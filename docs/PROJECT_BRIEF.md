@@ -6,6 +6,7 @@ We're building a production-grade, open-source, publicly auditable voting platfo
 - Save this prompt verbatim as `docs/PROJECT_BRIEF.md`. Future sessions are started by routines and see only the repo, so AGENTS.md must point to the brief and hold everything needed to continue.
 - Create AGENTS.md (with CLAUDE.md pointing to it) and project skills in `.claude/skills/`, containing concrete rules for dev, crypto review, contracts, circuits, migrations, releases and deploys.
 - Create `.claude/settings.json` with a SessionStart hook that starts local Postgres and Redis, creates the dev database if missing, and runs `vp install`.
+- The SessionStart hook sets `"timeout": 900` and runs `vp install` with `async: true` so a slow install never blocks the session from starting.
 - Create `docs/STATUS.md` as the work queue: ordered items, each small enough for one PR, grouped by phase.
 - Write the CI and review workflows described below in a PR titled "ci: bootstrap". It waits for my review, like any change to `.github/`.
 
@@ -85,6 +86,7 @@ We're building a production-grade, open-source, publicly auditable voting platfo
 - Direct-submit path: anyone can post their own registration or ballot commitment straight to the contracts if our servers refuse.
 - Bulletin-board contracts are immutable. Anything upgradeable sits behind a Safe multisig + timelock. No single-key admin anywhere.
 - ZK circuits: Noir for custom circuits (no per-circuit trusted setup); Semaphore's existing ceremony is the one accepted exception.
+- Noir is pinned to `1.0.0-beta.22` with the `bb` version bbup maps to it; `@noir-lang/noir_js` and `@aztec/bb.js` are pinned to the same releases. Upgrade only as a single PR that moves all four together, once bbup's bb-versions.json lists the new Noir version.
 - Testnets only (Sepolia + the chosen L2's testnet; local Anvil for tests) until I sign off on mainnet. Testnet deploys run from GitHub Actions with the `TESTNET_DEPLOYER_KEY` secret, never from a session. Verify every deployed contract's source on the explorer (`ETHERSCAN_API_KEY`).
 - No token in this build, but keep contracts and docs coin-ready: a future ERC-20 on the same L2 will fund the project.
 

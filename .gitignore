@@ -1,0 +1,47 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+.output/
+.vinxi/
+.tanstack/
+storybook-static/
+*.tsbuildinfo
+
+# Test output
+coverage/
+playwright-report/
+test-results/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Foundry
+packages/contracts/out/
+packages/contracts/cache/
+packages/contracts/broadcast/*/31337/
+
+# Noir
+packages/circuits/**/target/
+
+# Ponder
+.ponder/
+
+# Capacitor native build output
+apps/ballot/ios/App/build/
+apps/ballot/ios/App/Pods/
+apps/ballot/android/.gradle/
+apps/ballot/android/app/build/
+apps/ballot/android/build/
+
+# Obsidian per-user state
+docs/.obsidian/workspace*.json
+docs/.obsidian/cache
+
+# OS / editor
+.DS_Store
+*.log
+.idea/

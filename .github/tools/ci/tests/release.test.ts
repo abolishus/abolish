@@ -298,6 +298,7 @@ describe("shippedErrors", () => {
       { type: "-", path: "package//package.json" },
       { type: "-", path: "package/PACKAGE.JSON" },
       { type: "-", path: "package/caf\u00e9.js" },
+      { type: "-", path: "package/caf\\303\\251.js" },
     ]) {
       expect(shippedErrors(shipped, [...files, extra], release), extra.path).toHaveLength(1);
     }

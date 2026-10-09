@@ -379,9 +379,13 @@ jobs:
           path: ${{ runner.temp }}/release/
           if-no-files-found: error
 
+  # Unplanned build jobs are skipped by design, and a skipped ancestor skips
+  # every implicitly-conditioned job downstream, so each job from here on
+  # states its condition explicitly.
   checks:
     name: checks
     needs: verify
+    if: always() && needs.verify.result == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     permissions:
@@ -428,6 +432,7 @@ jobs:
   sign:
     name: sign
     needs: [verify, checks]
+    if: always() && needs.verify.result == 'success' && needs.checks.result == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -474,7 +479,9 @@ jobs:
     # Documents intent only: a branch that edits this file can drop the
     # condition. What actually stops a branch from publishing is the `npm`
     # environment allowing deployments from `main` only (owner setting, T-61).
-    if: github.ref == 'refs/heads/main'
+    if: >-
+      always() && github.ref == 'refs/heads/main' && needs.verify.result == 'success'
+      && needs.sign.result == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     # Trusted publishing on npm is bound to this workflow file and environment.

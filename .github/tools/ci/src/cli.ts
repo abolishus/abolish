@@ -388,7 +388,11 @@ function releaseVerify(): void {
     for (const r of plan) {
       const tgz = join(arg("--a"), tarballName(r));
       // `tar -tv` lines: mode, owner, size, date, time, path.
-      const entries = execFileSync("tar", ["-tvzf", tgz], { encoding: "utf8" })
+      const entries = execFileSync("tar", ["-tvzf", tgz], {
+        encoding: "utf8",
+        // C locale: tar escapes non-ASCII names, which shippedErrors refuses.
+        env: { ...process.env, LC_ALL: "C" },
+      })
         .split("\n")
         .filter((l) => l !== "")
         .map((l) => ({ type: l[0] ?? "", path: l.split(/\s+/).slice(5).join(" ") }));

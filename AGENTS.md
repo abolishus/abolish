@@ -7,7 +7,7 @@ Operating manual for every agent session on Abolish. Sessions are started by rou
 1. Read, in order: this file, [`docs/PROJECT_BRIEF.md`](docs/PROJECT_BRIEF.md) (the owner's brief, kept verbatim, never edited) and [`docs/STATUS.md`](docs/STATUS.md) (the work queue).
 2. Check open PRs on `abolishus/abolish`. Work in this order:
    1. Fix your red PRs (CI, review findings).
-   2. Resolve merge conflicts (merge the base branch in; never rewrite history someone else depends on).
+   2. Rebase your conflicting PRs onto `main`, as the brief says. Force-push only your own `claude/` branch, with `--force-with-lease`; never rewrite a branch anyone else pushes to.
    3. Start the next unblocked STATUS.md item, but only while fewer than **2** of your PRs are open.
 3. Load the skill for the area you touch (`.claude/skills/`):
    - `dev`: every change

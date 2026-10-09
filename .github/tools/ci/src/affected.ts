@@ -1,3 +1,5 @@
+import { execFileSync } from "node:child_process";
+
 // Selects which workspace packages CI must run a task in for a change set.
 //
 // `vp run --filter` has no "changed since <ref>" selector, so CI computes the
@@ -101,4 +103,20 @@ export function missingRequiredScripts(packages: readonly WorkspacePackage[]): s
       ? []
       : [`${p.dir}/package.json (${p.name}): missing required scripts: ${missing.join(", ")}`];
   });
+}
+
+/**
+ * Files changed between the merge base of `base` and HEAD. `-z` with
+ * quotePath off keeps non-ASCII names intact, and `--no-renames` lists both
+ * sides of a move: otherwise moving a file out of a package would report only
+ * its new location and the package would look unaffected.
+ */
+export function changedFiles(base: string, cwd = process.cwd()): string[] {
+  return execFileSync(
+    "git",
+    ["-c", "core.quotePath=false", "diff", "--no-renames", "--name-only", "-z", `${base}...HEAD`],
+    { cwd, encoding: "utf8", maxBuffer: 256 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] },
+  )
+    .split("\0")
+    .filter((f) => f.length > 0);
 }

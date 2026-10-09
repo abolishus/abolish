@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { parseDocument } from "yaml";
 import { findUnpinned } from "./actions-pinned.ts";
 import {
+  changedFiles,
   forTask,
   missingRequiredScripts,
   selectAffected,
@@ -98,16 +99,7 @@ function affected(): void {
     for (const m of missing) console.error(m);
     process.exit(1);
   }
-  const changed = process.argv.includes("--all")
-    ? undefined
-    : git(
-        "-c",
-        "core.quotePath=false",
-        "diff",
-        "--name-only",
-        "-z",
-        `${arg("--base")}...HEAD`,
-      ).split("\0");
+  const changed = process.argv.includes("--all") ? undefined : changedFiles(arg("--base"));
   const affectedSelection =
     changed === undefined ? ({ mode: "all" } as const) : selectAffected(changed, packages);
   const selection = forTask(affectedSelection, task, packages);

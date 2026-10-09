@@ -1,5 +1,10 @@
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, test } from "vite-plus/test";
 import {
+  changedFiles,
   forTask,
   missingRequiredScripts,
   selectAffected,
@@ -110,4 +115,35 @@ test("every package must define build, test and check", () => {
   expect(missingRequiredScripts([ok, bad])).toEqual([
     "packages/b/package.json (b): missing required scripts: test, check",
   ]);
+});
+
+test("a move out of a package reports both paths, so the package stays affected", () => {
+  const dir = mkdtempSync(join(tmpdir(), "affected-"));
+  const g = (...args: string[]) =>
+    execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], {
+      cwd: dir,
+      stdio: "pipe",
+    });
+  try {
+    g("init", "-q", "-b", "main");
+    mkdirSync(join(dir, "packages/crypto"), { recursive: true });
+    writeFileSync(join(dir, "packages/crypto/vectors.test.ts"), "x".repeat(200));
+    writeFileSync(join(dir, "packages/crypto/ɡroup.ts"), "y");
+    g("add", "-A");
+    g("commit", "-qm", "base");
+    g("checkout", "-qb", "change");
+    mkdirSync(join(dir, "docs/archive"), { recursive: true });
+    g("mv", "packages/crypto/vectors.test.ts", "docs/archive/vectors.test.ts");
+    writeFileSync(join(dir, "packages/crypto/ɡroup.ts"), "z");
+    g("commit", "-qam", "move");
+    const files = changedFiles("main", dir).sort();
+    expect(files).toEqual([
+      "docs/archive/vectors.test.ts",
+      "packages/crypto/vectors.test.ts",
+      "packages/crypto/ɡroup.ts",
+    ]);
+    expect(selectAffected(files, pkgs)).toEqual({ mode: "some", packages: ["@abolishus/crypto"] });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

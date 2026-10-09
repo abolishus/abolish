@@ -2,7 +2,7 @@
   "name": "@abolishus/ci-tools",
   "version": "0.0.0",
   "private": true,
-  "description": "Dependency-free scripts used by CI: affected-package selection, action pinning and lockfile policy.",
+  "description": "CI gate code: affected-package selection, action pinning, lockfile policy and the pnpm self-test. Its only runtime dependency is yaml.",
   "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {

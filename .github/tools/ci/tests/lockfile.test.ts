@@ -1,0 +1,390 @@
+import fc from "fast-check";
+import { describe, expect, test } from "vite-plus/test";
+import {
+  diffPackages,
+  LockfileParseError,
+  parsePackages,
+  registryViolations,
+  renderDiff,
+  splitKey,
+  manifestOverrides,
+  registryOverrides,
+  structuralViolations,
+  unjustifiedAllowBuilds,
+} from "../src/lockfile.ts";
+
+const I1 = `sha512-${"A".repeat(86)}==`;
+const I2 = `sha512-${"B".repeat(86)}==`;
+
+const lock = (entries: string) => `---
+lockfileVersion: '9.0'
+
+importers:
+
+  .:
+    devDependencies:
+      foo:
+        specifier: 1.0.0
+        version: 1.0.0
+
+packages:
+
+${entries}
+snapshots:
+
+  foo@1.0.0: {}
+`;
+
+describe("parsePackages", () => {
+  test("reads keys, quoted scoped keys and integrity", () => {
+    const parsed = parsePackages(
+      lock(`  foo@1.0.0:
+    resolution: {integrity: ${I1}}
+    engines: {node: '>=18'}
+
+  '@scope/bar@2.0.0-rc.1':
+    resolution: {integrity: ${I2}}
+    cpu: [x64]
+`),
+    );
+    expect([...parsed.keys()]).toEqual(["foo@1.0.0", "@scope/bar@2.0.0-rc.1"]);
+    expect(parsed.get("@scope/bar@2.0.0-rc.1")).toMatchObject({
+      name: "@scope/bar",
+      version: "2.0.0-rc.1",
+      integrity: I2,
+    });
+  });
+
+  test("ignores snapshots and importers", () => {
+    expect(parsePackages(lock("")).size).toBe(0);
+  });
+
+  test("reads packages from every YAML document", () => {
+    const two = `${lock(`  a@1.0.0:\n    resolution: {integrity: ${I1}}\n`)}\n---\npackages:\n\n  b@1.0.0:\n    resolution: {integrity: ${I2}}\n`;
+    expect([...parsePackages(two).keys()]).toEqual(["a@1.0.0", "b@1.0.0"]);
+  });
+});
+
+test("splitKey rejects keys without a version", () => {
+  expect(() => splitKey("@scope")).toThrow();
+  expect(splitKey("@a/b@1.2.3")).toEqual({ name: "@a/b", version: "1.2.3" });
+});
+
+test("structural policy rejects tarball and git resolutions", () => {
+  const parsed = parsePackages(
+    lock(`  ok@1.0.0:
+    resolution: {integrity: ${I1}}
+
+  tar@1.0.0:
+    resolution: {integrity: ${I1}, tarball: https://evil.example/tar.tgz}
+
+  gitdep@1.0.0:
+    resolution: {commit: abc, repo: https://github.com/x/y, type: git}
+`),
+  );
+  expect(structuralViolations(parsed).map((v) => v.split(":")[0])).toEqual([
+    "tar@1.0.0",
+    "gitdep@1.0.0",
+  ]);
+});
+
+test("diff classifies added, removed and re-resolved packages", () => {
+  const base = parsePackages(
+    lock(
+      `  keep@1.0.0:\n    resolution: {integrity: ${I1}}\n\n  gone@1.0.0:\n    resolution: {integrity: ${I1}}\n\n  swapped@1.0.0:\n    resolution: {integrity: ${I1}}\n`,
+    ),
+  );
+  const head = parsePackages(
+    lock(
+      `  keep@1.0.0:\n    resolution: {integrity: ${I1}}\n\n  new@1.0.0:\n    resolution: {integrity: ${I1}}\n\n  swapped@1.0.0:\n    resolution: {integrity: ${I2}}\n`,
+    ),
+  );
+  const diff = diffPackages(base, head);
+  expect(diff.added.map((p) => p.key)).toEqual(["new@1.0.0"]);
+  expect(diff.removed.map((p) => p.key)).toEqual(["gone@1.0.0"]);
+  expect(diff.changed.map((p) => p.key)).toEqual(["swapped@1.0.0"]);
+  expect(renderDiff(diff)).toContain("### Changed resolution (1)");
+  expect(renderDiff({ added: [], removed: [], changed: [] })).toBe(
+    "No lockfile package changes.\n",
+  );
+});
+
+describe("registryViolations", () => {
+  const pkg = {
+    key: "x@1.0.0",
+    name: "x",
+    version: "1.0.0",
+    resolution: `{integrity: ${I1}}`,
+    integrity: I1,
+  };
+  const now = new Date("2026-10-09T00:00:00Z");
+
+  test("passes an old package with matching integrity", () => {
+    expect(
+      registryViolations(
+        pkg,
+        { exists: true, integrity: I1, published: "2026-09-01T00:00:00Z" },
+        now,
+      ),
+    ).toEqual([]);
+  });
+
+  test("distinguishes a missing version from a version without sha512", () => {
+    const missing = registryViolations(
+      pkg,
+      { exists: false, integrity: undefined, published: undefined },
+      now,
+    );
+    expect(missing[0]).toMatch(/not found/);
+    const noSri = registryViolations(
+      pkg,
+      { exists: true, integrity: undefined, published: "2016-01-01T00:00:00Z" },
+      now,
+    );
+    expect(noSri[0]).toMatch(/no sha512 integrity/);
+  });
+
+  test("fails on integrity mismatch, youth, missing version or missing time", () => {
+    expect(
+      registryViolations(
+        pkg,
+        { exists: true, integrity: I2, published: "2026-09-01T00:00:00Z" },
+        now,
+      ),
+    ).toHaveLength(1);
+    expect(
+      registryViolations(
+        pkg,
+        { exists: true, integrity: I1, published: "2026-10-05T00:00:00Z" },
+        now,
+      ),
+    ).toHaveLength(1);
+    expect(
+      registryViolations(pkg, { exists: false, integrity: undefined, published: undefined }, now),
+    ).toHaveLength(1);
+    expect(
+      registryViolations(pkg, { exists: true, integrity: I1, published: undefined }, now),
+    ).toHaveLength(1);
+    expect(
+      registryViolations(pkg, { exists: true, integrity: I1, published: "not a date" }, now),
+    ).toHaveLength(1);
+  });
+});
+
+describe("parsePackages is total (fails closed)", () => {
+  test("rejects a block-style resolution instead of dropping the package", () => {
+    const text = lock(`  evil@9.9.9:\n    resolution:\n      integrity: ${I1}\n`);
+    expect(() => parsePackages(text)).toThrow(/flow mapping/);
+  });
+
+  test("a nested block field before resolution cannot hide the package", () => {
+    const text = lock(
+      `  evil@9.9.9:\n    peerDependencies:\n      react: '*'\n    resolution: {integrity: ${I1}}\n`,
+    );
+    expect([...parsePackages(text).keys()]).toEqual(["evil@9.9.9"]);
+  });
+
+  test("rejects a key with no resolution, duplicates, comments and stray indentation", () => {
+    expect(() => parsePackages(lock(`  a@1.0.0:\n    cpu: [x64]\n`))).toThrow(
+      /no flow-style resolution/,
+    );
+    expect(() =>
+      parsePackages(
+        lock(
+          `  a@1.0.0:\n    resolution: {integrity: ${I1}}\n\n  a@1.0.0:\n    resolution: {integrity: ${I1}}\n`,
+        ),
+      ),
+    ).toThrow(/duplicate/);
+    expect(() =>
+      parsePackages(lock(`  # hi\n  a@1.0.0:\n    resolution: {integrity: ${I1}}\n`)),
+    ).toThrow(/comments/);
+    expect(() =>
+      parsePackages(lock(`   a@1.0.0:\n    resolution: {integrity: ${I1}}\n`)),
+    ).toThrow();
+    expect(() =>
+      parsePackages(
+        lock(
+          `  a@1.0.0:\n    resolution: {integrity: ${I1}}\n    resolution: {integrity: ${I2}}\n`,
+        ),
+      ),
+    ).toThrow(/second resolution/);
+  });
+
+  test("rejects a flow-style packages section but accepts an empty one", () => {
+    expect(() => parsePackages(`packages: {a@1.0.0: {resolution: {integrity: ${I1}}}}\n`)).toThrow(
+      /block mapping/,
+    );
+    expect(parsePackages("packages: {}\n").size).toBe(0);
+  });
+
+  test("property: every package key is either returned or the parse throws", () => {
+    const name = fc.stringMatching(/^(@[a-z][a-z0-9-]{0,8}\/)?[a-z][a-z0-9.-]{0,12}$/);
+    const version = fc.stringMatching(/^\d{1,3}\.\d{1,3}\.\d{1,3}(-[a-z0-9.]{1,8})?$/);
+    const field = fc.oneof(
+      fc.constant("    engines: {node: '>=18'}"),
+      fc.constant("    cpu: [x64]"),
+      fc.constant("    peerDependencies:\n      react: '*'"),
+      fc.constant("    hasBin: true"),
+    );
+    const style = fc.constantFrom("flow", "block", "missing");
+    const entry = fc.record({
+      name,
+      version,
+      quoted: fc.boolean(),
+      // Distinct fields (duplicate keys are invalid YAML), split around the resolution.
+      fields: fc.uniqueArray(field, { maxLength: 4 }),
+      split: fc.nat(4),
+      style,
+    });
+    fc.assert(
+      fc.property(
+        fc.uniqueArray(entry, { selector: (e) => `${e.name}@${e.version}`, maxLength: 6 }),
+        (entries) => {
+          const body = entries
+            .map((e) => {
+              const key = `${e.name}@${e.version}`;
+              const head = e.quoted || key.startsWith("@") ? `  '${key}':` : `  ${key}:`;
+              const res =
+                e.style === "flow"
+                  ? [`    resolution: {integrity: ${I1}}`]
+                  : e.style === "block"
+                    ? ["    resolution:", `      integrity: ${I1}`]
+                    : [];
+              return [head, ...e.fields.slice(0, e.split), ...res, ...e.fields.slice(e.split)].join(
+                "\n",
+              );
+            })
+            .join("\n\n");
+          const text = lock(body.length > 0 ? `${body}\n` : "");
+          const keys = entries.map((e) => `${e.name}@${e.version}`).sort();
+          try {
+            expect([...parsePackages(text).keys()].sort()).toEqual(keys);
+            expect(entries.every((e) => e.style === "flow")).toBe(true);
+          } catch (err) {
+            if (!(err instanceof LockfileParseError)) throw err;
+            expect(entries.some((e) => e.style !== "flow")).toBe(true);
+          }
+        },
+      ),
+      { numRuns: Number(process.env["FC_NUM_RUNS"] ?? 200) },
+    );
+  });
+});
+
+describe("resolution must be exactly {integrity: sha512-…}", () => {
+  const one = (resolution: string) =>
+    parsePackages(lock(`  x@1.0.0:\n    resolution: ${resolution}\n`));
+
+  test("a decoy key cannot supply the integrity the gate checks", () => {
+    const parsed = one(`{xintegrity: ${I1}, integrity: ${I2}}`);
+    expect(parsed.get("x@1.0.0")?.integrity).toBeUndefined();
+    expect(structuralViolations(parsed)).toHaveLength(1);
+  });
+
+  test("extra keys, quoted git types and truncated hashes are violations", () => {
+    for (const r of [
+      `{integrity: ${I1}, tarball: https://registry.npmjs.org/x/-/x-1.0.0.tgz}`,
+      "{commit: abc, repo: https://github.com/x/y, type: 'git'}",
+      "{integrity: sha512-AAAA}",
+    ]) {
+      expect(structuralViolations(one(r)), r).toHaveLength(1);
+    }
+    expect(structuralViolations(one(`{integrity: ${I1}}`))).toEqual([]);
+    expect(() => one(`{integrity: ${I1}}x`)).toThrow(LockfileParseError);
+  });
+});
+
+describe("registryOverrides", () => {
+  test("rejects any .npmrc and registry settings in pnpm-workspace.yaml", () => {
+    expect(registryOverrides(["a/.npmrc", "src/x.ts"], "packages: []\n")).toHaveLength(1);
+    expect(registryOverrides([], "registry: https://evil.example/\n")).toHaveLength(1);
+    expect(registryOverrides([], "registries:\n  default: https://evil.example/\n")).toHaveLength(
+      1,
+    );
+    expect(registryOverrides([], "'@scope:registry': https://evil.example/\n")).toHaveLength(1);
+    expect(registryOverrides([], "npmrcAuthFile: x\n")).toHaveLength(1);
+  });
+
+  test("rejects overrides, patches and package extensions, which can swap a pinned name's code", () => {
+    expect(registryOverrides([], "overrides:\n  '@noble/curves': 1.0.0\n")).toHaveLength(1);
+    expect(registryOverrides([], "overrides:\n  '@noble/curves': npm:evil@1.0.0\n")).toHaveLength(
+      1,
+    );
+    expect(registryOverrides([], "overrides: x\n")).toHaveLength(1);
+    expect(registryOverrides([], "overrides:\n  vite@*: 'catalog:'\n")).toEqual([]);
+    expect(registryOverrides([], "patchedDependencies:\n  x: patches/x.patch\n")).toHaveLength(1);
+    expect(registryOverrides([], "packageExtensions:\n  x:\n    dependencies: {}\n")).toHaveLength(
+      1,
+    );
+  });
+
+  test("rejects override settings in package.json", () => {
+    expect(manifestOverrides("package.json", '{"name":"x","private":true}')).toEqual([]);
+    expect(manifestOverrides("package.json", '{"pnpm":{"overrides":{}}}')).toHaveLength(1);
+    expect(
+      manifestOverrides("a/package.json", '{"overrides":{"@noble/curves":"1.0.0"}}'),
+    ).toHaveLength(1);
+    expect(manifestOverrides("package.json", '{"resolutions":{}}')).toHaveLength(1);
+    expect(manifestOverrides("package.json", "{")).toHaveLength(1);
+  });
+
+  test("rejects pnpmfiles and config dependencies, which run code at install time", () => {
+    expect(registryOverrides([".pnpmfile.cjs"], "packages: []\n")).toHaveLength(1);
+    expect(registryOverrides(["apps/x/.pnpmfile.mjs"], "packages: []\n")).toHaveLength(1);
+    expect(registryOverrides(["pnpmfile.js"], "packages: []\n")).toHaveLength(1);
+    expect(registryOverrides([], "pnpmfile: hooks.cjs\n")).toHaveLength(1);
+    expect(registryOverrides([], "globalPnpmfile: hooks.cjs\n")).toHaveLength(1);
+    expect(registryOverrides([], "configDependencies:\n  x: 1.0.0+sha512-AA==\n")).toHaveLength(1);
+  });
+
+  test("accepts the normal configuration", () => {
+    expect(
+      registryOverrides(
+        ["package.json", "docs/npmrc.md"],
+        "packages:\n  - apps/*\nminimumReleaseAge: 10080\n",
+      ),
+    ).toEqual([]);
+  });
+
+  test("an unparseable workspace file is a violation", () => {
+    expect(registryOverrides([], "a: [\n").length).toBeGreaterThan(0);
+  });
+});
+
+describe("unjustifiedAllowBuilds", () => {
+  test("every allowBuilds entry needs a comment", () => {
+    expect(unjustifiedAllowBuilds("allowBuilds: {}\n")).toEqual([]);
+    expect(unjustifiedAllowBuilds("packages: []\n")).toEqual([]);
+    expect(
+      unjustifiedAllowBuilds(
+        "allowBuilds:\n  # esbuild ships its binary via postinstall\n  esbuild: true\n  sharp: true # native addon\n",
+      ),
+    ).toEqual([]);
+    expect(unjustifiedAllowBuilds("allowBuilds:\n  # why\n  a: true\n  b: true\n")).toEqual([
+      'pnpm-workspace.yaml: allowBuilds entry "b" needs a justification comment',
+    ]);
+    expect(unjustifiedAllowBuilds("allowBuilds: [a]\n")).toHaveLength(1);
+  });
+});
+
+describe("the packages section cannot be hidden", () => {
+  const entry = `  evil@9.9.9:\n    resolution: {integrity: ${I1}}\n`;
+  test.each([
+    ["single-quoted key", `'packages':\n${entry}`],
+    ["double-quoted key", `"packages":\n${entry}`],
+    ["explicit key", `? packages\n:\n${entry}`],
+    ["trailing space before colon", `packages :\n${entry}`],
+  ])("%s throws", (_, text) => {
+    expect(() => parsePackages(`lockfileVersion: '9.0'\n\n${text}`)).toThrow(LockfileParseError);
+  });
+
+  test("aliases and merge keys are rejected", () => {
+    const aliased = `packages:\n  a@1.0.0:\n    resolution: &r {integrity: ${I1}}\n  b@1.0.0:\n    resolution: *r\n`;
+    expect(() => parsePackages(aliased)).toThrow(LockfileParseError);
+  });
+
+  test("a second document that redefines a package is rejected", () => {
+    const twice = `packages:\n${entry}\n---\npackages:\n${entry}`;
+    expect(() => parsePackages(twice)).toThrow(/duplicate/);
+  });
+});

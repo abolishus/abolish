@@ -1,0 +1,105 @@
+# Required check: `reference-election`.
+# Runs the reference election fixture end to end (ceremony, every identity tier,
+# casting/challenge/re-vote, direct submit, threshold decryption, tally, L1
+# anchoring, Postgres wipe + rebuild from chain + IPFS, and independent
+# verification with our servers offline). It is the single proof that the
+# system works; see AGENTS.md "Reference election".
+#
+# Until the fixture exists (docs/STATUS.md), this check passes with a warning
+# annotation. That gap is recorded as known-weak in STATUS.md.
+name: reference-election
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  merge_group:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "local (Anvil + Helia, default) or staging"
+        required: false
+        default: local
+
+permissions:
+  contents: read
+
+concurrency:
+  group: reference-election-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  DO_NOT_TRACK: "1"
+
+jobs:
+  reference-election:
+    name: reference-election
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: postgres:16.10-bookworm@sha256:38471f330eb885e04de130b768d6db4e10469e2311879c7e5c699f6d2d8a1c74
+        env:
+          POSTGRES_USER: abolish
+          POSTGRES_PASSWORD: abolish
+          POSTGRES_DB: abolish_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U abolish" --health-interval 5s --health-timeout 5s --health-retries 20
+      redis:
+        image: redis:7.4.6-bookworm@sha256:a9cc41d6d01da2aa26c219e4f99ecbeead955a7b656c1c499cce8922311b2514
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgres://abolish:abolish@localhost:5432/abolish_test
+      REDIS_URL: redis://localhost:6379
+      REFERENCE_ELECTION_TARGET: ${{ github.event.inputs.target || 'local' }}
+    steps:
+      # Required checks are evaluated against the head SHA only. Retargeting a
+      # PR's base doesn't re-run them, so checks that passed against another
+      # base (e.g. a stacked branch that hides the real diff) must never count:
+      # a PR to any branch but the default fails here and stays failed.
+      - name: Pull request targets the default branch
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          if [ "$BASE_REF" != "$DEFAULT_BRANCH" ]; then
+            echo "::error::required checks only pass for pull requests into $DEFAULT_BRANCH (this one targets $BASE_REF); stacked PRs are not supported"
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Fixture present?
+        id: present
+        env:
+          # Owner-reviewed arming flag: P1-20 sets it to "true" in the same PR
+          # that adds the fixture, so removing the script later fails here
+          # instead of silently turning this check into a no-op.
+          EXPECT_FIXTURE: "false"
+        run: |
+          if python3 -c "import json,sys;sys.exit(0 if 'reference-election' in json.load(open('package.json')).get('scripts',{}) else 1)"; then
+            echo "present=true" >>"$GITHUB_OUTPUT"
+          elif [ "$EXPECT_FIXTURE" = "true" ]; then
+            echo "::error title=reference election missing::EXPECT_FIXTURE is true but package.json has no 'reference-election' script. The end-to-end proof can't be removed without a ci: PR."
+            exit 1
+          else
+            echo "present=false" >>"$GITHUB_OUTPUT"
+            echo "::warning title=reference election not implemented::The reference election fixture does not exist yet; this check proves nothing. Tracked in docs/STATUS.md."
+          fi
+      - uses: ./.github/actions/setup
+        if: steps.present.outputs.present == 'true'
+        with:
+          toolchain: "true"
+      - name: Run the reference election
+        if: steps.present.outputs.present == 'true'
+        run: vp run reference-election
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always() && steps.present.outputs.present == 'true'
+        with:
+          name: reference-election-transcript
+          path: reference-election-output/
+          if-no-files-found: ignore

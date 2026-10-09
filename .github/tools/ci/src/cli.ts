@@ -6,8 +6,19 @@
 //   actions-pinned          fail if any workflow uses an action not pinned by SHA
 //   lockfile --base <ref>   enforce lockfile policy, write the diff to lockfile-diff.md
 //   pnpm-selftest           prove the pinned pnpm honours our install-script policy
+//   release-versions        print "<dir> <version>" for every workspace package
+//   release-apply --versions <file>
+//                           in a clean checkout, apply the accepted next snapshot
+//                           versions from <file> (release-versions output, untrusted)
+//                           and print "<dir> <name> <version>" for each to publish
+//   release-verify --plan <file> --a <dir> --b <dir> --needs <file>
+//                           check both builds' tarballs against the plan and the
+//                           hashes their build jobs output (toJSON(needs)): one per
+//                           planned package, byte-identical, and each packed
+//                           manifest and file list acceptable to publish
 
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   appendFileSync,
   existsSync,
@@ -44,6 +55,17 @@ import {
   type RegistryFacts,
   unjustifiedAllowBuilds,
 } from "./lockfile.ts";
+import {
+  buildJobErrors,
+  proposedVersions,
+  reproducedErrors,
+  setVersion,
+  shippedErrors,
+  snapshotReleases,
+  tarballName,
+  type NeededJob,
+  type Release,
+} from "./release.ts";
 
 function git(...args: string[]): string {
   return execFileSync("git", args, {
@@ -294,6 +316,97 @@ function pnpmSelftest(): void {
   );
 }
 
+function releaseVersions(): void {
+  for (const { dir } of workspacePackages()) {
+    const { version } = JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as {
+      version?: unknown;
+    };
+    process.stdout.write(`${dir} ${String(version)}\n`);
+  }
+}
+
+function releaseApply(): void {
+  const fail = (errors: string[]): never => {
+    for (const e of errors) console.error(e);
+    process.exit(1);
+  };
+  // Applied to the commit as checked out, never on top of a tree that some
+  // other step (Changesets, a build) has already modified.
+  const dirty = git("status", "--porcelain", "--untracked-files=no");
+  if (dirty !== "") fail([`release-apply needs a clean checkout:\n${dirty}`]);
+  const packages = workspacePackages();
+  const { versions, errors } = proposedVersions(
+    readFileSync(arg("--versions"), "utf8"),
+    packages.map((p) => p.dir),
+  );
+  if (errors.length > 0) fail(errors);
+  const texts = new Map(
+    packages.map(({ dir }) => [dir, readFileSync(join(dir, "package.json"), "utf8")]),
+  );
+  const candidates = packages.map(({ dir }) => {
+    const before = JSON.parse(texts.get(dir) ?? "") as Record<string, unknown>;
+    const version = versions.get(dir);
+    return { dir, before, after: version === undefined ? before : { ...before, version } };
+  });
+  const plan = snapshotReleases(candidates, git("rev-parse", "HEAD").trim());
+  if (plan.errors.length > 0) fail(plan.errors);
+  for (const r of plan.releases) {
+    const out = setVersion(texts.get(r.dir) ?? "", r.version);
+    if (out === undefined) fail([`${r.dir}/package.json: can't rewrite its version field alone`]);
+    else writeFileSync(join(r.dir, "package.json"), out);
+  }
+  summary(
+    plan.releases.length === 0
+      ? "release: nothing to publish (no changesets)"
+      : plan.releases.map((r) => `- \`${r.name}@${r.version}\``).join("\n"),
+  );
+  for (const r of plan.releases) process.stdout.write(`${r.dir} ${r.name} ${r.version}\n`);
+}
+
+function releaseVerify(): void {
+  const plan: Release[] = readFileSync(arg("--plan"), "utf8")
+    .split("\n")
+    .filter((l) => l !== "")
+    .map((l) => {
+      const [dir = "", name = "", version = ""] = l.split(" ");
+      return { dir, name, version };
+    });
+  const hashes = (dir: string) =>
+    new Map(
+      readdirSync(dir).map((f) => [
+        f,
+        createHash("sha256")
+          .update(readFileSync(join(dir, f)))
+          .digest("hex"),
+      ]),
+    );
+  const a = hashes(arg("--a"));
+  const b = hashes(arg("--b"));
+  const needs = JSON.parse(readFileSync(arg("--needs"), "utf8")) as Record<string, NeededJob>;
+  const errors = [...reproducedErrors(plan, a, b), ...buildJobErrors(plan, needs, { a, b })];
+  if (errors.length === 0) {
+    for (const r of plan) {
+      const tgz = join(arg("--a"), tarballName(r));
+      // `tar -tv` lines: mode, owner, size, date, time, path.
+      const entries = execFileSync("tar", ["-tvzf", tgz], {
+        encoding: "utf8",
+        // C locale: tar escapes non-ASCII names, which shippedErrors refuses.
+        env: { ...process.env, LC_ALL: "C" },
+      })
+        .split("\n")
+        .filter((l) => l !== "")
+        .map((l) => ({ type: l[0] ?? "", path: l.split(/\s+/).slice(5).join(" ") }));
+      const manifest = JSON.parse(
+        execFileSync("tar", ["-xzOf", tgz, "package/package.json"], { encoding: "utf8" }),
+      ) as Record<string, unknown>;
+      errors.push(...shippedErrors(manifest, entries, r));
+    }
+  }
+  for (const e of errors) console.error(e);
+  if (errors.length > 0) process.exit(1);
+  console.log(`verified ${plan.length} tarball(s) from both builds`);
+}
+
 const command = process.argv[2];
 switch (command) {
   case "affected":
@@ -307,6 +420,15 @@ switch (command) {
     break;
   case "pnpm-selftest":
     pnpmSelftest();
+    break;
+  case "release-versions":
+    releaseVersions();
+    break;
+  case "release-apply":
+    releaseApply();
+    break;
+  case "release-verify":
+    releaseVerify();
     break;
   default:
     console.error(`unknown command: ${command ?? "(none)"}`);

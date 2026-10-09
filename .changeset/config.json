@@ -1,0 +1,11 @@
+{
+  "access": "public",
+  "baseBranch": "main",
+  "changelog": false,
+  "commit": false,
+  "privatePackages": false,
+  "snapshot": {
+    "useCalculatedVersion": true,
+    "prereleaseTemplate": "{tag}-{commit}"
+  }
+}

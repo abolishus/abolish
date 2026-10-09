@@ -7,7 +7,11 @@ Each check names the threats it closes and the STATUS item that specifies it. A 
 ## Principles
 
 - **Trust nothing served.** Every input comes from L1, the L2, IPFS, the permanent archive or local files, and is checked against L1 anchors or the evidence it carries. Nothing is accepted because an Abolish server said so, and no Abolish server or domain is contacted (T-24, T-49, T-69).
-- **Fail loudly.** Each check ends in pass, fail or unverifiable (data missing, a source unreachable, a root not yet settled). The election is verified only if every check passes. Unverifiable is never reported as pass.
+- **Fail loudly.** Each check ends in pass, fail or unverifiable (data missing, a source unreachable, a root not yet settled). Unverifiable is never reported as pass.
+- **Two kinds of check.** Anyone can post a ballot, so a bad ballot must never fail an election (T-52, T-53), and every conforming verifier must reach the same verdict on the same data (T-36):
+  - **Admission checks** decide whether one ballot or opening counts: decoding of the record inside a board entry, 5.1 to 5.5, 5.7, 6.1's numbering and 6.2. A failure rejects that entry only. A rejected entry is listed in the report (8.3), never counted, never displaces an earlier ballot and never counts toward a re-vote sequence.
+  - **Election checks** are everything else: 1.x, 2.x, 3.x, the board-entry envelope and hash chain in 4.1, 4.2 to 4.5, 5.6, 7.x and 8.x. The election is verified only if every election check passes.
+  - The board-entry envelope (P1-16) MUST be able to carry a payload that doesn't decode, as a rejected entry, so no voter can make 4.1 fail.
 - **Strict decoding first.** Every record is decoded strictly ([[notation]]) before any other check uses it, and rejected entries are reported, never skipped silently (T-31, T-52).
 - **Pinned trust roots.** The verifier's release pins what can't be derived from data: the L1 and L2 chain IDs, the addresses of the anchor contract and our L2 contracts, the canonical L2 portal on L1, the L2 derivation rules it applies, and the release-signing identities. Changing any of them is a new verifier release (T-64, T-71).
 
@@ -35,7 +39,7 @@ Each check names the threats it closes and the STATUS item that specifies it. A 
 
 ### 4. Board, anchors and archive
 
-- 4.1 Every board entry decodes strictly, and the hash chain is unbroken from the first entry to the last (T-23, T-31; P1-16).
+- 4.1 Every board-entry envelope decodes strictly (the record it carries is an admission check), and the hash chain is unbroken from the first entry to the last (T-23, T-31; P1-16).
 - 4.2 Every Merkle root anchored on L1 is recomputed from the board, and every entry falls under an anchored root (T-23, T-24; P1-16, P4-1).
 - 4.3 Every archive manifest reachable from L1 `archiveLocator` fields and from the manifest chain is found and matches what it names; any missing link is reported ([[0005-permanent-archive]]; T-51; P1-19, P4-3).
 - 4.4 Every one of our contracts' L2 events has a board entry with its inclusion evidence, and the archived event sequence reproduces each contract's on-chain event accumulator at every anchored period and at close. The check passes with an annotation naming which proof type settled each output root it relied on (TEE-only or ZK), and the report lists every TEE-only root (8.3) ([[0005-permanent-archive]], T-71; P1-18, P1-19).
@@ -46,7 +50,7 @@ Each check names the threats it closes and the STATUS item that specifies it. A 
 - 5.1 Every ballot's membership proof verifies against the electorate root for its tier in the election definition (T-04, T-05, T-13; P1-17).
 - 5.2 Its nullifier uses the scope derived from the election-definition hash (`abolish/v1/nullifier-scope`), never a scope from anywhere else (T-12, T-04; P1-17).
 - 5.3 The proof's signal binds the ballot hash, the election definition and the re-vote sequence number, so the proof can't be moved to another ballot or replayed (T-38, T-32; P1-12, P1-17).
-- 5.4 Every validity proof verifies, with its Fiat–Shamir challenge recomputed from the full statement table ([[domain-separation]]), and constrains the ballot to the election's rules: no over-vote, no negative vote, the approval limit if any (T-28, T-30, T-32; P1-12). **(P1-3)**
+- 5.4 Every validity proof verifies, with its Fiat–Shamir challenge recomputed from the full statement table, including the ballot's nullifier ([[domain-separation]]), and constrains the ballot to the election's rules: no over-vote, no negative vote, the approval limit if any (T-28, T-30, T-32; P1-12). **(P1-3)**
 - 5.5 The ballot counts as inside the poll's window under the close rule, using only L2 data derived from finalized L1 data (T-35, T-50, [[0004-l2-choice]]; P1-18).
 - 5.6 Direct-submitted ballots on L2 are on the board; a ballot found on L2 but missing from the board fails the check (T-25; P1-18, P3-5).
 - 5.7 A byte-identical repeat of an earlier ballot entry is rejected (T-38; P1-13).

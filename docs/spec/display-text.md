@@ -32,6 +32,10 @@ A verifier ([[verifier]]):
 - MUST, when it has a display-text record, recompute the commitment and reject the text if it doesn't match the election definition, so a forged text can't relabel the options of a verified result.
 - MUST check that the display-text record names exactly as many options per question as the election definition has.
 
+Software that shows an election to a voter (the ballot client, and anything that labels a Benaloh opening, such as a challenge checker):
+
+- MUST recompute the commitment from the display-text record it shows, compare it with the commitment in the election definition whose hash is registered on L2, and check that the record has exactly as many questions and options as the definition. On any mismatch it MUST refuse to show the ballot or label the opening. Otherwise whoever serves the text could swap option labels for one voter: the client would honestly encrypt the index the voter picked under a false label, and a challenge labelled from the same text would not catch it (T-34, T-41, G-6).
+
 ## Owned elsewhere
 
 - The display-text record layout (questions, options, descriptions, languages, maximum lengths, all as `utf8<M>` fields): P1-10.

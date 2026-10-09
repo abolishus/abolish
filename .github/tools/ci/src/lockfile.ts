@@ -282,9 +282,12 @@ export function renderDiff(diff: LockfileDiff): string {
 
 /**
  * Settings that would make pnpm fetch from somewhere other than the npm
- * registry the integrity was checked against. Any `.npmrc` (tracked anywhere)
- * and any registry, auth-file or scoped-registry key in pnpm-workspace.yaml is
- * a violation; an unparseable workspace file is too.
+ * registry the integrity was checked against, or run code at install time
+ * outside the allowBuilds policy. Any `.npmrc` or pnpmfile (tracked anywhere),
+ * and any registry, auth-file, scoped-registry, pnpmfile or configDependencies
+ * key in pnpm-workspace.yaml is a violation; an unparseable workspace file is
+ * too. pnpmfile hooks run whatever --ignore-scripts says, and config
+ * dependencies can ship pnpmfiles of their own.
  */
 export function registryOverrides(
   trackedFiles: readonly string[],
@@ -296,6 +299,10 @@ export function registryOverrides(
       (f) =>
         `${f}: .npmrc files are not allowed (registry and auth config would bypass the lockfile policy)`,
     );
+  for (const f of trackedFiles) {
+    if (/(^|\/)\.?pnpmfile\.[^/]*$/.test(f))
+      out.push(`${f}: pnpmfiles are not allowed (their hooks run code at install time)`);
+  }
   const doc = parseDocument(workspaceYaml, { uniqueKeys: true });
   if (doc.errors.length > 0) {
     out.push(`pnpm-workspace.yaml: does not parse: ${doc.errors[0]?.message ?? "unknown error"}`);
@@ -304,7 +311,7 @@ export function registryOverrides(
   const settings = doc.toJS() as unknown;
   if (settings !== null && typeof settings === "object") {
     for (const key of Object.keys(settings)) {
-      if (/registr|npmrc/i.test(key))
+      if (/registr|npmrc|pnpmfile|configDependencies/i.test(key))
         out.push(`pnpm-workspace.yaml: setting "${key}" is not allowed`);
     }
   }

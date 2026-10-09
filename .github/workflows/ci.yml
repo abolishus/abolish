@@ -45,7 +45,7 @@ jobs:
           node-version-file: .node-version
           run-install: "false"
       - name: Install dependencies (frozen lockfile, no install scripts)
-        run: vp install --frozen-lockfile --ignore-scripts
+        run: vp install --frozen-lockfile --ignore-scripts -- --ignore-pnpmfile
       - name: Select affected packages per task
         id: affected
         env:
@@ -79,7 +79,7 @@ jobs:
           node-version-file: .node-version
           run-install: "false"
       - name: Install dependencies (frozen lockfile, no install scripts)
-        run: vp install --frozen-lockfile --ignore-scripts
+        run: vp install --frozen-lockfile --ignore-scripts -- --ignore-pnpmfile
       - name: Actions are pinned by commit SHA
         run: vp node .github/tools/ci/src/cli.ts actions-pinned
       - name: actionlint
@@ -103,6 +103,17 @@ jobs:
           if [ "$EVENT" = "pull_request" ]; then base="origin/$BASE_REF"; else base="${BEFORE:-HEAD~1}"; fi
           git cat-file -e "$base^{commit}" 2>/dev/null || base="$(git hash-object -t tree /dev/null)"
           vp node .github/tools/ci/src/cli.ts lockfile --base "$base"
+      - name: The project brief is unchanged
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        # docs/PROJECT_BRIEF.md is the owner's brief, kept verbatim, and it
+        # overrides AGENTS.md; only the owner changes it, by overriding this check.
+        run: |
+          if ! git diff --quiet "origin/$BASE_REF...HEAD" -- docs/PROJECT_BRIEF.md; then
+            echo "::error file=docs/PROJECT_BRIEF.md::the project brief is kept verbatim; agents never edit it"
+            exit 1
+          fi
       - name: crypto depends only on @noble/*
         run: |
           f=packages/crypto/package.json

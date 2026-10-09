@@ -304,6 +304,15 @@ describe("registryOverrides", () => {
     expect(registryOverrides([], "npmrcAuthFile: x\n")).toHaveLength(1);
   });
 
+  test("rejects pnpmfiles and config dependencies, which run code at install time", () => {
+    expect(registryOverrides([".pnpmfile.cjs"], "packages: []\n")).toHaveLength(1);
+    expect(registryOverrides(["apps/x/.pnpmfile.mjs"], "packages: []\n")).toHaveLength(1);
+    expect(registryOverrides(["pnpmfile.js"], "packages: []\n")).toHaveLength(1);
+    expect(registryOverrides([], "pnpmfile: hooks.cjs\n")).toHaveLength(1);
+    expect(registryOverrides([], "globalPnpmfile: hooks.cjs\n")).toHaveLength(1);
+    expect(registryOverrides([], "configDependencies:\n  x: 1.0.0+sha512-AA==\n")).toHaveLength(1);
+  });
+
   test("accepts the normal configuration", () => {
     expect(
       registryOverrides(

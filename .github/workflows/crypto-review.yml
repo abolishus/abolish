@@ -1,8 +1,9 @@
 # Required check: `crypto-review` (the `crypto-review` job below).
 # Adversarial review, at the highest effort, of every change except prose-only
-# ones (docs/ outside docs/spec/, README.md, LICENSE). Agent instruction files
-# are always in scope. Passes as not applicable for prose-only changes, so it can
-# be a required check on every PR. Fails on any blocking finding and fails closed.
+# ones (README.md, LICENSE, docs/ that is not an instruction source). Every
+# instruction source AGENTS.md lists is always in scope. Passes as not
+# applicable for prose-only changes, so it can be a required check on every
+# PR. Fails on any blocking finding and fails closed.
 # Model: repository variable REVIEW_MODEL (falls back to the CLI's `opus` alias).
 # Prompt: .github/review/crypto-review.md, read from the base commit.
 #
@@ -44,7 +45,8 @@ jobs:
       pull-requests: write
     outputs:
       applies: ${{ steps.scope.outputs.applies }}
-      conclusion: ${{ steps.review.outputs.conclusion }}
+      # The runner's own outcome (before continue-on-error), always present.
+      outcome: ${{ steps.review.outcome }}
       result: ${{ steps.review.outputs.structured_output }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -57,10 +59,11 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         # Fail-closed scope: every change is in scope unless it only touches
-        # prose (docs/ outside docs/spec/, README.md, LICENSE). A list of
-        # "protocol paths" can't keep up with what protocol code imports, so
-        # nothing is exempt by default, and agent instruction files are never
-        # exempt at any depth.
+        # prose: README.md, LICENSE, and docs/ files that direct nobody. A list
+        # of "protocol paths" can't keep up with what protocol code imports, so
+        # nothing is exempt by default. Every instruction source AGENTS.md
+        # lists (agent files at any depth, the brief, STATUS, the threat model,
+        # ADRs, spec, runbooks) is never exempt.
         # --no-renames lists both sides of a move; -z with quotePath=false keeps
         # non-ASCII paths intact. An empty diff fails closed.
         run: |
@@ -71,7 +74,7 @@ jobs:
             exit 1
           fi
           prose='^(docs/.+|README\.md|LICENSE)$'
-          never_exempt='^docs/spec/|(^|/)(AGENTS\.md|CLAUDE(\.local)?\.md|\.mcp\.json)$|(^|/)\.claude/'
+          never_exempt='^docs/(spec/|adr/|runbooks/|THREAT_MODEL\.md$|PROJECT_BRIEF\.md$|STATUS\.md$)|(^|/)(AGENTS\.md|CLAUDE(\.local)?\.md|\.mcp\.json)$|(^|/)\.claude/'
           in_scope="$(printf '%s\n' "$changed" | grep -Ev "$prose" || true)"
           in_scope="$in_scope$(printf '\n%s\n' "$changed" | grep -E "$never_exempt" || true)"
           if [ -n "$(printf '%s' "$in_scope" | tr -d '[:space:]')" ]; then
@@ -79,7 +82,7 @@ jobs:
             printf '%s\n' "$in_scope" | sed '/^$/d; s/^/- /' >>"$GITHUB_STEP_SUMMARY"
           else
             echo "applies=false" >>"$GITHUB_OUTPUT"
-            echo "Only prose changed (docs/ outside docs/spec/, README.md, LICENSE): not applicable." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "Only prose changed (README.md, LICENSE, or docs/ that is not an instruction source): not applicable." | tee -a "$GITHUB_STEP_SUMMARY"
           fi
       - name: Prepare a read-only view of the change
         id: prompt
@@ -90,8 +93,19 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
-          mkdir -p .review/base
-          git -c core.quotePath=false diff --no-renames "$BASE_SHA...HEAD" >.review/diff.patch
+          # .review/ belongs to this step. A PR that commits it (symlinks to
+          # /dev/null or to the checkout root, or planted "base" files) could
+          # blind the reviewer, so its presence in the head tree fails the job,
+          # and the directory is created fresh (no -p: it must not exist).
+          if [ -n "$(git ls-tree --name-only HEAD .review)" ]; then
+            echo "::error::the pull request contains .review/, which the review harness owns"
+            exit 1
+          fi
+          rm -rf .review
+          mkdir .review .review/base
+          # --text --no-textconv --no-ext-diff: a PR-added .gitattributes can't
+          # turn hunks into "Binary files differ" or route them through a driver.
+          git -c core.quotePath=false diff --text --no-textconv --no-ext-diff --no-renames "$BASE_SHA...HEAD" >.review/diff.patch
           git -c core.quotePath=false diff --no-renames --name-status "$BASE_SHA...HEAD" >.review/changed-files.txt
           git log --format='%H %an%n%B%n---' "$BASE_SHA..HEAD" >.review/commits.txt
           jq -r '"# " + .pull_request.title + "\n\n" + (.pull_request.body // "")' "$GITHUB_EVENT_PATH" >.review/pull-request.md
@@ -230,11 +244,11 @@ jobs:
         env:
           REVIEW_NAME: crypto-review
           REVIEW_JSON: ${{ needs.review.outputs.result }}
-          REVIEW_OUTCOME: ${{ needs.review.outputs.conclusion }}
+          REVIEW_OUTCOME: ${{ needs.review.outputs.outcome }}
           OUT_FILE: ${{ runner.temp }}/crypto-review.md
         run: python3 -I base/.github/scripts/review-verdict.py
       - name: Post review summary
-        if: always() && needs.review.outputs.applies == 'true'
+        if: always() && hashFiles('base/.github/scripts/upsert-comment.sh') != '' && needs.review.outputs.applies == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}

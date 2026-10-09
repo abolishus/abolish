@@ -44,8 +44,10 @@ if not isinstance(review, dict) or review.get("verdict") not in ("pass", "fail")
 findings = review.get("findings") or []
 if not isinstance(findings, list):
     fail("the review output has a malformed findings list.")
-blocking = [f for f in findings if isinstance(f, dict) and f.get("severity") == "blocking"]
-other = [f for f in findings if isinstance(f, dict) and f.get("severity") != "blocking"]
+# Anything that isn't a well-formed non-blocking finding counts as blocking, so
+# a malformed entry or an unknown severity can't slip a defect past the gate.
+other = [f for f in findings if isinstance(f, dict) and f.get("severity") == "non-blocking"]
+blocking = [f if isinstance(f, dict) else {"title": "malformed finding", "detail": repr(f)} for f in findings if f not in other]
 passed = review["verdict"] == "pass" and not blocking
 
 

@@ -37,7 +37,7 @@ packages/contracts/
 
 - Unit tests for each function and revert path.
 - Fuzz tests for each external function (`FOUNDRY_PROFILE=ci` raises runs).
-- Invariant suites with handlers, invariants stated in prose in the test file. Examples: board length never decreases; entry hashes chain; a nullifier is used at most once per poll; root history is append-only.
+- Invariant suites with handlers, invariants stated in prose in the test file. Examples: board length never decreases; entry hashes chain; at most one counted ballot per (poll, nullifier), the latest in board order, with superseded ballots kept on the board (re-voting must work, so never use a proof check that records the nullifier and reverts on reuse, such as Semaphore's `validateProof`, on the ballot path); root history is append-only.
 - Gas snapshots (`forge snapshot --check`) for hot paths.
 - Cross-language vectors from `docs/spec/vectors/` checked in Solidity.
 

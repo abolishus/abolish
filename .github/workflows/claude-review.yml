@@ -42,7 +42,8 @@ jobs:
       pull-requests: write
     outputs:
       applies: ${{ 'true' }}
-      conclusion: ${{ steps.review.outputs.conclusion }}
+      # The runner's own outcome (before continue-on-error), always present.
+      outcome: ${{ steps.review.outcome }}
       result: ${{ steps.review.outputs.structured_output }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -58,8 +59,19 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
-          mkdir -p .review/base
-          git -c core.quotePath=false diff --no-renames "$BASE_SHA...HEAD" >.review/diff.patch
+          # .review/ belongs to this step. A PR that commits it (symlinks to
+          # /dev/null or to the checkout root, or planted "base" files) could
+          # blind the reviewer, so its presence in the head tree fails the job,
+          # and the directory is created fresh (no -p: it must not exist).
+          if [ -n "$(git ls-tree --name-only HEAD .review)" ]; then
+            echo "::error::the pull request contains .review/, which the review harness owns"
+            exit 1
+          fi
+          rm -rf .review
+          mkdir .review .review/base
+          # --text --no-textconv --no-ext-diff: a PR-added .gitattributes can't
+          # turn hunks into "Binary files differ" or route them through a driver.
+          git -c core.quotePath=false diff --text --no-textconv --no-ext-diff --no-renames "$BASE_SHA...HEAD" >.review/diff.patch
           git -c core.quotePath=false diff --no-renames --name-status "$BASE_SHA...HEAD" >.review/changed-files.txt
           git log --format='%H %an%n%B%n---' "$BASE_SHA..HEAD" >.review/commits.txt
           jq -r '"# " + .pull_request.title + "\n\n" + (.pull_request.body // "")' "$GITHUB_EVENT_PATH" >.review/pull-request.md
@@ -184,11 +196,11 @@ jobs:
         env:
           REVIEW_NAME: claude-review
           REVIEW_JSON: ${{ needs.review.outputs.result }}
-          REVIEW_OUTCOME: ${{ needs.review.outputs.conclusion }}
+          REVIEW_OUTCOME: ${{ needs.review.outputs.outcome }}
           OUT_FILE: ${{ runner.temp }}/claude-review.md
         run: python3 -I base/.github/scripts/review-verdict.py
       - name: Post review summary
-        if: always()
+        if: always() && hashFiles('base/.github/scripts/upsert-comment.sh') != ''
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}

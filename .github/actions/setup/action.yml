@@ -21,11 +21,12 @@ runs:
         run-install: "false"
         cache: "true"
     # --ignore-scripts on top of strictDepBuilds: enabling any install script
-    # needs this file changed, i.e. the owner's review.
+    # needs this file changed, i.e. the owner's review. --ignore-pnpmfile:
+    # pnpmfile hooks run code at install time whatever --ignore-scripts says.
     - name: Install dependencies (frozen lockfile, no install scripts)
       shell: bash
       working-directory: ${{ inputs.working-directory }}
-      run: vp install --frozen-lockfile --ignore-scripts
+      run: vp install --frozen-lockfile --ignore-scripts -- --ignore-pnpmfile
     - name: Install Noir, Barretenberg and Foundry
       if: inputs.toolchain == 'true'
       shell: bash

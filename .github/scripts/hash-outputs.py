@@ -62,7 +62,15 @@ for group in workspace_roots():
             continue
         for out in outputs:
             out_dir = manifest.parent / out
-            if ".." in Path(out).parts or not out_dir.is_dir() or not any(p.is_file() for p in out_dir.rglob("*")):
+            # Outputs outside the package or under node_modules are never hashed
+            # below, so declaring one would let a build escape the comparison.
+            if Path(out).is_absolute() or {"..", "node_modules"} & set(Path(out).parts):
+                errors.append(f"{manifest}: build output {out!r} must be a relative path inside the package, outside node_modules")
+                continue
+            if not out_dir.resolve().is_relative_to(manifest.parent.resolve()):
+                errors.append(f"{manifest}: build output {out!r} resolves outside the package")
+                continue
+            if not out_dir.is_dir() or not any(p.is_file() for p in out_dir.rglob("*")):
                 errors.append(f"{manifest}: declared build output {out!r} is missing or empty after the build")
 
 status = subprocess.run(

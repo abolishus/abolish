@@ -85,4 +85,4 @@ Each check names the threats it closes and the STATUS item that specifies it. A 
 
 - 8.1 Results are reported per tier, each with its anonymity-set size (group size at the definition's root) and its turnout. Tier 0 results are labelled as not Sybil-resistant (T-01, T-13, T-16; P1-19, P3-6).
 - 8.2 Small counts are flagged next to the result: a tally over few voters can reveal individual votes (T-16; P3-6).
-- 8.3 An election that used a record version marked broken is reported unverifiable, never verified. Everything reported unverifiable, every missing archive link, every TEE-only root and every rejected entry is listed with its reason (P1-19).
+- 8.3 An election whose profile pins a record version marked broken is reported unverifiable (entries rejected at admission don't count as use), never verified. Everything reported unverifiable, every missing archive link, every TEE-only root and every rejected entry is listed with its reason (P1-19).

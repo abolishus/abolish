@@ -63,7 +63,7 @@ A decoder for a record type takes a complete byte string and either returns one 
 - input that ends before the last field is read (`truncated`);
 - bytes left over after the last field (`trailing-bytes`);
 - a length or count over the field's maximum (`length-over-max`);
-- an unknown `record_type` (`unknown-record-type`), a known type other than the one expected where the record is read (`unexpected-record-type`), or a known type with an unknown `version` (`unknown-version`). A type is known if the registry in [[versioning]] gives it a specified layout; reserved types and the test range are unknown to production decoders. In a vector file, the known types are exactly those that appear as a `recordType` in that file;
+- an unknown `record_type` (`unknown-record-type`), a known type other than the one expected where the record is read (`unexpected-record-type`), or a known type with an unknown `version` (`unknown-version`). A type is known if the registry in [[versioning]] gives it a specified layout; reserved types and the test range are unknown to production decoders. In a vector file, the known types are exactly those that appear as a `recordType` in that file, and the known versions of a type exactly those that appear with it;
 - a `bool` or enum value outside its listed values (`invalid-enum`);
 - ill-formed UTF-8 in a `utf8<M>` field (`invalid-utf8`);
 - a `field<F>` value at or above its modulus, or a group element or scalar that fails the validation P1-11 specifies (`non-canonical`);

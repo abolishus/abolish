@@ -36,13 +36,13 @@ Sections still to be written, by the STATUS item that owns them:
 
 ## Decisions this spec depends on
 
-The spec follows the ADRs below. Where one is still open, the sections that depend on it say so, and nothing that depends on it is marked specified.
+The spec follows the ADRs below. Several are still open (`needs-decision`) and are adopted by default 72 hours after they were opened unless the owner answers, as the brief allows. Until then, every section marked specified below is specified pending the ADRs it names, and changes if the owner picks another option.
 
-- [[0001-canonical-encoding]]: explicit byte layouts (option A). [[notation]], [[versioning]] and the vectors follow it.
-- [[0003-tally-scheme]]: homomorphic tally for plurality and approval, mixnet for ranked choice. Sets the option limit in [[parameters]] and the tally checks in [[verifier]].
-- [[0004-l2-choice]]: the L2, its close rule and finality. Shapes the timing and L2-evidence checks in [[verifier]].
-- [[0005-permanent-archive]]: the display-text split ([[display-text]]), the result-critical field rule ([[notation]]) and the CID parameters ([[content-addressing]]).
-- [[0006-trustees]]: the panel bound into each election definition.
+- [[0001-canonical-encoding]] (open; adopted by default on 2026-10-12 06:15 UTC unless the owner answers): explicit byte layouts (option A). [[notation]], [[versioning]] and the vectors follow it.
+- [[0003-tally-scheme]] (open; default 2026-10-12 20:01 UTC): homomorphic tally for plurality and approval, mixnet for ranked choice. Sets the option limit in [[parameters]] and the tally checks in [[verifier]].
+- [[0004-l2-choice]] (open; default for testnet 2026-10-12 20:10 UTC): the L2, its close rule and finality. Shapes the timing and L2-evidence checks in [[verifier]].
+- [[0005-permanent-archive]] (open; adopted by default on 2026-10-12 20:23 UTC unless the owner answers): the display-text split ([[display-text]]), the result-critical field rule ([[notation]]) and the CID parameters ([[content-addressing]]).
+- [[0006-trustees]] (open; the owner decides, never defaulted): the panel bound into each election definition.
 - The everlasting-privacy ADR (P1-3, `0002`, open): decides whether the board carries threshold ElGamal ciphertexts or perfectly hiding commitments. The ballot, ceremony and tally sections can't be written until it is accepted; [[verifier]] marks the checks it changes.
 
 ## Prior art

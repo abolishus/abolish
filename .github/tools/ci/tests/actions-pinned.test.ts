@@ -64,13 +64,16 @@ jobs:
   ]);
 });
 
-test("local actions outside .github and path traversal are rejected", () => {
+test("local actions outside .github/actions and path traversal are rejected", () => {
   const yml = `
 steps:
   - uses: ./tools/actions/setup
   - uses: ./.github/../tools/x
+  - uses: ./.github/review/lint
+  - uses: ./.github/tools/ci/node_modules/pkg
+  - uses: ./.github/actions/../review/lint
 `;
-  expect(findUnpinned("w.yml", yml)).toHaveLength(2);
+  expect(findUnpinned("w.yml", yml)).toHaveLength(5);
 });
 
 test("container and service images need digests", () => {

@@ -144,7 +144,7 @@ jobs:
   claude-review:
     name: claude-review
     needs: review
-    if: always() && github.event_name == 'pull_request' && !github.event.pull_request.draft
+    if: always() && github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -152,6 +152,15 @@ jobs:
       pull-requests: write
       issues: write
     steps:
+      # The model job skips drafts, but this required job never does: a skipped
+      # required check counts as passing, so a draft's head would carry a green
+      # review that auto-merge could act on once the PR is marked ready. A draft
+      # fails here until the ready_for_review run replaces it.
+      - name: Pull request is ready for review
+        if: github.event.pull_request.draft
+        run: |
+          echo "::error::draft pull requests aren't reviewed; mark it ready for review to run claude-review"
+          exit 1
       # Required checks are evaluated against the head SHA only. Retargeting a
       # PR's base doesn't re-run them, so checks that passed against another
       # base (e.g. a stacked branch that hides the real diff) must never count:

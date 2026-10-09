@@ -8,8 +8,8 @@
 // `image` value is checked wherever it appears, so equivalent spellings (flow
 // mappings, quoted keys, `uses :`) cannot hide a step. Anything that does not
 // parse cleanly is itself a violation. Local actions must live under
-// `./.github/` so that everything they reference is scanned too, and covered by
-// CODEOWNERS.
+// `./.github/actions/`, the only action directory the CLI scans, so everything
+// they reference is checked too, and CODEOWNERS covers them.
 
 import { isMap, isScalar, isSeq, parseAllDocuments, type Node } from "yaml";
 
@@ -23,7 +23,7 @@ export interface PinViolation {
 
 const SHA_REF = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:\/[^@\s]+)?@[0-9a-f]{40}$/;
 const DIGEST = /@sha256:[0-9a-f]{64}$/;
-const LOCAL = /^\.\/\.github\/\S+$/;
+const LOCAL = /^\.\/\.github\/actions\/\S+$/;
 const VERSION_COMMENT = /#\s*v?\d/;
 
 function escapeRegExp(s: string): string {
@@ -56,7 +56,7 @@ export function findUnpinned(file: string, source: string): PinViolation[] {
   const checkUses = (path: string, value: string, line: string) => {
     if (value.startsWith("./")) {
       if (!LOCAL.test(value) || value.split("/").includes(".."))
-        add(path, value, "local actions must live under ./.github/");
+        add(path, value, "local actions must live under ./.github/actions/");
       return;
     }
     if (value.startsWith("docker://")) {

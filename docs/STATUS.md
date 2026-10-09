@@ -62,7 +62,7 @@ Last updated: 2026-10-09 (P1-1 threat model).
 - [ ] P1-2 (in progress, above) ADR: canonical encoding (explicit byte layouts vs deterministic CBOR). `needs-decision`.
 - [ ] P1-3 ADR: everlasting privacy (perfectly hiding commitments on the board vs standard threshold ElGamal), with a post-quantum "harvest now, decrypt later" analysis. `needs-decision`. Must be accepted before tally work (P1-12).
 - [ ] P1-4 ADR: ballot tally scheme (homomorphic exponential ElGamal vs verifiable mixnet) per election type (plurality, approval, ranked choice). `needs-decision` (in progress, above).
-- [ ] P1-5 ADR: L2 choice (Arbitrum One vs Base): L2BEAT stage at decision time, sequencer jurisdiction, forced-inclusion path, paymaster tooling. `needs-decision`.
+- [ ] P1-5 (in progress, #TBD, `claude/p1-5`) ADR: L2 choice (Arbitrum One vs Base): L2BEAT stage at decision time, sequencer jurisdiction, forced-inclusion path, paymaster tooling. `needs-decision`.
 - [ ] P1-6 ADR: permanent archive (Arweave vs pinning-only). `needs-decision`.
 - [ ] P1-7 ADR: trustees, k-of-n and named trustees. **Owner decides; never defaults.** Until then, development uses a test ceremony.
 - [ ] P1-8 `docs/spec/` skeleton: notation, domain-separation tag registry, versioning rules, vector format (`docs/spec/vectors/*.json`), and the list of what a third-party verifier must check.

@@ -11,7 +11,7 @@ Each check names the threats it closes and the STATUS item that specifies it. A 
 - **Two kinds of check.** Anyone can post a ballot, so a bad ballot must never fail an election (T-52, T-53), and every conforming verifier must reach the same verdict on the same data (T-36):
   - **Admission checks** decide whether one ballot or opening counts: decoding of the record inside a board entry, 5.1 to 5.5, 5.7, 6.1's admission part and 6.2. A failure rejects that entry only. A rejected entry is listed in the report (8.3), never counted and never displaces an earlier ballot (6.1, R4).
   - **Election checks** are everything else: 1.x, 2.x, 3.x, the board-entry envelope and hash chain in 4.1, 4.2 to 4.5, 5.6, 7.1 to 7.3 and 8.x (7.4 reports only). The election is verified only if every election check passes.
-  - The board-entry envelope (P1-16) MUST be able to carry a payload that doesn't decode, as a rejected entry, so no voter can make 4.1 fail.
+  - Our contracts accept a direct submission only if it decodes strictly (and SHOULD also check its membership proof), and revert otherwise (P1-18), so nothing undecodable reaches an L2 event, the board or the permanent archive (T-17, G-12), and no one can make 4.1 or 5.6 fail by posting junk. A record that decodes but fails another admission check is boarded as a rejected entry.
 - **Strict decoding first.** Every record is decoded strictly ([[notation]]) before any other check uses it, and rejected entries are reported, never skipped silently (T-31, T-52).
 - **Pinned trust roots.** The verifier's release pins what can't be derived from data: the L1 and L2 chain IDs, the addresses of the anchor contract and our L2 contracts, the canonical L2 portal on L1, the L2 derivation rules it applies, the release-signing identities, and the verification key of every proof system it accepts, per ballot record version (Semaphore's per-depth keys, or the zero-knowledge UltraHonk key of our Noir circuit), built from reviewed source. Changing any of them is a new verifier release (T-64, T-71, T-05). No proof is ever verified under a key taken from election data alone.
 
@@ -83,4 +83,4 @@ Each check names the threats it closes and the STATUS item that specifies it. A 
 
 - 8.1 Results are reported per tier, each with its anonymity-set size (group size at the definition's root) and its turnout. Tier 0 results are labelled as not Sybil-resistant (T-01, T-13, T-16; P1-19, P3-6).
 - 8.2 Small counts are flagged next to the result: a tally over few voters can reveal individual votes (T-16; P3-6).
-- 8.3 Everything reported unverifiable, every missing archive link, every TEE-only root and every rejected entry is listed with its reason (P1-19).
+- 8.3 Every election that used a record version marked broken is flagged. Everything reported unverifiable, every missing archive link, every TEE-only root and every rejected entry is listed with its reason (P1-19).

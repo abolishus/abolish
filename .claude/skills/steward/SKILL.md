@@ -26,7 +26,7 @@ description: Repo-specific conventions for driving Abolish PRs to merge — auto
 
 The review checks are stochastic, so re-running them until one passes defeats them.
 
-- A blocking finding is cleared only by a change to the code it cites, or by the owner. Later runs never see the thread, so a rebuttal can't be "accepted" by one, and a later run that happens not to flag it again is a re-roll.
+- A blocking finding is cleared only by a change that addresses it (touching the cited lines isn't enough), or by the owner. Later runs never see the thread, so a rebuttal can't be "accepted" by one, and a later run that happens not to flag it again is a re-roll.
 - To rebut instead of fixing: reply on the thread with the concrete reason, disable auto-merge (for example with the GitHub `disable_pr_auto_merge` tool) and leave the PR for the owner. A later green run doesn't clear the finding.
 - Never re-trigger a review with an empty or unrelated push, a close and reopen, or a duplicate PR.
 - If a run passes code that an earlier run failed, and that code hasn't changed, treat it as failed until the owner decides: disable auto-merge and say so on the PR.

@@ -41,7 +41,7 @@ except json.JSONDecodeError:
 if not isinstance(review, dict) or review.get("verdict") not in ("pass", "fail"):
     fail("the review output has no valid verdict.")
 
-findings = review.get("findings") or []
+findings = review.get("findings", [])
 if not isinstance(findings, list):
     fail("the review output has a malformed findings list.")
 # Anything that isn't a well-formed non-blocking finding counts as blocking, so

@@ -50,7 +50,7 @@ description: Day-to-day development rules for the Abolish monorepo (Vite+, testi
 
 - Name tests after the property they protect: `"rejects non-canonical scalar encodings"`, not `"test 3"`.
 - Property tests: `fc.assert(fc.property(...), { numRuns: Number(process.env.FC_NUM_RUNS ?? 100) })`. Round-trip, rejection of malformed input, and invariants.
-- Vectors: load from `docs/spec/vectors/` or `test-vectors/`, and never regenerate expected values from the code under test.
+- Vectors: load from `docs/spec/vectors/` or `packages/crypto/test-vectors/`, and never regenerate expected values from the code under test.
 - No test may depend on network access except where explicitly marked and skipped offline. Use Anvil and Helia locally.
 - Database tests use `TEST_DATABASE_URL`, and each test gets an isolated schema or transaction.
 

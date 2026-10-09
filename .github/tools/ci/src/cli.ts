@@ -8,7 +8,14 @@
 //   pnpm-selftest           prove the pinned pnpm honours our install-script policy
 
 import { execFileSync } from "node:child_process";
-import { appendFileSync, existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  lstatSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -18,6 +25,7 @@ import {
   changedFiles,
   workspaceRoots,
   forTask,
+  gatedPackageViolations,
   invalidPackageNames,
   missingRequiredScripts,
   selectAffected,
@@ -95,7 +103,17 @@ function affected(): void {
   // AGENTS.md: every workspace package defines build, test and check. Without
   // this, a package with no test script would look "unaffected" and CI would
   // pass with none of its tests run.
-  const missing = [...invalidPackageNames(packages), ...missingRequiredScripts(packages)];
+  const missing = [
+    ...invalidPackageNames(packages),
+    ...gatedPackageViolations(packages, (path) => {
+      try {
+        return lstatSync(path).isSymbolicLink();
+      } catch {
+        return false;
+      }
+    }),
+    ...missingRequiredScripts(packages),
+  ];
   if (missing.length > 0) {
     for (const m of missing) console.error(m);
     process.exit(1);

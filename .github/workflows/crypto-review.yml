@@ -59,25 +59,18 @@ jobs:
         id: scope
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        # Scope (the brief): the protocol packages, docs/spec and agent
-        # instruction files at any depth. Everything else gets claude-review
-        # only; .github/ is exempt because CODEOWNERS routes it to the owner.
-        # --no-renames lists both sides of a move; -z with quotePath=false keeps
-        # non-ASCII paths intact. An empty or unreadable diff fails the check.
+        # The selector is a tested script (pathspec-based, see its header); it
+        # fails the step when the diff can't be read or is empty.
         run: |
-          git -c core.quotePath=false diff --no-renames --name-only -z "$BASE_SHA...HEAD" >"$RUNNER_TEMP/changed.z"
-          changed="$(tr '\0' '\n' <"$RUNNER_TEMP/changed.z")"
-          if [ -z "$changed" ]; then
-            echo "::error::could not determine the changed files; refusing to skip crypto-review"
-            exit 1
-          fi
-          protocol='^(packages/(crypto|circuits|contracts|verifier)/|docs/spec/)|(^|/)(AGENTS\.md|CLAUDE(\.local)?\.md|\.mcp\.json)$|(^|/)\.claude/'
-          in_scope="$(printf '%s\n' "$changed" | grep -Ev '^\.github/' | grep -E "$protocol" || true)"
-          if [ -n "$in_scope" ]; then
-            echo "applies=true" >>"$GITHUB_OUTPUT"
-            printf '%s\n' "$in_scope" | sed 's/^/- /' >>"$GITHUB_STEP_SUMMARY"
+          .github/scripts/crypto-scope.sh "$BASE_SHA" >"$RUNNER_TEMP/scope.txt"
+          result="$(tail -n 1 "$RUNNER_TEMP/scope.txt")"
+          case "$result" in
+            applies=true | applies=false) echo "$result" >>"$GITHUB_OUTPUT" ;;
+            *) echo "::error::unexpected scope result"; exit 1 ;;
+          esac
+          if [ "$result" = applies=true ]; then
+            head -n -1 "$RUNNER_TEMP/scope.txt" >>"$GITHUB_STEP_SUMMARY"
           else
-            echo "applies=false" >>"$GITHUB_OUTPUT"
             echo "No protocol code or agent instruction files changed: not applicable." | tee -a "$GITHUB_STEP_SUMMARY"
           fi
       - name: Prepare a read-only view of the change

@@ -1,7 +1,6 @@
 packages:
   - apps/*
   - packages/*
-  - tools/*
   # CI gate code lives under .github/ so CODEOWNERS covers it: a PR cannot
   # weaken the policy that checks it without the owner's review.
   - .github/tools/*

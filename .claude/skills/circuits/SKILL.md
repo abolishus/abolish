@@ -29,6 +29,8 @@ packages/circuits/
 ## Rules
 
 - Noir circuits need no per-circuit trusted setup (UltraHonk). Semaphore's existing ceremony is the only accepted exception.
+- Always the **zero-knowledge** flavour of UltraHonk: every prover, verification key, Solidity verifier and bb.js backend. No no-ZK option (`--disable_zk`, `*-no-zk` targets) ever appears, gas savings included: a non-ZK proof doesn't hide the witness, and the membership witness identifies the voter. A test asserts the committed verification keys and verifier are the ZK variant.
+- Noir dependencies are path dependencies on sources vendored as plain files inside `packages/circuits`, never git dependencies (they resolve a mutable tag at build time). Record each one's upstream repo, tag and commit, and a tree hash CI re-derives, so every change appears in the reviewed diff.
 - Every value the statement depends on is a public input or constrained to one. Document the statement at the top of `main.nr` in maths notation, and keep it identical in `docs/spec/`.
 - Unconstrained functions (`unconstrained fn`) are hints only. Re-check every output inside the circuit.
 - Range-check every value that is meant to be smaller than the field. Watch for wrap-around in subtraction and comparison.

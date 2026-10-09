@@ -7,6 +7,7 @@ import { describe, expect, test } from "vite-plus/test";
 import {
   changedFiles,
   forTask,
+  gatedPackageViolations,
   invalidPackageNames,
   missingRequiredScripts,
   selectAffected,
@@ -230,5 +231,37 @@ describe("invalidPackageNames", () => {
       ),
       runs,
     );
+  });
+});
+
+describe("gatedPackageViolations", () => {
+  const pkg = (name: string, dir: string) => ({ name, dir, dependsOn: [], scripts: [] });
+  const none = () => false;
+
+  test("gated packages at their gated paths pass", () => {
+    expect(
+      gatedPackageViolations(
+        [pkg("@abolishus/crypto", "packages/crypto"), pkg("@abolishus/core", "packages/core")],
+        none,
+      ),
+    ).toEqual([]);
+  });
+
+  test("a gated package anywhere else, or under a look-alike name, fails", () => {
+    expect(
+      gatedPackageViolations(
+        [
+          pkg("@abolishus/verifier", "apps/verifier"),
+          pkg("@abolishus/crypto", "packages/cr\u0443pto"),
+        ],
+        none,
+      ),
+    ).toHaveLength(2);
+  });
+
+  test("a gated root that is a symlink fails", () => {
+    expect(gatedPackageViolations([], (p) => p === "packages/verifier")).toEqual([
+      "packages/verifier: must be a real directory, not a symlink",
+    ]);
   });
 });

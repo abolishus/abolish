@@ -1,6 +1,7 @@
-// The Python scripts that decide required checks: review-verdict.py
-// (claude-review, crypto-review) and hash-outputs.py (repro-build). They run
-// as subprocesses exactly as the workflows run them, under `python3 -I`.
+// The scripts that decide required checks: review-verdict.py (claude-review,
+// crypto-review), hash-outputs.py (repro-build) and crypto-scope.sh (whether
+// crypto-review applies). They run as subprocesses exactly as the workflows
+// run them (Python under `python3 -I`).
 
 import { execFileSync, spawnSync } from "node:child_process";
 import {
@@ -66,6 +67,8 @@ describe("review-verdict.py", () => {
     ["pass with a missing severity", review("pass", [{ title: "x" }]), "success"],
     ["pass with a non-object finding", review("pass", ["looks fine"]), "success"],
     ["a findings value that isn't a list", review("pass", { a: nit }), "success"],
+    ["an empty non-list findings value", review("pass", {}), "success"],
+    ["an empty-string findings value", review("pass", ""), "success"],
   ])("fails closed on %s", (_, json, outcome) => {
     expect(verdict(json, outcome).status).toBe(1);
   });
@@ -250,6 +253,113 @@ describe("hash-outputs.py", () => {
         },
       ),
       runs,
+    );
+  }, 600_000);
+});
+
+describe("crypto-scope.sh", () => {
+  let dir: string;
+  let base: string;
+  const git = (...args: string[]) =>
+    execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], {
+      cwd: dir,
+      stdio: "pipe",
+    }).toString();
+  beforeAll(() => {
+    dir = mkdtempSync(join(tmpdir(), "crypto-scope-"));
+    git("init", "-q", "-b", "main");
+    writeFileSync(join(dir, "README.md"), "base\n");
+    git("add", "-A");
+    git("commit", "-qm", "base");
+    base = git("rev-parse", "HEAD").trim();
+  });
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+
+  // Each case is a commit on a fresh branch from base; paths may be raw bytes.
+  const change = (paths: (string | Buffer)[], symlinks: [string, string][] = []) => {
+    git("checkout", "-q", "-f", "-B", "case", base);
+    git("clean", "-qfdx");
+    for (const p of paths) {
+      const full = Buffer.concat([Buffer.from(`${dir}/`), Buffer.isBuffer(p) ? p : Buffer.from(p)]);
+      const parent = full.subarray(0, full.lastIndexOf(0x2f));
+      mkdirSync(parent, { recursive: true });
+      writeFileSync(full, "x\n");
+    }
+    for (const [link, target] of symlinks) {
+      mkdirSync(join(dir, link, ".."), { recursive: true });
+      symlinkSync(target, join(dir, link));
+    }
+    git("add", "-A");
+    git("commit", "-qm", "change", "--allow-empty");
+    const r = spawnSync("bash", [join(scripts, "crypto-scope.sh"), base], {
+      cwd: dir,
+      encoding: "utf8",
+    });
+    return { status: r.status, last: r.stdout.trim().split("\n").at(-1) };
+  };
+
+  test.each([
+    ["a protocol package", ["packages/crypto/src/a.ts"], true],
+    ["docs/spec", ["docs/spec/encoding.md"], true],
+    ["root agent files", ["AGENTS.md"], true],
+    ["nested agent files", ["apps/web/CLAUDE.md", "x/.mcp.json"], true],
+    ["a .claude directory", [".claude/skills/dev/SKILL.md"], true],
+    ["agent files under .github", [".github/x/AGENTS.md", ".github/.claude/y"], false],
+    ["workflows only", [".github/workflows/ci.yml"], false],
+    ["other packages and docs", ["packages/core/a.ts", "docs/adr/0001.md", "README.md"], false],
+    ["a look-alike prefix", ["packages/cryptography/a.ts", "docs/specs/x.md"], false],
+  ])("%s", (_, paths, applies) => {
+    expect(change(paths)).toEqual({ status: 0, last: `applies=${applies}` });
+  });
+
+  test("a non-UTF-8 name sorting first doesn't hide a protocol change", () => {
+    const r = change([
+      Buffer.from("!caf\xe9.md", "latin1"),
+      Buffer.from("docs/caf\xe9.md", "latin1"),
+      "packages/crypto/a.ts",
+    ]);
+    expect(r).toEqual({ status: 0, last: "applies=true" });
+  });
+
+  test("a gated root committed as a symlink is in scope", () => {
+    const r = change(["tools/verifier/index.ts"], [["packages/verifier", "../tools/verifier"]]);
+    expect(r).toEqual({ status: 0, last: "applies=true" });
+  });
+
+  test("an empty diff fails closed", () => {
+    expect(change([]).status).not.toBe(0);
+  });
+
+  test("applies exactly when some changed path is in scope", () => {
+    const inScope = [
+      "packages/crypto/a.ts",
+      "packages/verifier",
+      "docs/spec/x.md",
+      "CLAUDE.md",
+      "a/b/AGENTS.md",
+      ".claude/x",
+    ];
+    const outOfScope = [
+      "README.md",
+      "packages/core/a.ts",
+      "packages/cryptox/a.ts",
+      ".github/AGENTS.md",
+      ".github/workflows/x.yml",
+      "docs/adr/1.md",
+    ];
+    const weird = [Buffer.from("w\xff.md", "latin1"), Buffer.from("!\xe9", "latin1")];
+    fc.assert(
+      fc.property(
+        fc.subarray(inScope),
+        fc.subarray([...outOfScope, ...weird], { minLength: 1 }),
+        (a, b) => {
+          expect(change([...a, ...b])).toEqual({
+            status: 0,
+            last: `applies=${a.length > 0}`,
+          });
+        },
+      ),
+      { numRuns: Number(process.env["FC_NUM_RUNS"] ?? 30) },
     );
   }, 600_000);
 });

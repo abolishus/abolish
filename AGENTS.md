@@ -11,7 +11,7 @@ Operating manual for every agent session on Abolish. Sessions are started by rou
    3. Start the next unblocked STATUS.md item, but only while fewer than **2** of your PRs are open.
 3. Load the skill for the area you touch (`.claude/skills/`):
    - `dev`: every change
-   - `crypto-review`: packages/crypto, circuits, contracts, verifier, core, sdk and both Capacitor plugins; apps/ballot; docs/spec; test-vectors
+   - `crypto-review`: packages/crypto, circuits, contracts, verifier, core, sdk and both Capacitor plugins; apps/ballot; docs/spec
    - `contracts`
    - `circuits`
    - `migrations`
@@ -45,7 +45,7 @@ Run your own review pass and fix what it finds:
 2. Tests pass for every affected package: `vp run --filter <pkg>... test`, or `vp run -r test`.
 3. Threat-model compliance: does the change cite the threats it addresses, and does it weaken any mitigation?
 4. Style matches the surrounding code. No dead code. Comments explain why, not what.
-5. For changes to protocol code (`packages/{crypto,circuits,contracts,verifier,core,sdk,capacitor-zk-prover,capacitor-nfc-passport}`, `apps/ballot`, `docs/spec`, `test-vectors`): launch an **independent subagent review** in-session, using the `crypto-review` skill's checklist, and address every finding **before** opening the PR.
+5. For changes to protocol code (`packages/{crypto,circuits,contracts,verifier,core,sdk,capacitor-zk-prover,capacitor-nfc-passport}`, `apps/ballot`, `docs/spec`): launch an **independent subagent review** in-session, using the `crypto-review` skill's checklist, and address every finding **before** opening the PR.
 6. Update `docs/STATUS.md` in the same PR: move the item, and note what's tested and what's known-weak.
 
 PR title: conventional-commit style (`feat(crypto): ...`, `fix(api): ...`, `docs: ...`, `ci: ...`). PR body: what changed, which threats it addresses, how it's tested, and what's known-weak.
@@ -98,7 +98,7 @@ Testing is the product. CI runs all of it on every PR:
 
 - **Unit:** `vite-plus/test`.
 - **Property-based:** `fast-check`. Required for every parser, encoder, state machine and protocol invariant. Honour `FC_NUM_RUNS` (CI sets 1000), and print the seed on failure.
-- **Published cryptographic test vectors:** RFCs, the library authors' vectors, ElectionGuard/Helios vectors where applicable. Vendor them under `test-vectors/`, recording the source URL and sha256.
+- **Published cryptographic test vectors:** RFCs, the library authors' vectors, ElectionGuard/Helios vectors where applicable. Vendor them under `packages/crypto/test-vectors/` (inside the `crypto-review` gate), recording the source URL and sha256.
 - **Cross-language encoding vectors:** `docs/spec/vectors/*.json`, consumed by TS, Solidity and Noir tests, so third-party verifiers can use them too.
 - **Contracts:** Foundry unit, fuzz and invariant tests. Profile `ci` runs deeper campaigns.
 - **Circuits:** `nargo test`, plus proof generation and verification round-trips through bb.
@@ -153,7 +153,7 @@ pnpm workspace orchestrated by Vite+ (no Turborepo/Nx).
 
 - Published packages (`crypto`, `verifier`, `sdk`, under the `@abolishus/` scope) are Apache-2.0 and built with `vp pack`. Everything else is AGPL-3.0-only.
 - Internal packages are source-only.
-- **The verifier's trust base stays inside the `crypto-review` gate.** Everything `packages/verifier` checks lives in `packages/crypto`, `packages/circuits`, `packages/contracts` or `packages/verifier` itself: ballot encoding, encryption and validity proofs; challenge/spoil and receipts; re-vote resolution; board chaining, inclusion proofs and Merkle roots; election-definition and nullifier-scope hashing; tally and decryption proofs. `core`, `sdk` and the apps call this code and never reimplement it. `packages/verifier` and `packages/crypto` depend only on those gated packages, `@noble/*`, generated ABIs and circuit artifacts, never on `core`, `sdk`, `api-contract` or `ui`, and no gated path contains a symlink. Ballot-client code that touches the plaintext or the encryption randomness is a `packages/crypto` API that `apps/ballot` calls.
+- **The verifier's trust base stays inside the `crypto-review` gate.** Everything `packages/verifier` checks lives in `packages/crypto`, `packages/circuits`, `packages/contracts` or `packages/verifier` itself: ballot encoding, encryption and validity proofs; challenge/spoil and receipts; re-vote resolution; board chaining, inclusion proofs and Merkle roots; election-definition and nullifier-scope hashing; tally and decryption proofs. `core`, `sdk` and the apps call this code and never reimplement it. `packages/crypto` depends on `@noble/*` only, with no workspace imports. `packages/verifier` depends only on the other gated packages, `@noble/*`, generated ABIs and circuit artifacts, never on `core`, `sdk`, `api-contract` or `ui`. No gated path contains a symlink. Ballot-client code that touches the plaintext or the encryption randomness is a `packages/crypto` API that `apps/ballot` calls.
 - Zod v4 is used only at transport boundaries (API, forms, env, DB rows) and only with strict objects. `packages/api-contract` and anything `apps/ballot` imports use `zod/mini`. No schema library ever defines protocol bytes; `docs/spec/` does.
 - Generated code (wagmi bindings, circuit artifacts) is never hand-edited.
 - `docs/` is an Obsidian vault. Link documents with `[[wikilinks]]`.

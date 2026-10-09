@@ -106,6 +106,32 @@ export function missingRequiredScripts(packages: readonly WorkspacePackage[]): s
   });
 }
 
+/** The packages crypto-review gates, by name, each at exactly `packages/<name>`. */
+export const GATED_PACKAGES = ["crypto", "circuits", "contracts", "verifier"] as const;
+
+/**
+ * crypto-review selects by path, so a gated package must live at its gated
+ * path as a real directory. A package named `@abolishus/verifier` anywhere
+ * else (or under a look-alike directory name), or `packages/verifier` as a
+ * symlink to an ungated directory, would move its code out of the gate.
+ * `isSymlink(path)` is injected so tests needn't touch the filesystem.
+ */
+export function gatedPackageViolations(
+  packages: readonly WorkspacePackage[],
+  isSymlink: (path: string) => boolean,
+): string[] {
+  const out: string[] = [];
+  for (const name of GATED_PACKAGES) {
+    const dir = `packages/${name}`;
+    if (isSymlink(dir)) out.push(`${dir}: must be a real directory, not a symlink`);
+    for (const p of packages) {
+      if (p.name === `@abolishus/${name}` && p.dir !== dir)
+        out.push(`${p.dir}/package.json: @abolishus/${name} must live at ${dir}`);
+    }
+  }
+  return out;
+}
+
 /** npm package-name grammar (lowercase, optional scope); nothing else may reach --filter. */
 const PACKAGE_NAME = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/;
 

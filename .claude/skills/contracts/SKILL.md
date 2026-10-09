@@ -20,12 +20,13 @@ packages/contracts/
 ```
 
 - Solidity version: exact pragma (`pragma solidity 0.8.x;`), and the same in `foundry.toml`. Settings: `via_ir` decided once, optimizer runs fixed, `bytecode_hash = "none"` and `cbor_metadata = false` for reproducible bytecode.
-- Remappings are explicit. Dependencies are vendored as git submodules pinned to release commits (OpenZeppelin, Semaphore), or installed from npm through the catalog. Record each choice in the package README.
+- Remappings are explicit. Dependencies (OpenZeppelin, Semaphore) are vendored as plain files inside `packages/contracts`, copied from an audited release, never git submodules: a submodule bump shows reviewers only a commit hash. Record each one's upstream repo, tag and commit, and a tree hash CI re-derives, in the package README.
 
 ## Rules
 
 - **Bulletin-board contracts are immutable:** no proxy, no owner, no pause, no selfdestruct, no delegatecall to mutable targets.
-- Anything upgradeable (registries, paymaster config) sits behind a **Safe multisig + TimelockController**. There is no single-key admin anywhere: no `Ownable` with an EOA owner. Tests assert the admin is the timelock.
+- **Per-election records are write-once** in non-upgradeable storage: the election-definition hash, verification-key hash, trustee keys and election public key. The verifier and the ballot client take the first registration event as authoritative and fail on any later change, and the client checks the election key against the DKG transcript before encrypting. Upgrading a registry must never be able to swap a key or re-scope a poll's nullifiers.
+- Anything upgradeable (registry logic that can't affect a recorded election, paymaster config) sits behind a **Safe multisig + TimelockController**. There is no single-key admin anywhere: no `Ownable` with an EOA owner. Tests assert the admin is the timelock.
 - **No PII on-chain.** Inputs are commitments, hashes, ciphertexts, proofs and public keys only. Every external function has a test that feeds representative inputs through a PII detector (no ASCII names, emails or document numbers in calldata; fixed-size typed fields) and asserts that events carry no user-supplied free text. A test asserts that no on-chain data links a group member to a poll.
 - **Direct-submit:** anyone can post a registration or ballot commitment directly. Bind every signed or proved payload to `block.chainid`, the contract address, and the poll ID; reject replays; never let a third party alter or front-run a submission into a different meaning.
 - One person, one vote: weight never depends on balance or token holdings. Keep contracts coin-ready (a future ERC-20 on the same L2 funds the project) without coupling voting to it.

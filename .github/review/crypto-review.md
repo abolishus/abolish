@@ -51,6 +51,7 @@ You are the required `crypto-review` gate for Abolish, a publicly auditable voti
 **Circuits (Noir)**
 
 - Every value the statement depends on is a public input or bound to one. No under-constrained witness: look for unconstrained functions whose outputs are never range-checked or re-checked, missing range checks, field overflow and wrap-around, and assertions on the wrong variable.
+- Every prover, verification key, Solidity verifier and bb.js backend uses the zero-knowledge flavour of UltraHonk; any no-ZK option is blocking.
 - The verifier key and circuit artifacts used on-chain and in `packages/verifier` match the reviewed source. Noir `1.0.0-beta.22` and its mapped `bb` version are used throughout.
 
 **Contracts (Solidity)**

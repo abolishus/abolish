@@ -1,6 +1,6 @@
 ---
 name: crypto-review
-description: Rules and the in-session adversarial review procedure for protocol code — packages/crypto, circuits, contracts, verifier, core, sdk and both Capacitor plugins, apps/ballot, docs/spec and test-vectors. Load before writing or reviewing any of them, and before opening a PR that touches them.
+description: Rules and the in-session adversarial review procedure for protocol code — packages/crypto, circuits, contracts, verifier, core, sdk and both Capacitor plugins, apps/ballot and docs/spec. Load before writing or reviewing any of them, and before opening a PR that touches them.
 ---
 
 # crypto-review
@@ -16,7 +16,7 @@ description: Rules and the in-session adversarial review procedure for protocol 
 - Randomness for secrets: CSPRNG only, with nonces never reused. Deterministic randomness exists only behind an explicit test seam that production code cannot reach.
 - Every protocol message format is versioned. Unknown versions are rejected, never guessed.
 - Anything on the public board that is only computationally hiding must agree with the accepted everlasting-privacy ADR.
-- Everything the verifier checks lives in `packages/{crypto,circuits,contracts,verifier}`, the only paths the required `crypto-review` gate covers. `packages/verifier` and `packages/crypto` never depend on `core`, `sdk`, `api-contract` or `ui`; no gated path contains a symlink; `apps/ballot` reaches the plaintext and randomness only through `packages/crypto` APIs. Code outside the gate that reimplements any of it is a blocking finding.
+- Everything the verifier checks lives in `packages/{crypto,circuits,contracts,verifier}`, the only code paths the required `crypto-review` gate covers (it also covers `docs/spec/` and the agent instruction files; see the AGENTS.md required-checks table). `packages/crypto` depends on `@noble/*` only; `packages/verifier` never depends on `core`, `sdk`, `api-contract` or `ui`; no gated path contains a symlink; `apps/ballot` reaches the plaintext and randomness only through `packages/crypto` APIs. Code outside the gate that reimplements any of it is a blocking finding.
 
 ## Tests required
 

@@ -2,11 +2,12 @@
 
 The work queue. Every session reads it, and every PR updates it. Items are ordered within each phase: take the first unblocked one. Each item is meant to fit in one PR. ADR items open as `needs-decision` PRs and don't block unrelated work. See [[PROJECT_BRIEF]] and the repo's `AGENTS.md`.
 
-Last updated: 2026-10-09 (P1-1 threat model).
+Last updated: 2026-10-09 (P1-2 canonical-encoding ADR).
 
 ## In progress
 
-- **P1-1 `docs/THREAT_MODEL.md`** (this PR): goals G-1–G-14, assets, adversaries A-1–A-11, threats T-01–T-69 with mitigations mapped to STATUS items, and the list of what isn't mitigated. Nearly every mitigation is marked planned, because nothing below the CI pipeline exists yet.
+- **P1-2 canonical-encoding ADR** (#5, `needs-decision`): [[0001-canonical-encoding]] recommends explicit fixed byte layouts. Adopted by default on 2026-10-12 if the owner hasn't answered.
+- **P0-3 `ci: release`** (#4): waits for the owner's review (`.github/`).
 
 ## Blocked
 
@@ -28,11 +29,13 @@ Last updated: 2026-10-09 (P1-1 threat model).
 - **Toolchain hashes are trust-on-first-use.** The sha256 pins in `.github/scripts/install-toolchain.sh` were recorded from the upstream GitHub releases on 2026-10-09; nothing cross-checks them against upstream attestations, and `repro-build` can't detect a deterministic malicious binary because both builds use the same one.
 - **Merge queue:** the review checks skip `merge_group`. If the owner enables a merge queue, it must use batch size 1, or the combined tree of a batch is never model-reviewed.
 - **Lockfile policy covers `packages:` only.** It checks which bytes can be installed; rewiring a `snapshots:` edge to another version already in `packages:` isn't checked. `crypto-review` doesn't run on lockfile or catalog changes (the brief scopes it to the four protocol packages). CI rejects overrides, patches and package extensions, but a catalog bump of `@noble/*` or `@aztec/bb.js`, or a rewired edge, is seen only by `claude-review` and owner review until P1-9's lockfile-closure check and P1-16b land.
+- **Auto-merge is disabled for the repository** (Settings → General → Pull Requests → Allow auto-merge), so enabling it on a PR fails and green PRs wait for the owner to merge them. Requested from the owner: enable it.
 - **Required checks and auto-merge depend on repo rulesets** that agents may not change. The owner must mark `ci`, `reference-election`, `repro-build`, `claude-review` and `crypto-review` as required on `main`.
-- **The threat model's mitigations are almost all planned, not built** (see [[THREAT_MODEL]], status column). Its "Not mitigated" section lists what no planned work addresses. No feature code may land before P1-1 merges.
+- **The threat model's mitigations are almost all planned, not built** (see [[THREAT_MODEL]], status column). Its "Not mitigated" section lists what no planned work addresses. P1-1 has merged, so feature code may now land, citing threat IDs.
 
 ## Done
 
+- 2026-10-09: P1-1 threat model merged (#3): goals G-1–G-14, assets, adversaries A-1–A-11, threats T-01–T-69 and the not-mitigated list.
 - 2026-10-09: P0-1 `ci: bootstrap` merged (#1): AGENTS.md, CLAUDE.md, project skills, SessionStart hook, STATUS, root `LICENSE` (AGPL-3.0-only), the root Vite+ workspace, `.github/tools/ci`, `.github/scripts/install-toolchain.sh`, and the workflows `ci`, `reference-election`, `repro-build`, `claude-review` and `crypto-review`.
 - 2026-10-09: the owner extended CODEOWNERS (#2) to `/.claude/`, `/AGENTS.md`, `/CLAUDE.md`, `/docs/PROJECT_BRIEF.md`, `/pnpm-workspace.yaml`, `/vite.config.ts` and `/tsconfig.base.json`.
 - 2026-10-09: project brief saved (`docs/PROJECT_BRIEF.md`).
@@ -48,8 +51,8 @@ Last updated: 2026-10-09 (P1-1 threat model).
 
 ## Phase 1: Threat model, spec, crypto core, circuits, verifier, reference election (CLI only)
 
-- [ ] P1-1 (in progress, above) `docs/THREAT_MODEL.md`: assets, adversaries (state actor, insiders including us, compromised devices, coercion and vote buying, DDoS, supply chain, domain or hosting seizure, prompt injection against this pipeline), threat IDs, mitigations, and an explicit list of what isn't mitigated yet. No feature code before this merges.
-- [ ] P1-2 ADR: canonical encoding (explicit byte layouts vs deterministic CBOR). `needs-decision`: [[0001-canonical-encoding]] recommends explicit byte layouts; adopted by default on 2026-10-12 if unanswered.
+- [x] P1-1 (#3) `docs/THREAT_MODEL.md`: assets, adversaries (state actor, insiders including us, compromised devices, coercion and vote buying, DDoS, supply chain, domain or hosting seizure, prompt injection against this pipeline), threat IDs, mitigations, and an explicit list of what isn't mitigated yet. No feature code before this merges.
+- [ ] P1-2 ADR: canonical encoding (explicit byte layouts vs deterministic CBOR). `needs-decision` (in progress, above).
 - [ ] P1-3 ADR: everlasting privacy (perfectly hiding commitments on the board vs standard threshold ElGamal), with a post-quantum "harvest now, decrypt later" analysis. `needs-decision`. Must be accepted before tally work (P1-12).
 - [ ] P1-4 ADR: ballot tally scheme (homomorphic exponential ElGamal vs verifiable mixnet) per election type (plurality, approval, ranked choice). `needs-decision`.
 - [ ] P1-5 ADR: L2 choice (Arbitrum One vs Base): L2BEAT stage at decision time, sequencer jurisdiction, forced-inclusion path, paymaster tooling. `needs-decision`.
@@ -61,7 +64,7 @@ Last updated: 2026-10-09 (P1-1 threat model).
 - [ ] P1-11 Group and hash layer: point/scalar codecs with subgroup checks, hash-to-field and domain separation, plus published vectors.
 - [ ] P1-12 Ballot encryption and validity proofs (per the tally ADR): disjunctive Chaum–Pedersen, Fiat–Shamir with full statement binding.
 - [ ] P1-13 Benaloh challenge/spoil, ballot receipts, and re-voting semantics (last ballot counts).
-- [ ] P1-14 Threshold key ceremony: Pedersen/Feldman DKG, a public transcript format, and verification of the transcript.
+- [ ] P1-14 Threshold key ceremony: a DKG secure against key bias and rogue keys (GJKR-style; see T-40), a public transcript format, and verification of the transcript.
 - [ ] P1-15 Threshold decryption shares with proofs, tally combination, and the tally transcript.
 - [ ] P1-16 Bulletin board model: append-only hash-chained entries, inclusion proofs, and Merkle roots for anchoring.
 - [ ] P1-16b `ci:` toolchain-consistency check: CI fails unless `NOIR_VERSION`/`BB_VERSION` in `.github/scripts/install-toolchain.sh` match the `@noir-lang/noir_js` / `@aztec/bb.js` catalog pins and bbup's `bb-versions.json` mapping. Must land before P1-17.

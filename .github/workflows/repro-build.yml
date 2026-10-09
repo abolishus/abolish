@@ -58,7 +58,7 @@ jobs:
           run-install: "false"
       - name: Install dependencies (frozen lockfile)
         working-directory: ${{ matrix.path }}
-        run: vp install --frozen-lockfile
+        run: vp install --frozen-lockfile --ignore-scripts
       - name: Install Noir, Barretenberg and Foundry
         working-directory: ${{ matrix.path }}
         run: .github/scripts/install-toolchain.sh "$RUNNER_TEMP/abolish-toolchain/bin"

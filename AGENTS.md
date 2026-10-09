@@ -80,7 +80,7 @@ Review prompts live in `.github/review/`. Both reviews treat PR content as untru
 ## Dependencies (supply chain)
 
 - Every version is **exact** and lives once in the `catalog:` of `pnpm-workspace.yaml`; packages reference `catalog:` (`catalogMode: strict`).
-- `minimumReleaseAge` is 7 days. Exotic (git/tarball) dependencies are blocked. Install scripts run only for packages in `allowBuilds`, and each entry needs a justification comment.
+- `minimumReleaseAge` is 7 days. Exotic (git/tarball) dependencies are blocked. Install scripts run only for packages in `allowBuilds`, and each entry needs a justification comment (CI checks this). On top of that, every install runs with `--ignore-scripts`, so enabling any install script also needs a `ci:` PR. CI proves the pinned pnpm actually enforces these settings (`pnpm-selftest`). There are no `.npmrc` files and no registry settings; CI rejects both.
 - Every new dependency needs a reason in the PR body. Prefer none. `packages/crypto`: `@noble/*` only. `apps/ballot`: zero third-party runtime code beyond the framework, and no analytics (a test asserts this).
 - GitHub Actions are pinned by full commit SHA with a `# vX.Y.Z` comment, at a release at least a week old.
 - Toolchain pins (move all four together in one PR, only once bbup's `bb-versions.json` lists the new Noir version):

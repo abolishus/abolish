@@ -10,8 +10,12 @@
 //   publishes (catches a hand-edited lockfile pointing at other bytes);
 // - every added or changed package is at least MIN_AGE_DAYS old.
 // The diff is also rendered as Markdown so the review workflows can review it.
+// Scope: the `packages:` section, i.e. which bytes can be installed at all.
+// `importers:` drift from the manifests is caught by `--frozen-lockfile`;
+// `snapshots:` (which already-present version each edge uses) is not checked
+// here, so rewiring an edge to another version already in `packages:` passes.
 
-import { parseDocument } from "yaml";
+import { isMap, isScalar, parseDocument, type Node } from "yaml";
 
 export interface LockedPackage {
   /** "name@version" exactly as the lockfile key, without quotes. */
@@ -234,4 +238,29 @@ export function registryOverrides(
     }
   }
   return out;
+}
+
+/**
+ * AGENTS.md: install scripts run only for packages in `allowBuilds`, and each
+ * entry needs a justification comment (on the line above, or trailing).
+ */
+export function unjustifiedAllowBuilds(workspaceYaml: string): string[] {
+  const doc = parseDocument(workspaceYaml, { uniqueKeys: true });
+  if (doc.errors.length > 0)
+    return [`pnpm-workspace.yaml: does not parse: ${doc.errors[0]?.message ?? "unknown error"}`];
+  const allow = doc.get("allowBuilds", true) as Node | undefined;
+  if (allow === undefined) return [];
+  if (!isMap(allow)) return ["pnpm-workspace.yaml: allowBuilds must be a mapping"];
+  return allow.items.flatMap((pair, i) => {
+    const key = pair.key as Node | null;
+    const value = pair.value as Node | null;
+    const name = isScalar(key) ? String(key.value) : "?";
+    const justified =
+      (key?.commentBefore ?? "").trim() !== "" ||
+      (value?.comment ?? "").trim() !== "" ||
+      (i === 0 && (allow.commentBefore ?? "").trim() !== "");
+    return justified
+      ? []
+      : [`pnpm-workspace.yaml: allowBuilds entry "${name}" needs a justification comment`];
+  });
 }

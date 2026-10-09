@@ -12,7 +12,8 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
   # A merge group only contains PRs this check already passed on; the job is
   # skipped there (a skipped required check counts as passing) so a merge
-  # queue never stalls on it.
+  # queue never stalls on it. With a batch size above one, the combined tree
+  # is never model-reviewed: configure any merge queue with batch size 1.
   merge_group:
 
 permissions:
@@ -49,7 +50,7 @@ jobs:
         # ("packages/crypto/\311\241roup.ts"), which would not match the pattern
         # and would silently skip this review. Fails closed if the diff is empty.
         run: |
-          pattern='^(packages/(crypto|circuits|contracts|verifier)/|docs/spec/|\.github/scripts/install-toolchain\.sh$)'
+          pattern='^(packages/(crypto|circuits|contracts|verifier)/|docs/spec/|\.github/scripts/install-toolchain\.sh$|pnpm-workspace\.yaml$)'
           git -c core.quotePath=false diff --name-only -z "$BASE_SHA...HEAD" >"$RUNNER_TEMP/changed.z"
           changed="$(tr '\0' '\n' <"$RUNNER_TEMP/changed.z")"
           if [ -z "$changed" ]; then
@@ -61,7 +62,7 @@ jobs:
             printf '%s\n' "$changed" | grep -E "$pattern" | sed 's/^/- /' >>"$GITHUB_STEP_SUMMARY"
           else
             echo "applies=false" >>"$GITHUB_OUTPUT"
-            echo "No changes under packages/{crypto,circuits,contracts,verifier}, docs/spec or the toolchain pins: not applicable." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "No changes under packages/{crypto,circuits,contracts,verifier}, docs/spec or the toolchain and catalog pins: not applicable." | tee -a "$GITHUB_STEP_SUMMARY"
           fi
       - name: Load review prompt
         id: prompt

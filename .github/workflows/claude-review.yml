@@ -10,7 +10,8 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
   # A merge group only contains PRs this check already passed on; the job is
   # skipped there (a skipped required check counts as passing) so a merge
-  # queue never stalls on it.
+  # queue never stalls on it. With a batch size above one, the combined tree
+  # is never model-reviewed: configure any merge queue with batch size 1.
   merge_group:
 
 permissions:

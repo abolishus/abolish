@@ -44,6 +44,8 @@ jobs:
           version-file: pnpm-workspace.yaml
           node-version-file: .node-version
           run-install: "false"
+      - name: Install dependencies (frozen lockfile, no install scripts)
+        run: vp install --frozen-lockfile --ignore-scripts
       - name: Select affected packages per task
         id: affected
         env:
@@ -76,6 +78,8 @@ jobs:
           version-file: pnpm-workspace.yaml
           node-version-file: .node-version
           run-install: "false"
+      - name: Install dependencies (frozen lockfile, no install scripts)
+        run: vp install --frozen-lockfile --ignore-scripts
       - name: Actions are pinned by commit SHA
         run: vp node .github/tools/ci/src/cli.ts actions-pinned
       - name: actionlint
@@ -88,8 +92,8 @@ jobs:
           echo "$ACTIONLINT_SHA256  $RUNNER_TEMP/$asset" | sha256sum -c -
           tar xzf "$RUNNER_TEMP/$asset" -C "$RUNNER_TEMP" actionlint
           "$RUNNER_TEMP/actionlint" -color
-      - name: Lockfile is consistent with manifests
-        run: vp install --frozen-lockfile --lockfile-only --ignore-scripts
+      - name: pnpm enforces the install-script policy (self-test)
+        run: vp node .github/tools/ci/src/cli.ts pnpm-selftest
       - name: Lockfile policy (registry-only, integrity matches registry, >= 7 days old)
         env:
           EVENT: ${{ github.event_name }}

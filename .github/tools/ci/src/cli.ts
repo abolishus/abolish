@@ -5,10 +5,14 @@
 //                           since <ref> (and their dependents) that define the task
 //   actions-pinned          fail if any workflow uses an action not pinned by SHA
 //   lockfile --base <ref>   enforce lockfile policy, write the diff to lockfile-diff.md
+//   pnpm-selftest           prove the pinned pnpm honours our install-script policy
 
 import { execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { parseDocument } from "yaml";
 import { findUnpinned } from "./actions-pinned.ts";
 import { forTask, selectAffected, toRunArgs, type WorkspacePackage } from "./affected.ts";
 import {
@@ -20,6 +24,7 @@ import {
   structuralViolations,
   type LockedPackage,
   type RegistryFacts,
+  unjustifiedAllowBuilds,
 } from "./lockfile.ts";
 
 const WORKSPACE_GLOBS = ["apps", "packages", "tools", ".github/tools"];
@@ -162,6 +167,7 @@ async function lockfile(): Promise<void> {
       git("ls-files", "-z").split("\0"),
       readFileSync("pnpm-workspace.yaml", "utf8"),
     ),
+    ...unjustifiedAllowBuilds(readFileSync("pnpm-workspace.yaml", "utf8")),
     ...structuralViolations(head),
   ];
   const cache = new Map<string, Promise<unknown>>();
@@ -181,6 +187,86 @@ async function lockfile(): Promise<void> {
   if (violations.length > 0) process.exit(1);
 }
 
+// Settings that only make sense for this workspace; everything else (the
+// supply-chain policy) is copied into the self-test project verbatim.
+const WORKSPACE_ONLY = new Set([
+  "packages",
+  "catalog",
+  "catalogs",
+  "catalogMode",
+  "overrides",
+  "peerDependencyRules",
+]);
+// An old, well-known package whose install runs a postinstall script.
+const SCRIPTED_DEPENDENCY = { esbuild: "0.25.0" };
+
+function install(dir: string): { ok: boolean; output: string } {
+  try {
+    const output = execFileSync("vp", ["install"], {
+      cwd: dir,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    return { ok: true, output };
+  } catch (e) {
+    const err = e as { stdout?: string; stderr?: string };
+    return { ok: false, output: `${err.stdout ?? ""}${err.stderr ?? ""}` };
+  }
+}
+
+/**
+ * The install-script policy is configuration only, so prove the pinned pnpm
+ * enforces it: (1) with our settings, installing a package that has a
+ * postinstall script must fail as an unapproved build; (2) an unknown setting
+ * must be rejected, which shows pnpm validates every key, so the keys our real
+ * installs accept are recognised rather than silently ignored.
+ */
+function pnpmSelftest(): void {
+  const settings = parseDocument(readFileSync("pnpm-workspace.yaml", "utf8")).toJS() as Record<
+    string,
+    unknown
+  >;
+  const policy = Object.fromEntries(
+    Object.entries(settings).filter(([k]) => !WORKSPACE_ONLY.has(k)),
+  );
+  const root = JSON.parse(readFileSync("package.json", "utf8")) as { devEngines?: unknown };
+  const dir = mkdtempSync(join(tmpdir(), "pnpm-selftest-"));
+  const failures: string[] = [];
+  try {
+    writeFileSync(
+      join(dir, "package.json"),
+      JSON.stringify({
+        name: "pnpm-selftest",
+        private: true,
+        devEngines: root.devEngines,
+        dependencies: SCRIPTED_DEPENDENCY,
+      }),
+    );
+    writeFileSync(join(dir, "pnpm-workspace.yaml"), JSON.stringify(policy));
+    const scripted = install(dir);
+    if (scripted.ok || !/Ignored build scripts/.test(scripted.output)) {
+      failures.push(
+        `install with a postinstall dependency did not fail as an unapproved build:\n${scripted.output}`,
+      );
+    }
+    writeFileSync(
+      join(dir, "pnpm-workspace.yaml"),
+      JSON.stringify({ ...policy, abolishSelftestUnknownSetting: true }),
+    );
+    const unknown = install(dir);
+    if (unknown.ok || !/UNRECOGNIZED_WORKSPACE_SETTINGS/.test(unknown.output)) {
+      failures.push(`pnpm accepted an unknown workspace setting:\n${unknown.output}`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+  for (const f of failures) console.error(f);
+  if (failures.length > 0) process.exit(1);
+  console.log(
+    `pnpm enforces the policy: unapproved build scripts fail the install; unknown settings are rejected (${Object.keys(policy).join(", ")})`,
+  );
+}
+
 const command = process.argv[2];
 switch (command) {
   case "affected":
@@ -191,6 +277,9 @@ switch (command) {
     break;
   case "lockfile":
     await lockfile();
+    break;
+  case "pnpm-selftest":
+    pnpmSelftest();
     break;
   default:
     console.error(`unknown command: ${command ?? "(none)"}`);

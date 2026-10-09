@@ -29,6 +29,7 @@ description: Day-to-day development rules for the Abolish monorepo (Vite+, testi
 - Location: `apps/<name>` or `packages/<name>`. Name: `@abolishus/<name>`. `"private": true` unless it's crypto, verifier or sdk.
 - `"license"`: `Apache-2.0` for crypto, verifier and sdk; `AGPL-3.0-only` otherwise. Add a `LICENSE` file when it differs from the root.
 - Scripts: `build`, `test` and `check` are mandatory. Add `test:e2e` and `test:storybook` where relevant.
+- Declare build outputs in package.json as `"abolish": {"buildOutputs": ["dist"]}` (`[]` for a type-check-only build). `repro-build` fails on a package with a `build` script but no declaration, or with a declared output that is missing or empty.
 - `tsconfig.json` extends `../../tsconfig.base.json`.
 - Published packages build with `vp pack` (ESM + d.ts). Internal packages are source-only: `exports` points at `src/*.ts`.
 - Add a README with purpose, threats addressed, and how to test.

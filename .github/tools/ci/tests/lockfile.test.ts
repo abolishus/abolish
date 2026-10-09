@@ -9,6 +9,7 @@ import {
   splitKey,
   registryOverrides,
   structuralViolations,
+  unjustifiedAllowBuilds,
 } from "../src/lockfile.ts";
 
 const I1 = `sha512-${"A".repeat(86)}==`;
@@ -282,5 +283,21 @@ describe("registryOverrides", () => {
 
   test("an unparseable workspace file is a violation", () => {
     expect(registryOverrides([], "a: [\n").length).toBeGreaterThan(0);
+  });
+});
+
+describe("unjustifiedAllowBuilds", () => {
+  test("every allowBuilds entry needs a comment", () => {
+    expect(unjustifiedAllowBuilds("allowBuilds: {}\n")).toEqual([]);
+    expect(unjustifiedAllowBuilds("packages: []\n")).toEqual([]);
+    expect(
+      unjustifiedAllowBuilds(
+        "allowBuilds:\n  # esbuild ships its binary via postinstall\n  esbuild: true\n  sharp: true # native addon\n",
+      ),
+    ).toEqual([]);
+    expect(unjustifiedAllowBuilds("allowBuilds:\n  # why\n  a: true\n  b: true\n")).toEqual([
+      'pnpm-workspace.yaml: allowBuilds entry "b" needs a justification comment',
+    ]);
+    expect(unjustifiedAllowBuilds("allowBuilds: [a]\n")).toHaveLength(1);
   });
 });

@@ -12,4 +12,4 @@ if ! command -v vp >/dev/null 2>&1; then
   exit 0
 fi
 vp env on >/dev/null 2>&1 || true
-vp install --frozen-lockfile
+vp install --frozen-lockfile --ignore-scripts

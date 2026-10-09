@@ -2,8 +2,8 @@ import { defineConfig } from "vite-plus";
 
 export default defineConfig({
   fmt: {
-    // The brief is kept verbatim as written by the project owner.
-    ignorePatterns: ["docs/PROJECT_BRIEF.md", "pnpm-lock.yaml"],
+    // Kept verbatim: the owner's brief and the FSF license text.
+    ignorePatterns: ["docs/PROJECT_BRIEF.md", "pnpm-lock.yaml", "LICENSE"],
   },
   lint: {
     jsPlugins: [{ name: "vite-plus", specifier: "vite-plus/oxlint-plugin" }],

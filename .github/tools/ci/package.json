@@ -18,5 +18,8 @@
     "fast-check": "catalog:",
     "typescript": "catalog:",
     "vite-plus": "catalog:"
+  },
+  "abolish": {
+    "buildOutputs": []
   }
 }

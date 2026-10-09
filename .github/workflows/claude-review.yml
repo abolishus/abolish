@@ -1,6 +1,7 @@
 # Required check: `claude-review`.
 # General correctness and threat-model review of every pull request. Fails on
 # any blocking finding, and fails closed if the review cannot complete.
+# Model: repository variable REVIEW_MODEL (falls back to the CLI's `opus` alias).
 # Prompt: .github/review/claude-review.md (changes need maintainer review).
 name: claude-review
 
@@ -63,7 +64,7 @@ jobs:
           allowed_bots: claude
           prompt: ${{ steps.prompt.outputs.text }}
           claude_args: >-
-            --model opus
+            --model ${{ vars.REVIEW_MODEL || 'opus' }}
             --effort high
             --max-turns 120
             --allowedTools "Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(gh pr view:*),Bash(gh pr diff:*),mcp__github_inline_comment__create_inline_comment"

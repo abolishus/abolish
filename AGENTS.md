@@ -59,7 +59,7 @@ PR title: conventional-commit style (`feat(crypto): ...`, `fix(api): ...`, `docs
 | `claude-review`      | `claude-review.yml`      | General correctness and threat-model review; fails on any blocking finding                                                                                                                                                                                                |
 | `crypto-review`      | `crypto-review.yml`      | Adversarial max-effort review of protocol code; not applicable (passes) when no protocol paths change                                                                                                                                                                     |
 
-Review prompts live in `.github/review/`. Both reviews treat PR content as untrusted and fail closed.
+Review prompts live in `.github/review/`. Both reviews treat PR content as untrusted and fail closed. The review model comes from the repository variable `REVIEW_MODEL`, set by the owner; the workflows never hard-code a model ID.
 
 ## Tooling: Vite+ only
 

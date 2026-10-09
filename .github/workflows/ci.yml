@@ -158,7 +158,7 @@ jobs:
     timeout-minutes: 45
     services:
       postgres:
-        image: postgres:16.10-bookworm@sha256:38471f330eb885e04de130b768d6db4e10469e2311879c7e5c699f6d2d8a1c74
+        image: public.ecr.aws/docker/library/postgres:16.10-bookworm@sha256:38471f330eb885e04de130b768d6db4e10469e2311879c7e5c699f6d2d8a1c74
         env:
           POSTGRES_USER: abolish
           POSTGRES_PASSWORD: abolish
@@ -167,7 +167,7 @@ jobs:
         options: >-
           --health-cmd "pg_isready -U abolish" --health-interval 5s --health-timeout 5s --health-retries 20
       redis:
-        image: redis:7.4.6-bookworm@sha256:a9cc41d6d01da2aa26c219e4f99ecbeead955a7b656c1c499cce8922311b2514
+        image: public.ecr.aws/docker/library/redis:7.4.6-bookworm@sha256:a9cc41d6d01da2aa26c219e4f99ecbeead955a7b656c1c499cce8922311b2514
         ports: ["6379:6379"]
         options: >-
           --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 5s --health-retries 20

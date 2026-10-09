@@ -29,7 +29,7 @@ What a future break reveals depends on what links a vote to a person, not only o
 Some limits hold whatever we choose:
 
 - **Hiding and binding can't both be perfect.** A commitment that is perfectly hiding is only computationally binding. Under A and B, a future discrete-log break also lets someone forge alternative openings and proofs for historical elections. Under C, a lattice break does the same. Historical verification then rests on what was anchored to L1 before the break. That depends on the hash functions and on Ethereum's own history resisting rewrites, including long-range attacks on validator signature keys by a quantum adversary. P1-16 must make sure every verification transcript is anchored.
-- **Trustees always see what they decrypt.** No option here stops k colluding trustees from reading individual ballots during the election (T-14). The question is only what the _public_ can read later.
+- **Trustees always see what they decrypt.** No option here stops k colluding trustees from reading individual ballots (T-14). They can do it during the election, and afterwards for as long as they, or anyone who seizes or compels them (A-1), keep their key material. Under A that is the DKG key shares; under B it is the KEM keys and share ciphertexts. Only deleting that material after the tally closes the window (see Consequences). The question this ADR answers is what the _public_ can read later.
 - **Membership proofs must be statistically zero-knowledge.** A proof that is only computationally zero-knowledge would let A-11 later extract the voter's secret and link every ballot. Semaphore's Groth16 proofs are perfectly zero-knowledge. Our Noir circuits (P1-17) must use bb's zero-knowledge UltraHonk flavour, and P1-17 must show its zero knowledge is statistical or perfect. If it can't, membership proofs fall back to Semaphore's Groth16 circuit.
 
 ## Options
@@ -128,7 +128,7 @@ How it works:
 
     An agent never ships the unaudited ML-KEM code on its own authority, and default adoption of this ADR doesn't decide this question.
 - **Threats:** T-15 is **mitigated for the public board**. The residual is harvested private-part ciphertexts (post-quantum conjectured, or classical under (b)) and ciphertexts posted publicly (offline or refusing trustees, direct submit), which are classical only. Other effects:
-  - T-14 is unchanged: k trustees read ballots during the election.
+  - T-14 is unchanged: k trustees can read ballots during the election and for as long as the key material survives. Required deletion after the tally (Consequences) ends that for receipted shares, but not for shares posted on the board.
   - T-29 is improved: errors are attributable.
   - T-40 trades DKG bias for per-ballot custody.
   - T-25 and T-26 now depend on trustee intake.
@@ -187,6 +187,10 @@ If B is accepted:
 - **P1-12 prerequisite:** the audit status of `@noble/post-quantum` is checked and recorded in STATUS, and the owner answers the ML-KEM question above.
 - **P1-17** shows that the membership proofs are statistically or perfectly zero-knowledge, or falls back to Semaphore's Groth16 circuit.
 - **P2-3 and P2-11:** every ballot intake endpoint (ours and the trustees') negotiates hybrid post-quantum TLS (`X25519MLKEM768`), and logs never retain share ciphertexts beyond the tally.
+- **Deletion after the tally is required, not optional (T-14, T-69).**
+  - Once the tally transcript is anchored, each trustee destroys its per-election KEM key and its stored share ciphertexts (P1-14, P1-15). Each trustee signs a destruction statement that goes on the board.
+  - Our operational store deletes its copy (P1-13, P2-3).
+  - Destruction can't be proven, and shares posted on the board stay there. So k trustees who secretly keep their keys can still read their own receipted shares later, and anyone can still harvest posted shares. Both residuals stay stated under T-14.
 - **P1-16, P1-20 and P4-1** anchor every verification, complaint and tally transcript to L1.
 - **[[THREAT_MODEL]]**: this PR already records option B's effects on T-11, T-14, T-15, T-25, T-27, T-41, T-42, T-54 and the not-mitigated list, marked as depending on P1-3. On acceptance:
   - T-15 becomes "Partial by design". The residual is harvested private-part ciphertexts (post-quantum conjectured) and publicly posted shares (classical only). Each trustee offline during voting lowers the post-quantum harvest threshold for the ballots it missed.

@@ -4,6 +4,8 @@
 set -euo pipefail
 pr="$1"
 body_file="$2"
+# The verdict step writes the body even when it fails; nothing to post if it never ran.
+[ -s "$body_file" ] || { echo "no review summary to post"; exit 0; }
 marker="$(head -1 "$body_file")"
 id="$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$pr/comments" \
   --jq ".[] | select(.user.login == \"github-actions[bot]\") | select(.body | startswith(\"$marker\")) | .id" | head -1)"

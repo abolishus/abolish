@@ -8,6 +8,10 @@ name: claude-review
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+  # A merge group only contains PRs this check already passed on; the job is
+  # skipped there (a skipped required check counts as passing) so a merge
+  # queue never stalls on it.
+  merge_group:
 
 permissions:
   contents: read
@@ -15,12 +19,13 @@ permissions:
   issues: write
 
 concurrency:
-  group: claude-review-${{ github.event.pull_request.number }}
+  group: claude-review-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
 jobs:
   claude-review:
     name: claude-review
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -88,7 +93,7 @@ jobs:
           OUT_FILE: ${{ runner.temp }}/claude-review.md
         run: python3 .github/scripts/review-verdict.py
       - name: Post review summary
-        if: always() && hashFiles(format('{0}/claude-review.md', runner.temp)) != ''
+        if: always()
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}

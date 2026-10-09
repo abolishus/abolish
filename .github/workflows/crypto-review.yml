@@ -10,6 +10,10 @@ name: crypto-review
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+  # A merge group only contains PRs this check already passed on; the job is
+  # skipped there (a skipped required check counts as passing) so a merge
+  # queue never stalls on it.
+  merge_group:
 
 permissions:
   contents: read
@@ -17,12 +21,13 @@ permissions:
   issues: write
 
 concurrency:
-  group: crypto-review-${{ github.event.pull_request.number }}
+  group: crypto-review-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
 jobs:
   crypto-review:
     name: crypto-review
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     steps:
@@ -107,7 +112,7 @@ jobs:
           OUT_FILE: ${{ runner.temp }}/crypto-review.md
         run: python3 .github/scripts/review-verdict.py
       - name: Post review summary
-        if: always() && steps.scope.outputs.applies == 'true' && hashFiles(format('{0}/crypto-review.md', runner.temp)) != ''
+        if: always() && steps.scope.outputs.applies == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}

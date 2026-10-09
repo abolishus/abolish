@@ -103,8 +103,8 @@ jobs:
         run: |
           f=packages/crypto/package.json
           [ -f "$f" ] || { echo "packages/crypto not present yet"; exit 0; }
-          bad=$(python3 -c "import json;d=json.load(open('$f'));print('\n'.join(k for k in d.get('dependencies',{}) if not k.startswith('@noble/')))")
-          if [ -n "$bad" ]; then echo "::error file=$f::non-@noble runtime dependencies: $bad"; exit 1; fi
+          bad=$(python3 -c "import json;d=json.load(open('$f'));print('\n'.join(k for field in ('dependencies','optionalDependencies','peerDependencies') for k in d.get(field,{}) if not k.startswith('@noble/')))")
+          if [ -n "$bad" ]; then echo "::error file=$f::non-@noble runtime, optional or peer dependencies: $bad"; exit 1; fi
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:

@@ -6,7 +6,7 @@ Last updated: 2026-10-09 (P1-1 threat model).
 
 ## In progress
 
-- **P1-1 `docs/THREAT_MODEL.md`** (this PR): goals G-1–G-14, assets, adversaries A-1–A-11, threats T-01–T-69 with mitigations mapped to STATUS items, and the list of what isn't mitigated. Nearly every mitigation is marked planned, because nothing below the CI pipeline exists yet.
+- **P0-3 `ci: release`** (#PR, `claude/p0-3`): `release.yml` plus placeholder metadata for the three published packages. A `ci:` PR, so it waits for the owner's review.
 
 ## Blocked
 
@@ -29,10 +29,11 @@ Last updated: 2026-10-09 (P1-1 threat model).
 - **Merge queue:** the review checks skip `merge_group`. If the owner enables a merge queue, it must use batch size 1, or the combined tree of a batch is never model-reviewed.
 - **Lockfile policy covers `packages:` only.** It checks which bytes can be installed; rewiring a `snapshots:` edge to another version already in `packages:` isn't checked. `crypto-review` doesn't run on lockfile or catalog changes (the brief scopes it to the four protocol packages). CI rejects overrides, patches and package extensions, but a catalog bump of `@noble/*` or `@aztec/bb.js`, or a rewired edge, is seen only by `claude-review` and owner review until P1-9's lockfile-closure check and P1-16b land.
 - **Required checks and auto-merge depend on repo rulesets** that agents may not change. The owner must mark `ci`, `reference-election`, `repro-build`, `claude-review` and `crypto-review` as required on `main`.
-- **The threat model's mitigations are almost all planned, not built** (see [[THREAT_MODEL]], status column). Its "Not mitigated" section lists what no planned work addresses. No feature code may land before P1-1 merges.
+- **The threat model's mitigations are almost all planned, not built** (see [[THREAT_MODEL]], status column). Its "Not mitigated" section lists what no planned work addresses. P1-1 merged in #3, so feature work may start.
 
 ## Done
 
+- 2026-10-09: P1-1 `docs/THREAT_MODEL.md` merged (#3): goals G-1–G-14, assets, adversaries A-1–A-11, threats T-01–T-69 with mitigations mapped to STATUS items, and the list of what isn't mitigated. Feature work is now unblocked.
 - 2026-10-09: P0-1 `ci: bootstrap` merged (#1): AGENTS.md, CLAUDE.md, project skills, SessionStart hook, STATUS, root `LICENSE` (AGPL-3.0-only), the root Vite+ workspace, `.github/tools/ci`, `.github/scripts/install-toolchain.sh`, and the workflows `ci`, `reference-election`, `repro-build`, `claude-review` and `crypto-review`.
 - 2026-10-09: the owner extended CODEOWNERS (#2) to `/.claude/`, `/AGENTS.md`, `/CLAUDE.md`, `/docs/PROJECT_BRIEF.md`, `/pnpm-workspace.yaml`, `/vite.config.ts` and `/tsconfig.base.json`.
 - 2026-10-09: project brief saved (`docs/PROJECT_BRIEF.md`).
@@ -43,12 +44,12 @@ Last updated: 2026-10-09 (P1-1 threat model).
 
 - [x] P0-1 `ci: bootstrap` (#1), with CODEOWNERS extended by the owner (#2)
 - [ ] P0-2 (blocked, above) Storybook under Vite+ smoke test: confirm on day one that Storybook works under Vite+. Use a minimal `packages/ui` with one component, a story, an interaction test and an axe check, wired to `test:storybook`. If it doesn't work, record exactly why under Blocked, along with the workaround.
-- [ ] P0-3 `ci: release` (needs owner review): `release.yml` with Changesets, `vp pack`, a double build plus hash comparison, cosign keyless signing, SLSA provenance, and `npm publish --tag next` via OIDC trusted publishing in the `npm` environment (GitHub-hosted runner, `id-token: write`, pinned npm ≥ 11.5). Also add placeholder `@abolishus/crypto`, `@abolishus/verifier` and `@abolishus/sdk` package metadata.
+- [ ] P0-3 (in progress, above) `ci: release` (needs owner review): `release.yml` with Changesets, `vp pack`, a double build plus hash comparison, cosign keyless signing, SLSA provenance, and `npm publish --tag next` via OIDC trusted publishing in the `npm` environment (GitHub-hosted runner, `id-token: write`, pinned npm ≥ 11.5). Also add placeholder `@abolishus/crypto`, `@abolishus/verifier` and `@abolishus/sdk` package metadata.
 - [ ] P0-4 Licenses: `LICENSE` (Apache-2.0) in each published package as it's created, and a README section explaining the AGPL/Apache split.
 
 ## Phase 1: Threat model, spec, crypto core, circuits, verifier, reference election (CLI only)
 
-- [ ] P1-1 (in progress, above) `docs/THREAT_MODEL.md`: assets, adversaries (state actor, insiders including us, compromised devices, coercion and vote buying, DDoS, supply chain, domain or hosting seizure, prompt injection against this pipeline), threat IDs, mitigations, and an explicit list of what isn't mitigated yet. No feature code before this merges.
+- [x] P1-1 (#3) `docs/THREAT_MODEL.md`: assets, adversaries (state actor, insiders including us, compromised devices, coercion and vote buying, DDoS, supply chain, domain or hosting seizure, prompt injection against this pipeline), threat IDs, mitigations, and an explicit list of what isn't mitigated yet. No feature code before this merges.
 - [ ] P1-2 ADR: canonical encoding (explicit byte layouts vs deterministic CBOR). `needs-decision`.
 - [ ] P1-3 ADR: everlasting privacy (perfectly hiding commitments on the board vs standard threshold ElGamal), with a post-quantum "harvest now, decrypt later" analysis. `needs-decision`. Must be accepted before tally work (P1-12).
 - [ ] P1-4 ADR: ballot tally scheme (homomorphic exponential ElGamal vs verifiable mixnet) per election type (plurality, approval, ranked choice). `needs-decision`.

@@ -6,7 +6,7 @@ Last updated: 2026-10-09 (P1-1 threat model).
 
 ## In progress
 
-- **P1-2 ADR: canonical encoding** (`claude/p1-2`, `needs-decision`): [[0001-canonical-encoding]].
+- **P1-2 ADR: canonical encoding** (#6, `claude/p1-2`, `needs-decision`): [[0001-canonical-encoding]] compares explicit byte layouts, deterministic CBOR and SSZ, and recommends explicit byte layouts (the only option TypeScript, Solidity, Noir and third parties can all decode strictly with short code). Adopted by default on 2026-10-12 06:15 UTC unless the owner answers. P1-8 and P1-10 build on it.
 - **P1-1 `docs/THREAT_MODEL.md`** (this PR): goals G-1–G-14, assets, adversaries A-1–A-11, threats T-01–T-69 with mitigations mapped to STATUS items, and the list of what isn't mitigated. Nearly every mitigation is marked planned, because nothing below the CI pipeline exists yet.
 
 ## Blocked

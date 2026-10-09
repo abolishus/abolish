@@ -10,6 +10,7 @@ description: Repo-specific conventions for driving Abolish PRs to merge — auto
 - Title in conventional-commit style. The body covers: what changed, threats addressed (IDs), tests, known-weak and, for protocol packages, "Independent review" (see `crypto-review`).
 - Enable **auto-merge (squash)** and subscribe to PR activity. Exception: `ci:` PRs (anything under `.github/`) wait for the owner's review, so leave auto-merge off.
 - Never have more than 2 open PRs.
+- Every PR targets `main`. Stacked PRs aren't supported: each required check fails on a PR into any other branch, because retargeting a base doesn't re-run checks.
 
 ## Required checks
 

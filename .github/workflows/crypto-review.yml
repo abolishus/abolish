@@ -33,6 +33,20 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     steps:
+      # Required checks are evaluated against the head SHA only. Retargeting a
+      # PR's base doesn't re-run them, so checks that passed against another
+      # base (e.g. a stacked branch that hides the real diff) must never count:
+      # a PR to any branch but the default fails here and stays failed.
+      - name: Pull request targets the default branch
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          if [ "$BASE_REF" != "$DEFAULT_BRANCH" ]; then
+            echo "::error::required checks only pass for pull requests into $DEFAULT_BRANCH (this one targets $BASE_REF); stacked PRs are not supported"
+            exit 1
+          fi
       - name: Refuse external pull requests
         if: github.event.pull_request.head.repo.full_name != github.repository
         run: |

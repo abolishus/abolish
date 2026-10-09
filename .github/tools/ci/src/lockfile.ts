@@ -15,7 +15,7 @@
 // `snapshots:` (which already-present version each edge uses) is not checked
 // here, so rewiring an edge to another version already in `packages:` passes.
 
-import { isMap, isScalar, parseDocument, type Node } from "yaml";
+import { isMap, isScalar, parseAllDocuments, parseDocument, type Document, type Node } from "yaml";
 
 export interface LockedPackage {
   /** "name@version" exactly as the lockfile key, without quotes. */
@@ -36,6 +36,7 @@ const FLOW_MAP = /^\s*(\{.*\})\s*$/;
 // else (extra keys, a decoy like `xintegrity`, tarball, git, directory) leaves
 // `integrity` undefined and is rejected by structuralViolations.
 const REGISTRY_RESOLUTION = /^\{integrity: (sha512-[A-Za-z0-9+/]{86}==)\}$/;
+const SHA512 = /^sha512-[A-Za-z0-9+/]{86}==$/;
 
 export function splitKey(key: string): { name: string; version: string } {
   const at = key.lastIndexOf("@");
@@ -77,8 +78,16 @@ export function parsePackages(lockfile: string): Map<string, LockedPackage> {
     const line = raw.replace(/\r$/, "");
     if (/^\S/.test(line)) {
       closeCurrent();
-      inPackages = line.trimEnd() === "packages:";
-      if (!inPackages && /^packages\s*:/.test(line) && line.trimEnd() !== "packages: {}") {
+      // Top-level lines must be exactly what pnpm writes: a document marker or
+      // a bare `key:` / `key: value`. A quoted or explicit (`? key`) spelling of
+      // `packages` would otherwise hide the whole section from this parser.
+      const top = /^([A-Za-z][A-Za-z0-9]*):(?: (.*))?$/.exec(line.trimEnd());
+      if (top === null) {
+        if (line.trimEnd() === "---") return;
+        throw new LockfileParseError(n, `unexpected top-level line: ${line.trim()}`);
+      }
+      inPackages = top[1] === "packages" && top[2] === undefined;
+      if (top[1] === "packages" && !inPackages && top[2] !== "{}") {
         throw new LockfileParseError(n, "packages section must be a block mapping");
       }
       return;
@@ -120,7 +129,61 @@ export function parsePackages(lockfile: string): Map<string, LockedPackage> {
     });
   });
   closeCurrent();
+  crossCheck(lockfile, out);
   return out;
+}
+
+/**
+ * Second, independent reading of the same file with a real YAML parser, which
+ * sees what pnpm sees whatever the spelling. The two readings must agree
+ * exactly on which packages exist and on each resolution, so a shape the line
+ * parser misreads is an error rather than a silent pass. Aliases, merge keys
+ * and parse warnings are rejected outright.
+ */
+function crossCheck(lockfile: string, lineParsed: Map<string, LockedPackage>): void {
+  const semantic = new Map<string, unknown>();
+  for (const doc of parseAllDocuments(lockfile, { uniqueKeys: true }) as Document[]) {
+    const problems = [...doc.errors, ...doc.warnings];
+    if (problems.length > 0)
+      throw new LockfileParseError(0, `YAML: ${problems[0]?.message ?? "unknown"}`);
+    let js: unknown;
+    try {
+      js = doc.toJS({ maxAliasCount: 0 });
+    } catch (e) {
+      throw new LockfileParseError(0, `YAML: ${(e as Error).message}`);
+    }
+    if (js === null || typeof js !== "object") continue;
+    const packages = (js as Record<string, unknown>)["packages"];
+    if (packages === undefined || packages === null) continue; // absent or empty section
+    if (packages === null || typeof packages !== "object" || Array.isArray(packages)) {
+      throw new LockfileParseError(0, "packages must be a mapping");
+    }
+    for (const [key, entry] of Object.entries(packages)) {
+      if (semantic.has(key))
+        throw new LockfileParseError(0, `duplicate package ${key} across documents`);
+      semantic.set(key, (entry as { resolution?: unknown } | null)?.resolution);
+    }
+  }
+  const lineKeys = [...lineParsed.keys()].sort();
+  const yamlKeys = [...semantic.keys()].sort();
+  if (lineKeys.length !== yamlKeys.length || lineKeys.some((k, i) => k !== yamlKeys[i])) {
+    const missing = yamlKeys.filter((k) => !lineParsed.has(k)).slice(0, 5);
+    throw new LockfileParseError(
+      0,
+      `parsers disagree on the package set (unseen by the line parser: ${missing.join(", ") || "none"})`,
+    );
+  }
+  for (const [key, pkg] of lineParsed) {
+    const res = semantic.get(key);
+    const keys = res !== null && typeof res === "object" ? Object.keys(res) : [];
+    const integrity = (res as { integrity?: unknown } | undefined)?.integrity;
+    const semanticIntegrity =
+      keys.length === 1 && typeof integrity === "string" && SHA512.test(integrity)
+        ? integrity
+        : undefined;
+    const agrees = semanticIntegrity === pkg.integrity;
+    if (!agrees) throw new LockfileParseError(0, `parsers disagree on the resolution of ${key}`);
+  }
 }
 
 export interface LockfileDiff {

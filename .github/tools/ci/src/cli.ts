@@ -157,6 +157,10 @@ async function lockfile(): Promise<void> {
     // No lockfile on the base branch: every package counts as added.
   }
   const head = parsePackages(readFileSync("pnpm-lock.yaml", "utf8"));
+  if (head.size === 0) {
+    console.error("pnpm-lock.yaml: no packages parsed; refusing to pass an empty lockfile");
+    process.exit(1);
+  }
   const diff = diffPackages(parsePackages(baseText), head);
   const markdown = renderDiff(diff);
   writeFileSync("lockfile-diff.md", markdown);

@@ -201,8 +201,9 @@ describe("parsePackages is total (fails closed)", () => {
       name,
       version,
       quoted: fc.boolean(),
-      before: fc.array(field, { maxLength: 3 }),
-      after: fc.array(field, { maxLength: 3 }),
+      // Distinct fields (duplicate keys are invalid YAML), split around the resolution.
+      fields: fc.uniqueArray(field, { maxLength: 4 }),
+      split: fc.nat(4),
       style,
     });
     fc.assert(
@@ -219,7 +220,9 @@ describe("parsePackages is total (fails closed)", () => {
                   : e.style === "block"
                     ? ["    resolution:", `      integrity: ${I1}`]
                     : [];
-              return [head, ...e.before, ...res, ...e.after].join("\n");
+              return [head, ...e.fields.slice(0, e.split), ...res, ...e.fields.slice(e.split)].join(
+                "\n",
+              );
             })
             .join("\n\n");
           const text = lock(body.length > 0 ? `${body}\n` : "");
@@ -299,5 +302,27 @@ describe("unjustifiedAllowBuilds", () => {
       'pnpm-workspace.yaml: allowBuilds entry "b" needs a justification comment',
     ]);
     expect(unjustifiedAllowBuilds("allowBuilds: [a]\n")).toHaveLength(1);
+  });
+});
+
+describe("the packages section cannot be hidden", () => {
+  const entry = `  evil@9.9.9:\n    resolution: {integrity: ${I1}}\n`;
+  test.each([
+    ["single-quoted key", `'packages':\n${entry}`],
+    ["double-quoted key", `"packages":\n${entry}`],
+    ["explicit key", `? packages\n:\n${entry}`],
+    ["trailing space before colon", `packages :\n${entry}`],
+  ])("%s throws", (_, text) => {
+    expect(() => parsePackages(`lockfileVersion: '9.0'\n\n${text}`)).toThrow(LockfileParseError);
+  });
+
+  test("aliases and merge keys are rejected", () => {
+    const aliased = `packages:\n  a@1.0.0:\n    resolution: &r {integrity: ${I1}}\n  b@1.0.0:\n    resolution: *r\n`;
+    expect(() => parsePackages(aliased)).toThrow(LockfileParseError);
+  });
+
+  test("a second document that redefines a package is rejected", () => {
+    const twice = `packages:\n${entry}\n---\npackages:\n${entry}`;
+    expect(() => parsePackages(twice)).toThrow(/duplicate/);
   });
 });

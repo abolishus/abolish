@@ -2,15 +2,15 @@
 
 The work queue. Every session reads it, and every PR updates it. Items are ordered within each phase: take the first unblocked one. Each item is meant to fit in one PR. ADR items open as `needs-decision` PRs and don't block unrelated work. See [[PROJECT_BRIEF]] and the repo's `AGENTS.md`.
 
-Last updated: 2026-10-09 (bootstrap session).
+Last updated: 2026-10-09 (P1-1 threat model).
 
 ## In progress
 
-- **P0-1 `ci: bootstrap`** (this PR): AGENTS.md, CLAUDE.md, project skills, SessionStart hook, this STATUS, root `LICENSE` (AGPL-3.0-only), the root Vite+ workspace, `.github/tools/ci`, `.github/scripts/install-toolchain.sh`, and the workflows `ci`, `reference-election`, `repro-build`, `claude-review` and `crypto-review`. It waits for the owner's review because it changes `.github/`.
+- **P1-1 `docs/THREAT_MODEL.md`** (this PR): goals G-1–G-14, assets, adversaries A-1–A-11, threats T-01–T-69 with mitigations mapped to STATUS items, and the list of what isn't mitigated. Nearly every mitigation is marked planned, because nothing below the CI pipeline exists yet.
 
 ## Blocked
 
-- Nothing yet.
+- **P0-2 Storybook under Vite+: blocked on the supply-chain trust policy (owner decision).** Storybook 10.6.1 itself is old enough and resolves, but `@storybook/react-vite` depends on `react-docgen` 8 → `@babel/core` 7 → `semver@^6.3.1`, and `vp add` fails with `High-risk trust downgrade for "semver@6.3.1"` from `trustPolicy: no-downgrade` in `pnpm-workspace.yaml`. Registry metadata shows it is a false positive: `semver@6.3.1` (and `5.7.2`) are July 2023 security backports published by an npm maintainer without provenance, after `7.5.1`–`7.5.4` had been published with provenance. No newer 6.x exists, and `react-docgen` has no Babel-8 release. Storybook wasn't run, so whether it works under Vite+ beyond install is still unknown. Workaround (needs the owner, because it relaxes a supply-chain setting in a CODEOWNERS file): add `trustPolicyExclude: [semver@6.3.1]` to `pnpm-workspace.yaml` with a comment giving this reason. Versions picked for the retry: `storybook`, `@storybook/react-vite`, `@storybook/addon-vitest` and `@storybook/addon-a11y` 10.6.1, `@vitest/browser-playwright` 5.0.1 (matches Vite+'s bundled Vitest), `playwright` 1.63.0 (1.64.0 is under 7 days old), React 19.3.0. P2-7 (`packages/ui`) depends on this.
 
 ## Known-weak
 
@@ -20,7 +20,7 @@ Last updated: 2026-10-09 (bootstrap session).
 - **External (fork) PRs can't pass `claude-review` or `crypto-review`,** because forks get no secrets. A maintainer must re-open them from an in-repo branch.
 - **Lockfile "review" is mechanical plus AI review,** not human review. CI enforces registry-only resolution, integrity matching the registry, and ≥ 7 days' age; `claude-review` must justify every added package. There is no human sign-off on dependency changes unless the owner adds one.
 - **Non-`.github/` changes merge on CI plus model review alone.** All gate code (workflows, review prompts, `.github/tools/ci` policy code, `.github/scripts/install-toolchain.sh` pins and hashes) lives under `.github/`, which CODEOWNERS routes to the owner, so a PR can't weaken the checks that judge it. Everything else auto-merges once CI, `claude-review` and (for protocol packages, `docs/spec/` and agent instruction files) `crypto-review` pass, with no human in the loop.
-- **CODEOWNERS covers only `/.github/`, and it binds only if the `main` ruleset has "Require review from Code Owners" enabled.** Agents can't verify or change either. Without owner review, an auto-merged PR could change `.claude/` (the SessionStart hooks run in every agent session), `AGENTS.md`/`CLAUDE.md` (agent instructions), `pnpm-workspace.yaml`, or `vite.config.ts` and `tsconfig.base.json` (which decide what `vp check` proves). CI's lockfile policy still enforces package age and integrity independently of `pnpm-workspace.yaml`. Requested from the owner on the bootstrap PR: add `/.claude/`, `/AGENTS.md`, `/CLAUDE.md`, `/docs/PROJECT_BRIEF.md`, `/docs/THREAT_MODEL.md`, `/docs/adr/`, `/pnpm-workspace.yaml`, `/pnpm-lock.yaml`, `/package.json`, `/vite.config.ts` and `/tsconfig.base.json` to CODEOWNERS, and enable code-owner review. Until then, a PR that edits an instruction source (the brief aside, which CI pins) is judged only by the two model reviews.
+- **CODEOWNERS binds only if the `main` ruleset has "Require review from Code Owners" enabled,** which agents can't verify. Since #2 it covers `/.github/`, `/.claude/`, `/AGENTS.md`, `/CLAUDE.md`, `/docs/PROJECT_BRIEF.md`, `/pnpm-workspace.yaml`, `/vite.config.ts` and `/tsconfig.base.json`. Still not covered: `/docs/THREAT_MODEL.md` and `/docs/adr/` (instruction sources per AGENTS.md), `/pnpm-lock.yaml` and the root `/package.json`. A PR that edits those is judged only by the two model reviews (CI's lockfile policy still enforces package age and integrity). Requested from the owner: add them, and enable code-owner review.
 - **Two concurrently reviewed PRs can merge into a combination no review saw.** Checks are recorded against the base each PR was reviewed on, and the review jobs skip `merge_group`. Requested from the owner: enable "Require branches to be up to date before merging" and "Require conversation resolution before merging" on `main` (the reviews post an inline thread per blocking finding), so the second PR is rebased and re-reviewed on the combined tree.
 - **`crypto-review` covers only the protocol packages, `docs/spec/` and agent instruction files** (the brief's scope, kept narrow so each run finishes). Changes to `packages/core`, `packages/sdk`, both Capacitor plugins, `apps/ballot`, ADRs, the threat model, STATUS, the brief and the build config get `claude-review` plus the in-session subagent review only. CI pins the brief verbatim; until the owner adds ADRs and the threat model to CODEOWNERS, nothing but `claude-review` stands between a weakening edit there and `main`.
 - **Review workflow bodies run from the PR head.** The review prompts and verdict script are read from the base commit, but GitHub runs the workflow file itself from the PR, so a PR that edits `claude-review.yml` or `crypto-review.yml` could weaken its own gate. Only owner review of `/.github/` (CODEOWNERS plus code-owner review) closes this.
@@ -29,24 +29,26 @@ Last updated: 2026-10-09 (bootstrap session).
 - **Merge queue:** the review checks skip `merge_group`. If the owner enables a merge queue, it must use batch size 1, or the combined tree of a batch is never model-reviewed.
 - **Lockfile policy covers `packages:` only.** It checks which bytes can be installed; rewiring a `snapshots:` edge to another version already in `packages:` isn't checked. `crypto-review` doesn't run on lockfile or catalog changes (the brief scopes it to the four protocol packages). CI rejects overrides, patches and package extensions, but a catalog bump of `@noble/*` or `@aztec/bb.js`, or a rewired edge, is seen only by `claude-review` and owner review until P1-9's lockfile-closure check and P1-16b land.
 - **Required checks and auto-merge depend on repo rulesets** that agents may not change. The owner must mark `ci`, `reference-election`, `repro-build`, `claude-review` and `crypto-review` as required on `main`.
-- **No threat model yet.** No feature code may land before P1-1.
+- **The threat model's mitigations are almost all planned, not built** (see [[THREAT_MODEL]], status column). Its "Not mitigated" section lists what no planned work addresses. No feature code may land before P1-1 merges.
 
 ## Done
 
+- 2026-10-09: P0-1 `ci: bootstrap` merged (#1): AGENTS.md, CLAUDE.md, project skills, SessionStart hook, STATUS, root `LICENSE` (AGPL-3.0-only), the root Vite+ workspace, `.github/tools/ci`, `.github/scripts/install-toolchain.sh`, and the workflows `ci`, `reference-election`, `repro-build`, `claude-review` and `crypto-review`.
+- 2026-10-09: the owner extended CODEOWNERS (#2) to `/.claude/`, `/AGENTS.md`, `/CLAUDE.md`, `/docs/PROJECT_BRIEF.md`, `/pnpm-workspace.yaml`, `/vite.config.ts` and `/tsconfig.base.json`.
 - 2026-10-09: project brief saved (`docs/PROJECT_BRIEF.md`).
 
 ---
 
 ## Phase 0: Bootstrap
 
-- [ ] P0-1 `ci: bootstrap` (in progress, above)
-- [ ] P0-2 Storybook under Vite+ smoke test: confirm on day one that Storybook works under Vite+. Use a minimal `packages/ui` with one component, a story, an interaction test and an axe check, wired to `test:storybook`. If it doesn't work, record exactly why under Blocked, along with the workaround.
+- [x] P0-1 `ci: bootstrap` (#1), with CODEOWNERS extended by the owner (#2)
+- [ ] P0-2 (blocked, above) Storybook under Vite+ smoke test: confirm on day one that Storybook works under Vite+. Use a minimal `packages/ui` with one component, a story, an interaction test and an axe check, wired to `test:storybook`. If it doesn't work, record exactly why under Blocked, along with the workaround.
 - [ ] P0-3 `ci: release` (needs owner review): `release.yml` with Changesets, `vp pack`, a double build plus hash comparison, cosign keyless signing, SLSA provenance, and `npm publish --tag next` via OIDC trusted publishing in the `npm` environment (GitHub-hosted runner, `id-token: write`, pinned npm ≥ 11.5). Also add placeholder `@abolishus/crypto`, `@abolishus/verifier` and `@abolishus/sdk` package metadata.
 - [ ] P0-4 Licenses: `LICENSE` (Apache-2.0) in each published package as it's created, and a README section explaining the AGPL/Apache split.
 
 ## Phase 1: Threat model, spec, crypto core, circuits, verifier, reference election (CLI only)
 
-- [ ] P1-1 `docs/THREAT_MODEL.md`: assets, adversaries (state actor, insiders including us, compromised devices, coercion and vote buying, DDoS, supply chain, domain or hosting seizure, prompt injection against this pipeline), threat IDs, mitigations, and an explicit list of what isn't mitigated yet. No feature code before this merges.
+- [ ] P1-1 (in progress, above) `docs/THREAT_MODEL.md`: assets, adversaries (state actor, insiders including us, compromised devices, coercion and vote buying, DDoS, supply chain, domain or hosting seizure, prompt injection against this pipeline), threat IDs, mitigations, and an explicit list of what isn't mitigated yet. No feature code before this merges.
 - [ ] P1-2 ADR: canonical encoding (explicit byte layouts vs deterministic CBOR). `needs-decision`.
 - [ ] P1-3 ADR: everlasting privacy (perfectly hiding commitments on the board vs standard threshold ElGamal), with a post-quantum "harvest now, decrypt later" analysis. `needs-decision`. Must be accepted before tally work (P1-12).
 - [ ] P1-4 ADR: ballot tally scheme (homomorphic exponential ElGamal vs verifiable mixnet) per election type (plurality, approval, ranked choice). `needs-decision`.

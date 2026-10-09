@@ -1,6 +1,11 @@
 import fc from "fast-check";
 import { describe, expect, test } from "vite-plus/test";
-import { snapshotReleases } from "../src/release.ts";
+import {
+  proposedVersions,
+  setVersion,
+  shippedManifestErrors,
+  snapshotReleases,
+} from "../src/release.ts";
 
 const commit = "7ca807bb8835312c5ff1ec4afcd89f463ea7faff";
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
@@ -155,6 +160,115 @@ describe("snapshotReleases", () => {
       );
       expect(releases).toEqual([]);
       expect(errors).toHaveLength(1);
+    }
+  });
+});
+
+describe("proposedVersions", () => {
+  const dirs = ["packages/crypto", "packages/sdk", ".github/tools/ci"];
+
+  test("reads one version per known workspace package", () => {
+    expect(proposedVersions("packages/sdk 0.1.0\n.github/tools/ci 0.0.0\n", dirs)).toEqual({
+      versions: new Map([
+        ["packages/sdk", "0.1.0"],
+        [".github/tools/ci", "0.0.0"],
+      ]),
+      errors: [],
+    });
+  });
+
+  test("refuses unknown dirs, duplicates and malformed lines", () => {
+    for (const text of [
+      "packages/core 0.1.0",
+      "../packages/sdk 0.1.0",
+      "packages/sdk 0.1.0\npackages/sdk 0.2.0",
+      "packages/sdk",
+      "packages/sdk 0.1.0 extra",
+      "packages/sdk  0.1.0",
+    ]) {
+      expect(proposedVersions(text, dirs).errors, text).toHaveLength(1);
+    }
+  });
+});
+
+describe("setVersion", () => {
+  const manifest = `{
+  "name": "@abolishus/sdk",
+  "version": "0.0.0",
+  "description": "mentions \\"version\\": \\"0.0.0\\"",
+  "scripts": {
+    "version": "echo"
+  }
+}
+`;
+
+  test("rewrites only the top-level version field", () => {
+    const out = setVersion(manifest, `0.0.1-next-${commit}`);
+    expect(out).toBe(manifest.replace(`"version": "0.0.0"`, `"version": "0.0.1-next-${commit}"`));
+    expect(JSON.parse(out ?? "")).toEqual({
+      ...(JSON.parse(manifest) as object),
+      version: `0.0.1-next-${commit}`,
+    });
+  });
+
+  test("refuses a manifest whose version field isn't a single top-level line", () => {
+    for (const text of [
+      `{"name": "x", "version": "0.0.0"}`,
+      `{\n  "name": "x"\n}\n`,
+      `{\n  "version": "0.0.0",\n  "x": {\n  "version": "0.0.0",\n  "y": 1\n  }\n}\n`,
+    ]) {
+      expect(setVersion(text, "0.0.1"), text).toBeUndefined();
+    }
+  });
+
+  test("any accepted rewrite changes nothing but the version", () => {
+    fc.assert(
+      fc.property(fc.string(), fc.string(), (description, version) => {
+        const text = `{\n  "name": "x",\n  "version": "0.0.0",\n  "description": ${JSON.stringify(description)}\n}\n`;
+        const out = setVersion(text, version);
+        if (out === undefined) return;
+        expect(JSON.parse(out)).toEqual({ name: "x", version, description });
+      }),
+      { numRuns },
+    );
+  });
+});
+
+describe("shippedManifestErrors", () => {
+  const release = {
+    dir: "packages/sdk",
+    name: "@abolishus/sdk",
+    version: `0.0.1-next-${commit}`,
+  };
+  const shipped = {
+    name: release.name,
+    version: release.version,
+    license: "Apache-2.0",
+    publishConfig: { access: "public" },
+    scripts: { build: "vp pack", test: "vp test run" },
+  };
+
+  test("accepts the manifest of the planned release", () => {
+    expect(shippedManifestErrors(shipped, release)).toEqual([]);
+  });
+
+  test("refuses a tarball that differs from the plan or could run code on install", () => {
+    for (const change of [
+      { name: "@abolishus/crypto" },
+      { version: "0.0.1" },
+      { private: false },
+      { license: "MIT" },
+      { publishConfig: { access: "public", tag: "latest" } },
+      { scripts: { postinstall: "node x.js" } },
+      { scripts: { preinstall: "x" } },
+      { scripts: { install: "x" } },
+      { bundleDependencies: ["x"] },
+      { bundledDependencies: true },
+    ]) {
+      expect(
+        shippedManifestErrors({ ...shipped, ...change }, release),
+        JSON.stringify(change),
+      ).toHaveLength(1);
     }
   });
 });

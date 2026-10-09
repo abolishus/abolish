@@ -2,10 +2,19 @@
 # verifier, sdk) on every push to main. Threats: T-61 (release or publishing
 # compromise), T-56 (compromised action or runner), T-55 (hijacked dependency).
 #
+#   version  runs `changeset version --snapshot next` and reports the
+#            versions it proposes. Changesets is third-party code configured
+#            from the ungated `.changeset/`, so this job's output is untrusted
+#            data and its checkout is discarded.
 #   build    two independent builds (different paths, locale, timezone, umask)
-#            version a `changeset version --snapshot next` and `vp pack` +
-#            `pnpm pack` each package a changeset touched; no secrets, no OIDC
+#            in fresh checkouts that never run Changesets: `release-apply`
+#            (CODEOWNERS-protected) accepts only `next` snapshots of this
+#            commit for the published packages and rewrites only their
+#            `version` fields, then `vp pack` + `pnpm pack`; no secrets, no OIDC
 #   compare  the two tarball manifests must be byte-identical
+#   checks   waits for `ci`, `repro-build` and `reference-election` on this
+#            commit and requires each to have passed: two PRs reviewed apart
+#            can merge into a combination no check saw (STATUS known-weak)
 #   sign     cosign keyless signature (Sigstore bundle) per tarball, plus SLSA
 #            build provenance (GitHub attestations); OIDC, no publish rights
 #   publish  `npm publish --tag next` of exactly the compared, signed tarballs,
@@ -39,8 +48,40 @@ env:
   DO_NOT_TRACK: "1"
 
 jobs:
+  version:
+    name: version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Not .github/actions/setup: that saves a dependency cache, which code
+      # run by Changesets could poison for later CI jobs.
+      - uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
+        with:
+          version-file: pnpm-workspace.yaml
+          node-version-file: .node-version
+          run-install: "false"
+      - name: Install dependencies (frozen lockfile)
+        run: vp install --frozen-lockfile --ignore-scripts -- --ignore-pnpmfile
+      - name: Version next snapshots
+        run: vp exec changeset version --snapshot next
+      # Anything above may have rewritten this checkout, including the gate
+      # code that prints this list; the build jobs judge it, not this job.
+      - name: Report proposed versions
+        run: vp node .github/tools/ci/src/cli.ts release-versions >"$RUNNER_TEMP/versions.txt"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: versions
+          path: ${{ runner.temp }}/versions.txt
+          if-no-files-found: error
+
   build:
     name: build (${{ matrix.variant }})
+    needs: version
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -77,9 +118,10 @@ jobs:
       - name: Install dependencies (frozen lockfile)
         working-directory: ${{ matrix.path }}
         run: vp install --frozen-lockfile --ignore-scripts -- --ignore-pnpmfile
-      - name: Version next snapshots
-        working-directory: ${{ matrix.path }}
-        run: vp exec changeset version --snapshot next
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: versions
+          path: ${{ runner.temp }}/proposed
       - name: Build and pack
         working-directory: ${{ matrix.path }}
         env:
@@ -90,12 +132,16 @@ jobs:
         run: |
           umask ${{ matrix.umask }}
           mkdir -p "$OUT"
-          vp node .github/tools/ci/src/cli.ts release-plan >"$OUT/plan.txt"
+          vp node .github/tools/ci/src/cli.ts release-apply --versions "$RUNNER_TEMP/proposed/versions.txt" >"$OUT/plan.txt"
           # The plan is read on fd 3 so no command in the loop can consume it.
           while read -r dir name version <&3; do
             echo "::group::$name@$version"
             vp run --no-cache --filter "$name" build </dev/null
             (cd "$dir" && vp pm pack --pack-destination "$OUT" </dev/null)
+            # Judge what npm will publish, not the workspace manifest.
+            tgz="$OUT/$(printf '%s' "${name#@}" | tr / -)-$version.tgz"
+            tar -xzOf "$tgz" package/package.json |
+              vp node .github/tools/ci/src/cli.ts release-shipped --name "$name" --version "$version"
             echo "::endgroup::"
           done 3<"$OUT/plan.txt"
           cd "$OUT"
@@ -108,6 +154,29 @@ jobs:
             diff <(echo "$expected") <(echo "$actual") || true
             exit 1
           fi
+          # Every `exports` target must be in the tarball, or a signed release
+          # ships a package that doesn't resolve.
+          for f in *.tgz; do
+            python3 - "$f" <<'PY'
+          import json, sys, tarfile
+
+          with tarfile.open(sys.argv[1]) as t:
+              names = set(t.getnames())
+              pkg = json.load(t.extractfile("package/package.json"))
+
+          def targets(x):
+              if isinstance(x, str):
+                  yield x
+              elif isinstance(x, dict):
+                  for v in x.values():
+                      yield from targets(v)
+
+          missing = [p for p in targets(pkg.get("exports", {})) if "package/" + p.removeprefix("./") not in names]
+          if missing:
+              print(f"::error::{sys.argv[1]}: exports targets missing from the tarball: {missing}")
+              sys.exit(1)
+          PY
+          done
           # The plan is hashed too, so both builds must agree on what ships.
           find . -maxdepth 1 -type f -printf '%f\0' | LC_ALL=C sort -z | xargs -0 -r sha256sum >"$RUNNER_TEMP/manifest-${{ matrix.variant }}.txt"
           cat "$RUNNER_TEMP/manifest-${{ matrix.variant }}.txt"
@@ -149,10 +218,49 @@ jobs:
             echo "publish=false" >>"$GITHUB_OUTPUT"
           fi
 
-  sign:
-    name: sign
+  checks:
+    name: checks
     needs: compare
     if: needs.compare.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      checks: read
+    steps:
+      # Only check runs created by GitHub Actions (app 15368) count. On a
+      # commit of main, only workflows triggered by the push to main run.
+      - name: ci, repro-build and reference-election passed on this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          for _ in $(seq 160); do
+            pending=0
+            for check in ci repro-build reference-election; do
+              run="$(gh api "repos/$REPO/commits/$SHA/check-runs?check_name=$check&filter=latest" \
+                --jq '[.check_runs[] | select(.app.id == 15368)] | max_by(.id) // {} | "\(.status // "missing") \(.conclusion // "")"')"
+              case "$run" in
+                "completed success") ;;
+                "completed "*)
+                  echo "::error::$check concluded ${run#completed } on $SHA; not publishing"
+                  exit 1
+                  ;;
+                *) pending=1 ;;
+              esac
+            done
+            if [ "$pending" = 0 ]; then
+              echo "ci, repro-build and reference-election passed on $SHA"
+              exit 0
+            fi
+            sleep 30
+          done
+          echo "::error::checks still pending on $SHA after 80 minutes"
+          exit 1
+
+  sign:
+    name: sign
+    needs: checks
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:

@@ -1,6 +1,11 @@
-// Release selection for release.yml: which packages a `changeset version
-// --snapshot next` run turned into `next` prereleases. Pure, so the rules are
-// unit-tested; cli.ts reads the manifests (before from git, after from disk).
+// Release selection for release.yml. A separate job runs `changeset version
+// --snapshot next` (third-party code, configured from the ungated `.changeset/`)
+// and reports the versions it produced. Those reports are untrusted: the build
+// jobs check out afresh, never run Changesets, and apply only versions these
+// rules accept, by rewriting the `version` field and nothing else. So nothing
+// outside the gated sources and this CODEOWNERS-protected file decides the
+// bytes that get built, signed and published (T-61, T-57). Pure, so the rules
+// are unit-tested; cli.ts does the I/O.
 
 /**
  * The only packages release.yml may publish (AGENTS.md, Architecture → Rules).
@@ -16,7 +21,7 @@ export interface ReleaseCandidate {
   dir: string;
   /** package.json at the commit being released; undefined for a new package. */
   before: Record<string, unknown> | undefined;
-  /** package.json after `changeset version --snapshot next`. */
+  /** package.json with the version `changeset version --snapshot next` proposed. */
   after: Record<string, unknown>;
 }
 
@@ -83,4 +88,77 @@ export function snapshotReleases(
   }
   releases.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   return { releases, errors };
+}
+
+/**
+ * Parses the version job's `<dir> <version>` lines. Every dir must be a
+ * workspace package and appear at most once; the versions themselves are
+ * judged later by snapshotReleases.
+ */
+export function proposedVersions(
+  text: string,
+  dirs: readonly string[],
+): { versions: Map<string, string>; errors: string[] } {
+  const versions = new Map<string, string>();
+  const errors: string[] = [];
+  const known = new Set(dirs);
+  for (const line of text.split("\n")) {
+    if (line === "") continue;
+    const m = /^(\S+) (\S+)$/.exec(line);
+    if (m === null) {
+      errors.push(`malformed version line ${JSON.stringify(line)}`);
+      continue;
+    }
+    const [, dir = "", version = ""] = m;
+    if (!known.has(dir)) errors.push(`${dir}: not a workspace package`);
+    else if (versions.has(dir)) errors.push(`${dir}: listed twice`);
+    else versions.set(dir, version);
+  }
+  return { versions, errors };
+}
+
+/**
+ * The manifest text with only its top-level `version` value replaced, or
+ * undefined if that can't be done unambiguously. The result must parse to the
+ * original object with nothing but `version` changed.
+ */
+export function setVersion(text: string, version: string): string | undefined {
+  const before = JSON.parse(text) as Record<string, unknown>;
+  if (typeof before["version"] !== "string") return undefined;
+  const field = new RegExp(`^  "version": ${escape(JSON.stringify(before["version"]))},$`, "gm");
+  if ((text.match(field) ?? []).length !== 1) return undefined;
+  const out = text.replace(field, () => `  "version": ${JSON.stringify(version)},`);
+  const after = JSON.parse(out) as Record<string, unknown>;
+  return JSON.stringify(after) === JSON.stringify({ ...before, version }) ? out : undefined;
+}
+
+function escape(literal: string): string {
+  return literal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Lifecycle scripts npm runs on every consumer's install. */
+const INSTALL_SCRIPTS = ["preinstall", "install", "postinstall"];
+
+/**
+ * Checks the package.json inside a packed tarball, i.e. what npm publishes
+ * and consumers install, not the workspace manifest it was packed from.
+ */
+export function shippedManifestErrors(
+  manifest: Record<string, unknown>,
+  release: Release,
+): string[] {
+  const errors: string[] = [];
+  const at = `${release.name}@${release.version} tarball`;
+  if (manifest["name"] !== release.name || manifest["version"] !== release.version)
+    errors.push(`${at}: ships as ${String(manifest["name"])}@${String(manifest["version"])}`);
+  if (manifest["private"] !== undefined) errors.push(`${at}: has a private field`);
+  if (manifest["license"] !== "Apache-2.0") errors.push(`${at}: license must be Apache-2.0`);
+  if (JSON.stringify(manifest["publishConfig"]) !== JSON.stringify({ access: "public" }))
+    errors.push(`${at}: publishConfig must be exactly {"access":"public"}`);
+  const scripts = (manifest["scripts"] ?? {}) as Record<string, unknown>;
+  for (const s of INSTALL_SCRIPTS)
+    if (s in scripts) errors.push(`${at}: runs a ${s} script on consumers' machines`);
+  for (const f of ["bundleDependencies", "bundledDependencies"])
+    if (f in manifest) errors.push(`${at}: ${f} ships third-party code inside the tarball`);
+  return errors;
 }

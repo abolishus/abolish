@@ -6,8 +6,13 @@
 //   actions-pinned          fail if any workflow uses an action not pinned by SHA
 //   lockfile --base <ref>   enforce lockfile policy, write the diff to lockfile-diff.md
 //   pnpm-selftest           prove the pinned pnpm honours our install-script policy
-//   release-plan            after `changeset version --snapshot next`, print
-//                           "<dir> <name> <version>" for each package to publish
+//   release-versions        print "<dir> <version>" for every workspace package
+//   release-apply --versions <file>
+//                           in a clean checkout, apply the accepted next snapshot
+//                           versions from <file> (release-versions output, untrusted)
+//                           and print "<dir> <name> <version>" for each to publish
+//   release-shipped --name <n> --version <v>
+//                           check the packed package.json (on stdin) of n@v
 
 import { execFileSync } from "node:child_process";
 import {
@@ -46,7 +51,12 @@ import {
   type RegistryFacts,
   unjustifiedAllowBuilds,
 } from "./lockfile.ts";
-import { snapshotReleases } from "./release.ts";
+import {
+  proposedVersions,
+  setVersion,
+  shippedManifestErrors,
+  snapshotReleases,
+} from "./release.ts";
 
 function git(...args: string[]): string {
   return execFileSync("git", args, {
@@ -297,29 +307,62 @@ function pnpmSelftest(): void {
   );
 }
 
-function releasePlan(): void {
-  const candidates = workspacePackages().map(({ dir }) => {
-    let before: Record<string, unknown> | undefined;
-    try {
-      before = JSON.parse(git("show", `HEAD:${dir}/package.json`)) as Record<string, unknown>;
-    } catch {
-      // Not in the commit being released.
-    }
-    const after = JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as Record<
-      string,
-      unknown
-    >;
-    return { dir, before, after };
+function releaseVersions(): void {
+  for (const { dir } of workspacePackages()) {
+    const { version } = JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as {
+      version?: unknown;
+    };
+    process.stdout.write(`${dir} ${String(version)}\n`);
+  }
+}
+
+function releaseApply(): void {
+  const fail = (errors: string[]): never => {
+    for (const e of errors) console.error(e);
+    process.exit(1);
+  };
+  // Applied to the commit as checked out, never on top of a tree that some
+  // other step (Changesets, a build) has already modified.
+  const dirty = git("status", "--porcelain", "--untracked-files=no");
+  if (dirty !== "") fail([`release-apply needs a clean checkout:\n${dirty}`]);
+  const packages = workspacePackages();
+  const { versions, errors } = proposedVersions(
+    readFileSync(arg("--versions"), "utf8"),
+    packages.map((p) => p.dir),
+  );
+  if (errors.length > 0) fail(errors);
+  const texts = new Map(
+    packages.map(({ dir }) => [dir, readFileSync(join(dir, "package.json"), "utf8")]),
+  );
+  const candidates = packages.map(({ dir }) => {
+    const before = JSON.parse(texts.get(dir) ?? "") as Record<string, unknown>;
+    const version = versions.get(dir);
+    return { dir, before, after: version === undefined ? before : { ...before, version } };
   });
-  const { releases, errors } = snapshotReleases(candidates, git("rev-parse", "HEAD").trim());
+  const plan = snapshotReleases(candidates, git("rev-parse", "HEAD").trim());
+  if (plan.errors.length > 0) fail(plan.errors);
+  for (const r of plan.releases) {
+    const out = setVersion(texts.get(r.dir) ?? "", r.version);
+    if (out === undefined) fail([`${r.dir}/package.json: can't rewrite its version field alone`]);
+    else writeFileSync(join(r.dir, "package.json"), out);
+  }
+  summary(
+    plan.releases.length === 0
+      ? "release: nothing to publish (no changesets)"
+      : plan.releases.map((r) => `- \`${r.name}@${r.version}\``).join("\n"),
+  );
+  for (const r of plan.releases) process.stdout.write(`${r.dir} ${r.name} ${r.version}\n`);
+}
+
+function releaseShipped(): void {
+  const manifest = JSON.parse(readFileSync(0, "utf8")) as Record<string, unknown>;
+  const errors = shippedManifestErrors(manifest, {
+    dir: "",
+    name: arg("--name"),
+    version: arg("--version"),
+  });
   for (const e of errors) console.error(e);
   if (errors.length > 0) process.exit(1);
-  summary(
-    releases.length === 0
-      ? "release: nothing to publish (no changesets)"
-      : releases.map((r) => `- \`${r.name}@${r.version}\``).join("\n"),
-  );
-  for (const r of releases) process.stdout.write(`${r.dir} ${r.name} ${r.version}\n`);
 }
 
 const command = process.argv[2];
@@ -336,8 +379,14 @@ switch (command) {
   case "pnpm-selftest":
     pnpmSelftest();
     break;
-  case "release-plan":
-    releasePlan();
+  case "release-versions":
+    releaseVersions();
+    break;
+  case "release-apply":
+    releaseApply();
+    break;
+  case "release-shipped":
+    releaseShipped();
     break;
   default:
     console.error(`unknown command: ${command ?? "(none)"}`);

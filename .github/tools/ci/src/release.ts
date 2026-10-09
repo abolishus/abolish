@@ -160,18 +160,36 @@ export function entryPoints(manifest: Record<string, unknown>): unknown[] {
   return out;
 }
 
+/** A tarball entry: its `tar -tv` type character (`-` file, `d` directory, ...) and path. */
+export interface TarEntry {
+  type: string;
+  path: string;
+}
+
 /**
- * Checks a packed tarball (its package.json and file list): what npm
- * publishes and consumers install, not the workspace manifest it was packed
- * from. `files` are the tarball's entry names (`package/...`).
+ * Checks a packed tarball (its package.json and entries): what npm publishes
+ * and consumers install, not the workspace manifest it was packed from.
  */
 export function shippedErrors(
   manifest: Record<string, unknown>,
-  files: readonly string[],
+  entries: readonly TarEntry[],
   release: Release,
 ): string[] {
   const errors: string[] = [];
   const at = `${release.name}@${release.version} tarball`;
+  // npm strips the first path segment whatever its name, and a later entry
+  // wins, so a second `x/package.json` would be what gets installed. Only
+  // plain files and directories under `package/`, each once.
+  const seen = new Set<string>();
+  for (const { type, path } of entries) {
+    if (type !== "-" && type !== "d")
+      errors.push(`${at}: ${path} is not a regular file or directory`);
+    if (!path.startsWith("package/") || path.split("/").includes(".."))
+      errors.push(`${at}: entry ${JSON.stringify(path)} is outside package/`);
+    if (seen.has(path)) errors.push(`${at}: ${path} appears twice`);
+    seen.add(path);
+  }
+  const files = entries.filter((e) => e.type === "-").map((e) => e.path);
   if (manifest["name"] !== release.name || manifest["version"] !== release.version)
     errors.push(`${at}: ships as ${String(manifest["name"])}@${String(manifest["version"])}`);
   if (manifest["private"] !== undefined) errors.push(`${at}: has a private field`);

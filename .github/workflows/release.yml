@@ -179,7 +179,7 @@ jobs:
           umask "$UMASK"
           printf '%s\n' "$VERSIONS" >"$RUNNER_TEMP/versions.txt"
           vp node .github/tools/ci/src/cli.ts release-apply --versions "$RUNNER_TEMP/versions.txt" >/dev/null
-          vp run --no-cache --filter "$NAME" build
+          vp run --no-cache --filter "$NAME..." build
           mkdir -p "$OUT"
           (cd "$DIR" && vp pm pack --pack-destination "$OUT")
       - name: Artifact name
@@ -201,6 +201,7 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
+      actions: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -212,18 +213,44 @@ jobs:
           run-install: "false"
       - name: Install dependencies (frozen lockfile, no install scripts)
         run: vp install --frozen-lockfile --ignore-scripts -- --ignore-pnpmfile
-      # By pattern: anything extra (from any job in this run) fails the
-      # one-tarball-per-plan-line check below rather than going unnoticed.
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          pattern: tgz-a-*
-          merge-multiple: true
-          path: ${{ runner.temp }}/a
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          pattern: tgz-b-*
-          merge-multiple: true
-          path: ${{ runner.temp }}/b
+      # Code in any job of this run can upload artifacts with the run's token,
+      # so tarballs are fetched by exact name, one artifact per planned package
+      # and variant, and any other `tgz-*` artifact in the run fails the
+      # release. (A pattern download would let a same-named file from a rogue
+      # artifact silently replace a genuine one.) A rogue artifact that takes a
+      # genuine name first only makes that build's upload fail: the run stops.
+      - name: Fetch exactly the planned tarballs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          PLAN: ${{ needs.plan.outputs.plan }}
+        run: |
+          expected="$(printf '%s\n' "$PLAN" | while read -r _dir name _version; do
+            slug="$(printf '%s' "${name#@}" | tr / -)"
+            printf 'tgz-a-%s\ntgz-b-%s\n' "$slug" "$slug"
+          done | LC_ALL=C sort)"
+          actual="$(gh api --paginate "repos/$REPO/actions/runs/$RUN_ID/artifacts" \
+            --jq '.artifacts[].name | select(startswith("tgz-"))' | LC_ALL=C sort)"
+          if [ "$expected" != "$actual" ]; then
+            echo "::error::tarball artifacts in this run differ from the plan"
+            diff <(echo "$expected") <(echo "$actual") || true
+            exit 1
+          fi
+          # Not a pipeline: `exit` inside a piped loop only leaves its subshell.
+          while read -r _dir name version; do
+            slug="$(printf '%s' "${name#@}" | tr / -)"
+            for v in a b; do
+              d="$RUNNER_TEMP/artifacts/$v-$slug"
+              gh run download "$RUN_ID" -R "$REPO" -n "tgz-$v-$slug" -D "$d" </dev/null
+              if [ "$(ls -A "$d")" != "$slug-$version.tgz" ]; then
+                echo "::error::artifact tgz-$v-$slug must hold exactly $slug-$version.tgz"
+                exit 1
+              fi
+              mkdir -p "$RUNNER_TEMP/$v"
+              mv "$d/$slug-$version.tgz" "$RUNNER_TEMP/$v/"
+            done
+          done <<<"$PLAN"
       - name: Tarballs match the plan, reproduce, and are fit to publish
         env:
           PLAN: ${{ needs.plan.outputs.plan }}

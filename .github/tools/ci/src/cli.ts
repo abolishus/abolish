@@ -382,13 +382,15 @@ function releaseVerify(): void {
   if (errors.length === 0) {
     for (const r of plan) {
       const tgz = join(arg("--a"), tarballName(r));
-      const files = execFileSync("tar", ["-tzf", tgz], { encoding: "utf8" })
+      // `tar -tv` lines: mode, owner, size, date, time, path.
+      const entries = execFileSync("tar", ["-tvzf", tgz], { encoding: "utf8" })
         .split("\n")
-        .filter((f) => f !== "");
+        .filter((l) => l !== "")
+        .map((l) => ({ type: l[0] ?? "", path: l.split(/\s+/).slice(5).join(" ") }));
       const manifest = JSON.parse(
         execFileSync("tar", ["-xzOf", tgz, "package/package.json"], { encoding: "utf8" }),
       ) as Record<string, unknown>;
-      errors.push(...shippedErrors(manifest, files, r));
+      errors.push(...shippedErrors(manifest, entries, r));
     }
   }
   for (const e of errors) console.error(e);

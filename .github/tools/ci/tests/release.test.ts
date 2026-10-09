@@ -251,7 +251,11 @@ describe("shippedErrors", () => {
     publishConfig: { access: "public" },
     scripts: { build: "vp pack", test: "vp test run" },
   };
-  const files = ["package/package.json", "package/dist/index.mjs", "package/dist/index.d.mts"];
+  const files = [
+    { type: "-", path: "package/package.json" },
+    { type: "-", path: "package/dist/index.mjs" },
+    { type: "-", path: "package/dist/index.d.mts" },
+  ];
 
   test("accepts the planned release with every entry point shipped", () => {
     expect(shippedErrors(shipped, files, release)).toEqual([]);
@@ -280,7 +284,16 @@ describe("shippedErrors", () => {
         JSON.stringify(change),
       ).toHaveLength(1);
     }
-    expect(shippedErrors(shipped, [...files, "package/binding.gyp"], release)).toHaveLength(1);
+    for (const extra of [
+      { type: "-", path: "package/binding.gyp" },
+      { type: "-", path: "x/package.json" },
+      { type: "-", path: "package/../x.js" },
+      { type: "-", path: "package/dist/index.mjs" },
+      { type: "l", path: "package/link" },
+      { type: "h", path: "package/hard" },
+    ]) {
+      expect(shippedErrors(shipped, [...files, extra], release), extra.path).toHaveLength(1);
+    }
   });
 
   test("entry points cover exports fallbacks, main, types and bin", () => {

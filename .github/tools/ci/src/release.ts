@@ -209,9 +209,10 @@ export function shippedErrors(
   const scripts = (manifest["scripts"] ?? {}) as Record<string, unknown>;
   for (const s of INSTALL_SCRIPTS)
     if (s in scripts) errors.push(`${at}: runs a ${s} script on consumers' machines`);
-  // npm runs `node-gyp rebuild` on install for a package with a binding.gyp.
-  if (files.includes("package/binding.gyp") || "gypfile" in manifest)
-    errors.push(`${at}: builds native code on consumers' machines (binding.gyp)`);
+  // npm adds `install: node-gyp rebuild` for any *.gyp in the package root
+  // (case-insensitive on some filesystems).
+  if (files.some((f) => /^package\/[^/]+\.gyp$/i.test(f)) || "gypfile" in manifest)
+    errors.push(`${at}: builds native code on consumers' machines (*.gyp)`);
   for (const f of ["bundleDependencies", "bundledDependencies"])
     if (f in manifest) errors.push(`${at}: ${f} ships third-party code inside the tarball`);
   const shipped = new Set(files);

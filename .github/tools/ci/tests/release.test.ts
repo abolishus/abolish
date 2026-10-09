@@ -289,6 +289,8 @@ describe("shippedErrors", () => {
     }
     for (const extra of [
       { type: "-", path: "package/binding.gyp" },
+      { type: "-", path: "package/addon.gyp" },
+      { type: "-", path: "package/X.GYP" },
       { type: "-", path: "x/package.json" },
       { type: "-", path: "package/../x.js" },
       { type: "-", path: "package/dist/index.mjs" },

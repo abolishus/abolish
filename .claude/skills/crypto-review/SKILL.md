@@ -1,6 +1,6 @@
 ---
 name: crypto-review
-description: Rules and the in-session adversarial review procedure for protocol code — packages/crypto, circuits, contracts, verifier, core and sdk, apps/ballot, docs/spec and test-vectors (the crypto-review CI scope). Load before writing or reviewing any of them, and before opening a PR that touches them.
+description: Rules and the in-session adversarial review procedure for protocol code — packages/crypto, circuits, contracts, verifier, core, sdk and both Capacitor plugins, apps/ballot, docs/spec and test-vectors. Load before writing or reviewing any of them, and before opening a PR that touches them.
 ---
 
 # crypto-review

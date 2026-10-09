@@ -75,9 +75,17 @@ jobs:
           persist-credentials: false
       - name: Fixture present?
         id: present
+        env:
+          # Owner-reviewed arming flag: P1-20 sets it to "true" in the same PR
+          # that adds the fixture, so removing the script later fails here
+          # instead of silently turning this check into a no-op.
+          EXPECT_FIXTURE: "false"
         run: |
           if python3 -c "import json,sys;sys.exit(0 if 'reference-election' in json.load(open('package.json')).get('scripts',{}) else 1)"; then
             echo "present=true" >>"$GITHUB_OUTPUT"
+          elif [ "$EXPECT_FIXTURE" = "true" ]; then
+            echo "::error title=reference election missing::EXPECT_FIXTURE is true but package.json has no 'reference-election' script. The end-to-end proof can't be removed without a ci: PR."
+            exit 1
           else
             echo "present=false" >>"$GITHUB_OUTPUT"
             echo "::warning title=reference election not implemented::The reference election fixture does not exist yet; this check proves nothing. Tracked in docs/STATUS.md."

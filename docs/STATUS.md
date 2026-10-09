@@ -14,7 +14,7 @@ Last updated: 2026-10-09 (bootstrap session).
 
 ## Known-weak
 
-- **`reference-election` check is a placeholder.** It passes with a warning until the root `reference-election` script exists (P1-20), so it proves nothing yet.
+- **`reference-election` check is a placeholder.** It passes with a warning until P1-20 adds the root `reference-election` script and sets the workflow's `EXPECT_FIXTURE` flag, so it proves nothing yet.
 - **`repro-build` has nothing to compare yet.** The only build today (`.github/tools/ci`) type-checks without emitting output. The check hashes every file a build creates, rejects any build that modifies a tracked file, and requires each package to declare its outputs, so it becomes meaningful as soon as a package emits output.
 - **The review workflows haven't run yet.** Two settings are unverified until the first real run: `allowed_bots: claude` (the identity Claude's PRs come from) and `--effort max` in claude-code-action. Fix in a `ci:` PR if the first run fails for either reason.
 - **External (fork) PRs can't pass `claude-review` or `crypto-review`,** because forks get no secrets. A maintainer must re-open them from an in-repo branch.
@@ -63,7 +63,7 @@ Last updated: 2026-10-09 (bootstrap session).
 - [ ] P1-17 `packages/circuits` scaffold (Noir 1.0.0-beta.22, bb 5.0.0-nightly.20260522): a membership + per-poll nullifier circuit compatible with Semaphore groups, with soundness tests.
 - [ ] P1-18 `packages/contracts` scaffold (Foundry 1.8.3): an immutable bulletin-board contract, election-definition registry, trustee key registry and direct-submit path; fuzz + invariant tests; PII-ban tests; wagmi bindings.
 - [ ] P1-19 `packages/verifier` CLI: download the board (from local files first), recompute and check everything, and check a served ballot client against a signed release. Spec in `docs/spec/verifier.md`.
-- [ ] P1-20 Reference election fixture (`vp run reference-election`), CLI only: ceremony → tiers (stubbed until Phase 3, with the stubs clearly marked) → cast/challenge/re-vote → direct submit → close → threshold decrypt → tally → anchor (Anvil) → wipe + rebuild → independent verification offline. Makes the `reference-election` check real.
+- [ ] P1-20 Reference election fixture (`vp run reference-election`), CLI only: ceremony → tiers (stubbed until Phase 3, with the stubs clearly marked) → cast/challenge/re-vote → direct submit → close → threshold decrypt → tally → anchor (Anvil) → wipe + rebuild → independent verification offline. Makes the `reference-election` check real. The same PR sets `EXPECT_FIXTURE: "true"` in `.github/workflows/reference-election.yml` (a `ci:` change), so removing the script later fails the check.
 - [ ] P1-21 `apps/admin-cli` and `packages/sdk` surfaces for simulations (for example "10,000 voters, 7 trustees, 2 offline, mixed tiers, servers down halfway").
 - [ ] P1-22 Phase 1 exit: reference election green in CI and `crypto-review` green on every Phase 1 change. Update STATUS with what's tested and what's known-weak.
 

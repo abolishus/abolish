@@ -1,8 +1,9 @@
 # Required check: `crypto-review`.
 # Adversarial review, at the highest effort, of every change to
-# protocol code (packages/crypto, circuits, contracts, verifier, core, sdk),
-# the ballot client (apps/ballot), docs/spec, test-vectors and the toolchain
-# and catalog pins. Passes immediately when none of those paths change, so it can be a
+# protocol code (packages/crypto, circuits, contracts, verifier, core, sdk and
+# both Capacitor plugins), the ballot client (apps/ballot), docs/spec,
+# test-vectors, the agent rules (.claude/, AGENTS.md, CLAUDE.md), and the
+# toolchain pins, catalog and lockfile. Passes immediately when none of those paths change, so it can be a
 # required check on every PR. Fails on any blocking finding and fails closed.
 # Model: repository variable REVIEW_MODEL (falls back to the CLI's `opus` alias).
 # Prompt: .github/review/crypto-review.md (changes need maintainer review).
@@ -65,7 +66,7 @@ jobs:
         # ("packages/crypto/\311\241roup.ts"), which would not match the pattern
         # and would silently skip this review. Fails closed if the diff is empty.
         run: |
-          pattern='^(packages/(crypto|circuits|contracts|verifier|core|sdk)/|apps/ballot/|docs/spec/|test-vectors/|\.github/scripts/install-toolchain\.sh$|pnpm-workspace\.yaml$)'
+          pattern='^(packages/(crypto|circuits|contracts|verifier|core|sdk|capacitor-zk-prover|capacitor-nfc-passport)/|apps/ballot/|docs/spec/|test-vectors/|\.claude/|AGENTS\.md$|CLAUDE\.md$|\.github/scripts/install-toolchain\.sh$|pnpm-workspace\.yaml$|pnpm-lock\.yaml$)'
           git -c core.quotePath=false diff --name-only -z "$BASE_SHA...HEAD" >"$RUNNER_TEMP/changed.z"
           changed="$(tr '\0' '\n' <"$RUNNER_TEMP/changed.z")"
           if [ -z "$changed" ]; then
@@ -77,7 +78,7 @@ jobs:
             printf '%s\n' "$changed" | grep -E "$pattern" | sed 's/^/- /' >>"$GITHUB_STEP_SUMMARY"
           else
             echo "applies=false" >>"$GITHUB_OUTPUT"
-            echo "No protocol, ballot-client, spec, test-vector or pin changes: not applicable." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "No protocol, ballot-client, spec, test-vector, agent-rule or dependency changes: not applicable." | tee -a "$GITHUB_STEP_SUMMARY"
           fi
       - name: Load review prompt
         id: prompt
@@ -111,7 +112,7 @@ jobs:
         id: review
         if: steps.scope.outputs.applies == 'true'
         continue-on-error: true
-        uses: anthropics/claude-code-action@4036a180cf690f49529f5d8c79c998855287f590 # v1.0.230
+        uses: anthropics/claude-code-action@97c53473391bff1901034d4b454b5bac7ab7a029 # v1.0.239
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ github.token }}

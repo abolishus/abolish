@@ -11,7 +11,7 @@ Operating manual for every agent session on Abolish. Sessions are started by rou
    3. Start the next unblocked STATUS.md item, but only while fewer than **2** of your PRs are open.
 3. Load the skill for the area you touch (`.claude/skills/`):
    - `dev`: every change
-   - `crypto-review`: packages/crypto, circuits, contracts, verifier, core and sdk; apps/ballot; docs/spec; test-vectors
+   - `crypto-review`: packages/crypto, circuits, contracts, verifier, core, sdk and both Capacitor plugins; apps/ballot; docs/spec; test-vectors
    - `contracts`
    - `circuits`
    - `migrations`
@@ -44,20 +44,20 @@ Run your own review pass and fix what it finds:
 2. Tests pass for every affected package: `vp run --filter <pkg>... test`, or `vp run -r test`.
 3. Threat-model compliance: does the change cite the threats it addresses, and does it weaken any mitigation?
 4. Style matches the surrounding code. No dead code. Comments explain why, not what.
-5. For changes in `crypto-review`'s scope (`packages/{crypto,circuits,contracts,verifier,core,sdk}`, `apps/ballot`, `docs/spec`, `test-vectors`): launch an **independent subagent review** in-session, using the `crypto-review` skill's checklist, and address every finding **before** opening the PR.
+5. For changes to protocol code (`packages/{crypto,circuits,contracts,verifier,core,sdk,capacitor-zk-prover,capacitor-nfc-passport}`, `apps/ballot`, `docs/spec`, `test-vectors`): launch an **independent subagent review** in-session, using the `crypto-review` skill's checklist, and address every finding **before** opening the PR.
 6. Update `docs/STATUS.md` in the same PR: move the item, and note what's tested and what's known-weak.
 
 PR title: conventional-commit style (`feat(crypto): ...`, `fix(api): ...`, `docs: ...`, `ci: ...`). PR body: what changed, which threats it addresses, how it's tested, and what's known-weak.
 
 ## Required checks
 
-| Check                | Workflow                 | What it proves                                                                                                                                                                                                                                                            |
-| -------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ci`                 | `ci.yml`                 | `vp check`; package check/test/build for affected packages; Playwright e2e; Storybook interaction + a11y; supply-chain policy (actions SHA-pinned, actionlint, lockfile registry-only with integrity matching the registry and ≥ 7 days old, crypto deps `@noble/*` only) |
-| `reference-election` | `reference-election.yml` | The reference election runs end to end (see below)                                                                                                                                                                                                                        |
-| `repro-build`        | `repro-build.yml`        | Two independent builds produce byte-identical outputs                                                                                                                                                                                                                     |
-| `claude-review`      | `claude-review.yml`      | General correctness and threat-model review; fails on any blocking finding                                                                                                                                                                                                |
-| `crypto-review`      | `crypto-review.yml`      | Adversarial max-effort review of protocol code (`packages/{crypto,circuits,contracts,verifier,core,sdk}`, `apps/ballot`, `docs/spec`, `test-vectors`, toolchain and catalog pins); passes as not applicable otherwise                                                     |
+| Check                | Workflow                 | What it proves                                                                                                                                                                                                                                                                                                                                       |
+| -------------------- | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ci`                 | `ci.yml`                 | `vp check`; package check/test/build for affected packages; Playwright e2e; Storybook interaction + a11y; supply-chain policy (actions SHA-pinned, actionlint, lockfile registry-only with integrity matching the registry and ≥ 7 days old, crypto deps `@noble/*` only)                                                                            |
+| `reference-election` | `reference-election.yml` | The reference election runs end to end (see below)                                                                                                                                                                                                                                                                                                   |
+| `repro-build`        | `repro-build.yml`        | Two independent builds produce byte-identical outputs                                                                                                                                                                                                                                                                                                |
+| `claude-review`      | `claude-review.yml`      | General correctness and threat-model review; fails on any blocking finding                                                                                                                                                                                                                                                                           |
+| `crypto-review`      | `crypto-review.yml`      | Adversarial max-effort review of protocol code and its rules (`packages/{crypto,circuits,contracts,verifier,core,sdk,capacitor-zk-prover,capacitor-nfc-passport}`, `apps/ballot`, `docs/spec`, `test-vectors`, `.claude/`, `AGENTS.md`, `CLAUDE.md`, toolchain pins, `pnpm-workspace.yaml` and `pnpm-lock.yaml`); passes as not applicable otherwise |
 
 Review prompts live in `.github/review/`. Both reviews treat PR content as untrusted and fail closed. The review model comes from the repository variable `REVIEW_MODEL`, set by the owner. The workflows contain no model ID. Exceptions to the no-model-identifiers rule: the CLI alias `opus` (the fallback when the variable is unset) and the `Co-Authored-By` attribution trailer the agent harness requires on commits. Both review workflows read their prompt and verdict script from the base commit, so a PR can't rewrite its own review.
 

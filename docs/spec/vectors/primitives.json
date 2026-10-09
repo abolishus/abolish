@@ -1,0 +1,778 @@
+{
+  "format": "abolish-vectors/1",
+  "title": "Primitive types, record framing and strict decoding",
+  "spec": "docs/spec/notation.md",
+  "generator": "Written as literal hex from the tables in docs/spec/notation.md by a one-off script (only the integer boundary values were computed, with Python's int.to_bytes), then checked by hand byte by byte. No Abolish encoder produced them. Record type 0xff01 is from the test range and is valid only in vectors.",
+  "vectors": [
+    {
+      "id": "u8-zero",
+      "type": {
+        "kind": "u8"
+      },
+      "value": "0",
+      "encoding": "00"
+    },
+    {
+      "id": "u8-one",
+      "type": {
+        "kind": "u8"
+      },
+      "value": "1",
+      "encoding": "01"
+    },
+    {
+      "id": "u8-max",
+      "type": {
+        "kind": "u8"
+      },
+      "value": "255",
+      "encoding": "ff"
+    },
+    {
+      "id": "u8-empty",
+      "type": {
+        "kind": "u8"
+      },
+      "encoding": "",
+      "error": "truncated"
+    },
+    {
+      "id": "u8-trailing",
+      "type": {
+        "kind": "u8"
+      },
+      "encoding": "0000",
+      "error": "trailing-bytes"
+    },
+    {
+      "id": "u16-zero",
+      "type": {
+        "kind": "u16"
+      },
+      "value": "0",
+      "encoding": "0000"
+    },
+    {
+      "id": "u16-one",
+      "type": {
+        "kind": "u16"
+      },
+      "value": "1",
+      "encoding": "0001"
+    },
+    {
+      "id": "u16-max",
+      "type": {
+        "kind": "u16"
+      },
+      "value": "65535",
+      "encoding": "ffff"
+    },
+    {
+      "id": "u16-big-endian",
+      "description": "Most significant byte first",
+      "type": {
+        "kind": "u16"
+      },
+      "value": "258",
+      "encoding": "0102"
+    },
+    {
+      "id": "u16-truncated",
+      "type": {
+        "kind": "u16"
+      },
+      "encoding": "ff",
+      "error": "truncated"
+    },
+    {
+      "id": "u16-empty",
+      "type": {
+        "kind": "u16"
+      },
+      "encoding": "",
+      "error": "truncated"
+    },
+    {
+      "id": "u16-trailing",
+      "type": {
+        "kind": "u16"
+      },
+      "encoding": "000000",
+      "error": "trailing-bytes"
+    },
+    {
+      "id": "u32-zero",
+      "type": {
+        "kind": "u32"
+      },
+      "value": "0",
+      "encoding": "00000000"
+    },
+    {
+      "id": "u32-one",
+      "type": {
+        "kind": "u32"
+      },
+      "value": "1",
+      "encoding": "00000001"
+    },
+    {
+      "id": "u32-max",
+      "type": {
+        "kind": "u32"
+      },
+      "value": "4294967295",
+      "encoding": "ffffffff"
+    },
+    {
+      "id": "u32-big-endian",
+      "description": "Most significant byte first",
+      "type": {
+        "kind": "u32"
+      },
+      "value": "16909060",
+      "encoding": "01020304"
+    },
+    {
+      "id": "u32-truncated",
+      "type": {
+        "kind": "u32"
+      },
+      "encoding": "ffffff",
+      "error": "truncated"
+    },
+    {
+      "id": "u32-empty",
+      "type": {
+        "kind": "u32"
+      },
+      "encoding": "",
+      "error": "truncated"
+    },
+    {
+      "id": "u32-trailing",
+      "type": {
+        "kind": "u32"
+      },
+      "encoding": "0000000000",
+      "error": "trailing-bytes"
+    },
+    {
+      "id": "u64-zero",
+      "type": {
+        "kind": "u64"
+      },
+      "value": "0",
+      "encoding": "0000000000000000"
+    },
+    {
+      "id": "u64-one",
+      "type": {
+        "kind": "u64"
+      },
+      "value": "1",
+      "encoding": "0000000000000001"
+    },
+    {
+      "id": "u64-max",
+      "type": {
+        "kind": "u64"
+      },
+      "value": "18446744073709551615",
+      "encoding": "ffffffffffffffff"
+    },
+    {
+      "id": "u64-big-endian",
+      "description": "Most significant byte first",
+      "type": {
+        "kind": "u64"
+      },
+      "value": "72623859790382856",
+      "encoding": "0102030405060708"
+    },
+    {
+      "id": "u64-truncated",
+      "type": {
+        "kind": "u64"
+      },
+      "encoding": "ffffffffffffff",
+      "error": "truncated"
+    },
+    {
+      "id": "u64-empty",
+      "type": {
+        "kind": "u64"
+      },
+      "encoding": "",
+      "error": "truncated"
+    },
+    {
+      "id": "u64-trailing",
+      "type": {
+        "kind": "u64"
+      },
+      "encoding": "000000000000000000",
+      "error": "trailing-bytes"
+    },
+    {
+      "id": "bool-false",
+      "type": {
+        "kind": "bool"
+      },
+      "value": false,
+      "encoding": "00"
+    },
+    {
+      "id": "bool-true",
+      "type": {
+        "kind": "bool"
+      },
+      "value": true,
+      "encoding": "01"
+    },
+    {
+      "id": "bool-two",
+      "type": {
+        "kind": "bool"
+      },
+      "encoding": "02",
+      "error": "invalid-enum"
+    },
+    {
+      "id": "bool-ff",
+      "type": {
+        "kind": "bool"
+      },
+      "encoding": "ff",
+      "error": "invalid-enum"
+    },
+    {
+      "id": "enum8-listed",
+      "type": {
+        "kind": "enum8",
+        "values": ["1", "2", "3"]
+      },
+      "value": "2",
+      "encoding": "02"
+    },
+    {
+      "id": "enum8-zero-unlisted",
+      "type": {
+        "kind": "enum8",
+        "values": ["1", "2", "3"]
+      },
+      "encoding": "00",
+      "error": "invalid-enum"
+    },
+    {
+      "id": "enum8-unlisted",
+      "type": {
+        "kind": "enum8",
+        "values": ["1", "2", "3"]
+      },
+      "encoding": "04",
+      "error": "invalid-enum"
+    },
+    {
+      "id": "bytes-fixed",
+      "type": {
+        "kind": "bytes",
+        "length": 4
+      },
+      "value": "deadbeef",
+      "encoding": "deadbeef"
+    },
+    {
+      "id": "bytes-fixed-short",
+      "type": {
+        "kind": "bytes",
+        "length": 4
+      },
+      "encoding": "deadbe",
+      "error": "truncated"
+    },
+    {
+      "id": "bytes-fixed-long",
+      "type": {
+        "kind": "bytes",
+        "length": 4
+      },
+      "encoding": "deadbeef00",
+      "error": "trailing-bytes"
+    },
+    {
+      "id": "bytes-var-empty",
+      "type": {
+        "kind": "bytes",
+        "max": 4
+      },
+      "value": "",
+      "encoding": "00000000"
+    },
+    {
+      "id": "bytes-var-max",
+      "type": {
+        "kind": "bytes",
+        "max": 4
+      },
+      "value": "01020304",
+      "encoding": "0000000401020304"
+    },
+    {
+      "id": "bytes-var-over-max",
+      "type": {
+        "kind": "bytes",
+        "max": 4
+      },
+      "encoding": "000000050102030405",
+      "error": "length-over-max"
+    },
+    {
+      "id": "bytes-var-over-max-before-read",
+      "description": "A huge length with no payload is rejected for its length, before any read or allocation",
+      "type": {
+        "kind": "bytes",
+        "max": 4
+      },
+      "encoding": "ffffffff",
+      "error": "length-over-max"
+    },
+    {
+      "id": "bytes-var-short-payload",
+      "type": {
+        "kind": "bytes",
+        "max": 4
+      },
+      "encoding": "00000003aabb",
+      "error": "truncated"
+    },
+    {
+      "id": "bytes-var-short-prefix",
+      "type": {
+        "kind": "bytes",
+        "max": 4
+      },
+      "encoding": "000000",
+      "error": "truncated"
+    },
+    {
+      "id": "bytes-var-trailing",
+      "type": {
+        "kind": "bytes",
+        "max": 4
+      },
+      "encoding": "00000001aabb",
+      "error": "trailing-bytes"
+    },
+    {
+      "id": "utf8-ascii",
+      "type": {
+        "kind": "utf8",
+        "max": 8
+      },
+      "value": "616263",
+      "encoding": "00000003616263"
+    },
+    {
+      "id": "utf8-multibyte",
+      "description": "U+00E9 and U+20AC",
+      "type": {
+        "kind": "utf8",
+        "max": 8
+      },
+      "value": "c3a9e282ac",
+      "encoding": "00000005c3a9e282ac"
+    },
+    {
+      "id": "utf8-not-normalised",
+      "description": "Decomposed e + U+0301 is accepted as is; decoders don't normalise",
+      "type": {
+        "kind": "utf8",
+        "max": 8
+      },
+      "value": "65cc81",
+      "encoding": "0000000365cc81"
+    },
+    {
+      "id": "utf8-invalid-continuation",
+      "description": "Lead byte without its continuation byte",
+      "type": {
+        "kind": "utf8",
+        "max": 8
+      },
+      "encoding": "00000001c3",
+      "error": "invalid-utf8"
+    },
+    {
+      "id": "utf8-overlong",
+      "description": "Overlong encoding of '/'",
+      "type": {
+        "kind": "utf8",
+        "max": 8
+      },
+      "encoding": "00000002c0af",
+      "error": "invalid-utf8"
+    },
+    {
+      "id": "utf8-surrogate",
+      "description": "Encoded UTF-16 surrogate U+D800",
+      "type": {
+        "kind": "utf8",
+        "max": 8
+      },
+      "encoding": "00000003eda080",
+      "error": "invalid-utf8"
+    },
+    {
+      "id": "utf8-over-max",
+      "type": {
+        "kind": "utf8",
+        "max": 8
+      },
+      "encoding": "00000009616161616161616161",
+      "error": "length-over-max"
+    },
+    {
+      "id": "list-empty",
+      "type": {
+        "kind": "list",
+        "max": 3,
+        "of": {
+          "kind": "u16"
+        }
+      },
+      "value": [],
+      "encoding": "00000000"
+    },
+    {
+      "id": "list-max",
+      "type": {
+        "kind": "list",
+        "max": 3,
+        "of": {
+          "kind": "u16"
+        }
+      },
+      "value": ["1", "2", "65535"],
+      "encoding": "0000000300010002ffff"
+    },
+    {
+      "id": "list-over-max",
+      "type": {
+        "kind": "list",
+        "max": 3,
+        "of": {
+          "kind": "u16"
+        }
+      },
+      "encoding": "000000040001000100010001",
+      "error": "length-over-max"
+    },
+    {
+      "id": "list-short",
+      "type": {
+        "kind": "list",
+        "max": 3,
+        "of": {
+          "kind": "u16"
+        }
+      },
+      "encoding": "00000002000100",
+      "error": "truncated"
+    },
+    {
+      "id": "list-trailing",
+      "type": {
+        "kind": "list",
+        "max": 3,
+        "of": {
+          "kind": "u16"
+        }
+      },
+      "encoding": "000000010001ff",
+      "error": "trailing-bytes"
+    },
+    {
+      "id": "list-of-var-bytes",
+      "description": "Each element carries its own length prefix",
+      "type": {
+        "kind": "list",
+        "max": 2,
+        "of": {
+          "kind": "bytes",
+          "max": 2
+        }
+      },
+      "value": ["aa", ""],
+      "encoding": "0000000200000001aa00000000"
+    },
+    {
+      "id": "list-of-var-bytes-element-over-max",
+      "type": {
+        "kind": "list",
+        "max": 2,
+        "of": {
+          "kind": "bytes",
+          "max": 2
+        }
+      },
+      "encoding": "0000000100000003aabbcc",
+      "error": "length-over-max"
+    },
+    {
+      "id": "record-test",
+      "description": "Header u16 type 0xff01, u8 version 1, then fields in order",
+      "type": {
+        "kind": "record",
+        "recordType": "ff01",
+        "version": 1,
+        "fields": [
+          {
+            "name": "flag",
+            "type": {
+              "kind": "bool"
+            }
+          },
+          {
+            "name": "count",
+            "type": {
+              "kind": "u32"
+            }
+          },
+          {
+            "name": "data",
+            "type": {
+              "kind": "bytes",
+              "max": 4
+            }
+          }
+        ]
+      },
+      "value": {
+        "flag": true,
+        "count": "258",
+        "data": "cafe"
+      },
+      "encoding": "ff0101010000010200000002cafe"
+    },
+    {
+      "id": "record-unknown-type",
+      "type": {
+        "kind": "record",
+        "recordType": "ff01",
+        "version": 1,
+        "fields": [
+          {
+            "name": "flag",
+            "type": {
+              "kind": "bool"
+            }
+          },
+          {
+            "name": "count",
+            "type": {
+              "kind": "u32"
+            }
+          },
+          {
+            "name": "data",
+            "type": {
+              "kind": "bytes",
+              "max": 4
+            }
+          }
+        ]
+      },
+      "encoding": "ff0201010000010200000002cafe",
+      "error": "unknown-record-type"
+    },
+    {
+      "id": "record-type-zero",
+      "type": {
+        "kind": "record",
+        "recordType": "ff01",
+        "version": 1,
+        "fields": [
+          {
+            "name": "flag",
+            "type": {
+              "kind": "bool"
+            }
+          },
+          {
+            "name": "count",
+            "type": {
+              "kind": "u32"
+            }
+          },
+          {
+            "name": "data",
+            "type": {
+              "kind": "bytes",
+              "max": 4
+            }
+          }
+        ]
+      },
+      "encoding": "000001010000010200000002cafe",
+      "error": "unknown-record-type"
+    },
+    {
+      "id": "record-unknown-version",
+      "type": {
+        "kind": "record",
+        "recordType": "ff01",
+        "version": 1,
+        "fields": [
+          {
+            "name": "flag",
+            "type": {
+              "kind": "bool"
+            }
+          },
+          {
+            "name": "count",
+            "type": {
+              "kind": "u32"
+            }
+          },
+          {
+            "name": "data",
+            "type": {
+              "kind": "bytes",
+              "max": 4
+            }
+          }
+        ]
+      },
+      "encoding": "ff0102010000010200000002cafe",
+      "error": "unknown-version"
+    },
+    {
+      "id": "record-version-zero",
+      "type": {
+        "kind": "record",
+        "recordType": "ff01",
+        "version": 1,
+        "fields": [
+          {
+            "name": "flag",
+            "type": {
+              "kind": "bool"
+            }
+          },
+          {
+            "name": "count",
+            "type": {
+              "kind": "u32"
+            }
+          },
+          {
+            "name": "data",
+            "type": {
+              "kind": "bytes",
+              "max": 4
+            }
+          }
+        ]
+      },
+      "encoding": "ff0100010000010200000002cafe",
+      "error": "unknown-version"
+    },
+    {
+      "id": "record-truncated-header",
+      "type": {
+        "kind": "record",
+        "recordType": "ff01",
+        "version": 1,
+        "fields": [
+          {
+            "name": "flag",
+            "type": {
+              "kind": "bool"
+            }
+          },
+          {
+            "name": "count",
+            "type": {
+              "kind": "u32"
+            }
+          },
+          {
+            "name": "data",
+            "type": {
+              "kind": "bytes",
+              "max": 4
+            }
+          }
+        ]
+      },
+      "encoding": "ff01",
+      "error": "truncated"
+    },
+    {
+      "id": "record-invalid-field",
+      "description": "First failure wins: the bool is checked before later fields",
+      "type": {
+        "kind": "record",
+        "recordType": "ff01",
+        "version": 1,
+        "fields": [
+          {
+            "name": "flag",
+            "type": {
+              "kind": "bool"
+            }
+          },
+          {
+            "name": "count",
+            "type": {
+              "kind": "u32"
+            }
+          },
+          {
+            "name": "data",
+            "type": {
+              "kind": "bytes",
+              "max": 4
+            }
+          }
+        ]
+      },
+      "encoding": "ff0101020000010200000002cafe",
+      "error": "invalid-enum"
+    },
+    {
+      "id": "record-trailing",
+      "type": {
+        "kind": "record",
+        "recordType": "ff01",
+        "version": 1,
+        "fields": [
+          {
+            "name": "flag",
+            "type": {
+              "kind": "bool"
+            }
+          },
+          {
+            "name": "count",
+            "type": {
+              "kind": "u32"
+            }
+          },
+          {
+            "name": "data",
+            "type": {
+              "kind": "bytes",
+              "max": 4
+            }
+          }
+        ]
+      },
+      "encoding": "ff0101010000010200000002cafe00",
+      "error": "trailing-bytes"
+    }
+  ]
+}

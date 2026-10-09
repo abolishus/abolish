@@ -128,7 +128,9 @@ jobs:
         if: needs.plan.outputs.check != ''
         env:
           ARGS: ${{ needs.plan.outputs.check }}
-        run: vp run $ARGS check
+        run: |
+          read -ra args <<<"$ARGS"
+          vp run "${args[@]}" check
 
   test:
     name: test
@@ -168,7 +170,9 @@ jobs:
       - name: Unit, property, vector, contract and circuit tests
         env:
           ARGS: ${{ needs.plan.outputs.test }}
-        run: vp run $ARGS test
+        run: |
+          read -ra args <<<"$ARGS"
+          vp run "${args[@]}" test
 
   build:
     name: build
@@ -186,7 +190,9 @@ jobs:
       - name: Build
         env:
           ARGS: ${{ needs.plan.outputs.build }}
-        run: vp run $ARGS build
+        run: |
+          read -ra args <<<"$ARGS"
+          vp run "${args[@]}" build
 
   e2e:
     name: e2e
@@ -206,7 +212,9 @@ jobs:
       - name: Playwright end-to-end tests
         env:
           ARGS: ${{ needs.plan.outputs.e2e }}
-        run: vp run $ARGS test:e2e
+        run: |
+          read -ra args <<<"$ARGS"
+          vp run "${args[@]}" test:e2e
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: failure()
         with:
@@ -230,7 +238,9 @@ jobs:
       - name: Storybook interaction and accessibility tests
         env:
           ARGS: ${{ needs.plan.outputs.storybook }}
-        run: vp run $ARGS test:storybook
+        run: |
+          read -ra args <<<"$ARGS"
+          vp run "${args[@]}" test:storybook
 
   ci:
     name: ci

@@ -6,6 +6,8 @@
 //   actions-pinned          fail if any workflow uses an action not pinned by SHA
 //   lockfile --base <ref>   enforce lockfile policy, write the diff to lockfile-diff.md
 //   pnpm-selftest           prove the pinned pnpm honours our install-script policy
+//   gated                   enforce the dependency, import, symlink and bundle policy
+//                           of the crypto-review-gated packages (see gated.ts)
 //   release-versions        print "<dir> <version>" for every workspace package
 //   release-apply --versions <file>
 //                           in a clean checkout, apply the accepted next snapshot
@@ -29,10 +31,12 @@ import {
 } from "node:fs";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { parseSync } from "vite-plus";
 import { parseDocument } from "yaml";
 import { findUnpinned } from "./actions-pinned.ts";
 import {
+  GATED_PACKAGES,
   changedFiles,
   workspaceRoots,
   forTask,
@@ -43,6 +47,19 @@ import {
   toRunArgs,
   type WorkspacePackage,
 } from "./affected.ts";
+import {
+  hasCode,
+  inlinedSourceViolations,
+  linkViolations,
+  lockfileGraphs,
+  lockfileViolations,
+  manifestViolations,
+  moduleReferences,
+  referenceViolation,
+  RULES,
+  runtimeDependencies,
+  type GatedName,
+} from "./gated.ts";
 import {
   diffPackages,
   parsePackages,
@@ -407,6 +424,109 @@ function releaseVerify(): void {
   console.log(`verified ${plan.length} tarball(s) from both builds`);
 }
 
+const MODULE_FILE = /\.(?:[cm]?[jt]sx?)$/;
+
+function moduleFiles(dir: string): string[] {
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir, { recursive: true, encoding: "utf8" })
+    .filter((f) => MODULE_FILE.test(f))
+    .sort()
+    .map((f) => join(dir, f));
+}
+
+/** Every module reference in `files` checked against the package's rule. */
+function importViolations(
+  name: GatedName,
+  files: readonly string[],
+  root: string,
+  declared: ReadonlyMap<string, string>,
+): string[] {
+  return files.flatMap((file) => {
+    const parsed = parseSync(file, readFileSync(file, "utf8"), { sourceType: "module" });
+    if (parsed.errors.length > 0)
+      return [`${file}: does not parse: ${parsed.errors[0]?.message ?? "unknown error"}`];
+    return moduleReferences(parsed.program).flatMap(
+      (ref) => referenceViolation(name, file, root, ref, declared) ?? [],
+    );
+  });
+}
+
+/**
+ * Packs the package as its build does, plus source maps, into a scratch
+ * directory: the maps must cite only the package's own src, and the output
+ * may import only what the package's own src may.
+ */
+function bundleViolations(
+  name: GatedName,
+  dir: string,
+  declared: ReadonlyMap<string, string>,
+): string[] {
+  const out = mkdtempSync(join(tmpdir(), `gated-${name}-`));
+  try {
+    execFileSync("vp", ["pack", "--sourcemap", "--out-dir", out, "--logLevel", "warn"], {
+      cwd: dir,
+      stdio: ["ignore", "inherit", "inherit"],
+    });
+    const files = readdirSync(out, { recursive: true, encoding: "utf8" }).map((f) => join(out, f));
+    const srcRoot = resolve(dir, "src");
+    const maps = files.filter((f) => f.endsWith(".map"));
+    const unmapped = files
+      .filter((f) => /\.[cm]?js$/.test(f) && !files.includes(`${f}.map`))
+      .filter((f) =>
+        hasCode(parseSync(f, readFileSync(f, "utf8"), { sourceType: "module" }).program),
+      )
+      .map((f) => `${f}: packed module has code but no source map, so inlining can't be ruled out`);
+    return [
+      ...(files.some((f) => MODULE_FILE.test(f)) ? [] : [`${dir}: vp pack produced no modules`]),
+      ...unmapped,
+      ...maps.flatMap((m) => {
+        const { sources } = JSON.parse(readFileSync(m, "utf8")) as { sources?: unknown };
+        return Array.isArray(sources)
+          ? inlinedSourceViolations(m, sources, srcRoot)
+          : [`${m}: source map has no sources list`];
+      }),
+      ...importViolations(
+        name,
+        files.filter((f) => MODULE_FILE.test(f)),
+        out,
+        declared,
+      ),
+    ].map((v) => v.replaceAll(out, `${dir}/<packed>`));
+  } finally {
+    rmSync(out, { recursive: true, force: true });
+  }
+}
+
+function gated(): void {
+  const catalog = ((
+    parseDocument(readFileSync("pnpm-workspace.yaml", "utf8")).toJS() as {
+      catalog?: Record<string, unknown>;
+    } | null
+  )?.catalog ?? {}) as Record<string, unknown>;
+  const graphs = lockfileGraphs(readFileSync("pnpm-lock.yaml", "utf8"));
+  const violations = [...linkViolations(git("ls-files", "-s", "-z"))];
+  const checked: string[] = [];
+  for (const name of GATED_PACKAGES) {
+    const dir = `packages/${name}`;
+    const file = join(dir, "package.json");
+    if (!existsSync(file)) continue;
+    checked.push(dir);
+    const manifest = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
+    const declared = runtimeDependencies(manifest);
+    violations.push(
+      ...manifestViolations(name, manifest, catalog),
+      ...lockfileViolations(name, manifest, graphs, catalog),
+      ...importViolations(name, moduleFiles(join(dir, "src")), join(dir, "src"), declared),
+    );
+    if (RULES[name].packed) violations.push(...bundleViolations(name, dir, declared));
+  }
+  for (const v of violations) console.error(v);
+  if (violations.length > 0) process.exit(1);
+  console.log(
+    `gated packages pass the dependency, import and bundle policy: ${checked.join(", ")}`,
+  );
+}
+
 const command = process.argv[2];
 switch (command) {
   case "affected":
@@ -420,6 +540,9 @@ switch (command) {
     break;
   case "pnpm-selftest":
     pnpmSelftest();
+    break;
+  case "gated":
+    gated();
     break;
   case "release-versions":
     releaseVersions();

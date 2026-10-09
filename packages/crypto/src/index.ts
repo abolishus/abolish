@@ -1,3 +1,4 @@
-// Placeholder so the package name is held on npm with trusted publishing set
-// up (docs/STATUS.md P0-3). The first real API lands with its STATUS item.
+// No API yet: the scaffold (P1-9) sets up the dependency policy, the build and
+// the published-vector harness. The first API, the canonical encoders and
+// decoders of docs/spec/notation.md, lands with P1-10.
 export {};

@@ -28,7 +28,9 @@
     "test": "vp test run"
   },
   "devDependencies": {
+    "@noble/hashes": "catalog:",
     "@types/node": "catalog:",
+    "fast-check": "catalog:",
     "typescript": "catalog:",
     "vite-plus": "catalog:"
   },

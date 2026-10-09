@@ -21,6 +21,7 @@ allowBuilds: {}
 
 catalog:
   "@types/node": 24.19.1
+  fast-check: 4.10.2
   typescript: 7.0.2
   vite: npm:@voidzero-dev/vite-plus-core@1.0.0
   vite-plus: 1.0.0

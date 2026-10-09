@@ -1,6 +1,8 @@
+import fc from "fast-check";
 import { describe, expect, test } from "vite-plus/test";
 import {
   diffPackages,
+  LockfileParseError,
   parsePackages,
   registryViolations,
   renderDiff,
@@ -133,6 +135,103 @@ describe("registryViolations", () => {
     expect(registryViolations(pkg, { integrity: I1, published: undefined }, now)).toHaveLength(1);
     expect(registryViolations(pkg, { integrity: I1, published: "not a date" }, now)).toHaveLength(
       1,
+    );
+  });
+});
+
+describe("parsePackages is total (fails closed)", () => {
+  test("rejects a block-style resolution instead of dropping the package", () => {
+    const text = lock(`  evil@9.9.9:\n    resolution:\n      integrity: ${I1}\n`);
+    expect(() => parsePackages(text)).toThrow(/flow mapping/);
+  });
+
+  test("a nested block field before resolution cannot hide the package", () => {
+    const text = lock(
+      `  evil@9.9.9:\n    peerDependencies:\n      react: '*'\n    resolution: {integrity: ${I1}}\n`,
+    );
+    expect([...parsePackages(text).keys()]).toEqual(["evil@9.9.9"]);
+  });
+
+  test("rejects a key with no resolution, duplicates, comments and stray indentation", () => {
+    expect(() => parsePackages(lock(`  a@1.0.0:\n    cpu: [x64]\n`))).toThrow(
+      /no flow-style resolution/,
+    );
+    expect(() =>
+      parsePackages(
+        lock(
+          `  a@1.0.0:\n    resolution: {integrity: ${I1}}\n\n  a@1.0.0:\n    resolution: {integrity: ${I1}}\n`,
+        ),
+      ),
+    ).toThrow(/duplicate/);
+    expect(() =>
+      parsePackages(lock(`  # hi\n  a@1.0.0:\n    resolution: {integrity: ${I1}}\n`)),
+    ).toThrow(/comments/);
+    expect(() =>
+      parsePackages(lock(`   a@1.0.0:\n    resolution: {integrity: ${I1}}\n`)),
+    ).toThrow();
+    expect(() =>
+      parsePackages(
+        lock(
+          `  a@1.0.0:\n    resolution: {integrity: ${I1}}\n    resolution: {integrity: ${I2}}\n`,
+        ),
+      ),
+    ).toThrow(/second resolution/);
+  });
+
+  test("rejects a flow-style packages section but accepts an empty one", () => {
+    expect(() => parsePackages(`packages: {a@1.0.0: {resolution: {integrity: ${I1}}}}\n`)).toThrow(
+      /block mapping/,
+    );
+    expect(parsePackages("packages: {}\n").size).toBe(0);
+  });
+
+  test("property: every package key is either returned or the parse throws", () => {
+    const name = fc.stringMatching(/^(@[a-z][a-z0-9-]{0,8}\/)?[a-z][a-z0-9.-]{0,12}$/);
+    const version = fc.stringMatching(/^\d{1,3}\.\d{1,3}\.\d{1,3}(-[a-z0-9.]{1,8})?$/);
+    const field = fc.oneof(
+      fc.constant("    engines: {node: '>=18'}"),
+      fc.constant("    cpu: [x64]"),
+      fc.constant("    peerDependencies:\n      react: '*'"),
+      fc.constant("    hasBin: true"),
+    );
+    const style = fc.constantFrom("flow", "block", "missing");
+    const entry = fc.record({
+      name,
+      version,
+      quoted: fc.boolean(),
+      before: fc.array(field, { maxLength: 3 }),
+      after: fc.array(field, { maxLength: 3 }),
+      style,
+    });
+    fc.assert(
+      fc.property(
+        fc.uniqueArray(entry, { selector: (e) => `${e.name}@${e.version}`, maxLength: 6 }),
+        (entries) => {
+          const body = entries
+            .map((e) => {
+              const key = `${e.name}@${e.version}`;
+              const head = e.quoted || key.startsWith("@") ? `  '${key}':` : `  ${key}:`;
+              const res =
+                e.style === "flow"
+                  ? [`    resolution: {integrity: ${I1}}`]
+                  : e.style === "block"
+                    ? ["    resolution:", `      integrity: ${I1}`]
+                    : [];
+              return [head, ...e.before, ...res, ...e.after].join("\n");
+            })
+            .join("\n\n");
+          const text = lock(body.length > 0 ? `${body}\n` : "");
+          const keys = entries.map((e) => `${e.name}@${e.version}`).sort();
+          try {
+            expect([...parsePackages(text).keys()].sort()).toEqual(keys);
+            expect(entries.every((e) => e.style === "flow")).toBe(true);
+          } catch (err) {
+            if (!(err instanceof LockfileParseError)) throw err;
+            expect(entries.some((e) => e.style !== "flow")).toBe(true);
+          }
+        },
+      ),
+      { numRuns: Number(process.env["FC_NUM_RUNS"] ?? 200) },
     );
   });
 });

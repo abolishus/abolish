@@ -21,8 +21,9 @@ export interface LockedPackage {
 
 export const MIN_AGE_DAYS = 7;
 
-const KEY_LINE = /^ {2}('?)(.+?)\1:\s*$/;
-const RESOLUTION_LINE = /^ {4}resolution:\s*(\{.*\})\s*$/;
+const KEY_LINE = /^ {2}(['"]?)([^'"\s][^'"]*?)\1:\s*$/;
+const RESOLUTION_LINE = /^ {4}resolution:(.*)$/;
+const FLOW_MAP = /^\s*(\{.*\})\s*$/;
 const INTEGRITY = /integrity:\s*(sha512-[A-Za-z0-9+/]+={0,2})/;
 
 export function splitKey(key: string): { name: string; version: string } {
@@ -31,37 +32,83 @@ export function splitKey(key: string): { name: string; version: string } {
   return { name: key.slice(0, at), version: key.slice(at + 1) };
 }
 
-/** Parses every top-level `packages:` section (pnpm may emit several YAML documents). */
+export class LockfileParseError extends Error {
+  constructor(line: number, reason: string) {
+    super(`pnpm-lock.yaml:${line}: ${reason}`);
+  }
+}
+
+/**
+ * Parses every top-level `packages:` section (pnpm may emit several YAML
+ * documents). Total by construction: the gate must never pass a package it
+ * failed to see, so any shape pnpm does not emit (block-style resolution,
+ * flow-style section, comments, odd indentation, a key without a resolution,
+ * duplicates) throws instead of being skipped.
+ */
 export function parsePackages(lockfile: string): Map<string, LockedPackage> {
   const out = new Map<string, LockedPackage>();
   let inPackages = false;
-  let current: string | undefined;
-  for (const line of lockfile.split("\n")) {
+  let current: { key: string; line: number } | undefined;
+
+  const closeCurrent = () => {
+    if (current !== undefined && !out.has(current.key)) {
+      throw new LockfileParseError(
+        current.line,
+        `package ${current.key} has no flow-style resolution`,
+      );
+    }
+    current = undefined;
+  };
+
+  const lines = lockfile.split("\n");
+  lines.forEach((raw, i) => {
+    const n = i + 1;
+    const line = raw.replace(/\r$/, "");
     if (/^\S/.test(line)) {
+      closeCurrent();
       inPackages = line.trimEnd() === "packages:";
-      current = undefined;
-      continue;
+      if (!inPackages && /^packages\s*:/.test(line) && line.trimEnd() !== "packages: {}") {
+        throw new LockfileParseError(n, "packages section must be a block mapping");
+      }
+      return;
     }
-    if (!inPackages) continue;
-    const key = KEY_LINE.exec(line);
-    if (key !== null) {
-      current = key[2];
-      continue;
+    if (!inPackages || line.trim() === "") return;
+    if (/^\s*#/.test(line)) throw new LockfileParseError(n, "comments are not allowed in packages");
+    if (/\t/.test(line.slice(0, line.length - line.trimStart().length))) {
+      throw new LockfileParseError(n, "tab indentation");
     }
-    const res = RESOLUTION_LINE.exec(line);
-    if (res !== null && current !== undefined) {
-      const resolution = res[1] ?? "";
-      const { name, version } = splitKey(current);
-      out.set(current, {
-        key: current,
-        name,
-        version,
-        resolution,
-        integrity: INTEGRITY.exec(resolution)?.[1],
-      });
-      current = undefined;
+    const indent = line.length - line.trimStart().length;
+    if (indent === 2) {
+      closeCurrent();
+      const key = KEY_LINE.exec(line);
+      if (key === null)
+        throw new LockfileParseError(n, `unrecognised package key line: ${line.trim()}`);
+      const name = key[2] ?? "";
+      if (out.has(name)) throw new LockfileParseError(n, `duplicate package ${name}`);
+      current = { key: name, line: n };
+      return;
     }
-  }
+    if (indent < 4 || current === undefined) {
+      throw new LockfileParseError(n, `unexpected line outside a package entry: ${line.trim()}`);
+    }
+    const res = indent === 4 ? RESOLUTION_LINE.exec(line) : null;
+    if (res === null) return; // another field of the current package
+    const flow = FLOW_MAP.exec(res[1] ?? "");
+    if (flow === null)
+      throw new LockfileParseError(n, `resolution of ${current.key} must be a flow mapping`);
+    if (out.has(current.key))
+      throw new LockfileParseError(n, `second resolution for ${current.key}`);
+    const resolution = flow[1] ?? "";
+    const { name, version } = splitKey(current.key);
+    out.set(current.key, {
+      key: current.key,
+      name,
+      version,
+      resolution,
+      integrity: INTEGRITY.exec(resolution)?.[1],
+    });
+  });
+  closeCurrent();
   return out;
 }
 

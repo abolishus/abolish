@@ -4,6 +4,10 @@
 # node_modules/.modules.yaml before running tests early in a session.
 set -euo pipefail
 
+# Development sessions only: the review workflows run Claude Code in CI, where
+# these services and installs are neither wanted nor allowed.
+if [ "${GITHUB_ACTIONS:-}" = "true" ]; then exit 0; fi
+
 cd "${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel)}"
 export PATH="$HOME/.local/share/vite-plus/bin:$PATH"
 

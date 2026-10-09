@@ -7,6 +7,10 @@
 # Dependency install runs separately and asynchronously (session-install.sh).
 set -euo pipefail
 
+# Development sessions only: the review workflows run Claude Code in CI, where
+# these services and installs are neither wanted nor allowed.
+if [ "${GITHUB_ACTIONS:-}" = "true" ]; then exit 0; fi
+
 log() { echo "[session-start] $*" >&2; }
 
 PG_USER=abolish

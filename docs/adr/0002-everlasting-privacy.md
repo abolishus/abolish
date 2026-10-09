@@ -3,7 +3,7 @@
 - Status: needs-decision
 - Date: 2026-10-09
 - Deciders: owner (one-way door)
-- Threats addressed: T-15 (primary), T-14, T-11, T-16, T-18, T-25, T-26, T-27, T-28, T-29, T-30, T-32, T-33, T-36, T-37, T-38, T-39, T-40, T-45 (see [[THREAT_MODEL]])
+- Threats addressed: T-15 (primary), T-14, T-11, T-16, T-18, T-25, T-26, T-27, T-28, T-29, T-30, T-32, T-33, T-36, T-37, T-38, T-39, T-40, T-41, T-42, T-45, T-46 (see [[THREAT_MODEL]])
 
 ## Context
 
@@ -71,39 +71,49 @@ How it works:
    - the Pedersen VSS commitments to the sharing polynomials of `(v, r)`, with threshold k, whose constant term is `C`;
    - disjunctive CDS proofs that each `C` commits to 0 or 1, plus a proof that the sum is allowed (T-28).
 
-   It also publishes `H(ct_i)` for each trustee's share ciphertext. The Fiat–Shamir challenge binds the full statement: every commitment, every VSS commitment, every `H(ct_i)`, the nullifier, the poll and the version (T-30, T-32, T-38). Everything here is perfectly hiding:
+   It also publishes `H(ct_i)` for each trustee's share ciphertext. Order of construction: shares and share ciphertexts first, then the public part, then the proofs. The Fiat–Shamir challenge binds the full statement: every commitment, every VSS commitment, every `H(ct_i)`, the nullifier, the poll and the version (T-30, T-32, T-38). Everything here is perfectly hiding:
    - Every `v` is equally consistent with the commitments.
    - The CDS proofs are witness-indistinguishable, and both branches are true statements.
    - `H(ct_i)` is statistically hiding in the random-oracle model, because each ciphertext carries more fresh entropy than the digest length.
 
-3. **Private part.** Trustee i's shares `(f(i), g(i))` for every option are encrypted to that trustee with a hybrid KEM and an AEAD. The associated data binds the poll, nullifier, trustee index, version and the hash of the public part.
-   - The KEM combines ML-KEM-768 (FIPS 203) with Diffie–Hellman in the commitment group. It uses the combiner construction of X-Wing (`draft-connolly-cfrg-xwing-kem`, revision pinned in the spec at P1-12; generally, Giacon, Heuer and Poettering, "KEM Combiners", PKC 2018).
-   - Using the commitment group instead of X25519 is deliberate. It lets a trustee prove what it decrypted (step 4) with a standard Chaum–Pedersen proof.
-   - The client uses fresh randomness and keeps no encapsulation seeds. Seeds would be proof of the vote for a coercer or a device thief (T-18, T-45, T-46).
-   - The ciphertexts go to the trustees' intake, not onto the public board.
-4. **Counting rule: a ballot counts unless it is publicly proven invalid.** Each trustee checks its share against the public VSS commitments.
-   - **Invalid share.** If the share is invalid, or the ciphertext doesn't decrypt, the trustee publishes a complaint with publicly verifiable decryption. It reveals the ML-KEM message `m`; anyone re-encapsulates (FIPS 203 `Encaps_internal`, used here only to verify, never to generate randomness) and compares with `ct`. It also reveals the Diffie–Hellman shared secret with a Chaum–Pedersen proof against its registered key. Anyone can then recompute the key, decrypt, and confirm the share is bad. A proven complaint excludes the ballot. Only a cheating client's share is ever revealed.
-   - **False complaint.** A complaint about a valid share fails publicly. It reveals only a share the complaining trustee already holds, which is no more than the trustee could leak anyway (T-14).
-   - **Delivery.** Each trustee signs a receipt for `H(ct_i)` when it receives the ciphertext. A ciphertext that isn't acknowledged by the voting deadline is re-delivered publicly through the board. That one share then has only post-quantum computational privacy. Forcing a ballot's privacy down to computational therefore takes k refusing trustees, who could read the ballot anyway.
-   - **Tally liveness.** The complaint window closes, and the counted set is fixed and anchored, before any sum is published. Every trustee that contributes a sum has then either a valid share of every counted ballot or a proven complaint that excluded the ballot. Any k honest trustees can therefore tally, whatever the voters did. Offline trustees simply don't contribute.
-   - **Re-voting (T-33, T-38, T-45).** "Last ballot" is decided by board order alone. If a nullifier's last ballot is proven invalid, that nullifier counts nothing. It never falls back to an earlier ballot. Only a cheating client can produce a provably invalid share, so honest voters are never affected, and an attacker can't use complaints to revert a re-vote.
+3. **Private part.** Trustee i's shares `(f(i), g(i))` for every option are encrypted to that trustee with a hybrid KEM and an AEAD. The AEAD's associated data binds the trustee index and a hash of the commitments, VSS commitments, nullifier, poll and version. It does not bind `H(ct_i)`, which is computed from the AEAD's own output.
+   - **The KEM is our own composition, specified in `docs/spec/`.** It combines ML-KEM-768 (FIPS 203) with Diffie–Hellman in the commitment group, following the X-Wing pattern (`draft-connolly-cfrg-xwing-kem`; generally, Giacon, Heuer and Poettering, "KEM Combiners", PKC 2018): the key is a hash of `ss_M ‖ ss_DH ‖ ct_DH ‖ pk_DH ‖ label`. Omitting `ct_M` from that hash rests on ML-KEM's ciphertext second-preimage resistance, as in X-Wing's analysis.
+   - **It isn't X-Wing.** X-Wing is defined only over X25519, so its library implementations and vectors don't apply. We use the commitment group instead so that a trustee can prove a Diffie–Hellman value with a standard Chaum–Pedersen proof (step 4).
+   - **Trustee KEM keys are fresh for each election.** That bounds any oracle exposure to one election, and lets keys be retired after the tally.
+   - **The client keeps encapsulation randomness only until the cast/spoil decision.** It reveals it on spoil, so a Benaloh challenge can check that each share went to the right trustee key (P1-13), and erases it on cast. The one exception is the ML-KEM message `m_i` of a ciphertext the client had to post publicly (step 4), which it keeps until the complaint window closes. A `m_i` without the Diffie–Hellman secret proves nothing about the vote to a coercer or a device thief (T-18, T-45, T-46).
+4. **Delivery and counting.**
+   - **Synchronous intake (the normal path).** Before the client shows "cast", it delivers each `ct_i` to trustee i's intake. The trustee decapsulates it, checks the share against the public VSS commitments, and returns a signed receipt for `H(ct_i)` stating that the share is valid. If the check fails, the trustee refuses at once and publishes nothing. Accepting or refusing reveals only what ML-KEM's IND-CCA security already allows a decapsulation oracle to reveal, and the Diffie–Hellman value never leaves the trustee.
+   - **Public posting (the fallback).** If trustee i doesn't answer, because it's offline, refuses, or our relay is down, the client posts `ct_i` to the board itself. That needs no trustee's cooperation, so trustees can't block a ballot by staying silent.
+   - **Deadline.** A delivery deadline falls after close. A ballot counts only if, by that deadline, every one of its n ciphertexts has a valid-share receipt or is posted on the board.
+   - **Complaints exist only for posted ciphertexts.** When trustee i decapsulates a posted ciphertext, there are two failure cases:
+     - The ML-KEM re-encryption check passes but the share is invalid. The trustee publishes `m` (anyone re-encapsulates with FIPS 203 `Encaps_internal`, used only to verify, and compares with `ct_i`) and the Diffie–Hellman value, with a Chaum–Pedersen proof against its registered key. Anyone then decrypts and confirms that the share is bad. That excludes the ballot. The trustee never reveals `m` for a ciphertext that failed the re-encryption check: that raw decryption output is exactly what the FO transform hides, and revealing it would leak the ML-KEM key over a few thousand crafted ciphertexts.
+     - The re-encryption check fails. The trustee publishes an unproven claim, and the client must answer by revealing `m_i` within the complaint window. If `m_i` re-encapsulates to `ct_i`, the claim is false and the ballot counts. If not, or if the client doesn't answer, the ballot is excluded.
+   - **Static-DH oracle.** Each proven complaint reveals the Diffie–Hellman value for an ephemeral key the poster chose, which is a static Diffie–Hellman oracle (Brown and Gallant, 2004; Cheon, EUROCRYPT 2006). Per-election keys bound the number of queries to the number of posted ciphertexts in one election. P1-11 checks the loss for the chosen group (the factorisation of ℓ ± 1).
+   - **Complaint window.** Complaints must be filed promptly after posting, and in any case before close where the posting happened before close. A voter whose ballot draws a complaint can then still re-vote. The voter's receipt check shows each of their ballot's receipts, postings and complaints.
+   - **Tally liveness.** The complaint window closes, and the counted set is fixed and anchored, before any sum is published. Every counted ballot then has a valid share at every trustee: either the trustee receipted it, or it was posted and not excluded. Any k honest trustees can therefore tally, whatever the voters did.
+   - **Re-voting (T-33, T-38, T-45).** "Last ballot" is decided by board order alone. If a nullifier's last ballot is excluded, that nullifier counts nothing; it never falls back to an earlier ballot, so complaints can't revert a re-vote. A ballot can be excluded only because its client sent an invalid share, or because the client failed to answer a claim on a posted ciphertext. That "cheating client" can be malware or a malicious served client acting for an honest voter (T-41, T-42). The defences are the receipt check and Benaloh challenges, plus re-voting before close.
 5. **Tally.** Over the counted set, each trustee publishes its summed shares per option. Anyone checks each trustee's sums against the product of the public VSS commitments, so a wrong sum is attributed to its trustee (T-29). Any k correct sums interpolate to the aggregate `(Σv, Σr)`, which must open the product of the public commitments.
    - Publishing two aggregates over ballot sets that differ by a few ballots would reveal those ballots' openings, permanently. So exactly one aggregate is published per disjoint partition (per tier, and per region where results are regional), over the anchored counted set, and it is never re-published (T-16).
 
 - **Pros:**
-  - **The public board is information-theoretically hiding.** Nothing on it reveals any individual vote, even to an adversary with unbounded computation or a quantum computer. That covers the commitments, VSS commitments, ciphertext hashes, validity proofs and the tally transcript. T-15 is mitigated for everything published.
-  - **No DKG.** Trustees only need a KEM key and a signing key each, and the threshold comes from voter-side sharing. That removes the DKG's key-bias and rogue-key attacks (T-40). The ceremony becomes key registration, with proofs of possession: a challenge encapsulated to the KEM key that the trustee must answer, and a signature.
+  - **The public board is information-theoretically hiding.** Nothing the protocol publishes reveals any individual vote, even to an adversary with unbounded computation or a quantum computer. That covers the commitments, VSS commitments, ciphertext hashes, validity proofs and the tally transcript. T-15 is mitigated for everything published, except ciphertexts posted under the fallback.
+  - **What it can't stop:** k colluding trustees can publish one ballot's shares, and anyone can check them against the public VSS commitments. That makes the ballot permanently and verifiably public, which helps a coercer. Option A has the same property: k trustees can publish a decryption with proofs. It belongs under T-14.
+  - **No DKG for plurality and approval.** Ranked choice still needs a threshold key for the mix (below). Trustees only need a KEM key and a signing key each, and the threshold comes from voter-side sharing. That removes the DKG's key-bias and rogue-key attacks (T-40). The ceremony becomes key registration, with proofs of possession: a challenge encapsulated to the KEM key that the trustee must answer, and a signature.
   - **Attributable trustee errors.** Each trustee's contribution to the tally is checked individually against public data (T-29).
-  - **Only group operations come from a library.** The group operations, hash-to-curve and the AEAD come from audited `@noble/*` libraries. Pedersen commitments, VSS, CDS proofs, Lagrange interpolation and the KEM combiner are our own compositions of published protocols. No published vectors exist for this composition, so `docs/spec/vectors/` and `crypto-review` carry the weight (T-36).
+  - **Only group operations come from a library.** The group operations, hash-to-curve and the AEAD come from audited `@noble/*` libraries. Pedersen commitments, VSS, CDS proofs, Lagrange interpolation, the complaint proofs and the hybrid KEM are our own compositions of published protocols. No published vectors exist for this composition, so `docs/spec/vectors/` and `crypto-review` carry the weight (T-36).
 - **Cons:**
   - **The private part is only computationally hiding.** Suppose someone records the share ciphertexts in transit (A-1 recording traffic to us or to the trustees) and later breaks both ML-KEM and discrete log. Shares for k trustees then reveal the vote. Privacy against that adversary is post-quantum conjectured (Module-LWE), not everlasting. Hybrid post-quantum TLS on every intake endpoint, and never publishing the ciphertexts, reduce the exposure.
   - **The brief's "election key" doesn't exist under B.** The brief says the election key is split across k-of-n trustees. Under B there is no single election key: the k-of-n threshold applies to each ballot's opening instead. The trust property is the same (no k−1 trustees can read a ballot or alter the tally undetected), but the owner should accept this deviation explicitly.
-  - **Trustees take on operational duties:** running intake, keeping ciphertexts until the tally, checking every ballot, and complaining within the window. That means being online during voting and the complaint window, not only at the tally. These duties belong to the trustee decision (P1-7), which is never defaulted. Default adoption of this ADR doesn't decide them.
+  - **Trustees take on operational duties:** running synchronous intake, keeping ciphertexts until the tally, checking every ballot, and checking posted ciphertexts within the complaint window. That means being online throughout voting, not only at the tally. These duties belong to the trustee decision (P1-7), which is never defaulted. Default adoption of this ADR doesn't decide them.
   - **More parties see network metadata.** Each trustee's intake endpoint sees submission metadata, so up to n more parties can correlate IPs (T-11).
-  - **Direct submit exposes the private part.** A voter who bypasses our servers (T-25) sends the share ciphertexts straight to the trustees' intake, and the contracts take only the public part. If every trustee endpoint is also unreachable, the last resort is posting the ciphertexts on-chain. That ballot then has only post-quantum computational privacy, not everlasting, and costs more gas (T-27). The client must say so before the voter uses that path.
+  - **Offline trustees and direct submit expose the private part.** Each trustee that doesn't answer at cast time gets its ciphertext posted publicly. That share then has only post-quantum computational privacy, and gas costs rise (T-27).
+    - A trustee that is offline for all of voting (the brief's "two offline") has its share posted for every ballot. That permanently lowers the number of ciphertexts A-11 must break to read a ballot, from k to k minus the number of offline trustees.
+    - A voter who bypasses our servers (T-25) delivers to the trustees' intake directly, and the contracts take only the public part. If every trustee is also unreachable, all n ciphertexts are posted, and that ballot is only post-quantum-computationally private, not everlasting.
+    - The client must say so before it posts.
+  - **A false claim can drop an offline voter.** A trustee can claim that a posted ciphertext fails the re-encryption check. If the voter's client is offline for the whole complaint window and can't answer with `m_i`, the ballot is excluded. The exclusion is public and attributable to that trustee, and only ciphertexts that were posted can draw such a claim.
   - **Availability of the private part.** Until the tally is published, the election depends on k trustees keeping their ciphertexts. They aren't on the public board, so they can't be rebuilt from chain and IPFS. Each trustee keeps its own, and our operational store keeps a non-authoritative copy (encrypted to the trustees). Once the tally transcript is published, the wipe-and-rebuild invariant holds again for the result. T-40's "losing or leaking a share" now applies to per-ballot ciphertexts.
   - **Larger ballots, more trustee work.** Rough estimate for 10 options, k = 4 and n = 7:
-    - public part about 3.2 KB: 1.3 KB of VSS commitments, 1.4 KB of CDS proofs, 0.2 KB of ciphertext hashes, plus the trustees' signed receipts;
+    - public part about 3.2 KB: 1.3 KB of VSS commitments, 1.4 KB of CDS proofs and 0.2 KB of ciphertext hashes, plus n signed receipts (or posted ciphertexts);
     - private part about 12.4 KB: seven ciphertexts of 1,120 bytes, plus 640 bytes of shares and an AEAD tag each.
 
     Trustees decapsulate and check every ballot, not only the aggregate.
@@ -115,7 +125,7 @@ How it works:
     - (b) ship Diffie–Hellman-only share encryption, whose private-part privacy is then classical (Shor-breakable), with T-15's residual stated as such.
 
     An agent never ships the unaudited ML-KEM code on its own authority, and default adoption of this ADR doesn't decide this question.
-- **Threats:** T-15 is **mitigated for the public board**. The residual is harvested private-part ciphertexts (post-quantum conjectured, or classical under (b)) and direct-submit fallback ballots. Other effects:
+- **Threats:** T-15 is **mitigated for the public board**. The residual is harvested private-part ciphertexts (post-quantum conjectured, or classical under (b)) and ciphertexts posted publicly (offline or refusing trustees, direct submit). Other effects:
   - T-14 is unchanged: k trustees read ballots during the election.
   - T-29 is improved: errors are attributable.
   - T-40 trades DKG bias for per-ballot custody.
@@ -140,14 +150,14 @@ Keep a single public, self-contained ciphertext as in A, but under a lattice ass
 **Option B: perfectly hiding commitments on the public board, with openings shared to the trustees under a hybrid post-quantum KEM, off the board.**
 
 - **It is the only option whose published data stays private against any future adversary.** The board is permanent and is mirrored to IPFS and an archive, so its privacy has to last as long as the data does.
-- **What B leaves computational isn't permanent or public.** That is the share ciphertexts, in transit and at the trustees: they are never published, they travel under post-quantum hybrid encryption, and they can be deleted after the tally. Under A or C, the computational part _is_ the permanent public record.
+- **What B leaves computational is mostly neither permanent nor public.** That is the share ciphertexts, in transit and at the trustees. They are published only under the posting fallback, they travel under post-quantum hybrid encryption, and they can be deleted after the tally. Under A or C, the computational part _is_ the permanent public record.
 - **It removes the DKG** (T-40) and makes each trustee's tally contribution checkable on its own (T-29).
 - **It is built only from published protocols** (CFSY96, Pedersen VSS, CDS, a KEM combiner) over group operations from audited `@noble/*` libraries.
 
 The costs are real, and P1-12 to P1-15 must carry them:
 
-- trustee intake endpoints, the complaint procedure and its window;
-- a direct-submit fallback with weaker privacy, disclosed to the voter;
+- synchronous trustee intake, public posting, the complaint procedure and its window;
+- a posting fallback (offline trustees, direct submit) with weaker privacy, disclosed to the voter;
 - availability of the private part until the tally;
 - the ML-KEM audit question, which the owner answers;
 - a less established mixnet for ranked choice.
@@ -162,13 +172,14 @@ What would change the recommendation:
 
 If B is accepted:
 
-- **P1-11** picks the prime-order group, derives the second generator `h` by hash-to-curve (RFC 9380) with a registered domain tag, and publishes vectors that let anyone check `h` was derived as specified, so no one could have chosen it.
-- **P1-12** becomes "ballot commitments, VSS commitments, validity proofs and hybrid-KEM share encryption", with ciphertext hashes in the public part and the full Fiat–Shamir statement binding. The client generates all randomness through `packages/crypto` and keeps no encapsulation seeds (T-39, T-18). The format follows [[0001-canonical-encoding]]. P1-12 also pins the X-Wing draft revision the combiner follows.
+- **P1-11** picks the prime-order group, checks its static Diffie–Hellman loss, derives the second generator `h` by hash-to-curve (RFC 9380) with a registered domain tag, and publishes vectors that let anyone check `h` was derived as specified, so no one could have chosen it.
+- **P1-12** becomes "ballot commitments, VSS commitments, validity proofs and hybrid-KEM share encryption", with ciphertext hashes in the public part and the full Fiat–Shamir statement binding. The client generates all randomness through `packages/crypto`, and keeps encapsulation randomness only as step 3 allows (T-39, T-18). The format follows [[0001-canonical-encoding]]. P1-12 also specifies the hybrid KEM (following the X-Wing pattern) with its own vectors, and per-election trustee keys.
 - **P1-13** covers:
-  - trustee receipts, the complaint procedure (publicly verifiable decryption), the complaint window and public re-delivery;
+  - synchronous intake with valid-share receipts, public posting, the delivery deadline, the complaint procedure for posted ciphertexts and its window;
   - the counting rule, including re-voting by board order with no fallback;
-  - how Benaloh challenges open both the commitments and the shares (a spoiled ballot reveals its own vote and is never counted).
-- **P1-14** becomes trustee key registration instead of a DKG: a hybrid KEM key and a signing key per trustee, each with proof of possession, in a public, anchored transcript. The STATUS item ("Pedersen/Feldman DKG") is rewritten to match.
+  - the voter's receipt check, which shows receipts, postings and complaints;
+  - how Benaloh challenges open the commitments, the shares and the encapsulation randomness (a spoiled ballot reveals its own vote and is never counted).
+- **P1-14** becomes trustee key registration instead of a DKG (for plurality and approval): a fresh hybrid KEM key for each election and a signing key per trustee, each with proof of possession, in a public, anchored transcript. The STATUS item ("Pedersen/Feldman DKG") is rewritten to match.
 - **P1-15** publishes per-trustee summed shares checked against the public VSS commitments, the opening of the aggregate commitment, and exactly one aggregate per disjoint partition.
 - **P1-4** must say, per election type, how the tally works over commitments, in particular ranked choice.
 - **P1-12 prerequisite:** the audit status of `@noble/post-quantum` is checked and recorded in STATUS, and the owner answers the ML-KEM question above.
@@ -176,7 +187,7 @@ If B is accepted:
 - **P2-3 and P2-11:** every ballot intake endpoint (ours and the trustees') negotiates hybrid post-quantum TLS (`X25519MLKEM768`), and logs never retain share ciphertexts beyond the tally.
 - **P1-16, P1-20 and P4-1** anchor every verification, complaint and tally transcript to L1.
 - **[[THREAT_MODEL]]** changes:
-  - T-15 becomes "Partial by design". The residual is harvested private-part ciphertexts and direct-submit fallback ballots.
+  - T-15 becomes "Partial by design". The residual is harvested private-part ciphertexts and publicly posted ciphertexts. Each trustee offline during voting lowers the harvest threshold for the ballots it missed.
   - The T-28, T-29, T-37 and T-40 mitigation texts are rewritten for commitments, summed shares and key registration in place of ElGamal, decryption shares and the DKG.
   - The not-mitigated list keeps T-14 and records that participation privacy rests on Poseidon.
 

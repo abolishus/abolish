@@ -11,10 +11,13 @@
 //                           in a clean checkout, apply the accepted next snapshot
 //                           versions from <file> (release-versions output, untrusted)
 //                           and print "<dir> <name> <version>" for each to publish
-//   release-shipped --name <n> --version <v>
-//                           check the packed package.json (on stdin) of n@v
+//   release-verify --plan <file> --a <dir> --b <dir>
+//                           check both builds' tarballs against the plan: one per
+//                           planned package, byte-identical, and each packed
+//                           manifest and file list acceptable to publish
 
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   appendFileSync,
   existsSync,
@@ -53,9 +56,12 @@ import {
 } from "./lockfile.ts";
 import {
   proposedVersions,
+  reproducedErrors,
   setVersion,
-  shippedManifestErrors,
+  shippedErrors,
   snapshotReleases,
+  tarballName,
+  type Release,
 } from "./release.ts";
 
 function git(...args: string[]): string {
@@ -354,15 +360,40 @@ function releaseApply(): void {
   for (const r of plan.releases) process.stdout.write(`${r.dir} ${r.name} ${r.version}\n`);
 }
 
-function releaseShipped(): void {
-  const manifest = JSON.parse(readFileSync(0, "utf8")) as Record<string, unknown>;
-  const errors = shippedManifestErrors(manifest, {
-    dir: "",
-    name: arg("--name"),
-    version: arg("--version"),
-  });
+function releaseVerify(): void {
+  const plan: Release[] = readFileSync(arg("--plan"), "utf8")
+    .split("\n")
+    .filter((l) => l !== "")
+    .map((l) => {
+      const [dir = "", name = "", version = ""] = l.split(" ");
+      return { dir, name, version };
+    });
+  const hashes = (dir: string) =>
+    new Map(
+      readdirSync(dir).map((f) => [
+        f,
+        createHash("sha256")
+          .update(readFileSync(join(dir, f)))
+          .digest("hex"),
+      ]),
+    );
+  const a = hashes(arg("--a"));
+  const errors = reproducedErrors(plan, a, hashes(arg("--b")));
+  if (errors.length === 0) {
+    for (const r of plan) {
+      const tgz = join(arg("--a"), tarballName(r));
+      const files = execFileSync("tar", ["-tzf", tgz], { encoding: "utf8" })
+        .split("\n")
+        .filter((f) => f !== "");
+      const manifest = JSON.parse(
+        execFileSync("tar", ["-xzOf", tgz, "package/package.json"], { encoding: "utf8" }),
+      ) as Record<string, unknown>;
+      errors.push(...shippedErrors(manifest, files, r));
+    }
+  }
   for (const e of errors) console.error(e);
   if (errors.length > 0) process.exit(1);
+  console.log(`verified ${plan.length} tarball(s) from both builds`);
 }
 
 const command = process.argv[2];
@@ -385,8 +416,8 @@ switch (command) {
   case "release-apply":
     releaseApply();
     break;
-  case "release-shipped":
-    releaseShipped();
+  case "release-verify":
+    releaseVerify();
     break;
   default:
     console.error(`unknown command: ${command ?? "(none)"}`);

@@ -139,12 +139,35 @@ function escape(literal: string): string {
 /** Lifecycle scripts npm runs on every consumer's install. */
 const INSTALL_SCRIPTS = ["preinstall", "install", "postinstall"];
 
+/** The file name `pnpm pack` gives a release's tarball. */
+export function tarballName(r: { name: string; version: string }): string {
+  return `${r.name.replace(/^@/, "").replace("/", "-")}-${r.version}.tgz`;
+}
+
+/** Every path a manifest's entry points name: exports (with fallbacks), main, module, types, bin. */
+export function entryPoints(manifest: Record<string, unknown>): unknown[] {
+  const out: unknown[] = [];
+  const walk = (x: unknown): void => {
+    if (x === null || x === undefined) return;
+    if (Array.isArray(x)) x.forEach(walk);
+    else if (typeof x === "object") Object.values(x).forEach(walk);
+    else out.push(x);
+  };
+  walk(manifest["exports"]);
+  for (const f of ["main", "module", "types", "typings"])
+    if (manifest[f] !== undefined) out.push(manifest[f]);
+  walk(manifest["bin"]);
+  return out;
+}
+
 /**
- * Checks the package.json inside a packed tarball, i.e. what npm publishes
- * and consumers install, not the workspace manifest it was packed from.
+ * Checks a packed tarball (its package.json and file list): what npm
+ * publishes and consumers install, not the workspace manifest it was packed
+ * from. `files` are the tarball's entry names (`package/...`).
  */
-export function shippedManifestErrors(
+export function shippedErrors(
   manifest: Record<string, unknown>,
+  files: readonly string[],
   release: Release,
 ): string[] {
   const errors: string[] = [];
@@ -158,7 +181,47 @@ export function shippedManifestErrors(
   const scripts = (manifest["scripts"] ?? {}) as Record<string, unknown>;
   for (const s of INSTALL_SCRIPTS)
     if (s in scripts) errors.push(`${at}: runs a ${s} script on consumers' machines`);
+  // npm runs `node-gyp rebuild` on install for a package with a binding.gyp.
+  if (files.includes("package/binding.gyp") || "gypfile" in manifest)
+    errors.push(`${at}: builds native code on consumers' machines (binding.gyp)`);
   for (const f of ["bundleDependencies", "bundledDependencies"])
     if (f in manifest) errors.push(`${at}: ${f} ships third-party code inside the tarball`);
+  const shipped = new Set(files);
+  for (const target of entryPoints(manifest)) {
+    if (typeof target !== "string" || target.includes("*")) {
+      errors.push(`${at}: unsupported entry point ${JSON.stringify(target)}`);
+      continue;
+    }
+    if (!shipped.has(`package/${target.replace(/^\.\//, "")}`))
+      errors.push(`${at}: entry point ${target} is not in the tarball`);
+  }
+  return errors;
+}
+
+/**
+ * The release as both builds produced it: exactly one tarball per planned
+ * package and nothing else in each build, byte-identical across the two.
+ * `a` and `b` map file name to sha256.
+ */
+export function reproducedErrors(
+  plan: readonly Release[],
+  a: ReadonlyMap<string, string>,
+  b: ReadonlyMap<string, string>,
+): string[] {
+  const expected = plan.map(tarballName).sort();
+  const errors: string[] = [];
+  for (const [label, files] of [
+    ["a", a],
+    ["b", b],
+  ] as const) {
+    const actual = [...files.keys()].sort();
+    if (JSON.stringify(actual) !== JSON.stringify(expected))
+      errors.push(
+        `build ${label} produced ${actual.join(", ") || "nothing"}; the plan is ${expected.join(", ") || "empty"}`,
+      );
+  }
+  for (const name of expected)
+    if (a.has(name) && a.get(name) !== b.get(name))
+      errors.push(`${name} differs between builds a and b; the release is not reproducible`);
   return errors;
 }

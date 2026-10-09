@@ -1,10 +1,13 @@
 import fc from "fast-check";
 import { describe, expect, test } from "vite-plus/test";
 import {
+  entryPoints,
   proposedVersions,
+  reproducedErrors,
   setVersion,
-  shippedManifestErrors,
+  shippedErrors,
   snapshotReleases,
+  tarballName,
 } from "../src/release.ts";
 
 const commit = "7ca807bb8835312c5ff1ec4afcd89f463ea7faff";
@@ -234,7 +237,7 @@ describe("setVersion", () => {
   });
 });
 
-describe("shippedManifestErrors", () => {
+describe("shippedErrors", () => {
   const release = {
     dir: "packages/sdk",
     name: "@abolishus/sdk",
@@ -244,12 +247,14 @@ describe("shippedManifestErrors", () => {
     name: release.name,
     version: release.version,
     license: "Apache-2.0",
+    exports: { ".": { types: "./dist/index.d.mts", default: "./dist/index.mjs" } },
     publishConfig: { access: "public" },
     scripts: { build: "vp pack", test: "vp test run" },
   };
+  const files = ["package/package.json", "package/dist/index.mjs", "package/dist/index.d.mts"];
 
-  test("accepts the manifest of the planned release", () => {
-    expect(shippedManifestErrors(shipped, release)).toEqual([]);
+  test("accepts the planned release with every entry point shipped", () => {
+    expect(shippedErrors(shipped, files, release)).toEqual([]);
   });
 
   test("refuses a tarball that differs from the plan or could run code on install", () => {
@@ -262,13 +267,60 @@ describe("shippedManifestErrors", () => {
       { scripts: { postinstall: "node x.js" } },
       { scripts: { preinstall: "x" } },
       { scripts: { install: "x" } },
+      { gypfile: true },
       { bundleDependencies: ["x"] },
       { bundledDependencies: true },
+      { main: "./dist/index.cjs" },
+      { bin: { abolish: "./bin/cli.mjs" } },
+      { exports: { ".": ["./dist/index.mjs", "./dist/missing.mjs"] } },
+      { exports: { "./*": "./dist/*.mjs" } },
     ]) {
       expect(
-        shippedManifestErrors({ ...shipped, ...change }, release),
+        shippedErrors({ ...shipped, ...change }, files, release),
         JSON.stringify(change),
       ).toHaveLength(1);
     }
+    expect(shippedErrors(shipped, [...files, "package/binding.gyp"], release)).toHaveLength(1);
+  });
+
+  test("entry points cover exports fallbacks, main, types and bin", () => {
+    expect(
+      entryPoints({
+        exports: { ".": [{ import: "./a.mjs" }, "./b.mjs"], "./x": null },
+        main: "./c.js",
+        types: "./d.d.ts",
+        bin: "./e.js",
+      }),
+    ).toEqual(["./a.mjs", "./b.mjs", "./c.js", "./d.d.ts", "./e.js"]);
+  });
+});
+
+describe("reproducedErrors", () => {
+  const plan = [
+    { dir: "packages/crypto", name: "@abolishus/crypto", version: `0.1.0-next-${commit}` },
+    { dir: "packages/sdk", name: "@abolishus/sdk", version: `0.0.1-next-${commit}` },
+  ];
+  const names = plan.map(tarballName);
+  const same = new Map(names.map((n) => [n, "aa"]));
+
+  test("names tarballs as pnpm pack does", () => {
+    expect(names).toEqual([
+      `abolishus-crypto-0.1.0-next-${commit}.tgz`,
+      `abolishus-sdk-0.0.1-next-${commit}.tgz`,
+    ]);
+  });
+
+  test("accepts identical builds of exactly the plan, including an empty one", () => {
+    expect(reproducedErrors(plan, same, new Map(same))).toEqual([]);
+    expect(reproducedErrors([], new Map(), new Map())).toEqual([]);
+  });
+
+  test("refuses a missing, extra or differing tarball", () => {
+    const missing = new Map([[names[0] ?? "", "aa"]]);
+    const extra = new Map([...same, ["evil.tgz", "bb"]]);
+    const differs = new Map([...same, [names[1] ?? "", "bb"]]);
+    expect(reproducedErrors(plan, missing, same)).toHaveLength(1);
+    expect(reproducedErrors(plan, same, extra)).toHaveLength(1);
+    expect(reproducedErrors(plan, same, differs)).toHaveLength(1);
   });
 });

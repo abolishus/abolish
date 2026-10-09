@@ -27,7 +27,7 @@ Each check names the threats it closes and the STATUS item that specifies it. A 
 
 - 2.1 The definition decodes strictly, and its hash (`abolish/v1/election-definition`) equals the hash registered on L2 before voting opened (T-34; P1-10, P1-18).
 - 2.2 It binds the chain ID and contract addresses the ballots were submitted to, so nothing can be replayed from another chain or deployment (T-30, T-32; P1-10).
-- 2.3 Its election type and tally scheme are ones this verifier supports, its profile pins a version for every record type the election uses, and every record of the election (board entries, ballots, openings, transcripts) uses exactly the version its profile pins (`profile-mismatch` otherwise) ([[versioning]]; T-31, T-34, [[0003-tally-scheme]]).
+- 2.3 Its election type and tally scheme are ones this verifier supports, its profile pins a version for every record type the election uses, and every record of the election (board entries, ballots, openings, transcripts) uses exactly the version its profile pins (`profile-mismatch` otherwise) and no version it pins was retired before the definition was registered ([[versioning]]; T-31, T-34, [[0003-tally-scheme]]).
 - 2.4 Its electorate is a group root per tier at a fixed L2 block, and that root matches the root computed from the board's record of signed group additions, never the L2 state alone (T-08, T-13, T-06, T-71; P1-18, P3-2).
 - 2.5 Its trustee panel (keys, `k`, `n`, panel identifier) matches the ceremony transcript and the keys registered on L2 (T-37, [[0006-trustees]]; P1-14, P1-18).
 - 2.6 Its timing (open, close, drift bound δ and the L2 sequencing bounds it assumes) is well formed, and the L2's configuration stayed within those bounds for the whole poll (T-35, T-50, [[0004-l2-choice]]; P1-18).
@@ -35,7 +35,7 @@ Each check names the threats it closes and the STATUS item that specifies it. A 
 
 ### 3. Key ceremony
 
-- 3.1 The ceremony transcript decodes strictly, its hash matches the one registered with the trustee keys on L2, and every proof in it verifies (T-37, T-40; P1-14). **(P1-3)**
+- 3.1 The ceremony transcript decodes strictly, its hash matches the one registered with the trustee keys on L2, and every proof in it verifies, with its Fiat–Shamir context (chain ID, registry address, election identifier, panel) rebuilt from the election being verified, never read from the transcript, so one election's ceremony can't be registered for another (T-37, T-40; P1-14). **(P1-3)**
 - 3.2 At least the number of trustees the panel rules require took part, and every complaint and disqualification in the transcript is resolved as the spec says ([[0006-trustees]]; T-40, T-54; P1-14).
 
 ### 4. Board, anchors and archive
@@ -73,6 +73,7 @@ Each check names the threats it closes and the STATUS item that specifies it. A 
 - 7.1 The aggregates are recomputed from the selected ballots alone, per tier and per option (T-29, T-08, [[0003-tally-scheme]]; P1-15). **(P1-3)**
 - 7.2 Every decryption or opening share verifies against its trustee's registered key, at least `k` valid shares are combined, and the combination gives the published result (T-29, T-14; P1-15). **(P1-3)**
 - 7.3 The tally transcript decodes strictly and its hash matches its board entry (T-29; P1-15).
+- 7.4 Every decryption or opening share on the board is for an aggregate the spec allows (per tier and option, over the selected ballots, [[0006-trustees]]); any other share, such as one for an individual ballot or for overlapping sets whose difference is one ballot, is reported with the trustee that posted it (T-14, T-16, T-29; P1-15).
 
 ### 8. Report
 

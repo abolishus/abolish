@@ -7,7 +7,7 @@
 
 ## Context
 
-Every ballot is published on the bulletin board. The board is mirrored to IPFS, written to the permanent archive (P1-6) and partly posted on the L2, and nothing published can be withdrawn. Whatever the board says about a vote today, an adversary can read in thirty years with whatever cryptanalysis exists then (A-11, "harvest now, decrypt later"). The brief requires an ADR on perfectly hiding commitments versus standard threshold ElGamal, with a post-quantum analysis, before the tally is built (P1-12).
+Every ballot is published on the bulletin board. The board is mirrored to IPFS, written to the permanent archive ([[0005-permanent-archive]] recommends Arweave, which guarantees a permanent copy) and partly posted on the L2, and nothing published can be withdrawn. Whatever the board says about a vote today, an adversary can read in thirty years with whatever cryptanalysis exists then (A-11, "harvest now, decrypt later"). The brief requires an ADR on perfectly hiding commitments versus standard threshold ElGamal, with a post-quantum analysis, before the tally is built (P1-12).
 
 The decision is one-way twice over:
 
@@ -46,7 +46,7 @@ The classic design: Helios (Adida, USENIX Security 2008), Belenios, and Election
   - The best-studied design for verifiable voting, with published specs and test vectors (ElectionGuard) to follow and check against.
   - Everything needed to tally sits on the public board, so the wipe-and-rebuild invariant and direct submit are simple: a ballot is self-contained.
   - Smallest ballots: two group elements and one proof per option.
-  - Works for both tally schemes P1-4 compares: homomorphic for plurality and approval, and well-known verifiable mixnets for ranked choice (Terelius–Wikström, Bayer–Groth).
+  - Works for both tally schemes [[0003-tally-scheme]] uses: homomorphic for plurality and approval, and well-known verifiable mixnets for ranked choice (Terelius–Wikström, Bayer–Groth).
 - **Cons:**
   - **Privacy is only computational (DDH).** A discrete-log break decrypts every ballot ever published, for every election, at once. That includes a cryptographically relevant quantum computer running Shor's algorithm. Each ciphertext can even be broken on its own, without recovering the joint key, because `g^r` is public.
   - **There is no way to fix this later:** already-published ciphertexts stay breakable.
@@ -120,7 +120,7 @@ How it works:
 
     Trustees decapsulate and check every ballot, not only the aggregate.
 
-  - **Ranked choice is harder.** Homomorphic tallying covers plurality and approval directly. Ranked choice needs a mixnet over commitment-consistent ciphertexts (Cuvelier–Pereira–Peters), which is less established than ElGamal mixnets and needs a threshold key for the mix. P1-4 has to settle this per election type.
+  - **Ranked choice is harder.** Homomorphic tallying covers plurality and approval directly. Ranked choice needs a mixnet over commitment-consistent ciphertexts (Cuvelier–Pereira–Peters), which is less established than ElGamal mixnets and needs a threshold key for the mix. [[0003-tally-scheme]] already limits the mixnet to ranked choice and leaves its design to a follow-up ADR before P5-1. Under B, that ADR must use a commitment-consistent mixnet.
   - **Trustee key substitution still breaks secrecy.** Replacing k trustees' KEM keys lets whoever holds the replacements read every ballot (T-37). Key registration needs the same public, anchored transcript that the joint key would have had.
   - **ML-KEM needs an audited library.** In the `@noble/*` family, ML-KEM lives in `@noble/post-quantum`, and the brief allows only audited cryptographic libraries. **Owner question:** if it has no independent audit when P1-12 starts, either:
     - (a) wait for an audit; or
@@ -166,7 +166,7 @@ The costs are real, and P1-12 to P1-15 must carry them:
 
 What would change the recommendation:
 
-- **No mixnet for ranked choice.** If P1-4 finds that no commitment-consistent mixnet can be built from audited primitives, use B for plurality and approval and decide ranked choice separately. Running A only for ranked choice would knowingly accept T-15 for those elections, so it needs the owner's explicit sign-off and a warning shown to voters.
+- **No mixnet for ranked choice.** If the ranked-choice mixnet ADR that [[0003-tally-scheme]] calls for finds that no commitment-consistent mixnet can be built from audited primitives, use B for plurality and approval and decide ranked choice separately. Running A only for ranked choice would knowingly accept T-15 for those elections, so it needs the owner's explicit sign-off and a warning shown to voters.
 - **Trustees can't take on the duties.** If trustees can't run independent intake, retention and attestation, B's direct-submit and availability costs would apply to every ballot rather than only to the fallback path. A would then be simpler for the same practical privacy against A-1. When P1-7 lands, this re-evaluation is mandatory, not optional.
 - **A ready-made primitive appears.** If an audited library offered threshold encryption with everlasting public privacy, prefer it for new election versions.
 
@@ -183,7 +183,7 @@ If B is accepted:
   - how Benaloh challenges open the commitments, the shares and the encapsulation randomness (a spoiled ballot reveals its own vote and is never counted).
 - **P1-14** becomes trustee key registration instead of a DKG (for plurality and approval): a fresh hybrid KEM key for each election and a signing key per trustee, each with proof of possession, in a public, anchored transcript. The STATUS item ("Pedersen/Feldman DKG") is rewritten to match.
 - **P1-15** publishes per-trustee summed shares checked against the public VSS commitments, the opening of the aggregate commitment, and exactly one aggregate per disjoint partition.
-- **P1-4** must say, per election type, how the tally works over commitments, in particular ranked choice.
+- **[[0003-tally-scheme]]** carries over to commitments for plurality and approval: the homomorphic tally runs over Pedersen commitments and summed shares instead of ElGamal ciphertexts and decryption shares. Its Fiat–Shamir binding list names "the joint public key"; under B, that becomes the hash of the trustee key-registration transcript. Its follow-up ranked-choice ADR must specify a commitment-consistent mixnet.
 - **P1-12 prerequisite:** the audit status of `@noble/post-quantum` is checked and recorded in STATUS, and the owner answers the ML-KEM question above.
 - **P1-17** shows that the membership proofs are statistically or perfectly zero-knowledge, or falls back to Semaphore's Groth16 circuit.
 - **P2-3 and P2-11:** every ballot intake endpoint (ours and the trustees') negotiates hybrid post-quantum TLS (`X25519MLKEM768`), and logs never retain share ciphertexts beyond the tally.

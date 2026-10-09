@@ -14,12 +14,12 @@ A result names its options by index. Only the display-text record says what opti
 The election definition binds its display text with a salted commitment:
 
 ```
-display_text_commitment = H(DS("abolish/v1/display-text", salt ‖ encode(display_text_record)))
+display_text_commitment = H(DS("abolish/v1/display-text", encode(display_text_record)))
 ```
 
-- `salt` is `bytes[32]` (`DISPLAY_TEXT_SALT_LEN`, [[parameters]]), drawn from a CSPRNG when the definition is created, through `packages/crypto` (T-39). It is never reused across definitions.
-- `encode(display_text_record)` is the record's full canonical encoding, header included. The salt has a fixed length, so the hash input is unambiguous.
-- The salt is stored with the text, inside the display-text record's IPFS object, and never in any result-critical record.
+- The display-text record (record type `0x0009`) has `salt`, a `bytes[32]` (`DISPLAY_TEXT_SALT_LEN`, [[parameters]]), as its first field after the header, followed by the text fields. The salt is drawn from a CSPRNG when the definition is created, through `packages/crypto` (T-39), and is never reused across definitions.
+- `encode(display_text_record)` is the record's full canonical encoding, header and salt included. The salt is hashed exactly once, as part of the record.
+- The record, salt included, is the IPFS object that is pinned. The salt never appears in any result-critical record.
 - The election definition carries only `display_text_commitment` (`bytes[32]`).
 
 Why the salt: display text is often short and guessable, such as a candidate's name or a yes/no question. Without a salt, anyone holding the permanent record could confirm a guess by hashing it, so the archive would keep the text in effect even after it was taken down. With a 32-byte random salt, confirming a guess means also guessing the salt, which takes about 2²⁵⁶ hash evaluations, or about 2¹²⁸ with a quantum search (G-12, A-11). This hiding is computational, resting on `H` behaving as a random oracle; it isn't perfect hiding. The salt isn't a secret from anyone who has the text: whoever holds both can prove to anyone what each option meant.

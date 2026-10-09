@@ -17,7 +17,7 @@ A conforming verifier implements every check in [[verifier]] and decodes every r
 | [[versioning]]              | Protocol and record versions, the record-type registry, change rules, election profiles  | Specified                                                   |
 | [[parameters]]              | Protocol-wide limits                                                                     | Specified for version 1; P1-18 may lower                    |
 | [[display-text]]            | The split between display text and result-critical data, and the display-text commitment | Split and commitment specified; record layout is P1-10's    |
-| [[content-addressing]]      | How board data becomes IPFS blocks, CIDs and CAR files                                   | Parameters pinned; vectors come with P4-3                   |
+| [[content-addressing]]      | How board data becomes IPFS blocks, CIDs and CAR files                                   | Provisional until P4-3's vectors                            |
 | [[verifier]]                | What a third-party verifier must check, stage by stage                                   | Checklist; each check is specified by its owning item       |
 | [[vectors/README\|vectors]] | The test-vector file format (`docs/spec/vectors/*.json`)                                 | Specified                                                   |
 

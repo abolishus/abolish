@@ -1,6 +1,6 @@
 # Protocol parameters
 
-Limits that apply across record types in protocol version 1. A record table may set a lower maximum for its own field, never a higher one. Raising a limit is a new record version ([[versioning]]); lowering one before it is frozen is an ordinary spec change. Threats: T-52 (bounded input sizes, so flooding and hostile lengths stay cheap to reject), T-28 (ballot shape), T-50 (direct-submitted ballots must fit the L2's forced-deposit limits).
+Limits that apply across record types in protocol version 1. A record version may set a lower maximum for its own field, never a higher one. Raising a protocol-wide limit is a new record version of every record type it affects, with this page recording which versions use the new limit ([[versioning]]); lowering one before it is frozen is an ordinary spec change. Threats: T-52 (bounded input sizes, so flooding and hostile lengths stay cheap to reject), T-28 (ballot shape), T-50 (direct-submitted ballots must fit the L2's forced-deposit limits).
 
 | Name                    | Value | Meaning                                                                                                      |
 | ----------------------- | ----- | ------------------------------------------------------------------------------------------------------------ |

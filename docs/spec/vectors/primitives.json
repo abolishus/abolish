@@ -2,7 +2,7 @@
   "format": "abolish-vectors/1",
   "title": "Primitive types, record framing and strict decoding",
   "spec": "docs/spec/notation.md",
-  "generator": "Written as literal hex from the tables in docs/spec/notation.md by a one-off script (only the integer boundary values were computed, with Python's int.to_bytes), then checked by hand byte by byte. No Abolish encoder produced them. Record type 0xff01 is from the test range and is valid only in vectors.",
+  "generator": "Written as literal hex from the tables in docs/spec/notation.md by a one-off script (only integer boundary values and r ± 1 were computed, with Python's integers), then checked by hand byte by byte and by a second strict decoder written independently from the spec. No Abolish encoder produced them. Record types 0xff01 and 0xff02 are from the test range and are valid only in vectors.",
   "vectors": [
     {
       "id": "u8-zero",
@@ -521,6 +521,140 @@
       "error": "length-over-max"
     },
     {
+      "id": "bytes-fixed-zero",
+      "type": {
+        "kind": "bytes",
+        "length": 0
+      },
+      "value": "",
+      "encoding": ""
+    },
+    {
+      "id": "bytes-fixed-zero-trailing",
+      "type": {
+        "kind": "bytes",
+        "length": 0
+      },
+      "encoding": "00",
+      "error": "trailing-bytes"
+    },
+    {
+      "id": "enum8-listed-255",
+      "type": {
+        "kind": "enum8",
+        "values": ["1", "2", "255"]
+      },
+      "value": "255",
+      "encoding": "ff"
+    },
+    {
+      "id": "utf8-empty",
+      "type": {
+        "kind": "utf8",
+        "max": 8
+      },
+      "value": "",
+      "encoding": "00000000"
+    },
+    {
+      "id": "utf8-max",
+      "type": {
+        "kind": "utf8",
+        "max": 8
+      },
+      "value": "6162636465666768",
+      "encoding": "000000086162636465666768"
+    },
+    {
+      "id": "utf8-truncated-before-validation",
+      "description": "The field is read in full before its content is validated, so a short payload is truncated even though its bytes are also invalid UTF-8",
+      "type": {
+        "kind": "utf8",
+        "max": 8
+      },
+      "encoding": "00000003c0af",
+      "error": "truncated"
+    },
+    {
+      "id": "list-of-var-bytes-at-max",
+      "type": {
+        "kind": "list",
+        "max": 2,
+        "of": {
+          "kind": "bytes",
+          "max": 2
+        }
+      },
+      "value": ["aabb", "cc"],
+      "encoding": "0000000200000002aabb00000001cc"
+    },
+    {
+      "id": "field-zero",
+      "type": {
+        "kind": "field",
+        "field": "bn254"
+      },
+      "value": "0000000000000000000000000000000000000000000000000000000000000000",
+      "encoding": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "id": "field-r-minus-one",
+      "description": "The largest canonical BN254 scalar-field element",
+      "type": {
+        "kind": "field",
+        "field": "bn254"
+      },
+      "value": "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000000",
+      "encoding": "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000000"
+    },
+    {
+      "id": "field-r",
+      "description": "r itself is the non-canonical encoding of 0",
+      "type": {
+        "kind": "field",
+        "field": "bn254"
+      },
+      "encoding": "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001",
+      "error": "non-canonical"
+    },
+    {
+      "id": "field-r-plus-one",
+      "description": "Non-canonical encoding of 1",
+      "type": {
+        "kind": "field",
+        "field": "bn254"
+      },
+      "encoding": "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000002",
+      "error": "non-canonical"
+    },
+    {
+      "id": "field-max",
+      "type": {
+        "kind": "field",
+        "field": "bn254"
+      },
+      "encoding": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "error": "non-canonical"
+    },
+    {
+      "id": "field-short",
+      "type": {
+        "kind": "field",
+        "field": "bn254"
+      },
+      "encoding": "00000000000000000000000000000000000000000000000000000000000000",
+      "error": "truncated"
+    },
+    {
+      "id": "field-trailing",
+      "type": {
+        "kind": "field",
+        "field": "bn254"
+      },
+      "encoding": "000000000000000000000000000000000000000000000000000000000000000000",
+      "error": "trailing-bytes"
+    },
+    {
       "id": "record-test",
       "description": "Header u16 type 0xff01, u8 version 1, then fields in order",
       "type": {
@@ -584,7 +718,7 @@
           }
         ]
       },
-      "encoding": "ff0201010000010200000002cafe",
+      "encoding": "ffff01010000010200000002cafe",
       "error": "unknown-record-type"
     },
     {
@@ -773,6 +907,59 @@
       },
       "encoding": "ff0101010000010200000002cafe00",
       "error": "trailing-bytes"
+    },
+    {
+      "id": "record-test-second-type",
+      "description": "A second test type, so record-test's type is not the only known one",
+      "type": {
+        "kind": "record",
+        "recordType": "ff02",
+        "version": 1,
+        "fields": [
+          {
+            "name": "value",
+            "type": {
+              "kind": "u8"
+            }
+          }
+        ]
+      },
+      "value": {
+        "value": "7"
+      },
+      "encoding": "ff020107"
+    },
+    {
+      "id": "record-unexpected-type",
+      "description": "A known type (0xff02) read where 0xff01 is expected",
+      "type": {
+        "kind": "record",
+        "recordType": "ff01",
+        "version": 1,
+        "fields": [
+          {
+            "name": "flag",
+            "type": {
+              "kind": "bool"
+            }
+          },
+          {
+            "name": "count",
+            "type": {
+              "kind": "u32"
+            }
+          },
+          {
+            "name": "data",
+            "type": {
+              "kind": "bytes",
+              "max": 4
+            }
+          }
+        ]
+      },
+      "encoding": "ff020107",
+      "error": "unexpected-record-type"
     }
   ]
 }

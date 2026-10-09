@@ -22,7 +22,7 @@ Each check names the threats it closes and the STATUS item that specifies it. A 
 
 - 2.1 The definition decodes strictly, and its hash (`abolish/v1/election-definition`) equals the hash registered on L2 before voting opened (T-34; P1-10, P1-18).
 - 2.2 It binds the chain ID and contract addresses the ballots were submitted to, so nothing can be replayed from another chain or deployment (T-30, T-32; P1-10).
-- 2.3 Its election type and tally scheme are ones this verifier supports, and its profile pins a version for every record type the election uses ([[versioning]]; T-31, [[0003-tally-scheme]]).
+- 2.3 Its election type and tally scheme are ones this verifier supports, its profile pins a version for every record type the election uses, and every record of the election (board entries, ballots, openings, transcripts) uses exactly the version its profile pins (`profile-mismatch` otherwise) ([[versioning]]; T-31, T-34, [[0003-tally-scheme]]).
 - 2.4 Its electorate is a group root per tier at a fixed L2 block, and that root matches the root computed from the board's record of signed group additions, never the L2 state alone (T-08, T-13, T-06, T-71; P1-18, P3-2).
 - 2.5 Its trustee panel (keys, `k`, `n`, panel identifier) matches the ceremony transcript and the keys registered on L2 (T-37, [[0006-trustees]]; P1-14, P1-18).
 - 2.6 Its timing (open, close, drift bound δ and the L2 sequencing bounds it assumes) is well formed, and the L2's configuration stayed within those bounds for the whole poll (T-35, T-50, [[0004-l2-choice]]; P1-18).
@@ -38,7 +38,7 @@ Each check names the threats it closes and the STATUS item that specifies it. A 
 - 4.1 Every board entry decodes strictly, and the hash chain is unbroken from the first entry to the last (T-23, T-31; P1-16).
 - 4.2 Every Merkle root anchored on L1 is recomputed from the board, and every entry falls under an anchored root (T-23, T-24; P1-16, P4-1).
 - 4.3 Every archive manifest reachable from L1 `archiveLocator` fields and from the manifest chain is found and matches what it names; any missing link is reported ([[0005-permanent-archive]]; T-51; P1-19, P4-3).
-- 4.4 Every one of our contracts' L2 events has a board entry with its inclusion evidence, and the archived event sequence reproduces each contract's on-chain event accumulator at every anchored period and at close. The verifier reports which proof type settled each output root it relied on (TEE-only or ZK), never a plain pass ([[0005-permanent-archive]], T-71; P1-18, P1-19).
+- 4.4 Every one of our contracts' L2 events has a board entry with its inclusion evidence, and the archived event sequence reproduces each contract's on-chain event accumulator at every anchored period and at close. The check passes with an annotation naming which proof type settled each output root it relied on (TEE-only or ZK), and the report lists every TEE-only root (8.3) ([[0005-permanent-archive]], T-71; P1-18, P1-19).
 - 4.5 Every deposit or forced transaction reaching our contracts traces to an ordinary call on L1 to the pinned portal or our relay (T-71, [[0004-l2-choice]]; P1-18, P1-19).
 
 ### 5. Ballots
@@ -53,7 +53,7 @@ Each check names the threats it closes and the STATUS item that specifies it. A 
 
 ### 6. Re-voting and spoiled ballots
 
-- 6.1 For each nullifier, exactly one ballot is selected by the re-vote rule: the highest sequence number, then first appearance on the board, among ballots that pass every check in section 5. A ballot that fails a check is never counted and never displaces an earlier one (T-33, T-38, [[0003-tally-scheme]]; P1-13).
+- 6.1 For each nullifier, at most one ballot is counted, chosen by the re-vote rule P1-13 specifies: the voter's last ballot in board order ([[0003-tally-scheme]]). The rule MUST NOT let any ballot field freeze a ballot as last: a coercer who watches one cast must not be able to stop later re-votes, for example by choosing a maximal sequence number (T-45). One construction that does this: the sequence number is dense, each ballot's being exactly one more than the number of earlier accepted ballots for its nullifier, and any other value is rejected, so a replayed earlier ballot carries a stale number and fails (T-38). P1-13 also pins: whether a last ballot that fails a later check falls back to an earlier one or counts nothing (the open everlasting-privacy ADR proposes counting nothing, so complaints can't revert a re-vote); that spoiled ballots never take part in selection; and whether selection is per nullifier or per tier and nullifier, since one secret in two tier groups yields one nullifier (T-33, T-38, T-45; P1-13). **(P1-3)**
 - 6.2 Every spoiled ballot's opening verifies against the ballot it opens, and no spoiled ballot is counted (T-42, T-47; P1-13). **(P1-3)**
 
 ### 7. Tally

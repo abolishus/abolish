@@ -46,7 +46,7 @@ Values:
 
 - Integers of every width are JSON strings in decimal (`"18446744073709551615"`), so no JSON parser rounds them.
 - `bool` is a JSON boolean.
-- `bytes[N]`, `bytes<M>` and `utf8<M>` values are lowercase hex strings of the content bytes, without the length prefix.
+- `bytes[N]`, `bytes<M>`, `utf8<M>` and `field<…>` values are lowercase hex strings of the content bytes, without the length prefix.
 - Lists are JSON arrays of element values.
 - Records are JSON objects keyed by field name, without the header; the header comes from the `type`.
 
@@ -58,10 +58,13 @@ Type descriptors:
 | `enum8`                           | `values`: the allowed values, as decimal strings                                                                                  |
 | `bytes`                           | either `length` (`bytes[N]`) or `max` (`bytes<M>`), as a JSON number                                                              |
 | `utf8`                            | `max`, as a JSON number                                                                                                           |
+| `field`                           | `field`: the field's name (`bn254`)                                                                                               |
 | `list`                            | `max`, as a JSON number, and `of`: the element's type descriptor                                                                  |
 | `record`                          | `recordType` (4 lowercase hex digits), `version` (a JSON number) and `fields`: an array of `{ "name", "type" }` in encoding order |
 
 ## Rules
+
+- The record types a file's decoder knows are exactly those that appear as a `recordType` in that file; any other type is unknown ([[notation]], Strict decoding).
 
 - A vector, once its layout is frozen ([[versioning]]), is never edited or removed. New vectors are added.
 - Every rejection rule in a spec section has at least one invalid vector, and every field type at least one valid vector at each boundary (zero, maximum, maximum plus one where representable).

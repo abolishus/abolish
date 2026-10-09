@@ -1,0 +1,35 @@
+packages:
+  - apps/*
+  - packages/*
+  - tools/*
+
+# Supply chain (see AGENTS.md "Dependencies"): every version is exact and lives
+# here once. Packages reference it with "catalog:".
+catalogMode: strict
+savePrefix: ""
+
+# Refuse versions younger than 7 days (minutes); most malicious publishes are
+# caught and yanked well inside that window.
+minimumReleaseAge: 10080
+# Refuse git/tarball/URL dependencies anywhere in the tree.
+blockExoticSubdeps: true
+# Refuse a version whose publish provenance is weaker than an earlier one.
+trustPolicy: no-downgrade
+# Install scripts run only for packages listed in allowBuilds.
+strictDepBuilds: true
+allowBuilds: {}
+
+catalog:
+  "@types/node": 24.19.1
+  typescript: 7.0.2
+  vite: npm:@voidzero-dev/vite-plus-core@1.0.0
+  vite-plus: 1.0.0
+
+overrides:
+  vite@*: "catalog:"
+
+peerDependencyRules:
+  allowAny:
+    - vite
+  allowedVersions:
+    vite: "*"

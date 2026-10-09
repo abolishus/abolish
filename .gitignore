@@ -45,3 +45,7 @@ docs/.obsidian/cache
 .DS_Store
 *.log
 .idea/
+
+# CI outputs
+lockfile-diff.md
+reference-election-output/

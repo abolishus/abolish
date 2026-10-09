@@ -1,0 +1,249 @@
+# Required check: `ci` (the aggregate job at the bottom).
+# Runs format/lint/typecheck, every package's unit, property, contract (Foundry
+# fuzz + invariant) and circuit (Noir) tests, Playwright e2e and Storybook
+# interaction/a11y tests, plus supply-chain policy. Pull requests run only the
+# affected packages and their dependents; pushes to main run everything.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  merge_group:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # Never let a tool phone home or prompt in CI.
+  DO_NOT_TRACK: "1"
+  CI: "true"
+
+jobs:
+  plan:
+    name: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      check: ${{ steps.affected.outputs.check }}
+      test: ${{ steps.affected.outputs.test }}
+      build: ${{ steps.affected.outputs.build }}
+      e2e: ${{ steps.affected.outputs.e2e }}
+      storybook: ${{ steps.affected.outputs.storybook }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
+        with:
+          version-file: pnpm-workspace.yaml
+          node-version-file: .node-version
+          run-install: "false"
+      - name: Select affected packages per task
+        id: affected
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if [ "$EVENT" = "pull_request" ]; then
+            scope=(--base "origin/$BASE_REF")
+          else
+            scope=(--all)
+          fi
+          for pair in check:check test:test build:build e2e:test:e2e storybook:test:storybook; do
+            key="${pair%%:*}"
+            task="${pair#*:}"
+            args="$(vp node tools/ci/src/cli.ts affected "${scope[@]}" --task "$task")"
+            echo "$key=$args" >>"$GITHUB_OUTPUT"
+          done
+
+  supply-chain:
+    name: supply-chain
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
+        with:
+          version-file: pnpm-workspace.yaml
+          node-version-file: .node-version
+          run-install: "false"
+      - name: Actions are pinned by commit SHA
+        run: vp node tools/ci/src/cli.ts actions-pinned
+      - name: actionlint
+        env:
+          ACTIONLINT_VERSION: 1.7.12
+          ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        run: |
+          asset="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl -sSfL --retry 4 -o "$RUNNER_TEMP/$asset" "https://github.com/rhysd/actionlint/releases/download/v$ACTIONLINT_VERSION/$asset"
+          echo "$ACTIONLINT_SHA256  $RUNNER_TEMP/$asset" | sha256sum -c -
+          tar xzf "$RUNNER_TEMP/$asset" -C "$RUNNER_TEMP" actionlint
+          "$RUNNER_TEMP/actionlint" -color
+      - name: Lockfile is consistent with manifests
+        run: vp install --frozen-lockfile --lockfile-only --ignore-scripts
+      - name: Lockfile policy (registry-only, integrity matches registry, >= 7 days old)
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          if [ "$EVENT" = "pull_request" ]; then base="origin/$BASE_REF"; else base="${BEFORE:-HEAD~1}"; fi
+          git cat-file -e "$base^{commit}" 2>/dev/null || base="$(git hash-object -t tree /dev/null)"
+          vp node tools/ci/src/cli.ts lockfile --base "$base"
+      - name: crypto depends only on @noble/*
+        run: |
+          f=packages/crypto/package.json
+          [ -f "$f" ] || { echo "packages/crypto not present yet"; exit 0; }
+          bad=$(python3 -c "import json;d=json.load(open('$f'));print('\n'.join(k for k in d.get('dependencies',{}) if not k.startswith('@noble/')))")
+          if [ -n "$bad" ]; then echo "::error file=$f::non-@noble runtime dependencies: $bad"; exit 1; fi
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: lockfile-diff
+          path: lockfile-diff.md
+          if-no-files-found: ignore
+
+  check:
+    name: check
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - name: Format, lint and typecheck (root)
+        run: vp check
+      - name: Package checks
+        if: needs.plan.outputs.check != ''
+        env:
+          ARGS: ${{ needs.plan.outputs.check }}
+        run: vp run $ARGS check
+
+  test:
+    name: test
+    needs: plan
+    if: needs.plan.outputs.test != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16.10-bookworm@sha256:38471f330eb885e04de130b768d6db4e10469e2311879c7e5c699f6d2d8a1c74
+        env:
+          POSTGRES_USER: abolish
+          POSTGRES_PASSWORD: abolish
+          POSTGRES_DB: abolish_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U abolish" --health-interval 5s --health-timeout 5s --health-retries 20
+      redis:
+        image: redis:7.4.6-bookworm@sha256:a9cc41d6d01da2aa26c219e4f99ecbeead955a7b656c1c499cce8922311b2514
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgres://abolish:abolish@localhost:5432/abolish_test
+      REDIS_URL: redis://localhost:6379
+      # fast-check: larger runs in CI than locally; seed is printed on failure.
+      FC_NUM_RUNS: "1000"
+      # Foundry: deeper fuzzing and invariant campaigns in CI.
+      FOUNDRY_PROFILE: ci
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          toolchain: "true"
+      - name: Unit, property, vector, contract and circuit tests
+        env:
+          ARGS: ${{ needs.plan.outputs.test }}
+        run: vp run $ARGS test
+
+  build:
+    name: build
+    needs: plan
+    if: needs.plan.outputs.build != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          toolchain: "true"
+      - name: Build
+        env:
+          ARGS: ${{ needs.plan.outputs.build }}
+        run: vp run $ARGS build
+
+  e2e:
+    name: e2e
+    needs: plan
+    if: needs.plan.outputs.e2e != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          toolchain: "true"
+      - name: Install Playwright browsers
+        run: vp exec playwright install --with-deps chromium firefox webkit
+      - name: Playwright end-to-end tests
+        env:
+          ARGS: ${{ needs.plan.outputs.e2e }}
+        run: vp run $ARGS test:e2e
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: failure()
+        with:
+          name: playwright-report
+          path: "**/playwright-report/"
+          if-no-files-found: ignore
+
+  storybook:
+    name: storybook
+    needs: plan
+    if: needs.plan.outputs.storybook != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - name: Install Playwright browser
+        run: vp exec playwright install --with-deps chromium
+      - name: Storybook interaction and accessibility tests
+        env:
+          ARGS: ${{ needs.plan.outputs.storybook }}
+        run: vp run $ARGS test:storybook
+
+  ci:
+    name: ci
+    if: always()
+    needs: [plan, supply-chain, check, test, build, e2e, storybook]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+      - name: All jobs passed or were not needed
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: python3 .github/scripts/require-jobs.py plan supply-chain check

@@ -1,0 +1,105 @@
+# Required check: `repro-build`.
+# Builds every package twice, on separate runners, from different checkout paths
+# with different locale, timezone and umask, and fails on any byte difference
+# in build outputs. Threat: a compromised build machine or nondeterministic
+# toolchain shipping a ballot client that differs from the reviewed source.
+# Release signing (Sigstore/cosign, SLSA provenance) lives in release.yml.
+name: repro-build
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  merge_group:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repro-build-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  DO_NOT_TRACK: "1"
+
+jobs:
+  build:
+    name: build (${{ matrix.variant }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: a
+            path: abolish
+            tz: UTC
+            lang: C.UTF-8
+            umask: "0022"
+          - variant: b
+            path: some/other/dir/abolish-repro
+            tz: Pacific/Auckland
+            lang: en_US.UTF-8
+            umask: "0077"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: ${{ matrix.path }}
+          persist-credentials: false
+      - name: Pin SOURCE_DATE_EPOCH to the commit time
+        working-directory: ${{ matrix.path }}
+        run: echo "SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)" >>"$GITHUB_ENV"
+      # Same steps as .github/actions/setup, inlined: `uses:` cannot take a matrix path.
+      - uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
+        with:
+          version-file: pnpm-workspace.yaml
+          node-version-file: .node-version
+          working-directory: ${{ matrix.path }}
+          run-install: "false"
+      - name: Install dependencies (frozen lockfile)
+        working-directory: ${{ matrix.path }}
+        run: vp install --frozen-lockfile
+      - name: Install Noir, Barretenberg and Foundry
+        working-directory: ${{ matrix.path }}
+        run: scripts/install-toolchain.sh "$RUNNER_TEMP/abolish-toolchain/bin"
+      - name: Build everything
+        working-directory: ${{ matrix.path }}
+        env:
+          TZ: ${{ matrix.tz }}
+          LANG: ${{ matrix.lang }}
+          LC_ALL: ${{ matrix.lang }}
+        run: |
+          umask ${{ matrix.umask }}
+          vp run -r --no-cache build
+      - name: Hash build outputs
+        working-directory: ${{ matrix.path }}
+        run: python3 .github/scripts/hash-outputs.py >"$RUNNER_TEMP/manifest-${{ matrix.variant }}.txt"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: manifest-${{ matrix.variant }}
+          path: ${{ runner.temp }}/manifest-${{ matrix.variant }}.txt
+
+  repro-build:
+    name: repro-build
+    if: always()
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Both builds succeeded
+        if: needs.build.result != 'success'
+        run: |
+          echo "::error::build result: ${{ needs.build.result }}"
+          exit 1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: manifest-*
+          merge-multiple: true
+      - name: Outputs are byte-identical
+        run: |
+          echo "files hashed: $(wc -l <manifest-a.txt)"
+          if ! diff -u manifest-a.txt manifest-b.txt; then
+            echo "::error::build outputs differ between runs; the build is not reproducible"
+            exit 1
+          fi
+          echo "build fingerprint: $(sha256sum manifest-a.txt | cut -d' ' -f1)" | tee -a "$GITHUB_STEP_SUMMARY"

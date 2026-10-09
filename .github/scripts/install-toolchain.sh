@@ -13,6 +13,11 @@
 set -euo pipefail
 
 NOIR_VERSION="1.0.0-beta.22"
+# Evidence for the Noir -> bb mapping, recorded 2026-10-09: bbup's
+# barretenberg/bbup/bb-versions.json at AztecProtocol/aztec-packages
+# next@bb15fcbbe969f11a892272715fe59f0976b086ca (sha256
+# 26f98a191cfc049521320d077473a12cf141ff9b909392f4685d349063a5b2f8) maps
+# "1.0.0-beta.22" to "5.0.0-nightly.20260522".
 BB_VERSION="5.0.0-nightly.20260522"
 FOUNDRY_VERSION="1.8.3"
 

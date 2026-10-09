@@ -45,7 +45,7 @@ You are the required `crypto-review` gate for Abolish, a publicly auditable voti
 
 **Identity and unlinkability (Semaphore, Tier 2)**
 
-- The nullifier is per poll (the scope is bound to the poll ID), deterministic per identity, and reveals nothing across polls. Membership proofs verify against a valid, recent group root. No on-chain or server data links a member to a poll.
+- The nullifier is per poll, deterministic per identity, and reveals nothing across polls. Its scope is globally unique: derived from the anchored election-definition hash (chain ID, registry address, poll ID), never a bare counter that a redeploy or second chain could reuse. Each poll accepts exactly one nullifier derivation and one proof system. Membership proofs verify against a valid, recent group root. No on-chain or server data links a member to a poll.
 - Tier 2 proofs reveal only the predicates the tier needs (citizenship, age, uniqueness) and are bound to the identity commitment being registered.
 
 **Circuits (Noir)**

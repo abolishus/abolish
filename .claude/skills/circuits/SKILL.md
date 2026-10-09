@@ -33,7 +33,7 @@ packages/circuits/
 - Unconstrained functions (`unconstrained fn`) are hints only. Re-check every output inside the circuit.
 - Range-check every value that is meant to be smaller than the field. Watch for wrap-around in subtraction and comparison.
 - Domain-separate every in-circuit hash, with the same tags as `docs/spec/`.
-- Nullifiers: `H(tag, identity_secret, poll_scope)`, with `poll_scope` bound to the poll ID. They reveal nothing across polls.
+- Nullifiers: `H(tag, identity_secret, poll_scope)`. `poll_scope` is globally unique: derive it from the anchored election-definition hash, which covers the chain ID, the registry contract address and the poll ID, never from a bare per-contract counter (a redeploy or second chain would reuse it, linking participation and allowing proof replay). Each poll accepts exactly one nullifier derivation and one proof system, or one identity could hold two nullifiers and vote twice. Nullifiers reveal nothing across polls.
 - Never put PII or document data in public inputs. Tier 2 proves predicates only (citizenship, age ≥ N, uniqueness).
 - Proving runs in a Web Worker in the browser, and in the native prover plugin under Capacitor. The same artifacts serve both.
 

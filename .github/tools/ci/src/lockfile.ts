@@ -284,10 +284,13 @@ export function renderDiff(diff: LockfileDiff): string {
  * Settings that would make pnpm fetch from somewhere other than the npm
  * registry the integrity was checked against, or run code at install time
  * outside the allowBuilds policy. Any `.npmrc` or pnpmfile (tracked anywhere),
- * and any registry, auth-file, scoped-registry, pnpmfile or configDependencies
- * key in pnpm-workspace.yaml is a violation; an unparseable workspace file is
- * too. pnpmfile hooks run whatever --ignore-scripts says, and config
- * dependencies can ship pnpmfiles of their own.
+ * and any registry, auth-file, scoped-registry, pnpmfile, configDependencies,
+ * patchedDependencies or packageExtensions key in pnpm-workspace.yaml, or an
+ * override not resolved through the catalog, is a violation; an unparseable
+ * workspace file is too. pnpmfile hooks run whatever --ignore-scripts says, and
+ * config dependencies can ship pnpmfiles of their own. Patches, extensions and
+ * version-naming overrides can swap the code behind a pinned name (an
+ * `@noble/*` override, say) without touching any importer's manifest.
  */
 export function registryOverrides(
   trackedFiles: readonly string[],
@@ -310,8 +313,23 @@ export function registryOverrides(
   }
   const settings = doc.toJS() as unknown;
   if (settings !== null && typeof settings === "object") {
-    for (const key of Object.keys(settings)) {
-      if (/registr|npmrc|pnpmfile|configDependencies/i.test(key))
+    for (const [key, value] of Object.entries(settings)) {
+      if (key === "overrides") {
+        // Vite+ needs `vite@*: "catalog:"`. An override resolved through the
+        // strict catalog adds no version the catalog doesn't already pin.
+        const entries =
+          value !== null && typeof value === "object" && !Array.isArray(value)
+            ? Object.entries(value)
+            : [["(not a mapping)", value]];
+        for (const [name, spec] of entries) {
+          if (spec !== "catalog:")
+            out.push(`pnpm-workspace.yaml: override ${name} must be "catalog:"`);
+        }
+      } else if (
+        /registr|npmrc|pnpmfile|configDependencies|overrides|patchedDependencies|packageExtensions/i.test(
+          key,
+        )
+      )
         out.push(`pnpm-workspace.yaml: setting "${key}" is not allowed`);
     }
   }
@@ -341,4 +359,23 @@ export function unjustifiedAllowBuilds(workspaceYaml: string): string[] {
       ? []
       : [`pnpm-workspace.yaml: allowBuilds entry "${name}" needs a justification comment`];
   });
+}
+
+/**
+ * The same resolution-changing settings, spelled in a package.json: a `pnpm`
+ * block, or npm/yarn-style `overrides` and `resolutions`.
+ */
+export function manifestOverrides(file: string, manifestJson: string): string[] {
+  let pkg: unknown;
+  try {
+    pkg = JSON.parse(manifestJson);
+  } catch {
+    return [`${file}: does not parse`];
+  }
+  if (pkg === null || typeof pkg !== "object") return [`${file}: is not an object`];
+  return ["pnpm", "overrides", "resolutions"]
+    .filter((key) => key in pkg)
+    .map(
+      (key) => `${file}: "${key}" is not allowed (it can change what a pinned name resolves to)`,
+    );
 }

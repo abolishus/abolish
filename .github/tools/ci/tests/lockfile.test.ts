@@ -7,6 +7,7 @@ import {
   registryViolations,
   renderDiff,
   splitKey,
+  manifestOverrides,
   registryOverrides,
   structuralViolations,
   unjustifiedAllowBuilds,
@@ -302,6 +303,29 @@ describe("registryOverrides", () => {
     );
     expect(registryOverrides([], "'@scope:registry': https://evil.example/\n")).toHaveLength(1);
     expect(registryOverrides([], "npmrcAuthFile: x\n")).toHaveLength(1);
+  });
+
+  test("rejects overrides, patches and package extensions, which can swap a pinned name's code", () => {
+    expect(registryOverrides([], "overrides:\n  '@noble/curves': 1.0.0\n")).toHaveLength(1);
+    expect(registryOverrides([], "overrides:\n  '@noble/curves': npm:evil@1.0.0\n")).toHaveLength(
+      1,
+    );
+    expect(registryOverrides([], "overrides: x\n")).toHaveLength(1);
+    expect(registryOverrides([], "overrides:\n  vite@*: 'catalog:'\n")).toEqual([]);
+    expect(registryOverrides([], "patchedDependencies:\n  x: patches/x.patch\n")).toHaveLength(1);
+    expect(registryOverrides([], "packageExtensions:\n  x:\n    dependencies: {}\n")).toHaveLength(
+      1,
+    );
+  });
+
+  test("rejects override settings in package.json", () => {
+    expect(manifestOverrides("package.json", '{"name":"x","private":true}')).toEqual([]);
+    expect(manifestOverrides("package.json", '{"pnpm":{"overrides":{}}}')).toHaveLength(1);
+    expect(
+      manifestOverrides("a/package.json", '{"overrides":{"@noble/curves":"1.0.0"}}'),
+    ).toHaveLength(1);
+    expect(manifestOverrides("package.json", '{"resolutions":{}}')).toHaveLength(1);
+    expect(manifestOverrides("package.json", "{")).toHaveLength(1);
   });
 
   test("rejects pnpmfiles and config dependencies, which run code at install time", () => {

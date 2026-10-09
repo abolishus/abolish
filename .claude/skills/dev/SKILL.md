@@ -37,7 +37,7 @@ description: Day-to-day development rules for the Abolish monorepo (Vite+, testi
 ## Code rules
 
 - TypeScript strict, with `noUncheckedIndexedAccess` and `exactOptionalPropertyTypes`. No `any`, no non-null `!` without a comment saying why it holds.
-- Domain logic lives in `packages/core`. Transports (Hono, oRPC, TanStack server functions, BullMQ handlers) stay thin: parse, call core, serialise.
+- Domain logic lives in `packages/core`, except anything `packages/verifier` checks (ballot validity, receipts, re-vote resolution, board chaining, inclusion proofs, election and nullifier-scope hashing, tally and decryption proofs): that lives in `packages/crypto`, `circuits`, `contracts` or `verifier`, where `crypto-review` gates it, and core calls it (AGENTS.md, Architecture → Rules). Transports (Hono, oRPC, TanStack server functions, BullMQ handlers) stay thin: parse, call core, serialise.
 - Zod v4 only at transport boundaries (API, forms, env, DB rows), always `z.strictObject` / `z.strict`. `packages/api-contract` and anything `apps/ballot` imports use `zod/mini`. Never use Zod (or any schema library) for bytes that are hashed, signed or anchored: those use the hand-written codecs in `packages/crypto` per `docs/spec/`.
 - Errors: typed results or typed errors at module boundaries. Never swallow an error; never log secrets, ballots, voting identities or PII.
 - Randomness: `crypto.getRandomValues` / `@noble/hashes/utils` `randomBytes` only. `Math.random` is banned outside tests of non-security code.

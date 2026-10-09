@@ -7,6 +7,7 @@ import { describe, expect, test } from "vite-plus/test";
 import {
   changedFiles,
   forTask,
+  invalidPackageNames,
   missingRequiredScripts,
   selectAffected,
   toRunArgs,
@@ -199,5 +200,35 @@ describe("workspaceRoots", () => {
         readFileSync(new URL("../../../../pnpm-workspace.yaml", import.meta.url), "utf8"),
       ),
     ).toContain(".github/tools");
+  });
+});
+
+describe("invalidPackageNames", () => {
+  const pkg = (name: string) => ({ name, dir: "packages/x", dependsOn: [], scripts: [] });
+
+  test("accepts npm package names, scoped or not", () => {
+    expect(invalidPackageNames([pkg("@abolishus/crypto"), pkg("ci-tools"), pkg("a.b_c")])).toEqual(
+      [],
+    );
+  });
+
+  test("rejects names that could forge CI output or arguments", () => {
+    for (const name of ["x\ntest=", "a b", "--all", "Upper", "@scope", "@s/x/y", "", "x;rm"]) {
+      expect(invalidPackageNames([pkg(name)])).toHaveLength(1);
+    }
+  });
+
+  test("no name containing whitespace or '=' ever passes", () => {
+    fc.assert(
+      fc.property(
+        fc.string(),
+        fc.constantFrom("\n", "\r", " ", "\t", "="),
+        fc.string(),
+        (a, c, b) => {
+          expect(invalidPackageNames([pkg(a + c + b)])).toHaveLength(1);
+        },
+      ),
+      runs,
+    );
   });
 });

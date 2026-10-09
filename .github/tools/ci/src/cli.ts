@@ -18,6 +18,7 @@ import {
   changedFiles,
   workspaceRoots,
   forTask,
+  invalidPackageNames,
   missingRequiredScripts,
   selectAffected,
   toRunArgs,
@@ -27,6 +28,7 @@ import {
   diffPackages,
   parsePackages,
   registryViolations,
+  manifestOverrides,
   registryOverrides,
   renderDiff,
   structuralViolations,
@@ -93,7 +95,7 @@ function affected(): void {
   // AGENTS.md: every workspace package defines build, test and check. Without
   // this, a package with no test script would look "unaffected" and CI would
   // pass with none of its tests run.
-  const missing = missingRequiredScripts(packages);
+  const missing = [...invalidPackageNames(packages), ...missingRequiredScripts(packages)];
   if (missing.length > 0) {
     for (const m of missing) console.error(m);
     process.exit(1);
@@ -170,6 +172,10 @@ async function lockfile(): Promise<void> {
       git("ls-files", "-z").split("\0"),
       readFileSync("pnpm-workspace.yaml", "utf8"),
     ),
+    ...git("ls-files", "-z")
+      .split("\0")
+      .filter((f) => f === "package.json" || f.endsWith("/package.json"))
+      .flatMap((f) => manifestOverrides(f, readFileSync(f, "utf8"))),
     ...unjustifiedAllowBuilds(readFileSync("pnpm-workspace.yaml", "utf8")),
     ...structuralViolations(head),
   ];

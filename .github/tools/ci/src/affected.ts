@@ -106,6 +106,20 @@ export function missingRequiredScripts(packages: readonly WorkspacePackage[]): s
   });
 }
 
+/** npm package-name grammar (lowercase, optional scope); nothing else may reach --filter. */
+const PACKAGE_NAME = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/;
+
+/**
+ * One message per workspace package whose name isn't a valid npm package name.
+ * Names flow into `--filter` arguments and from there into $GITHUB_OUTPUT, so
+ * a name with a newline could forge another task's output and skip its job.
+ */
+export function invalidPackageNames(packages: readonly WorkspacePackage[]): string[] {
+  return packages
+    .filter((p) => !PACKAGE_NAME.test(p.name))
+    .map((p) => `${p.dir}/package.json: invalid package name ${JSON.stringify(p.name)}`);
+}
+
 /**
  * Files changed between the merge base of `base` and HEAD. `-z` with
  * quotePath off keeps non-ASCII names intact, and `--no-renames` lists both

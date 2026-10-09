@@ -60,7 +60,7 @@ Last updated: 2026-10-09 (P1-1 threat model).
 - [x] P1-1 (#3) `docs/THREAT_MODEL.md`: assets, adversaries (state actor, insiders including us, compromised devices, coercion and vote buying, DDoS, supply chain, domain or hosting seizure, prompt injection against this pipeline), threat IDs, mitigations, and an explicit list of what isn't mitigated yet. No feature code before this merges.
 - [ ] P1-2 (in progress, above) ADR: canonical encoding (explicit byte layouts vs deterministic CBOR). `needs-decision`.
 - [ ] P1-3 ADR: everlasting privacy (perfectly hiding commitments on the board vs standard threshold ElGamal), with a post-quantum "harvest now, decrypt later" analysis. `needs-decision`. Must be accepted before tally work (P1-12).
-- [ ] P1-4 ADR: ballot tally scheme (homomorphic exponential ElGamal vs verifiable mixnet) per election type (plurality, approval, ranked choice). `needs-decision`.
+- [ ] P1-4 ADR: ballot tally scheme (homomorphic exponential ElGamal vs verifiable mixnet) per election type (plurality, approval, ranked choice). `needs-decision` (in progress, `claude/p1-4`).
 - [ ] P1-5 ADR: L2 choice (Arbitrum One vs Base): L2BEAT stage at decision time, sequencer jurisdiction, forced-inclusion path, paymaster tooling. `needs-decision`.
 - [ ] P1-6 ADR: permanent archive (Arweave vs pinning-only). `needs-decision`.
 - [ ] P1-7 ADR: trustees, k-of-n and named trustees. **Owner decides; never defaults.** Until then, development uses a test ceremony.

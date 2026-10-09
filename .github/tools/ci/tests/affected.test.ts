@@ -1,7 +1,8 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import fc from "fast-check";
 import { describe, expect, test } from "vite-plus/test";
 import {
   changedFiles,
@@ -10,6 +11,7 @@ import {
   selectAffected,
   toRunArgs,
   withDependents,
+  workspaceRoots,
 } from "../src/affected.ts";
 
 const pkgs = [
@@ -146,4 +148,56 @@ test("a move out of a package reports both paths, so the package stays affected"
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+const runs = { numRuns: Number(process.env["FC_NUM_RUNS"] ?? 200) };
+
+test("property: any path no package owns and no rule marks inert selects everything", () => {
+  const segment = fc.stringMatching(/^[a-z0-9][a-z0-9._-]{0,8}$/);
+  const owned = fc
+    .tuple(fc.constantFrom(...pkgs.map((p) => p.dir)), segment)
+    .map(([d, f]) => `${d}/${f}`);
+  const inert = fc
+    .tuple(fc.constantFrom("docs/notes", ".claude/skills/x"), segment)
+    .map(([d, f]) => `${d}/${f}`);
+  // "zz-" can't collide with a package directory or an inert rule.
+  const unknown = fc.tuple(segment, segment).map(([d, f]) => `zz-${d}/${f}`);
+  fc.assert(
+    fc.property(
+      fc.array(fc.oneof(owned, inert)),
+      unknown,
+      fc.array(fc.oneof(owned, inert)),
+      (before, u, after) => {
+        expect(selectAffected([...before, u, ...after], pkgs)).toEqual({ mode: "all" });
+      },
+    ),
+    runs,
+  );
+});
+
+describe("workspaceRoots", () => {
+  test("reads <dir>/* globs", () => {
+    expect(workspaceRoots("packages:\n  - apps/*\n  - .github/tools/*\ncatalog: {}\n")).toEqual([
+      "apps",
+      ".github/tools",
+    ]);
+  });
+  test("rejects other glob shapes, traversal and a missing list", () => {
+    for (const y of [
+      "packages:\n  - apps/**\n",
+      "packages:\n  - apps\n",
+      "packages:\n  - ../x/*\n",
+      "catalog: {}\n",
+      "packages: []\n",
+    ]) {
+      expect(() => workspaceRoots(y), y).toThrow();
+    }
+  });
+  test("matches the repository's own workspace file", () => {
+    expect(
+      workspaceRoots(
+        readFileSync(new URL("../../../../pnpm-workspace.yaml", import.meta.url), "utf8"),
+      ),
+    ).toContain(".github/tools");
+  });
 });

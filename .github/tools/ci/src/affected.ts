@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { parseDocument } from "yaml";
 
 // Selects which workspace packages CI must run a task in for a change set.
 //
@@ -119,4 +120,29 @@ export function changedFiles(base: string, cwd = process.cwd()): string[] {
   )
     .split("\0")
     .filter((f) => f.length > 0);
+}
+
+/**
+ * The directories whose children are workspace packages, read from the
+ * `packages:` list in pnpm-workspace.yaml so the gates can't drift from the
+ * workspace. Only `<dir>/*` globs are supported; anything else throws rather
+ * than silently leaving packages out of the required-scripts check.
+ */
+export function workspaceRoots(workspaceYaml: string): string[] {
+  const doc = parseDocument(workspaceYaml, { uniqueKeys: true });
+  if (doc.errors.length > 0)
+    throw new Error(`pnpm-workspace.yaml: ${doc.errors[0]?.message ?? "unparseable"}`);
+  const globs = (doc.toJS() as { packages?: unknown } | null)?.packages;
+  if (!Array.isArray(globs) || globs.length === 0)
+    throw new Error("pnpm-workspace.yaml: packages must be a non-empty list");
+  return globs.map((g) => {
+    const m =
+      typeof g === "string" ? /^([A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)*)\/\*$/.exec(g) : null;
+    if (m === null || m[1] === undefined || m[1].split("/").includes("..")) {
+      throw new Error(
+        `pnpm-workspace.yaml: unsupported packages glob ${JSON.stringify(g)} (use <dir>/*)`,
+      );
+    }
+    return m[1];
+  });
 }

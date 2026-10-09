@@ -1,3 +1,4 @@
+import fc from "fast-check";
 import { expect, test } from "vite-plus/test";
 import { findUnpinned } from "../src/actions-pinned.ts";
 
@@ -112,4 +113,26 @@ jobs:
   expect(reasons(yml)).toEqual([
     "jobs.a.steps.1.uses pinned action needs a trailing '# vX.Y.Z' comment on the same line",
   ]);
+});
+
+test("property: an unpinned uses is reported whatever the YAML spelling", () => {
+  const ref = fc
+    .stringMatching(/^[A-Za-z0-9._-]{1,20}$/)
+    .filter((r) => !/^[0-9a-f]{40}$/.test(r))
+    .map((r) => `attacker/action@${r}`);
+  const spelling = fc.constantFrom(
+    (v: string) => `      - uses: ${v}`,
+    (v: string) => `      - "uses": ${v}`,
+    (v: string) => `      - uses : ${v}`,
+    (v: string) => `      - {uses: ${v}}`,
+    (v: string) => `      - {name: x, uses: "${v}", with: {a: b}}`,
+    (v: string) => `      - name: x\n        'uses': '${v}'`,
+  );
+  fc.assert(
+    fc.property(ref, spelling, (v, spell) => {
+      const yml = `jobs:\n  a:\n    steps:\n      - uses: actions/checkout@${SHA} # v7.0.1\n${spell(v)}\n`;
+      expect(findUnpinned("w.yml", yml).map((x) => x.value)).toEqual([v]);
+    }),
+    { numRuns: Number(process.env["FC_NUM_RUNS"] ?? 200) },
+  );
 });

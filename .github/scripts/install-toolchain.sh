@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Installs the non-npm toolchain at exact, hash-verified versions:
 #   nargo (Noir), bb (Barretenberg), forge/cast/anvil (Foundry).
-# Used by CI (.github/actions/setup-toolchain) and by sessions on demand.
+# Used by CI (.github/actions/setup with toolchain: "true", and repro-build)
+# and by sessions on demand.
 #
 # Pins (see AGENTS.md "Toolchain pins"): Noir is 1.0.0-beta.22 and bb is the
 # version bbup's bb-versions.json maps to it. @noir-lang/noir_js and

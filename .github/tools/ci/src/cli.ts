@@ -16,6 +16,7 @@ import { parseDocument } from "yaml";
 import { findUnpinned } from "./actions-pinned.ts";
 import {
   changedFiles,
+  workspaceRoots,
   forTask,
   missingRequiredScripts,
   selectAffected,
@@ -33,8 +34,6 @@ import {
   type RegistryFacts,
   unjustifiedAllowBuilds,
 } from "./lockfile.ts";
-
-const WORKSPACE_GLOBS = ["apps", "packages", "tools", ".github/tools"];
 
 function git(...args: string[]): string {
   return execFileSync("git", args, {
@@ -58,7 +57,7 @@ function summary(markdown: string): void {
 
 function workspacePackages(): WorkspacePackage[] {
   const out: WorkspacePackage[] = [];
-  for (const root of WORKSPACE_GLOBS) {
+  for (const root of workspaceRoots(readFileSync("pnpm-workspace.yaml", "utf8"))) {
     if (!existsSync(root)) continue;
     for (const entry of readdirSync(root, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;

@@ -20,14 +20,35 @@ equal. Run from the repository root after the build; exits 1 on any violation.
 
 import hashlib
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
 
-WORKSPACE_GROUPS = ("apps", "packages", "tools", ".github/tools")
-
 errors = []
-for group in WORKSPACE_GROUPS:
+
+
+def workspace_roots() -> list[str]:
+    """`<dir>/*` entries of the `packages:` list in pnpm-workspace.yaml (no PyYAML on runners)."""
+    roots, in_packages = [], False
+    for line in Path("pnpm-workspace.yaml").read_text(encoding="utf-8").splitlines():
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if not line.startswith(" "):
+            in_packages = line.rstrip() == "packages:"
+            continue
+        if in_packages:
+            m = re.fullmatch(r"  - ([A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*)/\*", line.rstrip())
+            if m is None or ".." in m.group(1).split("/"):
+                errors.append(f"pnpm-workspace.yaml: unsupported packages entry {line.strip()!r} (use <dir>/*)")
+                continue
+            roots.append(m.group(1))
+    if not roots:
+        errors.append("pnpm-workspace.yaml: no packages globs found")
+    return roots
+
+
+for group in workspace_roots():
     root = Path(group)
     if not root.is_dir():
         continue

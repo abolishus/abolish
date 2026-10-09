@@ -26,13 +26,13 @@ Constraints that weigh on the choice:
 
 Each message type has a spec table: a field order, a fixed width per field, and an explicit framing rule for the few variable-length fields. The building blocks:
 
-- a header: an ASCII domain-separation tag `abolish/v1/<type>` (registered in `docs/spec/`, P1-8) and a one-byte format version;
+- a header: a `u8` length followed by an ASCII domain-separation tag `abolish/v1/<type>` (registered in `docs/spec/`, P1-8), so no tag can be read as a prefix of another. The tag's `v1` is the only version field: there is no separate version byte to disagree with it, and an unregistered tag is rejected;
 - unsigned integers, big-endian at a fixed width (`u8`, `u16`, `u32`, `u64`), with no varints;
 - group elements and scalars in the compressed encoding the group layer defines (P1-11), with canonicity and subgroup checks on decode (T-39);
 - 32-byte hashes;
 - variable-length lists and byte strings, prefixed with a `u32` length checked against a per-field maximum that the spec states;
 - text (poll titles and options), as length-prefixed strict UTF-8. Decoders reject overlong forms, surrogates and code points above U+10FFFF. NFC normalisation is an encoder (authoring-time) rule, not a decoder check: whether a string is in NFC depends on the implementation's Unicode version, so a decoder check would itself create parser differentials (T-31), and contracts can't check it;
-- no optional fields: a presence byte `0x00` or `0x01`, and nothing else is accepted;
+- optional fields only as a presence byte: `0x00` (absent, followed by no bytes at all, never a zero-filled placeholder) or `0x01` (present, followed by the value); any other presence byte is rejected;
 - no floats, no maps and no field reordering.
 
 Precedent: ElectionGuard defines its hash inputs as explicit byte sequences of fixed-width integers and elements (ElectionGuard Design Specification v2.0, the section on hash computations). Ethereum's ABI is a layout of this kind for static types, which Solidity reads natively. For dynamic types it uses offsets and accepts non-canonical forms, so contracts take protocol bytes as one opaque `bytes` argument and hash exactly those bytes, never an `abi.encode` of decoded fields (P1-8 states this). RFC 8446 (TLS 1.3) uses the same presentation language of fixed-width fields with explicit length prefixes.

@@ -26,7 +26,11 @@ on:
 
 permissions: {}
 
-# Never cancel a release mid-publish; a newer push waits its turn.
+# Never cancel a release mid-publish. GitHub keeps one pending run per group,
+# so of several pushes queued behind a running release only the newest
+# publishes; snapshots are per commit, so nothing is lost but intermediate
+# snapshots. Re-running an older run after a newer one has published moves
+# `next` back to the older commit: don't.
 concurrency:
   group: release
   cancel-in-progress: false
@@ -87,13 +91,23 @@ jobs:
           umask ${{ matrix.umask }}
           mkdir -p "$OUT"
           vp node .github/tools/ci/src/cli.ts release-plan >"$OUT/plan.txt"
-          while read -r dir name version; do
+          # The plan is read on fd 3 so no command in the loop can consume it.
+          while read -r dir name version <&3; do
             echo "::group::$name@$version"
-            vp run --no-cache --filter "$name" build
-            (cd "$dir" && vp pm pack --pack-destination "$OUT")
+            vp run --no-cache --filter "$name" build </dev/null
+            (cd "$dir" && vp pm pack --pack-destination "$OUT" </dev/null)
             echo "::endgroup::"
-          done <"$OUT/plan.txt"
+          done 3<"$OUT/plan.txt"
           cd "$OUT"
+          # Exactly one tarball per plan line and nothing else, so publish can
+          # neither skip a planned package nor ship an unplanned file.
+          expected="$(while read -r _dir name version; do printf '%s-%s.tgz\n' "$(printf '%s' "${name#@}" | tr / -)" "$version"; done <plan.txt | LC_ALL=C sort)"
+          actual="$(find . -maxdepth 1 -type f ! -name plan.txt -printf '%f\n' | LC_ALL=C sort)"
+          if [ "$expected" != "$actual" ]; then
+            echo "::error::packed files differ from the plan"
+            diff <(echo "$expected") <(echo "$actual") || true
+            exit 1
+          fi
           # The plan is hashed too, so both builds must agree on what ships.
           find . -maxdepth 1 -type f -printf '%f\0' | LC_ALL=C sort -z | xargs -0 -r sha256sum >"$RUNNER_TEMP/manifest-${{ matrix.variant }}.txt"
           cat "$RUNNER_TEMP/manifest-${{ matrix.variant }}.txt"
@@ -179,6 +193,10 @@ jobs:
   publish:
     name: publish
     needs: sign
+    # Documents intent only: a branch that edits this file can drop the
+    # condition. What actually stops a branch from publishing is the `npm`
+    # environment allowing deployments from `main` only (owner setting, T-61).
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     # Trusted publishing on npm is bound to this workflow file and environment.
@@ -193,6 +211,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # Only the root files (always in a cone-mode sparse checkout) are
+          # needed: pnpm-workspace.yaml and .node-version for setup-vp.
           sparse-checkout: .github/scripts
       - uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
         with:
@@ -238,16 +258,24 @@ jobs:
           echo "NPM_CLI=$RUNNER_TEMP/npm/bin/npm-cli.js" >>"$GITHUB_ENV"
       # The one place npm is called directly (AGENTS.md). Always `--tag next`;
       # never `latest`. A version already on the registry (a re-run) is skipped.
+      # The plan is read on fd 3 so no command in the loop can consume it.
       - name: npm publish --tag next
         working-directory: ${{ runner.temp }}/release
         run: |
           vp node "$NPM_CLI" --version
-          while read -r _dir name version; do
+          while read -r _dir name version <&3; do
             f="$(printf '%s' "${name#@}" | tr / -)-$version.tgz"
-            if [ "$(vp node "$NPM_CLI" view "$name@$version" version 2>/dev/null || true)" = "$version" ]; then
+            if [ "$(vp node "$NPM_CLI" view "$name@$version" version </dev/null 2>/dev/null || true)" = "$version" ]; then
               echo "$name@$version is already published"
               continue
             fi
-            vp node "$NPM_CLI" publish "./$f" --tag next --access public --provenance
+            vp node "$NPM_CLI" publish "./$f" --tag next --access public --provenance --ignore-scripts </dev/null
             echo "- \`$name@$version\` published as \`next\`" >>"$GITHUB_STEP_SUMMARY"
-          done <plan.txt
+            # Tripwire: the owner alone promotes `latest`. Fails the run (and
+            # so alerts) if this publish moved it anyway.
+            latest="$(vp node "$NPM_CLI" view "$name" dist-tags.latest </dev/null)"
+            if [ "$latest" = "$version" ]; then
+              echo "::error::$name@$version became latest; the owner must restore the previous latest"
+              exit 1
+            fi
+          done 3<plan.txt

@@ -6,7 +6,7 @@ const commit = "7ca807bb8835312c5ff1ec4afcd89f463ea7faff";
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
 
 function published(name: string, version: string, extra = {}) {
-  return { name, version, license: "Apache-2.0", ...extra };
+  return { name, version, license: "Apache-2.0", publishConfig: { access: "public" }, ...extra };
 }
 
 function candidate(dir: string, name: string, from: string, to: string, extra = {}) {
@@ -106,20 +106,55 @@ describe("snapshotReleases", () => {
     expect(snapshotReleases([], "7ca807b").errors).toHaveLength(1);
   });
 
-  test("every release is a published package with a snapshot version of this commit", () => {
+  test("accepts exactly the canonical x.y.z-next-<commit> versions", () => {
+    const part = fc.nat({ max: 10_000 });
+    const mutation = fc.constantFrom(
+      "none",
+      "leading-zero",
+      "build-metadata",
+      "other-commit",
+      "uppercase-commit",
+      "short-commit",
+      "other-tag",
+    );
     fc.assert(
-      fc.property(fc.string(), fc.string(), fc.string(), (crypto, verifier, sdk) => {
-        const { releases } = snapshotReleases(
-          [
-            candidate("packages/crypto", "@abolishus/crypto", "0.0.0", crypto),
-            candidate("packages/verifier", "@abolishus/verifier", "0.0.0", verifier),
-            candidate("packages/sdk", "@abolishus/sdk", "0.0.0", sdk),
-          ],
+      fc.property(part, part, part, mutation, (x, y, z, m) => {
+        let version = `${x}.${y}.${z}-next-${commit}`;
+        if (m === "leading-zero") version = `0${x}.${y}.${z}-next-${commit}`;
+        if (m === "build-metadata") version += "+1";
+        if (m === "other-commit") version = `${x}.${y}.${z}-next-${"a".repeat(40)}`;
+        if (m === "uppercase-commit") version = `${x}.${y}.${z}-next-${commit.toUpperCase()}`;
+        if (m === "short-commit") version = `${x}.${y}.${z}-next-${commit.slice(0, 7)}`;
+        if (m === "other-tag") version = `${x}.${y}.${z}-beta-${commit}`;
+        const { releases, errors } = snapshotReleases(
+          [candidate("packages/sdk", "@abolishus/sdk", "0.0.0", version)],
           commit,
         );
-        for (const r of releases) expect(r.version.endsWith(`-next-${commit}`)).toBe(true);
+        const accepted = m === "none";
+        expect(releases.map((r) => r.version)).toEqual(accepted ? [version] : []);
+        expect(errors).toHaveLength(accepted ? 0 : 1);
       }),
       { numRuns },
     );
+  });
+
+  test("refuses any publishConfig beyond public access", () => {
+    for (const publishConfig of [
+      undefined,
+      { access: "public", tag: "latest" },
+      { access: "public", registry: "https://evil.example/" },
+      { access: "restricted" },
+    ]) {
+      const { releases, errors } = snapshotReleases(
+        [
+          candidate("packages/sdk", "@abolishus/sdk", "0.0.0", `0.0.1-next-${commit}`, {
+            publishConfig,
+          }),
+        ],
+        commit,
+      );
+      expect(releases).toEqual([]);
+      expect(errors).toHaveLength(1);
+    }
   });
 });

@@ -73,6 +73,12 @@ export function snapshotReleases(
       errors.push(`${dir}: ${name} must be Apache-2.0`);
       continue;
     }
+    // publishConfig can redirect the registry or set a dist-tag; npm gives
+    // the CLI's `--tag next` precedence today, but nothing here relies on it.
+    if (JSON.stringify(after["publishConfig"]) !== JSON.stringify({ access: "public" })) {
+      errors.push(`${dir}: ${name} publishConfig must be exactly {"access":"public"}`);
+      continue;
+    }
     releases.push({ dir, name, version });
   }
   releases.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));

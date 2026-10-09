@@ -11,8 +11,9 @@
 //                           in a clean checkout, apply the accepted next snapshot
 //                           versions from <file> (release-versions output, untrusted)
 //                           and print "<dir> <name> <version>" for each to publish
-//   release-verify --plan <file> --a <dir> --b <dir>
-//                           check both builds' tarballs against the plan: one per
+//   release-verify --plan <file> --a <dir> --b <dir> --needs <file>
+//                           check both builds' tarballs against the plan and the
+//                           hashes their build jobs output (toJSON(needs)): one per
 //                           planned package, byte-identical, and each packed
 //                           manifest and file list acceptable to publish
 
@@ -55,12 +56,14 @@ import {
   unjustifiedAllowBuilds,
 } from "./lockfile.ts";
 import {
+  buildJobErrors,
   proposedVersions,
   reproducedErrors,
   setVersion,
   shippedErrors,
   snapshotReleases,
   tarballName,
+  type NeededJob,
   type Release,
 } from "./release.ts";
 
@@ -378,7 +381,9 @@ function releaseVerify(): void {
       ]),
     );
   const a = hashes(arg("--a"));
-  const errors = reproducedErrors(plan, a, hashes(arg("--b")));
+  const b = hashes(arg("--b"));
+  const needs = JSON.parse(readFileSync(arg("--needs"), "utf8")) as Record<string, NeededJob>;
+  const errors = [...reproducedErrors(plan, a, b), ...buildJobErrors(plan, needs, { a, b })];
   if (errors.length === 0) {
     for (const r of plan) {
       const tgz = join(arg("--a"), tarballName(r));

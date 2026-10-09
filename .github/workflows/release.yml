@@ -15,10 +15,13 @@
 #            can write.
 #   build    one job per package and variant (two variants: different paths,
 #            locale, timezone, umask), each in a fresh checkout producing
-#            exactly one tarball (`vp pack` + `pnpm pack`); no secrets, no OIDC
-#   verify   gate code only, fresh checkout, no build: exactly one tarball per
-#            planned package from each variant, byte-identical across both,
-#            and each packed manifest and file list acceptable to publish
+#            exactly one tarball (`vp pack` + `pnpm pack`) and outputting its
+#            sha256 (.github/actions/release-build); no secrets, no OIDC
+#   verify   gate code only, fresh checkout, no build: exactly the planned
+#            artifacts, each tarball matching the hash its own build job
+#            output, byte-identical across both variants, and each packed
+#            manifest and file list acceptable to publish. Its manifest is a
+#            job output that sign and publish check the artifacts against.
 #   checks   waits for `ci`, `repro-build` and `reference-election` on this
 #            commit and requires each to have passed: two PRs reviewed apart
 #            can merge into a combination no check saw (STATUS known-weak)
@@ -45,8 +48,8 @@ permissions: {}
 # Never cancel a release mid-publish. GitHub keeps one pending run per group,
 # so of several pushes queued behind a running release only the newest
 # publishes; snapshots are per commit, so nothing is lost but intermediate
-# snapshots. Re-running an older run after a newer one has published moves
-# `next` back to the older commit: don't.
+# snapshots. Re-running a run fails at verify (its tarball artifacts already
+# exist), safely; a stuck release needs a new commit on main.
 concurrency:
   group: release
   cancel-in-progress: false
@@ -97,7 +100,7 @@ jobs:
       publish: ${{ steps.plan.outputs.publish }}
       plan: ${{ steps.plan.outputs.plan }}
       versions: ${{ steps.plan.outputs.versions }}
-      packages: ${{ steps.plan.outputs.packages }}
+      names: ${{ steps.plan.outputs.names }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -124,84 +127,180 @@ jobs:
             echo "versions<<PLAN_EOF"
             [ -z "$plan" ] || printf '%s\n' "$plan" | awk '{ print $1, $3 }'
             echo "PLAN_EOF"
-            printf 'packages=%s\n' "$(printf '%s' "$plan" | jq -R -s -c 'split("\n") | map(select(. != "") | split(" ") | {name: .[1], dir: .[0]})')"
+            printf 'names=%s\n' "$(printf '%s' "$plan" | jq -R -s -c 'split("\n") | map(select(. != "") | split(" ") | .[1])')"
             if [ -n "$plan" ]; then echo "publish=true"; else echo "publish=false"; fi
           } >>"$GITHUB_OUTPUT"
           if [ -z "$plan" ]; then echo "nothing to publish (no pending changesets)" | tee -a "$GITHUB_STEP_SUMMARY"; fi
 
-  build:
-    name: build ${{ matrix.package.name }} (${{ matrix.variant }})
+  # One job per published package and variant, each in its own runner, so no
+  # package's build code shares a machine with another package's tarball.
+  # Each job outputs its tarball's hash; job outputs can't be written by other
+  # jobs, while artifacts can be deleted and re-uploaded by any job holding
+  # this run's token. Spelled out per package because a matrix job has one
+  # set of outputs for all its legs. Adding a published package means adding
+  # its two jobs here and to verify's needs, and to PUBLISHED_PACKAGES.
+  build-crypto-a:
+    name: build @abolishus/crypto (a)
     needs: plan
-    if: needs.plan.outputs.publish == 'true'
+    if: contains(fromJSON(needs.plan.outputs.names), '@abolishus/crypto')
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
       contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        package: ${{ fromJSON(needs.plan.outputs.packages) }}
-        variant: [a, b]
-    env:
-      CHECKOUT: ${{ matrix.variant == 'a' && 'abolish' || 'some/other/dir/abolish-release' }}
+    outputs:
+      sha256: ${{ steps.build.outputs.sha256 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          path: ${{ env.CHECKOUT }}
           persist-credentials: false
-      - name: Pin SOURCE_DATE_EPOCH to the commit time
-        working-directory: ${{ env.CHECKOUT }}
-        run: echo "SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)" >>"$GITHUB_ENV"
-      # Same steps as .github/actions/setup, inlined: `uses:` cannot take a matrix path.
-      - uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
+          sparse-checkout: .github/actions
+      - id: build
+        uses: ./.github/actions/release-build
         with:
-          version-file: pnpm-workspace.yaml
-          node-version-file: .node-version
-          working-directory: ${{ env.CHECKOUT }}
-          run-install: "false"
-      - name: Install dependencies (frozen lockfile)
-        working-directory: ${{ env.CHECKOUT }}
-        run: vp install --frozen-lockfile --ignore-scripts -- --ignore-pnpmfile
-      # Gate code runs before any build code in this job, and verify re-judges
-      # everything this job produces, so nothing here is trusted afterwards.
-      - name: Build and pack
-        working-directory: ${{ env.CHECKOUT }}
-        env:
-          VERSIONS: ${{ needs.plan.outputs.versions }}
-          NAME: ${{ matrix.package.name }}
-          DIR: ${{ matrix.package.dir }}
-          TZ: ${{ matrix.variant == 'a' && 'UTC' || 'Pacific/Auckland' }}
-          LANG: ${{ matrix.variant == 'a' && 'C.UTF-8' || 'en_US.UTF-8' }}
-          LC_ALL: ${{ matrix.variant == 'a' && 'C.UTF-8' || 'en_US.UTF-8' }}
-          UMASK: ${{ matrix.variant == 'a' && '0022' || '0077' }}
-          OUT: ${{ runner.temp }}/out
-        run: |
-          umask "$UMASK"
-          printf '%s\n' "$VERSIONS" >"$RUNNER_TEMP/versions.txt"
-          vp node .github/tools/ci/src/cli.ts release-apply --versions "$RUNNER_TEMP/versions.txt" >/dev/null
-          vp run --no-cache --filter "$NAME..." build
-          mkdir -p "$OUT"
-          (cd "$DIR" && vp pm pack --pack-destination "$OUT")
-      - name: Artifact name
-        id: artifact
-        env:
-          NAME: ${{ matrix.package.name }}
-          VARIANT: ${{ matrix.variant }}
-        run: echo "name=tgz-$VARIANT-$(printf '%s' "${NAME#@}" | tr / -)" >>"$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+          name: "@abolishus/crypto"
+          dir: packages/crypto
+          variant: a
+          versions: ${{ needs.plan.outputs.versions }}
+
+  build-crypto-b:
+    name: build @abolishus/crypto (b)
+    needs: plan
+    if: contains(fromJSON(needs.plan.outputs.names), '@abolishus/crypto')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      sha256: ${{ steps.build.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          name: ${{ steps.artifact.outputs.name }}
-          path: ${{ runner.temp }}/out/
-          if-no-files-found: error
+          persist-credentials: false
+          sparse-checkout: .github/actions
+      - id: build
+        uses: ./.github/actions/release-build
+        with:
+          name: "@abolishus/crypto"
+          dir: packages/crypto
+          variant: b
+          versions: ${{ needs.plan.outputs.versions }}
+
+  build-verifier-a:
+    name: build @abolishus/verifier (a)
+    needs: plan
+    if: contains(fromJSON(needs.plan.outputs.names), '@abolishus/verifier')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      sha256: ${{ steps.build.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/actions
+      - id: build
+        uses: ./.github/actions/release-build
+        with:
+          name: "@abolishus/verifier"
+          dir: packages/verifier
+          variant: a
+          versions: ${{ needs.plan.outputs.versions }}
+
+  build-verifier-b:
+    name: build @abolishus/verifier (b)
+    needs: plan
+    if: contains(fromJSON(needs.plan.outputs.names), '@abolishus/verifier')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      sha256: ${{ steps.build.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/actions
+      - id: build
+        uses: ./.github/actions/release-build
+        with:
+          name: "@abolishus/verifier"
+          dir: packages/verifier
+          variant: b
+          versions: ${{ needs.plan.outputs.versions }}
+
+  build-sdk-a:
+    name: build @abolishus/sdk (a)
+    needs: plan
+    if: contains(fromJSON(needs.plan.outputs.names), '@abolishus/sdk')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      sha256: ${{ steps.build.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/actions
+      - id: build
+        uses: ./.github/actions/release-build
+        with:
+          name: "@abolishus/sdk"
+          dir: packages/sdk
+          variant: a
+          versions: ${{ needs.plan.outputs.versions }}
+
+  build-sdk-b:
+    name: build @abolishus/sdk (b)
+    needs: plan
+    if: contains(fromJSON(needs.plan.outputs.names), '@abolishus/sdk')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      sha256: ${{ steps.build.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/actions
+      - id: build
+        uses: ./.github/actions/release-build
+        with:
+          name: "@abolishus/sdk"
+          dir: packages/sdk
+          variant: b
+          versions: ${{ needs.plan.outputs.versions }}
 
   verify:
     name: verify
-    needs: [plan, build]
+    needs:
+      [
+        plan,
+        build-crypto-a,
+        build-crypto-b,
+        build-verifier-a,
+        build-verifier-b,
+        build-sdk-a,
+        build-sdk-b,
+      ]
+    # Runs when something is planned and no build failed; builds of packages
+    # with nothing to publish are skipped.
+    if: >-
+      always() && needs.plan.result == 'success' && needs.plan.outputs.publish == 'true'
+      && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read
       actions: read
+    outputs:
+      manifest: ${{ steps.verify.outputs.manifest }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -251,19 +350,29 @@ jobs:
               mv "$d/$slug-$version.tgz" "$RUNNER_TEMP/$v/"
             done
           done <<<"$PLAN"
-      - name: Tarballs match the plan, reproduce, and are fit to publish
+      - name: Tarballs match the plan and their build jobs, reproduce, and are fit to publish
+        id: verify
         env:
           PLAN: ${{ needs.plan.outputs.plan }}
+          NEEDS: ${{ toJSON(needs) }}
           RELEASE: ${{ runner.temp }}/release
         run: |
           mkdir -p "$RELEASE"
           printf '%s\n' "$PLAN" >"$RELEASE/plan.txt"
-          vp node .github/tools/ci/src/cli.ts release-verify --plan "$RELEASE/plan.txt" --a "$RUNNER_TEMP/a" --b "$RUNNER_TEMP/b"
+          printf '%s' "$NEEDS" >"$RUNNER_TEMP/needs.json"
+          vp node .github/tools/ci/src/cli.ts release-verify --plan "$RELEASE/plan.txt" --a "$RUNNER_TEMP/a" --b "$RUNNER_TEMP/b" --needs "$RUNNER_TEMP/needs.json"
           cp "$RUNNER_TEMP"/a/*.tgz "$RELEASE/"
           cd "$RELEASE"
           find . -maxdepth 1 -type f -printf '%f\0' | LC_ALL=C sort -z | xargs -0 sha256sum >"$RUNNER_TEMP/manifest.txt"
           mv "$RUNNER_TEMP/manifest.txt" manifest.txt
           cat manifest.txt
+          # sign and publish check the artifact against this output, which no
+          # other job can write, not against the artifact's own copy.
+          {
+            echo "manifest<<MANIFEST_EOF"
+            cat manifest.txt
+            echo "MANIFEST_EOF"
+          } >>"$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-unsigned
@@ -318,7 +427,7 @@ jobs:
 
   sign:
     name: sign
-    needs: checks
+    needs: [verify, checks]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -329,9 +438,16 @@ jobs:
         with:
           name: release-unsigned
           path: release
-      - name: Tarballs match the verified manifest
+      - name: Files are exactly the verified ones
         working-directory: release
-        run: sha256sum --strict -c manifest.txt
+        env:
+          MANIFEST: ${{ needs.verify.outputs.manifest }}
+        run: |
+          printf '%s\n' "$MANIFEST" >"$RUNNER_TEMP/manifest.txt"
+          cmp manifest.txt "$RUNNER_TEMP/manifest.txt"
+          sha256sum --strict -c "$RUNNER_TEMP/manifest.txt"
+          # Nothing but the manifest's files (and the manifest) may be signed.
+          diff <(find . -mindepth 1 -printf '%P\n' | LC_ALL=C sort) <({ echo manifest.txt; awk '{ print $2 }' "$RUNNER_TEMP/manifest.txt"; } | LC_ALL=C sort)
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
         with:
           cosign-release: v3.0.6
@@ -354,7 +470,7 @@ jobs:
 
   publish:
     name: publish
-    needs: sign
+    needs: [verify, sign]
     # Documents intent only: a branch that edits this file can drop the
     # condition. What actually stops a branch from publishing is the `npm`
     # environment allowing deployments from `main` only (owner setting, T-61).
@@ -392,8 +508,11 @@ jobs:
         working-directory: ${{ runner.temp }}/release
         env:
           IDENTITY: ${{ github.server_url }}/${{ github.workflow_ref }}
+          MANIFEST: ${{ needs.verify.outputs.manifest }}
         run: |
-          sha256sum --strict -c manifest.txt
+          printf '%s\n' "$MANIFEST" >"$RUNNER_TEMP/manifest.txt"
+          cmp manifest.txt "$RUNNER_TEMP/manifest.txt"
+          sha256sum --strict -c "$RUNNER_TEMP/manifest.txt"
           for f in *.tgz; do
             cosign verify-blob --bundle "$f.sigstore.json" \
               --certificate-identity "$IDENTITY" \

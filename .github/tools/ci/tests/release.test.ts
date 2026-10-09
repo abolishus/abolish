@@ -1,6 +1,7 @@
 import fc from "fast-check";
 import { describe, expect, test } from "vite-plus/test";
 import {
+  buildJobErrors,
   entryPoints,
   proposedVersions,
   reproducedErrors,
@@ -259,6 +260,8 @@ describe("shippedErrors", () => {
 
   test("accepts the planned release with every entry point shipped", () => {
     expect(shippedErrors(shipped, files, release)).toEqual([]);
+    const withDir = [{ type: "d", path: "package/dist/" }, ...files];
+    expect(shippedErrors(shipped, withDir, release)).toEqual([]);
   });
 
   test("refuses a tarball that differs from the plan or could run code on install", () => {
@@ -291,6 +294,9 @@ describe("shippedErrors", () => {
       { type: "-", path: "package/dist/index.mjs" },
       { type: "l", path: "package/link" },
       { type: "h", path: "package/hard" },
+      { type: "-", path: "package/./package.json" },
+      { type: "-", path: "package//package.json" },
+      { type: "-", path: "package/PACKAGE.JSON" },
     ]) {
       expect(shippedErrors(shipped, [...files, extra], release), extra.path).toHaveLength(1);
     }
@@ -335,5 +341,33 @@ describe("reproducedErrors", () => {
     expect(reproducedErrors(plan, missing, same)).toHaveLength(1);
     expect(reproducedErrors(plan, same, extra)).toHaveLength(1);
     expect(reproducedErrors(plan, same, differs)).toHaveLength(1);
+  });
+});
+
+describe("buildJobErrors", () => {
+  const plan = [
+    { dir: "packages/crypto", name: "@abolishus/crypto", version: `0.1.0-next-${commit}` },
+  ];
+  const file = tarballName(plan[0] ?? { name: "", version: "" });
+  const hashes = { a: new Map([[file, "aa"]]), b: new Map([[file, "aa"]]) };
+  const job = (sha256: string, result = "success") => ({ result, outputs: { sha256 } });
+  const needs = {
+    plan: { result: "success" },
+    "build-crypto-a": job("aa"),
+    "build-crypto-b": job("aa"),
+  };
+
+  test("accepts tarballs that hash to what their build jobs reported", () => {
+    expect(buildJobErrors(plan, needs, hashes)).toEqual([]);
+  });
+
+  test("refuses a tarball replaced after its job built it, or a job that didn't succeed", () => {
+    expect(buildJobErrors(plan, { ...needs, "build-crypto-b": job("bb") }, hashes)).toHaveLength(1);
+    expect(
+      buildJobErrors(plan, { ...needs, "build-crypto-a": job("aa", "skipped") }, hashes),
+    ).toHaveLength(1);
+    const { "build-crypto-a": _, ...missing } = needs;
+    expect(buildJobErrors(plan, missing, hashes)).toHaveLength(1);
+    expect(buildJobErrors(plan, needs, { ...hashes, a: new Map() })).toHaveLength(1);
   });
 });

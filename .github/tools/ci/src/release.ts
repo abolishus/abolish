@@ -184,10 +184,14 @@ export function shippedErrors(
   for (const { type, path } of entries) {
     if (type !== "-" && type !== "d")
       errors.push(`${at}: ${path} is not a regular file or directory`);
-    if (!path.startsWith("package/") || path.split("/").includes(".."))
-      errors.push(`${at}: entry ${JSON.stringify(path)} is outside package/`);
-    if (seen.has(path)) errors.push(`${at}: ${path} appears twice`);
-    seen.add(path);
+    // Compared as normalised, so aliases (`package/./x`, `package//x`) and
+    // case variants, which extract to the same file, are refused too.
+    const segments = (type === "d" ? path.replace(/\/$/, "") : path).split("/");
+    if (segments[0] !== "package" || segments.some((x) => x === "" || x === "." || x === ".."))
+      errors.push(`${at}: entry ${JSON.stringify(path)} is not a plain path under package/`);
+    const key = segments.join("/").toLowerCase();
+    if (seen.has(key)) errors.push(`${at}: ${path} appears twice`);
+    seen.add(key);
   }
   const files = entries.filter((e) => e.type === "-").map((e) => e.path);
   if (manifest["name"] !== release.name || manifest["version"] !== release.version)
@@ -241,5 +245,37 @@ export function reproducedErrors(
   for (const name of expected)
     if (a.has(name) && a.get(name) !== b.get(name))
       errors.push(`${name} differs between builds a and b; the release is not reproducible`);
+  return errors;
+}
+
+/** What `toJSON(needs)` gives a job for one of the jobs it needs. */
+export interface NeededJob {
+  result?: string;
+  outputs?: Record<string, string>;
+}
+
+/**
+ * Each planned tarball must hash to what its own build job reported as a job
+ * output (`build-<package>-<variant>`). Artifacts can be deleted and
+ * re-uploaded by any job holding the run's token; job outputs can't be
+ * written by another job, so this binds every tarball to the job that built
+ * it (T-61).
+ */
+export function buildJobErrors(
+  plan: readonly Release[],
+  needs: Readonly<Record<string, NeededJob>>,
+  hashes: Readonly<Record<"a" | "b", ReadonlyMap<string, string>>>,
+): string[] {
+  const errors: string[] = [];
+  for (const r of plan) {
+    for (const variant of ["a", "b"] as const) {
+      const id = `build-${r.name.split("/")[1] ?? ""}-${variant}`;
+      const job = needs[id];
+      const file = tarballName(r);
+      if (job?.result !== "success") errors.push(`${id}: ${job?.result ?? "missing"}, not success`);
+      else if (job.outputs?.["sha256"] !== hashes[variant].get(file))
+        errors.push(`${file} (${variant}) doesn't match the hash ${id} reported for it`);
+    }
+  }
   return errors;
 }

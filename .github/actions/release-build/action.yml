@@ -1,0 +1,82 @@
+name: release-build
+description: >
+  Build and pack one published package for release.yml in a fresh checkout,
+  upload its tarball as artifact tgz-<variant>-<slug>, and output its sha256.
+  The hash travels as a job output, which no other job can write, so a
+  tarball that anything else in the run replaces or deletes and re-uploads
+  fails verify (T-61).
+inputs:
+  name:
+    description: Package name, e.g. @abolishus/crypto.
+    required: true
+  dir:
+    description: Package directory, e.g. packages/crypto.
+    required: true
+  variant:
+    description: a or b; b builds under a different path, locale, timezone and umask.
+    required: true
+  versions:
+    description: The accepted "<dir> <version>" lines from release.yml's plan job.
+    required: true
+outputs:
+  sha256:
+    description: sha256 of the packed tarball.
+    value: ${{ steps.pack.outputs.sha256 }}
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        path: ${{ inputs.variant == 'a' && 'build/abolish' || 'build/some/other/dir/abolish-release' }}
+        persist-credentials: false
+    - name: Variant settings
+      shell: bash
+      env:
+        VARIANT: ${{ inputs.variant }}
+      run: |
+        case "$VARIANT" in
+          a) printf '%s\n' CHECKOUT=build/abolish TZ=UTC LANG=C.UTF-8 LC_ALL=C.UTF-8 UMASK=0022 ;;
+          b) printf '%s\n' CHECKOUT=build/some/other/dir/abolish-release TZ=Pacific/Auckland LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 UMASK=0077 ;;
+          *) echo "::error::unknown variant $VARIANT"; exit 1 ;;
+        esac >>"$GITHUB_ENV"
+    - uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
+      with:
+        version-file: pnpm-workspace.yaml
+        node-version-file: .node-version
+        working-directory: ${{ env.CHECKOUT }}
+        run-install: "false"
+    - name: Install dependencies (frozen lockfile, no install scripts)
+      shell: bash
+      working-directory: ${{ env.CHECKOUT }}
+      run: vp install --frozen-lockfile --ignore-scripts -- --ignore-pnpmfile
+    # Gate code runs before any build code in this job; verify re-judges the
+    # tarball against the hash this job outputs.
+    - name: Build and pack
+      id: pack
+      shell: bash
+      working-directory: ${{ env.CHECKOUT }}
+      env:
+        NAME: ${{ inputs.name }}
+        DIR: ${{ inputs.dir }}
+        VARIANT: ${{ inputs.variant }}
+        VERSIONS: ${{ inputs.versions }}
+        OUT: ${{ runner.temp }}/out
+      run: |
+        umask "$UMASK"
+        SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
+        export SOURCE_DATE_EPOCH
+        printf '%s\n' "$VERSIONS" >"$RUNNER_TEMP/versions.txt"
+        vp node .github/tools/ci/src/cli.ts release-apply --versions "$RUNNER_TEMP/versions.txt" >/dev/null
+        vp run --no-cache --filter "$NAME..." build
+        mkdir -p "$OUT"
+        (cd "$DIR" && vp pm pack --pack-destination "$OUT")
+        slug="$(printf '%s' "${NAME#@}" | tr / -)"
+        version="$(awk -v d="$DIR" '$1 == d { print $2 }' "$RUNNER_TEMP/versions.txt")"
+        tgz="$OUT/$slug-$version.tgz"
+        echo "sha256=$(sha256sum "$tgz" | cut -d' ' -f1)" >>"$GITHUB_OUTPUT"
+        echo "artifact=tgz-$VARIANT-$slug" >>"$GITHUB_OUTPUT"
+    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: ${{ steps.pack.outputs.artifact }}
+        path: ${{ runner.temp }}/out/
+        if-no-files-found: error

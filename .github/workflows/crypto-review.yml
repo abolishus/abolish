@@ -45,15 +45,23 @@ jobs:
         id: scope
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        # -z and quotePath=false: git otherwise quotes non-ASCII paths
+        # ("packages/crypto/\311\241roup.ts"), which would not match the pattern
+        # and would silently skip this review. Fails closed if the diff is empty.
         run: |
-          pattern='^(packages/(crypto|circuits|contracts|verifier)/|docs/spec/)'
-          changed="$(git diff --name-only "$BASE_SHA...HEAD")"
-          if echo "$changed" | grep -qE "$pattern"; then
+          pattern='^(packages/(crypto|circuits|contracts|verifier)/|docs/spec/|\.github/scripts/install-toolchain\.sh$)'
+          git -c core.quotePath=false diff --name-only -z "$BASE_SHA...HEAD" >"$RUNNER_TEMP/changed.z"
+          changed="$(tr '\0' '\n' <"$RUNNER_TEMP/changed.z")"
+          if [ -z "$changed" ]; then
+            echo "::error::could not determine the changed files; refusing to skip crypto-review"
+            exit 1
+          fi
+          if printf '%s\n' "$changed" | grep -qE "$pattern"; then
             echo "applies=true" >>"$GITHUB_OUTPUT"
-            echo "$changed" | grep -E "$pattern" | sed 's/^/- /' >>"$GITHUB_STEP_SUMMARY"
+            printf '%s\n' "$changed" | grep -E "$pattern" | sed 's/^/- /' >>"$GITHUB_STEP_SUMMARY"
           else
             echo "applies=false" >>"$GITHUB_OUTPUT"
-            echo "No changes under packages/{crypto,circuits,contracts,verifier} or docs/spec: not applicable." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "No changes under packages/{crypto,circuits,contracts,verifier}, docs/spec or the toolchain pins: not applicable." | tee -a "$GITHUB_STEP_SUMMARY"
           fi
       - name: Load review prompt
         id: prompt

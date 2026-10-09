@@ -15,6 +15,7 @@ import {
   diffPackages,
   parsePackages,
   registryViolations,
+  registryOverrides,
   renderDiff,
   structuralViolations,
   type LockedPackage,
@@ -85,7 +86,14 @@ function affected(): void {
   const packages = workspacePackages();
   const changed = process.argv.includes("--all")
     ? undefined
-    : git("diff", "--name-only", `${arg("--base")}...HEAD`).split("\n");
+    : git(
+        "-c",
+        "core.quotePath=false",
+        "diff",
+        "--name-only",
+        "-z",
+        `${arg("--base")}...HEAD`,
+      ).split("\0");
   const affectedSelection =
     changed === undefined ? ({ mode: "all" } as const) : selectAffected(changed, packages);
   const selection = forTask(affectedSelection, task, packages);
@@ -104,9 +112,9 @@ function actionsPinned(): void {
         .filter((f) => /\.ya?ml$/.test(f))
         .flatMap((f) => findUnpinned(join(d, f), readFileSync(join(d, f), "utf8"))),
     );
-  for (const v of violations) console.error(`${v.file}:${v.line}: ${v.uses}: ${v.reason}`);
+  for (const v of violations) console.error(`${v.file}: ${v.path}: ${v.value}: ${v.reason}`);
   if (violations.length > 0) process.exit(1);
-  console.log("all actions pinned by commit SHA");
+  console.log("all actions pinned by commit SHA and all images by digest");
 }
 
 async function registryFacts(
@@ -149,7 +157,13 @@ async function lockfile(): Promise<void> {
   writeFileSync("lockfile-diff.md", markdown);
   summary(markdown);
 
-  const violations = structuralViolations(head);
+  const violations = [
+    ...registryOverrides(
+      git("ls-files", "-z").split("\0"),
+      readFileSync("pnpm-workspace.yaml", "utf8"),
+    ),
+    ...structuralViolations(head),
+  ];
   const cache = new Map<string, Promise<unknown>>();
   const now = new Date();
   const toCheck = [...diff.added, ...diff.changed];

@@ -7,11 +7,12 @@ import {
   registryViolations,
   renderDiff,
   splitKey,
+  registryOverrides,
   structuralViolations,
 } from "../src/lockfile.ts";
 
-const I1 = "sha512-AAAA";
-const I2 = "sha512-BBBB";
+const I1 = `sha512-${"A".repeat(86)}==`;
+const I2 = `sha512-${"B".repeat(86)}==`;
 
 const lock = (entries: string) => `---
 lockfileVersion: '9.0'
@@ -233,5 +234,53 @@ describe("parsePackages is total (fails closed)", () => {
       ),
       { numRuns: Number(process.env["FC_NUM_RUNS"] ?? 200) },
     );
+  });
+});
+
+describe("resolution must be exactly {integrity: sha512-…}", () => {
+  const one = (resolution: string) =>
+    parsePackages(lock(`  x@1.0.0:\n    resolution: ${resolution}\n`));
+
+  test("a decoy key cannot supply the integrity the gate checks", () => {
+    const parsed = one(`{xintegrity: ${I1}, integrity: ${I2}}`);
+    expect(parsed.get("x@1.0.0")?.integrity).toBeUndefined();
+    expect(structuralViolations(parsed)).toHaveLength(1);
+  });
+
+  test("extra keys, quoted git types and truncated hashes are violations", () => {
+    for (const r of [
+      `{integrity: ${I1}, tarball: https://registry.npmjs.org/x/-/x-1.0.0.tgz}`,
+      "{commit: abc, repo: https://github.com/x/y, type: 'git'}",
+      "{integrity: sha512-AAAA}",
+    ]) {
+      expect(structuralViolations(one(r)), r).toHaveLength(1);
+    }
+    expect(structuralViolations(one(`{integrity: ${I1}}`))).toEqual([]);
+    expect(() => one(`{integrity: ${I1}}x`)).toThrow(LockfileParseError);
+  });
+});
+
+describe("registryOverrides", () => {
+  test("rejects any .npmrc and registry settings in pnpm-workspace.yaml", () => {
+    expect(registryOverrides(["a/.npmrc", "src/x.ts"], "packages: []\n")).toHaveLength(1);
+    expect(registryOverrides([], "registry: https://evil.example/\n")).toHaveLength(1);
+    expect(registryOverrides([], "registries:\n  default: https://evil.example/\n")).toHaveLength(
+      1,
+    );
+    expect(registryOverrides([], "'@scope:registry': https://evil.example/\n")).toHaveLength(1);
+    expect(registryOverrides([], "npmrcAuthFile: x\n")).toHaveLength(1);
+  });
+
+  test("accepts the normal configuration", () => {
+    expect(
+      registryOverrides(
+        ["package.json", "docs/npmrc.md"],
+        "packages:\n  - apps/*\nminimumReleaseAge: 10080\n",
+      ),
+    ).toEqual([]);
+  });
+
+  test("an unparseable workspace file is a violation", () => {
+    expect(registryOverrides([], "a: [\n").length).toBeGreaterThan(0);
   });
 });

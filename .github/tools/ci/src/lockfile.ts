@@ -1,13 +1,17 @@
-// Minimal, dependency-free reader for the `packages:` section of a pnpm v9
-// lockfile, plus the policy CI applies to it.
+// Minimal reader for the `packages:` section of a pnpm v9 lockfile, plus the
+// policy CI applies to it.
 //
 // Policy (threat: supply-chain attack via dependency or lockfile tampering):
-// - every package resolves from the npm registry with a sha512 integrity hash
-//   (no tarball URLs, git or directory resolutions);
+// - every package resolution is exactly `{integrity: sha512-…}` (no tarball,
+//   git or directory resolutions, no extra keys);
+// - no `.npmrc` and no registry override in pnpm-workspace.yaml, so the
+//   registry pnpm fetches from is the one the integrity was checked against;
 // - every added or changed package's integrity matches what the registry
 //   publishes (catches a hand-edited lockfile pointing at other bytes);
 // - every added or changed package is at least MIN_AGE_DAYS old.
 // The diff is also rendered as Markdown so the review workflows can review it.
+
+import { parseDocument } from "yaml";
 
 export interface LockedPackage {
   /** "name@version" exactly as the lockfile key, without quotes. */
@@ -24,7 +28,10 @@ export const MIN_AGE_DAYS = 7;
 const KEY_LINE = /^ {2}(['"]?)([^'"\s][^'"]*?)\1:\s*$/;
 const RESOLUTION_LINE = /^ {4}resolution:(.*)$/;
 const FLOW_MAP = /^\s*(\{.*\})\s*$/;
-const INTEGRITY = /integrity:\s*(sha512-[A-Za-z0-9+/]+={0,2})/;
+// The only resolution a registry-only policy permits: exactly one key. Anything
+// else (extra keys, a decoy like `xintegrity`, tarball, git, directory) leaves
+// `integrity` undefined and is rejected by structuralViolations.
+const REGISTRY_RESOLUTION = /^\{integrity: (sha512-[A-Za-z0-9+/]{86}==)\}$/;
 
 export function splitKey(key: string): { name: string; version: string } {
   const at = key.lastIndexOf("@");
@@ -105,7 +112,7 @@ export function parsePackages(lockfile: string): Map<string, LockedPackage> {
       name,
       version,
       resolution,
-      integrity: INTEGRITY.exec(resolution)?.[1],
+      integrity: REGISTRY_RESOLUTION.exec(resolution)?.[1],
     });
   });
   closeCurrent();
@@ -140,9 +147,9 @@ export function diffPackages(
 export function structuralViolations(head: Map<string, LockedPackage>): string[] {
   const out: string[] = [];
   for (const pkg of head.values()) {
-    if (pkg.integrity === undefined || /tarball:|type:\s*git|directory:/.test(pkg.resolution)) {
+    if (pkg.integrity === undefined) {
       out.push(
-        `${pkg.key}: resolution must be a registry package with sha512 integrity, got ${pkg.resolution}`,
+        `${pkg.key}: resolution must be exactly {integrity: sha512-…}, got ${pkg.resolution}`,
       );
     }
   }
@@ -196,4 +203,35 @@ export function renderDiff(diff: LockfileDiff): string {
   section("Changed resolution", diff.changed);
   section("Removed", diff.removed);
   return lines.join("\n");
+}
+
+/**
+ * Settings that would make pnpm fetch from somewhere other than the npm
+ * registry the integrity was checked against. Any `.npmrc` (tracked anywhere)
+ * and any registry, auth-file or scoped-registry key in pnpm-workspace.yaml is
+ * a violation; an unparseable workspace file is too.
+ */
+export function registryOverrides(
+  trackedFiles: readonly string[],
+  workspaceYaml: string,
+): string[] {
+  const out = trackedFiles
+    .filter((f) => f === ".npmrc" || f.endsWith("/.npmrc"))
+    .map(
+      (f) =>
+        `${f}: .npmrc files are not allowed (registry and auth config would bypass the lockfile policy)`,
+    );
+  const doc = parseDocument(workspaceYaml, { uniqueKeys: true });
+  if (doc.errors.length > 0) {
+    out.push(`pnpm-workspace.yaml: does not parse: ${doc.errors[0]?.message ?? "unknown error"}`);
+    return out;
+  }
+  const settings = doc.toJS() as unknown;
+  if (settings !== null && typeof settings === "object") {
+    for (const key of Object.keys(settings)) {
+      if (/registr|npmrc/i.test(key))
+        out.push(`pnpm-workspace.yaml: setting "${key}" is not allowed`);
+    }
+  }
+  return out;
 }

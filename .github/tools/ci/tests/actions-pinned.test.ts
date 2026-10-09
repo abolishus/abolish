@@ -2,24 +2,100 @@ import { expect, test } from "vite-plus/test";
 import { findUnpinned } from "../src/actions-pinned.ts";
 
 const SHA = "3d3c42e5aac5ba805825da76410c181273ba90b1";
+const DIGEST = `sha256:${"a".repeat(64)}`;
 
-test("accepts SHA pins with a version comment and local actions", () => {
-  const yml = [
-    `      - uses: actions/checkout@${SHA} # v7.0.1`,
-    `        uses: "owner/repo/sub/path@${SHA}" # v1`,
-    "      - uses: ./.github/actions/setup",
-    `      - uses: docker://alpine@sha256:${"a".repeat(64)}`,
-  ].join("\n");
-  expect(findUnpinned("w.yml", yml)).toEqual([]);
+const reasons = (yml: string) => findUnpinned("w.yml", yml).map((v) => `${v.path} ${v.reason}`);
+
+test("accepts SHA pins with a version comment, local .github actions and digest-pinned images", () => {
+  const yml = `
+jobs:
+  a:
+    container: node@${DIGEST}
+    services:
+      db:
+        image: postgres:16@${DIGEST}
+    steps:
+      - uses: actions/checkout@${SHA} # v7.0.1
+      - uses: "owner/repo/sub/path@${SHA}" # v1
+      - uses: ./.github/actions/setup
+      - uses: docker://alpine@${DIGEST}
+  b:
+    uses: owner/repo/.github/workflows/x.yml@${SHA} # v2.0.0
+`;
+  expect(reasons(yml)).toEqual([]);
 });
 
 test("rejects tags, branches, short SHAs, missing comments and docker tags", () => {
-  const yml = [
-    "      - uses: actions/checkout@v7",
-    "      - uses: actions/checkout@main",
-    "      - uses: actions/checkout@3d3c42e",
-    `      - uses: actions/checkout@${SHA}`,
-    "      - uses: docker://alpine:3",
-  ].join("\n");
-  expect(findUnpinned("w.yml", yml).map((v) => v.line)).toEqual([1, 2, 3, 4, 5]);
+  const yml = `
+jobs:
+  a:
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@main
+      - uses: actions/checkout@3d3c42e
+      - uses: actions/checkout@${SHA}
+      - uses: docker://alpine:3
+`;
+  expect(reasons(yml)).toEqual([
+    "jobs.a.steps.0.uses action must be pinned to a 40-character commit SHA",
+    "jobs.a.steps.1.uses action must be pinned to a 40-character commit SHA",
+    "jobs.a.steps.2.uses action must be pinned to a 40-character commit SHA",
+    "jobs.a.steps.3.uses pinned action needs a trailing '# vX.Y.Z' comment",
+    "jobs.a.steps.4.uses docker image must be pinned by sha256 digest",
+  ]);
+});
+
+test("equivalent YAML spellings cannot hide an unpinned action", () => {
+  const yml = `
+jobs:
+  a:
+    steps:
+      - {uses: attacker/x@main}
+      - {uses: attacker/y@main, with: {t: "\${{ secrets.T }}"}}
+      - "uses": attacker/z@main
+      - uses : attacker/w@main
+`;
+  expect(findUnpinned("w.yml", yml).map((v) => v.value)).toEqual([
+    "attacker/x@main",
+    "attacker/y@main",
+    "attacker/z@main",
+    "attacker/w@main",
+  ]);
+});
+
+test("local actions outside .github and path traversal are rejected", () => {
+  const yml = `
+steps:
+  - uses: ./tools/actions/setup
+  - uses: ./.github/../tools/x
+`;
+  expect(findUnpinned("w.yml", yml)).toHaveLength(2);
+});
+
+test("container and service images need digests", () => {
+  const yml = `
+jobs:
+  a:
+    container: node:24
+  b:
+    container:
+      image: node:24
+    services:
+      redis:
+        image: redis:7
+`;
+  expect(reasons(yml)).toEqual([
+    "jobs.a.container container image must be pinned by sha256 digest",
+    "jobs.b.container.image container image must be pinned by sha256 digest",
+    "jobs.b.services.redis.image container image must be pinned by sha256 digest",
+  ]);
+});
+
+test("unparseable, multi-document or duplicate-key files are violations", () => {
+  expect(findUnpinned("w.yml", "jobs: [unclosed\n").length).toBeGreaterThan(0);
+  expect(findUnpinned("w.yml", "a: 1\n---\nb: 2\n").length).toBeGreaterThan(0);
+  expect(
+    findUnpinned("w.yml", `steps:\n  - uses: a/b@${SHA} # v1\n    uses: evil/x@main\n`).length,
+  ).toBeGreaterThan(0);
+  expect(findUnpinned("w.yml", "steps:\n  - uses: [a, b]\n")).toHaveLength(1);
 });

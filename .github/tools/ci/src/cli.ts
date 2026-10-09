@@ -1,4 +1,4 @@
-// CI entry point. Run with `vp node tools/ci/src/cli.ts <command>` from the repo root.
+// CI entry point. Run with `vp node .github/tools/ci/src/cli.ts <command>` from the repo root.
 //
 //   affected (--base <ref> | --all) --task <name>
 //                           print `vp run <name>` selection args for packages changed
@@ -21,7 +21,7 @@ import {
   type RegistryFacts,
 } from "./lockfile.ts";
 
-const WORKSPACE_GLOBS = ["apps", "packages", "tools"];
+const WORKSPACE_GLOBS = ["apps", "packages", "tools", ".github/tools"];
 
 function git(...args: string[]): string {
   return execFileSync("git", args, {

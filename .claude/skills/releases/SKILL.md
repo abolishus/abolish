@@ -26,7 +26,7 @@ description: Rules for versioning, reproducible signed builds and npm publishing
 ## Reproducibility rules
 
 - `SOURCE_DATE_EPOCH` is the commit time. No timestamps, absolute paths, hostnames or random IDs in outputs.
-- Sorted file lists, fixed locale and timezone in build scripts, and pinned toolchains (Node via `.node-version`, pnpm via devEngines, Vite+ via the catalog, nargo/bb/forge via `scripts/install-toolchain.sh`).
+- Sorted file lists, fixed locale and timezone in build scripts, and pinned toolchains (Node via `.node-version`, pnpm via devEngines, Vite+ via the catalog, nargo/bb/forge via `.github/scripts/install-toolchain.sh`).
 - Solidity bytecode is built with `bytecode_hash = "none"`. Docker images are built from pinned digests, with `--provenance` and reproducible layer timestamps.
 - When `repro-build` fails, find the nondeterminism. Never relax the comparison.
 

@@ -21,8 +21,8 @@ description: Day-to-day development rules for the Abolish monorepo (Vite+, testi
 - `vp check --fix`: run before every commit.
 - `vp run --filter <pkg> test` (one package) and `vp run -r test` (everything).
 - `vp test run path/to/file.test.ts`: one file. `vp test`: watch mode.
-- `vp run -r build`, then `vp node tools/ci/src/cli.ts affected --base origin/main --task test` to see what CI will select.
-- Toolchain: `scripts/install-toolchain.sh`, then add `~/.local/abolish-toolchain/bin` to PATH.
+- `vp run -r build`, then `vp node .github/tools/ci/src/cli.ts affected --base origin/main --task test` to see what CI will select.
+- Toolchain: `.github/scripts/install-toolchain.sh`, then add `~/.local/abolish-toolchain/bin` to PATH.
 
 ## New workspace package checklist
 

@@ -14,7 +14,7 @@ Also load `crypto-review`: circuits are protocol code.
 - `@noir-lang/noir_js` 1.0.0-beta.22
 - `@aztec/bb.js` 5.0.0-nightly.20260522
 
-Install locally with `scripts/install-toolchain.sh`, which checks sha256 hashes. To upgrade, wait until `bb-versions.json` lists the new Noir version, then update `scripts/install-toolchain.sh` (versions and hashes), the catalog in `pnpm-workspace.yaml`, AGENTS.md and this skill in a single PR.
+Install locally with `.github/scripts/install-toolchain.sh`, which checks sha256 hashes. To upgrade, wait until `bb-versions.json` lists the new Noir version, then update `.github/scripts/install-toolchain.sh` (versions and hashes), the catalog in `pnpm-workspace.yaml`, AGENTS.md and this skill in a single PR.
 
 ## Layout
 

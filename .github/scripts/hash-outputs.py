@@ -1,7 +1,7 @@
 """Print "<sha256>  <path>" for every build output file, sorted, for reproducibility checks.
 
 Build outputs are the dist/, .output/ and out/ directories of each workspace
-package (apps/*, packages/*, tools/*). Paths are repo-relative so manifests from
+package (apps/*, packages/*, tools/*, .github/tools/*). Paths are repo-relative so manifests from
 different checkout locations compare equal.
 """
 
@@ -10,7 +10,7 @@ from pathlib import Path
 
 OUTPUT_DIRS = ("dist", ".output", "out", "target")
 rows = []
-for group in ("apps", "packages", "tools"):
+for group in ("apps", "packages", "tools", ".github/tools"):
     root = Path(group)
     if not root.is_dir():
         continue

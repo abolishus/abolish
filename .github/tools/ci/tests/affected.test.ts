@@ -15,15 +15,17 @@ const pkgs = [
     dependsOn: ["@abolishus/verifier"],
     scripts: ["test", "test:e2e"],
   },
-  { name: "@abolishus/ci-tools", dir: "tools/ci", dependsOn: [], scripts: ["test"] },
+  { name: "@abolishus/ci-tools", dir: ".github/tools/ci", dependsOn: [], scripts: ["test"] },
 ];
 
 describe("selectAffected", () => {
   test("files inside packages select those packages", () => {
-    expect(selectAffected(["packages/crypto/src/a.ts", "tools/ci/src/x.ts"], pkgs)).toEqual({
-      mode: "some",
-      packages: ["@abolishus/ci-tools", "@abolishus/crypto"],
-    });
+    expect(selectAffected(["packages/crypto/src/a.ts", ".github/tools/ci/src/x.ts"], pkgs)).toEqual(
+      {
+        mode: "some",
+        packages: ["@abolishus/ci-tools", "@abolishus/crypto"],
+      },
+    );
   });
 
   test("a sibling directory with a shared prefix is not owned", () => {

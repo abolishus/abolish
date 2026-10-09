@@ -8,7 +8,7 @@
 # @aztec/bb.js in pnpm-workspace.yaml must match. Upgrade all four together in
 # one PR, and only once bb-versions.json lists the new Noir version.
 #
-# Usage: scripts/install-toolchain.sh [install-dir]   (default: ~/.local/abolish-toolchain/bin)
+# Usage: .github/scripts/install-toolchain.sh [install-dir]   (default: ~/.local/abolish-toolchain/bin)
 set -euo pipefail
 
 NOIR_VERSION="1.0.0-beta.22"

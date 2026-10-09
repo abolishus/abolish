@@ -6,7 +6,7 @@ Last updated: 2026-10-09 (bootstrap session).
 
 ## In progress
 
-- **P0-1 `ci: bootstrap`** (this PR): AGENTS.md, CLAUDE.md, project skills, SessionStart hook, this STATUS, root `LICENSE` (AGPL-3.0-only), the root Vite+ workspace, `tools/ci`, `scripts/install-toolchain.sh`, and the workflows `ci`, `reference-election`, `repro-build`, `claude-review` and `crypto-review`. It waits for the owner's review because it changes `.github/`.
+- **P0-1 `ci: bootstrap`** (this PR): AGENTS.md, CLAUDE.md, project skills, SessionStart hook, this STATUS, root `LICENSE` (AGPL-3.0-only), the root Vite+ workspace, `.github/tools/ci`, `.github/scripts/install-toolchain.sh`, and the workflows `ci`, `reference-election`, `repro-build`, `claude-review` and `crypto-review`. It waits for the owner's review because it changes `.github/`.
 
 ## Blocked
 
@@ -19,6 +19,7 @@ Last updated: 2026-10-09 (bootstrap session).
 - **The review workflows haven't run yet.** Two settings are unverified until the first real run: `allowed_bots: claude` (the identity Claude's PRs come from) and `--effort max` in claude-code-action. Fix in a `ci:` PR if the first run fails for either reason.
 - **External (fork) PRs can't pass `claude-review` or `crypto-review`,** because forks get no secrets. A maintainer must re-open them from an in-repo branch.
 - **Lockfile "review" is mechanical plus AI review,** not human review. CI enforces registry-only resolution, integrity matching the registry, and ≥ 7 days' age; `claude-review` must justify every added package. There is no human sign-off on dependency changes unless the owner adds one.
+- **Non-`.github/` changes merge on CI plus model review alone.** All gate code (workflows, review prompts, `.github/tools/ci` policy code, `.github/scripts/install-toolchain.sh` pins and hashes) lives under `.github/`, which CODEOWNERS routes to the owner, so a PR can't weaken the checks that judge it. Everything else auto-merges once CI, `claude-review` and (for protocol paths) `crypto-review` pass, with no human in the loop.
 - **Required checks and auto-merge depend on repo rulesets** that agents may not change. The owner must mark `ci`, `reference-election`, `repro-build`, `claude-review` and `crypto-review` as required on `main`.
 - **No threat model yet.** No feature code may land before P1-1.
 

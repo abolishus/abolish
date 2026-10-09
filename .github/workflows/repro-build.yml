@@ -61,7 +61,7 @@ jobs:
         run: vp install --frozen-lockfile
       - name: Install Noir, Barretenberg and Foundry
         working-directory: ${{ matrix.path }}
-        run: scripts/install-toolchain.sh "$RUNNER_TEMP/abolish-toolchain/bin"
+        run: .github/scripts/install-toolchain.sh "$RUNNER_TEMP/abolish-toolchain/bin"
       - name: Build everything
         working-directory: ${{ matrix.path }}
         env:

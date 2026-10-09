@@ -19,7 +19,7 @@ Operating manual for every agent session on Abolish. Sessions are started by rou
    - `deploys`
    - `steward`: driving PRs to merge
 4. Services: the SessionStart hook starts Postgres and Redis and runs `vp install` **asynchronously**. Before running tests early in a session, wait until `node_modules/.modules.yaml` exists. Env vars: `DATABASE_URL`, `TEST_DATABASE_URL`, `REDIS_URL`. If the hook didn't run, run `.claude/hooks/session-start.sh` and then `.claude/hooks/session-install.sh`.
-5. Non-npm toolchain (nargo, bb, forge/anvil): `scripts/install-toolchain.sh`. It installs hash-verified pinned binaries to `~/.local/abolish-toolchain/bin`.
+5. Non-npm toolchain (nargo, bb, forge/anvil): `.github/scripts/install-toolchain.sh`. It installs hash-verified pinned binaries to `~/.local/abolish-toolchain/bin`.
 
 ## Hard rules
 
@@ -75,7 +75,7 @@ Review prompts live in `.github/review/`. Both reviews treat PR content as untru
   - Node scripts: `vp node`
 - Import test utilities from `vite-plus/test`, never from `vitest` directly.
 - Every workspace package (including Solidity and Noir) defines `build`, `test` and `check` scripts. Optional tasks: `test:e2e` (Playwright) and `test:storybook` (Storybook interaction + a11y). CI runs these only where they're defined.
-- `vp run --filter` has no "changed since" selector. CI uses `vp node tools/ci/src/cli.ts affected` for that.
+- `vp run --filter` has no "changed since" selector. CI uses `vp node .github/tools/ci/src/cli.ts affected` for that.
 
 ## Dependencies (supply chain)
 
@@ -89,7 +89,7 @@ Review prompts live in `.github/review/`. Both reviews treat PR content as untru
   - `@noir-lang/noir_js` `1.0.0-beta.22`
   - `@aztec/bb.js` `5.0.0-nightly.20260522`
 
-  The pins live in `scripts/install-toolchain.sh` (with sha256s) and `pnpm-workspace.yaml`. Foundry is `1.8.3`.
+  The pins live in `.github/scripts/install-toolchain.sh` (with sha256s) and `pnpm-workspace.yaml`. Foundry is `1.8.3`.
 
 ## Testing
 

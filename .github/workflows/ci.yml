@@ -58,7 +58,7 @@ jobs:
           for pair in check:check test:test build:build e2e:test:e2e storybook:test:storybook; do
             key="${pair%%:*}"
             task="${pair#*:}"
-            args="$(vp node tools/ci/src/cli.ts affected "${scope[@]}" --task "$task")"
+            args="$(vp node .github/tools/ci/src/cli.ts affected "${scope[@]}" --task "$task")"
             echo "$key=$args" >>"$GITHUB_OUTPUT"
           done
 
@@ -77,7 +77,7 @@ jobs:
           node-version-file: .node-version
           run-install: "false"
       - name: Actions are pinned by commit SHA
-        run: vp node tools/ci/src/cli.ts actions-pinned
+        run: vp node .github/tools/ci/src/cli.ts actions-pinned
       - name: actionlint
         env:
           ACTIONLINT_VERSION: 1.7.12
@@ -98,7 +98,7 @@ jobs:
         run: |
           if [ "$EVENT" = "pull_request" ]; then base="origin/$BASE_REF"; else base="${BEFORE:-HEAD~1}"; fi
           git cat-file -e "$base^{commit}" 2>/dev/null || base="$(git hash-object -t tree /dev/null)"
-          vp node tools/ci/src/cli.ts lockfile --base "$base"
+          vp node .github/tools/ci/src/cli.ts lockfile --base "$base"
       - name: crypto depends only on @noble/*
         run: |
           f=packages/crypto/package.json

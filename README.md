@@ -13,7 +13,7 @@ vp env on                      # use the pinned Node.js (.node-version) and pnpm
 vp install
 vp check                       # format, lint, typecheck
 vp run -r test                 # every package's tests
-scripts/install-toolchain.sh   # nargo, bb and Foundry at pinned, hash-verified versions
+.github/scripts/install-toolchain.sh   # nargo, bb and Foundry at pinned, hash-verified versions
 ```
 
 ## License

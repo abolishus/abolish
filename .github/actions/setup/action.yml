@@ -6,7 +6,7 @@ inputs:
     required: false
     default: "."
   toolchain:
-    description: Also install nargo, bb and Foundry (hash-verified, see scripts/install-toolchain.sh).
+    description: Also install nargo, bb and Foundry (hash-verified, see .github/scripts/install-toolchain.sh).
     required: false
     default: "false"
 # repro-build.yml inlines these steps (a matrix path cannot be used in `uses:`); keep them in sync.
@@ -28,4 +28,4 @@ runs:
       if: inputs.toolchain == 'true'
       shell: bash
       working-directory: ${{ inputs.working-directory }}
-      run: scripts/install-toolchain.sh "$RUNNER_TEMP/abolish-toolchain/bin"
+      run: .github/scripts/install-toolchain.sh "$RUNNER_TEMP/abolish-toolchain/bin"

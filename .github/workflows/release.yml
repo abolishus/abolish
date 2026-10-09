@@ -513,6 +513,10 @@ jobs:
           printf '%s\n' "$MANIFEST" >"$RUNNER_TEMP/manifest.txt"
           cmp manifest.txt "$RUNNER_TEMP/manifest.txt"
           sha256sum --strict -c "$RUNNER_TEMP/manifest.txt"
+          # Exactly the manifest's files, the manifest and one bundle per
+          # tarball: an extra file (an .npmrc, say) never reaches npm.
+          diff <(find . -mindepth 1 -printf '%P\n' | LC_ALL=C sort) \
+            <(awk '{ print $2; if ($2 ~ /\.tgz$/) print $2 ".sigstore.json" } END { print "manifest.txt" }' "$RUNNER_TEMP/manifest.txt" | LC_ALL=C sort)
           for f in *.tgz; do
             cosign verify-blob --bundle "$f.sigstore.json" \
               --certificate-identity "$IDENTITY" \
@@ -536,9 +540,21 @@ jobs:
       # The one place npm is called directly (AGENTS.md). Always `--tag next`;
       # never `latest`. A version already on the registry (a re-run) is skipped.
       # The plan is read on fd 3 so no command in the loop can consume it.
+      # npm runs from an empty directory with no user config, and its registry,
+      # TLS and proxy settings are pinned here, so no file from an artifact
+      # can configure it.
       - name: npm publish --tag next
-        working-directory: ${{ runner.temp }}/release
+        env:
+          RELEASE: ${{ runner.temp }}/release
+          NPM_CONFIG_USERCONFIG: /dev/null
+          NPM_CONFIG_GLOBALCONFIG: /dev/null
+          NPM_CONFIG_REGISTRY: https://registry.npmjs.org/
+          NPM_CONFIG_STRICT_SSL: "true"
+          NPM_CONFIG_PROXY: ""
+          NPM_CONFIG_HTTPS_PROXY: ""
         run: |
+          mkdir "$RUNNER_TEMP/npm-cwd"
+          cd "$RUNNER_TEMP/npm-cwd"
           vp node "$NPM_CLI" --version
           while read -r _dir name version <&3; do
             f="$(printf '%s' "${name#@}" | tr / -)-$version.tgz"
@@ -546,7 +562,7 @@ jobs:
               echo "$name@$version is already published"
               continue
             fi
-            vp node "$NPM_CLI" publish "./$f" --tag next --access public --provenance --ignore-scripts </dev/null
+            vp node "$NPM_CLI" publish "$RELEASE/$f" --tag next --access public --provenance --ignore-scripts </dev/null
             echo "- \`$name@$version\` published as \`next\`" >>"$GITHUB_STEP_SUMMARY"
             # Tripwire: the owner alone promotes `latest`. Fails the run (and
             # so alerts) if this publish moved it anyway.
@@ -555,4 +571,4 @@ jobs:
               echo "::error::$name@$version became latest; the owner must restore the previous latest"
               exit 1
             fi
-          done 3<plan.txt
+          done 3<"$RELEASE/plan.txt"

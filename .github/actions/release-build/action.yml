@@ -35,26 +35,26 @@ runs:
         VARIANT: ${{ inputs.variant }}
       run: |
         case "$VARIANT" in
-          a) printf '%s\n' CHECKOUT=build/abolish TZ=UTC LANG=C.UTF-8 LC_ALL=C.UTF-8 UMASK=0022 ;;
-          b) printf '%s\n' CHECKOUT=build/some/other/dir/abolish-release TZ=Pacific/Auckland LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 UMASK=0077 ;;
+          a) printf '%s\n' TZ=UTC LANG=C.UTF-8 LC_ALL=C.UTF-8 UMASK=0022 ;;
+          b) printf '%s\n' TZ=Pacific/Auckland LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 UMASK=0077 ;;
           *) echo "::error::unknown variant $VARIANT"; exit 1 ;;
         esac >>"$GITHUB_ENV"
     - uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
       with:
         version-file: pnpm-workspace.yaml
         node-version-file: .node-version
-        working-directory: ${{ env.CHECKOUT }}
+        working-directory: ${{ inputs.variant == 'a' && 'build/abolish' || 'build/some/other/dir/abolish-release' }}
         run-install: "false"
     - name: Install dependencies (frozen lockfile, no install scripts)
       shell: bash
-      working-directory: ${{ env.CHECKOUT }}
+      working-directory: ${{ inputs.variant == 'a' && 'build/abolish' || 'build/some/other/dir/abolish-release' }}
       run: vp install --frozen-lockfile --ignore-scripts -- --ignore-pnpmfile
     # Gate code runs before any build code in this job; verify re-judges the
     # tarball against the hash this job outputs.
     - name: Build and pack
       id: pack
       shell: bash
-      working-directory: ${{ env.CHECKOUT }}
+      working-directory: ${{ inputs.variant == 'a' && 'build/abolish' || 'build/some/other/dir/abolish-release' }}
       env:
         NAME: ${{ inputs.name }}
         DIR: ${{ inputs.dir }}

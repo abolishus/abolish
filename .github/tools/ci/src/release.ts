@@ -187,7 +187,12 @@ export function shippedErrors(
     // Compared as normalised, so aliases (`package/./x`, `package//x`) and
     // case variants, which extract to the same file, are refused too.
     const segments = (type === "d" ? path.replace(/\/$/, "") : path).split("/");
-    if (segments[0] !== "package" || segments.some((x) => x === "" || x === "." || x === ".."))
+    // ASCII only: Unicode normalisation forms would otherwise alias too.
+    if (
+      segments[0] !== "package" ||
+      segments.some((x) => x === "" || x === "." || x === "..") ||
+      !/^[\x20-\x7e]+$/.test(path)
+    )
       errors.push(`${at}: entry ${JSON.stringify(path)} is not a plain path under package/`);
     const key = segments.join("/").toLowerCase();
     if (seen.has(key)) errors.push(`${at}: ${path} appears twice`);

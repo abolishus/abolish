@@ -14,7 +14,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseDocument } from "yaml";
 import { findUnpinned } from "./actions-pinned.ts";
-import { forTask, selectAffected, toRunArgs, type WorkspacePackage } from "./affected.ts";
+import {
+  forTask,
+  missingRequiredScripts,
+  selectAffected,
+  toRunArgs,
+  type WorkspacePackage,
+} from "./affected.ts";
 import {
   diffPackages,
   parsePackages,
@@ -42,11 +48,6 @@ function arg(name: string): string {
   const value = i === -1 ? undefined : process.argv[i + 1];
   if (value === undefined) throw new Error(`missing ${name}`);
   return value;
-}
-
-function output(name: string, value: string): void {
-  const file = process.env["GITHUB_OUTPUT"];
-  if (file !== undefined) appendFileSync(file, `${name}=${value}\n`);
 }
 
 function summary(markdown: string): void {
@@ -89,6 +90,14 @@ function workspacePackages(): WorkspacePackage[] {
 function affected(): void {
   const task = arg("--task");
   const packages = workspacePackages();
+  // AGENTS.md: every workspace package defines build, test and check. Without
+  // this, a package with no test script would look "unaffected" and CI would
+  // pass with none of its tests run.
+  const missing = missingRequiredScripts(packages);
+  if (missing.length > 0) {
+    for (const m of missing) console.error(m);
+    process.exit(1);
+  }
   const changed = process.argv.includes("--all")
     ? undefined
     : git(
@@ -103,8 +112,6 @@ function affected(): void {
     changed === undefined ? ({ mode: "all" } as const) : selectAffected(changed, packages);
   const selection = forTask(affectedSelection, task, packages);
   const args = toRunArgs(selection);
-  output("mode", selection.mode);
-  output("args", args.join(" "));
   summary(`\`${task}\`: \`${selection.mode}\` ${args.join(" ")}`);
   process.stdout.write(`${args.join(" ")}\n`);
 }

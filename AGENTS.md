@@ -11,7 +11,7 @@ Operating manual for every agent session on Abolish. Sessions are started by rou
    3. Start the next unblocked STATUS.md item, but only while fewer than **2** of your PRs are open.
 3. Load the skill for the area you touch (`.claude/skills/`):
    - `dev`: every change
-   - `crypto-review`: packages/crypto, packages/circuits, packages/contracts, packages/verifier, docs/spec
+   - `crypto-review`: packages/crypto, circuits, contracts, verifier, core and sdk; apps/ballot; docs/spec; test-vectors
    - `contracts`
    - `circuits`
    - `migrations`
@@ -44,7 +44,7 @@ Run your own review pass and fix what it finds:
 2. Tests pass for every affected package: `vp run --filter <pkg>... test`, or `vp run -r test`.
 3. Threat-model compliance: does the change cite the threats it addresses, and does it weaken any mitigation?
 4. Style matches the surrounding code. No dead code. Comments explain why, not what.
-5. For `packages/crypto`, `packages/circuits`, `packages/contracts` or `packages/verifier`: launch an **independent subagent review** in-session, using the `crypto-review` skill's checklist, and address every finding **before** opening the PR.
+5. For changes in `crypto-review`'s scope (`packages/{crypto,circuits,contracts,verifier,core,sdk}`, `apps/ballot`, `docs/spec`, `test-vectors`): launch an **independent subagent review** in-session, using the `crypto-review` skill's checklist, and address every finding **before** opening the PR.
 6. Update `docs/STATUS.md` in the same PR: move the item, and note what's tested and what's known-weak.
 
 PR title: conventional-commit style (`feat(crypto): ...`, `fix(api): ...`, `docs: ...`, `ci: ...`). PR body: what changed, which threats it addresses, how it's tested, and what's known-weak.
@@ -57,9 +57,9 @@ PR title: conventional-commit style (`feat(crypto): ...`, `fix(api): ...`, `docs
 | `reference-election` | `reference-election.yml` | The reference election runs end to end (see below)                                                                                                                                                                                                                        |
 | `repro-build`        | `repro-build.yml`        | Two independent builds produce byte-identical outputs                                                                                                                                                                                                                     |
 | `claude-review`      | `claude-review.yml`      | General correctness and threat-model review; fails on any blocking finding                                                                                                                                                                                                |
-| `crypto-review`      | `crypto-review.yml`      | Adversarial max-effort review of protocol code; not applicable (passes) when no protocol paths change                                                                                                                                                                     |
+| `crypto-review`      | `crypto-review.yml`      | Adversarial max-effort review of protocol code (`packages/{crypto,circuits,contracts,verifier,core,sdk}`, `apps/ballot`, `docs/spec`, `test-vectors`, toolchain and catalog pins); passes as not applicable otherwise                                                     |
 
-Review prompts live in `.github/review/`. Both reviews treat PR content as untrusted and fail closed. The review model comes from the repository variable `REVIEW_MODEL`, set by the owner; the workflows never hard-code a model ID.
+Review prompts live in `.github/review/`. Both reviews treat PR content as untrusted and fail closed. The review model comes from the repository variable `REVIEW_MODEL`, set by the owner. The workflows contain no model ID; the only exception to the no-model-identifiers rule is the CLI alias `opus`, used as a fallback when the variable is unset.
 
 ## Tooling: Vite+ only
 

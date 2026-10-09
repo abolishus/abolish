@@ -1,5 +1,11 @@
 import { describe, expect, test } from "vite-plus/test";
-import { forTask, selectAffected, toRunArgs, withDependents } from "../src/affected.ts";
+import {
+  forTask,
+  missingRequiredScripts,
+  selectAffected,
+  toRunArgs,
+  withDependents,
+} from "../src/affected.ts";
 
 const pkgs = [
   { name: "@abolishus/crypto", dir: "packages/crypto", dependsOn: [], scripts: ["test", "build"] },
@@ -90,4 +96,18 @@ describe("selectAffected", () => {
     expect(toRunArgs({ mode: "all" })).toEqual(["-r"]);
     expect(toRunArgs({ mode: "none" })).toEqual([]);
   });
+});
+
+test("every package must define build, test and check", () => {
+  const ok = {
+    name: "a",
+    dir: "packages/a",
+    dependsOn: [],
+    scripts: ["build", "test", "check", "test:e2e"],
+  };
+  const bad = { name: "b", dir: "packages/b", dependsOn: [], scripts: ["build"] };
+  expect(missingRequiredScripts([ok])).toEqual([]);
+  expect(missingRequiredScripts([ok, bad])).toEqual([
+    "packages/b/package.json (b): missing required scripts: test, check",
+  ]);
 });

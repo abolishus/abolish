@@ -90,3 +90,15 @@ export function toRunArgs(selection: Selection): string[] {
       return selection.packages.flatMap((name) => ["--filter", name]);
   }
 }
+
+export const REQUIRED_SCRIPTS = ["build", "test", "check"] as const;
+
+/** One message per workspace package missing a script AGENTS.md requires. */
+export function missingRequiredScripts(packages: readonly WorkspacePackage[]): string[] {
+  return packages.flatMap((p) => {
+    const missing = REQUIRED_SCRIPTS.filter((s) => !p.scripts.includes(s));
+    return missing.length === 0
+      ? []
+      : [`${p.dir}/package.json (${p.name}): missing required scripts: ${missing.join(", ")}`];
+  });
+}

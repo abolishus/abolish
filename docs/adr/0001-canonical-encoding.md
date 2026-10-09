@@ -103,10 +103,11 @@ What would change the recommendation:
 - **P1-8:** `docs/spec/` defines the primitive types above, the header, the domain-tag registry, the length-limit rule and the vector format.
 - **P1-10:** implements encoders and decoders per message type in `packages/crypto`, with property tests (decode∘encode and encode∘decode identities, and rejection of every mutation) and cross-language vectors consumed by TS, Solidity and Noir tests.
 - Every message type added later needs a spec table and vectors in the same PR.
+- Since decoders accept text that isn't NFC, two definitions can differ in bytes but look identical (close to T-34). The ballot client and the verifier warn on non-NFC or mixed-script text without rejecting it (P1-8, P1-19).
 - Tooling must make up for the lack of self-description: the verifier gets a `decode --pretty` command (P1-19).
 - **Known-weak:** spec tables are written by hand, so a table and its implementation can drift apart. Cross-language vectors that are generated independently of the code under test are the guard (T-36).
 
 ## Default
 
-- PR opened: 2026-10-09 (UTC).
-- If the owner hasn't answered by **2026-10-12**, option A is adopted and this ADR is marked `Status: accepted by default — revisit`.
+- PR opened: 2026-10-09T05:56Z (#5).
+- If the owner hasn't answered by **2026-10-12T05:56Z** (72 hours later), option A is adopted and this ADR is marked `Status: accepted by default — revisit`.

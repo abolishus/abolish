@@ -65,7 +65,6 @@ Type descriptors:
 ## Rules
 
 - The record types a file's decoder knows are exactly those that appear as a `recordType` in that file; any other type is unknown ([[notation]], Strict decoding).
-
 - A vector, once its layout is frozen ([[versioning]]), is never edited or removed. New vectors are added.
 - Every rejection rule in a spec section has at least one invalid vector, and every field type at least one valid vector at each boundary (zero, maximum, maximum plus one where representable).
 - Generated vectors are checked by hand, or by a second implementation written independently from the spec, before they are committed. The `generator` field says which.

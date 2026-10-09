@@ -12,7 +12,7 @@ Everything Abolish hashes, signs, proves over or anchors (ballots, validity proo
 The encoding has to be consumed in four places, written by different people at different times:
 
 1. TypeScript (`packages/crypto`, and from it the verifier, SDK and ballot client).
-2. Solidity: the direct-submit path (T-25) must check and hash a submitted ballot or registration on-chain. On-chain decoding costs gas per byte and per branch.
+2. Solidity: the brief requires a direct-submit path (T-25) that posts a ballot or registration commitment straight to the contracts. Whether the contract also decodes and checks what it receives, or stores opaque bytes and leaves strict decoding to the indexer and verifier, is a P1-18 design choice. This ADR assumes on-chain checking may be wanted. On-chain decoding costs gas per byte and per branch.
 3. Noir: circuits bind to election and poll identifiers and to public inputs. Noir has no heap and works on fixed-size arrays and field elements, so every in-circuit input has a length known at compile time.
 4. Third-party verifiers in any language (T-36). The spec plus `docs/spec/vectors/*.json` must be enough to write a strict decoder in a weekend.
 
@@ -97,7 +97,7 @@ These conventions come with A and are specified in P1-8:
 
 What would change the recommendation:
 
-- If the direct-submit path were dropped (no on-chain decoding) and circuits never consumed encoded records, B's tooling advantage would matter more. The brief requires both, so this is unlikely.
+- If the contracts never decode records (P1-18 stores opaque bytes) and circuits never consumed encoded records, B's tooling advantage would matter more. Even without on-chain decoding, A is still preferred because of Noir's fixed-size inputs and T-36.
 - If an audited, strict, `@noble`-style canonical encoder emerged that every target language already has, it would be worth re-evaluating, but only for new record versions.
 
 ## Consequences
@@ -108,7 +108,7 @@ What would change the recommendation:
   - cross-language vectors consumed by Solidity (P1-18) and Noir (P1-17) tests.
 - Every record type costs a spec table, vectors and three implementations. That is deliberate: the cost of a new shape falls on us, not on verifiers.
 - A dump tool in `packages/verifier` (P1-19) turns any encoded record into a readable form, so the format's opacity doesn't hurt debugging or public audit.
-- Known-weak until P1-10 lands: the vectors are the only cross-check between implementations. A bug shared by the spec and our TypeScript encoder would also be in the vectors, so the vectors must be hand-checked against the spec tables, and `crypto-review` reviews spec and vectors together.
+- Known-weak until the Noir (P1-17) and Solidity (P1-18) tests consume the vectors, or a third-party verifier exists: the TypeScript encoder (P1-10) generates the vectors, so a bug shared by the spec and that encoder would also be in the vectors, so the vectors must be hand-checked against the spec tables, and `crypto-review` reviews spec and vectors together.
 
 ## Default
 

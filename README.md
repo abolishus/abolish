@@ -18,7 +18,7 @@ vp run -r test                 # every package's tests
 
 ## Releases
 
-Every merge to `main` that carries a changeset publishes `next` prereleases of the published packages (`<version>-next-<commit>`) from [`release.yml`](.github/workflows/release.yml): built twice and compared byte for byte, signed with Sigstore (cosign keyless), with SLSA build provenance, and published to npm by trusted publishing (no tokens). `latest` is only ever moved by the maintainer (the packages were created on npm before this workflow ran, since a first publish sets `latest` whatever its tag). To check a tarball:
+Every merge to `main` that carries a changeset publishes `next` prereleases of the published packages (`<version>-next-<commit>`) from [`release.yml`](.github/workflows/release.yml): built twice and compared byte for byte, signed with Sigstore (cosign keyless), with SLSA build provenance, and published to npm by trusted publishing (no tokens). `latest` is only ever moved by the maintainer (the packages must exist on npm before this workflow first publishes, since a first publish sets `latest` whatever its tag). To check a tarball:
 
 ```sh
 cosign verify-blob --bundle <tarball>.sigstore.json \

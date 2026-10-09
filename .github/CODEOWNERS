@@ -1,2 +1,11 @@
-# Workflow changes need human review: the review gates themselves live here.
-/.github/   @abolishadmin
+# Paths that need owner review: the review gates themselves, and anything that
+# instructs agents or decides what the checks prove. A PR must not be able to
+# weaken the checks or the instructions that judge it.
+/.github/               @abolishadmin
+/.claude/               @abolishadmin
+/AGENTS.md              @abolishadmin
+/CLAUDE.md              @abolishadmin
+/docs/PROJECT_BRIEF.md  @abolishadmin
+/pnpm-workspace.yaml    @abolishadmin
+/vite.config.ts         @abolishadmin
+/tsconfig.base.json     @abolishadmin

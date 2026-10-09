@@ -59,7 +59,7 @@ PR title: conventional-commit style (`feat(crypto): ...`, `fix(api): ...`, `docs
 | `claude-review`      | `claude-review.yml`      | General correctness and threat-model review; fails on any blocking finding                                                                                                                                                                                                |
 | `crypto-review`      | `crypto-review.yml`      | Adversarial max-effort review of protocol code (`packages/{crypto,circuits,contracts,verifier,core,sdk}`, `apps/ballot`, `docs/spec`, `test-vectors`, toolchain and catalog pins); passes as not applicable otherwise                                                     |
 
-Review prompts live in `.github/review/`. Both reviews treat PR content as untrusted and fail closed. The review model comes from the repository variable `REVIEW_MODEL`, set by the owner. The workflows contain no model ID; the only exception to the no-model-identifiers rule is the CLI alias `opus`, used as a fallback when the variable is unset.
+Review prompts live in `.github/review/`. Both reviews treat PR content as untrusted and fail closed. The review model comes from the repository variable `REVIEW_MODEL`, set by the owner. The workflows contain no model ID. Exceptions to the no-model-identifiers rule: the CLI alias `opus` (the fallback when the variable is unset) and the `Co-Authored-By` attribution trailer the agent harness requires on commits. Both review workflows read their prompt and verdict script from the base commit, so a PR can't rewrite its own review.
 
 ## Tooling: Vite+ only
 

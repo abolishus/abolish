@@ -120,24 +120,53 @@ describe("registryViolations", () => {
 
   test("passes an old package with matching integrity", () => {
     expect(
-      registryViolations(pkg, { integrity: I1, published: "2026-09-01T00:00:00Z" }, now),
+      registryViolations(
+        pkg,
+        { exists: true, integrity: I1, published: "2026-09-01T00:00:00Z" },
+        now,
+      ),
     ).toEqual([]);
+  });
+
+  test("distinguishes a missing version from a version without sha512", () => {
+    const missing = registryViolations(
+      pkg,
+      { exists: false, integrity: undefined, published: undefined },
+      now,
+    );
+    expect(missing[0]).toMatch(/not found/);
+    const noSri = registryViolations(
+      pkg,
+      { exists: true, integrity: undefined, published: "2016-01-01T00:00:00Z" },
+      now,
+    );
+    expect(noSri[0]).toMatch(/no sha512 integrity/);
   });
 
   test("fails on integrity mismatch, youth, missing version or missing time", () => {
     expect(
-      registryViolations(pkg, { integrity: I2, published: "2026-09-01T00:00:00Z" }, now),
+      registryViolations(
+        pkg,
+        { exists: true, integrity: I2, published: "2026-09-01T00:00:00Z" },
+        now,
+      ),
     ).toHaveLength(1);
     expect(
-      registryViolations(pkg, { integrity: I1, published: "2026-10-05T00:00:00Z" }, now),
+      registryViolations(
+        pkg,
+        { exists: true, integrity: I1, published: "2026-10-05T00:00:00Z" },
+        now,
+      ),
     ).toHaveLength(1);
     expect(
-      registryViolations(pkg, { integrity: undefined, published: undefined }, now),
+      registryViolations(pkg, { exists: false, integrity: undefined, published: undefined }, now),
     ).toHaveLength(1);
-    expect(registryViolations(pkg, { integrity: I1, published: undefined }, now)).toHaveLength(1);
-    expect(registryViolations(pkg, { integrity: I1, published: "not a date" }, now)).toHaveLength(
-      1,
-    );
+    expect(
+      registryViolations(pkg, { exists: true, integrity: I1, published: undefined }, now),
+    ).toHaveLength(1);
+    expect(
+      registryViolations(pkg, { exists: true, integrity: I1, published: "not a date" }, now),
+    ).toHaveLength(1);
   });
 });
 

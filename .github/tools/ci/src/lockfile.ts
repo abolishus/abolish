@@ -224,7 +224,9 @@ export function structuralViolations(head: Map<string, LockedPackage>): string[]
 }
 
 export interface RegistryFacts {
-  /** dist.integrity published for this version, undefined if the version does not exist. */
+  /** Whether the registry lists this version at all. */
+  readonly exists: boolean;
+  /** dist.integrity published for this version (absent for pre-SRI publishes). */
   readonly integrity: string | undefined;
   /** ISO publish time for this version. */
   readonly published: string | undefined;
@@ -237,8 +239,14 @@ export function registryViolations(
   minAgeDays = MIN_AGE_DAYS,
 ): string[] {
   const out: string[] = [];
-  if (facts.integrity === undefined) {
+  if (!facts.exists) {
     out.push(`${pkg.key}: version not found on the npm registry`);
+    return out;
+  }
+  if (facts.integrity === undefined) {
+    out.push(
+      `${pkg.key}: the registry publishes no sha512 integrity for this version (pre-SRI publish); the policy requires sha512`,
+    );
     return out;
   }
   if (facts.integrity !== pkg.integrity) {

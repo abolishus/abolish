@@ -40,7 +40,7 @@ jobs:
     "jobs.a.steps.0.uses action must be pinned to a 40-character commit SHA",
     "jobs.a.steps.1.uses action must be pinned to a 40-character commit SHA",
     "jobs.a.steps.2.uses action must be pinned to a 40-character commit SHA",
-    "jobs.a.steps.3.uses pinned action needs a trailing '# vX.Y.Z' comment",
+    "jobs.a.steps.3.uses pinned action needs a trailing '# vX.Y.Z' comment on the same line",
     "jobs.a.steps.4.uses docker image must be pinned by sha256 digest",
   ]);
 });
@@ -98,4 +98,18 @@ test("unparseable, multi-document or duplicate-key files are violations", () => 
     findUnpinned("w.yml", `steps:\n  - uses: a/b@${SHA} # v1\n    uses: evil/x@main\n`).length,
   ).toBeGreaterThan(0);
   expect(findUnpinned("w.yml", "steps:\n  - uses: [a, b]\n")).toHaveLength(1);
+});
+
+test("each pinned occurrence needs its own version comment", () => {
+  const yml = `
+jobs:
+  a:
+    steps:
+      - uses: actions/checkout@${SHA} # v7.0.1
+      - uses: actions/checkout@${SHA}
+      - {uses: actions/checkout@${SHA}} # v7.0.1
+`;
+  expect(reasons(yml)).toEqual([
+    "jobs.a.steps.1.uses pinned action needs a trailing '# vX.Y.Z' comment on the same line",
+  ]);
 });

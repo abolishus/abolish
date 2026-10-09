@@ -46,8 +46,14 @@ export function findUnpinned(file: string, source: string): PinViolation[] {
   }
   if (out.length > 0) return out;
 
-  const lines = source.split("\n");
-  const checkUses = (path: string, value: string) => {
+  const lineOf = (node: Node | null): string => {
+    const start = node?.range?.[0];
+    if (start === undefined) return "";
+    const lineStart = source.lastIndexOf("\n", start - 1) + 1;
+    const lineEnd = source.indexOf("\n", start);
+    return source.slice(lineStart, lineEnd === -1 ? undefined : lineEnd);
+  };
+  const checkUses = (path: string, value: string, line: string) => {
     if (value.startsWith("./")) {
       if (!LOCAL.test(value) || value.split("/").includes(".."))
         add(path, value, "local actions must live under ./.github/");
@@ -61,9 +67,11 @@ export function findUnpinned(file: string, source: string): PinViolation[] {
       add(path, value, "action must be pinned to a 40-character commit SHA");
       return;
     }
-    const withComment = new RegExp(`${escapeRegExp(value)}['"]?\\s*(#.*)$`);
-    const commented = lines.some((l) => VERSION_COMMENT.test(withComment.exec(l)?.[1] ?? ""));
-    if (!commented) add(path, value, "pinned action needs a trailing '# vX.Y.Z' comment");
+    // The comment must be on this occurrence's own line, not anywhere in the file.
+    const withComment = new RegExp(`${escapeRegExp(value)}['"]?\\s*[,}\\]]*\\s*(#.*)$`);
+    if (!VERSION_COMMENT.test(withComment.exec(line)?.[1] ?? "")) {
+      add(path, value, "pinned action needs a trailing '# vX.Y.Z' comment on the same line");
+    }
   };
   const checkImage = (path: string, value: string) => {
     if (!DIGEST.test(value)) add(path, value, "container image must be pinned by sha256 digest");
@@ -91,7 +99,7 @@ export function findUnpinned(file: string, source: string): PinViolation[] {
       const grandparent = path[path.length - 2];
       if (key === "uses") {
         if (typeof scalar !== "string") add(where, String(scalar), "uses must be a plain string");
-        else checkUses(where, scalar);
+        else checkUses(where, scalar, lineOf(valueNode));
       } else if (key === "container" && typeof scalar === "string") {
         checkImage(where, scalar);
       } else if (

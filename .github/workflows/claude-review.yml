@@ -64,7 +64,14 @@ jobs:
           delim="EOF_$(openssl rand -hex 16)"
           {
             echo "text<<$delim"
-            cat .github/review/claude-review.md
+            # The prompt comes from the base commit, so a PR can't rewrite its own
+            # review instructions. Only the bootstrap PR, which adds it, uses head.
+            if git cat-file -e "$BASE_SHA:.github/review/claude-review.md" 2>/dev/null; then
+              git show "$BASE_SHA:.github/review/claude-review.md"
+            else
+              echo "::warning::.github/review/claude-review.md is not on the base branch; using the PR's copy" >&2
+              cat .github/review/claude-review.md
+            fi
             echo
             echo "## This run"
             echo "- Repository: $GITHUB_REPOSITORY"
@@ -103,10 +110,18 @@ jobs:
         id: verdict
         env:
           REVIEW_NAME: claude-review
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
           REVIEW_JSON: ${{ steps.review.outputs.structured_output }}
           REVIEW_OUTCOME: ${{ steps.review.outputs.conclusion }}
           OUT_FILE: ${{ runner.temp }}/claude-review.md
-        run: python3 .github/scripts/review-verdict.py
+        # Verdict logic also comes from the base commit when it exists there.
+        run: |
+          if git cat-file -e "$BASE_SHA:.github/scripts/review-verdict.py" 2>/dev/null; then
+            git show "$BASE_SHA:.github/scripts/review-verdict.py" >"$RUNNER_TEMP/review-verdict.py"
+          else
+            cp .github/scripts/review-verdict.py "$RUNNER_TEMP/review-verdict.py"
+          fi
+          python3 "$RUNNER_TEMP/review-verdict.py"
       - name: Post review summary
         if: always()
         env:

@@ -150,6 +150,7 @@ async function registryFacts(
       }
     | undefined;
   return {
+    exists: packument?.versions?.[pkg.version] !== undefined,
     integrity: packument?.versions?.[pkg.version]?.dist?.integrity,
     published: packument?.time?.[pkg.version],
   };

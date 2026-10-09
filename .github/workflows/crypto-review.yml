@@ -1,9 +1,7 @@
 # Required check: `crypto-review` (the `crypto-review` job below).
-# Adversarial review, at the highest effort, of every change to protocol code
-# (packages/crypto, circuits, contracts, verifier, core, sdk and both Capacitor
-# plugins), the ballot client (apps/ballot), docs/spec, test-vectors, the agent
-# rules (.claude/, AGENTS.md, CLAUDE.md), and the toolchain pins, catalog and
-# lockfile. Passes as not applicable when none of those paths change, so it can
+# Adversarial review, at the highest effort, of every change except prose-only
+# ones (docs/ outside docs/spec/, README.md, LICENSE). Agent instruction files
+# are always in scope. Passes as not applicable for prose-only changes, so it can
 # be a required check on every PR. Fails on any blocking finding and fails closed.
 # Model: repository variable REVIEW_MODEL (falls back to the CLI's `opus` alias).
 # Prompt: .github/review/crypto-review.md, read from the base commit.
@@ -54,29 +52,34 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
           persist-credentials: false
-      - name: Does this change touch protocol code?
+      - name: Does this change need the adversarial review?
         id: scope
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        # --no-renames: list both sides of a move, or moving a file out of
-        # protocol code would show only its new path and skip this review.
-        # -z and quotePath=false: git otherwise quotes non-ASCII paths
-        # ("packages/crypto/\311\241roup.ts"), which would not match the pattern
-        # and would silently skip this review. Fails closed if the diff is empty.
+        # Fail-closed scope: every change is in scope unless it only touches
+        # prose (docs/ outside docs/spec/, README.md, LICENSE). A list of
+        # "protocol paths" can't keep up with what protocol code imports, so
+        # nothing is exempt by default, and agent instruction files are never
+        # exempt at any depth.
+        # --no-renames lists both sides of a move; -z with quotePath=false keeps
+        # non-ASCII paths intact. An empty diff fails closed.
         run: |
-          pattern='^(packages/(crypto|circuits|contracts|verifier|core|sdk|capacitor-zk-prover|capacitor-nfc-passport)/|apps/ballot/|docs/spec/|test-vectors/|\.claude/|AGENTS\.md$|CLAUDE\.md$|\.github/scripts/install-toolchain\.sh$|pnpm-workspace\.yaml$|pnpm-lock\.yaml$)'
           git -c core.quotePath=false diff --no-renames --name-only -z "$BASE_SHA...HEAD" >"$RUNNER_TEMP/changed.z"
           changed="$(tr '\0' '\n' <"$RUNNER_TEMP/changed.z")"
           if [ -z "$changed" ]; then
             echo "::error::could not determine the changed files; refusing to skip crypto-review"
             exit 1
           fi
-          if printf '%s\n' "$changed" | grep -qE "$pattern"; then
+          prose='^(docs/.+|README\.md|LICENSE)$'
+          never_exempt='^docs/spec/|(^|/)(AGENTS\.md|CLAUDE(\.local)?\.md|\.mcp\.json)$|(^|/)\.claude/'
+          in_scope="$(printf '%s\n' "$changed" | grep -Ev "$prose" || true)"
+          in_scope="$in_scope$(printf '\n%s\n' "$changed" | grep -E "$never_exempt" || true)"
+          if [ -n "$(printf '%s' "$in_scope" | tr -d '[:space:]')" ]; then
             echo "applies=true" >>"$GITHUB_OUTPUT"
-            printf '%s\n' "$changed" | grep -E "$pattern" | sed 's/^/- /' >>"$GITHUB_STEP_SUMMARY"
+            printf '%s\n' "$in_scope" | sed '/^$/d; s/^/- /' >>"$GITHUB_STEP_SUMMARY"
           else
             echo "applies=false" >>"$GITHUB_OUTPUT"
-            echo "No protocol, ballot-client, spec, test-vector, agent-rule or dependency changes: not applicable." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "Only prose changed (docs/ outside docs/spec/, README.md, LICENSE): not applicable." | tee -a "$GITHUB_STEP_SUMMARY"
           fi
       - name: Prepare a read-only view of the change
         id: prompt
@@ -205,7 +208,7 @@ jobs:
           fi
       - name: Not applicable
         if: needs.review.outputs.applies != 'true'
-        run: echo "No protocol, ballot-client, spec, test-vector, agent-rule or dependency changes; crypto-review is not applicable."
+        run: echo "Only prose changed; crypto-review is not applicable."
       # Verdict code comes from the base commit (the PR's copy only on the
       # bootstrap PR that adds it), on a runner the model never touched.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

@@ -49,7 +49,7 @@ Last updated: 2026-10-09 (P1-1 threat model).
 ## Phase 1: Threat model, spec, crypto core, circuits, verifier, reference election (CLI only)
 
 - [ ] P1-1 (in progress, above) `docs/THREAT_MODEL.md`: assets, adversaries (state actor, insiders including us, compromised devices, coercion and vote buying, DDoS, supply chain, domain or hosting seizure, prompt injection against this pipeline), threat IDs, mitigations, and an explicit list of what isn't mitigated yet. No feature code before this merges.
-- [ ] P1-2 ADR: canonical encoding (explicit byte layouts vs deterministic CBOR). `needs-decision`.
+- [ ] P1-2 ADR: canonical encoding (explicit byte layouts vs deterministic CBOR). `needs-decision`: [[0001-canonical-encoding]] recommends explicit byte layouts; adopted by default on 2026-10-12 if unanswered.
 - [ ] P1-3 ADR: everlasting privacy (perfectly hiding commitments on the board vs standard threshold ElGamal), with a post-quantum "harvest now, decrypt later" analysis. `needs-decision`. Must be accepted before tally work (P1-12).
 - [ ] P1-4 ADR: ballot tally scheme (homomorphic exponential ElGamal vs verifiable mixnet) per election type (plurality, approval, ranked choice). `needs-decision`.
 - [ ] P1-5 ADR: L2 choice (Arbitrum One vs Base): L2BEAT stage at decision time, sequencer jurisdiction, forced-inclusion path, paymaster tooling. `needs-decision`.

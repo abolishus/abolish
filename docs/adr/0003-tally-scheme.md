@@ -109,4 +109,4 @@ What would change the recommendation:
 
 ## Default
 
-Opened 2026-10-09 20:02 UTC. If the owner hasn't answered by **2026-10-12 20:02 UTC**, option C is adopted and this ADR is marked `Status: accepted by default — revisit`.
+Opened 2026-10-09 20:01 UTC. If the owner hasn't answered by **2026-10-12 20:01 UTC**, option C is adopted and this ADR is marked `Status: accepted by default — revisit`.

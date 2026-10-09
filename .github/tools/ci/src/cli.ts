@@ -6,6 +6,8 @@
 //   actions-pinned          fail if any workflow uses an action not pinned by SHA
 //   lockfile --base <ref>   enforce lockfile policy, write the diff to lockfile-diff.md
 //   pnpm-selftest           prove the pinned pnpm honours our install-script policy
+//   release-plan            after `changeset version --snapshot next`, print
+//                           "<dir> <name> <version>" for each package to publish
 
 import { execFileSync } from "node:child_process";
 import {
@@ -44,6 +46,7 @@ import {
   type RegistryFacts,
   unjustifiedAllowBuilds,
 } from "./lockfile.ts";
+import { snapshotReleases } from "./release.ts";
 
 function git(...args: string[]): string {
   return execFileSync("git", args, {
@@ -294,6 +297,31 @@ function pnpmSelftest(): void {
   );
 }
 
+function releasePlan(): void {
+  const candidates = workspacePackages().map(({ dir }) => {
+    let before: Record<string, unknown> | undefined;
+    try {
+      before = JSON.parse(git("show", `HEAD:${dir}/package.json`)) as Record<string, unknown>;
+    } catch {
+      // Not in the commit being released.
+    }
+    const after = JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as Record<
+      string,
+      unknown
+    >;
+    return { dir, before, after };
+  });
+  const { releases, errors } = snapshotReleases(candidates, git("rev-parse", "HEAD").trim());
+  for (const e of errors) console.error(e);
+  if (errors.length > 0) process.exit(1);
+  summary(
+    releases.length === 0
+      ? "release: nothing to publish (no changesets)"
+      : releases.map((r) => `- \`${r.name}@${r.version}\``).join("\n"),
+  );
+  for (const r of releases) process.stdout.write(`${r.dir} ${r.name} ${r.version}\n`);
+}
+
 const command = process.argv[2];
 switch (command) {
   case "affected":
@@ -307,6 +335,9 @@ switch (command) {
     break;
   case "pnpm-selftest":
     pnpmSelftest();
+    break;
+  case "release-plan":
+    releasePlan();
     break;
   default:
     console.error(`unknown command: ${command ?? "(none)"}`);

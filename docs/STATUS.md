@@ -6,7 +6,7 @@ Last updated: 2026-10-09 (P1-1 threat model).
 
 ## In progress
 
-- **P0-3 `ci: release`** (#PR, `claude/p0-3`): `release.yml` plus placeholder metadata for the three published packages. A `ci:` PR, so it waits for the owner's review.
+- **P0-3 `ci: release`** (#4, `claude/p0-3`): `release.yml` (snapshot `next` prereleases via Changesets, double build + tarball hash comparison, cosign keyless signatures, SLSA build provenance, `npm publish --tag next` by trusted publishing in the `npm` environment with npm 11.21.0 fetched by integrity), the `release-plan` gate in `.github/tools/ci` (unit + property tests), and placeholder `@abolishus/crypto`, `@abolishus/verifier` and `@abolishus/sdk` (Apache-2.0 `LICENSE`, manifest tests). Also P0-4. A `ci:` PR, so it waits for the owner's review. Tested locally: the release-plan tests, and two snapshot builds under different umask and timezone producing identical tarballs; `actionlint` with shellcheck is clean. The workflow itself can't run before it merges.
 
 ## Blocked
 
@@ -29,6 +29,9 @@ Last updated: 2026-10-09 (P1-1 threat model).
 - **Merge queue:** the review checks skip `merge_group`. If the owner enables a merge queue, it must use batch size 1, or the combined tree of a batch is never model-reviewed.
 - **Lockfile policy covers `packages:` only.** It checks which bytes can be installed; rewiring a `snapshots:` edge to another version already in `packages:` isn't checked. `crypto-review` doesn't run on lockfile or catalog changes (the brief scopes it to the four protocol packages). CI rejects overrides, patches and package extensions, but a catalog bump of `@noble/*` or `@aztec/bb.js`, or a rewired edge, is seen only by `claude-review` and owner review until P1-9's lockfile-closure check and P1-16b land.
 - **Required checks and auto-merge depend on repo rulesets** that agents may not change. The owner must mark `ci`, `reference-election`, `repro-build`, `claude-review` and `crypto-review` as required on `main`.
+- **`release.yml` is unexercised** until the first changeset merges after #4. It needs, from the owner: the three packages existing on npm with a trusted publisher for `abolishus/abolish`, workflow `release.yml`, environment `npm`. Unverified until then: `vp node` running the npm CLI in a sparse checkout, and npm's OIDC exchange. The `npm` environment should restrict deployments to `main`.
+- **Release signatures are kept 90 days.** The cosign bundles live in the run's `release-signed` artifact; the SLSA attestations (GitHub attestations API) and npm's own provenance are permanent. A permanent home for the bundles (GitHub releases, IPFS) comes with the ballot-client release (P2-8).
+- **`next` snapshot versions don't sort by time** (`<x.y.z>-next-<commit>`); the `next` dist-tag always points at the last publish, but semver ranges over prereleases are meaningless. The ballot client, OpenAPI spec and container images aren't released yet (P2-8, P2-2, P2-11).
 - **The threat model's mitigations are almost all planned, not built** (see [[THREAT_MODEL]], status column). Its "Not mitigated" section lists what no planned work addresses. P1-1 merged in #3, so feature work may start.
 
 ## Done
@@ -45,7 +48,7 @@ Last updated: 2026-10-09 (P1-1 threat model).
 - [x] P0-1 `ci: bootstrap` (#1), with CODEOWNERS extended by the owner (#2)
 - [ ] P0-2 (blocked, above) Storybook under Vite+ smoke test: confirm on day one that Storybook works under Vite+. Use a minimal `packages/ui` with one component, a story, an interaction test and an axe check, wired to `test:storybook`. If it doesn't work, record exactly why under Blocked, along with the workaround.
 - [ ] P0-3 (in progress, above) `ci: release` (needs owner review): `release.yml` with Changesets, `vp pack`, a double build plus hash comparison, cosign keyless signing, SLSA provenance, and `npm publish --tag next` via OIDC trusted publishing in the `npm` environment (GitHub-hosted runner, `id-token: write`, pinned npm ≥ 11.5). Also add placeholder `@abolishus/crypto`, `@abolishus/verifier` and `@abolishus/sdk` package metadata.
-- [ ] P0-4 Licenses: `LICENSE` (Apache-2.0) in each published package as it's created, and a README section explaining the AGPL/Apache split.
+- [ ] P0-4 (in progress with P0-3, #4) Licenses: `LICENSE` (Apache-2.0) in each published package as it's created, and a README section explaining the AGPL/Apache split.
 
 ## Phase 1: Threat model, spec, crypto core, circuits, verifier, reference election (CLI only)
 

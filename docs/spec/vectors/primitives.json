@@ -960,6 +960,38 @@
       },
       "encoding": "ff020107",
       "error": "unexpected-record-type"
+    },
+    {
+      "id": "record-unknown-type-before-version",
+      "description": "The record type is checked before the version byte is read, so a header cut off after an unknown type is unknown-record-type, not truncated",
+      "type": {
+        "kind": "record",
+        "recordType": "ff01",
+        "version": 1,
+        "fields": [
+          {
+            "name": "flag",
+            "type": {
+              "kind": "bool"
+            }
+          },
+          {
+            "name": "count",
+            "type": {
+              "kind": "u32"
+            }
+          },
+          {
+            "name": "data",
+            "type": {
+              "kind": "bytes",
+              "max": 4
+            }
+          }
+        ]
+      },
+      "encoding": "ffff",
+      "error": "unknown-record-type"
     }
   ]
 }

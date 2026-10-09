@@ -35,7 +35,7 @@ Each check names the threats it closes and the STATUS item that specifies it. A 
 
 ### 3. Key ceremony
 
-- 3.1 The ceremony transcript decodes strictly, its hash matches the one registered with the trustee keys on L2, and every proof in it verifies, with its Fiat–Shamir context (chain ID, registry address, election identifier, panel) rebuilt from the election being verified, never read from the transcript, so one election's ceremony can't be registered for another (T-37, T-40; P1-14). **(P1-3)**
+- 3.1 The ceremony transcript decodes strictly, its hash matches the one registered with the trustee keys on L2, and every proof in it verifies, with its Fiat–Shamir context (chain ID, registry address, election identifier, panel) rebuilt from the election being verified, never read from the transcript, so one election's ceremony can't be registered for another (T-37, T-40; P1-14). **(P1-3)** A trustee whose ceremony proof fails is attributed and disqualified as 3.2 describes, not an election failure on its own.
 - 3.2 At least the number of trustees the panel rules require took part, and every complaint and disqualification in the transcript is resolved as the spec says ([[0006-trustees]]; T-40, T-54; P1-14).
 
 ### 4. Board, anchors and archive
@@ -54,7 +54,7 @@ Each check names the threats it closes and the STATUS item that specifies it. A 
 - 5.4 Every validity proof verifies, with its Fiat–Shamir challenge recomputed from the full statement table, including the ballot's nullifier ([[domain-separation]]), and constrains the ballot to the election's rules: no over-vote, no negative vote, the approval limit if any (T-28, T-30, T-32; P1-12). **(P1-3)**
 - 5.5 The ballot counts as inside the poll's window under the close rule, using only L2 data derived from finalized L1 data (T-35, T-50, [[0004-l2-choice]]; P1-18).
 - 5.6 Direct-submitted ballots on L2 are on the board; a ballot found on L2 but missing from the board fails the check (T-25; P1-18, P3-5).
-- 5.7 A repeat of an earlier ballot is rejected: the same nullifier with everything the membership proof's signal binds (5.3), whatever the entry's other bytes; Groth16 proofs are malleable, so byte comparison alone isn't enough (T-38; P1-13).
+- 5.7 A repeat of an earlier admitted ballot is rejected (rejected entries don't count as earlier ballots, R4): the same nullifier with everything the membership proof's signal binds (5.3), whatever the entry's other bytes; Groth16 proofs are malleable, so byte comparison alone isn't enough (T-38; P1-13).
 
 ### 6. Re-voting and spoiled ballots
 
@@ -75,7 +75,7 @@ Each check names the threats it closes and the STATUS item that specifies it. A 
 ### 7. Tally
 
 - 7.1 The aggregates are recomputed from the selected ballots alone, per tier and per option (T-29, T-08, [[0003-tally-scheme]]; P1-15). **(P1-3)**
-- 7.2 Every decryption or opening share verifies against its trustee's registered key, at least `k` valid shares are combined, and the combination gives the published result (T-29, T-14; P1-15). **(P1-3)**
+- 7.2 Each decryption or opening share is checked against its trustee's registered key; an invalid one is attributed to its trustee and excluded, never a failure on its own. At least `k` valid shares exist and are combined (fewer than `k` fails the election, T-54), and the combination gives the published result (T-29, T-14; P1-15). **(P1-3)**
 - 7.3 The tally transcript decodes strictly and its hash matches its board entry (T-29; P1-15).
 - 7.4 Every decryption or opening share on the board is for an aggregate the spec allows (per tier and option, over the selected ballots, [[0006-trustees]]); any other share, such as one for an individual ballot or for overlapping sets whose difference is one ballot, is reported with the trustee that posted it (T-14, T-16, T-29; P1-15). This check reports and attributes; it doesn't fail the election, whose result rests on 7.1 to 7.3.
 

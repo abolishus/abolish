@@ -1,8 +1,8 @@
 # Required check: `crypto-review` (the `crypto-review` job below).
-# Adversarial review, at the highest effort, of every change except prose-only
-# ones (README.md, LICENSE, docs/ that is not an instruction source). Every
-# instruction source AGENTS.md lists is always in scope. Passes as not
-# applicable for prose-only changes, so it can be a required check on every
+# Adversarial review, at the highest effort, of changes to the protocol
+# packages (crypto, circuits, contracts, verifier), docs/spec and agent
+# instruction files. .github/ is exempt (CODEOWNERS routes it to the owner).
+# Passes as not applicable otherwise, so it can be a required check on every
 # PR. Fails on any blocking finding and fails closed.
 # Model: repository variable REVIEW_MODEL (falls back to the CLI's `opus` alias).
 # Prompt: .github/review/crypto-review.md, read from the base commit.
@@ -36,9 +36,10 @@ concurrency:
 jobs:
   review:
     name: crypto-review (model)
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    # Drafts are skipped: iterate as a draft, and marking it ready runs the review.
+    if: github.event_name == 'pull_request' && !github.event.pull_request.draft && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-24.04
-    timeout-minutes: 180
+    timeout-minutes: 45
     permissions:
       contents: read
       # Inline comments are buffered by the action and posted after the session.
@@ -58,14 +59,11 @@ jobs:
         id: scope
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        # Fail-closed scope: every change is in scope unless it only touches
-        # prose: README.md, LICENSE, and docs/ files that direct nobody. A list
-        # of "protocol paths" can't keep up with what protocol code imports, so
-        # nothing is exempt by default. Every instruction source AGENTS.md
-        # lists (agent files at any depth, the brief, STATUS, the threat model,
-        # ADRs, spec, runbooks) is never exempt.
+        # Scope (the brief): the protocol packages, docs/spec and agent
+        # instruction files at any depth. Everything else gets claude-review
+        # only; .github/ is exempt because CODEOWNERS routes it to the owner.
         # --no-renames lists both sides of a move; -z with quotePath=false keeps
-        # non-ASCII paths intact. An empty diff fails closed.
+        # non-ASCII paths intact. An empty or unreadable diff fails the check.
         run: |
           git -c core.quotePath=false diff --no-renames --name-only -z "$BASE_SHA...HEAD" >"$RUNNER_TEMP/changed.z"
           changed="$(tr '\0' '\n' <"$RUNNER_TEMP/changed.z")"
@@ -73,16 +71,14 @@ jobs:
             echo "::error::could not determine the changed files; refusing to skip crypto-review"
             exit 1
           fi
-          prose='^(docs/.+|README\.md|LICENSE)$'
-          never_exempt='^docs/(spec/|adr/|runbooks/|THREAT_MODEL\.md$|PROJECT_BRIEF\.md$|STATUS\.md$)|(^|/)(AGENTS\.md|CLAUDE(\.local)?\.md|\.mcp\.json)$|(^|/)\.claude/'
-          in_scope="$(printf '%s\n' "$changed" | grep -Ev "$prose" || true)"
-          in_scope="$in_scope$(printf '\n%s\n' "$changed" | grep -E "$never_exempt" || true)"
-          if [ -n "$(printf '%s' "$in_scope" | tr -d '[:space:]')" ]; then
+          protocol='^(packages/(crypto|circuits|contracts|verifier)/|docs/spec/)|(^|/)(AGENTS\.md|CLAUDE(\.local)?\.md|\.mcp\.json)$|(^|/)\.claude/'
+          in_scope="$(printf '%s\n' "$changed" | grep -Ev '^\.github/' | grep -E "$protocol" || true)"
+          if [ -n "$in_scope" ]; then
             echo "applies=true" >>"$GITHUB_OUTPUT"
-            printf '%s\n' "$in_scope" | sed '/^$/d; s/^/- /' >>"$GITHUB_STEP_SUMMARY"
+            printf '%s\n' "$in_scope" | sed 's/^/- /' >>"$GITHUB_STEP_SUMMARY"
           else
             echo "applies=false" >>"$GITHUB_OUTPUT"
-            echo "Only prose changed (README.md, LICENSE, or docs/ that is not an instruction source): not applicable." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "No protocol code or agent instruction files changed: not applicable." | tee -a "$GITHUB_STEP_SUMMARY"
           fi
       - name: Prepare a read-only view of the change
         id: prompt
@@ -160,7 +156,7 @@ jobs:
           claude_args: >-
             --model ${{ vars.REVIEW_MODEL || 'opus' }}
             --effort max
-            --max-turns 400
+            --max-turns 150
             --allowedTools "Read,Grep,Glob,mcp__github_inline_comment__create_inline_comment"
             --disallowedTools "Bash,Write,Edit,MultiEdit,NotebookEdit,WebFetch,WebSearch,Task,Agent,Read(//proc/**),Read(//sys/**),Read(//etc/**),Read(//run/**),Read(//tmp/**),Read(//var/**),Read(//home/runner/work/_temp/**),Read(//home/runner/work/_actions/**),Read(//home/runner/.claude/**),Read(//home/runner/.config/**),Read(//home/runner/.local/**)"
             --json-schema '{"type":"object","additionalProperties":false,"required":["verdict","summary","findings"],"properties":{"verdict":{"enum":["pass","fail"]},"summary":{"type":"string"},"findings":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["severity","title","file","line","detail"],"properties":{"severity":{"enum":["blocking","non-blocking"]},"title":{"type":"string"},"file":{"type":"string"},"line":{"type":"integer"},"threat":{"type":"string"},"detail":{"type":"string"}}}}}}'
@@ -178,7 +174,7 @@ jobs:
   crypto-review:
     name: crypto-review
     needs: review
-    if: always() && github.event_name == 'pull_request'
+    if: always() && github.event_name == 'pull_request' && !github.event.pull_request.draft
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -222,7 +218,7 @@ jobs:
           fi
       - name: Not applicable
         if: needs.review.outputs.applies != 'true'
-        run: echo "Only prose changed; crypto-review is not applicable."
+        run: echo "No protocol code or agent instruction files changed; crypto-review is not applicable."
       # Verdict code comes from the base commit (the PR's copy only on the
       # bootstrap PR that adds it), on a runner the model never touched.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

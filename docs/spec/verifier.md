@@ -10,8 +10,10 @@ Each check names the threats it closes and the STATUS item that specifies it. A 
 - **Fail loudly.** Each check ends in pass, fail or unverifiable (data missing, a source unreachable, a root not yet settled). Unverifiable is never reported as pass.
 - **Two kinds of check.** Anyone can post a ballot, so a bad ballot must never fail an election (T-52, T-53), and every conforming verifier must reach the same verdict on the same data (T-36):
   - **Admission checks** decide whether one ballot or opening counts: decoding of the record inside a board entry, 5.1 to 5.5, 5.7, 6.1's admission part and 6.2. A failure rejects that entry only. A rejected entry is listed in the report (8.3), never counted and never displaces an earlier ballot (6.1, R4).
-  - **Election checks** are everything else: 1.x, 2.x, 3.x, the board-entry envelope and hash chain in 4.1, 4.2 to 4.5, 5.6, 7.1 to 7.3 and 8.x (7.4 reports only). The election is verified only if every election check passes.
-  - Our contracts accept a direct submission only if it decodes strictly (and SHOULD also check its membership proof), and revert otherwise (P1-18), so no undecodable record reaches an L2 event or the board, and no one can make 4.1 or 5.6 fail by posting junk. What the archive keeps beyond the record (inclusion evidence) can still carry arbitrary bytes; see [[notation]], Result-critical fields, and T-17. A record that decodes but fails another admission check is boarded as a rejected entry.
+  - **Election checks** are everything else: 1.2, 1.3, 2.1 to 2.6, 3.x, the board-entry envelope and hash chain in 4.1, 4.2 to 4.5, 5.6, 7.1 to 7.3 and 8.x. The election is verified only if every election check passes.
+  - **Report-only checks** (1.1, 2.7, 7.4) never decide the election's verdict, because their inputs come from whoever serves them, not from chain and IPFS election data: a served client or display text that doesn't match is reported loudly (1.1 as a separate client-integrity verdict, G-13), and mismatching text is treated as unavailable.
+  - An admission check that can't be evaluated (its evidence is missing) never rejects the entry: it makes 6.1, and so the election, unverifiable. The archived evidence for each entry (4.4) must cover everything its admission checks need.
+  - Our contracts accept a direct submission only if it decodes strictly (and MUST also check its membership proof, so non-members can't post at all), and revert otherwise (P1-18), so no undecodable record reaches an L2 event or the board, and no one can make 4.1 or 5.6 fail by posting junk. What the archive keeps beyond the record (inclusion evidence) can still carry arbitrary bytes; see [[notation]], Result-critical fields, and T-17. A record that decodes but fails another admission check is boarded as a rejected entry.
 - **Strict decoding first.** Every record is decoded strictly ([[notation]]) before any other check uses it, and rejected entries are reported, never skipped silently (T-31, T-52).
 - **Pinned trust roots.** The verifier's release pins what can't be derived from data: the L1 and L2 chain IDs, the addresses of the anchor contract and our L2 contracts, the canonical L2 portal on L1, the L2 derivation rules it applies, the release-signing identities, and the verification key of every proof system it accepts, per ballot record version (Semaphore's per-depth keys, or the zero-knowledge UltraHonk key of our Noir circuit), built from reviewed source. Changing any of them is a new verifier release (T-64, T-71, T-05). No proof is ever verified under a key taken from election data alone.
 
@@ -70,7 +72,7 @@ Each check names the threats it closes and the STATUS item that specifies it. A 
     - whether a last ballot that fails a later check falls back to an earlier one or counts nothing (the open everlasting-privacy ADR proposes counting nothing, so complaints can't revert a re-vote);
     - that spoiled ballots never take part;
     - whether selection is per nullifier or per tier and nullifier, since one secret in two tier groups yields one nullifier. **(P1-3)**
-- 6.2 Every spoiled ballot's opening verifies against the ballot it opens, and no spoiled ballot is counted (T-42, T-47; P1-13). **(P1-3)**
+- 6.2 Every spoiled ballot's opening verifies against the ballot it opens, and no spoiled ballot is counted. Only a ballot challenged when it was posted can be spoiled: its opening travels as a spoiled-ballot opening record (`0x0003`) that never enters 6.1, so an opening can never spoil a ballot that was cast, and the client erases the encryption randomness once the voter casts. P1-13 specifies this (T-42, T-45, T-47; P1-13). **(P1-3)**
 
 ### 7. Tally
 
@@ -83,4 +85,4 @@ Each check names the threats it closes and the STATUS item that specifies it. A 
 
 - 8.1 Results are reported per tier, each with its anonymity-set size (group size at the definition's root) and its turnout. Tier 0 results are labelled as not Sybil-resistant (T-01, T-13, T-16; P1-19, P3-6).
 - 8.2 Small counts are flagged next to the result: a tally over few voters can reveal individual votes (T-16; P3-6).
-- 8.3 Every election that used a record version marked broken is flagged. Everything reported unverifiable, every missing archive link, every TEE-only root and every rejected entry is listed with its reason (P1-19).
+- 8.3 An election that used a record version marked broken is reported unverifiable, never verified. Everything reported unverifiable, every missing archive link, every TEE-only root and every rejected entry is listed with its reason (P1-19).

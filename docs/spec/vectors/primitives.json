@@ -992,6 +992,68 @@
       },
       "encoding": "ffff",
       "error": "unknown-record-type"
+    },
+    {
+      "id": "utf8-bom-kept",
+      "description": "A leading U+FEFF is ordinary text: decoded and re-encoded as is, never stripped",
+      "type": {
+        "kind": "utf8",
+        "max": 8
+      },
+      "value": "efbbbf61",
+      "encoding": "00000004efbbbf61"
+    },
+    {
+      "id": "utf8-four-byte",
+      "description": "U+1F5F3, a valid 4-byte sequence",
+      "type": {
+        "kind": "utf8",
+        "max": 8
+      },
+      "value": "f09f97b3",
+      "encoding": "00000004f09f97b3"
+    },
+    {
+      "id": "utf8-above-max-code-point",
+      "description": "U+110000 is beyond Unicode",
+      "type": {
+        "kind": "utf8",
+        "max": 8
+      },
+      "encoding": "00000004f4908080",
+      "error": "invalid-utf8"
+    },
+    {
+      "id": "utf8-byte-f5",
+      "description": "Bytes f5 to ff never appear in UTF-8",
+      "type": {
+        "kind": "utf8",
+        "max": 8
+      },
+      "encoding": "00000001f5",
+      "error": "invalid-utf8"
+    },
+    {
+      "id": "utf8-lone-continuation",
+      "type": {
+        "kind": "utf8",
+        "max": 8
+      },
+      "encoding": "0000000180",
+      "error": "invalid-utf8"
+    },
+    {
+      "id": "list-element-validated-before-next",
+      "description": "Each element is validated as it is read, so an invalid first element is reported before the missing elements",
+      "type": {
+        "kind": "list",
+        "max": 3,
+        "of": {
+          "kind": "bool"
+        }
+      },
+      "encoding": "0000000302",
+      "error": "invalid-enum"
     }
   ]
 }

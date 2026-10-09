@@ -46,7 +46,7 @@ Each check names the threats it closes and the STATUS item that specifies it. A 
 - 4.2 Every Merkle root anchored on L1 is recomputed from the board, and every entry falls under an anchored root (T-23, T-24; P1-16, P4-1).
 - 4.3 Every archive manifest reachable from L1 `archiveLocator` fields and from the manifest chain is found and matches what it names; any missing link is reported ([[0005-permanent-archive]]; T-51; P1-19, P4-3).
 - 4.4 Every one of our contracts' L2 events has a board entry with its inclusion evidence, and the archived event sequence reproduces each contract's on-chain event accumulator at every anchored period and at close. The check passes with an annotation naming which proof type settled each output root it relied on (TEE-only or ZK), and the report lists every TEE-only root (8.3) ([[0005-permanent-archive]], T-71; P1-18, P1-19).
-- 4.5 Every deposit or forced transaction reaching our contracts traces to an ordinary call on L1 to the pinned portal or our relay (T-71, [[0004-l2-choice]]; P1-18, P1-19).
+- 4.5 Every deposit or forced transaction reaching our contracts traces to a finalized L1 transaction in which the pinned portal or our relay emitted the matching deposit, whatever called it; only a deposit with no such L1 source (one forged by L2 governance) fails (T-71, [[0004-l2-choice]]; P1-18, P1-19).
 
 ### 5. Ballots
 
@@ -71,8 +71,8 @@ Each check names the threats it closes and the STATUS item that specifies it. A 
   - P1-13 also pins three things:
     - whether a last ballot that fails a later check falls back to an earlier one or counts nothing (the open everlasting-privacy ADR proposes counting nothing, so complaints can't revert a re-vote);
     - that spoiled ballots never take part;
-    - whether selection is per nullifier or per tier and nullifier, since one secret in two tier groups yields one nullifier. **(P1-3)**
-- 6.2 Every spoiled ballot's opening verifies against the ballot it opens, and no spoiled ballot is counted. Only a ballot challenged when it was posted can be spoiled: its opening travels as a spoiled-ballot opening record (`0x0003`) that never enters 6.1, so an opening can never spoil a ballot that was cast, and the client erases the encryption randomness once the voter casts. P1-13 specifies this (T-42, T-45, T-47; P1-13). **(P1-3)**
+    - whether selection is per nullifier or per tier and nullifier, since one secret in two tier groups yields one nullifier. That shared nullifier also links a person's ballots across tiers, narrowing each ballot's anonymity set to members of both groups; P1-17 weighs a per-tier scope derived from the definition hash (T-13). **(P1-3)**
+- 6.2 Every spoiled ballot's opening verifies against the ballot it opens, and no spoiled ballot is counted. Only a ballot challenged when it was posted can be spoiled: its opening travels as a spoiled-ballot opening record (`0x0003`) that never enters 6.1, so an opening can never spoil a ballot that was cast, and the client erases the encryption randomness once the voter casts. A posted opening carries nothing that depends on the voter's nullifier (no proofs or fields bound to it), and the tracking code shown before the cast-or-challenge choice is computed over the nullifier-independent ballot core, so an opening can't be linked to its voter (T-12, G-3). P1-13 specifies this (T-42, T-45, T-47; P1-13). **(P1-3)**
 
 ### 7. Tally
 

@@ -5,6 +5,9 @@ Total by construction, so the check can't silently compare nothing:
 - Every untracked or ignored file in the checkout is hashed (outside
   node_modules), wherever the build wrote it. There is no allowlist of output
   directories to fall out of date.
+- The build must not modify any tracked file. Committed generated code (wagmi
+  bindings, circuit artifacts, verifier keys) must be byte-identical to what a
+  fresh build produces, so a build that rewrites one fails the job.
 - Every workspace package with a `build` script must declare its outputs in
   package.json as `"abolish": {"buildOutputs": ["dist", ...]}`: directories
   relative to the package, or `[]` for a build that only type-checks. A missing
@@ -47,11 +50,18 @@ status = subprocess.run(
     capture_output=True,
 ).stdout.decode("utf-8")
 rows = []
-for entry in filter(None, status.split("\0")):
+entries = iter(filter(None, status.split("\0")))
+for entry in entries:
     code, path = entry[:2], entry[3:]
-    if code not in ("??", "!!"):
-        continue
+    if code[0] in "RC":
+        next(entries, None)  # porcelain -z emits the rename source as its own field
     if "node_modules" in Path(path).parts:
+        continue
+    if code not in ("??", "!!"):
+        # The build changed a tracked file (e.g. committed generated code).
+        # Committed outputs must be byte-identical to a fresh build, so a
+        # build that rewrites one is a failure, not something to hash.
+        errors.append(f"build modified tracked file {path} (status {code.strip()}); commit the regenerated output")
         continue
     f = Path(path)
     if f.is_file():

@@ -15,7 +15,7 @@ Last updated: 2026-10-09 (bootstrap session).
 ## Known-weak
 
 - **`reference-election` check is a placeholder.** It passes with a warning until the root `reference-election` script exists (P1-20), so it proves nothing yet.
-- **`repro-build` compares nothing yet.** There are no build outputs until the first package with a `build` that emits `dist/` lands.
+- **`repro-build` has nothing to compare yet.** The only build today (`.github/tools/ci`) type-checks without emitting output. The check hashes every file a build creates, rejects any build that modifies a tracked file, and requires each package to declare its outputs, so it becomes meaningful as soon as a package emits output.
 - **The review workflows haven't run yet.** Two settings are unverified until the first real run: `allowed_bots: claude` (the identity Claude's PRs come from) and `--effort max` in claude-code-action. Fix in a `ci:` PR if the first run fails for either reason.
 - **External (fork) PRs can't pass `claude-review` or `crypto-review`,** because forks get no secrets. A maintainer must re-open them from an in-repo branch.
 - **Lockfile "review" is mechanical plus AI review,** not human review. CI enforces registry-only resolution, integrity matching the registry, and ≥ 7 days' age; `claude-review` must justify every added package. There is no human sign-off on dependency changes unless the owner adds one.

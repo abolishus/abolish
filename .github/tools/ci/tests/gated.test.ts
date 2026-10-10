@@ -335,6 +335,10 @@ describe("lockfileViolations", () => {
 
 describe("lockfileGraphs", () => {
   test("rejects YAML merge keys, which pnpm's parser may apply", () => {
+    expect(() => lockfileGraphs("snapshots:\n  x: {<<: {a: 1}}\n")).toThrow(/merge keys/);
+    expect(() => lockfileGraphs("snapshots:\n  x:\n    ? <<\n    : {a: 1}\n")).toThrow(
+      /merge keys/,
+    );
     expect(() =>
       lockfileGraphs(
         lockfile(CURVES_IMPORTER, NOBLE_PACKAGES, `${NOBLE_SNAPSHOTS}  x:\n    <<: {}\n`),
@@ -596,17 +600,27 @@ describe("inlinedSourceViolations", () => {
 });
 
 describe("buildConfigViolations and configuresPack", () => {
-  test("rejects any build or test config inside a gated package", () => {
-    expect(
-      buildConfigViolations([
-        "packages/crypto/vite.config.ts",
-        "packages/verifier/tests/vitest.config.mts",
-        "packages/crypto/tsdown.config.js",
-        "packages/sdk/vite.config.ts",
-        "vite.config.ts",
-        "packages/crypto/src/config.ts",
-      ]),
-    ).toHaveLength(3);
+  test("rejects any build config the gated builds could find, except the root vite.config.ts", () => {
+    const rejected = [
+      "packages/crypto/vite.config.ts",
+      "packages/verifier/tests/vitest.config.mts",
+      "packages/crypto/tsdown.config.js",
+      "packages/vite.config.ts",
+      "packages/vite.config.mts",
+      "vite.config.js",
+      "vite.config.mjs",
+      "vite.config.mts",
+      "vite.config.cjs",
+      "tsdown.config.ts",
+      "rolldown.config.mjs",
+    ];
+    const allowed = [
+      "vite.config.ts",
+      "packages/sdk/vite.config.ts",
+      "apps/web/vite.config.ts",
+      "packages/crypto/src/config.ts",
+    ];
+    expect(buildConfigViolations([...rejected, ...allowed])).toHaveLength(rejected.length);
   });
 
   test("detects a pack setting in the root config", () => {

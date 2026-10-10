@@ -237,6 +237,12 @@ function packedManifestViolations(file: string, manifest: Record<string, unknown
   return out;
 }
 
+function hasMergeKey(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(hasMergeKey);
+  const r = record(value);
+  return r !== undefined && Object.entries(r).some(([k, v]) => k === "<<" || hasMergeKey(v));
+}
+
 export interface LockfileGraph {
   readonly importers: Record<string, unknown>;
   readonly packages: Record<string, unknown>;
@@ -250,9 +256,6 @@ export interface LockfileGraph {
  * apart and an importer is read only with the document it is in.
  */
 export function lockfileGraphs(lockfile: string): LockfileGraph[] {
-  // The yaml library reads `<<` as a plain key; pnpm's parser may merge it.
-  if (/^\s*['"]?<<['"]?\s*:/m.test(lockfile))
-    throw new Error("pnpm-lock.yaml: YAML merge keys (<<) are not allowed");
   const out: LockfileGraph[] = [];
   for (const doc of parseAllDocuments(lockfile, { uniqueKeys: true }) as Document[]) {
     const problems = [...doc.errors, ...doc.warnings];
@@ -260,6 +263,8 @@ export function lockfileGraphs(lockfile: string): LockfileGraph[] {
       throw new Error(`pnpm-lock.yaml: ${problems[0]?.message ?? "unparseable"}`);
     const js = record(doc.toJS({ maxAliasCount: 0 }));
     if (js === undefined) continue;
+    // The yaml library reads `<<` as a plain key; pnpm's parser may merge it.
+    if (hasMergeKey(js)) throw new Error("pnpm-lock.yaml: YAML merge keys (<<) are not allowed");
     const section = (key: string) => {
       const value = js[key];
       if (value === undefined || value === null) return {};
@@ -546,20 +551,31 @@ export function inlinedSourceViolations(
   });
 }
 
+const CONFIG_FILE = /^(?:vite|vitest|vite-plus|tsdown|rolldown|rollup)\.config\.[^/]*$/;
+
 /**
- * Build configuration a gated package may not carry: a config runs during
- * the build and can rewrite modules and source maps (a `load` hook, a
- * `sourcemapPathTransform`), so it could forge the evidence the bundle check
- * reads. Packages build with the root config, which CODEOWNERS covers and
- * which may not configure `pack`.
+ * Build configuration that `vp pack` could load for a gated package: any
+ * config file inside a gated package, or in a directory the build searches
+ * on its way up (`packages/` and the repository root), except the root
+ * `vite.config.ts`, which CODEOWNERS covers and which may not configure
+ * `pack`. A config runs during the build and can rewrite modules and source
+ * maps (a `load` or `renderChunk` hook), so it could forge the evidence the
+ * bundle check reads; a root `vite.config.js` would even take precedence over
+ * the reviewed `.ts` one.
  */
 export function buildConfigViolations(trackedFiles: readonly string[]): string[] {
   return trackedFiles
-    .filter((f) => GATED_PACKAGES.some((n) => f.startsWith(`${gatedDir(n)}/`)))
-    .filter((f) =>
-      /(?:^|\/)(?:vite|vitest|vite-plus|tsdown|rolldown|rollup)\.config\.[^/]*$/.test(f),
-    )
-    .map((f) => `${f}: build configuration is not allowed in a gated package`);
+    .filter((f) => {
+      const slash = f.lastIndexOf("/");
+      const dir = slash === -1 ? "" : f.slice(0, slash);
+      if (!CONFIG_FILE.test(f.slice(slash + 1)) || f === "vite.config.ts") return false;
+      return (
+        dir === "" ||
+        dir === "packages" ||
+        GATED_PACKAGES.some((n) => f.startsWith(`${gatedDir(n)}/`))
+      );
+    })
+    .map((f) => `${f}: build configuration is not allowed where a gated package's build finds it`);
 }
 
 /** Whether a config module's AST has any property or key named `pack`. */

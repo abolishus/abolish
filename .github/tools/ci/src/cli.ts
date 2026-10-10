@@ -454,10 +454,25 @@ function importViolations(
   });
 }
 
+function pack(dir: string, out: string, extra: readonly string[]): Map<string, Buffer> {
+  execFileSync("vp", ["pack", ...extra, "--sourcemap", "--out-dir", out, "--logLevel", "warn"], {
+    cwd: dir,
+    stdio: ["ignore", "inherit", "inherit"],
+  });
+  return new Map(
+    readdirSync(out, { recursive: true, encoding: "utf8" })
+      .sort()
+      .filter((f) => lstatSync(join(out, f)).isFile())
+      .map((f) => [f, readFileSync(join(out, f))]),
+  );
+}
+
 /**
  * Packs the package as its build does, plus source maps, into a scratch
- * directory: the maps must cite only the package's own src, and the output
- * may import only what the package's own src may.
+ * directory, and again with `--no-config`: any difference means some config
+ * file changed the build, wherever the discovery rules found it. Then the
+ * maps must cite only the package's own src, with its exact content, and the
+ * output may import only what the package's own src may.
  */
 function bundleViolations(
   name: GatedName,
@@ -465,12 +480,16 @@ function bundleViolations(
   declared: ReadonlyMap<string, string>,
 ): string[] {
   const out = mkdtempSync(join(tmpdir(), `gated-${name}-`));
+  const bare = mkdtempSync(join(tmpdir(), `gated-${name}-bare-`));
   try {
-    execFileSync("vp", ["pack", "--sourcemap", "--out-dir", out, "--logLevel", "warn"], {
-      cwd: dir,
-      stdio: ["ignore", "inherit", "inherit"],
+    const built = pack(dir, out, []);
+    const unconfigured = pack(dir, bare, ["--no-config"]);
+    const differs = [...new Set([...built.keys(), ...unconfigured.keys()])].filter((f) => {
+      const a = built.get(f);
+      const b = unconfigured.get(f);
+      return a === undefined || b === undefined || !a.equals(b);
     });
-    const files = readdirSync(out, { recursive: true, encoding: "utf8" }).map((f) => join(out, f));
+    const files = [...built.keys()].map((f) => join(out, f));
     const srcRoot = resolve(dir, "src");
     const maps = files.filter((f) => f.endsWith(".map"));
     const unmapped = files
@@ -480,6 +499,9 @@ function bundleViolations(
       )
       .map((f) => `${f}: packed module has code but no source map, so inlining can't be ruled out`);
     return [
+      ...differs.map(
+        (f) => `${dir}: ${f} differs from a --no-config build, so a config changed it`,
+      ),
       ...(files.some((f) => MODULE_FILE.test(f)) ? [] : [`${dir}: vp pack produced no modules`]),
       ...unmapped,
       ...maps.flatMap((m) =>
@@ -499,6 +521,7 @@ function bundleViolations(
     ].map((v) => v.replaceAll(out, `${dir}/<packed>`));
   } finally {
     rmSync(out, { recursive: true, force: true });
+    rmSync(bare, { recursive: true, force: true });
   }
 }
 

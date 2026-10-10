@@ -44,7 +44,7 @@ The spec follows the ADRs below. Under rule A (`AGENTS.md`) the agent's choices 
 - [[0005-permanent-archive]] (accepted by the agent, owner may veto; the first real upload waits for the owner): the display-text split ([[display-text]]), the result-critical field rule ([[notation]]) and the CID parameters ([[content-addressing]]).
 - [[0007-group-and-hash]] (accepted by the owner on 2026-10-10: option A): ristretto255, SHA-256 as `H`, RFC 9380 `hash_to_ristretto255` and RFC 9497 `HashToScalar`. [[group]] follows it.
 - [[0006-trustees]] (open; owner-only: the owner decides): the panel bound into each election definition.
-- [[0002-everlasting-privacy]] (accepted by the owner on 2026-10-10: option B, perfectly hiding commitments on the board; three owner questions in its Decision section still block ballot encryption (P1-12) and, through trustee duties and the election-key wording, the ceremony): the ballot, ceremony and tally sections follow it once written; [[verifier]] marks the checks it changes.
+- [[0002-everlasting-privacy]] (accepted by the owner on 2026-10-10: option B, perfectly hiding commitments on the board; three owner questions in its Decision section still block ballot encryption (P1-12) and, through trustee duties and the election-key wording, the ceremony and the tally with its destruction step (P1-15)): the ballot, ceremony and tally sections follow it once written; [[verifier]] marks the checks it changes.
 
 ## Prior art
 

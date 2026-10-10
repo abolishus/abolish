@@ -128,26 +128,26 @@ Sybil resistance is the core problem: if one person can vote many times, results
 
 ### Integrity and verifiability (G-7, G-8, G-9)
 
-| ID       | Threat                                      | Adversary     | Status         |
-| -------- | ------------------------------------------- | ------------- | -------------- |
-| [[T-23]] | Board tampering                             | A-2           | Planned        |
-| [[T-24]] | Equivocation (split view)                   | A-2, A-1      | Planned        |
-| [[T-25]] | Ballot or registration censorship           | A-2, A-1, A-7 | Planned        |
-| [[T-26]] | Unprovable drops and false complaints       | A-2, A-1      | Planned        |
-| [[T-27]] | Wealth-gated paths                          | A-1, A-9      | Partial        |
-| [[T-28]] | Invalid ballots                             | A-9           | Needs decision |
-| [[T-29]] | Tally or decryption manipulation            | A-2           | Planned        |
-| [[T-30]] | Weak Fiat–Shamir binding ("Frozen Heart")   | A-9, A-2      | Planned        |
-| [[T-31]] | Encoding ambiguity and parser differentials | A-2, A-9      | Needs decision |
-| [[T-32]] | Ballot copying and replay                   | A-9, A-4      | Planned        |
-| [[T-33]] | Re-vote resolution manipulation             | A-2           | Needs design   |
-| [[T-34]] | Election definition substitution            | A-2           | Planned        |
-| [[T-35]] | Time manipulation                           | A-2, A-1      | Planned        |
-| [[T-36]] | Verifier monoculture                        | A-2           | Planned        |
-| [[T-37]] | Trustee key substitution                    | A-2           | Planned        |
-| [[T-38]] | Ballot substitution and re-vote replay      | A-4, A-2, A-9 | Planned        |
-| [[T-39]] | Cryptographic implementation flaws          | A-9, A-2, A-6 | Planned        |
-| [[T-40]] | DKG manipulation                            | A-2, A-1      | Planned        |
+| ID       | Threat                                      | Adversary     | Status       |
+| -------- | ------------------------------------------- | ------------- | ------------ |
+| [[T-23]] | Board tampering                             | A-2           | Planned      |
+| [[T-24]] | Equivocation (split view)                   | A-2, A-1      | Planned      |
+| [[T-25]] | Ballot or registration censorship           | A-2, A-1, A-7 | Planned      |
+| [[T-26]] | Unprovable drops and false complaints       | A-2, A-1      | Planned      |
+| [[T-27]] | Wealth-gated paths                          | A-1, A-9      | Partial      |
+| [[T-28]] | Invalid ballots                             | A-9           | Planned      |
+| [[T-29]] | Tally or decryption manipulation            | A-2           | Planned      |
+| [[T-30]] | Weak Fiat–Shamir binding ("Frozen Heart")   | A-9, A-2      | Planned      |
+| [[T-31]] | Encoding ambiguity and parser differentials | A-2, A-9      | Partial      |
+| [[T-32]] | Ballot copying and replay                   | A-9, A-4      | Planned      |
+| [[T-33]] | Re-vote resolution manipulation             | A-2           | Needs design |
+| [[T-34]] | Election definition substitution            | A-2           | Planned      |
+| [[T-35]] | Time manipulation                           | A-2, A-1      | Planned      |
+| [[T-36]] | Verifier monoculture                        | A-2           | Planned      |
+| [[T-37]] | Trustee key substitution                    | A-2           | Planned      |
+| [[T-38]] | Ballot substitution and re-vote replay      | A-4, A-2, A-9 | Planned      |
+| [[T-39]] | Cryptographic implementation flaws          | A-9, A-2, A-6 | Planned      |
+| [[T-40]] | DKG manipulation                            | A-2, A-1      | Planned      |
 
 ### Client integrity and cast as intended (G-6, G-13)
 
@@ -160,12 +160,12 @@ Sybil resistance is the core problem: if one person can vote many times, results
 
 ### Coercion and vote buying (G-11)
 
-| ID       | Threat                                                       | Adversary | Status         |
-| -------- | ------------------------------------------------------------ | --------- | -------------- |
-| [[T-45]] | Observed coercion                                            | A-4       | Partial        |
-| [[T-46]] | Vote buying by secret sale                                   | A-4       | Not mitigated  |
-| [[T-47]] | Proof of vote                                                | A-4       | Planned        |
-| [[T-70]] | Pattern ("Italian") attack on individually decrypted ballots | A-4       | Needs decision |
+| ID       | Threat                                                       | Adversary | Status        |
+| -------- | ------------------------------------------------------------ | --------- | ------------- |
+| [[T-45]] | Observed coercion                                            | A-4       | Partial       |
+| [[T-46]] | Vote buying by secret sale                                   | A-4       | Not mitigated |
+| [[T-47]] | Proof of vote                                                | A-4       | Planned       |
+| [[T-70]] | Pattern ("Italian") attack on individually decrypted ballots | A-4       | Planned       |
 
 ### Availability and censorship resistance (G-10)
 
@@ -173,9 +173,9 @@ Sybil resistance is the core problem: if one person can vote many times, results
 | -------- | --------------------------------------------------- | --------------------------------------------------------------- | -------------- |
 | [[T-48]] | DDoS                                                | A-5, A-1                                                        | Planned        |
 | [[T-49]] | Domain or hosting seizure                           | A-7, A-1                                                        | Planned        |
-| [[T-50]] | L2 censorship, reorg or failure                     | A-1, A-7                                                        | Needs decision |
+| [[T-50]] | L2 censorship, reorg or failure                     | A-1, A-7                                                        | Planned        |
 | [[T-71]] | L2 governance rewrites state or forges transactions | A-1 (and third-party L2 governance, not yet an adversary class) | Planned        |
-| [[T-51]] | Data loss                                           | A-7, A-2                                                        | Needs decision |
+| [[T-51]] | Data loss                                           | A-7, A-2                                                        | Planned        |
 | [[T-52]] | Spam and flooding                                   | A-5, A-1                                                        | Planned        |
 | [[T-53]] | Discreditation                                      | A-1                                                             | Partial        |
 | [[T-54]] | Trustee unavailability                              | A-1, A-7                                                        | Needs decision |

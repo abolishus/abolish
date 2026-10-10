@@ -379,6 +379,7 @@ describe("hostile JavaScript inputs", () => {
   test("rejects inputs that aren't byte arrays", () => {
     expect(() => decode(u8, Uint16Array.of(300) as never)).toThrow(TypeError);
     expect(() => decode(u8, [1] as never)).toThrow(TypeError);
+    expect(() => decode(u8, new Proxy(Uint8Array.of(1), {}))).toThrow(TypeError);
   });
 
   test("the writer copies its input and never wraps an integer", () => {

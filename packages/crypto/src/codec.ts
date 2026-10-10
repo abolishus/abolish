@@ -44,7 +44,9 @@ export class Reader {
   constructor(bytes: Uint8Array) {
     // Any other typed array would yield values outside their type (a
     // Uint16Array element of 300 read as a u8).
-    if (!(bytes instanceof Uint8Array)) throw new TypeError("decode: input must be a Uint8Array");
+    // A Proxy has no typed-array slots, so isView is false for it.
+    if (!(bytes instanceof Uint8Array) || !ArrayBuffer.isView(bytes))
+      throw new TypeError("decode: input must be a Uint8Array");
     // Copied once, into a plain Uint8Array: nothing decoded can alias the
     // caller's buffer (a Buffer's slice is a view), and bytes in shared memory
     // can't change between a check and the copy that is returned.

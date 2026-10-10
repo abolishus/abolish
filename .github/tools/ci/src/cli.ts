@@ -11,6 +11,9 @@
 //                           match the manifest and the file
 //   gated                   enforce the dependency, import, symlink and bundle policy
 //                           of the crypto-review-gated packages (see gated.ts)
+//   toolchain               fail unless install-toolchain.sh, the catalog, the lockfile
+//                           and AGENTS.md pin one Noir and one bb, and bbup's
+//                           bb-versions.json (pinned commit and next) maps one to the other
 //   release-versions        print "<dir> <version>" for every workspace package
 //   release-apply --versions <file>
 //                           in a clean checkout, apply the accepted next snapshot
@@ -80,6 +83,14 @@ import {
   type RegistryFacts,
   unjustifiedAllowBuilds,
 } from "./lockfile.ts";
+import {
+  bbVersionsUrls,
+  catalogPins,
+  lockedErrors,
+  mappingErrors,
+  pinErrors,
+  scriptPins,
+} from "./toolchain.ts";
 import {
   buildJobErrors,
   proposedVersions,
@@ -660,6 +671,64 @@ async function vectorsProvenance(): Promise<void> {
   console.log(`${files.length} vendored vector file(s) match their publishers by commit and tag`);
 }
 
+// Retries network errors and 5xx (raw.githubusercontent.com blips) but not
+// other statuses: a 404 means the pinned evidence is gone, which must fail.
+async function fetchBytes(url: string): Promise<Buffer> {
+  for (let attempt = 1; ; attempt++) {
+    let retryable: string;
+    try {
+      const r = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+      if (r.ok) return Buffer.from(await r.arrayBuffer());
+      if (r.status < 500) throw new Error(`${url}: HTTP ${r.status}`);
+      retryable = `HTTP ${r.status}`;
+    } catch (e) {
+      if (e instanceof Error && e.message.startsWith(`${url}: HTTP`)) throw e;
+      retryable = e instanceof Error ? e.message : String(e);
+    }
+    if (attempt === 4) throw new Error(`${url}: ${retryable}`);
+    await new Promise((resolve) => setTimeout(resolve, 2000 * 2 ** (attempt - 1)));
+  }
+}
+
+async function toolchain(): Promise<void> {
+  const script = scriptPins(readFileSync(".github/scripts/install-toolchain.sh", "utf8"));
+  const catalog = catalogPins(readFileSync("pnpm-workspace.yaml", "utf8"));
+  if (Array.isArray(script) || Array.isArray(catalog)) {
+    for (const e of [script, catalog].flatMap((x) => (Array.isArray(x) ? x : []))) {
+      console.error(e);
+    }
+    process.exit(1);
+  }
+  const errors = [
+    ...pinErrors(script, catalog, readFileSync("AGENTS.md", "utf8")),
+    ...lockedErrors(parsePackages(readFileSync("pnpm-lock.yaml", "utf8")).values(), script),
+  ];
+  // The pinned copy proves which file the mapping was read from; the copy on
+  // the branch bbup reads proves the commit is the publisher's (a commit SHA
+  // also resolves from any fork of the repository) and that upstream hasn't
+  // since remapped this Noir version.
+  const urls = bbVersionsUrls(script);
+  // Hash the bytes as served, so the digest is the one sha256sum gives; decode
+  // strictly, so a BOM or invalid UTF-8 fails rather than being normalised.
+  const decode = (bytes: Buffer) =>
+    new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
+  const pinnedBytes = await fetchBytes(urls.pinned);
+  const pinned = decode(pinnedBytes);
+  const digest = createHash("sha256").update(pinnedBytes).digest("hex");
+  if (digest !== script.bbVersionsSha256) {
+    errors.push(
+      `${urls.pinned}: sha256 ${digest}, expected BB_VERSIONS_SHA256 ${script.bbVersionsSha256}`,
+    );
+  }
+  errors.push(
+    ...mappingErrors(urls.pinned, pinned, script),
+    ...mappingErrors(urls.branch, decode(await fetchBytes(urls.branch)), script),
+  );
+  for (const e of errors) console.error(e);
+  if (errors.length > 0) process.exit(1);
+  console.log(`toolchain pins agree: Noir ${script.noir}, bb ${script.bb}`);
+}
+
 const command = process.argv[2];
 switch (command) {
   case "affected":
@@ -679,6 +748,9 @@ switch (command) {
     break;
   case "vectors-provenance":
     await vectorsProvenance();
+    break;
+  case "toolchain":
+    await toolchain();
     break;
   case "release-versions":
     releaseVersions();

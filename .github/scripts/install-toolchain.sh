@@ -13,12 +13,17 @@
 set -euo pipefail
 
 NOIR_VERSION="1.0.0-beta.22"
-# Evidence for the Noir -> bb mapping, recorded 2026-10-09: bbup's
-# barretenberg/bbup/bb-versions.json at AztecProtocol/aztec-packages
-# next@bb15fcbbe969f11a892272715fe59f0976b086ca (sha256
-# 26f98a191cfc049521320d077473a12cf141ff9b909392f4685d349063a5b2f8) maps
-# "1.0.0-beta.22" to "5.0.0-nightly.20260522".
 BB_VERSION="5.0.0-nightly.20260522"
+# Evidence for the Noir -> bb mapping, recorded 2026-10-09: bbup's
+# barretenberg/bbup/bb-versions.json at this AztecProtocol/aztec-packages
+# commit (on next) has this sha256 and maps NOIR_VERSION to BB_VERSION. Not
+# used below; CI's toolchain check (.github/tools/ci/src/toolchain.ts) re-fetches
+# the file by commit and from next and checks the mapping. Keep each of these
+# four as one top-level NAME="literal" line: the check refuses anything else.
+# shellcheck disable=SC2034
+BB_VERSIONS_COMMIT="bb15fcbbe969f11a892272715fe59f0976b086ca"
+# shellcheck disable=SC2034
+BB_VERSIONS_SHA256="26f98a191cfc049521320d077473a12cf141ff9b909392f4685d349063a5b2f8"
 FOUNDRY_VERSION="1.8.3"
 
 declare -A SHA256=(

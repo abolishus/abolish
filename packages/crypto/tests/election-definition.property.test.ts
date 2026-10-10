@@ -18,6 +18,7 @@ import {
   newDisplayTextSalt,
   newElectionId,
   PARAMETERS,
+  pinnedVersion,
   pinsDraftVersion,
 } from "../src/index.ts";
 
@@ -299,6 +300,21 @@ describe("display text", () => {
       });
     expect(check(text(["a", "a", "b", "c"]))).toBe("labels");
     expect(check(text(["a", "b", "c", "d"], "EN"))).toBe("language-tag");
+  });
+
+  test("a type pinned twice has no pinned version, whatever the order", () => {
+    const twice = (a: number, b: number) => ({
+      ...sampleDefinition,
+      profile: {
+        protocol_major: 1,
+        pins: [...allPins, { record_type: 9, version: a }, { record_type: 9, version: b }].filter(
+          (p, i) => p.record_type !== 9 || i >= 9,
+        ),
+      },
+    });
+    expect(pinnedVersion(twice(1, 2), 9)).toBeUndefined();
+    expect(pinnedVersion(twice(2, 1), 9)).toBeUndefined();
+    expect(pinnedVersion(sampleDefinition, 9)).toBe(1);
   });
 
   test("decodes only against a definition that pins version 1", () => {

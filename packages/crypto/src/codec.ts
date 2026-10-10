@@ -39,20 +39,30 @@ export class EncodeError extends Error {
 /** Reads a complete input left to right; every read is bounds-checked first. */
 export class Reader {
   #offset = 0;
-  constructor(private readonly bytes: Uint8Array) {}
+  readonly #bytes: Uint8Array;
+
+  constructor(bytes: Uint8Array) {
+    // Any other typed array would yield values outside their type (a
+    // Uint16Array element of 300 read as a u8).
+    if (!(bytes instanceof Uint8Array)) throw new TypeError("decode: input must be a Uint8Array");
+    // Copied once, into a plain Uint8Array: nothing decoded can alias the
+    // caller's buffer (a Buffer's slice is a view), and bytes in shared memory
+    // can't change between a check and the copy that is returned.
+    this.#bytes = new Uint8Array(bytes);
+  }
 
   get offset(): number {
     return this.#offset;
   }
 
   get remaining(): number {
-    return this.bytes.length - this.#offset;
+    return this.#bytes.length - this.#offset;
   }
 
   /** The next `n` bytes, as a view into the input. */
   take(n: number): Uint8Array {
     if (n > this.remaining) throw new DecodeError("truncated", this.#offset);
-    const out = this.bytes.subarray(this.#offset, this.#offset + n);
+    const out = this.#bytes.subarray(this.#offset, this.#offset + n);
     this.#offset += n;
     return out;
   }
@@ -76,12 +86,15 @@ export class Writer {
   #length = 0;
 
   bytes(b: Uint8Array): void {
+    checkBytes(b, "bytes");
     // Copied, so a caller mutating its buffer later can't change the output.
-    this.#chunks.push(b.slice());
+    this.#chunks.push(new Uint8Array(b));
     this.#length += b.length;
   }
 
   uint(width: 1 | 2 | 4, v: number): void {
+    // Never wraps: a value that doesn't fit has no encoding at this width.
+    checkUint(v, 2 ** (8 * width) - 1, `u${8 * width}`);
     const b = new Uint8Array(width);
     for (let i = width - 1; i >= 0; i--) {
       b[i] = v % 256;
@@ -304,10 +317,13 @@ export function list<T>(of: Codec<T>, max: number): Codec<readonly T[]> {
     minLength: 4,
     write(w, value) {
       if (!Array.isArray(value)) throw new EncodeError("list: expected an array");
-      if (value.length > max)
-        throw new EncodeError(`list: ${value.length} elements is over ${max}`);
-      w.uint(4, value.length);
-      for (const e of value as readonly T[]) of.write(w, e);
+      // The length is read once and the elements by index, so an overridden
+      // iterator or a proxy can't make the count disagree with the elements.
+      const items = value as readonly T[];
+      const n = items.length;
+      if (n > max) throw new EncodeError(`list: ${n} elements is over ${max}`);
+      w.uint(4, n);
+      for (let i = 0; i < n; i++) of.write(w, items[i] as T);
     },
     read(r) {
       const at = r.offset;
@@ -339,7 +355,6 @@ export function struct<const F extends Fields>(fields: F): Codec<StructValue<F>>
   for (const name of names)
     if (!FIELD_NAME.test(name)) throw new RangeError(`struct: bad field name ${name}`);
   if (new Set(names).size !== names.length) throw new RangeError("struct: duplicate field name");
-  const expected = [...names].sort().join();
   return {
     minLength: fields.reduce((n, [, c]) => n + c.minLength, 0),
     write(w, value) {
@@ -347,7 +362,10 @@ export function struct<const F extends Fields>(fields: F): Codec<StructValue<F>>
         throw new EncodeError("struct: expected an object");
       // No optional fields and no extras (notation.md): a value with any other
       // set of keys has no encoding under this type.
-      if (Object.keys(value).sort().join() !== expected)
+      if (
+        Object.keys(value).length !== names.length ||
+        !names.every((n) => Object.hasOwn(value, n))
+      )
         throw new EncodeError(`struct: expected exactly the fields ${names.join(", ")}`);
       const v = value as Readonly<Record<string, unknown>>;
       for (const [name, codec] of fields) codec.write(w, v[name]);

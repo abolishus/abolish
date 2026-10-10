@@ -8,26 +8,30 @@
  * checks this table against the spec. Only a `specified` tag has an input
  * layout, so only those can frame a hash input.
  */
-export const TAG_REGISTRY = [
-  { tag: "abolish/v1/display-text", status: "specified" },
-  { tag: "abolish/v1/election-definition", status: "reserved" },
-  { tag: "abolish/v1/board-entry", status: "reserved" },
-  { tag: "abolish/v1/board-chain", status: "reserved" },
-  { tag: "abolish/v1/merkle/leaf", status: "reserved" },
-  { tag: "abolish/v1/merkle/node", status: "reserved" },
-  { tag: "abolish/v1/ballot", status: "reserved" },
-  { tag: "abolish/v1/receipt", status: "reserved" },
-  { tag: "abolish/v1/nullifier-scope", status: "reserved" },
-  { tag: "abolish/v1/fs/ballot-validity/option", status: "reserved" },
-  { tag: "abolish/v1/fs/ballot-validity/sum", status: "reserved" },
-  { tag: "abolish/v1/fs/ceremony/possession", status: "reserved" },
-  { tag: "abolish/v1/fs/tally-share", status: "reserved" },
-  { tag: "abolish/v1/ceremony-transcript", status: "reserved" },
-  { tag: "abolish/v1/tally-transcript", status: "reserved" },
-  { tag: "abolish/v1/event-accumulator", status: "reserved" },
-  { tag: "abolish/v1/generator-h", status: "conditional" },
-  { tag: "abolish/v1/kem/share", status: "conditional" },
-] as const;
+export const TAG_REGISTRY = Object.freeze(
+  (
+    [
+      { tag: "abolish/v1/display-text", status: "specified" },
+      { tag: "abolish/v1/election-definition", status: "reserved" },
+      { tag: "abolish/v1/board-entry", status: "reserved" },
+      { tag: "abolish/v1/board-chain", status: "reserved" },
+      { tag: "abolish/v1/merkle/leaf", status: "reserved" },
+      { tag: "abolish/v1/merkle/node", status: "reserved" },
+      { tag: "abolish/v1/ballot", status: "reserved" },
+      { tag: "abolish/v1/receipt", status: "reserved" },
+      { tag: "abolish/v1/nullifier-scope", status: "reserved" },
+      { tag: "abolish/v1/fs/ballot-validity/option", status: "reserved" },
+      { tag: "abolish/v1/fs/ballot-validity/sum", status: "reserved" },
+      { tag: "abolish/v1/fs/ceremony/possession", status: "reserved" },
+      { tag: "abolish/v1/fs/tally-share", status: "reserved" },
+      { tag: "abolish/v1/ceremony-transcript", status: "reserved" },
+      { tag: "abolish/v1/tally-transcript", status: "reserved" },
+      { tag: "abolish/v1/event-accumulator", status: "reserved" },
+      { tag: "abolish/v1/generator-h", status: "conditional" },
+      { tag: "abolish/v1/kem/share", status: "conditional" },
+    ] as const
+  ).map((e) => Object.freeze(e)),
+);
 
 export type Tag = (typeof TAG_REGISTRY)[number]["tag"];
 

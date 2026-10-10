@@ -84,20 +84,39 @@ describe("domain-separation tag registry", () => {
   test("only specified tags frame a hash input", () => {
     expect(() => ds("abolish/v1/ballot" as never, new Uint8Array())).toThrow(RangeError);
     expect(() => ds("abolish/v1/unregistered" as never, new Uint8Array())).toThrow(RangeError);
+    expect(() => ds("abolish/v1/display-text", [1, 2] as never)).toThrow(TypeError);
   });
 });
 
 describe("record-type registry", () => {
   const rows = table(spec("versioning.md"), "## Record-type registry");
 
-  test("RECORD_TYPES matches docs/spec/versioning.md", () => {
-    const assigned = rows
-      .map((r) => /^`0x([0-9a-f]{4})`$/.exec(r[0] ?? "")?.[1])
-      .filter((n) => n !== undefined && n !== "0000")
-      .map((n) => Number.parseInt(n ?? "", 16));
-    expect(Object.values(RECORD_TYPES)).toEqual(assigned);
-    expect(rows.find((r) => r[1] === "test")?.[0]).toBe(
-      `\`0x${TEST_RECORD_TYPES.first.toString(16)}\`–\`0x${TEST_RECORD_TYPES.last.toString(16)}\``,
-    );
+  test("RECORD_TYPES matches docs/spec/versioning.md, number and name", () => {
+    // Every row is either the invalid 0x0000, the test range, or an assigned
+    // type; a row in any other shape fails rather than being skipped.
+    const camel = (name: string) =>
+      name.replace(/[ -]([a-z])/g, (_m, c: string) => c.toUpperCase());
+    const assigned: [string, number][] = [];
+    for (const [number = "", name = ""] of rows) {
+      if (number === "`0x0000`" && name === "none") continue;
+      if (name === "test") {
+        expect(number).toBe(
+          `\`0x${TEST_RECORD_TYPES.first.toString(16)}\`–\`0x${TEST_RECORD_TYPES.last.toString(16)}\``,
+        );
+        continue;
+      }
+      const m = /^`0x([0-9a-f]{4})`$/.exec(number);
+      if (m === null) throw new Error(`unrecognised registry row: ${number} | ${name}`);
+      assigned.push([camel(name), Number.parseInt(m[1] ?? "", 16)]);
+    }
+    expect(assigned.length).toBeGreaterThan(0);
+    expect(Object.entries(RECORD_TYPES)).toEqual(assigned);
+  });
+
+  test("the exported tables can't be changed at run time", () => {
+    expect(Object.isFrozen(RECORD_TYPES)).toBe(true);
+    expect(Object.isFrozen(TEST_RECORD_TYPES)).toBe(true);
+    expect(Object.isFrozen(TAG_REGISTRY)).toBe(true);
+    for (const e of TAG_REGISTRY) expect(Object.isFrozen(e)).toBe(true);
   });
 });

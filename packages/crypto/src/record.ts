@@ -12,7 +12,7 @@ import { type Codec, type CodecValue, DecodeError, EncodeError, Reader, Writer }
  * checks this table against it. A number here only names a type: a decoder
  * knows it once a `RecordType` with a specified layout is in its schema.
  */
-export const RECORD_TYPES = {
+export const RECORD_TYPES = Object.freeze({
   electionDefinition: 0x0001,
   ballot: 0x0002,
   spoiledBallotOpening: 0x0003,
@@ -22,10 +22,10 @@ export const RECORD_TYPES = {
   boardEntry: 0x0007,
   contractEvent: 0x0008,
   displayText: 0x0009,
-} as const;
+} as const);
 
 /** `0xff00`–`0xffff`: used only by vector files to exercise framing. */
-export const TEST_RECORD_TYPES = { first: 0xff00, last: 0xffff } as const;
+export const TEST_RECORD_TYPES = Object.freeze({ first: 0xff00, last: 0xffff } as const);
 
 const isTestType = (t: number) => t >= TEST_RECORD_TYPES.first && t <= TEST_RECORD_TYPES.last;
 
@@ -44,6 +44,11 @@ export type DecodedRecord<V extends Versions> = {
   readonly [K in RecordVersion<V>]: { readonly version: K; readonly value: CodecValue<V[K]> };
 }[RecordVersion<V>];
 
+// Record types made, and so validated and frozen, by `recordType`. A schema
+// takes no other object: a hand-built one could carry type 0, version 0 or a
+// mutable layout table.
+const MADE = new WeakSet<RecordType>();
+
 export function recordType<const V extends Versions>(type: number, versions: V): RecordType<V> {
   // 0x0000 is never valid, and neither is version 0x00 (notation.md).
   if (!Number.isInteger(type) || type < 1 || type > 0xffff)
@@ -56,7 +61,9 @@ export function recordType<const V extends Versions>(type: number, versions: V):
       throw new RangeError(`version ${k} must be an integer from 1 to 255`);
   }
   // Frozen, so a registered layout can't be swapped after a schema has it.
-  return Object.freeze({ recordType: type, versions: Object.freeze({ ...versions }) });
+  const t = Object.freeze({ recordType: type, versions: Object.freeze({ ...versions }) });
+  MADE.add(t);
+  return t;
 }
 
 function layoutOf(type: RecordType, version: number): Codec<unknown> | undefined {
@@ -68,14 +75,12 @@ export interface RecordSchemaOptions {
   readonly allowTestRange?: boolean;
 }
 
-export interface DecodeRecordOptions {
-  /**
-   * The version the election's profile pins for this type
-   * (docs/spec/versioning.md). Any other version is `profile-mismatch`, even
-   * one this schema could decode.
-   */
-  readonly version?: number;
-}
+/**
+ * Passed instead of a pinned version only where no election profile applies
+ * (vector files and tests). Every record of an election is decoded against
+ * the version its profile pins (docs/spec/versioning.md, T-34).
+ */
+export const UNPINNED: unique symbol = Symbol("unpinned");
 
 /** The set of record types (and their versions) a decoder knows. */
 export class RecordSchema {
@@ -83,6 +88,7 @@ export class RecordSchema {
 
   constructor(types: readonly RecordType[], options: RecordSchemaOptions = {}) {
     for (const t of types) {
+      if (!MADE.has(t)) throw new TypeError("record types must be made with recordType()");
       if (this.#types.has(t.recordType))
         throw new RangeError(`record type ${t.recordType} listed twice`);
       if (isTestType(t.recordType) && options.allowTestRange !== true)
@@ -115,11 +121,16 @@ export class RecordSchema {
     return w.finish();
   }
 
-  /** Strictly decodes a complete input as a record of `type`. */
+  /**
+   * Strictly decodes a complete input as a record of `type`. `pinned` is the
+   * version the election's profile pins for this type: any other version is
+   * `profile-mismatch`, even one this schema could decode. The argument is
+   * required so that skipping the check takes an explicit `UNPINNED`.
+   */
   decode<V extends Versions>(
     type: RecordType<V>,
     bytes: Uint8Array,
-    options: DecodeRecordOptions = {},
+    pinned: RecordVersion<V> | typeof UNPINNED,
   ): DecodedRecord<V> {
     this.#check(type);
     const r = new Reader(bytes);
@@ -132,8 +143,7 @@ export class RecordSchema {
     const v = r.uint(1);
     const layout = layoutOf(type, v);
     if (layout === undefined) throw new DecodeError("unknown-version", vAt);
-    if (options.version !== undefined && v !== options.version)
-      throw new DecodeError("profile-mismatch", vAt);
+    if (pinned !== UNPINNED && v !== pinned) throw new DecodeError("profile-mismatch", vAt);
     const value = layout.read(r);
     r.end();
     return { version: v, value } as DecodedRecord<V>;

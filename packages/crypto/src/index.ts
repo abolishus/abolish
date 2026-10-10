@@ -32,7 +32,6 @@ export {
 } from "./domain-separation.ts";
 export {
   type DecodedRecord,
-  type DecodeRecordOptions,
   RECORD_TYPES,
   RecordSchema,
   type RecordSchemaOptions,
@@ -40,5 +39,6 @@ export {
   recordType,
   type RecordVersion,
   TEST_RECORD_TYPES,
+  UNPINNED,
 } from "./record.ts";
 export { isWellFormedUtf8 } from "./utf8.ts";

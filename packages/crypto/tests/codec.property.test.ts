@@ -21,7 +21,9 @@ import {
   u32,
   u64,
   u8,
+  UNPINNED,
   utf8,
+  Writer,
 } from "../src/index.ts";
 
 // Properties of docs/spec/notation.md, "Strict decoding": decode(encode(x)) = x,
@@ -285,11 +287,11 @@ describe("record framing", () => {
   const schema = new RecordSchema([t1, t2]);
 
   test("round-trips every version and returns the version read", () => {
-    expect(schema.decode(t1, schema.encode(t1, 1, { x: 7 }))).toEqual({
+    expect(schema.decode(t1, schema.encode(t1, 1, { x: 7 }), UNPINNED)).toEqual({
       version: 1,
       value: { x: 7 },
     });
-    expect(schema.decode(t1, schema.encode(t1, 3, { y: 258 }))).toEqual({
+    expect(schema.decode(t1, schema.encode(t1, 3, { y: 258 }), 3)).toEqual({
       version: 3,
       value: { y: 258 },
     });
@@ -298,20 +300,20 @@ describe("record framing", () => {
 
   test("rejects a version other than the one the profile pins, right after the header", () => {
     const v1 = schema.encode(t1, 1, { x: 7 });
-    expect(outcome(() => schema.decode(t1, v1, { version: 3 }))).toEqual({
+    expect(outcome(() => schema.decode(t1, v1, 3))).toEqual({
       ok: false,
       code: "profile-mismatch",
     });
     // Checked before any field: a body that would fail to decode still reports the profile.
-    expect(outcome(() => schema.decode(t1, Uint8Array.of(0, 0x10, 1), { version: 3 }))).toEqual({
+    expect(outcome(() => schema.decode(t1, Uint8Array.of(0, 0x10, 1), 3))).toEqual({
       ok: false,
       code: "profile-mismatch",
     });
-    expect(schema.decode(t1, v1, { version: 1 }).version).toBe(1);
+    expect(schema.decode(t1, v1, 1).version).toBe(1);
   });
 
   test("distinguishes unknown, unexpected and unknown-version", () => {
-    const code = (b: number[]) => outcome(() => schema.decode(t1, Uint8Array.from(b)));
+    const code = (b: number[]) => outcome(() => schema.decode(t1, Uint8Array.from(b), UNPINNED));
     expect(code([0, 0x12, 1, 0])).toEqual({ ok: false, code: "unknown-record-type" });
     expect(code([0, 0, 1, 0])).toEqual({ ok: false, code: "unknown-record-type" });
     expect(code([0, 0x11, 1, 0])).toEqual({ ok: false, code: "unexpected-record-type" });
@@ -327,7 +329,7 @@ describe("record framing", () => {
         fc.constantFrom<RecordType>(t1, t2),
         (bytes, t) => {
           try {
-            const { version, value } = schema.decode(t, bytes);
+            const { version, value } = schema.decode(t, bytes, UNPINNED);
             expect(schema.encode(t, version as never, value as never)).toEqual(bytes);
           } catch (e) {
             if (!(e instanceof DecodeError)) throw e;
@@ -348,15 +350,91 @@ describe("record framing", () => {
     const test = recordType(0xff01, { 1: u8 });
     expect(() => new RecordSchema([test])).toThrow(RangeError);
     expect(
-      new RecordSchema([test], { allowTestRange: true }).decode(test, Uint8Array.of(0xff, 1, 1, 9))
-        .value,
+      new RecordSchema([test], { allowTestRange: true }).decode(
+        test,
+        Uint8Array.of(0xff, 1, 1, 9),
+        1,
+      ).value,
     ).toBe(9);
   });
 
   test("encodes and expects only the types it was built with", () => {
     const other = recordType(0x0010, { 1: struct([["x", u8]] as const) });
     expect(() => schema.encode(other, 1, { x: 1 })).toThrow(RangeError);
-    expect(() => schema.decode(other, Uint8Array.of(0, 0x10, 1, 1))).toThrow(RangeError);
+    expect(() => schema.decode(other, Uint8Array.of(0, 0x10, 1, 1), UNPINNED)).toThrow(RangeError);
     expect(() => schema.encode(t1, 2 as never, { x: 1 } as never)).toThrow(EncodeError);
+  });
+});
+
+describe("hostile JavaScript inputs", () => {
+  test("decodes a Buffer into plain arrays that don't alias it", () => {
+    const input = Buffer.from([0, 0, 0, 2, 7, 8]);
+    const value = decode(bytesVar(4), input);
+    input.fill(0);
+    expect(value).toEqual(Uint8Array.of(7, 8));
+    expect(Object.getPrototypeOf(value)).toBe(Uint8Array.prototype);
+    expect(Object.getPrototypeOf(decode(bytesFixed(1), Buffer.of(1)))).toBe(Uint8Array.prototype);
+  });
+
+  test("rejects inputs that aren't byte arrays", () => {
+    expect(() => decode(u8, Uint16Array.of(300) as never)).toThrow(TypeError);
+    expect(() => decode(u8, [1] as never)).toThrow(TypeError);
+  });
+
+  test("the writer copies its input and never wraps an integer", () => {
+    const w = new Writer();
+    const b = Buffer.from([1, 2]);
+    w.bytes(b);
+    b.fill(9);
+    expect(w.finish()).toEqual(Uint8Array.of(1, 2));
+    expect(() => new Writer().uint(1, 256)).toThrow(EncodeError);
+    expect(() => new Writer().uint(2, -1)).toThrow(EncodeError);
+    expect(() => new Writer().bytes([1] as never)).toThrow(EncodeError);
+  });
+
+  test("a list's count always matches the elements written", () => {
+    const sneaky = [1, 2];
+    Object.defineProperty(sneaky, Symbol.iterator, {
+      value: function* () {
+        yield 1;
+      },
+    });
+    expect(encode(list(u8, 4), sneaky)).toEqual(Uint8Array.of(0, 0, 0, 2, 1, 2));
+  });
+
+  test("a struct value must have exactly its fields as own keys", () => {
+    const codec = struct([
+      ["a", u8],
+      ["b", u8],
+    ] as const) as Codec<unknown>;
+    expect(() => encode(codec, { "a,b": 1 })).toThrow(EncodeError);
+    expect(() =>
+      encode(codec, Object.assign(Object.create({ a: 1 }) as object, { b: 2, c: 3 })),
+    ).toThrow(EncodeError);
+  });
+
+  test("record schemas take only types made by recordType()", () => {
+    expect(() => new RecordSchema([{ recordType: 0x1ff01, versions: { 300: u8 } }])).toThrow(
+      TypeError,
+    );
+    expect(() => new RecordSchema([{ recordType: 0, versions: { 0: u8 } }])).toThrow(TypeError);
+    expect(() => recordType(1, { "01": u8 } as never)).toThrow(RangeError);
+    const t = recordType(0x20, { 1: u8 });
+    expect(Object.isFrozen(t) && Object.isFrozen(t.versions)).toBe(true);
+  });
+
+  test("a version found only on Object.prototype is unknown", () => {
+    const t = recordType(0x20, { 1: u8 });
+    const schema = new RecordSchema([t]);
+    const proto = Object.prototype as Record<number, unknown>;
+    proto[5] = u8;
+    try {
+      expect(outcome(() => schema.decode(t, Uint8Array.of(0, 0x20, 5, 0), UNPINNED))).toEqual({
+        ok: false,
+        code: "unknown-version",
+      });
+    } finally {
+      delete proto[5];
+    }
   });
 });

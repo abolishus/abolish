@@ -1,12 +1,11 @@
 import { describe, expect, test } from "vite-plus/test";
-import { decode, DecodeError, encode } from "../src/index.ts";
-import { build, buildSchema, readVectorFile, type Vector } from "./spec-vectors.ts";
+import { decode, DecodeError, encode, UNPINNED } from "../src/index.ts";
+import { build, buildSchema, hex, readVectorFile, type Vector } from "./spec-vectors.ts";
 
 // docs/spec/vectors/primitives.json: the primitive types, record framing and
 // strict-decoding rejections of docs/spec/notation.md (T-31, T-36).
 const file = readVectorFile("primitives.json");
 const { schema, type } = buildSchema(file);
-const hex = (s: string) => Uint8Array.from(Buffer.from(s, "hex"));
 const toHex = (b: Uint8Array) => Buffer.from(b).toString("hex");
 
 function run(v: Vector) {
@@ -15,7 +14,7 @@ function run(v: Vector) {
     const { recordType, built } = type(v.type);
     const version = v.type.version;
     return {
-      decode: () => schema.decode(recordType, input).value,
+      decode: () => schema.decode(recordType, input, UNPINNED).value,
       encode: (value: unknown) => schema.encode(recordType, version, value),
       fromJson: built.fromJson,
     };

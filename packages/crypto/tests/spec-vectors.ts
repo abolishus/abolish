@@ -66,7 +66,18 @@ export function readVectorFile(name: string): VectorFile {
   return file;
 }
 
-const hex = (s: string) => Uint8Array.from(Buffer.from(s, "hex"));
+// Strict, so a malformed vector fails instead of quietly testing another
+// input: Buffer.from(s, "hex") stops at the first bad digit, and Number("")
+// is 0.
+export function hex(s: string): Uint8Array {
+  if (!/^(?:[0-9a-f]{2})*$/.test(s)) throw new Error(`not lowercase hex bytes: ${s}`);
+  return Uint8Array.from(Buffer.from(s, "hex"));
+}
+
+const decimal = (s: string) => {
+  if (!/^(?:0|[1-9][0-9]*)$/.test(s)) throw new Error(`not a decimal integer: ${s}`);
+  return BigInt(s);
+};
 
 /** A codec for a non-record descriptor, and how to turn its JSON value into a codec value. */
 export interface Built {
@@ -85,14 +96,17 @@ export function build(t: TypeDescriptor): Built {
     case "u16":
     case "u32": {
       const codec = { u8, u16, u32 }[t.kind];
-      return { codec, fromJson: (v) => Number(asString(v)) };
+      return { codec, fromJson: (v) => Number(decimal(asString(v))) };
     }
     case "u64":
-      return { codec: u64, fromJson: (v) => BigInt(asString(v)) };
+      return { codec: u64, fromJson: (v) => decimal(asString(v)) };
     case "bool":
       return { codec: bool, fromJson: (v) => v };
     case "enum8":
-      return { codec: enum8(t.values.map(Number)), fromJson: (v) => Number(asString(v)) };
+      return {
+        codec: enum8(t.values.map((x) => Number(decimal(x)))),
+        fromJson: (v) => Number(decimal(asString(v))),
+      };
     case "bytes":
       return {
         codec: "length" in t ? bytesFixed(t.length) : bytesVar(t.max),
@@ -102,7 +116,14 @@ export function build(t: TypeDescriptor): Built {
       return { codec: utf8(t.max), fromJson: (v) => hex(asString(v)) };
     case "field":
       if (t.field !== "bn254") throw new Error(`unknown field ${t.field}`);
-      return { codec: fieldBn254, fromJson: (v) => BigInt(`0x${asString(v)}`) };
+      return {
+        codec: fieldBn254,
+        fromJson: (v) => {
+          const b = hex(asString(v));
+          if (b.length !== 32) throw new Error("a field value is 32 bytes");
+          return BigInt(`0x${asString(v)}`);
+        },
+      };
     case "list": {
       const of = build(t.of);
       return {

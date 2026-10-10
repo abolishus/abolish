@@ -127,8 +127,8 @@ export function H(message: Uint8Array): Uint8Array {
 const ascii = (s: string) => Uint8Array.from(s, (c) => c.charCodeAt(0));
 
 /**
- * The `DST`, checked: RFC 9380 §3.1 requires at most 255 bytes (longer ones
- * would be hashed down) and recommends at least 16, which docs/spec requires.
+ * The `DST`, checked: RFC 9380 §5.3.1 aborts above 255 bytes (§5.3.3 hashes
+ * longer ones down) and §3.1 recommends at least 16, which docs/spec requires.
  * There is no default: @noble/curves would substitute its own (ADR 0007).
  */
 function checkDst(dst: Uint8Array): Uint8Array {

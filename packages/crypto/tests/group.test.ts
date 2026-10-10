@@ -260,6 +260,16 @@ describe("hash layer", () => {
       // but src/ has no reason to reach it except through ristretto255_hasher.
       if (/@noble\/curves\/abstract\//.test(source))
         throw new Error(`${name}: imports the generic hash-to-curve layer`);
+      // Only these two names, so no OPRF or other bundle with its own default
+      // DSTs, and the hasher only in the call form checked below (no
+      // destructuring, aliasing or bracket access).
+      for (const m of source.matchAll(/import \{([^}]*)\} from "@noble\/curves\/ed25519\.js"/g))
+        expect(m[1]?.trim(), name).toBe("ristretto255, ristretto255_hasher");
+      expect(source.match(/ristretto255_hasher/g)?.length ?? 0, name).toBe(
+        (source.match(/ristretto255_hasher\.(?:hashToScalar|hashToCurve)\(/g)?.length ?? 0) +
+          (source.includes("ristretto255_hasher }") ? 1 : 0),
+      );
+      expect(source, name).not.toMatch(/@noble\/curves\/(?!ed25519\.js")/);
       for (const m of source.matchAll(/ristretto255_hasher\.(\w+)\(([^;]*?)\);/gs)) {
         calls++;
         expect(m[2], `${name}: ${m[0]}`).toMatch(/, \{ DST: checkDst\(dst\) \}$/);

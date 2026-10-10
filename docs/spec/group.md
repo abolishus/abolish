@@ -58,7 +58,8 @@ so no one chose it, and no one knows its discrete log relative to `g` ([[0002-ev
 ## DST rules
 
 - Every `DST` is a registered tag ([[domain-separation]]) whose primitive is the construction it's used with: a Fiat–Shamir tag only for `HashToScalar`, a hash-to-curve tag only for `hash_to_ristretto255`. A tag is never used both as a `DST` and inside `DS`.
-- A tag used as a `DST` is 16 to 255 bytes long. RFC 9380 §3.1 recommends at least 16 bytes and requires at most 255 (a longer one would be hashed down); the tag grammar alone allows 12.
+- A tag used as a `DST` is 16 to 255 bytes long. RFC 9380 §3.1 recommends at least 16 bytes, and `expand_message_xmd` aborts on more than 255 (§5.3.1; §5.3.3 hashes a longer one down, which we never use); the tag grammar alone allows 12.
+- A `scalar` field that must be non-zero (a secret key, say) says so in its record table, as an `element` field says whether it allows the identity; `scalar` alone accepts 0.
 - Implementations pass the `DST` explicitly. Libraries that default to their own `DST` when it is omitted (`@noble/curves` does) are never called without one; a test in `packages/crypto` checks every call.
 
 ## Static Diffie–Hellman

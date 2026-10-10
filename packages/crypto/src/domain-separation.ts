@@ -70,8 +70,8 @@ export function assertSpecifiedTag(tag: unknown, primitives: readonly TagPrimiti
 }
 
 /**
- * `DS(tag, m) = u8(len(tag)) ‖ tag ‖ m`: the input to a plain or Fiat–Shamir
- * hash. The tag carries its own length, so the set of prefixes is prefix-free
+ * `DS(tag, m) = u8(len(tag)) ‖ tag ‖ m`: the input to a plain hash, or a KDF
+ * or AEAD input (Fiat–Shamir uses the tag as a `DST` instead, docs/spec/group.md). The tag carries its own length, so the set of prefixes is prefix-free
  * and no two tags can frame the same input.
  */
 export function ds(tag: DsTag, message: Uint8Array): Uint8Array {

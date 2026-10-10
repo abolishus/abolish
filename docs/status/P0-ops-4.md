@@ -1,6 +1,7 @@
 # P0-ops-4: reconcile accepted ADRs and their dependants
 
-- State: done when #27 merges
+- State: done
+- PR: #27
 - Branch: `claude/p0-ops-4`
 
 ## Scope

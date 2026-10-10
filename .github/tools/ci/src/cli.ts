@@ -48,6 +48,7 @@ import {
   type WorkspacePackage,
 } from "./affected.ts";
 import {
+  alternateManifestViolations,
   buildConfigViolations,
   configuresPack,
   hasCode,
@@ -559,6 +560,7 @@ function gated(): void {
   const violations = [
     ...linkViolations(git("ls-files", "-s", "-z")),
     ...configs,
+    ...alternateManifestViolations(tracked),
     ...(rootConfig.errors.length > 0 || configuresPack(rootConfig.program)
       ? [
           "vite.config.ts: must parse and must not configure pack (gated packages build with defaults)",
@@ -566,17 +568,20 @@ function gated(): void {
       : []),
   ];
   const checked: string[] = [];
+  const workspaceDeps: [string, string][] = [];
   for (const name of GATED_PACKAGES) {
     const dir = `packages/${name}`;
     const file = join(dir, "package.json");
     if (!existsSync(file)) {
-      // The published ones exist already; a rename or deletion mustn't pass vacuously.
-      if (RULES[name].packed) violations.push(`${file}: missing`);
+      // The published ones exist already, and a gated directory is a package
+      // or nothing: a rename, deletion or other manifest mustn't pass vacuously.
+      if (RULES[name].packed || existsSync(dir)) violations.push(`${file}: missing`);
       continue;
     }
     checked.push(dir);
     const tsconfig = join(dir, "tsconfig.json");
-    if (existsSync(tsconfig))
+    if (!existsSync(tsconfig)) violations.push(`${tsconfig}: missing`);
+    else
       violations.push(
         ...tsconfigViolations(
           tsconfig,
@@ -593,7 +598,13 @@ function gated(): void {
     // A banned config would run inside the packs below; report it instead.
     if (RULES[name].packed && configs.length === 0)
       violations.push(...bundleViolations(name, dir, declared));
+    for (const dep of declared.keys())
+      if (dep.startsWith("@abolishus/")) workspaceDeps.push([dir, dep]);
   }
+  // A gated workspace dependency is only as safe as the checks run on it.
+  for (const [dir, dep] of workspaceDeps)
+    if (!checked.includes(`packages/${dep.slice("@abolishus/".length)}`))
+      violations.push(`${dir}/package.json: ${dep} was not itself checked as a gated package`);
   for (const v of violations) console.error(v);
   if (violations.length > 0) process.exit(1);
   console.log(

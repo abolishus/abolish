@@ -2,6 +2,7 @@ import fc from "fast-check";
 import { parseSync } from "vite-plus";
 import { describe, expect, test } from "vite-plus/test";
 import {
+  alternateManifestViolations,
   bareName,
   buildConfigViolations,
   configuresPack,
@@ -447,6 +448,8 @@ describe("moduleReferences", () => {
       "new Worker(u);",
       "importScripts(u);",
       "globalThis.require('x');",
+      "process.dlopen(m, p);",
+      'process.binding("spawn_sync");',
     ])
       expect(refs(code).some((r) => r.specifier === undefined)).toBe(true);
   });
@@ -630,6 +633,22 @@ describe("buildConfigViolations and configuresPack", () => {
     expect(configuresPack(program("export default defineConfig({ pack: {} });"))).toBe(true);
     expect(configuresPack(program('export default defineConfig({ "pack": {} });'))).toBe(true);
     expect(configuresPack(program("const c = {}; c.pack = {}; export default c;"))).toBe(true);
+  });
+});
+
+describe("alternateManifestViolations", () => {
+  test("rejects package.yaml, package.json5 and a tsconfig directly in packages/", () => {
+    expect(
+      alternateManifestViolations([
+        "packages/circuits/package.yaml",
+        "apps/x/package.json5",
+        "packages/tsconfig.json",
+        "packages/tsconfig.base.json",
+        "packages/crypto/package.json",
+        "packages/crypto/tsconfig.json",
+        "tsconfig.json",
+      ]),
+    ).toHaveLength(4);
   });
 });
 

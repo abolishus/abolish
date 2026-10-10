@@ -68,8 +68,11 @@ export const VERIFIER_BUILTINS = new Set([
 /**
  * Names that reach a module loader or evaluator without an import
  * (`process.getBuiltinModule("node:module")`, `createRequire`, `eval`,
- * `new Function`, workers). Any identifier, property or string literal equal
- * to one of them is rejected; a gated package has no honest use for them.
+ * `new Function`, workers, `process.dlopen` and `process.binding`). Any
+ * identifier, property or string literal equal to one of them is rejected; a
+ * gated package has no honest use for them. This is a tripwire for the common
+ * names, not a sandbox: evaluator gadgets such as a function's `.constructor`,
+ * string timers, script elements and WebAssembly are left to review (T-55).
  */
 const LOADER_NAMES = new Set([
   "require",
@@ -80,6 +83,9 @@ const LOADER_NAMES = new Set([
   "Worker",
   "SharedWorker",
   "importScripts",
+  "dlopen",
+  "binding",
+  "_linkedBinding",
 ]);
 
 /** Top-level manifest keys a packed gated package may have. */
@@ -576,6 +582,22 @@ export function buildConfigViolations(trackedFiles: readonly string[]): string[]
       );
     })
     .map((f) => `${f}: build configuration is not allowed where a gated package's build finds it`);
+}
+
+/**
+ * Workspace manifests pnpm accepts besides package.json. CI's tooling reads
+ * only package.json, so a project defined by one of these (a gated package
+ * among them) would escape the required-scripts, affected and gated checks.
+ * A tsconfig directly in `packages/` would be what a gated build finds if the
+ * package's own one were removed.
+ */
+export function alternateManifestViolations(trackedFiles: readonly string[]): string[] {
+  return trackedFiles
+    .filter(
+      (f) =>
+        /(?:^|\/)package\.(?:yaml|json5)$/.test(f) || /^packages\/tsconfig[^/]*\.json$/.test(f),
+    )
+    .map((f) => `${f}: not allowed (CI reads only package.json and each package's own tsconfig)`);
 }
 
 /** Whether a config module's AST has any property or key named `pack`. */

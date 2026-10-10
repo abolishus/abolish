@@ -38,6 +38,6 @@ Software that shows an election to a voter (the ballot client, and anything that
 
 ## Owned elsewhere
 
-- The display-text record layout (questions, options, descriptions, languages, maximum lengths, all as `utf8<M>` fields): P1-10.
+- The display-text record layout (questions, options, descriptions, languages, maximum lengths, all as `utf8<M>` fields): P1-10b.
 - Where the record is pinned and how it is found from the election definition: P4-3.
 - What may be taken down, and by whom: the moderation policy (P2-10).

@@ -16,7 +16,7 @@ A conforming verifier implements every check in [[verifier]] and decodes every r
 | [[domain-separation]]       | Tag grammar, how a tag is applied to each kind of hash, the tag registry                 | Framing specified; most tags reserved for their owning item |
 | [[versioning]]              | Protocol and record versions, the record-type registry, change rules, election profiles  | Specified                                                   |
 | [[parameters]]              | Protocol-wide limits                                                                     | Specified for version 1; P1-18 may lower                    |
-| [[display-text]]            | The split between display text and result-critical data, and the display-text commitment | Split and commitment specified; record layout is P1-10's    |
+| [[display-text]]            | The split between display text and result-critical data, and the display-text commitment | Split and commitment specified; record layout is P1-10b's   |
 | [[content-addressing]]      | How board data becomes IPFS blocks, CIDs and CAR files                                   | Provisional until P4-3's vectors                            |
 | [[verifier]]                | What a third-party verifier must check, stage by stage                                   | Checklist; each check is specified by its owning item       |
 | [[vectors/README\|vectors]] | The test-vector file format (`docs/spec/vectors/*.json`)                                 | Specified                                                   |
@@ -24,7 +24,7 @@ A conforming verifier implements every check in [[verifier]] and decodes every r
 Sections still to be written, by the STATUS item that owns them:
 
 - Group, hash function and point/scalar codecs: P1-11.
-- Record layouts (election definition, ballot, board entry and the rest of the record-type registry): P1-10, with each record's owning item.
+- Record layouts: the election definition and display text by P1-10b, the rest of the record-type registry by each record's owning item. The primitive codecs, record framing and `DS` framing they build on are implemented in `packages/crypto` (P1-10).
 - Ballot encryption or commitment and validity proofs: P1-12.
 - Benaloh challenge/spoil, receipts and re-vote resolution: P1-13.
 - Key ceremony and its transcript: P1-14.

@@ -1,7 +1,7 @@
 {
   "name": "@abolishus/crypto",
   "version": "0.0.0",
-  "description": "Abolish protocol core: canonical encodings, ballot encryption and proofs. Scaffold; the first API lands with docs/STATUS.md P1-10.",
+  "description": "Abolish protocol core: canonical encodings, ballot encryption and proofs.",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",

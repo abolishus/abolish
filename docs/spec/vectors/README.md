@@ -66,5 +66,5 @@ Type descriptors:
 
 - The record types a file's decoder knows are exactly those that appear as a `recordType` in that file, and the versions it knows of each type exactly those that appear with it; any other type is unknown ([[notation]], Strict decoding).
 - A vector, once its layout is frozen ([[versioning]]), is never edited or removed. New vectors are added.
-- Every rejection rule in a spec section has at least one invalid vector, and every field type at least one valid vector at each boundary (zero, maximum, maximum plus one where representable). Rejections that need an election's context (`profile-mismatch`) are covered by the election-definition vectors of P1-10, which extend this format with a profile member.
+- Every rejection rule in a spec section has at least one invalid vector, and every field type at least one valid vector at each boundary (zero, maximum, maximum plus one where representable). Rejections that need an election's context (`profile-mismatch`) are covered by the election-definition vectors of P1-10b, which extend this format with a profile member.
 - Generated vectors are checked by hand, or by a second implementation written independently from the spec, before they are committed. The `generator` field says which.

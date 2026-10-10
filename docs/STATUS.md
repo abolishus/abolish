@@ -27,6 +27,7 @@ Each item's state (`todo`, `in progress`, `blocked`, `needs owner decision`, `do
 - [[P1-8]] `docs/spec/` skeleton
 - [[P1-9]] `packages/crypto` scaffold
 - [[P1-10]] Canonical encoders and decoders
+- [[P1-10b]] Election-definition and display-text records
 - [[P1-11]] Group and hash layer
 - [[P1-12]] Ballot commitments and validity proofs
 - [[P1-13]] Challenge/spoil, receipts and re-voting

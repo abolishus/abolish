@@ -674,6 +674,8 @@ export const VECTOR_PUBLISHERS: Readonly<Record<string, readonly string[]>> = {
   "nist-cavp": ["pyca/cryptography"],
   wycheproof: ["C2SP/wycheproof"],
   noble: ["paulmillr/noble-hashes", "paulmillr/noble-curves", "paulmillr/noble-ciphers"],
+  // RFC 6962 / RFC 9162 Merkle-tree roots and proofs, for the board tree (P1-16).
+  "transparency-dev": ["transparency-dev/merkle"],
   rfc: [],
 };
 

@@ -35,9 +35,15 @@ const gcd = (a: bigint, b: bigint): bigint => {
 
 /**
  * Brent's variant of Pollard's rho with x ↦ x² + c, for at most `iterations`
- * steps. Returns a non-trivial factor of `n`, or undefined if none was found.
+ * steps. Returns a non-trivial factor of `n`, undefined if the walk ran out
+ * without finding one, or "inconclusive" if it cycled (every gcd was `n`),
+ * which says nothing about `n` and calls for another `c`.
  */
-export function pollardRho(n: bigint, iterations: number, c = 1n): bigint | undefined {
+export function pollardRho(
+  n: bigint,
+  iterations: number,
+  c = 1n,
+): bigint | "inconclusive" | undefined {
   let y = 2n;
   let r = 1;
   let q = 1n;
@@ -61,9 +67,9 @@ export function pollardRho(n: bigint, iterations: number, c = 1n): bigint | unde
         for (let i = 0; i < m; i++) {
           z = (z * z + c) % n;
           const g1 = gcd(x > z ? x - z : z - x, n);
-          if (g1 !== 1n) return g1 === n ? undefined : g1;
+          if (g1 !== 1n) return g1 === n ? "inconclusive" : g1;
         }
-        return undefined;
+        return "inconclusive";
       }
       if (g !== 1n) return g;
     }
@@ -80,11 +86,15 @@ function main(): void {
     const { factors, rest } = trialDivide(n, 2_000_000);
     const small = [...factors].map(([p, e]) => (e > 1 ? `${p}^${e}` : `${p}`)).join(" · ");
     console.log(`${name}: ${small} · (${rest.toString(2).length}-bit cofactor)`);
-    const found = pollardRho(rest, 2 ** 23);
+    // A cycled walk is retried with the next constant, never reported as "no factor".
+    let found = pollardRho(rest, 2 ** 23);
+    for (let c = 2n; found === "inconclusive" && c <= 4n; c++) found = pollardRho(rest, 2 ** 23, c);
     console.log(
       found === undefined
         ? `  Pollard's rho, 2^23 iterations: no factor of the cofactor found`
-        : `  Pollard's rho found the factor ${found}`,
+        : found === "inconclusive"
+          ? `  Pollard's rho: inconclusive (every walk cycled)`
+          : `  Pollard's rho found the factor ${found}`,
     );
   }
 }

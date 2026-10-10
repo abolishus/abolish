@@ -525,6 +525,21 @@ function bundleViolations(
   }
 }
 
+/** Files in the directories a gated package's build searches for a config. */
+function configSearchPaths(): string[] {
+  const list = (dir: string, recursive: boolean) =>
+    existsSync(dir)
+      ? readdirSync(dir, { recursive, encoding: "utf8" })
+          .filter((f) => !f.split("/").includes("node_modules"))
+          .map((f) => (dir === "." ? f : `${dir}/${f}`))
+      : [];
+  return [
+    ...list(".", false),
+    ...list("packages", false),
+    ...GATED_PACKAGES.flatMap((n) => list(`packages/${n}`, true)),
+  ];
+}
+
 function gated(): void {
   const catalog = ((
     parseDocument(readFileSync("pnpm-workspace.yaml", "utf8")).toJS() as {
@@ -536,9 +551,14 @@ function gated(): void {
   const rootConfig = parseSync("vite.config.ts", readFileSync("vite.config.ts", "utf8"), {
     sourceType: "module",
   });
+  // Tracked files are what CI and releases build; the filesystem listing
+  // also covers anything a step created before this one. This ban is the
+  // real guard: the --no-config comparison below is a backstop that a
+  // config detecting the check's flags could evade.
+  const configs = buildConfigViolations([...new Set([...tracked, ...configSearchPaths()])]);
   const violations = [
     ...linkViolations(git("ls-files", "-s", "-z")),
-    ...buildConfigViolations(tracked),
+    ...configs,
     ...(rootConfig.errors.length > 0 || configuresPack(rootConfig.program)
       ? [
           "vite.config.ts: must parse and must not configure pack (gated packages build with defaults)",
@@ -570,7 +590,9 @@ function gated(): void {
       ...lockfileViolations(name, manifest, graphs, catalog),
       ...importViolations(name, moduleFiles(join(dir, "src")), join(dir, "src"), declared),
     );
-    if (RULES[name].packed) violations.push(...bundleViolations(name, dir, declared));
+    // A banned config would run inside the packs below; report it instead.
+    if (RULES[name].packed && configs.length === 0)
+      violations.push(...bundleViolations(name, dir, declared));
   }
   for (const v of violations) console.error(v);
   if (violations.length > 0) process.exit(1);

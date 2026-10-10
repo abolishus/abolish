@@ -1,8 +1,10 @@
 // Published-vector harness (AGENTS.md "Testing"): vendored files under
 // test-vectors/ are byte-for-byte copies of published vectors, each recorded
 // in manifest.json with its source URL and sha256. Every read checks the
-// sha256 first, with node:crypto rather than the @noble code under test, so a
-// vector file can't be edited to agree with a broken implementation (T-55).
+// sha256 first, with node:crypto rather than the @noble code under test. That
+// binds each file to its manifest entry; the entry is bound to its source
+// only by review, so a PR that edits a vector must also be caught comparing
+// it with `source` (T-55).
 
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";

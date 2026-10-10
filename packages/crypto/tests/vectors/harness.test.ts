@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import fc from "fast-check";
 import { afterEach, describe, expect, test } from "vite-plus/test";
 import { parseRsp, readManifest, readVendored, VECTORS_ROOT } from "./harness.ts";
@@ -14,7 +14,7 @@ describe("vendored vector files", () => {
     const listed = readManifest().map((f) => f.path);
     const onDisk = readdirSync(VECTORS_ROOT, { recursive: true, withFileTypes: true })
       .filter((d) => d.isFile() || d.isSymbolicLink())
-      .map((d) => join(d.parentPath, d.name).slice(VECTORS_ROOT.pathname.length))
+      .map((d) => join(d.parentPath, d.name).slice(fileURLToPath(VECTORS_ROOT).length))
       .filter((p) => !["manifest.json", "README.md", ".gitattributes"].includes(p))
       .sort();
     expect(onDisk).toEqual([...listed].sort());

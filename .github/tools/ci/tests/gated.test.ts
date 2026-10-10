@@ -3,6 +3,8 @@ import { parseSync } from "vite-plus";
 import { describe, expect, test } from "vite-plus/test";
 import {
   bareName,
+  buildConfigViolations,
+  configuresPack,
   closureViolations,
   hasCode,
   inlinedSourceViolations,
@@ -13,6 +15,7 @@ import {
   moduleReferences,
   referenceViolation,
   runtimeDependencies,
+  tsconfigViolations,
   type LockfileGraph,
 } from "../src/gated.ts";
 
@@ -20,11 +23,22 @@ const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
 const I = `sha512-${"A".repeat(86)}==`;
 const catalog = { "@noble/hashes": "2.4.0", "@noble/curves": "2.4.0", evil: "1.0.0" };
 
-const crypto = (extra: Record<string, unknown> = {}) => ({
-  name: "@abolishus/crypto",
+// Shaped like the real published manifests.
+const packed = (name: string, extra: Record<string, unknown> = {}) => ({
+  name: `@abolishus/${name}`,
+  version: "0.0.0",
+  license: "Apache-2.0",
+  files: ["dist"],
+  type: "module",
+  exports: {
+    ".": { types: "./dist/index.d.mts", default: "./dist/index.mjs" },
+    "./package.json": "./package.json",
+  },
+  publishConfig: { access: "public" },
   scripts: { build: "vp pack", test: "vp test run", check: "vp check" },
   ...extra,
 });
+const crypto = (extra: Record<string, unknown> = {}) => packed("crypto", extra);
 
 // Shaped like pnpm's output: a first document for pnpm itself, whose importers
 // also have a "." key, then the project.
@@ -142,10 +156,7 @@ describe("manifestViolations", () => {
         catalog,
       ),
     ).toHaveLength(1);
-    const verifier = (deps: Record<string, string>) => ({
-      scripts: { build: "vp pack" },
-      dependencies: deps,
-    });
+    const verifier = (deps: Record<string, string>) => packed("verifier", { dependencies: deps });
     expect(
       manifestViolations("verifier", verifier({ "@abolishus/crypto": "workspace:*" }), catalog),
     ).toEqual([]);
@@ -166,7 +177,9 @@ describe("manifestViolations", () => {
       "bundledDependencies",
       "imports",
     ]) {
-      expect(manifestViolations("crypto", crypto({ [field]: {} }), catalog)).toHaveLength(1);
+      // In every gated package, published or not.
+      expect(manifestViolations("contracts", { [field]: {} }, catalog)).toHaveLength(1);
+      expect(manifestViolations("crypto", crypto({ [field]: {} }), catalog)).not.toEqual([]);
     }
   });
 
@@ -181,6 +194,55 @@ describe("manifestViolations", () => {
     expect(manifestViolations("contracts", { scripts: { build: "forge build" } }, catalog)).toEqual(
       [],
     );
+  });
+
+  test("accepts the real manifest shape", () => {
+    expect(manifestViolations("crypto", crypto(), catalog)).toEqual([]);
+  });
+
+  test("a published package points consumers only at dist", () => {
+    const bad: Record<string, unknown>[] = [
+      { files: ["dist", "vendor"] },
+      { main: "./vendor/evil.js" },
+      { module: "./vendor/evil.js" },
+      { browser: { "./dist/index.mjs": "./vendor/evil.js" } },
+      { bin: { x: "./vendor/x.js" } },
+      { publishConfig: { access: "public", exports: "./vendor/x.js" } },
+      { exports: { ".": { browser: "./vendor/evil.js", default: "./dist/index.mjs" } } },
+      { exports: { ".": { default: "./vendor/evil.js" } } },
+      { exports: { ".": { default: "./dist/../vendor/evil.js" } } },
+      { exports: { ".": "./dist/index.mjs" } },
+      { exports: "./dist/index.mjs" },
+    ];
+    for (const extra of bad)
+      expect(manifestViolations("crypto", crypto(extra), catalog)).not.toEqual([]);
+  });
+
+  test("no lifecycle or other scripts beyond build, check and test", () => {
+    for (const script of ["postinstall", "prepare", "prepack", "postpack", "prepublishOnly"])
+      expect(
+        manifestViolations(
+          "crypto",
+          crypto({ scripts: { build: "vp pack", [script]: "node x.js" } }),
+          catalog,
+        ),
+      ).toHaveLength(1);
+    expect(
+      manifestViolations("contracts", { scripts: { build: "forge build", install: "x" } }, catalog),
+    ).toHaveLength(1);
+  });
+
+  test("rejects a dependency listed in both runtime fields", () => {
+    expect(
+      manifestViolations(
+        "crypto",
+        crypto({
+          dependencies: { "@noble/hashes": "catalog:" },
+          optionalDependencies: { "@noble/hashes": "catalog:" },
+        }),
+        catalog,
+      ),
+    ).toHaveLength(1);
   });
 });
 
@@ -271,6 +333,16 @@ describe("lockfileViolations", () => {
   });
 });
 
+describe("lockfileGraphs", () => {
+  test("rejects YAML merge keys, which pnpm's parser may apply", () => {
+    expect(() =>
+      lockfileGraphs(
+        lockfile(CURVES_IMPORTER, NOBLE_PACKAGES, `${NOBLE_SNAPSHOTS}  x:\n    <<: {}\n`),
+      ),
+    ).toThrow(/merge keys/);
+  });
+});
+
 describe("closureViolations", () => {
   const nobleName = fc.stringMatching(/^[a-z][a-z0-9-]{0,8}$/).map((n) => `@noble/${n}`);
   const anyName = fc.oneof(nobleName, fc.stringMatching(/^[a-z][a-z0-9-]{0,8}$/));
@@ -356,9 +428,23 @@ describe("moduleReferences", () => {
     ).toEqual([
       { specifier: undefined, kind: "ImportExpression" },
       { specifier: undefined, kind: "ImportExpression" },
-      { specifier: undefined, kind: "require()" },
+      { specifier: undefined, kind: "require" },
       { specifier: undefined, kind: "import.meta" },
     ]);
+  });
+
+  test("reports every name that reaches a loader or evaluator without an import", () => {
+    for (const code of [
+      'process.getBuiltinModule("node:module");',
+      'process["getBuiltinModule"]("node:module");',
+      "createRequire(x)('y');",
+      "eval('1');",
+      "new Function('return 1');",
+      "new Worker(u);",
+      "importScripts(u);",
+      "globalThis.require('x');",
+    ])
+      expect(refs(code).some((r) => r.specifier === undefined)).toBe(true);
   });
 });
 
@@ -398,9 +484,22 @@ describe("referenceViolation", () => {
       expect(check(s)).toBeTypeOf("string");
   });
 
-  test("node: built-ins only in the verifier", () => {
+  test("node: built-ins only in the verifier, and only the allowlisted ones", () => {
     expect(check("node:fs", "verifier")).toBeUndefined();
     expect(check("node:fs", "crypto")).toBeTypeOf("string");
+    for (const s of ["node:module", "node:vm", "node:child_process", "node:worker_threads"])
+      expect(check(s, "verifier")).toBeTypeOf("string");
+  });
+
+  test("rejects dot segments and escapes in a declared package's subpath", () => {
+    for (const s of [
+      "@noble/hashes/../../fast-check/lib/fast-check.js",
+      "@noble/hashes/./sha2.js",
+      "@noble/hashes/sha2.js?x",
+      "@noble/hashes/sha2%2ejs",
+      "@noble/hashes\\..\\x",
+    ])
+      expect(check(s)).toBeTypeOf("string");
   });
 
   test("an import resolving outside src is rejected, whatever the path", () => {
@@ -446,48 +545,105 @@ describe("linkViolations", () => {
       entry("120000", "packages/circuits"),
       entry("120000", "packages/sdk/src/link.ts"),
       entry("120000", "packages/crypto-evil/x"),
+      entry("120000", "packages"),
     ].join("\0");
     expect(linkViolations(listing)).toEqual([
       "packages/crypto/src/link.ts: symlinks are not allowed under a gated package",
       "packages/verifier/vendor: submodules are not allowed under a gated package",
       "packages/circuits: symlinks are not allowed under a gated package",
+      "packages: symlinks are not allowed under a gated package",
     ]);
   });
 });
 
 describe("inlinedSourceViolations", () => {
-  test("accepts only the package's own src", () => {
-    const map = "/tmp/out/index.mjs.map";
+  const map = "/tmp/out/index.mjs.map";
+  const srcRoot = "/repo/packages/crypto/src";
+  const disk = new Map([["/repo/packages/crypto/src/a.ts", "export const a = 1;\n"]]);
+  const read = (path: string) => disk.get(path);
+  const check = (m: Record<string, unknown>) => inlinedSourceViolations(map, m, srcRoot, read);
+  const own = "../../repo/packages/crypto/src/a.ts";
+
+  test("accepts the package's own src with its exact content", () => {
+    expect(check({ sources: [own], sourcesContent: ["export const a = 1;\n"] })).toEqual([]);
+  });
+
+  test("rejects sources outside src", () => {
+    const sources = [
+      "../../repo/node_modules/.pnpm/@noble+hashes@2.4.0/node_modules/@noble/hashes/sha2.js",
+      "../../repo/packages/crypto/src-evil/a.ts",
+      "../../repo/packages/verifier/src/a.ts",
+      null,
+    ];
+    expect(check({ sources, sourcesContent: sources.map(() => "") })).toHaveLength(4);
+  });
+
+  test("rejects a map whose embedded content differs from src, e.g. a load hook", () => {
+    expect(check({ sources: [own], sourcesContent: ["export const a = fetch('x');\n"] })).toEqual([
+      `${map}: embedded content of ${own} differs from the file in src`,
+    ]);
     expect(
-      inlinedSourceViolations(
-        map,
-        ["../../repo/packages/crypto/src/a.ts"],
-        "/repo/packages/crypto/src",
-      ),
-    ).toEqual([]);
+      check({ sources: ["../../repo/packages/crypto/src/gone.ts"], sourcesContent: [""] }),
+    ).toHaveLength(1);
+  });
+
+  test("rejects a sourceRoot, missing content or a missing sources list", () => {
+    expect(check({ sources: [own], sourcesContent: [""], sourceRoot: "/x" })).toHaveLength(1);
+    expect(check({ sources: [own] })).toHaveLength(1);
+    expect(check({ sources: [own], sourcesContent: [] })).toHaveLength(1);
+    expect(check({})).toHaveLength(1);
+  });
+});
+
+describe("buildConfigViolations and configuresPack", () => {
+  test("rejects any build or test config inside a gated package", () => {
     expect(
-      inlinedSourceViolations(
-        map,
-        [
-          "../../repo/node_modules/.pnpm/@noble+hashes@2.4.0/node_modules/@noble/hashes/sha2.js",
-          "../../repo/packages/crypto/src-evil/a.ts",
-          "../../repo/packages/verifier/src/a.ts",
-          null,
-        ],
-        "/repo/packages/crypto/src",
-      ),
-    ).toHaveLength(4);
+      buildConfigViolations([
+        "packages/crypto/vite.config.ts",
+        "packages/verifier/tests/vitest.config.mts",
+        "packages/crypto/tsdown.config.js",
+        "packages/sdk/vite.config.ts",
+        "vite.config.ts",
+        "packages/crypto/src/config.ts",
+      ]),
+    ).toHaveLength(3);
+  });
+
+  test("detects a pack setting in the root config", () => {
+    const program = (code: string) =>
+      parseSync("vite.config.ts", code, { sourceType: "module" }).program;
+    expect(configuresPack(program("export default defineConfig({ fmt: {} });"))).toBe(false);
+    expect(configuresPack(program("export default defineConfig({ pack: {} });"))).toBe(true);
+    expect(configuresPack(program('export default defineConfig({ "pack": {} });'))).toBe(true);
+    expect(configuresPack(program("const c = {}; c.pack = {}; export default c;"))).toBe(true);
+  });
+});
+
+describe("tsconfigViolations", () => {
+  test("requires the shared base and no resolution-changing options", () => {
+    const ok = { extends: "../../tsconfig.base.json", compilerOptions: { types: ["node"] } };
+    expect(tsconfigViolations("t.json", ok)).toEqual([]);
+    expect(tsconfigViolations("t.json", { ...ok, extends: "./evil.json" })).toHaveLength(1);
+    for (const key of ["paths", "baseUrl", "rootDirs", "plugins", "customConditions"])
+      expect(tsconfigViolations("t.json", { ...ok, compilerOptions: { [key]: {} } })).toHaveLength(
+        1,
+      );
   });
 });
 
 describe("hasCode", () => {
   const program = (code: string) => parseSync("m.js", code, { sourceType: "module" }).program;
 
-  test("an empty module has no code; anything else does", () => {
+  test("imports and re-exports alone are not code; anything else is", () => {
     expect(hasCode(program("export {};\n"))).toBe(false);
     expect(hasCode(program("// comment only\n"))).toBe(false);
+    expect(hasCode(program('export { a } from "./a.js";'))).toBe(false);
+    expect(hasCode(program('import * as x from "@noble/hashes/sha2.js"; export { x };'))).toBe(
+      false,
+    );
+    expect(hasCode(program('export * from "./a.js";'))).toBe(false);
     expect(hasCode(program("export const a = 1;"))).toBe(true);
-    expect(hasCode(program('export { a } from "./a.js";'))).toBe(true);
     expect(hasCode(program("const a = 1; export { a };"))).toBe(true);
+    expect(hasCode(program("export default 1;"))).toBe(true);
   });
 });

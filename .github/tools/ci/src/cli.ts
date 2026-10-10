@@ -48,6 +48,8 @@ import {
   type WorkspacePackage,
 } from "./affected.ts";
 import {
+  buildConfigViolations,
+  configuresPack,
   hasCode,
   inlinedSourceViolations,
   linkViolations,
@@ -58,6 +60,7 @@ import {
   referenceViolation,
   RULES,
   runtimeDependencies,
+  tsconfigViolations,
   type GatedName,
 } from "./gated.ts";
 import {
@@ -479,12 +482,14 @@ function bundleViolations(
     return [
       ...(files.some((f) => MODULE_FILE.test(f)) ? [] : [`${dir}: vp pack produced no modules`]),
       ...unmapped,
-      ...maps.flatMap((m) => {
-        const { sources } = JSON.parse(readFileSync(m, "utf8")) as { sources?: unknown };
-        return Array.isArray(sources)
-          ? inlinedSourceViolations(m, sources, srcRoot)
-          : [`${m}: source map has no sources list`];
-      }),
+      ...maps.flatMap((m) =>
+        inlinedSourceViolations(
+          m,
+          JSON.parse(readFileSync(m, "utf8")) as Record<string, unknown>,
+          srcRoot,
+          (path) => (existsSync(path) ? readFileSync(path, "utf8") : undefined),
+        ),
+      ),
       ...importViolations(
         name,
         files.filter((f) => MODULE_FILE.test(f)),
@@ -504,13 +509,37 @@ function gated(): void {
     } | null
   )?.catalog ?? {}) as Record<string, unknown>;
   const graphs = lockfileGraphs(readFileSync("pnpm-lock.yaml", "utf8"));
-  const violations = [...linkViolations(git("ls-files", "-s", "-z"))];
+  const tracked = git("ls-files", "-z").split("\0");
+  const rootConfig = parseSync("vite.config.ts", readFileSync("vite.config.ts", "utf8"), {
+    sourceType: "module",
+  });
+  const violations = [
+    ...linkViolations(git("ls-files", "-s", "-z")),
+    ...buildConfigViolations(tracked),
+    ...(rootConfig.errors.length > 0 || configuresPack(rootConfig.program)
+      ? [
+          "vite.config.ts: must parse and must not configure pack (gated packages build with defaults)",
+        ]
+      : []),
+  ];
   const checked: string[] = [];
   for (const name of GATED_PACKAGES) {
     const dir = `packages/${name}`;
     const file = join(dir, "package.json");
-    if (!existsSync(file)) continue;
+    if (!existsSync(file)) {
+      // The published ones exist already; a rename or deletion mustn't pass vacuously.
+      if (RULES[name].packed) violations.push(`${file}: missing`);
+      continue;
+    }
     checked.push(dir);
+    const tsconfig = join(dir, "tsconfig.json");
+    if (existsSync(tsconfig))
+      violations.push(
+        ...tsconfigViolations(
+          tsconfig,
+          JSON.parse(readFileSync(tsconfig, "utf8")) as Record<string, unknown>,
+        ),
+      );
     const manifest = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
     const declared = runtimeDependencies(manifest);
     violations.push(

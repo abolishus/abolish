@@ -44,11 +44,64 @@ export interface GatedRule {
   /** Whether `node:` built-ins may be imported (never in browser-facing code). */
   readonly nodeBuiltins: boolean;
   /**
-   * Published with `vp pack`: its build must be exactly that, and the packed
-   * bundle is checked for inlined third-party code.
+   * Published with `vp pack`: its build must be exactly that, its manifest
+   * may point consumers only at `dist`, and the packed bundle is checked for
+   * inlined third-party code.
    */
   readonly packed: boolean;
 }
+
+/**
+ * `node:` built-ins the verifier may import. Not `node:module`, `vm`,
+ * `child_process`, `worker_threads` or the like: each can load or run code the
+ * import graph doesn't show.
+ */
+export const VERIFIER_BUILTINS = new Set([
+  "node:fs",
+  "node:fs/promises",
+  "node:path",
+  "node:process",
+  "node:url",
+  "node:util",
+]);
+
+/**
+ * Names that reach a module loader or evaluator without an import
+ * (`process.getBuiltinModule("node:module")`, `createRequire`, `eval`,
+ * `new Function`, workers). Any identifier, property or string literal equal
+ * to one of them is rejected; a gated package has no honest use for them.
+ */
+const LOADER_NAMES = new Set([
+  "require",
+  "createRequire",
+  "getBuiltinModule",
+  "eval",
+  "Function",
+  "Worker",
+  "SharedWorker",
+  "importScripts",
+]);
+
+/** Top-level manifest keys a packed gated package may have. */
+const PACKED_MANIFEST_KEYS = new Set([
+  "name",
+  "version",
+  "description",
+  "license",
+  "repository",
+  "files",
+  "type",
+  "exports",
+  "publishConfig",
+  "scripts",
+  "dependencies",
+  "optionalDependencies",
+  "devDependencies",
+  "abolish",
+]);
+
+/** Scripts a gated package may define; no lifecycle script runs on install or pack. */
+const SCRIPT_NAME = /^(?:build|check|test|test:[a-z0-9-]+)$/;
 
 // packages/crypto runs in the ballot client, so it gets no built-ins and no
 // workspace imports. The verifier is a CLI too, and may use the other gated
@@ -103,14 +156,18 @@ export function manifestViolations(
   for (const field of FORBIDDEN_FIELDS) {
     if (field in manifest) out.push(`${file}: "${field}" is not allowed in a gated package`);
   }
-  if (rule.packed && record(manifest["scripts"])?.["build"] !== "vp pack")
-    out.push(
-      `${file}: the build script must be exactly "vp pack" (the bundle check reproduces it)`,
-    );
+  for (const script of Object.keys(record(manifest["scripts"]) ?? {}))
+    if (!SCRIPT_NAME.test(script))
+      out.push(`${file}: script "${script}" is not allowed (only build, check, test, test:*)`);
+  if (rule.packed) out.push(...packedManifestViolations(file, manifest));
   for (const field of RUNTIME_FIELDS) {
     if (field in manifest && record(manifest[field]) === undefined)
       out.push(`${file}: "${field}" must be an object`);
   }
+  const [first, second] = RUNTIME_FIELDS.map((f) => Object.keys(record(manifest[f]) ?? {}));
+  for (const dep of first ?? [])
+    if (second?.includes(dep))
+      out.push(`${file}: ${dep} is listed in more than one dependency field`);
   for (const [dep, spec] of runtimeDependencies(manifest)) {
     const ws = gatedByPackageName(dep);
     if (NOBLE.test(dep)) {
@@ -135,6 +192,51 @@ export function manifestViolations(
   return out;
 }
 
+/**
+ * A packed package must point consumers at its build output and nothing else:
+ * otherwise an `exports` condition, `browser` or `bin` field, or an extra
+ * `files` entry could ship modules that the src import lint and the bundle
+ * check never see.
+ */
+function packedManifestViolations(file: string, manifest: Record<string, unknown>): string[] {
+  const out: string[] = [];
+  for (const key of Object.keys(manifest))
+    if (!PACKED_MANIFEST_KEYS.has(key))
+      out.push(`${file}: "${key}" is not allowed in a published gated package`);
+  if (record(manifest["scripts"])?.["build"] !== "vp pack")
+    out.push(
+      `${file}: the build script must be exactly "vp pack" (the bundle check reproduces it)`,
+    );
+  if (JSON.stringify(manifest["files"]) !== '["dist"]')
+    out.push(`${file}: "files" must be exactly ["dist"]`);
+  if (JSON.stringify(manifest["publishConfig"]) !== '{"access":"public"}')
+    out.push(`${file}: "publishConfig" must be exactly {"access":"public"}`);
+  const exportsMap = record(manifest["exports"]);
+  if (exportsMap === undefined) {
+    out.push(`${file}: "exports" must be an object`);
+    return out;
+  }
+  for (const [subpath, target] of Object.entries(exportsMap)) {
+    if (subpath === "./package.json" && target === "./package.json") continue;
+    const conditions = record(target);
+    if (!subpath.startsWith(".") || conditions === undefined) {
+      out.push(`${file}: exports["${subpath}"] must map the conditions types and default`);
+      continue;
+    }
+    for (const [condition, path] of Object.entries(conditions)) {
+      if (condition !== "types" && condition !== "default")
+        out.push(`${file}: exports["${subpath}"].${condition}: only types and default are allowed`);
+      else if (
+        typeof path !== "string" ||
+        !/^\.\/dist\/[A-Za-z0-9._/-]+$/.test(path) ||
+        path.includes("..")
+      )
+        out.push(`${file}: exports["${subpath}"].${condition} must be a path under ./dist/`);
+    }
+  }
+  return out;
+}
+
 export interface LockfileGraph {
   readonly importers: Record<string, unknown>;
   readonly packages: Record<string, unknown>;
@@ -148,6 +250,9 @@ export interface LockfileGraph {
  * apart and an importer is read only with the document it is in.
  */
 export function lockfileGraphs(lockfile: string): LockfileGraph[] {
+  // The yaml library reads `<<` as a plain key; pnpm's parser may merge it.
+  if (/^\s*['"]?<<['"]?\s*:/m.test(lockfile))
+    throw new Error("pnpm-lock.yaml: YAML merge keys (<<) are not allowed");
   const out: LockfileGraph[] = [];
   for (const doc of parseAllDocuments(lockfile, { uniqueKeys: true }) as Document[]) {
     const problems = [...doc.errors, ...doc.warnings];
@@ -270,9 +375,10 @@ export interface ModuleReference {
 
 /**
  * Collects static imports and re-exports, dynamic `import()`, `import("x")`
- * types, `import x = require("x")`, and every `require(...)` call and
- * `import.meta` use (the last two are always violations: they can load or
- * locate code the static graph doesn't show).
+ * types, `import x = require("x")`, every `import.meta` use and every
+ * identifier, property or string naming a loader or evaluator (LOADER_NAMES).
+ * The last two are always violations: they can load or locate code the
+ * static graph doesn't show.
  */
 export function moduleReferences(program: unknown): ModuleReference[] {
   const out: ModuleReference[] = [];
@@ -309,12 +415,14 @@ export function moduleReferences(program: unknown): ModuleReference[] {
       case "TSExternalModuleReference":
         out.push({ specifier: literal(n["expression"]), kind: "TSExternalModuleReference" });
         break;
-      case "CallExpression": {
-        const callee = record(n["callee"]);
-        if (callee?.["type"] === "Identifier" && callee["name"] === "require")
-          out.push({ specifier: undefined, kind: "require()" });
+      case "Identifier":
+        if (LOADER_NAMES.has(String(n["name"])))
+          out.push({ specifier: undefined, kind: String(n["name"]) });
         break;
-      }
+      case "Literal":
+        if (typeof n["value"] === "string" && LOADER_NAMES.has(n["value"]))
+          out.push({ specifier: undefined, kind: `"${n["value"]}"` });
+        break;
       case "MetaProperty":
         if (record(n["meta"])?.["name"] === "import")
           out.push({ specifier: undefined, kind: "import.meta" });
@@ -361,12 +469,22 @@ export function referenceViolation(
       : `${where} ${JSON.stringify(spec)}: resolves outside ${root}`;
   }
   if (spec.startsWith("node:")) {
-    return RULES[name].nodeBuiltins
+    return RULES[name].nodeBuiltins && VERIFIER_BUILTINS.has(spec)
       ? undefined
-      : `${where} ${JSON.stringify(spec)}: node built-ins are not allowed in packages/${name}`;
+      : `${where} ${JSON.stringify(spec)}: this node built-in is not allowed in packages/${name}`;
   }
   const dep = bareName(spec);
   if (dep === undefined) return `${where} ${JSON.stringify(spec)}: not a package specifier`;
+  // Subpaths are resolved through the package's exports map; `..`, `.` and
+  // escapes would lean on that alone to stay inside the package.
+  if (
+    spec
+      .slice(dep.length)
+      .split("/")
+      .some((seg) => seg === "." || seg === "..") ||
+    /[\\%?#]/.test(spec)
+  )
+    return `${where} ${JSON.stringify(spec)}: subpath must not contain ., .., \\, %, ? or #`;
   if (!declared.has(dep))
     return `${where} ${JSON.stringify(spec)}: ${dep} is not a declared runtime dependency of packages/${name}`;
   const ws = gatedByPackageName(dep);
@@ -387,8 +505,10 @@ export function linkViolations(lsFilesStage: string): string[] {
     if (tab === -1) continue;
     const mode = entry.slice(0, entry.indexOf(" "));
     const path = entry.slice(tab + 1);
-    if (!GATED_PACKAGES.some((n) => path.startsWith(`${gatedDir(n)}/`) || path === gatedDir(n)))
-      continue;
+    const gated = GATED_PACKAGES.some(
+      (n) => path.startsWith(`${gatedDir(n)}/`) || path === gatedDir(n) || path === "packages",
+    );
+    if (!gated) continue;
     if (mode === "120000") out.push(`${path}: symlinks are not allowed under a gated package`);
     if (mode === "160000") out.push(`${path}: submodules are not allowed under a gated package`);
   }
@@ -397,27 +517,86 @@ export function linkViolations(lsFilesStage: string): string[] {
 
 /**
  * Source-map sources of a packed build, each relative to its map file. Every
- * one must be the package's own `src`; anything else (above all
- * `node_modules`) is third-party code inlined into the published bundle,
- * where no manifest or lockfile check sees it.
+ * one must be a file of the package's own `src`, and the map's embedded copy
+ * of it must equal that file on disk; anything else (above all
+ * `node_modules`) is code inlined into the published bundle, where no
+ * manifest or lockfile check sees it. `readSource` returns a file's text, or
+ * undefined if it doesn't exist.
  */
 export function inlinedSourceViolations(
   mapFile: string,
-  sources: readonly unknown[],
+  map: Record<string, unknown>,
   srcRoot: string,
+  readSource: (path: string) => string | undefined,
 ): string[] {
-  return sources.flatMap((source) => {
+  const { sources, sourcesContent, sourceRoot } = map;
+  if (sourceRoot !== undefined && sourceRoot !== "")
+    return [`${mapFile}: source maps must not set sourceRoot`];
+  if (!Array.isArray(sources)) return [`${mapFile}: source map has no sources list`];
+  if (!Array.isArray(sourcesContent) || sourcesContent.length !== sources.length)
+    return [`${mapFile}: source map must embed the content of every source`];
+  return sources.flatMap((source, i) => {
     if (typeof source !== "string") return [`${mapFile}: non-string source`];
     const resolved = posix.normalize(posix.join(posix.dirname(mapFile), source));
-    return resolved.startsWith(`${srcRoot}/`)
+    if (!resolved.startsWith(`${srcRoot}/`))
+      return [`${mapFile}: bundle inlines ${source}, which is outside ${srcRoot}`];
+    return readSource(resolved) === sourcesContent[i]
       ? []
-      : [`${mapFile}: bundle inlines ${source}, which is outside ${srcRoot}`];
+      : [`${mapFile}: embedded content of ${source} differs from the file in src`];
   });
 }
 
 /**
+ * Build configuration a gated package may not carry: a config runs during
+ * the build and can rewrite modules and source maps (a `load` hook, a
+ * `sourcemapPathTransform`), so it could forge the evidence the bundle check
+ * reads. Packages build with the root config, which CODEOWNERS covers and
+ * which may not configure `pack`.
+ */
+export function buildConfigViolations(trackedFiles: readonly string[]): string[] {
+  return trackedFiles
+    .filter((f) => GATED_PACKAGES.some((n) => f.startsWith(`${gatedDir(n)}/`)))
+    .filter((f) =>
+      /(?:^|\/)(?:vite|vitest|vite-plus|tsdown|rolldown|rollup)\.config\.[^/]*$/.test(f),
+    )
+    .map((f) => `${f}: build configuration is not allowed in a gated package`);
+}
+
+/** Whether a config module's AST has any property or key named `pack`. */
+export function configuresPack(program: unknown): boolean {
+  let found = false;
+  const visit = (node: unknown): void => {
+    if (found || node === null || typeof node !== "object") return;
+    if (Array.isArray(node)) return node.forEach(visit);
+    const n = node as Record<string, unknown>;
+    const key = record(n["key"]) ?? record(n["property"]);
+    if (key?.["name"] === "pack" || key?.["value"] === "pack") found = true;
+    for (const child of Object.values(n)) visit(child);
+  };
+  visit(program);
+  return found;
+}
+
+/**
+ * compilerOptions that change how imports resolve (path mapping, root
+ * merging, plugins), which the bundler honours but the import lint doesn't.
+ */
+export function tsconfigViolations(file: string, tsconfig: Record<string, unknown>): string[] {
+  const options = record(tsconfig["compilerOptions"]) ?? {};
+  return [
+    // The shared base (CODEOWNERS) sets none of these; another base could.
+    ...(tsconfig["extends"] === "../../tsconfig.base.json"
+      ? []
+      : [`${file}: must extend exactly ../../tsconfig.base.json`]),
+    ...["paths", "baseUrl", "rootDirs", "plugins", "customConditions"]
+      .filter((key) => key in options)
+      .map((key) => `${file}: compilerOptions.${key} is not allowed in a gated package`),
+  ];
+}
+
+/**
  * Whether a packed module has code a source map must account for: anything
- * but empty `export {}` statements. A module with code and no map can't be
+ * but imports and re-exports (whose specifiers the import lint checks). A module with code and no map can't be
  * checked for inlined dependencies, so it is a violation.
  */
 export function hasCode(program: unknown): boolean {
@@ -425,12 +604,7 @@ export function hasCode(program: unknown): boolean {
   if (!Array.isArray(body)) return true;
   return body.some((statement) => {
     const s = record(statement);
-    return !(
-      s?.["type"] === "ExportNamedDeclaration" &&
-      s["declaration"] == null &&
-      s["source"] == null &&
-      Array.isArray(s["specifiers"]) &&
-      s["specifiers"].length === 0
-    );
+    if (s?.["type"] === "ImportDeclaration" || s?.["type"] === "ExportAllDeclaration") return false;
+    return !(s?.["type"] === "ExportNamedDeclaration" && s["declaration"] == null);
   });
 }

@@ -27,8 +27,8 @@ export const TAG_REGISTRY = Object.freeze(
       { tag: "abolish/v1/ceremony-transcript", status: "reserved" },
       { tag: "abolish/v1/tally-transcript", status: "reserved" },
       { tag: "abolish/v1/event-accumulator", status: "reserved" },
-      { tag: "abolish/v1/generator-h", status: "conditional" },
-      { tag: "abolish/v1/kem/share", status: "conditional" },
+      { tag: "abolish/v1/generator-h", status: "reserved" },
+      { tag: "abolish/v1/kem/share", status: "reserved" },
     ] as const
   ).map((e) => Object.freeze(e)),
 );

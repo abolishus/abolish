@@ -2,7 +2,7 @@
   "name": "@abolishus/ci-tools",
   "version": "0.0.0",
   "private": true,
-  "description": "CI gate code: affected-package selection, action pinning, lockfile policy, the pnpm self-test and the gated-package policy. Its runtime dependencies are yaml and vite-plus (whose parser the gated-package import lint uses).",
+  "description": "CI gate code: affected-package selection, action pinning, lockfile policy, toolchain pin consistency, the pnpm self-test and the gated-package policy. Its runtime dependencies are yaml and vite-plus (whose parser the gated-package import lint uses).",
   "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {

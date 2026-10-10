@@ -103,6 +103,10 @@ jobs:
           if [ "$EVENT" = "pull_request" ]; then base="origin/$BASE_REF"; else base="${BEFORE:-HEAD~1}"; fi
           git cat-file -e "$base^{commit}" 2>/dev/null || base="$(git hash-object -t tree /dev/null)"
           vp node .github/tools/ci/src/cli.ts lockfile --base "$base"
+      # nargo/bb (install-toolchain.sh), noir_js/bb.js (catalog and lockfile)
+      # and AGENTS.md name one Noir and one bb, and bbup maps that Noir to that bb.
+      - name: Toolchain pins agree
+        run: vp node .github/tools/ci/src/cli.ts toolchain
       - name: The project brief is unchanged
         if: github.event_name == 'pull_request'
         env:

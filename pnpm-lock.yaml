@@ -167,6 +167,9 @@ catalogs:
     '@changesets/cli':
       specifier: 3.0.3
       version: 3.0.3
+    '@noble/hashes':
+      specifier: 2.4.0
+      version: 2.4.0
     '@types/node':
       specifier: 24.19.1
       version: 24.19.1
@@ -205,6 +208,9 @@ importers:
 
   .github/tools/ci:
     dependencies:
+      vite-plus:
+        specifier: 'catalog:'
+        version: 1.0.0(@types/node@24.19.1)(@vitest/ui@5.0.1)(typescript@7.0.2)(yaml@2.9.1)
       yaml:
         specifier: 'catalog:'
         version: 2.9.1
@@ -218,15 +224,18 @@ importers:
       typescript:
         specifier: 'catalog:'
         version: 7.0.2
-      vite-plus:
-        specifier: 'catalog:'
-        version: 1.0.0(@types/node@24.19.1)(@vitest/ui@5.0.1)(typescript@7.0.2)(yaml@2.9.1)
 
   packages/crypto:
     devDependencies:
+      '@noble/hashes':
+        specifier: 'catalog:'
+        version: 2.4.0
       '@types/node':
         specifier: 'catalog:'
         version: 24.19.1
+      fast-check:
+        specifier: 'catalog:'
+        version: 4.10.2
       typescript:
         specifier: 'catalog:'
         version: 7.0.2
@@ -365,6 +374,10 @@ packages:
   '@manypkg/tools@2.1.2':
     resolution: {integrity: sha512-6QEf6yqFbETdwGITKq57aYoPfX/3K8XFNwsAlx0C1M7o8cb79sv1M3w+tWuWvIcSbNqrLF7OD7YpZMVVz335hQ==}
     engines: {node: '>=20.0.0'}
+
+  '@noble/hashes@2.4.0':
+    resolution: {integrity: sha512-X5XaVWZIBCT7HHZGm5I7ZQXDwLG+bGXuSrMQAW+7Zvl87h1kmc1ZB1VSRJcpUfoUrGQp4Fkoxm5kZ+Ms+aW+eA==}
+    engines: {node: '>= 20.19.0'}
 
   '@oxc-project/runtime@0.151.0':
     resolution: {integrity: sha512-fNuliiqGTseerW2FTbxq6UOQavKL/NvNh9K3peJZZVNi1NbM4Ehscwp3MX9nu+9bfbSfmPUEivF779XQU5exiw==}
@@ -1663,6 +1676,8 @@ snapshots:
       jju: 1.4.0
       tinyglobby: 0.2.17
       yaml: 2.9.1
+
+  '@noble/hashes@2.4.0': {}
 
   '@oxc-project/runtime@0.151.0': {}
 

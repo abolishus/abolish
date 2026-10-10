@@ -114,12 +114,14 @@ jobs:
             echo "::error file=docs/PROJECT_BRIEF.md::the project brief is kept verbatim; agents never edit it"
             exit 1
           fi
-      - name: crypto depends only on @noble/*
-        run: |
-          f=packages/crypto/package.json
-          [ -f "$f" ] || { echo "packages/crypto not present yet"; exit 0; }
-          bad=$(python3 -c "import json;d=json.load(open('$f'));print('\n'.join(k for field in ('dependencies','optionalDependencies','peerDependencies') for k in d.get(field,{}) if not k.startswith('@noble/')))")
-          if [ -n "$bad" ]; then echo "::error file=$f::non-@noble runtime, optional or peer dependencies: $bad"; exit 1; fi
+      # packages/crypto resolves only to @noble/* (lockfile closure included),
+      # the verifier only to gated packages and @noble/*; src imports match
+      # what's declared; no symlinks or submodules under gated paths; the
+      # packed bundles inline no node_modules code. See gated.ts.
+      - name: Gated packages stay inside the gate
+        run: vp node .github/tools/ci/src/cli.ts gated
+      - name: Vendored test vectors match their pinned sources
+        run: vp node .github/tools/ci/src/cli.ts vectors-provenance
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:

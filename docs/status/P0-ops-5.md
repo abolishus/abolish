@@ -5,7 +5,7 @@
 
 ## Scope
 
-Non-blocking findings from `crypto-review` and `claude-review` on #27 (P0-ops-4): verifier check 2.8 joins the election checks and pins down the partition (cells within one tier, a total rule over bound fields, unplaceable ballots rejected at admission, proven region membership); the minimum-cell-size question is recorded as open for P1-15 with the owner's [[0006-trustees]]; 8.1 reports a regional cell's real anonymity set; the remaining ElGamal wording in 3.1 and 8.4 follows [[0002-everlasting-privacy]]; T-14 and T-16 record the registered partition; T-28 notes that P1-12 is blocked by the owner's questions.
+Follow-ups from the reviews on #27 (P0-ops-4): verifier check 2.8 becomes an election check that allows a tiers-only partition until P1-15 specifies regional cells (region proven against per-region roots, never a voter-chosen, grindable or per-ballot field; recomputed cell electorates above a protocol-wide floor), with trustee nodes and the ballot client running it before releasing a share or casting; the small-tier question stays with the owner in [[0006-trustees]]; 8.1, 3.1 and 8.4 follow [[0002-everlasting-privacy]]; T-14 and T-16 record the registered partition; T-28 notes that P1-12 is blocked by the owner's questions.
 
 ## Notes
 

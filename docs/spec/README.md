@@ -39,7 +39,7 @@ Sections still to be written, by the STATUS item that owns them:
 The spec follows the ADRs below. Under rule A (`AGENTS.md`) the agent's choices are accepted and stand unless the owner vetoes them; a section marked specified below changes if the owner vetoes an ADR it names.
 
 - [[0001-canonical-encoding]] (accepted by the agent, owner may veto): explicit byte layouts (option A). [[notation]], [[versioning]] and the vectors follow it.
-- [[0003-tally-scheme]] (accepted by the agent, owner may veto): homomorphic tally for plurality and approval, mixnet for ranked choice. Sets the option limit in [[parameters]] and the tally checks in [[verifier]].
+- [[0003-tally-scheme]] (accepted by the agent, owner may veto): homomorphic tally for plurality and approval, commitment-consistent mixnet for ranked choice (per [[0002-everlasting-privacy]]). Sets the option limit in [[parameters]] and the tally checks in [[verifier]].
 - [[0004-l2-choice]] (accepted by the agent for development and testnet, owner may veto; mainnet waits for the owner): the L2, its close rule and finality. Shapes the timing and L2-evidence checks in [[verifier]].
 - [[0005-permanent-archive]] (accepted by the agent, owner may veto; the first real upload waits for the owner): the display-text split ([[display-text]]), the result-critical field rule ([[notation]]) and the CID parameters ([[content-addressing]]).
 - [[0006-trustees]] (open; owner-only: the owner decides): the panel bound into each election definition.

@@ -2,7 +2,7 @@
 
 - Status: Accepted (agent) — owner may veto (2026-10-10, rule A): option C
 - Date: 2026-10-09
-- Deciders: agent, owner may veto (rule A)
+- Deciders: agent, owner may veto (rule A); owner: naming the mixers, and any ranked-choice design that isn't commitment-consistent (per [[0002-everlasting-privacy]])
 - Threats addressed: T-28, T-14, T-29, T-30, T-32, T-33, T-36, T-38, T-39, T-45, T-54, T-70 (new), with T-15 deferred to the everlasting-privacy ADR (see [[THREAT_MODEL]])
 
 ## Context
@@ -103,7 +103,7 @@ What would change the recommendation:
 - P1-12 implements A for plurality and approval: exponential-ElGamal ballots, disjunctive Chaum–Pedersen per option and for the sum (or the approval range), with published-protocol citations in `docs/spec/`.
 - P1-15 decrypts per-option, per-tier products only, with Chaum–Pedersen proofs on every share, and the verifier (P1-19) recomputes the products from the board itself.
 - The election definition (P1-8, P1-10) carries the election type and tally scheme, so one record type can't be tallied under another's rules.
-- A follow-up ADR on the ranked-choice tally is needed before P5-1. Its inputs: Shuffle-Sum and the FC 2019 MPC count as T-70-free alternatives; shuffle proof (Terelius–Wikström or Bayer–Groth) and verifiable generator derivation; who the mixers are and whether they are the trustees; mandatory per-ballot proofs of knowledge bound to the nullifier, and well-formedness proofs; the message-to-point encoding (T-39); pattern-attack limits such as capping ranked positions, with the prior art from the vVote deployment (Victoria, 2014); and how T-70 is reported. It touches a cryptographic protocol, so it is an ADR under rule A (`Accepted (agent) — owner may veto`), except that naming the mixers, if they are trustees, is the owner's.
+- A follow-up ADR on the ranked-choice tally is needed before P5-1. Its inputs: Shuffle-Sum and the FC 2019 MPC count as T-70-free alternatives; a commitment-consistent mixnet (Cuvelier–Pereira–Peters), which [[0002-everlasting-privacy]] requires; shuffle proof (Terelius–Wikström or Bayer–Groth) and verifiable generator derivation; who the mixers are and whether they are the trustees; mandatory per-ballot proofs of knowledge bound to the nullifier, and well-formedness proofs; the message-to-point encoding (T-39); pattern-attack limits such as capping ranked positions, with the prior art from the vVote deployment (Victoria, 2014); and how T-70 is reported. It touches a cryptographic protocol, so it is an ADR under rule A (`Accepted (agent) — owner may veto`), except for two owner-only parts. Naming the mixers is the owner's whether or not they are the trustees, because ballot secrecy rests on them as it does on trustees (T-14). And any design that isn't commitment-consistent would accept T-15 for ranked-choice elections, so per [[0002-everlasting-privacy]] it needs the owner's explicit sign-off and a warning shown to voters.
 - Ballot size grows with the number of options. P1-18 must size on-chain direct-submit limits (T-52) and Noir-facing hashes (per [[0001-canonical-encoding]]) for the largest supported option count, which P1-8 states.
 - Known-weak:
   - T-14 still holds and is inherent to any k-of-n scheme: k colluding trustees can decrypt any individual ballot. Even a commitment-consistent board (P1-3) only stops everyone else from reading ballots later (T-15); the openings still reach the trustees, encrypted under the threshold key.

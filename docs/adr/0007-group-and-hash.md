@@ -3,7 +3,7 @@
 - Status: accepted (owner, 2026-10-10: option A)
 - Date: 2026-10-10
 - Deciders: owner (one-way door)
-- Threats addressed: T-39, T-31, T-30, T-15, T-28, T-29, T-36, T-55 (see [[THREAT_MODEL]])
+- Threats addressed: T-39, T-31, T-30, T-15, T-28, T-29, T-36, T-54, T-55 (see [[THREAT_MODEL]])
 
 ## Context
 

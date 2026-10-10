@@ -59,11 +59,14 @@ export function ds(tag: SpecifiedTag, message: Uint8Array): Uint8Array {
   // Checked at run time too, for callers outside the type checker: hashing
   // under a reserved tag would use a layout the spec hasn't fixed.
   if (!SPECIFIED.has(tag)) throw new RangeError(`${String(tag)} is not a specified tag`);
-  if (!(message instanceof Uint8Array)) throw new TypeError("ds: message must be a Uint8Array");
-  const out = new Uint8Array(1 + tag.length + message.length);
+  if (!(message instanceof Uint8Array) || !ArrayBuffer.isView(message))
+    throw new TypeError("ds: message must be a Uint8Array");
+  // Copied first, so the length used and the bytes written are the same.
+  const m = new Uint8Array(message);
+  const out = new Uint8Array(1 + tag.length + m.length);
   out[0] = tag.length;
   // The grammar admits only ASCII, so each character is one byte.
   for (let i = 0; i < tag.length; i++) out[1 + i] = tag.charCodeAt(i);
-  out.set(message, 1 + tag.length);
+  out.set(m, 1 + tag.length);
   return out;
 }

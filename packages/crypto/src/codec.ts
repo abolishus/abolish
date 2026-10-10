@@ -86,10 +86,10 @@ export class Writer {
   #length = 0;
 
   bytes(b: Uint8Array): void {
-    checkBytes(b, "bytes");
     // Copied, so a caller mutating its buffer later can't change the output.
-    this.#chunks.push(new Uint8Array(b));
-    this.#length += b.length;
+    const c = copyBytes(b, "bytes");
+    this.#chunks.push(c);
+    this.#length += c.length;
   }
 
   uint(width: 1 | 2 | 4, v: number): void {
@@ -151,8 +151,17 @@ function checkUint(value: unknown, max: number, what: string): asserts value is 
     throw new EncodeError(`${what}: expected an integer from 0 to ${max}`);
 }
 
-function checkBytes(value: unknown, what: string): asserts value is Uint8Array {
-  if (!(value instanceof Uint8Array)) throw new EncodeError(`${what}: expected a Uint8Array`);
+/**
+ * A plain copy of a byte array, made before anything is validated so the
+ * checks and the output see the same bytes. `new Uint8Array(typedArray)` reads
+ * the source's internal slots, not its `length` or iterator, so a subclass
+ * can't lie about its contents; `ArrayBuffer.isView` is false for a Proxy,
+ * which has no such slots.
+ */
+function copyBytes(value: unknown, what: string): Uint8Array {
+  if (!(value instanceof Uint8Array) || !ArrayBuffer.isView(value))
+    throw new EncodeError(`${what}: expected a Uint8Array`);
+  return new Uint8Array(value);
 }
 
 function checkMax(max: number, what: string): void {
@@ -235,9 +244,9 @@ export function bytesFixed(n: number): Codec<Uint8Array> {
   return {
     minLength: n,
     write(w, value) {
-      checkBytes(value, `bytes[${n}]`);
-      if (value.length !== n) throw new EncodeError(`bytes[${n}]: got ${value.length} bytes`);
-      w.bytes(value);
+      const b = copyBytes(value, `bytes[${n}]`);
+      if (b.length !== n) throw new EncodeError(`bytes[${n}]: got ${b.length} bytes`);
+      w.bytes(b);
     },
     read: (r) => r.take(n).slice(),
   };
@@ -248,12 +257,11 @@ function prefixed(max: number, what: string, valid: (b: Uint8Array) => boolean):
   return {
     minLength: 4,
     write(w, value) {
-      checkBytes(value, what);
-      if (value.length > max)
-        throw new EncodeError(`${what}: ${value.length} bytes is over ${max}`);
-      if (!valid(value)) throw new EncodeError(`${what}: not well-formed UTF-8`);
-      w.uint(4, value.length);
-      w.bytes(value);
+      const b = copyBytes(value, what);
+      if (b.length > max) throw new EncodeError(`${what}: ${b.length} bytes is over ${max}`);
+      if (!valid(b)) throw new EncodeError(`${what}: not well-formed UTF-8`);
+      w.uint(4, b.length);
+      w.bytes(b);
     },
     read(r) {
       const at = r.offset;
@@ -354,7 +362,8 @@ export function struct<const F extends Fields>(fields: F): Codec<StructValue<F>>
   const names = fields.map(([name]) => name);
   for (const name of names)
     if (!FIELD_NAME.test(name)) throw new RangeError(`struct: bad field name ${name}`);
-  if (new Set(names).size !== names.length) throw new RangeError("struct: duplicate field name");
+  const fieldSet: ReadonlySet<string | symbol> = new Set(names);
+  if (fieldSet.size !== names.length) throw new RangeError("struct: duplicate field name");
   return {
     minLength: fields.reduce((n, [, c]) => n + c.minLength, 0),
     write(w, value) {
@@ -362,10 +371,9 @@ export function struct<const F extends Fields>(fields: F): Codec<StructValue<F>>
         throw new EncodeError("struct: expected an object");
       // No optional fields and no extras (notation.md): a value with any other
       // set of keys has no encoding under this type.
-      if (
-        Object.keys(value).length !== names.length ||
-        !names.every((n) => Object.hasOwn(value, n))
-      )
+      // Every own key counts, including symbols and non-enumerable ones.
+      const keys = Reflect.ownKeys(value);
+      if (keys.length !== names.length || !keys.every((k) => fieldSet.has(k)))
         throw new EncodeError(`struct: expected exactly the fields ${names.join(", ")}`);
       const v = value as Readonly<Record<string, unknown>>;
       for (const [name, codec] of fields) codec.write(w, v[name]);

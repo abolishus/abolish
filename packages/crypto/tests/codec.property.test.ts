@@ -438,3 +438,35 @@ describe("hostile JavaScript inputs", () => {
     }
   });
 });
+
+describe("byte inputs are copied before they are checked", () => {
+  class Lying extends Uint8Array {
+    override get length() {
+      return 2;
+    }
+  }
+
+  test("a Proxy around a Uint8Array is not a byte array", () => {
+    const p = new Proxy(Uint8Array.of(0x41, 0x42), {});
+    expect(() => encode(utf8(8), p)).toThrow(EncodeError);
+    expect(() => encode(bytesFixed(2), p)).toThrow(EncodeError);
+    expect(() => new Writer().bytes(p)).toThrow(EncodeError);
+  });
+
+  test("a subclass's own length getter is ignored", () => {
+    const four = new Lying([0xc0, 0xaf, 0, 0]);
+    expect(() => encode(utf8(8), four)).toThrow(EncodeError);
+    expect(() => encode(bytesFixed(2), four)).toThrow(EncodeError);
+    expect(encode(bytesVar(8), new Lying([1, 2, 3]))).toEqual(Uint8Array.of(0, 0, 0, 3, 1, 2, 3));
+  });
+
+  test("struct values with symbol or non-enumerable extra keys are rejected", () => {
+    const codec = struct([["a", u8]] as const) as Codec<unknown>;
+    expect(() => encode(codec, { a: 1, [Symbol("x")]: 2 })).toThrow(EncodeError);
+    const hidden = Object.defineProperty({ x: 5 }, "a", { value: 7, enumerable: false });
+    expect(() => encode(codec, hidden)).toThrow(EncodeError);
+    expect(() => encode(codec, Object.defineProperty({ a: 1 }, "b", { value: 2 }))).toThrow(
+      EncodeError,
+    );
+  });
+});

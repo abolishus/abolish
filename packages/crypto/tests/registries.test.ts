@@ -120,3 +120,19 @@ describe("record-type registry", () => {
     for (const e of TAG_REGISTRY) expect(Object.isFrozen(e)).toBe(true);
   });
 });
+
+describe("DS framing of hostile messages", () => {
+  test("uses the message's real bytes, never a Proxy's or subclass's view", () => {
+    class Lying extends Uint8Array {
+      override get length() {
+        return 0;
+      }
+    }
+    const framed = ds("abolish/v1/display-text", new Lying([0xaa]));
+    expect(framed.at(-1)).toBe(0xaa);
+    expect(framed.length).toBe(1 + 23 + 1);
+    expect(() => ds("abolish/v1/display-text", new Proxy(new Uint8Array(1), {}))).toThrow(
+      TypeError,
+    );
+  });
+});

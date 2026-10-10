@@ -138,7 +138,7 @@ Sybil resistance is the core problem: if one person can vote many times, results
 | [[T-28]] | Invalid ballots                             | A-9           | Planned      |
 | [[T-29]] | Tally or decryption manipulation            | A-2           | Planned      |
 | [[T-30]] | Weak Fiat–Shamir binding ("Frozen Heart")   | A-9, A-2      | Planned      |
-| [[T-31]] | Encoding ambiguity and parser differentials | A-2, A-9      | Planned      |
+| [[T-31]] | Encoding ambiguity and parser differentials | A-2, A-9      | Partial      |
 | [[T-32]] | Ballot copying and replay                   | A-9, A-4      | Planned      |
 | [[T-33]] | Re-vote resolution manipulation             | A-2           | Needs design |
 | [[T-34]] | Election definition substitution            | A-2           | Planned      |

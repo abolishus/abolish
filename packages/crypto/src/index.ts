@@ -65,6 +65,7 @@ export { PARAMETERS } from "./parameters.ts";
 export {
   decodeDisplayText,
   decodeElectionDefinition,
+  DRAFT_VERSIONS,
   displayTextCommitment,
   displayTextRule,
   electionDefinitionHash,
@@ -73,6 +74,7 @@ export {
   newDisplayTextSalt,
   newElectionId,
   pinnedVersion,
+  pinsDraftVersion,
   PROTOCOL_SCHEMA,
 } from "./protocol.ts";
 export {

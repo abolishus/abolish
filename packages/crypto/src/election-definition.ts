@@ -96,8 +96,10 @@ export type ElectionDefinitionRule =
   | "chain"
   | "timing";
 
-// Plurality and approval use every record type from 0x0001 to 0x0009.
-const REQUIRED_TYPES: readonly number[] = Object.values(RECORD_TYPES).toSorted((a, b) => a - b);
+// Plurality and approval use exactly the types 0x0001 to 0x0009. Fixed here,
+// not derived from RECORD_TYPES, so registering a new type can't change which
+// version-1 definitions are well formed.
+const REQUIRED_TYPES: readonly number[] = Object.freeze([1, 2, 3, 4, 5, 6, 7, 8, 9]);
 
 function strictlyAscending(xs: readonly number[]): boolean {
   for (let i = 1; i < xs.length; i++) if ((xs[i - 1] as number) >= (xs[i] as number)) return false;
@@ -136,17 +138,23 @@ export function electionDefinitionRule(d: ElectionDefinition): ElectionDefinitio
   )
     return "selections";
   // Ascending tiers make the tiers-only partition one cell per tier, none
-  // repeated or merged (verifier 2.8; T-29, T-36).
+  // repeated (verifier 2.8; T-29, T-36). Distinct roots keep two cells from
+  // sharing one membership proof, which would let a voter's claimed tier pick
+  // the cell, merging them (T-01, T-16).
   const tiers = d.electorate.map((g) => g.tier);
   const groupIds = new Set(d.electorate.map((g) => g.group_id));
+  const roots = new Set(d.electorate.map((g) => g.root));
   if (
     tiers.length === 0 ||
     !strictlyAscending(tiers) ||
     groupIds.size !== tiers.length ||
+    roots.size !== tiers.length ||
     d.electorate.some((g) => g.group_size < 1n)
   )
     return "electorate";
-  if (d.threshold < 1 || d.threshold > d.panel_size || d.panel_size > PARAMETERS.MAX_TRUSTEES)
+  // At least two trustees must combine shares: a 1-of-n panel lets one party
+  // open every voter's sharing alone, which the brief forbids (T-14).
+  if (d.threshold < 2 || d.threshold > d.panel_size || d.panel_size > PARAMETERS.MAX_TRUSTEES)
     return "panel";
   const l2 = [d.election_registry, d.board, d.trustee_registry, d.group_registry];
   const l1 = [d.l1_anchor, d.l1_relay];

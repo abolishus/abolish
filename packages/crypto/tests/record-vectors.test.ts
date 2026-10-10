@@ -49,7 +49,7 @@ function checkFile(name: string, count: number) {
 }
 
 describe("election definition (docs/spec/election-definition.md)", () => {
-  const { valid, invalid } = checkFile("election-definition.json", 45);
+  const { valid, invalid } = checkFile("election-definition.json", 56);
 
   test.each(valid)("%s decodes, re-encodes, hashes and meets its rules", (_id, v, expected) => {
     const value = expected(v) as ElectionDefinition;
@@ -91,7 +91,7 @@ describe("election definition (docs/spec/election-definition.md)", () => {
 });
 
 describe("display text (docs/spec/display-text.md)", () => {
-  const { valid, invalid } = checkFile("display-text.json", 19);
+  const { valid, invalid } = checkFile("display-text.json", 21);
 
   const definitionFor = (v: Vector) =>
     ({

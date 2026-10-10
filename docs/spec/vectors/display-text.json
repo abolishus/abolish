@@ -2,7 +2,7 @@
   "format": "abolish-vectors/1",
   "title": "Display text, version 1 (draft)",
   "spec": "docs/spec/display-text.md",
-  "generator": "Printed by packages/crypto/scripts/definition-vectors.py, written from the tables in docs/spec/display-text.md with only the Python standard library (hashlib for SHA-256), independently of packages/crypto; the TypeScript tests check packages/crypto's codecs, hashes and rule checks against it.",
+  "generator": "Printed by packages/crypto/scripts/definition-vectors.py, written from the tables in docs/spec/display-text.md with only the Python standard library (hashlib for SHA-256), independently of packages/crypto: its encoders build every encoding, and its own implementation of the spec's well-formedness rules confirms every valid vector's illFormed label (or its absence). Decode errors are labelled by hand from the strict-decoding rules. The TypeScript tests check packages/crypto's codecs, hashes and rule checks against it.",
   "draft": true,
   "types": {
     "option-text": {
@@ -621,6 +621,86 @@
         "displayTextCommitment": "3aa9403ddb2edfa70b2e3aee71633863c09d19cbc706eee766111ca7bab83b29"
       },
       "illFormed": "question"
+    },
+    {
+      "id": "display-text-language-uppercase",
+      "description": "An uppercase tag, which could sit beside en with other labels",
+      "type": {
+        "kind": "ref",
+        "name": "display-text-v1"
+      },
+      "pinned": 1,
+      "value": {
+        "salt": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+        "translations": [
+          {
+            "language": "454e",
+            "question": "53686f756c6420746865207061726b2073746179206f70656e206c6174653f",
+            "description": "",
+            "options": [
+              {
+                "label": "596573",
+                "description": ""
+              },
+              {
+                "label": "4e6f",
+                "description": ""
+              },
+              {
+                "label": "4162737461696e",
+                "description": "436f756e7465642c20627574206e65697468657220796573206e6f72206e6f2e"
+              }
+            ]
+          }
+        ]
+      },
+      "encoding": "0009010102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f200000000100000002454e0000001f53686f756c6420746865207061726b2073746179206f70656e206c6174653f00000000000000030000000359657300000000000000024e6f00000000000000074162737461696e00000020436f756e7465642c20627574206e65697468657220796573206e6f72206e6f2e",
+      "commitment": "1b4d7328474110799c06e9572d95e2f194104d6638238a236afe27b7159b4f79",
+      "definition": {
+        "optionCount": "3",
+        "displayTextCommitment": "1b4d7328474110799c06e9572d95e2f194104d6638238a236afe27b7159b4f79"
+      },
+      "illFormed": "language-tag"
+    },
+    {
+      "id": "display-text-labels-repeated",
+      "description": "Two options both labelled Yes",
+      "type": {
+        "kind": "ref",
+        "name": "display-text-v1"
+      },
+      "pinned": 1,
+      "value": {
+        "salt": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+        "translations": [
+          {
+            "language": "656e",
+            "question": "53686f756c6420746865207061726b2073746179206f70656e206c6174653f",
+            "description": "",
+            "options": [
+              {
+                "label": "596573",
+                "description": ""
+              },
+              {
+                "label": "596573",
+                "description": ""
+              },
+              {
+                "label": "4162737461696e",
+                "description": "436f756e7465642c20627574206e65697468657220796573206e6f72206e6f2e"
+              }
+            ]
+          }
+        ]
+      },
+      "encoding": "0009010102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f200000000100000002656e0000001f53686f756c6420746865207061726b2073746179206f70656e206c6174653f000000000000000300000003596573000000000000000359657300000000000000074162737461696e00000020436f756e7465642c20627574206e65697468657220796573206e6f72206e6f2e",
+      "commitment": "6eb0af41ad565f8a06e3f0beb3d7606593bc2cf457ed61dab180471d122c8cf3",
+      "definition": {
+        "optionCount": "3",
+        "displayTextCommitment": "6eb0af41ad565f8a06e3f0beb3d7606593bc2cf457ed61dab180471d122c8cf3"
+      },
+      "illFormed": "labels"
     },
     {
       "id": "display-text-label-empty",

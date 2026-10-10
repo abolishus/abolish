@@ -33,10 +33,31 @@ export function encodeElectionDefinition(d: ElectionDefinition): Uint8Array {
  */
 export function decodeElectionDefinition(bytes: Uint8Array): ElectionDefinition {
   const { version, value } = PROTOCOL_SCHEMA.decode(ELECTION_DEFINITION, bytes, UNPINNED);
-  const pin = value.profile.pins.find((p) => p.record_type === RECORD_TYPES.electionDefinition);
+  // Exactly one pin for 0x0001, at the record's own version; a second pin,
+  // whatever its order, is a mismatch too, so every decoder agrees.
+  const pins = value.profile.pins.filter((p) => p.record_type === RECORD_TYPES.electionDefinition);
   // Offset 2: the version byte, the field that disagrees with the profile.
-  if (pin?.version !== version) throw new DecodeError("profile-mismatch", 2);
+  if (pins.length !== 1 || pins[0]?.version !== version)
+    throw new DecodeError("profile-mismatch", 2);
   return value;
+}
+
+/**
+ * Record versions the registry marks draft (docs/spec/versioning.md, Draft
+ * layouts). A verifier reports an election whose profile pins any of them
+ * unverifiable, never verified; the PR that freezes a version removes it here.
+ */
+export const DRAFT_VERSIONS: readonly Readonly<{ record_type: number; version: number }>[] =
+  Object.freeze([
+    Object.freeze({ record_type: RECORD_TYPES.electionDefinition, version: 1 }),
+    Object.freeze({ record_type: RECORD_TYPES.displayText, version: 1 }),
+  ]);
+
+/** Whether `d`'s profile pins a draft version, which no real election may use. */
+export function pinsDraftVersion(d: ElectionDefinition): boolean {
+  return d.profile.pins.some((p) =>
+    DRAFT_VERSIONS.some((x) => x.record_type === p.record_type && x.version === p.version),
+  );
 }
 
 /** `H(DS("abolish/v1/election-definition", encode(definition)))`. */

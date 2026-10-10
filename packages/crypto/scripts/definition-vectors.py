@@ -298,8 +298,8 @@ MINIMAL = {
     "electorate": [{"tier": 0, "group_id": 0, "root": 0, "root_l2_block": 0, "group_size": 1}],
     "membership_vk_hash": b(32, 0),
     "panel_id": b(32, 0),
-    "threshold": 1,
-    "panel_size": 1,
+    "threshold": 2,
+    "panel_size": 2,
     "ceremony_transcript_hash": b(32, 0),
     "opens_at": 0,
     "closes_at": 1,
@@ -326,7 +326,7 @@ MAXIMAL = {
     "min_selections": 64,
     "max_selections": 64,
     "electorate": [
-        {"tier": t, "group_id": U64_MAX - t, "root": R - 1, "root_l2_block": U64_MAX, "group_size": U64_MAX}
+        {"tier": t, "group_id": U64_MAX - t, "root": R - 1 - t, "root_l2_block": U64_MAX, "group_size": U64_MAX}
         for t in range(3)
     ],
     "membership_vk_hash": b(32, 0xFF),
@@ -356,6 +356,73 @@ def with_pins(pins, major=1):
     return {"protocol_major": major, "pins": pins}
 
 
+# Well-formedness, from the rule table of docs/spec/election-definition.md, in
+# its order. Every vector's label is checked against these, so a hand-written
+# label can't disagree with the table.
+
+
+def definition_rule(d):
+    pins = d["profile"]["pins"]
+    types = [t for t, _ in pins]
+    if d["profile"]["protocol_major"] != 1:
+        return "protocol-major"
+    if any(types[i - 1] >= types[i] for i in range(1, len(types))):
+        return "profile-order"
+    if types != list(range(1, 10)):
+        return "profile-types"
+    if any(v < 1 for _, v in pins):
+        return "profile-version"
+    if not 2 <= d["option_count"] <= 64:
+        return "option-count"
+    mn, mx = d["min_selections"], d["max_selections"]
+    if not (mn <= mx <= d["option_count"] and mx >= 1) or (d["election_type"] == 1 and mx != 1):
+        return "selections"
+    e = d["electorate"]
+    tiers = [g["tier"] for g in e]
+    if (
+        not e
+        or any(tiers[i - 1] >= tiers[i] for i in range(1, len(tiers)))
+        or len({g["group_id"] for g in e}) != len(e)
+        or len({g["root"] for g in e}) != len(e)
+        or any(g["group_size"] < 1 for g in e)
+    ):
+        return "electorate"
+    if not 2 <= d["threshold"] <= d["panel_size"] <= 16:
+        return "panel"
+    l2 = [d[k] for k in ["election_registry", "board", "trustee_registry", "group_registry"]]
+    l1 = [d["l1_anchor"], d["l1_relay"]]
+    if (
+        d["l2_chain_id"] == 0
+        or d["l1_chain_id"] == 0
+        or d["l2_chain_id"] == d["l1_chain_id"]
+        or any(a == bytes(20) for a in l2 + l1)
+        or len(set(l2)) != 4
+        or len(set(l1)) != 2
+    ):
+        return "chain"
+    if d["opens_at"] >= d["closes_at"]:
+        return "timing"
+    return None
+
+
+def display_text_rule(t, option_count, commitment):
+    if H(ds("abolish/v1/display-text", enc_display_text(t))) != commitment:
+        return "commitment"
+    langs = [raw(x["language"]) for x in t["translations"]]
+    if not langs or any(langs[i - 1] >= langs[i] for i in range(1, len(langs))):
+        return "translations"
+    ok = set(b"abcdefghijklmnopqrstuvwxyz0123456789-")
+    if any(not 1 <= len(lang) <= 35 or any(c not in ok for c in lang) for lang in langs):
+        return "language-tag"
+    if any(len(x["options"]) != option_count for x in t["translations"]):
+        return "option-count"
+    if any(raw(x["question"]) == b"" or any(raw(o["label"]) == b"" for o in x["options"]) for x in t["translations"]):
+        return "question"
+    if any(len({raw(o["label"]) for o in x["options"]}) != len(x["options"]) for x in t["translations"]):
+        return "labels"
+    return None
+
+
 def def_vectors():
     T = ref("election-definition-v1")
     vs = []
@@ -364,6 +431,7 @@ def def_vectors():
         e = enc_definition(d)
         v = {"id": id_, "description": desc, "type": T, "value": def_json(d), "encoding": e.hex()}
         v["hash"] = H(ds("abolish/v1/election-definition", e)).hex()
+        assert definition_rule(d) == rule, (id_, definition_rule(d), rule)
         if rule is not None:
             v["illFormed"] = rule
         vs.append(v)
@@ -374,7 +442,7 @@ def def_vectors():
     valid("definition-typical", TYPICAL, "Plurality, Tier 0 and Tier 2, 4-of-7 panel, Base Sepolia and Sepolia chain IDs")
     valid("definition-approval", APPROVAL, "Approval of 1 to 3 of 5 options")
     valid("definition-minimal", MINIMAL, "Every field at its smallest well-formed value")
-    valid("definition-maximal", MAXIMAL, "Every field at its largest value: 64 options, 3 tiers, 16-of-16, every u64 at 2^64 - 1, roots at r - 1, every pin but its own at version 255")
+    valid("definition-maximal", MAXIMAL, "Every field at its largest value: 64 options, 3 tiers, 16-of-16, every u64 at 2^64 - 1, roots at r - 1 down to r - 3, every pin but its own at version 255")
 
     te = enc_definition(TYPICAL)
     invalid("definition-truncated", te[:-1], "truncated", "The last byte of display_text_commitment is missing")
@@ -394,6 +462,18 @@ def def_vectors():
         enc_definition(variant(TYPICAL, profile=with_pins([(1, 2)] + ALL_PINS[1:]))),
         "profile-mismatch",
         "A version-1 definition whose own profile pins 0x0001 at version 2",
+    )
+    invalid(
+        "definition-profile-pins-own-type-twice",
+        enc_definition(variant(TYPICAL, profile=with_pins([(1, 1), (1, 1)] + ALL_PINS[1:]))),
+        "profile-mismatch",
+        "0x0001 pinned twice, both at the record's version: exactly one pin is required, so this is a mismatch before any well-formedness rule",
+    )
+    invalid(
+        "definition-profile-pins-own-type-twice-other-first",
+        enc_definition(variant(TYPICAL, profile=with_pins([(1, 2), (1, 1)] + ALL_PINS[1:]))),
+        "profile-mismatch",
+        "0x0001 pinned at 2 then at 1: the result doesn't depend on which pin a decoder finds first",
     )
     invalid(
         "definition-profile-no-pin",
@@ -443,11 +523,20 @@ def def_vectors():
         ("electorate", "definition-tiers-unsorted", variant(TYPICAL, electorate=list(reversed(TYPICAL["electorate"]))), "Tier 2 before Tier 0"),
         ("electorate", "definition-tier-repeated", variant(TYPICAL, electorate=[TYPICAL["electorate"][0], dict(TYPICAL["electorate"][0], group_id=2)]), "Tier 0 twice, in two groups, so the tiers-only partition would count it twice"),
         ("electorate", "definition-group-shared", variant(TYPICAL, electorate=[TYPICAL["electorate"][0], dict(TYPICAL["electorate"][1], group_id=1)]), "Tier 0 and Tier 2 naming the same group"),
+        ("electorate", "definition-roots-equal", variant(TYPICAL, electorate=[TYPICAL["electorate"][0], dict(TYPICAL["electorate"][1], root=TYPICAL["electorate"][0]["root"])]), "Tier 0 and Tier 2 with the same root, so one membership proof would fit both cells"),
         ("electorate", "definition-group-empty", variant(TYPICAL, electorate=[dict(TYPICAL["electorate"][0], group_size=0)]), "A group of size 0"),
         ("panel", "definition-threshold-zero", variant(TYPICAL, threshold=0), "threshold 0"),
+        ("panel", "definition-threshold-one", variant(TYPICAL, threshold=1), "threshold 1: one trustee could open every sharing alone"),
+        ("panel", "definition-panel-one-of-one", variant(TYPICAL, threshold=1, panel_size=1), "A 1-of-1 panel"),
         ("panel", "definition-threshold-over-size", variant(TYPICAL, threshold=8), "threshold 8 over panel_size 7"),
         ("panel", "definition-panel-17", variant(TYPICAL, threshold=4, panel_size=17), "panel_size 17, over MAX_TRUSTEES"),
         ("chain", "definition-l2-chain-zero", variant(TYPICAL, l2_chain_id=0), "l2_chain_id 0"),
+        ("chain", "definition-l1-chain-zero", variant(TYPICAL, l1_chain_id=0), "l1_chain_id 0"),
+        ("chain", "definition-l1-addresses-repeated", variant(TYPICAL, l1_relay=TYPICAL["l1_anchor"]), "l1_relay equal to l1_anchor"),
+        ("chain", "definition-group-registry-is-trustee-registry", variant(TYPICAL, group_registry=TYPICAL["trustee_registry"]), "group_registry equal to trustee_registry"),
+        ("profile-types", "definition-pins-unassigned-type", variant(TYPICAL, profile=with_pins(ALL_PINS + [(0x000A, 1)])), "An extra pin for 0x000a, which the registry doesn't assign"),
+        ("protocol-major", "definition-two-rules-broken", variant(TYPICAL, profile=with_pins(ALL_PINS, 2), closes_at=0), "Both protocol-major and timing fail: the first rule in the table's order is reported"),
+        ("panel", "definition-panel-and-chain-broken", variant(TYPICAL, threshold=1, l1_chain_id=0), "Both panel and chain fail: panel comes first"),
         ("chain", "definition-same-chain", variant(TYPICAL, l1_chain_id=84532), "l1_chain_id equal to l2_chain_id"),
         ("chain", "definition-address-zero", variant(TYPICAL, l1_relay=b(20, 0)), "The zero address as l1_relay"),
         ("chain", "definition-l2-addresses-repeated", variant(TYPICAL, board=b(20, 0x11)), "board equal to election_registry"),
@@ -526,6 +615,7 @@ def dt_vectors():
     def invalid(id_, enc, err, desc):
         vs.append({"id": id_, "description": desc, "type": T, "pinned": 1, "encoding": enc.hex(), "error": err})
 
+    assert display_text_rule(DT, 3, commitment) is None
     valid("display-text-two-languages", DT, "English and Latin American Spanish, three options, multibyte text")
     one = {"salt": b(32, 0), "translations": [dict(EN, options=EN["options"][:2], description="")]}
     one_ctx = {"optionCount": "2", "displayTextCommitment": H(ds("abolish/v1/display-text", enc_display_text(one))).hex()}
@@ -564,9 +654,14 @@ def dt_vectors():
         ("language-tag", "display-text-language-underscore", {"salt": DT["salt"], "translations": [dict(EN, language="en_US")]}, "A language tag with an underscore"),
         ("option-count", "display-text-two-options", {"salt": DT["salt"], "translations": [dict(EN, options=EN["options"][:2])]}, "Two options where the definition has three"),
         ("question", "display-text-question-empty", {"salt": DT["salt"], "translations": [dict(EN, question="")]}, "An empty question"),
+        ("language-tag", "display-text-language-uppercase", {"salt": DT["salt"], "translations": [dict(EN, language="EN")]}, "An uppercase tag, which could sit beside en with other labels"),
+        ("labels", "display-text-labels-repeated", {"salt": DT["salt"], "translations": [dict(EN, options=[EN["options"][0], EN["options"][0], EN["options"][2]])]}, "Two options both labelled Yes"),
         ("question", "display-text-label-empty", {"salt": DT["salt"], "translations": [dict(EN, options=[{"label": "", "description": "x"}] + EN["options"][1:])]}, "An empty option label"),
     ]
     for rule, id_, t, desc in ill:
+        oc = 3
+        commit = commitment if rule == "commitment" else H(ds("abolish/v1/display-text", enc_display_text(t)))
+        assert display_text_rule(t, oc, commit) == rule, (id_, display_text_rule(t, oc, commit), rule)
         # Every rule after `commitment` is checked against a definition that
         # commits to this exact record, so only the rule named fails.
         c = ctx if rule == "commitment" else {"optionCount": "3", "displayTextCommitment": H(ds("abolish/v1/display-text", enc_display_text(t))).hex()}
@@ -578,8 +673,10 @@ def main(out_dir):
     out = Path(out_dir)
     gen = (
         "Printed by packages/crypto/scripts/definition-vectors.py, written from the tables in {spec} with only the Python "
-        "standard library (hashlib for SHA-256), independently of packages/crypto; the TypeScript tests check "
-        "packages/crypto's codecs, hashes and rule checks against it."
+        "standard library (hashlib for SHA-256), independently of packages/crypto: its encoders build every "
+        "encoding, and its own implementation of the spec's well-formedness rules confirms every valid vector's "
+        "illFormed label (or its absence). Decode errors are labelled by hand from the strict-decoding rules. The "
+        "TypeScript tests check packages/crypto's codecs, hashes and rule checks against it."
     )
     files = {
         "election-definition.json": {

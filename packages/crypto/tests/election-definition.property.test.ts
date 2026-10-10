@@ -9,6 +9,7 @@ import {
   type DisplayText,
   displayTextCommitment,
   displayTextRule,
+  DRAFT_VERSIONS,
   type ElectionDefinition,
   electionDefinitionHash,
   electionDefinitionRule,
@@ -17,6 +18,7 @@ import {
   newDisplayTextSalt,
   newElectionId,
   PARAMETERS,
+  pinsDraftVersion,
 } from "../src/index.ts";
 
 // Properties of the election definition and display-text records
@@ -234,7 +236,17 @@ describe("election definition well-formedness", () => {
       },
     ],
     ["panel", { threshold: 8 }],
-    ["panel", { threshold: 1, panel_size: PARAMETERS.MAX_TRUSTEES + 1 }],
+    ["panel", { threshold: 1 }],
+    [
+      "electorate",
+      {
+        electorate: [
+          { tier: 0, group_id: 1n, root: 5n, root_l2_block: 10n, group_size: 100n },
+          { tier: 1, group_id: 2n, root: 5n, root_l2_block: 10n, group_size: 50n },
+        ],
+      },
+    ],
+    ["panel", { threshold: 2, panel_size: PARAMETERS.MAX_TRUSTEES + 1 }],
     ["chain", { l1_chain_id: 84532n }],
     ["chain", { l1_relay: new Uint8Array(20).fill(5) }],
     ["chain", { group_registry: new Uint8Array(20) }],
@@ -279,6 +291,16 @@ describe("display text", () => {
     ).toBe("option-count");
   });
 
+  test("repeated labels and uppercase tags are rejected", () => {
+    const check = (t: DisplayText) =>
+      displayTextRule(t, {
+        ...sampleDefinition,
+        display_text_commitment: displayTextCommitment(t),
+      });
+    expect(check(text(["a", "a", "b", "c"]))).toBe("labels");
+    expect(check(text(["a", "b", "c", "d"], "EN"))).toBe("language-tag");
+  });
+
   test("decodes only against a definition that pins version 1", () => {
     const t = text(["a", "b"]);
     const unpinned = {
@@ -290,7 +312,9 @@ describe("display text", () => {
 
   test("text round-trips and random bodies are rejected or re-encode", () => {
     const utf8 = (max: number) =>
-      fc.string({ unit: "binary", maxLength: Math.floor(max / 4) }).map((s) => new TextEncoder().encode(s));
+      fc
+        .string({ unit: "binary", maxLength: Math.floor(max / 4) })
+        .map((s) => new TextEncoder().encode(s));
     const arb: fc.Arbitrary<DisplayText> = fc.record({
       salt: bytes(32),
       translations: fc.array(
@@ -315,6 +339,16 @@ describe("display text", () => {
       }),
       opts,
     );
+  });
+});
+
+describe("draft versions", () => {
+  test("every definition pinning version 1 of 0x0001 pins a draft", () => {
+    expect(pinsDraftVersion(sampleDefinition)).toBe(true);
+    expect(DRAFT_VERSIONS).toEqual([
+      { record_type: 1, version: 1 },
+      { record_type: 9, version: 1 },
+    ]);
   });
 });
 

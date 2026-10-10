@@ -36,7 +36,8 @@ export type DisplayTextRule =
   | "translations"
   | "language-tag"
   | "option-count"
-  | "question";
+  | "question"
+  | "labels";
 
 /** Byte order: negative if `a` sorts before `b`. */
 function compareBytes(a: Uint8Array, b: Uint8Array): number {
@@ -48,18 +49,16 @@ function compareBytes(a: Uint8Array, b: Uint8Array): number {
   return a.length - b.length;
 }
 
-// BCP 47's alphabet; the tag's finer grammar isn't checked, since the text is
-// for people and a tag only chooses which translation to show.
+// BCP 47's alphabet, lowercase only, so `en` and `EN` can't both appear with
+// different labels (T-41). The finer grammar isn't checked: a tag only
+// chooses which translation to show.
 const isLanguageTag = (b: Uint8Array) =>
   b.length >= 1 &&
   b.length <= 35 &&
-  b.every(
-    (c) =>
-      c === 0x2d ||
-      (c >= 0x30 && c <= 0x39) ||
-      (c >= 0x41 && c <= 0x5a) ||
-      (c >= 0x61 && c <= 0x7a),
-  );
+  b.every((c) => c === 0x2d || (c >= 0x30 && c <= 0x39) || (c >= 0x61 && c <= 0x7a));
+
+const distinct = (xs: readonly Uint8Array[]) =>
+  xs.every((a, i) => xs.slice(i + 1).every((b) => compareBytes(a, b) !== 0));
 
 /**
  * The first rule after `commitment` that a decoded display-text record breaks
@@ -80,5 +79,7 @@ export function displayTextShapeRule(
   if (!ts.every((x) => x.options.length === optionCount)) return "option-count";
   if (!ts.every((x) => x.question.length > 0 && x.options.every((o) => o.label.length > 0)))
     return "question";
+  // Two options with one label can't be told apart by a voter (T-34, T-41).
+  if (!ts.every((x) => distinct(x.options.map((o) => o.label)))) return "labels";
   return undefined;
 }

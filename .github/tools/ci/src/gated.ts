@@ -665,16 +665,47 @@ export function hasCode(program: unknown): boolean {
 }
 
 /**
- * Whether a vendored vector's `source` URL names immutable bytes: a file at a
- * full commit hash on raw.githubusercontent.com, or an RFC's text (RFCs are
- * never revised in place). Only such a source can be re-fetched and compared.
+ * Publishers whose vectors may be vendored, by directory under
+ * test-vectors/, with the repositories each may come from. Adding one is a
+ * `.github/` change, so the owner reviews it.
  */
-export function pinnedSource(url: string): boolean {
-  return (
-    (/^https:\/\/raw\.githubusercontent\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/[0-9a-f]{40}\/[A-Za-z0-9_./-]+$/.test(
-      url,
-    ) &&
-      !url.split("/").includes("..")) ||
-    /^https:\/\/www\.rfc-editor\.org\/rfc\/rfc[0-9]+\.txt$/.test(url)
-  );
+export const VECTOR_PUBLISHERS: Readonly<Record<string, readonly string[]>> = {
+  // NIST CAVP files, as redistributed unmodified by pyca/cryptography.
+  "nist-cavp": ["pyca/cryptography"],
+  wycheproof: ["C2SP/wycheproof"],
+  noble: ["paulmillr/noble-hashes", "paulmillr/noble-curves", "paulmillr/noble-ciphers"],
+  rfc: [],
+};
+
+const RAW =
+  /^https:\/\/raw\.githubusercontent\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\/([0-9a-f]{40})\/([A-Za-z0-9_./-]+)$/;
+const RFC = /^https:\/\/www\.rfc-editor\.org\/rfc\/(rfc[0-9]+)\.txt$/;
+const TAG = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+/**
+ * The URLs a vendored vector must be fetched from, all of which must serve
+ * the manifest's bytes, or why there are none. A GitHub source must be in an
+ * allowlisted repository for its directory, pinned to a commit, and named
+ * with a tag of that repository: GitHub serves any commit in a repository's
+ * fork network under the parent's name, so the commit alone doesn't show the
+ * publisher made it, but a tag resolves only against the repository's own
+ * refs. An RFC's text is never revised in place; its tag is the RFC name.
+ */
+export function provenanceUrls(path: string, source: string, tag: string): string[] | string {
+  const publisher = path.split("/")[0] ?? "";
+  const repos = VECTOR_PUBLISHERS[publisher];
+  if (repos === undefined) return `${path}: no allowlisted publisher for directory ${publisher}/`;
+  const rfc = RFC.exec(source);
+  if (rfc !== null)
+    return publisher === "rfc" && tag === rfc[1]
+      ? [source]
+      : `${path}: an RFC goes under rfc/ with its name as the tag`;
+  const raw = RAW.exec(source);
+  if (raw === null || source.split("/").includes(".."))
+    return `${path}: source must be a raw.githubusercontent.com URL pinned to a full commit hash`;
+  const [, repo = "", , file = ""] = raw;
+  if (!repos.includes(repo))
+    return `${path}: ${repo} is not an allowlisted repository for ${publisher}/`;
+  if (!TAG.test(tag)) return `${path}: tag ${JSON.stringify(tag)} is not a tag name`;
+  return [source, `https://raw.githubusercontent.com/${repo}/refs/tags/${tag}/${file}`];
 }

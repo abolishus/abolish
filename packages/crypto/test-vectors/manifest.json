@@ -5,6 +5,7 @@
       "path": "nist-cavp/SHA256ShortMsg.rsp",
       "sha256": "75e1cb83994638481808e225b9eb0c1ebd0c232d952ac42b61abce6363be283c",
       "source": "https://raw.githubusercontent.com/pyca/cryptography/e300bbe2f1bec75e5ee7e0ab7b196958831b3db6/vectors/cryptography_vectors/hashes/SHA2/SHA256ShortMsg.rsp",
+      "tag": "49.0.0",
       "origin": "NIST CAVP, Secure Hash Algorithm Validation System, byte-oriented SHA-2 vectors (shabytetestvectors.zip, CAVS 11.0, generated 2011-03-15), as redistributed unmodified by pyca/cryptography 49.0.0",
       "originUrl": "https://csrc.nist.gov/projects/cryptographic-algorithm-validation-program/secure-hashing",
       "license": "Work of the US government (NIST), not subject to copyright in the United States",

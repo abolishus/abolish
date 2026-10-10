@@ -6,8 +6,9 @@
 //   actions-pinned          fail if any workflow uses an action not pinned by SHA
 //   lockfile --base <ref>   enforce lockfile policy, write the diff to lockfile-diff.md
 //   pnpm-selftest           prove the pinned pnpm honours our install-script policy
-//   vectors-provenance      re-fetch every vendored test vector from its pinned source
-//                           and require the bytes to match the manifest and the file
+//   vectors-provenance      re-fetch every vendored test vector from its allowlisted
+//                           publisher, by commit and by tag, and require the bytes to
+//                           match the manifest and the file
 //   gated                   enforce the dependency, import, symlink and bundle policy
 //                           of the crypto-review-gated packages (see gated.ts)
 //   release-versions        print "<dir> <version>" for every workspace package
@@ -60,7 +61,7 @@ import {
   lockfileViolations,
   manifestViolations,
   moduleReferences,
-  pinnedSource,
+  provenanceUrls,
   referenceViolation,
   RULES,
   runtimeDependencies,
@@ -630,32 +631,33 @@ async function vectorsProvenance(): Promise<void> {
     return;
   }
   const { files } = JSON.parse(readFileSync(manifest, "utf8")) as {
-    files?: { path?: unknown; sha256?: unknown; source?: unknown }[];
+    files?: { path?: unknown; sha256?: unknown; source?: unknown; tag?: unknown }[];
   };
   if (!Array.isArray(files)) throw new Error(`${manifest}: files must be an array`);
   const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
   const errors: string[] = [];
-  for (const { path, sha256: expected, source } of files) {
-    const where = `${manifest}: ${String(path)}`;
-    if (typeof source !== "string" || !pinnedSource(source)) {
-      errors.push(
-        `${where}: source must be a commit-pinned raw.githubusercontent.com URL or an RFC`,
-      );
+  for (const { path, sha256: expected, source, tag } of files) {
+    const urls = provenanceUrls(String(path), String(source), String(tag));
+    if (typeof urls === "string") {
+      errors.push(`${manifest}: ${urls}`);
       continue;
     }
-    const response = await fetch(source);
-    if (!response.ok) {
-      errors.push(`${where}: ${source}: HTTP ${response.status}`);
-      continue;
-    }
-    const fetched = sha256(new Uint8Array(await response.arrayBuffer()));
     const local = sha256(readFileSync(join(VECTORS, String(path))));
-    if (fetched !== expected || local !== expected)
-      errors.push(`${where}: source ${fetched}, file ${local}, manifest ${String(expected)}`);
+    if (local !== expected) errors.push(`${manifest}: ${String(path)}: file ${local} != manifest`);
+    for (const url of urls) {
+      const response = await fetch(url);
+      const fetched = response.ok
+        ? sha256(new Uint8Array(await response.arrayBuffer()))
+        : undefined;
+      if (fetched !== expected)
+        errors.push(
+          `${manifest}: ${String(path)}: ${url}: ${fetched === undefined ? `HTTP ${response.status}` : fetched} != manifest ${String(expected)}`,
+        );
+    }
   }
   for (const e of errors) console.error(e);
   if (errors.length > 0) process.exit(1);
-  console.log(`${files.length} vendored vector file(s) match their pinned sources`);
+  console.log(`${files.length} vendored vector file(s) match their publishers by commit and tag`);
 }
 
 const command = process.argv[2];

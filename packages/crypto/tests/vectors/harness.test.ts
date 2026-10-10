@@ -36,6 +36,7 @@ describe("readVendored", () => {
       path,
       sha256,
       source: "https://example.org/file.txt",
+      tag: "v1",
       origin: "test",
       originUrl: "https://example.org/",
       license: "test",

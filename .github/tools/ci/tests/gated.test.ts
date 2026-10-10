@@ -14,7 +14,7 @@ import {
   lockfileViolations,
   manifestViolations,
   moduleReferences,
-  pinnedSource,
+  provenanceUrls,
   referenceViolation,
   runtimeDependencies,
   tsconfigViolations,
@@ -691,21 +691,37 @@ describe("hasCode", () => {
   });
 });
 
-describe("pinnedSource", () => {
-  test("accepts only commit-pinned GitHub raw files and RFC texts", () => {
-    const sha = "e300bbe2f1bec75e5ee7e0ab7b196958831b3db6";
-    expect(pinnedSource(`https://raw.githubusercontent.com/pyca/cryptography/${sha}/v/a.rsp`)).toBe(
-      true,
-    );
-    expect(pinnedSource("https://www.rfc-editor.org/rfc/rfc9380.txt")).toBe(true);
-    for (const url of [
-      "https://raw.githubusercontent.com/pyca/cryptography/main/v/a.rsp",
-      "https://raw.githubusercontent.com/pyca/cryptography/49.0.0/v/a.rsp",
-      `https://raw.githubusercontent.com/pyca/cryptography/${sha}/../x`,
-      `http://raw.githubusercontent.com/pyca/cryptography/${sha}/v/a.rsp`,
-      "https://example.org/a.rsp",
-      "https://www.rfc-editor.org/rfc/rfc9380.html",
-    ])
-      expect(pinnedSource(url)).toBe(false);
+describe("provenanceUrls", () => {
+  const sha = "e300bbe2f1bec75e5ee7e0ab7b196958831b3db6";
+  const raw = (repo: string, ref = sha) =>
+    `https://raw.githubusercontent.com/${repo}/${ref}/vectors/a.rsp`;
+
+  test("fetches an allowlisted publisher's file by commit and by tag", () => {
+    expect(provenanceUrls("nist-cavp/a.rsp", raw("pyca/cryptography"), "49.0.0")).toEqual([
+      raw("pyca/cryptography"),
+      "https://raw.githubusercontent.com/pyca/cryptography/refs/tags/49.0.0/vectors/a.rsp",
+    ]);
+    expect(
+      provenanceUrls("rfc/rfc9380.txt", "https://www.rfc-editor.org/rfc/rfc9380.txt", "rfc9380"),
+    ).toEqual(["https://www.rfc-editor.org/rfc/rfc9380.txt"]);
+  });
+
+  test("rejects other repositories, unpinned refs, bad tags and unknown publishers", () => {
+    const bad: [string, string, string][] = [
+      ["nist-cavp/a.rsp", raw("attacker/cryptography"), "49.0.0"],
+      ["nist-cavp/a.rsp", raw("C2SP/wycheproof"), "v1"],
+      ["wycheproof/a.json", raw("pyca/cryptography"), "49.0.0"],
+      ["nist-cavp/a.rsp", raw("pyca/cryptography", "main"), "49.0.0"],
+      ["nist-cavp/a.rsp", raw("pyca/cryptography", "49.0.0"), "49.0.0"],
+      ["nist-cavp/a.rsp", raw("pyca/cryptography"), "../main"],
+      ["nist-cavp/a.rsp", raw("pyca/cryptography"), ""],
+      ["nist-cavp/a.rsp", `https://raw.githubusercontent.com/pyca/cryptography/${sha}/../x`, "1"],
+      ["other/a.rsp", raw("pyca/cryptography"), "49.0.0"],
+      ["nist-cavp/a.rsp", "https://www.rfc-editor.org/rfc/rfc9380.txt", "rfc9380"],
+      ["rfc/rfc9380.txt", "https://www.rfc-editor.org/rfc/rfc9380.txt", "rfc1"],
+      ["rfc/rfc9380.txt", "https://www.rfc-editor.org/rfc/rfc9380.html", "rfc9380"],
+    ];
+    for (const [path, source, tag] of bad)
+      expect(provenanceUrls(path, source, tag)).toBeTypeOf("string");
   });
 });

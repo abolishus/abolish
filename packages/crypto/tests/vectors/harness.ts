@@ -3,7 +3,9 @@
 // in manifest.json with its source URL and sha256. Every read checks the
 // sha256 first, with node:crypto rather than the @noble code under test. That
 // binds each file to its manifest entry; CI's `vectors-provenance` step binds
-// the entry to its source by re-fetching the commit-pinned URL (T-55).
+// the entry to its publisher: it re-fetches the file from an allowlisted
+// repository for its directory, by commit and again by tag, and requires the
+// same bytes both times (T-55).
 
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -14,6 +16,7 @@ export interface VendoredFile {
   readonly path: string;
   readonly sha256: string;
   readonly source: string;
+  readonly tag: string;
   readonly origin: string;
   readonly originUrl: string;
   readonly license: string;
@@ -26,6 +29,7 @@ const FIELDS = [
   "path",
   "sha256",
   "source",
+  "tag",
   "origin",
   "originUrl",
   "license",

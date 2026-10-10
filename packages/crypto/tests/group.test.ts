@@ -269,7 +269,12 @@ describe("hash layer", () => {
         (source.match(/ristretto255_hasher\.(?:hashToScalar|hashToCurve)\(/g)?.length ?? 0) +
           (source.includes("ristretto255_hasher }") ? 1 : 0),
       );
-      expect(source, name).not.toMatch(/@noble\/curves\/(?!ed25519\.js")/);
+      // No namespace, dynamic or re-export route around the named import.
+      const code = source.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "");
+      for (const line of code.split("\n").filter((l) => l.includes("@noble/curves")))
+        expect(line, name).toBe(
+          'import { ristretto255, ristretto255_hasher } from "@noble/curves/ed25519.js";',
+        );
       for (const m of source.matchAll(/ristretto255_hasher\.(\w+)\(([^;]*?)\);/gs)) {
         calls++;
         expect(m[2], `${name}: ${m[0]}`).toMatch(/, \{ DST: checkDst\(dst\) \}$/);

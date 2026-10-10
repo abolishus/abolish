@@ -12,7 +12,7 @@ export const TAG_REGISTRY = Object.freeze(
   (
     [
       { tag: "abolish/v1/display-text", primitive: "plain", status: "specified" },
-      { tag: "abolish/v1/election-definition", primitive: "plain", status: "reserved" },
+      { tag: "abolish/v1/election-definition", primitive: "plain", status: "specified" },
       { tag: "abolish/v1/board-entry", primitive: "plain", status: "reserved" },
       { tag: "abolish/v1/board-chain", primitive: "plain", status: "reserved" },
       { tag: "abolish/v1/merkle/leaf", primitive: "plain", status: "reserved" },

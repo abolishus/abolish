@@ -24,6 +24,12 @@ export {
   Writer,
 } from "./codec.ts";
 export {
+  DISPLAY_TEXT,
+  type DisplayText,
+  type DisplayTextRule,
+  displayTextShapeRule,
+} from "./display-text.ts";
+export {
   ds,
   type DsTag,
   isWellFormedTag,
@@ -33,6 +39,15 @@ export {
   type TagPrimitive,
   TAG_REGISTRY,
 } from "./domain-separation.ts";
+export {
+  ELECTION_DEFINITION,
+  ELECTION_TYPES,
+  type ElectionDefinition,
+  type ElectionDefinitionRule,
+  electionDefinitionRule,
+  TALLY_SCHEMES,
+  TIERS,
+} from "./election-definition.ts";
 export {
   challenge,
   type Element,
@@ -46,6 +61,20 @@ export {
   IDENTITY,
   scalar,
 } from "./group.ts";
+export { PARAMETERS } from "./parameters.ts";
+export {
+  decodeDisplayText,
+  decodeElectionDefinition,
+  displayTextCommitment,
+  displayTextRule,
+  electionDefinitionHash,
+  encodeDisplayText,
+  encodeElectionDefinition,
+  newDisplayTextSalt,
+  newElectionId,
+  pinnedVersion,
+  PROTOCOL_SCHEMA,
+} from "./protocol.ts";
 export {
   type DecodedRecord,
   RECORD_TYPES,

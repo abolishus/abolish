@@ -24,6 +24,45 @@ display_text_commitment = H(DS("abolish/v1/display-text", encode(display_text_re
 
 Why the salt: display text is often short and guessable, such as a candidate's name or a yes/no question. Without a salt, anyone holding the permanent record could confirm a guess by hashing it, so the archive would keep the text in effect even after it was taken down. With a 32-byte random salt, confirming a guess means also guessing the salt, which takes about 2²⁵⁶ hash evaluations, or about 2¹²⁸ with a quantum search (G-12, A-11). This hiding is computational, resting on `H` behaving as a random oracle; it isn't perfect hiding. The salt isn't a secret from anyone who has the text: whoever holds both can prove to anyone what each option meant.
 
+## Layout (version 1)
+
+Record type `0x0009`, version 1, a **draft** ([[versioning]], Draft layouts) that leaves draft together with the election definition ([[election-definition]]).
+
+| Field          | Type                    | Meaning                                                                                     |
+| -------------- | ----------------------- | ------------------------------------------------------------------------------------------- |
+| `salt`         | `bytes[32]`             | The commitment's salt (above). Always the first field.                                      |
+| `translations` | `list<translation, 32>` | The text in each language it is offered in, in strictly ascending byte order of `language`. |
+
+`translation`:
+
+| Field         | Type                    | Meaning                                                                                                                                   |
+| ------------- | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `language`    | `utf8<35>`              | A [BCP 47](https://www.rfc-editor.org/info/bcp47) language tag, such as `en` or `es-419`: 1 to 35 bytes of ASCII letters, digits and `-`. |
+| `question`    | `utf8<1024>`            | The question.                                                                                                                             |
+| `description` | `utf8<8192>`            | Longer text about the question. May be empty.                                                                                             |
+| `options`     | `list<option_text, 64>` | One entry per option, in option index order.                                                                                              |
+
+`option_text`:
+
+| Field         | Type         | Meaning                             |
+| ------------- | ------------ | ----------------------------------- |
+| `label`       | `utf8<512>`  | The option's label.                 |
+| `description` | `utf8<1024>` | Longer text about it. May be empty. |
+
+The maxima bound a record at about 3.5 MB (32 languages of 64 options at every maximum), so a hostile record is cheap to reject (T-52). Text is compared and hashed as its exact bytes, never normalised ([[notation]]). Its translations are equal in standing: a voter-facing client shows the one the voter picks, and none is the authoritative one.
+
+A display-text record is well formed, for the definition it is checked against, when:
+
+| Code           | Rule                                                                                                                         |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `commitment`   | `H(DS("abolish/v1/display-text", encode(record)))` equals the definition's `display_text_commitment`.                        |
+| `translations` | `translations` is non-empty and in strictly ascending byte order of `language`, so no language appears twice.                |
+| `language-tag` | Every `language` is 1 to 35 bytes, each an ASCII letter, digit or `-`. Tags are compared as bytes, so `en` and `EN` are two. |
+| `option-count` | Every translation has exactly the definition's `option_count` options.                                                       |
+| `question`     | Every `question` and every option `label` is non-empty.                                                                      |
+
+The record is pinned by the election's profile like any other ([[versioning]]): a decoder that knows the election reads it against the pinned version. Vectors: `docs/spec/vectors/display-text.json`.
+
 ## Checks
 
 A verifier ([[verifier]]):
@@ -38,6 +77,5 @@ Software that shows an election to a voter (the ballot client, and anything that
 
 ## Owned elsewhere
 
-- The display-text record layout (questions, options, descriptions, languages, maximum lengths, all as `utf8<M>` fields): P1-10b.
 - Where the record is pinned and how it is found from the election definition: P4-3.
 - What may be taken down, and by whom: the moderation policy (P2-10).

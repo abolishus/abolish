@@ -1,0 +1,3168 @@
+{
+  "format": "abolish-vectors/1",
+  "title": "Election definition, version 1 (draft)",
+  "spec": "docs/spec/election-definition.md",
+  "generator": "Printed by packages/crypto/scripts/definition-vectors.py, written from the tables in docs/spec/election-definition.md with only the Python standard library (hashlib for SHA-256), independently of packages/crypto; the TypeScript tests check packages/crypto's codecs, hashes and rule checks against it.",
+  "draft": true,
+  "types": {
+    "record-pin": {
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "record_type",
+          "type": {
+            "kind": "u16"
+          }
+        },
+        {
+          "name": "version",
+          "type": {
+            "kind": "u8"
+          }
+        }
+      ]
+    },
+    "profile": {
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "protocol_major",
+          "type": {
+            "kind": "u8"
+          }
+        },
+        {
+          "name": "pins",
+          "type": {
+            "kind": "list",
+            "max": 64,
+            "of": {
+              "kind": "ref",
+              "name": "record-pin"
+            }
+          }
+        }
+      ]
+    },
+    "tier-group": {
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "tier",
+          "type": {
+            "kind": "enum8",
+            "values": ["0", "1", "2"]
+          }
+        },
+        {
+          "name": "group_id",
+          "type": {
+            "kind": "u64"
+          }
+        },
+        {
+          "name": "root",
+          "type": {
+            "kind": "field",
+            "field": "bn254"
+          }
+        },
+        {
+          "name": "root_l2_block",
+          "type": {
+            "kind": "u64"
+          }
+        },
+        {
+          "name": "group_size",
+          "type": {
+            "kind": "u64"
+          }
+        }
+      ]
+    },
+    "election-definition-v1": {
+      "kind": "record",
+      "recordType": "0001",
+      "version": 1,
+      "fields": [
+        {
+          "name": "profile",
+          "type": {
+            "kind": "ref",
+            "name": "profile"
+          }
+        },
+        {
+          "name": "election_id",
+          "type": {
+            "kind": "bytes",
+            "length": 32
+          }
+        },
+        {
+          "name": "l2_chain_id",
+          "type": {
+            "kind": "u64"
+          }
+        },
+        {
+          "name": "l1_chain_id",
+          "type": {
+            "kind": "u64"
+          }
+        },
+        {
+          "name": "election_registry",
+          "type": {
+            "kind": "bytes",
+            "length": 20
+          }
+        },
+        {
+          "name": "board",
+          "type": {
+            "kind": "bytes",
+            "length": 20
+          }
+        },
+        {
+          "name": "trustee_registry",
+          "type": {
+            "kind": "bytes",
+            "length": 20
+          }
+        },
+        {
+          "name": "group_registry",
+          "type": {
+            "kind": "bytes",
+            "length": 20
+          }
+        },
+        {
+          "name": "l1_anchor",
+          "type": {
+            "kind": "bytes",
+            "length": 20
+          }
+        },
+        {
+          "name": "l1_relay",
+          "type": {
+            "kind": "bytes",
+            "length": 20
+          }
+        },
+        {
+          "name": "election_type",
+          "type": {
+            "kind": "enum8",
+            "values": ["1", "2"]
+          }
+        },
+        {
+          "name": "tally_scheme",
+          "type": {
+            "kind": "enum8",
+            "values": ["1"]
+          }
+        },
+        {
+          "name": "option_count",
+          "type": {
+            "kind": "u16"
+          }
+        },
+        {
+          "name": "min_selections",
+          "type": {
+            "kind": "u16"
+          }
+        },
+        {
+          "name": "max_selections",
+          "type": {
+            "kind": "u16"
+          }
+        },
+        {
+          "name": "electorate",
+          "type": {
+            "kind": "list",
+            "max": 3,
+            "of": {
+              "kind": "ref",
+              "name": "tier-group"
+            }
+          }
+        },
+        {
+          "name": "membership_vk_hash",
+          "type": {
+            "kind": "bytes",
+            "length": 32
+          }
+        },
+        {
+          "name": "panel_id",
+          "type": {
+            "kind": "bytes",
+            "length": 32
+          }
+        },
+        {
+          "name": "threshold",
+          "type": {
+            "kind": "u8"
+          }
+        },
+        {
+          "name": "panel_size",
+          "type": {
+            "kind": "u8"
+          }
+        },
+        {
+          "name": "ceremony_transcript_hash",
+          "type": {
+            "kind": "bytes",
+            "length": 32
+          }
+        },
+        {
+          "name": "opens_at",
+          "type": {
+            "kind": "u64"
+          }
+        },
+        {
+          "name": "closes_at",
+          "type": {
+            "kind": "u64"
+          }
+        },
+        {
+          "name": "l1_inclusion_bound",
+          "type": {
+            "kind": "u32"
+          }
+        },
+        {
+          "name": "sequencing_window",
+          "type": {
+            "kind": "u64"
+          }
+        },
+        {
+          "name": "max_sequencer_drift",
+          "type": {
+            "kind": "u64"
+          }
+        },
+        {
+          "name": "display_text_commitment",
+          "type": {
+            "kind": "bytes",
+            "length": 32
+          }
+        }
+      ]
+    }
+  },
+  "vectors": [
+    {
+      "id": "definition-typical",
+      "description": "Plurality, Tier 0 and Tier 2, 4-of-7 panel, Base Sepolia and Sepolia chain IDs",
+      "type": {
+        "kind": "ref",
+        "name": "election-definition-v1"
+      },
+      "value": {
+        "profile": {
+          "protocol_major": "1",
+          "pins": [
+            {
+              "record_type": "1",
+              "version": "1"
+            },
+            {
+              "record_type": "2",
+              "version": "1"
+            },
+            {
+              "record_type": "3",
+              "version": "1"
+            },
+            {
+              "record_type": "4",
+              "version": "1"
+            },
+            {
+              "record_type": "5",
+              "version": "1"
+            },
+            {
+              "record_type": "6",
+              "version": "1"
+            },
+            {
+              "record_type": "7",
+              "version": "1"
+            },
+            {
+              "record_type": "8",
+              "version": "1"
+            },
+            {
+              "record_type": "9",
+              "version": "1"
+            }
+          ]
+        },
+        "election_id": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+        "l2_chain_id": "84532",
+        "l1_chain_id": "11155111",
+        "election_registry": "1111111111111111111111111111111111111111",
+        "board": "1212121212121212121212121212121212121212",
+        "trustee_registry": "1313131313131313131313131313131313131313",
+        "group_registry": "1414141414141414141414141414141414141414",
+        "l1_anchor": "2121212121212121212121212121212121212121",
+        "l1_relay": "2222222222222222222222222222222222222222",
+        "election_type": "1",
+        "tally_scheme": "1",
+        "option_count": "3",
+        "min_selections": "0",
+        "max_selections": "1",
+        "electorate": [
+          {
+            "tier": "0",
+            "group_id": "1",
+            "root": "0000000000000000000000000000000000000000000000000123456789abcdef",
+            "root_l2_block": "1000",
+            "group_size": "5000"
+          },
+          {
+            "tier": "2",
+            "group_id": "3",
+            "root": "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000000",
+            "root_l2_block": "1000",
+            "group_size": "120"
+          }
+        ],
+        "membership_vk_hash": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+        "panel_id": "606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f",
+        "threshold": "4",
+        "panel_size": "7",
+        "ceremony_transcript_hash": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+        "opens_at": "1767225600",
+        "closes_at": "1767830400",
+        "l1_inclusion_bound": "3600",
+        "sequencing_window": "3600",
+        "max_sequencer_drift": "1800",
+        "display_text_commitment": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf"
+      },
+      "encoding": "0001010100000009000101000201000301000401000501000601000701000801000901101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f0000000000014a340000000000aa36a71111111111111111111111111111111111111111121212121212121212121212121212121212121213131313131313131313131313131313131313131414141414141414141414141414141414141414212121212121212121212121212121212121212122222222222222222222222222222222222222220101000300000001000000020000000000000000010000000000000000000000000000000000000000000000000123456789abcdef00000000000003e8000000000000138802000000000000000330644e72e131a029b85045b68181585d2833e84879b9709143e1f593f000000000000000000003e80000000000000078404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f0407808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f000000006955b90000000000695ef38000000e100000000000000e100000000000000708a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "hash": "a4555c67fbc57b7ed42f873f73f36360baba11fa0de1f0ba0f104780a4071750"
+    },
+    {
+      "id": "definition-approval",
+      "description": "Approval of 1 to 3 of 5 options",
+      "type": {
+        "kind": "ref",
+        "name": "election-definition-v1"
+      },
+      "value": {
+        "profile": {
+          "protocol_major": "1",
+          "pins": [
+            {
+              "record_type": "1",
+              "version": "1"
+            },
+            {
+              "record_type": "2",
+              "version": "1"
+            },
+            {
+              "record_type": "3",
+              "version": "1"
+            },
+            {
+              "record_type": "4",
+              "version": "1"
+            },
+            {
+              "record_type": "5",
+              "version": "1"
+            },
+            {
+              "record_type": "6",
+              "version": "1"
+            },
+            {
+              "record_type": "7",
+              "version": "1"
+            },
+            {
+              "record_type": "8",
+              "version": "1"
+            },
+            {
+              "record_type": "9",
+              "version": "1"
+            }
+          ]
+        },
+        "election_id": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+        "l2_chain_id": "84532",
+        "l1_chain_id": "11155111",
+        "election_registry": "1111111111111111111111111111111111111111",
+        "board": "1212121212121212121212121212121212121212",
+        "trustee_registry": "1313131313131313131313131313131313131313",
+        "group_registry": "1414141414141414141414141414141414141414",
+        "l1_anchor": "2121212121212121212121212121212121212121",
+        "l1_relay": "2222222222222222222222222222222222222222",
+        "election_type": "2",
+        "tally_scheme": "1",
+        "option_count": "5",
+        "min_selections": "1",
+        "max_selections": "3",
+        "electorate": [
+          {
+            "tier": "0",
+            "group_id": "1",
+            "root": "0000000000000000000000000000000000000000000000000123456789abcdef",
+            "root_l2_block": "1000",
+            "group_size": "5000"
+          },
+          {
+            "tier": "2",
+            "group_id": "3",
+            "root": "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000000",
+            "root_l2_block": "1000",
+            "group_size": "120"
+          }
+        ],
+        "membership_vk_hash": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+        "panel_id": "606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f",
+        "threshold": "4",
+        "panel_size": "7",
+        "ceremony_transcript_hash": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+        "opens_at": "1767225600",
+        "closes_at": "1767830400",
+        "l1_inclusion_bound": "3600",
+        "sequencing_window": "3600",
+        "max_sequencer_drift": "1800",
+        "display_text_commitment": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf"
+      },
+      "encoding": "0001010100000009000101000201000301000401000501000601000701000801000901101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f0000000000014a340000000000aa36a71111111111111111111111111111111111111111121212121212121212121212121212121212121213131313131313131313131313131313131313131414141414141414141414141414141414141414212121212121212121212121212121212121212122222222222222222222222222222222222222220201000500010003000000020000000000000000010000000000000000000000000000000000000000000000000123456789abcdef00000000000003e8000000000000138802000000000000000330644e72e131a029b85045b68181585d2833e84879b9709143e1f593f000000000000000000003e80000000000000078404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f0407808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f000000006955b90000000000695ef38000000e100000000000000e100000000000000708a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "hash": "43514c00ae480a9e6a6b3b0bf2f898ca6e7a406d15a03f37ac38db7bc40f66cb"
+    },
+    {
+      "id": "definition-minimal",
+      "description": "Every field at its smallest well-formed value",
+      "type": {
+        "kind": "ref",
+        "name": "election-definition-v1"
+      },
+      "value": {
+        "profile": {
+          "protocol_major": "1",
+          "pins": [
+            {
+              "record_type": "1",
+              "version": "1"
+            },
+            {
+              "record_type": "2",
+              "version": "1"
+            },
+            {
+              "record_type": "3",
+              "version": "1"
+            },
+            {
+              "record_type": "4",
+              "version": "1"
+            },
+            {
+              "record_type": "5",
+              "version": "1"
+            },
+            {
+              "record_type": "6",
+              "version": "1"
+            },
+            {
+              "record_type": "7",
+              "version": "1"
+            },
+            {
+              "record_type": "8",
+              "version": "1"
+            },
+            {
+              "record_type": "9",
+              "version": "1"
+            }
+          ]
+        },
+        "election_id": "0000000000000000000000000000000000000000000000000000000000000000",
+        "l2_chain_id": "1",
+        "l1_chain_id": "2",
+        "election_registry": "0000000000000000000000000000000000000001",
+        "board": "0000000000000000000000000000000000000002",
+        "trustee_registry": "0000000000000000000000000000000000000003",
+        "group_registry": "0000000000000000000000000000000000000004",
+        "l1_anchor": "0000000000000000000000000000000000000001",
+        "l1_relay": "0000000000000000000000000000000000000002",
+        "election_type": "1",
+        "tally_scheme": "1",
+        "option_count": "2",
+        "min_selections": "0",
+        "max_selections": "1",
+        "electorate": [
+          {
+            "tier": "0",
+            "group_id": "0",
+            "root": "0000000000000000000000000000000000000000000000000000000000000000",
+            "root_l2_block": "0",
+            "group_size": "1"
+          }
+        ],
+        "membership_vk_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "panel_id": "0000000000000000000000000000000000000000000000000000000000000000",
+        "threshold": "1",
+        "panel_size": "1",
+        "ceremony_transcript_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "opens_at": "0",
+        "closes_at": "1",
+        "l1_inclusion_bound": "0",
+        "sequencing_window": "0",
+        "max_sequencer_drift": "0",
+        "display_text_commitment": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "encoding": "000101010000000900010100020100030100040100050100060100070100080100090100000000000000000000000000000000000000000000000000000000000000000000000000000001000000000000000200000000000000000000000000000000000000010000000000000000000000000000000000000002000000000000000000000000000000000000000300000000000000000000000000000000000000040000000000000000000000000000000000000001000000000000000000000000000000000000000201010002000000010000000100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "hash": "cc6ddcb227152fd555a8d1c9a28c8be93d222ad04de3305a6fae7e052f7bb931"
+    },
+    {
+      "id": "definition-maximal",
+      "description": "Every field at its largest value: 64 options, 3 tiers, 16-of-16, every u64 at 2^64 - 1, roots at r - 1, every pin but its own at version 255",
+      "type": {
+        "kind": "ref",
+        "name": "election-definition-v1"
+      },
+      "value": {
+        "profile": {
+          "protocol_major": "1",
+          "pins": [
+            {
+              "record_type": "1",
+              "version": "1"
+            },
+            {
+              "record_type": "2",
+              "version": "255"
+            },
+            {
+              "record_type": "3",
+              "version": "255"
+            },
+            {
+              "record_type": "4",
+              "version": "255"
+            },
+            {
+              "record_type": "5",
+              "version": "255"
+            },
+            {
+              "record_type": "6",
+              "version": "255"
+            },
+            {
+              "record_type": "7",
+              "version": "255"
+            },
+            {
+              "record_type": "8",
+              "version": "255"
+            },
+            {
+              "record_type": "9",
+              "version": "255"
+            }
+          ]
+        },
+        "election_id": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "l2_chain_id": "18446744073709551615",
+        "l1_chain_id": "18446744073709551614",
+        "election_registry": "ffffffffffffffffffffffffffffffffffffffff",
+        "board": "fefefefefefefefefefefefefefefefefefefefe",
+        "trustee_registry": "fdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfd",
+        "group_registry": "fcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfc",
+        "l1_anchor": "ffffffffffffffffffffffffffffffffffffffff",
+        "l1_relay": "fefefefefefefefefefefefefefefefefefefefe",
+        "election_type": "2",
+        "tally_scheme": "1",
+        "option_count": "64",
+        "min_selections": "64",
+        "max_selections": "64",
+        "electorate": [
+          {
+            "tier": "0",
+            "group_id": "18446744073709551615",
+            "root": "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000000",
+            "root_l2_block": "18446744073709551615",
+            "group_size": "18446744073709551615"
+          },
+          {
+            "tier": "1",
+            "group_id": "18446744073709551614",
+            "root": "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000000",
+            "root_l2_block": "18446744073709551615",
+            "group_size": "18446744073709551615"
+          },
+          {
+            "tier": "2",
+            "group_id": "18446744073709551613",
+            "root": "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000000",
+            "root_l2_block": "18446744073709551615",
+            "group_size": "18446744073709551615"
+          }
+        ],
+        "membership_vk_hash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "panel_id": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "threshold": "16",
+        "panel_size": "16",
+        "ceremony_transcript_hash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "opens_at": "18446744073709551614",
+        "closes_at": "18446744073709551615",
+        "l1_inclusion_bound": "4294967295",
+        "sequencing_window": "18446744073709551615",
+        "max_sequencer_drift": "18446744073709551615",
+        "display_text_commitment": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      },
+      "encoding": "00010101000000090001010002ff0003ff0004ff0005ff0006ff0007ff0008ff0009fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffffffffffffffffffffffffffffffffffffffefefefefefefefefefefefefefefefefefefefefdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfdfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfcfffffffffffffffffffffffffffffffffffffffffefefefefefefefefefefefefefefefefefefefe02010040004000400000000300ffffffffffffffff30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000000ffffffffffffffffffffffffffffffff01fffffffffffffffe30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000000ffffffffffffffffffffffffffffffff02fffffffffffffffd30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000000ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff1010fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "hash": "f92064df8da280d4bbb161d4f7a2f5132bd1b59acfaf58d0ad70ab66fee414e1"
+    },
+    {
+      "id": "definition-truncated",
+      "description": "The last byte of display_text_commitment is missing",
+      "type": {
+        "kind": "ref",
+        "name": "election-definition-v1"
+      },
+      "encoding": "0001010100000009000101000201000301000401000501000601000701000801000901101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f0000000000014a340000000000aa36a71111111111111111111111111111111111111111121212121212121212121212121212121212121213131313131313131313131313131313131313131414141414141414141414141414141414141414212121212121212121212121212121212121212122222222222222222222222222222222222222220101000300000001000000020000000000000000010000000000000000000000000000000000000000000000000123456789abcdef00000000000003e8000000000000138802000000000000000330644e72e131a029b85045b68181585d2833e84879b9709143e1f593f000000000000000000003e80000000000000078404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f0407808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f000000006955b90000000000695ef38000000e100000000000000e100000000000000708a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbe",
+      "error": "truncated"
+    },
+    {
+      "id": "definition-trailing",
+      "description": "One byte after display_text_commitment",
+      "type": {
+        "kind": "ref",
+        "name": "election-definition-v1"
+      },
+      "encoding": "0001010100000009000101000201000301000401000501000601000701000801000901101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f0000000000014a340000000000aa36a71111111111111111111111111111111111111111121212121212121212121212121212121212121213131313131313131313131313131313131313131414141414141414141414141414141414141414212121212121212121212121212121212121212122222222222222222222222222222222222222220101000300000001000000020000000000000000010000000000000000000000000000000000000000000000000123456789abcdef00000000000003e8000000000000138802000000000000000330644e72e131a029b85045b68181585d2833e84879b9709143e1f593f000000000000000000003e80000000000000078404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f0407808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f000000006955b90000000000695ef38000000e100000000000000e100000000000000708a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf00",
+      "error": "trailing-bytes"
+    },
+    {
+      "id": "definition-empty",
+      "description": "No header",
+      "type": {
+        "kind": "ref",
+        "name": "election-definition-v1"
+      },
+      "encoding": "",
+      "error": "truncated"
+    },
+    {
+      "id": "definition-type-zero",
+      "description": "Record type 0x0000",
+      "type": {
+        "kind": "ref",
+        "name": "election-definition-v1"
+      },
+      "encoding": "0000010100000009000101000201000301000401000501000601000701000801000901101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f0000000000014a340000000000aa36a71111111111111111111111111111111111111111121212121212121212121212121212121212121213131313131313131313131313131313131313131414141414141414141414141414141414141414212121212121212121212121212121212121212122222222222222222222222222222222222222220101000300000001000000020000000000000000010000000000000000000000000000000000000000000000000123456789abcdef00000000000003e8000000000000138802000000000000000330644e72e131a029b85045b68181585d2833e84879b9709143e1f593f000000000000000000003e80000000000000078404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f0407808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f000000006955b90000000000695ef38000000e100000000000000e100000000000000708a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "error": "unknown-record-type"
+    },
+    {
+      "id": "definition-type-unassigned",
+      "description": "Record type 0x000a, which the registry doesn't assign",
+      "type": {
+        "kind": "ref",
+        "name": "election-definition-v1"
+      },
+      "encoding": "000a010100000009000101000201000301000401000501000601000701000801000901101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f0000000000014a340000000000aa36a71111111111111111111111111111111111111111121212121212121212121212121212121212121213131313131313131313131313131313131313131414141414141414141414141414141414141414212121212121212121212121212121212121212122222222222222222222222222222222222222220101000300000001000000020000000000000000010000000000000000000000000000000000000000000000000123456789abcdef00000000000003e8000000000000138802000000000000000330644e72e131a029b85045b68181585d2833e84879b9709143e1f593f000000000000000000003e80000000000000078404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f0407808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f000000006955b90000000000695ef38000000e100000000000000e100000000000000708a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "error": "unknown-record-type"
+    },
+    {
+      "id": "definition-version-zero",
+      "description": "Version 0 is never valid",
+      "type": {
+        "kind": "ref",
+        "name": "election-definition-v1"
+      },
+      "encoding": "0001000100000009000101000201000301000401000501000601000701000801000901101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f0000000000014a340000000000aa36a71111111111111111111111111111111111111111121212121212121212121212121212121212121213131313131313131313131313131313131313131414141414141414141414141414141414141414212121212121212121212121212121212121212122222222222222222222222222222222222222220101000300000001000000020000000000000000010000000000000000000000000000000000000000000000000123456789abcdef00000000000003e8000000000000138802000000000000000330644e72e131a029b85045b68181585d2833e84879b9709143e1f593f000000000000000000003e80000000000000078404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f0407808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f000000006955b90000000000695ef38000000e100000000000000e100000000000000708a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "error": "unknown-version"
+    },
+    {
+      "id": "definition-version-unknown",
+      "description": "Version 2, which has no layout; its profile pins 0x0001 at 2, but no pin is known before the definition is read",
+      "type": {
+        "kind": "ref",
+        "name": "election-definition-v1"
+      },
+      "encoding": "0001020100000009000102000201000301000401000501000601000701000801000901101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f0000000000014a340000000000aa36a71111111111111111111111111111111111111111121212121212121212121212121212121212121213131313131313131313131313131313131313131414141414141414141414141414141414141414212121212121212121212121212121212121212122222222222222222222222222222222222222220101000300000001000000020000000000000000010000000000000000000000000000000000000000000000000123456789abcdef00000000000003e8000000000000138802000000000000000330644e72e131a029b85045b68181585d2833e84879b9709143e1f593f000000000000000000003e80000000000000078404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f0407808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f000000006955b90000000000695ef38000000e100000000000000e100000000000000708a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "error": "unknown-version"
+    },
+    {
+      "id": "definition-profile-pins-other-version",
+      "description": "A version-1 definition whose own profile pins 0x0001 at version 2",
+      "type": {
+        "kind": "ref",
+        "name": "election-definition-v1"
+      },
+      "encoding": "0001010100000009000102000201000301000401000501000601000701000801000901101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f0000000000014a340000000000aa36a71111111111111111111111111111111111111111121212121212121212121212121212121212121213131313131313131313131313131313131313131414141414141414141414141414141414141414212121212121212121212121212121212121212122222222222222222222222222222222222222220101000300000001000000020000000000000000010000000000000000000000000000000000000000000000000123456789abcdef00000000000003e8000000000000138802000000000000000330644e72e131a029b85045b68181585d2833e84879b9709143e1f593f000000000000000000003e80000000000000078404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f0407808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f000000006955b90000000000695ef38000000e100000000000000e100000000000000708a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "error": "profile-mismatch"
+    },
+    {
+      "id": "definition-profile-no-pin",
+      "description": "A definition whose profile pins no version for 0x0001",
+      "type": {
+        "kind": "ref",
+        "name": "election-definition-v1"
+      },
+      "encoding": "0001010100000008000201000301000401000501000601000701000801000901101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f0000000000014a340000000000aa36a71111111111111111111111111111111111111111121212121212121212121212121212121212121213131313131313131313131313131313131313131414141414141414141414141414141414141414212121212121212121212121212121212121212122222222222222222222222222222222222222220101000300000001000000020000000000000000010000000000000000000000000000000000000000000000000123456789abcdef00000000000003e8000000000000138802000000000000000330644e72e131a029b85045b68181585d2833e84879b9709143e1f593f000000000000000000003e80000000000000078404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f0407808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f000000006955b90000000000695ef38000000e100000000000000e100000000000000708a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "error": "profile-mismatch"
+    },
+    {
+      "id": "definition-election-type-zero",
+      "description": "election_type 0",
+      "type": {
+        "kind": "ref",
+        "name": "election-definition-v1"
+      },
+      "encoding": "0001010100000009000101000201000301000401000501000601000701000801000901101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f0000000000014a340000000000aa36a71111111111111111111111111111111111111111121212121212121212121212121212121212121213131313131313131313131313131313131313131414141414141414141414141414141414141414212121212121212121212121212121212121212122222222222222222222222222222222222222220001000300000001000000020000000000000000010000000000000000000000000000000000000000000000000123456789abcdef00000000000003e8000000000000138802000000000000000330644e72e131a029b85045b68181585d2833e84879b9709143e1f593f000000000000000000003e80000000000000078404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f0407808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f000000006955b90000000000695ef38000000e100000000000000e100000000000000708a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "error": "invalid-enum"
+    },
+    {
+      "id": "definition-election-type-ranked",
+      "description": "election_type 3, which version 1 doesn't list",
+      "type": {
+        "kind": "ref",
+        "name": "election-definition-v1"
+      },
+      "encoding": "0001010100000009000101000201000301000401000501000601000701000801000901101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f0000000000014a340000000000aa36a71111111111111111111111111111111111111111121212121212121212121212121212121212121213131313131313131313131313131313131313131414141414141414141414141414141414141414212121212121212121212121212121212121212122222222222222222222222222222222222222220301000300000001000000020000000000000000010000000000000000000000000000000000000000000000000123456789abcdef00000000000003e8000000000000138802000000000000000330644e72e131a029b85045b68181585d2833e84879b9709143e1f593f000000000000000000003e80000000000000078404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f0407808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f000000006955b90000000000695ef38000000e100000000000000e100000000000000708a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "error": "invalid-enum"
+    },
+    {
+      "id": "definition-tally-scheme-two",
+      "description": "tally_scheme 2, which version 1 doesn't list",
+      "type": {
+        "kind": "ref",
+        "name": "election-definition-v1"
+      },
+      "encoding": "0001010100000009000101000201000301000401000501000601000701000801000901101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f0000000000014a340000000000aa36a71111111111111111111111111111111111111111121212121212121212121212121212121212121213131313131313131313131313131313131313131414141414141414141414141414141414141414212121212121212121212121212121212121212122222222222222222222222222222222222222220102000300000001000000020000000000000000010000000000000000000000000000000000000000000000000123456789abcdef00000000000003e8000000000000138802000000000000000330644e72e131a029b85045b68181585d2833e84879b9709143e1f593f000000000000000000003e80000000000000078404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f0407808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f000000006955b90000000000695ef38000000e100000000000000e100000000000000708a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "error": "invalid-enum"
+    },
+    {
+      "id": "definition-tier-three",
+      "description": "A tier_group with tier 3",
+      "type": {
+        "kind": "ref",
+        "name": "election-definition-v1"
+      },
+      "encoding": "0001010100000009000101000201000301000401000501000601000701000801000901101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f0000000000014a340000000000aa36a71111111111111111111111111111111111111111121212121212121212121212121212121212121213131313131313131313131313131313131313131414141414141414141414141414141414141414212121212121212121212121212121212121212122222222222222222222222222222222222222220101000300000001000000020300000000000000010000000000000000000000000000000000000000000000000123456789abcdef00000000000003e8000000000000138802000000000000000330644e72e131a029b85045b68181585d2833e84879b9709143e1f593f000000000000000000003e80000000000000078404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f0407808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f000000006955b90000000000695ef38000000e100000000000000e100000000000000708a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "error": "invalid-enum"
+    },
+    {
+      "id": "definition-root-r",
+      "description": "A root equal to r",
+      "type": {
+        "kind": "ref",
+        "name": "election-definition-v1"
+      },
+      "encoding": "0001010100000009000101000201000301000401000501000601000701000801000901101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f0000000000014a340000000000aa36a711111111111111111111111111111111111111111212121212121212121212121212121212121212131313131313131313131313131313131313131314141414141414141414141414141414141414142121212121212121212121212121212121212121222222222222222222222222222222222222222201010003000000010000000200000000000000000130644e72e131a029b85045b68181585d2833e84879b9709143e1f593f000000100000000000003e8000000000000138802000000000000000330644e72e131a029b85045b68181585d2833e84879b9709143e1f593f000000000000000000003e80000000000000078404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f0407808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f000000006955b90000000000695ef38000000e100000000000000e100000000000000708a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "error": "non-canonical"
+    },
+    {
+      "id": "definition-electorate-over-max",
+      "description": "An electorate count of 4, over its maximum of 3, rejected before any entry is read",
+      "type": {
+        "kind": "ref",
+        "name": "election-definition-v1"
+      },
+      "encoding": "0001010100000009000101000201000301000401000501000601000701000801000901101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f0000000000014a340000000000aa36a71111111111111111111111111111111111111111121212121212121212121212121212121212121213131313131313131313131313131313131313131414141414141414141414141414141414141414212121212121212121212121212121212121212122222222222222222222222222222222222222220101000300000001000000040000000000000000010000000000000000000000000000000000000000000000000123456789abcdef00000000000003e8000000000000138802000000000000000330644e72e131a029b85045b68181585d2833e84879b9709143e1f593f000000000000000000003e80000000000000078404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f0407808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f000000006955b90000000000695ef38000000e100000000000000e100000000000000708a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "error": "length-over-max"
+    },
+    {
+      "id": "definition-pins-over-max",
+      "description": "A pins count of 65, over its maximum of 64",
+      "type": {
+        "kind": "ref",
+        "name": "election-definition-v1"
+      },
+      "encoding": "0001010100000041000101000201000301000401000501000601000701000801000901101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f0000000000014a340000000000aa36a71111111111111111111111111111111111111111121212121212121212121212121212121212121213131313131313131313131313131313131313131414141414141414141414141414141414141414212121212121212121212121212121212121212122222222222222222222222222222222222222220101000300000001000000020000000000000000010000000000000000000000000000000000000000000000000123456789abcdef00000000000003e8000000000000138802000000000000000330644e72e131a029b85045b68181585d2833e84879b9709143e1f593f000000000000000000003e80000000000000078404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f0407808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f000000006955b90000000000695ef38000000e100000000000000e100000000000000708a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "error": "length-over-max"
+    },
+    {
+      "id": "definition-protocol-major-two",
+      "description": "profile.protocol_major 2",
+      "type": {
+        "kind": "ref",
+        "name": "election-definition-v1"
+      },
+      "value": {
+        "profile": {
+          "protocol_major": "2",
+          "pins": [
+            {
+              "record_type": "1",
+              "version": "1"
+            },
+            {
+              "record_type": "2",
+              "version": "1"
+            },
+            {
+              "record_type": "3",
+              "version": "1"
+            },
+            {
+              "record_type": "4",
+              "version": "1"
+            },
+            {
+              "record_type": "5",
+              "version": "1"
+            },
+            {
+              "record_type": "6",
+              "version": "1"
+            },
+            {
+              "record_type": "7",
+              "version": "1"
+            },
+            {
+              "record_type": "8",
+              "version": "1"
+            },
+            {
+              "record_type": "9",
+              "version": "1"
+            }
+          ]
+        },
+        "election_id": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+        "l2_chain_id": "84532",
+        "l1_chain_id": "11155111",
+        "election_registry": "1111111111111111111111111111111111111111",
+        "board": "1212121212121212121212121212121212121212",
+        "trustee_registry": "1313131313131313131313131313131313131313",
+        "group_registry": "1414141414141414141414141414141414141414",
+        "l1_anchor": "2121212121212121212121212121212121212121",
+        "l1_relay": "2222222222222222222222222222222222222222",
+        "election_type": "1",
+        "tally_scheme": "1",
+        "option_count": "3",
+        "min_selections": "0",
+        "max_selections": "1",
+        "electorate": [
+          {
+            "tier": "0",
+            "group_id": "1",
+            "root": "0000000000000000000000000000000000000000000000000123456789abcdef",
+            "root_l2_block": "1000",
+            "group_size": "5000"
+          },
+          {
+            "tier": "2",
+            "group_id": "3",
+            "root": "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000000",
+            "root_l2_block": "1000",
+            "group_size": "120"
+          }
+        ],
+        "membership_vk_hash": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+        "panel_id": "606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f",
+        "threshold": "4",
+        "panel_size": "7",
+        "ceremony_transcript_hash": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+        "opens_at": "1767225600",
+        "closes_at": "1767830400",
+        "l1_inclusion_bound": "3600",
+        "sequencing_window": "3600",
+        "max_sequencer_drift": "1800",
+        "display_text_commitment": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf"
+      },
+      "encoding": "0001010200000009000101000201000301000401000501000601000701000801000901101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f0000000000014a340000000000aa36a71111111111111111111111111111111111111111121212121212121212121212121212121212121213131313131313131313131313131313131313131414141414141414141414141414141414141414212121212121212121212121212121212121212122222222222222222222222222222222222222220101000300000001000000020000000000000000010000000000000000000000000000000000000000000000000123456789abcdef00000000000003e8000000000000138802000000000000000330644e72e131a029b85045b68181585d2833e84879b9709143e1f593f000000000000000000003e80000000000000078404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f0407808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f000000006955b90000000000695ef38000000e100000000000000e100000000000000708a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "hash": "38bcc98d033c5b1a68adc1babf4eab2bb9b418afd5afd7207886d6d461c716d3",
+      "illFormed": "protocol-major"
+    },
+    {
+      "id": "definition-pins-unsorted",
+      "description": "Pins for 0x0003 before 0x0002",
+      "type": {
+        "kind": "ref",
+        "name": "election-definition-v1"
+      },
+      "value": {
+        "profile": {
+          "protocol_major": "1",
+          "pins": [
+            {
+              "record_type": "1",
+              "version": "1"
+            },
+            {
+              "record_type": "3",
+              "version": "1"
+            },
+            {
+              "record_type": "2",
+              "version": "1"
+            },
+            {
+              "record_type": "4",
+              "version": "1"
+            },
+            {
+              "record_type": "5",
+              "version": "1"
+            },
+            {
+              "record_type": "6",
+              "version": "1"
+            },
+            {
+              "record_type": "7",
+              "version": "1"
+            },
+            {
+              "record_type": "8",
+              "version": "1"
+            },
+            {
+              "record_type": "9",
+              "version": "1"
+            }
+          ]
+        },
+        "election_id": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+        "l2_chain_id": "84532",
+        "l1_chain_id": "11155111",
+        "election_registry": "1111111111111111111111111111111111111111",
+        "board": "1212121212121212121212121212121212121212",
+        "trustee_registry": "1313131313131313131313131313131313131313",
+        "group_registry": "1414141414141414141414141414141414141414",
+        "l1_anchor": "2121212121212121212121212121212121212121",
+        "l1_relay": "2222222222222222222222222222222222222222",
+        "election_type": "1",
+        "tally_scheme": "1",
+        "option_count": "3",
+        "min_selections": "0",
+        "max_selections": "1",
+        "electorate": [
+          {
+            "tier": "0",
+            "group_id": "1",
+            "root": "0000000000000000000000000000000000000000000000000123456789abcdef",
+            "root_l2_block": "1000",
+            "group_size": "5000"
+          },
+          {
+            "tier": "2",
+            "group_id": "3",
+            "root": "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000000",
+            "root_l2_block": "1000",
+            "group_size": "120"
+          }
+        ],
+        "membership_vk_hash": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+        "panel_id": "606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f",
+        "threshold": "4",
+        "panel_size": "7",
+        "ceremony_transcript_hash": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+        "opens_at": "1767225600",
+        "closes_at": "1767830400",
+        "l1_inclusion_bound": "3600",
+        "sequencing_window": "3600",
+        "max_sequencer_drift": "1800",
+        "display_text_commitment": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf"
+      },
+      "encoding": "0001010100000009000101000301000201000401000501000601000701000801000901101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f0000000000014a340000000000aa36a71111111111111111111111111111111111111111121212121212121212121212121212121212121213131313131313131313131313131313131313131414141414141414141414141414141414141414212121212121212121212121212121212121212122222222222222222222222222222222222222220101000300000001000000020000000000000000010000000000000000000000000000000000000000000000000123456789abcdef00000000000003e8000000000000138802000000000000000330644e72e131a029b85045b68181585d2833e84879b9709143e1f593f000000000000000000003e80000000000000078404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f0407808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f000000006955b90000000000695ef38000000e100000000000000e100000000000000708a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "hash": "80fbc083e3ca2768edae84999aeb0633e12c0ba97c06888e000b70dbb6923813",
+      "illFormed": "profile-order"
+    },
+    {
+      "id": "definition-pins-duplicate",
+      "description": "0x0002 pinned twice",
+      "type": {
+        "kind": "ref",
+        "name": "election-definition-v1"
+      },
+      "value": {
+        "profile": {
+          "protocol_major": "1",
+          "pins": [
+            {
+              "record_type": "1",
+              "version": "1"
+            },
+            {
+              "record_type": "2",
+              "version": "1"
+            },
+            {
+              "record_type": "2",
+              "version": "1"
+            },
+            {
+              "record_type": "3",
+              "version": "1"
+            },
+            {
+              "record_type": "4",
+              "version": "1"
+            },
+            {
+              "record_type": "5",
+              "version": "1"
+            },
+            {
+              "record_type": "6",
+              "version": "1"
+            },
+            {
+              "record_type": "7",
+              "version": "1"
+            },
+            {
+              "record_type": "8",
+              "version": "1"
+            },
+            {
+              "record_type": "9",
+              "version": "1"
+            }
+          ]
+        },
+        "election_id": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+        "l2_chain_id": "84532",
+        "l1_chain_id": "11155111",
+        "election_registry": "1111111111111111111111111111111111111111",
+        "board": "1212121212121212121212121212121212121212",
+        "trustee_registry": "1313131313131313131313131313131313131313",
+        "group_registry": "1414141414141414141414141414141414141414",
+        "l1_anchor": "2121212121212121212121212121212121212121",
+        "l1_relay": "2222222222222222222222222222222222222222",
+        "election_type": "1",
+        "tally_scheme": "1",
+        "option_count": "3",
+        "min_selections": "0",
+        "max_selections": "1",
+        "electorate": [
+          {
+            "tier": "0",
+            "group_id": "1",
+            "root": "0000000000000000000000000000000000000000000000000123456789abcdef",
+            "root_l2_block": "1000",
+            "group_size": "5000"
+          },
+          {
+            "tier": "2",
+            "group_id": "3",
+            "root": "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000000",
+            "root_l2_block": "1000",
+            "group_size": "120"
+          }
+        ],
+        "membership_vk_hash": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+        "panel_id": "606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f",
+        "threshold": "4",
+        "panel_size": "7",
+        "ceremony_transcript_hash": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+        "opens_at": "1767225600",
+        "closes_at": "1767830400",
+        "l1_inclusion_bound": "3600",
+        "sequencing_window": "3600",
+        "max_sequencer_drift": "1800",
+        "display_text_commitment": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf"
+      },
+      "encoding": "000101010000000a000101000201000201000301000401000501000601000701000801000901101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f0000000000014a340000000000aa36a71111111111111111111111111111111111111111121212121212121212121212121212121212121213131313131313131313131313131313131313131414141414141414141414141414141414141414212121212121212121212121212121212121212122222222222222222222222222222222222222220101000300000001000000020000000000000000010000000000000000000000000000000000000000000000000123456789abcdef00000000000003e8000000000000138802000000000000000330644e72e131a029b85045b68181585d2833e84879b9709143e1f593f000000000000000000003e80000000000000078404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f0407808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f000000006955b90000000000695ef38000000e100000000000000e100000000000000708a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "hash": "42d511f17c9c7c733a1d39ee71649ac592ff8de1d91326f1a31bd2d36173507c",
+      "illFormed": "profile-order"
+    },
+    {
+      "id": "definition-pins-missing-type",
+      "description": "No pin for 0x0005",
+      "type": {
+        "kind": "ref",
+        "name": "election-definition-v1"
+      },
+      "value": {
+        "profile": {
+          "protocol_major": "1",
+          "pins": [
+            {
+              "record_type": "1",
+              "version": "1"
+            },
+            {
+              "record_type": "2",
+              "version": "1"
+            },
+            {
+              "record_type": "3",
+              "version": "1"
+            },
+            {
+              "record_type": "4",
+              "version": "1"
+            },
+            {
+              "record_type": "6",
+              "version": "1"
+            },
+            {
+              "record_type": "7",
+              "version": "1"
+            },
+            {
+              "record_type": "8",
+              "version": "1"
+            },
+            {
+              "record_type": "9",
+              "version": "1"
+            }
+          ]
+        },
+        "election_id": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+        "l2_chain_id": "84532",
+        "l1_chain_id": "11155111",
+        "election_registry": "1111111111111111111111111111111111111111",
+        "board": "1212121212121212121212121212121212121212",
+        "trustee_registry": "1313131313131313131313131313131313131313",
+        "group_registry": "1414141414141414141414141414141414141414",
+        "l1_anchor": "2121212121212121212121212121212121212121",
+        "l1_relay": "2222222222222222222222222222222222222222",
+        "election_type": "1",
+        "tally_scheme": "1",
+        "option_count": "3",
+        "min_selections": "0",
+        "max_selections": "1",
+        "electorate": [
+          {
+            "tier": "0",
+            "group_id": "1",
+            "root": "0000000000000000000000000000000000000000000000000123456789abcdef",
+            "root_l2_block": "1000",
+            "group_size": "5000"
+          },
+          {
+            "tier": "2",
+            "group_id": "3",
+            "root": "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000000",
+            "root_l2_block": "1000",
+            "group_size": "120"
+          }
+        ],
+        "membership_vk_hash": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+        "panel_id": "606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f",
+        "threshold": "4",
+        "panel_size": "7",
+        "ceremony_transcript_hash": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+        "opens_at": "1767225600",
+        "closes_at": "1767830400",
+        "l1_inclusion_bound": "3600",
+        "sequencing_window": "3600",
+        "max_sequencer_drift": "1800",
+        "display_text_commitment": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf"
+      },
+      "encoding": "0001010100000008000101000201000301000401000601000701000801000901101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f0000000000014a340000000000aa36a71111111111111111111111111111111111111111121212121212121212121212121212121212121213131313131313131313131313131313131313131414141414141414141414141414141414141414212121212121212121212121212121212121212122222222222222222222222222222222222222220101000300000001000000020000000000000000010000000000000000000000000000000000000000000000000123456789abcdef00000000000003e8000000000000138802000000000000000330644e72e131a029b85045b68181585d2833e84879b9709143e1f593f000000000000000000003e80000000000000078404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f0407808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f000000006955b90000000000695ef38000000e100000000000000e100000000000000708a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "hash": "3de6efc80100d704401eb012466adb4d0ae76213e30e3d9abee465a821a4dfb5",
+      "illFormed": "profile-types"
+    },
+    {
+      "id": "definition-pins-test-type",
+      "description": "An extra pin for the test type 0xff00",
+      "type": {
+        "kind": "ref",
+        "name": "election-definition-v1"
+      },
+      "value": {
+        "profile": {
+          "protocol_major": "1",
+          "pins": [
+            {
+              "record_type": "1",
+              "version": "1"
+            },
+            {
+              "record_type": "2",
+              "version": "1"
+            },
+            {
+              "record_type": "3",
+              "version": "1"
+            },
+            {
+              "record_type": "4",
+              "version": "1"
+            },
+            {
+              "record_type": "5",
+              "version": "1"
+            },
+            {
+              "record_type": "6",
+              "version": "1"
+            },
+            {
+              "record_type": "7",
+              "version": "1"
+            },
+            {
+              "record_type": "8",
+              "version": "1"
+            },
+            {
+              "record_type": "9",
+              "version": "1"
+            },
+            {
+              "record_type": "65280",
+              "version": "1"
+            }
+          ]
+        },
+        "election_id": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+        "l2_chain_id": "84532",
+        "l1_chain_id": "11155111",
+        "election_registry": "1111111111111111111111111111111111111111",
+        "board": "1212121212121212121212121212121212121212",
+        "trustee_registry": "1313131313131313131313131313131313131313",
+        "group_registry": "1414141414141414141414141414141414141414",
+        "l1_anchor": "2121212121212121212121212121212121212121",
+        "l1_relay": "2222222222222222222222222222222222222222",
+        "election_type": "1",
+        "tally_scheme": "1",
+        "option_count": "3",
+        "min_selections": "0",
+        "max_selections": "1",
+        "electorate": [
+          {
+            "tier": "0",
+            "group_id": "1",
+            "root": "0000000000000000000000000000000000000000000000000123456789abcdef",
+            "root_l2_block": "1000",
+            "group_size": "5000"
+          },
+          {
+            "tier": "2",
+            "group_id": "3",
+            "root": "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000000",
+            "root_l2_block": "1000",
+            "group_size": "120"
+          }
+        ],
+        "membership_vk_hash": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+        "panel_id": "606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f",
+        "threshold": "4",
+        "panel_size": "7",
+        "ceremony_transcript_hash": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+        "opens_at": "1767225600",
+        "closes_at": "1767830400",
+        "l1_inclusion_bound": "3600",
+        "sequencing_window": "3600",
+        "max_sequencer_drift": "1800",
+        "display_text_commitment": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf"
+      },
+      "encoding": "000101010000000a000101000201000301000401000501000601000701000801000901ff0001101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f0000000000014a340000000000aa36a71111111111111111111111111111111111111111121212121212121212121212121212121212121213131313131313131313131313131313131313131414141414141414141414141414141414141414212121212121212121212121212121212121212122222222222222222222222222222222222222220101000300000001000000020000000000000000010000000000000000000000000000000000000000000000000123456789abcdef00000000000003e8000000000000138802000000000000000330644e72e131a029b85045b68181585d2833e84879b9709143e1f593f000000000000000000003e80000000000000078404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f0407808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f000000006955b90000000000695ef38000000e100000000000000e100000000000000708a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "hash": "40f4c1ae0b6937562eca387861c91be05f237a1ecbe4c4a8a94ea293af281cc2",
+      "illFormed": "profile-types"
+    },
+    {
+      "id": "definition-pin-version-zero",
+      "description": "0x0002 pinned at version 0",
+      "type": {
+        "kind": "ref",
+        "name": "election-definition-v1"
+      },
+      "value": {
+        "profile": {
+          "protocol_major": "1",
+          "pins": [
+            {
+              "record_type": "1",
+              "version": "1"
+            },
+            {
+              "record_type": "2",
+              "version": "0"
+            },
+            {
+              "record_type": "3",
+              "version": "1"
+            },
+            {
+              "record_type": "4",
+              "version": "1"
+            },
+            {
+              "record_type": "5",
+              "version": "1"
+            },
+            {
+              "record_type": "6",
+              "version": "1"
+            },
+            {
+              "record_type": "7",
+              "version": "1"
+            },
+            {
+              "record_type": "8",
+              "version": "1"
+            },
+            {
+              "record_type": "9",
+              "version": "1"
+            }
+          ]
+        },
+        "election_id": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+        "l2_chain_id": "84532",
+        "l1_chain_id": "11155111",
+        "election_registry": "1111111111111111111111111111111111111111",
+        "board": "1212121212121212121212121212121212121212",
+        "trustee_registry": "1313131313131313131313131313131313131313",
+        "group_registry": "1414141414141414141414141414141414141414",
+        "l1_anchor": "2121212121212121212121212121212121212121",
+        "l1_relay": "2222222222222222222222222222222222222222",
+        "election_type": "1",
+        "tally_scheme": "1",
+        "option_count": "3",
+        "min_selections": "0",
+        "max_selections": "1",
+        "electorate": [
+          {
+            "tier": "0",
+            "group_id": "1",
+            "root": "0000000000000000000000000000000000000000000000000123456789abcdef",
+            "root_l2_block": "1000",
+            "group_size": "5000"
+          },
+          {
+            "tier": "2",
+            "group_id": "3",
+            "root": "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000000",
+            "root_l2_block": "1000",
+            "group_size": "120"
+          }
+        ],
+        "membership_vk_hash": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+        "panel_id": "606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f",
+        "threshold": "4",
+        "panel_size": "7",
+        "ceremony_transcript_hash": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+        "opens_at": "1767225600",
+        "closes_at": "1767830400",
+        "l1_inclusion_bound": "3600",
+        "sequencing_window": "3600",
+        "max_sequencer_drift": "1800",
+        "display_text_commitment": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf"
+      },
+      "encoding": "0001010100000009000101000200000301000401000501000601000701000801000901101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f0000000000014a340000000000aa36a71111111111111111111111111111111111111111121212121212121212121212121212121212121213131313131313131313131313131313131313131414141414141414141414141414141414141414212121212121212121212121212121212121212122222222222222222222222222222222222222220101000300000001000000020000000000000000010000000000000000000000000000000000000000000000000123456789abcdef00000000000003e8000000000000138802000000000000000330644e72e131a029b85045b68181585d2833e84879b9709143e1f593f000000000000000000003e80000000000000078404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f0407808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f000000006955b90000000000695ef38000000e100000000000000e100000000000000708a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "hash": "57e56f04b3a42cf7b5b3c303496a4a29fdf3476b4ffd9e461a616de3d76983cf",
+      "illFormed": "profile-version"
+    },
+    {
+      "id": "definition-one-option",
+      "description": "option_count 1",
+      "type": {
+        "kind": "ref",
+        "name": "election-definition-v1"
+      },
+      "value": {
+        "profile": {
+          "protocol_major": "1",
+          "pins": [
+            {
+              "record_type": "1",
+              "version": "1"
+            },
+            {
+              "record_type": "2",
+              "version": "1"
+            },
+            {
+              "record_type": "3",
+              "version": "1"
+            },
+            {
+              "record_type": "4",
+              "version": "1"
+            },
+            {
+              "record_type": "5",
+              "version": "1"
+            },
+            {
+              "record_type": "6",
+              "version": "1"
+            },
+            {
+              "record_type": "7",
+              "version": "1"
+            },
+            {
+              "record_type": "8",
+              "version": "1"
+            },
+            {
+              "record_type": "9",
+              "version": "1"
+            }
+          ]
+        },
+        "election_id": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+        "l2_chain_id": "84532",
+        "l1_chain_id": "11155111",
+        "election_registry": "1111111111111111111111111111111111111111",
+        "board": "1212121212121212121212121212121212121212",
+        "trustee_registry": "1313131313131313131313131313131313131313",
+        "group_registry": "1414141414141414141414141414141414141414",
+        "l1_anchor": "2121212121212121212121212121212121212121",
+        "l1_relay": "2222222222222222222222222222222222222222",
+        "election_type": "1",
+        "tally_scheme": "1",
+        "option_count": "1",
+        "min_selections": "0",
+        "max_selections": "1",
+        "electorate": [
+          {
+            "tier": "0",
+            "group_id": "1",
+            "root": "0000000000000000000000000000000000000000000000000123456789abcdef",
+            "root_l2_block": "1000",
+            "group_size": "5000"
+          },
+          {
+            "tier": "2",
+            "group_id": "3",
+            "root": "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000000",
+            "root_l2_block": "1000",
+            "group_size": "120"
+          }
+        ],
+        "membership_vk_hash": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+        "panel_id": "606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f",
+        "threshold": "4",
+        "panel_size": "7",
+        "ceremony_transcript_hash": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+        "opens_at": "1767225600",
+        "closes_at": "1767830400",
+        "l1_inclusion_bound": "3600",
+        "sequencing_window": "3600",
+        "max_sequencer_drift": "1800",
+        "display_text_commitment": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf"
+      },
+      "encoding": "0001010100000009000101000201000301000401000501000601000701000801000901101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f0000000000014a340000000000aa36a71111111111111111111111111111111111111111121212121212121212121212121212121212121213131313131313131313131313131313131313131414141414141414141414141414141414141414212121212121212121212121212121212121212122222222222222222222222222222222222222220101000100000001000000020000000000000000010000000000000000000000000000000000000000000000000123456789abcdef00000000000003e8000000000000138802000000000000000330644e72e131a029b85045b68181585d2833e84879b9709143e1f593f000000000000000000003e80000000000000078404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f0407808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f000000006955b90000000000695ef38000000e100000000000000e100000000000000708a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "hash": "701ff413cb99d6e3240d1f5cd18452ed6ffd1e707dd8e8ab77dfcf9c97383e5e",
+      "illFormed": "option-count"
+    },
+    {
+      "id": "definition-65-options",
+      "description": "option_count 65, over MAX_OPTIONS",
+      "type": {
+        "kind": "ref",
+        "name": "election-definition-v1"
+      },
+      "value": {
+        "profile": {
+          "protocol_major": "1",
+          "pins": [
+            {
+              "record_type": "1",
+              "version": "1"
+            },
+            {
+              "record_type": "2",
+              "version": "1"
+            },
+            {
+              "record_type": "3",
+              "version": "1"
+            },
+            {
+              "record_type": "4",
+              "version": "1"
+            },
+            {
+              "record_type": "5",
+              "version": "1"
+            },
+            {
+              "record_type": "6",
+              "version": "1"
+            },
+            {
+              "record_type": "7",
+              "version": "1"
+            },
+            {
+              "record_type": "8",
+              "version": "1"
+            },
+            {
+              "record_type": "9",
+              "version": "1"
+            }
+          ]
+        },
+        "election_id": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+        "l2_chain_id": "84532",
+        "l1_chain_id": "11155111",
+        "election_registry": "1111111111111111111111111111111111111111",
+        "board": "1212121212121212121212121212121212121212",
+        "trustee_registry": "1313131313131313131313131313131313131313",
+        "group_registry": "1414141414141414141414141414141414141414",
+        "l1_anchor": "2121212121212121212121212121212121212121",
+        "l1_relay": "2222222222222222222222222222222222222222",
+        "election_type": "2",
+        "tally_scheme": "1",
+        "option_count": "65",
+        "min_selections": "1",
+        "max_selections": "3",
+        "electorate": [
+          {
+            "tier": "0",
+            "group_id": "1",
+            "root": "0000000000000000000000000000000000000000000000000123456789abcdef",
+            "root_l2_block": "1000",
+            "group_size": "5000"
+          },
+          {
+            "tier": "2",
+            "group_id": "3",
+            "root": "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000000",
+            "root_l2_block": "1000",
+            "group_size": "120"
+          }
+        ],
+        "membership_vk_hash": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+        "panel_id": "606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f",
+        "threshold": "4",
+        "panel_size": "7",
+        "ceremony_transcript_hash": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+        "opens_at": "1767225600",
+        "closes_at": "1767830400",
+        "l1_inclusion_bound": "3600",
+        "sequencing_window": "3600",
+        "max_sequencer_drift": "1800",
+        "display_text_commitment": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf"
+      },
+      "encoding": "0001010100000009000101000201000301000401000501000601000701000801000901101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f0000000000014a340000000000aa36a71111111111111111111111111111111111111111121212121212121212121212121212121212121213131313131313131313131313131313131313131414141414141414141414141414141414141414212121212121212121212121212121212121212122222222222222222222222222222222222222220201004100010003000000020000000000000000010000000000000000000000000000000000000000000000000123456789abcdef00000000000003e8000000000000138802000000000000000330644e72e131a029b85045b68181585d2833e84879b9709143e1f593f000000000000000000003e80000000000000078404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f0407808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f000000006955b90000000000695ef38000000e100000000000000e100000000000000708a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "hash": "d2ab41de022c94a2e2fd9b267bd7e1847966206410f738a0bff4f4e3418495fa",
+      "illFormed": "option-count"
+    },
+    {
+      "id": "definition-plurality-two",
+      "description": "A plurality definition with max_selections 2",
+      "type": {
+        "kind": "ref",
+        "name": "election-definition-v1"
+      },
+      "value": {
+        "profile": {
+          "protocol_major": "1",
+          "pins": [
+            {
+              "record_type": "1",
+              "version": "1"
+            },
+            {
+              "record_type": "2",
+              "version": "1"
+            },
+            {
+              "record_type": "3",
+              "version": "1"
+            },
+            {
+              "record_type": "4",
+              "version": "1"
+            },
+            {
+              "record_type": "5",
+              "version": "1"
+            },
+            {
+              "record_type": "6",
+              "version": "1"
+            },
+            {
+              "record_type": "7",
+              "version": "1"
+            },
+            {
+              "record_type": "8",
+              "version": "1"
+            },
+            {
+              "record_type": "9",
+              "version": "1"
+            }
+          ]
+        },
+        "election_id": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+        "l2_chain_id": "84532",
+        "l1_chain_id": "11155111",
+        "election_registry": "1111111111111111111111111111111111111111",
+        "board": "1212121212121212121212121212121212121212",
+        "trustee_registry": "1313131313131313131313131313131313131313",
+        "group_registry": "1414141414141414141414141414141414141414",
+        "l1_anchor": "2121212121212121212121212121212121212121",
+        "l1_relay": "2222222222222222222222222222222222222222",
+        "election_type": "1",
+        "tally_scheme": "1",
+        "option_count": "3",
+        "min_selections": "0",
+        "max_selections": "2",
+        "electorate": [
+          {
+            "tier": "0",
+            "group_id": "1",
+            "root": "0000000000000000000000000000000000000000000000000123456789abcdef",
+            "root_l2_block": "1000",
+            "group_size": "5000"
+          },
+          {
+            "tier": "2",
+            "group_id": "3",
+            "root": "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000000",
+            "root_l2_block": "1000",
+            "group_size": "120"
+          }
+        ],
+        "membership_vk_hash": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+        "panel_id": "606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f",
+        "threshold": "4",
+        "panel_size": "7",
+        "ceremony_transcript_hash": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+        "opens_at": "1767225600",
+        "closes_at": "1767830400",
+        "l1_inclusion_bound": "3600",
+        "sequencing_window": "3600",
+        "max_sequencer_drift": "1800",
+        "display_text_commitment": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf"
+      },
+      "encoding": "0001010100000009000101000201000301000401000501000601000701000801000901101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f0000000000014a340000000000aa36a71111111111111111111111111111111111111111121212121212121212121212121212121212121213131313131313131313131313131313131313131414141414141414141414141414141414141414212121212121212121212121212121212121212122222222222222222222222222222222222222220101000300000002000000020000000000000000010000000000000000000000000000000000000000000000000123456789abcdef00000000000003e8000000000000138802000000000000000330644e72e131a029b85045b68181585d2833e84879b9709143e1f593f000000000000000000003e80000000000000078404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f0407808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f000000006955b90000000000695ef38000000e100000000000000e100000000000000708a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "hash": "b5482607bf89a731be9393302942ad7e27d693d53cfb5c36c2e30347cbf5df93",
+      "illFormed": "selections"
+    },
+    {
+      "id": "definition-min-over-max",
+      "description": "min_selections 4 over max_selections 3",
+      "type": {
+        "kind": "ref",
+        "name": "election-definition-v1"
+      },
+      "value": {
+        "profile": {
+          "protocol_major": "1",
+          "pins": [
+            {
+              "record_type": "1",
+              "version": "1"
+            },
+            {
+              "record_type": "2",
+              "version": "1"
+            },
+            {
+              "record_type": "3",
+              "version": "1"
+            },
+            {
+              "record_type": "4",
+              "version": "1"
+            },
+            {
+              "record_type": "5",
+              "version": "1"
+            },
+            {
+              "record_type": "6",
+              "version": "1"
+            },
+            {
+              "record_type": "7",
+              "version": "1"
+            },
+            {
+              "record_type": "8",
+              "version": "1"
+            },
+            {
+              "record_type": "9",
+              "version": "1"
+            }
+          ]
+        },
+        "election_id": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+        "l2_chain_id": "84532",
+        "l1_chain_id": "11155111",
+        "election_registry": "1111111111111111111111111111111111111111",
+        "board": "1212121212121212121212121212121212121212",
+        "trustee_registry": "1313131313131313131313131313131313131313",
+        "group_registry": "1414141414141414141414141414141414141414",
+        "l1_anchor": "2121212121212121212121212121212121212121",
+        "l1_relay": "2222222222222222222222222222222222222222",
+        "election_type": "2",
+        "tally_scheme": "1",
+        "option_count": "5",
+        "min_selections": "4",
+        "max_selections": "3",
+        "electorate": [
+          {
+            "tier": "0",
+            "group_id": "1",
+            "root": "0000000000000000000000000000000000000000000000000123456789abcdef",
+            "root_l2_block": "1000",
+            "group_size": "5000"
+          },
+          {
+            "tier": "2",
+            "group_id": "3",
+            "root": "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000000",
+            "root_l2_block": "1000",
+            "group_size": "120"
+          }
+        ],
+        "membership_vk_hash": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+        "panel_id": "606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f",
+        "threshold": "4",
+        "panel_size": "7",
+        "ceremony_transcript_hash": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+        "opens_at": "1767225600",
+        "closes_at": "1767830400",
+        "l1_inclusion_bound": "3600",
+        "sequencing_window": "3600",
+        "max_sequencer_drift": "1800",
+        "display_text_commitment": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf"
+      },
+      "encoding": "0001010100000009000101000201000301000401000501000601000701000801000901101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f0000000000014a340000000000aa36a71111111111111111111111111111111111111111121212121212121212121212121212121212121213131313131313131313131313131313131313131414141414141414141414141414141414141414212121212121212121212121212121212121212122222222222222222222222222222222222222220201000500040003000000020000000000000000010000000000000000000000000000000000000000000000000123456789abcdef00000000000003e8000000000000138802000000000000000330644e72e131a029b85045b68181585d2833e84879b9709143e1f593f000000000000000000003e80000000000000078404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f0407808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f000000006955b90000000000695ef38000000e100000000000000e100000000000000708a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "hash": "ef664f31f937d0640506d0375dfa70990b2047ecc2753d06993051dbb403e57e",
+      "illFormed": "selections"
+    },
+    {
+      "id": "definition-max-over-options",
+      "description": "max_selections 6 over option_count 5",
+      "type": {
+        "kind": "ref",
+        "name": "election-definition-v1"
+      },
+      "value": {
+        "profile": {
+          "protocol_major": "1",
+          "pins": [
+            {
+              "record_type": "1",
+              "version": "1"
+            },
+            {
+              "record_type": "2",
+              "version": "1"
+            },
+            {
+              "record_type": "3",
+              "version": "1"
+            },
+            {
+              "record_type": "4",
+              "version": "1"
+            },
+            {
+              "record_type": "5",
+              "version": "1"
+            },
+            {
+              "record_type": "6",
+              "version": "1"
+            },
+            {
+              "record_type": "7",
+              "version": "1"
+            },
+            {
+              "record_type": "8",
+              "version": "1"
+            },
+            {
+              "record_type": "9",
+              "version": "1"
+            }
+          ]
+        },
+        "election_id": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+        "l2_chain_id": "84532",
+        "l1_chain_id": "11155111",
+        "election_registry": "1111111111111111111111111111111111111111",
+        "board": "1212121212121212121212121212121212121212",
+        "trustee_registry": "1313131313131313131313131313131313131313",
+        "group_registry": "1414141414141414141414141414141414141414",
+        "l1_anchor": "2121212121212121212121212121212121212121",
+        "l1_relay": "2222222222222222222222222222222222222222",
+        "election_type": "2",
+        "tally_scheme": "1",
+        "option_count": "5",
+        "min_selections": "1",
+        "max_selections": "6",
+        "electorate": [
+          {
+            "tier": "0",
+            "group_id": "1",
+            "root": "0000000000000000000000000000000000000000000000000123456789abcdef",
+            "root_l2_block": "1000",
+            "group_size": "5000"
+          },
+          {
+            "tier": "2",
+            "group_id": "3",
+            "root": "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000000",
+            "root_l2_block": "1000",
+            "group_size": "120"
+          }
+        ],
+        "membership_vk_hash": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+        "panel_id": "606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f",
+        "threshold": "4",
+        "panel_size": "7",
+        "ceremony_transcript_hash": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+        "opens_at": "1767225600",
+        "closes_at": "1767830400",
+        "l1_inclusion_bound": "3600",
+        "sequencing_window": "3600",
+        "max_sequencer_drift": "1800",
+        "display_text_commitment": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf"
+      },
+      "encoding": "0001010100000009000101000201000301000401000501000601000701000801000901101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f0000000000014a340000000000aa36a71111111111111111111111111111111111111111121212121212121212121212121212121212121213131313131313131313131313131313131313131414141414141414141414141414141414141414212121212121212121212121212121212121212122222222222222222222222222222222222222220201000500010006000000020000000000000000010000000000000000000000000000000000000000000000000123456789abcdef00000000000003e8000000000000138802000000000000000330644e72e131a029b85045b68181585d2833e84879b9709143e1f593f000000000000000000003e80000000000000078404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f0407808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f000000006955b90000000000695ef38000000e100000000000000e100000000000000708a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "hash": "3ab7d1ae9ba6ceb18133535515856abfaf023bc90751d82ed416a1770f76c659",
+      "illFormed": "selections"
+    },
+    {
+      "id": "definition-max-zero",
+      "description": "max_selections 0",
+      "type": {
+        "kind": "ref",
+        "name": "election-definition-v1"
+      },
+      "value": {
+        "profile": {
+          "protocol_major": "1",
+          "pins": [
+            {
+              "record_type": "1",
+              "version": "1"
+            },
+            {
+              "record_type": "2",
+              "version": "1"
+            },
+            {
+              "record_type": "3",
+              "version": "1"
+            },
+            {
+              "record_type": "4",
+              "version": "1"
+            },
+            {
+              "record_type": "5",
+              "version": "1"
+            },
+            {
+              "record_type": "6",
+              "version": "1"
+            },
+            {
+              "record_type": "7",
+              "version": "1"
+            },
+            {
+              "record_type": "8",
+              "version": "1"
+            },
+            {
+              "record_type": "9",
+              "version": "1"
+            }
+          ]
+        },
+        "election_id": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+        "l2_chain_id": "84532",
+        "l1_chain_id": "11155111",
+        "election_registry": "1111111111111111111111111111111111111111",
+        "board": "1212121212121212121212121212121212121212",
+        "trustee_registry": "1313131313131313131313131313131313131313",
+        "group_registry": "1414141414141414141414141414141414141414",
+        "l1_anchor": "2121212121212121212121212121212121212121",
+        "l1_relay": "2222222222222222222222222222222222222222",
+        "election_type": "2",
+        "tally_scheme": "1",
+        "option_count": "5",
+        "min_selections": "0",
+        "max_selections": "0",
+        "electorate": [
+          {
+            "tier": "0",
+            "group_id": "1",
+            "root": "0000000000000000000000000000000000000000000000000123456789abcdef",
+            "root_l2_block": "1000",
+            "group_size": "5000"
+          },
+          {
+            "tier": "2",
+            "group_id": "3",
+            "root": "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000000",
+            "root_l2_block": "1000",
+            "group_size": "120"
+          }
+        ],
+        "membership_vk_hash": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+        "panel_id": "606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f",
+        "threshold": "4",
+        "panel_size": "7",
+        "ceremony_transcript_hash": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+        "opens_at": "1767225600",
+        "closes_at": "1767830400",
+        "l1_inclusion_bound": "3600",
+        "sequencing_window": "3600",
+        "max_sequencer_drift": "1800",
+        "display_text_commitment": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf"
+      },
+      "encoding": "0001010100000009000101000201000301000401000501000601000701000801000901101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f0000000000014a340000000000aa36a71111111111111111111111111111111111111111121212121212121212121212121212121212121213131313131313131313131313131313131313131414141414141414141414141414141414141414212121212121212121212121212121212121212122222222222222222222222222222222222222220201000500000000000000020000000000000000010000000000000000000000000000000000000000000000000123456789abcdef00000000000003e8000000000000138802000000000000000330644e72e131a029b85045b68181585d2833e84879b9709143e1f593f000000000000000000003e80000000000000078404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f0407808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f000000006955b90000000000695ef38000000e100000000000000e100000000000000708a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "hash": "369286f4f35eebcdbf914e16bc052b9ccf37e15288eedaa45b8994774ccf487f",
+      "illFormed": "selections"
+    },
+    {
+      "id": "definition-electorate-empty",
+      "description": "No tiers",
+      "type": {
+        "kind": "ref",
+        "name": "election-definition-v1"
+      },
+      "value": {
+        "profile": {
+          "protocol_major": "1",
+          "pins": [
+            {
+              "record_type": "1",
+              "version": "1"
+            },
+            {
+              "record_type": "2",
+              "version": "1"
+            },
+            {
+              "record_type": "3",
+              "version": "1"
+            },
+            {
+              "record_type": "4",
+              "version": "1"
+            },
+            {
+              "record_type": "5",
+              "version": "1"
+            },
+            {
+              "record_type": "6",
+              "version": "1"
+            },
+            {
+              "record_type": "7",
+              "version": "1"
+            },
+            {
+              "record_type": "8",
+              "version": "1"
+            },
+            {
+              "record_type": "9",
+              "version": "1"
+            }
+          ]
+        },
+        "election_id": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+        "l2_chain_id": "84532",
+        "l1_chain_id": "11155111",
+        "election_registry": "1111111111111111111111111111111111111111",
+        "board": "1212121212121212121212121212121212121212",
+        "trustee_registry": "1313131313131313131313131313131313131313",
+        "group_registry": "1414141414141414141414141414141414141414",
+        "l1_anchor": "2121212121212121212121212121212121212121",
+        "l1_relay": "2222222222222222222222222222222222222222",
+        "election_type": "1",
+        "tally_scheme": "1",
+        "option_count": "3",
+        "min_selections": "0",
+        "max_selections": "1",
+        "electorate": [],
+        "membership_vk_hash": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+        "panel_id": "606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f",
+        "threshold": "4",
+        "panel_size": "7",
+        "ceremony_transcript_hash": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+        "opens_at": "1767225600",
+        "closes_at": "1767830400",
+        "l1_inclusion_bound": "3600",
+        "sequencing_window": "3600",
+        "max_sequencer_drift": "1800",
+        "display_text_commitment": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf"
+      },
+      "encoding": "0001010100000009000101000201000301000401000501000601000701000801000901101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f0000000000014a340000000000aa36a7111111111111111111111111111111111111111112121212121212121212121212121212121212121313131313131313131313131313131313131313141414141414141414141414141414141414141421212121212121212121212121212121212121212222222222222222222222222222222222222222010100030000000100000000404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f0407808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f000000006955b90000000000695ef38000000e100000000000000e100000000000000708a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "hash": "464c04a14f7b777a6cf2450c86dd72fc2a7701adfab3766dd021912d489504d6",
+      "illFormed": "electorate"
+    },
+    {
+      "id": "definition-tiers-unsorted",
+      "description": "Tier 2 before Tier 0",
+      "type": {
+        "kind": "ref",
+        "name": "election-definition-v1"
+      },
+      "value": {
+        "profile": {
+          "protocol_major": "1",
+          "pins": [
+            {
+              "record_type": "1",
+              "version": "1"
+            },
+            {
+              "record_type": "2",
+              "version": "1"
+            },
+            {
+              "record_type": "3",
+              "version": "1"
+            },
+            {
+              "record_type": "4",
+              "version": "1"
+            },
+            {
+              "record_type": "5",
+              "version": "1"
+            },
+            {
+              "record_type": "6",
+              "version": "1"
+            },
+            {
+              "record_type": "7",
+              "version": "1"
+            },
+            {
+              "record_type": "8",
+              "version": "1"
+            },
+            {
+              "record_type": "9",
+              "version": "1"
+            }
+          ]
+        },
+        "election_id": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+        "l2_chain_id": "84532",
+        "l1_chain_id": "11155111",
+        "election_registry": "1111111111111111111111111111111111111111",
+        "board": "1212121212121212121212121212121212121212",
+        "trustee_registry": "1313131313131313131313131313131313131313",
+        "group_registry": "1414141414141414141414141414141414141414",
+        "l1_anchor": "2121212121212121212121212121212121212121",
+        "l1_relay": "2222222222222222222222222222222222222222",
+        "election_type": "1",
+        "tally_scheme": "1",
+        "option_count": "3",
+        "min_selections": "0",
+        "max_selections": "1",
+        "electorate": [
+          {
+            "tier": "2",
+            "group_id": "3",
+            "root": "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000000",
+            "root_l2_block": "1000",
+            "group_size": "120"
+          },
+          {
+            "tier": "0",
+            "group_id": "1",
+            "root": "0000000000000000000000000000000000000000000000000123456789abcdef",
+            "root_l2_block": "1000",
+            "group_size": "5000"
+          }
+        ],
+        "membership_vk_hash": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+        "panel_id": "606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f",
+        "threshold": "4",
+        "panel_size": "7",
+        "ceremony_transcript_hash": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+        "opens_at": "1767225600",
+        "closes_at": "1767830400",
+        "l1_inclusion_bound": "3600",
+        "sequencing_window": "3600",
+        "max_sequencer_drift": "1800",
+        "display_text_commitment": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf"
+      },
+      "encoding": "0001010100000009000101000201000301000401000501000601000701000801000901101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f0000000000014a340000000000aa36a711111111111111111111111111111111111111111212121212121212121212121212121212121212131313131313131313131313131313131313131314141414141414141414141414141414141414142121212121212121212121212121212121212121222222222222222222222222222222222222222201010003000000010000000202000000000000000330644e72e131a029b85045b68181585d2833e84879b9709143e1f593f000000000000000000003e800000000000000780000000000000000010000000000000000000000000000000000000000000000000123456789abcdef00000000000003e80000000000001388404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f0407808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f000000006955b90000000000695ef38000000e100000000000000e100000000000000708a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "hash": "55c1ea133e299df2b17516b22be03646e5f7cebc9e05ebfe99b0fb25af9cf27b",
+      "illFormed": "electorate"
+    },
+    {
+      "id": "definition-tier-repeated",
+      "description": "Tier 0 twice, in two groups, so the tiers-only partition would count it twice",
+      "type": {
+        "kind": "ref",
+        "name": "election-definition-v1"
+      },
+      "value": {
+        "profile": {
+          "protocol_major": "1",
+          "pins": [
+            {
+              "record_type": "1",
+              "version": "1"
+            },
+            {
+              "record_type": "2",
+              "version": "1"
+            },
+            {
+              "record_type": "3",
+              "version": "1"
+            },
+            {
+              "record_type": "4",
+              "version": "1"
+            },
+            {
+              "record_type": "5",
+              "version": "1"
+            },
+            {
+              "record_type": "6",
+              "version": "1"
+            },
+            {
+              "record_type": "7",
+              "version": "1"
+            },
+            {
+              "record_type": "8",
+              "version": "1"
+            },
+            {
+              "record_type": "9",
+              "version": "1"
+            }
+          ]
+        },
+        "election_id": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+        "l2_chain_id": "84532",
+        "l1_chain_id": "11155111",
+        "election_registry": "1111111111111111111111111111111111111111",
+        "board": "1212121212121212121212121212121212121212",
+        "trustee_registry": "1313131313131313131313131313131313131313",
+        "group_registry": "1414141414141414141414141414141414141414",
+        "l1_anchor": "2121212121212121212121212121212121212121",
+        "l1_relay": "2222222222222222222222222222222222222222",
+        "election_type": "1",
+        "tally_scheme": "1",
+        "option_count": "3",
+        "min_selections": "0",
+        "max_selections": "1",
+        "electorate": [
+          {
+            "tier": "0",
+            "group_id": "1",
+            "root": "0000000000000000000000000000000000000000000000000123456789abcdef",
+            "root_l2_block": "1000",
+            "group_size": "5000"
+          },
+          {
+            "tier": "0",
+            "group_id": "2",
+            "root": "0000000000000000000000000000000000000000000000000123456789abcdef",
+            "root_l2_block": "1000",
+            "group_size": "5000"
+          }
+        ],
+        "membership_vk_hash": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+        "panel_id": "606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f",
+        "threshold": "4",
+        "panel_size": "7",
+        "ceremony_transcript_hash": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+        "opens_at": "1767225600",
+        "closes_at": "1767830400",
+        "l1_inclusion_bound": "3600",
+        "sequencing_window": "3600",
+        "max_sequencer_drift": "1800",
+        "display_text_commitment": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf"
+      },
+      "encoding": "0001010100000009000101000201000301000401000501000601000701000801000901101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f0000000000014a340000000000aa36a71111111111111111111111111111111111111111121212121212121212121212121212121212121213131313131313131313131313131313131313131414141414141414141414141414141414141414212121212121212121212121212121212121212122222222222222222222222222222222222222220101000300000001000000020000000000000000010000000000000000000000000000000000000000000000000123456789abcdef00000000000003e800000000000013880000000000000000020000000000000000000000000000000000000000000000000123456789abcdef00000000000003e80000000000001388404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f0407808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f000000006955b90000000000695ef38000000e100000000000000e100000000000000708a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "hash": "d800e5f65249c29e369cb61eabf48e70be0409dcacbf90b82207e2c7663643aa",
+      "illFormed": "electorate"
+    },
+    {
+      "id": "definition-group-shared",
+      "description": "Tier 0 and Tier 2 naming the same group",
+      "type": {
+        "kind": "ref",
+        "name": "election-definition-v1"
+      },
+      "value": {
+        "profile": {
+          "protocol_major": "1",
+          "pins": [
+            {
+              "record_type": "1",
+              "version": "1"
+            },
+            {
+              "record_type": "2",
+              "version": "1"
+            },
+            {
+              "record_type": "3",
+              "version": "1"
+            },
+            {
+              "record_type": "4",
+              "version": "1"
+            },
+            {
+              "record_type": "5",
+              "version": "1"
+            },
+            {
+              "record_type": "6",
+              "version": "1"
+            },
+            {
+              "record_type": "7",
+              "version": "1"
+            },
+            {
+              "record_type": "8",
+              "version": "1"
+            },
+            {
+              "record_type": "9",
+              "version": "1"
+            }
+          ]
+        },
+        "election_id": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+        "l2_chain_id": "84532",
+        "l1_chain_id": "11155111",
+        "election_registry": "1111111111111111111111111111111111111111",
+        "board": "1212121212121212121212121212121212121212",
+        "trustee_registry": "1313131313131313131313131313131313131313",
+        "group_registry": "1414141414141414141414141414141414141414",
+        "l1_anchor": "2121212121212121212121212121212121212121",
+        "l1_relay": "2222222222222222222222222222222222222222",
+        "election_type": "1",
+        "tally_scheme": "1",
+        "option_count": "3",
+        "min_selections": "0",
+        "max_selections": "1",
+        "electorate": [
+          {
+            "tier": "0",
+            "group_id": "1",
+            "root": "0000000000000000000000000000000000000000000000000123456789abcdef",
+            "root_l2_block": "1000",
+            "group_size": "5000"
+          },
+          {
+            "tier": "2",
+            "group_id": "1",
+            "root": "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000000",
+            "root_l2_block": "1000",
+            "group_size": "120"
+          }
+        ],
+        "membership_vk_hash": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+        "panel_id": "606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f",
+        "threshold": "4",
+        "panel_size": "7",
+        "ceremony_transcript_hash": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+        "opens_at": "1767225600",
+        "closes_at": "1767830400",
+        "l1_inclusion_bound": "3600",
+        "sequencing_window": "3600",
+        "max_sequencer_drift": "1800",
+        "display_text_commitment": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf"
+      },
+      "encoding": "0001010100000009000101000201000301000401000501000601000701000801000901101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f0000000000014a340000000000aa36a71111111111111111111111111111111111111111121212121212121212121212121212121212121213131313131313131313131313131313131313131414141414141414141414141414141414141414212121212121212121212121212121212121212122222222222222222222222222222222222222220101000300000001000000020000000000000000010000000000000000000000000000000000000000000000000123456789abcdef00000000000003e8000000000000138802000000000000000130644e72e131a029b85045b68181585d2833e84879b9709143e1f593f000000000000000000003e80000000000000078404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f0407808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f000000006955b90000000000695ef38000000e100000000000000e100000000000000708a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "hash": "24f2e404462aa52f9289db36509aeda50a8151efc94b48e6db37cb5da3165731",
+      "illFormed": "electorate"
+    },
+    {
+      "id": "definition-group-empty",
+      "description": "A group of size 0",
+      "type": {
+        "kind": "ref",
+        "name": "election-definition-v1"
+      },
+      "value": {
+        "profile": {
+          "protocol_major": "1",
+          "pins": [
+            {
+              "record_type": "1",
+              "version": "1"
+            },
+            {
+              "record_type": "2",
+              "version": "1"
+            },
+            {
+              "record_type": "3",
+              "version": "1"
+            },
+            {
+              "record_type": "4",
+              "version": "1"
+            },
+            {
+              "record_type": "5",
+              "version": "1"
+            },
+            {
+              "record_type": "6",
+              "version": "1"
+            },
+            {
+              "record_type": "7",
+              "version": "1"
+            },
+            {
+              "record_type": "8",
+              "version": "1"
+            },
+            {
+              "record_type": "9",
+              "version": "1"
+            }
+          ]
+        },
+        "election_id": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+        "l2_chain_id": "84532",
+        "l1_chain_id": "11155111",
+        "election_registry": "1111111111111111111111111111111111111111",
+        "board": "1212121212121212121212121212121212121212",
+        "trustee_registry": "1313131313131313131313131313131313131313",
+        "group_registry": "1414141414141414141414141414141414141414",
+        "l1_anchor": "2121212121212121212121212121212121212121",
+        "l1_relay": "2222222222222222222222222222222222222222",
+        "election_type": "1",
+        "tally_scheme": "1",
+        "option_count": "3",
+        "min_selections": "0",
+        "max_selections": "1",
+        "electorate": [
+          {
+            "tier": "0",
+            "group_id": "1",
+            "root": "0000000000000000000000000000000000000000000000000123456789abcdef",
+            "root_l2_block": "1000",
+            "group_size": "0"
+          }
+        ],
+        "membership_vk_hash": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+        "panel_id": "606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f",
+        "threshold": "4",
+        "panel_size": "7",
+        "ceremony_transcript_hash": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+        "opens_at": "1767225600",
+        "closes_at": "1767830400",
+        "l1_inclusion_bound": "3600",
+        "sequencing_window": "3600",
+        "max_sequencer_drift": "1800",
+        "display_text_commitment": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf"
+      },
+      "encoding": "0001010100000009000101000201000301000401000501000601000701000801000901101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f0000000000014a340000000000aa36a71111111111111111111111111111111111111111121212121212121212121212121212121212121213131313131313131313131313131313131313131414141414141414141414141414141414141414212121212121212121212121212121212121212122222222222222222222222222222222222222220101000300000001000000010000000000000000010000000000000000000000000000000000000000000000000123456789abcdef00000000000003e80000000000000000404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f0407808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f000000006955b90000000000695ef38000000e100000000000000e100000000000000708a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "hash": "9d104fb61db5c3d8ff867447c6f14cd6f7b74214a5a9ee39607510e07827c168",
+      "illFormed": "electorate"
+    },
+    {
+      "id": "definition-threshold-zero",
+      "description": "threshold 0",
+      "type": {
+        "kind": "ref",
+        "name": "election-definition-v1"
+      },
+      "value": {
+        "profile": {
+          "protocol_major": "1",
+          "pins": [
+            {
+              "record_type": "1",
+              "version": "1"
+            },
+            {
+              "record_type": "2",
+              "version": "1"
+            },
+            {
+              "record_type": "3",
+              "version": "1"
+            },
+            {
+              "record_type": "4",
+              "version": "1"
+            },
+            {
+              "record_type": "5",
+              "version": "1"
+            },
+            {
+              "record_type": "6",
+              "version": "1"
+            },
+            {
+              "record_type": "7",
+              "version": "1"
+            },
+            {
+              "record_type": "8",
+              "version": "1"
+            },
+            {
+              "record_type": "9",
+              "version": "1"
+            }
+          ]
+        },
+        "election_id": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+        "l2_chain_id": "84532",
+        "l1_chain_id": "11155111",
+        "election_registry": "1111111111111111111111111111111111111111",
+        "board": "1212121212121212121212121212121212121212",
+        "trustee_registry": "1313131313131313131313131313131313131313",
+        "group_registry": "1414141414141414141414141414141414141414",
+        "l1_anchor": "2121212121212121212121212121212121212121",
+        "l1_relay": "2222222222222222222222222222222222222222",
+        "election_type": "1",
+        "tally_scheme": "1",
+        "option_count": "3",
+        "min_selections": "0",
+        "max_selections": "1",
+        "electorate": [
+          {
+            "tier": "0",
+            "group_id": "1",
+            "root": "0000000000000000000000000000000000000000000000000123456789abcdef",
+            "root_l2_block": "1000",
+            "group_size": "5000"
+          },
+          {
+            "tier": "2",
+            "group_id": "3",
+            "root": "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000000",
+            "root_l2_block": "1000",
+            "group_size": "120"
+          }
+        ],
+        "membership_vk_hash": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+        "panel_id": "606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f",
+        "threshold": "0",
+        "panel_size": "7",
+        "ceremony_transcript_hash": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+        "opens_at": "1767225600",
+        "closes_at": "1767830400",
+        "l1_inclusion_bound": "3600",
+        "sequencing_window": "3600",
+        "max_sequencer_drift": "1800",
+        "display_text_commitment": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf"
+      },
+      "encoding": "0001010100000009000101000201000301000401000501000601000701000801000901101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f0000000000014a340000000000aa36a71111111111111111111111111111111111111111121212121212121212121212121212121212121213131313131313131313131313131313131313131414141414141414141414141414141414141414212121212121212121212121212121212121212122222222222222222222222222222222222222220101000300000001000000020000000000000000010000000000000000000000000000000000000000000000000123456789abcdef00000000000003e8000000000000138802000000000000000330644e72e131a029b85045b68181585d2833e84879b9709143e1f593f000000000000000000003e80000000000000078404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f0007808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f000000006955b90000000000695ef38000000e100000000000000e100000000000000708a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "hash": "e628daf6608cc18ff731c97302551e125a10688c8299afe1d53ae0948d2c5eb9",
+      "illFormed": "panel"
+    },
+    {
+      "id": "definition-threshold-over-size",
+      "description": "threshold 8 over panel_size 7",
+      "type": {
+        "kind": "ref",
+        "name": "election-definition-v1"
+      },
+      "value": {
+        "profile": {
+          "protocol_major": "1",
+          "pins": [
+            {
+              "record_type": "1",
+              "version": "1"
+            },
+            {
+              "record_type": "2",
+              "version": "1"
+            },
+            {
+              "record_type": "3",
+              "version": "1"
+            },
+            {
+              "record_type": "4",
+              "version": "1"
+            },
+            {
+              "record_type": "5",
+              "version": "1"
+            },
+            {
+              "record_type": "6",
+              "version": "1"
+            },
+            {
+              "record_type": "7",
+              "version": "1"
+            },
+            {
+              "record_type": "8",
+              "version": "1"
+            },
+            {
+              "record_type": "9",
+              "version": "1"
+            }
+          ]
+        },
+        "election_id": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+        "l2_chain_id": "84532",
+        "l1_chain_id": "11155111",
+        "election_registry": "1111111111111111111111111111111111111111",
+        "board": "1212121212121212121212121212121212121212",
+        "trustee_registry": "1313131313131313131313131313131313131313",
+        "group_registry": "1414141414141414141414141414141414141414",
+        "l1_anchor": "2121212121212121212121212121212121212121",
+        "l1_relay": "2222222222222222222222222222222222222222",
+        "election_type": "1",
+        "tally_scheme": "1",
+        "option_count": "3",
+        "min_selections": "0",
+        "max_selections": "1",
+        "electorate": [
+          {
+            "tier": "0",
+            "group_id": "1",
+            "root": "0000000000000000000000000000000000000000000000000123456789abcdef",
+            "root_l2_block": "1000",
+            "group_size": "5000"
+          },
+          {
+            "tier": "2",
+            "group_id": "3",
+            "root": "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000000",
+            "root_l2_block": "1000",
+            "group_size": "120"
+          }
+        ],
+        "membership_vk_hash": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+        "panel_id": "606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f",
+        "threshold": "8",
+        "panel_size": "7",
+        "ceremony_transcript_hash": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+        "opens_at": "1767225600",
+        "closes_at": "1767830400",
+        "l1_inclusion_bound": "3600",
+        "sequencing_window": "3600",
+        "max_sequencer_drift": "1800",
+        "display_text_commitment": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf"
+      },
+      "encoding": "0001010100000009000101000201000301000401000501000601000701000801000901101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f0000000000014a340000000000aa36a71111111111111111111111111111111111111111121212121212121212121212121212121212121213131313131313131313131313131313131313131414141414141414141414141414141414141414212121212121212121212121212121212121212122222222222222222222222222222222222222220101000300000001000000020000000000000000010000000000000000000000000000000000000000000000000123456789abcdef00000000000003e8000000000000138802000000000000000330644e72e131a029b85045b68181585d2833e84879b9709143e1f593f000000000000000000003e80000000000000078404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f0807808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f000000006955b90000000000695ef38000000e100000000000000e100000000000000708a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "hash": "fac2d63137c4a04f1499968ef10a1e5d244530363eacd6d378cf6aa67632e361",
+      "illFormed": "panel"
+    },
+    {
+      "id": "definition-panel-17",
+      "description": "panel_size 17, over MAX_TRUSTEES",
+      "type": {
+        "kind": "ref",
+        "name": "election-definition-v1"
+      },
+      "value": {
+        "profile": {
+          "protocol_major": "1",
+          "pins": [
+            {
+              "record_type": "1",
+              "version": "1"
+            },
+            {
+              "record_type": "2",
+              "version": "1"
+            },
+            {
+              "record_type": "3",
+              "version": "1"
+            },
+            {
+              "record_type": "4",
+              "version": "1"
+            },
+            {
+              "record_type": "5",
+              "version": "1"
+            },
+            {
+              "record_type": "6",
+              "version": "1"
+            },
+            {
+              "record_type": "7",
+              "version": "1"
+            },
+            {
+              "record_type": "8",
+              "version": "1"
+            },
+            {
+              "record_type": "9",
+              "version": "1"
+            }
+          ]
+        },
+        "election_id": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+        "l2_chain_id": "84532",
+        "l1_chain_id": "11155111",
+        "election_registry": "1111111111111111111111111111111111111111",
+        "board": "1212121212121212121212121212121212121212",
+        "trustee_registry": "1313131313131313131313131313131313131313",
+        "group_registry": "1414141414141414141414141414141414141414",
+        "l1_anchor": "2121212121212121212121212121212121212121",
+        "l1_relay": "2222222222222222222222222222222222222222",
+        "election_type": "1",
+        "tally_scheme": "1",
+        "option_count": "3",
+        "min_selections": "0",
+        "max_selections": "1",
+        "electorate": [
+          {
+            "tier": "0",
+            "group_id": "1",
+            "root": "0000000000000000000000000000000000000000000000000123456789abcdef",
+            "root_l2_block": "1000",
+            "group_size": "5000"
+          },
+          {
+            "tier": "2",
+            "group_id": "3",
+            "root": "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000000",
+            "root_l2_block": "1000",
+            "group_size": "120"
+          }
+        ],
+        "membership_vk_hash": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+        "panel_id": "606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f",
+        "threshold": "4",
+        "panel_size": "17",
+        "ceremony_transcript_hash": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+        "opens_at": "1767225600",
+        "closes_at": "1767830400",
+        "l1_inclusion_bound": "3600",
+        "sequencing_window": "3600",
+        "max_sequencer_drift": "1800",
+        "display_text_commitment": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf"
+      },
+      "encoding": "0001010100000009000101000201000301000401000501000601000701000801000901101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f0000000000014a340000000000aa36a71111111111111111111111111111111111111111121212121212121212121212121212121212121213131313131313131313131313131313131313131414141414141414141414141414141414141414212121212121212121212121212121212121212122222222222222222222222222222222222222220101000300000001000000020000000000000000010000000000000000000000000000000000000000000000000123456789abcdef00000000000003e8000000000000138802000000000000000330644e72e131a029b85045b68181585d2833e84879b9709143e1f593f000000000000000000003e80000000000000078404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f0411808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f000000006955b90000000000695ef38000000e100000000000000e100000000000000708a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "hash": "1d8e432ae7bbea31d53d5f13eb58a872aea4e1cfda86d30299a14eb66d782648",
+      "illFormed": "panel"
+    },
+    {
+      "id": "definition-l2-chain-zero",
+      "description": "l2_chain_id 0",
+      "type": {
+        "kind": "ref",
+        "name": "election-definition-v1"
+      },
+      "value": {
+        "profile": {
+          "protocol_major": "1",
+          "pins": [
+            {
+              "record_type": "1",
+              "version": "1"
+            },
+            {
+              "record_type": "2",
+              "version": "1"
+            },
+            {
+              "record_type": "3",
+              "version": "1"
+            },
+            {
+              "record_type": "4",
+              "version": "1"
+            },
+            {
+              "record_type": "5",
+              "version": "1"
+            },
+            {
+              "record_type": "6",
+              "version": "1"
+            },
+            {
+              "record_type": "7",
+              "version": "1"
+            },
+            {
+              "record_type": "8",
+              "version": "1"
+            },
+            {
+              "record_type": "9",
+              "version": "1"
+            }
+          ]
+        },
+        "election_id": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+        "l2_chain_id": "0",
+        "l1_chain_id": "11155111",
+        "election_registry": "1111111111111111111111111111111111111111",
+        "board": "1212121212121212121212121212121212121212",
+        "trustee_registry": "1313131313131313131313131313131313131313",
+        "group_registry": "1414141414141414141414141414141414141414",
+        "l1_anchor": "2121212121212121212121212121212121212121",
+        "l1_relay": "2222222222222222222222222222222222222222",
+        "election_type": "1",
+        "tally_scheme": "1",
+        "option_count": "3",
+        "min_selections": "0",
+        "max_selections": "1",
+        "electorate": [
+          {
+            "tier": "0",
+            "group_id": "1",
+            "root": "0000000000000000000000000000000000000000000000000123456789abcdef",
+            "root_l2_block": "1000",
+            "group_size": "5000"
+          },
+          {
+            "tier": "2",
+            "group_id": "3",
+            "root": "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000000",
+            "root_l2_block": "1000",
+            "group_size": "120"
+          }
+        ],
+        "membership_vk_hash": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+        "panel_id": "606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f",
+        "threshold": "4",
+        "panel_size": "7",
+        "ceremony_transcript_hash": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+        "opens_at": "1767225600",
+        "closes_at": "1767830400",
+        "l1_inclusion_bound": "3600",
+        "sequencing_window": "3600",
+        "max_sequencer_drift": "1800",
+        "display_text_commitment": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf"
+      },
+      "encoding": "0001010100000009000101000201000301000401000501000601000701000801000901101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f00000000000000000000000000aa36a71111111111111111111111111111111111111111121212121212121212121212121212121212121213131313131313131313131313131313131313131414141414141414141414141414141414141414212121212121212121212121212121212121212122222222222222222222222222222222222222220101000300000001000000020000000000000000010000000000000000000000000000000000000000000000000123456789abcdef00000000000003e8000000000000138802000000000000000330644e72e131a029b85045b68181585d2833e84879b9709143e1f593f000000000000000000003e80000000000000078404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f0407808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f000000006955b90000000000695ef38000000e100000000000000e100000000000000708a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "hash": "bf1ad1c98413a9629cb38e64996d89490a1526657848cb044588f662de9e82a5",
+      "illFormed": "chain"
+    },
+    {
+      "id": "definition-same-chain",
+      "description": "l1_chain_id equal to l2_chain_id",
+      "type": {
+        "kind": "ref",
+        "name": "election-definition-v1"
+      },
+      "value": {
+        "profile": {
+          "protocol_major": "1",
+          "pins": [
+            {
+              "record_type": "1",
+              "version": "1"
+            },
+            {
+              "record_type": "2",
+              "version": "1"
+            },
+            {
+              "record_type": "3",
+              "version": "1"
+            },
+            {
+              "record_type": "4",
+              "version": "1"
+            },
+            {
+              "record_type": "5",
+              "version": "1"
+            },
+            {
+              "record_type": "6",
+              "version": "1"
+            },
+            {
+              "record_type": "7",
+              "version": "1"
+            },
+            {
+              "record_type": "8",
+              "version": "1"
+            },
+            {
+              "record_type": "9",
+              "version": "1"
+            }
+          ]
+        },
+        "election_id": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+        "l2_chain_id": "84532",
+        "l1_chain_id": "84532",
+        "election_registry": "1111111111111111111111111111111111111111",
+        "board": "1212121212121212121212121212121212121212",
+        "trustee_registry": "1313131313131313131313131313131313131313",
+        "group_registry": "1414141414141414141414141414141414141414",
+        "l1_anchor": "2121212121212121212121212121212121212121",
+        "l1_relay": "2222222222222222222222222222222222222222",
+        "election_type": "1",
+        "tally_scheme": "1",
+        "option_count": "3",
+        "min_selections": "0",
+        "max_selections": "1",
+        "electorate": [
+          {
+            "tier": "0",
+            "group_id": "1",
+            "root": "0000000000000000000000000000000000000000000000000123456789abcdef",
+            "root_l2_block": "1000",
+            "group_size": "5000"
+          },
+          {
+            "tier": "2",
+            "group_id": "3",
+            "root": "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000000",
+            "root_l2_block": "1000",
+            "group_size": "120"
+          }
+        ],
+        "membership_vk_hash": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+        "panel_id": "606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f",
+        "threshold": "4",
+        "panel_size": "7",
+        "ceremony_transcript_hash": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+        "opens_at": "1767225600",
+        "closes_at": "1767830400",
+        "l1_inclusion_bound": "3600",
+        "sequencing_window": "3600",
+        "max_sequencer_drift": "1800",
+        "display_text_commitment": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf"
+      },
+      "encoding": "0001010100000009000101000201000301000401000501000601000701000801000901101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f0000000000014a340000000000014a341111111111111111111111111111111111111111121212121212121212121212121212121212121213131313131313131313131313131313131313131414141414141414141414141414141414141414212121212121212121212121212121212121212122222222222222222222222222222222222222220101000300000001000000020000000000000000010000000000000000000000000000000000000000000000000123456789abcdef00000000000003e8000000000000138802000000000000000330644e72e131a029b85045b68181585d2833e84879b9709143e1f593f000000000000000000003e80000000000000078404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f0407808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f000000006955b90000000000695ef38000000e100000000000000e100000000000000708a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "hash": "4d945d7e5164dc56d3e0845ac95b28ceb744244f064a6ed3c345159d6cd8a3e8",
+      "illFormed": "chain"
+    },
+    {
+      "id": "definition-address-zero",
+      "description": "The zero address as l1_relay",
+      "type": {
+        "kind": "ref",
+        "name": "election-definition-v1"
+      },
+      "value": {
+        "profile": {
+          "protocol_major": "1",
+          "pins": [
+            {
+              "record_type": "1",
+              "version": "1"
+            },
+            {
+              "record_type": "2",
+              "version": "1"
+            },
+            {
+              "record_type": "3",
+              "version": "1"
+            },
+            {
+              "record_type": "4",
+              "version": "1"
+            },
+            {
+              "record_type": "5",
+              "version": "1"
+            },
+            {
+              "record_type": "6",
+              "version": "1"
+            },
+            {
+              "record_type": "7",
+              "version": "1"
+            },
+            {
+              "record_type": "8",
+              "version": "1"
+            },
+            {
+              "record_type": "9",
+              "version": "1"
+            }
+          ]
+        },
+        "election_id": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+        "l2_chain_id": "84532",
+        "l1_chain_id": "11155111",
+        "election_registry": "1111111111111111111111111111111111111111",
+        "board": "1212121212121212121212121212121212121212",
+        "trustee_registry": "1313131313131313131313131313131313131313",
+        "group_registry": "1414141414141414141414141414141414141414",
+        "l1_anchor": "2121212121212121212121212121212121212121",
+        "l1_relay": "0000000000000000000000000000000000000000",
+        "election_type": "1",
+        "tally_scheme": "1",
+        "option_count": "3",
+        "min_selections": "0",
+        "max_selections": "1",
+        "electorate": [
+          {
+            "tier": "0",
+            "group_id": "1",
+            "root": "0000000000000000000000000000000000000000000000000123456789abcdef",
+            "root_l2_block": "1000",
+            "group_size": "5000"
+          },
+          {
+            "tier": "2",
+            "group_id": "3",
+            "root": "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000000",
+            "root_l2_block": "1000",
+            "group_size": "120"
+          }
+        ],
+        "membership_vk_hash": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+        "panel_id": "606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f",
+        "threshold": "4",
+        "panel_size": "7",
+        "ceremony_transcript_hash": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+        "opens_at": "1767225600",
+        "closes_at": "1767830400",
+        "l1_inclusion_bound": "3600",
+        "sequencing_window": "3600",
+        "max_sequencer_drift": "1800",
+        "display_text_commitment": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf"
+      },
+      "encoding": "0001010100000009000101000201000301000401000501000601000701000801000901101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f0000000000014a340000000000aa36a71111111111111111111111111111111111111111121212121212121212121212121212121212121213131313131313131313131313131313131313131414141414141414141414141414141414141414212121212121212121212121212121212121212100000000000000000000000000000000000000000101000300000001000000020000000000000000010000000000000000000000000000000000000000000000000123456789abcdef00000000000003e8000000000000138802000000000000000330644e72e131a029b85045b68181585d2833e84879b9709143e1f593f000000000000000000003e80000000000000078404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f0407808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f000000006955b90000000000695ef38000000e100000000000000e100000000000000708a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "hash": "c2852300b6431495ee0e587fc0a2b049c1f3650e8662702fd81080112fa7ab7b",
+      "illFormed": "chain"
+    },
+    {
+      "id": "definition-l2-addresses-repeated",
+      "description": "board equal to election_registry",
+      "type": {
+        "kind": "ref",
+        "name": "election-definition-v1"
+      },
+      "value": {
+        "profile": {
+          "protocol_major": "1",
+          "pins": [
+            {
+              "record_type": "1",
+              "version": "1"
+            },
+            {
+              "record_type": "2",
+              "version": "1"
+            },
+            {
+              "record_type": "3",
+              "version": "1"
+            },
+            {
+              "record_type": "4",
+              "version": "1"
+            },
+            {
+              "record_type": "5",
+              "version": "1"
+            },
+            {
+              "record_type": "6",
+              "version": "1"
+            },
+            {
+              "record_type": "7",
+              "version": "1"
+            },
+            {
+              "record_type": "8",
+              "version": "1"
+            },
+            {
+              "record_type": "9",
+              "version": "1"
+            }
+          ]
+        },
+        "election_id": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+        "l2_chain_id": "84532",
+        "l1_chain_id": "11155111",
+        "election_registry": "1111111111111111111111111111111111111111",
+        "board": "1111111111111111111111111111111111111111",
+        "trustee_registry": "1313131313131313131313131313131313131313",
+        "group_registry": "1414141414141414141414141414141414141414",
+        "l1_anchor": "2121212121212121212121212121212121212121",
+        "l1_relay": "2222222222222222222222222222222222222222",
+        "election_type": "1",
+        "tally_scheme": "1",
+        "option_count": "3",
+        "min_selections": "0",
+        "max_selections": "1",
+        "electorate": [
+          {
+            "tier": "0",
+            "group_id": "1",
+            "root": "0000000000000000000000000000000000000000000000000123456789abcdef",
+            "root_l2_block": "1000",
+            "group_size": "5000"
+          },
+          {
+            "tier": "2",
+            "group_id": "3",
+            "root": "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000000",
+            "root_l2_block": "1000",
+            "group_size": "120"
+          }
+        ],
+        "membership_vk_hash": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+        "panel_id": "606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f",
+        "threshold": "4",
+        "panel_size": "7",
+        "ceremony_transcript_hash": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+        "opens_at": "1767225600",
+        "closes_at": "1767830400",
+        "l1_inclusion_bound": "3600",
+        "sequencing_window": "3600",
+        "max_sequencer_drift": "1800",
+        "display_text_commitment": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf"
+      },
+      "encoding": "0001010100000009000101000201000301000401000501000601000701000801000901101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f0000000000014a340000000000aa36a71111111111111111111111111111111111111111111111111111111111111111111111111111111113131313131313131313131313131313131313131414141414141414141414141414141414141414212121212121212121212121212121212121212122222222222222222222222222222222222222220101000300000001000000020000000000000000010000000000000000000000000000000000000000000000000123456789abcdef00000000000003e8000000000000138802000000000000000330644e72e131a029b85045b68181585d2833e84879b9709143e1f593f000000000000000000003e80000000000000078404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f0407808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f000000006955b90000000000695ef38000000e100000000000000e100000000000000708a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "hash": "3a046514fc073354d3308720f5c7d6c6e1ff06e90c23f7b2454f11351c3a3527",
+      "illFormed": "chain"
+    },
+    {
+      "id": "definition-closes-at-open",
+      "description": "closes_at equal to opens_at",
+      "type": {
+        "kind": "ref",
+        "name": "election-definition-v1"
+      },
+      "value": {
+        "profile": {
+          "protocol_major": "1",
+          "pins": [
+            {
+              "record_type": "1",
+              "version": "1"
+            },
+            {
+              "record_type": "2",
+              "version": "1"
+            },
+            {
+              "record_type": "3",
+              "version": "1"
+            },
+            {
+              "record_type": "4",
+              "version": "1"
+            },
+            {
+              "record_type": "5",
+              "version": "1"
+            },
+            {
+              "record_type": "6",
+              "version": "1"
+            },
+            {
+              "record_type": "7",
+              "version": "1"
+            },
+            {
+              "record_type": "8",
+              "version": "1"
+            },
+            {
+              "record_type": "9",
+              "version": "1"
+            }
+          ]
+        },
+        "election_id": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+        "l2_chain_id": "84532",
+        "l1_chain_id": "11155111",
+        "election_registry": "1111111111111111111111111111111111111111",
+        "board": "1212121212121212121212121212121212121212",
+        "trustee_registry": "1313131313131313131313131313131313131313",
+        "group_registry": "1414141414141414141414141414141414141414",
+        "l1_anchor": "2121212121212121212121212121212121212121",
+        "l1_relay": "2222222222222222222222222222222222222222",
+        "election_type": "1",
+        "tally_scheme": "1",
+        "option_count": "3",
+        "min_selections": "0",
+        "max_selections": "1",
+        "electorate": [
+          {
+            "tier": "0",
+            "group_id": "1",
+            "root": "0000000000000000000000000000000000000000000000000123456789abcdef",
+            "root_l2_block": "1000",
+            "group_size": "5000"
+          },
+          {
+            "tier": "2",
+            "group_id": "3",
+            "root": "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000000",
+            "root_l2_block": "1000",
+            "group_size": "120"
+          }
+        ],
+        "membership_vk_hash": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+        "panel_id": "606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f",
+        "threshold": "4",
+        "panel_size": "7",
+        "ceremony_transcript_hash": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+        "opens_at": "1767225600",
+        "closes_at": "1767225600",
+        "l1_inclusion_bound": "3600",
+        "sequencing_window": "3600",
+        "max_sequencer_drift": "1800",
+        "display_text_commitment": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf"
+      },
+      "encoding": "0001010100000009000101000201000301000401000501000601000701000801000901101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f0000000000014a340000000000aa36a71111111111111111111111111111111111111111121212121212121212121212121212121212121213131313131313131313131313131313131313131414141414141414141414141414141414141414212121212121212121212121212121212121212122222222222222222222222222222222222222220101000300000001000000020000000000000000010000000000000000000000000000000000000000000000000123456789abcdef00000000000003e8000000000000138802000000000000000330644e72e131a029b85045b68181585d2833e84879b9709143e1f593f000000000000000000003e80000000000000078404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f0407808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f000000006955b900000000006955b90000000e100000000000000e100000000000000708a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "hash": "b3917b737610a96a9d304eff6d740f02b375572370aa645149353bf721f603c5",
+      "illFormed": "timing"
+    }
+  ]
+}

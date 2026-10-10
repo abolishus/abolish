@@ -82,7 +82,7 @@ Each item's state (`todo`, `in progress`, `blocked`, `needs owner decision`, `do
 - [[P5-3]] `packages/capacitor-nfc-passport`
 - [[P5-4]] `packages/capacitor-zk-prover`
 
-One-off items: [[P0-ops]] split shared hot files; [[P0-ops-2]] P0-ops review follow-ups; [[P0-ops-3]] apply rule A to the open ADRs; [[P0-ops-4]] reconcile accepted ADRs and their dependants; [[P0-ops-5]] partition and verifier follow-ups; [[P0-ops-6]] one cell per electorate tier; [[P0-ops-7]] no merged tiers in 2.8.
+One-off items: [[P0-ops]] split shared hot files; [[P0-ops-2]] P0-ops review follow-ups; [[P0-ops-3]] apply rule A to the open ADRs; [[P0-ops-4]] reconcile accepted ADRs and their dependants; [[P0-ops-5]] partition and verifier follow-ups; [[P0-ops-6]] one cell per electorate tier; [[P0-ops-7]] no merged tiers in 2.8; [[P0-ops-8]] a ballot's cell is its own tier.
 
 ## Blocked
 

@@ -87,7 +87,7 @@ One-off items: [[P0-ops]] split shared hot files.
 
 - **P0-2 Storybook under Vite+: blocked on the supply-chain trust policy (owner decision).** Storybook 10.6.1 itself is old enough and resolves, but `@storybook/react-vite` depends on `react-docgen` 8 → `@babel/core` 7 → `semver@^6.3.1`, and `vp add` fails with `High-risk trust downgrade for "semver@6.3.1"` from `trustPolicy: no-downgrade` in `pnpm-workspace.yaml`. Registry metadata shows it is a false positive: `semver@6.3.1` (and `5.7.2`) are July 2023 security backports published by an npm maintainer without provenance, after `7.5.1`–`7.5.4` had been published with provenance. No newer 6.x exists, and `react-docgen` has no Babel-8 release. Storybook wasn't run, so whether it works under Vite+ beyond install is still unknown. Workaround (needs the owner, because it relaxes a supply-chain setting in a CODEOWNERS file): add `trustPolicyExclude: [semver@6.3.1]` to `pnpm-workspace.yaml` with a comment giving this reason. Versions picked for the retry: `storybook`, `@storybook/react-vite`, `@storybook/addon-vitest` and `@storybook/addon-a11y` 10.6.1, `@vitest/browser-playwright` 5.0.1 (matches Vite+'s bundled Vitest), `playwright` 1.63.0 (1.64.0 is under 7 days old), React 19.3.0. P2-7 (`packages/ui`) depends on this.
 
-- **P1-12 ballot commitments and validity proofs: blocked on two owner questions** from [[0002-everlasting-privacy]] (trustee duties, and the wording of the brief's threshold-trust property). See [[P1-12]].
+- **P1-12 ballot commitments and validity proofs: blocked on three owner questions** from [[0002-everlasting-privacy]] (trustee duties, the `@noble/post-quantum` audit, and the wording of the brief's threshold-trust property). See [[P1-12]].
 
 ## Decisions to review
 
@@ -100,7 +100,7 @@ Decisions the agent made under rule A (`AGENTS.md`). Each stands unless the owne
 
 These four ADRs still read `Status: needs-decision`; a follow-up docs PR marks each `Accepted (agent) — owner may veto`.
 
-Waiting on the owner (owner-only under rule A): [[0006-trustees]] (P1-7: naming trustees), and P1-12's two questions above.
+Waiting on the owner (owner-only under rule A): [[0006-trustees]] (P1-7: naming trustees), and P1-12's three questions above.
 
 ## Known-weak
 

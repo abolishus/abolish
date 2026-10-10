@@ -44,6 +44,28 @@
       "license": "IETF Trust Legal Provisions (BCP 78); code components under the Revised BSD License",
       "retrieved": "2026-10-10",
       "covers": "ristretto255-SHA512 HashToScalar, HashToGroup and scalar and element serialisation, through RFC 9497 Appendix A.1 (OPRF, VOPRF and POPRF modes)"
+    },
+    {
+      "path": "transparency-dev/constants.go",
+      "sha256": "6faf1957b5727c99593412ca0375f7e1f90ba10d7747dc42624585f948da32a8",
+      "source": "https://raw.githubusercontent.com/transparency-dev/merkle/036047b5d2f7faf3b1ee643d391e60fe5b1defcf/testonly/constants.go",
+      "tag": "v0.0.2",
+      "origin": "transparency-dev/merkle (Go reference implementation of the RFC 6962 / RFC 9162 Merkle tree, maintained by the Transparency.dev community, originally Google's Certificate Transparency code)",
+      "originUrl": "https://github.com/transparency-dev/merkle",
+      "license": "Apache-2.0",
+      "retrieved": "2026-10-10",
+      "covers": "RFC 6962 Merkle tree hash: leaf inputs, every node hash and the root of every tree size from 0 to 8"
+    },
+    {
+      "path": "transparency-dev/verify_test.go",
+      "sha256": "c80310e1385b7926312d963f6b16d1cbe83b25d9ae6581a86e837ec89922a9e1",
+      "source": "https://raw.githubusercontent.com/transparency-dev/merkle/036047b5d2f7faf3b1ee643d391e60fe5b1defcf/proof/verify_test.go",
+      "tag": "v0.0.2",
+      "origin": "transparency-dev/merkle (Go reference implementation of the RFC 6962 / RFC 9162 Merkle tree, maintained by the Transparency.dev community, originally Google's Certificate Transparency code)",
+      "originUrl": "https://github.com/transparency-dev/merkle",
+      "license": "Apache-2.0",
+      "retrieved": "2026-10-10",
+      "covers": "RFC 6962 inclusion and consistency proofs (1-based leaf indices) for trees of up to 8 leaves, and their roots"
     }
   ]
 }

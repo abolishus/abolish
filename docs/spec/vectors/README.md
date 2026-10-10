@@ -6,11 +6,12 @@ Cross-language vectors for the encodings and computations in this spec. TypeScri
 
 One JSON file per spec section or record type, named after it (`primitives.json`, `election-definition.json`, …). Each file is UTF-8 JSON, formatted by `vp check`.
 
-| File              | Covers                                                                                       |
-| ----------------- | -------------------------------------------------------------------------------------------- |
-| `primitives.json` | Primitive types, record framing and strict-decoding rejections ([[notation]])                |
-| `group.json`      | `scalar` and `element` codecs: valid boundaries and every rejected class ([[group]])         |
-| `hash.json`       | `H`, `HashToScalar` under each Fiat–Shamir tag, and `h`, with intermediate bytes ([[group]]) |
+| File              | Covers                                                                                                          |
+| ----------------- | --------------------------------------------------------------------------------------------------------------- |
+| `primitives.json` | Primitive types, record framing and strict-decoding rejections ([[notation]])                                   |
+| `group.json`      | `scalar` and `element` codecs: valid boundaries and every rejected class ([[group]])                            |
+| `board.json`      | Board entries, the board tree with every inclusion and consistency proof, checkpoints, board checks ([[board]]) |
+| `hash.json`       | `H`, `HashToScalar` under each Fiat–Shamir tag, and `h`, with intermediate bytes ([[group]])                    |
 
 ## Format
 

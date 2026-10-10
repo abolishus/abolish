@@ -17,13 +17,17 @@ Vectors published by standards bodies and library authors (NIST CAVP, RFCs, Wych
 
 ## Files
 
-| Path                           | Covers                                                                            | Origin                                                       |
-| ------------------------------ | --------------------------------------------------------------------------------- | ------------------------------------------------------------ |
-| `nist-cavp/SHA256ShortMsg.rsp` | SHA-256, messages 0–64 bytes                                                      | NIST CAVP SHAVS byte-oriented vectors, via pyca/cryptography |
-| `rfc/rfc9496.txt`              | ristretto255: Appendix A.1–A.3                                                    | RFC 9496, from the RFC Editor                                |
-| `rfc/rfc9380.txt`              | `expand_message_xmd` over SHA-512: Appendix K.3                                   | RFC 9380, from the RFC Editor                                |
-| `rfc/rfc9497.txt`              | ristretto255-SHA512 `HashToScalar`, `HashToGroup` and serialisation: Appendix A.1 | RFC 9497, from the RFC Editor                                |
+| Path                              | Covers                                                                             | Origin                                                       |
+| --------------------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| `nist-cavp/SHA256ShortMsg.rsp`    | SHA-256, messages 0–64 bytes                                                       | NIST CAVP SHAVS byte-oriented vectors, via pyca/cryptography |
+| `rfc/rfc9496.txt`                 | ristretto255: Appendix A.1–A.3                                                     | RFC 9496, from the RFC Editor                                |
+| `rfc/rfc9380.txt`                 | `expand_message_xmd` over SHA-512: Appendix K.3                                    | RFC 9380, from the RFC Editor                                |
+| `rfc/rfc9497.txt`                 | ristretto255-SHA512 `HashToScalar`, `HashToGroup` and serialisation: Appendix A.1  | RFC 9497, from the RFC Editor                                |
+| `transparency-dev/constants.go`   | RFC 6962 Merkle tree: leaf inputs, node hashes and roots of trees of 1 to 8 leaves | transparency-dev/merkle v0.0.2 (Apache-2.0)                  |
+| `transparency-dev/verify_test.go` | RFC 6962 inclusion and consistency proofs over the same leaves                     | transparency-dev/merkle v0.0.2 (Apache-2.0)                  |
 
 The NIST CAVP zip on csrc.nist.gov couldn't be fetched from the session that vendored this file, so it was taken from the pyca/cryptography mirror at a pinned commit. All 65 digests were checked against both `@noble/hashes` and OpenSSL (through Python's `hashlib`) when it was vendored; a byte comparison against NIST's own zip is still to do.
 
 The RFC texts are vendored whole, and `tests/vectors/rfc.ts` parses the vectors out of their appendices strictly. RFC 9496 Appendix A.4 (`SQRT_RATIO_M1`) isn't checked directly, because `@noble/curves` doesn't export the function; it is exercised through `Decode` and element derivation.
+
+The transparency-dev files are Go source; `tests/vectors/transparency-dev.test.ts` parses their tables strictly and asserts how many rows it read. They use RFC 6962's `0x00`/`0x01` prefixes rather than our tags, so they test the tree code with RFC 6962's hashes plugged in; `docs/spec/vectors/board.json` covers the tagged instantiation. The directory needs `transparency-dev/merkle` in `VECTOR_PUBLISHERS`, added by the `ci:` PR #30.

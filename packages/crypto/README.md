@@ -2,7 +2,7 @@
 
 The protocol core of [Abolish](https://github.com/abolishus/abolish): canonical encodings, ballot encryption, validity proofs, threshold decryption and the bulletin-board model. Depends only on `@noble/*`.
 
-**Status: early.** The first APIs are the canonical encoding layer of [`docs/spec/notation.md`](../../docs/spec/notation.md) (P1-10) and the group and hash layer of [`docs/spec/group.md`](../../docs/spec/group.md) (P1-11); ballot commitments, proofs and the board model follow. Prereleases are published as `next`, signed and with provenance (see the repository README, "Releases").
+**Status: early.** The first APIs are the canonical encoding layer of [`docs/spec/notation.md`](../../docs/spec/notation.md) (P1-10) the group and hash layer of [`docs/spec/group.md`](../../docs/spec/group.md) (P1-11) and the bulletin board of [`docs/spec/board.md`](../../docs/spec/board.md) (P1-16); ballot commitments and proofs follow. Prereleases are published as `next`, signed and with provenance (see the repository README, "Releases").
 
 ## Canonical encoding
 
@@ -22,6 +22,15 @@ The prime-order group and hashes of ADR 0007 (option A), as thin wrappers over `
 - `challenge(tag, t)`: a Fiat–Shamir challenge, RFC 9497 `HashToScalar` with the tag as `DST`; it accepts only specified Fiat–Shamir tags, of which there are none until P1-12 specifies the first statement. `hashToGroup(tag, m)`: RFC 9380 `hash_to_ristretto255` under a specified hash-to-curve tag. Both always pass the `DST` to `@noble/curves`, which would otherwise use its own.
 - `G` (the RFC 9496 generator), `GENERATOR_H` (`h = hash_to_ristretto255("", DST = "abolish/v1/generator-h")`) and `IDENTITY`.
 
+## Bulletin board
+
+The board of `docs/spec/board.md` (T-23, T-24, T-42):
+
+- `encodeBoardEntry` and `decodeBoardEntry` (record type `0x0007`, version 1): the envelope of an election, a position, an anchoring segment and one payload record of a type allowed on the board, at most `MAX_BOARD_PAYLOAD` bytes. Only the payload's header is read; the record itself is decoded where it is used.
+- `boardEntryHash`, `chainLink` and `checkpointHash`: `H` under `abolish/v1/board-entry`, `abolish/v1/board-chain` and `abolish/v1/board-checkpoint`.
+- The RFC 9162 Merkle tree, generic over its two hashes (`TreeHash`), with `BOARD_TREE` using tagged `H`: `merkleRoot`, `merkleRoots` (every requested prefix root in one pass), `inclusionProof`, `consistencyProof`, and `verifyInclusion` and `verifyConsistency`, which return false for any malformed argument and never throw.
+- `checkBoard` (strict decoding, election, positions, segments, the canonical order of spoiled-ballot openings, and the chain links) and `checkCheckpoints` (each anchored checkpoint, in order, ends at its segment's boundary with that prefix's chain head and root, and every segment holding entries has one) throw a `BoardError` with the spec's code. `checkpointOf` builds the checkpoint after a segment.
+
 ## Rules
 
 - Runtime dependencies are `@noble/*` only, pinned to exact versions in the workspace catalog, with an `@noble`-only transitive closure, no node built-ins and no workspace imports. CI's `gated` check (`.github/tools/ci/src/gated.ts`) enforces this from the lockfile, the `src` imports and the packed bundle, which must inline nothing from `node_modules` (T-55, T-36).
@@ -35,8 +44,8 @@ vp run --filter @abolishus/crypto test
 
 - Unit and property tests use `vite-plus/test` and `fast-check`; property tests honour `FC_NUM_RUNS` (CI sets 1000) and print their seed on failure.
 - Published vectors are vendored byte for byte under [`test-vectors/`](test-vectors/README.md), each listed in `test-vectors/manifest.json` with its source URL and sha256. `tests/vectors/harness.ts` checks the sha256 before any test reads a file.
-- Cross-language vectors for what the spec defines live in `docs/spec/vectors/`, not here. `tests/primitives-vectors.test.ts` runs every vector in `primitives.json` and `group.json`, building codecs from the files' type descriptors; `tests/group.test.ts` runs `hash.json`.
-- `scripts/group-vectors.py` prints `group.json` and `hash.json` from an independent Python implementation of RFC 9496, RFC 9380 §5.3.1 and RFC 9497 §4.1 (`python3 -I packages/crypto/scripts/group-vectors.py docs/spec/vectors`, then `vp check --fix`). `scripts/static-dh-factors.ts` reproduces ADR 0007's factor search of ℓ ± 1 (`vp node packages/crypto/scripts/static-dh-factors.ts`, about 30 seconds).
+- Cross-language vectors for what the spec defines live in `docs/spec/vectors/`, not here. `tests/primitives-vectors.test.ts` runs every vector in `primitives.json` and `group.json`, building codecs from the files' type descriptors; `tests/group.test.ts` runs `hash.json`; `tests/board-vectors.test.ts` runs `board.json`.
+- `scripts/group-vectors.py` prints `group.json` and `hash.json` from an independent Python implementation of RFC 9496, RFC 9380 §5.3.1 and RFC 9497 §4.1 (`python3 -I packages/crypto/scripts/group-vectors.py docs/spec/vectors`, then `vp check --fix`). `scripts/static-dh-factors.ts` reproduces ADR 0007's factor search of ℓ ± 1 (`vp node packages/crypto/scripts/static-dh-factors.ts`, about 30 seconds). `scripts/board-vectors.py` prints `board.json` from an independent Python implementation of `docs/spec/board.md` and RFC 9162 §2.1, after checking itself against the vendored transparency-dev vectors.
 
 ## License
 

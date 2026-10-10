@@ -2,7 +2,7 @@
 
 - Status: Accepted (agent) — owner may veto (2026-10-10, rule A): option B, for development and testnet only; mainnet waits for the owner
 - Date: 2026-10-09
-- Deciders: owner (one-way door)
+- Deciders: agent, owner may veto (rule A); owner: mainnet
 - Threats addressed: T-50, T-71 (new), T-35, T-11, T-13, T-26, T-06, T-33, T-34, T-37, T-38, T-62, T-69 (see [[THREAT_MODEL]])
 
 ## Context

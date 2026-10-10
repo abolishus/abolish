@@ -2,7 +2,7 @@
 
 - Status: Accepted (agent) — owner may veto (2026-10-10, rule A): option A; the first real upload spends money, so it waits for the owner
 - Date: 2026-10-09
-- Deciders: owner (one-way door)
+- Deciders: agent, owner may veto (rule A); owner: spending on the first upload
 - Threats addressed: T-51, T-49, T-66, T-17, T-68, T-15, T-24, T-52, T-69, T-71 (see [[THREAT_MODEL]])
 
 ## Context

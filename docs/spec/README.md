@@ -43,7 +43,7 @@ The spec follows the ADRs below. Under rule A (`AGENTS.md`) the agent's choices 
 - [[0004-l2-choice]] (accepted by the agent for development and testnet, owner may veto; mainnet waits for the owner): the L2, its close rule and finality. Shapes the timing and L2-evidence checks in [[verifier]].
 - [[0005-permanent-archive]] (accepted by the agent, owner may veto; the first real upload waits for the owner): the display-text split ([[display-text]]), the result-critical field rule ([[notation]]) and the CID parameters ([[content-addressing]]).
 - [[0006-trustees]] (open; owner-only: the owner decides): the panel bound into each election definition.
-- [[0002-everlasting-privacy]] (accepted by the owner on 2026-10-10: option B, perfectly hiding commitments on the board; three owner questions in its Decision section still block ballot encryption, P1-12): the ballot, ceremony and tally sections follow it once written; [[verifier]] marks the checks it changes.
+- [[0002-everlasting-privacy]] (accepted by the owner on 2026-10-10: option B, perfectly hiding commitments on the board; three owner questions in its Decision section still block ballot encryption (P1-12) and, through trustee duties and the election-key wording, the ceremony): the ballot, ceremony and tally sections follow it once written; [[verifier]] marks the checks it changes.
 
 ## Prior art
 

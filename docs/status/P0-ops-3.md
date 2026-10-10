@@ -1,6 +1,6 @@
 # P0-ops-3: apply rule A to the open ADRs
 
-- State: in progress
+- State: in progress (touches `AGENTS.md`: waits for the owner's review)
 - Branch: `claude/p0-ops-3`
 
 ## Scope

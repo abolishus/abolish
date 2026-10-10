@@ -2,7 +2,7 @@
 
 - Status: Accepted (agent) — owner may veto (2026-10-10, rule A): option A
 - Date: 2026-10-09
-- Deciders: owner (one-way door)
+- Deciders: agent, owner may veto (rule A)
 - Threats addressed: T-31, T-30, T-36, T-23, T-34, T-38 (see [[THREAT_MODEL]])
 
 ## Context

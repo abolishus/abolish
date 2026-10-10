@@ -1,4 +1,44 @@
-// No API yet: the scaffold (P1-9) sets up the dependency policy, the build and
-// the published-vector harness. The first API, the canonical encoders and
-// decoders of docs/spec/notation.md, lands with P1-10.
-export {};
+export {
+  BN254_R,
+  bool,
+  bytesFixed,
+  bytesVar,
+  type Codec,
+  type CodecValue,
+  decode,
+  DecodeError,
+  type DecodeErrorCode,
+  encode,
+  EncodeError,
+  enum8,
+  fieldBn254,
+  list,
+  Reader,
+  struct,
+  type StructValue,
+  u16,
+  u32,
+  u64,
+  u8,
+  utf8,
+  Writer,
+} from "./codec.ts";
+export {
+  ds,
+  isWellFormedTag,
+  type SpecifiedTag,
+  type Tag,
+  TAG_REGISTRY,
+} from "./domain-separation.ts";
+export {
+  type DecodedRecord,
+  RECORD_TYPES,
+  RecordSchema,
+  type RecordSchemaOptions,
+  type RecordType,
+  recordType,
+  type RecordVersion,
+  TEST_RECORD_TYPES,
+  UNPINNED,
+} from "./record.ts";
+export { isWellFormedUtf8 } from "./utf8.ts";

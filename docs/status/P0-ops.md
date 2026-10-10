@@ -1,6 +1,7 @@
 # P0-ops: split shared hot files
 
-- State: in progress (a code-owned change: waits for the owner's review)
+- State: done
+- PR: #22 (merged after owner review)
 - Branch: `claude/p0-ops`
 
 ## Scope

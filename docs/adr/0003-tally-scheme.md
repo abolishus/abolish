@@ -100,6 +100,8 @@ What would change the recommendation:
 
 ## Consequences
 
+The ElGamal-specific bullets below are carried over to commitments by the Decision section, which governs where they differ.
+
 - P1-12 implements A for plurality and approval: exponential-ElGamal ballots, disjunctive Chaum–Pedersen per option and for the sum (or the approval range), with published-protocol citations in `docs/spec/`.
 - P1-15 decrypts per-option, per-tier products only, with Chaum–Pedersen proofs on every share, and the verifier (P1-19) recomputes the products from the board itself.
 - The election definition (P1-8, P1-10) carries the election type and tally scheme, so one record type can't be tallied under another's rules.
@@ -109,6 +111,16 @@ What would change the recommendation:
   - T-14 still holds and is inherent to any k-of-n scheme: k colluding trustees can decrypt any individual ballot. Even a commitment-consistent board (P1-3) only stops everyone else from reading ballots later (T-15); the openings still reach the trustees, encrypted under the threshold key.
   - T-16 still holds: per-tier totals over few voters reveal individual votes.
   - Ranked choice, once built, carries T-70.
+
+## Decision
+
+Accepted by the agent under rule A on 2026-10-10 (owner may veto): **option C**, carried over to the board format of [[0002-everlasting-privacy]], which the owner accepted on 2026-10-10 (option B) and which governs wherever this ADR's text assumes ElGamal:
+
+- Plurality and approval use the homomorphic tally over Pedersen commitments and per-trustee summed shares, not ElGamal ciphertexts and decryption shares (T-14, T-15, T-29). The disjunctive validity proofs are over the commitments (T-28).
+- The Fiat–Shamir statement is the full one [[0002-everlasting-privacy]] gives (every commitment, every VSS commitment, every `H(ct_i)`, the nullifier, the poll and the version); in the binding list above, "the joint public key" becomes the hash of the trustee key-registration transcript, and there are no ciphertexts on the board (T-30, T-32, T-38). There is no joint key or DKG for plurality and approval (P1-14).
+- The Consequences bullets for P1-12 and P1-15 read with that substitution: P1-12 builds commitment ballots and their proofs; P1-15 publishes summed shares checked against the public VSS commitments and opens exactly one aggregate per cell of a single disjoint partition (tier × region), deriving coarser totals, including the per-tier results above, without opening them. Both stay blocked by the three owner questions in [[0002-everlasting-privacy]].
+- The Known-weak note that openings reach the trustees "encrypted under the threshold key" reads: encrypted to each trustee under the hybrid KEM of [[0002-everlasting-privacy]] (or Diffie–Hellman only, if the owner's ML-KEM question goes that way). T-14 is unchanged: k colluding trustees can still open any ballot.
+- Ranked choice: the follow-up ADR must specify a commitment-consistent mixnet; naming the mixers, and any design that isn't commitment-consistent, are the owner's (Consequences above).
 
 ## Default
 

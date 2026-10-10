@@ -1,6 +1,6 @@
 # P0-ops-2: P0-ops review follow-ups
 
-- State: in progress
+- State: in progress (touches `AGENTS.md` and `.claude/`: waits for the owner's review)
 - Branch: `claude/p0-ops-2`
 
 ## Scope

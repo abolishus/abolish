@@ -10,7 +10,7 @@ description: Repo-specific conventions for driving Abolish PRs to merge — auto
 - Title in conventional-commit style. The body covers: what changed, threats addressed (IDs), tests, known-weak and, for protocol packages, "Independent review" (see `crypto-review`).
 - Open as a **draft** and iterate there; the review models don't run on drafts, and both review checks fail until the PR is marked ready. Mark it ready once, when it's complete and your own review pass is clean, then enable **auto-merge (squash)**. Subscribe to PR activity. Exception: `ci:` PRs (anything under `.github/`) wait for the owner's review, so leave auto-merge off.
 - On a ready PR, batch fixes: every push cancels and restarts the reviews.
-- Never have more than 2 open PRs.
+- Never have more than 2 PRs in flight (AGENTS.md, Hard rules: a draft, or ready with checks pending or failing).
 - Every PR targets `main`. Stacked PRs aren't supported: each required check fails on a PR into any other branch, because retargeting a base doesn't re-run checks.
 
 ## Required checks

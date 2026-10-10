@@ -7,12 +7,12 @@ description: Day-to-day development rules for the Abolish monorepo (Vite+, testi
 
 ## Loop for one STATUS.md item
 
-1. Confirm the item is unblocked and fewer than 2 of your PRs are open. Mark it **In progress** in `docs/STATUS.md` (that edit ships in the PR).
-2. Branch: `git checkout -b claude/<short-slug> origin/main`.
-3. Find the threat IDs the item addresses in `docs/THREAT_MODEL.md`. If none fit, the threat model needs updating first, in the same PR.
+1. Confirm the item is unblocked, has no branch or open PR, and fewer than 2 PRs are in flight (AGENTS.md).
+2. Claim it: `git checkout -b claude/<item-id> origin/main` (lowercased id), set `State: in progress` in `docs/status/<item-id>.md`, commit, and push the new branch without `--force`. A rejected push means the item is taken.
+3. Find the threat IDs the item addresses in `docs/THREAT_MODEL.md` (each threat's detail is in `docs/threats/`). If none fit, the threat model needs updating first, in the same PR.
 4. Write tests first where you can: unit, property (fast-check) and vectors. Then the code.
 5. Run the self-review gate (AGENTS.md "Before opening any PR"), including the subagent crypto review for protocol packages.
-6. Open the PR. Enable auto-merge (squash), except on `ci:` PRs. Subscribe to its activity. Load the `steward` skill.
+6. Open the PR as a draft; mark it ready once complete. Enable auto-merge (squash), except on `ci:` PRs. Subscribe to its activity. Load the `steward` skill.
 
 ## Commands
 

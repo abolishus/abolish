@@ -1,6 +1,6 @@
 # ADR NNNN: Title
 
-- Status: proposed | needs-decision | accepted | accepted by default — revisit | superseded by [[ADR-NNNN]]
+- Status: proposed | Accepted (agent) — owner may veto | needs-decision (owner-only questions) | accepted | accepted by default — revisit (before 2026-10-10) | superseded by [[ADR-NNNN]]
 - Date: YYYY-MM-DD
 - Deciders: owner (one-way door) | agent (reversible)
 - Threats addressed: T-xx, T-yy (see [[THREAT_MODEL]])

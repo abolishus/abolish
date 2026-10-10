@@ -34,6 +34,7 @@ Each check names the threats it closes and the STATUS item that specifies it. A 
 - 2.5 Its trustee panel (keys, `k`, `n`, panel identifier) matches what the verifier recomputes from the ceremony transcript in 3.1 (not the transcript's own claim) and the keys registered on L2 (T-37, [[0006-trustees]]; P1-14, P1-18).
 - 2.6 Its timing (open, close, drift bound δ and the L2 sequencing bounds it assumes) is well formed, and the L2's configuration stayed within those bounds for the whole poll (T-35, T-50, [[0004-l2-choice]]; P1-18).
 - 2.7 Where display text is available, it matches the definition's commitment ([[display-text]]; T-17, T-53).
+- 2.8 Its tally partition (tiers, any regions, the public rule that puts each ballot in a cell, and the minimum cell size) is well formed and disjoint, so 7.4 has a fixed set of cells to check openings against (T-14, T-16; [[0002-everlasting-privacy]], [[0006-trustees]]; P1-10b, P1-15).
 
 ### 3. Key ceremony
 
@@ -78,13 +79,13 @@ Each check names the threats it closes and the STATUS item that specifies it. A 
 ### 7. Tally
 
 - 7.1 The aggregates are recomputed from the selected ballots alone, per tier and per option (T-29, T-08, [[0003-tally-scheme]]; P1-15). **(P1-3)**
-- 7.2 Each decryption or opening share is checked against its trustee's registered key; an invalid one is excluded, and attributed to its trustee only if that trustee's signature on it verifies (otherwise to whoever relayed it), never a failure on its own. At least `k` valid shares exist and are combined (fewer than `k` fails the election, T-54), and the combination gives the published result (T-29, T-14; P1-15). **(P1-3)**
+- 7.2 Each trustee's summed share for each cell and option is checked against the product of that cell's public VSS commitments, which is what makes a wrong share attributable; its signature under the trustee's registered key only says who posted it. A share that fails is excluded, and attributed to its trustee only if that trustee's signature on it verifies (otherwise to whoever relayed it), never a failure on its own. At least `k` valid shares exist and are combined (fewer than `k` fails the election, T-54), and for each cell the interpolated `(Σv, Σr)` must open the product of that cell's ballot commitments, giving the published result ([[0002-everlasting-privacy]]; T-29, T-14; P1-15). Ranked-choice decryption shares get their checks from the follow-up ADR in [[0003-tally-scheme]]. **(P1-3)**
 - 7.3 The tally transcript decodes strictly and its hash matches its board entry (T-29; P1-15).
-- 7.4 Every decryption or opening share on the board is for an aggregate the spec allows (per tier and option, over the selected ballots, [[0006-trustees]]); any other share, such as one for an individual ballot or for overlapping sets whose difference is one ballot, is reported with the trustee that posted it (T-14, T-16, T-29; P1-15). This check reports and attributes; it doesn't fail the election, whose result rests on 7.1 to 7.3.
+- 7.4 Every summed share or opening on the board is for a cell of the partition registered in the election definition, per option, over the selected ballots ([[0002-everlasting-privacy]], [[0006-trustees]]); any other share, such as one for an individual ballot or for overlapping sets whose difference is one ballot, is reported with the trustee that posted it (T-14, T-16, T-29; P1-15). This check reports and attributes; it doesn't fail the election, whose result rests on 7.1 to 7.3.
 
 ### 8. Report
 
-- 8.1 Results are reported per tier, each with its anonymity-set size (group size at the definition's root) and its turnout. Tier 0 results are labelled as not Sybil-resistant (T-01, T-13, T-16; P1-19, P3-6).
-- 8.2 Small counts are flagged next to the result: a tally over few voters can reveal individual votes (T-16; P3-6).
+- 8.1 Results are reported per tier, and per cell where the partition has regions, each with its anonymity-set size (group size at the definition's root) and its turnout. Tier 0 results are labelled as not Sybil-resistant (T-01, T-13, T-16; P1-19, P3-6).
+- 8.2 Small counts are flagged next to each result and each cell: a tally over few voters can reveal individual votes (T-16; P3-6).
 - 8.3 An election whose profile pins a record version marked broken is reported unverifiable (entries rejected at admission don't count as use), never verified. Everything reported unverifiable, every missing archive link, every TEE-only root and every rejected entry is listed with its reason (P1-19).
 - 8.4 The report names the trustee panel that held the key, by the pinned identities, and whether our labelled seat took part ([[0006-trustees]]; T-37, T-14).

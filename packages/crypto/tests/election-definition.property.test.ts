@@ -152,8 +152,14 @@ describe("election definition codec", () => {
 
   test("a definition not pinned at its own version is profile-mismatch", () => {
     fc.assert(
-      fc.property(anyDefinition, (d) => {
-        const pinned = d.profile.pins.find((p) => p.record_type === 1)?.version === 1;
+      // Some definitions pin 0x0001 once, some twice, some not at all.
+      fc.property(anyDefinition, fc.nat({ max: 2 }), (base, copies) => {
+        const others = base.profile.pins.filter((p) => p.record_type !== 1).slice(0, 62);
+        const own = Array.from({ length: copies }, (_, i) => ({ record_type: 1, version: i + 1 }));
+        const d = { ...base, profile: { ...base.profile, pins: [...own, ...others] } };
+        // The spec's oracle: exactly one pin for 0x0001, at the record's version 1.
+        const ownPins = d.profile.pins.filter((p) => p.record_type === 1);
+        const pinned = ownPins.length === 1 && ownPins[0]?.version === 1;
         const b = encodeElectionDefinition(d);
         if (pinned) expect(decodeElectionDefinition(b)).toEqual(d);
         else expect(() => decodeElectionDefinition(b)).toThrow("profile-mismatch");

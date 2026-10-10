@@ -83,10 +83,14 @@ const LOADER_NAMES = new Set([
   "Worker",
   "SharedWorker",
   "importScripts",
-  "dlopen",
-  "binding",
-  "_linkedBinding",
 ]);
+
+/**
+ * Loader names that are also ordinary words (a commitment's "binding"), so
+ * they are rejected only as a member access: `process.binding(...)`,
+ * `x["dlopen"]`.
+ */
+const MEMBER_LOADER_NAMES = new Set(["dlopen", "binding", "_linkedBinding"]);
 
 /** Top-level manifest keys a packed gated package may have. */
 const PACKED_MANIFEST_KEYS = new Set([
@@ -428,12 +432,24 @@ export function moduleReferences(program: unknown): ModuleReference[] {
         break;
       case "Identifier":
         if (LOADER_NAMES.has(String(n["name"])))
-          out.push({ specifier: undefined, kind: String(n["name"]) });
+          out.push({ specifier: undefined, kind: `loader name ${String(n["name"])}` });
         break;
       case "Literal":
-        if (typeof n["value"] === "string" && LOADER_NAMES.has(n["value"]))
-          out.push({ specifier: undefined, kind: `"${n["value"]}"` });
+      case "TemplateLiteral": {
+        // A template with no substitutions is the same string.
+        const value = literal(n);
+        if (value !== undefined && LOADER_NAMES.has(value))
+          out.push({ specifier: undefined, kind: `loader name "${value}"` });
         break;
+      }
+      case "MemberExpression": {
+        const property = record(n["property"]);
+        const name =
+          n["computed"] === true ? literal(property) : (property?.["name"] as string | undefined);
+        if (name !== undefined && MEMBER_LOADER_NAMES.has(name))
+          out.push({ specifier: undefined, kind: `loader member .${name}` });
+        break;
+      }
       case "MetaProperty":
         if (record(n["meta"])?.["name"] === "import")
           out.push({ specifier: undefined, kind: "import.meta" });
@@ -557,7 +573,8 @@ export function inlinedSourceViolations(
   });
 }
 
-const CONFIG_FILE = /^(?:vite|vitest|vite-plus|tsdown|rolldown|rollup)\.config\.[^/]*$/;
+// Extension optional: tsdown's discovery also tries a bare `tsdown.config`.
+const CONFIG_FILE = /^(?:vite|vitest|vite-plus|tsdown|rolldown|rollup)\.config(?:\.[^/]*)?$/;
 
 /**
  * Build configuration that `vp pack` could load for a gated package: any
@@ -645,4 +662,19 @@ export function hasCode(program: unknown): boolean {
     if (s?.["type"] === "ImportDeclaration" || s?.["type"] === "ExportAllDeclaration") return false;
     return !(s?.["type"] === "ExportNamedDeclaration" && s["declaration"] == null);
   });
+}
+
+/**
+ * Whether a vendored vector's `source` URL names immutable bytes: a file at a
+ * full commit hash on raw.githubusercontent.com, or an RFC's text (RFCs are
+ * never revised in place). Only such a source can be re-fetched and compared.
+ */
+export function pinnedSource(url: string): boolean {
+  return (
+    (/^https:\/\/raw\.githubusercontent\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/[0-9a-f]{40}\/[A-Za-z0-9_./-]+$/.test(
+      url,
+    ) &&
+      !url.split("/").includes("..")) ||
+    /^https:\/\/www\.rfc-editor\.org\/rfc\/rfc[0-9]+\.txt$/.test(url)
+  );
 }

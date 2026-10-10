@@ -8,7 +8,7 @@ Vectors published by standards bodies and library authors (NIST CAVP, RFCs, Wych
 - Each file is listed in `manifest.json` with:
   - `path`: relative to this directory;
   - `sha256`: of the vendored bytes;
-  - `source`: the exact URL it was fetched from, pinned to a commit or immutable release where the host has one;
+  - `source`: the exact URL it was fetched from, pinned to immutable bytes: a full commit hash on `raw.githubusercontent.com`, or an RFC's text. CI's `vectors-provenance` step re-fetches every source and fails unless its sha256 matches the manifest and the vendored file;
   - `origin` and `originUrl`: who published the vectors, and where, when `source` is a mirror;
   - `license`, `retrieved` (date) and `covers` (which primitive and parameters).
 - `tests/vectors/harness.ts` refuses to read a file that isn't listed or whose sha256 doesn't match, and a test fails if any file here isn't listed. The sha256 is computed with `node:crypto`, never with the code under test.

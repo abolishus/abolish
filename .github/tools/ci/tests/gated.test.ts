@@ -14,6 +14,7 @@ import {
   lockfileViolations,
   manifestViolations,
   moduleReferences,
+  pinnedSource,
   referenceViolation,
   runtimeDependencies,
   tsconfigViolations,
@@ -433,9 +434,13 @@ describe("moduleReferences", () => {
     ).toEqual([
       { specifier: undefined, kind: "ImportExpression" },
       { specifier: undefined, kind: "ImportExpression" },
-      { specifier: undefined, kind: "require" },
+      { specifier: undefined, kind: "loader name require" },
       { specifier: undefined, kind: "import.meta" },
     ]);
+  });
+
+  test("ordinary words that are also loader members are allowed outside member access", () => {
+    expect(refs("const binding = 1; const o = { binding, dlopen: 2 }; f(binding);")).toEqual([]);
   });
 
   test("reports every name that reaches a loader or evaluator without an import", () => {
@@ -450,6 +455,9 @@ describe("moduleReferences", () => {
       "globalThis.require('x');",
       "process.dlopen(m, p);",
       'process.binding("spawn_sync");',
+      'process["_linkedBinding"]("x");',
+      "process[`getBuiltinModule`](`node:child_process`);",
+      "globalThis[`Function`](code)();",
     ])
       expect(refs(code).some((r) => r.specifier === undefined)).toBe(true);
   });
@@ -616,6 +624,8 @@ describe("buildConfigViolations and configuresPack", () => {
       "vite.config.cjs",
       "tsdown.config.ts",
       "rolldown.config.mjs",
+      "packages/tsdown.config",
+      "tsdown.config",
     ];
     const allowed = [
       "vite.config.ts",
@@ -678,5 +688,24 @@ describe("hasCode", () => {
     expect(hasCode(program("export const a = 1;"))).toBe(true);
     expect(hasCode(program("const a = 1; export { a };"))).toBe(true);
     expect(hasCode(program("export default 1;"))).toBe(true);
+  });
+});
+
+describe("pinnedSource", () => {
+  test("accepts only commit-pinned GitHub raw files and RFC texts", () => {
+    const sha = "e300bbe2f1bec75e5ee7e0ab7b196958831b3db6";
+    expect(pinnedSource(`https://raw.githubusercontent.com/pyca/cryptography/${sha}/v/a.rsp`)).toBe(
+      true,
+    );
+    expect(pinnedSource("https://www.rfc-editor.org/rfc/rfc9380.txt")).toBe(true);
+    for (const url of [
+      "https://raw.githubusercontent.com/pyca/cryptography/main/v/a.rsp",
+      "https://raw.githubusercontent.com/pyca/cryptography/49.0.0/v/a.rsp",
+      `https://raw.githubusercontent.com/pyca/cryptography/${sha}/../x`,
+      `http://raw.githubusercontent.com/pyca/cryptography/${sha}/v/a.rsp`,
+      "https://example.org/a.rsp",
+      "https://www.rfc-editor.org/rfc/rfc9380.html",
+    ])
+      expect(pinnedSource(url)).toBe(false);
   });
 });

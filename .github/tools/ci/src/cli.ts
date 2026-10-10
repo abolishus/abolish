@@ -6,6 +6,8 @@
 //   actions-pinned          fail if any workflow uses an action not pinned by SHA
 //   lockfile --base <ref>   enforce lockfile policy, write the diff to lockfile-diff.md
 //   pnpm-selftest           prove the pinned pnpm honours our install-script policy
+//   vectors-provenance      re-fetch every vendored test vector from its pinned source
+//                           and require the bytes to match the manifest and the file
 //   gated                   enforce the dependency, import, symlink and bundle policy
 //                           of the crypto-review-gated packages (see gated.ts)
 //   release-versions        print "<dir> <version>" for every workspace package
@@ -58,6 +60,7 @@ import {
   lockfileViolations,
   manifestViolations,
   moduleReferences,
+  pinnedSource,
   referenceViolation,
   RULES,
   runtimeDependencies,
@@ -612,6 +615,49 @@ function gated(): void {
   );
 }
 
+const VECTORS = "packages/crypto/test-vectors";
+
+/**
+ * The harness binds each vendored vector file to its manifest sha256; this
+ * binds the manifest to the published bytes, so a PR can't vendor an edited
+ * vector set (dropping the cases a flawed decoder fails, say) with a matching
+ * sha256. No reviewer can fetch the source, so CI does (T-55, T-39).
+ */
+async function vectorsProvenance(): Promise<void> {
+  const manifest = join(VECTORS, "manifest.json");
+  if (!existsSync(manifest)) {
+    console.log("no vendored vectors");
+    return;
+  }
+  const { files } = JSON.parse(readFileSync(manifest, "utf8")) as {
+    files?: { path?: unknown; sha256?: unknown; source?: unknown }[];
+  };
+  if (!Array.isArray(files)) throw new Error(`${manifest}: files must be an array`);
+  const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
+  const errors: string[] = [];
+  for (const { path, sha256: expected, source } of files) {
+    const where = `${manifest}: ${String(path)}`;
+    if (typeof source !== "string" || !pinnedSource(source)) {
+      errors.push(
+        `${where}: source must be a commit-pinned raw.githubusercontent.com URL or an RFC`,
+      );
+      continue;
+    }
+    const response = await fetch(source);
+    if (!response.ok) {
+      errors.push(`${where}: ${source}: HTTP ${response.status}`);
+      continue;
+    }
+    const fetched = sha256(new Uint8Array(await response.arrayBuffer()));
+    const local = sha256(readFileSync(join(VECTORS, String(path))));
+    if (fetched !== expected || local !== expected)
+      errors.push(`${where}: source ${fetched}, file ${local}, manifest ${String(expected)}`);
+  }
+  for (const e of errors) console.error(e);
+  if (errors.length > 0) process.exit(1);
+  console.log(`${files.length} vendored vector file(s) match their pinned sources`);
+}
+
 const command = process.argv[2];
 switch (command) {
   case "affected":
@@ -628,6 +674,9 @@ switch (command) {
     break;
   case "gated":
     gated();
+    break;
+  case "vectors-provenance":
+    await vectorsProvenance();
     break;
   case "release-versions":
     releaseVersions();

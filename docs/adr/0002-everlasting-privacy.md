@@ -1,9 +1,9 @@
 # ADR 0002: Everlasting privacy of the public board
 
-- Status: needs-decision
+- Status: accepted (owner, 2026-10-10): option B
 - Date: 2026-10-09
 - Deciders: owner (one-way door)
-- Threats addressed: T-15 (primary), T-14, T-11, T-16, T-18, T-25, T-26, T-27, T-28, T-29, T-30, T-32, T-33, T-36, T-37, T-38, T-39, T-40, T-41, T-42, T-45, T-46 (see [[THREAT_MODEL]])
+- Threats addressed: T-15 (primary), T-14, T-11, T-16, T-18, T-25, T-26, T-27, T-28, T-29, T-30, T-32, T-33, T-36, T-37, T-38, T-39, T-40, T-41, T-42, T-45, T-46, T-54, T-69 (see [[THREAT_MODEL]])
 
 ## Context
 
@@ -95,7 +95,7 @@ How it works:
      - The tally needs k tally-eligible trustees, whatever the voters did. A trustee that misses the window can't contribute, because a voter may have posted it an invalid share that nobody complained about. Before the counted set is fixed, each trustee signs a statement that it has processed every posting addressed to it. A trustee that signs it and then publishes a sum failing the check is attributed a wrong sum (T-29).
    - **Re-voting (T-33, T-38, T-45).** "Last ballot" is decided by the re-vote rule that P1-13 specifies to meet the requirements in [[verifier]] check 6.1 (no replay, no freezing, independence from the operator's ordering; T-38). If a nullifier's last ballot is excluded, that nullifier counts nothing; it never falls back to an earlier ballot, so complaints can't revert a re-vote. A counted ballot can be excluded only by a proven complaint, a public proof that its client sent an invalid share. A ballot that never gets a receipt or a passing posting for every ciphertext simply doesn't count, and only the voter's own client can supply a passing posting. That "cheating client" can be malware or a malicious served client acting for an honest voter (T-41, T-42). The defences are the receipt check and Benaloh challenges, plus re-voting before close. Because the complaint window runs past close, a complaint can arrive too late to re-vote. Malware that posts an invalid share on an honest voter's last ballot then nullifies that vote, a residual under T-41 and T-42.
 5. **Tally.** Over the counted set, each trustee publishes its summed shares per option. Anyone checks each trustee's sums against the product of the public VSS commitments, so a wrong sum is attributed to its trustee (T-29). Any k correct sums interpolate to the aggregate `(Σv, Σr)`, which must open the product of the public commitments.
-   - Publishing two aggregates over ballot sets that differ by a few ballots would reveal those ballots' openings, permanently. So exactly one aggregate is published per disjoint partition (per tier, and per region where results are regional), over the anchored counted set, and it is never re-published (T-16).
+   - Publishing two aggregates over ballot sets that differ by a few ballots would reveal those ballots' openings, permanently. So aggregate openings are published only over the cells of a single partition (tier × region, where results are regional), over the anchored counted set, and never re-published. Coarser totals (per tier, per region, overall) are derived from those cells, never opened separately, because two overlapping partitions can be combined to isolate a smaller set of ballots (T-16).
 
 - **Pros:**
   - **The public board is information-theoretically hiding.** Nothing the protocol publishes reveals any individual vote, even to an adversary with unbounded computation or a quantum computer. That covers the commitments, VSS commitments, ciphertext hashes, validity proofs and the tally transcript. T-15 is mitigated for everything published, except ciphertexts posted under the fallback.
@@ -106,7 +106,7 @@ How it works:
 - **Cons:**
   - **The private part is only computationally hiding.** Suppose someone records the share ciphertexts in transit (A-1 recording traffic to us or to the trustees) and later breaks both ML-KEM and discrete log. Shares for k trustees then reveal the vote. Privacy against that adversary is post-quantum conjectured (Module-LWE), not everlasting. Hybrid post-quantum TLS on every intake endpoint, and never publishing the ciphertexts, reduce the exposure.
   - **The brief's "election key" doesn't exist under B.** The brief says the election key is split across k-of-n trustees. Under B there is no single election key: the k-of-n threshold applies to each ballot's opening instead. The trust property is the same (no k−1 trustees can read a ballot or alter the tally undetected), but the owner should accept this deviation explicitly.
-  - **Trustees take on operational duties:** running synchronous intake, keeping ciphertexts until the tally, checking every ballot, and checking posted ciphertexts within the complaint window. That means being online during voting (or every one of its ballots gets posted) and before the tally, not only at the tally. These duties belong to the trustee decision (P1-7), which is never defaulted. Default adoption of this ADR doesn't decide them.
+  - **Trustees take on operational duties:** running synchronous intake, keeping ciphertexts until the tally, checking every ballot, and checking posted ciphertexts within the complaint window. That means being online during voting (or every one of its ballots gets posted) and before the tally, not only at the tally. These duties belong to the trustee decision (P1-7), which is never defaulted. Accepting this ADR doesn't decide them (see Decision).
   - **More parties see network metadata.** Each trustee's intake endpoint sees submission metadata, so up to n more parties can correlate IPs (T-11).
   - **Offline trustees and direct submit expose the private part.** Each trustee that doesn't answer at cast time gets its ciphertext posted publicly, with `m_i`. That share then has only classical (Diffie–Hellman, Shor-breakable) privacy, and gas costs rise (T-27).
     - A trustee that is offline for all of voting (the brief's "two offline") has its share posted for every ballot. That permanently lowers the number of ciphertexts A-11 must break with post-quantum cryptanalysis to read a ballot, from k to k minus the number of offline trustees. The posted shares fall to a quantum computer alone.
@@ -126,7 +126,7 @@ How it works:
     - (a) wait for an audit; or
     - (b) ship Diffie–Hellman-only share encryption, whose private-part privacy is then classical (Shor-breakable), with T-15's residual stated as such.
 
-    An agent never ships the unaudited ML-KEM code on its own authority, and default adoption of this ADR doesn't decide this question.
+    An agent never ships the unaudited ML-KEM code on its own authority, and accepting this ADR doesn't decide this question (see Decision).
 - **Threats:** T-15 is **mitigated for the public board**. The residual is harvested private-part ciphertexts (post-quantum conjectured, or classical under (b)) and ciphertexts posted publicly (offline or refusing trustees, direct submit), which are classical only. Other effects:
   - T-14 is unchanged: k trustees can read ballots during the election and for as long as the key material survives. Required deletion after the tally (Consequences) ends that for receipted shares, but not for shares posted on the board.
   - T-29 is improved: errors are attributable.
@@ -192,13 +192,18 @@ If B is accepted:
   - Our operational store deletes its copy (P1-13, P2-3).
   - Destruction can't be proven, and shares posted on the board stay there. So k trustees who secretly keep their keys can still read their own receipted shares later, and anyone can still harvest posted shares. Both residuals stay stated under T-14.
 - **P1-16, P1-20 and P4-1** anchor every verification, complaint and tally transcript to L1.
-- **[[THREAT_MODEL]]**: this PR already records option B's effects on T-11, T-14, T-15, T-25, T-27, T-41, T-42, T-54 and the not-mitigated list, marked as depending on P1-3. On acceptance:
+- **[[THREAT_MODEL]]**, updated in the same PR as this ADR:
+  - T-11, T-14, T-15, T-25, T-27, T-41, T-42, T-54 and the not-mitigated list record option B's effects.
   - T-15 becomes "Partial by design". The residual is harvested private-part ciphertexts (post-quantum conjectured) and publicly posted shares (classical only). Each trustee offline during voting lowers the post-quantum harvest threshold for the ballots it missed.
-  - The T-28, T-29, T-37 and T-40 mitigation texts are rewritten for commitments, summed shares and key registration in place of ElGamal, decryption shares and the DKG.
+  - The T-14, T-28, T-29, T-37 and T-40 mitigation texts are rewritten for commitments, summed shares and key registration in place of ElGamal, decryption shares and the DKG.
   - The not-mitigated list keeps T-14 and records that participation privacy rests on Poseidon.
 
-If A is chosen instead, T-15 stays in the not-mitigated list as "every ballot on the board becomes readable after a discrete-log break". Every election page and the verifier must state this.
+## Decision
 
-## Default
+Opened 2026-10-09 20:00 UTC. On 2026-10-10 the owner chose **option B**.
 
-Opened 2026-10-09 20:00 UTC. If the owner hasn't answered by **2026-10-12 20:00 UTC**, option B is adopted and this ADR is marked `Status: accepted by default — revisit`. Default adoption does not decide the trustees' duties (P1-7) or the ML-KEM audit question; both wait for the owner. Tally work (P1-12 onwards) doesn't start before then.
+These questions are still open. They block ballot-encryption work (P1-12) until the owner answers them:
+
+1. **Trustee duties (P1-7):** whether trustees run synchronous intake, stay online during voting, keep the share ciphertexts until the tally, and then destroy their keys and stored shares.
+2. **ML-KEM audit:** whether to wait for an independent audit of `@noble/post-quantum`, or ship Diffie–Hellman-only share encryption. With Diffie–Hellman alone, the private part has classical privacy only.
+3. **Election key:** whether the owner accepts the deviation from the brief's "election key is split across k-of-n trustees". Under B, the k-of-n threshold applies to each ballot's opening rather than to one key. The trust property is the same, but the wording isn't.

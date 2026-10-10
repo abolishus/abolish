@@ -14,6 +14,7 @@ A conforming verifier implements every check in [[verifier]] and decodes every r
 | --------------------------- | ---------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
 | [[notation]]                | Notation, primitive types, record framing, strict decoding rules, decode error codes     | Specified                                                   |
 | [[domain-separation]]       | Tag grammar, how a tag is applied to each kind of hash, the tag registry                 | Framing specified; most tags reserved for their owning item |
+| [[group]]                   | The group (ristretto255), `scalar` and `element` codecs, `H`, hash-to-scalar and `h`     | Specified                                                   |
 | [[versioning]]              | Protocol and record versions, the record-type registry, change rules, election profiles  | Specified                                                   |
 | [[parameters]]              | Protocol-wide limits                                                                     | Specified for version 1; P1-18 may lower                    |
 | [[display-text]]            | The split between display text and result-critical data, and the display-text commitment | Split and commitment specified; record layout is P1-10b's   |
@@ -23,7 +24,6 @@ A conforming verifier implements every check in [[verifier]] and decodes every r
 
 Sections still to be written, by the STATUS item that owns them:
 
-- Group, hash function and point/scalar codecs: P1-11.
 - Record layouts: the election definition and display text by P1-10b, the rest of the record-type registry by each record's owning item. The primitive codecs, record framing and `DS` framing they build on are implemented in `packages/crypto` (P1-10).
 - Ballot encryption or commitment and validity proofs: P1-12.
 - Benaloh challenge/spoil, receipts and re-vote resolution: P1-13.
@@ -42,6 +42,7 @@ The spec follows the ADRs below. Under rule A (`AGENTS.md`) the agent's choices 
 - [[0003-tally-scheme]] (accepted by the agent, owner may veto): homomorphic tally for plurality and approval, commitment-consistent mixnet for ranked choice (per [[0002-everlasting-privacy]]). Sets the option limit in [[parameters]] and the tally checks in [[verifier]].
 - [[0004-l2-choice]] (accepted by the agent for development and testnet, owner may veto; mainnet waits for the owner): the L2, its close rule and finality. Shapes the timing and L2-evidence checks in [[verifier]].
 - [[0005-permanent-archive]] (accepted by the agent, owner may veto; the first real upload waits for the owner): the display-text split ([[display-text]]), the result-critical field rule ([[notation]]) and the CID parameters ([[content-addressing]]).
+- [[0007-group-and-hash]] (accepted by the owner on 2026-10-10: option A): ristretto255, SHA-256 as `H`, RFC 9380 `hash_to_ristretto255` and RFC 9497 `HashToScalar`. [[group]] follows it.
 - [[0006-trustees]] (open; owner-only: the owner decides): the panel bound into each election definition.
 - [[0002-everlasting-privacy]] (accepted by the owner on 2026-10-10: option B, perfectly hiding commitments on the board; three owner questions in its Decision section still block ballot encryption (P1-12) and, through trustee duties and the election-key wording, the ceremony and the tally with its destruction step (P1-15)): the ballot, ceremony and tally sections follow it once written; [[verifier]] marks the checks it changes.
 

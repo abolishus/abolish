@@ -3,18 +3,22 @@
 // from the files' type descriptors, so the expected bytes and values come from
 // the spec's vectors, never from the code under test.
 
+import { ristretto255 } from "@noble/curves/ed25519.js";
 import { readFileSync } from "node:fs";
 import {
   bool,
   bytesFixed,
   bytesVar,
   type Codec,
+  element,
+  elementOrIdentity,
   enum8,
   fieldBn254,
   list,
   RecordSchema,
   type RecordType,
   recordType,
+  scalar,
   struct,
   u16,
   u32,
@@ -32,6 +36,8 @@ export type TypeDescriptor =
   | { readonly kind: "bytes"; readonly max: number }
   | { readonly kind: "utf8"; readonly max: number }
   | { readonly kind: "field"; readonly field: string }
+  | { readonly kind: "scalar" }
+  | { readonly kind: "element"; readonly identity: "allowed" | "rejected" }
   | { readonly kind: "list"; readonly max: number; readonly of: TypeDescriptor }
   | {
       readonly kind: "record";
@@ -123,6 +129,16 @@ export function build(t: TypeDescriptor): Built {
           if (b.length !== 32) throw new Error("a field value is 32 bytes");
           return BigInt(`0x${asString(v)}`);
         },
+      };
+    case "scalar":
+      return { codec: scalar, fromJson: (v) => decimal(asString(v)) };
+    case "element":
+      if (t.identity !== "allowed" && t.identity !== "rejected")
+        throw new Error(`unknown identity rule ${String(t.identity)}`);
+      return {
+        codec: t.identity === "allowed" ? elementOrIdentity : element,
+        // Decoded by @noble/curves directly, not through the codec under test.
+        fromJson: (v) => ristretto255.Point.fromBytes(hex(asString(v))),
       };
     case "list": {
       const of = build(t.of);

@@ -6,9 +6,11 @@ Cross-language vectors for the encodings and computations in this spec. TypeScri
 
 One JSON file per spec section or record type, named after it (`primitives.json`, `election-definition.json`, …). Each file is UTF-8 JSON, formatted by `vp check`.
 
-| File              | Covers                                                                        |
-| ----------------- | ----------------------------------------------------------------------------- |
-| `primitives.json` | Primitive types, record framing and strict-decoding rejections ([[notation]]) |
+| File              | Covers                                                                                       |
+| ----------------- | -------------------------------------------------------------------------------------------- |
+| `primitives.json` | Primitive types, record framing and strict-decoding rejections ([[notation]])                |
+| `group.json`      | `scalar` and `element` codecs: valid boundaries and every rejected class ([[group]])         |
+| `hash.json`       | `H`, `HashToScalar` under each Fiat–Shamir tag, and `h`, with intermediate bytes ([[group]]) |
 
 ## Format
 
@@ -52,15 +54,29 @@ Values:
 
 Type descriptors:
 
-| `kind`                            | Other members                                                                                                                     |
-| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `u8`, `u16`, `u32`, `u64`, `bool` | none                                                                                                                              |
-| `enum8`                           | `values`: the allowed values, as decimal strings                                                                                  |
-| `bytes`                           | either `length` (`bytes[N]`) or `max` (`bytes<M>`), as a JSON number                                                              |
-| `utf8`                            | `max`, as a JSON number                                                                                                           |
-| `field`                           | `field`: the field's name (`bn254`)                                                                                               |
-| `list`                            | `max`, as a JSON number, and `of`: the element's type descriptor                                                                  |
-| `record`                          | `recordType` (4 lowercase hex digits), `version` (a JSON number) and `fields`: an array of `{ "name", "type" }` in encoding order |
+| `kind`                            | Other members                                                                                                                         |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `u8`, `u16`, `u32`, `u64`, `bool` | none                                                                                                                                  |
+| `enum8`                           | `values`: the allowed values, as decimal strings                                                                                      |
+| `bytes`                           | either `length` (`bytes[N]`) or `max` (`bytes<M>`), as a JSON number                                                                  |
+| `utf8`                            | `max`, as a JSON number                                                                                                               |
+| `field`                           | `field`: the field's name (`bn254`)                                                                                                   |
+| `scalar`                          | none; the value is a decimal string                                                                                                   |
+| `element`                         | `identity`: `"allowed"` or `"rejected"`, whether the field may hold the identity; the value is the element's 32-byte encoding, in hex |
+| `list`                            | `max`, as a JSON number, and `of`: the element's type descriptor                                                                      |
+| `record`                          | `recordType` (4 lowercase hex digits), `version` (a JSON number) and `fields`: an array of `{ "name", "type" }` in encoding order     |
+
+## Hash vectors
+
+`hash.json` checks computations rather than codecs, so it has its own format, `abolish-hash-vectors/1`, with the same top-level fields. Each vector:
+
+- `id`, `description` (optional): as above.
+- `function`: `H`, `hash-to-scalar` (`HashToScalar(message, DST)`) or `hash-to-group` (`hash_to_ristretto255(message, DST)`), as [[group]] defines them.
+- `dst`: the `DST` as an ASCII string, for `hash-to-scalar` and `hash-to-group`.
+- `message`: the input, as lowercase hex.
+- `uniformBytes`: the 64-byte `expand_message_xmd` output, as lowercase hex, for `hash-to-scalar` and `hash-to-group`.
+- `output`: the result: the 32-byte digest for `H`, the `scalar` encoding for `hash-to-scalar`, the `element` encoding for `hash-to-group`.
+- `notEqual` (only on `generator-h`): encodings the output must differ from (`identity`, `g`, `minusG`).
 
 ## Rules
 

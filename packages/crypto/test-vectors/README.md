@@ -17,8 +17,13 @@ Vectors published by standards bodies and library authors (NIST CAVP, RFCs, Wych
 
 ## Files
 
-| Path                           | Covers                       | Origin                                                       |
-| ------------------------------ | ---------------------------- | ------------------------------------------------------------ |
-| `nist-cavp/SHA256ShortMsg.rsp` | SHA-256, messages 0–64 bytes | NIST CAVP SHAVS byte-oriented vectors, via pyca/cryptography |
+| Path                           | Covers                                                                            | Origin                                                       |
+| ------------------------------ | --------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| `nist-cavp/SHA256ShortMsg.rsp` | SHA-256, messages 0–64 bytes                                                      | NIST CAVP SHAVS byte-oriented vectors, via pyca/cryptography |
+| `rfc/rfc9496.txt`              | ristretto255: Appendix A.1–A.3                                                    | RFC 9496, from the RFC Editor                                |
+| `rfc/rfc9380.txt`              | `expand_message_xmd` over SHA-512: Appendix K.3                                   | RFC 9380, from the RFC Editor                                |
+| `rfc/rfc9497.txt`              | ristretto255-SHA512 `HashToScalar`, `HashToGroup` and serialisation: Appendix A.1 | RFC 9497, from the RFC Editor                                |
 
 The NIST CAVP zip on csrc.nist.gov couldn't be fetched from the session that vendored this file, so it was taken from the pyca/cryptography mirror at a pinned commit. All 65 digests were checked against both `@noble/hashes` and OpenSSL (through Python's `hashlib`) when it was vendored; a byte comparison against NIST's own zip is still to do.
+
+The RFC texts are vendored whole, and `tests/vectors/rfc.ts` parses the vectors out of their appendices strictly. RFC 9496 Appendix A.4 (`SQRT_RATIO_M1`) isn't checked directly, because `@noble/curves` doesn't export the function; it is exercised through `Decode` and element derivation.

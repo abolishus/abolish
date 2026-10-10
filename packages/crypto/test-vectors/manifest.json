@@ -11,6 +11,39 @@
       "license": "Work of the US government (NIST), not subject to copyright in the United States",
       "retrieved": "2026-10-09",
       "covers": "SHA-256 (FIPS 180-4) of messages from 0 to 64 bytes"
+    },
+    {
+      "path": "rfc/rfc9496.txt",
+      "sha256": "d875c6e703827da487eae8f0656fd25e4a278f1dcb0f06041669adad27c03ff3",
+      "source": "https://www.rfc-editor.org/rfc/rfc9496.txt",
+      "tag": "rfc9496",
+      "origin": "RFC 9496, The ristretto255 and decaf448 Groups (IETF/IRTF), plain-text rendering as published by the RFC Editor",
+      "originUrl": "https://www.rfc-editor.org/rfc/rfc9496",
+      "license": "IETF Trust Legal Provisions (BCP 78); code components under the Revised BSD License",
+      "retrieved": "2026-10-10",
+      "covers": "ristretto255 (RFC 9496): Appendix A.1 generator multiples, A.2 invalid encodings, A.3 element derivation from uniform bytes"
+    },
+    {
+      "path": "rfc/rfc9380.txt",
+      "sha256": "a2e6ab02b2117d6f52ac293020857752972b2e23ae005c33f612e40436ff4b6d",
+      "source": "https://www.rfc-editor.org/rfc/rfc9380.txt",
+      "tag": "rfc9380",
+      "origin": "RFC 9380, Hashing to Elliptic Curves (IETF/IRTF), plain-text rendering as published by the RFC Editor",
+      "originUrl": "https://www.rfc-editor.org/rfc/rfc9380",
+      "license": "IETF Trust Legal Provisions (BCP 78); code components under the Revised BSD License",
+      "retrieved": "2026-10-10",
+      "covers": "expand_message_xmd over SHA-512 (RFC 9380 Appendix K.3), the first half of hash_to_ristretto255"
+    },
+    {
+      "path": "rfc/rfc9497.txt",
+      "sha256": "95160517617374655fe23af2c6cec311eae326deb7689239f97641fd5a560432",
+      "source": "https://www.rfc-editor.org/rfc/rfc9497.txt",
+      "tag": "rfc9497",
+      "origin": "RFC 9497, Oblivious Pseudorandom Functions (OPRFs) Using Prime-Order Groups (IETF/IRTF), plain-text rendering as published by the RFC Editor",
+      "originUrl": "https://www.rfc-editor.org/rfc/rfc9497",
+      "license": "IETF Trust Legal Provisions (BCP 78); code components under the Revised BSD License",
+      "retrieved": "2026-10-10",
+      "covers": "ristretto255-SHA512 HashToScalar, HashToGroup and scalar and element serialisation, through RFC 9497 Appendix A.1 (OPRF, VOPRF and POPRF modes)"
     }
   ]
 }

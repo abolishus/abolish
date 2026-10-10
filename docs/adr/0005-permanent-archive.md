@@ -1,6 +1,6 @@
 # ADR 0005: Permanent archive
 
-- Status: needs-decision
+- Status: Accepted (agent) — owner may veto (2026-10-10, rule A): option A; the first real upload spends money, so it waits for the owner
 - Date: 2026-10-09
 - Deciders: owner (one-way door)
 - Threats addressed: T-51, T-49, T-66, T-17, T-68, T-15, T-24, T-52, T-69, T-71 (see [[THREAT_MODEL]])
@@ -106,3 +106,5 @@ What would change the recommendation:
 ## Default
 
 Opened 2026-10-09 20:23 UTC. If the owner hasn't answered by **2026-10-12 20:23 UTC**, option A (with IPFS pinning and the archive content rule) is adopted and this ADR is marked `Status: accepted by default — revisit`. Nothing is uploaded to Arweave mainnet before P4-3, and that upload spends real funds, so P4-3 waits for the owner to provide them.
+
+Superseded on 2026-10-10 by rule A (`AGENTS.md`): the owner's update replaced the 72-hour default, and the recommendation was adopted as `Accepted (agent) — owner may veto`, listed under Decisions to review in [[STATUS]].

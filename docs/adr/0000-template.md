@@ -1,6 +1,6 @@
 # ADR NNNN: Title
 
-- Status: proposed | Accepted (agent) — owner may veto | needs-decision (owner-only questions) | accepted | accepted by default — revisit (before 2026-10-10) | superseded by [[ADR-NNNN]]
+- Status: proposed | Accepted (agent) — owner may veto | needs-decision (owner-only questions) | accepted | accepted by default — revisit (only ADRs written before rule A, 2026-10-10) | superseded by [[ADR-NNNN]]
 - Date: YYYY-MM-DD
 - Deciders: agent, owner may veto (rule A) | owner (owner-only: trustees, mainnet or real funds, legal, spending, the brief's non-negotiable properties)
 - Threats addressed: T-xx, T-yy (see [[THREAT_MODEL]])

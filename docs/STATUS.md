@@ -81,7 +81,7 @@ Each item's state (`todo`, `in progress`, `blocked`, `needs owner decision`, `do
 - [[P5-3]] `packages/capacitor-nfc-passport`
 - [[P5-4]] `packages/capacitor-zk-prover`
 
-One-off items: [[P0-ops]] split shared hot files.
+One-off items: [[P0-ops]] split shared hot files; [[P0-ops-2]] P0-ops review follow-ups; [[P0-ops-3]] apply rule A to the open ADRs.
 
 ## Blocked
 
@@ -97,8 +97,6 @@ Decisions the agent made under rule A (`AGENTS.md`). Each stands unless the owne
 - [[0003-tally-scheme]] (P1-4, #9): homomorphic tally for plurality and approval; a mixnet only for ranked choice, by a later ADR.
 - [[0004-l2-choice]] (P1-5, #10): Base, for development and testnet. Mainnet stays with the owner.
 - [[0005-permanent-archive]] (P1-6, #11–#14): Arweave plus IPFS pinning. The first real upload spends money, so it waits for the owner.
-
-These four ADRs still read `Status: needs-decision`; a follow-up docs PR marks each `Accepted (agent) — owner may veto`.
 
 Waiting on the owner (owner-only under rule A): [[0006-trustees]] (P1-7: naming trustees), and P1-12's three questions above.
 

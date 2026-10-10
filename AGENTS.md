@@ -162,7 +162,7 @@ pnpm workspace orchestrated by Vite+ (no Turborepo/Nx).
 ## Docs map
 
 - [`docs/PROJECT_BRIEF.md`](docs/PROJECT_BRIEF.md): owner's brief, verbatim
-- [`docs/STATUS.md`](docs/STATUS.md): the work-queue index, plus Blocked, Known-weak and Decisions to review
+- [`docs/STATUS.md`](docs/STATUS.md): the work-queue index, plus Blocked, Decisions to review, Injection attempts and Known-weak
 - `docs/status/<item-id>.md`: one file per work item (state, PR, notes)
 - `docs/THREAT_MODEL.md`: goals, adversaries and the threat index; cited by every decision
 - `docs/threats/T-xx.md`: one file per threat (description, mitigation, status, history)

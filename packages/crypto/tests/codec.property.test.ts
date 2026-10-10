@@ -276,14 +276,23 @@ describe("encoders emit only defined encodings", () => {
     ).toThrow(RangeError);
     expect(() => struct([["__proto__", u8]] as const)).toThrow(RangeError);
   });
+
+  test("a struct's layout can't change after it is made", () => {
+    const fields: [string, Codec<unknown>][] = [["a", u8 as Codec<unknown>]];
+    const codec = struct(fields);
+    fields[0] = ["a", u16 as Codec<unknown>];
+    fields.push(["b", u8 as Codec<unknown>]);
+    expect(encode(codec, { a: 1 })).toEqual(Uint8Array.of(1));
+    expect(decode(codec, Uint8Array.of(7))).toEqual({ a: 7 });
+  });
 });
 
 describe("record framing", () => {
-  const t1 = recordType(0x0010, {
+  const t1 = recordType(0x0002, {
     1: struct([["x", u8]] as const),
     3: struct([["y", u16]] as const),
   });
-  const t2 = recordType(0x0011, { 1: struct([["z", bool]] as const) });
+  const t2 = recordType(0x0003, { 1: struct([["z", bool]] as const) });
   const schema = new RecordSchema([t1, t2]);
 
   test("round-trips every version and returns the version read", () => {
@@ -295,7 +304,7 @@ describe("record framing", () => {
       version: 3,
       value: { y: 258 },
     });
-    expect(schema.encode(t1, 3, { y: 258 })).toEqual(Uint8Array.of(0, 0x10, 3, 1, 2));
+    expect(schema.encode(t1, 3, { y: 258 })).toEqual(Uint8Array.of(0, 0x02, 3, 1, 2));
   });
 
   test("rejects a version other than the one the profile pins, right after the header", () => {
@@ -305,21 +314,43 @@ describe("record framing", () => {
       code: "profile-mismatch",
     });
     // Checked before any field: a body that would fail to decode still reports the profile.
-    expect(outcome(() => schema.decode(t1, Uint8Array.of(0, 0x10, 1), 3))).toEqual({
+    expect(outcome(() => schema.decode(t1, Uint8Array.of(0, 0x02, 1), 3))).toEqual({
       ok: false,
       code: "profile-mismatch",
     });
     expect(schema.decode(t1, v1, 1).version).toBe(1);
   });
 
+  test("a version both unpinned and unknown is profile-mismatch, not unknown-version", () => {
+    // notation.md: the pin is checked first, because it is what the election requires.
+    expect(outcome(() => schema.decode(t1, Uint8Array.of(0, 0x02, 2, 0), 1))).toEqual({
+      ok: false,
+      code: "profile-mismatch",
+    });
+    expect(outcome(() => schema.decode(t1, Uint8Array.of(0, 0x02, 2, 0), UNPINNED))).toEqual({
+      ok: false,
+      code: "unknown-version",
+    });
+    // A pin the schema has no layout for is a caller's bug, not a decode result.
+    expect(() => schema.decode(t1, Uint8Array.of(0, 0x02, 1, 0), 2 as never)).toThrow(RangeError);
+  });
+
+  test("production schemas take only numbers the registry assigns", () => {
+    expect(() => new RecordSchema([recordType(0x000a, { 1: u8 })])).toThrow(RangeError);
+    expect(() => new RecordSchema([recordType(0xfeff, { 1: u8 })])).toThrow(RangeError);
+    expect(
+      () => new RecordSchema([recordType(0x000a, { 1: u8 })], { allowTestRange: true }),
+    ).toThrow(RangeError);
+  });
+
   test("distinguishes unknown, unexpected and unknown-version", () => {
     const code = (b: number[]) => outcome(() => schema.decode(t1, Uint8Array.from(b), UNPINNED));
     expect(code([0, 0x12, 1, 0])).toEqual({ ok: false, code: "unknown-record-type" });
     expect(code([0, 0, 1, 0])).toEqual({ ok: false, code: "unknown-record-type" });
-    expect(code([0, 0x11, 1, 0])).toEqual({ ok: false, code: "unexpected-record-type" });
-    expect(code([0, 0x10, 2, 0])).toEqual({ ok: false, code: "unknown-version" });
-    expect(code([0, 0x10, 0, 0])).toEqual({ ok: false, code: "unknown-version" });
-    expect(code([0, 0x10])).toEqual({ ok: false, code: "truncated" });
+    expect(code([0, 0x03, 1, 0])).toEqual({ ok: false, code: "unexpected-record-type" });
+    expect(code([0, 0x02, 2, 0])).toEqual({ ok: false, code: "unknown-version" });
+    expect(code([0, 0x02, 0, 0])).toEqual({ ok: false, code: "unknown-version" });
+    expect(code([0, 0x02])).toEqual({ ok: false, code: "truncated" });
   });
 
   test("random bytes are rejected or re-encode to themselves", () => {
@@ -346,7 +377,7 @@ describe("record framing", () => {
     expect(() => recordType(1, { 0: u8 })).toThrow(RangeError);
     expect(() => recordType(1, { 256: u8 })).toThrow(RangeError);
     expect(() => recordType(1, {})).toThrow(RangeError);
-    expect(() => new RecordSchema([t1, recordType(0x0010, { 1: u8 })])).toThrow(RangeError);
+    expect(() => new RecordSchema([t1, recordType(0x0002, { 1: u8 })])).toThrow(RangeError);
     const test = recordType(0xff01, { 1: u8 });
     expect(() => new RecordSchema([test])).toThrow(RangeError);
     expect(
@@ -359,9 +390,9 @@ describe("record framing", () => {
   });
 
   test("encodes and expects only the types it was built with", () => {
-    const other = recordType(0x0010, { 1: struct([["x", u8]] as const) });
+    const other = recordType(0x0002, { 1: struct([["x", u8]] as const) });
     expect(() => schema.encode(other, 1, { x: 1 })).toThrow(RangeError);
-    expect(() => schema.decode(other, Uint8Array.of(0, 0x10, 1, 1), UNPINNED)).toThrow(RangeError);
+    expect(() => schema.decode(other, Uint8Array.of(0, 0x02, 1, 1), UNPINNED)).toThrow(RangeError);
     expect(() => schema.encode(t1, 2 as never, { x: 1 } as never)).toThrow(EncodeError);
   });
 });
@@ -420,17 +451,17 @@ describe("hostile JavaScript inputs", () => {
     );
     expect(() => new RecordSchema([{ recordType: 0, versions: { 0: u8 } }])).toThrow(TypeError);
     expect(() => recordType(1, { "01": u8 } as never)).toThrow(RangeError);
-    const t = recordType(0x20, { 1: u8 });
+    const t = recordType(0x0004, { 1: u8 });
     expect(Object.isFrozen(t) && Object.isFrozen(t.versions)).toBe(true);
   });
 
   test("a version found only on Object.prototype is unknown", () => {
-    const t = recordType(0x20, { 1: u8 });
+    const t = recordType(0x0004, { 1: u8 });
     const schema = new RecordSchema([t]);
     const proto = Object.prototype as Record<number, unknown>;
     proto[5] = u8;
     try {
-      expect(outcome(() => schema.decode(t, Uint8Array.of(0, 0x20, 5, 0), UNPINNED))).toEqual({
+      expect(outcome(() => schema.decode(t, Uint8Array.of(0, 0x04, 5, 0), UNPINNED))).toEqual({
         ok: false,
         code: "unknown-version",
       });

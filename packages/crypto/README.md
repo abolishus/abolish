@@ -9,9 +9,18 @@ The protocol core of [Abolish](https://github.com/abolishus/abolish): canonical 
 Strict encoders and decoders for the primitive types of the spec, following option A of ADR 0001 (explicit byte layouts):
 
 - Primitives: `u8`, `u16`, `u32`, `u64` (a `bigint`), `bool`, `enum8([...])`, `bytesFixed(n)`, `bytesVar(max)`, `utf8(max)` (the exact bytes, never normalised) and `fieldBn254` (a `bigint` below `BN254_R`). `list(of, max)` and `struct([...])` compose them.
-- `encode(codec, value)` and `decode(codec, bytes)` handle a value that isn't a record. Records go through a `RecordSchema` built from `recordType(number, { version: layout })`. Its `decode` requires the version the election's profile pins and rejects any other version (`profile-mismatch`). Skipping that check means passing `UNPINNED` explicitly, which only vector files and tests do. Inputs are copied once into a plain `Uint8Array`, so decoded values never alias the caller's buffer.
+- `encode(codec, value)` and `decode(codec, bytes)` handle a value that isn't a record. Records go through a `RecordSchema` built from `recordType(number, { version: layout })`. Its `decode` requires the version the election's profile pins and rejects any other version (`profile-mismatch`, checked before the version is looked up, so it wins over `unknown-version`). Skipping that check means passing `UNPINNED` explicitly: tests and vector files do, and so does `decodeElectionDefinition`, because a definition carries its own profile and is checked against it once decoded. A production schema accepts only the record-type numbers the registry assigns. Inputs are copied once into a plain `Uint8Array`, so decoded values never alias the caller's buffer.
 - Decoders reject and never repair. A `DecodeError` carries the spec's error code (`truncated`, `trailing-bytes`, `length-over-max`, `unknown-record-type`, `unexpected-record-type`, `unknown-version`, `invalid-enum`, `invalid-utf8`, `non-canonical`, `profile-mismatch`) and the offset where the failing field starts. Encoders throw `EncodeError` instead of emitting bytes the spec doesn't define (T-31).
 - `ds(tag, m)` builds `u8(len(tag)) ‖ tag ‖ m`, only for a tag the registry marks specified. `TAG_REGISTRY` and `RECORD_TYPES` are checked against the spec's registries by tests.
+
+## Election definition and display text
+
+Version 1 of record types `0x0001` and `0x0009` ([`docs/spec/election-definition.md`](../../docs/spec/election-definition.md), [`docs/spec/display-text.md`](../../docs/spec/display-text.md)). Both are **drafts**: never anchor one or use it in a real election (T-34, T-31, T-17).
+
+- `encodeElectionDefinition` and `decodeElectionDefinition`. The decoder decodes strictly, then rejects with `profile-mismatch` unless the definition's own profile pins `0x0001` at the record's version. `electionDefinitionHash` is `H(DS("abolish/v1/election-definition", ·))`. `electionDefinitionRule` returns the first well-formedness rule a decoded definition breaks.
+- `encodeDisplayText`, `decodeDisplayText` (against the version a definition pins), `displayTextCommitment` and `displayTextRule`, which a client runs before showing any text: commitment first, then shape.
+- `newElectionId` and `newDisplayTextSalt` draw 32 bytes from the platform CSPRNG (`@noble/hashes` `randomBytes`).
+- `PROTOCOL_SCHEMA` is the production schema: the types above and no others. `PARAMETERS` mirrors `docs/spec/parameters.md`.
 
 ## Group and hash
 
@@ -35,8 +44,8 @@ vp run --filter @abolishus/crypto test
 
 - Unit and property tests use `vite-plus/test` and `fast-check`; property tests honour `FC_NUM_RUNS` (CI sets 1000) and print their seed on failure.
 - Published vectors are vendored byte for byte under [`test-vectors/`](test-vectors/README.md), each listed in `test-vectors/manifest.json` with its source URL and sha256. `tests/vectors/harness.ts` checks the sha256 before any test reads a file.
-- Cross-language vectors for what the spec defines live in `docs/spec/vectors/`, not here. `tests/primitives-vectors.test.ts` runs every vector in `primitives.json` and `group.json`, building codecs from the files' type descriptors; `tests/group.test.ts` runs `hash.json`.
-- `scripts/group-vectors.py` prints `group.json` and `hash.json` from an independent Python implementation of RFC 9496, RFC 9380 §5.3.1 and RFC 9497 §4.1 (`python3 -I packages/crypto/scripts/group-vectors.py docs/spec/vectors`, then `vp check --fix`). `scripts/static-dh-factors.ts` reproduces ADR 0007's factor search of ℓ ± 1 (`vp node packages/crypto/scripts/static-dh-factors.ts`, about 30 seconds).
+- Cross-language vectors for what the spec defines live in `docs/spec/vectors/`, not here. `tests/primitives-vectors.test.ts` runs every vector in `primitives.json` and `group.json`, building codecs from the files' type descriptors; `tests/group.test.ts` runs `hash.json`; `tests/record-vectors.test.ts` runs `election-definition.json` and `display-text.json` through the production codecs, hashes and rule checks.
+- `scripts/group-vectors.py` prints `group.json` and `hash.json` from an independent Python implementation of RFC 9496, RFC 9380 §5.3.1 and RFC 9497 §4.1 (`python3 -I packages/crypto/scripts/group-vectors.py docs/spec/vectors`, then `vp check --fix`). `scripts/definition-vectors.py` prints `election-definition.json` and `display-text.json` from the spec tables with only the Python standard library (`python3 -I packages/crypto/scripts/definition-vectors.py docs/spec/vectors`, then `vp check --fix`). `scripts/static-dh-factors.ts` reproduces ADR 0007's factor search of ℓ ± 1 (`vp node packages/crypto/scripts/static-dh-factors.ts`, about 30 seconds).
 
 ## License
 

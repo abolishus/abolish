@@ -10,21 +10,22 @@ A conforming verifier implements every check in [[verifier]] and decodes every r
 
 ## Documents
 
-| Document                    | Defines                                                                                  | Status                                                      |
-| --------------------------- | ---------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
-| [[notation]]                | Notation, primitive types, record framing, strict decoding rules, decode error codes     | Specified                                                   |
-| [[domain-separation]]       | Tag grammar, how a tag is applied to each kind of hash, the tag registry                 | Framing specified; most tags reserved for their owning item |
-| [[group]]                   | The group (ristretto255), `scalar` and `element` codecs, `H`, hash-to-scalar and `h`     | Specified                                                   |
-| [[versioning]]              | Protocol and record versions, the record-type registry, change rules, election profiles  | Specified                                                   |
-| [[parameters]]              | Protocol-wide limits                                                                     | Specified for version 1; P1-18 may lower                    |
-| [[display-text]]            | The split between display text and result-critical data, and the display-text commitment | Split and commitment specified; record layout is P1-10b's   |
-| [[content-addressing]]      | How board data becomes IPFS blocks, CIDs and CAR files                                   | Provisional until P4-3's vectors                            |
-| [[verifier]]                | What a third-party verifier must check, stage by stage                                   | Checklist; each check is specified by its owning item       |
-| [[vectors/README\|vectors]] | The test-vector file format (`docs/spec/vectors/*.json`)                                 | Specified                                                   |
+| Document                    | Defines                                                                                     | Status                                                      |
+| --------------------------- | ------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| [[notation]]                | Notation, primitive types, record framing, strict decoding rules, decode error codes        | Specified                                                   |
+| [[domain-separation]]       | Tag grammar, how a tag is applied to each kind of hash, the tag registry                    | Framing specified; most tags reserved for their owning item |
+| [[group]]                   | The group (ristretto255), `scalar` and `element` codecs, `H`, hash-to-scalar and `h`        | Specified                                                   |
+| [[versioning]]              | Protocol and record versions, the record-type registry, change rules, election profiles     | Specified                                                   |
+| [[parameters]]              | Protocol-wide limits                                                                        | Specified for version 1; P1-18 may lower                    |
+| [[display-text]]            | The split between display text and result-critical data, the commitment and the record      | Specified; record version 1 is a draft                      |
+| [[election-definition]]     | The election definition record, its hash, decoding against its own profile, well-formedness | Version 1 specified as a draft (P1-14, P1-17, P1-18 fields) |
+| [[content-addressing]]      | How board data becomes IPFS blocks, CIDs and CAR files                                      | Provisional until P4-3's vectors                            |
+| [[verifier]]                | What a third-party verifier must check, stage by stage                                      | Checklist; each check is specified by its owning item       |
+| [[vectors/README\|vectors]] | The test-vector file format (`docs/spec/vectors/*.json`)                                    | Specified                                                   |
 
 Sections still to be written, by the STATUS item that owns them:
 
-- Record layouts: the election definition and display text by P1-10b, the rest of the record-type registry by each record's owning item. The primitive codecs, record framing and `DS` framing they build on are implemented in `packages/crypto` (P1-10).
+- Record layouts: the rest of the record-type registry, by each record's owning item. The election definition and display text are specified (P1-10b) as drafts until the items owning their fields settle them.
 - Ballot encryption or commitment and validity proofs: P1-12.
 - Benaloh challenge/spoil, receipts and re-vote resolution: P1-13.
 - Key ceremony and its transcript: P1-14.

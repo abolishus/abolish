@@ -39,12 +39,22 @@ export type TypeDescriptor =
   | { readonly kind: "scalar" }
   | { readonly kind: "element"; readonly identity: "allowed" | "rejected" }
   | { readonly kind: "list"; readonly max: number; readonly of: TypeDescriptor }
+  | { readonly kind: "struct"; readonly fields: readonly FieldDescriptor[] }
+  | { readonly kind: "ref"; readonly name: string }
   | {
       readonly kind: "record";
       readonly recordType: string;
       readonly version: number;
-      readonly fields: readonly { readonly name: string; readonly type: TypeDescriptor }[];
+      readonly fields: readonly FieldDescriptor[];
     };
+
+export interface FieldDescriptor {
+  readonly name: string;
+  readonly type: TypeDescriptor;
+}
+
+/** Named descriptors of a file's `types`, which `ref` descriptors point to. */
+export type NamedTypes = Readonly<Record<string, TypeDescriptor>>;
 
 export type RecordDescriptor = Extract<TypeDescriptor, { kind: "record" }>;
 
@@ -55,6 +65,11 @@ export interface Vector {
   readonly encoding: string;
   readonly value?: unknown;
   readonly error?: string;
+  readonly illFormed?: string;
+  readonly hash?: string;
+  readonly commitment?: string;
+  readonly pinned?: number;
+  readonly definition?: { readonly optionCount: string; readonly displayTextCommitment: string };
 }
 
 export interface VectorFile {
@@ -62,6 +77,8 @@ export interface VectorFile {
   readonly title: string;
   readonly spec: string;
   readonly generator: string;
+  readonly draft?: boolean;
+  readonly types?: NamedTypes;
   readonly vectors: readonly Vector[];
 }
 
@@ -96,7 +113,16 @@ const asString = (v: unknown) => {
   return v;
 };
 
-export function build(t: TypeDescriptor): Built {
+/** `t`, with a `ref` replaced by the descriptor it names. */
+export function resolve(t: TypeDescriptor, types: NamedTypes = {}): TypeDescriptor {
+  if (t.kind !== "ref") return t;
+  const named = Object.hasOwn(types, t.name) ? types[t.name] : undefined;
+  if (named === undefined || named.kind === "ref") throw new Error(`bad type ref ${t.name}`);
+  return named;
+}
+
+export function build(descriptor: TypeDescriptor, types: NamedTypes = {}): Built {
+  const t = resolve(descriptor, types);
   switch (t.kind) {
     case "u8":
     case "u16":
@@ -141,19 +167,23 @@ export function build(t: TypeDescriptor): Built {
         fromJson: (v) => ristretto255.Point.fromBytes(hex(asString(v))),
       };
     case "list": {
-      const of = build(t.of);
+      const of = build(t.of, types);
       return {
         codec: list(of.codec, t.max),
         fromJson: (v) => (v as unknown[]).map(of.fromJson),
       };
     }
+    case "struct":
+      return buildFields(t.fields, types);
+    case "ref":
+      throw new Error("unreachable: resolved above");
     case "record":
       throw new Error("records are built with buildSchema");
   }
 }
 
-function buildFields(r: RecordDescriptor): Built {
-  const fields = r.fields.map((f) => [f.name, build(f.type)] as const);
+function buildFields(fieldList: readonly FieldDescriptor[], types: NamedTypes): Built {
+  const fields = fieldList.map((f) => [f.name, build(f.type, types)] as const);
   return {
     codec: struct(fields.map(([name, b]) => [name, b.codec] as const)),
     fromJson: (v) =>
@@ -172,35 +202,39 @@ const typeNumber = (r: RecordDescriptor) => Number.parseInt(r.recordType, 16);
  */
 export function buildSchema(file: VectorFile): {
   readonly schema: RecordSchema;
-  readonly type: (r: RecordDescriptor) => {
+  readonly type: (r: TypeDescriptor) => {
     readonly recordType: RecordType;
     readonly built: Built;
   };
 } {
   const layouts = new Map<number, Map<number, { json: string; built: Built }>>();
+  const types = file.types ?? {};
   for (const v of file.vectors) {
-    if (v.type.kind !== "record") continue;
-    const versions = layouts.get(typeNumber(v.type)) ?? new Map();
-    layouts.set(typeNumber(v.type), versions);
-    const json = JSON.stringify(v.type.fields);
-    const seen = versions.get(v.type.version);
+    const t = resolve(v.type, types);
+    if (t.kind !== "record") continue;
+    const versions = layouts.get(typeNumber(t)) ?? new Map();
+    layouts.set(typeNumber(t), versions);
+    const json = JSON.stringify(t.fields);
+    const seen = versions.get(t.version);
     // One (type, version) pair is one layout; a file that disagrees with
     // itself is a broken vector file, not something to pick a side of.
     if (seen !== undefined && seen.json !== json)
-      throw new Error(`${v.id}: ${v.type.recordType} v${v.type.version} has two layouts`);
-    versions.set(v.type.version, seen ?? { json, built: buildFields(v.type) });
+      throw new Error(`${v.id}: ${t.recordType} v${t.version} has two layouts`);
+    versions.set(t.version, seen ?? { json, built: buildFields(t.fields, types) });
   }
-  const types = new Map<number, RecordType>();
+  const made = new Map<number, RecordType>();
   for (const [n, versions] of layouts)
-    types.set(
+    made.set(
       n,
       recordType(n, Object.fromEntries([...versions].map(([k, l]) => [k, l.built.codec]))),
     );
-  const schema = new RecordSchema([...types.values()], { allowTestRange: true });
+  const schema = new RecordSchema([...made.values()], { allowTestRange: true });
   return {
     schema,
-    type: (r) => {
-      const recordType = types.get(typeNumber(r));
+    type: (descriptor) => {
+      const r = resolve(descriptor, types);
+      if (r.kind !== "record") throw new Error("not a record type");
+      const recordType = made.get(typeNumber(r));
       const built = layouts.get(typeNumber(r))?.get(r.version)?.built;
       if (recordType === undefined || built === undefined) throw new Error("unreachable");
       return { recordType, built };

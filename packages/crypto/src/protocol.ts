@@ -65,9 +65,13 @@ export function electionDefinitionHash(d: ElectionDefinition): Uint8Array {
   return H(ds("abolish/v1/election-definition", encodeElectionDefinition(d)));
 }
 
-/** The version a definition's profile pins for `recordType`, if any. */
+/**
+ * The version a definition's profile pins for `recordType`: `undefined` unless
+ * exactly one pin names it, so the answer never depends on pin order.
+ */
 export function pinnedVersion(d: ElectionDefinition, recordType: number): number | undefined {
-  return d.profile.pins.find((p) => p.record_type === recordType)?.version;
+  const pins = d.profile.pins.filter((p) => p.record_type === recordType);
+  return pins.length === 1 ? pins[0]?.version : undefined;
 }
 
 export function encodeDisplayText(t: DisplayText): Uint8Array {

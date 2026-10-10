@@ -608,6 +608,8 @@ def dt_vectors():
         v = {"id": id_, "description": desc, "type": T, "pinned": 1, "value": dt_json(t), "encoding": e.hex()}
         v["commitment"] = H(ds("abolish/v1/display-text", e)).hex()
         v["definition"] = context
+        oc, c = int(context["optionCount"]), bytes.fromhex(context["displayTextCommitment"])
+        assert display_text_rule(t, oc, c) == rule, (id_, display_text_rule(t, oc, c), rule)
         if rule is not None:
             v["illFormed"] = rule
         vs.append(v)

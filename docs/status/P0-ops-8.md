@@ -9,4 +9,4 @@ Non-blocking finding from `crypto-review` on #34 (P0-ops-7): verifier check 2.8 
 
 ## Notes
 
-- The tiers-only rule is now fixed by the spec (a ballot goes to the cell of the tier it proved), so no definition can relabel one tier's aggregate as another's. 2.4 now also ties each tier's root to that tier's own group additions and forbids shared roots, since labels are only as good as the tier roots. Tested: `vp check`; in-session subagent review with the `crypto-review` checklist.
+- The tiers-only rule is now fixed by the spec (a ballot goes to the cell of the tier it proved), so no definition can relabel one tier's aggregate as another's. 2.4 now also ties each tier's root to that tier's own group additions, since labels are only as good as the tier roots, and asks P1-17 to domain-separate roots by tier so identical memberships can't give two tiers the same root (a first draft failed such elections outright; `claude-review` on #36 caught it). T-01 records the change. Tested: `vp check`; in-session subagent review with the `crypto-review` checklist.

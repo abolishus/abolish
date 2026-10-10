@@ -102,6 +102,10 @@ These four ADRs still read `Status: needs-decision`; a follow-up docs PR marks e
 
 Waiting on the owner (owner-only under rule A): [[0006-trustees]] (P1-7: naming trustees), and P1-12's three questions above.
 
+## Injection attempts
+
+Where and when untrusted content tried to redirect an agent (AGENTS.md, Untrusted input), never quoting it. None recorded yet.
+
 ## Known-weak
 
 - **CI pulls service images with a repository-level Docker Hub token** (#19). `DOCKERHUB_TOKEN` is read-only, and any workflow run from an in-repo branch can read it (T-65). If the token is revoked or expires, every service-container start fails with `unauthorized`. The fix is for the owner to rotate the secret, or to switch back to the ECR Public mirror (#17). Fork PRs get no secrets, so they pull anonymously.

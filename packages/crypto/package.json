@@ -27,8 +27,11 @@
     "check": "vp check",
     "test": "vp test run"
   },
+  "dependencies": {
+    "@noble/curves": "catalog:",
+    "@noble/hashes": "catalog:"
+  },
   "devDependencies": {
-    "@noble/hashes": "catalog:",
     "@types/node": "catalog:",
     "fast-check": "catalog:",
     "typescript": "catalog:",

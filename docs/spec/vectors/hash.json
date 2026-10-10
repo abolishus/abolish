@@ -1,0 +1,130 @@
+{
+  "format": "abolish-hash-vectors/1",
+  "title": "Protocol hash, hash-to-scalar and the generator h",
+  "spec": "docs/spec/group.md",
+  "generator": "Printed by packages/crypto/scripts/group-vectors.py: H with Python's hashlib; expand_message_xmd, HashToScalar and hash_to_ristretto255 written from RFC 9380, RFC 9497 and RFC 9496 with Python's integers and hashlib, checked against RFC 9380 Appendix K.3 and RFC 9496 Appendix A first, sharing no code with packages/crypto or @noble/curves. The Fiat-Shamir messages are arbitrary bytes: they test the construction under each tag, not a statement layout.",
+  "vectors": [
+    {
+      "id": "h-empty",
+      "function": "H",
+      "message": "",
+      "output": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "id": "h-abc",
+      "function": "H",
+      "message": "616263",
+      "output": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    },
+    {
+      "id": "generator-h",
+      "description": "h = hash_to_ristretto255(\"\", DST = \"abolish/v1/generator-h\")",
+      "function": "hash-to-group",
+      "dst": "abolish/v1/generator-h",
+      "message": "",
+      "uniformBytes": "dddb33140d4b736f8c22829dea81e464d04d86c04eb002cfdd17e1026d236af3a0e40642327d8b7bea86551f7cb3d5c1c7281e8f2ce0d32fee043b0af3af1182",
+      "output": "2ac338de551824e59d1a2563c133a8ec81b4007edb867d4e4411a416cc98fa34",
+      "notEqual": {
+        "identity": "0000000000000000000000000000000000000000000000000000000000000000",
+        "g": "e2f2ae0a6abc4e71a884a961c500515f58e30b6aa582dd8db6a65945e08d2d76",
+        "minusG": "eaffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f"
+      }
+    },
+    {
+      "id": "ballot-validity-option-empty",
+      "function": "hash-to-scalar",
+      "dst": "abolish/v1/fs/ballot-validity/option",
+      "message": "",
+      "uniformBytes": "28d39c5c0c7e18cfe9df57111ea8b56f4b1d98410412739b9c6e68b941fdc68d83ae43062f819ba5f0f9835e1212aeef5b18997e9e3da928ab5a1d35e62b319c",
+      "output": "4a073bf615c78631f29f1f9367c2fdf5e7a99d31046de5bb16b5a2a204107705"
+    },
+    {
+      "id": "ballot-validity-option-abc",
+      "function": "hash-to-scalar",
+      "dst": "abolish/v1/fs/ballot-validity/option",
+      "message": "616263",
+      "uniformBytes": "c93538dbe194cb41ce00373b34fe24a38538b4a79c28c6ee6fa12b3e2e5589844c84da4dcfd48be3a0783b60097802f1158decef06481a7e69734cd512e32b50",
+      "output": "cb0959f3e66fadb8a25bce36cccefad352e6ec3577a6f32862014e4b628f4f09"
+    },
+    {
+      "id": "ballot-validity-option-0x00-x-200",
+      "function": "hash-to-scalar",
+      "dst": "abolish/v1/fs/ballot-validity/option",
+      "message": "0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "uniformBytes": "76b544348d7f6cb78c1f391f5f2e5a447b880b83db78a5925c2a5ec67944802537dca63d4d25ed5bf1d51167d40ac472102aea9f2ea27191fe87fe936aa5a22b",
+      "output": "b7b32e55a8f05449ea7d836845d2ddfec41538ad2a67a8b6da0a217b19286905"
+    },
+    {
+      "id": "ballot-validity-sum-empty",
+      "function": "hash-to-scalar",
+      "dst": "abolish/v1/fs/ballot-validity/sum",
+      "message": "",
+      "uniformBytes": "917ab924ea33d8241b455fd1615a58b97734c1b781d6289d9734a4f55c9d0eb879a499a85fecda383a880611d5f0d45f17380f39be84826834bf5a94ceb11b82",
+      "output": "64458193eb1f4d71c42215ada5a76afd53b8c1a856593cfddf4c4e504db76003"
+    },
+    {
+      "id": "ballot-validity-sum-abc",
+      "function": "hash-to-scalar",
+      "dst": "abolish/v1/fs/ballot-validity/sum",
+      "message": "616263",
+      "uniformBytes": "8db1a7cecb561ded718d811b2e4a7ea83efba8b5afc76a266dede9ee84526b6079238b8da33f9a5fe4cead6ea4409f41cb7f044f332706b3bb5642d2b06c0f23",
+      "output": "5d2f2356ddaf839feec77b4f5c08cf51328ec521764ea2b9a6fe6c39b53f5b0f"
+    },
+    {
+      "id": "ballot-validity-sum-0x00-x-200",
+      "function": "hash-to-scalar",
+      "dst": "abolish/v1/fs/ballot-validity/sum",
+      "message": "0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "uniformBytes": "aae1acd7564cf2da5455d0ceb8baf536b2a0466a9189d8735a48157a0a71646a940c1a5677de1dcaecf2ec2fd5027adcf6ec0f7518a98218518ee6f2128ca4a6",
+      "output": "4503cc61eef234fac717df7542bbe033d165207c286b42332f2bcec948eaa600"
+    },
+    {
+      "id": "ceremony-possession-empty",
+      "function": "hash-to-scalar",
+      "dst": "abolish/v1/fs/ceremony/possession",
+      "message": "",
+      "uniformBytes": "b4036e483855cfd4bffeb9b4389c2127f87a77ec58d6113aed1bc78daef77a783b48d5bd3182dce800ed6de29adce6d2b4fc46074c476502c0eeadae12bbd2a9",
+      "output": "56d8ddee896e5f3b92bcbecc2295472559c789528b559849d4a627d5e87f080a"
+    },
+    {
+      "id": "ceremony-possession-abc",
+      "function": "hash-to-scalar",
+      "dst": "abolish/v1/fs/ceremony/possession",
+      "message": "616263",
+      "uniformBytes": "9d4fb692e25f6cf5445c412eea03aba3dcfb4feb15af5941ac70fc9fd5ba8d65dbd9a8ccef7b7a9bbf902da9a5730ffd251c2a0f0705e332af91af3eb79df937",
+      "output": "05faa769937a059e192f73b94a560058740f44b6f4d88ef40b8681d2edd4ba07"
+    },
+    {
+      "id": "ceremony-possession-0x00-x-200",
+      "function": "hash-to-scalar",
+      "dst": "abolish/v1/fs/ceremony/possession",
+      "message": "0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "uniformBytes": "86c811114548275a1ae3e18dc0b2373a7e804fbed712ae17edecab02f4ecbbe67fda62a0b629d3e82fd4a771577eb7dc173fb52bb170684a7832cbb822bd5198",
+      "output": "9449b79a1fea8b72ffe18068db9be7001d06d391133a40bfef640dae4bf0b802"
+    },
+    {
+      "id": "tally-share-empty",
+      "function": "hash-to-scalar",
+      "dst": "abolish/v1/fs/tally-share",
+      "message": "",
+      "uniformBytes": "fa26e31b5cf2c05a94472d95a361a3b5c742b06b1d3dd2554ef8e0590a100c3071e32338676f38a6654f6c62a65ed1d6757df30bcc489ff2e8af0f9d51a9ec50",
+      "output": "159a24a6a2f71970a62fd5ef0b95bd4909841f502f2f38249b2d3aa65702750e"
+    },
+    {
+      "id": "tally-share-abc",
+      "function": "hash-to-scalar",
+      "dst": "abolish/v1/fs/tally-share",
+      "message": "616263",
+      "uniformBytes": "05023f3d4f0802d46e51d0ae7cbc46ff445457ce44ecdf65e5e014babd762b595fcc924e3a5ebfdb102c1be77c8c027f8b8730ba2f116f08f1b6229558b80510",
+      "output": "b21c0c1cecb7af83d2bda2035567e9d808a5c2910b9bc9de5dc0491476c6b108"
+    },
+    {
+      "id": "tally-share-0x00-x-200",
+      "function": "hash-to-scalar",
+      "dst": "abolish/v1/fs/tally-share",
+      "message": "0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "uniformBytes": "d02c0b559b0cc718aed32f99af62918ff75861e7c168a7c4e0ae5d898555476caf59b4e2f3f195977bbdda18d2fe98762b693974fc756d56de04a58bad666ff7",
+      "output": "d015fde0f0c384efcc9b3cbbcc489d148c43dfe55d7efb2dd22a5b585dbff607"
+    }
+  ]
+}

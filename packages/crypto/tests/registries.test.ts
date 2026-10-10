@@ -40,10 +40,22 @@ const code = (cell: string) => {
 
 describe("domain-separation tag registry", () => {
   const rows = table(spec("domain-separation.md"), "## Registry");
-  const fromSpec = rows.map((r) => ({
-    tag: code(r[0] ?? ""),
-    status: (/^(\w+)/.exec(r[4] ?? "")?.[1] ?? "").toLowerCase(),
-  }));
+  const primitives: Readonly<Record<string, string>> = {
+    "Plain hash": "plain",
+    "Fiat–Shamir": "fiat-shamir",
+    "Hash-to-curve": "hash-to-curve",
+    "In-circuit": "in-circuit",
+    "KDF and AEAD": "kdf-aead",
+  };
+  const fromSpec = rows.map((r) => {
+    const primitive = primitives[r[2] ?? ""];
+    if (primitive === undefined) throw new Error(`unknown primitive ${r[2]}`);
+    return {
+      tag: code(r[0] ?? ""),
+      primitive,
+      status: (/^(\w+)/.exec(r[4] ?? "")?.[1] ?? "").toLowerCase(),
+    };
+  });
 
   test("TAG_REGISTRY matches docs/spec/domain-separation.md row for row", () => {
     expect(fromSpec.length).toBeGreaterThan(0);
@@ -81,8 +93,10 @@ describe("domain-separation tag registry", () => {
     );
   });
 
-  test("only specified tags frame a hash input", () => {
+  test("only specified plain-hash and KDF tags frame a hash input", () => {
     expect(() => ds("abolish/v1/ballot" as never, new Uint8Array())).toThrow(RangeError);
+    // Specified, but a hash-to-curve DST: DS framing would give it a second layout.
+    expect(() => ds("abolish/v1/generator-h" as never, new Uint8Array())).toThrow(RangeError);
     expect(() => ds("abolish/v1/unregistered" as never, new Uint8Array())).toThrow(RangeError);
     expect(() => ds("abolish/v1/display-text", [1, 2] as never)).toThrow(TypeError);
   });

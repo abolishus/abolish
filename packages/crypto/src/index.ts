@@ -25,11 +25,27 @@ export {
 } from "./codec.ts";
 export {
   ds,
+  type DsTag,
   isWellFormedTag,
   type SpecifiedTag,
+  type SpecifiedTagOf,
   type Tag,
+  type TagPrimitive,
   TAG_REGISTRY,
 } from "./domain-separation.ts";
+export {
+  challenge,
+  type Element,
+  element,
+  elementOrIdentity,
+  G,
+  GENERATOR_H,
+  GROUP_ORDER,
+  H,
+  hashToGroup,
+  IDENTITY,
+  scalar,
+} from "./group.ts";
 export {
   type DecodedRecord,
   RECORD_TYPES,

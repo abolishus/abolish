@@ -167,6 +167,9 @@ catalogs:
     '@changesets/cli':
       specifier: 3.0.3
       version: 3.0.3
+    '@noble/curves':
+      specifier: 2.4.0
+      version: 2.4.0
     '@noble/hashes':
       specifier: 2.4.0
       version: 2.4.0
@@ -226,10 +229,14 @@ importers:
         version: 7.0.2
 
   packages/crypto:
-    devDependencies:
+    dependencies:
+      '@noble/curves':
+        specifier: 'catalog:'
+        version: 2.4.0
       '@noble/hashes':
         specifier: 'catalog:'
         version: 2.4.0
+    devDependencies:
       '@types/node':
         specifier: 'catalog:'
         version: 24.19.1
@@ -374,6 +381,10 @@ packages:
   '@manypkg/tools@2.1.2':
     resolution: {integrity: sha512-6QEf6yqFbETdwGITKq57aYoPfX/3K8XFNwsAlx0C1M7o8cb79sv1M3w+tWuWvIcSbNqrLF7OD7YpZMVVz335hQ==}
     engines: {node: '>=20.0.0'}
+
+  '@noble/curves@2.4.0':
+    resolution: {integrity: sha512-P4/62zrgfH33CneE3Dn4WhJVA22YUU0eR51wKIan4NVRvwsA0YnPTwWGpNbpuacSujmSFLvyzpyuR30+fbq2Ew==}
+    engines: {node: '>= 20.19.0'}
 
   '@noble/hashes@2.4.0':
     resolution: {integrity: sha512-X5XaVWZIBCT7HHZGm5I7ZQXDwLG+bGXuSrMQAW+7Zvl87h1kmc1ZB1VSRJcpUfoUrGQp4Fkoxm5kZ+Ms+aW+eA==}
@@ -1676,6 +1687,10 @@ snapshots:
       jju: 1.4.0
       tinyglobby: 0.2.17
       yaml: 2.9.1
+
+  '@noble/curves@2.4.0':
+    dependencies:
+      '@noble/hashes': 2.4.0
 
   '@noble/hashes@2.4.0': {}
 

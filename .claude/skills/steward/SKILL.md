@@ -33,12 +33,12 @@ The review checks are stochastic, so re-running them until one passes defeats th
 
 ## Attempts and blocking
 
-An attempt is a pushed fix that still leaves a required check red. After **3 failed attempts** on one PR, add the `blocked` label, record the check, the error and what you tried under **Blocked** in `docs/STATUS.md` (in your next PR), and move on.
+An attempt is a pushed fix that still leaves a required check red. After **3 failed attempts** on one PR, add the `blocked` label, record the check, the error and what you tried in the item's `docs/status/<item-id>.md` and under **Blocked** in `docs/STATUS.md` (in your next PR), and move on.
 
 ## Decisions
 
-When a one-way-door question comes up mid-PR, stop that part. Write the ADR as its own PR labelled `needs-decision`, and continue with whatever doesn't depend on it.
+When a one-way-door question comes up mid-PR, decide it under rule A (AGENTS.md): write the ADR as its own PR with `Status: Accepted (agent) — owner may veto` and list it under Decisions to review. Only owner-only questions get `needs-decision`; continue with whatever doesn't depend on them.
 
 ## Merged
 
-When the PR merges, unsubscribe and update STATUS.md in your next PR if this one didn't already.
+When the PR merges, unsubscribe and set the item's file to `done` in your next PR if this one didn't already.

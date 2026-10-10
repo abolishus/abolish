@@ -1,23 +1,106 @@
 # STATUS
 
-The work queue. Every session reads it, and every PR updates it. Items are ordered within each phase: take the first unblocked one. Each item is meant to fit in one PR. ADR items open as `needs-decision` PRs and don't block unrelated work. See [[PROJECT_BRIEF]] and the repo's `AGENTS.md`.
+The work queue, as an index. Each item's state, PR and notes live in its own file, `docs/status/<item-id>.md`, so parallel PRs don't conflict: a PR touches only its own item's file (and the threat files its change affects), plus the sections below when it changes them. Items are ordered within each phase: take the first unblocked one with no `claude/<item-id>` branch and no open PR. See [[PROJECT_BRIEF]] and the repo's `AGENTS.md`.
 
-Last updated: 2026-10-10 (P1-3 everlasting-privacy ADR accepted).
+Last updated: 2026-10-10 (P0-ops: items split into `docs/status/`).
 
-## In progress
+## Queue
 
-- **P1-2 ADR: canonical encoding** (#6, merged; decision pending): [[0001-canonical-encoding]] recommends explicit byte layouts. Its status is still `needs-decision`; unless the owner records a decision, it is adopted by default on 2026-10-12 06:15 UTC and marked `accepted by default — revisit` in a follow-up PR. P1-8 and P1-10 build on it.
-- **P1-4 ADR: tally scheme** (#9, `claude/p1-4`, `needs-decision`): [[0003-tally-scheme]] compares homomorphic exponential ElGamal, a verifiable mixnet and a hybrid, and recommends the hybrid: homomorphic tally with disjunctive Chaum–Pedersen validity proofs for plurality and approval, and a mixnet only for ranked choice (IRV), specified by a follow-up ADR before P5-1. Adds T-70 (pattern attack on decrypted ballots) to the threat model. Numbered 0003 because P1-3 (#8) takes 0002. Adopted by default on 2026-10-12 20:01 UTC unless the owner answers.
-- **P1-5 ADR: L2 choice** (#10, `claude/p1-5`, `needs-decision`): [[0004-l2-choice]] compares Arbitrum One and Base (both L2BEAT Stage 1, both sequenced by one US company) and recommends Base: forced inclusion within 12 hours instead of 24 (30 minutes while its sequencer is live), Ethereum block semantics, and no contract upgrade without both its Security Council and Coinbase. Its cost is no upgrade delay at all, and Coinbase alone sets its configuration and proposer allowlist, so the ADR adds T-71 (L2 governance can rewrite state or forge transactions), updates T-35 and T-50, and requires contracts and the verifier to detect tampering rather than trust the L2 (signed group additions, L1-sourced forced ballots through our relay, a close rule bounded by batch posting). Testnet: Base Sepolia. Adopted by default for development and testnet on 2026-10-12 20:10 UTC unless the owner answers; mainnet waits for the owner.
-- **P1-6 ADR: permanent archive** (#11, `claude/p1-6`, `needs-decision`): [[0005-permanent-archive]] compares Arweave, pinning-only and Filecoin deals, and recommends Arweave plus IPFS pinning: only Arweave keeps data with nothing left to pay or run once we are seized or gone (T-51, T-49), and integrity comes from the L1 anchors, not the store. Arweave is an extra source, never required: verification must pass from chain + IPFS alone. Each L1 anchor carries a generic `archiveLocator` naming the latest confirmed archive manifest, so the verifier finds archived data from L1 without a gateway index; our L2 events are archived with their inclusion evidence (T-71). Display text is committed by salted hash and never archived, so it can still be taken down (T-17, T-68). Known-weak: archiving makes every ciphertext permanently available (T-15, answered only by P1-3), and permanence rests on Arweave's endowment economics. Adopted by default on 2026-10-12 20:23 UTC unless the owner answers; the first real upload (P4-3) waits for the owner to fund it.
-- **P1-7 ADR: trustees** (#15, `claude/p1-7`, `needs-decision`; **owner decides, never defaults**): [[0006-trustees]] compares one 3-of-5 panel, one 4-of-7 panel and two panels (open polls and civic), and recommends one 4-of-7 panel of trustee nodes (the brief's "7 trustees, two offline" plus one more failure), revisiting a civic panel before Phase 5. Any panel must keep at most k − 1 trustees per jurisdiction and per hosting provider, give us at most one labelled seat, and register keys through the public ceremony. Open polls close too often for hand-run trustees, so shares live in trustee nodes that release only the allowed aggregates. Names are the owner's to fill in; development uses a simulated 4-of-7 ceremony.
-- **P1-8 `docs/spec/` skeleton** (#16, `claude/p1-8`): notation and primitive encodings with strict-decoding rules and error codes ([[notation]]), the `DS(tag, m)` framing and tag registry ([[domain-separation]]), versioning with a record-type registry and per-election profiles against version downgrades ([[versioning]]), canonical `field<bn254>` elements, protocol limits including `MAX_OPTIONS` = 64 ([[parameters]]), the requirements P1-13's re-vote rule must meet (no replay, no freezing, independence from the operator's ordering; T-33 and T-38 updated), pinned proof verification keys, the split between per-ballot admission checks and election checks, the display-text split and salted commitment from [[0005-permanent-archive]] ([[display-text]]), provisional IPFS CID and CAR parameters ([[content-addressing]]), the vector format with 88 hand-checked primitive vectors ([[vectors/README|vectors]]), and the third-party verifier checklist ([[verifier]]). Known-weak: no code consumes the vectors yet (P1-10); hash, group and every record layout are still to be specified by P1-10 to P1-18; ballot, ceremony and tally checks wait on P1-3; the re-vote rule itself is P1-13's (the leading candidate binds a recent L1 block into each ballot); CID vectors wait for P4-3.
-- **P1-9 `packages/crypto` scaffold** (#18, `claude/p1-9`; a `ci:` PR, so it waits for the owner's review): a new CI `gated` check (`.github/tools/ci/src/gated.ts`) replaces the name-only `@noble/*` check. For each gated package it requires runtime dependencies to be `@noble/*` from the catalog at an exact version (plus, for the verifier, `@abolishus/{crypto,circuits,contracts}` as `workspace:*`), reads the package's lockfile importer and rejects aliases, `link:`/`file:` locks and peer-suffixed snapshots, walks the `snapshots:` closure and requires every package in it to be `@noble/*` with no install-time or peer fields, forbids peer, bundled and `imports` fields, lints every `src` module with a real parser (only relative imports inside `src` and declared allowed dependencies, with no dot segments in subpaths; an allowlist of `node:` built-ins in the verifier only; no `import.meta`, non-literal dynamic imports or common loader names, such as `require`, `createRequire`, `getBuiltinModule`, `eval`, `Function` or `process.dlopen`), rejects `package.yaml`/`package.json5` manifests and a gated directory without a `package.json`, rejects tracked symlinks and submodules under gated paths, lets a published gated package point consumers only at `dist` (`files`, `exports` and `publishConfig` fixed; no `main`, `browser`, `bin` or lifecycle scripts), forbids build configs anywhere a gated build finds them (the gated packages, `packages/` and the root, except the root `vite.config.ts`, which may not configure `pack`) and resolution-changing tsconfig options, and packs crypto and the verifier with source maps, requiring the output to be byte-identical to a `--no-config` build and every mapped source to be a file of their `src` whose embedded content matches the file on disk. `packages/crypto` gets `fast-check`, test-only `@noble/hashes` 2.4.0, and the published-vector harness: `test-vectors/manifest.json` records each vendored file's source URL and sha256, which the harness checks with `node:crypto` before any test reads it; a new CI step re-fetches each vendored file from a repository allowlisted for its publisher, by commit and by tag, and requires the same sha256; the first file is NIST CAVP `SHA256ShortMsg.rsp` (65 vectors, checked against `@noble/hashes`). T-55 updated. Tested: unit and property tests of every check (including that the closure check passes exactly when every reachable package is `@noble/*`), the harness and its `.rsp` parser, and a local run of the check against deliberate violations. Independent review: the in-session rounds found three blocking holes (a build config in the package, or in a parent directory the build searches, could rewrite the bundle and its source maps; manifest fields could ship code outside `src`), all fixed and covered by tests, plus non-blocking findings fixed the same way. Known-weak: the NIST file comes from pyca/cryptography's mirror, not NIST's zip, though CI re-fetches it from pyca's repository by commit and tag to check the bytes; the import lint is a tripwire for a fixed list of loader names, so evaluator gadgets (a function's `.constructor`, string timers, WebAssembly) are caught only by review; the build toolchain is trusted, since every bundle check runs the same bundler; the pack-and-inspect path of the CLI is tested by hand, not by a fixture repo; a module rolldown emits without a source map (its runtime helper) fails the check, which P1-10 may have to address; circuits and contracts get the strictest rule until P1-17 and P1-18 widen it.
-- **P1-16b `ci:` toolchain-consistency check** (#20, `claude/p1-16b`): `cli.ts toolchain`, a step in `ci`'s supply-chain job, fails unless `NOIR_VERSION`/`BB_VERSION` in `.github/scripts/install-toolchain.sh`, the `@noir-lang/noir_js`/`@aztec/bb.js` catalog pins, every locked `@noir-lang/*` and `@aztec/bb.js` version and AGENTS.md's "Toolchain pins" name one Noir and one bb, and bbup's `bb-versions.json` maps that Noir to that bb, both at the commit recorded in the script (sha256 checked) and on `next`, the branch bbup reads. The four script pins must each be one top-level literal assignment. Addresses T-60, T-05 and T-55. A `ci:` PR, so it waits for the owner's review. Tested: 42 unit and property tests; run by hand, it fails on a moved catalog pin, a wrong recorded sha256 and an unknown commit. Known-weak: it needs the network (fetches retry on 5xx and time out after 30 s), and turns red if upstream ever remaps or drops this Noir version on `next`, which is the signal to look, not a flake.
+Each item's state (`todo`, `in progress`, `blocked`, `needs owner decision`, `done`) is in its own file only, so starting or finishing an item never edits this index. Done as of 2026-10-10: P0-1, P0-3, P0-4, P1-1 to P1-6, P1-8, P1-9 and P1-16b.
+
+### Phase 0: Bootstrap
+
+- [[P0-1]] `ci: bootstrap`
+- [[P0-2]] Storybook under Vite+
+- [[P0-3]] `ci: release`
+- [[P0-4]] Licenses
+
+### Phase 1: Threat model, spec, crypto core, circuits, verifier, reference election (CLI only)
+
+- [[P1-1]] Threat model
+- [[P1-2]] ADR: canonical encoding
+- [[P1-3]] ADR: everlasting privacy
+- [[P1-4]] ADR: tally scheme
+- [[P1-5]] ADR: L2 choice
+- [[P1-6]] ADR: permanent archive
+- [[P1-7]] ADR: trustees
+- [[P1-8]] `docs/spec/` skeleton
+- [[P1-9]] `packages/crypto` scaffold
+- [[P1-10]] Canonical encoders and decoders
+- [[P1-11]] Group and hash layer
+- [[P1-12]] Ballot commitments and validity proofs
+- [[P1-13]] Challenge/spoil, receipts and re-voting
+- [[P1-14]] Trustee key registration
+- [[P1-15]] Summed shares, tally and destruction
+- [[P1-16]] Bulletin board model
+- [[P1-16b]] `ci:` toolchain-consistency check
+- [[P1-17]] `packages/circuits` scaffold
+- [[P1-18]] `packages/contracts` scaffold
+- [[P1-19]] `packages/verifier` CLI
+- [[P1-20]] Reference election fixture
+- [[P1-21]] Simulation surfaces in admin-cli and sdk
+- [[P1-22]] Phase 1 exit
+
+### Phase 2: Open polls end to end at Tier 0
+
+- [[P2-1]] `packages/core` and Drizzle schema
+- [[P2-2]] `packages/api-contract`
+- [[P2-3]] `apps/api`
+- [[P2-4]] `apps/worker`
+- [[P2-5]] Accounts
+- [[P2-6]] Voting identity
+- [[P2-7]] `packages/ui`
+- [[P2-8]] `apps/ballot`
+- [[P2-9]] `apps/web`
+- [[P2-10]] Moderation
+- [[P2-11]] `ci: deploy`
+- [[P2-12]] Phase 2 exit
+
+### Phase 3: Tier 2 ZK identity, Semaphore groups, indexer, per-tier results
+
+- [[P3-1]] ADR: Tier 2 identity provider
+- [[P3-2]] Semaphore groups per tier
+- [[P3-3]] Tier 1 vouching
+- [[P3-4]] Tier 2 QR handoff
+- [[P3-5]] `apps/indexer`
+- [[P3-6]] Per-tier results
+
+### Phase 4: Censorship resistance
+
+- [[P4-1]] Hourly L1 anchoring
+- [[P4-2]] Direct submit end to end
+- [[P4-3]] IPFS mirroring and permanent archive
+- [[P4-4]] ENS and second domain
+- [[P4-5]] `apps/node`
+- [[P4-6]] Verifier from chain and IPFS only
+
+### Phase 5: US civic referendums and native app
+
+- [[P5-1]] Referendum templates
+- [[P5-2]] Capacitor shell
+- [[P5-3]] `packages/capacitor-nfc-passport`
+- [[P5-4]] `packages/capacitor-zk-prover`
+
+One-off items: [[P0-ops]] split shared hot files.
 
 ## Blocked
 
 - **P0-2 Storybook under Vite+: blocked on the supply-chain trust policy (owner decision).** Storybook 10.6.1 itself is old enough and resolves, but `@storybook/react-vite` depends on `react-docgen` 8 → `@babel/core` 7 → `semver@^6.3.1`, and `vp add` fails with `High-risk trust downgrade for "semver@6.3.1"` from `trustPolicy: no-downgrade` in `pnpm-workspace.yaml`. Registry metadata shows it is a false positive: `semver@6.3.1` (and `5.7.2`) are July 2023 security backports published by an npm maintainer without provenance, after `7.5.1`–`7.5.4` had been published with provenance. No newer 6.x exists, and `react-docgen` has no Babel-8 release. Storybook wasn't run, so whether it works under Vite+ beyond install is still unknown. Workaround (needs the owner, because it relaxes a supply-chain setting in a CODEOWNERS file): add `trustPolicyExclude: [semver@6.3.1]` to `pnpm-workspace.yaml` with a comment giving this reason. Versions picked for the retry: `storybook`, `@storybook/react-vite`, `@storybook/addon-vitest` and `@storybook/addon-a11y` 10.6.1, `@vitest/browser-playwright` 5.0.1 (matches Vite+'s bundled Vitest), `playwright` 1.63.0 (1.64.0 is under 7 days old), React 19.3.0. P2-7 (`packages/ui`) depends on this.
+
+- **P1-12 ballot commitments and validity proofs: blocked on three owner questions** from [[0002-everlasting-privacy]] (trustee duties, the `@noble/post-quantum` audit, and the wording of the brief's threshold-trust property). See [[P1-12]].
+
+## Decisions to review
+
+Decisions the agent made under rule A (`AGENTS.md`). Each stands unless the owner vetoes it; a veto is recorded in the ADR and the item's file.
+
+- [[0001-canonical-encoding]] (P1-2, #6): explicit byte layouts.
+- [[0003-tally-scheme]] (P1-4, #9): homomorphic tally for plurality and approval; a mixnet only for ranked choice, by a later ADR.
+- [[0004-l2-choice]] (P1-5, #10): Base, for development and testnet. Mainnet stays with the owner.
+- [[0005-permanent-archive]] (P1-6, #11–#14): Arweave plus IPFS pinning. The first real upload spends money, so it waits for the owner.
+
+These four ADRs still read `Status: needs-decision`; a follow-up docs PR marks each `Accepted (agent) — owner may veto`.
+
+Waiting on the owner (owner-only under rule A): [[0006-trustees]] (P1-7: naming trustees), and P1-12's three questions above.
 
 ## Known-weak
 
@@ -35,7 +118,7 @@ Last updated: 2026-10-10 (P1-3 everlasting-privacy ADR accepted).
 - **The review model's file access is limited by a deny-list.** It has no shell and can't read `/proc`, `/etc`, the runner's temp and tool directories or its home configuration, but anything else readable on the runner outside those paths isn't explicitly blocked. The job holds the review token and a `pull-requests: write` GitHub token; the verdict is decided in a separate job the model never touches.
 - **Toolchain hashes are trust-on-first-use.** The sha256 pins in `.github/scripts/install-toolchain.sh` were recorded from the upstream GitHub releases on 2026-10-09; nothing cross-checks them against upstream attestations, and `repro-build` can't detect a deterministic malicious binary because both builds use the same one.
 - **Merge queue:** the review checks skip `merge_group`. If the owner enables a merge queue, it must use batch size 1, or the combined tree of a batch is never model-reviewed.
-- **Lockfile policy covers `packages:` only.** It checks which bytes can be installed; rewiring a `snapshots:` edge to another version already in `packages:` isn't checked. `crypto-review` doesn't run on lockfile or catalog changes (the brief scopes it to the four protocol packages). CI rejects overrides, patches and package extensions, but a catalog bump of `@noble/*` or `@aztec/bb.js`, or a rewired edge, is seen only by `claude-review` and owner review until P1-9's lockfile-closure check and P1-16b land.
+- **Lockfile policy covers `packages:` only.** It checks which bytes can be installed; rewiring a `snapshots:` edge to another version already in `packages:` isn't checked. `crypto-review` doesn't run on lockfile or catalog changes (the brief scopes it to the four protocol packages). CI rejects overrides, patches and package extensions, but a catalog bump of `@noble/*` or `@aztec/bb.js`, or a rewired edge, is seen only by `claude-review` and owner review. P1-9's closure check (#18) keeps the gated packages' closure `@noble/*`-only but doesn't judge a version bump; P1-16b (#20) ties the `@aztec/bb.js` and `@noir-lang/*` pins to the toolchain.
 - **Required checks and auto-merge depend on repo rulesets** that agents may not change. The owner must mark `ci`, `reference-election`, `repro-build`, `claude-review` and `crypto-review` as required on `main`.
 - **Publishing is only as safe as the `npm` environment's branch policy.** npm trusted publishing binds to the repository, workflow file name and environment, not to a branch. Anyone who can push a branch (including an agent) could run a modified `release.yml` there and publish anything, bypassing every in-workflow check. Must hold **before** the trusted publisher is configured on npm: the `npm` environment allows deployments from `main` only (ideally with the owner as required reviewer). Agents can't verify this setting. Requested from the owner.
 - **`release.yml` is unexercised** until the first changeset merges after #4. It needs, from the owner: the three packages existing on npm (a first publish sets `latest`) with a trusted publisher for `abolishus/abolish`, workflow `release.yml`, environment `npm`. Unverified until then: `vp node` running the npm CLI in a sparse checkout, and npm's OIDC exchange.
@@ -43,88 +126,3 @@ Last updated: 2026-10-10 (P1-3 everlasting-privacy ADR accepted).
 - **Release signatures are kept 90 days.** The cosign bundles live in the run's `release-signed` artifact; the SLSA attestations (GitHub attestations API) and npm's own provenance are permanent. A permanent home for the bundles (GitHub releases, IPFS) comes with the ballot-client release (P2-8).
 - **`next` snapshot versions don't sort by time** (`<x.y.z>-next-<commit>`); the `next` dist-tag always points at the last publish, but semver ranges over prereleases are meaningless. The ballot client, OpenAPI spec and container images aren't released yet (P2-8, P2-2, P2-11).
 - **The threat model's mitigations are almost all planned, not built** (see [[THREAT_MODEL]], status column). Its "Not mitigated" section lists what no planned work addresses. P1-1 merged in #3, so feature work may start.
-
-## Done
-
-- 2026-10-10: P1-3 ADR [[0002-everlasting-privacy]] accepted by the owner (#8): option B, perfectly hiding Pedersen and VSS commitments on the board (Cramer–Franklin–Schoenmakers–Yung), with shares sent to the trustees off the board under a hybrid ML-KEM + Diffie–Hellman KEM. It also brings synchronous trustee intake with valid-share receipts bound to the public part, a public posting fallback (posted shares have only classical privacy), exclusion only by proven complaints, per-trustee summed shares, and deletion of keys and shares after the tally. The threat model is updated (T-14, T-15, T-28, T-29, T-37, T-40 and others). Known-weak: no published vectors exist for this composition (T-36); participation privacy rests on Poseidon.
-- 2026-10-09: P1-2 ADR 0001 canonical encoding merged (#6) as `needs-decision`; the duplicate #5 was closed.
-- 2026-10-09: P0-3 `ci: release` and P0-4 licenses merged (#4) after owner review: `release.yml` (Changesets `next` snapshots, per-package double builds bound to job-output hashes, a gate-only `verify` job, cosign keyless + SLSA provenance, `npm publish --tag next` by trusted publishing in the `npm` environment), and the Apache-2.0 placeholder packages `@abolishus/crypto`, `@abolishus/verifier` and `@abolishus/sdk`. The workflow is still unexercised (see Known-weak).
-- 2026-10-09: P1-1 `docs/THREAT_MODEL.md` merged (#3): goals G-1–G-14, assets, adversaries A-1–A-11, threats T-01–T-69 with mitigations mapped to STATUS items, and the list of what isn't mitigated. Feature work is now unblocked.
-- 2026-10-09: P0-1 `ci: bootstrap` merged (#1): AGENTS.md, CLAUDE.md, project skills, SessionStart hook, STATUS, root `LICENSE` (AGPL-3.0-only), the root Vite+ workspace, `.github/tools/ci`, `.github/scripts/install-toolchain.sh`, and the workflows `ci`, `reference-election`, `repro-build`, `claude-review` and `crypto-review`.
-- 2026-10-09: the owner extended CODEOWNERS (#2) to `/.claude/`, `/AGENTS.md`, `/CLAUDE.md`, `/docs/PROJECT_BRIEF.md`, `/pnpm-workspace.yaml`, `/vite.config.ts` and `/tsconfig.base.json`.
-- 2026-10-09: project brief saved (`docs/PROJECT_BRIEF.md`).
-
----
-
-## Phase 0: Bootstrap
-
-- [x] P0-1 `ci: bootstrap` (#1), with CODEOWNERS extended by the owner (#2)
-- [ ] P0-2 (blocked, above) Storybook under Vite+ smoke test: confirm on day one that Storybook works under Vite+. Use a minimal `packages/ui` with one component, a story, an interaction test and an axe check, wired to `test:storybook`. If it doesn't work, record exactly why under Blocked, along with the workaround.
-- [x] P0-3 (#4) `ci: release` (needs owner review): `release.yml` with Changesets, `vp pack`, a double build plus hash comparison, cosign keyless signing, SLSA provenance, and `npm publish --tag next` via OIDC trusted publishing in the `npm` environment (GitHub-hosted runner, `id-token: write`, pinned npm ≥ 11.5). Also add placeholder `@abolishus/crypto`, `@abolishus/verifier` and `@abolishus/sdk` package metadata.
-- [x] P0-4 (#4) Licenses: `LICENSE` (Apache-2.0) in each published package as it's created, and a README section explaining the AGPL/Apache split.
-
-## Phase 1: Threat model, spec, crypto core, circuits, verifier, reference election (CLI only)
-
-- [x] P1-1 (#3) `docs/THREAT_MODEL.md`: assets, adversaries (state actor, insiders including us, compromised devices, coercion and vote buying, DDoS, supply chain, domain or hosting seizure, prompt injection against this pipeline), threat IDs, mitigations, and an explicit list of what isn't mitigated yet. No feature code before this merges.
-- [ ] P1-2 (#6 merged; decision pending, above) ADR: canonical encoding (explicit byte layouts vs deterministic CBOR). `needs-decision`.
-- [x] P1-3 (#8, accepted: option B) ADR: everlasting privacy (perfectly hiding commitments on the board vs standard threshold ElGamal), with a post-quantum "harvest now, decrypt later" analysis. `needs-decision`. Must be accepted before tally work (P1-12).
-- [ ] P1-4 ADR: ballot tally scheme (homomorphic exponential ElGamal vs verifiable mixnet) per election type (plurality, approval, ranked choice). `needs-decision` (in progress, above).
-- [ ] P1-5 (in progress, above) ADR: L2 choice (Arbitrum One vs Base): L2BEAT stage at decision time, sequencer jurisdiction, forced-inclusion path, paymaster tooling. `needs-decision`.
-- [ ] P1-6 (in progress, `claude/p1-6`) ADR: permanent archive (Arweave vs pinning-only). `needs-decision`.
-- [ ] P1-7 (in progress, `claude/p1-7`) ADR: trustees, k-of-n and named trustees. **Owner decides; never defaults.** Until then, development uses a test ceremony.
-- [ ] P1-8 (in progress, above) `docs/spec/` skeleton: notation, domain-separation tag registry, versioning rules, vector format (`docs/spec/vectors/*.json`), and the list of what a third-party verifier must check.
-- [ ] P1-9 (in progress, `claude/p1-9`) `packages/crypto` scaffold: `@noble/*` only, `vp pack`, Apache-2.0, fast-check, and the published-vector harness (`packages/crypto/test-vectors/` with source URLs and sha256s). Same PR (`ci:` part): replace the name-only `@noble/*` check with one that reads `importers['packages/crypto']` from the lockfile, requires every runtime dependency to resolve to a registry `@noble/*` package with an `@noble`-only closure, rejects `npm:`/`link:`/`file:`/`workspace:` specs, lints `src` imports against declared dependencies, and asserts the packed bundle inlines no `node_modules` code. Same `ci:` part: an import lint for `packages/verifier` and `packages/crypto` that fails on any workspace dependency or import outside `packages/{crypto,circuits,contracts,verifier}` (plus `@noble/*`, generated ABIs and circuit artifacts), and on any symlink under a gated path (AGENTS.md, Architecture → Rules).
-- [ ] P1-10 Canonical encoders and decoders per the encoding ADR, with property tests and cross-language vectors.
-- [ ] P1-11 Group and hash layer: point/scalar codecs with subgroup checks, hash-to-field and domain separation, plus published vectors.
-- [ ] P1-12 Ballot commitments and validity proofs per [[0002-everlasting-privacy]] and the tally ADR: Pedersen and VSS commitments, disjunctive Chaum–Pedersen (CDS) proofs, hybrid-KEM share encryption, Fiat–Shamir with full statement binding. **Blocked on three owner questions** from [[0002-everlasting-privacy]] (Decision): trustee duties (P1-7), the `@noble/post-quantum` audit, and the election-key wording.
-- [ ] P1-13 Benaloh challenge/spoil, ballot receipts, and re-voting semantics (last ballot counts).
-- [ ] P1-14 Trustee key registration per [[0002-everlasting-privacy]]: a per-election hybrid KEM key and a signing key per trustee, with proofs of possession, a public anchored transcript and its verification. No DKG for plurality and approval; a ranked-choice mixnet that needs one chooses a bias-resistant DKG in its own ADR.
-- [ ] P1-15 Per-trustee summed shares checked against the public VSS commitments, tally combination and the opening of the aggregate commitment (only over the cells of one partition), the tally transcript, and signed destruction of keys and stored shares after the tally.
-- [ ] P1-16 Bulletin board model: append-only hash-chained entries, inclusion proofs, and Merkle roots for anchoring.
-- [ ] P1-16b (in progress, above) `ci:` toolchain-consistency check: CI fails unless `NOIR_VERSION`/`BB_VERSION` in `.github/scripts/install-toolchain.sh` match the `@noir-lang/noir_js` / `@aztec/bb.js` catalog pins and bbup's `bb-versions.json` mapping. Must land before P1-17.
-- [ ] P1-17 `packages/circuits` scaffold (Noir 1.0.0-beta.22, bb 5.0.0-nightly.20260522): a membership + per-poll nullifier circuit compatible with Semaphore groups, with soundness tests.
-- [ ] P1-18 `packages/contracts` scaffold (Foundry 1.8.3): an immutable bulletin-board contract, election-definition registry, trustee key registry and direct-submit path; fuzz + invariant tests; PII-ban tests; wagmi bindings. Per [[0005-permanent-archive]]: each contract keeps an on-chain running hash and counter of its own events, and the anchor carries a generic, versioned `archiveLocator`.
-- [ ] P1-19 `packages/verifier` CLI: download the board (from local files first), recompute and check everything, and check a served ballot client against a signed release. Spec in `docs/spec/verifier.md`. Per [[0005-permanent-archive]]: check the archived event sequence against each contract's event accumulator using archived storage proofs at output roots (reporting whether each root settled by TEE-only or ZK proof), walk the manifest chain and every anchor's `archiveLocator`, and pass with Arweave or IPFS unreachable.
-- [ ] P1-20 Reference election fixture (`vp run reference-election`), CLI only: ceremony → tiers (stubbed until Phase 3, with the stubs clearly marked) → cast/challenge/re-vote → direct submit → close → threshold decrypt → tally → anchor (Anvil) → wipe + rebuild → independent verification offline. Makes the `reference-election` check real. The same PR sets `EXPECT_FIXTURE: "true"` in `.github/workflows/reference-election.yml` (a `ci:` change), so removing the script later fails the check. The workflow must call a fixed, owner-reviewed entry point rather than whatever the root script says, independently run `packages/verifier` over `reference-election-output/`, and require the transcript to cover every stage the brief lists.
-- [ ] P1-21 `apps/admin-cli` and `packages/sdk` surfaces for simulations (for example "10,000 voters, 7 trustees, 2 offline, mixed tiers, servers down halfway").
-- [ ] P1-22 Phase 1 exit: reference election green in CI and `crypto-review` green on every Phase 1 change. Update STATUS with what's tested and what's known-weak.
-
-## Phase 2: Open polls end to end at Tier 0
-
-- [ ] P2-1 `packages/core` + Drizzle schema: append-only board tables (grants + triggers), the account/ballot no-join test, and migrations roles.
-- [ ] P2-2 `packages/api-contract` (oRPC, `zod/mini`) + OpenAPI generation.
-- [ ] P2-3 `apps/api` (Hono + oRPC): board read, ballot submit, election definitions.
-- [ ] P2-4 `apps/worker` (BullMQ, hashtagged queues): proof batch verification, IPFS pinning, tally coordination.
-- [ ] P2-5 Accounts: better-auth + passkeys (accounts only), and Turnstile on Tier 0 actions.
-- [ ] P2-6 Voting identity: a device-held Semaphore secret, encrypted with a WebAuthn PRF-derived key for recovery.
-- [ ] P2-7 `packages/ui`: shadcn/ui + Tailwind, i18n, and Storybook stories with interaction and a11y tests for every component.
-- [ ] P2-8 `apps/ballot`: a static, reproducible build; encryption and proving in a Web Worker; strict CSP; a no-analytics bundle test.
-- [ ] P2-9 `apps/web`: TanStack Start SSR (discovery, results, poll creation), and PostHog proxied via our domain.
-- [ ] P2-10 Moderation policy (written) and moderation tooling for poll content (never results).
-- [ ] P2-11 `ci: deploy`: signed images to Railway (PR environments + staging), and Cloudflare in front.
-- [ ] P2-12 Phase 2 exit: reference election against staging.
-
-## Phase 3: Tier 2 ZK identity, Semaphore groups, indexer, per-tier results
-
-- [ ] P3-1 ADR: zkPassport vs Self vs longfellow-zk. Must confirm proofs verify off-chain or on the chosen L2, with no third-chain dependency. `needs-decision`.
-- [ ] P3-2 Semaphore groups per tier on L2, and a test that no on-chain data links a member to any poll.
-- [ ] P3-3 Tier 1 vouching / web of trust.
-- [ ] P3-4 Tier 2 QR handoff to the chosen proof app.
-- [ ] P3-5 `apps/indexer` (Ponder), including direct-submitted ballots.
-- [ ] P3-6 Per-tier results everywhere (API, web, verifier).
-
-## Phase 4: Censorship resistance
-
-- [ ] P4-1 Hourly L1 anchoring of board roots (worker + contract).
-- [ ] P4-2 Direct-submit path, end to end, with servers refusing.
-- [ ] P4-3 IPFS mirroring of board + ballot client, plus the permanent archive per ADR.
-- [ ] P4-4 `abolishus.eth` + the second non-US-TLD domain (ADR), listed everywhere.
-- [ ] P4-5 `apps/node`: a one-command community node (verifier + IPFS + chain reader, no DB).
-- [ ] P4-6 Verifier running against chain + IPFS only, in the reference election with servers and domain offline.
-
-## Phase 5: US civic referendums and native app
-
-- [ ] P5-1 Referendum templates (national/state/district; plurality, approval, ranked choice).
-- [ ] P5-2 Capacitor shell around `apps/ballot` (macOS runners for native builds).
-- [ ] P5-3 `packages/capacitor-nfc-passport` (passport + ISO 18013-5 mDL).
-- [ ] P5-4 `packages/capacitor-zk-prover` (evaluate mopro).

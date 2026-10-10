@@ -43,9 +43,9 @@ We're building a production-grade, open-source, publicly auditable voting platfo
   - `crypto-review`: adversarial review at the highest effort, with its own prompt.
   - Both fail the check on any blocking finding.
 - At most 2 open PRs at once. Each run: fix your red PRs first, then rebase conflicting ones, then start the next unblocked STATUS.md item. After 3 failed attempts on one PR, label it `blocked`, record why in STATUS.md, and move on.
-- One-way-door decisions (chain, identity scheme, cryptographic protocol, privacy model, canonical encoding, permanent storage): write an ADR in `docs/adr/` with 2–3 options and a recommendation, open it as a PR labeled `needs-decision`, and continue with unblocked work.
-  - If I haven't answered in 72 hours, adopt your recommendation, mark the ADR "accepted by default — revisit", and proceed.
-  - Never default trustees or anything touching mainnet; those wait for me.
+- Decide, don't ask. You make every decision yourself except: naming trustees, anything touching mainnet or real funds, legal or entity matters, spending money, and changes to the brief's non-negotiable properties.
+  - For everything else, including one-way-door decisions (chain, identity scheme, cryptographic protocol, privacy model, canonical encoding, permanent storage), choose what your analysis supports, write an ADR in `docs/adr/` with 2–3 options and status "Accepted (agent) — owner may veto", let it merge through the normal checks, and list it under "Decisions to review" in the status docs.
+  - Only the owner-only list above gets the `needs-decision` label, and those never block unrelated work.
 - Never push to main. Never modify rulesets, environments, CODEOWNERS or npm settings. Changes to `.github/` are allowed in PRs titled "ci: ..." and wait for my review. If a gate blocks you, record it in STATUS.md and work on something else.
 - A phase is done only when the reference election passes against staging and `crypto-review` is green on every change in it.
 

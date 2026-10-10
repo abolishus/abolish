@@ -36,14 +36,14 @@ Sections still to be written, by the STATUS item that owns them:
 
 ## Decisions this spec depends on
 
-The spec follows the ADRs below. Several are still open (`needs-decision`) and are adopted by default 72 hours after they were opened unless the owner answers, as the brief allows. Until then, every section marked specified below is specified pending the ADRs it names, and changes if the owner picks another option.
+The spec follows the ADRs below. Under rule A (`AGENTS.md`) the agent's choices are accepted and stand unless the owner vetoes them; a section marked specified below changes if the owner vetoes an ADR it names.
 
-- [[0001-canonical-encoding]] (open; adopted by default on 2026-10-12 06:15 UTC unless the owner answers): explicit byte layouts (option A). [[notation]], [[versioning]] and the vectors follow it.
-- [[0003-tally-scheme]] (open; default 2026-10-12 20:01 UTC): homomorphic tally for plurality and approval, mixnet for ranked choice. Sets the option limit in [[parameters]] and the tally checks in [[verifier]].
-- [[0004-l2-choice]] (open; default for testnet 2026-10-12 20:10 UTC): the L2, its close rule and finality. Shapes the timing and L2-evidence checks in [[verifier]].
-- [[0005-permanent-archive]] (open; adopted by default on 2026-10-12 20:23 UTC unless the owner answers): the display-text split ([[display-text]]), the result-critical field rule ([[notation]]) and the CID parameters ([[content-addressing]]).
-- [[0006-trustees]] (open; the owner decides, never defaulted): the panel bound into each election definition.
-- The everlasting-privacy ADR (P1-3, `0002`, open): decides whether the board carries threshold ElGamal ciphertexts or perfectly hiding commitments. The ballot, ceremony and tally sections can't be written until it is accepted; [[verifier]] marks the checks it changes.
+- [[0001-canonical-encoding]] (accepted by the agent, owner may veto): explicit byte layouts (option A). [[notation]], [[versioning]] and the vectors follow it.
+- [[0003-tally-scheme]] (accepted by the agent, owner may veto): homomorphic tally for plurality and approval, commitment-consistent mixnet for ranked choice (per [[0002-everlasting-privacy]]). Sets the option limit in [[parameters]] and the tally checks in [[verifier]].
+- [[0004-l2-choice]] (accepted by the agent for development and testnet, owner may veto; mainnet waits for the owner): the L2, its close rule and finality. Shapes the timing and L2-evidence checks in [[verifier]].
+- [[0005-permanent-archive]] (accepted by the agent, owner may veto; the first real upload waits for the owner): the display-text split ([[display-text]]), the result-critical field rule ([[notation]]) and the CID parameters ([[content-addressing]]).
+- [[0006-trustees]] (open; owner-only: the owner decides): the panel bound into each election definition.
+- [[0002-everlasting-privacy]] (accepted by the owner on 2026-10-10: option B, perfectly hiding commitments on the board; three owner questions in its Decision section still block ballot encryption (P1-12) and, through trustee duties and the election-key wording, the ceremony): the ballot, ceremony and tally sections follow it once written; [[verifier]] marks the checks it changes.
 
 ## Prior art
 

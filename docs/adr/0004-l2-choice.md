@@ -1,8 +1,8 @@
 # ADR 0004: L2 choice
 
-- Status: needs-decision
+- Status: Accepted (agent) — owner may veto (2026-10-10, rule A): option B, for development and testnet only; mainnet waits for the owner
 - Date: 2026-10-09
-- Deciders: owner (one-way door)
+- Deciders: agent, owner may veto (rule A); owner: mainnet
 - Threats addressed: T-50, T-71 (new), T-35, T-11, T-13, T-26, T-06, T-33, T-34, T-37, T-38, T-62, T-69 (see [[THREAT_MODEL]])
 
 ## Context
@@ -107,3 +107,5 @@ What would change the recommendation:
 ## Default
 
 Opened 2026-10-09 20:10 UTC. If the owner hasn't answered by **2026-10-12 20:10 UTC**, option B is adopted for development and testnet work and this ADR is marked `Status: accepted by default — revisit`. Mainnet deployment is never defaulted: it waits for the owner.
+
+Superseded on 2026-10-10 by rule A (`AGENTS.md`): the owner's update replaced the 72-hour default, and the recommendation was adopted as `Accepted (agent) — owner may veto`, listed under Decisions to review in [[STATUS]].

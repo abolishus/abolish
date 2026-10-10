@@ -1,8 +1,8 @@
 # ADR 0001: Canonical encoding of protocol bytes
 
-- Status: needs-decision
+- Status: Accepted (agent) — owner may veto (2026-10-10, rule A): option A
 - Date: 2026-10-09
-- Deciders: owner (one-way door)
+- Deciders: agent, owner may veto (rule A)
 - Threats addressed: T-31, T-30, T-36, T-23, T-34, T-38 (see [[THREAT_MODEL]])
 
 ## Context
@@ -113,3 +113,5 @@ What would change the recommendation:
 ## Default
 
 Opened 2026-10-09 06:15 UTC. If the owner hasn't answered by **2026-10-12 06:15 UTC**, option A is adopted and this ADR is marked `Status: accepted by default — revisit`.
+
+Superseded on 2026-10-10 by rule A (`AGENTS.md`): the owner's update replaced the 72-hour default, and the recommendation was adopted as `Accepted (agent) — owner may veto`, listed under Decisions to review in [[STATUS]].

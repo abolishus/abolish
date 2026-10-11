@@ -216,7 +216,7 @@ describe("board tree", () => {
 
 describe("board checks", () => {
   test("parses every vector", () => {
-    expect(file.boards.length).toBe(30);
+    expect(file.boards.length).toBe(33);
   });
 
   for (const v of file.boards)

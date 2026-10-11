@@ -2562,11 +2562,11 @@
       "checkpoints": [
         {
           "electionId": "ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d",
-          "segment": "0",
+          "segment": "2",
           "size": "0",
           "head": "0000000000000000000000000000000000000000000000000000000000000000",
           "root": "0000000000000000000000000000000000000000000000000000000000000000",
-          "hash": "b893ca55810a84ac963dea8b5b1e1761d5f044b3d2e9197f1f921b1207a86eda"
+          "hash": "1a98712123406ef49182bf2336d10b0cbbc3df5fdef326c6c4fbbed4bbafff88"
         },
         {
           "electionId": "ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d",
@@ -2637,7 +2637,7 @@
     },
     {
       "id": "checkpoint-mid-segment",
-      "description": "A checkpoint that ends inside segment 1",
+      "description": "A checkpoint for segment 2 that stops inside segment 1",
       "electionId": "ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d",
       "entries": [
         "000701ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d0000000000000000000000000000000b000501636572656d6f6e79",
@@ -2654,11 +2654,11 @@
       "checkpoints": [
         {
           "electionId": "ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d",
-          "segment": "1",
+          "segment": "2",
           "size": "3",
           "head": "ae58b1e4b8c6de877ce9b4eb883ddbdca8970d03e406e3f52534fb534c6f6f1b",
           "root": "dbdd07aa69c2864b82b96e8c67dcbe9a67c8e3ad13c1c39e40c40453dd31de0d",
-          "hash": "de1083139d6ba9649529ebb07f86ea2f81b82c62590c763c816590b08d5fed71"
+          "hash": "272cc9c1f6c14cd0438e52405fb551a57e31c8c7565de1c5d457041ebc6fb4bd"
         },
         {
           "electionId": "ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d",
@@ -2725,14 +2725,6 @@
         },
         {
           "electionId": "ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d",
-          "segment": "0",
-          "size": "2",
-          "head": "c8cd5d204649795025a967df6adcd7b1d4c180becf883f9dbd9718e51b24809d",
-          "root": "de1032561f26c96ea22ed88d8b1cde78335321d16999c30a0ff493f7330ef879",
-          "hash": "afe1ea255489007db2382a3ffdb71f2a7d4c4b737145c262781aae8070a0e8e3"
-        },
-        {
-          "electionId": "ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d",
           "segment": "1",
           "size": "7",
           "head": "6aaa2b817b6368086303681e63e7aafa7fee8196033a5d3c92837e39db752227",
@@ -2796,14 +2788,6 @@
         },
         {
           "electionId": "ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d",
-          "segment": "1",
-          "size": "7",
-          "head": "6aaa2b817b6368086303681e63e7aafa7fee8196033a5d3c92837e39db752227",
-          "root": "a963173d1bff718f9c81a1ef02e075d92ecbc39c70e70b06d8e7a2921f8b75db",
-          "hash": "0381464b11433612d427c1c05aba41077d92df5fc57c0dd43d371636ee338a26"
-        },
-        {
-          "electionId": "ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d",
           "segment": "4",
           "size": "8",
           "head": "0f7b9ca34aba27f28bf127a5795fabaeee84c1fb3a5520ad8f6bcde197a231d6",
@@ -2859,14 +2843,6 @@
         },
         {
           "electionId": "ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d",
-          "segment": "1",
-          "size": "7",
-          "head": "6aaa2b817b6368086303681e63e7aafa7fee8196033a5d3c92837e39db752227",
-          "root": "a963173d1bff718f9c81a1ef02e075d92ecbc39c70e70b06d8e7a2921f8b75db",
-          "hash": "0381464b11433612d427c1c05aba41077d92df5fc57c0dd43d371636ee338a26"
-        },
-        {
-          "electionId": "ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d",
           "segment": "4",
           "size": "8",
           "head": "0f7b9ca34aba27f28bf127a5795fabaeee84c1fb3a5520ad8f6bcde197a231d6",
@@ -2889,7 +2865,7 @@
     },
     {
       "id": "checkpoint-errors-in-order",
-      "description": "Checkpoint 0 has a wrong root and checkpoint 1 ends mid-segment: checkpoints are checked one at a time, in order",
+      "description": "Checkpoint 0 has a wrong root and checkpoint 1 stops mid-segment: checkpoints are checked one at a time, in order",
       "electionId": "ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d",
       "entries": [
         "000701ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d0000000000000000000000000000000b000501636572656d6f6e79",
@@ -2914,11 +2890,11 @@
         },
         {
           "electionId": "ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d",
-          "segment": "1",
+          "segment": "2",
           "size": "3",
           "head": "ae58b1e4b8c6de877ce9b4eb883ddbdca8970d03e406e3f52534fb534c6f6f1b",
           "root": "dbdd07aa69c2864b82b96e8c67dcbe9a67c8e3ad13c1c39e40c40453dd31de0d",
-          "hash": "de1083139d6ba9649529ebb07f86ea2f81b82c62590c763c816590b08d5fed71"
+          "hash": "272cc9c1f6c14cd0438e52405fb551a57e31c8c7565de1c5d457041ebc6fb4bd"
         },
         {
           "electionId": "ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d",
@@ -2927,14 +2903,6 @@
           "head": "c8cd5d204649795025a967df6adcd7b1d4c180becf883f9dbd9718e51b24809d",
           "root": "de1032561f26c96ea22ed88d8b1cde78335321d16999c30a0ff493f7330ef879",
           "hash": "afe1ea255489007db2382a3ffdb71f2a7d4c4b737145c262781aae8070a0e8e3"
-        },
-        {
-          "electionId": "ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d",
-          "segment": "1",
-          "size": "7",
-          "head": "6aaa2b817b6368086303681e63e7aafa7fee8196033a5d3c92837e39db752227",
-          "root": "a963173d1bff718f9c81a1ef02e075d92ecbc39c70e70b06d8e7a2921f8b75db",
-          "hash": "0381464b11433612d427c1c05aba41077d92df5fc57c0dd43d371636ee338a26"
         },
         {
           "electionId": "ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d",
@@ -3012,6 +2980,204 @@
         "code": "checkpoint-head",
         "checkpoint": 1
       }
+    },
+    {
+      "id": "checkpoint-equivocation",
+      "description": "A second, different checkpoint anchored for segment 1 (a fork shown to some voters), even after the honest one passes",
+      "electionId": "ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d",
+      "entries": [
+        "000701ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d0000000000000000000000000000000b000501636572656d6f6e79",
+        "000701ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d0000000000000001000000000000000f000801726567697374726174696f6e",
+        "000701ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d0000000000000002000000010000000b00020162616c6c6f740001",
+        "000701ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d0000000000000003000000010000000b00020162616c6c6f740002",
+        "000701ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d0000000000000004000000010000000400030101",
+        "000701ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d000000000000000500000001000000050003010100",
+        "000701ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d0000000000000006000000010000000400030102",
+        "000701ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d0000000000000007000000040000000b00020162616c6c6f740003",
+        "000701ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d0000000000000008000000060000000800060174616c6c79",
+        "000701ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d0000000000000009000000060000000400030100"
+      ],
+      "checkpoints": [
+        {
+          "electionId": "ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d",
+          "segment": "0",
+          "size": "2",
+          "head": "c8cd5d204649795025a967df6adcd7b1d4c180becf883f9dbd9718e51b24809d",
+          "root": "de1032561f26c96ea22ed88d8b1cde78335321d16999c30a0ff493f7330ef879",
+          "hash": "afe1ea255489007db2382a3ffdb71f2a7d4c4b737145c262781aae8070a0e8e3"
+        },
+        {
+          "electionId": "ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d",
+          "segment": "1",
+          "size": "7",
+          "head": "6aaa2b817b6368086303681e63e7aafa7fee8196033a5d3c92837e39db752227",
+          "root": "a963173d1bff718f9c81a1ef02e075d92ecbc39c70e70b06d8e7a2921f8b75db",
+          "hash": "0381464b11433612d427c1c05aba41077d92df5fc57c0dd43d371636ee338a26"
+        },
+        {
+          "electionId": "ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d",
+          "segment": "4",
+          "size": "8",
+          "head": "0f7b9ca34aba27f28bf127a5795fabaeee84c1fb3a5520ad8f6bcde197a231d6",
+          "root": "4835c73c0fcfef0126e94a16f2ea7a6792d4d9f4ace1df1baee5628842478cf0",
+          "hash": "1a908a35f5825fa12878af0e1d7500246ad54bc93f370604e084bd5e3c12eb77"
+        },
+        {
+          "electionId": "ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d",
+          "segment": "6",
+          "size": "10",
+          "head": "fc87f28192f272702cf7d1cdea1075188ee5b9c8d0a8bc800b0016e8fbe1a003",
+          "root": "bd58f626279773b51885eb3d7bd5064cabc3a5bbb1000ea09c15758f4c5c4d4e",
+          "hash": "3eddb7eb7af71c42292dcad86dc4837d73d2259f96b695bd165275acac8b3855"
+        },
+        {
+          "electionId": "ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d",
+          "segment": "1",
+          "size": "7",
+          "head": "c9dd6427cdf7d319a9ab27a6f5f1cc6cacb07284bb4b8a94f980775ba147fb66",
+          "root": "589ddf534c3068ad2fda4b09e22ec0ebab13d1aeb59023271389c602104621a7",
+          "hash": "9ac41beb5060ef66e83d1d6eef5ffd2237484dcf35e67f6c01719d67351ee1e0"
+        }
+      ],
+      "result": {
+        "code": "checkpoint-equivocation",
+        "checkpoint": 4
+      }
+    },
+    {
+      "id": "checkpoint-equivocation-first",
+      "description": "Equivocation is found before any per-checkpoint check, wherever the forked checkpoint sits",
+      "electionId": "ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d",
+      "entries": [
+        "000701ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d0000000000000000000000000000000b000501636572656d6f6e79",
+        "000701ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d0000000000000001000000000000000f000801726567697374726174696f6e",
+        "000701ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d0000000000000002000000010000000b00020162616c6c6f740001",
+        "000701ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d0000000000000003000000010000000b00020162616c6c6f740002",
+        "000701ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d0000000000000004000000010000000400030101",
+        "000701ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d000000000000000500000001000000050003010100",
+        "000701ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d0000000000000006000000010000000400030102",
+        "000701ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d0000000000000007000000040000000b00020162616c6c6f740003",
+        "000701ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d0000000000000008000000060000000800060174616c6c79",
+        "000701ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d0000000000000009000000060000000400030100"
+      ],
+      "checkpoints": [
+        {
+          "electionId": "ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d",
+          "segment": "1",
+          "size": "7",
+          "head": "c9dd6427cdf7d319a9ab27a6f5f1cc6cacb07284bb4b8a94f980775ba147fb66",
+          "root": "589ddf534c3068ad2fda4b09e22ec0ebab13d1aeb59023271389c602104621a7",
+          "hash": "9ac41beb5060ef66e83d1d6eef5ffd2237484dcf35e67f6c01719d67351ee1e0"
+        },
+        {
+          "electionId": "ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d",
+          "segment": "0",
+          "size": "2",
+          "head": "c8cd5d204649795025a967df6adcd7b1d4c180becf883f9dbd9718e51b24809d",
+          "root": "de1032561f26c96ea22ed88d8b1cde78335321d16999c30a0ff493f7330ef879",
+          "hash": "afe1ea255489007db2382a3ffdb71f2a7d4c4b737145c262781aae8070a0e8e3"
+        },
+        {
+          "electionId": "ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d",
+          "segment": "1",
+          "size": "7",
+          "head": "6aaa2b817b6368086303681e63e7aafa7fee8196033a5d3c92837e39db752227",
+          "root": "a963173d1bff718f9c81a1ef02e075d92ecbc39c70e70b06d8e7a2921f8b75db",
+          "hash": "0381464b11433612d427c1c05aba41077d92df5fc57c0dd43d371636ee338a26"
+        },
+        {
+          "electionId": "ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d",
+          "segment": "4",
+          "size": "8",
+          "head": "0f7b9ca34aba27f28bf127a5795fabaeee84c1fb3a5520ad8f6bcde197a231d6",
+          "root": "4835c73c0fcfef0126e94a16f2ea7a6792d4d9f4ace1df1baee5628842478cf0",
+          "hash": "1a908a35f5825fa12878af0e1d7500246ad54bc93f370604e084bd5e3c12eb77"
+        },
+        {
+          "electionId": "ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d",
+          "segment": "6",
+          "size": "10",
+          "head": "fc87f28192f272702cf7d1cdea1075188ee5b9c8d0a8bc800b0016e8fbe1a003",
+          "root": "bd58f626279773b51885eb3d7bd5064cabc3a5bbb1000ea09c15758f4c5c4d4e",
+          "hash": "3eddb7eb7af71c42292dcad86dc4837d73d2259f96b695bd165275acac8b3855"
+        }
+      ],
+      "result": {
+        "code": "checkpoint-equivocation",
+        "checkpoint": 2
+      }
+    },
+    {
+      "id": "checkpoint-repeated",
+      "description": "The same checkpoint anchored twice is not equivocation",
+      "electionId": "ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d",
+      "entries": [
+        "000701ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d0000000000000000000000000000000b000501636572656d6f6e79",
+        "000701ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d0000000000000001000000000000000f000801726567697374726174696f6e",
+        "000701ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d0000000000000002000000010000000b00020162616c6c6f740001",
+        "000701ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d0000000000000003000000010000000b00020162616c6c6f740002",
+        "000701ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d0000000000000004000000010000000400030101",
+        "000701ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d000000000000000500000001000000050003010100",
+        "000701ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d0000000000000006000000010000000400030102",
+        "000701ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d0000000000000007000000040000000b00020162616c6c6f740003",
+        "000701ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d0000000000000008000000060000000800060174616c6c79",
+        "000701ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d0000000000000009000000060000000400030100"
+      ],
+      "checkpoints": [
+        {
+          "electionId": "ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d",
+          "segment": "0",
+          "size": "2",
+          "head": "c8cd5d204649795025a967df6adcd7b1d4c180becf883f9dbd9718e51b24809d",
+          "root": "de1032561f26c96ea22ed88d8b1cde78335321d16999c30a0ff493f7330ef879",
+          "hash": "afe1ea255489007db2382a3ffdb71f2a7d4c4b737145c262781aae8070a0e8e3"
+        },
+        {
+          "electionId": "ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d",
+          "segment": "1",
+          "size": "7",
+          "head": "6aaa2b817b6368086303681e63e7aafa7fee8196033a5d3c92837e39db752227",
+          "root": "a963173d1bff718f9c81a1ef02e075d92ecbc39c70e70b06d8e7a2921f8b75db",
+          "hash": "0381464b11433612d427c1c05aba41077d92df5fc57c0dd43d371636ee338a26"
+        },
+        {
+          "electionId": "ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d",
+          "segment": "4",
+          "size": "8",
+          "head": "0f7b9ca34aba27f28bf127a5795fabaeee84c1fb3a5520ad8f6bcde197a231d6",
+          "root": "4835c73c0fcfef0126e94a16f2ea7a6792d4d9f4ace1df1baee5628842478cf0",
+          "hash": "1a908a35f5825fa12878af0e1d7500246ad54bc93f370604e084bd5e3c12eb77"
+        },
+        {
+          "electionId": "ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d",
+          "segment": "6",
+          "size": "10",
+          "head": "fc87f28192f272702cf7d1cdea1075188ee5b9c8d0a8bc800b0016e8fbe1a003",
+          "root": "bd58f626279773b51885eb3d7bd5064cabc3a5bbb1000ea09c15758f4c5c4d4e",
+          "hash": "3eddb7eb7af71c42292dcad86dc4837d73d2259f96b695bd165275acac8b3855"
+        },
+        {
+          "electionId": "ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d",
+          "segment": "1",
+          "size": "7",
+          "head": "6aaa2b817b6368086303681e63e7aafa7fee8196033a5d3c92837e39db752227",
+          "root": "a963173d1bff718f9c81a1ef02e075d92ecbc39c70e70b06d8e7a2921f8b75db",
+          "hash": "0381464b11433612d427c1c05aba41077d92df5fc57c0dd43d371636ee338a26"
+        }
+      ],
+      "result": "ok",
+      "links": [
+        "b76814e8ca2e655b73c859d1bbc5c7d0f79de5943ba6648477e213718b2d3ebb",
+        "c8cd5d204649795025a967df6adcd7b1d4c180becf883f9dbd9718e51b24809d",
+        "ae58b1e4b8c6de877ce9b4eb883ddbdca8970d03e406e3f52534fb534c6f6f1b",
+        "4e81cf3d90e4a771efd8fef3e9c16a0162245030c248b2e777a3594c5597ff81",
+        "0744d3e5d29361d4987433241e2a10e3edeef8012e883f0129641e2df2e98d33",
+        "3f43b41c4ef1f2d4150f0234ae866533bde32fb7039d45d3bd0a2d28fcb4b641",
+        "6aaa2b817b6368086303681e63e7aafa7fee8196033a5d3c92837e39db752227",
+        "0f7b9ca34aba27f28bf127a5795fabaeee84c1fb3a5520ad8f6bcde197a231d6",
+        "9dc2195b89bab2274e4f1c93d359d47e262ed2da2e37e44f38cec593b96494b1",
+        "fc87f28192f272702cf7d1cdea1075188ee5b9c8d0a8bc800b0016e8fbe1a003"
+      ]
     },
     {
       "id": "unanchored",

@@ -267,10 +267,16 @@ def check_board(election_id, entries, checkpoints):
         decoded.append(e)
     hashes = [entry_hash(b) for b in entries]
     links = chain_links(entries)
+    # Every anchored checkpoint for the election, attributed from L1: first the
+    # election and equivocation (two different checkpoints for one segment).
+    first = {}
+    for j, cp in enumerate(checkpoints):
+        if cp[0] != election_id:
+            return ("wrong-election", {"checkpoint": j})
+        if first.setdefault(cp[1], cp) != cp:
+            return ("checkpoint-equivocation", {"checkpoint": j})
     anchored = set()
     for j, (cid, seg, size, head, root) in enumerate(checkpoints):
-        if cid != election_id:
-            return ("wrong-election", {"checkpoint": j})
         if size == 0:
             return ("checkpoint-size", {"checkpoint": j})
         if size > len(entries):
@@ -634,36 +640,52 @@ def main(out_dir):
     board("entry-trailing-bytes", "An envelope with a trailing byte", bad, [], ("decode", {"entry": 1, "decodeError": "trailing-bytes"}))
     c = cps(g, [0, 1, 4, 6])
     board("checkpoint-other-election", "A checkpoint for another election", g, [c[0], (other,) + c[1][1:]], ("wrong-election", {"checkpoint": 1}))
-    board("checkpoint-size-zero", "A checkpoint of an empty board", g, [(eid, 0, 0, bytes(32), bytes(32))] + c, ("checkpoint-size", {"checkpoint": 0}))
+    rest = cps(g, [0, 4, 6])
+    board("checkpoint-size-zero", "A checkpoint of an empty board", g, [(eid, 2, 0, bytes(32), bytes(32))] + c, ("checkpoint-size", {"checkpoint": 0}))
     board("checkpoint-missing", "The anchored board is longer than the one held", g[:8], cps(g, [6]), ("checkpoint-missing", {"checkpoint": 0}))
     mid = cps(g, [1])[0]
     board(
         "checkpoint-mid-segment",
-        "A checkpoint that ends inside segment 1",
+        "A checkpoint for segment 2 that stops inside segment 1",
         g,
-        [(eid, 1, 3, chain_links(g)[2], BOARD.mth([entry_hash(b) for b in g[:3]]))] + c,
+        [(eid, 2, 3, chain_links(g)[2], BOARD.mth([entry_hash(b) for b in g[:3]]))] + cps(g, [0, 1, 4, 6]),
         ("checkpoint-boundary", {"checkpoint": 0}),
     )
     board(
         "checkpoint-segment-too-early",
         "Segment 0's checkpoint claiming segment 1's size",
         g,
-        [(eid, 0) + mid[2:]] + c,
+        [(eid, 0) + mid[2:]] + cps(g, [1, 4, 6]),
         ("checkpoint-boundary", {"checkpoint": 0}),
     )
     seg0 = cps(g, [0])[0]
-    board("checkpoint-wrong-head", "A checkpoint with another size's chain head", g, [mid[:3] + (seg0[3], mid[4])] + c, ("checkpoint-head", {"checkpoint": 0}))
-    board("checkpoint-wrong-root", "A checkpoint with another size's root", g, [mid[:4] + (seg0[4],)] + c, ("checkpoint-root", {"checkpoint": 0}))
+    board("checkpoint-wrong-head", "A checkpoint with another size's chain head", g, [mid[:3] + (seg0[3], mid[4])] + rest, ("checkpoint-head", {"checkpoint": 0}))
+    board("checkpoint-wrong-root", "A checkpoint with another size's root", g, [mid[:4] + (seg0[4],)] + rest, ("checkpoint-root", {"checkpoint": 0}))
     board(
         "checkpoint-errors-in-order",
-        "Checkpoint 0 has a wrong root and checkpoint 1 ends mid-segment: checkpoints are checked one at a time, in order",
+        "Checkpoint 0 has a wrong root and checkpoint 1 stops mid-segment: checkpoints are checked one at a time, in order",
         g,
-        [mid[:4] + (seg0[4],), (eid, 1, 3, chain_links(g)[2], BOARD.mth([entry_hash(b) for b in g[:3]]))] + c,
+        [mid[:4] + (seg0[4],), (eid, 2, 3, chain_links(g)[2], BOARD.mth([entry_hash(b) for b in g[:3]]))] + rest,
         ("checkpoint-root", {"checkpoint": 0}),
     )
     forked = list(g)
     forked[2] = entry(eid, 2, 1, ballot(7))
     board("checkpoint-forked", "The board held differs from the anchored one in entry 2", forked, c, ("checkpoint-head", {"checkpoint": 1}))
+    board(
+        "checkpoint-equivocation",
+        "A second, different checkpoint anchored for segment 1 (a fork shown to some voters), even after the honest one passes",
+        g,
+        c + cps(forked, [1]),
+        ("checkpoint-equivocation", {"checkpoint": 4}),
+    )
+    board(
+        "checkpoint-equivocation-first",
+        "Equivocation is found before any per-checkpoint check, wherever the forked checkpoint sits",
+        g,
+        cps(forked, [1]) + c,
+        ("checkpoint-equivocation", {"checkpoint": 2}),
+    )
+    board("checkpoint-repeated", "The same checkpoint anchored twice is not equivocation", g, c + c[1:2], "ok")
     board("unanchored", "Entries after the last checkpoint", g, cps(g, [0, 1, 4]), ("unanchored", {"segment": 6}))
     board("unanchored-skipped-segment", "Segment 1 holds entries but was never anchored", g, cps(g, [0, 4, 6]), ("unanchored", {"segment": 1}))
     board("no-checkpoints", "No anchored checkpoint at all", g, [], ("unanchored", {"segment": 0}))

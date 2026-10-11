@@ -2,7 +2,7 @@
 
 The protocol core of [Abolish](https://github.com/abolishus/abolish): canonical encodings, ballot encryption, validity proofs, threshold decryption and the bulletin-board model. Depends only on `@noble/*`.
 
-**Status: early.** The first APIs are the canonical encoding layer of [`docs/spec/notation.md`](../../docs/spec/notation.md) (P1-10) the group and hash layer of [`docs/spec/group.md`](../../docs/spec/group.md) (P1-11) and the bulletin board of [`docs/spec/board.md`](../../docs/spec/board.md) (P1-16); ballot commitments and proofs follow. Prereleases are published as `next`, signed and with provenance (see the repository README, "Releases").
+**Status: early.** The first APIs are the canonical encoding layer of [`docs/spec/notation.md`](../../docs/spec/notation.md) (P1-10), the group and hash layer of [`docs/spec/group.md`](../../docs/spec/group.md) (P1-11), and the bulletin board of [`docs/spec/board.md`](../../docs/spec/board.md) (P1-16); ballot commitments and proofs follow. Prereleases are published as `next`, signed and with provenance (see the repository README, "Releases").
 
 ## Canonical encoding
 

@@ -155,6 +155,7 @@ export type BoardErrorCode =
   | "wrong-index"
   | "segment-decreased"
   | "opening-order"
+  | "checkpoint-equivocation"
   | "checkpoint-size"
   | "checkpoint-missing"
   | "checkpoint-boundary"
@@ -256,12 +257,14 @@ export function checkBoard(
 }
 
 /**
- * Checks the checkpoints anchored for the board's election against it, one
- * at a time and in order: each ends at its segment's boundary, with the chain
- * head and tree root of that prefix. Then every segment holding entries must
- * have one, so nothing stays unanchored past its period (docs/spec/verifier.md
- * 4.2; T-23, T-24). Each checkpoint's hash must already have been checked
- * against its L1 anchor.
+ * Checks every checkpoint anchored for the board's election, as read from the
+ * pinned anchor contract on L1: all of them, never a selection, or a fork
+ * shown only to some voters would pass (T-24). First, each names the election
+ * and no segment has two different checkpoints (equivocation). Then, one at a
+ * time and in order, each ends at its segment's boundary with the chain head
+ * and tree root of that prefix. Last, every segment holding entries must have
+ * one, so nothing stays unanchored past its period (docs/spec/verifier.md 4.2;
+ * T-23, T-24).
  */
 export function checkCheckpoints(board: CheckedBoard, checkpoints: readonly Checkpoint[]): void {
   if (!Array.isArray(checkpoints)) throw new TypeError("checkpoints must be an array");
@@ -278,10 +281,18 @@ export function checkCheckpoints(board: CheckedBoard, checkpoints: readonly Chec
       .map((cp) => Number(cp.size)),
   );
   const roots = merkleRoots(BOARD_TREE, board.entryHashes, sizes);
-  const anchored = new Set<number>();
+  const bySegment = new Map<number, Uint8Array>();
   read.forEach((cp, j) => {
     if (!equalBytes(cp.election_id, board.electionId))
       throw new BoardError("wrong-election", { checkpoint: j });
+    const encoded = encode(checkpointV1, cp);
+    const first = bySegment.get(cp.segment);
+    if (first === undefined) bySegment.set(cp.segment, encoded);
+    else if (!equalBytes(first, encoded))
+      throw new BoardError("checkpoint-equivocation", { checkpoint: j });
+  });
+  const anchored = new Set<number>();
+  read.forEach((cp, j) => {
     if (cp.size === 0n) throw new BoardError("checkpoint-size", { checkpoint: j });
     if (cp.size > BigInt(entries.length))
       throw new BoardError("checkpoint-missing", { checkpoint: j });

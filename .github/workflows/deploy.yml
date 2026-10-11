@@ -252,7 +252,8 @@ jobs:
           }
           # A project token is scoped to one Railway environment.
           env_id="$(gql "$Q_ENV" '{}' | jq -er .projectToken.environmentId)"
-          gql "$Q_SOURCE" "$(jq -cn --arg s "$SERVICE_ID" --arg e "$env_id" --arg i "$IMAGE@$DIGEST" '{s: $s, e: $e, i: $i}')" >/dev/null
+          gql "$Q_SOURCE" "$(jq -cn --arg s "$SERVICE_ID" --arg e "$env_id" --arg i "$IMAGE@$DIGEST" '{s: $s, e: $e, i: $i}')" |
+            jq -e '.serviceInstanceUpdate == true' >/dev/null
           deployment="$(gql "$Q_DEPLOY" "$(jq -cn --arg s "$SERVICE_ID" --arg e "$env_id" '{s: $s, e: $e}')" | jq -er .serviceInstanceDeployV2)"
           echo "Railway deployment $deployment: $IMAGE@$DIGEST" | tee -a "$GITHUB_STEP_SUMMARY"
           for _ in $(seq 120); do

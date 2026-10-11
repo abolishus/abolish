@@ -140,6 +140,14 @@ describe("trustee vectors (docs/spec/vectors/trustee.json)", () => {
       ).filter((v) => v.id === id);
       expect(found, path).toHaveLength(1);
       const v = found[0] as object;
+      // The replacer list applies at every depth, so the digest covers every
+      // field only while vectors stay flat (scalars and arrays of strings).
+      for (const field of Object.values(v))
+        expect(
+          ["string", "number", "boolean"].includes(typeof field) ||
+            (Array.isArray(field) && field.every((x) => typeof x === "string")),
+          path,
+        ).toBe(true);
       const canon = JSON.stringify(v, Object.keys(v).sort());
       expect(createHash("sha256").update(canon).digest("hex"), path).toBe(digest);
     }

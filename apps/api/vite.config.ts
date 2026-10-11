@@ -10,7 +10,7 @@ export default defineConfig({
     platform: "node",
     dts: false,
     deps: { alwaysBundle: [/.*/] },
-    copy: [{ from: "../../packages/core/src/db/migrations", to: "dist" }],
+    copy: ["../../packages/core/src/db/migrations"],
   },
   run: {
     tasks: {

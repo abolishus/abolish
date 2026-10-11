@@ -1,8 +1,9 @@
-# syntax=docker/dockerfile:1
 # The API image: Node and the bundle in dist/, nothing else of the repo
 # (vite.config.ts, pack). Build it after `vp run --filter @abolishus/api... build`,
 # with this directory as the context (.dockerignore lets only dist/ in).
 #
+# No `# syntax=` line: an external frontend would be one more image pulled by
+# tag at build time; the builder's own frontend parses this file.
 # Reproducible: the base is pinned by digest (the ECR Public mirror of the
 # Docker Hub library image, same digest, pulled without credentials; T-65),
 # and the build sets SOURCE_DATE_EPOCH and rewrite-timestamp, so two builds of
@@ -20,7 +21,7 @@ COPY --chown=0:0 --chmod=a=rX dist/ /app/
 
 # Every IPv4 interface: the container's network is the boundary, and the
 # proxy in front terminates TLS. A service reached over Railway's private
-# network (IPv6 only) sets API_HOST=:: instead; a host without IPv6 would
+# network over IPv6 sets API_HOST=:: instead; a host without IPv6 would
 # refuse that as a default.
 ENV NODE_ENV=production \
     API_HOST=0.0.0.0 \

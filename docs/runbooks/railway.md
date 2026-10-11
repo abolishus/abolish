@@ -34,10 +34,10 @@ Not used by the API. The worker (P2-4) needs it: a service from `docker.dragonfl
 
 Each service's source is a container image, set by digest by the deploy workflow _(part 2)_, never a repository: Railway never builds (T-61). Each service has no public domain unless listed.
 
-| Service       | Command                    | Variables                                                     | Notes                                                                                                                                            |
-| ------------- | -------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `api-migrate` | `node migrate.mjs`         | `DATABASE_URL` (`abolish_migrate`), `DATABASE_SCHEMA=abolish` | Restart policy: never. Applies pending migrations and exits; deployed before `api`, which waits for it to succeed.                               |
-| `api`         | image default (`main.mjs`) | `DATABASE_URL` (`abolish_api`), `API_PORT=8787`               | Public domain, behind Cloudflare. `API_HOST` is `0.0.0.0` in the image; set `::` if a service must reach it over Railway's IPv6 private network. |
+| Service       | Command                    | Variables                                                     | Notes                                                                                                                                                                                                                                     |
+| ------------- | -------------------------- | ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `api-migrate` | `node migrate.mjs`         | `DATABASE_URL` (`abolish_migrate`), `DATABASE_SCHEMA=abolish` | Restart policy: never. Applies pending migrations and exits. Railway doesn't order services, so the deploy workflow _(part 2)_ deploys it first and deploys `api` only once it has exited 0.                                              |
+| `api`         | image default (`main.mjs`) | `DATABASE_URL` (`abolish_api`), `API_PORT=8787`               | Custom domain `api.<domain>` with target port 8787 (the API reads `API_PORT`, not Railway's `PORT`), behind Cloudflare. `API_HOST` is `0.0.0.0` in the image; set `::` if a service must reach it over IPv6 on Railway's private network. |
 
 Both use the same image digest, so a deploy never runs an API against migrations other than its own. No other variable is needed; secrets live only in Railway variables, never in the image or the repository.
 
@@ -49,9 +49,9 @@ One Railway project token per environment, scoped to that environment, stored as
 
 ### Cloudflare
 
-- DNS: `api.<domain>` proxied (orange cloud) to the `api` service's Railway domain; SSL mode Full (strict).
+- DNS: add `api.<domain>` as a custom domain on the `api` service first (Railway routes by host name), then a proxied (orange cloud) CNAME to the target Railway gives; SSL mode Full (strict).
 - WAF managed rules on; a rate-limiting rule per client address on `POST /ballots` and on the whole API host (T-48, T-52). The API also caps requests in flight (`apps/api` README, Transport); per-address limits are Cloudflare's job.
-- Logs (T-11): no Logpush job, no Log Explorer, nothing that retains client addresses or query strings. Cloudflare still sees every address in transit; that's T-11's residual.
+- Logs (T-11): no Logpush job and no Log Explorer. That doesn't make Cloudflare forget addresses: every WAF or rate-limit match is kept as a security event with the client address, path and query string, and analytics keep sampled requests. A rate-limit match on `POST /ballots` thus records an address next to the time of a ballot submission. Cloudflare sees every address in transit anyway; that's T-11's residual, and voters who need more use Tor or direct submit.
 - Turnstile on Tier 0 actions comes with the web app (P2-9); never on ballot submission, which must work without our domain (T-25).
 
 Railway's own HTTP logs record request paths and may record client addresses; we can't turn them off. Ballot submission carries no account session, so they can't join an account to a ballot (T-10), but they add one more party that sees addresses (T-11).
@@ -65,13 +65,14 @@ vp install --frozen-lockfile
 vp run --filter @abolishus/crypto build
 vp run --filter @abolishus/api build    # type-checks, then bundles into apps/api/dist
 SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)" docker buildx build \
-  --platform linux/amd64 \
+  --platform linux/amd64 --provenance=false --sbom=false \
   --output type=oci,dest=api.tar,rewrite-timestamp=true \
   apps/api
 ```
 
 - `apps/api/dist` is the whole program: `main.mjs`, `migrate.mjs`, one shared chunk with every dependency inlined, and `migrations/`, the SQL files from `packages/core`. `repro-build` already checks that it's byte-identical across checkouts.
 - The image (`apps/api/Dockerfile`) is the Node base pinned by digest, at the version in `.node-version` (a test checks it), with the package managers removed and `dist/` copied in root-owned and read-only, run as `node`. `.dockerignore` lets only `dist/` into the context.
+- Attestations are off here (buildx would otherwise wrap the image in an index with them), so the digest compared is the image alone; part 2 adds signatures and provenance afterwards. `rewrite-timestamp` needs BuildKit 0.13 or later.
 - `SOURCE_DATE_EPOCH` plus `rewrite-timestamp=true` clamp every file time in the new layers to the commit time, so the digest doesn't depend on when or where it was built. Checked on 2026-10-11: two builds of the same commit, one with a fresh `dist/` built under a different umask, gave the same OCI archive, byte for byte.
 - _(part 2)_ The workflow pushes the image to `ghcr.io/abolishus/abolish-api`, signs the digest with cosign keyless signing and attaches SLSA provenance. Provenance and signatures are separate manifests that refer to the image; they don't change its digest.
 
@@ -87,7 +88,7 @@ Migrations are forward-only (`packages/core`, Database), and `api-migrate` refus
 
 ## Rotating secrets
 
-- A database login: create a new login in the same group role, point the service's `DATABASE_URL` at it, redeploy, then `DROP ROLE` the old one. Objects are owned by the group roles, not the logins, so nothing moves.
+- A database login: create a new login in the same group role (for the API, also `ALTER ROLE … SET search_path = abolish`, or every query fails), point the service's `DATABASE_URL` at it, redeploy, then `DROP ROLE` the old one. Objects are owned by the group roles, not the logins, so nothing moves.
 - `RAILWAY_TOKEN`: the owner creates a new project token for the environment in Railway, replaces the GitHub environment secret, then revokes the old token.
 - If a Railway token leaked: revoke it first, then check the environment's deployment history for digests that no workflow run produced and redeploy the last good one.
 

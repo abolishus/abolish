@@ -19,12 +19,15 @@ const env = Env.parse({
   DATABASE_SCHEMA: process.env["DATABASE_SCHEMA"],
 });
 
-// One connection, so SET ROLE holds for the migration's transaction: objects
-// are then owned by abolish_migrator, not by the login user, and a rotated
-// login can still migrate.
-const sql = postgres(env.DATABASE_URL, { max: 1, onnotice: () => {} });
+// The role is a startup parameter, so every connection, a reconnect included,
+// acts as abolish_migrator: objects then belong to the group role rather than
+// the login, and a rotated login can still migrate.
+const sql = postgres(env.DATABASE_URL, {
+  max: 1,
+  onnotice: () => {},
+  connection: { role: "abolish_migrator" },
+});
 try {
-  await sql.unsafe("SET ROLE abolish_migrator");
   const applied = await migrate(sql, env.DATABASE_SCHEMA);
   process.stdout.write(`${JSON.stringify({ migrations: applied })}\n`);
 } finally {

@@ -9,7 +9,9 @@ which checks itself against hashlib.sha3_256 and published answers before
 use. Selection here sorts each group by block number instead of scanning for
 a maximum, so the two implementations don't share a structure either.
 
-Usage: python3 -I -B packages/crypto/scripts/revoting-vectors.py <out-dir>
+Usage: python3 -I -B packages/crypto/scripts/revoting-vectors.py <out-dir>,
+then `vp check --fix` (the committed file is formatted; its values are what
+this prints).
 """
 
 import hashlib
@@ -40,16 +42,19 @@ def message(definition_hash, tier, ballot_hash, ref_number, ref_hash):
     return hashlib.sha256(bytes([len(TAG)]) + TAG + m).digest()
 
 
-def check_reference(number, ref_hash, chain, head, closes_at):
-    """chain: {number: (hash, timestamp)} for every finalized block up to head."""
-    if number <= head:
-        block_hash, timestamp = chain[number]
-        if block_hash != ref_hash:
-            return "l1-ref-unknown"
-        return "l1-ref-after-close" if timestamp > closes_at else "admitted"
-    # Timestamps strictly increase with the number, so the head after close
-    # puts every later number after close too.
-    return "l1-ref-after-close" if chain[head][1] > closes_at else "pending"
+def check_reference(number, ref_hash, chain, head, ref_min, closes_at):
+    """chain: {number: (hash, timestamp)} for the finalized blocks from ref_min to head."""
+    if number < ref_min:
+        return "l1-ref-before-open"
+    # Timestamps strictly increase with the number, so a block after close at
+    # or below the named number puts the named block after close too.
+    if chain[min(number, head)][1] > closes_at:
+        return "l1-ref-after-close"
+    if number > head:
+        return "pending"
+    if chain[number][0] != ref_hash:
+        return "l1-ref-unknown"
+    return "admitted"
 
 
 def select(ballots):
@@ -156,11 +161,24 @@ def main():
         t += 24 if n == 104 else 12
     ts = lambda n: chain[n][1]
     assert all(ts(n) < ts(n + 1) for n in range(100, 109))
+    # Verifiers whose heads are both past close agree on every verdict.
+    for number in [0, 100, 101, 103, 106, 107, 108, 112, U64_MAX]:
+        for h in [(107, 109), (108, 109)]:
+            verdicts = {
+                check_reference(number, det("other"), {n: chain[n] for n in chain if 101 <= n <= hd}, hd, 101, ts(106))
+                for hd in h
+            }
+            assert len(verdicts) == 1, (number, h)
+    ref_min = 101
     reference_cases = [
         ("admitted", "A finalized block before close, with its hash", 103, None, 109, ts(106)),
         ("at-close", "A block whose timestamp equals closes_at is admitted", 106, None, 109, ts(106)),
+        ("at-minimum", "The first block of the window is admitted", ref_min, None, 109, ts(106)),
+        ("before-open", "A block before l1_ref_min is rejected by number alone", ref_min - 1, None, 109, ts(106)),
+        ("ancient", "An ancient block is rejected with no lookup, whatever its hash", 0, det("other"), 109, ts(106)),
         ("wrong-hash", "The number is finalized with another hash: reorganised away or never existed", 103, det("other"), 109, ts(106)),
-        ("wrong-hash-after-close", "A wrong hash is reported as unknown before the time is checked", 108, det("other"), 109, ts(106)),
+        ("wrong-hash-after-close", "Time is checked before the hash", 108, det("other"), 109, ts(106)),
+        ("wrong-hash-after-close-short-head", "The same ballot gets the same verdict from a verifier whose head is just past close", 108, det("other"), 107, ts(106)),
         ("after-close", "A finalized block after closes_at", 108, None, 109, ts(106)),
         ("pending", "Beyond the finalized head while the head is before close", 107, None, 105, ts(106)),
         ("pending-head-at-close", "A head exactly at closes_at isn't after it, so beyond it is still pending", 108, None, 106, ts(106)),
@@ -171,6 +189,7 @@ def main():
     references = []
     for name, description, number, ref_hash, head, closes_at in reference_cases:
         ref_hash = chain[number][0] if ref_hash is None else ref_hash
+        visible = {n: chain[n] for n in chain if ref_min <= n <= head}
         references.append(
             {
                 "id": f"reference-{name}",
@@ -178,8 +197,9 @@ def main():
                 "l1RefNumber": str(number),
                 "l1RefHash": ref_hash.hex(),
                 "head": str(head),
+                "l1RefMin": str(ref_min),
                 "closesAt": str(closes_at),
-                "verdict": check_reference(number, ref_hash, chain, head, closes_at),
+                "verdict": check_reference(number, ref_hash, visible, head, ref_min, closes_at),
             }
         )
 

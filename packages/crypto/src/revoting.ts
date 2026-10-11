@@ -75,31 +75,49 @@ export interface FinalizedL1 {
   block(n: bigint): FinalizedL1Block;
 }
 
-export type L1ReferenceVerdict = "admitted" | "pending" | "l1-ref-unknown" | "l1-ref-after-close";
+export type L1ReferenceVerdict =
+  | "admitted"
+  | "pending"
+  | "l1-ref-before-open"
+  | "l1-ref-after-close"
+  | "l1-ref-unknown";
 
 /**
- * Verifier 5.8 (docs/spec/revoting.md, Admission). A reference beyond `head`
- * is pending only while `head` is at or before `closesAt`: once L1 has
- * finalized a block after close, every later number is after close too, so a
- * ballot naming a block that never comes (2^64 − 1, say) is rejected rather
- * than keeping the election unverifiable for good (T-53).
+ * Seconds before `opens_at` from which a ballot may name a block: `l1_ref_min`
+ * is the first finalized L1 block whose timestamp is at or after
+ * `opens_at − L1_REF_MARGIN`. The caller finds it in the L1 range it reads for
+ * anchors (docs/spec/revoting.md, Admission).
+ */
+export const L1_REF_MARGIN = 3600n;
+
+/**
+ * Verifier 5.8 (docs/spec/revoting.md, Admission), steps in the spec's order.
+ * The lower bound keeps every lookup inside the L1 range around the poll, so
+ * a ballot naming an ancient block can't demand evidence nobody archives
+ * (T-53, T-36). A reference beyond `head` is pending only while `head` is at
+ * or before `closesAt`: once L1 has finalized a block after close, every later
+ * number is after close too, so a block that never comes (2^64 − 1, say) can't
+ * keep the election unverifiable. Checking the time before the hash makes the
+ * verdict the same for every head past close.
  */
 export function checkL1Reference(
   ref: { readonly l1RefNumber: bigint; readonly l1RefHash: Uint8Array },
   l1: FinalizedL1,
-  closesAt: bigint,
+  window: { readonly l1RefMin: bigint; readonly closesAt: bigint },
 ): L1ReferenceVerdict {
   checkU64(ref.l1RefNumber, "checkL1Reference: l1RefNumber");
   const refHash = bytes32(ref.l1RefHash, "checkL1Reference: l1RefHash");
   checkU64(l1.head, "checkL1Reference: head");
-  checkU64(closesAt, "checkL1Reference: closesAt");
+  checkU64(window.l1RefMin, "checkL1Reference: l1RefMin");
+  checkU64(window.closesAt, "checkL1Reference: closesAt");
+  if (ref.l1RefNumber < window.l1RefMin) return "l1-ref-before-open";
   const atOrBelowHead = ref.l1RefNumber <= l1.head;
   const block = l1.block(atOrBelowHead ? ref.l1RefNumber : l1.head);
   const hash = bytes32(block.hash, "checkL1Reference: block hash");
   checkU64(block.timestamp, "checkL1Reference: block timestamp");
-  if (atOrBelowHead && !equalBytes(hash, refHash)) return "l1-ref-unknown";
-  if (block.timestamp > closesAt) return "l1-ref-after-close";
-  return atOrBelowHead ? "admitted" : "pending";
+  if (block.timestamp > window.closesAt) return "l1-ref-after-close";
+  if (!atOrBelowHead) return "pending";
+  return equalBytes(hash, refHash) ? "admitted" : "l1-ref-unknown";
 }
 
 // Public data, so a constant-time comparison isn't needed.

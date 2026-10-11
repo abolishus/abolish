@@ -105,6 +105,7 @@ export {
   checkL1Reference,
   type FinalizedL1,
   type FinalizedL1Block,
+  L1_REF_MARGIN,
   type L1ReferenceVerdict,
   membershipMessage,
   membershipMessageField,

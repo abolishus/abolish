@@ -58,7 +58,7 @@ Each check names the threats it closes and the STATUS item that specifies it. A 
 - 5.5 The ballot counts as inside the poll's window under the close rule, using only L2 data derived from finalized L1 data (T-35, T-50, [[0004-l2-choice]]; P1-18).
 - 5.6 Direct-submitted ballots on L2 are on the board; a ballot found on L2 but missing from the board fails the check (T-25; P1-18, P3-5).
 - 5.7 A repeat of an earlier admitted ballot is rejected (rejected entries don't count as earlier ballots, R4): the same tier, nullifier and message `M` (5.3), whatever the entry's other bytes; Groth16 proofs are malleable, so byte comparison alone isn't enough ([[revoting]], Selection step 1; T-38; P1-13).
-- 5.8 The L1 block the ballot names is on the finalized L1 chain with the hash the ballot gives, and its timestamp is at or before `closes_at` (`l1-ref-unknown`, `l1-ref-after-close`). A ballot naming a block beyond the finalized head is pending only until L1 finalizes a block after `closes_at`, and rejected after that, so no reference can keep an election unverifiable ([[revoting]], Admission; T-45, T-35, T-53; P1-13).
+- 5.8 The L1 block the ballot names is no older than an hour before `opens_at`, is on the finalized L1 chain with the hash the ballot gives, and has a timestamp at or before `closes_at` (`l1-ref-before-open`, `l1-ref-after-close`, `l1-ref-unknown`, checked in that order). A ballot naming a block beyond the finalized head is pending only until L1 finalizes a block after `closes_at`, and rejected after that, so no reference can keep an election unverifiable, and every lookup falls in the L1 range around the poll ([[revoting]], Admission; T-45, T-35, T-53, T-36; P1-13).
 
 ### 6. Re-voting and spoiled ballots
 

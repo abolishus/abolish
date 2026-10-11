@@ -38,7 +38,7 @@ Each ballot carries a number bound into its proof; the highest counts. Variants:
 
 ### C. A recent L1 block bound into each ballot; the newest block counts, exact ties count nothing
 
-Each ballot names a recent block of the election's L1 chain, by number and hash, and its membership proof's message binds both ([[revoting]]). A verifier admits a ballot only if that block is on the finalized L1 chain and no later than close. For each tier and nullifier, the admitted ballot naming the highest block number counts; two distinct ballots naming that same number tie, and then none counts.
+Each ballot names a recent block of the election's L1 chain, by number and hash, and its membership proof's message binds both ([[revoting]]). A verifier admits a ballot only if that block is on the finalized L1 chain, no earlier than an hour before opening and no later than close. For each tier and nullifier, the admitted ballot naming the highest block number counts; two distinct ballots naming that same number tie, and then none counts.
 
 - **Pros:**
   - **R3.** The rank is fixed by the voter when the proof is made. No board position, segment, arrival time or L2 block enters the rule, so withholding or reordering changes nothing.
@@ -46,7 +46,7 @@ Each ballot names a recent block of the election's L1 chain, by number and hash,
   - **R1.** A replay carries the message it was made with, so it is recognised by (tier, nullifier, message) whatever its proof bytes, and an earlier ballot replayed after a re-vote still ranks by its own, older block.
   - **R5.** The client needs only an L1 block it reads itself and its own records.
   - **Ties instead of a tie-break.** Within one block, two ballots can't be ranked without a value the voter chooses, which a coercer could demand (B's flaw). Counting neither instead lets a watched voter cancel a coerced ballot at once by naming the same block, before a newer one is settled.
-  - The check is a plain lookup in finalized L1 data the verifier reads anyway for anchors ([[board]]), with no new primitive.
+  - The check is a lookup in finalized L1 data with no new primitive. The lower bound (an hour before opening, found by number alone) and the upper bound (the first block after close) keep every lookup inside the L1 range around the poll that the verifier reads and archives for anchors anyway ([[board]]), so a ballot naming an ancient block can't demand evidence nobody keeps, and every verifier reaches the same verdict.
 - **Cons:**
   - 40 more bytes per ballot (the block number and hash), on the board and in direct-submit calldata.
   - A ballot naming a block that L1 reorganises away is rejected; clients name a block at least 2 deep and check after finality, but a ballot cast just before close may have no time to be cast again.

@@ -12,7 +12,7 @@ import {
   type DecodeErrorCode,
   verifyBoard,
 } from "@abolishus/crypto";
-import type { Bundle, InputSources } from "./bundle.ts";
+import type { Bundle, InputSource, InputSources } from "./bundle.ts";
 import { CHECKS, type CheckKind } from "./checks.ts";
 
 export type CheckStatus = "pass" | "fail" | "unverifiable";
@@ -107,6 +107,19 @@ function boardOutcomes(e: BoardError): readonly [Outcome, Outcome] {
   }
 }
 
+// A local file authenticates nothing. The switch is exhaustive, so a new
+// source type doesn't compile until it is decided here.
+function authenticated(source: InputSource): boolean {
+  switch (source) {
+    case "local-file":
+      return false;
+    default: {
+      const unhandled: never = source;
+      throw new Error(`unknown input source ${String(unhandled)}`);
+    }
+  }
+}
+
 /** `verdictAgainstInputs` (docs/spec/verifier.md, Verdicts). Report-only checks never change it. */
 function judge(checks: readonly CheckResult[]): Verdict {
   if (checks.some((c) => c.kind === "election" && c.status === "fail")) return "failed";
@@ -149,11 +162,11 @@ export function verifyBundle(bundle: Bundle): Report {
     ...(implemented.get(c.id) ?? { status: "unverifiable", code: "not-implemented" }),
   }));
   const verdictAgainstInputs = judge(checks);
-  // Every input is a local file today, and a local file authenticates
-  // nothing, so the verdict is unverifiable whatever the checks found.
   return {
     format: REPORT_FORMAT,
-    verdict: "unverifiable",
+    verdict: Object.values(bundle.sources).every(authenticated)
+      ? verdictAgainstInputs
+      : "unverifiable",
     verdictAgainstInputs,
     inputs: { ...bundle.sources },
     board,

@@ -136,7 +136,7 @@ Hex is lowercase, exactly 64 digits for 32 bytes. An integer is a JSON string of
 ### Verdicts
 
 - `verdictAgainstInputs` is `failed` if any election check fails, otherwise `unverifiable` if any election or admission check is unverifiable, otherwise `verified`. Report-only checks never change it. An admission check that fails only rejects its entry. One that can't be evaluated makes 6.1 unverifiable (Principles), so it counts as unverifiable here.
-- `verdict` equals `verdictAgainstInputs` when every input is authenticated, and is `unverifiable` otherwise.
+- `verdict` equals `verdictAgainstInputs` when every input is authenticated, and is `unverifiable` otherwise. Anyone can make a bundle whose `verdictAgainstInputs` is `failed`, so it is never the election's verdict: a consumer never shows it without `verdict` and `inputs` beside it (T-53).
 
 ### Report
 

@@ -160,6 +160,7 @@ export type BoardErrorCode =
   | "opening-order"
   | "checkpoint-equivocation"
   | "checkpoint-size"
+  | "checkpoint-inconsistent"
   | "checkpoint-missing"
   | "checkpoint-boundary"
   | "copy-mismatch"
@@ -324,10 +325,13 @@ export interface VerifiedBoard {
  * prefix up to the largest anchored size, and anything past it is ignored, so
  * no one can fail an election by appending entries to a copy of its board
  * (T-53). Order (docs/spec/board.md, Board checks): election and equivocation
- * over the anchors; their sizes; the copy's raw bytes against every anchored
- * head and root; the entry checks over the prefix; each checkpoint's
- * boundary; every segment whose window has closed has a checkpoint; once the
- * seal's window has closed, the seal has one.
+ * over the anchors; their sizes and their consistency with each other, from
+ * L1 alone; whether the copy is long enough; the copy's raw bytes against
+ * every anchored head and root, where an anchor no board can match fails the
+ * election and only an unmatched copy is the copy's fault; the entry checks
+ * over the prefix; each checkpoint's boundary; every segment whose window has
+ * closed has a checkpoint; once the seal's window has closed, the seal has
+ * one.
  */
 export function verifyBoard(
   electionId: Uint8Array,
@@ -342,6 +346,7 @@ export function verifyBoard(
   if (typeof now !== "bigint") throw new TypeError("now must be a bigint");
   const c = checkClock(clock);
   const id = copyBytes(electionId, "electionId");
+  if (id.length !== 32) throw new RangeError("electionId must be 32 bytes");
   // Re-encoded and decoded, so every field is well formed and copied; the
   // index of each counted anchor is its position in `anchors`.
   const counted: [number, Checkpoint][] = [];
@@ -359,32 +364,56 @@ export function verifyBoard(
     else if (!equalBytes(first, encoded))
       throw new BoardError("checkpoint-equivocation", { checkpoint: j });
   }
-  const held = encodedEntries.length;
-  let extent = 0;
+  // From L1 alone, before any copy is read, so no mirror can mask it: a
+  // board only grows, so a later segment's checkpoint is never smaller than
+  // an earlier one's, and two of equal size are equal (T-24).
   for (const [j, cp] of counted) {
     if (cp.size === 0n) throw new BoardError("checkpoint-size", { checkpoint: j });
-    if (cp.size > BigInt(held)) throw new BoardError("checkpoint-missing", { checkpoint: j });
-    extent = Math.max(extent, Number(cp.size));
+    for (const [, other] of counted)
+      if (
+        other.segment < cp.segment &&
+        (other.size > cp.size ||
+          (other.size === cp.size &&
+            !(equalBytes(other.head, cp.head) && equalBytes(other.root, cp.root))))
+      )
+        throw new BoardError("checkpoint-inconsistent", { checkpoint: j });
   }
   // Authenticate the raw bytes before decoding anything. Entries are
   // unsigned, so a copy that doesn't match the anchored heads and roots is
   // that copy's fault, never the election's: the caller tries another source
-  // (T-53, T-23).
-  const prefix = Array.from({ length: extent }, (_, i) =>
+  // (T-53, T-23). Anchors the copy is long enough for are compared first, so
+  // a checkpoint larger than any copy can't hide one no board matches.
+  const held = encodedEntries.length;
+  const reach = counted.filter(([, cp]) => cp.size <= BigInt(held));
+  // A loop, not a spread: the anchor count is the anchoring authority's to choose.
+  const extent = counted.reduce((m, [, cp]) => Math.max(m, Number(cp.size)), 0);
+  const prefix = Array.from({ length: Math.min(extent, held) }, (_, i) =>
     copyBytes(encodedEntries[i] as Uint8Array, `entry ${i}`),
   );
   const hashes = prefix.map(boardEntryHash);
   const links: Uint8Array[] = [];
   for (const e of hashes) links.push(chainLink(links.at(-1) ?? new Uint8Array(32), e));
-  const roots = merkleRoots(BOARD_TREE, hashes, new Set(counted.map(([, cp]) => Number(cp.size))));
-  for (const [j, cp] of counted) {
+  const roots = merkleRoots(BOARD_TREE, hashes, new Set(reach.map(([, cp]) => Number(cp.size))));
+  const checked = reach.map(([j, cp]) => {
     const size = Number(cp.size);
-    if (
-      !equalBytes(links[size - 1] as Uint8Array, cp.head) ||
-      !equalBytes(roots.get(size) as Uint8Array, cp.root)
-    )
-      throw new BoardError("copy-mismatch", { checkpoint: j });
+    const head = equalBytes(links[size - 1] as Uint8Array, cp.head);
+    const root = equalBytes(roots.get(size) as Uint8Array, cp.root);
+    return { j, size, head, root, full: head && root };
+  });
+  // Head and root are both functions of the same entries, so under collision
+  // resistance a checkpoint is the anchoring authority's fault, never the
+  // copy's, when the copy matches its head but not its root (or the reverse),
+  // or when the copy fully matches another counted checkpoint at least as
+  // large: that checkpoint admits only this prefix. No mirror can bring
+  // either about, so a mirror still can't fail an election (T-24, T-53).
+  for (const m of checked) {
+    const split = m.head !== m.root;
+    const contradicted = !m.full && checked.some((o) => o.full && o.size >= m.size);
+    if (split || contradicted) throw new BoardError("checkpoint-inconsistent", { checkpoint: m.j });
   }
+  for (const [j, cp] of counted)
+    if (cp.size > BigInt(held)) throw new BoardError("checkpoint-missing", { checkpoint: j });
+  for (const m of checked) if (!m.full) throw new BoardError("copy-mismatch", { checkpoint: m.j });
   // The prefix is now the anchored board, so any failure below is the
   // operator's.
   const board = checkBoard(id, prefix, pinned);

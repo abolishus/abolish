@@ -295,21 +295,41 @@ def check_board(election_id, entries, anchors, now):
             return ("wrong-election", {"checkpoint": j})
         if first.setdefault(cp[1], cp) != cp:
             return ("checkpoint-equivocation", {"checkpoint": j})
+    # From L1 alone: a later segment's checkpoint is never smaller, and two of
+    # equal size are equal.
     for j, cp in counted.items():
         if cp[2] == 0:
             return ("checkpoint-size", {"checkpoint": j})
-        if cp[2] > len(entries):
-            return ("checkpoint-missing", {"checkpoint": j})
+        for o in counted.values():
+            if o[1] < cp[1] and (o[2] > cp[2] or (o[2] == cp[2] and o[3:] != cp[3:])):
+                return ("checkpoint-inconsistent", {"checkpoint": j})
     # The authenticated extent: entries past the largest checkpoint are no
     # one's claim, so they are neither checked nor counted.
     extent = max((cp[2] for cp in counted.values()), default=0)
     prefix = entries[:extent]
+    # Only anchors the copy is long enough for are compared; a larger one is
+    # checkpoint-missing, but only after a split or contradicted one is found.
+    reach = {j: cp for j, cp in counted.items() if cp[2] <= len(entries)}
     # Authenticate the raw bytes before decoding anything: a copy that doesn't
     # match the anchors is this copy's problem, not the election's.
     hashes = [entry_hash(b) for b in prefix]
     links = chain_links(prefix)
-    for j, (cid, seg, size, head, root) in counted.items():
-        if links[size - 1] != head or BOARD.mth(hashes[:size]) != root:
+    match = {
+        j: (size, links[size - 1] == head, BOARD.mth(hashes[:size]) == root)
+        for j, (cid, seg, size, head, root) in reach.items()
+    }
+    # A checkpoint no board can match is the anchoring authority's: the copy
+    # matches its head but not its root (or the reverse), or fully matches a
+    # counted checkpoint at least as large. Only otherwise is the copy at fault.
+    for j, (size, hd, rt) in match.items():
+        full = hd and rt
+        if hd != rt or (not full and any(s2 >= size and h2 and r2 for s2, h2, r2 in match.values())):
+            return ("checkpoint-inconsistent", {"checkpoint": j})
+    for j, cp in counted.items():
+        if cp[2] > len(entries):
+            return ("checkpoint-missing", {"checkpoint": j})
+    for j, (size, hd, rt) in match.items():
+        if not (hd and rt):
             return ("copy-mismatch", {"checkpoint": j})
     decoded, err = check_entries(election_id, prefix)
     if err:
@@ -695,26 +715,55 @@ def main(out_dir):
     board("checkpoint-missing", "The anchored board is longer than the one held", g[:8], c, ("checkpoint-missing", {"checkpoint": 3}))
     mid = cps(g, [1])[0]
     rest = cps(g, [0, 4, 6])
+    inside = (eid, 1, 3, chain_links(g)[2], BOARD.mth([entry_hash(b) for b in g[:3]]))
     board(
         "checkpoint-mid-segment",
-        "A checkpoint for segment 2 that stops inside segment 1",
+        "A checkpoint for segment 1 that stops inside segment 1",
         g,
-        [(eid, 2, 3, chain_links(g)[2], BOARD.mth([entry_hash(b) for b in g[:3]]))] + c,
+        [inside] + cps(g, [0, 4, 6]),
         ("checkpoint-boundary", {"checkpoint": 0}),
     )
     board("checkpoint-segment-too-early", "Segment 0's checkpoint claiming segment 1's size", g, [(eid, 0) + mid[2:]] + cps(g, [1, 4, 6]), ("checkpoint-boundary", {"checkpoint": 0}))
     seg0 = cps(g, [0])[0]
-    board("checkpoint-wrong-head", "A checkpoint whose head matches no prefix of the copy held", g, [mid[:3] + (seg0[3], mid[4])] + rest, ("copy-mismatch", {"checkpoint": 0}))
-    board("checkpoint-wrong-root", "A checkpoint whose root matches no prefix of the copy held", g, [mid[:4] + (seg0[4],)] + rest, ("copy-mismatch", {"checkpoint": 0}))
-    board(
-        "checkpoint-errors-in-order",
-        "Checkpoint 0 stops mid-segment and checkpoint 1 has a wrong root: the copy is authenticated against every checkpoint before any boundary is checked",
-        g,
-        [(eid, 2, 3, chain_links(g)[2], BOARD.mth([entry_hash(b) for b in g[:3]])), mid[:4] + (seg0[4],)] + rest,
-        ("copy-mismatch", {"checkpoint": 1}),
-    )
     forked = list(g)
     forked[2] = entry(eid, 2, 1, ballot(7))
+    board("checkpoint-wrong-head", "A checkpoint with the honest root and a wrong head: no board matches it, so the anchoring authority is at fault", g, [mid[:3] + (seg0[3], mid[4])] + rest, ("checkpoint-inconsistent", {"checkpoint": 0}))
+    board("checkpoint-wrong-root", "A checkpoint with the honest head and a wrong root: no board matches it, so the anchoring authority is at fault", g, [mid[:4] + (seg0[4],)] + rest, ("checkpoint-inconsistent", {"checkpoint": 0}))
+    board(
+        "checkpoint-contradicted-by-larger",
+        "Segment 1's checkpoint is of a forked board, but the copy fully matches segment 4's larger checkpoint, which admits only the copy's prefix",
+        g,
+        [cps(forked, [1])[0]] + rest,
+        ("checkpoint-inconsistent", {"checkpoint": 0}),
+    )
+    board(
+        "checkpoint-size-decreases",
+        "Segment 4's checkpoint is smaller than segment 1's, which no growing board allows (from L1 alone)",
+        g,
+        [c[0], c[1], (eid, 4) + seg0[2:], c[3]],
+        ("checkpoint-inconsistent", {"checkpoint": 2}),
+    )
+    board(
+        "checkpoint-equal-size-differs",
+        "Segments 1 and 2 anchored at the same size with different roots (from L1 alone, before the copy is read)",
+        g[:8],
+        c + [(eid, 2) + cps(forked, [1])[0][2:]],
+        ("checkpoint-inconsistent", {"checkpoint": 4}),
+    )
+    board(
+        "checkpoint-split-before-missing",
+        "A checkpoint with a wrong head is found from a short copy even when a larger checkpoint is missing from it",
+        g[:8],
+        [mid[:3] + (seg0[3], mid[4])] + rest,
+        ("checkpoint-inconsistent", {"checkpoint": 0}),
+    )
+    board(
+        "checkpoint-errors-in-order",
+        "Checkpoint 0 stops mid-segment and checkpoint 1 (the largest) matches no prefix of the copy: the copy is authenticated against every checkpoint before any boundary is checked",
+        g,
+        [inside, cps(forked, [4])[0], seg0],
+        ("copy-mismatch", {"checkpoint": 1}),
+    )
     board("checkpoint-forked", "The copy held differs from the anchored board in entry 2", forked, c, ("copy-mismatch", {"checkpoint": 1}))
     board("checkpoint-equivocation", "A second, different checkpoint anchored for segment 1 (a fork shown to some voters)", g, c + cps(forked, [1]), ("checkpoint-equivocation", {"checkpoint": 4}))
     board("checkpoint-equivocation-first", "Equivocation is found before any per-checkpoint check, wherever the forked checkpoint sits", g, cps(forked, [1]) + c, ("checkpoint-equivocation", {"checkpoint": 2}))

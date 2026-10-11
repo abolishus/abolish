@@ -95,7 +95,8 @@ Migrations are forward-only (`packages/core`, Database), and `migrate.mjs` refus
 
 ## Rotating secrets
 
-- A database login: create a new login in the same group role (for the API, also `ALTER ROLE … SET search_path = abolish`, or every query fails), point the service's `DATABASE_URL` at it, redeploy, then `DROP ROLE` the old one. Objects are owned by the group roles, not the logins, so nothing moves.
+- The API's database login: create a new login in `abolish_app` with `ALTER ROLE … SET search_path = abolish` (or every query fails), point the `api` service's `DATABASE_URL` at it, redeploy, then `DROP ROLE` the old one. Objects are owned by the group roles, not the logins, so nothing moves.
+- The migrator's login: create a new login in `abolish_migrator`, replace `MIGRATE_DATABASE_URL` in each GitHub environment (the TCP proxy's address with `?sslmode=require`), then `DROP ROLE` the old one. Dropping it first fails the next deploy at its migrate step.
 - `RAILWAY_TOKEN`: the owner creates a new project token for the environment in Railway, replaces the GitHub environment secret, then revokes the old token.
 - If a Railway token leaked: revoke it first, then check the environment's deployment history for digests that no workflow run produced and redeploy the last good one.
 

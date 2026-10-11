@@ -2,8 +2,8 @@ import { migrate } from "@abolishus/core";
 import postgres from "postgres";
 import * as z from "zod";
 
-// Applies pending migrations, then exits. The deployment runs it as its own
-// one-shot service before the API, with a user granted abolish_migrator that
+// Applies pending migrations, then exits. The deploy workflow runs it from the
+// image before deploying the API, with a user granted abolish_migrator that
 // the API never holds (packages/core, Database; T-23, T-65).
 
 const Env = z.strictObject({

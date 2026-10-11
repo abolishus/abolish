@@ -70,7 +70,7 @@ S_g = H(DS("abolish/v1/nullifier-scope", definition_hash ‖ u8(t_g) ‖ encode(
 
 ## Message
 
-The message is a 32-byte digest `M` that P1-12 and P1-13 define: at least the ballot hash, the election definition, the tier and whatever the re-vote rule ranks by ([[verifier]] 5.3, T-38). The circuit's public input is `m̂ = F(M)`.
+The message is the 32-byte digest `M` of [[revoting]] (Message): a tagged hash of the election-definition hash, the tier, the ballot hash (P1-12) and the L1 block the re-vote rule ranks by ([[verifier]] 5.3, T-38). The circuit's public input is `m̂ = F(M)`.
 
 ## Field mapping
 
@@ -100,7 +100,7 @@ A verifier fails the election definition if any tier's root differs from the tie
 1. Recomputes `ŝ_g` from the definition (Scope).
 2. Takes `ρ = root_g` from the definition, never from the ballot; `ρ` is never 0 (Statement).
 3. Decodes the ballot's nullifier `ν` as a `field<bn254>`, rejecting a non-canonical value (T-31).
-4. Recomputes `m̂ = F(M)` from the ballot (P1-12, P1-13).
+4. Recomputes `m̂ = F(M)` from the ballot record and the definition ([[revoting]], Message).
 5. Verifies the Groth16 proof under the pinned depth-32 verification key, with public signals `[ρ, ν, m̂, ŝ_g]`. Any failure rejects the ballot.
 
 Because the scope binds the tier, a proof made for one tier never verifies as another, even if the two tiers have the same root: no relay or operator can move a ballot between tally cells ([[verifier]] 2.8).
@@ -117,7 +117,7 @@ Because the scope binds the tier, a proof made for one tier never verifies as an
 ## Owned elsewhere
 
 - The verification keys, their hash in the election definition, the proof encoding and the Groth16 verification itself: P1-17b.
-- `M`: P1-12 (ballot hash) and P1-13 (receipts and re-voting).
+- `M`: specified in [[revoting]]; the ballot hash inside it is P1-12's.
 - The tier encoding: the election definition's tier field (P1-10b) and the group registry's tier attribution (P1-18, P3-2) MUST use exactly the values this page binds into the scope (0, 1, 2), and the verifier takes `t_g` from the registry binding it checks in [[verifier]] 2.4, never from the definition's label alone.
 - Groups and their additions and removals: P3-2, with the commitment and removal rules above (P1-18 emits them).
 - On-chain membership checks (direct submit, P1-18): a contract MUST verify the ballot's Groth16 proof under the pinned depth-32 key against the tier root registered with the election's definition, with `ŝ_g` recomputed on chain from the definition hash, tier and root (SHA-256 and Keccak are EVM precompiles or opcodes), and revert otherwise, so non-members can't post at all ([[verifier]], Principles; T-52). It never verifies against a group contract's own current root, a LeanIMT root or a depth from the caller, so it needs no on-chain tree, and [[verifier]] 2.4 still checks the registered root against the board.

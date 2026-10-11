@@ -49,3 +49,6 @@ docs/.obsidian/cache
 # CI outputs
 lockfile-diff.md
 reference-election-output/
+
+# Python bytecode (vector generators run with python3 -I -B)
+__pycache__/

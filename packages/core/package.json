@@ -2,7 +2,7 @@
   "name": "@abolishus/core",
   "version": "0.0.0",
   "private": true,
-  "description": "Domain logic and the Postgres schema: append-only board tables, migrations and database roles. Source-only.",
+  "description": "Domain logic and the Postgres schema: append-only board tables and appending to them, migrations and database roles. Source-only.",
   "license": "AGPL-3.0-only",
   "type": "module",
   "exports": {
@@ -14,6 +14,7 @@
     "test": "vp run test:db"
   },
   "dependencies": {
+    "@abolishus/crypto": "workspace:*",
     "drizzle-orm": "catalog:",
     "postgres": "catalog:"
   },

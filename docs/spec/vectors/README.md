@@ -6,17 +6,19 @@ Cross-language vectors for the encodings and computations in this spec. TypeScri
 
 One JSON file per spec section or record type, named after it (`primitives.json`, `election-definition.json`, …). Each file is UTF-8 JSON, formatted by `vp check`.
 
-| File                     | Covers                                                                                                                                  |
-| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `primitives.json`        | Primitive types, record framing and strict-decoding rejections ([[notation]])                                                           |
-| `group.json`             | `scalar` and `element` codecs: valid boundaries and every rejected class ([[group]])                                                    |
-| `board.json`             | Board entries, the board tree with every inclusion and consistency proof, checkpoints, board checks ([[board]])                         |
-| `membership.json`        | The nullifier scope, the Semaphore field mapping `F` and the protocol-wide tree depth ([[membership]])                                  |
-| `revoting.json`          | The membership message `M` and `F(M)`, and the selection of counted ballots, ties and repeats included ([[revoting]])                   |
-| `hash.json`              | `H`, `HashToScalar` under each Fiat–Shamir tag, and `h`, with intermediate bytes ([[group]])                                            |
-| `event-accumulator.json` | The event accumulator: genesis values, event sequences step by step, rejected inputs ([[contracts]])                                    |
-| `trustee.json`           | Trustee identity keys and signatures, accepted and rejected; panel identifiers; ceremony-registration statements ([[trustee-identity]]) |
-| `circuit.json`           | Circuit-facing values: each registered tag's field element and the two byte packings ([[notation]], [[domain-separation]])              |
+| File                       | Covers                                                                                                                                  |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `primitives.json`          | Primitive types, record framing and strict-decoding rejections ([[notation]])                                                           |
+| `group.json`               | `scalar` and `element` codecs: valid boundaries and every rejected class ([[group]])                                                    |
+| `board.json`               | Board entries, the board tree with every inclusion and consistency proof, checkpoints, board checks ([[board]])                         |
+| `membership.json`          | The nullifier scope, the Semaphore field mapping `F` and the protocol-wide tree depth ([[membership]])                                  |
+| `revoting.json`            | The membership message `M` and `F(M)`, and the selection of counted ballots, ties and repeats included ([[revoting]])                   |
+| `hash.json`                | `H`, `HashToScalar` under each Fiat–Shamir tag, and `h`, with intermediate bytes ([[group]])                                            |
+| `election-definition.json` | Election definition version 1: codec, definition hash, self-pin and well-formedness ([[election-definition]])                           |
+| `display-text.json`        | Display-text record version 1: codec, commitment and well-formedness ([[display-text]])                                                 |
+| `event-accumulator.json`   | The event accumulator: genesis values, event sequences step by step, rejected inputs ([[contracts]])                                    |
+| `trustee.json`             | Trustee identity keys and signatures, accepted and rejected; panel identifiers; ceremony-registration statements ([[trustee-identity]]) |
+| `circuit.json`             | Circuit-facing values: each registered tag's field element and the two byte packings ([[notation]], [[domain-separation]])              |
 
 ## Format
 
@@ -39,6 +41,7 @@ Top-level fields:
 - `title`, `spec`: what the file covers and the spec page that defines it.
 - `generator`: how the vectors were produced, and how they were checked against the spec tables independently of the encoder that produced them ([[0001-canonical-encoding]], Consequences).
 - `vectors`: the list of vectors.
+- `types` (optional): named type descriptors, an object from name to descriptor, which `ref` descriptors point to.
 
 Each vector:
 
@@ -71,6 +74,16 @@ Type descriptors:
 | `element`                         | `identity`: `"allowed"` or `"rejected"`, whether the field may hold the identity; the value is the element's 32-byte encoding, in hex |
 | `list`                            | `max`, as a JSON number, and `of`: the element's type descriptor                                                                      |
 | `record`                          | `recordType` (4 lowercase hex digits), `version` (a JSON number) and `fields`: an array of `{ "name", "type" }` in encoding order     |
+| `struct`                          | `fields`: as for `record`. A structure nested in a record, with no header; its value is a JSON object keyed by field name             |
+| `ref`                             | `name`: a key of the file's `types`; the descriptor it names                                                                          |
+
+## Record vectors
+
+`election-definition.json` and `display-text.json` add members to their vectors:
+
+- In `election-definition.json`, a `0x0001` record is decoded the two-step way of [[election-definition]] (Decoding), so its own profile's pin is checked and can fail with `profile-mismatch`. Each valid vector carries `hash`, the definition hash, and `stubHash`, the stub hash, both as lowercase hex.
+- In `display-text.json`, each vector carries `pinned`, the version the election's profile pins, and is decoded against it ([[notation]]: the pin is checked before the version is looked up). Each valid vector carries `commitment`, the display-text commitment as lowercase hex, and `definition`, the definition fields it is checked against: `optionCount` (a decimal string) and `displayTextCommitment` (hex).
+- `illFormed` (valid vectors only): the bytes decode and round-trip, but the record breaks the well-formedness rule with this code, the first in the spec's order. A valid vector without it is well formed.
 
 ## Board vectors
 
@@ -132,5 +145,5 @@ Type descriptors:
 
 - The record types a file's decoder knows are exactly those that appear as a `recordType` in that file, and the versions it knows of each type exactly those that appear with it; any other type is unknown ([[notation]], Strict decoding).
 - A vector, once its layout is frozen ([[versioning]]), is never edited or removed. New vectors are added. `packages/crypto/tests/vectors/trustee-published.json` pins every published `trustee.json` vector by the sha256 of its JSON; a PR that adds vectors there adds their digests in the same PR.
-- Every rejection rule in a spec section has at least one invalid vector, and every field type at least one valid vector at each boundary (zero, maximum, maximum plus one where representable). Rejections that need an election's context (`profile-mismatch`) are covered by the election-definition vectors of P1-10b, which extend this format with a profile member.
+- Every rejection rule in a spec section has at least one invalid vector, and every field type at least one valid vector at each boundary (zero, maximum, maximum plus one where representable). Rejections that need an election's context (`profile-mismatch`) are covered by the record vectors above.
 - Generated vectors are checked by hand, or by a second implementation written independently from the spec, before they are committed. The `generator` field says which.

@@ -360,7 +360,12 @@ const FIELD_NAME = /^[a-z][a-z0-9_]*$/;
  * A structure: its fields in table order, with no header, prefix or padding
  * (notation.md, "Records"). Values are plain objects with exactly these keys.
  */
-export function struct<const F extends Fields>(fields: F): Codec<StructValue<F>> {
+export function struct<const F extends Fields>(layout: F): Codec<StructValue<F>> {
+  // Copied and frozen, so a layout can't change after a record type registers
+  // it, whatever the caller later does with its array.
+  const fields: Fields = Object.freeze(
+    Array.from(layout, ([name, codec]) => Object.freeze([name, codec] as const)),
+  );
   const names = fields.map(([name]) => name);
   for (const name of names)
     if (!FIELD_NAME.test(name)) throw new RangeError(`struct: bad field name ${name}`);

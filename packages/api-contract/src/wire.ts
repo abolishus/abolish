@@ -71,23 +71,19 @@ export const Hash32 = hexFixed(32);
  * A `u64` as a canonical decimal string: no sign, no leading zeros, at most
  * 2^64 − 1. Board positions and tree sizes are `u64` (docs/spec/board.md),
  * which a JSON number can't carry exactly above 2^53, and a decimal string is
- * what query and path parameters carry anyway.
+ * what query parameters carry anyway.
  */
-export const U64 = z
-  .string()
-  .check(
-    z.refine(
-      (s) => U64_PATTERN.test(s) && BigInt(s) <= U64_MAX,
-      "expected a canonical decimal u64",
-    ),
-  );
+export const U64 = z.string().check(
+  // The pattern also reaches the OpenAPI document, which the refinement can't.
+  // The refinement re-tests it, so BigInt never sees a non-decimal string.
+  z.regex(U64_PATTERN, "expected a canonical decimal u64"),
+  z.refine((s) => U64_PATTERN.test(s) && BigInt(s) <= U64_MAX, "exceeds 2^64 - 1"),
+);
+
+const PAGE_SIZE_PATTERN = /^[1-9][0-9]{0,3}$/;
 
 /** A page size from 1 to `MAX_PAGE`, as a canonical decimal string. */
-export const PageSize = z
-  .string()
-  .check(
-    z.refine(
-      (s) => /^[1-9][0-9]{0,3}$/.test(s) && Number(s) <= MAX_PAGE,
-      "expected a canonical decimal page size",
-    ),
-  );
+export const PageSize = z.string().check(
+  z.regex(PAGE_SIZE_PATTERN, "expected a canonical decimal page size"),
+  z.refine((s) => PAGE_SIZE_PATTERN.test(s) && Number(s) <= MAX_PAGE, `exceeds ${MAX_PAGE}`),
+);

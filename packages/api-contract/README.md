@@ -4,14 +4,14 @@ The public API's contract: the oRPC procedures `apps/api` implements and the bal
 
 ## What it covers
 
-| Procedure                   | Route                                                  |
-| --------------------------- | ------------------------------------------------------ |
-| `elections.getDefinition`   | `GET /elections/{electionId}/definition`               |
-| `board.getHead`             | `GET /elections/{electionId}/board/head`               |
-| `board.getEntries`          | `GET /elections/{electionId}/board/entries`            |
-| `board.getInclusionProof`   | `GET /elections/{electionId}/board/proofs/inclusion`   |
-| `board.getConsistencyProof` | `GET /elections/{electionId}/board/proofs/consistency` |
-| `ballots.submit`            | `POST /elections/{electionId}/ballots`                 |
+| Procedure                   | Route                           |
+| --------------------------- | ------------------------------- |
+| `elections.getDefinition`   | `GET /elections/definition`     |
+| `board.getHead`             | `GET /board/head`               |
+| `board.getEntries`          | `GET /board/entries`            |
+| `board.getInclusionProof`   | `GET /board/proofs/inclusion`   |
+| `board.getConsistencyProof` | `GET /board/proofs/consistency` |
+| `ballots.submit`            | `POST /ballots`                 |
 
 ## Rules
 
@@ -20,6 +20,7 @@ The public API's contract: the oRPC procedures `apps/api` implements and the bal
 - **No identity on the ballot path.** No procedure declares authentication, and no field names an account, session, person or plaintext vote; a test asserts both (T-09, T-10). Ballots are submitted without an account.
 - **Everything is bounded** (T-52): ballots by `MAX_BOARD_PAYLOAD` (tied by a test to `docs/spec/parameters.md`), pages by count and bytes, proof paths by length.
 - **Integers are canonical decimal strings.** Positions and tree sizes are `u64`, which JSON numbers can't carry exactly.
+- **No path parameters.** oRPC merges a request's query or body over its path parameters, so a field in both would let the URL name one election while the handler serves another (T-31). Every input comes from the query (GET) or the body (POST) alone; a test asserts it.
 - **Strict objects only.** A request with an unknown field is refused; a test checks every object in the generated document.
 
 ## Build and test

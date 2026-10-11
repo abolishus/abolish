@@ -24,7 +24,11 @@ import {
 /** Error codes from docs/spec/ (`truncated`, `non-canonical`, …) and the verifier's admission checks. */
 const ErrorCode = z.string().check(z.regex(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/), z.maxLength(64));
 
-const ElectionPath = z.strictObject({ electionId: Hash32 });
+// No route has path parameters. oRPC's compact input merges a request's query
+// or body over its path parameters, so a field in both places would let the
+// URL name one election while the handler serves another (T-31). Every input
+// comes from the query (GET) or the body (POST) alone.
+const ElectionQuery = z.strictObject({ electionId: Hash32 });
 
 const electionNotFound = {
   ELECTION_NOT_FOUND: { status: 404, message: "No election with this id is known to this server." },
@@ -40,33 +44,33 @@ const outOfRange = {
 const getDefinition = oc
   .route({
     method: "GET",
-    path: "/elections/{electionId}/definition",
+    path: "/elections/definition",
     summary: "An election's definition record",
     description:
       "The election definition (record 0x0001) as registered. Callers hash it and compare the hash with the election registry on the L2 before using it (T-34).",
     tags: ["elections"],
   })
   .errors(electionNotFound)
-  .input(ElectionPath)
+  .input(ElectionQuery)
   .output(z.strictObject({ definition: hexBytes(MAX_BOARD_PAYLOAD) }));
 
 const getHead = oc
   .route({
     method: "GET",
-    path: "/elections/{electionId}/board/head",
+    path: "/board/head",
     summary: "The board's current size, chain head and tree root",
     description:
       "Unanchored until the checkpoint that covers it is on L1. Callers check later heads against it with a consistency proof (T-24).",
     tags: ["board"],
   })
   .errors(electionNotFound)
-  .input(ElectionPath)
+  .input(ElectionQuery)
   .output(z.strictObject({ treeSize: U64, chainHead: Hash32, root: Hash32 }));
 
 const getEntries = oc
   .route({
     method: "GET",
-    path: "/elections/{electionId}/board/entries",
+    path: "/board/entries",
     summary: "A page of board entries",
     description: `Encoded board entries (record 0x0007) from position \`start\`, in order: at most \`limit\`, and at most ${MAX_PAGE_BYTES} bytes of entries unless the page holds one entry. Fewer than \`limit\` entries is not the end of the board; an empty page (\`start\` equal to the board's size) is, and a \`start\` beyond it is \`OUT_OF_RANGE\`.`,
     tags: ["board"],
@@ -94,7 +98,7 @@ const ProofPath = z.strictObject({
 const getInclusionProof = oc
   .route({
     method: "GET",
-    path: "/elections/{electionId}/board/proofs/inclusion",
+    path: "/board/proofs/inclusion",
     summary: "An inclusion proof for one entry",
     description:
       "RFC 9162 audit path for entry `index` in the tree of the first `treeSize` entries, under the board's tagged hashes (docs/spec/board.md).",
@@ -107,7 +111,7 @@ const getInclusionProof = oc
 const getConsistencyProof = oc
   .route({
     method: "GET",
-    path: "/elections/{electionId}/board/proofs/consistency",
+    path: "/board/proofs/consistency",
     summary: "A consistency proof between two tree sizes",
     description:
       "RFC 9162 consistency proof that the tree of `secondSize` entries extends the tree of `firstSize` entries (docs/spec/board.md).",
@@ -120,7 +124,7 @@ const getConsistencyProof = oc
 const submitBallot = oc
   .route({
     method: "POST",
-    path: "/elections/{electionId}/ballots",
+    path: "/ballots",
     successStatus: 201,
     summary: "Cast or challenge a ballot",
     description:

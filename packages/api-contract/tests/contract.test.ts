@@ -61,7 +61,8 @@ describe("the contract's shape", () => {
     for (const p of procedures) {
       const route = p["~orpc"].route;
       expect(route.method).toBeDefined();
-      expect(route.path).toMatch(/^\/elections\/\{electionId\}\//);
+      // T-31: no path parameters, so a query or body field can't override one.
+      expect(route.path).not.toMatch(/[{}]/);
     }
   });
 
@@ -116,12 +117,12 @@ describe("the generated OpenAPI document", () => {
 
   test("lists exactly the contract's operations", () => {
     expect(operations.map(({ method, path }) => `${method.toUpperCase()} ${path}`).sort()).toEqual([
-      "GET /elections/{electionId}/board/entries",
-      "GET /elections/{electionId}/board/head",
-      "GET /elections/{electionId}/board/proofs/consistency",
-      "GET /elections/{electionId}/board/proofs/inclusion",
-      "GET /elections/{electionId}/definition",
-      "POST /elections/{electionId}/ballots",
+      "GET /board/entries",
+      "GET /board/head",
+      "GET /board/proofs/consistency",
+      "GET /board/proofs/inclusion",
+      "GET /elections/definition",
+      "POST /ballots",
     ]);
   });
 });

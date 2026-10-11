@@ -10,26 +10,27 @@ A conforming verifier implements every check in [[verifier]] and decodes every r
 
 ## Documents
 
-| Document                    | Defines                                                                                                            | Status                                                                                                 |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
-| [[notation]]                | Notation, primitive types, record framing, strict decoding rules, decode error codes                               | Specified                                                                                              |
-| [[domain-separation]]       | Tag grammar, how a tag is applied to each kind of hash, the tag registry                                           | Framing specified; most tags reserved for their owning item                                            |
-| [[group]]                   | The group (ristretto255), `scalar` and `element` codecs, `H`, hash-to-scalar and `h`                               | Specified                                                                                              |
-| [[board]]                   | The board-entry envelope, the board tree, inclusion and consistency proofs, segments, checkpoints and board checks | Specified; anchoring is P4-1's                                                                         |
-| [[versioning]]              | Protocol and record versions, the record-type registry, change rules, election profiles                            | Specified                                                                                              |
-| [[parameters]]              | Protocol-wide limits                                                                                               | Specified for version 1; P1-18 may lower                                                               |
-| [[contracts]]               | The event accumulator every Abolish contract keeps over its own events                                             | Event accumulator specified; registries, direct submit, contract events and the close rule are P1-18's |
-| [[display-text]]            | The split between display text and result-critical data, and the display-text commitment                           | Split and commitment specified; record layout is P1-10b's                                              |
-| [[membership]]              | The membership statement (Semaphore v4), the nullifier scope, the field mapping, tree depth and membership checks  | Specified; verification keys and Groth16 verification are P1-17b's                                     |
-| [[content-addressing]]      | How board data becomes IPFS blocks, CIDs and CAR files                                                             | Provisional until P4-3's vectors                                                                       |
-| [[verifier]]                | What a third-party verifier must check, stage by stage                                                             | Checklist; each check is specified by its owning item                                                  |
-| [[vectors/README\|vectors]] | The test-vector file format (`docs/spec/vectors/*.json`)                                                           | Specified                                                                                              |
+| Document                    | Defines                                                                                                             | Status                                                                                                 |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| [[notation]]                | Notation, primitive types, record framing, strict decoding rules, decode error codes                                | Specified                                                                                              |
+| [[domain-separation]]       | Tag grammar, how a tag is applied to each kind of hash, the tag registry                                            | Framing specified; most tags reserved for their owning item                                            |
+| [[group]]                   | The group (ristretto255), `scalar` and `element` codecs, `H`, hash-to-scalar and `h`                                | Specified                                                                                              |
+| [[board]]                   | The board-entry envelope, the board tree, inclusion and consistency proofs, segments, checkpoints and board checks  | Specified; anchoring is P4-1's                                                                         |
+| [[versioning]]              | Protocol and record versions, the record-type registry, change rules, election profiles                             | Specified                                                                                              |
+| [[parameters]]              | Protocol-wide limits                                                                                                | Specified for version 1; P1-18 may lower                                                               |
+| [[contracts]]               | The event accumulator every Abolish contract keeps over its own events                                              | Event accumulator specified; registries, direct submit, contract events and the close rule are P1-18's |
+| [[display-text]]            | The split between display text and result-critical data, and the display-text commitment                            | Split and commitment specified; record layout is P1-10b's                                              |
+| [[membership]]              | The membership statement (Semaphore v4), the nullifier scope, the field mapping, tree depth and membership checks   | Specified; verification keys and Groth16 verification are P1-17b's                                     |
+| [[revoting]]                | The re-vote rule: the membership message, the L1 reference admission checks and the selection of the counted ballot | Specified; the ballot record that carries it is P1-12's                                                |
+| [[content-addressing]]      | How board data becomes IPFS blocks, CIDs and CAR files                                                              | Provisional until P4-3's vectors                                                                       |
+| [[verifier]]                | What a third-party verifier must check, stage by stage                                                              | Checklist; each check is specified by its owning item                                                  |
+| [[vectors/README\|vectors]] | The test-vector file format (`docs/spec/vectors/*.json`)                                                            | Specified                                                                                              |
 
 Sections still to be written, by the STATUS item that owns them:
 
 - Record layouts: the election definition and display text by P1-10b, the rest of the record-type registry by each record's owning item. The primitive codecs, record framing and `DS` framing they build on are implemented in `packages/crypto` (P1-10).
 - Ballot encryption or commitment and validity proofs: P1-12.
-- Benaloh challenge/spoil, receipts and re-vote resolution: P1-13.
+- Benaloh challenge/spoil and receipts: P1-13 (re-vote resolution is in [[revoting]]).
 - Key ceremony and its transcript: P1-14.
 - Decryption or opening shares and the tally transcript: P1-15.
 - Membership verification keys, proof encoding and Groth16 verification: P1-17b.
@@ -46,6 +47,7 @@ The spec follows the ADRs below. Under rule A (`AGENTS.md`) the agent's choices 
 - [[0005-permanent-archive]] (accepted by the agent, owner may veto; the first real upload waits for the owner): the display-text split ([[display-text]]), the result-critical field rule ([[notation]]) and the CID parameters ([[content-addressing]]).
 - [[0007-group-and-hash]] (accepted by the owner on 2026-10-10: option A): ristretto255, SHA-256 as `H`, RFC 9380 `hash_to_ristretto255` and RFC 9497 `HashToScalar`. [[group]] follows it.
 - [[0009-membership-proof]] (accepted by the agent, owner may veto): Semaphore v4's circuit and Groth16 proofs for membership, with a per-poll, per-tier-group scope. [[membership]] follows it.
+- [[0011-revote-rule]] (accepted by the agent, owner may veto): the newest L1 block reference counts, and exact ties count nothing. [[revoting]] follows it.
 - [[0006-trustees]] (open; owner-only: the owner decides): the panel bound into each election definition.
 - [[0002-everlasting-privacy]] (accepted by the owner on 2026-10-10: option B, perfectly hiding commitments on the board; three owner questions in its Decision section still block ballot encryption (P1-12) and, through trustee duties and the election-key wording, the ceremony and the tally with its destruction step (P1-15)): the ballot, ceremony and tally sections follow it once written; [[verifier]] marks the checks it changes.
 

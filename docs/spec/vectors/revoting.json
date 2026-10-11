@@ -1,0 +1,490 @@
+{
+  "format": "abolish-revoting-vectors/1",
+  "title": "Re-voting: the membership message and the selection of counted ballots",
+  "spec": "docs/spec/revoting.md",
+  "generator": "packages/crypto/scripts/revoting-vectors.py: an independent Python implementation (hashlib SHA-256; membership-vectors.py's self-checked Keccak-256 for F), with selection by sorting rather than packages/crypto's scan",
+  "messages": [
+    {
+      "id": "message-tier-0",
+      "definitionHash": "0ee744df7059f2a39fc52e46c262027f89627bb57b8465bc5caca09bfe214156",
+      "tier": 0,
+      "ballotHash": "9400f3ef0d21ceb934d164fb39098c4e93460953e568992a9fba0b0178d16e9b",
+      "l1RefNumber": "21000000",
+      "l1RefHash": "c63ad8358923ef4cc19c8224749851d98ba89b8ed93ca3dfe5ad1017044348b3",
+      "message": "d0c9d107fa898d2089401deb71fab151511a535ccfb0ced80f00c79741abab83",
+      "messageField": "437375147647357783609037548551006801024639470957898055590365007065200122258"
+    },
+    {
+      "id": "message-tier-1",
+      "definitionHash": "0ee744df7059f2a39fc52e46c262027f89627bb57b8465bc5caca09bfe214156",
+      "tier": 1,
+      "ballotHash": "9400f3ef0d21ceb934d164fb39098c4e93460953e568992a9fba0b0178d16e9b",
+      "l1RefNumber": "21000000",
+      "l1RefHash": "c63ad8358923ef4cc19c8224749851d98ba89b8ed93ca3dfe5ad1017044348b3",
+      "message": "1b8f4fbffd2a28dcd4e286db5b84be824923df3801a0e76cafd6082002ffcf37",
+      "messageField": "353229203170638987310324816806208414748326360262730656261039600362671782179"
+    },
+    {
+      "id": "message-tier-2",
+      "definitionHash": "0ee744df7059f2a39fc52e46c262027f89627bb57b8465bc5caca09bfe214156",
+      "tier": 2,
+      "ballotHash": "9400f3ef0d21ceb934d164fb39098c4e93460953e568992a9fba0b0178d16e9b",
+      "l1RefNumber": "21000000",
+      "l1RefHash": "c63ad8358923ef4cc19c8224749851d98ba89b8ed93ca3dfe5ad1017044348b3",
+      "message": "85609b4f3b44ec9fa23573b12ff547e006b1d8d27e0179d4602fce1dfc5693ae",
+      "messageField": "77573912438950408643640802169194059664945988769742398015650449229688650389"
+    },
+    {
+      "id": "message-next-block",
+      "definitionHash": "0ee744df7059f2a39fc52e46c262027f89627bb57b8465bc5caca09bfe214156",
+      "tier": 0,
+      "ballotHash": "9400f3ef0d21ceb934d164fb39098c4e93460953e568992a9fba0b0178d16e9b",
+      "l1RefNumber": "21000001",
+      "l1RefHash": "a165794f7b83b0bc94e970954d22ff07eeeeddf546f0f497c54acb12ec73a78c",
+      "message": "97df49f2771fd537b42cef851f36c913b56dfb1c02e52752a240454156d8d544",
+      "messageField": "59529784802968703857320958561481139145539704780564543288356355658019535392"
+    },
+    {
+      "id": "message-other-ballot",
+      "definitionHash": "0ee744df7059f2a39fc52e46c262027f89627bb57b8465bc5caca09bfe214156",
+      "tier": 0,
+      "ballotHash": "7f8a1e31fb0743525b47da08f17fba2f5d9ba1145e764ac9aa999423728ff2d2",
+      "l1RefNumber": "21000000",
+      "l1RefHash": "c63ad8358923ef4cc19c8224749851d98ba89b8ed93ca3dfe5ad1017044348b3",
+      "message": "fba75ef5195b40ec72144cbb18cd0a810563729567146d44d65f21873a5f62d7",
+      "messageField": "47034292047857777415673299325998926332750036817485778461592931138743394188"
+    },
+    {
+      "id": "message-other-definition",
+      "definitionHash": "b7c80f9c329da8f284d7a37e7f30d784eee80571835f6e9c93652c201a1c2174",
+      "tier": 0,
+      "ballotHash": "9400f3ef0d21ceb934d164fb39098c4e93460953e568992a9fba0b0178d16e9b",
+      "l1RefNumber": "21000000",
+      "l1RefHash": "c63ad8358923ef4cc19c8224749851d98ba89b8ed93ca3dfe5ad1017044348b3",
+      "message": "5798123a14493d638e0b818ca110069872b811ddd083f482aed3be48fa783f3f",
+      "messageField": "274972394391632727594382096242380381232528308877363177473823930842385670342"
+    },
+    {
+      "id": "message-same-number-other-hash",
+      "definitionHash": "0ee744df7059f2a39fc52e46c262027f89627bb57b8465bc5caca09bfe214156",
+      "tier": 0,
+      "ballotHash": "9400f3ef0d21ceb934d164fb39098c4e93460953e568992a9fba0b0178d16e9b",
+      "l1RefNumber": "21000000",
+      "l1RefHash": "a5744d0ae2971a31b45c84f948868542f745671a13e20ca3ee7ecdc24e70ecb6",
+      "message": "2e3b3d5a7d3ffd0266eb7bd7287633bfb7b332cc7a322a4e2e0287732c4d9aef",
+      "messageField": "256091150538464480675897695176273810762709706272491740290581044675703951797"
+    },
+    {
+      "id": "message-block-zero",
+      "definitionHash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "tier": 0,
+      "ballotHash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "l1RefNumber": "0",
+      "l1RefHash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "message": "0aae8ee8d0697eac3625376723de45e0aeef1800f51a757c8b3f425a71f2ca23",
+      "messageField": "142760730190182826937147781707416465584487535884230026229521998615248364923"
+    },
+    {
+      "id": "message-block-u64-max",
+      "definitionHash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "tier": 2,
+      "ballotHash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "l1RefNumber": "18446744073709551615",
+      "l1RefHash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "message": "a4a21e764dc58c015ab3c4502e23aebd6f6c6ffc84906edc72f03c834fac9bbd",
+      "messageField": "190431298156981437732118469002861866804877424217103977751365938964824725109"
+    },
+    {
+      "id": "message-unknown-tier",
+      "description": "Tier 3 doesn't exist",
+      "definitionHash": "0ee744df7059f2a39fc52e46c262027f89627bb57b8465bc5caca09bfe214156",
+      "tier": 3,
+      "ballotHash": "9400f3ef0d21ceb934d164fb39098c4e93460953e568992a9fba0b0178d16e9b",
+      "l1RefNumber": "1",
+      "l1RefHash": "c63ad8358923ef4cc19c8224749851d98ba89b8ed93ca3dfe5ad1017044348b3",
+      "error": "unknown-tier"
+    },
+    {
+      "id": "message-number-above-u64",
+      "description": "2^64 doesn't fit a u64",
+      "definitionHash": "0ee744df7059f2a39fc52e46c262027f89627bb57b8465bc5caca09bfe214156",
+      "tier": 0,
+      "ballotHash": "9400f3ef0d21ceb934d164fb39098c4e93460953e568992a9fba0b0178d16e9b",
+      "l1RefNumber": "18446744073709551616",
+      "l1RefHash": "c63ad8358923ef4cc19c8224749851d98ba89b8ed93ca3dfe5ad1017044348b3",
+      "error": "not-u64"
+    }
+  ],
+  "selections": [
+    {
+      "id": "select-single",
+      "description": "One ballot is selected",
+      "ballots": [
+        {
+          "tier": 0,
+          "nullifier": "12165211338961158600065290250614630607336352952842626636129370434849878684052",
+          "message": "14ec23765135ed7c787cf0cbd39791beba74ec894c04f997febbf296f54972d5",
+          "l1RefNumber": "100",
+          "index": "0"
+        }
+      ],
+      "selected": ["0"],
+      "repeats": [],
+      "ties": []
+    },
+    {
+      "id": "select-newer-block-posted-first",
+      "description": "The re-vote naming the newer block counts although the operator posted it first (R3)",
+      "ballots": [
+        {
+          "tier": 0,
+          "nullifier": "12165211338961158600065290250614630607336352952842626636129370434849878684052",
+          "message": "7aa63b2482e63608b1369fe56f6c089105ba414fc705ea85ae6a0a8a947c6de4",
+          "l1RefNumber": "101",
+          "index": "3"
+        },
+        {
+          "tier": 0,
+          "nullifier": "12165211338961158600065290250614630607336352952842626636129370434849878684052",
+          "message": "14ec23765135ed7c787cf0cbd39791beba74ec894c04f997febbf296f54972d5",
+          "l1RefNumber": "100",
+          "index": "7"
+        }
+      ],
+      "selected": ["3"],
+      "repeats": [],
+      "ties": []
+    },
+    {
+      "id": "select-withheld-coerced-ballot",
+      "description": "A coerced ballot withheld and posted last still ranks by its own, older block (R3, R2)",
+      "ballots": [
+        {
+          "tier": 0,
+          "nullifier": "12165211338961158600065290250614630607336352952842626636129370434849878684052",
+          "message": "7aa63b2482e63608b1369fe56f6c089105ba414fc705ea85ae6a0a8a947c6de4",
+          "l1RefNumber": "140",
+          "index": "2"
+        },
+        {
+          "tier": 0,
+          "nullifier": "12165211338961158600065290250614630607336352952842626636129370434849878684052",
+          "message": "14ec23765135ed7c787cf0cbd39791beba74ec894c04f997febbf296f54972d5",
+          "l1RefNumber": "120",
+          "index": "9"
+        }
+      ],
+      "selected": ["2"],
+      "repeats": [],
+      "ties": []
+    },
+    {
+      "id": "select-tie-voids-group",
+      "description": "Two distinct ballots naming the top block tie; the older ballot doesn't count in their place",
+      "ballots": [
+        {
+          "tier": 1,
+          "nullifier": "12165211338961158600065290250614630607336352952842626636129370434849878684052",
+          "message": "14ec23765135ed7c787cf0cbd39791beba74ec894c04f997febbf296f54972d5",
+          "l1RefNumber": "100",
+          "index": "0"
+        },
+        {
+          "tier": 1,
+          "nullifier": "12165211338961158600065290250614630607336352952842626636129370434849878684052",
+          "message": "7aa63b2482e63608b1369fe56f6c089105ba414fc705ea85ae6a0a8a947c6de4",
+          "l1RefNumber": "105",
+          "index": "1"
+        },
+        {
+          "tier": 1,
+          "nullifier": "12165211338961158600065290250614630607336352952842626636129370434849878684052",
+          "message": "97de8243f74b5649944551308049d09fafbcc1b6ba4e8728aca4b193c8595d02",
+          "l1RefNumber": "105",
+          "index": "2"
+        }
+      ],
+      "selected": [],
+      "repeats": [],
+      "ties": ["1", "2"]
+    },
+    {
+      "id": "select-tie-below-top",
+      "description": "A tie at a lower block doesn't stop the newest ballot counting",
+      "ballots": [
+        {
+          "tier": 0,
+          "nullifier": "12165211338961158600065290250614630607336352952842626636129370434849878684052",
+          "message": "14ec23765135ed7c787cf0cbd39791beba74ec894c04f997febbf296f54972d5",
+          "l1RefNumber": "100",
+          "index": "0"
+        },
+        {
+          "tier": 0,
+          "nullifier": "12165211338961158600065290250614630607336352952842626636129370434849878684052",
+          "message": "7aa63b2482e63608b1369fe56f6c089105ba414fc705ea85ae6a0a8a947c6de4",
+          "l1RefNumber": "100",
+          "index": "1"
+        },
+        {
+          "tier": 0,
+          "nullifier": "12165211338961158600065290250614630607336352952842626636129370434849878684052",
+          "message": "97de8243f74b5649944551308049d09fafbcc1b6ba4e8728aca4b193c8595d02",
+          "l1RefNumber": "101",
+          "index": "2"
+        }
+      ],
+      "selected": ["2"],
+      "repeats": [],
+      "ties": []
+    },
+    {
+      "id": "select-repeat-stands-once",
+      "description": "A re-randomised copy has the same message: the smaller index stands, the other is a repeat (R1)",
+      "ballots": [
+        {
+          "tier": 0,
+          "nullifier": "12165211338961158600065290250614630607336352952842626636129370434849878684052",
+          "message": "14ec23765135ed7c787cf0cbd39791beba74ec894c04f997febbf296f54972d5",
+          "l1RefNumber": "100",
+          "index": "5"
+        },
+        {
+          "tier": 0,
+          "nullifier": "12165211338961158600065290250614630607336352952842626636129370434849878684052",
+          "message": "14ec23765135ed7c787cf0cbd39791beba74ec894c04f997febbf296f54972d5",
+          "l1RefNumber": "100",
+          "index": "2"
+        }
+      ],
+      "selected": ["2"],
+      "repeats": ["5"],
+      "ties": []
+    },
+    {
+      "id": "select-replay-after-revote",
+      "description": "Replaying an earlier ballot after a re-vote is a repeat and can't make it last (R1)",
+      "ballots": [
+        {
+          "tier": 2,
+          "nullifier": "2936513994806093352094037201281154380365881977309744482790446330070267393868",
+          "message": "14ec23765135ed7c787cf0cbd39791beba74ec894c04f997febbf296f54972d5",
+          "l1RefNumber": "100",
+          "index": "0"
+        },
+        {
+          "tier": 2,
+          "nullifier": "2936513994806093352094037201281154380365881977309744482790446330070267393868",
+          "message": "7aa63b2482e63608b1369fe56f6c089105ba414fc705ea85ae6a0a8a947c6de4",
+          "l1RefNumber": "130",
+          "index": "1"
+        },
+        {
+          "tier": 2,
+          "nullifier": "2936513994806093352094037201281154380365881977309744482790446330070267393868",
+          "message": "14ec23765135ed7c787cf0cbd39791beba74ec894c04f997febbf296f54972d5",
+          "l1RefNumber": "100",
+          "index": "2"
+        }
+      ],
+      "selected": ["1"],
+      "repeats": ["2"],
+      "ties": []
+    },
+    {
+      "id": "select-repeat-of-tied-ballot",
+      "description": "A repeat doesn't count as a distinct ballot, so it neither causes nor breaks a tie",
+      "ballots": [
+        {
+          "tier": 0,
+          "nullifier": "12165211338961158600065290250614630607336352952842626636129370434849878684052",
+          "message": "14ec23765135ed7c787cf0cbd39791beba74ec894c04f997febbf296f54972d5",
+          "l1RefNumber": "100",
+          "index": "0"
+        },
+        {
+          "tier": 0,
+          "nullifier": "12165211338961158600065290250614630607336352952842626636129370434849878684052",
+          "message": "14ec23765135ed7c787cf0cbd39791beba74ec894c04f997febbf296f54972d5",
+          "l1RefNumber": "100",
+          "index": "1"
+        },
+        {
+          "tier": 0,
+          "nullifier": "12165211338961158600065290250614630607336352952842626636129370434849878684052",
+          "message": "7aa63b2482e63608b1369fe56f6c089105ba414fc705ea85ae6a0a8a947c6de4",
+          "l1RefNumber": "100",
+          "index": "2"
+        }
+      ],
+      "selected": [],
+      "repeats": ["1"],
+      "ties": ["0", "2"]
+    },
+    {
+      "id": "select-same-message-other-tier",
+      "description": "Tiers are separate groups, even with equal nullifier and message values",
+      "ballots": [
+        {
+          "tier": 0,
+          "nullifier": "1681697155155564536644035343074554342196044105275360342703691897939981566113",
+          "message": "df48120d3d5c5f4ef270e27b5adfd2592fefcd906b731b908f9c2f436a25dbde",
+          "l1RefNumber": "100",
+          "index": "0"
+        },
+        {
+          "tier": 1,
+          "nullifier": "1681697155155564536644035343074554342196044105275360342703691897939981566113",
+          "message": "df48120d3d5c5f4ef270e27b5adfd2592fefcd906b731b908f9c2f436a25dbde",
+          "l1RefNumber": "90",
+          "index": "1"
+        }
+      ],
+      "selected": ["0", "1"],
+      "repeats": [],
+      "ties": []
+    },
+    {
+      "id": "select-many-voters",
+      "description": "Several voters across tiers, with re-votes, a tie, a repeat and a lone ballot",
+      "ballots": [
+        {
+          "tier": 0,
+          "nullifier": "12165211338961158600065290250614630607336352952842626636129370434849878684052",
+          "message": "14ec23765135ed7c787cf0cbd39791beba74ec894c04f997febbf296f54972d5",
+          "l1RefNumber": "100",
+          "index": "0"
+        },
+        {
+          "tier": 0,
+          "nullifier": "2936513994806093352094037201281154380365881977309744482790446330070267393868",
+          "message": "7aa63b2482e63608b1369fe56f6c089105ba414fc705ea85ae6a0a8a947c6de4",
+          "l1RefNumber": "100",
+          "index": "1"
+        },
+        {
+          "tier": 0,
+          "nullifier": "12165211338961158600065290250614630607336352952842626636129370434849878684052",
+          "message": "97de8243f74b5649944551308049d09fafbcc1b6ba4e8728aca4b193c8595d02",
+          "l1RefNumber": "102",
+          "index": "2"
+        },
+        {
+          "tier": 1,
+          "nullifier": "12165211338961158600065290250614630607336352952842626636129370434849878684052",
+          "message": "df48120d3d5c5f4ef270e27b5adfd2592fefcd906b731b908f9c2f436a25dbde",
+          "l1RefNumber": "99",
+          "index": "3"
+        },
+        {
+          "tier": 0,
+          "nullifier": "2936513994806093352094037201281154380365881977309744482790446330070267393868",
+          "message": "8db57fc45058fb50e18f0d484e257bfd9f4fc81ce3ba877cc04f71dfa47052d7",
+          "l1RefNumber": "101",
+          "index": "4"
+        },
+        {
+          "tier": 0,
+          "nullifier": "2936513994806093352094037201281154380365881977309744482790446330070267393868",
+          "message": "9b92df05c47ddd48ee76051e1e39a1d95f854ddb3d8a63d19bbc5bf791c67389",
+          "l1RefNumber": "101",
+          "index": "5"
+        },
+        {
+          "tier": 2,
+          "nullifier": "536587504053073035598690604082986215874941158969915375230548588337753212549",
+          "message": "1a56b42ea1c87ecb06f85f4bb7851582732329bc28765ec8388e82bdf4d95a81",
+          "l1RefNumber": "50",
+          "index": "6"
+        },
+        {
+          "tier": 0,
+          "nullifier": "12165211338961158600065290250614630607336352952842626636129370434849878684052",
+          "message": "97de8243f74b5649944551308049d09fafbcc1b6ba4e8728aca4b193c8595d02",
+          "l1RefNumber": "102",
+          "index": "7"
+        },
+        {
+          "tier": 1,
+          "nullifier": "1681697155155564536644035343074554342196044105275360342703691897939981566113",
+          "message": "e6be2bcf016ef9d6f5eb2eb26fb415540e93a76d984d115527b4f4b252020f99",
+          "l1RefNumber": "0",
+          "index": "8"
+        }
+      ],
+      "selected": ["2", "3", "6", "8"],
+      "repeats": ["7"],
+      "ties": ["4", "5"]
+    },
+    {
+      "id": "select-duplicate-index",
+      "description": "Two ballots at one board position",
+      "ballots": [
+        {
+          "tier": 0,
+          "nullifier": "12165211338961158600065290250614630607336352952842626636129370434849878684052",
+          "message": "14ec23765135ed7c787cf0cbd39791beba74ec894c04f997febbf296f54972d5",
+          "l1RefNumber": "100",
+          "index": "4"
+        },
+        {
+          "tier": 0,
+          "nullifier": "2936513994806093352094037201281154380365881977309744482790446330070267393868",
+          "message": "7aa63b2482e63608b1369fe56f6c089105ba414fc705ea85ae6a0a8a947c6de4",
+          "l1RefNumber": "100",
+          "index": "4"
+        }
+      ],
+      "error": "duplicate-index"
+    },
+    {
+      "id": "select-inconsistent-message",
+      "description": "Equal messages naming different blocks: M binds the number, so one was decoded wrongly",
+      "ballots": [
+        {
+          "tier": 0,
+          "nullifier": "12165211338961158600065290250614630607336352952842626636129370434849878684052",
+          "message": "14ec23765135ed7c787cf0cbd39791beba74ec894c04f997febbf296f54972d5",
+          "l1RefNumber": "100",
+          "index": "0"
+        },
+        {
+          "tier": 0,
+          "nullifier": "12165211338961158600065290250614630607336352952842626636129370434849878684052",
+          "message": "14ec23765135ed7c787cf0cbd39791beba74ec894c04f997febbf296f54972d5",
+          "l1RefNumber": "101",
+          "index": "1"
+        }
+      ],
+      "error": "inconsistent-message"
+    },
+    {
+      "id": "select-unknown-tier",
+      "description": "Tier 3 doesn't exist",
+      "ballots": [
+        {
+          "tier": 3,
+          "nullifier": "12165211338961158600065290250614630607336352952842626636129370434849878684052",
+          "message": "14ec23765135ed7c787cf0cbd39791beba74ec894c04f997febbf296f54972d5",
+          "l1RefNumber": "100",
+          "index": "0"
+        }
+      ],
+      "error": "unknown-tier"
+    },
+    {
+      "id": "select-non-canonical-nullifier",
+      "description": "A nullifier equal to r",
+      "ballots": [
+        {
+          "tier": 0,
+          "nullifier": "21888242871839275222246405745257275088548364400416034343698204186575808495617",
+          "message": "14ec23765135ed7c787cf0cbd39791beba74ec894c04f997febbf296f54972d5",
+          "l1RefNumber": "100",
+          "index": "0"
+        }
+      ],
+      "error": "non-canonical-nullifier"
+    }
+  ]
+}

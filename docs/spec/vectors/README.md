@@ -12,6 +12,7 @@ One JSON file per spec section or record type, named after it (`primitives.json`
 | `group.json`             | `scalar` and `element` codecs: valid boundaries and every rejected class ([[group]])                                       |
 | `board.json`             | Board entries, the board tree with every inclusion and consistency proof, checkpoints, board checks ([[board]])            |
 | `membership.json`        | The nullifier scope, the Semaphore field mapping `F` and the protocol-wide tree depth ([[membership]])                     |
+| `revoting.json`          | The membership message `M` and `F(M)`, and the selection of counted ballots, ties and repeats included ([[revoting]])      |
 | `hash.json`              | `H`, `HashToScalar` under each Fiat–Shamir tag, and `h`, with intermediate bytes ([[group]])                               |
 | `event-accumulator.json` | The event accumulator: genesis values, event sequences step by step, rejected inputs ([[contracts]])                       |
 | `circuit.json`           | Circuit-facing values: each registered tag's field element and the two byte packings ([[notation]], [[domain-separation]]) |

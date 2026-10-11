@@ -99,4 +99,12 @@ export {
   TEST_RECORD_TYPES,
   UNPINNED,
 } from "./record.ts";
+export {
+  type AdmittedBallot,
+  type BallotSelection,
+  membershipMessage,
+  membershipMessageField,
+  type MembershipMessageInput,
+  selectBallots,
+} from "./revoting.ts";
 export { isWellFormedUtf8 } from "./utf8.ts";

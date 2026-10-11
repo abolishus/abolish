@@ -24,7 +24,11 @@ trustPolicyExclude:
   - semver@6.3.1
 # Install scripts run only for packages listed in allowBuilds.
 strictDepBuilds: true
-allowBuilds: {}
+allowBuilds:
+  # Denied, not allowed: an optional native accelerator for msgpackr (via
+  # bullmq, P2-4). msgpackr falls back to its pure-JS codec without it, so its
+  # install script (node-gyp-build) never needs to run.
+  msgpackr-extract: false
 
 catalog:
   # Proving toolchain: must match NOIR_VERSION / BB_VERSION in
@@ -41,8 +45,10 @@ catalog:
   "@orpc/zod": 1.15.4
   "@types/node": 24.19.1
   better-auth: 1.7.7
+  bullmq: 6.3.11
   drizzle-orm: 0.45.3
   fast-check: 4.10.2
+  ioredis: 5.11.1
   postgres: 3.4.9
   typescript: 7.0.2
   vite: npm:@voidzero-dev/vite-plus-core@1.0.0

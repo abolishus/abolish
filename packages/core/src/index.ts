@@ -1,3 +1,4 @@
+export { auditBoard, BoardAuditError, type BoardAuditCode, listBoards } from "./audit.ts";
 export {
   appendEntry,
   type AppendedEntry,

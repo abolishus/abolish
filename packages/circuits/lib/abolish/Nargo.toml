@@ -1,0 +1,6 @@
+[package]
+name = "abolish"
+type = "lib"
+authors = ["Abolish"]
+
+[dependencies]

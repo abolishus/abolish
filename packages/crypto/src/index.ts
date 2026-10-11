@@ -83,6 +83,7 @@ export {
   type EventAccumulatorState,
   replayEventAccumulator,
 } from "./event-accumulator.ts";
+export { electionId } from "./election-registry.ts";
 export {
   DEFINITION_V1_LIMITS,
   ELECTION_TYPES,

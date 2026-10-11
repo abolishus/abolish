@@ -144,6 +144,9 @@ describe("ballot-validity.json", () => {
       expect(sharing.shares.map((s) => toHex(encode(SHARES, s)))).toEqual(b.shares);
       expect(checkValidity(ctx, vote)).toEqual({ ok: true });
     },
+    // options-max proves 64 options and a 65-branch sum proof: about 2 s alone,
+    // over 5 s on a shared CI runner, so the default timeout made it flaky.
+    60_000,
   );
 
   test.each(vectors.ballots.map((b) => [b.id, b] as const))(

@@ -416,3 +416,35 @@ describe("randomness and parameters", () => {
     });
   });
 });
+
+describe("record types other than the definition", () => {
+  // Specified types are unexpected where a definition is read; reserved and
+  // unassigned ones are unknown. The contract's decoder reports the same
+  // codes (packages/contracts, docs/spec/contracts.md, Registration; T-36).
+  const vectors = JSON.parse(
+    readFileSync(
+      new URL("../../../docs/spec/vectors/election-definition.json", import.meta.url),
+      "utf8",
+    ),
+  ) as { vectors: { id: string; encoding: string }[] };
+  const typical = vectors.vectors.find((v) => v.id === "definition-typical");
+  if (typical === undefined) throw new Error("definition-typical vector missing");
+
+  test.each([
+    [0x0007, "unexpected-record-type"],
+    [0x0009, "unexpected-record-type"],
+    [0x0002, "unknown-record-type"],
+  ] as const)("type %i is %s", (type, code) => {
+    const b = Uint8Array.from(Buffer.from(typical.encoding, "hex"));
+    b[0] = type >> 8;
+    b[1] = type & 0xff;
+    let caught: unknown;
+    try {
+      decodeElectionDefinition(b);
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(DecodeError);
+    expect((caught as DecodeError).code).toBe(code);
+  });
+});

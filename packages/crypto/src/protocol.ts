@@ -11,6 +11,7 @@ import {
   type DisplayTextRule,
   displayTextShapeRule,
 } from "./display-text.ts";
+import { BOARD_ENTRY } from "./board.ts";
 import { ds } from "./domain-separation.ts";
 import { ELECTION_DEFINITION, type ElectionDefinition } from "./election-definition.ts";
 import { H } from "./group.ts";
@@ -38,7 +39,7 @@ export class UnsupportedVersionError extends Error {
  * `ELECTION_DEFINITION`, so `decodeElectionDefinition`, with its self-pin
  * check, is the only way to decode a definition (T-34, T-31).
  */
-export const PROTOCOL_SCHEMA = new RecordSchema([ELECTION_DEFINITION, DISPLAY_TEXT]);
+export const PROTOCOL_SCHEMA = new RecordSchema([ELECTION_DEFINITION, BOARD_ENTRY, DISPLAY_TEXT]);
 
 export function encodeElectionDefinition(d: ElectionDefinition): Uint8Array {
   return PROTOCOL_SCHEMA.encode(ELECTION_DEFINITION, 1, d);

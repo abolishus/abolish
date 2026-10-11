@@ -1,0 +1,73 @@
+{
+  "format": "abolish-election-registry-vectors/1",
+  "title": "Election registry: election identifiers",
+  "spec": "docs/spec/contracts.md",
+  "generator": "Printed by packages/crypto/scripts/election-registry-vectors.py, an independent implementation of docs/spec/contracts.md (Election registry) with Python's hashlib only. packages/crypto and packages/contracts both check it.",
+  "tag": "abolish/v1/election-id",
+  "electionIds": [
+    {
+      "id": "first",
+      "description": "The first election a registry on Base Sepolia creates",
+      "chainId": "84532",
+      "registry": "5fbdb2315678afecb367f032d93f642f64180aa3",
+      "counter": "0",
+      "electionId": "4781fee507b1b82b86f544dba907b0d66020e985797532e5009c92d5a75558ce"
+    },
+    {
+      "id": "second",
+      "description": "The registry's next election",
+      "chainId": "84532",
+      "registry": "5fbdb2315678afecb367f032d93f642f64180aa3",
+      "counter": "1",
+      "electionId": "4ff3a87241dcc4c18693428b1e569419b1c728744b1ff8ecdc6d7add6ab706b8"
+    },
+    {
+      "id": "other-registry",
+      "description": "Counter 0 at another registry address on the same chain",
+      "chainId": "84532",
+      "registry": "e7f1725e7734ce288f8367e1bb143e90bb3f0512",
+      "counter": "0",
+      "electionId": "863c6b2727e506eb130ad6044032db957386c96ace41b2043f8717f5d9c63279"
+    },
+    {
+      "id": "other-chain",
+      "description": "Counter 0 at the same address on Anvil's default chain",
+      "chainId": "31337",
+      "registry": "5fbdb2315678afecb367f032d93f642f64180aa3",
+      "counter": "0",
+      "electionId": "019ce04cb5f59bc3b2c696c573405a51c19a8eb50563774135b0ed4fa6c8ea17"
+    },
+    {
+      "id": "counter-bytes",
+      "description": "A counter whose bytes are all distinct, to pin the byte order",
+      "chainId": "84532",
+      "registry": "5fbdb2315678afecb367f032d93f642f64180aa3",
+      "counter": "72623859790382856",
+      "electionId": "c81f76dff5305fc93a1b41af3886c6f77fbcce4c018bc406cd07c618ea4620fb"
+    },
+    {
+      "id": "max",
+      "description": "The largest chain ID and counter with a u64 encoding",
+      "chainId": "18446744073709551615",
+      "registry": "ffffffffffffffffffffffffffffffffffffffff",
+      "counter": "18446744073709551615",
+      "electionId": "4398afc64c7f2953941dfc6b9318800adeca4948135666d30745c3c21f6473c2"
+    }
+  ],
+  "rejected": [
+    {
+      "id": "chain-id-over-u64",
+      "description": "A chain ID of 2^64 has no u64 encoding",
+      "chainId": "18446744073709551616",
+      "registry": "5fbdb2315678afecb367f032d93f642f64180aa3",
+      "counter": "0"
+    },
+    {
+      "id": "counter-over-u64",
+      "description": "A counter of 2^64 has no u64 encoding",
+      "chainId": "84532",
+      "registry": "5fbdb2315678afecb367f032d93f642f64180aa3",
+      "counter": "18446744073709551616"
+    }
+  ]
+}

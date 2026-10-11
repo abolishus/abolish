@@ -418,7 +418,10 @@ describe("what is kept (T-10, T-11)", () => {
     await call(new Jar(), "GET", "/auth/passkey/generate-authenticate-options");
     const live = await count("account_verifications");
     expect(live).toBeGreaterThan(0);
-    expect(await pruneAccountVerifications(app, new Date())).toBe(0);
+    // Pruning at the earliest expiry deletes nothing: only rows expired before `now` go.
+    const [{ first }] = (await db.admin`
+      SELECT min(expires_at) AS first FROM account_verifications`) as unknown as [{ first: Date }];
+    expect(await pruneAccountVerifications(app, first)).toBe(0);
     expect(await count("account_verifications")).toBe(live);
     const later = new Date(Date.now() + 10 * 60 * 1000);
     expect(await pruneAccountVerifications(app, later)).toBe(live);

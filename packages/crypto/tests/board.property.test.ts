@@ -36,6 +36,10 @@ const run = <T>(p: fc.IPropertyWithHooks<T> | fc.IProperty<T>) => fc.assert(p, {
 
 const ELECTION = new Uint8Array(32).fill(0xe1);
 const allowedTypes = [...BOARD_PAYLOAD_TYPES];
+
+test("the allowed payload types can't be changed at run time", () => {
+  expect(Object.isFrozen(BOARD_PAYLOAD_TYPES)).toBe(true);
+});
 const recordOf = (type: number, body: Uint8Array) =>
   Uint8Array.of(type >> 8, type & 0xff, 1, ...body);
 

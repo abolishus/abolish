@@ -30,13 +30,16 @@ export const MAX_BOARD_PAYLOAD = 1_048_576;
  * Display text is never on the board (T-17), receipts stay with their voter,
  * entries never nest, and a definition arrives as the event that registered it.
  */
-export const BOARD_PAYLOAD_TYPES: ReadonlySet<number> = new Set([
+export const BOARD_PAYLOAD_TYPES: readonly number[] = Object.freeze([
   RECORD_TYPES.ballot,
   RECORD_TYPES.spoiledBallotOpening,
   RECORD_TYPES.ceremonyTranscript,
   RECORD_TYPES.tallyTranscript,
   RECORD_TYPES.contractEvent,
 ]);
+
+// A private Set for lookups, so callers can't add a type to what the decoder accepts.
+const PAYLOAD_TYPES: ReadonlySet<number> = new Set(BOARD_PAYLOAD_TYPES);
 
 const RECORD_HEADER_LENGTH = 3;
 
@@ -57,7 +60,7 @@ const payload: Codec<Uint8Array> = {
       throw new EncodeError(`payload: ${b.length} bytes is over ${MAX_BOARD_PAYLOAD}`);
     if (b.length < RECORD_HEADER_LENGTH)
       throw new EncodeError("payload: shorter than a record header");
-    if (!BOARD_PAYLOAD_TYPES.has(recordTypeOf(b)))
+    if (!PAYLOAD_TYPES.has(recordTypeOf(b)))
       throw new EncodeError(`payload: record type ${recordTypeOf(b)} isn't allowed on the board`);
     w.uint(4, b.length);
     w.bytes(b);
@@ -69,7 +72,7 @@ const payload: Codec<Uint8Array> = {
     if (n > MAX_BOARD_PAYLOAD) throw new DecodeError("length-over-max", at);
     const content = r.take(n).slice();
     if (content.length < RECORD_HEADER_LENGTH) throw new DecodeError("truncated", at + 4);
-    if (!BOARD_PAYLOAD_TYPES.has(recordTypeOf(content)))
+    if (!PAYLOAD_TYPES.has(recordTypeOf(content)))
       throw new DecodeError("unexpected-record-type", at + 4);
     return content;
   },

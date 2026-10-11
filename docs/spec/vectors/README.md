@@ -67,6 +67,16 @@ Type descriptors:
 | `list`                            | `max`, as a JSON number, and `of`: the element's type descriptor                                                                      |
 | `record`                          | `recordType` (4 lowercase hex digits), `version` (a JSON number) and `fields`: an array of `{ "name", "type" }` in encoding order     |
 
+## Board vectors
+
+`board.json` covers [[board]] with its own format, `abolish-board-vectors/1`, and the same top-level fields, plus:
+
+- `maxBoardPayload`: `MAX_BOARD_PAYLOAD`, as a decimal string.
+- `clock`: the anchoring clock the board vectors use (`epoch`, `period`, `deadline`, `lastSegment`, decimal strings; [[board]], Timing). Real elections take theirs from P4-1.
+- `entries`: board-entry codec vectors. Each has `id`, `description` and `encoding` (hex), and either `value` (`election_id`, `index`, `segment`, `payload`; integers as decimal strings, bytes as hex) with `entryHash`, or `error` (a decode error code).
+- `tree`: `leaves` (32-byte hex, used as `D[n]`), `roots` (the root of every prefix, size 1 first), `inclusion` (`index`, `size`, `path`) and `consistency` (`size1`, `size2`, `path`) for every pair, and `rejected`: proofs that must fail, with `kind` (`inclusion` or `consistency`) and the arguments of that check.
+- `boards`: board checks. Each has `electionId`, `entries` (hex encodings in order), `checkpoints` (each anchor: `electionId`, `segment`, `size`, `head`, `root`, its `hash`, and `anchoredAt`, the L1 time it was anchored), `links` (the chain links, on valid boards), and `result`: `"ok"`, or `{ "code", … }` with `entry`, `checkpoint`, `segment` or `decodeError` saying where it failed ([[board]], Board checks).
+
 ## Hash vectors
 
 `hash.json` checks computations rather than codecs, so it has its own format, `abolish-hash-vectors/1`, with the same top-level fields. Each vector:

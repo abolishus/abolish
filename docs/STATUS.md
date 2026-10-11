@@ -112,6 +112,7 @@ Where and when untrusted content tried to redirect an agent (AGENTS.md, Untruste
 
 ## Known-weak
 
+- **Logs, caches and queues have no account-to-ballot no-join test yet** (T-10). The schema test from P2-1 covers tables only. [[P2-3]] (API request logs, caches) and [[P2-4]] (queue job payloads, worker logs) must each add a test that no log line, cache key or job payload carries both an account or session identifier and a ballot, nullifier or poll-participation value.
 - **CI pulls service images with a repository-level Docker Hub token** (#19). `DOCKERHUB_TOKEN` is read-only, and any workflow run from an in-repo branch can read it (T-65). If the token is revoked or expires, every service-container start fails with `unauthorized`. The fix is for the owner to rotate the secret, or to switch back to the ECR Public mirror (#17). Fork PRs get no secrets, so they pull anonymously.
 - **`reference-election` check is a placeholder.** It passes with a warning until P1-20 adds the root `reference-election` script and sets the workflow's `EXPECT_FIXTURE` flag, so it proves nothing yet.
 - **`repro-build` has nothing to compare yet.** The only build today (`.github/tools/ci`) type-checks without emitting output. The check hashes every file a build creates, rejects any build that modifies a tracked file, and requires each package to declare its outputs, so it becomes meaningful as soon as a package emits output.

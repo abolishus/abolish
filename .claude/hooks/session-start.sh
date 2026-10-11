@@ -51,9 +51,13 @@ ensure_databases() {
   as_postgres psql -v ON_ERROR_STOP=1 -qtA -d postgres >/dev/null <<SQL
 DO \$\$ BEGIN
   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '${PG_USER}') THEN
-    CREATE ROLE ${PG_USER} LOGIN PASSWORD '${PG_PASSWORD}' CREATEDB;
+    CREATE ROLE ${PG_USER} LOGIN PASSWORD '${PG_PASSWORD}';
   END IF;
 END \$\$;
+-- Superuser like CI's service user: roles.sql sets NOSUPERUSER, NOCREATEDB,
+-- NOBYPASSRLS and NOREPLICATION, which CREATEROLE alone can't. This is the
+-- throwaway session database only; deployments never connect as a superuser.
+ALTER ROLE ${PG_USER} SUPERUSER;
 SQL
   for db in "${PG_DATABASES[@]}"; do
     if ! as_postgres psql -qtA -d postgres -c "SELECT 1 FROM pg_database WHERE datname = '${db}'" | grep -q 1; then

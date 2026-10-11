@@ -17,7 +17,7 @@ description: Rules for Postgres schema changes with Drizzle — append-only bull
 
 ## Mechanics
 
-- Drizzle schema in `packages/core/src/db/schema/` (or the owning app). Generate migrations with `vp exec drizzle-kit generate`, then **read and hand-review the SQL**. Raw SQL (grants, triggers, roles) goes in the same migration file.
+- Drizzle schema in `packages/core/src/db/schema/` (or the owning app). **Write migrations by hand** as SQL files in `src/db/migrations/` (`NNNN_name.sql`); don't add `drizzle-kit`, which would bring a bundler toolchain (esbuild, tsx) into the dependency tree for SQL that has to be read line by line anyway. A test must check that the Drizzle tables match the migrated ones, so the schema and the SQL can't drift. Raw SQL (grants, triggers, roles) goes in the same migration file.
 - Migrations are forward-only and immutable once merged. Fix mistakes with a new migration.
 - Every migration must be safe on a populated database. Add a column nullable or with a default, then backfill, then constrain. No long locks on hot tables.
 - Roles: `abolish_migrator` (owner, DDL) and `abolish_app` (runtime, least privilege). The app never connects as owner.

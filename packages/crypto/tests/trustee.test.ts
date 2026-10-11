@@ -34,6 +34,7 @@ interface TrusteeVectors {
     readonly id: string;
     readonly encoding: string;
     readonly secretKey?: string;
+    readonly description?: string;
     readonly error?: string;
   }[];
   readonly signatures: readonly {
@@ -94,13 +95,14 @@ describe("trustee vectors (docs/spec/vectors/trustee.json)", () => {
       vectors.signatures.length,
       vectors.panels.length,
       vectors.registrations.length,
-    ]).toEqual([20, 22, 14, 4]);
+    ]).toEqual([23, 23, 14, 4]);
   });
 
   test.each(vectors.keys)("key $id", (v) => {
     if (v.error === undefined) {
-      const secret = hex(v.secretKey ?? "");
-      expect(toHex(identityKey(secret))).toBe(v.encoding);
+      // A valid key with no known secret (x = 0) only decodes.
+      if (v.secretKey !== undefined) expect(toHex(identityKey(hex(v.secretKey)))).toBe(v.encoding);
+      else expect(v.id).toMatch(/^key-x-zero-prefix-0[23]$/);
       expect(toHex(decode(p256Key, hex(v.encoding)))).toBe(v.encoding);
       expect(toHex(encode(p256Key, hex(v.encoding)))).toBe(v.encoding);
       return;

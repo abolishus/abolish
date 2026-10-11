@@ -47,9 +47,11 @@ Each tier group's root `root_g` is the root of its **tier tree**, not of Semapho
 
 - `len > 32` gives `ρ = 0`, rejected (above).
 - `len = 32` puts `C` at height 0, so `C` is a leaf: a registered commitment, of exactly one secret (`s < l` and Poseidon's collision resistance).
-- `len < 32` puts `C = Poseidon2(Ax, Ay)` at a height `h > 0`, so `C` equals the inner node over two children, which by collision resistance are `Ax` and `Ay`. For `h = 1` those are two registered leaves, so the identity costs two registrations; for `h > 1` they are inner nodes, and `Ax` (a coordinate of `s · B8`) would have to equal a Poseidon output, a preimage the attacker can't find.
+- `len < 32` puts `C = Poseidon2(Ax, Ay)` at a height `h > 0`, so `C` equals the inner node over two children, which by collision resistance are `Ax` and `Ay`. For `h = 1` those are two leaves, at least one of them registered: a prime-subgroup point never has `Ay = 0`, and `Ax = 0` only for the identity point `(0, 1)`, the public secret `s = 0`, so one registration of the value `1` next to an empty leaf would make `s = 0` a voting identity that anyone can use. That still adds at most one identity per registration, and the commitment rules below forbid it. For `h > 1` they are inner nodes, and `Ax` (a coordinate of `s · B8`) would have to equal a Poseidon output, a preimage the attacker can't find.
 
 So the identities that can vote in a tier are at most its registrations, short of a Poseidon collision or preimage (T-03, T-04, T-06). This changes the group's tree, not Semaphore's circuit or keys.
+
+**Commitments and removals.** A verifier counts an addition only if its commitment is a canonical `field<bn254>` other than `0`, `1` and `Poseidon2(0, 1)` (the commitment of the public secret `s = 0`); any other addition fails the definition ([[verifier]] 2.4). A removal counts only under the same binding as an addition (the group's identifier, the chain ID and the registry address) and names a leaf index, never a commitment, since commitments can repeat; it sets that leaf to 0. Group contracts must emit both in that form (P1-18, P3-2).
 
 ## Scope
 
@@ -93,7 +95,7 @@ Every membership proof, in every tier and every election, uses the verification 
 
 ## Checks
 
-A verifier fails the election definition if any tier's root differs from the tier tree it recomputes from the group's additions, is 0, or the group has more than 2³² additions ([[verifier]] 2.4). A definition lists only tiers whose group has at least one member at the root's block; an empty tier has no cell and no ballots (P1-10b, [[verifier]] 2.8). Then, for each ballot that claims tier group `g` ([[verifier]] 5.1–5.3), it:
+A verifier fails the election definition if any tier's root differs from the tier tree it recomputes from the group's additions, is 0, or the group has more than 2³² additions ([[verifier]] 2.4). It also fails a definition that lists a tier whose group has no addition that is still unremoved at the root's block: such a tier's root is `Z_32`, which no one can prove against, so it would be a cell that can't hold a ballot (P1-10b, [[verifier]] 2.8). Then, for each ballot that claims tier group `g` ([[verifier]] 5.1–5.3), it:
 
 1. Recomputes `ŝ_g` from the definition (Scope).
 2. Takes `ρ = root_g` from the definition, never from the ballot; `ρ` is never 0 (Statement).
@@ -117,4 +119,6 @@ Because the scope binds the tier, a proof made for one tier never verifies as an
 - The verification keys, their hash in the election definition, the proof encoding and the Groth16 verification itself: P1-17b.
 - `M`: P1-12 (ballot hash) and P1-13 (receipts and re-voting).
 - The tier encoding: the election definition's tier field (P1-10b) and the group registry's tier attribution (P1-18, P3-2) MUST use exactly the values this page binds into the scope (0, 1, 2), and the verifier takes `t_g` from the registry binding it checks in [[verifier]] 2.4, never from the definition's label alone.
-- Groups and their additions and removals: P3-2. The prover in the ballot client and native app: P2-8, P5-4.
+- Groups and their additions and removals: P3-2, with the commitment and removal rules above (P1-18 emits them).
+- On-chain membership checks (direct submit, P1-18): a contract either verifies against an on-chain complete depth-32 zero-filled tree it maintains itself (about 32 `Poseidon2` evaluations per insertion), or checks no membership and leaves it to the verifier; it never uses a LeanIMT root or accepts any depth.
+- The prover in the ballot client and native app: P2-8, P5-4. The client MUST build its 32-level path from the whole tier's additions (from the board, or by fetching every leaf) and check the rebuilt root against the definition; asking a server for its own path would reveal its leaf index (T-10, T-13).

@@ -89,6 +89,7 @@ One-off items: [[P0-ops]] split shared hot files; [[P0-ops-2]] P0-ops review fol
 ## Blocked
 
 - [[P1-13]] part 2, receipts (#48): labelled `blocked` after three pushes that each left `crypto-review` with a new blocking finding in the receipt's evidence model. It waits on the owner's review of ADR 0013 (in #48) as it stands, or on binding receipt keys per election first; see [[P1-13]].
+- [[P1-12]] part 2, share encryption (#58), and so P1-14 part 2, P1-12 part 3 and P1-15 parts 2 and 3: waiting on the owner's answer on [[0016-share-kem-dh-group]] (Waiting on the owner, below).
 - On 2026-10-11 the owner unblocked [[P0-2]] (`trustPolicyExclude: [semver@6.3.1]`), [[P1-12]] and [[P1-14]] part 2 (answers recorded in [[0002-everlasting-privacy]], Decision).
 
 ## Decisions to review

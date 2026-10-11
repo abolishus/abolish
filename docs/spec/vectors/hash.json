@@ -127,6 +127,30 @@
       "output": "d015fde0f0c384efcc9b3cbbcc489d148c43dfe55d7efb2dd22a5b585dbff607"
     },
     {
+      "id": "share-ephemeral-empty",
+      "function": "hash-to-scalar",
+      "dst": "abolish/v1/fs/share-ephemeral",
+      "message": "",
+      "uniformBytes": "d728d4b51f728a1d18c748a325af70d77ad680446bb7661e6ef9c294022f9e7b4df4e4b5f191148b449113ca0a84bc1a2731d8ac285a33d8b3c5d48c4ef13ece",
+      "output": "6f0c6ffdef011741fcfacae4b22ff144a663d35ec1f863c81e9b4c0e1de07b0e"
+    },
+    {
+      "id": "share-ephemeral-abc",
+      "function": "hash-to-scalar",
+      "dst": "abolish/v1/fs/share-ephemeral",
+      "message": "616263",
+      "uniformBytes": "f72ac2991fe6b9d18aa2ddeb18dc381bf1b2d8a875cb2e2f6ba311ddf9ddc592c591835cae356257a590f44bbf3c974bcecf4f583d5112440b97236c8938b9f5",
+      "output": "7016b9ac5f754a6c66662dfb4e766d18c37341c789d174cefffb4784723eb409"
+    },
+    {
+      "id": "share-ephemeral-0x00-x-200",
+      "function": "hash-to-scalar",
+      "dst": "abolish/v1/fs/share-ephemeral",
+      "message": "0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "uniformBytes": "d2a2f24ebd595431f663cc46f18da289d8abc5f80c7fbdfe0a357e0c1ab526ec88131e85c0ca01dccaaf5ab52fd79782beab6f2615f36eb0666ecb5b48b72cb2",
+      "output": "a8df756a0833190642d3674ec9bcb3f3d546a8d0cc734de65cb50d272266140e"
+    },
+    {
       "id": "share-complaint-empty",
       "function": "hash-to-scalar",
       "dst": "abolish/v1/fs/share-complaint",

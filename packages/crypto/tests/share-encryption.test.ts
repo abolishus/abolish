@@ -70,7 +70,7 @@ interface BallotVector {
       readonly g: readonly string[];
     }[];
   };
-  readonly encapsulation: readonly { readonly m: string; readonly e: string }[];
+  readonly encapsulation: readonly { readonly m: string; readonly e: string; readonly w: string }[];
   readonly ciphertexts: readonly string[];
   readonly shareHashes: readonly string[];
   readonly committedVote: string;
@@ -155,12 +155,14 @@ describe("share-encryption.json", () => {
       kem: "abolish/v1/kem/share",
       aad: "abolish/v1/kem/share-aad",
       ciphertext: "abolish/v1/share-ciphertext",
+      ephemeral: "abolish/v1/fs/share-ephemeral",
       complaint: "abolish/v1/fs/share-complaint",
     });
-    expect(vectors.ballots.length).toBe(6);
-    expect(vectors.decryptFailures.length).toBe(9);
-    expect(vectors.postings.length).toBe(8);
-    expect(vectors.complaints.length).toBe(10);
+    expect(vectors.ballots.length).toBe(7);
+    expect(vectors.decryptFailures.length).toBe(11);
+    expect(vectors.postings.length).toBe(9);
+    expect(vectors.complaints.length).toBe(11);
+    expect(vectors.decode.length).toBe(23);
   });
 
   test.each(Object.entries(vectors.panels))("derives every key of %s from its seed", (_, keys) => {
@@ -215,6 +217,7 @@ describe("share-encryption.json", () => {
     const randomness: ShareEncapsulation[] = b.encapsulation.map((r) => ({
       m: hex(r.m),
       e: BigInt(r.e),
+      w: BigInt(r.w),
     }));
     const out = encryptSharesWith(
       validityContext(b),
@@ -241,7 +244,8 @@ describe("share-encryption.json", () => {
   test.each(vectors.postings.map((p) => [p.id, p] as const))("posting %s", (_, p) => {
     const b = ballotById(p.ballot);
     const key = (panelOf(b)[p.seat - 1] as KemKeyPair).publicKey;
-    const r = checkPosting(p.seat, key, b.shareHashes.map(hex), {
+    const vss = decode(COMMITTED_VOTE, hex(b.committedVote)).vss;
+    const r = checkPosting(validityContext(b), p.seat, key, vss, b.shareHashes.map(hex), {
       ciphertext: hex(p.ciphertext),
       m: hex(p.m),
     });
@@ -270,7 +274,15 @@ describe("share-encryption.json", () => {
         bytesHex(
           encode(
             COMPLAINT_PROOF,
-            proveComplaintWith(ctx, c.seat, pair, hex(c.ciphertext), BigInt(c.w)),
+            proveComplaintWith(
+              ctx,
+              c.seat,
+              pair,
+              vote.vss,
+              vote.share_hashes,
+              posting,
+              BigInt(c.w),
+            ),
           ),
         ),
       ).toBe(c.proof);
@@ -290,9 +302,11 @@ describe("share-encryption.json", () => {
       "posting-encapsulation",
       "posting-hash",
       "posting-malformed",
+      "posting-proof",
       "share-check",
       "share-decrypt",
       "share-malformed",
+      "share-proof",
     ]);
   });
 
@@ -380,7 +394,7 @@ describe("properties", () => {
   });
 
   test(
-    "an honest posting passes and a complaint against it is unfounded",
+    "an honest posting passes, and its trustee refuses to complain about it",
     { timeout: 60_000 },
     () => {
       fc.assert(
@@ -390,15 +404,40 @@ describe("properties", () => {
           const ct = enc.ciphertexts[seat - 1] as Uint8Array;
           const posting = { ciphertext: ct, m: (enc.randomness[seat - 1] as ShareEncapsulation).m };
           const pair = keys[seat - 1] as KemKeyPair;
-          expect(checkPosting(seat, pair.publicKey, vote.share_hashes, posting)).toEqual({
-            ok: true,
-          });
-          const proof = proveComplaint(ctx, seat, pair, ct);
           expect(
-            checkComplaint(ctx, seat, pair.publicKey, vote.vss, vote.share_hashes, posting, proof),
-          ).toEqual({
+            checkPosting(ctx, seat, pair.publicKey, vote.vss, vote.share_hashes, posting),
+          ).toEqual({ ok: true });
+          expect(() =>
+            proveComplaint(ctx, seat, pair, vote.vss, vote.share_hashes, posting),
+          ).toThrow(RangeError);
+        }),
+        { numRuns: keyRuns },
+      );
+    },
+  );
+
+  test(
+    "a ciphertext carrying another ciphertext's ephemeral and proof fails its proof",
+    { timeout: 60_000 },
+    () => {
+      fc.assert(
+        fc.property(election, ({ ctx, votes, keys }) => {
+          // The copy attack of docs/spec/share-encryption.md (Ciphertext): an
+          // attacker's own ciphertext with a victim's ct_dh and proof.
+          const victim = castBallot(ctx, votes, keys).enc.ciphertexts[0] as Uint8Array;
+          const own = castBallot(ctx, votes, keys);
+          const ct = Uint8Array.from(own.enc.ciphertexts[0] as Uint8Array);
+          ct.set(victim.subarray(1088, 1184), 1088);
+          const pair = keys[0] as KemKeyPair;
+          expect(openShares(ctx, 1, pair.secretKey, own.vote.vss, ct)).toEqual({
             ok: false,
-            code: "complaint-unfounded",
+            code: "share-proof",
+          });
+          const hashes = [shareCiphertextHash(ct), ...own.vote.share_hashes.slice(1)];
+          const posting = { ciphertext: ct, m: (own.enc.randomness[0] as ShareEncapsulation).m };
+          expect(checkPosting(ctx, 1, pair.publicKey, own.vote.vss, hashes, posting)).toEqual({
+            ok: false,
+            code: "posting-proof",
           });
         }),
         { numRuns: keyRuns },
@@ -424,7 +463,14 @@ describe("properties", () => {
             expect(r.ok).toBe(false);
             const posting = { ciphertext: ct, m: (enc.randomness[0] as ShareEncapsulation).m };
             expect(
-              checkPosting(1, (keys[0] as KemKeyPair).publicKey, vote.share_hashes, posting).ok,
+              checkPosting(
+                ctx,
+                1,
+                (keys[0] as KemKeyPair).publicKey,
+                vote.vss,
+                vote.share_hashes,
+                posting,
+              ).ok,
             ).toBe(false);
           },
         ),
@@ -434,30 +480,32 @@ describe("properties", () => {
   );
 
   test("a complaint with any altered field fails its proof", { timeout: 60_000 }, () => {
+    const c = vectors.complaints.find((v) => v.id === "bad-share-complaint");
+    if (c === undefined) throw new Error("no bad-share-complaint vector");
+    const b = ballotById(c.ballot);
+    const ctx = validityContext(b);
+    const pair = panelOf(b)[c.seat - 1] as KemKeyPair;
+    const vote = decode(COMMITTED_VOTE, hex(b.committedVote));
+    const posting = { ciphertext: hex(c.ciphertext), m: hex(c.m) };
+    const order = 2n ** 252n + 27742317777372353535851937790883648493n;
     fc.assert(
       fc.property(
-        election,
         fc.integer({ min: 0, max: 2 }),
         fc.bigInt({ min: 1n, max: 1n << 200n }),
-        ({ ctx, votes, keys }, field, delta) => {
-          const { enc, vote } = castBallot(ctx, votes, keys);
-          const pair = keys[0] as KemKeyPair;
-          const ct = enc.ciphertexts[0] as Uint8Array;
-          const p = proveComplaint(ctx, 1, pair, ct);
-          const order = 2n ** 252n + 27742317777372353535851937790883648493n;
+        (field, delta) => {
+          const p = proveComplaint(ctx, c.seat, pair, vote.vss, vote.share_hashes, posting);
+          expect(
+            checkComplaint(ctx, c.seat, pair.publicKey, vote.vss, vote.share_hashes, posting, p),
+          ).toEqual({ ok: true });
           const bad =
             field === 0
               ? { ...p, dh: p.dh.add(G.multiply(delta)) }
               : field === 1
                 ? { ...p, c: (p.c + delta) % order }
                 : { ...p, z: (p.z + delta) % order };
-          const posting = { ciphertext: ct, m: (enc.randomness[0] as ShareEncapsulation).m };
           expect(
-            checkComplaint(ctx, 1, pair.publicKey, vote.vss, vote.share_hashes, posting, bad),
-          ).toEqual({
-            ok: false,
-            code: "complaint-proof",
-          });
+            checkComplaint(ctx, c.seat, pair.publicKey, vote.vss, vote.share_hashes, posting, bad),
+          ).toEqual({ ok: false, code: "complaint-proof" });
         },
       ),
       { numRuns: keyRuns },
@@ -469,7 +517,7 @@ describe("properties", () => {
     { timeout: 60_000 },
     () => {
       fc.assert(
-        fc.property(fc.uint8Array({ minLength: 1124, maxLength: 1300 }), (bytes) => {
+        fc.property(fc.uint8Array({ minLength: 1188, maxLength: 1400 }), (bytes) => {
           let v: unknown;
           try {
             v = decode(SHARE_CIPHERTEXT, bytes);
@@ -514,20 +562,20 @@ describe("input checks", () => {
   test("needs one key and one encapsulation per seat", () => {
     const sharing = shareVote(rules, [1, 0]);
     expect(() => encryptShares(ctx, sharing, keys.slice(0, 1))).toThrow(RangeError);
-    expect(() => encryptSharesWith(ctx, sharing, keys, [{ m: new Uint8Array(32), e: 1n }])).toThrow(
-      RangeError,
-    );
+    expect(() =>
+      encryptSharesWith(ctx, sharing, keys, [{ m: new Uint8Array(32), e: 1n, w: 1n }]),
+    ).toThrow(RangeError);
   });
 
-  test("refuses an ephemeral of 0 and a short ML-KEM message", () => {
+  test("refuses an ephemeral or proof nonce of 0 and a short ML-KEM message", () => {
     const sharing = shareVote(rules, [1, 0]);
-    const ok = { m: new Uint8Array(32), e: 1n };
-    expect(() =>
-      encryptSharesWith(ctx, sharing, keys, [ok, { m: new Uint8Array(32), e: 0n }]),
-    ).toThrow(RangeError);
-    expect(() =>
-      encryptSharesWith(ctx, sharing, keys, [ok, { m: new Uint8Array(31), e: 1n }]),
-    ).toThrow(RangeError);
+    const ok = { m: new Uint8Array(32), e: 1n, w: 1n };
+    for (const bad of [
+      { m: new Uint8Array(32), e: 0n, w: 1n },
+      { m: new Uint8Array(32), e: 1n, w: 0n },
+      { m: new Uint8Array(31), e: 1n, w: 1n },
+    ])
+      expect(() => encryptSharesWith(ctx, sharing, keys, [ok, bad])).toThrow(RangeError);
   });
 
   test("refuses a key that fails the modulus check or has an identity DH key", () => {

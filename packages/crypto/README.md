@@ -28,7 +28,7 @@ The prime-order group and hashes of ADR 0007 (option A), as thin wrappers over `
 
 - `scalar`: 32 bytes little-endian, below `GROUP_ORDER` (ℓ), a `bigint`; a value at or above ℓ is rejected, never reduced. `element` and `elementOrIdentity`: the 32-byte RFC 9496 encoding of a ristretto255 `Element`; `element` rejects the identity. Both fail with `non-canonical`. The element encoder accepts only points built by `@noble/curves` and re-decodes its own output, so it writes nothing but valid encodings.
 - `H(m)`: SHA-256. Plain hashes are `H(ds(tag, m))`.
-- `challenge(tag, t)`: a Fiat–Shamir challenge, RFC 9497 `HashToScalar` with the tag as `DST`; it accepts only specified Fiat–Shamir tags (today the two ballot-validity tags and the share-complaint tag). `hashToGroup(tag, m)`: RFC 9380 `hash_to_ristretto255` under a specified hash-to-curve tag. Both always pass the `DST` to `@noble/curves`, which would otherwise use its own.
+- `challenge(tag, t)`: a Fiat–Shamir challenge, RFC 9497 `HashToScalar` with the tag as `DST`; it accepts only specified Fiat–Shamir tags (today the two ballot-validity tags and the two share-encryption tags). `hashToGroup(tag, m)`: RFC 9380 `hash_to_ristretto255` under a specified hash-to-curve tag. Both always pass the `DST` to `@noble/curves`, which would otherwise use its own.
 - `G` (the RFC 9496 generator), `GENERATOR_H` (`h = hash_to_ristretto255("", DST = "abolish/v1/generator-h")`) and `IDENTITY`.
 
 ## Ballot commitments and validity proofs
@@ -48,9 +48,9 @@ Each trustee's shares travel under the hybrid KEM of [`docs/spec/share-encryptio
 
 - `kemKeygen()` makes a trustee's per-election key pair: `KEM_PUBLIC_KEY` (the ML-KEM encapsulation key, modulus-checked, and the DH key) and `KEM_SECRET_KEY` (the ML-KEM seed and the DH scalar), every secret from the CSPRNG.
 - `encryptShares(context, sharing, keys)` encrypts each seat's shares of a `VoteSharing` from `shareVote` to its registered key and returns the ciphertexts (`SHARE_CIPHERTEXT`), their hashes for `proveValidity` (`shareCiphertextHash`) and the encapsulation randomness, which the client keeps only until the voter casts or spoils.
-- `openShares(context, seat, secretKey, vss, ciphertext)` is a trustee's intake: `share-malformed`, `share-decrypt`, then `share-check`.
-- `checkPosting(seat, key, shareHashes, posting)` is anyone's check of a ciphertext the client posted with its ML-KEM message: `posting-malformed`, `posting-hash`, `posting-encapsulation`.
-- `proveComplaint(context, seat, keyPair, ciphertext)` reveals the DH value of a posted ciphertext with a Chaum–Pedersen proof (`COMPLAINT_PROOF`); `checkComplaint` checks the posting, the proof (`complaint-proof`) and that the shares really fail (`complaint-unfounded` otherwise).
+- `openShares(context, seat, secretKey, vss, ciphertext)` is a trustee's intake: `share-malformed`, `share-proof` (each ciphertext proves knowledge of its DH ephemeral, so no one can reuse another's), `share-decrypt`, then `share-check`.
+- `checkPosting(seat, key, shareHashes, posting)` is anyone's check of a ciphertext the client posted with its ML-KEM message: `posting-malformed`, `posting-hash`, `posting-proof`, `posting-encapsulation`.
+- `proveComplaint(context, seat, keyPair, vss, shareHashes, posting)` reveals the DH value of a posted ciphertext with a Chaum–Pedersen proof (`COMPLAINT_PROOF`), and refuses unless the posting passes and its shares fail the trustee's own intake; `checkComplaint` checks the posting, the proof (`complaint-proof`) and that the shares really fail (`complaint-unfounded` otherwise).
 
 `@noble/post-quantum` is self-audited only, allowed on testnets by the owner with an audit before mainnet (ADR 0002, Decision).
 

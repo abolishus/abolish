@@ -54,6 +54,7 @@ MAX_SEALED = 4 + 64 * MAX_OPTIONS + 16
 KEM_TAG = b"abolish/v1/kem/share"
 AAD_TAG = b"abolish/v1/kem/share-aad"
 CT_TAG = b"abolish/v1/share-ciphertext"
+EPHEMERAL_TAG = b"abolish/v1/fs/share-ephemeral"
 COMPLAINT_TAG = b"abolish/v1/fs/share-complaint"
 
 u8, u16, u32, scalar, element, ds, H = bv.u8, bv.u16, bv.u32, bv.scalar, bv.element, bv.ds, bv.H
@@ -453,38 +454,64 @@ def aad(definition_hash, seat, vss):
     return ds(AAD_TAG, definition_hash + u16(bv.BALLOT_RECORD_TYPE) + u8(bv.BALLOT_VERSION) + u8(seat) + bv.enc_vss(vss))
 
 
-def enc_ciphertext(ct_m, ct_dh, sealed):
-    return ct_m + element(ct_dh) + u32(len(sealed)) + sealed
+def enc_ciphertext(ct_m, ct_dh, c, z, sealed):
+    return ct_m + element(ct_dh) + scalar(c) + scalar(z) + u32(len(sealed)) + sealed
 
 
 def dec_ciphertext(b):
     """Strict decode of share_ciphertext; None on any failure."""
-    if len(b) < 1088 + 32 + 4:
+    head = 1088 + 32 + 64 + 4
+    if len(b) < head:
         return None
-    ct_m, dh_b, n = b[:1088], b[1088:1120], int.from_bytes(b[1120:1124], "big")
-    if n > MAX_SEALED or len(b) != 1124 + n:
+    ct_m, dh_b = b[:1088], b[1088:1120]
+    c, z = int.from_bytes(b[1120:1152], "little"), int.from_bytes(b[1152:1184], "little")
+    n = int.from_bytes(b[1184:1188], "big")
+    if c >= L or z >= L or n > MAX_SEALED or len(b) != head + n:
         return None
     if dh_b == bytes(32):
         return None
     p = grp.decode(dh_b)
     if p is None:
         return None
-    return {"ct_m": ct_m, "ct_dh": p, "sealed": b[1124:]}
+    return {"ct_m": ct_m, "ct_dh": p, "c": c, "z": z, "sealed": b[head:]}
 
 
 def share_hash(ct):
     return H(ds(CT_TAG, ct))
 
 
-def encrypt(definition_hash, seat, key, vss, shares_bytes, m, e):
-    """One seat's ciphertext; returns the encoding and the intermediate values."""
+def ephemeral_challenge(definition_hash, seat, dh, vss, ct_m, ct_dh, sealed, a):
+    t = (
+        definition_hash
+        + u16(bv.BALLOT_RECORD_TYPE)
+        + u8(bv.BALLOT_VERSION)
+        + u8(seat)
+        + element(dh)
+        + bv.enc_vss(vss)
+        + ct_m
+        + element(ct_dh)
+        + u32(len(sealed))
+        + sealed
+        + element(a, True)
+    )
+    return bv.hash_to_scalar(t, EPHEMERAL_TAG)
+
+
+def pok_ok(definition_hash, seat, dh, vss, ct):
+    a = grp.add(pt_mul(ct["z"], G), grp.neg(pt_mul(ct["c"], ct["ct_dh"])))
+    return ephemeral_challenge(definition_hash, seat, dh, vss, ct["ct_m"], ct["ct_dh"], ct["sealed"], a) == ct["c"]
+
+
+def encrypt(definition_hash, seat, key, vss, shares_bytes, m, e, w, dh_scalar=None):
+    """One seat's ciphertext; returns the encoding and the intermediate values. `dh_scalar` (a cheat) seals under another DH value."""
     ss_m, ct_m = encaps_internal(key["ek"], m)
     ct_dh = pt_mul(e, G)
-    ss_dh = pt_mul(e, key["dh"])
+    ss_dh = pt_mul(e if dh_scalar is None else dh_scalar, key["dh"])
     k = combine(ss_m, ss_dh, ct_dh, key["dh"])
     a = aad(definition_hash, seat, vss)
     sealed = aead_seal(k, NONCE, a, shares_bytes)
-    ct = enc_ciphertext(ct_m, ct_dh, sealed)
+    c = ephemeral_challenge(definition_hash, seat, key["dh"], vss, ct_m, ct_dh, sealed, pt_mul(w, G))
+    ct = enc_ciphertext(ct_m, ct_dh, c, (w + c * e) % L, sealed)
     return ct, {"kemSharedSecret": ss_m.hex(), "dhSharedSecret": element(ss_dh).hex(), "aeadKey": k.hex(), "associatedDataHash": H(a).hex()}
 
 
@@ -506,7 +533,7 @@ def dec_shares(b, m):
 
 
 def open_with(k, definition_hash, seat, vss, sealed):
-    """Decryption steps 3 and 4 with a known AEAD key: None if they pass, else the code."""
+    """Decryption steps 4 and 5 with a known AEAD key: None if they pass, else the code."""
     pt = aead_open(k, NONCE, aad(definition_hash, seat, vss), sealed)
     shares = None if pt is None else dec_shares(pt, len(vss))
     if shares is None:
@@ -520,12 +547,14 @@ def decrypt(definition_hash, seat, key, vss, ct_bytes):
     ct = dec_ciphertext(ct_bytes)
     if ct is None:
         return "share-malformed"
+    if not pok_ok(definition_hash, seat, key["dh"], vss, ct):
+        return "share-proof"
     ss_m = decaps_internal(key["dk"], ct["ct_m"])
     k = combine(ss_m, pt_mul(key["x"], ct["ct_dh"]), ct["ct_dh"], key["dh"])
     return open_with(k, definition_hash, seat, vss, ct["sealed"]) or "ok"
 
 
-def check_posting(seat, key, share_hashes, ct_bytes, m):
+def check_posting(definition_hash, seat, key, vss, share_hashes, ct_bytes, m):
     if len(m) != 32:
         return "posting-malformed", None
     ct = dec_ciphertext(ct_bytes)
@@ -533,6 +562,8 @@ def check_posting(seat, key, share_hashes, ct_bytes, m):
         return "posting-malformed", None
     if share_hash(ct_bytes) != share_hashes[seat - 1]:
         return "posting-hash", None
+    if not pok_ok(definition_hash, seat, key["dh"], vss, ct):
+        return "posting-proof", None
     ss_m, ct_m = encaps_internal(key["ek"], m)
     if ct_m != ct["ct_m"]:
         return "posting-encapsulation", None
@@ -544,11 +575,20 @@ def complaint_challenge(definition_hash, seat, dh, sh, ct_dh, d, a1, a2):
     return bv.hash_to_scalar(t, COMPLAINT_TAG)
 
 
-def prove_complaint(definition_hash, seat, key, ct_bytes, w):
+def raw_complaint(definition_hash, seat, key, ct_bytes, w):
+    """The complaint proof's arithmetic alone, without the trustee's preconditions (for invalid vectors)."""
     ct = dec_ciphertext(ct_bytes)
     d = pt_mul(key["x"], ct["ct_dh"])
     c = complaint_challenge(definition_hash, seat, key["dh"], share_hash(ct_bytes), ct["ct_dh"], d, pt_mul(w, G), pt_mul(w, ct["ct_dh"]))
     return {"dh": d, "c": c, "z": (w + c * key["x"]) % L}
+
+
+def prove_complaint(definition_hash, seat, key, vss, share_hashes, ct_bytes, m, w):
+    """A trustee's complaint: only for a posting that passes and whose shares fail its intake."""
+    code, _ = check_posting(definition_hash, seat, key, vss, share_hashes, ct_bytes, m)
+    assert code == "ok"
+    assert decrypt(definition_hash, seat, key, vss, ct_bytes) in ("share-decrypt", "share-check")
+    return raw_complaint(definition_hash, seat, key, ct_bytes, w)
 
 
 def enc_complaint(p):
@@ -556,7 +596,7 @@ def enc_complaint(p):
 
 
 def check_complaint(definition_hash, seat, key, vss, share_hashes, ct_bytes, m, proof):
-    code, passed = check_posting(seat, key, share_hashes, ct_bytes, m)
+    code, passed = check_posting(definition_hash, seat, key, vss, share_hashes, ct_bytes, m)
     if code != "ok":
         return code
     ct, ss_m = passed
@@ -599,15 +639,15 @@ def make_encrypted_ballot(label, ctx, votes, keys, cheat=None):
     rng = bv.Rng("encapsulation/" + label)
     cts, inter, enc_rand = [], [], []
     for seat in range(1, ctx["panelSize"] + 1):
-        m, e = rng.bytes32(), nonzero_scalar(rng)
+        m, e, w = rng.bytes32(), nonzero_scalar(rng), nonzero_scalar(rng)
         sb = bv.enc_shares(shares[seat - 1])
         if cheat is not None:
-            ct, iv = cheat(seat, sb, keys[seat - 1], vote["vss"], m, e)
+            ct, iv = cheat(seat, sb, keys[seat - 1], vote["vss"], m, e, w)
         else:
-            ct, iv = encrypt(ctx["definitionHash"], seat, keys[seat - 1], vote["vss"], sb, m, e)
+            ct, iv = encrypt(ctx["definitionHash"], seat, keys[seat - 1], vote["vss"], sb, m, e, w)
         cts.append(ct)
         inter.append(iv)
-        enc_rand.append({"m": m.hex(), "e": str(e)})
+        enc_rand.append({"m": m.hex(), "e": str(e), "w": str(w)})
     hashes = [share_hash(ct) for ct in cts]
     vote, randomness, _ = bv.make_ballot("ballot/" + label, ctx, votes, share_hashes=hashes)
     assert bv.check_validity(ctx, vote) == "ok"
@@ -664,39 +704,47 @@ def main():
     ballot("options-max", "MAX_OPTIONS: 64 options, k = n = 2; each sealed field is the 4116-byte maximum", wide, [1 if j % 5 == 0 else 0 for j in range(64)], "panel-2")
     ballot("trustees-max", "MAX_TRUSTEES: k = n = 16, seat 16 in the associated data", many, [1, 0], "panel-16")
 
-    def bad_shares(seat, sb, key, vss, m, e):
+    def bad_shares(seat, sb, key, vss, m, e, w):
         # Seat 2's shares with v + 1 in the first option, sealed correctly.
         if seat == 2:
             v = (int.from_bytes(sb[4:36], "little") + 1) % L
             sb = sb[:4] + scalar(v) + sb[36:]
-        return encrypt(plural["definitionHash"], seat, key, vss, sb, m, e)
+        return encrypt(plural["definitionHash"], seat, key, vss, sb, m, e, w)
 
-    def wrong_key(seat, sb, key, vss, m, e):
+    def wrong_key(seat, sb, key, vss, m, e, w):
         # Seat 2's ciphertext sealed under a key from the wrong DH value, so no one can open it.
-        ct, iv = encrypt(plural["definitionHash"], seat, key, vss, sb, m, e)
-        if seat != 2:
-            return ct, iv
-        ss_m, ct_m = encaps_internal(key["ek"], m)
-        k = combine(ss_m, pt_mul(e + 1, key["dh"]), pt_mul(e, G), key["dh"])
-        sealed = aead_seal(k, NONCE, aad(plural["definitionHash"], seat, vss), sb)
-        return enc_ciphertext(ct_m, pt_mul(e, G), sealed), dict(iv, aeadKey=k.hex())
+        return encrypt(plural["definitionHash"], seat, key, vss, sb, m, e, w, dh_scalar=e + 1 if seat == 2 else None)
 
-    def short_list(seat, sb, key, vss, m, e):
+    def short_list(seat, sb, key, vss, m, e, w):
         # Seat 1's plaintext lists m − 1 shares.
         if seat == 1:
             sb = u32(2) + sb[4 : 4 + 128]
-        return encrypt(plural["definitionHash"], seat, key, vss, sb, m, e)
+        return encrypt(plural["definitionHash"], seat, key, vss, sb, m, e, w)
 
     ballot("bad-share", "A dishonest client: seat 2's first share has v + 1, sealed correctly", plural, [1, 0, 0], "panel-3", bad_shares, lambda s: "share-check" if s == 2 else "ok")
     ballot("bad-seal", "A dishonest client: seat 2's shares sealed under a key from the wrong DH value", plural, [0, 0, 1], "panel-3", wrong_key, lambda s: "share-decrypt" if s == 2 else "ok")
     ballot("short-list", "A dishonest client: seat 1's plaintext has m − 1 shares", plural, [0, 0, 0], "panel-3", short_list, lambda s: "share-decrypt" if s == 1 else "ok")
+
+    victim = made["plurality"]["cts"][0]
+
+    def copy_ephemeral(seat, sb, key, vss, m, e, w):
+        # The attack the proof of knowledge stops: seat 1's ciphertext reuses the
+        # plurality ballot's ct_dh and proof with its own ML-KEM part and garbage,
+        # so that an honest complaint would reveal the victim's DH value.
+        ct, iv = encrypt(plural["definitionHash"], seat, key, vss, sb, m, e, w)
+        if seat != 1:
+            return ct, iv
+        _, ct_m = encaps_internal(key["ek"], m)
+        return ct_m + victim[1088:1184] + u32(len(sb) + 16) + bytes(len(sb) + 16), dict(iv, aeadKey=None)
+
+    ballot("copied-ephemeral", "An attacker's ballot: seat 1's ciphertext copies the plurality ballot's ct_dh and proof over its own ML-KEM part and a garbage seal", plural, [0, 1, 0], "panel-3", copy_ephemeral, lambda s: "share-proof" if s == 1 else "ok")
 
     # Decryptions under the wrong context or of altered ciphertexts.
     p = made["plurality"]
     other = made["bad-seal"]
     decrypt_failures = []
 
-    def fail(id_, desc, seat, key_seat, ct, definition_hash=None, vss=None, expect="share-decrypt"):
+    def fail(id_, desc, seat, key_seat, ct, definition_hash=None, vss=None, expect="share-proof"):
         dh_ = definition_hash or plural["definitionHash"]
         got = decrypt(dh_, seat, keys3[key_seat - 1], vss or p["vote"]["vss"], ct)
         assert got == expect, (id_, got)
@@ -722,6 +770,8 @@ def main():
     fail("flipped-tag", "The last byte of the AEAD tag flipped", 1, 1, flip(ct1, len(ct1) - 1))
     fail("flipped-mlkem", "The first byte of the ML-KEM ciphertext flipped: implicit rejection, then the AEAD fails", 1, 1, flip(ct1, 0))
     fail("flipped-dh", "ct_dh replaced by another valid element", 1, 1, ct1[:1088] + element(pt_mul(5, G)) + ct1[1120:])
+    fail("flipped-pok", "The proof's response z + 1", 1, 1, ct1[:1152] + scalar((int.from_bytes(ct1[1152:1184], "little") + 1) % L) + ct1[1184:])
+    fail("pok-z-l", "The proof's response is ℓ", 1, 1, ct1[:1152] + L.to_bytes(32, "little") + ct1[1184:], expect="share-malformed")
     fail("identity-dh", "ct_dh is the identity", 1, 1, ct1[:1088] + bytes(32) + ct1[1120:], expect="share-malformed")
     fail("truncated", "One byte short", 1, 1, ct1[:-1], expect="share-malformed")
 
@@ -729,7 +779,7 @@ def main():
     postings = []
 
     def posting(id_, desc, b, seat, ct, m, expect):
-        got, _ = check_posting(seat, b["keys"][seat - 1], [share_hash(c) for c in b["cts"]], ct, m)
+        got, _ = check_posting(b["ctx"]["definitionHash"], seat, b["keys"][seat - 1], b["vote"]["vss"], [share_hash(c) for c in b["cts"]], ct, m)
         assert got == expect, (id_, got)
         postings.append({"id": id_, "description": desc, "ballot": b["id"] if "id" in b else None, "seat": seat, "ciphertext": ct.hex(), "m": m.hex(), "result": expect})
 
@@ -744,6 +794,8 @@ def main():
     posting("short-m", "A 31-byte m", p, 1, p["cts"][0], m1[:31], "posting-malformed")
     posting("malformed", "ct_dh is the identity", p, 1, p["cts"][0][:1088] + bytes(32) + p["cts"][0][1120:], m1, "posting-malformed")
     posting("altered", "A flipped tag byte: the hash no longer matches", p, 1, flip(p["cts"][0], len(p["cts"][0]) - 1), m1, "posting-hash")
+    cp = made["copied-ephemeral"]
+    posting("copied-ephemeral", "The attacker's seat 1 ciphertext with its own m: its copied proof fails", cp, 1, cp["cts"][0], bytes.fromhex(cp["encRand"][0]["m"]), "posting-proof")
     bs = made["bad-share"]
     posting("pass-bad-share", "The dishonest client's seat 2 ciphertext: the public check passes", bs, 2, bs["cts"][1], bytes.fromhex(bs["encRand"][1]["m"]), "ok")
 
@@ -769,20 +821,28 @@ def main():
         b = made[b_id]
         w = nonzero_scalar(rng)
         ct = b["cts"][seat - 1]
-        proof = prove_complaint(b["ctx"]["definitionHash"], seat, b["keys"][seat - 1], ct, w)
+        mm = bytes.fromhex(b["encRand"][seat - 1]["m"])
+        hashes = [share_hash(c) for c in b["cts"]]
+        if expect == "ok":
+            proof = prove_complaint(b["ctx"]["definitionHash"], seat, b["keys"][seat - 1], b["vote"]["vss"], hashes, ct, mm, w)
+        else:
+            # An honest trustee never makes this one: its preconditions fail.
+            proof = raw_complaint(b["ctx"]["definitionHash"], seat, b["keys"][seat - 1], ct, w)
+            w = None
         complaint(b_id + "-complaint", desc, b, seat, ct, bytes.fromhex(b["encRand"][seat - 1]["m"]), proof, expect, w)
 
     b = made["bad-share"]
     ct, m = b["cts"][1], bytes.fromhex(b["encRand"][1]["m"])
-    good = prove_complaint(plural["definitionHash"], 2, b["keys"][1], ct, nonzero_scalar(rng))
+    good = prove_complaint(plural["definitionHash"], 2, b["keys"][1], b["vote"]["vss"], [share_hash(c) for c in b["cts"]], ct, m, nonzero_scalar(rng))
     complaint("proof-z", "The response z + 1", b, 2, ct, m, dict(good, z=(good["z"] + 1) % L), "complaint-proof")
     complaint("proof-c", "The challenge c + 1", b, 2, ct, m, dict(good, c=(good["c"] + 1) % L), "complaint-proof")
     complaint("proof-dh", "Another DH value with the same proof", b, 2, ct, m, dict(good, dh=grp.add(good["dh"], G)), "complaint-proof")
-    forged = prove_complaint(plural["definitionHash"], 2, b["keys"][0], ct, nonzero_scalar(rng))
+    forged = raw_complaint(plural["definitionHash"], 2, b["keys"][0], ct, nonzero_scalar(rng))
     complaint("other-key", "Proved with seat 1's key for seat 2's posting", b, 2, ct, m, forged, "complaint-proof")
     complaint("bad-posting", "A complaint about a posting that fails the public check", b, 2, ct, bytes.fromhex(b["encRand"][0]["m"]), good, "posting-encapsulation")
-    other_def = prove_complaint(H(b"another election"), 2, b["keys"][1], ct, nonzero_scalar(rng))
+    other_def = raw_complaint(H(b"another election"), 2, b["keys"][1], ct, nonzero_scalar(rng))
     complaint("other-definition", "Proved under another definition hash", b, 2, ct, m, other_def, "complaint-proof")
+    complaint("copied-ephemeral", "A complaint about the attacker's copied-ephemeral posting: void, so nothing is revealed", cp, 1, cp["cts"][0], bytes.fromhex(cp["encRand"][0]["m"]), raw_complaint(plural["definitionHash"], 1, cp["keys"][0], cp["cts"][0], nonzero_scalar(rng)), "posting-proof")
 
     # Codec rejections.
     decode = []
@@ -823,17 +883,19 @@ def main():
     rej("kem-secret-zero", "x = 0", "kem-secret", keys3[0]["seed"] + bytes(32), "non-canonical")
     rej("kem-secret-l", "x = ℓ", "kem-secret", keys3[0]["seed"] + L.to_bytes(32, "little"), "non-canonical")
     wct = made["options-max"]["cts"][0]
-    assert int.from_bytes(wct[1120:1124], "big") == MAX_SEALED
+    assert int.from_bytes(wct[1184:1188], "big") == MAX_SEALED
     accept("ciphertext-max", "A ciphertext whose sealed field is the 4116-byte maximum", "share-ciphertext", wct)
-    rej("ciphertext-over-max", "A sealed field of 4117 bytes", "share-ciphertext", wct[:1120] + u32(MAX_SEALED + 1) + wct[1124:] + b"\x00", "length-over-max")
+    rej("ciphertext-over-max", "A sealed field of 4117 bytes", "share-ciphertext", wct[:1184] + u32(MAX_SEALED + 1) + wct[1188:] + b"\x00", "length-over-max")
     rej("ciphertext-identity", "ct_dh is the identity", "share-ciphertext", ct1[:1088] + bytes(32) + ct1[1120:], "non-canonical")
+    rej("ciphertext-pok-c-l", "The proof's challenge is ℓ", "share-ciphertext", ct1[:1120] + L.to_bytes(32, "little") + ct1[1152:], "non-canonical")
     rej("ciphertext-non-canonical", "ct_dh is a non-canonical encoding (field element p)", "share-ciphertext", ct1[:1088] + (2**255 - 19).to_bytes(32, "little") + ct1[1120:], "non-canonical")
     rej("ciphertext-truncated", "One byte short", "share-ciphertext", ct1[:-1], "truncated")
     rej("ciphertext-trailing", "One byte after the last field", "share-ciphertext", ct1 + b"\x00", "trailing-bytes")
-    cp = bytes.fromhex(complaints[0]["proof"])
-    accept("complaint", "A proven complaint's proof", "complaint-proof", cp)
-    rej("complaint-identity", "dh is the identity", "complaint-proof", bytes(32) + cp[32:], "non-canonical")
-    rej("complaint-c-l", "c = ℓ", "complaint-proof", cp[:32] + L.to_bytes(32, "little") + cp[64:], "non-canonical")
+    cpp = bytes.fromhex(complaints[0]["proof"])
+    accept("complaint", "A proven complaint's proof", "complaint-proof", cpp)
+    rej("complaint-identity", "dh is the identity", "complaint-proof", bytes(32) + cpp[32:], "non-canonical")
+    rej("complaint-c-l", "c = ℓ", "complaint-proof", cpp[:32] + L.to_bytes(32, "little") + cpp[64:], "non-canonical")
+    rej("complaint-z-l", "z = ℓ", "complaint-proof", cpp[:64] + L.to_bytes(32, "little"), "non-canonical")
 
     data = {
         "format": "abolish-share-encryption-vectors/1",
@@ -854,6 +916,7 @@ def main():
             "kem": KEM_TAG.decode(),
             "aad": AAD_TAG.decode(),
             "ciphertext": CT_TAG.decode(),
+            "ephemeral": EPHEMERAL_TAG.decode(),
             "complaint": COMPLAINT_TAG.decode(),
         },
         "panels": {name: [key_json(k) for k in keys] for name, keys in panels.items()},

@@ -155,16 +155,15 @@ export function kemKeyPairWith(seed: Uint8Array, x: bigint): KemKeyPair {
 
 /** A fresh per-election KEM key pair, every secret from the CSPRNG (docs/spec/share-encryption.md, Trustee KEM key). */
 export function kemKeygen(): KemKeyPair {
-  let x = randomScalar();
-  // 0 has probability about 2⁻²⁵²; drawing again keeps x uniform on 1 to ℓ − 1.
-  while (x === 0n) x = randomScalar();
-  return kemKeyPairWith(randomBytes(MLKEM_SEED_LEN), x);
+  return kemKeyPairWith(randomBytes(MLKEM_SEED_LEN), nonZeroRandom());
 }
 
 /** The ciphertext carrying one trustee's shares (docs/spec/share-encryption.md, Ciphertext). */
 export const SHARE_CIPHERTEXT = struct([
   ["ct_mlkem", bytesFixed(MLKEM_CT_LEN)],
   ["ct_dh", element],
+  ["pok_c", scalar],
+  ["pok_z", scalar],
   ["sealed", bytesVar(MAX_SEALED)],
 ]);
 
@@ -211,6 +210,48 @@ function associatedData(ctx: ShareContext, seat: number, vss: CommittedVote["vss
   return ds("abolish/v1/kem/share-aad", w.finish());
 }
 
+/**
+ * The challenge of the ciphertext's proof of knowledge of `e = log_g ct_DH`.
+ * It binds everything the ciphertext is for, so no one but its maker can put
+ * its `ct_DH` in another ciphertext: otherwise a copy, posted with garbage,
+ * would make an honest trustee's complaint reveal `ct_DH^x` and so open the
+ * original (docs/spec/share-encryption.md, Ciphertext; T-15, T-41).
+ */
+function ephemeralChallenge(
+  ctx: ShareContext,
+  seat: number,
+  dh: Element,
+  vss: CommittedVote["vss"],
+  ctM: Uint8Array,
+  ctDh: Element,
+  sealed: Uint8Array,
+  a: Element,
+): bigint {
+  const w = new Writer();
+  w.bytes(ctx.definitionHash);
+  u16.write(w, BALLOT_RECORD_TYPE);
+  u8.write(w, BALLOT_VERSION);
+  u8.write(w, seat);
+  element.write(w, dh);
+  VSS.write(w, vss);
+  w.bytes(ctM);
+  element.write(w, ctDh);
+  bytesVar(MAX_SEALED).write(w, sealed);
+  elementOrIdentity.write(w, a);
+  return challenge("abolish/v1/fs/share-ephemeral", w.finish());
+}
+
+function ephemeralProofOk(
+  ctx: ShareContext,
+  seat: number,
+  dh: Element,
+  vss: CommittedVote["vss"],
+  ct: ShareCiphertext,
+): boolean {
+  const a = mul(G, ct.pok_z).subtract(mul(ct.ct_dh, ct.pok_c));
+  return ephemeralChallenge(ctx, seat, dh, vss, ct.ct_mlkem, ct.ct_dh, ct.sealed, a) === ct.pok_c;
+}
+
 // Each AEAD key seals exactly one message: it hashes a fresh 32-byte ML-KEM
 // message and a fresh ephemeral, so a fixed nonce never repeats under a key.
 const NONCE = new Uint8Array(12);
@@ -235,10 +276,14 @@ function open(
   }
 }
 
-/** The encapsulation randomness for one seat: the ML-KEM message `m` and the DH ephemeral `e`. */
+/**
+ * The encapsulation randomness for one seat: the ML-KEM message `m`, the DH
+ * ephemeral `e` and the nonce `w` of the proof of knowledge of `e`.
+ */
 export interface ShareEncapsulation {
   readonly m: Uint8Array;
   readonly e: bigint;
+  readonly w: bigint;
 }
 
 /**
@@ -273,23 +318,42 @@ export function encryptSharesWith(
     // Round-trips the key through its codec: the modulus check and a
     // non-identity DH key, whatever the caller passed (T-39).
     const k = decode(KEM_PUBLIC_KEY, encode(KEM_PUBLIC_KEY, key));
-    const { m, e } = randomness[i] as ShareEncapsulation;
+    const { m, e, w } = randomness[i] as ShareEncapsulation;
     if (!(m instanceof Uint8Array) || m.length !== MLKEM_MSG_LEN)
       throw new RangeError("encrypt: m must be 32 bytes");
     if (typeof e !== "bigint" || e <= 0n || e >= GROUP_ORDER)
       throw new RangeError("encrypt: e must be a scalar from 1 to ℓ − 1");
+    if (typeof w !== "bigint" || w <= 0n || w >= GROUP_ORDER)
+      throw new RangeError("encrypt: w must be a scalar from 1 to ℓ − 1");
     const { cipherText, sharedSecret } = ml_kem768.encapsulate(k.ek, m);
     const ctDh = G.multiply(e);
     const key2 = combine(sharedSecret, k.dh.multiply(e), ctDh, k.dh);
     const aad = associatedData(ctx, i + 1, sharing.vss);
     const plain = encode(SHARES, sharing.shares[i] as readonly Share[]);
     const sealed = chacha20poly1305(key2, NONCE, aad).encrypt(plain);
-    return encode(SHARE_CIPHERTEXT, { ct_mlkem: cipherText, ct_dh: ctDh, sealed });
+    const pokC = ephemeralChallenge(
+      ctx,
+      i + 1,
+      k.dh,
+      sharing.vss,
+      cipherText,
+      ctDh,
+      sealed,
+      G.multiply(w),
+    );
+    const pokZ = (w + pokC * e) % GROUP_ORDER;
+    return encode(SHARE_CIPHERTEXT, {
+      ct_mlkem: cipherText,
+      ct_dh: ctDh,
+      pok_c: pokC,
+      pok_z: pokZ,
+      sealed,
+    });
   });
   return {
     ciphertexts,
     hashes: ciphertexts.map(shareCiphertextHash),
-    randomness: randomness.map(({ m, e }) => ({ m: Uint8Array.from(m), e })),
+    randomness: randomness.map(({ m, e, w }) => ({ m: Uint8Array.from(m), e, w })),
   };
 }
 
@@ -309,15 +373,18 @@ export function encryptShares(
     ctx,
     sharing,
     keys,
-    keys.map(() => {
-      let e = randomScalar();
-      while (e === 0n) e = randomScalar();
-      return { m: randomBytes(MLKEM_MSG_LEN), e };
-    }),
+    keys.map(() => ({ m: randomBytes(MLKEM_MSG_LEN), e: nonZeroRandom(), w: nonZeroRandom() })),
   );
 }
 
-export type OpenCode = "share-malformed" | "share-decrypt" | "share-check";
+function nonZeroRandom(): bigint {
+  let v = randomScalar();
+  // 0 has probability about 2⁻²⁵²; drawing again keeps v uniform on 1 to ℓ − 1.
+  while (v === 0n) v = randomScalar();
+  return v;
+}
+
+export type OpenCode = "share-malformed" | "share-proof" | "share-decrypt" | "share-check";
 
 export type OpenResult =
   | { readonly ok: true; readonly shares: readonly Share[] }
@@ -346,12 +413,14 @@ export function openShares(
   } catch {
     return { ok: false, code: "share-malformed" };
   }
+  const dh = G.multiply(secretKey.x);
+  if (!ephemeralProofOk(ctx, seat, dh, vss, ct)) return { ok: false, code: "share-proof" };
   const { secretKey: dk } = ml_kem768.keygen(secretKey.seed);
   // FIPS 203 Decaps: implicit rejection returns a pseudorandom secret for a
   // ciphertext that fails re-encryption, so the AEAD then fails.
   const ssM = ml_kem768.decapsulate(ct.ct_mlkem, dk);
   dk.fill(0);
-  const key = combine(ssM, ct.ct_dh.multiply(secretKey.x), ct.ct_dh, G.multiply(secretKey.x));
+  const key = combine(ssM, ct.ct_dh.multiply(secretKey.x), ct.ct_dh, dh);
   ssM.fill(0);
   const shares = open(key, associatedData(ctx, seat, vss), ct.sealed, vss.length);
   key.fill(0);
@@ -366,15 +435,21 @@ export interface Posting {
   readonly m: Uint8Array;
 }
 
-export type PostingCode = "posting-malformed" | "posting-hash" | "posting-encapsulation";
+export type PostingCode =
+  | "posting-malformed"
+  | "posting-hash"
+  | "posting-proof"
+  | "posting-encapsulation";
 
 export type PostingResult =
   | { readonly ok: true }
   | { readonly ok: false; readonly code: PostingCode };
 
 function postingCheck(
+  ctx: ShareContext,
   seat: number,
   key: KemPublicKey,
+  vss: CommittedVote["vss"],
   shareHashes: CommittedVote["share_hashes"],
   posting: Posting,
 ):
@@ -385,6 +460,7 @@ function postingCheck(
       readonly ssM: Uint8Array;
     }
   | { readonly ok: false; readonly code: PostingCode } {
+  checkContext(ctx);
   checkSeat(seat, shareHashes.length);
   const k = decode(KEM_PUBLIC_KEY, encode(KEM_PUBLIC_KEY, key));
   let ct: ShareCiphertext;
@@ -398,6 +474,7 @@ function postingCheck(
   const expected = shareHashes[seat - 1] as Uint8Array;
   if (!bytesEqual(shareCiphertextHash(posting.ciphertext), expected))
     return { ok: false, code: "posting-hash" };
+  if (!ephemeralProofOk(ctx, seat, k.dh, vss, ct)) return { ok: false, code: "posting-proof" };
   // FIPS 203 Encaps_internal, used only to verify: m determines the ML-KEM
   // ciphertext, so only the client that made it can supply a passing m.
   const { cipherText, sharedSecret } = ml_kem768.encapsulate(k.ek, posting.m);
@@ -408,17 +485,19 @@ function postingCheck(
 /**
  * The public check of a posted ciphertext (docs/spec/share-encryption.md,
  * Public posting): it decodes, hashes to the ballot's share hash for its seat,
- * and its ML-KEM message re-encapsulates to its ML-KEM ciphertext under the
- * seat's registered key. A posting that fails is ignored; it never excludes a
- * ballot.
+ * its proof of knowledge of the ephemeral verifies, and its ML-KEM message
+ * re-encapsulates to its ML-KEM ciphertext under the seat's registered key. A
+ * posting that fails is ignored; it never excludes a ballot.
  */
 export function checkPosting(
+  ctx: ShareContext,
   seat: number,
   key: KemPublicKey,
+  vss: CommittedVote["vss"],
   shareHashes: CommittedVote["share_hashes"],
   posting: Posting,
 ): PostingResult {
-  const r = postingCheck(seat, key, shareHashes, posting);
+  const r = postingCheck(ctx, seat, key, vss, shareHashes, posting);
   return r.ok ? { ok: true } : r;
 }
 
@@ -466,22 +545,31 @@ export function proveComplaintWith(
   ctx: ShareContext,
   seat: number,
   keyPair: KemKeyPair,
-  ciphertext: Uint8Array,
+  vss: CommittedVote["vss"],
+  shareHashes: CommittedVote["share_hashes"],
+  posting: Posting,
   w: bigint,
 ): ComplaintProof {
-  checkContext(ctx);
-  checkSeat(seat, MAX_TRUSTEES);
   checkSecretKey(keyPair.secretKey);
   if (typeof w !== "bigint" || w <= 0n || w >= GROUP_ORDER)
     throw new RangeError("complaint: w must be a scalar from 1 to ℓ − 1");
   const { x } = keyPair.secretKey;
-  const ct = decode(SHARE_CIPHERTEXT, ciphertext);
+  if (!G.multiply(x).equals(keyPair.publicKey.dh))
+    throw new RangeError("complaint: the key pair doesn't match");
+  // Only a posting that passes the public check, and whose shares fail this
+  // trustee's own intake at decryption or the share check: the DH value is
+  // revealed for nothing else (ADR 0002, Complaints).
+  const p = postingCheck(ctx, seat, keyPair.publicKey, vss, shareHashes, posting);
+  if (!p.ok) throw new RangeError(`complaint: the posting fails (${p.code})`);
+  const intake = openShares(ctx, seat, keyPair.secretKey, vss, posting.ciphertext);
+  if (intake.ok) throw new RangeError("complaint: the posted shares are valid");
+  const ct = p.ct;
   const d = ct.ct_dh.multiply(x);
   const c = complaintChallenge(
     ctx,
     seat,
-    G.multiply(x),
-    shareCiphertextHash(ciphertext),
+    keyPair.publicKey.dh,
+    shareHashes[seat - 1] as Uint8Array,
     ct.ct_dh,
     d,
     G.multiply(w),
@@ -492,20 +580,21 @@ export function proveComplaintWith(
 
 /**
  * A trustee's complaint about a posted ciphertext whose share is invalid
- * (docs/spec/share-encryption.md, Complaints): it reveals only the DH value,
- * never any ML-KEM output (ADR 0002, Complaints). A trustee complains only
- * about a posting that passes the public check and whose shares fail its own
- * intake check; each complaint answers one static-DH query (docs/spec/group.md).
+ * (docs/spec/share-encryption.md, Complaints): it reveals only the DH value
+ * `ct_DH^x`, which the poster, having proved it knows `e`, can already
+ * compute; never any ML-KEM output (ADR 0002, Complaints). It refuses unless
+ * the posting passes the public check and the shares fail this trustee's
+ * intake at decryption or the share check.
  */
 export function proveComplaint(
   ctx: ShareContext,
   seat: number,
   keyPair: KemKeyPair,
-  ciphertext: Uint8Array,
+  vss: CommittedVote["vss"],
+  shareHashes: CommittedVote["share_hashes"],
+  posting: Posting,
 ): ComplaintProof {
-  let w = randomScalar();
-  while (w === 0n) w = randomScalar();
-  return proveComplaintWith(ctx, seat, keyPair, ciphertext, w);
+  return proveComplaintWith(ctx, seat, keyPair, vss, shareHashes, posting, nonZeroRandom());
 }
 
 export type ComplaintCode = PostingCode | "complaint-proof" | "complaint-unfounded";
@@ -531,8 +620,7 @@ export function checkComplaint(
   posting: Posting,
   complaint: ComplaintProof,
 ): ComplaintResult {
-  checkContext(ctx);
-  const p = postingCheck(seat, key, shareHashes, posting);
+  const p = postingCheck(ctx, seat, key, vss, shareHashes, posting);
   if (!p.ok) return p;
   const { dh: d, c, z } = decode(COMPLAINT_PROOF, encode(COMPLAINT_PROOF, complaint));
   const ctDh = p.ct.ct_dh;

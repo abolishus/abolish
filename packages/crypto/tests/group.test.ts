@@ -312,13 +312,13 @@ describe("docs/spec/vectors/hash.json", () => {
   };
   const ascii = (s: string) => Uint8Array.from(s, (c) => c.charCodeAt(0));
 
-  test("is an abolish-hash-vectors/1 file with all 18 vectors", () => {
+  test("is an abolish-hash-vectors/1 file with all 21 vectors", () => {
     expect(file.format).toBe("abolish-hash-vectors/1");
     expect(file.vectors.map((v) => v.function)).toEqual([
       "H",
       "H",
       "hash-to-group",
-      ...Array<string>(15).fill("hash-to-scalar"),
+      ...Array<string>(18).fill("hash-to-scalar"),
     ]);
     expect(new Set(file.vectors.map((v) => v.id)).size).toBe(file.vectors.length);
   });

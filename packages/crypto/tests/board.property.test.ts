@@ -470,9 +470,9 @@ describe("board checks", () => {
         payload: recordOf(2, new Uint8Array()),
       }),
     ];
-    const [a] = checkpointsFor(entries, 0);
-    if (a === undefined) throw new Error("unreachable");
-    const cp = a.checkpoint;
+    const [a0] = checkpointsFor(entries, 0);
+    if (a0 === undefined) throw new Error("unreachable");
+    const cp = a0.checkpoint;
     const board = checkBoard(ELECTION, entries, 1);
     const verify = (a: Anchor) => verifyBoard(ELECTION, entries, 1, [a], clockFor(0), closedAt(0));
     expect(() => verify(anchorOf({ ...cp, root: cp.root.slice(1) }))).toThrow(EncodeError);
@@ -480,6 +480,10 @@ describe("board checks", () => {
     expect(checkpointOf(board, 0)).toEqual(cp);
     expect(() => checkpointOf(board, -1)).toThrow(RangeError);
     expect(() => checkBoard(ELECTION.slice(1), entries, 1)).toThrow(RangeError);
+    // A malformed id is the caller's bug, never an election failure.
+    expect(() =>
+      verifyBoard(ELECTION.slice(1), entries, 1, [a0], clockFor(0), closedAt(0)),
+    ).toThrow(RangeError);
   });
 
   test("only anchors within their period's window count, and never after the seal", () => {

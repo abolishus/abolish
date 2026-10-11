@@ -342,6 +342,7 @@ export function verifyBoard(
   if (typeof now !== "bigint") throw new TypeError("now must be a bigint");
   const c = checkClock(clock);
   const id = copyBytes(electionId, "electionId");
+  if (id.length !== 32) throw new RangeError("electionId must be 32 bytes");
   // Re-encoded and decoded, so every field is well formed and copied; the
   // index of each counted anchor is its position in `anchors`.
   const counted: [number, Checkpoint][] = [];

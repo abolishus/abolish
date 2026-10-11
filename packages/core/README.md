@@ -22,6 +22,17 @@ One append-only, hash-chained board per election ([`docs/spec/board.md`](../../d
 - Field lengths and ranges follow the board entry's layout, with payloads from 3 bytes (a record header) to `MAX_BOARD_PAYLOAD` whose record type is one the board allows.
 - Both trigger functions run with a fixed `search_path` ending in `pg_temp`, so no caller can shadow the table with a temporary one.
 
+### Appending (`src/board.ts`)
+
+`appendEntry(sql, electionId, segment, payload)` appends the next entry of an election's board and returns its index, entry hash and link:
+
+- The entry is encoded, hashed and chained by `@abolishus/crypto` (`encodeBoardEntry`, `boardEntryHash`, `chainLink`), the same code the verifier runs.
+- Appends to one board are serialised by a transaction-scoped advisory lock on the election, so concurrent callers get consecutive indexes.
+- It refuses, with a typed `AppendError`, an entry that doesn't encode (a payload type the board doesn't allow, a bad election ID or segment), a segment below the previous entry's, and an entry that breaks the order of spoiled-ballot openings (within a segment they come last, in increasing byte order; T-42, T-47).
+- It checks only the envelope. Whether a payload may be boarded (it must decode strictly under the election's profile) is the caller's to decide, at admission (P2-3).
+
+`readBoard(sql, electionId)` returns the board as encoded entries in index order, the input to `checkBoard` and the verifier, which recompute every hash rather than trusting the stored columns.
+
 ### No joins (T-10)
 
 Accounts and ballots never join. The tests fail on a table missing from `TABLE_CLASSES`, on any foreign key that starts or ends at a board table, and on a board column with an account-like name.

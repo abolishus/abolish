@@ -306,6 +306,9 @@ importers:
 
   packages/core:
     dependencies:
+      '@abolishus/crypto':
+        specifier: workspace:*
+        version: link:../crypto
       drizzle-orm:
         specifier: 'catalog:'
         version: 0.45.3(postgres@3.4.9)

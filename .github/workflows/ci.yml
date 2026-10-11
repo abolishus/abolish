@@ -118,6 +118,12 @@ jobs:
             echo "::error file=docs/PROJECT_BRIEF.md::the project brief is kept verbatim; agents never edit it"
             exit 1
           fi
+      # The verifier's pack in the gated check needs @abolishus/crypto's types
+      # in dist/. --no-config, because this runs before the gated check has
+      # ruled out a build config (gated.ts only packs once none is found).
+      - name: Build the workspace libraries other packages import
+        working-directory: packages/crypto
+        run: vp pack --no-config
       # packages/crypto resolves only to @noble/* (lockfile closure included),
       # the verifier only to gated packages and @noble/*; src imports match
       # what's declared; no symlinks or submodules under gated paths; the

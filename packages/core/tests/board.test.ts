@@ -36,7 +36,7 @@ function chain(n: number, electionId = b32()): Row[] {
       electionId,
       idx: BigInt(i),
       segment: BigInt(Math.floor(i / 2)),
-      payload: Uint8Array.of(0, 2, 1, i & 0xff),
+      payload: Uint8Array.of(0, 2, 1, i & 0xff), // a ballot record header, then a byte
       entryHash: b32(),
       prevLink,
       link,
@@ -173,11 +173,45 @@ describe("append order", () => {
       (r) => [{ ...r[0]!, payload: new Uint8Array(1048577) }],
     ],
     ["a short link", "23514", (r) => [{ ...r[0]!, link: new Uint8Array(31) }]],
+    [
+      "an election definition as payload",
+      "23514",
+      (r) => [{ ...r[0]!, payload: Uint8Array.of(0, 1, 1) }],
+    ],
+    [
+      "a display-text record as payload",
+      "23514",
+      (r) => [{ ...r[0]!, payload: Uint8Array.of(0, 9, 1) }],
+    ],
   ];
   test.each(bad)("rejects %s", async (_, code, mutate) => {
     const rows = mutate(chain(3));
     expect(await failsWith(insert(app, rows))).toBe(code);
     expect(await count(db.admin, rows[0]!.electionId)).toBe(0);
+  });
+
+  test("a temporary table can't stand in for the previous entry", async () => {
+    // pg_temp comes first in an unpinned search_path, so this would fake
+    // entry 99 if the trigger resolved board_entries through the caller's path.
+    const [e, prevLink] = [b32(), b32()];
+    await app`CREATE TEMP TABLE board_entries (LIKE ${app(db.schema)}.board_entries)`;
+    await app`INSERT INTO pg_temp.board_entries VALUES (${e}, 99, 0, ${Uint8Array.of(0, 2, 1)}, ${ZERO}, ${ZERO}, ${prevLink})`;
+    const row = {
+      electionId: e,
+      idx: 100n,
+      segment: 0n,
+      payload: Uint8Array.of(0, 2, 1),
+      entryHash: b32(),
+      prevLink,
+      link: b32(),
+    };
+    expect(
+      await failsWith(
+        app`INSERT INTO ${app(db.schema)}.board_entries VALUES (${row.electionId}, ${row.idx.toString()}, 0, ${row.payload}, ${row.entryHash}, ${row.prevLink}, ${row.link})`,
+      ),
+    ).toBe("23514");
+    await app`DROP TABLE pg_temp.board_entries`;
+    expect(await count(db.admin, e)).toBe(0);
   });
 
   test("only a well-formed next entry is ever accepted", async () => {

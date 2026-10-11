@@ -17,3 +17,14 @@ BEGIN
 EXCEPTION WHEN duplicate_object OR unique_violation THEN NULL;
 END
 $$;
+-- A role that already existed keeps whatever it had, so pin the attributes
+-- and refuse a runtime role that can act as the owner.
+ALTER ROLE abolish_migrator NOLOGIN NOSUPERUSER NOCREATEROLE NOCREATEDB NOBYPASSRLS NOREPLICATION;
+ALTER ROLE abolish_app NOLOGIN NOSUPERUSER NOCREATEROLE NOCREATEDB NOBYPASSRLS NOREPLICATION;
+DO $$
+BEGIN
+  IF pg_has_role('abolish_app', 'abolish_migrator', 'MEMBER') THEN
+    RAISE EXCEPTION 'abolish_app must not be a member of abolish_migrator';
+  END IF;
+END
+$$;

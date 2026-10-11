@@ -30,6 +30,14 @@ test("no foreign key starts or ends at a board table", async () => {
   expect(fks.filter((f) => board.has(bare(f["src"])) || board.has(bare(f["dst"])))).toEqual([]);
 });
 
+test("the runtime role can't act as the owner", async () => {
+  const [r] = await db.admin`
+    SELECT pg_has_role('abolish_app', 'abolish_migrator', 'MEMBER') AS member,
+      rolsuper OR rolcreaterole OR rolcreatedb OR rolbypassrls OR rolcanlogin AS elevated
+    FROM pg_roles WHERE rolname = 'abolish_app'`;
+  expect(r).toEqual({ member: false, elevated: false });
+});
+
 test("no board column looks like an account or a person", async () => {
   const cols = await db.admin`
     SELECT table_name, column_name FROM information_schema.columns

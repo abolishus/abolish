@@ -19,7 +19,8 @@ One append-only, hash-chained board per election ([`docs/spec/board.md`](../../d
 - `abolish_app` holds `SELECT` and `INSERT` only.
 - Triggers reject every `UPDATE`, `DELETE` and `TRUNCATE`, for every role, the owner included.
 - An insert must be the next entry: index 0 chaining from 32 zero bytes, or the index after the last one, with a segment no smaller than the last one's and `prev_link` equal to its `link`.
-- Field lengths and ranges follow the board entry's layout, with payloads from 3 bytes (a record header) to `MAX_BOARD_PAYLOAD`.
+- Field lengths and ranges follow the board entry's layout, with payloads from 3 bytes (a record header) to `MAX_BOARD_PAYLOAD` whose record type is one the board allows.
+- Both trigger functions run with a fixed `search_path` ending in `pg_temp`, so no caller can shadow the table with a temporary one.
 
 ### No joins (T-10)
 

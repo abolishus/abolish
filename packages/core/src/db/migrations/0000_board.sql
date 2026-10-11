@@ -9,7 +9,12 @@ CREATE TABLE board_entries (
   election_id bytea NOT NULL CHECK (octet_length(election_id) = 32),
   idx bigint NOT NULL CHECK (idx >= 0),
   segment bigint NOT NULL CHECK (segment BETWEEN 0 AND 4294967295),
-  payload bytea NOT NULL CHECK (octet_length(payload) BETWEEN 3 AND 1048576),
+  -- A complete record of a type allowed on the board (board.md, Allowed
+  -- payloads): the first two bytes are its big-endian u16 record_type.
+  payload bytea NOT NULL CHECK (
+    octet_length(payload) BETWEEN 3 AND 1048576
+    AND substring(payload FROM 1 FOR 2) IN ('\x0002', '\x0003', '\x0005', '\x0006', '\x0008')
+  ),
   entry_hash bytea NOT NULL CHECK (octet_length(entry_hash) = 32),
   prev_link bytea NOT NULL CHECK (octet_length(prev_link) = 32),
   link bytea NOT NULL CHECK (octet_length(link) = 32),
@@ -66,6 +71,16 @@ $$;
 CREATE TRIGGER board_entries_append_only_in_order
   BEFORE INSERT ON board_entries
   FOR EACH ROW EXECUTE FUNCTION board_entries_check_append();
+
+-- The functions resolve names through a fixed search_path with pg_temp last:
+-- otherwise a caller could shadow board_entries with a temporary table and
+-- fake the previous entry the append check reads.
+DO $$
+BEGIN
+  EXECUTE format('ALTER FUNCTION board_entries_check_append() SET search_path = pg_catalog, %I, pg_temp', current_schema());
+  EXECUTE format('ALTER FUNCTION board_entries_reject_change() SET search_path = pg_catalog, %I, pg_temp', current_schema());
+END
+$$;
 
 REVOKE ALL ON board_entries FROM PUBLIC;
 REVOKE ALL ON FUNCTION board_entries_reject_change() FROM PUBLIC;

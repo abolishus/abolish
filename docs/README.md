@@ -8,3 +8,4 @@ This folder is an Obsidian vault. Link with `[[wikilinks]]`.
 - `adr/`: architecture decision records ([[0000-template]])
 - `spec/`: protocol and canonical-encoding spec for independent verifiers
 - `runbooks/`: operational procedures
+- [[moderation-policy]]: what moderation may touch (poll content, never results), its grounds and its public log

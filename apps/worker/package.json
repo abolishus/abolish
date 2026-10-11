@@ -16,7 +16,6 @@
   },
   "dependencies": {
     "@abolishus/core": "workspace:*",
-    "@abolishus/crypto": "workspace:*",
     "bullmq": "catalog:",
     "ioredis": "catalog:",
     "postgres": "catalog:",

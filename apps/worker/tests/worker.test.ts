@@ -88,7 +88,7 @@ async function expectNoKeyHolds(keyPrefix: string, marker: string) {
                 ? JSON.stringify(await connection.xrange(key, "-", "+"))
                 : type === "set"
                   ? JSON.stringify(await connection.smembers(key))
-                  : `unchecked ${type}`;
+                  : expect.unreachable(`a key of unchecked type ${type}`);
     expect(dump, key).not.toContain(marker);
   }
 }
@@ -124,6 +124,18 @@ test("a job with data its schema doesn't name fails unhandled, and its data is n
   expect(JSON.stringify(lines)).not.toContain(MARKER);
   // removeOnFail: nothing in Redis still holds the data.
   await expectNoKeyHolds(prefix, MARKER);
+});
+
+test("a job named other than its queue's key fails unhandled", async () => {
+  await audits.add("audit", {});
+  expect(await outcome()).toEqual([
+    {
+      queue: "{board-audit}",
+      outcome: "failed",
+      error: "invalid-job-data",
+      ms: expect.any(Number),
+    },
+  ]);
 });
 
 test("every key the worker uses is under its queue's hash tag", async () => {

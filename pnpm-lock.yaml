@@ -303,9 +303,6 @@ importers:
       '@abolishus/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@abolishus/crypto':
-        specifier: workspace:*
-        version: link:../../packages/crypto
       bullmq:
         specifier: 'catalog:'
         version: 6.3.11(ioredis@5.11.1)

@@ -45,8 +45,10 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
       async (job): Promise<void> => {
         // Whatever wrote to Redis, a handler sees only the fields its
         // queue's schema names.
+        // The name is kept in the events stream after the job is gone, so it
+        // must be the queue's key, never something a producer chose.
         const data = spec.data.safeParse(job.data);
-        if (!data.success) throw new JobError("invalid-job-data");
+        if (!data.success || job.name !== key) throw new JobError("invalid-job-data");
         try {
           await handlers[key](ctx, data.data);
         } catch (e) {
@@ -86,8 +88,9 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
   // Unheard, BullMQ prints the error and its stack to stderr.
   audits.on("error", () => log({ queue: QUEUES.boardAudit.name, error: "worker" }));
   const close = async () => {
-    await Promise.all(workers.map(({ worker }) => worker.close()));
+    const closed = await Promise.allSettled(workers.map(({ worker }) => worker.close()));
     await audits.close();
+    for (const c of closed) if (c.status === "rejected") throw c.reason;
   };
   try {
     await audits.upsertJobScheduler(

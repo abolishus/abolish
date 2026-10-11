@@ -223,6 +223,14 @@
       "head": "102",
       "opensAt": "1800003624",
       "l1RefMin": "102"
+    },
+    {
+      "id": "ref-min-low-not-before",
+      "description": "low must be block 0 or before the window",
+      "low": "104",
+      "head": "109",
+      "opensAt": "1800003636",
+      "error": "low-not-before-window"
     }
   ],
   "references": [

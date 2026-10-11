@@ -66,7 +66,7 @@ As C, but within one block the higher sequence number counts, instead of a tie.
 
 ## Recommendation
 
-**C.** It is the only option that meets all of R1 to R6: A and B fail R3, B fails R2, and D reopens the dead zone that ties close. Its costs are 40 bytes per ballot, a wait for L1 finality before a closed election can be verified, and an inherent last-moment window that is about 36 seconds longer than with no rule at all.
+**C.** It is the only option that meets R1 to R5, and R6 once P1-18's close rule accounts for its wait: A and B fail R3, B fails R2, and D reopens the dead zone that ties close. Its costs are 40 bytes per ballot, a wait for L1 finality before a closed election can be verified, and an inherent last-moment window that is about 36 seconds longer than with no rule at all.
 
 What would change it: an L2 with fast, operator-independent finality whose block hashes contracts can read (the reference could then be checked on chain), or an owner decision to adopt deniable re-voting with hidden nullifiers, which needs its own ADR.
 

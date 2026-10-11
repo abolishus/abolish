@@ -48,7 +48,8 @@ interface RevotingVectors {
     readonly low: string;
     readonly head: string;
     readonly opensAt: string;
-    readonly l1RefMin: string | null;
+    readonly l1RefMin?: string | null;
+    readonly error?: string;
   }[];
   readonly references: readonly {
     readonly id: string;
@@ -161,6 +162,12 @@ describe("revoting vectors (docs/spec/vectors/revoting.json)", () => {
 
   test.each(vectors.refMins)("l1_ref_min: $id", (v) => {
     const low = decimal(v.low);
+    if (v.error !== undefined) {
+      expect(() => l1RefMin(finalized(low, decimal(v.head)), low, decimal(v.opensAt))).toThrow(
+        RangeError,
+      );
+      return;
+    }
     const expected = v.l1RefMin === null ? undefined : decimal(v.l1RefMin);
     expect(l1RefMin(finalized(low, decimal(v.head)), low, decimal(v.opensAt))).toBe(expected);
   });

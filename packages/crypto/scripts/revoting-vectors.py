@@ -238,6 +238,18 @@ def main():
             }
         )
 
+    # A `low` that isn't before the window could hide the answer below it.
+    ref_mins.append(
+        {
+            "id": "ref-min-low-not-before",
+            "description": "low must be block 0 or before the window",
+            "low": "104",
+            "head": "109",
+            "opensAt": str(ts(103) + 3600),
+            "error": "low-not-before-window",
+        }
+    )
+
     nu = [int.from_bytes(det("nullifier", i), "big") % R for i in range(4)]
     m = [det("message", i) for i in range(8)]
     selection_cases = [

@@ -3931,6 +3931,64 @@
       }
     },
     {
+      "id": "checkpoint-split-before-missing",
+      "description": "A checkpoint with a wrong head is found from a short copy even when a larger checkpoint is missing from it",
+      "electionId": "ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d",
+      "now": "1800032401",
+      "entries": [
+        "000701ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d0000000000000000000000000000000b000501636572656d6f6e79",
+        "000701ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d0000000000000001000000000000000f000801726567697374726174696f6e",
+        "000701ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d0000000000000002000000010000000b00020162616c6c6f740001",
+        "000701ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d0000000000000003000000010000000b00020162616c6c6f740002",
+        "000701ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d0000000000000004000000010000000400030101",
+        "000701ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d000000000000000500000001000000050003010100",
+        "000701ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d0000000000000006000000010000000400030102",
+        "000701ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d0000000000000007000000040000000b00020162616c6c6f740003"
+      ],
+      "checkpoints": [
+        {
+          "electionId": "ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d",
+          "segment": "1",
+          "size": "7",
+          "head": "c8cd5d204649795025a967df6adcd7b1d4c180becf883f9dbd9718e51b24809d",
+          "root": "a963173d1bff718f9c81a1ef02e075d92ecbc39c70e70b06d8e7a2921f8b75db",
+          "hash": "d00449bc40813320227fc11351ccf742fe4d11d9a14fd157210eb3332f6371b1",
+          "anchoredAt": "1800007260"
+        },
+        {
+          "electionId": "ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d",
+          "segment": "0",
+          "size": "2",
+          "head": "c8cd5d204649795025a967df6adcd7b1d4c180becf883f9dbd9718e51b24809d",
+          "root": "de1032561f26c96ea22ed88d8b1cde78335321d16999c30a0ff493f7330ef879",
+          "hash": "afe1ea255489007db2382a3ffdb71f2a7d4c4b737145c262781aae8070a0e8e3",
+          "anchoredAt": "1800003660"
+        },
+        {
+          "electionId": "ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d",
+          "segment": "4",
+          "size": "8",
+          "head": "0f7b9ca34aba27f28bf127a5795fabaeee84c1fb3a5520ad8f6bcde197a231d6",
+          "root": "4835c73c0fcfef0126e94a16f2ea7a6792d4d9f4ace1df1baee5628842478cf0",
+          "hash": "1a908a35f5825fa12878af0e1d7500246ad54bc93f370604e084bd5e3c12eb77",
+          "anchoredAt": "1800018060"
+        },
+        {
+          "electionId": "ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d",
+          "segment": "6",
+          "size": "10",
+          "head": "fc87f28192f272702cf7d1cdea1075188ee5b9c8d0a8bc800b0016e8fbe1a003",
+          "root": "bd58f626279773b51885eb3d7bd5064cabc3a5bbb1000ea09c15758f4c5c4d4e",
+          "hash": "3eddb7eb7af71c42292dcad86dc4837d73d2259f96b695bd165275acac8b3855",
+          "anchoredAt": "1800025260"
+        }
+      ],
+      "result": {
+        "code": "checkpoint-inconsistent",
+        "checkpoint": 0
+      }
+    },
+    {
       "id": "checkpoint-errors-in-order",
       "description": "Checkpoint 0 stops mid-segment and checkpoint 1 (the largest) matches no prefix of the copy: the copy is authenticated against every checkpoint before any boundary is checked",
       "electionId": "ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d",

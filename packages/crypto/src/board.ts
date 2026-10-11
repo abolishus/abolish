@@ -378,24 +378,22 @@ export function verifyBoard(
       )
         throw new BoardError("checkpoint-inconsistent", { checkpoint: j });
   }
-  const held = encodedEntries.length;
-  let extent = 0;
-  for (const [j, cp] of counted) {
-    if (cp.size > BigInt(held)) throw new BoardError("checkpoint-missing", { checkpoint: j });
-    extent = Math.max(extent, Number(cp.size));
-  }
   // Authenticate the raw bytes before decoding anything. Entries are
   // unsigned, so a copy that doesn't match the anchored heads and roots is
   // that copy's fault, never the election's: the caller tries another source
-  // (T-53, T-23).
-  const prefix = Array.from({ length: extent }, (_, i) =>
+  // (T-53, T-23). Anchors the copy is long enough for are compared first, so
+  // a checkpoint larger than any copy can't hide one no board matches.
+  const held = encodedEntries.length;
+  const reach = counted.filter(([, cp]) => cp.size <= BigInt(held));
+  const extent = Math.max(0, ...counted.map(([, cp]) => Number(cp.size)));
+  const prefix = Array.from({ length: Math.min(extent, held) }, (_, i) =>
     copyBytes(encodedEntries[i] as Uint8Array, `entry ${i}`),
   );
   const hashes = prefix.map(boardEntryHash);
   const links: Uint8Array[] = [];
   for (const e of hashes) links.push(chainLink(links.at(-1) ?? new Uint8Array(32), e));
-  const roots = merkleRoots(BOARD_TREE, hashes, new Set(counted.map(([, cp]) => Number(cp.size))));
-  const checked = counted.map(([j, cp]) => {
+  const roots = merkleRoots(BOARD_TREE, hashes, new Set(reach.map(([, cp]) => Number(cp.size))));
+  const checked = reach.map(([j, cp]) => {
     const size = Number(cp.size);
     const head = equalBytes(links[size - 1] as Uint8Array, cp.head);
     const root = equalBytes(roots.get(size) as Uint8Array, cp.root);
@@ -412,6 +410,8 @@ export function verifyBoard(
     const contradicted = !m.full && checked.some((o) => o.full && o.size >= m.size);
     if (split || contradicted) throw new BoardError("checkpoint-inconsistent", { checkpoint: m.j });
   }
+  for (const [j, cp] of counted)
+    if (cp.size > BigInt(held)) throw new BoardError("checkpoint-missing", { checkpoint: j });
   for (const m of checked) if (!m.full) throw new BoardError("copy-mismatch", { checkpoint: m.j });
   // The prefix is now the anchored board, so any failure below is the
   // operator's.

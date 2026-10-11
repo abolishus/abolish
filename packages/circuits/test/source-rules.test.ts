@@ -2,6 +2,7 @@
 // no Noir test would notice being broken by the next circuit or dependency.
 
 import { readdirSync, readFileSync } from "node:fs";
+import { dirname, posix } from "node:path";
 import { describe, expect, test } from "vite-plus/test";
 
 const ROOT = new URL("../", import.meta.url);
@@ -30,14 +31,19 @@ describe("circuit source rules", () => {
     "%s has only path dependencies inside packages/circuits",
     (file) => {
       // A git dependency resolves a mutable tag at build time; a path outside
-      // the package leaves the crypto-review gate (T-55).
-      const deps =
-        read(file)
-          .split(/^\[dependencies\]$/m)[1]
-          ?.split(/^\[/m)[0] ?? "";
+      // the package leaves the crypto-review gate (T-55). Dependencies are
+      // accepted only as one-line inline tables, so no sub-table or `git` key
+      // can hide one.
+      const text = read(file);
+      expect(text).not.toMatch(/^\s*\[\s*dependencies\s*\.|\bgit\s*=/m);
+      const deps = text.split(/^\[dependencies\]$/m)[1]?.split(/^\[/m)[0] ?? "";
       for (const line of deps.split("\n").filter((l) => l.trim() !== "")) {
-        expect(line).toMatch(/^[a-z0-9_]+ = \{ path = "[^"]+" \}$/);
-        expect(line).not.toMatch(/path = "(?:\/|(?:\.\.\/){3})/);
+        const m = /^[a-z0-9_]+ = \{ path = "([^"]+)" \}$/.exec(line);
+        expect(m, line).not.toBeNull();
+        const path = m?.[1] ?? "/";
+        const target = posix.normalize(posix.join(dirname(file), path));
+        expect(path.startsWith("/"), line).toBe(false);
+        expect(target === ".." || target.startsWith("../"), line).toBe(false);
       }
     },
   );

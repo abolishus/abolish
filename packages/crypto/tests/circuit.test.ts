@@ -1,6 +1,7 @@
 import fc from "fast-check";
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vite-plus/test";
+import { deriveTagField } from "../src/circuit.ts";
 import {
   BN254_R,
   circuitTagField,
@@ -60,7 +61,7 @@ describe("circuit vectors", () => {
   });
 
   test.each(vectors.tags)("tag_field($tag)", ({ tag, field }) => {
-    expect(circuitTagField(tag)).toBe(BigInt(field));
+    expect(deriveTagField(tag)).toBe(BigInt(field));
   });
 
   test("every tag in the file is registered, and the vectors cover the circuit tag itself", () => {
@@ -81,9 +82,15 @@ describe("circuit vectors", () => {
 
 describe("tag field elements", () => {
   test("are below the BN254 order with 8 bits to spare, and distinct across the registry", () => {
-    const fields = TAG_REGISTRY.map((e) => circuitTagField(e.tag));
+    const fields = TAG_REGISTRY.map((e) => deriveTagField(e.tag));
     for (const f of fields) expect(f < 1n << 248n && f < BN254_R).toBe(true);
     expect(new Set(fields).size).toBe(fields.length);
+  });
+
+  test("circuitTagField refuses tags not registered as In-circuit", () => {
+    // T-30: a plain-hash tag used in a circuit would get a second layout.
+    for (const { tag } of TAG_REGISTRY) expect(() => circuitTagField(tag)).toThrow(RangeError);
+    expect(() => circuitTagField("abolish/v1/not-registered")).toThrow(RangeError);
   });
 
   test("reject strings outside the tag grammar", () => {
@@ -94,7 +101,7 @@ describe("tag field elements", () => {
       "Abolish/v1/display-text",
       "abolish/v1/a b",
     ])
-      expect(() => circuitTagField(bad)).toThrow(RangeError);
+      expect(() => deriveTagField(bad)).toThrow(RangeError);
   });
 });
 

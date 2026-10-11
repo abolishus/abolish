@@ -81,6 +81,10 @@ def main():
         data = det(f"bounded-{name}", n)
         fields = [n] + pack(data + bytes(max_len - n))
         bounded.append({"id": name, "max": max_len, "bytes": data.hex(), "fields": [str(f) for f in fields]})
+    # Content ending in zero bytes: only the length tells these apart.
+    for name, data in [("a-of-4", b"a"), ("a-zero-of-4", b"a\x00"), ("a-zero-zero-of-4", b"a\x00\x00")]:
+        fields = [len(data)] + pack(data + bytes(4 - len(data)))
+        bounded.append({"id": name, "max": 4, "bytes": data.hex(), "fields": [str(f) for f in fields]})
     for name, max_len, n in [("over-max-0", 0, 1), ("over-max-31", 31, 32)]:
         bounded.append({"id": name, "max": max_len, "bytes": det(f"bounded-{name}", n).hex(), "error": "too-long"})
 

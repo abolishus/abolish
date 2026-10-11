@@ -45,7 +45,7 @@ Groth16 verification of the proofs themselves is P1-17b's.
 
 How tags and bytes become BN254 field elements, exactly as `packages/circuits` does in Noir (`docs/spec/notation.md`, Circuit-facing values; `docs/spec/domain-separation.md`, In-circuit hashes; T-30, T-31):
 
-- `circuitTagField(tag)`: `int(H(DS("abolish/v1/circuit-tag", tag))) >> 8`, the constant by which a tag enters a circuit.
+- `circuitTagField(tag)`: `int(H(DS("abolish/v1/circuit-tag", tag))) >> 8`, the constant by which a tag enters a circuit, only for a tag registered In-circuit (none yet), so no plain-hash tag gets a second layout (T-30).
 - `packBytes(bytes)`: `bytes[N]` as `ceil(N / 31)` big-endian chunks. `packBoundedBytes(bytes, max)`: the length, then the content zero-padded to `max` and packed.
 
 ## Rules

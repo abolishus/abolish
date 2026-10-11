@@ -112,7 +112,7 @@ Type descriptors:
 
 `circuit.json` checks computations, so it has its own format, `abolish-circuit-vectors/1`, with the same top-level fields, plus:
 
-- `tags`: `tag_field` ([[domain-separation]], In-circuit hashes). Each has `tag` (ASCII), `digest` (the SHA-256 digest under `abolish/v1/circuit-tag`, hex) and `field` (decimal). A tag registered after the file was generated may have no vector yet; consumers check the ones present.
+- `tags`: `tag_field` ([[domain-separation]], In-circuit hashes). Each has `tag` (ASCII), `digest` (the SHA-256 digest under `abolish/v1/circuit-tag`, hex) and `field` (decimal). They cover every registered tag to test the derivation; only a tag registered In-circuit may be used in a circuit. A tag registered after the file was generated may have no vector yet; consumers check the ones present.
 - `packBytes`: `bytes[N]` packing ([[notation]], Circuit-facing values). Each has `id`, `bytes` (hex; `N` is its length) and `fields` (decimal strings).
 - `packBoundedBytes`: `bytes<M>` packing. Each has `id`, `max` (`M`, a JSON number), `bytes` (the content, hex) and either `fields` (the length, then the packed padded content, decimal strings) or `error`: `too-long` for content longer than `M`. A Noir consumer passes the content zero-padded to `M` bytes, and checks that a non-zero padding byte fails.
 

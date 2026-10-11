@@ -67,11 +67,13 @@ fn bounded_${fn(v.id)}() {
     assert(len == ${fields[0]});
     assert(out == ${array(fields.slice(1))});
 }`);
-    if (b.length < v.max) {
+    // The first and the last padding byte, so an off-by-one in either
+    // direction of the padding check fails a test.
+    for (const at of new Set(b.length < v.max ? [b.length, v.max - 1] : [])) {
       const dirty = [...padded];
-      dirty[v.max - 1] = 1;
+      dirty[at] = 1;
       out.push(`#[test(should_fail_with = "padding byte is not zero")]
-fn bounded_${fn(v.id)}_rejects_padding() {
+fn bounded_${fn(v.id)}_rejects_padding_at_${at}() {
     let _: (Field, [Field; ${chunks}]) = pack_bounded_bytes(${array(dirty)}, ${b.length});
 }`);
     }
@@ -95,12 +97,8 @@ describe("circuit.json through the Noir library", () => {
     );
     writeFileSync(join(dir, "src", "lib.nr"), noirTests());
     const out = execFileSync("nargo", ["test", "--program-dir", dir], { encoding: "utf8" });
-    const expected =
-      vectors.packBytes.length +
-      vectors.packBoundedBytes.length +
-      vectors.packBoundedBytes.filter(
-        (v) => v.error === undefined && bytesOf(v.bytes).length < v.max,
-      ).length;
+    const expected = noirTests().split("#[test").length - 1;
+    expect(expected).toBeGreaterThan(vectors.packBytes.length + vectors.packBoundedBytes.length);
     expect(out).toContain(`${expected} tests passed`);
   }, 120_000);
 });

@@ -3,7 +3,7 @@
 // BN254 field elements, the same way packages/circuits does in Noir, so the
 // in-circuit and off-circuit forms can't drift (T-31, T-30).
 
-import { ds, isWellFormedTag } from "./domain-separation.ts";
+import { ds, isWellFormedTag, TAG_REGISTRY } from "./domain-separation.ts";
 import { H } from "./group.ts";
 
 /** Bytes per field element when packing: 31 bytes is 248 bits, below the BN254 order. */
@@ -31,8 +31,24 @@ function bigEndian(bytes: Uint8Array): bigint {
  * value is below the field order with no reduction, as Semaphore's `F`.
  */
 export function circuitTagField(tag: string): bigint {
+  // Only a tag registered for in-circuit use: deriving the constant of a
+  // plain-hash tag would let a circuit give that tag a second primitive and
+  // layout (docs/spec/domain-separation.md, Rules; T-30). No tag is registered
+  // In-circuit yet, so this rejects every tag until the first circuit's PR.
+  const entry = TAG_REGISTRY.find((e) => e.tag === tag);
+  if (entry?.status !== "specified" || (entry.primitive as string) !== "in-circuit")
+    throw new RangeError(`circuitTagField: ${String(tag)} is not a specified In-circuit tag`);
+  return deriveTagField(tag);
+}
+
+/**
+ * The derivation behind `circuitTagField`, for any well-formed tag. Not
+ * exported from the package: only the vectors test uses it on tags of other
+ * primitives, to check the rule against the independent generator.
+ */
+export function deriveTagField(tag: string): bigint {
   if (typeof tag !== "string" || !isWellFormedTag(tag))
-    throw new RangeError("circuitTagField: not a well-formed tag");
+    throw new RangeError("deriveTagField: not a well-formed tag");
   const ascii = new Uint8Array(tag.length);
   // The grammar admits only ASCII, so each character is one byte.
   for (let i = 0; i < tag.length; i++) ascii[i] = tag.charCodeAt(i);

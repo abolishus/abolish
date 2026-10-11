@@ -76,7 +76,9 @@ What would change it: browsers letting a page use a credential outside its RP ID
 - Envelopes are never archived, mirrored or anchored. A voter can delete theirs.
 - The ballot client is the only place the secret, the PRF output and the derived keys exist, and they are `packages/crypto` APIs the client calls (AGENTS.md, Architecture), so the code that touches them stays inside the `crypto-review` gate.
 - Out of scope here, and still open for T-18: revoking a stolen identity and re-registering. At Tier 2 the uniqueness nullifier lets one document register once ([[0010-tier2-identity-provider]]), so a voter who loses both the device and the backup loses Tier 2 until that design exists. P2-6 records it as a follow-up.
-- Ballot receipts stay on the device only; a lost device loses them, which affects only that voter's own checks (G-7), never a result.
+- Ballot receipts and cast records stay on the device only; the backup carries neither. A lost device loses the voter's own receipt checks (G-7), and a recovered client starts without the records [[revoting]]'s client rules rely on, which can affect the voter's own vote:
+  - Client rule 3's alarm would fire on every earlier ballot of the voter's in a poll still open. P2-8's recovered client must first show the voter every ballot on the board under their nullifiers, as cast before recovery, for them to confirm or flag (a ballot they don't recognise is the T-18 alarm), and then name only blocks newer than all of them.
+  - The passkey syncs, so a voter can hold the secret on two devices at once. Two clients that cast in one election and tier without each other's records can name the same block, which ties the ballots and voids that vote ([[revoting]], A voter who has lost their records). P2-8 must warn a recovered client's voter to cast from one device per poll, and re-read the board under their nullifiers before every cast.
 
 ## Decision
 

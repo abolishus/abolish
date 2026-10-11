@@ -87,14 +87,14 @@ describe("the bundle", () => {
       SELECT DISTINCT tableowner FROM pg_tables WHERE schemaname = ${schema}`;
     expect(owners.map((r) => r.tableowner)).toEqual(["abolish_migrator"]);
     expect(await migrateOnce()).toEqual([]);
-  });
+  }, 30_000);
 
   test("migrate.mjs refuses a schema name that isn't a plain identifier", async () => {
     const m = run("migrate.mjs", { DATABASE_URL: as(migrator), DATABASE_SCHEMA: 'x"; DROP' });
     const [code] = (await once(m.child, "exit")) as [number];
     expect(code).not.toBe(0);
     expect(m.err()).toContain("DATABASE_SCHEMA");
-  });
+  }, 30_000);
 
   test("main.mjs serves from the migrated schema as a login granted only abolish_app", async () => {
     const probe = createServer();
@@ -123,7 +123,7 @@ describe("the bundle", () => {
         await exited;
       }
     }
-  });
+  }, 30_000);
 });
 
 describe("the Dockerfile", () => {

@@ -126,6 +126,12 @@ export interface ApiOptions {
    * reading its answer can't hold one (T-52). Default 15 s.
    */
   readonly idleTimeoutMs?: number;
+  /**
+   * A request still holding its slot this long after taking it is destroyed,
+   * so a client that reads its answer slowly, never quite idle, can't hold a
+   * slot either (T-52). Default 60 s.
+   */
+  readonly deadlineMs?: number;
 }
 
 /** A whole request (headers and body) must arrive within this. */
@@ -138,6 +144,7 @@ export function createApiServer({
   log,
   maxInFlight = 32,
   idleTimeoutMs = 15_000,
+  deadlineMs = 60_000,
 }: ApiOptions): Server {
   if (!Number.isSafeInteger(maxInFlight) || maxInFlight < 1)
     throw new RangeError("maxInFlight must be at least 1");
@@ -179,7 +186,11 @@ export function createApiServer({
         return refuse(res, 503);
       }
       inFlight++;
-      res.once("close", () => inFlight--);
+      const deadline = setTimeout(() => res.destroy(), deadlineMs);
+      res.once("close", () => {
+        clearTimeout(deadline);
+        inFlight--;
+      });
       try {
         if (route === "unmatched") return refuse(res, 404);
         if (req.method === "POST") {

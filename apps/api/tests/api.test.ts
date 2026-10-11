@@ -357,6 +357,31 @@ describe("transport", () => {
     await new Promise((r) => capped.close(r));
   });
 
+  test("a slow reader loses its slot at the deadline, however it trickles (T-52)", async () => {
+    const capped = createApiServer({ sql: app, log: () => {}, maxInFlight: 1, deadlineMs: 500 });
+    await new Promise<void>((r) => capped.listen(0, "127.0.0.1", r));
+    const port = (capped.address() as AddressInfo).port;
+    const e = await election(9, 1_000_000);
+    const head = () =>
+      fetch(`http://127.0.0.1:${port}/board/head?electionId=${e.idHex}`).then((r) => r.status);
+    const socket = connect(port, "127.0.0.1");
+    socket.on("error", () => {});
+    socket.write(
+      `GET /board/entries?electionId=${e.idHex}&start=0&limit=256 HTTP/1.1\r\nhost: x\r\n\r\n`,
+    );
+    // Read a little every 50 ms: never idle, never done.
+    socket.pause();
+    const trickle = setInterval(() => socket.read(1024), 50);
+    await new Promise((r) => setTimeout(r, 200));
+    expect(await head()).toBe(503);
+    await new Promise((r) => setTimeout(r, 800));
+    expect(await head()).toBe(200);
+    clearInterval(trickle);
+    socket.destroy();
+    capped.closeAllConnections();
+    await new Promise((r) => capped.close(r));
+  });
+
   test("src/main.ts starts under plain Node, without a TypeScript transform", async () => {
     // Node strips types but rejects TypeScript-only syntax (parameter
     // properties, enums) that the test runner's transform would accept.

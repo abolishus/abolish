@@ -38,7 +38,8 @@ CREATE INDEX account_sessions_user_id ON account_sessions (user_id);
 CREATE TABLE account_passkeys (
   id text PRIMARY KEY,
   user_id text NOT NULL REFERENCES account_users (id) ON DELETE CASCADE,
-  name text,
+  -- Clients label passkeys with device or owner names; none is kept.
+  name text CHECK (name IS NULL),
   public_key text NOT NULL,
   credential_id text NOT NULL UNIQUE,
   counter bigint NOT NULL CHECK (counter BETWEEN 0 AND 4294967295),
@@ -82,6 +83,9 @@ CREATE TABLE account_verifications (
   updated_at timestamptz NOT NULL
 );
 CREATE INDEX account_verifications_identifier ON account_verifications (identifier);
+-- The passkey plugin never deletes an abandoned challenge, and anyone can make
+-- one; pruneAccountVerifications deletes expired rows by this index (T-52).
+CREATE INDEX account_verifications_expires_at ON account_verifications (expires_at);
 
 REVOKE ALL
   ON account_users, account_sessions, account_passkeys, account_credentials, account_verifications

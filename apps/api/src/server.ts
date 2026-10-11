@@ -69,7 +69,8 @@ function carriesAccountCredential(req: IncomingMessage): boolean {
       .trim()
       .split("=", 1)[0]!
       .replace(/^__(?:Secure|Host)-/i, "");
-    return name.toLowerCase().startsWith(`${ACCOUNT_COOKIE_PREFIX}.`);
+    // better-auth reads both `<prefix>.<name>` and `<prefix>-<name>`.
+    return name.toLowerCase().startsWith(ACCOUNT_COOKIE_PREFIX);
   });
 }
 

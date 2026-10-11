@@ -15,6 +15,7 @@ import {
   createAccounts,
   MAX_ACCOUNT_BODY,
   newAccountId,
+  pruneAccountVerifications,
 } from "../src/index.ts";
 import {
   type AuthenticationOptions,
@@ -263,6 +264,74 @@ describe("sign-up and sign-in by passkey", () => {
   });
 });
 
+describe("adding a passkey to an account", () => {
+  test("a ceremony begun signed in can't attach a passkey after sign-out (shared browser)", async () => {
+    const jar = new Jar();
+    await signUp(jar, new SoftAuthenticator(RP_ID));
+    const id = (await accounts.accountOf(new Headers({ cookie: jar.header() })))!;
+    const options = await call(jar, "GET", "/auth/passkey/generate-register-options");
+    await call(jar, "POST", "/auth/sign-out", {});
+    const response = new SoftAuthenticator(RP_ID).create(
+      (await options.json()) as RegistrationOptions,
+      { origin: ORIGIN },
+    );
+    const res = await call(jar, "POST", "/auth/passkey/verify-registration", {
+      response,
+      createSession: true,
+    });
+    expect(res.status).toBe(401);
+    expect(jar.cookies.has(SESSION)).toBe(false);
+    const [{ n }] = (await db.admin`
+      SELECT count(*)::int AS n FROM account_passkeys WHERE user_id = ${id}`) as unknown as [
+      { n: number },
+    ];
+    expect(n).toBe(1);
+  });
+
+  test("a session more than a day old can't add a passkey", async () => {
+    const jar = new Jar();
+    await signUp(jar, new SoftAuthenticator(RP_ID));
+    const id = (await accounts.accountOf(new Headers({ cookie: jar.header() })))!;
+    await db.admin`
+      UPDATE account_sessions SET created_at = now() - interval '25 hours' WHERE user_id = ${id}`;
+    expect((await signUp(jar, new SoftAuthenticator(RP_ID))).status).toBe(401);
+  });
+
+  test("a ceremony begun signed out can't finish in someone else's session", async () => {
+    const jar = new Jar();
+    const options = await call(jar, "GET", "/auth/passkey/generate-register-options");
+    const signedIn = new Jar();
+    await signUp(signedIn, new SoftAuthenticator(RP_ID));
+    for (const [k, v] of signedIn.cookies) if (k === SESSION) jar.cookies.set(k, v);
+    const response = new SoftAuthenticator(RP_ID).create(
+      (await options.json()) as RegistrationOptions,
+      { origin: ORIGIN },
+    );
+    const res = await call(jar, "POST", "/auth/passkey/verify-registration", {
+      response,
+      createSession: true,
+    });
+    expect(res.status).toBe(401);
+  });
+
+  test("a registration made for another origin creates nothing", async () => {
+    const users = await count("account_users");
+    const jar = new Jar();
+    const options = await call(jar, "GET", "/auth/passkey/generate-register-options");
+    const response = new SoftAuthenticator(RP_ID).create(
+      (await options.json()) as RegistrationOptions,
+      { origin: "https://ballot.abolish.test" },
+    );
+    const res = await call(jar, "POST", "/auth/passkey/verify-registration", {
+      response,
+      createSession: true,
+    });
+    // SimpleWebAuthn throws, and the plugin answers that with 500.
+    expect(res.ok).toBe(false);
+    expect(await count("account_users")).toBe(users);
+  });
+});
+
 describe("what is kept (T-10, T-11)", () => {
   test("sessions keep no address or user agent, whatever the request carries", async () => {
     const jar = new Jar();
@@ -318,6 +387,44 @@ describe("what is kept (T-10, T-11)", () => {
       await expect(change).rejects.toThrow(/check constraint/);
   });
 
+  test("a passkey name or a ceremony context is refused, not stored", async () => {
+    const jar = new Jar();
+    const named = await call(jar, "GET", "/auth/passkey/generate-register-options");
+    const response = new SoftAuthenticator(RP_ID).create(
+      (await named.json()) as RegistrationOptions,
+      { origin: ORIGIN },
+    );
+    const res = await call(jar, "POST", "/auth/passkey/verify-registration", {
+      response,
+      createSession: true,
+      name: "Jane's phone",
+    });
+    expect(res.status).toBe(400);
+    const ctx = await call(
+      new Jar(),
+      "GET",
+      "/auth/passkey/generate-register-options?context=jane%40example.com",
+    );
+    expect(ctx.status).toBe(400);
+    const dump = JSON.stringify(
+      await db.admin`SELECT * FROM account_passkeys, account_verifications`,
+    );
+    expect(dump).not.toContain("Jane");
+    expect(dump).not.toContain("jane@example.com");
+    await expect(app`UPDATE account_passkeys SET name = 'x'`).rejects.toThrow(/check constraint/);
+  });
+
+  test("expired challenges are pruned, live ones kept", async () => {
+    await call(new Jar(), "GET", "/auth/passkey/generate-authenticate-options");
+    const live = await count("account_verifications");
+    expect(live).toBeGreaterThan(0);
+    expect(await pruneAccountVerifications(app, new Date())).toBe(0);
+    expect(await count("account_verifications")).toBe(live);
+    const later = new Date(Date.now() + 10 * 60 * 1000);
+    expect(await pruneAccountVerifications(app, later)).toBe(live);
+    expect(await count("account_verifications")).toBe(0);
+  });
+
   test("better-auth's warnings and errors are logged by level only", () => {
     for (const line of logged) expect(Object.keys(line)).toEqual(["auth"]);
   });
@@ -336,6 +443,7 @@ describe("routes", () => {
       "/auth/error",
       "/auth/reference/openapi.json",
       "/auth/passkey/generate-register-options/",
+      "/auth/passkey/update-passkey",
       "/elsewhere",
     ])
       for (const method of ["GET", "POST"] as const) {

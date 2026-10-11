@@ -650,6 +650,7 @@ describe("account credentials (T-10)", () => {
     { cookie: `__Host-${ACCOUNT_COOKIE_PREFIX}.session_data=${token()}` },
     { cookie: `a=1; __SECURE-${ACCOUNT_COOKIE_PREFIX.toUpperCase()}.passkey-challenge=${token()}` },
     { cookie: `__cf_bm=x;${ACCOUNT_COOKIE_PREFIX}.dont_remember=true` },
+    { cookie: `${ACCOUNT_COOKIE_PREFIX}-session_token=${token()}` },
     { authorization: `Bearer ${token()}` },
     { authorization: `Basic ${token()}` },
   ];

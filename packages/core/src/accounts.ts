@@ -1,7 +1,7 @@
 import { passkey } from "@better-auth/passkey";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { APIError } from "better-auth/api";
+import { APIError, getSessionFromCtx } from "better-auth/api";
 import { drizzle } from "drizzle-orm/postgres-js";
 import type { Sql } from "postgres";
 import {
@@ -38,7 +38,6 @@ export const ACCOUNT_ROUTES = [
   "GET /auth/passkey/generate-authenticate-options",
   "POST /auth/passkey/verify-authentication",
   "GET /auth/passkey/list-user-passkeys",
-  "POST /auth/passkey/update-passkey",
   "POST /auth/passkey/delete-passkey",
 ] as const;
 
@@ -49,7 +48,7 @@ const ROUTES: ReadonlySet<string> = new Set(ACCOUNT_ROUTES);
 /**
  * Every account cookie's name starts with this, after the `__Secure-` prefix
  * browsers require of a secure cookie's name. Ballot and board routes refuse
- * any request carrying one (T-10).
+ * any request carrying a cookie whose name starts with it (T-10).
  */
 export const ACCOUNT_COOKIE_PREFIX = "abolish-account";
 
@@ -59,6 +58,8 @@ export const MAX_ACCOUNT_BODY = 64 * 1024;
 /** How long a session lasts, and how often its expiry moves forward on use. */
 const SESSION_SECONDS = 14 * 24 * 60 * 60;
 const SESSION_REFRESH_SECONDS = 24 * 60 * 60;
+/** A session younger than this may add a passkey to its account (better-auth's `freshAge`). */
+const FRESH_SESSION_SECONDS = 24 * 60 * 60;
 
 /** The label a new passkey shows in the user's passkey manager: nothing about the person. */
 export const PASSKEY_USER_NAME = "Abolish account";
@@ -100,9 +101,11 @@ export function newAccountId(): string {
   return id;
 }
 
-function refuse(status: number): Response {
+const REFUSALS = { 400: "BAD_REQUEST", 404: "NOT_FOUND", 413: "PAYLOAD_TOO_LARGE" } as const;
+
+function refuse(status: keyof typeof REFUSALS): Response {
   return Response.json(
-    { code: status === 404 ? "NOT_FOUND" : "PAYLOAD_TOO_LARGE", status },
+    { code: REFUSALS[status], status },
     { status, headers: { "cache-control": "no-store" } },
   );
 }
@@ -132,6 +135,16 @@ async function boundedBody(request: Request): Promise<Uint8Array | undefined> {
     at += c.length;
   }
   return body;
+}
+
+/** Whether a registration body sets the passkey's `name` (refused, rather than failing at the database). */
+function namesPasskey(body: Uint8Array): boolean {
+  try {
+    const parsed: unknown = JSON.parse(new TextDecoder().decode(body));
+    return typeof parsed === "object" && parsed !== null && "name" in parsed;
+  } catch {
+    return false;
+  }
 }
 
 export function createAccounts({ sql, secret, origin, rpID, log }: AccountsOptions): Accounts {
@@ -166,6 +179,7 @@ export function createAccounts({ sql, secret, origin, rpID, log }: AccountsOptio
     user: { modelName: "account_users", deleteUser: { enabled: true } },
     session: {
       modelName: "account_sessions",
+      freshAge: FRESH_SESSION_SECONDS,
       expiresIn: SESSION_SECONDS,
       updateAge: SESSION_REFRESH_SECONDS,
     },
@@ -220,8 +234,22 @@ export function createAccounts({ sql, secret, origin, rpID, log }: AccountsOptio
             // The plugin asks for user verification but doesn't check it.
             if (!verification.registrationInfo?.userVerified)
               throw new APIError("UNAUTHORIZED", { message: "user verification required" });
-            // A signed-in user adds a passkey to their own account.
-            if (await ctx.context.internalAdapter.findUserById(user.id)) return;
+            // A signed-in user adds a passkey to their own account, but only
+            // from a fresh session of that account at verify time: the
+            // challenge cookie outlives sign-out, so without this the next
+            // person at a shared browser could attach their passkey to the
+            // last user's account, and a stolen session could add a passkey
+            // that outlives it. (`requireSession: false` drops the plugin's
+            // own freshness check.)
+            if (await ctx.context.internalAdapter.findUserById(user.id)) {
+              const session = await getSessionFromCtx(ctx);
+              const fresh =
+                session !== null &&
+                Date.now() - session.session.createdAt.getTime() < FRESH_SESSION_SECONDS * 1000;
+              if (!fresh || session.user.id !== user.id)
+                throw new APIError("UNAUTHORIZED", { message: "a fresh session is required" });
+              return;
+            }
             const created = await ctx.context.internalAdapter.createUser(
               {
                 email: `${newAccountId()}@account.invalid`,
@@ -247,9 +275,14 @@ export function createAccounts({ sql, secret, origin, rpID, log }: AccountsOptio
     async handler(request) {
       const path = new URL(request.url).pathname;
       if (!ROUTES.has(`${request.method} ${path}`)) return refuse(404);
+      // The passkey plugin stores `context` verbatim with the challenge, and a
+      // passkey's `name` is whatever the client calls it ("Jane's iPhone"):
+      // neither is kept (the migration refuses a name).
+      if (new URL(request.url).searchParams.has("context")) return refuse(400);
       if (request.method !== "POST") return auth.handler(request);
       const body = await boundedBody(request);
       if (!body) return refuse(413);
+      if (path === "/auth/passkey/verify-registration" && namesPasskey(body)) return refuse(400);
       return auth.handler(
         new Request(request.url, { method: "POST", headers: request.headers, body }),
       );
@@ -259,4 +292,15 @@ export function createAccounts({ sql, secret, origin, rpID, log }: AccountsOptio
       return session?.user.id;
     },
   };
+}
+
+/**
+ * Deletes WebAuthn challenges that expired before `now`, returning how many.
+ * Anyone can start a ceremony and abandon it, and the passkey plugin never
+ * deletes those rows, so a scheduled job (P2-4) runs this (T-52).
+ */
+export async function pruneAccountVerifications(sql: Sql, now: Date): Promise<number> {
+  const deleted =
+    await sql`DELETE FROM account_verifications WHERE expires_at < ${now.toISOString()}::timestamptz`;
+  return deleted.count;
 }

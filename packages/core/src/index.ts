@@ -62,6 +62,7 @@ export {
   MAX_ACCOUNT_BODY,
   newAccountId,
   PASSKEY_USER_NAME,
+  pruneAccountVerifications,
 } from "./accounts.ts";
 export {
   MAX_REPORT_QUEUE,

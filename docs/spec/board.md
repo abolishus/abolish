@@ -6,7 +6,7 @@ The public bulletin board: the envelope that places a record on it, how its entr
 
 - **One board per election.** Every entry names its election. Entries are appended by whoever runs the board (our server, A-2), one at a time, and never changed or removed (T-23).
 - **Position.** Entry `i` is the `i`-th entry appended, counting from 0. Its position is part of the entry, and so of its hash.
-- **Segments.** Entries are grouped by anchoring period: each entry carries the number of the period in which it was appended, its segment. Segment numbers never decrease along a board. P4-1 fixes the period length (hourly) and the epoch period numbers count from; this page only needs them to be integers that never decrease.
+- **Segments.** Entries are grouped by anchoring period: each entry carries the number of the period in which it was appended, its segment. Segment numbers never decrease along a board. Periods are fixed intervals of L1 time under the anchoring clock (Anchoring, below), whose values P4-1 sets (hourly).
 - **Checkpoints.** After each period, the board's state (its size, chain head and Merkle root after that period's segment) is summarised as a checkpoint, and P4-1 anchors it on L1 so that its election and segment can be read there. Every period that adds entries gets one, and a verifier checks every checkpoint anchored for the election. Anyone holding the entries can recompute every checkpoint, and anyone holding a receipt can check it against an anchored checkpoint with a logarithmic-size proof (T-24).
 - **What the board doesn't decide.** Whether a ballot or opening counts is decided by the admission checks on the record an entry carries ([[verifier]]), never by the envelope. The board's order matters only where this page says so (openings, below); P1-13's re-vote rule must not depend on the order in which the operator writes unanchored entries ([[verifier]] 6.1, R3).
 
@@ -100,7 +100,12 @@ A consistency proof that the tree of size `m` is a prefix of the tree of size `n
 
 Every step of either loop shifts `sn` right at least once and fails once `sn` is 0, so a path of more than 65 hashes always fails, and implementations reject one before reading it (T-52).
 
-A voter's client uses these to check, after the next anchor, that the board it was shown when it cast is a prefix of the anchored one. It reads the checkpoint anchored for its entry's election and segment from L1 itself, and raises an alarm if more than one distinct checkpoint is anchored for that segment, then or at any later check, so a split view shown before anchoring is caught (T-24). How receipts carry the proofs is P1-13's.
+A voter's client uses these to check that the board it was shown when it cast is a prefix of the anchored one (T-24, T-25):
+
+1. **At cast.** It refuses, and alarms on, an envelope whose `segment` isn't the period current at the cast by the anchoring clock, within a tolerance of one period (so a cast at a period boundary isn't refused). Otherwise the operator could label the entry with a segment that is never anchored, or one far in the future.
+2. **After the deadline of its segment `s`.** It reads from L1 itself every timely checkpoint anchored for its election, and checks inclusion of its entry at index `i`, and consistency from the signed size and root in its receipt, against the earliest one with `segment ≥ s`. It alarms if there is none by the deadline, if any timely checkpoint for the election is inconsistent with its receipt, or if more than one distinct timely checkpoint is anchored for a segment, then or at any later check.
+
+How receipts carry the proofs, and how a client raises an alarm, is P1-13's.
 
 ## Segments and checkpoints
 
@@ -122,9 +127,11 @@ It is a structure, not a record: it has no header, and it is only ever hashed, a
 checkpoint_hash = H(DS("abolish/v1/board-checkpoint", encode(checkpoint)))
 ```
 
-A checkpoint is valid for a board exactly when `size ≥ 1`, the board has at least `size` entries, entry `size − 1` has `segment ≤ s`, the entry after it (if any) has `segment > s`, `head = link_{size−1}` and `root = root_size`. So a checkpoint always ends at a segment boundary, and two valid checkpoints for the same segment are equal. A period with no new entries may be anchored again or skipped, but a period that added entries MUST get a checkpoint, so no entry stays unanchored past its period (how late the anchor may land is P4-1's).
+A checkpoint is valid for a board exactly when `size ≥ 1`, the board has at least `size` entries, entry `size − 1` has `segment ≤ s`, the entry after it (if any) has `segment > s`, `head = link_{size−1}` and `root = root_size`. So a checkpoint always ends at a segment boundary, and two valid checkpoints for the same segment are equal. A period with no new entries may be anchored again or skipped, but a period that added entries MUST get a checkpoint, so no entry stays unanchored past its period (and, by the timing rule below, anchored within its window).
 
 **Anchoring.** P4-1 anchors each checkpoint through the anchor contract the verifier pins, with its `election_id` and `segment` readable on L1 next to its hash, and the full checkpoint published on L1 in the same transaction (or the checkpoint itself in place of the hash). An anchor counts for an election only if it was sent by that election's anchoring authority: an address the election definition binds, or one the verifier pins (our Safe, say). The contract rejects anchors for the election from anyone else, or, failing that, verifiers and voters' clients ignore them. Otherwise anyone could anchor a bogus checkpoint for an election, or front-run the honest one, and fail it (T-52). P4-1 and P1-18 enforce this. P4-1 decides how one transaction carries several elections' checkpoints, but every anchored checkpoint MUST be attributable to its election and segment from L1 alone. A verifier checks **every** checkpoint anchored for the election, never a selection it was handed: otherwise the operator could anchor a second checkpoint for a forked board, show it only to the voters whose ballots it keeps, and publish the other (T-24). Two different checkpoints anchored for one segment are equivocation, and fail the election. An anchored hash that names the election but can't be matched to a published checkpoint makes the election unverifiable, never verified.
+
+**Timing.** The anchoring clock has four values, set by P4-1 and pinned by the verifier for the election: an `epoch` and a `period` length (period `s` is the L1 time interval `[epoch + s·period, epoch + (s+1)·period)`), a `deadline`, and `lastSegment`, the election's seal (the last period its board may use, fixed by its definition's timing: close, plus the time P1-13 allows for publishing openings). An anchor for segment `s` counts only if it is in a finalized L1 block whose timestamp is at or after the end of period `s` and at most `deadline` after it, and `s ≤ lastSegment`. Verifiers and voters' clients ignore every other anchor, and P4-1's contract SHOULD reject them. So an anchor made late can neither fail a closed election nor hide a fork, an entry labelled with a far-off segment can't be anchored late, and every segment with entries must have a timely checkpoint. An entry with `segment > lastSegment` fails the election (`after-seal`).
 
 The **segment object** of period `s` (the bytes [[content-addressing]] turns into a CID and CAR, and [[0005-permanent-archive]] archives) is the concatenation `encode(entry_a) ‖ … ‖ encode(entry_b)` of that segment's entries in index order. Each encoded entry is self-delimiting (fixed-width fields, then a length-prefixed payload), so the object splits into entries in exactly one way. An empty segment has no object.
 
@@ -151,18 +158,19 @@ A verifier ([[verifier]], checks 4.1 and 4.2) takes the entries of one election'
 | `segment-decreased` | Its `segment` is smaller than the previous entry's.                                                                              |
 | `opening-order`     | It breaks the order of spoiled-ballot openings above.                                                                            |
 
-Then the checkpoints: every one anchored on L1 for the election through the pinned anchor contract (Anchoring, above). First, for each in order, `wrong-election` and `checkpoint-equivocation`; then each in full, one at a time in order, failing at the first row that applies:
+Then the anchors: every one for the election through the pinned anchor contract (Anchoring, above), with the anchoring clock. First, `after-seal` for each entry. Then only the timely anchors count (Timing, above), and for each of them in order, `wrong-election` and `checkpoint-equivocation`; then each in full, one at a time in order, failing at the first row that applies:
 
-| Code                      | Fails when                                                                                                               |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `wrong-election`          | Its `election_id` isn't the expected one.                                                                                |
-| `checkpoint-equivocation` | Another checkpoint for the same `segment`, earlier in the list, differs from it.                                         |
-| `checkpoint-size`         | Its `size` is 0.                                                                                                         |
-| `checkpoint-missing`      | Its `size` is larger than the board the verifier holds: entries are missing (reported unverifiable, never pass).         |
-| `checkpoint-boundary`     | Its `size` isn't the end of segment `segment` as defined above.                                                          |
-| `checkpoint-head`         | Its `head` isn't `link_{size−1}`.                                                                                        |
-| `checkpoint-root`         | Its `root` isn't `root_size`.                                                                                            |
-| `unanchored`              | After every checkpoint passes, some segment that holds entries has no checkpoint (reported with the first such segment). |
+| Code                      | Fails when                                                                                                                      |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `after-seal`              | An entry's `segment` is after `lastSegment` (reported at the entry).                                                            |
+| `wrong-election`          | Its `election_id` isn't the expected one.                                                                                       |
+| `checkpoint-equivocation` | Another checkpoint for the same `segment`, earlier in the list, differs from it.                                                |
+| `checkpoint-size`         | Its `size` is 0.                                                                                                                |
+| `checkpoint-missing`      | Its `size` is larger than the board the verifier holds: entries are missing (reported unverifiable, never pass).                |
+| `checkpoint-boundary`     | Its `size` isn't the end of segment `segment` as defined above.                                                                 |
+| `checkpoint-head`         | Its `head` isn't `link_{size−1}`.                                                                                               |
+| `checkpoint-root`         | Its `root` isn't `root_size`.                                                                                                   |
+| `unanchored`              | After every checkpoint passes, some segment that holds entries has no timely checkpoint (reported with the first such segment). |
 
 Every one of these is an election check: the operator writes the envelopes, the order and the segments, so any failure is the operator's (T-23). A failure of the record inside a payload isn't one of these ([[verifier]], Admission checks).
 
@@ -172,8 +180,8 @@ The brief requires the board to be hash-chained, and the chain and the tree each
 
 ## Residuals
 
-- **Before the first anchor after an entry,** the operator can drop or reorder unanchored entries, or show different boards to different viewers (T-23, T-24). A voter holding a receipt detects a drop or fork at the next anchor with an inclusion and consistency proof against the checkpoint anchored for its segment; anyone else sees a fork only if the operator anchors both branches, which is equivocation. Every period with entries must be anchored, so the window is one anchoring period plus however long P4-1 lets an anchor lag.
-- **Whoever holds the anchoring key can fail an election** by anchoring two checkpoints for one segment. That failure is public and attributable to the key, and no worse than the operator withholding the board.
+- **Before the first anchor after an entry,** the operator can drop or reorder unanchored entries, or show different boards to different viewers (T-23, T-24). A voter holding a receipt detects a drop or fork once its segment's deadline has passed, by the checks above; anyone else sees a fork only if the operator anchors both branches in time, which is equivocation. The window is one period plus the deadline.
+- **Whoever holds the anchoring key can fail an election, but only while it runs:** by anchoring two checkpoints for one segment within that segment's window, or a wrong one. That failure is public and attributable to the key. Once a segment's deadline has passed, nothing anchored for it counts, so no later holder of the key (a compelled or seized one, T-69) can fail a closed election (T-53).
 - **The operator chooses the order** of everything except openings. Nothing that counts may depend on it: that is R3 of [[verifier]] 6.1, which P1-13's re-vote rule must meet.
 - **Withholding** a submission from the board altogether (T-25) isn't detectable from the board: it is caught by the voter's receipt (P1-13) and, for direct submissions, by our contracts' event accumulators ([[0005-permanent-archive]], P1-18).
 - **Opening order within a period** hides the order of arrival, not the period itself: an opening is linked to the period in which it was posted, which is why clients publish openings only after close (P1-13). It never unlinks an opening from the challenged ballot it opens (above).
@@ -181,7 +189,8 @@ The brief requires the board to be hash-chained, and the chain and the tree each
 
 ## Owned elsewhere
 
-- The period length, the epoch of period numbers, and how checkpoints are anchored on L1 and found again: P4-1.
+- The anchoring clock's values (period length, epoch, deadline, and how the seal follows from the definition), the anchor contract, which SHOULD reject untimely anchors and a second checkpoint for an election and segment, and how checkpoints are found again: P4-1.
+- The verifier reading anchor times from finalized L1 blocks only: P1-19.
 - The contract-event record (`0x0008`), its inclusion evidence, and whether it carries raw transactions ([[notation]], Result-critical fields): P1-18.
 - What a receipt holds (entry hash, index, chain link, a signed size and root, the proofs above), and how challenged ballots are placed and built: P1-13.
 - Where entries are stored, and the database rules that keep them append-only: P2-1.

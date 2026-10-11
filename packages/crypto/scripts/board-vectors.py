@@ -245,7 +245,23 @@ def checkpoint_hash(election_id, segment, size, head, root):
     return tagged("abolish/v1/board-checkpoint")(election_id + u(4, segment) + u(8, size) + head + root)
 
 
-def check_board(election_id, entries, checkpoints):
+# The anchoring clock of the vectors (P4-1 fixes the real one): period s
+# covers [EPOCH + s*PERIOD, EPOCH + (s+1)*PERIOD), an anchor for s counts only
+# if its finalized L1 block time is in [end of s, end of s + DEADLINE], and
+# nothing after LAST_SEGMENT counts.
+CLOCK = {"epoch": 1800000000, "period": 3600, "deadline": 7200, "lastSegment": 8}
+
+
+def segment_end(s):
+    return CLOCK["epoch"] + (s + 1) * CLOCK["period"]
+
+
+def timely(segment, anchored_at):
+    end = segment_end(segment)
+    return segment <= CLOCK["lastSegment"] and end <= anchored_at <= end + CLOCK["deadline"]
+
+
+def check_board(election_id, entries, anchors):
     """docs/spec/board.md, Board checks. Returns None or (code, where)."""
     decoded = []
     for i, b in enumerate(entries):
@@ -267,16 +283,21 @@ def check_board(election_id, entries, checkpoints):
         decoded.append(e)
     hashes = [entry_hash(b) for b in entries]
     links = chain_links(entries)
-    # Every anchored checkpoint for the election, attributed from L1: first the
-    # election and equivocation (two different checkpoints for one segment).
+    for i, e in enumerate(decoded):
+        if e["segment"] > CLOCK["lastSegment"]:
+            return ("after-seal", {"entry": i})
+    # Every anchor for the election from the pinned contract; only timely ones
+    # count. First the election and equivocation (two different checkpoints
+    # for one segment).
+    checkpoints = {j: cp for j, (cp, t) in enumerate(anchors) if timely(cp[1], t)}
     first = {}
-    for j, cp in enumerate(checkpoints):
+    for j, cp in checkpoints.items():
         if cp[0] != election_id:
             return ("wrong-election", {"checkpoint": j})
         if first.setdefault(cp[1], cp) != cp:
             return ("checkpoint-equivocation", {"checkpoint": j})
     anchored = set()
-    for j, (cid, seg, size, head, root) in enumerate(checkpoints):
+    for j, (cid, seg, size, head, root) in checkpoints.items():
         if size == 0:
             return ("checkpoint-size", {"checkpoint": j})
         if size > len(entries):
@@ -569,6 +590,8 @@ def main(out_dir):
     board_vectors = []
 
     def board(id_, description, entries, checkpoints, result):
+        # A bare checkpoint is anchored a minute after its period ends.
+        checkpoints = [c if len(c) == 2 else (c, segment_end(c[1]) + 60) for c in checkpoints]
         got = check_board(eid, entries, checkpoints)
         want = None if result == "ok" else result
         assert got == want, (id_, got, want)
@@ -586,8 +609,9 @@ def main(out_dir):
                         "head": h(hd),
                         "root": h(r),
                         "hash": h(checkpoint_hash(c, s, n, hd, r)),
+                        "anchoredAt": str(t),
                     }
-                    for c, s, n, hd, r in checkpoints
+                    for (c, s, n, hd, r), t in checkpoints
                 ],
                 "result": "ok" if result == "ok" else {"code": result[0], **result[1]},
             }
@@ -686,6 +710,44 @@ def main(out_dir):
         ("checkpoint-equivocation", {"checkpoint": 2}),
     )
     board("checkpoint-repeated", "The same checkpoint anchored twice is not equivocation", g, c + c[1:2], "ok")
+    late = segment_end(1) + CLOCK["deadline"] + 1
+    board(
+        "late-fork-ignored",
+        "A forked checkpoint anchored after segment 1's deadline doesn't count, so it can't fail the election",
+        g,
+        c + [(cps(forked, [1])[0], late)],
+        "ok",
+    )
+    board(
+        "late-only-is-unanchored",
+        "Segment 1's only checkpoint was anchored after its deadline",
+        g,
+        [c[0], (c[1], late)] + c[2:],
+        ("unanchored", {"segment": 1}),
+    )
+    board(
+        "early-anchor-ignored",
+        "A checkpoint anchored before its period ended doesn't count",
+        g,
+        [c[0], (c[1], segment_end(1) - 1)] + c[2:],
+        ("unanchored", {"segment": 1}),
+    )
+    board(
+        "deadline-is-inclusive",
+        "An anchor exactly at the end of the period and one exactly at the deadline both count",
+        g,
+        [(c[0], segment_end(0)), (c[1], segment_end(1) + CLOCK["deadline"])] + c[2:],
+        "ok",
+    )
+    board(
+        "after-seal-anchor-ignored",
+        "A checkpoint for a segment after the last one never counts, whenever it lands",
+        g,
+        c + [(eid, 9, len(g), chain_links(g)[-1], bytes(32))],
+        "ok",
+    )
+    sealed = board_of(good + [(9, ballot(4))])
+    board("entry-after-seal", "An entry in a segment after the election's last one", sealed, cps(sealed, [0, 1, 4, 6, 9]), ("after-seal", {"entry": 10}))
     board("unanchored", "Entries after the last checkpoint", g, cps(g, [0, 1, 4]), ("unanchored", {"segment": 6}))
     board("unanchored-skipped-segment", "Segment 1 holds entries but was never anchored", g, cps(g, [0, 4, 6]), ("unanchored", {"segment": 1}))
     board("no-checkpoints", "No anchored checkpoint at all", g, [], ("unanchored", {"segment": 0}))
@@ -701,6 +763,7 @@ def main(out_dir):
             "(every root, inclusion proof and consistency proof there), and every vector here is checked by it."
         ),
         "maxBoardPayload": str(MAX_BOARD_PAYLOAD),
+        "clock": {k: str(v) for k, v in CLOCK.items()},
         "entries": entry_vectors,
         "tree": {
             "leaves": [h(x) for x in leaves],

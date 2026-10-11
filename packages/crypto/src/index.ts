@@ -1,4 +1,6 @@
 export {
+  type Anchor,
+  type AnchorClock,
   BOARD_ENTRY,
   BOARD_PAYLOAD_TYPES,
   type BoardEntry,
@@ -15,6 +17,7 @@ export {
   checkpointOf,
   decodeBoardEntry,
   encodeBoardEntry,
+  isTimely,
   MAX_BOARD_PAYLOAD,
 } from "./board.ts";
 export {

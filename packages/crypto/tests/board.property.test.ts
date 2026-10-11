@@ -1,6 +1,8 @@
 import fc from "fast-check";
 import { describe, expect, test } from "vite-plus/test";
 import {
+  type Anchor,
+  type AnchorClock,
   BOARD_PAYLOAD_TYPES,
   BOARD_TREE,
   type BoardEntry,
@@ -9,6 +11,7 @@ import {
   checkCheckpoints,
   type Checkpoint,
   checkpointOf,
+  isTimely,
   consistencyProof,
   DecodeError,
   decodeBoardEntry,
@@ -325,19 +328,27 @@ const boardArb = fc
   })
   .filter(({ entries }) => entries.length > 0);
 
-function checkpointsFor(entries: readonly Uint8Array[], last: number): Checkpoint[] {
+const CLOCK: AnchorClock = { epoch: 0n, period: 3600n, deadline: 7200n, lastSegment: 1000 };
+
+/** Each checkpoint anchored a minute after its period ends. */
+const anchorOf = (checkpoint: Checkpoint): Anchor => ({
+  checkpoint,
+  anchoredAt: (BigInt(checkpoint.segment) + 1n) * CLOCK.period + 60n,
+});
+
+function checkpointsFor(entries: readonly Uint8Array[], last: number): Anchor[] {
   const board = checkBoard(ELECTION, entries, 1);
-  const out: Checkpoint[] = [];
+  const out: Anchor[] = [];
   for (let s = 0; s <= last; s++) {
     const cp = checkpointOf(board, s);
-    if (cp !== undefined) out.push(cp);
+    if (cp !== undefined) out.push(anchorOf(cp));
   }
   return out;
 }
 
-function verdict(entries: readonly Uint8Array[], checkpoints: readonly Checkpoint[]): string {
+function verdict(entries: readonly Uint8Array[], anchors: readonly Anchor[]): string {
   try {
-    checkCheckpoints(checkBoard(ELECTION, entries, 1), checkpoints);
+    checkCheckpoints(checkBoard(ELECTION, entries, 1), anchors, CLOCK);
   } catch (e) {
     if (e instanceof BoardError) return e.code;
     throw e;
@@ -416,14 +427,40 @@ describe("board checks", () => {
         payload: recordOf(2, new Uint8Array()),
       }),
     ];
-    const [cp] = checkpointsFor(entries, 0);
-    if (cp === undefined) throw new Error("unreachable");
+    const [a] = checkpointsFor(entries, 0);
+    if (a === undefined) throw new Error("unreachable");
+    const cp = a.checkpoint;
     const board = checkBoard(ELECTION, entries, 1);
-    expect(() => checkCheckpoints(board, [{ ...cp, root: cp.root.slice(1) }])).toThrow(EncodeError);
-    expect(() => checkCheckpoints(board, [{ ...cp, size: -1n }])).toThrow(EncodeError);
+    expect(() =>
+      checkCheckpoints(board, [anchorOf({ ...cp, root: cp.root.slice(1) })], CLOCK),
+    ).toThrow(EncodeError);
+    expect(() => checkCheckpoints(board, [anchorOf({ ...cp, size: -1n })], CLOCK)).toThrow(
+      EncodeError,
+    );
     expect(checkpointOf(board, 0)).toEqual(cp);
     expect(() => checkpointOf(board, -1)).toThrow(RangeError);
     expect(() => checkBoard(ELECTION.slice(1), entries, 1)).toThrow(RangeError);
+  });
+
+  test("only anchors within their period's window count, and never after the seal", () => {
+    const end = (s: number) => (BigInt(s) + 1n) * CLOCK.period;
+    expect(isTimely(CLOCK, 0, end(0))).toBe(true);
+    expect(isTimely(CLOCK, 0, end(0) - 1n)).toBe(false);
+    expect(isTimely(CLOCK, 0, end(0) + CLOCK.deadline)).toBe(true);
+    expect(isTimely(CLOCK, 0, end(0) + CLOCK.deadline + 1n)).toBe(false);
+    expect(isTimely(CLOCK, CLOCK.lastSegment + 1, end(CLOCK.lastSegment + 1))).toBe(false);
+    expect(isTimely(CLOCK, 3, 7 as never)).toBe(false);
+    expect(() => isTimely({ ...CLOCK, period: 0n }, 0, 0n)).toThrow(RangeError);
+    run(
+      fc.property(boardArb, fc.bigInt({ min: 1n, max: 10n ** 9n }), ({ entries, last }, lag) => {
+        // Every anchor landing after its deadline: nothing is anchored.
+        const late = checkpointsFor(entries, last).map((a) => ({
+          ...a,
+          anchoredAt: end(a.checkpoint.segment) + CLOCK.deadline + lag,
+        }));
+        expect(verdict(entries, late)).toBe("unanchored");
+      }),
+    );
   });
 
   test("a version other than the pinned one is a decode failure", () => {

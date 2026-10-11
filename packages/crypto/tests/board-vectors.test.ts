@@ -2,13 +2,14 @@ import { bytesToHex } from "@noble/hashes/utils.js";
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vite-plus/test";
 import {
+  type Anchor,
+  type AnchorClock,
   BOARD_TREE,
   type BoardEntry,
   boardEntryHash,
   BoardError,
   checkBoard,
   checkCheckpoints,
-  type Checkpoint,
   checkpointHash,
   consistencyProof,
   DecodeError,
@@ -66,6 +67,7 @@ interface BoardVector {
     readonly head: string;
     readonly root: string;
     readonly hash: string;
+    readonly anchoredAt: string;
   }[];
   readonly links?: readonly string[];
   readonly result: "ok" | { readonly code: string; readonly [k: string]: unknown };
@@ -74,6 +76,7 @@ interface BoardVector {
 interface BoardFile {
   readonly format: string;
   readonly maxBoardPayload: string;
+  readonly clock: Readonly<Record<"epoch" | "period" | "deadline" | "lastSegment", string>>;
   readonly entries: readonly EntryVector[];
   readonly tree: {
     readonly leaves: readonly string[];
@@ -214,14 +217,21 @@ describe("board tree", () => {
   });
 });
 
+const clock: AnchorClock = {
+  epoch: dec(file.clock.epoch),
+  period: dec(file.clock.period),
+  deadline: dec(file.clock.deadline),
+  lastSegment: Number(dec(file.clock.lastSegment)),
+};
+
 describe("board checks", () => {
   test("parses every vector", () => {
-    expect(file.boards.length).toBe(33);
+    expect(file.boards.length).toBe(39);
   });
 
   for (const v of file.boards)
     test(v.id, () => {
-      const checkpoints: Checkpoint[] = v.checkpoints.map((c) => {
+      const anchors: Anchor[] = v.checkpoints.map((c) => {
         const cp = {
           election_id: hex(c.electionId),
           segment: Number(dec(c.segment)),
@@ -230,13 +240,13 @@ describe("board checks", () => {
           root: hex(c.root),
         };
         expect(bytesToHex(checkpointHash(cp))).toBe(c.hash);
-        return cp;
+        return { checkpoint: cp, anchoredAt: dec(c.anchoredAt) };
       });
       let got: unknown = "ok";
       try {
         const board = checkBoard(hex(v.electionId), v.entries.map(hex), 1);
         if (v.links !== undefined) expect(board.links.map(bytesToHex)).toEqual(v.links);
-        checkCheckpoints(board, checkpoints);
+        checkCheckpoints(board, anchors, clock);
       } catch (e) {
         if (!(e instanceof BoardError)) throw e;
         got = { code: e.code, ...e.at };

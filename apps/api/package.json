@@ -9,7 +9,7 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "build": "vp exec tsc -p tsconfig.json",
+    "build": "vp exec tsc -p tsconfig.json && vp pack",
     "check": "vp check",
     "start": "vp node src/main.ts",
     "test": "vp run test:db"
@@ -30,6 +30,8 @@
     "vite-plus": "catalog:"
   },
   "abolish": {
-    "buildOutputs": []
+    "buildOutputs": [
+      "dist"
+    ]
   }
 }

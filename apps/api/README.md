@@ -32,6 +32,12 @@ One line per request: method, the contract route it matched (from a fixed list, 
 
 `vp run --filter @abolishus/api start` (plain Node, no TypeScript transform: `erasableSyntaxOnly` in `tsconfig.json` and a test that starts `src/main.ts` keep it that way) with `DATABASE_URL` (a user granted `abolish_app`, never the owner), and optionally `API_HOST` (default `127.0.0.1`) and `API_PORT` (default `8787`).
 
+`src/migrate.ts` applies pending migrations to `DATABASE_SCHEMA` (default `abolish`) and exits. It connects with `DATABASE_URL` as a user granted `abolish_migrator` and switches to that role, so the tables belong to the group role rather than the login.
+
+## Image
+
+`vp run build` type-checks, then bundles `main.ts` and `migrate.ts` into `dist/` with every dependency inlined, plus core's migrations (`vite.config.ts`, `pack`). The `Dockerfile` puts `dist/` on the Node base pinned by digest and nothing else, so the image carries no `node_modules`, package manager or test code. Building, deploying and the database setup it expects are in [`docs/runbooks/railway.md`](../../docs/runbooks/railway.md). `tests/image.test.ts` runs the bundle copied away from the repository: `migrate.mjs` against an empty schema, then `main.mjs` as a login granted only `abolish_app`.
+
 ## Tests
 
 `vp run --filter @abolishus/api test` needs `TEST_DATABASE_URL`, as `@abolishus/core`'s tests do, and runs uncached. The tests start the server on a free port and check every answer with `@abolishus/crypto`.

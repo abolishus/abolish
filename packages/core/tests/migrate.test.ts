@@ -1,7 +1,8 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import { loadMigrations, migrate } from "../src/index.ts";
 import { type TestDb, testDb } from "./db.ts";
@@ -35,6 +36,22 @@ describe("migrate", () => {
     await expect(migrate(await db.as("abolish_migrator"), 'x"; DROP')).rejects.toThrow(
       /plain identifier/,
     );
+  });
+});
+
+describe("roles.sql", () => {
+  // Every test file runs it at once in CI; unserialized ALTER ROLEs on the same
+  // role fail with "tuple concurrently updated".
+  test("is safe to run concurrently", async () => {
+    const roles = readFileSync(new URL("../src/db/roles.sql", import.meta.url), "utf8");
+    const clients = Array.from({ length: 8 }, () =>
+      postgres(process.env["TEST_DATABASE_URL"]!, { max: 1, onnotice: () => {} }),
+    );
+    try {
+      await Promise.all(clients.map((c) => c.unsafe(roles)));
+    } finally {
+      await Promise.all(clients.map((c) => c.end()));
+    }
   });
 });
 

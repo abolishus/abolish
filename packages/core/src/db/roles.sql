@@ -5,6 +5,10 @@
 -- the owner's privileges (T-23).
 --   abolish_migrator  owns the schema and runs migrations (DDL)
 --   abolish_app       runtime: on board tables, SELECT and INSERT only
+-- One transaction under a cluster-wide advisory lock: concurrent ALTER ROLEs
+-- on the same role fail with "tuple concurrently updated", so runs queue.
+BEGIN;
+SELECT pg_advisory_xact_lock(hashtext('abolish/roles.sql'));
 DO $$
 BEGIN
   CREATE ROLE abolish_migrator NOLOGIN;
@@ -28,3 +32,4 @@ BEGIN
   END IF;
 END
 $$;
+COMMIT;

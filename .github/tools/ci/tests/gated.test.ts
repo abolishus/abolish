@@ -234,12 +234,16 @@ describe("manifestViolations", () => {
     ).toEqual([]);
     const bad: unknown[] = [
       "./dist/bin.mjs",
-      { x: "./vendor/x.js" },
-      { x: "./dist/../vendor/x.js" },
-      { x: "dist/bin.mjs" },
-      { x: 1 },
+      { "abolish-x": "./vendor/x.js" },
+      { "abolish-x": "./dist/../vendor/x.js" },
+      { "abolish-x": "dist/bin.mjs" },
+      { "abolish-x": 1 },
       { "../x": "./dist/bin.mjs" },
       { X: "./dist/bin.mjs" },
+      { vp: "./dist/bin.mjs" },
+      { node: "./dist/bin.mjs" },
+      { "abolish-": "./dist/bin.mjs" },
+      { "abolish-X": "./dist/bin.mjs" },
     ];
     for (const bin of bad)
       expect(manifestViolations("crypto", crypto({ bin }), catalog)).not.toEqual([]);

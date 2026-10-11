@@ -246,8 +246,12 @@ function packedManifestViolations(file: string, manifest: Record<string, unknown
     if (bin === undefined) out.push(`${file}: "bin" must be an object`);
     else
       for (const [command, path] of Object.entries(bin)) {
-        if (!/^[a-z][a-z0-9-]*$/.test(command))
-          out.push(`${file}: bin["${command}"]: command names are lowercase letters, digits and -`);
+        // Prefixed, so a gated package can't shadow a toolchain command (vp,
+        // node) in a dependent's node_modules/.bin while its scripts run (T-59).
+        if (!/^abolish-[a-z0-9-]+$/.test(command))
+          out.push(
+            `${file}: bin["${command}"]: command names are abolish- then lowercase letters, digits and -`,
+          );
         if (!isDistPath(path)) out.push(`${file}: bin["${command}"] must be a path under ./dist/`);
       }
   }

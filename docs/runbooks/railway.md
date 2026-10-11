@@ -4,7 +4,7 @@ How Abolish runs on Railway: what the owner creates by hand, how images are buil
 
 Postgres is not authoritative: wiping it loses no result (T-66). Nothing on Railway holds a ballot's plaintext; the API sees ciphertexts and proofs only (T-09).
 
-Status: the API image (this runbook, Building) exists. The `ci: deploy` workflow that builds, signs and deploys it is P2-11 part 2; until it merges, nothing deploys, and the steps below marked _(part 2)_ describe what it will do. The worker (P2-4), web (P2-9) and ballot client (P2-8) add their own sections as they land.
+Status: the API image (this runbook, Building) exists. The workflow that builds, signs and deploys it, `.github/workflows/deploy.yml`, is P2-11 part 2 (#69, owner review); until it merges, nothing deploys, and the steps below marked _(part 2)_ describe what it does. Production deploys wait on the reference election against staging (P1-20). The worker (P2-4), web (P2-9) and ballot client (P2-8) add their own sections as they land.
 
 ## What the owner creates by hand
 
@@ -24,7 +24,8 @@ One Railway Postgres per environment. Its default user is the cluster owner: use
    ALTER ROLE abolish_api SET search_path = abolish;
    ```
 
-3. Only the `api-migrate` service gets `abolish_migrate`'s URL; only `api` gets `abolish_api`'s. A compromised API can then append to the board but never alter a table, a trigger or a grant (T-23, T-65).
+3. Only the deploy workflow gets `abolish_migrate`'s URL (the `MIGRATE_DATABASE_URL` secret, below); only the `api` service gets `abolish_api`'s. A compromised API can then append to the board but never alter a table, a trigger or a grant (T-23, T-65).
+4. The deploy workflow migrates from a GitHub runner, so the database needs Railway's TCP proxy enabled; use its address with `?sslmode=require` in `MIGRATE_DATABASE_URL`. That encrypts the connection but doesn't verify the proxy's certificate, and the database is then reachable from the internet behind its passwords.
 
 ### Dragonfly
 
@@ -34,18 +35,24 @@ Not used by the API. The worker (P2-4) needs it: a service from `docker.dragonfl
 
 Each service's source is a container image, set by digest by the deploy workflow _(part 2)_, never a repository: Railway never builds (T-61). Each service has no public domain unless listed.
 
-| Service       | Command                    | Variables                                                     | Notes                                                                                                                                                                                                                                     |
-| ------------- | -------------------------- | ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `api-migrate` | `node migrate.mjs`         | `DATABASE_URL` (`abolish_migrate`), `DATABASE_SCHEMA=abolish` | Restart policy: never. Applies pending migrations and exits. Railway doesn't order services, so the deploy workflow _(part 2)_ deploys it first and deploys `api` only once it has exited 0.                                              |
-| `api`         | image default (`main.mjs`) | `DATABASE_URL` (`abolish_api`), `API_PORT=8787`               | Custom domain `api.<domain>` with target port 8787 (the API reads `API_PORT`, not Railway's `PORT`), behind Cloudflare. `API_HOST` is `0.0.0.0` in the image; set `::` if a service must reach it over IPv6 on Railway's private network. |
+| Service | Command                    | Variables                                       | Notes                                                                                                                                                                                                                                     |
+| ------- | -------------------------- | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `api`   | image default (`main.mjs`) | `DATABASE_URL` (`abolish_api`), `API_PORT=8787` | Custom domain `api.<domain>` with target port 8787 (the API reads `API_PORT`, not Railway's `PORT`), behind Cloudflare. `API_HOST` is `0.0.0.0` in the image; set `::` if a service must reach it over IPv6 on Railway's private network. |
 
-Both use the same image digest, so a deploy never runs an API against migrations other than its own. No other variable is needed; secrets live only in Railway variables, never in the image or the repository.
+Migrations aren't a Railway service: Railway reports when a deployment is live, not when a one-shot process has exited, so nothing could wait for one, and its pre-deploy command would put the migrator's credential in the API's environment. The deploy workflow runs the same digest's `node migrate.mjs` itself, before pointing `api` at it, so an API never runs against migrations other than its own. No other variable is needed; secrets live only in Railway variables, never in the image or the repository.
 
 There is no health endpoint yet, so Railway's deploy health check stays off: a deploy whose process exits shows as crashed, but one that starts and then fails every query doesn't. Add `/health` and turn the check on with the next API change.
 
-### Railway tokens
+### GitHub environments and the image registry
 
 One Railway project token per environment, scoped to that environment, stored as `RAILWAY_TOKEN` in the matching GitHub environment (`staging`: `main` only, no reviewer; `production`: the `prod` branch only, owner approval). Never a repository secret: a workflow run from a PR branch can read repository secrets but not these (T-65). PR environments, if any, get a token that reaches neither.
+
+Each environment also holds:
+
+- Secret `MIGRATE_DATABASE_URL`: the `abolish_migrate` login over the TCP proxy (Postgres, step 4). `RAILWAY_TOKEN` can read every Railway variable anyway, so keeping this beside it widens nothing.
+- Variable `RAILWAY_API_SERVICE_ID`: the `api` service's ID (service settings in Railway). Not secret.
+
+Images go to `ghcr.io/abolishus/abolish-api`, tagged `sha-<commit>` for people and deployed by digest. After the first run creates the package, make it public in its GitHub package settings: Railway pulls it without credentials, and anyone can check a running digest against the build (T-49).
 
 ### Cloudflare
 
@@ -74,17 +81,17 @@ SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)" docker buildx build \
 - The image (`apps/api/Dockerfile`) is the Node base pinned by digest, at the version in `.node-version` (a test checks it), with the package managers removed and `dist/` copied in root-owned and read-only, run as `node`. `.dockerignore` lets only `dist/` into the context.
 - Attestations are off here (buildx would otherwise wrap the image in an index with them), so the digest compared is the image alone; part 2 adds signatures and provenance afterwards. `rewrite-timestamp` needs BuildKit 0.13 or later.
 - `SOURCE_DATE_EPOCH` plus `rewrite-timestamp=true` clamp every file time in the new layers to the commit time, so the digest doesn't depend on when or where it was built. Checked on 2026-10-11: two builds of the same commit, one with a fresh `dist/` built under a different umask, gave the same OCI archive, byte for byte.
-- _(part 2)_ The workflow pushes the image to `ghcr.io/abolishus/abolish-api`, signs the digest with cosign keyless signing and attaches SLSA provenance. Provenance and signatures are separate manifests that refer to the image; they don't change its digest.
+- _(part 2)_ The workflow builds on a BuildKit container pinned by digest (the runner's default driver can't export OCI archives), pushes the archive with `skopeo copy --preserve-digests` so the registry holds exactly the compared digest, signs it with cosign keyless signing and attaches SLSA provenance. Provenance and signatures are separate manifests that refer to the image; they don't change its digest.
 
 ## Deploying
 
-_(part 2)_ Every merge to `main`: build twice and compare, push, sign, then in the `staging` environment set `api-migrate` to the new digest and run it; once it exits 0, set `api` to the same digest. Then the reference election runs against staging. A production deploy happens only when the owner fast-forwards `prod` to a commit on `main`; it never rebuilds. It finds that commit's digest, verifies its signature and provenance, checks that the reference election passed on staging for that digest, waits for the owner's approval, and deploys the digest the same way. Agents list release candidates (commit, digest, reference-election result) in STATUS and never touch `prod`.
+_(part 2)_ Every merge to `main`, once `ci`, `repro-build` and `reference-election` have passed on it: build twice and compare, push, sign, then in the `staging` environment verify the signature and provenance, run the digest's `node migrate.mjs` with `MIGRATE_DATABASE_URL`, and once it exits 0 set the `api` service's source to the digest and deploy, waiting until Railway reports it live. The reference election against staging comes with P1-20. A production deploy (not built yet: it needs that reference election) happens only when the owner fast-forwards `prod` to a commit on `main`; it never rebuilds. It finds that commit's digest, verifies its signature and provenance, checks that the reference election passed on staging for that digest, waits for the owner's approval, and deploys the digest the same way. Agents list release candidates (commit, digest, reference-election result) in STATUS and never touch `prod`.
 
 ## Rolling back
 
 Redeploy `api` at the previous digest, from the last successful deploy run or the service's deployment history in Railway. Never by tag.
 
-Migrations are forward-only (`packages/core`, Database), and `api-migrate` refuses to run if an applied file changed or disappeared, so a rollback never runs `api-migrate`. A migration must therefore keep the previous release working: add, never rename or drop, in the release that introduces it, and remove what's unused only in a later one. A release that can't follow that rule says so in its PR, and rolling back past it means restoring the database (below) rather than redeploying.
+Migrations are forward-only (`packages/core`, Database), and `migrate.mjs` refuses to run if an applied file changed or disappeared, so a rollback never migrates: in Railway, redeploy the `api` service's earlier deployment, which keeps its digest. A migration must therefore keep the previous release working: add, never rename or drop, in the release that introduces it, and remove what's unused only in a later one. A release that can't follow that rule says so in its PR, and rolling back past it means restoring the database (below) rather than redeploying.
 
 ## Rotating secrets
 
@@ -94,7 +101,7 @@ Migrations are forward-only (`packages/core`, Database), and `api-migrate` refus
 
 ## Restoring after losing Postgres
 
-Nothing that decides a result lives only in Postgres (T-66). On a fresh database: repeat the Postgres setup above, run `api-migrate`, redeploy `api`. Election definitions and the board are then rebuilt from chain and IPFS by the indexer (P3-5) and the mirror (P4-3); until those exist, a restored database starts empty and the boards of elections in progress must be re-imported from their IPFS mirrors by hand. Operational data with no other copy (moderation log, accounts, voters' recovery backups) is lost unless restored from a Railway backup.
+Nothing that decides a result lives only in Postgres (T-66). On a fresh database: repeat the Postgres setup above, run the current digest's `node migrate.mjs` with the migrator's URL (`docker run --rm -e DATABASE_URL ghcr.io/abolishus/abolish-api@<digest> node migrate.mjs`), redeploy `api`. Election definitions and the board are then rebuilt from chain and IPFS by the indexer (P3-5) and the mirror (P4-3); until those exist, a restored database starts empty and the boards of elections in progress must be re-imported from their IPFS mirrors by hand. Operational data with no other copy (moderation log, accounts, voters' recovery backups) is lost unless restored from a Railway backup.
 
 ## If Railway, Cloudflare or a domain is taken from us
 

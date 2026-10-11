@@ -173,34 +173,40 @@ describe("share-encryption.json", () => {
     }
   });
 
-  test.each(vectors.ballots.map((b) => [b.id, b] as const))("ballot %s", (_, b) => {
-    const ctx = validityContext(b);
-    const keys = panelOf(b);
-    const vote = decode(COMMITTED_VOTE, hex(b.committedVote));
-    // The committed vote carries the ciphertexts' hashes and is valid.
-    expect(vote.share_hashes.map(bytesHex)).toEqual(b.shareHashes);
-    expect(b.ciphertexts.map((c) => bytesHex(shareCiphertextHash(hex(c))))).toEqual(b.shareHashes);
-    expect(checkValidity(ctx, vote)).toEqual({ ok: true });
-    for (const d of b.decryptions) {
-      const r = openShares(
-        ctx,
-        d.seat,
-        (keys[d.seat - 1] as KemKeyPair).secretKey,
-        vote.vss,
-        hex(b.ciphertexts[d.seat - 1] as string),
+  test.each(vectors.ballots.map((b) => [b.id, b] as const))(
+    "ballot %s",
+    { timeout: 60_000 },
+    (_, b) => {
+      const ctx = validityContext(b);
+      const keys = panelOf(b);
+      const vote = decode(COMMITTED_VOTE, hex(b.committedVote));
+      // The committed vote carries the ciphertexts' hashes and is valid.
+      expect(vote.share_hashes.map(bytesHex)).toEqual(b.shareHashes);
+      expect(b.ciphertexts.map((c) => bytesHex(shareCiphertextHash(hex(c))))).toEqual(
+        b.shareHashes,
       );
-      if (d.result === "ok") {
-        expect(r.ok).toBe(true);
-        if (r.ok) expect(bytesHex(encode(SHARES, r.shares))).toBe(d.shares);
-      } else expect(r).toEqual({ ok: false, code: d.result });
-    }
-  });
+      expect(checkValidity(ctx, vote)).toEqual({ ok: true });
+      for (const d of b.decryptions) {
+        const r = openShares(
+          ctx,
+          d.seat,
+          (keys[d.seat - 1] as KemKeyPair).secretKey,
+          vote.vss,
+          hex(b.ciphertexts[d.seat - 1] as string),
+        );
+        if (d.result === "ok") {
+          expect(r.ok).toBe(true);
+          if (r.ok) expect(bytesHex(encode(SHARES, r.shares))).toBe(d.shares);
+        } else expect(r).toEqual({ ok: false, code: d.result });
+      }
+    },
+  );
 
   test.each(
     vectors.ballots
       .filter((b) => b.decryptions.every((d) => d.result === "ok"))
       .map((b) => [b.id, b] as const),
-  )("reproduces every ciphertext of %s byte for byte", (_, b) => {
+  )("reproduces every ciphertext of %s byte for byte", { timeout: 60_000 }, (_, b) => {
     const polynomials: OptionPolynomials[] = b.randomness.polynomials.map((p) => ({
       f: p.f.map(BigInt),
       g: p.g.map(BigInt),
@@ -355,8 +361,10 @@ function castBallot(ctx: ValidityContext, votes: readonly (0 | 1)[], keys: reado
   return { sharing, enc, vote: proveValidity(ctx, sharing, enc.hashes) };
 }
 
+// options-max checks 64 options' validity and decrypts two 4 KB ciphertexts,
+// and the properties run ML-KEM many times: over 5 s on a shared CI runner.
 describe("properties", () => {
-  test("every trustee opens its honest ciphertext to its own shares", () => {
+  test("every trustee opens its honest ciphertext to its own shares", { timeout: 60_000 }, () => {
     fc.assert(
       fc.property(election, ({ ctx, votes, keys }) => {
         const { sharing, enc, vote } = castBallot(ctx, votes, keys);
@@ -371,53 +379,61 @@ describe("properties", () => {
     );
   });
 
-  test("an honest posting passes and a complaint against it is unfounded", () => {
-    fc.assert(
-      fc.property(election, fc.nat(), ({ ctx, votes, keys }, pick) => {
-        const { enc, vote } = castBallot(ctx, votes, keys);
-        const seat = (pick % keys.length) + 1;
-        const ct = enc.ciphertexts[seat - 1] as Uint8Array;
-        const posting = { ciphertext: ct, m: (enc.randomness[seat - 1] as ShareEncapsulation).m };
-        const pair = keys[seat - 1] as KemKeyPair;
-        expect(checkPosting(seat, pair.publicKey, vote.share_hashes, posting)).toEqual({
-          ok: true,
-        });
-        const proof = proveComplaint(ctx, seat, pair, ct);
-        expect(
-          checkComplaint(ctx, seat, pair.publicKey, vote.vss, vote.share_hashes, posting, proof),
-        ).toEqual({
-          ok: false,
-          code: "complaint-unfounded",
-        });
-      }),
-      { numRuns: keyRuns },
-    );
-  });
-
-  test("a changed byte anywhere in a ciphertext stops it opening and fails its posting", () => {
-    fc.assert(
-      fc.property(
-        election,
-        fc.nat(),
-        fc.integer({ min: 1, max: 255 }),
-        ({ ctx, votes, keys }, at, flip) => {
+  test(
+    "an honest posting passes and a complaint against it is unfounded",
+    { timeout: 60_000 },
+    () => {
+      fc.assert(
+        fc.property(election, fc.nat(), ({ ctx, votes, keys }, pick) => {
           const { enc, vote } = castBallot(ctx, votes, keys);
-          const ct = Uint8Array.from(enc.ciphertexts[0] as Uint8Array);
-          const i = at % ct.length;
-          ct[i] = (ct[i] as number) ^ flip;
-          const r = openShares(ctx, 1, (keys[0] as KemKeyPair).secretKey, vote.vss, ct);
-          expect(r.ok).toBe(false);
-          const posting = { ciphertext: ct, m: (enc.randomness[0] as ShareEncapsulation).m };
+          const seat = (pick % keys.length) + 1;
+          const ct = enc.ciphertexts[seat - 1] as Uint8Array;
+          const posting = { ciphertext: ct, m: (enc.randomness[seat - 1] as ShareEncapsulation).m };
+          const pair = keys[seat - 1] as KemKeyPair;
+          expect(checkPosting(seat, pair.publicKey, vote.share_hashes, posting)).toEqual({
+            ok: true,
+          });
+          const proof = proveComplaint(ctx, seat, pair, ct);
           expect(
-            checkPosting(1, (keys[0] as KemKeyPair).publicKey, vote.share_hashes, posting).ok,
-          ).toBe(false);
-        },
-      ),
-      { numRuns: keyRuns },
-    );
-  });
+            checkComplaint(ctx, seat, pair.publicKey, vote.vss, vote.share_hashes, posting, proof),
+          ).toEqual({
+            ok: false,
+            code: "complaint-unfounded",
+          });
+        }),
+        { numRuns: keyRuns },
+      );
+    },
+  );
 
-  test("a complaint with any altered field fails its proof", () => {
+  test(
+    "a changed byte anywhere in a ciphertext stops it opening and fails its posting",
+    { timeout: 60_000 },
+    () => {
+      fc.assert(
+        fc.property(
+          election,
+          fc.nat(),
+          fc.integer({ min: 1, max: 255 }),
+          ({ ctx, votes, keys }, at, flip) => {
+            const { enc, vote } = castBallot(ctx, votes, keys);
+            const ct = Uint8Array.from(enc.ciphertexts[0] as Uint8Array);
+            const i = at % ct.length;
+            ct[i] = (ct[i] as number) ^ flip;
+            const r = openShares(ctx, 1, (keys[0] as KemKeyPair).secretKey, vote.vss, ct);
+            expect(r.ok).toBe(false);
+            const posting = { ciphertext: ct, m: (enc.randomness[0] as ShareEncapsulation).m };
+            expect(
+              checkPosting(1, (keys[0] as KemKeyPair).publicKey, vote.share_hashes, posting).ok,
+            ).toBe(false);
+          },
+        ),
+        { numRuns: keyRuns },
+      );
+    },
+  );
+
+  test("a complaint with any altered field fails its proof", { timeout: 60_000 }, () => {
     fc.assert(
       fc.property(
         election,
@@ -448,23 +464,27 @@ describe("properties", () => {
     );
   });
 
-  test("a ciphertext decodes only to a value that re-encodes to the same bytes", () => {
-    fc.assert(
-      fc.property(fc.uint8Array({ minLength: 1124, maxLength: 1300 }), (bytes) => {
-        let v: unknown;
-        try {
-          v = decode(SHARE_CIPHERTEXT, bytes);
-        } catch (e) {
-          expect(e).toBeInstanceOf(DecodeError);
-          return;
-        }
-        expect(bytesHex(encode(SHARE_CIPHERTEXT, v as never))).toBe(bytesHex(bytes));
-      }),
-      { numRuns },
-    );
-  });
+  test(
+    "a ciphertext decodes only to a value that re-encodes to the same bytes",
+    { timeout: 60_000 },
+    () => {
+      fc.assert(
+        fc.property(fc.uint8Array({ minLength: 1124, maxLength: 1300 }), (bytes) => {
+          let v: unknown;
+          try {
+            v = decode(SHARE_CIPHERTEXT, bytes);
+          } catch (e) {
+            expect(e).toBeInstanceOf(DecodeError);
+            return;
+          }
+          expect(bytesHex(encode(SHARE_CIPHERTEXT, v as never))).toBe(bytesHex(bytes));
+        }),
+        { numRuns },
+      );
+    },
+  );
 
-  test("a KEM key decodes only if it re-encodes to the same bytes", () => {
+  test("a KEM key decodes only if it re-encodes to the same bytes", { timeout: 60_000 }, () => {
     fc.assert(
       fc.property(fc.uint8Array({ minLength: 1216, maxLength: 1216 }), (bytes) => {
         let v: unknown;

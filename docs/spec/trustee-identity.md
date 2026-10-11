@@ -60,7 +60,7 @@ R  = u1 · G + u2 · Q
 
 and accepts if and only if `R` is not the identity and `x(R) mod n = r`. `x(R)` is an integer below `p`, which is larger than `n`, so the reduction matters: an `R` with `x(R) ≥ n` verifies against `r = x(R) − n`. Both edge cases have vectors (`trustee.json`). This is SEC 1 v2 §4.1.4 and FIPS 186-5 §6.4.2, plus the decoding rules above. A conforming verifier MUST reject exactly the inputs this rule rejects.
 
-**Which key signs what.** The identity key signs only the statements this page specifies (the ceremony registration, below) and the trustee's own ceremony entry, which registers its per-election keys with their proofs of possession (P1-14's second part). Statements made during and after an election (share receipts, tally shares, destruction statements; [[0002-everlasting-privacy]], [[verifier]] 3.1 and 7.2) are signed with the per-election signing key that the ceremony entry registers, under this page's scheme and encodings, and checked against that registered key, never against the identity key directly. A per-election key bounds what a stolen key can sign to one election; the identity key, which a release pins, makes the registered key attributable to its seat (T-37).
+**Which key signs what.** The identity key signs every trustee message of the ceremony phase, before the trustee's per-election keys are registered: the ceremony registration (below), the trustee's own ceremony entry, which registers its per-election keys with their proofs of possession, the answers to possession challenges, and complaints (P1-14's second part). Statements made after registration, during and after an election (share receipts, tally shares, destruction statements; [[0002-everlasting-privacy]], [[verifier]] 3.1 and 7.2) are signed with the per-election signing key that the ceremony entry registers, under this page's scheme and encodings, and checked against that registered key, never against the identity key directly. A per-election key bounds what a stolen key can sign to one election; the identity key, which a release pins, makes the registered key attributable to its seat (T-37).
 
 **Signing.** A signer computes a standard ECDSA signature on `M` with SHA-256 and a nonce that is secret, uniform and never reused (an HSM's generator, or RFC 6979's deterministic nonce), then, if `s > (n − 1) / 2`, replaces `s` with `n − s`. `packages/crypto` signs with RFC 6979 §3.2 nonces and HMAC-SHA-256, so it never depends on a random number generator at signing time.
 
@@ -76,11 +76,11 @@ A panel is an ordered list of `n` identity keys and a threshold `k`. Seat `i` (1
 panel_id = H(DS("abolish/v1/panel", u8(k) ‖ u8(n) ‖ Q_1 ‖ … ‖ Q_n))
 ```
 
-with each `Q_i` as its 33-byte `p256-key` encoding. A panel is valid only if:
+with each `Q_i` as its 33-byte `p256-key` encoding. A panel is valid only if (checked in this order, which fixes the error code `packages/crypto` and the vectors report; a third party MUST reject the same panels and SHOULD report the same code):
 
-- `2 ≤ k ≤ n ≤ MAX_TRUSTEES` ([[parameters]]): with `k = 1` one trustee could open every voter's sharing alone (T-14);
-- every `Q_i` decodes as a `p256-key`;
-- the keys are pairwise distinct. A key in two seats would give its holder two shares of every ballot, so `k − 1` parties could open what needs `k` (T-14).
+1. `n ≤ MAX_TRUSTEES` ([[parameters]]) (`size`);
+2. `2 ≤ k ≤ n` (`threshold`): with `k = 1` one trustee could open every voter's sharing alone (T-14);
+3. for each seat in order, `Q_i` decodes as a `p256-key` (`key`) and differs from every earlier key (`duplicate-key`). A key in two seats would give its holder two shares of every ballot, so `k − 1` parties could open what needs `k` (T-14).
 
 `panel_id` binds `k`, `n`, every key and its seat, so a definition can't name a known panel with a lower threshold, a reordered seat list or a substituted key and keep the same identifier (T-37, T-14). It is the value the election definition carries as `panel_id` (P1-10b). Releases pin panels by their keys and `k`; the verifier and the ballot client recompute `panel_id` from what they pin and never take it from election data ([[verifier]], Pinned trust roots).
 
@@ -112,7 +112,7 @@ Contracts check signatures with the `P256VERIFY` precompile (RIP-7212 on Base si
 ## Security notes
 
 - **Not post-quantum.** A quantum adversary able to break P-256 during an election could forge a trustee's statements live. Forging after the fact changes nothing anchored at the time ([[board]]). A hybrid suite would be a new set of tags ([[0012-trustee-identity-signatures]], option D).
-- **A stolen identity key speaks for its seat** in every election until a release unpins it. Keys belong in hardware ([[0006-trustees]], rule 6; T-37). Per-election keys (the KEM key of [[0002-everlasting-privacy]]) limit what a stolen key decrypts, not what it can sign.
+- **A stolen identity key speaks for its seat** in every election until a release unpins it. Keys belong in hardware ([[0006-trustees]], rule 6; T-37). Per-election keys limit what a stolen _per-election_ key can decrypt or sign to one election; a stolen _identity_ key can still register keys of the thief's choosing for every election that follows, so per-election keys don't contain it.
 - **One key, one use, and the signer builds the message.** An identity key (and a per-election signing key) MUST be used for Abolish statements only, never shared with TLS, code signing, PIV authentication or another protocol, and the node that signs MUST build `m` from fields it has validated and compute `H(DS(tag, m))` itself. Hardware interfaces often sign a raw 32-byte digest; a node that signs a digest handed to it, or a key that another system can be made to sign with, yields valid Abolish statements for whoever chooses the digest, since the tag protects only parties that frame the message themselves.
 - **Nonces.** A biased or repeated ECDSA nonce reveals `d`. RFC 6979, or an HSM's generator, is required. With a sound nonce, ECDSA is unforgeable under chosen-message attack, so signing hashes another party chose (such as `stub_hash`) is safe.
 

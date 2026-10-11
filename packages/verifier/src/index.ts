@@ -1,3 +1,21 @@
-// Placeholder so the package name is held on npm with trusted publishing set
-// up (docs/STATUS.md P0-3). The first real API lands with its STATUS item.
-export {};
+export {
+  type Bundle,
+  BUNDLE_FORMAT,
+  BundleError,
+  type InputSource,
+  type InputSources,
+  parseBundle,
+  splitEntries,
+} from "./bundle.ts";
+export { CHECKS, type CheckKind, type CheckSpec } from "./checks.ts";
+export { readBundle } from "./files.ts";
+export {
+  type CheckAt,
+  type CheckCode,
+  type CheckResult,
+  type CheckStatus,
+  type Report,
+  REPORT_FORMAT,
+  type Verdict,
+  verifyBundle,
+} from "./verify.ts";

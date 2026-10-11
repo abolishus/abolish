@@ -1,0 +1,149 @@
+// Runs the checks of docs/spec/verifier.md over one bundle and builds the
+// report (Procedure, Verdicts, Report). Only the board checks (4.1, 4.2) are
+// implemented; every other check is reported unverifiable, so no run can
+// report an election verified yet. A run on unauthenticated inputs reports
+// what the checks found against them, but its verdict stays unverifiable, so
+// a crafted bundle can neither verify nor fail an election (T-53, T-24).
+
+import {
+  BoardError,
+  type BoardErrorAt,
+  type BoardErrorCode,
+  type DecodeErrorCode,
+  verifyBoard,
+} from "@abolishus/crypto";
+import type { Bundle, InputSources } from "./bundle.ts";
+import { CHECKS, type CheckKind } from "./checks.ts";
+
+export type CheckStatus = "pass" | "fail" | "unverifiable";
+export type Verdict = "verified" | "failed" | "unverifiable";
+export type CheckCode = BoardErrorCode | "not-reached" | "not-implemented";
+
+/** Where a failure is: an entry, a checkpoint by its position in the bundle's anchors, a segment, or the board. */
+export type CheckAt =
+  | { readonly entry: number; readonly decodeError?: DecodeErrorCode }
+  | { readonly checkpoint: number }
+  | { readonly segment: number }
+  | Record<string, never>;
+
+export interface CheckResult {
+  readonly id: string;
+  readonly kind: CheckKind;
+  readonly status: CheckStatus;
+  readonly code?: CheckCode;
+  readonly at?: CheckAt;
+}
+
+export interface Report {
+  readonly format: typeof REPORT_FORMAT;
+  readonly verdict: Verdict;
+  readonly verdictAgainstInputs: Verdict;
+  readonly inputs: InputSources;
+  readonly board: {
+    readonly entries: number;
+    readonly unreadableBytes: number;
+    readonly unauthenticated?: number;
+  };
+  readonly checks: readonly CheckResult[];
+}
+
+export const REPORT_FORMAT = "abolish-verifier-report/1";
+
+type Outcome = Pick<CheckResult, "status" | "code" | "at">;
+
+const PASS: Outcome = { status: "pass" };
+const NOT_REACHED: Outcome = { status: "unverifiable", code: "not-reached" };
+
+// The board checks stop at the first failure (docs/spec/board.md, Board
+// checks). These codes come from the steps before the entries are checked
+// (anchors and the copy) or after (boundaries and timeliness).
+const ANCHOR_CODES: ReadonlySet<BoardErrorCode> = new Set([
+  "checkpoint-equivocation",
+  "checkpoint-size",
+  "checkpoint-inconsistent",
+]);
+const COPY_CODES: ReadonlySet<BoardErrorCode> = new Set(["checkpoint-missing", "copy-mismatch"]);
+const AFTER_ENTRY_CODES: ReadonlySet<BoardErrorCode> = new Set([
+  "checkpoint-boundary",
+  "unanchored",
+  "unsealed",
+]);
+
+function copyAt(at: BoardErrorAt): CheckAt {
+  if ("entry" in at)
+    return at.decodeError === undefined
+      ? { entry: at.entry }
+      : { entry: at.entry, decodeError: at.decodeError };
+  if ("checkpoint" in at) return { checkpoint: at.checkpoint };
+  if ("segment" in at) return { segment: at.segment };
+  return {};
+}
+
+/** The rows of 4.1 and 4.2 for a board-check failure (docs/spec/verifier.md, Procedure, step 3). */
+function boardOutcomes(e: BoardError): readonly [Outcome, Outcome] {
+  const failed: Outcome = { status: "fail", code: e.code, at: copyAt(e.at) };
+  // A copy that is too short or differs is that copy's problem: unverifiable
+  // from this source, never the election's failure (T-53).
+  if (COPY_CODES.has(e.code)) {
+    const copy: Outcome = { status: "unverifiable", code: e.code, at: copyAt(e.at) };
+    return [copy, copy];
+  }
+  if (ANCHOR_CODES.has(e.code) || (e.code === "wrong-election" && "checkpoint" in e.at))
+    return [NOT_REACHED, failed];
+  if (AFTER_ENTRY_CODES.has(e.code)) return [PASS, failed];
+  return [failed, NOT_REACHED];
+}
+
+/** `verdictAgainstInputs` (docs/spec/verifier.md, Verdicts). Report-only checks never change it. */
+function judge(checks: readonly CheckResult[]): Verdict {
+  if (checks.some((c) => c.kind === "election" && c.status === "fail")) return "failed";
+  if (checks.some((c) => c.kind !== "report-only" && c.status === "unverifiable"))
+    return "unverifiable";
+  return "verified";
+}
+
+/** Runs every check over one bundle and reports it (docs/spec/verifier.md, Report). */
+export function verifyBundle(bundle: Bundle): Report {
+  let board: Report["board"];
+  let outcomes: readonly [Outcome, Outcome];
+  try {
+    const verified = verifyBoard(
+      bundle.electionId,
+      bundle.entries,
+      bundle.boardEntryVersion,
+      bundle.anchors,
+      bundle.clock,
+      bundle.now,
+    );
+    board = {
+      entries: bundle.entries.length,
+      unreadableBytes: bundle.unreadableBytes,
+      unauthenticated: verified.unauthenticated,
+    };
+    outcomes = [PASS, PASS];
+  } catch (e) {
+    if (!(e instanceof BoardError)) throw e;
+    board = { entries: bundle.entries.length, unreadableBytes: bundle.unreadableBytes };
+    outcomes = boardOutcomes(e);
+  }
+  const implemented = new Map([
+    ["4.1", outcomes[0]],
+    ["4.2", outcomes[1]],
+  ]);
+  const checks = CHECKS.map((c): CheckResult => ({
+    id: c.id,
+    kind: c.kind,
+    ...(implemented.get(c.id) ?? { status: "unverifiable", code: "not-implemented" }),
+  }));
+  const verdictAgainstInputs = judge(checks);
+  // Every input is a local file today, and a local file authenticates
+  // nothing, so the verdict is unverifiable whatever the checks found.
+  return {
+    format: REPORT_FORMAT,
+    verdict: "unverifiable",
+    verdictAgainstInputs,
+    inputs: { ...bundle.sources },
+    board,
+    checks,
+  };
+}

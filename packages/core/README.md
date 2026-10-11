@@ -8,7 +8,7 @@ Postgres is not authoritative: every result is rebuilt from chain + IPFS, and a 
 
 - `src/db/roles.sql`: the two roles, created once per cluster by an administrator. `abolish_migrator` owns the schema and runs migrations. `abolish_app` is what services use at runtime. Both are `NOLOGIN` group roles: each deployment logs in as its own user, granted one of them. Services never connect as the owner.
 - `src/db/migrations/`: forward-only SQL migrations, named `NNNN_name.sql`, applied in order by `migrate(sql, schema)` as `abolish_migrator`. A ledger (`schema_migrations`) records each file's sha256, and `migrate` refuses to run if an applied file changed or is missing. Merged migrations are never edited; a fix is a new migration.
-- `src/db/schema/`: the Drizzle view of the migrated tables, and `TABLE_CLASSES`, which sorts every table into board or operational.
+- `src/db/schema/`: the Drizzle view of the migrated tables, and `TABLE_CLASSES`, which sorts every table into board or operational (`moderation_actions` is operational).
 
 Migrations are written by hand rather than generated: `drizzle-kit` would bring a bundler toolchain (esbuild, tsx) into the dependency tree for SQL that has to be read line by line anyway. A test checks that the Drizzle tables match the migrated ones.
 
@@ -48,6 +48,18 @@ What the API serves, computed with `@abolishus/crypto`'s tree (`BOARD_TREE`), so
 - `readInclusionProof` and `readConsistencyProof`: RFC 9162 paths. `BoardReadError` is `invalid-range` for positions no tree has, and `beyond-board` for a tree larger than the board, checked before any position reaches a query.
 
 These read the stored `entry_hash` column rather than rehashing every payload; a client that checks what it is served catches a column that disagrees with the bytes.
+
+### `moderation_actions` (T-68)
+
+The moderation log ([`docs/moderation-policy.md`](../../docs/moderation-policy.md)): one row per decision about a poll, `seq`, `election_id`, `action` (`delist`, `hide`, `restore`), `reason` (a code from the policy, of the action's kind), `moderator` (an opaque handle, not an account) and `decided_at`. Operational: no result reads it, and a wipe loses it without changing any result. Append-only like the board (`abolish_app` holds `SELECT` and `INSERT` only; triggers reject every `UPDATE`, `DELETE` and `TRUNCATE`, for every role), so a decision is reversed by a later one, never erased. No column holds free text (T-17).
+
+`src/moderation.ts`:
+
+- `moderate(sql, electionId, decision)` records a decision and returns its sequence number and the poll's new state (`visible`, `delisted`, `hidden`). Decisions are serialised by one advisory lock, so sequence numbers commit in order and each decision is judged against the state it changes. `ModerationError` refuses a malformed decision (`invalid`), an election with no stored definition (`unknown-election`), hiding a poll before its close plus inclusion bound for a reason outside `OPEN_POLL_HIDE_REASONS` (`open-poll`), an action that changes nothing (`no-change`) and a decision dated before the log's newest (`out-of-order`).
+- `moderationStatus(sql, electionId)`: the poll's state and newest decision.
+- `readModerationLog(sql, after, limit)`: the public log, by sequence number, without the moderator.
+
+It never reads or writes the board, and only reads a definition, to find the poll and its close (a test checks this).
 
 ### No joins (T-10)
 

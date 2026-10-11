@@ -1,0 +1,281 @@
+// The moderation log (docs/moderation-policy.md; T-68). Moderation decides
+// what our front ends show of a poll: whether it is listed in discovery and
+// search, and whether its display text is shown. It never touches a result:
+// this module reads and writes `moderation_actions` alone, and nothing that
+// builds or checks a result reads that table. A result stays verifiable from
+// chain + IPFS whatever is decided here (G-9), and hiding a poll's text
+// leaves its counts published, by option index.
+
+import { decodeElectionDefinition } from "@abolishus/crypto";
+import { asc, desc, eq, gt, sql as q } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/postgres-js";
+import type { Sql } from "postgres";
+import { isBytes } from "./bytes.ts";
+import { electionDefinitions, moderationActions } from "./db/schema/index.ts";
+
+/** Grounds for delisting or hiding (docs/moderation-policy.md, Reasons). */
+export const REMOVAL_REASONS = [
+  "illegal",
+  "personal-data",
+  "threat",
+  "harassment",
+  "spam",
+  "impersonation",
+  "legal-notice",
+] as const;
+/**
+ * The only grounds for hiding a poll's text before it closes
+ * (docs/moderation-policy.md, Actions). Hiding stops voting through our
+ * ballot client, which won't show text it can't check, so for any other
+ * ground an open poll is delisted instead (T-68).
+ */
+export const OPEN_POLL_HIDE_REASONS = ["illegal", "personal-data", "threat"] as const;
+/** Grounds for restoring (docs/moderation-policy.md, Appeals and errors). */
+export const RESTORE_REASONS = ["appeal-upheld", "error", "notice-withdrawn"] as const;
+
+export type RemovalReason = (typeof REMOVAL_REASONS)[number];
+export type RestoreReason = (typeof RESTORE_REASONS)[number];
+
+/** A decision: one action with a reason of its kind, by a moderator, at a time. */
+export type ModerationDecision =
+  | {
+      readonly action: "delist" | "hide";
+      readonly reason: RemovalReason;
+      readonly moderator: string;
+      readonly decidedAt: Date;
+    }
+  | {
+      readonly action: "restore";
+      readonly reason: RestoreReason;
+      readonly moderator: string;
+      readonly decidedAt: Date;
+    };
+
+/**
+ * What our front ends do with a poll: `visible` (listed, text shown),
+ * `delisted` (off discovery and search, text shown to anyone with the link)
+ * or `hidden` (off discovery and search, text withheld; the result is still
+ * shown, by option index).
+ */
+export type ModerationState = "visible" | "delisted" | "hidden";
+
+const STATE_AFTER = { delist: "delisted", hide: "hidden", restore: "visible" } as const;
+
+export type ModerationErrorCode =
+  /** The decision is malformed: an unknown action, a reason of the wrong kind, a bad handle or time. */
+  | "invalid"
+  /** No definition is stored for the election, so there is no poll to moderate. */
+  | "unknown-election"
+  /** Hiding a poll that hasn't closed, for a reason outside `OPEN_POLL_HIDE_REASONS`. */
+  | "open-poll"
+  /** The poll is already in the state the action leads to. */
+  | "no-change"
+  /** The decision is dated before the log's newest one. */
+  | "out-of-order";
+
+export class ModerationError extends Error {
+  override readonly name = "ModerationError";
+  readonly code: ModerationErrorCode;
+  constructor(code: ModerationErrorCode) {
+    super(`moderation refused: ${code}`);
+    this.code = code;
+  }
+}
+
+/**
+ * A moderator handle: 1 to 32 lowercase letters, digits and inner hyphens.
+ * It names a moderator to the operator, not an account to the database (no
+ * foreign key leaves the account tables, T-10), and the public log omits it.
+ */
+const HANDLE = /^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/;
+/**
+ * The two-key advisory lock every decision takes (a separate keyspace from
+ * the board's lock class and from migrations' one-key locks). One lock for
+ * all elections: decisions are rare, and serialising them all makes the log's
+ * sequence numbers commit in order, so a reader paging by sequence number
+ * never passes a decision that commits later with a smaller one.
+ */
+const MODERATION_LOCK = [0x0b0a4e, 0] as const;
+
+function checkElectionId(electionId: unknown): asserts electionId is Uint8Array {
+  if (!isBytes(electionId) || electionId.length !== 32)
+    throw new TypeError("electionId must be 32 bytes");
+}
+
+function wellFormed(d: ModerationDecision): boolean {
+  if (typeof d !== "object" || d === null) return false;
+  const reasons: readonly string[] =
+    d.action === "restore"
+      ? RESTORE_REASONS
+      : d.action === "delist" || d.action === "hide"
+        ? REMOVAL_REASONS
+        : [];
+  return (
+    reasons.includes(d.reason) &&
+    typeof d.moderator === "string" &&
+    HANDLE.test(d.moderator) &&
+    d.decidedAt instanceof Date &&
+    Number.isFinite(d.decidedAt.getTime())
+  );
+}
+
+export interface ModerationStatus {
+  readonly state: ModerationState;
+  /** The newest decision, absent while the poll has never been moderated. */
+  readonly latest?: {
+    readonly seq: bigint;
+    readonly action: ModerationDecision["action"];
+    readonly reason: RemovalReason | RestoreReason;
+    readonly decidedAt: Date;
+  };
+}
+
+/**
+ * Records `decision` about `electionId`'s poll and returns its log sequence
+ * number and the poll's new state. Decisions are serialised by a
+ * transaction-scoped advisory lock, so each one is judged against the state
+ * it changes and the log stays in sequence and time order. Refused, with
+ * nothing written: a malformed decision, an election with no stored
+ * definition, hiding a poll that hasn't closed for a reason other than
+ * `OPEN_POLL_HIDE_REASONS`, an action that changes nothing (a log of no-ops would bury the
+ * decisions that matter), and a decision dated before the log's newest one.
+ */
+export async function moderate(
+  client: Sql,
+  electionId: Uint8Array,
+  decision: ModerationDecision,
+): Promise<{ readonly seq: bigint; readonly state: ModerationState }> {
+  checkElectionId(electionId);
+  if (!wellFormed(decision)) throw new ModerationError("invalid");
+  const id = new Uint8Array(electionId);
+  const { action, reason, moderator } = decision;
+  const decidedAt = new Date(decision.decidedAt.getTime());
+  return drizzle({ client }).transaction(
+    async (tx) => {
+      await tx.execute(
+        q`SELECT pg_advisory_xact_lock(${MODERATION_LOCK[0]}::int, ${MODERATION_LOCK[1]}::int)`,
+      );
+      const [stored] = await tx
+        .select({ definition: electionDefinitions.definition })
+        .from(electionDefinitions)
+        .where(eq(electionDefinitions.electionId, id));
+      if (stored === undefined) throw new ModerationError("unknown-election");
+      if (action === "hide" && !(OPEN_POLL_HIDE_REASONS as readonly string[]).includes(reason)) {
+        // A stored definition was decoded and checked before it was stored.
+        const def = decodeElectionDefinition(new Uint8Array(stored.definition));
+        // Ballots can still arrive until the inclusion bound after the close
+        // (election-definition.md, closes_at and l1_inclusion_bound).
+        const at = BigInt(Math.floor(decidedAt.getTime() / 1000));
+        if (at < def.closes_at + BigInt(def.l1_inclusion_bound))
+          throw new ModerationError("open-poll");
+      }
+      const [prev] = await tx
+        .select({ action: moderationActions.action })
+        .from(moderationActions)
+        .where(eq(moderationActions.electionId, id))
+        .orderBy(desc(moderationActions.seq))
+        .limit(1);
+      const before = prev === undefined ? "visible" : stateAfter(prev.action);
+      const state = STATE_AFTER[action];
+      if (state === before) throw new ModerationError("no-change");
+      const [newest] = await tx
+        .select({ decidedAt: moderationActions.decidedAt })
+        .from(moderationActions)
+        .orderBy(desc(moderationActions.seq))
+        .limit(1);
+      if (newest !== undefined && decidedAt < newest.decidedAt)
+        throw new ModerationError("out-of-order");
+      const [row] = await tx
+        .insert(moderationActions)
+        .values({ electionId: id, action, reason, moderator, decidedAt })
+        .returning({ seq: moderationActions.seq });
+      // INSERT … RETURNING yields exactly the one row inserted.
+      return { seq: row!.seq, state };
+    },
+    // The newest decisions must be read after the lock is taken (as for the
+    // board's appends): a snapshot older than the lock could miss one.
+    { isolationLevel: "read committed" },
+  );
+}
+
+function stateAfter(action: string): ModerationState {
+  if (action === "delist" || action === "hide" || action === "restore") return STATE_AFTER[action];
+  // The table's check constraint admits only those three.
+  throw new Error(`moderation_actions holds an unknown action: ${action}`);
+}
+
+/** The poll's current state: its newest decision's, or `visible` if it has none. */
+export async function moderationStatus(
+  client: Sql,
+  electionId: Uint8Array,
+): Promise<ModerationStatus> {
+  checkElectionId(electionId);
+  const [row] = await drizzle({ client })
+    .select({
+      seq: moderationActions.seq,
+      action: moderationActions.action,
+      reason: moderationActions.reason,
+      decidedAt: moderationActions.decidedAt,
+    })
+    .from(moderationActions)
+    .where(eq(moderationActions.electionId, new Uint8Array(electionId)))
+    .orderBy(desc(moderationActions.seq))
+    .limit(1);
+  if (row === undefined) return { state: "visible" };
+  const state = stateAfter(row.action);
+  return {
+    state,
+    latest: {
+      seq: row.seq,
+      action: row.action as ModerationDecision["action"],
+      reason: row.reason as RemovalReason | RestoreReason,
+      decidedAt: row.decidedAt,
+    },
+  };
+}
+
+/** One decision as the public log shows it: everything but the moderator. */
+export interface PublicModerationEntry {
+  readonly seq: bigint;
+  readonly electionId: Uint8Array;
+  readonly action: ModerationDecision["action"];
+  readonly reason: RemovalReason | RestoreReason;
+  readonly decidedAt: Date;
+}
+
+/** The most entries one page of the public log returns. */
+export const MAX_MODERATION_PAGE = 1000;
+
+/**
+ * Up to `limit` decisions with a sequence number above `after`, oldest first:
+ * the public moderation log (docs/moderation-policy.md, Transparency). It
+ * never includes the moderator's handle.
+ */
+export async function readModerationLog(
+  client: Sql,
+  after: bigint,
+  limit: number,
+): Promise<PublicModerationEntry[]> {
+  if (typeof after !== "bigint" || after < 0n) throw new TypeError("after must be a bigint ≥ 0");
+  if (!Number.isInteger(limit) || limit < 1 || limit > MAX_MODERATION_PAGE)
+    throw new TypeError(`limit must be an integer from 1 to ${MAX_MODERATION_PAGE}`);
+  const rows = await drizzle({ client })
+    .select({
+      seq: moderationActions.seq,
+      electionId: moderationActions.electionId,
+      action: moderationActions.action,
+      reason: moderationActions.reason,
+      decidedAt: moderationActions.decidedAt,
+    })
+    .from(moderationActions)
+    .where(gt(moderationActions.seq, after))
+    .orderBy(asc(moderationActions.seq))
+    .limit(limit);
+  return rows.map((r) => ({
+    seq: r.seq,
+    electionId: new Uint8Array(r.electionId),
+    action: r.action as ModerationDecision["action"],
+    reason: r.reason as RemovalReason | RestoreReason,
+    decidedAt: r.decidedAt,
+  }));
+}

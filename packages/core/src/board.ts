@@ -38,11 +38,10 @@ export type AppendErrorCode =
 
 export class AppendError extends Error {
   override readonly name = "AppendError";
-  constructor(
-    readonly code: AppendErrorCode,
-    options?: { cause?: unknown },
-  ) {
+  readonly code: AppendErrorCode;
+  constructor(code: AppendErrorCode, options?: { cause?: unknown }) {
     super(`board append refused: ${code}`, options);
+    this.code = code;
   }
 }
 
@@ -186,8 +185,10 @@ export type BoardReadErrorCode =
 
 export class BoardReadError extends Error {
   override readonly name = "BoardReadError";
-  constructor(readonly code: BoardReadErrorCode) {
+  readonly code: BoardReadErrorCode;
+  constructor(code: BoardReadErrorCode) {
     super(`board read refused: ${code}`);
+    this.code = code;
   }
 }
 

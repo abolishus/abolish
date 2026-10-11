@@ -16,6 +16,7 @@ export {
 export {
   DefinitionError,
   type DefinitionErrorCode,
+  hasDefinition,
   readDefinition,
   storeDefinition,
   type StoredDefinition,

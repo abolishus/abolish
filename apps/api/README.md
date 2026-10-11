@@ -19,17 +19,18 @@ Board procedures answer only for elections whose definition the server holds.
 
 ## Transport
 
-- Inputs come from the query (GET) or a JSON body (POST) alone. A GET with a body is refused.
+- Inputs come from the query (GET) or a JSON body (POST) alone. A GET with a body, and a POST with a query string, are refused, so nothing keyed on the URL sees a different request (T-31).
+- At most `maxInFlight` requests (32 by default) are handled at once, counted from the first byte; past it a request gets 503 before anything is read. A board page can hold 8 MiB and costs several times that in memory, so this bounds memory however many clients connect (T-52).
 - POST bodies: `application/json` only (oRPC's own reader would accept multipart and files of any size), at most `MAX_REQUEST_BODY` bytes, cut off as soon as they exceed it (T-52).
 - `cache-control: no-store` and `x-content-type-options: nosniff` on every response.
 
 ## Request log (T-10, T-11)
 
-One line per request: method, the contract route it matched (from a fixed list, never the raw URL), status and duration. Never an address, a header, a query string or a body. Internal errors are logged by their kind only, since messages can quote input. The handlers' context holds the database and nothing else, so no procedure can read a cookie, a token or an address. `tests/api.test.ts` fails if any of these reaches a line.
+One line per request: method, the contract route it matched (from a fixed list, never the raw URL), status and duration. Never an address, a header, a query string or a body. Internal errors, including answers that fail the contract's output schema, are logged by their kind only, since messages can quote input. The handlers' context holds the database and nothing else, so no procedure can read a cookie, a token or an address. `tests/api.test.ts` fails if any of these reaches a line.
 
 ## Running
 
-`vp run --filter @abolishus/api start` with `DATABASE_URL` (a user granted `abolish_app`, never the owner), and optionally `API_HOST` (default `127.0.0.1`) and `API_PORT` (default `8787`).
+`vp run --filter @abolishus/api start` (plain Node, no TypeScript transform: `erasableSyntaxOnly` in `tsconfig.json` and a test that starts `src/main.ts` keep it that way) with `DATABASE_URL` (a user granted `abolish_app`, never the owner), and optionally `API_HOST` (default `127.0.0.1`) and `API_PORT` (default `8787`).
 
 ## Tests
 

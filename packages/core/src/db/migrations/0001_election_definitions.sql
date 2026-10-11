@@ -4,8 +4,10 @@
 -- (T-34, T-53), and every caller hashes what it is served and compares the
 -- hash with the registry before using it. The registry is write-once per
 -- election, so this table is too: a row is never changed or removed, and an
--- election has at most one definition. @abolishus/crypto decodes and checks
--- each definition before it is stored; this table only bounds the bytes.
+-- election has at most one definition, so whatever stores one must take it
+-- from a finalized L2 block (a reorged registration can't be taken back
+-- here). @abolishus/crypto decodes and checks each definition before it is
+-- stored; this table only bounds the bytes.
 
 CREATE TABLE election_definitions (
   election_id bytea PRIMARY KEY CHECK (octet_length(election_id) = 32),
@@ -13,8 +15,7 @@ CREATE TABLE election_definitions (
   definition bytea NOT NULL CHECK (
     octet_length(definition) BETWEEN 3 AND 1048576
     AND substring(definition FROM 1 FOR 2) = '\x0001'
-  ),
-  definition_hash bytea NOT NULL CHECK (octet_length(definition_hash) = 32)
+  )
 );
 
 CREATE FUNCTION election_definitions_reject_change() RETURNS trigger

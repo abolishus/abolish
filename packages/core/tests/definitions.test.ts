@@ -13,6 +13,7 @@ import {
   DefinitionError,
   type DefinitionErrorCode,
   electionDefinitions,
+  hasDefinition,
   readDefinition,
   storeDefinition,
 } from "../src/index.ts";
@@ -124,14 +125,13 @@ describe("schema", () => {
     }
   }
 
-  test("rows must carry a definition record and 32-byte hashes", async () => {
+  test("rows must carry a definition record and a 32-byte election ID", async () => {
     const id = new Uint8Array(randomBytes(32));
-    const insert = (definition: Uint8Array, electionId = id, hash = id) =>
-      app`INSERT INTO election_definitions VALUES (${electionId}, ${definition}, ${hash})`;
+    const insert = (definition: Uint8Array, electionId = id) =>
+      app`INSERT INTO election_definitions VALUES (${electionId}, ${definition})`;
     expect(await failsWith(insert(Uint8Array.of(0, 2, 1)))).toBe("23514");
     expect(await failsWith(insert(Uint8Array.of(0, 1)))).toBe("23514");
     expect(await failsWith(insert(fresh(), id.subarray(1)))).toBe("23514");
-    expect(await failsWith(insert(fresh(), id, id.subarray(1)))).toBe("23514");
   });
 });
 
@@ -232,12 +232,17 @@ describe("storeDefinition", () => {
   });
 });
 
-describe("readDefinition", () => {
-  test("is undefined for an unknown election", async () => {
-    expect(await readDefinition(app, new Uint8Array(randomBytes(32)))).toBeUndefined();
+describe("readDefinition and hasDefinition", () => {
+  test("an unknown election has none", async () => {
+    const id = new Uint8Array(randomBytes(32));
+    expect(await readDefinition(app, id)).toBeUndefined();
+    expect(await hasDefinition(app, id)).toBe(false);
+    await storeDefinition(app, fresh(id));
+    expect(await hasDefinition(app, id)).toBe(true);
   });
 
   test("refuses an election ID that isn't 32 bytes", async () => {
     await expect(readDefinition(app, new Uint8Array(31))).rejects.toThrow(TypeError);
+    await expect(hasDefinition(app, new Uint8Array(31))).rejects.toThrow(TypeError);
   });
 });

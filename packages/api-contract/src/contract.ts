@@ -60,7 +60,7 @@ const getHead = oc
     path: "/board/head",
     summary: "The board's current size, chain head and tree root",
     description:
-      "Unanchored until the checkpoint that covers it is on L1. Callers check later heads against it with a consistency proof (T-24).",
+      "Unanchored until the checkpoint that covers it is on L1. Callers check later heads against it with a consistency proof (T-24). An empty board has no chain head or root (docs/spec/board.md never hashes an empty tree): it answers `treeSize` 0 with `chainHead` and `root` all zeros, which a client never checks anything against.",
     tags: ["board"],
   })
   .errors(electionNotFound)

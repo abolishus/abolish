@@ -7,5 +7,4 @@ import { bytea } from "./bytea.ts";
 export const electionDefinitions = pgTable("election_definitions", {
   electionId: bytea("election_id").primaryKey(),
   definition: bytea("definition").notNull(),
-  definitionHash: bytea("definition_hash").notNull(),
 });

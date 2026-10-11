@@ -12,7 +12,7 @@ import {
   electionDefinitionRule,
   type ElectionDefinitionRule,
 } from "@abolishus/crypto";
-import { eq } from "drizzle-orm";
+import { eq, sql as q } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import type { Sql } from "postgres";
 import { electionDefinitions } from "./db/schema/index.ts";
@@ -28,11 +28,13 @@ export type DefinitionErrorCode =
 
 export class DefinitionError extends Error {
   override readonly name = "DefinitionError";
+  readonly code: DefinitionErrorCode;
   constructor(
-    readonly code: DefinitionErrorCode,
+    code: DefinitionErrorCode,
     options?: { cause?: DecodeError | ElectionDefinitionRule },
   ) {
     super(`election definition refused: ${code}`, options);
+    this.code = code;
   }
 }
 
@@ -48,8 +50,9 @@ const equal = (a: Uint8Array, b: Uint8Array) =>
  * Stores an election definition under the `election_id` it carries, after
  * strict decoding and the well-formedness rules. Storing the same bytes again
  * is a no-op; different bytes for a stored election are a `conflict`. The
- * caller is responsible for having read the definition from the registry
- * (P3-5 indexes it): this checks the bytes, not their registration.
+ * caller is responsible for having read the definition from the registry in
+ * a finalized L2 block (P3-5 indexes it): the row is permanent, and this
+ * checks the bytes, not their registration.
  */
 export async function storeDefinition(
   client: Sql,
@@ -71,7 +74,7 @@ export async function storeDefinition(
   const db = drizzle({ client });
   const inserted = await db
     .insert(electionDefinitions)
-    .values({ electionId, definition: bytes, definitionHash })
+    .values({ electionId, definition: bytes })
     .onConflictDoNothing({ target: electionDefinitions.electionId })
     .returning({ electionId: electionDefinitions.electionId });
   if (inserted.length === 0) {
@@ -79,6 +82,18 @@ export async function storeDefinition(
     if (stored === undefined || !equal(stored, bytes)) throw new DefinitionError("conflict");
   }
   return { electionId, definitionHash };
+}
+
+/** Whether a definition is stored for `electionId`, without reading it. */
+export async function hasDefinition(client: Sql, electionId: Uint8Array): Promise<boolean> {
+  if (!isBytes(electionId) || electionId.length !== 32)
+    throw new TypeError("electionId must be 32 bytes");
+  const [row] = await drizzle({ client })
+    .select({ one: q<number>`1` })
+    .from(electionDefinitions)
+    .where(eq(electionDefinitions.electionId, new Uint8Array(electionId)))
+    .limit(1);
+  return row !== undefined;
 }
 
 /** The stored definition of `electionId`, as its encoded bytes, or `undefined`. */

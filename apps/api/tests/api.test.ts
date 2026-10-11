@@ -12,7 +12,9 @@ import { appendEntry, readBoard, storeDefinition } from "@abolishus/core";
 import { type TestDb, testDb } from "@abolishus/core/test-db";
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { request as httpRequest, type Server } from "node:http";
+import { spawn } from "node:child_process";
+import { createServer, request as httpRequest, type Server } from "node:http";
+import { fileURLToPath } from "node:url";
 import type { AddressInfo } from "node:net";
 import type { Sql } from "postgres";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
@@ -293,6 +295,76 @@ describe("ballots.submit", () => {
 });
 
 describe("transport", () => {
+  test("a POST with a query string is refused: inputs come from the body alone (T-31)", async () => {
+    const e = await election();
+    const r = await fetch(`${base}/ballots?electionId=${hex(b32())}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ electionId: e.idHex, ballot: "000201" }),
+    });
+    expect(r.status).toBe(400);
+  });
+
+  test("past maxInFlight, requests are refused before anything is read (T-52)", async () => {
+    const capped = createApiServer({ sql: app, log: () => {}, maxInFlight: 1 });
+    await new Promise<void>((r) => capped.listen(0, "127.0.0.1", r));
+    const url = `http://127.0.0.1:${(capped.address() as AddressInfo).port}`;
+    // A body that never finishes holds the only slot.
+    const slow = httpRequest(`${url}/ballots`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "transfer-encoding": "chunked" },
+    });
+    slow.on("error", () => {});
+    slow.write("{");
+    await new Promise((r) => setTimeout(r, 50));
+    const e = await election();
+    expect((await fetch(`${url}/board/head?electionId=${e.idHex}`)).status).toBe(503);
+    slow.destroy();
+    await new Promise((r) => setTimeout(r, 50));
+    expect((await fetch(`${url}/board/head?electionId=${e.idHex}`)).status).toBe(200);
+    capped.closeAllConnections();
+    await new Promise((r) => capped.close(r));
+    expect(() => createApiServer({ sql: app, log: () => {}, maxInFlight: 0 })).toThrow(RangeError);
+  });
+
+  test("src/main.ts starts under plain Node, without a TypeScript transform", async () => {
+    // Node strips types but rejects TypeScript-only syntax (parameter
+    // properties, enums) that the test runner's transform would accept.
+    const probe = createServer();
+    await new Promise<void>((r) => probe.listen(0, "127.0.0.1", r));
+    const port = (probe.address() as AddressInfo).port;
+    await new Promise((r) => probe.close(r));
+    const child = spawn(
+      process.execPath,
+      [fileURLToPath(new URL("../src/main.ts", import.meta.url))],
+      {
+        env: {
+          PATH: process.env["PATH"] ?? "",
+          DATABASE_URL: process.env["TEST_DATABASE_URL"] ?? "",
+          API_PORT: String(port),
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    let stderr = "";
+    child.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
+    try {
+      let status = 0;
+      for (let i = 0; i < 100 && status === 0; i++) {
+        await new Promise((r) => setTimeout(r, 100));
+        status = await fetch(`http://127.0.0.1:${port}/nope`).then(
+          (r) => r.status,
+          () => 0,
+        );
+        if (child.exitCode !== null) break;
+      }
+      expect(stderr).toBe("");
+      expect(status).toBe(404);
+    } finally {
+      child.kill("SIGTERM");
+    }
+  });
+
   test("unknown routes and methods are 404", async () => {
     expect((await fetch(`${base}/nope`)).status).toBe(404);
     expect((await fetch(`${base}/ballots`, { method: "DELETE" })).status).toBe(404);

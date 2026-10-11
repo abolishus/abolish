@@ -1,6 +1,7 @@
 import { contract, MAX_PAGE_BYTES } from "@abolishus/api-contract";
 import {
   BoardReadError,
+  hasDefinition,
   readConsistencyProof,
   readDefinition,
   readEntries,
@@ -41,7 +42,7 @@ function boardError(e: unknown, outOfRange: () => Error): never {
 /** Board procedures answer only for elections whose definition this server holds. */
 async function knownElection(sql: Sql, electionId: string, notFound: () => Error) {
   const id = fromHex(electionId);
-  if ((await readDefinition(sql, id)) === undefined) throw notFound();
+  if (!(await hasDefinition(sql, id))) throw notFound();
   return id;
 }
 

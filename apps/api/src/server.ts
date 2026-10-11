@@ -52,8 +52,10 @@ function routeOf(req: IncomingMessage): string {
 }
 
 class BodyError extends Error {
-  constructor(readonly status: number) {
+  readonly status: number;
+  constructor(status: number) {
     super(`request body refused: ${status}`);
+    this.status = status;
   }
 }
 
@@ -67,41 +69,70 @@ async function readJsonBody(req: IncomingMessage): Promise<unknown> {
   if (!/^application\/json(?:\s*;\s*charset=utf-8)?$/i.test(type)) throw new BodyError(415);
   const declared = req.headers["content-length"];
   if (declared !== undefined && !(Number(declared) <= MAX_REQUEST_BODY)) throw new BodyError(413);
-  const chunks: Buffer[] = [];
-  let size = 0;
-  for await (const chunk of req as AsyncIterable<Buffer>) {
-    size += chunk.length;
-    if (size > MAX_REQUEST_BODY) throw new BodyError(413);
-    chunks.push(chunk);
-  }
-  let text: string;
+  const body = await new Promise<Buffer>((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    const onData = (chunk: Buffer) => {
+      size += chunk.length;
+      if (size <= MAX_REQUEST_BODY) return void chunks.push(chunk);
+      // Stop reading without destroying the socket, so the 413 still reaches
+      // the client; the connection closes once it is sent.
+      req.off("data", onData);
+      req.pause();
+      reject(new BodyError(413));
+    };
+    req.on("data", onData);
+    req.once("end", () => resolve(Buffer.concat(chunks)));
+    req.once("error", reject);
+  });
   try {
-    text = new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks));
-    return JSON.parse(text) as unknown;
+    return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(body)) as unknown;
   } catch {
     throw new BodyError(400);
   }
 }
 
+const REFUSALS: Record<number, string> = {
+  400: "BAD_REQUEST",
+  404: "NOT_FOUND",
+  413: "PAYLOAD_TOO_LARGE",
+  415: "UNSUPPORTED_MEDIA_TYPE",
+  500: "INTERNAL_SERVER_ERROR",
+  503: "SERVICE_UNAVAILABLE",
+};
+
 function refuse(res: ServerResponse, status: number) {
   res.statusCode = status;
   res.setHeader("content-type", "application/json");
-  res.end(JSON.stringify({ code: status === 404 ? "NOT_FOUND" : "BAD_REQUEST", status }));
+  res.end(JSON.stringify({ code: REFUSALS[status], status }));
 }
 
 export interface ApiOptions {
   readonly sql: Sql;
   readonly log: Log;
+  /**
+   * Most requests handled at once, from the first byte to the last: past it,
+   * a request is refused with 503 before anything is read. Each page of the
+   * board can hold `MAX_PAGE_BYTES` and costs several times that in memory,
+   * so this bounds the server's memory however many clients connect (T-52).
+   */
+  readonly maxInFlight?: number;
 }
 
 /** The API server. The caller listens on it and closes it. */
-export function createApiServer({ sql, log }: ApiOptions): Server {
+export function createApiServer({ sql, log, maxInFlight = 32 }: ApiOptions): Server {
+  if (!Number.isSafeInteger(maxInFlight) || maxInFlight < 1)
+    throw new RangeError("maxInFlight must be at least 1");
+  let inFlight = 0;
   const handler = new OpenAPIHandler(router, {
     // Procedures' own errors (ELECTION_NOT_FOUND, …) are answers, not
     // failures; anything else becomes a 500 and is logged by kind.
     clientInterceptors: [
       onError((e) => {
-        if (!(e instanceof ORPCError)) log({ error: e instanceof Error ? e.name : typeof e });
+        // An ORPCError of status 500 is a failure too: an answer that fails
+        // the contract's output schema, say, which must not go unnoticed.
+        if (!(e instanceof ORPCError) || e.status >= 500)
+          log({ error: e instanceof Error ? e.name : typeof e });
       }),
     ],
   });
@@ -118,9 +149,18 @@ export function createApiServer({ sql, log }: ApiOptions): Server {
     );
     res.setHeader("x-content-type-options", "nosniff");
     res.setHeader("cache-control", "no-store");
+    if (inFlight >= maxInFlight) {
+      res.setHeader("connection", "close");
+      return refuse(res, 503);
+    }
+    inFlight++;
+    res.once("close", () => inFlight--);
     try {
       if (route === "unmatched") return refuse(res, 404);
       if (req.method === "POST") {
+        // A POST takes its input from the body alone, so nothing that keys on
+        // the URL (a cache, a rate limiter) sees a different request (T-31).
+        if (req.url?.includes("?")) return refuse(res, 400);
         (req as IncomingMessage & { body?: unknown }).body = await readJsonBody(req);
       } else if (req.headers["content-length"] !== undefined || req.headers["transfer-encoding"]) {
         // A GET takes its input from the query alone (T-31).

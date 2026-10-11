@@ -35,9 +35,9 @@ One append-only, hash-chained board per election ([`docs/spec/board.md`](../../d
 
 ### `election_definitions` (T-34)
 
-One definition per election, as the API serves it: `election_id`, `definition` (the encoded record) and `definition_hash`. Write-once like the L2 registry it mirrors: `abolish_app` holds `SELECT` and `INSERT` only, and triggers reject every `UPDATE`, `DELETE` and `TRUNCATE`, for every role. Rebuilt from the registry's `DefinitionRegistered` events (P3-5).
+One definition per election, as the API serves it: `election_id` and `definition` (the encoded record). Write-once like the L2 registry it mirrors: `abolish_app` holds `SELECT` and `INSERT` only, and triggers reject every `UPDATE`, `DELETE` and `TRUNCATE`, for every role. Rebuilt from the registry's `DefinitionRegistered` events (P3-5).
 
-`storeDefinition(sql, bytes)` decodes the definition strictly and checks the well-formedness rules with `@abolishus/crypto`, then stores it under the `election_id` it carries. Storing the same bytes again is a no-op; different bytes for a stored election are refused (`conflict`). It checks bytes, not registration: the caller reads definitions from the registry. `readDefinition(sql, electionId)` returns the stored bytes.
+`storeDefinition(sql, bytes)` decodes the definition strictly and checks the well-formedness rules with `@abolishus/crypto`, then stores it under the `election_id` it carries. Storing the same bytes again is a no-op; different bytes for a stored election are refused (`conflict`). It checks bytes, not registration: the caller reads definitions from the registry. `readDefinition(sql, electionId)` returns the stored bytes and `hasDefinition` says whether there are any, without reading them. A stored row is permanent, so callers store only definitions registered in a finalized L2 block.
 
 ### Reading the board (`src/board.ts`)
 

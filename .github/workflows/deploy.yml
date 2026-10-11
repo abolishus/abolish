@@ -195,6 +195,12 @@ jobs:
       contents: read
       packages: read
     steps:
+      # Before anything reads the image: the package may still be private.
+      - name: Log in to GHCR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ACTOR: ${{ github.actor }}
+        run: printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
         with:
           cosign-release: v3.0.6
@@ -218,11 +224,8 @@ jobs:
         env:
           DIGEST: ${{ needs.publish.outputs.digest }}
           DATABASE_URL: ${{ secrets.MIGRATE_DATABASE_URL }}
-          GH_TOKEN: ${{ github.token }}
-          ACTOR: ${{ github.actor }}
         run: |
           [ -n "$DATABASE_URL" ] || { echo "::error::MIGRATE_DATABASE_URL is not set in the staging environment"; exit 1; }
-          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
           docker run --rm -e DATABASE_URL "$IMAGE@$DIGEST" node migrate.mjs
       - name: Deploy the API to Railway
         env:
@@ -256,7 +259,8 @@ jobs:
             status="$(gql "$Q_STATUS" "$(jq -cn --arg d "$deployment" '{d: $d}')" | jq -er .deployment.status)"
             case "$status" in
               SUCCESS) echo "deployed"; exit 0 ;;
-              FAILED | CRASHED | REMOVED | SKIPPED)
+              # NEEDS_APPROVAL and SLEEPING never become live on their own.
+              FAILED | CRASHED | REMOVED | SKIPPED | NEEDS_APPROVAL | SLEEPING)
                 echo "::error::Railway deployment $deployment ended $status"
                 exit 1
                 ;;

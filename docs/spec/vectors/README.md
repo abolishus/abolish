@@ -20,6 +20,7 @@ One JSON file per spec section or record type, named after it (`primitives.json`
 | `election-registry.json`   | Election identifiers the election registry assigns, and inputs with no `u64` encoding ([[contracts]], Election registry)                                                                                            |
 | `trustee.json`             | Trustee identity keys and signatures, accepted and rejected; panel identifiers; ceremony-registration statements ([[trustee-identity]])                                                                             |
 | `ballot-validity.json`     | Committed votes with the randomness that made them, their validity verdicts, trustees' share checks and codec rejections ([[ballot-validity]])                                                                      |
+| `share-encryption.json`    | Trustee KEM keys, share ciphertexts with the randomness that made them, decryptions, postings and complaints with their verdicts, and codec rejections ([[share-encryption]])                                       |
 | `tally.json`               | Cell aggregates, trustees' per-ballot and summed shares with their check verdicts, combined seats, Lagrange coefficients and openings; published openings with the verifier's verdicts; a derived total ([[tally]]) |
 | `circuit.json`             | Circuit-facing values: each registered tag's field element and the two byte packings ([[notation]], [[domain-separation]])                                                                                          |
 
@@ -150,6 +151,17 @@ Type descriptors:
 - `ballots`: each has `id`, `description`, `context` (`definitionHash` hex; `optionCount`, `minSelections`, `maxSelections`, `threshold`, `panelSize` and `tier` as JSON numbers; `nullifier` decimal), `encoding` (the committed vote, hex) and `result`: `"ok"`, or `{ "code" }` with the first failing check's code, plus `option` for `option-proof`. Valid ballots also carry what made them, so an implementation reproduces `encoding` byte for byte: `votes`; `randomness`, with `polynomials` (per option, `f` and `g`: the `k` coefficients of `f_j` and `g_j`, constant term first, decimal) and the proof randomness `options` (per option) and `sum`, each `{ "w", "simulated": [{ "c", "z" }] }` (decimal; the simulated branches in branch order, skipping the real one); `shareHashes` (hex, seat order); `statementHash` (hex); and `shares` (each trustee's `list<share>` encoding, hex, seat 1 first).
 - `shareChecks`: each has `id`, `ballot` (the `id` of the ballot whose `vss` it is checked against), `index` (the trustee's seat), `shares` (hex) and `valid`.
 - `decode`: rejected encodings. Each has `id`, `description`, `type` (`committed-vote` or `shares`), `encoding` (hex) and `error`, a decode error code.
+
+## Share-encryption vectors
+
+`share-encryption.json` covers [[share-encryption]] with its own format, `abolish-share-encryption-vectors/1`, and the same top-level fields, plus `tags` (the combiner, associated-data, ciphertext and complaint tags, ASCII) and:
+
+- `panels`: trustee KEM keys by panel name (`panel-3`, `panel-2`, `panel-16`), seat 1 first. Each has `seed` (`d ‖ z`, hex), `x` (decimal) and `publicKey` (the `kem_key` encoding, hex).
+- `ballots`: each has `id`, `description`, `context` (as in the ballot-validity vectors), `panel`, `votes`, `randomness` (the sharing polynomials and proof randomness, as in the ballot-validity vectors), `encapsulation` (per seat, `m` hex and `e` decimal), `ciphertexts` (hex, seat order), `intermediate` (per seat: `kemSharedSecret`, `dhSharedSecret`, `aeadKey` and `associatedDataHash`, the SHA-256 of `aad`, hex), `shareHashes`, `committedVote` (hex; it passes the validity check) and `decryptions` (per seat, `result`: `"ok"` with `shares` hex, or a decryption code). Three ballots are dishonest: their `intermediate` values are those of the ciphertext actually sent.
+- `decryptFailures`: decryptions under the wrong context or of altered ciphertexts, all with the `panel-3` keys. Each has `id`, `description`, `definitionHash`, `seat` (in the associated data), `keySeat` (whose secret key decrypts), `vss` (hex), `ciphertext` and `result`.
+- `postings`: each has `id`, `description`, `ballot`, `seat`, `ciphertext`, `m` and `result`: `"ok"` or a posting code.
+- `complaints`: each has `id`, `description`, `ballot`, `seat`, `ciphertext`, `m` (the posting complained about), `proof` (the `complaint_proof` encoding, hex), `w` (decimal, where the proof is honest and reproducible) and `result`: `"ok"` for a proven complaint, or a posting or complaint code.
+- `decode`: each has `id`, `description`, `type` (`kem-key`, `kem-secret`, `share-ciphertext` or `complaint-proof`), `encoding` (hex) and `error`: a decode error code, or `null` for an encoding that must decode and re-encode to itself.
 
 ## Circuit vectors
 

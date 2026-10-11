@@ -297,6 +297,7 @@ FS_TAGS = [
     "abolish/v1/fs/ballot-validity/sum",
     "abolish/v1/fs/ceremony/possession",
     "abolish/v1/fs/tally-share",
+    "abolish/v1/fs/share-complaint",
 ]
 
 

@@ -38,8 +38,8 @@ import { PARAMETERS } from "./parameters.ts";
 const { MAX_OPTIONS, MAX_TRUSTEES } = PARAMETERS;
 
 /** The ballot record type and version whose proof rules this module implements. */
-const BALLOT_RECORD_TYPE = 0x0002;
-const BALLOT_VERSION = 1;
+export const BALLOT_RECORD_TYPE = 0x0002;
+export const BALLOT_VERSION = 1;
 
 const bitProof = struct([
   ["c0", scalar],
@@ -60,9 +60,10 @@ export type Branch = { readonly c: bigint; readonly z: bigint };
 /**
  * The committed vote a ballot carries (docs/spec/ballot-validity.md,
  * Committed vote). Counts are bounded here by the protocol maxima and checked
- * against the election by `checkValidity` (`validity-shape`).
+ * against the election by `checkValidity` (`validity-shape`). `VSS` is
+ * exported internally for share encryption's associated data.
  */
-const VSS = list(list(element, MAX_TRUSTEES), MAX_OPTIONS);
+export const VSS = list(list(element, MAX_TRUSTEES), MAX_OPTIONS);
 const SHARE_HASHES = list(bytesFixed(32), MAX_TRUSTEES);
 
 export const COMMITTED_VOTE = struct([
@@ -364,8 +365,13 @@ export interface VoteSharing {
   readonly shares: readonly (readonly Share[])[];
 }
 
-/** Every sharing `shareVoteWith` made: the only ones `proveValidityWith` accepts. */
+/** Every sharing `shareVoteWith` made: the only ones `proveValidityWith` and share encryption accept. */
 const SHARINGS = new WeakSet<VoteSharing>();
+
+/** Internal: whether `shareVote` made this sharing (unchanged, since it is frozen). */
+export function isRegisteredSharing(sharing: VoteSharing): boolean {
+  return SHARINGS.has(sharing);
+}
 
 function deepFreeze<T>(value: T): T {
   // Freezes points too (@noble/curves doesn't freeze every point it returns);
@@ -440,8 +446,8 @@ export function shareVoteWith(
   return sharing;
 }
 
-/** A uniform scalar from the CSPRNG: 64 bytes reduced mod ℓ, within about 2⁻²⁶² of uniform. */
-function randomScalar(): bigint {
+/** Internal: a uniform scalar from the CSPRNG, 64 bytes reduced mod ℓ, within about 2⁻²⁶² of uniform. */
+export function randomScalar(): bigint {
   const b = randomBytes(64);
   let v = 0n;
   for (let i = 63; i >= 0; i--) v = (v << 8n) | BigInt(b[i] as number);

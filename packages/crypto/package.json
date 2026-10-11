@@ -28,8 +28,10 @@
     "test": "vp test run"
   },
   "dependencies": {
+    "@noble/ciphers": "catalog:",
     "@noble/curves": "catalog:",
-    "@noble/hashes": "catalog:"
+    "@noble/hashes": "catalog:",
+    "@noble/post-quantum": "catalog:"
   },
   "devDependencies": {
     "@types/node": "catalog:",

@@ -1,0 +1,154 @@
+# Share encryption
+
+How a ballot's shares reach each trustee privately: the hybrid KEM that combines ML-KEM-768 with Diffie–Hellman in ristretto255, the AEAD that seals the shares, the hash `H(ct_i)` the committed vote carries, a trustee's decryption and check, the public check of a ciphertext the client posts itself, and a trustee's complaint about a posted share that is invalid. This is the private part of [[0002-everlasting-privacy]] (option B, accepted by the owner, with the owner's answer to the ML-KEM question), with the Diffie–Hellman half chosen by [[0016-share-kem-dh-group]]. Notation is from [[notation]], the group and hashes from [[group]], the committed vote and shares from [[ballot-validity]]. Threats: T-15, T-14, T-18, T-30, T-31, T-36, T-37, T-39, T-41.
+
+What this page doesn't cover yet:
+
+- **Registering trustee KEM keys** with their proofs of possession, in the ceremony transcript: P1-14 part 2. This page defines the key and its encoding.
+- **Receipts, postings and complaints as board records,** their signatures, the delivery deadline and the complaint window: P1-12 part 3 with P1-13 and P1-15. This page defines what each one checks.
+- **Spoiled ballots:** what a challenged ballot reveals and how its ciphertexts are rebuilt (P1-13). Encryption is deterministic given the randomness below, so revealing it lets anyone rebuild each ciphertext.
+
+## Sources
+
+- **ML-KEM-768:** NIST FIPS 203 (August 2024), `ML-KEM.KeyGen_internal`, `ML-KEM.Encaps_internal` and `ML-KEM.Decaps_internal` (Algorithms 16 to 18) with the input checks of §7.2 and §7.3, from `@noble/post-quantum`. That library is self-audited only; the owner allowed it on testnets, with an independent audit before mainnet ([[0002-everlasting-privacy]], Decision).
+- **The combiner:** X-Wing (D. Connolly, P. Schwabe and B. Westerbaan, `draft-connolly-cfrg-xwing-kem`, and "X-Wing: The Hybrid KEM You've Been Looking For", IACR CiC 2024), with Diffie–Hellman in ristretto255 instead of X25519 and SHA-256 under our tag instead of SHA3-256 under X-Wing's label. KEM combiners in general: F. Giacon, F. Heuer and B. Poettering, "KEM Combiners", PKC 2018.
+- **ChaCha20-Poly1305:** RFC 8439, §2.8, from `@noble/ciphers`.
+- **Complaint proof:** the Chaum–Pedersen proof of equal discrete logs (D. Chaum and T. P. Pedersen, "Wallet Databases with Observers", CRYPTO 1992), in compact form under Fiat–Shamir with the whole statement hashed ([[domain-separation]]).
+
+## Trustee KEM key
+
+Each trustee generates a fresh key for each election ([[0002-everlasting-privacy]]): 64 bytes `seed = d ‖ z` and a scalar `x`, uniform on 1 to `ℓ − 1`, all from the CSPRNG.
+
+```
+(ek, dk) = ML-KEM-768.KeyGen_internal(d, z)
+dh       = g^x
+```
+
+The public key, `kem_key`:
+
+| Field | Type          | Meaning                                                                                                                                                                           |
+| ----- | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ek`  | `bytes[1184]` | The ML-KEM-768 encapsulation key. It must pass FIPS 203 §7.2's modulus check: every 12-bit coefficient of its first 1152 bytes, read as `ByteDecode12` reads them, is below 3329. |
+| `dh`  | `element`     | `g^x`. Never the identity ([[group]]).                                                                                                                                            |
+
+A key failing the modulus check is a decode error (`non-canonical`): with it, `ByteEncode12(ByteDecode12(ek)) = ek`, so each key has one encoding (T-31, T-39).
+
+The secret key, `kem_secret`, is what a trustee node stores, never posts or sends, and destroys after the tally ([[0002-everlasting-privacy]], Consequences; P1-15 part 3; T-14):
+
+| Field  | Type        | Meaning                                    |
+| ------ | ----------- | ------------------------------------------ |
+| `seed` | `bytes[64]` | `d ‖ z`; the node derives `dk` from it     |
+| `x`    | `scalar`    | The DH secret key. Not 0 (`non-canonical`) |
+
+## Ciphertext
+
+For trustee `i`, with its registered key `(ek_i, dh_i)` and the shares `S_i` it receives ([[ballot-validity]], Shares), the client draws 32 bytes `m_i` and a scalar `e_i`, uniform on 1 to `ℓ − 1`, from the CSPRNG, fresh for each trustee and each ballot, and computes:
+
+```
+(ss_M, ct_M) = ML-KEM-768.Encaps_internal(ek_i, m_i)
+ct_DH        = g^{e_i}
+ss_DH        = dh_i^{e_i}
+K            = H(DS("abolish/v1/kem/share", ss_M ‖ encode(ss_DH) ‖ encode(ct_DH) ‖ encode(dh_i)))
+aad          = DS("abolish/v1/kem/share-aad",
+                 definition_hash ‖ u16(0x0002) ‖ u8(1) ‖ u8(i) ‖ encode(vss))
+sealed       = ChaCha20-Poly1305.Seal(K, nonce = 12 zero bytes, aad, encode(S_i))
+ct_i         = encode(share_ciphertext)
+```
+
+`share_ciphertext`:
+
+| Field      | Type          | Meaning                                                                                                                  |
+| ---------- | ------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `ct_mlkem` | `bytes[1088]` | `ct_M`                                                                                                                   |
+| `ct_dh`    | `element`     | `ct_DH`. Never the identity: an identity ephemeral makes `ss_DH` public, leaving only the ML-KEM half (T-39)             |
+| `sealed`   | `bytes<4116>` | The AEAD output: `encode(S_i)` (a 4-byte count and 64 bytes per option) and the 16-byte tag. 4116 bytes at `MAX_OPTIONS` |
+
+The committed vote's share hash for seat `i` ([[ballot-validity]], Committed vote) is
+
+```
+H(ct_i) = H(DS("abolish/v1/share-ciphertext", ct_i))
+```
+
+Notes:
+
+- **The combiner.** `K` hashes both shared secrets, the DH ciphertext and the trustee's DH key, as X-Wing does. It omits `ct_M` and `ek`: ML-KEM's shared secret already depends on `H(ek)`, and X-Wing's analysis shows ML-KEM's ciphertext second-preimage resistance makes `ct_M` redundant. `K` is secret as long as either half is: an adversary needs both ML-KEM and discrete logs in ristretto255 to read a share in transit ([[0002-everlasting-privacy]], Decision; T-15).
+- **One key, one message.** Each `K` seals exactly one message: it hashes a fresh 256-bit `m_i` and a fresh `e_i`, so the fixed nonce never repeats under a key. `packages/crypto` draws both itself and never accepts them from a caller outside its tests.
+- **Associated data.** `aad` binds the election, the ballot record type and version, the seat and every VSS commitment, so a ciphertext opens only for the seat and the committed vote it was made for ([[0002-everlasting-privacy]], Private part). It doesn't bind `H(ct_i)`, which is computed from `sealed`. It also doesn't bind the tier or the nullifier, unlike ADR 0002's text, so a ballot challenged before casting can be made with nothing that depends on the nullifier ([[ballot-validity]], Proving; [[verifier]] 6.2). Nothing is lost: the validity proofs bind the nullifier and every `H(ct_j)` ([[ballot-validity]], Statement hash), so moving ciphertexts to another nullifier needs new validity proofs, which need the openings.
+- **Hiding.** `H(ct_i)` is statistically hiding in the random-oracle model: `ct_i` carries `m_i` and `e_i`, over 500 bits of fresh entropy, against a 256-bit digest ([[0002-everlasting-privacy]], Public part).
+- **Sizes.** `ct_i` is 1088 + 32 + 4 + 4 + 64·`m` + 16 bytes: 1784 bytes at 10 options.
+
+Order of construction ([[ballot-validity]], Proving): the sharing and `vss`, then every `ct_i` and `H(ct_i)`, then the statement hash and the proofs. The client keeps `(m_i, e_i)` until the voter casts or challenges: a posting needs `m_i`, a spoiled ballot reveals both (P1-13), and a cast erases them ([[0002-everlasting-privacy]], Private part; T-18, T-45).
+
+## Decryption
+
+Trustee `i`, holding `kem_secret = (seed, x)` and the ballot's committed vote, which has already passed the validity checks ([[ballot-validity]], Checks):
+
+1. Decode `ct_i` as `share_ciphertext`; on failure, `share-malformed`.
+2. `ss_M = ML-KEM-768.Decaps_internal(dk, ct_M)`, `ss_DH = ct_DH^x`, `K` and `aad` as above, with `dh = g^x`.
+3. Open `sealed`. If the AEAD fails, or the plaintext doesn't decode as `list<share, MAX_OPTIONS>` with exactly `m` entries, `share-decrypt`.
+4. Check every option's share against `vss` ([[ballot-validity]], Shares); on failure, `share-check`.
+
+The checks run in that order and the first failure is the result. A trustee receipts the ciphertext only if every step passes (P1-12 part 3). On any failure it refuses at once and publishes nothing ([[0002-everlasting-privacy]], Delivery). It never reveals `ss_M` or `ss_DH` for a ciphertext it decrypted: ML-KEM's implicit rejection (FIPS 203 Algorithm 18) makes `Decaps` return a pseudorandom secret for a ciphertext that fails re-encryption, and revealing that output would leak `dk` over a few thousand crafted ciphertexts.
+
+## Public posting
+
+If trustee `i` doesn't receipt, the client posts `(i, ct_i, m_i)` itself ([[0002-everlasting-privacy]], Delivery). Anyone checks a posting against the ballot's committed vote and the seat's registered key, in this order:
+
+| Code                    | Check                                                                                                                                           |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `posting-malformed`     | `m_i` is 32 bytes and `ct_i` decodes as `share_ciphertext`.                                                                                     |
+| `posting-hash`          | `H(ct_i)` equals the committed vote's `share_hashes[i]`.                                                                                        |
+| `posting-encapsulation` | `ML-KEM-768.Encaps_internal(ek_i, m_i)` gives `ct_M` equal to `ct_i`'s `ct_mlkem`. Encapsulation is used only to verify here, never to encrypt. |
+
+A posting that fails is ignored: it never excludes a ballot, because anyone who has seen `ct_i` could attach a wrong `m_i`. `m_i` determines `ct_M`, and ML-KEM's correctness makes the passing `m_i` for a given `ct_M` unique, so only the client that made `ct_i` can supply one. A passing posting publishes `ss_M`, so **a posted share has only classical (Diffie–Hellman) privacy** ([[0002-everlasting-privacy]], Cons; T-15, T-27).
+
+## Complaints
+
+Suppose a posting passes but trustee `i`'s decryption of it fails at step 3 or 4. The trustee publishes a complaint: `D = ct_DH^x` with a Chaum–Pedersen proof that `log_g dh_i = log_{ct_DH} D`. Anyone then derives `K` from the posted `m_i` and `D`, and sees that the shares don't open or don't pass. A proven complaint excludes the ballot ([[0002-everlasting-privacy]], Complaints; [[revoting]], No fallback).
+
+`complaint_proof`:
+
+| Field | Type      | Meaning                               |
+| ----- | --------- | ------------------------------------- |
+| `dh`  | `element` | `D`, the DH value. Never the identity |
+| `c`   | `scalar`  | The challenge                         |
+| `z`   | `scalar`  | The response                          |
+
+Proving, with `w` uniform on 1 to `ℓ − 1` from the CSPRNG: `A_1 = g^w`, `A_2 = ct_DH^w`, `c` as below, `z = w + c·x mod ℓ`. Checking recomputes
+
+```
+A_1 = g^z · dh_i^{−c}
+A_2 = ct_DH^z · D^{−c}
+t   = definition_hash ‖ u8(i) ‖ encode(dh_i) ‖ H(ct_i) ‖ encode(ct_DH) ‖ encode(D) ‖ encode(A_1) ‖ encode(A_2)
+c   = HashToScalar(t, DST = "abolish/v1/fs/share-complaint")
+```
+
+and accepts if the recomputed `c` equals the proof's. `A_1` and `A_2` are encoded with the identity allowed; every other value is as its table says. `t` carries the election, the proof's position (the seat), the trustee's key, the ciphertext the complaint is about (by its hash, which the ballot's statement binds) and every prover commitment ([[domain-separation]], Fiat–Shamir).
+
+Anyone checks a complaint in this order, and the first failure is the result:
+
+| Code                  | Check                                                                                                                                                                                                                                                        |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `posting-*`           | The posting passes the public check above. A complaint about a posting that fails it is void.                                                                                                                                                                |
+| `complaint-proof`     | The Chaum–Pedersen proof verifies.                                                                                                                                                                                                                           |
+| `complaint-unfounded` | With `ss_M` from the posting's `Encaps_internal`, `ss_DH = D`, and `K` and `aad` as above, decryption steps 3 and 4 fail. If they pass, the complaint is unfounded: the ballot stands, and the complaint is attributed to the trustee that signed it (T-29). |
+
+If every check passes, the complaint is proven and the ballot is excluded.
+
+Notes:
+
+- **Only posted ciphertexts.** A trustee complains only about a posting that passes the public check. A ciphertext delivered at intake that fails is refused there, with nothing published.
+- **Static-DH oracle.** Each complaint reveals `D` for a `ct_DH` the poster chose: one query to a static Diffie–Hellman oracle on the trustee's per-election key ([[group]], Static Diffie–Hellman). Queries are bounded by the passing postings addressed to the trustee in one election; the posting records of part 3 must keep them below 2³² per key.
+- **Intake is an oracle too.** A trustee's accept or refuse at intake tells the sender whether the AEAD opened, which for a crafted ciphertext answers one guess of `ss_DH`: no more than a decision on a guessed DH value, and the ML-KEM half stays behind implicit rejection.
+
+## Residuals
+
+- **Only computationally hiding in transit.** A recorded `ct_i` falls to an adversary who breaks both ML-KEM-768 and discrete logs in ristretto255 (A-11, T-15). A posted `ct_i` falls to discrete logs alone.
+- **Unaudited ML-KEM code.** `@noble/post-quantum` has no independent audit; testnets only until one exists ([[0002-everlasting-privacy]], Decision).
+- **Not X-Wing.** The combiner follows X-Wing over another group and hash, so X-Wing's vectors and proofs don't apply directly ([[0016-share-kem-dh-group]], T-36).
+- **Not constant time.** ML-KEM's arithmetic in `@noble/post-quantum` is JavaScript and makes no constant-time claim; the scalar multiplications are `@noble/curves`' constant-time ladder. A local timing attacker on a trustee node could learn about `dk` or `x` (T-39, T-14).
+- **Secrets can't be zeroised in JavaScript.** `packages/crypto` overwrites the byte arrays it derives (`dk`, `ss_M`, `K`), but `x` and `e_i` are `bigint`s.
+
+## Test vectors
+
+`docs/spec/vectors/share-encryption.json` ([[vectors/README|vectors]]): trustee keys from their seeds; ballots with every ciphertext and share hash, from the randomness that made them; each trustee's decryption, and decryptions failing each step (another seat, another definition, a changed `vss`, a flipped tag byte, wrong shares sealed correctly); postings passing and failing each check; complaints proven, unfounded and failing their proof; codec rejections of `kem_key`, `kem_secret`, `share_ciphertext` and `complaint_proof`. They are printed by `packages/crypto/scripts/share-encryption-vectors.py`, which implements ML-KEM-768 from FIPS 203 and ChaCha20-Poly1305 from RFC 8439 in Python's integers and `hashlib`, reusing only the independent ristretto255 code of `group-vectors.py` and the ballot code of `ballot-validity-vectors.py`. Before printing, it checks its ML-KEM-768 against the accumulated FIPS 203 vectors of Go's `crypto/mlkem` tests (100 iterations; 10 000 with `--full`) and its AEAD against RFC 8439 §2.8.2. `packages/crypto` checks `@noble/post-quantum` against the same 10 000-iteration hash and `@noble/ciphers` against RFC 8439 §2.8.2.

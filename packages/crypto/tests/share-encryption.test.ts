@@ -341,6 +341,23 @@ const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
 const keyRuns = Math.max(10, Math.ceil(numRuns / 20));
 const PANEL = Array.from({ length: 4 }, () => kemKeygen());
 
+// Random bytes almost never decode, so the codec properties also start from
+// valid encodings and change one byte, which reaches both outcomes.
+function nearValid(valid: readonly Uint8Array[]) {
+  return fc
+    .record({
+      base: fc.constantFrom(...valid),
+      at: fc.nat(),
+      to: fc.integer({ min: 0, max: 255 }),
+      mutate: fc.boolean(),
+    })
+    .map(({ base, at, to, mutate }) => {
+      const out = Uint8Array.from(base);
+      if (mutate) out[at % out.length] = to;
+      return out;
+    });
+}
+
 /** An election on PANEL: 1 to 4 options, 2 ≤ k ≤ n ≤ 4, and a vote it allows. */
 const election = fc
   .record({
@@ -517,16 +534,22 @@ describe("properties", () => {
     { timeout: 60_000 },
     () => {
       fc.assert(
-        fc.property(fc.uint8Array({ minLength: 1188, maxLength: 1400 }), (bytes) => {
-          let v: unknown;
-          try {
-            v = decode(SHARE_CIPHERTEXT, bytes);
-          } catch (e) {
-            expect(e).toBeInstanceOf(DecodeError);
-            return;
-          }
-          expect(bytesHex(encode(SHARE_CIPHERTEXT, v as never))).toBe(bytesHex(bytes));
-        }),
+        fc.property(
+          fc.oneof(
+            fc.uint8Array({ minLength: 1188, maxLength: 1400 }),
+            nearValid(vectors.ballots.flatMap((b) => b.ciphertexts.map((c) => hex(c)))),
+          ),
+          (bytes) => {
+            let v: unknown;
+            try {
+              v = decode(SHARE_CIPHERTEXT, bytes);
+            } catch (e) {
+              expect(e).toBeInstanceOf(DecodeError);
+              return;
+            }
+            expect(bytesHex(encode(SHARE_CIPHERTEXT, v as never))).toBe(bytesHex(bytes));
+          },
+        ),
         { numRuns },
       );
     },
@@ -534,16 +557,24 @@ describe("properties", () => {
 
   test("a KEM key decodes only if it re-encodes to the same bytes", { timeout: 60_000 }, () => {
     fc.assert(
-      fc.property(fc.uint8Array({ minLength: 1216, maxLength: 1216 }), (bytes) => {
-        let v: unknown;
-        try {
-          v = decode(KEM_PUBLIC_KEY, bytes);
-        } catch (e) {
-          expect(e).toBeInstanceOf(DecodeError);
-          return;
-        }
-        expect(bytesHex(encode(KEM_PUBLIC_KEY, v as KemPublicKey))).toBe(bytesHex(bytes));
-      }),
+      fc.property(
+        fc.oneof(
+          fc.uint8Array({ minLength: 1216, maxLength: 1216 }),
+          nearValid(
+            Object.values(vectors.panels).flatMap((keys) => keys.map((k) => hex(k.publicKey))),
+          ),
+        ),
+        (bytes) => {
+          let v: unknown;
+          try {
+            v = decode(KEM_PUBLIC_KEY, bytes);
+          } catch (e) {
+            expect(e).toBeInstanceOf(DecodeError);
+            return;
+          }
+          expect(bytesHex(encode(KEM_PUBLIC_KEY, v as KemPublicKey))).toBe(bytesHex(bytes));
+        },
+      ),
       { numRuns },
     );
   });

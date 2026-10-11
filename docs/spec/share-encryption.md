@@ -103,7 +103,7 @@ Trustee `i`, holding `kem_secret = (seed, x)` and the ballot's committed vote, w
 4. Open `sealed`. If the AEAD fails, or the plaintext doesn't decode as `list<share, MAX_OPTIONS>` with exactly `m` entries, `share-decrypt`.
 5. Check every option's share against `vss` ([[ballot-validity]], Shares); on failure, `share-check`.
 
-The checks run in that order and the first failure is the result. A trustee receipts the ciphertext only if every step passes (P1-12 part 3). On any failure it refuses at once and publishes nothing ([[0002-everlasting-privacy]], Delivery). It never reveals `ss_M` or `ss_DH` for a ciphertext it decrypted: ML-KEM's implicit rejection (FIPS 203 Algorithm 18) makes `Decaps` return a pseudorandom secret for a ciphertext that fails re-encryption, and revealing that output would leak `dk` over a few thousand crafted ciphertexts.
+The checks run in that order and the first failure is the result. A trustee receipts the ciphertext only if every step passes (P1-12 part 3). These steps take `ct_i` as delivered; checking `H(ct_i)` against the committed vote's `share_hashes[i]` belongs to the receipt, which part 3 specifies, as the posting check already does. On any failure it refuses at once and publishes nothing ([[0002-everlasting-privacy]], Delivery). It never reveals `ss_M` or `ss_DH` for a ciphertext it decrypted: ML-KEM's implicit rejection (FIPS 203 Algorithm 18) makes `Decaps` return a pseudorandom secret for a ciphertext that fails re-encryption, and revealing that output would leak `dk` over a few thousand crafted ciphertexts.
 
 ## Public posting
 
@@ -116,7 +116,7 @@ If trustee `i` doesn't receipt, the client posts `(i, ct_i, m_i)` itself ([[0002
 | `posting-proof`         | The proof of knowledge of `e_i` verifies for seat `i`, its registered `dh_i` and the ballot's `vss`.                                            |
 | `posting-encapsulation` | `ML-KEM-768.Encaps_internal(ek_i, m_i)` gives `ct_M` equal to `ct_i`'s `ct_mlkem`. Encapsulation is used only to verify here, never to encrypt. |
 
-A posting that fails is ignored: it never excludes a ballot, because anyone who has seen `ct_i` could attach a wrong `m_i`. `m_i` determines `ct_M`, and ML-KEM's correctness makes the passing `m_i` for a given `ct_M` unique, so only the client that made `ct_i` can supply one. A passing posting publishes `ss_M`, so **a posted share has only classical (Diffie–Hellman) privacy** ([[0002-everlasting-privacy]], Cons; T-15, T-27).
+A posting that fails is ignored: it never excludes a ballot, because anyone who has seen `ct_i` could attach a wrong `m_i`. `m_i` determines `ct_M`, and ML-KEM's correctness makes the passing `m_i` for a given `ct_M` unique, so only a party that knows `m_i` can supply one: the client that made `ct_i`, or trustee `i`, which recovers `m_i` with ML-KEM's inner decryption (FIPS 203 K-PKE.Decrypt, a step of `Decaps`) when `ct_M` is honest. A posting by trustee `i` gives it no new power, since it holds `S_i` and could disclose it outright ([[0002-everlasting-privacy]]; T-14), but it publishes `ss_M`, so the share drops to classical privacy for everyone even after the trustee receipted it, and [[verifier]] 8.2 counts it as readable. This corrects [[0002-everlasting-privacy]] (option B, Re-voting), which says only the voter's own client can supply a passing posting. A passing posting publishes `ss_M`, so **a posted share has only classical (Diffie–Hellman) privacy** ([[0002-everlasting-privacy]], Cons; T-15, T-27).
 
 ## Complaints
 
@@ -154,7 +154,7 @@ If every check passes, the complaint is proven and the ballot is excluded.
 Notes:
 
 - **Only posted ciphertexts.** A trustee complains only about a posting that passes the public check, its proof of knowledge included, and whose shares fail its own decryption at step 4 or 5; `packages/crypto` refuses to make a complaint otherwise. A ciphertext delivered at intake that fails is refused there, with nothing published.
-- **No DH oracle.** A passing posting proves its maker knows `e_i`, so the `D = dh_i^{e_i}` a complaint reveals is a value the poster could already compute: the complaint answers no static Diffie–Hellman query ([[group]], Static Diffie–Hellman), and it can't be aimed at another ciphertext's ephemeral.
+- **No DH oracle.** A passing posting's `ct_i` proves that whoever made it knows `e_i` (the Schnorr proof is extractable in the random-oracle model, by rewinding with the forking lemma, Pointcheval and Stern, J. Cryptology 2000; composing many postings follows Bernhard, Pereira and Warinschi, ASIACRYPT 2012), so the `D = dh_i^{e_i}` a complaint reveals is a value the poster could already compute: the complaint answers no static Diffie–Hellman query ([[group]], Static Diffie–Hellman), and it can't be aimed at another ciphertext's ephemeral.
 - **Intake reveals nothing the sender lacks.** A trustee's accept or refuse at intake tells the sender whether the AEAD opened and the shares passed. With the proof of knowledge checked first, the sender already knows `ss_DH`, and the ML-KEM half stays behind implicit rejection.
 
 ## Residuals
@@ -162,7 +162,7 @@ Notes:
 - **Only computationally hiding in transit.** A recorded `ct_i` falls to an adversary who breaks both ML-KEM-768 and discrete logs in ristretto255 (A-11, T-15). A posted `ct_i` falls to discrete logs alone.
 - **Unaudited ML-KEM code.** `@noble/post-quantum` has no independent audit; testnets only until one exists ([[0002-everlasting-privacy]], Decision).
 - **Not X-Wing.** The combiner follows X-Wing over another group and hash, so X-Wing's vectors and proofs don't apply directly ([[0016-share-kem-dh-group]], T-36).
-- **Not constant time.** ML-KEM's arithmetic in `@noble/post-quantum` is JavaScript and makes no constant-time claim; the scalar multiplications are `@noble/curves`' constant-time ladder. A local timing attacker on a trustee node could learn about `dk` or `x` (T-39, T-14).
+- **Not constant time.** ML-KEM's arithmetic in `@noble/post-quantum` is JavaScript and makes no constant-time claim; the scalar multiplications are `@noble/curves`' constant-time ladder. A timing attacker could learn about `dk` or `x`, and not only a local one: trustee intake decapsulates any well-formed ciphertext with a valid proof of knowledge next to a valid ballot core, and the proof doesn't cover `ct_M`, so it is a remote, unauthenticated decapsulation endpoint for a chosen `ct_M`. The mainnet audit must cover ML-KEM's timing, and intake needs rate limits (T-39, T-14).
 - **Secrets can't be zeroised in JavaScript.** `packages/crypto` overwrites the byte arrays it derives (`dk`, `ss_M`, `K`), but `x` and `e_i` are `bigint`s.
 
 ## Test vectors

@@ -52,7 +52,7 @@ Each trustee's shares travel under the hybrid KEM of [`docs/spec/share-encryptio
 - `checkPosting(context, seat, key, vss, shareHashes, posting)` is anyone's check of a ciphertext the client posted with its ML-KEM message: `posting-malformed`, `posting-hash`, `posting-proof`, `posting-encapsulation`.
 - `proveComplaint(context, seat, keyPair, vss, shareHashes, posting)` reveals the DH value of a posted ciphertext with a Chaum–Pedersen proof (`COMPLAINT_PROOF`), and refuses unless the posting passes and its shares fail the trustee's own intake; `checkComplaint` checks the posting, the proof (`complaint-proof`) and that the shares really fail (`complaint-unfounded` otherwise).
 
-`@noble/post-quantum` is self-audited only, allowed on testnets by the owner with an audit before mainnet (ADR 0002, Decision).
+`@noble/post-quantum` is self-audited only. The owner allowed it on testnets, with an audit before mainnet, in a hybrid with X25519 (ADR 0002, Decision); whether this ristretto255 hybrid counts waits on the owner's answer in ADR 0016, and nothing ships before it.
 
 ## Bulletin board
 

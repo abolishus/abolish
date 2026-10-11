@@ -8,6 +8,7 @@ export {
   splitEntries,
 } from "./bundle.ts";
 export { CHECKS, type CheckKind, type CheckSpec } from "./checks.ts";
+export { type CliOutput, EXIT_CODES, runCli } from "./cli.ts";
 export { readBundle } from "./files.ts";
 export {
   type CheckAt,

@@ -152,3 +152,21 @@ JSON, an object with these members, in this order:
 | `checks`               | Every check on this page exactly once, in this page's order: `id` (such as `"4.1"`), `kind` (`"election"`, `"admission"` or `"report-only"`, per Principles), `status` (`"pass"`, `"fail"` or `"unverifiable"`) and, unless it passed, `code`, plus `at` where the code names a place |
 
 While an election runs, 4.2 passes on the segments whose windows have closed by `now` ([[board]], Board checks), so its pass covers the board as of `now` only. `code` is a board-check code from [[board]], `not-reached` (an earlier board check stopped the run first) or `not-implemented`. `at` is `{"entry": n}` (with `"decodeError"`, the [[notation]] code, for `decode`), `{"checkpoint": n}` (its position in `anchors`), `{"segment": s}`, or `{}` for `unsealed`.
+
+### Command line
+
+`abolish-verify [--] <bundle-directory>` runs the procedure over one bundle. On success it writes the report to stdout as JSON followed by a newline, and a summary to stderr. A rejected bundle writes no report, only the reason, to stderr.
+
+The exit code depends on `verdict` alone, never on `verdictAgainstInputs`, so a script that reads only the exit code can't be made to read a crafted bundle's findings as the election's (T-53):
+
+| Code | Meaning                                                         |
+| ---- | --------------------------------------------------------------- |
+| 0    | `verdict` is `verified`                                         |
+| 3    | `verdict` is `failed`                                           |
+| 4    | `verdict` is `unverifiable`                                     |
+| 5    | The bundle was rejected; there is no report                     |
+| 2    | Usage: no bundle, more than one, an unknown option, or `--help` |
+
+0 means verified and nothing else, which is why `--help` exits 2. No code is 1, which Node uses for an uncaught error. Any code not in the table is a failure of the verifier itself and says nothing about the election.
+
+The summary's first line is `verdict: <verdict>`. While any input is unauthenticated it continues ` (unauthenticated inputs: <names>; against those inputs: <verdictAgainstInputs>)`, so `verdictAgainstInputs` is never shown without `verdict` and the inputs beside it. A line follows for each failed check: its `id`, `fail`, its `code` and its `at` as JSON. Anything quoted from the bundle (a rejected member name, say) is printed as printable ASCII only: every other character and the backslash are written as `\u{<hex>}`, so a bundle can't put control or bidirectional characters on a terminal.

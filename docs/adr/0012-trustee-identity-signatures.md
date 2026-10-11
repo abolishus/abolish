@@ -51,6 +51,13 @@ Each trustee is an Ethereum account; the contract checks signatures with `ecreco
 - **Pros:** works on every EVM chain with no precompile caveats; the same key type our Safe owners use for EIP-712 group additions ([[0004-l2-choice]]); hardware wallets (Ledger, Trezor) are cheap and common; `@noble/curves`' `secp256k1` is audited.
 - **Cons:** no FIPS 140 HSM, PIV card or platform enclave support for secp256k1 signing beyond a few HSMs and cloud KMS; NIST SP 800-186 allows the curve only for blockchain use. A trustee that is a university or a civil-society body has fewer custody choices, and the custody of these keys is what T-37 rests on. `ecrecover` returns an address, so verification by key recovery hides a malformed signature as "some other signer" unless every caller checks the range rules; OpenZeppelin's `ECDSA` does.
 
+### B∧C. Both: every identity-signed (ceremony-phase) message carries a P-256 and a secp256k1 signature
+
+Each seat pins two identity keys, both bound into `panel_id`; a ceremony-phase statement counts only with both signatures, checked on chain through `P256VERIFY` and `ecrecover`.
+
+- **Pros:** closes the residual recorded under B: forging `k` seats' ceremony entries would need an undisclosed P-256 break _and_ `k` secp256k1 keys (by theft or a separate break), and a custody thief would need both of a seat's keys.
+- **Cons:** two keys and two custody processes per trustee, where the secp256k1 key has the narrower hardware choice that is C's main cost; a second key and signature encoding to specify and vector (a wider T-31 surface); about 3,000 more gas per signature on chain.
+
 ### D. A post-quantum or hybrid signature (ML-DSA-65, or Ed25519 + ML-DSA)
 
 - **Pros:** signatures stay unforgeable against a quantum adversary.
@@ -64,9 +71,9 @@ Each trustee is an Ethereum account; the contract checks signatures with `ecreco
 - **For B: custody.** The identity key is the one secret whose theft speaks for a seat at every election. Trustees are independent institutions picking their own hardware, and P-256 is what FIPS HSMs, PIV cards, cloud KMS and platform enclaves sign with; secp256k1 has a few HSMs, cloud KMS and hardware wallets. Theft through weak custody is the likelier way to lose an identity key (T-37).
 - **For C: parameter provenance.** secp256k1's curve parameters are rigid; P-256's come from an unexplained seed. That matters only against an adversary holding an undisclosed break of P-256, which is speculative, while weak custody is not.
 
-B is chosen for custody. Its known weaknesses, nonce generation and malleability, are handled by RFC 6979 and the low-s rule and covered by published vectors. The parameter-provenance residual is stated in [[trustee-identity]] (Security notes). A veto in favour of C is cheap while no identity key is pinned (Decision).
+B is chosen for custody. B∧C would remove the provenance residual, but it gives every trustee a second root key whose custody is C's weak point, for protection against a speculative break; it stays open to the owner. B's known weaknesses, nonce generation and malleability, are handled by RFC 6979 and the low-s rule and covered by published vectors. The parameter-provenance residual is stated in [[trustee-identity]] (Security notes). A veto in favour of C is cheap while no identity key is pinned (Decision).
 
-What would change it: an owner decision that trustees must hold Ethereum accounts, or that rigid curve parameters outweigh custody (C); the owner answering the ML-KEM audit question in a way that also clears ML-DSA, which makes a hybrid suite (D, alongside B) the next step; or a practical break of P-256.
+What would change it: an owner decision that trustees must hold Ethereum accounts, or that rigid curve parameters outweigh custody (C); an owner decision that the root statements should not rest on one curve at all (B∧C), at the cost of a second key per trustee; the owner answering the ML-KEM audit question in a way that also clears ML-DSA, which makes a hybrid suite (D, alongside B) the next step; or a practical break of P-256.
 
 ## Consequences
 
@@ -79,4 +86,4 @@ What would change it: an owner decision that trustees must hold Ethereum account
 
 ## Decision
 
-Option B, `Accepted (agent) — owner may veto`, listed under Decisions to review in [[STATUS]]. A veto in favour of C changes [[trustee-identity]]'s encodings and the registry's verification, and nothing else; no identity key has been pinned or anchored yet.
+Option B, `Accepted (agent) — owner may veto`, listed under Decisions to review in [[STATUS]]. A veto in favour of C changes [[trustee-identity]]'s encodings and the registry's verification, and nothing else. A veto in favour of B∧C also changes the panel identifier's layout (two keys per seat) and every ceremony-phase statement (two signatures). No identity key has been pinned or anchored yet.

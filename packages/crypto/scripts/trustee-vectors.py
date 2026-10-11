@@ -138,7 +138,15 @@ def ecdsa_sign(d, message, low_s=True):
 def verify(key, message, sig):
     """The spec's Verify over the complete message M = DS(tag, m)."""
     q = decompress(key)
-    if q is None or len(sig) != 64:
+    if q is None:
+        return False
+    return verify_point(q, message, sig)
+
+
+def verify_point(q, message, sig):
+    """ECDSA verification against a point, with the low-s rule: what a
+    verifier that accepted any SEC 1 key encoding would compute."""
+    if len(sig) != 64:
         return False
     r, s = int.from_bytes(sig[:32], "big"), int.from_bytes(sig[32:], "big")
     if not (1 <= r < N and 1 <= s <= HALF_N):
@@ -358,6 +366,14 @@ def main(out_dir):
         ("sig-key-uncompressed-own", "sig-1 under key-1's own uncompressed form (0x04)", uncompressed(keys[0]), bm, bs),
         ("sig-key-hybrid", "sig-1 under key-1's own SEC 1 hybrid form (0x06 or 0x07)", uncompressed(keys[0], True), bm, bs),
     ]
+    # The key-encoding vectors must be valid signatures under the point their
+    # key encodes, so only the encoding rule can reject them.
+    for _vid, _desc, key, msg, sig in rejected:
+        if len(key) == 65:
+            x, y = int.from_bytes(key[1:33], "big"), int.from_bytes(key[33:], "big")
+            expected_prefix = 6 + (y & 1) if _vid == "sig-key-hybrid" else 4
+            assert (x, y) == decompress(keys[0]) and key[0] == expected_prefix
+            assert verify_point((x, y), ds(REGISTRATION_TAG, msg), sig)
     for vid, desc, key, msg, sig in rejected:
         M = ds(REGISTRATION_TAG, msg)
         assert not verify(key, M, sig), vid
@@ -377,6 +393,33 @@ def main(out_dir):
             "message": h(bm),
             "dsMessage": h(ds(REGISTRATION_TAG, bm)),
             "signature": h(other),
+            "valid": False,
+        }
+    )
+
+    # Published in #46 and kept byte for byte, never removed or edited
+    # (versioning.md, Change rules; the vectors README explains them):
+    # key-x-above-p has the same bytes as key-x-equals-p-prefix-03, and
+    # sig-key-uncompressed (G's point with key-1's signature, so not a
+    # valid signature under its key either) is superseded by the -own and
+    # -hybrid vectors. Appended last, so earlier positions are unchanged.
+    key_vectors.append(
+        {
+            "id": "key-x-above-p",
+            "encoding": h(b"\x03" + P.to_bytes(32, "big")),
+            "error": "non-canonical",
+        }
+    )
+    M = ds(REGISTRATION_TAG, bm)
+    assert not verify_point(G, M, bs)
+    sig_vectors.append(
+        {
+            "id": "sig-key-uncompressed",
+            "description": "valid signature, key in uncompressed form",
+            "key": h(b"\x04" + G[0].to_bytes(32, "big") + G[1].to_bytes(32, "big")),
+            "message": h(bm),
+            "dsMessage": h(M),
+            "signature": h(bs),
             "valid": False,
         }
     )

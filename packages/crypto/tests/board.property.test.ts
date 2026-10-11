@@ -8,7 +8,6 @@ import {
   type BoardEntry,
   BoardError,
   checkBoard,
-  checkCheckpoints,
   type Checkpoint,
   checkpointOf,
   isTimely,
@@ -24,6 +23,7 @@ import {
   RECORD_TYPES,
   UNPINNED,
   verifyConsistency,
+  verifyBoard,
   verifyInclusion,
 } from "../src/index.ts";
 
@@ -332,12 +332,22 @@ const boardArb = fc
   })
   .filter(({ entries }) => entries.length > 0);
 
-const CLOCK: AnchorClock = { epoch: 0n, period: 3600n, deadline: 7200n, lastSegment: 1000 };
+const PERIOD = 3600n;
+const DEADLINE = 7200n;
+const end = (s: number) => (BigInt(s) + 1n) * PERIOD;
+/** The clock of a board whose seal is `last`, and a finalized time after the seal's window. */
+const clockFor = (last: number): AnchorClock => ({
+  epoch: 0n,
+  period: PERIOD,
+  deadline: DEADLINE,
+  lastSegment: last,
+});
+const closedAt = (last: number) => end(last) + DEADLINE + 1n;
 
 /** Each checkpoint anchored a minute after its period ends. */
 const anchorOf = (checkpoint: Checkpoint): Anchor => ({
   checkpoint,
-  anchoredAt: (BigInt(checkpoint.segment) + 1n) * CLOCK.period + 60n,
+  anchoredAt: end(checkpoint.segment) + 60n,
 });
 
 function checkpointsFor(entries: readonly Uint8Array[], last: number): Anchor[] {
@@ -350,9 +360,10 @@ function checkpointsFor(entries: readonly Uint8Array[], last: number): Anchor[] 
   return out;
 }
 
-function verdict(entries: readonly Uint8Array[], anchors: readonly Anchor[]): string {
+/** The verdict on a closed election whose seal is `last`. */
+function verdict(entries: readonly Uint8Array[], anchors: readonly Anchor[], last: number): string {
   try {
-    checkCheckpoints(checkBoard(ELECTION, entries, 1), anchors, CLOCK);
+    verifyBoard(ELECTION, entries, 1, anchors, clockFor(last), closedAt(last));
   } catch (e) {
     if (e instanceof BoardError) return e.code;
     throw e;
@@ -364,7 +375,7 @@ describe("board checks", () => {
   test("a well-formed board passes with the checkpoint of every segment", () => {
     run(
       fc.property(boardArb, ({ entries, last }) => {
-        expect(verdict(entries, checkpointsFor(entries, last))).toBe("ok");
+        expect(verdict(entries, checkpointsFor(entries, last), last)).toBe("ok");
       }),
     );
   });
@@ -381,43 +392,71 @@ describe("board checks", () => {
           const changed = entries.map((b) => b.slice());
           const target = changed[e % changed.length] as Uint8Array;
           target[at % target.length] = (target[at % target.length] as number) ^ x;
-          expect(verdict(changed, checkpoints)).not.toBe("ok");
+          expect(verdict(changed, checkpoints, last)).not.toBe("ok");
         },
       ),
     );
   });
 
-  test("dropping, duplicating or swapping entries fails a check", () => {
+  test("dropping, duplicating or swapping anchored entries fails a check", () => {
     run(
       fc.property(boardArb, fc.nat(), ({ entries, last }, a) => {
         const checkpoints = checkpointsFor(entries, last);
         const i = a % entries.length;
-        expect(verdict([...entries.slice(0, i), ...entries.slice(i + 1)], checkpoints)).not.toBe(
-          "ok",
-        );
-        expect(verdict([...entries.slice(0, i + 1), ...entries.slice(i)], checkpoints)).not.toBe(
-          "ok",
-        );
+        const dropped = [...entries.slice(0, i), ...entries.slice(i + 1)];
+        expect(verdict(dropped, checkpoints, last)).not.toBe("ok");
         if (i + 1 < entries.length) {
+          const duplicated = [...entries.slice(0, i + 1), ...entries.slice(i)];
+          expect(verdict(duplicated, checkpoints, last)).not.toBe("ok");
           const swapped = entries.slice();
           [swapped[i], swapped[i + 1]] = [swapped[i + 1] as Uint8Array, swapped[i] as Uint8Array];
-          expect(verdict(swapped, checkpoints)).not.toBe("ok");
+          expect(verdict(swapped, checkpoints, last)).not.toBe("ok");
         }
       }),
     );
   });
 
-  test("entries after the last checkpoint are unanchored", () => {
+  test("entries past the sealed extent change nothing: no one can fail a closed election by appending", () => {
+    run(
+      fc.property(
+        boardArb,
+        fc.array(fc.uint8Array({ maxLength: 80 }), { minLength: 1, maxLength: 4 }),
+        fc.nat(),
+        ({ entries, last }, junk, seg) => {
+          const checkpoints = checkpointsFor(entries, last);
+          const forged = encodeBoardEntry({
+            election_id: ELECTION,
+            index: BigInt(entries.length),
+            segment: seg % (last + 3),
+            payload: recordOf(RECORD_TYPES.ballot, new Uint8Array()),
+          });
+          const tail = [forged, ...junk];
+          const v = verifyBoard(
+            ELECTION,
+            [...entries, ...tail],
+            1,
+            checkpoints,
+            clockFor(last),
+            closedAt(last),
+          );
+          expect(v.board.entries.length).toBe(entries.length);
+          expect(v.unauthenticated).toBe(tail.length);
+        },
+      ),
+    );
+  });
+
+  test("a closed election needs its seal's checkpoint; a running one waits for each window", () => {
     run(
       fc.property(boardArb, ({ entries, last }) => {
         const checkpoints = checkpointsFor(entries, last);
-        const extra = encodeBoardEntry({
-          election_id: ELECTION,
-          index: BigInt(entries.length),
-          segment: last + 1,
-          payload: recordOf(RECORD_TYPES.ballot, new Uint8Array()),
-        });
-        expect(verdict([...entries, extra], checkpoints)).toBe("unanchored");
+        const withoutSeal = checkpoints.filter((a) => a.checkpoint.segment !== last);
+        expect(verdict(entries, withoutSeal, last)).toBe("unsealed");
+        // Before the seal's window has closed, the same anchors pass, over
+        // the prefix they cover.
+        const v = verifyBoard(ELECTION, entries, 1, withoutSeal, clockFor(last), end(last) + 1n);
+        const covered = withoutSeal.reduce((n, a) => Math.max(n, Number(a.checkpoint.size)), 0);
+        expect(v.board.entries.length).toBe(covered);
       }),
     );
   });
@@ -435,34 +474,33 @@ describe("board checks", () => {
     if (a === undefined) throw new Error("unreachable");
     const cp = a.checkpoint;
     const board = checkBoard(ELECTION, entries, 1);
-    expect(() =>
-      checkCheckpoints(board, [anchorOf({ ...cp, root: cp.root.slice(1) })], CLOCK),
-    ).toThrow(EncodeError);
-    expect(() => checkCheckpoints(board, [anchorOf({ ...cp, size: -1n })], CLOCK)).toThrow(
-      EncodeError,
-    );
+    const verify = (a: Anchor) => verifyBoard(ELECTION, entries, 1, [a], clockFor(0), closedAt(0));
+    expect(() => verify(anchorOf({ ...cp, root: cp.root.slice(1) }))).toThrow(EncodeError);
+    expect(() => verify(anchorOf({ ...cp, size: -1n }))).toThrow(EncodeError);
     expect(checkpointOf(board, 0)).toEqual(cp);
     expect(() => checkpointOf(board, -1)).toThrow(RangeError);
     expect(() => checkBoard(ELECTION.slice(1), entries, 1)).toThrow(RangeError);
   });
 
   test("only anchors within their period's window count, and never after the seal", () => {
-    const end = (s: number) => (BigInt(s) + 1n) * CLOCK.period;
+    const CLOCK = clockFor(1000);
     expect(isTimely(CLOCK, 0, end(0))).toBe(true);
     expect(isTimely(CLOCK, 0, end(0) - 1n)).toBe(false);
     expect(isTimely(CLOCK, 0, end(0) + CLOCK.deadline)).toBe(true);
     expect(isTimely(CLOCK, 0, end(0) + CLOCK.deadline + 1n)).toBe(false);
     expect(isTimely(CLOCK, CLOCK.lastSegment + 1, end(CLOCK.lastSegment + 1))).toBe(false);
     expect(isTimely(CLOCK, 3, 7 as never)).toBe(false);
+    expect(isTimely(CLOCK, -1, end(0))).toBe(false);
+    expect(isTimely(CLOCK, 1.5, end(0))).toBe(false);
     expect(() => isTimely({ ...CLOCK, period: 0n }, 0, 0n)).toThrow(RangeError);
     run(
       fc.property(boardArb, fc.bigInt({ min: 1n, max: 10n ** 9n }), ({ entries, last }, lag) => {
         // Every anchor landing after its deadline: nothing is anchored.
         const late = checkpointsFor(entries, last).map((a) => ({
           ...a,
-          anchoredAt: end(a.checkpoint.segment) + CLOCK.deadline + lag,
+          anchoredAt: end(a.checkpoint.segment) + DEADLINE + lag,
         }));
-        expect(verdict(entries, late)).toBe("unanchored");
+        expect(verdict(entries, late, last)).toBe("unsealed");
       }),
     );
   });

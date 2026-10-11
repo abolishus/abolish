@@ -8,8 +8,6 @@ import {
   type BoardEntry,
   boardEntryHash,
   BoardError,
-  checkBoard,
-  checkCheckpoints,
   checkpointHash,
   consistencyProof,
   DecodeError,
@@ -20,6 +18,7 @@ import {
   merkleRoot,
   merkleRoots,
   UNPINNED,
+  verifyBoard,
   verifyConsistency,
   verifyInclusion,
 } from "../src/index.ts";
@@ -70,6 +69,8 @@ interface BoardVector {
     readonly anchoredAt: string;
   }[];
   readonly links?: readonly string[];
+  readonly extent?: string;
+  readonly now: string;
   readonly result: "ok" | { readonly code: string; readonly [k: string]: unknown };
 }
 
@@ -226,7 +227,7 @@ const clock: AnchorClock = {
 
 describe("board checks", () => {
   test("parses every vector", () => {
-    expect(file.boards.length).toBe(39);
+    expect(file.boards.length).toBe(43);
   });
 
   for (const v of file.boards)
@@ -244,9 +245,11 @@ describe("board checks", () => {
       });
       let got: unknown = "ok";
       try {
-        const board = checkBoard(hex(v.electionId), v.entries.map(hex), 1);
-        if (v.links !== undefined) expect(board.links.map(bytesToHex)).toEqual(v.links);
-        checkCheckpoints(board, anchors, clock);
+        const entries = v.entries.map(hex);
+        const verified = verifyBoard(hex(v.electionId), entries, 1, anchors, clock, dec(v.now));
+        expect(verified.board.entries.length).toBe(Number(dec(v.extent)));
+        expect(verified.unauthenticated).toBe(entries.length - Number(dec(v.extent)));
+        expect(verified.board.links.map(bytesToHex)).toEqual(v.links);
       } catch (e) {
         if (!(e instanceof BoardError)) throw e;
         got = { code: e.code, ...e.at };

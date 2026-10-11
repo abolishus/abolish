@@ -131,7 +131,7 @@ A checkpoint is valid for a board exactly when `size ≥ 1`, the board has at le
 
 **Anchoring.** P4-1 anchors each checkpoint through the anchor contract the verifier pins, with its `election_id` and `segment` readable on L1 next to its hash, and the full checkpoint published on L1 in the same transaction (or the checkpoint itself in place of the hash). An anchor counts for an election only if it was sent by that election's anchoring authority: an address the election definition binds, or one the verifier pins (our Safe, say). The contract rejects anchors for the election from anyone else, or, failing that, verifiers and voters' clients ignore them. Otherwise anyone could anchor a bogus checkpoint for an election, or front-run the honest one, and fail it (T-52). P4-1 and P1-18 enforce this. P4-1 decides how one transaction carries several elections' checkpoints, but every anchored checkpoint MUST be attributable to its election and segment from L1 alone. A verifier checks **every** checkpoint anchored for the election, never a selection it was handed: otherwise the operator could anchor a second checkpoint for a forked board, show it only to the voters whose ballots it keeps, and publish the other (T-24). Two different checkpoints anchored for one segment are equivocation, and fail the election. An anchored hash that names the election but can't be matched to a published checkpoint makes the election unverifiable, never verified.
 
-**Timing.** The anchoring clock has four values, set by P4-1 and pinned by the verifier for the election: an `epoch` and a `period` length (period `s` is the L1 time interval `[epoch + s·period, epoch + (s+1)·period)`), a `deadline`, and `lastSegment`, the election's seal: the last period its board may use. The definition fixes it (P1-10b) as the latest end of every post-close window, never only one of them: publishing openings (P1-13), the trustees publishing the tally (P1-15), and our contract events and close-time accumulator data reaching the board after L2 finality (P1-18, [[0005-permanent-archive]]). A tally not boarded by the seal can't be part of a valid board, so the election then has no verifiable result (T-54). An anchor for segment `s` counts only if it is in a finalized L1 block whose timestamp is at or after the end of period `s` and at most `deadline` after it, and `s ≤ lastSegment`. Verifiers and voters' clients ignore every other anchor, and P4-1's contract SHOULD reject them. So an anchor made late can neither fail a closed election nor hide a fork, an entry labelled with a far-off segment can't be anchored late, and every segment with entries must have a timely checkpoint. An entry with `segment > lastSegment` fails the election (`after-seal`).
+**Timing.** The anchoring clock has four values, set by P4-1 and pinned by the verifier for the election: an `epoch` and a `period` length (period `s` is the L1 time interval `[epoch + s·period, epoch + (s+1)·period)`), a `deadline`, and `lastSegment`, the election's seal: the last period its board may use. The definition fixes it (P1-10b) as the latest end of every post-close window, never only one of them: publishing openings (P1-13), the trustees publishing the tally (P1-15), and our contract events and close-time accumulator data reaching the board after L2 finality (P1-18, [[0005-permanent-archive]]). A tally not boarded by the seal can't be part of a valid board, so the election then has no verifiable result (T-54). An anchor for segment `s` counts only if it is in a finalized L1 block whose timestamp is at or after the end of period `s` and at most `deadline` after it, and `s ≤ lastSegment`. Verifiers and voters' clients ignore every other anchor, and P4-1's contract SHOULD reject them. So an anchor made late can neither fail a closed election nor hide a fork, an entry labelled with a far-off segment can't be anchored late, and every segment with entries must have a timely checkpoint. The seal's own period MUST get a checkpoint, anchored even if nothing was appended in it (it then repeats the board's state): that seal checkpoint authenticates the board's final extent, so a closed election without one fails (`unsealed`), attributably on L1. No anchor ever covers an entry with `segment > lastSegment`, so such an entry is never part of the board.
 
 The **segment object** of period `s` (the bytes [[content-addressing]] turns into a CID and CAR, and [[0005-permanent-archive]] archives) is the concatenation `encode(entry_a) ‖ … ‖ encode(entry_b)` of that segment's entries in index order. Each encoded entry is self-delimiting (fixed-width fields, then a length-prefixed payload), so the object splits into entries in exactly one way. An empty segment has no object.
 
@@ -148,31 +148,35 @@ The board operator holds the openings it receives in a period and appends them, 
 
 ## Board checks
 
-A verifier ([[verifier]], checks 4.1 and 4.2) takes the entries of one election's board, in index order, and the election identifier it expects, and checks, entry by entry, failing at the first problem:
+A verifier ([[verifier]], checks 4.1 and 4.2) takes the election identifier it expects, the board's entries in index order from wherever it found them, every anchor for the election from the pinned anchor contract (Anchoring, above), the anchoring clock, and `now`: the time of the latest finalized L1 block it has read.
 
-| Code                | Fails when                                                                                                                       |
-| ------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `decode`            | The entry doesn't decode strictly as a version 1 board entry (with the [[notation]] decode error code), payload header included. |
-| `wrong-election`    | Its `election_id` isn't the expected one.                                                                                        |
-| `wrong-index`       | Its `index` isn't its position.                                                                                                  |
-| `segment-decreased` | Its `segment` is smaller than the previous entry's.                                                                              |
-| `opening-order`     | It breaks the order of spoiled-ballot openings above.                                                                            |
+**Only anchored entries are the board.** Entries carry no signature: anyone can write a well-formed entry for any election. What makes an entry part of the board is a timely checkpoint whose size covers it. So the verifier checks exactly the prefix up to the largest size among the counted anchors (its _extent_), and ignores every entry past it, reporting how many it ignored as input it can't authenticate, never as an election failure. No one can fail an election by handing a verifier its board with entries appended (T-53). For a closed election the seal checkpoint fixes the extent.
 
-Then the anchors: every one for the election through the pinned anchor contract (Anchoring, above), with the anchoring clock. First, `after-seal` for each entry. Then only the timely anchors count (Timing, above), and for each of them in order, `wrong-election` and `checkpoint-equivocation`; then each in full, one at a time in order, failing at the first row that applies:
+The checks run in this order, failing at the first problem:
 
-| Code                      | Fails when                                                                                                                      |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `after-seal`              | An entry's `segment` is after `lastSegment` (reported at the entry).                                                            |
-| `wrong-election`          | Its `election_id` isn't the expected one.                                                                                       |
-| `checkpoint-equivocation` | Another checkpoint for the same `segment`, earlier in the list, differs from it.                                                |
-| `checkpoint-size`         | Its `size` is 0.                                                                                                                |
-| `checkpoint-missing`      | Its `size` is larger than the board the verifier holds: entries are missing (reported unverifiable, never pass).                |
-| `checkpoint-boundary`     | Its `size` isn't the end of segment `segment` as defined above.                                                                 |
-| `checkpoint-head`         | Its `head` isn't `link_{size−1}`.                                                                                               |
-| `checkpoint-root`         | Its `root` isn't `root_size`.                                                                                                   |
-| `unanchored`              | After every checkpoint passes, some segment that holds entries has no timely checkpoint (reported with the first such segment). |
+1. Only anchors that are timely (Timing, above) and in finalized blocks up to `now` count. For each, in order: `wrong-election`, then `checkpoint-equivocation`.
+2. For each counted anchor, in order: `checkpoint-size`, then `checkpoint-missing`.
+3. Each entry of the prefix, in order: `decode`, `wrong-election`, `wrong-index`, `segment-decreased`, `opening-order`.
+4. For each counted anchor, in order: `checkpoint-boundary`, `checkpoint-head`, `checkpoint-root`.
+5. `unanchored`, then `unsealed`.
 
-Every one of these is an election check: the operator writes the envelopes, the order and the segments, so any failure is the operator's (T-23). A failure of the record inside a payload isn't one of these ([[verifier]], Admission checks).
+| Code                      | Fails when                                                                                                                                   |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `wrong-election`          | An anchor's checkpoint, or an entry, names another election.                                                                                 |
+| `checkpoint-equivocation` | Another counted checkpoint for the same `segment`, earlier in the list, differs from it.                                                     |
+| `checkpoint-size`         | Its `size` is 0.                                                                                                                             |
+| `checkpoint-missing`      | Its `size` is larger than the board the verifier holds: entries are missing (reported unverifiable, never pass).                             |
+| `decode`                  | An entry doesn't decode strictly as a version 1 board entry (with the [[notation]] decode error code), payload header included.              |
+| `wrong-index`             | An entry's `index` isn't its position.                                                                                                       |
+| `segment-decreased`       | An entry's `segment` is smaller than the previous entry's.                                                                                   |
+| `opening-order`           | An entry breaks the order of spoiled-ballot openings above.                                                                                  |
+| `checkpoint-boundary`     | A checkpoint's `size` isn't the end of segment `segment` within the prefix.                                                                  |
+| `checkpoint-head`         | Its `head` isn't `link_{size−1}`.                                                                                                            |
+| `checkpoint-root`         | Its `root` isn't `root_size`.                                                                                                                |
+| `unanchored`              | A segment of the prefix whose window (end of period plus `deadline`) closed before `now` has no counted checkpoint (the first such segment). |
+| `unsealed`                | The seal's window closed before `now`, and no counted checkpoint is for `lastSegment`.                                                       |
+
+Every one of these is an election check: the operator writes the envelopes, the order and the segments, and the anchoring authority the checkpoints, so any failure is theirs (T-23). A failure of the record inside a payload isn't one of these ([[verifier]], Admission checks). While an election runs, a segment whose window is still open isn't failed for lacking a checkpoint, so live monitoring (P4-5) can run these checks too.
 
 ## Why both a chain and a tree
 

@@ -158,20 +158,21 @@ export type BoardErrorCode =
   | "wrong-index"
   | "segment-decreased"
   | "opening-order"
-  | "after-seal"
   | "checkpoint-equivocation"
   | "checkpoint-size"
   | "checkpoint-missing"
   | "checkpoint-boundary"
   | "checkpoint-head"
   | "checkpoint-root"
-  | "unanchored";
+  | "unanchored"
+  | "unsealed";
 
-/** Where a board check failed: an entry, a checkpoint, or a segment no checkpoint anchors. */
+/** Where a board check failed: an entry, a checkpoint, a segment no checkpoint anchors, or the board (unsealed). */
 export type BoardErrorAt =
   | { readonly entry: number; readonly decodeError?: DecodeErrorCode }
   | { readonly checkpoint: number }
-  | { readonly segment: number };
+  | { readonly segment: number }
+  | Record<string, never>;
 
 /** A board that fails an election check (T-23). */
 export class BoardError extends Error {
@@ -300,63 +301,79 @@ function checkClock(clock: AnchorClock): AnchorClock {
  */
 export function isTimely(clock: AnchorClock, segment: number, anchoredAt: bigint): boolean {
   const c = checkClock(clock);
-  if (typeof anchoredAt !== "bigint" || segment > c.lastSegment) return false;
-  const end = c.epoch + (BigInt(segment) + 1n) * c.period;
+  if (!Number.isInteger(segment) || segment < 0 || segment > c.lastSegment) return false;
+  if (typeof anchoredAt !== "bigint") return false;
+  const end = segmentEnd(c, segment);
   return anchoredAt >= end && anchoredAt <= end + c.deadline;
 }
 
+const segmentEnd = (c: AnchorClock, segment: number) => c.epoch + (BigInt(segment) + 1n) * c.period;
+
+/** A verified board: its authenticated prefix, and how many entries past it were ignored. */
+export interface VerifiedBoard {
+  readonly board: CheckedBoard;
+  /** Entries after the authenticated prefix: no anchor covers them, so they are no one's claim. */
+  readonly unauthenticated: number;
+}
+
 /**
- * Checks every anchor for the board's election, as read from the pinned
- * anchor contract on L1: all of them, never a selection, or a fork shown only
- * to some voters would pass (T-24). Untimely anchors are ignored. No entry may
- * lie after the seal. Then, over the timely ones: each names the election and
- * no segment has two different checkpoints (equivocation); then, one at a time
- * and in order, each ends at its segment's boundary with the chain head and
- * tree root of that prefix. Last, every segment holding entries must have a
- * timely checkpoint (docs/spec/verifier.md 4.2; T-23, T-24).
+ * Verifies one election's board against every anchor for the election, as
+ * read from the pinned anchor contract on L1 up to the finalized L1 time
+ * `now`: all of them, never a selection, or a fork shown only to some voters
+ * would pass (T-24). Untimely anchors are ignored. Entries carry no signature,
+ * so only an anchored checkpoint authenticates them: the board checked is the
+ * prefix up to the largest anchored size, and anything past it is ignored, so
+ * no one can fail an election by appending entries to a copy of its board
+ * (T-53). Order (docs/spec/board.md, Board checks): election and equivocation
+ * over the anchors; their sizes; the entry checks over the prefix; each
+ * checkpoint's boundary, head and root; every segment whose window has closed
+ * has a checkpoint; once the seal's window has closed, the seal has one.
  */
-export function checkCheckpoints(
-  board: CheckedBoard,
+export function verifyBoard(
+  electionId: Uint8Array,
+  encodedEntries: readonly Uint8Array[],
+  pinned: RecordVersion<typeof BOARD_ENTRY.versions> | typeof UNPINNED,
   anchors: readonly Anchor[],
   clock: AnchorClock,
-): void {
+  now: bigint,
+): VerifiedBoard {
   if (!Array.isArray(anchors)) throw new TypeError("anchors must be an array");
+  if (!Array.isArray(encodedEntries)) throw new TypeError("encodedEntries must be an array");
+  if (typeof now !== "bigint") throw new TypeError("now must be a bigint");
   const c = checkClock(clock);
-  const { entries } = board;
-  entries.forEach((e, i) => {
-    if (e.segment > c.lastSegment) throw new BoardError("after-seal", { entry: i });
-  });
+  const id = copyBytes(electionId, "electionId");
   // Re-encoded and decoded, so every field is well formed and copied; the
   // index of each counted anchor is its position in `anchors`.
   const counted: [number, Checkpoint][] = [];
   for (let j = 0; j < anchors.length; j++) {
     const a = anchors[j] as Anchor;
     const cp = decode(checkpointV1, encode(checkpointV1, a.checkpoint));
-    if (isTimely(c, cp.segment, a.anchoredAt)) counted.push([j, cp]);
+    if (isTimely(c, cp.segment, a.anchoredAt) && a.anchoredAt <= now) counted.push([j, cp]);
   }
-  // Roots for every size in range, in one pass, so each checkpoint can then
-  // be checked in full before the next.
-  const sizes = new Set(
-    counted
-      .filter(([, cp]) => cp.size >= 1n && cp.size <= BigInt(entries.length))
-      .map(([, cp]) => Number(cp.size)),
-  );
-  const roots = merkleRoots(BOARD_TREE, board.entryHashes, sizes);
   const bySegment = new Map<number, Uint8Array>();
   for (const [j, cp] of counted) {
-    if (!equalBytes(cp.election_id, board.electionId))
-      throw new BoardError("wrong-election", { checkpoint: j });
+    if (!equalBytes(cp.election_id, id)) throw new BoardError("wrong-election", { checkpoint: j });
     const encoded = encode(checkpointV1, cp);
     const first = bySegment.get(cp.segment);
     if (first === undefined) bySegment.set(cp.segment, encoded);
     else if (!equalBytes(first, encoded))
       throw new BoardError("checkpoint-equivocation", { checkpoint: j });
   }
-  const anchored = new Set<number>();
+  const held = encodedEntries.length;
+  let extent = 0;
   for (const [j, cp] of counted) {
     if (cp.size === 0n) throw new BoardError("checkpoint-size", { checkpoint: j });
-    if (cp.size > BigInt(entries.length))
-      throw new BoardError("checkpoint-missing", { checkpoint: j });
+    if (cp.size > BigInt(held)) throw new BoardError("checkpoint-missing", { checkpoint: j });
+    extent = Math.max(extent, Number(cp.size));
+  }
+  const board = checkBoard(id, encodedEntries.slice(0, extent), pinned);
+  const { entries } = board;
+  const roots = merkleRoots(
+    BOARD_TREE,
+    board.entryHashes,
+    new Set(counted.map(([, cp]) => Number(cp.size))),
+  );
+  for (const [j, cp] of counted) {
     const size = Number(cp.size);
     const last = entries[size - 1] as BoardEntry;
     const next = entries[size];
@@ -366,10 +383,16 @@ export function checkCheckpoints(
       throw new BoardError("checkpoint-head", { checkpoint: j });
     if (!equalBytes(roots.get(size) as Uint8Array, cp.root))
       throw new BoardError("checkpoint-root", { checkpoint: j });
-    anchored.add(cp.segment);
   }
+  // A segment counts as unanchored only once its window has closed by
+  // finalized L1 time, so a running election isn't failed early.
   for (const e of entries)
-    if (!anchored.has(e.segment)) throw new BoardError("unanchored", { segment: e.segment });
+    if (!bySegment.has(e.segment) && segmentEnd(c, e.segment) + c.deadline < now)
+      throw new BoardError("unanchored", { segment: e.segment });
+  // The seal's checkpoint authenticates the board's final extent.
+  if (segmentEnd(c, c.lastSegment) + c.deadline < now && !bySegment.has(c.lastSegment))
+    throw new BoardError("unsealed", {});
+  return { board, unauthenticated: held - extent };
 }
 
 /** The checkpoint after segment `segment` of a checked board, or undefined if the board is empty there. */

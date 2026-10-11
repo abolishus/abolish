@@ -11,7 +11,6 @@ export {
   chainLink,
   type CheckedBoard,
   checkBoard,
-  checkCheckpoints,
   type Checkpoint,
   checkpointHash,
   checkpointOf,
@@ -19,6 +18,8 @@ export {
   encodeBoardEntry,
   isTimely,
   MAX_BOARD_PAYLOAD,
+  type VerifiedBoard,
+  verifyBoard,
 } from "./board.ts";
 export {
   BN254_R,

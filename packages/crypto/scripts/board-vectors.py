@@ -249,7 +249,8 @@ def checkpoint_hash(election_id, segment, size, head, root):
 # covers [EPOCH + s*PERIOD, EPOCH + (s+1)*PERIOD), an anchor for s counts only
 # if its finalized L1 block time is in [end of s, end of s + DEADLINE], and
 # nothing after LAST_SEGMENT counts.
-CLOCK = {"epoch": 1800000000, "period": 3600, "deadline": 7200, "lastSegment": 8}
+CLOCK = {"epoch": 1800000000, "period": 3600, "deadline": 7200, "lastSegment": 6}
+CLOSED = 1800000000 + 7 * 3600 + 7200 + 1  # after the seal's deadline
 
 
 def segment_end(s):
@@ -261,58 +262,67 @@ def timely(segment, anchored_at):
     return segment <= CLOCK["lastSegment"] and end <= anchored_at <= end + CLOCK["deadline"]
 
 
-def check_board(election_id, entries, anchors):
-    """docs/spec/board.md, Board checks. Returns None or (code, where)."""
+def check_entries(election_id, entries):
+    """docs/spec/board.md, the entry checks. Returns (decoded, None) or (None, error)."""
     decoded = []
     for i, b in enumerate(entries):
         e = decode_entry(b)
         if isinstance(e, str):
-            return ("decode", {"entry": i, "decodeError": e})
+            return None, ("decode", {"entry": i, "decodeError": e})
         if e["electionId"] != election_id:
-            return ("wrong-election", {"entry": i})
+            return None, ("wrong-election", {"entry": i})
         if e["index"] != i:
-            return ("wrong-index", {"entry": i})
+            return None, ("wrong-index", {"entry": i})
         if decoded and e["segment"] < decoded[-1]["segment"]:
-            return ("segment-decreased", {"entry": i})
+            return None, ("segment-decreased", {"entry": i})
         if decoded and decoded[-1]["segment"] == e["segment"]:
             prev = decoded[-1]["payload"]
             prev_open = int.from_bytes(prev[0:2], "big") == OPENING
             this_open = int.from_bytes(e["payload"][0:2], "big") == OPENING
             if prev_open and (not this_open or not prev < e["payload"]):
-                return ("opening-order", {"entry": i})
+                return None, ("opening-order", {"entry": i})
         decoded.append(e)
-    hashes = [entry_hash(b) for b in entries]
-    links = chain_links(entries)
-    for i, e in enumerate(decoded):
-        if e["segment"] > CLOCK["lastSegment"]:
-            return ("after-seal", {"entry": i})
-    # Every anchor for the election from the pinned contract; only timely ones
-    # count. First the election and equivocation (two different checkpoints
-    # for one segment).
-    checkpoints = {j: cp for j, (cp, t) in enumerate(anchors) if timely(cp[1], t)}
+    return decoded, None
+
+
+def check_board(election_id, entries, anchors, now):
+    """docs/spec/board.md, Board checks. Returns ("ok", extent) or (code, where)."""
+    # Only timely anchors count; first the election and equivocation.
+    counted = {j: cp for j, (cp, t) in enumerate(anchors) if timely(cp[1], t) and t <= now}
     first = {}
-    for j, cp in checkpoints.items():
+    for j, cp in counted.items():
         if cp[0] != election_id:
             return ("wrong-election", {"checkpoint": j})
         if first.setdefault(cp[1], cp) != cp:
             return ("checkpoint-equivocation", {"checkpoint": j})
-    anchored = set()
-    for j, (cid, seg, size, head, root) in checkpoints.items():
-        if size == 0:
+    for j, cp in counted.items():
+        if cp[2] == 0:
             return ("checkpoint-size", {"checkpoint": j})
-        if size > len(entries):
+        if cp[2] > len(entries):
             return ("checkpoint-missing", {"checkpoint": j})
-        if decoded[size - 1]["segment"] > seg or (size < len(entries) and decoded[size]["segment"] <= seg):
+    # The authenticated extent: entries past the largest checkpoint are no
+    # one's claim, so they are neither checked nor counted.
+    extent = max((cp[2] for cp in counted.values()), default=0)
+    prefix = entries[:extent]
+    decoded, err = check_entries(election_id, prefix)
+    if err:
+        return err
+    hashes = [entry_hash(b) for b in prefix]
+    links = chain_links(prefix)
+    for j, (cid, seg, size, head, root) in counted.items():
+        if decoded[size - 1]["segment"] > seg or (size < extent and decoded[size]["segment"] <= seg):
             return ("checkpoint-boundary", {"checkpoint": j})
         if links[size - 1] != head:
             return ("checkpoint-head", {"checkpoint": j})
         if BOARD.mth(hashes[:size]) != root:
             return ("checkpoint-root", {"checkpoint": j})
-        anchored.add(seg)
+    segments = {cp[1] for cp in counted.values()}
     for e in decoded:
-        if e["segment"] not in anchored:
+        if e["segment"] not in segments and segment_end(e["segment"]) + CLOCK["deadline"] < now:
             return ("unanchored", {"segment": e["segment"]})
-    return None
+    if segment_end(CLOCK["lastSegment"]) + CLOCK["deadline"] < now and CLOCK["lastSegment"] not in segments:
+        return ("unsealed", {})
+    return ("ok", extent)
 
 
 def h(b):
@@ -589,99 +599,91 @@ def main(out_dir):
 
     board_vectors = []
 
-    def board(id_, description, entries, checkpoints, result):
+    def board(id_, description, entries, checkpoints, result, now=CLOSED):
         # A bare checkpoint is anchored a minute after its period ends.
         checkpoints = [c if len(c) == 2 else (c, segment_end(c[1]) + 60) for c in checkpoints]
-        got = check_board(eid, entries, checkpoints)
-        want = None if result == "ok" else result
+        got = check_board(eid, entries, checkpoints, now)
+        if result[0] == "ok":
+            want = result
+        else:
+            want = result
         assert got == want, (id_, got, want)
-        board_vectors.append(
-            {
-                "id": id_,
-                "description": description,
-                "electionId": h(eid),
-                "entries": [h(b) for b in entries],
-                "checkpoints": [
-                    {
-                        "electionId": h(c),
-                        "segment": str(s),
-                        "size": str(n),
-                        "head": h(hd),
-                        "root": h(r),
-                        "hash": h(checkpoint_hash(c, s, n, hd, r)),
-                        "anchoredAt": str(t),
-                    }
-                    for (c, s, n, hd, r), t in checkpoints
-                ],
-                "result": "ok" if result == "ok" else {"code": result[0], **result[1]},
-            }
-        )
-        if result == "ok":
-            board_vectors[-1]["links"] = [h(x) for x in chain_links(entries)]
+        v = {
+            "id": id_,
+            "description": description,
+            "electionId": h(eid),
+            "now": str(now),
+            "entries": [h(b) for b in entries],
+            "checkpoints": [
+                {
+                    "electionId": h(c),
+                    "segment": str(s),
+                    "size": str(n),
+                    "head": h(hd),
+                    "root": h(r),
+                    "hash": h(checkpoint_hash(c, s, n, hd, r)),
+                    "anchoredAt": str(t),
+                }
+                for (c, s, n, hd, r), t in checkpoints
+            ],
+        }
+        if result[0] == "ok":
+            v["result"] = "ok"
+            v["extent"] = str(result[1])
+            v["links"] = [h(x) for x in chain_links(entries[: result[1]])]
+        else:
+            v["result"] = {"code": result[0], **result[1]}
+        board_vectors.append(v)
 
     g = board_of(good)
-    board("valid", "Segments 0, 1, 4 and 6, with openings sorted at the end of segments 1 and 6", g, cps(g, [0, 1, 4, 6]), "ok")
-    board(
-        "valid-reanchored-and-gaps",
-        "Checkpoints for empty periods (2, 3, 5) and a checkpoint repeated",
-        g,
-        cps(g, [0, 1, 2, 3, 4, 4, 5, 6]),
-        "ok",
-    )
-    board("valid-single-entry", "One entry, one checkpoint", g[:1], cps(g[:1], [0]), "ok")
-    board("valid-only-openings", "A segment holding only openings", board_of([(0, opening(b"\x05")), (0, opening(b"\x06"))]), cps(board_of([(0, opening(b"\x05")), (0, opening(b"\x06"))]), [0]), "ok")
-    bad = list(g)
-    bad[3] = entry(other, 3, 1, ballot(2))
-    board("wrong-election", "Entry 3 names another election", bad, [], ("wrong-election", {"entry": 3}))
-    bad = list(g)
-    bad[3] = entry(eid, 4, 1, ballot(2))
-    board("wrong-index", "Entry 3 claims index 4", bad, [], ("wrong-index", {"entry": 3}))
+    n = len(g)
+    c = cps(g, [0, 1, 4, 6])
+    ok = ("ok", n)
+    board("valid", "Segments 0, 1, 4 and 6 (the seal), with openings sorted at the end of segments 1 and 6", g, c, ok)
+    board("valid-reanchored-and-gaps", "Checkpoints for empty periods (2, 3, 5) and a checkpoint repeated", g, cps(g, [0, 1, 2, 3, 4, 4, 5, 6]), ok)
+    board("valid-single-entry", "One entry; the seal re-anchors the same state", g[:1], cps(g[:1], [0, 6]), ("ok", 1))
+    only = board_of([(0, opening(b"\x05")), (0, opening(b"\x06"))])
+    board("valid-only-openings", "A segment holding only openings", only, cps(only, [0, 6]), ("ok", 2))
+    forged = entry(eid, n, 7, payload(0x0002, b"forged"))
+    board("forged-trailing-ignored", "Entries past the sealed extent authenticate nothing and change nothing, wellformed or not", g + [forged, b"\x00\x07"], c, ok)
+    board("forged-trailing-same-segment", "A forged entry labelled with the seal's segment, past its checkpoint", g + [entry(eid, n, 6, ballot(9))], c, ok)
+    # Entry checks run over the authenticated prefix, so a broken entry inside it fails.
+    for id_, desc, k, bad, code in [
+        ("wrong-election", "Entry 3 names another election", 3, entry(other, 3, 1, ballot(2)), ("wrong-election", {"entry": 3})),
+        ("wrong-index", "Entry 3 claims index 4", 3, entry(eid, 4, 1, ballot(2)), ("wrong-index", {"entry": 3})),
+        ("segment-decreased", "Segment 0 after segment 1", 7, entry(eid, 7, 0, ballot(3)), ("segment-decreased", {"entry": 7})),
+        ("opening-before-ballot", "A ballot after an opening in the same segment", 5, entry(eid, 5, 1, ballot(9)), ("opening-order", {"entry": 5})),
+        ("openings-unsorted", "Openings out of byte order", 5, entry(eid, 5, 1, opening(b"\x00")), ("opening-order", {"entry": 5})),
+        ("opening-duplicate", "The same opening twice in a segment", 5, entry(eid, 5, 1, opening(b"\x01")), ("opening-order", {"entry": 5})),
+        ("opening-before-ceremony", "A record of type 0x0005 after an opening in the same segment", 5, entry(eid, 5, 1, payload(0x0005, b"\xff")), ("opening-order", {"entry": 5})),
+        ("opening-before-event", "A record of type 0x0008 after an opening in the same segment", 5, entry(eid, 5, 1, payload(0x0008, b"\xff")), ("opening-order", {"entry": 5})),
+        ("display-text-on-board", "Display text in a payload", 5, entry(eid, 5, 1, payload(0x0009, b"text")), ("decode", {"entry": 5, "decodeError": "unexpected-record-type"})),
+        ("entry-trailing-bytes", "An envelope with a trailing byte", 1, g[1] + b"\x00", ("decode", {"entry": 1, "decodeError": "trailing-bytes"})),
+    ]:
+        bad_board = list(g)
+        bad_board[k] = bad
+        board(id_, desc, bad_board, c, code)
     swapped = list(g)
     swapped[2], swapped[3] = swapped[3], swapped[2]
-    board("reordered", "Entries 2 and 3 swapped: their indices no longer match", swapped, [], ("wrong-index", {"entry": 2}))
-    dropped = g[:3] + g[4:]
-    board("dropped", "Entry 3 dropped", dropped, [], ("wrong-index", {"entry": 3}))
-    bad = board_of(good[:7] + [(0, ballot(3))])
-    board("segment-decreased", "Segment 0 after segment 1", bad, [], ("segment-decreased", {"entry": 7}))
-    bad = board_of(good[:5] + [(1, ballot(9))])
-    board("opening-before-ballot", "A ballot after an opening in the same segment", bad, [], ("opening-order", {"entry": 5}))
-    bad = board_of(good[:5] + [(1, opening(b"\x00"))])
-    board("openings-unsorted", "Openings out of byte order", bad, [], ("opening-order", {"entry": 5}))
-    bad = board_of(good[:5] + [(1, opening(b"\x01"))])
-    board("opening-duplicate", "The same opening twice in a segment", bad, [], ("opening-order", {"entry": 5}))
-    bad = board_of(good[:5] + [(1, opening(b"\x01\x00")), (1, opening(b"\x01"))])
-    board("opening-prefix-order", "A payload sorts before every payload it is a prefix of", bad, [], ("opening-order", {"entry": 6}))
-    ok_next = board_of(good[:5] + [(2, ballot(9))])
-    board("opening-then-next-segment", "A ballot after an opening is fine in a later segment", ok_next, cps(ok_next, [0, 1, 2]), "ok")
-    for t, name in ((0x0005, "ceremony"), (0x0008, "event")):
-        bad = board_of(good[:5] + [(1, payload(t, b"\xff"))])
-        board(f"opening-before-{name}", f"A record of type 0x{t:04x} after an opening in the same segment", bad, [], ("opening-order", {"entry": 5}))
-    bad = list(g)
-    bad[5] = entry(eid, 5, 1, payload(0x0009, b"text"))
-    board("display-text-on-board", "Display text in a payload", bad, [], ("decode", {"entry": 5, "decodeError": "unexpected-record-type"}))
-    bad = list(g)
-    bad[1] = bad[1] + b"\x00"
-    board("entry-trailing-bytes", "An envelope with a trailing byte", bad, [], ("decode", {"entry": 1, "decodeError": "trailing-bytes"}))
-    c = cps(g, [0, 1, 4, 6])
-    board("checkpoint-other-election", "A checkpoint for another election", g, [c[0], (other,) + c[1][1:]], ("wrong-election", {"checkpoint": 1}))
-    rest = cps(g, [0, 4, 6])
+    board("reordered", "Entries 2 and 3 swapped: their indices no longer match", swapped, c, ("wrong-index", {"entry": 2}))
+    board("dropped", "Entry 3 dropped from inside the anchored extent", g[:3] + g[4:], cps(g, [0, 1]), ("wrong-index", {"entry": 3}))
+    pref = board_of(good[:5] + [(1, opening(b"\x01\x00")), (1, opening(b"\x01"))])
+    board("opening-prefix-order", "A payload sorts before every payload it is a prefix of", pref, cps(pref, [0, 1, 6]), ("opening-order", {"entry": 6}))
+    nxt = board_of(good[:5] + [(2, ballot(9))])
+    board("opening-then-next-segment", "A ballot after an opening is fine in a later segment", nxt, cps(nxt, [0, 1, 2, 6]), ("ok", 6))
+    board("checkpoint-other-election", "A checkpoint for another election", g, [c[0], (other,) + c[1][1:]] + c[2:], ("wrong-election", {"checkpoint": 1}))
     board("checkpoint-size-zero", "A checkpoint of an empty board", g, [(eid, 2, 0, bytes(32), bytes(32))] + c, ("checkpoint-size", {"checkpoint": 0}))
-    board("checkpoint-missing", "The anchored board is longer than the one held", g[:8], cps(g, [6]), ("checkpoint-missing", {"checkpoint": 0}))
+    board("checkpoint-missing", "The anchored board is longer than the one held", g[:8], c, ("checkpoint-missing", {"checkpoint": 3}))
     mid = cps(g, [1])[0]
+    rest = cps(g, [0, 4, 6])
     board(
         "checkpoint-mid-segment",
         "A checkpoint for segment 2 that stops inside segment 1",
         g,
-        [(eid, 2, 3, chain_links(g)[2], BOARD.mth([entry_hash(b) for b in g[:3]]))] + cps(g, [0, 1, 4, 6]),
+        [(eid, 2, 3, chain_links(g)[2], BOARD.mth([entry_hash(b) for b in g[:3]]))] + c,
         ("checkpoint-boundary", {"checkpoint": 0}),
     )
-    board(
-        "checkpoint-segment-too-early",
-        "Segment 0's checkpoint claiming segment 1's size",
-        g,
-        [(eid, 0) + mid[2:]] + cps(g, [1, 4, 6]),
-        ("checkpoint-boundary", {"checkpoint": 0}),
-    )
+    board("checkpoint-segment-too-early", "Segment 0's checkpoint claiming segment 1's size", g, [(eid, 0) + mid[2:]] + cps(g, [1, 4, 6]), ("checkpoint-boundary", {"checkpoint": 0}))
     seg0 = cps(g, [0])[0]
     board("checkpoint-wrong-head", "A checkpoint with another size's chain head", g, [mid[:3] + (seg0[3], mid[4])] + rest, ("checkpoint-head", {"checkpoint": 0}))
     board("checkpoint-wrong-root", "A checkpoint with another size's root", g, [mid[:4] + (seg0[4],)] + rest, ("checkpoint-root", {"checkpoint": 0}))
@@ -695,62 +697,36 @@ def main(out_dir):
     forked = list(g)
     forked[2] = entry(eid, 2, 1, ballot(7))
     board("checkpoint-forked", "The board held differs from the anchored one in entry 2", forked, c, ("checkpoint-head", {"checkpoint": 1}))
-    board(
-        "checkpoint-equivocation",
-        "A second, different checkpoint anchored for segment 1 (a fork shown to some voters), even after the honest one passes",
-        g,
-        c + cps(forked, [1]),
-        ("checkpoint-equivocation", {"checkpoint": 4}),
-    )
-    board(
-        "checkpoint-equivocation-first",
-        "Equivocation is found before any per-checkpoint check, wherever the forked checkpoint sits",
-        g,
-        cps(forked, [1]) + c,
-        ("checkpoint-equivocation", {"checkpoint": 2}),
-    )
-    board("checkpoint-repeated", "The same checkpoint anchored twice is not equivocation", g, c + c[1:2], "ok")
+    board("checkpoint-equivocation", "A second, different checkpoint anchored for segment 1 (a fork shown to some voters)", g, c + cps(forked, [1]), ("checkpoint-equivocation", {"checkpoint": 4}))
+    board("checkpoint-equivocation-first", "Equivocation is found before any per-checkpoint check, wherever the forked checkpoint sits", g, cps(forked, [1]) + c, ("checkpoint-equivocation", {"checkpoint": 2}))
+    board("checkpoint-repeated", "The same checkpoint anchored twice is not equivocation", g, c + c[1:2], ok)
     late = segment_end(1) + CLOCK["deadline"] + 1
-    board(
-        "late-fork-ignored",
-        "A forked checkpoint anchored after segment 1's deadline doesn't count, so it can't fail the election",
-        g,
-        c + [(cps(forked, [1])[0], late)],
-        "ok",
-    )
-    board(
-        "late-only-is-unanchored",
-        "Segment 1's only checkpoint was anchored after its deadline",
-        g,
-        [c[0], (c[1], late)] + c[2:],
-        ("unanchored", {"segment": 1}),
-    )
-    board(
-        "early-anchor-ignored",
-        "A checkpoint anchored before its period ended doesn't count",
-        g,
-        [c[0], (c[1], segment_end(1) - 1)] + c[2:],
-        ("unanchored", {"segment": 1}),
-    )
-    board(
-        "deadline-is-inclusive",
-        "An anchor exactly at the end of the period and one exactly at the deadline both count",
-        g,
-        [(c[0], segment_end(0)), (c[1], segment_end(1) + CLOCK["deadline"])] + c[2:],
-        "ok",
-    )
-    board(
-        "after-seal-anchor-ignored",
-        "A checkpoint for a segment after the last one never counts, whenever it lands",
-        g,
-        c + [(eid, 9, len(g), chain_links(g)[-1], bytes(32))],
-        "ok",
-    )
-    sealed = board_of(good + [(9, ballot(4))])
-    board("entry-after-seal", "An entry in a segment after the election's last one", sealed, cps(sealed, [0, 1, 4, 6, 9]), ("after-seal", {"entry": 10}))
-    board("unanchored", "Entries after the last checkpoint", g, cps(g, [0, 1, 4]), ("unanchored", {"segment": 6}))
+    board("late-fork-ignored", "A forked checkpoint anchored after segment 1's deadline doesn't count", g, c + [(cps(forked, [1])[0], late)], ok)
+    board("late-only-is-unanchored", "Segment 1's only checkpoint was anchored after its deadline", g, [c[0], (c[1], late)] + c[2:], ("unanchored", {"segment": 1}))
+    board("early-anchor-ignored", "A checkpoint anchored before its period ended doesn't count", g, [c[0], (c[1], segment_end(1) - 1)] + c[2:], ("unanchored", {"segment": 1}))
+    board("deadline-is-inclusive", "Anchors exactly at the end of the period and exactly at the deadline both count", g, [(c[0], segment_end(0)), (c[1], segment_end(1) + CLOCK["deadline"])] + c[2:], ok)
+    board("after-seal-anchor-ignored", "A checkpoint for a segment after the seal never counts", g + [entry(eid, n, 7, ballot(4))], c + [cps(g + [entry(eid, n, 7, ballot(4))], [7])[0]], ok)
     board("unanchored-skipped-segment", "Segment 1 holds entries but was never anchored", g, cps(g, [0, 4, 6]), ("unanchored", {"segment": 1}))
-    board("no-checkpoints", "No anchored checkpoint at all", g, [], ("unanchored", {"segment": 0}))
+    board("unsealed", "A closed election with no checkpoint for its seal", g, cps(g, [0, 1, 4]), ("unsealed", {}))
+    board("no-checkpoints", "A closed election with no anchored checkpoint at all", g, [], ("unsealed", {}))
+    running = segment_end(4) + CLOCK["deadline"] + 1
+    board(
+        "running-election",
+        "While the election runs, entries past the last checkpoint wait to be anchored, and the seal isn't due yet",
+        g,
+        cps(g, [0, 1, 4]),
+        ("ok", 8),
+        now=running,
+    )
+    board(
+        "running-future-anchor-ignored",
+        "An anchor whose L1 time is after the verifier's finalized time doesn't count yet",
+        g,
+        cps(g, [0, 1, 4]) + [(c[3], running + 7200)],
+        ("ok", 8),
+        now=running,
+    )
+    board("running-unanchored", "A segment whose window has closed without a checkpoint fails even while running", g, cps(g, [0, 4]), ("unanchored", {"segment": 1}), now=running)
 
     out = {
         "format": "abolish-board-vectors/1",

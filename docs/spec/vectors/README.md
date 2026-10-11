@@ -6,11 +6,12 @@ Cross-language vectors for the encodings and computations in this spec. TypeScri
 
 One JSON file per spec section or record type, named after it (`primitives.json`, `election-definition.json`, …). Each file is UTF-8 JSON, formatted by `vp check`.
 
-| File              | Covers                                                                                       |
-| ----------------- | -------------------------------------------------------------------------------------------- |
-| `primitives.json` | Primitive types, record framing and strict-decoding rejections ([[notation]])                |
-| `group.json`      | `scalar` and `element` codecs: valid boundaries and every rejected class ([[group]])         |
-| `hash.json`       | `H`, `HashToScalar` under each Fiat–Shamir tag, and `h`, with intermediate bytes ([[group]]) |
+| File              | Covers                                                                                                          |
+| ----------------- | --------------------------------------------------------------------------------------------------------------- |
+| `primitives.json` | Primitive types, record framing and strict-decoding rejections ([[notation]])                                   |
+| `group.json`      | `scalar` and `element` codecs: valid boundaries and every rejected class ([[group]])                            |
+| `board.json`      | Board entries, the board tree with every inclusion and consistency proof, checkpoints, board checks ([[board]]) |
+| `hash.json`       | `H`, `HashToScalar` under each Fiat–Shamir tag, and `h`, with intermediate bytes ([[group]])                    |
 
 ## Format
 
@@ -65,6 +66,16 @@ Type descriptors:
 | `element`                         | `identity`: `"allowed"` or `"rejected"`, whether the field may hold the identity; the value is the element's 32-byte encoding, in hex |
 | `list`                            | `max`, as a JSON number, and `of`: the element's type descriptor                                                                      |
 | `record`                          | `recordType` (4 lowercase hex digits), `version` (a JSON number) and `fields`: an array of `{ "name", "type" }` in encoding order     |
+
+## Board vectors
+
+`board.json` covers [[board]] with its own format, `abolish-board-vectors/1`, and the same top-level fields, plus:
+
+- `maxBoardPayload`: `MAX_BOARD_PAYLOAD`, as a decimal string.
+- `clock`: the anchoring clock the board vectors use (`epoch`, `period`, `deadline`, `lastSegment`, decimal strings; [[board]], Timing). Real elections take theirs from P4-1.
+- `entries`: board-entry codec vectors. Each has `id`, `description` and `encoding` (hex), and either `value` (`election_id`, `index`, `segment`, `payload`; integers as decimal strings, bytes as hex) with `entryHash`, or `error` (a decode error code).
+- `tree`: `leaves` (32-byte hex, used as `D[n]`), `roots` (the root of every prefix, size 1 first), `inclusion` (`index`, `size`, `path`) and `consistency` (`size1`, `size2`, `path`) for every pair, and `rejected`: proofs that must fail, with `kind` (`inclusion` or `consistency`) and the arguments of that check.
+- `boards`: board checks. Each has `electionId`, `now` (the finalized L1 time of the check), `entries` (hex encodings in order, possibly with unauthenticated entries after the anchored extent), `checkpoints` (each anchor: `electionId`, `segment`, `size`, `head`, `root`, its `hash`, and `anchoredAt`, the L1 time it was anchored), and `result`: `"ok"`, with `extent` (how many entries the anchors authenticate) and `links` (their chain links), or `{ "code", … }` with `entry`, `checkpoint`, `segment` or `decodeError` saying where it failed ([[board]], Board checks).
 
 ## Hash vectors
 

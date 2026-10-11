@@ -1,4 +1,27 @@
 export {
+  type Anchor,
+  type AnchorClock,
+  BOARD_ENTRY,
+  BOARD_PAYLOAD_TYPES,
+  type BoardEntry,
+  boardEntryHash,
+  BoardError,
+  type BoardErrorAt,
+  type BoardErrorCode,
+  chainLink,
+  type CheckedBoard,
+  checkBoard,
+  type Checkpoint,
+  checkpointHash,
+  checkpointOf,
+  decodeBoardEntry,
+  encodeBoardEntry,
+  isTimely,
+  MAX_BOARD_PAYLOAD,
+  type VerifiedBoard,
+  verifyBoard,
+} from "./board.ts";
+export {
   BN254_R,
   bool,
   bytesFixed,
@@ -46,6 +69,16 @@ export {
   IDENTITY,
   scalar,
 } from "./group.ts";
+export {
+  BOARD_TREE,
+  consistencyProof,
+  inclusionProof,
+  merkleRoot,
+  merkleRoots,
+  type TreeHash,
+  verifyConsistency,
+  verifyInclusion,
+} from "./merkle.ts";
 export {
   type DecodedRecord,
   RECORD_TYPES,

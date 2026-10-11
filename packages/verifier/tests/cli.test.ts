@@ -26,6 +26,8 @@ const vectors = JSON.parse(
   readFileSync(new URL("../../../docs/spec/vectors/board.json", import.meta.url), "utf8"),
 ) as BoardFile;
 
+const BIN = new URL("../src/bin.ts", import.meta.url).pathname;
+
 const root = mkdtempSync(join(tmpdir(), "abolish-verify-cli-"));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 let dirs = 0;
@@ -123,14 +125,11 @@ describe("a bundle that parses", () => {
     mkdirSync(join(root, "-h"));
     writeFileSync(join(root, "-h", "bundle.json"), readFileSync(join(dir, "bundle.json")));
     writeFileSync(join(root, "-h", "board.bin"), readFileSync(join(dir, "board.bin")));
-    const cwd = process.cwd();
-    try {
-      process.chdir(root);
-      expect(run("--", "-h").code).toBe(EXIT_CODES.unverifiable);
-      expect(run("-h")).toMatchObject({ code: EXIT_CODES.usage, stderr: "" });
-    } finally {
-      process.chdir(cwd);
-    }
+    // From the bundle's parent, so the argument really starts with "-".
+    const spawn = (...args: string[]) =>
+      spawnSync(process.execPath, [BIN, ...args], { cwd: root, encoding: "utf8" });
+    expect(spawn("--", "-h").status).toBe(EXIT_CODES.unverifiable);
+    expect(spawn("-h")).toMatchObject({ status: EXIT_CODES.usage, stderr: "" });
   });
 });
 
@@ -221,8 +220,7 @@ describe("usage", () => {
 
 describe("the entry point", () => {
   test("runs as a process and sets the exit code", () => {
-    const bin = new URL("../src/bin.ts", import.meta.url).pathname;
-    const p = spawnSync(process.execPath, [bin, vectorDir(failedId)], { encoding: "utf8" });
+    const p = spawnSync(process.execPath, [BIN, vectorDir(failedId)], { encoding: "utf8" });
     expect(p.stderr).toMatch(/^verdict: unverifiable /);
     expect(p.status).toBe(EXIT_CODES.unverifiable);
     expect((JSON.parse(p.stdout) as Report).verdictAgainstInputs).toBe("failed");

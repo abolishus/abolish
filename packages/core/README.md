@@ -33,10 +33,26 @@ One append-only, hash-chained board per election ([`docs/spec/board.md`](../../d
 
 `readBoard(sql, electionId)` returns the board as encoded entries in index order, the input to `checkBoard` and the verifier, which recompute every hash rather than trusting the stored columns.
 
+### `election_definitions` (T-34)
+
+One definition per election, as the API serves it: `election_id` and `definition` (the encoded record). Write-once like the L2 registry it mirrors: `abolish_app` holds `SELECT` and `INSERT` only, and triggers reject every `UPDATE`, `DELETE` and `TRUNCATE`, for every role. Rebuilt from the registry's `DefinitionRegistered` events (P3-5).
+
+`storeDefinition(sql, bytes)` decodes the definition strictly and checks the well-formedness rules with `@abolishus/crypto`, then stores it under the `election_id` it carries. Storing the same bytes again is a no-op; different bytes for a stored election are refused (`conflict`). It checks bytes, not registration: the caller reads definitions from the registry. `readDefinition(sql, electionId)` returns the stored bytes and `hasDefinition` says whether there are any, without reading them. A stored row is permanent, so callers store only definitions registered in a finalized L2 block.
+
+### Reading the board (`src/board.ts`)
+
+What the API serves, computed with `@abolishus/crypto`'s tree (`BOARD_TREE`), so a client checks it with the verifier's own functions:
+
+- `readHead`: size, chain head and root (`undefined` head and root while the board is empty).
+- `readEntries(sql, id, start, limit, maxBytes)`: up to `limit` encoded entries, at most `maxBytes` unless the page holds one entry. Lengths are read first, so payloads past the budget are never loaded (T-52).
+- `readInclusionProof` and `readConsistencyProof`: RFC 9162 paths. `BoardReadError` is `invalid-range` for positions no tree has, and `beyond-board` for a tree larger than the board, checked before any position reaches a query.
+
+These read the stored `entry_hash` column rather than rehashing every payload; a client that checks what it is served catches a column that disagrees with the bytes.
+
 ### No joins (T-10)
 
 Accounts and ballots never join. The tests fail on a table missing from `TABLE_CLASSES`, on any foreign key that starts or ends at a board table, and on a board column with an account-like name.
 
 ## Tests
 
-`vp run --filter @abolishus/core test` needs `TEST_DATABASE_URL`, connecting as a user that can create roles and `SET ROLE` to them (the CI service user is a superuser). Each test file migrates its own schema and drops it afterwards. The tests run uncached (`test:db` in `vite.config.ts`).
+`vp run --filter @abolishus/core test` needs `TEST_DATABASE_URL`, connecting as a user that can create roles and `SET ROLE` to them (the CI service user is a superuser). Each test file migrates its own schema and drops it afterwards. `@abolishus/core/test-db` exports that helper for other packages' database tests. The tests run uncached (`test:db` in `vite.config.ts`).

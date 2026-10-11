@@ -6,7 +6,8 @@
   "license": "AGPL-3.0-only",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./test-db": "./tests/db.ts"
   },
   "scripts": {
     "build": "vp exec tsc -p tsconfig.json",

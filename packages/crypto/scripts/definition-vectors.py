@@ -375,7 +375,7 @@ def definition_rule(d):
     if not 2 <= d["option_count"] <= 64:
         return "option-count"
     mn, mx = d["min_selections"], d["max_selections"]
-    if not (mn <= mx <= d["option_count"] and mx >= 1) or (d["election_type"] == 1 and mx != 1):
+    if not (mn <= mx <= d["option_count"] and mx >= 1) or (d["election_type"] == 1 and (mn, mx) != (0, 1)):
         return "selections"
     e = d["electorate"]
     tiers = [g["tier"] for g in e]
@@ -518,6 +518,8 @@ def def_vectors():
         ("selections", "definition-plurality-two", variant(TYPICAL, max_selections=2), "A plurality definition with max_selections 2"),
         ("selections", "definition-min-over-max", variant(APPROVAL, min_selections=4), "min_selections 4 over max_selections 3"),
         ("selections", "definition-max-over-options", variant(APPROVAL, max_selections=6), "max_selections 6 over option_count 5"),
+        ("selections", "definition-plurality-not-blank", variant(TYPICAL, min_selections=1), "A plurality definition forbidding blank ballots: a blank plurality ballot is valid (ADR 0003)"),
+        ("profile-types", "definition-64-pins", variant(TYPICAL, profile=with_pins([(t, 1) for t in range(1, 65)])), "64 pins, the list's maximum: decodes, but pins types the election doesn't use"),
         ("selections", "definition-max-zero", variant(APPROVAL, min_selections=0, max_selections=0), "max_selections 0"),
         ("electorate", "definition-electorate-empty", variant(TYPICAL, electorate=[]), "No tiers"),
         ("electorate", "definition-tiers-unsorted", variant(TYPICAL, electorate=list(reversed(TYPICAL["electorate"]))), "Tier 2 before Tier 0"),
@@ -623,6 +625,31 @@ def dt_vectors():
     one_ctx = {"optionCount": "2", "displayTextCommitment": H(ds("abolish/v1/display-text", enc_display_text(one))).hex()}
     valid("display-text-one-language", one, "One language, two options, empty descriptions", context=one_ctx)
 
+    # Valid vectors at every maximum, kept small by testing counts and lengths apart.
+    long_fields = {
+        "salt": b(32, 0xFF),
+        "translations": [
+            {
+                "language": "a" * 35,
+                "question": "q" * 1024,
+                "description": "d" * 8192,
+                "options": [{"label": "x" * 512, "description": "y" * 1024}, {"label": "z" * 512, "description": ""}],
+            }
+        ],
+    }
+    many_options = {"salt": b(32, 0), "translations": [dict(EN, options=[{"label": f"o{i}", "description": ""} for i in range(64)])]}
+    many_languages = {
+        "salt": b(32, 0),
+        "translations": [dict(EN, language=f"x{i:02d}", options=EN["options"][:2]) for i in range(32)],
+    }
+    for id_, t, oc, desc in [
+        ("display-text-every-length-at-max", long_fields, 2, "Tag, question, description, label and option description each at its maximum length"),
+        ("display-text-64-options", many_options, 64, "64 options, the maximum"),
+        ("display-text-32-translations", many_languages, 2, "32 translations, the maximum"),
+    ]:
+        c = {"optionCount": str(oc), "displayTextCommitment": H(ds("abolish/v1/display-text", enc_display_text(t))).hex()}
+        valid(id_, t, desc, context=c)
+
     e = enc_display_text(DT)
     invalid("display-text-truncated", e[:-1], "truncated", "The last byte is missing")
     invalid("display-text-trailing", e + b"\x00", "trailing-bytes", "One byte after the last field")
@@ -639,6 +666,17 @@ def dt_vectors():
         u16(9) + u8(1) + DT["salt"] + u32(1) + utf8("en", 35) + utf8("q", 1024) + utf8("", 8192) + u32(1) + u32(513) + b"a" * 513 + u32(0)
     )
     invalid("display-text-label-over-max", long_label, "length-over-max", "An option label of 513 bytes, over its maximum of 512")
+    hdr = u16(9) + u8(1) + DT["salt"]
+    tail_opts = lambda n: u32(n) + b"".join(utf8(f"o{i}", 512) + utf8("", 1024) for i in range(n))
+    invalid("display-text-question-over-max", hdr + u32(1) + utf8("en", 35) + u32(1025) + b"q" * 1025, "length-over-max", "A question of 1025 bytes, over its maximum of 1024")
+    invalid("display-text-description-over-max", hdr + u32(1) + utf8("en", 35) + utf8("q", 1024) + u32(8193) + b"d" * 8193, "length-over-max", "A description of 8193 bytes, over its maximum of 8192")
+    invalid(
+        "display-text-option-description-over-max",
+        hdr + u32(1) + utf8("en", 35) + utf8("q", 1024) + utf8("", 8192) + u32(1) + utf8("a", 512) + u32(1025) + b"d" * 1025,
+        "length-over-max",
+        "An option description of 1025 bytes, over its maximum of 1024",
+    )
+    invalid("display-text-options-over-max", hdr + u32(1) + utf8("en", 35) + utf8("q", 1024) + utf8("", 8192) + u32(65), "length-over-max", "65 options, over the maximum of 64, rejected before any is read")
     invalid("display-text-translations-over-max", u16(9) + u8(1) + DT["salt"] + u32(33), "length-over-max", "33 translations, over the maximum of 32")
     invalid(
         "display-text-language-over-max",

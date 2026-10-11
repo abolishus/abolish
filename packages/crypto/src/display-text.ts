@@ -5,7 +5,6 @@
 // verified result (T-34, T-41).
 
 import { bytesFixed, type CodecValue, list, struct, utf8 } from "./codec.ts";
-import { PARAMETERS } from "./parameters.ts";
 import { RECORD_TYPES, recordType } from "./record.ts";
 
 const optionText = struct([
@@ -17,11 +16,11 @@ const translation = struct([
   ["language", utf8(35)],
   ["question", utf8(1024)],
   ["description", utf8(8192)],
-  ["options", list(optionText, PARAMETERS.MAX_OPTIONS)],
+  ["options", list(optionText, 64)],
 ] as const);
 
 const displayTextV1 = struct([
-  ["salt", bytesFixed(PARAMETERS.DISPLAY_TEXT_SALT_LEN)],
+  ["salt", bytesFixed(32)],
   ["translations", list(translation, 32)],
 ] as const);
 
@@ -61,7 +60,8 @@ const distinct = (xs: readonly Uint8Array[]) =>
   xs.every((a, i) => xs.slice(i + 1).every((b) => compareBytes(a, b) !== 0));
 
 /**
- * The first rule after `commitment` that a decoded display-text record breaks
+ * Internal: clients call `displayTextRule`, which checks the commitment first
+ * (T-34, T-41). The first rule after `commitment` that a decoded display-text record breaks
  * for a definition with `optionCount` options, or `undefined`. The commitment
  * is checked by `displayTextRule`, which hashes the record.
  */

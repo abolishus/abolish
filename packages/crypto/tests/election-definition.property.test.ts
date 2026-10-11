@@ -18,6 +18,8 @@ import {
   newDisplayTextSalt,
   newElectionId,
   PARAMETERS,
+  UnsupportedVersionError,
+  DEFINITION_V1_LIMITS,
   pinnedVersion,
   pinsDraftVersion,
 } from "../src/index.ts";
@@ -232,6 +234,7 @@ describe("election definition well-formedness", () => {
     ["option-count", { option_count: PARAMETERS.MAX_OPTIONS + 1, max_selections: 2 }],
     ["selections", { election_type: 1 }],
     ["selections", { min_selections: 3 }],
+    ["selections", { election_type: 1, min_selections: 1, max_selections: 1 }],
     ["electorate", { electorate: [] }],
     [
       "electorate",
@@ -329,7 +332,9 @@ describe("display text", () => {
       ...sampleDefinition,
       profile: { protocol_major: 1, pins: allPins.slice(0, 8) },
     };
-    expect(() => decodeDisplayText(encodeDisplayText(t), unpinned)).toThrow(RangeError);
+    expect(() => decodeDisplayText(encodeDisplayText(t), unpinned)).toThrow(
+      UnsupportedVersionError,
+    );
   });
 
   test("text round-trips and random bodies are rejected or re-encode", () => {
@@ -390,5 +395,10 @@ describe("randomness and parameters", () => {
     ]);
     expect(Object.entries(PARAMETERS)).toEqual(rows);
     expect(Object.isFrozen(PARAMETERS)).toBe(true);
+    // Version 1's limits are literals; today they equal the protocol-wide ones.
+    expect(DEFINITION_V1_LIMITS).toEqual({
+      maxOptions: PARAMETERS.MAX_OPTIONS,
+      maxTrustees: PARAMETERS.MAX_TRUSTEES,
+    });
   });
 });

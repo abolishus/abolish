@@ -16,7 +16,6 @@ import {
   u64,
   u8,
 } from "./codec.ts";
-import { PARAMETERS } from "./parameters.ts";
 import { RECORD_TYPES, recordType } from "./record.ts";
 
 const address = bytesFixed(20);
@@ -62,7 +61,7 @@ const electionDefinitionV1 = struct([
   ["option_count", u16],
   ["min_selections", u16],
   ["max_selections", u16],
-  ["electorate", list(tierGroup, TIERS.length)],
+  ["electorate", list(tierGroup, 3)],
   ["membership_vk_hash", hash],
   ["panel_id", hash],
   ["threshold", u8],
@@ -82,6 +81,11 @@ export const ELECTION_DEFINITION = recordType(RECORD_TYPES.electionDefinition, {
 });
 
 export type ElectionDefinition = CodecValue<typeof electionDefinitionV1>;
+
+// Version 1's limits, written out rather than read from PARAMETERS: raising a
+// protocol-wide limit is a new record version (parameters.md), so it must
+// never change what version 1 accepts. A test ties them to PARAMETERS.
+export const DEFINITION_V1_LIMITS = Object.freeze({ maxOptions: 64, maxTrustees: 16 } as const);
 
 /** The well-formedness rule codes of docs/spec/election-definition.md, in checking order. */
 export type ElectionDefinitionRule =
@@ -129,12 +133,15 @@ export function electionDefinitionRule(d: ElectionDefinition): ElectionDefinitio
   )
     return "profile-types";
   if (d.profile.pins.some((p) => p.version < 1)) return "profile-version";
-  if (d.option_count < 2 || d.option_count > PARAMETERS.MAX_OPTIONS) return "option-count";
+  if (d.option_count < 2 || d.option_count > DEFINITION_V1_LIMITS.maxOptions) return "option-count";
   if (
     d.min_selections > d.max_selections ||
     d.max_selections > d.option_count ||
     d.max_selections < 1 ||
-    (d.election_type === ELECTION_TYPES.plurality && d.max_selections !== 1)
+    // A blank plurality ballot is valid (0003-tally-scheme), so plurality is
+    // exactly the range [0, 1].
+    (d.election_type === ELECTION_TYPES.plurality &&
+      (d.min_selections !== 0 || d.max_selections !== 1))
   )
     return "selections";
   // Ascending tiers make the tiers-only partition one cell per tier, none
@@ -154,7 +161,11 @@ export function electionDefinitionRule(d: ElectionDefinition): ElectionDefinitio
     return "electorate";
   // At least two trustees must combine shares: a 1-of-n panel lets one party
   // open every voter's sharing alone, which the brief forbids (T-14).
-  if (d.threshold < 2 || d.threshold > d.panel_size || d.panel_size > PARAMETERS.MAX_TRUSTEES)
+  if (
+    d.threshold < 2 ||
+    d.threshold > d.panel_size ||
+    d.panel_size > DEFINITION_V1_LIMITS.maxTrustees
+  )
     return "panel";
   const l2 = [d.election_registry, d.board, d.trustee_registry, d.group_registry];
   const l1 = [d.l1_anchor, d.l1_relay];

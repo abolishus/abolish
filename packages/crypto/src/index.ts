@@ -23,12 +23,7 @@ export {
   utf8,
   Writer,
 } from "./codec.ts";
-export {
-  DISPLAY_TEXT,
-  type DisplayText,
-  type DisplayTextRule,
-  displayTextShapeRule,
-} from "./display-text.ts";
+export { DISPLAY_TEXT, type DisplayText, type DisplayTextRule } from "./display-text.ts";
 export {
   ds,
   type DsTag,
@@ -41,6 +36,7 @@ export {
 } from "./domain-separation.ts";
 export {
   ELECTION_DEFINITION,
+  DEFINITION_V1_LIMITS,
   ELECTION_TYPES,
   type ElectionDefinition,
   type ElectionDefinitionRule,
@@ -76,6 +72,7 @@ export {
   pinnedVersion,
   pinsDraftVersion,
   PROTOCOL_SCHEMA,
+  UnsupportedVersionError,
 } from "./protocol.ts";
 export {
   type DecodedRecord,

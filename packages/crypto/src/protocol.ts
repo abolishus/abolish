@@ -17,6 +17,21 @@ import { H } from "./group.ts";
 import { PARAMETERS } from "./parameters.ts";
 import { RECORD_TYPES, RecordSchema, UNPINNED } from "./record.ts";
 
+/**
+ * A definition pins a version of a record type this package can't decode (or
+ * pins none). Not a `DecodeError`: the record's bytes weren't read, and the
+ * caller reports the definition as unsupported ([[verifier]] 2.3).
+ */
+export class UnsupportedVersionError extends Error {
+  override readonly name = "UnsupportedVersionError";
+  constructor(
+    readonly recordType: number,
+    readonly pinned: number | undefined,
+  ) {
+    super(`unsupported pin for record type ${recordType}: ${String(pinned)}`);
+  }
+}
+
 /** Every record type with a specified layout; production decoders know these and no others. */
 export const PROTOCOL_SCHEMA = new RecordSchema([ELECTION_DEFINITION, DISPLAY_TEXT]);
 
@@ -86,8 +101,7 @@ export function encodeDisplayText(t: DisplayText): Uint8Array {
  */
 export function decodeDisplayText(bytes: Uint8Array, definition: ElectionDefinition): DisplayText {
   const pinned = pinnedVersion(definition, RECORD_TYPES.displayText);
-  if (pinned !== 1)
-    throw new RangeError("the definition doesn't pin a supported display-text version");
+  if (pinned !== 1) throw new UnsupportedVersionError(RECORD_TYPES.displayText, pinned);
   return PROTOCOL_SCHEMA.decode(DISPLAY_TEXT, bytes, pinned).value;
 }
 

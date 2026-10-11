@@ -1877,6 +1877,416 @@
       "illFormed": "selections"
     },
     {
+      "id": "definition-plurality-not-blank",
+      "description": "A plurality definition forbidding blank ballots: a blank plurality ballot is valid (ADR 0003)",
+      "type": {
+        "kind": "ref",
+        "name": "election-definition-v1"
+      },
+      "value": {
+        "profile": {
+          "protocol_major": "1",
+          "pins": [
+            {
+              "record_type": "1",
+              "version": "1"
+            },
+            {
+              "record_type": "2",
+              "version": "1"
+            },
+            {
+              "record_type": "3",
+              "version": "1"
+            },
+            {
+              "record_type": "4",
+              "version": "1"
+            },
+            {
+              "record_type": "5",
+              "version": "1"
+            },
+            {
+              "record_type": "6",
+              "version": "1"
+            },
+            {
+              "record_type": "7",
+              "version": "1"
+            },
+            {
+              "record_type": "8",
+              "version": "1"
+            },
+            {
+              "record_type": "9",
+              "version": "1"
+            }
+          ]
+        },
+        "election_id": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+        "l2_chain_id": "84532",
+        "l1_chain_id": "11155111",
+        "election_registry": "1111111111111111111111111111111111111111",
+        "board": "1212121212121212121212121212121212121212",
+        "trustee_registry": "1313131313131313131313131313131313131313",
+        "group_registry": "1414141414141414141414141414141414141414",
+        "l1_anchor": "2121212121212121212121212121212121212121",
+        "l1_relay": "2222222222222222222222222222222222222222",
+        "election_type": "1",
+        "tally_scheme": "1",
+        "option_count": "3",
+        "min_selections": "1",
+        "max_selections": "1",
+        "electorate": [
+          {
+            "tier": "0",
+            "group_id": "1",
+            "root": "0000000000000000000000000000000000000000000000000123456789abcdef",
+            "root_l2_block": "1000",
+            "group_size": "5000"
+          },
+          {
+            "tier": "2",
+            "group_id": "3",
+            "root": "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000000",
+            "root_l2_block": "1000",
+            "group_size": "120"
+          }
+        ],
+        "membership_vk_hash": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+        "panel_id": "606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f",
+        "threshold": "4",
+        "panel_size": "7",
+        "ceremony_transcript_hash": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+        "opens_at": "1767225600",
+        "closes_at": "1767830400",
+        "l1_inclusion_bound": "3600",
+        "sequencing_window": "3600",
+        "max_sequencer_drift": "1800",
+        "display_text_commitment": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf"
+      },
+      "encoding": "0001010100000009000101000201000301000401000501000601000701000801000901101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f0000000000014a340000000000aa36a71111111111111111111111111111111111111111121212121212121212121212121212121212121213131313131313131313131313131313131313131414141414141414141414141414141414141414212121212121212121212121212121212121212122222222222222222222222222222222222222220101000300010001000000020000000000000000010000000000000000000000000000000000000000000000000123456789abcdef00000000000003e8000000000000138802000000000000000330644e72e131a029b85045b68181585d2833e84879b9709143e1f593f000000000000000000003e80000000000000078404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f0407808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f000000006955b90000000000695ef38000000e100000000000000e100000000000000708a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "hash": "c9b67a4797a654feaf42b0e9ca8406822521d4fe25cfbab2a703f286457dedef",
+      "illFormed": "selections"
+    },
+    {
+      "id": "definition-64-pins",
+      "description": "64 pins, the list's maximum: decodes, but pins types the election doesn't use",
+      "type": {
+        "kind": "ref",
+        "name": "election-definition-v1"
+      },
+      "value": {
+        "profile": {
+          "protocol_major": "1",
+          "pins": [
+            {
+              "record_type": "1",
+              "version": "1"
+            },
+            {
+              "record_type": "2",
+              "version": "1"
+            },
+            {
+              "record_type": "3",
+              "version": "1"
+            },
+            {
+              "record_type": "4",
+              "version": "1"
+            },
+            {
+              "record_type": "5",
+              "version": "1"
+            },
+            {
+              "record_type": "6",
+              "version": "1"
+            },
+            {
+              "record_type": "7",
+              "version": "1"
+            },
+            {
+              "record_type": "8",
+              "version": "1"
+            },
+            {
+              "record_type": "9",
+              "version": "1"
+            },
+            {
+              "record_type": "10",
+              "version": "1"
+            },
+            {
+              "record_type": "11",
+              "version": "1"
+            },
+            {
+              "record_type": "12",
+              "version": "1"
+            },
+            {
+              "record_type": "13",
+              "version": "1"
+            },
+            {
+              "record_type": "14",
+              "version": "1"
+            },
+            {
+              "record_type": "15",
+              "version": "1"
+            },
+            {
+              "record_type": "16",
+              "version": "1"
+            },
+            {
+              "record_type": "17",
+              "version": "1"
+            },
+            {
+              "record_type": "18",
+              "version": "1"
+            },
+            {
+              "record_type": "19",
+              "version": "1"
+            },
+            {
+              "record_type": "20",
+              "version": "1"
+            },
+            {
+              "record_type": "21",
+              "version": "1"
+            },
+            {
+              "record_type": "22",
+              "version": "1"
+            },
+            {
+              "record_type": "23",
+              "version": "1"
+            },
+            {
+              "record_type": "24",
+              "version": "1"
+            },
+            {
+              "record_type": "25",
+              "version": "1"
+            },
+            {
+              "record_type": "26",
+              "version": "1"
+            },
+            {
+              "record_type": "27",
+              "version": "1"
+            },
+            {
+              "record_type": "28",
+              "version": "1"
+            },
+            {
+              "record_type": "29",
+              "version": "1"
+            },
+            {
+              "record_type": "30",
+              "version": "1"
+            },
+            {
+              "record_type": "31",
+              "version": "1"
+            },
+            {
+              "record_type": "32",
+              "version": "1"
+            },
+            {
+              "record_type": "33",
+              "version": "1"
+            },
+            {
+              "record_type": "34",
+              "version": "1"
+            },
+            {
+              "record_type": "35",
+              "version": "1"
+            },
+            {
+              "record_type": "36",
+              "version": "1"
+            },
+            {
+              "record_type": "37",
+              "version": "1"
+            },
+            {
+              "record_type": "38",
+              "version": "1"
+            },
+            {
+              "record_type": "39",
+              "version": "1"
+            },
+            {
+              "record_type": "40",
+              "version": "1"
+            },
+            {
+              "record_type": "41",
+              "version": "1"
+            },
+            {
+              "record_type": "42",
+              "version": "1"
+            },
+            {
+              "record_type": "43",
+              "version": "1"
+            },
+            {
+              "record_type": "44",
+              "version": "1"
+            },
+            {
+              "record_type": "45",
+              "version": "1"
+            },
+            {
+              "record_type": "46",
+              "version": "1"
+            },
+            {
+              "record_type": "47",
+              "version": "1"
+            },
+            {
+              "record_type": "48",
+              "version": "1"
+            },
+            {
+              "record_type": "49",
+              "version": "1"
+            },
+            {
+              "record_type": "50",
+              "version": "1"
+            },
+            {
+              "record_type": "51",
+              "version": "1"
+            },
+            {
+              "record_type": "52",
+              "version": "1"
+            },
+            {
+              "record_type": "53",
+              "version": "1"
+            },
+            {
+              "record_type": "54",
+              "version": "1"
+            },
+            {
+              "record_type": "55",
+              "version": "1"
+            },
+            {
+              "record_type": "56",
+              "version": "1"
+            },
+            {
+              "record_type": "57",
+              "version": "1"
+            },
+            {
+              "record_type": "58",
+              "version": "1"
+            },
+            {
+              "record_type": "59",
+              "version": "1"
+            },
+            {
+              "record_type": "60",
+              "version": "1"
+            },
+            {
+              "record_type": "61",
+              "version": "1"
+            },
+            {
+              "record_type": "62",
+              "version": "1"
+            },
+            {
+              "record_type": "63",
+              "version": "1"
+            },
+            {
+              "record_type": "64",
+              "version": "1"
+            }
+          ]
+        },
+        "election_id": "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+        "l2_chain_id": "84532",
+        "l1_chain_id": "11155111",
+        "election_registry": "1111111111111111111111111111111111111111",
+        "board": "1212121212121212121212121212121212121212",
+        "trustee_registry": "1313131313131313131313131313131313131313",
+        "group_registry": "1414141414141414141414141414141414141414",
+        "l1_anchor": "2121212121212121212121212121212121212121",
+        "l1_relay": "2222222222222222222222222222222222222222",
+        "election_type": "1",
+        "tally_scheme": "1",
+        "option_count": "3",
+        "min_selections": "0",
+        "max_selections": "1",
+        "electorate": [
+          {
+            "tier": "0",
+            "group_id": "1",
+            "root": "0000000000000000000000000000000000000000000000000123456789abcdef",
+            "root_l2_block": "1000",
+            "group_size": "5000"
+          },
+          {
+            "tier": "2",
+            "group_id": "3",
+            "root": "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000000",
+            "root_l2_block": "1000",
+            "group_size": "120"
+          }
+        ],
+        "membership_vk_hash": "404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f",
+        "panel_id": "606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f",
+        "threshold": "4",
+        "panel_size": "7",
+        "ceremony_transcript_hash": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f",
+        "opens_at": "1767225600",
+        "closes_at": "1767830400",
+        "l1_inclusion_bound": "3600",
+        "sequencing_window": "3600",
+        "max_sequencer_drift": "1800",
+        "display_text_commitment": "a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf"
+      },
+      "encoding": "0001010100000040000101000201000301000401000501000601000701000801000901000a01000b01000c01000d01000e01000f01001001001101001201001301001401001501001601001701001801001901001a01001b01001c01001d01001e01001f01002001002101002201002301002401002501002601002701002801002901002a01002b01002c01002d01002e01002f01003001003101003201003301003401003501003601003701003801003901003a01003b01003c01003d01003e01003f01004001101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f0000000000014a340000000000aa36a71111111111111111111111111111111111111111121212121212121212121212121212121212121213131313131313131313131313131313131313131414141414141414141414141414141414141414212121212121212121212121212121212121212122222222222222222222222222222222222222220101000300000001000000020000000000000000010000000000000000000000000000000000000000000000000123456789abcdef00000000000003e8000000000000138802000000000000000330644e72e131a029b85045b68181585d2833e84879b9709143e1f593f000000000000000000003e80000000000000078404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f0407808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f000000006955b90000000000695ef38000000e100000000000000e100000000000000708a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebf",
+      "hash": "1664fd3597cb18695803d676dbf9b9de57d00705969cf817b1bcb1a0c443c925",
+      "illFormed": "profile-types"
+    },
+    {
       "id": "definition-max-zero",
       "description": "max_selections 0",
       "type": {

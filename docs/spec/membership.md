@@ -97,4 +97,5 @@ Because the scope binds the tier, a proof made for one tier never verifies as an
 
 - The verification keys, their hash in the election definition, the proof encoding and the Groth16 verification itself: P1-17b.
 - `M`: P1-12 (ballot hash) and P1-13 (receipts and re-voting).
+- The tier encoding: the election definition's tier field (P1-10b) and the group registry's tier attribution (P1-18, P3-2) MUST use exactly the values this page binds into the scope (0, 1, 2), and the verifier takes `t_g` from the registry binding it checks in [[verifier]] 2.4, never from the definition's label alone.
 - Groups and their additions and removals: P3-2. The prover in the ballot client and native app: P2-8, P5-4.

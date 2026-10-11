@@ -17,6 +17,11 @@ minimumReleaseAge: 10080
 blockExoticSubdeps: true
 # Refuse a version whose publish provenance is weaker than an earlier one.
 trustPolicy: no-downgrade
+# semver@6.3.1 is a July 2023 security backport published without provenance
+# after 7.5.x had it, so no-downgrade flags it falsely. Storybook needs it via
+# react-docgen -> @babel/core 7. Owner decision 2026-10-11 (P0-2).
+trustPolicyExclude:
+  - semver@6.3.1
 # Install scripts run only for packages listed in allowBuilds.
 strictDepBuilds: true
 allowBuilds: {}

@@ -67,8 +67,8 @@ We're building a production-grade, open-source, publicly auditable voting platfo
 - Ballot secrecy: no plaintext vote ever touches a server, a log, analytics or a chain. Eligibility is unlinkable from ballot content.
 - Everlasting privacy: write an ADR on perfectly-hiding commitments on the public board vs standard threshold ElGamal, including a post-quantum "harvest now, decrypt later" analysis, before building the tally.
 - Coercion resistance for remote voting: at minimum, re-voting where the last ballot counts; document what remains open.
-- Threshold trust: the election key is split across k-of-n independent named trustees (I'll name them via ADR). No single party, including us, can decrypt individual ballots or alter a tally undetected. Ceremony tooling produces a public transcript.
-- Use only audited cryptographic libraries. Never roll our own primitives; composing published protocols is fine.
+- Threshold trust: each ballot's opening is split across k-of-n independent named trustees (I'll name them via ADR). No single party, including us, can decrypt individual ballots or alter a tally undetected. Ceremony tooling produces a public transcript.
+- Use only audited cryptographic libraries. Never roll our own primitives; composing published protocols is fine. One exception: ML-KEM from `@noble/post-quantum` may be used inside a hybrid KEM with X25519 on testnets before it is independently audited; an audit is a mainnet prerequisite.
 - One person, one vote. Weight never depends on tokens or wealth.
 - No PII on-chain, ever. Enforce this with tests on contract inputs.
 

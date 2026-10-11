@@ -202,8 +202,8 @@ If B is accepted:
 
 Opened 2026-10-09 20:00 UTC. On 2026-10-10 the owner chose **option B**.
 
-These questions are still open. They block ballot-encryption work (P1-12) until the owner answers them:
+On 2026-10-11 the owner answered the three open questions:
 
-1. **Trustee duties (P1-7):** whether trustees run synchronous intake, stay online during voting, keep the share ciphertexts until the tally, and then destroy their keys and stored shares.
-2. **ML-KEM audit:** whether to wait for an independent audit of `@noble/post-quantum`, or ship Diffie–Hellman-only share encryption. With Diffie–Hellman alone, the private part has classical privacy only.
-3. **Election key:** whether the owner accepts the deviation from the brief's "election key is split across k-of-n trustees". Under B, the k-of-n threshold applies to each ballot's opening rather than to one key. The trust property is the same, but the wording isn't.
+1. **Trustee duties (P1-7): accepted.** Trustees run synchronous intake, stay online during voting, keep the share ciphertexts until the tally, and then destroy their keys and stored shares. These duties run in automated trustee nodes ([[0006-trustees]]), not by hand. Naming the trustees remains a separate owner decision.
+2. **ML-KEM audit: hybrid now, audit before mainnet.** Share encryption uses a hybrid KEM (X25519 combined with ML-KEM-768 from `@noble/post-quantum`), so breaking a share needs both broken; a flaw in the unaudited ML-KEM code can't leave privacy below the Diffie–Hellman-only option. This is allowed on testnets only. An independent audit of the ML-KEM code in use is a mainnet prerequisite; funding one is an owner decision.
+3. **Election key: accepted.** The brief now says each ballot's opening is split across k-of-n trustees, matching option B. The trust property is unchanged.

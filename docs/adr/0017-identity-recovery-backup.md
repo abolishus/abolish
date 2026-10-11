@@ -3,7 +3,7 @@
 - Status: Accepted (agent) — owner may veto (2026-10-11, rule A): option A
 - Date: 2026-10-11
 - Deciders: agent, owner may veto (rule A)
-- Threats addressed: T-20, T-10, T-18, T-11, T-41, T-52, T-66, T-69 (see [[THREAT_MODEL]])
+- Threats addressed: T-20, T-10, T-18, T-11, T-41, T-46, T-49, T-52, T-66, T-67, T-69 (see [[THREAT_MODEL]])
 
 ## Context
 
@@ -22,7 +22,7 @@ So the trust boundary of a PRF-derived key is every page and app that can use th
 ### A. A separate backup passkey on a dedicated ballot RP ID; the ciphertext stored by us under a locator derived from the PRF
 
 1. **RP ID.** The backup passkey's RP ID is a dedicated host that serves only the ballot client: a stable domain (not an IPFS gateway origin, which changes with every release's CID), on a registrable domain other than `apps/web`'s (so the two are never same-site and no account cookie reaches the ballot client), with no other subdomains served under it and no wildcard DNS. The ballot client is the only code served there.
-2. **Credential.** The ballot client creates a discoverable passkey of its own, never the account passkey (better-auth, `apps/web`). Its user handle is 32 random bytes and its user name a fixed generic label, never an account identifier or anything the voter types, so the credential names nothing, in our storage or in the passkey provider's. Both its creation and every evaluation require user verification (`userVerification: "required"`), and the client proceeds only if the authenticator data shows UV, so backup and recovery always use the same PRF secret. If the BE flag shows the credential can't sync, the client tells the voter the backup won't survive this authenticator.
+2. **Credential.** The ballot client creates a discoverable passkey of its own, never the account passkey (better-auth, `apps/web`). Its user handle is 32 random bytes and its user name a fixed generic label, never an account identifier or anything the voter types, so the credential names nothing, in our storage or in the passkey provider's. Both its creation and every evaluation require user verification (`userVerification: "required"`), and the client proceeds only if the authenticator data shows UV, so backup and recovery always use the same PRF secret. If the authenticator data shows the credential can't sync (BE clear) or isn't backed up yet (BS clear), the client tells the voter the backup won't survive this authenticator, and checks BS again on later uses.
 3. **Keys.** One PRF evaluation, with a fixed salt that a domain tag defines, gives 32 bytes. HKDF-SHA-256 (RFC 5869) under registered tags derives two independent values from it: a wrap key and a locator. Neither is ever stored or sent except as below.
 4. **Envelope.** The secret goes into a fixed-length, versioned plaintext record, sealed with an AEAD under the wrap key with a fresh random nonce. The associated data binds the version and the locator, so an envelope moved to another locator doesn't open. Every envelope of a version has the same length.
 5. **Storage.** The ballot client stores the envelope through the API's ballot path, which carries no account session, cookie or token (T-10). A request presents the locator; the server keeps the row under `id = H(tag, locator)`, so a copy of the table (a leak, a seizure) can't be used to read, overwrite or delete a row. Only a holder of the locator can read, replace or delete its envelope. The table is operational, has no account column and no timestamp beyond what the expiry rule needs, and the request log holds only the method, the route, the status and the duration, as for every API request (T-10). Envelopes are never put on the board, IPFS or the archive.
@@ -40,7 +40,7 @@ So the trust boundary of a PRF-derived key is every page and app that can use th
   - Anyone can write rows (the ballot path is anonymous by design), so storage can be flooded (T-52). Rows are fixed-size and small; per-address limits sit at the proxy (P2-11). No Turnstile: the ballot client ships no third-party code.
   - Wiping Postgres loses every backup (T-66). Backups affect no result, so the brief's invariant holds, but a voter who then loses their device loses their identity.
   - A voter whose authenticator doesn't support `prf` gets no backup at all, and one whose backup passkey doesn't sync gets one that dies with that authenticator.
-  - The passkey provider (Apple, Google, a password manager) holds both the account passkey and the backup passkey in one user's vault. It can't evaluate either without the user, and the backup passkey names nothing, but it knows the user has one.
+  - The passkey provider (Apple, Google, a password manager) holds both the account passkey and the backup passkey in one user's vault. It can't evaluate either without the user, and the backup passkey names nothing, but it knows the user has one. Whoever takes over the voter's provider account and enrols a device of their own gets the passkey and passes user verification there, so can open the backup through the ballot client: a route to the secret that didn't exist while it lived only on the device (T-18).
 
 ### B. User-held only: a recovery code the voter keeps
 
@@ -60,7 +60,7 @@ Also considered: the `largeBlob` extension (store the secret in the authenticato
 
 ## Recommendation
 
-**Option A.** It gives what the brief asks for, cross-device recovery from the passkey alone with the secret never leaving the device unencrypted, and keeps the key inside a boundary that holds only the signed ballot client. What the server keeps is useless without a UV-gated PRF evaluation it can't make. C is rejected (T-20). B is rejected because it contradicts the brief; whether to offer it anyway, to voters without PRF support or as a second copy against a database wipe, is the owner's call.
+**Option A.** It gives what the brief asks for, cross-device recovery from the passkey alone with the secret never leaving the device unencrypted, and keeps the key inside a boundary that holds only the signed ballot client. What the server keeps is useless without a UV-gated PRF evaluation it can't make. C is rejected (T-20). B is rejected because it contradicts the brief; the owner may still ask for it, for voters without PRF support or as a second copy against a database wipe.
 
 What would change it: browsers letting a page use a credential outside its RP ID's domain and related origins (that breaks the boundary A rests on); the ballot client having to share a registrable domain with `apps/web` (then the backup must move to the native app, P5-2); the owner allowing B as a fallback; or the owner preferring no operator-held backups at all.
 
@@ -80,4 +80,4 @@ What would change it: browsers letting a page use a credential outside its RP ID
 
 ## Decision
 
-Under rule A (`AGENTS.md`): option A, status `Accepted (agent) — owner may veto`, listed under Decisions to review in [[STATUS]]. Offering option B, which contradicts the brief, stays with the owner.
+Under rule A (`AGENTS.md`): option A, status `Accepted (agent) — owner may veto`, listed under Decisions to review in [[STATUS]]. The owner may ask for option B, which contradicts the brief, as a fallback; nothing waits on that.

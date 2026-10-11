@@ -31,6 +31,16 @@ The board of `docs/spec/board.md` (T-23, T-24, T-42):
 - The RFC 9162 Merkle tree, generic over its two hashes (`TreeHash`), with `BOARD_TREE` using tagged `H`: `merkleRoot`, `merkleRoots` (every requested prefix root in one pass), `inclusionProof`, `consistencyProof`, and `verifyInclusion` and `verifyConsistency`, which return false for any malformed argument and never throw.
 - `verifyBoard` checks one election's board against every anchor for it, given the anchoring clock (`AnchorClock`) and the latest finalized L1 time. Only timely anchors count (`isTimely`). It checks only the prefix those anchors cover and ignores entries past it. Within that prefix it checks strict decoding, election, positions, segments, the order of spoiled-ballot openings, equivocation, each checkpoint's boundary, unanchored segments and the seal, after first checking the copy's raw bytes against every anchored head and root (a mismatch, `copy-mismatch`, means the copy is wrong, not the election; `checkpoint-inconsistent`, a checkpoint no board can match, from L1 alone or against the copy, fails the election, attributably to the anchoring authority). A failure throws a `BoardError` with the spec's code. `checkBoard` runs the entry checks alone, and `checkpointOf` builds the checkpoint after a segment.
 
+## Membership
+
+What Abolish derives around Semaphore v4's membership circuit (`docs/spec/membership.md`, ADR 0009; T-12, T-13):
+
+- `nullifierScope(definitionHash, tier, root)`: `S_g = H(DS("abolish/v1/nullifier-scope", definition_hash ‖ u8(tier) ‖ root))`, one scope per poll and tier group, even for tiers with equal roots. `membershipScope` maps it into the field as the circuit's scope input.
+- `semaphoreField(x)`: Semaphore's `hash`, `keccak256(x) >> 8`, for 32-byte inputs.
+- `MEMBERSHIP_DEPTH`: 32, the one tree depth (and so verification key) every membership proof uses, so no server can steer it.
+
+Groth16 verification of the proofs themselves is P1-17b's.
+
 ## Rules
 
 - Runtime dependencies are `@noble/*` only, pinned to exact versions in the workspace catalog, with an `@noble`-only transitive closure, no node built-ins and no workspace imports. CI's `gated` check (`.github/tools/ci/src/gated.ts`) enforces this from the lockfile, the `src` imports and the packed bundle, which must inline nothing from `node_modules` (T-55, T-36).
@@ -44,8 +54,8 @@ vp run --filter @abolishus/crypto test
 
 - Unit and property tests use `vite-plus/test` and `fast-check`; property tests honour `FC_NUM_RUNS` (CI sets 1000) and print their seed on failure.
 - Published vectors are vendored byte for byte under [`test-vectors/`](test-vectors/README.md), each listed in `test-vectors/manifest.json` with its source URL and sha256. `tests/vectors/harness.ts` checks the sha256 before any test reads a file.
-- Cross-language vectors for what the spec defines live in `docs/spec/vectors/`, not here. `tests/primitives-vectors.test.ts` runs every vector in `primitives.json` and `group.json`, building codecs from the files' type descriptors; `tests/group.test.ts` runs `hash.json`; `tests/board-vectors.test.ts` runs `board.json`.
-- `scripts/group-vectors.py` prints `group.json` and `hash.json` from an independent Python implementation of RFC 9496, RFC 9380 §5.3.1 and RFC 9497 §4.1 (`python3 -I packages/crypto/scripts/group-vectors.py docs/spec/vectors`, then `vp check --fix`). `scripts/static-dh-factors.ts` reproduces ADR 0007's factor search of ℓ ± 1 (`vp node packages/crypto/scripts/static-dh-factors.ts`, about 30 seconds). `scripts/board-vectors.py` prints `board.json` from an independent Python implementation of `docs/spec/board.md` and RFC 9162 §2.1, after checking itself against the vendored transparency-dev vectors.
+- Cross-language vectors for what the spec defines live in `docs/spec/vectors/`, not here. `tests/primitives-vectors.test.ts` runs every vector in `primitives.json` and `group.json`, building codecs from the files' type descriptors; `tests/group.test.ts` runs `hash.json`; `tests/board-vectors.test.ts` runs `board.json`; `tests/membership.test.ts` runs `membership.json`.
+- `scripts/group-vectors.py` prints `group.json` and `hash.json` from an independent Python implementation of RFC 9496, RFC 9380 §5.3.1 and RFC 9497 §4.1 (`python3 -I packages/crypto/scripts/group-vectors.py docs/spec/vectors`, then `vp check --fix`). `scripts/static-dh-factors.ts` reproduces ADR 0007's factor search of ℓ ± 1 (`vp node packages/crypto/scripts/static-dh-factors.ts`, about 30 seconds). `scripts/board-vectors.py` prints `board.json` from an independent Python implementation of `docs/spec/board.md` and RFC 9162 §2.1, after checking itself against the vendored transparency-dev vectors. `scripts/membership-vectors.py` prints `membership.json`, with its own Keccak-256 checked against `hashlib.sha3_256` and published answers.
 
 ## License
 

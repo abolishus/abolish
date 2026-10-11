@@ -20,6 +20,7 @@ A conforming verifier implements every check in [[verifier]] and decodes every r
 | [[parameters]]              | Protocol-wide limits                                                                                               | Specified for version 1; P1-18 may lower                                                               |
 | [[contracts]]               | The event accumulator every Abolish contract keeps over its own events                                             | Event accumulator specified; registries, direct submit, contract events and the close rule are P1-18's |
 | [[display-text]]            | The split between display text and result-critical data, and the display-text commitment                           | Split and commitment specified; record layout is P1-10b's                                              |
+| [[membership]]              | The membership statement (Semaphore v4), the nullifier scope, the field mapping, tree depth and membership checks  | Specified; verification keys and Groth16 verification are P1-17b's                                     |
 | [[content-addressing]]      | How board data becomes IPFS blocks, CIDs and CAR files                                                             | Provisional until P4-3's vectors                                                                       |
 | [[verifier]]                | What a third-party verifier must check, stage by stage                                                             | Checklist; each check is specified by its owning item                                                  |
 | [[vectors/README\|vectors]] | The test-vector file format (`docs/spec/vectors/*.json`)                                                           | Specified                                                                                              |
@@ -31,7 +32,7 @@ Sections still to be written, by the STATUS item that owns them:
 - Benaloh challenge/spoil, receipts and re-vote resolution: P1-13.
 - Key ceremony and its transcript: P1-14.
 - Decryption or opening shares and the tally transcript: P1-15.
-- Membership and nullifier circuit: P1-17.
+- Membership verification keys, proof encoding and Groth16 verification: P1-17b.
 - Contracts, events and the close rule: P1-18 ([[contracts]] has the event accumulator so far).
 - Verifier procedure and report format: P1-19 (extends [[verifier]]).
 
@@ -44,6 +45,7 @@ The spec follows the ADRs below. Under rule A (`AGENTS.md`) the agent's choices 
 - [[0004-l2-choice]] (accepted by the agent for development and testnet, owner may veto; mainnet waits for the owner): the L2, its close rule and finality. Shapes the timing and L2-evidence checks in [[verifier]].
 - [[0005-permanent-archive]] (accepted by the agent, owner may veto; the first real upload waits for the owner): the display-text split ([[display-text]]), the result-critical field rule ([[notation]]) and the CID parameters ([[content-addressing]]).
 - [[0007-group-and-hash]] (accepted by the owner on 2026-10-10: option A): ristretto255, SHA-256 as `H`, RFC 9380 `hash_to_ristretto255` and RFC 9497 `HashToScalar`. [[group]] follows it.
+- [[0009-membership-proof]] (accepted by the agent, owner may veto): Semaphore v4's circuit and Groth16 proofs for membership, with a per-poll, per-tier-group scope. [[membership]] follows it.
 - [[0006-trustees]] (open; owner-only: the owner decides): the panel bound into each election definition.
 - [[0002-everlasting-privacy]] (accepted by the owner on 2026-10-10: option B, perfectly hiding commitments on the board; three owner questions in its Decision section still block ballot encryption (P1-12) and, through trustee duties and the election-key wording, the ceremony and the tally with its destruction step (P1-15)): the ballot, ceremony and tally sections follow it once written; [[verifier]] marks the checks it changes.
 

@@ -79,4 +79,4 @@ A record that affects a result (anything on the board, in an election definition
 
 ## Circuit-facing values
 
-Noir circuits take fixed-size arrays of field elements. Each record a circuit consumes states, next to its table, how its fields are packed into field elements, so the in-circuit and off-circuit forms are defined together and can't drift ([[0001-canonical-encoding]]). The packing rules come with P1-17. Group elements and scalars never enter a circuit ([[0007-group-and-hash]]: the membership circuit binds a ballot through a hash in its signal).
+Noir circuits take fixed-size arrays of field elements. Each record a circuit consumes states, next to its table, how its fields are packed into field elements, so the in-circuit and off-circuit forms are defined together and can't drift ([[0001-canonical-encoding]]). The packing rules come with the first custom Noir circuit (P1-17c); membership uses Semaphore's circuit, which takes no Abolish record ([[membership]]). Group elements and scalars never enter a circuit ([[0007-group-and-hash]]: the membership circuit binds a ballot through a hash in its signal).

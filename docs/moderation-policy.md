@@ -54,7 +54,7 @@ Every restoration cites one of: `appeal-upheld` (the creator's appeal succeeded)
 
 ## Reports
 
-Anyone can report a poll, citing one of the removal grounds above (`POST /moderation/reports`, no account). A report stores the poll and the code, never the reporter's account, address, contact details or any text. Reports are counted, one row per poll and ground, so a flood of reports grows two counters and never the table (T-52), and only the hour of the newest report under each ground is kept, so a report can't be timed closely enough to match it to a request (T-11). Report volume is not a ground: a moderator judges the poll against this policy, not the number of reports. The counts only order the moderators' queue, which the API never serves.
+Anyone can report a poll, citing one of the removal grounds above (`POST /moderation/reports`, no account). A report stores the poll and the code, never the reporter's account, address, contact details or any text. Reports are counted, one row per poll and ground, so a flood of reports grows two counters and never the table (T-52). The row keeps no time for a report, only the hour the oldest unreviewed report under its ground arrived, which orders the queue (reporting a poll again never moves it back). That stops the stored row from timing a report. It doesn't stop everything: an insider who reads the counters repeatedly, or who holds the database's write-ahead log or backups, can time a report, and the proxy's or platform's logs can hold the reporter's address with that time (T-11). Report volume is not a ground: a moderator judges the poll against this policy, not the number of reports. The counts only order the moderators' queue, which the API never serves.
 
 A moderator reviews a poll's reports under a ground by marking the ones they saw as reviewed (`reviewReports`, given the count the queue showed them), so a report that arrives meanwhile stays pending. Reviewing is not a decision: any action is a separate entry in the log, and reviewing without one leaves the poll as it is. Reports and reviews never enter the public log.
 
@@ -84,6 +84,7 @@ Until then, content that appears illegal is hidden with `illegal` and escalated 
 - Hidden display text survives in copies others pinned, and in the hands of anyone who downloaded it (T-17 residual).
 - Hiding an open poll stops voting through our client; voters then need the text from elsewhere, or the direct-submit path.
 - Appeals, the moderators' own tooling, and the front-end behaviour above are later parts (P2-9, P2-8). Until the tooling exists, a moderator acts through `packages/core` directly.
-- Anyone can report any poll as often as the proxy lets them, so the pending counts can be inflated; they only order the queue, and volume is never a ground. A poll's reports can't be withdrawn, and the app role can't delete them.
+- Anyone can report any poll as often as the proxy lets them, so the pending counts can be inflated; volume is never a ground, and the queue is ordered by how long reports have waited, not by count. A poll's reports can't be withdrawn, and the app role can't delete them.
+- A report can be timed by an insider (counters read repeatedly, the write-ahead log, backups) and matched to an address in proxy or platform logs (T-11).
 
 See [[THREAT_MODEL]], [[display-text]], [[0005-permanent-archive]].

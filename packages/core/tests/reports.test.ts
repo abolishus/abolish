@@ -99,7 +99,7 @@ describe("schema", () => {
       "reason",
       "total",
       "pending",
-      "last_reported_at",
+      "pending_since",
     ]);
   });
 
@@ -122,15 +122,23 @@ describe("schema", () => {
   test("the table refuses rows outside the policy's grounds and counts", async () => {
     const id = new Uint8Array(randomBytes(32));
     const at = new Date().toISOString();
-    const insert = (election: Uint8Array, reason: string, total: number, pending: number) =>
-      app`INSERT INTO moderation_reports (election_id, reason, total, pending, last_reported_at)
-        VALUES (${election}, ${reason}, ${total}, ${pending}, ${at})`;
+    const insert = (
+      election: Uint8Array,
+      reason: string,
+      total: number,
+      pending: number,
+      since: string | null = at,
+    ) =>
+      app`INSERT INTO moderation_reports (election_id, reason, total, pending, pending_since)
+        VALUES (${election}, ${reason}, ${total}, ${pending}, ${since})`;
     expect(await failsWith(insert(id, "unpopular", 1, 1))).toBe("23514");
     expect(await failsWith(insert(id, "error", 1, 1))).toBe("23514");
     expect(await failsWith(insert(id, "spam", 0, 0))).toBe("23514");
     expect(await failsWith(insert(id, "spam", 1, 2))).toBe("23514");
     expect(await failsWith(insert(id, "spam", 1, -1))).toBe("23514");
     expect(await failsWith(insert(id.subarray(1), "spam", 1, 1))).toBe("23514");
+    expect(await failsWith(insert(id, "spam", 1, 1, null))).toBe("23514");
+    expect(await failsWith(insert(id, "spam", 1, 0))).toBe("23514");
   });
 });
 
@@ -161,15 +169,27 @@ describe("report", () => {
     expect((await queueFor(id)).map((r) => [r.pending, r.total])).toEqual([[12n, 12n]]);
   });
 
-  test("keeps only the hour of the newest report, from the database clock (T-11)", async () => {
+  test("keeps only the hour the oldest pending report arrived, from the database clock (T-11)", async () => {
     const id = await election();
     await report(app, id, "spam");
     const [r] = await queueFor(id);
     const [clock] = await app`SELECT now()::text AS now`;
     const now = new Date(clock!["now"] as string);
-    expect(r!.lastReportedAt.getTime() % 3_600_000).toBe(0);
-    expect(now.getTime() - r!.lastReportedAt.getTime()).toBeLessThan(3_600_000 + 60_000);
-    expect(now.getTime()).toBeGreaterThanOrEqual(r!.lastReportedAt.getTime());
+    expect(r!.pendingSince.getTime() % 3_600_000).toBe(0);
+    expect(now.getTime() - r!.pendingSince.getTime()).toBeLessThan(3_600_000 + 60_000);
+    expect(now.getTime()).toBeGreaterThanOrEqual(r!.pendingSince.getTime());
+  });
+
+  test("reporting a poll again never moves it back in the queue (T-68)", async () => {
+    const id = await election();
+    await report(app, id, "spam");
+    await db.admin`UPDATE moderation_reports SET pending_since = pending_since - interval '3 days'
+      WHERE election_id = ${id}`;
+    const [before] = await queueFor(id);
+    await report(app, id, "spam");
+    const [after] = await queueFor(id);
+    expect(after!.pendingSince).toEqual(before!.pendingSince);
+    expect(after!.pending).toBe(2n);
   });
 
   test("refuses an election with no stored definition, with nothing written", async () => {
@@ -210,9 +230,13 @@ describe("the queue and reviews", () => {
     // A report arrives after the moderator read the queue.
     await report(app, id, "impersonation");
     expect(await reviewReports(app, id, "impersonation", seen!.total)).toBe(1n);
-    expect((await queueFor(id)).map((r) => [r.pending, r.total])).toEqual([[1n, 3n]]);
+    const [left] = await queueFor(id);
+    expect([left!.pending, left!.total]).toEqual([1n, 3n]);
+    expect(left!.pendingSince).toEqual(seen!.pendingSince);
     expect(await reviewReports(app, id, "impersonation", 3n)).toBe(0n);
     expect(await queueFor(id)).toEqual([]);
+    const [row] = await app`SELECT pending_since FROM moderation_reports WHERE election_id = ${id}`;
+    expect(row!["pending_since"]).toBeNull();
     // A stale review never brings reports back.
     expect(await reviewReports(app, id, "impersonation", 1n)).toBe(0n);
     expect(await queueFor(id)).toEqual([]);
@@ -234,8 +258,8 @@ describe("the queue and reviews", () => {
     const [a, b] = [await election(), await election()];
     await report(app, a, "spam");
     await report(app, b, "spam");
-    // Back-date a's report: the queue orders by the hour of the newest report.
-    await db.admin`UPDATE moderation_reports SET last_reported_at = last_reported_at - interval '2 hours'
+    // Back-date a's report: the queue orders by how long reports have waited.
+    await db.admin`UPDATE moderation_reports SET pending_since = pending_since - interval '2 hours'
       WHERE election_id = ${a}`;
     const queue = await readReportQueue(app, MAX_REPORT_QUEUE);
     const at = (id: Uint8Array) => queue.findIndex((r) => sameId(r.electionId, id));
@@ -275,6 +299,31 @@ describe("the queue and reviews", () => {
       { numRuns: Math.min(numRuns, 50) },
     );
   });
+});
+
+test("pages through the whole queue, each pending pair once, in order", async () => {
+  const ids = await Promise.all([1, 2, 3].map(() => election()));
+  for (const id of ids)
+    for (const reason of ["spam", "threat"] as const) await report(app, id, reason);
+  const all = await readReportQueue(app, MAX_REPORT_QUEUE);
+  const paged = [];
+  let page = await readReportQueue(app, 2);
+  while (page.length > 0) {
+    paged.push(...page);
+    page = await readReportQueue(app, 2, page.at(-1));
+  }
+  expect(paged).toEqual(all);
+  for (const id of ids) expect(paged.filter((r) => sameId(r.electionId, id))).toHaveLength(2);
+  const cursor = all[0]!;
+  await expect(
+    readReportQueue(app, 1, { ...cursor, pendingSince: new Date(Number.NaN) }),
+  ).rejects.toThrow(TypeError);
+  await expect(readReportQueue(app, 1, { ...cursor, reason: "error" as never })).rejects.toThrow(
+    TypeError,
+  );
+  await expect(
+    readReportQueue(app, 1, { ...cursor, electionId: new Uint8Array(3) }),
+  ).rejects.toThrow(TypeError);
 });
 
 describe("never results", () => {

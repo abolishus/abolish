@@ -49,6 +49,7 @@ export {
 export {
   MAX_REPORT_QUEUE,
   type PendingReport,
+  type ReportQueueCursor,
   readReportQueue,
   report,
   reviewReports,

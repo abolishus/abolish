@@ -24,7 +24,7 @@ export const moderationReports = pgTable(
     reason: text("reason").notNull(),
     total: bigint("total", { mode: "bigint" }).notNull(),
     pending: bigint("pending", { mode: "bigint" }).notNull(),
-    lastReportedAt: timestamp("last_reported_at", { withTimezone: true }).notNull(),
+    pendingSince: timestamp("pending_since", { withTimezone: true }),
   },
   (t) => [primaryKey({ columns: [t.electionId, t.reason] })],
 );

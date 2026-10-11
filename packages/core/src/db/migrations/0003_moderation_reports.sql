@@ -7,10 +7,12 @@
 -- flood of anonymous reports grows two counters, never the table (T-52).
 --
 -- `total` counts every report under the ground; `pending` counts those no
--- moderator has reviewed yet. Report volume is not a ground for moderation:
--- the counts only order the moderators' queue. `last_reported_at` is the
--- database clock at the hour, so the table can't time a report closely
--- enough to match it to a request in any log (T-11).
+-- moderator has reviewed yet. Report volume is not a ground for moderation.
+-- `pending_since` is the hour, by the database clock, when the oldest
+-- unreviewed report arrived (null when none is pending): the queue is ordered
+-- by it, so reporting a poll again never moves it back (T-68). It changes
+-- only when a report starts a pending run, so the row doesn't record when
+-- later reports arrived (T-11; what still can, see docs/moderation-policy.md).
 --
 -- Operational data: a wipe loses the queue and changes no result. No foreign
 -- key reaches election_definitions (no-join test: no key touches a board
@@ -25,11 +27,11 @@ CREATE TABLE moderation_reports (
   ),
   total bigint NOT NULL CHECK (total >= 1),
   pending bigint NOT NULL CHECK (pending >= 0 AND pending <= total),
-  last_reported_at timestamptz NOT NULL,
+  pending_since timestamptz CHECK ((pending = 0) = (pending_since IS NULL)),
   PRIMARY KEY (election_id, reason)
 );
 
-CREATE INDEX moderation_reports_pending ON moderation_reports (last_reported_at)
+CREATE INDEX moderation_reports_queue ON moderation_reports (pending_since, election_id, reason)
   WHERE pending > 0;
 
 REVOKE ALL ON moderation_reports FROM PUBLIC;

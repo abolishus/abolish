@@ -28,9 +28,10 @@ const isRemovalReason = (reason: unknown): reason is RemovalReason =>
 /**
  * Counts one report of `electionId`'s poll under `reason`. Refused, with
  * nothing written: a reason outside `REMOVAL_REASONS` (`invalid`) and an
- * election with no stored definition (`unknown-election`). The report's time
- * is kept only as the hour of the newest report under its ground, from the
- * database clock (T-11).
+ * election with no stored definition (`unknown-election`). No time is kept
+ * for the report itself: a report that starts a pending run sets
+ * `pending_since` to the hour, by the database clock, and later ones change
+ * only the counts (T-11).
  */
 export async function report(
   client: Sql,
@@ -44,13 +45,15 @@ export async function report(
   const hour = q`date_trunc('hour', clock_timestamp(), 'UTC')`;
   await drizzle({ client })
     .insert(moderationReports)
-    .values({ electionId: id, reason, total: 1n, pending: 1n, lastReportedAt: hour })
+    .values({ electionId: id, reason, total: 1n, pending: 1n, pendingSince: hour })
     .onConflictDoUpdate({
       target: [moderationReports.electionId, moderationReports.reason],
       set: {
         total: q`${moderationReports.total} + 1`,
         pending: q`${moderationReports.pending} + 1`,
-        lastReportedAt: hour,
+        // Kept while reports are pending, so reporting a poll again never
+        // moves it back in the queue (T-68).
+        pendingSince: q`COALESCE(${moderationReports.pendingSince}, ${hour})`,
       },
     });
 }
@@ -63,27 +66,51 @@ export interface PendingReport {
   readonly pending: bigint;
   /** Every report under this ground; pass it to `reviewReports` once judged. */
   readonly total: bigint;
-  /** The hour of the newest report under this ground. */
-  readonly lastReportedAt: Date;
+  /** The hour the oldest unreviewed report under this ground arrived. */
+  readonly pendingSince: Date;
 }
+
+/** Where a page of the queue ended: its last row's position. */
+export type ReportQueueCursor = Pick<PendingReport, "pendingSince" | "electionId" | "reason">;
 
 /** The most rows one read of the report queue returns. */
 export const MAX_REPORT_QUEUE = 1000;
 
 /**
  * Up to `limit` (election, ground) pairs with unreviewed reports, the longest
- * waiting first. For the moderators' tooling only: the API never serves it, so
+ * waiting first, after `after` (the last row of the previous page) if given,
+ * so a flood of reports can't hide the rest of the queue behind one page
+ * (T-52). For the moderators' tooling only: the API never serves it, so
  * nobody else learns what was reported.
  */
-export async function readReportQueue(client: Sql, limit: number): Promise<PendingReport[]> {
+export async function readReportQueue(
+  client: Sql,
+  limit: number,
+  after?: ReportQueueCursor,
+): Promise<PendingReport[]> {
   if (!Number.isInteger(limit) || limit < 1 || limit > MAX_REPORT_QUEUE)
     throw new TypeError(`limit must be an integer from 1 to ${MAX_REPORT_QUEUE}`);
+  if (after !== undefined) {
+    checkElectionId(after.electionId);
+    if (!(after.pendingSince instanceof Date) || Number.isNaN(after.pendingSince.getTime()))
+      throw new TypeError("after.pendingSince must be a valid Date");
+    if (!isRemovalReason(after.reason))
+      throw new TypeError("after.reason must be a removal reason");
+  }
+  const t = moderationReports;
   const rows = await drizzle({ client })
     .select()
-    .from(moderationReports)
-    .where(gt(moderationReports.pending, 0n))
+    .from(t)
+    .where(
+      and(
+        gt(t.pending, 0n),
+        after === undefined
+          ? undefined
+          : q`(${t.pendingSince}, ${t.electionId}, ${t.reason}) > (${after.pendingSince.toISOString()}::timestamptz, ${new Uint8Array(after.electionId)}, ${after.reason})`,
+      ),
+    )
     .orderBy(
-      asc(moderationReports.lastReportedAt),
+      asc(moderationReports.pendingSince),
       asc(moderationReports.electionId),
       asc(moderationReports.reason),
     )
@@ -96,7 +123,8 @@ export async function readReportQueue(client: Sql, limit: number): Promise<Pendi
       reason: r.reason,
       pending: r.pending,
       total: r.total,
-      lastReportedAt: r.lastReportedAt,
+      // The table's check constraint sets it whenever reports are pending.
+      pendingSince: r.pendingSince!,
     };
   });
 }
@@ -123,6 +151,7 @@ export async function reviewReports(
     .update(moderationReports)
     .set({
       pending: q`LEAST(${moderationReports.pending}, ${moderationReports.total} - ${seenTotal}::bigint)`,
+      pendingSince: q`CASE WHEN LEAST(${moderationReports.pending}, ${moderationReports.total} - ${seenTotal}::bigint) = 0 THEN NULL ELSE ${moderationReports.pendingSince} END`,
     })
     .where(
       and(

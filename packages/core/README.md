@@ -63,12 +63,12 @@ It never reads or writes the board, and only reads a definition, to find the pol
 
 ### `moderation_reports` (T-68, T-52)
 
-Reports of polls to the moderators: one row per election and removal ground, `election_id`, `reason`, `total`, `pending` (not yet reviewed) and `last_reported_at` (the hour of the newest report). Nothing about the reporter, and no text (T-10, T-11, T-17). Counting bounds the table however many anonymous reports arrive (T-52). `abolish_app` holds `SELECT`, `INSERT` and `UPDATE`, never `DELETE` or `TRUNCATE`. Operational: a wipe loses the queue and changes no result.
+Reports of polls to the moderators: one row per election and removal ground, `election_id`, `reason`, `total`, `pending` (not yet reviewed) and `pending_since` (the hour the oldest unreviewed report arrived, null when none is pending; it orders the queue, and reporting again never moves a poll back). Nothing about the reporter, and no text (T-10, T-11, T-17). Counting bounds the table however many anonymous reports arrive (T-52). `abolish_app` holds `SELECT`, `INSERT` and `UPDATE`, never `DELETE` or `TRUNCATE`. Operational: a wipe loses the queue and changes no result.
 
 `src/reports.ts`:
 
 - `report(sql, electionId, reason)` counts one report; `ModerationError` refuses a reason outside `REMOVAL_REASONS` (`invalid`) and an election with no stored definition (`unknown-election`).
-- `readReportQueue(sql, limit)`: the pairs with unreviewed reports, longest waiting first. For the moderators only; the API never serves it.
+- `readReportQueue(sql, limit, after?)`: the pairs with unreviewed reports, longest waiting first, paged by the last row of the previous page. For the moderators only; the API never serves it.
 - `reviewReports(sql, electionId, reason, seenTotal)` marks reviewed the first `seenTotal` reports (the `total` the queue showed), so reports counted since stay pending. It records no decision.
 
 Reports never change a poll's state or the public log (a test checks this): report volume is never a ground.

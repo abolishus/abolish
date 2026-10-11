@@ -9,7 +9,7 @@ The circuit is Semaphore v4's, unchanged:
 - Repository `semaphore-protocol/semaphore`, tag `v4.14.3`, commit `4dbc39b83a4066bf5084fd7f5d336202aad2f815`.
 - Circuit: `packages/circuits/src/semaphore.circom`, sha256 `d67fbae4504476569c03ce7beb23bacf4c4ebb9cbd8f49888f57ed14b288e486`.
 - Field mapping of message and scope: `packages/proof/src/hash.ts` at the same commit.
-- Proving and verification keys: Semaphore's multi-party trusted setup, one key pair per maximum tree depth `D` from 1 to 32. How they are pinned, hashed into the election definition and checked is P1-17b's.
+- Proving and verification keys: Semaphore's multi-party trusted setup, which produced one key pair per maximum tree depth from 1 to 32. Abolish uses only the depth-32 pair (Tree depth). How it is pinned, hashed into the election definition and checked is P1-17b's.
 
 A later Semaphore release is adopted only by an ADR, and only if the statement below is unchanged; otherwise it is a new ballot version ([[versioning]]).
 
@@ -34,16 +34,17 @@ m̂ is constrained (m̂ · m̂), so the proof binds it
 
 ## Scope
 
-Each tier group `g` of the election definition, with root `root_g`, has its own scope:
+Each tier group `g` of the election definition, with tier `t_g` and root `root_g`, has its own scope:
 
 ```
-S_g = H(DS("abolish/v1/nullifier-scope", definition_hash ‖ encode(root_g)))
+S_g = H(DS("abolish/v1/nullifier-scope", definition_hash ‖ u8(t_g) ‖ encode(root_g)))
 ŝ_g = F(S_g)
 ```
 
-- `definition_hash` is the election definition's hash (`bytes[32]`, [[domain-separation]], P1-10b), and `encode(root_g)` is the 32-byte `field<bn254>` encoding of the tier's root. The input after the tag is exactly 64 bytes.
+- `definition_hash` is the election definition's hash (`bytes[32]`, [[domain-separation]], P1-10b). `t_g` is the group's tier (0, 1 or 2) as a `u8`: the tier the verifier attributes to the group from the group registry, which the definition's label must equal ([[verifier]] 2.4). `encode(root_g)` is the 32-byte `field<bn254>` encoding of the tier's root. The input after the tag is exactly 65 bytes.
+- **The tier, not only the root, is bound.** Two tiers can have the same root: identical rosters added to two groups, or one shared sole member whose leaf is the root. Nothing requires roots to differ ([[verifier]] 2.4 counts each addition toward the tier its authorisation binds, whatever the membership). Binding `t_g` gives equal-root tiers different scopes, so their nullifiers stay unrelated and a proof made for one tier never verifies for the other.
 - **Per poll.** The definition hash binds the poll, the chain IDs, the contract addresses and the election identifier, so a redeploy, a second chain or another poll never reuses a scope, and a nullifier reveals nothing across polls (T-12, T-30).
-- **Per tier group.** A person whose secret is in two tier groups has two unrelated nullifiers in one poll. Their ballots in different tiers can't be linked through the nullifier (T-13), and each tier counts at most one of their ballots (G-2).
+- **Per tier group.** A person whose secret is in two tier groups has two unrelated nullifiers in one poll, even when the two groups have the same root. Their ballots in different tiers can't be linked through the nullifier (T-13), and each tier counts at most one of their ballots (G-2).
 - **Never from the ballot.** A verifier computes `ŝ_g` itself from the definition, and never takes a scope from a ballot, a relay or a server ([[verifier]] 5.2).
 
 ## Message
@@ -64,26 +65,31 @@ F(x) = int(keccak256(x)) >> 8          (x: bytes[32])
 
 ## Tree depth
 
-A tier group's proofs use the verification key for depth `D_g = max(1, ⌈log₂ n_g⌉)`, where `n_g` is the **leaf count** of the tier's LeanIMT at `root_g`: every insertion up to the root's block, removed members included (a removal sets a leaf to 0 but never shrinks the tree; Semaphore's `getMerkleTreeSize`). A verifier recomputes it from the group's additions on the board ([[verifier]] 2.4). It is not the anonymity-set size: once members are removed, the active member count reported with the results ([[verifier]] 8.1) is smaller, and using it here would give some members' paths no room, disenfranchising them by leaf position. Semaphore's keys stop at depth 32, so a tier group with more than 2³² leaves can't vote, and a verifier fails a definition that has one. That is the depth of a LeanIMT with `n_g` leaves, so every member's path fits (`len ≤ D_g`). A proof under any other depth is rejected, so all ballots of one tier use one key and the depth reveals nothing about the voter. The prover MUST pass `D_g` explicitly: Semaphore's library otherwise infers the depth from the path length, which LeanIMT shortens for some leaf positions in a tree that isn't full, so the inferred depth would narrow down the voter's position (T-13) and the proof would be rejected here.
+Every membership proof, in every tier and every election, uses the verification key for one protocol-wide depth, `D = 32`, Semaphore's maximum. The prover MUST pass `D = 32` explicitly, never a depth it computes or is told:
+
+- **Nothing to steer.** A per-tier depth would have to come from the tier's leaf count, which the root doesn't determine and a client can't cheaply recompute, so in practice a server would supply it. An operator could then serve one voter a wrong count: the voter's proof verifies locally under the wrong key, every verifier rejects it, and it is the only ballot under that key, so it is both suppressed and identifiable (T-10, T-13). A fixed depth removes the input.
+- **Nothing to reveal.** Semaphore's library otherwise infers the depth from the path length, which LeanIMT shortens for some leaf positions in a tree that isn't full; one fixed key means the key used says nothing about the voter or their leaf.
+- **Every path fits.** A LeanIMT with at most 2³² leaves has depth at most 32, so `len ≤ 32` for every member. A tier group with more than 2³² leaves (every insertion, removed members included: a removal sets a leaf to 0 but never shrinks the tree) can't be proven, and a verifier fails a definition that has one.
+- **Cost.** The depth-32 proving key is Semaphore's largest, and a proof hashes 32 levels whatever the group size. P2-8 and P5-4 measure proving time on target devices; if it is too slow, a later ballot version can fix a smaller protocol-wide depth or carry a depth in the election definition that the verifier checks, never one a server supplies.
 
 ## Checks
 
-A verifier fails the election definition if any tier's `root_g` is 0 or its leaf count `n_g` is 0 or above 2³² ([[verifier]] 2.4). Then, for each ballot that claims tier group `g` ([[verifier]] 5.1–5.3), it:
+A verifier fails the election definition if any tier's `root_g` is 0 or its group has more than 2³² leaves ([[verifier]] 2.4). Then, for each ballot that claims tier group `g` ([[verifier]] 5.1–5.3), it:
 
 1. Recomputes `ŝ_g` from the definition (Scope).
 2. Takes `ρ = root_g` from the definition, never from the ballot; `ρ` is never 0 (Statement).
 3. Decodes the ballot's nullifier `ν` as a `field<bn254>`, rejecting a non-canonical value (T-31).
 4. Recomputes `m̂ = F(M)` from the ballot (P1-12, P1-13).
-5. Verifies the Groth16 proof under the depth-`D_g` verification key it pins, with public signals `[ρ, ν, m̂, ŝ_g]`. Any failure rejects the ballot.
+5. Verifies the Groth16 proof under the pinned depth-32 verification key, with public signals `[ρ, ν, m̂, ŝ_g]`. Any failure rejects the ballot.
 
-Because the root and the scope are both fixed per tier group, a proof made for one tier never verifies as another: no relay or operator can move a ballot between tally cells ([[verifier]] 2.8). The election definition's rule that no two tiers share a root (P1-10b) makes the tier unambiguous from the root alone; the scope binds it a second time.
+Because the scope binds the tier, a proof made for one tier never verifies as another, even if the two tiers have the same root: no relay or operator can move a ballot between tally cells ([[verifier]] 2.8).
 
 ## Security notes
 
 - **Zero knowledge.** Groth16 proofs are perfectly zero-knowledge for a well-formed reference string (Groth, EUROCRYPT 2016), so a proof reveals nothing about `s`, the leaf or the path, even to an unbounded adversary ([[0002-everlasting-privacy]]). Against a subverted setup this holds only if the proving key's reference string is well formed (Fuchsbauer, PKC 2018), so it MUST be checked: once per pinned key, publicly, by P1-17b, which binds the checked key into `abolish/v1/membership-vk`, and the prover MUST use exactly that key. It also holds only if the prover's Groth16 randomisers come from a CSPRNG (P2-8, P5-4 check their prover's randomness source).
 - **Nullifier privacy is computational.** `ν = Poseidon2(ŝ, s)`: linking nullifiers across scopes, or a nullifier to an identity commitment, needs `s` or a Poseidon preimage (T-12, T-15).
 - **Soundness** rests on Semaphore's ceremony (T-07), on the circuit (T-05) and on BN254, whose discrete-log security is about 100–110 bits after the tower number field sieve ([[0007-group-and-hash]]): a forged proof would admit a non-member, and a second nullifier for one identity would need a Poseidon collision.
-- **Chosen-scope linkage.** `S_g` is public, so any other Semaphore application that holds the voter's identity could ask for a proof under scope `int(S_g)` and so learn the voter's nullifier for that poll and tier. The domain tag stops accidental collisions, not this. The prover MUST therefore use the Abolish identity secret for nothing but Abolish membership proofs, never export it to another Semaphore application, and prove only under a scope it recomputed from a definition it verified (P2-6, P2-8, P5-4; T-12).
+- **Chosen-scope linkage.** `S_g` is public, so any other Semaphore application that holds the voter's identity could ask for a proof under scope `int(S_g)` and so learn the voter's nullifier for that poll and tier. The domain tag stops accidental collisions, not this. The prover MUST therefore use the Abolish identity secret for nothing but Abolish membership proofs, never export it to another Semaphore application, and prove only under a scope it recomputed from a definition it verified, with the tier and root taken from that definition (P2-6, P2-8, P5-4; T-12).
 - **Malleability.** Anyone can re-randomise a Groth16 proof without the witness. Replay detection uses the nullifier and the message, never the proof bytes ([[verifier]] 5.7, 6.1 R1; T-38).
 - **Small groups.** A tier group of one or two members gives its voters no meaningful anonymity. The group size is reported with the results (T-13, T-16).
 

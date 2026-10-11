@@ -93,18 +93,10 @@ def field_map(x):
     return int.from_bytes(keccak256(x), "big") >> 8
 
 
-def scope(definition_hash, root):
-    assert len(definition_hash) == 32 and 0 < root < R
-    m = definition_hash + root.to_bytes(32, "big")
+def scope(definition_hash, tier, root):
+    assert len(definition_hash) == 32 and tier in (0, 1, 2) and 0 < root < R
+    m = definition_hash + bytes([tier]) + root.to_bytes(32, "big")
     return hashlib.sha256(bytes([len(TAG)]) + TAG + m).digest()
-
-
-def depth(n):
-    assert 1 <= n <= 1 << 32
-    d = 0
-    while (1 << d) < n:
-        d += 1
-    return max(1, d)
 
 
 def det(label, i=0):
@@ -133,46 +125,45 @@ def main():
         )
 
     scopes = []
+    shared = int.from_bytes(det("root", 1), "big") % R
     cases = [
-        ("min-root", det("definition", 0), 1),
-        ("max-root", det("definition", 0), R - 1),
-        ("same-definition-other-root", det("definition", 0), int.from_bytes(det("root", 1), "big") % R),
-        ("other-definition-same-root", det("definition", 1), int.from_bytes(det("root", 1), "big") % R),
-        ("zero-definition", bytes(32), 2),
+        ("min-root", det("definition", 0), 0, 1),
+        ("max-root", det("definition", 0), 0, R - 1),
+        ("tier-1", det("definition", 0), 1, shared),
+        ("tier-2", det("definition", 0), 2, shared),
+        ("other-definition", det("definition", 1), 2, shared),
+        ("zero-definition", bytes(32), 0, 2),
     ]
-    for name, d, root in cases:
-        s = scope(d, root)
+    for name, d, tier, root in cases:
+        s = scope(d, tier, root)
         scopes.append(
             {
                 "id": f"scope-{name}",
                 "definitionHash": d.hex(),
+                "tier": tier,
                 "root": root.to_bytes(32, "big").hex(),
                 "scope": s.hex(),
                 "scopeField": str(field_map(s)),
             }
         )
-    scopes.append(
-        {
-            "id": "scope-root-equal-to-r",
-            "description": "a root that isn't a canonical field<bn254> is rejected",
-            "definitionHash": det("definition", 0).hex(),
-            "root": R.to_bytes(32, "big").hex(),
-            "error": "non-canonical",
-        }
-    )
-
-    scopes.append(
-        {
-            "id": "scope-zero-root",
-            "description": "a tier root of 0 is provable by anyone (proof length above the depth), so it has no scope",
-            "definitionHash": det("definition", 0).hex(),
-            "root": bytes(32).hex(),
-            "error": "zero-root",
-        }
-    )
-
-    depths = [{"leafCount": str(n), "depth": depth(n)} for n in (1, 2, 3, 4, 5, 8, 9, 1023, 1024, 1025, 1 << 32)]
-    depths += [{"leafCount": str(n), "error": "out-of-range"} for n in (0, (1 << 32) + 1)]
+    # Two tiers with the same root (identical rosters) still get different scopes.
+    assert scope(det("definition", 0), 1, shared) != scope(det("definition", 0), 2, shared)
+    rejected = [
+        ("root-equal-to-r", "a root that isn't a canonical field<bn254> is rejected", 0, R, "non-canonical"),
+        ("zero-root", "a tier root of 0 is provable by anyone (proof length above the depth), so it has no scope", 0, 0, "zero-root"),
+        ("unknown-tier", "only tiers 0, 1 and 2 exist", 3, 1, "unknown-tier"),
+    ]
+    for name, description, tier, root, error in rejected:
+        scopes.append(
+            {
+                "id": f"scope-{name}",
+                "description": description,
+                "definitionHash": det("definition", 0).hex(),
+                "tier": tier,
+                "root": root.to_bytes(32, "big").hex(),
+                "error": error,
+            }
+        )
 
     doc = {
         "format": "abolish-membership-vectors/1",
@@ -184,8 +175,8 @@ def main():
             "padding) and the published Keccak-256 of the empty string and of 32 zero bytes"
         ),
         "fieldMap": field,
+        "depth": 32,
         "scopes": scopes,
-        "depths": depths,
     }
     (out / "membership.json").write_text(json.dumps(doc, indent=2) + "\n")
 

@@ -4,7 +4,7 @@ import { describe, expect, test } from "vite-plus/test";
 import {
   BN254_R,
   EncodeError,
-  membershipDepth,
+  MEMBERSHIP_DEPTH,
   membershipScope,
   nullifierScope,
   semaphoreField,
@@ -17,6 +17,7 @@ import { SPEC_VECTORS } from "./spec-vectors.ts";
 
 interface MembershipVectors {
   readonly format: string;
+  readonly depth: number;
   readonly fieldMap: readonly {
     readonly id: string;
     readonly input: string;
@@ -25,14 +26,10 @@ interface MembershipVectors {
   readonly scopes: readonly {
     readonly id: string;
     readonly definitionHash: string;
+    readonly tier: number;
     readonly root: string;
     readonly scope?: string;
     readonly scopeField?: string;
-    readonly error?: string;
-  }[];
-  readonly depths: readonly {
-    readonly leafCount: string;
-    readonly depth?: number;
     readonly error?: string;
   }[];
 }
@@ -46,10 +43,20 @@ const toHex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2,
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
 const bytes32 = fc.uint8Array({ minLength: 32, maxLength: 32 });
 const root = fc.bigInt({ min: 1n, max: BN254_R - 1n });
+const tier = fc.constantFrom(0, 1, 2);
+const errors: Readonly<Record<string, new (...args: never[]) => Error>> = {
+  "non-canonical": EncodeError,
+  "zero-root": RangeError,
+  "unknown-tier": RangeError,
+};
 
 describe("membership vectors (docs/spec/vectors/membership.json)", () => {
   test("uses the format this reader knows", () => {
     expect(vectors.format).toBe("abolish-membership-vectors/1");
+  });
+
+  test("every proof uses the one protocol-wide depth", () => {
+    expect(MEMBERSHIP_DEPTH).toBe(vectors.depth);
   });
 
   test.each(vectors.fieldMap)("F matches Semaphore's hash: $id", (v) => {
@@ -58,19 +65,15 @@ describe("membership vectors (docs/spec/vectors/membership.json)", () => {
 
   test.each(vectors.scopes)("nullifier scope: $id", (v) => {
     const r = BigInt(`0x${v.root}`);
+    const d = hex(v.definitionHash);
     if (v.error !== undefined) {
-      const expected = v.error === "zero-root" ? RangeError : EncodeError;
-      expect(() => nullifierScope(hex(v.definitionHash), r)).toThrow(expected);
+      const expected = errors[v.error];
+      if (expected === undefined) throw new Error(`unknown error code ${v.error}`);
+      expect(() => nullifierScope(d, v.tier, r)).toThrow(expected);
       return;
     }
-    expect(toHex(nullifierScope(hex(v.definitionHash), r))).toBe(v.scope);
-    expect(membershipScope(hex(v.definitionHash), r)).toBe(BigInt(v.scopeField ?? ""));
-  });
-
-  test.each(vectors.depths)("tree depth for $leafCount leaves", (v) => {
-    const n = BigInt(v.leafCount);
-    if (v.error !== undefined) expect(() => membershipDepth(n)).toThrow(RangeError);
-    else expect(membershipDepth(n)).toBe(v.depth);
+    expect(toHex(nullifierScope(d, v.tier, r))).toBe(v.scope);
+    expect(membershipScope(d, v.tier, r)).toBe(BigInt(v.scopeField ?? ""));
   });
 });
 
@@ -85,52 +88,45 @@ describe("membership properties", () => {
     );
   });
 
-  test("each tier group of a poll gets its own scope (T-13), and each poll its own (T-12)", () => {
+  test("each poll (T-12), tier (T-13) and tier root gets its own scope", () => {
     fc.assert(
-      fc.property(bytes32, bytes32, root, root, (d1, d2, r1, r2) => {
-        fc.pre(toHex(d1) !== toHex(d2) && r1 !== r2);
-        const s = toHex(nullifierScope(d1, r1));
-        expect(toHex(nullifierScope(d1, r2))).not.toBe(s);
-        expect(toHex(nullifierScope(d2, r1))).not.toBe(s);
+      fc.property(bytes32, bytes32, tier, tier, root, root, (d1, d2, t1, t2, r1, r2) => {
+        fc.pre(toHex(d1) !== toHex(d2) && t1 !== t2 && r1 !== r2);
+        const s = toHex(nullifierScope(d1, t1, r1));
+        expect(toHex(nullifierScope(d2, t1, r1))).not.toBe(s);
+        // Equal roots in two tiers (identical rosters) still give two scopes.
+        expect(toHex(nullifierScope(d1, t2, r1))).not.toBe(s);
+        expect(toHex(nullifierScope(d1, t1, r2))).not.toBe(s);
       }),
       { numRuns },
     );
   });
 
-  test("rejects inputs that aren't exactly 32 bytes, and roots outside the field", () => {
+  test("rejects bad lengths, unknown tiers, roots outside the field and root 0", () => {
     fc.assert(
       fc.property(fc.uint8Array({ maxLength: 64 }), (x) => {
         fc.pre(x.length !== 32);
         expect(() => semaphoreField(x)).toThrow(TypeError);
-        expect(() => nullifierScope(x, 1n)).toThrow(TypeError);
+        expect(() => nullifierScope(x, 0, 1n)).toThrow(TypeError);
       }),
       { numRuns },
     );
+    const d = new Uint8Array(32);
     for (const bad of [-1n, BN254_R, 1n << 256n])
-      expect(() => nullifierScope(new Uint8Array(32), bad)).toThrow(EncodeError);
+      expect(() => nullifierScope(d, 0, bad)).toThrow(EncodeError);
+    for (const bad of [-1, 3, 255, 1.5, Number.NaN])
+      expect(() => nullifierScope(d, bad, 1n)).toThrow(RangeError);
     // Root 0 is provable by anyone with any secret (docs/spec/membership.md, Statement).
-    expect(() => nullifierScope(new Uint8Array(32), 0n)).toThrow(RangeError);
-    expect(() => membershipScope(new Uint8Array(32), 0n)).toThrow(RangeError);
-  });
-
-  test("the depth fits every member's path and is the smallest that does", () => {
-    fc.assert(
-      fc.property(fc.bigInt({ min: 1n, max: 1n << 32n }), (n) => {
-        const d = membershipDepth(n);
-        expect(d >= 1 && d <= 32).toBe(true);
-        expect(n <= 1n << BigInt(d)).toBe(true);
-        if (d > 1) expect(n > 1n << BigInt(d - 1)).toBe(true);
-      }),
-      { numRuns },
-    );
+    expect(() => nullifierScope(d, 0, 0n)).toThrow(RangeError);
+    expect(() => membershipScope(d, 0, 0n)).toThrow(RangeError);
   });
 
   test("does not mutate or alias its inputs", () => {
     const d = new Uint8Array(32).fill(7);
     const before = toHex(d);
-    const s = nullifierScope(d, 5n);
+    const s = nullifierScope(d, 1, 5n);
     expect(toHex(d)).toBe(before);
     s.fill(0);
-    expect(toHex(nullifierScope(d, 5n))).not.toBe(toHex(s));
+    expect(toHex(nullifierScope(d, 1, 5n))).not.toBe(toHex(s));
   });
 });

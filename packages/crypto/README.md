@@ -35,9 +35,9 @@ The board of `docs/spec/board.md` (T-23, T-24, T-42):
 
 What Abolish derives around Semaphore v4's membership circuit (`docs/spec/membership.md`, ADR 0009; T-12, T-13):
 
-- `nullifierScope(definitionHash, root)`: `S_g = H(DS("abolish/v1/nullifier-scope", definition_hash ‖ root))`, one scope per poll and tier group. `membershipScope` maps it into the field as the circuit's scope input.
+- `nullifierScope(definitionHash, tier, root)`: `S_g = H(DS("abolish/v1/nullifier-scope", definition_hash ‖ u8(tier) ‖ root))`, one scope per poll and tier group, even for tiers with equal roots. `membershipScope` maps it into the field as the circuit's scope input.
 - `semaphoreField(x)`: Semaphore's `hash`, `keccak256(x) >> 8`, for 32-byte inputs.
-- `membershipDepth(groupSize)`: the one tree depth (and so verification key) every ballot of a tier group uses.
+- `MEMBERSHIP_DEPTH`: 32, the one tree depth (and so verification key) every membership proof uses, so no server can steer it.
 
 Groth16 verification of the proofs themselves is P1-17b's.
 

@@ -4,7 +4,7 @@
 // verification are Semaphore's (P1-17b).
 
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import { encode, fieldBn254 } from "./codec.ts";
+import { encode, fieldBn254, u8 } from "./codec.ts";
 import { ds } from "./domain-separation.ts";
 import { H } from "./group.ts";
 
@@ -26,38 +26,36 @@ export function semaphoreField(x: Uint8Array): bigint {
 }
 
 /**
- * `S_g = H(DS("abolish/v1/nullifier-scope", definition_hash ‖ encode(root_g)))`.
+ * `S_g = H(DS("abolish/v1/nullifier-scope", definition_hash ‖ u8(tier) ‖ encode(root_g)))`.
  * Binding the definition hash makes the scope unique to one poll on one
- * deployment (T-12, T-30); binding the tier's root gives each tier group its
- * own nullifiers, so one person's ballots in two tiers can't be linked (T-13)
- * and a proof can't be moved to another tier. A root of 0 is rejected:
- * Semaphore's circuit proves membership of root 0 for any secret when the
- * proof length exceeds the depth, so such a tier would admit anyone with
- * unlimited nullifiers (T-04, T-05).
+ * deployment (T-12, T-30). Binding the tier, not only its root, gives each
+ * tier group its own nullifiers even when two tiers have the same root, so
+ * one person's ballots in two tiers can't be linked (T-13) and a proof can't
+ * be moved to another tier. A root of 0 is rejected: Semaphore's circuit
+ * proves membership of root 0 for any secret when the proof length exceeds
+ * the depth, so such a tier would admit anyone with unlimited nullifiers
+ * (T-04, T-05).
  */
-export function nullifierScope(definitionHash: Uint8Array, root: bigint): Uint8Array {
+export function nullifierScope(definitionHash: Uint8Array, tier: number, root: bigint): Uint8Array {
+  if (tier !== 0 && tier !== 1 && tier !== 2)
+    throw new RangeError("nullifierScope: tier must be 0, 1 or 2");
   if (root === 0n) throw new RangeError("nullifierScope: a tier root of 0 is provable by anyone");
-  const input = new Uint8Array(64);
+  const input = new Uint8Array(65);
   input.set(bytes32(definitionHash, "nullifierScope: definitionHash"));
-  input.set(encode(fieldBn254, root), 32);
+  input.set(encode(u8, tier), 32);
+  input.set(encode(fieldBn254, root), 33);
   return H(ds("abolish/v1/nullifier-scope", input));
 }
 
 /** `ŝ_g = F(S_g)`: the scope as the circuit's public input. */
-export function membershipScope(definitionHash: Uint8Array, root: bigint): bigint {
-  return semaphoreField(nullifierScope(definitionHash, root));
+export function membershipScope(definitionHash: Uint8Array, tier: number, root: bigint): bigint {
+  return semaphoreField(nullifierScope(definitionHash, tier, root));
 }
 
 /**
- * `D_g = max(1, ⌈log₂ n⌉)`: the one tree depth whose verification key a tier
- * group uses, so the depth reveals nothing about the voter's leaf position
- * (T-13). `n` is the LeanIMT's leaf count, removed members included, never
- * the active member count: a removal zeroes a leaf but doesn't shrink the tree.
+ * The one protocol-wide tree depth every membership proof uses (Semaphore's
+ * maximum). A per-tier depth would be an input a server could steer to
+ * suppress and identify one voter's ballot (T-10, T-13); a fixed one also
+ * says nothing about the voter's leaf position.
  */
-export function membershipDepth(leafCount: bigint): number {
-  if (typeof leafCount !== "bigint" || leafCount < 1n || leafCount > 1n << 32n)
-    throw new RangeError("membershipDepth: leaf count must be from 1 to 2^32");
-  let d = 0;
-  while (1n << BigInt(d) < leafCount) d++;
-  return Math.max(1, d);
-}
+export const MEMBERSHIP_DEPTH = 32;

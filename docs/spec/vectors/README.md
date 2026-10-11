@@ -11,7 +11,7 @@ One JSON file per spec section or record type, named after it (`primitives.json`
 | `primitives.json`        | Primitive types, record framing and strict-decoding rejections ([[notation]])                                   |
 | `group.json`             | `scalar` and `element` codecs: valid boundaries and every rejected class ([[group]])                            |
 | `board.json`             | Board entries, the board tree with every inclusion and consistency proof, checkpoints, board checks ([[board]]) |
-| `membership.json`        | The nullifier scope, the Semaphore field mapping `F` and the tree depth ([[membership]])                        |
+| `membership.json`        | The nullifier scope, the Semaphore field mapping `F` and the protocol-wide tree depth ([[membership]])          |
 | `hash.json`              | `H`, `HashToScalar` under each Fiat–Shamir tag, and `h`, with intermediate bytes ([[group]])                    |
 | `event-accumulator.json` | The event accumulator: genesis values, event sequences step by step, rejected inputs ([[contracts]])            |
 
@@ -104,8 +104,8 @@ Type descriptors:
 `membership.json` covers [[membership]] with its own format, `abolish-membership-vectors/1`, and the same top-level fields, plus:
 
 - `fieldMap`: `F`. Each has `id`, `input` (32 bytes, hex), `keccak256` (the Keccak-256 digest of `input`, hex) and `output` (`F(input)`, decimal).
-- `scopes`: the nullifier scope. Each has `id`, `definitionHash` and `root` (32 bytes each, hex; `root` is read big-endian) and either `scope` (`S_g`, hex) and `scopeField` (`F(S_g)`, decimal), or `error`: `non-canonical` for a root that isn't a canonical `field<bn254>`, `zero-root` for a root of 0 ([[membership]], Statement).
-- `depths`: the tree depth. Each has `leafCount` (the LeanIMT's leaf count, removed members included; decimal) and either `depth` (a JSON number) or `error` (`out-of-range`).
+- `depth`: the protocol-wide tree depth, as a JSON number.
+- `scopes`: the nullifier scope. Each has `id`, `definitionHash` and `root` (32 bytes each, hex; `root` is read big-endian), `tier` (a JSON number) and either `scope` (`S_g`, hex) and `scopeField` (`F(S_g)`, decimal), or `error`: `non-canonical` for a root that isn't a canonical `field<bn254>`, `zero-root` for a root of 0 ([[membership]], Statement), `unknown-tier` for a tier other than 0, 1 or 2.
 
 ## Rules
 

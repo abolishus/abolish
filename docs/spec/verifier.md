@@ -23,7 +23,7 @@ Each check names the threats it closes and the STATUS item that specifies it. A 
 
 - 1.1 A served ballot client matches a signed, reproducible release: its bytes hash to a release hash signed by the release identity (T-41, G-13; P1-19, P2-8).
 - 1.2 The bytecode at every contract address the election uses matches the release build of reviewed source (T-64; P1-18, P1-19).
-- 1.3 The verification-key hash in the election definition, and every key inside a verifier contract the election uses, equals the pinned key for the ballot version the profile names; a definition naming any other key fails (T-05, T-04, T-64; P1-17, P1-18).
+- 1.3 The membership verification-key hash in the election definition (`abolish/v1/membership-vk`, over the pinned depth-32 Semaphore key, [[membership]]), and every key inside a verifier contract the election uses, equals the pinned key for the ballot version the profile names; a definition naming any other key fails (T-05, T-04, T-64; P1-17b, P1-18).
 
 ### 2. Election definition
 
@@ -51,8 +51,8 @@ Each check names the threats it closes and the STATUS item that specifies it. A 
 
 ### 5. Ballots
 
-- 5.1 Every ballot's membership proof verifies against the electorate root for its tier in the election definition, under the pinned verification key for that tier's depth, as [[membership]] (Checks) specifies; a definition with a tier root of 0 fails, since Semaphore's circuit lets anyone prove membership of root 0 (T-04, T-05, T-13; P1-17, P1-17b).
-- 5.2 Its nullifier uses the scope the verifier derives from the election-definition hash and the tier's root (`abolish/v1/nullifier-scope`, [[membership]]), never a scope from anywhere else (T-12, T-13, T-04; P1-17).
+- 5.1 Every ballot's membership proof verifies against the electorate root for its tier in the election definition, under the pinned protocol-wide depth-32 verification key, as [[membership]] (Checks) specifies; a definition with a tier root of 0 fails, since Semaphore's circuit lets anyone prove membership of root 0 (T-04, T-05, T-13; P1-17, P1-17b).
+- 5.2 Its nullifier uses the scope the verifier derives from the election-definition hash, the tier and the tier's root (`abolish/v1/nullifier-scope`, [[membership]]), never a scope from anywhere else (T-12, T-13, T-04; P1-17).
 - 5.3 The proof's signal binds everything P1-13 and P1-17 require it to (at least the ballot hash, the election definition, the ballot's tier and whatever the re-vote rule ranks by, such as a sequence number or an L1 reference), so the proof can't be moved to another ballot or replayed (T-38, T-32; P1-12, P1-17).
 - 5.4 Every validity proof verifies, with its Fiat–Shamir challenge recomputed from the full statement table, including the ballot's nullifier ([[domain-separation]]), and constrains the ballot to the election's rules: no over-vote, no negative vote, the approval limit if any (T-28, T-30, T-32; P1-12). **(P1-3)**
 - 5.5 The ballot counts as inside the poll's window under the close rule, using only L2 data derived from finalized L1 data (T-35, T-50, [[0004-l2-choice]]; P1-18).
@@ -73,7 +73,7 @@ Each check names the threats it closes and the STATUS item that specifies it. A 
   - P1-13 also pins three things:
     - whether a last ballot that fails a later check falls back to an earlier one or counts nothing ([[0002-everlasting-privacy]] counts nothing, so complaints can't revert a re-vote; P1-13 specifies it);
     - that spoiled ballots never take part;
-    - selection is per nullifier, which is per tier group: the scope binds the tier's root, so one secret in two tier groups yields two unrelated nullifiers, and a person's ballots in different tiers are neither linked nor ranked against each other ([[membership]], Scope; T-13). **(P1-3)**
+    - selection is per (tier, nullifier): the scope binds the tier and its root, so one secret in two tier groups yields two unrelated nullifiers, even when the two groups have the same root, and a person's ballots in different tiers are neither linked nor ranked against each other ([[membership]], Scope; T-13). **(P1-3)**
 - 6.2 Every spoiled ballot's opening verifies against the ballot it opens, and no spoiled ballot is counted. Only a ballot challenged when it was posted can be spoiled: its opening travels as a spoiled-ballot opening record (`0x0003`) that never enters 6.1, so an opening can never spoil a ballot that was cast, and the client erases the encryption randomness once the voter casts. Publishing an opening is opt-in and off by default: the default check runs on the voter's own second device or a checker they choose, with the opening handed over directly (QR code or file), never through our API (T-42). An opening the voter does publish (as dispute evidence) is sent only after the poll closes, never in the session that cast, and the board orders openings canonically within each anchoring period ([[board]], Spoiled-ballot openings), so an opening's own timing and board position don't link it to the cast ballot. The opening still names the challenged ballot it opens, which is itself a board entry posted in the casting session, so P1-13 must keep that challenged entry from being tied to the cast ballot ([[board]]). A published opening carries nothing that depends on the voter's nullifier, and the tracking code shown before the cast-or-challenge choice is computed over the nullifier-independent ballot core. Residual (T-12, T-47): a published opening can still be linked to its voter through the publisher's network metadata (T-11), and it usually shows the voter's real choice. P1-13 specifies this (T-42, T-45, T-47; P1-13). **(P1-3)**
 
 ### 7. Tally

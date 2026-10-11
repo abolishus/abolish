@@ -1,6 +1,6 @@
 # Verifier
 
-What an independent verifier must check to accept an Abolish election result, using chain and IPFS data alone, with our servers and domains offline (G-9, T-36). `packages/verifier` implements this list, and a third party can implement it from this spec in any language. P1-19 extends this page with the verifier's procedure, inputs and report format.
+What an independent verifier must check to accept an Abolish election result, using chain and IPFS data alone, with our servers and domains offline (G-9, T-36). `packages/verifier` implements this list, and a third party can implement it from this spec in any language. Its inputs, procedure and report are under [Inputs, procedure and report](#inputs-procedure-and-report) (P1-19).
 
 Each check names the threats it closes and the STATUS item that specifies it. A check whose section isn't written yet is still required: until it exists, no verifier can claim the election verified. Checks marked **(P1-3)** take the shape of [[0002-everlasting-privacy]] (accepted by the owner, option B); their sections are written by P1-12 to P1-15.
 
@@ -89,3 +89,66 @@ Each check names the threats it closes and the STATUS item that specifies it. A 
 - 8.2 Small counts are flagged next to each result and each cell: a tally over few voters can reveal individual votes. Each cell also reports, and flags by the same small-count rule, the number of its counted ballots with postings that pass the public check of [[0002-everlasting-privacy]] at fewer than `k` distinct seats (a passing posting counts as readable, since its share can't be checked publicly): a future adversary reads the others, and the opening gives the sum of the rest ([[tally]], Residuals; T-15, T-16; P3-6, P1-19).
 - 8.3 An election whose profile pins a record version marked broken is reported unverifiable (entries rejected at admission don't count as use), never verified. Everything reported unverifiable, every missing archive link, every TEE-only root and every rejected entry is listed with its reason (P1-19).
 - 8.4 The report names the trustee panel that held shares for the election, and which trustee signed each cell's passing opening, or that it is unsigned (or, for ranked choice, whose decryption shares were combined), by the pinned identities, and whether our labelled seat took part ([[0006-trustees]]; T-37, T-14).
+
+## Inputs, procedure and report
+
+How `packages/verifier` runs the checks above and reports them (P1-19). This section grows with the checks: today the verifier reads local inputs only and runs 4.1 and 4.2. Every other check is reported unverifiable with `not-implemented`, so no run can report an election verified yet. The bundle and the report are tool formats, not protocol bytes: nothing hashes, signs or anchors them. They are versioned so that a reader rejects a format it doesn't know.
+
+### Bundle
+
+A run reads one bundle: a directory with two files.
+
+`board.bin` is the board copy: `encode(entry_0) ‖ encode(entry_1) ‖ …` in index order, which is the segment objects of [[board]] concatenated in segment order. The verifier splits it by the version-1 entry layout: 47 fixed bytes (record header, `election_id`, `index`, `segment`), then the payload's `u32` length `L`, then `L` bytes, so each entry is `51 + L` bytes. Splitting stops at the first entry where fewer than 51 bytes remain, or fewer than `L` bytes after them. The entries before that point are the copy the verifier holds. The count of bytes from that point on is reported as `unreadableBytes`, and those bytes are never decoded. Splitting reads only lengths, and it splits an entry whose `L` is over `MAX_BOARD_PAYLOAD` ([[parameters]]) like any other: the bytes are already held, and 4.1's strict decode fails it (`decode`, `length-over-max`), so an operator who anchors one answers for it rather than leaving every copy short. The header, fields and payload are judged by 4.1. Since the board checks ignore every entry past the anchored extent ([[board]], Board checks), unreadable bytes past it change nothing. Unreadable bytes inside it leave the copy short (`checkpoint-missing`, unless an earlier board check fails first), which is unverifiable from that copy (T-53). `MAX_BOARD_PAYLOAD` bounds what is admitted to the board, not what a verifier hashes: the board checks hash every entry inside the anchored extent before decoding any, so an anchored entry with a length near 2^32 is hashed in full (up to 4 GiB). Only the anchoring authority, or a mirror serving bytes within the anchored extent, can cause that, and it costs the verifier time, not its verdict.
+
+**Residual: anchored encodings `board.bin` can't carry.** The split is the only one a self-delimiting concatenation allows, so an entry the operator hashed and anchored with bytes past its payload (or any other encoding that doesn't split back into itself) can't be represented in any copy. Every copy then fails `copy-mismatch` or `checkpoint-missing`, and the election stays unverifiable for good, never failed, with nothing naming the operator. This is the same outcome as [[board]]'s withheld or forked tails (Residuals), and the same candidate fix closes it: bind a content address of each segment object into what is anchored (P4-1, P4-3), so an anchor that names no splittable object is provably the anchoring authority's.
+
+`bundle.json` is UTF-8 JSON, an object with exactly these members. Invalid UTF-8, a byte-order mark, and an object anywhere in the file that repeats a member name all reject the bundle, so no two readers can take one file for different inputs:
+
+| Member              | Value                                                                                                                                                                                                       |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `format`            | `"abolish-verifier-bundle/1"`                                                                                                                                                                               |
+| `electionId`        | The election's `election_id`, as hex.                                                                                                                                                                       |
+| `boardEntryVersion` | The board-entry version the election's profile pins: the number `1`, the only version.                                                                                                                      |
+| `clock`             | The anchoring clock of [[board]], Timing: an object with exactly `epoch`, `period`, `deadline` (each a `u64`) and `lastSegment` (a `u32`).                                                                  |
+| `now`               | A `u64`: the time of the latest finalized L1 block read.                                                                                                                                                    |
+| `anchors`           | An array of every anchor for the election: objects with exactly `electionId`, `segment` (`u32`), `size` (`u64`), `head`, `root` and `anchoredAt` (`u64`, the time of the finalized L1 block that holds it). |
+
+Hex is lowercase, exactly 64 digits for 32 bytes. An integer is a JSON string of decimal digits with no sign and no leading zero (except `"0"`), within its type, and `period` is at least 1. Any other member, value or shape, or a missing or unreadable file, rejects the whole bundle before any check runs, and a rejected bundle has no report: it isn't evidence about any election. A checkpoint's position in `anchors`, from 0, names it in the report.
+
+**Every bundle input is unauthenticated.** The anchors and `now` should come from L1 (P4-1), and the clock, the election identifier and the pinned version from the election definition (P1-10b) and the verifier's pinned roots. A local file proves none of that. So each run records where each input came from (`local-file` for all of them today). Any run with an unauthenticated input reports `unverifiable` as its verdict, whatever the checks find, and reports separately what they found against those inputs. So a crafted bundle can neither verify nor fail an election (T-53, T-24). Reading anchors from L1 and the clock from the definition replaces the bundle members, one by one, in later parts.
+
+### Procedure
+
+1. Read and parse the bundle, or reject it.
+2. Split `board.bin`.
+3. Run the board checks of [[board]] (Board checks) with the bundle's election identifier, pinned version, anchors, clock and `now`. They stop at the first failure, and the code decides the rows of 4.1 and 4.2:
+
+| Outcome                                                                                                   | 4.1                         | 4.2                         |
+| --------------------------------------------------------------------------------------------------------- | --------------------------- | --------------------------- |
+| All pass                                                                                                  | pass                        | pass                        |
+| `wrong-election` at a checkpoint, `checkpoint-equivocation`, `checkpoint-size`, `checkpoint-inconsistent` | unverifiable, `not-reached` | fail, with the code         |
+| `checkpoint-missing`, `copy-mismatch`                                                                     | unverifiable, with the code | unverifiable, with the code |
+| `decode`, `wrong-election` at an entry, `wrong-index`, `segment-decreased`, `opening-order`               | fail, with the code         | unverifiable, `not-reached` |
+| `checkpoint-boundary`, `unanchored`, `unsealed`                                                           | pass                        | fail, with the code         |
+
+4. Report every other check unverifiable with `not-implemented`.
+
+### Verdicts
+
+- `verdictAgainstInputs` is `failed` if any election check fails, otherwise `unverifiable` if any election or admission check is unverifiable, otherwise `verified`. Report-only checks never change it. An admission check that fails only rejects its entry. One that can't be evaluated makes 6.1 unverifiable (Principles), so it counts as unverifiable here.
+- `verdict` equals `verdictAgainstInputs` when every input is authenticated, and is `unverifiable` otherwise. Anyone can make a bundle whose `verdictAgainstInputs` is `failed`, so it is never the election's verdict: a consumer never shows it without `verdict` and `inputs` beside it (T-53).
+
+### Report
+
+JSON, an object with these members, in this order:
+
+| Member                 | Value                                                                                                                                                                                                                                                                                 |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `format`               | `"abolish-verifier-report/1"`                                                                                                                                                                                                                                                         |
+| `verdict`              | `"verified"`, `"failed"` or `"unverifiable"`                                                                                                                                                                                                                                          |
+| `verdictAgainstInputs` | The same three values                                                                                                                                                                                                                                                                 |
+| `inputs`               | Where each input came from: `electionId`, `boardEntryVersion`, `clock`, `now` and `anchors`, each `"local-file"` today                                                                                                                                                                |
+| `board`                | `entries`, the number of entries split from the copy; `unreadableBytes`; and, only when the board checks pass, `unauthenticated`, the number of entries held past the anchored extent                                                                                                 |
+| `checks`               | Every check on this page exactly once, in this page's order: `id` (such as `"4.1"`), `kind` (`"election"`, `"admission"` or `"report-only"`, per Principles), `status` (`"pass"`, `"fail"` or `"unverifiable"`) and, unless it passed, `code`, plus `at` where the code names a place |
+
+While an election runs, 4.2 passes on the segments whose windows have closed by `now` ([[board]], Board checks), so its pass covers the board as of `now` only. `code` is a board-check code from [[board]], `not-reached` (an earlier board check stopped the run first) or `not-implemented`. `at` is `{"entry": n}` (with `"decodeError"`, the [[notation]] code, for `decode`), `{"checkpoint": n}` (its position in `anchors`), `{"segment": s}`, or `{}` for `unsealed`.

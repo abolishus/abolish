@@ -1,6 +1,6 @@
 # Contracts
 
-What our L2 contracts commit to, for a verifier that reads them from the chain and the archive alone. So far this page specifies the event accumulator every Abolish L2 contract keeps (P4-1's L1 anchor contract decides for itself). The election registry, the trustee key registry, direct submission, the contract-event record (`0x0008`) with its inclusion evidence, and the close rule are still P1-18's, and are added here as they are built. Notation is from [[notation]], tags from [[domain-separation]].
+What our L2 contracts commit to, for a verifier that reads them from the chain and the archive alone. So far this page specifies the event accumulator every Abolish L2 contract keeps (P4-1's L1 anchor contract decides for itself) and the election registry. The trustee key registry, direct submission, the contract-event record (`0x0008`) with its inclusion evidence, and the close rule are still P1-18's, and are added here as they are built. Notation is from [[notation]], tags from [[domain-separation]].
 
 ## Event accumulator
 
@@ -55,3 +55,62 @@ Given a contract's address, the chain ID, its archived logs in L2 order (block n
 
 - The accumulator proves that the archive matches the contract's storage, not that the storage is honest: L2 governance that rewrites state can rewrite it too (T-71, detection only, through the evidence each event carries).
 - Each event costs one SHA-256 precompile call over its log, plus two storage writes: 60 gas plus 12 per 32-byte word for the hash. Voters don't transact to vote, so it is mostly our gas, but a direct submitter (T-25) pays it for their own submission.
+
+## Election registry
+
+Threats: T-34 (definition substitution), T-24 (equivocation), T-23 (board tampering), T-17 (chosen bytes in the archive), T-37 (a ceremony carried into another definition), T-08 and T-13 (an electorate that isn't public before voting), T-25 (blocking a legitimate election), T-71 (trusting who sent a transaction).
+
+The election registry assigns each election its identifier and records the hash of its one definition ([[election-definition]]), write-once. It is immutable: no owner, proxy, pause or upgrade path, and it inherits the event accumulator above. Every rule below is fixed when it is deployed.
+
+### Deployment
+
+The registry is deployed with the deployment it belongs to, as immutable values: the `board`, `trustee_registry` and `group_registry` addresses on its own chain, the L1 chain ID, the `l1_anchor` and `l1_relay` addresses, and `epoch`, the anchoring clock's start of the anchor contract `l1_anchor` names (P4-1; [[election-definition]], The seal). Its own chain ID is `block.chainid` and its own address is `election_registry`. Deployment reverts unless these could appear in a well-formed definition (the `chain` rule: no zero address, the four L2 addresses including its own pairwise distinct, the two L1 addresses distinct, the L1 chain ID non-zero and different from its own), and, as for every contract, unless its chain ID fits a `u64`.
+
+### Election identifier
+
+```
+election_id = H(DS("abolish/v1/election-id", u64(chain_id) ‖ bytes[20](registry) ‖ u64(counter)))
+```
+
+where `chain_id` is the registry's chain, `registry` its address and `counter` the number of elections it created before this one, from 0. The input after the tag is exactly 36 bytes. Binding the chain and the address makes the identifier unique across every registry, here or on another chain, so a redeployed registry can't reuse one and have its checkpoints attributed to another election ([[board]], `election_id`; T-23, T-24). It is a hash output, so the creator chooses none of its bytes (T-17). Creation reverts rather than wrap the counter.
+
+`createElection()` takes no arguments (calldata of exactly its 4-byte selector) and makes the caller the election's **creator**, the only account that can register its definition. Anyone can create an election; doing so costs gas and blocks nothing, because no one else can register under the identifier it gets.
+
+### Registration
+
+`registerDefinition(bytes definition)` registers the definition of an election. It checks, in this order, and reverts on the first failure:
+
+1. **Canonical calldata.** The calldata is exactly the standard ABI encoding of one `bytes` argument: offset `0x20`, the length, the bytes, zero padding to a 32-byte boundary, and nothing after. Solidity's decoder accepts other offsets and trailing data, so without this a transaction could carry bytes no record defines ([[notation]], Result-critical fields; T-17).
+2. **Strict decoding** of `definition` as record type `0x0001`, version 1, including the profile check of [[election-definition]] (Decoding), with the decode error codes of [[notation]]. The contract knows the record types specified when version 1 was frozen: `0x0007` and `0x0009` are `unexpected-record-type`, and every other type but `0x0001`, including any specified later, is `unknown-record-type`.
+3. **Well-formedness**: every rule of [[election-definition]] (Well-formedness), reporting the first that fails.
+4. **This deployment**: `l2_chain_id` is the registry's chain, `l1_chain_id` the deployment's L1, `election_registry` the registry's own address, and `board`, `trustee_registry`, `group_registry`, `l1_anchor` and `l1_relay` the deployment's ([[election-definition]], What gets admitted).
+5. **The election**: `election_id` was created by this registry, the caller is its creator, and it has no registered definition. One definition per election, write-once (T-34, T-24). Restricting registration to the creator stops anyone who learns a pending definition's fields (a trustee, whoever relays ceremony messages) from registering first and blocking it (T-25). This is the only check that uses the caller, and it guards only the creator's own identifier: the caller (possibly an aliased L1 sender, or a delegated account) is never trusted for anything else ([[notation]], Result-critical fields).
+6. **Timing**: `opens_at ≥ epoch` (no ballot before the anchoring clock starts, [[verifier]] 2.6) and `block.timestamp < opens_at` (registered before voting opens, [[verifier]] 2.1).
+7. **The electorate is in the past**: every tier's `root_l2_block` is below `block.number`, the registering block ([[election-definition]], The electorate is in the past; T-08, T-13).
+8. **The ceremony**: `ITrusteeRegistry(trustee_registry).ceremonyRecorded(stub_hash, ceremony_transcript_hash)` is true, where `stub_hash` is computed from `definition` ([[election-definition]], Stub hash and the ceremony). The trustee registry returns true only for a pair a quorum of distinct seats of its pinned panel signed ([[trustee-identity]], Ceremony registration). The check compares hashes; it never relies on who sent either transaction (T-37, T-71). A transcript hash may repeat across definitions.
+
+It then stores `definition_hash` for `election_id` and emits `DefinitionRegistered`. A registered definition can't be changed or removed.
+
+The registry doesn't check what only the board can show: that each root is the root of its tier's additions at `root_l2_block`, each `group_size`, each group's tier, the panel against the pinned panels, or the version pins against a verifier release ([[verifier]] 2.3 to 2.5). It doesn't bound `l1_inclusion_bound`, `sequencing_window` or `max_sequencer_drift` either: the close rule (P1-18, direct submission) says what values it needs, and no registry may be deployed before it does, since a deployed registry's rules can't change.
+
+### Events
+
+Each event goes through the event accumulator, with topic 0 the keccak-256 of its signature (the standard ABI):
+
+| Event                                                                                                | Topics                                       | Data                                                                                                                            |
+| ---------------------------------------------------------------------------------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `ElectionCreated(bytes32 indexed electionId, address indexed creator, uint64 counter)`               | `election_id`, the creator as a 32-byte word | `counter`, ABI-encoded                                                                                                          |
+| `DefinitionRegistered(bytes32 indexed electionId, bytes32 indexed definitionHash, bytes definition)` | `election_id`, `definition_hash`             | The definition's full canonical encoding, ABI-encoded as `bytes`, so the board and any verifier rebuild it from the chain alone |
+
+A verifier takes the definition's registration from `DefinitionRegistered` on the registry its release pins, recomputes `definition_hash` from the bytes, and finds the election's creation, and no second registration, in the same contract's event sequence ([[verifier]] 2.1, 4.4). The creator's address is public; it is the account that runs the election, not a voter.
+
+### Vectors
+
+`vectors/election-registry.json` (format `abolish-election-registry-vectors/1`, see [[vectors/README|vectors]]) gives election identifiers and inputs with no `u64` encoding. TypeScript (`packages/crypto`) and Solidity (`packages/contracts`) tests both consume it; the Solidity tests also run every vector of `vectors/election-definition.json` through the contract's decoder, rules and hashes.
+
+### Known-weak
+
+- **The trustee registry doesn't exist yet** (P1-18, next part). Until it does, the registry's ceremony check is tested against a stand-in, and nothing may be deployed.
+- **No close-rule bounds** on the definition's timing fields (above).
+- **Creation is permissionless**, so anyone can make the counter grow. Each creation costs its sender gas and reserves nothing anyone else needs.
+- **Gas.** Registering a two-tier definition (about 500 bytes) costs about 115,000 gas in the tests, mostly decoding, the ceremony check, and three SHA-256 calls (stub, definition, accumulator); creating an election about 98,000. Each runs once per election, so neither is a hot path.

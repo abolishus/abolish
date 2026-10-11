@@ -36,6 +36,7 @@ export const TAG_REGISTRY = Object.freeze(
       { tag: "abolish/v1/ceremony-transcript", primitive: "plain", status: "reserved" },
       { tag: "abolish/v1/tally-transcript", primitive: "plain", status: "reserved" },
       { tag: "abolish/v1/event-accumulator", primitive: "plain", status: "specified" },
+      { tag: "abolish/v1/election-id", primitive: "plain", status: "specified" },
       { tag: "abolish/v1/generator-h", primitive: "hash-to-curve", status: "specified" },
       { tag: "abolish/v1/kem/share", primitive: "kdf-aead", status: "reserved" },
       { tag: "abolish/v1/circuit-tag", primitive: "plain", status: "specified" },

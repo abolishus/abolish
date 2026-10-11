@@ -27,9 +27,12 @@ interface Vm {
         pure
         returns (string[] memory);
     function parseUint(string calldata stringifiedValue) external pure returns (uint256);
+    function prank(address msgSender) external;
     function readFile(string calldata path) external view returns (string memory data);
     function recordLogs() external;
+    function roll(uint256 newHeight) external;
     function toString(uint256 value) external pure returns (string memory);
+    function warp(uint256 newTimestamp) external;
 }
 
 /// Base for the test contracts: the cheatcode address and plain assertions

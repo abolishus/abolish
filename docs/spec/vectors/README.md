@@ -17,6 +17,7 @@ One JSON file per spec section or record type, named after it (`primitives.json`
 | `election-definition.json` | Election definition version 1: codec, definition hash, self-pin and well-formedness ([[election-definition]])                                  |
 | `display-text.json`        | Display-text record version 1: codec, commitment and well-formedness ([[display-text]])                                                        |
 | `event-accumulator.json`   | The event accumulator: genesis values, event sequences step by step, rejected inputs ([[contracts]])                                           |
+| `election-registry.json`   | Election identifiers the election registry assigns, and inputs with no `u64` encoding ([[contracts]], Election registry)                       |
 | `trustee.json`             | Trustee identity keys and signatures, accepted and rejected; panel identifiers; ceremony-registration statements ([[trustee-identity]])        |
 | `ballot-validity.json`     | Committed votes with the randomness that made them, their validity verdicts, trustees' share checks and codec rejections ([[ballot-validity]]) |
 | `circuit.json`             | Circuit-facing values: each registered tag's field element and the two byte packings ([[notation]], [[domain-separation]])                     |
@@ -115,6 +116,13 @@ Type descriptors:
 - `genesis`: each has `id`, `description`, `chainId` (decimal string), `address` (20 bytes, hex) and `accumulator`, the genesis value ([[contracts]], Values).
 - `sequences`: each has `id`, `description`, `chainId`, `address`, `genesis`, `events` (each `{ "topics": [32-byte hex, …], "data": hex }`, in emission order) and `accumulators`, the value after each event in turn.
 - `rejected`: inputs with no accumulator value. `kind` is `genesis` (with `chainId` and `address`: a chain ID with no `u64` encoding) or `step` (with `topics` and `data`: a log with no topics, more than four, or a topic that isn't 32 bytes). A Solidity consumer can't represent a non-32-byte topic and skips it.
+
+## Election-registry vectors
+
+`election-registry.json` checks a computation, so it has its own format, `abolish-election-registry-vectors/1`, with the same top-level fields, plus `tag` (the registered tag, as an ASCII string) and:
+
+- `electionIds`: each has `id`, `description`, `chainId` and `counter` (decimal strings), `registry` (20 bytes, hex) and `electionId`, the identifier ([[contracts]], Election identifier).
+- `rejected`: the same inputs with no `electionId`, where `chainId` or `counter` has no `u64` encoding. A Solidity consumer can't represent them and skips them.
 
 ## Membership vectors
 

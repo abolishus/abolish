@@ -13,6 +13,8 @@ import { type TestDb, testDb } from "@abolishus/core/test-db";
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { spawn } from "node:child_process";
+import { once } from "node:events";
+import { connect } from "node:net";
 import { createServer, request as httpRequest, type Server } from "node:http";
 import { fileURLToPath } from "node:url";
 import type { AddressInfo } from "node:net";
@@ -327,6 +329,34 @@ describe("transport", () => {
     expect(() => createApiServer({ sql: app, log: () => {}, maxInFlight: 0 })).toThrow(RangeError);
   });
 
+  test("an idle client loses its slot: a stalled upload or an unread answer (T-52)", async () => {
+    const capped = createApiServer({ sql: app, log: () => {}, maxInFlight: 1, idleTimeoutMs: 300 });
+    await new Promise<void>((r) => capped.listen(0, "127.0.0.1", r));
+    const port = (capped.address() as AddressInfo).port;
+    const url = `http://127.0.0.1:${port}`;
+    const e = await election(9, 1_000_000);
+    const head = () => fetch(`${url}/board/head?electionId=${e.idHex}`).then((r) => r.status);
+    const stalls = [
+      // Headers and one byte of a body, then nothing.
+      `POST /ballots HTTP/1.1\r\nhost: x\r\ncontent-type: application/json\r\ntransfer-encoding: chunked\r\n\r\n1\r\n{\r\n`,
+      // An 8 MB page the client never reads.
+      `GET /board/entries?electionId=${e.idHex}&start=0&limit=256 HTTP/1.1\r\nhost: x\r\n\r\n`,
+    ];
+    for (const stall of stalls) {
+      const socket = connect(port, "127.0.0.1");
+      socket.on("error", () => {});
+      socket.write(stall);
+      socket.pause();
+      await new Promise((r) => setTimeout(r, 100));
+      expect(await head()).toBe(503);
+      await new Promise((r) => setTimeout(r, 800));
+      expect(await head()).toBe(200);
+      socket.destroy();
+    }
+    capped.closeAllConnections();
+    await new Promise((r) => capped.close(r));
+  });
+
   test("src/main.ts starts under plain Node, without a TypeScript transform", async () => {
     // Node strips types but rejects TypeScript-only syntax (parameter
     // properties, enums) that the test runner's transform would accept.
@@ -361,7 +391,9 @@ describe("transport", () => {
       expect(stderr).toBe("");
       expect(status).toBe(404);
     } finally {
+      const exited = once(child, "exit");
       child.kill("SIGTERM");
+      await exited;
     }
   });
 

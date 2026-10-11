@@ -115,12 +115,30 @@ export interface ApiOptions {
    * a request is refused with 503 before anything is read. Each page of the
    * board can hold `MAX_PAGE_BYTES` and costs several times that in memory,
    * so this bounds the server's memory however many clients connect (T-52).
+   * The timeouts below keep idle clients from holding the slots: a few
+   * sockets can still take them all, but only by keeping traffic flowing,
+   * and per-address limits belong to the proxy in front (P2-11).
    */
   readonly maxInFlight?: number;
+  /**
+   * A connection with no traffic in either direction for this long is
+   * destroyed, freeing its slot: a client that stalls its upload or stops
+   * reading its answer can't hold one (T-52). Default 15 s.
+   */
+  readonly idleTimeoutMs?: number;
 }
 
+/** A whole request (headers and body) must arrive within this. */
+const REQUEST_TIMEOUT_MS = 30_000;
+const HEADERS_TIMEOUT_MS = 10_000;
+
 /** The API server. The caller listens on it and closes it. */
-export function createApiServer({ sql, log, maxInFlight = 32 }: ApiOptions): Server {
+export function createApiServer({
+  sql,
+  log,
+  maxInFlight = 32,
+  idleTimeoutMs = 15_000,
+}: ApiOptions): Server {
   if (!Number.isSafeInteger(maxInFlight) || maxInFlight < 1)
     throw new RangeError("maxInFlight must be at least 1");
   let inFlight = 0;
@@ -136,47 +154,62 @@ export function createApiServer({ sql, log, maxInFlight = 32 }: ApiOptions): Ser
       }),
     ],
   });
-  return createServer(async (req, res) => {
-    const started = performance.now();
-    const route = routeOf(req);
-    res.on("finish", () =>
-      log({
-        method: METHODS.has(req.method ?? "") ? (req.method as string) : "other",
-        route,
-        status: res.statusCode,
-        ms: Math.round(performance.now() - started),
-      }),
-    );
-    res.setHeader("x-content-type-options", "nosniff");
-    res.setHeader("cache-control", "no-store");
-    if (inFlight >= maxInFlight) {
-      res.setHeader("connection", "close");
-      return refuse(res, 503);
-    }
-    inFlight++;
-    res.once("close", () => inFlight--);
-    try {
-      if (route === "unmatched") return refuse(res, 404);
-      if (req.method === "POST") {
-        // A POST takes its input from the body alone, so nothing that keys on
-        // the URL (a cache, a rate limiter) sees a different request (T-31).
-        if (req.url?.includes("?")) return refuse(res, 400);
-        (req as IncomingMessage & { body?: unknown }).body = await readJsonBody(req);
-      } else if (req.headers["content-length"] !== undefined || req.headers["transfer-encoding"]) {
-        // A GET takes its input from the query alone (T-31).
-        return refuse(res, 400);
-      }
-      const { matched } = await handler.handle(req, res, { context: { sql } });
-      if (!matched) refuse(res, 404);
-    } catch (e) {
-      if (e instanceof BodyError) {
-        // Stop reading: the rest of an oversize body is never buffered.
+  const server = createServer(
+    {
+      requestTimeout: REQUEST_TIMEOUT_MS,
+      headersTimeout: HEADERS_TIMEOUT_MS,
+      connectionsCheckingInterval: 1_000,
+    },
+    async (req, res) => {
+      const started = performance.now();
+      const route = routeOf(req);
+      res.on("finish", () =>
+        log({
+          method: METHODS.has(req.method ?? "") ? (req.method as string) : "other",
+          route,
+          status: res.statusCode,
+          ms: Math.round(performance.now() - started),
+        }),
+      );
+      res.setHeader("x-content-type-options", "nosniff");
+      res.setHeader("cache-control", "no-store");
+      if (inFlight >= maxInFlight) {
         res.setHeader("connection", "close");
-        return refuse(res, e.status);
+        res.setHeader("retry-after", "1");
+        return refuse(res, 503);
       }
-      log({ error: e instanceof Error ? e.name : typeof e });
-      if (!res.headersSent) refuse(res, 500);
-      else res.destroy();
-    }
-  });
+      inFlight++;
+      res.once("close", () => inFlight--);
+      try {
+        if (route === "unmatched") return refuse(res, 404);
+        if (req.method === "POST") {
+          // A POST takes its input from the body alone, so nothing that keys on
+          // the URL (a cache, a rate limiter) sees a different request (T-31).
+          if (req.url?.includes("?")) return refuse(res, 400);
+          (req as IncomingMessage & { body?: unknown }).body = await readJsonBody(req);
+        } else if (
+          req.headers["content-length"] !== undefined ||
+          req.headers["transfer-encoding"]
+        ) {
+          // A GET takes its input from the query alone (T-31).
+          return refuse(res, 400);
+        }
+        const { matched } = await handler.handle(req, res, { context: { sql } });
+        if (!matched) refuse(res, 404);
+      } catch (e) {
+        if (e instanceof BodyError) {
+          // Stop reading: the rest of an oversize body is never buffered.
+          res.setHeader("connection", "close");
+          return refuse(res, e.status);
+        }
+        log({ error: e instanceof Error ? e.name : typeof e });
+        if (!res.headersSent) refuse(res, 500);
+        else res.destroy();
+      }
+    },
+  );
+  // With no listener for "timeout", Node destroys the idle socket, which
+  // closes its response and frees its slot.
+  server.setTimeout(idleTimeoutMs);
+  return server;
 }

@@ -20,7 +20,7 @@ Board procedures answer only for elections whose definition the server holds.
 ## Transport
 
 - Inputs come from the query (GET) or a JSON body (POST) alone. A GET with a body, and a POST with a query string, are refused, so nothing keyed on the URL sees a different request (T-31).
-- At most `maxInFlight` requests (32 by default) are handled at once, counted from the first byte; past it a request gets 503 before anything is read. A board page can hold 8 MiB and costs several times that in memory, so this bounds memory however many clients connect (T-52).
+- At most `maxInFlight` requests (32 by default) are handled at once, counted from the first byte; past it a request gets 503 before anything is read. A board page can hold 8 MiB and costs several times that in memory, so this bounds memory however many clients connect (T-52). A connection idle in both directions for 15 s is destroyed, a request must arrive within 30 s (headers within 10 s), so a client that stalls its upload or stops reading its answer loses its slot. A few busy sockets can still take every slot; per-address limits belong to the proxy in front (P2-11).
 - POST bodies: `application/json` only (oRPC's own reader would accept multipart and files of any size), at most `MAX_REQUEST_BODY` bytes, cut off as soon as they exceed it (T-52).
 - `cache-control: no-store` and `x-content-type-options: nosniff` on every response.
 

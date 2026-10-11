@@ -98,6 +98,10 @@ describe("domain-separation tag registry", () => {
     expect(() => ds("abolish/v1/ballot" as never, new Uint8Array())).toThrow(RangeError);
     // Specified, but a hash-to-curve DST: DS framing would give it a second layout.
     expect(() => ds("abolish/v1/generator-h" as never, new Uint8Array())).toThrow(RangeError);
+    // Specified, but a Signature tag: a signed message never doubles as a hash input.
+    expect(() => ds("abolish/v1/sig/ceremony-registration" as never, new Uint8Array())).toThrow(
+      RangeError,
+    );
     expect(() => ds("abolish/v1/unregistered" as never, new Uint8Array())).toThrow(RangeError);
     expect(() => ds("abolish/v1/display-text", [1, 2] as never)).toThrow(TypeError);
   });

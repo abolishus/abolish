@@ -41,6 +41,7 @@ ECDSA on NIST P-256, signing `DS(tag, m)` with SHA-256 as the message digest, so
   - ECDSA signing needs a fresh, secret nonce per signature, and a biased nonce leaks the key (the PlayStation 3 and Bitcoin wallet failures). RFC 6979 deterministic nonces, which `packages/crypto` uses, remove the RNG from the picture; trustees signing in an HSM rely on its nonce generator.
   - **Malleable without a rule:** `(r, n − s)` verifies whenever `(r, s)` does. The low-s rule makes signatures strongly unforgeable in practice for anyone but the signer, but a signer can still produce many valid signatures on one message. A signature therefore never identifies a message, and nothing in the protocol depends on its bytes being unique.
   - Not post-quantum, like every option but D (below).
+  - **Parameter provenance.** P-256's constants were derived from an unexplained seed, which some audiences distrust ([[0007-group-and-hash]] records this against P-256 as a group). No weakness is known, and ECDSA's standard security argument holds, but the identity keys are the root that registers every per-election KEM key: an adversary with an undisclosed P-256 break could forge `k` seats' ceremony entries, register KEM keys it holds and read every ballot, with a transcript that verifies everywhere (T-37, T-14). secp256k1 (C) has rigid parameters.
   - The precompile takes an uncompressed key, so contracts hold the pinned keys as `(x, y)`, checked against the 33-byte encodings when the contract is deployed (P1-18).
 
 ### C. ECDSA over secp256k1 (Ethereum accounts)
@@ -58,9 +59,14 @@ Each trustee is an Ethereum account; the contract checks signatures with `ecreco
 
 ## Recommendation
 
-**B, ECDSA over P-256 with SHA-256, low-s.** It is the only option that is checkable on chain with audited code (needed by the trustee registry, T-71, T-37), and it gives independent trustees the widest choice of hardware for the one key that speaks for their seat (T-37). Its known weaknesses, nonce generation and malleability, are handled by RFC 6979 and the low-s rule, and are covered by published vectors. C is the close second, and would be preferred if the trustee registry moved to a chain without the P-256 precompile or OpenZeppelin's fallback became too costly to call; neither applies to Base or L1. A and D fail the on-chain requirement.
+**B, ECDSA over P-256 with SHA-256, low-s.** Two options are checkable on chain with audited code, as the trustee registry needs (T-71, T-37): B through `P256VERIFY` and OpenZeppelin's `P256`, and C through `ecrecover` and OpenZeppelin's `ECDSA`. A and D aren't. Between B and C the choice is a trade-off, and it is close:
 
-What would change it: an owner decision that trustees must hold Ethereum accounts (C); the owner answering the ML-KEM audit question in a way that also clears ML-DSA, which makes a hybrid suite (D, alongside B) the next step; or a practical break of P-256.
+- **For B: custody.** The identity key is the one secret whose theft speaks for a seat at every election. Trustees are independent institutions picking their own hardware, and P-256 is what FIPS HSMs, PIV cards, cloud KMS and platform enclaves sign with; secp256k1 has a few HSMs, cloud KMS and hardware wallets. Theft through weak custody is the likelier way to lose an identity key (T-37).
+- **For C: parameter provenance.** secp256k1's constants are rigid; P-256's come from an unexplained seed. That matters only against an adversary holding an undisclosed break of P-256, which is speculative, while weak custody is not.
+
+B is chosen for custody. Its known weaknesses, nonce generation and malleability, are handled by RFC 6979 and the low-s rule and covered by published vectors. The parameter-provenance residual is stated in [[trustee-identity]] (Security notes). A veto in favour of C is cheap while no identity key is pinned (Decision).
+
+What would change it: an owner decision that trustees must hold Ethereum accounts, or that rigid parameters outweigh custody (C); the owner answering the ML-KEM audit question in a way that also clears ML-DSA, which makes a hybrid suite (D, alongside B) the next step; or a practical break of P-256.
 
 ## Consequences
 

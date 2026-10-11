@@ -97,6 +97,14 @@ def decompress(b):
     return (x, y)
 
 
+def uncompressed(key, hybrid=False):
+    """key's 65-byte SEC 1 uncompressed form, or its hybrid form (0x06 or
+    0x07 by y's parity), both valid SEC 1 encodings of the same point."""
+    x, y = decompress(key)
+    prefix = 6 + (y & 1) if hybrid else 4
+    return bytes([prefix]) + x.to_bytes(32, "big") + y.to_bytes(32, "big")
+
+
 def rfc6979_k(d, h1):
     """RFC 6979 §3.2 with HMAC-SHA-256, qlen = hlen = 256."""
     x = d.to_bytes(32, "big")
@@ -195,10 +203,18 @@ def main(out_dir):
     ]
     key_vectors.append({"id": "key-generator", "secretKey": f"{1:064x}", "encoding": h(compress(G))})
     key_vectors.append({"id": "key-n-minus-1", "secretKey": f"{N - 1:064x}", "encoding": h(compress(mul(N - 1, G)))})
-    # Rejected encodings. x = 0 is not on P-256 (b is not a square), and
-    # x = 1 neither; found by search below rather than assumed.
+    # x = 0 is on P-256 (b is a square mod p): the points (0, ±sqrt(b)) are
+    # valid keys with no known secret, and some decoders wrongly require
+    # 0 < x. The smallest off-curve x and the smallest on-curve x ≥ 1 are
+    # found by search rather than assumed.
+    assert decompress(bytes([2]) + bytes(32)) is not None
+    for prefix in (2, 3):
+        enc = bytes([prefix]) + bytes(32)
+        key_vectors.append(
+            {"id": f"key-x-zero-prefix-0{prefix}", "description": "x = 0: valid, no known secret", "encoding": h(enc)}
+        )
     off_curve = next(x for x in range(0, 100) if decompress(bytes([2]) + x.to_bytes(32, "big")) is None)
-    on_curve_x = next(x for x in range(0, 100) if decompress(bytes([2]) + x.to_bytes(32, "big")) is not None)
+    on_curve_x = next(x for x in range(1, 100) if decompress(bytes([2]) + x.to_bytes(32, "big")) is not None)
     g_x = G[0].to_bytes(32, "big")
     g_uncompressed = b"\x04" + g_x + G[1].to_bytes(32, "big")
     rejected_keys = [
@@ -207,7 +223,8 @@ def main(out_dir):
         ("key-hybrid-prefix", b"\x06" + g_x, "non-canonical"),
         ("key-prefix-01", b"\x01" + g_x, "non-canonical"),
         ("key-x-equals-p", b"\x02" + P.to_bytes(32, "big"), "non-canonical"),
-        ("key-x-above-p", b"\x03" + (P + on_curve_x).to_bytes(32, "big"), "non-canonical"),
+        ("key-x-equals-p-prefix-03", b"\x03" + P.to_bytes(32, "big"), "non-canonical"),
+        ("key-x-p-plus-on-curve-x", b"\x03" + (P + on_curve_x).to_bytes(32, "big"), "non-canonical"),
         ("key-all-ff", b"\x02" + b"\xff" * 32, "non-canonical"),
         ("key-off-curve", b"\x02" + off_curve.to_bytes(32, "big"), "non-canonical"),
         ("key-truncated", compress(G)[:32], "truncated"),
@@ -219,8 +236,8 @@ def main(out_dir):
         # Left to right: the 33-byte field is validated before any excess.
         assert (err == "trailing-bytes") == (len(enc) > 33 and decompress(enc[:33]) is not None)
     key_vectors += [{"id": i, "encoding": h(e), "error": err} for i, e, err in rejected_keys]
-    # key-x-above-p is p + x for the smallest x on the curve, so it tests
-    # aliasing (x ≥ p) rather than an off-curve x.
+    # key-x-p-plus-on-curve-x is p + x for the smallest x ≥ 1 on the curve,
+    # so it tests aliasing (x > p) rather than an off-curve x.
     assert decompress(b"\x03" + on_curve_x.to_bytes(32, "big")) is not None
 
     # Signatures over DS(tag, m) under the registration tag.
@@ -338,7 +355,8 @@ def main(out_dir):
         ("sig-truncated", "63 bytes", bk, bm, bs[:63]),
         ("sig-trailing", "65 bytes", bk, bm, bs + b"\x00"),
         ("sig-der", "the same r and s in DER", bk, bm, b"\x30\x44\x02\x20" + bs[:32] + b"\x02\x20" + bs[32:]),
-        ("sig-key-uncompressed", "valid signature, key in uncompressed form", g_uncompressed, bm, bs),
+        ("sig-key-uncompressed", "sig-1 under key-1's own uncompressed form (0x04)", uncompressed(keys[0]), bm, bs),
+        ("sig-key-hybrid", "sig-1 under key-1's own SEC 1 hybrid form (0x06 or 0x07)", uncompressed(keys[0], True), bm, bs),
     ]
     for vid, desc, key, msg, sig in rejected:
         M = ds(REGISTRATION_TAG, msg)

@@ -54,6 +54,16 @@
       "encoding": "026b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296"
     },
     {
+      "id": "key-x-zero-prefix-02",
+      "description": "x = 0: valid, no known secret",
+      "encoding": "020000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "id": "key-x-zero-prefix-03",
+      "description": "x = 0: valid, no known secret",
+      "encoding": "030000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
       "id": "key-identity",
       "encoding": "000000000000000000000000000000000000000000000000000000000000000000",
       "error": "non-canonical"
@@ -79,8 +89,13 @@
       "error": "non-canonical"
     },
     {
-      "id": "key-x-above-p",
+      "id": "key-x-equals-p-prefix-03",
       "encoding": "03ffffffff00000001000000000000000000000000ffffffffffffffffffffffff",
+      "error": "non-canonical"
+    },
+    {
+      "id": "key-x-p-plus-on-curve-x",
+      "encoding": "03ffffffff00000001000000000000000000000001000000000000000000000004",
       "error": "non-canonical"
     },
     {
@@ -295,8 +310,17 @@
     },
     {
       "id": "sig-key-uncompressed",
-      "description": "valid signature, key in uncompressed form",
-      "key": "046b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c2964fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5",
+      "description": "sig-1 under key-1's own uncompressed form (0x04)",
+      "key": "04ea0528c2dcb5d51505e9e8cf7c754dc4a880ecf5b72aa3a3d5eec3f45b75cc01f97b7aaee0cd7152fd6b6cb8837f0a55c1afcafe81d5589cfcbd263e31a704e3",
+      "message": "",
+      "dsMessage": "2461626f6c6973682f76312f7369672f636572656d6f6e792d726567697374726174696f6e",
+      "signature": "5332ec7213dd32fd70e2be5791da00b688b8600704af5d99f0c68e831bf170ec704173b8cc2e49134c432407c12029ea5cc219bc67c96806c063533f267c8ec2",
+      "valid": false
+    },
+    {
+      "id": "sig-key-hybrid",
+      "description": "sig-1 under key-1's own SEC 1 hybrid form (0x06 or 0x07)",
+      "key": "07ea0528c2dcb5d51505e9e8cf7c754dc4a880ecf5b72aa3a3d5eec3f45b75cc01f97b7aaee0cd7152fd6b6cb8837f0a55c1afcafe81d5589cfcbd263e31a704e3",
       "message": "",
       "dsMessage": "2461626f6c6973682f76312f7369672f636572656d6f6e792d726567697374726174696f6e",
       "signature": "5332ec7213dd32fd70e2be5791da00b688b8600704af5d99f0c68e831bf170ec704173b8cc2e49134c432407c12029ea5cc219bc67c96806c063533f267c8ec2",

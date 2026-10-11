@@ -385,7 +385,8 @@ export function verifyBoard(
   // a checkpoint larger than any copy can't hide one no board matches.
   const held = encodedEntries.length;
   const reach = counted.filter(([, cp]) => cp.size <= BigInt(held));
-  const extent = Math.max(0, ...counted.map(([, cp]) => Number(cp.size)));
+  // A loop, not a spread: the anchor count is the anchoring authority's to choose.
+  const extent = counted.reduce((m, [, cp]) => Math.max(m, Number(cp.size)), 0);
   const prefix = Array.from({ length: Math.min(extent, held) }, (_, i) =>
     copyBytes(encodedEntries[i] as Uint8Array, `entry ${i}`),
   );

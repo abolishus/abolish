@@ -355,7 +355,7 @@ def main(out_dir):
         ("sig-truncated", "63 bytes", bk, bm, bs[:63]),
         ("sig-trailing", "65 bytes", bk, bm, bs + b"\x00"),
         ("sig-der", "the same r and s in DER", bk, bm, b"\x30\x44\x02\x20" + bs[:32] + b"\x02\x20" + bs[32:]),
-        ("sig-key-uncompressed", "sig-1 under key-1's own uncompressed form (0x04)", uncompressed(keys[0]), bm, bs),
+        ("sig-key-uncompressed-own", "sig-1 under key-1's own uncompressed form (0x04)", uncompressed(keys[0]), bm, bs),
         ("sig-key-hybrid", "sig-1 under key-1's own SEC 1 hybrid form (0x06 or 0x07)", uncompressed(keys[0], True), bm, bs),
     ]
     for vid, desc, key, msg, sig in rejected:

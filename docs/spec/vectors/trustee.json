@@ -309,7 +309,7 @@
       "valid": false
     },
     {
-      "id": "sig-key-uncompressed",
+      "id": "sig-key-uncompressed-own",
       "description": "sig-1 under key-1's own uncompressed form (0x04)",
       "key": "04ea0528c2dcb5d51505e9e8cf7c754dc4a880ecf5b72aa3a3d5eec3f45b75cc01f97b7aaee0cd7152fd6b6cb8837f0a55c1afcafe81d5589cfcbd263e31a704e3",
       "message": "",

@@ -392,7 +392,30 @@ describe("board checks", () => {
           const changed = entries.map((b) => b.slice());
           const target = changed[e % changed.length] as Uint8Array;
           target[at % target.length] = (target[at % target.length] as number) ^ x;
-          expect(verdict(changed, checkpoints, last)).not.toBe("ok");
+          // Honest anchors: the copy is at fault, never the election (T-53).
+          expect(verdict(changed, checkpoints, last)).toBe("copy-mismatch");
+        },
+      ),
+    );
+  });
+
+  test("a checkpoint with only its head or only its root wrong fails the election", () => {
+    run(
+      fc.property(
+        boardArb,
+        fc.nat(),
+        fc.boolean(),
+        fc.uint8Array({ minLength: 32, maxLength: 32 }),
+        ({ entries, last }, k, wrongHead, bogus) => {
+          const checkpoints = checkpointsFor(entries, last);
+          const i = k % checkpoints.length;
+          const a = checkpoints[i] as Anchor;
+          const field = wrongHead ? "head" : "root";
+          fc.pre(!a.checkpoint[field].every((b, j) => b === bogus[j]));
+          const bad = { ...a, checkpoint: { ...a.checkpoint, [field]: bogus } };
+          const anchors = checkpoints.map((x, j) => (j === i ? bad : x));
+          // No board matches it, whatever copy is held (T-24, T-53).
+          expect(verdict(entries, anchors, last)).toBe("checkpoint-inconsistent");
         },
       ),
     );
@@ -404,13 +427,13 @@ describe("board checks", () => {
         const checkpoints = checkpointsFor(entries, last);
         const i = a % entries.length;
         const dropped = [...entries.slice(0, i), ...entries.slice(i + 1)];
-        expect(verdict(dropped, checkpoints, last)).not.toBe("ok");
+        expect(verdict(dropped, checkpoints, last)).toMatch(/^(copy-mismatch|checkpoint-missing)$/);
         if (i + 1 < entries.length) {
           const duplicated = [...entries.slice(0, i + 1), ...entries.slice(i)];
-          expect(verdict(duplicated, checkpoints, last)).not.toBe("ok");
+          expect(verdict(duplicated, checkpoints, last)).toBe("copy-mismatch");
           const swapped = entries.slice();
           [swapped[i], swapped[i + 1]] = [swapped[i + 1] as Uint8Array, swapped[i] as Uint8Array];
-          expect(verdict(swapped, checkpoints, last)).not.toBe("ok");
+          expect(verdict(swapped, checkpoints, last)).toBe("copy-mismatch");
         }
       }),
     );

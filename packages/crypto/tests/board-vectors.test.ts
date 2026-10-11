@@ -227,7 +227,7 @@ const clock: AnchorClock = {
 
 describe("board checks", () => {
   test("parses every vector", () => {
-    expect(file.boards.length).toBe(45);
+    expect(file.boards.length).toBe(48);
   });
 
   for (const v of file.boards)

@@ -140,7 +140,7 @@ function rejectDuplicateMembers(json: string): void {
     const c = json[i];
     if (c === '"') {
       let j = i + 1;
-      while (json[j] !== '"') j += json[j] === "\\" ? 2 : 1;
+      while (j < json.length && json[j] !== '"') j += json[j] === "\\" ? 2 : 1;
       const names = frames.at(-1);
       if (expectName && names instanceof Set) {
         const name = JSON.parse(json.slice(i, j + 1)) as string;

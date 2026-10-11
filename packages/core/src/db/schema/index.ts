@@ -1,8 +1,8 @@
 import { boardEntries } from "./board.ts";
 import { electionDefinitions } from "./definitions.ts";
-import { moderationActions } from "./moderation.ts";
+import { moderationActions, moderationReports } from "./moderation.ts";
 
-export { boardEntries, electionDefinitions, moderationActions };
+export { boardEntries, electionDefinitions, moderationActions, moderationReports };
 
 /**
  * Every table in the schema, by class. Board tables hold public bulletin-board
@@ -13,5 +13,5 @@ export { boardEntries, electionDefinitions, moderationActions };
  */
 export const TABLE_CLASSES = {
   board: ["board_entries", "election_definitions"],
-  operational: ["moderation_actions", "schema_migrations"],
+  operational: ["moderation_actions", "moderation_reports", "schema_migrations"],
 } as const;

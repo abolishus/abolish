@@ -433,4 +433,9 @@ describe("readModerationLog", () => {
     await expect(readModerationLog(app, 0n, MAX_MODERATION_PAGE + 1)).rejects.toThrow(TypeError);
     await expect(readModerationLog(app, 0n, 1.5)).rejects.toThrow(TypeError);
   });
+
+  test("answers an empty page past the largest sequence number Postgres can hold", async () => {
+    for (const after of [(1n << 63n) - 1n, 1n << 63n, (1n << 64n) - 1n])
+      expect(await readModerationLog(app, after, 1)).toEqual([]);
+  });
 });

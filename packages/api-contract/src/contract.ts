@@ -144,11 +144,100 @@ const submitBallot = oc
   .input(z.strictObject({ electionId: Hash32, ballot: hexBytes(MAX_BOARD_PAYLOAD) }))
   .output(z.strictObject({ entry: hexBytes(MAX_BOARD_ENTRY), link: Hash32 }));
 
+// Moderation (docs/moderation-policy.md; T-68). The log is public, so anyone
+// can see what we did to a poll's display text and why; it never names the
+// moderator or a reporter. Moderation never reaches a result: these routes
+// read the log and count reports, nothing else.
+
+/** The policy's removal grounds; a test ties this copy to `@abolishus/core`. */
+export const REMOVAL_REASONS = [
+  "illegal",
+  "personal-data",
+  "threat",
+  "harassment",
+  "spam",
+  "impersonation",
+  "legal-notice",
+] as const;
+/** The policy's grounds for restoring; a test ties this copy to `@abolishus/core`. */
+export const RESTORE_REASONS = ["appeal-upheld", "error", "notice-withdrawn"] as const;
+
+const ModerationAction = z.enum(["delist", "hide", "restore"]);
+const ModerationReason = z.enum([...REMOVAL_REASONS, ...RESTORE_REASONS]);
+/** When a decision was recorded, by the database clock: UTC, to the millisecond. */
+const Timestamp = z.iso.datetime({ precision: 3 });
+
+const getModerationLog = oc
+  .route({
+    method: "GET",
+    path: "/moderation/log",
+    summary: "A page of the public moderation log",
+    description:
+      "Moderation decisions with a sequence number above `after`, oldest first: at most `limit`. Fewer than `limit` entries means the log ends there for now. Sequence numbers increase but may skip. Each decision delists a poll, hides its display text or restores it, under one of the policy's reason codes; none of them touches a poll's board, definition or result (docs/moderation-policy.md).",
+    tags: ["moderation"],
+  })
+  .input(z.strictObject({ after: U64, limit: PageSize }))
+  .output(
+    z.strictObject({
+      entries: z
+        .array(
+          z.strictObject({
+            seq: U64,
+            electionId: Hash32,
+            action: ModerationAction,
+            reason: ModerationReason,
+            decidedAt: Timestamp,
+          }),
+        )
+        .check(z.maxLength(MAX_PAGE)),
+    }),
+  );
+
+const getModerationStatus = oc
+  .route({
+    method: "GET",
+    path: "/moderation/status",
+    summary: "A poll's moderation state",
+    description:
+      "`visible`, `delisted` (left out of discovery and search) or `hidden` (display text withheld; the result is still shown by option number), with the newest decision if there is one. A poll never moderated is `visible` with no `latest`.",
+    tags: ["moderation"],
+  })
+  .errors(electionNotFound)
+  .input(ElectionQuery)
+  .output(
+    z.strictObject({
+      state: z.enum(["visible", "delisted", "hidden"]),
+      latest: z.optional(
+        z.strictObject({
+          seq: U64,
+          action: ModerationAction,
+          reason: ModerationReason,
+          decidedAt: Timestamp,
+        }),
+      ),
+    }),
+  );
+
+const reportPoll = oc
+  .route({
+    method: "POST",
+    path: "/moderation/reports",
+    successStatus: 202,
+    summary: "Report a poll to the moderators",
+    description:
+      "Counts one report of the poll under one of the policy's removal grounds. Needs no account: the server keeps the poll and the ground and nothing about who reported it. A moderator judges the poll against the policy; the number of reports is never a ground (docs/moderation-policy.md, Reports).",
+    tags: ["moderation"],
+  })
+  .errors(electionNotFound)
+  .input(z.strictObject({ electionId: Hash32, reason: z.enum(REMOVAL_REASONS) }))
+  .output(z.strictObject({}));
+
 /** The public API contract. `apps/api` implements it; clients call it. */
 export const contract = {
   elections: { getDefinition },
   board: { getHead, getEntries, getInclusionProof, getConsistencyProof },
   ballots: { submit: submitBallot },
+  moderation: { getLog: getModerationLog, getStatus: getModerationStatus, report: reportPoll },
 };
 
 export type Contract = typeof contract;

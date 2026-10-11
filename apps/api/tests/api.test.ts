@@ -8,7 +8,17 @@ import {
   verifyConsistency,
   verifyInclusion,
 } from "@abolishus/crypto";
-import { appendEntry, readBoard, storeDefinition } from "@abolishus/core";
+import {
+  appendEntry,
+  MAX_REPORT_QUEUE,
+  moderate,
+  readBoard,
+  readReportQueue,
+  REMOVAL_REASONS as CORE_REMOVAL_REASONS,
+  RESTORE_REASONS as CORE_RESTORE_REASONS,
+  storeDefinition,
+} from "@abolishus/core";
+import { REMOVAL_REASONS, RESTORE_REASONS } from "@abolishus/api-contract";
 import { type TestDb, testDb } from "@abolishus/core/test-db";
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -296,6 +306,120 @@ describe("ballots.submit", () => {
   });
 });
 
+describe("moderation (T-68)", () => {
+  test("the contract's reason codes are core's", () => {
+    expect([...REMOVAL_REASONS]).toEqual([...CORE_REMOVAL_REASONS]);
+    expect([...RESTORE_REASONS]).toEqual([...CORE_RESTORE_REASONS]);
+  });
+
+  test("a poll never moderated is visible, with no decision", async () => {
+    const e = await election();
+    const r = await get("/moderation/status", { electionId: e.idHex });
+    expect(r.status).toBe(200);
+    expect(await json(r)).toEqual({ state: "visible" });
+  });
+
+  test("the status is the newest decision, without the moderator", async () => {
+    const e = await election();
+    const { seq } = await moderate(app, e.id, {
+      action: "hide",
+      reason: "personal-data",
+      moderator: "mod-secret",
+    });
+    const r = await get("/moderation/status", { electionId: e.idHex });
+    const body = await json(r);
+    expect(body).toEqual({
+      state: "hidden",
+      latest: {
+        seq: seq.toString(),
+        action: "hide",
+        reason: "personal-data",
+        decidedAt: expect.stringMatching(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/),
+      },
+    });
+    expect(JSON.stringify(body)).not.toContain("mod-secret");
+  });
+
+  test("the status of an unknown election is ELECTION_NOT_FOUND", async () => {
+    const r = await get("/moderation/status", { electionId: hex(b32()) });
+    expect(r.status).toBe(404);
+    expect((await json(r))["code"]).toBe("ELECTION_NOT_FOUND");
+  });
+
+  test("the public log pages through every decision in order, without the moderator", async () => {
+    const [a, b] = [await election(), await election()];
+    const before = await json(await get("/moderation/log", { after: "0", limit: "256" }));
+    const start = (before["entries"] as { seq: string }[]).at(-1)?.seq ?? "0";
+    await moderate(app, a.id, { action: "delist", reason: "spam", moderator: "mod-secret" });
+    await moderate(app, b.id, { action: "hide", reason: "threat", moderator: "mod-secret" });
+    await moderate(app, a.id, { action: "restore", reason: "error", moderator: "mod-other" });
+    const first = await json(await get("/moderation/log", { after: start, limit: "2" }));
+    const entries = first["entries"] as Record<string, string>[];
+    expect(entries.map((x) => [x["electionId"], x["action"], x["reason"]])).toEqual([
+      [a.idHex, "delist", "spam"],
+      [b.idHex, "hide", "threat"],
+    ]);
+    for (const x of entries)
+      expect(Object.keys(x).sort()).toEqual(["action", "decidedAt", "electionId", "reason", "seq"]);
+    const rest = await json(
+      await get("/moderation/log", { after: entries[1]!["seq"]!, limit: "2" }),
+    );
+    expect((rest["entries"] as Record<string, string>[]).map((x) => x["action"])).toEqual([
+      "restore",
+    ]);
+    expect(JSON.stringify([first, rest])).not.toContain("mod-");
+  });
+
+  test("the log refuses positions and page sizes outside its bounds", async () => {
+    const page = (after: string, limit: string) => get("/moderation/log", { after, limit });
+    for (const [after, limit] of [
+      ["-1", "1"],
+      ["01", "1"],
+      ["18446744073709551616", "1"],
+      ["0", "0"],
+      ["0", "257"],
+    ] as const)
+      expect((await page(after, limit)).status, `${after} ${limit}`).toBe(400);
+    // Past the largest sequence number Postgres holds, the log is empty.
+    for (const after of ["9223372036854775807", "18446744073709551615"])
+      expect(await json(await page(after, "1"))).toEqual({ entries: [] });
+  });
+
+  test("a report is counted for the moderators and changes nothing public", async () => {
+    const e = await election();
+    for (let i = 0; i < 3; i++) {
+      const r = await post("/moderation/reports", { electionId: e.idHex, reason: "harassment" });
+      expect(r.status).toBe(202);
+      expect(await json(r)).toEqual({});
+    }
+    const queue = (await readReportQueue(app, MAX_REPORT_QUEUE)).filter(
+      (q) => hex(q.electionId) === e.idHex,
+    );
+    expect(queue.map((q) => [q.reason, q.pending])).toEqual([["harassment", 3n]]);
+    expect(await json(await get("/moderation/status", { electionId: e.idHex }))).toEqual({
+      state: "visible",
+    });
+  });
+
+  test("a report needs a known election and one of the policy's removal grounds", async () => {
+    const e = await election();
+    const r = await post("/moderation/reports", { electionId: hex(b32()), reason: "spam" });
+    expect(r.status).toBe(404);
+    expect((await json(r))["code"]).toBe("ELECTION_NOT_FOUND");
+    for (const body of [
+      { electionId: e.idHex, reason: "error" },
+      { electionId: e.idHex, reason: "unpopular" },
+      { electionId: e.idHex },
+      { electionId: e.idHex, reason: "spam", note: "call me on 555-0100" },
+      { electionId: e.idHex, reason: "spam", account: "x" },
+    ])
+      expect((await post("/moderation/reports", body)).status, JSON.stringify(body)).toBe(400);
+    expect(
+      (await readReportQueue(app, MAX_REPORT_QUEUE)).filter((q) => hex(q.electionId) === e.idHex),
+    ).toEqual([]);
+  });
+});
+
 describe("transport", () => {
   test("a POST with a query string is refused: inputs come from the body alone (T-31)", async () => {
     const e = await election();
@@ -463,9 +587,10 @@ describe("request log (T-10, T-11)", () => {
     await post("/ballots", { electionId: e.idHex, ballot, nullifier: nullifierLike }, secrets);
     await fetch(`${base}/${ballot}?${nullifierLike}`, { headers: secrets });
     await post("/ballots", "{", secrets);
+    await post("/moderation/reports", { electionId: e.idHex, reason: "spam" }, secrets);
     // The server logs on "finish", after the response: wait for every line.
     await new Promise((r) => setTimeout(r, 50));
-    expect(logs).toHaveLength(6);
+    expect(logs).toHaveLength(7);
     const text = JSON.stringify(logs);
     for (const value of [
       ...Object.values(secrets),
@@ -488,6 +613,7 @@ describe("request log (T-10, T-11)", () => {
       "POST /ballots",
       "unmatched",
       "POST /ballots",
+      "POST /moderation/reports",
     ]);
   });
 

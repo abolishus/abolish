@@ -1,4 +1,4 @@
-export { contract, type Contract } from "./contract.ts";
+export { contract, type Contract, REMOVAL_REASONS, RESTORE_REASONS } from "./contract.ts";
 export {
   Hash32,
   hexBytes,

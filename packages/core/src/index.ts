@@ -26,6 +26,7 @@ export {
   boardEntries,
   electionDefinitions,
   moderationActions,
+  moderationReports,
   TABLE_CLASSES,
 } from "./db/schema/index.ts";
 export {
@@ -45,3 +46,10 @@ export {
   RESTORE_REASONS,
   type RestoreReason,
 } from "./moderation.ts";
+export {
+  MAX_REPORT_QUEUE,
+  type PendingReport,
+  readReportQueue,
+  report,
+  reviewReports,
+} from "./reports.ts";

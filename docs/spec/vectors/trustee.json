@@ -2,7 +2,7 @@
   "format": "abolish-trustee-vectors/1",
   "title": "Trustee identity: keys, signatures, panel identifier and ceremony registration",
   "spec": "docs/spec/trustee-identity.md",
-  "generator": "packages/crypto/scripts/trustee-vectors.py: an independent Python implementation (standard library only: affine P-256 arithmetic, RFC 6979 with hmac and hashlib) that first reproduces RFC 6979 Appendix A.2.5's two P-256/SHA-256 signatures, nonces included; every signature here was also verified with OpenSSL through pyca/cryptography when generated",
+  "generator": "packages/crypto/scripts/trustee-vectors.py: an independent Python implementation (standard library only: affine P-256 arithmetic, RFC 6979 with hmac and hashlib) that first reproduces RFC 6979 Appendix A.2.5's two P-256/SHA-256 signatures, nonces included",
   "tags": {
     "panel": "abolish/v1/panel",
     "registration": "abolish/v1/sig/ceremony-registration"
@@ -154,6 +154,26 @@
       "dsMessage": "2461626f6c6973682f76312f7369672f636572656d6f6e792d726567697374726174696f6e00",
       "digest": "d23e43d0c50a66f3c72f04fee300869a02d2b7abbcecc0fd8b5f984675c4689d",
       "signature": "5a89ba5f91b78c997dab8837e3172b4caf4950c1659566d8a90e364f430e74dc58125c95faebb1fd2120e34b88662434b2dc7379b6f7995ba383f29d2acef9ed",
+      "valid": true
+    },
+    {
+      "id": "sig-digest-at-least-n",
+      "description": "H(DS(tag, m)) is at or above n; e is reduced modulo n",
+      "key": "03ea0528c2dcb5d51505e9e8cf7c754dc4a880ecf5b72aa3a3d5eec3f45b75cc01",
+      "message": "0000000015baa733",
+      "dsMessage": "2461626f6c6973682f76312f7369672f636572656d6f6e792d726567697374726174696f6e0000000015baa733",
+      "digest": "ffffffffd55197011990cf8137b76854c4fab0e81b04abe982651fa97978b866",
+      "signature": "d74eae7fe45948c82c13e9975b4844893187c111fcd5b13a0664e232a92ab540053118d5f33e35203e54ac280208148cfaa1470344867378270e5314926b6cc5",
+      "valid": true
+    },
+    {
+      "id": "sig-x-of-r-at-least-n",
+      "description": "x(R) is at or above n and r = x(R) - n; the key is constructed for it and has no known secret",
+      "key": "023c1bba0d8e73d531e35f275faff05e1f43f8fd7d5230b190f6d5d690674578b6",
+      "message": "78285229206174206c65617374206e",
+      "dsMessage": "2461626f6c6973682f76312f7369672f636572656d6f6e792d726567697374726174696f6e78285229206174206c65617374206e",
+      "digest": "f0964ea8e66c67a2655939a4c9286c5e2d76a52e53e9aae2e6b3a6f5e698b649",
+      "signature": "00000000000000000000000000000000000000000000000000000000000000030000000000000000000000000000000000000000000000000000000001234567",
       "valid": true
     },
     {

@@ -266,6 +266,59 @@ def main(out_dir):
             "valid": True,
         }
     )
+    # A digest at or above n (found by a search over 8-byte messages; about
+    # 2^32 tries): verifiers must reduce e modulo n, not reject it.
+    m_big = bytes.fromhex("0000000015baa733")
+    M = ds(REGISTRATION_TAG, m_big)
+    assert int.from_bytes(sha256(M), "big") >= N
+    _k, r_big, s_big = ecdsa_sign(secrets[0], M)
+    sig = sig_bytes(r_big, s_big)
+    assert verify(keys[0], M, sig)
+    sig_vectors.append(
+        {
+            "id": "sig-digest-at-least-n",
+            "description": "H(DS(tag, m)) is at or above n; e is reduced modulo n",
+            "key": h(keys[0]),
+            "message": h(m_big),
+            "dsMessage": h(M),
+            "digest": h(sha256(M)),
+            "signature": h(sig),
+            "valid": True,
+        }
+    )
+    # An R with x(R) ≥ n, so r = x(R) − n. No honest signer reaches this
+    # (probability about 2^-128), so the key is constructed from R and has no
+    # known secret: Q = (R − u1·G) / u2, as a malicious trustee could choose.
+    t = 0
+    while True:
+        x = N + t
+        rhs = (x * x * x + A * x + B) % P
+        y = pow(rhs, (P + 1) // 4, P)
+        if x < P and y * y % P == rhs:
+            break
+        t += 1
+    big_r = (x, y)
+    m_xr = b"x(R) at least n"
+    M = ds(REGISTRATION_TAG, m_xr)
+    e = int.from_bytes(sha256(M), "big")
+    r_xr, s_xr = x - N, 0x1234567
+    w = pow(s_xr, -1, N)
+    u1, u2 = e * w % N, r_xr * w % N
+    q = mul(pow(u2, -1, N), add(big_r, mul(N - u1, G)))
+    sig = sig_bytes(r_xr, s_xr)
+    assert verify(compress(q), M, sig)
+    sig_vectors.append(
+        {
+            "id": "sig-x-of-r-at-least-n",
+            "description": "x(R) is at or above n and r = x(R) - n; the key is constructed for it and has no known secret",
+            "key": h(compress(q)),
+            "message": h(m_xr),
+            "dsMessage": h(M),
+            "digest": h(sha256(M)),
+            "signature": h(sig),
+            "valid": True,
+        }
+    )
     base = sig_vectors[0]
     bk, bm, bs = bytes.fromhex(base["key"]), bytes.fromhex(base["message"]), bytes.fromhex(base["signature"])
     br, bss = int.from_bytes(bs[:32], "big"), int.from_bytes(bs[32:], "big")
@@ -372,8 +425,7 @@ def main(out_dir):
         "generator": (
             "packages/crypto/scripts/trustee-vectors.py: an independent Python implementation (standard library "
             "only: affine P-256 arithmetic, RFC 6979 with hmac and hashlib) that first reproduces RFC 6979 Appendix "
-            "A.2.5's two P-256/SHA-256 signatures, nonces included; every signature here was also verified with "
-            "OpenSSL through pyca/cryptography when generated"
+            "A.2.5's two P-256/SHA-256 signatures, nonces included"
         ),
         "tags": {"panel": PANEL_TAG.decode(), "registration": REGISTRATION_TAG.decode()},
         "keys": key_vectors,

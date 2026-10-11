@@ -120,6 +120,8 @@ export {
   identityKey,
   MAX_TRUSTEES,
   type Panel,
+  PanelError,
+  type PanelErrorCode,
   p256Key,
   p256Sig,
   panelId,

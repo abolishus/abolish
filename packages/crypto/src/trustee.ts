@@ -148,7 +148,7 @@ export function verifyStatement(
 
 /**
  * ECDSA P-256/SHA-256 over the complete message `M`, low-s. Exported for the
- * published-vector tests (RFC 6979, Wycheproof), which sign raw messages;
+ * published-vector tests (RFC 6979, NIST CAVP SigVer), which use raw messages;
  * the protocol signs only through `signStatement`, which frames `M` as
  * `DS(tag, m)`.
  */
@@ -187,25 +187,41 @@ export interface Panel {
   readonly keys: readonly Uint8Array[];
 }
 
+/** Why a panel is invalid, with the codes of docs/spec/vectors/trustee.json. */
+export type PanelErrorCode = "threshold" | "size" | "duplicate-key" | "key";
+
+/** A panel that docs/spec/trustee-identity.md, Panel identifier, rejects. */
+export class PanelError extends RangeError {
+  override readonly name = "PanelError";
+  constructor(
+    readonly code: PanelErrorCode,
+    message: string,
+  ) {
+    super(`panel: ${message}`);
+  }
+}
+
 function checkedPanel(panel: Panel): { threshold: number; keys: Uint8Array[] } {
   if (panel === null || typeof panel !== "object") throw new TypeError("panel: expected an object");
   const { threshold } = panel;
   // Copied once, so the keys checked are the keys hashed.
   const keys = Array.isArray(panel.keys)
-    ? panel.keys.map((k: unknown, i) => bytesOf(k, 33, `panel key ${i + 1}`))
+    ? panel.keys.map((k: unknown, i) => copyOf(k, `panel key ${i + 1}`))
     : null;
   if (keys === null) throw new TypeError("panel: keys must be an array");
   const n = keys.length;
+  if (n > MAX_TRUSTEES) throw new PanelError("size", `n must be at most ${MAX_TRUSTEES}`);
   // T-14: k = 1 would let one trustee open every sharing alone.
-  if (!Number.isSafeInteger(threshold) || threshold < 2 || threshold > n || n > MAX_TRUSTEES)
-    throw new RangeError(`panel: need 2 ≤ k ≤ n ≤ ${MAX_TRUSTEES}`);
+  if (!Number.isSafeInteger(threshold) || threshold < 2 || threshold > n)
+    throw new PanelError("threshold", "need 2 ≤ k ≤ n");
   const seen = new Set<string>();
   for (const [i, key] of keys.entries()) {
-    if (!isCanonicalKey(key)) throw new RangeError(`panel: key ${i + 1} is not a P-256 key`);
+    if (key.length !== 33 || !isCanonicalKey(key))
+      throw new PanelError("key", `key ${i + 1} is not a p256-key`);
     // Encodings are canonical, so equal points have equal bytes. T-14: one
     // key in two seats gives its holder two shares of every ballot.
     const hex = Array.from(key, (x) => x.toString(16).padStart(2, "0")).join("");
-    if (seen.has(hex)) throw new RangeError(`panel: key ${i + 1} sits in two seats`);
+    if (seen.has(hex)) throw new PanelError("duplicate-key", `key ${i + 1} sits in two seats`);
     seen.add(hex);
   }
   return { threshold, keys };

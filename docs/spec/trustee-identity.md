@@ -1,6 +1,6 @@
 # Trustee identity
 
-Every trustee seat has a long-term identity key. It signs everything the trustee says in the protocol, so a ceremony message, registration, receipt, tally share or destruction statement can be attributed to its seat and to nothing else, and the trustee registry on L2 can check a panel's signatures instead of trusting who sent a transaction. This page fixes the identity key and signature encodings, how a message is signed and verified, the panel identifier and the signed statements specified so far. The scheme is ECDSA over P-256 with SHA-256 ([[0012-trustee-identity-signatures]]). Notation and decoding rules are from [[notation]]. Threats: T-37, T-14, T-29, T-31, T-30, T-71.
+Every trustee seat has a long-term identity key, pinned in the verifier's and the ballot client's releases. It is the root of everything a trustee says in the protocol: it signs the trustee's ceremony registration and the trustee's own ceremony entry, which registers that trustee's per-election keys, so every later statement can be attributed to its seat and to nothing else, and the trustee registry on L2 can check a panel's signatures instead of trusting who sent a transaction. This page fixes the identity key and signature encodings, how a message is signed and verified, the panel identifier and the signed statements specified so far. The scheme is ECDSA over P-256 with SHA-256 ([[0012-trustee-identity-signatures]]). Notation and decoding rules are from [[notation]]. Threats: T-37, T-14, T-29, T-31, T-30, T-71.
 
 ## Curve
 
@@ -42,7 +42,7 @@ A trustee signs a statement `m` under a registered signature tag `tag` ([[domain
 M = DS(tag, m)
 ```
 
-so the ECDSA digest is `e = int(H(M))`, the protocol hash of [[group]] read big-endian. `n` has 256 bits, so `e` is used whole, with no truncation (SEC 1 v2 §4.1.3, step 5).
+so the ECDSA digest is `e = int(H(M))`, the protocol hash of [[group]] read big-endian. `n` has 256 bits, so `e` is used whole, with no truncation (SEC 1 v2 §4.1.3, step 5), and is then reduced modulo `n` like every other operand: a digest at or above `n` (probability about 2⁻³²) is valid, never rejected.
 
 The encoding, `p256-sig`, is `bytes[64]`: `r ‖ s`, each 32 bytes big-endian (IEEE P1363). A decoder MUST reject with `non-canonical`:
 
@@ -58,7 +58,9 @@ u1 = e · w,  u2 = r · w
 R  = u1 · G + u2 · Q
 ```
 
-and accepts if and only if `R` is not the identity and `x(R) mod n = r`. This is SEC 1 v2 §4.1.4 and FIPS 186-5 §6.4.2, plus the decoding rules above. A conforming verifier MUST reject exactly the inputs this rule rejects.
+and accepts if and only if `R` is not the identity and `x(R) mod n = r`. `x(R)` is an integer below `p`, which is larger than `n`, so the reduction matters: an `R` with `x(R) ≥ n` verifies against `r = x(R) − n`. Both edge cases have vectors (`trustee.json`). This is SEC 1 v2 §4.1.4 and FIPS 186-5 §6.4.2, plus the decoding rules above. A conforming verifier MUST reject exactly the inputs this rule rejects.
+
+**Which key signs what.** The identity key signs only the statements this page specifies (the ceremony registration, below) and the trustee's own ceremony entry, which registers its per-election keys with their proofs of possession (P1-14's second part). Statements made during and after an election (share receipts, tally shares, destruction statements; [[0002-everlasting-privacy]], [[verifier]] 3.1 and 7.2) are signed with the per-election signing key that the ceremony entry registers, under this page's scheme and encodings, and checked against that registered key, never against the identity key directly. A per-election key bounds what a stolen key can sign to one election; the identity key, which a release pins, makes the registered key attributable to its seat (T-37).
 
 **Signing.** A signer computes a standard ECDSA signature on `M` with SHA-256 and a nonce that is secret, uniform and never reused (an HSM's generator, or RFC 6979's deterministic nonce), then, if `s > (n − 1) / 2`, replaces `s` with `n − s`. `packages/crypto` signs with RFC 6979 §3.2 nonces and HMAC-SHA-256, so it never depends on a random number generator at signing time.
 
@@ -88,16 +90,16 @@ Each statement type has its own tag under `abolish/v1/sig/` and a fixed layout. 
 
 ### Ceremony registration
 
-`abolish/v1/sig/ceremony-registration`: trustee `i` approves the outcome of a key ceremony for one election. The trustee registry on L2 records a ceremony transcript hash for a definition stub only with this signature from enough of the pinned panel's seats (the number is P1-18's), never on `msg.sender` alone (T-71, T-37).
+`abolish/v1/sig/ceremony-registration`: trustee `i` approves the outcome of a key ceremony for one election. The trustee registry on L2 records a ceremony transcript hash for a definition stub only with this signature from enough of the pinned panel's seats (the number is P1-18's), never on `msg.sender` alone (T-71, T-37). The count is of **distinct seats**: each `index` counts at most once, and only with a signature that verifies under that seat's pinned key. ECDSA lets one signer make any number of distinct valid signatures on one statement, so a contract or verifier that counted signatures would let one seat, or one stolen key, reach the quorum alone (T-14, T-37).
 
-| Field                      | Type        | Meaning                                                                                                      |
-| -------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------ |
-| `l2_chain_id`              | `u64`       | EIP-155 chain ID of the L2 the trustee registry is on ([[0004-l2-choice]]).                                  |
-| `trustee_registry`         | `bytes[20]` | The registry's address.                                                                                      |
-| `panel_id`                 | `bytes[32]` | The panel the signer sits on (Panel identifier).                                                             |
-| `index`                    | `u8`        | The signer's seat, `1 ≤ index ≤ n`.                                                                          |
-| `stub_hash`                | `bytes[32]` | Hash of the election definition with its ceremony transcript hash zeroed (P1-10b), which fixes the election. |
-| `ceremony_transcript_hash` | `bytes[32]` | Hash of the ceremony transcript the signer approves (P1-14, `abolish/v1/ceremony-transcript`).               |
+| Field                      | Type        | Meaning                                                                                                                                                                                                     |
+| -------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `l2_chain_id`              | `u64`       | EIP-155 chain ID of the L2 the trustee registry is on ([[0004-l2-choice]]). EIP-155 chain IDs are 256-bit; a registry on a chain whose ID doesn't fit `u64` MUST refuse every registration (Base's do fit). |
+| `trustee_registry`         | `bytes[20]` | The registry's address.                                                                                                                                                                                     |
+| `panel_id`                 | `bytes[32]` | The panel the signer sits on (Panel identifier).                                                                                                                                                            |
+| `index`                    | `u8`        | The signer's seat, `1 ≤ index ≤ n`.                                                                                                                                                                         |
+| `stub_hash`                | `bytes[32]` | Hash of the election definition with its ceremony transcript hash zeroed (P1-10b), which fixes the election.                                                                                                |
+| `ceremony_transcript_hash` | `bytes[32]` | Hash of the ceremony transcript the signer approves (P1-14, `abolish/v1/ceremony-transcript`).                                                                                                              |
 
 `m` is 125 bytes. The chain ID and registry address let a contract check that a signature was made for it (`block.chainid`, `address(this)`) without decoding the stub. The panel and index stop a signature from counting for another seat or panel, and `stub_hash` binds the election, its definition and its `election_id`, so a registration can't be replayed for another election or another definition of the same one (T-37, T-34). A verifier checks the registration signatures it finds on the board against the pinned panel; a missing or failing signature is attributed to no one.
 
@@ -105,12 +107,13 @@ Further statements (KEM-key possession and the ceremony transcript itself, share
 
 ## On chain
 
-Contracts check signatures with the `P256VERIFY` precompile (RIP-7212 on Base since Fjord, EIP-7951 on Ethereum since Fusaka; address `0x100`), through OpenZeppelin's audited `P256` library. The precompile takes the digest, `r`, `s` and the key's uncompressed coordinates and doesn't apply the low-s rule, so a contract MUST also require `1 ≤ r < n` and `1 ≤ s ≤ (n − 1) / 2` itself, and holds each pinned key as `(x, y)`, checked at deployment against the 33-byte encoding. P1-18 implements this.
+Contracts check signatures with the `P256VERIFY` precompile (RIP-7212 on Base since Fjord, EIP-7951 on Ethereum since Fusaka; address `0x100`), through OpenZeppelin's audited `P256` library. The precompile takes the digest, `r`, `s` and the key's uncompressed coordinates and doesn't apply the low-s rule. OpenZeppelin's `P256.verify` checks the ranges and low `s` before calling it; a contract MUST NOT call the precompile any other way, and checks `1 ≤ r < n` and `1 ≤ s ≤ (n − 1) / 2` itself as well, as defence in depth against a library change. It holds each pinned key as `(x, y)`, checked at deployment against the 33-byte encoding, and computes the digest `H(DS(tag, m))` itself from the decoded fields. P1-18 implements this.
 
 ## Security notes
 
 - **Not post-quantum.** A quantum adversary able to break P-256 during an election could forge a trustee's statements live. Forging after the fact changes nothing anchored at the time ([[board]]). A hybrid suite would be a new set of tags ([[0012-trustee-identity-signatures]], option D).
 - **A stolen identity key speaks for its seat** in every election until a release unpins it. Keys belong in hardware ([[0006-trustees]], rule 6; T-37). Per-election keys (the KEM key of [[0002-everlasting-privacy]]) limit what a stolen key decrypts, not what it can sign.
+- **One key, one use, and the signer builds the message.** An identity key (and a per-election signing key) MUST be used for Abolish statements only, never shared with TLS, code signing, PIV authentication or another protocol, and the node that signs MUST build `m` from fields it has validated and compute `H(DS(tag, m))` itself. Hardware interfaces often sign a raw 32-byte digest; a node that signs a digest handed to it, or a key that another system can be made to sign with, yields valid Abolish statements for whoever chooses the digest, since the tag protects only parties that frame the message themselves.
 - **Nonces.** A biased or repeated ECDSA nonce reveals `d`. RFC 6979, or an HSM's generator, is required. With a sound nonce, ECDSA is unforgeable under chosen-message attack, so signing hashes another party chose (such as `stub_hash`) is safe.
 
 ## Sources

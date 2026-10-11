@@ -14,6 +14,7 @@ import {
   p256Key,
   p256Sig,
   panelId,
+  PanelError,
   signCeremonyRegistration,
   signStatement,
   verifyCeremonyRegistration,
@@ -93,7 +94,7 @@ describe("trustee vectors (docs/spec/vectors/trustee.json)", () => {
       vectors.signatures.length,
       vectors.panels.length,
       vectors.registrations.length,
-    ]).toEqual([20, 20, 14, 4]);
+    ]).toEqual([20, 22, 14, 4]);
   });
 
   test.each(vectors.keys)("key $id", (v) => {
@@ -123,14 +124,27 @@ describe("trustee vectors (docs/spec/vectors/trustee.json)", () => {
     expect(toHex(sha256(hex(v.dsMessage)))).toBe(v.digest);
     // RFC 6979 is deterministic: the seat's own key reproduces the bytes.
     const seat = vectors.keys.find((k) => k.encoding === v.key && k.secretKey !== undefined);
-    expect(seat).toBeDefined();
+    // Only the constructed x(R) ≥ n vector has a key with no known secret.
+    if (seat === undefined) {
+      expect(v.id).toBe("sig-x-of-r-at-least-n");
+      return;
+    }
     expect(toHex(signStatement(hex(seat?.secretKey ?? ""), TAG, m))).toBe(v.signature);
   });
 
   test.each(vectors.panels)("panel $id", (v) => {
     const panel = { threshold: v.threshold, keys: v.keys.map(hex) };
     if (v.error === undefined) expect(toHex(panelId(panel))).toBe(v.panelId);
-    else expect(() => panelId(panel)).toThrow(RangeError);
+    else {
+      let err: unknown;
+      try {
+        panelId(panel);
+      } catch (e) {
+        err = e;
+      }
+      expect(err).toBeInstanceOf(PanelError);
+      expect((err as PanelError).code).toBe(v.error);
+    }
   });
 
   test.each(vectors.registrations)("registration $id", (v) => {

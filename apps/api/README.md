@@ -26,6 +26,7 @@ Board procedures answer only for elections whose definition the server holds.
 - At most `maxInFlight` requests (32 by default) are handled at once, counted from the first byte; past it a request gets 503 before anything is read. A board page can hold 8 MiB and costs several times that in memory, so this bounds memory however many clients connect (T-52). A connection idle in both directions for 15 s is destroyed, a request must arrive within 30 s (headers within 10 s), and a request holding a slot for 60 s is destroyed, so a client that stalls its upload, stops reading its answer or reads it slowly loses its slot. A few sockets can still take every slot for up to a minute at a time; per-address limits belong to the proxy in front (P2-11).
 - POST bodies: `application/json` only (oRPC's own reader would accept multipart and files of any size), at most `MAX_REQUEST_BODY` bytes, cut off as soon as they exceed it (T-52).
 - `cache-control: no-store` and `x-content-type-options: nosniff` on every response.
+- **No account credentials (T-10).** A request carrying an account cookie (any cookie named under `ACCOUNT_COOKIE_PREFIX`, with or without `__Secure-` or `__Host-`) or any `Authorization` header is refused with 400 before anything else is read. Accounts live on `apps/web`'s origin (`@abolishus/core`, Accounts), whose host-only cookies never reach this host from a browser, so one arriving means a misconfigured or hostile client; refusing it means no ballot or board request is ever handled next to an account.
 
 ## Request log (T-10, T-11)
 
@@ -47,4 +48,4 @@ One line per request: method, the contract route it matched (from a fixed list, 
 
 ## Decisions
 
-- **No Hono yet.** AGENTS.md names Hono + oRPC. Nothing so far needs middleware beyond the body bound and the log, which `node:http` does in a few lines, and adding Hono changes the workspace catalog, which needs the owner's review. It comes in with the first part that needs it (accounts, P2-5).
+- **No Hono yet.** AGENTS.md names Hono + oRPC. Nothing so far needs middleware beyond the body bound, the log and the account-credential refusal, which `node:http` does in a few lines. Accounts (P2-5) didn't need it either: they are served by `apps/web` on its own origin, not here, so the API never handles an account request.

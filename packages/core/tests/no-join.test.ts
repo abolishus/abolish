@@ -3,10 +3,14 @@ import { TABLE_CLASSES } from "../src/index.ts";
 import { type TestDb, testDb } from "./db.ts";
 
 // Accounts and ballots never join (.claude/skills/migrations; T-10): every
-// table is classified, no foreign key touches a board table, and no board
-// table has a column that could name an account or a person.
+// table is classified, no foreign key touches a board table or leaves the
+// account tables, no board table has a column that could name an account or
+// a person, and no account table has one that could name a ballot, a voting
+// identity or a poll.
 
 const ACCOUNT_LIKE = /account|user|voter|person|email|phone|session|passkey|device|ip_?addr|name/;
+const BALLOT_LIKE =
+  /ballot|vote|nullifier|election|poll|tier|commit|identity|semaphore|receipt|board|entry|segment|share|tally|definition/;
 
 let db: TestDb;
 beforeAll(async () => {
@@ -17,7 +21,11 @@ afterAll(() => db?.close());
 test("every table is classified as board or operational", async () => {
   const tables = await db.admin`
     SELECT table_name FROM information_schema.tables WHERE table_schema = ${db.schema} ORDER BY table_name`;
-  const classified = [...TABLE_CLASSES.board, ...TABLE_CLASSES.operational].sort();
+  const classified = [
+    ...TABLE_CLASSES.board,
+    ...TABLE_CLASSES.account,
+    ...TABLE_CLASSES.operational,
+  ].sort();
   expect(tables.map((t) => t["table_name"])).toEqual(classified);
 });
 
@@ -28,6 +36,19 @@ test("no foreign key starts or ends at a board table", async () => {
   const board = new Set<string>(TABLE_CLASSES.board);
   const bare = (t: string) => t.split(".").pop()!.replaceAll('"', "");
   expect(fks.filter((f) => board.has(bare(f["src"])) || board.has(bare(f["dst"])))).toEqual([]);
+});
+
+test("every foreign key from or to an account table stays among the account tables", async () => {
+  const fks = await db.admin`
+    SELECT conrelid::regclass::text AS src, confrelid::regclass::text AS dst FROM pg_constraint
+    WHERE contype = 'f' AND connamespace = ${db.schema}::regnamespace`;
+  const account = new Set<string>(TABLE_CLASSES.account);
+  const bare = (t: string) => t.split(".").pop()!.replaceAll('"', "");
+  const touching = fks.filter((f) => account.has(bare(f["src"])) || account.has(bare(f["dst"])));
+  expect(touching.length).toBeGreaterThan(0);
+  expect(
+    touching.filter((f) => !account.has(bare(f["src"])) || !account.has(bare(f["dst"]))),
+  ).toEqual([]);
 });
 
 test("the runtime role can't act as the owner", async () => {
@@ -44,4 +65,28 @@ test("no board column looks like an account or a person", async () => {
     WHERE table_schema = ${db.schema} AND table_name = ANY(${[...TABLE_CLASSES.board]})`;
   expect(cols.length).toBeGreaterThan(0);
   expect(cols.filter((c) => ACCOUNT_LIKE.test(c["column_name"]))).toEqual([]);
+});
+
+test("no account column looks like a ballot, a voting identity or a poll", async () => {
+  const cols = await db.admin`
+    SELECT table_name, column_name FROM information_schema.columns
+    WHERE table_schema = ${db.schema} AND table_name = ANY(${[...TABLE_CLASSES.account]})`;
+  expect(new Set(cols.map((c) => c["table_name"]))).toEqual(new Set(TABLE_CLASSES.account));
+  expect(cols.filter((c) => BALLOT_LIKE.test(c["column_name"]))).toEqual([]);
+});
+
+test("no view, function or trigger reads both an account table and a board table", async () => {
+  // A join can live in a view or a function as well as in a foreign key.
+  const views = await db.admin`
+    SELECT table_name, view_definition FROM information_schema.views WHERE table_schema = ${db.schema}`;
+  expect(views).toEqual([]);
+  const fns = await db.admin`
+    SELECT p.proname, p.prosrc FROM pg_proc p WHERE p.pronamespace = ${db.schema}::regnamespace`;
+  const names = (re: readonly string[]) => new RegExp(`\\b(${re.join("|")})\\b`);
+  const both = fns.filter(
+    (f) =>
+      names(TABLE_CLASSES.account).test(f["prosrc"]) &&
+      names(TABLE_CLASSES.board).test(f["prosrc"]),
+  );
+  expect(both).toEqual([]);
 });

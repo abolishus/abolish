@@ -113,7 +113,7 @@ A run reads one bundle: a directory with two files.
 | `now`               | A `u64`: the time of the latest finalized L1 block read.                                                                                                                                                    |
 | `anchors`           | An array of every anchor for the election: objects with exactly `electionId`, `segment` (`u32`), `size` (`u64`), `head`, `root` and `anchoredAt` (`u64`, the time of the finalized L1 block that holds it). |
 
-Hex is lowercase, exactly 64 digits for 32 bytes. An integer is a JSON string of decimal digits with no sign and no leading zero (except `"0"`), within its type, and `period` is at least 1. Any other member, value or shape, or a missing or unreadable file, rejects the whole bundle before any check runs, and a rejected bundle has no report: it isn't evidence about any election. A checkpoint's position in `anchors`, from 0, names it in the report.
+Hex is lowercase, exactly 64 digits for 32 bytes. An integer is a JSON string of decimal digits with no sign and no leading zero (except `"0"`), within its type, and `period` is at least 1. Any other member, value or shape, or a missing or unreadable file, or one that isn't a regular file (a device or a FIFO, which may never end), rejects the whole bundle before any check runs, and a rejected bundle has no report: it isn't evidence about any election. A checkpoint's position in `anchors`, from 0, names it in the report.
 
 **Every bundle input is unauthenticated.** The anchors and `now` should come from L1 (P4-1), and the clock, the election identifier and the pinned version from the election definition (P1-10b) and the verifier's pinned roots. A local file proves none of that. So each run records where each input came from (`local-file` for all of them today). Any run with an unauthenticated input reports `unverifiable` as its verdict, whatever the checks find, and reports separately what they found against those inputs. So a crafted bundle can neither verify nor fail an election (T-53, T-24). Reading anchors from L1 and the clock from the definition replaces the bundle members, one by one, in later parts.
 
@@ -152,3 +152,21 @@ JSON, an object with these members, in this order:
 | `checks`               | Every check on this page exactly once, in this page's order: `id` (such as `"4.1"`), `kind` (`"election"`, `"admission"` or `"report-only"`, per Principles), `status` (`"pass"`, `"fail"` or `"unverifiable"`) and, unless it passed, `code`, plus `at` where the code names a place |
 
 While an election runs, 4.2 passes on the segments whose windows have closed by `now` ([[board]], Board checks), so its pass covers the board as of `now` only. `code` is a board-check code from [[board]], `not-reached` (an earlier board check stopped the run first) or `not-implemented`. `at` is `{"entry": n}` (with `"decodeError"`, the [[notation]] code, for `decode`), `{"checkpoint": n}` (its position in `anchors`), `{"segment": s}`, or `{}` for `unsealed`.
+
+### Command line
+
+`abolish-verify [--] <bundle-directory>` runs the procedure over one bundle. On success it writes the report to stdout as JSON followed by a newline, and a summary to stderr. A rejected bundle writes no report, only the reason, to stderr.
+
+The exit code depends on `verdict` alone, never on `verdictAgainstInputs`, so a script that reads only the exit code can't be made to read a crafted bundle's findings as the election's (T-53):
+
+| Code | Meaning                                                                       |
+| ---- | ----------------------------------------------------------------------------- |
+| 0    | `verdict` is `verified`                                                       |
+| 20   | `verdict` is `failed`                                                         |
+| 21   | `verdict` is `unverifiable`                                                   |
+| 22   | The bundle was rejected; there is no report                                   |
+| 64   | Usage: no bundle, an empty one, more than one, an unknown option, or `--help` |
+
+0 means verified and nothing else, which is why `--help` (whose text goes to stdout, unlike every other usage error's) exits 64. No code is one Node exits with on its own: 1 for an uncaught error, 3 to 14 for its internal failures, over 128 for a signal. Any code not in the table, including 1 when the report can't be written, is a failure of the verifier itself and says nothing about the election.
+
+The summary's first line is `verdict: <verdict>`. While any input is unauthenticated it continues ` (unauthenticated inputs: <names>; against those inputs: <verdictAgainstInputs>)`, so `verdictAgainstInputs` is never shown without `verdict` and the inputs beside it. A line follows for each failed check: its `id`, `fail`, its `code` and its `at` as JSON. Anything quoted from the bundle (a rejected member name, say) is printed as printable ASCII only: every other character and the backslash are written as `\u{<hex>}`, so a bundle can't put control or bidirectional characters on a terminal.

@@ -1,17 +1,31 @@
 // Reads a bundle directory (docs/spec/verifier.md, Bundle): bundle.json and
 // board.bin. The verifier contacts nothing: every input is a local file here.
 
-import { readFileSync } from "node:fs";
+import { closeSync, constants, fstatSync, openSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { type Bundle, BundleError, parseBundle } from "./bundle.ts";
 
 function read(dir: string, name: string): Uint8Array {
+  let fd: number;
   try {
-    return readFileSync(join(dir, name));
+    // Non-blocking, so opening a FIFO can't wait forever for a writer.
+    fd = openSync(join(dir, name), constants.O_RDONLY | (constants.O_NONBLOCK ?? 0));
   } catch (e) {
     // A missing or unreadable file rejects the bundle: it is no evidence
     // about any election, so it must never read as a short copy.
     throw new BundleError(`${name}: can't be read`, { cause: e });
+  }
+  try {
+    // Only a regular file has an end: a device (/dev/zero) or a FIFO would
+    // keep a run from ever finishing. Checked on the open file, so it can't
+    // be swapped after the check.
+    if (!fstatSync(fd).isFile()) throw new BundleError(`${name}: not a regular file`);
+    return readFileSync(fd);
+  } catch (e) {
+    if (e instanceof BundleError) throw e;
+    throw new BundleError(`${name}: can't be read`, { cause: e });
+  } finally {
+    closeSync(fd);
   }
 }
 

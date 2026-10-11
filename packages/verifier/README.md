@@ -18,6 +18,14 @@ A bundle is a directory with `board.bin` (the board copy: its encoded entries in
 - **A bad copy is never the election's failure.** A short or altered copy (`checkpoint-missing`, `copy-mismatch`) is unverifiable from that source, and bytes past the anchored extent change nothing (T-53).
 - **Malformed bundles are rejected whole** (`BundleError`), before any check runs.
 
+### Command line
+
+```sh
+vp node packages/verifier/src/bin.ts path/to/bundle   # from a checkout
+```
+
+It prints the JSON report on stdout and a summary on stderr, and exits on `verdict` alone: 0 verified, 20 failed, 21 unverifiable, 22 bundle rejected, 64 usage. Any other code is the verifier's own error, not a verdict. `runCli(args, { stdout, stderr })` runs the same from code. The package doesn't install an `abolish-verify` binary yet: a published gated package may not declare `bin` until CI's policy allows it.
+
 The checks themselves live in `@abolishus/crypto`; this package reads inputs, maps outcomes onto the spec's checks and reports them (T-36).
 
 ## Test

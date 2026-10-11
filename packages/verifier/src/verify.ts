@@ -109,7 +109,7 @@ function boardOutcomes(e: BoardError): readonly [Outcome, Outcome] {
 
 // A local file authenticates nothing. The switch is exhaustive, so a new
 // source type doesn't compile until it is decided here.
-function authenticated(source: InputSource): boolean {
+export function authenticated(source: InputSource): boolean {
   switch (source) {
     case "local-file":
       return false;

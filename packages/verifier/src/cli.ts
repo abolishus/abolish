@@ -16,17 +16,18 @@ export interface CliOutput {
 }
 
 /**
- * Exit codes. 0 means verified and nothing else: help and usage errors exit
- * 2. None is 1, which Node uses for an uncaught error, so a crash never reads
+ * Exit codes. 0 means verified and nothing else: help exits as a usage error.
+ * None is a code Node exits with on its own (1 for an uncaught error, 3 to 14
+ * for its internal failures, over 128 for a signal), so a crash never reads
  * as a verdict; any code not listed here is the verifier's own failure and
  * says nothing about the election.
  */
 export const EXIT_CODES = Object.freeze({
   verified: 0,
-  usage: 2,
-  failed: 3,
-  unverifiable: 4,
-  bundleRejected: 5,
+  failed: 20,
+  unverifiable: 21,
+  bundleRejected: 22,
+  usage: 64,
 } as const);
 
 const USAGE = `Usage: abolish-verify [--] <bundle-directory>
@@ -35,11 +36,13 @@ Verifies one election from a bundle (board.bin and bundle.json; see
 docs/spec/verifier.md, Inputs, procedure and report). Prints the JSON report
 on stdout and a summary on stderr.
 
-Exit codes: 0 verified, 3 failed, 4 unverifiable, 5 bundle rejected,
-2 usage. Any other code is an error of the verifier, not a verdict.
+Exit codes: 0 verified, 20 failed, 21 unverifiable, 22 bundle rejected,
+64 usage (and --help). Any other code is an error of the verifier, not a
+verdict.
 `;
 
-function exitCode(verdict: Verdict): number {
+/** The exit code for a report's `verdict`. */
+export function exitCode(verdict: Verdict): number {
   switch (verdict) {
     case "verified":
       return EXIT_CODES.verified;
@@ -110,7 +113,9 @@ export function runCli(args: readonly string[], out: CliOutput): number {
     return EXIT_CODES.usage;
   }
   const [dir] = positionals;
-  if (dir === undefined || positionals.length !== 1) {
+  // An empty argument (an unset shell variable) would read the working
+  // directory, a bundle the caller never named.
+  if (dir === undefined || dir === "" || positionals.length !== 1) {
     out.stderr(USAGE);
     return EXIT_CODES.usage;
   }

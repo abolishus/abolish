@@ -1,10 +1,10 @@
-import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import fc from "fast-check";
 import { afterAll, describe, expect, test } from "vite-plus/test";
-import { printable } from "../src/cli.ts";
+import { exitCode, printable } from "../src/cli.ts";
 import { EXIT_CODES, readBundle, type Report, runCli, verifyBundle } from "../src/index.ts";
 
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
@@ -74,12 +74,25 @@ const failedId = vectors.boards.find(
   (b) => b.result !== "ok" && b.result.code === "checkpoint-equivocation",
 )?.id as string;
 
+// Codes Node exits with on its own: an uncaught error, its internal
+// failures, and signals (128 + n).
+const NODE_CODES = [1, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14];
+
 describe("exit codes", () => {
-  test("are distinct, 0 is verified only, and none is Node's uncaught-error code 1", () => {
+  test("are distinct, 0 is verified only, and none is a code Node exits with on its own", () => {
     const codes = Object.values(EXIT_CODES);
     expect(new Set(codes).size).toBe(codes.length);
-    expect(codes).not.toContain(1);
+    for (const c of codes) {
+      expect(NODE_CODES).not.toContain(c);
+      expect(c).toBeLessThan(128);
+    }
     expect(Object.entries(EXIT_CODES).filter(([, c]) => c === 0)).toEqual([["verified", 0]]);
+  });
+
+  test("each verdict exits with its own code", () => {
+    expect(exitCode("verified")).toBe(EXIT_CODES.verified);
+    expect(exitCode("failed")).toBe(EXIT_CODES.failed);
+    expect(exitCode("unverifiable")).toBe(EXIT_CODES.unverifiable);
   });
 });
 
@@ -105,13 +118,19 @@ describe("a bundle that parses", () => {
     expect(r.stderr).toMatch(/^ {2}4\.2 fail checkpoint-equivocation \{"checkpoint":\d+\}$/m);
   });
 
-  test("accepts a bundle directory named like an option after --", () => {
+  test("reads a directory named like an option only after --", () => {
     const dir = vectorDir(okId);
-    const dashed = join(root, "-h");
-    mkdirSync(dashed);
-    writeFileSync(join(dashed, "bundle.json"), readFileSync(join(dir, "bundle.json")));
-    writeFileSync(join(dashed, "board.bin"), readFileSync(join(dir, "board.bin")));
-    expect(run("--", dashed).code).toBe(EXIT_CODES.unverifiable);
+    mkdirSync(join(root, "-h"));
+    writeFileSync(join(root, "-h", "bundle.json"), readFileSync(join(dir, "bundle.json")));
+    writeFileSync(join(root, "-h", "board.bin"), readFileSync(join(dir, "board.bin")));
+    const cwd = process.cwd();
+    try {
+      process.chdir(root);
+      expect(run("--", "-h").code).toBe(EXIT_CODES.unverifiable);
+      expect(run("-h")).toMatchObject({ code: EXIT_CODES.usage, stderr: "" });
+    } finally {
+      process.chdir(cwd);
+    }
   });
 });
 
@@ -126,6 +145,31 @@ describe("a rejected bundle", () => {
     const malformed = run(bundleDir("{}", new Uint8Array()));
     expect(malformed.code).toBe(EXIT_CODES.bundleRejected);
     expect(malformed.stdout).toBe("");
+  });
+
+  test("rejects a board.bin that isn't a regular file instead of reading it forever", () => {
+    const ok = vectorDir(okId);
+    const json = readFileSync(join(ok, "bundle.json"));
+    const zero = join(root, String(dirs++));
+    mkdirSync(zero);
+    writeFileSync(join(zero, "bundle.json"), json);
+    symlinkSync("/dev/zero", join(zero, "board.bin"));
+    const fifo = join(root, String(dirs++));
+    mkdirSync(fifo);
+    writeFileSync(join(fifo, "bundle.json"), json);
+    execFileSync("mkfifo", [join(fifo, "board.bin")]);
+    for (const dir of [zero, fifo])
+      expect(run(dir)).toEqual({
+        code: EXIT_CODES.bundleRejected,
+        stdout: "",
+        stderr: "bundle rejected: board.bin: not a regular file\n",
+      });
+    // A link to a regular file is read like the file.
+    const linked = join(root, String(dirs++));
+    mkdirSync(linked);
+    symlinkSync(join(ok, "bundle.json"), join(linked, "bundle.json"));
+    symlinkSync(join(ok, "board.bin"), join(linked, "board.bin"));
+    expect(run(linked).stdout).toBe(run(ok).stdout);
   });
 
   test("can't put terminal control characters on stderr through a member name", () => {
@@ -166,7 +210,7 @@ describe("printable", () => {
 
 describe("usage", () => {
   test("help, no bundle, two bundles and unknown options exit usage with no report", () => {
-    for (const args of [["--help"], ["-h"], [], ["a", "b"], ["--json", "a"]]) {
+    for (const args of [["--help"], ["-h"], [], [""], ["--", ""], ["a", "b"], ["--json", "a"]]) {
       const r = run(...args);
       expect(r.code).toBe(EXIT_CODES.usage);
       expect(r.stdout).not.toMatch(/"format"/);

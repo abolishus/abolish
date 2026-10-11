@@ -42,6 +42,8 @@ export interface AppendedEntry {
   readonly link: Uint8Array;
 }
 
+const isBytes = (x: unknown): x is Uint8Array => x instanceof Uint8Array && ArrayBuffer.isView(x);
+
 const recordTypeOf = (payload: Uint8Array) =>
   payload.length < 2 ? -1 : ((payload[0] as number) << 8) | (payload[1] as number);
 
@@ -74,7 +76,6 @@ export async function appendEntry(
   // Inputs will come from transport decoding (P2-3): anything but real bytes
   // is refused, never coerced (a string would become zero bytes and land on
   // another election's board, for good).
-  const isBytes = (x: unknown): x is Uint8Array => x instanceof Uint8Array && ArrayBuffer.isView(x);
   if (!isBytes(electionId) || electionId.length !== 32 || !isBytes(payload))
     throw new AppendError("invalid-entry");
   const id = new Uint8Array(electionId);
@@ -139,7 +140,8 @@ export async function appendEntry(
  * stored columns.
  */
 export async function readBoard(client: Sql, electionId: Uint8Array): Promise<Uint8Array[]> {
-  if (!(electionId instanceof Uint8Array)) throw new TypeError("electionId must be a Uint8Array");
+  if (!isBytes(electionId) || electionId.length !== 32)
+    throw new TypeError("electionId must be 32 bytes");
   const id = new Uint8Array(electionId);
   const rows = await drizzle({ client })
     .select({

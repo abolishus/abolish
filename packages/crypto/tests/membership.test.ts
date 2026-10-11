@@ -1,5 +1,6 @@
 import fc from "fast-check";
 import { readFileSync } from "node:fs";
+import { keccak_256 } from "@noble/hashes/sha3.js";
 import { describe, expect, test } from "vite-plus/test";
 import {
   BN254_R,
@@ -21,6 +22,7 @@ interface MembershipVectors {
   readonly fieldMap: readonly {
     readonly id: string;
     readonly input: string;
+    readonly keccak256: string;
     readonly output: string;
   }[];
   readonly scopes: readonly {
@@ -63,6 +65,9 @@ describe("membership vectors (docs/spec/vectors/membership.json)", () => {
   });
 
   test.each(vectors.fieldMap)("F matches Semaphore's hash: $id", (v) => {
+    // The published Keccak-256 intermediate pins @noble's keccak to the
+    // independent sponge, so a failure in the shift or byte order is localised.
+    expect(toHex(keccak_256(hex(v.input)))).toBe(toHex(hex(v.keccak256)));
     expect(semaphoreField(hex(v.input))).toBe(decimal(v.output));
   });
 

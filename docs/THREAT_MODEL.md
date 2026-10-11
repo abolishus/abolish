@@ -122,7 +122,7 @@ Sybil resistance is the core problem: if one person can vote many times, results
 | [[T-17]] | PII on-chain or on IPFS                                  | A-2, A-9, A-10 | Planned        |
 | [[T-18]] | Voting-identity secret theft                             | A-3, A-4       | Partial        |
 | [[T-19]] | Third-party proof app privacy                            | A-1, A-2       | Needs decision |
-| [[T-20]] | Account-to-identity linkage through the recovery backup  | A-2, A-1       | Needs design   |
+| [[T-20]] | Account-to-identity linkage through the recovery backup  | A-2, A-1       | Planned        |
 | [[T-21]] | Tier 2 proof front-running and trust roots               | A-9, A-1, A-6  | Needs decision |
 | [[T-22]] | Tier 1 social graph exposure                             | A-2, A-1, A-10 | Needs design   |
 

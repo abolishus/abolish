@@ -228,6 +228,18 @@ importers:
         specifier: 'catalog:'
         version: 7.0.2
 
+  packages/contracts:
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.19.1
+      typescript:
+        specifier: 'catalog:'
+        version: 7.0.2
+      vite-plus:
+        specifier: 'catalog:'
+        version: 1.0.0(@types/node@24.19.1)(@vitest/ui@5.0.1)(typescript@7.0.2)(yaml@2.9.1)
+
   packages/crypto:
     dependencies:
       '@noble/curves':

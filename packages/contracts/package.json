@@ -1,0 +1,23 @@
+{
+  "name": "@abolishus/contracts",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Abolish's L2 contracts (Foundry): the event accumulator so far; registries and direct submission follow (P1-18).",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "scripts": {
+    "build": "forge build && rm -rf out/build-info",
+    "check": "forge fmt --check && forge build --sizes",
+    "test": "forge test && vp test run"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vite-plus": "catalog:"
+  },
+  "abolish": {
+    "buildOutputs": [
+      "out"
+    ]
+  }
+}

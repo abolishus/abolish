@@ -1,0 +1,208 @@
+{
+  "format": "abolish-event-accumulator-vectors/1",
+  "title": "Event accumulator: genesis, steps and rejected inputs",
+  "spec": "docs/spec/contracts.md",
+  "generator": "packages/crypto/scripts/event-accumulator-vectors.py: an independent Python implementation of docs/spec/contracts.md (Event accumulator) using hashlib only, sharing no code with packages/crypto or packages/contracts. Topic values are deterministic stand-ins (SHA-256 of a label), not real event signature hashes: the accumulator treats topics as opaque bytes.",
+  "tag": "abolish/v1/event-accumulator",
+  "genesis": [
+    {
+      "id": "zero",
+      "description": "Chain ID 0 and the zero address",
+      "chainId": "0",
+      "address": "0000000000000000000000000000000000000000",
+      "accumulator": "04114380be6c527ae341c909d6021eb1653cab7c646014f87fdead141b692a2b"
+    },
+    {
+      "id": "base-sepolia",
+      "description": "Base Sepolia, an Anvil-style first deployment address",
+      "chainId": "84532",
+      "address": "5fbdb2315678afecb367f032d93f642f64180aa3",
+      "accumulator": "a0356b94e18514dcff5e7e768ee83c138e7446c8bf008f9f0df42cae0c440cfc"
+    },
+    {
+      "id": "anvil",
+      "description": "Anvil's default chain ID, same address",
+      "chainId": "31337",
+      "address": "5fbdb2315678afecb367f032d93f642f64180aa3",
+      "accumulator": "4114f74b26b08e131f1569ca3ee07ea82602b23ccdf3569ba889a158396c68da"
+    },
+    {
+      "id": "max-chain-id",
+      "description": "The largest chain ID with a u64 encoding",
+      "chainId": "18446744073709551615",
+      "address": "ffffffffffffffffffffffffffffffffffffffff",
+      "accumulator": "311c8d526604151b10f0feb22e6f4d2d37768fa5e5f0413b445f507be1163cf7"
+    }
+  ],
+  "sequences": [
+    {
+      "id": "one-topic-empty-data",
+      "description": "One log with only topic 0 and no data",
+      "chainId": "84532",
+      "address": "5fbdb2315678afecb367f032d93f642f64180aa3",
+      "genesis": "a0356b94e18514dcff5e7e768ee83c138e7446c8bf008f9f0df42cae0c440cfc",
+      "events": [
+        {
+          "topics": ["5c18b5afab74db2b794b16733ec4e03e096be8e134806caecfa149000c2d0bd4"],
+          "data": ""
+        }
+      ],
+      "accumulators": ["2bcc1d568a7b5c5b9425d3a6dade2a4c7653922e5e13059ef93da81adbc30c38"]
+    },
+    {
+      "id": "every-topic-count",
+      "description": "Logs with 1, 2, 3 and 4 topics, then 1 again",
+      "chainId": "84532",
+      "address": "5fbdb2315678afecb367f032d93f642f64180aa3",
+      "genesis": "a0356b94e18514dcff5e7e768ee83c138e7446c8bf008f9f0df42cae0c440cfc",
+      "events": [
+        {
+          "topics": ["2701b4acb79b9e492edfd702f1e5eb0ea070a1de6b05845055e36ff39b83587a"],
+          "data": "314ba75571622cc42f641480fa5cfd0e31ce09f44968788a30ebd63bc09cd88a"
+        },
+        {
+          "topics": [
+            "72b4e1a22c326d772127ce653e753c308a21c2ff96970f259d527ce6b73af9b9",
+            "4aa0000c26bfe37fd1317113382faf060415737e73ca1093b7211413ffbcc7e3"
+          ],
+          "data": "4247ed3fd22fb165d6cb4b40d982ae59d6efddb5ec300e7ea6524d8db6ebbd2b"
+        },
+        {
+          "topics": [
+            "ddb33e845d467749d7a748ef8f8b4236c264792d89f4fe22b907d1571484ed21",
+            "f1836439832f60fe6249eef46c7fbf224c1b9f73e5cf210e90ffda3c5f80c75a",
+            "323bab0ddee868a17926ad1d9e0c8acf4ab2c526370e7f95e76891ee2627c977"
+          ],
+          "data": "5588da44ea7bd595ba9ea2ee8e2c60227f4bb7f9ab845341ac92287f296642e19575e7632204e3c2bc38f3f7424cc72957df4877dbd1ccc36b22ac5acc6f2f474c3ffe1e8f93ac2410f16379c01f96e83a52d0b1a30818f37fc9001b0d32565d"
+        },
+        {
+          "topics": [
+            "4b107d79a039980aca79e37d6fd2e016a5699c39a21da1dd050674eae3e5d3c9",
+            "2be1d478fb3241661ee62163ef102a600443ebae0093afe160ab4501b116ef6d",
+            "70734081aacfa41b6e5ba855d7a5091d1f9fe1bd87b7bf2edd567d35092fc32a",
+            "fa466e5aae36e4e601692ba3f276d588a2577533def2ef3e67a9c8fe8219f209"
+          ],
+          "data": ""
+        },
+        {
+          "topics": ["2701b4acb79b9e492edfd702f1e5eb0ea070a1de6b05845055e36ff39b83587a"],
+          "data": "8321f98a7cf13c22c3c17f1da966dd7d7dd7a9e2b63c4ea90df3f7474876abbc"
+        }
+      ],
+      "accumulators": [
+        "534d6936f606c8c47f165df9aec8b786be6fb9de791a1fdf98ae22fdcb841e07",
+        "fd2e58ef625cda09a2eddebf110909359fea0c446de8bc9000bf1310f1e4c822",
+        "ea187bbbe31b05c900174f6cff20944533bd1ce8ffeeeaa0ca2fef898d03a9cf",
+        "1a483ff34599af0b1bdde179c8fc4e13226bbd7521055f8c931e236788915112",
+        "ba824ae717f06a3dd63f8fd3b26332d2da879e8e4663618a13295e134f66da67"
+      ]
+    },
+    {
+      "id": "odd-data-lengths",
+      "description": "Data lengths that aren't a multiple of 32, including 1 and 33 bytes",
+      "chainId": "31337",
+      "address": "5fbdb2315678afecb367f032d93f642f64180aa3",
+      "genesis": "4114f74b26b08e131f1569ca3ee07ea82602b23ccdf3569ba889a158396c68da",
+      "events": [
+        {
+          "topics": ["133142a07da881e216e088b1a95e87c13b5b0d5767a30c4ce33b09e071dc81df"],
+          "data": "c5"
+        },
+        {
+          "topics": ["133142a07da881e216e088b1a95e87c13b5b0d5767a30c4ce33b09e071dc81df"],
+          "data": "6420a0cd3ee5b88b099486ca3bdcf34554c92c40745919e5ae78b0c174cab707d1"
+        },
+        {
+          "topics": ["133142a07da881e216e088b1a95e87c13b5b0d5767a30c4ce33b09e071dc81df"],
+          "data": "4ddf58a67dd9112041db1d410f034a09e83cdb9de39571ab2b9dbac1938e67da1fde984839e5bc5216578cc18b1811a63c033312d40f4472fb7c52c1f1b564fe85882817a996dad073eb470bcf625d14be823c618c11906a2bdcb099f6572eb3f03db946b0d0e45e229e5f989d30e95599b7f9e78bfd583c8f4c71286d5690d7c86ae178ca73efc4e5cb05f813162103b3978de5ce5306c5d0fb21d415e207e16572058fbd4bcdab981bc846849f1b63873efd5570bed729be0b5bf48ccda7109422f1cbf6056486dddd366abe97bf686fc60af6ac3368d4122f9fb7054b07ae7b88680d9178441d906df0bc0032a491ea9da3b31bd91e9b2bf7e26b707aaa3428afa87574a97094f43fe67c6fa87c46b310df6bdb3eec7ae974bc3bdf93d0633058d6c1cbfdd4474458781c"
+        }
+      ],
+      "accumulators": [
+        "69bc8ee01cbdff94b2a33238e77eef3b3d444966d7d6e6a0426218e425f40720",
+        "378d6df05f9260e192bb372c3d12f77dbf6efdc347658ac607267c5754ea6bfe",
+        "f0350353ea6b994f04cd70da43923e9daec697926e83aa14c5aba26b5060b01f"
+      ]
+    },
+    {
+      "id": "same-log-twice",
+      "description": "The same log twice gives two different accumulators: the index and the chain both change",
+      "chainId": "84532",
+      "address": "5fbdb2315678afecb367f032d93f642f64180aa3",
+      "genesis": "a0356b94e18514dcff5e7e768ee83c138e7446c8bf008f9f0df42cae0c440cfc",
+      "events": [
+        {
+          "topics": ["5c18b5afab74db2b794b16733ec4e03e096be8e134806caecfa149000c2d0bd4"],
+          "data": ""
+        },
+        {
+          "topics": ["5c18b5afab74db2b794b16733ec4e03e096be8e134806caecfa149000c2d0bd4"],
+          "data": ""
+        }
+      ],
+      "accumulators": [
+        "2bcc1d568a7b5c5b9425d3a6dade2a4c7653922e5e13059ef93da81adbc30c38",
+        "6e4b867b50356654f033b03dd8dea06ffc9a9eb8247df019b14d47ced34699eb"
+      ]
+    },
+    {
+      "id": "other-address",
+      "description": "The every-topic-count logs from another address on the same chain, so every value differs",
+      "chainId": "84532",
+      "address": "e7f1725e7734ce288f8367e1bb143e90bb3f0512",
+      "genesis": "7c10325e44da4dd7100d5c728bcdf164b083e456183519b2e173e232887f6adf",
+      "events": [
+        {
+          "topics": ["2701b4acb79b9e492edfd702f1e5eb0ea070a1de6b05845055e36ff39b83587a"],
+          "data": "314ba75571622cc42f641480fa5cfd0e31ce09f44968788a30ebd63bc09cd88a"
+        },
+        {
+          "topics": [
+            "72b4e1a22c326d772127ce653e753c308a21c2ff96970f259d527ce6b73af9b9",
+            "4aa0000c26bfe37fd1317113382faf060415737e73ca1093b7211413ffbcc7e3"
+          ],
+          "data": "4247ed3fd22fb165d6cb4b40d982ae59d6efddb5ec300e7ea6524d8db6ebbd2b"
+        }
+      ],
+      "accumulators": [
+        "bbcccdaec3349c9f80b94f60d95d6b82ae3078e57735d5f511a69c54be681fa5",
+        "fd02f4e7b3c9469468be15208889f05c74c6cc8a81a774922057520407f86b4c"
+      ]
+    }
+  ],
+  "rejected": [
+    {
+      "id": "chain-id-too-large",
+      "description": "A chain ID of 2^64 has no u64 encoding; deployment reverts",
+      "kind": "genesis",
+      "chainId": "18446744073709551616",
+      "address": "5fbdb2315678afecb367f032d93f642f64180aa3"
+    },
+    {
+      "id": "no-topics",
+      "description": "An anonymous log (no topics) is never accumulated",
+      "kind": "step",
+      "topics": [],
+      "data": ""
+    },
+    {
+      "id": "five-topics",
+      "description": "A log has at most 4 topics",
+      "kind": "step",
+      "topics": [
+        "e8bd5027340e20aaf10e39cc70091d5518c4db3c277fbccb281bc0067eeabf08",
+        "704a1e38ceeb435315ff27587a7adc43abbe6e9a9bfcec8642a012a8acd23a27",
+        "f013712b472ffcfc6f7c137cbb7fced255c415a766f660565f011a4726be5ecf",
+        "b11dd2011cd4996befbf388478d1972f1b8b0a8b2cc51ce1b163bc818a43ed60",
+        "65e736fb6f714d38781a4510c6967c3c86a89c0099b3380b34d46c360b54cc37"
+      ],
+      "data": ""
+    },
+    {
+      "id": "short-topic",
+      "description": "A topic is exactly 32 bytes",
+      "kind": "step",
+      "topics": ["91cde4046fc260eb77922b64f116868ee1e041665a9a0adffad90052cd867b"],
+      "data": ""
+    }
+  ]
+}

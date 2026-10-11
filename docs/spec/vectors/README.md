@@ -6,12 +6,13 @@ Cross-language vectors for the encodings and computations in this spec. TypeScri
 
 One JSON file per spec section or record type, named after it (`primitives.json`, `election-definition.json`, …). Each file is UTF-8 JSON, formatted by `vp check`.
 
-| File              | Covers                                                                                                          |
-| ----------------- | --------------------------------------------------------------------------------------------------------------- |
-| `primitives.json` | Primitive types, record framing and strict-decoding rejections ([[notation]])                                   |
-| `group.json`      | `scalar` and `element` codecs: valid boundaries and every rejected class ([[group]])                            |
-| `board.json`      | Board entries, the board tree with every inclusion and consistency proof, checkpoints, board checks ([[board]]) |
-| `hash.json`       | `H`, `HashToScalar` under each Fiat–Shamir tag, and `h`, with intermediate bytes ([[group]])                    |
+| File                     | Covers                                                                                                          |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------- |
+| `primitives.json`        | Primitive types, record framing and strict-decoding rejections ([[notation]])                                   |
+| `group.json`             | `scalar` and `element` codecs: valid boundaries and every rejected class ([[group]])                            |
+| `board.json`             | Board entries, the board tree with every inclusion and consistency proof, checkpoints, board checks ([[board]]) |
+| `hash.json`              | `H`, `HashToScalar` under each Fiat–Shamir tag, and `h`, with intermediate bytes ([[group]])                    |
+| `event-accumulator.json` | The event accumulator: genesis values, event sequences step by step, rejected inputs ([[contracts]])            |
 
 ## Format
 
@@ -88,6 +89,14 @@ Type descriptors:
 - `uniformBytes`: the 64-byte `expand_message_xmd` output, as lowercase hex, for `hash-to-scalar` and `hash-to-group`.
 - `output`: the result: the 32-byte digest for `H`, the `scalar` encoding for `hash-to-scalar`, the `element` encoding for `hash-to-group`.
 - `notEqual` (only on `generator-h`): encodings the output must differ from (`identity`, `g`, `minusG`).
+
+## Event-accumulator vectors
+
+`event-accumulator.json` checks a computation, so it has its own format, `abolish-event-accumulator-vectors/1`, with the same top-level fields, plus `tag` (the registered tag, as an ASCII string) and:
+
+- `genesis`: each has `id`, `description`, `chainId` (decimal string), `address` (20 bytes, hex) and `accumulator`, the genesis value ([[contracts]], Values).
+- `sequences`: each has `id`, `description`, `chainId`, `address`, `genesis`, `events` (each `{ "topics": [32-byte hex, …], "data": hex }`, in emission order) and `accumulators`, the value after each event in turn.
+- `rejected`: inputs with no accumulator value. `kind` is `genesis` (with `chainId` and `address`: a chain ID with no `u64` encoding) or `step` (with `topics` and `data`: a log with no topics, more than four, or a topic that isn't 32 bytes). A Solidity consumer can't represent a non-32-byte topic and skips it.
 
 ## Rules
 

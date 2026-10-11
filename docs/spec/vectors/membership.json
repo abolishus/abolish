@@ -55,11 +55,11 @@
   ],
   "scopes": [
     {
-      "id": "scope-zero-root",
+      "id": "scope-min-root",
       "definitionHash": "0afac5bc42452f8a13de139568971e5ccf05ace98df48411677b4dc13268a1f7",
-      "root": "0000000000000000000000000000000000000000000000000000000000000000",
-      "scope": "a3f1646342442a02c00f161986dee087ef5cb59b5e867217683deb12b1db7aa4",
-      "scopeField": "10288635400014126445368566119738353120450613335618134539081790042645269478"
+      "root": "0000000000000000000000000000000000000000000000000000000000000001",
+      "scope": "47c6e5d078c306fcbc0eab949c820ad18adee317362d472fd4bffa259561c7ba",
+      "scopeField": "126171607480587442570258821339834677455578994290308855690283438278478230192"
     },
     {
       "id": "scope-max-root",
@@ -85,9 +85,9 @@
     {
       "id": "scope-zero-definition",
       "definitionHash": "0000000000000000000000000000000000000000000000000000000000000000",
-      "root": "0000000000000000000000000000000000000000000000000000000000000001",
-      "scope": "787682bace867d1d4ec34ba18f7472ff5e5f14f0084fa084ebe743721b830217",
-      "scopeField": "104017558754793949689604667304838814595174772207401322800624968360376625993"
+      "root": "0000000000000000000000000000000000000000000000000000000000000002",
+      "scope": "ea1538022a10e6ce6dbe02d2827c7d1dbfcc6e2b199633b4cae22bc5a5a455ae",
+      "scopeField": "174302907190391250271669544514907524880666923733278241006759809941738350653"
     },
     {
       "id": "scope-root-equal-to-r",
@@ -95,59 +95,66 @@
       "definitionHash": "0afac5bc42452f8a13de139568971e5ccf05ace98df48411677b4dc13268a1f7",
       "root": "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001",
       "error": "non-canonical"
+    },
+    {
+      "id": "scope-zero-root",
+      "description": "a tier root of 0 is provable by anyone (proof length above the depth), so it has no scope",
+      "definitionHash": "0afac5bc42452f8a13de139568971e5ccf05ace98df48411677b4dc13268a1f7",
+      "root": "0000000000000000000000000000000000000000000000000000000000000000",
+      "error": "zero-root"
     }
   ],
   "depths": [
     {
-      "groupSize": "1",
+      "leafCount": "1",
       "depth": 1
     },
     {
-      "groupSize": "2",
+      "leafCount": "2",
       "depth": 1
     },
     {
-      "groupSize": "3",
+      "leafCount": "3",
       "depth": 2
     },
     {
-      "groupSize": "4",
+      "leafCount": "4",
       "depth": 2
     },
     {
-      "groupSize": "5",
+      "leafCount": "5",
       "depth": 3
     },
     {
-      "groupSize": "8",
+      "leafCount": "8",
       "depth": 3
     },
     {
-      "groupSize": "9",
+      "leafCount": "9",
       "depth": 4
     },
     {
-      "groupSize": "1023",
+      "leafCount": "1023",
       "depth": 10
     },
     {
-      "groupSize": "1024",
+      "leafCount": "1024",
       "depth": 10
     },
     {
-      "groupSize": "1025",
+      "leafCount": "1025",
       "depth": 11
     },
     {
-      "groupSize": "4294967296",
+      "leafCount": "4294967296",
       "depth": 32
     },
     {
-      "groupSize": "0",
+      "leafCount": "0",
       "error": "out-of-range"
     },
     {
-      "groupSize": "4294967297",
+      "leafCount": "4294967297",
       "error": "out-of-range"
     }
   ]

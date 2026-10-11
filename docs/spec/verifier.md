@@ -51,7 +51,7 @@ Each check names the threats it closes and the STATUS item that specifies it. A 
 
 ### 5. Ballots
 
-- 5.1 Every ballot's membership proof verifies against the electorate root for its tier in the election definition, under the pinned verification key for that tier's depth, as [[membership]] (Checks) specifies (T-04, T-05, T-13; P1-17, P1-17b).
+- 5.1 Every ballot's membership proof verifies against the electorate root for its tier in the election definition, under the pinned verification key for that tier's depth, as [[membership]] (Checks) specifies; a definition with a tier root of 0 fails, since Semaphore's circuit lets anyone prove membership of root 0 (T-04, T-05, T-13; P1-17, P1-17b).
 - 5.2 Its nullifier uses the scope the verifier derives from the election-definition hash and the tier's root (`abolish/v1/nullifier-scope`, [[membership]]), never a scope from anywhere else (T-12, T-13, T-04; P1-17).
 - 5.3 The proof's signal binds everything P1-13 and P1-17 require it to (at least the ballot hash, the election definition, the ballot's tier and whatever the re-vote rule ranks by, such as a sequence number or an L1 reference), so the proof can't be moved to another ballot or replayed (T-38, T-32; P1-12, P1-17).
 - 5.4 Every validity proof verifies, with its Fiat–Shamir challenge recomputed from the full statement table, including the ballot's nullifier ([[domain-separation]]), and constrains the ballot to the election's rules: no over-vote, no negative vote, the approval limit if any (T-28, T-30, T-32; P1-12). **(P1-3)**

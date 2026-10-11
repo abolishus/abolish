@@ -30,9 +30,13 @@ export function semaphoreField(x: Uint8Array): bigint {
  * Binding the definition hash makes the scope unique to one poll on one
  * deployment (T-12, T-30); binding the tier's root gives each tier group its
  * own nullifiers, so one person's ballots in two tiers can't be linked (T-13)
- * and a proof can't be moved to another tier.
+ * and a proof can't be moved to another tier. A root of 0 is rejected:
+ * Semaphore's circuit proves membership of root 0 for any secret when the
+ * proof length exceeds the depth, so such a tier would admit anyone with
+ * unlimited nullifiers (T-04, T-05).
  */
 export function nullifierScope(definitionHash: Uint8Array, root: bigint): Uint8Array {
+  if (root === 0n) throw new RangeError("nullifierScope: a tier root of 0 is provable by anyone");
   const input = new Uint8Array(64);
   input.set(bytes32(definitionHash, "nullifierScope: definitionHash"));
   input.set(encode(fieldBn254, root), 32);
@@ -46,13 +50,14 @@ export function membershipScope(definitionHash: Uint8Array, root: bigint): bigin
 
 /**
  * `D_g = max(1, ⌈log₂ n⌉)`: the one tree depth whose verification key a tier
- * group of `n` members uses, so the depth reveals nothing about the voter's
- * leaf position (T-13).
+ * group uses, so the depth reveals nothing about the voter's leaf position
+ * (T-13). `n` is the LeanIMT's leaf count, removed members included, never
+ * the active member count: a removal zeroes a leaf but doesn't shrink the tree.
  */
-export function membershipDepth(groupSize: bigint): number {
-  if (typeof groupSize !== "bigint" || groupSize < 1n || groupSize > 1n << 32n)
-    throw new RangeError("membershipDepth: group size must be from 1 to 2^32");
+export function membershipDepth(leafCount: bigint): number {
+  if (typeof leafCount !== "bigint" || leafCount < 1n || leafCount > 1n << 32n)
+    throw new RangeError("membershipDepth: leaf count must be from 1 to 2^32");
   let d = 0;
-  while (1n << BigInt(d) < groupSize) d++;
+  while (1n << BigInt(d) < leafCount) d++;
   return Math.max(1, d);
 }

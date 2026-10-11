@@ -31,7 +31,7 @@ interface MembershipVectors {
     readonly error?: string;
   }[];
   readonly depths: readonly {
-    readonly groupSize: string;
+    readonly leafCount: string;
     readonly depth?: number;
     readonly error?: string;
   }[];
@@ -45,7 +45,7 @@ const hex = (s: string) => Uint8Array.from(s.match(/../g) ?? [], (b) => parseInt
 const toHex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
 const bytes32 = fc.uint8Array({ minLength: 32, maxLength: 32 });
-const root = fc.bigInt({ min: 0n, max: BN254_R - 1n });
+const root = fc.bigInt({ min: 1n, max: BN254_R - 1n });
 
 describe("membership vectors (docs/spec/vectors/membership.json)", () => {
   test("uses the format this reader knows", () => {
@@ -59,15 +59,16 @@ describe("membership vectors (docs/spec/vectors/membership.json)", () => {
   test.each(vectors.scopes)("nullifier scope: $id", (v) => {
     const r = BigInt(`0x${v.root}`);
     if (v.error !== undefined) {
-      expect(() => nullifierScope(hex(v.definitionHash), r)).toThrow(EncodeError);
+      const expected = v.error === "zero-root" ? RangeError : EncodeError;
+      expect(() => nullifierScope(hex(v.definitionHash), r)).toThrow(expected);
       return;
     }
     expect(toHex(nullifierScope(hex(v.definitionHash), r))).toBe(v.scope);
     expect(membershipScope(hex(v.definitionHash), r)).toBe(BigInt(v.scopeField ?? ""));
   });
 
-  test.each(vectors.depths)("tree depth for $groupSize members", (v) => {
-    const n = BigInt(v.groupSize);
+  test.each(vectors.depths)("tree depth for $leafCount leaves", (v) => {
+    const n = BigInt(v.leafCount);
     if (v.error !== undefined) expect(() => membershipDepth(n)).toThrow(RangeError);
     else expect(membershipDepth(n)).toBe(v.depth);
   });
@@ -101,12 +102,15 @@ describe("membership properties", () => {
       fc.property(fc.uint8Array({ maxLength: 64 }), (x) => {
         fc.pre(x.length !== 32);
         expect(() => semaphoreField(x)).toThrow(TypeError);
-        expect(() => nullifierScope(x, 0n)).toThrow(TypeError);
+        expect(() => nullifierScope(x, 1n)).toThrow(TypeError);
       }),
       { numRuns },
     );
     for (const bad of [-1n, BN254_R, 1n << 256n])
       expect(() => nullifierScope(new Uint8Array(32), bad)).toThrow(EncodeError);
+    // Root 0 is provable by anyone with any secret (docs/spec/membership.md, Statement).
+    expect(() => nullifierScope(new Uint8Array(32), 0n)).toThrow(RangeError);
+    expect(() => membershipScope(new Uint8Array(32), 0n)).toThrow(RangeError);
   });
 
   test("the depth fits every member's path and is the smallest that does", () => {

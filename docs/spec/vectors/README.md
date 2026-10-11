@@ -104,8 +104,8 @@ Type descriptors:
 `membership.json` covers [[membership]] with its own format, `abolish-membership-vectors/1`, and the same top-level fields, plus:
 
 - `fieldMap`: `F`. Each has `id`, `input` (32 bytes, hex), `keccak256` (the Keccak-256 digest of `input`, hex) and `output` (`F(input)`, decimal).
-- `scopes`: the nullifier scope. Each has `id`, `definitionHash` and `root` (32 bytes each, hex; `root` is read big-endian) and either `scope` (`S_g`, hex) and `scopeField` (`F(S_g)`, decimal), or `error` (`non-canonical`, for a root that isn't a canonical `field<bn254>`).
-- `depths`: the tree depth. Each has `groupSize` (decimal) and either `depth` (a JSON number) or `error` (`out-of-range`).
+- `scopes`: the nullifier scope. Each has `id`, `definitionHash` and `root` (32 bytes each, hex; `root` is read big-endian) and either `scope` (`S_g`, hex) and `scopeField` (`F(S_g)`, decimal), or `error`: `non-canonical` for a root that isn't a canonical `field<bn254>`, `zero-root` for a root of 0 ([[membership]], Statement).
+- `depths`: the tree depth. Each has `leafCount` (the LeanIMT's leaf count, removed members included; decimal) and either `depth` (a JSON number) or `error` (`out-of-range`).
 
 ## Rules
 

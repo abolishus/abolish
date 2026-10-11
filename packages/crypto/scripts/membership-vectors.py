@@ -94,7 +94,7 @@ def field_map(x):
 
 
 def scope(definition_hash, root):
-    assert len(definition_hash) == 32 and 0 <= root < R
+    assert len(definition_hash) == 32 and 0 < root < R
     m = definition_hash + root.to_bytes(32, "big")
     return hashlib.sha256(bytes([len(TAG)]) + TAG + m).digest()
 
@@ -134,11 +134,11 @@ def main():
 
     scopes = []
     cases = [
-        ("zero-root", det("definition", 0), 0),
+        ("min-root", det("definition", 0), 1),
         ("max-root", det("definition", 0), R - 1),
         ("same-definition-other-root", det("definition", 0), int.from_bytes(det("root", 1), "big") % R),
         ("other-definition-same-root", det("definition", 1), int.from_bytes(det("root", 1), "big") % R),
-        ("zero-definition", bytes(32), 1),
+        ("zero-definition", bytes(32), 2),
     ]
     for name, d, root in cases:
         s = scope(d, root)
@@ -161,8 +161,18 @@ def main():
         }
     )
 
-    depths = [{"groupSize": str(n), "depth": depth(n)} for n in (1, 2, 3, 4, 5, 8, 9, 1023, 1024, 1025, 1 << 32)]
-    depths += [{"groupSize": str(n), "error": "out-of-range"} for n in (0, (1 << 32) + 1)]
+    scopes.append(
+        {
+            "id": "scope-zero-root",
+            "description": "a tier root of 0 is provable by anyone (proof length above the depth), so it has no scope",
+            "definitionHash": det("definition", 0).hex(),
+            "root": bytes(32).hex(),
+            "error": "zero-root",
+        }
+    )
+
+    depths = [{"leafCount": str(n), "depth": depth(n)} for n in (1, 2, 3, 4, 5, 8, 9, 1023, 1024, 1025, 1 << 32)]
+    depths += [{"leafCount": str(n), "error": "out-of-range"} for n in (0, (1 << 32) + 1)]
 
     doc = {
         "format": "abolish-membership-vectors/1",

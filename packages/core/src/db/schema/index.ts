@@ -1,6 +1,7 @@
 import { boardEntries } from "./board.ts";
+import { electionDefinitions } from "./definitions.ts";
 
-export { boardEntries };
+export { boardEntries, electionDefinitions };
 
 /**
  * Every table in the schema, by class. Board tables hold public bulletin-board
@@ -10,6 +11,6 @@ export { boardEntries };
  * that could link the two classes (.claude/skills/migrations; T-10, T-13).
  */
 export const TABLE_CLASSES = {
-  board: ["board_entries"],
+  board: ["board_entries", "election_definitions"],
   operational: ["schema_migrations"],
 } as const;

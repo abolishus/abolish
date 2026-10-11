@@ -1,0 +1,114 @@
+import { contract, MAX_PAGE_BYTES } from "@abolishus/api-contract";
+import {
+  BoardReadError,
+  readConsistencyProof,
+  readDefinition,
+  readEntries,
+  readHead,
+  readInclusionProof,
+} from "@abolishus/core";
+import { implement, ORPCError } from "@orpc/server";
+import type { Sql } from "postgres";
+
+// The contract's procedures (packages/api-contract). Each handler parses its
+// already-validated input into bytes, calls core and serialises the answer:
+// no protocol logic lives here (AGENTS.md, Architecture). Every answer is a
+// claim the caller checks with @abolishus/crypto (T-23, T-24, T-34).
+//
+// The context holds the database and nothing else: no handler can see a
+// request's headers, cookies or address, so no procedure can tie what it
+// serves or receives to a person or session (T-10, T-11).
+
+export interface Context {
+  readonly sql: Sql;
+}
+
+const os = implement(contract).$context<Context>();
+
+const fromHex = (hex: string) => new Uint8Array(Buffer.from(hex, "hex"));
+const toHex = (bytes: Uint8Array) => Buffer.from(bytes).toString("hex");
+const ZERO_HASH = "00".repeat(32);
+
+/** The board's position errors, as the contract names them. */
+function boardError(e: unknown, outOfRange: () => Error): never {
+  if (e instanceof BoardReadError) {
+    if (e.code === "beyond-board") throw outOfRange();
+    throw new ORPCError("BAD_REQUEST", { message: "No tree of these sizes has these positions." });
+  }
+  throw e;
+}
+
+/** Board procedures answer only for elections whose definition this server holds. */
+async function knownElection(sql: Sql, electionId: string, notFound: () => Error) {
+  const id = fromHex(electionId);
+  if ((await readDefinition(sql, id)) === undefined) throw notFound();
+  return id;
+}
+
+export const router = os.router({
+  elections: {
+    getDefinition: os.elections.getDefinition.handler(async ({ input, context, errors }) => {
+      const definition = await readDefinition(context.sql, fromHex(input.electionId));
+      if (definition === undefined) throw errors.ELECTION_NOT_FOUND();
+      return { definition: toHex(definition) };
+    }),
+  },
+  board: {
+    getHead: os.board.getHead.handler(async ({ input, context, errors }) => {
+      const id = await knownElection(context.sql, input.electionId, errors.ELECTION_NOT_FOUND);
+      const head = await readHead(context.sql, id);
+      // An empty board has no chain head or root (docs/spec/board.md never
+      // hashes an empty tree): size 0 comes with zeros, which no client checks
+      // anything against.
+      return {
+        treeSize: head.size.toString(),
+        chainHead: head.head === undefined ? ZERO_HASH : toHex(head.head),
+        root: head.root === undefined ? ZERO_HASH : toHex(head.root),
+      };
+    }),
+    getEntries: os.board.getEntries.handler(async ({ input, context, errors }) => {
+      const id = await knownElection(context.sql, input.electionId, errors.ELECTION_NOT_FOUND);
+      const entries = await readEntries(
+        context.sql,
+        id,
+        BigInt(input.start),
+        Number(input.limit),
+        MAX_PAGE_BYTES,
+      ).catch((e: unknown) => boardError(e, errors.OUT_OF_RANGE));
+      return { entries: entries.map(toHex) };
+    }),
+    getInclusionProof: os.board.getInclusionProof.handler(async ({ input, context, errors }) => {
+      const id = await knownElection(context.sql, input.electionId, errors.ELECTION_NOT_FOUND);
+      const path = await readInclusionProof(
+        context.sql,
+        id,
+        BigInt(input.index),
+        BigInt(input.treeSize),
+      ).catch((e: unknown) => boardError(e, errors.OUT_OF_RANGE));
+      return { path: path.map(toHex) };
+    }),
+    getConsistencyProof: os.board.getConsistencyProof.handler(
+      async ({ input, context, errors }) => {
+        const id = await knownElection(context.sql, input.electionId, errors.ELECTION_NOT_FOUND);
+        const path = await readConsistencyProof(
+          context.sql,
+          id,
+          BigInt(input.firstSize),
+          BigInt(input.secondSize),
+        ).catch((e: unknown) => boardError(e, errors.OUT_OF_RANGE));
+        return { path: path.map(toHex) };
+      },
+    ),
+  },
+  ballots: {
+    // Admission (strict decoding, the membership and validity proofs, the
+    // L1 reference and the poll window, verifier 5.x) isn't built yet, so
+    // this server boards no ballot: it fails closed rather than board one it
+    // hasn't checked (T-17, T-52, T-53). A voter can still submit directly to
+    // the contracts once direct submit exists (T-25). P2-3 part 2.
+    submit: os.ballots.submit.handler(async ({ input, context, errors }) => {
+      await knownElection(context.sql, input.electionId, errors.ELECTION_NOT_FOUND);
+      throw errors.ELECTION_NOT_OPEN();
+    }),
+  },
+});

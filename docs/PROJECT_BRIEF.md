@@ -43,6 +43,11 @@ We're building a production-grade, open-source, publicly auditable voting platfo
   - `crypto-review`: adversarial review at the highest effort, with its own prompt.
   - Both fail the check on any blocking finding.
 - At most 2 open PRs at once. Each run: fix your red PRs first, then rebase conflicting ones, then start the next unblocked STATUS.md item. After 3 failed attempts on one PR, label it `blocked`, record why in STATUS.md, and move on.
+- Always work from the latest `main`. Other runs merge constantly, so:
+  - Before any work on a branch (a new item, a fix, a rebase, a review response), run `git fetch origin` and rebase the branch onto `origin/main`. Create new branches from `origin/main`, never from a local `main`.
+  - Right before every push, fetch and rebase again. If `main` moved, rerun the affected tests before pushing.
+  - After a rebase, push your own branch with `--force-with-lease`; never force-push anyone else's branch, and never use plain `--force`.
+  - Before marking a PR ready, confirm it is up to date with `origin/main` and has no conflicts.
 - Decide, don't ask. You make every decision yourself except: naming trustees, anything touching mainnet or real funds, legal or entity matters, spending money, and changes to the brief's non-negotiable properties.
   - For everything else, including one-way-door decisions (chain, identity scheme, cryptographic protocol, privacy model, canonical encoding, permanent storage), choose what your analysis supports, write an ADR in `docs/adr/` with 2–3 options and status "Accepted (agent) — owner may veto", let it merge through the normal checks, and list it under "Decisions to review" in the status docs.
   - Only the owner-only list above gets the `needs-decision` label, and those never block unrelated work.

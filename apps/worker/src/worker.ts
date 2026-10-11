@@ -20,6 +20,8 @@ export interface WorkerOptions {
   readonly auditEveryMs: number;
   /** The first segment of every key; tests give each run its own. */
   readonly prefix?: string;
+  /** The handlers, `HANDLERS` unless a test replaces them to make one fail. */
+  readonly handlers?: typeof HANDLERS;
 }
 
 export interface RunningWorker {
@@ -34,17 +36,25 @@ const elapsed = (job: { processedOn?: number | undefined; finishedOn?: number | 
 export async function startWorker(options: WorkerOptions): Promise<RunningWorker> {
   const { connection, sql, log } = options;
   const prefix = options.prefix ?? KEY_PREFIX;
+  const handlers = options.handlers ?? HANDLERS;
   const ctx = { sql, log };
   const workers = (Object.keys(QUEUES) as QueueKey[]).map((key) => {
     const spec = QUEUES[key];
     const worker = new Worker(
       spec.name,
-      async (job) => {
+      async (job): Promise<void> => {
         // Whatever wrote to Redis, a handler sees only the fields its
         // queue's schema names.
         const data = spec.data.safeParse(job.data);
         if (!data.success) throw new JobError("invalid-job-data");
-        await HANDLERS[key](ctx, data.data);
+        try {
+          await handlers[key](ctx, data.data);
+        } catch (e) {
+          // T-10: BullMQ writes a failure's message to the queue's events
+          // stream, which removeOnFail doesn't clear, and any other error's
+          // message can quote data. Only a JobError's fixed message gets there.
+          throw e instanceof JobError ? e : new JobError("internal");
+        }
       },
       // T-10: a job's data, error and stack trace leave Redis as soon as it
       // finishes, even when its producer didn't ask (JOB_OPTIONS does).
@@ -73,19 +83,25 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
     return { name: spec.name, worker };
   });
   const audits = new Queue(QUEUES.boardAudit.name, { connection, prefix });
-  await audits.upsertJobScheduler(
-    "board-audit",
-    { every: options.auditEveryMs },
-    { name: "boardAudit", data: {}, opts: JOB_OPTIONS },
-  );
+  // Unheard, BullMQ prints the error and its stack to stderr.
+  audits.on("error", () => log({ queue: QUEUES.boardAudit.name, error: "worker" }));
+  const close = async () => {
+    await Promise.all(workers.map(({ worker }) => worker.close()));
+    await audits.close();
+  };
+  try {
+    await audits.upsertJobScheduler(
+      "board-audit",
+      { every: options.auditEveryMs },
+      { name: "boardAudit", data: {}, opts: JOB_OPTIONS },
+    );
+  } catch (e) {
+    await close();
+    throw e;
+  }
   // Started only once the schedule is in place, so a failure there leaves
   // nothing running.
   for (const { name, worker } of workers)
     worker.run().catch(() => log({ queue: name, error: "worker" }));
-  return {
-    async close() {
-      await Promise.all(workers.map(({ worker }) => worker.close()));
-      await audits.close();
-    },
-  };
+  return { close };
 }

@@ -88,6 +88,9 @@ export async function auditBoard(client: Sql, electionId: Uint8Array): Promise<n
   for (const [i, r] of rows.entries()) {
     if (!equal(r.entryHash, board.entryHashes[i] as Uint8Array))
       throw new BoardAuditError("entry-hash-mismatch", i);
+    // The triggers already hold prev_link to the stored previous link, so a
+    // wrong one shows first as that row's link-mismatch; this catches rows
+    // written while the owner had the triggers off.
     if (
       !equal(r.prevLink, i === 0 ? zero : (board.links[i - 1] as Uint8Array)) ||
       !equal(r.link, board.links[i] as Uint8Array)

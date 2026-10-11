@@ -18,12 +18,19 @@ export interface JobLogLine {
  * A board that failed its audit. The election ID and position are public:
  * they are on the board itself, and no person's request led here.
  */
-export interface AuditFindingLine {
-  readonly queue: "{board-audit}";
-  readonly finding: BoardAuditCode;
-  readonly election: string;
-  readonly index: number;
-}
+export type AuditFindingLine =
+  | {
+      readonly queue: "{board-audit}";
+      readonly finding: BoardAuditCode;
+      readonly election: string;
+      readonly index: number;
+    }
+  | {
+      /** The audit itself failed (its message isn't logged), so the board is unchecked. */
+      readonly queue: "{board-audit}";
+      readonly finding: "audit-error";
+      readonly election: string;
+    };
 
 /** A failure outside any job: the worker lost Redis, say. */
 export interface WorkerErrorLine {

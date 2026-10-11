@@ -25,7 +25,9 @@ const hex = (b: Uint8Array) => Buffer.from(b).toString("hex");
 
 /**
  * Audits every board, one after another, so one bad board doesn't hide
- * another: each finding is logged, then the job fails if there was any.
+ * another: each finding is logged, including a board whose audit failed for
+ * another reason (a timeout, a lost connection), then the job fails if there
+ * was any.
  */
 async function boardAudit(ctx: JobContext, _data: JobData<"boardAudit">): Promise<void> {
   let findings = 0;
@@ -33,8 +35,11 @@ async function boardAudit(ctx: JobContext, _data: JobData<"boardAudit">): Promis
     try {
       await auditBoard(ctx.sql, id);
     } catch (e) {
-      if (!(e instanceof BoardAuditError)) throw e;
-      ctx.log({ queue: "{board-audit}", finding: e.code, election: hex(id), index: e.index });
+      ctx.log(
+        e instanceof BoardAuditError
+          ? { queue: "{board-audit}", finding: e.code, election: hex(id), index: e.index }
+          : { queue: "{board-audit}", finding: "audit-error", election: hex(id) },
+      );
       findings++;
     }
   }

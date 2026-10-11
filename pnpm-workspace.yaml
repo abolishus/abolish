@@ -24,11 +24,13 @@ trustPolicyExclude:
   - semver@6.3.1
 # Install scripts run only for packages listed in allowBuilds.
 strictDepBuilds: true
-allowBuilds:
-  # Denied, not allowed: an optional native accelerator for msgpackr (via
-  # bullmq, P2-4). msgpackr falls back to its pure-JS codec without it, so its
-  # install script (node-gyp-build) never needs to run.
-  msgpackr-extract: false
+allowBuilds: {}
+# msgpackr (via bullmq, P2-4) loads this optional native accelerator, a
+# prebuilt binary, whenever it is installed. Left out, msgpackr uses its
+# pure-JS codec, and no opaque native code runs beside the database
+# credential. apps/worker's tests check it doesn't resolve.
+ignoredOptionalDependencies:
+  - msgpackr-extract
 
 catalog:
   # Proving toolchain: must match NOIR_VERSION / BB_VERSION in

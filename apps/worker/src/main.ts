@@ -36,5 +36,8 @@ const worker = await startWorker({
 
 for (const signal of ["SIGINT", "SIGTERM"] as const)
   process.once(signal, () => {
-    void worker.close().then(() => Promise.all([sql.end(), connection.quit()]));
+    worker
+      .close()
+      .then(() => Promise.all([sql.end(), connection.quit()]))
+      .catch(() => process.exit(1));
   });

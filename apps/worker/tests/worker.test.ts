@@ -3,6 +3,7 @@ import { type TestDb, testDb } from "@abolishus/core/test-db";
 import { Queue } from "bullmq";
 import { Redis } from "ioredis";
 import { randomBytes } from "node:crypto";
+import { createRequire } from "node:module";
 import type { Sql } from "postgres";
 import { afterAll, beforeAll, expect, test } from "vite-plus/test";
 import { type LogLine, QUEUES, type RunningWorker, startWorker } from "../src/index.ts";
@@ -68,6 +69,30 @@ async function audit(data: object): Promise<LogLine[]> {
   return outcome();
 }
 
+/** Fails if any key under `keyPrefix`, of any type, holds `marker`. */
+async function expectNoKeyHolds(keyPrefix: string, marker: string) {
+  const keys = await connection.keys(`${keyPrefix}:*`);
+  expect(keys.length).toBeGreaterThan(0);
+  for (const key of keys) {
+    const type = await connection.type(key);
+    const dump =
+      type === "hash"
+        ? JSON.stringify(await connection.hgetall(key))
+        : type === "string"
+          ? String(await connection.get(key))
+          : type === "list"
+            ? JSON.stringify(await connection.lrange(key, 0, -1))
+            : type === "zset"
+              ? JSON.stringify(await connection.zrange(key, 0, -1))
+              : type === "stream"
+                ? JSON.stringify(await connection.xrange(key, "-", "+"))
+                : type === "set"
+                  ? JSON.stringify(await connection.smembers(key))
+                  : `unchecked ${type}`;
+    expect(dump, key).not.toContain(marker);
+  }
+}
+
 test("schedules the board audit, and runs it once at start", async () => {
   const schedulers = await audits.getJobSchedulers();
   expect(schedulers.map((s) => [s.key, s.every])).toEqual([["board-audit", 3_600_000]]);
@@ -98,25 +123,7 @@ test("a job with data its schema doesn't name fails unhandled, and its data is n
   ]);
   expect(JSON.stringify(lines)).not.toContain(MARKER);
   // removeOnFail: nothing in Redis still holds the data.
-  const keys = await connection.keys(`${prefix}:*`);
-  for (const key of keys) {
-    const type = await connection.type(key);
-    const dump =
-      type === "hash"
-        ? JSON.stringify(await connection.hgetall(key))
-        : type === "string"
-          ? String(await connection.get(key))
-          : type === "list"
-            ? JSON.stringify(await connection.lrange(key, 0, -1))
-            : type === "zset"
-              ? JSON.stringify(await connection.zrange(key, 0, -1))
-              : type === "stream"
-                ? JSON.stringify(await connection.xrange(key, "-", "+"))
-                : type === "set"
-                  ? JSON.stringify(await connection.smembers(key))
-                  : "";
-    expect(dump, key).not.toContain(MARKER);
-  }
+  await expectNoKeyHolds(prefix, MARKER);
 });
 
 test("every key the worker uses is under its queue's hash tag", async () => {
@@ -124,6 +131,47 @@ test("every key the worker uses is under its queue's hash tag", async () => {
   const keys = await connection.keys(`${prefix}:*`);
   expect(keys.length).toBeGreaterThan(0);
   for (const key of keys) expect(key.startsWith(`${prefix}:{board-audit}:`), key).toBe(true);
+});
+
+test("a handler's own error message is neither logged nor kept, the events stream included", async () => {
+  // Error messages can quote data (Drizzle's quote the query's parameters).
+  const own = `abolish-test-${hex(randomBytes(6))}`;
+  const lines: LogLine[] = [];
+  const other = await startWorker({
+    connection,
+    sql: app,
+    log: (l) => lines.push(l),
+    auditEveryMs: 3_600_000,
+    prefix: own,
+    handlers: {
+      boardAudit: async () => {
+        throw new Error(`params: ${MARKER}`);
+      },
+    },
+  });
+  try {
+    for (let i = 0; i < 200 && !lines.some((l) => "outcome" in l); i++)
+      await new Promise((r) => setTimeout(r, 25));
+    expect(lines).toEqual([
+      { queue: "{board-audit}", outcome: "failed", error: "internal", ms: expect.any(Number) },
+    ]);
+    await expectNoKeyHolds(own, MARKER);
+  } finally {
+    await other.close();
+    await new Queue(QUEUES.boardAudit.name, { connection, prefix: own }).obliterate({
+      force: true,
+    });
+  }
+});
+
+test("msgpackr's native accelerator isn't installed, so no prebuilt binary loads", async () => {
+  const fromBullmq = createRequire(createRequire(import.meta.url).resolve("bullmq"));
+  const msgpackr = fromBullmq.resolve("msgpackr");
+  expect(() => createRequire(msgpackr).resolve("msgpackr-extract")).toThrow();
+  const { isNativeAccelerationEnabled } = (await import(msgpackr)) as {
+    isNativeAccelerationEnabled: boolean;
+  };
+  expect(isNativeAccelerationEnabled).toBe(false);
 });
 
 // Last: the bad boards stay in the schema and fail every later audit.

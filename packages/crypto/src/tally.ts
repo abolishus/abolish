@@ -139,6 +139,8 @@ function invert(x: bigint): bigint {
 
 /** `λ_i = Π_{l ≠ i} l · (l − i)^{−1} mod ℓ`, for each seat of `seats` in order (distinct, from 1). */
 export function lagrangeAtZero(seats: readonly number[]): bigint[] {
+  if (seats.some((s) => !Number.isSafeInteger(s) || s < 1 || s > MAX_TRUSTEES))
+    throw new RangeError("lagrangeAtZero: seats are from 1 to MAX_TRUSTEES");
   if (new Set(seats).size !== seats.length) throw new RangeError("lagrangeAtZero: distinct seats");
   return seats.map((i) =>
     seats.reduce((acc, l) => (l === i ? acc : mod(acc * BigInt(l) * invert(BigInt(l - i)))), 1n),
@@ -166,8 +168,16 @@ export function openCell(
       throw new RangeError("openCell: seats are from 1 to the panel size");
   const passing: number[] = [];
   const excluded: number[] = [];
+  // A value that isn't a canonical scalar has no encoding, so it can't be on
+  // the board: it fails here rather than being reduced mod ℓ by the check.
+  const canonical = (shares: readonly Share[]) =>
+    Array.isArray(shares) &&
+    shares.every((s) =>
+      [s?.v, s?.r].every((x) => typeof x === "bigint" && x >= 0n && x < GROUP_ORDER),
+    );
   for (const seat of seats)
-    (checkSummedShares(aggregate, seat, summed.get(seat) as readonly Share[])
+    (canonical(summed.get(seat) as readonly Share[]) &&
+    checkSummedShares(aggregate, seat, summed.get(seat) as readonly Share[])
       ? passing
       : excluded
     ).push(seat);
@@ -197,7 +207,8 @@ export function openCell(
 
 /**
  * A coarser total: per option, the sum of the given cells' counts
- * (docs/spec/tally.md, Coarser totals). Derived, never opened.
+ * (docs/spec/tally.md, Coarser totals). Derived, never opened. The caller
+ * passes each cell once: nothing here can tell two equal cells apart.
  */
 export function deriveTotal(cells: readonly (readonly bigint[])[]): bigint[] {
   if (cells.length === 0) throw new RangeError("deriveTotal: at least one cell");

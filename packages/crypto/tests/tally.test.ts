@@ -316,8 +316,21 @@ describe("checks and inputs", () => {
       ]),
     ).toThrow(RangeError);
     expect(() => lagrangeAtZero([1, 1])).toThrow(RangeError);
+    expect(() => lagrangeAtZero([0, 1])).toThrow(RangeError);
+    expect(() => lagrangeAtZero([1, 17])).toThrow(RangeError);
     expect(() => deriveTotal([])).toThrow(RangeError);
     expect(() => deriveTotal([[1n], [1n, 2n]])).toThrow(RangeError);
+  });
+
+  test("a summed share that isn't a canonical scalar is excluded, though it passes mod ℓ", () => {
+    const { ballots, summed } = honestCell(rules, [[1, 0]]);
+    const aliased = (summed[0] as Share[]).map((s, j) =>
+      j === 0 ? { v: s.v + GROUP_ORDER, r: s.r } : s,
+    );
+    expect(checkSummedShares(aggregateCell(rules, ballots), 1, aliased)).toBe(true);
+    const posted = new Map(summed.map((s, i) => [i + 1, i === 0 ? aliased : s]));
+    const r = openCell(rules, ballots, posted);
+    expect(r).toMatchObject({ ok: true, combined: [2, 3], excluded: [1], counts: [1n, 0n] });
   });
 
   test("an empty cell opens to zero from (0, 0) sums", () => {

@@ -2,7 +2,7 @@
 
 - Status: Accepted (agent) — owner may veto (2026-10-11, rule A): option A, with the conditions under Decision
 - Date: 2026-10-11
-- Deciders: agent, owner may veto (rule A). Owner-only, if the gate in Decision isn't met: anything that would put document data, or proofs from which it could later be extracted, on-chain or on the board (the brief's "No PII on-chain, ever").
+- Deciders: agent, owner may veto (rule A). Owner-only: whether a chip-holder-recomputable nullifier on the board counts as PII on-chain, publishing proofs that are only computationally zero-knowledge, and the reading of bb.js as part of the verifier's trust base (the brief's "No PII on-chain, ever"; AGENTS.md, verifier trust base).
 - Threats addressed: T-03, T-05, T-06, T-07, T-13, T-15, T-17, T-19, T-21 (see [[THREAT_MODEL]])
 
 ## Context
@@ -26,13 +26,13 @@ Facts below were read on 2026-10-11 from each project's documentation and public
 
 ### A. zkPassport
 
-ICAO 9303 passports and ID cards, read over NFC by the zkPassport app (https://docs.zkpassport.id). Aztec Labs has owned it since May 2026.
+ICAO 9303 passports and ID cards, read over NFC by the zkPassport app (https://docs.zkpassport.id). Aztec Labs acquired its maker, Obsidion, in May 2026 (https://siliconangle.com/2026/05/27/aztec-labs-acquires-zkpassport-maker-obsidion-age-verification-pressure-mounts/).
 
-- **Proof system:** Noir circuits proven with UltraHonk on the phone. The zero-knowledge flavour is the default, and there is no per-circuit trusted setup, only Aztec's universal SRS. The circuits pin Noir `1.0.0-beta.22`, our pin (`circuits/package.json`). Proofs are recursively compressed into one outer proof (https://docs.zkpassport.id/faq).
+- **Proof system:** Noir circuits proven with UltraHonk on the phone. Its tooling defaults to the zero-knowledge flavour (`cloud-prover/src/handler.ts`); unconfirmed for the exact outer proof that would be published, since EVM wrappers have used non-zero-knowledge flavours. There is no per-circuit trusted setup, only Aztec's universal SRS. The circuits pin Noir `1.0.0-beta.22`, our pin (`circuits/package.json` @5bd0f61). Proofs are recursively compressed into one outer proof (https://docs.zkpassport.id/faq).
 - **Proving location:** client-side; personal data never leaves the phone (FAQ). The optional cloud prover, used only to wrap a proof for EVM verification, receives subproofs whose private inputs are already concealed (`cloud-prover/README.md`).
 - **Verification:**
   - **Off-chain** in TypeScript with bb.js (`@zkpassport/sdk`, `verify()`). A local-only mode is available; without it, the SDK falls back to zkPassport's hosted verifier (https://docs.zkpassport.id/changelog).
-  - **On-chain:** a root verifier at one address on Ethereum, Sepolia and Base, plus a root registry configured for Base (`registry-sdk/src/networks.ts`). **No third chain.** Unconfirmed: whether Base's roots are written there directly or bridged from Ethereum.
+  - **On-chain:** a root verifier at one address on Ethereum, Sepolia and Base, plus a root registry configured for Base (`registry-sdk/src/networks.ts`). **No third chain.** Unconfirmed: whether Base's roots are written there directly or bridged from Ethereum. That doesn't bear on the no-third-chain requirement, because our verifier doesn't trust zkPassport's contracts (Consequences).
   - **Admin keys:** an admin key can swap the root verifier's sub-verifiers (deployment JSON), and an oracle role updates the registry roots.
 - **Trust roots:** the certificate, circuit and sanctions registries are Merkle roots on-chain. Each root carries a validity window, a revocation flag and the IPFS CID of the packaged certificate list. A third party can recompute a root from the list (`registry-contracts/src`, `registry-sdk/README.md`). The roots come from the ICAO and national master lists; the full curation pipeline isn't documented (unconfirmed).
 - **Uniqueness nullifier:** `Poseidon2(private_nullifier, service_scope, service_subscope)`, where `private_nullifier = Poseidon2(dg1, eContent, SOD signature)`. It is per document, scoped to a domain and a scope, and unlinkable across scopes except by someone holding the chip data (`lib/commitment`).
@@ -42,10 +42,11 @@ ICAO 9303 passports and ID cards, read over NFC by the zkPassport app (https://d
 - **Coverage:** passports, national IDs and residence permits from countries that publish their CSCA certificates. US passports are supported, US ID cards aren't, and there is no mDL support (`document-support-rules.json`, https://docs.zkpassport.id/limitations).
 - **Licence:** Apache-2.0 for the circuits, SDK and mobile app. Development is very active, with breaking SDK changes in 0.15–0.18.
 - **Cons:**
-  - **No public audit of the circuits yet.** They are "under internal and external review" (`SECURITY.md`). The OPRF circuits they use were audited by Least Authority in January 2026.
+  - **No public audit of the circuits yet.** They are "under internal and external review" (`SECURITY.md`). The OPRF circuits they use were audited by Least Authority in January 2026 (https://leastauthority.com/wp-content/uploads/2026/03/Least-Authority-TACEO-OPRF-Noir-Circuits-Final-Audit-Report.pdf).
   - **Passive authentication only:** no circuit checks Active or Chip Authentication, so cloned chip data (the SOD and data groups) is enough to prove. FaceMatch mitigates this only partly.
   - **"One ID, one account", not one person** (https://docs.zkpassport.id/examples/personhood). This is the T-03 residual that every option shares.
   - **Statistical zero knowledge of bb's UltraHonk isn't established** ([[0009-membership-proof]]). See Consequences.
+  - **No mDL and no US state ID cards.** The brief's Tier 2 names both passports and ISO 18013-5 mDLs. With zkPassport, Tier 2 at launch covers only people who hold a US passport, roughly half of US citizens (unconfirmed for 2026). Adding mDLs later to the same tier would give a person with both a passport and an mDL two identities, unless the two credentials share a uniqueness mechanism (T-03).
 
 ### B. Self (formerly OpenPassport)
 
@@ -67,7 +68,7 @@ ICAO 9303 passports and ID cards, read over NFC by the zkPassport app (https://d
 - **No uniqueness nullifier exists in the circuits,** and Google Wallet accepts only its own pinned circuit. That fails requirement 2: Tier 2 would have no Sybil resistance.
 - **Verification and coverage:**
   - Verifiers exist in C++, Rust and Go. There is none in TypeScript or WASM, and none on the EVM.
-  - mDL data has no citizenship field.
+  - ISO 18013-5 defines an optional `nationality` element, but US state mDLs are issued to non-citizens too and don't attest citizenship.
   - US coverage is a growing set of state mDLs (unconfirmed for 2026).
 
 ## Recommendation
@@ -90,58 +91,88 @@ What would change it:
 - an audit finding that breaks zkPassport's circuits;
 - zkPassport moving its registries off Base, or making verification depend on a hosted service;
 - a licence change;
-- the zero-knowledge gate below failing with no acceptable fallback;
+- the owner ruling that every available nullifier mode puts PII on-chain;
 - longfellow-zk gaining a scoped nullifier and passport support.
 
 ## Consequences
 
 ### How Abolish uses zkPassport (P3-4)
 
-Conditions on using zkPassport (T-21, T-06, T-05):
+These conditions are part of the decision (T-21, T-06, T-05, T-03). P3-4 writes them into [[verifier]] 2.4 and [[membership]], which today cover only the binding.
 
-- **Verifier.**
-  - Our verifier never calls zkPassport's hosted verifier, its RPC endpoints or its upgradeable root verifier.
-  - It verifies proofs locally with the bb.js that `AGENTS.md` pins, against circuit verification keys vendored with their provenance (tag, commit, sha256, re-fetched in CI). Allowing that publisher needs a `ci:` PR first, under rule B.
-  - It checks each proof's certificate and circuit roots against roots the election definition fixes at an L2 block, as it does for tier roots.
-  - It recomputes those roots from the IPFS-packaged certificate lists, which we mirror and archive (T-21, T-36, [[0005-permanent-archive]]).
+- **Verification.**
+  - Our verifier never calls zkPassport's hosted verifier, its RPC endpoints, its cloud prover or its upgradeable root verifier.
+  - It verifies proofs locally with the bb.js that `AGENTS.md` pins, against verification keys vendored with their provenance (tag, commit, sha256, re-fetched in CI). Allowing that publisher needs a `ci:` PR first, under rule B.
   - P3-4 confirms that zkPassport's bb version matches ours, or moves the toolchain pins together, as `AGENTS.md` requires.
-- **Contracts.** No contract of ours trusts zkPassport's root verifier or registry for anything that affects a result: both are upgradeable by zkPassport's keys (T-62, T-71).
-  - A Tier 2 addition counts only if the verifier's own check of its proof passes ([[verifier]] 2.4).
-  - An on-chain check, if P3-2 adds one, is spam control only.
-- **Binding.** The bound data is fixed by [[membership]] and P3-4: the identity commitment, the tier group identifier, the chain ID and the registry address, under an Abolish domain tag. The verifier attributes an addition by what the proof binds, never by the transaction (T-21, T-06).
-- **Nullifier.**
-  - The scope is a constant per deployment: an Abolish domain and a scope that names the tier group. The verifier rejects a second counted addition with the same scoped nullifier (T-03).
-  - **Non-salted mode** for now. With it, an issuing state can test whether a document it issued registered at Abolish's Tier 2 (it learns registration, never a vote: membership proofs are perfectly zero-knowledge, [[0009-membership-proof]]). This is stated under T-13 and T-19.
-  - The salted mode would add a third-party OPRF network to the uniqueness guarantee, and mandatory Apple or Google device attestation to registration. That excludes privacy-focused devices and gives two more parties a say in who can register (T-19, T-27). A later ADR can adopt it.
-- **Mock documents.** The reference election (P1-20) uses zkPassport's mock documents, whose nullifier type is MOCK. Those stubs are clearly marked, and verifiers reject MOCK nullifiers outside a local chain.
+  - **`@aztec/bb.js` in the verifier's trust base.** `AGENTS.md` lets `packages/verifier` depend on gated packages, `@noble/*`, generated ABIs and circuit artifacts only. This ADR reads bb.js, already pinned as part of the proving toolchain, as the runtime for circuit artifacts. As with [[0009-membership-proof]]'s reading of Groth16, an agent ADR doesn't settle that reading: the owner confirms it before P3-4 builds the verifier side (listed in [[STATUS]]).
+- **Circuit root: a pinned set, never a parameter.** zkPassport's outer proof accepts any inner proof whose verification-key hash is in its circuit registry root, so that root decides soundness. Our verifier recomputes it from a vendored, reviewed set of inner-circuit verification keys, all of the zero-knowledge flavour (the `circuits` skill), and rejects a proof under any other root. Changing that set is a new protocol version. Neither the definition's author (A-2) nor zkPassport's oracle can choose it (T-05, T-06). If P3-4 finds that the proof isn't structured this way, it amends this ADR before building.
+- **Certificate roots: chained to pinned sources.**
+  - A matching list isn't enough: our own operator could publish a list containing its own CSCA and mint Tier 2 members. So every certificate in a list the verifier accepts must chain to a pinned, signed source: the ICAO PKD master list, or a national master list that the release pins with its provenance.
+  - The verifier also requires the root to have appeared in zkPassport's registry on Base. That is a second, independent party's corroboration, not a trust in their contracts (T-21, T-06).
+  - The lists are mirrored and archived ([[0005-permanent-archive]]).
+- **Root history.** Tier groups outlive elections, so each addition is checked against a certificate root that was valid at the addition's own L2 block, never against one root per election.
+- **Proof date.**
+  - zkPassport's prover chooses the date its proof is checked against. The verifier requires that date to be within a stated bound of the addition's L2 timestamp, and the document to be unexpired then.
+  - Without this, a holder could backdate a proof to register an expired or replaced document whose chip still reads, alongside the new one (T-03).
+  - Renewal or replacement while the old chip still works remains a residual (T-03).
+- **Binding.** The bound data is a canonical record that P3-4 specifies in `docs/spec/` under its own domain tag, decoded strictly. It carries the identity commitment, the tier group identifier, the chain ID and the registry address. The verifier attributes an addition by what the proof binds, never by the transaction (T-21, T-06, T-31).
+- **Disclosure.** Only predicates are proven (US nationality, age ≥ 18), never disclosed values. Each public input of the published proof is listed, and P3-4 shows that none is a deterministic, low-entropy function of document data (T-17).
+- **Nullifier uniqueness.**
+  - One scope for Tier 2 per deployment, not per group. If Tier 2 ever has several groups (state or district electorates), one document still registers once, and its region comes from a proven predicate under the same nullifier, which a later spec defines.
+  - The nullifier type (non-salted, salted or MOCK) is fixed per deployment, and the verifier rejects any other type. Changing it needs a new Tier 2 group with full re-registration, never a second derivation alongside the first.
+  - No election counts Tier 2 groups from two deployments.
+  - The verifier counts one addition per scoped nullifier. A removal never frees a nullifier, so an operator can't remove a member and re-add them. A voter who loses their secret is recovered by the voting-identity backup (P2-6), or registers again only with a new document.
+  - P3-2 defines who may authorise a Tier 2 removal.
+- **Mock documents.**
+  - The reference election (P1-20) uses zkPassport's mock documents, whose nullifier type is MOCK. Those stubs are clearly marked.
+  - A verifier accepts MOCK only when the election definition carries an explicit test flag and its chain ID is on a pinned allow-list of local and test chains. It never accepts MOCK on a mainnet chain ID. This keeps the phase gate (a reference election on staging, which runs on Base Sepolia) passable.
+  - P3-4 confirms that MOCK is fixed by the circuit (by the mock CSCA), not chosen by the prover, and that zkPassport's production list contains no mock CSCA.
+- **Contracts.** No contract of ours trusts zkPassport's root verifier or registry for anything that affects a result: both are upgradeable by zkPassport's keys (T-62, T-71). An on-chain check, if P3-2 adds one, is spam control only.
 
-### The zero-knowledge gate (T-15, T-17)
+### Before any real document: zero knowledge and the nullifier (T-15, T-17, T-13)
 
-The verifier must re-check every Tier 2 addition (requirement 5). So each addition's document proof has to be public, on the board and in the permanent archive, along with its public inputs. The proof's private inputs include the document's data groups (`dg1`: name, document number, date of birth, nationality). If the published proof is only computationally zero-knowledge, a future adversary (A-11) could recover those inputs. That would put personal data in the permanent public record, attached to an identity commitment. It would not reveal votes, since membership proofs stay perfectly zero-knowledge, but it would breach "No PII on-chain, ever".
+The verifier must re-check every Tier 2 addition (requirement 5). So each addition's proof and its public inputs, including the scoped nullifier, would be public: on the board and in the permanent archive. That raises two questions.
 
-[[0009-membership-proof]] found no published argument that bb's zero-knowledge UltraHonk is statistically zero-knowledge. So:
+1. **Zero knowledge of the published proof.**
+   - The proof's private inputs include the document's data groups (`dg1`: name, document number, date of birth, nationality). If the proof is only computationally zero-knowledge, a future adversary (A-11) could recover them. That would put personal data in the permanent public record, attached to an identity commitment. It wouldn't reveal votes, since membership proofs are perfectly zero-knowledge, but it would breach "No PII on-chain, ever".
+   - [[0009-membership-proof]] found no published argument that bb's zero-knowledge UltraHonk is statistically zero-knowledge.
+   - **Gate (P3-4):** a reviewed argument, for the exact bb version and the zkPassport circuits, that the published proof is statistically zero-knowledge.
+   - **If the gate isn't met,** the agent's default is to keep proofs off the board and have a trustee threshold attest each Tier 2 addition, with signed attestations on the board. Tier 2 stuffing is then checkable only by trusting the attesters, as for Tiers 0 and 1 (T-06). That breaches no non-negotiable, so it is the agent's call under rule A.
+   - Publishing computationally zero-knowledge proofs anyway would rest "No PII on-chain" on a computational assumption. Only the owner can choose that.
+2. **The scoped nullifier.**
+   - In non-salted mode, anyone who has read the chip can recompute a document's nullifier and so map it to a named person and their identity commitment. That includes the issuing state, a malicious build of the proof app (T-19) and anyone holding leaked chip dumps.
+   - Whether such a value counts as PII on-chain is a reading of a non-negotiable. So this ADR doesn't decide it: it is an owner question (`needs-decision`, listed in [[STATUS]]).
+   - The alternatives each have a trust cost:
+     - zkPassport's salted mode: a third-party threshold OPRF network, plus mandatory Apple or Google device attestation, which excludes privacy-focused devices (T-19, T-27);
+     - a nullifier keyed by a threshold VOPRF that the trustees run (needs design, P3-4);
+     - keeping nullifiers off the board with the attesters, as under question 1's fallback.
 
-- **Gate (P3-4, before any real document is registered on any public chain, testnet included):** establish, with a reviewed argument for the exact bb version and the zkPassport outer circuit, that the published proof is statistically zero-knowledge.
-- **If the gate is met:** document proofs are published, and T-06's Tier 2 mitigation is complete.
-- **If it isn't met,** the agent doesn't pick between the two remaining options, because each crosses a line the owner owns. P3-4 labels the question `needs-decision`, and Tier 2 stays off real documents until the owner answers. The two options:
-  - (a) Publish the proofs anyway, with T-15 and T-17 stating that document data is protected only computationally. This changes "No PII on-chain, ever" to a computational reading.
-  - (b) Keep proofs off the board, and have an operator or the trustees attest each Tier 2 addition. Then Tier 2 group stuffing is checkable only by trusting the attesters (T-06), as for Tiers 0 and 1.
-- Meanwhile Tier 0 and Tier 1 work proceeds, and Tier 2 works end to end on mock documents.
+**No real document is registered on any public chain, testnet included, until both questions are settled.** Tier 2 works end to end on mock documents meanwhile, and Tier 0 and Tier 1 work proceeds.
 
 ### Residuals, stated in the threat files
 
-- **T-03:** passive authentication only, so cloned chip data proves. A person with two documents gets two identities, and an issuing state can mint identities.
-- **T-07, T-05:** soundness rests on zkPassport's unaudited circuits and Aztec's universal SRS.
-- **T-21:** zkPassport's oracle controls which certificates its roots admit. Our verifier recomputes the roots from the published lists, so it can detect a bad list but not the oracle's choice of which genuine certificates to include.
+- **T-03:** passive authentication only, so cloned chip data proves. A person with two documents gets two identities, including a renewed or replaced document whose old chip still reads. An issuing state can mint identities.
+- **T-05, T-07:** soundness rests on zkPassport's unaudited circuits, on passive authentication, and on Aztec's universal SRS.
+- **T-21:**
+  - zkPassport's oracle and its circuit-registry admin decide which certificates and circuits their own roots admit. Our verifier pins the circuit set itself and chains certificates to pinned master lists, so neither can add a circuit or a certificate the verifier accepts.
+  - What remains is the master-list signers themselves, and an operator who chooses which genuine certificates to omit, which can only exclude people.
 - **T-19:** the voter runs zkPassport's app until P5-3 and P5-4 ship ours. The app is open source, but the binary the voter installs isn't checked against it.
+- **Coverage:** Tier 2 at launch covers US passport holders only (no mDLs, no state ID cards).
 
 ### Follow-ups
 
-- **P3-4** (Tier 2 QR handoff) carries the conditions and the gate above, and the hand-off to [[membership]] for the bound-data layout.
-- **P3-2** (groups) carries the on-chain addition path.
-- **P5-3 and P5-4** reuse zkPassport's circuits in our own app.
-- Threat files T-03, T-06, T-13, T-19 and T-21 name this decision.
+- **P3-4** (Tier 2 QR handoff): the conditions above, the spec edits to [[verifier]] 2.4 and [[membership]], the bound-data record, and the gate.
+- **P3-2** (groups): the on-chain addition path, and Tier 2 removals.
+- **P5-3 and P5-4:** reuse zkPassport's circuits in our own app.
+- Threat files T-03, T-05, T-06, T-07, T-13, T-17, T-19 and T-21 name this decision.
 
 ## Decision
 
-Under rule A (`AGENTS.md`): **option A, zkPassport**, used on the conditions above, with status `Accepted (agent) — owner may veto`, and listed under Decisions to review in [[STATUS]]. The zero-knowledge gate is P3-4's. If it fails, the choice between (a) and (b) goes to the owner, and nothing in this ADR decides it.
+Under rule A (`AGENTS.md`): **option A, zkPassport**, used on the conditions above, with status `Accepted (agent) — owner may veto`, and listed under Decisions to review in [[STATUS]].
+
+The agent's fallback if the zero-knowledge gate fails is attested additions. Two questions stay with the owner and are listed in [[STATUS]]:
+
+- whether a chip-holder-recomputable nullifier counts as PII on-chain;
+- the reading of bb.js as part of the verifier's trust base.
+
+Neither blocks other work.

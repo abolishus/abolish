@@ -1,0 +1,21 @@
+{
+  "name": "@abolishus/circuits",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Abolish's Noir circuits: the shared packing library so far; the first custom circuit follows.",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "scripts": {
+    "build": "nargo check --workspace",
+    "check": "nargo fmt --check && nargo check --workspace",
+    "test": "nargo test --workspace && vp test run"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vite-plus": "catalog:"
+  },
+  "abolish": {
+    "buildOutputs": []
+  }
+}

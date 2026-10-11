@@ -41,6 +41,13 @@ What Abolish derives around Semaphore v4's membership circuit (`docs/spec/member
 
 Groth16 verification of the proofs themselves is P1-17b's.
 
+## Circuit-facing values
+
+How tags and bytes become BN254 field elements, exactly as `packages/circuits` does in Noir (`docs/spec/notation.md`, Circuit-facing values; `docs/spec/domain-separation.md`, In-circuit hashes; T-30, T-31):
+
+- `circuitTagField(tag)`: `int(H(DS("abolish/v1/circuit-tag", tag))) >> 8`, the constant by which a tag enters a circuit, only for a tag registered In-circuit (none yet), so no plain-hash tag gets a second layout (T-30).
+- `packBytes(bytes)`: `bytes[N]` as `ceil(N / 31)` big-endian chunks. `packBoundedBytes(bytes, max)`: the length, then the content zero-padded to `max` and packed.
+
 ## Rules
 
 - Runtime dependencies are `@noble/*` only, pinned to exact versions in the workspace catalog, with an `@noble`-only transitive closure, no node built-ins and no workspace imports. CI's `gated` check (`.github/tools/ci/src/gated.ts`) enforces this from the lockfile, the `src` imports and the packed bundle, which must inline nothing from `node_modules` (T-55, T-36).
@@ -54,8 +61,8 @@ vp run --filter @abolishus/crypto test
 
 - Unit and property tests use `vite-plus/test` and `fast-check`; property tests honour `FC_NUM_RUNS` (CI sets 1000) and print their seed on failure.
 - Published vectors are vendored byte for byte under [`test-vectors/`](test-vectors/README.md), each listed in `test-vectors/manifest.json` with its source URL and sha256. `tests/vectors/harness.ts` checks the sha256 before any test reads a file.
-- Cross-language vectors for what the spec defines live in `docs/spec/vectors/`, not here. `tests/primitives-vectors.test.ts` runs every vector in `primitives.json` and `group.json`, building codecs from the files' type descriptors; `tests/group.test.ts` runs `hash.json`; `tests/board-vectors.test.ts` runs `board.json`; `tests/membership.test.ts` runs `membership.json`.
-- `scripts/group-vectors.py` prints `group.json` and `hash.json` from an independent Python implementation of RFC 9496, RFC 9380 §5.3.1 and RFC 9497 §4.1 (`python3 -I packages/crypto/scripts/group-vectors.py docs/spec/vectors`, then `vp check --fix`). `scripts/static-dh-factors.ts` reproduces ADR 0007's factor search of ℓ ± 1 (`vp node packages/crypto/scripts/static-dh-factors.ts`, about 30 seconds). `scripts/board-vectors.py` prints `board.json` from an independent Python implementation of `docs/spec/board.md` and RFC 9162 §2.1, after checking itself against the vendored transparency-dev vectors. `scripts/membership-vectors.py` prints `membership.json`, with its own Keccak-256 checked against `hashlib.sha3_256` and published answers.
+- Cross-language vectors for what the spec defines live in `docs/spec/vectors/`, not here. `tests/primitives-vectors.test.ts` runs every vector in `primitives.json` and `group.json`, building codecs from the files' type descriptors; `tests/group.test.ts` runs `hash.json`; `tests/board-vectors.test.ts` runs `board.json`; `tests/membership.test.ts` runs `membership.json`; `tests/circuit.test.ts` runs `circuit.json`.
+- `scripts/group-vectors.py` prints `group.json` and `hash.json` from an independent Python implementation of RFC 9496, RFC 9380 §5.3.1 and RFC 9497 §4.1 (`python3 -I packages/crypto/scripts/group-vectors.py docs/spec/vectors`, then `vp check --fix`). `scripts/static-dh-factors.ts` reproduces ADR 0007's factor search of ℓ ± 1 (`vp node packages/crypto/scripts/static-dh-factors.ts`, about 30 seconds). `scripts/board-vectors.py` prints `board.json` from an independent Python implementation of `docs/spec/board.md` and RFC 9162 §2.1, after checking itself against the vendored transparency-dev vectors. `scripts/membership-vectors.py` prints `membership.json`, with its own Keccak-256 checked against `hashlib.sha3_256` and published answers. `scripts/circuit-vectors.py` prints `circuit.json`, reading the tags from the registry in `docs/spec/domain-separation.md`.
 
 ## License
 

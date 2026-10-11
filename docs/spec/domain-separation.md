@@ -34,7 +34,15 @@ How the tag enters the hash depends on the primitive. In every case the tag is t
 
 - **Key derivation and AEAD**: the tag is the KDF's `info` or label input, and an AEAD's associated data starts with `DS(tag, ·)`. The protocol section that uses them gives the exact layout.
 
-- **In-circuit hashes**: in protocol version 1 no Abolish tag enters a circuit. Membership proofs use Semaphore v4's circuit unchanged, whose internal Poseidon hashes keep Semaphore's definitions; what Abolish derives around it (the nullifier scope, the message) is a plain hash under `DS`, mapped into the field by Semaphore's own rule ([[membership]], Field mapping). P1-17c, which scaffolds Noir for the first custom circuit, specifies how a tag maps to a field element, applied to the registered string, so in-circuit and off-circuit tags can't diverge.
+- **In-circuit hashes**: a hash computed inside a Noir circuit takes its tag as one field element, `tag_field(tag)`, as its first input, followed by the input layout its registry row defines, with a fixed number of inputs per tag. The row also names the hash (Poseidon2 over BN254, say). The tag's field element is
+
+  ```
+  tag_field(tag) = int(H(DS("abolish/v1/circuit-tag", tag))) >> 8
+  ```
+
+  where `tag` is the registered string's ASCII bytes and `int` reads the 32-byte digest big-endian. The shift leaves 248 bits, so `tag_field(tag) < r` with no reduction, as for [[membership]]'s `F`, and two tags get the same field element only through a collision in 248 bits (about 2¹²⁴ work). A circuit embeds `tag_field(tag)` as a constant computed off-circuit (`docs/spec/vectors/circuit.json`), and an off-circuit implementation of the same hash uses the same constant, so in-circuit and off-circuit tags can't diverge (T-30, T-31). Deriving the constant from the string, rather than choosing one per circuit, keeps the registry the only place a tag is defined. A tag used this way is registered with the primitive In-circuit.
+
+  In protocol version 1 no Abolish tag enters a circuit yet. Membership proofs use Semaphore v4's circuit unchanged, whose internal Poseidon hashes keep Semaphore's definitions; what Abolish derives around it (the nullifier scope, the message) is a plain hash under `DS`, mapped into the field by Semaphore's own rule ([[membership]], Field mapping).
 
 - **External formats** that carry their own domain separation (EIP-712 signatures, Ethereum transaction and receipt hashes, Arweave and IPFS identifiers) are used as their standards define them, and aren't registered here.
 
@@ -72,3 +80,4 @@ Status values: **specified** (input layout defined, link given), **reserved** (p
 | `abolish/v1/event-accumulator`         | Running hash of a contract's own events ([[0005-permanent-archive]], T-71, T-25)                                                                                                                                                                                           | Plain hash    | P1-18  | Specified ([[contracts]])                    |
 | `abolish/v1/generator-h`               | Second Pedersen generator `h`, with no known discrete log relative to `g`: hiding needs only `h` ≠ identity, but whoever knows `log_g h` can open a commitment to any value, so this is what makes ballot commitments and VSS commitments binding (T-15, T-28, T-29, T-39) | Hash-to-curve | P1-11  | Specified ([[group]], Hash to group and `h`) |
 | `abolish/v1/kem/share`                 | Hybrid KEM combiner and AEAD for trustee shares ([[0002-everlasting-privacy]]; Diffie–Hellman only if the owner's ML-KEM question goes that way)                                                                                                                           | KDF and AEAD  | P1-12  | Reserved                                     |
+| `abolish/v1/circuit-tag`               | A tag's field element for in-circuit hashes, over the tag's ASCII bytes (T-30, T-31)                                                                                                                                                                                       | Plain hash    | P1-17c | Specified (In-circuit hashes, above)         |

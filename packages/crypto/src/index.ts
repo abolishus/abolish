@@ -76,6 +76,7 @@ export {
   IDENTITY,
   scalar,
 } from "./group.ts";
+export { circuitTagField, PACK_CHUNK, packBoundedBytes, packBytes } from "./circuit.ts";
 export { MEMBERSHIP_DEPTH, membershipScope, nullifierScope, semaphoreField } from "./membership.ts";
 export {
   BOARD_TREE,

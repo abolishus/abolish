@@ -6,14 +6,15 @@ Cross-language vectors for the encodings and computations in this spec. TypeScri
 
 One JSON file per spec section or record type, named after it (`primitives.json`, `election-definition.json`, …). Each file is UTF-8 JSON, formatted by `vp check`.
 
-| File                     | Covers                                                                                                          |
-| ------------------------ | --------------------------------------------------------------------------------------------------------------- |
-| `primitives.json`        | Primitive types, record framing and strict-decoding rejections ([[notation]])                                   |
-| `group.json`             | `scalar` and `element` codecs: valid boundaries and every rejected class ([[group]])                            |
-| `board.json`             | Board entries, the board tree with every inclusion and consistency proof, checkpoints, board checks ([[board]]) |
-| `membership.json`        | The nullifier scope, the Semaphore field mapping `F` and the protocol-wide tree depth ([[membership]])          |
-| `hash.json`              | `H`, `HashToScalar` under each Fiat–Shamir tag, and `h`, with intermediate bytes ([[group]])                    |
-| `event-accumulator.json` | The event accumulator: genesis values, event sequences step by step, rejected inputs ([[contracts]])            |
+| File                     | Covers                                                                                                                     |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| `primitives.json`        | Primitive types, record framing and strict-decoding rejections ([[notation]])                                              |
+| `group.json`             | `scalar` and `element` codecs: valid boundaries and every rejected class ([[group]])                                       |
+| `board.json`             | Board entries, the board tree with every inclusion and consistency proof, checkpoints, board checks ([[board]])            |
+| `membership.json`        | The nullifier scope, the Semaphore field mapping `F` and the protocol-wide tree depth ([[membership]])                     |
+| `hash.json`              | `H`, `HashToScalar` under each Fiat–Shamir tag, and `h`, with intermediate bytes ([[group]])                               |
+| `event-accumulator.json` | The event accumulator: genesis values, event sequences step by step, rejected inputs ([[contracts]])                       |
+| `circuit.json`           | Circuit-facing values: each registered tag's field element and the two byte packings ([[notation]], [[domain-separation]]) |
 
 ## Format
 
@@ -106,6 +107,14 @@ Type descriptors:
 - `fieldMap`: `F`. Each has `id`, `input` (32 bytes, hex), `keccak256` (the Keccak-256 digest of `input`, hex) and `output` (`F(input)`, decimal).
 - `depth`: the protocol-wide tree depth, as a JSON number.
 - `scopes`: the nullifier scope. Each has `id`, `definitionHash` and `root` (32 bytes each, hex; `root` is read big-endian), `tier` (a JSON number) and either `scope` (`S_g`, hex) and `scopeField` (`F(S_g)`, decimal), or `error`: `non-canonical` for a root that isn't a canonical `field<bn254>`, `zero-root` for a root of 0 ([[membership]], Statement), `unknown-tier` for a tier other than 0, 1 or 2.
+
+## Circuit vectors
+
+`circuit.json` checks computations, so it has its own format, `abolish-circuit-vectors/1`, with the same top-level fields, plus:
+
+- `tags`: `tag_field` ([[domain-separation]], In-circuit hashes). Each has `tag` (ASCII), `digest` (the SHA-256 digest under `abolish/v1/circuit-tag`, hex) and `field` (decimal). They cover every registered tag to test the derivation; only a tag registered In-circuit may be used in a circuit. A tag registered after the file was generated may have no vector yet; consumers check the ones present.
+- `packBytes`: `bytes[N]` packing ([[notation]], Circuit-facing values). Each has `id`, `bytes` (hex; `N` is its length) and `fields` (decimal strings).
+- `packBoundedBytes`: `bytes<M>` packing. Each has `id`, `max` (`M`, a JSON number), `bytes` (the content, hex) and either `fields` (the length, then the packed padded content, decimal strings) or `error`: `too-long` for content longer than `M`. A Noir consumer passes the content zero-padded to `M` bytes, and checks that a non-zero padding byte fails.
 
 ## Rules
 

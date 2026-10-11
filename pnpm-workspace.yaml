@@ -25,12 +25,12 @@ trustPolicyExclude:
 # Install scripts run only for packages listed in allowBuilds.
 strictDepBuilds: true
 allowBuilds: {}
-# credential. apps/worker's tests check it doesn't resolve.
 # msgpackr (via bullmq, P2-4) loads this optional native accelerator, a
 # prebuilt binary, whenever it is installed. Left out, msgpackr uses its
 # pure-JS codec, and no opaque native code runs beside the database
-  - msgpackr-extract
+# credential. apps/worker's tests check it doesn't resolve.
 ignoredOptionalDependencies:
+  - msgpackr-extract
 
 catalog:
   # Proving toolchain: must match NOIR_VERSION / BB_VERSION in

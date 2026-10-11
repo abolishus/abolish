@@ -9,6 +9,7 @@ import {
   checkSummedShares,
   type CommittedVote,
   decode,
+  DecodeError,
   deriveTotal,
   element,
   elementOrIdentity,
@@ -39,7 +40,7 @@ interface CellVector {
     readonly summed: string;
   }[];
   readonly aggregate: string;
-  readonly posted: readonly {
+  readonly received: readonly {
     readonly seat: number;
     readonly how: string;
     readonly shares: string;
@@ -119,7 +120,7 @@ describe("tally.json", () => {
       expect(summed).toEqual(decode(SHARES, hex(t.summed)));
     }
     const posted = new Map<number, readonly Share[]>();
-    for (const p of c.posted) {
+    for (const p of c.received) {
       const shares = decode(SHARES, hex(p.shares));
       posted.set(p.seat, shares);
       expect(checkSummedShares(aggregate, p.seat, shares)).toBe(p.valid);
@@ -133,7 +134,13 @@ describe("tally.json", () => {
     const c = vectors.cells.find((x) => x.id === o.cell);
     if (!c) throw new Error(`no cell ${o.cell}`);
     const ballots = c.ballots.map((b) => decode(VSS, hex(b.vss)));
-    const opening = o.opening === null ? undefined : decode(SHARES, hex(o.opening));
+    // Bytes with no canonical decoding carry no opening.
+    let opening: readonly Share[] | undefined;
+    try {
+      opening = o.opening === null ? undefined : decode(SHARES, hex(o.opening));
+    } catch (e) {
+      if (!(e instanceof DecodeError)) throw e;
+    }
     const expected = o.result.ok ? { ok: true, counts: o.result.counts.map(BigInt) } : o.result;
     expect(checkOpening(c.rules, ballots, opening)).toEqual(expected);
   });
@@ -340,12 +347,12 @@ describe("checks and inputs", () => {
     expect(() => deriveTotal([[1n], [1n, 2n]])).toThrow(RangeError);
   });
 
-  test("a summed share that isn't a canonical scalar is excluded, though it passes mod ℓ", () => {
+  test("a summed share that isn't a canonical scalar fails, though it would pass mod ℓ", () => {
     const { ballots, summed } = honestCell(rules, [[1, 0]]);
     const aliased = (summed[0] as Share[]).map((s, j) =>
       j === 0 ? { v: s.v + GROUP_ORDER, r: s.r } : s,
     );
-    expect(checkSummedShares(aggregateCell(rules, ballots), 1, aliased)).toBe(true);
+    expect(checkSummedShares(aggregateCell(rules, ballots), 1, aliased)).toBe(false);
     const posted = new Map(summed.map((s, i) => [i + 1, i === 0 ? aliased : s]));
     const r = openCell(rules, ballots, posted);
     expect(r).toMatchObject({ ok: true, combined: [2, 3], excluded: [1], counts: [1n, 0n] });

@@ -38,22 +38,28 @@ Trustees send their summed shares only to the other trustees, encrypted under th
 - Pros: the board carries only the count and the summed randomness, so the leak above is gone for every external adversary, and ADR 0002's guarantee for the tally transcript holds again. The result is still fully verifiable: a wrong opening can't open `Ĉ_{c,j}` under binding, and its signer is attributed (T-29). It's the smallest verifier of the three (T-36).
 - Cons:
   - A trustee that sends a wrong summed share is caught by the other trustees, who check it against public data, but not publicly attributable: publishing a failing sum as evidence could leak correct per-option values in it. The result stays correct; only public attribution of an unhelpful trustee is lost (T-29, T-54).
-  - Every trustee that receives `k` summed shares learns the summed polynomials at every seat. A corrupt trustee, together with a relay that shapes the postings and a later break of their encryption, gains the leak above: the same extra points posted shares give it under ADR 0002, now at other seats too (T-14, T-15).
+  - Every trustee that receives `k` summed shares learns the summed polynomials at every seat. A corrupt trustee, wherever the postings fall into the pattern above (shaped by a relay or by trustees' downtime), and with a later break of their encryption, gains the leak above; it can also disclose the summed shares, unattributably, giving everyone that power, and a trustee seized before destruction yields the same (T-14, T-15, A-1).
   - Summed shares in transit are as harvestable as ballot shares in transit: a future break of both X25519 and ML-KEM reads them, as it reads every harvested share ciphertext (ADR 0002's existing residual).
 
 ## Recommendation
 
 **Option C.** It restores ADR 0002's everlasting-privacy guarantee for everything on the board, keeps the result verifiable by anyone, and adds no protocol round. B keeps public attribution but adds an interactive phase with its own agreement and liveness problems for a property, attributing an unhelpful trustee, that the brief doesn't require: the brief requires that no single party can alter a tally undetected, which C keeps. A is the owner's.
 
-What would change it: if the owner wants public attribution of every trustee's contribution, B is the path that keeps it without the leak; a later version can add it as a new tally version. If the fallback posting goes away (no posted shares ever), A's leak disappears and A becomes safe again.
+What would change it: if the owner wants public attribution of every trustee's contribution, B is the path that keeps it without the leak; a later version can add it as a new tally version. B also narrows the corrupt-trustee residual of C, but only for coalitions of fewer than `k − 1` trustees: `k − 1` trustees know `F` at every seat under every option, from their own points and the published `F(0)` (with `k = 2`, a single trustee does). If the fallback posting goes away (no posted shares ever), A's leak disappears for external adversaries.
 
 ## Consequences
 
-- [[tally]] specifies summed shares as private between trustees, the trustees' check and combination, and the published opening with `tally-opening` and `tally-range`; a cell with no opening on the board fails the election (`tally-missing`, T-54).
-- [[verifier]] 7.2 checks the opening instead of per-trustee shares; 7.4 reports any summed share found on the board as a disclosure by its signer; 8.4 names the trustee that signed each opening.
+- [[tally]] specifies summed shares as private between trustees (never through the board, IPFS or the archive, with no posting fallback), the trustees' check and combination, and the published opening with `tally-opening`, `tally-conflict` and `tally-range`; a cell with no opening on the board fails the election (`tally-missing`, T-54).
+- Destruction after the tally (P1-15 part 3) covers each trustee's own and received summed shares and their decrypted copies, as well as its KEM key and stored share ciphertexts.
+- [[verifier]] 7.2 checks the opening instead of per-trustee shares; 7.4 reports any summed share found on the board as a disclosure by its sender or any recipient, never by its signer alone; 8.4 names the trustee that signed each opening.
 - P1-15 part 2 defines the private summed-share message (encrypted under the hybrid KEM of P1-12 part 2, signed with the sender's per-election key) and the opening record in the tally transcript.
 - T-29: wrong openings are attributed publicly; wrong summed shares only among trustees. T-14 and T-15 state the corrupt-trustee residual.
-- [[0002-everlasting-privacy]] (Tally, item 5) reads with this substitution: "each trustee publishes its summed shares" becomes "each trustee sends its summed shares to the other trustees, and a trustee publishes the opening"; the public check is on the opening.
+- Statements this ADR supersedes, which read with these substitutions:
+  - [[0002-everlasting-privacy]], Tally (item 5): "each trustee publishes its summed shares" becomes "each trustee sends its summed shares to the other trustees, and a trustee publishes the opening"; the public check is on the opening.
+  - [[0002-everlasting-privacy]], Tally liveness: "before any sum is published" means before any summed share is sent; "a trustee that misses the window can't contribute" no longer applies, because a summed share that passes the check is correct whoever computed it ([[tally]], Combination); and "a trustee that ... publishes a sum failing the check is attributed a wrong sum" becomes: is known to the other trustees.
+  - [[0002-everlasting-privacy]], Pros ("Attributable trustee errors ... checked individually against public data"), the line on removing the DKG ("makes each trustee's tally contribution checkable on its own") and Consequences ("P1-15 publishes per-trustee summed shares"): a trustee's tally contribution is checked by the other trustees; what is public and attributable is each cell's opening and its signer.
+  - [[0003-tally-scheme]], Decision ("P1-15 publishes summed shares checked against the public VSS commitments"): P1-15 publishes each cell's opening, checked against the aggregate commitment.
+  - T-14's Mitigation ("Honest trustees only ever publish summed shares for cells ..."): honest trustees only ever send summed shares, and publish openings, for cells of the registered partition.
 
 ## Decision
 

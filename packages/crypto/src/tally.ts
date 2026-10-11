@@ -52,6 +52,8 @@ export type CellOpening =
       readonly excluded: readonly number[];
     };
 
+const isScalar = (x: unknown) => typeof x === "bigint" && x >= 0n && x < GROUP_ORDER;
+
 const mod = (x: bigint) => ((x % GROUP_ORDER) + GROUP_ORDER) % GROUP_ORDER;
 
 // @noble rejects a multiplier of 0, which openings of empty cells use.
@@ -121,14 +123,18 @@ export function sumShares(rules: TallyRules, shares: readonly (readonly Share[])
 /**
  * The summed-share check (docs/spec/tally.md; verifier 7.2): seat `seat`'s
  * list has one entry per option and each is the evaluation at `seat` of the
- * polynomials the aggregate commits to. The same equation as a trustee's
- * check of one ballot's shares (Pedersen 1991).
+ * polynomials the aggregate commits to, each a canonical scalar. The same
+ * equation as a trustee's check of one ballot's shares (Pedersen 1991).
  */
 export function checkSummedShares(
   aggregate: CellAggregate,
   seat: number,
   summed: readonly Share[],
 ): boolean {
+  // A value that isn't a canonical scalar has no encoding, so no message can
+  // carry it: it fails here rather than being reduced mod ℓ by the equation.
+  if (!Array.isArray(summed) || !summed.every((s) => isScalar(s?.v) && isScalar(s?.r)))
+    return false;
   return checkShares(aggregate, seat, summed);
 }
 
@@ -154,8 +160,6 @@ export function lagrangeAtZero(seats: readonly number[]): bigint[] {
     seats.reduce((acc, l) => (l === i ? acc : mod(acc * BigInt(l) * invert(BigInt(l - i)))), 1n),
   );
 }
-
-const isScalar = (x: unknown) => typeof x === "bigint" && x >= 0n && x < GROUP_ORDER;
 
 /** `tally-opening` then `tally-range` for each option in order, against the aggregate. */
 function checkAgainst(
@@ -222,13 +226,8 @@ export function openCell(
       throw new RangeError("openCell: seats are from 1 to the panel size");
   const passing: number[] = [];
   const excluded: number[] = [];
-  // A value that isn't a canonical scalar has no encoding, so no message can
-  // carry it: it fails here rather than being reduced mod ℓ by the check.
-  const canonical = (shares: readonly Share[]) =>
-    Array.isArray(shares) && shares.every((s) => isScalar(s?.v) && isScalar(s?.r));
   for (const seat of seats)
-    (canonical(summed.get(seat) as readonly Share[]) &&
-    checkSummedShares(aggregate, seat, summed.get(seat) as readonly Share[])
+    (checkSummedShares(aggregate, seat, summed.get(seat) as readonly Share[])
       ? passing
       : excluded
     ).push(seat);

@@ -30,6 +30,8 @@ library EventAccumulatorLib {
         returns (bytes32)
     {
         if (topics.length < 1 || topics.length > 4) revert TopicCount(topics.length);
+        // Unreachable in the EVM (4 GiB of memory can't be paid for), but it
+        // keeps the u32 length encoding total rather than silently truncating.
         if (data.length > type(uint32).max) revert DataTooLong(data.length);
         // encodePacked writes a bytes32[] as its elements back to back, with no
         // length prefix: exactly t_0 ‖ … ‖ t_{k−1}.

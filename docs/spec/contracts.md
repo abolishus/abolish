@@ -1,12 +1,12 @@
 # Contracts
 
-What our L2 contracts commit to, for a verifier that reads them from the chain and the archive alone. So far this page specifies the event accumulator every Abolish contract keeps. The election registry, the trustee key registry, direct submission, the contract-event record (`0x0008`) with its inclusion evidence, and the close rule are still P1-18's, and are added here as they are built. Notation is from [[notation]], tags from [[domain-separation]].
+What our L2 contracts commit to, for a verifier that reads them from the chain and the archive alone. So far this page specifies the event accumulator every Abolish L2 contract keeps (P4-1's L1 anchor contract decides for itself). The election registry, the trustee key registry, direct submission, the contract-event record (`0x0008`) with its inclusion evidence, and the close rule are still P1-18's, and are added here as they are built. Notation is from [[notation]], tags from [[domain-separation]].
 
 ## Event accumulator
 
 Threats: T-71 (L2 governance or our server hiding an event), T-25 (a direct-submitted ballot withheld from the board), T-24 (equivocation). Decided by [[0005-permanent-archive]], Consequences, "L2 events".
 
-Our server writes the board, and inclusion proofs show only that an event exists, never that none was left out. So every Abolish contract keeps a running hash and a counter over every log it emits, in its own storage. Storage is committed by the L2 state root, which L1 output roots commit to, so an account and storage proof (`eth_getProof`) of these two values at an L2 block pins the contract's whole event sequence up to that block. A verifier replays the archived sequence and compares ([[verifier]] 4.4, P1-19).
+Our server writes the board, and inclusion proofs show only that an event exists, never that none was left out. So every Abolish L2 contract keeps a running hash and a counter over every log it emits, in its own storage. Storage is committed by the L2 state root, which L1 output roots commit to, so an account and storage proof (`eth_getProof`) of these two values at an L2 block pins the contract's whole event sequence up to that block. A verifier replays the archived sequence and compares ([[verifier]] 4.4, P1-19).
 
 ### Values
 
@@ -16,7 +16,7 @@ Our server writes the board, and inclusion proofs show only that an event exists
   acc_0 = H(DS("abolish/v1/event-accumulator", u8(0) ‖ u64(chain_id) ‖ bytes[20](address)))
   ```
 
-  and a count of 0, where `chain_id` is the chain's EIP-155 identifier (`block.chainid`) and `address` the contract's own address. Binding both means one contract's event sequence can't be presented as another's, on this chain or a fork (T-71). A contract MUST revert its deployment if `chain_id` is 2⁶⁴ or more, since it has no `u64` encoding.
+  and a count of 0, where `chain_id` is the chain's EIP-155 identifier (`block.chainid`) and `address` the contract's own address. Binding both means one contract's event sequence can't be presented as another's, here or on another chain where the same address is deployed (T-71). It doesn't separate the two sides of a fork after deployment, which share the stored value: that is the job of the pinned L2 and the output root the storage proof is checked against (Verification). A contract MUST revert its deployment if `chain_id` is 2⁶⁴ or more, since it has no `u64` encoding.
 
 - **Step.** For its `n`-th log (0-based), with topics `t_0 … t_{k−1}` and data `d`, the contract sets
 
@@ -39,13 +39,13 @@ The leading `u8` separates the two input layouts, and fixed widths plus the leng
     = 0x1073a090f5464cb55b258e445c2f90eb0f9b00fb8b1700430d20b9c53b939600
   ```
 
-  The accumulator is the 32-byte word at `S`. The count is the word at `S + 1`, as a big-endian 256-bit integer whose top 192 bits are zero. ERC-7201's keccak derivation is an external format ([[domain-separation]]), not a protocol hash.
+  The accumulator is the 32-byte word at `S`. The count is the word at `S + 1`, as a big-endian 256-bit integer whose top 192 bits are zero; a proven word with any of those bits set fails the check. ERC-7201's keccak derivation is an external format ([[domain-separation]]), not a protocol hash.
 
 - `eventAccumulator()` returns `(bytes32 accumulator, uint64 count)` for convenience. A verifier relies on the storage proof, never on a call answered by an RPC node.
 
 ### Verification
 
-Given a contract's address, the chain ID, its archived logs in L2 order (block number, then transaction index, then log index within the transaction), and a storage proof of `S` and `S + 1` at an L2 block `B`, a verifier recomputes `acc` and the count from genesis over every archived log emitted at or before `B`. The archive matches the contract at `B` exactly when both equal the proven values. Anything else (a log left out, added, altered or reordered, or a log from another contract or chain) gives a different accumulator, except with negligible probability under SHA-256's collision resistance. [[verifier]] 4.4 says when this is checked and what the result is worth: a storage proof is only as good as the output root it is proven against ([[0004-l2-choice]], T-71 residual).
+Given a contract's address, the chain ID, its archived logs in L2 order (block number, then the receipt's `logIndex`, which counts within the block), and a storage proof of `S` and `S + 1` at an L2 block `B`, a verifier recomputes `acc` and the count from genesis over every archived log emitted at or before `B`. The archive matches the contract at `B` exactly when both equal the proven values. Anything else (a log left out, added, altered or reordered, or a log from another contract or chain) gives a different accumulator, except with negligible probability under SHA-256's collision resistance. The storage proof is an account proof for the contract's pinned address ([[verifier]] 1.2) under the state root that the output root commits to, plus a storage proof of each slot. The storage trie holds each value as the RLP of its minimal big-endian bytes, and omits a zero value: the verifier decodes the value, left-pads it to 32 bytes, and reads an absent slot as zero. The accumulator commits to the order of logs, not to their blocks or transactions, so each log's place is bound by its own receipt inclusion evidence ([[verifier]] 4.4). [[verifier]] 4.4 says when this is checked and what the result is worth: a storage proof is only as good as the output root it is proven against ([[0004-l2-choice]], T-71 residual).
 
 ### Vectors
 
@@ -54,4 +54,4 @@ Given a contract's address, the chain ID, its archived logs in L2 order (block n
 ### Known-weak
 
 - The accumulator proves that the archive matches the contract's storage, not that the storage is honest: L2 governance that rewrites state can rewrite it too (T-71, detection only, through the evidence each event carries).
-- Each event costs one SHA-256 precompile call over its log, plus two storage writes. That is our gas, not the voter's (voters don't transact to vote).
+- Each event costs one SHA-256 precompile call over its log, plus two storage writes: 60 gas plus 12 per 32-byte word for the hash. Voters don't transact to vote, so it is mostly our gas, but a direct submitter (T-25) pays it for their own submission.

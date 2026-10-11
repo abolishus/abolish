@@ -162,8 +162,7 @@ export type BoardErrorCode =
   | "checkpoint-size"
   | "checkpoint-missing"
   | "checkpoint-boundary"
-  | "checkpoint-head"
-  | "checkpoint-root"
+  | "copy-mismatch"
   | "unanchored"
   | "unsealed";
 
@@ -325,9 +324,10 @@ export interface VerifiedBoard {
  * prefix up to the largest anchored size, and anything past it is ignored, so
  * no one can fail an election by appending entries to a copy of its board
  * (T-53). Order (docs/spec/board.md, Board checks): election and equivocation
- * over the anchors; their sizes; the entry checks over the prefix; each
- * checkpoint's boundary, head and root; every segment whose window has closed
- * has a checkpoint; once the seal's window has closed, the seal has one.
+ * over the anchors; their sizes; the copy's raw bytes against every anchored
+ * head and root; the entry checks over the prefix; each checkpoint's
+ * boundary; every segment whose window has closed has a checkpoint; once the
+ * seal's window has closed, the seal has one.
  */
 export function verifyBoard(
   electionId: Uint8Array,
@@ -366,23 +366,35 @@ export function verifyBoard(
     if (cp.size > BigInt(held)) throw new BoardError("checkpoint-missing", { checkpoint: j });
     extent = Math.max(extent, Number(cp.size));
   }
-  const board = checkBoard(id, encodedEntries.slice(0, extent), pinned);
-  const { entries } = board;
-  const roots = merkleRoots(
-    BOARD_TREE,
-    board.entryHashes,
-    new Set(counted.map(([, cp]) => Number(cp.size))),
+  // Authenticate the raw bytes before decoding anything. Entries are
+  // unsigned, so a copy that doesn't match the anchored heads and roots is
+  // that copy's fault, never the election's: the caller tries another source
+  // (T-53, T-23).
+  const prefix = Array.from({ length: extent }, (_, i) =>
+    copyBytes(encodedEntries[i] as Uint8Array, `entry ${i}`),
   );
+  const hashes = prefix.map(boardEntryHash);
+  const links: Uint8Array[] = [];
+  for (const e of hashes) links.push(chainLink(links.at(-1) ?? new Uint8Array(32), e));
+  const roots = merkleRoots(BOARD_TREE, hashes, new Set(counted.map(([, cp]) => Number(cp.size))));
+  for (const [j, cp] of counted) {
+    const size = Number(cp.size);
+    if (
+      !equalBytes(links[size - 1] as Uint8Array, cp.head) ||
+      !equalBytes(roots.get(size) as Uint8Array, cp.root)
+    )
+      throw new BoardError("copy-mismatch", { checkpoint: j });
+  }
+  // The prefix is now the anchored board, so any failure below is the
+  // operator's.
+  const board = checkBoard(id, prefix, pinned);
+  const { entries } = board;
   for (const [j, cp] of counted) {
     const size = Number(cp.size);
     const last = entries[size - 1] as BoardEntry;
     const next = entries[size];
     if (last.segment > cp.segment || (next !== undefined && next.segment <= cp.segment))
       throw new BoardError("checkpoint-boundary", { checkpoint: j });
-    if (!equalBytes(board.links[size - 1] as Uint8Array, cp.head))
-      throw new BoardError("checkpoint-head", { checkpoint: j });
-    if (!equalBytes(roots.get(size) as Uint8Array, cp.root))
-      throw new BoardError("checkpoint-root", { checkpoint: j });
   }
   // A segment counts as unanchored only once its window has closed by
   // finalized L1 time, so a running election isn't failed early.

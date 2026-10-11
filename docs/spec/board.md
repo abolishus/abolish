@@ -156,27 +156,31 @@ The checks run in this order, failing at the first problem:
 
 1. Only anchors that are timely (Timing, above) and in finalized blocks up to `now` count. For each, in order: `wrong-election`, then `checkpoint-equivocation`.
 2. For each counted anchor, in order: `checkpoint-size`, then `checkpoint-missing`.
-3. Each entry of the prefix, in order: `decode`, `wrong-election`, `wrong-index`, `segment-decreased`, `opening-order`.
-4. For each counted anchor, in order: `checkpoint-boundary`, `checkpoint-head`, `checkpoint-root`.
-5. `unanchored`, then `unsealed`.
+3. The copy's raw bytes against the anchors, before anything is decoded: the entry hashes, chain links and tree roots of the prefix are computed from the encodings as held, and for each counted anchor, in order, its `head` and `root` must match (`copy-mismatch`).
+4. Each entry of the prefix, in order: `decode`, `wrong-election`, `wrong-index`, `segment-decreased`, `opening-order`.
+5. For each counted anchor, in order: `checkpoint-boundary`.
+6. `unanchored`, then `unsealed`.
 
-| Code                      | Fails when                                                                                                                                   |
-| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `wrong-election`          | An anchor's checkpoint, or an entry, names another election.                                                                                 |
-| `checkpoint-equivocation` | Another counted checkpoint for the same `segment`, earlier in the list, differs from it.                                                     |
-| `checkpoint-size`         | Its `size` is 0.                                                                                                                             |
-| `checkpoint-missing`      | Its `size` is larger than the board the verifier holds: entries are missing (reported unverifiable, never pass).                             |
-| `decode`                  | An entry doesn't decode strictly as a version 1 board entry (with the [[notation]] decode error code), payload header included.              |
-| `wrong-index`             | An entry's `index` isn't its position.                                                                                                       |
-| `segment-decreased`       | An entry's `segment` is smaller than the previous entry's.                                                                                   |
-| `opening-order`           | An entry breaks the order of spoiled-ballot openings above.                                                                                  |
-| `checkpoint-boundary`     | A checkpoint's `size` isn't the end of segment `segment` within the prefix.                                                                  |
-| `checkpoint-head`         | Its `head` isn't `link_{size−1}`.                                                                                                            |
-| `checkpoint-root`         | Its `root` isn't `root_size`.                                                                                                                |
-| `unanchored`              | A segment of the prefix whose window (end of period plus `deadline`) closed before `now` has no counted checkpoint (the first such segment). |
-| `unsealed`                | The seal's window closed before `now`, and no counted checkpoint is for `lastSegment`.                                                       |
+`checkpoint-missing` and `copy-mismatch` say the copy the verifier holds isn't the anchored board: it is too short, or its bytes differ. They are reported as unverifiable from that source, and the verifier tries another copy, never as a failure of the election: a hostile mirror can serve a bad copy, but it can't make an election fail. Only once step 3 has passed is the prefix the anchored board, so every later failure is the operator's.
 
-Every one of these is an election check: the operator writes the envelopes, the order and the segments, and the anchoring authority the checkpoints, so any failure is theirs (T-23). A failure of the record inside a payload isn't one of these ([[verifier]], Admission checks). While an election runs, a segment whose window is still open isn't failed for lacking a checkpoint, so live monitoring (P4-5) can run these checks too.
+| Code                      | Fails when                                                                                                                                                                                       |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `wrong-election`          | An anchor's checkpoint, or an entry, names another election.                                                                                                                                     |
+| `checkpoint-equivocation` | Another counted checkpoint for the same `segment`, earlier in the list, differs from it.                                                                                                         |
+| `checkpoint-size`         | Its `size` is 0.                                                                                                                                                                                 |
+| `checkpoint-missing`      | Its `size` is larger than the board the verifier holds: entries are missing (reported unverifiable, never pass).                                                                                 |
+| `decode`                  | An entry doesn't decode strictly as a version 1 board entry (with the [[notation]] decode error code), payload header included.                                                                  |
+| `wrong-index`             | An entry's `index` isn't its position.                                                                                                                                                           |
+| `segment-decreased`       | An entry's `segment` is smaller than the previous entry's.                                                                                                                                       |
+| `opening-order`           | An entry breaks the order of spoiled-ballot openings above.                                                                                                                                      |
+| `checkpoint-boundary`     | A checkpoint's `size` isn't the end of segment `segment` within the prefix.                                                                                                                      |
+| `copy-mismatch`           | The prefix as held doesn't hash to a counted checkpoint's `head` (`link_{size−1}`) or `root` (`root_size`): this copy isn't the anchored board (unverifiable from this source, never a failure). |
+| `unanchored`              | A segment of the prefix whose window (end of period plus `deadline`) closed before `now` has no counted checkpoint (the first such segment).                                                     |
+| `unsealed`                | The seal's window closed before `now`, and no counted checkpoint is for `lastSegment`.                                                                                                           |
+
+Every other code is an election check: the operator writes the envelopes, the order and the segments, and the anchoring authority the checkpoints, so any such failure is theirs (T-23). A failure of the record inside a payload isn't one of these ([[verifier]], Admission checks). While an election runs, a segment whose window is still open isn't failed for lacking a checkpoint, so live monitoring (P4-5) can run these checks too.
+
+Entries the operator dropped before anchoring are, to the public verifier, simply not part of the board: it can't tell a dropped entry from a forged one. Only the voter whose entry it was can show the drop, by the client checks above, and P1-13's receipt carries the operator's signature on the size and root it was shown so that the voter's alarm is evidence anyone can check (T-23, T-25).
 
 ## Why both a chain and a tree
 

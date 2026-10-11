@@ -304,18 +304,19 @@ def check_board(election_id, entries, anchors, now):
     # one's claim, so they are neither checked nor counted.
     extent = max((cp[2] for cp in counted.values()), default=0)
     prefix = entries[:extent]
-    decoded, err = check_entries(election_id, prefix)
-    if err:
-        return err
+    # Authenticate the raw bytes before decoding anything: a copy that doesn't
+    # match the anchors is this copy's problem, not the election's.
     hashes = [entry_hash(b) for b in prefix]
     links = chain_links(prefix)
     for j, (cid, seg, size, head, root) in counted.items():
+        if links[size - 1] != head or BOARD.mth(hashes[:size]) != root:
+            return ("copy-mismatch", {"checkpoint": j})
+    decoded, err = check_entries(election_id, prefix)
+    if err:
+        return err
+    for j, (cid, seg, size, head, root) in counted.items():
         if decoded[size - 1]["segment"] > seg or (size < extent and decoded[size]["segment"] <= seg):
             return ("checkpoint-boundary", {"checkpoint": j})
-        if links[size - 1] != head:
-            return ("checkpoint-head", {"checkpoint": j})
-        if BOARD.mth(hashes[:size]) != root:
-            return ("checkpoint-root", {"checkpoint": j})
     segments = {cp[1] for cp in counted.values()}
     for e in decoded:
         if e["segment"] not in segments and segment_end(e["segment"]) + CLOCK["deadline"] < now:
@@ -597,6 +598,12 @@ def main(out_dir):
             out.append((election or eid, s, size, links[size - 1], BOARD.mth(hashes)))
         return out
 
+    def anchored(entries, template):
+        """The template's (election, segment, size), with head and root over these raw entries."""
+        links = chain_links(entries)
+        hashes = [entry_hash(b) for b in entries]
+        return [(e, s_, n_, links[n_ - 1], BOARD.mth(hashes[:n_])) for e, s_, n_, _, _ in template]
+
     board_vectors = []
 
     def board(id_, description, entries, checkpoints, result, now=CLOSED):
@@ -662,11 +669,23 @@ def main(out_dir):
     ]:
         bad_board = list(g)
         bad_board[k] = bad
-        board(id_, desc, bad_board, c, code)
+        # The operator anchored this board as it is, so the failure is its own.
+        board(id_, desc, bad_board, anchored(bad_board, c), code)
+    altered = list(g)
+    altered[7] = entry(eid, 7, 0, ballot(3))
+    board(
+        "copy-altered-inside-extent",
+        "A copy with one anchored entry altered (its segment lowered) doesn't match the anchors: the copy is at fault, not the election",
+        altered,
+        c,
+        ("copy-mismatch", {"checkpoint": 2}),
+    )
     swapped = list(g)
     swapped[2], swapped[3] = swapped[3], swapped[2]
-    board("reordered", "Entries 2 and 3 swapped: their indices no longer match", swapped, c, ("wrong-index", {"entry": 2}))
-    board("dropped", "Entry 3 dropped from inside the anchored extent", g[:3] + g[4:], cps(g, [0, 1]), ("wrong-index", {"entry": 3}))
+    board("reordered", "An anchored board with entries 2 and 3 swapped: their indices don't match", swapped, anchored(swapped, c), ("wrong-index", {"entry": 2}))
+    board("reordered-copy", "A copy with entries 2 and 3 swapped doesn't match the anchors", swapped, c, ("copy-mismatch", {"checkpoint": 1}))
+    dropped = g[:3] + g[4:]
+    board("dropped", "An anchored board with entry 3 missing: indices skip", dropped, anchored(dropped, cps(g, [0, 1])), ("wrong-index", {"entry": 3}))
     pref = board_of(good[:5] + [(1, opening(b"\x01\x00")), (1, opening(b"\x01"))])
     board("opening-prefix-order", "A payload sorts before every payload it is a prefix of", pref, cps(pref, [0, 1, 6]), ("opening-order", {"entry": 6}))
     nxt = board_of(good[:5] + [(2, ballot(9))])
@@ -685,18 +704,18 @@ def main(out_dir):
     )
     board("checkpoint-segment-too-early", "Segment 0's checkpoint claiming segment 1's size", g, [(eid, 0) + mid[2:]] + cps(g, [1, 4, 6]), ("checkpoint-boundary", {"checkpoint": 0}))
     seg0 = cps(g, [0])[0]
-    board("checkpoint-wrong-head", "A checkpoint with another size's chain head", g, [mid[:3] + (seg0[3], mid[4])] + rest, ("checkpoint-head", {"checkpoint": 0}))
-    board("checkpoint-wrong-root", "A checkpoint with another size's root", g, [mid[:4] + (seg0[4],)] + rest, ("checkpoint-root", {"checkpoint": 0}))
+    board("checkpoint-wrong-head", "A checkpoint whose head matches no prefix of the copy held", g, [mid[:3] + (seg0[3], mid[4])] + rest, ("copy-mismatch", {"checkpoint": 0}))
+    board("checkpoint-wrong-root", "A checkpoint whose root matches no prefix of the copy held", g, [mid[:4] + (seg0[4],)] + rest, ("copy-mismatch", {"checkpoint": 0}))
     board(
         "checkpoint-errors-in-order",
-        "Checkpoint 0 has a wrong root and checkpoint 1 stops mid-segment: checkpoints are checked one at a time, in order",
+        "Checkpoint 0 stops mid-segment and checkpoint 1 has a wrong root: the copy is authenticated against every checkpoint before any boundary is checked",
         g,
-        [mid[:4] + (seg0[4],), (eid, 2, 3, chain_links(g)[2], BOARD.mth([entry_hash(b) for b in g[:3]]))] + rest,
-        ("checkpoint-root", {"checkpoint": 0}),
+        [(eid, 2, 3, chain_links(g)[2], BOARD.mth([entry_hash(b) for b in g[:3]])), mid[:4] + (seg0[4],)] + rest,
+        ("copy-mismatch", {"checkpoint": 1}),
     )
     forked = list(g)
     forked[2] = entry(eid, 2, 1, ballot(7))
-    board("checkpoint-forked", "The board held differs from the anchored one in entry 2", forked, c, ("checkpoint-head", {"checkpoint": 1}))
+    board("checkpoint-forked", "The copy held differs from the anchored board in entry 2", forked, c, ("copy-mismatch", {"checkpoint": 1}))
     board("checkpoint-equivocation", "A second, different checkpoint anchored for segment 1 (a fork shown to some voters)", g, c + cps(forked, [1]), ("checkpoint-equivocation", {"checkpoint": 4}))
     board("checkpoint-equivocation-first", "Equivocation is found before any per-checkpoint check, wherever the forked checkpoint sits", g, cps(forked, [1]) + c, ("checkpoint-equivocation", {"checkpoint": 2}))
     board("checkpoint-repeated", "The same checkpoint anchored twice is not equivocation", g, c + c[1:2], ok)

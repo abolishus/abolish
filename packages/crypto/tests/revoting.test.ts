@@ -6,6 +6,7 @@ import {
   BN254_R,
   checkL1Reference,
   type FinalizedL1,
+  l1RefMin,
   membershipMessage,
   membershipMessageField,
   selectBallots,
@@ -41,6 +42,13 @@ interface RevotingVectors {
     readonly number: string;
     readonly hash: string;
     readonly timestamp: string;
+  }[];
+  readonly refMins: readonly {
+    readonly id: string;
+    readonly low: string;
+    readonly head: string;
+    readonly opensAt: string;
+    readonly l1RefMin: string | null;
   }[];
   readonly references: readonly {
     readonly id: string;
@@ -149,6 +157,12 @@ describe("revoting vectors (docs/spec/vectors/revoting.json)", () => {
     }
     expect(toHex(membershipMessage(input))).toBe(toHex(hex(v.message ?? "")));
     expect(membershipMessageField(input)).toBe(decimal(v.messageField));
+  });
+
+  test.each(vectors.refMins)("l1_ref_min: $id", (v) => {
+    const low = decimal(v.low);
+    const expected = v.l1RefMin === null ? undefined : decimal(v.l1RefMin);
+    expect(l1RefMin(finalized(low, decimal(v.head)), low, decimal(v.opensAt))).toBe(expected);
   });
 
   test.each(vectors.references)("L1 reference: $id", (v) => {
@@ -324,6 +338,33 @@ describe("checkL1Reference", () => {
           "l1-ref-unknown",
         );
       }),
+      { numRuns },
+    );
+  });
+
+  test("l1RefMin finds the first block of the window, by binary search", () => {
+    fc.assert(
+      fc.property(
+        fc.bigInt({ min: 0n, max: 5000n }),
+        fc.bigInt({ min: 0n, max: 5000n }),
+        fc.bigInt({ min: 0n, max: 80_000n }),
+        (low, span, opensAt) => {
+          const l1 = chain(low + span, low);
+          const threshold = opensAt > 3600n ? opensAt - 3600n : 0n;
+          const ts = (n: bigint) => 1000n + 12n * n;
+          if (ts(low) >= threshold && low > 0n) {
+            expect(() => l1RefMin(l1, low, opensAt)).toThrow(RangeError);
+            return;
+          }
+          let expected: bigint | undefined;
+          for (let n = low; n <= low + span; n++)
+            if (ts(n) >= threshold) {
+              expected = n;
+              break;
+            }
+          expect(l1RefMin(l1, low, opensAt)).toBe(expected);
+        },
+      ),
       { numRuns },
     );
   });

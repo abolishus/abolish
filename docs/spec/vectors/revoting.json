@@ -167,6 +167,64 @@
       "timestamp": "1800000120"
     }
   ],
+  "refMins": [
+    {
+      "id": "ref-min-exact",
+      "description": "A block exactly at opens_at - 3600 is the first of the window",
+      "low": "100",
+      "head": "109",
+      "opensAt": "1800003636",
+      "l1RefMin": "103"
+    },
+    {
+      "id": "ref-min-just-after",
+      "description": "One second after a block's time: the next block",
+      "low": "100",
+      "head": "109",
+      "opensAt": "1800003637",
+      "l1RefMin": "104"
+    },
+    {
+      "id": "ref-min-just-before",
+      "description": "One second before a block's time: that block",
+      "low": "100",
+      "head": "109",
+      "opensAt": "1800003635",
+      "l1RefMin": "103"
+    },
+    {
+      "id": "ref-min-missed-slot",
+      "description": "Inside the gap of a missed slot: the block after it",
+      "low": "100",
+      "head": "109",
+      "opensAt": "1800003661",
+      "l1RefMin": "105"
+    },
+    {
+      "id": "ref-min-at-head",
+      "description": "The window starts at the head",
+      "low": "100",
+      "head": "109",
+      "opensAt": "1800003720",
+      "l1RefMin": "109"
+    },
+    {
+      "id": "ref-min-beyond-head",
+      "description": "The head hasn't reached the window yet",
+      "low": "100",
+      "head": "109",
+      "opensAt": "1800003721",
+      "l1RefMin": null
+    },
+    {
+      "id": "ref-min-short-head",
+      "description": "A shorter head that has reached the window",
+      "low": "100",
+      "head": "102",
+      "opensAt": "1800003624",
+      "l1RefMin": "102"
+    }
+  ],
   "references": [
     {
       "id": "reference-admitted",
@@ -253,6 +311,16 @@
       "description": "A finalized block after closes_at",
       "l1RefNumber": "108",
       "l1RefHash": "ba252194f659c348137fcc1eae4f649c88ca38a47d50d1459dc108c6e0311eac",
+      "head": "109",
+      "l1RefMin": "101",
+      "closesAt": "1800000084",
+      "verdict": "l1-ref-after-close"
+    },
+    {
+      "id": "reference-after-close-own-hash",
+      "description": "A block after close with its own hash, at the head",
+      "l1RefNumber": "109",
+      "l1RefHash": "c67bbeed33c97ed6d6a9cfc7a23913ccf4c88210c5b5100de5d45aec272d96ba",
       "head": "109",
       "l1RefMin": "101",
       "closesAt": "1800000084",

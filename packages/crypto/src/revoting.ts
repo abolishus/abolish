@@ -91,6 +91,42 @@ export type L1ReferenceVerdict =
 export const L1_REF_MARGIN = 3600n;
 
 /**
+ * `l1_ref_min`: the first finalized block whose timestamp is at or after
+ * `opensAt − L1_REF_MARGIN` (0 if that is negative), searched between `low` and
+ * `l1.head`. `low` is any finalized block the caller knows is earlier (the
+ * anchoring epoch's, say); it must be block 0 or have an earlier timestamp,
+ * or the answer could lie below it. Returns `undefined` while the head hasn't
+ * reached the window. Binary search relies on Ethereum's timestamps strictly
+ * increasing with the block number.
+ */
+export function l1RefMin(l1: FinalizedL1, low: bigint, opensAt: bigint): bigint | undefined {
+  checkU64(l1.head, "l1RefMin: head");
+  checkU64(low, "l1RefMin: low");
+  checkU64(opensAt, "l1RefMin: opensAt");
+  if (low > l1.head) throw new RangeError("l1RefMin: low is above the finalized head");
+  const threshold = opensAt > L1_REF_MARGIN ? opensAt - L1_REF_MARGIN : 0n;
+  const at = (n: bigint) => {
+    const t = l1.block(n).timestamp;
+    checkU64(t, "l1RefMin: block timestamp");
+    return t;
+  };
+  if (at(low) >= threshold) {
+    if (low === 0n) return 0n;
+    throw new RangeError("l1RefMin: low isn't before the window");
+  }
+  if (at(l1.head) < threshold) return undefined;
+  // Invariant: at(lo) < threshold ≤ at(hi).
+  let lo = low;
+  let hi = l1.head;
+  while (hi - lo > 1n) {
+    const mid = lo + (hi - lo) / 2n;
+    if (at(mid) < threshold) lo = mid;
+    else hi = mid;
+  }
+  return hi;
+}
+
+/**
  * Verifier 5.8 (docs/spec/revoting.md, Admission), steps in the spec's order.
  * The lower bound keeps every lookup inside the L1 range around the poll, so
  * a ballot naming an ancient block can't demand evidence nobody archives
@@ -98,7 +134,8 @@ export const L1_REF_MARGIN = 3600n;
  * or before `closesAt`: once L1 has finalized a block after close, every later
  * number is after close too, so a block that never comes (2^64 − 1, say) can't
  * keep the election unverifiable. Checking the time before the hash makes the
- * verdict the same for every head past close.
+ * verdict the same for every head past close, so a verifier may pass the
+ * first block after close as `head` and read no further L1.
  */
 export function checkL1Reference(
   ref: { readonly l1RefNumber: bigint; readonly l1RefHash: Uint8Array },

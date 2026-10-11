@@ -57,6 +57,18 @@ def check_reference(number, ref_hash, chain, head, ref_min, closes_at):
     return "admitted"
 
 
+def first_in_window(chain, low, head, opens_at):
+    """The first block from low to head with timestamp >= opens_at - 3600, scanning upwards."""
+    threshold = max(0, opens_at - 3600)
+    if chain[low][1] >= threshold:
+        assert low == 0
+        return 0
+    for n in range(low, head + 1):
+        if chain[n][1] >= threshold:
+            return n
+    return None
+
+
 def select(ballots):
     """ballots: list of dicts with tier, nullifier, message (bytes), ref, index."""
     seen_index = set()
@@ -180,6 +192,7 @@ def main():
         ("wrong-hash-after-close", "Time is checked before the hash", 108, det("other"), 109, ts(106)),
         ("wrong-hash-after-close-short-head", "The same ballot gets the same verdict from a verifier whose head is just past close", 108, det("other"), 107, ts(106)),
         ("after-close", "A finalized block after closes_at", 108, None, 109, ts(106)),
+        ("after-close-own-hash", "A block after close with its own hash, at the head", 109, None, 109, ts(106)),
         ("pending", "Beyond the finalized head while the head is before close", 107, None, 105, ts(106)),
         ("pending-head-at-close", "A head exactly at closes_at isn't after it, so beyond it is still pending", 108, None, 106, ts(106)),
         ("beyond-head-after-close", "Beyond the head once the head is after close", 112, det("future"), 109, ts(106)),
@@ -200,6 +213,28 @@ def main():
                 "l1RefMin": str(ref_min),
                 "closesAt": str(closes_at),
                 "verdict": check_reference(number, ref_hash, visible, head, ref_min, closes_at),
+            }
+        )
+
+    ref_mins = []
+    for name, description, opens_at, head in [
+        ("exact", "A block exactly at opens_at - 3600 is the first of the window", ts(103) + 3600, 109),
+        ("just-after", "One second after a block's time: the next block", ts(103) + 3601, 109),
+        ("just-before", "One second before a block's time: that block", ts(103) + 3599, 109),
+        ("missed-slot", "Inside the gap of a missed slot: the block after it", ts(104) + 13 + 3600, 109),
+        ("at-head", "The window starts at the head", ts(109) + 3600, 109),
+        ("beyond-head", "The head hasn't reached the window yet", ts(109) + 3601, 109),
+        ("short-head", "A shorter head that has reached the window", ts(102) + 3600, 102),
+    ]:
+        expected = first_in_window(chain, 100, head, opens_at)
+        ref_mins.append(
+            {
+                "id": f"ref-min-{name}",
+                "description": description,
+                "low": "100",
+                "head": str(head),
+                "opensAt": str(opens_at),
+                "l1RefMin": None if expected is None else str(expected),
             }
         )
 
@@ -334,6 +369,7 @@ def main():
         "l1Chain": [
             {"number": str(n), "hash": h.hex(), "timestamp": str(t)} for n, (h, t) in sorted(chain.items())
         ],
+        "refMins": ref_mins,
         "references": references,
         "selections": selections,
     }

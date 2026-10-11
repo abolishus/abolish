@@ -34,6 +34,10 @@ catalog:
   "@noble/curves": 2.4.0
   "@noble/hashes": 2.4.0
   "@noir-lang/noir_js": 1.0.0-beta.22
+  "@orpc/contract": 1.15.4
+  "@orpc/openapi": 1.15.4
+  "@orpc/server": 1.15.4
+  "@orpc/zod": 1.15.4
   "@types/node": 24.19.1
   drizzle-orm: 0.45.3
   fast-check: 4.10.2
@@ -42,6 +46,7 @@ catalog:
   vite: npm:@voidzero-dev/vite-plus-core@1.0.0
   vite-plus: 1.0.0
   yaml: 2.9.1
+  zod: 4.6.5
 
 overrides:
   vite@*: "catalog:"

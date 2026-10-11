@@ -122,8 +122,10 @@ contract ElectionRegistry is EventAccumulator {
     }
 
     /// @notice Creates an election and makes the caller its creator, the only
-    /// account that can register its definition. Takes no input, so it can
-    /// carry nothing but the caller's address (T-17).
+    /// account that can register its definition. Takes no arguments, so its
+    /// event carries only the identifier, the caller and the counter; what
+    /// the surrounding transaction carries is T-17's residual
+    /// (docs/spec/contracts.md, The shared event sequence).
     function createElection() external returns (bytes32 electionId) {
         if (msg.data.length != 4) revert NonCanonicalCalldata();
         uint64 counter = electionCount;

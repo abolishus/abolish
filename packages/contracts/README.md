@@ -21,6 +21,8 @@ Abolish's L2 contracts, built with Foundry 1.8.3 and solc 0.8.30. Internal and s
 - `registerDefinition(bytes)` admits the creator's one definition, write-once, only with canonical calldata, if it decodes strictly (`src/ElectionDefinition.sol`), is well formed, names this deployment, opens after the anchoring epoch and after registration, has every electorate root in an earlier block, and its stub was recorded with its ceremony transcript hash by the trustee registry (`src/ITrusteeRegistry.sol`; T-34, T-17, T-37, T-08, T-13, T-25).
 - The trustee registry is the next part of P1-18; tests use a stand-in (`test/utils/DefinitionHarness.sol`).
 
+## Rules
+
 - `test/source-rules.test.ts` checks every file in `src/`:
   - it has no `emit` statement or anonymous event;
   - only `EventAccumulator.sol` uses raw `log0` … `log4`;

@@ -368,7 +368,8 @@ export interface VoteSharing {
 const SHARINGS = new WeakSet<VoteSharing>();
 
 function deepFreeze<T>(value: T): T {
-  // Elements are frozen by @noble/curves already; bigints are immutable.
+  // Freezes points too (@noble/curves doesn't freeze every point it returns);
+  // bigints are immutable.
   if (value !== null && typeof value === "object" && !Object.isFrozen(value)) {
     for (const v of Object.values(value)) deepFreeze(v);
     Object.freeze(value);

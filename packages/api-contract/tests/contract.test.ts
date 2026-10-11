@@ -122,7 +122,10 @@ describe("the generated OpenAPI document", () => {
       "GET /board/proofs/consistency",
       "GET /board/proofs/inclusion",
       "GET /elections/definition",
+      "GET /moderation/log",
+      "GET /moderation/status",
       "POST /ballots",
+      "POST /moderation/reports",
     ]);
   });
 });

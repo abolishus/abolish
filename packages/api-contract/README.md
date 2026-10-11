@@ -12,6 +12,9 @@ The public API's contract: the oRPC procedures `apps/api` implements and the bal
 | `board.getInclusionProof`   | `GET /board/proofs/inclusion`   |
 | `board.getConsistencyProof` | `GET /board/proofs/consistency` |
 | `ballots.submit`            | `POST /ballots`                 |
+| `moderation.getLog`         | `GET /moderation/log`           |
+| `moderation.getStatus`      | `GET /moderation/status`        |
+| `moderation.report`         | `POST /moderation/reports`      |
 
 ## Rules
 

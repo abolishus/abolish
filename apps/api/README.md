@@ -14,6 +14,9 @@ Every answer is a claim the caller checks with `@abolishus/crypto`: a definition
 | `board.getInclusionProof`   | RFC 9162 audit path. Impossible positions are `BAD_REQUEST`; a tree beyond the board is `OUT_OF_RANGE`.                                                           |
 | `board.getConsistencyProof` | RFC 9162 consistency proof, with the same errors.                                                                                                                 |
 | `ballots.submit`            | **Fails closed** with `ELECTION_NOT_OPEN`: admission (decoding, proofs, L1 reference, poll window) isn't built, so the server boards no ballot yet (P2-3 part 2). |
+| `moderation.getLog`         | The public moderation log by sequence number, without the moderator ([`docs/moderation-policy.md`](../../docs/moderation-policy.md), T-68).                       |
+| `moderation.getStatus`      | A poll's moderation state and newest decision, without the moderator.                                                                                             |
+| `moderation.report`         | Counts an anonymous report of a poll under a removal ground; changes nothing public.                                                                              |
 
 Board procedures answer only for elections whose definition the server holds.
 

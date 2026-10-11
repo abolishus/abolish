@@ -1,6 +1,6 @@
 # Moderation policy
 
-How we moderate user-created polls, and the limits we hold ourselves to. The brief requires this policy and its tooling before Phase 2 goes public, and fixes its one rule: **moderation acts on poll content, never on results** ([[PROJECT_BRIEF]]). Threats: T-68 (moderation abuse), T-17 (personal data in poll text), T-10 (accounts and ballots never join), T-52 (spam). Tooling: `packages/core` (`moderate`, `moderationStatus`, `readModerationLog`; P2-10).
+How we moderate user-created polls, and the limits we hold ourselves to. The brief requires this policy and its tooling before Phase 2 goes public, and fixes its one rule: **moderation acts on poll content, never on results** ([[PROJECT_BRIEF]]). Threats: T-68 (moderation abuse), T-17 (personal data in poll text), T-10 (accounts and ballots never join), T-52 (spam). Tooling: `packages/core` (`moderate`, `moderationStatus`, `readModerationLog`, `report`, `readReportQueue`, `reviewReports`; P2-10) and the public API (`GET /moderation/log`, `GET /moderation/status`, `POST /moderation/reports`).
 
 Status: written by the agent under rule A (P2-10 part 1). The parts that are legal matters are the owner's and are marked **Owner** below; until the owner answers them, they say what we do in the meantime.
 
@@ -48,13 +48,15 @@ Every restoration cites one of: `appeal-upheld` (the creator's appeal succeeded)
 ## Transparency
 
 - **The log.** Every decision is a row in an append-only log: the election ID, the action, the reason code and the time, read from the database's clock rather than given by the moderator. The app role can't edit or delete a row, and triggers stop even the owner's ordinary `UPDATE`, `DELETE` and `TRUNCATE`; a decision is reversed only by a later one, which stays next to it. An owner running DDL could still drop the triggers, and the app role could insert a row without going through the tooling's checks: the log binds the tooling, not an insider (A-2; see What it doesn't prove). The log carries no free text, so it can't carry personal data.
-- **Public.** The whole log is published (the API serves it, P2-10 part 2) and shown on each moderated poll's page. It doesn't name the moderator, the person who reported the poll or the poll's creator.
+- **Public.** The whole log is published (the API serves it at `GET /moderation/log`, and each poll's state at `GET /moderation/status`) and shown on each moderated poll's page. It doesn't name the moderator, the person who reported the poll or the poll's creator.
 - **Internally accountable.** Each decision records an opaque moderator handle that the operator maps to a person. It isn't an account reference: no table links an account to a decision (T-10).
 - **What it doesn't prove.** The log is in our database, so an insider (A-2) could withhold a row from what we serve or wipe the log. Results don't depend on it, so this can hide what we did to display text, never change an outcome. Anchoring the log (so withholding is detectable) is not built; see Known-weak.
 
 ## Reports
 
-Anyone can report a poll, citing a reason code (P2-10 part 2). A report stores the poll and the code, never the reporter's account, address or contact details. Report volume is not a ground: a moderator judges the poll against this policy, not the number of reports.
+Anyone can report a poll, citing one of the removal grounds above (`POST /moderation/reports`, no account). A report stores the poll and the code, never the reporter's account, address, contact details or any text. Reports are counted, one row per poll and ground, so a flood of reports grows two counters and never the table (T-52). The row keeps no time for a report, only the hour the oldest unreviewed report under its ground arrived, which orders the queue (reporting a poll again never moves it back). That stops the stored row from timing a report. It doesn't stop everything: an insider who reads the counters repeatedly, or who holds the database's write-ahead log or backups, can time a report, and the proxy's or platform's logs can hold the reporter's address with that time (T-11). Report volume is not a ground: a moderator judges the poll against this policy, not the number of reports. The counts only order the moderators' queue, which the API never serves.
+
+A moderator reviews a poll's reports under a ground by marking the ones they saw as reviewed (`reviewReports`, given the count the queue showed them), so a report that arrives meanwhile stays pending. Reviewing is not a decision: any action is a separate entry in the log, and reviewing without one leaves the poll as it is. Reports and reviews never enter the public log.
 
 ## Appeals
 
@@ -81,6 +83,8 @@ Until then, content that appears illegal is hidden with `illegal` and escalated 
 - The log lives in Postgres. A wipe loses it, and every poll goes back to visible; an insider can withhold rows from what we serve. Neither changes a result (T-68 residual).
 - Hidden display text survives in copies others pinned, and in the hands of anyone who downloaded it (T-17 residual).
 - Hiding an open poll stops voting through our client; voters then need the text from elsewhere, or the direct-submit path.
-- Reports, appeals, the public API and the front-end behaviour above are part 2 and later (P2-9, P2-8).
+- Appeals, the moderators' own tooling, and the front-end behaviour above are later parts (P2-9, P2-8). Until the tooling exists, a moderator acts through `packages/core` directly.
+- Anyone can report any poll as often as the proxy lets them, so the pending counts can be inflated; volume is never a ground, and the queue is ordered by how long reports have waited, not by count. A poll's reports can't be withdrawn, and the app role can't delete them.
+- A report can be timed by an insider (counters read repeatedly, the write-ahead log, backups) and matched to an address in proxy or platform logs (T-11).
 
 See [[THREAT_MODEL]], [[display-text]], [[0005-permanent-archive]].

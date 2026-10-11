@@ -2,11 +2,15 @@ import { contract, MAX_PAGE_BYTES } from "@abolishus/api-contract";
 import {
   BoardReadError,
   hasDefinition,
+  ModerationError,
+  moderationStatus,
   readConsistencyProof,
   readDefinition,
   readEntries,
   readHead,
   readInclusionProof,
+  readModerationLog,
+  report,
 } from "@abolishus/core";
 import { implement, ORPCError } from "@orpc/server";
 import type { Sql } from "postgres";
@@ -110,6 +114,49 @@ export const router = os.router({
     submit: os.ballots.submit.handler(async ({ input, context, errors }) => {
       await knownElection(context.sql, input.electionId, errors.ELECTION_NOT_FOUND);
       throw errors.ELECTION_NOT_OPEN();
+    }),
+  },
+  // The public moderation log, a poll's state, and reports
+  // (docs/moderation-policy.md; T-68). Nothing here names a moderator or a
+  // reporter, and a report reaches no one but the moderators' queue.
+  moderation: {
+    getLog: os.moderation.getLog.handler(async ({ input, context }) => {
+      const entries = await readModerationLog(
+        context.sql,
+        BigInt(input.after),
+        Number(input.limit),
+      );
+      return {
+        entries: entries.map((e) => ({
+          seq: e.seq.toString(),
+          electionId: toHex(e.electionId),
+          action: e.action,
+          reason: e.reason,
+          decidedAt: e.decidedAt.toISOString(),
+        })),
+      };
+    }),
+    getStatus: os.moderation.getStatus.handler(async ({ input, context, errors }) => {
+      const id = await knownElection(context.sql, input.electionId, errors.ELECTION_NOT_FOUND);
+      const { state, latest } = await moderationStatus(context.sql, id);
+      if (latest === undefined) return { state };
+      return {
+        state,
+        latest: {
+          seq: latest.seq.toString(),
+          action: latest.action,
+          reason: latest.reason,
+          decidedAt: latest.decidedAt.toISOString(),
+        },
+      };
+    }),
+    report: os.moderation.report.handler(async ({ input, context, errors }) => {
+      await report(context.sql, fromHex(input.electionId), input.reason).catch((e: unknown) => {
+        if (e instanceof ModerationError && e.code === "unknown-election")
+          throw errors.ELECTION_NOT_FOUND();
+        throw e;
+      });
+      return {};
     }),
   },
 });

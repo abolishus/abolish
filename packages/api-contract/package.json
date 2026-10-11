@@ -1,0 +1,34 @@
+{
+  "name": "@abolishus/api-contract",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The public API's oRPC contract (zod/mini) and its generated OpenAPI document. Source-only.",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "node scripts/openapi.ts dist/openapi.json",
+    "check": "vp check",
+    "test": "vp test run"
+  },
+  "dependencies": {
+    "@orpc/contract": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@orpc/openapi": "catalog:",
+    "@orpc/server": "catalog:",
+    "@orpc/zod": "catalog:",
+    "@types/node": "catalog:",
+    "fast-check": "catalog:",
+    "typescript": "catalog:",
+    "vite-plus": "catalog:"
+  },
+  "abolish": {
+    "buildOutputs": [
+      "dist"
+    ]
+  }
+}

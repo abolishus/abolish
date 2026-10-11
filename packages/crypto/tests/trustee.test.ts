@@ -398,6 +398,20 @@ describe("ceremony registration", () => {
     expect(verifyCeremonyRegistration({ ...panel, threshold: 2 }, reg, sig)).toBe(false);
   });
 
+  test("verification rejects, never throws on, a registration no seat could sign", () => {
+    const sig = signCeremonyRegistration(be32(101n), panel, reg);
+    for (const index of [0, 5, 1.5, -1, Number.NaN])
+      expect(verifyCeremonyRegistration(panel, { ...reg, index }, sig)).toBe(false);
+    expect(verifyCeremonyRegistration(panel, { ...reg, l2ChainId: 2n ** 64n }, sig)).toBe(false);
+    expect(verifyCeremonyRegistration(panel, { ...reg, stubHash: new Uint8Array(31) }, sig)).toBe(
+      false,
+    );
+    // The panel is pinned configuration: a bad one is the caller's bug.
+    expect(() => verifyCeremonyRegistration({ ...panel, threshold: 1 }, reg, sig)).toThrow(
+      PanelError,
+    );
+  });
+
   test("only the seat's own key can sign, and only for a seat of the panel", () => {
     expect(() => signCeremonyRegistration(be32(100n), panel, reg)).toThrow(RangeError);
     for (const index of [0, 5, 1.5, -1])

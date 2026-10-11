@@ -313,8 +313,25 @@ export function verifyCeremonyRegistration(
   reg: CeremonyRegistration,
   sig: Uint8Array,
 ): boolean {
-  const { message, key } = registration(checkedPanel(panel), reg);
-  return verifyStatement(key, "abolish/v1/sig/ceremony-registration", message, sig);
+  // The panel is pinned, so a bad one throws; the registration comes from
+  // untrusted data, so a seat outside the panel or a field with no encoding
+  // is a statement no seat signed, and fails like a bad signature.
+  const checked = checkedPanel(panel);
+  if (!Number.isSafeInteger(reg.index) || reg.index < 1 || reg.index > checked.keys.length)
+    return false;
+  let statement: { message: Uint8Array; key: Uint8Array };
+  try {
+    statement = registration(checked, reg);
+  } catch (e) {
+    if (e instanceof EncodeError) return false;
+    throw e;
+  }
+  return verifyStatement(
+    statement.key,
+    "abolish/v1/sig/ceremony-registration",
+    statement.message,
+    sig,
+  );
 }
 
 // Public keys, so timing doesn't matter; written without early exit anyway.

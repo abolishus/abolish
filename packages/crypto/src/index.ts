@@ -1,4 +1,23 @@
 export {
+  type BitProof,
+  type Branch,
+  checkShares,
+  checkValidity,
+  COMMITTED_VOTE,
+  type CommittedVote,
+  type OptionPolynomials,
+  proveValidity,
+  type Share,
+  SHARES,
+  shareVote,
+  statementHash,
+  type ValidityCode,
+  type ValidityContext,
+  type ValidityResult,
+  type ValidityRules,
+  type VoteSharing,
+} from "./ballot-validity.ts";
+export {
   type Anchor,
   type AnchorClock,
   BOARD_ENTRY,

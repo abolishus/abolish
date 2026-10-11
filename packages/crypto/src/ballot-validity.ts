@@ -1,0 +1,521 @@
+// Ballot commitments, Pedersen VSS and validity proofs
+// (docs/spec/ballot-validity.md; ADR 0002 option B, ADR 0003 option C):
+// perfectly hiding commitments to each option's vote, shared among the
+// trustees with Pedersen VSS (Pedersen 1991; CFSY 1996), and disjunctive
+// Schnorr proofs (CDS 1994) that each option holds 0 or 1 and the sum lies in
+// the election's range, under Fiat–Shamir challenges that bind the whole
+// statement (T-15, T-28, T-30, T-32). Group operations and hashes are
+// @noble's; this module only composes them.
+
+import { randomBytes } from "@noble/hashes/utils.js";
+import {
+  bytesFixed,
+  type Codec,
+  encode,
+  fieldBn254,
+  list,
+  type CodecValue,
+  struct,
+  u16,
+  u8,
+  Writer,
+} from "./codec.ts";
+import { ds, type SpecifiedTagOf } from "./domain-separation.ts";
+import {
+  challenge,
+  type Element,
+  element,
+  elementOrIdentity,
+  G,
+  GENERATOR_H,
+  GROUP_ORDER,
+  H,
+  IDENTITY,
+  scalar,
+} from "./group.ts";
+import { PARAMETERS } from "./parameters.ts";
+
+const { MAX_OPTIONS, MAX_TRUSTEES } = PARAMETERS;
+
+/** The ballot record type and version whose proof rules this module implements. */
+const BALLOT_RECORD_TYPE = 0x0002;
+const BALLOT_VERSION = 1;
+
+const bitProof = struct([
+  ["c0", scalar],
+  ["z0", scalar],
+  ["c1", scalar],
+  ["z1", scalar],
+]);
+const branch = struct([
+  ["c", scalar],
+  ["z", scalar],
+]);
+
+/** `bit_proof`: the two branches of an option proof, value 0 then value 1. */
+export type BitProof = CodecValue<typeof bitProof>;
+/** `branch`: one branch of the sum proof. */
+export type Branch = { readonly c: bigint; readonly z: bigint };
+
+/**
+ * The committed vote a ballot carries (docs/spec/ballot-validity.md,
+ * Committed vote). Counts are bounded here by the protocol maxima and checked
+ * against the election by `checkValidity` (`validity-shape`).
+ */
+const VSS = list(list(element, MAX_TRUSTEES), MAX_OPTIONS);
+const SHARE_HASHES = list(bytesFixed(32), MAX_TRUSTEES);
+
+export const COMMITTED_VOTE = struct([
+  ["vss", VSS],
+  ["share_hashes", SHARE_HASHES],
+  ["option_proofs", list(bitProof, MAX_OPTIONS)],
+  ["sum_proof", list(branch, MAX_OPTIONS + 1)],
+]);
+
+export type CommittedVote = CodecValue<typeof COMMITTED_VOTE>;
+
+const share = struct([
+  ["v", scalar],
+  ["r", scalar],
+]);
+
+/** One option's share for one trustee: `(f_j(i), g_j(i))`. */
+export type Share = { readonly v: bigint; readonly r: bigint };
+
+/** The shares one trustee receives for one ballot, one per option. */
+export const SHARES: Codec<readonly Share[]> = list(share, MAX_OPTIONS);
+
+/** The election's rules a ballot is shared and proved under, from its registered definition. */
+export interface ValidityRules {
+  readonly optionCount: number;
+  readonly minSelections: number;
+  readonly maxSelections: number;
+  /** `k`: the polynomials' degree is `k − 1`. */
+  readonly threshold: number;
+  /** `n`: shares go to trustees 1 to `n`. */
+  readonly panelSize: number;
+}
+
+/**
+ * Everything a ballot's proofs are checked against, taken from context the
+ * verifier has already checked, never from the ballot's committed vote
+ * (docs/spec/ballot-validity.md, Context).
+ */
+export interface ValidityContext extends ValidityRules {
+  readonly definitionHash: Uint8Array;
+  readonly tier: number;
+  readonly nullifier: bigint;
+}
+
+export type ValidityCode = "validity-shape" | "option-proof" | "sum-proof";
+
+export type ValidityResult =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly code: ValidityCode; readonly option?: number };
+
+const mod = (x: bigint) => ((x % GROUP_ORDER) + GROUP_ORDER) % GROUP_ORDER;
+
+// @noble rejects a multiplier of 0, which proofs legitimately use.
+function mul(p: Element, s: bigint): Element {
+  const e = mod(s);
+  return e === 0n ? IDENTITY : p.multiply(e);
+}
+
+/** `g^v · h^r`. */
+function pedersen(v: bigint, r: bigint): Element {
+  return mul(G, v).add(mul(GENERATOR_H, r));
+}
+
+function checkRules(rules: ValidityRules): void {
+  const { optionCount: m, minSelections: min, maxSelections: max, threshold: k } = rules;
+  const n = rules.panelSize;
+  const int = (x: unknown) => Number.isSafeInteger(x);
+  if (![m, min, max, k, n].every(int)) throw new TypeError("rules: expected integers");
+  if (m < 1 || m > MAX_OPTIONS) throw new RangeError("rules: optionCount out of range");
+  if (min < 0 || min > max || max > m) throw new RangeError("rules: selections out of range");
+  if (k < 2 || k > n || n > MAX_TRUSTEES) throw new RangeError("rules: panel out of range");
+}
+
+function checkContext(ctx: ValidityContext): void {
+  checkRules(ctx);
+  const d = ctx.definitionHash;
+  if (!(d instanceof Uint8Array) || !ArrayBuffer.isView(d) || new Uint8Array(d).length !== 32)
+    throw new TypeError("context: definitionHash must be 32 bytes");
+  if (!Number.isSafeInteger(ctx.tier) || ctx.tier < 0 || ctx.tier > 0xff)
+    throw new RangeError("context: tier must be a u8");
+}
+
+/**
+ * `statement_hash`: the digest every validity proof of the ballot binds
+ * (docs/spec/ballot-validity.md, Statement hash). It covers the election, the
+ * ballot version, the tier, the nullifier (T-32), every commitment and every
+ * share ciphertext's hash (T-30).
+ */
+export function statementHash(
+  ctx: ValidityContext,
+  vss: CommittedVote["vss"],
+  shareHashes: CommittedVote["share_hashes"],
+): Uint8Array {
+  checkContext(ctx);
+  const w = new Writer();
+  w.bytes(new Uint8Array(ctx.definitionHash));
+  u16.write(w, BALLOT_RECORD_TYPE);
+  u8.write(w, BALLOT_VERSION);
+  u8.write(w, ctx.tier);
+  fieldBn254.write(w, ctx.nullifier);
+  // Encoded by the ballot's own field codecs, so exactly as the ballot carries them.
+  VSS.write(w, vss);
+  SHARE_HASHES.write(w, shareHashes);
+  return H(ds("abolish/v1/ballot-statement", w.finish()));
+}
+
+type FsTag = SpecifiedTagOf<"fiat-shamir">;
+
+/** `Y_s = Y · g^{−s}`. */
+const shifted = (y: Element, s: number) => y.subtract(mul(G, BigInt(s)));
+
+/** `A_b = h^{z_b} · Y_{s_b}^{−c_b}`: the prover commitment a branch implies. */
+const announcement = (y: Element, s: number, c: bigint, z: bigint) =>
+  mul(GENERATOR_H, z).subtract(mul(shifted(y, s), c));
+
+/** `HashToScalar(prefix ‖ encode(Y) ‖ encode(A_0) ‖ …)` under the proof's tag. */
+function orChallenge(tag: FsTag, prefix: Uint8Array, y: Element, a: readonly Element[]): bigint {
+  const w = new Writer();
+  w.bytes(prefix);
+  elementOrIdentity.write(w, y);
+  for (const x of a) elementOrIdentity.write(w, x);
+  return challenge(tag, w.finish());
+}
+
+/** Checks a disjunctive proof that `y` commits to one of `values`, branch `b` for `values[b]`. */
+function verifyOr(
+  tag: FsTag,
+  prefix: Uint8Array,
+  y: Element,
+  values: readonly number[],
+  branches: readonly Branch[],
+): boolean {
+  if (branches.length !== values.length) return false;
+  const a = branches.map((br, b) => announcement(y, values[b] as number, br.c, br.z));
+  const sum = branches.reduce((acc, br) => acc + br.c, 0n);
+  return mod(sum) === orChallenge(tag, prefix, y, a);
+}
+
+/** The randomness of one disjunctive proof: the real branch's `w`, and `(c, z)` for every other branch in order. */
+export interface OrNonces {
+  readonly w: bigint;
+  readonly simulated: readonly Branch[];
+}
+
+/** Proves `y = g^{values[real]} · h^ρ` as one of `values` (docs/spec/ballot-validity.md, Proving). */
+function proveOr(
+  tag: FsTag,
+  prefix: Uint8Array,
+  y: Element,
+  values: readonly number[],
+  real: number,
+  rho: bigint,
+  nonces: OrNonces,
+): Branch[] {
+  if (!shifted(y, values[real] as number).equals(mul(GENERATOR_H, rho)))
+    throw new RangeError("prove: the commitment doesn't open to the claimed value");
+  const { w, simulated } = nonces;
+  if (w <= 0n || w >= GROUP_ORDER) throw new RangeError("prove: w must be from 1 to ℓ − 1");
+  if (simulated.length !== values.length - 1)
+    throw new RangeError("prove: one simulated branch per false value");
+  for (const s of simulated)
+    if (s.c < 0n || s.c >= GROUP_ORDER || s.z < 0n || s.z >= GROUP_ORDER)
+      throw new RangeError("prove: simulated values must be scalars");
+  // Branch b's simulated values: the false branches take `simulated` in order.
+  const fake = (b: number) => simulated[b < real ? b : b - 1] as Branch;
+  const a = values.map((s, b) => {
+    if (b === real) return mul(GENERATOR_H, w);
+    const { c, z } = fake(b);
+    return announcement(y, s, c, z);
+  });
+  const c = orChallenge(tag, prefix, y, a);
+  const cReal = mod(c - simulated.reduce((acc, s) => acc + s.c, 0n));
+  return values.map((_, b) => (b === real ? { c: cReal, z: mod(w + cReal * rho) } : fake(b)));
+}
+
+function optionPrefix(statement: Uint8Array, j: number): Uint8Array {
+  const w = new Writer();
+  w.bytes(statement);
+  u16.write(w, j);
+  return w.finish();
+}
+
+function sumPrefix(statement: Uint8Array, min: number, max: number): Uint8Array {
+  const w = new Writer();
+  w.bytes(statement);
+  u16.write(w, min);
+  u16.write(w, max);
+  return w.finish();
+}
+
+const range = (min: number, max: number) =>
+  Array.from({ length: max - min + 1 }, (_, i) => min + i);
+
+/** `C_Σ`: the product of the options' commitments `E_{j,0}`. */
+function commitmentSum(vss: CommittedVote["vss"]): Element {
+  return vss.reduce((acc, e) => acc.add(e[0] as Element), IDENTITY);
+}
+
+/**
+ * The admission check of docs/spec/ballot-validity.md (Checks; verifier 5.4):
+ * shape against the election, then each option proof in order, then the sum
+ * proof. The first failure is the result.
+ */
+export function checkValidity(ctx: ValidityContext, vote: CommittedVote): ValidityResult {
+  checkContext(ctx);
+  const { optionCount: m, minSelections: min, maxSelections: max, threshold: k } = ctx;
+  const { vss, share_hashes, option_proofs, sum_proof } = vote;
+  if (
+    vss.length !== m ||
+    vss.some((e) => e.length !== k) ||
+    share_hashes.length !== ctx.panelSize ||
+    option_proofs.length !== m ||
+    sum_proof.length !== max - min + 1
+  )
+    return { ok: false, code: "validity-shape" };
+  const statement = statementHash(ctx, vss, share_hashes);
+  for (let j = 0; j < m; j++) {
+    const p = option_proofs[j] as BitProof;
+    const branches = [
+      { c: p.c0, z: p.z0 },
+      { c: p.c1, z: p.z1 },
+    ];
+    const tag = "abolish/v1/fs/ballot-validity/option";
+    if (
+      !verifyOr(
+        tag,
+        optionPrefix(statement, j),
+        (vss[j] as readonly Element[])[0] as Element,
+        [0, 1],
+        branches,
+      )
+    )
+      return { ok: false, code: "option-proof", option: j };
+  }
+  const tag = "abolish/v1/fs/ballot-validity/sum";
+  if (
+    !verifyOr(tag, sumPrefix(statement, min, max), commitmentSum(vss), range(min, max), sum_proof)
+  )
+    return { ok: false, code: "sum-proof" };
+  return { ok: true };
+}
+
+/**
+ * Trustee `index`'s check of its shares against the public VSS commitments
+ * (Pedersen 1991, Section 4): one share per option, and for each,
+ * `g^v · h^r = Π_t E_{j,t}^{index^t}`. A trustee receipts a ballot only if
+ * this holds (ADR 0002, Delivery).
+ */
+export function checkShares(
+  vss: CommittedVote["vss"],
+  index: number,
+  shares: readonly Share[],
+): boolean {
+  if (!Number.isSafeInteger(index) || index < 1 || index > MAX_TRUSTEES)
+    throw new RangeError("checkShares: index must be a trustee seat from 1");
+  if (shares.length !== vss.length) return false;
+  const x = BigInt(index);
+  return vss.every((e, j) => {
+    // Horner's rule: ((E_{k−1})^i · E_{k−2})^i · … · E_0.
+    let acc = IDENTITY;
+    for (let t = e.length - 1; t >= 0; t--) acc = mul(acc, x).add(e[t] as Element);
+    const s = shares[j] as Share;
+    return acc.equals(pedersen(s.v, s.r));
+  });
+}
+
+/** One option's sharing polynomials: `f` holds the vote then `a_1 … a_{k−1}`, `g` holds `r` then `b_1 … b_{k−1}`. */
+export interface OptionPolynomials {
+  readonly f: readonly bigint[];
+  readonly g: readonly bigint[];
+}
+
+/**
+ * The client's secret state between sharing and proving: the vote, its
+ * polynomials, the public VSS commitments and every trustee's shares. The
+ * caller erases it once the voter casts (ADR 0002; T-18, T-45).
+ */
+export interface VoteSharing {
+  readonly votes: readonly (0 | 1)[];
+  readonly polynomials: readonly OptionPolynomials[];
+  readonly vss: CommittedVote["vss"];
+  /** `shares[i − 1]` is trustee `i`'s list. */
+  readonly shares: readonly (readonly Share[])[];
+}
+
+function evaluate(coefficients: readonly bigint[], x: bigint): bigint {
+  let acc = 0n;
+  for (let t = coefficients.length - 1; t >= 0; t--)
+    acc = mod(acc * x + (coefficients[t] as bigint));
+  return acc;
+}
+
+function checkVotes(rules: ValidityRules, votes: readonly number[]): void {
+  if (!Array.isArray(votes) || votes.length !== rules.optionCount)
+    throw new RangeError("votes: one entry per option");
+  if (!votes.every((v) => v === 0 || v === 1)) throw new RangeError("votes: each must be 0 or 1");
+  const total = votes.reduce((a, v) => a + v, 0);
+  if (total < rules.minSelections || total > rules.maxSelections)
+    throw new RangeError("votes: selection count outside the election's range");
+}
+
+/**
+ * Internal: shares a vote with the given polynomials. Production code calls
+ * `shareVote`, which draws them from the CSPRNG; the package entry point
+ * doesn't export this, so only tests reproducing vectors can choose them.
+ */
+export function shareVoteWith(
+  rules: ValidityRules,
+  votes: readonly (0 | 1)[],
+  polynomials: readonly OptionPolynomials[],
+): VoteSharing {
+  checkRules(rules);
+  checkVotes(rules, votes);
+  const k = rules.threshold;
+  if (polynomials.length !== votes.length) throw new RangeError("polynomials: one per option");
+  polynomials.forEach((p, j) => {
+    if (p.f.length !== k || p.g.length !== k) throw new RangeError("polynomials: k coefficients");
+    if (p.f[0] !== BigInt(votes[j] as number))
+      throw new RangeError("polynomials: f's constant term is the vote");
+    for (const c of [...p.f, ...p.g])
+      if (typeof c !== "bigint" || c < 0n || c >= GROUP_ORDER)
+        throw new RangeError("polynomials: coefficients must be scalars");
+  });
+  const vss = polynomials.map((p) =>
+    p.f.map((a, t) => {
+      const e = pedersen(a, p.g[t] as bigint);
+      // About 2⁻²⁵² for random coefficients; the codec rejects it, so the
+      // caller draws again (docs/spec/ballot-validity.md, Notes).
+      if (e.is0()) throw new RangeError("polynomials: a VSS commitment is the identity");
+      return e;
+    }),
+  );
+  const shares = Array.from({ length: rules.panelSize }, (_, i) =>
+    polynomials.map((p) => ({ v: evaluate(p.f, BigInt(i + 1)), r: evaluate(p.g, BigInt(i + 1)) })),
+  );
+  return { votes: [...votes], polynomials, vss, shares };
+}
+
+/** A uniform scalar from the CSPRNG: 64 bytes reduced mod ℓ, within about 2⁻²⁶² of uniform. */
+function randomScalar(): bigint {
+  const b = randomBytes(64);
+  let v = 0n;
+  for (let i = 63; i >= 0; i--) v = (v << 8n) | BigInt(b[i] as number);
+  return v % GROUP_ORDER;
+}
+
+function randomNonZeroScalar(): bigint {
+  for (;;) {
+    const s = randomScalar();
+    if (s !== 0n) return s;
+  }
+}
+
+/** Shares a vote among the trustees, with every coefficient from the CSPRNG (docs/spec/ballot-validity.md, Committed vote). */
+export function shareVote(rules: ValidityRules, votes: readonly (0 | 1)[]): VoteSharing {
+  checkRules(rules);
+  checkVotes(rules, votes);
+  for (;;) {
+    const polynomials = votes.map((v) => ({
+      f: [BigInt(v), ...Array.from({ length: rules.threshold - 1 }, randomScalar)],
+      g: Array.from({ length: rules.threshold }, randomScalar),
+    }));
+    try {
+      return shareVoteWith(rules, votes, polynomials);
+    } catch (e) {
+      // Only an identity VSS commitment is retried; anything else is a bug.
+      if (!(e instanceof RangeError && e.message.includes("identity"))) throw e;
+    }
+  }
+}
+
+/** The randomness of a ballot's proofs: one set per option proof, one for the sum proof. */
+export interface ValidityNonces {
+  readonly options: readonly OrNonces[];
+  readonly sum: OrNonces;
+}
+
+/**
+ * Internal: proves a shared vote valid with the given randomness. Production
+ * code calls `proveValidity`; the package entry point doesn't export this.
+ */
+export function proveValidityWith(
+  ctx: ValidityContext,
+  sharing: VoteSharing,
+  shareHashes: CommittedVote["share_hashes"],
+  nonces: ValidityNonces,
+): CommittedVote {
+  checkContext(ctx);
+  const { optionCount: m, minSelections: min, maxSelections: max } = ctx;
+  if (sharing.vss.length !== m || sharing.vss.some((e) => e.length !== ctx.threshold))
+    throw new RangeError("prove: the sharing doesn't match the election");
+  if (shareHashes.length !== ctx.panelSize)
+    throw new RangeError("prove: one share hash per trustee");
+  if (nonces.options.length !== m) throw new RangeError("prove: one nonce set per option");
+  const statement = statementHash(ctx, sharing.vss, shareHashes);
+  const option_proofs = sharing.vss.map((e, j) => {
+    const v = sharing.votes[j] as 0 | 1;
+    const r = (sharing.polynomials[j] as OptionPolynomials).g[0] as bigint;
+    const tag = "abolish/v1/fs/ballot-validity/option";
+    const branches = proveOr(
+      tag,
+      optionPrefix(statement, j),
+      e[0] as Element,
+      [0, 1],
+      v,
+      r,
+      nonces.options[j] as OrNonces,
+    );
+    // proveOr returns one branch per value, here two.
+    const [b0, b1] = branches as [Branch, Branch];
+    return { c0: b0.c, z0: b0.z, c1: b1.c, z1: b1.z };
+  });
+  const total = sharing.votes.reduce<number>((a, v) => a + v, 0);
+  const rho = mod(sharing.polynomials.reduce((a, p) => a + (p.g[0] as bigint), 0n));
+  const values = range(min, max);
+  const sum_proof = proveOr(
+    "abolish/v1/fs/ballot-validity/sum",
+    sumPrefix(statement, min, max),
+    commitmentSum(sharing.vss),
+    values,
+    total - min,
+    rho,
+    nonces.sum,
+  );
+  const vote = { vss: sharing.vss, share_hashes: shareHashes, option_proofs, sum_proof };
+  // Round-trips the result through the codec, so a ballot this returns always encodes.
+  encode(COMMITTED_VOTE, vote);
+  return vote;
+}
+
+function randomOrNonces(branches: number): OrNonces {
+  return {
+    w: randomNonZeroScalar(),
+    simulated: Array.from({ length: branches - 1 }, () => ({
+      c: randomScalar(),
+      z: randomScalar(),
+    })),
+  };
+}
+
+/**
+ * Proves a shared vote valid: an option proof per option and the sum proof,
+ * with all randomness from the CSPRNG (docs/spec/ballot-validity.md, Proving).
+ * `shareHashes` are the hashes of the share ciphertexts, in seat order.
+ */
+export function proveValidity(
+  ctx: ValidityContext,
+  sharing: VoteSharing,
+  shareHashes: CommittedVote["share_hashes"],
+): CommittedVote {
+  checkContext(ctx);
+  return proveValidityWith(ctx, sharing, shareHashes, {
+    options: sharing.vss.map(() => randomOrNonces(2)),
+    sum: randomOrNonces(ctx.maxSelections - ctx.minSelections + 1),
+  });
+}

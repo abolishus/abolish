@@ -6,19 +6,20 @@ Cross-language vectors for the encodings and computations in this spec. TypeScri
 
 One JSON file per spec section or record type, named after it (`primitives.json`, `election-definition.json`, …). Each file is UTF-8 JSON, formatted by `vp check`.
 
-| File                       | Covers                                                                                                                                  |
-| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `primitives.json`          | Primitive types, record framing and strict-decoding rejections ([[notation]])                                                           |
-| `group.json`               | `scalar` and `element` codecs: valid boundaries and every rejected class ([[group]])                                                    |
-| `board.json`               | Board entries, the board tree with every inclusion and consistency proof, checkpoints, board checks ([[board]])                         |
-| `membership.json`          | The nullifier scope, the Semaphore field mapping `F` and the protocol-wide tree depth ([[membership]])                                  |
-| `revoting.json`            | The membership message `M` and `F(M)`, and the selection of counted ballots, ties and repeats included ([[revoting]])                   |
-| `hash.json`                | `H`, `HashToScalar` under each Fiat–Shamir tag, and `h`, with intermediate bytes ([[group]])                                            |
-| `election-definition.json` | Election definition version 1: codec, definition hash, self-pin and well-formedness ([[election-definition]])                           |
-| `display-text.json`        | Display-text record version 1: codec, commitment and well-formedness ([[display-text]])                                                 |
-| `event-accumulator.json`   | The event accumulator: genesis values, event sequences step by step, rejected inputs ([[contracts]])                                    |
-| `trustee.json`             | Trustee identity keys and signatures, accepted and rejected; panel identifiers; ceremony-registration statements ([[trustee-identity]]) |
-| `circuit.json`             | Circuit-facing values: each registered tag's field element and the two byte packings ([[notation]], [[domain-separation]])              |
+| File                       | Covers                                                                                                                                         |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `primitives.json`          | Primitive types, record framing and strict-decoding rejections ([[notation]])                                                                  |
+| `group.json`               | `scalar` and `element` codecs: valid boundaries and every rejected class ([[group]])                                                           |
+| `board.json`               | Board entries, the board tree with every inclusion and consistency proof, checkpoints, board checks ([[board]])                                |
+| `membership.json`          | The nullifier scope, the Semaphore field mapping `F` and the protocol-wide tree depth ([[membership]])                                         |
+| `revoting.json`            | The membership message `M` and `F(M)`, and the selection of counted ballots, ties and repeats included ([[revoting]])                          |
+| `hash.json`                | `H`, `HashToScalar` under each Fiat–Shamir tag, and `h`, with intermediate bytes ([[group]])                                                   |
+| `election-definition.json` | Election definition version 1: codec, definition hash, self-pin and well-formedness ([[election-definition]])                                  |
+| `display-text.json`        | Display-text record version 1: codec, commitment and well-formedness ([[display-text]])                                                        |
+| `event-accumulator.json`   | The event accumulator: genesis values, event sequences step by step, rejected inputs ([[contracts]])                                           |
+| `trustee.json`             | Trustee identity keys and signatures, accepted and rejected; panel identifiers; ceremony-registration statements ([[trustee-identity]])        |
+| `ballot-validity.json`     | Committed votes with the randomness that made them, their validity verdicts, trustees' share checks and codec rejections ([[ballot-validity]]) |
+| `circuit.json`             | Circuit-facing values: each registered tag's field element and the two byte packings ([[notation]], [[domain-separation]])                     |
 
 ## Format
 
@@ -132,6 +133,14 @@ Type descriptors:
 - Two vectors published in the first version are kept unchanged although their names mislead: `key-x-above-p` encodes `x = p` with prefix `0x03` (the same bytes as `key-x-equals-p-prefix-03`; `key-x-p-plus-on-curve-x` is the real aliasing case), and `sig-key-uncompressed` pairs G's uncompressed form with key-1's signature, so it is invalid for two reasons and is superseded by `sig-key-uncompressed-own` and `sig-key-hybrid`, which only the encoding rule rejects.
 - `panels`: each has `id`, `threshold`, `keys` (hex, seat 1 first) and either `panelId` (hex) or `error`: `threshold` (`k` outside `2 ≤ k ≤ n`), `size` (`n` over `MAX_TRUSTEES`), `duplicate-key` or `key` (a key that isn't a `p256-key`).
 - `registrations`: ceremony registrations signed by a seat of the panel named in `panel`. Each has `id`, `l2ChainId` (decimal), `trusteeRegistry`, `index`, `stubHash`, `ceremonyTranscriptHash`, `message` (the 125-byte `m`) and `signature`, by the key in seat `index`.
+
+## Ballot-validity vectors
+
+`ballot-validity.json` covers [[ballot-validity]] with its own format, `abolish-ballot-validity-vectors/1`, and the same top-level fields, plus `tags` (the statement, option and sum tags, ASCII), `generatorH` (`h`'s encoding, hex) and:
+
+- `ballots`: each has `id`, `description`, `context` (`definitionHash` hex; `optionCount`, `minSelections`, `maxSelections`, `threshold`, `panelSize` and `tier` as JSON numbers; `nullifier` decimal), `encoding` (the committed vote, hex) and `result`: `"ok"`, or `{ "code" }` with the first failing check's code, plus `option` for `option-proof`. Valid ballots also carry what made them, so an implementation reproduces `encoding` byte for byte: `votes`; `randomness`, with `polynomials` (per option, `f` and `g`: the `k` coefficients of `f_j` and `g_j`, constant term first, decimal) and the proof randomness `options` (per option) and `sum`, each `{ "w", "simulated": [{ "c", "z" }] }` (decimal; the simulated branches in branch order, skipping the real one); `shareHashes` (hex, seat order); `statementHash` (hex); and `shares` (each trustee's `list<share>` encoding, hex, seat 1 first).
+- `shareChecks`: each has `id`, `ballot` (the `id` of the ballot whose `vss` it is checked against), `index` (the trustee's seat), `shares` (hex) and `valid`.
+- `decode`: rejected encodings. Each has `id`, `description`, `type` (`committed-vote` or `shares`), `encoding` (hex) and `error`, a decode error code.
 
 ## Circuit vectors
 

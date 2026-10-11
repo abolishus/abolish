@@ -23,6 +23,7 @@ A conforming verifier implements every check in [[verifier]] and decodes every r
 | [[membership]]              | The membership statement (Semaphore v4), the nullifier scope, the field mapping, tree depth and membership checks   | Specified; verification keys and Groth16 verification are P1-17b's                                     |
 | [[election-definition]]     | The election definition record, its hash, decoding against its own profile, well-formedness                         | Version 1 specified                                                                                    |
 | [[revoting]]                | The re-vote rule: the membership message, the L1 reference admission checks and the selection of the counted ballot | Specified; the ballot record that carries it is P1-12's                                                |
+| [[ballot-validity]]         | Ballot commitments, Pedersen VSS shares and the trustees' share check, the statement hash and the validity proofs   | Specified; share encryption and the ballot record are P1-12's parts 2 and 3                            |
 | [[trustee-identity]]        | Trustee identity keys and signatures (ECDSA P-256), the panel identifier and the ceremony-registration statement    | Specified; the ceremony transcript and KEM-key possession are P1-14's second part                      |
 | [[content-addressing]]      | How board data becomes IPFS blocks, CIDs and CAR files                                                              | Provisional until P4-3's vectors                                                                       |
 | [[verifier]]                | What a third-party verifier must check, stage by stage                                                              | Checklist; each check is specified by its owning item                                                  |
@@ -31,7 +32,7 @@ A conforming verifier implements every check in [[verifier]] and decodes every r
 Sections still to be written, by the STATUS item that owns them:
 
 - Record layouts: the rest of the record-type registry, by each record's owning item. The election definition and display text are specified (P1-10b).
-- Ballot encryption or commitment and validity proofs: P1-12.
+- Share encryption (the hybrid KEM) and the ballot record: P1-12, parts 2 and 3 ([[ballot-validity]] has the commitments and validity proofs).
 - Benaloh challenge/spoil and receipts: P1-13 (re-vote resolution is in [[revoting]]).
 - Key ceremony and its transcript: P1-14 ([[trustee-identity]] has the identity keys, signatures and panel identifier so far).
 - Decryption or opening shares and the tally transcript: P1-15.

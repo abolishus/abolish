@@ -442,6 +442,32 @@ describe("prover inputs", () => {
     expect(() => checkShares(vote.vss, 17, [])).toThrow(RangeError);
   });
 
+  test("proves only a sharing shareVote made, unchanged (T-15)", () => {
+    const ctx: ValidityContext = {
+      ...rules,
+      definitionHash: new Uint8Array(32),
+      tier: 0,
+      nullifier: 1n,
+    };
+    const hashes = [new Uint8Array(32), new Uint8Array(32), new Uint8Array(32)];
+    const sharing = shareVote(rules, [1, 0, 0]);
+    expect(checkValidity(ctx, proveValidity(ctx, sharing, hashes))).toEqual({ ok: true });
+    // A copy, or a sharing built by hand with r_0 = 0 so that C_0 = g: a
+    // commitment anyone could open. Both verify if proved, so neither may be.
+    expect(() => proveValidity(ctx, { ...sharing }, hashes)).toThrow(TypeError);
+    const p = (f: bigint[], g: bigint[]) => ({ f, g });
+    const polynomials = [p([1n, 1n], [0n, 1n]), p([0n, 1n], [5n, 1n]), p([0n, 1n], [6n, 1n])];
+    const shares = sharing.shares;
+    const handBuilt = { votes: [1, 0, 0] as const, polynomials, vss: sharing.vss, shares };
+    expect(() => proveValidity(ctx, handBuilt, hashes)).toThrow(TypeError);
+    // And a registered sharing can't be changed in place.
+    const g0 = (sharing.polynomials[0] as OptionPolynomials).g as bigint[];
+    expect(Object.isFrozen(g0)).toBe(true);
+    expect(() => {
+      g0[0] = 0n;
+    }).toThrow(TypeError);
+  });
+
   test("the package entry point exports no way to choose the randomness", async () => {
     const api: Record<string, unknown> = await import("../src/index.ts");
     expect(api["shareVoteWith"]).toBeUndefined();

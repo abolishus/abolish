@@ -231,12 +231,6 @@ class Rng:
         d = hashlib.sha512(self.label + self.i.to_bytes(4, "big")).digest()
         return int.from_bytes(d, "little") % L
 
-    def nonzero(self):
-        while True:
-            s = self.scalar()
-            if s:
-                return s
-
     def bytes32(self):
         self.i += 1
         return hashlib.sha256(self.label + b"/bytes/" + self.i.to_bytes(4, "big")).digest()
@@ -266,7 +260,7 @@ def make_ballot(label, ctx, votes, share_hashes=None, cheat=None):
     rand_opts = []
     option_proofs = []
     for j, (p, v) in enumerate(zip(polys, votes)):
-        w, c, z = rng.nonzero(), rng.scalar(), rng.scalar()
+        w, c, z = rng.scalar(), rng.scalar(), rng.scalar()
         rand_opts.append({"w": w, "simulated": [{"c": c, "z": z}]})
         real = v if v in (0, 1) else 1
         rho = p["g"][0]
@@ -280,7 +274,7 @@ def make_ballot(label, ctx, votes, share_hashes=None, cheat=None):
     values = list(range(lo, hi + 1))
     total = sum(votes) % L
     rho = sum(p["g"][0] for p in polys) % L
-    w = rng.nonzero()
+    w = rng.scalar()
     sims = [(rng.scalar(), rng.scalar()) for _ in range(len(values) - 1)]
     rand_sum = {"w": w, "simulated": [{"c": c, "z": z} for c, z in sims]}
     if lo <= total <= hi:

@@ -45,7 +45,7 @@ Its VSS commitments are, for `t = 0, …, k − 1`,
 E_{j,t} = g^{coef_t(f_j)} · h^{coef_t(g_j)}
 ```
 
-so `E_{j,0} = C_j = g^{v_j} · h^{r_j}` is the Pedersen commitment to option `j`'s vote. Trustee `i` (`1 ≤ i ≤ n`, its seat in the panel) receives, for every option, the share `(f_j(i), g_j(i))`; part 2 encrypts the shares to it. Each `E_{j,t}` is perfectly hiding because its `h` exponent is uniform and independent of everything else, so the commitments reveal nothing about the vote to anyone, whatever their computing power ([[0002-everlasting-privacy]], T-15). They are binding under the discrete-log assumption, because no one knows `log_g h` ([[group]], Hash to group and `h`).
+so `E_{j,0} = C_j = g^{v_j} · h^{r_j}` is the Pedersen commitment to option `j`'s vote. Trustee `i` (`1 ≤ i ≤ n`, its seat in the panel) receives, for every option, the share `(f_j(i), g_j(i))`; part 2 encrypts the shares to it. Each `E_{j,t}` is information-theoretically hiding (perfectly, up to the sampling distance under Proving) because its `h` exponent is uniform and independent of everything else, so the commitments reveal nothing about the vote to anyone, whatever their computing power ([[0002-everlasting-privacy]], T-15). They are binding under the discrete-log assumption, because no one knows `log_g h` ([[group]], Hash to group and `h`).
 
 The ballot carries the committed vote:
 
@@ -137,13 +137,15 @@ Together with the option proofs, this proves the vote has no option counted twic
 
 To prove `Y` commits to `s_v` with randomness `ρ` (an option proof: `ρ = r_j`, `s_v = v_j`; the sum proof: `ρ = Σ r_j mod ℓ`, `s_v = Σ v_j`):
 
-1. Draw `w` uniformly from 1 to `ℓ − 1`, and set `A_v = h^w`.
+1. Draw `w` uniformly from the scalars, and set `A_v = h^w`.
 2. For every other branch `b ≠ v`, draw `c_b` and `z_b` uniformly from the scalars and set `A_b = h^{z_b} · Y_{s_b}^{−c_b}`.
 3. Compute `c` from `t` as above, then `c_v = c − Σ_{b≠v} c_b` and `z_v = w + c_v · ρ`, both mod `ℓ`.
 
-This is the standard simulation of the false branches (CDS94): every branch of an honest proof is distributed exactly as an honest Schnorr transcript, so the proof is perfectly witness-indistinguishable and reveals nothing about which value was committed, even to an unbounded adversary (T-15). `w`, the simulated `c_b` and `z_b`, and every polynomial coefficient come from the platform CSPRNG through `packages/crypto` and are never reused; the client erases them, with `r_j`, once the voter casts, except where P1-13's challenge reveals them on a spoiled ballot ([[0002-everlasting-privacy]], T-18, T-45).
+This is the standard simulation of the false branches (CDS94): whatever the committed value, an honest proof is distributed as a uniformly random accepting transcript, so the proof is witness-indistinguishable against an unbounded adversary and reveals nothing about which value was committed (T-15). The only distance from perfect is the scalar sampling: each scalar is 64 CSPRNG bytes reduced mod `ℓ`, within about 2⁻²⁶² of uniform, so a ballot's proofs and commitments are within a statistical distance of about 2⁻²⁵⁰ of their ideal distribution. `w`, the simulated `c_b` and `z_b`, and every polynomial coefficient come from the platform CSPRNG through `packages/crypto` and are never reused. A caller can't supply them: `packages/crypto` proves only a sharing it made itself, unchanged. Once the voter casts, the client discards them with `r_j`, except where P1-13's challenge reveals them on a spoiled ballot ([[0002-everlasting-privacy]], T-18, T-45); in JavaScript that means dropping every reference, since a `bigint` can't be overwritten.
 
 Order of construction: the vote's polynomials and `vss` first, then the shares and their ciphertexts (part 2) and `share_hashes`, then `statement_hash`, then the option proofs and the sum proof.
+
+Every validity proof binds the ballot's nullifier, and so does each share ciphertext's associated data ([[0002-everlasting-privacy]], Private part), which reaches the proofs through `share_hashes`. P1-13 requires a challenged ballot to carry nothing that depends on the nullifier ([[verifier]] 6.2, [[board]]), so P1-13 and part 2 reconcile the two before either is frozen: for example, a challenged ballot built without proofs and under a nullifier-independent context, or a tracking code over the nullifier-independent core. Until then a challenged ballot's format is open (T-42, T-47).
 
 ## Shares
 
@@ -160,7 +162,7 @@ Trustee `i` checks each option's share against the public VSS commitments (Peder
 g^{v} · h^{r} = E_{j,0} · E_{j,1}^{i} · E_{j,2}^{i²} · … · E_{j,k−1}^{i^{k−1}}
 ```
 
-A trustee receipts the ballot's ciphertext only if the list has exactly `m` entries and every option's share passes ([[0002-everlasting-privacy]], Delivery). A share that passes is the evaluation at `i` of the polynomials `vss` commits to (binding, under discrete log), so any `k` trustees holding valid shares can open the ballot's commitments, and the tally's summed shares open the sum of the counted commitments (P1-15, T-29). Shares never appear on the board except as P1-13 and part 2 allow (a spoiled ballot's opening, a posted ciphertext); a trustee keeps them only until the tally ([[0002-everlasting-privacy]], Consequences, T-14).
+A trustee receipts the ballot's ciphertext only if the ballot's committed vote passes the checks below (all of them, `validity-shape` included, so each option has exactly `k` VSS commitments), the list has exactly `m` entries and every option's share passes ([[0002-everlasting-privacy]], Delivery). A share that passes is the evaluation at `i` of the polynomials `vss` commits to (binding, under discrete log), so any `k` trustees holding valid shares can open the ballot's commitments, and the tally's summed shares open the sum of the counted commitments (P1-15, T-29). Shares never appear on the board except as P1-13 and part 2 allow (a spoiled ballot's opening, a posted ciphertext); a trustee keeps them only until the tally ([[0002-everlasting-privacy]], Consequences, T-14).
 
 ## Checks
 
@@ -179,7 +181,7 @@ Decoding failures (a non-canonical scalar, an identity commitment, a count over 
 - **Trustees can open any ballot.** Any `k` trustees can combine their shares and open a ballot's commitments, publicly and verifiably (T-14, [[0002-everlasting-privacy]]). This page doesn't change that.
 - **Binding is computational.** Someone who could compute discrete logs in ristretto255 (a cryptographically relevant quantum computer) could open a commitment to another value and forge validity proofs for past elections. Privacy is unaffected; historical verification then rests on what was anchored on L1 before the break ([[0002-everlasting-privacy]], Context).
 - **Shares check only against the client's own commitments.** A trustee's check proves that the shares match `vss`, not that the client sent the shares the voter meant: a malicious client can commit to a valid vote other than the voter's choice. That is cast-as-intended, P1-13's Benaloh challenge (T-41, T-42).
-- **Not constant time.** The prover's scalar arithmetic (`c_v`, `z_v`, the polynomial evaluations) uses JavaScript `bigint`, which isn't constant time; the scalar multiplications are `@noble/curves`', which are. A local timing attacker on the voter's device could learn about `ρ` or the vote. The device is in the voter's trust base already (T-18, T-41).
+- **Not constant time.** The prover's scalar arithmetic (`c_v`, `z_v`, the polynomial evaluations) uses JavaScript `bigint`, which isn't constant time. Each scalar multiplication is `@noble/curves`' constant-time ladder, and `packages/crypto` runs the same multiplications whatever the vote (`g^{v_j}` as `g^{v_j + 1} · g^{−1}`; every `Y_s` before the real branch is chosen), but the order of a proof's operations still depends on which branch is real. A local timing attacker on the voter's device could learn about `ρ` or the vote. The device is in the voter's trust base already (T-18, T-41).
 
 ## Test vectors
 

@@ -126,6 +126,17 @@ function pedersen(v: bigint, r: bigint): Element {
   return mul(G, v).add(mul(GENERATOR_H, r));
 }
 
+/**
+ * `g^v · h^r` for a vote `v` of 0 or 1, computed as `g^{v+1} · g^{−1}` so the
+ * same full scalar multiplication runs whatever the vote: `mul` would skip
+ * one exactly when `v = 0` (docs/spec/ballot-validity.md, Residuals).
+ */
+function commitVote(v: bigint, r: bigint): Element {
+  return G.multiply(v + 1n)
+    .subtract(G)
+    .add(mul(GENERATOR_H, r));
+}
+
 function checkRules(rules: ValidityRules): void {
   const { optionCount: m, minSelections: min, maxSelections: max, threshold: k } = rules;
   const n = rules.panelSize;
@@ -174,9 +185,9 @@ type FsTag = SpecifiedTagOf<"fiat-shamir">;
 /** `Y_s = Y · g^{−s}`. */
 const shifted = (y: Element, s: number) => y.subtract(mul(G, BigInt(s)));
 
-/** `A_b = h^{z_b} · Y_{s_b}^{−c_b}`: the prover commitment a branch implies. */
-const announcement = (y: Element, s: number, c: bigint, z: bigint) =>
-  mul(GENERATOR_H, z).subtract(mul(shifted(y, s), c));
+/** `A_b = h^{z_b} · Y_{s_b}^{−c_b}`, from `Y_{s_b}`: the prover commitment a branch implies. */
+const announcement = (yShifted: Element, c: bigint, z: bigint) =>
+  mul(GENERATOR_H, z).subtract(mul(yShifted, c));
 
 /** `HashToScalar(prefix ‖ encode(Y) ‖ encode(A_0) ‖ …)` under the proof's tag. */
 function orChallenge(tag: FsTag, prefix: Uint8Array, y: Element, a: readonly Element[]): bigint {
@@ -196,7 +207,7 @@ function verifyOr(
   branches: readonly Branch[],
 ): boolean {
   if (branches.length !== values.length) return false;
-  const a = branches.map((br, b) => announcement(y, values[b] as number, br.c, br.z));
+  const a = branches.map((br, b) => announcement(shifted(y, values[b] as number), br.c, br.z));
   const sum = branches.reduce((acc, br) => acc + br.c, 0n);
   return mod(sum) === orChallenge(tag, prefix, y, a);
 }
@@ -217,10 +228,13 @@ function proveOr(
   rho: bigint,
   nonces: OrNonces,
 ): Branch[] {
-  if (!shifted(y, values[real] as number).equals(mul(GENERATOR_H, rho)))
+  // Every Y_s first, whatever the real branch: the values are public, so the
+  // work here doesn't depend on the vote.
+  const ys = values.map((s) => shifted(y, s));
+  if (!(ys[real] as Element).equals(mul(GENERATOR_H, rho)))
     throw new RangeError("prove: the commitment doesn't open to the claimed value");
   const { w, simulated } = nonces;
-  if (w <= 0n || w >= GROUP_ORDER) throw new RangeError("prove: w must be from 1 to ℓ − 1");
+  if (w < 0n || w >= GROUP_ORDER) throw new RangeError("prove: w must be a scalar");
   if (simulated.length !== values.length - 1)
     throw new RangeError("prove: one simulated branch per false value");
   for (const s of simulated)
@@ -228,10 +242,10 @@ function proveOr(
       throw new RangeError("prove: simulated values must be scalars");
   // Branch b's simulated values: the false branches take `simulated` in order.
   const fake = (b: number) => simulated[b < real ? b : b - 1] as Branch;
-  const a = values.map((s, b) => {
+  const a = values.map((_, b) => {
     if (b === real) return mul(GENERATOR_H, w);
     const { c, z } = fake(b);
-    return announcement(y, s, c, z);
+    return announcement(ys[b] as Element, c, z);
   });
   const c = orChallenge(tag, prefix, y, a);
   const cReal = mod(c - simulated.reduce((acc, s) => acc + s.c, 0n));
@@ -337,8 +351,10 @@ export interface OptionPolynomials {
 
 /**
  * The client's secret state between sharing and proving: the vote, its
- * polynomials, the public VSS commitments and every trustee's shares. The
- * caller erases it once the voter casts (ADR 0002; T-18, T-45).
+ * polynomials, the public VSS commitments and every trustee's shares. Only
+ * `shareVote` makes one, frozen, and `proveValidity` refuses any other. The
+ * caller drops every reference once the voter casts: JavaScript can't zeroise
+ * a `bigint` (ADR 0002; T-18, T-45).
  */
 export interface VoteSharing {
   readonly votes: readonly (0 | 1)[];
@@ -346,6 +362,18 @@ export interface VoteSharing {
   readonly vss: CommittedVote["vss"];
   /** `shares[i − 1]` is trustee `i`'s list. */
   readonly shares: readonly (readonly Share[])[];
+}
+
+/** Every sharing `shareVoteWith` made: the only ones `proveValidityWith` accepts. */
+const SHARINGS = new WeakSet<VoteSharing>();
+
+function deepFreeze<T>(value: T): T {
+  // Elements are frozen by @noble/curves already; bigints are immutable.
+  if (value !== null && typeof value === "object" && !Object.isFrozen(value)) {
+    for (const v of Object.values(value)) deepFreeze(v);
+    Object.freeze(value);
+  }
+  return value;
 }
 
 function evaluate(coefficients: readonly bigint[], x: bigint): bigint {
@@ -388,7 +416,7 @@ export function shareVoteWith(
   });
   const vss = polynomials.map((p) =>
     p.f.map((a, t) => {
-      const e = pedersen(a, p.g[t] as bigint);
+      const e = t === 0 ? commitVote(a, p.g[0] as bigint) : pedersen(a, p.g[t] as bigint);
       // About 2⁻²⁵² for random coefficients; the codec rejects it, so the
       // caller draws again (docs/spec/ballot-validity.md, Notes).
       if (e.is0()) throw new RangeError("polynomials: a VSS commitment is the identity");
@@ -398,7 +426,17 @@ export function shareVoteWith(
   const shares = Array.from({ length: rules.panelSize }, (_, i) =>
     polynomials.map((p) => ({ v: evaluate(p.f, BigInt(i + 1)), r: evaluate(p.g, BigInt(i + 1)) })),
   );
-  return { votes: [...votes], polynomials, vss, shares };
+  // Frozen and registered, so `proveValidity` proves only a sharing made here,
+  // never one a caller built or changed: a caller choosing r_j could publish a
+  // commitment anyone can open (T-15).
+  const sharing: VoteSharing = deepFreeze({
+    votes: [...votes],
+    polynomials: polynomials.map((p) => ({ f: [...p.f], g: [...p.g] })),
+    vss,
+    shares,
+  });
+  SHARINGS.add(sharing);
+  return sharing;
 }
 
 /** A uniform scalar from the CSPRNG: 64 bytes reduced mod ℓ, within about 2⁻²⁶² of uniform. */
@@ -407,13 +445,6 @@ function randomScalar(): bigint {
   let v = 0n;
   for (let i = 63; i >= 0; i--) v = (v << 8n) | BigInt(b[i] as number);
   return v % GROUP_ORDER;
-}
-
-function randomNonZeroScalar(): bigint {
-  for (;;) {
-    const s = randomScalar();
-    if (s !== 0n) return s;
-  }
 }
 
 /** Shares a vote among the trustees, with every coefficient from the CSPRNG (docs/spec/ballot-validity.md, Committed vote). */
@@ -451,6 +482,8 @@ export function proveValidityWith(
   nonces: ValidityNonces,
 ): CommittedVote {
   checkContext(ctx);
+  if (!SHARINGS.has(sharing))
+    throw new TypeError("prove: the sharing must come from shareVote, unchanged");
   const { optionCount: m, minSelections: min, maxSelections: max } = ctx;
   if (sharing.vss.length !== m || sharing.vss.some((e) => e.length !== ctx.threshold))
     throw new RangeError("prove: the sharing doesn't match the election");
@@ -495,7 +528,7 @@ export function proveValidityWith(
 
 function randomOrNonces(branches: number): OrNonces {
   return {
-    w: randomNonZeroScalar(),
+    w: randomScalar(),
     simulated: Array.from({ length: branches - 1 }, () => ({
       c: randomScalar(),
       z: randomScalar(),

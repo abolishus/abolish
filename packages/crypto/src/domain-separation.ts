@@ -27,7 +27,7 @@ export const TAG_REGISTRY = Object.freeze(
       { tag: "abolish/v1/fs/tally-share", primitive: "fiat-shamir", status: "reserved" },
       { tag: "abolish/v1/ceremony-transcript", primitive: "plain", status: "reserved" },
       { tag: "abolish/v1/tally-transcript", primitive: "plain", status: "reserved" },
-      { tag: "abolish/v1/event-accumulator", primitive: "plain", status: "reserved" },
+      { tag: "abolish/v1/event-accumulator", primitive: "plain", status: "specified" },
       { tag: "abolish/v1/generator-h", primitive: "hash-to-curve", status: "specified" },
       { tag: "abolish/v1/kem/share", primitive: "kdf-aead", status: "reserved" },
     ] as const

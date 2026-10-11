@@ -1,0 +1,42 @@
+# Foundry configuration for @abolishus/contracts (contracts skill, Layout).
+# One compiler, one EVM target and no metadata hash, so two builds of the same
+# source are byte-identical (repro-build) and the deployed bytecode can be
+# checked against the release build (verifier 1.2, T-64).
+[profile.default]
+src = "src"
+test = "test"
+out = "out"
+libs = []
+solc_version = "0.8.30"
+evm_version = "cancun"
+via_ir = false
+optimizer = true
+optimizer_runs = 200
+bytecode_hash = "none"
+cbor_metadata = false
+# No compilation cache: repro-build hashes every file a build leaves behind.
+# Forge still writes out/build-info, whose id hashes absolute paths, so the
+# package build script deletes it.
+cache = false
+# Tests read the cross-language vectors (docs/spec/vectors) and nothing else.
+fs_permissions = [{ access = "read", path = "../../docs/spec/vectors" }]
+
+[profile.default.fuzz]
+runs = 256
+
+[profile.default.invariant]
+runs = 64
+depth = 32
+fail_on_revert = true
+
+# CI (FOUNDRY_PROFILE=ci): deeper fuzz and invariant campaigns.
+[profile.ci.fuzz]
+runs = 10000
+
+[profile.ci.invariant]
+runs = 512
+depth = 64
+fail_on_revert = true
+
+[fmt]
+line_length = 100

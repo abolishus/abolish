@@ -57,6 +57,13 @@ export {
   TAG_REGISTRY,
 } from "./domain-separation.ts";
 export {
+  type ContractLog,
+  eventAccumulatorGenesis,
+  eventAccumulatorStep,
+  type EventAccumulatorState,
+  replayEventAccumulator,
+} from "./event-accumulator.ts";
+export {
   challenge,
   type Element,
   element,

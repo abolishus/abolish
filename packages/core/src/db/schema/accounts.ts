@@ -1,6 +1,6 @@
 import { bigint, boolean, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 
-// Drizzle view of migrations/0003_accounts.sql; a test checks the two agree.
+// Drizzle view of migrations/0004_accounts.sql; a test checks the two agree.
 // The property names are better-auth's field names, which its Drizzle adapter
 // maps to these columns (src/accounts.ts).
 

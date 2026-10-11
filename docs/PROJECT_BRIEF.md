@@ -117,6 +117,32 @@ We're building a production-grade, open-source, publicly auditable voting platfo
 - Cloudflare in front of Railway, with Turnstile on Tier 0 actions.
 - `docs/` is an Obsidian vault: brief, ADRs, threat model, protocol spec, runbooks, STATUS, linked with [[wikilinks]].
 
+## Design direction
+The product's authority comes from people trusting what it shows them, including people who disagree with the result. It should look like civic infrastructure, not a movement or a crypto product: a public notice board crossed with a receipt. Plain, calm, permanent, covered in evidence.
+
+These are starting guidelines, not a locked spec. You may improve on them wherever usability, accessibility, clarity or trust gains: refine the palette, type scale, spacing, components and flows as you learn. Record a notable departure (a new primary color, a different type family, a changed core flow) as an agent-accepted ADR with the reasoning. Only the constraints marked **Keep** are fixed.
+
+Principles:
+- **Plain enough for anyone.** Plain language, one task per screen, generous targets. Borrow the clarity of good government design systems (USWDS, GOV.UK) but not their look: it must not read as a government site.
+- **Ballots that can't be misread.** Ballot screens follow the Center for Civic Design's Field Guides to Ensuring Voter Intent (the AIGA Design for Democracy guidelines). **Keep.**
+- **Show your work.** Verification is visible, not a "trust us" badge: receipts, hashes, board entries, trustee counts and per-tier totals are first-class, well-designed elements.
+- **Calm and unmanipulative.** No confetti, streaks, urgency timers, engagement hooks or dark patterns. A vote is a serious act and the UI is quiet about it. **Keep.**
+- **Permanent.** The board is forever; the feel is archival (printed matter, a ledger, a court record), not a feed.
+
+Starting system:
+- Type: IBM Plex. Sans for the interface, Mono for evidence (hashes, receipts, proofs, board entries), Serif for public-record moments (final results, certifications, ceremony transcripts). Tabular figures for every count. Self-host the fonts (e.g. fontsource packages); never load them from a third-party CDN.
+- Color: paper and ink plus one signal color. Ballot paper `#F6F3EC` (ground), Ink `#1B1A17` (text, rules), Pencil `#5A5650` (secondary text), Ink violet `#5B4B8A` (the single accent; purple reads as "both sides" in US politics, kept dusty so it doesn't read as crypto). Status only: Recorded `#2F6B5E`, Pending `#8A5A12`. Dark mode is ink on dark paper, not neon. Never red or blue as a primary or brand color. **Keep** (the no-red/blue rule).
+- Signature elements:
+  - The receipt: a ticket-stub component (perforated divider) holding the receipt hash, board entry number and time.
+  - The visual fingerprint: a deterministic, symmetric glyph drawn from a receipt or election hash, so people can compare "does mine match the board's?" without reading hex. Shown on the receipt and on the board.
+  - The board: results and ledgers on a strict visible grid with ruled lines, like a public notice board.
+  - The receipt's status trail: encrypted on device, recorded on the board, anchored to Ethereum, counted.
+- Results always show the verification tier as a first-class layer (a tier switcher, never a footnote) with counts and scope. Tiers are never blended into one headline number. **Keep.**
+- Every results page links to "verify it yourself" (find your receipt, recount with the verifier, the verifier doesn't need our servers).
+- Voice: plain, factual, slightly formal. Numbers carry their scope ("58.4% yes among 40,112 document-verified voters"). No hype words ("revolution", "decentralized future"), no exclamation marks, no emoji.
+- Avoid: crypto aesthetics (gradients, glowing nodes, 3D coins, dark-mode-only), patriotic imagery (flags, eagles, stars), protest-poster rawness, and generic AI-app styling.
+- Reference mockups (owner's design canvas, not reachable from sessions): a foundations board, a phone ballot screen, a phone receipt screen and a public results page, all following the system above.
+
 ## Builds and releases
 - GitHub Actions builds every release twice and fails on hash mismatch, then signs with Sigstore/cosign keyless signing and SLSA provenance. Railway deploys that image.
 - Each ballot-client release publishes its hash and is pinned to IPFS. The verifier can check that a served client matches a release.

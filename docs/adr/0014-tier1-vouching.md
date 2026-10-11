@@ -75,7 +75,7 @@ A vouch is a pair of Semaphore proofs from a member of the Tier 2 group (documen
   - A person with two disjoint groups of `k` vouchers gets two Tier 1 identities. Each honest voucher sees one real person and can't check whether that person already has a Tier 1 identity.
   - A Tier 2 member can also vouch anonymously for their own Tier 1 commitment, and nobody can detect it.
 - **Cost.** Each vouch is two Groth16 proofs, so an addition carries `2k` proofs: about 1.5 KB at `k = 3`.
-  - A verifier rebuilding Tier 1 checks `2k` proofs per addition, plus the Tier 2 tier trees the proofs refer to. At tens of millions of members that is around 10⁸ pairing checks, before any invalid submissions (T-52).
+  - A verifier rebuilding Tier 1 checks `2k` proofs per addition, plus the Tier 2 tier trees the proofs refer to. At tens of millions of members that is around 10⁸ pairing checks, before any invalid submissions (T-52). Slots are deployment-wide, so rebuilding one Tier 1 group means replaying every Tier 1 group of the registry in one order, junk groups included.
   - Part 2 must use batched Groth16 verification (a random linear combination of the equations) and measure the cost.
 
 **Transitive variant (C′).** Letting Tier 1 members vouch too would make Tier 1 a true web of trust, and it could start before Tier 2. But Sybils it admits could then vouch for more Sybils.
@@ -101,7 +101,7 @@ The numbers:
   - About half of US citizens hold a passport (unconfirmed for 2026, see [[0010-tier2-identity-provider]]), so 4× leaves room for every citizen without one.
   - It also bounds collusion at 4 identities per colluding document.
 
-Both are constants of the deployment's registry. Changing either needs a new registry with full re-admission to Tier 1, never a second rule alongside the first, so a budget can't be spent twice. A redeployed registry resets every budget, as it does for Tier 2's nullifiers ([[0010-tier2-identity-provider]]). So no election counts Tier 1 groups from two registries.
+Both are constants of the deployment's registry. Changing either needs a new registry with full re-admission to Tier 1, never a second rule alongside the first, so a budget can't be spent twice. A redeployed registry resets every budget, as it does for Tier 2's nullifiers ([[0010-tier2-identity-provider]]). A verifier fails an election definition whose Tier 1 groups come from more than one registry (part 2 adds this to [[verifier]] 2.4).
 
 What would change it:
 
@@ -124,26 +124,32 @@ These are part of the decision. Part 2 writes them, with cross-language vectors 
 
 The rules:
 
-- **Authorisation.** A Tier 1 addition counts only if its vouches include `k` valid vouches for its own commitment whose per-vouchee nullifiers are pairwise distinct and whose slot nullifiers are pairwise distinct and unused by every earlier counted vouch in the deployment.
-  - A valid vouch has both proofs valid under the pinned depth-32 key, `j < L`, and both scopes recomputed by the verifier from the group's binding, never taken from the record.
-  - The `k` counted vouches are the first `k` in the record's order that satisfy this. Only they consume slots. Extra vouches, and every vouch in an addition that doesn't count, consume nothing, so nobody can burn an honest voucher's slot by submitting a short or malformed addition.
-  - This replaces the Safe's signature for Tier 1 in [[verifier]] 2.4. Tier 0 keeps the Safe.
+- **Authorisation.** A Tier 1 addition carries exactly `k` vouches for its own commitment. It counts only if all of the following hold:
+  - every vouch is valid: both proofs verify under the pinned depth-32 key, `j < L`, and the verifier recomputes both scopes from the group's binding, never taking them from the record;
+  - the `k` per-vouchee nullifiers are pairwise distinct;
+  - the `k` slot nullifiers are pairwise distinct, and no earlier counted vouch in the deployment used any of them;
+  - its commitment isn't already an unremoved leaf of the group.
+
+  A counted addition consumes its `k` slots. An addition that doesn't count, including one with more or fewer than `k` vouches, consumes nothing. Requiring exactly `k` leaves no choice of subset, so every verifier reaches the same answer, and nobody can split one vouchee's spare vouches into a second addition that burns honest slots. Nobody can burn a slot by submitting a short or malformed addition either. Part 2 adds vectors for overlapping nullifiers and for every rejected case. This replaces the Safe's signature for Tier 1 in [[verifier]] 2.4. Tier 0 keeps the Safe.
+
 - **No authorisation by transaction.** The vouches travel with the addition, and the verifier attributes the addition by what they bind, as it does for Tier 2 ([[verifier]] 2.4; T-21, T-71).
-- **Order.** "Earlier" is the order of additions in the deployment's registry. Only a voucher's own secret can produce its slot nullifier, so reordering can only choose which of one voucher's own double-spent vouches counts, never cancel an honest vouch.
+- **Order.** "Earlier" is one total order over every Tier 1 addition in the deployment's registry: L2 block, then transaction index, then log index. Only a voucher's own secret can produce its slot nullifier, so reordering can only choose which of one voucher's own double-spent vouches counts, never cancel an honest vouch. Because slots are deployment-wide, rebuilding any one Tier 1 group means replaying every Tier 1 addition in the registry up to that group's root block, and the operator can inflate that work with junk groups (Cost, T-52).
 - **Tier 2 root.** Each proof names a Tier 2 group root by its L2 block.
   - **Which groups:** the verifier accepts only a group that the same registry and chain attribute to tier 2 under 2.4's binding. It recomputes that group's tier tree ([[membership]], Tier tree) with 2.4's Tier 2 counting rules, outside any election, including [[0010-tier2-identity-provider]]'s rules for MOCK nullifiers and the test flag. The root must be non-zero.
-  - **Which block:** it must be an anchoring period boundary at or before the addition's block, and within a window `W` of it. So a removed Tier 2 member stops vouching after `W`, and no proof uses a root that was current only briefly, such as one taken just after a registration (T-13).
+  - **Which block:** an anchoring period boundary, meaning the last L2 block whose timestamp is at or before the end of an anchoring period ([[board]], Timing), so every verifier derives the same set from board and chain data alone. It must be at or before the addition's block, and within `W` L2 blocks of it. `W` exceeds one anchoring period plus the time a vouchee needs to collect their vouches; part 2 fixes it in [[parameters]]. So a removed Tier 2 member stops vouching after `W`, and no proof uses a root that was current only briefly, such as one taken just after a registration (T-13).
+  - **Mock members:** MOCK Tier 2 members ([[0010-tier2-identity-provider]]) vouch only on the allow-listed test chains, and a Tier 1 addition with a vouch from one counts only in an election whose definition carries the test flag.
 - **Forbidden commitments.** A vouch for a forbidden commitment ([[membership]], Commitments and removals) counts for nothing, and the client refuses to make one.
 - **Slots.**
   - The client picks an unused `j` uniformly at random from `[0, L)` rather than counting up, so `j` doesn't reveal how many vouches its voucher has made.
-  - A slot handed to a vouchee counts as spent until `W` has passed without it appearing on the board. After that, the client recomputes its `L` slot nullifiers and reads the board.
+  - A slot handed to a vouchee counts as spent until its slot nullifier is consumed by a counted vouch, or until the L2 block `W` blocks after the root block the vouch names is final. A held vouch past that point can never count, since its root is outside `W`. After that, the client checks whether the slot was consumed.
+  - The client checks consumption by fetching every consumed slot nullifier (or the whole board) and matching its own locally, never by asking a server about its own values: a query by value would link the voucher's address to their vouches (T-10, T-22), as fetching one's own Merkle path would ([[membership]], Owned elsewhere).
   - So a lost record never costs a slot permanently, and a vouchee who holds a vouch back can't later collide with a second vouchee's addition.
   - The client never stores `C_V` next to the slot it spent.
 - **Scopes stay separate.** The vouch tags are distinct from `abolish/v1/nullifier-scope`, so vouch nullifiers are unrelated to vote nullifiers for the same secret ([[membership]], Chosen-scope linkage).
 
 ### Rules for P3-2 (groups), P2-6 and P2-8 (clients) and P2-3 (API)
 
-- **Device to device, submitted by the vouchee.** The vouchee shows their commitment to each voucher in person or over a channel they choose (a QR code). The voucher's device proves and hands the vouch back the same way, and the vouchee submits the addition with its vouches. No account, contact list or phone number is involved, and no server sees who is standing next to whom (T-22, T-10).
+- **Device to device, submitted by the vouchee.** The vouchee shows their commitment to each voucher in person or over a channel they choose (a QR code). The voucher's device proves and hands the vouch back the same way, and the vouchee submits the addition with exactly `k` vouches. No account, contact list or phone number is involved, and no server sees who is standing next to whom (T-22, T-10).
 - **No account on submission.** The addition is submitted without an account, like a ballot, through the API or straight to the contract (T-25, T-10).
 - **Contract checks are spam control.** The Tier 1 group contract may check the vouches on chain (P3-2), but only as spam control. The verifier's recomputation from the board is the authority.
 - **Fresh commitment for Tier 1.** The client (P2-6) MUST register a Tier 1 commitment distinct from any Tier 2 commitment of the same person. Otherwise the same commitment, public in both groups, links their two memberships (T-13). A voucher's client refuses to vouch for a commitment already in any Tier 1 or Tier 2 group.

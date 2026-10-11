@@ -554,7 +554,10 @@ export function proveComplaintWith(
   if (typeof w !== "bigint" || w <= 0n || w >= GROUP_ORDER)
     throw new RangeError("complaint: w must be a scalar from 1 to ℓ − 1");
   const { x } = keyPair.secretKey;
-  if (!G.multiply(x).equals(keyPair.publicKey.dh))
+  if (
+    !G.multiply(x).equals(keyPair.publicKey.dh) ||
+    !bytesEqual(ml_kem768.keygen(keyPair.secretKey.seed).publicKey, keyPair.publicKey.ek)
+  )
     throw new RangeError("complaint: the key pair doesn't match");
   // Only a posting that passes the public check, and whose shares fail this
   // trustee's own intake at decryption or the share check: the DH value is
@@ -562,7 +565,8 @@ export function proveComplaintWith(
   const p = postingCheck(ctx, seat, keyPair.publicKey, vss, shareHashes, posting);
   if (!p.ok) throw new RangeError(`complaint: the posting fails (${p.code})`);
   const intake = openShares(ctx, seat, keyPair.secretKey, vss, posting.ciphertext);
-  if (intake.ok) throw new RangeError("complaint: the posted shares are valid");
+  if (intake.ok || (intake.code !== "share-decrypt" && intake.code !== "share-check"))
+    throw new RangeError("complaint: the posted shares don't fail decryption or the share check");
   const ct = p.ct;
   const d = ct.ct_dh.multiply(x);
   const c = complaintChallenge(

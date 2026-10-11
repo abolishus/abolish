@@ -154,7 +154,7 @@ Notes:
 
 - **Only posted ciphertexts.** A trustee complains only about a posting that passes the public check, its proof of knowledge included, and whose shares fail its own decryption at step 4 or 5; `packages/crypto` refuses to make a complaint otherwise. A ciphertext delivered at intake that fails is refused there, with nothing published.
 - **No DH oracle.** A passing posting proves its maker knows `e_i`, so the `D = dh_i^{e_i}` a complaint reveals is a value the poster could already compute: the complaint answers no static Diffie–Hellman query ([[group]], Static Diffie–Hellman), and it can't be aimed at another ciphertext's ephemeral.
-- **Intake is an oracle too.** A trustee's accept or refuse at intake tells the sender whether the AEAD opened, which for a crafted ciphertext answers one guess of `ss_DH`: no more than a decision on a guessed DH value, and the ML-KEM half stays behind implicit rejection.
+- **Intake reveals nothing the sender lacks.** A trustee's accept or refuse at intake tells the sender whether the AEAD opened and the shares passed. With the proof of knowledge checked first, the sender already knows `ss_DH`, and the ML-KEM half stays behind implicit rejection.
 
 ## Residuals
 

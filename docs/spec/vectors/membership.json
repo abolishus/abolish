@@ -1,0 +1,154 @@
+{
+  "format": "abolish-membership-vectors/1",
+  "title": "Membership: nullifier scope, Semaphore field mapping and tree depth",
+  "spec": "docs/spec/membership.md",
+  "generator": "packages/crypto/scripts/membership-vectors.py: an independent Python implementation with its own Keccak-256, checked against hashlib.sha3_256 (same permutation, SHA3 padding) and the published Keccak-256 of the empty string and of 32 zero bytes",
+  "fieldMap": [
+    {
+      "id": "field-zero",
+      "input": "0000000000000000000000000000000000000000000000000000000000000000",
+      "keccak256": "290decd9548b62a8d60345a988386fc84ba6bc95484008f6362f93160ef3e563",
+      "output": "72536837793382353857766664600029564596379343648020771091641483823512744933"
+    },
+    {
+      "id": "field-one",
+      "input": "0000000000000000000000000000000000000000000000000000000000000001",
+      "keccak256": "b10e2d527612073b26eecdfd717e6a320cf44b4afac2b0732d9fcbe2b7fa0cf6",
+      "output": "312829776796408387545637016147278514583116203736587368460269838669765409292"
+    },
+    {
+      "id": "field-all-ff",
+      "input": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "keccak256": "a9c584056064687e149968cbab758a3376d22aedc6a55823d1b3ecbee81b8fb9",
+      "output": "299960357257039674083140105386840675525084898880315147717440550201513745295"
+    },
+    {
+      "id": "field-r-minus-1",
+      "input": "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000000",
+      "keccak256": "985b362850779535b462b01f4f8e43f0352b2a2f9fbd3852991123568f6cb981",
+      "output": "269190272846586305656837393178382714106353744112458489752803091495630367929"
+    },
+    {
+      "id": "field-deterministic-0",
+      "input": "5eb4ec01e0792d2ec3393e8035e7fe3de181fd166ff40830c6f956537821c658",
+      "keccak256": "6913d294ed07cb3e0fa074dc3065ab6195b58d4096ccda08bdb7eac8c7662e43",
+      "output": "185655752254847313260003888737067639891679946421021064219234699298317231662"
+    },
+    {
+      "id": "field-deterministic-1",
+      "input": "6ba414aa22987a3d65d4fa8d0e499354b4e04dfb44afaa2c06c43177533beacb",
+      "keccak256": "b9c3f5119203f1baa916a4eb3e2a840bd5f23eaafacb92859a39c50e8391dfc0",
+      "output": "328219154558934925698458893987204165747186024307820436158225576117649248735"
+    },
+    {
+      "id": "field-deterministic-2",
+      "input": "f61a07532031458b4abfecfa212babecdf281f71302fa6d015b5571aa8cb4998",
+      "keccak256": "1d26fda26c8466bdbc1389bf64ff49f4bcfff8732854f1ff879f3f7450251091",
+      "output": "51507669211490610186142851603822226976009999602004106046633513995635533072"
+    },
+    {
+      "id": "field-deterministic-3",
+      "input": "117ceb106da2d748f13e10a06fb537c52f1dd8f880188f899c20f1a472e00f2b",
+      "keccak256": "b5bc1cf6df4c9b9fc8cd0fa938abd18f21a7e22095bf588f19859d7aa8443fd0",
+      "output": "321097627915274603560288237865612496128686665894695403923559648416225575999"
+    }
+  ],
+  "scopes": [
+    {
+      "id": "scope-zero-root",
+      "definitionHash": "0afac5bc42452f8a13de139568971e5ccf05ace98df48411677b4dc13268a1f7",
+      "root": "0000000000000000000000000000000000000000000000000000000000000000",
+      "scope": "a3f1646342442a02c00f161986dee087ef5cb59b5e867217683deb12b1db7aa4",
+      "scopeField": "10288635400014126445368566119738353120450613335618134539081790042645269478"
+    },
+    {
+      "id": "scope-max-root",
+      "definitionHash": "0afac5bc42452f8a13de139568971e5ccf05ace98df48411677b4dc13268a1f7",
+      "root": "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000000",
+      "scope": "050686b0b2fd82bf7cfc35dd21da329ce0b0e3a50a53e46ee699c12f9b68b2ad",
+      "scopeField": "53344501690996927570479018838261893852223460348267515599581630762775271291"
+    },
+    {
+      "id": "scope-same-definition-other-root",
+      "definitionHash": "0afac5bc42452f8a13de139568971e5ccf05ace98df48411677b4dc13268a1f7",
+      "root": "0e0b819fc53aec81a654fc5bc5f1e04edd6bb4a57482476d70404a5540f6e593",
+      "scope": "68d1b14d6716d7cfa96681058e8033b8577ee8d4d6108419bbbf31d531a687f9",
+      "scopeField": "412069604037057834320799577017942294912350076517358530690468183432858662350"
+    },
+    {
+      "id": "scope-other-definition-same-root",
+      "definitionHash": "5c8c73283717c840d4a41b7d3a4b5e70b93e3e2e3d638c24ad8b510975f840e3",
+      "root": "0e0b819fc53aec81a654fc5bc5f1e04edd6bb4a57482476d70404a5540f6e593",
+      "scope": "e8452660a367896d184a86fac931c9c9aac8a7f19c69433e463009df80357d45",
+      "scopeField": "330404704976863264666687289990850533294560600218548080926881402419433813665"
+    },
+    {
+      "id": "scope-zero-definition",
+      "definitionHash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "root": "0000000000000000000000000000000000000000000000000000000000000001",
+      "scope": "787682bace867d1d4ec34ba18f7472ff5e5f14f0084fa084ebe743721b830217",
+      "scopeField": "104017558754793949689604667304838814595174772207401322800624968360376625993"
+    },
+    {
+      "id": "scope-root-equal-to-r",
+      "description": "a root that isn't a canonical field<bn254> is rejected",
+      "definitionHash": "0afac5bc42452f8a13de139568971e5ccf05ace98df48411677b4dc13268a1f7",
+      "root": "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001",
+      "error": "non-canonical"
+    }
+  ],
+  "depths": [
+    {
+      "groupSize": "1",
+      "depth": 1
+    },
+    {
+      "groupSize": "2",
+      "depth": 1
+    },
+    {
+      "groupSize": "3",
+      "depth": 2
+    },
+    {
+      "groupSize": "4",
+      "depth": 2
+    },
+    {
+      "groupSize": "5",
+      "depth": 3
+    },
+    {
+      "groupSize": "8",
+      "depth": 3
+    },
+    {
+      "groupSize": "9",
+      "depth": 4
+    },
+    {
+      "groupSize": "1023",
+      "depth": 10
+    },
+    {
+      "groupSize": "1024",
+      "depth": 10
+    },
+    {
+      "groupSize": "1025",
+      "depth": 11
+    },
+    {
+      "groupSize": "4294967296",
+      "depth": 32
+    },
+    {
+      "groupSize": "0",
+      "error": "out-of-range"
+    },
+    {
+      "groupSize": "4294967297",
+      "error": "out-of-range"
+    }
+  ]
+}

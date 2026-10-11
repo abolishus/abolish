@@ -76,6 +76,7 @@ export {
   IDENTITY,
   scalar,
 } from "./group.ts";
+export { membershipDepth, membershipScope, nullifierScope, semaphoreField } from "./membership.ts";
 export {
   BOARD_TREE,
   consistencyProof,

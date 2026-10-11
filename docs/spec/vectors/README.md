@@ -11,6 +11,7 @@ One JSON file per spec section or record type, named after it (`primitives.json`
 | `primitives.json`        | Primitive types, record framing and strict-decoding rejections ([[notation]])                                   |
 | `group.json`             | `scalar` and `element` codecs: valid boundaries and every rejected class ([[group]])                            |
 | `board.json`             | Board entries, the board tree with every inclusion and consistency proof, checkpoints, board checks ([[board]]) |
+| `membership.json`        | The nullifier scope, the Semaphore field mapping `F` and the tree depth ([[membership]])                        |
 | `hash.json`              | `H`, `HashToScalar` under each Fiat–Shamir tag, and `h`, with intermediate bytes ([[group]])                    |
 | `event-accumulator.json` | The event accumulator: genesis values, event sequences step by step, rejected inputs ([[contracts]])            |
 
@@ -97,6 +98,14 @@ Type descriptors:
 - `genesis`: each has `id`, `description`, `chainId` (decimal string), `address` (20 bytes, hex) and `accumulator`, the genesis value ([[contracts]], Values).
 - `sequences`: each has `id`, `description`, `chainId`, `address`, `genesis`, `events` (each `{ "topics": [32-byte hex, …], "data": hex }`, in emission order) and `accumulators`, the value after each event in turn.
 - `rejected`: inputs with no accumulator value. `kind` is `genesis` (with `chainId` and `address`: a chain ID with no `u64` encoding) or `step` (with `topics` and `data`: a log with no topics, more than four, or a topic that isn't 32 bytes). A Solidity consumer can't represent a non-32-byte topic and skips it.
+
+## Membership vectors
+
+`membership.json` covers [[membership]] with its own format, `abolish-membership-vectors/1`, and the same top-level fields, plus:
+
+- `fieldMap`: `F`. Each has `id`, `input` (32 bytes, hex), `keccak256` (the Keccak-256 digest of `input`, hex) and `output` (`F(input)`, decimal).
+- `scopes`: the nullifier scope. Each has `id`, `definitionHash` and `root` (32 bytes each, hex; `root` is read big-endian) and either `scope` (`S_g`, hex) and `scopeField` (`F(S_g)`, decimal), or `error` (`non-canonical`, for a root that isn't a canonical `field<bn254>`).
+- `depths`: the tree depth. Each has `groupSize` (decimal) and either `depth` (a JSON number) or `error` (`out-of-range`).
 
 ## Rules
 

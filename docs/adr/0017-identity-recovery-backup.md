@@ -79,6 +79,8 @@ What would change it: browsers letting a page use a credential outside its RP ID
 - Ballot receipts and cast records stay on the device only; the backup carries neither. A lost device loses the voter's own receipt checks (G-7), and a recovered client starts without the records [[revoting]]'s client rules rely on, which can affect the voter's own vote:
   - Client rule 3's alarm would fire on every earlier ballot of the voter's in a poll still open. P2-8's recovered client must first show the voter every ballot on the board under their nullifiers, as cast before recovery, for them to confirm or flag (a ballot they don't recognise is the T-18 alarm), and then name only blocks newer than all of them.
   - The passkey syncs, so a voter can hold the secret on two devices at once. Two clients that cast in one election and tier without each other's records can name the same block, which ties the ballots and voids that vote ([[revoting]], A voter who has lost their records). P2-8 must warn a recovered client's voter to cast from one device per poll, and re-read the board under their nullifiers before every cast.
+  - Both reads come from board segments the client downloads in full (or reads anyway for its anchor checks), never from a query keyed by a nullifier: one address asking about all of a voter's nullifiers at once would link them to each other and to that address (T-11, T-13).
+  - The client can't decrypt earlier ballots (the backup carries no randomness or records), so the voter judges each one only by its approximate cast time, from its L1 block (about 12 seconds). A forged ballot cast close to a real one looks familiar, so this check catches a thief only when their timing differs (T-18); P2-8's interface must not claim more.
 
 ## Decision
 

@@ -6,21 +6,22 @@ Cross-language vectors for the encodings and computations in this spec. TypeScri
 
 One JSON file per spec section or record type, named after it (`primitives.json`, `election-definition.json`, …). Each file is UTF-8 JSON, formatted by `vp check`.
 
-| File                       | Covers                                                                                                                                         |
-| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `primitives.json`          | Primitive types, record framing and strict-decoding rejections ([[notation]])                                                                  |
-| `group.json`               | `scalar` and `element` codecs: valid boundaries and every rejected class ([[group]])                                                           |
-| `board.json`               | Board entries, the board tree with every inclusion and consistency proof, checkpoints, board checks ([[board]])                                |
-| `membership.json`          | The nullifier scope, the Semaphore field mapping `F` and the protocol-wide tree depth ([[membership]])                                         |
-| `revoting.json`            | The membership message `M` and `F(M)`, and the selection of counted ballots, ties and repeats included ([[revoting]])                          |
-| `hash.json`                | `H`, `HashToScalar` under each Fiat–Shamir tag, and `h`, with intermediate bytes ([[group]])                                                   |
-| `election-definition.json` | Election definition version 1: codec, definition hash, self-pin and well-formedness ([[election-definition]])                                  |
-| `display-text.json`        | Display-text record version 1: codec, commitment and well-formedness ([[display-text]])                                                        |
-| `event-accumulator.json`   | The event accumulator: genesis values, event sequences step by step, rejected inputs ([[contracts]])                                           |
-| `election-registry.json`   | Election identifiers the election registry assigns, and inputs with no `u64` encoding ([[contracts]], Election registry)                       |
-| `trustee.json`             | Trustee identity keys and signatures, accepted and rejected; panel identifiers; ceremony-registration statements ([[trustee-identity]])        |
-| `ballot-validity.json`     | Committed votes with the randomness that made them, their validity verdicts, trustees' share checks and codec rejections ([[ballot-validity]]) |
-| `circuit.json`             | Circuit-facing values: each registered tag's field element and the two byte packings ([[notation]], [[domain-separation]])                     |
+| File                       | Covers                                                                                                                                                                           |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `primitives.json`          | Primitive types, record framing and strict-decoding rejections ([[notation]])                                                                                                    |
+| `group.json`               | `scalar` and `element` codecs: valid boundaries and every rejected class ([[group]])                                                                                             |
+| `board.json`               | Board entries, the board tree with every inclusion and consistency proof, checkpoints, board checks ([[board]])                                                                  |
+| `membership.json`          | The nullifier scope, the Semaphore field mapping `F` and the protocol-wide tree depth ([[membership]])                                                                           |
+| `revoting.json`            | The membership message `M` and `F(M)`, and the selection of counted ballots, ties and repeats included ([[revoting]])                                                            |
+| `hash.json`                | `H`, `HashToScalar` under each Fiat–Shamir tag, and `h`, with intermediate bytes ([[group]])                                                                                     |
+| `election-definition.json` | Election definition version 1: codec, definition hash, self-pin and well-formedness ([[election-definition]])                                                                    |
+| `display-text.json`        | Display-text record version 1: codec, commitment and well-formedness ([[display-text]])                                                                                          |
+| `event-accumulator.json`   | The event accumulator: genesis values, event sequences step by step, rejected inputs ([[contracts]])                                                                             |
+| `election-registry.json`   | Election identifiers the election registry assigns, and inputs with no `u64` encoding ([[contracts]], Election registry)                                                         |
+| `trustee.json`             | Trustee identity keys and signatures, accepted and rejected; panel identifiers; ceremony-registration statements ([[trustee-identity]])                                          |
+| `ballot-validity.json`     | Committed votes with the randomness that made them, their validity verdicts, trustees' share checks and codec rejections ([[ballot-validity]])                                   |
+| `tally.json`               | Cell aggregates, trustees' per-ballot and summed shares with their check verdicts, combined seats, Lagrange coefficients, openings and failures, and a derived total ([[tally]]) |
+| `circuit.json`             | Circuit-facing values: each registered tag's field element and the two byte packings ([[notation]], [[domain-separation]])                                                       |
 
 ## Format
 

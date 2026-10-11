@@ -157,6 +157,18 @@ export {
   type MembershipMessageInput,
   selectBallots,
 } from "./revoting.ts";
+export {
+  aggregateCell,
+  type CellAggregate,
+  type CellOpening,
+  checkSummedShares,
+  deriveTotal,
+  lagrangeAtZero,
+  openCell,
+  sumShares,
+  type TallyCode,
+  type TallyRules,
+} from "./tally.ts";
 export { isWellFormedUtf8 } from "./utf8.ts";
 export {
   type CeremonyRegistration,

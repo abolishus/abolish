@@ -64,10 +64,9 @@ describe("circuit vectors", () => {
     expect(deriveTagField(tag)).toBe(BigInt(field));
   });
 
-  test("every tag in the file is registered, and the vectors cover the circuit tag itself", () => {
-    const registered = new Set(TAG_REGISTRY.map((e) => e.tag));
-    for (const { tag } of vectors.tags) expect(registered.has(tag as never)).toBe(true);
-    expect(vectors.tags.map((t) => t.tag)).toContain("abolish/v1/circuit-tag");
+  test("the file lists exactly the registered tags, in registry order", () => {
+    // A tag registered without regenerating circuit.json would otherwise go unvectored.
+    expect(vectors.tags.map((t) => t.tag)).toEqual(TAG_REGISTRY.map((e) => e.tag));
   });
 
   test.each(vectors.packBytes)("packBytes $id", ({ bytes, fields }) => {

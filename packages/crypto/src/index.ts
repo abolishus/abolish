@@ -46,6 +46,7 @@ export {
   utf8,
   Writer,
 } from "./codec.ts";
+export { DISPLAY_TEXT, type DisplayText, type DisplayTextRule } from "./display-text.ts";
 export {
   ds,
   type DsTag,
@@ -64,6 +65,15 @@ export {
   replayEventAccumulator,
 } from "./event-accumulator.ts";
 export {
+  DEFINITION_V1_LIMITS,
+  ELECTION_TYPES,
+  type ElectionDefinition,
+  type ElectionDefinitionRule,
+  electionDefinitionRule,
+  TALLY_SCHEMES,
+  TIERS,
+} from "./election-definition.ts";
+export {
   challenge,
   type Element,
   element,
@@ -78,6 +88,20 @@ export {
 } from "./group.ts";
 export { circuitTagField, PACK_CHUNK, packBoundedBytes, packBytes } from "./circuit.ts";
 export { MEMBERSHIP_DEPTH, membershipScope, nullifierScope, semaphoreField } from "./membership.ts";
+export { PARAMETERS } from "./parameters.ts";
+export {
+  decodeDisplayText,
+  decodeElectionDefinition,
+  displayTextCommitment,
+  displayTextRule,
+  electionDefinitionHash,
+  electionStubHash,
+  encodeDisplayText,
+  encodeElectionDefinition,
+  newDisplayTextSalt,
+  pinnedVersion,
+  UnsupportedVersionError,
+} from "./protocol.ts";
 export {
   BOARD_TREE,
   consistencyProof,

@@ -132,6 +132,12 @@ describe("record-type registry", () => {
     expect(Object.entries(RECORD_TYPES)).toEqual(assigned);
   });
 
+  test("no record version is marked draft", () => {
+    // Published vectors freeze a version; there is no draft exception
+    // (0008-draft-record-layouts).
+    for (const [, , , , status = ""] of rows) expect(status).not.toMatch(/draft/i);
+  });
+
   test("the exported tables can't be changed at run time", () => {
     expect(Object.isFrozen(RECORD_TYPES)).toBe(true);
     expect(Object.isFrozen(TEST_RECORD_TYPES)).toBe(true);

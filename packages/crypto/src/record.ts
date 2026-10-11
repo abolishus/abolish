@@ -29,6 +29,8 @@ export const TEST_RECORD_TYPES = Object.freeze({ first: 0xff00, last: 0xffff } a
 
 const isTestType = (t: number) => t >= TEST_RECORD_TYPES.first && t <= TEST_RECORD_TYPES.last;
 
+const ASSIGNED: ReadonlySet<number> = new Set(Object.values(RECORD_TYPES));
+
 type Versions = Readonly<Record<number, Codec<unknown>>>;
 
 /** One record type: its number and the layout of each version it has. */
@@ -91,8 +93,10 @@ export class RecordSchema {
       if (!MADE.has(t)) throw new TypeError("record types must be made with recordType()");
       if (this.#types.has(t.recordType))
         throw new RangeError(`record type ${t.recordType} listed twice`);
-      if (isTestType(t.recordType) && options.allowTestRange !== true)
-        throw new RangeError(`record type ${t.recordType} is in the test range`);
+      // versioning.md is the only place numbers are assigned: a production
+      // schema takes nothing else, so no decoder can know an unassigned type.
+      if (isTestType(t.recordType) ? options.allowTestRange !== true : !ASSIGNED.has(t.recordType))
+        throw new RangeError(`record type ${t.recordType} is not assigned`);
       this.#types.set(t.recordType, t);
     }
   }
@@ -125,7 +129,9 @@ export class RecordSchema {
    * Strictly decodes a complete input as a record of `type`. `pinned` is the
    * version the election's profile pins for this type: any other version is
    * `profile-mismatch`, even one this schema could decode. The argument is
-   * required so that skipping the check takes an explicit `UNPINNED`.
+   * required so that skipping the check takes an explicit `UNPINNED`. The pin
+   * is checked before the version is looked up: a version that is both
+   * unpinned and unknown is `profile-mismatch` (notation.md).
    */
   decode<V extends Versions>(
     type: RecordType<V>,
@@ -133,6 +139,10 @@ export class RecordSchema {
     pinned: RecordVersion<V> | typeof UNPINNED,
   ): DecodedRecord<V> {
     this.#check(type);
+    if (pinned !== UNPINNED && layoutOf(type, pinned) === undefined)
+      throw new RangeError(
+        `record type ${type.recordType} has no version ${String(pinned)} to pin`,
+      );
     const r = new Reader(bytes);
     // The type is checked before the version byte is read (notation.md).
     const at = r.offset;
@@ -141,9 +151,9 @@ export class RecordSchema {
     if (t !== type.recordType) throw new DecodeError("unexpected-record-type", at);
     const vAt = r.offset;
     const v = r.uint(1);
+    if (pinned !== UNPINNED && v !== pinned) throw new DecodeError("profile-mismatch", vAt);
     const layout = layoutOf(type, v);
     if (layout === undefined) throw new DecodeError("unknown-version", vAt);
-    if (pinned !== UNPINNED && v !== pinned) throw new DecodeError("profile-mismatch", vAt);
     const value = layout.read(r);
     r.end();
     return { version: v, value } as DecodedRecord<V>;

@@ -533,14 +533,14 @@ describe("board checks", () => {
   });
 
   test("a version other than the pinned one is a decode failure", () => {
-    const entries = [
-      encodeBoardEntry({
-        election_id: ELECTION,
-        index: 0n,
-        segment: 0,
-        payload: recordOf(2, new Uint8Array()),
-      }),
-    ];
-    expect(() => checkBoard(ELECTION, entries, 2 as never)).toThrow(BoardError);
+    const entry = encodeBoardEntry({
+      election_id: ELECTION,
+      index: 0n,
+      segment: 0,
+      payload: recordOf(2, new Uint8Array()),
+    });
+    // The entry's own version byte (after the 2-byte record type) claims 2.
+    entry[2] = 2;
+    expect(() => checkBoard(ELECTION, [entry], 1)).toThrow(BoardError);
   });
 });

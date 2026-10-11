@@ -8,10 +8,14 @@ import { encode, fieldBn254, u8 } from "./codec.ts";
 import { ds } from "./domain-separation.ts";
 import { H } from "./group.ts";
 
+// Copies before checking the length: a Uint8Array subclass could report a
+// false `length` while holding another number of bytes (codec.ts, copyBytes).
 function bytes32(x: unknown, what: string): Uint8Array {
-  if (!(x instanceof Uint8Array) || !ArrayBuffer.isView(x) || x.length !== 32)
+  if (!(x instanceof Uint8Array) || !ArrayBuffer.isView(x))
     throw new TypeError(`${what}: expected 32 bytes`);
-  return new Uint8Array(x);
+  const copy = new Uint8Array(x);
+  if (copy.length !== 32) throw new TypeError(`${what}: expected 32 bytes`);
+  return copy;
 }
 
 /**

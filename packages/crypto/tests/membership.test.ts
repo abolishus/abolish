@@ -9,7 +9,7 @@ import {
   nullifierScope,
   semaphoreField,
 } from "../src/index.ts";
-import { SPEC_VECTORS } from "./spec-vectors.ts";
+import { hex, SPEC_VECTORS } from "./spec-vectors.ts";
 
 // docs/spec/vectors/membership.json comes from an independent Python
 // implementation with its own Keccak (scripts/membership-vectors.py), so these
@@ -38,7 +38,10 @@ const vectors = JSON.parse(
   readFileSync(new URL("membership.json", SPEC_VECTORS), "utf8"),
 ) as MembershipVectors;
 
-const hex = (s: string) => Uint8Array.from(s.match(/../g) ?? [], (b) => parseInt(b, 16));
+const decimal = (s: string | undefined) => {
+  if (s === undefined || !/^(?:0|[1-9][0-9]*)$/.test(s)) throw new Error(`not a decimal: ${s}`);
+  return BigInt(s);
+};
 const toHex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
 const bytes32 = fc.uint8Array({ minLength: 32, maxLength: 32 });
@@ -60,11 +63,11 @@ describe("membership vectors (docs/spec/vectors/membership.json)", () => {
   });
 
   test.each(vectors.fieldMap)("F matches Semaphore's hash: $id", (v) => {
-    expect(semaphoreField(hex(v.input))).toBe(BigInt(v.output));
+    expect(semaphoreField(hex(v.input))).toBe(decimal(v.output));
   });
 
   test.each(vectors.scopes)("nullifier scope: $id", (v) => {
-    const r = BigInt(`0x${v.root}`);
+    const r = BigInt(`0x${toHex(hex(v.root))}`);
     const d = hex(v.definitionHash);
     if (v.error !== undefined) {
       const expected = errors[v.error];
@@ -72,8 +75,9 @@ describe("membership vectors (docs/spec/vectors/membership.json)", () => {
       expect(() => nullifierScope(d, v.tier, r)).toThrow(expected);
       return;
     }
-    expect(toHex(nullifierScope(d, v.tier, r))).toBe(v.scope);
-    expect(membershipScope(d, v.tier, r)).toBe(BigInt(v.scopeField ?? ""));
+    if (v.scope === undefined) throw new Error(`${v.id}: a success vector needs scope`);
+    expect(toHex(nullifierScope(d, v.tier, r))).toBe(toHex(hex(v.scope)));
+    expect(membershipScope(d, v.tier, r)).toBe(decimal(v.scopeField));
   });
 });
 

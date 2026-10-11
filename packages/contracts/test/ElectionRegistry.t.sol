@@ -469,15 +469,25 @@ contract ElectionRegistryTest is TestBase {
         assertEq(count, logs.length, "count");
     }
 
-    /// A crude personal-data detector: an at sign, or a run of 8 or more
-    /// printable ASCII characters (a name, an address, a document number).
+    /// A crude personal-data detector: an at sign with two printable ASCII
+    /// characters on each side (an email address), or a run of 12 or more
+    /// printable characters (a name, a street address, a document number).
+    /// Loose enough that ~250 bytes of hash output rarely trip it (about 2%
+    /// for a fresh fixture), so a failure after a fixture change needs a look,
+    /// not a looser detector.
     function _looksLikeText(bytes memory b) internal pure returns (bool) {
         uint256 run;
         for (uint256 i; i < b.length; i++) {
-            uint8 c = uint8(b[i]);
-            if (c == 0x40) return true;
-            run = c >= 0x20 && c < 0x7f ? run + 1 : 0;
-            if (run >= 8) return true;
+            bool printable = uint8(b[i]) >= 0x20 && uint8(b[i]) < 0x7f;
+            run = printable ? run + 1 : 0;
+            if (run >= 12) return true;
+            if (b[i] == 0x40 && i >= 2 && i + 2 < b.length) {
+                bool flanked = true;
+                for (uint256 k = i - 2; k <= i + 2; k++) {
+                    if (uint8(b[k]) < 0x20 || uint8(b[k]) >= 0x7f) flanked = false;
+                }
+                if (flanked) return true;
+            }
         }
         return false;
     }

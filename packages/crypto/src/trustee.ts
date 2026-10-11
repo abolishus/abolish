@@ -273,10 +273,20 @@ export function ceremonyRegistrationMessage(panel: Panel, reg: CeremonyRegistrat
 
 // The statement and the key of its seat, both from one checked copy of the
 // panel, so the key verified against is the key the identifier hashed.
+// Each field read once, so a getter can't show the checks one value and the
+// encoder another.
+function snapshot(reg: CeremonyRegistration): CeremonyRegistration {
+  if (reg === null || typeof reg !== "object")
+    throw new TypeError("ceremony registration: expected an object");
+  const { l2ChainId, trusteeRegistry, index, stubHash, ceremonyTranscriptHash } = reg;
+  return { l2ChainId, trusteeRegistry, index, stubHash, ceremonyTranscriptHash };
+}
+
 function registration(
   checked: { threshold: number; keys: Uint8Array[] },
-  reg: CeremonyRegistration,
+  input: CeremonyRegistration,
 ): { message: Uint8Array; key: Uint8Array } {
+  const reg = snapshot(input);
   const key = Number.isSafeInteger(reg.index) ? checked.keys[reg.index - 1] : undefined;
   if (key === undefined || reg.index < 1)
     throw new RangeError("ceremony registration: index must be a seat of the panel");
@@ -317,6 +327,7 @@ export function verifyCeremonyRegistration(
   // untrusted data, so a seat outside the panel or a field with no encoding
   // is a statement no seat signed, and fails like a bad signature.
   const checked = checkedPanel(panel);
+  reg = snapshot(reg);
   if (!Number.isSafeInteger(reg.index) || reg.index < 1 || reg.index > checked.keys.length)
     return false;
   let statement: { message: Uint8Array; key: Uint8Array };

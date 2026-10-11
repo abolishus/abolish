@@ -229,11 +229,18 @@ jobs:
           DIGEST: ${{ needs.publish.outputs.digest }}
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
           SERVICE_ID: ${{ vars.RAILWAY_API_SERVICE_ID }}
+          # Railway's GraphQL API (backboard.railway.com/graphql/v2).
+          Q_ENV: "query { projectToken { environmentId } }"
+          Q_SOURCE: >-
+            mutation($s: String!, $e: String!, $i: String!) {
+            serviceInstanceUpdate(serviceId: $s, environmentId: $e, input: { source: { image: $i } }) }
+          Q_DEPLOY: "mutation($s: String!, $e: String!) { serviceInstanceDeployV2(serviceId: $s, environmentId: $e) }"
+          Q_STATUS: "query($d: String!) { deployment(id: $d) { status } }"
         run: |
-          [ -n "$RAILWAY_TOKEN" ] && [ -n "$SERVICE_ID" ] || {
+          if [ -z "$RAILWAY_TOKEN" ] || [ -z "$SERVICE_ID" ]; then
             echo "::error::RAILWAY_TOKEN and RAILWAY_API_SERVICE_ID must be set in the staging environment"
             exit 1
-          }
+          fi
           gql() {
             curl -sS --fail-with-body --retry 4 https://backboard.railway.com/graphql/v2 \
               -H "Project-Access-Token: $RAILWAY_TOKEN" -H 'content-type: application/json' \
@@ -241,16 +248,12 @@ jobs:
               jq -e 'if .errors then error(.errors | tostring) else .data end'
           }
           # A project token is scoped to one Railway environment.
-          env_id="$(gql 'query { projectToken { environmentId } }' '{}' | jq -er .projectToken.environmentId)"
-          gql 'mutation($s: String!, $e: String!, $i: String!) {
-                 serviceInstanceUpdate(serviceId: $s, environmentId: $e, input: { source: { image: $i } })
-               }' "$(jq -cn --arg s "$SERVICE_ID" --arg e "$env_id" --arg i "$IMAGE@$DIGEST" '{s: $s, e: $e, i: $i}')" >/dev/null
-          deployment="$(gql 'mutation($s: String!, $e: String!) { serviceInstanceDeployV2(serviceId: $s, environmentId: $e) }' \
-            "$(jq -cn --arg s "$SERVICE_ID" --arg e "$env_id" '{s: $s, e: $e}')" | jq -er .serviceInstanceDeployV2)"
+          env_id="$(gql "$Q_ENV" '{}' | jq -er .projectToken.environmentId)"
+          gql "$Q_SOURCE" "$(jq -cn --arg s "$SERVICE_ID" --arg e "$env_id" --arg i "$IMAGE@$DIGEST" '{s: $s, e: $e, i: $i}')" >/dev/null
+          deployment="$(gql "$Q_DEPLOY" "$(jq -cn --arg s "$SERVICE_ID" --arg e "$env_id" '{s: $s, e: $e}')" | jq -er .serviceInstanceDeployV2)"
           echo "Railway deployment $deployment: $IMAGE@$DIGEST" | tee -a "$GITHUB_STEP_SUMMARY"
           for _ in $(seq 120); do
-            status="$(gql 'query($d: String!) { deployment(id: $d) { status } }' \
-              "$(jq -cn --arg d "$deployment" '{d: $d}')" | jq -er .deployment.status)"
+            status="$(gql "$Q_STATUS" "$(jq -cn --arg d "$deployment" '{d: $d}')" | jq -er .deployment.status)"
             case "$status" in
               SUCCESS) echo "deployed"; exit 0 ;;
               FAILED | CRASHED | REMOVED | SKIPPED)

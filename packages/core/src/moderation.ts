@@ -36,19 +36,21 @@ export const RESTORE_REASONS = ["appeal-upheld", "error", "notice-withdrawn"] as
 export type RemovalReason = (typeof REMOVAL_REASONS)[number];
 export type RestoreReason = (typeof RESTORE_REASONS)[number];
 
-/** A decision: one action with a reason of its kind, by a moderator, at a time. */
+/**
+ * A decision: one action with a reason of its kind, by a moderator. Its time
+ * is the database's clock when it is recorded, never the caller's: a
+ * caller-chosen time could date a hide past a poll's close (T-68).
+ */
 export type ModerationDecision =
   | {
       readonly action: "delist" | "hide";
       readonly reason: RemovalReason;
       readonly moderator: string;
-      readonly decidedAt: Date;
     }
   | {
       readonly action: "restore";
       readonly reason: RestoreReason;
       readonly moderator: string;
-      readonly decidedAt: Date;
     };
 
 /**
@@ -68,10 +70,12 @@ export type ModerationErrorCode =
   | "unknown-election"
   /** Hiding a poll that hasn't closed, for a reason outside `OPEN_POLL_HIDE_REASONS`. */
   | "open-poll"
-  /** The poll is already in the state the action leads to. */
-  | "no-change"
-  /** The decision is dated before the log's newest one. */
-  | "out-of-order";
+  /**
+   * The poll is already in the state the action leads to, under the same
+   * reason (a removal may be re-cited under another ground; a restore never
+   * repeats).
+   */
+  | "no-change";
 
 export class ModerationError extends Error {
   override readonly name = "ModerationError";
@@ -110,13 +114,7 @@ function wellFormed(d: ModerationDecision): boolean {
       : d.action === "delist" || d.action === "hide"
         ? REMOVAL_REASONS
         : [];
-  return (
-    reasons.includes(d.reason) &&
-    typeof d.moderator === "string" &&
-    HANDLE.test(d.moderator) &&
-    d.decidedAt instanceof Date &&
-    Number.isFinite(d.decidedAt.getTime())
-  );
+  return reasons.includes(d.reason) && typeof d.moderator === "string" && HANDLE.test(d.moderator);
 }
 
 export interface ModerationStatus {
@@ -134,11 +132,13 @@ export interface ModerationStatus {
  * Records `decision` about `electionId`'s poll and returns its log sequence
  * number and the poll's new state. Decisions are serialised by a
  * transaction-scoped advisory lock, so each one is judged against the state
- * it changes and the log stays in sequence and time order. Refused, with
- * nothing written: a malformed decision, an election with no stored
- * definition, hiding a poll that hasn't closed for a reason other than
- * `OPEN_POLL_HIDE_REASONS`, an action that changes nothing (a log of no-ops would bury the
- * decisions that matter), and a decision dated before the log's newest one.
+ * it changes and sequence numbers commit in order. Each is dated by the
+ * database clock. Refused, with nothing written: a malformed decision, an
+ * election with no stored definition, hiding a poll that hasn't closed for a
+ * reason outside `OPEN_POLL_HIDE_REASONS`, and an action that changes nothing
+ * (a log of no-ops would bury the decisions that matter). Only this function
+ * enforces those rules: the app role can insert rows directly, bypassing them,
+ * so they hold for the tooling, not against an insider (T-68).
  */
 export async function moderate(
   client: Sql,
@@ -149,12 +149,15 @@ export async function moderate(
   if (!wellFormed(decision)) throw new ModerationError("invalid");
   const id = new Uint8Array(electionId);
   const { action, reason, moderator } = decision;
-  const decidedAt = new Date(decision.decidedAt.getTime());
   return drizzle({ client }).transaction(
     async (tx) => {
       await tx.execute(
         q`SELECT pg_advisory_xact_lock(${MODERATION_LOCK[0]}::int, ${MODERATION_LOCK[1]}::int)`,
       );
+      // The decision's time: the database clock, read after the lock.
+      const [clock] = await tx.execute<{ now: Date | string }>(q`SELECT clock_timestamp() AS now`);
+      // SELECT without FROM yields exactly one row.
+      const decidedAt = new Date(clock!.now);
       const [stored] = await tx
         .select({ definition: electionDefinitions.definition })
         .from(electionDefinitions)
@@ -170,21 +173,15 @@ export async function moderate(
           throw new ModerationError("open-poll");
       }
       const [prev] = await tx
-        .select({ action: moderationActions.action })
+        .select({ action: moderationActions.action, reason: moderationActions.reason })
         .from(moderationActions)
         .where(eq(moderationActions.electionId, id))
         .orderBy(desc(moderationActions.seq))
         .limit(1);
       const before = prev === undefined ? "visible" : stateAfter(prev.action);
       const state = STATE_AFTER[action];
-      if (state === before) throw new ModerationError("no-change");
-      const [newest] = await tx
-        .select({ decidedAt: moderationActions.decidedAt })
-        .from(moderationActions)
-        .orderBy(desc(moderationActions.seq))
-        .limit(1);
-      if (newest !== undefined && decidedAt < newest.decidedAt)
-        throw new ModerationError("out-of-order");
+      if (state === before && (action === "restore" || prev?.reason === reason))
+        throw new ModerationError("no-change");
       const [row] = await tx
         .insert(moderationActions)
         .values({ electionId: id, action, reason, moderator, decidedAt })

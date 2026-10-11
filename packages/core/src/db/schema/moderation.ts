@@ -1,7 +1,7 @@
 import { bigint, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 import { bytea } from "./bytea.ts";
 
-// Drizzle view of migrations/0003_moderation.sql; a test checks the two agree.
+// Drizzle view of migrations/0002_moderation.sql; a test checks the two agree.
 // Append-only: the app role can only SELECT and INSERT (T-68).
 
 export const moderationActions = pgTable("moderation_actions", {

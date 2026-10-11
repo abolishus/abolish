@@ -25,7 +25,7 @@ import {
 } from "../src/index.ts";
 import { type TestDb, testDb } from "./db.ts";
 
-// The moderation log (migrations/0003_moderation.sql, src/moderation.ts;
+// The moderation log (migrations/0002_moderation.sql, src/moderation.ts;
 // docs/moderation-policy.md; T-68): decisions are append-only and public,
 // each one changes a poll's state, they carry no free text, and they never
 // reach a result: the board and the definition read back byte for byte.
@@ -54,13 +54,9 @@ beforeAll(async () => {
 });
 afterAll(() => db?.close());
 
-/** Every decision gets a later time than the last, as a real clock would. */
-let clock = Date.UTC(2026, 9, 11);
-const now = () => new Date((clock += 1000));
-
 /**
  * A stored election under a fresh ID. The typical vector's poll closed in
- * January 2026, before the test clock starts; `closesAt` moves the close.
+ * January 2026; `closesAt` moves the close.
  */
 async function election(closesAt = typical.closes_at): Promise<Uint8Array> {
   const id = new Uint8Array(randomBytes(32));
@@ -81,13 +77,11 @@ const hide = (reason: (typeof REMOVAL_REASONS)[number] = "personal-data"): Moder
   action: "hide",
   reason,
   moderator: "mod-1",
-  decidedAt: now(),
 });
 const delist = (reason: (typeof REMOVAL_REASONS)[number] = "spam"): ModerationDecision => ({
   action: "delist",
   reason,
   moderator: "mod-1",
-  decidedAt: now(),
 });
 const restore = (
   reason: (typeof RESTORE_REASONS)[number] = "appeal-upheld",
@@ -95,7 +89,6 @@ const restore = (
   action: "restore",
   reason,
   moderator: "mod-2",
-  decidedAt: now(),
 });
 
 async function refusedWith(p: Promise<unknown>): Promise<ModerationErrorCode> {
@@ -177,6 +170,15 @@ describe("schema", () => {
     }
   }
 
+  test("the owner can't switch triggers off for its session", async () => {
+    expect(await failsWith(owner`SET session_replication_role = replica`)).toBe("42501");
+  });
+
+  test("the app role can't disable the triggers or drop the table", async () => {
+    expect(await failsWith(app`ALTER TABLE moderation_actions DISABLE TRIGGER USER`)).toBe("42501");
+    expect(await failsWith(app`DROP TABLE moderation_actions`)).toBe("42501");
+  });
+
   test("the table refuses rows outside the policy's codes, handles and lengths", async () => {
     const id = new Uint8Array(randomBytes(32));
     const at = new Date().toISOString();
@@ -231,30 +233,39 @@ describe("moderate", () => {
     const before = await count();
     expect(await refusedWith(moderate(app, id, restore()))).toBe("no-change");
     await moderate(app, id, hide());
-    expect(await refusedWith(moderate(app, id, hide("illegal")))).toBe("no-change");
+    expect(await refusedWith(moderate(app, id, hide()))).toBe("no-change");
     expect(await count()).toBe(before + 1);
   });
 
   test("hides a poll that hasn't closed only for illegal content, personal data or a threat", async () => {
     // Hiding stops voting through our client, so for other grounds an open
     // poll is delisted (docs/moderation-policy.md, Actions; T-68).
+    const bound = BigInt(typical.l1_inclusion_bound);
+    const nowSec = () => BigInt(Math.floor(Date.now() / 1000));
     for (const reason of REMOVAL_REASONS) {
-      const closesAt = BigInt(Math.floor(clock / 1000)) + 600n;
-      const deadline = Number(closesAt + BigInt(typical.l1_inclusion_bound)) * 1000;
-      const id = await election(closesAt);
+      // Closed, but ballots may still land until the inclusion bound after it.
+      const landing = await election(nowSec() - bound + 60n);
+      const done = await election(nowSec() - bound - 60n);
       if ((OPEN_POLL_HIDE_REASONS as readonly string[]).includes(reason)) {
-        expect((await moderate(app, id, hide(reason))).state).toBe("hidden");
+        expect((await moderate(app, landing, hide(reason))).state).toBe("hidden");
       } else {
-        expect(await refusedWith(moderate(app, id, hide(reason)))).toBe("open-poll");
-        expect((await moderate(app, id, delist(reason))).state).toBe("delisted");
-        // Ballots may still land until the inclusion bound after the close.
-        const atClose = { ...hide(reason), decidedAt: new Date(deadline - 1000) };
-        expect(await refusedWith(moderate(app, id, atClose))).toBe("open-poll");
-        const after = { ...hide(reason), decidedAt: new Date(deadline) };
-        expect((await moderate(app, id, after)).state).toBe("hidden");
-        clock = Math.max(clock, deadline);
+        expect(await refusedWith(moderate(app, landing, hide(reason)))).toBe("open-poll");
+        expect((await moderate(app, landing, delist(reason))).state).toBe("delisted");
+        expect((await moderate(app, done, hide(reason))).state).toBe("hidden");
       }
     }
+  });
+
+  test("dates a decision by the database clock, whatever time the caller passes", async () => {
+    // A caller-chosen time could date a hide past the close (T-68).
+    const id = await election(BigInt(Math.floor(Date.now() / 1000)) + 3600n);
+    const forged = { ...hide("spam"), decidedAt: new Date("2100-01-01T00:00:00Z") };
+    expect(await refusedWith(moderate(app, id, forged))).toBe("open-poll");
+    const before = Date.now();
+    await moderate(app, id, { ...forged, action: "delist" } as ModerationDecision);
+    const { latest } = await moderationStatus(app, id);
+    expect(latest!.decidedAt.getTime()).toBeGreaterThanOrEqual(before - 5000);
+    expect(latest!.decidedAt.getTime()).toBeLessThanOrEqual(Date.now() + 5000);
   });
 
   test("refuses an election with no stored definition", async () => {
@@ -265,13 +276,14 @@ describe("moderate", () => {
     expect(await count()).toBe(before);
   });
 
-  test("refuses a decision dated before the log's newest one", async () => {
-    const [a, b] = [await election(), await election()];
-    const late = hide();
-    await moderate(app, a, late);
-    const early = { ...delist(), decidedAt: new Date(late.decidedAt.getTime() - 1) };
-    expect(await refusedWith(moderate(app, b, early))).toBe("out-of-order");
-    expect(await moderationStatus(app, b)).toEqual({ state: "visible" });
+  test("re-cites a removal under another ground, but never repeats one", async () => {
+    const id = await election();
+    await moderate(app, id, hide("spam"));
+    expect(await refusedWith(moderate(app, id, hide("spam")))).toBe("no-change");
+    expect((await moderate(app, id, hide("personal-data"))).state).toBe("hidden");
+    expect((await moderationStatus(app, id)).latest?.reason).toBe("personal-data");
+    await moderate(app, id, restore("error"));
+    expect(await refusedWith(moderate(app, id, restore("appeal-upheld")))).toBe("no-change");
   });
 
   test("refuses malformed decisions", async () => {
@@ -285,8 +297,6 @@ describe("moderate", () => {
       { ...hide(), moderator: "" },
       { ...hide(), moderator: "a".repeat(33) },
       { ...hide(), moderator: "mod-" },
-      { ...hide(), decidedAt: new Date(Number.NaN) },
-      { ...hide(), decidedAt: "2026-10-11T00:00:00Z" },
       { ...hide(), note: undefined, moderator: 7 },
       null,
     ];
@@ -304,11 +314,8 @@ describe("moderate", () => {
   test("concurrent identical decisions record exactly one", async () => {
     const id = await election();
     const clients = await Promise.all(Array.from({ length: 6 }, () => db.as("abolish_app")));
-    const at = now();
     const results = await Promise.allSettled(
-      clients.map((c) =>
-        moderate(c, id, { action: "hide", reason: "spam", moderator: "m", decidedAt: at }),
-      ),
+      clients.map((c) => moderate(c, id, { action: "hide", reason: "spam", moderator: "m" })),
     );
     expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
     for (const r of results)
@@ -387,10 +394,11 @@ describe("readModerationLog", () => {
     await moderate(app, b, d2);
     await moderate(app, a, d3);
     const first = await readModerationLog(app, start, 2);
-    expect(first.map((e) => [e.electionId, e.action, e.reason, e.decidedAt])).toEqual([
-      [a, "hide", "harassment", d1.decidedAt],
-      [b, "delist", "impersonation", d2.decidedAt],
+    expect(first.map((e) => [e.electionId, e.action, e.reason])).toEqual([
+      [a, "hide", "harassment"],
+      [b, "delist", "impersonation"],
     ]);
+    expect(first[0]!.decidedAt.getTime()).toBeLessThanOrEqual(first[1]!.decidedAt.getTime());
     const rest = await readModerationLog(app, first.at(-1)!.seq, 2);
     expect(rest.map((e) => [e.electionId, e.action, e.reason])).toEqual([
       [a, "restore", "notice-withdrawn"],

@@ -29,6 +29,7 @@ CREATE TABLE moderation_actions (
     END
   ),
   moderator text NOT NULL CHECK (moderator ~ '^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$'),
+  -- The database clock when the tooling recorded it (src/moderation.ts).
   decided_at timestamptz NOT NULL
 );
 

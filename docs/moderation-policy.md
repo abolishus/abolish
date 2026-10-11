@@ -19,17 +19,17 @@ A poll has two kinds of data ([[display-text]]):
 | `hide`    | As `delist`, and the display text is withheld: the poll page shows a notice naming the reason code instead, and the result is shown by option number ("Option 3: 1,204"). We unpin the text. |
 | `restore` | Back to listed, text shown.                                                                                                                                                                  |
 
-An election's state is its newest decision (`visible`, `delisted` or `hidden`). A decision that wouldn't change the state is refused.
+An election's state is its newest decision (`visible`, `delisted` or `hidden`). A decision that changes neither the state nor its reason is refused.
 
 Use the least restrictive action that addresses the harm: delist unless showing the text itself does harm (personal data, a threat, illegal content, a scam link).
 
-Hiding an open poll's text means our ballot client can't show the question, and the ballot client must refuse to show a ballot whose text it can't check against the definition ([[display-text]], Checks). So hiding an open poll stops voting through our client until it is restored. Because that comes close to suppressing a poll, a poll is hidden before it closes (until `closes_at` plus `l1_inclusion_bound`, while ballots can still land) only for `illegal`, `personal-data` or `threat`, and delisted otherwise. The tooling refuses any other hide of an open poll (`open-poll`). Voting itself stays possible: anyone holding a copy of the text can check it against the commitment, and the direct-submit path doesn't go through us (G-10).
+Hiding an open poll's text means our ballot client can't show the question, and the ballot client must refuse to show a ballot whose text it can't check against the definition ([[display-text]], Checks). So hiding an open poll stops voting through our client until it is restored. Because that comes close to suppressing a poll, a poll is hidden before it closes (until `closes_at` plus `l1_inclusion_bound`, while ballots can still land) only for `illegal`, `personal-data` or `threat`, and delisted otherwise. The tooling refuses any other hide of an open poll (`open-poll`). Voting itself stays possible: anyone holding a copy of the text can check it against the commitment, and the direct-submit path doesn't go through us (G-10). Even so, an open-poll hide can lower turnout through our client, and so can change an outcome, on a reason code nobody outside can check; a compelled operator (A-1) could misuse `threat` this way. That is the one place moderation reaches a result, indirectly, and it is listed for the owner under Decisions to review in [[STATUS]]. A later part may narrow it, for example by letting the ballot client keep showing a `threat`-hidden poll's committed text from IPFS while our web pages withhold it.
 
 What moderation can't do: copies of display text that others pinned on IPFS stay where they are, and community nodes (`apps/node`) decide for themselves whether to follow our log (T-17 residual, T-68 residual). We publish the log so they can.
 
 ## Reasons
 
-Every removal cites exactly one reason code. These are the only grounds:
+Every removal cites exactly one reason code. A removal can be re-cited under a different code (a poll hidden for `spam` later found to carry `personal-data`), so the log shows the strongest ground. These are the only grounds:
 
 | Code            | Ground                                                                                                                                                  |
 | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -47,7 +47,7 @@ Every restoration cites one of: `appeal-upheld` (the creator's appeal succeeded)
 
 ## Transparency
 
-- **The log.** Every decision is a row in an append-only log: the election ID, the action, the reason code and the time. Nobody, the database owner included, can edit or delete a row; a decision is reversed only by a later one, which stays next to it. The log carries no free text, so it can't carry personal data.
+- **The log.** Every decision is a row in an append-only log: the election ID, the action, the reason code and the time, read from the database's clock rather than given by the moderator. The app role can't edit or delete a row, and triggers stop even the owner's ordinary `UPDATE`, `DELETE` and `TRUNCATE`; a decision is reversed only by a later one, which stays next to it. An owner running DDL could still drop the triggers, and the app role could insert a row without going through the tooling's checks: the log binds the tooling, not an insider (A-2; see What it doesn't prove). The log carries no free text, so it can't carry personal data.
 - **Public.** The whole log is published (the API serves it, P2-10 part 2) and shown on each moderated poll's page. It doesn't name the moderator, the person who reported the poll or the poll's creator.
 - **Internally accountable.** Each decision records an opaque moderator handle that the operator maps to a person. It isn't an account reference: no table links an account to a decision (T-10).
 - **What it doesn't prove.** The log is in our database, so an insider (A-2) could withhold a row from what we serve or wipe the log. Results don't depend on it, so this can hide what we did to display text, never change an outcome. Anchoring the log (so withholding is detectable) is not built; see Known-weak.
@@ -58,7 +58,7 @@ Anyone can report a poll, citing a reason code (P2-10 part 2). A report stores t
 
 ## Appeals
 
-The poll's creator can appeal any decision once, from their account. A different moderator from the one who decided reviews it. An upheld appeal is a `restore` with `appeal-upheld`; a rejected one leaves the state, and the log, as they are.
+The poll's creator can appeal any decision once, from their account. A different moderator from the one who decided reviews it. An upheld appeal is a `restore` with `appeal-upheld`; a rejected one leaves the state, and the log, as they are. While there is only one moderator (Moderators, below), appeals wait for a second one, and Phase 2 doesn't go public before one is named.
 
 ## Moderators
 
@@ -74,7 +74,7 @@ Moderators act through the tooling only, under handles. They never see or handle
 - how we receive and act on legal notices and orders (`legal-notice`), including copyright notices, and whether we publish them;
 - what we do when compelled to act on results or on the board, which this policy and the system don't allow (A-1). The system's answer is that a result stays verifiable from chain + IPFS whatever we are made to do; what we say publicly is the owner's call.
 
-Until then: content that is plainly illegal is hidden with `illegal`, and nothing else is reported to anyone.
+Until then, content that appears illegal is hidden with `illegal` and escalated to the owner at once. Whether, and to whom, it is reported is the owner's decision, and Phase 2 doesn't go public before it is made.
 
 ## Known-weak
 

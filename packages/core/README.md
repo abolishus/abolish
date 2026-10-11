@@ -55,7 +55,7 @@ The moderation log ([`docs/moderation-policy.md`](../../docs/moderation-policy.m
 
 `src/moderation.ts`:
 
-- `moderate(sql, electionId, decision)` records a decision and returns its sequence number and the poll's new state (`visible`, `delisted`, `hidden`). Decisions are serialised by one advisory lock, so sequence numbers commit in order and each decision is judged against the state it changes. `ModerationError` refuses a malformed decision (`invalid`), an election with no stored definition (`unknown-election`), hiding a poll before its close plus inclusion bound for a reason outside `OPEN_POLL_HIDE_REASONS` (`open-poll`), an action that changes nothing (`no-change`) and a decision dated before the log's newest (`out-of-order`).
+- `moderate(sql, electionId, decision)` records a decision and returns its sequence number and the poll's new state (`visible`, `delisted`, `hidden`). Decisions are serialised by one advisory lock, so sequence numbers commit in order and each decision is judged against the state it changes, and each is dated by the database clock, never the caller. `ModerationError` refuses a malformed decision (`invalid`), an election with no stored definition (`unknown-election`), hiding a poll before its close plus inclusion bound for a reason outside `OPEN_POLL_HIDE_REASONS` (`open-poll`), and an action that changes neither the state nor its reason (`no-change`). Only `moderate` enforces these: the app role can still insert directly, so they bind the tooling, not an insider.
 - `moderationStatus(sql, electionId)`: the poll's state and newest decision.
 - `readModerationLog(sql, after, limit)`: the public log, by sequence number, without the moderator.
 

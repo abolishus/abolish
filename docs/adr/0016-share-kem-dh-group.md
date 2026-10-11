@@ -1,8 +1,8 @@
 # ADR 0016: The Diffie–Hellman half of the share KEM
 
-- Status: Accepted (agent) — owner may veto (2026-10-11, rule A): option A
+- Status: needs-decision (owner-only): the brief's non-negotiable exception for unaudited ML-KEM names X25519. Recommended: option A
 - Date: 2026-10-11
-- Deciders: agent, owner may veto (rule A)
+- Deciders: owner. [[PROJECT_BRIEF]] (Non-negotiable properties) allows unaudited ML-KEM from `@noble/post-quantum` only "inside a hybrid KEM with X25519 on testnets", and changes to the brief's non-negotiable properties are owner-only (rule A). Option A pairs it with Curve25519 DH in its ristretto255 encoding, not RFC 7748's X25519, so an agent's reading can't settle it.
 - Threats addressed: T-15, T-39, T-41, T-36 (see [[THREAT_MODEL]])
 
 ## Context
@@ -40,7 +40,7 @@ Option A. The owner's answer is about the post-quantum question: that ML-KEM-768
 ## Consequences
 
 - [[share-encryption]] specifies the KEM, the AEAD (ChaCha20-Poly1305, RFC 8439, from `@noble/ciphers`), the trustee KEM key format, the ciphertext and its hash, the public check of a posting and the complaint proof. P1-14 part 2 registers the keys with their proofs of possession.
-- `packages/crypto` depends on `@noble/post-quantum` (ML-KEM-768 only) and `@noble/ciphers` (ChaCha20-Poly1305 only). `@noble/post-quantum` is self-audited only (version 0.6.1, April 2026); the owner allowed it on testnets, and an independent audit of the code in use is a mainnet prerequisite ([[0002-everlasting-privacy]], Decision).
+- `packages/crypto` depends on `@noble/post-quantum` (ML-KEM-768 only) and `@noble/ciphers` (ChaCha20-Poly1305 only). `@noble/post-quantum` is self-audited only, at version 0.6.1 (April 2026); the pinned 0.7.1 includes changes since that self-audit. The owner allowed it on testnets, and an independent audit of the code in use is a mainnet prerequisite ([[0002-everlasting-privacy]], Decision).
 - Without published vectors for this KEM, `docs/spec/vectors/share-encryption.json` comes from an independent Python implementation of ML-KEM-768, ChaCha20-Poly1305 and the combiner, checked against the published accumulated ML-KEM-768 vectors and RFC 8439 (T-36).
 - The AEAD's associated data binds the definition, ballot version, seat and VSS commitments, but not the tier or nullifier that [[0002-everlasting-privacy]] (Private part) lists: the validity proofs already bind both together with every ciphertext hash, and leaving them out lets a ballot's ciphertexts be made before its nullifier, as a challenged ballot needs ([[ballot-validity]], Proving; [[verifier]] 6.2). This narrows nothing ADR 0002 relies on ([[share-encryption]], Ciphertext).
 - Every ciphertext carries a Schnorr proof of knowledge of its DH ephemeral, binding the whole ciphertext, seat, key and committed vote. The in-session review of P1-12 part 2 showed that without it, an attacker who copies a victim's ephemeral into its own posted ciphertext turns an honest trustee's complaint into a decryption of the victim's share. With it, a complaint reveals only a DH value its poster already knows, so complaints are no longer a static Diffie–Hellman oracle either.
@@ -48,4 +48,9 @@ Option A. The owner's answer is about the post-quantum question: that ML-KEM-768
 
 ## Decision
 
-Option A, `Accepted (agent) — owner may veto`, listed under Decisions to review in [[STATUS]].
+Waiting on the owner, listed under Waiting on the owner in [[STATUS]]. `crypto-review` on #58 found that this ADR first recorded option A as an agent decision, which reads the brief's non-negotiable "with X25519" as Diffie–Hellman on Curve25519 in any encoding. That reading is the owner's to make. Any one of these settles it:
+
+- the owner amends the brief's exception (or confirms in [[0002-everlasting-privacy]], Decision) to cover Curve25519 DH in its ristretto255 encoding, which accepts option A as built in #58;
+- the owner keeps X25519 as RFC 7748 defines it, and P1-12 part 2 is rebuilt on option B with a reviewed complaint proof over X25519.
+
+Until then, #58 doesn't merge and nothing builds on its formats (P1-14 part 2, P1-12 part 3, P1-15 parts 2 and 3).

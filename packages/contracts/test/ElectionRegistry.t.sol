@@ -249,7 +249,13 @@ contract ElectionRegistryTest is TestBase {
             )
         );
         // Recorded for another stub with the same transcript hash: still refused.
-        trustees.record(bytes32(uint256(stub) ^ 1), d.ceremonyTranscriptHash);
+        trustees.record(
+            bytes32(uint256(stub) ^ 1),
+            d.ceremonyTranscriptHash,
+            d.panelId,
+            d.threshold,
+            d.panelSize
+        );
         _expectRefused(
             CREATOR,
             enc,
@@ -257,6 +263,28 @@ contract ElectionRegistryTest is TestBase {
                 ElectionRegistry.CeremonyNotRecorded.selector, stub, d.ceremonyTranscriptHash
             )
         );
+    }
+
+    /// T-14, T-37: the trustee registry is asked about the panel and
+    /// threshold the definition names, so an approval recorded for this stub
+    /// under another panel or threshold doesn't count.
+    function test_RefusesACeremonyRecordedForAnotherPanel() public {
+        bytes32 id = _create();
+        ElectionDefinitionLib.Definition memory d = RegistryFixture.template(registry, id);
+        bytes memory enc = DefinitionEncoder.encode(d);
+        bytes32 stub = lib.stubHash(enc);
+        bytes memory refusal = abi.encodeWithSelector(
+            ElectionRegistry.CeremonyNotRecorded.selector, stub, d.ceremonyTranscriptHash
+        );
+        trustees.record(
+            stub, d.ceremonyTranscriptHash, sha256("other panel"), d.threshold, d.panelSize
+        );
+        trustees.record(stub, d.ceremonyTranscriptHash, d.panelId, d.threshold + 1, d.panelSize);
+        trustees.record(stub, d.ceremonyTranscriptHash, d.panelId, d.threshold, d.panelSize + 1);
+        _expectRefused(CREATOR, enc, refusal);
+        trustees.record(stub, d.ceremonyTranscriptHash, d.panelId, d.threshold, d.panelSize);
+        vm.prank(CREATOR);
+        registry.registerDefinition(enc);
     }
 
     /// A transcript hash may repeat across definitions (election-definition.md,
@@ -271,6 +299,48 @@ contract ElectionRegistryTest is TestBase {
         registry.registerDefinition(encA);
         vm.prank(CREATOR);
         registry.registerDefinition(encB);
+    }
+
+    // --- personal data (contracts skill, No PII on-chain; T-17) --------------
+
+    /// Representative inputs leave no free text in calldata or events: every
+    /// input is a fixed-format field, and each event carries only the
+    /// identifier, creator, counter, hash and the definition's own encoding.
+    function test_NoFreeTextInCalldataOrEvents() public {
+        vm.recordLogs();
+        (, bytes memory enc) = _created();
+        vm.prank(CREATOR);
+        registry.registerDefinition(enc);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        assertTrue(
+            !_looksLikeText(abi.encodeCall(ElectionRegistry.registerDefinition, (enc))), "calldata"
+        );
+        assertEq(logs.length, 2, "two logs");
+        for (uint256 i; i < logs.length; i++) {
+            assertTrue(!_looksLikeText(logs[i].data), "event data");
+            for (uint256 t; t < logs[i].topics.length; t++) {
+                assertTrue(!_looksLikeText(abi.encode(logs[i].topics[t])), "event topic");
+            }
+        }
+    }
+
+    /// Text can't ride along with a definition: anything after its last
+    /// field is refused, so a name or an email address never reaches the
+    /// event or the archive that way. (Chosen bytes inside a fixed field,
+    /// such as the display-text commitment, are T-17's stated residual.)
+    function test_RefusesTextAppendedToADefinition() public {
+        (, bytes memory enc) = _created();
+        bytes memory withText = abi.encodePacked(enc, "Alice Smith, alice@example.com, P1234567");
+        assertTrue(_looksLikeText(withText), "detector misses the text");
+        _expectRefused(
+            CREATOR,
+            withText,
+            abi.encodeWithSelector(
+                ElectionDefinitionLib.DefinitionMalformed.selector,
+                ElectionDefinitionLib.DecodeError.TrailingBytes,
+                enc.length
+            )
+        );
     }
 
     // --- calldata ------------------------------------------------------------
@@ -397,6 +467,19 @@ contract ElectionRegistryTest is TestBase {
         (bytes32 stored, uint64 count) = registry.eventAccumulator();
         assertEq(stored, acc, "accumulator");
         assertEq(count, logs.length, "count");
+    }
+
+    /// A crude personal-data detector: an at sign, or a run of 8 or more
+    /// printable ASCII characters (a name, an address, a document number).
+    function _looksLikeText(bytes memory b) internal pure returns (bool) {
+        uint256 run;
+        for (uint256 i; i < b.length; i++) {
+            uint8 c = uint8(b[i]);
+            if (c == 0x40) return true;
+            run = c >= 0x20 && c < 0x7f ? run + 1 : 0;
+            if (run >= 8) return true;
+        }
+        return false;
     }
 
     function _slice(bytes memory b, uint256 from, uint256 len)

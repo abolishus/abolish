@@ -88,6 +88,8 @@ library RegistryFixture {
         ElectionDefinitionLib.Definition memory d
     ) internal returns (bytes memory encoded) {
         encoded = DefinitionEncoder.encode(d);
-        trustees.record(lib.stubHash(encoded), d.ceremonyTranscriptHash);
+        trustees.record(
+            lib.stubHash(encoded), d.ceremonyTranscriptHash, d.panelId, d.threshold, d.panelSize
+        );
     }
 }

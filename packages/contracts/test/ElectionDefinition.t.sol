@@ -101,6 +101,22 @@ contract ElectionDefinitionVectorsTest is TestBase {
         assertTrue(i > 0, "no election-id vectors");
     }
 
+    /// Types specified when version 1 was frozen, other than the definition,
+    /// are unexpected rather than unknown (docs/spec/contracts.md, Registration).
+    function test_SpecifiedOtherTypesAreUnexpected() public view {
+        string memory json = vm.readFile(DEFINITIONS);
+        bytes memory b = _bytes(json, _key(0, ".encoding"));
+        uint16[2] memory types = [uint16(0x0007), uint16(0x0009)];
+        for (uint256 t; t < 2; t++) {
+            b[0] = bytes1(uint8(types[t] >> 8));
+            b[1] = bytes1(uint8(types[t]));
+            _assertDecodeError(b, "unexpected-record-type", "specified type");
+        }
+        b[0] = 0x00;
+        b[1] = 0x02; // reserved, no layout yet
+        _assertDecodeError(b, "unknown-record-type", "reserved type");
+    }
+
     // --- helpers -------------------------------------------------------------
 
     function _assertDecodeError(bytes memory b, string memory code, string memory id)

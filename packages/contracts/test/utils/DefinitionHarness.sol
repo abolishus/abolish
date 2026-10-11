@@ -92,17 +92,29 @@ library DefinitionEncoder {
 /// Stands in for the trustee key registry (P1-18, part 3): it reports a pair
 /// as recorded once a test records it.
 contract MockTrusteeRegistry is ITrusteeRegistry {
-    mapping(bytes32 => mapping(bytes32 => bool)) internal recorded;
+    mapping(bytes32 => bool) internal recorded;
 
-    function record(bytes32 stubHash, bytes32 transcriptHash) external {
-        recorded[stubHash][transcriptHash] = true;
+    function record(
+        bytes32 stubHash,
+        bytes32 transcriptHash,
+        bytes32 panelId,
+        uint8 threshold,
+        uint8 panelSize
+    ) external {
+        recorded[
+            keccak256(abi.encode(stubHash, transcriptHash, panelId, threshold, panelSize))
+        ] = true;
     }
 
-    function ceremonyRecorded(bytes32 stubHash, bytes32 transcriptHash)
-        external
-        view
-        returns (bool)
-    {
-        return recorded[stubHash][transcriptHash];
+    function ceremonyRecorded(
+        bytes32 stubHash,
+        bytes32 transcriptHash,
+        bytes32 panelId,
+        uint8 threshold,
+        uint8 panelSize
+    ) external view returns (bool) {
+        return recorded[
+            keccak256(abi.encode(stubHash, transcriptHash, panelId, threshold, panelSize))
+        ];
     }
 }

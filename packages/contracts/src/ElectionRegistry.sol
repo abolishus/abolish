@@ -174,9 +174,14 @@ contract ElectionRegistry is EventAccumulator {
         // The ceremony was run for exactly this definition: the check compares
         // hashes the panel signed, never who sent the transaction (T-37, T-71).
         bytes32 stub = ElectionDefinitionLib.stubHash(definition, def.transcriptOffset);
-        if (!ITrusteeRegistry(trusteeRegistry).ceremonyRecorded(stub, def.ceremonyTranscriptHash)) {
-            revert CeremonyNotRecorded(stub, def.ceremonyTranscriptHash);
-        }
+        // The panel's identifier, threshold and size are passed too, so the
+        // trustee registry checks the approving quorum belongs to the panel
+        // the definition names, at its threshold (T-14, T-37).
+        bool recorded = ITrusteeRegistry(trusteeRegistry)
+            .ceremonyRecorded(
+                stub, def.ceremonyTranscriptHash, def.panelId, def.threshold, def.panelSize
+            );
+        if (!recorded) revert CeremonyNotRecorded(stub, def.ceremonyTranscriptHash);
 
         bytes32 h = ElectionDefinitionLib.hash(definition);
         definitionHashOf[id] = h;

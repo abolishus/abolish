@@ -4,6 +4,8 @@ import { describe, expect, test } from "vite-plus/test";
 import {
   type AdmittedBallot,
   BN254_R,
+  checkL1Reference,
+  type FinalizedL1,
   membershipMessage,
   membershipMessageField,
   selectBallots,
@@ -34,6 +36,19 @@ interface RevotingVectors {
     readonly message?: string;
     readonly messageField?: string;
     readonly error?: string;
+  }[];
+  readonly l1Chain: readonly {
+    readonly number: string;
+    readonly hash: string;
+    readonly timestamp: string;
+  }[];
+  readonly references: readonly {
+    readonly id: string;
+    readonly l1RefNumber: string;
+    readonly l1RefHash: string;
+    readonly head: string;
+    readonly closesAt: string;
+    readonly verdict: string;
   }[];
   readonly selections: readonly {
     readonly id: string;
@@ -101,6 +116,15 @@ const ballots = fc.array(ballotCore, { maxLength: 24 }).chain((cores) =>
       });
     }),
 );
+// The vector chain, cut at `head`: asking for any other block is a test failure.
+const finalized = (head: bigint): FinalizedL1 => ({
+  head,
+  block(n) {
+    const b = vectors.l1Chain.find((x) => decimal(x.number) === n);
+    if (b === undefined || n > head) throw new Error(`block ${n} isn't finalized`);
+    return { hash: hex(b.hash), timestamp: decimal(b.timestamp) };
+  },
+});
 const counted = (bs: readonly AdmittedBallot[]) =>
   bs.map((b) => `${b.tier}:${b.nullifier}:${toHex(b.message)}`).sort();
 
@@ -123,6 +147,11 @@ describe("revoting vectors (docs/spec/vectors/revoting.json)", () => {
     }
     expect(toHex(membershipMessage(input))).toBe(toHex(hex(v.message ?? "")));
     expect(membershipMessageField(input)).toBe(decimal(v.messageField));
+  });
+
+  test.each(vectors.references)("L1 reference: $id", (v) => {
+    const ref = { l1RefNumber: decimal(v.l1RefNumber), l1RefHash: hex(v.l1RefHash) };
+    expect(checkL1Reference(ref, finalized(decimal(v.head)), decimal(v.closesAt))).toBe(v.verdict);
   });
 
   test.each(vectors.selections)("selection: $id", (v) => {
@@ -195,6 +224,74 @@ describe("membershipMessage", () => {
       expect(() => membershipMessage({ ...input, tier })).toThrow(RangeError);
     for (const l1RefNumber of [-1n, U64_MAX + 1n])
       expect(() => membershipMessage({ ...input, l1RefNumber })).toThrow(RangeError);
+  });
+});
+
+describe("checkL1Reference", () => {
+  // A chain of 12-second blocks from block 0, finalized up to `head`.
+  const chain = (head: bigint): FinalizedL1 => ({
+    head,
+    block: (n) => ({ hash: new Uint8Array(32).fill(Number(n % 256n)), timestamp: 1000n + 12n * n }),
+  });
+
+  test("once a block after close is finalized, nothing is pending (T-53)", () => {
+    fc.assert(
+      fc.property(
+        fc.bigInt({ min: 0n, max: 10_000n }),
+        fc.bigInt({ min: 0n, max: 10_000n }),
+        u64,
+        bytes32,
+        (head, closeBlock, refNumber, refHash) => {
+          const closesAt = 1000n + 12n * closeBlock;
+          const verdict = checkL1Reference(
+            { l1RefNumber: refNumber, l1RefHash: refHash },
+            chain(head),
+            closesAt,
+          );
+          if (head > closeBlock) expect(verdict).not.toBe("pending");
+          if (verdict === "admitted") expect(refNumber <= closeBlock).toBe(true);
+          if (refNumber > head) expect(["pending", "l1-ref-after-close"]).toContain(verdict);
+        },
+      ),
+      { numRuns },
+    );
+  });
+
+  test("admits exactly the finalized block's own hash", () => {
+    fc.assert(
+      fc.property(fc.bigInt({ min: 0n, max: 100n }), fc.nat(31), (n, at) => {
+        const l1 = chain(100n);
+        const hash = l1.block(n).hash;
+        expect(checkL1Reference({ l1RefNumber: n, l1RefHash: hash }, l1, U64_MAX)).toBe("admitted");
+        const other = new Uint8Array(hash);
+        other[at] = (other[at] ?? 0) ^ 1;
+        expect(checkL1Reference({ l1RefNumber: n, l1RefHash: other }, l1, U64_MAX)).toBe(
+          "l1-ref-unknown",
+        );
+      }),
+      { numRuns },
+    );
+  });
+
+  test("rejects malformed inputs", () => {
+    const l1 = chain(10n);
+    const ok = { l1RefNumber: 1n, l1RefHash: l1.block(1n).hash };
+    expect(() => checkL1Reference({ ...ok, l1RefNumber: -1n }, l1, 0n)).toThrow(RangeError);
+    expect(() => checkL1Reference({ ...ok, l1RefNumber: U64_MAX + 1n }, l1, 0n)).toThrow(
+      RangeError,
+    );
+    expect(() => checkL1Reference({ ...ok, l1RefHash: new Uint8Array(31) }, l1, 0n)).toThrow(
+      TypeError,
+    );
+    expect(() => checkL1Reference(ok, { ...l1, head: -1n }, 0n)).toThrow(RangeError);
+    expect(() => checkL1Reference(ok, l1, -1n)).toThrow(RangeError);
+    expect(() =>
+      checkL1Reference(
+        ok,
+        { head: 10n, block: () => ({ hash: new Uint8Array(32), timestamp: -1n }) },
+        0n,
+      ),
+    ).toThrow(RangeError);
   });
 });
 

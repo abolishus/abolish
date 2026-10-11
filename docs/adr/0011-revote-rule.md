@@ -53,7 +53,9 @@ Each ballot names a recent block of the election's L1 chain, by number and hash,
   - Verification of a closed election waits for L1 finality of every named block (minutes).
   - The last moments before close stay coercible, as in every last-ballot-counts scheme, widened by about 36 seconds (the time for a newer block to be 2 deep); in that window a watched voter can only void with a tie.
   - Contracts can't check an arbitrary L1 block hash from L2, so a direct-submitted ballot with a bad reference is caught by the verifier's admission check, not by the contract.
-  - Re-votes stay public to anyone who knows the voter's nullifier, now with their L1 block (when they were made, to about 12 seconds).
+  - Re-votes stay public to anyone who knows the voter's nullifier, now with their L1 block (when they were made, to about 12 seconds). The same timing links a voter's ballots in two tiers if they are cast together, so clients cast per tier independently.
+  - A block hash is unpredictable to everyone except its builder: a coercer who controls or bribes the proposers of a run of upcoming slots can have ballots made ahead for those blocks, stretching the freeze window by that run.
+  - A direct submit can name a block that never comes; the admission check rejects it once L1 has finalized a block after close, so it can't hold the election unverifiable.
 
 ### D. C with a client-chosen sequence number to rank ballots within one block
 
@@ -76,7 +78,8 @@ What would change it: an L2 with fast, operator-independent finality whose block
 - P1-18: direct submit doesn't check the L1 reference on chain. Calldata sizing counts the 40 bytes.
 - P1-19: the verifier reads finalized L1 block hashes and timestamps, already needed for anchors.
 - P2-8, P5-4: the client reads L1 itself, keeps a record of the block each cast named, waits for a newer block before re-voting, checks admission after finality, and offers the tie escape to a watched voter.
-- `packages/crypto`: `membershipMessage` and `selectBallots` implement the message and selection, with vectors from an independent implementation.
+- `packages/crypto`: `membershipMessage`, `checkL1Reference` and `selectBallots` implement the message, the admission check on the block and selection, with vectors from an independent implementation.
+- P1-12, P1-15, P1-18 and P1-13's receipts: whatever decides later whether a selected ballot counts binds its content (`ballot_hash`, or tier, nullifier and `M`), never its board entry, since a re-randomised copy can stand in its place ([[revoting]], Owned elsewhere).
 - Known-weak: T-45's last-moment window, re-vote visibility, and verification waiting on L1 finality (see [[revoting]], Residuals).
 
 ## Decision

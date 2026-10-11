@@ -1,6 +1,6 @@
 {
   "format": "abolish-revoting-vectors/1",
-  "title": "Re-voting: the membership message and the selection of counted ballots",
+  "title": "Re-voting: the membership message, the L1 reference check and the selection of counted ballots",
   "spec": "docs/spec/revoting.md",
   "generator": "packages/crypto/scripts/revoting-vectors.py: an independent Python implementation (hashlib SHA-256; membership-vectors.py's self-checked Keccak-256 for F), with selection by sorting rather than packages/crypto's scan",
   "messages": [
@@ -113,6 +113,150 @@
       "l1RefNumber": "18446744073709551616",
       "l1RefHash": "c63ad8358923ef4cc19c8224749851d98ba89b8ed93ca3dfe5ad1017044348b3",
       "error": "not-u64"
+    }
+  ],
+  "l1Chain": [
+    {
+      "number": "100",
+      "hash": "b02ad6012c81390fe4dec00f2f317d215a2c94b97dc4d296417cb152ac0b9905",
+      "timestamp": "1800000000"
+    },
+    {
+      "number": "101",
+      "hash": "0f0163dfa050603d3d18420728abbe38da0075062f5e486301cba966643e3c28",
+      "timestamp": "1800000012"
+    },
+    {
+      "number": "102",
+      "hash": "c01032af85ea28cd46294037b0f6540b242647a6e74d8ab1c985c05d3807e249",
+      "timestamp": "1800000024"
+    },
+    {
+      "number": "103",
+      "hash": "a2d1c0bf6d13eadf5d250414008c4c062ff5674f2055e7e18ed8943189947704",
+      "timestamp": "1800000036"
+    },
+    {
+      "number": "104",
+      "hash": "0499a46b821456cecdc87ff25348f1bbe92d38f318fefa35e06432e342695acc",
+      "timestamp": "1800000048"
+    },
+    {
+      "number": "105",
+      "hash": "789131eb9121c0cd8d2ad0daa99bf53ae7db998a35df106ffdeb6085aa62c005",
+      "timestamp": "1800000072"
+    },
+    {
+      "number": "106",
+      "hash": "184d5e12c993fd163469bffc937e5a86a663400b5ee5b91322105f399945b945",
+      "timestamp": "1800000084"
+    },
+    {
+      "number": "107",
+      "hash": "212f24299c64c4651c7ceeab46c5f73269a835d6d4a9f6e11703e0a34546180f",
+      "timestamp": "1800000096"
+    },
+    {
+      "number": "108",
+      "hash": "ba252194f659c348137fcc1eae4f649c88ca38a47d50d1459dc108c6e0311eac",
+      "timestamp": "1800000108"
+    },
+    {
+      "number": "109",
+      "hash": "c67bbeed33c97ed6d6a9cfc7a23913ccf4c88210c5b5100de5d45aec272d96ba",
+      "timestamp": "1800000120"
+    }
+  ],
+  "references": [
+    {
+      "id": "reference-admitted",
+      "description": "A finalized block before close, with its hash",
+      "l1RefNumber": "103",
+      "l1RefHash": "a2d1c0bf6d13eadf5d250414008c4c062ff5674f2055e7e18ed8943189947704",
+      "head": "109",
+      "closesAt": "1800000084",
+      "verdict": "admitted"
+    },
+    {
+      "id": "reference-at-close",
+      "description": "A block whose timestamp equals closes_at is admitted",
+      "l1RefNumber": "106",
+      "l1RefHash": "184d5e12c993fd163469bffc937e5a86a663400b5ee5b91322105f399945b945",
+      "head": "109",
+      "closesAt": "1800000084",
+      "verdict": "admitted"
+    },
+    {
+      "id": "reference-wrong-hash",
+      "description": "The number is finalized with another hash: reorganised away or never existed",
+      "l1RefNumber": "103",
+      "l1RefHash": "4f1b01947195f855a7806a066b94f97767e23761880ef5b9eec6c6e8360d65f2",
+      "head": "109",
+      "closesAt": "1800000084",
+      "verdict": "l1-ref-unknown"
+    },
+    {
+      "id": "reference-wrong-hash-after-close",
+      "description": "A wrong hash is reported as unknown before the time is checked",
+      "l1RefNumber": "108",
+      "l1RefHash": "4f1b01947195f855a7806a066b94f97767e23761880ef5b9eec6c6e8360d65f2",
+      "head": "109",
+      "closesAt": "1800000084",
+      "verdict": "l1-ref-unknown"
+    },
+    {
+      "id": "reference-after-close",
+      "description": "A finalized block after closes_at",
+      "l1RefNumber": "108",
+      "l1RefHash": "ba252194f659c348137fcc1eae4f649c88ca38a47d50d1459dc108c6e0311eac",
+      "head": "109",
+      "closesAt": "1800000084",
+      "verdict": "l1-ref-after-close"
+    },
+    {
+      "id": "reference-pending",
+      "description": "Beyond the finalized head while the head is before close",
+      "l1RefNumber": "107",
+      "l1RefHash": "212f24299c64c4651c7ceeab46c5f73269a835d6d4a9f6e11703e0a34546180f",
+      "head": "105",
+      "closesAt": "1800000084",
+      "verdict": "pending"
+    },
+    {
+      "id": "reference-pending-head-at-close",
+      "description": "A head exactly at closes_at isn't after it, so beyond it is still pending",
+      "l1RefNumber": "108",
+      "l1RefHash": "ba252194f659c348137fcc1eae4f649c88ca38a47d50d1459dc108c6e0311eac",
+      "head": "106",
+      "closesAt": "1800000084",
+      "verdict": "pending"
+    },
+    {
+      "id": "reference-beyond-head-after-close",
+      "description": "Beyond the head once the head is after close",
+      "l1RefNumber": "112",
+      "l1RefHash": "a66d23ef439022a255e9feb4622de13893a08829823b54f931a7fb70c26c1723",
+      "head": "109",
+      "closesAt": "1800000084",
+      "verdict": "l1-ref-after-close"
+    },
+    {
+      "id": "reference-far-future-pending",
+      "description": "2^64 - 1 is pending while the head is before close",
+      "l1RefNumber": "18446744073709551615",
+      "l1RefHash": "a66d23ef439022a255e9feb4622de13893a08829823b54f931a7fb70c26c1723",
+      "head": "104",
+      "closesAt": "1800000084",
+      "verdict": "pending"
+    },
+    {
+      "id": "reference-far-future-rejected",
+      "description": "2^64 - 1 is rejected once a block after close is finalized, never pending for good",
+      "l1RefNumber": "18446744073709551615",
+      "l1RefHash": "a66d23ef439022a255e9feb4622de13893a08829823b54f931a7fb70c26c1723",
+      "head": "107",
+      "closesAt": "1800000084",
+      "verdict": "l1-ref-after-close"
     }
   ],
   "selections": [

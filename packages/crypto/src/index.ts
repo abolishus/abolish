@@ -102,6 +102,10 @@ export {
 export {
   type AdmittedBallot,
   type BallotSelection,
+  checkL1Reference,
+  type FinalizedL1,
+  type FinalizedL1Block,
+  type L1ReferenceVerdict,
   membershipMessage,
   membershipMessageField,
   type MembershipMessageInput,

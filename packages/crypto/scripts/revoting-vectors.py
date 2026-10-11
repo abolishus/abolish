@@ -2,14 +2,14 @@
 """Independent generator for docs/spec/vectors/revoting.json.
 
 A second implementation of docs/spec/revoting.md: the membership message M,
-its field mapping F(M), and the selection of counted ballots. It is written
+its field mapping F(M), the admission check on the L1 reference, and the selection of counted ballots. It is written
 from the spec with Python's standard library only and shares no code with
 packages/crypto. The Keccak-256 sponge behind F is membership-vectors.py's,
 which checks itself against hashlib.sha3_256 and published answers before
 use. Selection here sorts each group by block number instead of scanning for
 a maximum, so the two implementations don't share a structure either.
 
-Usage: python3 -I packages/crypto/scripts/revoting-vectors.py <out-dir>
+Usage: python3 -I -B packages/crypto/scripts/revoting-vectors.py <out-dir>
 """
 
 import hashlib
@@ -38,6 +38,18 @@ def message(definition_hash, tier, ballot_hash, ref_number, ref_hash):
     m = definition_hash + bytes([tier]) + ballot_hash + ref_number.to_bytes(8, "big") + ref_hash
     assert len(m) == 105
     return hashlib.sha256(bytes([len(TAG)]) + TAG + m).digest()
+
+
+def check_reference(number, ref_hash, chain, head, closes_at):
+    """chain: {number: (hash, timestamp)} for every finalized block up to head."""
+    if number <= head:
+        block_hash, timestamp = chain[number]
+        if block_hash != ref_hash:
+            return "l1-ref-unknown"
+        return "l1-ref-after-close" if timestamp > closes_at else "admitted"
+    # Timestamps strictly increase with the number, so the head after close
+    # puts every later number after close too.
+    return "l1-ref-after-close" if chain[head][1] > closes_at else "pending"
 
 
 def select(ballots):
@@ -133,6 +145,41 @@ def main():
                 "l1RefNumber": str(n),
                 "l1RefHash": det("block", 0).hex(),
                 "error": error,
+            }
+        )
+
+    # Blocks 100 to 109, 12 seconds apart, with one missed slot after 104.
+    chain = {}
+    t = 1_800_000_000
+    for n in range(100, 110):
+        chain[n] = (det("chain", n), t)
+        t += 24 if n == 104 else 12
+    ts = lambda n: chain[n][1]
+    assert all(ts(n) < ts(n + 1) for n in range(100, 109))
+    reference_cases = [
+        ("admitted", "A finalized block before close, with its hash", 103, None, 109, ts(106)),
+        ("at-close", "A block whose timestamp equals closes_at is admitted", 106, None, 109, ts(106)),
+        ("wrong-hash", "The number is finalized with another hash: reorganised away or never existed", 103, det("other"), 109, ts(106)),
+        ("wrong-hash-after-close", "A wrong hash is reported as unknown before the time is checked", 108, det("other"), 109, ts(106)),
+        ("after-close", "A finalized block after closes_at", 108, None, 109, ts(106)),
+        ("pending", "Beyond the finalized head while the head is before close", 107, None, 105, ts(106)),
+        ("pending-head-at-close", "A head exactly at closes_at isn't after it, so beyond it is still pending", 108, None, 106, ts(106)),
+        ("beyond-head-after-close", "Beyond the head once the head is after close", 112, det("future"), 109, ts(106)),
+        ("far-future-pending", "2^64 - 1 is pending while the head is before close", U64_MAX, det("future"), 104, ts(106)),
+        ("far-future-rejected", "2^64 - 1 is rejected once a block after close is finalized, never pending for good", U64_MAX, det("future"), 107, ts(106)),
+    ]
+    references = []
+    for name, description, number, ref_hash, head, closes_at in reference_cases:
+        ref_hash = chain[number][0] if ref_hash is None else ref_hash
+        references.append(
+            {
+                "id": f"reference-{name}",
+                "description": description,
+                "l1RefNumber": str(number),
+                "l1RefHash": ref_hash.hex(),
+                "head": str(head),
+                "closesAt": str(closes_at),
+                "verdict": check_reference(number, ref_hash, chain, head, closes_at),
             }
         )
 
@@ -256,7 +303,7 @@ def main():
 
     doc = {
         "format": "abolish-revoting-vectors/1",
-        "title": "Re-voting: the membership message and the selection of counted ballots",
+        "title": "Re-voting: the membership message, the L1 reference check and the selection of counted ballots",
         "spec": "docs/spec/revoting.md",
         "generator": (
             "packages/crypto/scripts/revoting-vectors.py: an independent Python implementation "
@@ -264,6 +311,10 @@ def main():
             "selection by sorting rather than packages/crypto's scan"
         ),
         "messages": messages,
+        "l1Chain": [
+            {"number": str(n), "hash": h.hex(), "timestamp": str(t)} for n, (h, t) in sorted(chain.items())
+        ],
+        "references": references,
         "selections": selections,
     }
     (out / "revoting.json").write_text(json.dumps(doc, indent=2) + "\n")

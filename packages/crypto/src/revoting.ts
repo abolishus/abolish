@@ -1,8 +1,8 @@
 // The re-vote rule of docs/spec/revoting.md (ADR 0011): the membership
 // proof's message, which binds the L1 block a ballot is ranked by, and the
-// selection of each tier and nullifier's counted ballot (verifier 5.7, 6.1).
-// The admission checks on the L1 block itself (verifier 5.8) need finalized
-// L1 data, so they belong to the verifier (P1-19).
+// admission check on that block (verifier 5.8), and the selection of each tier
+// and nullifier's counted ballot (verifier 5.7, 6.1). Reading finalized L1
+// blocks is the verifier's (P1-19); the check here takes them as input.
 
 import { BN254_R, encode, u64, u8 } from "./codec.ts";
 import { ds } from "./domain-separation.ts";
@@ -62,12 +62,62 @@ export function membershipMessageField(input: MembershipMessageInput): bigint {
   return semaphoreField(membershipMessage(input));
 }
 
+/** A finalized L1 block, as the verifier read it from the definition's `l1_chain_id`. */
+export interface FinalizedL1Block {
+  readonly hash: Uint8Array;
+  /** Unix seconds; strictly increasing with the block number on Ethereum. */
+  readonly timestamp: bigint;
+}
+
+/** The finalized L1 chain up to `head`; `block(n)` is only asked for `n ≤ head`. */
+export interface FinalizedL1 {
+  readonly head: bigint;
+  block(n: bigint): FinalizedL1Block;
+}
+
+export type L1ReferenceVerdict = "admitted" | "pending" | "l1-ref-unknown" | "l1-ref-after-close";
+
+/**
+ * Verifier 5.8 (docs/spec/revoting.md, Admission). A reference beyond `head`
+ * is pending only while `head` is at or before `closesAt`: once L1 has
+ * finalized a block after close, every later number is after close too, so a
+ * ballot naming a block that never comes (2^64 − 1, say) is rejected rather
+ * than keeping the election unverifiable for good (T-53).
+ */
+export function checkL1Reference(
+  ref: { readonly l1RefNumber: bigint; readonly l1RefHash: Uint8Array },
+  l1: FinalizedL1,
+  closesAt: bigint,
+): L1ReferenceVerdict {
+  checkU64(ref.l1RefNumber, "checkL1Reference: l1RefNumber");
+  const refHash = bytes32(ref.l1RefHash, "checkL1Reference: l1RefHash");
+  checkU64(l1.head, "checkL1Reference: head");
+  checkU64(closesAt, "checkL1Reference: closesAt");
+  const atOrBelowHead = ref.l1RefNumber <= l1.head;
+  const block = l1.block(atOrBelowHead ? ref.l1RefNumber : l1.head);
+  const hash = bytes32(block.hash, "checkL1Reference: block hash");
+  checkU64(block.timestamp, "checkL1Reference: block timestamp");
+  if (atOrBelowHead && !equalBytes(hash, refHash)) return "l1-ref-unknown";
+  if (block.timestamp > closesAt) return "l1-ref-after-close";
+  return atOrBelowHead ? "admitted" : "pending";
+}
+
+// Public data, so a constant-time comparison isn't needed.
+function equalBytes(a: Uint8Array, b: Uint8Array): boolean {
+  return a.length === b.length && a.every((x, i) => x === b[i]);
+}
+
 /** One ballot that passed every admission check except 5.7 (docs/spec/revoting.md, Selection). */
 export interface AdmittedBallot {
   readonly tier: number;
   /** The nullifier `ν`, a canonical `field<bn254>` value. */
   readonly nullifier: bigint;
-  /** `M`, which the membership proof verified against. */
+  /**
+   * `M` as the verifier recomputed it from the ballot record and the
+   * definition (never a decoded field), which the membership proof verified
+   * against. Then equal messages always name the same block, and the
+   * inconsistency `selectBallots` throws on is unreachable from board data.
+   */
   readonly message: Uint8Array;
   readonly l1RefNumber: bigint;
   /** The ballot's board position; unique among the input. */

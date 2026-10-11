@@ -100,7 +100,6 @@ Decisions the agent made under rule A (`AGENTS.md`). Each stands unless the owne
 - [[0003-tally-scheme]] (P1-4, #9): homomorphic tally for plurality and approval; a commitment-consistent mixnet only for ranked choice, by a later ADR (naming the mixers, and any design that isn't commitment-consistent, stay with the owner).
 - [[0004-l2-choice]] (P1-5, #10): Base, for development and testnet. Mainnet stays with the owner.
 - [[0005-permanent-archive]] (P1-6, #11–#14): Arweave plus IPFS pinning. The first real upload spends money, so it waits for the owner.
-
 - [[0009-membership-proof]] (P1-17): Semaphore v4's own circuit and Groth16 proofs for membership (the fallback [[0002-everlasting-privacy]] names, since statistical zero knowledge of bb's UltraHonk can't be shown today), with a nullifier scope per poll and tier group and one protocol-wide tree depth (32).
 
 Waiting on the owner (owner-only under rule A): [[0006-trustees]] (P1-7: naming trustees), and P1-12's three questions above.

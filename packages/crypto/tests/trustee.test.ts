@@ -95,7 +95,7 @@ describe("trustee vectors (docs/spec/vectors/trustee.json)", () => {
       vectors.signatures.length,
       vectors.panels.length,
       vectors.registrations.length,
-    ]).toEqual([23, 23, 14, 4]);
+    ]).toEqual([24, 24, 14, 4]);
   });
 
   test.each(vectors.keys)("key $id", (v) => {
@@ -115,6 +115,34 @@ describe("trustee vectors (docs/spec/vectors/trustee.json)", () => {
     }
     expect(err).toBeInstanceOf(DecodeError);
     expect((err as DecodeError).code).toBe(v.error);
+  });
+
+  test("the key-encoding vectors are rejected only for the key's encoding", () => {
+    // Each carries key-1's own point in a 65-byte SEC 1 form with sig-1, so a
+    // verifier that accepted that form would accept the signature: these
+    // catch exactly that parser differential (T-31, T-36).
+    const key1 = vectors.keys.find((k) => k.id === "key-1");
+    const sig1 = vectors.signatures.find((v) => v.id === "sig-1");
+    const point = p256.Point.fromHex(key1?.encoding ?? "");
+    const { x, y } = point.toAffine();
+    for (const id of ["sig-key-uncompressed-own", "sig-key-hybrid"]) {
+      const v = vectors.signatures.find((s) => s.id === id);
+      const key = hex(v?.key ?? "");
+      expect(key.length).toBe(65);
+      expect(toHex(key.subarray(1, 33))).toBe(toHex(be32(x)));
+      expect(toHex(key.subarray(33))).toBe(toHex(be32(y)));
+      expect(key[0]).toBe(id === "sig-key-hybrid" ? 6 + Number(y & 1n) : 4);
+      expect(v?.signature).toBe(sig1?.signature);
+      expect(v?.message).toBe(sig1?.message);
+      // Valid under the point itself: only the encoding rule rejects it.
+      expect(
+        p256.verify(hex(v?.signature ?? ""), hex(v?.dsMessage ?? ""), point.toBytes(false), {
+          prehash: true,
+          lowS: true,
+        }),
+      ).toBe(true);
+      expect(verifyStatement(key, TAG, hex(v?.message ?? ""), hex(v?.signature ?? ""))).toBe(false);
+    }
   });
 
   test.each(vectors.signatures)("signature $id", (v) => {

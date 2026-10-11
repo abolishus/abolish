@@ -122,6 +122,11 @@
       "id": "key-trailing-byte",
       "encoding": "036b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c29600",
       "error": "trailing-bytes"
+    },
+    {
+      "id": "key-x-above-p",
+      "encoding": "03ffffffff00000001000000000000000000000000ffffffffffffffffffffffff",
+      "error": "non-canonical"
     }
   ],
   "signatures": [
@@ -333,6 +338,15 @@
       "message": "",
       "dsMessage": "2461626f6c6973682f76312f7369672f636572656d6f6e792d726567697374726174696f6e",
       "signature": "37c6e392c2ee328872bdef87aa5640090777076afa5b4c143a1c8f82668be5af2de4bd9b2ebd1052a33773219f439a9022172022e1f07f9d460f2eae3377da71",
+      "valid": false
+    },
+    {
+      "id": "sig-key-uncompressed",
+      "description": "valid signature, key in uncompressed form",
+      "key": "046b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c2964fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5",
+      "message": "",
+      "dsMessage": "2461626f6c6973682f76312f7369672f636572656d6f6e792d726567697374726174696f6e",
+      "signature": "5332ec7213dd32fd70e2be5791da00b688b8600704af5d99f0c68e831bf170ec704173b8cc2e49134c432407c12029ea5cc219bc67c96806c063533f267c8ec2",
       "valid": false
     }
   ],

@@ -46,6 +46,7 @@ describe("domain-separation tag registry", () => {
     "Hash-to-curve": "hash-to-curve",
     "In-circuit": "in-circuit",
     "KDF and AEAD": "kdf-aead",
+    Signature: "signature",
   };
   const fromSpec = rows.map((r) => {
     const primitive = primitives[r[2] ?? ""];

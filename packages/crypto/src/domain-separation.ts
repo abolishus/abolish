@@ -33,6 +33,12 @@ export const TAG_REGISTRY = Object.freeze(
       { tag: "abolish/v1/generator-h", primitive: "hash-to-curve", status: "specified" },
       { tag: "abolish/v1/kem/share", primitive: "kdf-aead", status: "reserved" },
       { tag: "abolish/v1/circuit-tag", primitive: "plain", status: "specified" },
+      { tag: "abolish/v1/panel", primitive: "plain", status: "specified" },
+      {
+        tag: "abolish/v1/sig/ceremony-registration",
+        primitive: "signature",
+        status: "specified",
+      },
     ] as const
   ).map((e) => Object.freeze(e)),
 );
@@ -80,6 +86,21 @@ export function assertSpecifiedTag(tag: unknown, primitives: readonly TagPrimiti
  */
 export function ds(tag: DsTag, message: Uint8Array): Uint8Array {
   assertSpecifiedTag(tag, ["plain", "kdf-aead"]);
+  return frame(tag, message);
+}
+
+/**
+ * `DS(tag, m)` as the message a trustee signs (docs/spec/trustee-identity.md).
+ * Kept apart from `ds` so a signature tag never frames a plain hash and a
+ * plain-hash tag never frames a signed message: each tag has one layout and
+ * one primitive.
+ */
+export function dsSignature(tag: SpecifiedTagOf<"signature">, message: Uint8Array): Uint8Array {
+  assertSpecifiedTag(tag, ["signature"]);
+  return frame(tag, message);
+}
+
+function frame(tag: string, message: Uint8Array): Uint8Array {
   if (!(message instanceof Uint8Array) || !ArrayBuffer.isView(message))
     throw new TypeError("ds: message must be a Uint8Array");
   // Copied first, so the length used and the bytes written are the same.

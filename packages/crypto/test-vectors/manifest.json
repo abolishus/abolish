@@ -66,6 +66,28 @@
       "license": "Apache-2.0",
       "retrieved": "2026-10-10",
       "covers": "RFC 6962 inclusion and consistency proofs (1-based leaf indices) for trees of up to 8 leaves, and their roots"
+    },
+    {
+      "path": "rfc/rfc6979.txt",
+      "sha256": "456e8f17558fdbd206f968b96fc6f1b4a71ea331ab30ad17f711ab3adaa7d701",
+      "source": "https://www.rfc-editor.org/rfc/rfc6979.txt",
+      "tag": "rfc6979",
+      "origin": "RFC 6979, Deterministic Usage of the Digital Signature Algorithm (DSA) and Elliptic Curve Digital Signature Algorithm (ECDSA) (IETF), plain-text rendering as published by the RFC Editor",
+      "originUrl": "https://www.rfc-editor.org/rfc/rfc6979",
+      "license": "IETF Trust Legal Provisions (BCP 78); code components under the Revised BSD License",
+      "retrieved": "2026-10-11",
+      "covers": "ECDSA over P-256 with SHA-256 and RFC 6979 deterministic nonces: the key pair and the two SHA-256 signatures of Appendix A.2.5"
+    },
+    {
+      "path": "nist-cavp/SigVer.rsp",
+      "sha256": "e9841c3d12e323042751460d0b8ef4bc59c2640105ec7da4852775f80ab10191",
+      "source": "https://raw.githubusercontent.com/pyca/cryptography/e300bbe2f1bec75e5ee7e0ab7b196958831b3db6/vectors/cryptography_vectors/asymmetric/ECDSA/FIPS_186-3/SigVer.rsp",
+      "tag": "49.0.0",
+      "origin": "NIST CAVP, ECDSA Validation System, FIPS 186-3 SigVer vectors (186-3ecdsatestvectors.zip, CAVS 11.0, generated 2011-03-16), as redistributed unmodified by pyca/cryptography 49.0.0",
+      "originUrl": "https://csrc.nist.gov/projects/cryptographic-algorithm-validation-program/digital-signatures",
+      "license": "Work of the US government (NIST), not subject to copyright in the United States",
+      "retrieved": "2026-10-11",
+      "covers": "ECDSA signature verification over P-256 with SHA-256 (the [P-256,SHA-256] section: 15 cases, passing and failing)"
     }
   ]
 }

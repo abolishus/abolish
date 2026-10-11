@@ -282,6 +282,8 @@ describe("moderate", () => {
     expect(await refusedWith(moderate(app, id, hide("spam")))).toBe("no-change");
     expect((await moderate(app, id, hide("personal-data"))).state).toBe("hidden");
     expect((await moderationStatus(app, id)).latest?.reason).toBe("personal-data");
+    // Alternating back to a ground already cited since the state began is a no-op.
+    expect(await refusedWith(moderate(app, id, hide("spam")))).toBe("no-change");
     await moderate(app, id, restore("error"));
     expect(await refusedWith(moderate(app, id, restore("appeal-upheld")))).toBe("no-change");
   });
@@ -326,22 +328,38 @@ describe("moderate", () => {
   });
 
   test("the state is always the newest decision's, and only changes are recorded", async () => {
-    // A model of the policy's state machine against the database.
-    const action = fc.constantFrom("delist", "hide", "restore") as fc.Arbitrary<
-      ModerationDecision["action"]
-    >;
+    // A model of the policy's state machine against the database: a decision
+    // is recorded when it changes the state, or when it re-cites a removal
+    // under a reason not yet cited since the state began. A small pool of
+    // reasons makes repeats likely.
+    const decision: fc.Arbitrary<ModerationDecision> = fc.oneof(
+      fc.record({
+        action: fc.constantFrom("delist" as const, "hide" as const),
+        reason: fc.constantFrom("spam" as const, "threat" as const, "personal-data" as const),
+        moderator: fc.constant("mod-1"),
+      }),
+      fc.record({
+        action: fc.constant("restore" as const),
+        reason: fc.constantFrom(...RESTORE_REASONS),
+        moderator: fc.constant("mod-2"),
+      }),
+    );
     await fc.assert(
-      fc.asyncProperty(fc.array(action, { maxLength: 8 }), async (actions) => {
+      fc.asyncProperty(fc.array(decision, { maxLength: 10 }), async (decisions) => {
         const id = await election();
         let model: ModerationState = "visible";
+        let cited = new Set<string>();
         let recorded = 0;
-        for (const a of actions) {
-          const next = ({ delist: "delisted", hide: "hidden", restore: "visible" } as const)[a];
-          const d = a === "restore" ? restore() : a === "hide" ? hide() : delist();
-          if (next === model) {
+        for (const d of decisions) {
+          const next = ({ delist: "delisted", hide: "hidden", restore: "visible" } as const)[
+            d.action
+          ];
+          if (next === model && (d.action === "restore" || cited.has(d.reason))) {
             expect(await refusedWith(moderate(app, id, d))).toBe("no-change");
           } else {
             expect((await moderate(app, id, d)).state).toBe(next);
+            if (next !== model) cited = new Set();
+            cited.add(d.reason);
             model = next;
             recorded++;
           }

@@ -19,7 +19,7 @@ A poll has two kinds of data ([[display-text]]):
 | `hide`    | As `delist`, and the display text is withheld: the poll page shows a notice naming the reason code instead, and the result is shown by option number ("Option 3: 1,204"). We unpin the text. |
 | `restore` | Back to listed, text shown.                                                                                                                                                                  |
 
-An election's state is its newest decision (`visible`, `delisted` or `hidden`). A decision that changes neither the state nor its reason is refused.
+An election's state is its newest decision (`visible`, `delisted` or `hidden`). A decision that neither changes the state nor cites a new reason is refused.
 
 Use the least restrictive action that addresses the harm: delist unless showing the text itself does harm (personal data, a threat, illegal content, a scam link).
 
@@ -29,7 +29,7 @@ What moderation can't do: copies of display text that others pinned on IPFS stay
 
 ## Reasons
 
-Every removal cites exactly one reason code. A removal can be re-cited under a different code (a poll hidden for `spam` later found to carry `personal-data`), so the log shows the strongest ground. These are the only grounds:
+Every removal cites exactly one reason code. A removal can be re-cited under a different code (a poll hidden for `spam` later found to carry `personal-data`), so the log can show a further ground; a ground already cited since the poll's state last changed can't be cited again. These are the only grounds:
 
 | Code            | Ground                                                                                                                                                  |
 | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |

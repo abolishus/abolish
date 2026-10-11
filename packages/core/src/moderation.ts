@@ -71,9 +71,9 @@ export type ModerationErrorCode =
   /** Hiding a poll that hasn't closed, for a reason outside `OPEN_POLL_HIDE_REASONS`. */
   | "open-poll"
   /**
-   * The poll is already in the state the action leads to, under the same
-   * reason (a removal may be re-cited under another ground; a restore never
-   * repeats).
+   * The poll is already in the state the action leads to, and the reason was
+   * already cited since that state began (a removal may be re-cited under a
+   * new ground; a restore never repeats).
    */
   | "no-change";
 
@@ -172,16 +172,27 @@ export async function moderate(
         if (at < def.closes_at + BigInt(def.l1_inclusion_bound))
           throw new ModerationError("open-poll");
       }
-      const [prev] = await tx
+      // The newest decisions, enough to cover the run since the last change
+      // of state: within a run each reason appears once (below), so a run has
+      // at most one row per removal reason.
+      const recent = await tx
         .select({ action: moderationActions.action, reason: moderationActions.reason })
         .from(moderationActions)
         .where(eq(moderationActions.electionId, id))
         .orderBy(desc(moderationActions.seq))
-        .limit(1);
-      const before = prev === undefined ? "visible" : stateAfter(prev.action);
+        .limit(REMOVAL_REASONS.length + 1);
+      const before = recent[0] === undefined ? "visible" : stateAfter(recent[0].action);
       const state = STATE_AFTER[action];
-      if (state === before && (action === "restore" || prev?.reason === reason))
-        throw new ModerationError("no-change");
+      if (state === before) {
+        // A removal may be re-cited under a ground not yet cited since the
+        // state last changed, so the log can't fill with alternating no-ops.
+        const cited = new Set<string>();
+        for (const r of recent) {
+          if (stateAfter(r.action) !== before) break;
+          cited.add(r.reason);
+        }
+        if (action === "restore" || cited.has(reason)) throw new ModerationError("no-change");
+      }
       const [row] = await tx
         .insert(moderationActions)
         .values({ electionId: id, action, reason, moderator, decidedAt })

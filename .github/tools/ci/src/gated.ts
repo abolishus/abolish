@@ -95,6 +95,7 @@ const MEMBER_LOADER_NAMES = new Set(["dlopen", "binding", "_linkedBinding"]);
 /** Top-level manifest keys a packed gated package may have. */
 const PACKED_MANIFEST_KEYS = new Set([
   "name",
+  "bin",
   "version",
   "description",
   "license",
@@ -202,21 +203,54 @@ export function manifestViolations(
   return out;
 }
 
+const PACK_ENTRY = /^src\/[a-z][a-z0-9-]*\.ts$/;
+
+/**
+ * The entries a packed package's build script (`scripts.build`) names.
+ * `vp pack` alone packs the default entry, src/index.ts; `vp pack
+ * src/index.ts src/bin.ts` names each entry, so a command line can be packed
+ * beside the library. Entries are top-level files of src, and the bundle
+ * check packs the same entries, so it judges exactly what the build ships.
+ * Undefined if the script is anything else.
+ */
+export function packEntries(manifest: Record<string, unknown>): readonly string[] | undefined {
+  const script = record(manifest["scripts"])?.["build"];
+  if (typeof script !== "string") return undefined;
+  const [vp, command, ...entries] = script.split(" ");
+  if (vp !== "vp" || command !== "pack") return undefined;
+  if (!entries.every((e) => PACK_ENTRY.test(e)) || new Set(entries).size !== entries.length)
+    return undefined;
+  return entries;
+}
+
+const isDistPath = (path: unknown) =>
+  typeof path === "string" && /^\.\/dist\/[A-Za-z0-9._/-]+$/.test(path) && !path.includes("..");
+
 /**
  * A packed package must point consumers at its build output and nothing else:
- * otherwise an `exports` condition, `browser` or `bin` field, or an extra
- * `files` entry could ship modules that the src import lint and the bundle
- * check never see.
+ * otherwise an `exports` condition, a `browser` field, a `bin` outside dist,
+ * or an extra `files` entry could ship modules that the src import lint and
+ * the bundle check never see.
  */
 function packedManifestViolations(file: string, manifest: Record<string, unknown>): string[] {
   const out: string[] = [];
   for (const key of Object.keys(manifest))
     if (!PACKED_MANIFEST_KEYS.has(key))
       out.push(`${file}: "${key}" is not allowed in a published gated package`);
-  if (record(manifest["scripts"])?.["build"] !== "vp pack")
+  if (packEntries(manifest) === undefined)
     out.push(
-      `${file}: the build script must be exactly "vp pack" (the bundle check reproduces it)`,
+      `${file}: the build script must be exactly "vp pack", optionally followed by distinct src/<name>.ts entries (the bundle check reproduces it)`,
     );
+  if (manifest["bin"] !== undefined) {
+    const bin = record(manifest["bin"]);
+    if (bin === undefined) out.push(`${file}: "bin" must be an object`);
+    else
+      for (const [command, path] of Object.entries(bin)) {
+        if (!/^[a-z][a-z0-9-]*$/.test(command))
+          out.push(`${file}: bin["${command}"]: command names are lowercase letters, digits and -`);
+        if (!isDistPath(path)) out.push(`${file}: bin["${command}"] must be a path under ./dist/`);
+      }
+  }
   if (JSON.stringify(manifest["files"]) !== '["dist"]')
     out.push(`${file}: "files" must be exactly ["dist"]`);
   if (JSON.stringify(manifest["publishConfig"]) !== '{"access":"public"}')
@@ -236,11 +270,7 @@ function packedManifestViolations(file: string, manifest: Record<string, unknown
     for (const [condition, path] of Object.entries(conditions)) {
       if (condition !== "types" && condition !== "default")
         out.push(`${file}: exports["${subpath}"].${condition}: only types and default are allowed`);
-      else if (
-        typeof path !== "string" ||
-        !/^\.\/dist\/[A-Za-z0-9._/-]+$/.test(path) ||
-        path.includes("..")
-      )
+      else if (!isDistPath(path))
         out.push(`${file}: exports["${subpath}"].${condition} must be a path under ./dist/`);
     }
   }

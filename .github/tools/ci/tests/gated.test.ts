@@ -13,6 +13,7 @@ import {
   lockfileGraphs,
   lockfileViolations,
   manifestViolations,
+  packEntries,
   moduleReferences,
   provenanceUrls,
   referenceViolation,
@@ -218,6 +219,58 @@ describe("manifestViolations", () => {
     ];
     for (const extra of bad)
       expect(manifestViolations("crypto", crypto(extra), catalog)).not.toEqual([]);
+  });
+
+  test("a published package may install commands from dist", () => {
+    expect(
+      manifestViolations(
+        "verifier",
+        packed("verifier", {
+          bin: { "abolish-verify": "./dist/bin.mjs" },
+          scripts: { build: "vp pack src/index.ts src/bin.ts", test: "vp test run" },
+        }),
+        catalog,
+      ),
+    ).toEqual([]);
+    const bad: unknown[] = [
+      "./dist/bin.mjs",
+      { x: "./vendor/x.js" },
+      { x: "./dist/../vendor/x.js" },
+      { x: "dist/bin.mjs" },
+      { x: 1 },
+      { "../x": "./dist/bin.mjs" },
+      { X: "./dist/bin.mjs" },
+    ];
+    for (const bin of bad)
+      expect(manifestViolations("crypto", crypto({ bin }), catalog)).not.toEqual([]);
+  });
+
+  test("the build packs the default entry or named top-level src entries, nothing else", () => {
+    const entries = (build: unknown) => packEntries({ scripts: { build } });
+    expect(entries("vp pack")).toEqual([]);
+    expect(entries("vp pack src/index.ts src/bin.ts")).toEqual(["src/index.ts", "src/bin.ts"]);
+    for (const build of [
+      undefined,
+      "vp pack ",
+      "vp  pack",
+      "vp pack src/index.ts src/index.ts",
+      "vp pack src/a/b.ts",
+      "vp pack src/../x.ts",
+      "vp pack vendor/x.ts",
+      "vp pack src/x.js",
+      "vp pack --config x.ts",
+      "vp pack src/index.ts && node x.js",
+      "vp build",
+    ])
+      expect(entries(build)).toBeUndefined();
+    expect(packEntries({})).toBeUndefined();
+    expect(
+      manifestViolations(
+        "crypto",
+        crypto({ scripts: { build: "vp pack src/x.ts --no-dts" } }),
+        catalog,
+      ),
+    ).toHaveLength(1);
   });
 
   test("no lifecycle or other scripts beyond build, check and test", () => {

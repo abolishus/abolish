@@ -371,7 +371,8 @@ def main(out_dir):
     for _vid, _desc, key, msg, sig in rejected:
         if len(key) == 65:
             x, y = int.from_bytes(key[1:33], "big"), int.from_bytes(key[33:], "big")
-            assert (x, y) == decompress(keys[0]) and key[0] in (4, 6 + (y & 1))
+            expected_prefix = 6 + (y & 1) if _vid == "sig-key-hybrid" else 4
+            assert (x, y) == decompress(keys[0]) and key[0] == expected_prefix
             assert verify_point((x, y), ds(REGISTRATION_TAG, msg), sig)
     for vid, desc, key, msg, sig in rejected:
         M = ds(REGISTRATION_TAG, msg)

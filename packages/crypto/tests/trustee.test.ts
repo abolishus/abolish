@@ -1,4 +1,5 @@
 import fc from "fast-check";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { p256 } from "@noble/curves/nist.js";
 import { sha256 } from "@noble/hashes/sha2.js";
@@ -115,6 +116,33 @@ describe("trustee vectors (docs/spec/vectors/trustee.json)", () => {
     }
     expect(err).toBeInstanceOf(DecodeError);
     expect((err as DecodeError).code).toBe(v.error);
+  });
+
+  test("every published vector is still present and unchanged", () => {
+    // tests/vectors/trustee-published.json pins each vector published on
+    // main (by section and id, sha256 of its JSON with sorted keys): a
+    // published vector is never edited or removed (docs/spec/versioning.md,
+    // Change rules), so a regeneration can't silently drop one.
+    const pinned = JSON.parse(
+      readFileSync(new URL("vectors/trustee-published.json", import.meta.url), "utf8"),
+    ) as Record<string, string>;
+    const sections = {
+      keys: vectors.keys,
+      signatures: vectors.signatures,
+      panels: vectors.panels,
+      registrations: vectors.registrations,
+    } as const;
+    expect(Object.keys(pinned).length).toBe(66);
+    for (const [path, digest] of Object.entries(pinned)) {
+      const [section = "", id] = path.split("/");
+      const found = (
+        sections[section as keyof typeof sections] as readonly { id: string }[]
+      ).filter((v) => v.id === id);
+      expect(found, path).toHaveLength(1);
+      const v = found[0] as object;
+      const canon = JSON.stringify(v, Object.keys(v).sort());
+      expect(createHash("sha256").update(canon).digest("hex"), path).toBe(digest);
+    }
   });
 
   test("the key-encoding vectors are rejected only for the key's encoding", () => {

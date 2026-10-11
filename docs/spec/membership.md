@@ -15,7 +15,7 @@ A later Semaphore release is adopted only by an ADR, and only if the statement b
 
 ## Statement
 
-Notation: `r` is the BN254 scalar field order ([[notation]], `field<bn254>`); `l` = 2736030358979909402780800718157159386076813972158567259200215660948447373041 is the order of Baby Jubjub's prime subgroup and `B8` its generator (EIP-2494); `Poseidon2` is the two-input Poseidon hash over BN254 of circomlib; `LeanIMTRoot` is the root that zk-kit's `BinaryMerkleRoot(D)` computes from a leaf, a proof length, a path index and `D` siblings, with `Poseidon2` at every node.
+Notation: `r` is the BN254 scalar field order ([[notation]], `field<bn254>`); `l` = 2736030358979909402780800718157159386076813972158567259200215660948447373041 is the order of Baby Jubjub's prime subgroup and `B8` its generator (EIP-2494); `Poseidon2` is the two-input Poseidon hash over BN254 of circomlib; `MerkleRoot` is the root that zk-kit's `BinaryMerkleRoot(D)` computes from a leaf, a proof length, a path index and `D` siblings, with `Poseidon2` at every node.
 
 Public inputs, in this order: `(ρ, ν, m̂, ŝ)`. Witness: `s`, the proof length `len`, the path index `index` (one field element, which the circuit decomposes into `D` bits) and `D` siblings, exactly Semaphore's `merkleProofLength`, `merkleProofIndex` and `merkleProofSiblings`. The circuit for depth `D` proves:
 
@@ -23,14 +23,33 @@ Public inputs, in this order: `(ρ, ν, m̂, ŝ)`. Witness: `s`, the proof lengt
 s < l
 (Ax, Ay) = s · B8
 C        = Poseidon2(Ax, Ay)                        identity commitment
-ρ        = LeanIMTRoot(C, len, index, siblings)
+ρ        = MerkleRoot(C, len, index, siblings)
 ν        = Poseidon2(ŝ, s)                          nullifier
 m̂ is constrained (m̂ · m̂), so the proof binds it
 ```
 
 `ρ` and `ν` are the circuit's outputs and `m̂`, `ŝ` its public inputs; a Groth16 verifier takes them as the four public signals `[ρ, ν, m̂, ŝ]`. Every value is an element of the BN254 scalar field.
 
-**The circuit doesn't constrain `len`.** For `len > D`, zk-kit's `BinaryMerkleRoot` outputs `ρ = 0` (its own documentation says to enforce `len ≤ D` outside the circuit), so anyone, with any secret and so any number of nullifiers, can prove membership of a group whose root is 0. A root of 0 is never a real tier: a verifier MUST fail a definition in which any tier's root is 0, and MUST NOT verify a membership proof whose `ρ` is 0 (Checks; T-04, T-05). A tier's root can become 0 without anyone forging it: an empty group, or a one-leaf LeanIMT whose only member was removed (Semaphore removes a member by setting its leaf to 0, and a one-leaf tree's root is its leaf).
+**The circuit doesn't constrain `len`.** For `len > D`, zk-kit's `BinaryMerkleRoot` outputs `ρ = 0` (its own documentation says to enforce `len ≤ D` outside the circuit), so anyone, with any secret and so any number of nullifiers, can prove membership of a group whose root is 0. A root of 0 is never a real tier: a verifier MUST fail a definition in which any tier's root is 0, and MUST NOT verify a membership proof whose `ρ` is 0 (Checks; T-04, T-05). A tier tree (below) never has root 0, so this rule rejects only forgeries.
+
+**Nor does it constrain where the path starts.** `MerkleRoot` hashes leaves and inner nodes alike, so a proof with `len < D` treats `C` as an inner node, and one through a registered value treats that value as the root of a private subtree. In Semaphore v4's LeanIMT, whose leaves sit at varying heights and whose verifier accepts any depth, one registration can therefore be the root of a private tree of `2^k` identities, each with its own nullifier. The tier tree below closes this.
+
+## Tier tree
+
+Each tier group's root `root_g` is the root of its **tier tree**, not of Semaphore v4's LeanIMT:
+
+- A complete binary tree of depth exactly 32 over `Poseidon2`: `node(0, i)` is the `i`-th leaf, `node(h+1, j) = Poseidon2(node(h, 2j), node(h, 2j+1))`, and `root_g = node(32, 0)`.
+- Leaf `i` is the identity commitment of the group's `i`-th addition (counted as [[verifier]] 2.4 counts additions), or 0 if that member was removed, or 0 beyond the last addition. Empty subtrees are therefore the chain `Z_0 = 0`, `Z_{h+1} = Poseidon2(Z_h, Z_h)`, as in zk-kit's incremental Merkle tree with zero value 0. A group with more than 2³² additions has no tier tree.
+- A verifier computes `root_g` itself from the group's additions on the board ([[verifier]] 2.4); the root a group contract keeps (a LeanIMT, P1-18, P3-2) is never used in its place. The definition's root for the tier must equal it.
+- An honest member proves with `len = 32`, its leaf index and its 32 siblings.
+
+**One registration, at most one identity.** Let a proof verify with `ρ = root_g`:
+
+- `len > 32` gives `ρ = 0`, rejected (above).
+- `len = 32` puts `C` at height 0, so `C` is a leaf: a registered commitment, of exactly one secret (`s < l` and Poseidon's collision resistance).
+- `len < 32` puts `C = Poseidon2(Ax, Ay)` at a height `h > 0`, so `C` equals the inner node over two children, which by collision resistance are `Ax` and `Ay`. For `h = 1` those are two registered leaves, so the identity costs two registrations; for `h > 1` they are inner nodes, and `Ax` (a coordinate of `s · B8`) would have to equal a Poseidon output, a preimage the attacker can't find.
+
+So the identities that can vote in a tier are at most its registrations, short of a Poseidon collision or preimage (T-03, T-04, T-06). This changes the group's tree, not Semaphore's circuit or keys.
 
 ## Scope
 
@@ -68,13 +87,13 @@ F(x) = int(keccak256(x)) >> 8          (x: bytes[32])
 Every membership proof, in every tier and every election, uses the verification key for one protocol-wide depth, `D = 32`, Semaphore's maximum. The prover MUST pass `D = 32` explicitly, never a depth it computes or is told:
 
 - **Nothing to steer.** A per-tier depth would have to come from the tier's leaf count, which the root doesn't determine and a client can't cheaply recompute, so in practice a server would supply it. An operator could then serve one voter a wrong count: the voter's proof verifies locally under the wrong key, every verifier rejects it, and it is the only ballot under that key, so it is both suppressed and identifiable (T-10, T-13). A fixed depth removes the input.
-- **Nothing to reveal.** Semaphore's library otherwise infers the depth from the path length, which LeanIMT shortens for some leaf positions in a tree that isn't full; one fixed key means the key used says nothing about the voter or their leaf.
-- **Every path fits.** A LeanIMT with at most 2³² leaves has depth at most 32, so `len ≤ 32` for every member. A tier group with more than 2³² leaves (every insertion, removed members included: a removal sets a leaf to 0 but never shrinks the tree) can't be proven, and a verifier fails a definition that has one.
+- **Nothing to reveal.** Semaphore's library otherwise infers the depth from the path length; with one fixed key and every path 32 long, the key used says nothing about the voter or their leaf.
+- **The tier tree's own depth.** The tier tree has depth exactly 32, so every member's path has exactly 32 levels (Tier tree). A tier group with more than 2³² additions (removed members included: a removal sets a leaf to 0 but never frees it) has no tier tree, and a verifier fails a definition that has one.
 - **Cost.** The depth-32 proving key is Semaphore's largest, and a proof hashes 32 levels whatever the group size. P2-8 and P5-4 measure proving time on target devices; if it is too slow, a later ballot version can fix a smaller protocol-wide depth or carry a depth in the election definition that the verifier checks, never one a server supplies.
 
 ## Checks
 
-A verifier fails the election definition if any tier's `root_g` is 0 or its group has more than 2³² leaves ([[verifier]] 2.4). Then, for each ballot that claims tier group `g` ([[verifier]] 5.1–5.3), it:
+A verifier fails the election definition if any tier's root differs from the tier tree it recomputes from the group's additions, is 0, or the group has more than 2³² additions ([[verifier]] 2.4). A definition lists only tiers whose group has at least one member at the root's block; an empty tier has no cell and no ballots (P1-10b, [[verifier]] 2.8). Then, for each ballot that claims tier group `g` ([[verifier]] 5.1–5.3), it:
 
 1. Recomputes `ŝ_g` from the definition (Scope).
 2. Takes `ρ = root_g` from the definition, never from the ballot; `ρ` is never 0 (Statement).
@@ -88,7 +107,7 @@ Because the scope binds the tier, a proof made for one tier never verifies as an
 
 - **Zero knowledge.** Groth16 proofs are perfectly zero-knowledge for a well-formed reference string (Groth, EUROCRYPT 2016), so a proof reveals nothing about `s`, the leaf or the path, even to an unbounded adversary ([[0002-everlasting-privacy]]). Against a subverted setup this holds only if the proving key's reference string is well formed (Fuchsbauer, PKC 2018), so it MUST be checked: once per pinned key, publicly, by P1-17b, which binds the checked key into `abolish/v1/membership-vk`, and the prover MUST use exactly that key. It also holds only if the prover's Groth16 randomisers come from a CSPRNG (P2-8, P5-4 check their prover's randomness source).
 - **Nullifier privacy is computational.** `ν = Poseidon2(ŝ, s)`: linking nullifiers across scopes, or a nullifier to an identity commitment, needs `s` or a Poseidon preimage (T-12, T-15).
-- **Soundness** rests on Semaphore's ceremony (T-07), on the circuit (T-05) and on BN254, whose discrete-log security is about 100–110 bits after the tower number field sieve ([[0007-group-and-hash]]): a forged proof would admit a non-member, and a second nullifier for one identity would need a Poseidon collision.
+- **Soundness** rests on Semaphore's ceremony (T-07), on the circuit (T-05) and on BN254, whose discrete-log security is about 100–110 bits after the tower number field sieve ([[0007-group-and-hash]]): a forged proof would admit a non-member. A second nullifier for one identity would need a Poseidon collision, and a second identity for one registration a Poseidon collision or preimage (Tier tree).
 - **Chosen-scope linkage.** `S_g` is public, so any other Semaphore application that holds the voter's identity could ask for a proof under scope `int(S_g)` and so learn the voter's nullifier for that poll and tier. The domain tag stops accidental collisions, not this. The prover MUST therefore use the Abolish identity secret for nothing but Abolish membership proofs, never export it to another Semaphore application, and prove only under a scope it recomputed from a definition it verified, with the tier and root taken from that definition (P2-6, P2-8, P5-4; T-12).
 - **Malleability.** Anyone can re-randomise a Groth16 proof without the witness. Replay detection uses the nullifier and the message, never the proof bytes ([[verifier]] 5.7, 6.1 R1; T-38).
 - **Small groups.** A tier group of one or two members gives its voters no meaningful anonymity. The group size is reported with the results (T-13, T-16).

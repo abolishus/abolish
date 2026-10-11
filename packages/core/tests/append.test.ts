@@ -99,6 +99,21 @@ describe("appendEntry", () => {
     await assertVerifiable(id, 40);
   });
 
+  test("still forms one chain when the connection defaults to repeatable read", async () => {
+    // appendEntry sets READ COMMITTED itself: under a snapshot level the
+    // previous entry would be read from a snapshot taken before the lock.
+    const id = b32();
+    const clients = await Promise.all([0, 1, 2, 3].map(() => db.as("abolish_app")));
+    for (const c of clients)
+      await c.unsafe("SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL REPEATABLE READ");
+    await Promise.all(
+      clients.flatMap((c, k) =>
+        Array.from({ length: 10 }, (_, i) => appendEntry(c, id, 0, ballot(k, i))),
+      ),
+    );
+    await assertVerifiable(id, 40);
+  });
+
   test("refuses a segment below the previous entry's", async () => {
     const id = b32();
     await appendEntry(app, id, 5, ballot());
@@ -128,6 +143,15 @@ describe("appendEntry", () => {
     expect(await refusedWith(appendEntry(app, new Uint8Array(31), 0, ballot()))).toBe(
       "invalid-entry",
     );
+    // Values a transport decoder might hand over are refused, never coerced.
+    for (const bad of ["a".repeat(32), Array(32).fill(1), new Uint8Array(0), new Uint8Array(33)])
+      expect(await refusedWith(appendEntry(app, bad as unknown as Uint8Array, 0, ballot()))).toBe(
+        "invalid-entry",
+      );
+    expect(await refusedWith(appendEntry(app, id, 0, [0, 2, 1] as unknown as Uint8Array))).toBe(
+      "invalid-entry",
+    );
+    expect(await readBoard(app, new Uint8Array(32))).toEqual([]);
     for (const segment of [-1, 2 ** 32, 0.5])
       expect(await refusedWith(appendEntry(app, id, segment, ballot()))).toBe("invalid-entry");
     expect(await readBoard(app, id)).toEqual([]);

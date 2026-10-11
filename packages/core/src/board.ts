@@ -11,6 +11,12 @@ import { boardEntries } from "./db/schema/index.ts";
 
 const SPOILED_BALLOT_OPENING = 0x0003;
 const MAX_SEGMENT = 2 ** 32 - 1;
+/**
+ * The class half of the two-key advisory lock on a board. The two-key form is
+ * a separate keyspace from the one-bigint locks migrations take, so a board
+ * lock never collides with them.
+ */
+const BOARD_LOCK_CLASS = 0x0b0a4d;
 
 export type AppendErrorCode =
   /** The entry doesn't encode: a payload type not allowed on the board, a bad length or election ID. */
@@ -53,7 +59,9 @@ function compareBytes(a: Uint8Array, b: Uint8Array): number {
  * concurrent callers get consecutive indexes. The caller decides whether the
  * payload may be boarded at all: it MUST decode strictly under the election's
  * profile (docs/spec/board.md, Allowed payloads); this checks only the
- * envelope's rules.
+ * envelope's rules. `AppendError` covers those refusals; a database error
+ * (a writer that bypassed this function, say) propagates as is, and nothing
+ * is written.
  */
 export async function appendEntry(
   client: Sql,
@@ -63,52 +71,65 @@ export async function appendEntry(
 ): Promise<AppendedEntry> {
   if (!Number.isInteger(segment) || segment < 0 || segment > MAX_SEGMENT)
     throw new AppendError("invalid-entry");
-  const id = Uint8Array.from(electionId);
-  const body = Uint8Array.from(payload);
-  return drizzle({ client }).transaction(async (tx) => {
-    // The lock key is the first 8 bytes of the election ID, a hash output, so
-    // two elections rarely share one; sharing only serialises their appends.
-    await tx.execute(
-      q`SELECT pg_advisory_xact_lock(('x' || encode(substring(${id}::bytea FROM 1 FOR 8), 'hex'))::bit(64)::bigint)`,
-    );
-    const [prev] = await tx
-      .select()
-      .from(boardEntries)
-      .where(eq(boardEntries.electionId, id))
-      .orderBy(desc(boardEntries.idx))
-      .limit(1);
-    if (prev !== undefined) {
-      const prevSegment = Number(prev.segment);
-      if (segment < prevSegment) throw new AppendError("segment-decreased");
-      if (
-        segment === prevSegment &&
-        recordTypeOf(prev.payload) === SPOILED_BALLOT_OPENING &&
-        (recordTypeOf(body) !== SPOILED_BALLOT_OPENING || compareBytes(prev.payload, body) >= 0)
-      )
-        throw new AppendError("opening-order");
-    }
-    const index = prev === undefined ? 0n : prev.idx + 1n;
-    const entry: BoardEntry = { election_id: id, index, segment, payload: body };
-    let encoded: Uint8Array;
-    try {
-      encoded = encodeBoardEntry(entry);
-    } catch (e) {
-      throw new AppendError("invalid-entry", { cause: e });
-    }
-    const entryHash = boardEntryHash(encoded);
-    const prevLink = prev?.link ?? new Uint8Array(32);
-    const link = chainLink(prevLink, entryHash);
-    await tx.insert(boardEntries).values({
-      electionId: id,
-      idx: index,
-      segment: BigInt(segment),
-      payload: body,
-      entryHash,
-      prevLink,
-      link,
-    });
-    return { index, entryHash, link };
-  });
+  // Inputs will come from transport decoding (P2-3): anything but real bytes
+  // is refused, never coerced (a string would become zero bytes and land on
+  // another election's board, for good).
+  const isBytes = (x: unknown): x is Uint8Array => x instanceof Uint8Array && ArrayBuffer.isView(x);
+  if (!isBytes(electionId) || electionId.length !== 32 || !isBytes(payload))
+    throw new AppendError("invalid-entry");
+  const id = new Uint8Array(electionId);
+  const body = new Uint8Array(payload);
+  return drizzle({ client }).transaction(
+    async (tx) => {
+      // The lock's second key is the election ID's first 4 bytes, from a hash
+      // output, so two elections rarely share one; sharing only serialises
+      // their appends.
+      await tx.execute(
+        q`SELECT pg_advisory_xact_lock(${BOARD_LOCK_CLASS}::int, ('x' || encode(substring(${id}::bytea FROM 1 FOR 4), 'hex'))::bit(32)::int)`,
+      );
+      const [prev] = await tx
+        .select()
+        .from(boardEntries)
+        .where(eq(boardEntries.electionId, id))
+        .orderBy(desc(boardEntries.idx))
+        .limit(1);
+      if (prev !== undefined) {
+        const prevSegment = Number(prev.segment);
+        if (segment < prevSegment) throw new AppendError("segment-decreased");
+        if (
+          segment === prevSegment &&
+          recordTypeOf(prev.payload) === SPOILED_BALLOT_OPENING &&
+          (recordTypeOf(body) !== SPOILED_BALLOT_OPENING || compareBytes(prev.payload, body) >= 0)
+        )
+          throw new AppendError("opening-order");
+      }
+      const index = prev === undefined ? 0n : prev.idx + 1n;
+      const entry: BoardEntry = { election_id: id, index, segment, payload: body };
+      let encoded: Uint8Array;
+      try {
+        encoded = encodeBoardEntry(entry);
+      } catch (e) {
+        throw new AppendError("invalid-entry", { cause: e });
+      }
+      const entryHash = boardEntryHash(encoded);
+      const prevLink = prev?.link ?? new Uint8Array(32);
+      const link = chainLink(prevLink, entryHash);
+      await tx.insert(boardEntries).values({
+        electionId: id,
+        idx: index,
+        segment: BigInt(segment),
+        payload: body,
+        entryHash,
+        prevLink,
+        link,
+      });
+      return { index, entryHash, link };
+    },
+    // The previous entry must be read after the lock is taken. Under a
+    // snapshot isolation level the snapshot would predate the lock, and
+    // concurrent appends would collide (T-23).
+    { isolationLevel: "read committed" },
+  );
 }
 
 /**
@@ -118,7 +139,8 @@ export async function appendEntry(
  * stored columns.
  */
 export async function readBoard(client: Sql, electionId: Uint8Array): Promise<Uint8Array[]> {
-  const id = Uint8Array.from(electionId);
+  if (!(electionId instanceof Uint8Array)) throw new TypeError("electionId must be a Uint8Array");
+  const id = new Uint8Array(electionId);
   const rows = await drizzle({ client })
     .select({
       idx: boardEntries.idx,
@@ -133,7 +155,7 @@ export async function readBoard(client: Sql, electionId: Uint8Array): Promise<Ui
       election_id: id,
       index: r.idx,
       segment: Number(r.segment),
-      payload: Uint8Array.from(r.payload),
+      payload: new Uint8Array(r.payload),
     }),
   );
 }

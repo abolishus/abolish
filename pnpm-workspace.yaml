@@ -35,7 +35,9 @@ catalog:
   "@noble/hashes": 2.4.0
   "@noir-lang/noir_js": 1.0.0-beta.22
   "@types/node": 24.19.1
+  drizzle-orm: 0.45.3
   fast-check: 4.10.2
+  postgres: 3.4.9
   typescript: 7.0.2
   vite: npm:@voidzero-dev/vite-plus-core@1.0.0
   vite-plus: 1.0.0

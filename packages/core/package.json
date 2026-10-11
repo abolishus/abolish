@@ -1,0 +1,29 @@
+{
+  "name": "@abolishus/core",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Domain logic and the Postgres schema: append-only board tables, migrations and database roles. Source-only.",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "vp exec tsc -p tsconfig.json",
+    "check": "vp check",
+    "test": "vp run test:db"
+  },
+  "dependencies": {
+    "drizzle-orm": "catalog:",
+    "postgres": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "fast-check": "catalog:",
+    "typescript": "catalog:",
+    "vite-plus": "catalog:"
+  },
+  "abolish": {
+    "buildOutputs": []
+  }
+}

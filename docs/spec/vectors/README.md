@@ -6,16 +6,17 @@ Cross-language vectors for the encodings and computations in this spec. TypeScri
 
 One JSON file per spec section or record type, named after it (`primitives.json`, `election-definition.json`, …). Each file is UTF-8 JSON, formatted by `vp check`.
 
-| File                     | Covers                                                                                                                     |
-| ------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
-| `primitives.json`        | Primitive types, record framing and strict-decoding rejections ([[notation]])                                              |
-| `group.json`             | `scalar` and `element` codecs: valid boundaries and every rejected class ([[group]])                                       |
-| `board.json`             | Board entries, the board tree with every inclusion and consistency proof, checkpoints, board checks ([[board]])            |
-| `membership.json`        | The nullifier scope, the Semaphore field mapping `F` and the protocol-wide tree depth ([[membership]])                     |
-| `revoting.json`          | The membership message `M` and `F(M)`, and the selection of counted ballots, ties and repeats included ([[revoting]])      |
-| `hash.json`              | `H`, `HashToScalar` under each Fiat–Shamir tag, and `h`, with intermediate bytes ([[group]])                               |
-| `event-accumulator.json` | The event accumulator: genesis values, event sequences step by step, rejected inputs ([[contracts]])                       |
-| `circuit.json`           | Circuit-facing values: each registered tag's field element and the two byte packings ([[notation]], [[domain-separation]]) |
+| File                     | Covers                                                                                                                                  |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `primitives.json`        | Primitive types, record framing and strict-decoding rejections ([[notation]])                                                           |
+| `group.json`             | `scalar` and `element` codecs: valid boundaries and every rejected class ([[group]])                                                    |
+| `board.json`             | Board entries, the board tree with every inclusion and consistency proof, checkpoints, board checks ([[board]])                         |
+| `membership.json`        | The nullifier scope, the Semaphore field mapping `F` and the protocol-wide tree depth ([[membership]])                                  |
+| `revoting.json`          | The membership message `M` and `F(M)`, and the selection of counted ballots, ties and repeats included ([[revoting]])                   |
+| `hash.json`              | `H`, `HashToScalar` under each Fiat–Shamir tag, and `h`, with intermediate bytes ([[group]])                                            |
+| `event-accumulator.json` | The event accumulator: genesis values, event sequences step by step, rejected inputs ([[contracts]])                                    |
+| `trustee.json`           | Trustee identity keys and signatures, accepted and rejected; panel identifiers; ceremony-registration statements ([[trustee-identity]]) |
+| `circuit.json`           | Circuit-facing values: each registered tag's field element and the two byte packings ([[notation]], [[domain-separation]])              |
 
 ## Format
 
@@ -108,6 +109,15 @@ Type descriptors:
 - `fieldMap`: `F`. Each has `id`, `input` (32 bytes, hex), `keccak256` (the Keccak-256 digest of `input`, hex) and `output` (`F(input)`, decimal).
 - `depth`: the protocol-wide tree depth, as a JSON number.
 - `scopes`: the nullifier scope. Each has `id`, `definitionHash` and `root` (32 bytes each, hex; `root` is read big-endian), `tier` (a JSON number) and either `scope` (`S_g`, hex) and `scopeField` (`F(S_g)`, decimal), or `error`: `non-canonical` for a root that isn't a canonical `field<bn254>`, `zero-root` for a root of 0 ([[membership]], Statement), `unknown-tier` for a tier other than 0, 1 or 2.
+
+## Trustee vectors
+
+`trustee.json` covers [[trustee-identity]] with its own format, `abolish-trustee-vectors/1`, and the same top-level fields, plus `tags` (the panel and registration tags, ASCII) and:
+
+- `keys`: `p256-key` encodings. Each has `id`, `encoding` (hex) and either `secretKey` (the test secret scalar, 32 bytes big-endian; never a real key) or `error`, a decode error code ([[notation]], Strict decoding): `non-canonical`, `truncated` or `trailing-bytes`.
+- `signatures`: each has `id`, `key` and `message` (`m`, hex), `dsMessage` (`DS(tag, m)` under the registration tag, hex), `signature` (hex) and `valid`. Valid ones also give `digest` (`H(DS(tag, m))`). All but one are RFC 6979 signatures after the low-s rule, so a deterministic signer reproduces them byte for byte; they include a digest at or above `n` (`sig-digest-at-least-n`). The exception, `sig-x-of-r-at-least-n`, has `x(R) ≥ n` and a key constructed for it with no known secret; it must verify. Invalid ones have a `description`; they cover high `s`, `r` and `s` out of range, a flipped bit, another message, key or tag, wrong lengths, DER, and an uncompressed key.
+- `panels`: each has `id`, `threshold`, `keys` (hex, seat 1 first) and either `panelId` (hex) or `error`: `threshold` (`k` outside `2 ≤ k ≤ n`), `size` (`n` over `MAX_TRUSTEES`), `duplicate-key` or `key` (a key that isn't a `p256-key`).
+- `registrations`: ceremony registrations signed by a seat of the panel named in `panel`. Each has `id`, `l2ChainId` (decimal), `trusteeRegistry`, `index`, `stubHash`, `ceremonyTranscriptHash`, `message` (the 125-byte `m`) and `signature`, by the key in seat `index`.
 
 ## Circuit vectors
 

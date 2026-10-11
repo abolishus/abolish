@@ -114,3 +114,20 @@ export {
   selectBallots,
 } from "./revoting.ts";
 export { isWellFormedUtf8 } from "./utf8.ts";
+export {
+  type CeremonyRegistration,
+  ceremonyRegistrationMessage,
+  identityKey,
+  MAX_TRUSTEES,
+  type Panel,
+  PanelError,
+  type PanelErrorCode,
+  p256Key,
+  p256Sig,
+  panelId,
+  signCeremonyRegistration,
+  type SignatureTag,
+  signStatement,
+  verifyCeremonyRegistration,
+  verifyStatement,
+} from "./trustee.ts";

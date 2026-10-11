@@ -101,8 +101,9 @@ Decisions the agent made under rule A (`AGENTS.md`). Each stands unless the owne
 - [[0004-l2-choice]] (P1-5, #10): Base, for development and testnet. Mainnet stays with the owner.
 - [[0005-permanent-archive]] (P1-6, #11–#14): Arweave plus IPFS pinning. The first real upload spends money, so it waits for the owner.
 - [[0009-membership-proof]] (P1-17): Semaphore v4's own circuit and Groth16 proofs for membership (the fallback [[0002-everlasting-privacy]] names, since statistical zero knowledge of bb's UltraHonk can't be shown today), with a nullifier scope per poll and tier group, and tier trees of fixed depth 32. **Owner to confirm before P1-17b starts:** the ADR reads verifying Groth16 over `@noble/curves`' BN254 pairing as composing a published protocol, not implementing a proof system (the `crypto-review` skill forbids the latter); the skill is owner-reviewed, so an agent ADR alone doesn't settle that reading.
+- [[0010-tier2-identity-provider]] (P3-1): zkPassport for Tier 2, verified locally with the inner-circuit set and the US CSCA anchors pinned by us, never through zkPassport's hosted verifier or upgradeable contracts. Self is rejected (Celo dependency, proving in a TEE) and so is longfellow-zk (no uniqueness nullifier). No real document is registered on a public chain until its published proof is shown statistically zero-knowledge (fallback: trustee-attested additions) and the owner has answered the nullifier question below.
 
-Waiting on the owner (owner-only under rule A): [[0006-trustees]] (P1-7: naming trustees), and P1-12's three questions above.
+Waiting on the owner (owner-only under rule A): [[0006-trustees]] (P1-7: naming trustees), P1-12's three questions above, and two from [[0010-tier2-identity-provider]]: whether a Tier 2 nullifier that anyone holding the passport chip's data can recompute counts as PII on-chain, and whether `@aztec/bb.js` may sit in the verifier's trust base as the runtime for circuit artifacts. The nullifier answer is needed before any real document is registered; the bb.js reading is needed before P3-4 builds the verifier side.
 
 ## Injection attempts
 

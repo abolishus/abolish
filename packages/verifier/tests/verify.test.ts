@@ -1,5 +1,12 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vite-plus/test";
+import {
+  BOARD_TREE,
+  boardEntryHash,
+  chainLink,
+  MAX_BOARD_PAYLOAD,
+  merkleRoot,
+} from "@abolishus/crypto";
 import { CHECKS, parseBundle, type Report, splitEntries, verifyBundle } from "../src/index.ts";
 
 // Fixtures: the boards of docs/spec/vectors/board.json, produced by the
@@ -156,11 +163,53 @@ describe("board checks 4.1 and 4.2 over the board vectors", () => {
     });
 });
 
-test("an entry with trailing bytes in board.bin takes them from the next entry, so the copy no longer matches", () => {
+test("an anchored entry with trailing bytes can't be carried by board.bin: unverifiable for good (residual)", () => {
+  // The entry's extra bytes become the start of the next entry, so no copy
+  // splits back into what was anchored (docs/spec/verifier.md, Bundle).
   const v = vectors.boards.find((b) => b.id === "entry-trailing-bytes") as BoardVector;
   const r = verifyBundle(parseBundle(bundleJson(v), concat(v.entries.map(hex))));
-  expect(r.verdictAgainstInputs).not.toBe("verified");
-  expect(row(r, "4.1")?.status).not.toBe("pass");
+  expect(row(r, "4.2")).toMatchObject({ status: "unverifiable", code: "checkpoint-missing" });
+  expect(r.verdictAgainstInputs).toBe("unverifiable");
+});
+
+test("an anchored entry with a length over MAX_BOARD_PAYLOAD fails 4.1, attributably, instead of leaving the copy short", () => {
+  // Hand-built: one entry whose payload length field is over the maximum,
+  // anchored by a checkpoint over its exact bytes. The hashes come from the
+  // crypto primitives the board vectors pin.
+  const electionId = vectors.boards[0]?.electionId as string;
+  const entry = concat([
+    hex(`000701${electionId}` + "0000000000000000" + "00000000"),
+    Uint8Array.of(0x00, 0x10, 0x00, 0x01), // MAX_BOARD_PAYLOAD + 1
+    new Uint8Array(MAX_BOARD_PAYLOAD + 1).fill(0x02),
+  ]);
+  expect(0x00100001).toBe(MAX_BOARD_PAYLOAD + 1);
+  const e0 = boardEntryHash(entry);
+  const json = JSON.stringify({
+    format: "abolish-verifier-bundle/1",
+    electionId,
+    boardEntryVersion: 1,
+    clock: vectors.clock,
+    now: "1800003661",
+    anchors: [
+      {
+        electionId,
+        segment: "0",
+        size: "1",
+        head: Buffer.from(chainLink(new Uint8Array(32), e0)).toString("hex"),
+        root: Buffer.from(merkleRoot(BOARD_TREE, [e0])).toString("hex"),
+        anchoredAt: "1800003660",
+      },
+    ],
+  });
+  const r = verifyBundle(parseBundle(json, entry));
+  expect(row(r, "4.1")).toEqual({
+    id: "4.1",
+    kind: "election",
+    status: "fail",
+    code: "decode",
+    at: { entry: 0, decodeError: "length-over-max" },
+  });
+  expect(r.verdictAgainstInputs).toBe("failed");
 });
 
 describe("report", () => {

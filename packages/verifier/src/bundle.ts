@@ -4,7 +4,7 @@
 // no evidence about any election. A short or unreadable board copy is not
 // rejected here; the board checks decide what it means (T-53).
 
-import { type Anchor, type AnchorClock, MAX_BOARD_PAYLOAD } from "@abolishus/crypto";
+import type { Anchor, AnchorClock } from "@abolishus/crypto";
 
 /** Where an input came from. Only L1 or the pinned roots authenticate one; a local file never does. */
 export type InputSource = "local-file";
@@ -102,9 +102,11 @@ const LENGTH = 4;
 
 /**
  * Splits a board copy into encoded entries by their length fields alone. It
- * stops where the next entry can't be read (too few bytes, or a payload
- * length over `MAX_BOARD_PAYLOAD`, read before anything else, T-52) and
- * returns how many bytes it left. Nothing is decoded: 4.1 judges the entries.
+ * stops where fewer bytes remain than the next entry needs, and returns how
+ * many bytes it left. Nothing is decoded, not even a length over
+ * `MAX_BOARD_PAYLOAD`: the bytes are already held, and such an entry is the
+ * operator's to answer for, so 4.1 must see it and fail it (`decode`), not
+ * leave the copy short and the election unverifiable (T-23).
  */
 export function splitEntries(board: Uint8Array): {
   readonly entries: readonly Uint8Array[];
@@ -116,12 +118,44 @@ export function splitEntries(board: Uint8Array): {
   let at = 0;
   while (bytes.length - at >= FIXED + LENGTH) {
     const n = new DataView(bytes.buffer, at + FIXED, LENGTH).getUint32(0);
-    if (n > MAX_BOARD_PAYLOAD || bytes.length - at - FIXED - LENGTH < n) break;
+    if (bytes.length - at - FIXED - LENGTH < n) break;
     const end = at + FIXED + LENGTH + n;
     entries.push(bytes.slice(at, end));
     at = end;
   }
   return { entries, unreadableBytes: bytes.length - at };
+}
+
+/**
+ * Throws if any object in a JSON text (already parsed once) repeats a member
+ * name. `JSON.parse` keeps the last of them, and another reader might keep
+ * the first, so two verifiers could judge different inputs from one file.
+ */
+function rejectDuplicateMembers(json: string): void {
+  // One frame per open object or array: the member names seen so far, or
+  // null for an array.
+  const frames: (Set<string> | null)[] = [];
+  let expectName = false;
+  for (let i = 0; i < json.length; i++) {
+    const c = json[i];
+    if (c === '"') {
+      let j = i + 1;
+      while (json[j] !== '"') j += json[j] === "\\" ? 2 : 1;
+      const names = frames.at(-1);
+      if (expectName && names instanceof Set) {
+        const name = JSON.parse(json.slice(i, j + 1)) as string;
+        if (names.has(name)) throw new BundleError(`bundle.json: duplicate member ${name}`);
+        names.add(name);
+        expectName = false;
+      }
+      i = j;
+    } else if (c === "{") {
+      frames.push(new Set());
+      expectName = true;
+    } else if (c === "[") frames.push(null);
+    else if (c === "}" || c === "]") frames.pop();
+    else if (c === ",") expectName = frames.at(-1) instanceof Set;
+  }
 }
 
 /**
@@ -136,6 +170,7 @@ export function parseBundle(json: string, board: Uint8Array): Bundle {
   } catch {
     throw new BundleError("bundle.json: not JSON");
   }
+  rejectDuplicateMembers(json);
   const b = object(
     value,
     ["format", "electionId", "boardEntryVersion", "clock", "now", "anchors"],

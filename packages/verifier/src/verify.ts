@@ -54,21 +54,6 @@ type Outcome = Pick<CheckResult, "status" | "code" | "at">;
 const PASS: Outcome = { status: "pass" };
 const NOT_REACHED: Outcome = { status: "unverifiable", code: "not-reached" };
 
-// The board checks stop at the first failure (docs/spec/board.md, Board
-// checks). These codes come from the steps before the entries are checked
-// (anchors and the copy) or after (boundaries and timeliness).
-const ANCHOR_CODES: ReadonlySet<BoardErrorCode> = new Set([
-  "checkpoint-equivocation",
-  "checkpoint-size",
-  "checkpoint-inconsistent",
-]);
-const COPY_CODES: ReadonlySet<BoardErrorCode> = new Set(["checkpoint-missing", "copy-mismatch"]);
-const AFTER_ENTRY_CODES: ReadonlySet<BoardErrorCode> = new Set([
-  "checkpoint-boundary",
-  "unanchored",
-  "unsealed",
-]);
-
 function copyAt(at: BoardErrorAt): CheckAt {
   if ("entry" in at)
     return at.decodeError === undefined
@@ -79,19 +64,47 @@ function copyAt(at: BoardErrorAt): CheckAt {
   return {};
 }
 
-/** The rows of 4.1 and 4.2 for a board-check failure (docs/spec/verifier.md, Procedure, step 3). */
+/**
+ * The rows of 4.1 and 4.2 for a board-check failure (docs/spec/verifier.md,
+ * Procedure, step 3). The board checks stop at the first failure, so the
+ * code says which steps ran. Exhaustive: a new code doesn't compile until it
+ * is mapped.
+ */
 function boardOutcomes(e: BoardError): readonly [Outcome, Outcome] {
-  const failed: Outcome = { status: "fail", code: e.code, at: copyAt(e.at) };
-  // A copy that is too short or differs is that copy's problem: unverifiable
-  // from this source, never the election's failure (T-53).
-  if (COPY_CODES.has(e.code)) {
-    const copy: Outcome = { status: "unverifiable", code: e.code, at: copyAt(e.at) };
-    return [copy, copy];
+  const at = copyAt(e.at);
+  const failed: Outcome = { status: "fail", code: e.code, at };
+  const code: BoardErrorCode = e.code;
+  switch (code) {
+    // A copy that is too short or differs is that copy's problem:
+    // unverifiable from this source, never the election's failure (T-53).
+    case "checkpoint-missing":
+    case "copy-mismatch": {
+      const copy: Outcome = { status: "unverifiable", code, at };
+      return [copy, copy];
+    }
+    // Anchor checks run before any entry is decoded.
+    case "checkpoint-equivocation":
+    case "checkpoint-size":
+    case "checkpoint-inconsistent":
+      return [NOT_REACHED, failed];
+    case "wrong-election":
+      return "checkpoint" in e.at ? [NOT_REACHED, failed] : [failed, NOT_REACHED];
+    // Entry checks: 4.1 failed, and the checkpoint steps after it never ran.
+    case "decode":
+    case "wrong-index":
+    case "segment-decreased":
+    case "opening-order":
+      return [failed, NOT_REACHED];
+    // Run only once every entry passed.
+    case "checkpoint-boundary":
+    case "unanchored":
+    case "unsealed":
+      return [PASS, failed];
+    default: {
+      const unmapped: never = code;
+      throw new Error(`unmapped board-check code ${String(unmapped)}`);
+    }
   }
-  if (ANCHOR_CODES.has(e.code) || (e.code === "wrong-election" && "checkpoint" in e.at))
-    return [NOT_REACHED, failed];
-  if (AFTER_ENTRY_CODES.has(e.code)) return [PASS, failed];
-  return [failed, NOT_REACHED];
 }
 
 /** `verdictAgainstInputs` (docs/spec/verifier.md, Verdicts). Report-only checks never change it. */

@@ -67,16 +67,16 @@ describe("splitEntries", () => {
     );
   });
 
-  test("stops at a length over MAX_BOARD_PAYLOAD before reading the payload (T-52)", () => {
+  test("splits an entry whose length is over MAX_BOARD_PAYLOAD, leaving 4.1 to reject it", () => {
     const fixed = new Uint8Array(47);
     const over = concat([
       fixed,
       u32be(MAX_BOARD_PAYLOAD + 1),
       new Uint8Array(MAX_BOARD_PAYLOAD + 1),
     ]);
-    expect(splitEntries(over)).toEqual({ entries: [], unreadableBytes: over.length });
-    const max = concat([fixed, u32be(MAX_BOARD_PAYLOAD), new Uint8Array(MAX_BOARD_PAYLOAD)]);
-    expect(splitEntries(max).entries.length).toBe(1);
+    const split = splitEntries(over);
+    expect(split.unreadableBytes).toBe(0);
+    expect(split.entries.map((e) => e.length)).toEqual([over.length]);
   });
 
   test("returns entries that don't alias the input", () => {
@@ -228,6 +228,25 @@ describe("parseBundle", () => {
       expect(() => parse(mutate(valid() as Mutable))).toThrow(BundleError);
     });
 
+  test("accepts the same member name in different objects", () => {
+    const o = valid();
+    const b = parse({ ...o, anchors: [o.anchors[0], { ...o.anchors[0], segment: "1" }] });
+    expect(b.anchors.length).toBe(2);
+  });
+
+  const text = JSON.stringify(valid());
+  const duplicated: [string, string][] = [
+    ["at the top level", text.replace('"now":', '"now":"1","now":')],
+    ["in the clock", text.replace('"epoch":', '"epoch":"1","epoch":')],
+    ["in an anchor", text.replace('"size":', '"size":"9","size":')],
+    ["spelt with an escape", text.replace('"now":', '"n\\u006fw":"1","now":')],
+  ];
+  for (const [where, json] of duplicated)
+    test(`rejects a duplicate member ${where}`, () => {
+      expect(json).not.toBe(text);
+      expect(() => parseBundle(json, new Uint8Array())).toThrow(/duplicate member/);
+    });
+
   test("rejects text that isn't JSON", () => {
     expect(() => parseBundle("{", new Uint8Array())).toThrow(BundleError);
   });
@@ -258,6 +277,22 @@ describe("readBundle", () => {
     const json = Buffer.concat([Buffer.from(JSON.stringify(valid())), Buffer.of(0xff)]);
     withDir({ "bundle.json": json, "board.bin": new Uint8Array() }, (dir) => {
       expect(() => readBundle(dir)).toThrow(/not UTF-8/);
+    });
+  });
+
+  test("rejects a byte-order mark", () => {
+    const json = Buffer.concat([Buffer.of(0xef, 0xbb, 0xbf), Buffer.from(JSON.stringify(valid()))]);
+    withDir({ "bundle.json": json, "board.bin": new Uint8Array() }, (dir) => {
+      expect(() => readBundle(dir)).toThrow(BundleError);
+    });
+  });
+
+  test("rejects a bundle with a file missing, rather than reading it as an empty copy", () => {
+    withDir({ "bundle.json": JSON.stringify(valid()) }, (dir) => {
+      expect(() => readBundle(dir)).toThrow(/board\.bin: can't be read/);
+    });
+    withDir({ "board.bin": new Uint8Array() }, (dir) => {
+      expect(() => readBundle(dir)).toThrow(/bundle\.json: can't be read/);
     });
   });
 });

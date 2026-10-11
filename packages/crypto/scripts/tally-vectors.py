@@ -90,6 +90,29 @@ def lagrange(seats):
     return out
 
 
+def check_opening(m, ballots, agg, opening):
+    """docs/spec/tally.md, Opening checks: the verifier's check of a published opening."""
+    if opening is None or len(opening) != m or not all(0 <= x < L for s in opening for x in (s["v"], s["r"])):
+        return {"ok": False, "code": "tally-missing"}
+    for j, s in enumerate(opening):
+        if not grp.equal(bv.pedersen(s["v"], s["r"]), agg[j][0]):
+            return {"ok": False, "code": "tally-opening", "option": j}
+        if s["v"] > len(ballots):
+            return {"ok": False, "code": "tally-range", "option": j}
+    return {"ok": True, "counts": [str(s["v"]) for s in opening]}
+
+
+def honest_opening(m, honest, k):
+    """Each option's (F(0), G(0)) from seats 1..k's honest sums, by solving for every coefficient."""
+    return [
+        {
+            "v": solve_constant([(i, honest[i][j]["v"]) for i in range(1, k + 1)]),
+            "r": solve_constant([(i, honest[i][j]["r"]) for i in range(1, k + 1)]),
+        }
+        for j in range(m)
+    ]
+
+
 def open_cell(m, k, n, ballots, summed):
     """docs/spec/tally.md, Combination and opening; `summed` maps seat to its list."""
     agg = aggregate(m, k, ballots)
@@ -129,6 +152,7 @@ def main():
 
     cells = []
     made = {}
+    honest_cells = {}
 
     def cell(id_, desc, ctx, votes_list, tamper=None, absent=()):
         """`tamper` maps a seat to (description, function of its honest summed list → posted list)."""
@@ -155,6 +179,7 @@ def main():
             p["valid"] = bv.check_shares(agg, p["seat"], summed[p["seat"]])
             assert p["valid"] == (p["how"] == "honest"), (id_, p["seat"])
         made[id_] = result
+        honest_cells[id_] = (m, vss, agg, honest_opening(m, honest, k))
         cells.append(
             {
                 "id": id_,
@@ -238,6 +263,40 @@ def main():
     def counts(id_):
         return [int(x) for x in made[id_]["counts"]]
 
+    openings = []
+
+    def opening(id_, cell_id, desc, change=None, expect=None):
+        m, vss, agg, honest = honest_cells[cell_id]
+        posted = honest if change is None else change(honest)
+        got = check_opening(m, vss, agg, posted)
+        if expect is not None:
+            assert got == expect, (id_, got, expect)
+        openings.append(
+            {
+                "id": id_,
+                "cell": cell_id,
+                "description": desc,
+                "opening": None if posted is None else bv.enc_shares(posted).hex(),
+                "result": got,
+            }
+        )
+        return got
+
+    for cell_id, r in made.items():
+        if r["ok"]:
+            got = opening(f"{cell_id}-valid", cell_id, "The cell's honest opening")
+            assert got == {"ok": True, "counts": r["counts"]}, cell_id
+
+    def at(j, **kw):
+        return lambda o: [dict(s, **{key: (s[key] + d) % L for key, d in kw.items()}) if i == j else s for i, s in enumerate(o)]
+
+    opening("count-plus-one", "plurality-honest", "Option 1's count is one more than the cell's", at(1, v=1), {"ok": False, "code": "tally-opening", "option": 1})
+    opening("randomness-plus-one", "plurality-honest", "Option 0's randomness is off by one", at(0, r=1), {"ok": False, "code": "tally-opening", "option": 0})
+    opening("options-swapped", "tier-0", "Options 0 and 2 swapped", lambda o: [o[2], o[1], o[0]], {"ok": False, "code": "tally-opening", "option": 0})
+    opening("short", "plurality-honest", "One option fewer than the election", lambda o: o[:-1], {"ok": False, "code": "tally-missing"})
+    opening("missing", "plurality-honest", "No opening on the board for the cell", lambda o: None, {"ok": False, "code": "tally-missing"})
+    opening("vote-of-two", "range-vote-of-two", "The vote-of-2 cell's opening: it opens the aggregate, with a count of 2 over 1 ballot", None, {"ok": False, "code": "tally-range", "option": 0})
+
     totals = [
         {
             "id": "overall-two-tiers",
@@ -262,6 +321,7 @@ def main():
             "cross-checked against the Lagrange coefficients listed"
         ),
         "cells": cells,
+        "openings": openings,
         "totals": totals,
     }
     with open(f"{out}/tally.json", "w") as f:

@@ -1,8 +1,9 @@
 // The homomorphic tally of docs/spec/tally.md (ADR 0002 option B, ADR 0003
-// option C): per cell of the partition, the product of the counted ballots'
-// VSS commitments, each trustee's summed shares checked against it, and the
-// opening of each option's aggregate commitment from any k valid summed shares
-// (CFSY 1996, Section 3; T-29, T-54, T-16). Group operations are @noble's;
+// option C, ADR 0015 option C): per cell of the partition, the product of the
+// counted ballots' VSS commitments, each trustee's summed shares checked
+// against it, the opening of each option's aggregate commitment from any k
+// valid summed shares, and the verifier's check of the published opening
+// (CFSY 1996, Section 3; T-29, T-54, T-16, T-15). Group operations are @noble's;
 // this module only composes them with scalar arithmetic modulo ℓ.
 
 import { checkShares, type CommittedVote, type Share } from "./ballot-validity.ts";
@@ -25,6 +26,13 @@ export type CellAggregate = readonly (readonly Element[])[];
 
 export type TallyCode = "tally-quorum" | "tally-opening" | "tally-range";
 
+/** The verifier's codes for a cell's published opening (docs/spec/tally.md, Opening checks). */
+export type OpeningCode = "tally-missing" | "tally-opening" | "tally-range";
+
+export type OpeningResult =
+  | { readonly ok: true; readonly counts: readonly bigint[] }
+  | { readonly ok: false; readonly code: OpeningCode; readonly option?: number };
+
 export type CellOpening =
   | {
       readonly ok: true;
@@ -34,7 +42,7 @@ export type CellOpening =
       readonly randomness: readonly bigint[];
       /** `Q`: the seats combined, the `k` lowest whose summed shares pass. */
       readonly combined: readonly number[];
-      /** Seats whose summed shares failed the check (`tally-share`), ascending. */
+      /** Seats whose summed shares failed the check, ascending. */
       readonly excluded: readonly number[];
     }
   | {
@@ -147,13 +155,59 @@ export function lagrangeAtZero(seats: readonly number[]): bigint[] {
   );
 }
 
+const isScalar = (x: unknown) => typeof x === "bigint" && x >= 0n && x < GROUP_ORDER;
+
+/** `tally-opening` then `tally-range` for each option in order, against the aggregate. */
+function checkAgainst(
+  aggregate: CellAggregate,
+  ballotCount: number,
+  opening: readonly Share[],
+):
+  | { readonly ok: true; readonly counts: readonly bigint[] }
+  | {
+      readonly ok: false;
+      readonly code: "tally-opening" | "tally-range";
+      readonly option: number;
+    } {
+  for (let j = 0; j < aggregate.length; j++) {
+    const { v, r } = opening[j] as Share;
+    const opens = mul(G, v)
+      .add(mul(GENERATOR_H, r))
+      .equals((aggregate[j] as readonly Element[])[0] as Element);
+    if (!opens) return { ok: false, code: "tally-opening", option: j };
+    if (v > BigInt(ballotCount)) return { ok: false, code: "tally-range", option: j };
+  }
+  return { ok: true, counts: opening.map((s) => s.v) };
+}
+
 /**
- * Opens one cell (docs/spec/tally.md, Combination and opening; verifier 7.1,
- * 7.2): aggregates the counted ballots, checks every posted summed share,
- * combines the `k` lowest passing seats and checks that the result opens each
- * option's aggregate commitment with a count of at most the cell's ballots.
- * `summed` maps each seat that posted to its summed shares, which come from
- * the board and may be anything.
+ * The verifier's check of a cell's published opening (docs/spec/tally.md,
+ * Opening checks; verifier 7.2): one `(V_j, R_j)` per option, each a
+ * canonical scalar, opening the product of the counted ballots' commitments
+ * with a count of at most the cell's ballots. `opening` comes from the board
+ * and may be anything, or nothing (`undefined`).
+ */
+export function checkOpening(
+  rules: TallyRules,
+  ballots: readonly CommittedVote["vss"][],
+  opening: readonly Share[] | undefined,
+): OpeningResult {
+  const aggregate = aggregateCell(rules, ballots);
+  if (
+    !Array.isArray(opening) ||
+    opening.length !== rules.optionCount ||
+    !opening.every((s) => isScalar(s?.v) && isScalar(s?.r))
+  )
+    return { ok: false, code: "tally-missing" };
+  return checkAgainst(aggregate, ballots.length, opening);
+}
+
+/**
+ * A trustee's combination of one cell (docs/spec/tally.md, Combination):
+ * aggregates the counted ballots, checks every summed share it received,
+ * combines the `k` lowest passing seats, and runs the opening checks on the
+ * result before it is published. `summed` maps each sending seat to its
+ * summed shares, which come from other trustees and may be anything.
  */
 export function openCell(
   rules: TallyRules,
@@ -168,13 +222,10 @@ export function openCell(
       throw new RangeError("openCell: seats are from 1 to the panel size");
   const passing: number[] = [];
   const excluded: number[] = [];
-  // A value that isn't a canonical scalar has no encoding, so it can't be on
-  // the board: it fails here rather than being reduced mod ℓ by the check.
+  // A value that isn't a canonical scalar has no encoding, so no message can
+  // carry it: it fails here rather than being reduced mod ℓ by the check.
   const canonical = (shares: readonly Share[]) =>
-    Array.isArray(shares) &&
-    shares.every((s) =>
-      [s?.v, s?.r].every((x) => typeof x === "bigint" && x >= 0n && x < GROUP_ORDER),
-    );
+    Array.isArray(shares) && shares.every((s) => isScalar(s?.v) && isScalar(s?.r));
   for (const seat of seats)
     (canonical(summed.get(seat) as readonly Share[]) &&
     checkSummedShares(aggregate, seat, summed.get(seat) as readonly Share[])
@@ -184,25 +235,25 @@ export function openCell(
   if (passing.length < k) return { ok: false, code: "tally-quorum", excluded };
   const combined = passing.slice(0, k);
   const lambda = lagrangeAtZero(combined);
-  const counts: bigint[] = [];
-  const randomness: bigint[] = [];
-  for (let j = 0; j < aggregate.length; j++) {
-    let v = 0n;
-    let r = 0n;
-    combined.forEach((seat, q) => {
-      const s = (summed.get(seat) as readonly Share[])[j] as Share;
-      v = mod(v + (lambda[q] as bigint) * s.v);
-      r = mod(r + (lambda[q] as bigint) * s.r);
-    });
-    const opens = mul(G, v)
-      .add(mul(GENERATOR_H, r))
-      .equals((aggregate[j] as readonly Element[])[0] as Element);
-    if (!opens) return { ok: false, code: "tally-opening", option: j, excluded };
-    if (v > BigInt(ballots.length)) return { ok: false, code: "tally-range", option: j, excluded };
-    counts.push(v);
-    randomness.push(r);
-  }
-  return { ok: true, counts, randomness, combined, excluded };
+  const opening = aggregate.map((_, j) =>
+    combined.reduce(
+      (acc, seat, q) => {
+        const s = (summed.get(seat) as readonly Share[])[j] as Share;
+        const l = lambda[q] as bigint;
+        return { v: mod(acc.v + l * s.v), r: mod(acc.r + l * s.r) };
+      },
+      { v: 0n, r: 0n },
+    ),
+  );
+  const checked = checkAgainst(aggregate, ballots.length, opening);
+  if (!checked.ok) return { ...checked, excluded };
+  return {
+    ok: true,
+    counts: opening.map((s) => s.v),
+    randomness: opening.map((s) => s.r),
+    combined,
+    excluded,
+  };
 }
 
 /**

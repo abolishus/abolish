@@ -5,6 +5,7 @@ import {
   aggregateCell,
   type CellAggregate,
   type CellOpening,
+  checkOpening,
   checkSummedShares,
   type CommittedVote,
   decode,
@@ -64,6 +65,14 @@ interface CellVector {
 interface Vectors {
   readonly format: string;
   readonly cells: readonly CellVector[];
+  readonly openings: readonly {
+    readonly id: string;
+    readonly cell: string;
+    readonly opening: string | null;
+    readonly result:
+      | { readonly ok: true; readonly counts: readonly string[] }
+      | { readonly ok: false; readonly code: string; readonly option?: number };
+  }[];
   readonly totals: readonly {
     readonly id: string;
     readonly cells: readonly string[];
@@ -118,6 +127,15 @@ describe("tally.json", () => {
     expect(openCell(c.rules, ballots, posted)).toEqual(expected(c.result));
     if (c.result.ok)
       expect(lagrangeAtZero(c.result.combined)).toEqual(c.result.lagrange.map(BigInt));
+  });
+
+  test.each(vectors.openings.map((o) => [o.id, o] as const))("opening %s", (_, o) => {
+    const c = vectors.cells.find((x) => x.id === o.cell);
+    if (!c) throw new Error(`no cell ${o.cell}`);
+    const ballots = c.ballots.map((b) => decode(VSS, hex(b.vss)));
+    const opening = o.opening === null ? undefined : decode(SHARES, hex(o.opening));
+    const expected = o.result.ok ? { ok: true, counts: o.result.counts.map(BigInt) } : o.result;
+    expect(checkOpening(c.rules, ballots, opening)).toEqual(expected);
   });
 
   test.each(vectors.totals.map((t) => [t.id, t] as const))("total %s", (_, t) => {
@@ -331,6 +349,21 @@ describe("checks and inputs", () => {
     const posted = new Map(summed.map((s, i) => [i + 1, i === 0 ? aliased : s]));
     const r = openCell(rules, ballots, posted);
     expect(r).toMatchObject({ ok: true, combined: [2, 3], excluded: [1], counts: [1n, 0n] });
+  });
+
+  test("checkOpening accepts exactly what openCell publishes, and rejects non-scalars", () => {
+    const { ballots, summed } = honestCell(rules, [
+      [1, 0],
+      [0, 1],
+      [1, 0],
+    ]);
+    const r = openCell(rules, ballots, new Map(summed.map((s, i) => [i + 1, s])));
+    if (!r.ok) throw new Error("honest cell failed");
+    const opening = r.counts.map((v, j) => ({ v, r: r.randomness[j] as bigint }));
+    expect(checkOpening(rules, ballots, opening)).toEqual({ ok: true, counts: [2n, 1n] });
+    const aliased = opening.map((s, j) => (j === 0 ? { v: s.v + GROUP_ORDER, r: s.r } : s));
+    expect(checkOpening(rules, ballots, aliased)).toEqual({ ok: false, code: "tally-missing" });
+    expect(checkOpening(rules, ballots, undefined)).toEqual({ ok: false, code: "tally-missing" });
   });
 
   test("an empty cell opens to zero from (0, 0) sums", () => {

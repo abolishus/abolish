@@ -5,7 +5,7 @@ How a panel's trustees register their per-election keys for one election: the ce
 What this page doesn't cover:
 
 - **Approving the transcript.** Each seat that accepts the outcome signs the ceremony registration ([[trustee-identity]], Ceremony registration) over the transcript hash below; the trustee registry records the transcript once the panel's quorum of seats has signed ([[contracts]], Trustee registry).
-- **Using the keys.** Shares are encrypted only to the registered KEM keys of qualified seats; how a ballot leaves out a seat that isn't qualified is the ballot record's (P1-12 part 3). Statements signed with the registered per-election keys (receipts, tally shares, destruction) are specified with their items (P1-12 part 3, P1-15).
+- **Using the keys.** Shares are encrypted only to the registered KEM keys of qualified seats; a ballot leaves out a seat that isn't qualified with a zero share hash, and needs no delivery to it ([[delivery]], Delivery check). Statements signed with the registered per-election keys (receipts, tally shares, destruction) are specified with their items (P1-12 part 3, P1-15).
 - **A ranked-choice mix key.** If the follow-up ADR of [[0003-tally-scheme]] needs one, its DKG is a new record version.
 
 ## Sources

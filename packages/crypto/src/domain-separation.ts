@@ -44,6 +44,7 @@ export const TAG_REGISTRY = Object.freeze(
       { tag: "abolish/v1/fs/share-ephemeral", primitive: "fiat-shamir", status: "specified" },
       { tag: "abolish/v1/fs/share-complaint", primitive: "fiat-shamir", status: "specified" },
       { tag: "abolish/v1/sig/share-receipt", primitive: "signature", status: "specified" },
+      { tag: "abolish/v1/sig/share-complaint", primitive: "signature", status: "specified" },
       { tag: "abolish/v1/circuit-tag", primitive: "plain", status: "specified" },
       { tag: "abolish/v1/panel", primitive: "plain", status: "specified" },
       {

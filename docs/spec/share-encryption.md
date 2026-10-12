@@ -5,7 +5,7 @@ How a ballot's shares reach each trustee privately: the hybrid KEM that combines
 What this page doesn't cover yet:
 
 - **Registering trustee KEM keys** with their proofs of possession, in the ceremony transcript: [[ceremony]]. This page defines the key and its encoding.
-- **Receipts, postings and complaints on the board:** the records that carry them, the complaint's signature, the delivery deadline and the complaint window (P1-12 part 3b, with P1-13 and P1-15). This page defines what each one checks, and the share receipt's signed statement.
+- **Receipts, postings and complaints on the board:** the records that carry them, the complaint's signature, the delivery deadline, the complaint window and which ballots they deliver or exclude are in [[delivery]]. This page defines what each one checks, and the share receipt's signed statement.
 - **Spoiled ballots:** what a challenged ballot reveals and how its ciphertexts are rebuilt (P1-13). Encryption is deterministic given the randomness below, so revealing it lets anyone rebuild each ciphertext.
 
 ## Sources

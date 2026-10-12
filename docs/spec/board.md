@@ -10,7 +10,9 @@ The public bulletin board: the envelope that places a record on it, how its entr
 - **Checkpoints.** After each period, the board's state (its size, chain head and Merkle root after that period's segment) is summarised as a checkpoint, and P4-1 anchors it on L1 so that its election and segment can be read there. Every period that adds entries gets one, and a verifier checks every checkpoint anchored for the election. Anyone holding the entries can recompute every checkpoint, and anyone holding a receipt can check it against an anchored checkpoint with a logarithmic-size proof (T-24).
 - **What the board doesn't decide.** Whether a ballot or opening counts is decided by the admission checks on the record an entry carries ([[verifier]]), never by the envelope. The board's order matters only where this page says so (openings, below); P1-13's re-vote rule must not depend on the order in which the operator writes unanchored entries ([[verifier]] 6.1, R3).
 
-## Board entry (record type `0x0007`, version 1)
+## Board entry (record type `0x0007`, versions 1 and 3)
+
+Versions 1 and 3 have the same layout and differ only in the record types they allow (Allowed payloads). Version 2 is never assigned: a frozen vector uses it as the version that doesn't exist. An election uses the version its profile pins ([[versioning]]).
 
 | Field         | Type                       | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | ------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -23,17 +25,20 @@ The public bulletin board: the envelope that places a record on it, how its entr
 
 ### Allowed payloads
 
-The payload is a complete record whose `record_type` is one of:
+The payload is a complete record whose `record_type` is one the entry's version allows:
 
-| `record_type` | Name                   | Why it is on the board                                                                                        |
-| ------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `0x0002`      | ballot                 | A ballot cast or challenged through our API                                                                   |
-| `0x0003`      | spoiled-ballot opening | A published Benaloh opening (P1-13); ordered canonically, below                                               |
-| `0x0005`      | ceremony transcript    | The key ceremony's public transcript (P1-14)                                                                  |
-| `0x0006`      | tally opening          | One cell's opening of the tally (P1-15, [[tally]])                                                            |
-| `0x0008`      | contract event         | One of our contracts' L2 events, including direct-submitted ballots and the definition's registration (P1-18) |
+| `record_type` | Name                   | Versions | Why it is on the board                                                                                        |
+| ------------- | ---------------------- | -------- | ------------------------------------------------------------------------------------------------------------- |
+| `0x0002`      | ballot                 | 1, 3     | A ballot cast or challenged through our API                                                                   |
+| `0x0003`      | spoiled-ballot opening | 1, 3     | A published Benaloh opening (P1-13); ordered canonically, below                                               |
+| `0x0005`      | ceremony transcript    | 1, 3     | The key ceremony's public transcript (P1-14)                                                                  |
+| `0x0006`      | tally opening          | 1, 3     | One cell's opening of the tally (P1-15, [[tally]])                                                            |
+| `0x0008`      | contract event         | 1, 3     | One of our contracts' L2 events, including direct-submitted ballots and the definition's registration (P1-18) |
+| `0x000c`      | share receipt          | 3        | A trustee's receipt for one seat's share of a ballot ([[delivery]])                                           |
+| `0x000d`      | share posting          | 3        | A client's public posting of one seat's ciphertext ([[delivery]])                                             |
+| `0x000e`      | share complaint        | 3        | A trustee's proof that a posted share is invalid ([[delivery]])                                               |
 
-Any other record type is rejected when the envelope is decoded, with `unexpected-record-type`, including the types [[notation]] would call unknown (`0x0000`, unassigned numbers and the test range): here the envelope fixes the allowed set, so anything outside it is unexpected. The reasons: an election definition reaches the board only as the contract event that registered it, a receipt stays with its voter, a summed-share message never leaves the trustees ([[tally]], Summed-share message), a board entry never nests, and display text is never on the board, the chain or the archive ([[display-text]], T-17). A payload shorter than a record header (3 bytes) is rejected with `truncated`. Both errors are reported at the offset of the payload's first byte.
+Any other record type, including one the entry's version doesn't allow, is rejected when the envelope is decoded, with `unexpected-record-type`, including the types [[notation]] would call unknown (`0x0000`, unassigned numbers and the test range): here the envelope fixes the allowed set, so anything outside it is unexpected. The reasons: an election definition reaches the board only as the contract event that registered it, a receipt stays with its voter, a board entry never nests, and display text is never on the board, the chain or the archive ([[display-text]], T-17). A payload shorter than a record header (3 bytes) is rejected with `truncated`. Both errors are reported at the offset of the payload's first byte.
 
 The envelope decoder reads only the payload's `record_type`. Its version and contents are decoded when the record is used, by the admission checks for ballots and openings and by the election checks for transcripts and events ([[verifier]]). A payload that fails there is a rejected entry, listed in the report, and stays on the board: removing it would break every later proof. The board operator MUST append only payloads that decode strictly under the election's profile (our contracts already accept only such records, [[verifier]]): an undecodable payload would put up to `MAX_BOARD_PAYLOAD` arbitrary bytes into the permanent archive (T-17). A verifier can't tell an operator's mistake from a submitter's here, so it reports such an entry as rejected rather than failing the election.
 
@@ -172,7 +177,7 @@ The checks run in this order, failing at the first problem:
 | `checkpoint-size`         | Its `size` is 0.                                                                                                                                                                                 |
 | `checkpoint-inconsistent` | No board can match it: from L1 alone (step 2), or against the copy (step 3). An election failure, attributable to the anchoring authority.                                                       |
 | `checkpoint-missing`      | Its `size` is larger than the board the verifier holds: entries are missing (reported unverifiable, never pass).                                                                                 |
-| `decode`                  | An entry doesn't decode strictly as a version 1 board entry (with the [[notation]] decode error code), payload header included.                                                                  |
+| `decode`                  | An entry doesn't decode strictly as a board entry of the pinned version (with the [[notation]] decode error code), payload header included.                                                      |
 | `wrong-index`             | An entry's `index` isn't its position.                                                                                                                                                           |
 | `segment-decreased`       | An entry's `segment` is smaller than the previous entry's.                                                                                                                                       |
 | `opening-order`           | An entry breaks the order of spoiled-ballot openings above.                                                                                                                                      |

@@ -37,9 +37,12 @@ import { PARAMETERS } from "./parameters.ts";
 
 const { MAX_OPTIONS, MAX_TRUSTEES } = PARAMETERS;
 
-/** The ballot record type and version whose proof rules this module implements. */
+/** The ballot record type, and the version whose share ciphertexts this module's shares use. */
 export const BALLOT_RECORD_TYPE = 0x0002;
 export const BALLOT_VERSION = 1;
+
+/** The ballot versions whose proof rules this module implements: 1 names a tier, 2 a cell. */
+export type BallotVersion = 1 | 2;
 
 const bitProof = struct([
   ["c0", scalar],
@@ -102,11 +105,17 @@ export interface ValidityRules {
  * verifier has already checked, never from the ballot's committed vote
  * (docs/spec/ballot-validity.md, Context).
  */
-export interface ValidityContext extends ValidityRules {
-  readonly definitionHash: Uint8Array;
-  readonly tier: number;
-  readonly nullifier: bigint;
-}
+export type ValidityContext = ValidityRules & BallotHashContext;
+
+/**
+ * What a ballot names beside its nullifier: under version 1 its tier, under
+ * version 2 its cell's position in the partition (docs/spec/ballot-validity.md,
+ * Ballot record (version 2); 0019-regional-cells). Either is the `u8` after
+ * the version in the statement and ballot hashes.
+ */
+export type BallotLabel =
+  | { readonly ballotVersion?: 1; readonly tier: number }
+  | { readonly ballotVersion: 2; readonly cell: number };
 
 export type ValidityCode = "validity-shape" | "option-proof" | "sum-proof";
 
@@ -157,15 +166,32 @@ function checkBallotContext(ctx: BallotHashContext): void {
   const d = ctx.definitionHash;
   if (!(d instanceof Uint8Array) || !ArrayBuffer.isView(d) || new Uint8Array(d).length !== 32)
     throw new TypeError("context: definitionHash must be 32 bytes");
-  if (!Number.isSafeInteger(ctx.tier) || ctx.tier < 0 || ctx.tier > 0xff)
-    throw new RangeError("context: tier must be a u8");
+  labelOf(ctx);
+}
+
+/**
+ * The ballot version and the `u8` it names, read once. A context naming both
+ * a tier and a cell is refused, so no caller can mean one and hash the other.
+ */
+export function labelOf(ctx: BallotLabel): {
+  readonly version: BallotVersion;
+  readonly label: number;
+} {
+  const version = ctx.ballotVersion ?? 1;
+  let label: unknown;
+  if (version === 1 && !("cell" in ctx)) label = (ctx as { readonly tier: unknown }).tier;
+  else if (version === 2 && !("tier" in ctx)) label = (ctx as { readonly cell: unknown }).cell;
+  else throw new RangeError("context: expected ballot version 1 with a tier or 2 with a cell");
+  if (!Number.isSafeInteger(label) || (label as number) < 0 || (label as number) > 0xff)
+    throw new RangeError("context: the tier or cell must be a u8");
+  return { version, label: label as number };
 }
 
 /**
  * `statement_hash`: the digest every validity proof of the ballot binds
  * (docs/spec/ballot-validity.md, Statement hash). It covers the election, the
- * ballot version, the tier, the nullifier (T-32), every commitment and every
- * share ciphertext's hash (T-30).
+ * ballot version, the tier (version 2: the cell), the nullifier (T-32), every
+ * commitment and every share ciphertext's hash (T-30).
  */
 export function statementHash(
   ctx: ValidityContext,
@@ -173,11 +199,12 @@ export function statementHash(
   shareHashes: CommittedVote["share_hashes"],
 ): Uint8Array {
   checkContext(ctx);
+  const { version, label } = labelOf(ctx);
   const w = new Writer();
   w.bytes(new Uint8Array(ctx.definitionHash));
   u16.write(w, BALLOT_RECORD_TYPE);
-  u8.write(w, BALLOT_VERSION);
-  u8.write(w, ctx.tier);
+  u8.write(w, version);
+  u8.write(w, label);
   fieldBn254.write(w, ctx.nullifier);
   // Encoded by the ballot's own field codecs, so exactly as the ballot carries them.
   VSS.write(w, vss);
@@ -185,8 +212,11 @@ export function statementHash(
   return H(ds("abolish/v1/ballot-statement", w.finish()));
 }
 
-/** What names a ballot beside its committed vote: the election, its tier and its nullifier. */
-export type BallotHashContext = Pick<ValidityContext, "definitionHash" | "tier" | "nullifier">;
+/** What names a ballot beside its committed vote: the election, its tier or cell, and its nullifier. */
+export type BallotHashContext = BallotLabel & {
+  readonly definitionHash: Uint8Array;
+  readonly nullifier: bigint;
+};
 
 /**
  * `ballot_hash`: the hash of the ballot's public part, the statement hash's
@@ -197,11 +227,12 @@ export type BallotHashContext = Pick<ValidityContext, "definitionHash" | "tier" 
  */
 export function ballotHash(ctx: BallotHashContext, vote: CommittedVote): Uint8Array {
   checkBallotContext(ctx);
+  const { version, label } = labelOf(ctx);
   const w = new Writer();
   w.bytes(new Uint8Array(ctx.definitionHash));
   u16.write(w, BALLOT_RECORD_TYPE);
-  u8.write(w, BALLOT_VERSION);
-  u8.write(w, ctx.tier);
+  u8.write(w, version);
+  u8.write(w, label);
   fieldBn254.write(w, ctx.nullifier);
   // vss ‖ share_hashes ‖ option_proofs ‖ sum_proof, exactly as the ballot carries them.
   COMMITTED_VOTE.write(w, vote);

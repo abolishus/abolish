@@ -124,11 +124,14 @@ def enc_shares(shares):
 
 
 def statement_hash(ctx, vss, share_hashes):
+    # Ballot version 2 names its cell where version 1 names its tier
+    # (ballot-validity.md, Ballot record (version 2)).
+    version = ctx.get("ballotVersion", 1)
     m = (
         ctx["definitionHash"]
         + u16(BALLOT_RECORD_TYPE)
-        + u8(BALLOT_VERSION)
-        + u8(ctx["tier"])
+        + u8(version)
+        + u8(ctx["cell"] if version == 2 else ctx["tier"])
         + field(ctx["nullifier"])
         + enc_vss(vss)
         + enc_share_hashes(share_hashes)

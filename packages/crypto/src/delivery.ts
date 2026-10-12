@@ -6,7 +6,7 @@
 // no proven complaint excludes it (ADR 0002, Deadline, Complaints and the
 // owner's 2026-10-12 decision; T-41, T-29, T-25, T-54).
 
-import { ballotHash, type CommittedVote } from "./ballot-validity.ts";
+import { ballotHash, type BallotLabel, type CommittedVote, labelOf } from "./ballot-validity.ts";
 import {
   bytesFixed,
   type CodecValue,
@@ -240,12 +240,14 @@ export interface DeliveryElection {
   readonly deadlines: DeliveryDeadlines;
 }
 
-/** A ballot [[revoting]] selected, decoded, with its tier and nullifier; it passed `validity-shape`. */
-export interface DeliveryBallot {
-  readonly tier: number;
+/**
+ * A ballot [[revoting]] selected, decoded, with its tier (ballot version 2:
+ * its cell) and nullifier; it passed `validity-shape`.
+ */
+export type DeliveryBallot = BallotLabel & {
   readonly nullifier: bigint;
   readonly vote: CommittedVote;
-}
+};
 
 /**
  * A delivery record in the counted extent: through the board path, with the
@@ -399,9 +401,11 @@ export function checkDelivery(
   const hashes = ballots.map((b) => {
     if (b.vote.share_hashes.length !== panelSize)
       throw new RangeError("checkDelivery: every ballot must have passed validity-shape");
-    return ballotHash({ definitionHash, tier: b.tier, nullifier: b.nullifier }, b.vote);
+    const { version, label } = labelOf(b);
+    const named: BallotLabel = version === 1 ? { tier: label } : { ballotVersion: 2, cell: label };
+    return ballotHash({ definitionHash, ...named, nullifier: b.nullifier }, b.vote);
   });
-  // A ballot hash binds the tier and nullifier, so selected ballots never share one.
+  // A ballot hash binds the tier or cell and the nullifier, so selected ballots never share one.
   const byHash = new Map(hashes.map((h, i) => [hex(h), i]));
 
   const delivered = ballots.map(() => new Set<number>());

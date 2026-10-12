@@ -470,11 +470,13 @@ describe("2.3's profile combination", () => {
     },
   });
 
-  // From docs/spec/verifier.md 2.3: ballot version 1 needs board-entry 3 or
-  // 4, tally-opening version 1 needs 4, and a board-entry version this
-  // package doesn't read is unsupported, never a failure (T-36).
+  // From docs/spec/verifier.md 2.3: ballot versions 1 and 2 need board-entry
+  // 3 or 4, tally-opening version 1 needs 4, ballot version 2 needs
+  // definition version 3 or 4 (these are version 1), and a board-entry version
+  // this package doesn't read is unsupported, never a failure (T-36).
   const expected = (board: number, ballot: number, opening: number) => {
     if (![1, 3, 4].includes(board)) return "unsupported-version";
+    if (ballot === 2) return "profile-combination";
     const carriesDelivery = board === 3 || board === 4;
     const carriesDestruction = board === 4;
     const fits = (ballot !== 1 || carriesDelivery) && (opening !== 1 || carriesDestruction);
@@ -496,7 +498,7 @@ describe("2.3's profile combination", () => {
     expect(profileCombinationRule(pinning(4, 1, 1))).toBeUndefined();
   });
 
-  test("definition version 3 refuses every ballot version until one names its cell", () => {
+  test("definition version 3 pairs only with ballot version 2, which no opening can challenge yet", () => {
     // The rule reads only the profile, so version 1's value with 0x0001
     // pinned at 3 stands in for a version-3 definition.
     const v3 = (ballot: number) => {
@@ -512,11 +514,40 @@ describe("2.3's profile combination", () => {
       };
     };
     expect(profileCombinationRule(v3(1))).toBe("profile-combination");
-    expect(profileCombinationRule(v3(2))).toBe("profile-combination");
+    expect(profileCombinationRule(v3(3))).toBe("profile-combination");
+    // Ballot version 2 is the only one that could fit, and no spoiled-ballot
+    // opening version opens its cores yet, so it is refused under every one
+    // (docs/spec/challenge.md, Versions; T-42).
+    for (const spoiled of [1, 2, 255]) {
+      const d = v3(2);
+      const pinned = {
+        ...d,
+        profile: {
+          ...d.profile,
+          pins: d.profile.pins.map((p) =>
+            p.record_type === RECORD_TYPES.spoiledBallotOpening ? { ...p, version: spoiled } : p,
+          ),
+        },
+      };
+      expect(profileCombinationRule(pinned)).toBe("profile-combination");
+    }
     expect(profileCombinationRule(pinning(4, 1, 1))).toBeUndefined();
+    expect(profileCombinationRule(pinning(4, 2, 1))).toBe("profile-combination");
+    // Ballot version 2 still needs a board that carries its delivery records.
+    const v3Board1 = v3(2);
+    const board1 = {
+      ...v3Board1,
+      profile: {
+        ...v3Board1.profile,
+        pins: v3Board1.profile.pins.map((p) =>
+          p.record_type === RECORD_TYPES.boardEntry ? { ...p, version: 1 } : p,
+        ),
+      },
+    };
+    expect(profileCombinationRule(board1)).toBe("profile-combination");
   });
 
-  test("definition version 4 keeps version 3's regional cells, so it refuses them too", () => {
+  test("definition version 4 keeps version 3's regional cells and its pairing", () => {
     const v4 = (ballot: number) => {
       const d = pinning(4, ballot, 1);
       return {
@@ -530,7 +561,20 @@ describe("2.3's profile combination", () => {
       };
     };
     expect(profileCombinationRule(v4(1))).toBe("profile-combination");
+    expect(profileCombinationRule(v4(3))).toBe("profile-combination");
     expect(profileCombinationRule(v4(2))).toBe("profile-combination");
+    const v4Board = (board: number) => ({
+      ...v4(2),
+      profile: {
+        ...v4(2).profile,
+        pins: v4(2).profile.pins.map((p) =>
+          p.record_type === RECORD_TYPES.boardEntry ? { ...p, version: board } : p,
+        ),
+      },
+    });
+    // Ballot version 2 needs receipts on the board, and tally-opening 1 destruction.
+    expect(profileCombinationRule(v4Board(1))).toBe("profile-combination");
+    expect(profileCombinationRule(v4Board(3))).toBe("profile-combination");
   });
 
   test("a definition pinning no board-entry version is unsupported, never a failure", () => {
@@ -550,7 +594,7 @@ describe("2.3's profile combination", () => {
     // electionDefinitionRule refuses these too; a caller that skipped it
     // must still refuse to cast (T-34).
     for (const type of [RECORD_TYPES.ballot, RECORD_TYPES.tallyOpening]) {
-      const fitting = pinning(4, 2, 2);
+      const fitting = pinning(4, 3, 2);
       const without = {
         ...fitting,
         profile: {

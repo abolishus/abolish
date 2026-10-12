@@ -110,6 +110,33 @@ export const boardAnchorAbi = [
     stateMutability: "view",
   },
   {
+    type: "function",
+    inputs: [
+      { name: "prefix", internalType: "uint8", type: "uint8" },
+      { name: "x", internalType: "bytes32", type: "bytes32" },
+    ],
+    name: "receiptKeyRecord",
+    outputs: [
+      { name: "registeredAt", internalType: "uint64", type: "uint64" },
+      { name: "retiredAt", internalType: "uint64", type: "uint64" },
+    ],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    inputs: [{ name: "key", internalType: "bytes", type: "bytes" }],
+    name: "registerReceiptKey",
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    inputs: [{ name: "key", internalType: "bytes", type: "bytes" }],
+    name: "retireReceiptKey",
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
     type: "event",
     anonymous: false,
     inputs: [
@@ -162,6 +189,24 @@ export const boardAnchorAbi = [
     name: "CheckpointAnchored",
   },
   {
+    type: "event",
+    anonymous: false,
+    inputs: [
+      { name: "x", internalType: "bytes32", type: "bytes32", indexed: true },
+      { name: "prefix", internalType: "uint8", type: "uint8", indexed: false },
+    ],
+    name: "ReceiptKeyRegistered",
+  },
+  {
+    type: "event",
+    anonymous: false,
+    inputs: [
+      { name: "x", internalType: "bytes32", type: "bytes32", indexed: true },
+      { name: "prefix", internalType: "uint8", type: "uint8", indexed: false },
+    ],
+    name: "ReceiptKeyRetired",
+  },
+  {
     type: "error",
     inputs: [
       { name: "electionId", internalType: "bytes32", type: "bytes32" },
@@ -199,6 +244,7 @@ export const boardAnchorAbi = [
     inputs: [{ name: "length", internalType: "uint256", type: "uint256" }],
     name: "MalformedLocator",
   },
+  { type: "error", inputs: [], name: "MalformedReceiptKey" },
   { type: "error", inputs: [], name: "NonCanonicalCalldata" },
   {
     type: "error",
@@ -222,6 +268,22 @@ export const boardAnchorAbi = [
       { name: "timestamp", internalType: "uint256", type: "uint256" },
     ],
     name: "PeriodNotOver",
+  },
+  {
+    type: "error",
+    inputs: [
+      { name: "prefix", internalType: "uint8", type: "uint8" },
+      { name: "x", internalType: "bytes32", type: "bytes32" },
+    ],
+    name: "ReceiptKeyAlreadyRegistered",
+  },
+  {
+    type: "error",
+    inputs: [
+      { name: "prefix", internalType: "uint8", type: "uint8" },
+      { name: "x", internalType: "bytes32", type: "bytes32" },
+    ],
+    name: "ReceiptKeyNotActive",
   },
   {
     type: "error",

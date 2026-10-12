@@ -26,6 +26,7 @@ import {
   type ValidityCode,
   type ValidityContext,
   type ValidityResult,
+  type ValidityRules,
 } from "../src/index.ts";
 import { hex, SPEC_VECTORS } from "./spec-vectors.ts";
 
@@ -225,11 +226,11 @@ const contextArb = fc.record({
 });
 
 function honestBallot(
-  rules: Omit<ValidityContext, "definitionHash" | "tier" | "nullifier">,
+  rules: ValidityRules,
   votes: readonly (0 | 1)[],
   c: { definitionHash: Uint8Array; tier: number; nullifier: bigint },
 ) {
-  const ctx: ValidityContext = { ...rules, ...c };
+  const ctx = { ...rules, ...c } satisfies ValidityContext;
   const sharing = shareVote(ctx, votes);
   const shareHashes = Array.from({ length: ctx.panelSize }, (_, i) => new Uint8Array(32).fill(i));
   return { ctx, sharing, vote: proveValidity(ctx, sharing, shareHashes) };

@@ -49,6 +49,7 @@ Abolish's contracts (the L2 contracts and the L1 board anchor), built with Found
 - `anchor(bytes checkpoints, bytes locator)` takes concatenated checkpoint encodings from the authority only, with canonical calldata, each non-empty, inside its window (`[end, end + deadline]` after its period ends) and the first for its election and segment, and stores `H(DS("abolish/v1/board-checkpoint", encode(checkpoint)))` at a per-segment slot under the ERC-7201 namespace `abolish.board-anchor`, so a verifier proves every anchor of an election from state (T-23, T-24, T-52).
 - `CheckpointAnchored` publishes the full checkpoint, through the event accumulator.
 - A call may carry the `archiveLocator` of ADR 0005 (`u16(version) ‖ body`, at most 128 bytes, framed but not interpreted), alone or with checkpoints; `ArchiveLocated` logs it and the latest one stays in state with a count, so the archive is found from L1 alone, even after history expiry (T-49, T-51).
+- `registerReceiptKey(bytes key)` and `retireReceiptKey(bytes key)` keep the append-only record of receipt keys ([`docs/adr/0023-receipt-evidence.md`](../../docs/adr/0023-receipt-evidence.md)): from the authority only, with canonical calldata, a 33-byte key framed as compressed P-256 (not checked on the curve); a key is registered once and retired at most once, each time in one word (`registeredAt`, `retiredAt`) under the same namespace, so a verifier proves both with one storage proof, and `ReceiptKeyRegistered` and `ReceiptKeyRetired` go through the event accumulator (T-26, T-69, T-17).
 - `src/CanonicalCalldata.sol` is the calldata check it shares with the election registry.
 - The hourly job and the Sepolia deployment are P4-1 part 2.
 
@@ -112,7 +113,7 @@ FOUNDRY_PROFILE=ci vp run --filter @abolishus/contracts test   # deeper fuzz and
 
 The tests cover:
 
-- the cross-language vectors in `docs/spec/vectors/event-accumulator.json`, `election-definition.json`, `election-registry.json`, `trustee.json`, `group-registry.json` and the checkpoints of `board.json`, which independent Python implementations produced;
+- the cross-language vectors in `docs/spec/vectors/event-accumulator.json`, `election-definition.json`, `election-registry.json`, `trustee.json`, `group-registry.json`, the checkpoints of `board.json` and the receipt-key records of `election-definition-v4.json`'s judging cases, which independent Python implementations produced;
 - fuzz tests that replay the logs the EVM recorded;
 - a test per admission rule of the election registry, per refusal of the trustee registry, of the group registry (its stateful ones included) and of the board anchor (with its window's exact boundaries), and fuzz tests that any one-bit change to an approved definition or a signed group record, or arbitrary bytes, is refused;
 - the group registry's gas for one member with two approvals, two members, a batch of 256 and a removal, each bounded in its own test;

@@ -208,20 +208,24 @@ describe("2.3: the profile's versions fit together", () => {
     });
 
   // [board entry, ballot, tally opening, fits]: ballot version 1 needs board
-  // entries that carry share receipts and complaints (3 or 4), and
-  // tally-opening version 1 needs ones that carry destruction statements (4).
+  // entries that carry share receipts and complaints (3 or 4), tally-opening
+  // version 1 needs ones that carry destruction statements (4), and ballot
+  // version 2, which names a cell, needs definition version 3 or 4 (these are
+  // version 1). Ballot version 3 stands for a version with neither need.
   const table: readonly (readonly [number, number, number, boolean])[] = [
     [4, 1, 1, true],
     [3, 1, 1, false],
     [1, 1, 1, false],
     [3, 1, 2, true],
     [1, 1, 2, false],
-    [4, 2, 1, true],
-    [3, 2, 1, false],
-    [1, 2, 1, false],
-    [1, 2, 2, true],
-    [3, 2, 2, true],
-    [4, 2, 2, true],
+    [4, 2, 1, false],
+    [4, 2, 2, false],
+    [4, 3, 1, true],
+    [3, 3, 1, false],
+    [1, 3, 1, false],
+    [1, 3, 2, true],
+    [3, 3, 2, true],
+    [4, 3, 2, true],
   ];
   for (const [board, ballot, opening, fits] of table)
     test(`board entry ${board}, ballot ${ballot}, tally opening ${opening}: ${fits ? "fits" : "fails"}`, () => {

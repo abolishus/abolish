@@ -11,6 +11,7 @@ interface Vm {
         address emitter;
     }
 
+    function addr(uint256 privateKey) external pure returns (address keyAddr);
     function assume(bool condition) external pure;
     function chainId(uint256 newChainId) external;
     function envOr(string calldata name, bool defaultValue) external view returns (bool value);
@@ -33,15 +34,24 @@ interface Vm {
         external
         pure
         returns (uint256);
+    function parseJsonUintArray(string calldata json, string calldata key)
+        external
+        pure
+        returns (uint256[] memory);
     function parseUint(string calldata stringifiedValue) external pure returns (uint256);
     function prank(address msgSender) external;
     function readFile(string calldata path) external view returns (string memory data);
     function recordLogs() external;
     function roll(uint256 newHeight) external;
+    function sign(uint256 privateKey, bytes32 digest)
+        external
+        pure
+        returns (uint8 v, bytes32 r, bytes32 s);
     function signP256(uint256 privateKey, bytes32 digest)
         external
         pure
         returns (bytes32 r, bytes32 s);
+    function store(address target, bytes32 slot, bytes32 value) external;
     function toString(uint256 value) external pure returns (string memory);
     function warp(uint256 newTimestamp) external;
 }

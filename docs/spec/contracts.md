@@ -253,7 +253,7 @@ A commitment may repeat, within a group or across groups ([[membership]], Commit
 record = u64(group_id) ‖ u16(count) ‖ u64(index) × count ‖ u8(approvals) ‖ approval × approvals
 ```
 
-exactly `11 + 8 · count + 66 · approvals` bytes, with `approvals` the byte at offset `10 + 8 · count`. The registry checks, in this order: canonical calldata; the length; the group, as for additions; `1 ≤ count ≤ MAX_BATCH`; the indices are strictly increasing, each below the group's member count and none removed already; then rules 7 and 8 of Additions over the `RemoveMembers` digest. It then marks each index removed and emits `MembersRemoved`. A removal sets that leaf of the tier tree to 0 ([[membership]], Commitments and removals); the member count doesn't change, so leaf numbering never shifts.
+exactly `11 + 8 · count + 66 · approvals` bytes, with `approvals` the byte at offset `10 + 8 · count`. The registry checks, in this order: canonical calldata; the length; the group, as for additions (it exists and its tier is 0); `1 ≤ count ≤ MAX_BATCH`; index by index, that it is greater than the one before, below the group's member count and not removed already; then rules 7 and 8 of Additions over the `RemoveMembers` digest. It then marks each index removed and emits `MembersRemoved`. A removal sets that leaf of the tier tree to 0 ([[membership]], Commitments and removals); the member count doesn't change, so leaf numbering never shifts.
 
 [[membership]] lets a verifier meet stray removals (an index no addition has reached, a leaf already removed) and ignore them. This registry refuses them, so each of its removals changes exactly the leaves it names; a replayed removal reverts.
 
@@ -322,7 +322,7 @@ The registry refuses every record a verifier would not count, every forbidden co
 - **Duplicates are the signing path's to refuse** (Additions): a repeated commitment overstates `group_size` by one.
 - **Tiers 1 and 2 have no addition path yet** (P3-3, P3-4), and no registry may be deployed until they do.
 - **No paymaster yet.** [[0004-l2-choice]] sponsors registration through our own ERC-4337 paymaster (P2-6, this item's later part); until then whoever submits an addition pays its gas.
-- **Gas.** In the tests, adding one member with two of three approvals costs about 85,000 gas, and each further commitment in the same batch about 1,000: the signatures (two `ecrecover` calls and a keccak over the commitments) dominate, and a batch of 256 costs about 400,000.
+- **Gas.** In the tests, adding one member with two of three approvals costs about 67,000 gas beyond the transaction's base cost and calldata, each further commitment in the same batch about 1,500, and a batch of 256 about 430,000: two `ecrecover` calls, the keccak hashes of the digest, the storage write and the accumulator step. Removing one member costs about 85,000, mostly its first write to the removed-index bitmap.
 
 ## Board anchor
 

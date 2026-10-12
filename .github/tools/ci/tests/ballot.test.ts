@@ -4,6 +4,7 @@ import {
   BALLOT_CSP_TEXT,
   distViolations,
   htmlViolations,
+  moduleListViolations,
   moduleViolations,
   packageOf,
 } from "../src/ballot.ts";
@@ -110,6 +111,24 @@ describe("moduleViolations", () => {
       `${repo}/node_modules/.pnpm/evil@1.0.0/node_modules/evil/node_modules/react/x.js`,
     ])
       expect(moduleViolations([id], repo), id).toHaveLength(1);
+  });
+});
+
+describe("moduleListViolations", () => {
+  const react = [pnpm("react", "index.js"), pnpm("react-dom", "client.js")];
+
+  test("accepts a list of allowed modules that includes react-dom", () => {
+    expect(moduleListViolations(react, repo)).toEqual([]);
+  });
+
+  test("rejects a list that isn't one of strings", () => {
+    for (const ids of [null, {}, "x", [1], [...react, null]])
+      expect(moduleListViolations(ids, repo).length, JSON.stringify(ids)).toBeGreaterThan(0);
+  });
+
+  test("rejects a list without react-dom, which would make the check vacuous", () => {
+    expect(moduleListViolations([], repo).length).toBeGreaterThan(0);
+    expect(moduleListViolations([pnpm("react", "index.js")], repo).length).toBeGreaterThan(0);
   });
 });
 
@@ -241,6 +260,7 @@ describe("distViolations", () => {
       'new WebSocket("wss://x.example.com")',
       'fetch("//collector.example.com/e")',
       'fetch("\\/\\/collector.example.com/e")',
+      'fetch("https:\\/\\/collector.example.com/e")',
       "navigator.sendBeacon(u,d)",
       'eval("1")',
       'new Function("return 1")',

@@ -124,6 +124,22 @@ export function packageOf(id: string, repoRoot: string): string | undefined {
   return m[1];
 }
 
+/**
+ * Problems with the module list the build child reported: it must be a list
+ * of strings, include react-dom (or the module check would be vacuous), and
+ * pass `moduleViolations`.
+ */
+export function moduleListViolations(ids: unknown, repoRoot: string): string[] {
+  if (!Array.isArray(ids) || !ids.every((id) => typeof id === "string"))
+    return ["apps/ballot: the build's module list isn't a list of strings"];
+  return [
+    ...(ids.some((id) => packageOf(id, repoRoot) === "react-dom")
+      ? []
+      : ["apps/ballot: the build reported no react-dom, so the module check would be vacuous"]),
+    ...moduleViolations(ids, repoRoot),
+  ];
+}
+
 /** Modules in the build that come from neither an allowed package nor allowed workspace source. */
 export function moduleViolations(ids: readonly string[], repoRoot: string): string[] {
   const violations: string[] = [];
@@ -258,8 +274,9 @@ export function distViolations(files: ReadonlyMap<string, string>): string[] {
   for (const [name, text] of files) {
     if (!/\.(html|js|css)$/.test(name)) continue;
     const at = (msg: string) => violations.push(`apps/ballot: ${name}: ${msg}`);
-    for (const [url] of text.matchAll(/\b(?:https?|wss?):\/\/[^\s"'`)<>\\]*/g)) {
-      const trimmed = url.replace(/[.,;]+$/, "");
+    // Escaped slashes (`https:\/\/host`) are the same string in JS.
+    for (const [url] of text.matchAll(/\b(?:https?|wss?):(?:\\?\/){2}[^\s"'`)<>]*/g)) {
+      const trimmed = url.replace(/\\\//g, "/").replace(/[.,;\\]+$/, "");
       if (!INERT_URLS.has(trimmed)) at(`names ${trimmed}`);
     }
     // A heuristic over quoted strings; the CSP's 'self' is the real barrier.

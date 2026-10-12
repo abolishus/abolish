@@ -44,7 +44,7 @@ import { join, resolve } from "node:path";
 import { parseSync } from "vite-plus";
 import { parseDocument } from "yaml";
 import { findUnpinned } from "./actions-pinned.ts";
-import { distViolations, moduleViolations, packageOf } from "./ballot.ts";
+import { distViolations, moduleListViolations } from "./ballot.ts";
 import {
   GATED_PACKAGES,
   changedFiles,
@@ -762,29 +762,22 @@ function ballot(): void {
       env: { ...process.env, NODE_ENV: "production" },
     });
     const files = new Map<string, string>();
-    for (const entry of readdirSync(outDir, { recursive: true, withFileTypes: true }))
-      if (entry.isFile()) {
-        const path = join(entry.parentPath, entry.name);
-        files.set(
-          path
-            .slice(outDir.length + 1)
-            .split("\\")
-            .join("/"),
-          readFileSync(path, "latin1"),
-        );
-      }
-    const ids: unknown = JSON.parse(readFileSync(idsFile, "utf8"));
-    const violations =
-      Array.isArray(ids) && ids.every((id) => typeof id === "string")
-        ? [
-            ...(ids.some((id) => packageOf(id, resolve(".")) === "react-dom")
-              ? []
-              : [
-                  "apps/ballot: the build reported no react-dom, so the module check would be vacuous",
-                ]),
-            ...moduleViolations(ids, resolve(".")),
-          ]
-        : ["apps/ballot: the build's module list isn't a list of strings"];
+    const violations: string[] = [];
+    for (const entry of readdirSync(outDir, { recursive: true, withFileTypes: true })) {
+      const path = join(entry.parentPath, entry.name);
+      const name = path
+        .slice(outDir.length + 1)
+        .split("\\")
+        .join("/");
+      // A symlink or other special file would never reach the emitted-file
+      // allow-list as a file, so it is a violation of its own.
+      if (entry.isFile()) files.set(name, readFileSync(path, "latin1"));
+      else if (!entry.isDirectory())
+        violations.push(`apps/ballot: emits ${name}, which isn't a regular file`);
+    }
+    violations.push(
+      ...moduleListViolations(JSON.parse(readFileSync(idsFile, "utf8")), resolve(".")),
+    );
     violations.push(...distViolations(files));
     for (const v of violations) console.error(v);
     if (violations.length > 0) process.exit(1);

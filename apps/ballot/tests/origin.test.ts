@@ -36,7 +36,9 @@ describe("onSharedGatewayPath", () => {
 
   test("refuses paths it can't decode, or that keep decoding", () => {
     expect(onSharedGatewayPath("/%E0%A4%A/")).toBe(true);
-    expect(onSharedGatewayPath(`/${"%25".repeat(6)}69pfs/`)).toBe(true);
+    // Nested encodings of a harmless segment: only the round cap refuses the deeper one.
+    expect(onSharedGatewayPath(`/%${"25".repeat(3)}78/`)).toBe(false);
+    expect(onSharedGatewayPath(`/%${"25".repeat(6)}78/`)).toBe(true);
   });
 
   test("recognises any percent-encoding of the first segment", () => {

@@ -1,7 +1,7 @@
 // The ballot client's Content Security Policy, pinned (T-43). The policy
 // itself lives in index.html; the tests hold it to this, directive by
 // directive. Both are in this package, so the owner-reviewed copy in
-// .github/tools/ci/src/ballot.ts (#82) is the gate (T-59); this one repeats it.
+// .github/tools/ci/src/ballot.ts is the gate (T-59); this one repeats it.
 //
 // - Scripts, styles, fonts and images come only from the client's own origin:
 //   no inline code, no eval, no other site.

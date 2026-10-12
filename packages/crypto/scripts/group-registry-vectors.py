@@ -423,31 +423,44 @@ def verdict_remove(rec):
     return {"error": bad[0], **({"seat": bad[1]} if bad[1] is not None else {})} if bad else None
 
 
-def apply_group(records):
+def apply_group(records, group_id=0):
     """The verifier's replay of one group (spec, Group registry, Verification):
-    its own member count and removed set, every registry check, no chain
-    state. Returns the leaves (0 where removed) or the first failing record."""
+    its own member count and leaves, every registry check, no chain state, in
+    the spec's order per record: decoding, the group, the approvals, then the
+    position or size, then removed leaves. Returns the leaves (0 where
+    removed) or the first failing record and its reason."""
     count, leaves = 0, []
     for at, (kind, rec) in enumerate(records):
-        bad = verdict_add(rec) if kind == "add" else verdict_remove(rec)
-        if bad:
-            return {"error": "group-history", "at": at, "reason": bad["error"]}
+        def fail(reason):
+            return {"error": "group-history", "at": at, "reason": reason}
+
+        try:
+            parsed = parse_add(rec) if kind == "add" else parse_remove(rec)
+        except ValueError as e:
+            return fail(str(e))
+        if parsed[0] != group_id:
+            return fail("group")
         if kind == "add":
-            _, first, cs, _ = parse_add(rec)
+            _, first, cs, aps = parsed
+            bad = check_approvals(add_digest(group_id, first, cs), aps)
+        else:
+            _, size, idx, aps = parsed
+            bad = check_approvals(remove_digest(group_id, size, idx), aps)
+        if bad:
+            return fail(bad[0])
+        if kind == "add":
             if first != count or count + len(cs) > 2**32:
-                return {"error": "group-history", "at": at, "reason": "position"}
+                return fail("position")
             leaves += cs
             count += len(cs)
         else:
-            _, size, idx, _ = parse_remove(rec)
             if size > count:
-                return {"error": "group-history", "at": at, "reason": "size"}
+                return fail("size")
             if any(leaves[i] == 0 for i in idx):
-                return {"error": "group-history", "at": at, "reason": "removed"}
+                return fail("removed")
             for i in idx:
                 leaves[i] = 0
     return {"count": count, "leaves": ["%064x" % c for c in leaves], "groupSize": sum(1 for c in leaves if c)}
-
 
 def commitments(n, seed):
     out = []
@@ -616,14 +629,18 @@ def main():
         ("removal-beyond-size", "A removal of index 2 signed at size 2", [b0, b1, signed_remove(2, [2])]),
         ("unsigned", "The second batch with one approval of the two needed", [b0, unsigned_b1]),
         ("forbidden", "The second batch holding Poseidon2(0, 1), validly signed", [b0, forbidden_b1]),
+        ("omitted-removal", "The removal left out between batches: a history that still checks (a stated residual)", [b0, b1, b2]),
+        ("other-group", "A validly signed batch of group 1 among group 0's records", [b0, ("add", add_record(1, 2, cs_b1, approvals_for(add_digest(1, 2, cs_b1), [1, 2])))]),
+        ("two-faults", "The second batch replayed with one approval: the approvals are checked before the position", [b0, b1, ("add", add_record(0, 2, cs_b1, approvals_for(add_digest(0, 2, cs_b1), [1])))]),
     ):
         sequences.append({
             "id": id_, "description": desc, "groupId": 0,
             "records": [{"kind": k, "record": hexs(r)} for k, r in recs],
             **apply_group(recs),
         })
-    assert sequences[0]["groupSize"] == 4 and "error" not in sequences[1]
-    assert all(q["error"] == "group-history" for q in sequences[2:])
+    passing = {"honest", "omitted-tail", "omitted-removal"}
+    assert sequences[0]["groupSize"] == 4
+    assert all(("error" in q) == (q["id"] not in passing) for q in sequences)
 
     doc = {
         "format": "abolish-group-registry-vectors/1",

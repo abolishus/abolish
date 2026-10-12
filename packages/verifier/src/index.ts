@@ -23,6 +23,7 @@ export {
   type L1Evidence,
   type L1Header,
   lowestSegmentSlot,
+  MAX_SEGMENTS_READ,
   NodePool,
   type Rlp,
   RlpError,

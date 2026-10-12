@@ -194,11 +194,14 @@ export function copyCheckpoints(
     if (b.length < SEGMENT_AT + 4) break;
     fields.push(new DataView(b.buffer, b.byteOffset + SEGMENT_AT, 4).getUint32(0));
   }
-  const sizeAfter = (s: number) => {
-    const i = fields.findIndex((f) => f > s);
-    return i === -1 ? fields.length : i;
-  };
-  const sizes = new Map(segments.map((s) => [s, sizeAfter(s)]));
+  // The first entry past `s` never moves back as `s` grows, even in a copy
+  // whose segments decrease, so one pass serves every segment.
+  const sizes = new Map<number, number>();
+  let i = 0;
+  for (const s of [...segments].sort((a, b) => a - b)) {
+    while (i < fields.length && (fields[i] as number) <= s) i++;
+    sizes.set(s, i);
+  }
   // A loop, not a spread: the segment count grows with the election's length.
   let extent = 0;
   for (const size of sizes.values()) extent = Math.max(extent, size);

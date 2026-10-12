@@ -335,6 +335,12 @@ def main():
             closed, NOBODY, 0, {"error": {"code": "l1-anchor-absent"}},
         )
         vectors.append(v)
+        v, _, _ = case(
+            "anchor-without-code",
+            "The anchor's address is an account with no code (the deployer's): read as absent",
+            closed, DEPLOYER, 0, {"error": {"code": "l1-anchor-absent"}},
+        )
+        vectors.append(v)
     finally:
         anvil.terminate()
         anvil.wait()

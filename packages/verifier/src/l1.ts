@@ -128,6 +128,7 @@ export type L1ErrorCode =
   | "l1-proof-missing"
   | "l1-proof-malformed"
   | "l1-anchor-absent"
+  | "l1-range-too-long"
   | "l1-checkpoint-unknown";
 
 export class L1Error extends Error {
@@ -143,6 +144,15 @@ export class L1Error extends Error {
 }
 
 const EMPTY_TRIE = keccak_256(Uint8Array.of(0x80));
+const NO_CODE = keccak_256(new Uint8Array());
+
+/**
+ * The most segment words one run reads: about 120 years of hourly periods.
+ * Until the clock and `f` are pinned they come from the bundle, so without a
+ * bound a bundle of a few hundred bytes could keep a verifier proving empty
+ * slots for hours.
+ */
+export const MAX_SEGMENTS_READ = 1_048_576;
 
 const equal = (a: Uint8Array, b: Uint8Array) =>
   a.length === b.length && a.every((x, i) => x === b[i]);
@@ -300,7 +310,10 @@ function storageRoot(l1: L1Evidence): Uint8Array {
     if (!a.list || a.items.length !== 4) throw new RlpError("an account is 4 fields");
     rlpUint(a.items[0], 8);
     rlpUint(a.items[1], 32);
-    rlpBytes32(a.items[3]);
+    // An account without code (an EOA, say) can't be the anchor: read it as
+    // absent, so a wrong address is unverifiable, never every segment
+    // unanchored.
+    if (equal(rlpBytes32(a.items[3]), NO_CODE)) throw new L1Error("l1-anchor-absent");
     return rlpBytes32(a.items[2]);
   } catch (e) {
     if (e instanceof RlpError) throw new L1Error("l1-proof-malformed");
@@ -341,6 +354,7 @@ export function anchorsFromState(
   let first = lowestPlusOne - 1n;
   if (first < BigInt(l1.firstSegment)) first = BigInt(l1.firstSegment);
   if (first > last) return [];
+  if (last - first + 1n > BigInt(MAX_SEGMENTS_READ)) throw new L1Error("l1-range-too-long");
   const words: [number, Uint8Array][] = [];
   // A loop over segments, at most the election's length in periods.
   for (let s = Number(first); s <= Number(last); s++) {

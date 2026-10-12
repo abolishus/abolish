@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vite-plus/test";
 import {
   BUNDLE_FORMAT_L1,
+  MAX_SEGMENTS_READ,
   type CheckResult,
   parseBundle,
   type Report,
@@ -87,7 +88,7 @@ const row = (r: Report, id: string) => r.checks.find((c) => c.id === id) as Chec
 
 test("the file is the L1-anchor vector format", () => {
   expect(file.format).toBe("abolish-l1-anchor-vectors/1");
-  expect(file.vectors.length).toBe(11);
+  expect(file.vectors.length).toBe(12);
   expect(new Set(file.vectors.map((v) => v.id)).size).toBe(file.vectors.length);
 });
 
@@ -171,4 +172,34 @@ test("extra nodes and repeated nodes change nothing", () => {
   const other = file.vectors.find((x) => x.id === "running") as Vector;
   const r = run({ ...v, nodes: [...other.nodes, ...v.nodes, ...v.nodes] });
   expect(r).toEqual(run(v));
+});
+
+test("a clock and f that would read more than 2^20 words stop before reading them", () => {
+  const v = file.vectors.find((x) => x.id === "closed") as Vector;
+  const bundle = (lastSegment: number) =>
+    parseBundle(
+      JSON.stringify({
+        format: BUNDLE_FORMAT_L1,
+        electionId: file.electionId,
+        boardEntryVersion: 1,
+        clock: { epoch: "0", period: "1", deadline: "0", lastSegment: `${lastSegment}` },
+        l1: {
+          anchor: v.anchor,
+          firstSegment: "0",
+          header: v.block.header,
+          nodes: v.nodes,
+          checkpoints: [],
+        },
+      }),
+      board(v),
+    );
+  // Segments 0 to 2^20 - 1 are read (every word but segment 0's is absent
+  // under this clock); one more is refused.
+  expect(row(verifyBundle(bundle(MAX_SEGMENTS_READ - 1)), "4.2").code).not.toBe(
+    "l1-range-too-long",
+  );
+  expect(row(verifyBundle(bundle(MAX_SEGMENTS_READ)), "4.2")).toMatchObject({
+    status: "unverifiable",
+    code: "l1-range-too-long",
+  });
 });

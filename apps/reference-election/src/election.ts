@@ -21,6 +21,7 @@ import {
   encodeCeremonyTranscript,
   identityKey,
   keysMessage,
+  membershipVkHash,
   newDisplayTextSalt,
   type Panel,
   panelId,
@@ -42,8 +43,6 @@ export const STUBS = Object.freeze({
     "the election, trustee and group registries and the L2 board are placeholder addresses: nothing is registered on L2 (P1-18 deploys them; verifier 2.1, 2.4 and 3.1 read them)",
   electorate:
     "one Tier 0 group with a placeholder root and size: no registration or membership yet (stage 2, P3-2)",
-  membershipKey:
-    "membership_vk_hash is a placeholder: no ballot is cast, so no membership proof is checked (P1-17b, stage 4)",
   panel:
     "the panel's identity keys are fresh random keys, given to the verifier as a local file: no release pins a panel yet ([[0006-trustees]], P1-7)",
   anchorAuthority:
@@ -153,7 +152,8 @@ export function runCeremony(
     min_selections: 0,
     max_selections: 1,
     electorate: [{ tier: 0, group_id: 1n, root: 1n, root_l2_block: 1n, group_size: 1n }],
-    membership_vk_hash: label("membership-vk"),
+    // The pinned key, which verifier 1.3 requires; no ballot is cast yet (stage 4).
+    membership_vk_hash: membershipVkHash(),
     panel_id: panelId(panel),
     threshold: panel.threshold,
     panel_size: panel.keys.length,

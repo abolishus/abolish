@@ -36,7 +36,7 @@ export {
   type BallotCore,
   ballotCore,
   ballotCoreHash,
-  sharesVoteCommitment,
+  opensBallotCommitment,
   type ChallengeOpeningCheck,
   type ChallengeOpeningCode,
   checkChallengeOpening,

@@ -1758,7 +1758,7 @@
       "offset": 0
     }
   ],
-  "sharedCommitment": [
+  "openedCommitments": [
     {
       "id": "fresh-share-hashes",
       "description": "The plurality opening's commitments encrypted again with fresh randomness: another code",
@@ -1774,7 +1774,7 @@
         ]
       },
       "coreHash": "3031cd290adf810f1aff44d01666059b0779340801f358aa1f28dfff4a5ee592",
-      "shared": true
+      "opened": true
     },
     {
       "id": "other-tier",
@@ -1791,7 +1791,7 @@
         ]
       },
       "coreHash": "3ca775d20aaaa39d4a61bd8a8e5014086d5154a129074ad530d58b22a4e34545",
-      "shared": true
+      "opened": true
     },
     {
       "id": "same-core",
@@ -1808,7 +1808,7 @@
         ]
       },
       "coreHash": "fe3d99ada2284162958cdfaaba047976bb86f9b0d016a5ad35d57d6139641d4c",
-      "shared": true
+      "opened": true
     },
     {
       "id": "reblinded",
@@ -1825,7 +1825,7 @@
         ]
       },
       "coreHash": "e9795f725243174ee7a8f15238d815432f73470fb300b74afecf989e3d64fe08",
-      "shared": true
+      "opened": true
     },
     {
       "id": "moved-option",
@@ -1842,7 +1842,41 @@
         ]
       },
       "coreHash": "1ba7d70e93477c2e9847db40ea1984b183367076c580c474439b38936fe01c27",
-      "shared": true
+      "opened": true
+    },
+    {
+      "id": "same-randomness-other-vote",
+      "description": "Option 0's r_0 under the other vote (1 − v_0), every other commitment fresh: opened by testing C' · h^{−r_0}",
+      "opening": "plurality",
+      "core": {
+        "definitionHash": "27819ab7e3df03fcbe05d509bd2487d7f48a412a98d991e84705112e94316105",
+        "tier": 0,
+        "vss": "0000000300000002a02173526e8af7885d29c637ec9dbdfb388234327c39a2d88b78280baddc846d3add988bd87c773ac400a4aa362771d507af7277c354788efa8ae9eed234987b0000000222c3d4a5abd8267459fb97f0fe7970f2514dac995059c9a5b9e9cdb2caa5f03d0eba6a291251f1c400bade9afe88f4b6a103ebf80fec28c070207556fc5dd12900000002624f998afd274127c6cc57c60a91c90edafae6c75997f7ad5957ba4286cd8c48c0b4d78988514e13bfa0b8ec3715bb9d7eeb27aa31a254b9de959f016eb67029",
+        "shareHashes": [
+          "3e6a8c4174b3a2a1a40f2b64b519d8c0aacedebac615480ef04567828b635fe6",
+          "7284af118d69e8f1d9b17489453fcfc18994b7fa37739726b8a32a266dfe79bc",
+          "4a785f866219a6e96079eb71eaf5a1486ac2e1ca139a0589297fc127c7a0e6b4"
+        ]
+      },
+      "coreHash": "8b90c4f7f3978bbf4fb98859fecdb010faa925b1ef7d3713a88ca49fbc4fc0b0",
+      "opened": true
+    },
+    {
+      "id": "shifted-randomness",
+      "description": "Option 0 under r_0 + 1, every other commitment fresh: derived by a chosen relation, not caught (a residual)",
+      "opening": "plurality",
+      "core": {
+        "definitionHash": "27819ab7e3df03fcbe05d509bd2487d7f48a412a98d991e84705112e94316105",
+        "tier": 0,
+        "vss": "000000030000000254d21d547b5359f69515431507416ee9325e2a9af5b9fec608eb71c57d6c8d33e44ee904f5af7f156c63a04cd6482c8631dbe5df4b7529912879a3a26d4e8e5300000002b492614f3530b27ecaca26e7fbf9d821b8de80006dc8afac4203457db5127051044116d3848be5446ce3fcbf29aa26bc2d919e51cd1d6ee2ad821bdb6dd0900900000002469f0ec7e37a2b1625f0a4392a2735c62d2322233fd47158527e1c6fad41da68faaf6d54ed141771594b4c49ba726fd429e0617163bc3ea1d3a0fcb423d63e4b",
+        "shareHashes": [
+          "e3020e01ea286bfe293b7615ebb1c25cd3cf73993fe236fe102f5b4522defb3e",
+          "08f0efcb834f597cbe76a69eec3252e5958faceab8f622e8dbe479d2625576eb",
+          "79f68b9424310d196489ff6dc200ca4ac89391144610a9c3eb8e04df40979021"
+        ]
+      },
+      "coreHash": "7f820c012af8be82ec6f1834a0458fc5171d41037eacedf5b39c9ef4143e10b6",
+      "opened": false
     },
     {
       "id": "fresh-randomness",
@@ -1859,7 +1893,7 @@
         ]
       },
       "coreHash": "29636cbb33bcaa5b8e5875e4bd6199511aa43eefd977823e8aa33b8c1f4b1adf",
-      "shared": false
+      "opened": false
     },
     {
       "id": "other-vote",
@@ -1876,7 +1910,7 @@
         ]
       },
       "coreHash": "c24e2c8a246592b55051fcb0faa7e7ad28ac9c5ad559e3e4ec4cf6e2186d32c0",
-      "shared": false
+      "opened": false
     },
     {
       "id": "other-election",
@@ -1893,7 +1927,7 @@
         ]
       },
       "coreHash": "759f9244f4bd347bc4fafb60f5439d0b046a27722a456dc297ef196bc79ed839",
-      "shared": false
+      "opened": false
     }
   ],
   "castBallots": [

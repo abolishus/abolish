@@ -244,7 +244,7 @@ The proofs are randomised: regenerating gives other proof bytes for the same sta
 - `elections`: by name, each `definition` (an election definition, hex), `definitionHash`, `panel` and `registered` (the seats of the registered key set; the other seats are outside it).
 - `openings`: each has `id`, `description`, `election` (the one it is checked against), `encoding` (hex), `coreHash` (hex) and `result`: `"ok"`, with `votes` (each `v_j`, decimal) and `withinRules` (`false` is `opening-vote-outside`), or the first failing check, with `option` for `opening-vss` and `seat` for `opening-ciphertext`. An opening an honest client made also has `randomness`: `polynomials` (each option's `f` and `g`, decimal) and `encapsulation` (every seat's `m` (hex), `e` and `w` (decimal), registered or not, as the client's encryption draws them), from which `openChallenge` re-makes `encoding`.
 - `decode`: rejected encodings, as in the ballot vectors.
-- `sharedCommitment`: each has `id`, `description`, `opening` (the `id` of an opening in this file), `core` (`definitionHash`, `tier`, `vss` as its encoding and `shareHashes`, hex), its `coreHash`, and `shared`: whether that core shares a vote commitment with the opening ([[challenge]], Shared commitments).
+- `openedCommitments`: each has `id`, `description`, `opening` (the `id` of an opening in this file), `core` (`definitionHash`, `tier`, `vss` as its encoding and `shareHashes`, hex), its `coreHash`, and `opened`: whether the opening opens a commitment of that core ([[challenge]], Opened commitments).
 - `castBallots`: `ballot` (the `id` of an admitted ballot in `ballot.json`) and its `coreHash`.
 
 ## Ballot vectors

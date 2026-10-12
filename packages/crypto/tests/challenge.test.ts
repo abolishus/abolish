@@ -8,7 +8,7 @@ import {
   type BallotElection,
   ballotCore,
   ballotCoreHash,
-  sharesVoteCommitment,
+  opensBallotCommitment,
   ballotElection,
   type ChallengeOpeningCheck,
   checkChallengeOpening,
@@ -96,7 +96,7 @@ interface Vectors {
     readonly error: string;
     readonly offset?: number;
   }[];
-  readonly sharedCommitment: readonly {
+  readonly openedCommitments: readonly {
     readonly id: string;
     readonly opening: string;
     readonly core: {
@@ -106,7 +106,7 @@ interface Vectors {
       readonly shareHashes: readonly string[];
     };
     readonly coreHash: string;
-    readonly shared: boolean;
+    readonly opened: boolean;
   }[];
   readonly castBallots: readonly { readonly ballot: string; readonly coreHash: string }[];
 }
@@ -223,8 +223,8 @@ describe("challenge.json", () => {
     if (d.offset !== undefined) expect((error as DecodeError).offset).toBe(d.offset);
   });
 
-  test.each(vectors.sharedCommitment.map((c) => [c.id, c] as const))(
-    "shared commitments: %s",
+  test.each(vectors.openedCommitments.map((c) => [c.id, c] as const))(
+    "opened commitments: %s",
     (_, c) => {
       const o = vectors.openings.find((x) => x.id === c.opening);
       if (o === undefined) throw new Error(`no opening ${c.opening}`);
@@ -236,9 +236,7 @@ describe("challenge.json", () => {
         shareHashes: c.core.shareHashes.map(hex),
       };
       expect(toHex(coreHash(core))).toBe(c.coreHash);
-      const opened = { definitionHash: opening.definition_hash, vss: opening.vss };
-      expect(sharesVoteCommitment(opened, core)).toBe(c.shared);
-      expect(sharesVoteCommitment(core, opened)).toBe(c.shared);
+      expect(opensBallotCommitment(opening, core)).toBe(c.opened);
     },
   );
 

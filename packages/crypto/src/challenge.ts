@@ -35,7 +35,7 @@ import { ds } from "./domain-separation.ts";
 import { TIERS } from "./election-definition.ts";
 import {
   type Element,
-  element,
+  elementOrIdentity,
   G,
   GENERATOR_H,
   GROUP_ORDER,
@@ -151,6 +151,8 @@ export function openingCoreHash(opening: SpoiledBallotOpening): Uint8Array {
 
 const ZERO_HASH = new Uint8Array(32);
 
+const toHex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+
 const equalBytes = (a: Uint8Array, b: Uint8Array) =>
   a.length === b.length && a.every((x, i) => x === b[i]);
 
@@ -222,28 +224,40 @@ export function trackingCode(
 }
 
 /**
- * Whether two cores share a vote commitment: the same definition hash, and
- * some `C_j = E_{j,0}` of one equal to some `C_{j'}` of the other, at any
- * options (docs/spec/challenge.md, Shared commitments). An opening gives
- * `v_j` and `r_j`, which open `C_j` wherever it is cast: under fresh share
- * hashes, another tier, re-blinded higher coefficients or another option. So
- * `opening-cast` and the checker's warning compare this, never tracking
- * codes or whole VSS lists (T-45, T-47).
+ * Whether a published opening would open a commitment of `ballot`
+ * (docs/spec/challenge.md, Opened commitments): the same definition hash,
+ * and some ballot commitment `C_{j'}`, at any option, equal to an opened
+ * `C_j`, to `h^{r_j}` or to `g · h^{r_j}`. An opening gives `v_j` and `r_j`,
+ * which open `C_j` wherever it is cast (under fresh share hashes, another
+ * tier, re-blinded higher coefficients or another option) and any
+ * commitment to 0 or 1 under the same `r_j`. So `opening-cast` and the
+ * checker's warning compare this, never tracking codes or whole VSS lists
+ * (T-45, T-47). A commitment derived from an opened one by a chosen
+ * relation isn't caught: a residual.
  */
-export function sharesVoteCommitment(
-  a: Pick<BallotCore, "definitionHash" | "vss">,
-  b: Pick<BallotCore, "definitionHash" | "vss">,
+export function opensBallotCommitment(
+  opening: SpoiledBallotOpening,
+  ballot: Pick<BallotCore, "definitionHash" | "vss">,
 ): boolean {
-  if (!equalBytes(a.definitionHash, b.definitionHash)) return false;
+  if (!equalBytes(opening.definition_hash, ballot.definitionHash)) return false;
   // Encoded, so an element is compared by its one canonical encoding.
-  const constants = (vss: BallotCore["vss"]) =>
-    vss.map((row) => {
-      const c = row[0];
-      if (c === undefined) throw new RangeError("vss: an option without commitments");
-      return encode(element, c);
-    });
-  const theirs = constants(b.vss);
-  return constants(a.vss).some((c) => theirs.some((d) => equalBytes(c, d)));
+  const enc = (e: Element) => toHex(encode(elementOrIdentity, e));
+  const opened = new Set<string>();
+  opening.vss.forEach((row, j) => {
+    const c = row[0];
+    if (c === undefined) throw new RangeError("vss: an option without commitments");
+    opened.add(enc(c));
+    const r = opening.polynomials[j]?.g[0];
+    if (r === undefined) return;
+    const hr = mul(GENERATOR_H, r);
+    opened.add(enc(hr));
+    opened.add(enc(hr.add(G)));
+  });
+  return ballot.vss.some((row) => {
+    const c = row[0];
+    if (c === undefined) throw new RangeError("vss: an option without commitments");
+    return opened.has(enc(c));
+  });
 }
 
 /**
@@ -326,7 +340,7 @@ function evaluate(coefficients: readonly bigint[], x: bigint): bigint {
  * result. A passing opening gives its tracking code and the vote it opens to,
  * whatever that vote is (`withinRules` false is `opening-vote-outside`).
  * Whether its vote was cast, and where it was boarded, are the board's checks
- * (`sharesVoteCommitment`). It takes a record `decodeOpening` returned: a
+ * (`opensBallotCommitment`). It takes a record `decodeOpening` returned: a
  * hand-built one with a coefficient at or above ℓ, say, throws instead.
  */
 export function checkChallengeOpening(

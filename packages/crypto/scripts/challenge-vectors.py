@@ -447,11 +447,11 @@ def main():
     def core_json(c):
         return {"definitionHash": hexs(c["definitionHash"]), "tier": c["tier"], "vss": hexs(bv.enc_vss(c["vss"])), "shareHashes": [hexs(h) for h in c["shareHashes"]]}
 
-    # Shared vote commitments under other tracking codes (challenge.md,
-    # Shared commitments): the opened core's C_j re-used with fresh share
-    # hashes, another tier, re-blinded higher coefficients or at another
-    # option share a commitment; fresh r_j for the same vote, another vote or
-    # another election's hash don't.
+    # Opened commitments under other tracking codes (challenge.md, Opened
+    # commitments): the opened core's C_j re-used with fresh share hashes,
+    # another tier, re-blinded higher coefficients or at another option, or
+    # an opened r_j under the other vote, are opened; fresh r_j for the same
+    # vote, another vote, a shifted r_j or another election's hash aren't.
     def encrypt_all(label, polys, vss):
         r = bv.Rng("re-encrypted/" + label)
         hashes = []
@@ -476,6 +476,10 @@ def main():
         return out
 
     bp = base["polynomials"]
+    flip = reblinded("flip", bp, lambda j: False)
+    flipped = [{"f": [(1 - bp[0]["f"][0]) % L] + flip[0]["f"][1:], "g": [bp[0]["g"][0]] + flip[0]["g"][1:]}] + flip[1:]
+    shift = reblinded("shift", bp, lambda j: False)
+    shifted = [{"f": [bp[0]["f"][0]] + shift[0]["f"][1:], "g": [(bp[0]["g"][0] + 1) % L] + shift[0]["g"][1:]}] + shift[1:]
     moved = reblinded("moved", [bp[1], bp[0], bp[2]], lambda j: j == 0)
     cases = (
         ("fresh-share-hashes", "The plurality opening's commitments encrypted again with fresh randomness: another code", core_from("fresh", bp), True),
@@ -483,20 +487,27 @@ def main():
         ("same-core", "The opened core itself", base, True),
         ("reblinded", "The same v_j and r_j with every higher coefficient fresh: new E_{j,t} for t ≥ 1, new shares and share hashes, the same C_j", core_from("reblinded", reblinded("all", bp, lambda j: True)), True),
         ("moved-option", "Option 1's C_j cast at option 0 (with option 0's vote there), every other commitment fresh", core_from("moved", moved), True),
+        ("same-randomness-other-vote", "Option 0's r_0 under the other vote (1 − v_0), every other commitment fresh: opened by testing C' · h^{−r_0}", core_from("flip", flipped), True),
+        ("shifted-randomness", "Option 0 under r_0 + 1, every other commitment fresh: derived by a chosen relation, not caught (a residual)", core_from("shift", shifted), False),
         ("fresh-randomness", "The same votes with a fresh r_j for every option: no commitment in common", core_from("fresh-r", reblinded("none", bp, lambda j: False)), False),
         ("other-vote", "The blank opening's core", honest["plurality-blank"], False),
         ("other-election", "The same commitments named under the approval election's definition hash (an opened C_j cast in another election is a residual, challenge.md)", {**base, "definitionHash": approval["definitionHash"]}, False),
     )
-    shared_commitment = []
+    opened_commitments = []
     base_code = core_hash(base["definitionHash"], base["tier"], base["vss"], base["shareHashes"])
     for id_, desc, c, want in cases:
-        constants = [grp.encode(row[0]) for row in base["vss"]]
-        shared = c["definitionHash"] == base["definitionHash"] and any(grp.encode(row[0]) in constants for row in c["vss"])
+        # What the opening opens: each C_j, and h^{r_j} and g · h^{r_j}.
+        opened_set = set()
+        for row, p in zip(base["vss"], bp):
+            opened_set.add(grp.encode(row[0]))
+            opened_set.add(grp.encode(bv.pedersen(0, p["g"][0])))
+            opened_set.add(grp.encode(bv.pedersen(1, p["g"][0])))
+        shared = c["definitionHash"] == base["definitionHash"] and any(grp.encode(row[0]) in opened_set for row in c["vss"])
         assert shared == want, id_
         code = core_hash(c["definitionHash"], c["tier"], c["vss"], c["shareHashes"])
         assert (code == base_code) == (id_ == "same-core"), id_
         assert (bv.enc_vss(c["vss"]) == bv.enc_vss(base["vss"])) == (id_ in ("fresh-share-hashes", "other-tier", "same-core", "other-election")), id_
-        shared_commitment.append({"id": id_, "description": desc, "opening": "plurality", "core": core_json(c), "coreHash": hexs(code), "shared": shared})
+        opened_commitments.append({"id": id_, "description": desc, "opening": "plurality", "core": core_json(c), "coreHash": hexs(code), "opened": shared})
 
     # Cast ballots' core hashes, from the frozen ballot.json.
     ballots = json.loads((VECTORS / "ballot.json").read_text())
@@ -529,7 +540,7 @@ def main():
         },
         "openings": openings,
         "decode": decode,
-        "sharedCommitment": shared_commitment,
+        "openedCommitments": opened_commitments,
         "castBallots": cast,
     }
     (pathlib.Path(out_dir) / "challenge.json").write_text(json.dumps(out, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

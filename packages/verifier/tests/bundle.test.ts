@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { describe, expect, test } from "vite-plus/test";
 import {
   BUNDLE_FORMAT,
+  BUNDLE_FORMAT_DEFINITION,
   BUNDLE_FORMAT_L1,
   BundleError,
   type LocalBundle,
@@ -417,4 +418,54 @@ describe("parseBundle, format 2", () => {
       ),
     );
   });
+});
+
+// Format 3: format 2 with the election identifier, version and anchor
+// address replaced by the definition. Its bytes are held, not decoded, here.
+const validDefinition = () => {
+  const { electionId: _e, boardEntryVersion: _v, ...rest } = validL1();
+  const { anchor: _a, ...l1 } = rest.l1;
+  return { ...rest, format: "abolish-verifier-bundle/3", definition: "0001", l1 };
+};
+
+describe("parseBundle, format 3", () => {
+  test("reads a valid bundle, holding the definition as bytes", () => {
+    const b = parseL1(validDefinition());
+    if (b.format !== BUNDLE_FORMAT_DEFINITION) throw new Error("expected format 3");
+    expect(toHex(b.definition)).toBe("0001");
+    expect("anchor" in b.l1).toBe(false);
+    expect(b.l1.firstSegment).toBe(0);
+    expect(b.sources).toEqual({
+      electionId: "definition",
+      boardEntryVersion: "definition",
+      clock: "local-file",
+      now: "l1-state-proof",
+      anchors: "l1-state-proof",
+      l1Header: "local-file",
+      anchorAddress: "definition",
+      firstSegment: "local-file",
+      definition: "local-file",
+    });
+  });
+
+  type Shape = ReturnType<typeof validDefinition>;
+  const rejected: [string, (o: Shape) => unknown][] = [
+    // The definition is the only source of these: a second one could disagree.
+    ["an election identifier", (o) => ({ ...o, electionId: l1File.electionId })],
+    ["a board-entry version", (o) => ({ ...o, boardEntryVersion: 1 })],
+    ["an anchor address", (o) => ({ ...o, l1: { ...o.l1, anchor: closed.anchor } })],
+    ["now and anchors", (o) => ({ ...o, now: "0", anchors: [] })],
+    ["a missing definition", ({ definition: _d, ...o }) => o],
+    ["an empty definition", (o) => ({ ...o, definition: "" })],
+    ["a definition of odd length", (o) => ({ ...o, definition: "000" })],
+    ["an uppercase definition", (o) => ({ ...o, definition: "0A" })],
+    ["a definition that isn't a string", (o) => ({ ...o, definition: [0, 1] })],
+    ["a missing l1", ({ l1: _l, ...o }) => o],
+    ["a malformed header", (o) => ({ ...o, l1: { ...o.l1, header: "c0" } })],
+    ["a missing clock", ({ clock: _c, ...o }) => o],
+  ];
+  for (const [what, mutate] of rejected)
+    test(`rejects ${what}`, () => {
+      expect(() => parseL1(mutate(validDefinition()))).toThrow(BundleError);
+    });
 });

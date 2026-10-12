@@ -2,7 +2,7 @@
 
 The independent verifier for [Abolish](https://github.com/abolishus/abolish) elections: downloads the public bulletin board and recomputes and checks the whole election without trusting our servers.
 
-**Status: early.** It reads a local bundle, can read an election's anchors from the board anchor's L1 state, and runs the board checks (4.1 and 4.2 of [`docs/spec/verifier.md`](../../docs/spec/verifier.md)). Every other check is reported unverifiable, so no run reports an election verified yet. Prereleases are published as `next`, signed and with provenance (see the repository README, "Releases").
+**Status: early.** It reads a local bundle, can read an election's anchors from the board anchor's L1 state, can check an election definition's decoding and well-formedness, and runs the board checks (4.1 and 4.2 of [`docs/spec/verifier.md`](../../docs/spec/verifier.md)). Every other check is reported unverifiable, so no run reports an election verified yet. Prereleases are published as `next`, signed and with provenance (see the repository README, "Releases").
 
 ## Use
 
@@ -12,9 +12,9 @@ import { readBundle, verifyBundle } from "@abolishus/verifier";
 const report = verifyBundle(readBundle("path/to/bundle"));
 ```
 
-A bundle is a directory with `board.bin` (the board copy: its encoded entries in index order) and `bundle.json` (the election identifier, the pinned board-entry version, the anchoring clock, and either `now` and every anchor for the election (format 1) or the L1 evidence they are read from (format 2): an L1 block header, the `eth_getProof` trie nodes of the board anchor's slots, and any checkpoints no copy matches). Their exact format, the procedure and the JSON report are under "Inputs, procedure and report" in `docs/spec/verifier.md`.
+A bundle is a directory with `board.bin` (the board copy: its encoded entries in index order) and `bundle.json` (the election identifier, the pinned board-entry version, the anchoring clock, and either `now` and every anchor for the election (format 1) or the L1 evidence they are read from (format 2): an L1 block header, the `eth_getProof` trie nodes of the board anchor's slots, and any checkpoints no copy matches). Format 3 gives the election definition instead of the election identifier, the version and the anchor's address, and takes all three from it; decoding it and its well-formedness are reported under 2.1, and the report gives its hash, to compare with the one the L2 election registry holds. Their exact format, the procedure and the JSON report are under "Inputs, procedure and report" in `docs/spec/verifier.md`.
 
-- **Inputs from a local file authenticate nothing.** Anchors and `now` read from L1 state are only as authentic as the header, the anchor's address and the first segment they are proven from, which are still local files; until those and the clock come from trusted sources, the report's `verdict` is always `unverifiable`. The report names the L1 block (`l1.blockHash`), so it can be compared with a node you trust. `verdictAgainstInputs` says what the checks found against the bundle's inputs. A crafted bundle can neither verify nor fail an election (T-53, T-24).
+- **Inputs from a local file authenticate nothing.** Anchors and `now` read from L1 state are only as authentic as the header, the anchor's address and the first segment they are proven from, which are still local files, and so is the definition; until those and the clock come from trusted sources, the report's `verdict` is always `unverifiable`. The report names the L1 block (`l1.blockHash`), so it can be compared with a node you trust. `verdictAgainstInputs` says what the checks found against the bundle's inputs. A crafted bundle can neither verify nor fail an election (T-53, T-24).
 - **A bad copy is never the election's failure.** A short or altered copy (`checkpoint-missing`, `copy-mismatch`) is unverifiable from that source, and bytes past the anchored extent change nothing (T-53).
 - **Malformed bundles are rejected whole** (`BundleError`), before any check runs.
 

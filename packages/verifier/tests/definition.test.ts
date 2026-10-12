@@ -1,0 +1,299 @@
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  decodeElectionDefinition,
+  type ElectionDefinition,
+  encodeElectionDefinition,
+  RECORD_TYPES,
+} from "@abolishus/crypto";
+import { describe, expect, test } from "vite-plus/test";
+import {
+  BUNDLE_FORMAT_DEFINITION,
+  BUNDLE_FORMAT_L1,
+  type CheckResult,
+  EXIT_CODES,
+  parseBundle,
+  type Report,
+  runCli,
+  verifyBundle,
+} from "../src/index.ts";
+
+// Format-3 bundles: the election identifier, the pinned board-entry version
+// and the anchor's address come from the election definition
+// (docs/spec/verifier.md, Definition). Fixtures: the definitions of
+// docs/spec/vectors/election-definition.json (packages/crypto/scripts/
+// definition-vectors.py, with each one's expected decode error, rule and
+// hash), and the L1 evidence and boards of l1-anchor.json and board.json.
+
+const VECTORS = new URL("../../../docs/spec/vectors/", import.meta.url);
+const read = (name: string) => JSON.parse(readFileSync(new URL(name, VECTORS), "utf8")) as unknown;
+
+interface DefinitionVector {
+  readonly id: string;
+  readonly encoding: string;
+  readonly error?: string;
+  readonly illFormed?: string;
+  readonly hash?: string;
+}
+
+interface L1Vector {
+  readonly id: string;
+  readonly anchor: string;
+  readonly firstSegment: string;
+  readonly block: { readonly header: string };
+  readonly nodes: readonly string[];
+  readonly checkpoints: readonly string[];
+  readonly copy: string;
+  readonly copyEntries?: string;
+}
+
+const definitions = (read("election-definition.json") as { vectors: DefinitionVector[] }).vectors;
+const l1File = read("l1-anchor.json") as {
+  readonly clock: Readonly<Record<string, string>>;
+  readonly electionId: string;
+  readonly vectors: readonly L1Vector[];
+};
+const boards = (read("board.json") as { boards: { id: string; entries: string[] }[] }).boards;
+
+const hex = (s: string) => Uint8Array.from(Buffer.from(s, "hex"));
+const toHex = (b: Uint8Array) => Buffer.from(b).toString("hex");
+
+function copyOf(v: L1Vector): Uint8Array {
+  const copy = boards.find((b) => b.id === v.copy);
+  if (copy === undefined) throw new Error(`no board ${v.copy}`);
+  const n = v.copyEntries === undefined ? undefined : Number(v.copyEntries);
+  return hex(copy.entries.slice(0, n).join(""));
+}
+
+const l1Of = (v: L1Vector) => ({
+  firstSegment: v.firstSegment,
+  header: v.block.header,
+  nodes: v.nodes,
+  checkpoints: v.checkpoints,
+});
+
+function format3(definition: string, v: L1Vector): Report {
+  const json = JSON.stringify({
+    format: BUNDLE_FORMAT_DEFINITION,
+    definition,
+    clock: l1File.clock,
+    l1: l1Of(v),
+  });
+  return verifyBundle(parseBundle(json, copyOf(v)));
+}
+
+function format2(v: L1Vector): Report {
+  const json = JSON.stringify({
+    format: BUNDLE_FORMAT_L1,
+    electionId: l1File.electionId,
+    boardEntryVersion: 1,
+    clock: l1File.clock,
+    l1: { anchor: v.anchor, ...l1Of(v) },
+  });
+  return verifyBundle(parseBundle(json, copyOf(v)));
+}
+
+const vector = (id: string) => {
+  const d = definitions.find((x) => x.id === id);
+  if (d === undefined) throw new Error(`no definition ${id}`);
+  return d;
+};
+const closed = l1File.vectors.find((v) => v.id === "closed") as L1Vector;
+const typical = decodeElectionDefinition(hex(vector("definition-typical").encoding));
+
+/** The typical definition, for the L1 vectors' election and anchor. */
+const forElection = (anchor: string, change: Partial<ElectionDefinition> = {}) =>
+  toHex(
+    encodeElectionDefinition({
+      ...typical,
+      election_id: hex(l1File.electionId),
+      l1_anchor: hex(anchor),
+      ...change,
+    }),
+  );
+
+const row = (r: Report, id: string) => r.checks.find((c) => c.id === id) as CheckResult;
+const notReached = (r: Report) => {
+  expect(row(r, "4.1")).toMatchObject({ status: "unverifiable", code: "not-reached" });
+  expect(row(r, "4.2")).toMatchObject({ status: "unverifiable", code: "not-reached" });
+};
+
+test("the fixtures cover undecodable, ill-formed and well-formed definitions", () => {
+  expect(definitions.some((d) => d.error !== undefined)).toBe(true);
+  // Both kinds of unknown version: 0, never valid, and a later one.
+  const versions = definitions
+    .filter((d) => d.error === "unknown-version")
+    .map((d) => hex(d.encoding)[2]);
+  expect(versions).toContain(0);
+  expect(versions.some((v) => v !== 0)).toBe(true);
+  expect(definitions.some((d) => d.illFormed !== undefined)).toBe(true);
+  expect(definitions.some((d) => d.error === undefined && d.illFormed === undefined)).toBe(true);
+});
+
+describe("2.1: the definition decodes strictly and is well formed", () => {
+  // An empty definition is rejected with the bundle: bundle hex is never
+  // empty (bundle.test.ts).
+  for (const d of definitions.filter((x) => x.encoding !== ""))
+    test(d.id, () => {
+      const r = format3(d.encoding, closed);
+      // The definition is a local file: whatever it is, nothing can verify
+      // or fail the election through it (T-53).
+      expect(r.verdict).toBe("unverifiable");
+      expect(r.inputs.definition).toBe("local-file");
+      if (d.error === "unknown-version" && hex(d.encoding)[2] !== 0) {
+        // A version a later release may read: unverifiable, never failed.
+        expect(row(r, "2.3")).toEqual({
+          id: "2.3",
+          kind: "election",
+          status: "unverifiable",
+          code: "unsupported-version",
+          at: {},
+        });
+        expect(row(r, "2.1").code).toBe("not-implemented");
+        expect(r.verdictAgainstInputs).toBe("unverifiable");
+        notReached(r);
+        return;
+      }
+      if (d.error !== undefined) {
+        expect(row(r, "2.1")).toEqual({
+          id: "2.1",
+          kind: "election",
+          status: "fail",
+          code: "decode",
+          at: { decodeError: d.error },
+        });
+        expect(r.definition).toBeUndefined();
+        expect(r.verdictAgainstInputs).toBe("failed");
+        notReached(r);
+        return;
+      }
+      // The hash the registry must hold, from the independent implementation.
+      expect(r.definition).toEqual({ hash: d.hash });
+      if (d.illFormed !== undefined) {
+        expect(row(r, "2.1")).toEqual({
+          id: "2.1",
+          kind: "election",
+          status: "fail",
+          code: d.illFormed,
+          at: {},
+        });
+        expect(r.verdictAgainstInputs).toBe("failed");
+        notReached(r);
+        return;
+      }
+      // Decoding and well-formedness pass, but whether L2 registered this
+      // hash isn't checked yet, so 2.1 can't pass.
+      expect(row(r, "2.1")).toMatchObject({ status: "unverifiable", code: "not-implemented" });
+    });
+});
+
+describe("the board checks' inputs come from the definition", () => {
+  for (const v of l1File.vectors)
+    test(`${v.id}: the same checks as format 2 with the definition's fields`, () => {
+      const r3 = format3(forElection(v.anchor), v);
+      const r2 = format2(v);
+      expect(r3.checks.filter((c) => c.id !== "2.1")).toEqual(
+        r2.checks.filter((c) => c.id !== "2.1"),
+      );
+      expect(r3.board).toEqual(r2.board);
+      expect(r3.l1).toEqual(r2.l1);
+      expect(r3.verdictAgainstInputs).toBe(r2.verdictAgainstInputs);
+      expect(r3.verdict).toBe("unverifiable");
+      // Only format 3 has a definition to report.
+      expect(r2.definition).toBeUndefined();
+      expect(r3.definition).toBeDefined();
+    });
+
+  test("the election identifier is the definition's: anchors are read under it", () => {
+    const other = new Uint8Array(32).fill(7);
+    const r = format3(forElection(closed.anchor, { election_id: other }), closed);
+    // The anchor holds nothing for that election, so no entry is inside an
+    // anchored extent, and the closed election was never sealed.
+    expect(r.l1?.anchors).toEqual([]);
+    expect(row(r, "4.1").status).toBe("pass");
+    expect(row(r, "4.2")).toMatchObject({ status: "fail", code: "unsealed" });
+  });
+
+  test("the anchor is the definition's l1_anchor: another address holds no anchor", () => {
+    const others = l1File.vectors.filter((v) => v.anchor !== closed.anchor);
+    expect(others.length).toBeGreaterThan(0);
+    for (const o of others) {
+      const r = format3(forElection(o.anchor), closed);
+      expect(row(r, "4.1")).toMatchObject({ status: "unverifiable", code: "not-reached" });
+      expect(row(r, "4.2").status).toBe("unverifiable");
+      expect(["l1-anchor-absent", "l1-proof-missing"]).toContain(row(r, "4.2").code);
+    }
+  });
+
+  test("a board-entry version this verifier can't read leaves 2.3 unverifiable", () => {
+    const pins = typical.profile.pins.map((p) =>
+      p.record_type === RECORD_TYPES.boardEntry ? { ...p, version: 2 } : p,
+    );
+    const r = format3(
+      forElection(closed.anchor, { profile: { ...typical.profile, pins } }),
+      closed,
+    );
+    expect(row(r, "2.3")).toEqual({
+      id: "2.3",
+      kind: "election",
+      status: "unverifiable",
+      code: "unsupported-version",
+      at: {},
+    });
+    expect(row(r, "2.1")).toMatchObject({ status: "unverifiable", code: "not-implemented" });
+    expect(r.verdictAgainstInputs).toBe("unverifiable");
+    expect(r.definition?.hash).toMatch(/^[0-9a-f]{64}$/);
+    notReached(r);
+  });
+});
+
+describe("the report", () => {
+  test("gives the definition hash after the inputs, in the spec's member order", () => {
+    const r = format3(forElection(closed.anchor), closed);
+    expect(Object.keys(r)).toEqual([
+      "format",
+      "verdict",
+      "verdictAgainstInputs",
+      "inputs",
+      "definition",
+      "board",
+      "l1",
+      "checks",
+    ]);
+    expect(Object.keys(r.inputs)).toEqual([
+      "electionId",
+      "boardEntryVersion",
+      "clock",
+      "now",
+      "anchors",
+      "l1Header",
+      "anchorAddress",
+      "firstSegment",
+      "definition",
+    ]);
+  });
+
+  test("the summary names the definition as unauthenticated, not the fields taken from it", () => {
+    const json = JSON.stringify({
+      format: BUNDLE_FORMAT_DEFINITION,
+      definition: forElection(closed.anchor),
+      clock: l1File.clock,
+      l1: l1Of(closed),
+    });
+    const dir = mkdtempSync(join(tmpdir(), "abolish-verify-"));
+    try {
+      writeFileSync(join(dir, "bundle.json"), json);
+      writeFileSync(join(dir, "board.bin"), copyOf(closed));
+      let stderr = "";
+      const code = runCli([dir], { stdout: () => {}, stderr: (t) => (stderr += t) });
+      expect(code).toBe(EXIT_CODES.unverifiable);
+      expect(stderr.split("\n")[0]).toBe(
+        "verdict: unverifiable (unauthenticated inputs: clock, l1Header, firstSegment, definition; " +
+          "against those inputs: unverifiable)",
+      );
+    } finally {
+      rmSync(dir, { recursive: true });
+    }
+  });
+});

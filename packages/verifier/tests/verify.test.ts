@@ -12,7 +12,7 @@ import { CHECKS, parseBundle, type Report, splitEntries, verifyBundle } from "..
 // Fixtures: the boards of docs/spec/vectors/board.json, produced by the
 // independent Python implementation in packages/crypto/scripts/board-vectors.py
 // (never by the code under test), with the verdict each must reach. The
-// expected rows of 4.1 and 4.2 follow docs/spec/verifier.md, Procedure, step 3.
+// expected rows of 4.1 and 4.2 follow docs/spec/verifier.md, Procedure, step 5.
 
 interface CheckpointVector {
   readonly electionId: string;
@@ -84,7 +84,7 @@ const bundleJson = (v: BoardVector) =>
 
 const row = (r: Report, id: string) => r.checks.find((c) => c.id === id);
 
-// The rows the spec's table gives for each board-check code (Procedure, step 3).
+// The rows the spec's table gives for each board-check code (Procedure, step 5).
 const ANCHOR = ["checkpoint-equivocation", "checkpoint-size", "checkpoint-inconsistent"];
 const COPY = ["checkpoint-missing", "copy-mismatch"];
 const AFTER = ["checkpoint-boundary", "unanchored", "unsealed"];

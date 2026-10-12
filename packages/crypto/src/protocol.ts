@@ -110,8 +110,10 @@ export type ProfileCombinationRule = "profile-combination" | "unsupported-versio
  * version may add itself to the rule (T-36), but a client that must refuse
  * such an election treats any result but `undefined` as a refusal: it can't
  * cast to a board it can't read. A ballot or tally-opening type pinned twice
- * or not at all is `profile-combination` too, so a caller that skipped
- * `electionDefinitionRule` still refuses rather than casting (T-34).
+ * or not at all is `profile-combination` too, and a board-entry type pinned
+ * twice or not at all `unsupported-version`, so in those cases a caller that
+ * skipped `electionDefinitionRule` still refuses (T-34). It doesn't replace
+ * that rule: run it first.
  */
 export function profileCombinationRule(d: ElectionDefinition): ProfileCombinationRule | undefined {
   const board = pinnedVersion(d, RECORD_TYPES.boardEntry);

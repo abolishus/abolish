@@ -763,6 +763,8 @@ describe("board checks under board-entry versions 3 and 4", () => {
     expect(boardPayloadTypes(1)).toBe(BOARD_PAYLOAD_TYPES);
     expect(boardPayloadTypes(3)).toBe(BOARD_PAYLOAD_TYPES_V3);
     expect(boardPayloadTypes(4)).toBe(BOARD_PAYLOAD_TYPES_V4);
+    for (const bad of [2, 5, "constructor", "toString"])
+      expect(() => boardPayloadTypes(bad as never)).toThrow(RangeError);
   });
 
   test("a well-formed board passes under its version, with the checkpoint of every segment", () => {

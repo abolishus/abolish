@@ -76,6 +76,9 @@ const PAYLOAD_TYPES_BY_VERSION = {
  * than naming versions.
  */
 export function boardPayloadTypes(version: BoardEntryVersion): readonly number[] {
+  // An untyped caller can pass anything; own keys only, never the prototype's.
+  if (!Object.hasOwn(PAYLOAD_TYPES_BY_VERSION, version))
+    throw new RangeError(`boardPayloadTypes: no board-entry version ${String(version)}`);
   return PAYLOAD_TYPES_BY_VERSION[version];
 }
 

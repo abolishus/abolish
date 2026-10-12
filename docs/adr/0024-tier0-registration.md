@@ -3,7 +3,7 @@
 - Status: Accepted (agent) — owner may veto (2026-10-12, rule A): option B, with option D as the direct path
 - Date: 2026-10-12
 - Deciders: agent, owner may veto (rule A)
-- Threats addressed: T-01, T-06, T-10, T-11, T-13, T-16, T-18, T-20, T-25, T-46, T-52, T-67, T-69 (see [[THREAT_MODEL]])
+- Threats addressed: T-01, T-06, T-10, T-11, T-13, T-16, T-18, T-20, T-25, T-46, T-49, T-52, T-67, T-69 (see [[THREAT_MODEL]])
 
 ## Context
 

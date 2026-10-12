@@ -547,19 +547,22 @@ jobs:
       # The one place npm is called directly (AGENTS.md). Always `--tag next`;
       # never `latest`. A version already on the registry (a re-run) is skipped.
       # The plan is read on fd 3 so no command in the loop can consume it.
-      # npm runs from an empty directory with no user config, and its registry,
-      # TLS and proxy settings are pinned here, so no file from an artifact
-      # can configure it.
+      # npm runs from an empty directory with empty user and global configs
+      # (two distinct files: npm refuses to load one path as both), and its
+      # registry, TLS and proxy settings are pinned here, so no file from an
+      # artifact can configure it.
       - name: npm publish --tag next
         env:
           RELEASE: ${{ runner.temp }}/release
-          NPM_CONFIG_USERCONFIG: /dev/null
-          NPM_CONFIG_GLOBALCONFIG: /dev/null
+          NPM_CONFIG_USERCONFIG: ${{ runner.temp }}/npmrc-user-empty
+          NPM_CONFIG_GLOBALCONFIG: ${{ runner.temp }}/npmrc-global-empty
           NPM_CONFIG_REGISTRY: https://registry.npmjs.org/
           NPM_CONFIG_STRICT_SSL: "true"
           NPM_CONFIG_PROXY: ""
           NPM_CONFIG_HTTPS_PROXY: ""
         run: |
+          : >"$NPM_CONFIG_USERCONFIG"
+          : >"$NPM_CONFIG_GLOBALCONFIG"
           mkdir "$RUNNER_TEMP/npm-cwd"
           cd "$RUNNER_TEMP/npm-cwd"
           vp node "$NPM_CLI" --version

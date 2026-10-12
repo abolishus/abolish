@@ -87,3 +87,20 @@ export const PageSize = z.string().check(
   z.regex(PAGE_SIZE_PATTERN, "expected a canonical decimal page size"),
   z.refine((s) => PAGE_SIZE_PATTERN.test(s) && Number(s) <= MAX_PAGE, `exceeds ${MAX_PAGE}`),
 );
+
+/**
+ * A version-1 identity backup envelope (record `0x000a`,
+ * docs/spec/identity-backup.md) is exactly this many bytes. Every envelope
+ * and every request has the same size, so sizes say nothing about a voter
+ * (T-52). A test ties this copy to `@abolishus/core`.
+ */
+export const IDENTITY_BACKUP_ENVELOPE = 63;
+
+/** Whole months a backup outlives its last write; a test ties this copy to `@abolishus/core`. */
+export const IDENTITY_BACKUP_RETENTION_MONTHS = 24;
+
+/** A backup locator: 32 bytes the client derives from its PRF output. */
+export const IdentityBackupLocator = hexFixed(32);
+
+/** A version-1 envelope, opaque here: the server decodes it strictly with `@abolishus/crypto`. */
+export const IdentityBackupEnvelope = hexFixed(IDENTITY_BACKUP_ENVELOPE);

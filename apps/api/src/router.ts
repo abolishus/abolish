@@ -1,13 +1,17 @@
 import { contract, MAX_PAGE_BYTES } from "@abolishus/api-contract";
 import {
   BoardReadError,
+  deleteIdentityBackup,
   hasDefinition,
+  IdentityBackupStoreError,
   ModerationError,
   moderationStatus,
+  putIdentityBackup,
   readConsistencyProof,
   readDefinition,
   readEntries,
   readHead,
+  readIdentityBackup,
   readInclusionProof,
   readModerationLog,
   report,
@@ -156,6 +160,31 @@ export const router = os.router({
           throw errors.ELECTION_NOT_FOUND();
         throw e;
       });
+      return {};
+    }),
+  },
+  // Identity backups (ADR 0017, option A, step 5): the envelope is stored,
+  // served and deleted by locator, which core hashes before it reaches the
+  // table. Like every route, these see no header, cookie or address (T-10).
+  backups: {
+    put: os.backups.put.handler(async ({ input, context, errors }) => {
+      await putIdentityBackup(context.sql, fromHex(input.locator), fromHex(input.envelope)).catch(
+        (e: unknown) => {
+          if (e instanceof IdentityBackupStoreError)
+            throw errors.BACKUP_REJECTED({ data: { code: e.code } });
+          throw e;
+        },
+      );
+      return {};
+    }),
+    fetch: os.backups.fetch.handler(async ({ input, context, errors }) => {
+      const envelope = await readIdentityBackup(context.sql, fromHex(input.locator));
+      if (envelope === undefined) throw errors.BACKUP_NOT_FOUND();
+      return { envelope: toHex(envelope) };
+    }),
+    delete: os.backups.delete.handler(async ({ input, context, errors }) => {
+      if (!(await deleteIdentityBackup(context.sql, fromHex(input.locator))))
+        throw errors.BACKUP_NOT_FOUND();
       return {};
     }),
   },

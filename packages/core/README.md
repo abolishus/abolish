@@ -8,7 +8,7 @@ Postgres is not authoritative: every result is rebuilt from chain + IPFS, and a 
 
 - `src/db/roles.sql`: the two roles, created once per cluster by an administrator. `abolish_migrator` owns the schema and runs migrations. `abolish_app` is what services use at runtime. Both are `NOLOGIN` group roles: each deployment logs in as its own user, granted one of them. Services never connect as the owner.
 - `src/db/migrations/`: forward-only SQL migrations, named `NNNN_name.sql`, applied in order by `migrate(sql, schema)` as `abolish_migrator`. A ledger (`schema_migrations`) records each file's sha256, and `migrate` refuses to run if an applied file changed or is missing. Merged migrations are never edited; a fix is a new migration.
-- `src/db/schema/`: the Drizzle view of the migrated tables, and `TABLE_CLASSES`, which sorts every table into board, account or operational (`moderation_actions` and `moderation_reports` are operational).
+- `src/db/schema/`: the Drizzle view of the migrated tables, and `TABLE_CLASSES`, which sorts every table into board, account or operational (`identity_backups`, `moderation_actions` and `moderation_reports` are operational).
 
 Migrations are written by hand rather than generated: `drizzle-kit` would bring a bundler toolchain (esbuild, tsx) into the dependency tree for SQL that has to be read line by line anyway. A test checks that the Drizzle tables match the migrated ones.
 
@@ -72,6 +72,16 @@ Reports of polls to the moderators: one row per election and removal ground, `el
 - `reviewReports(sql, electionId, reason, seenTotal)` marks reviewed the first `seenTotal` reports (the `total` the queue showed), so reports counted since stay pending. It records no decision.
 
 Reports never change a poll's state or the public log (a test checks this): report volume is never a ground.
+
+### `identity_backups` (T-20, T-10, T-11, T-52, T-66)
+
+Voting-identity recovery backups (ADR 0017, option A, step 5; `docs/spec/identity-backup.md`): `id` (`H(DS(id-tag, locator))`, 32 bytes), `envelope` (a version-1 envelope, 63 bytes, header checked by the table) and `written_month` (the UTC month of the last write, by the database clock). The locator is never stored, so a copy of the table can't read, replace or delete a row. No account column, address or request time; reads change nothing. `abolish_app` holds `SELECT`, `INSERT`, `UPDATE` and `DELETE`, never `TRUNCATE`. Operational: a wipe loses every backup and changes no result (T-66).
+
+`src/identity-backups.ts`:
+
+- `putIdentityBackup(sql, locator, envelope)` stores or replaces the envelope after decoding it strictly; `IdentityBackupStoreError` carries the decoder's code.
+- `readIdentityBackup(sql, locator)` and `deleteIdentityBackup(sql, locator)`.
+- `pruneIdentityBackups(sql, now)` deletes backups last written more than `IDENTITY_BACKUP_RETENTION_MONTHS` (24) whole months before `now`'s month. The ballot client rewrites its envelope to keep it (P2-8).
 
 ### Accounts (`src/accounts.ts`; T-10, T-11, T-20)
 

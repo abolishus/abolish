@@ -110,6 +110,28 @@ describe("the contract's shape", () => {
   });
 });
 
+describe("identity backups (ADR 0017; T-10, T-20)", () => {
+  test("every backup route is a POST, so a locator never sits in a URL", () => {
+    const routes = Object.values(contract.backups).map((p) => p["~orpc"].route);
+    expect(routes.length).toBe(3);
+    for (const route of routes) expect(route.method).toBe("POST");
+  });
+
+  test("a backup request has one size: a 32-byte locator and a 63-byte envelope", async () => {
+    const input = contract.backups.put["~orpc"].inputSchema;
+    const valid = { locator: "ab".repeat(32), envelope: "000a01" + "cd".repeat(60) };
+    expect((await input?.["~standard"].validate(valid))?.issues).toBeUndefined();
+    for (const bad of [
+      { ...valid, locator: "ab".repeat(31) },
+      { ...valid, locator: "ab".repeat(33) },
+      { ...valid, envelope: valid.envelope.slice(2) },
+      { ...valid, envelope: `${valid.envelope}00` },
+      { ...valid, envelope: valid.envelope.toUpperCase() },
+    ])
+      expect((await input?.["~standard"].validate(bad))?.issues).toBeDefined();
+  });
+});
+
 describe("the generated OpenAPI document", () => {
   test("is deterministic", async () => {
     expect(await renderOpenApi()).toBe(await renderOpenApi());
@@ -124,6 +146,9 @@ describe("the generated OpenAPI document", () => {
       "GET /elections/definition",
       "GET /moderation/log",
       "GET /moderation/status",
+      "POST /backups",
+      "POST /backups/delete",
+      "POST /backups/fetch",
       "POST /ballots",
       "POST /moderation/reports",
     ]);

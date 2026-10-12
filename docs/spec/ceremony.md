@@ -4,7 +4,7 @@ How a panel's trustees register their per-election keys for one election: the ce
 
 What this page doesn't cover:
 
-- **Approving the transcript.** Each seat that accepts the outcome signs the ceremony registration ([[trustee-identity]], Ceremony registration) over the transcript hash below; the trustee registry's quorum is P1-18's.
+- **Approving the transcript.** Each seat that accepts the outcome signs the ceremony registration ([[trustee-identity]], Ceremony registration) over the transcript hash below; the trustee registry records the transcript once the panel's quorum of seats has signed ([[contracts]], Trustee registry).
 - **Using the keys.** Shares are encrypted only to the registered KEM keys of qualified seats; how a ballot leaves out a seat that isn't qualified is the ballot record's (P1-12 part 3). Statements signed with the registered per-election keys (receipts, tally shares, destruction) are specified with their items (P1-12 part 3, P1-15).
 - **A ranked-choice mix key.** If the follow-up ADR of [[0003-tally-scheme]] needs one, its DKG is a new record version.
 
@@ -216,7 +216,7 @@ A node refuses a run whose stub fails any of these, and never signs a registrati
 
 A seat signs the ceremony registration ([[trustee-identity]], Ceremony registration) only for a stub that passes the stub checks (above) and a transcript that passes this check, that holds every message it sent as it sent it, and whose round chain it signed over. It approves **at most one transcript per `stub_hash`**, whatever the run, and its node keeps that record for as long as the stub can be registered.
 
-A run that stops before a quorum approves it is abandoned: the creator starts another with a fresh `run_id` and the same stub, and every seat generates fresh keys. A run whose transcript a quorum has approved is final for that stub. With `k > n / 2` two quorums share a seat, so a second approved transcript for one stub needs a seat that broke the rule above; [[verifier]] 3.1 still accepts only the transcript the definition binds. The trustee registry records at most one transcript per `stub_hash` and refuses any other once one has its quorum (P1-18), so a quorum can't hold a second set of keys in reserve for the same definition. Only the panel can register a transcript, so this first-come rule can't be raced by anyone outside it ([[election-definition]], Stub hash and the ceremony).
+A run that stops before a quorum approves it is abandoned: the creator starts another with a fresh `run_id` and the same stub, and every seat generates fresh keys. A run whose transcript a quorum has approved is final for that stub. With a quorum `q > n / 2` ([[contracts]], Trustee registry) two quorums share a seat, so a second approved transcript for one stub needs a seat that broke the rule above; [[verifier]] 3.1 still accepts only the transcript the definition binds. The trustee registry records at most one transcript per `stub_hash` and panel and refuses any other once one has its quorum ([[contracts]], Trustee registry), so a quorum can't hold a second set of keys in reserve for the same definition. Only the panel can register a transcript, so this first-come rule can't be raced by anyone outside it ([[election-definition]], Stub hash and the ceremony).
 
 ## Vectors
 

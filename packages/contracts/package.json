@@ -2,13 +2,13 @@
   "name": "@abolishus/contracts",
   "version": "0.0.0",
   "private": true,
-  "description": "Abolish's contracts (Foundry): the event accumulator, the election registry and the L1 board anchor so far; the trustee registry and direct submission follow (P1-18).",
+  "description": "Abolish's contracts (Foundry): the event accumulator, the election and trustee registries and the L1 board anchor so far; direct submission follows (P1-18).",
   "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
     "build": "forge build && rm -rf out/build-info",
     "check": "forge fmt --check && forge build --sizes",
-    "test": "forge test && vp test run"
+    "test": "forge test && FOUNDRY_PROFILE=precompile EXPECT_P256VERIFY=true forge test --match-path test/TrusteeRegistry.t.sol && vp test run"
   },
   "devDependencies": {
     "@types/node": "catalog:",

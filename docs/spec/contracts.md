@@ -1,6 +1,6 @@
 # Contracts
 
-What our L2 contracts commit to, for a verifier that reads them from the chain and the archive alone. So far this page specifies the event accumulator every Abolish contract keeps, the election registry, and the board anchor, our one contract on L1 (P4-1). The trustee key registry, direct submission, the contract-event record (`0x0008`) with its inclusion evidence, and the close rule are still P1-18's, and are added here as they are built. Notation is from [[notation]], tags from [[domain-separation]].
+What our L2 contracts commit to, for a verifier that reads them from the chain and the archive alone. So far this page specifies the event accumulator every Abolish contract keeps, the election registry, the trustee registry, and the board anchor, our one contract on L1 (P4-1). The group registry (P3-2), direct submission, the contract-event record (`0x0008`) with its inclusion evidence, and the close rule are still P1-18's, and are added here as they are built. Notation is from [[notation]], tags from [[domain-separation]].
 
 ## Event accumulator
 
@@ -112,10 +112,78 @@ A verifier takes the definition's registration from `DefinitionRegistered` on th
 
 ### Known-weak
 
-- **The trustee registry doesn't exist yet** (P1-18, next part). Until it does, the registry's ceremony check is tested against a stand-in, and nothing may be deployed.
 - **No close-rule bounds** on the definition's timing fields (above).
 - **Creation is permissionless**, so anyone can make the counter grow. Each creation costs its sender gas and reserves nothing anyone else needs.
 - **Gas.** Registering a two-tier definition (about 500 bytes) costs about 115,000 gas in the tests, mostly decoding, the ceremony check, and three SHA-256 calls (stub, definition, accumulator); creating an election about 98,000. Each runs once per election, so neither is a hot path.
+
+## Trustee registry
+
+Threats: T-71 (trusting who sent a transaction), T-37 (a ceremony carried into another definition, a stolen identity key), T-14 (fewer than `k` parties opening ballots), T-31 (malleable signatures), T-17 (chosen bytes in the archive), T-25 (blocking a legitimate election).
+
+The trustee registry pins the deployment's trustee panels and records, for each definition stub, the one ceremony transcript a quorum of a panel's seats approved. The election registry asks it `ceremonyRecorded` before admitting a definition (Election registry, rule 8). It is immutable: no owner, proxy, pause or upgrade path, no way to add, change or remove a panel, and it inherits the event accumulator above.
+
+### Deployment
+
+The registry is deployed with a non-empty list of panels. For each it takes the threshold `k`, a **quorum** `q`, the seats' keys as their `p256-key` encodings in seat order ([[trustee-identity]], Identity key), and each key's point `(x, y)`. It refuses the deployment, naming the panel's position and the first failing check, in this order (checks 3 and 4 run seat by seat, so a seat's key is checked, then compared with the earlier seats', before the next seat's):
+
+1. `n ≤ MAX_TRUSTEES`, where `n` is the number of points (`size`);
+2. `2 ≤ k ≤ n` (`threshold`);
+3. the encodings are exactly `33 · n` bytes, and each seat's encoding is the encoding of its point: first byte `0x02 + (y mod 2)`, the same `x`, and `(x, y)` on the curve with `x, y < p`, checked with OpenZeppelin's `P256.isValidPublicKey` (`key`). An encoding passes this for some point exactly when `p256-key` accepts it, so the deployment pins exactly the keys a verifier decodes, the two points with `x = 0` included;
+4. no point repeats an earlier seat's (`duplicate-key`);
+5. `k ≤ q ≤ n` (`quorum`);
+6. its `panel_id` ([[trustee-identity]], Panel identifier), computed from `k`, `n` and the encodings, isn't an earlier panel's (`duplicate-panel`). Another quorum doesn't make another panel.
+
+Checks 1 to 4 are [[trustee-identity]]'s panel rules, with its codes. Each pinned panel is logged as `PanelPinned`, so the board and any verifier read the deployment's panels and quorums from the chain alone. As for every contract, deployment reverts unless the chain ID fits a `u64`, which the registration statement's `l2_chain_id` needs.
+
+**The quorum.** `q` is how many distinct seats must sign a registration. It is at least `k`, because a transcript fewer than `k` seats approved could register keys no `k` honest seats checked, and at most `n`. A deployment sets it per panel, and its deployment record (`packages/contracts/deployments/<chain-id>.json`) MUST carry it. Until the owner decides [[0006-trustees]] rule 7, deployments use `q = k`, the floor the ceremony itself has ([[ceremony]], Security notes): `k` seats approving a transcript are the `k` that could open every ballot anyway (T-14), so a higher quorum adds no secrecy, only another way for absent seats to stall an election. Rule 7 as proposed would set `q = n − 1`. A release may still pin a stricter participation rule for verifier 3.2; that is a property of the transcript, not of who approved it.
+
+### Registration
+
+`registerCeremony(bytes registration)` takes one record:
+
+```
+registration = panel_id ‖ stub_hash ‖ ceremony_transcript_hash ‖ u8(count) ‖ approval × count
+approval     = u8(index) ‖ p256-sig
+```
+
+`panel_id`, `stub_hash` and `ceremony_transcript_hash` are `bytes[32]`, and `p256-sig` is [[trustee-identity]]'s 64-byte `r ‖ s`. The record is exactly `97 + 65 · count` bytes. Anyone may submit it. The registry checks, in this order, and reverts on the first failure (checks 7 and 8 run approval by approval: an approval's seat, then its signature, before the next approval's):
+
+1. **Canonical calldata**, as for the election registry's `registerDefinition` (T-17).
+2. **Length**: at least the 97-byte header, and exactly `97 + 65 · count` bytes. Nothing can be appended, so the record carries no bytes the layout doesn't define (T-17).
+3. **The panel** is pinned.
+4. **The transcript hash** isn't zero, the value a stub carries in its place ([[election-definition]], Stub hash and the ceremony).
+5. **Quorum**: `count ≥ q`.
+6. **Write-once**: nothing is recorded yet for this `stub_hash` and panel.
+7. **The seats**: the approvals' indices are strictly increasing, the first at least 1 and the last at most `n`, so each seat counts once. ECDSA lets one key make many valid signatures on one statement, so counting signatures instead of seats would let one seat, or one stolen key, reach a quorum alone ([[trustee-identity]], Ceremony registration; T-14, T-37).
+8. **The signatures**: each approval's signature verifies, under its seat's pinned key, on the ceremony registration statement ([[trustee-identity]], Ceremony registration) with `l2_chain_id = block.chainid`, `trustee_registry` this contract, and the record's `panel_id`, the approval's `index`, `stub_hash` and `ceremony_transcript_hash`. The registry builds the 125-byte statement and its digest `H(DS("abolish/v1/sig/ceremony-registration", m))` itself, and verifies through OpenZeppelin's `P256.verify` after checking `1 ≤ r < n` and `1 ≤ s ≤ (n − 1) / 2` itself ([[trustee-identity]], On chain). Every approval must verify, including any beyond the quorum, so no record holds a signature the panel didn't make.
+
+It then records `ceremony_transcript_hash` for (`stub_hash`, `panel_id`) and emits `CeremonyRegistered`. A recorded transcript can't be changed or removed, and a second registration for the same stub and panel reverts, with the same transcript or another: a quorum can't hold a second set of keys in reserve for a definition ([[ceremony]], Approval and re-runs). The sender is never checked or recorded (T-71).
+
+**Per stub and panel.** A stub names one panel, and an honest seat signs only for a stub that names its own ([[ceremony]], Stub checks). Recording per stub alone would let a quorum of another panel the deployment pins register first and block the stub's own panel for good (T-25); keyed by panel, its record is simply never asked for, since the election registry passes the definition's own panel.
+
+`ceremonyRecorded(stub_hash, transcript_hash, panel_id, threshold, panel_size)` returns true exactly when `panel_id` is pinned with that threshold and size, and the transcript recorded for (`stub_hash`, `panel_id`) is non-zero and equals `transcript_hash`. `panel_id` already binds `k` and `n`; comparing them as well costs nothing and keeps the answer right whatever the caller passes.
+
+### Events
+
+Each event goes through the event accumulator, with topic 0 the keccak-256 of its signature:
+
+| Event                                                                                                                       | Topics                                              | Data                                                      |
+| --------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- | --------------------------------------------------------- |
+| `PanelPinned(bytes32 indexed panelId, uint8 threshold, uint8 quorum, bytes keys)`                                           | `panel_id`                                          | `k`, `q` and the `33 · n` bytes of encodings, ABI-encoded |
+| `CeremonyRegistered(bytes32 indexed stubHash, bytes32 indexed panelId, bytes32 indexed transcriptHash, bytes registration)` | `stub_hash`, `panel_id`, `ceremony_transcript_hash` | The whole registration record, ABI-encoded as `bytes`     |
+
+The panels are logged at deployment, so they are the first events of the registry's sequence. A verifier finds an election's ceremony registration by its stub and panel, checks every approval against the panel its release pins ([[trustee-identity]], Ceremony registration), and counts the distinct seats whose approvals verify against the quorum its release pins for that panel, never the `q` in `PanelPinned`, which it compares with its own and reports if they differ (P1-19, [[verifier]] 3.1). It needs nothing else from the contract's state. Like the election registry, the trustee registry is shared by every election, so its event sequence is replayed whole from the archive ([[verifier]] 4.4; Election registry, The shared event sequence). Only a quorum can add an event to it, so it grows with ceremonies, not with junk.
+
+### Vectors
+
+The Solidity tests consume `vectors/trustee.json`: the deployment check accepts every key vector `p256Key` accepts and refuses every other, at any length; every signature vector verifies exactly when it is marked valid; every panel vector is pinned with its `panel_id`, or refused with its code; and every registration vector's message and digest are the ones the registry builds.
+
+### Known-weak
+
+- **The precompile is the chain's code, not ours or OpenZeppelin's.** The contract is built for `cancun`, which has no `P256VERIFY`, so the tests' default run takes `P256.verify`'s Solidity fallback (about 250,000 gas a signature). The package's test script runs the trustee registry's tests again on `osaka`, where Foundry provides the precompile (EIP-7951), so both paths pass every vector; a 7-seat registration then costs about 180,000 gas. Base implements the precompile itself (RIP-7212), and a disagreement between its implementation and Foundry's would first show on a testnet deployment.
+- **The vendored library is checked against itself.** `test/vendor.test.ts` pins the vendored files' hashes, which the package README records with their upstream tag and commit; re-fetching them from upstream in CI needs a `ci:` change (rule B).
+- **A quorum can register a transcript for any stub**, including one no election will register. It costs gas, blocks nothing, and needs `q` seats' signatures, but each such event puts 64 bytes the quorum chose (`stub_hash`, `ceremony_transcript_hash`) into the shared archive every verifier replays (T-17).
+- **The quorum is the deployer's choice.** `q` is a constructor input held in storage, so verifier 1.2's bytecode check doesn't pin it, and a deployer can pick any `q` from `k` to `n`, or pin extra panels. The `k` floor holds whatever it picks. A verifier must not inherit the choice: it counts the distinct valid seats in the `CeremonyRegistered` record itself (Events, above), against the quorum its release pins.
 
 ## Board anchor
 

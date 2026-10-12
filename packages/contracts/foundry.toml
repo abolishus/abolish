@@ -7,6 +7,8 @@ src = "src"
 test = "test"
 out = "out"
 libs = []
+# Vendored dependencies (README, Vendored code), mapped explicitly.
+remappings = ["@openzeppelin/contracts/=vendor/openzeppelin-contracts/contracts/"]
 solc_version = "0.8.30"
 evm_version = "cancun"
 via_ir = false
@@ -37,6 +39,14 @@ runs = 10000
 runs = 512
 depth = 64
 fail_on_revert = true
+
+# The trustee registry's tests again on an EVM with the P256VERIFY precompile
+# (EIP-7951), so OpenZeppelin's P256 takes its precompile path, the one Base
+# runs, as well as its Solidity fallback (the package's test script). A
+# separate output directory keeps these artifacts out of the release build.
+[profile.precompile]
+evm_version = "osaka"
+out = "out-precompile"
 
 [fmt]
 line_length = 100

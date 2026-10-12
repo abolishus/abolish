@@ -21,6 +21,7 @@ test-results/
 
 # Foundry
 packages/contracts/out/
+packages/contracts/out-precompile/
 packages/contracts/cache/
 packages/contracts/broadcast/*/31337/
 

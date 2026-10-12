@@ -8,6 +8,7 @@
 // read yet, so 3.1 and 2.5 never pass here.
 
 import {
+  type BoardEntryVersion,
   type CeremonyErrorCode,
   ceremonyTranscriptHash,
   checkCeremonyTranscript,
@@ -79,7 +80,7 @@ const equal = (a: Uint8Array, b: Uint8Array) =>
 function findTranscript(
   d: ElectionDefinition,
   entries: readonly Uint8Array[],
-  boardEntryVersion: 1,
+  boardEntryVersion: BoardEntryVersion,
 ): { readonly entry: number; readonly bytes: Uint8Array } | undefined {
   for (const [at, encoded] of entries.entries()) {
     let payload: Uint8Array;
@@ -107,7 +108,7 @@ export function ceremonyChecks(
   d: ElectionDefinition,
   panel: Panel,
   entries: readonly Uint8Array[],
-  boardEntryVersion: 1,
+  boardEntryVersion: BoardEntryVersion,
 ): { readonly rows: ReadonlyMap<string, CeremonyOutcome>; readonly report?: CeremonyReport } {
   const rows = (r25: CeremonyOutcome, r31: CeremonyOutcome, r32: CeremonyOutcome) =>
     new Map([

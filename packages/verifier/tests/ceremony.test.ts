@@ -37,7 +37,7 @@ interface Case {
   readonly panel: string;
   readonly definition: string;
   readonly board: string;
-  readonly expected: Readonly<Record<"2.5" | "3.1" | "3.2", Record<string, unknown>>>;
+  readonly expected: Readonly<Record<string, Record<string, unknown>>>;
   readonly ceremony?: Report["ceremony"];
 }
 
@@ -91,9 +91,11 @@ const format4 = (c: Case, definition = c.definition, board = hex(c.board)) =>
   verifyBundle(parseBundle(json(definition, panelOf(c.panel)), board));
 
 const row = (r: Report, id: string) => r.checks.find((x) => x.id === id) as CheckResult;
-const rows = (r: Report) =>
+// The rows a case gives: 2.5, 3.1 and 3.2, and 2.3 in the cases for
+// board-entry versions 3 and 4.
+const rows = (r: Report, ids: readonly string[] = ["2.5", "3.1", "3.2"]) =>
   Object.fromEntries(
-    (["2.5", "3.1", "3.2"] as const).map((id) => {
+    ids.map((id) => {
       const { status, code, at } = row(r, id);
       return [id, { status, ...(code !== undefined && { code }), ...(at !== undefined && { at }) }];
     }),
@@ -111,6 +113,7 @@ test("the fixtures cover a pass, every row's failures and the unverifiable cases
     { status: "fail", code: "decode" },
     { status: "unverifiable", code: "ceremony-transcript-missing" },
     { status: "unverifiable", code: "unsupported-version" },
+    { status: "fail", code: "profile-combination" },
   ])
     expect(outcomes.some((o) => Object.entries(want).every(([k, v]) => o[k] === v))).toBe(true);
 });
@@ -119,7 +122,7 @@ describe("2.5, 3.1 and 3.2 against the independent implementation", () => {
   for (const c of file.cases)
     test(c.id, () => {
       const r = format4(c);
-      expect(rows(r)).toEqual(c.expected);
+      expect(rows(r, Object.keys(c.expected))).toEqual(c.expected);
       expect(r.ceremony).toEqual(c.ceremony);
       // The panel and the definition are local files: whatever the transcript
       // is, nothing can verify or fail the election through them (T-53).

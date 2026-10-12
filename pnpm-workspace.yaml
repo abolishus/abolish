@@ -62,11 +62,13 @@ catalog:
   "@types/react": 19.2.7
   "@types/react-dom": 19.2.3
   "@vitest/browser-playwright": 5.0.1
+  "@wagmi/cli": 2.10.0
   better-auth: 1.7.7
   bullmq: 6.3.11
   class-variance-authority: 0.7.1
   cn: 0.4.0
   drizzle-orm: 0.45.3
+  esbuild: 0.28.2
   fast-check: 4.10.2
   ioredis: 5.11.1
   lucide-react: 1.52.0

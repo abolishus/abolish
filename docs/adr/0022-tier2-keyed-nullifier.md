@@ -134,7 +134,7 @@ Option A stands. What changes is which parts are reused, what part 2b must check
 
 - TACEO's `encode` follows RFC 9380's `encode_to_curve`: one Elligator2 map of one Poseidon2 output, under TACEO's fixed tag. RFC 9380 says `encode_to_curve` isn't a random oracle. 2HashDH's analysis, and RFC 9497, model `H1` as one, and this ADR needs `H1`'s tag to bind the Tier 2 scope.
 - So `H1` follows RFC 9380's `hash_to_curve`: `clear_cofactor(map(u0) + map(u1))`. Here `map` is the Elligator2 map with the rational map to the Edwards form, the two values `u0, u1` are independent outputs of the Poseidon2 permutation under our scoped tag, and the sum is complete Edwards addition.
-- Only `map_to_curve_elligator2` and `encode` are public in `oprf-nr`. Composing the map therefore means vendoring or re-implementing its Edwards step, which part 2b specifies with vectors.
+- Only `map_to_curve_elligator2` and `encode` are public in `oprf-nr`. So part 2b vendors the map's Edwards step from the audited `50798b4` code, unchanged. If that can't be done, it records the gap and stops, as the Consequences require, rather than writing the step itself.
 - `H1` is evaluated only inside the query and output circuits. The client takes `B` from the query circuit's output and unblinds it outside with `@noble/curves`. So no hash-to-curve is needed in TypeScript.
 
 **The audit doesn't cover `oprf-nr` v1.0.0 as it stands.** TACEO's README says v1.0.0 was extracted from `oprf-service` at `831928b`, a later commit than the audited ones. Its curve, map and proof files differ from both `50798b4` and `831928b`. So part 2b diffs every gadget it uses against `50798b4` and reviews the difference. Its argument also covers the audit's findings that touch our circuits:
@@ -155,7 +155,7 @@ Option A stands. What changes is which parts are reused, what part 2b must check
 - `x` hashes `dg1`, `eContent` and the document signature. zkPassport takes ECDSA signatures as fixed-width `r ‖ s`. Its `sig_check_ecdsa` decodes `r` and `s` with range-checked decoders, `noir-ecdsa` v0.5.0 rejects `s > n/2`, and the client normalises a high `s` before proving.
 - RSA signatures are decoded below the modulus. PKCS#1 v1.5 is deterministic and checked over the whole encoded message, and PSS randomness lets only the signer (the issuing state, already conceded by the first limit) make a second signature.
 - So a holder can't re-encode one signature into a second `x`.
-- But uniqueness also rests on the soundness of the pinned identity sub-circuits: zero padding of `dg1` and `eContent`, and the binding of the document signer's key to its certificate. The independent review raised a question about the sub-circuits that part 2b must settle. Its details are withheld from this repository until the owner decides on disclosure (Waiting on the owner in [[STATUS]]).
+- But uniqueness also rests on the soundness of the pinned identity sub-circuits as a whole. The independent review raised a question about them that part 2b must settle. Its details are withheld from this repository until the owner decides on disclosure (Waiting on the owner in [[STATUS]]).
 - Until it is settled, zkPassport's identity sub-circuits aren't reused "unchanged" for real documents. That doesn't affect MOCK documents on test chains.
 
 **The zkPassport app's request can't name our panel.**

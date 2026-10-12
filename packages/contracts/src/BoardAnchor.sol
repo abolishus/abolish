@@ -246,12 +246,17 @@ contract BoardAnchor is EventAccumulator {
     /// opening later may list it (docs/spec/election-definition.md, Receipt
     /// keys). Reverts unless the caller is the authority, the calldata is
     /// exactly one 33-byte `bytes` argument, the key is framed as compressed,
-    /// and the key has never been registered: a retired key never comes back,
-    /// so a seized one can't be listed again by a hostile creator (T-69).
+    /// and neither the key nor its twin (the other prefix with the same `x`)
+    /// has ever been registered: a retired key never comes back, so a seized
+    /// one can't be listed again by a hostile creator, and nor can its
+    /// negation, whose secret key is the seized one's negated (T-69).
     function registerReceiptKey(bytes calldata key) external {
         (uint8 prefix, bytes32 x) = _receiptKey(key);
-        ReceiptKeyRecord storage r = _anchorStorage().receiptKeys[prefix][x];
-        if (r.registeredAt != 0) revert ReceiptKeyAlreadyRegistered(prefix, x);
+        AnchorStorage storage s = _anchorStorage();
+        ReceiptKeyRecord storage r = s.receiptKeys[prefix][x];
+        if (r.registeredAt != 0 || s.receiptKeys[prefix ^ 1][x].registeredAt != 0) {
+            revert ReceiptKeyAlreadyRegistered(prefix, x);
+        }
         r.registeredAt = uint64(block.timestamp);
         _log2(ReceiptKeyRegistered.selector, x, abi.encode(prefix));
     }

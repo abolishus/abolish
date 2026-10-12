@@ -102,7 +102,12 @@ contract AnchorHandler is TestBase {
         k %= 4;
         bytes memory key = receiptKey(k);
         uint64[2] memory record = shadowKey[k];
-        bool allowed = !stranger && (retire ? record[0] != 0 && record[1] == 0 : record[0] == 0);
+        // Keys 2j and 2j + 1 are twins (one x, both prefixes): registering
+        // either keeps the other out for good.
+        bool allowed = !stranger
+            && (retire
+                    ? record[0] != 0 && record[1] == 0
+                    : record[0] == 0 && shadowKey[k ^ 1][0] == 0);
         vm.prank(stranger ? address(0x5742) : authority);
         try (retire ? anchor.retireReceiptKey : anchor.registerReceiptKey)(key) {
             if (!allowed) unexpected = true;
@@ -153,6 +158,8 @@ contract AnchorHandler is TestBase {
 /// `test_HandlerAnchors` shows the handler reaches the success path, so the
 /// invariants aren't checked only against an empty anchor.
 contract BoardAnchorInvariantTest is TestBase {
+    bytes32 internal constant ANCHOR_SLOT =
+        0x16eba4501d0a9dddbfa03518d843c364be664629e6d99efb7169d8f090095b00;
     BoardAnchor internal anchor;
     AnchorHandler internal handler;
 
@@ -213,12 +220,21 @@ contract BoardAnchorInvariantTest is TestBase {
         );
     }
 
+    /// Read from the word a verifier proves, so a stray bit the getter
+    /// would hide fails too: the high 128 bits stay zero and a retirement
+    /// never precedes its registration (docs/spec/verifier.md 2.9,
+    /// `receipt-key-record`).
     function invariant_ReceiptKeyRecordsMatchTheShadow() public view {
         for (uint256 k; k < 4; k++) {
             bytes memory key = handler.receiptKey(k);
-            (uint64 registeredAt, uint64 retiredAt) = anchor.receiptKeyRecord(
-                uint8(key[0]), bytes32(uint256(keccak256(abi.encode(k / 2))))
+            bytes32 inner = keccak256(abi.encode(uint256(uint8(key[0])), uint256(ANCHOR_SLOT) + 4));
+            uint256 word = uint256(
+                vm.load(address(anchor), keccak256(abi.encode(keccak256(abi.encode(k / 2)), inner)))
             );
+            uint64 registeredAt = uint64(word);
+            uint64 retiredAt = uint64(word >> 64);
+            assertEq(word >> 128, 0, "high bits");
+            assertTrue(retiredAt == 0 || (registeredAt != 0 && retiredAt >= registeredAt), "order");
             (uint64 wantRegistered, uint64 wantRetired) = handler.keyRecord(k);
             assertEq(registeredAt, wantRegistered, "registeredAt");
             assertEq(retiredAt, wantRetired, "retiredAt");
@@ -229,6 +245,7 @@ contract BoardAnchorInvariantTest is TestBase {
         for (uint256 i; i < 8; i++) {
             handler.writeKey(uint8(i), i >= 4, false);
         }
-        assertEq(handler.keyWrites(), 8, "every first write lands");
+        // Keys 1 and 3 are twins of 0 and 2, so only 0 and 2 are registered and retired.
+        assertEq(handler.keyWrites(), 4, "every allowed write lands");
     }
 }

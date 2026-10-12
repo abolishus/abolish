@@ -406,7 +406,7 @@ A verifier proves both at `B`, follows the last locator to its manifest, and fro
 
 The contract doesn't check that `x` is on the curve, which would need a modular square root on chain: a definition can list only canonical keys ([[trustee-identity]], Identity key), so a registered non-key judges nothing, and only the authority can pay to register one. Then:
 
-- `registerReceiptKey` reverts if the key has ever been registered, retired or not; otherwise it sets the key's `registered_at` to `block.timestamp`.
+- `registerReceiptKey` reverts if the key has ever been registered, retired or not, or if its twin has: the key with the other prefix and the same `x`, which is its negation, whose secret key anyone holding the key's own also holds (so retiring a seized key also keeps its negation out); otherwise it sets the key's `registered_at` to `block.timestamp`.
 - `retireReceiptKey` reverts unless the key is registered and not retired; otherwise it sets its `retired_at` to `block.timestamp`.
 
 Nothing else writes either field and neither is ever cleared, so the record is append-only: a key is registered once, retired at most once, and never re-registered (T-69). Each emits, through the event accumulator,

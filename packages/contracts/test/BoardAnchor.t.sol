@@ -637,11 +637,31 @@ contract BoardAnchorTest is TestBase {
     function test_ReceiptKeyRecordsReplayTheJudgingVectors() public {
         string memory json = vm.readFile(DEFINITION_V4_VECTORS);
         uint256 replayed;
+        uint256 impossible;
         for (uint256 i; vm.keyExistsJson(json, _judging(i)); i++) {
             string memory c = _judging(i);
-            if (vm.keyExistsJson(json, string.concat(c, ".error"))) continue;
             uint64 registeredAt = uint64(_uintString(json, string.concat(c, ".registeredAt")));
             uint64 retiredAt = uint64(_uintString(json, string.concat(c, ".retiredAt")));
+            if (vm.keyExistsJson(json, string.concat(c, ".error"))) {
+                // A retirement without a registration, or before it: at the
+                // retirement's time the key isn't registered, so the anchor
+                // refuses it. The other impossible records are writes after
+                // the block they were read at, which only a false proof gives.
+                if (retiredAt != 0 && (registeredAt == 0 || retiredAt < registeredAt)) {
+                    setUp();
+                    bytes memory never = _receiptKey(0x02, keccak256(bytes(c)));
+                    vm.warp(retiredAt);
+                    _expectReceiptKeyRefused(
+                        BoardAnchor.retireReceiptKey.selector,
+                        never,
+                        abi.encodeWithSelector(
+                            BoardAnchor.ReceiptKeyNotActive.selector, uint8(2), _x(never)
+                        )
+                    );
+                    impossible++;
+                }
+                continue;
+            }
             if (registeredAt == 0) continue;
             // A fresh anchor per case: block times only move forward.
             setUp();
@@ -662,6 +682,7 @@ contract BoardAnchorTest is TestBase {
             replayed++;
         }
         assertEq(replayed, 12, "writable judging vectors");
+        assertEq(impossible, 2, "unwritable judging vectors");
     }
 
     /// Registration writes `registered_at` in the low 64 bits of the
@@ -757,13 +778,16 @@ contract BoardAnchorTest is TestBase {
         (uint64 registeredAt, uint64 retiredAt) = anchor.receiptKeyRecord(0x02, x);
         assertEq(registeredAt, EPOCH, "registeredAt moved");
         assertEq(retiredAt, EPOCH + 1, "retiredAt moved");
-        // The other prefix is another key, with its own record.
-        bytes memory twin = _receiptKey(0x03, "k");
-        vm.prank(authority);
-        anchor.registerReceiptKey(twin);
-        (registeredAt, retiredAt) = anchor.receiptKeyRecord(0x03, x);
-        assertEq(registeredAt, EPOCH + 2, "twin registeredAt");
-        assertEq(retiredAt, 0, "twin retiredAt");
+        // Its twin, the other prefix with the same x, is its negation: anyone
+        // holding the retired key's secret holds the twin's, so it never
+        // comes in either.
+        _expectReceiptKeyRefused(
+            BoardAnchor.registerReceiptKey.selector,
+            _receiptKey(0x03, "k"),
+            abi.encodeWithSelector(BoardAnchor.ReceiptKeyAlreadyRegistered.selector, uint8(3), x)
+        );
+        (registeredAt,) = anchor.receiptKeyRecord(0x03, x);
+        assertEq(registeredAt, 0, "twin registered");
     }
 
     /// A key is exactly 33 bytes starting 0x02 or 0x03, for both calls (T-17).
@@ -787,30 +811,68 @@ contract BoardAnchorTest is TestBase {
     /// The calldata is exactly one canonical 33-byte `bytes` argument: a
     /// moved offset, a trailing byte or word, and dirty padding are refused.
     function test_ReceiptKeysRefuseNonCanonicalCalldata() public {
-        bytes memory key = _receiptKey(0x02, "k");
-        bytes memory good = abi.encodeCall(BoardAnchor.registerReceiptKey, (key));
-        bytes memory nonCanonical = abi.encodeWithSelector(_nonCanonical());
-        bytes memory dirty = bytes.concat(good);
-        dirty[dirty.length - 1] = 0x01;
-        // A properly framed argument at offset 0x40, after a junk word.
-        bytes memory moved = bytes.concat(
-            BoardAnchor.registerReceiptKey.selector,
-            abi.encode(uint256(0x40), uint256(0), uint256(33)),
-            key,
-            new bytes(31)
-        );
-        bytes[4] memory calls =
-            [bytes.concat(good, hex"00"), bytes.concat(good, bytes32(0)), dirty, moved];
-        for (uint256 i; i < calls.length; i++) {
+        bytes4[2] memory selectors =
+            [BoardAnchor.registerReceiptKey.selector, BoardAnchor.retireReceiptKey.selector];
+        for (uint256 f; f < 2; f++) {
+            bytes memory key = _receiptKey(0x02, "k");
+            bytes memory good = abi.encodeWithSelector(selectors[f], key);
+            bytes memory nonCanonical = abi.encodeWithSelector(_nonCanonical());
+            bytes memory dirty = bytes.concat(good);
+            dirty[dirty.length - 1] = 0x01;
+            // A properly framed argument at offset 0x40, after a junk word.
+            bytes memory moved = bytes.concat(
+                selectors[f], abi.encode(uint256(0x40), uint256(0), uint256(33)), key, new bytes(31)
+            );
+            // Offset 0, reading the offset word as a zero length: the
+            // calldata's length fits an empty argument, so only the offset
+            // check refuses it.
+            bytes memory selfPointing = bytes.concat(selectors[f], abi.encode(uint256(0)));
+            // Framing is checked after canonicality: a bad prefix in
+            // non-canonical calldata is refused as non-canonical.
+            bytes memory badPrefix =
+                bytes.concat(abi.encodeWithSelector(selectors[f], _receiptKey(0x04, "k")), hex"00");
+            bytes[6] memory calls = [
+                bytes.concat(good, hex"00"),
+                bytes.concat(good, bytes32(0)),
+                dirty,
+                moved,
+                selfPointing,
+                badPrefix
+            ];
+            for (uint256 i; i < calls.length; i++) {
+                vm.prank(authority);
+                (bool ok, bytes memory ret) = address(anchor).call(calls[i]);
+                _assertRefused(ok, ret, nonCanonical);
+            }
+            (uint64 registeredAt, uint64 retiredAt) = anchor.receiptKeyRecord(0x02, _x(key));
+            assertEq(f == 0 ? registeredAt : retiredAt, 0, "written");
             vm.prank(authority);
-            (bool ok, bytes memory ret) = address(anchor).call(calls[i]);
-            _assertRefused(ok, ret, nonCanonical);
+            (bool accepted,) = address(anchor).call(good);
+            assertTrue(accepted, "the canonical call");
         }
-        (uint64 registeredAt,) = anchor.receiptKeyRecord(0x02, _x(key));
-        assertEq(registeredAt, 0, "registered");
-        vm.prank(authority);
-        (bool accepted,) = address(anchor).call(good);
-        assertTrue(accepted, "the canonical call");
+    }
+
+    /// The caller is checked first: a stranger's call is refused as such
+    /// whatever its key or calldata, so no one but the authority learns
+    /// anything from the record's refusals or reaches them.
+    function test_ReceiptKeysCheckTheCallerFirst() public {
+        bytes memory notAuthority =
+            abi.encodeWithSelector(BoardAnchor.NotAuthority.selector, address(0xA11CE));
+        bytes4[2] memory selectors =
+            [BoardAnchor.registerReceiptKey.selector, BoardAnchor.retireReceiptKey.selector];
+        for (uint256 f; f < 2; f++) {
+            bytes memory good = abi.encodeWithSelector(selectors[f], _receiptKey(0x02, "k"));
+            bytes[3] memory calls = [
+                abi.encodeWithSelector(selectors[f], _receiptKey(0x04, "k")),
+                abi.encodeWithSelector(selectors[f], new bytes(32)),
+                bytes.concat(good, hex"00")
+            ];
+            for (uint256 i; i < calls.length; i++) {
+                vm.prank(address(0xA11CE));
+                (bool ok, bytes memory ret) = address(anchor).call(calls[i]);
+                _assertRefused(ok, ret, notAuthority);
+            }
+        }
     }
 
     /// Any calldata the authority sends to either call is accepted only if it
@@ -862,30 +924,38 @@ contract BoardAnchorTest is TestBase {
     /// times, leaves each record as the first registration and the first
     /// retirement after it wrote it, and nothing else succeeds (T-69).
     function testFuzz_ReceiptKeyRecordFollowsTheFirstWrites(uint256[8] calldata ops) public {
-        uint64[2][3] memory shadow;
+        // Keys 0–3: prefixes 0x02 and 0x03 of two x values, so 2k and 2k + 1 are twins.
+        uint64[2][4] memory shadow;
         uint256 t = EPOCH;
         for (uint256 i; i < ops.length; i++) {
-            uint256 k = ops[i] % 3;
+            uint256 k = ops[i] % 4;
             bool retire = (ops[i] >> 8) % 2 == 1;
             t += (ops[i] >> 16) % 1000;
             vm.warp(t);
-            bytes memory key = _receiptKey(0x02, bytes32(k + 1));
             vm.prank(authority);
             (bool ok,) = address(anchor)
                 .call(
                     retire
-                        ? abi.encodeCall(BoardAnchor.retireReceiptKey, (key))
-                        : abi.encodeCall(BoardAnchor.registerReceiptKey, (key))
+                        ? abi.encodeCall(BoardAnchor.retireReceiptKey, (_fuzzKey(k)))
+                        : abi.encodeCall(BoardAnchor.registerReceiptKey, (_fuzzKey(k)))
                 );
-            bool allowed = retire ? shadow[k][0] != 0 && shadow[k][1] == 0 : shadow[k][0] == 0;
+            bool allowed = retire
+                ? shadow[k][0] != 0 && shadow[k][1] == 0
+                : shadow[k][0] == 0 && shadow[k ^ 1][0] == 0;
             assertTrue(ok == allowed, "acceptance");
             if (ok) shadow[k][retire ? 1 : 0] = uint64(t);
         }
-        for (uint256 k; k < 3; k++) {
-            (uint64 registeredAt, uint64 retiredAt) = anchor.receiptKeyRecord(0x02, bytes32(k + 1));
+        for (uint256 k; k < 4; k++) {
+            bytes memory key = _fuzzKey(k);
+            (uint64 registeredAt, uint64 retiredAt) =
+                anchor.receiptKeyRecord(uint8(key[0]), _x(key));
             assertEq(registeredAt, shadow[k][0], "registeredAt");
             assertEq(retiredAt, shadow[k][1], "retiredAt");
         }
+    }
+
+    function _fuzzKey(uint256 k) internal pure returns (bytes memory) {
+        return _receiptKey(uint8(2 + k % 2), bytes32(k / 2 + 1));
     }
 
     /// A real key's calldata and logs carry no text. The 32 bytes after the

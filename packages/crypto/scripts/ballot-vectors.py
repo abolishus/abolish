@@ -26,7 +26,9 @@ from the record; the second (outside the workspace, with Semaphore's circuit
 artifacts and snarkjs) proves, checks that the circuit's outputs equal the
 expected root and nullifier, and records snarkjs's verdict on every case's
 signals; the third assembles the records and decides each case with this
-file's own admission check, taking the pairing's verdict from snarkjs. Every
+file's own admission check, taking the pairing's verdict from snarkjs. The decode
+rejections are labelled by hand from the strict-decoding rules and the
+record's fixed offsets. Every
 value but the proofs is deterministic from fixed labels (test data, never
 keys); Groth16 proving is randomised, so the committed file is the record.
 """
@@ -394,6 +396,10 @@ def build(constants):
     prove("over-vote", "tier-0", 3, p, 0, bh_of(b13), (b13["l1RefNumber"], b13["l1RefHash"]))
     case("sum-proof", "A member's plurality over-vote: two options, each proved 0 or 1", "plurality", [1, 2], b13, "over-vote")
 
+    # The order of the checks, where two would fail: the earlier code is the result.
+    case("order-unqualified-before-membership", "An unregistered seat's share hash and another ballot's proof: share-hash-unqualified comes first", "plurality", [1, 2], b3, "tier-2", "share-hash-unqualified")
+    case("order-membership-before-option", "A vote of 2 and another ballot's proof: membership-proof comes first", "plurality", [1, 2], b12, "tier-0", "membership-proof")
+
     checks = []
     for c in cases:
         e = elections[c["election"]]
@@ -484,7 +490,7 @@ def assemble(constants, proofs_path, out_dir):
         ("proof-c-coordinate-p", "A membership proof whose C has x at the base field order", with_bytes(proof_at + 192, bytes.fromhex("30644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd47")), "non-canonical", proof_at + 192),
         ("vss-identity", "A committed vote whose first VSS commitment is the identity", with_bytes(first_element, bytes(32)), "non-canonical", first_element),
         ("version-2", "Version 2, which no profile can pin yet (the pinned version is 1)", with_bytes(2, b"\x02"), "profile-mismatch", 2),
-        ("other-type", "Record type 0x000c: the only known type here is 0x0002 (vectors README, Record vectors)", with_bytes(0, b"\x00\x0c"), "unknown-record-type", 0),
+        ("other-type", "Record type 0x000c, a share receipt's: in this file the only known type is 0x0002 (notation.md, Strict decoding)", with_bytes(0, b"\x00\x0c"), "unknown-record-type", 0),
     ]
     decode_vectors = []
     for did, desc, enc, err, at in decode:
@@ -503,7 +509,8 @@ def assemble(constants, proofs_path, out_dir):
             "generators and its own self-checked Baby Jubjub; membership proofs by packages/crypto/scripts/ballot-proofs.mjs, "
             "run outside the workspace with Semaphore 4.14.3's depth-32 circuit artifacts and snarkjs 0.7.5's fullProve, which "
             "checks that each proof's outputs equal the root and nullifier computed here; every pairing verdict is snarkjs's "
-            "groth16.verify on the signals derived here from the record"
+            "groth16.verify on the signals derived here from the record. Decode errors and their offsets are labelled by hand "
+            "from the strict-decoding rules and the layout's fixed offsets"
         ),
         "recordType": "0x0002",
         "version": 1,

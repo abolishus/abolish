@@ -265,6 +265,28 @@ describe("ballot context", () => {
     );
   });
 
+  test("refuses a definition naming another membership key", () => {
+    const other = decodeElectionDefinition(
+      encodeElectionDefinition({ ...d, membership_vk_hash: new Uint8Array(32) }),
+    );
+    expect(() => ballotElection(other, keySet([1, 2], other.ceremony_transcript_hash))).toThrow(
+      RangeError,
+    );
+  });
+
+  test("overwriting the exposed definition hash changes nothing checked", () => {
+    const election = electionOf("plurality", [1, 2]);
+    const record = decodeBallot(honest, 1);
+    const before = checkBallot(election, record);
+    election.definitionHash.fill(0);
+    expect(checkBallot(election, record)).toEqual(before);
+    expect(before.ok).toBe(true);
+    expect(checkBallot(election, { ...record, definition_hash: new Uint8Array(32) })).toEqual({
+      ok: false,
+      code: "ballot-stray",
+    });
+  });
+
   test("checkBallot and ballotSignals refuse a context ballotElection didn't make", () => {
     const record = decodeBallot(honest, 1);
     const copy = { ...plurality };

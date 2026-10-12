@@ -12,7 +12,6 @@ import {
   ballotHash,
   checkValidity,
   COMMITTED_VOTE,
-  type CommittedVote,
   shapeOk,
   type ValidityContext,
   type ValidityRules,
@@ -24,6 +23,7 @@ import { membershipScope, semaphoreField } from "./membership.ts";
 import {
   type MembershipSignals,
   membershipProof,
+  membershipVkHash,
   verifyDecodedMembershipProof,
 } from "./membership-proof.ts";
 import { electionDefinitionHash, pinnedVersion, UnsupportedVersionError } from "./protocol.ts";
@@ -88,8 +88,9 @@ export interface BallotElection extends ValidityRules {
  * The context `checkBallot` and `ballotSignals` run against. `registered`
  * must be the key set `checkCeremonyTranscript` returned for the transcript
  * this definition names, so no caller can pair one election with another's
- * seats (T-37). The caller has decoded the definition and run verifier 2.4
- * for it (no tier root is 0).
+ * seats (T-37). The caller has decoded the definition and run verifier 2.x
+ * for it; a definition naming another membership key (1.3) or a tier root of
+ * 0 (2.4) is refused here too, since no ballot could be checked under it.
  */
 export function ballotElection(
   definition: ElectionDefinition,
@@ -103,9 +104,11 @@ export function ballotElection(
   const transcript = checkedTranscriptHash(registered);
   if (transcript === undefined || !equalBytes(transcript, definition.ceremony_transcript_hash))
     throw new RangeError("ballotElection: not the key set of this definition's ceremony");
+  if (!equalBytes(definition.membership_vk_hash, membershipVkHash()))
+    throw new RangeError("ballotElection: the definition names another membership key");
   const definitionHash = electionDefinitionHash(definition);
   const election: BallotElection = Object.freeze({
-    definitionHash,
+    definitionHash: Uint8Array.from(definitionHash),
     optionCount: definition.option_count,
     minSelections: definition.min_selections,
     maxSelections: definition.max_selections,
@@ -116,22 +119,27 @@ export function ballotElection(
         Object.freeze({
           tier: g.tier,
           root: g.root,
+          // Throws for a root of 0, which anyone can prove membership of (T-04).
           scope: membershipScope(definitionHash, g.tier, g.root),
         }),
       ),
     ),
     qualified: Object.freeze(registered.map((k) => k.index)),
   });
-  MADE.add(election);
+  MADE.set(election, definitionHash);
   return election;
 }
 
-// Contexts `ballotElection` made: a hand-built one could pair a definition
+// Contexts `ballotElection` made, each with its own copy of the definition
+// hash: a hand-built context, or one whose exposed hash was overwritten in
+// place (a frozen object's byte array isn't frozen), could pair a definition
 // hash with another election's roots, scopes or seats.
-const MADE = new WeakSet<BallotElection>();
+const MADE = new WeakMap<BallotElection, Uint8Array>();
 
-function checkMade(election: BallotElection): void {
-  if (!MADE.has(election)) throw new TypeError("expected a context made by ballotElection");
+function definitionHashOf(election: BallotElection): Uint8Array {
+  const hash = MADE.get(election);
+  if (hash === undefined) throw new TypeError("expected a context made by ballotElection");
+  return hash;
 }
 
 /**
@@ -147,29 +155,51 @@ export function ballotSignals(
   election: BallotElection,
   ballot: UnprovenBallot,
 ): MembershipSignals | undefined {
-  checkMade(election);
-  if (!equalBytes(ballot.definition_hash, election.definitionHash)) return undefined;
+  const definitionHash = definitionHashOf(election);
+  const fields = fieldsOf(ballot);
+  if (!equalBytes(fields.definitionHash, definitionHash)) return undefined;
   const hash = ballotHash(
-    { definitionHash: election.definitionHash, tier: ballot.tier, nullifier: ballot.nullifier },
-    ballot.committed_vote,
+    { definitionHash, tier: fields.tier, nullifier: fields.nullifier },
+    fields.vote,
   );
-  return signalsOf(election, ballot, hash)?.signals;
+  return signalsOf(election, definitionHash, fields, hash)?.signals;
 }
 
-function signalsOf(election: BallotElection, ballot: UnprovenBallot, hash: Uint8Array) {
-  const group = election.tiers.find((g) => g.tier === ballot.tier);
+type Fields = ReturnType<typeof fieldsOf>;
+
+// Reads each field once, so a record with getters can't show one check one
+// value and the next another.
+function fieldsOf(ballot: UnprovenBallot) {
+  const { definition_hash, tier, nullifier, l1_ref_number, l1_ref_hash, committed_vote } = ballot;
+  return {
+    definitionHash: definition_hash,
+    tier,
+    nullifier,
+    l1RefNumber: l1_ref_number,
+    l1RefHash: Uint8Array.from(l1_ref_hash),
+    vote: committed_vote,
+  };
+}
+
+function signalsOf(
+  election: BallotElection,
+  definitionHash: Uint8Array,
+  fields: Fields,
+  hash: Uint8Array,
+) {
+  const group = election.tiers.find((g) => g.tier === fields.tier);
   if (group === undefined) return undefined;
   // M binds the election, the tier, the ballot hash and the L1 block (T-38, T-45).
   const message = membershipMessage({
-    definitionHash: election.definitionHash,
-    tier: ballot.tier,
+    definitionHash,
+    tier: fields.tier,
     ballotHash: hash,
-    l1RefNumber: ballot.l1_ref_number,
-    l1RefHash: ballot.l1_ref_hash,
+    l1RefNumber: fields.l1RefNumber,
+    l1RefHash: fields.l1RefHash,
   });
   const signals: MembershipSignals = {
     root: group.root,
-    nullifier: ballot.nullifier,
+    nullifier: fields.nullifier,
     message: semaphoreField(message),
     scope: group.scope,
   };
@@ -206,22 +236,23 @@ export type BallotCheck =
  * L1 reference admitted (5.8) and the close rule (5.5) before selection.
  */
 export function checkBallot(election: BallotElection, ballot: BallotRecord): BallotCheck {
-  checkMade(election);
-  if (!equalBytes(ballot.definition_hash, election.definitionHash))
+  const definitionHash = definitionHashOf(election);
+  const proof = ballot.membership_proof;
+  const fields = fieldsOf(ballot);
+  const { tier, nullifier, vote } = fields;
+  if (!equalBytes(fields.definitionHash, definitionHash))
     return { ok: false, code: "ballot-stray" };
-  if (!election.tiers.some((g) => g.tier === ballot.tier))
-    return { ok: false, code: "ballot-tier" };
+  if (!election.tiers.some((g) => g.tier === tier)) return { ok: false, code: "ballot-tier" };
   const ctx: ValidityContext = {
-    definitionHash: election.definitionHash,
+    definitionHash,
     optionCount: election.optionCount,
     minSelections: election.minSelections,
     maxSelections: election.maxSelections,
     threshold: election.threshold,
     panelSize: election.panelSize,
-    tier: ballot.tier,
-    nullifier: ballot.nullifier,
+    tier,
+    nullifier,
   };
-  const vote: CommittedVote = ballot.committed_vote;
   if (!shapeOk(ctx, vote)) return { ok: false, code: "validity-shape" };
   // A seat outside the registered key set gets no shares, and its hash is
   // fixed, so it carries no chosen bytes into the archive (T-17).
@@ -233,8 +264,10 @@ export function checkBallot(election: BallotElection, ballot: BallotRecord): Bal
       return { ok: false, code: "share-hash-unqualified" };
   const hash = ballotHash(ctx, vote);
   // The tier was found above, so the signals exist.
-  const derived = signalsOf(election, ballot, hash) as NonNullable<ReturnType<typeof signalsOf>>;
-  if (!verifyDecodedMembershipProof(ballot.membership_proof, derived.signals))
+  const derived = signalsOf(election, definitionHash, fields, hash) as NonNullable<
+    ReturnType<typeof signalsOf>
+  >;
+  if (!verifyDecodedMembershipProof(proof, derived.signals))
     return { ok: false, code: "membership-proof" };
   const validity = checkValidity(ctx, vote);
   if (!validity.ok) return validity;
@@ -242,10 +275,10 @@ export function checkBallot(election: BallotElection, ballot: BallotRecord): Bal
     ok: true,
     ballotHash: hash,
     message: derived.message,
-    tier: ballot.tier,
-    nullifier: ballot.nullifier,
-    l1RefNumber: ballot.l1_ref_number,
-    l1RefHash: Uint8Array.from(ballot.l1_ref_hash),
+    tier,
+    nullifier,
+    l1RefNumber: fields.l1RefNumber,
+    l1RefHash: fields.l1RefHash,
   };
 }
 

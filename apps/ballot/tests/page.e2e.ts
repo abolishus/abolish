@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 
 import { type Browser, chromium, type Page } from "playwright";
 import { build, preview, type PreviewServer } from "vite-plus";
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "vite-plus/test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "vite-plus/test";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const GATEWAY_PATH = "/ipfs/bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi/";
@@ -90,6 +90,12 @@ beforeEach(async () => {
   });
   await page.goto(`${origin}/`);
   await page.getByRole("heading", { level: 1 }).waitFor();
+});
+
+// Each test's page closes with it, so a late event from one page (an image
+// load, a CSP report) can't land in the next test's arrays.
+afterEach(async () => {
+  await page?.close();
 });
 
 describe("the served ballot client", () => {

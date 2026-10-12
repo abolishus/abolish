@@ -227,13 +227,17 @@ export function trackingCode(
  * Whether a published opening would open a commitment of `ballot`
  * (docs/spec/challenge.md, Opened commitments): the same definition hash,
  * and some ballot commitment `C_{j'}`, at any option, equal to an opened
- * `C_j`, to `h^{r_j}` or to `g · h^{r_j}`. An opening gives `v_j` and `r_j`,
- * which open `C_j` wherever it is cast (under fresh share hashes, another
- * tier, re-blinded higher coefficients or another option) and any
- * commitment to 0 or 1 under the same `r_j`. So `opening-cast` and the
- * checker's warning compare this, never tracking codes or whole VSS lists
- * (T-45, T-47). A commitment derived from an opened one by a chosen
- * relation isn't caught: a residual.
+ * `C_j`, or to `h^s` or `g · h^s` for a secret scalar `s` the opening
+ * reveals: a coefficient of any `g_j`, a coefficient of any `f_j` but its
+ * constant term (the vote), a seat's share `f_j(i)` or `g_j(i)`,
+ * or a seat's `e_i` or `w_i`. An opened `C_j` is opened wherever it is cast
+ * (under fresh share hashes, another tier, re-blinded higher coefficients or
+ * another option), and so is any commitment to 0 or 1 whose randomness is a
+ * revealed scalar. So `opening-cast` and the checker's warning compare this,
+ * never tracking codes or whole VSS lists (T-45, T-47). Randomness derived
+ * from revealed scalars by a chosen relation isn't caught: a residual. It
+ * takes an opening that passed `checkChallengeOpening`, whose share hashes
+ * give `n`.
  */
 export function opensBallotCommitment(
   opening: SpoiledBallotOpening,
@@ -243,16 +247,30 @@ export function opensBallotCommitment(
   // Encoded, so an element is compared by its one canonical encoding.
   const enc = (e: Element) => toHex(encode(elementOrIdentity, e));
   const opened = new Set<string>();
-  opening.vss.forEach((row, j) => {
+  for (const row of opening.vss) {
     const c = row[0];
     if (c === undefined) throw new RangeError("vss: an option without commitments");
     opened.add(enc(c));
-    const r = opening.polynomials[j]?.g[0];
-    if (r === undefined) return;
-    const hr = mul(GENERATOR_H, r);
-    opened.add(enc(hr));
-    opened.add(enc(hr.add(G)));
-  });
+  }
+  const seats = opening.share_hashes.map((_, i) => BigInt(i + 1));
+  const revealed = new Set<bigint>();
+  for (const { f, g } of opening.polynomials) {
+    // f_j's constant term is the vote, 0 or 1, never randomness: h^{v_j} and
+    // g · h^{v_j} are commitments anyone can open, so matching them would let
+    // one such ballot block every opening, and reveal nothing (challenge.md).
+    for (const c of f.slice(1)) revealed.add(c);
+    for (const c of g) revealed.add(c);
+    for (const poly of [f, g]) for (const x of seats) revealed.add(evaluate(poly, x));
+  }
+  for (const { e, w } of opening.seats) {
+    revealed.add(e);
+    revealed.add(w);
+  }
+  for (const s of revealed) {
+    const hs = mul(GENERATOR_H, s);
+    opened.add(enc(hs));
+    opened.add(enc(hs.add(G)));
+  }
   return ballot.vss.some((row) => {
     const c = row[0];
     if (c === undefined) throw new RangeError("vss: an option without commitments");

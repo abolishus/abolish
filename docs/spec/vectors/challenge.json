@@ -1928,6 +1928,91 @@
       },
       "coreHash": "759f9244f4bd347bc4fafb60f5439d0b046a27722a456dc297ef196bc79ed839",
       "opened": false
+    },
+    {
+      "id": "higher-coefficient",
+      "description": "Option 0's vote under b_{0,1}, g_0's revealed higher coefficient, every other commitment fresh",
+      "opening": "plurality",
+      "core": {
+        "definitionHash": "27819ab7e3df03fcbe05d509bd2487d7f48a412a98d991e84705112e94316105",
+        "tier": 0,
+        "vss": "0000000300000002e4f28e2df537b065c95d30a8d04eedd2c72241343f6e865499cf01eceaaf384a94067caa4e43f789c7d05fec1443503c1f90d16144079623dc1330e00d77cb6d00000002741fe41cba3187d90918901ff6bfc0a8291d3131250c4d69fec428a5e864312274b36bc1c61c5ca40f66721b2ea544a4dea913c3830b84072a4b4cf23a1cf37f00000002a2d87c2426390d64159fdf202a415fd6ebff4428032ff489c42355bafb1d5f64267d14568dbb8c19429ccf49782f380f246cdba211d116c298c9fc2bb1973e7b",
+        "shareHashes": [
+          "e73d47ee830c0b4cbf3a9a1f8ab0277640baae74b14995093a0674c07443efaf",
+          "746561230602b021daaf962abbc30db449f1caca663ec69a2cfc43e4d58de735",
+          "d11c75ebb80fbe24a73e3f59da5fcf95af78efa4d8f73ce24fa06cda5ca4e3c1"
+        ]
+      },
+      "coreHash": "79c957604ae38381262be3024dcb0dc2c75ef3741b519a255d7a0dc97cd3ae86",
+      "opened": true
+    },
+    {
+      "id": "seat-share",
+      "description": "Option 0's vote under g_0(2), seat 2's revealed share, every other commitment fresh",
+      "opening": "plurality",
+      "core": {
+        "definitionHash": "27819ab7e3df03fcbe05d509bd2487d7f48a412a98d991e84705112e94316105",
+        "tier": 0,
+        "vss": "00000003000000027eddcc93faeeff2b5e55df3cefaa943e6e2670d66dab00dec33f460ea041680ad0517bef8938de4272580302a779cb60245d7d2e9d77979346453ab15af32922000000023a5b473f95c047868a428feae469003e51f970282c70ab0f6f5c83462cd8997e0c7e33df2f90cea6b074fddb67ba1063ab47f85dab5968d8af028b9f7a6b271c00000002ceba6ff8f8f462fb5ecc212fca43ba161ee2f64185b51f6c2a422e8fee14c26216517f130f5f42225d26a7641ca16a68e11082fbee9d7ebccf29b487a02f8326",
+        "shareHashes": [
+          "10c1577398fb06b93ce1c255a670122663241189ea490284e39a9782933d79fb",
+          "b0de8c3ca9292bbd552482df33b8693c7679bb786a70f2479f3bf8c63ad88b51",
+          "4760fb2b5f38684b6e4d19f1b113576903a7e64e07db3c0c387d58bcfaf283e2"
+        ]
+      },
+      "coreHash": "7b37de949dd3f591f0c109c514e79b161ab85eeda58d01c5149d14da76d2bb17",
+      "opened": true
+    },
+    {
+      "id": "vote-coefficient",
+      "description": "Option 0's vote under a_{1,1}, f_1's revealed higher coefficient, every other commitment fresh",
+      "opening": "plurality",
+      "core": {
+        "definitionHash": "27819ab7e3df03fcbe05d509bd2487d7f48a412a98d991e84705112e94316105",
+        "tier": 0,
+        "vss": "00000003000000025418d7fe5a0208d35af94450644531ba24b209786677fe860478bb6b496c91317cebd401fe389516a1a383e33123d65ae0e91b915f07380351ca601987f8b41e000000021adfcd225e3494cfeeae619f7b1250518f2f62a23b80580a95500fb34b653e2094b9100f0c192866fee13e4c6a4c608159b51096792019ca9de73d0c18f89761000000029485c0789f76307ed909799afbe100ed9525716cd767a26418cd26f3ca96e012669402843ba72b6264a3d812bb03973636f4e0e67eb81520d8d40add75757339",
+        "shareHashes": [
+          "b62f91b4b5958907963a7a79543a1274b5c9566858219e893409eb2e78a2f5f6",
+          "b744e565d5798e047d381a6314bbd8634e6e4df6939b1ed76f8f29ee6c341cfd",
+          "dc24728ad4c67afc81ddbab54311d1d7f5a85f234f08a660b85f31055f773cb8"
+        ]
+      },
+      "coreHash": "7b7d76783195371dfcb585c10f384e9a9d2f942cacf92ca34244d66974e6c4d6",
+      "opened": true
+    },
+    {
+      "id": "seat-ephemeral",
+      "description": "Option 0's vote under seat 1's revealed e_1, every other commitment fresh",
+      "opening": "plurality",
+      "core": {
+        "definitionHash": "27819ab7e3df03fcbe05d509bd2487d7f48a412a98d991e84705112e94316105",
+        "tier": 0,
+        "vss": "00000003000000023c1466c069a083c8670a33b145a2bd7a88abcd0f11dd424fd5a22e001ff5956b3e39e9140649ad9894359d7286ee28795f05b36918b8b55dc19474f2f28dbc7400000002d2f5cbf875c31c804924ea2265064335a05fa1e8c5215a7e880d3fb231bcc82384d347e67ca78666315c15a32ab0b7bcb74299b4331e9a11f307697b4be47b5d00000002d4a3365ab3a0d392945f5984a94fc5d74aac34e3b75af85b252317facbd2254dea2fcec096a6438c7689728d9d5d724ba54099f868f9427bc663f2865b9d7e77",
+        "shareHashes": [
+          "c2ff470dd70ecd68d5bbe33798cfbffc2e094dc54899a42c996de7c27128ca61",
+          "ab9a1eeb506a0ebab4fcf93ea352cad91d627054d3a7515aeaad9bd82280ef8a",
+          "fe9f7bdeea470fe42835a7551cca73988b8822725e61333721ff9f85a34564c7"
+        ]
+      },
+      "coreHash": "86a9145771bd61c5c1b0eb6b36538706c3f7a3ec838fa6bf210802e6532eeda6",
+      "opened": true
+    },
+    {
+      "id": "public-randomness",
+      "description": "A counted core whose option 0 commits to 1 with r = 0 (C = g) and option 1 to 0 with r = 1 (C = h): anyone can open them already, and the opening's votes are never matched as randomness",
+      "opening": "plurality",
+      "core": {
+        "definitionHash": "27819ab7e3df03fcbe05d509bd2487d7f48a412a98d991e84705112e94316105",
+        "tier": 0,
+        "vss": "0000000300000002e2f2ae0a6abc4e71a884a961c500515f58e30b6aa582dd8db6a65945e08d2d7608db9b85e40d7eb6ae364f63badf38f9d7f10553d710d68862f1b4aef225b773000000022ac338de551824e59d1a2563c133a8ec81b4007edb867d4e4411a416cc98fa3498b3f3992f16b0fd75f3f5beb327765ec1d546a804d5f3039b21d78978a8262b000000020cd6e8147817a5327169c594aa98ccc6ecf74be29f8afda653988a2ad0246d52288bfe3b18db9a4b0711268543225aed07ca90f947d697b71d98c78f4c4f7d7b",
+        "shareHashes": [
+          "0000000000000000000000000000000000000000000000000000000000000000",
+          "0000000000000000000000000000000000000000000000000000000000000000",
+          "0000000000000000000000000000000000000000000000000000000000000000"
+        ]
+      },
+      "coreHash": "362a7e5739dc96bd5ecbefa27660f5ea98c7bfa59ef58bf1a91ecfdde78f99bf",
+      "opened": false
     }
   ],
   "castBallots": [

@@ -89,6 +89,7 @@ One-off items: [[P0-ops]] split shared hot files; [[P0-ops-2]] P0-ops review fol
 ## Blocked
 
 - [[P1-13]] part 2, receipts (#48): labelled `blocked` after three pushes that each left `crypto-review` with a new blocking finding in the receipt's evidence model. It waits on the owner's review of ADR 0013 (in #48) as it stands, or on binding receipt keys per election first; see [[P1-13]].
+- On 2026-10-12 the owner answered [[0016-share-kem-dh-group]] (option A), unblocking [[P1-12]] part 2 (#58) and so P1-14 part 2, P1-12 part 3 and P1-15 parts 2 and 3.
 - On 2026-10-11 the owner unblocked [[P0-2]] (`trustPolicyExclude: [semver@6.3.1]`), [[P1-12]] and [[P1-14]] part 2 (answers recorded in [[0002-everlasting-privacy]], Decision).
 
 ## Decisions to review
@@ -118,6 +119,7 @@ Where and when untrusted content tried to redirect an agent (AGENTS.md, Untruste
 
 ## Known-weak
 
+- **`@noble/post-quantum` (ML-KEM-768) is unaudited** (P1-12 part 2, #58). It is self-audited at 0.6.1, and the pinned 0.7.1 has changes since. The brief allows it on testnets only, in a hybrid KEM with X25519, which the owner reads as covering #58's ristretto255 hybrid ([[0016-share-kem-dh-group]]); an independent audit of the code in use is a mainnet prerequisite, and funding it is the owner's ([[0002-everlasting-privacy]], Decision).
 - **The API has no cache or metrics no-join test yet** (T-10). P2-1 covers tables, P2-3 part 1 the API's request log and P2-4 part 1 queue job data, Redis and the worker's log. The API part that adds a cache or metrics extends its test, and so does each new queue (by its side and fields). The proxy in front of the API logs on its own; [[P2-11]] must configure it to keep no addresses or query strings (T-11).
 - **CI pulls service images with a repository-level Docker Hub token** (#19). `DOCKERHUB_TOKEN` is read-only, and any workflow run from an in-repo branch can read it (T-65). If the token is revoked or expires, every service-container start fails with `unauthorized`. The fix is for the owner to rotate the secret, or to switch back to the ECR Public mirror (#17). Fork PRs get no secrets, so they pull anonymously.
 - **`reference-election` check is a placeholder.** It passes with a warning until P1-20 adds the root `reference-election` script and sets the workflow's `EXPECT_FIXTURE` flag, so it proves nothing yet.

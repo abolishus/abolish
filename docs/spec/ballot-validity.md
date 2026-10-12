@@ -4,7 +4,7 @@ How a plurality or approval ballot commits to its vote on the public board, how 
 
 What this page doesn't cover yet, by the part of P1-12 that owns it:
 
-- **Share encryption** (part 2): the hybrid KEM and AEAD that carry each trustee's shares, and the hash `H(ct_i)` of each ciphertext. This page takes the `n` ciphertext hashes as 32-byte values and binds them into the statement.
+- **Share encryption** is specified in [[share-encryption]] (part 2): the hybrid KEM and AEAD that carry each trustee's shares, and the hash `H(ct_i)` of each ciphertext. This page takes the `n` ciphertext hashes as 32-byte values and binds them into the statement.
 - **The ballot record** (`0x0002`, part 3, with P1-13 and P1-17b): the record that carries the committed vote below with its tier, nullifier, L1 block reference and membership proof, and the ballot hash. The committed vote is a structure nested in that record, and its layout here is the one version 1 of the record carries.
 
 ## Sources
@@ -45,14 +45,14 @@ Its VSS commitments are, for `t = 0, …, k − 1`,
 E_{j,t} = g^{coef_t(f_j)} · h^{coef_t(g_j)}
 ```
 
-so `E_{j,0} = C_j = g^{v_j} · h^{r_j}` is the Pedersen commitment to option `j`'s vote. Trustee `i` (`1 ≤ i ≤ n`, its seat in the panel) receives, for every option, the share `(f_j(i), g_j(i))`; part 2 encrypts the shares to it. Each `E_{j,t}` is information-theoretically hiding (perfectly, up to the sampling distance under Proving) because its `h` exponent is uniform and independent of everything else, so the commitments reveal nothing about the vote to anyone, whatever their computing power ([[0002-everlasting-privacy]], T-15). They are binding under the discrete-log assumption, because no one knows `log_g h` ([[group]], Hash to group and `h`).
+so `E_{j,0} = C_j = g^{v_j} · h^{r_j}` is the Pedersen commitment to option `j`'s vote. Trustee `i` (`1 ≤ i ≤ n`, its seat in the panel) receives, for every option, the share `(f_j(i), g_j(i))`, encrypted to it as [[share-encryption]] specifies. Each `E_{j,t}` is information-theoretically hiding (perfectly, up to the sampling distance under Proving) because its `h` exponent is uniform and independent of everything else, so the commitments reveal nothing about the vote to anyone, whatever their computing power ([[0002-everlasting-privacy]], T-15). They are binding under the discrete-log assumption, because no one knows `log_g h` ([[group]], Hash to group and `h`).
 
 The ballot carries the committed vote:
 
 | Field           | Type                                             | Meaning                                                                                                                                      |
 | --------------- | ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
 | `vss`           | `list<list<element, MAX_TRUSTEES>, MAX_OPTIONS>` | For each option `j` in order, its `k` VSS commitments `E_{j,0}, …, E_{j,k−1}`. None is the identity.                                         |
-| `share_hashes`  | `list<bytes[32], MAX_TRUSTEES>`                  | `H(ct_i)` for each trustee `i = 1, …, n` in seat order: the hash of the ciphertext carrying trustee `i`'s shares (part 2).                   |
+| `share_hashes`  | `list<bytes[32], MAX_TRUSTEES>`                  | `H(ct_i)` for each trustee `i = 1, …, n` in seat order: the hash of the ciphertext carrying trustee `i`'s shares ([[share-encryption]]).     |
 | `option_proofs` | `list<bit_proof, MAX_OPTIONS>`                   | For each option `j` in order, the proof that `C_j` commits to 0 or 1.                                                                        |
 | `sum_proof`     | `list<branch, 65>`                               | The proof that `C_Σ` commits to a value from `min` to `max`: one branch per value `s = min, …, max`, in that order. 65 is `MAX_OPTIONS + 1`. |
 
@@ -143,9 +143,9 @@ To prove `Y` commits to `s_v` with randomness `ρ` (an option proof: `ρ = r_j`,
 
 This is the standard simulation of the false branches (CDS94): whatever the committed value, an honest proof is distributed as a uniformly random accepting transcript, so the proof is witness-indistinguishable against an unbounded adversary and reveals nothing about which value was committed (T-15). The only distance from perfect is the scalar sampling: each scalar is 64 CSPRNG bytes reduced mod `ℓ`, within about 2⁻²⁶² of uniform, so a ballot's proofs and commitments are within a statistical distance of about 2⁻²⁵⁰ of their ideal distribution. `w`, the simulated `c_b` and `z_b`, and every polynomial coefficient come from the platform CSPRNG through `packages/crypto` and are never reused. A caller can't supply them: `packages/crypto` proves only a sharing it made itself, unchanged. Once the voter casts, the client discards them with `r_j`, except where P1-13's challenge reveals them on a spoiled ballot ([[0002-everlasting-privacy]], T-18, T-45); in JavaScript that means dropping every reference, since a `bigint` can't be overwritten.
 
-Order of construction: the vote's polynomials and `vss` first, then the shares and their ciphertexts (part 2) and `share_hashes`, then `statement_hash`, then the option proofs and the sum proof.
+Order of construction: the vote's polynomials and `vss` first, then the shares and their ciphertexts ([[share-encryption]]) and `share_hashes`, then `statement_hash`, then the option proofs and the sum proof.
 
-Every validity proof binds the ballot's nullifier, and so does each share ciphertext's associated data ([[0002-everlasting-privacy]], Private part), which reaches the proofs through `share_hashes`. P1-13 requires a challenged ballot to carry nothing that depends on the nullifier ([[verifier]] 6.2, [[board]]), so P1-13 and part 2 reconcile the two before either is frozen: for example, a challenged ballot built without proofs and under a nullifier-independent context, or a tracking code over the nullifier-independent core. Until then a challenged ballot's format is open (T-42, T-47).
+Every validity proof binds the ballot's nullifier. The share ciphertexts don't: their associated data binds the definition, the seat and `vss` but not the tier or the nullifier ([[share-encryption]], Ciphertext), so the sharing, the ciphertexts and `share_hashes` can be made without the nullifier. P1-13 requires a challenged ballot to carry nothing that depends on the nullifier ([[verifier]] 6.2, [[board]]), so a challenged ballot can be that nullifier-independent core without the proofs, or with a tracking code over it. P1-13 fixes its format (T-42, T-47).
 
 ## Shares
 

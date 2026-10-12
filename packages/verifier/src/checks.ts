@@ -26,6 +26,9 @@ export const CHECKS: readonly CheckSpec[] = Object.freeze([
   ...admission("5.1", "5.2", "5.3", "5.4", "5.5"),
   ...election("5.6"),
   ...admission("5.7", "5.8"),
+  // A failing posting or an unfounded complaint is only reported; 5.9 is an
+  // election check because it decides which ballots are counted.
+  ...election("5.9"),
   // 6.1's admission part is an admission check and the rest an election
   // check; one row, judged as an election check, since its unverifiability
   // or failure decides the election either way.

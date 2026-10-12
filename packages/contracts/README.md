@@ -2,7 +2,7 @@
 
 Abolish's contracts (the L2 contracts and the L1 board anchor), built with Foundry 1.8.3 and solc 0.8.30. Internal and source-only: deployed bytecode is checked against the release build of this source (verifier check 1.2, T-64).
 
-**Status: early (P1-18, P3-2, P4-1).** So far there are the event accumulator, the election registry, the trustee key registry, the group registry with its Tier 0 additions and the L1 board anchor. Direct submission and the wagmi bindings follow in later P1-18 changes. Nothing is deployed, and nothing may be until the close rule exists ([`docs/spec/contracts.md`](../../docs/spec/contracts.md), Election registry).
+**Status: early (P1-18, P3-2, P4-1).** So far there are the event accumulator, the election registry, the trustee key registry, the group registry with its Tier 0 additions and the L1 board anchor. The deployable contracts have typed wagmi bindings (Bindings, below). Direct submission follows in a later P1-18 change. Nothing is deployed, and nothing may be until the close rule exists ([`docs/spec/contracts.md`](../../docs/spec/contracts.md), Election registry).
 
 ## Event accumulator
 
@@ -51,6 +51,15 @@ Abolish's contracts (the L2 contracts and the L1 board anchor), built with Found
 - A call may carry the `archiveLocator` of ADR 0005 (`u16(version) ‖ body`, at most 128 bytes, framed but not interpreted), alone or with checkpoints; `ArchiveLocated` logs it and the latest one stays in state with a count, so the archive is found from L1 alone, even after history expiry (T-49, T-51).
 - `src/CanonicalCalldata.sol` is the calldata check it shares with the election registry.
 - The hourly job and the Sepolia deployment are P4-1 part 2.
+
+## Bindings
+
+`src/generated/abi.ts` holds the typed ABIs (`as const`) of the four deployable contracts, `BoardAnchor`, `ElectionRegistry`, `GroupRegistry` and `TrusteeRegistry`, made by the wagmi CLI's Foundry plugin from the build's `out/` (`wagmi.config.ts`). It is generated and never hand-edited:
+
+- the package build compiles, then runs `wagmi generate` and formats the file with `vp fmt`, so `repro-build` fails if a commit's bindings don't match its contracts (it rejects a build that changes a tracked file);
+- `test/bindings.test.ts` checks that the file binds exactly the concrete contracts in `src/`, each with the ABI in its compiled artifact.
+
+The file is plain data with no imports. `@wagmi/cli` is a dev dependency only; nothing it pulls in (viem, esbuild) reaches the generated file.
 
 ## Rules
 

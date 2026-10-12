@@ -1,6 +1,7 @@
-// The election definition, record type 0x0001 versions 1 and 3
-// (docs/spec/election-definition.md): the layouts, and the well-formedness
-// rules a decoded definition must also meet. Version 2 is never assigned: a
+// The election definition, record type 0x0001 versions 1, 3 and 4
+// (docs/spec/election-definition.md): the layouts, the well-formedness
+// rules a decoded definition must also meet, and when a listed receipt key
+// judges the election. Version 2 is never assigned: a
 // frozen vector uses it as the version with no layout. Its hash, registered on L2 before
 // voting opens and bound into every ballot and proof, is what stops an
 // election's rules changing or differing between voters (T-34).
@@ -19,6 +20,7 @@ import {
 } from "./codec.ts";
 import { RECORD_TYPES, recordType } from "./record.ts";
 import { foldRegions } from "./regional-cells.ts";
+import { p256Key } from "./trustee.ts";
 
 const address = bytesFixed(20);
 const hash = bytesFixed(32);
@@ -121,14 +123,28 @@ const electionDefinitionV3 = struct([
   ...TAIL,
 ] as const);
 
-/** Record type 0x0001, versions 1 and 3 (docs/spec/election-definition.md). */
+/** Version 4's limit on `receipt_keys`: room to rotate a key during an election. */
+export const DEFINITION_V4_LIMITS = Object.freeze({ receiptKeys: 4 } as const);
+
+// Version 3's fields, in order, then the receipt keys that judge the
+// election's receipts (0023-receipt-evidence).
+const electionDefinitionV4 = struct([
+  ...HEAD,
+  ["electorate", list(tierElectorate, 3)],
+  ...TAIL,
+  ["receipt_keys", list(p256Key, DEFINITION_V4_LIMITS.receiptKeys)],
+] as const);
+
+/** Record type 0x0001, versions 1, 3 and 4 (docs/spec/election-definition.md). */
 export const ELECTION_DEFINITION = recordType(RECORD_TYPES.electionDefinition, {
   1: electionDefinitionV1,
   3: electionDefinitionV3,
+  4: electionDefinitionV4,
 });
 
 export type ElectionDefinition = CodecValue<typeof electionDefinitionV1>;
 export type ElectionDefinitionV3 = CodecValue<typeof electionDefinitionV3>;
+export type ElectionDefinitionV4 = CodecValue<typeof electionDefinitionV4>;
 export type TierElectorate = CodecValue<typeof tierElectorate>;
 
 // Version 1's limits, written out rather than read from PARAMETERS: raising a
@@ -190,6 +206,87 @@ export function electionDefinitionV3Rule(
   d: ElectionDefinitionV3,
 ): ElectionDefinitionV3Rule | undefined {
   return headRule(d) ?? electorateV3Rule(d) ?? cellsRule(d) ?? tailRule(d);
+}
+
+/** The well-formedness rule codes of version 4, in checking order: version 3's, then `receipt-keys`. */
+export type ElectionDefinitionV4Rule = ElectionDefinitionV3Rule | "receipt-keys";
+
+/**
+ * Version 4's `electionDefinitionRule`: version 3's rules, then
+ * `receipt-keys`, a non-empty list in strictly ascending byte order, so no
+ * key is listed twice. Whether each key judges the election is
+ * `receiptKeyJudgement`'s, against L1 ([[verifier]] 2.9; T-26).
+ */
+export function electionDefinitionV4Rule(
+  d: ElectionDefinitionV4,
+): ElectionDefinitionV4Rule | undefined {
+  const rule = electionDefinitionV3Rule(d);
+  if (rule !== undefined) return rule;
+  const keys = d.receipt_keys;
+  if (keys.length === 0) return "receipt-keys";
+  for (let i = 1; i < keys.length; i++)
+    if (compareBytes(keys[i - 1] as Uint8Array, keys[i] as Uint8Array) >= 0) return "receipt-keys";
+  return undefined;
+}
+
+function compareBytes(a: Uint8Array, b: Uint8Array): number {
+  for (let i = 0; i < Math.min(a.length, b.length); i++)
+    if (a[i] !== b[i]) return (a[i] as number) - (b[i] as number);
+  return a.length - b.length;
+}
+
+/**
+ * One key's word in the anchor's receipt-key record (docs/spec/contracts.md,
+ * Board anchor, Receipt keys), read from L1 state at a finalized block: the
+ * L1 timestamps of its registration and retirement, 0 for none.
+ */
+export interface ReceiptKeyRecord {
+  readonly registeredAt: bigint;
+  readonly retiredAt: bigint;
+}
+
+/** What a listed key's record says about one election ([[verifier]] 2.9). */
+export type ReceiptKeyJudgement = "judges" | "unregistered" | "retired" | "unsettled";
+
+/**
+ * Whether a listed key judges an election that opens at `opensAt`, from its
+ * record at a finalized L1 block whose timestamp is `provenAt`
+ * (docs/spec/election-definition.md, Receipt keys; [[verifier]] 2.9):
+ *
+ * - `judges`: registered before `opensAt` and not retired by then, read at a
+ *   block at or after `opensAt`, so no later write can change it;
+ * - `unregistered`: not registered before `opensAt`, read at such a block;
+ * - `retired`: registered before `opensAt` and retired at or before it,
+ *   final whenever it is read;
+ * - `unsettled`: read at a block before `opensAt` and not yet retired, so a
+ *   registration or a retirement may still come.
+ *
+ * Every value is a u64 timestamp. A record retired but not registered,
+ * retired before it was registered, or written after `provenAt` can't be the
+ * anchor's at that block, so it throws: the caller read the wrong word.
+ */
+export function receiptKeyJudgement(
+  record: ReceiptKeyRecord,
+  opensAt: bigint,
+  provenAt: bigint,
+): ReceiptKeyJudgement {
+  const { registeredAt, retiredAt } = record;
+  for (const v of [registeredAt, retiredAt, opensAt, provenAt])
+    if (typeof v !== "bigint" || v < 0n || v >= 1n << 64n)
+      throw new RangeError("receipt-key times must be u64 bigints");
+  if (
+    registeredAt > provenAt ||
+    retiredAt > provenAt ||
+    (retiredAt !== 0n && (registeredAt === 0n || retiredAt < registeredAt))
+  )
+    throw new RangeError("not a receipt-key record the anchor can hold at that block");
+  // Any write after opensAt has a later timestamp and changes nothing for
+  // this election, so a block at or after opensAt settles every key; before
+  // it, only a retirement is already final (T-26, T-69).
+  const registeredBefore = registeredAt !== 0n && registeredAt < opensAt;
+  if (registeredBefore && retiredAt !== 0n && retiredAt <= opensAt) return "retired";
+  if (provenAt < opensAt) return "unsettled";
+  return registeredBefore ? "judges" : "unregistered";
 }
 
 type Head = Pick<

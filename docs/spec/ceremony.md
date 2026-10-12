@@ -100,7 +100,14 @@ ceremony_context ‖ u8(i) ‖ encode(kem_key) ‖ signing_key
 
 ### Round 2: challenges
 
-After round 1 closes, each seat `j` in `S_1` draws, for every other seat `i` in `S_1` in increasing order, 32 bytes `μ_{j→i}` from the CSPRNG, and computes `(ss_{j→i}, ct_{j→i}) = ML-KEM-768.Encaps_internal(ek_i, μ_{j→i})`, with `ek_i` from seat `i`'s round-1 message. It sends:
+After round 1 closes, each seat `j` in `S_1` draws, for every other seat `i` in `S_1` in increasing order, 32 bytes `μ_{j→i}` from the CSPRNG, and computes
+
+```
+m_{j→i}            = H(DS("abolish/v1/ceremony-challenge", ceremony_context ‖ u8(j) ‖ u8(i) ‖ μ_{j→i}))
+(ss_{j→i}, ct_{j→i}) = ML-KEM-768.Encaps_internal(ek_i, m_{j→i})
+```
+
+with `ek_i` from seat `i`'s round-1 message. The hash binds the challenge to its run, its challenger and its target: a ciphertext re-encapsulates as `j`'s challenge to `i` only from a `μ` that `j` drew for that pair, so no seat can pass off another seat's challenge as its own (Soundness, below). It sends:
 
 | Field        | Type                                  | Meaning                                                               |
 | ------------ | ------------------------------------- | --------------------------------------------------------------------- |
@@ -132,7 +139,7 @@ After round 3 closes, each seat `j` in `S_2` sends:
 | `reveals`   | `list<bytes[32], MAX_TRUSTEES − 1>` | `μ_{j→i}` for every `i` in `S_1` other than `j`, in increasing order |
 | `signature` | `p256-sig`                          | `Q_j`'s signature over `h_3`                                         |
 
-Signing over `h_3` fixes every answer before any `μ` is public, so no seat can compute an answer from a revealed `μ` instead of decapsulating. An honest seat sends its reveals only once it holds round 3 as the coordinator closed it, and refuses to sign the ceremony registration for a transcript whose round 3 differs.
+Signing over `h_3` fixes every answer before any `μ` is public, so no seat can compute an answer from a revealed `μ` instead of decapsulating. An honest seat sends its reveals only once it holds round 3 as the coordinator closed it, and only if they re-encapsulate to the challenges round 2 holds for it (a restarted node could otherwise reveal secrets of a round 2 it didn't send, and be disqualified); it refuses to sign the ceremony registration for a transcript whose round 3 differs.
 
 ## Transcript
 
@@ -174,18 +181,26 @@ A seat `i` is **qualified** if and only if none of these holds. Each is a reason
 | `no-challenges` | It is in `S_1` and has no round-2 message                                                                                                                                                                            |
 | `no-answers`    | It is in `S_1` and has no round-3 message                                                                                                                                                                            |
 | `no-reveals`    | It is in `S_2` and has no round-4 message                                                                                                                                                                            |
-| `bad-challenge` | It has a round-4 message and, for some seat `t`, `ML-KEM-768.Encaps_internal(ek_t, μ_{i→t})` gives a ciphertext other than `ct_{i→t}`                                                                                |
+| `bad-challenge` | It has a round-4 message and, for some seat `t`, `ML-KEM-768.Encaps_internal(ek_t, m_{i→t})`, with `m_{i→t}` from its revealed `μ_{i→t}`, gives a ciphertext other than `ct_{i→t}`                                   |
 | `wrong-answer`  | It has a round-3 message and, for some seat `j` with a round-4 message whose challenge to `i` is valid (re-encapsulates to `ct_{j→i}`), its answer to `j` differs from the shared secret that re-encapsulation gives |
 
 Why each rule:
 
-- **`duplicate-key`** applies only among seats whose proofs pass. Both proofs bind the seat, so a seat that copies another's `dh` or `P` can't make them pass: a duplicate among passing seats means both seats hold the secret, and both are excluded, as the panel rule excludes a repeated identity key (T-14). A seat whose signing key is an identity key would fold the two roles that [[trustee-identity]] keeps apart. There is no rule for `ek`: a seat that copies another's `ek` fails its own challenges (it can't decapsulate), while a rule would let it exclude the honest seat it copied.
-- **`bad-challenge`** is the challenger's: its reveal doesn't encapsulate to what it sent. ML-KEM's ciphertext determines `μ` (up to a decryption failure, probability below 2⁻¹⁶⁴), so a challenger can't reveal a second `μ` for one ciphertext. A bad challenge never counts against its target.
+- **`duplicate-key`** applies only among seats whose proofs pass. Both proofs bind the seat, so a seat that copies another's `dh` or `P` can't make them pass: a duplicate among passing seats means both seats hold the secret, and both are excluded, as the panel rule excludes a repeated identity key (T-14). A seat whose signing key is an identity key would fold the two roles that [[trustee-identity]] keeps apart. There is no rule for `ek`: a seat that copies another's `ek` can answer its challenges only by having the key's holder decapsulate them, which costs a seat for each challenge (Soundness), while a rule would let it exclude the honest seat it copied.
+- **`bad-challenge`** is the challenger's: its reveal doesn't encapsulate to what it sent. ML-KEM's ciphertext determines its message `m` (up to a decryption failure, probability below 2⁻¹⁶⁴), and `m` determines `μ` up to a SHA-256 collision, so a challenger can't reveal a second `μ` for one ciphertext. A bad challenge never counts against its target.
 - **`wrong-answer`** is the target's: the challenge was a real encapsulation under its registered `ek`, and it didn't produce the shared secret. A challenge from a seat that sent no reveals can't be checked and counts against no one but its sender (`no-reveals`).
 
-If a seat `i` is qualified, every other qualified seat sent it a challenge that re-encapsulates and that `i` answered correctly before any `μ` was revealed. With at least `k ≥ 2` qualified seats, at least one of them is honest if fewer than `k` are corrupt (T-14), so `i`'s possession of `dk_i` is shown against a challenger it didn't collude with.
+**Soundness.** The messages of one round aren't ordered, so a seat can wait for the others' messages of the same round before sending its own (rushing), and round 3 publishes every answering seat's decapsulations. So the only way to answer a challenge under a key a seat can't open is to have the key's holder `o` decapsulate it: a seat `t` sends the ciphertext as its own challenge to `o` and copies `o`'s answer. Then `t`'s challenge to `o` re-encapsulates only from a `μ` whose `m_{t→o}` equals the relayed challenge's `m_{j→i}`, which binds another pair, so `t` gets `bad-challenge`, or `no-reveals` if it reveals nothing. Each seat has one challenge to `o`, so each relayed ciphertext costs a different seat its qualification.
+
+Suppose seat `i` is qualified and doesn't hold `dk_i`. If its holder `o` is no seat, or a seat that won't decapsulate for `i`, `i` fails some challenge. If `o` is corrupt, `i` gained nothing the corrupt seats didn't already hold. If `o` is honest, every honest qualified seat sent `i` a challenge under `o`'s key that `i` answered correctly, so each was relayed by a different seat, each of them corrupt and disqualified. Then the corrupt seats number at least the qualified seats: if fewer than `k` are corrupt (T-14), fewer than `k` seats qualify and the transcript fails `ceremony-quorum`. A transcript that passes therefore registers, for every qualified seat, an `ek` whose secret that seat holds or shares with another corrupt seat.
 
 The check's output is the **registered key set**: for each qualified seat in increasing order, its `index`, `kem_key` and `signing_key`. [[verifier]] 3.1 compares it with what the definition and L2 bind; [[verifier]] 2.5 and the ballot client's panel check use it before any share is made ([[election-definition]], The panel is checked before any share exists).
+
+## Approval and re-runs
+
+A seat signs the ceremony registration ([[trustee-identity]], Ceremony registration) only for a transcript that passes this check, that holds every message it sent as it sent it, and whose round chain it signed over. It approves **at most one transcript per `stub_hash`**, whatever the run, and its node keeps that record for as long as the stub can be registered.
+
+A run that stops before a quorum approves it is abandoned: the creator starts another with a fresh `run_id` and the same stub, and every seat generates fresh keys. A run whose transcript a quorum has approved is final for that stub. With `k > n / 2` two quorums share a seat, so a second approved transcript for one stub needs a seat that broke the rule above; [[verifier]] 3.1 still accepts only the transcript the definition binds. The trustee registry records at most one transcript per `stub_hash` and refuses any other once one has its quorum (P1-18), so a quorum can't hold a second set of keys in reserve for the same definition. Only the panel can register a transcript, so this first-come rule can't be raced by anyone outside it ([[election-definition]], Stub hash and the ceremony).
 
 ## Vectors
 
@@ -193,9 +208,9 @@ The check's output is the **registered key set**: for each qualified seat in inc
 
 ## Security notes
 
-- **Withholding.** The coordinator can drop a seat's message, which makes that seat `absent` or disqualifies it, and nothing in the transcript shows it. The seat's node, and every honest seat that saw the message, refuses to sign the ceremony registration. A coordinator can therefore shrink the qualified set to any `k` seats that will sign; it can't add a key, change one or qualify a seat that didn't prove possession. With [[0006-trustees]] undecided, the protocol's floor is `k` qualified seats (rule 7 there would require `n − 1`; a release can pin that per panel). A smaller qualified set leaves the tally a smaller failure margin (T-54).
+- **Withholding.** The coordinator can drop a seat's message, which makes that seat `absent` or disqualifies it, and nothing in the transcript shows it. The seat's node, and every honest seat that saw the message, refuses to sign the ceremony registration. A coordinator can therefore shrink the qualified set to any `k` seats that will sign. It can also let a seat see the other messages of a round before sending its own (Soundness covers that). It can't add a message to a round once a later round has begun, change one, or qualify a seat that didn't prove possession. With [[0006-trustees]] undecided, the protocol's floor is `k` qualified seats (rule 7 there would require `n − 1`; a release can pin that per panel). A smaller qualified set leaves the tally a smaller failure margin (T-54).
 - **No joint key.** Plurality and approval have no aggregate key, so there is no rogue-key attack to stop (T-40). The proofs show possession: of `x_i`, so a seat can complain ([[share-encryption]], Complaints) and can't take another's `dh`; of `dk_i`, so shares to it can be opened; of `d_i`, so later statements are its own.
 - **Corrupt challengers.** A corrupt seat can give a corrupt target the answers to its own challenges. That proves nothing about the target, but the target must still answer every honest qualified seat's challenge. If all qualified seats but the target are corrupt, the corrupt set already has `k` seats (T-14).
 - **Decapsulation is chosen-ciphertext access.** A trustee decapsulates at most `n − 1` ciphertexts that other seats chose, and publishes the results. ML-KEM-768 is IND-CCA2 ([[share-encryption]], Sources), which covers this.
-- **The challenge secrets.** `μ_{j→i}` and `ss_{j→i}` protect nothing after the ceremony. A node draws them from the CSPRNG and never reuses them: a `μ` known before round 3 closes would let its target answer without `dk`.
+- **The challenge secrets.** `μ_{j→i}`, `m_{j→i}` and `ss_{j→i}` protect nothing after the ceremony. A node draws them from the CSPRNG and never reuses them: a `μ` known before round 3 closes would let its target answer without `dk`.
 - **Per-election keys.** Keys are fresh for each election and each run; a node destroys the KEM secret after the tally (P1-15 part 3) and the signing key after its last statement. [[0012-trustee-identity-signatures]]'s residuals for the identity key apply: a stolen identity key can register keys of the thief's choosing for every later election.

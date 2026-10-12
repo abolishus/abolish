@@ -52,6 +52,7 @@ export const TAG_REGISTRY = Object.freeze(
       },
       { tag: "abolish/v1/ceremony-context", primitive: "plain", status: "specified" },
       { tag: "abolish/v1/ceremony-round", primitive: "plain", status: "specified" },
+      { tag: "abolish/v1/ceremony-challenge", primitive: "plain", status: "specified" },
       { tag: "abolish/v1/sig/ceremony-message", primitive: "signature", status: "specified" },
       { tag: "abolish/v1/sig/ceremony-signing-key", primitive: "signature", status: "specified" },
     ] as const

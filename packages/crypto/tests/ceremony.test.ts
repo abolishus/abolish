@@ -248,7 +248,8 @@ function ceremony(threshold: number, n: number, runId: Uint8Array) {
     reveals,
   });
   const { runId: _, ...electionParams } = params;
-  return { params, electionParams, seats, keys, round2, answers, bytes };
+  const secrets = challenges.map((x) => x.secrets);
+  return { params, electionParams, seats, keys, round2, answers, secrets, bytes };
 }
 
 describe("an honest ceremony", () => {
@@ -368,9 +369,21 @@ describe("a seat's node", () => {
   test("reveals one μ per other seat, and only after sending challenges", () => {
     const rounds = { keys: c.keys, challenges: c.round2, answers: c.answers };
     expect(() => revealsMessage(c.params, seat, rounds, [new Uint8Array(32)])).toThrow(/μ/);
+    expect(revealsMessage(c.params, seat, rounds, c.secrets[0] ?? []).index).toBe(1);
     expect(() =>
       revealsMessage(c.params, seat, { ...rounds, challenges: c.round2.slice(1) }, []),
     ).toThrow();
+  });
+
+  test("reveals only the μs behind the challenges the transcript holds for it", () => {
+    // As after a restart: secrets of a round 2 that isn't the one in the transcript.
+    const rounds = { keys: c.keys, challenges: c.round2, answers: c.answers };
+    const stale = [new Uint8Array(32).fill(1), new Uint8Array(32).fill(2)];
+    expect(() => revealsMessage(c.params, seat, rounds, stale)).toThrow(/doesn't match/);
+    // Another seat's μs, in another seat's slots, don't match either.
+    expect(() => revealsMessage(c.params, seat, rounds, c.secrets[1] ?? [])).toThrow(
+      /doesn't match/,
+    );
   });
 
   test("refuses a proof nonce outside 1 to ℓ − 1", () => {

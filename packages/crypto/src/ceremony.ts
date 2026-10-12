@@ -308,6 +308,23 @@ function possessionOk(context: Uint8Array, m: KeysMessage): boolean {
   );
 }
 
+/**
+ * The ML-KEM message of seat `j`'s challenge to seat `i`:
+ * `H(DS("abolish/v1/ceremony-challenge", ceremony_context ‖ u8(j) ‖ u8(i) ‖ μ))`.
+ * Binding the pair means a challenge only re-encapsulates as the one `j` sent
+ * `i`: a seat that relays another seat's challenge to the real key owner, to
+ * have it decapsulated, can't reveal a `μ` that checks for its own slot
+ * (docs/spec/ceremony.md, Round 2; T-37, T-54).
+ */
+function challengeMessage(context: Uint8Array, j: number, i: number, mu: Uint8Array): Uint8Array {
+  const w = new Writer();
+  w.bytes(context);
+  u8.write(w, j);
+  u8.write(w, i);
+  w.bytes(mu);
+  return H(ds("abolish/v1/ceremony-challenge", w.finish()));
+}
+
 /** A seat's secrets for one run: its identity key, and the fresh per-election keys it registers. */
 export interface SeatSecrets {
   readonly index: number;
@@ -362,7 +379,10 @@ export function keysMessageWith(params: CeremonyParams, seat: SeatSecrets, w: bi
 
 /** Round 1: the seat's keys, its proof of knowledge of `x` and its signing key's signature. */
 export function keysMessage(params: CeremonyParams, seat: SeatSecrets): KeysMessage {
-  return keysMessageWith(params, seat, randomScalar());
+  // w is uniform on 1 to ℓ − 1; randomScalar can return 0 (probability 2⁻²⁵²).
+  let w = randomScalar();
+  while (w === 0n) w = randomScalar();
+  return keysMessageWith(params, seat, w);
 }
 
 /** A round-2 message and the challenge secrets `μ` its seat keeps until round 4. */
@@ -395,7 +415,11 @@ export function challengesMessageWith(
     return Uint8Array.from(mu);
   });
   const challenges = targets.map(
-    (t, i) => ml_kem768.encapsulate(t.kem_key.ek, mus[i] as Uint8Array).cipherText,
+    (t, i) =>
+      ml_kem768.encapsulate(
+        t.kem_key.ek,
+        challengeMessage(run.context, seat.index, t.index, mus[i] as Uint8Array),
+      ).cipherText,
   );
   const message = sign<ChallengesMessage>(seat.identitySecret, 2, h[1] as Uint8Array, {
     index: seat.index,
@@ -463,8 +487,25 @@ export function revealsMessage(
   const h = checkedPrefix(run, rounds);
   if (!rounds.challenges.some((c) => c.index === seat.index))
     throw new RangeError("ceremony: the seat sent no challenges");
-  if (secrets.length !== rounds.keys.filter((m) => m.index !== seat.index).length)
-    throw new RangeError("ceremony: one μ per other seat");
+  const targets = rounds.keys.filter((m) => m.index !== seat.index);
+  if (secrets.length !== targets.length) throw new RangeError("ceremony: one μ per other seat");
+  // The μs must be the ones behind the challenges this transcript holds for
+  // the seat: after a restart or a replayed round 2 they may not be, and
+  // revealing them would get the seat itself disqualified (bad-challenge).
+  const sent = rounds.challenges.find((c) => c.index === seat.index) as ChallengesMessage;
+  targets.forEach((t, at) => {
+    const mu = secrets[at];
+    if (!(mu instanceof Uint8Array) || mu.length !== MLKEM_MSG_LEN)
+      throw new RangeError("ceremony: μ must be 32 bytes");
+    const m = challengeMessage(run.context, seat.index, t.index, mu);
+    if (
+      !equalBytes(
+        ml_kem768.encapsulate(t.kem_key.ek, m).cipherText,
+        sent.challenges[at] as Uint8Array,
+      )
+    )
+      throw new RangeError("ceremony: a μ doesn't match the challenge the transcript holds");
+  });
   return sign<RevealsMessage>(seat.identitySecret, 4, h[3] as Uint8Array, {
     index: seat.index,
     reveals: secrets.map((s) => Uint8Array.from(s)),
@@ -592,7 +633,8 @@ function seatResults(run: Run, t: Rounds): SeatResult[] {
     const c = challenges.get(j) as ChallengesMessage;
     s1.filter((i) => i !== j).forEach((i, at) => {
       const ek = (keys.get(i) as KeysMessage).kem_key.ek;
-      const { cipherText, sharedSecret } = ml_kem768.encapsulate(ek, rev.reveals[at] as Uint8Array);
+      const m = challengeMessage(run.context, j, i, rev.reveals[at] as Uint8Array);
+      const { cipherText, sharedSecret } = ml_kem768.encapsulate(ek, m);
       valid.set(
         `${j}>${i}`,
         equalBytes(cipherText, c.challenges[at] as Uint8Array) ? sharedSecret : null,

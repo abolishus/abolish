@@ -5,8 +5,9 @@
 // T-67: each event gets a fresh random distinct ID and no person profile, so
 // nothing in PostHog follows a visitor from one page to the next or joins
 // them to an account; GeoIP is off; pages are templates (src/analytics.ts).
-// Events are sent in batches without their own timestamps, so PostHog places
-// them at the batch's arrival rather than at the moment of each request.
+// Events are sent in batches without their own timestamps, in random order,
+// so PostHog places them at the batch's arrival and can't read one visitor's
+// path through the site from their order.
 
 import type { ClientError, Page } from "../analytics.ts";
 
@@ -50,6 +51,16 @@ export const noAnalytics: Analytics = {
   close: async () => {},
 };
 
+/** Fisher–Yates with the platform CSPRNG. */
+function shuffle<T>(items: T[]) {
+  const random = new Uint32Array(1);
+  for (let i = items.length - 1; i > 0; i--) {
+    // Modulo bias of at most i / 2^32 doesn't matter for an ordering.
+    const j = crypto.getRandomValues(random)[0]! % (i + 1);
+    [items[i], items[j]] = [items[j]!, items[i]!];
+  }
+}
+
 export function createAnalytics({
   host,
   key,
@@ -63,6 +74,8 @@ export function createAnalytics({
     throw new RangeError("host must be a bare https origin");
   const endpoint = new URL("/batch/", origin).href;
   let queue: PostHogEvent[] = [];
+  // Batches being sent don't count against maxQueue; each post times out,
+  // so at most a batch or two wait here.
   let sending = Promise.resolve();
 
   function push(event: string, properties: Record<string, unknown>) {
@@ -100,6 +113,7 @@ export function createAnalytics({
     if (queue.length > 0) {
       const batch = queue;
       queue = [];
+      shuffle(batch);
       sending = sending.then(() => post(batch));
     }
     return sending;
@@ -119,6 +133,8 @@ export function createAnalytics({
         $exception_list: [
           {
             type: name,
+            // The message never leaves the page (src/error-reports.ts).
+            value: "",
             mechanism: { handled: false, synthetic: false },
             stacktrace: {
               type: "raw",
@@ -127,8 +143,10 @@ export function createAnalytics({
                 const [, filename, line, column] = /^(.*):([0-9]+):([0-9]+)$/.exec(frame)!;
                 return {
                   filename,
+                  function: "?",
                   lineno: Number(line),
                   colno: Number(column),
+                  in_app: true,
                   platform: "web:javascript",
                 };
               }),

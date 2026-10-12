@@ -451,7 +451,11 @@ describe("failures", () => {
 });
 
 describe("analytics", () => {
-  const report = { page: "/polls/:id", name: "TypeError", frames: ["assets/main-Ab1.js:1:2345"] };
+  const report = {
+    page: "/polls/:id",
+    name: "TypeError",
+    frames: ["assets/index-AbC_12-x.js:1:2345"],
+  };
   const post = (body: unknown, headers: Record<string, string> = {}, target = "/ingest/error") =>
     raw(target, {
       method: "POST",
@@ -502,6 +506,9 @@ describe("analytics", () => {
       [post(report, { origin: "https://evil.test" }), 403],
       [raw("/ingest/error", { method: "POST", body: Buffer.from(JSON.stringify(report)) }), 403],
       [post(report, { "content-type": "text/plain" }), 415],
+      [post(report, { "content-type": "application/json; charset=utf-8" }), 415],
+      // Well-formed, but not a bundle this server serves.
+      [post({ ...report, frames: ["assets/main-Ab1.js:1:2"] }), 400],
       [post("{"), 400],
       [post({ ...report, message: "x" }), 400],
       [post({ ...report, page: `/polls/${id}` }), 400],

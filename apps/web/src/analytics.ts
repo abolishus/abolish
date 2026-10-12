@@ -19,13 +19,18 @@ export function pageOf(pathname: string): Page {
   return "other";
 }
 
-/** An error's name as JavaScript gives it (`TypeError`, `ORPCError`): an identifier, never its message. */
-export const ERROR_NAME = /^[A-Za-z_$][A-Za-z0-9_$]{0,63}$/;
+/**
+ * An error's name as JavaScript gives it (`TypeError`, `ORPCError`): an
+ * identifier, never its message, and too short to hold a poll ID.
+ */
+export const ERROR_NAME = /^[A-Za-z_$][A-Za-z0-9_$]{0,39}$/;
 
 /**
- * A position in one of our hashed bundles, `assets/<name>.js:<line>:<column>`.
- * Bundle names carry only a content hash, so a frame says where our code
- * failed and nothing about what it was showing.
+ * A position in one of our bundles, `assets/<name>.js:<line>:<column>`.
+ * A bundle's name is its module's (a route's, say, which is no more than the
+ * page's template) and a content hash, so a frame says where our code failed
+ * and nothing about what it was showing. The front accepts only names of
+ * bundles it serves (src/node/serve.ts).
  */
 export const FRAME = /^assets\/[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*\.js:[0-9]{1,7}:[0-9]{1,7}$/;
 
@@ -40,15 +45,20 @@ export interface ClientError {
 }
 
 /**
- * The frames of `stack` that are positions in our bundles, innermost first.
- * Everything else in it (the message, other scripts' URLs, function names)
- * is dropped: a message can quote what the page held, and a frame in another
- * script names nothing we can fix.
+ * The frames of `stack` that are positions in our bundles on `origin`,
+ * innermost first. Everything else in it (other scripts' URLs, an
+ * extension's own `assets/`, function names) is dropped: a frame elsewhere
+ * names nothing we can fix. The caller removes the message first
+ * (src/error-reports.ts), since a message can quote what the page held.
  */
-export function framesOf(stack: string): string[] {
+export function framesOf(stack: string, origin: string): string[] {
   const frames: string[] = [];
+  const at = origin.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   for (const match of stack.matchAll(
-    /\/(assets\/[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*\.js:[0-9]{1,7}:[0-9]{1,7})(?![0-9])/g,
+    new RegExp(
+      `(?<![^\\s(@])${at}\\/(assets\\/[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)*\\.js:[0-9]{1,7}:[0-9]{1,7})(?![0-9])`,
+      "g",
+    ),
   )) {
     frames.push(match[1]!);
     if (frames.length === MAX_FRAMES) break;

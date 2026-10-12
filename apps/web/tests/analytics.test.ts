@@ -3,7 +3,13 @@ import { describe, expect, test } from "vite-plus/test";
 
 import { FRAME, framesOf, MAX_FRAMES, pageOf, PAGES, parseClientError } from "../src/analytics.ts";
 import { createAnalytics, type PostHogEvent } from "../src/node/analytics.ts";
-import { MAX_REPORTS, reportErrors, reportOf, type ReportingWindow } from "../src/error-reports.ts";
+import {
+  MAX_REPORTS,
+  reportCaught,
+  reportErrors,
+  reportOf,
+  type ReportingWindow,
+} from "../src/error-reports.ts";
 import { toHex } from "../src/values.ts";
 
 const runs = { numRuns: Number(process.env["FC_NUM_RUNS"] ?? 100) };
@@ -54,10 +60,21 @@ describe("stack frames", () => {
       "next@https://abolish.test/assets/route.polls-x9.js:12:34",
       "    at https://abolish.test/assets/vendor.js:5:6789012345",
     ].join("\n");
-    expect(framesOf(stack)).toEqual([
+    expect(framesOf(stack, "https://abolish.test")).toEqual([
       "assets/main-Ab_1.js:1:2345",
       "assets/route.polls-x9.js:12:34",
     ]);
+  });
+
+  test("drops another origin's or an extension's assets/", () => {
+    const stack = [
+      "    at chrome-extension://abcdef/assets/content-X1.js:3:4",
+      "f@moz-extension://abcdef/assets/content-X1.js:3:4",
+      "    at https://evil.test/assets/main-1.js:1:2",
+      "    at https://abolish.test.evil.test/assets/main-1.js:1:2",
+      "    at x (chrome-extension://a/https://abolish.test/assets/main-1.js:1:2)",
+    ].join("\n");
+    expect(framesOf(stack, "https://abolish.test")).toEqual([]);
   });
 
   test("whatever the stack, every kept frame matches FRAME, and at most MAX_FRAMES are kept", () => {
@@ -70,7 +87,7 @@ describe("stack frames", () => {
           ),
         ),
         (lines) => {
-          const frames = framesOf(lines.join("\n"));
+          const frames = framesOf(lines.join("\n"), "https://abolish.test");
           expect(frames.length).toBeLessThanOrEqual(MAX_FRAMES);
           for (const f of frames) expect(f).toMatch(FRAME);
         },
@@ -121,15 +138,16 @@ describe("client reports", () => {
 
 describe("error reporting in the browser", () => {
   class FakeWindow extends EventTarget implements ReportingWindow {
-    location = { pathname: "/polls/" + "ab".repeat(32) };
+    location = { origin: "https://abolish.test", pathname: "/polls/" + "ab".repeat(32) };
   }
+  const at = (pathname: string) => ({ origin: "https://abolish.test", pathname });
   const thrown = (name: string, stack: string) =>
     Object.assign(new Error("secret"), { name, stack });
   const ours = "Error: secret\n    at f (https://abolish.test/assets/main-1.js:1:2)";
 
   test("reports our own failures by name, template and frames, never message or path", () => {
     const err = thrown("RangeError", `RangeError: ${"ab".repeat(32)}\n${ours}`);
-    expect(reportOf(err, "/polls/" + "ab".repeat(32))).toEqual({
+    expect(reportOf(err, at("/polls/" + "ab".repeat(32)))).toEqual({
       page: "/polls/:id",
       name: "RangeError",
       frames: ["assets/main-1.js:1:2"],
@@ -137,13 +155,36 @@ describe("error reporting in the browser", () => {
   });
 
   test("ignores what isn't an Error or has no frame of ours", () => {
-    expect(reportOf("thrown text", "/")).toBeUndefined();
-    expect(reportOf({ name: "Error", stack: ours }, "/")).toBeUndefined();
-    expect(reportOf(thrown("Error", "at chrome-extension://x/a.js:1:2"), "/")).toBeUndefined();
+    expect(reportOf("thrown text", at("/"))).toBeUndefined();
+    expect(reportOf({ name: "Error", stack: ours }, at("/"))).toBeUndefined();
+    expect(reportOf(thrown("Error", "at chrome-extension://x/a.js:1:2"), at("/"))).toBeUndefined();
+  });
+
+  test("never reads a frame out of the message", () => {
+    // Chromium's form: the stack opens with String(error), message included.
+    const error = new Error("title https://abolish.test/assets/Poll_ab12cd.js:1:2 here");
+    error.stack = `${String(error)}\n${ours.split("\n")[1]}`;
+    expect(reportOf(error, at("/"))?.frames).toEqual(["assets/main-1.js:1:2"]);
+    error.stack = String(error);
+    expect(reportOf(error, at("/"))).toBeUndefined();
   });
 
   test("an unusable name is reported as Error", () => {
-    expect(reportOf(thrown("my error!", ours), "/")?.name).toBe("Error");
+    expect(reportOf(thrown("my error!", ours), at("/"))?.name).toBe("Error");
+    expect(reportOf(thrown("e" + "ab".repeat(32), ours), at("/"))?.name).toBe("Error");
+  });
+
+  test("reports what the router caught while installed, and nothing after", async () => {
+    const sent: unknown[] = [];
+    reportCaught(thrown("TypeError", ours));
+    const stop = reportErrors(new FakeWindow(), async (r) => void sent.push(r));
+    reportCaught(thrown("TypeError", ours));
+    reportCaught(undefined);
+    stop();
+    reportCaught(thrown("TypeError", ours));
+    expect(sent).toEqual([
+      { page: "/polls/:id", name: "TypeError", frames: ["assets/main-1.js:1:2"] },
+    ]);
   });
 
   test("sends at most MAX_REPORTS per page load, until stopped, and survives a failing send", async () => {
@@ -210,7 +251,7 @@ describe("PostHog batches", () => {
     expect(calls[0]!.init.redirect).toBe("error");
     const [{ api_key, batch }] = sent() as [{ api_key: string; batch: PostHogEvent[] }];
     expect(api_key).toBe("phc_test");
-    expect(batch.map((e) => e.event)).toEqual(["$pageview", "$pageview", "$exception"]);
+    expect(batch.map((e) => e.event).sort()).toEqual(["$exception", "$pageview", "$pageview"]);
     expect(new Set(batch.map((e) => e.distinct_id)).size).toBe(3);
     for (const event of batch) {
       expect(Object.keys(event).sort()).toEqual(["distinct_id", "event", "properties"]);
@@ -219,19 +260,41 @@ describe("PostHog batches", () => {
         $geoip_disable: true,
       });
     }
-    expect(batch[0]!.properties).toMatchObject({ $current_url: "/polls/:id", status: 200 });
-    expect(batch[2]!.properties["$exception_list"]).toEqual([
+    const view = batch.find((e) => e.event === "$pageview")!;
+    expect(view.properties).toMatchObject({ $current_url: "/polls/:id", status: 200 });
+    const exception = batch.find((e) => e.event === "$exception")!;
+    expect(exception.properties["$exception_list"]).toEqual([
       {
         type: "TypeError",
+        value: "",
         mechanism: { handled: false, synthetic: false },
         stacktrace: {
           type: "raw",
           frames: [
-            { filename: "assets/main-1.js", lineno: 12, colno: 345, platform: "web:javascript" },
+            {
+              filename: "assets/main-1.js",
+              function: "?",
+              lineno: 12,
+              colno: 345,
+              in_app: true,
+              platform: "web:javascript",
+            },
           ],
         },
       },
     ]);
+  });
+
+  test("are sent in random order, not the order they happened in", async () => {
+    const { fetch, sent } = stub();
+    const analytics = createAnalytics({ host: "https://ph.test", key: "k", fetch, log: () => {} });
+    for (let status = 200; status < 240; status++) analytics.pageview("/", status);
+    await analytics.close();
+    const order = sent()[0]!.batch.map((e) => e.properties["status"] as number);
+    const sorted = [...order].sort((a, b) => a - b);
+    expect(sorted).toEqual(Array.from({ length: 40 }, (_, i) => 200 + i));
+    // A shuffle keeps the order with probability 1 / 40!.
+    expect(order).not.toEqual(sorted);
   });
 
   test("hold at most maxQueue events between flushes, and send nothing when empty", async () => {

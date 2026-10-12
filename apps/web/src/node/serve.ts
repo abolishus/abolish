@@ -15,6 +15,7 @@
 // position (src/analytics.ts, src/node/analytics.ts).
 
 import { once } from "node:events";
+import { readdirSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { join } from "node:path";
@@ -204,6 +205,8 @@ export function createWebServer({
   if (!Number.isSafeInteger(maxInFlight) || maxInFlight < 1)
     throw new RangeError("maxInFlight must be at least 1");
   const assets = join(clientDir, "assets");
+  // The bundles a report's frames may name: the ones this server serves.
+  const bundles = new Set(readdirSync(assets).filter((name) => name.endsWith(".js")));
   let inFlight = 0;
 
   /**
@@ -287,7 +290,8 @@ export function createWebServer({
   /**
    * `/ingest/error`: a failure in one of our pages, reported by the page's
    * own code (src/error-reports.ts) and passed to PostHog only if it is
-   * exactly a `ClientError`, so a report can carry nothing else (T-67).
+   * exactly a `ClientError` whose frames name bundles we serve, so a report
+   * can carry nothing else (T-67).
    */
   async function ingest(req: IncomingMessage, res: ServerResponse, url: URL) {
     if (url.pathname !== "/ingest/error" || url.search !== "") throw new Refusal(404);
@@ -303,6 +307,9 @@ export function createWebServer({
       throw new Refusal(400);
     }
     if (report === undefined) throw new Refusal(400);
+    // FRAME (src/analytics.ts) holds, so each is `assets/<file>:<line>:<column>`.
+    for (const frame of report.frames)
+      if (!bundles.has(frame.slice("assets/".length, frame.indexOf(":")))) throw new Refusal(400);
     analytics.exception("client", report);
     res.statusCode = 204;
     res.setHeader("cache-control", "no-store");

@@ -72,7 +72,8 @@ const analytics =
   env.POSTHOG_HOST === undefined || env.POSTHOG_KEY === undefined
     ? noAnalytics
     : createAnalytics({
-        host: new URL(env.POSTHOG_HOST).origin,
+        // Refused at start unless a bare origin.
+        host: env.POSTHOG_HOST,
         key: env.POSTHOG_KEY,
         log: write,
       });

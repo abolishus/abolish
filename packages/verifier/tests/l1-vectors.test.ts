@@ -140,8 +140,19 @@ describe("anchors read from L1 state", () => {
       }
       if (v.board === undefined) throw new Error("an anchors vector has a board result");
       const { code, ...at } = v.board;
+      // The rows docs/spec/verifier.md (Procedure) gives each code.
+      const rows: Record<string, readonly [string, string]> = {
+        unanchored: ["pass", "fail"],
+        "checkpoint-missing": ["unverifiable", "unverifiable"],
+        "checkpoint-inconsistent": ["unverifiable", "fail"],
+      };
+      const want = rows[code];
+      if (want === undefined) throw new Error(`no rows for ${code}`);
+      expect([row(r, "4.1").status, row(r, "4.2").status]).toEqual(want);
       const hit = r.checks.find((c) => c.code === code);
       expect(hit?.at).toEqual(at);
+      if (want[0] === "unverifiable" && want[1] === "fail")
+        expect(row(r, "4.1").code).toBe("not-reached");
     });
 });
 

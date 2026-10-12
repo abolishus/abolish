@@ -180,8 +180,9 @@ Type descriptors:
 - `id`, `description`;
 - `block`: `header` (the raw RLP header, hex), `number` and `timestamp` (decimal), and `hash` (hex) unless the header was changed;
 - `anchor` (the address, hex), `firstSegment` (decimal), `nodes` and `checkpoints`: a format-2 bundle's `l1` member ([[verifier]], Bundle);
-- `copy`: the `board.json` board whose entries make `board.bin`, cut to the first `copyEntries` entries when that is present;
-- `result`: either `anchors` (each `segment`, `hash` and `source`, in segment order) with `board` (`"ok"`, or the board-check code and its `at` for 4.1 or 4.2), or `error` (the L1 code and, for `l1-checkpoint-unknown`, its `segment`).
+- `copy`: the `board.json` board whose entries make `board.bin`, cut to its first `copyEntries` entries when that member is present (beside `result`);
+- `result`: either `anchors` (each `segment`, `hash` and `source`, in segment order) or `error` (the L1 code and, for `l1-checkpoint-unknown`, its `segment`);
+- `board`, beside `result` and only with `anchors`: `"ok"` if 4.1 and 4.2 pass, else the board-check code with its `at` members flattened beside it (`{"code": "unanchored", "segment": 0}`).
 
 ## Rules
 

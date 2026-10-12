@@ -30,6 +30,7 @@ catalog:
   # Proving toolchain: must match NOIR_VERSION / BB_VERSION in
   # .github/scripts/install-toolchain.sh (AGENTS.md "Toolchain pins").
   "@aztec/bb.js": 5.0.0-nightly.20260522
+  "@better-auth/passkey": 1.7.7
   "@changesets/cli": 3.0.3
   "@noble/curves": 2.4.0
   "@noble/hashes": 2.4.0
@@ -39,6 +40,7 @@ catalog:
   "@orpc/server": 1.15.4
   "@orpc/zod": 1.15.4
   "@types/node": 24.19.1
+  better-auth: 1.7.7
   drizzle-orm: 0.45.3
   fast-check: 4.10.2
   postgres: 3.4.9

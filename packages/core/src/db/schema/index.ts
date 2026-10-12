@@ -1,17 +1,43 @@
+import {
+  accountCredentials,
+  accountPasskeys,
+  accountSessions,
+  accountUsers,
+  accountVerifications,
+} from "./accounts.ts";
 import { boardEntries } from "./board.ts";
 import { electionDefinitions } from "./definitions.ts";
 import { moderationActions, moderationReports } from "./moderation.ts";
 
-export { boardEntries, electionDefinitions, moderationActions, moderationReports };
+export {
+  accountCredentials,
+  accountPasskeys,
+  accountSessions,
+  accountUsers,
+  accountVerifications,
+  boardEntries,
+  electionDefinitions,
+  moderationActions,
+  moderationReports,
+};
 
 /**
  * Every table in the schema, by class. Board tables hold public bulletin-board
- * data and are rebuilt from chain + IPFS; operational tables (accounts, drafts,
- * moderation, caches) hold nothing a result depends on. A test fails
- * on any table not listed here, and on any foreign key or account-like column
- * that could link the two classes (.claude/skills/migrations; T-10, T-13).
+ * data and are rebuilt from chain + IPFS. Account tables hold accounts
+ * (better-auth): who someone is to the app, never how they voted. Operational
+ * tables (drafts, moderation, caches) hold nothing a result depends on. A test
+ * fails on any table not listed here, on any foreign key that leaves its
+ * class's tables (board or account), and on a column of either class that
+ * could name the other (.claude/skills/migrations; T-10, T-13).
  */
 export const TABLE_CLASSES = {
   board: ["board_entries", "election_definitions"],
+  account: [
+    "account_credentials",
+    "account_passkeys",
+    "account_sessions",
+    "account_users",
+    "account_verifications",
+  ],
   operational: ["moderation_actions", "moderation_reports", "schema_migrations"],
 } as const;

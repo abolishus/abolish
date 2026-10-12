@@ -8,7 +8,7 @@ Postgres is not authoritative: every result is rebuilt from chain + IPFS, and a 
 
 - `src/db/roles.sql`: the two roles, created once per cluster by an administrator. `abolish_migrator` owns the schema and runs migrations. `abolish_app` is what services use at runtime. Both are `NOLOGIN` group roles: each deployment logs in as its own user, granted one of them. Services never connect as the owner.
 - `src/db/migrations/`: forward-only SQL migrations, named `NNNN_name.sql`, applied in order by `migrate(sql, schema)` as `abolish_migrator`. A ledger (`schema_migrations`) records each file's sha256, and `migrate` refuses to run if an applied file changed or is missing. Merged migrations are never edited; a fix is a new migration.
-- `src/db/schema/`: the Drizzle view of the migrated tables, and `TABLE_CLASSES`, which sorts every table into board or operational (`moderation_actions` and `moderation_reports` are operational).
+- `src/db/schema/`: the Drizzle view of the migrated tables, and `TABLE_CLASSES`, which sorts every table into board, account or operational (`moderation_actions` and `moderation_reports` are operational).
 
 Migrations are written by hand rather than generated: `drizzle-kit` would bring a bundler toolchain (esbuild, tsx) into the dependency tree for SQL that has to be read line by line anyway. A test checks that the Drizzle tables match the migrated ones.
 
@@ -73,9 +73,29 @@ Reports of polls to the moderators: one row per election and removal ground, `el
 
 Reports never change a poll's state or the public log (a test checks this): report volume is never a ground.
 
+### Accounts (`src/accounts.ts`; T-10, T-11, T-20)
+
+Who someone is to the app (poll creation, moderation, notifications), with better-auth and passkeys. Never a voting identity: that and its recovery passkey live in the ballot client, on its own RP ID ([ADR 0017](../../docs/adr/0017-identity-recovery-backup.md)).
+
+`createAccounts({ sql, secret, origin, rpID, log })` returns:
+
+- `handler(request)`: a `Request` → `Response` handler that `apps/web` serves on its own origin under `/auth/`. Only `ACCOUNT_ROUTES` reach better-auth (sessions, sign-out, account deletion, the passkey ceremonies, and listing and deleting passkeys); every other path, including better-auth's password, e-mail, social and profile routes, is 404. POST bodies over `MAX_ACCOUNT_BODY` (64 KiB) are 413.
+- `accountOf(headers)`: the account ID behind a request's session cookie, for `apps/web`'s server code.
+
+`pruneAccountVerifications(sql, now)` deletes expired WebAuthn challenges. Anyone can start a ceremony and abandon it, and the passkey plugin never deletes those rows, so a scheduled job (P2-4) must run it (T-52).
+
+How it is set up:
+
+- **Passkeys only.** Signing up is registering a discoverable passkey; a signed-in user's new passkey joins their account, but only from a session of that account less than a day old at verify time: the challenge cookie outlives sign-out, so otherwise the next person at a shared browser could attach a passkey to the last user's account. User verification is required when a passkey is made and when it is used, and checked here: the plugin asks for it but doesn't check it. (At sign-in the plugin only prefers it, so a security key without a PIN is refused rather than asked for one.)
+- **Nothing about the person.** No e-mail (a random `@account.invalid` placeholder, since better-auth requires one), name, picture, address or user agent: IP tracking is off, a hook clears both on every session, and the migration's checks refuse them. The passkey's user name is a fixed label. A passkey `name` (clients send device or owner names) and the plugin's `context` parameter are refused with 400, and renaming passkeys isn't routed. The authenticator model (AAGUID) is kept, as the plugin stores it; most platform authenticators report zeros. Passwords and OAuth tokens have a table because better-auth reads it, but every row is refused.
+- **Cookies.** `__Secure-abolish-account.*`, host-only, `HttpOnly`, `SameSite=Strict`. Requests with cookies must come from `origin` (better-auth's origin check, pinned on even under a test runner, which would otherwise turn it off).
+- **No telemetry.** Off in the options, and `createAccounts` throws if `BETTER_AUTH_TELEMETRY` is set, since that variable switches it on whatever the options say. better-auth's own warnings and errors reach `log` by level only, since their messages can quote input.
+- better-auth's rate limiter is off: it keys on addresses, which we don't keep. Per-address limits are the proxy's (P2-11); Turnstile comes in P2-5 part 2.
+- better-auth reads the clock itself, so session expiry isn't on an injected clock.
+
 ### No joins (T-10)
 
-Accounts and ballots never join. The tests fail on a table missing from `TABLE_CLASSES`, on any foreign key that starts or ends at a board table, and on a board column with an account-like name.
+Accounts and ballots never join. The tests fail on a table missing from `TABLE_CLASSES`, on any foreign key that starts or ends at a board table or that leaves the account tables, on a board column with an account-like name, on an account column with a ballot-like name, and on any view, or any function naming tables of both classes.
 
 ## Tests
 

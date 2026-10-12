@@ -43,6 +43,7 @@ describe("domain-separation tag registry", () => {
   const primitives: Readonly<Record<string, string>> = {
     "Plain hash": "plain",
     "Fiat–Shamir": "fiat-shamir",
+    "Fiat–Shamir (Baby Jubjub)": "fiat-shamir-bjj",
     "Hash-to-curve": "hash-to-curve",
     "In-circuit": "in-circuit",
     "KDF and AEAD": "kdf-aead",

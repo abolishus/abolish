@@ -15,9 +15,15 @@ import {
   electionDefinitionV3Hash,
   electionDefinitionV3Rule,
   electionStubV3Hash,
+  type ElectionDefinitionV4,
+  electionDefinitionV4Hash,
+  electionDefinitionV4Rule,
+  electionStubV4Hash,
   encodeDisplayText,
   encodeElectionDefinition,
   encodeElectionDefinitionV3,
+  encodeElectionDefinitionV4,
+  receiptKeyJudgement,
 } from "../src/index.ts";
 import { PROTOCOL_SCHEMA } from "../src/protocol.ts";
 import { buildSchema, hex, readVectorFile, type Vector } from "./spec-vectors.ts";
@@ -127,6 +133,68 @@ describe("election definition version 3 (docs/spec/election-definition.md, Layou
     expect([...rules].toSorted()).toEqual(
       ["protocol-major", "selections", "electorate", "cells", "panel"].toSorted(),
     );
+  });
+});
+
+describe("election definition version 4 (docs/spec/election-definition.md, Layout (version 4))", () => {
+  const { valid, invalid } = checkFile("election-definition-v4.json", 21);
+
+  test.each(valid)("%s decodes, re-encodes, hashes and meets its rules", (_id, v, expected) => {
+    const value = expected(v) as ElectionDefinitionV4;
+    const record = decodeElectionDefinitionRecord(hex(v.encoding));
+    expect(record.version).toBe(4);
+    const decoded = record.value as ElectionDefinitionV4;
+    expect(decoded).toEqual(value);
+    expect(toHex(encodeElectionDefinitionV4(decoded))).toBe(v.encoding);
+    expect(toHex(electionDefinitionV4Hash(decoded))).toBe(v.hash);
+    expect(toHex(electionStubV4Hash(decoded))).toBe(v.stubHash);
+    expect(electionDefinitionV4Rule(decoded)).toBe(v.illFormed);
+  });
+
+  test.each(invalid)("%s is rejected", (_id, v) => {
+    expect(decodeError(() => decodeElectionDefinitionRecord(hex(v.encoding)))).toBe(v.error);
+  });
+
+  test("a version-4 definition is unknown-version to callers that read only version 1", () => {
+    for (const [, v] of valid)
+      expect(decodeError(() => decodeElectionDefinition(hex(v.encoding)))).toBe("unknown-version");
+  });
+
+  test("covers receipt-keys and its place after version 3's rules", () => {
+    const rules = new Set(valid.map(([, v]) => v.illFormed).filter((r) => r !== undefined));
+    expect([...rules].toSorted()).toEqual(
+      ["protocol-major", "cells", "timing", "receipt-keys"].toSorted(),
+    );
+  });
+
+  const judging = (readVectorFile("election-definition-v4.json") as { judging?: Judging[] })
+    .judging;
+  interface Judging {
+    readonly id: string;
+    readonly registeredAt: string;
+    readonly retiredAt: string;
+    readonly opensAt: string;
+    readonly provenAt: string;
+    readonly judgement?: string;
+    readonly error?: string;
+  }
+  const cases = (judging ?? []).map((j) => [j.id, j] as const);
+
+  test("has judging vectors for every judgement and impossible records", () => {
+    expect(new Set(cases.map(([, j]) => j.judgement ?? j.error))).toEqual(
+      new Set(["judges", "unregistered", "retired", "unsettled", "impossible-record"]),
+    );
+  });
+
+  test.each(cases)("judging %s", (_id, j) => {
+    const judge = () =>
+      receiptKeyJudgement(
+        { registeredAt: BigInt(j.registeredAt), retiredAt: BigInt(j.retiredAt) },
+        BigInt(j.opensAt),
+        BigInt(j.provenAt),
+      );
+    if (j.error === undefined) expect(judge()).toBe(j.judgement);
+    else expect(judge).toThrow(RangeError);
   });
 });
 

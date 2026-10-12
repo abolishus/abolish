@@ -240,6 +240,15 @@ describe("report", () => {
       });
   });
 
+  test("2.9 is unverifiable for a bundle that carries no definition", () => {
+    expect(report.checks.find((c) => c.id === "2.9")).toEqual({
+      id: "2.9",
+      kind: "election",
+      status: "unverifiable",
+      code: "not-implemented",
+    });
+  });
+
   test("8.5 is not applicable: board-entry version 1 can't carry a destruction statement", () => {
     expect(report.checks.find((c) => c.id === "8.5")).toEqual({
       id: "8.5",

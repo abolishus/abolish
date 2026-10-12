@@ -1,6 +1,6 @@
 # @abolishus/admin-cli
 
-The operator's command line. Internal and source-only; AGPL-3.0-only. Commands parse their arguments, call `@abolishus/core` and print one JSON object per line on stdout (refusals on stderr), so a person or an agent can drive it. No domain logic lives here. Simulations (P1-21) come later.
+The operator's command line. Internal and source-only; AGPL-3.0-only. Commands parse their arguments, call `@abolishus/core` and print one JSON object per line on stdout (refusals on stderr), so a person or an agent can drive it. No domain logic lives here.
 
 ## Moderation
 
@@ -16,9 +16,20 @@ The operator's command line. Internal and source-only; AGPL-3.0-only. Commands p
 
 Election IDs are 64 lowercase hex digits, their one spelling (T-31). Exit codes: 0 done, 1 refused by core (`{ "error": code }`), 2 malformed arguments (with the usage), 3 any other failure, such as an unreachable database (`{ "error": "internal", "kind": … }`, the error's name only, since its message can name the database's address).
 
+## Simulations
+
+`docs/status/P1-21.md`. A scenario is JSON (see `@abolishus/sdk`'s README), given inline or as a file; these commands need no database.
+
+| Command                                                            | What it does                                                                                                                                                                                                      |
+| ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `simulation plan (--scenario <json> \| --file <path>)`             | The plan the seed fixes: ballots cast, how many went direct during the outage, and each tier's expected counts. No cryptography; instant.                                                                         |
+| `simulation run (--scenario <json> \| --file <path>) [--progress]` | Runs the election through the protocol code and prints the report (`ok`, each cell's outcome and counts against the plan, and the stubs). With `--progress`, about a hundred `{ "progress": … }` lines before it. |
+
+A malformed scenario is a usage error naming the field (exit 2). A run whose cells differ from the plan prints the report, then `{ "error": "simulation-mismatch" }` (exit 1).
+
 ## Running
 
-From `apps/admin-cli`: `vp node src/main.ts moderation queue` with `DATABASE_URL` (a user granted `abolish_app`, never the owner).
+From `apps/admin-cli`: `vp node src/main.ts moderation queue` with `DATABASE_URL` (a user granted `abolish_app`, never the owner). Only the moderation commands read it; a missing or malformed one is refused as `{ "error": "database-url" }` (exit 1).
 
 ## Tests
 

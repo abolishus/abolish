@@ -77,7 +77,7 @@ function object(
   for (const k of Object.keys(o))
     if (!keys.includes(k) && !optional.includes(k))
       throw new Refusal(`${path}.${k}`, "unknown field");
-  for (const k of keys) if (!(k in o)) throw new Refusal(`${path}.${k}`, "missing");
+  for (const k of keys) if (!Object.hasOwn(o, k)) throw new Refusal(`${path}.${k}`, "missing");
   return o;
 }
 
@@ -95,7 +95,8 @@ function fraction(v: unknown, path: string): number {
 
 function seats(v: unknown, path: string, panel: number): number[] {
   if (!Array.isArray(v)) throw new Refusal(path, "expected an array of seats");
-  const out = v.map((s, i) => integer(s, `${path}[${i}]`, 1, panel));
+  // Array.from visits holes too, so a sparse array is refused rather than skipped.
+  const out = Array.from(v, (s: unknown, i) => integer(s, `${path}[${i}]`, 1, panel));
   for (let i = 1; i < out.length; i++)
     if ((out[i - 1] as number) >= (out[i] as number))
       throw new Refusal(path, "seats are distinct and ascending");
@@ -118,15 +119,17 @@ function parse(input: unknown): Scenario {
   const t = object(o["trustees"], "$.trustees", ["panel", "threshold"], ["offline", "faulty"]);
   const panel = integer(t["panel"], "$.trustees.panel", 2, PARAMETERS.MAX_TRUSTEES);
   const threshold = integer(t["threshold"], "$.trustees.threshold", 2, panel);
-  const offline = "offline" in t ? seats(t["offline"], "$.trustees.offline", panel) : [];
-  const faulty = "faulty" in t ? seats(t["faulty"], "$.trustees.faulty", panel) : [];
+  const offline = Object.hasOwn(t, "offline")
+    ? seats(t["offline"], "$.trustees.offline", panel)
+    : [];
+  const faulty = Object.hasOwn(t, "faulty") ? seats(t["faulty"], "$.trustees.faulty", panel) : [];
   if (faulty.some((s) => offline.includes(s)))
     throw new Refusal("$.trustees.faulty", "a seat is either offline or faulty");
 
   const w = object(o["tiers"], "$.tiers", [], ["0", "1", "2"]);
   const tiers = { "0": 0, "1": 0, "2": 0 };
   for (const k of SIMULATED_TIERS)
-    if (`${k}` in w) tiers[`${k}`] = integer(w[`${k}`], `$.tiers.${k}`, 0, 1_000_000);
+    if (Object.hasOwn(w, `${k}`)) tiers[`${k}`] = integer(w[`${k}`], `$.tiers.${k}`, 0, 1_000_000);
   if (tiers["0"] + tiers["1"] + tiers["2"] === 0)
     throw new Refusal("$.tiers", "at least one tier has a positive weight");
 
@@ -134,7 +137,7 @@ function parse(input: unknown): Scenario {
     throw new Refusal("$", `voters × options × panel is at most ${MAX_SIMULATED_WORK}`);
 
   let outage: Scenario["outage"] = null;
-  if (o["outage"] !== undefined && o["outage"] !== null) {
+  if (Object.hasOwn(o, "outage") && o["outage"] !== null) {
     const r = object(o["outage"], "$.outage", ["from", "to"]);
     const from = fraction(r["from"], "$.outage.from");
     const to = fraction(r["to"], "$.outage.to");

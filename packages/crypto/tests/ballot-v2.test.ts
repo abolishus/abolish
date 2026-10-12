@@ -4,9 +4,11 @@ import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vite-plus/test";
 import { checkedKeySetForTests } from "../src/ceremony.ts";
 import {
+  ballotCore,
   ballotElection,
   type BallotCheckV2,
   type BallotRecordV2,
+  ballotSignals,
   ballotSignalsV2,
   type CellBallotElection,
   cellBallotElection,
@@ -15,6 +17,7 @@ import {
   checkDelivery,
   DecodeError,
   decodeBallot,
+  decodeElectionDefinition,
   decodeElectionDefinitionRecord,
   type ElectionDefinitionV3,
   type ElectionDefinitionV4,
@@ -369,6 +372,23 @@ describe("cell ballot context", () => {
     election.definitionHash.fill(0);
     expect(checkBallotV2(election, record)).toEqual(before);
     expect(before.ok).toBe(true);
+  });
+
+  test("a context of one ballot version never checks the other's records", () => {
+    const record = decodeBallot(honest, 2);
+    const asV1 = decodeBallot(Uint8Array.from([0, 2, 1, ...honest.subarray(3)]), 1);
+    // A version-1 context: ballot.json's plurality election.
+    const v1Vectors = JSON.parse(readFileSync(new URL("ballot.json", SPEC_VECTORS), "utf8")) as {
+      readonly elections: { readonly plurality: { readonly definition: string } };
+    };
+    const v1Definition = decodeElectionDefinition(hex(v1Vectors.elections.plurality.definition));
+    const v1 = ballotElection(v1Definition, keySet([1, 2], v1Definition.ceremony_transcript_hash));
+    expect(() => checkBallotV2(v1 as never, record)).toThrow(TypeError);
+    expect(() => ballotSignalsV2(v1 as never, record)).toThrow(TypeError);
+    expect(() => checkBallot(regional as never, asV1)).toThrow(TypeError);
+    expect(() => ballotSignals(regional as never, asV1)).toThrow(TypeError);
+    // The Benaloh challenge path reads version-1 contexts only so far.
+    expect(() => ballotCore(regional as never, 0, [] as never)).toThrow(TypeError);
   });
 
   test("checkBallotV2 and ballotSignalsV2 refuse a context cellBallotElection didn't make", () => {

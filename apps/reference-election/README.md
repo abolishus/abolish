@@ -39,7 +39,7 @@ Everything else is listed as `not-yet` in `stages.json`, with the item that brin
 
 ## Stubs
 
-`STUBS` in `src/election.ts`, written into `stages.json`: the L2 contracts are placeholder addresses (nothing is registered on L2), the electorate is one placeholder Tier 0 group, `membership_vk_hash` is a placeholder, the panel is given to the verifier as a local file, the anchoring authority is a one-byte contract Anvil lets the fixture send from rather than the Safe, and the seal is the segment after the ceremony's. Each placeholder is the Keccak-256 of a `reference-election/placeholder/…` label, so none can be taken for a deployment's.
+`STUBS` in `src/election.ts`, written into `stages.json`: the L2 contracts are placeholder addresses (nothing is registered on L2), the electorate is one placeholder Tier 0 group (the definition names the pinned membership key, which verifier 1.3 requires), the panel is given to the verifier as a local file, the anchoring authority is a one-byte contract Anvil lets the fixture send from rather than the Safe, and the seal is the segment after the ceremony's. Each placeholder is the Keccak-256 of a `reference-election/placeholder/…` label, so none can be taken for a deployment's.
 
 ## Keys
 

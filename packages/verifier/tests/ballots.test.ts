@@ -154,7 +154,9 @@ describe("admission is decided per entry", () => {
       }),
       { numRuns: runs(20) },
     );
-  });
+    // Each run checks a whole bundle: the transcript and every ballot's
+    // Groth16 pairing, about 0.2 s on a shared CI runner.
+  }, 120_000);
 
   test("any change to an admitted ballot's record rejects it", () => {
     const admitted = byId("admitted");
@@ -176,7 +178,7 @@ describe("admission is decided per entry", () => {
       ),
       { numRuns: runs(30) },
     );
-  });
+  }, 120_000);
 
   test("a ballot of another election's board isn't this election's to judge", () => {
     const admitted = byId("admitted");

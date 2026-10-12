@@ -4,7 +4,16 @@
 // no evidence about any election. A short or unreadable board copy is not
 // rejected here; the board checks decide what it means (T-53).
 
-import { type Anchor, type AnchorClock, DecodeError, decodeCheckpoint } from "@abolishus/crypto";
+import {
+  type Anchor,
+  type AnchorClock,
+  DecodeError,
+  decodeCheckpoint,
+  MAX_TRUSTEES,
+  type Panel,
+  PanelError,
+  panelId,
+} from "@abolishus/crypto";
 import { decodeHeader, type L1Evidence, NodePool, RlpError } from "./l1.ts";
 
 /**
@@ -27,6 +36,7 @@ export interface InputSources {
   readonly anchorAddress?: InputSource;
   readonly firstSegment?: InputSource;
   readonly definition?: InputSource;
+  readonly panel?: InputSource;
 }
 
 interface BundleCommon {
@@ -68,8 +78,18 @@ export interface DefinitionBundle extends BundleCommon {
   readonly l1: Omit<L1Evidence, "anchor">;
 }
 
+/**
+ * Format 4: as format 3, with the trustee panel the release pins, which the
+ * key-ceremony checks (2.5, 3.1, 3.2) run against. The verifier has no pinned
+ * panels yet, so the bundle gives it and it is a local input.
+ */
+export interface CeremonyBundle extends Omit<DefinitionBundle, "format"> {
+  readonly format: typeof BUNDLE_FORMAT_CEREMONY;
+  readonly panel: Panel;
+}
+
 /** One election's inputs: the board copy, and what the board checks judge it against. */
-export type Bundle = LocalBundle | L1Bundle | DefinitionBundle;
+export type Bundle = LocalBundle | L1Bundle | DefinitionBundle | CeremonyBundle;
 
 /** A bundle that doesn't follow docs/spec/verifier.md, Bundle. */
 export class BundleError extends Error {
@@ -79,6 +99,7 @@ export class BundleError extends Error {
 export const BUNDLE_FORMAT = "abolish-verifier-bundle/1";
 export const BUNDLE_FORMAT_L1 = "abolish-verifier-bundle/2";
 export const BUNDLE_FORMAT_DEFINITION = "abolish-verifier-bundle/3";
+export const BUNDLE_FORMAT_CEREMONY = "abolish-verifier-bundle/4";
 
 const U32_MAX = 2n ** 32n - 1n;
 const U64_MAX = 2n ** 64n - 1n;
@@ -180,6 +201,24 @@ function parseL1(value: unknown, withAnchor = true): Omit<L1Evidence, "anchor"> 
   };
 }
 
+// A panel the panel identifier's rules accept (docs/spec/trustee-identity.md,
+// Panel identifier): 2 ≤ k ≤ n ≤ MAX_TRUSTEES, canonical P-256 keys, no key
+// in two seats. Checked here, so the ceremony checks only see a valid panel.
+function parsePanel(value: unknown): Panel {
+  const p = object(value, ["threshold", "keys"], "panel");
+  const panel = {
+    threshold: Number(integer(p["threshold"], BigInt(MAX_TRUSTEES), "panel.threshold")),
+    keys: array(p["keys"], "panel.keys").map((k, i) => hexBytes(k, `panel.keys[${i}]`, 33)),
+  };
+  try {
+    panelId(panel);
+  } catch (e) {
+    if (e instanceof PanelError) throw new BundleError(`panel: ${e.code}`);
+    throw e;
+  }
+  return panel;
+}
+
 // The version-1 entry layout: record header (3), election_id (32), index (8)
 // and segment (4), then the payload's u32 length and the payload.
 const FIXED = 3 + 32 + 8 + 4;
@@ -260,35 +299,45 @@ export function parseBundle(json: string, board: Uint8Array): Bundle {
     value !== null && typeof value === "object" && !Array.isArray(value)
       ? (value as Record<string, unknown>)["format"]
       : undefined;
-  if (format === BUNDLE_FORMAT_DEFINITION) {
-    const b = object(value, ["format", "definition", "clock", "l1"], "bundle.json");
+  if (format === BUNDLE_FORMAT_DEFINITION || format === BUNDLE_FORMAT_CEREMONY) {
+    const ceremony = format === BUNDLE_FORMAT_CEREMONY;
+    const members = ["format", "definition", "clock", "l1"];
+    const b = object(value, ceremony ? [...members, "panel"] : members, "bundle.json");
     const definition = hexBytes(b["definition"], "definition");
     const clock = parseClock(b["clock"]);
     const l1 = parseL1(b["l1"], false);
+    const panel = ceremony ? parsePanel(b["panel"]) : undefined;
     const split = splitEntries(board);
-    return {
-      format,
+    const common = {
       definition,
       clock,
       l1,
       entries: split.entries,
       unreadableBytes: split.unreadableBytes,
-      sources: {
-        electionId: "definition",
-        boardEntryVersion: "definition",
-        clock: "local-file",
-        now: "l1-state-proof",
-        anchors: "l1-state-proof",
-        l1Header: "local-file",
-        anchorAddress: "definition",
-        firstSegment: "local-file",
-        definition: "local-file",
-      },
     };
+    const sources = {
+      electionId: "definition",
+      boardEntryVersion: "definition",
+      clock: "local-file",
+      now: "l1-state-proof",
+      anchors: "l1-state-proof",
+      l1Header: "local-file",
+      anchorAddress: "definition",
+      firstSegment: "local-file",
+      definition: "local-file",
+    } as const;
+    return panel === undefined
+      ? { format: BUNDLE_FORMAT_DEFINITION, ...common, sources }
+      : {
+          format: BUNDLE_FORMAT_CEREMONY,
+          ...common,
+          panel,
+          sources: { ...sources, panel: "local-file" },
+        };
   }
   if (format !== BUNDLE_FORMAT && format !== BUNDLE_FORMAT_L1)
     throw new BundleError(
-      `bundle.json: format must be ${BUNDLE_FORMAT}, ${BUNDLE_FORMAT_L1} or ${BUNDLE_FORMAT_DEFINITION}`,
+      `bundle.json: format must be ${BUNDLE_FORMAT}, ${BUNDLE_FORMAT_L1}, ${BUNDLE_FORMAT_DEFINITION} or ${BUNDLE_FORMAT_CEREMONY}`,
     );
   const b = object(
     value,

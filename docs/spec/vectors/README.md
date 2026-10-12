@@ -31,6 +31,7 @@ One JSON file per spec section or record type, named after it (`primitives.json`
 | `circuit.json`             | Circuit-facing values: each registered tag's field element and the two byte packings ([[notation]], [[domain-separation]])                                                                                                                |
 | `identity-backup.json`     | Identity secrets at their boundaries and their sampling, the PRF salt, backups with their keys, locator, row id, associated data and envelope, and envelopes that don't open, with their codes ([[identity-backup]])                      |
 | `l1-anchor.json`           | Board anchors read from L1 state: Anvil's raw headers and `eth_getProof` trie nodes for a deployed board anchor, with the anchors a verifier reads or the code it stops with ([[verifier]], Anchors from L1; [[contracts]], Board anchor) |
+| `verifier-ceremony.json`   | The verifier's key-ceremony checks: definitions, board copies and pinned panels, with the rows 2.5, 3.1 and 3.2 and what the transcript check found ([[verifier]], Key ceremony)                                                          |
 
 ## Format
 

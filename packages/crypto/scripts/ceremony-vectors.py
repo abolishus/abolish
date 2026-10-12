@@ -192,11 +192,11 @@ def keys_body(ctx, s, panel):
 # --- The ceremony, with ways for a seat to cheat --------------------------------------
 
 
-def run(label, panel, seats, cheat=None):
+def run(label, panel, seats, cheat=None, election=ELECTION):
     """Runs the four rounds for `seats` (indices taking part); `cheat` maps a hook name to a function."""
     cheat = cheat or {}
     run_id = H(f"ceremony-run/{label}".encode())
-    ctx = context(panel, run_id)
+    ctx = context(panel, run_id, election)
     secrets = {i: seat_secrets(label, i) for i in seats}
     for i, s in secrets.items():
         if "seat" in cheat:
@@ -371,13 +371,13 @@ def decode_transcript(b, pinned=VERSION):
     return run_id, rounds
 
 
-def check(panel, b):
+def check(panel, b, election=ELECTION):
     try:
         run_id, rounds = decode_transcript(b)
     except DecodeFail as e:
         return {"ok": False, "code": e.code}
     n, k = len(panel["keys"]), panel["k"]
-    ctx = context(panel, run_id)
+    ctx = context(panel, run_id, election)
     r1, r2, r3, r4 = rounds
     s1 = [m["index"] for m in r1]
     s2 = [m["index"] for m in r2]

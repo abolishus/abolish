@@ -1,3 +1,8 @@
+// First, before any other module: creates the one Trusted Types policy the CSP
+// allows, ballot-worker, so no code imported after it can claim the name. It
+// does nothing else, so it is safe on a path gateway too (T-43).
+import "./worker-policy.ts";
+
 import { I18nProvider } from "@abolishus/ui";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";

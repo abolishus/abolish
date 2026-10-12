@@ -113,6 +113,7 @@ export { circuitTagField, PACK_CHUNK, packBoundedBytes, packBytes } from "./circ
 export { MEMBERSHIP_DEPTH, membershipScope, nullifierScope, semaphoreField } from "./membership.ts";
 export { PARAMETERS } from "./parameters.ts";
 export {
+  checkElectionToShow,
   decodeDisplayText,
   decodeElectionDefinition,
   displayTextCommitment,
@@ -123,6 +124,8 @@ export {
   encodeElectionDefinition,
   newDisplayTextSalt,
   pinnedVersion,
+  type ShowCheck,
+  type ShowRefusal,
   UnsupportedVersionError,
 } from "./protocol.ts";
 export {

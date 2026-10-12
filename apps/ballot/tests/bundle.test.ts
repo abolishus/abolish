@@ -1,8 +1,11 @@
 // What the ballot client's build may contain. The client is the only place a
 // plaintext vote exists, so its bundle carries no third-party runtime code
-// beyond React, no analytics SDK, no inline script and no other origin, and
-// its CSP forbids loading anything else (T-43, T-67, T-41; AGENTS.md,
-// Dependencies). The test builds the app itself, so it judges the real output.
+// beyond React, the shadcn/ui runtime and the @noble/* libraries
+// @abolishus/crypto is built on, no analytics SDK, no inline script and no
+// other origin, and its CSP forbids loading anything else (T-43, T-67, T-41;
+// AGENTS.md, Dependencies). The test builds the app itself, so it judges the
+// real output, Web Worker included. The owner-reviewed copy of these rules in
+// .github/tools/ci/src/ballot.ts is the gate (T-59); this one repeats it.
 
 import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -18,9 +21,10 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 const repo = join(root, "..", "..");
 
 /**
- * npm packages whose code may run in the ballot client: React, and the shadcn/ui
- * runtime the owner allowed (Base UI and its dependencies, cva, cn, lucide).
- * Anything else fails; adding to this list is a reviewed change.
+ * npm packages whose code may run in the ballot client: React, the shadcn/ui
+ * runtime the owner allowed (Base UI and its dependencies, cva, cn, lucide),
+ * and the audited @noble/* libraries @abolishus/crypto uses, which the worker
+ * runs. Anything else fails; adding to this list is a reviewed change.
  */
 const RUNTIME_PACKAGES = new Set([
   "react",
@@ -39,9 +43,35 @@ const RUNTIME_PACKAGES = new Set([
   "clsx",
   "cn",
   "lucide-react",
+  "@noble/ciphers",
+  "@noble/curves",
+  "@noble/hashes",
+  "@noble/post-quantum",
 ]);
-/** Workspace source the client may bundle. */
-const WORKSPACE_SOURCES = ["apps/ballot/src/", "apps/ballot/index.html", "packages/ui/src/"];
+/** Workspace source the client may bundle: @abolishus/crypto through its exports, so its build. */
+const WORKSPACE_SOURCES = [
+  "apps/ballot/src/",
+  "apps/ballot/index.html",
+  "packages/ui/src/",
+  "packages/crypto/dist/",
+];
+
+/**
+ * APIs that reach the network or load code, banned from every script the page
+ * doesn't load itself, the worker's above all: a dedicated worker takes its
+ * CSP from its own response headers, never the page's <meta>, so on a host
+ * that sends none, nothing else restricts it (T-43).
+ */
+const WORKER_BANNED = [
+  /\bfetch\b/,
+  /\bXMLHttpRequest\b/,
+  /\bWebSocket\b/,
+  /\bWebTransport\b/,
+  /\bEventSource\b/,
+  /\bimportScripts\b/,
+  /\b(Shared)?Worker\b/,
+  /\bimport\(/,
+];
 
 /**
  * URLs that appear in the bundle as inert strings, never fetched: XML namespace
@@ -116,6 +146,8 @@ beforeAll(async () => {
       logLevel: "silent",
       build: { outDir, emptyOutDir: true },
       plugins: [collect],
+      // Vite bundles a worker in a build of its own that runs only these.
+      worker: { plugins: () => [collect] },
     });
   } finally {
     if (nodeEnv === undefined) delete process.env["NODE_ENV"];
@@ -142,14 +174,16 @@ const html = () => {
 };
 
 describe("bundle contents", () => {
-  test("bundles no npm package's code but React's", () => {
+  test("bundles no npm package's code but React's, the shadcn/ui runtime's and @noble/*", () => {
     const packages = new Set(moduleIds.map(packageOf).filter((p) => p !== undefined));
     expect([...packages].filter((p) => !RUNTIME_PACKAGES.has(p))).toEqual([]);
     // The list isn't vacuous: React is really there.
     expect(packages.has("react-dom")).toBe(true);
+    // ...and the worker's modules were seen: @noble/curves comes in only there.
+    expect(packages.has("@noble/curves")).toBe(true);
   });
 
-  test("bundles workspace code only from the ballot app and @abolishus/ui", () => {
+  test("bundles workspace code only from the ballot app, @abolishus/ui and @abolishus/crypto's build", () => {
     const outside = moduleIds
       .filter((id) => packageOf(id) === undefined)
       .map((id) => relative(repo, id).split(sep).join("/"))
@@ -211,6 +245,52 @@ describe("bundle contents", () => {
           .map((pattern) => `${name}: ${pattern}`),
       );
     expect(found).toEqual([]);
+  });
+});
+
+describe("the Web Worker", () => {
+  // Scripts index.html doesn't load: the worker, which the page spawns.
+  const unloaded = () => {
+    const loaded = new Set(
+      [...html().matchAll(/\s(?:src|href)="\.\/(assets\/[\w-]+\.js)"/g)].map(([, name]) => name),
+    );
+    return [...files].filter(([name]) => name.endsWith(".js") && !loaded.has(name));
+  };
+
+  // T-43: whoever creates the policy first holds the only way to mint a
+  // script URL, so the page's script creates it before any module's code.
+  test("is spawned through ballot-worker, which the page creates before React's code", () => {
+    const [entry] = [...html().matchAll(/<script\b[^>]*\ssrc="\.\/(assets\/[\w-]+\.js)"/g)].map(
+      ([, name]) => files.get(name ?? "") ?? "",
+    );
+    const claim = entry?.search(/createPolicy\(\s*[`"']ballot-worker[`"']/) ?? -1;
+    expect(claim).toBeGreaterThanOrEqual(0);
+    expect(claim).toBeLessThan(entry?.indexOf("react.transitional.element") ?? -1);
+    // Text order is run order only within one script: a chunk the entry
+    // imports, or a second script, would run before the entry's body.
+    expect(entry).not.toMatch(/(^|[;}\s])import\s*[\w{*"'`]/);
+    expect(html().match(/<script\b/g)).toHaveLength(1);
+    expect(html()).not.toMatch(/modulepreload/i);
+  });
+
+  test("is one script of its own, which the page doesn't load", () => {
+    expect(unloaded().map(([name]) => name)).toEqual([
+      expect.stringMatching(/^assets\/worker-[\w-]+\.js$/),
+    ]);
+  });
+
+  test("uses no network, worker or code-loading API", () => {
+    const found = unloaded().flatMap(([name, text]) =>
+      WORKER_BANNED.filter((pattern) => pattern.test(text)).map((p) => `${name}: ${p}`),
+    );
+    expect(found).toEqual([]);
+  });
+
+  test("no script uses WebRTC, which no CSP directive governs", () => {
+    const found = textFiles().filter(([, text]) =>
+      /\bRTC(PeerConnection|DataChannel)\b/.test(text),
+    );
+    expect(found.map(([name]) => name)).toEqual([]);
   });
 });
 

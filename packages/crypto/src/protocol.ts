@@ -13,7 +13,12 @@ import {
 } from "./display-text.ts";
 import { BOARD_ENTRY } from "./board.ts";
 import { ds } from "./domain-separation.ts";
-import { ELECTION_DEFINITION, type ElectionDefinition } from "./election-definition.ts";
+import {
+  ELECTION_DEFINITION,
+  type ElectionDefinition,
+  electionDefinitionRule,
+  type ElectionDefinitionRule,
+} from "./election-definition.ts";
 import { H } from "./group.ts";
 import { PARAMETERS } from "./parameters.ts";
 import { RECORD_TYPES, RecordSchema, UNPINNED } from "./record.ts";
@@ -123,6 +128,84 @@ export function displayTextRule(
   // Not secret, so no constant-time comparison is needed.
   if (!sameBytes(displayTextCommitment(t), definition.display_text_commitment)) return "commitment";
   return displayTextShapeRule(t, definition.option_count);
+}
+
+/**
+ * Why software that shows an election to a voter (the ballot client, a
+ * challenge checker) refuses to show it: the first check that failed.
+ */
+export type ShowRefusal =
+  | { readonly problem: "definition-undecodable" }
+  | { readonly problem: "another-election" }
+  | { readonly problem: "unregistered-definition" }
+  | { readonly problem: "definition-ill-formed"; readonly rule: ElectionDefinitionRule }
+  | { readonly problem: "display-text-undecodable" }
+  | { readonly problem: "display-text-ill-formed"; readonly rule: DisplayTextRule };
+
+export type ShowCheck =
+  | {
+      readonly ok: true;
+      readonly definition: ElectionDefinition;
+      readonly displayText: DisplayText;
+    }
+  | ({ readonly ok: false } & ShowRefusal);
+
+/**
+ * Every check software must pass before it shows an election to a voter or
+ * labels a Benaloh opening (docs/spec/display-text.md, Checks): the definition
+ * decodes under its own pin, names `electionId` (the election the voter
+ * asked for), hashes to `registeredHash` and is well formed; the display text
+ * decodes under the version the definition pins and passes `displayTextRule`,
+ * commitment first. Kept here, inside the crypto-review gate, so no client
+ * composes it differently (T-34, T-41, G-6).
+ *
+ * `registeredHash` must be the definition hash the L2 election registry holds
+ * for `electionId`, read by the caller from the chain (or a proof of its
+ * state), never from whoever served the records: without it, a server that
+ * serves both records could commit a forged definition to relabelled text
+ * (T-34, T-41). The registry and chain are the deployment the caller's own
+ * release pins, never the `election_registry` or `l2_chain_id` a definition
+ * names, which a forged definition could point at a registry of its own.
+ */
+export function checkElectionToShow(
+  electionId: Uint8Array,
+  registeredHash: Uint8Array,
+  definitionBytes: Uint8Array,
+  displayTextBytes: Uint8Array,
+): ShowCheck {
+  if (!(electionId instanceof Uint8Array) || electionId.length !== 32)
+    throw new TypeError("electionId must be 32 bytes");
+  if (!(registeredHash instanceof Uint8Array) || registeredHash.length !== 32)
+    throw new TypeError("registeredHash must be 32 bytes");
+  let definition;
+  try {
+    definition = decodeElectionDefinition(definitionBytes);
+  } catch (error) {
+    if (error instanceof DecodeError) return { ok: false, problem: "definition-undecodable" };
+    throw error;
+  }
+  // Not secret, so no constant-time comparison is needed.
+  if (!sameBytes(definition.election_id, electionId))
+    return { ok: false, problem: "another-election" };
+  if (!sameBytes(electionDefinitionHash(definition), registeredHash))
+    return { ok: false, problem: "unregistered-definition" };
+  const definitionRule = electionDefinitionRule(definition);
+  if (definitionRule !== undefined)
+    return { ok: false, problem: "definition-ill-formed", rule: definitionRule };
+  let displayText;
+  try {
+    displayText = decodeDisplayText(displayTextBytes, definition);
+  } catch (error) {
+    // A well-formed definition may pin a display-text version this package
+    // can't decode; that is refused like bytes that don't decode.
+    if (error instanceof DecodeError || error instanceof UnsupportedVersionError)
+      return { ok: false, problem: "display-text-undecodable" };
+    throw error;
+  }
+  const textRule = displayTextRule(displayText, definition);
+  if (textRule !== undefined)
+    return { ok: false, problem: "display-text-ill-formed", rule: textRule };
+  return { ok: true, definition, displayText };
 }
 
 /** A fresh display-text salt, from the platform CSPRNG (docs/spec/display-text.md; T-39). */

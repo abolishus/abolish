@@ -12,7 +12,8 @@
 // - Trusted Types: any write of a string into a DOM sink that parses HTML or
 //   script throws, so an injected string can't become markup. One named
 //   policy, ballot-worker, may exist, for the worker's own script URL
-//   (`new Worker(url)` is a script-URL sink); part 2 creates it.
+//   (`new Worker(url)` is a script-URL sink); main.tsx creates it before
+//   anything else runs (src/worker-policy.ts).
 // - base-uri and form-action 'none': no <base> can redirect relative URLs and
 //   no form can post a choice anywhere.
 // A <meta> policy can't set frame-ancestors, report-uri or sandbox; framing

@@ -275,6 +275,26 @@ describe("expiry (T-52)", () => {
     expect(await readIdentityBackup(app, rewritten.locator)).toEqual(rewritten.envelope);
   });
 
+  test("months are UTC months, whatever the session's time zone", async () => {
+    // 2026-10-31T12:00Z is already November east of UTC+12 and still October
+    // well west of it; the prune must count from October either way.
+    for (const zone of ["Pacific/Kiritimati", "Pacific/Pago_Pago"]) {
+      const zoned = await db.as("abolish_app");
+      await zoned.unsafe(`SET TIME ZONE '${zone}'`);
+      const kept = backup();
+      await putIdentityBackup(zoned, kept.locator, kept.envelope);
+      const [utc] = await db.admin`
+        SELECT date_trunc('month', clock_timestamp() AT TIME ZONE 'UTC')::date::text AS m`;
+      expect(await months(kept.locator)).toEqual([utc!["m"]]);
+      await writtenIn(kept.locator, "2024-10-01");
+      await pruneIdentityBackups(zoned, new Date("2026-10-31T12:00:00Z"));
+      await pruneIdentityBackups(zoned, new Date("2026-10-01T06:00:00Z"));
+      expect(await readIdentityBackup(zoned, kept.locator)).toEqual(kept.envelope);
+      await pruneIdentityBackups(zoned, new Date("2026-11-01T06:00:00Z"));
+      expect(await readIdentityBackup(zoned, kept.locator)).toBeUndefined();
+    }
+  });
+
   test("refuses an invalid clock", async () => {
     await expect(pruneIdentityBackups(app, new Date(Number.NaN))).rejects.toThrow(TypeError);
   });

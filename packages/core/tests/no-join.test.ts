@@ -3,9 +3,10 @@ import { TABLE_CLASSES } from "../src/index.ts";
 import { type TestDb, testDb } from "./db.ts";
 
 // Accounts and ballots never join (.claude/skills/migrations; T-10): every
-// table is classified, no foreign key touches a board table or leaves the
-// account tables, no board table has a column that could name an account or
-// a person, and no account table has one that could name a ballot, a voting
+// table is classified, no foreign key touches a board or identity table or
+// leaves the account tables, no board or identity table has a column that
+// could name an account or a person (identity tables hold voting-identity
+// backups, which must never meet an account: T-20), and no account table has one that could name a ballot, a voting
 // identity or a poll.
 
 const ACCOUNT_LIKE = /account|user|voter|person|email|phone|session|passkey|device|ip_?addr|name/;
@@ -18,12 +19,13 @@ beforeAll(async () => {
 });
 afterAll(() => db?.close());
 
-test("every table is classified as board or operational", async () => {
+test("every table is classified", async () => {
   const tables = await db.admin`
     SELECT table_name FROM information_schema.tables WHERE table_schema = ${db.schema} ORDER BY table_name`;
   const classified = [
     ...TABLE_CLASSES.board,
     ...TABLE_CLASSES.account,
+    ...TABLE_CLASSES.identity,
     ...TABLE_CLASSES.operational,
   ].sort();
   expect(tables.map((t) => t["table_name"])).toEqual(classified);
@@ -59,11 +61,12 @@ test("the runtime role can't act as the owner", async () => {
   expect(r).toEqual({ member: false, elevated: false });
 });
 
-test("no board column looks like an account or a person", async () => {
+test("no board or identity column looks like an account or a person", async () => {
+  const tables = [...TABLE_CLASSES.board, ...TABLE_CLASSES.identity];
   const cols = await db.admin`
     SELECT table_name, column_name FROM information_schema.columns
-    WHERE table_schema = ${db.schema} AND table_name = ANY(${[...TABLE_CLASSES.board]})`;
-  expect(cols.length).toBeGreaterThan(0);
+    WHERE table_schema = ${db.schema} AND table_name = ANY(${tables})`;
+  expect(new Set(cols.map((c) => c["table_name"]))).toEqual(new Set(tables));
   expect(cols.filter((c) => ACCOUNT_LIKE.test(c["column_name"]))).toEqual([]);
 });
 
@@ -75,7 +78,7 @@ test("no account column looks like a ballot, a voting identity or a poll", async
   expect(cols.filter((c) => BALLOT_LIKE.test(c["column_name"]))).toEqual([]);
 });
 
-test("no view, function or trigger reads both an account table and a board table", async () => {
+test("no view, function or trigger reads an account table and a board or identity table", async () => {
   // A join can live in a view or a function as well as in a foreign key.
   const views = await db.admin`
     SELECT table_name, view_definition FROM information_schema.views WHERE table_schema = ${db.schema}`;
@@ -86,7 +89,7 @@ test("no view, function or trigger reads both an account table and a board table
   const both = fns.filter(
     (f) =>
       names(TABLE_CLASSES.account).test(f["prosrc"]) &&
-      names(TABLE_CLASSES.board).test(f["prosrc"]),
+      names([...TABLE_CLASSES.board, ...TABLE_CLASSES.identity]).test(f["prosrc"]),
   );
   expect(both).toEqual([]);
 });

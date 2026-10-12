@@ -26,9 +26,12 @@ export const IDENTITY_BACKUP_ENVELOPE_LENGTH = 63;
 
 /**
  * Whole months a backup is kept after its last write. A row last written in
- * month M is deleted from month M + 25 on: the ballot client rewrites its
- * envelope (P2-8), so a voter who opens it at least every two years keeps
- * their backup. Reads don't count: the server keeps no access time (ADR 0017).
+ * month M is deleted from month M + 25 on. Reads don't count: the server
+ * keeps no access time (ADR 0017). Rewriting needs the backup passkey's PRF
+ * output, since the client keeps no locator or key between ceremonies
+ * (docs/spec/identity-backup.md, Keys), so the ballot client must re-seal
+ * during every backup-passkey ceremony and ask for one well before the
+ * retention runs out (P2-8); opening the client alone keeps nothing alive.
  */
 export const IDENTITY_BACKUP_RETENTION_MONTHS = 24;
 

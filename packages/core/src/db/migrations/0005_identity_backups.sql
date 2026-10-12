@@ -7,13 +7,19 @@
 --
 -- No account column, no address, no request time: the ballot path carries no
 -- account session (apps/api refuses one), and nothing here can name a person
--- (T-10). The only time kept is `written_month`, the UTC month of the last
--- write by the database clock, which the expiry rule needs: a month says
--- little about when a voter was active, so it can't be matched against a
--- proxy's request times (T-11). Reads don't touch it: the server keeps no
+-- (T-10). The only time the table stores is `written_month`, the UTC month
+-- of the last write by the database clock, which the expiry rule needs. That
+-- narrows, but doesn't close, timing (T-11): system columns such as `xmin`
+-- still order writes, and Postgres's own logs could date them, so the
+-- deployment must keep statement logging and commit timestamps off (P2-11).
+-- What closes it is the ADR's argument: joining an id to an address gives
+-- nothing usable without a PRF evaluation. Reads don't touch the row: no
 -- access time. A backup not written for 24 whole months is deleted
--- (pruneIdentityBackups); the ballot client rewrites its envelope to keep it.
--- That bounds what anonymous writes leave behind (T-52).
+-- (pruneIdentityBackups), which bounds what anonymous writes leave behind
+-- (T-52). Rewriting needs a backup-passkey ceremony, since the
+-- client keeps no locator or key (docs/spec/identity-backup.md, Keys), so the
+-- ballot client must re-seal during every such ceremony and ask for one well
+-- before 24 months pass (P2-8).
 --
 -- Operational data: a wipe loses every backup and changes no result (T-66).
 -- Never on the board, the chain, IPFS or the archive.
@@ -25,7 +31,7 @@ CREATE TABLE identity_backups (
   envelope bytea NOT NULL CHECK (
     octet_length(envelope) = 63 AND substring(envelope FROM 1 FOR 3) = '\x000a01'::bytea
   ),
-  written_month date NOT NULL CHECK (written_month = date_trunc('month', written_month)::date)
+  written_month date NOT NULL CHECK (extract(day FROM written_month) = 1)
 );
 
 CREATE INDEX identity_backups_expiry ON identity_backups (written_month);

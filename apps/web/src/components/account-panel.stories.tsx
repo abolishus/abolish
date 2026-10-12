@@ -80,12 +80,15 @@ const signsUp: Story["play"] = async ({ canvasElement }) => {
   await userEvent.click(
     await canvas.findByRole("button", { name: "Create an account with a passkey" }),
   );
-  await expect(await canvas.findByText("You're signed in.")).toBeVisible();
-  await expect(canvas.getByText(/^Synced passkey, added/)).toBeVisible();
+  await expect(await canvas.findByText(/^Synced passkey, added/)).toBeVisible();
+  await expect(canvas.getByRole("status")).toHaveTextContent("You're signed in.");
+  // The button that had focus is gone: focus is back on the heading.
+  await expect(canvas.getByRole("heading", { level: 1 })).toHaveFocus();
   // One passkey: it can't be removed.
   await expect(canvas.queryByRole("button", { name: "Remove" })).toBeNull();
   await userEvent.click(canvas.getByRole("button", { name: "Sign out" }));
   await expect(await canvas.findByRole("button", { name: "Sign in with a passkey" })).toBeVisible();
+  await expect(canvas.getByRole("status")).toHaveTextContent("You're signed out.");
 };
 
 export const SignedOut: Story = { args: { client: fakeClient() }, play: signsUp };
@@ -121,7 +124,7 @@ export const SignedInDark: Story = {
   args: { client: fakeClient({ signedIn: true, passkeys: TWO }) },
   parameters: { theme: "dark" },
   play: async ({ canvasElement }) => {
-    await expect(await within(canvasElement).findByText("You're signed in.")).toBeVisible();
+    await expect(await within(canvasElement).findByText(/^Device passkey, added/)).toBeVisible();
   },
 };
 
@@ -137,6 +140,7 @@ export const DeleteAccount: Story = {
     await expect(
       await canvas.findByRole("button", { name: "Create an account with a passkey" }),
     ).toBeVisible();
+    await expect(canvas.getByRole("status")).toHaveTextContent("The account is deleted.");
     await expect((args.client as ReturnType<typeof fakeClient>).calls).toEqual(["deleteAccount"]);
   },
 };

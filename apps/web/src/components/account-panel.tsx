@@ -1,7 +1,12 @@
 import { Button, useI18n, useTranslate } from "@abolishus/ui";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-import { AccountError, type AccountClient, type PasskeyView } from "../account/client.ts";
+import {
+  AccountError,
+  type AccountClient,
+  type AccountFailure,
+  type PasskeyView,
+} from "../account/client.ts";
 import { catalogs } from "../messages.ts";
 import { formatUtc } from "./format.ts";
 
@@ -10,7 +15,19 @@ type View =
   | { readonly kind: "signed-out" }
   | { readonly kind: "signed-in"; readonly passkeys: readonly PasskeyView[] };
 
-type Notice = "cancelled" | "unsupported" | "failed" | "signedOutOthers" | "passkeyAdded";
+/** What an action did, announced politely. */
+type Done =
+  | "signedIn"
+  | "signedOut"
+  | "signedOutOthers"
+  | "passkeyAdded"
+  | "passkeyRemoved"
+  | "accountDeleted";
+
+type Notice = Done | AccountFailure;
+
+const isFailure = (n: Notice): n is AccountFailure =>
+  n === "cancelled" || n === "unsupported" || n === "failed";
 
 export interface AccountPanelProps {
   readonly client: AccountClient;
@@ -26,9 +43,13 @@ export function AccountPanel({ client }: AccountPanelProps) {
   const t = useTranslate(catalogs);
   const { locale } = useI18n();
   const [view, setView] = useState<View>({ kind: "loading" });
-  const [busy, setBusy] = useState(false);
+  // Busy until the session is known, so assistive technology waits for it.
+  const [busy, setBusy] = useState(true);
   const [notice, setNotice] = useState<Notice | undefined>();
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // An action disables the button that had focus, and may replace it: focus
+  // goes back to the heading, so keyboard users keep their place.
+  const heading = useRef<HTMLHeadingElement>(null);
 
   const refresh = useCallback(async () => {
     if (!(await client.signedIn())) return setView({ kind: "signed-out" });
@@ -36,14 +57,16 @@ export function AccountPanel({ client }: AccountPanelProps) {
   }, [client]);
 
   useEffect(() => {
-    refresh().catch(() => {
-      setView({ kind: "signed-out" });
-      setNotice("failed");
-    });
+    refresh()
+      .catch(() => {
+        setView({ kind: "signed-out" });
+        setNotice("failed");
+      })
+      .finally(() => setBusy(false));
   }, [refresh]);
 
   /** Runs one action, then shows the account as the server now has it. */
-  const act = (action: () => Promise<void>, done?: Notice) => async () => {
+  const act = (action: () => Promise<void>, done?: Done) => async () => {
     setBusy(true);
     setNotice(undefined);
     try {
@@ -59,12 +82,13 @@ export function AccountPanel({ client }: AccountPanelProps) {
       setNotice("failed");
     } finally {
       setBusy(false);
+      heading.current?.focus();
     }
   };
 
   return (
     <section aria-labelledby="account-title" aria-busy={busy} className="grid max-w-prose gap-6">
-      <h1 id="account-title" className="text-3xl font-semibold">
+      <h1 id="account-title" ref={heading} tabIndex={-1} className="text-3xl font-semibold">
         {t("accountTitle")}
       </h1>
       <p className="text-muted-foreground">{t("accountLede")}</p>
@@ -75,10 +99,14 @@ export function AccountPanel({ client }: AccountPanelProps) {
       ) : null}
       {view.kind === "signed-out" ? (
         <div className="flex flex-wrap gap-2">
-          <Button disabled={busy} onClick={act(() => client.signUp())}>
+          <Button disabled={busy} onClick={act(() => client.signUp(), "signedIn")}>
             {t("accountSignUp")}
           </Button>
-          <Button variant="secondary" disabled={busy} onClick={act(() => client.signIn())}>
+          <Button
+            variant="secondary"
+            disabled={busy}
+            onClick={act(() => client.signIn(), "signedIn")}
+          >
             {t("accountSignIn")}
           </Button>
         </div>
@@ -106,7 +134,7 @@ export function AccountPanel({ client }: AccountPanelProps) {
                     <Button
                       variant="quiet"
                       disabled={busy}
-                      onClick={act(() => client.removePasskey(p.id))}
+                      onClick={act(() => client.removePasskey(p.id), "passkeyRemoved")}
                     >
                       {t("passkeyRemove")}
                     </Button>
@@ -125,7 +153,11 @@ export function AccountPanel({ client }: AccountPanelProps) {
             </div>
           </section>
           <div className="flex flex-wrap gap-2">
-            <Button variant="secondary" disabled={busy} onClick={act(() => client.signOut())}>
+            <Button
+              variant="secondary"
+              disabled={busy}
+              onClick={act(() => client.signOut(), "signedOut")}
+            >
               {t("accountSignOut")}
             </Button>
             <Button
@@ -143,7 +175,10 @@ export function AccountPanel({ client }: AccountPanelProps) {
             <p>{t("accountDeleteLede")}</p>
             {confirmDelete ? (
               <div className="flex flex-wrap gap-2">
-                <Button disabled={busy} onClick={act(() => client.deleteAccount())}>
+                <Button
+                  disabled={busy}
+                  onClick={act(() => client.deleteAccount(), "accountDeleted")}
+                >
                   {t("accountDeleteConfirm")}
                 </Button>
                 <Button variant="secondary" disabled={busy} onClick={() => setConfirmDelete(false)}>
@@ -161,11 +196,15 @@ export function AccountPanel({ client }: AccountPanelProps) {
         </>
       ) : null}
       <div role="status" className="min-h-6">
-        {notice === "signedOutOthers" || notice === "passkeyAdded" ? t(notice) : null}
+        {notice !== undefined && !isFailure(notice) ? t(notice) : null}
       </div>
-      {notice === "cancelled" || notice === "unsupported" || notice === "failed" ? (
+      {notice !== undefined && isFailure(notice) ? (
         <p role="alert" className="m-0 text-destructive">
-          {t(`accountFailure_${notice}`)}
+          {t(
+            notice === "failed" && view.kind !== "signed-in"
+              ? "accountFailure_failedSignedOut"
+              : `accountFailure_${notice}`,
+          )}
         </p>
       ) : null}
     </section>

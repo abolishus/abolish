@@ -101,6 +101,10 @@ const enUS = {
   accountSignedIn: "You're signed in.",
   accountSignOut: "Sign out",
   accountSignOutOthers: "Sign out everywhere else",
+  signedIn: "You're signed in.",
+  signedOut: "You're signed out.",
+  accountDeleted: "The account is deleted.",
+  passkeyRemoved: "Passkey removed.",
   signedOutOthers: "Every other session of this account is signed out.",
   passkeysTitle: "Passkeys",
   passkeySynced: "Synced passkey, added {created} UTC",
@@ -116,6 +120,7 @@ const enUS = {
   accountDeleteCancel: "Keep account",
   accountFailure_cancelled: "The passkey prompt was dismissed. Nothing changed.",
   accountFailure_unsupported: "This browser doesn't support passkeys.",
+  accountFailure_failedSignedOut: "That didn't work. Nothing changed; try again shortly.",
   accountFailure_failed:
     "That didn't work. Adding a passkey or deleting the account needs a sign-in from the last day: sign out, sign in again and retry.",
 } as const;

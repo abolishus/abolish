@@ -37,6 +37,27 @@ const logged: Parameters<Log>[0][] = [];
 /** Every request the stub Start handler received. */
 const started: Request[] = [];
 
+/** The last streamed page: how many chunks it gave and whether it was cancelled. */
+let stream = { pulls: 0, cancelled: false };
+
+/** A page that streams a chunk every 20 ms, without end. */
+function streamed(): Response {
+  stream = { pulls: 0, cancelled: false };
+  const state = stream;
+  return new Response(
+    new ReadableStream({
+      pull: async (controller) => {
+        state.pulls++;
+        await new Promise((r) => setTimeout(r, 20));
+        controller.enqueue(new Uint8Array(1024));
+      },
+      cancel: () => {
+        state.cancelled = true;
+      },
+    }),
+  );
+}
+
 beforeAll(async () => {
   db = await testDb();
   const accounts = createAccounts({
@@ -54,6 +75,17 @@ beforeAll(async () => {
     start: {
       fetch: async (request) => {
         started.push(request);
+        const path = new URL(request.url).pathname;
+        if (path === "/stream") return streamed();
+        if (path === "/broken")
+          return new Response(
+            new ReadableStream({
+              pull: () => {
+                throw new Error("render failed");
+              },
+            }),
+            { headers: { "content-length": "5000", "set-cookie": "c=3; Secure" } },
+          );
         const headers = new Headers({ "content-type": "text/html" });
         headers.append("set-cookie", "a=1; Secure");
         headers.append("set-cookie", "b=2; Secure");
@@ -261,9 +293,12 @@ describe("the front", () => {
     expect(asset.headers["content-type"]).toBe("text/javascript; charset=utf-8");
     expect(asset.headers["cache-control"]).toBe("public, max-age=31536000, immutable");
     expect(asset.headers["x-content-type-options"]).toBe("nosniff");
+    // `..` segments resolve before routing: what is left is a page path,
+    // which Start answers, and never a file outside assets/.
+    for (const target of ["/assets/../secret.txt", "/assets/%2e%2e/secret.txt"])
+      expect((await raw(target)).body).not.toContain("not an asset");
+    started.length = 0;
     for (const target of [
-      "/assets/../secret.txt",
-      "/assets/%2e%2e/secret.txt",
       "/assets/..%2fsecret.txt",
       "/assets/missing-abc.js",
       "/assets/index-AbC_12-x.js?v=1",
@@ -281,6 +316,8 @@ describe("the front", () => {
     expect(started[0]?.headers.get("host")).toBe("abolish.test");
     expect((await raw("http://evil.test/polls")).status).toBe(400);
     expect((await raw("//evil.test/polls")).status).toBe(400);
+    expect((await raw("/\\evil.test/x")).status).toBe(400);
+    expect((await raw("/\\\\evil.test/")).status).toBe(400);
     expect((await raw("/", { method: "PUT" })).status).toBe(400);
     expect(started).toHaveLength(1);
   });
@@ -318,7 +355,7 @@ describe("the front", () => {
     await raw("/assets/index-AbC_12-x.js");
     await raw("/auth/get-session");
     await raw("/_serverFn/abc", { method: "POST", body: Buffer.from("{}") });
-    await raw("/assets/../secret.txt");
+    await raw("/\\evil.test/x");
     // Lines are written on "finish", after the client has its answer.
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(logged.map((l) => ("route" in l ? l.route : l.error))).toEqual([
@@ -334,6 +371,69 @@ describe("the front", () => {
       for (const leak of [id, "secret", "tok", "UA", "127.0.0.1", "/"])
         expect(text).not.toContain(leak);
     }
+  });
+});
+
+describe("failures", () => {
+  test("pages and server functions never get the account cookie", async () => {
+    started.length = 0;
+    await raw("/polls", { headers: { cookie: `${SESSION}=tok; other=1` } });
+    await raw("/_serverFn/x", {
+      method: "POST",
+      headers: { cookie: `${SESSION}=tok` },
+      body: Buffer.from("{}"),
+    });
+    expect(started).toHaveLength(2);
+    for (const request of started) expect(request.headers.get("cookie")).toBeNull();
+  });
+
+  test("a client that leaves mid-page stops the render", async () => {
+    const { port } = server.address() as AddressInfo;
+    await new Promise<void>((resolve, reject) => {
+      const req = rawRequest({ host: "127.0.0.1", port, path: "/stream" }, (res) => {
+        res.once("data", () => {
+          req.destroy();
+          resolve();
+        });
+      });
+      req.on("error", () => {});
+      req.once("error", reject);
+      req.end();
+    });
+    for (let i = 0; i < 50 && !stream.cancelled; i++) await new Promise((r) => setTimeout(r, 20));
+    expect(stream.cancelled).toBe(true);
+    const pulls = stream.pulls;
+    await new Promise((r) => setTimeout(r, 100));
+    expect(stream.pulls).toBe(pulls);
+  });
+
+  test("a page that fails after its headers were staged is a clean 500", async () => {
+    logged.length = 0;
+    const res = await raw("/broken");
+    expect(res.status).toBe(500);
+    expect(res.headers["set-cookie"]).toBeUndefined();
+    expect(res.headers["content-length"]).not.toBe("5000");
+    expect(res.headers["connection"]).toBe("close");
+    expect(res.body).toBe("500\n");
+    expect(logged).toContainEqual({ error: "Error" });
+  });
+
+  test("a client that aborts its upload isn't logged as a server error", async () => {
+    logged.length = 0;
+    const { port } = server.address() as AddressInfo;
+    const req = rawRequest({
+      host: "127.0.0.1",
+      port,
+      method: "POST",
+      path: "/_serverFn/x",
+      headers: { "content-length": "100" },
+    });
+    req.on("error", () => {});
+    req.write("{");
+    await new Promise((r) => setTimeout(r, 50));
+    req.destroy();
+    await new Promise((r) => setTimeout(r, 100));
+    expect(logged.filter((l) => "error" in l)).toEqual([]);
   });
 });
 

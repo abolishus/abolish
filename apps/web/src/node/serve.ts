@@ -12,6 +12,7 @@
 // visitor looked at): only the method, a route class from a fixed list, the
 // status and the duration.
 
+import { once } from "node:events";
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { join } from "node:path";
@@ -123,7 +124,16 @@ function classify(method: string, path: string): RouteClass {
   return "page";
 }
 
-function refuse(res: ServerResponse, status: number) {
+/**
+ * Answers `status` with a fixed body. Anything staged for another answer
+ * (its length, cookies, caching) is dropped first: a failure can come after
+ * a response's headers were set but before they were sent.
+ */
+function refuse(res: ServerResponse, status: number, extra: Record<string, string> = {}) {
+  for (const name of res.getHeaderNames()) res.removeHeader(name);
+  for (const [name, value] of Object.entries(extra)) res.setHeader(name, value);
+  res.setHeader("x-content-type-options", "nosniff");
+  res.setHeader("connection", "close");
   res.statusCode = status;
   res.setHeader("content-type", "text/plain; charset=utf-8");
   res.end(`${status}\n`);
@@ -141,20 +151,28 @@ async function send(res: ServerResponse, response: Response, head: boolean) {
     return void res.end();
   }
   const reader = response.body.getReader();
+  // A client that goes away (or the deadline) stops the render: the stream
+  // is cancelled rather than left pending with nobody to read it (T-52).
+  const gone = new AbortController();
+  const onClose = () => gone.abort();
+  res.once("close", onClose);
   try {
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
-      // Wait for the client to take each chunk, so a slow reader can't make
-      // the server buffer a whole page (the deadline below still applies).
-      if (!res.write(value))
-        await new Promise((resolve) => {
-          res.once("drain", resolve);
-          res.once("close", resolve);
-        });
       if (res.destroyed) return await reader.cancel();
+      // Wait for the client to take each chunk, so a slow reader can't make
+      // the server buffer a whole page (the deadline still applies).
+      if (!res.write(value)) {
+        try {
+          await once(res, "drain", { signal: gone.signal });
+        } catch {
+          return await reader.cancel();
+        }
+      }
     }
   } finally {
+    res.off("close", onClose);
     reader.releaseLock();
   }
   res.end();
@@ -179,14 +197,29 @@ export function createWebServer({
   const assets = join(clientDir, "assets");
   let inFlight = 0;
 
+  /**
+   * The request's URL on our origin, or undefined for any target that would
+   * leave it: an absolute form (`GET http://elsewhere/`), `//host` or `/\\host`
+   * (which the URL parser reads as another host).
+   */
+  function urlOf(req: IncomingMessage): URL | undefined {
+    const target = req.url ?? "";
+    if (!target.startsWith("/")) return undefined;
+    let url: URL;
+    try {
+      url = new URL(target, origin);
+    } catch {
+      return undefined;
+    }
+    return url.origin === base.origin ? url : undefined;
+  }
+
   async function handle(req: IncomingMessage, res: ServerResponse, route: RouteClass) {
     const method = req.method ?? "";
     // Origin-form only: an absolute-form target (`GET http://elsewhere/`)
     // would replace the origin the URL is built on.
-    const target = req.url ?? "";
-    if (!METHODS.has(method) || !target.startsWith("/") || target.startsWith("//"))
-      throw new Refusal(400);
-    const url = new URL(target, origin);
+    const url = urlOf(req);
+    if (!METHODS.has(method) || url === undefined) throw new Refusal(400);
 
     if (route === "asset") {
       const match = ASSET.exec(url.pathname);
@@ -217,6 +250,9 @@ export function createWebServer({
     const headers = new Headers();
     for (const [name, value] of Object.entries(req.headers)) {
       if (value === undefined || name === "host") continue;
+      // Pages and server functions never get the account cookie: nothing
+      // they render can join a session to the poll it shows (T-10, T-67).
+      if (name === "cookie" && route !== "auth") continue;
       for (const v of Array.isArray(value) ? value : [value]) headers.append(name, v);
     }
     headers.set("host", base.host);
@@ -246,8 +282,9 @@ export function createWebServer({
     async (req, res) => {
       const started = performance.now();
       const method = METHODS.has(req.method ?? "") ? (req.method as string) : "other";
-      const path = (req.url ?? "").split("?", 1)[0]!;
-      let route = classify(method, path);
+      // Classed on the path the handlers will see, `..` segments resolved.
+      const url = urlOf(req);
+      let route: RouteClass = url === undefined ? "refused" : classify(method, url.pathname);
       res.on("finish", () =>
         log({ method, route, status: res.statusCode, ms: Math.round(performance.now() - started) }),
       );
@@ -256,9 +293,7 @@ export function createWebServer({
       res.setHeader("x-content-type-options", "nosniff");
       if (inFlight >= maxInFlight) {
         route = "refused";
-        res.setHeader("connection", "close");
-        res.setHeader("retry-after", "1");
-        return refuse(res, 503);
+        return refuse(res, 503, { "retry-after": "1" });
       }
       inFlight++;
       const deadline = setTimeout(() => res.destroy(), deadlineMs);
@@ -271,9 +306,10 @@ export function createWebServer({
       } catch (e) {
         if (e instanceof Refusal) {
           route = "refused";
-          res.setHeader("connection", "close");
           return refuse(res, e.status);
         }
+        // A client that went away mid-request isn't a server failure.
+        if (req.destroyed || res.destroyed) return void res.destroy();
         log({ error: e instanceof Error ? e.name : typeof e });
         if (!res.headersSent) refuse(res, 500);
         else res.destroy();

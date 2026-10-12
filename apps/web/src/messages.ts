@@ -91,6 +91,38 @@ const enUS = {
   "reason_appeal-upheld": "Appeal upheld",
   reason_error: "Moderator error",
   "reason_notice-withdrawn": "Notice withdrawn",
+  navAccount: "Account",
+  accountTitle: "Account",
+  accountLede:
+    "An account lets you create and manage polls. It never votes: ballots are cast in the ballot app, with a voting identity that stays on your device, and nothing here can tell how or whether you voted.",
+  accountNeedsScript: "Accounts use passkeys, which need this page's script.",
+  accountSignUp: "Create an account with a passkey",
+  accountSignIn: "Sign in with a passkey",
+  accountSignedIn: "You're signed in.",
+  accountSignOut: "Sign out",
+  accountSignOutOthers: "Sign out everywhere else",
+  signedIn: "You're signed in.",
+  signedOut: "You're signed out.",
+  accountDeleted: "The account is deleted.",
+  passkeyRemoved: "Passkey removed.",
+  signedOutOthers: "Every other session of this account is signed out.",
+  passkeysTitle: "Passkeys",
+  passkeySynced: "Synced passkey, added {created} UTC",
+  passkeyDevice: "Device passkey, added {created} UTC",
+  passkeyRemove: "Remove",
+  passkeyAdd: "Add a passkey",
+  passkeyAdded: "Passkey added.",
+  accountDeleteTitle: "Delete account",
+  accountDeleteLede:
+    "Deletes the account, its passkeys and its sessions. Polls already published stay on the public board.",
+  accountDelete: "Delete account…",
+  accountDeleteConfirm: "Delete account permanently",
+  accountDeleteCancel: "Keep account",
+  accountFailure_cancelled: "The passkey prompt was dismissed. Nothing changed.",
+  accountFailure_unsupported: "This browser doesn't support passkeys.",
+  accountFailure_failedSignedOut: "That didn't work. Nothing changed; try again shortly.",
+  accountFailure_failed:
+    "That didn't work. Adding a passkey or deleting the account needs a sign-in from the last day: sign out, sign in again and retry.",
 } as const;
 
 export type Messages = Record<keyof typeof enUS, Message>;

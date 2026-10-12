@@ -111,7 +111,7 @@ function refuse(status: keyof typeof REFUSALS): Response {
 }
 
 /** The body of `request`, at most `MAX_ACCOUNT_BODY` bytes, or undefined if it is longer. */
-async function boundedBody(request: Request): Promise<Uint8Array | undefined> {
+async function boundedBody(request: Request): Promise<Uint8Array<ArrayBuffer> | undefined> {
   const declared = request.headers.get("content-length");
   if (declared !== null && !(Number(declared) <= MAX_ACCOUNT_BODY)) return undefined;
   if (!request.body) return new Uint8Array(0);

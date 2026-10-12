@@ -147,7 +147,7 @@ function cspNonce(response: Response): string {
 }
 
 describe("every page", () => {
-  test.each(["/", `/polls/${ID}`, "/moderation", "/polls", "/nowhere"])(
+  test.each(["/", `/polls/${ID}`, "/moderation", "/polls", "/account", "/nowhere"])(
     "%s carries the security headers, and its inline scripts the response's nonce",
     async (path) => {
       const response = await get(path);

@@ -1,0 +1,105 @@
+# ADR 0022: A Tier 2 nullifier keyed by the trustees
+
+- Status: Accepted (agent) — owner may veto
+- Date: 2026-10-12
+- Deciders: agent, owner may veto (rule A). The owner asked for this design in [[0010-tier2-identity-provider]] (Owner decision, 2026-10-12). Two points touch the owner's own decisions and are raised under Decisions to review: the agent doesn't use the owner's allowance to board proofs once a keyed nullifier exists (Decision), and the key is long-lived, unlike the per-election keys of [[0006-trustees]] rule 7 (Consequences). Nothing waits on either.
+- Threats addressed: T-03, T-06, T-13, T-14, T-15, T-17, T-19, T-21, T-40 (see [[THREAT_MODEL]])
+
+## Context
+
+[[0010-tier2-identity-provider]] uses zkPassport for Tier 2. Its uniqueness nullifier is `Poseidon2(private_nullifier, scope, subscope)`, with `private_nullifier = Poseidon2(dg1, eContent, SOD signature)`: a deterministic function of the chip's data. The owner ruled on 2026-10-12 that such a value is PII, because anyone who has read the chip (the issuing state, a hotel or border reader, a malicious proof-app build, a leaked chip dump) can recompute it and so name the person behind an identity commitment. So:
+
+- real Tier 2 additions are **trustee-attested**: a threshold of the panel ([[0006-trustees]]) checks each proof and the nullifier's uniqueness off the board, and only the signed attestation and the identity commitment are boarded;
+- the attesters therefore hold every Tier 2 nullifier next to its commitment (T-13), and a copy of that list, stolen or compelled from any one attester, is mapped to named people by anyone holding chip data, offline and at scale;
+- the owner asked for a nullifier keyed by a threshold VOPRF that the trustees run, "so neither the chip data alone nor any single trustee can recompute it", and this ADR designs it.
+
+What a keyed nullifier `N` has to do:
+
+1. **Unique per document.** One document yields one `N`, for the life of the deployment's Tier 2 scope ([[0010-tier2-identity-provider]], Nullifier uniqueness). Two valid derivations for one document would let it register twice (T-03).
+2. **Not computable from the chip data alone,** nor by fewer than `k` trustees (T-13, T-14).
+3. **Never seen raw by a trustee.** The attesters must not learn zkPassport's chip-recomputable nullifier at all, even in transit, or requirement 2 is only as good as their deletion.
+4. **Correct and unique at attestation.** A client colluding with up to `k − 1` trustees can't obtain or register a second `N` for its document, and a trustee can't make an honest client's `N` wrong without being caught and attributed.
+5. **Bound to the registration,** so a relayed query, answer or output can't be reused for another commitment, tier, chain or registry (T-21).
+
+What is one-way: every Tier 2 member's `N` is derived under one key and one derivation. Changing either means re-registering all of Tier 2 under a new scope ([[0010-tier2-identity-provider]]: a second derivation alongside the first lets one document register twice).
+
+### Two limits no keyed nullifier removes
+
+These shape every option below, so they come first.
+
+- **Whoever holds the chip data can ask.** zkPassport checks passive authentication only, so whoever holds a document's chip data can make that document's proof, and so can run the OPRF query for it exactly as its holder would: the trustees can't tell them apart. The issuing state, or anyone with a chip dump, can therefore learn `N` for any document whose chip it has read, one query and one valid proof each; with a stolen attester list, that maps the list online, one document at a time. A keyed nullifier stops offline mapping, not this online one. The querier also learns whether a document is already registered, from the attesters' refusal of a duplicate: that is the [[0010-tier2-identity-provider]] nullifier-burning residual (T-21, T-03) seen from the other side, and it exists under every design, attestation with a raw nullifier included.
+- **A Diffie–Hellman OPRF leaves discrete-log relations on the key.** Any recorded pair `(B, sk_i · B)` or `(B, sk · B)` gives `sk_i` or `sk` to an adversary who solves discrete logs (A-11, T-15), whoever made the query: a harvested registration in transit is enough, and so is registering one document of one's own, since the client unblinds `sk · H1(x)` for a point it can compute. With `sk`, that adversary recomputes `N` for every document whose chip data it holds, and a harvested `N` together with the boarded attestation gives the commitment too. Publishing no public key doesn't change this; encrypting every message of the protocol under the hybrid KEM narrows it to clients and trustees.
+
+## Options
+
+### A. Threshold 2HashDH, evaluated by the panel; `N` kept with the attesters
+
+The 2HashDH OPRF of Jarecki, Kiayias and Krawczyk ("Round-Optimal Password-Protected Secret Sharing and T-PAKE in the Password-Only Model", ASIACRYPT 2014), `F_sk(x) = H2(x, sk · H1(x))`, in its threshold form (Jarecki, Kiayias, Krawczyk and Xu, "TOPPSS: Cost-minimal Password-Protected Secret Sharing based on Threshold OPRF", ACNS 2017). Its single-server form is RFC 9497's OPRF mode.
+
+- **Key.** The OPRF key `sk` (distinct from the threshold `k`) is shared `k`-of-`n` across the panel ([[0006-trustees]]: 4-of-7) by the first phase of the Gennaro–Jarecki–Krawczyk–Rabin DKG (J. Cryptology 2007), which is Pedersen VSS (Pedersen, CRYPTO 1991) with perfectly hiding commitments, from which each seat's share commitment `C_i = sk_i · G + s_i · J` is computed. `J` comes from hash-to-group under a registered tag, so no one knows `log_G J`. The second phase, which publishes `sk · G`, is never run: there is no public key. The VSS transcript is the only public record of the key, and it is perfectly hiding, so nothing published fixes `sk` even to an unbounded adversary. GJKR's first phase, rather than Pedersen's 1991 DKG, gives a uniform key if one dealer is honest (T-40).
+- **Query.** The client takes `x` as zkPassport's `private_nullifier` (so `N` is per document, as zkPassport's own nullifier is), picks a fresh nonzero `r`, and sends `B = r · H1(x)` with a **query proof**: a zero-knowledge proof that `B` is a blinding of `H1(x)` for the `x` inside a valid zkPassport proof under the circuit set and US anchors [[0010-tier2-identity-provider]] pins, bound to the registration record (identity commitment, tier group, chain ID, registry) and a fresh query identifier. zkPassport's own nullifier is a private input: the trustees never see it (requirement 3).
+- **Evaluation.** Each taking-part seat checks the query proof and returns `Z_i = sk_i · B` with a proof of knowledge of `(sk_i, s_i)` such that `Z_i = sk_i · B` and `C_i = sk_i · G + s_i · J`, a Chaum–Pedersen-style proof of equal representation under Fiat–Shamir. Because `C_i` is perfectly hiding, the statement alone is true for every `Z_i`; the proof is sound as a proof of knowledge, under Pedersen binding (no one knows `log_G J`). Its challenge hashes the whole statement: `G`, `J`, `B`, `Z_i`, `C_i`, the seat, the query identifier and the registration record. It is zero-knowledge in the random-oracle model, so it reveals nothing beyond `Z_i`. The seat signs its answer with its identity key, so a wrong one is attributable. The client checks every proof, combines `k` correct answers by Lagrange interpolation in the exponent (`Z = sk · B`), unblinds with `r⁻¹` and hashes: `N = H2(x, sk · H1(x))`.
+- **Attestation.** The client sends `N`, the `k` signed answers `(Z_i, π_i)` it combined, and an **output proof** with public inputs `B`, `Z`, `N`, the query identifier and the registration record, showing that `B = r · H1(x)` and `N = H2(x, r⁻¹ · Z)` for one `x` and `r` (the same `x` as the query, because `B` is). Each attester checks every `π_i` against the public `C_i`, recombines `Z` itself, and checks the output proof against that `Z`. A client that substitutes any other `Z` fails here, and any `k` correct answers combine to the same `sk · B`, so one document has one `N`.
+- **Uniqueness across quorums.** One attester's check isn't enough: two quorums that share only one seat would let that seat, if corrupt, attest a duplicate, and so would a seat whose list is merely behind. So:
+  - every attestation carries the group's next position, as Tier 0's signed batches do ([[contracts]], Group registry), and an attester signs position `j` only once it holds `N` for every position below `j`, each delivered to all seats under the signatures that attested it;
+  - an attestation counts only with `q = max(k, n − 1)` seats' signatures, the quorum [[0006-trustees]] rule 7 already uses (6 of 7). Any two quorums then share `2q − n = 5` seats, so a duplicate needs 5 corrupt attesters, more than the `k − 1 = 3` the panel's threshold tolerates.
+- **Pros:**
+  - Meets requirements 1 to 5. The attesters' lists hold only `N`, so a stolen or compelled list is useless offline without `k` shares, and a chip dump alone recomputes nothing (requirement 2). No `k − 1` trustees can evaluate (threshold one-more Diffie–Hellman in the random-oracle model, the assumption of TOPPSS).
+  - Composes published protocols on standard assumptions. Every check the attesters make is over values they verify themselves.
+  - The query proof can likely reuse audited circuits: zkPassport's salted mode already proves an OPRF query from its `private_nullifier` for TACEO's threshold OPRF network, whose Noir circuits Least Authority audited in January 2026 ([[0010-tier2-identity-provider]], Option A). Here the panel would run the OPRF nodes in TACEO's place, with no device-attestation requirement of ours (unconfirmed: that the query circuit is separable from FaceMatch, and which curve and hash it uses; part 2 checks).
+- **Cons:**
+  - **Classical only against a future break** (the second limit above). `N` is safe on the attesters' lists, not on the board.
+  - **A long-lived key** (Consequences).
+  - **Registration needs `q = max(k, n − 1)` seats online,** six of seven, for every Tier 2 addition: two seats away stop Tier 2 registration, as rule 7 already lets them stop an election opening (T-25, T-69).
+  - **The attesters' lists are state that can't be rebuilt from chain and IPFS.** A seat that loses its list can't attest until it copies the others' and checks the copy against every boarded attestation's position. Wipe-and-rebuild of results is unaffected, because results depend on the boarded attestations only.
+  - Two proofs per registration on the device, and our own composition, for which no published vectors exist (T-36).
+
+### B. RFC 9497 VOPRF over ristretto255 with a public key; `N` on the board
+
+RFC 9497's VOPRF mode, made threshold as in A, over ristretto255 ([[0007-group-and-hash]]), with each seat's verification key `sk_i · G` and the combined `sk · G` public, so anyone can check the evaluation proofs and the board can carry `N`, `B`, `Z` and the proofs. Uniqueness becomes publicly checkable.
+
+- **Pros:** the single-server suite is a published standard with vectors, implemented in `@noble/curves` 2.4.0 (`ristretto255_oprf`), which Trail of Bits audited at 2.3.0 in full. Uniqueness of `N` across Tier 2 is checked by anyone, not only by the attesters (T-06).
+- **Cons:**
+  - **A public `sk · G` and public `(B, Z)` pairs hand `sk` to a discrete-log break,** and `N` on the board is then mapped to named people by anyone with chip data, permanently (T-15, T-17). The owner kept proofs that are only computationally zero-knowledge off the board so that "No PII on-chain" doesn't rest on a computational assumption ([[0010-tier2-identity-provider]], Owner decision); the agent reads a nullifier whose anonymity rests on discrete logs the same way.
+  - Even classically, a published `N` lets the issuing state map its own citizens' registrations by querying (the first limit), turning a per-document online probe into a public, permanent registration list.
+  - The query proof would compute ristretto255 and SHA-512 in non-native arithmetic inside a Noir circuit, far costlier on a phone than an embedded curve.
+  - The proofs on the board must also pass the zero-knowledge gate of [[0010-tier2-identity-provider]].
+
+### C. A symmetric PRF evaluated in multi-party computation
+
+The client secret-shares `x` to the panel, the panel evaluates a keyed hash (for example Poseidon2 keyed by a shared `sk`) by maliciously secure MPC, and a collaborative SNARK proves the result. No discrete-log relation exists anywhere, so the second limit doesn't apply.
+
+- **Pros:** post-quantum at the PRF level; `N` could in principle be boarded (the first limit still applies).
+- **Cons:** no audited implementation in our stack: MPC frameworks and collaborative SNARKs (TACEO's co-SNARKs among them) aren't `@noble/*`, and adding one is a new trust base in the protocol packages. Several MPC rounds among all seats per registration. Kept as the path to a boardable `N` once an audited implementation exists.
+
+## Recommendation
+
+**A.** It does what the owner asked (neither the chip data alone nor any single trustee recomputes the nullifier), keeps the attesters from ever seeing a chip-recomputable value, and adds no public data at all. B would put on the board a value that a discrete-log break, or the issuing state's own queries, turn into a list of named registrants. C is the right shape for a boardable nullifier but has no audited implementation to compose.
+
+What would change it:
+
+- an audited MPC or post-quantum OPRF implementation in the `@noble/*` family, or a `ci:` allowance for one: then C, with `N` boarded only if the owner agrees, and only under a new scope (full re-registration);
+- active or chip authentication in zkPassport's circuits: a chip dump then can't prove, which leaves the first limit to whoever physically holds the chip (a border officer, say) and to an issuer that kept the chip's private key from personalisation;
+- the owner reading a discrete-log-protected keyed nullifier as acceptable on the board: then B's public verification on top of A, under a new scope.
+
+## Consequences
+
+- **What the board carries is unchanged:** attestations and identity commitments ([[0010-tier2-identity-provider]], Owner decision). So are the verifier's checks: verifier 2.4 counts attested additions, and the uniqueness check stays a trust assumption in the attesters (T-06), now needing 5 corrupt seats rather than one.
+- **What the attesters see changes:** `N` instead of zkPassport's nullifier, and nothing of the document. T-13's attester residual narrows from "anyone holding chip data maps a stolen list offline" to "`k` trustees, or the holder of `k` shares, with chip data, offline; or anyone with chip data, online, one query and one valid proof per document". The panel publishes the number of query evaluations and of refused duplicates per period, so a mass probe is visible even if it can't be stopped (T-13, T-21).
+- **A new nullifier type.** [[0010-tier2-identity-provider]] fixes the nullifier type per deployment (non-salted, salted or MOCK). Trustee-keyed is a new type; a deployment uses it alone. MOCK documents use a test key, accepted only on the pinned allow-list of test chains, as 0010's MOCK rule already requires.
+- **Who runs the query.** Under the QR handoff, `x` lives in the proof app, not in our ballot client: both proofs need `x` and `r` on that device. So either zkPassport's app speaks this protocol to our panel (its salted mode's flow, pointed at our nodes; part 2 checks whether it can be), or real-document Tier 2 waits for our own app (P5-3, P5-4). A malicious proof-app build learns `x` and `N` for every user (T-19).
+- **Channels.** The query and output proofs, and the answers, never reach the board, so the zero-knowledge gate of [[0010-tier2-identity-provider]] doesn't apply to them. Requests travel to each seat under the hybrid KEM of [[share-encryption]] (ML-KEM-768 with Diffie–Hellman), to registration KEM keys of their own: the share-encryption keys are per election and destroyed after the tally, and registration happens between elections. Answers travel back to a fresh client KEM key. Each seat deletes the proofs once it has signed or refused (T-15). Both proofs carry `dg1` in their witness and are only computationally zero-knowledge, so a seat that keeps them, and later breaks the assumption or finds a zero-knowledge bug, learns the holder's name, date of birth and commitment.
+- **A long-lived key.** `sk` lives for the deployment's Tier 2 scope. Every other trustee secret is per election ([[0006-trustees]] rule 7) and destroyed after the tally ([[tally]], Destruction), so this departs from the owner's lifecycle rule and is raised under Decisions to review. Changing the panel needs proactive resharing of `sk` to the new seats (Herzberg, Jarecki, Krawczyk and Yung, CRYPTO 1995; Desmedt and Jajodia, 1997) with a public, perfectly hiding transcript. Resharing doesn't revoke old shares, it relies on their erasure: any `k` members of one past epoch keep the key for good, so the jurisdiction and hosting limits of [[0006-trustees]] (rules 1 and 2) must hold within every epoch. Losing `n − k + 1` shares ends the scope, and all of Tier 2 re-registers (T-40, T-14). The trustee role description ([[0006-trustees]], P1-7) must say so before real documents register.
+- **The document's uniqueness rests on `x`.** `x` includes the SOD signature. If an accepted document signer uses ECDSA and the circuit doesn't fix the signature's encoding and low `s`, the holder turns `s` into `n − s` and gets a second `x`, and so a second `N` (T-03). Part 2 confirms that zkPassport canonicalises it, or that the pinned US signers use a non-malleable scheme.
+- **The group and hashes.** `H1` maps into a prime-order group whose arithmetic is native in a Noir circuit over BN254, so the proofs stay cheap on a phone: the prime-order subgroup of Baby Jubjub (EIP-2494), which `@noble/curves` implements (`babyjubjub`), unless part 2 finds that the reusable zkPassport/TACEO query circuit uses another embedded curve, which a short amendment to this ADR records. Baby Jubjub's subgroup gives about 126-bit security, for a key meant to last decades. Points are decoded strictly and checked to be in the prime-order subgroup. RFC 9380 has no Baby Jubjub suite, so `H1` is a new parameterisation of one of its maps (for example its simplified SWU through an isomorphic Weierstrass form, which `@noble/curves` implements generically); if no audited map fits, part 2 records the gap and stops before writing one. `H2` is Poseidon2 with a tag field ([[domain-separation]]), since it runs inside the output proof. Both `H1`'s tag and `H2`'s input bind the Tier 2 scope (chain ID, registry, deployment), so `N` stays scoped even if a key were ever reused.
+- **Known-weak:** the first limit (online probing by any chip-data holder); the second limit (a discrete-log break and chip data map a stolen list or a harvested registration); a long-lived key held by people, with old epochs' shares kept only by erasure; proofs only computationally zero-knowledge towards the seats; a malicious proof-app build; six of seven seats online to register; attesters' lists outside the wipe-and-rebuild invariant.
+- **Follow-ups (P3-4):**
+  - Part 2: confirm zkPassport's salted-mode query circuit (its inputs, its curve, whether it fixes the SOD signature's encoding) and whether its app can query our panel without FaceMatch; specify the key's sharing and resharing transcripts, the registration KEM keys, the query, answer and output records, the evaluation proof, the attestation's position and quorum (the registry and verifier 2.4 require `q` seats' signatures per addition, and an honest seat signs at most one addition per position, without which the 5-seat bound fails) and the delivery of `N` to every seat, in `docs/spec/`, with vectors.
+  - Part 3: the trustee node's evaluation and nullifier list (P2-13), the client side (in the proof app, or P5-3 and P5-4), the QR handoff, and the published probe counts.
+  - Tier 2 for real documents still waits on everything [[0010-tier2-identity-provider]] lists; this ADR adds the trustee role description's new duty and the owner's view on the key's lifecycle.
+
+## Decision
+
+Under rule A (`AGENTS.md`): **option A**, with status `Accepted (agent) — owner may veto`, listed under Decisions to review in [[STATUS]].
+
+`N` stays off the board. The owner's 2026-10-12 decision allows proofs on the board once a trustee-keyed nullifier exists and the zero-knowledge gate is met. The agent doesn't use that allowance: a Diffie–Hellman-keyed nullifier on the board would rest the registrants' anonymity on discrete logs, and would let the issuing state list its own citizens' registrations by querying. The cost is that Tier 2's uniqueness stays a trust assumption in the attesters (T-06) until option C or an owner decision changes it. Boarding a keyed nullifier, and the long-lived key, are raised under Decisions to review; nothing waits on them.

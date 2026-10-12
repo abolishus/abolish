@@ -71,6 +71,7 @@ export {
   type BoardEntryVersion,
   type BoardEntry,
   boardEntryHash,
+  anchoredCheckpoints,
   BoardError,
   type BoardErrorAt,
   type BoardErrorCode,
@@ -348,6 +349,22 @@ export {
   type SeatResult,
   type SeatSecrets,
 } from "./ceremony.ts";
+export {
+  type BoardFailedReason,
+  calldataCarries,
+  type ConsistencyToCheckpoint,
+  disputeEnd,
+  isReceiptAlarm,
+  judgeReceipt,
+  type JudgingKeys,
+  type NotEvidenceReason,
+  RECEIPT_COMMITMENT_SALT_LEN,
+  receiptCommitment,
+  type ReceiptJudgeInput,
+  type ReceiptOpeningCheck,
+  type ReceiptOpeningErrorCode,
+  type ReceiptVerdict,
+} from "./receipt-evidence.ts";
 export {
   type CastExpectation,
   checkReceiptAtCast,

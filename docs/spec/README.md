@@ -23,6 +23,7 @@ A conforming verifier implements every check in [[verifier]] and decodes every r
 | [[membership]]              | The membership statement (Semaphore v4), the nullifier scope, the field mapping, tree depth and membership checks                       | Specified; verification keys and Groth16 verification are P1-17b's                                     |
 | [[election-definition]]     | The election definition record, its hash, decoding against its own profile, well-formedness                                             | Version 1 specified                                                                                    |
 | [[revoting]]                | The re-vote rule: the membership message, the L1 reference admission checks and the selection of the counted ballot                     | Specified; the ballot record that carries it is P1-12's                                                |
+| [[receipts]]                | The receipt record, its signed statement and the check at cast                                                      | Specified; the later checks are P1-13b's                                                               |
 | [[ballot-validity]]         | Ballot commitments, Pedersen VSS shares and the trustees' share check, the statement hash and the validity proofs                       | Specified; the ballot record is P1-12's part 3                                                         |
 | [[share-encryption]]        | Share encryption: the hybrid KEM (ML-KEM-768 with DH in ristretto255), the ciphertext and its hash, decryption, postings and complaints | Specified; key registration is P1-14's, the board records P1-12 part 3's                               |
 | [[tally]]                   | The homomorphic tally: cell aggregates, trustees' summed shares and their check, the combination and opening checks                     | Specified; the tally transcript and destruction are P1-15's parts 2 and 3                              |
@@ -35,7 +36,7 @@ Sections still to be written, by the STATUS item that owns them:
 
 - Record layouts: the rest of the record-type registry, by each record's owning item. The election definition and display text are specified (P1-10b).
 - The ballot record, and receipts, postings and complaints as board records: P1-12 part 3 ([[ballot-validity]] has the commitments and validity proofs, [[share-encryption]] the share KEM and its checks).
-- Benaloh challenge/spoil and receipts: P1-13 (re-vote resolution is in [[revoting]]).
+- Benaloh challenge/spoil: P1-13 (re-vote resolution is in [[revoting]], receipts in [[receipts]]; their later checks are P1-13b's).
 - Key ceremony and its transcript: P1-14 ([[trustee-identity]] has the identity keys, signatures and panel identifier so far).
 - The tally transcript and destruction statements: P1-15, parts 2 and 3 ([[tally]] has the summed shares and openings).
 - Membership verification keys, proof encoding and Groth16 verification: P1-17b.
@@ -54,6 +55,7 @@ The spec follows the ADRs below. Under rule A (`AGENTS.md`) the agent's choices 
 - [[0009-membership-proof]] (accepted by the agent, owner may veto): Semaphore v4's circuit and Groth16 proofs for membership, with a per-poll, per-tier-group scope. [[membership]] follows it.
 - [[0011-revote-rule]] (accepted by the agent, owner may veto): the newest L1 block reference counts, and exact ties count nothing. [[revoting]] follows it.
 - [[0012-trustee-identity-signatures]] (accepted by the agent, owner may veto): trustee identity keys and signatures are ECDSA over P-256 with SHA-256, low-s, checkable on chain through `P256VERIFY`. [[trustee-identity]] follows it.
+- [[0013-ballot-receipts]] (accepted by the agent, owner may veto): a receipt is the operator's signature, under the trustee suite, on the board it showed with the voter's entry last, plus the entry's audit path. [[receipts]] follows it; the later checks are P1-13b's.
 - [[0006-trustees]] (open; owner-only: the owner decides): the panel bound into each election definition.
 - [[0002-everlasting-privacy]] (accepted by the owner on 2026-10-10: option B, perfectly hiding commitments on the board; three owner questions in its Decision section still block ballot encryption (P1-12) and, through trustee duties and the election-key wording, the ceremony and the tally with its destruction step (P1-15)): the ballot, ceremony and tally sections follow it once written; [[verifier]] marks the checks it changes.
 

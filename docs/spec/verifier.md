@@ -194,7 +194,7 @@ Once the check reaches the seats, the report's `ceremony` gives what it found, s
 | `checkpoint-boundary`, `unanchored`, `unsealed`                                                           | pass                        | fail, with the code         |
 
 6. For format 4, unless step 3 stopped the board checks, run the key-ceremony checks ([Key ceremony](#key-ceremony)); if it did, 2.5, 3.1 and 3.2 are unverifiable with `not-reached`.
-7. Report every other check unverifiable with `not-implemented`.
+7. Unless step 3 stopped the board checks, report 8.5 unverifiable with `not-applicable` if the board-entry version they use (the bundle's for formats 1 and 2, the definition's for 3 and 4) doesn't allow `0x000f` (8.5). Report every other check unverifiable with `not-implemented`.
 
 ### Verdicts
 

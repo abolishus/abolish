@@ -481,7 +481,7 @@ describe("2.3's profile combination", () => {
     return fits ? undefined : "profile-combination";
   };
 
-  test("every board-entry, ballot and tally-opening version from 1 to 6", () => {
+  test("board-entry versions 1 to 6 against ballot and tally-opening versions 1 to 3", () => {
     for (let board = 1; board <= 6; board++)
       for (let ballot = 1; ballot <= 3; ballot++)
         for (let opening = 1; opening <= 3; opening++)

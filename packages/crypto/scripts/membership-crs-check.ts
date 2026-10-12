@@ -5,7 +5,8 @@
 // formed (Groth, EUROCRYPT 2016), and only then against a subverted setup
 // (Fuchsbauer, PKC 2018; Abdolmaleki, Baghery, Lipmaa and Zając, ASIACRYPT
 // 2017). This script checks that `semaphore-32.zkey`, with the circuit's R1CS
-// and the powers of tau it was built from, is exactly an honest Groth16 key:
+// and the powers of tau it was built from, is an honest Groth16 key (up to a
+// component of H no proof uses, below):
 // that there are `α`, `β`, `γ ≠ 0`, `δ ≠ 0` and `τ` (with `τ^N ≠ 1`) such that
 // every point equals its formula. Then for any witness of the circuit an
 // honest proof's `A` and `B` are uniform and independent of it (through `r`
@@ -579,7 +580,8 @@ export function checkCrs(zkey: Zkey, ptau: Powers, r1cs: R1cs): string[] {
   // points, which the prover weights by A·B − C there. ptau holds no τ^{2N−1},
   // so snarkjs's basis has some fixed point in its place: H_i may carry
   // κ_i·Z for κ_i = ω^{2i+1}/(2N), that coefficient of L_{2i+1}, and any Z.
-  // A proof never uses Z, since A·B − C has degree at most 2N − 2 and so
+  // A proof never uses Z: the prover sets C = A·B on the N-point domain, so
+  // A·B − C vanishes there and has degree at most 2N − 2, and so
   // Σ h_i·κ_i = 0, its coefficient of X^{2N−1}. The check therefore takes ρ
   // with Σ ρ_i·κ_i = 0, which tests H up to exactly that direction.
   {

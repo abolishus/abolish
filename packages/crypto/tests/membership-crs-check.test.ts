@@ -394,6 +394,9 @@ describe("the file parsers", () => {
   // (12 + 4 bytes) and its own 12-byte header; alpha1 follows the two primes
   // and three counts.
   const alphaAt = 12 + 16 + 12 + 36 + 36 + 12;
+  // The first coefficient: after section 2 (660 bytes), section 3 (two IC
+  // points) and section 4's header and count.
+  const coefAt = 12 + 16 + 12 + 660 + 12 + 128 + 12 + 4;
 
   test.each([
     ["a wrong magic", () => parseZkey(at(zb, 0, [0x78]))],
@@ -408,6 +411,10 @@ describe("the file parsers", () => {
     ],
     ["too few powers", () => parsePtau(pb, 2 * N, N)],
     ["a non-canonical R1CS coefficient", () => parseR1cs(at(rb, rb.length - 32, le(Fr.ORDER)))],
+    ["a coefficient matrix other than A or B", () => parseZkey(at(zb, coefAt, u32(2)))],
+    ["a coefficient row outside the domain", () => parseZkey(at(zb, coefAt + 4, u32(N)))],
+    ["a non-canonical zkey coefficient", () => parseZkey(at(zb, coefAt + 12, le(Fr.ORDER)))],
+    ["an unknown zkey section", () => parseZkey(at(zb, zb.length - 16, u32(11)))],
   ])("reject %s", (_, run) => {
     expect(run).toThrow(CrsCheckError);
   });

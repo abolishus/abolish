@@ -569,6 +569,55 @@ export interface SeatResult {
   readonly reasons: readonly SeatReason[];
 }
 
+/**
+ * Every registered key set `checkCeremonyTranscript` returned, with the hash
+ * of the transcript it came from: the only sets summed shares are sent and
+ * received under, and only for the election whose definition names that
+ * transcript, so a node can't use a key set served from anywhere else, or
+ * another run's or another election's (T-37, T-15; ADR 0015).
+ */
+const CHECKED_KEY_SETS = new WeakMap<readonly RegisteredKeys[], Uint8Array>();
+
+/**
+ * Internal: the hash of the transcript `checkCeremonyTranscript` checked to
+ * return this key set (the set and its entries are frozen, its byte arrays
+ * copied), or `undefined` for any other set.
+ */
+export function checkedTranscriptHash(keys: readonly RegisteredKeys[]): Uint8Array | undefined {
+  const hash = CHECKED_KEY_SETS.get(keys);
+  return hash === undefined ? undefined : Uint8Array.from(hash);
+}
+
+/**
+ * Internal, for tests: marks a key set as checked for a transcript hash,
+ * without a transcript. The package entry point doesn't export this.
+ */
+export function checkedKeySetForTests(
+  keys: readonly RegisteredKeys[],
+  transcriptHash: Uint8Array,
+): readonly RegisteredKeys[] {
+  return markChecked([...keys], transcriptHash);
+}
+
+function markChecked(
+  keys: RegisteredKeys[],
+  transcriptHash: Uint8Array,
+): readonly RegisteredKeys[] {
+  // Byte arrays are copied (their contents can't be frozen), so a later change
+  // to a caller's buffer can't change what the marked set holds.
+  const set = Object.freeze(
+    keys.map((k) =>
+      Object.freeze({
+        index: k.index,
+        kemKey: Object.freeze({ ek: Uint8Array.from(k.kemKey.ek), dh: k.kemKey.dh }),
+        signingKey: Uint8Array.from(k.signingKey),
+      }),
+    ),
+  );
+  CHECKED_KEY_SETS.set(set, Uint8Array.from(transcriptHash));
+  return set;
+}
+
 /** A qualified seat's registered keys. */
 export interface RegisteredKeys {
   readonly index: number;
@@ -721,11 +770,15 @@ export function checkCeremonyTranscript(
   const seats = seatResults(run, t);
   const qualified = seats.filter((s) => s.reasons.length === 0).map((s) => s.index);
   if (qualified.length < run.threshold) return { ok: false, code: "ceremony-quorum", seats };
-  const registered = qualified.map((index) => {
-    const m = t.keys.find((k) => k.index === index) as KeysMessage;
-    return { index, kemKey: m.kem_key, signingKey: m.signing_key };
-  });
-  return { ok: true, hash: ceremonyTranscriptHash(bytes), seats, registered };
+  const hash = ceremonyTranscriptHash(bytes);
+  const registered = markChecked(
+    qualified.map((index) => {
+      const m = t.keys.find((k) => k.index === index) as KeysMessage;
+      return { index, kemKey: m.kem_key, signingKey: m.signing_key };
+    }),
+    hash,
+  );
+  return { ok: true, hash, seats, registered };
 }
 
 // Public values, so timing doesn't matter; written without early exit anyway.

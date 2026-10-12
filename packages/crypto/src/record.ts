@@ -23,6 +23,7 @@ export const RECORD_TYPES = Object.freeze({
   contractEvent: 0x0008,
   displayText: 0x0009,
   identityBackup: 0x000a,
+  summedShareMessage: 0x000b,
 } as const);
 
 /** `0xff00`–`0xffff`: used only by vector files to exercise framing. */

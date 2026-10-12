@@ -239,6 +239,19 @@ export {
   type TallyRules,
 } from "./tally.ts";
 export {
+  decodeSummedShareMessage,
+  encodeSummedShareMessage,
+  openSummedShares,
+  sealSummedShares,
+  SUMMED_SHARE,
+  type SummedShareCell,
+  type SummedShareCode,
+  type SummedShareElection,
+  type SummedShareMessage,
+  type SummedShareResult,
+  type SummedShareSender,
+} from "./summed-share.ts";
+export {
   aggregateHash,
   type CellCheck,
   type CellCode,

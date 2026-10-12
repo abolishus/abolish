@@ -30,6 +30,7 @@ Each item's state (`todo`, `in progress`, `blocked`, `needs owner decision`, `do
 - [[P1-10b]] Election-definition and display-text records
 - [[P1-11]] Group and hash layer
 - [[P1-12]] Ballot commitments and validity proofs
+- [[P1-12c]] Membership-checked intake and bounded trustee receipts
 - [[P1-13]] Challenge/spoil, receipts and re-voting
 - [[P1-13b]] Receipt evidence model
 - [[P1-14]] Trustee key registration
@@ -89,6 +90,7 @@ One-off items: [[P0-ops]] split shared hot files; [[P0-ops-2]] P0-ops review fol
 
 ## Blocked
 
+- On 2026-10-12 the owner decided the open finding that blocked [[P1-12]] part 3b (#101) a second time: the unbounded trustee-node receipt obligation is accepted as a residual until [[P1-12c]] (membership-checked intake, after P1-17b and the ballot record, with P1-18's batched receipts) closes it, which MUST happen before any election registry is deployed ([[0002-everlasting-privacy]], Decision). #101 resumes.
 - On 2026-10-12 the owner decided the two fallback findings that blocked [[P1-12]] part 3b (#101): no forced posting (receipts through the contract path; posting only by the voter's explicit choice) and contract-path postings only ([[0002-everlasting-privacy]], Decision). #101 resumes on that design.
 
 - On 2026-10-12 the owner answered [[0016-share-kem-dh-group]] (option A), unblocking [[P1-12]] part 2 (#58) and so P1-14 part 2, P1-12 part 3 and P1-15 parts 2 and 3.

@@ -271,11 +271,13 @@ describe("the board checks' inputs come from the definition", () => {
       // fails, which stops none of the other checks.
       const r3 = format3(forElection(v.anchor), v);
       const r2 = format2(v);
-      // 2.9 needs a decoded definition, which only format 3 carries.
+      // 1.3 and 2.9 need a decoded definition, which only format 3 carries.
       const others = (r: Report) =>
-        r.checks.filter((c) => c.id !== "2.1" && c.id !== "2.3" && c.id !== "2.9");
+        r.checks.filter((c) => !["1.3", "2.1", "2.3", "2.9"].includes(c.id));
       expect(others(r3)).toEqual(others(r2));
       expect(row(r3, "2.3")).toEqual(COMBINATION_FAILS);
+      // The typical definition names a placeholder membership key, not the pinned one.
+      expect(row(r3, "1.3")).toMatchObject({ status: "fail", code: "membership-key" });
       expect(row(r3, "2.9")).toEqual({ id: "2.9", kind: "election", status: "pass" });
       expect(r3.board).toEqual(r2.board);
       expect(r3.l1).toEqual(r2.l1);

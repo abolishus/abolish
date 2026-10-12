@@ -21,6 +21,7 @@ import {
   panelId,
   pinnedVersion,
   RECORD_TYPES,
+  type RegisteredKeys,
   type SeatReason,
 } from "@abolishus/crypto";
 import { bytesToHex } from "@noble/hashes/utils.js";
@@ -109,7 +110,12 @@ export function ceremonyChecks(
   panel: Panel,
   entries: readonly Uint8Array[],
   boardEntryVersion: BoardEntryVersion,
-): { readonly rows: ReadonlyMap<string, CeremonyOutcome>; readonly report?: CeremonyReport } {
+): {
+  readonly rows: ReadonlyMap<string, CeremonyOutcome>;
+  readonly report?: CeremonyReport;
+  /** The registered key set, once 3.2 passed: what ballots are checked against (5.1 to 5.4). */
+  readonly registered?: readonly RegisteredKeys[];
+} {
   const rows = (r25: CeremonyOutcome, r31: CeremonyOutcome, r32: CeremonyOutcome) =>
     new Map([
       ["2.5", r25],
@@ -191,5 +197,9 @@ export function ceremonyChecks(
       : { status: "pass" };
   // 3.1 also needs the trustee registry's record of this transcript and its
   // approvals on L2, which this verifier doesn't read yet: never a pass here.
-  return { rows: rows(NOT_IMPLEMENTED, NOT_IMPLEMENTED, ceremony), report };
+  return {
+    rows: rows(NOT_IMPLEMENTED, NOT_IMPLEMENTED, ceremony),
+    report,
+    ...(checked.ok && ceremony.status === "pass" && { registered: checked.registered }),
+  };
 }

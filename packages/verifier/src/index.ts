@@ -14,6 +14,7 @@ export {
   parseBundle,
   splitEntries,
 } from "./bundle.ts";
+export { type BallotsReport, type RejectedBallot } from "./ballots.ts";
 export { type CeremonyCode, type CeremonyReport } from "./ceremony.ts";
 export { CHECKS, type CheckKind, type CheckSpec } from "./checks.ts";
 export { type CliOutput, EXIT_CODES, runCli } from "./cli.ts";

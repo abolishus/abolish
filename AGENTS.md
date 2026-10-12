@@ -109,7 +109,7 @@ Testing is the product. CI runs all of it on every PR:
 
 ## Reference election
 
-`vp run reference-election` (root script; not yet implemented, see STATUS) is the single end-to-end proof that the system works. It runs:
+`vp run reference-election` (root script, `apps/reference-election`; it covers only some stages so far, each listed with its coverage in `reference-election-output/stages.json`) is the single end-to-end proof that the system works. It runs:
 
 1. Trustee key ceremony with public transcript
 2. Registration at every identity tier

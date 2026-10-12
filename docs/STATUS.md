@@ -6,7 +6,7 @@ Last updated: 2026-10-10 (P0-ops: items split into `docs/status/`).
 
 ## Queue
 
-Each item's state (`todo`, `in progress`, `blocked`, `needs owner decision`, `done`) is in its own file only, so starting or finishing an item never edits this index. Done as of 2026-10-10: P0-1, P0-3, P0-4, P1-1 to P1-6, P1-8, P1-9 and P1-16b.
+Each item's state (`todo`, `in progress`, `blocked`, `needs owner decision`, `done`) is in its own file only, so starting or finishing an item never edits this index. Done as of 2026-10-12: P0-1 to P0-4, P1-1 to P1-6, P1-8 to P1-11, P1-14, P1-16, P1-16b, P1-17, P1-17c, P2-1, P2-2, P2-5, P2-7 and P3-1, plus every P0-ops item.
 
 ### Phase 0: Bootstrap
 
@@ -91,6 +91,7 @@ One-off items: [[P0-ops]] split shared hot files; [[P0-ops-2]] P0-ops review fol
 
 ## Blocked
 
+- On 2026-10-12 the owner answered [[0006-trustees]]'s small-cell question (regions below the floor fold into a per-tier remainder cell; tiers are never merged or withheld), unblocking [[P1-15]] part 4.
 - On 2026-10-12 the owner decided the open finding that blocked [[P1-12]] part 3b (#101) a second time: the unbounded trustee-node receipt obligation is accepted as a residual until [[P1-12c]] (membership-checked intake, after P1-17b and the ballot record, with P1-18's batched receipts) closes it, which MUST happen before any election registry is deployed ([[0002-everlasting-privacy]], Decision). #101 resumes.
 - On 2026-10-12 the owner decided the two fallback findings that blocked [[P1-12]] part 3b (#101): no forced posting (receipts through the contract path; posting only by the voter's explicit choice) and contract-path postings only ([[0002-everlasting-privacy]], Decision). #101 resumes on that design.
 
@@ -99,7 +100,7 @@ One-off items: [[P0-ops]] split shared hot files; [[P0-ops-2]] P0-ops review fol
 
 ## Decisions to review
 
-On 2026-10-12 the owner confirmed [[0004-l2-choice]] (testnet only; mainnet L2 revisited), [[0011-revote-rule]], [[0012-trustee-identity-signatures]] and [[0014-tier1-vouching]]; decided [[0006-trustees]]'s structure (option B, rule 7: the registry quorum becomes `q = max(k, n − 1)`, which is `n − 1` for 4-of-7); and narrowed [[moderation-policy]]: a `threat` hide no longer stops voting through our client (P2-10 part 5).
+On 2026-10-12 the owner confirmed [[0004-l2-choice]] (testnet only; mainnet L2 revisited), [[0011-revote-rule]], [[0012-trustee-identity-signatures]] and [[0014-tier1-vouching]]; decided [[0006-trustees]]'s structure (option B, rule 7: the registry quorum becomes `q = max(k, n − 1)`, which is `n − 1` for 4-of-7); narrowed [[moderation-policy]]: a `threat` hide no longer stops voting through our client (P2-10 part 5); and answered [[0006-trustees]]'s small-cell question: regions below the floor fold into a per-tier remainder cell, tiers are never merged or withheld, unblocking [[P1-15]] part 4.
 
 Decisions the agent made under rule A (`AGENTS.md`). Each stands unless the owner vetoes it; a veto is recorded in the ADR and the item's file.
 
@@ -123,7 +124,7 @@ Decisions the agent made under rule A (`AGENTS.md`). Each stands unless the owne
 - [[tally]], Destruction (P1-15 part 3, #103): a reading of [[0002-everlasting-privacy]]'s deletion rule. Trustees destroy once every cell has a passing opening anchored, as the ADR says, or at the latest at `t_D`, once the tally window and the anchoring deadline of the segment before it have passed by L1 time, even if the tally is incomplete. They keep the openings they already signed. So a stalled tally doesn't extend everyone's exposure, at the cost that a cell no trustee had combined by then stays unopened. A missing statement is only reported, never an election failure. The seal gains a 1-day destruction window after `t_D`. A veto means a longer hold, or no fallback, in the spec before any election is registered.
 - [[moderation-policy]] (P2-10): moderation acts only on display text and listing, never on the board, a definition, a tally or an election's timing, with a closed list of grounds and an append-only public log. One trade-off reaches results indirectly: hiding an open poll for `illegal` or `personal-data` stops voting through our ballot client, which won't show text it can't check, so it can lower turnout on a reason code nobody outside can check; voters keep the direct-submit path. Since the owner's narrowing (P2-10 part 5) a `threat` hide of an open poll withholds the text only from our web pages: the ballot client keeps showing the committed text from IPFS, which we keep pinned until the poll closes, and it treats a poll whose state it can't read as visible. Delisting only, or extending the `threat` treatment to the other two grounds, were the alternatives.
 
-Waiting on the owner (owner-only under rule A): [[0006-trustees]] (P1-7: the trustees' names; the structure, 4-of-7 with n − 1 to open, was decided on 2026-10-12); the legal and entity questions in [[moderation-policy]] (P2-10: which law decides `illegal` and the reporting duties that come with it, how legal notices are received and published, what we say if compelled to act on results, and who may moderate), needed before Phase 2 goes public; and two from [[0010-tier2-identity-provider]]: whether a Tier 2 nullifier that anyone holding the passport chip's data can recompute counts as PII on-chain, and whether `@aztec/bb.js` may sit in the verifier's trust base as the runtime for circuit artifacts. The nullifier answer is needed before any real document is registered; the bb.js reading is needed before P3-4 builds the verifier side. Also the tier-floor question in [[0006-trustees]] (Consequences): whether a tier or cell below the minimum size may be withheld or merged rather than opened with T-16's warning. It is the last part of [[P1-15]] (part 4, regional cells and their size floor); until it is answered every tier is opened and small ones are flagged.
+Waiting on the owner (owner-only under rule A): [[0006-trustees]] (P1-7: the trustees' names; the structure, 4-of-7 with n − 1 to open, was decided on 2026-10-12); the legal and entity questions in [[moderation-policy]] (P2-10: which law decides `illegal` and the reporting duties that come with it, how legal notices are received and published, what we say if compelled to act on results, and who may moderate), needed before Phase 2 goes public; and two from [[0010-tier2-identity-provider]]: whether a Tier 2 nullifier that anyone holding the passport chip's data can recompute counts as PII on-chain, and whether `@aztec/bb.js` may sit in the verifier's trust base as the runtime for circuit artifacts. The nullifier answer is needed before any real document is registered; the bb.js reading is needed before P3-4 builds the verifier side.
 
 ## Injection attempts
 

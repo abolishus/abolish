@@ -13,6 +13,16 @@ const enUS = {
   lookupSubmit: "Open poll",
   lookupInvalid: "A poll ID is 64 hexadecimal characters (0–9, a–f).",
   navModeration: "Moderation log",
+  navPolls: "Polls",
+  listTitle: "Listed polls",
+  listLede:
+    "Polls this server lists, in order of their IDs. Polls that moderation has delisted or hidden aren't listed but stay open by ID, and the election registry on chain names every poll, whatever this list shows.",
+  listEmpty: "No polls listed.",
+  listCloses: "Closes",
+  listIllFormed: "Breaks a protocol rule: the verifier fails it.",
+  listMore: "More polls",
+  listUndecodable: "The server's definition doesn't decode.",
+  listMismatch: "The server sent another poll's definition.",
   pollTitle: "Poll",
   pollId: "Poll ID",
   pollClaim:

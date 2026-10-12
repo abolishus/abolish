@@ -61,6 +61,28 @@ const definitions = new Map([
   [SWAPPED_ID, typical.encoding],
 ]);
 
+/**
+ * What the stub lists for discovery, in order, as the API would: never the
+ * hidden poll. Eighteen fillers, the typical poll and one the stub has lost
+ * fill the first page, with the lost one last (so it is the page's cursor
+ * but not shown); the swapped poll is on the second.
+ */
+const FILLER = Array.from({ length: 18 }, (_, i) =>
+  (i + 1).toString(16).padStart(2, "0").repeat(32),
+);
+const LOST_ID = "13".repeat(32);
+const listed = [...FILLER, ID, SWAPPED_ID, LOST_ID].sort();
+for (const id of FILLER)
+  definitions.set(
+    id,
+    toHex(
+      encodeElectionDefinition({
+        ...decodeElectionDefinition(fromHex(typical.encoding)),
+        election_id: fromHex(id),
+      }),
+    ),
+  );
+
 /** While set, the stub drops every connection unanswered, as a dead API would. */
 let down = false;
 
@@ -82,6 +104,11 @@ function stubApi(): Server {
       const after = BigInt(url.searchParams.get("after") ?? "0");
       const entries = after < 7n ? [{ ...LATEST, electionId: HIDDEN_ID }] : [];
       return json(200, { entries });
+    }
+    if (url.pathname === "/elections") {
+      const after = url.searchParams.get("after") ?? "";
+      const limit = Number(url.searchParams.get("limit"));
+      return json(200, { elections: listed.filter((id) => id > after).slice(0, limit) });
     }
     if (definition === undefined)
       return json(404, {
@@ -262,6 +289,66 @@ describe("lookup", () => {
   });
 });
 
+describe("poll list", () => {
+  /** The polls a page of the list links to, in order. */
+  const linked = (html: string) =>
+    [...html.matchAll(/<li\b[^>]*><a[^>]*href="\/polls\/([0-9a-f]{64})"/g)].map((m) => m[1]);
+
+  test("pages through what the API lists, each poll's definition decoded", async () => {
+    const first = await (await get("/polls")).text();
+    expect(first).toContain("Listed polls");
+    expect(first).toContain('name="id"');
+    const page1 = linked(first);
+    expect(listed.indexOf(LOST_ID)).toBe(19);
+    expect(page1).toEqual(listed.slice(0, 19));
+    const more = /href="\/polls\?after=([0-9a-f]{64})"/.exec(first)?.[1];
+    // The cursor is the listing's last ID, even when that poll isn't shown.
+    expect(more).toBe(listed[19]);
+    const second = await (await get(`/polls?after=${more}`)).text();
+    const page2 = linked(second);
+    // The poll the stub lost drops out; nothing else is skipped or repeated.
+    expect([...page1, ...page2]).toEqual(listed.filter((id) => id !== LOST_ID));
+    expect(second).not.toMatch(/href="\/polls\?after=/);
+    expect(first).toContain("One choice");
+  });
+
+  test("never lists a poll the API leaves out, such as a hidden one (T-68)", async () => {
+    let html = await (await get("/polls")).text();
+    let all = linked(html);
+    const more = /href="\/polls\?after=([0-9a-f]{64})"/.exec(html)?.[1];
+    html = await (await get(`/polls?after=${more}`)).text();
+    all = [...all, ...linked(html)];
+    expect(all).not.toContain(HIDDEN_ID);
+  });
+
+  test("flags a definition that names another election rather than showing it (T-34)", async () => {
+    const html = await (await get(`/polls?after=${LOST_ID}`)).text();
+    expect(html).toContain(`href="/polls/${SWAPPED_ID}"`);
+    expect(html).toContain("sent another poll&#x27;s definition");
+  });
+
+  test.each(["?after=abc", `?after=${ID.toUpperCase()}`, `?after=${ID}&after=${ID}`])(
+    "%s starts from the beginning, quoting no error",
+    async (search) => {
+      const response = await follow(`/polls${search}`);
+      expect(response.status).toBe(200);
+      const html = await response.text();
+      expect(linked(html)).toEqual(listed.slice(0, 19));
+      expect(html).not.toMatch(/new Error|expected an election ID/);
+    },
+  );
+
+  test("asks the API for nothing of the visitor's (T-10)", async () => {
+    seen.length = 0;
+    await get("/polls", { cookie: "session=secret", "x-forwarded-for": "203.0.113.9" });
+    expect(seen.map((r) => r.path).filter((p) => p === "/elections")).toHaveLength(1);
+    for (const { headers } of seen) {
+      expect(headers.cookie).toBeUndefined();
+      expect(JSON.stringify(headers)).not.toContain("203.0.113.9");
+    }
+  });
+});
+
 describe("moderation log", () => {
   test("lists decisions with their reasons, linking each poll", async () => {
     const html = await (await get("/moderation")).text();
@@ -295,7 +382,7 @@ describe("server functions", () => {
       .filter((f) => f.endsWith(".js"))
       .flatMap((f) => [...readFileSync(`${dir}/${f}`, "utf8").matchAll(/\(`([0-9a-f]{64})`\)/g)])
       .map((m) => m[1] ?? "");
-    expect(ids.length).toBe(2);
+    expect(ids.length).toBe(3);
     return ids;
   }
 
@@ -317,7 +404,9 @@ describe("server functions", () => {
         "x-tsr-serverfn": "true",
       });
       expect(own.status).toBe(200);
-      expect(await own.text()).toMatch(/expected an election ID|expected a canonical decimal u64/);
+      expect(await own.text()).toMatch(
+        /expected an election ID|expected a canonical decimal u64|or an empty string/,
+      );
     }
   });
 });

@@ -17,18 +17,22 @@ Vectors published by standards bodies and library authors (NIST CAVP, RFCs, Wych
 
 ## Files
 
-| Path                              | Covers                                                                             | Origin                                                             |
-| --------------------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| `nist-cavp/SHA256ShortMsg.rsp`    | SHA-256, messages 0–64 bytes                                                       | NIST CAVP SHAVS byte-oriented vectors, via pyca/cryptography       |
-| `rfc/rfc9496.txt`                 | ristretto255: Appendix A.1–A.3                                                     | RFC 9496, from the RFC Editor                                      |
-| `rfc/rfc9380.txt`                 | `expand_message_xmd` over SHA-512: Appendix K.3                                    | RFC 9380, from the RFC Editor                                      |
-| `rfc/rfc9497.txt`                 | ristretto255-SHA512 `HashToScalar`, `HashToGroup` and serialisation: Appendix A.1  | RFC 9497, from the RFC Editor                                      |
-| `rfc/rfc6979.txt`                 | ECDSA P-256/SHA-256 with RFC 6979 nonces: Appendix A.2.5                           | RFC 6979, from the RFC Editor                                      |
-| `rfc/rfc8439.txt`                 | ChaCha20-Poly1305 AEAD: §2.8.2 (encryption) and Appendix A.5 (decryption)          | RFC 8439, from the RFC Editor                                      |
-| `rfc/rfc5869.txt`                 | HKDF-SHA-256: Appendix A.1–A.3                                                     | RFC 5869, from the RFC Editor                                      |
-| `nist-cavp/SigVer.rsp`            | ECDSA P-256/SHA-256 signature verification: the `[P-256,SHA-256]` section          | NIST CAVP ECDSA SigVer (FIPS 186-3) vectors, via pyca/cryptography |
-| `transparency-dev/constants.go`   | RFC 6962 Merkle tree: leaf inputs, node hashes and roots of trees of 1 to 8 leaves | transparency-dev/merkle v0.0.2 (Apache-2.0)                        |
-| `transparency-dev/verify_test.go` | RFC 6962 inclusion and consistency proofs over the same leaves                     | transparency-dev/merkle v0.0.2 (Apache-2.0)                        |
+| Path                               | Covers                                                                               | Origin                                                             |
+| ---------------------------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------ |
+| `nist-cavp/SHA256ShortMsg.rsp`     | SHA-256, messages 0–64 bytes                                                         | NIST CAVP SHAVS byte-oriented vectors, via pyca/cryptography       |
+| `rfc/rfc9496.txt`                  | ristretto255: Appendix A.1–A.3                                                       | RFC 9496, from the RFC Editor                                      |
+| `rfc/rfc9380.txt`                  | `expand_message_xmd` over SHA-512: Appendix K.3                                      | RFC 9380, from the RFC Editor                                      |
+| `rfc/rfc9497.txt`                  | ristretto255-SHA512 `HashToScalar`, `HashToGroup` and serialisation: Appendix A.1    | RFC 9497, from the RFC Editor                                      |
+| `rfc/rfc6979.txt`                  | ECDSA P-256/SHA-256 with RFC 6979 nonces: Appendix A.2.5                             | RFC 6979, from the RFC Editor                                      |
+| `rfc/rfc8439.txt`                  | ChaCha20-Poly1305 AEAD: §2.8.2 (encryption) and Appendix A.5 (decryption)            | RFC 8439, from the RFC Editor                                      |
+| `rfc/rfc5869.txt`                  | HKDF-SHA-256: Appendix A.1–A.3                                                       | RFC 5869, from the RFC Editor                                      |
+| `nist-cavp/SigVer.rsp`             | ECDSA P-256/SHA-256 signature verification: the `[P-256,SHA-256]` section            | NIST CAVP ECDSA SigVer (FIPS 186-3) vectors, via pyca/cryptography |
+| `transparency-dev/constants.go`    | RFC 6962 Merkle tree: leaf inputs, node hashes and roots of trees of 1 to 8 leaves   | transparency-dev/merkle v0.0.2 (Apache-2.0)                        |
+| `transparency-dev/verify_test.go`  | RFC 6962 inclusion and consistency proofs over the same leaves                       | transparency-dev/merkle v0.0.2 (Apache-2.0)                        |
+| `semaphore/verification-keys.json` | Semaphore v4's Groth16 verification keys, depths 1 to 32; the depth-32 one is pinned | semaphore-protocol/semaphore v4.14.3 (MIT)                         |
+| `iden3/poseidon_constants.json`    | circomlib's Poseidon round constants and MDS matrices                                | iden3/circomlibjs v0.1.7 (GPL-3.0)                                 |
+| `iden3/poseidon.js`                | Poseidon(1, 2) known answer                                                          | iden3/circomlibjs v0.1.7 (GPL-3.0)                                 |
+| `iden3/poseidoncircuit.js`         | Poseidon(1, 2) and Poseidon(3, 4) known answers                                      | iden3/circomlib v2.0.5 (GPL-3.0)                                   |
 
 The NIST CAVP zip on csrc.nist.gov couldn't be fetched from the session that vendored this file, so it was taken from the pyca/cryptography mirror at a pinned commit. All 65 digests were checked against both `@noble/hashes` and OpenSSL (through Python's `hashlib`) when it was vendored; a byte comparison against NIST's own zip is still to do.
 
@@ -39,3 +43,5 @@ The transparency-dev files are Go source; `tests/vectors/transparency-dev.test.t
 The SigVer file's passing cases include signatures with `s` in the high half, which ECDSA accepts and Abolish's low-s rule rejects ([[trustee-identity]]). `tests/vectors/p256.test.ts` checks every failing case is rejected and every passing case is accepted exactly when its `s` is in the low half, and that the low-half form `(r, n − s)` of each high-s passing case is accepted.
 
 ML-KEM-768 has no vendored vectors yet. `tests/vectors/mlkem.test.ts` checks `@noble/post-quantum` against the accumulated FIPS 203 hashes of Go's `crypto/mlkem` tests (go1.25.0, `TestAccumulated`), copied into the test with their URL: the inputs come from SHAKE-128, so the two 32-byte hashes stand for 10 000 key generations, encapsulations and decapsulations, but neither `golang/go` nor C2SP's CCTV is an allowlisted publisher, so the provenance step doesn't re-fetch them. Vendoring NIST's ACVP ML-KEM vectors needs a publisher added in a `ci:` PR.
+
+The Semaphore and iden3 files back membership proofs (`docs/spec/membership.md`; `tests/vectors/semaphore.test.ts`). The pinned key in `src/membership-proof.ts` must equal the depth-32 entry of `verification-keys.json`, point for point. `src/poseidon.ts` takes its constants from `@noble/curves`' Grain generator, never from a table: the test checks they equal circomlibjs's published `C[1]` and `M[1]` (t = 3) and reproduce circomlib's known answers, which the tests parse from the two JavaScript test files and count. The GPL-3.0 files are test data only; nothing from them is built into the package. `.prettierignore` keeps the formatter off this directory, since its JSON and JavaScript files must stay byte for byte as published.

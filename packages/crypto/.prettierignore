@@ -1,0 +1,2 @@
+# Vendored vectors are byte-for-byte copies of published files (test-vectors/README.md).
+test-vectors/*/

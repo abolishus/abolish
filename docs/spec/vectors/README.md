@@ -12,6 +12,8 @@ One JSON file per spec section or record type, named after it (`primitives.json`
 | `group.json`               | `scalar` and `element` codecs: valid boundaries and every rejected class ([[group]])                                                                                                                                                      |
 | `board.json`               | Board entries, the board tree with every inclusion and consistency proof, checkpoints, board checks ([[board]])                                                                                                                           |
 | `membership.json`          | The nullifier scope, the Semaphore field mapping `F` and the protocol-wide tree depth ([[membership]])                                                                                                                                    |
+| `tier-tree.json`           | circomlib's `Poseidon2`, the empty-subtree chain, tier trees replayed from additions and removals (forbidden and stray ones included), roots and paths ([[membership]], Tier tree)                                                        |
+| `membership-proof.json`    | The pinned depth-32 key and its hash, real Semaphore proofs with snarkjs's verdicts, tampered proofs and signals, and rejected encodings ([[membership]], Verification key, Proof encoding)                                               |
 | `revoting.json`            | The membership message `M` and `F(M)`, and the selection of counted ballots, ties and repeats included ([[revoting]])                                                                                                                     |
 | `hash.json`                | `H`, `HashToScalar` under each Fiat–Shamir tag, and `h`, with intermediate bytes ([[group]])                                                                                                                                              |
 | `election-definition.json` | Election definition version 1: codec, definition hash, self-pin and well-formedness ([[election-definition]])                                                                                                                             |
@@ -157,6 +159,22 @@ Type descriptors:
 - `fieldMap`: `F`. Each has `id`, `input` (32 bytes, hex), `keccak256` (the Keccak-256 digest of `input`, hex) and `output` (`F(input)`, decimal).
 - `depth`: the protocol-wide tree depth, as a JSON number.
 - `scopes`: the nullifier scope. Each has `id`, `definitionHash` and `root` (32 bytes each, hex; `root` is read big-endian), `tier` (a JSON number) and either `scope` (`S_g`, hex) and `scopeField` (`F(S_g)`, decimal), or `error`: `non-canonical` for a root that isn't a canonical `field<bn254>`, `zero-root` for a root of 0 ([[membership]], Statement), `unknown-tier` for a tier other than 0, 1 or 2.
+
+`tier-tree.json` covers [[membership]], Tier tree, with format `abolish-tier-tree-vectors/1` and the same top-level fields, plus `depth`, and:
+
+- `poseidon2`: circomlib's `Poseidon2`. Each has `id`, `inputs` (two decimal field elements) and `output` (decimal).
+- `zeros`: `Z_0` to `Z_32`, decimal.
+- `trees`: groups replayed under the lenient rules of Commitments and removals. Each has `id`, `note`, `events` (in order, each `{"add": c}` with `c` a decimal `uint256`, possibly forbidden, or `{"remove": i}` with `i` a decimal leaf index, possibly stray), the resulting `leaves` (decimal, `0` for a removed or forbidden addition), `groupSize`, `root` (decimal), `emptyRoot` (whether `root = Z_32`, which fails a definition listing the tier) and `paths`: up to three members' `index` and `siblings` (32 decimal values, bottom up).
+
+`membership-proof.json` covers [[membership]], Verification key, Proof encoding and Verification, with format `abolish-membership-proof-vectors/1` and the same top-level fields, plus `source` (Semaphore's commit and the artifacts' URLs and sha256s), and:
+
+- `verificationKey`: `depth`, `encoding` (the 768-byte `vk`, hex), `zkeySha256` and `hash` (`membership_vk_hash`, hex).
+- `definitionHash` (hex) and `trees`: each tree's `id`, `tier`, `leaves` and `root` (decimal), which a verifier rebuilds.
+- `fieldMapping`: `scopeBytes` (`S_g` over `definitionHash`, the `tier` and the `root`) with `scope` (`F(S_g)`), or `messageBytes` with `message` (`F(M)`), all from Semaphore's own `hash`.
+- `proofs`: each has `name`, `note`, `proof` (256 bytes, hex), `signals` (`root`, `nullifier`, `message`, `scope`, decimal, as given to the verifier), `snarkjs` (snarkjs's verdict), `valid` (the spec's) and, when invalid, `reason`: `proof` (the pairing check fails), `signal` (a signal at or above `r`) or `root` (`ρ = 0`, which snarkjs accepts).
+- `decode`: proof encodings every decoder rejects, each with `name`, `note` and `proof` (hex). The errors are `truncated` for `short`, `trailing-bytes` for `long`, and otherwise `non-canonical` at the broken point's offset (0, 64 or 192).
+
+The proofs are randomised: regenerating gives other proof bytes for the same statements, so the committed file is the record.
 
 ## Trustee vectors
 

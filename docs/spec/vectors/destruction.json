@@ -1,0 +1,614 @@
+{
+  "format": "abolish-destruction-vectors/1",
+  "title": "Destruction statements: the record, its signature and the report over a board's statements",
+  "spec": "docs/spec/tally.md",
+  "generator": "packages/crypto/scripts/destruction-vectors.py: an independent Python implementation of docs/spec/tally.md (Destruction, Destruction checks), with trustee-vectors.py's P-256 ECDSA, which reproduces RFC 6979 Appendix A.2.5 first",
+  "tag": "abolish/v1/sig/destruction",
+  "recordType": "0x000f",
+  "version": 1,
+  "election": {
+    "definitionHash": "e56671f9b518eb79eb92b82bfa256a16b31aee40bf9d1a5e2cbf535c758a27e3",
+    "registered": [
+      {
+        "index": 1,
+        "signingKey": "03b23aca25394d1b8422a187949d8a56788ad4f2e02c9da069607ff66c9df54158"
+      },
+      {
+        "index": 2,
+        "signingKey": "03d4adb042525fa6add8bde9f313e37385e4a03d145ab3c77acaa8d53bd912474f"
+      },
+      {
+        "index": 4,
+        "signingKey": "03ec53f48c29f22f743c5f801f4f0d7161f1bfd58c87954736fc488da695d0709f"
+      }
+    ]
+  },
+  "statements": [
+    {
+      "id": "seat-1",
+      "description": "Seat 1's statement",
+      "signingSecret": "3902fd570bdab74a8749488edcaf0b0812691aee5f30c731b1408efcabbd54fb",
+      "signingKey": "03b23aca25394d1b8422a187949d8a56788ad4f2e02c9da069607ff66c9df54158",
+      "definitionHash": "e56671f9b518eb79eb92b82bfa256a16b31aee40bf9d1a5e2cbf535c758a27e3",
+      "signer": 1,
+      "message": "000f01e56671f9b518eb79eb92b82bfa256a16b31aee40bf9d1a5e2cbf535c758a27e301",
+      "signature": "72dd0fa6d5aacd0f223115d222a3ecd6f855dfa7b0da869beb53dfe68a80cc800ac972d5f9eedbd22a5190ff09fedd2142f411fbe72ae2f0ecf8e928d0260096",
+      "encoding": "000f01e56671f9b518eb79eb92b82bfa256a16b31aee40bf9d1a5e2cbf535c758a27e30172dd0fa6d5aacd0f223115d222a3ecd6f855dfa7b0da869beb53dfe68a80cc800ac972d5f9eedbd22a5190ff09fedd2142f411fbe72ae2f0ecf8e928d0260096"
+    },
+    {
+      "id": "seat-2",
+      "description": "Seat 2's statement",
+      "signingSecret": "ca680f970a0fdd5e8e48fba7d26fddd9c458960aa36a32c88621ff36a40dc1e7",
+      "signingKey": "03d4adb042525fa6add8bde9f313e37385e4a03d145ab3c77acaa8d53bd912474f",
+      "definitionHash": "e56671f9b518eb79eb92b82bfa256a16b31aee40bf9d1a5e2cbf535c758a27e3",
+      "signer": 2,
+      "message": "000f01e56671f9b518eb79eb92b82bfa256a16b31aee40bf9d1a5e2cbf535c758a27e302",
+      "signature": "a19e9cb9425300c4e33e2629646da671ce7cebc8d88d376ed1b1a50905ea170e3a75b5441d1563a20d041cfd8153c3c045b4088ac5f4a4e9b775942f7f404c86",
+      "encoding": "000f01e56671f9b518eb79eb92b82bfa256a16b31aee40bf9d1a5e2cbf535c758a27e302a19e9cb9425300c4e33e2629646da671ce7cebc8d88d376ed1b1a50905ea170e3a75b5441d1563a20d041cfd8153c3c045b4088ac5f4a4e9b775942f7f404c86"
+    },
+    {
+      "id": "seat-4-other-election",
+      "description": "Seat 4's key over another definition",
+      "signingSecret": "52c001147a69bfdfc426cca91e5e48e64c1d184974a1097f59c2d1c01314eba1",
+      "signingKey": "03ec53f48c29f22f743c5f801f4f0d7161f1bfd58c87954736fc488da695d0709f",
+      "definitionHash": "f4789aa5488004f43aa262c2bb48d3cde11c27d28ca5908bdb1830864f6b4eb0",
+      "signer": 4,
+      "message": "000f01f4789aa5488004f43aa262c2bb48d3cde11c27d28ca5908bdb1830864f6b4eb004",
+      "signature": "86ff06db7cc33d8e76dfa66b9e51442805095e4c174bc953323b36d0c9a9f843795e678f8ff874f25f89515b842227f76680fef387e4b26f905eaaf356eba5cf",
+      "encoding": "000f01f4789aa5488004f43aa262c2bb48d3cde11c27d28ca5908bdb1830864f6b4eb00486ff06db7cc33d8e76dfa66b9e51442805095e4c174bc953323b36d0c9a9f843795e678f8ff874f25f89515b842227f76680fef387e4b26f905eaaf356eba5cf"
+    }
+  ],
+  "decodeErrors": [
+    {
+      "id": "empty",
+      "description": "No bytes",
+      "encoding": "",
+      "error": "truncated",
+      "offset": 0
+    },
+    {
+      "id": "header-only",
+      "description": "A header and nothing else",
+      "encoding": "000f01",
+      "error": "truncated",
+      "offset": 3
+    },
+    {
+      "id": "tally-opening-type",
+      "description": "Record type 0x0006 where a destruction statement is read",
+      "encoding": "000601e56671f9b518eb79eb92b82bfa256a16b31aee40bf9d1a5e2cbf535c758a27e30172dd0fa6d5aacd0f223115d222a3ecd6f855dfa7b0da869beb53dfe68a80cc800ac972d5f9eedbd22a5190ff09fedd2142f411fbe72ae2f0ecf8e928d0260096",
+      "error": "unknown-record-type",
+      "offset": 0
+    },
+    {
+      "id": "version-2",
+      "description": "Version 2, which tally opening 1 doesn't fix",
+      "encoding": "000f02e56671f9b518eb79eb92b82bfa256a16b31aee40bf9d1a5e2cbf535c758a27e30172dd0fa6d5aacd0f223115d222a3ecd6f855dfa7b0da869beb53dfe68a80cc800ac972d5f9eedbd22a5190ff09fedd2142f411fbe72ae2f0ecf8e928d0260096",
+      "error": "profile-mismatch",
+      "offset": 2
+    },
+    {
+      "id": "truncated-before-signer",
+      "description": "The definition hash and nothing after it",
+      "encoding": "000f01e56671f9b518eb79eb92b82bfa256a16b31aee40bf9d1a5e2cbf535c758a27e3",
+      "error": "truncated",
+      "offset": 35
+    },
+    {
+      "id": "truncated-in-signature",
+      "description": "The last byte of the signature missing",
+      "encoding": "000f01e56671f9b518eb79eb92b82bfa256a16b31aee40bf9d1a5e2cbf535c758a27e30172dd0fa6d5aacd0f223115d222a3ecd6f855dfa7b0da869beb53dfe68a80cc800ac972d5f9eedbd22a5190ff09fedd2142f411fbe72ae2f0ecf8e928d02600",
+      "error": "truncated",
+      "offset": 36
+    },
+    {
+      "id": "trailing-byte",
+      "description": "One byte after the signature",
+      "encoding": "000f01e56671f9b518eb79eb92b82bfa256a16b31aee40bf9d1a5e2cbf535c758a27e30172dd0fa6d5aacd0f223115d222a3ecd6f855dfa7b0da869beb53dfe68a80cc800ac972d5f9eedbd22a5190ff09fedd2142f411fbe72ae2f0ecf8e928d026009600",
+      "error": "trailing-bytes",
+      "offset": 100
+    },
+    {
+      "id": "signature-high-s",
+      "description": "The signature's s replaced by n − s",
+      "encoding": "000f01e56671f9b518eb79eb92b82bfa256a16b31aee40bf9d1a5e2cbf535c758a27e30172dd0fa6d5aacd0f223115d222a3ecd6f855dfa7b0da869beb53dfe68a80cc80f5368d290611242ed5ae6f00f60122de79f2e8b1bfecbb9406c0e19a2c3d24bb",
+      "error": "non-canonical",
+      "offset": 36
+    },
+    {
+      "id": "signature-r-zero",
+      "description": "The signature's r is 0",
+      "encoding": "000f01e56671f9b518eb79eb92b82bfa256a16b31aee40bf9d1a5e2cbf535c758a27e30100000000000000000000000000000000000000000000000000000000000000000ac972d5f9eedbd22a5190ff09fedd2142f411fbe72ae2f0ecf8e928d0260096",
+      "error": "non-canonical",
+      "offset": 36
+    },
+    {
+      "id": "signature-r-order",
+      "description": "The signature's r is n",
+      "encoding": "000f01e56671f9b518eb79eb92b82bfa256a16b31aee40bf9d1a5e2cbf535c758a27e301ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc6325510ac972d5f9eedbd22a5190ff09fedd2142f411fbe72ae2f0ecf8e928d0260096",
+      "error": "non-canonical",
+      "offset": 36
+    }
+  ],
+  "reports": [
+    {
+      "id": "all-destroyed",
+      "description": "Every registered seat's statement in the destruction segment or later",
+      "firstPassing": [10, 12],
+      "windowSegment": 40,
+      "entries": [
+        {
+          "segment": 13,
+          "payload": "000f01e56671f9b518eb79eb92b82bfa256a16b31aee40bf9d1a5e2cbf535c758a27e30172dd0fa6d5aacd0f223115d222a3ecd6f855dfa7b0da869beb53dfe68a80cc800ac972d5f9eedbd22a5190ff09fedd2142f411fbe72ae2f0ecf8e928d0260096"
+        },
+        {
+          "segment": 14,
+          "payload": "000f01e56671f9b518eb79eb92b82bfa256a16b31aee40bf9d1a5e2cbf535c758a27e302a19e9cb9425300c4e33e2629646da671ce7cebc8d88d376ed1b1a50905ea170e3a75b5441d1563a20d041cfd8153c3c045b4088ac5f4a4e9b775942f7f404c86"
+        },
+        {
+          "segment": 20,
+          "payload": "000f01e56671f9b518eb79eb92b82bfa256a16b31aee40bf9d1a5e2cbf535c758a27e304562a30781f722f9fa1730eae8965aaa2a6be7ec381b12097b11576f64f05120d49f057473a27b77e63d8d9b02e49fe9beec430acf050b6642e885f8e714c1adf"
+        }
+      ],
+      "result": {
+        "from": 13,
+        "seats": [
+          {
+            "seat": 1,
+            "code": "destroyed",
+            "at": 0
+          },
+          {
+            "seat": 2,
+            "code": "destroyed",
+            "at": 1
+          },
+          {
+            "seat": 4,
+            "code": "destroyed",
+            "at": 2
+          }
+        ],
+        "duplicates": [],
+        "unattributed": [],
+        "stray": [],
+        "rejected": []
+      }
+    },
+    {
+      "id": "early",
+      "description": "Seat 2's statement is in segment 12, the segment of cell 1's first passing opening, before its checkpoint could be anchored: destruction-early",
+      "firstPassing": [10, 12],
+      "windowSegment": 40,
+      "entries": [
+        {
+          "segment": 13,
+          "payload": "000f01e56671f9b518eb79eb92b82bfa256a16b31aee40bf9d1a5e2cbf535c758a27e30172dd0fa6d5aacd0f223115d222a3ecd6f855dfa7b0da869beb53dfe68a80cc800ac972d5f9eedbd22a5190ff09fedd2142f411fbe72ae2f0ecf8e928d0260096"
+        },
+        {
+          "segment": 12,
+          "payload": "000f01e56671f9b518eb79eb92b82bfa256a16b31aee40bf9d1a5e2cbf535c758a27e302a19e9cb9425300c4e33e2629646da671ce7cebc8d88d376ed1b1a50905ea170e3a75b5441d1563a20d041cfd8153c3c045b4088ac5f4a4e9b775942f7f404c86"
+        },
+        {
+          "segment": 13,
+          "payload": "000f01e56671f9b518eb79eb92b82bfa256a16b31aee40bf9d1a5e2cbf535c758a27e304562a30781f722f9fa1730eae8965aaa2a6be7ec381b12097b11576f64f05120d49f057473a27b77e63d8d9b02e49fe9beec430acf050b6642e885f8e714c1adf"
+        }
+      ],
+      "result": {
+        "from": 13,
+        "seats": [
+          {
+            "seat": 1,
+            "code": "destroyed",
+            "at": 0
+          },
+          {
+            "seat": 2,
+            "code": "destruction-early",
+            "at": 1
+          },
+          {
+            "seat": 4,
+            "code": "destroyed",
+            "at": 2
+          }
+        ],
+        "duplicates": [],
+        "unattributed": [],
+        "stray": [],
+        "rejected": []
+      }
+    },
+    {
+      "id": "missing",
+      "description": "Only seat 1 made a statement: seats 2 and 4 are destruction-missing",
+      "firstPassing": [10, 12],
+      "windowSegment": 40,
+      "entries": [
+        {
+          "segment": 30,
+          "payload": "000f01e56671f9b518eb79eb92b82bfa256a16b31aee40bf9d1a5e2cbf535c758a27e30172dd0fa6d5aacd0f223115d222a3ecd6f855dfa7b0da869beb53dfe68a80cc800ac972d5f9eedbd22a5190ff09fedd2142f411fbe72ae2f0ecf8e928d0260096"
+        }
+      ],
+      "result": {
+        "from": 13,
+        "seats": [
+          {
+            "seat": 1,
+            "code": "destroyed",
+            "at": 0
+          },
+          {
+            "seat": 2,
+            "code": "destruction-missing"
+          },
+          {
+            "seat": 4,
+            "code": "destruction-missing"
+          }
+        ],
+        "duplicates": [],
+        "unattributed": [],
+        "stray": [],
+        "rejected": []
+      }
+    },
+    {
+      "id": "tally-incomplete",
+      "description": "Cell 1 has no passing opening, so the destruction segment is the tally window's, 40: seat 1's statement in 40 is on time, seat 2's in 39 early",
+      "firstPassing": [10, null],
+      "windowSegment": 40,
+      "entries": [
+        {
+          "segment": 40,
+          "payload": "000f01e56671f9b518eb79eb92b82bfa256a16b31aee40bf9d1a5e2cbf535c758a27e30172dd0fa6d5aacd0f223115d222a3ecd6f855dfa7b0da869beb53dfe68a80cc800ac972d5f9eedbd22a5190ff09fedd2142f411fbe72ae2f0ecf8e928d0260096"
+        },
+        {
+          "segment": 39,
+          "payload": "000f01e56671f9b518eb79eb92b82bfa256a16b31aee40bf9d1a5e2cbf535c758a27e302a19e9cb9425300c4e33e2629646da671ce7cebc8d88d376ed1b1a50905ea170e3a75b5441d1563a20d041cfd8153c3c045b4088ac5f4a4e9b775942f7f404c86"
+        },
+        {
+          "segment": 41,
+          "payload": "000f01e56671f9b518eb79eb92b82bfa256a16b31aee40bf9d1a5e2cbf535c758a27e304562a30781f722f9fa1730eae8965aaa2a6be7ec381b12097b11576f64f05120d49f057473a27b77e63d8d9b02e49fe9beec430acf050b6642e885f8e714c1adf"
+        }
+      ],
+      "result": {
+        "from": 40,
+        "seats": [
+          {
+            "seat": 1,
+            "code": "destroyed",
+            "at": 0
+          },
+          {
+            "seat": 2,
+            "code": "destruction-early",
+            "at": 1
+          },
+          {
+            "seat": 4,
+            "code": "destroyed",
+            "at": 2
+          }
+        ],
+        "duplicates": [],
+        "unattributed": [],
+        "stray": [],
+        "rejected": []
+      }
+    },
+    {
+      "id": "tally-after-window",
+      "description": "Cell 1's first passing opening is in segment 45, after the tally window's segment 40: trustees destroyed at t_D, so the destruction segment is 40",
+      "firstPassing": [10, 45],
+      "windowSegment": 40,
+      "entries": [
+        {
+          "segment": 40,
+          "payload": "000f01e56671f9b518eb79eb92b82bfa256a16b31aee40bf9d1a5e2cbf535c758a27e30172dd0fa6d5aacd0f223115d222a3ecd6f855dfa7b0da869beb53dfe68a80cc800ac972d5f9eedbd22a5190ff09fedd2142f411fbe72ae2f0ecf8e928d0260096"
+        },
+        {
+          "segment": 41,
+          "payload": "000f01e56671f9b518eb79eb92b82bfa256a16b31aee40bf9d1a5e2cbf535c758a27e302a19e9cb9425300c4e33e2629646da671ce7cebc8d88d376ed1b1a50905ea170e3a75b5441d1563a20d041cfd8153c3c045b4088ac5f4a4e9b775942f7f404c86"
+        },
+        {
+          "segment": 46,
+          "payload": "000f01e56671f9b518eb79eb92b82bfa256a16b31aee40bf9d1a5e2cbf535c758a27e304562a30781f722f9fa1730eae8965aaa2a6be7ec381b12097b11576f64f05120d49f057473a27b77e63d8d9b02e49fe9beec430acf050b6642e885f8e714c1adf"
+        }
+      ],
+      "result": {
+        "from": 40,
+        "seats": [
+          {
+            "seat": 1,
+            "code": "destroyed",
+            "at": 0
+          },
+          {
+            "seat": 2,
+            "code": "destroyed",
+            "at": 1
+          },
+          {
+            "seat": 4,
+            "code": "destroyed",
+            "at": 2
+          }
+        ],
+        "duplicates": [],
+        "unattributed": [],
+        "stray": [],
+        "rejected": []
+      }
+    },
+    {
+      "id": "unattributed",
+      "description": "Beside seat 1's statement: one by seat 3, which isn't registered; seat 4's fields signed with seat 2's key; seat 1's signature with the signer changed to 2; and seat 1's key signing the same bytes under the tally-opening tag. None is attributed, so seats 2 and 4 are missing",
+      "firstPassing": [10, 12],
+      "windowSegment": 40,
+      "entries": [
+        {
+          "segment": 13,
+          "payload": "000f01e56671f9b518eb79eb92b82bfa256a16b31aee40bf9d1a5e2cbf535c758a27e30172dd0fa6d5aacd0f223115d222a3ecd6f855dfa7b0da869beb53dfe68a80cc800ac972d5f9eedbd22a5190ff09fedd2142f411fbe72ae2f0ecf8e928d0260096"
+        },
+        {
+          "segment": 13,
+          "payload": "000f01e56671f9b518eb79eb92b82bfa256a16b31aee40bf9d1a5e2cbf535c758a27e3039b63d8020929d8c6b79274a947401f6154dacde216a613ddad880ed712e75fb0269a01ab54da8c875d8c92732c581145e29e5cceec060edb28b641e423b1c772"
+        },
+        {
+          "segment": 13,
+          "payload": "000f01e56671f9b518eb79eb92b82bfa256a16b31aee40bf9d1a5e2cbf535c758a27e304b9d5019d47ff1249113b9388e17ed13464726656d4bea6e93a07de53784779e2429f6ccab6553b85698c63b028b7bc28f248b1f2720cc0268d9a0afe0452dbf1"
+        },
+        {
+          "segment": 13,
+          "payload": "000f01e56671f9b518eb79eb92b82bfa256a16b31aee40bf9d1a5e2cbf535c758a27e30272dd0fa6d5aacd0f223115d222a3ecd6f855dfa7b0da869beb53dfe68a80cc800ac972d5f9eedbd22a5190ff09fedd2142f411fbe72ae2f0ecf8e928d0260096"
+        },
+        {
+          "segment": 13,
+          "payload": "000f01e56671f9b518eb79eb92b82bfa256a16b31aee40bf9d1a5e2cbf535c758a27e30128cb4dff9f4bcb9288b88013db7e4af957e2e181ae46e258a8519d7a1fa7057115170158f693ad5fd7a3541d26c8ed09fc111ce3e2c5468276d7c0aaf36ff846"
+        }
+      ],
+      "result": {
+        "from": 13,
+        "seats": [
+          {
+            "seat": 1,
+            "code": "destroyed",
+            "at": 0
+          },
+          {
+            "seat": 2,
+            "code": "destruction-missing"
+          },
+          {
+            "seat": 4,
+            "code": "destruction-missing"
+          }
+        ],
+        "duplicates": [],
+        "unattributed": [
+          {
+            "at": 1
+          },
+          {
+            "at": 2
+          },
+          {
+            "at": 3
+          },
+          {
+            "at": 4
+          }
+        ],
+        "stray": [],
+        "rejected": []
+      }
+    },
+    {
+      "id": "stray",
+      "description": "Seat 4's key over another definition (attributed, stray) and another definition signed by a key this election never registered (unattributed, stray); seat 4 has no statement of its own",
+      "firstPassing": [10, 12],
+      "windowSegment": 40,
+      "entries": [
+        {
+          "segment": 13,
+          "payload": "000f01e56671f9b518eb79eb92b82bfa256a16b31aee40bf9d1a5e2cbf535c758a27e30172dd0fa6d5aacd0f223115d222a3ecd6f855dfa7b0da869beb53dfe68a80cc800ac972d5f9eedbd22a5190ff09fedd2142f411fbe72ae2f0ecf8e928d0260096"
+        },
+        {
+          "segment": 13,
+          "payload": "000f01f4789aa5488004f43aa262c2bb48d3cde11c27d28ca5908bdb1830864f6b4eb00486ff06db7cc33d8e76dfa66b9e51442805095e4c174bc953323b36d0c9a9f843795e678f8ff874f25f89515b842227f76680fef387e4b26f905eaaf356eba5cf"
+        },
+        {
+          "segment": 14,
+          "payload": "000f01e56671f9b518eb79eb92b82bfa256a16b31aee40bf9d1a5e2cbf535c758a27e302a19e9cb9425300c4e33e2629646da671ce7cebc8d88d376ed1b1a50905ea170e3a75b5441d1563a20d041cfd8153c3c045b4088ac5f4a4e9b775942f7f404c86"
+        },
+        {
+          "segment": 14,
+          "payload": "000f01f4789aa5488004f43aa262c2bb48d3cde11c27d28ca5908bdb1830864f6b4eb00152810581b41c6c91c21f3a07b1dec78690ef889d1c5c894e8a4322ee8ffbcd3910c0ab8cc5621d4ab81599bc2ec774555722fcde9371a73e56d5f2b45035cd1e"
+        }
+      ],
+      "result": {
+        "from": 13,
+        "seats": [
+          {
+            "seat": 1,
+            "code": "destroyed",
+            "at": 0
+          },
+          {
+            "seat": 2,
+            "code": "destroyed",
+            "at": 2
+          },
+          {
+            "seat": 4,
+            "code": "destruction-missing"
+          }
+        ],
+        "duplicates": [],
+        "unattributed": [],
+        "stray": [
+          {
+            "at": 1,
+            "signer": 4
+          },
+          {
+            "at": 3,
+            "signer": null
+          }
+        ],
+        "rejected": []
+      }
+    },
+    {
+      "id": "duplicates",
+      "description": "Seat 1 signed early and again later: its first statement decides (destruction-early) and the second is a duplicate; a byte-identical copy of seat 2's is a duplicate too",
+      "firstPassing": [10, 12],
+      "windowSegment": 40,
+      "entries": [
+        {
+          "segment": 5,
+          "payload": "000f01e56671f9b518eb79eb92b82bfa256a16b31aee40bf9d1a5e2cbf535c758a27e30172dd0fa6d5aacd0f223115d222a3ecd6f855dfa7b0da869beb53dfe68a80cc800ac972d5f9eedbd22a5190ff09fedd2142f411fbe72ae2f0ecf8e928d0260096"
+        },
+        {
+          "segment": 13,
+          "payload": "000f01e56671f9b518eb79eb92b82bfa256a16b31aee40bf9d1a5e2cbf535c758a27e302a19e9cb9425300c4e33e2629646da671ce7cebc8d88d376ed1b1a50905ea170e3a75b5441d1563a20d041cfd8153c3c045b4088ac5f4a4e9b775942f7f404c86"
+        },
+        {
+          "segment": 20,
+          "payload": "000f01e56671f9b518eb79eb92b82bfa256a16b31aee40bf9d1a5e2cbf535c758a27e30172dd0fa6d5aacd0f223115d222a3ecd6f855dfa7b0da869beb53dfe68a80cc800ac972d5f9eedbd22a5190ff09fedd2142f411fbe72ae2f0ecf8e928d0260096"
+        },
+        {
+          "segment": 21,
+          "payload": "000f01e56671f9b518eb79eb92b82bfa256a16b31aee40bf9d1a5e2cbf535c758a27e302a19e9cb9425300c4e33e2629646da671ce7cebc8d88d376ed1b1a50905ea170e3a75b5441d1563a20d041cfd8153c3c045b4088ac5f4a4e9b775942f7f404c86"
+        },
+        {
+          "segment": 22,
+          "payload": "000f01e56671f9b518eb79eb92b82bfa256a16b31aee40bf9d1a5e2cbf535c758a27e304562a30781f722f9fa1730eae8965aaa2a6be7ec381b12097b11576f64f05120d49f057473a27b77e63d8d9b02e49fe9beec430acf050b6642e885f8e714c1adf"
+        }
+      ],
+      "result": {
+        "from": 13,
+        "seats": [
+          {
+            "seat": 1,
+            "code": "destruction-early",
+            "at": 0
+          },
+          {
+            "seat": 2,
+            "code": "destroyed",
+            "at": 1
+          },
+          {
+            "seat": 4,
+            "code": "destroyed",
+            "at": 4
+          }
+        ],
+        "duplicates": [
+          {
+            "at": 2,
+            "seat": 1
+          },
+          {
+            "at": 3,
+            "seat": 2
+          }
+        ],
+        "unattributed": [],
+        "stray": [],
+        "rejected": []
+      }
+    },
+    {
+      "id": "rejected",
+      "description": "A version-2 copy of seat 2's statement and a 3-byte payload are rejected entries; seat 2's version-1 statement after them counts",
+      "firstPassing": [10, 12],
+      "windowSegment": 40,
+      "entries": [
+        {
+          "segment": 13,
+          "payload": "000f01e56671f9b518eb79eb92b82bfa256a16b31aee40bf9d1a5e2cbf535c758a27e30172dd0fa6d5aacd0f223115d222a3ecd6f855dfa7b0da869beb53dfe68a80cc800ac972d5f9eedbd22a5190ff09fedd2142f411fbe72ae2f0ecf8e928d0260096"
+        },
+        {
+          "segment": 13,
+          "payload": "000f02e56671f9b518eb79eb92b82bfa256a16b31aee40bf9d1a5e2cbf535c758a27e302a19e9cb9425300c4e33e2629646da671ce7cebc8d88d376ed1b1a50905ea170e3a75b5441d1563a20d041cfd8153c3c045b4088ac5f4a4e9b775942f7f404c86"
+        },
+        {
+          "segment": 13,
+          "payload": "000f01"
+        },
+        {
+          "segment": 14,
+          "payload": "000f01e56671f9b518eb79eb92b82bfa256a16b31aee40bf9d1a5e2cbf535c758a27e302a19e9cb9425300c4e33e2629646da671ce7cebc8d88d376ed1b1a50905ea170e3a75b5441d1563a20d041cfd8153c3c045b4088ac5f4a4e9b775942f7f404c86"
+        },
+        {
+          "segment": 14,
+          "payload": "000f01e56671f9b518eb79eb92b82bfa256a16b31aee40bf9d1a5e2cbf535c758a27e304562a30781f722f9fa1730eae8965aaa2a6be7ec381b12097b11576f64f05120d49f057473a27b77e63d8d9b02e49fe9beec430acf050b6642e885f8e714c1adf"
+        }
+      ],
+      "result": {
+        "from": 13,
+        "seats": [
+          {
+            "seat": 1,
+            "code": "destroyed",
+            "at": 0
+          },
+          {
+            "seat": 2,
+            "code": "destroyed",
+            "at": 3
+          },
+          {
+            "seat": 4,
+            "code": "destroyed",
+            "at": 4
+          }
+        ],
+        "duplicates": [],
+        "unattributed": [],
+        "stray": [],
+        "rejected": [
+          {
+            "at": 1,
+            "error": "profile-mismatch"
+          },
+          {
+            "at": 2,
+            "error": "truncated"
+          }
+        ]
+      }
+    },
+    {
+      "id": "empty-board",
+      "description": "No statements at all",
+      "firstPassing": [10, 12],
+      "windowSegment": 40,
+      "entries": [],
+      "result": {
+        "from": 13,
+        "seats": [
+          {
+            "seat": 1,
+            "code": "destruction-missing"
+          },
+          {
+            "seat": 2,
+            "code": "destruction-missing"
+          },
+          {
+            "seat": 4,
+            "code": "destruction-missing"
+          }
+        ],
+        "duplicates": [],
+        "unattributed": [],
+        "stray": [],
+        "rejected": []
+      }
+    }
+  ]
+}

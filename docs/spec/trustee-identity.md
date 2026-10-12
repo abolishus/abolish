@@ -103,7 +103,7 @@ Each statement type has its own tag under `abolish/v1/sig/` and a fixed layout. 
 
 `m` is 125 bytes. The chain ID and registry address let a contract check that a signature was made for it (`block.chainid`, `address(this)`) without decoding the stub. The panel and index stop a signature from counting for another seat or panel, and `stub_hash` binds the election, its definition and its `election_id`, so a registration can't be replayed for another election or another definition of the same one (T-37, T-34). A verifier checks the registration signatures it finds on the board against the pinned panel; a missing or failing signature is attributed to no one.
 
-Further statements are specified with their items: the ceremony's messages and the signing key's proof of possession in [[ceremony]]; a cell's opening of the tally in [[tally]] (Opening record); share receipts, the summed-share message and destruction with P1-12 and P1-15.
+Further statements are specified with their items: the ceremony's messages and the signing key's proof of possession in [[ceremony]]; a cell's opening of the tally in [[tally]] (Opening record); the summed-share message and the destruction statement in [[tally]] (Summed-share message, Destruction); share receipts with P1-12.
 
 ## On chain
 

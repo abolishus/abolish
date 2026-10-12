@@ -27,6 +27,7 @@ One JSON file per spec section or record type, named after it (`primitives.json`
 | `tally.json`               | Cell aggregates, trustees' per-ballot and summed shares with their check verdicts, combined seats, Lagrange coefficients and openings; published openings with the verifier's verdicts; a derived total ([[tally]])                       |
 | `tally-opening.json`       | Tally openings (record type `0x0006`): signed records re-made byte for byte, decode rejections, and elections with the verifier's per-cell verdicts and attributions ([[tally]], Opening record)                                          |
 | `summed-share.json`        | Summed-share messages (record type `0x000b`): messages re-made byte for byte from their randomness with every intermediate value, decode rejections, and each of the recipient's checks failing ([[tally]], Summed-share message)         |
+| `destruction.json`         | Destruction statements (record type `0x000f`): statements re-made byte for byte, decode rejections, and the verifier's report over a board's statements ([[tally]], Destruction)                                                          |
 | `receipt.json`             | Receipts: the record and its signed statement, rejected encodings and the checks at cast ([[receipts]])                                                                                                                                   |
 | `ceremony.json`            | Key-ceremony transcripts: honest runs with the secrets that made them, every seat disqualification and transcript-level failure, the registered key sets and hashes, and decode rejections ([[ceremony]])                                 |
 | `circuit.json`             | Circuit-facing values: each registered tag's field element and the two byte packings ([[notation]], [[domain-separation]])                                                                                                                |
@@ -234,6 +235,15 @@ Type descriptors:
 - `messages`: honest messages. Each has `id`, `description`, `cell`, `aggregateHash`, `sender`, `recipient`, `summed` (`v` and `r` decimal, per option), the sender's randomness `mu` (hex) and `e` (decimal), and the values it makes: `ctM`, `ctDh`, `ssM`, `ssDh`, `key` (`K`), `aad`, `plaintext`, `signed` (the bytes signed), `signature` (RFC 6979 after the low-s rule) and `encoding` (the record), all hex. The recipient's check passes with `summed`.
 - `decodeErrors`: each has `id`, `description`, `encoding` (hex), `error` (the decode error code) and `offset`; the known type is `0x000b`, version 1. Each is also `summed-malformed` at seat 2.
 - `receiving`: each has `id`, `description`, `recipient` (the seat checking it, with its `kem` secret from `seats`), `encoding` (hex) and `result`: `ok`, or the first failing code of [[tally]], Receiving.
+
+## Destruction vectors
+
+`destruction.json` covers [[tally]] (Destruction, Destruction checks) with its own format, `abolish-destruction-vectors/1`, and the same top-level fields, plus `tag` (the signature tag, ASCII), `recordType` and `version`, and:
+
+- `election`: what every statement is checked against: `definitionHash` (hex) and `registered` (each qualified seat's `index` and per-election `signingKey`, hex). Seat 3 holds a key but isn't registered.
+- `statements`: signed statements. Each has `id`, `description`, `signingSecret` (32 bytes big-endian, hex; test data), `signingKey`, `definitionHash`, `signer`, `message` (the signed bytes, header included, hex), `signature` (RFC 6979 after the low-s rule) and `encoding` (the record, hex).
+- `decodeErrors`: each has `id`, `description`, `encoding` (hex), `error` (the decode error code) and `offset`; the known type is `0x000f`, version 1.
+- `reports`: each has `id`, `description`, `firstPassing` (per cell, the segment of its first passing opening, or `null`), `windowSegment` (`s_T`), `entries` (the destruction-statement payloads in the sealed extent, in board order, each with its `segment` and `payload`, hex; some don't decode) and `result`: `from` (the destruction segment), `seats` (per registered seat, `seat`, `code` and, unless it is `destruction-missing`, `at`), `duplicates` (`at`, `seat`), `unattributed` (`at`), `stray` (`at`, `signer` or `null`) and `rejected` (`at`, `error`); every `at` is a position in `entries`.
 
 ## Circuit vectors
 

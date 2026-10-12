@@ -287,6 +287,22 @@ export {
   type SummedShareSender,
 } from "./summed-share.ts";
 export {
+  checkDestruction,
+  decodeDestructionStatement,
+  DESTRUCTION_STATEMENT,
+  type DestructionElection,
+  type DestructionEntry,
+  type DestructionReport,
+  destructionSegment,
+  type DestructionStatement,
+  type DestructionStatementFields,
+  destructionStatementMessage,
+  type DestructionTiming,
+  encodeDestructionStatement,
+  type SeatDestruction,
+  signDestructionStatement,
+} from "./destruction.ts";
+export {
   aggregateHash,
   type CellCheck,
   type CellCode,

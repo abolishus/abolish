@@ -137,6 +137,28 @@ describe("htmlViolations", () => {
     expect(htmlViolations(early).length).toBeGreaterThan(0);
   });
 
+  test("rejects a policy hidden in a comment, and any element outside the fixed set", () => {
+    const commented = page().replace(
+      '<meta charset="utf-8" />',
+      `<!-- <meta charset="utf-8" /><meta http-equiv="Content-Security-Policy" content="${policy}" /> -->`,
+    );
+    const stripped = commented.replace(
+      /<meta\s+http-equiv="Content-Security-Policy"\s+content="[^"]*"\s*\/>\n/,
+      "",
+    );
+    expect(htmlViolations(stripped).length).toBeGreaterThan(0);
+    for (const extra of [
+      "<!-- note -->",
+      "<![CDATA[x]]>",
+      "<template><img src=x></template>",
+      "<noscript><img src=x></noscript>",
+      "<textarea></textarea>",
+      "<iframe></iframe>",
+      "<base href=x>",
+    ])
+      expect(htmlViolations(page(policy, extra)).length, extra).toBeGreaterThan(0);
+  });
+
   test("rejects a second policy, however it is written", () => {
     expect(
       htmlViolations(

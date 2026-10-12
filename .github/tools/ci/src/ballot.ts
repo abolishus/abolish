@@ -140,10 +140,28 @@ const sameCsp = (a: Record<string, readonly string[]>, b: Record<string, readonl
     ([k, v]) => Object.hasOwn(b, k) && JSON.stringify(v) === JSON.stringify(b[k]),
   );
 
+/** The only elements index.html may contain. */
+const PAGE_ELEMENTS: ReadonlySet<string> = new Set([
+  "html",
+  "head",
+  "meta",
+  "title",
+  "script",
+  "link",
+  "body",
+  "div",
+]);
+
 /** Problems with index.html: the CSP's presence, place and value, inline code, non-relative references. */
 export function htmlViolations(page: string): string[] {
   const violations: string[] = [];
   const at = (msg: string) => violations.push(`apps/ballot: index.html: ${msg}`);
+  // Comments, CDATA and raw-text elements hide markup from the tag scan
+  // below (a commented-out policy would pass it while the browser applies
+  // none), so the page may hold only the doctype and a fixed set of elements.
+  if (/<!(?!doctype html>)/i.test(page)) at("no comment, CDATA or declaration but <!doctype html>");
+  for (const [, name] of page.matchAll(/<\/?([a-z][a-z0-9-]*)/gi))
+    if (!PAGE_ELEMENTS.has((name ?? "").toLowerCase())) at(`no <${name}> element`);
   // A policy in a <meta> applies only to what comes after it, so nothing of
   // any kind may precede it but the charset declaration.
   const tags = [...page.matchAll(/<([a-z][a-z0-9-]*)\b([^>]*)>/gi)]

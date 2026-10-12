@@ -104,8 +104,11 @@ export type ProfileCombinationRule = "profile-combination" | "unsupported-versio
  * docs/spec/tally.md, Destruction), so an election's creator can't leave
  * delivery or destruction off the board (T-34). A board-entry version this
  * package doesn't read is `unsupported-version`, never a failure: a later
- * version may add itself to the rule (T-36). Call it on a well-formed
- * definition, whose profile pins each of these types once.
+ * version may add itself to the rule (T-36), but a client that must refuse
+ * such an election treats any result but `undefined` as a refusal: it can't
+ * cast to a board it can't read. Call it only on a definition that passes
+ * `electionDefinitionRule`, whose profile pins each of these types once; a
+ * duplicate pin would hide its version from `pinnedVersion` and the rule.
  */
 export function profileCombinationRule(d: ElectionDefinition): ProfileCombinationRule | undefined {
   const board = pinnedVersion(d, RECORD_TYPES.boardEntry);

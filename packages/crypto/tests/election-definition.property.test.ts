@@ -475,7 +475,9 @@ describe("2.3's profile combination", () => {
   // package doesn't read is unsupported, never a failure (T-36).
   const expected = (board: number, ballot: number, opening: number) => {
     if (![1, 3, 4].includes(board)) return "unsupported-version";
-    const fits = (ballot !== 1 || board >= 3) && (opening !== 1 || board === 4);
+    const carriesDelivery = board === 3 || board === 4;
+    const carriesDestruction = board === 4;
+    const fits = (ballot !== 1 || carriesDelivery) && (opening !== 1 || carriesDestruction);
     return fits ? undefined : "profile-combination";
   };
 

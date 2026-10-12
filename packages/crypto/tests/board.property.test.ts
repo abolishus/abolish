@@ -788,7 +788,7 @@ describe("board checks under board-entry versions 3 and 4", () => {
 
   test("the same board under any other pinned version fails decoding at its first entry", () => {
     run(
-      fc.property(either, ({ entries, version }) => {
+      fc.property(either, ({ entries, last, version }) => {
         for (const other of [1, 3, 4] as const) {
           if (other === version) continue;
           let caught: unknown;
@@ -800,6 +800,11 @@ describe("board checks under board-entry versions 3 and 4", () => {
           expect(caught).toBeInstanceOf(BoardError);
           expect((caught as BoardError).code).toBe("decode");
           expect((caught as BoardError).at).toMatchObject({ entry: 0 });
+          // verifyBoard too: honest anchors authenticate the bytes, which then
+          // fail decoding under the wrong pin.
+          expect(verdictUnder(entries, anchorsUnder(entries, last, version), last, other)).toBe(
+            "decode",
+          );
         }
       }),
     );
@@ -807,7 +812,7 @@ describe("board checks under board-entry versions 3 and 4", () => {
 
   test("relabelled as version 3, a version-4 board is refused at its first destruction statement", () => {
     run(
-      fc.property(boardUnder(4), ({ entries }) => {
+      fc.property(boardUnder(4), ({ entries, last }) => {
         const relabelled = entries.map((b) =>
           Uint8Array.of(b[0] as number, b[1] as number, 3, ...b.slice(3)),
         );
@@ -828,6 +833,13 @@ describe("board checks under board-entry versions 3 and 4", () => {
             entry: first,
             decodeError: "unexpected-record-type",
           });
+          // Anchored as it is, the relabelled copy still fails verifyBoard
+          // under version 3, by its decoding, not its bytes.
+          const segments = Array.from({ length: last + 1 }, (_, s) => s);
+          const anchors = [...copyCheckpoints(ELECTION, relabelled, segments).values()].map(
+            anchorOf,
+          );
+          expect(verdictUnder(relabelled, anchors, last, 3)).toBe("decode");
         }
       }),
     );

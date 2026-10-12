@@ -347,7 +347,9 @@ def main():
 
     def election(id_, desc, cells, records, expect, boarded_after=None):
         """`records` are tally openings, or raw payloads (bytes) that may not decode. `boarded_after`
-        lists, per cell, ballots boarded after the counted extent: they never enter `cells`."""
+        lists, per cell, ballots boarded after the counted extent that the re-vote rule would select:
+        they never enter `cells`, and they fail the election as the operator's (`tally-late`, verifier
+        7.1), though `result`, the tally check over the counted extent, still passes."""
         recs = [o if isinstance(o, bytes) else encode(o) for o in records]
         got = check_tally(definition_hash, m, k, registered, cells, recs)
         for key, want in expect.items():
@@ -355,6 +357,8 @@ def main():
         entry = {"id": id_, "description": desc, "cells": [[bv.enc_vss(b).hex() for b in c] for c in cells], "openings": [b.hex() for b in recs], "result": got}
         if boarded_after is not None:
             entry["boardedAfter"] = [[bv.enc_vss(b).hex() for b in c] for c in boarded_after]
+            if any(boarded_after):
+                entry["election"] = {"code": "tally-late", "attributedTo": "operator"}
         elections.append(entry)
 
     honest0, honest1 = record(0, 1, open0), record(1, 2, open1)
@@ -482,7 +486,7 @@ def main():
     late = make_cell("tier-0-late", [[0, 1, 0]])[0]
     election(
         "late-ballot",
-        "Honest openings over the counted extent; a valid ballot for cell 0 is boarded only after it (listed in boardedAfter). The counted set never includes it, so the cell passes and no trustee is blamed; counting it would make both openings tally-aggregate",
+        "Honest openings over the counted extent; a valid ballot for cell 0, which the re-vote rule would select, is boarded only after it (listed in boardedAfter). The counted set never includes it, so the tally check passes and no trustee is blamed (counting it would make both openings tally-aggregate), but the late ballot would have changed the counted set, so the election fails tally-late, attributed to the operator",
         two,
         [honest0, honest1],
         {"ok": True},

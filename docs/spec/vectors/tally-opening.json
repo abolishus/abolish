@@ -1436,7 +1436,7 @@
     },
     {
       "id": "late-ballot",
-      "description": "Honest openings over the counted extent; a valid ballot for cell 0 is boarded only after it (listed in boardedAfter). The counted set never includes it, so the cell passes and no trustee is blamed; counting it would make both openings tally-aggregate",
+      "description": "Honest openings over the counted extent; a valid ballot for cell 0, which the re-vote rule would select, is boarded only after it (listed in boardedAfter). The counted set never includes it, so the tally check passes and no trustee is blamed (counting it would make both openings tally-aggregate), but the late ballot would have changed the counted set, so the election fails tally-late, attributed to the operator",
       "cells": [
         [
           "0000000300000002b08761fa2372ae62bb6855bc36129f657a4d4abfe436bcc27645d4db9a17ab5a42745dc54c5d05bdde0ce2e1af6191f34804981ce942c7caa2f8c038edc9e45a00000002d4e63db4de1a28f969e15a3954cf19295d1c0d49c24ce3bf9a2547c13324742d0e15d238c146ac8b43a5d08e0363e6c5081a38bbf2b5e41cb68622818fab497200000002e0567fc1812b36eaa36e367a0cde5bf3e46c8ed7f8a32862e2661b895f71e42ba8a6dab13f00d9ebfc7642a86046355d556df7ec872dec90d4816c8c03ce0b3e",
@@ -1486,7 +1486,11 @@
           "0000000300000002a23ca40c25396f6f0081639c87689b7cbc3ff0400228e46f697979e487103436c0e5911181290fcd27344037d94e06c9250bd62060386a0231ae2f6f61fa2b2d00000002fe5cac14321e8e1cad6249b2feca53ff749e0271c5bb8f0145de8263090f000a0c2a95b9d9ee3d5ac9954a05a702ce9b6afc3b412bcf94003fa022d2babecd6200000002b43c65008c7d4d5c887fbd868c37f7710e78da3a9f1df659aff0779b73701568269902dd3508cb64d906dafea6af25f2d5b242543a0d51e43a85f38ba85df61e"
         ],
         []
-      ]
+      ],
+      "election": {
+        "code": "tally-late",
+        "attributedTo": "operator"
+      }
     }
   ]
 }

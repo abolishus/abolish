@@ -581,6 +581,39 @@ describe("checkpoints from a raw copy", () => {
     );
   });
 
+  test("each size is the index of the first entry past the segment, for any copy and segment list", () => {
+    run(
+      fc.property(
+        fc.array(fc.oneof(fc.integer({ min: 0, max: 0xffffffff }), fc.constant(-1)), {
+          maxLength: 30,
+        }),
+        fc.array(fc.integer({ min: 0, max: 0xffffffff }), { maxLength: 10 }),
+        fc.array(fc.integer({ min: 0, max: 40 }), { maxLength: 10 }),
+        (fields, wide, small) => {
+          // -1 is an entry too short to carry a segment field.
+          const copy = fields.map((f, i) =>
+            f === -1
+              ? new Uint8Array(46)
+              : encodeBoardEntry({
+                  election_id: ELECTION,
+                  index: BigInt(i),
+                  segment: f,
+                  payload: recordOf(allowedTypes[0] as number, Uint8Array.of(i)),
+                }),
+          );
+          const readable = fields.indexOf(-1) === -1 ? fields : fields.slice(0, fields.indexOf(-1));
+          const segments = [...wide, ...small, ...small, ...readable.slice(0, 3)];
+          const got = copyCheckpoints(ELECTION, copy, segments);
+          for (const s of segments) {
+            const first = readable.findIndex((f) => f > s);
+            const size = first === -1 ? readable.length : first;
+            expect(got.get(s)?.size).toBe(size === 0 ? undefined : BigInt(size));
+          }
+        },
+      ),
+    );
+  });
+
   test("the prefix ends at the first entry past the segment, and a short entry ends it", () => {
     const entry = (index: number, segment: number) =>
       encodeBoardEntry({

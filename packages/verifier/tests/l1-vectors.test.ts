@@ -193,11 +193,13 @@ test("a clock and f that would read more than 2^20 words stop before reading the
       }),
       board(v),
     );
-  // Segments 0 to 2^20 - 1 are read (every word but segment 0's is absent
-  // under this clock); one more is refused.
-  expect(row(verifyBundle(bundle(MAX_SEGMENTS_READ - 1)), "4.2").code).not.toBe(
-    "l1-range-too-long",
-  );
+  // At 2^20 - 1 the walk starts: the vector's nodes prove only the slots of
+  // its own clock, so it stops at a later segment's missing node. One
+  // segment more is refused before any segment's word is read.
+  expect(row(verifyBundle(bundle(MAX_SEGMENTS_READ - 1)), "4.2")).toMatchObject({
+    status: "unverifiable",
+    code: "l1-proof-missing",
+  });
   expect(row(verifyBundle(bundle(MAX_SEGMENTS_READ)), "4.2")).toMatchObject({
     status: "unverifiable",
     code: "l1-range-too-long",

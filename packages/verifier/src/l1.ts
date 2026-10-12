@@ -147,7 +147,8 @@ const EMPTY_TRIE = keccak_256(Uint8Array.of(0x80));
 const NO_CODE = keccak_256(new Uint8Array());
 
 /**
- * The most segment words one run reads: about 120 years of hourly periods.
+ * The most segment words one run reads: about 120 years of hourly periods
+ * (sooner under a shorter period).
  * Until the clock and `f` are pinned they come from the bundle, so without a
  * bound a bundle of a few hundred bytes could keep a verifier proving empty
  * slots for hours.
@@ -313,8 +314,9 @@ function storageRoot(l1: L1Evidence): Uint8Array {
     // An account without code (an EOA, say) can't be the anchor: read it as
     // absent, so a wrong address is unverifiable, never every segment
     // unanchored.
+    const root = rlpBytes32(a.items[2]);
     if (equal(rlpBytes32(a.items[3]), NO_CODE)) throw new L1Error("l1-anchor-absent");
-    return rlpBytes32(a.items[2]);
+    return root;
   } catch (e) {
     if (e instanceof RlpError) throw new L1Error("l1-proof-malformed");
     throw e;

@@ -14,7 +14,7 @@ The operator's command line. Internal and source-only; AGPL-3.0-only. Commands p
 | `moderation status <election-id>`                                                       | The poll's state and its newest decision, without the moderator.                                                                                                                                                  |
 | `moderation log [--after <seq>] [--limit 1..1000]`                                      | The public log, as `GET /moderation/log` serves it: no moderator.                                                                                                                                                 |
 
-Election IDs are 64 lowercase hex digits, their one spelling (T-31). Exit codes: 0 done, 1 refused by core (`{ "error": code }`), 2 malformed arguments (with the usage).
+Election IDs are 64 lowercase hex digits, their one spelling (T-31). Exit codes: 0 done, 1 refused by core (`{ "error": code }`), 2 malformed arguments (with the usage), 3 any other failure, such as an unreachable database (`{ "error": "internal", "kind": … }`, the error's name only, since its message can name the database's address).
 
 ## Running
 

@@ -5,8 +5,8 @@
 # verification with our servers offline). It is the single proof that the
 # system works; see AGENTS.md "Reference election".
 #
-# Until the fixture exists (docs/STATUS.md), this check passes with a warning
-# annotation. That gap is recorded as known-weak in STATUS.md.
+# The fixture covers only some stages so far; reference-election-output/
+# stages.json lists each stage's coverage (docs/status/P1-20.md).
 name: reference-election
 
 on:
@@ -82,10 +82,11 @@ jobs:
       - name: Fixture present?
         id: present
         env:
-          # Owner-reviewed arming flag: P1-20 sets it to "true" in the same PR
-          # that adds the fixture, so removing the script later fails here
-          # instead of silently turning this check into a no-op.
-          EXPECT_FIXTURE: "false"
+          # Owner-reviewed arming flag: the fixture exists since P1-20 part 1
+          # (#129), so removing the script fails here instead of silently
+          # turning this check into a no-op. Requiring every stage covered
+          # (stages.json) is a later step, once the stages exist.
+          EXPECT_FIXTURE: "true"
         run: |
           if python3 -c "import json,sys;sys.exit(0 if 'reference-election' in json.load(open('package.json')).get('scripts',{}) else 1)"; then
             echo "present=true" >>"$GITHUB_OUTPUT"

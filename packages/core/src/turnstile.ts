@@ -88,6 +88,8 @@ export function createTurnstile({
       }
       if (typeof outcome !== "object" || outcome === null) return "unavailable";
       const o = outcome as Record<string, unknown>;
+      // A real token solved on another site or for another action is the
+      // caller's doing, not Cloudflare's: refused, not unavailable.
       if (o["success"] === true)
         return o["hostname"] === hostname && o["action"] === action ? "passed" : "refused";
       // Cloudflare's own failure, or our misconfigured key: not the caller's fault.

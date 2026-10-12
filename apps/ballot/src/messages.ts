@@ -8,7 +8,7 @@ const enUS = {
     "This page loads nothing from any other site, and your choices leave this device only encrypted.",
   sharedOriginTitle: "This address isn't safe for voting",
   sharedOrigin:
-    "This copy of the ballot is served from an address other sites share, so they could read it. Open the ballot from abolish.us or another address listed by Abolish instead.",
+    "This copy of the ballot is served from an address other sites share, so they could read it. Open the ballot from abolishus.eth or another address Abolish lists instead.",
 } as const;
 
 export type Messages = Record<keyof typeof enUS, string>;

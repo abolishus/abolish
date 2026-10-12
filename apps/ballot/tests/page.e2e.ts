@@ -189,5 +189,8 @@ describe("the served ballot client", () => {
     await expect(page.getByRole("heading", { level: 1 }).textContent()).resolves.toBe(
       "This address isn't safe for voting",
     );
+    await expect(page.getByText(/open the ballot link/).count()).resolves.toBe(0);
+    expect(violations).toEqual([]);
+    expect(consoleErrors).toEqual([]);
   });
 });

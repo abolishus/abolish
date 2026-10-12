@@ -141,10 +141,19 @@ describe("bundle contents", () => {
       (name) =>
         name !== "index.html" &&
         name !== "third-party-licenses.md" &&
+        name !== "font-licenses.txt" &&
         !/^assets\/[\w-]+\.(js|css)$/.test(name) &&
         !/^assets\/ibm-plex-(sans|mono|serif)-[\w-]+\.woff2?$/.test(name),
     );
     expect(unexpected).toEqual([]);
+  });
+
+  test("ships the licences of the code and fonts it redistributes", () => {
+    expect(files.get("third-party-licenses.md")).toMatch(/## react-dom - [\d.]+ \(MIT\)/);
+    const fonts = files.get("font-licenses.txt") ?? "";
+    for (const name of ["sans", "mono", "serif"])
+      expect(fonts).toContain(`@fontsource/ibm-plex-${name}\n`);
+    expect(fonts.match(/SIL Open Font License, Version 1\.1/g)?.length).toBeGreaterThanOrEqual(3);
   });
 
   test("contains no analytics, tracking or error-reporting SDK", () => {
@@ -164,6 +173,7 @@ describe("bundle contents", () => {
     expect(urls).toEqual([]);
   });
 
+  // A heuristic over quoted strings; the CSP's 'self' is the real barrier.
   test("names no protocol-relative URL", () => {
     const urls = textFiles().flatMap(([name, text]) =>
       [...text.matchAll(/["'`(]\/\/[a-z0-9.-]+\.[a-z]{2,}/gi)].map(([url]) => `${name}: ${url}`),

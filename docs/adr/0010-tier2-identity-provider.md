@@ -2,7 +2,7 @@
 
 - Status: Accepted (agent) — owner may veto (2026-10-11, rule A): option A, with the conditions under Decision
 - Date: 2026-10-11
-- Deciders: agent, owner may veto (rule A). Owner-only, open now: whether a chip-holder-recomputable nullifier on the board counts as PII on-chain, and the reading of bb.js as part of the verifier's trust base. Owner-only only if the agent's fallback is to be overridden: publishing proofs that are only computationally zero-knowledge (the brief's "No PII on-chain, ever"; AGENTS.md, verifier trust base).
+- Deciders: agent, owner may veto (rule A). The owner-only questions (the nullifier's PII reading, bb.js in the verifier's trust base, and publishing proofs that are only computationally zero-knowledge) were answered on 2026-10-12: see Owner decision.
 - Threats addressed: T-03, T-05, T-06, T-07, T-13, T-15, T-17, T-19, T-21 (see [[THREAT_MODEL]])
 
 ## Context
@@ -105,7 +105,7 @@ These conditions are part of the decision (T-21, T-06, T-05, T-03). P3-4 writes 
   - The voter's side never routes subproofs through zkPassport's cloud prover either: their concealment may be only computational (T-15, T-19). Proving stays entirely on the device.
   - It verifies proofs locally with the bb.js that `AGENTS.md` pins, against verification keys vendored with their provenance (tag, commit, sha256, re-fetched in CI). Allowing that publisher needs a `ci:` PR first, under rule B.
   - P3-4 confirms that zkPassport's bb version matches ours, or moves the toolchain pins together, as `AGENTS.md` requires.
-  - **`@aztec/bb.js` in the verifier's trust base.** `AGENTS.md` lets `packages/verifier` depend on gated packages, `@noble/*`, generated ABIs and circuit artifacts only. This ADR reads bb.js, already pinned as part of the proving toolchain, as the runtime for circuit artifacts. As with [[0009-membership-proof]]'s reading of Groth16, an agent ADR doesn't settle that reading: **the owner confirms it before P3-4 builds the verifier side** (listed in [[STATUS]]).
+  - **`@aztec/bb.js` in the verifier's trust base.** `AGENTS.md` lets `packages/verifier` depend on gated packages, `@noble/*`, generated ABIs and circuit artifacts only. This ADR reads bb.js, already pinned as part of the proving toolchain, as the runtime for circuit artifacts. As with [[0009-membership-proof]]'s reading of Groth16, an agent ADR doesn't settle that reading: the owner confirmed it on 2026-10-12, on the conditions above (Owner decision).
 - **Circuit root: a pinned set, never a parameter.** zkPassport's outer proof accepts any inner proof whose verification-key hash is in its circuit registry root, so that root decides soundness. Our verifier recomputes it from a vendored, reviewed set of inner-circuit verification keys, all of the zero-knowledge flavour (the `circuits` skill), and rejects a proof under any other root. Changing that set is a new protocol version. Neither the definition's author (A-2) nor zkPassport's oracle can choose it (T-05, T-06). If P3-4 finds that the proof isn't structured this way, it amends this ADR before building.
 - **Trust anchors: the US issuer only.**
   - For a US-scope tier, the proof must show that the issuing state is the USA, as a predicate, and its document signer certificate must chain to a US CSCA certificate that the verifier release pins, with its provenance. The pins sit in a reviewed, public release, and a third-party verifier can substitute its own.
@@ -143,7 +143,7 @@ The verifier must re-check every Tier 2 addition (requirement 5). So each additi
    - Publishing computationally zero-knowledge proofs anyway would rest "No PII on-chain" on a computational assumption. Only the owner can choose that.
 2. **The scoped nullifier.**
    - In non-salted mode, anyone who has read the chip can recompute a document's nullifier and so map it to a named person and their identity commitment. That includes the issuing state, a malicious build of the proof app (T-19) and anyone holding leaked chip dumps.
-   - Whether such a value counts as PII on-chain is a reading of a non-negotiable. So this ADR doesn't decide it: it is an owner question (`needs-decision`, listed in [[STATUS]]).
+   - Whether such a value counts as PII on-chain is a reading of a non-negotiable. The owner answered on 2026-10-12: it is PII, so it never goes on the board (Owner decision).
    - The alternatives each have a trust cost:
      - zkPassport's salted mode: a third-party threshold OPRF network, plus mandatory Apple or Google device attestation, which excludes privacy-focused devices (T-19, T-27);
      - a nullifier keyed by a threshold VOPRF that the trustees run (needs design, P3-4);
@@ -176,9 +176,12 @@ The verifier must re-check every Tier 2 addition (requirement 5). So each additi
 
 Under rule A (`AGENTS.md`): **option A, zkPassport**, used on the conditions above, with status `Accepted (agent) — owner may veto`, and listed under Decisions to review in [[STATUS]].
 
-The agent's fallback if the zero-knowledge gate fails is attested additions. Two questions stay with the owner and are listed in [[STATUS]]:
+The agent's fallback if the zero-knowledge gate fails is attested additions. The owner's answers to the two owner-only questions follow.
 
-- whether a chip-holder-recomputable nullifier counts as PII on-chain;
-- the reading of bb.js as part of the verifier's trust base.
+## Owner decision (2026-10-12)
 
-Neither blocks other work.
+- **The nullifier is PII.** A nullifier that anyone holding the chip's data can recompute (the issuing state included) would let them list which named people registered, so it never goes on the board or into the archive, in any mode. zkPassport's salted mode is rejected: it rests on a third-party OPRF network and on Apple or Google device attestation, which shuts out rooted and privacy-focused devices (T-19, T-27).
+- **Tier 2 additions are trustee-attested until a trustee-keyed nullifier exists.** Whatever the zero-knowledge gate's outcome, real documents use the fallback above: proofs and nullifiers stay off the board, a threshold of the panel ([[0006-trustees]]) checks each proof and the nullifier's uniqueness and signs the addition, and only the signed attestation and the identity commitment are boarded. Tier 2 stuffing is then checkable only by trusting the attesters (T-06), and the attesters see each nullifier next to its commitment (T-13).
+- **Later: a nullifier keyed by a threshold VOPRF that the trustees run** (P3-4 designs it, with an ADR), so neither the chip data alone nor any single trustee can recompute it. When it exists, proofs may be boarded if the zero-knowledge gate is also met; until then, attestation.
+- **No computationally zero-knowledge proofs on the board.** If the gate isn't met, proofs stay off the board; "No PII on-chain, ever" never rests on a computational assumption.
+- **bb.js in the verifier's trust base: confirmed,** on the conditions under Verification (the pinned version, vendored keys with provenance re-checked in CI, local verification only, never zkPassport's hosted verifier, cloud prover or contracts). P3-4 may add `@aztec/bb.js` to `packages/verifier`.

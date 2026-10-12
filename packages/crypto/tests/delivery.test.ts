@@ -463,4 +463,27 @@ describe("properties", () => {
       { numRuns },
     );
   });
+
+  test("a vector posting with any byte changed decodes only if it re-encodes to itself", () => {
+    // Random bytes never reach a full-size posting, so mutate a real one.
+    const posting = hex(
+      (V.records.find((r) => r.type === "share-posting") as { encoding: string }).encoding,
+    );
+    fc.assert(
+      fc.property(fc.nat(), fc.integer({ min: 1, max: 255 }), (pos, flip) => {
+        const b = posting.slice();
+        const i = 3 + (pos % (b.length - 3));
+        b[i] = (b[i] as number) ^ flip;
+        let out: Uint8Array;
+        try {
+          out = decoders["share-posting"](b);
+        } catch (e) {
+          if (e instanceof DecodeError) return;
+          throw e;
+        }
+        expect(out).toEqual(b);
+      }),
+      { numRuns },
+    );
+  });
 });

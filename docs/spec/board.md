@@ -30,7 +30,7 @@ The payload is a complete record whose `record_type` is one of:
 | `0x0002`      | ballot                 | A ballot cast or challenged through our API                                                                   |
 | `0x0003`      | spoiled-ballot opening | A published Benaloh opening (P1-13); ordered canonically, below                                               |
 | `0x0005`      | ceremony transcript    | The key ceremony's public transcript (P1-14)                                                                  |
-| `0x0006`      | tally transcript       | The tally (P1-15)                                                                                             |
+| `0x0006`      | tally opening          | One cell's opening of the tally (P1-15, [[tally]])                                                            |
 | `0x0008`      | contract event         | One of our contracts' L2 events, including direct-submitted ballots and the definition's registration (P1-18) |
 
 Any other record type is rejected when the envelope is decoded, with `unexpected-record-type`, including the types [[notation]] would call unknown (`0x0000`, unassigned numbers and the test range): here the envelope fixes the allowed set, so anything outside it is unexpected. The reasons: an election definition reaches the board only as the contract event that registered it, a receipt stays with its voter, a board entry never nests, and display text is never on the board, the chain or the archive ([[display-text]], T-17). A payload shorter than a record header (3 bytes) is rejected with `truncated`. Both errors are reported at the offset of the payload's first byte.

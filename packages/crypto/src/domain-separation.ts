@@ -32,9 +32,9 @@ export const TAG_REGISTRY = Object.freeze(
       },
       { tag: "abolish/v1/fs/ballot-validity/sum", primitive: "fiat-shamir", status: "specified" },
       { tag: "abolish/v1/fs/ceremony/possession", primitive: "fiat-shamir", status: "specified" },
-      { tag: "abolish/v1/fs/tally-share", primitive: "fiat-shamir", status: "reserved" },
+      { tag: "abolish/v1/fs/tally-share", primitive: "fiat-shamir", status: "retired" },
       { tag: "abolish/v1/ceremony-transcript", primitive: "plain", status: "specified" },
-      { tag: "abolish/v1/tally-transcript", primitive: "plain", status: "reserved" },
+      { tag: "abolish/v1/tally-transcript", primitive: "plain", status: "retired" },
       { tag: "abolish/v1/event-accumulator", primitive: "plain", status: "specified" },
       { tag: "abolish/v1/election-id", primitive: "plain", status: "specified" },
       { tag: "abolish/v1/generator-h", primitive: "hash-to-curve", status: "specified" },
@@ -56,6 +56,7 @@ export const TAG_REGISTRY = Object.freeze(
       { tag: "abolish/v1/ceremony-answer", primitive: "plain", status: "specified" },
       { tag: "abolish/v1/sig/ceremony-message", primitive: "signature", status: "specified" },
       { tag: "abolish/v1/sig/ceremony-signing-key", primitive: "signature", status: "specified" },
+      { tag: "abolish/v1/sig/tally-opening", primitive: "signature", status: "specified" },
     ] as const
   ).map((e) => Object.freeze(e)),
 );

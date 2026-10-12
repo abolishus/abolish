@@ -219,6 +219,22 @@ export {
   type TallyRules,
 } from "./tally.ts";
 export {
+  type CellCheck,
+  type CellCode,
+  checkTally,
+  decodeTallyOpening,
+  encodeTallyOpening,
+  type FailingOpening,
+  type OpeningReport,
+  signTallyOpening,
+  TALLY_OPENING,
+  type TallyCheck,
+  type TallyElection,
+  type TallyOpening,
+  tallyOpeningStatement,
+  type TallyOpeningStatement,
+} from "./tally-opening.ts";
+export {
   checkComplaint,
   checkPosting,
   COMPLAINT_PROOF,

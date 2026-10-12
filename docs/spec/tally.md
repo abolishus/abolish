@@ -1,10 +1,10 @@
 # Tally: summed shares and cell openings
 
-How the result of a plurality or approval election is computed, and how anyone checks it from the board: the aggregate commitments of each cell of the tally partition; each trustee's summed shares, which go only to the other trustees, and their check against the aggregates; the combination of any `k` valid summed shares into the opening of each aggregate; and the checks on the published opening. What is published follows [[0015-tally-publication]] (option C): the opening, never a trustee's summed shares. This is the tally of [[0002-everlasting-privacy]] (option B, accepted by the owner) for the homomorphic scheme of [[0003-tally-scheme]] (`tally_scheme` 1, [[election-definition]]). Notation is from [[notation]], the group from [[group]], the committed vote and shares from [[ballot-validity]]. Threats: T-29, T-14, T-15, T-16, T-54, T-36.
+How the result of a plurality or approval election is computed, and how anyone checks it from the board: the aggregate commitments of each cell of the tally partition; each trustee's summed shares, which go only to the other trustees, and their check against the aggregates; the combination of any `k` valid summed shares into the opening of each aggregate; the opening record (record type `0x0006`, version 1), its signature and the window in which it must reach the board; and the checks on the published openings. What is published follows [[0015-tally-publication]] (option C): the opening, never a trustee's summed shares. This is the tally of [[0002-everlasting-privacy]] (option B, accepted by the owner) for the homomorphic scheme of [[0003-tally-scheme]] (`tally_scheme` 1, [[election-definition]]). Notation is from [[notation]], the group from [[group]], the committed vote and shares from [[ballot-validity]]. Threats: T-29, T-14, T-15, T-16, T-54, T-36, T-31, T-34.
 
 What this page doesn't cover yet, by the part of P1-15 that owns it:
 
-- **The messages and the tally transcript** (part 2): the private message carrying a trustee's summed shares to the other trustees (encrypted under the hybrid KEM of [[0002-everlasting-privacy]], signed with the sender's per-election key), and the tally transcript (`0x0006`, `abolish/v1/tally-transcript`) carrying each cell's opening, signed by the trustee that combined it ([[trustee-identity]], Which key signs what; P1-14 part 2), with the window in which it must be boarded ([[election-definition]], The seal). This page defines the values and the checks; part 2 defines the bytes, and [[verifier]] 7.3 and 7.4.
+- **The summed-share message** (part 2b): the private message carrying a trustee's summed shares to each other trustee, encrypted under the hybrid KEM of [[share-encryption]] to the recipient's registered KEM key and signed with the sender's per-election signing key ([[trustee-identity]], Which key signs what). This page defines the summed shares and their check; part 2b defines the message's bytes.
 - **Destruction** (part 3): each trustee's signed statement that it destroyed its per-election KEM key, its stored share ciphertexts, and its own and received summed shares (and every decrypted copy) after the tally is anchored ([[0002-everlasting-privacy]], Consequences; T-14, T-69).
 
 ## Sources
@@ -56,7 +56,7 @@ A trustee checks every summed share it receives, from seat `i`, against the aggr
 g^{V_{c,i,j}} · h^{R_{c,i,j}} = Ê_{c,j,0} · Ê_{c,j,1}^{i} · … · Ê_{c,j,k−1}^{i^{k−1}}   for every j
 ```
 
-The check passes when the list has exactly `m` entries, each a canonical `scalar`, and every option's equation holds. Summed shares that pass are the evaluations at `i` of `F_{c,j}` and `G_{c,j}` (binding, under discrete log in ristretto255). Summed shares that fail are excluded from the combination; the trustees know which seat sent them, but nothing on the board attributes them (T-29, [[0015-tally-publication]]). No Fiat–Shamir proof accompanies a summed share: the check is a deterministic equation over public values, so `abolish/v1/fs/tally-share` ([[domain-separation]]) isn't needed, and part 2 retires it with the transcript.
+The check passes when the list has exactly `m` entries, each a canonical `scalar`, and every option's equation holds. Summed shares that pass are the evaluations at `i` of `F_{c,j}` and `G_{c,j}` (binding, under discrete log in ristretto255). Summed shares that fail are excluded from the combination; the trustees know which seat sent them, but nothing on the board attributes them (T-29, [[0015-tally-publication]]). No Fiat–Shamir proof accompanies a summed share: the check is a deterministic equation over public values, so `abolish/v1/fs/tally-share` ([[domain-separation]]) isn't needed and is retired, never used.
 
 ## Combination
 
@@ -73,11 +73,11 @@ V_{c,j} = Σ_{i ∈ Q} λ_i · V_{c,i,j}   (mod ℓ)
 R_{c,j} = Σ_{i ∈ Q} λ_i · R_{c,i,j}   (mod ℓ)
 ```
 
-and the trustee publishes, per cell, the list of `(V_{c,j}, R_{c,j})` for `j = 0, …, m − 1`, each a canonical `scalar` (part 2 defines the record). Any `k` passing summed shares give the same opening: they lie on the same polynomials (binding), and `k` points fix a polynomial of degree `k − 1`, so `V_{c,j} = F_{c,j}(0)` and `R_{c,j} = G_{c,j}(0)` whichever are combined. Before publishing, the trustee runs the checks below on its own opening.
+and the trustee publishes, per cell, the list of `(V_{c,j}, R_{c,j})` for `j = 0, …, m − 1`, each a canonical `scalar`, in a tally opening (Opening record, below). Any `k` passing summed shares give the same opening: they lie on the same polynomials (binding), and `k` points fix a polynomial of degree `k − 1`, so `V_{c,j} = F_{c,j}(0)` and `R_{c,j} = G_{c,j}(0)` whichever are combined. Before publishing, the trustee runs the checks below on its own opening.
 
 ## Opening checks
 
-The verifier recomputes `Ĉ_{c,j}` from the counted ballots ([[verifier]] 7.1) and checks each cell's published opening, in cell order and then option order:
+The verifier recomputes `Ĉ_{c,j}` from the counted ballots ([[verifier]] 7.1) and checks each cell's published openings (Opening record, Which openings are a cell's), in cell order and then option order:
 
 | Code             | Check                                                                                                                                      |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -88,18 +88,55 @@ The verifier recomputes `Ĉ_{c,j}` from the counted ballots ([[verifier]] 7.1) a
 
 The openings of a cell are every opening of it within the board's sealed extent ([[board]]; [[election-definition]], The seal), signed or not: one found after the seal or outside the anchored extent is never part of the board. Per cell, the checks run in this order, and the first failure, in cell order, fails the election ([[verifier]] 7.2; T-29, T-54):
 
-1. `tally-missing` fails if no opening of the cell has exactly `m` canonical entries.
-2. `tally-opening` fails if none of those passes for every option; each failing opening is reported, attributed to a trustee only if its signature verifies over a message binding this election's definition hash, this cell and `m` (part 2 defines it), and otherwise reported as unattributed, so an honest trustee's opening replayed into another cell or election never frames it.
+1. `tally-missing` fails if no opening of the cell has exactly `m` entries (each is a canonical `scalar`, or the record wouldn't decode). An opening of the cell with another number of entries is reported, attributed as its signature allows.
+2. `tally-opening` fails if none of those passes for every option; each failing opening is reported, attributed to a trustee only if its signature verifies over a message binding this election's definition hash, this cell and `m` (Opening record, Signature), and otherwise reported as unattributed, so an honest trustee's opening replayed into another cell or election never frames it.
 3. `tally-conflict` fails if two passing openings differ.
 4. `tally-range` runs on the passing opening.
 
-A passing opening is correct whoever computed it, so an unsigned one counts; [[verifier]] 8.4 then reports the cell's opening as unsigned. Under binding every passing opening is the same, so a relay can't crowd out an honest one by posting others, and two different ones reveal `log_g h`; no vector exercises `tally-conflict`, since building two passing openings needs that discrete log.
+A passing opening is correct whoever computed it, so an unattributed one counts; if no passing opening of the cell is attributed, [[verifier]] 8.4 reports the cell's opening as unsigned. Under binding every passing opening is the same, so a relay can't crowd out an honest one by posting others, and two different ones reveal `log_g h`; no vector exercises `tally-conflict`, since building two passing openings needs that discrete log.
 
 Notes:
 
 - **The opening is what makes the result verifiable.** Under binding, no one can publish `(V, R)` opening `Ĉ_{c,j}` with `V` other than the cell's real count. `tally-range` can't fail while binding holds, since option proofs bound every counted `v^{(b)}_j` to 0 or 1; it is checked anyway, as it is what the result rests on (T-29, T-36), and a vector exercises it with a ballot no validity check would admit.
 - **An honest combination always passes `tally-opening`,** even if binding is broken: `Σ_{i∈Q} λ_i · i^t` is 1 for `t = 0` and 0 for `0 < t < k`, so `Π_{i∈Q} (Π_t Ê_{c,j,t}^{i^t})^{λ_i} = Ê_{c,j,0}` holds in the exponent.
 - **The opening reveals the count and nothing else about any ballot.** `V_{c,j}` is the count. `R_{c,j}` is the sum of the counted ballots' randomness, which each perfectly hiding commitment leaves uniform; even with discrete logs in ristretto255, `V + x·R` already follows from `Ĉ_{c,j}`. A ballot with fewer than `k` posted shares stays hidden: no per-seat value of the summed polynomials is published ([[0015-tally-publication]], Context). A cell with one counted ballot reveals that ballot: that is the cell's size, flagged by [[verifier]] 8.2, and why openings are only ever per cell of one partition (T-16, [[0002-everlasting-privacy]], Tally).
+
+## Opening record
+
+A trustee publishes a cell's opening as a **tally opening**, record type `0x0006`, version 1 ([[versioning]]), on the election's board ([[board]], Allowed payloads). One record carries one cell's opening; an election's tally transcript is every tally opening on its board.
+
+| Field             | Type                       | Meaning                                                                                                                                                       |
+| ----------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `definition_hash` | `bytes[32]`                | The election's definition hash ([[election-definition]], Definition hash)                                                                                     |
+| `cell`            | `u8`                       | The cell, by its position in the registered partition, from 0: under version 1 of the definition, the position of its tier in `electorate` ([[verifier]] 2.8) |
+| `signer`          | `u8`                       | The seat that combined the opening and signs it                                                                                                               |
+| `opening`         | `list<share, MAX_OPTIONS>` | `(V_{c,j}, R_{c,j})` for `j = 0, …, m − 1`, in option order, with `share` as in [[ballot-validity]] (`v`, then `r`, both `scalar`)                            |
+| `signature`       | `p256-sig`                 | The signer's signature (below)                                                                                                                                |
+
+The record decodes strictly ([[notation]]), so every `V` and `R` is a canonical `scalar`: a count encoded as `V + ℓ` is no record. Decoding doesn't compare `definition_hash`, `cell`, `signer` or the number of entries with the election; the checks below do, so a record that names another election, cell, seat or option count is still read, and reported. Every field is a hash, a small integer, a scalar or a signature, so the record carries no chosen bytes beyond what any signature or proof does ([[notation]], Result-critical fields; T-17).
+
+**Signature.** `signature` is an ECDSA P-256 signature by a per-election signing key, under `abolish/v1/sig/tally-opening` ([[trustee-identity]], Signatures), over
+
+```
+m = definition_hash ‖ u8(cell) ‖ u8(signer) ‖ encode(opening)
+```
+
+the record's fields without its header and signature: `38 + 64·m'` bytes for an opening of `m'` entries. The signature **attributes** the opening to seat `signer` if and only if `signer` is a seat of the election's registered key set ([[ceremony]], Transcript check) and the signature verifies under that seat's registered signing key, never the identity key ([[trustee-identity]], Which key signs what). Any other opening is **unattributed**: it still counts if it passes, since a passing opening is correct whoever made it, but a failure in it is no one's (T-29). `m` binds the definition hash, the cell and, through the list's count, the number of options, so an honest trustee's opening replayed into another election or cell, or with entries added or removed, is unattributed and never frames its signer. A relay that strips or replaces a signature only makes the opening unattributed: a passing one still counts, and a failing one is blamed on no one. A trustee signs at most one opening per cell, each after its own checks pass (Combination), so a second, different opening signed by the same seat is evidence against it.
+
+**Which openings are a cell's.** For [[verifier]] 7.2 and 7.4, every tally opening within the sealed extent of the board ([[board]]; [[election-definition]], The seal) is, in board order, either:
+
+- an **opening of cell `c`**, if its `definition_hash` is the election's and its `cell` is `c`, a cell of the registered partition; or
+- a **stray opening**, if it names another definition or a cell the partition doesn't have. A stray opening is reported, attributed as its signature allows, and is never an opening of any cell ([[verifier]] 7.4).
+
+A tally opening whose version the profile doesn't pin is `profile-mismatch` ([[verifier]] 2.3). One that otherwise fails to decode is a rejected entry ([[board]], Allowed payloads), listed in the report and never an opening of any cell, so it can't stand in for a missing one.
+
+## Tally window
+
+Version 1 of the tally opening fixes the **tally window**: `TALLY_WINDOW = 604,800` seconds (7 days), counted from `closes_at + l1_inclusion_bound`. Each cell's opening must be on the board by its end, boarding latency included, and the window is the tally's term in the seal's `W` ([[election-definition]], The seal). It is a constant of this record version, so no creator, operator or verifier release chooses it for one election, and changing it is a new version (T-34, T-54).
+
+The window must hold everything between close and the openings: the share-delivery deadline and the complaint window of [[0002-everlasting-privacy]], the anchoring of the counted set, the exchange of summed shares (part 2b) and the combination. Whichever record version fixes the deadline and the complaint window (P1-12 part 3, P1-13) MUST end them so that at least 72 hours of the tally window remain after the checkpoint anchoring the counted set is due ([[board]], Timing: the end of its period plus `deadline`), or specify a new tally version with a longer window.
+
+Why 7 days: a cell with no opening by the seal fails the election permanently (`tally-missing`, T-54), so the window has to outlast `k` trustees' nodes being briefly unreachable after the earlier deadlines, a weekend included. A longer window postpones the seal, and with it the moment the result is final and checkable from L1 alone. An opening boarded after the tally window but before the seal (another post-close window may end later) still counts: the window fixes what the seal must cover, not which openings are read.
 
 ## Coarser totals
 
@@ -119,3 +156,5 @@ A total over several cells (per tier where cells are regions, or overall) is the
 ## Test vectors
 
 `docs/spec/vectors/tally.json` ([[vectors/README|vectors]]): cells with their ballots' VSS commitments, every trustee's shares per ballot, the aggregates, each trustee's summed shares and check verdict, the seats combined, the Lagrange coefficients and the opening; cells with a failing trustee (a share off by one, a sum missing a ballot, options swapped, a short list), an empty cell, a cell with one ballot, a cell at `MAX_TRUSTEES`, a cell short of `k` passing trustees (`tally-quorum`), a cell whose only ballot holds a vote of 2 and so fails `tally-range` (a ballot no admission check would let through, to exercise the check), and an election with two cells and its derived overall total; and published openings checked by the verifier: each valid opening, a count or randomness off by one (`tally-opening`), a short or missing opening and one whose count is encoded as `V + ℓ` (`tally-missing`), and the vote-of-2 cell's opening (`tally-range`). They are printed by `packages/crypto/scripts/tally-vectors.py`, an implementation of this page in Python's integers that reuses `ballot-validity-vectors.py` to make the ballots, and so shares nothing with `packages/crypto`. It finds each opening by solving the Vandermonde system for every coefficient of the summed polynomials, not by Lagrange coefficients, and checks the two agree.
+
+`docs/spec/vectors/tally-opening.json`: tally openings signed by registered seats and re-made byte for byte, with their signed messages; decode rejections (truncation, trailing bytes, another record type, an unpinned version, a non-canonical `V` or `R`, more than `MAX_OPTIONS` entries); and elections with registered signing keys, their cells' ballots and the tally openings on their boards, each with the verifier's result: every cell passing with attributed and unattributed openings, a failing opening beside a passing one, attributed or not, a cell with only failing openings, a missing cell, a short opening, a replay into another cell, signatures by an unregistered seat or another seat's key, stray openings for another election and for a cell outside the partition, identical openings by two seats, and `tally-range`. They are printed by `packages/crypto/scripts/tally-opening-vectors.py`, which builds on `tally-vectors.py` and `trustee-vectors.py`'s P-256 ECDSA.

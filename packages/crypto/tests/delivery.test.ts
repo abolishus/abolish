@@ -360,25 +360,50 @@ describe("input checks", () => {
       ).toThrow(RangeError);
   });
 
-  test("the delivery window covers anchoring or forced inclusion, then a forced receipt", () => {
+  test("the windows cover anchoring or forced inclusion, then a forced receipt or complaint", () => {
     const hour = 3600n;
     // Hourly periods, a 12-hour anchoring deadline, Base's 12-hour forced
-    // inclusion plus an hour of missed slots, and a 13-hour contract-event window.
+    // inclusion plus an hour of missed slots, a 13-hour contract-event window
+    // and an hour for L1 finality and the node's reaction.
     const deployed = {
       period: hour,
       deadline: 12n * hour,
       contractEventWindow: 13n * hour,
       forcedInclusion: 13n * hour,
+      margin: hour,
     };
     expect(deliveryWindowFits(deployed)).toBe(true);
-    // Either term alone can break the bound.
+    // Each term alone can break a bound.
     expect(deliveryWindowFits({ ...deployed, deadline: DELIVERY_WINDOW })).toBe(false);
+    expect(deliveryWindowFits({ ...deployed, margin: DELIVERY_WINDOW })).toBe(false);
     expect(deliveryWindowFits({ ...deployed, contractEventWindow: DELIVERY_WINDOW })).toBe(false);
+    const delivery = DELIVERY_WINDOW - 15n * hour;
+    expect(deliveryWindowFits({ ...deployed, forcedInclusion: delivery })).toBe(true);
+    expect(deliveryWindowFits({ ...deployed, forcedInclusion: delivery + 1n })).toBe(false);
+    // A small F lets the delivery bound pass while the complaint bound fails.
     expect(
-      deliveryWindowFits({ ...deployed, forcedInclusion: DELIVERY_WINDOW - 14n * hour + 1n }),
+      deliveryWindowFits({
+        ...deployed,
+        forcedInclusion: 0n,
+        contractEventWindow: DELIVERY_WINDOW,
+        margin: DELIVERY_WINDOW - 14n * hour,
+      }),
     ).toBe(false);
-    expect(deliveryWindowFits({ ...deployed, forcedInclusion: DELIVERY_WINDOW - 14n * hour })).toBe(
-      true,
+    // The complaint bound (W_C + F + R within the three days after the delivery
+    // deadline) is checked too: nothing that breaks it passes.
+    fc.assert(
+      fc.property(
+        fc.bigInt({ min: 0n, max: 2n * DELIVERY_WINDOW }),
+        fc.bigInt({ min: 0n, max: 2n * DELIVERY_WINDOW }),
+        fc.bigInt({ min: 0n, max: 2n * DELIVERY_WINDOW }),
+        (contractEventWindow, forcedInclusion, margin) => {
+          const c = { ...deployed, contractEventWindow, forcedInclusion, margin };
+          const complaintFits =
+            contractEventWindow + forcedInclusion + margin <= COMPLAINT_WINDOW - DELIVERY_WINDOW;
+          if (!complaintFits) expect(deliveryWindowFits(c)).toBe(false);
+        },
+      ),
+      { numRuns },
     );
     expect(() => deliveryWindowFits({ ...deployed, period: -1n })).toThrow(RangeError);
   });

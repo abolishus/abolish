@@ -201,26 +201,32 @@ export function deliveryDeadlines(closesAt: bigint, l1InclusionBound: bigint): D
 }
 
 /**
- * The bound P4-1's anchoring clock and P1-18's contract-event window must
- * keep (docs/spec/delivery.md, Direct submit): `DELIVERY_WINDOW ≥
- * max(2 · period + deadline, W_C) + F`, so every counted ballot is anchored or
- * recorded by the contract early enough for a trustee node to see it and still
- * send its receipts through the contract path in time, even forced through L1.
- * Seconds, as bigints.
+ * The bounds P4-1's anchoring clock and P1-18's contract-event window must
+ * keep (docs/spec/delivery.md, Direct submit), in seconds as bigints:
+ * `DELIVERY_WINDOW ≥ max(2 · period + deadline + R, W_C) + F`, so every
+ * counted ballot's anchoring or contract recording is confirmable on finalized
+ * L1 in time for a trustee node to send its receipts through the contract
+ * path, even forced through L1; and `COMPLAINT_WINDOW − DELIVERY_WINDOW ≥ W_C
+ * + F + R`, so a trustee can read the last posting and still send a complaint.
+ * `margin` is `R`, for L1 finality and the node's own reaction.
  */
 export function deliveryWindowFits(constants: {
   readonly period: bigint;
   readonly deadline: bigint;
   readonly contractEventWindow: bigint;
   readonly forcedInclusion: bigint;
+  readonly margin: bigint;
 }): boolean {
-  const { period, deadline, contractEventWindow, forcedInclusion } = constants;
-  for (const v of [period, deadline, contractEventWindow, forcedInclusion])
+  const { period, deadline, contractEventWindow, forcedInclusion, margin } = constants;
+  for (const v of [period, deadline, contractEventWindow, forcedInclusion, margin])
     if (typeof v !== "bigint" || v < 0n)
       throw new RangeError("every constant must be a bigint ≥ 0");
-  const seen =
-    2n * period + deadline > contractEventWindow ? 2n * period + deadline : contractEventWindow;
-  return seen + forcedInclusion <= DELIVERY_WINDOW;
+  const anchored = 2n * period + deadline + margin;
+  const seen = anchored > contractEventWindow ? anchored : contractEventWindow;
+  return (
+    seen + forcedInclusion <= DELIVERY_WINDOW &&
+    contractEventWindow + forcedInclusion + margin <= COMPLAINT_WINDOW - DELIVERY_WINDOW
+  );
 }
 
 /** What the delivery check runs against, all from data the verifier has already checked. */

@@ -87,16 +87,35 @@ def entry(version, election_id, index, segment, payload):
 
 
 def decode_entry(b, pinned):
-    """The envelope under the pinned version: board-vectors.py's strict decoder, with the version's own allowed set."""
-    if len(b) < 3 or b[2] != pinned:
+    """Strict decoding of a board entry under the pinned version (docs/spec/notation.md, board.md), with that version's allowed set."""
+    if len(b) < 2:
+        return "truncated"
+    if int.from_bytes(b[0:2], "big") != BOARD_ENTRY_TYPE:
+        return "unknown-record-type"
+    if len(b) < 3:
+        return "truncated"
+    if b[2] != pinned:
         return "version"
-    d = bdv.decode_entry(b[:2] + b"\x01" + b[3:])
-    if isinstance(d, str) and d != "unexpected-record-type":
-        return d
-    t = int.from_bytes(b[51:53], "big")
-    if t not in ALLOWED[pinned]:
+    if len(b) < 51:
+        return "truncated"
+    n = int.from_bytes(b[47:51], "big")
+    if n > bdv.MAX_BOARD_PAYLOAD:
+        return "length-over-max"
+    if len(b) < 51 + n:
+        return "truncated"
+    payload = b[51 : 51 + n]
+    if n < 3:
+        return "truncated"
+    if int.from_bytes(payload[0:2], "big") not in ALLOWED[pinned]:
         return "unexpected-record-type"
-    return d
+    if len(b) != 51 + n:
+        return "trailing-bytes"
+    return {
+        "electionId": b[3:35],
+        "index": int.from_bytes(b[35:43], "big"),
+        "segment": int.from_bytes(b[43:47], "big"),
+        "payload": payload,
+    }
 
 
 def combination(defn):
@@ -169,7 +188,23 @@ def expected(panel, defn, entries, bundle_panel, board_version=1):
     return dict(rows, **{"3.1": NOT_IMPLEMENTED, "3.2": outcome("pass")}), ceremony
 
 
+def self_check():
+    eid = bytes(32)
+    for t in sorted(ALLOWED[4] | {0x0004, 0x000D}):
+        p = t.to_bytes(2, "big") + b"\x01\x00"
+        for v in (1, 3, 4):
+            ok = t in ALLOWED[v]
+            raw = bdv.entry(eid, 0, 0, p)
+            e = raw[:2] + bytes([v]) + raw[3:]
+            d = decode_entry(e, v)
+            assert isinstance(d, dict) == ok and (ok or d == "unexpected-record-type"), (t, v, d)
+            assert decode_entry(e + b"\x00", v) == ("trailing-bytes" if ok else "unexpected-record-type")
+            if v == 1:
+                assert bdv.decode_entry(e) == d, (t, d)
+
+
 def main(out):
+    self_check()
     panels = {
         "panel-4": cv.make_panel("panel-4", 3, 4),
         "panel-4-k2": cv.make_panel("panel-4-k2", 2, 4),

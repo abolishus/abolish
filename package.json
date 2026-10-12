@@ -5,7 +5,8 @@
   "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
-    "ready": "vp check && vp run -r check && vp run -r test && vp run -r build"
+    "ready": "vp check && vp run -r check && vp run -r test && vp run -r build",
+    "reference-election": "vp run --filter @abolishus/crypto --filter @abolishus/verifier --filter @abolishus/contracts build && vp run --filter @abolishus/reference-election reference-election"
   },
   "devDependencies": {
     "@changesets/cli": "catalog:",

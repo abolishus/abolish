@@ -227,8 +227,9 @@ export function trackingCode(
  * Whether a published opening would open a commitment of `ballot`
  * (docs/spec/challenge.md, Opened commitments): the same definition hash,
  * and some ballot commitment `C_{j'}`, at any option, equal to an opened
- * `C_j`, or to `h^s` or `g · h^s` for a scalar `s` the opening reveals: a
- * coefficient of any `f_j` or `g_j`, a seat's share `f_j(i)` or `g_j(i)`,
+ * `C_j`, or to `h^s` or `g · h^s` for a secret scalar `s` the opening
+ * reveals: a coefficient of any `g_j`, a coefficient of any `f_j` but its
+ * constant term (the vote), a seat's share `f_j(i)` or `g_j(i)`,
  * or a seat's `e_i` or `w_i`. An opened `C_j` is opened wherever it is cast
  * (under fresh share hashes, another tier, re-blinded higher coefficients or
  * another option), and so is any commitment to 0 or 1 whose randomness is a
@@ -253,11 +254,14 @@ export function opensBallotCommitment(
   }
   const seats = opening.share_hashes.map((_, i) => BigInt(i + 1));
   const revealed = new Set<bigint>();
-  for (const { f, g } of opening.polynomials)
-    for (const poly of [f, g]) {
-      for (const c of poly) revealed.add(c);
-      for (const x of seats) revealed.add(evaluate(poly, x));
-    }
+  for (const { f, g } of opening.polynomials) {
+    // f_j's constant term is the vote, 0 or 1, never randomness: h^{v_j} and
+    // g · h^{v_j} are commitments anyone can open, so matching them would let
+    // one such ballot block every opening, and reveal nothing (challenge.md).
+    for (const c of f.slice(1)) revealed.add(c);
+    for (const c of g) revealed.add(c);
+    for (const poly of [f, g]) for (const x of seats) revealed.add(evaluate(poly, x));
+  }
   for (const { e, w } of opening.seats) {
     revealed.add(e);
     revealed.add(w);

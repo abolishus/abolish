@@ -504,6 +504,7 @@ def main():
         ("seat-share", "Option 0's vote under g_0(2), seat 2's revealed share, every other commitment fresh", core_from("seatshare", seatshare), True),
         ("vote-coefficient", "Option 0's vote under a_{1,1}, f_1's revealed higher coefficient, every other commitment fresh", core_from("fcoef", fcoef), True),
         ("seat-ephemeral", "Option 0's vote under seat 1's revealed e_1, every other commitment fresh", core_from("eph", eph), True),
+        ("public-randomness", "A counted core whose option 0 commits to 1 with r = 0 (C = g) and option 1 to 0 with r = 1 (C = h): anyone can open them already, and the opening's votes are never matched as randomness", {"definitionHash": base["definitionHash"], "tier": 0, "vss": [[bv.pedersen(1, 0), bv.pedersen(0, 5)], [bv.pedersen(0, 1), bv.pedersen(0, 7)], [bv.pedersen(0, 11), bv.pedersen(0, 13)]], "shareHashes": [bytes(32)] * plural["panelSize"]}, False),
     )
     opened_commitments = []
     base_code = core_hash(base["definitionHash"], base["tier"], base["vss"], base["shareHashes"])
@@ -517,8 +518,10 @@ def main():
         # and g_j, each seat's shares f_j(i) and g_j(i), each seat's e and w.
         revealed = set()
         for p in bp:
+            # f_j's constant term is the vote, never randomness.
+            revealed.update(p["f"][1:])
+            revealed.update(p["g"])
             for poly in (p["f"], p["g"]):
-                revealed.update(poly)
                 revealed.update(bv.evaluate(poly, i) for i in range(1, plural["panelSize"] + 1))
         for st in base["seats"]:
             revealed.update((st["e"], st["w"]))

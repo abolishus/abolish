@@ -1996,6 +1996,23 @@
       },
       "coreHash": "86a9145771bd61c5c1b0eb6b36538706c3f7a3ec838fa6bf210802e6532eeda6",
       "opened": true
+    },
+    {
+      "id": "public-randomness",
+      "description": "A counted core whose option 0 commits to 1 with r = 0 (C = g) and option 1 to 0 with r = 1 (C = h): anyone can open them already, and the opening's votes are never matched as randomness",
+      "opening": "plurality",
+      "core": {
+        "definitionHash": "27819ab7e3df03fcbe05d509bd2487d7f48a412a98d991e84705112e94316105",
+        "tier": 0,
+        "vss": "0000000300000002e2f2ae0a6abc4e71a884a961c500515f58e30b6aa582dd8db6a65945e08d2d7608db9b85e40d7eb6ae364f63badf38f9d7f10553d710d68862f1b4aef225b773000000022ac338de551824e59d1a2563c133a8ec81b4007edb867d4e4411a416cc98fa3498b3f3992f16b0fd75f3f5beb327765ec1d546a804d5f3039b21d78978a8262b000000020cd6e8147817a5327169c594aa98ccc6ecf74be29f8afda653988a2ad0246d52288bfe3b18db9a4b0711268543225aed07ca90f947d697b71d98c78f4c4f7d7b",
+        "shareHashes": [
+          "0000000000000000000000000000000000000000000000000000000000000000",
+          "0000000000000000000000000000000000000000000000000000000000000000",
+          "0000000000000000000000000000000000000000000000000000000000000000"
+        ]
+      },
+      "coreHash": "362a7e5739dc96bd5ecbefa27660f5ea98c7bfa59ef58bf1a91ecfdde78f99bf",
+      "opened": false
     }
   ],
   "castBallots": [

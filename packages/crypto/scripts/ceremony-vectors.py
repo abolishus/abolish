@@ -49,6 +49,7 @@ CT_LEN = 1088
 CONTEXT_TAG = b"abolish/v1/ceremony-context"
 ROUND_TAG = b"abolish/v1/ceremony-round"
 CHALLENGE_TAG = b"abolish/v1/ceremony-challenge"
+ANSWER_TAG = b"abolish/v1/ceremony-answer"
 TRANSCRIPT_TAG = b"abolish/v1/ceremony-transcript"
 POSSESSION_TAG = b"abolish/v1/fs/ceremony/possession"
 MESSAGE_TAG = b"abolish/v1/sig/ceremony-message"
@@ -142,6 +143,11 @@ def challenge_m(ctx, j, i, mu):
     return H(ds(CHALLENGE_TAG, ctx + u8(j) + u8(i) + mu))
 
 
+def answer_hash(ctx, j, i, ss):
+    """Seat i's answer to seat j's challenge (spec: Round 3)."""
+    return H(ds(ANSWER_TAG, ctx + u8(j) + u8(i) + ss))
+
+
 def signed(round_, prev, index, body, d):
     return sign(d, MESSAGE_TAG, u8(round_) + prev + u8(index) + body)
 
@@ -232,7 +238,7 @@ def run(label, panel, seats, cheat=None):
         for j in [x for x in s2 if x != i]:
             at = [x for x in s1 if x != j].index(i)
             # A short challenge list (the shape vector) leaves nothing to decapsulate.
-            answers.append(se.decaps_internal(secrets[i]["dk"], cts_of[j][at]) if at < len(cts_of[j]) else bytes(32))
+            answers.append(answer_hash(ctx, j, i, se.decaps_internal(secrets[i]["dk"], cts_of[j][at])) if at < len(cts_of[j]) else bytes(32))
         if "answers" in cheat:
             answers = cheat["answers"](i, answers, {"r3": r3, "s1": s1, "s2": s2, "mus": mus, "ctx": ctx, "ek1": eks.get(1)})
         body = lst(answers)
@@ -418,7 +424,7 @@ def check(panel, b):
     for j, mus in rv.items():
         for at, t in enumerate([x for x in s1 if x != j]):
             ss, ct = se.encaps_internal(keys[t]["ek"], challenge_m(ctx, j, t, mus[at]))
-            shared[(j, t)] = ss if ct == ch[j][at] else None
+            shared[(j, t)] = answer_hash(ctx, j, t, ss) if ct == ch[j][at] else None
     seats = []
     for i in range(1, n + 1):
         reasons = []
@@ -472,6 +478,7 @@ def main(out):
         "panel-4": make_panel("panel-4", 3, 4),
         "panel-4-k2": make_panel("panel-4-k2", 2, 4),
         "panel-2": make_panel("panel-2", 2, 2),
+        "panel-3": make_panel("panel-3", 2, 3),
         "panel-16": make_panel("panel-16", 11, 16),
     }
     vectors = []
@@ -618,17 +625,42 @@ def main(out):
                 out[others.index(challenger)] = holder_answers[[x for x in st["s2"] if x != 1].index(relayer)]
             for a in accomplices:
                 mu = st["mus"][a][[x for x in st["s1"] if x != a].index(i)]
-                out[others.index(a)] = se.encaps_internal(st["ek1"], challenge_m(st["ctx"], a, i, mu))[0]
+                out[others.index(a)] = answer_hash(st["ctx"], a, i, se.encaps_internal(st["ek1"], challenge_m(st["ctx"], a, i, mu))[0])
             return out
 
         return hook
 
     add(
         "relay-2",
-        "Seat 2 registers seat 1's ek, relays seat 1's challenge to it back to seat 1 as its own challenge, copies seat 1's answer and reveals seat 1's μ. The pair in m makes the relayed challenge fail its reveal: seat 2 is disqualified, and one seat is below k = 2.",
+        "Seat 2 registers seat 1's ek, relays seat 1's challenge to it back to seat 1 as its own challenge, copies seat 1's answer and reveals seat 1's μ. The pair in m fails the relayed challenge's reveal, and the pair in the answer makes the copied answer wrong: seat 2 is disqualified, and one seat is below k = 2.",
         "panel-2",
         [1, 2],
         {"seat": copy_ek_of_1(2), "challenges": relay_challenge(2, 2, 1), "answers": relayed_answers(2, {1: 2}), "reveals": relay_reveal(2, 2, 1)},
+        expect="ceremony-quorum",
+    )
+
+    # The view split found in CI review: seat 3 (corrupt, with the coordinator)
+    # signs a second round 2 that relays seat 2's challenge to it through its
+    # slot to seat 1, and only seat 1 is shown it. Seat 1's round-3 message is
+    # signed over that other round 2, so it is left out (as are its reveals);
+    # seat 3 answers seat 2 with what seat 1 published there, which is bound to
+    # the pair (3, 1), not (2, 3).
+    def split_view_answers(i, answers, st):
+        if i != 3:
+            return answers
+        mu = st["mus"][2][[x for x in st["s1"] if x != 2].index(3)]
+        ss = se.encaps_internal(st["ek1"], challenge_m(st["ctx"], 2, 3, mu))[0]
+        others = [x for x in st["s2"] if x != i]
+        out = list(answers)
+        out[others.index(2)] = answer_hash(st["ctx"], 3, 1, ss)
+        return out
+
+    add(
+        "relay-view-split",
+        "2-of-3 panel; seat 3 registers seat 1's ek. Seat 3 signed a second round 2 relaying seat 2's challenge to seat 1, shown to seat 1 alone, so seat 1's answers and reveals are left out. Seat 3 answers seat 2 with seat 1's published answer from that view, which is bound to the pair (3, 1): wrong-answer, and one qualified seat is below k = 2.",
+        "panel-3",
+        [1, 2, 3],
+        {"seat": copy_ek_of_1(3), "skip3": 1, "skip4": 1, "answers": split_view_answers},
         expect="ceremony-quorum",
     )
 
@@ -642,7 +674,7 @@ def main(out):
 
     add(
         "relay-sacrificed",
-        "Corrupt seats 3 and 4 of a 2-of-4 panel: seat 4 registers seat 1's ek; seat 3 relays seat 1's challenge to seat 4, and seat 4 relays seat 2's, each to seat 1 as its own challenge. Seat 4 answers every challenge correctly, but both relayers fail their reveals, leaving the two honest seats.",
+        "Corrupt seats 3 and 4 of a 2-of-4 panel: seat 4 registers seat 1's ek; seat 3 relays seat 1's challenge to seat 4, and seat 4 relays seat 2's, each to seat 1 as its own challenge. Seat 1's answers are bound to seat 1 as target, so seat 4's copies of them are wrong, and both relayers fail their reveals, leaving the two honest seats.",
         "panel-4-k2",
         [1, 2, 3, 4],
         {
@@ -651,7 +683,7 @@ def main(out):
             "answers": relayed_answers(4, {1: 3, 2: 4}, accomplices=(3,)),
             "reveals": both(relay_reveal(3, 4, 1), relay_reveal(4, 4, 2)),
         },
-        expect=[(3, ["bad-challenge"]), (4, ["bad-challenge"])],
+        expect=[(3, ["bad-challenge"]), (4, ["bad-challenge", "wrong-answer"])],
     )
 
     def two_bad(i, answers, *_):
@@ -731,7 +763,7 @@ def main(out):
         "title": "Key ceremony: transcripts, their checks and their hashes",
         "spec": "docs/spec/ceremony.md",
         "generator": "packages/crypto/scripts/ceremony-vectors.py: an independent Python implementation (standard library only), with share-encryption-vectors.py's ML-KEM-768 (checked against Go's accumulated FIPS 203 vectors first) and ristretto255, and trustee-vectors.py's P-256 ECDSA, which reproduces RFC 6979 Appendix A.2.5 first. Every value is test data, never keys",
-        "tags": {t.decode(): t.decode() for t in [CONTEXT_TAG, ROUND_TAG, CHALLENGE_TAG, TRANSCRIPT_TAG, POSSESSION_TAG, MESSAGE_TAG, SIGNING_KEY_TAG]},
+        "tags": {t.decode(): t.decode() for t in [CONTEXT_TAG, ROUND_TAG, CHALLENGE_TAG, ANSWER_TAG, TRANSCRIPT_TAG, POSSESSION_TAG, MESSAGE_TAG, SIGNING_KEY_TAG]},
         "election": {
             "l2ChainId": str(ELECTION["l2ChainId"]),
             "trusteeRegistry": ELECTION["trusteeRegistry"].hex(),

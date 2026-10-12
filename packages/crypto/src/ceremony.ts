@@ -325,6 +325,22 @@ function challengeMessage(context: Uint8Array, j: number, i: number, mu: Uint8Ar
   return H(ds("abolish/v1/ceremony-challenge", w.finish()));
 }
 
+/**
+ * Seat `i`'s answer to seat `j`'s challenge:
+ * `H(DS("abolish/v1/ceremony-answer", ceremony_context ‖ u8(j) ‖ u8(i) ‖ ss))`.
+ * A seat publishes only answers bound to itself as target, so whatever round 2
+ * a coordinator showed it, no other seat can reuse what it publishes as its
+ * own answer (docs/spec/ceremony.md, Round 3; T-37).
+ */
+function answerHash(context: Uint8Array, j: number, i: number, ss: Uint8Array): Uint8Array {
+  const w = new Writer();
+  w.bytes(context);
+  u8.write(w, j);
+  u8.write(w, i);
+  w.bytes(ss);
+  return H(ds("abolish/v1/ceremony-answer", w.finish()));
+}
+
 /** A seat's secrets for one run: its identity key, and the fresh per-election keys it registers. */
 export interface SeatSecrets {
   readonly index: number;
@@ -466,7 +482,10 @@ export function answersMessage(
     .filter((c) => c.index !== seat.index)
     .map((c) => {
       const position = s1.filter((i) => i !== c.index).indexOf(seat.index);
-      return ml_kem768.decapsulate(c.challenges[position] as Uint8Array, dk);
+      const ss = ml_kem768.decapsulate(c.challenges[position] as Uint8Array, dk);
+      const answer = answerHash(run.context, c.index, seat.index, ss);
+      ss.fill(0);
+      return answer;
     });
   dk.fill(0);
   return sign<AnswersMessage>(seat.identitySecret, 3, h[2] as Uint8Array, {
@@ -627,7 +646,7 @@ function seatResults(run: Run, t: Rounds): SeatResult[] {
   const dhCount = count(passing.map((m) => hex(encode(KEM_PUBLIC_KEY, m.kem_key).subarray(-32))));
   const sigCount = count(passing.map((m) => hex(m.signing_key)));
 
-  // Re-encapsulation of every revealed challenge: valid, and its shared secret.
+  // Re-encapsulation of every revealed challenge: valid, and the answer it expects.
   const valid = new Map<string, Uint8Array | null>();
   for (const [j, rev] of reveals) {
     const c = challenges.get(j) as ChallengesMessage;
@@ -637,7 +656,9 @@ function seatResults(run: Run, t: Rounds): SeatResult[] {
       const { cipherText, sharedSecret } = ml_kem768.encapsulate(ek, m);
       valid.set(
         `${j}>${i}`,
-        equalBytes(cipherText, c.challenges[at] as Uint8Array) ? sharedSecret : null,
+        equalBytes(cipherText, c.challenges[at] as Uint8Array)
+          ? answerHash(run.context, j, i, sharedSecret)
+          : null,
       );
     });
   }

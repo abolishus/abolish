@@ -32,14 +32,15 @@ const bundleServer: Plugin = {
 };
 
 // The route generator writes src/routeTree.gen.ts formatted by Prettier at
-// its default 80 columns, which `vp check` reflows to the repo's 100. Format
-// it in the repo's style once it is written (the generator writes it while
-// the config resolves), so a build leaves the committed file unchanged
-// (repro-build rejects a build that modifies a tracked file).
+// its default 80 columns, which `vp check` reflows to the repo's 100. It
+// writes whenever this config resolves (`vp pack` included, which is why the
+// build packs first), so the build formats the file in the repo's style once
+// it is done, leaving the committed file unchanged (repro-build rejects a
+// build that modifies a tracked file).
 const formatRouteTree: Plugin = {
   name: "format-route-tree",
   apply: "build",
-  buildStart() {
+  closeBundle() {
     execFileSync("vp", ["fmt", "src/routeTree.gen.ts"], { cwd: root, stdio: "ignore" });
   },
 };

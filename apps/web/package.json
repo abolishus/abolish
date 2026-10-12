@@ -6,7 +6,7 @@
   "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
-    "build": "vp exec tsc -p tsconfig.json && vp build && vp pack",
+    "build": "vp exec tsc -p tsconfig.json && vp pack && vp build",
     "check": "vp check",
     "start": "vp node dist/node/main.mjs",
     "test": "vp run test:db",

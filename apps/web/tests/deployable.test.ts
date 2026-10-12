@@ -25,12 +25,14 @@ let dir: string;
 let login: string;
 
 beforeAll(async () => {
+  dir = mkdtempSync(join(tmpdir(), "abolish-web-image-"));
+  // Packed first, as the build script does: loading the config regenerates
+  // the route tree, which the app build then formats (vite.config.ts).
+  execFileSync("vp", ["pack", "--out-dir", join(dir, "node")], { cwd: pkg, stdio: "inherit" });
   const builder = await createBuilder({ root: pkg, logLevel: "warn" });
   await builder.buildApp();
-  dir = mkdtempSync(join(tmpdir(), "abolish-web-image-"));
   cpSync(join(pkg, "dist", "server"), join(dir, "server"), { recursive: true });
   cpSync(join(pkg, "dist", "client"), join(dir, "client"), { recursive: true });
-  execFileSync("vp", ["pack", "--out-dir", join(dir, "node")], { cwd: pkg, stdio: "inherit" });
   db = await testDb();
   login = `${db.schema}_web`;
   await db.admin.unsafe(`CREATE ROLE "${login}" LOGIN PASSWORD '${password}' IN ROLE abolish_app`);

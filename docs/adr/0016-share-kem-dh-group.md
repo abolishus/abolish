@@ -1,8 +1,8 @@
 # ADR 0016: The Diffie–Hellman half of the share KEM
 
-- Status: needs-decision (owner-only): the brief's non-negotiable exception for unaudited ML-KEM names X25519. Recommended: option A
+- Status: Accepted (owner), 2026-10-12: option A
 - Date: 2026-10-11
-- Deciders: owner. [[PROJECT_BRIEF]] (Non-negotiable properties) allows unaudited ML-KEM from `@noble/post-quantum` only "inside a hybrid KEM with X25519 on testnets", and changes to the brief's non-negotiable properties are owner-only (rule A). Option A pairs it with Curve25519 DH in its ristretto255 encoding, not RFC 7748's X25519, so an agent's reading can't settle it.
+- Deciders: owner. [[PROJECT_BRIEF]] (Non-negotiable properties) allows unaudited ML-KEM from `@noble/post-quantum` only "inside a hybrid KEM with X25519 on testnets", and changes to the brief's non-negotiable properties are owner-only (rule A); the owner's answer (Decision) reads that exception as covering this construction.
 - Threats addressed: T-15, T-39, T-41, T-36 (see [[THREAT_MODEL]])
 
 ## Context
@@ -48,11 +48,10 @@ Option A. The owner's answer is about the post-quantum question: that ML-KEM-768
 
 ## Decision
 
-Waiting on the owner, listed under Waiting on the owner in [[STATUS]]. `crypto-review` on #58 found that this ADR first recorded option A as an agent decision, which reads the brief's non-negotiable "with X25519" as Diffie–Hellman on Curve25519 in any encoding. That reading is the owner's to make. Any one of these settles it:
+On 2026-10-12 the owner chose **option A**, recorded in [[0002-everlasting-privacy]] (Decision) as well:
 
-- the owner amends the brief's exception (or confirms in [[0002-everlasting-privacy]], Decision) to cover Curve25519 DH in its ristretto255 encoding, which accepts option A as built in #58;
-- the owner keeps X25519 as RFC 7748 defines it, and P1-12 part 2 is rebuilt on option B with a reviewed complaint proof over X25519.
+1. **The ML-KEM exception covers this hybrid.** The brief's "hybrid KEM with X25519" is read as Diffie–Hellman on Curve25519, here in its ristretto255 encoding (RFC 9496), the commitment group: same curve and hardness, and a trustee's complaint stays a standard Chaum–Pedersen proof. The exception's other limits stand: testnets only, and an independent audit before mainnet ([[0002-everlasting-privacy]], Decision). That audit covers the hybrid's combiner and its composition with the AEAD and the proof of knowledge as well as the ML-KEM code, since X-Wing's own vectors and analysis don't apply as-is.
+2. **The associated data leaves out the tier and nullifier.** This narrows the list in [[0002-everlasting-privacy]] (Private part): `aad` binds the definition, the ballot record type and version, the seat and the VSS commitments ([[share-encryption]], Notes).
+3. **The proof of knowledge of the DH ephemeral leaves out the nullifier.** [[domain-separation]] (Fiat–Shamir) records it as the one exception to its nullifier rule; `t_e` binds the VSS commitments, so the rule's purpose holds ([[share-encryption]], Notes).
 
-The owner's answer should also cover a second, smaller departure from the owner-accepted [[0002-everlasting-privacy]] (Consequences, above): the AEAD's associated data leaves out the tier and nullifier that ADR 0002's Private part lists, so a challenged ballot's ciphertexts can be made before its nullifier. The same holds for the proof of knowledge of each ciphertext's DH ephemeral: its challenge leaves out the nullifier, which [[domain-separation]] (Fiat–Shamir) requires of every proof carried in a ballot ([[share-encryption]], Notes). No attack was found on either: moving the ciphertexts or their proofs to another nullifier needs new validity proofs over the same `vss`, which need the openings.
-
-Until then, #58 doesn't merge and nothing builds on its formats (P1-14 part 2, P1-12 part 3, P1-15 parts 2 and 3).
+Agent's recommendation, which the owner followed: option B swaps a naming mismatch for a new complaint proof over X25519's cofactor-8 Montgomery form, which is more novel cryptography, not less. The residual the owner accepts is that the hybrid is checked only against our own independent vectors until the audit.

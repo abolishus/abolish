@@ -1,11 +1,12 @@
 import { MAX_BOARD_PAYLOAD } from "@abolishus/crypto";
 import fc from "fast-check";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vite-plus/test";
 import {
   BUNDLE_FORMAT,
+  BUNDLE_FORMAT_L1,
   BundleError,
   type LocalBundle,
   parseBundle,
@@ -310,5 +311,110 @@ describe("readBundle", () => {
     withDir({ "board.bin": new Uint8Array() }, (dir) => {
       expect(() => readBundle(dir)).toThrow(/bundle\.json: can't be read/);
     });
+  });
+});
+
+// Format 2, from the `closed` vector of docs/spec/vectors/l1-anchor.json.
+const l1File = JSON.parse(
+  readFileSync(new URL("../../../docs/spec/vectors/l1-anchor.json", import.meta.url), "utf8"),
+) as {
+  readonly clock: Record<string, string>;
+  readonly electionId: string;
+  readonly vectors: readonly {
+    readonly id: string;
+    readonly anchor: string;
+    readonly block: { readonly header: string };
+    readonly nodes: readonly string[];
+  }[];
+};
+const closed = l1File.vectors.find((v) => v.id === "closed");
+if (closed === undefined) throw new Error("no closed vector");
+const CHECKPOINT = `${l1File.electionId}${"00".repeat(76)}`;
+const validL1 = () => ({
+  format: "abolish-verifier-bundle/2",
+  electionId: l1File.electionId,
+  boardEntryVersion: 1,
+  clock: l1File.clock,
+  l1: {
+    anchor: closed.anchor,
+    firstSegment: "0",
+    header: closed.block.header,
+    nodes: [...closed.nodes],
+    checkpoints: [CHECKPOINT],
+  },
+});
+type L1Shape = ReturnType<typeof validL1>["l1"];
+const withL1 = (l1: unknown) => ({ ...validL1(), l1 });
+const parseL1 = (o: unknown) => parseBundle(JSON.stringify(o), new Uint8Array());
+
+describe("parseBundle, format 2", () => {
+  test("reads a valid bundle and its L1 evidence", () => {
+    const b = parseL1(validL1());
+    if (b.format !== BUNDLE_FORMAT_L1) throw new Error("expected format 2");
+    expect(b.l1.header.timestamp).toBe(1800032401n);
+    expect(toHex(b.l1.anchor)).toBe(closed.anchor);
+    expect(b.l1.firstSegment).toBe(0);
+    expect(b.l1.checkpoints.length).toBe(1);
+    expect(b.sources).toEqual({
+      electionId: "local-file",
+      boardEntryVersion: "local-file",
+      clock: "local-file",
+      now: "l1-state-proof",
+      anchors: "l1-state-proof",
+      l1Header: "local-file",
+      anchorAddress: "local-file",
+      firstSegment: "local-file",
+    });
+  });
+
+  const header = closed.block.header;
+  const rejected: [string, (l: L1Shape) => unknown][] = [
+    ["an unknown l1 member", (l) => ({ ...l, extra: [] })],
+    ["a missing l1 member", ({ checkpoints: _c, ...l }) => l],
+    ["an anchor of 19 bytes", (l) => ({ ...l, anchor: l.anchor.slice(2) })],
+    ["an anchor of 21 bytes", (l) => ({ ...l, anchor: `${l.anchor}00` })],
+    ["an uppercase anchor", (l) => ({ ...l, anchor: l.anchor.toUpperCase() })],
+    ["a first segment with a leading zero", (l) => ({ ...l, firstSegment: "01" })],
+    ["a first segment of 2^32", (l) => ({ ...l, firstSegment: `${2 ** 32}` })],
+    ["a first segment as a number", (l) => ({ ...l, firstSegment: 0 })],
+    ["an empty header", (l) => ({ ...l, header: "" })],
+    ["a header of odd length", (l) => ({ ...l, header: header.slice(1) })],
+    ["a header that isn't RLP", (l) => ({ ...l, header: `${header}00` })],
+    ["a header that is RLP but not a header", (l) => ({ ...l, header: "c0" })],
+    ["nodes that aren't an array", (l) => ({ ...l, nodes: {} })],
+    ["an empty node", (l) => ({ ...l, nodes: [...l.nodes, ""] })],
+    ["an uppercase node", (l) => ({ ...l, nodes: [(l.nodes[0] as string).toUpperCase()] })],
+    ["a node that isn't a string", (l) => ({ ...l, nodes: [1] })],
+    ["checkpoints that aren't an array", (l) => ({ ...l, checkpoints: "" })],
+    ["a checkpoint of 107 bytes", (l) => ({ ...l, checkpoints: [CHECKPOINT.slice(2)] })],
+    ["a checkpoint of 109 bytes", (l) => ({ ...l, checkpoints: [`${CHECKPOINT}00`] })],
+    ["l1 that isn't an object", () => []],
+  ];
+  for (const [what, mutate] of rejected)
+    test(`rejects ${what}`, () => {
+      expect(() => parseL1(withL1(mutate(validL1().l1)))).toThrow(BundleError);
+    });
+
+  test("rejects a bundle with any l1 member replaced by a value of another shape", () => {
+    const keys = Object.keys(validL1().l1);
+    run(
+      fc.property(
+        fc.constantFrom(...keys),
+        fc.oneof(fc.integer(), fc.boolean(), fc.constant(null), fc.object(), fc.string()),
+        (key, value) => {
+          const l = { ...validL1().l1, [key]: value };
+          fc.pre(JSON.stringify(l) !== JSON.stringify(validL1().l1));
+          // A string that happens to be valid for its member is no mutation.
+          let ok = true;
+          try {
+            parseL1(withL1(l));
+          } catch (e) {
+            if (!(e instanceof BundleError)) throw e;
+            ok = false;
+          }
+          if (ok) expect(typeof value).toBe("string");
+        },
+      ),
+    );
   });
 });

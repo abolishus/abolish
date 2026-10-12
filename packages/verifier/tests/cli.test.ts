@@ -146,6 +146,20 @@ describe("a rejected bundle", () => {
     expect(malformed.stdout).toBe("");
   });
 
+  test("rejects a format-2 bundle whose header isn't one, as a bundle and not a crash", () => {
+    const l1 = JSON.stringify({
+      format: "abolish-verifier-bundle/2",
+      electionId: "ab".repeat(32),
+      boardEntryVersion: 1,
+      clock: { epoch: "0", period: "1", deadline: "0", lastSegment: "0" },
+      l1: { anchor: "00".repeat(20), firstSegment: "0", header: "c0", nodes: [], checkpoints: [] },
+    });
+    const r = run(bundleDir(l1, new Uint8Array()));
+    expect(r.code).toBe(EXIT_CODES.bundleRejected);
+    expect(r.stdout).toBe("");
+    expect(r.stderr).toMatch(/^bundle rejected: l1\.header: /);
+  });
+
   test("rejects a board.bin that isn't a regular file instead of reading it forever", () => {
     const ok = vectorDir(okId);
     const json = readFileSync(join(ok, "bundle.json"));

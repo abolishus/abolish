@@ -108,6 +108,21 @@ contract TrusteeIdentityVectorsTest is TestBase {
         assertTrue(valid >= 7 && valid < i, "signature vector coverage");
     }
 
+    /// Under the `precompile` profile the package's test script sets
+    /// `EXPECT_P256VERIFY`, and this asserts the EVM really answers at 0x100,
+    /// so that run can't silently fall back to OpenZeppelin's Solidity code
+    /// and test the same path twice.
+    function test_PrecompileAnswersWhenExpected() public view {
+        if (!vm.envOr("EXPECT_P256VERIFY", false)) return;
+        string memory json = vm.readFile(TrusteeFixture.VECTORS);
+        bytes memory key = vm.parseBytes(vm.parseJsonString(json, ".signatures[0].key"));
+        (uint256 x, uint256 y,) = TrusteeFixture.point(key);
+        bytes memory sig = vm.parseBytes(vm.parseJsonString(json, ".signatures[0].signature"));
+        bytes32 digest = _bytes32(json, ".signatures[0].digest");
+        (bool ok, bytes memory ret) = address(0x100).staticcall(abi.encodePacked(digest, sig, x, y));
+        assertTrue(ok && ret.length == 32 && uint256(bytes32(ret)) == 1, "no P256VERIFY");
+    }
+
     /// Each panel vector: deployed with its identifier, or refused with the
     /// code the file gives (size, threshold, key, duplicate-key), in the
     /// spec's order.

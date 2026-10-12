@@ -16,7 +16,6 @@ import {
   type DecodeErrorCode,
   decodeBoardEntry,
   type ElectionDefinition,
-  electionStubHash,
   type Panel,
   panelId,
   pinnedVersion,
@@ -66,6 +65,19 @@ const TRANSCRIPT_CODES: ReadonlySet<string> = new Set<CeremonyErrorCode>([
   "ceremony-signature",
 ]);
 
+/** The fields the ceremony checks read, the same in every definition version. */
+type CeremonyDefinition = Pick<
+  ElectionDefinition,
+  | "profile"
+  | "election_id"
+  | "l2_chain_id"
+  | "trustee_registry"
+  | "panel_id"
+  | "threshold"
+  | "panel_size"
+  | "ceremony_transcript_hash"
+>;
+
 const equal = (a: Uint8Array, b: Uint8Array) =>
   a.length === b.length && a.every((x, i) => x === b[i]);
 
@@ -79,7 +91,7 @@ const equal = (a: Uint8Array, b: Uint8Array) =>
  * transcript.
  */
 function findTranscript(
-  d: ElectionDefinition,
+  d: CeremonyDefinition,
   entries: readonly Uint8Array[],
   boardEntryVersion: BoardEntryVersion,
 ): { readonly entry: number; readonly bytes: Uint8Array } | undefined {
@@ -103,10 +115,13 @@ function findTranscript(
 /**
  * The rows 2.5, 3.1 and 3.2 for a definition that decoded, is well formed and
  * pins a board-entry version this verifier reads, and the report's
- * `ceremony` once the transcript check reached the seats.
+ * `ceremony` once the transcript check reached the seats. `stubHash` is the
+ * definition's stub hash under its own version, which the transcript's
+ * context binds (T-37).
  */
 export function ceremonyChecks(
-  d: ElectionDefinition,
+  d: CeremonyDefinition,
+  stubHash: Uint8Array,
   panel: Panel,
   entries: readonly Uint8Array[],
   boardEntryVersion: BoardEntryVersion,
@@ -159,7 +174,7 @@ export function ceremonyChecks(
       l2ChainId: d.l2_chain_id,
       trusteeRegistry: d.trustee_registry,
       electionId: d.election_id,
-      stubHash: electionStubHash(d),
+      stubHash,
       panel,
     },
     found.bytes,

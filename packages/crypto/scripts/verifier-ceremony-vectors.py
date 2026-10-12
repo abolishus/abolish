@@ -11,8 +11,10 @@ the definition alone.
 
 It reuses this folder's independent Python implementations, which share no
 code with packages/crypto or packages/verifier: ceremony-vectors.py (the
-rounds, the transcript and its check), definition-vectors.py (the definition
-encoding and its rules) and board-vectors.py (the board-entry envelope).
+rounds, the transcript and its check), definition-vectors.py,
+regional-cells-vectors.py and definition-v4-vectors.py (the definition
+encodings of versions 1, 3 and 4 and their rules) and board-vectors.py (the
+board-entry envelope).
 
 Usage: python3 -I -B packages/crypto/scripts/verifier-ceremony-vectors.py <out-dir>
 """
@@ -35,14 +37,31 @@ def _load(name, file):
 cv = _load("ceremony_vectors", "ceremony-vectors.py")
 dv = _load("definition_vectors", "definition-vectors.py")
 bdv = _load("board_vectors", "board-vectors.py")
+rc = _load("regional_cells_vectors", "regional-cells-vectors.py")
+d4 = _load("definition_v4_vectors", "definition-v4-vectors.py")
 
 H, ds = cv.H, cv.ds
 TRANSCRIPT_TAG = b"abolish/v1/ceremony-transcript"
 STUB_TAG = b"abolish/v1/election-stub"
 
 
+# Each definition version's encoding and rules, by the version its own
+# profile pins for 0x0001 (election-definition.md, Decoding).
+ENCODE = {1: dv.enc_definition, 3: rc.enc_definition_v3, 4: d4.enc_definition_v4}
+RULE = {1: dv.definition_rule, 3: rc.definition_rule, 4: d4.definition_rule}
+
+
+def own_version(d):
+    return dict(d["profile"]["pins"])[0x0001]
+
+
+def encode(d):
+    return ENCODE[own_version(d)](d)
+
+
 def stub_hash(d):
-    return H(ds(STUB_TAG, dv.enc_definition(dict(d, ceremony_transcript_hash=bytes(32)))))
+    """The stub hash under the definition's own version: the stub is the whole definition with the transcript hash zeroed."""
+    return H(ds(STUB_TAG, encode(dict(d, ceremony_transcript_hash=bytes(32)))))
 
 
 def election_of(d):
@@ -55,21 +74,22 @@ def election_of(d):
     }
 
 
-def definition_for(panel, transcript_hash, **changes):
+def definition_for(panel, transcript_hash, base=dv.TYPICAL, **changes):
     d = dict(
-        dv.TYPICAL,
+        base,
         panel_id=cv.panel_id(panel["k"], panel["keys"]),
         threshold=panel["k"],
         panel_size=len(panel["keys"]),
         ceremony_transcript_hash=transcript_hash,
         **changes,
     )
-    assert dv.definition_rule(d) is None, dv.definition_rule(d)
+    assert RULE[own_version(d)](d) is None, RULE[own_version(d)](d)
     return d
 
 
 BOARD_ENTRY_TYPE = 0x0007
 BALLOT_TYPE = 0x0002
+SPOILED_OPENING_TYPE = 0x0003
 TALLY_OPENING_TYPE = 0x0006
 # docs/spec/board.md, Allowed payloads: version 3 adds share receipts (0x000c)
 # and complaints (0x000e) to version 1's set; version 4 adds the destruction
@@ -122,8 +142,18 @@ def combination(defn):
     """2.3's profile-combination (docs/spec/verifier.md, 2.3), from the spec's text."""
     pins = dict(defn["profile"]["pins"])
     board, ballot, opening = pins[BOARD_ENTRY_TYPE], pins.get(BALLOT_TYPE), pins.get(TALLY_OPENING_TYPE)
-    fits = (ballot != 1 or board in (3, 4)) and (opening != 1 or board == 4)
-    return NOT_IMPLEMENTED if fits else outcome("fail", "profile-combination", {})
+    failed = outcome("fail", "profile-combination", {})
+    # Definition versions 3 and 4 pin ballot version 2, which names its cell, and only they do.
+    if (pins[0x0001] in (3, 4)) != (ballot == 2):
+        return failed
+    if not ((ballot not in (1, 2) or board in (3, 4)) and (opening != 1 or board == 4)):
+        return failed
+    if ballot == 2:
+        # No spoiled-ballot opening version opens version-2 cores yet: version
+        # 1, the only one specified, opens version 1's, and any other is one a
+        # later release may define (challenge.md, Versions; T-36).
+        return failed if pins.get(SPOILED_OPENING_TYPE) == 1 else outcome("unverifiable", "unsupported-version", {})
+    return NOT_IMPLEMENTED
 
 
 def transcript(label, panel, seats, election, cheat=None):
@@ -222,14 +252,14 @@ def main(out):
     stray = transcript("verifier/abandoned", panel, seats, election)
     cases = []
 
-    def add(id_, desc, t, payloads, bundle_panel="panel-4", entry_election=eid, named="panel-4", board_version=None, entry_version=None, **changes):
+    def add(id_, desc, t, payloads, bundle_panel="panel-4", entry_election=eid, named="panel-4", board_version=None, entry_version=None, base=dv.TYPICAL, **changes):
         named = panels[named]
         if board_version is not None:
-            pins = [(ty, board_version if ty == BOARD_ENTRY_TYPE else v) for ty, v in dv.TYPICAL["profile"]["pins"]]
+            pins = [(ty, board_version if ty == BOARD_ENTRY_TYPE else v) for ty, v in base["profile"]["pins"]]
             changes = dict(changes, profile={"protocol_major": 1, "pins": pins})
         pinned = 1 if board_version is None else board_version
         written = pinned if entry_version is None else entry_version
-        defn = definition_for(named, H(ds(TRANSCRIPT_TAG, t)), **changes)
+        defn = definition_for(named, H(ds(TRANSCRIPT_TAG, t)), base, **changes)
         entries = [entry(written, entry_election if p is t else eid, i, 0, p) for i, p in enumerate(payloads)]
         rows, ceremony = expected(named, defn, entries, panels[bundle_panel], pinned)
         # Cases from P1-19 part 4b on also give 2.3's combination row.
@@ -239,7 +269,7 @@ def main(out):
             "id": id_,
             "description": desc,
             "panel": bundle_panel,
-            "definition": dv.enc_definition(defn).hex(),
+            "definition": encode(defn).hex(),
             "board": b"".join(entries).hex(),
             "expected": rows,
         }
@@ -325,11 +355,37 @@ def main(out):
     assert r["2.3"]["code"] == "profile-combination" and r["3.2"] == outcome("pass")
     assert add("board-v4-entry-v1", "The profile pins board-entry version 4, but the transcript was boarded in a version-1 entry, which doesn't decode under the pinned version: missing.", v4, [v4], board_version=4, entry_version=1)["3.1"]["code"] == "ceremony-transcript-missing"
 
+    # Definition versions 3 and 4 (P1-15 part 4b-2b): the transcript binds the
+    # stub under the definition's own version, so a transcript made for
+    # another version's stub of the same election fails its signatures. Their
+    # profiles pin ballot version 2, which no spoiled-ballot opening version
+    # can challenge yet, so 2.3 fails, and the ceremony checks still run.
+    def regional(base, label):
+        pins = [(ty, {BOARD_ENTRY_TYPE: 4, BALLOT_TYPE: 2}.get(ty, v)) for ty, v in base["profile"]["pins"]]
+        b = dict(base, profile={"protocol_major": 1, "pins": pins})
+        return b, transcript(label, panel, seats, election_of(definition_for(panel, bytes(32), b)))
+
+    v3_base, v3_t = regional(rc.TYPICAL, "verifier/definition-v3")
+    r = add("definition-v3", "A version-3 definition (regional cells) whose transcript binds its version-3 stub: every seat qualifies; 2.3 fails, since no opening version challenges ballot version 2 yet.", v3_t, [v3_t], board_version=4, base=v3_base)
+    assert r["3.2"] == outcome("pass") and r["2.3"]["code"] == "profile-combination", r
+    r = add("definition-v3-v1-stub", "A version-3 definition naming a transcript made for a version-1 stub of the same election, chain and panel: every signature fails (T-37).", v4, [v4], board_version=4, base=v3_base)
+    assert r["3.1"]["code"] == "ceremony-signature", r
+    v4_base, v4_t = regional(d4.TYPICAL, "verifier/definition-v4")
+    r = add("definition-v4", "A version-4 definition (receipt keys) whose transcript binds its version-4 stub: every seat qualifies.", v4_t, [v4_t], board_version=4, base=v4_base)
+    assert r["3.2"] == outcome("pass"), r
+    r = add("definition-v4-v3-stub", "A version-4 definition naming a transcript made for the version-3 stub without its receipt keys: every signature fails, since the stub binds the keys (T-26, T-37).", v3_t, [v3_t], board_version=4, base=v4_base)
+    assert r["3.1"]["code"] == "ceremony-signature", r
+    opening2 = [(ty, 2 if ty == SPOILED_OPENING_TYPE else v) for ty, v in v3_base["profile"]["pins"]]
+    v3_o2_base = dict(v3_base, profile={"protocol_major": 1, "pins": opening2})
+    _, v3_o2_t = regional(v3_o2_base, "verifier/definition-v3-opening-2")
+    r = add("definition-v3-opening-2", "A version-3 definition pinning spoiled-ballot opening version 2, which a later release may define to open version-2 cores: 2.3 is unsupported, never failed (T-36), and the ceremony checks still run.", v3_o2_t, [v3_o2_t], board_version=4, base=v3_o2_base)
+    assert r["2.3"]["code"] == "unsupported-version" and r["3.2"] == outcome("pass"), r
+
     doc = {
         "format": "abolish-verifier-ceremony-vectors/1",
         "title": "The verifier's key-ceremony checks: definitions, boards and pinned panels, with the rows 2.5, 3.1 and 3.2",
         "spec": "docs/spec/verifier.md",
-        "generator": "packages/crypto/scripts/verifier-ceremony-vectors.py, from ceremony-vectors.py, definition-vectors.py and board-vectors.py (independent Python implementations)",
+        "generator": "packages/crypto/scripts/verifier-ceremony-vectors.py, from ceremony-vectors.py, definition-vectors.py, regional-cells-vectors.py, definition-v4-vectors.py and board-vectors.py (independent Python implementations)",
         "panels": {
             name: {"threshold": str(p["k"]), "keys": [k.hex() for k in p["keys"]]} for name, p in panels.items()
         },

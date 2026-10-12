@@ -19,6 +19,9 @@ export const PARAMETERS = Object.freeze({
   // Seconds after the seal's anchoring window until the dispute end t_E; a
   // constant of receipt version 1 (docs/spec/receipts.md).
   DISPUTE_WINDOW: 2_592_000,
+  // Seconds after closes_at + l1_inclusion_bound; the publication window of
+  // spoiled-ballot opening version 1 (docs/spec/challenge.md).
+  OPENING_WINDOW: 604_800,
   DISPLAY_TEXT_SALT_LEN: 32,
   // Constants of the group registry's deployment (docs/spec/vouching.md).
   VOUCH_K: 3,

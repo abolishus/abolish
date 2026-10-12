@@ -33,6 +33,23 @@ export {
   type UnprovenBallot,
 } from "./ballot.ts";
 export {
+  type BallotCore,
+  ballotCore,
+  ballotCoreHash,
+  sharesVoteCommitment,
+  type ChallengeOpeningCheck,
+  type ChallengeOpeningCode,
+  checkChallengeOpening,
+  coreHash,
+  decodeOpening,
+  encodeOpening,
+  openChallenge,
+  openingCoreHash,
+  SPOILED_BALLOT_OPENING,
+  type SpoiledBallotOpening,
+  trackingCode,
+} from "./challenge.ts";
+export {
   type Anchor,
   type AnchorClock,
   BOARD_ENTRY,

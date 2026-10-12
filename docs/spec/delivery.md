@@ -138,7 +138,7 @@ The report lists, for each selected ballot, whether it was delivered, which seat
 | `complaint-unfounded`  | A complaint whose proof verifies but whose shares open and pass. The ballot stands; the complaint is attributed to its signer if its signature attributes it, and otherwise no one's                                                                                                                                                 |
 | `receipt-contradicted` | A share receipt that passes, for a seat whose complaint about the same ballot is proven: the seat signed that shares passed which a public proof shows don't. Attributed to that seat                                                                                                                                                |
 
-Each record is reported with the first of these codes that applies, in table order, so a late record is reported late whatever else is wrong with it. Records naming a ballot that isn't selected (an earlier ballot of a re-voting nullifier, a ballot outside the counted extent) are read and set aside: they decide nothing, and nothing is reported for them. A record that doesn't decode is a rejected entry (Decoding).
+Each record is reported with the first of these codes that applies, in table order, so a late record for this definition, a selected ballot and a registered seat is reported late, whatever else is wrong with it. Records naming a ballot that isn't selected (an earlier ballot of a re-voting nullifier, a ballot outside the counted extent) are read and set aside: they decide nothing, and nothing is reported for them. A record that doesn't decode is a rejected entry (Decoding).
 
 Notes:
 

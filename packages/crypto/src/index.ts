@@ -25,6 +25,7 @@ export {
   BOARD_ENTRY,
   BOARD_PAYLOAD_TYPES,
   BOARD_PAYLOAD_TYPES_V3,
+  BOARD_PAYLOAD_TYPES_V4,
   type BoardEntryVersion,
   type BoardEntry,
   boardEntryHash,
@@ -286,6 +287,22 @@ export {
   type SummedShareResult,
   type SummedShareSender,
 } from "./summed-share.ts";
+export {
+  checkDestruction,
+  decodeDestructionStatement,
+  DESTRUCTION_STATEMENT,
+  type DestructionElection,
+  type DestructionEntry,
+  type DestructionReport,
+  destructionSegment,
+  type DestructionStatement,
+  type DestructionStatementFields,
+  destructionStatementMessage,
+  type DestructionTiming,
+  encodeDestructionStatement,
+  type SeatDestruction,
+  signDestructionStatement,
+} from "./destruction.ts";
 export {
   aggregateHash,
   type CellCheck,

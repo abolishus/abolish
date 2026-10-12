@@ -54,6 +54,16 @@ export const BOARD_PAYLOAD_TYPES_V3: readonly number[] = Object.freeze([
   RECORD_TYPES.shareComplaint,
 ]);
 
+/**
+ * Record types a version-4 entry may carry: version 3's, and the trustees'
+ * destruction statements after the tally (docs/spec/tally.md, Destruction).
+ * Version 3's set is frozen by its vectors, so allowing them is a new version.
+ */
+export const BOARD_PAYLOAD_TYPES_V4: readonly number[] = Object.freeze([
+  ...BOARD_PAYLOAD_TYPES_V3,
+  RECORD_TYPES.destructionStatement,
+]);
+
 const RECORD_HEADER_LENGTH = 3;
 
 const recordTypeOf = (record: Uint8Array) => ((record[0] as number) << 8) | (record[1] as number);
@@ -107,12 +117,17 @@ const entryV1 = entryFields(BOARD_PAYLOAD_TYPES);
 
 // The same layout: only the allowed payload types differ.
 const entryV3 = entryFields(BOARD_PAYLOAD_TYPES_V3);
+const entryV4 = entryFields(BOARD_PAYLOAD_TYPES_V4);
 
-/** Board entry, version 1 or 3 (docs/spec/board.md). */
+/** Board entry, version 1, 3 or 4 (docs/spec/board.md). */
 export type BoardEntry = CodecValue<typeof entryV1>;
 
 /** Record type `0x0007`: the envelope that places a record on the board. */
-export const BOARD_ENTRY = recordType(RECORD_TYPES.boardEntry, { 1: entryV1, 3: entryV3 });
+export const BOARD_ENTRY = recordType(RECORD_TYPES.boardEntry, {
+  1: entryV1,
+  3: entryV3,
+  4: entryV4,
+});
 
 /** A board-entry version this release reads and writes. */
 export type BoardEntryVersion = RecordVersion<typeof BOARD_ENTRY.versions>;

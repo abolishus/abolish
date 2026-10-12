@@ -10,9 +10,9 @@ The public bulletin board: the envelope that places a record on it, how its entr
 - **Checkpoints.** After each period, the board's state (its size, chain head and Merkle root after that period's segment) is summarised as a checkpoint, and P4-1 anchors it on L1 so that its election and segment can be read there. Every period that adds entries gets one, and a verifier checks every checkpoint anchored for the election. Anyone holding the entries can recompute every checkpoint, and anyone holding a receipt can check it against an anchored checkpoint with a logarithmic-size proof (T-24).
 - **What the board doesn't decide.** Whether a ballot or opening counts is decided by the admission checks on the record an entry carries ([[verifier]]), never by the envelope. The board's order matters only where this page says so (openings, below); P1-13's re-vote rule must not depend on the order in which the operator writes unanchored entries ([[verifier]] 6.1, R3).
 
-## Board entry (record type `0x0007`, versions 1 and 3)
+## Board entry (record type `0x0007`, versions 1, 3 and 4)
 
-Versions 1 and 3 have the same layout and differ only in the record types they allow (Allowed payloads). Version 2 is never assigned: a frozen vector uses it as the version that doesn't exist. An election uses the version its profile pins ([[versioning]]).
+Versions 1, 3 and 4 have the same layout and differ only in the record types they allow (Allowed payloads): version 3 adds [[delivery]]'s receipts and complaints to version 1's, and version 4 adds [[tally]]'s destruction statement to version 3's. Version 2 is never assigned: a frozen vector uses it as the version that doesn't exist. An election uses the version its profile pins ([[versioning]]).
 
 | Field         | Type                       | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | ------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -27,15 +27,16 @@ Versions 1 and 3 have the same layout and differ only in the record types they a
 
 The payload is a complete record whose `record_type` is one the entry's version allows:
 
-| `record_type` | Name                   | Versions | Why it is on the board                                                                                        |
-| ------------- | ---------------------- | -------- | ------------------------------------------------------------------------------------------------------------- |
-| `0x0002`      | ballot                 | 1, 3     | A ballot cast or challenged through our API                                                                   |
-| `0x0003`      | spoiled-ballot opening | 1, 3     | A published Benaloh opening (P1-13); ordered canonically, below                                               |
-| `0x0005`      | ceremony transcript    | 1, 3     | The key ceremony's public transcript (P1-14)                                                                  |
-| `0x0006`      | tally opening          | 1, 3     | One cell's opening of the tally (P1-15, [[tally]])                                                            |
-| `0x0008`      | contract event         | 1, 3     | One of our contracts' L2 events, including direct-submitted ballots and the definition's registration (P1-18) |
-| `0x000c`      | share receipt          | 3        | A trustee's receipt for one seat's share of a ballot ([[delivery]])                                           |
-| `0x000e`      | share complaint        | 3        | A trustee's proof that a posted share is invalid ([[delivery]])                                               |
+| `record_type` | Name                   | Versions | Why it is on the board                                                                                                |
+| ------------- | ---------------------- | -------- | --------------------------------------------------------------------------------------------------------------------- |
+| `0x0002`      | ballot                 | 1, 3, 4  | A ballot cast or challenged through our API                                                                           |
+| `0x0003`      | spoiled-ballot opening | 1, 3, 4  | A published Benaloh opening (P1-13); ordered canonically, below                                                       |
+| `0x0005`      | ceremony transcript    | 1, 3, 4  | The key ceremony's public transcript (P1-14)                                                                          |
+| `0x0006`      | tally opening          | 1, 3, 4  | One cell's opening of the tally (P1-15, [[tally]])                                                                    |
+| `0x0008`      | contract event         | 1, 3, 4  | One of our contracts' L2 events, including direct-submitted ballots and the definition's registration (P1-18)         |
+| `0x000c`      | share receipt          | 3, 4     | A trustee's receipt for one seat's share of a ballot ([[delivery]])                                                   |
+| `0x000e`      | share complaint        | 3, 4     | A trustee's proof that a posted share is invalid ([[delivery]])                                                       |
+| `0x000f`      | destruction statement  | 4        | A trustee's signed statement that it destroyed its per-election key material after the tally ([[tally]], Destruction) |
 
 Any other record type, including one the entry's version doesn't allow, is rejected when the envelope is decoded, with `unexpected-record-type`, including the types [[notation]] would call unknown (`0x0000`, unassigned numbers and the test range): here the envelope fixes the allowed set, so anything outside it is unexpected. The reasons: an election definition reaches the board only as the contract event that registered it, and so does a share posting (`0x000d`), whose data must be on L2 for every trustee to read ([[delivery]], Direct submit); a voter's receipt (`0x0004`) stays with its voter, a summed-share message never leaves the trustees ([[tally]], Summed-share message), a board entry never nests, and display text is never on the board, the chain or the archive ([[display-text]], T-17). A payload shorter than a record header (3 bytes) is rejected with `truncated`. Both errors are reported at the offset of the payload's first byte.
 

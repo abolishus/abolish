@@ -14,5 +14,7 @@ export const PARAMETERS = Object.freeze({
   // records' version 1, which ballot version 1 fixes (docs/spec/delivery.md).
   DELIVERY_WINDOW: 172_800,
   COMPLAINT_WINDOW: 432_000,
+  // Seconds after t_D; the destruction window of tally-opening version 1.
+  DESTRUCTION_WINDOW: 86_400,
   DISPLAY_TEXT_SALT_LEN: 32,
 } as const);

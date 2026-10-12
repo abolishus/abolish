@@ -91,7 +91,7 @@ where `chain_id` is the registry's chain, `registry` its address and `counter` t
 
 It then stores `definition_hash` for `election_id` and emits `DefinitionRegistered`. A registered definition can't be changed or removed.
 
-The registry doesn't check what only the board can show: that each root is the root of its tier's additions at `root_l2_block`, each `group_size`, each group's tier, the panel against the pinned panels, or the version pins against a verifier release ([[verifier]] 2.3 to 2.5). It doesn't bound `l1_inclusion_bound`, `sequencing_window` or `max_sequencer_drift` either: the close rule (P1-18, direct submission) says what values it needs, and no registry may be deployed before it does, since a deployed registry's rules can't change.
+The registry doesn't check what only the board can show: that each root is the root of its tier's additions at `root_l2_block`, each `group_size`, each group's tier, the panel against the pinned panels, or the version pins against a verifier release ([[verifier]] 2.3 to 2.5). It doesn't yet refuse a profile that fails [[verifier]] 2.3's `profile-combination`: one pinning ballot version 1 without board-entry version 3 or 4 ([[delivery]], Versions), or tally-opening version 1 without board-entry version 4 ([[tally]], Destruction). Both pages require the registry to refuse such a profile, and that check MUST be added before any registry is deployed. It doesn't bound `l1_inclusion_bound`, `sequencing_window` or `max_sequencer_drift` either: the close rule (P1-18, direct submission) says what values it needs, and no registry may be deployed before it does, since a deployed registry's rules can't change.
 
 ### Events
 

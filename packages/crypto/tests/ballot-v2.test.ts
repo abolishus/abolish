@@ -135,7 +135,10 @@ describe("ballot-v2.json", () => {
       const d = definitions.get(name) as ElectionDefinitionV3;
       expect(toHex(encodeElectionDefinitionV3(d))).toBe(e.definition);
       expect(electionDefinitionV3Rule(d)).toBeUndefined();
-      expect(profileCombinationRule(d)).toBeUndefined();
+      // No spoiled-ballot opening version opens a version-2 core yet, so 2.3
+      // refuses this profile until P1-13 specifies one (docs/spec/challenge.md,
+      // Versions; T-42). The ballot checks below run under it all the same.
+      expect(profileCombinationRule(d)).toBe("profile-combination");
       expect(toHex(electionDefinitionV3Hash(d))).toBe(e.definitionHash);
       const election = electionOf(name, [1, 2]);
       expect(toHex(election.definitionHash)).toBe(e.definitionHash);

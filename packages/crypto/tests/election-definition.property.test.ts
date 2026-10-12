@@ -498,7 +498,7 @@ describe("2.3's profile combination", () => {
     expect(profileCombinationRule(pinning(4, 1, 1))).toBeUndefined();
   });
 
-  test("definition version 3 pairs only with ballot version 2, which names its cell", () => {
+  test("definition version 3 pairs only with ballot version 2, which no opening can challenge yet", () => {
     // The rule reads only the profile, so version 1's value with 0x0001
     // pinned at 3 stands in for a version-3 definition.
     const v3 = (ballot: number) => {
@@ -515,7 +515,22 @@ describe("2.3's profile combination", () => {
     };
     expect(profileCombinationRule(v3(1))).toBe("profile-combination");
     expect(profileCombinationRule(v3(3))).toBe("profile-combination");
-    expect(profileCombinationRule(v3(2))).toBeUndefined();
+    // Ballot version 2 is the only one that could fit, and no spoiled-ballot
+    // opening version opens its cores yet, so it is refused under every one
+    // (docs/spec/challenge.md, Versions; T-42).
+    for (const spoiled of [1, 2, 255]) {
+      const d = v3(2);
+      const pinned = {
+        ...d,
+        profile: {
+          ...d.profile,
+          pins: d.profile.pins.map((p) =>
+            p.record_type === RECORD_TYPES.spoiledBallotOpening ? { ...p, version: spoiled } : p,
+          ),
+        },
+      };
+      expect(profileCombinationRule(pinned)).toBe("profile-combination");
+    }
     expect(profileCombinationRule(pinning(4, 1, 1))).toBeUndefined();
     expect(profileCombinationRule(pinning(4, 2, 1))).toBe("profile-combination");
     // Ballot version 2 still needs a board that carries its delivery records.
@@ -532,7 +547,7 @@ describe("2.3's profile combination", () => {
     expect(profileCombinationRule(board1)).toBe("profile-combination");
   });
 
-  test("definition version 4 keeps version 3's regional cells, so it pairs only with ballot version 2", () => {
+  test("definition version 4 keeps version 3's regional cells and its pairing", () => {
     const v4 = (ballot: number) => {
       const d = pinning(4, ballot, 1);
       return {
@@ -547,7 +562,7 @@ describe("2.3's profile combination", () => {
     };
     expect(profileCombinationRule(v4(1))).toBe("profile-combination");
     expect(profileCombinationRule(v4(3))).toBe("profile-combination");
-    expect(profileCombinationRule(v4(2))).toBeUndefined();
+    expect(profileCombinationRule(v4(2))).toBe("profile-combination");
     const v4Board = (board: number) => ({
       ...v4(2),
       profile: {

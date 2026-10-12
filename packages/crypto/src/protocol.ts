@@ -158,6 +158,12 @@ const CELL_BALLOT_VERSIONS: ReadonlySet<number> = new Set<number>([2]);
 // Ballot versions whose delivery records reach the board as share receipts
 // and complaints (docs/spec/delivery.md, Versions).
 const DELIVERED_BALLOT_VERSIONS: ReadonlySet<number> = new Set<number>([1, 2]);
+// The spoiled-ballot opening versions that open ballot version 2's cores
+// (docs/spec/challenge.md, Versions; opening version 1 opens version 1's
+// only). None does yet, so a profile pinning ballot version 2 is refused
+// whatever opening it pins: a ballot that can't be challenged can't be
+// checked as cast-as-intended (T-42, T-47). P1-13 adds the first.
+const CELL_CORE_OPENINGS: ReadonlySet<number> = new Set<number>();
 
 /** Why 2.3's profile combination refuses a definition's pins. */
 export type ProfileCombinationRule = "profile-combination" | "unsupported-version";
@@ -168,7 +174,8 @@ export type ProfileCombinationRule = "profile-combination" | "unsupported-versio
  * (docs/spec/delivery.md, Versions): ballot versions 1 and 2 need a
  * board-entry version that carries share receipts and complaints (3 or 4),
  * definition versions 3 and 4 need ballot version 2 and only they pair with
- * it, and
+ * it, ballot version 2 needs a spoiled-ballot opening version that opens its
+ * cores (none yet, so it is refused for now), and
  * tally-opening version 1 one that carries destruction statements (4,
  * docs/spec/tally.md, Destruction), so an election's creator can't leave
  * delivery or destruction off the board (T-34). A board-entry version this
@@ -196,6 +203,9 @@ export function profileCombinationRule(
   const definition = pinnedVersion(d, RECORD_TYPES.electionDefinition);
   const regional = definition === 3 || definition === 4;
   if (regional !== CELL_BALLOT_VERSIONS.has(ballot)) return "profile-combination";
+  const spoiled = pinnedVersion(d, RECORD_TYPES.spoiledBallotOpening);
+  if (ballot === 2 && (spoiled === undefined || !CELL_CORE_OPENINGS.has(spoiled)))
+    return "profile-combination";
   const allowed = boardPayloadTypes(board);
   const carriesDelivery =
     allowed.includes(RECORD_TYPES.shareReceipt) && allowed.includes(RECORD_TYPES.shareComplaint);

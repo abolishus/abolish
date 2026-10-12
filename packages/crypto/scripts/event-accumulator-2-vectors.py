@@ -63,21 +63,28 @@ def sig(signature):
     return det("topic0/" + signature, 32)
 
 
-def check(chain_id, address, events, proven_count, proven_block, proven_acc):
-    """Verification of docs/spec/contracts.md (Event accumulator): the code of the first failing rule, or None."""
-    for i, e in enumerate(events):
-        if e["n"] != i:
-            return "index"
-        if i > 0 and (e["block"] < events[i - 1]["block"] or e["timestamp"] < events[i - 1]["timestamp"]):
-            return "order"
-    if len(events) < proven_count:
+def check(chain_id, address, events, c, B, proven_acc):
+    """Verification of docs/spec/contracts.md (Event accumulator), rule by rule
+    as the spec numbers them: the code of the first failing rule, or None."""
+    # Rule 1: numbered 0, 1, ... with no gap; b and tau never decrease.
+    if [e["n"] for e in events] != list(range(len(events))):
+        return "index"
+    pairs = list(zip(events, events[1:]))
+    if any(b["block"] < a["block"] or b["timestamp"] < a["timestamp"] for a, b in pairs):
+        return "order"
+    # Rule 2: every log with n < c the archive holds is at or before B, and the
+    # log n = c, if the archive holds one, is after B.
+    if any(e["block"] > B for e in events if e["n"] < c):
+        return "block-range"
+    if any(e["n"] == c and e["block"] <= B for e in events):
+        return "block-range"
+    # Rule 3: the accumulator over logs 0 .. c-1 equals the proven value; an
+    # archive holding fewer than c logs can't reproduce it.
+    counted = [e for e in events if e["n"] < c]
+    if len(counted) < c:
         return "accumulator"
-    if any(e["block"] > proven_block for e in events[:proven_count]):
-        return "block-range"
-    if len(events) > proven_count and events[proven_count]["block"] <= proven_block:
-        return "block-range"
     acc = genesis(chain_id, address)
-    for e in events[:proven_count]:
+    for e in counted:
         acc = step(acc, e["n"], e["block"], e["timestamp"], e["topics"], e["data"])
     return None if acc == proven_acc else "accumulator"
 
@@ -154,6 +161,13 @@ sequences = [
         BASE,
         ADDR,
         [ev(1, T0 + 1, [sig("Ping()")], b"")],
+    ),
+    (
+        "zero-block-and-timestamp",
+        "Block 0 and timestamp 0, the smallest values",
+        BASE,
+        ADDR,
+        [ev(0, 0, [sig("Ping()")], b""), ev(0, 0, [sig("Ping()")], b"")],
     ),
     (
         "max-block-and-timestamp",
@@ -248,6 +262,7 @@ proof_cases = [
     ("counted-after-proof", "A proof at block 101 claiming four logs: the fourth is after it", HIST, 4, 101, HIST_ACCS[3]),
     ("uncounted-before-proof", "A proof at block 250 claiming three logs while the fourth is at block 250", HIST, 3, 250, HIST_ACCS[2]),
     ("archive-short", "A proof claiming five logs against an archive of four", HIST[:4], 5, 251, HIST_ACCS[4]),
+    ("archive-short-past-block", "A proof at block 101 claiming five logs against an archive of four: the fourth log, at block 250, is after the proof (rule 2 before rule 3)", HIST[:4], 5, 101, HIST_ACCS[4]),
     ("other-address", "The archive's logs against another contract's proof", HIST, 5, 251, accumulators(BASE, bytes.fromhex("e7f1725e7734ce288f8367e1bb143e90bb3f0512"), HIST)[4]),
 ]
 

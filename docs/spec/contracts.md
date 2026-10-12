@@ -60,7 +60,7 @@ Anything else (a log left out, added, altered or reordered, a log from another c
 
 ### Vectors
 
-`vectors/event-accumulator-2.json` (format `abolish-event-accumulator-vectors/2`, see [[vectors/README|vectors]]) gives genesis values, event sequences with each event's block and the accumulator after every step, and rejected inputs, including histories that break rules 1 and 2 of Verification. TypeScript (`packages/crypto`) and Solidity (`packages/contracts`) tests both consume it. `vectors/event-accumulator.json` is the frozen first layout's, consumed by nothing.
+`vectors/event-accumulator-2.json` (format `abolish-event-accumulator-vectors/2`, see [[vectors/README|vectors]]) gives genesis values, event sequences with each event's block and the accumulator after every step, proof checks, including histories that break each rule of Verification, and rejected inputs. TypeScript (`packages/crypto`) and Solidity (`packages/contracts`) tests both consume it. `vectors/event-accumulator.json` is the frozen first layout's, consumed by nothing.
 
 ### Known-weak
 

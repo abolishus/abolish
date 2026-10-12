@@ -199,6 +199,31 @@
       "accumulators": ["ad865df0f7c2244352550cf2862d5d06aacd065db6464dd4656d78daf4833bb3"]
     },
     {
+      "id": "zero-block-and-timestamp",
+      "description": "Block 0 and timestamp 0, the smallest values",
+      "chainId": "84532",
+      "address": "5fbdb2315678afecb367f032d93f642f64180aa3",
+      "genesis": "4efd36778f8ee4f3375788ccdf9d82af964e98f108d70dc8ba80592115c4bfea",
+      "events": [
+        {
+          "block": "0",
+          "timestamp": "0",
+          "topics": ["5c18b5afab74db2b794b16733ec4e03e096be8e134806caecfa149000c2d0bd4"],
+          "data": ""
+        },
+        {
+          "block": "0",
+          "timestamp": "0",
+          "topics": ["5c18b5afab74db2b794b16733ec4e03e096be8e134806caecfa149000c2d0bd4"],
+          "data": ""
+        }
+      ],
+      "accumulators": [
+        "296f29b521d2c8ba762a96bc35550f06073919e82770581e8287b6c590f4eaff",
+        "90e224a24ba27f8e5fd9a508dbf157e91c7af9f2e90288a1ca6bef440b79da03"
+      ]
+    },
+    {
       "id": "max-block-and-timestamp",
       "description": "The largest block number and timestamp with a u64 encoding",
       "chainId": "84532",
@@ -1079,6 +1104,60 @@
         "accumulator": "0efdc0dde60239c5c2239f457c3e3131418236d09732ffa3b872261b1370b1fd"
       },
       "error": "accumulator"
+    },
+    {
+      "id": "archive-short-past-block",
+      "description": "A proof at block 101 claiming five logs against an archive of four: the fourth log, at block 250, is after the proof (rule 2 before rule 3)",
+      "chainId": "84532",
+      "address": "5fbdb2315678afecb367f032d93f642f64180aa3",
+      "events": [
+        {
+          "n": "0",
+          "block": "100",
+          "timestamp": "1760000000",
+          "topics": ["2701b4acb79b9e492edfd702f1e5eb0ea070a1de6b05845055e36ff39b83587a"],
+          "data": "314ba75571622cc42f641480fa5cfd0e31ce09f44968788a30ebd63bc09cd88a"
+        },
+        {
+          "n": "1",
+          "block": "100",
+          "timestamp": "1760000000",
+          "topics": [
+            "72b4e1a22c326d772127ce653e753c308a21c2ff96970f259d527ce6b73af9b9",
+            "4aa0000c26bfe37fd1317113382faf060415737e73ca1093b7211413ffbcc7e3"
+          ],
+          "data": "4247ed3fd22fb165d6cb4b40d982ae59d6efddb5ec300e7ea6524d8db6ebbd2b"
+        },
+        {
+          "n": "2",
+          "block": "101",
+          "timestamp": "1760000002",
+          "topics": [
+            "ddb33e845d467749d7a748ef8f8b4236c264792d89f4fe22b907d1571484ed21",
+            "f1836439832f60fe6249eef46c7fbf224c1b9f73e5cf210e90ffda3c5f80c75a",
+            "323bab0ddee868a17926ad1d9e0c8acf4ab2c526370e7f95e76891ee2627c977"
+          ],
+          "data": "5588da44ea7bd595ba9ea2ee8e2c60227f4bb7f9ab845341ac92287f296642e19575e7632204e3c2bc38f3f7424cc72957df4877dbd1ccc36b22ac5acc6f2f474c3ffe1e8f93ac2410f16379c01f96e83a52d0b1a30818f37fc9001b0d32565d"
+        },
+        {
+          "n": "3",
+          "block": "250",
+          "timestamp": "1760000300",
+          "topics": [
+            "4b107d79a039980aca79e37d6fd2e016a5699c39a21da1dd050674eae3e5d3c9",
+            "2be1d478fb3241661ee62163ef102a600443ebae0093afe160ab4501b116ef6d",
+            "70734081aacfa41b6e5ba855d7a5091d1f9fe1bd87b7bf2edd567d35092fc32a",
+            "fa466e5aae36e4e601692ba3f276d588a2577533def2ef3e67a9c8fe8219f209"
+          ],
+          "data": ""
+        }
+      ],
+      "proof": {
+        "count": "5",
+        "block": "101",
+        "accumulator": "0efdc0dde60239c5c2239f457c3e3131418236d09732ffa3b872261b1370b1fd"
+      },
+      "error": "block-range"
     },
     {
       "id": "other-address",

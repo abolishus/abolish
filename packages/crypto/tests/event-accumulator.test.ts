@@ -128,6 +128,15 @@ describe("event-accumulator vectors", () => {
     ).toBe(v.error);
   });
 
+  test("the first layout's frozen file is unchanged", () => {
+    // Retired before any deployment and read by nothing, so only this pin
+    // keeps it from being edited (docs/spec/versioning.md, Frozen).
+    const frozen = readFileSync(new URL("event-accumulator.json", SPEC_VECTORS));
+    expect(bytesToHex(sha256(frozen))).toBe(
+      "785fcf0a351f168795c28778c527cc44dbec958f2b49a7fabc6a1f2ca16b61e5",
+    );
+  });
+
   test.each(file.rejected)("rejects $id", (v) => {
     if (v.kind === "genesis")
       expect(() => eventAccumulatorGenesis(BigInt(v.chainId), hex(v.address))).toThrow(RangeError);
@@ -323,6 +332,27 @@ describe("event accumulator", () => {
       ),
       { numRuns },
     );
+  });
+
+  test("throws on a malformed archived log rather than reporting a rule", () => {
+    const proof = { count: 0n, block: 0n, accumulator: new Uint8Array(32) };
+    const log = {
+      n: 0n,
+      block: 1n,
+      timestamp: 1n,
+      topics: [new Uint8Array(32)],
+      data: new Uint8Array(),
+    };
+    const addr = new Uint8Array(20);
+    expect(() =>
+      checkEventAccumulatorProof(1n, addr, [{ ...log, block: 1 as never }], proof),
+    ).toThrow(RangeError);
+    expect(() => checkEventAccumulatorProof(1n, addr, [{ ...log, n: -1n }], proof)).toThrow(
+      RangeError,
+    );
+    expect(() =>
+      checkEventAccumulatorProof(1n, addr, [{ ...log, timestamp: 2n ** 64n }], proof),
+    ).toThrow(RangeError);
   });
 
   test("rejects a malformed proof", () => {

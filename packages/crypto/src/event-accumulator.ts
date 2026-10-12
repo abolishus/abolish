@@ -146,7 +146,10 @@ export function replayEventAccumulator(
  * on the wrong side of the proof's block without changing the accumulator,
  * so an archive can't move an event across a period boundary (T-71, T-25).
  * The proof itself (account and storage proofs under an output root) is the
- * caller's to check first.
+ * caller's to check first. Throws a RangeError or TypeError, as
+ * `eventAccumulatorStep` does, on a log that isn't well formed (an `n`,
+ * block or timestamp outside `u64`, or a malformed topic or data): that is
+ * a malformed input, not an archive that fails to match.
  */
 export function checkEventAccumulatorProof(
   chainId: bigint,
@@ -157,18 +160,25 @@ export function checkEventAccumulatorProof(
   u64Arg(proven.block, "proven.block");
   u64Arg(proven.count, "proven.count");
   const logs = Array.from(archive);
+  for (const log of logs) {
+    u64Arg(log.n, "n");
+    u64Arg(log.block, "block");
+    u64Arg(log.timestamp, "timestamp");
+  }
   for (const [i, log] of logs.entries()) {
     if (log.n !== BigInt(i)) return "index";
     const prev = logs[i - 1];
     if (prev !== undefined && (log.block < prev.block || log.timestamp < prev.timestamp))
       return "order";
   }
-  // A count beyond the archive can't be reproduced from it.
-  if (proven.count > BigInt(logs.length)) return "accumulator";
-  const c = Number(proven.count);
+  // Rule 2 over the logs the archive holds; a count beyond the archive can't
+  // be reproduced from it, which rule 3 reports.
+  const short = proven.count > BigInt(logs.length);
+  const c = short ? logs.length : Number(proven.count);
   if (logs.slice(0, c).some((l) => l.block > proven.block)) return "block-range";
   const next = logs[c];
-  if (next !== undefined && next.block <= proven.block) return "block-range";
+  if (!short && next !== undefined && next.block <= proven.block) return "block-range";
+  if (short) return "accumulator";
   const replayed = replayEventAccumulator(chainId, address, logs.slice(0, c));
   return equalBytes(replayed.accumulator, copyBytes(proven.accumulator, "proven.accumulator"))
     ? null

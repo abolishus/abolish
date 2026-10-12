@@ -7,6 +7,7 @@
 // only calls them and compares the result with the plan (T-29, T-54, T-25).
 
 import {
+  type CellOpening,
   ceremonyKeygen,
   checkOpening,
   type CommittedVote,
@@ -67,6 +68,7 @@ export interface SimulationReport {
   readonly scenario: Scenario;
   readonly ballots: { readonly cast: number; readonly server: number; readonly direct: number };
   readonly trustees: {
+    /** Every seat not offline, faulty ones included. */
     readonly online: readonly number[];
     readonly offline: readonly number[];
     readonly faulty: readonly number[];
@@ -96,13 +98,72 @@ function corrupt(summed: readonly Share[]): Share[] {
   return summed.map((s, j) => (j === 0 ? { v: (s.v + 1n) % GROUP_ORDER, r: s.r } : s));
 }
 
-function expectedOutcome(scenario: Scenario): CellOutcome {
-  const { panel, threshold, offline, faulty } = scenario.trustees;
-  return panel - offline.length - faulty.length >= threshold ? "opened" : "tally-quorum";
+/** What every cell must show: the outcome and, for each, which seats are excluded and combined. */
+export interface CellExpectation {
+  readonly outcome: CellOutcome;
+  /** The faulty seats, ascending: the summed-share check must catch each. */
+  readonly excluded: readonly number[];
+  /** When opened, the `k` lowest honest online seats. */
+  readonly combined: readonly number[];
 }
 
-const sameCounts = (a: readonly number[], b: readonly number[]) =>
+export function expectCells(scenario: Scenario): CellExpectation {
+  const { panel, threshold, offline, faulty } = scenario.trustees;
+  const honest = Array.from({ length: panel }, (_, i) => i + 1).filter(
+    (s) => !offline.includes(s) && !faulty.includes(s),
+  );
+  return {
+    outcome: honest.length >= threshold ? "opened" : "tally-quorum",
+    excluded: faulty,
+    combined: honest.slice(0, threshold),
+  };
+}
+
+const same = (a: readonly number[], b: readonly number[]) =>
   a.length === b.length && a.every((x, i) => x === b[i]);
+
+/**
+ * Judges one cell's tally against the plan: the outcome, the excluded and
+ * combined seats, and, when opened, the verifier's check and the counts.
+ * Any difference is a `matches: false` the report carries.
+ */
+export function judgeCell(
+  cell: {
+    readonly tier: SimulatedTier;
+    readonly ballots: number;
+    readonly expected: readonly number[];
+  },
+  want: CellExpectation,
+  opened: CellOpening,
+  verified: boolean,
+): CellReport {
+  const base = {
+    ...cell,
+    expectedOutcome: want.outcome,
+    excluded: opened.excluded,
+  };
+  if (!opened.ok)
+    return {
+      ...base,
+      outcome: opened.code,
+      verified: false,
+      matches: opened.code === want.outcome && same(opened.excluded, want.excluded),
+    };
+  const counts = opened.counts.map(Number);
+  return {
+    ...base,
+    outcome: "opened",
+    counts,
+    combined: opened.combined,
+    verified,
+    matches:
+      want.outcome === "opened" &&
+      verified &&
+      same(counts, cell.expected) &&
+      same(opened.excluded, want.excluded) &&
+      same(opened.combined, want.combined),
+  };
+}
 
 /** Runs `scenario` and reports each cell's result against the plan. Throws only on a bug. */
 export function runSimulation(
@@ -126,16 +187,31 @@ export function runSimulation(
   const keys = seats.map((s) => s.kem.publicKey);
   const online = seats.map((s) => s.index).filter((i) => !offline.includes(i));
 
-  // Per tier: the counted ballots' VSS commitments, and each online seat's shares of them.
+  const tallyRules: TallyRules = { optionCount: scenario.options, threshold: k, panelSize: n };
+  // Per tier: the counted ballots' VSS commitments, and each online seat's
+  // running sum of its shares of them, so shares don't accumulate per ballot.
+  const zero = () => Array.from({ length: scenario.options }, () => ({ v: 0n, r: 0n }));
   const cells = new Map(
     plan.tiers.map((t) => [
       t,
       {
         vss: [] as CommittedVote["vss"][],
-        shares: new Map(online.map((i) => [i, [] as (readonly Share[])[]])),
+        sums: new Map<number, readonly Share[]>(online.map((i) => [i, zero()])),
       },
     ]),
   );
+  type Cell = NonNullable<ReturnType<typeof cells.get>>;
+  // A missing entry is a bug in this file, never a scenario's doing.
+  const cellOf = (tier: SimulatedTier): Cell => {
+    const cell = cells.get(tier);
+    if (cell === undefined) throw new Error("simulation: a voter outside the electorate");
+    return cell;
+  };
+  const sumOf = (cell: Cell, seat: number): readonly Share[] => {
+    const sum = cell.sums.get(seat);
+    if (sum === undefined) throw new Error("simulation: no running sum for an online seat");
+    return sum;
+  };
   let server = 0;
   plan.voters.forEach((voter, done) => {
     const ctx: ValidityContext = {
@@ -147,8 +223,7 @@ export function runSimulation(
     const sharing = shareVote(rules, voter.votes);
     const encrypted = encryptShares({ definitionHash }, sharing, keys);
     const vote = proveValidity(ctx, sharing, encrypted.hashes);
-    const cell = cells.get(voter.tier);
-    if (cell === undefined) throw new Error("simulation: a voter outside the electorate");
+    const cell = cellOf(voter.tier);
     for (const seat of online) {
       const s = seats[seat - 1] as SeatSecrets;
       const result = intake(
@@ -160,53 +235,32 @@ export function runSimulation(
       // An honest client's ballot that intake refuses is a bug in the protocol code.
       if (!result.ok)
         throw new Error(`simulation: intake refused an honest ballot (${result.code})`);
-      cell.shares.get(seat)?.push(result.shares);
+      cell.sums.set(seat, sumShares(tallyRules, [sumOf(cell, seat), result.shares]));
     }
     cell.vss.push(vote.vss);
     if (voter.path === "server") server++;
     options.onProgress?.({ stage: "cast", done: done + 1, total: plan.voters.length });
   });
 
-  const tallyRules: TallyRules = { optionCount: scenario.options, threshold: k, panelSize: n };
-  const want = expectedOutcome(scenario);
+  const want = expectCells(scenario);
   const reports: CellReport[] = plan.tiers.map((tier, done) => {
-    const cell = cells.get(tier) as NonNullable<ReturnType<typeof cells.get>>;
-    const expected = plan.expected.get(tier) as readonly number[];
+    const cell = cellOf(tier);
     const summed = new Map<number, readonly Share[]>();
     for (const seat of online) {
-      const sum = sumShares(tallyRules, cell.shares.get(seat) ?? []);
+      const sum = sumOf(cell, seat);
       summed.set(seat, faulty.includes(seat) ? corrupt(sum) : sum);
     }
     const opened = openCell(tallyRules, cell.vss, summed);
+    const verified =
+      opened.ok &&
+      checkOpening(
+        tallyRules,
+        cell.vss,
+        opened.counts.map((v, j) => ({ v, r: opened.randomness[j] as bigint })),
+      ).ok;
     options.onProgress?.({ stage: "tally", done: done + 1, total: plan.tiers.length });
-    if (!opened.ok) {
-      const outcome = opened.code;
-      return {
-        tier,
-        ballots: cell.vss.length,
-        expected,
-        expectedOutcome: want,
-        outcome,
-        excluded: opened.excluded,
-        verified: false,
-        matches: outcome === want,
-      };
-    }
-    const shares = opened.counts.map((v, j) => ({ v, r: opened.randomness[j] as bigint }));
-    const verified = checkOpening(tallyRules, cell.vss, shares).ok;
-    const counts = opened.counts.map(Number);
-    return {
-      tier,
-      ballots: cell.vss.length,
-      expected,
-      expectedOutcome: want,
-      outcome: "opened",
-      counts,
-      combined: opened.combined,
-      excluded: opened.excluded,
-      verified,
-      matches: want === "opened" && verified && sameCounts(counts, expected),
-    };
+    const expected = plan.expected.get(tier) as readonly number[];
+    return judgeCell({ tier, ballots: cell.vss.length, expected }, want, opened, verified);
   });
 
   const allOpened = reports.every((c) => c.counts !== undefined);
@@ -214,7 +268,7 @@ export function runSimulation(
     ok: reports.every((c) => c.matches),
     scenario,
     ballots: { cast: plan.voters.length, server, direct: plan.voters.length - server },
-    trustees: { online: online.filter((i) => !faulty.includes(i)), offline, faulty },
+    trustees: { online, offline, faulty },
     cells: reports,
     ...(allOpened
       ? {

@@ -4,16 +4,24 @@
 // gives, parsed strictly from JSON so a typo is refused rather than silently
 // defaulted (T-31).
 
-import { PARAMETERS } from "@abolishus/crypto";
+import { PARAMETERS, TIERS } from "@abolishus/crypto";
 
 /**
- * The largest electorate a scenario may ask for. A run costs about 0.35 s per
+ * The largest electorate a scenario may ask for. A run costs about 0.3 s per
  * ballot on one core at 7 seats, mostly each online seat's intake, so
  * 10,000 voters take about an hour and this many about ten.
  */
 export const MAX_SIMULATED_VOTERS = 100_000;
 
-export const SIMULATED_TIERS = Object.freeze([0, 1, 2] as const);
+/**
+ * The most `voters × options × panel` a scenario may ask for. A run keeps
+ * every ballot's VSS commitments until the tally, `options × threshold`
+ * points each, so this bounds its memory at a few hundred megabytes.
+ */
+export const MAX_SIMULATED_WORK = 2_000_000;
+
+/** The definition's tiers, each one cell of the electorate. */
+export const SIMULATED_TIERS = TIERS;
 export type SimulatedTier = (typeof SIMULATED_TIERS)[number];
 
 export interface Scenario {
@@ -33,7 +41,10 @@ export interface Scenario {
   };
   /** Each tier's relative share of the voters; a tier of weight 0 isn't in the electorate. */
   readonly tiers: Readonly<Record<`${SimulatedTier}`, number>>;
-  /** The share of the voting period, `[from, to)` of `[0, 1]`, when our servers refuse ballots. */
+  /**
+   * The share of the voting period, `[from, to)` of `[0, 1]`, when our servers
+   * refuse ballots; `null` (or no field) for none.
+   */
   readonly outage: { readonly from: number; readonly to: number } | null;
   /** Seeds the plan only (who votes how and when), never a secret. */
   readonly seed: number;
@@ -107,8 +118,8 @@ function parse(input: unknown): Scenario {
   const t = object(o["trustees"], "$.trustees", ["panel", "threshold"], ["offline", "faulty"]);
   const panel = integer(t["panel"], "$.trustees.panel", 2, PARAMETERS.MAX_TRUSTEES);
   const threshold = integer(t["threshold"], "$.trustees.threshold", 2, panel);
-  const offline = seats(t["offline"] ?? [], "$.trustees.offline", panel);
-  const faulty = seats(t["faulty"] ?? [], "$.trustees.faulty", panel);
+  const offline = "offline" in t ? seats(t["offline"], "$.trustees.offline", panel) : [];
+  const faulty = "faulty" in t ? seats(t["faulty"], "$.trustees.faulty", panel) : [];
   if (faulty.some((s) => offline.includes(s)))
     throw new Refusal("$.trustees.faulty", "a seat is either offline or faulty");
 
@@ -118,6 +129,9 @@ function parse(input: unknown): Scenario {
     if (`${k}` in w) tiers[`${k}`] = integer(w[`${k}`], `$.tiers.${k}`, 0, 1_000_000);
   if (tiers["0"] + tiers["1"] + tiers["2"] === 0)
     throw new Refusal("$.tiers", "at least one tier has a positive weight");
+
+  if (voters * options * panel > MAX_SIMULATED_WORK)
+    throw new Refusal("$", `voters × options × panel is at most ${MAX_SIMULATED_WORK}`);
 
   let outage: Scenario["outage"] = null;
   if (o["outage"] !== undefined && o["outage"] !== null) {

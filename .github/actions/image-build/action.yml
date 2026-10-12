@@ -1,0 +1,84 @@
+name: image-build
+description: >
+  Build one service's container image for deploy.yml in a fresh checkout, as
+  an OCI archive uploaded as artifact image-<variant>-<service>, and output
+  its image manifest digest. Variant b builds under a different path, locale,
+  timezone and umask; deploy.yml pushes only if both digests match (T-61).
+inputs:
+  service:
+    description: The image's service, e.g. api (apps/<service>, package @abolishus/<service>).
+    required: true
+  variant:
+    description: a or b.
+    required: true
+outputs:
+  digest:
+    description: sha256 digest of the image manifest.
+    value: ${{ steps.image.outputs.digest }}
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        path: ${{ inputs.variant == 'a' && 'build/abolish' || 'build/some/other/dir/abolish-image' }}
+        persist-credentials: false
+    - name: Variant settings
+      shell: bash
+      env:
+        VARIANT: ${{ inputs.variant }}
+      run: |
+        case "$VARIANT" in
+          a) printf '%s\n' TZ=UTC LANG=C.UTF-8 LC_ALL=C.UTF-8 UMASK=0022 ;;
+          b) printf '%s\n' TZ=Pacific/Auckland LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 UMASK=0077 ;;
+          *) echo "::error::unknown variant $VARIANT"; exit 1 ;;
+        esac >>"$GITHUB_ENV"
+    - uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
+      with:
+        version-file: pnpm-workspace.yaml
+        node-version-file: .node-version
+        working-directory: ${{ inputs.variant == 'a' && 'build/abolish' || 'build/some/other/dir/abolish-image' }}
+        run-install: "false"
+    - name: Install dependencies (frozen lockfile, no install scripts)
+      shell: bash
+      working-directory: ${{ inputs.variant == 'a' && 'build/abolish' || 'build/some/other/dir/abolish-image' }}
+      run: vp install --frozen-lockfile --ignore-scripts -- --ignore-pnpmfile
+    # The runner's default `docker` driver can't export OCI archives, so a
+    # BuildKit container does, pinned by digest like the image's base.
+    - name: BuildKit builder
+      shell: bash
+      run: |
+        docker buildx create --name abolish --driver docker-container \
+          --driver-opt image=moby/buildkit:v0.33.1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea
+    # SOURCE_DATE_EPOCH plus rewrite-timestamp clamp every file time in the
+    # new layers to the commit; attestations are off so the digest is the
+    # image's alone (deploy.yml attests it after the comparison).
+    - name: Build the image
+      id: image
+      shell: bash
+      working-directory: ${{ inputs.variant == 'a' && 'build/abolish' || 'build/some/other/dir/abolish-image' }}
+      env:
+        SERVICE: ${{ inputs.service }}
+        VARIANT: ${{ inputs.variant }}
+        OUT: ${{ runner.temp }}/image
+      run: |
+        umask "$UMASK"
+        SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
+        export SOURCE_DATE_EPOCH
+        case "$SERVICE" in api) ;; *) echo "::error::unknown service $SERVICE"; exit 1 ;; esac
+        vp run --no-cache --filter "@abolishus/$SERVICE..." build
+        mkdir -p "$OUT"
+        docker buildx build --builder abolish --no-cache \
+          --platform linux/amd64 --provenance=false --sbom=false \
+          --metadata-file "$RUNNER_TEMP/metadata.json" \
+          --output "type=oci,dest=$OUT/$SERVICE.tar,rewrite-timestamp=true" \
+          "apps/$SERVICE"
+        digest="$(jq -er '."containerimage.digest"' "$RUNNER_TEMP/metadata.json")"
+        [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::bad digest $digest"; exit 1; }
+        echo "digest=$digest" >>"$GITHUB_OUTPUT"
+        echo "artifact=image-$VARIANT-$SERVICE" >>"$GITHUB_OUTPUT"
+    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: ${{ steps.image.outputs.artifact }}
+        path: ${{ runner.temp }}/image/${{ inputs.service }}.tar
+        if-no-files-found: error
+        retention-days: 1

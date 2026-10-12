@@ -74,10 +74,27 @@ describe("moduleViolations", () => {
     `${repo}/apps/ballot/index.html`,
     `${repo}/apps/ballot/src/main.tsx`,
     `${repo}/packages/ui/src/index.ts`,
+    `${repo}/packages/crypto/dist/index.mjs`,
+    pnpm("@noble/curves", "ed25519.js"),
+    pnpm("@noble/hashes", "sha2.js"),
+    pnpm("@noble/ciphers", "chacha.js"),
+    pnpm("@noble/post-quantum", "ml-kem.js"),
+    `${repo}/apps/ballot/src/worker.ts?worker&url`,
   ];
 
-  test("accepts React and the allowed workspace sources", () => {
+  test("accepts React, @abolishus/crypto's build, its @noble/* libraries and the allowed workspace sources", () => {
     expect(moduleViolations(allowed, repo)).toEqual([]);
+  });
+
+  test("rejects @abolishus/crypto's source and @noble/* packages it doesn't use", () => {
+    for (const id of [
+      `${repo}/packages/crypto/src/index.ts`,
+      `${repo}/packages/crypto/package.json`,
+      `${repo}/packages/crypto-evil/dist/index.mjs`,
+      pnpm("@noble/secp256k1", "index.js"),
+      pnpm("@noble-evil/curves", "index.js"),
+    ])
+      expect(moduleViolations([id], repo), id).toHaveLength(1);
   });
 
   test("rejects any other npm package", () => {
@@ -141,7 +158,14 @@ describe("htmlViolations", () => {
     for (const csp of [
       policy.replace("script-src 'self'", "script-src 'self' 'unsafe-inline'"),
       policy.replace("connect-src 'none'", "connect-src https:"),
-      policy.replace("; trusted-types 'none'", ""),
+      policy.replace("; trusted-types ballot-worker", ""),
+      policy.replace(
+        "trusted-types ballot-worker",
+        "trusted-types ballot-worker 'allow-duplicates'",
+      ),
+      policy.replace("trusted-types ballot-worker", "trusted-types ballot-worker other"),
+      policy.replace("worker-src 'self'", "worker-src 'self' blob:"),
+      policy.replace("; worker-src 'self'", ""),
       `${policy}; worker-src *`,
       policy.replace("; ", ";"),
       ` ${policy}`,
@@ -240,6 +264,38 @@ describe("htmlViolations", () => {
 describe("distViolations", () => {
   test("accepts the client's output", () => {
     expect(distViolations(dist())).toEqual([]);
+  });
+
+  test("lets only the scripts index.html loads reach the network or load code", () => {
+    const page = "assets/index-BuPP35rj.js";
+    const worker = "assets/worker-D4bX0ZyQ.js";
+    expect(distViolations(dist({ [page]: 'fetch("./definition")' }))).toEqual([]);
+    expect(distViolations(dist({ [worker]: "self.onmessage=e=>postMessage(e.data)" }))).toEqual([]);
+    // Lookalike names a minified library carries aren't the APIs.
+    expect(distViolations(dist({ [worker]: "x.fetchPriority;prefetchDNS();y.Workers" }))).toEqual(
+      [],
+    );
+    for (const code of [
+      'fetch("https://x")',
+      "self.fetch(u)",
+      "new XMLHttpRequest",
+      "new WebSocket(u)",
+      "new WebTransport(u)",
+      "new EventSource(u)",
+      'importScripts("./x.js")',
+      "new Worker(u)",
+      "new SharedWorker(u)",
+      'import("./x.js")',
+    ])
+      expect(distViolations(dist({ [worker]: code })).length, code).toBeGreaterThan(0);
+  });
+
+  test("rejects WebRTC anywhere, which no CSP directive governs", () => {
+    for (const name of ["assets/index-BuPP35rj.js", "assets/worker-D4bX0ZyQ.js"])
+      for (const code of ["new RTCPeerConnection(c)", "RTCDataChannel"])
+        expect(distViolations(dist({ [name]: code })).length, `${name}: ${code}`).toBeGreaterThan(
+          0,
+        );
   });
 
   test("rejects unexpected files", () => {

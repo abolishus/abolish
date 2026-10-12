@@ -13,11 +13,14 @@
 import { posix, relative, sep } from "node:path";
 
 /**
- * npm packages whose code may run in the ballot client: React, and the
- * shadcn/ui runtime the owner allowed on 2026-10-12 (Base UI and its
- * dependencies, class-variance-authority, clsx behind `cn`, lucide-react;
- * docs/PROJECT_BRIEF.md, AGENTS.md "Dependencies"). Adding to it is an
- * owner-reviewed change.
+ * npm packages whose code may run in the ballot client: React, the shadcn/ui
+ * runtime the owner allowed on 2026-10-12 (Base UI and its dependencies,
+ * class-variance-authority, clsx behind `cn`, lucide-react;
+ * docs/PROJECT_BRIEF.md, AGENTS.md "Dependencies"), and the `@noble/*`
+ * libraries @abolishus/crypto is built on, which the client runs to encrypt
+ * and prove a ballot (AGENTS.md: code that touches the plaintext or the
+ * encryption randomness is a packages/crypto API the client calls). Adding to
+ * it is an owner-reviewed change.
  */
 export const RUNTIME_PACKAGES: ReadonlySet<string> = new Set([
   "react",
@@ -36,20 +39,33 @@ export const RUNTIME_PACKAGES: ReadonlySet<string> = new Set([
   "clsx",
   "cn",
   "lucide-react",
+  "@noble/ciphers",
+  "@noble/curves",
+  "@noble/hashes",
+  "@noble/post-quantum",
 ]);
 
-/** Workspace files the client may bundle, relative to the repository root. */
+/**
+ * Workspace files the client may bundle, relative to the repository root.
+ * @abolishus/crypto is reached through its exports, so its build output, which
+ * ci's setup builds from packages/crypto/src (inside the crypto-review gate).
+ */
 export const WORKSPACE_SOURCES = [
   "apps/ballot/src/",
   "apps/ballot/index.html",
   "packages/ui/src/",
+  "packages/crypto/dist/",
 ] as const;
 
 /**
  * The ballot client's Content Security Policy (T-43). Scripts, styles, fonts
  * and images from its own origin only; no requests (a later change that
- * fetches an election widens connect-src here, under owner review); Trusted
- * Types; no <base> and no form posts.
+ * fetches an election widens connect-src here, under owner review); Web
+ * Workers from its own origin only, where encryption and proving run; Trusted
+ * Types, with one named policy, `ballot-worker`, for the worker's script URL
+ * (`new Worker(url)` is a script-URL sink; the client creates the policy
+ * first, and a second policy of that name throws); no <base> and no form
+ * posts.
  */
 export const BALLOT_CSP: Readonly<Record<string, readonly string[]>> = {
   "default-src": ["'none'"],
@@ -58,10 +74,11 @@ export const BALLOT_CSP: Readonly<Record<string, readonly string[]>> = {
   "font-src": ["'self'"],
   "img-src": ["'self'"],
   "connect-src": ["'none'"],
+  "worker-src": ["'self'"],
   "base-uri": ["'none'"],
   "form-action": ["'none'"],
   "require-trusted-types-for": ["'script'"],
-  "trusted-types": ["'none'"],
+  "trusted-types": ["ballot-worker"],
 };
 
 /**
@@ -260,9 +277,40 @@ export function htmlViolations(page: string): string[] {
   return violations;
 }
 
-/** Problems with the emitted files: unexpected names, URLs, SDK markers, string evaluation. */
+/**
+ * APIs that reach the network or load code, banned from every script the page
+ * doesn't load itself. Those scripts are Web Workers (or chunks loaded at run
+ * time), and a dedicated worker takes its CSP from its own response headers,
+ * never from the page's <meta>: on a host that sends none (an IPFS gateway,
+ * abolishus.eth), connect-src 'none' and Trusted Types don't apply in the
+ * worker, where the plaintext and the randomness are. So its I/O stays on the
+ * main thread (T-43). A heuristic over the bytes, like the URL scan: code that
+ * builds the names at run time evades it, and the worker's own e2e is the
+ * other check.
+ */
+const WORKER_BANNED: readonly RegExp[] = [
+  /\bfetch\b/,
+  /\bXMLHttpRequest\b/,
+  /\bWebSocket\b/,
+  /\bWebTransport\b/,
+  /\bEventSource\b/,
+  /\bimportScripts\b/,
+  /\b(Shared)?Worker\b/,
+  /\bimport\(/,
+];
+
+/** WebRTC reaches any host and no CSP directive governs it, in a page or a worker. */
+const BANNED: readonly RegExp[] = [/\bRTC(PeerConnection|DataChannel)\b/];
+
+/** Problems with the emitted files: unexpected names, URLs, SDK markers, string evaluation, network APIs. */
 export function distViolations(files: ReadonlyMap<string, string>): string[] {
   const violations: string[] = [];
+  // The scripts index.html loads (a <script src> or a modulepreload <link>).
+  const pageScripts = new Set(
+    [...(files.get("index.html") ?? "").matchAll(/\s(?:src|href)="\.\/(assets\/[\w-]+\.js)"/g)].map(
+      ([, name]) => name,
+    ),
+  );
   for (const name of files.keys())
     if (!EMITTED.some((pattern) => pattern.test(name)))
       violations.push(
@@ -284,9 +332,17 @@ export function distViolations(files: ReadonlyMap<string, string>): string[] {
       at(`names a protocol-relative URL ${ref}`);
     for (const marker of ANALYTICS_MARKERS)
       if (marker.test(text)) at(`matches the analytics marker ${marker}`);
-    if (name.endsWith(".js"))
+    if (name.endsWith(".js")) {
       for (const pattern of [/\beval\(/, /\bnew Function\(/, /\bset(Timeout|Interval)\(\s*["'`]/])
         if (pattern.test(text)) at(`uses ${pattern}, which the CSP refuses`);
+      for (const pattern of BANNED) if (pattern.test(text)) at(`uses ${pattern}`);
+      if (!pageScripts.has(name))
+        for (const pattern of WORKER_BANNED)
+          if (pattern.test(text))
+            at(
+              `uses ${pattern} outside the scripts index.html loads; a worker gets no CSP from the page, so its I/O stays on the main thread`,
+            );
+    }
   }
   return violations;
 }

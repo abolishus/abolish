@@ -9,7 +9,6 @@ import {
   DecodeError,
   decodeTallyOpening,
   element,
-  EncodeError,
   encodeTallyOpening,
   GROUP_ORDER,
   identityKey,
@@ -84,6 +83,7 @@ interface Vectors {
       readonly failure?: { readonly cell: number; readonly code: string; readonly option?: number };
       readonly cells: readonly VectorCell[];
       readonly stray: readonly Report[];
+      readonly rejected: readonly { readonly at: number; readonly error: string }[];
     };
   }[];
 }
@@ -151,8 +151,8 @@ describe("tally-opening.json", () => {
 
   test.each(vectors.elections)("election $id", (v) => {
     const cells = v.cells.map((c) => c.map((b) => decode(VSS, hex(b)) as CommittedVote["vss"]));
-    const openings = v.openings.map((b) => decodeTallyOpening(hex(b), 1));
-    expect(asVector(checkTally(election, cells, openings))).toEqual(v.result);
+    const payloads = v.openings.map((b) => hex(b));
+    expect(asVector(checkTally(election, cells, payloads, 1))).toEqual(v.result);
   });
 });
 
@@ -237,7 +237,8 @@ describe("properties", () => {
         const r = checkTally(
           el,
           cells.map((c) => c.ballots),
-          records.map((b) => decodeTallyOpening(b, 1)),
+          records,
+          1,
         );
         expect(r.ok).toBe(true);
         r.cells.forEach((c, i) => {
@@ -245,6 +246,7 @@ describe("properties", () => {
           expect(c.passing).toEqual([{ at: i, signer: input.signer }]);
         });
         expect(r.stray).toEqual([]);
+        expect(r.rejected).toEqual([]);
       }),
       { numRuns: Math.max(10, numRuns / 20) },
     );
@@ -266,19 +268,17 @@ describe("properties", () => {
           const changed = Uint8Array.from(original);
           const i = at % changed.length;
           changed[i] = (changed[i] as number) ^ flip;
-          let o: TallyOpening;
-          try {
-            o = decodeTallyOpening(changed, 1);
-          } catch (e) {
-            expect(e).toBeInstanceOf(DecodeError);
-            return;
-          }
           const r = checkTally(
             el,
             cells.map((c) => c.ballots),
-            [o],
+            [changed],
+            1,
           );
           const reports = [...r.stray, ...r.cells.flatMap((c) => [...c.passing, ...c.failing])];
+          if (r.rejected.length === 1) {
+            expect(reports).toEqual([]);
+            return;
+          }
           expect(reports).toHaveLength(1);
           expect(reports[0]?.signer).toBeNull();
         },
@@ -341,25 +341,29 @@ describe("checks without vectors", () => {
     expect(differ(a, [...a, ...a])).toBe(true);
   });
 
-  test("a hand-built opening with a non-canonical scalar is refused, not reduced", () => {
+  test("a payload with a non-canonical scalar is a rejected entry, not reduced", () => {
     const { el, cells, records } = honestTally({
       rules: { optionCount: 2, threshold: 2, panelSize: 3 },
       signer: 1,
       definitionHash: new Uint8Array(32),
       votes: [[[1, 0]]],
     });
-    const o = decodeTallyOpening(records[0] as Uint8Array, 1);
-    const bad = {
-      ...o,
-      opening: o.opening.map((s, j) => (j === 0 ? { v: s.v + GROUP_ORDER, r: s.r } : s)),
-    };
-    expect(() =>
-      checkTally(
-        el,
-        cells.map((c) => c.ballots),
-        [bad],
-      ),
-    ).toThrow(EncodeError);
+    const bad = Uint8Array.from(records[0] as Uint8Array);
+    // Option 0's V, little-endian after the 3-byte header, 34 bytes of fields
+    // and the 4-byte count: adding ℓ keeps it under 2²⁵⁶ for a count of 0 or 1.
+    const v = bad.subarray(41, 73);
+    let x = 0n;
+    for (let i = 31; i >= 0; i--) x = (x << 8n) | BigInt(v[i] as number);
+    x += GROUP_ORDER;
+    for (let i = 0; i < 32; i++) v[i] = Number((x >> BigInt(8 * i)) & 0xffn);
+    const r = checkTally(
+      el,
+      cells.map((c) => c.ballots),
+      [bad],
+      1,
+    );
+    expect(r.rejected).toEqual([{ at: 0, error: "non-canonical" }]);
+    expect(r.failure).toEqual({ cell: 0, code: "tally-missing" });
   });
 
   test("an opening for a seat outside the registered set is unattributed", () => {
@@ -373,7 +377,8 @@ describe("checks without vectors", () => {
     const r = checkTally(
       fewer,
       cells.map((c) => c.ballots),
-      records.map((b) => decodeTallyOpening(b, 1)),
+      records,
+      1,
     );
     expect(r.ok).toBe(true);
     expect(r.cells[0]?.passing).toEqual([{ at: 0, signer: null }]);

@@ -6,7 +6,15 @@
 // T-31, ADR 0015).
 
 import { type CommittedVote, type Share, SHARES } from "./ballot-validity.ts";
-import { bytesFixed, type CodecValue, encode, struct, u8 } from "./codec.ts";
+import {
+  bytesFixed,
+  type CodecValue,
+  DecodeError,
+  type DecodeErrorCode,
+  encode,
+  struct,
+  u8,
+} from "./codec.ts";
 import { type Element, G, GENERATOR_H, IDENTITY } from "./group.ts";
 import { RECORD_TYPES, RecordSchema, recordType } from "./record.ts";
 import { aggregateCell, type CellAggregate, type TallyRules } from "./tally.ts";
@@ -133,13 +141,15 @@ export interface TallyCheck {
   readonly cells: readonly CellCheck[];
   /** Openings naming another definition or a cell the partition doesn't have (verifier 7.4). */
   readonly stray: readonly OpeningReport[];
+  /** Payloads that don't decode under the pinned version: rejected entries, never an election failure. */
+  readonly rejected: readonly { readonly at: number; readonly error: DecodeErrorCode }[];
 }
 
 const sameBytes = (a: Uint8Array, b: Uint8Array) =>
   a.length === b.length && a.every((x, i) => x === b[i]);
 
 // @noble rejects a multiplier of 0, which openings of empty cells use. Every
-// value here went through the record codec, so none is at or above ℓ.
+// value here was decoded, so none is at or above ℓ.
 function mul(p: Element, s: bigint): Element {
   return s === 0n ? IDENTITY : p.multiply(s);
 }
@@ -217,26 +227,35 @@ function checkCell(
 /**
  * The verifier's tally check (docs/spec/tally.md, Opening record and Opening
  * checks; verifier 7.2 to 7.4). `cells` holds each cell's counted ballots, in
- * partition order; `openings` every tally opening in the board's sealed
- * extent that decoded under the pinned version, in board order. Each opening
- * is an opening of the cell it names, or stray; every failing or stray one is
- * reported with the seat its signature attributes it to, if any.
+ * partition order; `payloads` every tally-opening payload (record type
+ * `0x0006`) in the board's sealed extent, in board order, and `at` in every
+ * report is a position in it. Anyone can post one, so a payload that doesn't
+ * decode under the pinned version is a rejected entry, never a failure. Each
+ * opening is an opening of the cell it names, or stray; every failing or
+ * stray one is reported with the seat its signature attributes it to, if any.
  */
 export function checkTally(
   election: TallyElection,
   cells: readonly (readonly CommittedVote["vss"][])[],
-  openings: readonly TallyOpening[],
+  payloads: readonly Uint8Array[],
+  pinned: 1,
 ): TallyCheck {
   if (!(election.definitionHash instanceof Uint8Array) || election.definitionHash.length !== 32)
     throw new RangeError("checkTally: definitionHash must be 32 bytes");
   if (cells.length < 1 || cells.length > MAX_CELLS)
     throw new RangeError("checkTally: from 1 to 256 cells");
-  // Through the codec, so a caller's hand-built value is held to what a
-  // decoded record satisfies: canonical scalars and a valid signature encoding.
-  for (const o of openings) encodeTallyOpening(o);
   const byCell = cells.map(() => [] as { at: number; opening: TallyOpening }[]);
   const stray: OpeningReport[] = [];
-  openings.forEach((opening, at) => {
+  const rejected: { at: number; error: DecodeErrorCode }[] = [];
+  payloads.forEach((payload, at) => {
+    let opening: TallyOpening;
+    try {
+      opening = decodeTallyOpening(payload, pinned);
+    } catch (e) {
+      if (!(e instanceof DecodeError)) throw e;
+      rejected.push({ at, error: e.code });
+      return;
+    }
     const mine = sameBytes(opening.definition_hash, election.definitionHash);
     const list = mine ? byCell[opening.cell] : undefined;
     if (list === undefined) stray.push({ at, signer: attribution(election, opening) });
@@ -244,11 +263,11 @@ export function checkTally(
   });
   const checked = cells.map((ballots, c) => checkCell(election, ballots, byCell[c] ?? []));
   const at = checked.findIndex((c) => !c.ok);
-  if (at === -1) return { ok: true, cells: checked, stray };
+  if (at === -1) return { ok: true, cells: checked, stray, rejected };
   const bad = checked[at] as Extract<CellCheck, { ok: false }>;
   const failure =
     bad.option === undefined
       ? { cell: at, code: bad.code }
       : { cell: at, code: bad.code, option: bad.option };
-  return { ok: false, failure, cells: checked, stray };
+  return { ok: false, failure, cells: checked, stray, rejected };
 }

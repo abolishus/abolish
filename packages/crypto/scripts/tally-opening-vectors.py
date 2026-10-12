@@ -184,17 +184,22 @@ def check_cell(m, k, registered, ballots, openings):
     return {"ok": True, "counts": [str(s["v"]) for s in first], **out}
 
 
-def check_tally(definition_hash, m, k, registered, cells, records):
-    """verifier 7.2 to 7.4 over decoded records in board order."""
+def check_tally(definition_hash, m, k, registered, cells, payloads):
+    """verifier 7.2 to 7.4 over the tally-opening payloads in board order; undecodable ones are rejected entries."""
     by_cell = [[] for _ in cells]
-    stray = []
-    for at, o in enumerate(records):
+    stray, rejected = [], []
+    for at, b in enumerate(payloads):
+        try:
+            o = decode(b)
+        except Reject as e:
+            rejected.append({"at": at, "error": e.code})
+            continue
         if o["definitionHash"] == definition_hash and o["cell"] < len(cells):
             by_cell[o["cell"]].append((at, o))
         else:
             stray.append({"at": at, "signer": attribution(registered, o)})
     checked = [check_cell(m, k, registered, ballots, by_cell[c]) for c, ballots in enumerate(cells)]
-    result = {"ok": all(c["ok"] for c in checked), "cells": checked, "stray": stray}
+    result = {"ok": all(c["ok"] for c in checked), "cells": checked, "stray": stray, "rejected": rejected}
     for c, r in enumerate(checked):
         if not r["ok"]:
             result["failure"] = {"cell": c, "code": r["code"], **({"option": r["option"]} if "option" in r else {})}
@@ -321,9 +326,9 @@ def main():
     elections = []
 
     def election(id_, desc, cells, records, expect):
-        recs = [encode(o) for o in records]
-        assert [decode(b) for b in recs] == records
-        got = check_tally(definition_hash, m, k, registered, cells, records)
+        """`records` are tally openings, or raw payloads (bytes) that may not decode."""
+        recs = [o if isinstance(o, bytes) else encode(o) for o in records]
+        got = check_tally(definition_hash, m, k, registered, cells, recs)
         for key, want in expect.items():
             assert got.get(key) == want, (id_, key, got.get(key), want)
         elections.append({"id": id_, "description": desc, "cells": [[bv.enc_vss(b).hex() for b in c] for c in cells], "openings": [b.hex() for b in recs], "result": got})
@@ -409,6 +414,28 @@ def main():
         two,
         [record(1, 1, bump(open1, 2)), record(0, 1, bump(open0, 0))],
         {"ok": False, "failure": {"cell": 0, "code": "tally-opening", "option": 0}},
+    )
+
+    election(
+        "unpinned-version",
+        "Beside honest openings, a copy of cell 1's opening labelled version 2 and a payload of three bytes: both are rejected entries, and the election passes",
+        two,
+        [honest0, encode(honest1, version=2), honest1, bytes.fromhex("000601")],
+        {"ok": True, "rejected": [{"at": 1, "error": "profile-mismatch"}, {"at": 3, "error": "truncated"}]},
+    )
+    election(
+        "two-failing-openings",
+        "Cell 0's only openings both fail: seat 1's at option 2, then seat 2's at option 0. The cell reports the first failing opening in board order, option 2",
+        two,
+        [record(0, 1, bump(open0, 2)), record(0, 2, bump(open0, 0)), honest1],
+        {"ok": False, "failure": {"cell": 0, "code": "tally-opening", "option": 2}},
+    )
+    election(
+        "short-and-failing",
+        "Cell 0 has a short opening and a full-length one that fails: tally-opening, not tally-missing",
+        two,
+        [record(0, 1, open0[:2]), record(0, 2, bump(open0, 1)), honest1],
+        {"ok": False, "failure": {"cell": 0, "code": "tally-opening", "option": 1}},
     )
 
     by_id = {e["id"]: e["result"] for e in elections}

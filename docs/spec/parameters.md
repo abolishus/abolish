@@ -2,13 +2,14 @@
 
 Limits that apply across record types in protocol version 1. A record version may set a lower maximum for its own field, never a higher one. Raising a protocol-wide limit is a new record version of every record type it affects, with this page recording which versions use the new limit ([[versioning]]); lowering one before it is frozen is an ordinary spec change. Threats: T-52 (bounded input sizes, so flooding and hostile lengths stay cheap to reject), T-28 (ballot shape), T-50 (direct-submitted ballots must fit the L2's forced-deposit limits).
 
-| Name                    | Value     | Meaning                                                                                                      |
-| ----------------------- | --------- | ------------------------------------------------------------------------------------------------------------ |
-| `MAX_TAG_LEN`           | 255       | Maximum length of a domain-separation tag in bytes ([[domain-separation]]); fixed by its `u8` length prefix. |
-| `MAX_OPTIONS`           | 64        | Maximum number of options in one question of a plurality or approval election ([[0003-tally-scheme]]).       |
-| `MAX_TRUSTEES`          | 16        | Maximum `n` of a trustee panel ([[0006-trustees]] proposes `n = 7`).                                         |
-| `MAX_BOARD_PAYLOAD`     | 1,048,576 | Maximum length in bytes of the record a board entry carries ([[board]]).                                     |
-| `DISPLAY_TEXT_SALT_LEN` | 32        | Length of the salt in a display-text commitment ([[display-text]], [[0005-permanent-archive]]).              |
+| Name                    | Value     | Meaning                                                                                                                                                                                                   |
+| ----------------------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `MAX_TAG_LEN`           | 255       | Maximum length of a domain-separation tag in bytes ([[domain-separation]]); fixed by its `u8` length prefix.                                                                                              |
+| `MAX_OPTIONS`           | 64        | Maximum number of options in one question of a plurality or approval election ([[0003-tally-scheme]]).                                                                                                    |
+| `MAX_TRUSTEES`          | 16        | Maximum `n` of a trustee panel ([[0006-trustees]] proposes `n = 7`).                                                                                                                                      |
+| `MAX_BOARD_PAYLOAD`     | 1,048,576 | Maximum length in bytes of the record a board entry carries ([[board]]).                                                                                                                                  |
+| `TALLY_WINDOW`          | 604,800   | Seconds after `closes_at + l1_inclusion_bound` by which each cell's opening must be on the board; a constant of tally-opening version 1 and the tally's term in the seal's `W` ([[tally]], Tally window). |
+| `DISPLAY_TEXT_SALT_LEN` | 32        | Length of the salt in a display-text commitment ([[display-text]], [[0005-permanent-archive]]).                                                                                                           |
 
 ## Why these values
 

@@ -92,6 +92,31 @@ export function pinnedVersion(d: ElectionDefinition, recordType: number): number
   return pins.length === 1 ? pins[0]?.version : undefined;
 }
 
+/** Why 2.3's profile combination refuses a definition's pins. */
+export type ProfileCombinationRule = "profile-combination" | "unsupported-version";
+
+/**
+ * 2.3's `profile-combination` (docs/spec/verifier.md, 2.3), for the verifier
+ * and for any client that must refuse an election bound to fail it
+ * (docs/spec/delivery.md, Versions): ballot version 1 needs a board-entry
+ * version that carries share receipts and complaints (3 or 4), and
+ * tally-opening version 1 one that carries destruction statements (4,
+ * docs/spec/tally.md, Destruction), so an election's creator can't leave
+ * delivery or destruction off the board (T-34). A board-entry version this
+ * package doesn't read is `unsupported-version`, never a failure: a later
+ * version may add itself to the rule (T-36). Call it on a well-formed
+ * definition, whose profile pins each of these types once.
+ */
+export function profileCombinationRule(d: ElectionDefinition): ProfileCombinationRule | undefined {
+  const board = pinnedVersion(d, RECORD_TYPES.boardEntry);
+  if (board === undefined || !Object.hasOwn(BOARD_ENTRY.versions, board))
+    return "unsupported-version";
+  const ballot = pinnedVersion(d, RECORD_TYPES.ballot);
+  const opening = pinnedVersion(d, RECORD_TYPES.tallyOpening);
+  const fits = (ballot !== 1 || board === 3 || board === 4) && (opening !== 1 || board === 4);
+  return fits ? undefined : "profile-combination";
+}
+
 export function encodeDisplayText(t: DisplayText): Uint8Array {
   return PROTOCOL_SCHEMA.encode(DISPLAY_TEXT, 1, t);
 }

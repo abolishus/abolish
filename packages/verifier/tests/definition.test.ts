@@ -241,6 +241,12 @@ describe("2.3: the profile's versions fit together", () => {
       }
       // The version is one this verifier reads, so the board checks ran.
       expect(row(r, "4.1").code).not.toBe("not-reached");
+      // Only version 4 carries destruction statements (8.5, report-only).
+      expect(row(r, "8.5")).toMatchObject(
+        board === 4
+          ? { status: "unverifiable", code: "not-implemented" }
+          : { status: "unverifiable", code: "not-applicable" },
+      );
       expect(r.verdict).toBe("unverifiable");
     });
 

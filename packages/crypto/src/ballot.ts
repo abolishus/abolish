@@ -17,7 +17,16 @@ import {
   type ValidityRules,
 } from "./ballot-validity.ts";
 import { checkedTranscriptHash, type RegisteredKeys } from "./ceremony.ts";
-import { bytesFixed, type CodecValue, enum8, fieldBn254, struct, u64 } from "./codec.ts";
+import {
+  bytesFixed,
+  type CodecValue,
+  decode,
+  encode,
+  enum8,
+  fieldBn254,
+  struct,
+  u64,
+} from "./codec.ts";
 import { type ElectionDefinition, TIERS } from "./election-definition.ts";
 import { membershipScope, semaphoreField } from "./membership.ts";
 import {
@@ -28,6 +37,7 @@ import {
 } from "./membership-proof.ts";
 import { electionDefinitionHash, pinnedVersion, UnsupportedVersionError } from "./protocol.ts";
 import { RECORD_TYPES, RecordSchema, recordType } from "./record.ts";
+import { KEM_PUBLIC_KEY } from "./share-encryption.ts";
 import { membershipMessage } from "./revoting.ts";
 
 // The fixed-width fields come first, at fixed offsets, so a contract reads
@@ -127,6 +137,18 @@ export function ballotElection(
     qualified: Object.freeze(registered.map((k) => k.index)),
   });
   MADE.set(election, definitionHash);
+  KEYS.set(
+    election,
+    Object.freeze(
+      registered.map((k) =>
+        Object.freeze({
+          index: k.index,
+          kemKey: decode(KEM_PUBLIC_KEY, encode(KEM_PUBLIC_KEY, k.kemKey)),
+          signingKey: Uint8Array.from(k.signingKey),
+        }),
+      ),
+    ),
+  );
   return election;
 }
 
@@ -136,7 +158,19 @@ export function ballotElection(
 // hash with another election's roots, scopes or seats.
 const MADE = new WeakMap<BallotElection, Uint8Array>();
 
-function definitionHashOf(election: BallotElection): Uint8Array {
+// The registered key set of each context, copied when it was made, for checks
+// that rebuild ciphertexts (docs/spec/challenge.md, Checks).
+const KEYS = new WeakMap<BallotElection, readonly RegisteredKeys[]>();
+
+/** Internal: the registered key set `ballotElection` made this context from. */
+export function registeredKeysOf(election: BallotElection): readonly RegisteredKeys[] {
+  const keys = KEYS.get(election);
+  if (keys === undefined) throw new TypeError("expected a context made by ballotElection");
+  return keys;
+}
+
+/** Internal: the definition hash `ballotElection` made this context from. */
+export function definitionHashOf(election: BallotElection): Uint8Array {
   const hash = MADE.get(election);
   if (hash === undefined) throw new TypeError("expected a context made by ballotElection");
   return hash;

@@ -290,12 +290,86 @@ export interface ShareEncapsulation {
  * A ballot's share ciphertexts, one per seat in order, with their hashes for
  * the committed vote. `randomness` stays on the client only until the voter
  * casts or spoils: a posting needs `m`, a spoiled ballot reveals both, and a
- * cast erases them (ADR 0002, Private part; T-18, T-45).
+ * cast erases them (ADR 0002, Private part; T-18, T-45). This package keeps a
+ * private copy for `openChallenge` while the object lives, so after a cast
+ * the client copies out what it still needs and drops the whole object.
  */
 export interface EncryptedShares {
   readonly ciphertexts: readonly Uint8Array[];
   readonly hashes: readonly Uint8Array[];
   readonly randomness: readonly ShareEncapsulation[];
+}
+
+/**
+ * Internal: one seat's ciphertext of `shares` under `key`, deterministic in
+ * its randomness (docs/spec/share-encryption.md, Ciphertext). Encryption and
+ * a challenge's check both make ciphertexts here, so an opening rebuilds
+ * exactly the bytes a client sent (docs/spec/challenge.md, Checks). The
+ * package entry point doesn't export it: a caller choosing `m` or `e` could
+ * reuse an AEAD key (T-15).
+ */
+export function encryptSeat(
+  ctx: ShareContext,
+  seat: number,
+  key: KemPublicKey,
+  vss: CommittedVote["vss"],
+  shares: readonly Share[],
+  randomness: ShareEncapsulation,
+): Uint8Array {
+  // Round-trips the key through its codec: the modulus check and a
+  // non-identity DH key, whatever the caller passed (T-39).
+  const k = decode(KEM_PUBLIC_KEY, encode(KEM_PUBLIC_KEY, key));
+  const { m, e, w } = randomness;
+  if (!(m instanceof Uint8Array) || m.length !== MLKEM_MSG_LEN)
+    throw new RangeError("encrypt: m must be 32 bytes");
+  if (typeof e !== "bigint" || e <= 0n || e >= GROUP_ORDER)
+    throw new RangeError("encrypt: e must be a scalar from 1 to ℓ − 1");
+  if (typeof w !== "bigint" || w <= 0n || w >= GROUP_ORDER)
+    throw new RangeError("encrypt: w must be a scalar from 1 to ℓ − 1");
+  const { cipherText, sharedSecret } = ml_kem768.encapsulate(k.ek, m);
+  const ctDh = G.multiply(e);
+  const aeadKey = combine(sharedSecret, k.dh.multiply(e), ctDh, k.dh);
+  sharedSecret.fill(0);
+  const aad = associatedData(ctx, seat, vss);
+  const sealed = chacha20poly1305(aeadKey, NONCE, aad).encrypt(encode(SHARES, shares));
+  aeadKey.fill(0);
+  const pokC = ephemeralChallenge(ctx, seat, k.dh, vss, cipherText, ctDh, sealed, G.multiply(w));
+  const pokZ = (w + pokC * e) % GROUP_ORDER;
+  return encode(SHARE_CIPHERTEXT, {
+    ct_mlkem: cipherText,
+    ct_dh: ctDh,
+    pok_c: pokC,
+    pok_z: pokZ,
+    sealed,
+  });
+}
+
+/** What `encryptSharesWith` made an `EncryptedShares` from, copied so the caller can't change it. */
+export interface Encryption {
+  readonly sharing: VoteSharing;
+  readonly definitionHash: Uint8Array;
+  /** Each seat's KEM key, encoded. */
+  readonly keys: readonly Uint8Array[];
+  readonly hashes: readonly Uint8Array[];
+  readonly randomness: readonly ShareEncapsulation[];
+}
+
+// Every encryption `encryptSharesWith` made, with private copies of what made
+// it: a challenge reveals only the randomness of ciphertexts made here, for
+// the sharing they encrypt (docs/spec/challenge.md, Client rules).
+const ENCRYPTIONS = new WeakMap<EncryptedShares, Encryption>();
+
+/** Internal: what made `encrypted`, or `undefined` if `encryptShares` didn't. */
+export function encryptionOf(encrypted: EncryptedShares): Encryption | undefined {
+  const made = ENCRYPTIONS.get(encrypted);
+  if (made === undefined) return undefined;
+  return {
+    sharing: made.sharing,
+    definitionHash: Uint8Array.from(made.definitionHash),
+    keys: made.keys.map((k) => Uint8Array.from(k)),
+    hashes: made.hashes.map((h) => Uint8Array.from(h)),
+    randomness: made.randomness.map(({ m, e, w }) => ({ m: Uint8Array.from(m), e, w })),
+  };
 }
 
 /**
@@ -314,47 +388,34 @@ export function encryptSharesWith(
   const n = sharing.shares.length;
   if (keys.length !== n) throw new RangeError("encrypt: one trustee key per seat");
   if (randomness.length !== n) throw new RangeError("encrypt: one encapsulation per seat");
-  const ciphertexts = keys.map((key, i) => {
-    // Round-trips the key through its codec: the modulus check and a
-    // non-identity DH key, whatever the caller passed (T-39).
-    const k = decode(KEM_PUBLIC_KEY, encode(KEM_PUBLIC_KEY, key));
-    const { m, e, w } = randomness[i] as ShareEncapsulation;
-    if (!(m instanceof Uint8Array) || m.length !== MLKEM_MSG_LEN)
-      throw new RangeError("encrypt: m must be 32 bytes");
-    if (typeof e !== "bigint" || e <= 0n || e >= GROUP_ORDER)
-      throw new RangeError("encrypt: e must be a scalar from 1 to ℓ − 1");
-    if (typeof w !== "bigint" || w <= 0n || w >= GROUP_ORDER)
-      throw new RangeError("encrypt: w must be a scalar from 1 to ℓ − 1");
-    const { cipherText, sharedSecret } = ml_kem768.encapsulate(k.ek, m);
-    const ctDh = G.multiply(e);
-    const key2 = combine(sharedSecret, k.dh.multiply(e), ctDh, k.dh);
-    const aad = associatedData(ctx, i + 1, sharing.vss);
-    const plain = encode(SHARES, sharing.shares[i] as readonly Share[]);
-    const sealed = chacha20poly1305(key2, NONCE, aad).encrypt(plain);
-    const pokC = ephemeralChallenge(
+  const copies = randomness.map(({ m, e, w }) => ({
+    m: m instanceof Uint8Array ? Uint8Array.from(m) : m,
+    e,
+    w,
+  }));
+  const ciphertexts = keys.map((key, i) =>
+    encryptSeat(
       ctx,
       i + 1,
-      k.dh,
+      key,
       sharing.vss,
-      cipherText,
-      ctDh,
-      sealed,
-      G.multiply(w),
-    );
-    const pokZ = (w + pokC * e) % GROUP_ORDER;
-    return encode(SHARE_CIPHERTEXT, {
-      ct_mlkem: cipherText,
-      ct_dh: ctDh,
-      pok_c: pokC,
-      pok_z: pokZ,
-      sealed,
-    });
-  });
-  return {
+      sharing.shares[i] as readonly Share[],
+      copies[i] as ShareEncapsulation,
+    ),
+  );
+  const encrypted: EncryptedShares = {
     ciphertexts,
     hashes: ciphertexts.map(shareCiphertextHash),
-    randomness: randomness.map(({ m, e, w }) => ({ m: Uint8Array.from(m), e, w })),
+    randomness: copies.map(({ m, e, w }) => ({ m: Uint8Array.from(m), e, w })),
   };
+  ENCRYPTIONS.set(encrypted, {
+    sharing,
+    definitionHash: Uint8Array.from(ctx.definitionHash),
+    keys: keys.map((k) => encode(KEM_PUBLIC_KEY, k)),
+    hashes: encrypted.hashes.map((h) => Uint8Array.from(h)),
+    randomness: copies,
+  });
+  return encrypted;
 }
 
 /**

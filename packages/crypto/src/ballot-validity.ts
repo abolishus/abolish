@@ -410,6 +410,23 @@ export function isRegisteredSharing(sharing: VoteSharing): boolean {
   return SHARINGS.has(sharing);
 }
 
+// What each sharing has been used for: proved (the voter chose to cast it) or
+// opened (the voter challenged it). One sharing is never both: an opened core
+// is never cast, and a cast core's randomness is never revealed
+// (docs/spec/challenge.md, Client rules; T-42, T-45).
+const SPENT = new WeakMap<VoteSharing, "proved" | "opened">();
+
+/**
+ * Internal: marks a sharing as opened by a challenge, or throws if it was
+ * proved. Only `openChallenge` calls this; the package entry point doesn't
+ * export it.
+ */
+export function markOpened(sharing: VoteSharing): void {
+  if (SPENT.get(sharing) === "proved")
+    throw new TypeError("open: this sharing was proved for casting; it is never opened");
+  SPENT.set(sharing, "opened");
+}
+
 function deepFreeze<T>(value: T): T {
   // Freezes points too (@noble/curves doesn't freeze every point it returns);
   // bigints are immutable.
@@ -528,6 +545,8 @@ export function proveValidityWith(
   checkContext(ctx);
   if (!SHARINGS.has(sharing))
     throw new TypeError("prove: the sharing must come from shareVote, unchanged");
+  if (SPENT.get(sharing) === "opened")
+    throw new TypeError("prove: this sharing was opened by a challenge; it is never cast");
   const { optionCount: m, minSelections: min, maxSelections: max } = ctx;
   if (sharing.vss.length !== m || sharing.vss.some((e) => e.length !== ctx.threshold))
     throw new RangeError("prove: the sharing doesn't match the election");
@@ -567,6 +586,7 @@ export function proveValidityWith(
   const vote = { vss: sharing.vss, share_hashes: shareHashes, option_proofs, sum_proof };
   // Round-trips the result through the codec, so a ballot this returns always encodes.
   encode(COMMITTED_VOTE, vote);
+  SPENT.set(sharing, "proved");
   return vote;
 }
 

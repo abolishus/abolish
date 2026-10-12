@@ -84,6 +84,7 @@ export const TAG_REGISTRY = Object.freeze(
         status: "specified",
       },
       { tag: "abolish/v1/sig/nullifier-answer", primitive: "signature", status: "specified" },
+      { tag: "abolish/v1/ballot-core", primitive: "plain", status: "specified" },
     ] as const
   ).map((e) => Object.freeze(e)),
 );

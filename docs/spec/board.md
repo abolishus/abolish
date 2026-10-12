@@ -29,8 +29,8 @@ The payload is a complete record whose `record_type` is one the entry's version 
 
 | `record_type` | Name                   | Versions | Why it is on the board                                                                                                |
 | ------------- | ---------------------- | -------- | --------------------------------------------------------------------------------------------------------------------- |
-| `0x0002`      | ballot                 | 1, 3, 4  | A ballot cast through our API ([[ballot-validity]], Ballot record); how a challenged ballot is boarded is P1-13's     |
-| `0x0003`      | spoiled-ballot opening | 1, 3, 4  | A published Benaloh opening (P1-13); ordered canonically, below                                                       |
+| `0x0002`      | ballot                 | 1, 3, 4  | A ballot cast through our API ([[ballot-validity]], Ballot record); cast ballots only, never a challenged one         |
+| `0x0003`      | spoiled-ballot opening | 1, 3, 4  | A published Benaloh opening, after close ([[challenge]]); ordered canonically, below                                  |
 | `0x0005`      | ceremony transcript    | 1, 3, 4  | The key ceremony's public transcript (P1-14)                                                                          |
 | `0x0006`      | tally opening          | 1, 3, 4  | One cell's opening of the tally (P1-15, [[tally]])                                                                    |
 | `0x0008`      | contract event         | 1, 3, 4  | One of our contracts' L2 events, including direct-submitted ballots and the definition's registration (P1-18)         |
@@ -151,7 +151,7 @@ Within each segment:
 
 The board operator holds the openings it receives in a period and appends them, sorted, when the period ends, just before the checkpoint. Since every opening payload is distinct in the order, posting an identical opening twice in one segment is impossible.
 
-**What this protects, and what it doesn't.** The rule hides when, within its period, each opening was sent, and stops the operator placing an opening where its position says something (next to another entry, or in arrival order). It does not unlink an opening from the challenged ballot it opens: the opening names that ballot by content, as it must for anyone to check it. That challenged ballot is itself a board entry, posted in the session that cast, so whether _it_ can be linked to the cast ballot (by adjacency, timing or a shared nullifier) is decided by how P1-13 places and builds challenged ballots, not by this rule. P1-13 MUST make a challenged ballot carry nothing that depends on the voter's nullifier, and MUST say how its entry is kept from being tied to the cast ballot, or state the link as a residual in T-47 ([[verifier]] 6.2; T-42, T-47).
+**What this protects, and what it doesn't.** The rule hides when, within its period, each opening was sent, and stops the operator placing an opening where its position says something (next to another entry, or in arrival order). A challenged ballot is never boarded on its own: its core travels inside its opening, which carries nothing that depends on the voter's nullifier, and openings are boarded only in segments after the counted extent's last ([[challenge]], Publication; [[0021-challenged-ballots]]). So nothing reaches the board when a voter challenges, and an opening's position links it only to a period after close, never to the casting session. What an opening's content links it to (the vote it shows, which is usually the voter's real one, and its publisher's network metadata) is [[challenge]]'s residual (T-42, T-47, T-11, T-12).
 
 ## Board checks
 
@@ -204,7 +204,7 @@ The brief requires the board to be hash-chained, and the chain and the tree each
 - **A missed deadline fails the election permanently.** If no timely checkpoint lands for a segment with entries (an operator outage, a hosting seizure, a lost anchoring key, or an anchor transaction kept off L1 by censorship or fees), the election fails `unanchored` and can't be repaired, attributably to the anchoring authority (T-49, T-50, T-53). A longer `deadline` makes this less likely but lengthens the fork window, since voters check only after it. P4-1 MUST justify the value it picks against both, and run anchoring so that one outage can't miss it.
 - **The operator chooses the order** of everything except openings. Nothing that counts may depend on it: that is R3 of [[verifier]] 6.1, which P1-13's re-vote rule must meet.
 - **Withholding** a submission from the board altogether (T-25) isn't detectable from the board: the voter's client sees no receipt and submits directly (P4-2), which leaves no evidence of the refusal, and, for direct submissions, it is caught by our contracts' event accumulators ([[0005-permanent-archive]], P1-18).
-- **Opening order within a period** hides the order of arrival, not the period itself: an opening is linked to the period in which it was posted, which is why clients publish openings only after close (P1-13). It never unlinks an opening from the challenged ballot it opens (above).
+- **Opening order within a period** hides the order of arrival, not the period itself: an opening is linked to the period in which it was posted, which is why clients publish openings only after close ([[challenge]], Publication). It never unlinks an opening from the challenged ballot it opens (above).
 - **An undecodable payload** stays in the permanent archive if an operator breaks the rule above; it is reported, not an election failure (T-17).
 
 ## Owned elsewhere
@@ -212,6 +212,6 @@ The brief requires the board to be hash-chained, and the chain and the tree each
 - The anchoring clock's values, the anchor contract (which rejects untimely anchors and a second checkpoint for an election and segment) and how a verifier finds every anchored checkpoint again: [[contracts]], Board anchor (P4-1). The job that anchors hourly: P4-1 part 2.
 - The verifier reading anchor times from finalized L1 blocks only: P1-19.
 - The contract-event record (`0x0008`), its inclusion evidence, and whether it carries raw transactions ([[notation]], Result-critical fields): P1-18.
-- What a receipt holds and its later checks: [[receipts]]. How challenged ballots are placed and built: P1-13. Where entry-hash lists and segment objects are found: P4-3.
+- What a receipt holds and its later checks: [[receipts]]. How challenged ballots are built, opened and published: [[challenge]]. Where entry-hash lists and segment objects are found: P4-3.
 - Where entries are stored, and the database rules that keep them append-only: P2-1.
 - The verifier's report and how `checkpoint-missing` maps to unverifiable: P1-19.

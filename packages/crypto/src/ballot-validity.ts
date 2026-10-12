@@ -304,22 +304,32 @@ function commitmentSum(vss: CommittedVote["vss"]): Element {
 }
 
 /**
+ * `validity-shape` alone: the counts the election fixes. Exported internally
+ * so trustee intake can check a ciphertext's hash between the shape and the
+ * proofs, which are the costly part (docs/spec/share-encryption.md, Intake).
+ */
+export function shapeOk(ctx: ValidityContext, vote: CommittedVote): boolean {
+  checkContext(ctx);
+  const { optionCount: m, minSelections: min, maxSelections: max, threshold: k } = ctx;
+  return (
+    vote.vss.length === m &&
+    vote.vss.every((e) => e.length === k) &&
+    vote.share_hashes.length === ctx.panelSize &&
+    vote.option_proofs.length === m &&
+    vote.sum_proof.length === max - min + 1
+  );
+}
+
+/**
  * The admission check of docs/spec/ballot-validity.md (Checks; verifier 5.4):
  * shape against the election, then each option proof in order, then the sum
  * proof. The first failure is the result.
  */
 export function checkValidity(ctx: ValidityContext, vote: CommittedVote): ValidityResult {
   checkContext(ctx);
-  const { optionCount: m, minSelections: min, maxSelections: max, threshold: k } = ctx;
+  const { optionCount: m, minSelections: min, maxSelections: max } = ctx;
   const { vss, share_hashes, option_proofs, sum_proof } = vote;
-  if (
-    vss.length !== m ||
-    vss.some((e) => e.length !== k) ||
-    share_hashes.length !== ctx.panelSize ||
-    option_proofs.length !== m ||
-    sum_proof.length !== max - min + 1
-  )
-    return { ok: false, code: "validity-shape" };
+  if (!shapeOk(ctx, vote)) return { ok: false, code: "validity-shape" };
   const statement = statementHash(ctx, vss, share_hashes);
   for (let j = 0; j < m; j++) {
     const p = option_proofs[j] as BitProof;

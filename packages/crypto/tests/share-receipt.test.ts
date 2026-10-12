@@ -2,6 +2,7 @@ import fc from "fast-check";
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vite-plus/test";
 import { kemKeyPairWith } from "../src/share-encryption.ts";
+import { checkReceiptStatement } from "../src/share-receipt.ts";
 import {
   ballotHash,
   checkShareReceipt,
@@ -156,8 +157,8 @@ describe("share-receipt.json", () => {
     });
     expect(vectors.ballotHashes.length).toBe(16);
     expect(vectors.intakes.length).toBe(33);
-    expect(vectors.intakeFailures.length).toBe(9);
-    expect(vectors.receiptChecks.length).toBe(14);
+    expect(vectors.intakeFailures.length).toBe(11);
+    expect(vectors.receiptChecks.length).toBe(16);
   });
 
   test.each(Object.entries(vectors.panels))("derives every key of %s", (_, seats) => {
@@ -203,7 +204,16 @@ describe("share-receipt.json", () => {
         share_hash: r.shareHash,
       };
       expect(bytesHex(shareReceiptStatement(statement))).toBe(v.statement);
-      expect(checkShareReceipt(signers(b.panel as string), statement, r.receipt)).toBe(true);
+      expect(checkReceiptStatement(signers(b.panel as string), statement, r.receipt)).toBe(true);
+      const ctx = validityContext(b.context);
+      expect(checkShareReceipt(signers(b.panel as string), ctx, vote, v.seat, r.receipt)).toBe(
+        true,
+      );
+      // The same receipt never checks for another seat of the same ballot.
+      const other = (v.seat % ctx.panelSize) + 1;
+      expect(checkShareReceipt(signers(b.panel as string), ctx, vote, other, r.receipt)).toBe(
+        false,
+      );
     },
   );
 
@@ -228,7 +238,7 @@ describe("share-receipt.json", () => {
       seat: v.seat,
       share_hash: hex(v.shareHash),
     };
-    expect(checkShareReceipt(signers(v.panel), statement, hex(v.signature))).toBe(v.valid);
+    expect(checkReceiptStatement(signers(v.panel), statement, hex(v.signature))).toBe(v.valid);
   });
 
   test("an identity key is never a receipt signer", () => {
@@ -244,9 +254,9 @@ describe("share-receipt.json", () => {
     };
     const sig = hex(v?.signature as string);
     expect(
-      checkShareReceipt([{ index: 1, signingKey: hex(seat.identityKey) }], statement, sig),
+      checkReceiptStatement([{ index: 1, signingKey: hex(seat.identityKey) }], statement, sig),
     ).toBe(true);
-    expect(checkShareReceipt(signers("panel-3"), statement, sig)).toBe(false);
+    expect(checkReceiptStatement(signers("panel-3"), statement, sig)).toBe(false);
   });
 });
 
@@ -328,7 +338,11 @@ describe("properties", () => {
               seat,
               share_hash: r.shareHash,
             };
-            expect(checkShareReceipt(SIGNERS, statement, r.receipt)).toBe(true);
+            expect(checkReceiptStatement(SIGNERS, statement, r.receipt)).toBe(true);
+            expect(checkShareReceipt(SIGNERS, ctx, vote, seat, r.receipt)).toBe(true);
+            expect(
+              checkShareReceipt(SIGNERS, { ...ctx, tier: ctx.tier ^ 1 }, vote, seat, r.receipt),
+            ).toBe(false);
             // Delivered again, the same receipt (RFC 6979).
             const again = intake(ctx, keysOf(seat), vote, ct);
             expect(again.ok && bytesHex(again.receipt)).toBe(bytesHex(r.receipt));
@@ -373,7 +387,7 @@ describe("properties", () => {
         fc.integer({ min: 1, max: 255 }),
         (s, field, at, x) => {
           const sig = signWith(s);
-          expect(checkShareReceipt(SIGNERS, s, sig)).toBe(true);
+          expect(checkReceiptStatement(SIGNERS, s, sig)).toBe(true);
           // Any one byte of the 97-byte statement changed.
           const m = shareReceiptStatement(s);
           const i = at % m.length;
@@ -384,12 +398,12 @@ describe("properties", () => {
             seat: m[64] as number,
             share_hash: m.slice(65, 97),
           };
-          expect(checkShareReceipt(SIGNERS, changed, sig)).toBe(false);
+          expect(checkReceiptStatement(SIGNERS, changed, sig)).toBe(false);
           // Or the signature itself.
           const bad = Uint8Array.from(sig);
           const j = field % bad.length;
           bad[j] = (bad[j] as number) ^ x;
-          expect(checkShareReceipt(SIGNERS, s, bad)).toBe(false);
+          expect(checkReceiptStatement(SIGNERS, s, bad)).toBe(false);
         },
       ),
       { numRuns },

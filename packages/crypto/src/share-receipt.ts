@@ -7,11 +7,13 @@
 
 import {
   ballotHash,
+  type BallotHashContext,
   checkValidity,
   type CommittedVote,
   type Share,
   type ValidityCode,
   type ValidityContext,
+  shapeOk,
 } from "./ballot-validity.ts";
 import { bytesFixed, type CodecValue, encode, struct, u8 } from "./codec.ts";
 import {
@@ -67,10 +69,14 @@ export type IntakeResult =
   | { readonly ok: false; readonly code: IntakeCode; readonly option?: number };
 
 /**
- * Trustee intake of one ballot's ciphertext: the validity checks under the
- * delivered tier and nullifier, then `share-hash`, then decryption. The first
- * failure is the result, and nothing is signed. The caller has run verifier
- * 2.5 for the election (the rules, the panel and its own registered keys).
+ * Trustee intake of one ballot's ciphertext (docs/spec/share-encryption.md,
+ * Intake and receipts): `validity-shape`, then `share-hash`, then the option
+ * and sum proofs under the delivered tier and nullifier, then decryption. The
+ * first failure is the result, and nothing is signed. The caller has run
+ * verifier 2.5 for the election (the rules, the panel and its own registered
+ * keys), decoded the delivery strictly (`COMMITTED_VOTE`, a `u8` tier, a
+ * `field<bn254>` nullifier) and refused one that doesn't decode, and refused a
+ * tier the definition doesn't list.
  */
 export function intake(
   ctx: ValidityContext,
@@ -81,12 +87,14 @@ export function intake(
   const { seat } = keys;
   if (!Number.isSafeInteger(seat) || seat < 1 || seat > ctx.panelSize)
     throw new RangeError("intake: seat must be a trustee seat from 1 to n");
-  const validity = checkValidity(ctx, vote);
-  if (!validity.ok) return validity;
-  // validity-shape passed, so the ballot has exactly n share hashes.
+  if (!shapeOk(ctx, vote)) return { ok: false, code: "validity-shape" };
+  // The shape holds, so the ballot has exactly n share hashes. This cheap
+  // check runs before the proofs, the costly part of intake.
   const shareHash = shareCiphertextHash(ciphertext);
   if (!equalBytes(shareHash, vote.share_hashes[seat - 1] as Uint8Array))
     return { ok: false, code: "share-hash" };
+  const validity = checkValidity(ctx, vote);
+  if (!validity.ok) return validity;
   const opened = openShares(ctx, seat, keys.kemSecret, vote.vss, ciphertext);
   if (!opened.ok) return opened;
   const hash = ballotHash(ctx, vote);
@@ -111,12 +119,36 @@ export interface ReceiptSigner {
 
 /**
  * `share-receipt` (docs/spec/share-encryption.md, Intake and receipts): true
- * only if `statement.seat` has registered keys and the signature verifies
- * under that seat's signing key. The caller builds the statement from the
- * election and the ballot (its recomputed ballot hash and its share hash for
- * the seat), never from anything the receipt's carrier supplies.
+ * only if `seat` has registered keys and the signature verifies under that
+ * seat's signing key over the statement built from the ballot itself: its
+ * recomputed ballot hash and its share hash for the seat, never values that
+ * came with the receipt. The caller has strictly decoded the ballot.
  */
 export function checkShareReceipt(
+  registered: readonly ReceiptSigner[],
+  ctx: BallotHashContext,
+  vote: CommittedVote,
+  seat: number,
+  signature: Uint8Array,
+): boolean {
+  if (!Number.isSafeInteger(seat) || seat < 1 || seat > vote.share_hashes.length) return false;
+  return checkReceiptStatement(
+    registered,
+    {
+      definition_hash: ctx.definitionHash,
+      ballot_hash: ballotHash(ctx, vote),
+      seat,
+      share_hash: vote.share_hashes[seat - 1] as Uint8Array,
+    },
+    signature,
+  );
+}
+
+/**
+ * The same check over a statement the caller built. Exported internally for
+ * the vectors, which name a statement's hashes directly.
+ */
+export function checkReceiptStatement(
   registered: readonly ReceiptSigner[],
   statement: ShareReceiptStatement,
   signature: Uint8Array,

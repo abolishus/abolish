@@ -77,14 +77,27 @@ def p256_key(d):
     return ecdsa.compress(ecdsa.mul(d, ecdsa.G))
 
 
+def shape_ok(ctx, vote):
+    m, lo, hi, k = ctx["optionCount"], ctx["min"], ctx["max"], ctx["threshold"]
+    return (
+        len(vote["vss"]) == m
+        and all(len(e) == k for e in vote["vss"])
+        and len(vote["shareHashes"]) == ctx["panelSize"]
+        and len(vote["optionProofs"]) == m
+        and len(vote["sumProof"]) == hi - lo + 1
+    )
+
+
 def intake(ctx, seat, kem_key, signing_secret, vote, ct):
-    """Validity, then share-hash, then decryption steps 1 to 5; the receipt only if all pass."""
-    v = bv.check_validity(ctx, vote)
-    if v != "ok":
-        return v, None
+    """validity-shape, share-hash, the proofs, then decryption steps 1 to 5; the receipt only if all pass."""
+    if not shape_ok(ctx, vote):
+        return {"code": "validity-shape"}, None
     sh = se.share_hash(ct)
     if sh != vote["shareHashes"][seat - 1]:
         return {"code": "share-hash"}, None
+    v = bv.check_validity(ctx, vote)
+    if v != "ok":
+        return v, None
     got = se.decrypt(ctx["definitionHash"], seat, kem_key, vote["vss"], ct)
     if got != "ok":
         return {"code": got}, None
@@ -226,6 +239,8 @@ def main():
     sp[0]["z"] = (sp[0]["z"] + 1) % L
     fail("altered-sum-proof", "The sum proof's first response + 1", 1, ct1, "sum-proof", vote=vote_with(sumProof=sp))
     fail("other-seat-ciphertext", "Seat 1 is delivered seat 2's ciphertext", 1, ct2, "share-hash")
+    fail("shape-before-hash", "Under a panel of 4 seats and with seat 2's ciphertext: the shape is checked first", 1, ct2, "validity-shape", ctx=ctx_with(panelSize=4))
+    fail("hash-before-proofs", "Swapped option proofs and seat 2's ciphertext: the share hash is checked before the proofs", 1, ct2, "share-hash", vote=vote_with(optionProofs=[proofs[1], proofs[0], proofs[2]]))
     fail("altered-ciphertext", "Seat 1's ciphertext with its last byte flipped", 1, ct1[:-1] + bytes([ct1[-1] ^ 1]), "share-hash")
 
     # A ballot whose share hash for seat 1 is the hash of bytes that aren't a ciphertext.
@@ -285,6 +300,10 @@ def main():
     check("identity-key", "Seat 1's statement signed with seat 1's identity key, not its per-election key", 1, sign(identity_secret("panel-3", 1), m1), False)
     m4 = statement(dh_, bh, 4, sh1)
     check("unregistered-seat", "A receipt for seat 4 of a 3-seat panel, signed with seat 1's key", 4, sign(signing_secret("panel-3", 1), m4), False)
+    m0 = statement(dh_, bh, 0, sh1)
+    check("seat-zero", "A receipt for seat 0, signed with seat 1's key", 0, sign(signing_secret("panel-3", 1), m0), False)
+    m17 = statement(dh_, bh, 17, sh1)
+    check("seat-over-max", "A receipt for seat 17, above MAX_TRUSTEES, signed with seat 1's key", 17, sign(signing_secret("panel-3", 1), m17), False)
     check("other-definition", "Seat 1's receipt checked under another definition hash", 1, sig1, False, definition_hash=bv.H(b"another election"))
     check("other-ballot", "Seat 1's receipt checked against the bad-share ballot", 1, sig1, False, b_hash=other_bh)
     check("other-ciphertext", "Seat 1's receipt checked against seat 2's share hash", 1, sig1, False, share_hash=sh2)

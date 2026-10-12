@@ -68,8 +68,43 @@ def definition_for(panel, transcript_hash, **changes):
     return d
 
 
-def board(election_id, payloads):
-    return b"".join(bdv.entry(election_id, i, 0, p) for i, p in enumerate(payloads))
+BOARD_ENTRY_TYPE = 0x0007
+BALLOT_TYPE = 0x0002
+TALLY_OPENING_TYPE = 0x0006
+# docs/spec/board.md, Allowed payloads: version 3 adds share receipts (0x000c)
+# and complaints (0x000e) to version 1's set; version 4 adds the destruction
+# statement (0x000f). Every version has the same layout.
+ALLOWED = {1: set(bdv.PAYLOAD_TYPES)}
+ALLOWED[3] = ALLOWED[1] | {0x000C, 0x000E}
+ALLOWED[4] = ALLOWED[3] | {0x000F}
+
+
+def entry(version, election_id, index, segment, payload):
+    if version == 1:
+        return bdv.entry(election_id, index, segment, payload)
+    assert int.from_bytes(payload[:2], "big") in ALLOWED[version]
+    return bdv.entry(election_id, index, segment, payload)[:2] + bytes([version]) + bdv.entry(election_id, index, segment, payload)[3:]
+
+
+def decode_entry(b, pinned):
+    """The envelope under the pinned version: board-vectors.py's strict decoder, with the version's own allowed set."""
+    if len(b) < 3 or b[2] != pinned:
+        return "version"
+    d = bdv.decode_entry(b[:2] + b"\x01" + b[3:])
+    if isinstance(d, str) and d != "unexpected-record-type":
+        return d
+    t = int.from_bytes(b[51:53], "big")
+    if t not in ALLOWED[pinned]:
+        return "unexpected-record-type"
+    return d
+
+
+def combination(defn):
+    """2.3's profile-combination (docs/spec/verifier.md, 2.3), from the spec's text."""
+    pins = dict(defn["profile"]["pins"])
+    board, ballot, opening = pins[BOARD_ENTRY_TYPE], pins.get(BALLOT_TYPE), pins.get(TALLY_OPENING_TYPE)
+    fits = (ballot != 1 or board in (3, 4)) and (opening != 1 or board == 4)
+    return NOT_IMPLEMENTED if fits else outcome("fail", "profile-combination", {})
 
 
 def transcript(label, panel, seats, election, cheat=None):
@@ -90,7 +125,7 @@ NOT_REACHED = outcome("unverifiable", "not-reached")
 NOT_IMPLEMENTED = outcome("unverifiable", "not-implemented")
 
 
-def expected(panel, defn, entries, bundle_panel):
+def expected(panel, defn, entries, bundle_panel, board_version=1):
     """The rows a verifier reports (docs/spec/verifier.md, Key ceremony), computed here independently."""
     if cv.panel_id(bundle_panel["k"], bundle_panel["keys"]) != defn["panel_id"] or (
         bundle_panel["k"],
@@ -103,7 +138,7 @@ def expected(panel, defn, entries, bundle_panel):
         return dict(rows, **{"3.1": unsupported, "3.2": unsupported}), None
     found = None
     for at, e in enumerate(entries):
-        d = bdv.decode_entry(e)
+        d = decode_entry(e, board_version)
         if isinstance(d, str) or d["electionId"] != defn["election_id"]:
             continue
         payload = d["payload"]
@@ -152,11 +187,19 @@ def main(out):
     stray = transcript("verifier/abandoned", panel, seats, election)
     cases = []
 
-    def add(id_, desc, t, payloads, bundle_panel="panel-4", entry_election=eid, named="panel-4", **changes):
+    def add(id_, desc, t, payloads, bundle_panel="panel-4", entry_election=eid, named="panel-4", board_version=None, entry_version=None, **changes):
         named = panels[named]
+        if board_version is not None:
+            pins = [(ty, board_version if ty == BOARD_ENTRY_TYPE else v) for ty, v in dv.TYPICAL["profile"]["pins"]]
+            changes = dict(changes, profile={"protocol_major": 1, "pins": pins})
+        pinned = 1 if board_version is None else board_version
+        written = pinned if entry_version is None else entry_version
         defn = definition_for(named, H(ds(TRANSCRIPT_TAG, t)), **changes)
-        entries = [bdv.entry(entry_election if p is t else eid, i, 0, p) for i, p in enumerate(payloads)]
-        rows, ceremony = expected(named, defn, entries, panels[bundle_panel])
+        entries = [entry(written, entry_election if p is t else eid, i, 0, p) for i, p in enumerate(payloads)]
+        rows, ceremony = expected(named, defn, entries, panels[bundle_panel], pinned)
+        # Cases from P1-19 part 4b on also give 2.3's combination row.
+        if board_version is not None:
+            rows = dict(rows, **{"2.3": combination(defn)})
         case = {
             "id": id_,
             "description": desc,
@@ -229,6 +272,23 @@ def main(out):
     assert add("participation-disqualified", "A 4-of-7 panel where all seven seats send every round but seats 6 and 7 answer wrongly: five qualified seats, below n − 1, though seven took part in the messages.", disqualified, [disqualified], bundle_panel="panel-7", named="panel-7")["3.2"]["code"] == "ceremony-participation"
     four = transcript("verifier/panel-7-four", panel7, [1, 2, 3, 4], election7)
     assert add("participation-four", "A 4-of-7 panel where only seats 1 to 4 take part: exactly k, two short of n − 1.", four, [four], bundle_panel="panel-7", named="panel-7")["3.2"]["code"] == "ceremony-participation"
+
+    # Board-entry versions 3 and 4 (P1-19 part 4b): the transcript is found
+    # under the pinned version, and 2.3 reports whether the pins fit. The
+    # profile is part of the stub, so each version has its own transcripts.
+    def for_board(version):
+        pins = [(ty, version if ty == BOARD_ENTRY_TYPE else v) for ty, v in dv.TYPICAL["profile"]["pins"]]
+        e = election_of(definition_for(panel, bytes(32), profile={"protocol_major": 1, "pins": pins}))
+        return transcript(f"verifier/board-v{version}", panel, seats, e), transcript(f"verifier/board-v{version}-abandoned", panel, seats, e)
+
+    v4, v4_stray = for_board(4)
+    assert add("board-v4", "The profile pins board-entry version 4, which carries destruction statements: the pins fit, and the transcript is found in a version-4 entry after an abandoned run's.", v4, [v4_stray, v4], board_version=4)["3.2"] == outcome("pass")
+    v3, _ = for_board(3)
+    r = add("board-v3", "The profile pins board-entry version 3 beside tally-opening version 1: 2.3 fails profile-combination, and the transcript check still runs under version 3.", v3, [v3], board_version=3)
+    assert r["2.3"]["code"] == "profile-combination" and r["3.2"] == outcome("pass")
+    r = add("board-v1-pinned", "The profile pins board-entry version 1 beside ballot version 1: 2.3 fails profile-combination; the transcript check still runs.", honest, [honest], board_version=1)
+    assert r["2.3"]["code"] == "profile-combination" and r["3.2"] == outcome("pass")
+    assert add("board-v4-entry-v1", "The profile pins board-entry version 4, but the transcript was boarded in a version-1 entry, which doesn't decode under the pinned version: missing.", v4, [v4], board_version=4, entry_version=1)["3.1"]["code"] == "ceremony-transcript-missing"
 
     doc = {
         "format": "abolish-verifier-ceremony-vectors/1",

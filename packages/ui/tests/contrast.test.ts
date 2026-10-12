@@ -56,6 +56,7 @@ const pairs: [string, string][] = [
   ["primary-foreground", "primary"],
   ["secondary-foreground", "secondary"],
   ["card-foreground", "card"],
+  ["muted-foreground", "card"],
   ["accent-foreground", "accent"],
   ["recorded", "background"],
   ["pending", "background"],

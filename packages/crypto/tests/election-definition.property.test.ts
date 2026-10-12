@@ -516,6 +516,23 @@ describe("2.3's profile combination", () => {
     expect(profileCombinationRule(pinning(4, 1, 1))).toBeUndefined();
   });
 
+  test("definition version 4 keeps version 3's regional cells, so it refuses them too", () => {
+    const v4 = (ballot: number) => {
+      const d = pinning(4, ballot, 1);
+      return {
+        ...d,
+        profile: {
+          ...d.profile,
+          pins: d.profile.pins.map((p) =>
+            p.record_type === RECORD_TYPES.electionDefinition ? { ...p, version: 4 } : p,
+          ),
+        },
+      };
+    };
+    expect(profileCombinationRule(v4(1))).toBe("profile-combination");
+    expect(profileCombinationRule(v4(2))).toBe("profile-combination");
+  });
+
   test("a definition pinning no board-entry version is unsupported, never a failure", () => {
     const none = {
       ...sampleDefinition,

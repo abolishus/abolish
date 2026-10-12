@@ -4,6 +4,7 @@
 // the spec's vectors, never from the code under test.
 
 import { ristretto255 } from "@noble/curves/ed25519.js";
+import { p256 } from "@noble/curves/nist.js";
 import { readFileSync } from "node:fs";
 import {
   bool,
@@ -15,6 +16,7 @@ import {
   enum8,
   fieldBn254,
   list,
+  p256Key,
   RecordSchema,
   type RecordType,
   recordType,
@@ -38,6 +40,7 @@ export type TypeDescriptor =
   | { readonly kind: "field"; readonly field: string }
   | { readonly kind: "scalar" }
   | { readonly kind: "element"; readonly identity: "allowed" | "rejected" }
+  | { readonly kind: "p256-key" }
   | { readonly kind: "list"; readonly max: number; readonly of: TypeDescriptor }
   | { readonly kind: "struct"; readonly fields: readonly FieldDescriptor[] }
   | { readonly kind: "ref"; readonly name: string }
@@ -165,6 +168,17 @@ export function build(descriptor: TypeDescriptor, types: NamedTypes = {}): Built
         codec: t.identity === "allowed" ? elementOrIdentity : element,
         // Decoded by @noble/curves directly, not through the codec under test.
         fromJson: (v) => ristretto255.Point.fromBytes(hex(asString(v))),
+      };
+    case "p256-key":
+      return {
+        codec: p256Key,
+        fromJson: (v) => {
+          // Checked by @noble/curves directly, not through the codec under test.
+          const b = hex(asString(v));
+          if (b.length !== 33) throw new Error("a p256-key is 33 bytes");
+          p256.Point.fromBytes(b).assertValidity();
+          return b;
+        },
       };
     case "list": {
       const of = build(t.of, types);

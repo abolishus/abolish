@@ -17,6 +17,7 @@ import {
   ELECTION_DEFINITION,
   type ElectionDefinition,
   type ElectionDefinitionV3,
+  type ElectionDefinitionV4,
   electionDefinitionRule,
   type ElectionDefinitionRule,
 } from "./election-definition.ts";
@@ -55,10 +56,15 @@ export function encodeElectionDefinitionV3(d: ElectionDefinitionV3): Uint8Array 
   return PROTOCOL_SCHEMA.encode(ELECTION_DEFINITION, 3, d);
 }
 
+export function encodeElectionDefinitionV4(d: ElectionDefinitionV4): Uint8Array {
+  return PROTOCOL_SCHEMA.encode(ELECTION_DEFINITION, 4, d);
+}
+
 /** A decoded definition of any version this package reads. */
 export type ElectionDefinitionRecord =
   | { readonly version: 1; readonly value: ElectionDefinition }
-  | { readonly version: 3; readonly value: ElectionDefinitionV3 };
+  | { readonly version: 3; readonly value: ElectionDefinitionV3 }
+  | { readonly version: 4; readonly value: ElectionDefinitionV4 };
 
 /**
  * Strictly decodes an election definition of any version, then checks it
@@ -103,6 +109,17 @@ export function electionDefinitionV3Hash(d: ElectionDefinitionV3): Uint8Array {
   return H(ds("abolish/v1/election-definition", encodeElectionDefinitionV3(d)));
 }
 
+/** `electionDefinitionHash` for version 4: the same tag over the version-4 encoding. */
+export function electionDefinitionV4Hash(d: ElectionDefinitionV4): Uint8Array {
+  return H(ds("abolish/v1/election-definition", encodeElectionDefinitionV4(d)));
+}
+
+/** `electionStubHash` for version 4: the receipt keys are in the stub, fixed before the ceremony (T-26). */
+export function electionStubV4Hash(d: ElectionDefinitionV4): Uint8Array {
+  const stub = { ...d, ceremony_transcript_hash: new Uint8Array(32) };
+  return H(ds("abolish/v1/election-stub", encodeElectionDefinitionV4(stub)));
+}
+
 /** `electionStubHash` for version 3. */
 export function electionStubV3Hash(d: ElectionDefinitionV3): Uint8Array {
   const stub = { ...d, ceremony_transcript_hash: new Uint8Array(32) };
@@ -134,7 +151,7 @@ export function pinnedVersion(
 const isBoardEntryVersion = (v: number | undefined): v is BoardEntryVersion =>
   v !== undefined && Object.hasOwn(BOARD_ENTRY.versions, v);
 
-// Ballot versions that name their cell, which definition version 3 needs;
+// Ballot versions that name their cell, which definition versions 3 and 4 need;
 // P1-12 adds the first.
 const CELL_BALLOT_VERSIONS: ReadonlySet<number> = new Set<number>();
 
@@ -159,7 +176,7 @@ export type ProfileCombinationRule = "profile-combination" | "unsupported-versio
  * that rule: run it first.
  */
 export function profileCombinationRule(
-  d: ElectionDefinition | ElectionDefinitionV3,
+  d: ElectionDefinition | ElectionDefinitionV3 | ElectionDefinitionV4,
 ): ProfileCombinationRule | undefined {
   const board = pinnedVersion(d, RECORD_TYPES.boardEntry);
   if (!isBoardEntryVersion(board)) return "unsupported-version";
@@ -170,7 +187,8 @@ export function profileCombinationRule(
   // only a tier and no version names a cell yet, so every ballot version is
   // refused until one does, never only the known one (docs/spec/
   // election-definition.md, Notes; T-16, T-34).
-  if (pinnedVersion(d, RECORD_TYPES.electionDefinition) === 3 && !CELL_BALLOT_VERSIONS.has(ballot))
+  const definition = pinnedVersion(d, RECORD_TYPES.electionDefinition);
+  if ((definition === 3 || definition === 4) && !CELL_BALLOT_VERSIONS.has(ballot))
     return "profile-combination";
   const allowed = boardPayloadTypes(board);
   const carriesDelivery =

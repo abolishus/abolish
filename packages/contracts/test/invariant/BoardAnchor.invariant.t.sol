@@ -6,9 +6,9 @@ import {TestBase} from "../utils/Vm.sol";
 
 contract InvariantAuthority {}
 
-/// Moves the clock and sends checkpoints for a few elections and segments,
-/// from the authority or anyone else, keeping a shadow of what the anchor
-/// should hold.
+/// Moves the clock, sends checkpoints for a few elections and segments, and
+/// registers and retires a few receipt keys, from the authority or anyone
+/// else, keeping a shadow of what the anchor should hold.
 contract AnchorHandler is TestBase {
     uint64 internal constant EPOCH = 1_800_000_000;
 
@@ -24,6 +24,10 @@ contract AnchorHandler is TestBase {
     uint256 public anchored;
     /// Locators logged by successful calls.
     uint256 public locators;
+    /// Receipt-key records by key index (0–3: prefixes 0x02 and 0x03 of two
+    /// `x` values), as `(registeredAt, retiredAt)`, and the writes that succeeded.
+    mapping(uint256 k => uint64[2]) internal shadowKey;
+    uint256 public keyWrites;
     /// Set if a call succeeded or failed against the rules.
     bool public unexpected;
 
@@ -92,6 +96,36 @@ contract AnchorHandler is TestBase {
         }
     }
 
+    /// Registers or retires one of four receipt keys, from the authority
+    /// unless `stranger` is set.
+    function writeKey(uint8 k, bool retire, bool stranger) external {
+        k %= 4;
+        bytes memory key = receiptKey(k);
+        uint64[2] memory record = shadowKey[k];
+        // Keys 2j and 2j + 1 are twins (one x, both prefixes): registering
+        // either keeps the other out for good.
+        bool allowed = !stranger
+            && (retire
+                    ? record[0] != 0 && record[1] == 0
+                    : record[0] == 0 && shadowKey[k ^ 1][0] == 0);
+        vm.prank(stranger ? address(0x5742) : authority);
+        try (retire ? anchor.retireReceiptKey : anchor.registerReceiptKey)(key) {
+            if (!allowed) unexpected = true;
+            shadowKey[k][retire ? 1 : 0] = uint64(block.timestamp);
+            keyWrites++;
+        } catch {
+            if (allowed) unexpected = true;
+        }
+    }
+
+    function receiptKey(uint256 k) public pure returns (bytes memory) {
+        return abi.encodePacked(uint8(2 + k % 2), keccak256(abi.encode(k / 2)));
+    }
+
+    function keyRecord(uint256 k) external view returns (uint64, uint64) {
+        return (shadowKey[k][0], shadowKey[k][1]);
+    }
+
     /// Half the time one of the two periods that ended last, so anchors
     /// succeed often; otherwise any of segments 0–7.
     function _segment(uint256 r) internal view returns (uint32) {
@@ -116,11 +150,16 @@ contract AnchorHandler is TestBase {
 /// 3. The anchor keeps, per election, one more than the lowest segment
 ///    anchored, or 0 (T-24: a verifier proves every slot from there).
 /// 4. The anchor's locator count equals the locators posted.
-/// 5. The event accumulator counts one log per anchored checkpoint and per
-///    locator.
+/// 5. The event accumulator counts one log per anchored checkpoint, per
+///    locator and per receipt-key write.
+/// 6. Each receipt key's record holds the time of its first registration and
+///    of the first retirement after it, or zero: only the authority writes
+///    it, and never a second time (T-26, T-69).
 /// `test_HandlerAnchors` shows the handler reaches the success path, so the
 /// invariants aren't checked only against an empty anchor.
 contract BoardAnchorInvariantTest is TestBase {
+    bytes32 internal constant ANCHOR_SLOT =
+        0x16eba4501d0a9dddbfa03518d843c364be664629e6d99efb7169d8f090095b00;
     BoardAnchor internal anchor;
     AnchorHandler internal handler;
 
@@ -176,6 +215,37 @@ contract BoardAnchorInvariantTest is TestBase {
 
     function invariant_EveryAnchorIsAccumulated() public view {
         (, uint64 count) = anchor.eventAccumulator();
-        assertEq(count, handler.anchored() + handler.locators(), "event count");
+        assertEq(
+            count, handler.anchored() + handler.locators() + handler.keyWrites(), "event count"
+        );
+    }
+
+    /// Read from the word a verifier proves, so a stray bit the getter
+    /// would hide fails too: the high 128 bits stay zero and a retirement
+    /// never precedes its registration (docs/spec/verifier.md 2.9,
+    /// `receipt-key-record`).
+    function invariant_ReceiptKeyRecordsMatchTheShadow() public view {
+        for (uint256 k; k < 4; k++) {
+            bytes memory key = handler.receiptKey(k);
+            bytes32 inner = keccak256(abi.encode(uint256(uint8(key[0])), uint256(ANCHOR_SLOT) + 4));
+            uint256 word = uint256(
+                vm.load(address(anchor), keccak256(abi.encode(keccak256(abi.encode(k / 2)), inner)))
+            );
+            uint64 registeredAt = uint64(word);
+            uint64 retiredAt = uint64(word >> 64);
+            assertEq(word >> 128, 0, "high bits");
+            assertTrue(retiredAt == 0 || (registeredAt != 0 && retiredAt >= registeredAt), "order");
+            (uint64 wantRegistered, uint64 wantRetired) = handler.keyRecord(k);
+            assertEq(registeredAt, wantRegistered, "registeredAt");
+            assertEq(retiredAt, wantRetired, "retiredAt");
+        }
+    }
+
+    function test_HandlerWritesReceiptKeys() public {
+        for (uint256 i; i < 8; i++) {
+            handler.writeKey(uint8(i), i >= 4, false);
+        }
+        // Keys 1 and 3 are twins of 0 and 2, so only 0 and 2 are registered and retired.
+        assertEq(handler.keyWrites(), 4, "every allowed write lands");
     }
 }

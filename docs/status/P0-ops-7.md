@@ -1,6 +1,6 @@
 # P0-ops-7: no merged tiers in 2.8
 
-- State: done when its PR merges
+- State: done (#34)
 - Branch: `claude/p0-ops-7`
 
 ## Scope

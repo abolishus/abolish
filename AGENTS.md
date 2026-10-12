@@ -47,7 +47,7 @@ Run your own review pass and fix what it finds:
 3. Threat-model compliance: does the change cite the threats it addresses, and does it weaken any mitigation?
 4. Style matches the surrounding code. No dead code. Comments explain why, not what.
 5. For changes to protocol code (`packages/{crypto,circuits,contracts,verifier,core,sdk,capacitor-zk-prover,capacitor-nfc-passport}`, `apps/ballot`, `docs/spec`): launch an **independent subagent review** in-session, using the `crypto-review` skill's checklist, and address every finding **before** opening the PR.
-6. Update the item's `docs/status/<item-id>.md` in the same PR: its state, and what's tested and what's known-weak.
+6. Update the item's `docs/status/<item-id>.md` in the same PR: its state, and what's tested and what's known-weak. Write the state as it will be once this PR merges (`done (#N)`, or `in progress (part 2 merged in #N; part 3 next)`), never `in review`: nothing updates the file after the merge.
 
 PR title: conventional-commit style (`feat(crypto): ...`, `fix(api): ...`, `docs: ...`, `ci: ...`). PR body: what changed, which threats it addresses, how it's tested, and what's known-weak.
 

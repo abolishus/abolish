@@ -6,7 +6,7 @@ Last updated: 2026-10-10 (P0-ops: items split into `docs/status/`).
 
 ## Queue
 
-Each item's state (`todo`, `in progress`, `blocked`, `needs owner decision`, `done`) is in its own file only, so starting or finishing an item never edits this index. Done as of 2026-10-12: P0-1 to P0-4, P1-1 to P1-6, P1-8 to P1-11, P1-14, P1-16, P1-16b, P1-17 and P1-17c.
+Each item's state (`todo`, `in progress`, `blocked`, `needs owner decision`, `done`) is in its own file only, so starting or finishing an item never edits this index. Done as of 2026-10-12: P0-1 to P0-4, P1-1 to P1-6, P1-8 to P1-11, P1-14, P1-16, P1-16b, P1-17, P1-17c, P2-1, P2-2, P2-5, P2-7 and P3-1, plus every P0-ops item.
 
 ### Phase 0: Bootstrap
 

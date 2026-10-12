@@ -48,6 +48,7 @@ export class BallotWorker {
   /** Checks an election in the worker (election.ts). */
   async checkElection(
     electionId: Uint8Array,
+    registeredHash: Uint8Array,
     definition: Uint8Array,
     displayText: Uint8Array,
   ): Promise<ElectionCheck> {
@@ -64,6 +65,7 @@ export class BallotWorker {
         id,
         kind: "check-election",
         electionId,
+        registeredHash,
         definition,
         displayText,
       });

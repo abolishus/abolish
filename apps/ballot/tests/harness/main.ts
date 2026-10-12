@@ -14,9 +14,15 @@ const fromHex = (hex: string) =>
 
 const harness = {
   /** The worker's verdict, with its bigints as strings so the test can read it. */
-  async check(electionId: string, definition: string, displayText: string): Promise<string> {
+  async check(
+    electionId: string,
+    registeredHash: string,
+    definition: string,
+    displayText: string,
+  ): Promise<string> {
     const result = await worker.checkElection(
       fromHex(electionId),
+      fromHex(registeredHash),
       fromHex(definition),
       fromHex(displayText),
     );
@@ -27,7 +33,12 @@ const harness = {
     worker.terminate();
     const started = performance.now();
     try {
-      await worker.checkElection(new Uint8Array(32), new Uint8Array(), new Uint8Array());
+      await worker.checkElection(
+        new Uint8Array(32),
+        new Uint8Array(32),
+        new Uint8Array(),
+        new Uint8Array(),
+      );
       return "answered";
     } catch (e) {
       return `${e instanceof Error ? e.name : "?"} after ${Math.round(performance.now() - started)} ms`;

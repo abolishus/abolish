@@ -51,6 +51,18 @@ const definitionVectors = vectors<DefinitionVector>("election-definition");
 const textVectors = vectors<TextVector>("display-text");
 
 const hex = (s: string) => Uint8Array.from(Buffer.from(s, "hex"));
+
+/** The definition hash by the spec's formula, with node:crypto rather than the code under test. */
+const definitionHash = (bytes: Uint8Array) => {
+  const tag = Buffer.from("abolish/v1/election-definition", "ascii");
+  return createHash("sha256")
+    .update(Buffer.concat([Buffer.from([tag.length]), tag, bytes]))
+    .digest();
+};
+
+/** The check, with the registry holding the hash of exactly the definition served. */
+const check = (electionId: Uint8Array, definition: Uint8Array, displayText: Uint8Array) =>
+  checkElection(electionId, Uint8Array.from(definitionHash(definition)), definition, displayText);
 const text = (s: string) => Buffer.from(s, "hex").toString("utf8");
 
 function vector<T extends { id: string }>(list: T[], id: string): T {
@@ -83,15 +95,10 @@ describe("the election", () => {
 
   test("shows the definition's own hash, by the spec's formula over its bytes", () => {
     const encoding = encodeElectionDefinition(goodDefinition());
-    const result = checkElection(typical.election_id, encoding, anyText);
+    const result = check(typical.election_id, encoding, anyText);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    const tag = Buffer.from("abolish/v1/election-definition", "ascii");
-    expect(result.election.definitionHash).toBe(
-      createHash("sha256")
-        .update(Buffer.concat([Buffer.from([tag.length]), tag, encoding]))
-        .digest("hex"),
-    );
+    expect(result.election.definitionHash).toBe(definitionHash(encoding).toString("hex"));
   });
 
   test("names an approval election as one", () => {
@@ -105,7 +112,7 @@ describe("the election", () => {
       max_selections: 2,
     };
     expect(
-      checkElection(definition.election_id, encodeElectionDefinition(definition), anyText),
+      check(definition.election_id, encodeElectionDefinition(definition), anyText),
     ).toMatchObject({
       ok: true,
       election: { electionType: "approval", minSelections: 1, maxSelections: 2 },
@@ -119,18 +126,25 @@ describe("the election", () => {
     const encoding = hex(vector(definitionVectors, id).encoding);
     const electionId =
       rule === undefined ? typical.election_id : decodeElectionDefinition(encoding).election_id;
-    expect(checkElection(electionId, encoding, anyText)).toEqual(
+    expect(check(electionId, encoding, anyText)).toEqual(
       rule === undefined ? { ok: false, problem } : { ok: false, problem, rule },
     );
   });
 
-  test("passes on the refusal of another election's definition", () => {
+  test("passes on the refusal of a definition the registry doesn't hold", () => {
     expect(
       checkElection(
-        new Uint8Array(32).fill(0xff),
+        typical.election_id,
+        new Uint8Array(32),
         encodeElectionDefinition(goodDefinition()),
         anyText,
       ),
+    ).toEqual({ ok: false, problem: "unregistered-definition" });
+  });
+
+  test("passes on the refusal of another election's definition", () => {
+    expect(
+      check(new Uint8Array(32).fill(0xff), encodeElectionDefinition(goodDefinition()), anyText),
     ).toEqual({ ok: false, problem: "another-election" });
   });
 });
@@ -146,7 +160,7 @@ describe("the display text", () => {
         Number(v.definition.optionCount),
         hex(v.definition.displayTextCommitment),
       );
-      const result = checkElection(
+      const result = check(
         definition.election_id,
         encodeElectionDefinition(definition),
         hex(v.encoding),
@@ -184,11 +198,7 @@ describe("the display text", () => {
         hex(v.definition.displayTextCommitment),
       );
       expect(
-        checkElection(
-          definition.election_id,
-          encodeElectionDefinition(definition),
-          hex(v.encoding),
-        ),
+        check(definition.election_id, encodeElectionDefinition(definition), hex(v.encoding)),
       ).toEqual({ ok: false, problem: "display-text-ill-formed", rule: v.illFormed });
     },
   );
@@ -197,11 +207,7 @@ describe("the display text", () => {
     "refuses $id, which doesn't decode",
     ({ encoding }) => {
       expect(
-        checkElection(
-          typical.election_id,
-          encodeElectionDefinition(goodDefinition()),
-          hex(encoding),
-        ),
+        check(typical.election_id, encodeElectionDefinition(goodDefinition()), hex(encoding)),
       ).toEqual({ ok: false, problem: "display-text-undecodable" });
     },
   );
@@ -211,11 +217,7 @@ describe("the display text", () => {
   test("refuses text the definition doesn't commit to", () => {
     for (const v of withDefinition.filter((x) => x.illFormed === undefined && x !== goodText))
       expect(
-        checkElection(
-          typical.election_id,
-          encodeElectionDefinition(goodDefinition()),
-          hex(v.encoding),
-        ),
+        check(typical.election_id, encodeElectionDefinition(goodDefinition()), hex(v.encoding)),
       ).toEqual({ ok: false, problem: "display-text-ill-formed", rule: "commitment" });
   });
 });

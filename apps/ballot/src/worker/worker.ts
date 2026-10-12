@@ -27,7 +27,12 @@ scope.onmessage = ({ data }) => {
       v: PROTOCOL_VERSION,
       id: request.id,
       kind: "check-election",
-      result: checkElection(request.electionId, request.definition, request.displayText),
+      result: checkElection(
+        request.electionId,
+        request.registeredHash,
+        request.definition,
+        request.displayText,
+      ),
     };
   } catch {
     response = { v: PROTOCOL_VERSION, id: request.id, kind: "error" };

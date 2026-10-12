@@ -15,6 +15,8 @@ export interface CheckElectionRequest {
   readonly id: number;
   readonly kind: "check-election";
   readonly electionId: Uint8Array;
+  /** The definition hash the L2 election registry holds for `electionId`. */
+  readonly registeredHash: Uint8Array;
   readonly definition: Uint8Array;
   readonly displayText: Uint8Array;
 }
@@ -36,24 +38,34 @@ const isRecord = (x: unknown): x is Record<string, unknown> =>
 
 const isId = (x: unknown): x is number => Number.isSafeInteger(x) && (x as number) >= 0;
 
-const REQUEST_KEYS = ["definition", "displayText", "electionId", "id", "kind", "v"];
+const REQUEST_KEYS = [
+  "definition",
+  "displayText",
+  "electionId",
+  "id",
+  "kind",
+  "registeredHash",
+  "v",
+];
 
-/** A request the worker accepts, or `undefined`: exact keys, exact types, a 32-byte election id. */
+/** A request the worker accepts, or `undefined`: exact keys, exact types, a 32-byte election id and hash. */
 export function parseRequest(data: unknown): WorkerRequest | undefined {
   if (!isRecord(data)) return undefined;
   const keys = Object.keys(data).sort();
   if (keys.length !== REQUEST_KEYS.length || !keys.every((k, i) => k === REQUEST_KEYS[i]))
     return undefined;
-  const { v, id, kind, electionId, definition, displayText } = data;
+  const { v, id, kind, electionId, registeredHash, definition, displayText } = data;
   if (v !== PROTOCOL_VERSION || !isId(id) || kind !== "check-election") return undefined;
   if (
     !(electionId instanceof Uint8Array) ||
     electionId.length !== 32 ||
+    !(registeredHash instanceof Uint8Array) ||
+    registeredHash.length !== 32 ||
     !(definition instanceof Uint8Array) ||
     !(displayText instanceof Uint8Array)
   )
     return undefined;
-  return { v, id, kind, electionId, definition, displayText };
+  return { v, id, kind, electionId, registeredHash, definition, displayText };
 }
 
 /** The id of a request the worker refuses, so its error can be matched; `undefined` if it has none. */

@@ -6,6 +6,7 @@ import { describe, expect, test } from "vite-plus/test";
 
 import {
   checkElectionToShow,
+  encodeDisplayText,
   decodeElectionDefinition,
   type ElectionDefinition,
   encodeElectionDefinition,
@@ -15,7 +16,8 @@ import {
 // `checkElectionToShow`, the checks software must pass before it shows an
 // election to a voter (docs/spec/display-text.md, Checks), against the
 // published vectors: every definition the vectors call undecodable or
-// ill-formed is refused, so is every good one under another election's id,
+// ill-formed is refused, so is every good one under another election's id or
+// a hash the registry doesn't hold,
 // and display text is shown only if it decodes, matches the definition's
 // commitment and is well formed (T-34, T-41).
 
@@ -45,6 +47,25 @@ const vectors = <T>(name: string): T[] =>
 const definitionVectors = vectors<DefinitionVector>("election-definition");
 const textVectors = vectors<TextVector>("display-text");
 const hex = (s: string) => Uint8Array.from(Buffer.from(s, "hex"));
+
+/** `H(DS(tag, bytes))` by the spec's formula, with node:crypto rather than the code under test. */
+function specHash(tag: string, bytes: Uint8Array): Uint8Array {
+  const t = Buffer.from(tag, "ascii");
+  return Uint8Array.from(
+    createHash("sha256")
+      .update(Buffer.concat([Buffer.from([t.length]), t, bytes]))
+      .digest(),
+  );
+}
+
+/** The check, with the registry holding the hash of exactly the definition served. */
+const show = (electionId: Uint8Array, definition: Uint8Array, displayText: Uint8Array) =>
+  checkElectionToShow(
+    electionId,
+    specHash("abolish/v1/election-definition", definition),
+    definition,
+    displayText,
+  );
 
 function vector<T extends { id: string }>(list: T[], id: string): T {
   const found = list.find((v) => v.id === id);
@@ -77,7 +98,7 @@ describe("the election definition", () => {
   test.each(definitionVectors.filter((v) => v.error !== undefined))(
     "refuses $id, which doesn't decode",
     ({ encoding }) => {
-      expect(checkElectionToShow(typical.election_id, hex(encoding), anyText)).toEqual({
+      expect(show(typical.election_id, hex(encoding), anyText)).toEqual({
         ok: false,
         problem: "definition-undecodable",
       });
@@ -88,7 +109,7 @@ describe("the election definition", () => {
     "refuses $id, which breaks $illFormed",
     ({ encoding, illFormed }) => {
       const id = decodeElectionDefinition(hex(encoding)).election_id;
-      expect(checkElectionToShow(id, hex(encoding), anyText)).toEqual({
+      expect(show(id, hex(encoding), anyText)).toEqual({
         ok: false,
         problem: "definition-ill-formed",
         rule: illFormed,
@@ -103,7 +124,7 @@ describe("the election definition", () => {
       fc.assert(
         fc.property(fc.uint8Array({ minLength: 32, maxLength: 32 }), (other) => {
           fc.pre(!own.every((b, i) => b === other[i]));
-          expect(checkElectionToShow(other, hex(encoding), anyText)).toEqual({
+          expect(show(other, hex(encoding), anyText)).toEqual({
             ok: false,
             problem: "another-election",
           });
@@ -113,15 +134,41 @@ describe("the election definition", () => {
     },
   );
 
-  test("refuses an election id that isn't 32 bytes", () => {
-    for (const id of [new Uint8Array(31), new Uint8Array(33)])
-      expect(() => checkElectionToShow(id, goodDefinition, anyText)).toThrow(TypeError);
+  // The registry is what ties the records to the election: without it, a
+  // server serving both could commit a forged definition to relabelled text.
+  test("refuses a definition whose hash isn't the one registered", () => {
+    const registered = specHash("abolish/v1/election-definition", goodDefinition);
+    fc.assert(
+      fc.property(fc.uint8Array({ minLength: 32, maxLength: 32 }), (other) => {
+        fc.pre(!registered.every((b, i) => b === other[i]));
+        expect(checkElectionToShow(typical.election_id, other, goodDefinition, anyText)).toEqual({
+          ok: false,
+          problem: "unregistered-definition",
+        });
+      }),
+      { numRuns },
+    );
+    expect(
+      checkElectionToShow(typical.election_id, registered, goodDefinition, anyText),
+    ).toMatchObject({ ok: true });
+  });
+
+  test("refuses ids and hashes that aren't 32 bytes", () => {
+    const registered = specHash("abolish/v1/election-definition", goodDefinition);
+    for (const bad of [new Uint8Array(31), new Uint8Array(33)]) {
+      expect(() => checkElectionToShow(bad, registered, goodDefinition, anyText)).toThrow(
+        TypeError,
+      );
+      expect(() => checkElectionToShow(typical.election_id, bad, goodDefinition, anyText)).toThrow(
+        TypeError,
+      );
+    }
   });
 
   test("never throws on arbitrary bytes, and accepts none", () => {
     fc.assert(
       fc.property(fc.uint8Array({ maxLength: 512 }), (bytes) => {
-        expect(checkElectionToShow(typical.election_id, bytes, anyText).ok).toBe(false);
+        expect(show(typical.election_id, bytes, anyText).ok).toBe(false);
       }),
       { numRuns },
     );
@@ -133,7 +180,7 @@ describe("the display text", () => {
     "accepts $id under a definition that commits to it",
     (v) => {
       const definition = definitionFor(v);
-      const result = checkElectionToShow(
+      const result = show(
         definition.election_id,
         encodeElectionDefinition(definition),
         hex(v.encoding),
@@ -141,13 +188,11 @@ describe("the display text", () => {
       expect(result.ok).toBe(true);
       if (!result.ok) return;
       expect(result.definition).toEqual(definition);
-      // The record shown is the one served: its commitment, by the spec's
-      // formula over the served bytes, is the definition's.
-      const tag = Buffer.from("abolish/v1/display-text", "ascii");
+      // The record returned is exactly the one served, whose commitment, by
+      // the spec's formula, is the definition's.
+      expect(encodeDisplayText(result.displayText)).toEqual(hex(v.encoding));
       expect(
-        createHash("sha256")
-          .update(Buffer.concat([Buffer.from([tag.length]), tag, hex(v.encoding)]))
-          .digest("hex"),
+        Buffer.from(specHash("abolish/v1/display-text", hex(v.encoding))).toString("hex"),
       ).toBe(v.definition?.displayTextCommitment);
     },
   );
@@ -157,11 +202,7 @@ describe("the display text", () => {
     (v) => {
       const definition = definitionFor(v);
       expect(
-        checkElectionToShow(
-          definition.election_id,
-          encodeElectionDefinition(definition),
-          hex(v.encoding),
-        ),
+        show(definition.election_id, encodeElectionDefinition(definition), hex(v.encoding)),
       ).toEqual({ ok: false, problem: "display-text-ill-formed", rule: v.illFormed });
     },
   );
@@ -169,7 +210,7 @@ describe("the display text", () => {
   test.each(textVectors.filter((v) => v.error !== undefined))(
     "refuses $id, which doesn't decode",
     ({ encoding }) => {
-      expect(checkElectionToShow(typical.election_id, goodDefinition, hex(encoding))).toEqual({
+      expect(show(typical.election_id, goodDefinition, hex(encoding))).toEqual({
         ok: false,
         problem: "display-text-undecodable",
       });
@@ -181,7 +222,7 @@ describe("the display text", () => {
   test.each(withDefinition.filter((v) => v.illFormed === undefined && v !== goodText))(
     "refuses $id under a definition that commits to other text",
     ({ encoding }) => {
-      expect(checkElectionToShow(typical.election_id, goodDefinition, hex(encoding))).toEqual({
+      expect(show(typical.election_id, goodDefinition, hex(encoding))).toEqual({
         ok: false,
         problem: "display-text-ill-formed",
         rule: "commitment",
@@ -201,7 +242,7 @@ describe("the display text", () => {
     };
     const bytes = encodeElectionDefinition(definition);
     // Still well formed: the rules require a pin of version 1 or more.
-    expect(checkElectionToShow(definition.election_id, bytes, hex(goodText.encoding))).toEqual({
+    expect(show(definition.election_id, bytes, hex(goodText.encoding))).toEqual({
       ok: false,
       problem: "display-text-undecodable",
     });
@@ -216,7 +257,7 @@ describe("the display text", () => {
         (at, flip) => {
           const changed = original.slice();
           changed[at] = (changed[at] as number) ^ flip;
-          expect(checkElectionToShow(typical.election_id, goodDefinition, changed).ok).toBe(false);
+          expect(show(typical.election_id, goodDefinition, changed).ok).toBe(false);
         },
       ),
       { numRuns },
@@ -226,7 +267,7 @@ describe("the display text", () => {
   test("never throws on arbitrary text bytes, and accepts none", () => {
     fc.assert(
       fc.property(fc.uint8Array({ maxLength: 512 }), (bytes) => {
-        expect(checkElectionToShow(typical.election_id, goodDefinition, bytes).ok).toBe(false);
+        expect(show(typical.election_id, goodDefinition, bytes).ok).toBe(false);
       }),
       { numRuns },
     );

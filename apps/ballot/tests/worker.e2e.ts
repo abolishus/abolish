@@ -141,16 +141,31 @@ afterEach(async () => {
   await page?.close();
 });
 
-const check = (electionId: string, definitionBytes: string, displayText: string) =>
+/** The definition hash by the spec's formula, standing in for what the L2 registry holds. */
+const registered = (definitionHexBytes: string) => {
+  const tag = Buffer.from("abolish/v1/election-definition", "ascii");
+  return createHash("sha256")
+    .update(Buffer.concat([Buffer.from([tag.length]), tag, fromHex(definitionHexBytes)]))
+    .digest("hex");
+};
+
+const check = (
+  electionId: string,
+  definitionBytes: string,
+  displayText: string,
+  registeredHash = registered(definitionBytes),
+) =>
   page
     .evaluate(
-      ([id, d, t]) =>
+      ([id, h, d, t]) =>
         (
           globalThis as unknown as {
-            ballotHarness: { check(id: string, d: string, t: string): Promise<string> };
+            ballotHarness: {
+              check(id: string, h: string, d: string, t: string): Promise<string>;
+            };
           }
-        ).ballotHarness.check(id, d, t),
-      [electionId, definitionBytes, displayText] as const,
+        ).ballotHarness.check(id, h, d, t),
+      [electionId, registeredHash, definitionBytes, displayText] as const,
     )
     .then((json) => JSON.parse(json) as Record<string, unknown>);
 
@@ -199,6 +214,12 @@ describe("the ballot worker", () => {
         rule: "commitment",
       },
     );
+  });
+
+  test("refuses a definition the registry doesn't hold, however its text matches", async () => {
+    await expect(
+      check(hex(definition.election_id), definitionHex, textHex, "00".repeat(32)),
+    ).resolves.toEqual({ ok: false, problem: "unregistered-definition" });
   });
 
   test("refuses the election under another election's id", async () => {

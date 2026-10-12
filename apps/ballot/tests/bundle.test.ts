@@ -266,6 +266,11 @@ describe("the Web Worker", () => {
     const claim = entry?.search(/createPolicy\(\s*[`"']ballot-worker[`"']/) ?? -1;
     expect(claim).toBeGreaterThanOrEqual(0);
     expect(claim).toBeLessThan(entry?.indexOf("react.transitional.element") ?? -1);
+    // Text order is run order only within one script: a chunk the entry
+    // imports, or a second script, would run before the entry's body.
+    expect(entry).not.toMatch(/(^|[;}\s])import\s*[\w{*"'`]/);
+    expect(html().match(/<script\b/g)).toHaveLength(1);
+    expect(html()).not.toMatch(/modulepreload/i);
   });
 
   test("is one script of its own, which the page doesn't load", () => {

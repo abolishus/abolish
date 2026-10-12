@@ -1,16 +1,13 @@
 // What the ballot client shows of an election, once @abolishus/crypto's
 // `checkElectionToShow` has passed it: the definition decodes, names the
-// election in the ballot link and is well formed, and the display text matches
+// election in the ballot link, hashes to the hash the L2 registry holds for it
+// and is well formed, and the display text matches
 // the definition's commitment and the spec's rules (docs/spec/display-text.md,
 // Checks). Otherwise whoever serves the text could swap option labels for one
 // voter, who would then honestly encrypt the index they picked under a false
 // label (T-34, T-41, G-6). The checks live in the crypto-review gate; this
 // file only turns a passed election into what the screens show. It runs in
 // the Web Worker, beside the code that will encrypt the ballot.
-//
-// Not checked here: that the definition's hash is the one registered on L2.
-// The client can't read the chain yet (P2-8 part 2b), so it shows the hash for
-// a voter or the verifier to compare (T-34).
 
 import {
   checkElectionToShow,
@@ -65,15 +62,23 @@ const text = (bytes: Uint8Array) => utf8.decode(bytes);
 
 /**
  * Checks the election the client was asked to show: `electionId` is the one
- * in the ballot link, `definition` and `displayText` the records served for
+ * in the ballot link, `registeredHash` the definition hash the L2 election
+ * registry holds for it (read by the page from the chain, never from whoever
+ * served the records), `definition` and `displayText` the records served for
  * it. A refusal names the first check that failed.
  */
 export function checkElection(
   electionId: Uint8Array,
+  registeredHash: Uint8Array,
   definitionBytes: Uint8Array,
   displayTextBytes: Uint8Array,
 ): ElectionCheck {
-  const checked = checkElectionToShow(electionId, definitionBytes, displayTextBytes);
+  const checked = checkElectionToShow(
+    electionId,
+    registeredHash,
+    definitionBytes,
+    displayTextBytes,
+  );
   if (!checked.ok) return checked;
   const { definition, displayText } = checked;
   return {

@@ -16,6 +16,7 @@ const request = () => ({
   id: 7,
   kind: "check-election",
   electionId: new Uint8Array(32),
+  registeredHash: new Uint8Array(32).fill(1),
   definition: new Uint8Array([1, 2, 3]),
   displayText: new Uint8Array([4, 5]),
 });
@@ -50,6 +51,8 @@ describe("requests", () => {
     ["a short election id", { electionId: new Uint8Array(31) }],
     ["a long election id", { electionId: new Uint8Array(33) }],
     ["an election id that isn't bytes", { electionId: Array(32).fill(0) }],
+    ["a short registered hash", { registeredHash: new Uint8Array(31) }],
+    ["a registered hash that isn't bytes", { registeredHash: "00".repeat(32) }],
     ["a definition that isn't bytes", { definition: "0102" }],
     ["display text that isn't bytes", { displayText: new Uint16Array(2) }],
     ["an extra key", { extra: true }],
@@ -57,7 +60,7 @@ describe("requests", () => {
     expect(parseRequest({ ...request(), ...change })).toBeUndefined();
   });
 
-  test.each(["v", "id", "kind", "electionId", "definition", "displayText"])(
+  test.each(["v", "id", "kind", "electionId", "registeredHash", "definition", "displayText"])(
     "refuses a request without %s",
     (key) => {
       const r: Record<string, unknown> = request();

@@ -1,8 +1,10 @@
 export {
   type Bundle,
   BUNDLE_FORMAT,
+  BUNDLE_FORMAT_DEFINITION,
   BUNDLE_FORMAT_L1,
   BundleError,
+  type DefinitionBundle,
   type InputSource,
   type InputSources,
   type L1Bundle,

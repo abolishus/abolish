@@ -11,9 +11,11 @@ import { decodeHeader, type L1Evidence, NodePool, RlpError } from "./l1.ts";
  * Where an input came from. A local file authenticates nothing; an
  * `l1-state-proof` input is proven against the state root of the header the
  * bundle gives, so it is exactly as authentic as the header, the anchor's
- * address and the first segment, which are listed as inputs of their own.
+ * address and the first segment, which are listed as inputs of their own. A
+ * `definition` input is a field of the election definition, so it is exactly
+ * as authentic as the definition, also listed as an input of its own.
  */
-export type InputSource = "local-file" | "l1-state-proof";
+export type InputSource = "local-file" | "l1-state-proof" | "definition";
 
 export interface InputSources {
   readonly electionId: InputSource;
@@ -24,11 +26,10 @@ export interface InputSources {
   readonly l1Header?: InputSource;
   readonly anchorAddress?: InputSource;
   readonly firstSegment?: InputSource;
+  readonly definition?: InputSource;
 }
 
 interface BundleCommon {
-  readonly electionId: Uint8Array;
-  readonly boardEntryVersion: 1;
   readonly clock: AnchorClock;
   /** The board copy, split into encoded entries in index order. */
   readonly entries: readonly Uint8Array[];
@@ -40,6 +41,8 @@ interface BundleCommon {
 /** Format 1: `now` and every anchor given as they are. */
 export interface LocalBundle extends BundleCommon {
   readonly format: typeof BUNDLE_FORMAT;
+  readonly electionId: Uint8Array;
+  readonly boardEntryVersion: 1;
   readonly now: bigint;
   readonly anchors: readonly Anchor[];
 }
@@ -47,11 +50,26 @@ export interface LocalBundle extends BundleCommon {
 /** Format 2: `now` and the anchors read from the board anchor's L1 state. */
 export interface L1Bundle extends BundleCommon {
   readonly format: typeof BUNDLE_FORMAT_L1;
+  readonly electionId: Uint8Array;
+  readonly boardEntryVersion: 1;
   readonly l1: L1Evidence;
 }
 
+/**
+ * Format 3: as format 2, with the election identifier, the pinned board-entry
+ * version and the anchor's address taken from the election definition. The
+ * definition is held as bytes: decoding it is check 2.1, not parsing, so a
+ * definition that doesn't decode is the election's failure once the
+ * definition is authenticated, never a malformed bundle.
+ */
+export interface DefinitionBundle extends BundleCommon {
+  readonly format: typeof BUNDLE_FORMAT_DEFINITION;
+  readonly definition: Uint8Array;
+  readonly l1: Omit<L1Evidence, "anchor">;
+}
+
 /** One election's inputs: the board copy, and what the board checks judge it against. */
-export type Bundle = LocalBundle | L1Bundle;
+export type Bundle = LocalBundle | L1Bundle | DefinitionBundle;
 
 /** A bundle that doesn't follow docs/spec/verifier.md, Bundle. */
 export class BundleError extends Error {
@@ -60,6 +78,7 @@ export class BundleError extends Error {
 
 export const BUNDLE_FORMAT = "abolish-verifier-bundle/1";
 export const BUNDLE_FORMAT_L1 = "abolish-verifier-bundle/2";
+export const BUNDLE_FORMAT_DEFINITION = "abolish-verifier-bundle/3";
 
 const U32_MAX = 2n ** 32n - 1n;
 const U64_MAX = 2n ** 64n - 1n;
@@ -131,8 +150,11 @@ function array(value: unknown, what: string): readonly unknown[] {
   return value;
 }
 
-function parseL1(value: unknown): L1Evidence {
-  const l = object(value, ["anchor", "firstSegment", "header", "nodes", "checkpoints"], "l1");
+function parseL1(value: unknown): L1Evidence;
+function parseL1(value: unknown, withAnchor: false): Omit<L1Evidence, "anchor">;
+function parseL1(value: unknown, withAnchor = true): Omit<L1Evidence, "anchor"> {
+  const members = ["firstSegment", "header", "nodes", "checkpoints"];
+  const l = object(value, withAnchor ? ["anchor", ...members] : members, "l1");
   const raw = hexBytes(l["header"], "l1.header");
   let header: L1Evidence["header"];
   try {
@@ -143,7 +165,7 @@ function parseL1(value: unknown): L1Evidence {
   }
   return {
     header,
-    anchor: hexBytes(l["anchor"], "l1.anchor", 20),
+    ...(withAnchor && { anchor: hexBytes(l["anchor"], "l1.anchor", 20) }),
     firstSegment: Number(integer(l["firstSegment"], U32_MAX, "l1.firstSegment")),
     nodes: new NodePool(array(l["nodes"], "l1.nodes").map((n, i) => hexBytes(n, `l1.nodes[${i}]`))),
     checkpoints: array(l["checkpoints"], "l1.checkpoints").map((c, i) => {
@@ -238,8 +260,36 @@ export function parseBundle(json: string, board: Uint8Array): Bundle {
     value !== null && typeof value === "object" && !Array.isArray(value)
       ? (value as Record<string, unknown>)["format"]
       : undefined;
+  if (format === BUNDLE_FORMAT_DEFINITION) {
+    const b = object(value, ["format", "definition", "clock", "l1"], "bundle.json");
+    const definition = hexBytes(b["definition"], "definition");
+    const clock = parseClock(b["clock"]);
+    const l1 = parseL1(b["l1"], false);
+    const split = splitEntries(board);
+    return {
+      format,
+      definition,
+      clock,
+      l1,
+      entries: split.entries,
+      unreadableBytes: split.unreadableBytes,
+      sources: {
+        electionId: "definition",
+        boardEntryVersion: "definition",
+        clock: "local-file",
+        now: "l1-state-proof",
+        anchors: "l1-state-proof",
+        l1Header: "local-file",
+        anchorAddress: "definition",
+        firstSegment: "local-file",
+        definition: "local-file",
+      },
+    };
+  }
   if (format !== BUNDLE_FORMAT && format !== BUNDLE_FORMAT_L1)
-    throw new BundleError(`bundle.json: format must be ${BUNDLE_FORMAT} or ${BUNDLE_FORMAT_L1}`);
+    throw new BundleError(
+      `bundle.json: format must be ${BUNDLE_FORMAT}, ${BUNDLE_FORMAT_L1} or ${BUNDLE_FORMAT_DEFINITION}`,
+    );
   const b = object(
     value,
     format === BUNDLE_FORMAT

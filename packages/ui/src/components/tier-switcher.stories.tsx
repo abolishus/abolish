@@ -9,6 +9,13 @@ const tiers = [
   { value: "tier-0", label: "Unverified accounts", scope: "112,950 voters" },
 ];
 
+// During a switch Base UI keeps the outgoing panel mounted (inert) until its
+// exit transition ends, so read the panel the selected tab controls.
+function selectedPanel(root: HTMLElement): HTMLElement | null {
+  const tab = within(root).getByRole("tab", { selected: true });
+  return root.ownerDocument.getElementById(tab.getAttribute("aria-controls") ?? "");
+}
+
 const meta = {
   component: TierSwitcher,
   args: {
@@ -34,7 +41,7 @@ export const Default: Story = {
       "Unverified accounts112,950 voters",
     ]);
     await expect(tabs[0]).toHaveAttribute("aria-selected", "true");
-    await expect(canvas.getByRole("tabpanel")).toHaveTextContent("Results among 40,112 voters");
+    await expect(selectedPanel(canvasElement)).toHaveTextContent("Results among 40,112 voters");
     for (const tab of tabs) {
       await expect(tab.getBoundingClientRect().height).toBeGreaterThanOrEqual(48);
     }
@@ -46,7 +53,7 @@ export const Switching: Story = {
     const canvas = within(canvasElement);
     await userEvent.click(canvas.getByRole("tab", { name: /Vouched/ }));
     await expect(args.onValueChange).toHaveBeenCalledWith("tier-1");
-    await expect(canvas.getByRole("tabpanel")).toHaveTextContent("Results among 8,301 voters");
+    await expect(selectedPanel(canvasElement)).toHaveTextContent("Results among 8,301 voters");
   },
 };
 
@@ -63,9 +70,7 @@ export const Keyboard: Story = {
 export const StartsOnAnotherTier: Story = {
   args: { defaultValue: "tier-0" },
   play: async ({ canvasElement }) => {
-    await expect(within(canvasElement).getByRole("tabpanel")).toHaveTextContent(
-      "Results among 112,950 voters",
-    );
+    await expect(selectedPanel(canvasElement)).toHaveTextContent("Results among 112,950 voters");
   },
 };
 

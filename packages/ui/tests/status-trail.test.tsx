@@ -9,13 +9,13 @@ const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
 const stateLabels = { complete: "done", pending: "in progress", upcoming: "not yet" };
 const rank: Record<StepState, number> = { complete: 0, pending: 1, upcoming: 2 };
 
-const render = (states: StepState[]) =>
+const render = (states: StepState[], stepTemplate = "{step}, {state}") =>
   renderToStaticMarkup(
     <I18nProvider locale="en-US">
       <StatusTrail
         label="Your ballot"
         stateLabels={stateLabels}
-        stepTemplate="{step}, {state}"
+        stepTemplate={stepTemplate}
         steps={states.map((state, i) => ({ label: `Step ${i}`, state }))}
       />
     </I18nProvider>,
@@ -40,4 +40,11 @@ describe("StatusTrail", () => {
       { numRuns },
     );
   });
+
+  it.each(["{step}", "{state}", "Step"])(
+    "refuses a step template %j that drops a part",
+    (template) => {
+      expect(() => render(["complete"], template)).toThrow(RangeError);
+    },
+  );
 });

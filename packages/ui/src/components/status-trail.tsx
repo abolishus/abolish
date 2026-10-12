@@ -1,7 +1,7 @@
 import { Check, Circle, Clock } from "lucide-react";
 import { cn } from "cn";
 
-import { formatMessage } from "../i18n/format.ts";
+import { formatMessage, placeholders } from "../i18n/format.ts";
 import { useI18n } from "../i18n/context.tsx";
 
 /** Where a step stands. */
@@ -45,6 +45,12 @@ const icons = { complete: Check, pending: Clock, upcoming: Circle } as const;
 export function StatusTrail({ label, steps, stateLabels, stepTemplate }: StatusTrailProps) {
   const { locale } = useI18n();
   const order: Record<StepState, number> = { complete: 0, pending: 1, upcoming: 2 };
+  // The visible label is hidden from screen readers, so the template is all
+  // they hear: a template without either part would drop it silently.
+  const used = placeholders(stepTemplate);
+  if (!used.includes("step") || !used.includes("state")) {
+    throw new RangeError("a step template must use both {step} and {state}");
+  }
   steps.forEach((step, i) => {
     const previous = steps[i - 1];
     if (previous === undefined) return;

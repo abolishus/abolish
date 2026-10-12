@@ -3,6 +3,13 @@ import { expect, userEvent, within } from "storybook/test";
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./tabs.tsx";
 
+// During a switch Base UI keeps the outgoing panel mounted (inert) until its
+// exit transition ends, so read the panel the selected tab controls.
+function selectedPanel(root: HTMLElement): HTMLElement | null {
+  const tab = within(root).getByRole("tab", { selected: true });
+  return root.ownerDocument.getElementById(tab.getAttribute("aria-controls") ?? "");
+}
+
 const meta = {
   component: Tabs,
   args: { defaultValue: "board" },
@@ -25,7 +32,7 @@ export const Default: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await userEvent.click(canvas.getByRole("tab", { name: "Trustees" }));
-    await expect(canvas.getByRole("tabpanel")).toHaveTextContent("Who holds the keys.");
+    await expect(selectedPanel(canvasElement)).toHaveTextContent("Who holds the keys.");
     for (const tab of canvas.getAllByRole("tab")) {
       await expect(tab.getBoundingClientRect().height).toBeGreaterThanOrEqual(48);
     }

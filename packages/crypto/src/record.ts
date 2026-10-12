@@ -18,7 +18,7 @@ export const RECORD_TYPES = Object.freeze({
   spoiledBallotOpening: 0x0003,
   receipt: 0x0004,
   ceremonyTranscript: 0x0005,
-  tallyTranscript: 0x0006,
+  tallyOpening: 0x0006,
   boardEntry: 0x0007,
   contractEvent: 0x0008,
   displayText: 0x0009,

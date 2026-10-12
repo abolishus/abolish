@@ -34,7 +34,7 @@ export const BOARD_PAYLOAD_TYPES: readonly number[] = Object.freeze([
   RECORD_TYPES.ballot,
   RECORD_TYPES.spoiledBallotOpening,
   RECORD_TYPES.ceremonyTranscript,
-  RECORD_TYPES.tallyTranscript,
+  RECORD_TYPES.tallyOpening,
   RECORD_TYPES.contractEvent,
 ]);
 

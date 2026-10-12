@@ -8,5 +8,7 @@ export const PARAMETERS = Object.freeze({
   MAX_OPTIONS: 64,
   MAX_TRUSTEES: 16,
   MAX_BOARD_PAYLOAD,
+  // Seconds; the tally window of tally-opening version 1 (docs/spec/tally.md).
+  TALLY_WINDOW: 604_800,
   DISPLAY_TEXT_SALT_LEN: 32,
 } as const);

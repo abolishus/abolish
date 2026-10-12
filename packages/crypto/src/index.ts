@@ -110,6 +110,24 @@ export {
   scalar,
 } from "./group.ts";
 export { circuitTagField, PACK_CHUNK, packBoundedBytes, packBytes } from "./circuit.ts";
+// Not exported: `newIdentitySecretWith` and `sealIdentityBackupWith`, the test
+// seams that take their randomness, so production code can't reuse a nonce.
+export {
+  BABYJUBJUB_ORDER,
+  decodeIdentityBackup,
+  encodeIdentityBackup,
+  IDENTITY_BACKUP,
+  type IdentityBackup,
+  IdentityBackupError,
+  type IdentityBackupErrorCode,
+  identityBackupId,
+  identityBackupLocator,
+  identityBackupPrfSalt,
+  isIdentitySecret,
+  newIdentitySecret,
+  openIdentityBackup,
+  sealIdentityBackup,
+} from "./identity-backup.ts";
 export { MEMBERSHIP_DEPTH, membershipScope, nullifierScope, semaphoreField } from "./membership.ts";
 export { PARAMETERS } from "./parameters.ts";
 export {

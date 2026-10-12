@@ -25,6 +25,7 @@ Vectors published by standards bodies and library authors (NIST CAVP, RFCs, Wych
 | `rfc/rfc9497.txt`                 | ristretto255-SHA512 `HashToScalar`, `HashToGroup` and serialisation: Appendix A.1  | RFC 9497, from the RFC Editor                                      |
 | `rfc/rfc6979.txt`                 | ECDSA P-256/SHA-256 with RFC 6979 nonces: Appendix A.2.5                           | RFC 6979, from the RFC Editor                                      |
 | `rfc/rfc8439.txt`                 | ChaCha20-Poly1305 AEAD: §2.8.2 (encryption) and Appendix A.5 (decryption)          | RFC 8439, from the RFC Editor                                      |
+| `rfc/rfc5869.txt`                 | HKDF-SHA-256: Appendix A.1–A.3                                                     | RFC 5869, from the RFC Editor                                      |
 | `nist-cavp/SigVer.rsp`            | ECDSA P-256/SHA-256 signature verification: the `[P-256,SHA-256]` section          | NIST CAVP ECDSA SigVer (FIPS 186-3) vectors, via pyca/cryptography |
 | `transparency-dev/constants.go`   | RFC 6962 Merkle tree: leaf inputs, node hashes and roots of trees of 1 to 8 leaves | transparency-dev/merkle v0.0.2 (Apache-2.0)                        |
 | `transparency-dev/verify_test.go` | RFC 6962 inclusion and consistency proofs over the same leaves                     | transparency-dev/merkle v0.0.2 (Apache-2.0)                        |

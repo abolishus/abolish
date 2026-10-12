@@ -1,0 +1,284 @@
+{
+  "format": "abolish-identity-backup-vectors/1",
+  "title": "Identity backup: the secret's encoding and sampling, the PRF salt, keys, locator, row id and envelope",
+  "spec": "docs/spec/identity-backup.md",
+  "generator": "packages/crypto/scripts/identity-backup-vectors.py: an independent Python implementation (standard library only), with HKDF from RFC 5869 over hmac, checked against RFC 5869 Appendix A.1 to A.3, and share-encryption-vectors.py's ChaCha20-Poly1305, checked against RFC 8439's vectors",
+  "tags": {
+    "prfSalt": "abolish/v1/identity-backup/prf-salt",
+    "wrapKey": "abolish/v1/identity-backup/wrap-key",
+    "locator": "abolish/v1/identity-backup/locator",
+    "id": "abolish/v1/identity-backup/id",
+    "aad": "abolish/v1/identity-backup/aad"
+  },
+  "order": "2736030358979909402780800718157159386076813972158567259200215660948447373041",
+  "prfSalt": "4a12a50afc7e726f6dfa6ef46471afefe1de5feaf5603cfb33ec9b8bc533baca",
+  "secrets": [
+    {
+      "id": "secret-zero",
+      "encoding": "0000000000000000000000000000000000000000000000000000000000000000",
+      "isSecret": false
+    },
+    {
+      "id": "secret-one",
+      "encoding": "0000000000000000000000000000000000000000000000000000000000000001",
+      "isSecret": true
+    },
+    {
+      "id": "secret-order-minus-one",
+      "encoding": "060c89ce5c263405370a08b6d0302b0bab3eedb83920ee0a677297dc392126f0",
+      "isSecret": true
+    },
+    {
+      "id": "secret-order",
+      "encoding": "060c89ce5c263405370a08b6d0302b0bab3eedb83920ee0a677297dc392126f1",
+      "isSecret": false
+    },
+    {
+      "id": "secret-order-plus-one",
+      "encoding": "060c89ce5c263405370a08b6d0302b0bab3eedb83920ee0a677297dc392126f2",
+      "isSecret": false
+    },
+    {
+      "id": "secret-2-251",
+      "encoding": "0800000000000000000000000000000000000000000000000000000000000000",
+      "isSecret": false
+    },
+    {
+      "id": "secret-max",
+      "encoding": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "isSecret": false
+    },
+    {
+      "id": "secret-labelled",
+      "encoding": "00ffd9490bf6e5544a5159026a1b9f79cdbc2ec13523cdf039d4379522e86aaf",
+      "isSecret": true
+    },
+    {
+      "id": "secret-short",
+      "encoding": "00000000000000000000000000000000000000000000000000000000000001",
+      "isSecret": false
+    },
+    {
+      "id": "secret-long",
+      "encoding": "000000000000000000000000000000000000000000000000000000000000000001",
+      "isSecret": false
+    }
+  ],
+  "sampling": [
+    {
+      "id": "sample-first",
+      "draws": ["6ad190d61886f5eb2e605f446c1c8e91af833d97ed2cc7a21406ae5e775bedb1"],
+      "secret": "02d190d61886f5eb2e605f446c1c8e91af833d97ed2cc7a21406ae5e775bedb1"
+    },
+    {
+      "id": "sample-top-bits-cleared",
+      "draws": ["f888c7f226e0be8f017ebc912d0a3959679746da5f512bfadb59af8c0eafd6f8"],
+      "secret": "0088c7f226e0be8f017ebc912d0a3959679746da5f512bfadb59af8c0eafd6f8"
+    },
+    {
+      "id": "sample-zero-then",
+      "draws": [
+        "0000000000000000000000000000000000000000000000000000000000000000",
+        "f800000000000000000000000000000000000000000000000000000000000000",
+        "926c52db4188ff433434fffe6cd41405bf1cc2f6d189cde01816958c183b2195"
+      ],
+      "secret": "026c52db4188ff433434fffe6cd41405bf1cc2f6d189cde01816958c183b2195"
+    },
+    {
+      "id": "sample-order-then",
+      "draws": [
+        "060c89ce5c263405370a08b6d0302b0bab3eedb83920ee0a677297dc392126f1",
+        "fe0c89ce5c263405370a08b6d0302b0bab3eedb83920ee0a677297dc392126f1",
+        "9dad03e08b6e7b8160ace87cc5b20e3e93e8428080f3ee5482bb676f40386501"
+      ],
+      "secret": "05ad03e08b6e7b8160ace87cc5b20e3e93e8428080f3ee5482bb676f40386501"
+    },
+    {
+      "id": "sample-top-bits-only-then",
+      "draws": [
+        "f800000000000000000000000000000000000000000000000000000000000000",
+        "07ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "5259bef6f69664d00d88deacca2993a4de5fc6e6d7f42682281fcd6e2eeda12a"
+      ],
+      "secret": "0259bef6f69664d00d88deacca2993a4de5fc6e6d7f42682281fcd6e2eeda12a"
+    }
+  ],
+  "backups": [
+    {
+      "id": "backup-labelled",
+      "description": "A secret, PRF output and nonce from labels",
+      "prfOutput": "4798c69ce02618f2eb0774f98ebec580663844d6146e25f759b3a2f983c637fd",
+      "secret": "0069b842c6056da92047f4ca2d68feadec9ead7365f3a35bed66e372928c258e",
+      "nonce": "bc2bc3c709a859fd5f59bdaa",
+      "wrapKey": "ffdac8c19ca7745d18bd64779b4cf7ef35eeff5f392fe7c4e40d3687fb724e8b",
+      "locator": "6e3545725bda5b22bc23e5d0699321207895b7a16ad4e4e73389976dae883e23",
+      "backupId": "59db9247a85552c49a69a38a4fecdfba98fcbecb4c42cef9152cd3ed4a4c414a",
+      "aad": "1e61626f6c6973682f76312f6964656e746974792d6261636b75702f616164000a016e3545725bda5b22bc23e5d0699321207895b7a16ad4e4e73389976dae883e23",
+      "envelope": "000a01bc2bc3c709a859fd5f59bdaac8fbc8f6a567a3758eb571feedcdc16420d3ad778bfa1775f5f2d1ea84e21ae1483d9b6f7b0d0cbad211380a563d11e1"
+    },
+    {
+      "id": "backup-one",
+      "description": "The secret 1",
+      "prfOutput": "dafaf89c5d005c706620193b6e3a7e680cc0b197dbd1dda36da81bb8a7454977",
+      "secret": "0000000000000000000000000000000000000000000000000000000000000001",
+      "nonce": "7320905bb437393f6b865f10",
+      "wrapKey": "fa4f8ba9f4ee7908014fe310d22fb389c38bca1f7bed754c3df3d4ea2f8d9f83",
+      "locator": "7f140d5c5c6fbb7bf6e4b27f51687117c4f8dbbac9355769386ca0636a591362",
+      "backupId": "b4c4a52602f3f97521a3f56793817d26071cfbf7ba9180d323b6f0481f925ced",
+      "aad": "1e61626f6c6973682f76312f6964656e746974792d6261636b75702f616164000a017f140d5c5c6fbb7bf6e4b27f51687117c4f8dbbac9355769386ca0636a591362",
+      "envelope": "000a017320905bb437393f6b865f10b7759ee69c1a2d6d95cfb79362747f9af935c74daff431693aaa19a0fcfc8363b4d76b74efd53b7c594949b0f74a82e0"
+    },
+    {
+      "id": "backup-order-minus-one",
+      "description": "The secret l − 1",
+      "prfOutput": "457036df0356cdf93b23798501a1e9b99b936fc8e0b2175f06be72e6e4b52c8a",
+      "secret": "060c89ce5c263405370a08b6d0302b0bab3eedb83920ee0a677297dc392126f0",
+      "nonce": "7f1ffcd87fbedda2ebb3c89f",
+      "wrapKey": "4c07bc0f13e677db39bd0028eb719874487ad665f936501881f5f92b39a6210a",
+      "locator": "65776b2d319a60ef5a215f56420438c22b6d8930187d5ce52c4cd89e5321a3a3",
+      "backupId": "e9face04f686b0b41e47e685dad34f1c8410e91d3bfd9c97b6994fd381977e32",
+      "aad": "1e61626f6c6973682f76312f6964656e746974792d6261636b75702f616164000a0165776b2d319a60ef5a215f56420438c22b6d8930187d5ce52c4cd89e5321a3a3",
+      "envelope": "000a017f1ffcd87fbedda2ebb3c89f8a3100a32ca8f78f197446fbf443006cd6bf6719e81081889405f5b66615f8c8c6e94eba35e6c6057b22649ef9cdf922"
+    },
+    {
+      "id": "backup-zero-nonce",
+      "description": "An all-zero nonce: any 12 bytes are a nonce",
+      "prfOutput": "b4419e5466a5e0c7d1c5b7447dd6731e233eb57e9b85c63092a2a56c2b3f0f8f",
+      "secret": "031c99d10ab16dc95abfff015fc1bfabd2a23379e5f2b6a2778c41581bec3073",
+      "nonce": "000000000000000000000000",
+      "wrapKey": "0fe74a7c5798a869f698331b163fded3c5ec333aabeb5befada31daab02ddac8",
+      "locator": "249b4eca50b84c7c0d6a54d649336f51f007511fa28b96c3bd76a36503a2aa0b",
+      "backupId": "518c42d8681d147e01676e8875e4f2774e34efba2ff4768d4b3fec3ff13526de",
+      "aad": "1e61626f6c6973682f76312f6964656e746974792d6261636b75702f616164000a01249b4eca50b84c7c0d6a54d649336f51f007511fa28b96c3bd76a36503a2aa0b",
+      "envelope": "000a01000000000000000000000000d453f18f73a28d70ba5d02caefc510880f3a42fbfc79f0ad32ea1e3ea386616f3479327265a0d6ee3adc0b5266f9b321"
+    }
+  ],
+  "open": [
+    {
+      "id": "open-other-prf",
+      "description": "Another passkey's PRF output",
+      "prfOutput": "5779c9c2122b43e3d9a27a0f72750894f366e543dc1d59f177618d01934b347e",
+      "envelope": "000a01bc2bc3c709a859fd5f59bdaac8fbc8f6a567a3758eb571feedcdc16420d3ad778bfa1775f5f2d1ea84e21ae1483d9b6f7b0d0cbad211380a563d11e1",
+      "code": "backup-open"
+    },
+    {
+      "id": "open-nonce-altered",
+      "description": "A nonce bit flipped",
+      "prfOutput": "4798c69ce02618f2eb0774f98ebec580663844d6146e25f759b3a2f983c637fd",
+      "envelope": "000a01bd2bc3c709a859fd5f59bdaac8fbc8f6a567a3758eb571feedcdc16420d3ad778bfa1775f5f2d1ea84e21ae1483d9b6f7b0d0cbad211380a563d11e1",
+      "code": "backup-open"
+    },
+    {
+      "id": "open-ciphertext-altered",
+      "description": "A ciphertext bit flipped",
+      "prfOutput": "4798c69ce02618f2eb0774f98ebec580663844d6146e25f759b3a2f983c637fd",
+      "envelope": "000a01bc2bc3c709a859fd5f59bdaac9fbc8f6a567a3758eb571feedcdc16420d3ad778bfa1775f5f2d1ea84e21ae1483d9b6f7b0d0cbad211380a563d11e1",
+      "code": "backup-open"
+    },
+    {
+      "id": "open-tag-altered",
+      "description": "A tag bit flipped",
+      "prfOutput": "4798c69ce02618f2eb0774f98ebec580663844d6146e25f759b3a2f983c637fd",
+      "envelope": "000a01bc2bc3c709a859fd5f59bdaac8fbc8f6a567a3758eb571feedcdc16420d3ad778bfa1775f5f2d1ea84e21ae1483d9b6f7b0d0cbad211380a563d11e0",
+      "code": "backup-open"
+    },
+    {
+      "id": "open-other-locator-in-aad",
+      "description": "Sealed with another locator in the associated data",
+      "prfOutput": "4798c69ce02618f2eb0774f98ebec580663844d6146e25f759b3a2f983c637fd",
+      "envelope": "000a01db5cd850b7c2aa8173ee465c42fb21d3565d64e8fd9d05acaaadbde9304c77c3b13e437985b9d454b4fc4a4621ffd7dbc50c16891d0eea1614ccf7d9",
+      "code": "backup-open"
+    },
+    {
+      "id": "open-other-version-in-aad",
+      "description": "Sealed with version 2 in the associated data, framed as version 1",
+      "prfOutput": "4798c69ce02618f2eb0774f98ebec580663844d6146e25f759b3a2f983c637fd",
+      "envelope": "000a01db5cd850b7c2aa8173ee465c42fb21d3565d64e8fd9d05acaaadbde9304c77c3b13e437985b9d454b4fc4a461d8fb38b434acadb8f1399b42bb54de3",
+      "code": "backup-open"
+    },
+    {
+      "id": "open-secret-zero",
+      "description": "Opens, but the plaintext is 0",
+      "prfOutput": "4798c69ce02618f2eb0774f98ebec580663844d6146e25f759b3a2f983c637fd",
+      "envelope": "000a01bb505123429d9355feb564ceba95d2fe9e5da6f01e2ae4e525936378826fd88ba2f771c4e41d5939f7fcd7e49b810e5c9b56277c45256722f53661c0",
+      "code": "backup-secret"
+    },
+    {
+      "id": "open-secret-order",
+      "description": "Opens, but the plaintext is l",
+      "prfOutput": "4798c69ce02618f2eb0774f98ebec580663844d6146e25f759b3a2f983c637fd",
+      "envelope": "000a01a229bf421ab961fde34815e4e64711199d825183c004770b9acd5fea6bd4845e88b0a763cec192c73b6f809b04f1e975728b03a59ffed2bd140384f7",
+      "code": "backup-secret"
+    },
+    {
+      "id": "open-secret-max",
+      "description": "Opens, but the plaintext is 2²⁵⁶ − 1",
+      "prfOutput": "4798c69ce02618f2eb0774f98ebec580663844d6146e25f759b3a2f983c637fd",
+      "envelope": "000a01c3c299abab1f06d3702e985a06e395075f8b824fce15353c2327072ea63892f3272cea3222b5eb5baa5163cc3ff4f8e10dc74c4ebbf74c5c5f8acc4a",
+      "code": "backup-secret"
+    },
+    {
+      "id": "decode-empty",
+      "description": "No bytes",
+      "prfOutput": "4798c69ce02618f2eb0774f98ebec580663844d6146e25f759b3a2f983c637fd",
+      "envelope": "",
+      "code": "truncated"
+    },
+    {
+      "id": "decode-header-only",
+      "description": "Only the record type",
+      "prfOutput": "4798c69ce02618f2eb0774f98ebec580663844d6146e25f759b3a2f983c637fd",
+      "envelope": "000a",
+      "code": "truncated"
+    },
+    {
+      "id": "decode-short",
+      "description": "One byte short",
+      "prfOutput": "4798c69ce02618f2eb0774f98ebec580663844d6146e25f759b3a2f983c637fd",
+      "envelope": "000a01bc2bc3c709a859fd5f59bdaac8fbc8f6a567a3758eb571feedcdc16420d3ad778bfa1775f5f2d1ea84e21ae1483d9b6f7b0d0cbad211380a563d11",
+      "code": "truncated"
+    },
+    {
+      "id": "decode-trailing",
+      "description": "One byte more",
+      "prfOutput": "4798c69ce02618f2eb0774f98ebec580663844d6146e25f759b3a2f983c637fd",
+      "envelope": "000a01bc2bc3c709a859fd5f59bdaac8fbc8f6a567a3758eb571feedcdc16420d3ad778bfa1775f5f2d1ea84e21ae1483d9b6f7b0d0cbad211380a563d11e100",
+      "code": "trailing-bytes"
+    },
+    {
+      "id": "decode-type-zero",
+      "description": "Record type 0x0000",
+      "prfOutput": "4798c69ce02618f2eb0774f98ebec580663844d6146e25f759b3a2f983c637fd",
+      "envelope": "000001bc2bc3c709a859fd5f59bdaac8fbc8f6a567a3758eb571feedcdc16420d3ad778bfa1775f5f2d1ea84e21ae1483d9b6f7b0d0cbad211380a563d11e1",
+      "code": "unknown-record-type"
+    },
+    {
+      "id": "decode-type-receipt",
+      "description": "Record type 0x0004, a receipt",
+      "prfOutput": "4798c69ce02618f2eb0774f98ebec580663844d6146e25f759b3a2f983c637fd",
+      "envelope": "000401bc2bc3c709a859fd5f59bdaac8fbc8f6a567a3758eb571feedcdc16420d3ad778bfa1775f5f2d1ea84e21ae1483d9b6f7b0d0cbad211380a563d11e1",
+      "code": "unknown-record-type"
+    },
+    {
+      "id": "decode-type-unassigned",
+      "description": "Record type 0x000b, unassigned",
+      "prfOutput": "4798c69ce02618f2eb0774f98ebec580663844d6146e25f759b3a2f983c637fd",
+      "envelope": "000b01bc2bc3c709a859fd5f59bdaac8fbc8f6a567a3758eb571feedcdc16420d3ad778bfa1775f5f2d1ea84e21ae1483d9b6f7b0d0cbad211380a563d11e1",
+      "code": "unknown-record-type"
+    },
+    {
+      "id": "decode-version-zero",
+      "description": "Version 0",
+      "prfOutput": "4798c69ce02618f2eb0774f98ebec580663844d6146e25f759b3a2f983c637fd",
+      "envelope": "000a00bc2bc3c709a859fd5f59bdaac8fbc8f6a567a3758eb571feedcdc16420d3ad778bfa1775f5f2d1ea84e21ae1483d9b6f7b0d0cbad211380a563d11e1",
+      "code": "unknown-version"
+    },
+    {
+      "id": "decode-version-two",
+      "description": "Version 2, unknown",
+      "prfOutput": "4798c69ce02618f2eb0774f98ebec580663844d6146e25f759b3a2f983c637fd",
+      "envelope": "000a02bc2bc3c709a859fd5f59bdaac8fbc8f6a567a3758eb571feedcdc16420d3ad778bfa1775f5f2d1ea84e21ae1483d9b6f7b0d0cbad211380a563d11e1",
+      "code": "unknown-version"
+    }
+  ]
+}

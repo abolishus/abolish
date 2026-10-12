@@ -2,7 +2,7 @@
 
 Abolish's contracts (the L2 contracts and the L1 board anchor), built with Foundry 1.8.3 and solc 0.8.30. Internal and source-only: deployed bytecode is checked against the release build of this source (verifier check 1.2, T-64).
 
-**Status: early (P1-18, P4-1).** So far there are the event accumulator, the election registry and the L1 board anchor. The trustee key registry, direct submission and the wagmi bindings follow in later P1-18 changes. Nothing is deployed, and nothing may be until the trustee registry and the close rule exist ([`docs/spec/contracts.md`](../../docs/spec/contracts.md), Election registry).
+**Status: early (P1-18, P4-1).** So far there are the event accumulator, the election registry, the trustee key registry and the L1 board anchor. Direct submission and the wagmi bindings follow in later P1-18 changes. Nothing is deployed, and nothing may be until the close rule exists ([`docs/spec/contracts.md`](../../docs/spec/contracts.md), Election registry).
 
 ## Event accumulator
 
@@ -19,7 +19,16 @@ Abolish's contracts (the L2 contracts and the L1 board anchor), built with Found
 
 - `createElection()` assigns `election_id = H(DS("abolish/v1/election-id", u64(chain_id) ‖ registry ‖ u64(counter)))` and makes the caller the election's creator.
 - `registerDefinition(bytes)` admits the creator's one definition, write-once, only with canonical calldata, if it decodes strictly (`src/ElectionDefinition.sol`), is well formed, names this deployment, opens after the anchoring epoch and after registration, has every electorate root in an earlier block, and its stub was recorded with its ceremony transcript hash by the trustee registry (`src/ITrusteeRegistry.sol`; T-34, T-17, T-37, T-08, T-13, T-25).
-- The trustee registry is the next part of P1-18; tests use a stand-in (`test/utils/DefinitionHarness.sol`).
+- Its unit tests use a stand-in trustee registry (`test/utils/DefinitionHarness.sol`); `test/TrusteeRegistry.t.sol` runs it against the real one.
+
+## Trustee registry
+
+`src/TrusteeRegistry.sol` implements [`docs/spec/contracts.md`](../../docs/spec/contracts.md), Trustee registry, and the on-chain rules of [`docs/spec/trustee-identity.md`](../../docs/spec/trustee-identity.md):
+
+- The deployment pins its panels, write-once: each panel's threshold `k`, its quorum `q` (`k ≤ q ≤ n`) and its seats' keys, each given as its 33-byte encoding and its `(x, y)`, checked against each other. Panels are refused in the spec's order (size, threshold, key, duplicate key), then for their quorum and for repeating a panel. `PanelPinned` logs each one.
+- `registerCeremony(bytes)` takes `panel_id ‖ stub_hash ‖ transcript_hash ‖ u8(count) ‖ count × (u8(index) ‖ r ‖ s)` with canonical calldata, and records the transcript for the stub and panel, write-once, only if at least `q` distinct seats, in increasing order, signed the ceremony registration statement and every signature verifies under its seat's pinned key. Anyone may submit; the sender counts for nothing (T-71, T-37, T-14). `CeremonyRegistered` logs the whole record.
+- `ceremonyRecorded(stub, transcript, panel_id, k, n)` answers the election registry: true only for a recorded pair, of a pinned panel with that threshold and size.
+- Signatures are checked through OpenZeppelin's `P256` (vendored, below), which uses the `P256VERIFY` precompile where the chain has it and its own Solidity code where it doesn't; the contract checks the range and low-s rules itself as well.
 
 ## Board anchor
 
@@ -45,7 +54,28 @@ Abolish's contracts (the L2 contracts and the L1 board anchor), built with Found
 
   `repro-build` compares two builds byte for byte.
 
-- No dependencies are vendored yet. The tests declare only the Foundry cheatcodes they use (`test/utils/Vm.sol`) instead of vendoring forge-std. Any dependency added later is vendored as plain files from an audited release, never as a git submodule, and listed here with its upstream repository, tag, commit and tree hash.
+- The tests declare only the Foundry cheatcodes they use (`test/utils/Vm.sol`) instead of vendoring forge-std. Dependencies are vendored as plain files from an audited release, never as a git submodule (Vendored code, below).
+
+## Vendored code
+
+`vendor/openzeppelin-contracts/` holds five unmodified files of [OpenZeppelin Contracts](https://github.com/OpenZeppelin/openzeppelin-contracts) (MIT, its `LICENSE` beside them) at tag `v5.6.1`, commit `5fd1781b1454fd1ef8e722282f86f9293cacf256`: `P256.sol` and the four files it imports. They are byte-identical to the same paths in that commit and in the npm package `@openzeppelin/contracts@5.6.1`. `foundry.toml` maps `@openzeppelin/contracts/` to them and nothing else. The `P256` library has been in OpenZeppelin's audited releases since 5.1.
+
+`test/vendor.test.ts` checks that the directory holds exactly these files with these sha256 sums (the `sha256sum` lines below), and that the tree hash, the sha256 of those lines, is the one recorded here:
+
+<!-- vendored:openzeppelin-contracts -->
+
+```text
+20aebc68b11c063133aa2af0ef4bb29875477c6d16d715718f0daec563938b84  LICENSE
+0704b9d6c032cca8512a3bc3f30f49f86f1f03102d2896a3d23e794b82efea66  contracts/utils/Errors.sol
+270fc8401c1a13fae6a7a4a2dd6e381b95d658896701e51f0d3e2688acab3dec  contracts/utils/Panic.sol
+0d7bb2f2b5e0ceb0e1a28523ee179c1aee5980cb793df739dd9ccf87170dffe2  contracts/utils/cryptography/P256.sol
+bdfdbe133991c0c78042957ff5cd97167926fcaf6d15664f3835a076cb066457  contracts/utils/math/Math.sol
+5779bc848bde39f1ad7bc02b4f708a0040888e0083b1a33f119cd94639350134  contracts/utils/math/SafeCast.sol
+```
+
+Tree hash: `5fc43e2daf0a5e03da7494c9bd4507c639373dca7ff489c53bb41195f7bcb191`.
+
+The check proves the files haven't changed since they were vendored, not that they match upstream: re-deriving them from the tag in CI needs a `ci:` change (rule B), recorded as known-weak in [`docs/status/P1-18.md`](../../docs/status/P1-18.md).
 
 ## Test
 
@@ -57,9 +87,9 @@ FOUNDRY_PROFILE=ci vp run --filter @abolishus/contracts test   # deeper fuzz and
 
 The tests cover:
 
-- the cross-language vectors in `docs/spec/vectors/event-accumulator.json`, `election-definition.json`, `election-registry.json` and the checkpoints of `board.json`, which independent Python implementations produced;
+- the cross-language vectors in `docs/spec/vectors/event-accumulator.json`, `election-definition.json`, `election-registry.json`, `trustee.json` and the checkpoints of `board.json`, which independent Python implementations produced;
 - fuzz tests that replay the logs the EVM recorded;
-- a test per admission rule of the election registry and per refusal of the board anchor (with its window's exact boundaries), and fuzz tests that any one-bit change to an approved definition, or arbitrary bytes, is refused;
+- a test per admission rule of the election registry, per refusal of the trustee registry and per refusal of the board anchor (with its window's exact boundaries), and fuzz tests that any one-bit change to an approved definition, or arbitrary bytes, is refused;
 - invariant suites (`test/invariant/`) whose invariants are stated in prose in each file.
 
 ## License

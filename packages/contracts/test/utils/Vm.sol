@@ -19,6 +19,7 @@ interface Vm {
     function keyExistsJson(string calldata json, string calldata key) external view returns (bool);
     function load(address target, bytes32 slot) external view returns (bytes32 data);
     function parseBytes(string calldata stringifiedValue) external pure returns (bytes memory);
+    function parseJsonBool(string calldata json, string calldata key) external pure returns (bool);
     function parseJsonString(string calldata json, string calldata key)
         external
         pure
@@ -27,11 +28,19 @@ interface Vm {
         external
         pure
         returns (string[] memory);
+    function parseJsonUint(string calldata json, string calldata key)
+        external
+        pure
+        returns (uint256);
     function parseUint(string calldata stringifiedValue) external pure returns (uint256);
     function prank(address msgSender) external;
     function readFile(string calldata path) external view returns (string memory data);
     function recordLogs() external;
     function roll(uint256 newHeight) external;
+    function signP256(uint256 privateKey, bytes32 digest)
+        external
+        pure
+        returns (bytes32 r, bytes32 s);
     function toString(uint256 value) external pure returns (string memory);
     function warp(uint256 newTimestamp) external;
 }

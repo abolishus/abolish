@@ -1,6 +1,6 @@
 # @abolishus/contracts
 
-Abolish's contracts (the L2 contracts and the L1 board anchor), built with Foundry 1.8.3 and solc 0.8.30. Internal and source-only: deployed bytecode is checked against the release build of this source (verifier check 1.2, T-64).
+Abolish's contracts (the L2 contracts and the L1 board anchor), built with Foundry 1.8.3 and solc 0.8.30. Internal and source-only: deployed bytecode is checked against the release build of this source (verifier check 1.2, T-64; Release build, below).
 
 **Status: early (P1-18, P3-2, P4-1).** So far there are the event accumulator, the election registry, the trustee key registry, the group registry with its Tier 0 additions and the L1 board anchor. The deployable contracts have typed wagmi bindings (Bindings, below). Direct submission follows in a later P1-18 change. Nothing is deployed, and nothing may be until the close rule exists ([`docs/spec/contracts.md`](../../docs/spec/contracts.md), Election registry).
 
@@ -60,6 +60,10 @@ Abolish's contracts (the L2 contracts and the L1 board anchor), built with Found
 - `test/bindings.test.ts` checks that the file binds exactly the concrete contracts in `src/`, each with the ABI in its compiled artifact.
 
 The file is plain data with no imports. `@wagmi/cli` is a dev dependency only; nothing it pulls in (viem, esbuild) reaches the generated file.
+
+## Release build
+
+The release build, whose bytecode and immutable ranges verifier 1.2 pins and from which every deployment is made, is `forge build` alone with the default profile, run on a fresh runner (no restored cache) in a job that runs no npm code, then `out/build-info` removed and the remaining artifacts hashed before anything else runs; the hashes are the job's output, and later jobs check against them. It is never the `out/` of `vp run build`: that build runs under `vp` and runs `@wagmi/cli` and Prettier after forge, and either could rewrite forge's artifacts without changing an ABI, in both of `repro-build`'s builds alike (T-55, T-64).
 
 ## Rules
 

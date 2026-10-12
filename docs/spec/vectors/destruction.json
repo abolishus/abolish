@@ -634,7 +634,7 @@
       "error": "unexpected-record-type"
     },
     {
-      "id": "v4-receipt-type",
+      "id": "v4-share-receipt-type",
       "description": "A version-4 entry carrying a share-receipt header, as version 3 allows",
       "version": 4,
       "encoding": "00070467e79b9b50a36dce9f874b2f26841618e19a93716ac786c30d2dbb9d6939900200000000000000090000000d00000004000c0100",
@@ -662,7 +662,7 @@
       "error": "unexpected-record-type"
     },
     {
-      "id": "v4-receipt-record-type",
+      "id": "v4-voter-receipt-type",
       "description": "A version-4 entry still refuses the voter's receipt (0x0004), which stays with its voter",
       "version": 4,
       "encoding": "00070467e79b9b50a36dce9f874b2f26841618e19a93716ac786c30d2dbb9d6939900200000000000000090000000d0000000400040100",

@@ -16,7 +16,9 @@ function Tabs({ className, orientation = "horizontal", ...props }: TabsPrimitive
 }
 
 // Adapted: every tab is at least 48px tall ("generous targets", brief) with
-// text-sm, and inactive tabs at 70% of the foreground for AA contrast.
+// text-sm, and inactive tabs at 70% of the foreground in light (the CLI's 60%
+// is lighter); dark keeps the CLI's `muted-foreground`. Both pass AA, which the
+// light and dark stories' axe checks confirm.
 const tabsListVariants = cva(
   "group/tabs-list inline-flex w-fit items-center justify-center rounded-none p-[3px] text-muted-foreground group-data-horizontal/tabs:min-h-12 group-data-vertical/tabs:h-fit group-data-vertical/tabs:flex-col data-[variant=line]:rounded-none",
   {

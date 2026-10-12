@@ -1,4 +1,6 @@
 export {
+  ballotHash,
+  type BallotHashContext,
   type BitProof,
   type Branch,
   checkShares,
@@ -281,6 +283,16 @@ export {
   type ShareContext,
   type ShareEncapsulation,
 } from "./share-encryption.ts";
+export {
+  checkShareReceipt,
+  intake,
+  type IntakeCode,
+  type IntakeKeys,
+  type IntakeResult,
+  type ReceiptSigner,
+  shareReceiptStatement,
+  type ShareReceiptStatement,
+} from "./share-receipt.ts";
 export { isWellFormedUtf8 } from "./utf8.ts";
 export {
   type CeremonyRegistration,

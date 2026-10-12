@@ -21,6 +21,7 @@ One JSON file per spec section or record type, named after it (`primitives.json`
 | `trustee.json`             | Trustee identity keys and signatures, accepted and rejected; panel identifiers; ceremony-registration statements ([[trustee-identity]])                                                                                                   |
 | `ballot-validity.json`     | Committed votes with the randomness that made them, their validity verdicts, trustees' share checks and codec rejections ([[ballot-validity]])                                                                                            |
 | `share-encryption.json`    | Trustee KEM keys, share ciphertexts with the randomness that made them, decryptions, postings and complaints with their verdicts, and codec rejections ([[share-encryption]])                                                             |
+| `share-receipt.json`       | Ballot hashes; each seat's intake of the share-encryption ballots with its share receipt, intakes failing each check, and receipt checks ([[ballot-validity]], Ballot hash; [[share-encryption]], Intake and receipts)                    |
 | `tally.json`               | Cell aggregates, trustees' per-ballot and summed shares with their check verdicts, combined seats, Lagrange coefficients and openings; published openings with the verifier's verdicts; a derived total ([[tally]])                       |
 | `tally-opening.json`       | Tally openings (record type `0x0006`): signed records re-made byte for byte, decode rejections, and elections with the verifier's per-cell verdicts and attributions ([[tally]], Opening record)                                          |
 | `receipt.json`             | Receipts: the record and its signed statement, rejected encodings and the checks at cast ([[receipts]])                                                                                                                                   |
@@ -167,6 +168,16 @@ Type descriptors:
 - `postings`: each has `id`, `description`, `ballot`, `seat`, `ciphertext`, `m` and `result`: `"ok"` or a posting code.
 - `complaints`: each has `id`, `description`, `ballot`, `seat`, `ciphertext`, `m` (the posting complained about), `proof` (the `complaint_proof` encoding, hex), `w` (decimal, where the proof is honest and reproducible) and `result`: `"ok"` for a proven complaint, or a posting or complaint code.
 - `decode`: each has `id`, `description`, `type` (`kem-key`, `kem-secret`, `share-ciphertext` or `complaint-proof`), `encoding` (hex) and `error`: a decode error code, or `null` for an encoding that must decode and re-encode to itself.
+
+## Share-receipt vectors
+
+`share-receipt.json` covers [[ballot-validity]] (Ballot hash) and [[share-encryption]] (Intake and receipts) with its own format, `abolish-share-receipt-vectors/1`, and the same top-level fields, plus `tags` (the ballot-hash and share-receipt tags, ASCII) and:
+
+- `panels`: by the names of `share-encryption.json`'s panels, each seat's `seat`, `signingSecret` (32 bytes big-endian, hex; test data), `signingKey` (its registered per-election key) and `identityKey` (a key that is never a receipt signer), as `p256-key` encodings, hex.
+- `ballotHashes`: each has `source` (`ballot-validity.json` or `share-encryption.json`), `ballot` (the `id` of a valid ballot in that file, whose `context` and committed vote it hashes) and `ballotHash` (hex).
+- `intakes`: every seat's intake of every `share-encryption.json` ballot, with that file's KEM keys and this file's signing secrets. Each has `ballot`, `seat` and `result`: `"ok"`, with `ballotHash`, `shareHash`, `statement` (the signed `m`, hex) and `receipt` (the signature, RFC 6979 after the low-s rule, hex), or an intake code.
+- `intakeFailures`: intakes by `panel-3`'s seats that fail. Each has `id`, `description`, `context` (as in the ballot-validity vectors), `seat`, `committedVote` (hex), `ciphertext` (hex), `result` (the first failing code) and, for `option-proof`, `option`.
+- `receiptChecks`: each has `id`, `description`, `panel` (whose signing keys are registered), `definitionHash`, `ballotHash`, `seat`, `shareHash` (the statement the checker builds, hex), `signature` (hex) and `valid`.
 
 ## Ceremony vectors
 

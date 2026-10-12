@@ -1,11 +1,11 @@
 # Share encryption
 
-How a ballot's shares reach each trustee privately: the hybrid KEM that combines ML-KEM-768 with Diffie–Hellman in ristretto255, the AEAD that seals the shares, the hash `H(ct_i)` the committed vote carries, a trustee's decryption and check, the public check of a ciphertext the client posts itself, and a trustee's complaint about a posted share that is invalid. This is the private part of [[0002-everlasting-privacy]] (option B, accepted by the owner, with the owner's answer to the ML-KEM question), with the Diffie–Hellman half chosen by [[0016-share-kem-dh-group]]. Notation is from [[notation]], the group and hashes from [[group]], the committed vote and shares from [[ballot-validity]]. Threats: T-15, T-14, T-18, T-30, T-31, T-36, T-37, T-39, T-41.
+How a ballot's shares reach each trustee privately: the hybrid KEM that combines ML-KEM-768 with Diffie–Hellman in ristretto255, the AEAD that seals the shares, the hash `H(ct_i)` the committed vote carries, a trustee's decryption and check, its intake and signed share receipt, the public check of a ciphertext the client posts itself, and a trustee's complaint about a posted share that is invalid. This is the private part of [[0002-everlasting-privacy]] (option B, accepted by the owner, with the owner's answer to the ML-KEM question), with the Diffie–Hellman half chosen by [[0016-share-kem-dh-group]]. Notation is from [[notation]], the group and hashes from [[group]], the committed vote and shares from [[ballot-validity]]. Threats: T-15, T-14, T-18, T-30, T-31, T-36, T-37, T-39, T-41.
 
 What this page doesn't cover yet:
 
 - **Registering trustee KEM keys** with their proofs of possession, in the ceremony transcript: [[ceremony]]. This page defines the key and its encoding.
-- **Receipts, postings and complaints as board records,** their signatures, the delivery deadline and the complaint window: P1-12 part 3 with P1-13 and P1-15. This page defines what each one checks.
+- **Receipts, postings and complaints on the board:** the records that carry them, the complaint's signature, the delivery deadline and the complaint window (P1-12 part 3b, with P1-13 and P1-15). This page defines what each one checks, and the share receipt's signed statement.
 - **Spoiled ballots:** what a challenged ballot reveals and how its ciphertexts are rebuilt (P1-13). Encryption is deterministic given the randomness below, so revealing it lets anyone rebuild each ciphertext.
 
 ## Sources
@@ -103,7 +103,41 @@ Trustee `i`, holding `kem_secret = (seed, x)` and the ballot's committed vote, w
 4. Open `sealed`. If the AEAD fails, or the plaintext doesn't decode as `list<share, MAX_OPTIONS>` with exactly `m` entries, `share-decrypt`.
 5. Check every option's share against `vss` ([[ballot-validity]], Shares); on failure, `share-check`.
 
-The checks run in that order and the first failure is the result. A trustee receipts the ciphertext only if every step passes (P1-12 part 3). These steps take `ct_i` as delivered; checking `H(ct_i)` against the committed vote's `share_hashes[i]` belongs to the receipt, which part 3 specifies, as the posting check already does. On any failure it refuses at once and publishes nothing ([[0002-everlasting-privacy]], Delivery). It never reveals `ss_M` or `ss_DH` for a ciphertext it decrypted: ML-KEM's implicit rejection (FIPS 203 Algorithm 18) makes `Decaps` return a pseudorandom secret for a ciphertext that fails re-encryption, and revealing that output would leak `dk` over a few thousand crafted ciphertexts.
+The checks run in that order and the first failure is the result. These steps take `ct_i` as delivered; intake (below) checks `H(ct_i)` against the committed vote's `share_hashes[i]` first, as the posting check does. On any failure it refuses at once and publishes nothing ([[0002-everlasting-privacy]], Delivery). It never reveals `ss_M` or `ss_DH` for a ciphertext it decrypted: ML-KEM's implicit rejection (FIPS 203 Algorithm 18) makes `Decaps` return a pseudorandom secret for a ciphertext that fails re-encryption, and revealing that output would leak `dk` over a few thousand crafted ciphertexts.
+
+## Intake and receipts
+
+Trustee `i`'s node takes a delivery of one ballot's ciphertext: the ballot's tier (`u8`), nullifier (`field<bn254>`) and committed vote, each decoded strictly as the ballot carries it ([[notation]], [[ballot-validity]]), and `ct_i`. It runs [[verifier]] 2.5 for the election before it takes any. It checks, in this order, and the first failure is the result:
+
+1. `delivery-malformed`: the tier, nullifier or committed vote doesn't decode, or the tier isn't one the definition's electorate lists.
+2. `validity-shape` ([[ballot-validity]], Checks).
+3. `share-hash`: `H(ct_i)` equals `share_hashes[i]`, the committed vote's hash for seat `i`.
+4. The rest of the validity checks (`option-proof`, `sum-proof`), under the definition and the delivered tier and nullifier.
+5. Decryption, steps 1 to 5 above (`share-malformed`, `share-proof`, `share-decrypt`, `share-check`).
+
+On any failure it refuses at once, signs nothing and publishes nothing ([[0002-everlasting-privacy]], Delivery). If every check passes, it stores `ct_i` and its shares under the ballot hash until the tally ([[0002-everlasting-privacy]], Consequences; P1-15 part 3), and returns a **share receipt**: an ECDSA P-256 signature by its per-election signing key ([[trustee-identity]], Which key signs what), under `abolish/v1/sig/share-receipt`, over
+
+```
+m = definition_hash ‖ ballot_hash ‖ u8(i) ‖ H(ct_i)
+```
+
+97 bytes, with `ballot_hash` from [[ballot-validity]] (Ballot hash).
+
+Anyone checks a share receipt for seat `i` against a ballot:
+
+| Code            | Check                                                                                                                                                                                                                                                                             |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `share-receipt` | Seat `i` has registered keys ([[ceremony]], Transcript check), and the signature verifies under seat `i`'s registered signing key, never its identity key, over `m` built from the election's `definition_hash`, the ballot's recomputed `ballot_hash` and its `share_hashes[i]`. |
+
+A receipt that fails is ignored: it delivers nothing, and, like a failing posting, it never excludes a ballot or fails the election, since anyone can attach junk to a ballot. The ballot's own checks (validity, membership) run as for any ballot; a receipt adds nothing to them.
+
+Notes:
+
+- **What a receipt says.** That seat `i` holds `ct_i` and found that its shares open and pass against this exact public part, which passed the validity checks. Nothing about eligibility: intake runs before the membership proof exists ([[revoting]], Client rule 6), so it checks neither membership nor the L1 reference; that the tier is one the definition lists (step 1) says nothing about whether the voter belongs to it. A receipt for a ballot that is never admitted delivers nothing.
+- **One public part.** `ballot_hash` binds the definition, the ballot version, the tier, the nullifier, every commitment, every share hash and every proof ([[ballot-validity]], Ballot hash), so a receipt counts only for the public part the trustee checked. It leaves out the membership proof and the L1 reference, so the receipt also covers a re-randomised copy of the ballot, and the same public part cast again under a newer L1 reference: both carry the shares the trustee holds.
+- **`H(ct_i)` in `m`.** `ballot_hash` binds it already. It is in `m` too so that a receipt names its ciphertext on its own: the trustee's stored ciphertext and a voter's receipt check are found by it.
+- **The order.** The shape check runs first, so `share_hashes[i]` exists when step 3 reads it, and the cheap checks run before the validity proofs, the costliest step (at `MAX_OPTIONS`, hundreds of scalar multiplications), and before any decapsulation. They don't make intake an authenticated endpoint: anyone can make a valid ballot over a ciphertext of their choosing (Residuals).
+- **Repeated deliveries.** A node signs with an RFC 6979 nonce, as `packages/crypto` does, so delivering the same ciphertext for the same public part again gives the same receipt. A node whose signer draws its nonces (an HSM, say) gives another valid signature on the same statement, which counts the same: the protocol keys on the statement, never on signature bytes ([[trustee-identity]], Signing).
 
 ## Public posting
 
@@ -162,9 +196,12 @@ Notes:
 - **Only computationally hiding in transit.** A recorded `ct_i` falls to an adversary who breaks both ML-KEM-768 and discrete logs in ristretto255 (A-11, T-15). A posted `ct_i` falls to discrete logs alone.
 - **Unaudited ML-KEM code.** `@noble/post-quantum` has no independent audit; testnets only until one exists ([[0002-everlasting-privacy]], Decision).
 - **Not X-Wing.** The combiner follows X-Wing over another group and hash, so X-Wing's vectors and proofs don't apply directly ([[0016-share-kem-dh-group]], T-36).
+- **Intake is an open write.** Anyone can make a valid ballot, under any nullifier, with no credential, so anyone can make a trustee node verify proofs, decapsulate and store a ciphertext and its shares until the tally. Storage and work are bounded only by the node's rate limits and quotas, which a node operator must set (T-39, T-52, T-54).
 - **Not constant time.** ML-KEM's arithmetic in `@noble/post-quantum` is JavaScript and makes no constant-time claim; the scalar multiplications are `@noble/curves`' constant-time ladder. A timing attacker could learn about `dk` or `x`, and not only a local one: trustee intake decapsulates any well-formed ciphertext with a valid proof of knowledge next to a valid ballot core, and the proof doesn't cover `ct_M`, so it is a remote, unauthenticated decapsulation endpoint for a chosen `ct_M`. The mainnet audit must cover ML-KEM's timing, and intake needs rate limits (T-39, T-14).
 - **Secrets can't be zeroised in JavaScript.** `packages/crypto` overwrites the byte arrays it derives (`dk`, `ss_M`, `K`), but `x` and `e_i` are `bigint`s.
 
 ## Test vectors
 
 `docs/spec/vectors/share-encryption.json` ([[vectors/README|vectors]]): trustee keys from their seeds; ballots with every ciphertext and share hash, from the randomness that made them; each trustee's decryption, and decryptions failing each step (another seat, another definition, a changed `vss`, a flipped tag byte, wrong shares sealed correctly); postings passing and failing each check; complaints proven, unfounded and failing their proof; codec rejections of `kem_key`, `kem_secret`, `share_ciphertext` and `complaint_proof`. They are printed by `packages/crypto/scripts/share-encryption-vectors.py`, which implements ML-KEM-768 from FIPS 203 and ChaCha20-Poly1305 from RFC 8439 in Python's integers and `hashlib`, reusing only the independent ristretto255 code of `group-vectors.py` and the ballot code of `ballot-validity-vectors.py`. Before printing, it checks its ML-KEM-768 against the accumulated FIPS 203 vectors of Go's `crypto/mlkem` tests (100 iterations; 10 000 with `--full`) and its AEAD against RFC 8439 §2.8.2. `packages/crypto` checks `@noble/post-quantum` against the same 10 000-iteration hash and `@noble/ciphers` against RFC 8439 §2.8.2.
+
+`docs/spec/vectors/share-receipt.json`: the ballot hash of every valid ballot in `ballot-validity.json` and every ballot in `share-encryption.json`; each seat's intake of the `share-encryption.json` ballots, with its share receipt re-made byte for byte from the seat's signing secret; intakes failing each check from `validity-shape` on (a shape for another panel, a swapped option proof, an altered sum proof, another seat's ciphertext, and the dishonest clients' ciphertexts) and showing their order; and receipt checks passing and failing (another seat, an unregistered seat, seat 0 and seat 17, the identity key, another definition, another ballot, another ciphertext, an altered or high-`s` signature). They are printed by `packages/crypto/scripts/share-receipt-vectors.py`, which reuses `share-encryption-vectors.py`'s ballots and decryption and `trustee-vectors.py`'s P-256 ECDSA, and so shares nothing with `packages/crypto`.

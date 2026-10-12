@@ -19,7 +19,7 @@ export const TAG_REGISTRY = Object.freeze(
       { tag: "abolish/v1/merkle/leaf", primitive: "plain", status: "specified" },
       { tag: "abolish/v1/merkle/node", primitive: "plain", status: "specified" },
       { tag: "abolish/v1/board-checkpoint", primitive: "plain", status: "specified" },
-      { tag: "abolish/v1/ballot", primitive: "plain", status: "reserved" },
+      { tag: "abolish/v1/ballot", primitive: "plain", status: "specified" },
       { tag: "abolish/v1/sig/receipt", primitive: "signature", status: "specified" },
       { tag: "abolish/v1/nullifier-scope", primitive: "plain", status: "specified" },
       { tag: "abolish/v1/membership-message", primitive: "plain", status: "specified" },
@@ -43,6 +43,7 @@ export const TAG_REGISTRY = Object.freeze(
       { tag: "abolish/v1/share-ciphertext", primitive: "plain", status: "specified" },
       { tag: "abolish/v1/fs/share-ephemeral", primitive: "fiat-shamir", status: "specified" },
       { tag: "abolish/v1/fs/share-complaint", primitive: "fiat-shamir", status: "specified" },
+      { tag: "abolish/v1/sig/share-receipt", primitive: "signature", status: "specified" },
       { tag: "abolish/v1/circuit-tag", primitive: "plain", status: "specified" },
       { tag: "abolish/v1/panel", primitive: "plain", status: "specified" },
       {

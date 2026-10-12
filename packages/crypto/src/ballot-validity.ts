@@ -150,6 +150,10 @@ function checkRules(rules: ValidityRules): void {
 
 function checkContext(ctx: ValidityContext): void {
   checkRules(ctx);
+  checkBallotContext(ctx);
+}
+
+function checkBallotContext(ctx: BallotHashContext): void {
   const d = ctx.definitionHash;
   if (!(d instanceof Uint8Array) || !ArrayBuffer.isView(d) || new Uint8Array(d).length !== 32)
     throw new TypeError("context: definitionHash must be 32 bytes");
@@ -179,6 +183,29 @@ export function statementHash(
   VSS.write(w, vss);
   SHARE_HASHES.write(w, shareHashes);
   return H(ds("abolish/v1/ballot-statement", w.finish()));
+}
+
+/** What names a ballot beside its committed vote: the election, its tier and its nullifier. */
+export type BallotHashContext = Pick<ValidityContext, "definitionHash" | "tier" | "nullifier">;
+
+/**
+ * `ballot_hash`: the hash of the ballot's public part, the statement hash's
+ * inputs followed by the validity proofs (docs/spec/ballot-validity.md,
+ * Ballot hash). The membership proof's message and every share receipt bind
+ * it (T-38, T-41); it leaves out the membership proof, which anyone can
+ * re-randomise, and the L1 reference, which `M` binds itself.
+ */
+export function ballotHash(ctx: BallotHashContext, vote: CommittedVote): Uint8Array {
+  checkBallotContext(ctx);
+  const w = new Writer();
+  w.bytes(new Uint8Array(ctx.definitionHash));
+  u16.write(w, BALLOT_RECORD_TYPE);
+  u8.write(w, BALLOT_VERSION);
+  u8.write(w, ctx.tier);
+  fieldBn254.write(w, ctx.nullifier);
+  // vss ‖ share_hashes ‖ option_proofs ‖ sum_proof, exactly as the ballot carries them.
+  COMMITTED_VOTE.write(w, vote);
+  return H(ds("abolish/v1/ballot", w.finish()));
 }
 
 type FsTag = SpecifiedTagOf<"fiat-shamir">;
@@ -277,22 +304,32 @@ function commitmentSum(vss: CommittedVote["vss"]): Element {
 }
 
 /**
+ * `validity-shape` alone: the counts the election fixes. Exported internally
+ * so trustee intake can check a ciphertext's hash between the shape and the
+ * proofs, which are the costly part (docs/spec/share-encryption.md, Intake).
+ */
+export function shapeOk(ctx: ValidityContext, vote: CommittedVote): boolean {
+  checkContext(ctx);
+  const { optionCount: m, minSelections: min, maxSelections: max, threshold: k } = ctx;
+  return (
+    vote.vss.length === m &&
+    vote.vss.every((e) => e.length === k) &&
+    vote.share_hashes.length === ctx.panelSize &&
+    vote.option_proofs.length === m &&
+    vote.sum_proof.length === max - min + 1
+  );
+}
+
+/**
  * The admission check of docs/spec/ballot-validity.md (Checks; verifier 5.4):
  * shape against the election, then each option proof in order, then the sum
  * proof. The first failure is the result.
  */
 export function checkValidity(ctx: ValidityContext, vote: CommittedVote): ValidityResult {
   checkContext(ctx);
-  const { optionCount: m, minSelections: min, maxSelections: max, threshold: k } = ctx;
+  const { optionCount: m, minSelections: min, maxSelections: max } = ctx;
   const { vss, share_hashes, option_proofs, sum_proof } = vote;
-  if (
-    vss.length !== m ||
-    vss.some((e) => e.length !== k) ||
-    share_hashes.length !== ctx.panelSize ||
-    option_proofs.length !== m ||
-    sum_proof.length !== max - min + 1
-  )
-    return { ok: false, code: "validity-shape" };
+  if (!shapeOk(ctx, vote)) return { ok: false, code: "validity-shape" };
   const statement = statementHash(ctx, vss, share_hashes);
   for (let j = 0; j < m; j++) {
     const p = option_proofs[j] as BitProof;

@@ -20,7 +20,7 @@ m̂ = F(M)
 
 - `definition_hash` is the election definition's hash (P1-10b), the same value the nullifier scope binds.
 - `tier` is the ballot's tier (0, 1 or 2), the same value its scope binds ([[membership]], Scope).
-- `ballot_hash` is the ballot's hash under `abolish/v1/ballot` (P1-12): its commitments, ciphertexts and validity proofs, never its membership proof (which can't bind its own hash) and never the L1 reference (which `M` binds itself).
+- `ballot_hash` is the ballot's hash under `abolish/v1/ballot` ([[ballot-validity]], Ballot hash): its tier, nullifier, commitments, share-ciphertext hashes and validity proofs, never its membership proof (which can't bind its own hash) and never the L1 reference (which `M` binds itself).
 - `l1_ref_number` (`u64`) and `l1_ref_hash` (`bytes[32]`) name the L1 block: its number, and its execution-layer block hash as the block header's Keccak-256 (the `hash` that Ethereum's JSON-RPC `eth_getBlockByNumber` returns).
 - The input after the tag is exactly 105 bytes. `F` is [[membership]]'s field mapping.
 

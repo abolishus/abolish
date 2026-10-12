@@ -382,6 +382,9 @@ export function verifyBundle(bundle: Bundle): Report {
       // A failing combination doesn't stop the checks: the pinned version is
       // one this verifier reads, so the report still shows what the board holds.
       ...(definition.profile !== undefined ? [["2.3", definition.profile] as const] : []),
+      // Only version 1 is read here, and it lists no receipt keys, so 2.9 has
+      // nothing to check; version 4's keys need the anchor's record (P1-13b).
+      ["2.9", PASS],
       ...(carriesDestruction(definition.inputs.boardEntryVersion)
         ? []
         : [["8.5", NOT_APPLICABLE] as const]),

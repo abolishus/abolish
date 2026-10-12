@@ -230,7 +230,7 @@ describe("report", () => {
   });
 
   test("reports every unimplemented check as unverifiable, never as pass", () => {
-    const implemented = new Set(["4.1", "4.2", "8.5"]);
+    const implemented = new Set(["2.9", "4.1", "4.2", "8.5"]);
     for (const c of report.checks.filter((x) => !implemented.has(x.id)))
       expect(c).toEqual({
         id: c.id,
@@ -238,6 +238,14 @@ describe("report", () => {
         status: "unverifiable",
         code: "not-implemented",
       });
+  });
+
+  test("2.9 passes a version-1 definition, which lists no receipt keys to check", () => {
+    expect(report.checks.find((c) => c.id === "2.9")).toEqual({
+      id: "2.9",
+      kind: "election",
+      status: "pass",
+    });
   });
 
   test("8.5 is not applicable: board-entry version 1 can't carry a destruction statement", () => {

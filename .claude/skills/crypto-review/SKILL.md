@@ -36,7 +36,7 @@ Spawn a fresh subagent: general-purpose, with no access to your reasoning. Pass 
 Ask it to return findings as severity, file:line, attack, and fix. Then:
 
 1. Fix every blocking finding, or rebut it in writing with an argument a cryptographer would accept.
-2. If you changed code, re-run the subagent on the new diff.
+2. Don't re-run the subagent on your fixes: one in-session round, then mark the PR ready and let CI's `crypto-review` check them. Re-run it only if a fix changed the protocol's design rather than patching code.
 3. Summarise the subagent review (findings and dispositions) in the PR body under "Independent review".
 
 ## Red flags: stop and write an ADR instead

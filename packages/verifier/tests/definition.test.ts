@@ -473,14 +473,17 @@ describe("definition versions 3 and 4 (regional cells)", () => {
     });
 
   // [board entry, ballot, spoiled-ballot opening, 2.3]: definition versions 3
-  // and 4 need ballot version 2, which needs board entries that carry its
+  // and 4 need a ballot version that names its cell (2 is the only one known), which needs board entries that carry its
   // delivery records and a spoiled-ballot opening version that opens its
   // cores. None does yet: version 1 opens version-1 cores only, so it fails,
   // and version 2 is one a later release may define, so it is unsupported,
   // never a failure (T-36, T-42).
   const table: readonly (readonly [number, number, number, string])[] = [
     [4, 1, 1, "profile-combination"],
-    [4, 3, 1, "profile-combination"],
+    // Ballot version 3 stands for one a later release may define as naming
+    // its cell: unsupported, never failed, whatever the opening (T-36).
+    [4, 3, 1, "unsupported-version"],
+    [4, 3, 2, "unsupported-version"],
     [4, 2, 1, "profile-combination"],
     [4, 2, 2, "unsupported-version"],
     [3, 2, 255, "unsupported-version"],

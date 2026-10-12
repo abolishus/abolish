@@ -24,7 +24,8 @@ import {
   RECORD_TYPES,
 } from "../src/index.ts";
 import { SPOILED_BALLOT_OPENING } from "../src/challenge.ts";
-import { SPOILED_OPENING_VERSIONS } from "../src/protocol.ts";
+import { BALLOT } from "../src/ballot.ts";
+import { BALLOT_VERSIONS, SPOILED_OPENING_VERSIONS } from "../src/protocol.ts";
 
 // Properties of the election definition and display-text records
 // (docs/spec/election-definition.md, docs/spec/display-text.md): every value
@@ -500,10 +501,13 @@ describe("2.3's profile combination", () => {
     expect(profileCombinationRule(pinning(4, 1, 1))).toBeUndefined();
   });
 
-  test("the opening versions 2.3 knows are the ones the opening codec reads", () => {
+  test("the opening and ballot versions 2.3 knows are the ones their codecs read", () => {
     const ascending = (a: number, b: number) => a - b;
     expect([...SPOILED_OPENING_VERSIONS].sort(ascending)).toEqual(
       Object.keys(SPOILED_BALLOT_OPENING.versions).map(Number).sort(ascending),
+    );
+    expect([...BALLOT_VERSIONS].sort(ascending)).toEqual(
+      Object.keys(BALLOT.versions).map(Number).sort(ascending),
     );
   });
 
@@ -523,7 +527,9 @@ describe("2.3's profile combination", () => {
       };
     };
     expect(profileCombinationRule(v3(1))).toBe("profile-combination");
-    expect(profileCombinationRule(v3(3))).toBe("profile-combination");
+    // A ballot version this package doesn't know may be a later release's
+    // cell-naming ballot: unsupported, never failed (T-36).
+    expect(profileCombinationRule(v3(3))).toBe("unsupported-version");
     // Ballot version 2 is the only one that could fit, and no spoiled-ballot
     // opening version opens its cores yet, so it is refused under every one
     // this package knows (docs/spec/challenge.md, Versions; T-42). One it
@@ -586,7 +592,7 @@ describe("2.3's profile combination", () => {
       };
     };
     expect(profileCombinationRule(v4(1))).toBe("profile-combination");
-    expect(profileCombinationRule(v4(3))).toBe("profile-combination");
+    expect(profileCombinationRule(v4(3))).toBe("unsupported-version");
     expect(profileCombinationRule(v4(2))).toBe("profile-combination");
     const v4Board = (board: number) => ({
       ...v4(2),

@@ -143,11 +143,19 @@ def combination(defn):
     pins = dict(defn["profile"]["pins"])
     board, ballot, opening = pins[BOARD_ENTRY_TYPE], pins.get(BALLOT_TYPE), pins.get(TALLY_OPENING_TYPE)
     failed = outcome("fail", "profile-combination", {})
+    regional = pins[0x0001] in (3, 4)
+    # Ballot versions 1 and 2 are the ones specified; any other may be a later
+    # release's, which might name its cell (T-36).
+    unknown_ballot = ballot not in (1, 2)
     # Definition versions 3 and 4 pin ballot version 2, which names its cell, and only they do.
-    if (pins[0x0001] in (3, 4)) != (ballot == 2):
+    if not (regional and unknown_ballot) and regional != (ballot == 2):
+        return failed
+    if ballot == 2 and SPOILED_OPENING_TYPE not in pins:
         return failed
     if not ((ballot not in (1, 2) or board in (3, 4)) and (opening != 1 or board == 4)):
         return failed
+    if regional and unknown_ballot:
+        return outcome("unverifiable", "unsupported-version", {})
     if ballot == 2:
         # No spoiled-ballot opening version opens version-2 cores yet: version
         # 1, the only one specified, opens version 1's, and any other is one a

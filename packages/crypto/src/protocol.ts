@@ -168,6 +168,9 @@ const CELL_CORE_OPENINGS: ReadonlySet<number> = new Set<number>();
 // SPOILED_BALLOT_OPENING), written out because importing it here would be an
 // import cycle; a test ties the two.
 export const SPOILED_OPENING_VERSIONS: ReadonlySet<number> = new Set<number>([1]);
+// The ballot versions this package reads (ballot.ts's BALLOT), written out
+// for the same reason.
+export const BALLOT_VERSIONS: ReadonlySet<number> = new Set<number>([1, 2]);
 
 /** Why 2.3's profile combination refuses a definition's pins. */
 export type ProfileCombinationRule = "profile-combination" | "unsupported-version";
@@ -180,7 +183,8 @@ export type ProfileCombinationRule = "profile-combination" | "unsupported-versio
  * definition versions 3 and 4 need ballot version 2 and only they pair with
  * it, ballot version 2 needs a spoiled-ballot opening version that opens its
  * cores (none yet, so it is refused for now, though an opening version this
- * package doesn't know is `unsupported-version`), and
+ * package doesn't know is `unsupported-version`, and so is a ballot version
+ * it doesn't know under definition version 3 or 4), and
  * tally-opening version 1 one that carries destruction statements (4,
  * docs/spec/tally.md, Destruction), so an election's creator can't leave
  * delivery or destruction off the board (T-34). A board-entry version this
@@ -207,7 +211,12 @@ export function profileCombinationRule(
   // version none of them (docs/spec/election-definition.md, Notes; T-16, T-34).
   const definition = pinnedVersion(d, RECORD_TYPES.electionDefinition);
   const regional = definition === 3 || definition === 4;
-  if (regional !== CELL_BALLOT_VERSIONS.has(ballot)) return "profile-combination";
+  // A ballot version this package doesn't know may be one a later release
+  // reads as naming its cell, so under a regional definition it is judged
+  // last, as unsupported (T-36).
+  const unknownBallot = !BALLOT_VERSIONS.has(ballot);
+  if (!(regional && unknownBallot) && regional !== CELL_BALLOT_VERSIONS.has(ballot))
+    return "profile-combination";
   const spoiled = pinnedVersion(d, RECORD_TYPES.spoiledBallotOpening);
   if (ballot === 2 && spoiled === undefined) return "profile-combination";
   const allowed = boardPayloadTypes(board);
@@ -218,6 +227,7 @@ export function profileCombinationRule(
     (!DELIVERED_BALLOT_VERSIONS.has(ballot) || carriesDelivery) &&
     (opening !== 1 || carriesDestruction);
   if (!fits) return "profile-combination";
+  if (regional && unknownBallot) return "unsupported-version";
   if (ballot === 2 && spoiled !== undefined && !CELL_CORE_OPENINGS.has(spoiled))
     // An opening version this package doesn't know may be one a later
     // release knows to open version-2 cores, so it is unsupported here,

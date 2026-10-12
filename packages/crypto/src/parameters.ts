@@ -23,4 +23,6 @@ export const PARAMETERS = Object.freeze({
   // Constants of the group registry's deployment (docs/spec/vouching.md).
   VOUCH_K: 3,
   VOUCH_SLOTS: 12,
+  // Registered members; the regional-cell floor of election-definition version 3.
+  MIN_CELL_ELECTORATE: 1000,
 } as const);

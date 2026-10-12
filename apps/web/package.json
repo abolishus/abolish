@@ -1,0 +1,49 @@
+{
+  "name": "@abolishus/web",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The public website: TanStack Start SSR for discovery, poll pages and public results. Never casts a vote.",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "scripts": {
+    "build": "vp exec tsc -p tsconfig.json && vp build",
+    "check": "vp check",
+    "test": "vp test run --project unit",
+    "test:storybook": "vp test run --project storybook",
+    "storybook": "storybook dev -p 6008"
+  },
+  "dependencies": {
+    "@abolishus/api-contract": "workspace:*",
+    "@abolishus/crypto": "workspace:*",
+    "@abolishus/ui": "workspace:*",
+    "@orpc/client": "catalog:",
+    "@orpc/contract": "catalog:",
+    "@orpc/openapi-client": "catalog:",
+    "@tanstack/react-router": "catalog:",
+    "@tanstack/react-start": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:"
+  },
+  "devDependencies": {
+    "@storybook/addon-a11y": "catalog:",
+    "@storybook/addon-vitest": "catalog:",
+    "@storybook/react-vite": "catalog:",
+    "@tailwindcss/vite": "catalog:",
+    "@types/node": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "@vitest/browser-playwright": "catalog:",
+    "fast-check": "catalog:",
+    "playwright": "catalog:",
+    "storybook": "catalog:",
+    "tailwindcss": "catalog:",
+    "typescript": "catalog:",
+    "vite-plus": "catalog:",
+    "vitest": "catalog:"
+  },
+  "abolish": {
+    "buildOutputs": [
+      "dist"
+    ]
+  }
+}

@@ -46,14 +46,18 @@ catalog:
   "@noble/hashes": 2.4.0
   "@noble/post-quantum": 0.7.1
   "@noir-lang/noir_js": 1.0.0-beta.22
+  "@orpc/client": 1.15.4
   "@orpc/contract": 1.15.4
   "@orpc/openapi": 1.15.4
+  "@orpc/openapi-client": 1.15.4
   "@orpc/server": 1.15.4
   "@orpc/zod": 1.15.4
   "@storybook/addon-a11y": 10.6.1
   "@storybook/addon-vitest": 10.6.1
   "@storybook/react-vite": 10.6.1
   "@tailwindcss/vite": 4.3.3
+  "@tanstack/react-router": 1.170.41
+  "@tanstack/react-start": 1.168.60
   "@types/node": 24.19.1
   "@types/react": 19.2.7
   "@types/react-dom": 19.2.3

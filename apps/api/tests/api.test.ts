@@ -3,7 +3,11 @@ import {
   checkBoard,
   decodeElectionDefinition,
   encodeElectionDefinition,
+  identityBackupId,
   merkleRoot,
+  newIdentitySecret,
+  openIdentityBackup,
+  sealIdentityBackup,
   UNPINNED,
   verifyConsistency,
   verifyInclusion,
@@ -11,6 +15,8 @@ import {
 import {
   ACCOUNT_COOKIE_PREFIX,
   appendEntry,
+  IDENTITY_BACKUP_ENVELOPE_LENGTH,
+  IDENTITY_BACKUP_RETENTION_MONTHS,
   MAX_REPORT_QUEUE,
   moderate,
   readBoard,
@@ -19,7 +25,12 @@ import {
   RESTORE_REASONS as CORE_RESTORE_REASONS,
   storeDefinition,
 } from "@abolishus/core";
-import { REMOVAL_REASONS, RESTORE_REASONS } from "@abolishus/api-contract";
+import {
+  IDENTITY_BACKUP_ENVELOPE,
+  IDENTITY_BACKUP_RETENTION_MONTHS as CONTRACT_RETENTION_MONTHS,
+  REMOVAL_REASONS,
+  RESTORE_REASONS,
+} from "@abolishus/api-contract";
 import { type TestDb, testDb } from "@abolishus/core/test-db";
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -421,6 +432,95 @@ describe("moderation (T-68)", () => {
   });
 });
 
+describe("backups (ADR 0017; T-10, T-20, T-52)", () => {
+  /** A backup as the ballot client makes one. */
+  function backup() {
+    const prf = b32();
+    const secret = newIdentitySecret();
+    const { locator, envelope } = sealIdentityBackup(prf, Uint8Array.from(secret));
+    return { prf, secret, locator: hex(locator), envelope: hex(envelope) };
+  }
+
+  test("the contract's sizes and retention are core's", () => {
+    expect(IDENTITY_BACKUP_ENVELOPE).toBe(IDENTITY_BACKUP_ENVELOPE_LENGTH);
+    expect(CONTRACT_RETENTION_MONTHS).toBe(IDENTITY_BACKUP_RETENTION_MONTHS);
+  });
+
+  test("put, fetch, replace and delete by locator; the envelope opens to the secret", async () => {
+    const b = backup();
+    expect((await post("/backups", { locator: b.locator, envelope: b.envelope })).status).toBe(200);
+    const r = await post("/backups/fetch", { locator: b.locator });
+    expect(r.status).toBe(200);
+    const { envelope } = await json(r);
+    expect(envelope).toBe(b.envelope);
+    expect(openIdentityBackup(b.prf, unhex(envelope as string))).toEqual(b.secret);
+
+    const next = hex(sealIdentityBackup(b.prf, newIdentitySecret()).envelope);
+    expect((await post("/backups", { locator: b.locator, envelope: next })).status).toBe(200);
+    expect(await json(await post("/backups/fetch", { locator: b.locator }))).toEqual({
+      envelope: next,
+    });
+
+    expect((await post("/backups/delete", { locator: b.locator })).status).toBe(200);
+    for (const path of ["/backups/fetch", "/backups/delete"]) {
+      const gone = await post(path, { locator: b.locator });
+      expect(gone.status).toBe(404);
+      expect((await json(gone))["code"]).toBe("BACKUP_NOT_FOUND");
+    }
+  });
+
+  test("the table keeps a hash of the locator, never the locator", async () => {
+    const b = backup();
+    await post("/backups", { locator: b.locator, envelope: b.envelope });
+    const rows = await app`SELECT encode(id, 'hex') AS id FROM identity_backups`;
+    const ids = rows.map((r) => r["id"]);
+    expect(ids).toContain(hex(identityBackupId(unhex(b.locator))));
+    expect(ids).not.toContain(b.locator);
+    // A row's id, presented as a locator, finds nothing (T-66).
+    const id = hex(identityBackupId(unhex(b.locator)));
+    expect((await post("/backups/fetch", { locator: id })).status).toBe(404);
+  });
+
+  test("an envelope that doesn't decode is BACKUP_REJECTED with the decoder's code", async () => {
+    const b = backup();
+    for (const [envelope, code] of [
+      [`000b01${b.envelope.slice(6)}`, "unknown-record-type"],
+      [`000a02${b.envelope.slice(6)}`, "unknown-version"],
+    ] as const) {
+      const r = await post("/backups", { locator: b.locator, envelope });
+      expect(r.status).toBe(422);
+      const body = await json(r);
+      expect(body["code"]).toBe("BACKUP_REJECTED");
+      expect(body["data"]).toEqual({ code });
+    }
+    expect((await post("/backups/fetch", { locator: b.locator })).status).toBe(404);
+  });
+
+  test("refuses a locator or envelope of any other size or spelling, and extra fields", async () => {
+    const b = backup();
+    for (const body of [
+      { locator: b.locator.slice(2), envelope: b.envelope },
+      { locator: `${b.locator}00`, envelope: b.envelope },
+      { locator: b.locator.toUpperCase(), envelope: b.envelope },
+      { locator: b.locator, envelope: b.envelope.slice(2) },
+      { locator: b.locator, envelope: `${b.envelope}00` },
+      { locator: b.locator, envelope: b.envelope, accountId: "x" },
+      { envelope: b.envelope },
+    ])
+      expect((await post("/backups", body)).status).toBe(400);
+    expect(
+      (await post("/backups/fetch", { locator: b.locator, envelope: b.envelope })).status,
+    ).toBe(400);
+  });
+
+  test("the locator never travels in a URL: GET is not a route", async () => {
+    const b = backup();
+    await post("/backups", { locator: b.locator, envelope: b.envelope });
+    for (const path of ["/backups", "/backups/fetch"])
+      expect((await get(path, { locator: b.locator })).status).toBe(404);
+  });
+});
+
 describe("transport", () => {
   test("a POST with a query string is refused: inputs come from the body alone (T-31)", async () => {
     const e = await election();
@@ -590,9 +690,14 @@ describe("request log (T-10, T-11)", () => {
     await fetch(`${base}/${ballot}?${nullifierLike}`, { headers: secrets });
     await post("/ballots", "{", secrets);
     await post("/moderation/reports", { electionId: e.idHex, reason: "spam" }, secrets);
+    const prf = b32();
+    const { locator, envelope } = sealIdentityBackup(prf, newIdentitySecret());
+    await post("/backups", { locator: hex(locator), envelope: hex(envelope) }, secrets);
+    await post("/backups/fetch", { locator: hex(locator) }, secrets);
+    await post("/backups/delete", { locator: hex(locator) }, secrets);
     // The server logs on "finish", after the response: wait for every line.
     await new Promise((r) => setTimeout(r, 50));
-    expect(logs).toHaveLength(7);
+    expect(logs).toHaveLength(10);
     const text = JSON.stringify(logs);
     for (const value of [
       ...Object.values(secrets),
@@ -600,6 +705,9 @@ describe("request log (T-10, T-11)", () => {
       e.idHex,
       ballot,
       nullifierLike,
+      hex(locator),
+      hex(identityBackupId(locator)),
+      hex(envelope),
       "127.0.0.1",
     ])
       expect(text).not.toContain(value);
@@ -616,6 +724,9 @@ describe("request log (T-10, T-11)", () => {
       "unmatched",
       "POST /ballots",
       "POST /moderation/reports",
+      "POST /backups",
+      "POST /backups/fetch",
+      "POST /backups/delete",
     ]);
   });
 
@@ -657,18 +768,29 @@ describe("account credentials (T-10)", () => {
 
   test("a request carrying one is refused, on every route, before anything is read", async () => {
     const e = await election(1);
+    // A stored backup, so a refused request that slipped through would find it.
+    const { locator, envelope } = sealIdentityBackup(b32(), newIdentitySecret());
+    const stored = { locator: hex(locator), envelope: hex(envelope) };
+    expect((await post("/backups", stored)).status).toBe(200);
     for (const headers of refused) {
       const reads = [
         await fetch(`${base}/elections/definition?electionId=${e.idHex}`, { headers }),
         await fetch(`${base}/board/head?electionId=${e.idHex}`, { headers }),
         await fetch(`${base}/nope`, { headers }),
         await post("/ballots", { electionId: e.idHex, ballot: "000201" }, headers),
+        await post("/backups", { locator: stored.locator, envelope: stored.envelope }, headers),
+        await post("/backups/fetch", { locator: stored.locator }, headers),
+        await post("/backups/delete", { locator: stored.locator }, headers),
       ];
       for (const r of reads) {
         expect([headers, r.status]).toEqual([headers, 400]);
         expect(await r.json()).toEqual({ code: "BAD_REQUEST", status: 400 });
       }
     }
+    // Neither replaced nor deleted (ADR 0017: refused, not ignored).
+    expect(await json(await post("/backups/fetch", { locator: stored.locator }))).toEqual({
+      envelope: stored.envelope,
+    });
   });
 
   test("other cookies are served as usual", async () => {

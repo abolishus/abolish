@@ -7,6 +7,7 @@ import {
 } from "./accounts.ts";
 import { boardEntries } from "./board.ts";
 import { electionDefinitions } from "./definitions.ts";
+import { identityBackups } from "./identity-backups.ts";
 import { moderationActions, moderationReports } from "./moderation.ts";
 
 export {
@@ -17,6 +18,7 @@ export {
   accountVerifications,
   boardEntries,
   electionDefinitions,
+  identityBackups,
   moderationActions,
   moderationReports,
 };
@@ -25,10 +27,14 @@ export {
  * Every table in the schema, by class. Board tables hold public bulletin-board
  * data and are rebuilt from chain + IPFS. Account tables hold accounts
  * (better-auth): who someone is to the app, never how they voted. Operational
- * tables (drafts, moderation, caches) hold nothing a result depends on. A test
- * fails on any table not listed here, on any foreign key that leaves its
- * class's tables (board or account), and on a column of either class that
- * could name the other (.claude/skills/migrations; T-10, T-13).
+ * tables (drafts, moderation, caches) hold nothing a result depends on.
+ * Identity tables hold voting-identity backups (ADR 0017): operational, since
+ * a wipe changes no result, but on the ballot side of the no-join rules. A
+ * test fails on any table not listed here, on any foreign key that touches a
+ * board or identity table or leaves the account tables, on a column of the
+ * board or identity class that could name an account and an account column
+ * that could name a ballot, and on a function that reads an account table
+ * with a board or identity table (.claude/skills/migrations; T-10, T-13, T-20).
  */
 export const TABLE_CLASSES = {
   board: ["board_entries", "election_definitions"],
@@ -39,5 +45,6 @@ export const TABLE_CLASSES = {
     "account_users",
     "account_verifications",
   ],
+  identity: ["identity_backups"],
   operational: ["moderation_actions", "moderation_reports", "schema_migrations"],
 } as const;

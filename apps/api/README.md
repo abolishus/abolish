@@ -17,6 +17,9 @@ Every answer is a claim the caller checks with `@abolishus/crypto`: a definition
 | `moderation.getLog`         | The public moderation log by sequence number, without the moderator ([`docs/moderation-policy.md`](../../docs/moderation-policy.md), T-68).                       |
 | `moderation.getStatus`      | A poll's moderation state and newest decision, without the moderator.                                                                                             |
 | `moderation.report`         | Counts an anonymous report of a poll under a removal ground; changes nothing public.                                                                              |
+| `backups.put`               | Stores or replaces an identity backup envelope under a locator; the table keeps a hash of the locator (ADR 0017, T-20).                                           |
+| `backups.fetch`             | The envelope stored under a locator. A POST, so the locator never sits in a URL.                                                                                  |
+| `backups.delete`            | Deletes the envelope stored under a locator.                                                                                                                      |
 
 Board procedures answer only for elections whose definition the server holds.
 

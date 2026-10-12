@@ -4,6 +4,10 @@ import * as z from "zod/mini";
 import {
   Hash32,
   hexBytes,
+  IDENTITY_BACKUP_ENVELOPE,
+  IDENTITY_BACKUP_RETENTION_MONTHS,
+  IdentityBackupEnvelope,
+  IdentityBackupLocator,
   MAX_BOARD_ENTRY,
   MAX_BOARD_PAYLOAD,
   MAX_PAGE,
@@ -232,12 +236,70 @@ const reportPoll = oc
   .input(z.strictObject({ electionId: Hash32, reason: z.enum(REMOVAL_REASONS) }))
   .output(z.strictObject({}));
 
+// Voting-identity recovery backups (ADR 0017, option A, step 5;
+// docs/spec/identity-backup.md). The ballot client stores the envelope that
+// seals its identity secret under a locator derived from its backup
+// passkey's PRF output. Every route is a POST, so the locator, which lets its
+// holder read, replace or delete the envelope, travels in the body and never
+// in a URL a proxy or cache could keep. Like the ballot path, these need no
+// account and refuse one (T-10, T-20); bodies have a fixed size (T-52).
+
+const Locator = z.strictObject({ locator: IdentityBackupLocator });
+
+const backupNotFound = {
+  BACKUP_NOT_FOUND: { status: 404, message: "No backup is stored under this locator." },
+} as const;
+
+const putBackup = oc
+  .route({
+    method: "POST",
+    path: "/backups",
+    summary: "Store an identity backup",
+    description: `Stores a version-1 envelope (record 0x000a, ${IDENTITY_BACKUP_ENVELOPE} bytes) under \`locator\`, replacing any envelope there. The server keeps it under a hash of the locator, never the locator, and can't open it. A backup not written for ${IDENTITY_BACKUP_RETENTION_MONTHS} whole months after the month of its last write is deleted; reads don't extend it, so a client rewrites its envelope to keep it.`,
+    tags: ["backups"],
+  })
+  .errors({
+    BACKUP_REJECTED: {
+      status: 422,
+      message: "The envelope doesn't decode strictly as a version-1 identity backup.",
+      data: z.strictObject({ code: ErrorCode }),
+    },
+  })
+  .input(z.strictObject({ locator: IdentityBackupLocator, envelope: IdentityBackupEnvelope }))
+  .output(z.strictObject({}));
+
+const fetchBackup = oc
+  .route({
+    method: "POST",
+    path: "/backups/fetch",
+    summary: "Fetch an identity backup",
+    description:
+      "The envelope stored under `locator`. A POST, so the locator never sits in a URL. The client opens it with its PRF output and checks the recovered identity's commitment against the tier groups it downloads in full (docs/spec/identity-backup.md, Opening). The server can return an older envelope sealed under the same passkey, or none: envelopes carry no freshness.",
+    tags: ["backups"],
+  })
+  .errors(backupNotFound)
+  .input(Locator)
+  .output(z.strictObject({ envelope: IdentityBackupEnvelope }));
+
+const deleteBackup = oc
+  .route({
+    method: "POST",
+    path: "/backups/delete",
+    summary: "Delete an identity backup",
+    description: "Deletes the envelope stored under `locator`.",
+    tags: ["backups"],
+  })
+  .errors(backupNotFound)
+  .input(Locator)
+  .output(z.strictObject({}));
+
 /** The public API contract. `apps/api` implements it; clients call it. */
 export const contract = {
   elections: { getDefinition },
   board: { getHead, getEntries, getInclusionProof, getConsistencyProof },
   ballots: { submit: submitBallot },
   moderation: { getLog: getModerationLog, getStatus: getModerationStatus, report: reportPoll },
+  backups: { put: putBackup, fetch: fetchBackup, delete: deleteBackup },
 };
 
 export type Contract = typeof contract;

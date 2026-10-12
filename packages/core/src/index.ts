@@ -22,6 +22,16 @@ export {
   storeDefinition,
   type StoredDefinition,
 } from "./definitions.ts";
+export {
+  deleteIdentityBackup,
+  IDENTITY_BACKUP_ENVELOPE_LENGTH,
+  IDENTITY_BACKUP_LOCATOR_LENGTH,
+  IDENTITY_BACKUP_RETENTION_MONTHS,
+  IdentityBackupStoreError,
+  pruneIdentityBackups,
+  putIdentityBackup,
+  readIdentityBackup,
+} from "./identity-backups.ts";
 export { loadMigrations, migrate, type Migration } from "./db/migrate.ts";
 export {
   accountCredentials,
@@ -31,6 +41,7 @@ export {
   accountVerifications,
   boardEntries,
   electionDefinitions,
+  identityBackups,
   moderationActions,
   moderationReports,
   TABLE_CLASSES,

@@ -1,8 +1,11 @@
 import { readdirSync } from "node:fs";
 import { describe, expect, it } from "vite-plus/test";
 
+// Recursive, so a component in a subdirectory can't skip its story.
 const dir = new URL("../src/components/", import.meta.url);
-const files = readdirSync(dir);
+const files = readdirSync(dir, { recursive: true, encoding: "utf8" }).map((f) =>
+  f.replaceAll("\\", "/"),
+);
 const components = files.filter((f) => f.endsWith(".tsx") && !f.endsWith(".stories.tsx"));
 
 describe("components", () => {

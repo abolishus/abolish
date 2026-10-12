@@ -1,0 +1,84 @@
+/*
+ * Abolish design tokens and base styles (docs/PROJECT_BRIEF.md, Design
+ * direction): paper and ink plus one signal colour, IBM Plex self-hosted.
+ * Apps import this file and run Tailwind's Vite plugin over it.
+ *
+ * Fonts come from @fontsource packages and are bundled with the app, never
+ * fetched from a third-party CDN, so loading a page tells no one else who
+ * opened it (brief: "Self-host the fonts"; T-43: no third-party code or
+ * origins in the ballot client).
+ */
+@import "tailwindcss";
+
+@import "@fontsource/ibm-plex-sans/400.css";
+@import "@fontsource/ibm-plex-sans/600.css";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-serif/400.css";
+@import "@fontsource/ibm-plex-serif/600.css";
+
+/* Components live next to this file; consumers' own sources are scanned by default. */
+@source "./";
+
+/*
+ * Colours. `tests/contrast.test.ts` reads these blocks and checks every text
+ * colour against the ground at WCAG 2.2 AA, in both themes. Never red or blue
+ * as a primary or brand colour (brief, Keep). Recorded and Pending are for
+ * status only.
+ */
+:root,
+[data-theme="light"] {
+  --abolish-paper: #f6f3ec;
+  --abolish-ink: #1b1a17;
+  --abolish-pencil: #5a5650;
+  --abolish-accent: #5b4b8a;
+  --abolish-recorded: #2f6b5e;
+  --abolish-pending: #8a5a12;
+  color-scheme: light;
+}
+
+/* Dark mode is ink on dark paper, not neon. Same values in both blocks below. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --abolish-paper: #1d1c19;
+    --abolish-ink: #ece7dc;
+    --abolish-pencil: #b0aa9f;
+    --abolish-accent: #b4a6e0;
+    --abolish-recorded: #7dbfae;
+    --abolish-pending: #dda85c;
+    color-scheme: dark;
+  }
+}
+
+[data-theme="dark"] {
+  --abolish-paper: #1d1c19;
+  --abolish-ink: #ece7dc;
+  --abolish-pencil: #b0aa9f;
+  --abolish-accent: #b4a6e0;
+  --abolish-recorded: #7dbfae;
+  --abolish-pending: #dda85c;
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-paper: var(--abolish-paper);
+  --color-ink: var(--abolish-ink);
+  --color-pencil: var(--abolish-pencil);
+  --color-accent: var(--abolish-accent);
+  --color-recorded: var(--abolish-recorded);
+  --color-pending: var(--abolish-pending);
+
+  /* Sans for the interface, Mono for evidence, Serif for public-record moments. */
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --font-serif: "IBM Plex Serif", ui-serif, Georgia, serif;
+}
+
+@layer base {
+  /* The raw tokens, not --color-*: `@theme inline` resolves those at :root,
+     so they wouldn't follow a data-theme set on <body>. */
+  body {
+    background-color: var(--abolish-paper);
+    color: var(--abolish-ink);
+    font-family: var(--font-sans);
+  }
+}

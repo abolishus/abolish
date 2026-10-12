@@ -346,11 +346,18 @@ describe("input checks", () => {
       expect(() => checkDelivery(e, b, [bad as unknown as DeliveryEntry], 1)).toThrow(RangeError);
   });
 
-  test("refuses deadlines that aren't bigints", () => {
-    const e = { ...electionOf(v), deadlines: { delivery: 1, complaint: 2 } };
-    expect(() => checkDelivery(e as unknown as DeliveryElection, ballotsOf(v), [], 1)).toThrow(
-      RangeError,
-    );
+  test("refuses segments and deadlines that aren't ordered bigints", () => {
+    const e = electionOf(v);
+    for (const bad of [
+      { deadlines: { delivery: 1, complaint: 2 } },
+      { segments: { delivery: undefined, complaint: 2n } },
+      { segments: { delivery: -1n, complaint: 2n } },
+      { segments: { delivery: 3n, complaint: 2n } },
+      { deadlines: { delivery: 3n, complaint: 2n } },
+    ])
+      expect(() =>
+        checkDelivery({ ...e, ...bad } as unknown as DeliveryElection, ballotsOf(v), [], 1),
+      ).toThrow(RangeError);
   });
 
   test("the delivery window covers anchoring or forced inclusion, then a forced receipt", () => {

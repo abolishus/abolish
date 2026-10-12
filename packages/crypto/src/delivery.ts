@@ -367,8 +367,18 @@ export function checkDelivery(
   for (const k of registered)
     if (!Number.isSafeInteger(k.index) || k.index < 1 || k.index > panelSize)
       throw new RangeError("checkDelivery: every registered seat must be from 1 to n");
-  if (typeof deadlines?.delivery !== "bigint" || typeof deadlines.complaint !== "bigint")
-    throw new RangeError("checkDelivery: deadlines must be bigints");
+  // A malformed window would fail open (every record in time) or closed, so
+  // both pairs are checked, and each pair in order.
+  for (const pair of [segments, deadlines])
+    if (
+      typeof pair?.delivery !== "bigint" ||
+      typeof pair.complaint !== "bigint" ||
+      pair.delivery < 0n ||
+      pair.complaint < pair.delivery
+    )
+      throw new RangeError(
+        "checkDelivery: segments and deadlines must be bigints, delivery ≤ complaint",
+      );
   for (const e of entries)
     if (
       e.path === "board"

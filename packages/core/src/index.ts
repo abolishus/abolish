@@ -41,6 +41,7 @@ export {
   accountUsers,
   accountVerifications,
   boardEntries,
+  boardSubtrees,
   electionDefinitions,
   identityBackups,
   moderationActions,

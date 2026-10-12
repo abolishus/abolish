@@ -4,20 +4,23 @@
 // T-36). The table's triggers check order and chaining again on insert.
 
 import {
+  appendSubtrees,
   BOARD_TREE,
   type BoardEntry,
   boardEntryHash,
   chainLink,
-  consistencyProof,
+  consistencyProofSubtrees,
   encodeBoardEntry,
-  inclusionProof,
-  merkleRoot,
+  foldSubtrees,
+  inclusionProofSubtrees,
+  rootSubtrees,
+  type SubtreeId,
 } from "@abolishus/crypto";
-import { and, asc, desc, eq, gte, lt, sql as q } from "drizzle-orm";
+import { and, asc, desc, eq, gte, lt, or, sql as q } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import type { Sql } from "postgres";
 import { isBytes } from "./bytes.ts";
-import { boardEntries } from "./db/schema/index.ts";
+import { boardEntries, boardSubtrees } from "./db/schema/index.ts";
 
 const SPOILED_BALLOT_OPENING = 0x0003;
 const MAX_SEGMENT = 2 ** 32 - 1;
@@ -43,6 +46,41 @@ export class AppendError extends Error {
     super(`board append refused: ${code}`, options);
     this.code = code;
   }
+}
+
+/**
+ * The stored hashes of the subtrees `ids`, in order. Subtrees are written
+ * with their entries, in one transaction, so every subtree within a board's
+ * size is there; a missing one means a board written around `appendEntry`,
+ * which is refused rather than recomputed.
+ */
+async function subtreeHashes(
+  db: Pick<ReturnType<typeof drizzle>, "select">,
+  id: Uint8Array,
+  ids: readonly SubtreeId[],
+): Promise<Uint8Array[]> {
+  if (ids.length === 0) return [];
+  const key = (level: number, index: bigint | number) => `${level}/${index}`;
+  const wanted = new Map(ids.map((s) => [key(s.level, s.index), s]));
+  const rows = await db
+    .select({ level: boardSubtrees.level, idx: boardSubtrees.idx, hash: boardSubtrees.hash })
+    .from(boardSubtrees)
+    .where(
+      and(
+        eq(boardSubtrees.electionId, id),
+        or(
+          ...[...wanted.values()].map((s) =>
+            and(eq(boardSubtrees.level, s.level), eq(boardSubtrees.idx, BigInt(s.index))),
+          ),
+        ),
+      ),
+    );
+  const found = new Map(rows.map((r) => [key(r.level, r.idx), new Uint8Array(r.hash)]));
+  return ids.map((s) => {
+    const hash = found.get(key(s.level, s.index));
+    if (hash === undefined) throw new Error(`board subtree (${s.level}, ${s.index}) is missing`);
+    return hash;
+  });
 }
 
 export interface AppendedEntry {
@@ -133,6 +171,19 @@ export async function appendEntry(
         prevLink,
         link,
       });
+      // The subtrees this entry completes, from the ones covering the board
+      // before it, in the same transaction: heads and proofs then never read
+      // more than O(log n) of them (T-52).
+      const size = Number(index);
+      const frontier = size === 0 ? [] : await subtreeHashes(tx, id, rootSubtrees(size));
+      await tx.insert(boardSubtrees).values(
+        appendSubtrees(BOARD_TREE, frontier, size, entryHash).map((t) => ({
+          electionId: id,
+          level: t.level,
+          idx: BigInt(t.index),
+          hash: t.hash,
+        })),
+      );
       return { index, entryHash, link };
     },
     // The previous entry must be read after the lock is taken. Under a
@@ -214,52 +265,62 @@ function checkId(electionId: Uint8Array): Uint8Array {
 
 const isU64 = (x: unknown): x is bigint => typeof x === "bigint" && x >= 0n && x < 1n << 64n;
 
+/**
+ * The board's last entry, read through the primary key's index: indexes are
+ * contiguous from 0, so its position plus one is the board's size.
+ */
+async function lastEntry(
+  client: Sql,
+  id: Uint8Array,
+): Promise<{ idx: bigint; link: Uint8Array } | undefined> {
+  const [row] = await drizzle({ client })
+    .select({ idx: boardEntries.idx, link: boardEntries.link })
+    .from(boardEntries)
+    .where(eq(boardEntries.electionId, id))
+    .orderBy(desc(boardEntries.idx))
+    .limit(1);
+  return row;
+}
+
 /** The number of entries on the board. */
 async function boardSize(client: Sql, id: Uint8Array): Promise<bigint> {
-  const [row] = await drizzle({ client })
-    .select({ n: q<string>`count(*)` })
-    .from(boardEntries)
-    .where(eq(boardEntries.electionId, id));
-  return BigInt(row?.n ?? 0);
+  const last = await lastEntry(client, id);
+  return last === undefined ? 0n : last.idx + 1n;
 }
 
 /**
- * The stored entry hashes of the first `size` entries, which the caller has
- * checked the board holds. Rows are never changed or removed, so this prefix
- * is the one that was counted.
+ * Hashes for each range of a proof plan, from the stored subtrees. The caller
+ * has checked the board holds the tree; subtrees never change, so a later
+ * append can't alter the answer.
  */
-async function entryHashes(client: Sql, id: Uint8Array, size: bigint): Promise<Uint8Array[]> {
-  const rows = await drizzle({ client })
-    .select({ entryHash: boardEntries.entryHash })
-    .from(boardEntries)
-    .where(and(eq(boardEntries.electionId, id), lt(boardEntries.idx, size)))
-    .orderBy(asc(boardEntries.idx));
-  return rows.map((r) => new Uint8Array(r.entryHash));
+async function proofFrom(
+  client: Sql,
+  id: Uint8Array,
+  plan: readonly (readonly SubtreeId[])[],
+): Promise<Uint8Array[]> {
+  if (plan.length === 0) return [];
+  const hashes = await subtreeHashes(drizzle({ client }), id, plan.flat());
+  let at = 0;
+  return plan.map((range) => foldSubtrees(BOARD_TREE, hashes.slice(at, (at += range.length))));
 }
 
 /**
- * The board's size, chain head and tree root. The root is computed over the
- * stored entry hashes with @abolishus/crypto's tree, so it is the root a
- * checkpoint of this board carries. Nothing here is trusted by a reader: a
- * client checks the head against its own receipt and later checkpoints with a
- * consistency proof (docs/spec/board.md; T-24).
+ * The board's size, chain head and tree root. The root is folded from the
+ * stored subtrees with @abolishus/crypto's tree, so it is the root a
+ * checkpoint of this board carries, from O(log n) rows (T-52). Nothing here
+ * is trusted by a reader: a client checks the head against its own receipt
+ * and later checkpoints with a consistency proof (docs/spec/board.md; T-24).
  */
 export async function readHead(client: Sql, electionId: Uint8Array): Promise<BoardHead> {
   const id = checkId(electionId);
-  const rows = await drizzle({ client })
-    .select({ entryHash: boardEntries.entryHash, link: boardEntries.link })
-    .from(boardEntries)
-    .where(eq(boardEntries.electionId, id))
-    .orderBy(asc(boardEntries.idx));
-  const last = rows.at(-1);
+  const last = await lastEntry(client, id);
   if (last === undefined) return { size: 0n, head: undefined, root: undefined };
+  const size = last.idx + 1n;
+  const subtrees = await subtreeHashes(drizzle({ client }), id, rootSubtrees(Number(size)));
   return {
-    size: BigInt(rows.length),
+    size,
     head: new Uint8Array(last.link),
-    root: merkleRoot(
-      BOARD_TREE,
-      rows.map((r) => new Uint8Array(r.entryHash)),
-    ),
+    root: foldSubtrees(BOARD_TREE, subtrees),
   };
 }
 
@@ -338,8 +399,7 @@ export async function readInclusionProof(
   if (!isU64(index) || !isU64(treeSize)) throw new RangeError("index and treeSize must be u64s");
   if (treeSize === 0n || index >= treeSize) throw new BoardReadError("invalid-range");
   if (treeSize > (await boardSize(client, id))) throw new BoardReadError("beyond-board");
-  const hashes = await entryHashes(client, id, treeSize);
-  return inclusionProof(BOARD_TREE, hashes, Number(index));
+  return proofFrom(client, id, inclusionProofSubtrees(Number(index), Number(treeSize)));
 }
 
 /**
@@ -358,6 +418,5 @@ export async function readConsistencyProof(
   // The spec's verifier fails on m = 0, so no server answers it.
   if (firstSize === 0n || firstSize > secondSize) throw new BoardReadError("invalid-range");
   if (secondSize > (await boardSize(client, id))) throw new BoardReadError("beyond-board");
-  const hashes = await entryHashes(client, id, secondSize);
-  return consistencyProof(BOARD_TREE, hashes, Number(firstSize));
+  return proofFrom(client, id, consistencyProofSubtrees(Number(firstSize), Number(secondSize)));
 }

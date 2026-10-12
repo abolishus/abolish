@@ -22,11 +22,21 @@ One append-only, hash-chained board per election ([`docs/spec/board.md`](../../d
 - Field lengths and ranges follow the board entry's layout, with payloads from 3 bytes (a record header) to `MAX_BOARD_PAYLOAD` whose record type is one the board allows.
 - Both trigger functions run with a fixed `search_path` ending in `pg_temp`, so no caller can shadow the table with a temporary one.
 
+### `board_subtrees` (T-52)
+
+The board tree's perfect subtrees: for each election, `level`, `idx` and `hash`, the root of the `2^level` entries from `idx · 2^level`, computed by `@abolishus/crypto` (`appendSubtrees`). Heads and proofs fold O(log n) of them instead of rehashing every entry hash.
+
+- Append-only like the board: `abolish_app` holds `SELECT` and `INSERT` only; triggers reject every `UPDATE`, `DELETE` and `TRUNCATE`, for every role.
+- An insert must have its entries already: a leaf's entry is on the board, and a parent's two children are stored. The trigger runs with a fixed `search_path`, like the board's.
+- The database can't hash, so `auditBoard` recomputes every subtree from the recomputed entry hashes (`subtree-missing`, `subtree-mismatch`).
+- The migration refuses to run over a board that already has entries (none can: nothing boards before it); such a board is wiped and rebuilt from chain + IPFS.
+
 ### Appending (`src/board.ts`)
 
 `appendEntry(sql, electionId, segment, payload)` appends the next entry of an election's board and returns its index, entry hash and link:
 
 - The entry is encoded, hashed and chained by `@abolishus/crypto` (`encodeBoardEntry`, `boardEntryHash`, `chainLink`), the same code the verifier runs.
+- In the same transaction it stores the subtrees the entry completes, from the stored ones covering the board before it. A board missing one (rows written around `appendEntry`) can't be appended to.
 - Appends to one board are serialised by a transaction-scoped advisory lock on the election, so concurrent callers get consecutive indexes.
 - It refuses, with a typed `AppendError`, an entry that doesn't encode (a payload type the board doesn't allow, a bad election ID or segment), a segment below the previous entry's, and an entry that breaks the order of spoiled-ballot openings (within a segment they come last, in increasing byte order; T-42, T-47).
 - It checks only the envelope. Whether a payload may be boarded (it must decode strictly under the election's profile) is the caller's to decide, at admission (P2-3).
@@ -47,7 +57,7 @@ What the API serves, computed with `@abolishus/crypto`'s tree (`BOARD_TREE`), so
 - `readEntries(sql, id, start, limit, maxBytes)`: up to `limit` encoded entries, at most `maxBytes` unless the page holds one entry. Lengths are read first, so payloads past the budget are never loaded (T-52).
 - `readInclusionProof` and `readConsistencyProof`: RFC 9162 paths. `BoardReadError` is `invalid-range` for positions no tree has, and `beyond-board` for a tree larger than the board, checked before any position reaches a query.
 
-These read the stored `entry_hash` column rather than rehashing every payload; a client that checks what it is served catches a column that disagrees with the bytes.
+The size and head come from the last entry, through the primary key's index; roots and proofs fold the stored subtrees that `@abolishus/crypto`'s `rootSubtrees`, `inclusionProofSubtrees` and `consistencyProofSubtrees` name. So each reads O(log n) rows. Nothing rehashes payloads; a client that checks what it is served catches a stored hash that disagrees with the bytes, and so does `auditBoard`.
 
 ### `moderation_actions` (T-68)
 
@@ -111,7 +121,7 @@ How it is set up:
 
 ### Auditing the board (`src/audit.ts`; T-23, T-66)
 
-The table's triggers check order and chaining but never hash, so a writer that bypassed `appendEntry`, or a corrupted or restored database, can store columns the payloads don't produce. `auditBoard(sql, id)` reads the board in one query, recomputes it with the verifier's own `checkBoard`, and compares every row's `entry_hash`, `prev_link` and `link`; it returns the size or throws `BoardAuditError` (`board-invalid`, `entry-hash-mismatch` or `link-mismatch`) with the first wrong index. `listBoards(sql)` lists every election with entries. `apps/worker` runs the audit on a schedule. It detects and repairs nothing: Postgres isn't authoritative.
+The table's triggers check order and chaining but never hash, so a writer that bypassed `appendEntry`, or a corrupted or restored database, can store columns the payloads don't produce. `auditBoard(sql, id)` reads the board in one query, recomputes it with the verifier's own `checkBoard`, and compares every row's `entry_hash`, `prev_link` and `link`, then every subtree each entry completes against one recomputed from those entry hashes; it returns the size or throws `BoardAuditError` (`board-invalid`, `entry-hash-mismatch`, `link-mismatch`, `subtree-missing` or `subtree-mismatch`) with the first wrong index. `listBoards(sql)` lists every election with entries. `apps/worker` runs the audit on a schedule. It detects and repairs nothing: Postgres isn't authoritative.
 
 ### No joins (T-10)
 

@@ -12,6 +12,7 @@ import {
   type Anchor,
   BoardError,
   type BoardEntryVersion,
+  boardPayloadTypes,
   type BoardErrorAt,
   type BoardErrorCode,
   DecodeError,
@@ -108,6 +109,8 @@ const UNSUPPORTED: Outcome = { status: "unverifiable", code: "unsupported-versio
 // 8.5 under a board-entry version that can't carry a destruction statement:
 // reported, never `destruction-missing` for every seat (docs/spec/verifier.md, 8.5).
 const NOT_APPLICABLE: Outcome = { status: "unverifiable", code: "not-applicable" };
+const carriesDestruction = (v: BoardEntryVersion) =>
+  boardPayloadTypes(v).includes(RECORD_TYPES.destructionStatement);
 
 function copyAt(at: BoardErrorAt): CheckAt {
   if ("entry" in at)
@@ -262,11 +265,23 @@ function fromDefinition(bundle: Bundle):
   // so it leaves the election unverifiable here, never failed (2.3).
   const version = pinnedVersion(definition, RECORD_TYPES.boardEntry);
   if (!isReadable(version)) return stopped("2.3", UNSUPPORTED, hash);
-  // The version is one this verifier reads, so the rule can't be unsupported here.
-  const combination =
-    profileCombinationRule(definition) === "profile-combination"
-      ? ({ status: "fail", code: "profile-combination", at: {} } as const)
-      : undefined;
+  let combination: Outcome | undefined;
+  const pins = profileCombinationRule(definition);
+  switch (pins) {
+    case undefined:
+      break;
+    case "profile-combination":
+      combination = { status: "fail", code: "profile-combination", at: {} };
+      break;
+    case "unsupported-version":
+      // Not reached while READABLE is within crypto's versions; if they ever
+      // drift, the version is unsupported here too, never a pass (T-36).
+      return stopped("2.3", UNSUPPORTED, hash);
+    default: {
+      const unknown: never = pins;
+      throw new Error(`unmapped profile rule ${String(unknown)}`);
+    }
+  }
   return {
     hash,
     definition,
@@ -367,7 +382,9 @@ export function verifyBundle(bundle: Bundle): Report {
       // A failing combination doesn't stop the checks: the pinned version is
       // one this verifier reads, so the report still shows what the board holds.
       ...(definition.profile !== undefined ? [["2.3", definition.profile] as const] : []),
-      ...(definition.inputs.boardEntryVersion !== 4 ? [["8.5", NOT_APPLICABLE] as const] : []),
+      ...(carriesDestruction(definition.inputs.boardEntryVersion)
+        ? []
+        : [["8.5", NOT_APPLICABLE] as const]),
     ]);
     // The transcript's bytes are authenticated by the definition's hash of
     // them, not by the board checks, so they run whatever 4.1 and 4.2 found.

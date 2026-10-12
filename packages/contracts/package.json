@@ -13,6 +13,7 @@
   "devDependencies": {
     "@types/node": "catalog:",
     "@wagmi/cli": "catalog:",
+    "esbuild": "catalog:",
     "typescript": "catalog:",
     "vite-plus": "catalog:"
   },

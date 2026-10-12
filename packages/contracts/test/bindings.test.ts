@@ -11,7 +11,11 @@ import * as bindings from "../src/generated/abi.ts";
 const SRC = new URL("../src/", import.meta.url);
 const OUT = new URL("../out/", import.meta.url);
 
-/** Every concrete contract declared in src/: what gets deployed. */
+/**
+ * Every concrete contract declared in src/: what gets deployed. src/ is flat,
+ * and the first test keeps it so, or a contract in a subdirectory would be
+ * missed here and in wagmi.config.ts alike.
+ */
 function deployableContracts(): string[] {
   return readdirSync(SRC)
     .filter((f) => f.endsWith(".sol"))
@@ -28,6 +32,13 @@ const bindingName = (contract: string) => `${contract[0]?.toLowerCase()}${contra
 const deployable = deployableContracts();
 
 describe("wagmi bindings", () => {
+  test("src/ keeps every Solidity file at its top level", () => {
+    const nested = readdirSync(SRC, { recursive: true, encoding: "utf8" }).filter(
+      (f) => f.endsWith(".sol") && f.includes("/"),
+    );
+    expect(nested).toEqual([]);
+  });
+
   test("cover exactly the deployable contracts", () => {
     expect(deployable.length).toBeGreaterThan(0);
     const expected = deployable.map((p) => bindingName(p.split("/")[1] ?? "")).sort();

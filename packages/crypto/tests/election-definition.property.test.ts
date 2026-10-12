@@ -508,4 +508,31 @@ describe("2.3's profile combination", () => {
     };
     expect(profileCombinationRule(none)).toBe("unsupported-version");
   });
+
+  test("a ballot or tally-opening type pinned twice or not at all is refused, never a fit", () => {
+    // electionDefinitionRule refuses these too; a caller that skipped it
+    // must still refuse to cast (T-34).
+    for (const type of [RECORD_TYPES.ballot, RECORD_TYPES.tallyOpening]) {
+      const fitting = pinning(4, 2, 2);
+      const without = {
+        ...fitting,
+        profile: {
+          ...fitting.profile,
+          pins: fitting.profile.pins.filter((p) => p.record_type !== type),
+        },
+      };
+      const twice = {
+        ...fitting,
+        profile: {
+          ...fitting.profile,
+          pins: [...fitting.profile.pins, { record_type: type, version: 2 }],
+        },
+      };
+      expect(profileCombinationRule(fitting)).toBeUndefined();
+      expect(electionDefinitionRule(without)).toBeDefined();
+      expect(profileCombinationRule(without)).toBe("profile-combination");
+      expect(electionDefinitionRule(twice)).toBeDefined();
+      expect(profileCombinationRule(twice)).toBe("profile-combination");
+    }
+  });
 });

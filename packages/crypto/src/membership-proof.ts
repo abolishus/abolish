@@ -165,6 +165,10 @@ function g2Point(x: Fp2, y: Fp2): G2 | null {
   }
 }
 
+// Proofs `membershipProof` decoded: frozen, with every point checked in its
+// group, so `verifyDecodedMembershipProof` can skip the decoder's checks.
+const DECODED = new WeakSet<MembershipProof>();
+
 /**
  * The `membership_proof` codec: A (G1), B (G2), C (G1), each coordinate a
  * 32-byte big-endian base-field element below `p`, G2 coordinates imaginary
@@ -209,7 +213,9 @@ export const membershipProof: Codec<MembershipProof> = {
     if (b === null) throw new DecodeError("non-canonical", at + 64);
     const c = g1Point(readWord(bytes, 192), readWord(bytes, 224));
     if (c === null) throw new DecodeError("non-canonical", at + 192);
-    return { a, b, c };
+    const proof = Object.freeze({ a, b, c });
+    DECODED.add(proof);
+    return proof;
   },
 };
 
@@ -310,15 +316,8 @@ function verificationKey(): NonNullable<typeof key> {
  * compares proof bytes (T-38).
  */
 export function verifyMembershipProof(proof: Uint8Array, signals: MembershipSignals): boolean {
-  if (signals === null || typeof signals !== "object")
-    throw new TypeError("signals: expected an object");
-  // Read once, so a getter can't show the checks one value and the pairing another.
-  const { root, nullifier, message, scope } = signals;
-  const inputs = [root, nullifier, message, scope];
-  for (const v of inputs)
-    if (typeof v !== "bigint") throw new TypeError("signals: expected bigints");
-  if (inputs.some((v) => v < 0n || v >= BN254_R)) return false;
-  if (root === 0n) return false;
+  const inputs = signalInputs(signals);
+  if (inputs === null) return false;
   let decoded: MembershipProof;
   try {
     decoded = decodeMembershipProof(proof);
@@ -326,6 +325,40 @@ export function verifyMembershipProof(proof: Uint8Array, signals: MembershipSign
     if (e instanceof DecodeError) return false;
     throw e;
   }
+  return pairingCheck(decoded, inputs);
+}
+
+/**
+ * Internal: `verifyMembershipProof` for a proof the caller already decoded
+ * with `membershipProof` (a ballot record's field), so its points aren't
+ * decoded and subgroup-checked twice. Points that didn't come from that
+ * decoder are refused.
+ */
+export function verifyDecodedMembershipProof(
+  proof: MembershipProof,
+  signals: MembershipSignals,
+): boolean {
+  const inputs = signalInputs(signals);
+  if (inputs === null) return false;
+  if (!DECODED.has(proof)) throw new TypeError("proof: expected a decoded membership proof");
+  return pairingCheck(proof, inputs);
+}
+
+/** The signals in the circuit's order, or `null` if one is at or above `r` or the root is 0. */
+function signalInputs(signals: MembershipSignals): readonly bigint[] | null {
+  if (signals === null || typeof signals !== "object")
+    throw new TypeError("signals: expected an object");
+  // Read once, so a getter can't show the checks one value and the pairing another.
+  const { root, nullifier, message, scope } = signals;
+  const inputs = [root, nullifier, message, scope];
+  for (const v of inputs)
+    if (typeof v !== "bigint") throw new TypeError("signals: expected bigints");
+  if (inputs.some((v) => v < 0n || v >= BN254_R)) return null;
+  if (root === 0n) return null;
+  return inputs;
+}
+
+function pairingCheck(decoded: MembershipProof, inputs: readonly bigint[]): boolean {
   const vk = verificationKey();
   let l = vk.ic[0] as G1; // IC has exactly 5 points (nPublic + 1).
   for (const [i, v] of inputs.entries()) if (v !== 0n) l = l.add((vk.ic[i + 1] as G1).multiply(v));

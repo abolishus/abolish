@@ -336,10 +336,10 @@ describe("record framing", () => {
   });
 
   test("production schemas take only numbers the registry assigns", () => {
-    expect(() => new RecordSchema([recordType(0x0010, { 1: u8 })])).toThrow(RangeError);
+    expect(() => new RecordSchema([recordType(0x00fe, { 1: u8 })])).toThrow(RangeError);
     expect(() => new RecordSchema([recordType(0xfeff, { 1: u8 })])).toThrow(RangeError);
     expect(
-      () => new RecordSchema([recordType(0x0010, { 1: u8 })], { allowTestRange: true }),
+      () => new RecordSchema([recordType(0x00fe, { 1: u8 })], { allowTestRange: true }),
     ).toThrow(RangeError);
   });
 

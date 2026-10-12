@@ -200,6 +200,29 @@ export function deliveryDeadlines(closesAt: bigint, l1InclusionBound: bigint): D
   return { delivery: end + DELIVERY_WINDOW, complaint: end + COMPLAINT_WINDOW };
 }
 
+/**
+ * The bound P4-1's anchoring clock and P1-18's contract-event window must
+ * keep (docs/spec/delivery.md, Direct submit): `DELIVERY_WINDOW ≥
+ * max(2 · period + deadline, W_C) + F`, so every counted ballot is anchored or
+ * recorded by the contract early enough for a trustee node to see it and still
+ * send its receipts through the contract path in time, even forced through L1.
+ * Seconds, as bigints.
+ */
+export function deliveryWindowFits(constants: {
+  readonly period: bigint;
+  readonly deadline: bigint;
+  readonly contractEventWindow: bigint;
+  readonly forcedInclusion: bigint;
+}): boolean {
+  const { period, deadline, contractEventWindow, forcedInclusion } = constants;
+  for (const v of [period, deadline, contractEventWindow, forcedInclusion])
+    if (typeof v !== "bigint" || v < 0n)
+      throw new RangeError("every constant must be a bigint ≥ 0");
+  const seen =
+    2n * period + deadline > contractEventWindow ? 2n * period + deadline : contractEventWindow;
+  return seen + forcedInclusion <= DELIVERY_WINDOW;
+}
+
 /** What the delivery check runs against, all from data the verifier has already checked. */
 export interface DeliveryElection {
   readonly definitionHash: Uint8Array;

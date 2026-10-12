@@ -12,7 +12,7 @@ export const PARAMETERS = Object.freeze({
   TALLY_WINDOW: 604_800,
   // Seconds; the delivery deadline and complaint window of the delivery
   // records' version 1, which ballot version 1 fixes (docs/spec/delivery.md).
-  DELIVERY_WINDOW: 86_400,
-  COMPLAINT_WINDOW: 345_600,
+  DELIVERY_WINDOW: 172_800,
+  COMPLAINT_WINDOW: 432_000,
   DISPLAY_TEXT_SALT_LEN: 32,
 } as const);

@@ -358,6 +358,7 @@ export {
   decodeSharePosting,
   decodeShareReceipt,
   deliveryDeadlines,
+  deliveryWindowFits,
   deliverySegments,
   encodeShareComplaint,
   encodeSharePosting,

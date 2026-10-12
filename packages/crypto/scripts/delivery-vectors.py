@@ -42,8 +42,8 @@ se, ecdsa, bv, grp = sr.se, sr.ecdsa, sr.bv, sr.grp
 L = grp.L
 COMPLAINT_TAG = b"abolish/v1/sig/share-complaint"
 RECEIPT_TAG = sr.RECEIPT_TAG
-DELIVERY_WINDOW = 86_400
-COMPLAINT_WINDOW = 345_600
+DELIVERY_WINDOW = 172_800
+COMPLAINT_WINDOW = 432_000
 
 RECEIPT, POSTING, COMPLAINT, BOARD_ENTRY = 0x000C, 0x000D, 0x000E, 0x0007
 BALLOT = 0x0002
@@ -432,8 +432,8 @@ def main():
     for id_, epoch, period, closes_at, bound in (
         ("hourly", 1_700_000_000, 3600, 1_700_360_000, 0),
         ("hourly-bound", 1_700_000_000, 3600, 1_700_360_000, 1800),
-        ("boundary", 0, 3600, 3600 * 30 - 86_400, 0),
-        ("one-before-boundary", 0, 3600, 3600 * 30 - 86_400 - 1, 0),
+        ("boundary", 0, 3600, 3600 * 60 - DELIVERY_WINDOW, 0),
+        ("one-before-boundary", 0, 3600, 3600 * 60 - DELIVERY_WINDOW - 1, 0),
         ("daily", 1_000, 86_400, 1_000 + 86_400 * 3 + 5, 7),
     ):
         d, k = segments(epoch, period, closes_at, bound)
@@ -483,7 +483,7 @@ def main():
         """Contract-path records submitted at time `t`."""
         return [("contract", t, p) for p in payloads]
 
-    T0 = TD - 86_400  # the close
+    T0 = TD - DELIVERY_WINDOW  # the close
 
     r = election("all-receipted", "Every seat receipts Alice's ballot; the last in the deadline's own segment", ["alice"], at(3, R("alice", 1), R("alice", 2)) + at(SD, R("alice", 3)))
     assert r["ballots"][0]["counted"]

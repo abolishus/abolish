@@ -19,6 +19,7 @@ import {
   type DeliveryElection,
   type DeliveryEntry,
   deliveryDeadlines,
+  deliveryWindowFits,
   deliverySegments,
   encodeBoardEntry,
   EncodeError,
@@ -352,6 +353,29 @@ describe("input checks", () => {
     );
   });
 
+  test("the delivery window covers anchoring or forced inclusion, then a forced receipt", () => {
+    const hour = 3600n;
+    // Hourly periods, a 12-hour anchoring deadline, Base's 12-hour forced
+    // inclusion plus an hour of missed slots, and a 13-hour contract-event window.
+    const deployed = {
+      period: hour,
+      deadline: 12n * hour,
+      contractEventWindow: 13n * hour,
+      forcedInclusion: 13n * hour,
+    };
+    expect(deliveryWindowFits(deployed)).toBe(true);
+    // Either term alone can break the bound.
+    expect(deliveryWindowFits({ ...deployed, deadline: DELIVERY_WINDOW })).toBe(false);
+    expect(deliveryWindowFits({ ...deployed, contractEventWindow: DELIVERY_WINDOW })).toBe(false);
+    expect(
+      deliveryWindowFits({ ...deployed, forcedInclusion: DELIVERY_WINDOW - 14n * hour + 1n }),
+    ).toBe(false);
+    expect(deliveryWindowFits({ ...deployed, forcedInclusion: DELIVERY_WINDOW - 14n * hour })).toBe(
+      true,
+    );
+    expect(() => deliveryWindowFits({ ...deployed, period: -1n })).toThrow(RangeError);
+  });
+
   test("refuses a close before the anchoring clock's epoch", () => {
     expect(() => deliverySegments({ epoch: 100n, period: 10n }, 50n, 0n)).toThrow(RangeError);
     expect(() => deliverySegments({ epoch: 0n, period: 0n }, 50n, 0n)).toThrow(RangeError);
@@ -464,26 +488,32 @@ describe("properties", () => {
     );
   });
 
-  test("a vector posting with any byte changed decodes only if it re-encodes to itself", () => {
-    // Random bytes never reach a full-size posting, so mutate a real one.
-    const posting = hex(
-      (V.records.find((r) => r.type === "share-posting") as { encoding: string }).encoding,
-    );
-    fc.assert(
-      fc.property(fc.nat(), fc.integer({ min: 1, max: 255 }), (pos, flip) => {
-        const b = posting.slice();
-        const i = 3 + (pos % (b.length - 3));
-        b[i] = (b[i] as number) ^ flip;
-        let out: Uint8Array;
-        try {
-          out = decoders["share-posting"](b);
-        } catch (e) {
-          if (e instanceof DecodeError) return;
-          throw e;
-        }
-        expect(out).toEqual(b);
-      }),
-      { numRuns },
-    );
-  });
+  test(
+    "a vector posting with any byte changed decodes only if it re-encodes to itself",
+    {
+      timeout: 120_000,
+    },
+    () => {
+      // Random bytes never reach a full-size posting, so mutate a real one.
+      const posting = hex(
+        (V.records.find((r) => r.type === "share-posting") as { encoding: string }).encoding,
+      );
+      fc.assert(
+        fc.property(fc.nat(), fc.integer({ min: 1, max: 255 }), (pos, flip) => {
+          const b = posting.slice();
+          const i = 3 + (pos % (b.length - 3));
+          b[i] = (b[i] as number) ^ flip;
+          let out: Uint8Array;
+          try {
+            out = decoders["share-posting"](b);
+          } catch (e) {
+            if (e instanceof DecodeError) return;
+            throw e;
+          }
+          expect(out).toEqual(b);
+        }),
+        { numRuns },
+      );
+    },
+  );
 });

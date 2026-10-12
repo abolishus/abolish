@@ -8,8 +8,8 @@
     "complaint": "abolish/v1/sig/share-complaint"
   },
   "windows": {
-    "delivery": "86400",
-    "complaint": "345600"
+    "delivery": "172800",
+    "complaint": "432000"
   },
   "definitionHash": "4459913af27b23a4f7fe95bedfca78f3a2e1695d8a42b4bdc4555885ac4be8b1",
   "panel": [
@@ -233,10 +233,10 @@
       "period": "3600",
       "closesAt": "1700360000",
       "l1InclusionBound": "0",
-      "delivery": "124",
-      "complaint": "196",
-      "deliveryDeadline": "1700446400",
-      "complaintDeadline": "1700705600"
+      "delivery": "148",
+      "complaint": "220",
+      "deliveryDeadline": "1700532800",
+      "complaintDeadline": "1700792000"
     },
     {
       "id": "hourly-bound",
@@ -244,32 +244,32 @@
       "period": "3600",
       "closesAt": "1700360000",
       "l1InclusionBound": "1800",
-      "delivery": "124",
-      "complaint": "196",
-      "deliveryDeadline": "1700448200",
-      "complaintDeadline": "1700707400"
+      "delivery": "148",
+      "complaint": "220",
+      "deliveryDeadline": "1700534600",
+      "complaintDeadline": "1700793800"
     },
     {
       "id": "boundary",
       "epoch": "0",
       "period": "3600",
-      "closesAt": "21600",
+      "closesAt": "43200",
       "l1InclusionBound": "0",
-      "delivery": "30",
-      "complaint": "102",
-      "deliveryDeadline": "108000",
-      "complaintDeadline": "367200"
+      "delivery": "60",
+      "complaint": "132",
+      "deliveryDeadline": "216000",
+      "complaintDeadline": "475200"
     },
     {
       "id": "one-before-boundary",
       "epoch": "0",
       "period": "3600",
-      "closesAt": "21599",
+      "closesAt": "43199",
       "l1InclusionBound": "0",
-      "delivery": "29",
-      "complaint": "101",
-      "deliveryDeadline": "107999",
-      "complaintDeadline": "367199"
+      "delivery": "59",
+      "complaint": "131",
+      "deliveryDeadline": "215999",
+      "complaintDeadline": "475199"
     },
     {
       "id": "daily",
@@ -277,10 +277,10 @@
       "period": "86400",
       "closesAt": "260205",
       "l1InclusionBound": "7",
-      "delivery": "4",
-      "complaint": "7",
-      "deliveryDeadline": "346612",
-      "complaintDeadline": "605812"
+      "delivery": "5",
+      "complaint": "8",
+      "deliveryDeadline": "433012",
+      "complaintDeadline": "692212"
     }
   ],
   "elections": [
@@ -293,8 +293,8 @@
         "complaint": "112"
       },
       "deadlines": {
-        "delivery": "1700086400",
-        "complaint": "1700345600"
+        "delivery": "1700172800",
+        "complaint": "1700432000"
       },
       "ballots": [
         {
@@ -345,8 +345,8 @@
         "complaint": "112"
       },
       "deadlines": {
-        "delivery": "1700086400",
-        "complaint": "1700345600"
+        "delivery": "1700172800",
+        "complaint": "1700432000"
       },
       "ballots": [
         {
@@ -370,7 +370,7 @@
         },
         {
           "path": "contract",
-          "submittedAt": "1700086400",
+          "submittedAt": "1700172800",
           "payload": "000c014459913af27b23a4f7fe95bedfca78f3a2e1695d8a42b4bdc4555885ac4be8b1d0d46569ca141ff6dd30eb1d9b95fd3e2fe8ba3735a561250eb1a96e72a4281703a0cfde5cc3d25aa0586ae834c328dac97bb7a05ccc20812b0f39007c39889d40126788d2b4457d210320f135e801ad90da647cb4283c7d4ac1dffcda4dcad954479627013e255ebae832bc266f4e1f24d59e70e28db730190c23087ba2c67837"
         }
       ],
@@ -397,8 +397,8 @@
         "complaint": "112"
       },
       "deadlines": {
-        "delivery": "1700086400",
-        "complaint": "1700345600"
+        "delivery": "1700172800",
+        "complaint": "1700432000"
       },
       "ballots": [
         {
@@ -422,7 +422,7 @@
         },
         {
           "path": "contract",
-          "submittedAt": "1700086401",
+          "submittedAt": "1700172801",
           "payload": "000c014459913af27b23a4f7fe95bedfca78f3a2e1695d8a42b4bdc4555885ac4be8b1d0d46569ca141ff6dd30eb1d9b95fd3e2fe8ba3735a561250eb1a96e72a4281703a0cfde5cc3d25aa0586ae834c328dac97bb7a05ccc20812b0f39007c39889d40126788d2b4457d210320f135e801ad90da647cb4283c7d4ac1dffcda4dcad954479627013e255ebae832bc266f4e1f24d59e70e28db730190c23087ba2c67837"
         }
       ],
@@ -454,8 +454,8 @@
         "complaint": "112"
       },
       "deadlines": {
-        "delivery": "1700086400",
-        "complaint": "1700345600"
+        "delivery": "1700172800",
+        "complaint": "1700432000"
       },
       "ballots": [
         {
@@ -506,8 +506,8 @@
         "complaint": "112"
       },
       "deadlines": {
-        "delivery": "1700086400",
-        "complaint": "1700345600"
+        "delivery": "1700172800",
+        "complaint": "1700432000"
       },
       "ballots": [
         {
@@ -563,8 +563,8 @@
         "complaint": "112"
       },
       "deadlines": {
-        "delivery": "1700086400",
-        "complaint": "1700345600"
+        "delivery": "1700172800",
+        "complaint": "1700432000"
       },
       "ballots": [
         {
@@ -629,8 +629,8 @@
         "complaint": "112"
       },
       "deadlines": {
-        "delivery": "1700086400",
-        "complaint": "1700345600"
+        "delivery": "1700172800",
+        "complaint": "1700432000"
       },
       "ballots": [
         {
@@ -676,8 +676,8 @@
         "complaint": "112"
       },
       "deadlines": {
-        "delivery": "1700086400",
-        "complaint": "1700345600"
+        "delivery": "1700172800",
+        "complaint": "1700432000"
       },
       "ballots": [
         {
@@ -733,8 +733,8 @@
         "complaint": "112"
       },
       "deadlines": {
-        "delivery": "1700086400",
-        "complaint": "1700345600"
+        "delivery": "1700172800",
+        "complaint": "1700432000"
       },
       "ballots": [
         {
@@ -758,7 +758,7 @@
         },
         {
           "path": "contract",
-          "submittedAt": "1700086400",
+          "submittedAt": "1700172800",
           "payload": "000d014459913af27b23a4f7fe95bedfca78f3a2e1695d8a42b4bdc4555885ac4be8b1d0d46569ca141ff6dd30eb1d9b95fd3e2fe8ba3735a561250eb1a96e72a4281703f43c2d5e46e36de1ac1bb79d3511f789f8ea92105e4e38e736c185c69f98db13369a2e7d9fb0bff730d2788287cf942ed0219c0935cacc80262a19a186a16dd713c61771bdeab54a0128d5adfeec6400a64b21beca5f72b829aec73fe116f51465d669dfb2156260195d2c78e9effdd0525ea4c81a70a71d846ee7c21a07dca59cbca737db2b2dfccdb9e845622e187733ac79701b8daaf9d06289a941e87b8aa3224259e45f3c5e8466f76a972aedd119ede0576bbf78ba69fa91dd5ca5a0035cc784fc2142c57fd3d1f316375f230ab67acf641b6561c4f43694473c39e35421d40d6bfef6daa491a0ab67b306d0a4d2392e5dffa3e16d3e0d23d3ecc676bf44ab563a50f740e3085d6d39d1b9c735c2c7f5473bca9313c6d27e2ad24823da9975bd3efe937494ec6fd1fff49558dc50e715146656469199a8dfac7c95e5d3990757da370feb941d1aa9756a9a3cfd0acbdeeb6eec3d06130f74cc4e4faf7204fd51680c60e9c3d80cf13a475d4e2b66a1513db4483468c890871b7344e9fed800635fe10e0388bc097176648045b8888fdee8bcb4ac75f8fc300d579d6a3f5eb0983eb50853f44e99d94188439489e38b10bdfbc3e31452464749917e2ceee632f82669ed7ecdd6a5e8468fbdb905e8cb6807d60624b77e31a4644e9a6a89df5829dd2d1cf2460858b55ed97d1b52e770b987d0f01f8f73a865c5e059604a150be60d7aa8ecbef9e9853114535cf86f2acf74a3976f5c5ec329cb4ec622b4db52679e124a6d1de9bf4af9e5d8f93f4ac426687b622f8f17c106dd2c9fce5a34132f64883e11a1ba44fb09c02d1c533a7765e97356f95b83bca31df0a43e8a9f5b977e1a544b25ef6bd1d02e26ea5bbc1b8ad544337bef8dd3b8699ad326a7d2db5ba47cd533f3dee4030fad71e353fa91e007eeac2b778b9b2169a00b5034cad659febdbe161164265406f5e2baa10a9fa2d85bbd36011ff3bd1f8e047c342b18a7ef44be1d8137e15439678fe8192f73d83d966ad8e68aec36cf6a92e7443801f762a2125b8792939b25c3651bf6f296c802ce4390e5a071da6ab4836f0d240a58fb57084c9b15e9c863f27601af78552e25955c45dd59d6551fe3a1ee79608339780e8320eb405567a536c505bfd3fba4c1383f4c614aa36b2936bbddcbd88ef300deadb4f65e88f7beca5e025f1ed517ec09f63fe89ac435afd4540037d48eebb9df709bba91555f7818815bcc8301a4a7db0de7c331193a88fccd782745fda2a5f0f59ed89fc3be7ae39a5b794cb2d6ffb3d85f3ca80978248c192f1018a62dc8d4a0db36e6d1865dc477ca13da4fd6f7b9894ba001316e22078dacd02ebb1e98503b61489e2a350e11e1ca605747582d4fb23115d0bbbb4ddaf6cbcd7fe7e0c8e7aa8e0b4489358fae8bf35feb0c346e16ce8fbb5dca0c473debdcbe2de173ddee4b811152b3a0133ea6042414caeb6d99ccdbc499aab73279646bf326077b36b077c7ec5c14ef10d99d6dfd2e07612780a7b841e9e9a297e044ccb22c357f1188b370b6d6ff5880889c7790f189ce4e6297236c9847a7708802c20c5422c666f0d8fe1f53726e25ba47dd69ece3296d88446bb601252a6346d5ef0ebee05111045507d125979510c75b5d909467a5cadf54b481a5b1694a1697040cddb5c3658dbc1bcc9cf93261e2721b84a82aefcab5c30a88a48fae3277e10f08000000d463c5fd91553ea848159aead6f67ba8549373689e1d92a95b954e6fc6d980e0b067c674b84ccf5e13e6f8f070dd7645d454ff97180787a93c34eb303812f2ccb57903631aac7af7e39ecf8ef089b0b6d56054c71f21cb05d0fef2504fb808582d27e20673b8275117111075830f3dbdc1599cb74f2cea68856bd890d97a17dd55fb5286af13cfd13bb46485ab9ff1b94888dfd5eae65778e59ca2ec44d51c9325e385c11aabaa4a009a2c0b55b3c8767b5ee5c24661ef510440be2b12049af3d7f07d2427594c07f50a8031f6e151e801b2737107"
         }
       ],
@@ -785,8 +785,8 @@
         "complaint": "112"
       },
       "deadlines": {
-        "delivery": "1700086400",
-        "complaint": "1700345600"
+        "delivery": "1700172800",
+        "complaint": "1700432000"
       },
       "ballots": [
         {
@@ -810,7 +810,7 @@
         },
         {
           "path": "contract",
-          "submittedAt": "1700086401",
+          "submittedAt": "1700172801",
           "payload": "000d014459913af27b23a4f7fe95bedfca78f3a2e1695d8a42b4bdc4555885ac4be8b1d0d46569ca141ff6dd30eb1d9b95fd3e2fe8ba3735a561250eb1a96e72a4281703f43c2d5e46e36de1ac1bb79d3511f789f8ea92105e4e38e736c185c69f98db13369a2e7d9fb0bff730d2788287cf942ed0219c0935cacc80262a19a186a16dd713c61771bdeab54a0128d5adfeec6400a64b21beca5f72b829aec73fe116f51465d669dfb2156260195d2c78e9effdd0525ea4c81a70a71d846ee7c21a07dca59cbca737db2b2dfccdb9e845622e187733ac79701b8daaf9d06289a941e87b8aa3224259e45f3c5e8466f76a972aedd119ede0576bbf78ba69fa91dd5ca5a0035cc784fc2142c57fd3d1f316375f230ab67acf641b6561c4f43694473c39e35421d40d6bfef6daa491a0ab67b306d0a4d2392e5dffa3e16d3e0d23d3ecc676bf44ab563a50f740e3085d6d39d1b9c735c2c7f5473bca9313c6d27e2ad24823da9975bd3efe937494ec6fd1fff49558dc50e715146656469199a8dfac7c95e5d3990757da370feb941d1aa9756a9a3cfd0acbdeeb6eec3d06130f74cc4e4faf7204fd51680c60e9c3d80cf13a475d4e2b66a1513db4483468c890871b7344e9fed800635fe10e0388bc097176648045b8888fdee8bcb4ac75f8fc300d579d6a3f5eb0983eb50853f44e99d94188439489e38b10bdfbc3e31452464749917e2ceee632f82669ed7ecdd6a5e8468fbdb905e8cb6807d60624b77e31a4644e9a6a89df5829dd2d1cf2460858b55ed97d1b52e770b987d0f01f8f73a865c5e059604a150be60d7aa8ecbef9e9853114535cf86f2acf74a3976f5c5ec329cb4ec622b4db52679e124a6d1de9bf4af9e5d8f93f4ac426687b622f8f17c106dd2c9fce5a34132f64883e11a1ba44fb09c02d1c533a7765e97356f95b83bca31df0a43e8a9f5b977e1a544b25ef6bd1d02e26ea5bbc1b8ad544337bef8dd3b8699ad326a7d2db5ba47cd533f3dee4030fad71e353fa91e007eeac2b778b9b2169a00b5034cad659febdbe161164265406f5e2baa10a9fa2d85bbd36011ff3bd1f8e047c342b18a7ef44be1d8137e15439678fe8192f73d83d966ad8e68aec36cf6a92e7443801f762a2125b8792939b25c3651bf6f296c802ce4390e5a071da6ab4836f0d240a58fb57084c9b15e9c863f27601af78552e25955c45dd59d6551fe3a1ee79608339780e8320eb405567a536c505bfd3fba4c1383f4c614aa36b2936bbddcbd88ef300deadb4f65e88f7beca5e025f1ed517ec09f63fe89ac435afd4540037d48eebb9df709bba91555f7818815bcc8301a4a7db0de7c331193a88fccd782745fda2a5f0f59ed89fc3be7ae39a5b794cb2d6ffb3d85f3ca80978248c192f1018a62dc8d4a0db36e6d1865dc477ca13da4fd6f7b9894ba001316e22078dacd02ebb1e98503b61489e2a350e11e1ca605747582d4fb23115d0bbbb4ddaf6cbcd7fe7e0c8e7aa8e0b4489358fae8bf35feb0c346e16ce8fbb5dca0c473debdcbe2de173ddee4b811152b3a0133ea6042414caeb6d99ccdbc499aab73279646bf326077b36b077c7ec5c14ef10d99d6dfd2e07612780a7b841e9e9a297e044ccb22c357f1188b370b6d6ff5880889c7790f189ce4e6297236c9847a7708802c20c5422c666f0d8fe1f53726e25ba47dd69ece3296d88446bb601252a6346d5ef0ebee05111045507d125979510c75b5d909467a5cadf54b481a5b1694a1697040cddb5c3658dbc1bcc9cf93261e2721b84a82aefcab5c30a88a48fae3277e10f08000000d463c5fd91553ea848159aead6f67ba8549373689e1d92a95b954e6fc6d980e0b067c674b84ccf5e13e6f8f070dd7645d454ff97180787a93c34eb303812f2ccb57903631aac7af7e39ecf8ef089b0b6d56054c71f21cb05d0fef2504fb808582d27e20673b8275117111075830f3dbdc1599cb74f2cea68856bd890d97a17dd55fb5286af13cfd13bb46485ab9ff1b94888dfd5eae65778e59ca2ec44d51c9325e385c11aabaa4a009a2c0b55b3c8767b5ee5c24661ef510440be2b12049af3d7f07d2427594c07f50a8031f6e151e801b2737107"
         }
       ],
@@ -842,8 +842,8 @@
         "complaint": "112"
       },
       "deadlines": {
-        "delivery": "1700086400",
-        "complaint": "1700345600"
+        "delivery": "1700172800",
+        "complaint": "1700432000"
       },
       "ballots": [
         {
@@ -904,8 +904,8 @@
         "complaint": "112"
       },
       "deadlines": {
-        "delivery": "1700086400",
-        "complaint": "1700345600"
+        "delivery": "1700172800",
+        "complaint": "1700432000"
       },
       "ballots": [
         {
@@ -992,8 +992,8 @@
         "complaint": "112"
       },
       "deadlines": {
-        "delivery": "1700086400",
-        "complaint": "1700345600"
+        "delivery": "1700172800",
+        "complaint": "1700432000"
       },
       "ballots": [
         {
@@ -1049,8 +1049,8 @@
         "complaint": "112"
       },
       "deadlines": {
-        "delivery": "1700086400",
-        "complaint": "1700345600"
+        "delivery": "1700172800",
+        "complaint": "1700432000"
       },
       "ballots": [
         {
@@ -1115,8 +1115,8 @@
         "complaint": "112"
       },
       "deadlines": {
-        "delivery": "1700086400",
-        "complaint": "1700345600"
+        "delivery": "1700172800",
+        "complaint": "1700432000"
       },
       "ballots": [
         {
@@ -1178,8 +1178,8 @@
         "complaint": "112"
       },
       "deadlines": {
-        "delivery": "1700086400",
-        "complaint": "1700345600"
+        "delivery": "1700172800",
+        "complaint": "1700432000"
       },
       "ballots": [
         {
@@ -1241,8 +1241,8 @@
         "complaint": "112"
       },
       "deadlines": {
-        "delivery": "1700086400",
-        "complaint": "1700345600"
+        "delivery": "1700172800",
+        "complaint": "1700432000"
       },
       "ballots": [
         {
@@ -1304,8 +1304,8 @@
         "complaint": "112"
       },
       "deadlines": {
-        "delivery": "1700086400",
-        "complaint": "1700345600"
+        "delivery": "1700172800",
+        "complaint": "1700432000"
       },
       "ballots": [
         {
@@ -1366,8 +1366,8 @@
         "complaint": "112"
       },
       "deadlines": {
-        "delivery": "1700086400",
-        "complaint": "1700345600"
+        "delivery": "1700172800",
+        "complaint": "1700432000"
       },
       "ballots": [
         {
@@ -1396,7 +1396,7 @@
         },
         {
           "path": "contract",
-          "submittedAt": "1700345600",
+          "submittedAt": "1700432000",
           "payload": "000e014459913af27b23a4f7fe95bedfca78f3a2e1695d8a42b4bdc4555885ac4be8b1ec34f0c84f1365bc9091388cdd94aecb048cc9b813c533f5aa9293cf04c513b802126de08092d4a55dd180f537323a9dbec47666623fec741a84b1464bfe69c27874f266c0de17d7da120a66974b8293925b50de4cfd5e41a384ea58e4c0e7a2072fb74252496132db1647b5f4d14eec18a8892fcd091a65bf81ddd45f1e3f9104d404473e9112e436026d3ea462918dde45b05b7368928f826ab1bab7d14f50347885c0dc65f330b16183f3a79a4b89e31474bf8879ab09d31d0e1ad46e9faa5b"
         }
       ],
@@ -1429,8 +1429,8 @@
         "complaint": "112"
       },
       "deadlines": {
-        "delivery": "1700086400",
-        "complaint": "1700345600"
+        "delivery": "1700172800",
+        "complaint": "1700432000"
       },
       "ballots": [
         {
@@ -1459,7 +1459,7 @@
         },
         {
           "path": "contract",
-          "submittedAt": "1700345601",
+          "submittedAt": "1700432001",
           "payload": "000e014459913af27b23a4f7fe95bedfca78f3a2e1695d8a42b4bdc4555885ac4be8b1ec34f0c84f1365bc9091388cdd94aecb048cc9b813c533f5aa9293cf04c513b802126de08092d4a55dd180f537323a9dbec47666623fec741a84b1464bfe69c27874f266c0de17d7da120a66974b8293925b50de4cfd5e41a384ea58e4c0e7a2072fb74252496132db1647b5f4d14eec18a8892fcd091a65bf81ddd45f1e3f9104d404473e9112e436026d3ea462918dde45b05b7368928f826ab1bab7d14f50347885c0dc65f330b16183f3a79a4b89e31474bf8879ab09d31d0e1ad46e9faa5b"
         }
       ],
@@ -1491,8 +1491,8 @@
         "complaint": "112"
       },
       "deadlines": {
-        "delivery": "1700086400",
-        "complaint": "1700345600"
+        "delivery": "1700172800",
+        "complaint": "1700432000"
       },
       "ballots": [
         {
@@ -1548,8 +1548,8 @@
         "complaint": "112"
       },
       "deadlines": {
-        "delivery": "1700086400",
-        "complaint": "1700345600"
+        "delivery": "1700172800",
+        "complaint": "1700432000"
       },
       "ballots": [
         {
@@ -1615,8 +1615,8 @@
         "complaint": "112"
       },
       "deadlines": {
-        "delivery": "1700086400",
-        "complaint": "1700345600"
+        "delivery": "1700172800",
+        "complaint": "1700432000"
       },
       "ballots": [
         {
@@ -1678,8 +1678,8 @@
         "complaint": "112"
       },
       "deadlines": {
-        "delivery": "1700086400",
-        "complaint": "1700345600"
+        "delivery": "1700172800",
+        "complaint": "1700432000"
       },
       "ballots": [
         {
@@ -1740,8 +1740,8 @@
         "complaint": "112"
       },
       "deadlines": {
-        "delivery": "1700086400",
-        "complaint": "1700345600"
+        "delivery": "1700172800",
+        "complaint": "1700432000"
       },
       "ballots": [
         {
@@ -1814,8 +1814,8 @@
         "complaint": "112"
       },
       "deadlines": {
-        "delivery": "1700086400",
-        "complaint": "1700345600"
+        "delivery": "1700172800",
+        "complaint": "1700432000"
       },
       "ballots": [
         {
@@ -1945,8 +1945,8 @@
         "complaint": "112"
       },
       "deadlines": {
-        "delivery": "1700086400",
-        "complaint": "1700345600"
+        "delivery": "1700172800",
+        "complaint": "1700432000"
       },
       "ballots": [
         {
@@ -2081,8 +2081,8 @@
         "complaint": "112"
       },
       "deadlines": {
-        "delivery": "1700086400",
-        "complaint": "1700345600"
+        "delivery": "1700172800",
+        "complaint": "1700432000"
       },
       "ballots": [
         {

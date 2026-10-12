@@ -3,8 +3,10 @@
 
 A second implementation of docs/spec/delivery.md: the share-receipt,
 share-posting and share-complaint records (0x000c to 0x000e, version 1),
-the complaint's signed message, board entries under version 3, the deadline
-segments, and the delivery check over selected ballots. It is written from the
+the complaint's signed message, board entries under version 3 (receipts and
+complaints only), the deadline segments and deadlines, and the delivery check
+over selected ballots, with records through the board path and the contract
+path (postings only through the contract path). It is written from the
 spec with Python's integers and hashlib, and shares no code with
 packages/crypto or any @noble library. It reuses share-receipt-vectors.py's
 ballot hash, intake and P-256 ECDSA (from trustee-vectors.py, which reproduces
@@ -159,7 +161,8 @@ def board_entry(version, election_id, index, segment, payload):
     return header(BOARD_ENTRY, version) + election_id + u64(index) + u32(segment) + u32(len(payload)) + payload
 
 
-ALLOWED = {1: {0x0002, 0x0003, 0x0005, 0x0006, 0x0008}, 3: {0x0002, 0x0003, 0x0005, 0x0006, 0x0008, RECEIPT, POSTING, COMPLAINT}}
+# Version 3 adds receipts and complaints, never postings: a posting delivers only through the contract path.
+ALLOWED = {1: {0x0002, 0x0003, 0x0005, 0x0006, 0x0008}, 3: {0x0002, 0x0003, 0x0005, 0x0006, 0x0008, RECEIPT, COMPLAINT}}
 
 
 def entry_error(b):
@@ -179,19 +182,28 @@ def segments(epoch, period, closes_at, bound):
     return (end + DELIVERY_WINDOW - epoch) // period, (end + COMPLAINT_WINDOW - epoch) // period
 
 
+def deadlines(closes_at, bound):
+    """The deadlines a contract-path record's submission time is compared with, in seconds."""
+    end = closes_at + bound
+    return end + DELIVERY_WINDOW, end + COMPLAINT_WINDOW
+
+
 # --- The delivery check -----------------------------------------------------------
 
 
-def check_delivery(definition_hash, registered, seg_d, seg_k, ballots, entries):
-    """docs/spec/delivery.md, Delivery check, from the spec's text."""
+def check_delivery(definition_hash, registered, seg_d, seg_k, t_d, t_k, ballots, entries):
+    """docs/spec/delivery.md, Delivery check, from the spec's text. Each entry is (path, segment or submission time, payload)."""
     hashes = [sr.ballot_hash(b["ctx"], bv.enc_committed_vote(b["vote"])) for b in ballots]
     index = {h: i for i, h in enumerate(hashes)}
     delivered = [set() for _ in ballots]
     reports, rejected = [], []
     receipts, complaints = [], []
     postings = [dict() for _ in ballots]
-    for at, (segment, payload) in enumerate(entries):
+    for at, (path, when, payload) in enumerate(entries):
         parsed = parse_record(payload)
+        # Board-entry version 3 never carries a posting: one through the board path is a rejected entry.
+        if not isinstance(parsed, str) and parsed[0] == "posting" and path != "contract":
+            parsed = "unexpected-record-type"
         if isinstance(parsed, str):
             rejected.append({"at": at, "error": parsed})
             continue
@@ -207,7 +219,11 @@ def check_delivery(definition_hash, registered, seg_d, seg_k, ballots, entries):
         if key is None:
             reports.append({"at": at, "code": "delivery-seat"})
             continue
-        if segment > (seg_k if kind == "complaint" else seg_d):
+        if path == "board":
+            late = when > (seg_k if kind == "complaint" else seg_d)
+        else:
+            late = when > (t_k if kind == "complaint" else t_d)
+        if late:
             reports.append({"at": at, "code": "delivery-late"})
             continue
         b = ballots[i]
@@ -401,9 +417,11 @@ def main():
         assert entry_error(enc) == error, id_
         entries_json.append({"id": id_, "description": desc, "version": version, "encoding": enc.hex(), "error": error})
 
-    for name, payload in (("receipt", a1), ("posting", p3), ("complaint", cc)):
+    for name, payload in (("receipt", a1), ("complaint", cc)):
         entry(f"v3-{name}", f"A version-3 entry carrying a share {name}", 3, payload, None)
         entry(f"v1-{name}", f"A version-1 entry can't carry a share {name}", 1, payload, "unexpected-record-type")
+    entry("v3-posting", "A version-3 entry can't carry a share posting: postings reach the board only as contract events", 3, p3, "unexpected-record-type")
+    entry("v1-posting", "A version-1 entry can't carry a share posting", 1, p3, "unexpected-record-type")
     entry("v3-ballot-type", "A version-3 entry carrying a ballot header, as version 1 allows", 3, header(BALLOT) + b"\x00", None)
     entry("v3-receipt-type-0x0004", "A version-3 entry still refuses the voter's receipt (0x0004)", 3, header(0x0004) + b"\x00", "unexpected-record-type")
 
@@ -417,41 +435,72 @@ def main():
         ("daily", 1_000, 86_400, 1_000 + 86_400 * 3 + 5, 7),
     ):
         d, k = segments(epoch, period, closes_at, bound)
-        seg_json.append({"id": id_, "epoch": str(epoch), "period": str(period), "closesAt": str(closes_at), "l1InclusionBound": str(bound), "delivery": str(d), "complaint": str(k)})
+        td, tk = deadlines(closes_at, bound)
+        seg_json.append(
+            {
+                "id": id_,
+                "epoch": str(epoch),
+                "period": str(period),
+                "closesAt": str(closes_at),
+                "l1InclusionBound": str(bound),
+                "delivery": str(d),
+                "complaint": str(k),
+                "deliveryDeadline": str(td),
+                "complaintDeadline": str(tk),
+            }
+        )
 
     # --- Elections ---
     elections = []
     SD, SK = 40, 112
+    # The deadlines of a close at 1,700,000,000 with no inclusion bound, for contract-path records.
+    TD, TK = deadlines(1_700_000_000, 0)
 
     def election(id_, desc, names, entries, seats=(1, 2, 3)):
         sel = [ballots[n] for n in names]
-        result = check_delivery(definition_hash, registered(seats), SD, SK, sel, entries)
+        result = check_delivery(definition_hash, registered(seats), SD, SK, TD, TK, sel, entries)
         elections.append(
             {
                 "id": id_,
                 "description": desc,
                 "registered": list(seats),
                 "segments": {"delivery": str(SD), "complaint": str(SK)},
+                "deadlines": {"delivery": str(TD), "complaint": str(TK)},
                 "ballots": [ballot_json(b) for b in sel],
-                "entries": [{"segment": s, "payload": p.hex()} for s, p in entries],
+                "entries": [{"path": "board", "segment": w, "payload": p.hex()} if path == "board" else {"path": "contract", "submittedAt": str(w), "payload": p.hex()} for path, w, p in entries],
                 "result": result,
             }
         )
         return result
 
     def at(seg, *payloads):
-        return [(seg, p) for p in payloads]
+        """Board-path records boarded in segment `seg`."""
+        return [("board", seg, p) for p in payloads]
+
+    def by(t, *payloads):
+        """Contract-path records submitted at time `t`."""
+        return [("contract", t, p) for p in payloads]
+
+    T0 = TD - 86_400  # the close
 
     r = election("all-receipted", "Every seat receipts Alice's ballot; the last in the deadline's own segment", ["alice"], at(3, R("alice", 1), R("alice", 2)) + at(SD, R("alice", 3)))
     assert r["ballots"][0]["counted"]
-    r = election("posting-fallback", "Seats 1 and 2 receipt; seat 3's ciphertext is posted", ["alice"], at(3, R("alice", 1), R("alice", 2), P("alice", 3)))
+    r = election("contract-receipts", "Seat 3's receipt reaches the board only through the contract path, as trustee nodes send them, submitted at the delivery deadline itself", ["alice"], at(3, R("alice", 1), R("alice", 2)) + by(TD, R("alice", 3)))
     assert r["ballots"][0]["counted"]
+    r = election("late-contract-receipt", "Seat 3's contract-path receipt is submitted one second after the delivery deadline, though its contract event is in an early segment's counted extent", ["alice"], at(3, R("alice", 1), R("alice", 2)) + by(TD + 1, R("alice", 3)))
+    assert r["ballots"][0]["missing"] == [3] and r["records"] == [{"at": 2, "code": "delivery-late"}]
+    r = election("posting-fallback", "Seats 1 and 2 receipt; the voter chooses to post seat 3's ciphertext through the contract path", ["alice"], at(3, R("alice", 1), R("alice", 2)) + by(T0 + 60, P("alice", 3)))
+    assert r["ballots"][0]["counted"]
+    r = election("board-path-posting", "Seat 3's posting reaches the board through the board path: a rejected entry, which delivers nothing", ["alice"], at(3, R("alice", 1), R("alice", 2), P("alice", 3)))
+    assert r["ballots"][0]["missing"] == [3] and r["rejected"] == [{"at": 2, "error": "unexpected-record-type"}]
     r = election("missing-seat", "Seat 3 neither receipted nor posted", ["alice"], at(3, R("alice", 1), R("alice", 2)))
     assert r["ballots"][0]["missing"] == [3]
     r = election("late-receipt", "Seat 3's receipt is boarded one segment after s_D", ["alice"], at(3, R("alice", 1), R("alice", 2)) + at(SD + 1, R("alice", 3)))
     assert r["ballots"][0]["missing"] == [3] and r["records"] == [{"at": 2, "code": "delivery-late"}]
-    late_posting = election("late-posting", "Seat 3's posting is boarded one segment after s_D", ["alice"], at(3, R("alice", 1), R("alice", 2)) + at(SD + 1, P("alice", 3)))
-    assert late_posting["ballots"][0]["missing"] == [3]
+    r = election("posting-at-deadline", "Seat 3's posting is submitted through the contract path at the delivery deadline itself", ["alice"], at(3, R("alice", 1), R("alice", 2)) + by(TD, P("alice", 3)))
+    assert r["ballots"][0]["counted"]
+    r = election("late-posting", "Seat 3's posting is submitted through the contract path one second after the delivery deadline", ["alice"], at(3, R("alice", 1), R("alice", 2)) + by(TD + 1, P("alice", 3)))
+    assert r["ballots"][0]["missing"] == [3] and r["records"] == [{"at": 2, "code": "delivery-late"}]
 
     b_ = ballots["alice"]
     sh = b_["vote"]["shareHashes"]
@@ -467,9 +516,9 @@ def main():
     other_ct = receipt_record(definition_hash, b_["hash"], 1, sh[1], sr.sign(signing_secret(1), m_other_ct))
     r = election(
         "failing-receipts",
-        "Seat 1's receipt fails four ways: a share_hash field that isn't the ballot's (over a signature on the right statement), another seat's key, the identity key, and seat 1's own signature over seat 2's ciphertext (attributed to seat 1)",
+        "Seat 1's receipt fails four ways: a share_hash field that isn't the ballot's (over a signature on the right statement), another seat's key, the identity key, and seat 1's own signature over seat 2's ciphertext (attributed to seat 1), the last through the contract path",
         ["alice"],
-        at(3, wrong_field, wrong_key, identity, other_ct, R("alice", 2), R("alice", 3)),
+        at(3, wrong_field, wrong_key, identity) + by(T0 + 60, other_ct) + at(3, R("alice", 2), R("alice", 3)),
     )
     assert r["ballots"][0]["missing"] == [1] and [x["code"] for x in r["records"]] == ["share-receipt"] * 4
     # Only the last is seat 1's signature over its own fields: a share hash other than the ballot's, attributed.
@@ -481,44 +530,65 @@ def main():
     m_alice1 = bytes.fromhex(b_["encRand"][0]["m"])
     r = election(
         "failing-postings",
-        "Seat 3's postings fail: seat 1's m with seat 3's ciphertext (posting-encapsulation), seat 1's ciphertext posted as seat 3's (posting-hash)",
+        "Seat 3's contract-path postings fail: seat 1's m with seat 3's ciphertext (posting-encapsulation), seat 1's ciphertext posted as seat 3's (posting-hash)",
         ["alice"],
-        at(3, R("alice", 1), R("alice", 2), P("alice", 3, m=m_alice1), P("alice", 1, as_seat=3)),
+        at(3, R("alice", 1), R("alice", 2)) + by(T0 + 60, P("alice", 3, m=m_alice1), P("alice", 1, as_seat=3)),
     )
     assert r["ballots"][0]["missing"] == [3] and [x["code"] for x in r["records"]] == ["posting-encapsulation", "posting-hash"]
 
-    r = election("proven-complaint", "Carol's dishonest seat 2 share is posted; seat 2 proves it invalid, and the ballot is excluded though delivered", ["carol"], at(3, R("carol", 1), R("carol", 3), P("carol", 2)) + at(60, C("carol", 2, carol_proof)))
+    carol_posted = at(3, R("carol", 1), R("carol", 3)) + by(T0 + 60, P("carol", 2))
+    r = election("proven-complaint", "Carol's dishonest seat 2 share is posted through the contract path; seat 2 proves it invalid on the board, and the ballot is excluded though delivered", ["carol"], carol_posted + at(60, C("carol", 2, carol_proof)))
     assert r["ballots"][0]["delivered"] and not r["ballots"][0]["counted"] and r["ballots"][0]["excludedBy"] == [{"at": 3, "seat": 2, "signer": 2}]
-    r = election("unattributed-complaint", "The same proof signed with seat 1's key: still proven, and the ballot is excluded, attributed to no one", ["carol"], at(3, R("carol", 1), R("carol", 3), P("carol", 2)) + at(60, C("carol", 2, carol_proof, secret=signing_secret(1))))
+    r = election("unattributed-complaint", "The same proof signed with seat 1's key: still proven, and the ballot is excluded, attributed to no one", ["carol"], carol_posted + at(60, C("carol", 2, carol_proof, secret=signing_secret(1))))
     assert r["ballots"][0]["excludedBy"] == [{"at": 3, "seat": 2, "signer": None}]
-    r = election("complaint-in-its-segment", "The complaint is boarded in s_K itself", ["carol"], at(3, R("carol", 1), R("carol", 3), P("carol", 2)) + at(SK, C("carol", 2, carol_proof)))
+    r = election("complaint-in-its-segment", "The complaint is boarded in s_K itself", ["carol"], carol_posted + at(SK, C("carol", 2, carol_proof)))
     assert not r["ballots"][0]["counted"]
-    r = election("late-complaint", "The complaint is boarded one segment after s_K: ignored, and Carol's ballot stays counted", ["carol"], at(3, R("carol", 1), R("carol", 3), P("carol", 2)) + at(SK + 1, C("carol", 2, carol_proof)))
+    r = election("late-complaint", "The complaint is boarded one segment after s_K: ignored, and Carol's ballot stays counted", ["carol"], carol_posted + at(SK + 1, C("carol", 2, carol_proof)))
+    assert r["ballots"][0]["counted"] and r["records"] == [{"at": 3, "code": "delivery-late"}]
+    r = election("contract-complaint", "The complaint is submitted through the contract path at the end of the complaint window itself", ["carol"], carol_posted + by(TK, C("carol", 2, carol_proof)))
+    assert not r["ballots"][0]["counted"]
+    r = election("late-contract-complaint", "The complaint is submitted through the contract path one second after the complaint window: ignored", ["carol"], carol_posted + by(TK + 1, C("carol", 2, carol_proof)))
     assert r["ballots"][0]["counted"] and r["records"] == [{"at": 3, "code": "delivery-late"}]
     r = election("void-complaint", "A complaint with no passing posting for its seat: void, and Carol's ballot lacks seat 2", ["carol"], at(3, R("carol", 1), R("carol", 3)) + at(60, C("carol", 2, carol_proof)))
     assert r["ballots"][0]["missing"] == [2] and r["records"] == [{"at": 2, "code": "complaint-void"}]
-    r = election("unfounded-complaint", "Seat 2 complains about Alice's valid posted share: unfounded, attributed to seat 2, and the ballot stands", ["alice"], at(3, R("alice", 1), R("alice", 3), P("alice", 2)) + at(60, C("alice", 2, alice_unfounded)))
+    r = election(
+        "complaint-on-board-path-posting",
+        "Carol's seat 2 posting reaches the board only through the board path, so it is rejected and delivers nothing: a complaint about it is void, and the ballot lacks seat 2",
+        ["carol"],
+        at(3, R("carol", 1), R("carol", 3), P("carol", 2)) + at(60, C("carol", 2, carol_proof)),
+    )
+    assert r["ballots"][0]["missing"] == [2] and r["records"] == [{"at": 3, "code": "complaint-void"}] and r["rejected"] == [{"at": 2, "error": "unexpected-record-type"}]
+    r = election("unfounded-complaint", "Seat 2 complains about Alice's valid posted share: unfounded, attributed to seat 2, and the ballot stands", ["alice"], at(3, R("alice", 1), R("alice", 3)) + by(T0 + 60, P("alice", 2)) + at(60, C("alice", 2, alice_unfounded)))
     assert r["ballots"][0]["counted"] and r["records"] == [{"at": 3, "code": "complaint-unfounded", "signer": 2}]
     bad = dict(carol_proof, z=(carol_proof["z"] + 1) % L)
-    r = election("complaint-proof-fails", "Seat 2's complaint with z + 1, re-signed: its proof fails, and Carol's ballot stays counted", ["carol"], at(3, R("carol", 1), R("carol", 3), P("carol", 2)) + at(60, C("carol", 2, bad)))
+    r = election("complaint-proof-fails", "Seat 2's complaint with z + 1, re-signed: its proof fails, and Carol's ballot stays counted", ["carol"], carol_posted + at(60, C("carol", 2, bad)))
     assert r["ballots"][0]["counted"] and r["records"] == [{"at": 3, "code": "complaint-proof"}]
     bc = ballots["carol"]
     sh_c = bc["vote"]["shareHashes"]
     false_receipt = receipt_record(definition_hash, bc["hash"], 2, sh_c[1], sr.sign(signing_secret(2), sr.statement(definition_hash, bc["hash"], 2, sh_c[1])))
-    r = election("contradicted-receipt", "Seat 2 signs a receipt for Carol's invalid share, and its complaint about the posting is proven: excluded, and the receipt is reported against seat 2", ["carol"], at(3, R("carol", 1), false_receipt, R("carol", 3), P("carol", 2)) + at(60, C("carol", 2, carol_proof)))
+    r = election(
+        "contradicted-receipt",
+        "Seat 2 signs a receipt for Carol's invalid share, and its complaint about the posting is proven: excluded, and the receipt is reported against seat 2",
+        ["carol"],
+        at(3, R("carol", 1), false_receipt, R("carol", 3)) + by(T0 + 60, P("carol", 2)) + at(60, C("carol", 2, carol_proof)),
+    )
     assert not r["ballots"][0]["counted"] and r["records"] == [{"at": 1, "code": "receipt-contradicted", "signer": 2}]
 
     # Three ballots, with duplicates, a record for Dave's ballot (not selected) and two orders.
     mixed = (
         at(2, R("alice", 2), R("bob", 1), R("dave", 1), R("alice", 1), R("carol", 1))
-        + at(5, P("carol", 2), R("alice", 2), R("bob", 3), R("carol", 3), P("alice", 3))
+        + by(T0 + 300, P("carol", 2))
+        + at(5, R("alice", 2), R("bob", 3), R("carol", 3))
+        + by(T0 + 600, P("alice", 3))
         + at(SD, R("alice", 1))
         + at(70, C("carol", 2, carol_proof))
     )
     first = election("three-ballots", "Alice counted, Bob missing seat 2, Carol excluded; duplicates and a record for Dave's unselected ballot decide nothing", ["alice", "bob", "carol"], mixed)
     assert [x["counted"] for x in first["ballots"]] == [True, False, False] and first["ballots"][1]["missing"] == [2] and first["records"] == []
-    # The same records in reverse board order (segments made non-decreasing again): the same verdicts.
-    reordered = [(s, p) for (_, p), s in zip(reversed(mixed), sorted(s for s, _ in mixed))]
+    # The same records in reverse board order (board-path segments made non-decreasing again): the same verdicts.
+    rev = list(reversed(mixed))
+    segs = iter(sorted(w for path, w, _ in mixed if path == "board"))
+    reordered = [(path, next(segs) if path == "board" else w, p) for path, w, p in rev]
     second = election("three-ballots-reordered", "The same records in reverse order: the same verdicts", ["alice", "bob", "carol"], reordered)
     strip = lambda res: [{k: v for k, v in b.items() if k != "excludedBy"} | {"excludedBy": [c["seat"] for c in b["excludedBy"]]} for b in res["ballots"]]
     assert strip(first) == strip(second)
@@ -526,9 +596,9 @@ def main():
     junk_ct = ct3[:1088] + bytes(32) + ct3[1120:]
     r = election(
         "rejected-entries",
-        "A truncated receipt, a posting whose ciphertext doesn't decode, a ballot header and a payload shorter than a record header are rejected entries; the ballot is delivered by the rest",
+        "A truncated receipt, a contract-path posting whose ciphertext doesn't decode, a ballot header and a payload shorter than a record header are rejected entries; the ballot is delivered by the rest",
         ["alice"],
-        at(3, a1[:-1], R("alice", 1), P("alice", 3, ct=junk_ct), R("alice", 2), header(BALLOT) + b"\x00", R("alice", 3), b"\x00\x0c"),
+        at(3, a1[:-1], R("alice", 1)) + by(T0 + 60, P("alice", 3, ct=junk_ct)) + at(3, R("alice", 2), header(BALLOT) + b"\x00", R("alice", 3), b"\x00\x0c"),
     )
     assert r["ballots"][0]["counted"] and r["rejected"] == [
         {"at": 0, "error": "truncated"},

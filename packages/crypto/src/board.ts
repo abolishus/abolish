@@ -40,15 +40,17 @@ export const BOARD_PAYLOAD_TYPES: readonly number[] = Object.freeze([
 
 /**
  * Record types a version-3 entry may carry: version 1's, and the share
- * receipts, postings and complaints that show a ballot's delivery
- * (docs/spec/delivery.md). Version 1's set is frozen, so allowing them is a
- * new version (docs/spec/versioning.md); version 2 is never assigned, since
- * board.json's frozen `unknown-version` vector uses it as the unknown one.
+ * receipts and complaints that show a ballot's delivery
+ * (docs/spec/delivery.md). Never a share posting: a posting delivers only
+ * through the contract path, as a contract event, so the operator can't
+ * withhold its data from the trustees. Version 1's set is frozen, so allowing
+ * them is a new version (docs/spec/versioning.md); version 2 is never
+ * assigned, since board.json's frozen `unknown-version` vector uses it as the
+ * unknown one.
  */
 export const BOARD_PAYLOAD_TYPES_V3: readonly number[] = Object.freeze([
   ...BOARD_PAYLOAD_TYPES,
   RECORD_TYPES.shareReceipt,
-  RECORD_TYPES.sharePosting,
   RECORD_TYPES.shareComplaint,
 ]);
 

@@ -18,6 +18,7 @@ import {
   type DeliveryCheck,
   type DeliveryElection,
   type DeliveryEntry,
+  deliveryDeadlines,
   deliverySegments,
   encodeBoardEntry,
   EncodeError,
@@ -63,6 +64,7 @@ interface ElectionVector {
   readonly id: string;
   readonly registered: readonly number[];
   readonly segments: { readonly delivery: string; readonly complaint: string };
+  readonly deadlines: { readonly delivery: string; readonly complaint: string };
   readonly ballots: readonly {
     readonly id: string;
     readonly tier: number;
@@ -70,7 +72,10 @@ interface ElectionVector {
     readonly committedVote: string;
     readonly ballotHash: string;
   }[];
-  readonly entries: readonly { readonly segment: number; readonly payload: string }[];
+  readonly entries: readonly (
+    | { readonly path: "board"; readonly segment: number; readonly payload: string }
+    | { readonly path: "contract"; readonly submittedAt: string; readonly payload: string }
+  )[];
   readonly result: ResultVector;
 }
 
@@ -113,6 +118,8 @@ interface Vectors {
     readonly l1InclusionBound: string;
     readonly delivery: string;
     readonly complaint: string;
+    readonly deliveryDeadline: string;
+    readonly complaintDeadline: string;
   }[];
   readonly elections: readonly ElectionVector[];
 }
@@ -141,6 +148,10 @@ function electionOf(v: ElectionVector): DeliveryElection {
       };
     }),
     segments: { delivery: BigInt(v.segments.delivery), complaint: BigInt(v.segments.complaint) },
+    deadlines: {
+      delivery: BigInt(v.deadlines.delivery),
+      complaint: BigInt(v.deadlines.complaint),
+    },
   };
 }
 
@@ -152,7 +163,11 @@ const ballotsOf = (v: ElectionVector): DeliveryBallot[] =>
   }));
 
 const entriesOf = (v: ElectionVector): DeliveryEntry[] =>
-  v.entries.map((e) => ({ segment: e.segment, payload: hex(e.payload) }));
+  v.entries.map((e) =>
+    e.path === "board"
+      ? { path: "board", segment: e.segment, payload: hex(e.payload) }
+      : { path: "contract", submittedAt: BigInt(e.submittedAt), payload: hex(e.payload) },
+  );
 
 function asJson(r: DeliveryCheck): ResultVector {
   return {
@@ -240,6 +255,10 @@ describe("delivery vectors", () => {
         BigInt(v.l1InclusionBound),
       ),
     ).toEqual({ delivery: BigInt(v.delivery), complaint: BigInt(v.complaint) });
+    expect(deliveryDeadlines(BigInt(v.closesAt), BigInt(v.l1InclusionBound))).toEqual({
+      delivery: BigInt(v.deliveryDeadline),
+      complaint: BigInt(v.complaintDeadline),
+    });
   });
 
   test.each(V.elections.map((v) => [v.id, v] as const))(
@@ -259,29 +278,29 @@ describe("board entry version 3", () => {
   const base = { election_id: new Uint8Array(32), index: 0n, segment: 0 };
   const record = (t: number) => Uint8Array.of(t >> 8, t & 0xff, 1, 0);
 
-  test("allows exactly version 1's types and the three delivery types", () => {
+  test("allows exactly version 1's types, share receipts and complaints", () => {
     expect([...BOARD_PAYLOAD_TYPES_V3].sort((a, b) => a - b)).toEqual(
-      [
-        ...BOARD_PAYLOAD_TYPES,
-        RECORD_TYPES.shareReceipt,
-        RECORD_TYPES.sharePosting,
-        RECORD_TYPES.shareComplaint,
-      ].sort((a, b) => a - b),
+      [...BOARD_PAYLOAD_TYPES, RECORD_TYPES.shareReceipt, RECORD_TYPES.shareComplaint].sort(
+        (a, b) => a - b,
+      ),
     );
     expect(Object.isFrozen(BOARD_PAYLOAD_TYPES_V3)).toBe(true);
   });
 
-  test("version 1 refuses to encode a delivery record; version 3 encodes it", () => {
-    for (const t of [
-      RECORD_TYPES.shareReceipt,
-      RECORD_TYPES.sharePosting,
-      RECORD_TYPES.shareComplaint,
-    ]) {
+  test("version 1 refuses to encode a receipt or complaint; version 3 encodes it", () => {
+    for (const t of [RECORD_TYPES.shareReceipt, RECORD_TYPES.shareComplaint]) {
       expect(() => encodeBoardEntry({ ...base, payload: record(t) }, 1)).toThrow(EncodeError);
       const b = encodeBoardEntry({ ...base, payload: record(t) }, 3);
       expect(b[2]).toBe(3);
       expect(decodeBoardEntry(b, 3).payload).toEqual(record(t));
     }
+  });
+
+  test("no version encodes a share posting: postings reach the board only as contract events", () => {
+    for (const version of [1, 3] as const)
+      expect(() =>
+        encodeBoardEntry({ ...base, payload: record(RECORD_TYPES.sharePosting) }, version),
+      ).toThrow(EncodeError);
   });
 
   test("version 2 is never assigned", () => {
@@ -310,6 +329,27 @@ describe("input checks", () => {
       registered: [{ ...(e.registered[0] as DeliveryElection["registered"][number]), index: 4 }],
     };
     expect(() => checkDelivery(bad, [b], [], 1)).toThrow(RangeError);
+  });
+
+  test("refuses an entry with no path, a bad segment or a submission time that isn't a bigint", () => {
+    const e = electionOf(v);
+    const b = ballotsOf(v);
+    const payload = new Uint8Array(3);
+    for (const bad of [
+      { segment: 0, payload },
+      { path: "board", segment: -1, payload },
+      { path: "board", segment: 1.5, payload },
+      { path: "contract", submittedAt: 5, payload },
+      { path: "relay", submittedAt: 5n, payload },
+    ])
+      expect(() => checkDelivery(e, b, [bad as unknown as DeliveryEntry], 1)).toThrow(RangeError);
+  });
+
+  test("refuses deadlines that aren't bigints", () => {
+    const e = { ...electionOf(v), deadlines: { delivery: 1, complaint: 2 } };
+    expect(() => checkDelivery(e as unknown as DeliveryElection, ballotsOf(v), [], 1)).toThrow(
+      RangeError,
+    );
   });
 
   test("refuses a close before the anchoring clock's epoch", () => {
@@ -375,6 +415,27 @@ describe("properties", () => {
           },
         ),
         { numRuns },
+      );
+    },
+  );
+
+  test(
+    "a passing posting delivers through the contract path and never through the board path",
+    { timeout: 120_000 },
+    () => {
+      const fallback = V.elections.find((e) => e.id === "posting-fallback") as ElectionVector;
+      const entries = entriesOf(fallback);
+      const posting = entries.findIndex((e) => e.path === "contract");
+      fc.assert(
+        fc.property(fc.nat({ max: 1_000 }), (segment) => {
+          const moved = entries.map((e, i) =>
+            i === posting ? { path: "board" as const, segment, payload: e.payload } : e,
+          );
+          const r = checkDelivery(electionOf(fallback), ballotsOf(fallback), moved, 1);
+          expect(r.ballots[0]?.missing).toEqual([3]);
+          expect(r.rejected).toEqual([{ at: posting, error: "unexpected-record-type" }]);
+        }),
+        { numRuns: slowRuns },
       );
     },
   );

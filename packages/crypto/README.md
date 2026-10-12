@@ -66,11 +66,11 @@ How a panel registers its per-election keys for one election (`docs/spec/ceremon
 
 ## Delivery
 
-Share delivery on the board, from [`docs/spec/delivery.md`](../../docs/spec/delivery.md) (ADR 0002, Deadline and Complaints; T-41, T-29, T-25):
+Share delivery on the board, from [`docs/spec/delivery.md`](../../docs/spec/delivery.md) (ADR 0002, Deadline, Complaints and the owner's 2026-10-12 decision; T-41, T-29, T-25, T-54):
 
-- The records: share receipts, postings and complaints (`encodeShareReceipt`, `encodeSharePosting`, `encodeShareComplaint` and their decoders; record types `0x000c` to `0x000e`, version 1, fixed by ballot version 1). A trustee node turns its intake result into a record with `shareReceiptRecord` (the ballot client boards the receipts it holds itself, docs/spec/delivery.md, Client rules), and signs a complaint with `signShareComplaint`.
-- `deliverySegments`: the last segments in which a board-path receipt, posting or complaint is in time.
-- A verifier: `checkDelivery` over the selected ballots and every delivery record in the counted extent. A ballot stays counted only if every qualified seat has a passing receipt or posting in time and no complaint about it is proven; the verdict doesn't depend on the records' order.
+- The records: share receipts, postings and complaints (`encodeShareReceipt`, `encodeSharePosting`, `encodeShareComplaint` and their decoders; record types `0x000c` to `0x000e`, version 1, fixed by ballot version 1). A trustee node turns its intake result into a record with `shareReceiptRecord` and sends it through the contract path as well as the board path (the ballot client resubmits the receipts it holds too, docs/spec/delivery.md, Client rules), and signs a complaint with `signShareComplaint`. Board-entry version 3 carries receipts and complaints, never postings: a posting delivers only as a contract event.
+- `deliverySegments`: the last segments in which a board-path receipt or complaint is in time; `deliveryDeadlines`: the deadlines a contract-path record's submission time is compared with.
+- A verifier: `checkDelivery` over the selected ballots and every delivery record in the counted extent, each with its path (a board entry's segment, or a contract event's submission time). A ballot stays counted only if every qualified seat has a passing receipt or contract-path posting in time and no complaint about it is proven; a board-path posting is a rejected entry; the verdict doesn't depend on the records' order.
 
 ## Tally
 

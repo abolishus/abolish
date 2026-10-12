@@ -2,8 +2,9 @@
 // (0x000c), postings (0x000d) and complaints (0x000e) as records, the
 // delivery deadline and complaint window, and the delivery check that decides
 // which selected ballots stay in the counted set. A ballot counts only if every
-// qualified seat has a receipt or a passing posting in time, and no proven
-// complaint excludes it (ADR 0002, Deadline and Complaints; T-41, T-29, T-25).
+// qualified seat has a receipt or a passing contract-path posting in time, and
+// no proven complaint excludes it (ADR 0002, Deadline, Complaints and the
+// owner's 2026-10-12 decision; T-41, T-29, T-25, T-54).
 
 import { ballotHash, type CommittedVote } from "./ballot-validity.ts";
 import {
@@ -150,7 +151,7 @@ export interface PeriodClock {
   readonly period: bigint;
 }
 
-/** `s_D` and `s_K`: the last segments in which a board-path record is in time. */
+/** `s_D` and `s_K`: the last segments in which a board-path receipt or complaint is in time. */
 export interface DeliverySegments {
   readonly delivery: bigint;
   readonly complaint: bigint;
@@ -180,6 +181,25 @@ export function deliverySegments(
   };
 }
 
+/**
+ * The delivery deadline and the end of the complaint window, in seconds:
+ * `closes_at + l1_inclusion_bound + DELIVERY_WINDOW` and likewise with
+ * `COMPLAINT_WINDOW`. A contract-path record is in time if its submission time
+ * is at or before them (docs/spec/delivery.md, Windows).
+ */
+export interface DeliveryDeadlines {
+  readonly delivery: bigint;
+  readonly complaint: bigint;
+}
+
+/** The deadlines a contract-path record's submission time is compared with. */
+export function deliveryDeadlines(closesAt: bigint, l1InclusionBound: bigint): DeliveryDeadlines {
+  if (typeof closesAt !== "bigint" || typeof l1InclusionBound !== "bigint" || l1InclusionBound < 0n)
+    throw new RangeError("closesAt and l1InclusionBound must be bigints, the bound ≥ 0");
+  const end = closesAt + l1InclusionBound;
+  return { delivery: end + DELIVERY_WINDOW, complaint: end + COMPLAINT_WINDOW };
+}
+
 /** What the delivery check runs against, all from data the verifier has already checked. */
 export interface DeliveryElection {
   readonly definitionHash: Uint8Array;
@@ -188,6 +208,7 @@ export interface DeliveryElection {
   /** The registered key set ([[ceremony]], Transcript check): the qualified seats. */
   readonly registered: readonly RegisteredKeys[];
   readonly segments: DeliverySegments;
+  readonly deadlines: DeliveryDeadlines;
 }
 
 /** A ballot [[revoting]] selected, decoded, with its tier and nullifier; it passed `validity-shape`. */
@@ -197,11 +218,16 @@ export interface DeliveryBallot {
   readonly vote: CommittedVote;
 }
 
-/** A delivery record in the counted extent, with the segment of the entry that carries it. */
-export interface DeliveryEntry {
-  readonly segment: number;
-  readonly payload: Uint8Array;
-}
+/**
+ * A delivery record in the counted extent: through the board path, with the
+ * segment of the board entry that carries it, or through the contract path,
+ * with its L2 submission time, read from its contract event (P1-18). Only the
+ * contract path carries postings: L2 data is available to every trustee, so
+ * no operator can withhold a posting through the complaint window.
+ */
+export type DeliveryEntry =
+  | { readonly path: "board"; readonly segment: number; readonly payload: Uint8Array }
+  | { readonly path: "contract"; readonly submittedAt: bigint; readonly payload: Uint8Array };
 
 export type DeliveryRecordCode =
   | "delivery-stray"
@@ -255,13 +281,16 @@ type Decoded =
   | { readonly kind: "posting"; readonly record: SharePostingRecord }
   | { readonly kind: "complaint"; readonly record: ShareComplaintRecord };
 
-function decodeDelivery(payload: Uint8Array, pinned: 1): Decoded {
+function decodeDelivery(payload: Uint8Array, pinned: 1, path: DeliveryEntry["path"]): Decoded {
   if (payload.length < 3) throw new DecodeError("truncated", 0);
   const type = ((payload[0] as number) << 8) | (payload[1] as number);
   switch (type) {
     case RECORD_TYPES.shareReceipt:
       return { kind: "receipt", record: decodeShareReceipt(payload, pinned) };
     case RECORD_TYPES.sharePosting:
+      // Board-entry version 3 doesn't allow a posting, so one here through the
+      // board path is rejected like the entry that would carry it.
+      if (path !== "contract") throw new DecodeError("unexpected-record-type", 0);
       return { kind: "posting", record: decodeSharePosting(payload, pinned) };
     case RECORD_TYPES.shareComplaint:
       return { kind: "complaint", record: decodeShareComplaint(payload, pinned) };
@@ -292,14 +321,14 @@ function complaintSigner(
 /**
  * The delivery check (docs/spec/delivery.md, Delivery check; verifier 5.9).
  * `ballots` are the ballots selected for every cell from the counted extent;
- * `entries` every share-receipt, posting and complaint payload in the counted
- * extent that reached the board through the board path, in board order, and
- * `at` in every report is a position in it: their segment is their submission
- * time. Records sent through the contract path are judged by their L2
- * submission time, which waits on P1-18's contract-event record. A
- * ballot stays in the counted set only if every qualified seat has a receipt
- * or a passing posting in time and no complaint about it is proven. Neither
- * depends on the records' order, duplicates or records for other ballots (R3).
+ * `entries` every share-receipt, posting and complaint in the counted extent,
+ * by either path, in board order, and `at` in every report is a position in
+ * it. A board-path record is in time by its segment, a contract-path one by
+ * its submission time, and a posting delivers only through the contract path.
+ * A ballot stays in the counted set only if every qualified seat has a
+ * receipt or a passing posting in time and no complaint about it is proven.
+ * Neither depends on the records' order, duplicates or records for other
+ * ballots (R3).
  */
 export function checkDelivery(
   election: DeliveryElection,
@@ -307,7 +336,7 @@ export function checkDelivery(
   entries: readonly DeliveryEntry[],
   pinned: 1,
 ): DeliveryCheck {
-  const { definitionHash, panelSize, registered, segments } = election;
+  const { definitionHash, panelSize, registered, segments, deadlines } = election;
   if (!(definitionHash instanceof Uint8Array) || definitionHash.length !== 32)
     throw new RangeError("checkDelivery: definitionHash must be 32 bytes");
   if (!Number.isSafeInteger(panelSize) || panelSize < 2 || panelSize > MAX_TRUSTEES)
@@ -315,6 +344,15 @@ export function checkDelivery(
   for (const k of registered)
     if (!Number.isSafeInteger(k.index) || k.index < 1 || k.index > panelSize)
       throw new RangeError("checkDelivery: every registered seat must be from 1 to n");
+  if (typeof deadlines?.delivery !== "bigint" || typeof deadlines.complaint !== "bigint")
+    throw new RangeError("checkDelivery: deadlines must be bigints");
+  for (const e of entries)
+    if (
+      e.path === "board"
+        ? !Number.isSafeInteger(e.segment) || e.segment < 0
+        : e.path !== "contract" || typeof e.submittedAt !== "bigint"
+    )
+      throw new RangeError("checkDelivery: every entry is a board-path or contract-path record");
   const keyOf = new Map(registered.map((k) => [k.index, k]));
   if (keyOf.size !== registered.length)
     throw new RangeError("checkDelivery: a registered seat is listed twice");
@@ -335,10 +373,10 @@ export function checkDelivery(
   const complaints: { at: number; ballot: number; record: ShareComplaintRecord }[] = [];
   const postings = ballots.map(() => new Map<number, SharePostingRecord>());
 
-  entries.forEach(({ segment, payload }, at) => {
+  entries.forEach((entry, at) => {
     let d: Decoded;
     try {
-      d = decodeDelivery(payload, pinned);
+      d = decodeDelivery(entry.payload, pinned, entry.path);
     } catch (e) {
       if (!(e instanceof DecodeError)) throw e;
       rejected.push({ at, error: e.code });
@@ -357,8 +395,11 @@ export function checkDelivery(
       records.push({ at, code: "delivery-seat" });
       return;
     }
-    const last = d.kind === "complaint" ? segments.complaint : segments.delivery;
-    if (BigInt(segment) > last) {
+    const late =
+      entry.path === "board"
+        ? BigInt(entry.segment) > (d.kind === "complaint" ? segments.complaint : segments.delivery)
+        : entry.submittedAt > (d.kind === "complaint" ? deadlines.complaint : deadlines.delivery);
+    if (late) {
       records.push({ at, code: "delivery-late" });
       return;
     }

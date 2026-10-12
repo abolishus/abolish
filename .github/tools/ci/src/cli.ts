@@ -11,6 +11,9 @@
 //                           match the manifest and the file
 //   gated                   enforce the dependency, import, symlink and bundle policy
 //                           of the crypto-review-gated packages (see gated.ts)
+//   ballot                  build apps/ballot and enforce its bundle and CSP policy:
+//                           no npm runtime code but React's and shadcn/ui's, no analytics SDK, no URL
+//                           but inert ones, the pinned CSP (see ballot.ts)
 //   toolchain               fail unless install-toolchain.sh, the catalog, the lockfile
 //                           and AGENTS.md pin one Noir and one bb, and bbup's
 //                           bb-versions.json (pinned commit and next) maps one to the other
@@ -41,6 +44,7 @@ import { join, resolve } from "node:path";
 import { parseSync } from "vite-plus";
 import { parseDocument } from "yaml";
 import { findUnpinned } from "./actions-pinned.ts";
+import { distViolations, moduleListViolations } from "./ballot.ts";
 import {
   GATED_PACKAGES,
   changedFiles,
@@ -739,6 +743,50 @@ async function toolchain(): Promise<void> {
   console.log(`toolchain pins agree: Noir ${script.noir}, bb ${script.bb}`);
 }
 
+function ballot(): void {
+  const dir = "apps/ballot";
+  // The client exists on main: a PR that removes or moves it mustn't pass the
+  // gate vacuously.
+  if (!existsSync(join(dir, "package.json"))) {
+    console.error(`${dir}/package.json: missing`);
+    process.exit(1);
+  }
+  const work = mkdtempSync(join(tmpdir(), "abolish-ballot-"));
+  const outDir = join(work, "dist");
+  const idsFile = join(work, "ids.json");
+  try {
+    // apps/ballot's Vite config is the PR's code: it runs only in this child,
+    // and everything below is judged here, in code it can't reach (T-59).
+    execFileSync(process.execPath, [".github/tools/ci/src/ballot-build.ts", outDir, idsFile], {
+      stdio: "inherit",
+      env: { ...process.env, NODE_ENV: "production" },
+    });
+    const files = new Map<string, string>();
+    const violations: string[] = [];
+    for (const entry of readdirSync(outDir, { recursive: true, withFileTypes: true })) {
+      const path = join(entry.parentPath, entry.name);
+      const name = path
+        .slice(outDir.length + 1)
+        .split("\\")
+        .join("/");
+      // A symlink or other special file would never reach the emitted-file
+      // allow-list as a file, so it is a violation of its own.
+      if (entry.isFile()) files.set(name, readFileSync(path, "latin1"));
+      else if (!entry.isDirectory())
+        violations.push(`apps/ballot: emits ${name}, which isn't a regular file`);
+    }
+    violations.push(
+      ...moduleListViolations(JSON.parse(readFileSync(idsFile, "utf8")), resolve(".")),
+    );
+    violations.push(...distViolations(files));
+    for (const v of violations) console.error(v);
+    if (violations.length > 0) process.exit(1);
+    console.log(`apps/ballot: ${files.size} files pass the bundle and CSP policy`);
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+}
+
 const command = process.argv[2];
 switch (command) {
   case "affected":
@@ -755,6 +803,9 @@ switch (command) {
     break;
   case "gated":
     gated();
+    break;
+  case "ballot":
+    ballot();
     break;
   case "vectors-provenance":
     await vectorsProvenance();

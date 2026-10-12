@@ -9,6 +9,7 @@ import {
   verifyInclusion,
 } from "@abolishus/crypto";
 import {
+  ACCOUNT_COOKIE_PREFIX,
   appendEntry,
   MAX_REPORT_QUEUE,
   moderate,
@@ -570,9 +571,10 @@ describe("transport", () => {
 describe("request log (T-10, T-11)", () => {
   test("no line carries an address, a header, a query, a body or an identifier", async () => {
     const e = await election(2);
+    // Account credentials are refused outright (next describe); anything else
+    // a client sends is served but never logged.
     const secrets = {
       cookie: `session=${hex(b32())}`,
-      authorization: `Bearer ${hex(b32())}`,
       "x-forwarded-for": "203.0.113.77",
       "x-request-id": hex(b32()),
     };
@@ -637,5 +639,43 @@ describe("request log (T-10, T-11)", () => {
     ]);
     expect(JSON.stringify(lines)).not.toContain("secret");
     expect(JSON.stringify(lines)).not.toContain(id);
+  });
+});
+
+describe("account credentials (T-10)", () => {
+  const token = () => hex(b32());
+  const refused = [
+    { cookie: `__Secure-${ACCOUNT_COOKIE_PREFIX}.session_token=${token()}` },
+    { cookie: `${ACCOUNT_COOKIE_PREFIX}.session_token=${token()}` },
+    { cookie: `__Host-${ACCOUNT_COOKIE_PREFIX}.session_data=${token()}` },
+    { cookie: `a=1; __SECURE-${ACCOUNT_COOKIE_PREFIX.toUpperCase()}.passkey-challenge=${token()}` },
+    { cookie: `__cf_bm=x;${ACCOUNT_COOKIE_PREFIX}.dont_remember=true` },
+    { cookie: `${ACCOUNT_COOKIE_PREFIX}-session_token=${token()}` },
+    { authorization: `Bearer ${token()}` },
+    { authorization: `Basic ${token()}` },
+  ];
+
+  test("a request carrying one is refused, on every route, before anything is read", async () => {
+    const e = await election(1);
+    for (const headers of refused) {
+      const reads = [
+        await fetch(`${base}/elections/definition?electionId=${e.idHex}`, { headers }),
+        await fetch(`${base}/board/head?electionId=${e.idHex}`, { headers }),
+        await fetch(`${base}/nope`, { headers }),
+        await post("/ballots", { electionId: e.idHex, ballot: "000201" }, headers),
+      ];
+      for (const r of reads) {
+        expect([headers, r.status]).toEqual([headers, 400]);
+        expect(await r.json()).toEqual({ code: "BAD_REQUEST", status: 400 });
+      }
+    }
+  });
+
+  test("other cookies are served as usual", async () => {
+    const e = await election(1);
+    const r = await fetch(`${base}/board/head?electionId=${e.idHex}`, {
+      headers: { cookie: `__cf_bm=${token()}; abolish.theme=dark; account=1` },
+    });
+    expect(r.status).toBe(200);
   });
 });

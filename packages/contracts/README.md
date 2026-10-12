@@ -1,8 +1,8 @@
 # @abolishus/contracts
 
-Abolish's L2 contracts, built with Foundry 1.8.3 and solc 0.8.30. Internal and source-only: deployed bytecode is checked against the release build of this source (verifier check 1.2, T-64).
+Abolish's contracts (the L2 contracts and the L1 board anchor), built with Foundry 1.8.3 and solc 0.8.30. Internal and source-only: deployed bytecode is checked against the release build of this source (verifier check 1.2, T-64).
 
-**Status: early (P1-18).** So far there are the event accumulator and the election registry. The trustee key registry, direct submission and the wagmi bindings follow in later P1-18 changes. Nothing is deployed, and nothing may be until the trustee registry and the close rule exist ([`docs/spec/contracts.md`](../../docs/spec/contracts.md), Election registry).
+**Status: early (P1-18, P4-1).** So far there are the event accumulator, the election registry and the L1 board anchor. The trustee key registry, direct submission and the wagmi bindings follow in later P1-18 changes. Nothing is deployed, and nothing may be until the trustee registry and the close rule exist ([`docs/spec/contracts.md`](../../docs/spec/contracts.md), Election registry).
 
 ## Event accumulator
 
@@ -20,6 +20,17 @@ Abolish's L2 contracts, built with Foundry 1.8.3 and solc 0.8.30. Internal and s
 - `createElection()` assigns `election_id = H(DS("abolish/v1/election-id", u64(chain_id) ‖ registry ‖ u64(counter)))` and makes the caller the election's creator.
 - `registerDefinition(bytes)` admits the creator's one definition, write-once, only with canonical calldata, if it decodes strictly (`src/ElectionDefinition.sol`), is well formed, names this deployment, opens after the anchoring epoch and after registration, has every electorate root in an earlier block, and its stub was recorded with its ceremony transcript hash by the trustee registry (`src/ITrusteeRegistry.sol`; T-34, T-17, T-37, T-08, T-13, T-25).
 - The trustee registry is the next part of P1-18; tests use a stand-in (`test/utils/DefinitionHarness.sol`).
+
+## Board anchor
+
+`src/BoardAnchor.sol` implements [`docs/spec/contracts.md`](../../docs/spec/contracts.md), Board anchor, our one contract on L1:
+
+- Its clock (`epoch`, `period`, `deadline`) and its anchoring `authority` are immutable; deployment refuses a zero period and an authority without code or with only an EIP-7702 delegation (a single key; T-53, T-69).
+- `anchor(bytes checkpoints, bytes locator)` takes concatenated checkpoint encodings from the authority only, with canonical calldata, each non-empty, inside its window (`[end, end + deadline]` after its period ends) and the first for its election and segment, and stores `H(DS("abolish/v1/board-checkpoint", encode(checkpoint)))` at a per-segment slot under the ERC-7201 namespace `abolish.board-anchor`, so a verifier proves every anchor of an election from state (T-23, T-24, T-52).
+- `CheckpointAnchored` publishes the full checkpoint, through the event accumulator.
+- A call may carry the `archiveLocator` of ADR 0005 (`u16(version) ‖ body`, at most 128 bytes, framed but not interpreted), alone or with checkpoints; `ArchiveLocated` logs it and the latest one stays in state with a count, so the archive is found from L1 alone, even after history expiry (T-49, T-51).
+- `src/CanonicalCalldata.sol` is the calldata check it shares with the election registry.
+- The hourly job and the Sepolia deployment are P4-1 part 2.
 
 ## Rules
 
@@ -46,9 +57,9 @@ FOUNDRY_PROFILE=ci vp run --filter @abolishus/contracts test   # deeper fuzz and
 
 The tests cover:
 
-- the cross-language vectors in `docs/spec/vectors/event-accumulator.json`, `election-definition.json` and `election-registry.json`, which independent Python implementations produced;
+- the cross-language vectors in `docs/spec/vectors/event-accumulator.json`, `election-definition.json`, `election-registry.json` and the checkpoints of `board.json`, which independent Python implementations produced;
 - fuzz tests that replay the logs the EVM recorded;
-- a test per admission rule of the election registry, and fuzz tests that any one-bit change to an approved definition, or arbitrary bytes, is refused;
+- a test per admission rule of the election registry and per refusal of the board anchor (with its window's exact boundaries), and fuzz tests that any one-bit change to an approved definition, or arbitrary bytes, is refused;
 - invariant suites (`test/invariant/`) whose invariants are stated in prose in each file.
 
 ## License

@@ -2,9 +2,9 @@ import { Count, Hash, useI18n, useTranslate } from "@abolishus/ui";
 import type { ReactNode } from "react";
 
 import { catalogs } from "../messages.ts";
-import type { PollView, Tier } from "../poll.ts";
+import type { Instant, PollView, Tier } from "../poll.ts";
 import type { BoardHead, ModerationState } from "../server/load.ts";
-import { formatInstant } from "./format.ts";
+import { formatUtc } from "./format.ts";
 
 export interface PollSummaryProps {
   poll: PollView;
@@ -13,6 +13,18 @@ export interface PollSummaryProps {
 }
 
 const TIER_LABEL = { 0: "tier0", 1: "tier1", 2: "tier2" } as const satisfies Record<Tier, string>;
+
+/** An instant from the definition, or its raw seconds past what `Date` holds. */
+function When({ instant }: { instant: Instant }) {
+  const t = useTranslate(catalogs);
+  const { locale } = useI18n();
+  if (instant.iso === undefined) return <span className="tabular-nums">{instant.seconds}</span>;
+  return (
+    <time dateTime={instant.iso} suppressHydrationWarning>
+      {t("utcTime", { time: formatUtc(locale, new Date(instant.iso)) })}
+    </time>
+  );
+}
 
 function Fact({ term, children }: { term: string; children: ReactNode }) {
   return (
@@ -31,7 +43,6 @@ function Fact({ term, children }: { term: string; children: ReactNode }) {
  */
 export function PollSummary({ poll, board, moderation }: PollSummaryProps) {
   const t = useTranslate(catalogs);
-  const { locale } = useI18n();
   const latest = moderation.latest;
   return (
     <article className="grid gap-8">
@@ -54,7 +65,7 @@ export function PollSummary({ poll, board, moderation }: PollSummaryProps) {
 
       {poll.illFormed !== undefined ? (
         <p role="alert" className="max-w-prose border-l-4 border-destructive pl-4">
-          {t("illFormed", { rule: poll.illFormed })}
+          {t("illFormed", { rule: t(`rule_${poll.illFormed}`) })}
         </p>
       ) : null}
 
@@ -70,8 +81,9 @@ export function PollSummary({ poll, board, moderation }: PollSummaryProps) {
         </Fact>
         <Fact term={t("factElectorate")}>
           <ul className="m-0 grid list-none gap-1 p-0">
-            {poll.electorate.map((group) => (
-              <li key={group.tier}>
+            {/* By position: an ill-formed definition can repeat a tier. */}
+            {poll.electorate.map((group, i) => (
+              <li key={i}>
                 {t(TIER_LABEL[group.tier])}:{" "}
                 <span className="tabular-nums">
                   {t("groupMembers", { count: BigInt(group.groupSize) })}
@@ -85,8 +97,12 @@ export function PollSummary({ poll, board, moderation }: PollSummaryProps) {
             {t("trusteesOf", { threshold: poll.threshold, size: poll.panelSize })}
           </span>
         </Fact>
-        <Fact term={t("factOpens")}>{formatInstant(locale, poll.opensAt)}</Fact>
-        <Fact term={t("factCloses")}>{formatInstant(locale, poll.closesAt)}</Fact>
+        <Fact term={t("factOpens")}>
+          <When instant={poll.opensAt} />
+        </Fact>
+        <Fact term={t("factCloses")}>
+          <When instant={poll.closesAt} />
+        </Fact>
       </dl>
 
       <Hash value={poll.definitionHash} label={t("definitionHash")} />

@@ -41,7 +41,19 @@ const enUS = {
   boardUnanchored:
     "Until an L1 checkpoint covers these values, they are only this server's word. Keep them: a later board that doesn't extend them is evidence of tampering.",
   illFormed:
-    "This definition breaks the protocol's rule “{rule}”, so the verifier fails this election.",
+    "This definition breaks a protocol rule ({rule}), so the verifier fails this election.",
+  "rule_protocol-major": "unsupported protocol version",
+  "rule_profile-order": "record versions out of order",
+  "rule_profile-types": "wrong record types",
+  "rule_profile-version": "a record at version 0",
+  "rule_option-count": "number of options",
+  rule_selections: "selection limits",
+  rule_electorate: "who can vote",
+  rule_panel: "trustee panel",
+  rule_chain: "chains and contracts",
+  rule_timing: "opening and closing times",
+  utcTime: "{time} UTC",
+  shortId: "{prefix}…",
   moderationDelisted:
     "This poll is left out of discovery and search ({reason}). Its board and result are unaffected.",
   moderationHidden:

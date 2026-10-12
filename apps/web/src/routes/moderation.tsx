@@ -6,9 +6,11 @@ import { isCanonicalU64, searchText } from "../values.ts";
 import { LOG_PAGE } from "../server/load.ts";
 
 export const Route = createFileRoute("/moderation")({
-  validateSearch: (search: Record<string, unknown>): { after?: string } => {
+  // Always sets `after`, as in polls.index.tsx: anything but a canonical
+  // u64 starts the log from the beginning.
+  validateSearch: (search: Record<string, unknown>): { after: string | undefined } => {
     const after = searchText(search["after"]);
-    return isCanonicalU64(after) ? { after } : {};
+    return { after: isCanonicalU64(after) ? after : undefined };
   },
   loaderDeps: ({ search }) => ({ after: search.after ?? "0" }),
   loader: ({ deps }) => fetchModerationLog({ data: deps.after }),

@@ -42,6 +42,11 @@ export function securityHeaders(nonce: string): Readonly<Record<string, string>>
     "referrer-policy": "no-referrer",
     "cross-origin-opener-policy": "same-origin",
     "cross-origin-resource-policy": "same-origin",
+    // Each page is rendered for one response, with its own nonce: a cache that
+    // served it again would hand every visitor the same one.
+    "cache-control": "no-store",
+    // Ignored over plain HTTP; the proxy in front (P2-11) terminates TLS.
+    "strict-transport-security": "max-age=31536000",
     "permissions-policy":
       "camera=(), microphone=(), geolocation=(), usb=(), serial=(), hid=(), bluetooth=(), payment=(), browsing-topics=()",
   };

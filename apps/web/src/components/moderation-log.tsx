@@ -57,14 +57,14 @@ export function ModerationLog({ log, next }: ModerationLogProps) {
                       translate="no"
                       href={`/polls/${entry.electionId}`}
                     >
-                      {entry.electionId.slice(0, 16)}…
+                      {t("shortId", { prefix: entry.electionId.slice(0, 16) })}
                     </a>
                   </td>
                   <td className="py-2 pr-4">{t(`action_${entry.action}`)}</td>
                   <td className="py-2 pr-4">{t(`reason_${entry.reason}`)}</td>
                   <td className="py-2 tabular-nums">
-                    <time dateTime={entry.decidedAt}>
-                      {formatUtc(locale, new Date(entry.decidedAt))}
+                    <time dateTime={entry.decidedAt} suppressHydrationWarning>
+                      {t("utcTime", { time: formatUtc(locale, new Date(entry.decidedAt)) })}
                     </time>
                   </td>
                 </tr>

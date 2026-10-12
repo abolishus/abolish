@@ -32,7 +32,8 @@ export function createApi(baseUrl: string, fetchImpl: typeof fetch = fetch): Api
       fetchImpl(request, {
         ...init,
         redirect: "error",
-        signal: AbortSignal.timeout(API_TIMEOUT_MS),
+        // The timeout joins the request's own signal, so an aborted call stops too.
+        signal: AbortSignal.any([request.signal, AbortSignal.timeout(API_TIMEOUT_MS)]),
       }),
     // An answer that breaks the contract is an error, not something to render.
     plugins: [new ResponseValidationPlugin(contract)],

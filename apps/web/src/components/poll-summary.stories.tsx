@@ -99,7 +99,7 @@ export const IllFormed: Story = {
   args: { poll: { ...poll, electionType: "approval", illFormed: "panel" } },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await expect(canvas.getByRole("alert")).toHaveTextContent("“panel”");
+    await expect(canvas.getByRole("alert")).toHaveTextContent("(trustee panel)");
     await expect(canvas.getByText("Approve any number")).toBeVisible();
   },
 };

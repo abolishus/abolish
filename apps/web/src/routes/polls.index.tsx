@@ -6,9 +6,11 @@ import { normalizeElectionId, searchText } from "../values.ts";
 // The lookup form's target: a poll ID goes to its page under the one
 // spelling that names it; anything else comes back to the form.
 export const Route = createFileRoute("/polls/")({
-  validateSearch: (search: Record<string, unknown>): { id?: string } => {
+  // Always sets `id`: the router lays this object over the raw search, so a
+  // key left out would keep whatever the URL held (an array, for `?id=a&id=b`).
+  validateSearch: (search: Record<string, unknown>): { id: string | undefined } => {
     const id = searchText(search["id"]);
-    return id === undefined ? {} : { id: id.slice(0, 256) };
+    return { id: id?.slice(0, 256) };
   },
   beforeLoad: ({ search }) => {
     if (search.id === undefined) return;

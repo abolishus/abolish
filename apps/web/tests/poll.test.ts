@@ -49,7 +49,7 @@ describe("definitionView", () => {
   test.each(decodable.map((v) => [v.id, v] as const))(
     "%s: shows the vector's hash, rule and facts",
     (_, v) => {
-      const value = v.value!; // filtered above
+      const value = v.value!; // `decodable` holds only vectors with a value
       const result = definitionView(value.election_id, v.encoding);
       if (!result.ok) throw new Error(`refused: ${result.problem}`);
       const { poll } = result;
@@ -76,6 +76,7 @@ describe("definitionView", () => {
 
   test("refuses a definition served for another election (T-34)", () => {
     for (const v of decodable) {
+      // `decodable` holds only vectors with a value.
       const other = v.value!.election_id.replace(/^./, (c) => (c === "0" ? "1" : "0"));
       expect(definitionView(other, v.encoding)).toEqual({
         ok: false,
@@ -96,25 +97,31 @@ describe("definitionView", () => {
 
   test("never throws on a mutated vector, and shows it only if it still decodes to this election", () => {
     const typical = decodable[0]!; // asserted non-empty above
+    const electionId = typical.value!.election_id; // `decodable` holds only vectors with a value
     const bytes = fromHex(typical.encoding);
     fc.assert(
       fc.property(fc.nat(bytes.length - 1), fc.integer({ min: 1, max: 255 }), (at, flip) => {
         const mutated = bytes.slice();
         mutated[at]! ^= flip; // `at` is in range
-        const result = definitionView(typical.value!.election_id, toHex(mutated));
-        if (result.ok) expect(result.poll.definitionHash).not.toBe(typical.hash);
+        const mutatedHex = toHex(mutated);
+        const result = definitionView(electionId, mutatedHex);
+        if (!result.ok) return;
+        expect(result.poll.definitionHash).not.toBe(typical.hash);
+        // Shown only because it still names this election.
+        expect(toHex(decodeElectionDefinition(mutated).election_id)).toBe(electionId);
       }),
       runs,
     );
   });
 
   test("shows the raw seconds of an instant past what Date holds", () => {
-    const typical = decodable[0]!;
+    const typical = decodable[0]!; // asserted non-empty above
+    const electionId = typical.value!.election_id; // `decodable` holds only vectors with a value
     const far = encodeElectionDefinition({
       ...decodeElectionDefinition(fromHex(typical.encoding)),
       closes_at: (1n << 64n) - 1n,
     });
-    const result = definitionView(typical.value!.election_id, toHex(far));
+    const result = definitionView(electionId, toHex(far));
     if (!result.ok) throw new Error(result.problem);
     expect(result.poll.closesAt).toEqual({ seconds: "18446744073709551615", iso: undefined });
   });

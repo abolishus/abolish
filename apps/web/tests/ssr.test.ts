@@ -61,6 +61,9 @@ const definitions = new Map([
   [SWAPPED_ID, typical.encoding],
 ]);
 
+/** While set, the stub drops every connection unanswered, as a dead API would. */
+let down = false;
+
 /** Every request the stub API received, with its headers. */
 const seen: { path: string; headers: IncomingHttpHeaders }[] = [];
 
@@ -68,6 +71,7 @@ function stubApi(): Server {
   return createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://stub");
     seen.push({ path: url.pathname, headers: req.headers });
+    if (down) return void req.socket.destroy();
     const json = (status: number, body: unknown) => {
       res.writeHead(status, { "content-type": "application/json" });
       res.end(JSON.stringify(body));
@@ -124,6 +128,16 @@ function get(path: string, headers: Record<string, string> = {}): Promise<Respon
   return handler.fetch(new Request(`http://localhost${path}`, { headers }));
 }
 
+/** `get`, following one redirect to this site, as a browser would. */
+async function follow(path: string): Promise<Response> {
+  const response = await get(path);
+  const location = response.headers.get("location");
+  if (response.status !== 307 || location === null) return response;
+  const next = new URL(location, "http://localhost");
+  expect(next.origin).toBe("http://localhost");
+  return get(next.pathname + next.search);
+}
+
 /** The nonce the CSP allows, checking the rest of the policy along the way. */
 function cspNonce(response: Response): string {
   const csp = response.headers.get("content-security-policy") ?? "";
@@ -140,6 +154,7 @@ describe("every page", () => {
       const nonce = cspNonce(response);
       expect(response.headers.get("x-content-type-options")).toBe("nosniff");
       expect(response.headers.get("referrer-policy")).toBe("no-referrer");
+      expect(response.headers.get("cache-control")).toBe("no-store");
       const csp = response.headers.get("content-security-policy") ?? "";
       expect(csp).toContain("default-src 'none'");
       expect(csp).toContain("frame-ancestors 'none'");
@@ -229,6 +244,17 @@ describe("lookup", () => {
     expect(response.headers.get("location")).toMatch(new RegExp(`/polls/${ID}$`));
   });
 
+  test.each(["?id=a&id=b", "?id=", "?id=%00"])(
+    "%s is a normal page, quoting no error",
+    async (search) => {
+      const response = await follow(`/polls${search}`);
+      expect(response.status).toBe(200);
+      const html = await response.text();
+      expect(html).toContain('name="id"');
+      expect(html).not.toMatch(/new Error|is not a function/);
+    },
+  );
+
   test("returns anything else to the form, marked invalid", async () => {
     const html = await (await get("/polls?id=123")).text();
     expect(html).toContain('aria-invalid="true"');
@@ -243,6 +269,17 @@ describe("moderation log", () => {
     expect(html).toContain("Personal data");
     expect(html).toContain(`href="/polls/${HIDDEN_ID}"`);
   });
+
+  test.each(["?after=abc", "?after=99999999999999999999", "?after=1&after=2", "?after=-1"])(
+    "%s starts from the beginning, quoting no error",
+    async (search) => {
+      const response = await follow(`/moderation${search}`);
+      expect(response.status).toBe(200);
+      const html = await response.text();
+      expect(html).toContain("Text hidden");
+      expect(html).not.toMatch(/new Error|expected a canonical/);
+    },
+  );
 
   test("pages by sequence number", async () => {
     const html = await (await get("/moderation?after=7")).text();
@@ -273,20 +310,21 @@ describe("server functions", () => {
       expect(response.status).toBe(403);
       expect(response.headers.get("content-security-policy")).toContain("default-src 'none'");
       expect(seen).toEqual([]);
-      // The same call from our own pages reaches the function (here, its input check).
+      // The same call from our own pages gets past the check: with no input, the
+      // function's own input check answers, so it was the CSRF check that refused above.
       const own = await get(`/_serverFn/${id}`, {
         "sec-fetch-site": "same-origin",
         "x-tsr-serverfn": "true",
       });
       expect(own.status).toBe(200);
+      expect(await own.text()).toMatch(/expected an election ID|expected a canonical decimal u64/);
     }
   });
 });
 
 describe("failures", () => {
   test("an unreachable API gives an error page that quotes nothing", async () => {
-    const saved = process.env["API_URL"];
-    await new Promise((resolve) => api.close(resolve));
+    down = true;
     try {
       const response = await get(`/polls/${ID}`);
       expect(response.status).toBe(500);
@@ -294,10 +332,9 @@ describe("failures", () => {
       expect(html).toContain("Something went wrong");
       expect(html).not.toContain("127.0.0.1");
       expect(html).not.toMatch(/ECONNREFUSED|fetch failed/);
+      expect(html).not.toMatch(/ECONNRESET|socket hang up/);
     } finally {
-      api = stubApi();
-      const port = new URL(saved ?? "").port;
-      await new Promise<void>((resolve) => api.listen(Number(port), "127.0.0.1", resolve));
+      down = false;
     }
   });
 });

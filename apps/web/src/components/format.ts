@@ -1,19 +1,12 @@
-import type { Instant } from "../poll.ts";
-
 /**
- * A date and time for `locale`, always in UTC: the server and the browser
- * then render the same text, whatever their time zones.
+ * A date and time for `locale`, in UTC, so the server and the browser agree
+ * whatever their time zones. Their ICU versions can still word it slightly
+ * differently, so callers render it with `suppressHydrationWarning`.
  */
 export function formatUtc(locale: string, date: Date): string {
-  const formatted = new Intl.DateTimeFormat(locale, {
+  return new Intl.DateTimeFormat(locale, {
     dateStyle: "long",
     timeStyle: "short",
     timeZone: "UTC",
   }).format(date);
-  return `${formatted} UTC`;
-}
-
-/** A definition's instant, or its raw seconds if it is past what `Date` holds. */
-export function formatInstant(locale: string, instant: Instant): string {
-  return instant.iso === undefined ? instant.seconds : formatUtc(locale, new Date(instant.iso));
 }

@@ -1055,6 +1055,24 @@ contract GroupRegistryTest is GroupTestBase {
         registry.removeMembers(_removalAt(0, 1, GroupFixture.indices(0)));
     }
 
+    /// The removal checks run in the spec's order: the size against the
+    /// count before any index, and an index against the size before
+    /// whether it was removed (docs/spec/contracts.md, Removals).
+    function test_RemovalChecksRunInOrder() public {
+        registry.addMembers(_addition(0, GroupFixture.commitments(1, 2)));
+        _expectRemoveRefused(
+            registry,
+            _removalAt(0, 3, GroupFixture.indices(3)),
+            abi.encodeWithSelector(GroupRegistry.SizeBeyondCount.selector, 3, 2)
+        );
+        registry.removeMembers(_removalAt(0, 2, GroupFixture.indices(1)));
+        _expectRemoveRefused(
+            registry,
+            _removalAt(0, 1, GroupFixture.indices(1)),
+            abi.encodeWithSelector(GroupRegistry.IndexBeyondSize.selector, 1)
+        );
+    }
+
     /// A removal signed at size `s` never removes index `s` or beyond, even
     /// once the group has grown past it and a member landed there: what
     /// `size` is signed for (docs/spec/contracts.md, Removals).

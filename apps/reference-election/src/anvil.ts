@@ -59,9 +59,13 @@ export async function startAnvil(chainId: bigint): Promise<Anvil> {
     { stdio: ["ignore", "ignore", "inherit"] },
   );
   // A binary that isn't on PATH emits "error" and never "exit".
+  let spawnFailed = false;
   const exited = new Promise<void>((resolve) => {
     child.once("exit", () => resolve());
-    child.once("error", () => resolve());
+    child.once("error", () => {
+      spawnFailed = true;
+      resolve();
+    });
   });
   const spawnError = new Promise<never>((_, reject) => child.once("error", reject));
   spawnError.catch(() => {});
@@ -80,7 +84,7 @@ export async function startAnvil(chainId: bigint): Promise<Anvil> {
         throw new Error(`another node answered on port ${port}`);
       return { url, call: rpc.call, stop };
     } catch (e) {
-      if (attempt >= 100 || child.exitCode !== null) {
+      if (attempt >= 100 || spawnFailed || child.exitCode !== null) {
         await stop();
         throw new Error("anvil didn't start (is the toolchain installed? AGENTS.md)", {
           cause: e,

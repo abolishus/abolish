@@ -103,3 +103,65 @@ What would change it:
 Under rule A (`AGENTS.md`): **option A**, with status `Accepted (agent) — owner may veto`, listed under Decisions to review in [[STATUS]].
 
 `N` stays off the board. The owner's 2026-10-12 decision allows proofs on the board once a trustee-keyed nullifier exists and the zero-knowledge gate is met. The agent doesn't use that allowance: a Diffie–Hellman-keyed nullifier on the board would rest the registrants' anonymity on discrete logs, and would let the issuing state list its own citizens' registrations by querying. The cost is that Tier 2's uniqueness stays a trust assumption in the attesters (T-06) until option C or an owner decision changes it. Boarding a keyed nullifier, and the long-lived key, are raised under Decisions to review; nothing waits on them.
+
+## Amendment (P3-4 part 2a, 2026-10-12): what zkPassport's circuits allow
+
+**Sources read** (pinned by commit):
+
+- zkPassport's circuits: `zkpassport/circuits` at `c7da418`.
+- Its SDK and utilities: `zkpassport/zkpassport-packages` at `2cfe793`.
+- The TACEO gadgets they import: `TaceoLabs/oprf-nr` v1.0.0, `e4984d6`.
+- The libraries under zkPassport's document-signature check: `zkpassport/noir-ecdsa` v0.5.0, `zkpassport/noir_rsa` v0.12.0, `zkpassport/noir-bignum` v0.10.0-2 and `zkpassport/noir_bigcurve` v0.14.0-2.
+- Least Authority's January 2026 audit of `TaceoLabs/oprf-service`'s Noir circuits, which reviewed `aaf0c88` and verified fixes at `50798b4`.
+
+Option A stands. What changes is which parts are reused, what part 2b must check, and where the client runs.
+
+**The curve is the one assumed.**
+
+- TACEO's gadgets work in Baby Jubjub's prime-order subgroup with EIP-2494's `B8` as generator: `a = 168700`, `d = 168696`.
+- These are the parameters of `@noble/curves`' `babyjubjub` (`misc.js`, unchanged since 2.3.0, which Trail of Bits audited with the whole library in scope).
+- The attesters' checks need only that group's arithmetic, outside any circuit. noble's Edwards decoding doesn't check the subgroup, so part 2b's spec calls `isTorsionFree()` explicitly and fixes the point encoding.
+
+**zkPassport's salted mode is option B's shape, so its output side isn't reused.**
+
+- Every disclosure circuit (`lib/commitment/scoped-nullifier`) checks the OPRF in-circuit with `verified_oprf`. That gadget verifies one combined Chaum–Pedersen proof against a public key `pk = sk · G` and outputs `Poseidon2(pk)` as a public input.
+- Option A has no public key and uses per-seat proofs against perfectly hiding share commitments. Its output proof therefore stays our own circuit, with `B`, `Z` and `N` public as the Decision says.
+- The query side, `bin/oprf-auth`, has no FaceMatch check inside the circuit. It binds only `comm_in`, the commitment that zkPassport's integrity sub-circuit outputs, and returns `B`. FaceMatch is required by the SDK (salted mode only with `facematch('strict')`) and, per its client constants, by the TACEO nodes' `face-match` module, whose enforcement these sources don't show.
+- `oprf-auth` binds no query identifier or registration record (requirement 5) and uses TACEO's `encode` (below). It also accepts `x = 0`: zkPassport's commitments admit a hash-only form of the private nullifier, with its value set to 0, and only the disclosure circuit rejects that.
+- So our query circuit is our own. It takes `comm_in` from the identity chain [[0010-tier2-identity-provider]] pins, and it MUST require the clear-value form and `x ≠ 0`; otherwise every document shares a second `x`. The panel checks that chain's sub-proofs and the query proof against the same `comm_in`.
+
+**`H1` is a random-oracle hash, not TACEO's `encode`.**
+
+- TACEO's `encode` follows RFC 9380's `encode_to_curve`: one Elligator2 map of one Poseidon2 output, under TACEO's fixed tag. RFC 9380 says `encode_to_curve` isn't a random oracle. 2HashDH's analysis, and RFC 9497, model `H1` as one, and this ADR needs `H1`'s tag to bind the Tier 2 scope.
+- So `H1` follows RFC 9380's `hash_to_curve`: `clear_cofactor(map(u0) + map(u1))`. Here `map` is the Elligator2 map with the rational map to the Edwards form, the two values `u0, u1` are independent outputs of the Poseidon2 permutation under our scoped tag, and the sum is complete Edwards addition.
+- Only `map_to_curve_elligator2` and `encode` are public in `oprf-nr`. Composing the map therefore means vendoring or re-implementing its Edwards step, which part 2b specifies with vectors.
+- `H1` is evaluated only inside the query and output circuits. The client takes `B` from the query circuit's output and unblinds it outside with `@noble/curves`. So no hash-to-curve is needed in TypeScript.
+
+**The audit doesn't cover `oprf-nr` v1.0.0 as it stands.** TACEO's README says v1.0.0 was extracted from `oprf-service` at `831928b`, a later commit than the audited ones. Its curve, map and proof files differ from both `50798b4` and `831928b`. So part 2b diffs every gadget it uses against `50798b4` and reviews the difference. Its argument also covers the audit's findings that touch our circuits:
+
+- A: a subgroup check on the unblinded response, which our output circuit needs.
+- B: incomplete Montgomery addition, which must not be used for `map(u0) + map(u1)`.
+- D: the zero case of `inv0` in the map, resolved.
+- E: exceptional cases of the Montgomery–Edwards conversion.
+
+**"Poseidon2" means two things.**
+
+- zkPassport and TACEO use the Poseidon2 permutation (Grassi, Khovratovich and Schofnegger, 2023), as Noir's standard library and bb implement it. Our [[membership]] spec uses "Poseidon2" for circomlib's two-input Poseidon.
+- `H2` and `H1`'s hash-to-field use the Poseidon2 permutation, and part 2b names each so that neither can be read as the other.
+- The seats' evaluation proofs are verified outside circuits, so their Fiat–Shamir hash is SHA-256 under a registered tag ([[domain-separation]]).
+
+**Uniqueness of `x` per document: the signature encoding is canonical; the rest is part 2b's.**
+
+- `x` hashes `dg1`, `eContent` and the document signature. zkPassport takes ECDSA signatures as fixed-width `r ‖ s`. Its `sig_check_ecdsa` decodes `r` and `s` with range-checked decoders, `noir-ecdsa` v0.5.0 rejects `s > n/2`, and the client normalises a high `s` before proving.
+- RSA signatures are decoded below the modulus. PKCS#1 v1.5 is deterministic and checked over the whole encoded message, and PSS randomness lets only the signer (the issuing state, already conceded by the first limit) make a second signature.
+- So a holder can't re-encode one signature into a second `x`.
+- But uniqueness also rests on the soundness of the pinned identity sub-circuits: zero padding of `dg1` and `eContent`, and the binding of the document signer's key to its certificate. The independent review raised a question about the sub-circuits that part 2b must settle. Its details are withheld from this repository until the owner decides on disclosure (Waiting on the owner in [[STATUS]]).
+- Until it is settled, zkPassport's identity sub-circuits aren't reused "unchanged" for real documents. That doesn't affect MOCK documents on test chains.
+
+**The zkPassport app's request can't name our panel.**
+
+- The SDK's request carries only an OPRF key ID (`oprf_k`), for its fixed node set: a 2-of-3 network, run by H2ONodes, TACEO and Aztec Labs according to code comments.
+- Salted mode requires strict FaceMatch, which [[0010-tier2-identity-provider]] rejects (Apple or Google device attestation). The app's source isn't public, so this is a statement about the request, not proof of the app's code.
+- Its non-salted mode would show the attesters zkPassport's chip-recomputable nullifier, which requirement 3 forbids.
+- So, as the Consequences allowed, **real-document Tier 2 through the panel waits for our own app** (P5-3, P5-4). That app runs the identity chain, the query and the output proof on the device. P3-4 part 3 builds the panel's side, the client protocol and the QR handoff against MOCK documents. A QR handoff to zkPassport's app carries no real Tier 2 addition under this ADR.
+- What would change it: zkPassport's app accepting a deployment's own OPRF nodes and query circuit without FaceMatch. That is an upstream change, and adopting it would need its own review of the app's flow.

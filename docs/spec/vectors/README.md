@@ -18,6 +18,7 @@ One JSON file per spec section or record type, named after it (`primitives.json`
 | `display-text.json`        | Display-text record version 1: codec, commitment and well-formedness ([[display-text]])                                                                                                                                                   |
 | `event-accumulator.json`   | The event accumulator: genesis values, event sequences step by step, rejected inputs ([[contracts]])                                                                                                                                      |
 | `election-registry.json`   | Election identifiers the election registry assigns, and inputs with no `u64` encoding ([[contracts]], Election registry)                                                                                                                  |
+| `group-registry.json`      | The group registry's EIP-712 domain and types, addition and removal records with their digests and signed approvals, rejected records and forbidden commitments ([[contracts]], Group registry)                                           |
 | `trustee.json`             | Trustee identity keys and signatures, accepted and rejected; panel identifiers; ceremony-registration statements ([[trustee-identity]])                                                                                                   |
 | `ballot-validity.json`     | Committed votes with the randomness that made them, their validity verdicts, trustees' share checks and codec rejections ([[ballot-validity]])                                                                                            |
 | `share-encryption.json`    | Trustee KEM keys, share ciphertexts with the randomness that made them, decryptions, postings and complaints with their verdicts, and codec rejections ([[share-encryption]])                                                             |
@@ -132,6 +133,18 @@ Type descriptors:
 
 - `electionIds`: each has `id`, `description`, `chainId` and `counter` (decimal strings), `registry` (20 bytes, hex) and `electionId`, the identifier ([[contracts]], Election identifier).
 - `rejected`: the same inputs with no `electionId`, where `chainId` or `counter` has no `u64` encoding. A Solidity consumer can't represent them and skips them.
+
+## Group-registry vectors
+
+`group-registry.json` covers [[contracts]], Group registry, with its own format, `abolish-group-registry-vectors/1`, and the same top-level fields, plus:
+
+- `domain`: the EIP-712 domain (`name`, `version`, `chainId` as a JSON number, `verifyingContract` hex), its `typeHash` and `separator`. Every record below is signed under it.
+- `types`: `AddMembers` and `RemoveMembers`, each with its `type` string and `typeHash`.
+- `constants`: `maxBatch`, `maxRegistrars`, the field modulus `r` and `Poseidon2(0, 1)` (hex).
+- `registrars`: the `threshold`, the test `secretKeys` (32 bytes big-endian, hex; never real keys), their `addresses` in ascending order, as the registry pins them, and an `outsiderSecretKey` no registrar holds.
+- `commitments`: values (32 bytes, hex) at the forbidden boundaries, each with `forbidden`.
+- `additions` and `removals`: valid records. Each has `id`, `description`, `groupId`, `tier`, `firstIndex` (additions) or `indices` (removals) as JSON numbers, `commitments` (hex, additions), `structHash`, `digest`, `record` (hex) and `approvals`: each with `seat`, `r` and `s` (hex), `v` and `signer`, the address `ecrecover` returns. Signatures are RFC 6979 (HMAC-SHA-256) over the digest, low-s, so a deterministic signer reproduces them byte for byte.
+- `rejected`: records breaking one stateless rule, each with `id`, `kind` (`add` or `remove`), `description`, `record` and `error`: `length`, `batch`, `forbidden-commitment`, `index-order` (removals), `approvals` (fewer than the threshold), `seat` or `signature`, the last two with the failing `seat`. The rules that need the registry's state (the group, the position, an index already removed) are tested against the contract instead.
 
 ## Membership vectors
 

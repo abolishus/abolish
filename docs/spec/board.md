@@ -202,7 +202,7 @@ The brief requires the board to be hash-chained, and the chain and the tree each
 
 ## Owned elsewhere
 
-- The anchoring clock's values (period length, epoch, deadline, and how the seal follows from the definition), the anchor contract, which SHOULD reject untimely anchors and a second checkpoint for an election and segment, and how checkpoints are found again: P4-1.
+- The anchoring clock's values, the anchor contract (which rejects untimely anchors and a second checkpoint for an election and segment) and how a verifier finds every anchored checkpoint again: [[contracts]], Board anchor (P4-1). The job that anchors hourly: P4-1 part 2.
 - The verifier reading anchor times from finalized L1 blocks only: P1-19.
 - The contract-event record (`0x0008`), its inclusion evidence, and whether it carries raw transactions ([[notation]], Result-critical fields): P1-18.
 - What a receipt holds (entry hash, index, chain link, a signed size and root, the proofs above), and how challenged ballots are placed and built: P1-13.

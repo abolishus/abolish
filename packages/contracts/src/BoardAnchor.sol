@@ -1,0 +1,154 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+pragma solidity 0.8.30;
+
+import {CanonicalCalldata} from "./CanonicalCalldata.sol";
+import {EventAccumulator} from "./EventAccumulator.sol";
+
+/// @title The board checkpoint hash (docs/spec/board.md, Segments and checkpoints).
+library CheckpointLib {
+    /// `u8(len(tag)) ‖ tag` for `abolish/v1/board-checkpoint` (0x1b = 27).
+    bytes internal constant DS_BOARD_CHECKPOINT = "\x1babolish/v1/board-checkpoint";
+
+    /// `encode(checkpoint)`: `election_id ‖ u32(segment) ‖ u64(size) ‖ head ‖ root`.
+    uint256 internal constant ENCODED_LENGTH = 108;
+
+    /// `H(DS("abolish/v1/board-checkpoint", encode(checkpoint)))`.
+    function hash(bytes32 electionId, uint32 segment, uint64 size, bytes32 head, bytes32 root)
+        internal
+        pure
+        returns (bytes32)
+    {
+        return sha256(abi.encodePacked(DS_BOARD_CHECKPOINT, electionId, segment, size, head, root));
+    }
+}
+
+/// @title The L1 board anchor (docs/spec/contracts.md, Board anchor).
+/// @notice Records, once per election and segment, the hash of the board's
+/// checkpoint after that segment, and publishes the checkpoint itself in the
+/// same log, so every result traces to L1 (T-23, T-24). It takes checkpoints
+/// only from the anchoring authority fixed at deployment, so no one else can
+/// front-run an election's checkpoint with a bogus one (T-52); only inside
+/// the window after the period ends, so a late anchor can neither fail a
+/// closed election nor hide a fork (T-24, T-53); and only one per election and
+/// segment, so it holds no equivocation. There is no admin, proxy, pause or
+/// upgrade path: the clock and the authority are fixed at deployment.
+contract BoardAnchor is EventAccumulator {
+    /// The anchoring clock: period `s` is `[epoch + s·period, epoch + (s+1)·period)`,
+    /// and its checkpoint is taken from the period's end to `deadline` seconds after.
+    struct Clock {
+        uint64 epoch;
+        uint64 period;
+        uint64 deadline;
+    }
+
+    /// @notice A checkpoint was anchored: its hash is now stored for
+    /// `(electionId, segment)`. The data is `(size, head, root)`, so with the
+    /// topics it is the full checkpoint.
+    event CheckpointAnchored(
+        bytes32 indexed electionId,
+        uint32 indexed segment,
+        bytes32 indexed checkpointHash,
+        uint64 size,
+        bytes32 head,
+        bytes32 root
+    );
+
+    error InvalidDeployment();
+    error NotAuthority(address caller);
+    error MalformedCheckpoints(uint256 length);
+    error EmptyBoard(bytes32 electionId, uint32 segment);
+    error PeriodNotOver(uint32 segment, uint256 periodEnd, uint256 timestamp);
+    error PastDeadline(uint32 segment, uint256 periodEnd, uint256 timestamp);
+    error AlreadyAnchored(bytes32 electionId, uint32 segment);
+
+    /// @custom:storage-location erc7201:abolish.board-anchor
+    struct AnchorStorage {
+        mapping(bytes32 electionId => mapping(uint32 segment => bytes32)) checkpointHash;
+    }
+
+    /// keccak256(abi.encode(uint256(keccak256("abolish.board-anchor")) - 1)) & ~bytes32(uint256(0xff)):
+    /// fixed, so a verifier can prove each election's anchors by slot
+    /// (docs/spec/contracts.md, Board anchor).
+    bytes32 internal constant ANCHOR_SLOT =
+        0x16eba4501d0a9dddbfa03518d843c364be664629e6d99efb7169d8f090095b00;
+
+    uint64 public immutable epoch;
+    uint64 public immutable period;
+    uint64 public immutable deadline;
+    /// The anchoring authority: a multisig, never a single key (T-53, T-69).
+    address public immutable authority;
+
+    constructor(Clock memory clock, address authority_) {
+        // An address without code is a single key (or nothing). Code doesn't
+        // prove a multisig, so the deployment record names the Safe and its
+        // threshold, but the plain mistake is refused here.
+        if (clock.period == 0 || authority_.code.length == 0) revert InvalidDeployment();
+        epoch = clock.epoch;
+        period = clock.period;
+        deadline = clock.deadline;
+        authority = authority_;
+    }
+
+    /// @notice The stored checkpoint hash for an election's segment, or zero.
+    /// A verifier uses a storage proof of the slot instead.
+    function checkpointHashOf(bytes32 electionId, uint32 segment) external view returns (bytes32) {
+        return _anchorStorage().checkpointHash[electionId][segment];
+    }
+
+    /// @notice The L1 time at which period `segment` ends.
+    function periodEnd(uint32 segment) public view returns (uint256) {
+        // At most 2^64 + 2^32·2^64: no overflow in 256 bits.
+        return uint256(epoch) + (uint256(segment) + 1) * period;
+    }
+
+    /// @notice Anchors one or more checkpoints, each `encode(checkpoint)` of
+    /// docs/spec/board.md, concatenated. Reverts, anchoring none, unless the
+    /// caller is the authority and every checkpoint is non-empty, inside its
+    /// window and the first for its election and segment.
+    function anchor(bytes calldata checkpoints) external {
+        if (msg.sender != authority) revert NotAuthority(msg.sender);
+        CanonicalCalldata.requireOneBytesArgument(checkpoints);
+        uint256 len = checkpoints.length;
+        if (len == 0 || len % CheckpointLib.ENCODED_LENGTH != 0) {
+            revert MalformedCheckpoints(len);
+        }
+        AnchorStorage storage s = _anchorStorage();
+        for (uint256 at; at < len; at += CheckpointLib.ENCODED_LENGTH) {
+            bytes32 id = bytes32(checkpoints[at:at + 32]);
+            uint32 segment = uint32(bytes4(checkpoints[at + 32:at + 36]));
+            uint64 size = uint64(bytes8(checkpoints[at + 36:at + 44]));
+            bytes32 head = bytes32(checkpoints[at + 44:at + 76]);
+            bytes32 root = bytes32(checkpoints[at + 76:at + 108]);
+
+            // A checkpoint of an empty board fails the election
+            // (`checkpoint-size`), so it is never anchored.
+            if (size == 0) revert EmptyBoard(id, segment);
+            // The window of docs/spec/board.md, Timing: the verifier ignores
+            // an anchor outside it, so it is never stored.
+            uint256 end = periodEnd(segment);
+            if (block.timestamp < end) revert PeriodNotOver(segment, end, block.timestamp);
+            if (block.timestamp - end > deadline) {
+                revert PastDeadline(segment, end, block.timestamp);
+            }
+            // One checkpoint per election and segment, even an equal one, so
+            // L1 never holds an equivocation (T-24).
+            if (s.checkpointHash[id][segment] != bytes32(0)) revert AlreadyAnchored(id, segment);
+
+            bytes32 h = CheckpointLib.hash(id, segment, size, head, root);
+            s.checkpointHash[id][segment] = h;
+            _log4(
+                CheckpointAnchored.selector,
+                id,
+                bytes32(uint256(segment)),
+                h,
+                abi.encode(size, head, root)
+            );
+        }
+    }
+
+    function _anchorStorage() private pure returns (AnchorStorage storage s) {
+        assembly ("memory-safe") {
+            s.slot := ANCHOR_SLOT
+        }
+    }
+}

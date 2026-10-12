@@ -1,6 +1,6 @@
 # Contracts
 
-What our L2 contracts commit to, for a verifier that reads them from the chain and the archive alone. So far this page specifies the event accumulator every Abolish L2 contract keeps (P4-1's L1 anchor contract decides for itself) and the election registry. The trustee key registry, direct submission, the contract-event record (`0x0008`) with its inclusion evidence, and the close rule are still P1-18's, and are added here as they are built. Notation is from [[notation]], tags from [[domain-separation]].
+What our L2 contracts commit to, for a verifier that reads them from the chain and the archive alone. So far this page specifies the event accumulator every Abolish contract keeps, the election registry, and the board anchor, our one contract on L1 (P4-1). The trustee key registry, direct submission, the contract-event record (`0x0008`) with its inclusion evidence, and the close rule are still P1-18's, and are added here as they are built. Notation is from [[notation]], tags from [[domain-separation]].
 
 ## Event accumulator
 
@@ -116,3 +116,74 @@ A verifier takes the definition's registration from `DefinitionRegistered` on th
 - **No close-rule bounds** on the definition's timing fields (above).
 - **Creation is permissionless**, so anyone can make the counter grow. Each creation costs its sender gas and reserves nothing anyone else needs.
 - **Gas.** Registering a two-tier definition (about 500 bytes) costs about 115,000 gas in the tests, mostly decoding, the ceremony check, and three SHA-256 calls (stub, definition, accumulator); creating an election about 98,000. Each runs once per election, so neither is a hot path.
+
+## Board anchor
+
+Threats: T-23 (board tampering), T-24 (equivocation), T-52 (front-running an election's anchor), T-53 (discreditation), T-49 and T-50 (outages and censorship that miss a deadline), T-17 (chosen bytes on L1), T-69 (a compelled or seized anchoring key).
+
+The board anchor is our one contract on L1. It records, once per election and segment, the hash of the board's checkpoint after that segment ([[board]], Segments and checkpoints), and publishes the checkpoint itself in the same log, so every checkpoint is attributable to its election and segment from L1 alone. It is immutable: no owner, proxy, pause or upgrade path. Its clock and its anchoring authority are fixed at deployment, and a verifier release pins its address (and checks its bytecode, [[verifier]] 1.2), which pins both. The definition's `l1_anchor` names it.
+
+### Deployment
+
+The anchor is deployed with the anchoring clock of [[board]], Timing, and the address of the anchoring authority, all immutable:
+
+| Value       | Deployed value            | Meaning                                                                                                                                                                           |
+| ----------- | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `epoch`     | a whole hour, in L1 time  | The start of period 0. The L2 registry carries the same value (Election registry, Deployment).                                                                                    |
+| `period`    | 3,600 seconds             | Hourly anchoring, as the brief sets.                                                                                                                                              |
+| `deadline`  | 43,200 seconds (12 hours) | How long after a period ends its checkpoint may still be anchored.                                                                                                                |
+| `authority` | our Safe on L1            | The only account that can anchor. Version-1 definitions bind no authority of their own ([[election-definition]], The seal), so this is the authority [[board]], Anchoring, means. |
+
+Deployment reverts if `period` is 0, or if `authority` has no code: a single key is never the anchoring authority. Code doesn't prove a multisig, so the deployment record (`packages/contracts/deployments/<chain-id>.json`) names the Safe, its owners' count and its threshold, and a verifier release that pins the anchor states them. Because the clock is in the anchor, never in a definition, no one can choose a deadline after seeing a board (T-24, T-53).
+
+**Why 12 hours.** [[board]], Residuals, asks P4-1 to justify the deadline against two costs. A missed deadline fails the election permanently (T-49, T-50, T-53): 12 hours covers an overnight outage of the anchoring service before anyone is paged, a fee spike that prices out a few hourly attempts, a Safe signer offline for part of a day, and L1 censorship far longer than Ethereum's observed inclusion delays, with twelve hourly retries from independent runners inside the window. The fork window it opens is bounded the other way: a voter's client confirms a receipt against L1 once its segment is anchored, at most `period + deadline` (13 hours) after casting, and a closed election is verifiable at most 12 hours after its seal's period ends. Elections run for days, so a same-day confirmation is enough, and anchoring runs hourly regardless: the deadline is the bound on a failure, not the normal delay. A shorter deadline would make one bad night fail an election; a longer one would let a voter's receipt stay unconfirmed into the next day.
+
+### Anchoring
+
+`anchor(bytes checkpoints)` takes one or more checkpoints, each `encode(checkpoint)` of [[board]] (108 bytes: `election_id ‖ u32(segment) ‖ u64(size) ‖ head ‖ root`), concatenated, so one transaction can carry several elections' checkpoints. The call reverts, anchoring none of them, unless:
+
+1. the caller is `authority` (T-52: no one else can front-run an election's checkpoint with a bogus one);
+2. the calldata is exactly the ABI encoding of one `bytes` argument (offset `0x20`, zero padding, nothing after it), and its length is a non-zero multiple of 108 (T-17);
+3. every checkpoint has `size ≥ 1`: an empty board's checkpoint fails the election (`checkpoint-size`), so it is never stored;
+4. for every checkpoint, `end ≤ block.timestamp ≤ end + deadline`, where `end = epoch + (segment + 1)·period` is the end of its period ([[board]], Timing);
+5. no checkpoint has been stored for its election and segment, in an earlier call or earlier in this one, even an equal one.
+
+For each checkpoint, in order, it stores `checkpoint_hash = H(DS("abolish/v1/board-checkpoint", encode(checkpoint)))` for `(election_id, segment)` and emits
+
+| Event                                                                                                                                             | Topics                                                        | Data                                |
+| ------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- | ----------------------------------- |
+| `CheckpointAnchored(bytes32 indexed electionId, uint32 indexed segment, bytes32 indexed checkpointHash, uint64 size, bytes32 head, bytes32 root)` | `election_id`, `segment` as a 32-byte word, `checkpoint_hash` | `size`, `head`, `root`, ABI-encoded |
+
+through the event accumulator (above), which the anchor inherits like every Abolish contract, with `chain_id` the L1's.
+
+The anchor doesn't know an election's seal ([[board]], Timing): it is computed from the definition, which lives on L2. A verifier ignores an anchor for a segment after the seal. Nor does it check that an election's checkpoints grow with their segments: with a 12-hour deadline, a later segment can be anchored before an earlier one, and [[board]], Board checks, catches an inconsistent pair from L1 alone (`checkpoint-inconsistent`).
+
+### Verification
+
+Rule 5 means L1 never holds two checkpoints for one election and segment, and rules 1 and 4 mean every stored one counts: it came from the authority, inside its window. So a verifier reads an election's anchors completely from state, never from a list of logs an RPC node could shorten (T-24):
+
+- The hash for `(election_id, s)` is the word at `keccak256(abi.encode(uint256(s), keccak256(abi.encode(election_id, A))))`, where `A` is the [ERC-7201](https://eips.ethereum.org/EIPS/eip-7201) namespace `abolish.board-anchor`:
+
+  ```
+  A = keccak256(abi.encode(uint256(keccak256("abolish.board-anchor")) − 1)) & ~0xff
+    = 0x16eba4501d0a9dddbfa03518d843c364be664629e6d99efb7169d8f090095b00
+  ```
+
+  Zero means none was anchored. The verifier proves the word for every segment from the period containing `opens_at` to the seal with `eth_getProof` against the state root of a finalized L1 block (how it trusts L1 headers is [[verifier]]'s), and never trusts an `eth_call` answer.
+
+- For each non-zero word it needs the checkpoint itself: from the `CheckpointAnchored` log (with its receipt's inclusion in that block), or from any board copy that recomputes a checkpoint with that hash. Its `anchoredAt` for [[board]], Board checks, is the timestamp of the block holding the log. A non-zero word that matches no checkpoint anyone can produce makes the election unverifiable ([[board]], Anchoring).
+
+The anchor's own event accumulator gives the same completeness for its log sequence, but the per-segment words are what a verifier needs, and they need no archive replay.
+
+### Vectors
+
+The checkpoint hash and the window rule are the ones `vectors/board.json` already exercises: the Solidity tests hash every checkpoint there and compare it with the published `hash`, and anchor the `valid` board's checkpoints at their vector times, under the vectors' own clock.
+
+### Known-weak
+
+- **The anchoring authority can fail a running election** by anchoring a checkpoint no board matches, before the honest one (rule 5 then keeps it). That is attributable on L1, and a Safe makes it take a quorum of its owners rather than one key, but nothing prevents it (T-24, T-53, T-69). A late anchor can't do it: the window closes 12 hours after each period.
+- **Withheld tails and late forks** remain [[board]]'s residual: an authority that anchors a checkpoint extending every receipt with entries it never publishes makes the election unverifiable, not failed.
+- **No checkpoint for a segment past the seal is refused on L1**: the anchor can't read the definition. Verifiers ignore it; it costs the authority gas and changes no result.
+- **The authority chooses 108 bytes per checkpoint** that land on L1 for good, such as a checkpoint for an election that doesn't exist (T-17). Only the authority can, and the deployment's Safe is accountable for it.
+- **Gas.** In the tests one checkpoint costs about 82,000 gas, and each further one in the same call about 32,000: a storage write, two SHA-256 calls (the hash and the accumulator) and a log. At 100 live elections, hourly, that is about 3.3 million gas an hour.
+- **The deployment, the Safe and the hourly job don't exist yet** (P4-1 part 2, with the worker and a `ci:` deploy workflow for Sepolia). Until then, nothing is anchored and every board is unanchored.

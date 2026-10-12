@@ -61,7 +61,7 @@ The checks after the segment's deadline against the checkpoints anchored on L1, 
 - **Time.** A receipt carries no time of its own, so a key obtained after an election could otherwise forge evidence against it for good; the evidence a receipt gives must be bounded in time, and a voter's evidence of a real drop must survive that bound.
 - **Withheld boards.** An operator can anchor a fork that no checkpoint contradicts from L1 alone and withhold the board until any bound has passed.
 - **Keys.** The receipt keys that judge an election must be fixed before voting starts (bound in the election definition, or recorded per election), so a later release can't void receipts, and keys not bound to an election can't forge against it.
-- **Presence.** A dropped ballot is shown only by a valid ballot that no admitted entry of the anchored board carries by content (`(tier, ν, M)`); a rejected or re-randomised copy proves nothing either way. That needs P1-12's ballot record.
+- **Presence.** A dropped ballot is shown only by a valid ballot that no admitted entry of the anchored board carries by content (`(tier, ν, M)`); a rejected or re-randomised copy proves nothing either way. The ballot record and its admission checks are specified ([[ballot-validity]], Ballot record); the check itself is P1-13b's.
 - **Privacy.** Anything a voter posts or fetches to keep or check evidence must not name the entry to the operator or to the source (T-45, T-11).
 
 Until P1-13b, [[board]]'s client rule 2 is unchanged, and a receipt is the voter's own check at cast.

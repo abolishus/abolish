@@ -24,7 +24,7 @@ m̂ = F(M)
 - `l1_ref_number` (`u64`) and `l1_ref_hash` (`bytes[32]`) name the L1 block: its number, and its execution-layer block hash as the block header's Keccak-256 (the `hash` that Ethereum's JSON-RPC `eth_getBlockByNumber` returns).
 - The input after the tag is exactly 105 bytes. `F` is [[membership]]'s field mapping.
 
-The ballot record (`0x0002`, P1-12) MUST carry `tier`, `l1_ref_number` and `l1_ref_hash` as fields, so a verifier recomputes `M` from the record and the definition alone, never from anything a server supplies.
+The ballot record (`0x0002`, [[ballot-validity]], Ballot record) carries `tier`, `l1_ref_number` and `l1_ref_hash` as fields, so a verifier recomputes `M` from the record and the definition alone, never from anything a server supplies.
 
 **Why each part is bound.** The ballot hash stops a proof from being moved to another ballot (T-38). The definition hash and tier are bound by the scope already; binding them again makes `M` self-describing, so no message is valid for two polls or two tiers even if a scope were mistaken. The block hash is what makes the reference unpredictable: a block number alone could be chosen in advance, so a coercer could have a voter make ballots for future numbers while watching once and post them later (T-45). The number is bound so a verifier looks up exactly one block, never searches for one.
 
@@ -111,7 +111,7 @@ How the rule meets [[verifier]] 6.1:
 
 ## Owned elsewhere
 
-- The ballot record that carries `tier`, `l1_ref_number`, `l1_ref_hash` and the membership proof, and `ballot_hash`: P1-12.
+- The ballot record that carries `tier`, `l1_ref_number`, `l1_ref_hash` and the membership proof, and `ballot_hash`: [[ballot-validity]] (Ballot record, Ballot hash).
 - `l1_chain_id`, `opens_at`, `closes_at` and `l1_inclusion_bound`: fields of the election definition (P1-10b); `opens_at` and `closes_at` are in seconds since the Unix epoch, the scale of L1 block timestamps.
 - **The voter's check covers ranking.** A ballot's `M`, `l1_ref_number` and `l1_ref_hash` are made after the cast-or-challenge choice (Client rule 6), so Benaloh's challenge doesn't audit them: a malicious client could cast a correctly encrypted re-vote with a wrong hash, an older block or a self-tie, and the coerced earlier ballot would keep counting. The voter's later receipt check (P1-13b), run on a device or verifier the voter chooses, MUST show the ballot's admission verdict ([[verifier]] 5.8) and whether it is the selected ballot of its tier and nullifier, not only that it is on the board (T-41, T-42).
 - **Keyed by content, never by entry.** Anyone can re-randomise a ballot's proof and get the copy placed at a smaller index (by front-running a direct submit, or by the operator's ordering), so the copy stands and the voter's own entry is listed as a `repeat` (Selection, step 1). That is harmless only if everything that later decides whether the selected ballot counts binds the ballot's content, `ballot_hash` or (`tier`, `ν`, `M`), never an entry hash or index: the share-delivery receipts, postings and complaints of [[0002-everlasting-privacy]] (P1-12, P1-15), the voter's receipt checks (P1-13b), and direct submit (P1-18), whose contract MUST NOT revert a repeat in a way the client reads as a failed cast.

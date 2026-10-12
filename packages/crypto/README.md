@@ -41,7 +41,14 @@ The public part of a plurality or approval ballot, per [`docs/spec/ballot-validi
 - `checkValidity(context, vote)` is the admission check: `validity-shape`, then `option-proof` (naming the option), then `sum-proof`. Its context comes from the registered definition and the ballot's own tier and nullifier, never from the committed vote.
 - `checkShares(vss, index, shares)` is trustee `index`'s check of its shares (`SHARES`) against the VSS commitments.
 
-The caller erases a `VoteSharing` once the voter casts. `ballotHash(context, vote)` names the ballot's public part: the statement hash's inputs followed by the validity proofs, which the membership proof's message and every share receipt bind. The ballot record follows once P1-17b encodes the membership proof.
+The caller erases a `VoteSharing` once the voter casts. `ballotHash(context, vote)` names the ballot's public part: the statement hash's inputs followed by the validity proofs, which the membership proof's message and every share receipt bind.
+
+The ballot record (record type `0x0002`, version 1; [`docs/spec/ballot-validity.md`](../../docs/spec/ballot-validity.md), Ballot record; T-28, T-38, T-17):
+
+- `encodeBallot` and `decodeBallot` (`BallotRecord`): the definition hash, tier, nullifier, L1 reference and membership proof at fixed offsets, then the committed vote. A challenged ballot isn't one (P1-13).
+- `ballotElection(definition, registered)` derives the context once: the definition hash, rules, each tier's root and scope, and the qualified seats, from a key set `checkCeremonyTranscript` returned for the transcript the definition names. `checkBallot` and `ballotSignals` take only contexts it made.
+- `ballotSignals(election, ballot)` gives the public signals `[ρ, ν, F(M), ŝ]` a ballot's membership proof is made over; the ballot client proves over exactly these (P2-8).
+- `checkBallot(election, ballot)` is the admission check of verifier 5.1 to 5.4, in order: `ballot-stray`, `ballot-tier`, `validity-shape`, `share-hash-unqualified`, `membership-proof`, `option-proof`, `sum-proof`. An admitted ballot gives its ballot hash and the `(tier, ν, M, l1_ref_number)` that `checkL1Reference` and `selectBallots` take next. The ballot client runs it on its own record before sending it.
 
 ## Share encryption
 

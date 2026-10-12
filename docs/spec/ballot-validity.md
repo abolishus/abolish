@@ -1,11 +1,8 @@
 # Ballot commitments and validity proofs
 
-How a plurality or approval ballot commits to its vote on the public board, how the vote is shared among the trustees, and how anyone checks, before the tally, that the commitments hold a vote the election's rules allow. This is the public part of [[0002-everlasting-privacy]] (option B, accepted by the owner) for the homomorphic tally of [[0003-tally-scheme]]: perfectly hiding Pedersen commitments, Pedersen verifiable secret sharing, and disjunctive Chaum–Pedersen validity proofs under a Fiat–Shamir challenge that binds the whole statement. Notation is from [[notation]], the group and hashes from [[group]]. Threats: T-15, T-28, T-29, T-30, T-31, T-32, T-14, T-36, T-38, T-39.
+How a plurality or approval ballot commits to its vote on the public board, how the vote is shared among the trustees, and how anyone checks, before the tally, that the commitments hold a vote the election's rules allow. This is the public part of [[0002-everlasting-privacy]] (option B, accepted by the owner) for the homomorphic tally of [[0003-tally-scheme]]: perfectly hiding Pedersen commitments, Pedersen verifiable secret sharing, and disjunctive Chaum–Pedersen validity proofs under a Fiat–Shamir challenge that binds the whole statement. Notation is from [[notation]], the group and hashes from [[group]]. Threats: T-15, T-28, T-29, T-30, T-31, T-32, T-14, T-17, T-36, T-38, T-39, T-52.
 
-What this page doesn't cover yet, by the part of P1-12 that owns it:
-
-- **Share encryption** is specified in [[share-encryption]] (part 2): the hybrid KEM and AEAD that carry each trustee's shares, and the hash `H(ct_i)` of each ciphertext. This page takes the `n` ciphertext hashes as 32-byte values and binds them into the statement.
-- **The ballot record** (`0x0002`, with P1-13 and P1-17b): the record that carries the committed vote below with its tier, nullifier, L1 block reference and membership proof. It waits for P1-17b's encoding of the membership proof. The committed vote is a structure nested in that record, and its layout here is the one version 1 of the record carries; the ballot hash (below) is over it and the values the record carries beside it.
+It also specifies the ballot record (`0x0002`, version 1) that carries the committed vote with its tier, nullifier, L1 block reference and membership proof, and that record's admission checks (Ballot record). Share encryption is specified in [[share-encryption]] (P1-12 part 2): the hybrid KEM and AEAD that carry each trustee's shares, and the hash `H(ct_i)` of each ciphertext. This page takes the `n` ciphertext hashes as 32-byte values and binds them into the statement.
 
 ## Sources
 
@@ -203,6 +200,68 @@ The validity check is an admission check ([[verifier]] 5.4): a ballot that fails
 
 Decoding failures (a non-canonical scalar, an identity commitment, a count over its maximum) are decode errors of the ballot record, before any of these.
 
+## Ballot record
+
+Record type `0x0002`, version 1: one cast ballot, posted through our API as a board entry or by direct submit as a contract event (P1-18).
+
+| Field              | Type               | Meaning                                                                                                   |
+| ------------------ | ------------------ | --------------------------------------------------------------------------------------------------------- |
+| `definition_hash`  | `bytes[32]`        | The election's definition hash                                                                            |
+| `tier`             | `enum8<0, 1, 2>`   | The tier whose group the voter proves membership of ([[membership]], Scope)                               |
+| `nullifier`        | `field<bn254>`     | `ν`, the voter's nullifier for this poll and tier                                                         |
+| `l1_ref_number`    | `u64`              | The number of the L1 block the ballot names ([[revoting]], Message)                                       |
+| `l1_ref_hash`      | `bytes[32]`        | That block's hash                                                                                         |
+| `membership_proof` | `membership_proof` | The Groth16 proof of membership, 256 bytes ([[membership]], Proof encoding)                               |
+| `committed_vote`   | `committed_vote`   | `vss`, `share_hashes`, `option_proofs` and `sum_proof`, in that order and encoding (Committed vote above) |
+
+Notes:
+
+- **Bound by the ballot hash.** `definition_hash`, `tier`, `nullifier` and `committed_vote` are exactly the inputs of `ballot_hash` beside the record type and version. The other three fields are the two it leaves out: the membership proof, and the L1 reference, which `M` binds (Ballot hash). So every field is bound, as Ballot hash requires.
+- **Fixed offsets.** Counting the 3-byte header, `definition_hash` starts at byte 3, `tier` at 35, `nullifier` at 36, `l1_ref_number` at 68, `l1_ref_hash` at 76, `membership_proof` at 108 (its `A`, `B` and `C` at 108, 172 and 300) and `committed_vote` at 364. A contract reads every field it checks at a fixed offset without parsing the committed vote (P1-18). A record is 364 bytes plus its committed vote: 1,192 bytes at 3 options, `k = 2` and `n = 3`; about 3.3 KB at 10 options, `k = 4` and `n = 7`; about 45 KB at `MAX_OPTIONS` and `MAX_TRUSTEES`, well within `MAX_BOARD_PAYLOAD`.
+- **It names its election.** Like the delivery records ([[delivery]], Records), a ballot carries its definition hash, so a ballot posted to another election's board is reported as stray rather than read under that election's rules.
+- **Cast ballots only.** A ballot challenged at cast carries nothing that depends on the nullifier ([[verifier]] 6.2; [[revoting]], Client rule 6), so it has no nullifier, L1 reference, validity proofs or membership proof, and isn't a record of this version. An election pins one version of `0x0002`, so a challenged ballot can't be a second layout beside this one either. How it reaches the board is P1-13's: its own record type, whose version the spoiled-ballot opening's version fixes (as this version fixes the delivery records') and which a board-entry version allows ([[board]], Allowed payloads), or a place inside the opening itself.
+
+### Decoding
+
+The record decodes strictly ([[notation]]): a `tier` other than 0, 1 or 2 is `invalid-enum`; a `nullifier` at or above `r` is `non-canonical`; the membership proof decodes as [[membership]] (Proof encoding) specifies, so a broken point is `non-canonical` at its offset (108, 172 or 300); and the committed vote decodes as Committed vote does. Decoding doesn't compare `definition_hash` or `tier` with the election; the admission checks do, so a ballot naming another election or tier is still read, and reported. A record that fails to decode, including one under a version the profile doesn't pin (`profile-mismatch`), is a rejected entry ([[verifier]] 2.3), listed in the report and never an election failure.
+
+### Admission
+
+The admission checks of [[verifier]] 5.1 to 5.4 on a decoded ballot, against the registered definition (checked by 2.1 to 2.8) and the registered key set (3.1). They run in this order, and the first failure is the result. Each rejects that entry only: it is listed in the report, never counted, and never displaces another ballot (6.1, R4).
+
+| Code                     | Rejects a ballot when                                                                                                                                                                                                                                                                                                                                               |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ballot-stray`           | `definition_hash` isn't the election's.                                                                                                                                                                                                                                                                                                                             |
+| `ballot-tier`            | The definition's electorate has no group of tier `tier`.                                                                                                                                                                                                                                                                                                            |
+| `validity-shape`         | The committed vote's shape doesn't match the election (Checks).                                                                                                                                                                                                                                                                                                     |
+| `share-hash-unqualified` | A seat `i` outside the registered key set has a `share_hashes[i]` other than 32 zero bytes ([[delivery]], Notes).                                                                                                                                                                                                                                                   |
+| `membership-proof`       | The membership proof fails [[membership]] (Checks) under the pinned key with the public signals `[ρ, ν, m̂, ŝ]`: `ρ` and `ŝ` are the root and scope of the tier's group in the definition, `ν` is the record's `nullifier`, and `m̂ = F(M)`, with `M` recomputed from the record's `ballot_hash`, `tier` and L1 reference and the definition ([[revoting]], Message). |
+| `option-proof`           | An option proof fails (Checks), reported with the first failing option.                                                                                                                                                                                                                                                                                             |
+| `sum-proof`              | The sum proof fails (Checks).                                                                                                                                                                                                                                                                                                                                       |
+
+A ballot that passes gives its `ballot_hash` and the tuple (`tier`, `ν`, `M`, `l1_ref_number`) that [[revoting]] ranks. Its L1 reference is admitted separately (5.8, [[revoting]], Admission), as is its time under the close rule (5.5, P1-18); repeats and ties (5.7, 6.1) and delivery (5.9, [[delivery]]) are decided over the ballots admitted. None of these checks reads another entry, so admission is stable (R4).
+
+Why this order: the first two need only the record's header fields; the shape and the unqualified seats only lengths and zeros. The membership proof is checked before the validity proofs so that a non-member's ballot is reported as a membership failure whatever its validity proofs, and the verifier numbering (5.1 before 5.4) is the order a report lists. A seat in the registered key set with a zero share hash isn't rejected here: no ciphertext hashes to it, so the seat can't be delivered and the delivery check leaves the ballot uncounted (5.9).
+
+`share-hash-unqualified` is the check [[delivery]] (Notes) requires: a seat outside the registered key set gets no shares, so its share hash is fixed, and a ballot can't carry `32 · (n − q)` chosen bytes there into the permanent archive (T-17).
+
+### Casting
+
+The ballot client (P2-8, P5-4) builds a record in this order, after running [[verifier]] 2.5 and 2.8 for the election:
+
+1. The vote's sharing, the share ciphertexts and `share_hashes` (Proving; [[share-encryption]]), with 32 zero bytes for each seat outside the registered key set. Nothing so far depends on the nullifier, so this is what P1-13's challenge can audit.
+2. Once the voter chooses to cast: the validity proofs, which bind `ν`; the L1 block ([[revoting]], Client rules 1 to 3); `ballot_hash`; and then the public signals of the admission row `membership-proof`, from the definition it checked and never from a server ([[membership]], Security notes).
+3. The membership proof under the pinned depth-32 key, with the proving key whose sha256 `membership_vk_hash` binds ([[membership]], Verification key).
+4. Before the record leaves the device, the client runs the admission checks above on the finished record, the membership proof's verification included ([[membership]], Security notes), and never sends a record that fails them.
+
+A retry sends the identical record ([[revoting]], Client rule 3).
+
+### Residuals
+
+- **What the contract path leaves free.** The archive keeps every direct-submitted record, including one the verifier rejects, so a field the contract doesn't check is free to a member with a valid membership proof (T-17). P1-18's contract MUST run, besides the membership proof ([[membership]], Owned elsewhere), the cheap checks before it: `ballot-stray`, `ballot-tier`, `validity-shape` and `share-hash-unqualified`. Two parts stay free even then: the L1 reference (40 bytes), which a contract can't check from L2 ([[revoting]], Owned elsewhere), and the validity proofs (64 bytes per option and per sum branch), whose ristretto255 arithmetic it doesn't run; the verifier rejects such a ballot at 5.8 or 5.4. Until P1-18 specifies its contract, the whole record after the membership proof is free on that path. Through the board path, the board operator MUST board a ballot only if it passes the admission checks above (an honest client's always does, Casting), so a boarded ballot carries none of these chosen bytes; one it boards anyway is still read and rejected, and reporting it against the operator is P1-19's.
+- **Random-looking fields.** VSS commitments, a qualified seat's share hash and the proofs' scalars look random, so a malicious client can hide chosen bytes in them, as in every field that must be random ([[notation]], Result-critical fields; T-17).
+- **Malleable proofs.** Anyone can re-randomise the membership proof of a ballot they have seen and post the copy; it is a repeat, recognised by (`tier`, `ν`, `M`), never by its bytes ([[revoting]], Selection; T-38).
+
 ## Residuals
 
 - **Trustees can open any ballot.** Any `k` trustees can combine their shares and open a ballot's commitments, publicly and verifiably (T-14, [[0002-everlasting-privacy]]). This page doesn't change that.
@@ -213,3 +272,5 @@ Decoding failures (a non-canonical scalar, an identity commitment, a count over 
 ## Test vectors
 
 `docs/spec/vectors/ballot-validity.json` ([[vectors/README|vectors]]): ballots for plurality and approval, blank ballots, ballots at `MAX_OPTIONS` and at `MAX_TRUSTEES`, each with the randomness that produced it so an implementation can reproduce every byte; one ballot failing each check, including a proof copied to another nullifier, option or election, a vote of 2, an over-vote, and challenges that don't sum; codec rejections of the committed vote and of shares; and valid and invalid shares for every trustee of a ballot. They are printed by `packages/crypto/scripts/ballot-validity-vectors.py`, an implementation of this page in Python's integers and `hashlib`, reusing only the independent ristretto255 and RFC 9380 code of `group-vectors.py`, which checks itself against the RFCs first.
+
+`docs/spec/vectors/ballot.json`: ballot records of two elections (plurality over tiers 0 and 2, approval over tier 1), each with its encoding, ballot hash, `M`, the public signals the admission check derives and the result: admitted ballots (each tier, a re-vote, the same ballot proved twice, a share hash at every seat), and one ballot rejected by each code, the membership failures including a changed L1 reference, another ballot's proof, a proof under another tier's root and scope, a nullifier that isn't the circuit's and a non-member; two ballots failing two checks each, which pin the order; and decode rejections. They are printed by `packages/crypto/scripts/ballot-vectors.py`, an implementation of Ballot record in Python's integers and `hashlib` (reusing this folder's other independent generators, with its own Baby Jubjub), with membership proofs from snarkjs over Semaphore's depth-32 circuit (`ballot-proofs.mjs`), which checks that each proof's root and nullifier are the ones the Python computed; every pairing verdict in the file is snarkjs's.

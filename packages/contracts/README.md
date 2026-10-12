@@ -92,6 +92,8 @@ The tests cover:
 - a test per admission rule of the election registry, per refusal of the trustee registry and per refusal of the board anchor (with its window's exact boundaries), and fuzz tests that any one-bit change to an approved definition, or arbitrary bytes, is refused;
 - invariant suites (`test/invariant/`) whose invariants are stated in prose in each file.
 
+The test script also runs the trustee registry's tests under the `precompile` profile (`osaka`, with Foundry's `P256VERIFY`), so OpenZeppelin's `P256` is tested on its precompile path as well as its Solidity fallback; that profile writes to `out-precompile/`, never to the release build's `out/`.
+
 ## License
 
 AGPL-3.0-only, as the rest of the repository.

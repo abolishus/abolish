@@ -3,7 +3,7 @@ pragma solidity 0.8.30;
 
 import {P256} from "@openzeppelin/contracts/utils/cryptography/P256.sol";
 import {CanonicalCalldata} from "./CanonicalCalldata.sol";
-import {EventAccumulator} from "./EventAccumulator.sol";
+import {EventAccumulator, EventAccumulatorLib} from "./EventAccumulator.sol";
 import {ITrusteeRegistry} from "./ITrusteeRegistry.sol";
 
 /// @title Trustee identity keys, panels and signatures on chain
@@ -216,7 +216,12 @@ contract TrusteeRegistry is EventAccumulator, ITrusteeRegistry {
             uint256 r = uint256(bytes32(registration[at + 1:at + 33]));
             uint256 s = uint256(bytes32(registration[at + 33:at + 65]));
             bytes32 digest = TrusteeIdentityLib.registrationDigest(
-                uint64(block.chainid), address(this), panel, index, stub, transcript
+                EventAccumulatorLib.chainId64(block.chainid),
+                address(this),
+                panel,
+                index,
+                stub,
+                transcript
             );
             uint256[2] storage q = _keyOf[panel][index];
             if (!TrusteeIdentityLib.verify(digest, r, s, q[0], q[1])) {

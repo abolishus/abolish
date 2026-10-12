@@ -105,6 +105,7 @@ test("the fixtures cover a pass, every row's failures and the unverifiable cases
     { status: "pass" },
     { status: "fail", code: "panel-unpinned" },
     { status: "fail", code: "ceremony-quorum" },
+    { status: "fail", code: "ceremony-participation" },
     { status: "fail", code: "ceremony-signature" },
     { status: "fail", code: "ceremony-order" },
     { status: "fail", code: "decode" },

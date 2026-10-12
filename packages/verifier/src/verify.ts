@@ -2,8 +2,8 @@
 // report (Procedure, Verdicts, Report). Only the board checks (4.1, 4.2), the
 // definition's decoding and well-formedness (part of 2.1) and, for format 4,
 // the key-ceremony transcript check (3.2, and the parts of 2.5 and 3.1 that
-// need no L2 state) are implemented; every other check is reported unverifiable, so no run can
-// report an election verified yet. A run on unauthenticated inputs reports
+// need no L2 state) are implemented; every other check is reported
+// unverifiable, so no run can report an election verified yet. A run on unauthenticated inputs reports
 // what the checks found against them, but its verdict stays unverifiable, so
 // a crafted bundle can neither verify nor fail an election (T-53, T-24).
 
@@ -79,7 +79,7 @@ export interface Report {
     readonly unreadableBytes: number;
     readonly unauthenticated?: number;
   };
-  /** The L1 block a format-2 or format-3 bundle was proven at, and the anchors read from its state. */
+  /** The L1 block a format-2, 3 or 4 bundle was proven at, and the anchors read from its state. */
   readonly l1?: {
     readonly blockHash: string;
     readonly blockNumber: string;
@@ -198,7 +198,7 @@ type BoardInputs =
     };
 
 /**
- * A format-3 bundle's definition (docs/spec/verifier.md, Definition): its
+ * A format-3 or format-4 bundle's definition (docs/spec/verifier.md, Definition): its
  * decoding and well-formedness, which are part of 2.1, the board-entry
  * version its profile pins, and the board checks' inputs taken from it. Any
  * other format gives them as they are.

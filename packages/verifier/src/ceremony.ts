@@ -28,11 +28,12 @@ import { bytesToHex } from "@noble/hashes/utils.js";
 export type CeremonyCode =
   | Exclude<CeremonyErrorCode, DecodeErrorCode>
   | "panel-unpinned"
-  | "ceremony-transcript-missing";
+  | "ceremony-transcript-missing"
+  | "ceremony-participation";
 
 /** What the transcript check found, once it reached the seats (the report's `ceremony`). */
 export interface CeremonyReport {
-  /** The board entry, by index in the copy, that carries the transcript. */
+  /** The position in the copy, from 0, of the entry that carries the transcript (not its `index` field). */
   readonly entry: number;
   readonly seats: readonly { readonly index: number; readonly reasons: readonly SeatReason[] }[];
   /** The qualified seats and their per-election signing keys; empty below quorum. */
@@ -178,14 +179,16 @@ export function ceremonyChecks(
       ? checked.registered.map((k) => ({ index: k.index, signingKey: bytesToHex(k.signingKey) }))
       : [],
   };
+  // ADR 0006 rule 7 (the owner, 2026-10-12): an election opens only if at
+  // least n − 1 seats took part, so a coordinator can't quietly shrink the
+  // qualified set to k and the tally's failure margin with it (T-54, T-40).
+  const participation = Math.max(panel.threshold, panel.keys.length - 1);
+  const ceremony: CeremonyOutcome = !checked.ok
+    ? { status: "fail", code: "ceremony-quorum", at }
+    : checked.registered.length < participation
+      ? { status: "fail", code: "ceremony-participation", at }
+      : { status: "pass" };
   // 3.1 also needs the trustee registry's record of this transcript and its
   // approvals on L2, which this verifier doesn't read yet: never a pass here.
-  return {
-    rows: rows(
-      NOT_IMPLEMENTED,
-      NOT_IMPLEMENTED,
-      checked.ok ? { status: "pass" } : { status: "fail", code: "ceremony-quorum", at },
-    ),
-    report,
-  };
+  return { rows: rows(NOT_IMPLEMENTED, NOT_IMPLEMENTED, ceremony), report };
 }

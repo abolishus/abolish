@@ -127,11 +127,19 @@ def expected(panel, defn, entries, bundle_panel):
     }
     if not result["ok"]:
         return dict(rows, **{"3.1": NOT_IMPLEMENTED, "3.2": outcome("fail", "ceremony-quorum", {"entry": at})}), ceremony
+    # ADR 0006 rule 7 (owner, 2026-10-12): an election opens only if at least n − 1 seats took part.
+    n = len(panel["keys"])
+    if len(result["registered"]) < max(panel["k"], n - 1):
+        return dict(rows, **{"3.1": NOT_IMPLEMENTED, "3.2": outcome("fail", "ceremony-participation", {"entry": at})}), ceremony
     return dict(rows, **{"3.1": NOT_IMPLEMENTED, "3.2": outcome("pass")}), ceremony
 
 
 def main(out):
-    panels = {"panel-4": cv.make_panel("panel-4", 3, 4), "panel-4-k2": cv.make_panel("panel-4-k2", 2, 4)}
+    panels = {
+        "panel-4": cv.make_panel("panel-4", 3, 4),
+        "panel-4-k2": cv.make_panel("panel-4-k2", 2, 4),
+        "panel-7": cv.make_panel("panel-7", 4, 7),
+    }
     panel = panels["panel-4"]
     seats = [1, 2, 3, 4]
     # Every definition here is TYPICAL for panel-4 with its own transcript
@@ -144,10 +152,11 @@ def main(out):
     stray = transcript("verifier/abandoned", panel, seats, election)
     cases = []
 
-    def add(id_, desc, t, payloads, bundle_panel="panel-4", entry_election=eid, **changes):
-        defn = definition_for(panel, H(ds(TRANSCRIPT_TAG, t)), **changes)
+    def add(id_, desc, t, payloads, bundle_panel="panel-4", entry_election=eid, named="panel-4", **changes):
+        named = panels[named]
+        defn = definition_for(named, H(ds(TRANSCRIPT_TAG, t)), **changes)
         entries = [bdv.entry(entry_election if p is t else eid, i, 0, p) for i, p in enumerate(payloads)]
-        rows, ceremony = expected(panel, defn, entries, panels[bundle_panel])
+        rows, ceremony = expected(named, defn, entries, panels[bundle_panel])
         case = {
             "id": id_,
             "description": desc,
@@ -205,6 +214,16 @@ def main(out):
         [honest],
         profile={"protocol_major": 1, "pins": pins},
     )["3.1"]["code"] == "unsupported-version"
+
+    # ADR 0006 rule 7: a 4-of-7 panel opens only with at least n − 1 = 6 qualified seats.
+    panel7 = panels["panel-7"]
+    election7 = election_of(definition_for(panel7, bytes(32)))
+    six = transcript("verifier/panel-7-six", panel7, [1, 2, 3, 4, 5, 6], election7)
+    assert add("participation-six", "A 4-of-7 panel where seat 7 sends nothing: six qualified seats meet n − 1 (ADR 0006, rule 7).", six, [six], bundle_panel="panel-7", named="panel-7")["3.2"] == outcome("pass")
+    five = transcript("verifier/panel-7-five", panel7, [1, 2, 3, 4, 5], election7)
+    assert add("participation-five", "A 4-of-7 panel where seats 6 and 7 send nothing: five qualified seats meet k = 4 but not n − 1 = 6.", five, [five], bundle_panel="panel-7", named="panel-7")["3.2"]["code"] == "ceremony-participation"
+    four = transcript("verifier/panel-7-four", panel7, [1, 2, 3, 4], election7)
+    assert add("participation-four", "A 4-of-7 panel where only seats 1 to 4 take part: exactly k, two short of n − 1.", four, [four], bundle_panel="panel-7", named="panel-7")["3.2"]["code"] == "ceremony-participation"
 
     doc = {
         "format": "abolish-verifier-ceremony-vectors/1",

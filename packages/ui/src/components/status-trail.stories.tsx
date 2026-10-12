@@ -10,6 +10,7 @@ const meta = {
   args: {
     label: "Your ballot",
     stateLabels,
+    stepTemplate: "{step}, {state}",
     steps: [
       { label: "Encrypted on this device", state: "complete" },
       { label: "Recorded on the board", state: "complete", detail: "Entry 40,112" },
@@ -27,9 +28,15 @@ export const Default: Story = {
     const trail = within(canvasElement).getByRole("list", { name: "Your ballot" });
     const steps = within(trail).getAllByRole("listitem");
     await expect(steps).toHaveLength(4);
-    // Each step's state is in words, not only in its colour and icon.
-    await expect(steps[0]).toHaveTextContent("Encrypted on this device, done");
-    await expect(steps[2]).toHaveTextContent("Anchored to Ethereum, in progress");
+    // Each step's state is in words, not only in its colour and icon, and
+    // a screen reader hears exactly the template's text.
+    const heard = steps.map((step) => step.querySelector(".sr-only")?.textContent);
+    await expect(heard).toEqual([
+      "Encrypted on this device, done",
+      "Recorded on the board, done",
+      "Anchored to Ethereum, in progress",
+      "Counted, not yet",
+    ]);
     await expect(steps[2]).toHaveAttribute("aria-current", "step");
     await expect(steps[3]).toHaveTextContent("Counted, not yet");
   },
@@ -54,5 +61,16 @@ export const Dark: Story = {
   parameters: { theme: "dark" },
   play: async ({ canvasElement }) => {
     await expect(within(canvasElement).getByRole("list")).toBeVisible();
+  },
+};
+
+export const LocaleTemplate: Story = {
+  args: { stepTemplate: "{step} \u2014 {state}" },
+  play: async ({ canvasElement }) => {
+    const first = within(canvasElement).getAllByRole("listitem")[0];
+    // The joining punctuation is the caller's, never hard-coded.
+    await expect(first?.querySelector(".sr-only")?.textContent).toBe(
+      "Encrypted on this device \u2014 done",
+    );
   },
 };

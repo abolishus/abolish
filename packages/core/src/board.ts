@@ -115,7 +115,9 @@ export async function appendEntry(
       const entry: BoardEntry = { election_id: id, index, segment, payload: body };
       let encoded: Uint8Array;
       try {
-        encoded = encodeBoardEntry(entry);
+        // Version 1 only: the delivery records of board-entry version 3 need the
+        // election's pinned version, which core doesn't read yet.
+        encoded = encodeBoardEntry(entry, 1);
       } catch (e) {
         throw new AppendError("invalid-entry", { cause: e });
       }
@@ -160,12 +162,15 @@ export async function readBoard(client: Sql, electionId: Uint8Array): Promise<Ui
     .where(eq(boardEntries.electionId, id))
     .orderBy(asc(boardEntries.idx));
   return rows.map((r) =>
-    encodeBoardEntry({
-      election_id: id,
-      index: r.idx,
-      segment: Number(r.segment),
-      payload: new Uint8Array(r.payload),
-    }),
+    encodeBoardEntry(
+      {
+        election_id: id,
+        index: r.idx,
+        segment: Number(r.segment),
+        payload: new Uint8Array(r.payload),
+      },
+      1,
+    ),
   );
 }
 
@@ -307,12 +312,15 @@ export async function readEntries(
     )
     .orderBy(asc(boardEntries.idx));
   return rows.map((r) =>
-    encodeBoardEntry({
-      election_id: id,
-      index: r.idx,
-      segment: Number(r.segment),
-      payload: new Uint8Array(r.payload),
-    }),
+    encodeBoardEntry(
+      {
+        election_id: id,
+        index: r.idx,
+        segment: Number(r.segment),
+        payload: new Uint8Array(r.payload),
+      },
+      1,
+    ),
   );
 }
 

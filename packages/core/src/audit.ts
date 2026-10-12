@@ -67,12 +67,15 @@ export async function auditBoard(client: Sql, electionId: Uint8Array): Promise<n
     .orderBy(asc(boardEntries.idx));
   // The table's CHECKs take only payloads the entry envelope encodes.
   const encoded = rows.map((r) =>
-    encodeBoardEntry({
-      election_id: id,
-      index: r.idx,
-      segment: Number(r.segment),
-      payload: new Uint8Array(r.payload),
-    }),
+    encodeBoardEntry(
+      {
+        election_id: id,
+        index: r.idx,
+        segment: Number(r.segment),
+        payload: new Uint8Array(r.payload),
+      },
+      1,
+    ),
   );
   let board;
   try {

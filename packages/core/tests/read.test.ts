@@ -68,7 +68,7 @@ async function refusedWith(p: Promise<unknown>): Promise<BoardReadErrorCode> {
 test("BOARD_ENTRY_OVERHEAD is what encodeBoardEntry adds to a payload", () => {
   for (const len of [4, 100, 70_000]) {
     const payload = ballot(0, len);
-    const encoded = encodeBoardEntry({ election_id: b32(), index: 7n, segment: 1, payload });
+    const encoded = encodeBoardEntry({ election_id: b32(), index: 7n, segment: 1, payload }, 1);
     expect(encoded.length - len).toBe(BOARD_ENTRY_OVERHEAD);
   }
 });

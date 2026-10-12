@@ -58,7 +58,7 @@ async function appendRaw(
   const prevLink = prev === undefined ? new Uint8Array(32) : Uint8Array.from(prev["link"]);
   const entryHash =
     override.entryHash ??
-    boardEntryHash(encodeBoardEntry({ election_id: id, index: idx, segment, payload }));
+    boardEntryHash(encodeBoardEntry({ election_id: id, index: idx, segment, payload }, 1));
   const link = override.link ?? chainLink(prevLink, entryHash);
   await insertRow(id, idx, segment, payload, entryHash, prevLink, link);
 }

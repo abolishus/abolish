@@ -5,7 +5,7 @@ How a ballot's shares reach each trustee privately: the hybrid KEM that combines
 What this page doesn't cover yet:
 
 - **Registering trustee KEM keys** with their proofs of possession, in the ceremony transcript: [[ceremony]]. This page defines the key and its encoding.
-- **Receipts, postings and complaints on the board:** the records that carry them, the complaint's signature, the delivery deadline and the complaint window (P1-12 part 3b, with P1-13 and P1-15). This page defines what each one checks, and the share receipt's signed statement.
+- **Receipts, postings and complaints on the board:** the records that carry them, the complaint's signature, the delivery deadline, the complaint window and which ballots they deliver or exclude are in [[delivery]]. This page defines what each one checks, and the share receipt's signed statement.
 - **Spoiled ballots:** what a challenged ballot reveals and how its ciphertexts are rebuilt (P1-13). Encryption is deterministic given the randomness below, so revealing it lets anyone rebuild each ciphertext.
 
 ## Sources
@@ -91,7 +91,7 @@ Notes:
 - **Hiding.** `H(ct_i)` is statistically hiding in the random-oracle model: `ct_i` carries `m_i` and `e_i`, over 500 bits of fresh entropy, against a 256-bit digest ([[0002-everlasting-privacy]], Public part). The proof of knowledge is zero-knowledge in the random-oracle model and adds nothing about `e_i` beyond `ct_DH`.
 - **Sizes.** `ct_i` is 1088 + 32 + 64 + 4 + 4 + 64·`m` + 16 bytes: 1848 bytes at 10 options.
 
-Order of construction ([[ballot-validity]], Proving): the sharing and `vss`, then every `ct_i` and `H(ct_i)`, then the statement hash and the proofs. The client keeps `(m_i, e_i, w_i)` until the voter casts or challenges: a posting needs `m_i`, a spoiled ballot reveals them (P1-13), and a cast erases them ([[0002-everlasting-privacy]], Private part; T-18, T-45).
+Order of construction ([[ballot-validity]], Proving): the sharing and `vss`, then every `ct_i` and `H(ct_i)`, then the statement hash and the proofs. The client keeps `(m_i, e_i, w_i)` until the voter casts or challenges: a posting needs `m_i`, a spoiled ballot reveals them (P1-13), and a cast erases them, except `ct_i` and `m_i` for a seat that didn't receipt, kept only until the voter decides whether to post it ([[delivery]], Client rules; [[0002-everlasting-privacy]], Private part; T-18, T-45).
 
 ## Decryption
 
@@ -141,7 +141,7 @@ Notes:
 
 ## Public posting
 
-If trustee `i` doesn't receipt, the client posts `(i, ct_i, m_i)` itself ([[0002-everlasting-privacy]], Delivery). Anyone checks a posting against the ballot's committed vote and the seat's registered key, in this order:
+If trustee `i` doesn't receipt, the client may post `(i, ct_i, m_i)` itself, only at the voter's explicit choice and only through the contract path, never for a seat whose receipt passes ([[0002-everlasting-privacy]], Delivery and Decision; [[delivery]], Client rules). Anyone checks a posting against the ballot's committed vote and the seat's registered key, in this order:
 
 | Code                    | Check                                                                                                                                           |
 | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |

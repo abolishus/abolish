@@ -38,64 +38,93 @@ export const BOARD_PAYLOAD_TYPES: readonly number[] = Object.freeze([
   RECORD_TYPES.contractEvent,
 ]);
 
-// A private Set for lookups, so callers can't add a type to what the decoder accepts.
-const PAYLOAD_TYPES: ReadonlySet<number> = new Set(BOARD_PAYLOAD_TYPES);
+/**
+ * Record types a version-3 entry may carry: version 1's, and the share
+ * receipts and complaints that show a ballot's delivery
+ * (docs/spec/delivery.md). Never a share posting: a posting delivers only
+ * through the contract path, as a contract event, so the operator can't
+ * withhold its data from the trustees. Version 1's set is frozen, so allowing
+ * them is a new version (docs/spec/versioning.md); version 2 is never
+ * assigned, since board.json's frozen `unknown-version` vector uses it as the
+ * unknown one.
+ */
+export const BOARD_PAYLOAD_TYPES_V3: readonly number[] = Object.freeze([
+  ...BOARD_PAYLOAD_TYPES,
+  RECORD_TYPES.shareReceipt,
+  RECORD_TYPES.shareComplaint,
+]);
 
 const RECORD_HEADER_LENGTH = 3;
 
 const recordTypeOf = (record: Uint8Array) => ((record[0] as number) << 8) | (record[1] as number);
 
 /**
- * `bytes<MAX_BOARD_PAYLOAD>` holding one record of an allowed type. Only the
- * payload's header is read here; its version and fields are decoded when the
- * record is used.
+ * `bytes<MAX_BOARD_PAYLOAD>` holding one record of a type in `allowed`. Only
+ * the payload's header is read here; its version and fields are decoded when
+ * the record is used.
  */
-const payload: Codec<Uint8Array> = {
-  minLength: 4,
-  write(w, value) {
-    if (!(value instanceof Uint8Array) || !ArrayBuffer.isView(value))
-      throw new EncodeError("payload: expected a Uint8Array");
-    const b = new Uint8Array(value);
-    if (b.length > MAX_BOARD_PAYLOAD)
-      throw new EncodeError(`payload: ${b.length} bytes is over ${MAX_BOARD_PAYLOAD}`);
-    if (b.length < RECORD_HEADER_LENGTH)
-      throw new EncodeError("payload: shorter than a record header");
-    if (!PAYLOAD_TYPES.has(recordTypeOf(b)))
-      throw new EncodeError(`payload: record type ${recordTypeOf(b)} isn't allowed on the board`);
-    w.uint(4, b.length);
-    w.bytes(b);
-  },
-  read(r) {
-    const at = r.offset;
-    const n = r.uint(4);
-    // T-52: checked against the maximum before anything is read.
-    if (n > MAX_BOARD_PAYLOAD) throw new DecodeError("length-over-max", at);
-    const content = r.take(n).slice();
-    if (content.length < RECORD_HEADER_LENGTH) throw new DecodeError("truncated", at + 4);
-    if (!PAYLOAD_TYPES.has(recordTypeOf(content)))
-      throw new DecodeError("unexpected-record-type", at + 4);
-    return content;
-  },
-};
+function payload(allowed: readonly number[]): Codec<Uint8Array> {
+  // A private Set for lookups, so callers can't add a type to what the decoder accepts.
+  const PAYLOAD_TYPES: ReadonlySet<number> = new Set(allowed);
+  return {
+    minLength: 4,
+    write(w, value) {
+      if (!(value instanceof Uint8Array) || !ArrayBuffer.isView(value))
+        throw new EncodeError("payload: expected a Uint8Array");
+      const b = new Uint8Array(value);
+      if (b.length > MAX_BOARD_PAYLOAD)
+        throw new EncodeError(`payload: ${b.length} bytes is over ${MAX_BOARD_PAYLOAD}`);
+      if (b.length < RECORD_HEADER_LENGTH)
+        throw new EncodeError("payload: shorter than a record header");
+      if (!PAYLOAD_TYPES.has(recordTypeOf(b)))
+        throw new EncodeError(`payload: record type ${recordTypeOf(b)} isn't allowed on the board`);
+      w.uint(4, b.length);
+      w.bytes(b);
+    },
+    read(r) {
+      const at = r.offset;
+      const n = r.uint(4);
+      // T-52: checked against the maximum before anything is read.
+      if (n > MAX_BOARD_PAYLOAD) throw new DecodeError("length-over-max", at);
+      const content = r.take(n).slice();
+      if (content.length < RECORD_HEADER_LENGTH) throw new DecodeError("truncated", at + 4);
+      if (!PAYLOAD_TYPES.has(recordTypeOf(content)))
+        throw new DecodeError("unexpected-record-type", at + 4);
+      return content;
+    },
+  };
+}
 
-const entryV1 = struct([
-  ["election_id", bytesFixed(32)],
-  ["index", u64],
-  ["segment", u32],
-  ["payload", payload],
-] as const);
+const entryFields = (allowed: readonly number[]) =>
+  struct([
+    ["election_id", bytesFixed(32)],
+    ["index", u64],
+    ["segment", u32],
+    ["payload", payload(allowed)],
+  ] as const);
 
-/** Board entry, version 1 (docs/spec/board.md). */
+const entryV1 = entryFields(BOARD_PAYLOAD_TYPES);
+
+// The same layout: only the allowed payload types differ.
+const entryV3 = entryFields(BOARD_PAYLOAD_TYPES_V3);
+
+/** Board entry, version 1 or 3 (docs/spec/board.md). */
 export type BoardEntry = CodecValue<typeof entryV1>;
 
 /** Record type `0x0007`: the envelope that places a record on the board. */
-export const BOARD_ENTRY = recordType(RECORD_TYPES.boardEntry, { 1: entryV1 });
+export const BOARD_ENTRY = recordType(RECORD_TYPES.boardEntry, { 1: entryV1, 3: entryV3 });
+
+/** A board-entry version this release reads and writes. */
+export type BoardEntryVersion = RecordVersion<typeof BOARD_ENTRY.versions>;
 
 const SCHEMA = new RecordSchema([BOARD_ENTRY]);
 
-/** Encodes a board entry under version 1, the only version. */
-export function encodeBoardEntry(entry: BoardEntry): Uint8Array {
-  return SCHEMA.encode(BOARD_ENTRY, 1, entry);
+/**
+ * Encodes a board entry under `version`, the one the election's profile pins.
+ * It has no default: an entry hashed under the wrong version matches nothing.
+ */
+export function encodeBoardEntry(entry: BoardEntry, version: BoardEntryVersion): Uint8Array {
+  return SCHEMA.encode(BOARD_ENTRY, version, entry);
 }
 
 /**
@@ -161,7 +190,7 @@ export function decodeCheckpoint(bytes: Uint8Array): Checkpoint {
   return decode(checkpointV1, copyBytes(bytes, "bytes"));
 }
 
-// The version-1 entry layout: the segment is the u32 after the record header
+// The entry layout of every version: the segment is the u32 after the record header
 // (3), election_id (32) and index (8).
 const SEGMENT_AT = 3 + 32 + 8;
 

@@ -6,6 +6,7 @@ import {
   BOARD_PAYLOAD_TYPES,
   BOARD_TREE,
   type BoardEntry,
+  type BoardEntryVersion,
   BoardError,
   checkBoard,
   type Checkpoint,
@@ -64,7 +65,7 @@ describe("board-entry envelope", () => {
   test("decode(encode(e)) = e", () => {
     run(
       fc.property(entryArb, (e) => {
-        expect(decodeBoardEntry(encodeBoardEntry(e), 1)).toEqual(e);
+        expect(decodeBoardEntry(encodeBoardEntry(e, 1), 1)).toEqual(e);
       }),
     );
   });
@@ -73,7 +74,7 @@ describe("board-entry envelope", () => {
     const mutated = fc
       .tuple(entryArb, fc.nat(), fc.integer({ min: 0, max: 255 }))
       .map(([e, at, byte]) => {
-        const b = encodeBoardEntry(e);
+        const b = encodeBoardEntry(e, 1);
         b[at % b.length] = byte;
         return b;
       });
@@ -86,7 +87,8 @@ describe("board-entry envelope", () => {
           expect(err).toBeInstanceOf(DecodeError);
           return;
         }
-        expect(encodeBoardEntry(e)).toEqual(b);
+        // Unpinned, either version decodes; re-encode under the one it carries.
+        expect(encodeBoardEntry(e, b[2] as BoardEntryVersion)).toEqual(b);
       }),
     );
   });
@@ -101,22 +103,24 @@ describe("board-entry envelope", () => {
       RECORD_TYPES.displayText,
       0xff00,
     ])
-      expect(() => encodeBoardEntry({ ...base, payload: recordOf(t, Uint8Array.of(0)) })).toThrow(
-        EncodeError,
-      );
-    expect(() => encodeBoardEntry({ ...base, payload: Uint8Array.of(0, 2) })).toThrow(EncodeError);
+      expect(() =>
+        encodeBoardEntry({ ...base, payload: recordOf(t, Uint8Array.of(0)) }, 1),
+      ).toThrow(EncodeError);
+    expect(() => encodeBoardEntry({ ...base, payload: Uint8Array.of(0, 2) }, 1)).toThrow(
+      EncodeError,
+    );
     const big = new Uint8Array(MAX_BOARD_PAYLOAD + 1);
     big[1] = RECORD_TYPES.ballot;
-    expect(() => encodeBoardEntry({ ...base, payload: big })).toThrow(EncodeError);
+    expect(() => encodeBoardEntry({ ...base, payload: big }, 1)).toThrow(EncodeError);
     const max = big.slice(0, MAX_BOARD_PAYLOAD);
-    expect(decodeBoardEntry(encodeBoardEntry({ ...base, payload: max }), 1).payload.length).toBe(
+    expect(decodeBoardEntry(encodeBoardEntry({ ...base, payload: max }, 1), 1).payload.length).toBe(
       MAX_BOARD_PAYLOAD,
     );
   });
 
   test("payload header errors are reported at the payload's first byte", () => {
     const base = { election_id: ELECTION, index: 0n, segment: 0 };
-    const good = encodeBoardEntry({ ...base, payload: recordOf(2, Uint8Array.of(7)) });
+    const good = encodeBoardEntry({ ...base, payload: recordOf(2, Uint8Array.of(7)) }, 1);
     const wrongType = good.slice();
     wrongType[52] = RECORD_TYPES.displayText;
     expect(() => decodeBoardEntry(wrongType, 1)).toThrow(
@@ -129,12 +133,15 @@ describe("board-entry envelope", () => {
   });
 
   test("a hostile payload length is rejected before anything is read", () => {
-    const b = encodeBoardEntry({
-      election_id: ELECTION,
-      index: 0n,
-      segment: 0,
-      payload: recordOf(2, new Uint8Array()),
-    });
+    const b = encodeBoardEntry(
+      {
+        election_id: ELECTION,
+        index: 0n,
+        segment: 0,
+        payload: recordOf(2, new Uint8Array()),
+      },
+      1,
+    );
     const view = new DataView(b.buffer);
     view.setUint32(47, 0xffffffff);
     expect(() => decodeBoardEntry(b, 1)).toThrow(
@@ -324,12 +331,15 @@ const boardArb = fc
         .sort((a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b)));
       for (const payload of [...s.others, ...openings])
         entries.push(
-          encodeBoardEntry({
-            election_id: ELECTION,
-            index: BigInt(entries.length),
-            segment,
-            payload,
-          }),
+          encodeBoardEntry(
+            {
+              election_id: ELECTION,
+              index: BigInt(entries.length),
+              segment,
+              payload,
+            },
+            1,
+          ),
         );
     }
     return { entries, last: segment };
@@ -451,12 +461,15 @@ describe("board checks", () => {
         fc.nat(),
         ({ entries, last }, junk, seg) => {
           const checkpoints = checkpointsFor(entries, last);
-          const forged = encodeBoardEntry({
-            election_id: ELECTION,
-            index: BigInt(entries.length),
-            segment: seg % (last + 3),
-            payload: recordOf(RECORD_TYPES.ballot, new Uint8Array()),
-          });
+          const forged = encodeBoardEntry(
+            {
+              election_id: ELECTION,
+              index: BigInt(entries.length),
+              segment: seg % (last + 3),
+              payload: recordOf(RECORD_TYPES.ballot, new Uint8Array()),
+            },
+            1,
+          );
           const tail = [forged, ...junk];
           const v = verifyBoard(
             ELECTION,
@@ -490,12 +503,15 @@ describe("board checks", () => {
 
   test("checkpoints are re-read, so a mutable or malformed one can't pass", () => {
     const entries = [
-      encodeBoardEntry({
-        election_id: ELECTION,
-        index: 0n,
-        segment: 0,
-        payload: recordOf(2, new Uint8Array()),
-      }),
+      encodeBoardEntry(
+        {
+          election_id: ELECTION,
+          index: 0n,
+          segment: 0,
+          payload: recordOf(2, new Uint8Array()),
+        },
+        1,
+      ),
     ];
     const [a0] = checkpointsFor(entries, 0);
     if (a0 === undefined) throw new Error("unreachable");
@@ -537,12 +553,15 @@ describe("board checks", () => {
   });
 
   test("a version other than the pinned one is a decode failure", () => {
-    const entry = encodeBoardEntry({
-      election_id: ELECTION,
-      index: 0n,
-      segment: 0,
-      payload: recordOf(2, new Uint8Array()),
-    });
+    const entry = encodeBoardEntry(
+      {
+        election_id: ELECTION,
+        index: 0n,
+        segment: 0,
+        payload: recordOf(2, new Uint8Array()),
+      },
+      1,
+    );
     // The entry's own version byte (after the 2-byte record type) claims 2.
     entry[2] = 2;
     expect(() => checkBoard(ELECTION, [entry], 1)).toThrow(BoardError);
@@ -594,12 +613,15 @@ describe("checkpoints from a raw copy", () => {
           const copy = fields.map((f, i) =>
             f === -1
               ? new Uint8Array(46)
-              : encodeBoardEntry({
-                  election_id: ELECTION,
-                  index: BigInt(i),
-                  segment: f,
-                  payload: recordOf(allowedTypes[0] as number, Uint8Array.of(i)),
-                }),
+              : encodeBoardEntry(
+                  {
+                    election_id: ELECTION,
+                    index: BigInt(i),
+                    segment: f,
+                    payload: recordOf(allowedTypes[0] as number, Uint8Array.of(i)),
+                  },
+                  1,
+                ),
           );
           const readable = fields.indexOf(-1) === -1 ? fields : fields.slice(0, fields.indexOf(-1));
           const segments = [...wide, ...small, ...small, ...readable.slice(0, 3)];
@@ -616,12 +638,15 @@ describe("checkpoints from a raw copy", () => {
 
   test("the prefix ends at the first entry past the segment, and a short entry ends it", () => {
     const entry = (index: number, segment: number) =>
-      encodeBoardEntry({
-        election_id: ELECTION,
-        index: BigInt(index),
-        segment,
-        payload: recordOf(allowedTypes[0] as number, Uint8Array.of(index)),
-      });
+      encodeBoardEntry(
+        {
+          election_id: ELECTION,
+          index: BigInt(index),
+          segment,
+          payload: recordOf(allowedTypes[0] as number, Uint8Array.of(index)),
+        },
+        1,
+      );
     // Segments 0, 2, 1: a copy that isn't a board still gives prefixes.
     const copy = [entry(0, 0), entry(1, 2), entry(2, 1)];
     const got = copyCheckpoints(ELECTION, copy, [0, 1, 2, 3]);

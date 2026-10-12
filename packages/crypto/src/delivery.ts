@@ -462,7 +462,7 @@ export function checkDelivery(
   return { ballots: result, records, rejected };
 }
 
-/** Builds a share receipt record from a node's intake result, for boarding. */
+/** Builds a share receipt record from an intake result, for the client and the node to board. */
 export function shareReceiptRecord(
   definitionHash: Uint8Array,
   seat: number,

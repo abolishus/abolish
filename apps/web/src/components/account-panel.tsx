@@ -103,7 +103,7 @@ export function AccountPanel({ client }: AccountPanelProps) {
             {t("accountSignUp")}
           </Button>
           <Button
-            variant="secondary"
+            variant="outline"
             disabled={busy}
             onClick={act(() => client.signIn(), "signedIn")}
           >
@@ -132,7 +132,7 @@ export function AccountPanel({ client }: AccountPanelProps) {
                   {/* The last passkey stays: without one, nobody can sign in again. */}
                   {view.passkeys.length > 1 ? (
                     <Button
-                      variant="quiet"
+                      variant="link"
                       disabled={busy}
                       onClick={act(() => client.removePasskey(p.id), "passkeyRemoved")}
                     >
@@ -144,7 +144,7 @@ export function AccountPanel({ client }: AccountPanelProps) {
             </ul>
             <div>
               <Button
-                variant="secondary"
+                variant="outline"
                 disabled={busy}
                 onClick={act(() => client.addPasskey(), "passkeyAdded")}
               >
@@ -154,14 +154,14 @@ export function AccountPanel({ client }: AccountPanelProps) {
           </section>
           <div className="flex flex-wrap gap-2">
             <Button
-              variant="secondary"
+              variant="outline"
               disabled={busy}
               onClick={act(() => client.signOut(), "signedOut")}
             >
               {t("accountSignOut")}
             </Button>
             <Button
-              variant="secondary"
+              variant="outline"
               disabled={busy}
               onClick={act(() => client.signOutOthers(), "signedOutOthers")}
             >
@@ -181,13 +181,13 @@ export function AccountPanel({ client }: AccountPanelProps) {
                 >
                   {t("accountDeleteConfirm")}
                 </Button>
-                <Button variant="secondary" disabled={busy} onClick={() => setConfirmDelete(false)}>
+                <Button variant="outline" disabled={busy} onClick={() => setConfirmDelete(false)}>
                   {t("accountDeleteCancel")}
                 </Button>
               </div>
             ) : (
               <div>
-                <Button variant="secondary" disabled={busy} onClick={() => setConfirmDelete(true)}>
+                <Button variant="outline" disabled={busy} onClick={() => setConfirmDelete(true)}>
                   {t("accountDelete")}
                 </Button>
               </div>

@@ -12,7 +12,7 @@
 //   gated                   enforce the dependency, import, symlink and bundle policy
 //                           of the crypto-review-gated packages (see gated.ts)
 //   ballot                  build apps/ballot and enforce its bundle and CSP policy:
-//                           no npm runtime code but React's, no analytics SDK, no URL
+//                           no npm runtime code but React's and shadcn/ui's, no analytics SDK, no URL
 //                           but inert ones, the pinned CSP (see ballot.ts)
 //   toolchain               fail unless install-toolchain.sh, the catalog, the lockfile
 //                           and AGENTS.md pin one Noir and one bb, and bbup's

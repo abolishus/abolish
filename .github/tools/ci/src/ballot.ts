@@ -1,7 +1,7 @@
 // Bundle and CSP policy for the ballot client (apps/ballot), the only place a
 // plaintext vote exists. The brief requires "a test asserts its bundle
 // contains no analytics SDK"; AGENTS.md allows it no third-party runtime code
-// beyond the framework; T-43 needs its strict CSP. Those are policies, so
+// beyond React and the shadcn/ui runtime; T-43 needs its strict CSP. Those are policies, so
 // they live here, under CODEOWNERS, where the PR they judge can't weaken them
 // (T-59; AGENTS.md rule B). apps/ballot's own tests may repeat them.
 //
@@ -12,8 +12,31 @@
 
 import { posix, relative, sep } from "node:path";
 
-/** npm packages whose code may run in the ballot client: the framework only. */
-export const RUNTIME_PACKAGES: ReadonlySet<string> = new Set(["react", "react-dom", "scheduler"]);
+/**
+ * npm packages whose code may run in the ballot client: React, and the
+ * shadcn/ui runtime the owner allowed on 2026-10-12 (Base UI and its
+ * dependencies, class-variance-authority, clsx behind `cn`, lucide-react;
+ * docs/PROJECT_BRIEF.md, AGENTS.md "Dependencies"). Adding to it is an
+ * owner-reviewed change.
+ */
+export const RUNTIME_PACKAGES: ReadonlySet<string> = new Set([
+  "react",
+  "react-dom",
+  "scheduler",
+  "@base-ui/react",
+  "@base-ui/utils",
+  "@floating-ui/core",
+  "@floating-ui/dom",
+  "@floating-ui/react-dom",
+  "@floating-ui/utils",
+  "@babel/runtime",
+  "reselect",
+  "use-sync-external-store",
+  "class-variance-authority",
+  "clsx",
+  "cn",
+  "lucide-react",
+]);
 
 /** Workspace files the client may bundle, relative to the repository root. */
 export const WORKSPACE_SOURCES = [
@@ -77,11 +100,11 @@ export const ANALYTICS_MARKERS: readonly RegExp[] = [
   /\bsendBeacon\b/,
 ];
 
-/** What the build may emit, besides index.html: hashed scripts and styles, IBM Plex fonts, licences. */
+/** What the build may emit, besides index.html: hashed scripts and styles, self-hosted fonts, licences. */
 const EMITTED = [
   /^index\.html$/,
   /^assets\/[\w-]+\.(js|css)$/,
-  /^assets\/ibm-plex-(sans|mono|serif)-[\w-]+\.woff2?$/,
+  /^assets\/(oxanium|jetbrains-mono)-[\w-]+\.woff2?$/,
   /^third-party-licenses\.md$/,
   /^font-licenses\.txt$/,
 ];

@@ -39,8 +39,8 @@ const dist = (overrides: Record<string, string> = {}) =>
       "assets/index-BuPP35rj.js":
         'const s="http://www.w3.org/2000/svg";throw Error("https://react.dev/errors/"+e)',
       "assets/index-C6Etfezz.css":
-        "/*! tailwindcss | https://tailwindcss.com */@font-face{src:url(./ibm-plex-sans-latin-400-normal-CDDApCn2.woff2)}",
-      "assets/ibm-plex-sans-latin-400-normal-CDDApCn2.woff2": "wOF2",
+        "/*! tailwindcss | https://tailwindcss.com */@font-face{src:url(./oxanium-latin-wght-normal-CDDApCn2.woff2)}",
+      "assets/oxanium-latin-wght-normal-CDDApCn2.woff2": "wOF2",
       "third-party-licenses.md": "# Licenses",
       "font-licenses.txt": "SIL Open Font License, Version 1.1 http://scripts.sil.org/OFL",
       ...overrides,

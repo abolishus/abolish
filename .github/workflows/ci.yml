@@ -139,7 +139,7 @@ jobs:
           path: lockfile-diff.md
           if-no-files-found: ignore
 
-  # apps/ballot bundles no npm code but React's, no analytics SDK and no URL
+  # apps/ballot bundles no npm code but React's and shadcn/ui's, no analytics SDK and no URL
   # but inert ones, under the pinned CSP (ballot.ts). Its own job: building it
   # runs the PR's Vite config, which must not share a runner with the
   # supply-chain steps (T-59).

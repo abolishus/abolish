@@ -1,6 +1,7 @@
 import { storybookTest } from "@storybook/addon-vitest/vitest-plugin";
 import tailwindcss from "@tailwindcss/vite";
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { defineConfig, type Plugin } from "vite-plus";
@@ -21,10 +22,34 @@ const relativeSourcePaths: Plugin = {
   },
 };
 
+// The built server is one self-contained module tree: every dependency is
+// inlined, so the deployable is Node and dist/ with nothing from node_modules
+// (src/node/main.ts). Build only: the tests' module runner loads sources.
+const bundleServer: Plugin = {
+  name: "bundle-server",
+  apply: "build",
+  configEnvironment: (name) => (name === "ssr" ? { resolve: { noExternal: true } } : undefined),
+};
+
+// The route generator writes src/routeTree.gen.ts formatted by Prettier at
+// its default 80 columns, which `vp check` reflows to the repo's 100. Format
+// it in the repo's style once it is written (the generator writes it while
+// the config resolves), so a build leaves the committed file unchanged
+// (repro-build rejects a build that modifies a tracked file).
+const formatRouteTree: Plugin = {
+  name: "format-route-tree",
+  apply: "build",
+  buildStart() {
+    execFileSync("vp", ["fmt", "src/routeTree.gen.ts"], { cwd: root, stdio: "ignore" });
+  },
+};
+
 export default defineConfig({
   plugins: [
     tailwindcss(),
     relativeSourcePaths,
+    bundleServer,
+    formatRouteTree,
     tanstackStart({
       // src/routeTree.gen.ts is generated: written in the repo's own style,
       // so it passes `vp check` as generated.
@@ -32,6 +57,23 @@ export default defineConfig({
     }),
   ],
   build: { sourcemap: false },
+  // The Node entry (src/node/main.ts), every dependency inlined as for the
+  // Start server, beside the Vite build's output: dist/node/main.mjs loads
+  // dist/server/server.js and serves dist/client/assets.
+  pack: {
+    entry: { main: "src/node/main.ts" },
+    outDir: "dist/node",
+    platform: "node",
+    dts: false,
+    deps: { alwaysBundle: [/.*/] },
+  },
+  run: {
+    tasks: {
+      // tests/serve.test.ts runs against a live Postgres (TEST_DATABASE_URL),
+      // so the tests are never cached; a cached task wouldn't see the variable.
+      "test:db": { command: "vp test run --project unit", cache: false },
+    },
+  },
   test: {
     projects: [
       {
@@ -40,8 +82,10 @@ export default defineConfig({
           name: "unit",
           include: ["tests/**/*.test.ts"],
           environment: "node",
-          // tests/ssr.test.ts builds the app first.
-          hookTimeout: 120_000,
+          // tests/ssr.test.ts and tests/deployable.test.ts each build the app
+          // into dist/ first, so the files run one at a time.
+          hookTimeout: 180_000,
+          fileParallelism: false,
         },
       },
       {

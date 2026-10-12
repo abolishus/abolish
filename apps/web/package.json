@@ -6,14 +6,16 @@
   "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
-    "build": "vp exec tsc -p tsconfig.json && vp build",
+    "build": "vp exec tsc -p tsconfig.json && vp build && vp pack",
     "check": "vp check",
-    "test": "vp test run --project unit",
+    "start": "vp node dist/node/main.mjs",
+    "test": "vp run test:db",
     "test:storybook": "vp test run --project storybook",
     "storybook": "storybook dev -p 6008"
   },
   "dependencies": {
     "@abolishus/api-contract": "workspace:*",
+    "@abolishus/core": "workspace:*",
     "@abolishus/crypto": "workspace:*",
     "@abolishus/ui": "workspace:*",
     "@orpc/client": "catalog:",
@@ -21,8 +23,10 @@
     "@orpc/openapi-client": "catalog:",
     "@tanstack/react-router": "catalog:",
     "@tanstack/react-start": "catalog:",
+    "postgres": "catalog:",
     "react": "catalog:",
-    "react-dom": "catalog:"
+    "react-dom": "catalog:",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@storybook/addon-a11y": "catalog:",

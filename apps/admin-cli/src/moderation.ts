@@ -15,6 +15,7 @@ import {
   readReportQueue,
   REMOVAL_REASONS,
   type RemovalReason,
+  type ReportQueueCursor,
   RESTORE_REASONS,
   type RestoreReason,
   reviewReports,
@@ -76,12 +77,18 @@ async function refusable<T>(p: Promise<T>): Promise<T> {
  * prints it in `next`. Opaque to the operator; parsed strictly so a typo is a
  * usage error rather than a page that silently starts elsewhere.
  */
-function queueCursor(s: string) {
+export function parseQueueCursor(s: string): ReportQueueCursor {
   const m = /^([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:00:00\.000Z)\/([0-9a-f]{64})\/([a-z-]+)$/.exec(
     s,
   );
   const pendingSince = m?.[1] === undefined ? undefined : new Date(m[1]);
-  if (m === null || pendingSince === undefined || pendingSince.toISOString() !== m[1])
+  // An out-of-range field (hour 30) makes an invalid Date, whose toISOString throws.
+  if (
+    m === null ||
+    pendingSince === undefined ||
+    Number.isNaN(pendingSince.getTime()) ||
+    pendingSince.toISOString() !== m[1]
+  )
     throw new UsageError("--after is a cursor as `queue` printed it in `next`");
   // Groups 2 and 3 aren't optional, so a match has both.
   return { pendingSince, electionId: electionId(m[2]!), reason: removalReason(m[3]!) };
@@ -89,6 +96,10 @@ function queueCursor(s: string) {
 
 // `run` (cli.ts) calls a command only with exactly its `positionals`, so the
 // `!` on each positional below holds.
+export function formatQueueCursor(c: ReportQueueCursor): string {
+  return `${c.pendingSince.toISOString()}/${hex(c.electionId)}/${c.reason}`;
+}
+
 export const moderationCommands: Readonly<Record<string, Command>> = {
   queue: {
     usage: `[--limit 1..${MAX_REPORT_QUEUE}] [--after <next>]`,
@@ -100,7 +111,7 @@ export const moderationCommands: Readonly<Record<string, Command>> = {
       const rows = await readReportQueue(
         sql,
         limit,
-        typeof after === "string" ? queueCursor(after) : undefined,
+        typeof after === "string" ? parseQueueCursor(after) : undefined,
       );
       for (const r of rows)
         io.out({
@@ -114,7 +125,7 @@ export const moderationCommands: Readonly<Record<string, Command>> = {
       // A full page may have more behind it; a short one is the end.
       if (rows.length === limit && last !== undefined)
         io.out({
-          next: `${last.pendingSince.toISOString()}/${hex(last.electionId)}/${last.reason}`,
+          next: formatQueueCursor(last),
         });
     },
   },

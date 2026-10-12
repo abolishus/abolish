@@ -41,8 +41,8 @@ export function usage(): string {
 
 /**
  * Runs one command and returns its exit code: 0 on success, 1 when core
- * refuses it, 2 for malformed arguments. Any other error is thrown, since it
- * isn't the operator's to fix.
+ * refuses it, 2 for malformed arguments, 3 for any other failure, so a caller
+ * can tell a refusal from a broken deployment.
  */
 export async function run(argv: readonly string[], sql: Sql, io: CliIo): Promise<number> {
   const [group, name, ...rest] = argv;
@@ -73,6 +73,9 @@ export async function run(argv: readonly string[], sql: Sql, io: CliIo): Promise
       io.err({ error: e.code });
       return 1;
     }
-    throw e;
+    // Not the operator's to fix (an unreachable database, a missing grant).
+    // Only the error's kind: its message can name the database's address.
+    io.err({ error: "internal", kind: e instanceof Error ? e.name : typeof e });
+    return 3;
   }
 }

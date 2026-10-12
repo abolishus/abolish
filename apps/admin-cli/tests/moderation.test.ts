@@ -233,3 +233,15 @@ describe("moderation decisions", () => {
     });
   });
 });
+
+test("any other failure exits 3 with its kind only, never its message", async () => {
+  const closed = await db.as("abolish_app");
+  await closed.end();
+  const err: unknown[] = [];
+  const code = await run(["moderation", "status", "00".repeat(32)], closed, {
+    out: () => expect.unreachable(),
+    err: (v) => err.push(v),
+  });
+  expect(code).toBe(3);
+  expect(err).toEqual([{ error: "internal", kind: expect.any(String) }]);
+});

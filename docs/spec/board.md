@@ -148,7 +148,7 @@ The board operator holds the openings it receives in a period and appends them, 
 
 ## Board checks
 
-A verifier ([[verifier]], checks 4.1 and 4.2) takes the election identifier it expects, the board's entries in index order from wherever it found them, every anchor for the election from the pinned anchor contract (Anchoring, above), the anchoring clock, and `now`: the time of the latest finalized L1 block it has read.
+A verifier ([[verifier]], checks 4.1 and 4.2) takes the election identifier it expects, the board's entries in index order from wherever it found them, every anchor for the election from the pinned anchor contract (Anchoring, above), the anchoring clock, and `now`: the time of the latest finalized L1 block it has read, the same block at which it proves the anchors ([[contracts]], Board anchor, Verification).
 
 **Only anchored entries are the board.** Entries carry no signature: anyone can write a well-formed entry for any election. What makes an entry part of the board is a timely checkpoint whose size covers it. So the verifier checks exactly the prefix up to the largest size among the counted anchors (its _extent_), and ignores every entry past it, reporting how many it ignored as input it can't authenticate, never as an election failure. No one can fail an election by handing a verifier its board with entries appended (T-53). For a closed election the seal checkpoint fixes the extent.
 

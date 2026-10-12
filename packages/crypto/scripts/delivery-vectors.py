@@ -200,10 +200,12 @@ def check_delivery(definition_hash, registered, seg_d, seg_k, t_d, t_k, ballots,
     receipts, complaints = [], []
     postings = [dict() for _ in ballots]
     for at, (path, when, payload) in enumerate(entries):
-        parsed = parse_record(payload)
-        # Board-entry version 3 never carries a posting: one through the board path is a rejected entry.
-        if not isinstance(parsed, str) and parsed[0] == "posting" and path != "contract":
+        # Board-entry version 3 never carries a posting: one through the board path is a rejected
+        # entry, whatever its bytes, as the envelope would reject it by its type alone.
+        if path != "contract" and len(payload) >= 3 and int.from_bytes(payload[:2], "big") == POSTING:
             parsed = "unexpected-record-type"
+        else:
+            parsed = parse_record(payload)
         if isinstance(parsed, str):
             rejected.append({"at": at, "error": parsed})
             continue
@@ -493,6 +495,8 @@ def main():
     assert r["ballots"][0]["counted"]
     r = election("board-path-posting", "Seat 3's posting reaches the board through the board path: a rejected entry, which delivers nothing", ["alice"], at(3, R("alice", 1), R("alice", 2), P("alice", 3)))
     assert r["ballots"][0]["missing"] == [3] and r["rejected"] == [{"at": 2, "error": "unexpected-record-type"}]
+    r = election("board-path-malformed-posting", "A truncated posting and one labelled version 2 through the board path: rejected by type, as the board entry would be, before any decoding", ["alice"], at(3, R("alice", 1), R("alice", 2), P("alice", 3)[:-1], P("alice", 3)[:2] + b"\x02" + P("alice", 3)[3:]))
+    assert r["ballots"][0]["missing"] == [3] and r["rejected"] == [{"at": 2, "error": "unexpected-record-type"}, {"at": 3, "error": "unexpected-record-type"}]
     r = election("missing-seat", "Seat 3 neither receipted nor posted", ["alice"], at(3, R("alice", 1), R("alice", 2)))
     assert r["ballots"][0]["missing"] == [3]
     r = election("late-receipt", "Seat 3's receipt is boarded one segment after s_D", ["alice"], at(3, R("alice", 1), R("alice", 2)) + at(SD + 1, R("alice", 3)))

@@ -3,7 +3,7 @@
 // user granted abolish_app (never the owner; packages/core, Database) and
 // listens.
 
-import { createAccounts } from "@abolishus/core";
+import { createAccounts, createTurnstile } from "@abolishus/core";
 import { fileURLToPath } from "node:url";
 import postgres from "postgres";
 import * as z from "zod";
@@ -24,6 +24,9 @@ const Env = z
     ACCOUNT_RP_ID: z.string().min(1).optional(),
     // Signs account cookies: at least 32 bytes of randomness, as text.
     ACCOUNT_SECRET: z.string().min(32),
+    // The Turnstile widget's secret key: every passkey ceremony start needs a
+    // token solved on this site (packages/core, Turnstile; T-01, T-52).
+    TURNSTILE_SECRET_KEY: z.string().min(1),
     // Loopback unless told otherwise: the deployment's proxy terminates TLS.
     WEB_HOST: z.string().min(1).default("127.0.0.1"),
     WEB_PORT: z.coerce.number().int().min(1).max(65535).default(3000),
@@ -45,6 +48,7 @@ const env = Env.parse({
   WEB_ORIGIN: process.env["WEB_ORIGIN"],
   ACCOUNT_RP_ID: process.env["ACCOUNT_RP_ID"] || undefined,
   ACCOUNT_SECRET: process.env["ACCOUNT_SECRET"],
+  TURNSTILE_SECRET_KEY: process.env["TURNSTILE_SECRET_KEY"],
   WEB_HOST: process.env["WEB_HOST"],
   WEB_PORT: process.env["WEB_PORT"],
   POSTHOG_HOST: process.env["POSTHOG_HOST"] || undefined,
@@ -66,6 +70,10 @@ const accounts = createAccounts({
   secret: env.ACCOUNT_SECRET,
   origin: new URL(env.WEB_ORIGIN).origin,
   rpID: env.ACCOUNT_RP_ID ?? new URL(env.WEB_ORIGIN).hostname,
+  turnstile: createTurnstile({
+    secretKey: env.TURNSTILE_SECRET_KEY,
+    hostname: new URL(env.WEB_ORIGIN).hostname,
+  }),
   log: write,
 });
 const analytics =

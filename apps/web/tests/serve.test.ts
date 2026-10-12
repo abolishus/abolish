@@ -77,6 +77,8 @@ beforeAll(async () => {
     secret: SECRET,
     origin: ORIGIN,
     rpID: RP_ID,
+    // Turnstile's checks are packages/core's tests; here every start passes.
+    turnstile: { verify: async () => "passed" },
     log: () => {},
   });
   clientDir = mkdtempSync(join(tmpdir(), "abolish-web-client-"));

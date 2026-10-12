@@ -83,6 +83,7 @@ describe("dist/node/main.mjs", () => {
       API_URL: "http://127.0.0.1:9",
       WEB_ORIGIN: "https://abolish.test",
       ACCOUNT_SECRET: SECRET,
+      TURNSTILE_SECRET_KEY: "turnstile-secret",
       WEB_PORT: String(port),
     });
     try {
@@ -138,11 +139,25 @@ describe("dist/node/main.mjs", () => {
       API_URL: "http://127.0.0.1:9",
       WEB_ORIGIN: "https://abolish.test",
       ACCOUNT_SECRET: "short",
+      TURNSTILE_SECRET_KEY: "turnstile-secret",
     });
     const [code] = (await once(web.child, "exit")) as [number];
     expect(code).not.toBe(0);
     expect(web.err()).toContain("ACCOUNT_SECRET");
     expect(web.err()).not.toContain(password);
+  }, 30_000);
+
+  test("refuses to start without a Turnstile secret key", async () => {
+    const web = run({
+      DATABASE_URL: database(),
+      API_URL: "http://127.0.0.1:9",
+      WEB_ORIGIN: "https://abolish.test",
+      ACCOUNT_SECRET: SECRET,
+    });
+    const [code] = (await once(web.child, "exit")) as [number];
+    expect(code).not.toBe(0);
+    expect(web.err()).toContain("TURNSTILE_SECRET_KEY");
+    expect(web.err()).not.toContain(SECRET);
   }, 30_000);
 
   test("refuses half a PostHog configuration, quoting none of it", async () => {
@@ -151,6 +166,7 @@ describe("dist/node/main.mjs", () => {
       API_URL: "http://127.0.0.1:9",
       WEB_ORIGIN: "https://abolish.test",
       ACCOUNT_SECRET: SECRET,
+      TURNSTILE_SECRET_KEY: "turnstile-secret",
       POSTHOG_KEY: "phc_unpaired",
     });
     const [code] = (await once(web.child, "exit")) as [number];

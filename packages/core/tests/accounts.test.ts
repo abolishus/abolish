@@ -16,6 +16,10 @@ import {
   MAX_ACCOUNT_BODY,
   newAccountId,
   pruneAccountVerifications,
+  type Turnstile,
+  type TurnstileAction,
+  TURNSTILE_HEADER,
+  type TurnstileVerdict,
 } from "../src/index.ts";
 import {
   type AuthenticationOptions,
@@ -37,6 +41,18 @@ let app: Sql;
 let accounts: Accounts;
 const logged: AccountLogLine[] = [];
 
+/** A token the stand-in Turnstile passes for any action; real verification is tests/turnstile.test.ts. */
+const TOKEN = "test-token";
+/** Tokens the stand-in has seen, with their action, and what it answers next. */
+const turnstileCalls: [string | null, TurnstileAction][] = [];
+let turnstileAnswer: TurnstileVerdict | undefined;
+const turnstile: Turnstile = {
+  verify: async (token, action) => {
+    turnstileCalls.push([token, action]);
+    return turnstileAnswer ?? (token === TOKEN ? "passed" : "refused");
+  },
+};
+
 beforeAll(async () => {
   db = await testDb();
   app = await db.as("abolish_app");
@@ -45,6 +61,7 @@ beforeAll(async () => {
     secret: SECRET,
     origin: ORIGIN,
     rpID: RP_ID,
+    turnstile,
     log: (line) => logged.push(line),
   });
 });
@@ -79,7 +96,7 @@ async function call(
   body?: unknown,
   headers: Record<string, string> = {},
 ): Promise<Response> {
-  const h = new Headers({ origin: ORIGIN, ...headers });
+  const h = new Headers({ origin: ORIGIN, [TURNSTILE_HEADER]: TOKEN, ...headers });
   if (jar.cookies.size) h.set("cookie", jar.header());
   if (body !== undefined) h.set("content-type", "application/json");
   const res = await accounts.handler(
@@ -429,7 +446,7 @@ describe("what is kept (T-10, T-11)", () => {
   });
 
   test("better-auth's warnings and errors are logged by level only", () => {
-    for (const line of logged) expect(Object.keys(line)).toEqual(["auth"]);
+    for (const line of logged) expect([["auth"], ["turnstile"]]).toContainEqual(Object.keys(line));
   });
 });
 
@@ -529,8 +546,78 @@ describe("account deletion", () => {
   });
 });
 
+describe("Turnstile on ceremony starts (T-01, T-52)", () => {
+  const STARTS = [
+    ["/auth/passkey/generate-register-options", "passkey-register"],
+    ["/auth/passkey/generate-authenticate-options", "passkey-authenticate"],
+  ] as const;
+
+  test("each ceremony start is checked for its own action, and refused without a pass, writing nothing", async () => {
+    for (const [path, action] of STARTS) {
+      turnstileCalls.length = 0;
+      expect((await call(new Jar(), "GET", path)).status).toBe(200);
+      expect(turnstileCalls).toEqual([[TOKEN, action]]);
+      const before = await count("account_verifications");
+      for (const headers of [{ [TURNSTILE_HEADER]: "wrong" }, { [TURNSTILE_HEADER]: "" }]) {
+        const res = await call(new Jar(), "GET", path, undefined, headers);
+        expect(res.status).toBe(403);
+        expect(await res.json()).toEqual({ code: "TURNSTILE_REFUSED", status: 403 });
+        expect(res.headers.getSetCookie()).toEqual([]);
+      }
+      const bare = new Headers({ origin: ORIGIN });
+      const missing = await accounts.handler(new Request(`${ORIGIN}${path}`, { headers: bare }));
+      expect(missing.status).toBe(403);
+      expect(turnstileCalls.at(-1)).toEqual([null, action]);
+      expect(await count("account_verifications")).toBe(before);
+    }
+  });
+
+  test("a signed-in session still needs a pass to add a passkey", async () => {
+    const jar = new Jar();
+    await signUp(jar, new SoftAuthenticator(RP_ID));
+    const res = await call(jar, "GET", STARTS[0][0], undefined, { [TURNSTILE_HEADER]: "wrong" });
+    expect(res.status).toBe(403);
+  });
+
+  test("Turnstile unreachable: 503, logged by kind, and nothing written", async () => {
+    const before = await count("account_verifications");
+    turnstileAnswer = "unavailable";
+    try {
+      for (const [path] of STARTS) {
+        logged.length = 0;
+        const res = await call(new Jar(), "GET", path);
+        expect(res.status).toBe(503);
+        expect(await res.json()).toEqual({ code: "TURNSTILE_UNAVAILABLE", status: 503 });
+        expect(logged).toEqual([{ turnstile: "unavailable" }]);
+      }
+    } finally {
+      turnstileAnswer = undefined;
+    }
+    expect(await count("account_verifications")).toBe(before);
+  });
+
+  test("no other route asks for a token", async () => {
+    turnstileCalls.length = 0;
+    for (const route of ACCOUNT_ROUTES) {
+      const [method, path] = route.split(" ") as ["GET" | "POST", string];
+      if (STARTS.some(([start]) => start === path)) continue;
+      await call(new Jar(), method, path, method === "POST" ? {} : undefined, {
+        [TURNSTILE_HEADER]: "wrong",
+      });
+    }
+    expect(turnstileCalls).toEqual([]);
+  });
+});
+
 describe("createAccounts", () => {
-  const base = () => ({ sql: app, secret: SECRET, origin: ORIGIN, rpID: RP_ID, log: () => {} });
+  const base = () => ({
+    sql: app,
+    secret: SECRET,
+    origin: ORIGIN,
+    rpID: RP_ID,
+    turnstile,
+    log: () => {},
+  });
 
   test("refuses to start when better-auth's telemetry is switched on by environment", () => {
     for (const value of ["1", "true", "yes"]) {

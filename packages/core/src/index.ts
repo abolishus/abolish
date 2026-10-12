@@ -77,6 +77,16 @@ export {
   pruneAccountVerifications,
 } from "./accounts.ts";
 export {
+  createTurnstile,
+  MAX_TURNSTILE_TOKEN,
+  type Turnstile,
+  type TurnstileAction,
+  type TurnstileOptions,
+  type TurnstileVerdict,
+  TURNSTILE_HEADER,
+  TURNSTILE_SITEVERIFY,
+} from "./turnstile.ts";
+export {
   MAX_REPORT_QUEUE,
   type PendingReport,
   type ReportQueueCursor,

@@ -111,7 +111,7 @@ The proofs themselves (`docs/spec/membership.md`, Verification key, Proof encodi
 - `poseidon2(a, b)`: circomlib's two-input Poseidon over BN254, on `@noble/curves`' permutation with constants from its Grain generator.
 - `tierTreeRoot(leaves)`, `tierTreePath(leaves, index)`, `tierTreeZeros()`: the depth-32 tier tree verifiers rebuild from a group's additions. `replayTierGroup(events)` is the lenient replay for group contracts without a signed sequence; the group registry's groups replay strictly through `applyGroupRecords`.
 
-The public check of the proving key's reference string is P1-17b part 2.
+The proving key's reference string was checked well formed, once and publicly, by `scripts/membership-crs-check.ts` (`docs/spec/membership.md`, Reference-string check; T-07, T-12). Its tests run on a toy key; set `MEMBERSHIP_CRS_DIR` to a directory with `semaphore-32.zkey`, `ppot_0080_14.ptau` and `semaphore-32.r1cs` to rerun it on the real one.
 
 ## Circuit-facing values
 

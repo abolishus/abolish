@@ -121,6 +121,12 @@ const notReached = (r: Report) => {
 
 test("the fixtures cover undecodable, ill-formed and well-formed definitions", () => {
   expect(definitions.some((d) => d.error !== undefined)).toBe(true);
+  // Both kinds of unknown version: 0, never valid, and a later one.
+  const versions = definitions
+    .filter((d) => d.error === "unknown-version")
+    .map((d) => hex(d.encoding)[2]);
+  expect(versions).toContain(0);
+  expect(versions.some((v) => v !== 0)).toBe(true);
   expect(definitions.some((d) => d.illFormed !== undefined)).toBe(true);
   expect(definitions.some((d) => d.error === undefined && d.illFormed === undefined)).toBe(true);
 });
@@ -135,6 +141,20 @@ describe("2.1: the definition decodes strictly and is well formed", () => {
       // or fail the election through it (T-53).
       expect(r.verdict).toBe("unverifiable");
       expect(r.inputs.definition).toBe("local-file");
+      if (d.error === "unknown-version" && hex(d.encoding)[2] !== 0) {
+        // A version a later release may read: unverifiable, never failed.
+        expect(row(r, "2.3")).toEqual({
+          id: "2.3",
+          kind: "election",
+          status: "unverifiable",
+          code: "unsupported-version",
+          at: {},
+        });
+        expect(row(r, "2.1").code).toBe("not-implemented");
+        expect(r.verdictAgainstInputs).toBe("unverifiable");
+        notReached(r);
+        return;
+      }
       if (d.error !== undefined) {
         expect(row(r, "2.1")).toEqual({
           id: "2.1",
@@ -180,6 +200,9 @@ describe("the board checks' inputs come from the definition", () => {
       expect(r3.l1).toEqual(r2.l1);
       expect(r3.verdictAgainstInputs).toBe(r2.verdictAgainstInputs);
       expect(r3.verdict).toBe("unverifiable");
+      // Only format 3 has a definition to report.
+      expect(r2.definition).toBeUndefined();
+      expect(r3.definition).toBeDefined();
     });
 
   test("the election identifier is the definition's: anchors are read under it", () => {

@@ -73,7 +73,7 @@ export interface Report {
     readonly unreadableBytes: number;
     readonly unauthenticated?: number;
   };
-  /** The L1 block a format-2 bundle was proven at, and the anchors read from its state. */
+  /** The L1 block a format-2 or format-3 bundle was proven at, and the anchors read from its state. */
   readonly l1?: {
     readonly blockHash: string;
     readonly blockNumber: string;
@@ -93,6 +93,7 @@ type Outcome = Pick<CheckResult, "status" | "code" | "at">;
 
 const PASS: Outcome = { status: "pass" };
 const NOT_REACHED: Outcome = { status: "unverifiable", code: "not-reached" };
+const UNSUPPORTED: Outcome = { status: "unverifiable", code: "unsupported-version", at: {} };
 
 function copyAt(at: BoardErrorAt): CheckAt {
   if ("entry" in at)
@@ -219,6 +220,12 @@ function fromDefinition(bundle: Bundle):
     definition = decodeElectionDefinition(bundle.definition);
   } catch (e) {
     if (!(e instanceof DecodeError)) throw e;
+    // A definition version this verifier doesn't know may be one a later
+    // release reads, so, like an unknown board-entry version below, it
+    // leaves the election unverifiable, never failed: releases must not
+    // disagree on a verdict (T-36). Version 0 is never valid.
+    if (e.code === "unknown-version" && bundle.definition[2] !== 0)
+      return stopped("2.3", UNSUPPORTED);
     return stopped("2.1", { status: "fail", code: "decode", at: { decodeError: e.code } });
   }
   const hash = electionDefinitionHash(definition);
@@ -227,8 +234,7 @@ function fromDefinition(bundle: Bundle):
   // A version this verifier can't read may be one a later release supports,
   // so it leaves the election unverifiable here, never failed (2.3).
   const version = pinnedVersion(definition, RECORD_TYPES.boardEntry);
-  if (version !== 1)
-    return stopped("2.3", { status: "unverifiable", code: "unsupported-version", at: {} }, hash);
+  if (version !== 1) return stopped("2.3", UNSUPPORTED, hash);
   return {
     hash,
     inputs: {

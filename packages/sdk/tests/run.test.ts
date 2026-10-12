@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vite-plus/test";
+import { runSimulation, type Scenario, SIMULATION_STUBS } from "../src/index.ts";
+import { type CellExpectation, expectCells, judgeCell } from "../src/simulation/run.ts";
 
 // Each ballot costs about 0.1 s per online seat (intake checks its proofs).
 const timeout = 60_000;
-import { runSimulation, type Scenario, SIMULATION_STUBS } from "../src/index.ts";
-import { type CellExpectation, expectCells, judgeCell } from "../src/simulation/run.ts";
 
 const base: Scenario = {
   voters: 9,

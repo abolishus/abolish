@@ -105,6 +105,19 @@ describe("parseScenario", () => {
     expect(refusal({ ...valid, outage: { from: 0, to: 1, at: 0 } })).toBe("$.outage.at");
   });
 
+  it("reads only the object's own fields, never inherited ones", () => {
+    expect(refusal(Object.create(valid))).toBe("$.voters");
+    const t = Object.create({ offline: [9] });
+    Object.assign(t, { panel: 5, threshold: 3 });
+    expect(parseScenario({ ...valid, trustees: t })).toMatchObject({ ok: true });
+    expect(refusal({ ...valid, tiers: Object.create({ "0": 1 }) })).toBe("$.tiers");
+    const inherited = Object.assign(Object.create({ outage: { from: 0, to: 1 } }), valid, {
+      outage: undefined,
+    });
+    delete inherited.outage;
+    expect(parseScenario(inherited)).toMatchObject({ ok: true, scenario: { outage: null } });
+  });
+
   it("refuses missing required fields", () => {
     for (const k of ["voters", "election", "options", "trustees", "tiers", "seed"]) {
       const o: Record<string, unknown> = { ...valid };

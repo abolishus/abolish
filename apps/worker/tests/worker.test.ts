@@ -101,6 +101,10 @@ async function expectNoKeyHolds(keyPrefix: string, marker: string) {
   expect(keys.length).toBeGreaterThan(0);
   for (const key of keys) {
     const type = await connection.type(key);
+    // The worker is still running, so a listed key can expire or be deleted
+    // before its type is read (a lock or a marker, say); a key that is gone
+    // holds nothing.
+    if (type === "none") continue;
     const dump =
       type === "hash"
         ? JSON.stringify(await connection.hgetall(key))

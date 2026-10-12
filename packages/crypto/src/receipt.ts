@@ -10,6 +10,7 @@ import {
   type CodecValue,
   DecodeError,
   type DecodeErrorCode,
+  EncodeError,
   encode,
   list,
   struct,
@@ -196,8 +197,9 @@ export function checkReceiptAtCast(bytes: Uint8Array, expected: CastExpectation)
       segment: r.segment,
       payload,
     });
-  } catch {
+  } catch (e) {
     // A payload no board entry can carry: no receipt can be for it.
+    if (!(e instanceof EncodeError)) throw e;
     return { ok: false, code: "receipt-entry" };
   }
   if (!equalBytes(boardEntryHash(entry), r.entry_hash)) return { ok: false, code: "receipt-entry" };

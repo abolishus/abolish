@@ -17,7 +17,7 @@ The public website: a TanStack Start app rendered on the server, for finding pol
 
 ## Build and run
 
-`vp run --filter @abolishus/web... build` packs the Node entry into `dist/node/main.mjs`, then builds the Start app into `dist/server` and `dist/client`, with every dependency inlined into the server. `node dist/node/main.mjs` runs from `dist/` alone, with no `node_modules` (the image comes with P2-11).
+`vp run --filter @abolishus/web... build` packs the Node entry into `dist/node/main.mjs`, then builds the Start app into `dist/server` and `dist/client`, with every dependency inlined into the server. `node dist/node/main.mjs` runs from `dist/` alone, with no `node_modules`; `Dockerfile` packs `dist/` into the image `deploy.yml` ships to staging ([Railway runbook](../../docs/runbooks/railway.md)).
 
 ## Configuration
 

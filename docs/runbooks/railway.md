@@ -4,7 +4,7 @@ How Abolish runs on Railway: what the owner creates by hand, how images are buil
 
 Postgres is not authoritative: wiping it loses no result (T-66). Nothing on Railway holds a ballot's plaintext; the API sees ciphertexts and proofs only (T-09).
 
-Status: the API image (this runbook, Building) exists. `.github/workflows/deploy.yml` builds, signs and deploys it to staging on every push to `main` (#69, #74). Production deploys wait on the reference election against staging (P1-20). The worker (P2-4), web (P2-9) and ballot client (P2-8) add their own sections as they land.
+Status: the API and web images (this runbook, Building) exist. `.github/workflows/deploy.yml` builds, signs and deploys both to staging on every push to `main` (#69, #74), the API first. Production deploys wait on the reference election against staging (P1-20). The worker (P2-4) and ballot client (P2-8) add their own sections as they land.
 
 ## What the owner creates by hand
 
@@ -22,9 +22,11 @@ One Railway Postgres per environment. Its default user is the cluster owner: use
    CREATE ROLE abolish_migrate LOGIN PASSWORD '…' IN ROLE abolish_migrator;
    CREATE ROLE abolish_api LOGIN PASSWORD '…' IN ROLE abolish_app;
    ALTER ROLE abolish_api SET search_path = abolish;
+   CREATE ROLE abolish_web LOGIN PASSWORD '…' IN ROLE abolish_app;
+   ALTER ROLE abolish_web SET search_path = abolish;
    ```
 
-3. Only the deploy workflow gets `abolish_migrate`'s URL (the `MIGRATE_DATABASE_URL` secret, below); only the `api` service gets `abolish_api`'s. A compromised API can then append to the board but never alter a table, a trigger or a grant (T-23, T-65).
+3. Only the deploy workflow gets `abolish_migrate`'s URL (the `MIGRATE_DATABASE_URL` secret, below); only the `api` service gets `abolish_api`'s, and only `web` gets `abolish_web`'s. A compromised API can then append to the board but never alter a table, a trigger or a grant (T-23, T-65).
 4. The deploy workflow migrates from a GitHub runner, so the database needs Railway's TCP proxy enabled; use its address with `?sslmode=require` in `MIGRATE_DATABASE_URL`. That encrypts the connection but doesn't verify the proxy's certificate, and the database is then reachable from the internet behind its passwords.
 
 ### Dragonfly
@@ -35,9 +37,10 @@ Not used by the API. The worker (P2-4) needs it: a service from `docker.dragonfl
 
 Each service's source is a container image, set by digest by the deploy workflow, never a repository: Railway never builds (T-61). Each service has no public domain unless listed.
 
-| Service | Command                    | Variables                                       | Notes                                                                                                                                                                                                                                     |
-| ------- | -------------------------- | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `api`   | image default (`main.mjs`) | `DATABASE_URL` (`abolish_api`), `API_PORT=8787` | Custom domain `api.<domain>` with target port 8787 (the API reads `API_PORT`, not Railway's `PORT`), behind Cloudflare. `API_HOST` is `0.0.0.0` in the image; set `::` if a service must reach it over IPv6 on Railway's private network. |
+| Service | Command                         | Variables                                                                                                                                             | Notes                                                                                                                                                                                                                                                                                                         |
+| ------- | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `api`   | image default (`main.mjs`)      | `DATABASE_URL` (`abolish_api`), `API_PORT=8787`                                                                                                       | Custom domain `api.<domain>` with target port 8787 (the API reads `API_PORT`, not Railway's `PORT`), behind Cloudflare. `API_HOST` is `0.0.0.0` in the image; set `::` if a service must reach it over IPv6 on Railway's private network.                                                                     |
+| `web`   | image default (`node/main.mjs`) | `DATABASE_URL` (`abolish_web`), `API_URL=http://api.railway.internal:8787`, `WEB_ORIGIN`, `ACCOUNT_SECRET` (32+ random bytes), `TURNSTILE_SECRET_KEY` | Public domain with target port 3000 (`WEB_PORT`; Railway's `PORT` is ignored); `WEB_ORIGIN` is that domain, `https`. Reaches the API over the private network, so `api` sets `API_HOST=::`. `TURNSTILE_SECRET_KEY` is a placeholder until the widget lands (P2-9), so passkey sign-ups fail closed meanwhile. |
 
 Migrations aren't a Railway service: Railway reports when a deployment is live, not when a one-shot process has exited, so nothing could wait for one, and its pre-deploy command would put the migrator's credential in the API's environment. The deploy workflow runs the same digest's `node migrate.mjs` itself, before pointing `api` at it, so an API never runs against migrations other than its own. No other variable is needed; secrets live only in Railway variables, never in the image or the repository.
 
@@ -50,9 +53,9 @@ One Railway project token per environment, scoped to that environment, stored as
 Each environment also holds:
 
 - Secret `MIGRATE_DATABASE_URL`: the `abolish_migrate` login over the TCP proxy (Postgres, step 4). `RAILWAY_TOKEN` can read every Railway variable anyway, so keeping this beside it widens nothing.
-- Variable `RAILWAY_API_SERVICE_ID`: the `api` service's ID (service settings in Railway). Not secret.
+- Variables `RAILWAY_API_SERVICE_ID` and `RAILWAY_WEB_SERVICE_ID`: the `api` and `web` services' IDs (service settings in Railway). Not secret.
 
-Images go to `ghcr.io/abolishus/abolish-api`, tagged `sha-<commit>` for people and deployed by digest. After the first run creates the package, make it public in its GitHub package settings: Railway pulls it without credentials, and anyone can check a running digest against the build (T-49).
+Images go to `ghcr.io/abolishus/abolish-api` and `ghcr.io/abolishus/abolish-web`, tagged `sha-<commit>` for people and deployed by digest. After the first run creates each package, make it public in its GitHub package settings: Railway pulls it without credentials, and anyone can check a running digest against the build (T-49).
 
 ### Cloudflare
 

@@ -75,6 +75,7 @@ interface Result {
   readonly code?: string;
   readonly keyId?: string;
   readonly seats?: readonly { readonly index: number; readonly reasons: readonly string[] }[];
+  readonly dealers?: readonly number[];
   readonly qualified?: readonly {
     readonly index: number;
     readonly kemKey: string;
@@ -171,6 +172,7 @@ function asVector(r: NullifierKeyCheck): Result {
     ok: true,
     keyId: toHex(r.keyId),
     seats: r.seats,
+    dealers: r.dealers,
     qualified: r.qualified.map((q) => ({
       index: q.index,
       kemKey: toHex(encode(KEM_PUBLIC_KEY, q.kemKey)),
@@ -240,8 +242,10 @@ describe("nullifier-key.json", () => {
       const seats = seatsOf(t);
       const vs = t.seats as readonly SeatVector[];
       const keys = seats.map((s) => registrationKeysMessage(params, s));
-      const dealings = seats.map((s, i) => {
-        const v = vs[i] as SeatVector;
+      // A seat that dealt sealed a share to every other seat; no-dealing's seat 3 sealed none.
+      const dealers = seats.filter((_, i) => (vs[i] as SeatVector).dealtShares.length > 0);
+      const dealings = dealers.map((s) => {
+        const v = vs.find((x) => x.index === s.index) as SeatVector;
         const d = dealingMessageWith(
           params,
           s,
@@ -642,6 +646,38 @@ describe("a seat's node", () => {
     );
     expect(() => dealingMessage(run.params, seat, forged)).toThrow(/key-signature/);
     expect(() => dealingMessage(run.params, seat, [...run.keys].reverse())).toThrow(/key-order/);
+  });
+
+  test("checks and complains only with the keys its round-1 message carries", () => {
+    const rounds = { keys: run.keys, dealings: run.transcript.dealings };
+    // As after a restart that regenerated the keys: every honest share would
+    // fail to open, and the complaints would publish this seat's shares.
+    const regenerated = registrationKeygen(seat.index, seat.identitySecret);
+    const shared = (run.dealings[1] as (typeof run.dealings)[number]).shares.find(
+      (x) => x.recipient === seat.index,
+    ) as { bytes: Uint8Array };
+    expect(() =>
+      checkDealtShare(
+        run.params,
+        { index: seat.index, secretKey: regenerated.kem.secretKey },
+        rounds,
+        shared.bytes,
+      ),
+    ).toThrow(/round-1 message doesn't carry its keys/);
+    expect(() => complaintsMessage(run.params, regenerated, rounds, [2])).toThrow(
+      /round-1 message doesn't carry its keys/,
+    );
+    expect(() => dealingMessage(run.params, regenerated, run.keys)).toThrow(
+      /round-1 message doesn't carry its keys/,
+    );
+    expect(
+      checkDealtShare(
+        run.params,
+        { index: seat.index, secretKey: seat.kem.secretKey },
+        rounds,
+        shared.bytes,
+      ).ok,
+    ).toBe(true);
   });
 
   test("complains only about other dealers of round 2", () => {

@@ -106,7 +106,7 @@ C_i = Σ_{d ∈ QUAL} Σ_{j=0}^{k−1} (i^j mod l) · A_{d,j}
 
 and its secret share is the pair `(sk_i, s_i) = (Σ_d f_d(i), Σ_d f'_d(i)) mod l`, so `C_i = sk_i · G + s_i · J`. The OPRF key is `sk = Σ_d f_d(0)`, which no one holds. Anyone recomputes `C_i` from the transcript; a client and an attester take it from the transcript they checked, never from an answer. `C_i` is perfectly hiding, so nothing published fixes `sk` even to an unbounded adversary; Pedersen binding, which rests on no one knowing `log_G J`, is what makes `sk_i` the only first half of an opening a seat can prove knowledge of (T-15, T-40).
 
-`C_i` is the identity only if `sk_i · G = −s_i · J`, which happens with negligible probability for an honest sharing; the transcript check rejects it ([[nullifier-key]], `key-commitment`).
+`C_i` is the identity only if `sk_i · G = −s_i · J`, which happens with negligible probability for an honest sharing, though a seat can aim for its own; the transcript check then leaves seat `i` without a share ([[nullifier-key]], `identity-commitment`).
 
 ## Evaluation
 

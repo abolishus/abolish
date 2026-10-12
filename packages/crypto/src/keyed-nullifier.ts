@@ -553,6 +553,9 @@ export function combineAnswers(key: NullifierKey, answers: readonly NullifierAns
   if (new Set(seats).size !== k) throw new RangeError("combineAnswers: seats must be distinct");
   let z = BJJ_IDENTITY;
   for (const a of answers) {
+    // Defence in depth: the answer check already refuses an unqualified seat.
+    if (key.commitments[a.seat - 1] == null)
+      throw new RangeError("combineAnswers: an answer from a seat the key doesn't qualify");
     if (
       !sameBytes(a.key_id, key.keyId) ||
       !sameBytes(a.key_id, first.key_id) ||

@@ -576,23 +576,26 @@ def check(panel, b, scope=SCOPE):
             elif any(opening(x["share"], x["blind"]) != commitment_at(dealings[i]["commitments"], x["complainer"]) for x in responses[i]["reveals"]):
                 reasons.append("bad-reveal")
         seats.append({"index": i, "reasons": reasons})
-    qualified = [s["index"] for s in seats if not s["reasons"]]
+    # The qualified dealers; a dealer whose own share commitment is the identity holds nothing.
+    dealers = [s["index"] for s in seats if not s["reasons"]]
+    commitments = {}
+    for i in dealers:
+        c = BID
+        for dd in dealers:
+            c = kn.add(c, commitment_at(dealings[dd]["commitments"], i))
+        if c == BID:
+            next(s for s in seats if s["index"] == i)["reasons"].append("identity-commitment")
+        else:
+            commitments[i] = c
+    qualified = [i for i in dealers if i in commitments]
     # 5. Quorum.
     if len(qualified) < k:
         return {"ok": False, "code": "key-quorum", "seats": seats}
-    # 6. Commitments.
-    commitments = {}
-    for i in qualified:
-        c = BID
-        for dd in qualified:
-            c = kn.add(c, commitment_at(dealings[dd]["commitments"], i))
-        commitments[i] = c
-    if any(c == BID for c in commitments.values()):
-        return {"ok": False, "code": "key-commitment", "seats": seats}
     return {
         "ok": True,
         "keyId": H(ds(KEY_TAG, b)).hex(),
         "seats": seats,
+        "dealers": dealers,
         "qualified": [
             {"index": i, "kemKey": keys[i]["kemKey"].hex(), "signingKey": keys[i]["signingKey"].hex(), "commitment": kn.enc_point(commitments[i]).hex()}
             for i in qualified
@@ -603,6 +606,7 @@ def check(panel, b, scope=SCOPE):
 def seat_shares(result, r):
     """Each qualified seat's share, from its secrets, the dealt shares and the reveals, checked against C_i."""
     qualified = [q["index"] for q in result["qualified"]]
+    dealers = result["dealers"]
     r1, r2, _, r4 = r["rounds"]
     reveals = {}
     for m in r4:
@@ -612,7 +616,7 @@ def seat_shares(result, r):
     out = []
     for i in qualified:
         sk = s = 0
-        for dd in qualified:
+        for dd in dealers:
             if dd == i:
                 v = (poly(r["secrets"][i]["f"], i), poly(r["secrets"][i]["g"], i))
             elif (dd, i) in reveals:
@@ -733,7 +737,28 @@ def main(out):
         {"complain": {4: [1]}},
         expect=[],
     )
-    add("no-dealing", "Seat 3 registers keys but deals nothing; it holds no share.", "panel-5", [1, 2, 3, 4, 5], {"skip2": [3]}, expect=[(3, ["no-dealing"])])
+    add("no-dealing", "Seat 3 registers keys but deals nothing; it holds no share.", "panel-5", [1, 2, 3, 4, 5], {"skip2": [3]}, honest=True, expect=[(3, ["no-dealing"])])
+
+    def zero_own_share(i, s, all_):
+        # Seat 5 picks its polynomials after seeing the others' shares to it
+        # (rushing), so that its own share, and so C_5, is the identity. Its
+        # dealing is honest and stays qualified; only seat 5 holds nothing.
+        if i != 5:
+            return
+        for name in ("f", "g"):
+            others = sum(poly(all_[d][name], 5) for d in all_ if d != 5) % BL
+            rest = sum(c * pow(5, j, BL) for j, c in enumerate(s[name]) if j > 0) % BL
+            s[name][0] = (-others - rest) % BL
+
+    add(
+        "identity-commitment",
+        "Seat 5 chooses its polynomials, after seeing every other seat's share to it, so that its own share and C_5 are the identity; its dealing counts, but it holds no share.",
+        "panel-5",
+        [1, 2, 3, 4, 5],
+        {"seat": zero_own_share},
+        honest=True,
+        expect=[(5, ["identity-commitment"])],
+    )
 
     def other_pop(i, s, all_):
         if i == 3:
@@ -795,6 +820,29 @@ def main(out):
     runs_secrets = {"shape-response": {1: seat_secrets("shape-response", 1, 3)}}
     add("shape-response", "Dealer 1 publishes seat 5's share though no one complained.", "panel-5", [1, 2, 3, 4, 5], {"rounds": unasked_response}, expect="key-shape")
 
+    def complaint_from_absent(rounds, ctx, d):
+        r1, r2, r3, r4 = rounds
+        h2 = round_hash(round_hash(ctx, 1, enc_round(r1)), 2, enc_round(r2))
+        body = lst([u8(1)])
+        sk5 = panels["panel-5"]["secrets"][4]
+        return [r1, r2, r3 + [{"index": 5, "body": body, "sig": signed(3, h2, 5, body, sk5)}], r4]
+
+    add("order-complaint", "Seat 5, absent from round 1, complains about dealer 1 in round 3.", "panel-5", [1, 2, 3, 4], {"rounds": complaint_from_absent}, expect="key-order")
+
+    def complaint_signed_early(rounds, ctx, d):
+        r1, r2, r3, r4 = rounds
+        h1 = round_hash(ctx, 1, enc_round(r1))
+        return [r1, r2, [resign(m, 3, h1, d[m["index"]]) if m["index"] == 3 else m for m in r3], r4]
+
+    add("signature-complaint", "As complaint-answered, but seat 3 signs its complaint over h_1 instead of h_2.", "panel-5", [1, 2, 3, 4, 5], {"plain": bad_share_to_3, "seal": bad_seal_to_4, "rounds": complaint_signed_early}, expect="key-signature")
+
+    def response_signed_early(rounds, ctx, d):
+        r1, r2, r3, r4 = rounds
+        h2 = round_hash(round_hash(ctx, 1, enc_round(r1)), 2, enc_round(r2))
+        return [r1, r2, r3, [resign(m, 4, h2, d[m["index"]]) for m in r4]]
+
+    add("signature-response", "As complaint-answered, but dealer 2 signs its response over h_2 instead of h_3.", "panel-5", [1, 2, 3, 4, 5], {"plain": bad_share_to_3, "seal": bad_seal_to_4, "rounds": response_signed_early}, expect="key-signature")
+
     def equivocate(rounds, ctx, d):
         other = keys_body(ctx, seat_secrets("equivocation", 1, 3))
         r1 = [resign({**m, "body": other}, 1, ctx, d[1]) if m["index"] == 1 else m for m in rounds[0]]
@@ -832,6 +880,19 @@ def main(out):
     share_check("context-recipient", "Dealer 1's share for seat 2, checked by seat 3.", "honest-5", 3, good, "share-context")
     share_check("context-run", "Dealer 1's share for seat 2 of another run (absent), checked in honest-5.", "honest-5", 2, runs["absent"]["dealt"][(1, 2)]["bytes"], "share-context")
     share_check("hash", "Dealer 1's share for seat 3, relabelled as for seat 2: its hash isn't the one dealer 1 signed for seat 2.", "honest-5", 2, relabel(runs["honest-5"]["dealt"][(1, 3)]["bytes"], 2), "share-hash")
+    def relabel_dealer(b, dealer):
+        # The dealer byte follows the header and key_context.
+        return b[:35] + u8(dealer) + b[36:]
+
+    share_check("context-own", "Dealer 1's share for seat 2, relabelled as dealt by seat 2 itself.", "honest-5", 2, relabel_dealer(good, 2), "share-context")
+    share_check(
+        "context-no-dealing",
+        "Dealer 1's share for seat 2 of no-dealing, relabelled as dealt by seat 3, which dealt nothing.",
+        "no-dealing",
+        2,
+        relabel_dealer(runs["no-dealing"]["dealt"][(1, 2)]["bytes"], 3),
+        "share-context",
+    )
     flipped = bytearray(good)
     flipped[-1] ^= 1
     share_check("hash-flipped", "A tag byte of dealer 1's share for seat 2 flipped.", "honest-5", 2, bytes(flipped), "share-hash")

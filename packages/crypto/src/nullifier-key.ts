@@ -278,8 +278,8 @@ function chain(context: Uint8Array, t: Partial<Rounds>): Uint8Array[] {
 
 const ROUND_CODECS = [ROUND_1, ROUND_2, ROUND_3, ROUND_4] as const;
 
-// `body` is the message's encoding without `index` (first byte) and the
-// 64-byte signature (last), which is exactly its fields in between.
+// The message's encoding without its 64-byte signature is `u8(i) ‖ body`,
+// which follows `u8(r) ‖ h_{r−1}` in what the seat signs.
 function signedMessage(round: number, prev: Uint8Array, encoded: Uint8Array): Uint8Array {
   const w = new Writer();
   u8.write(w, round);
@@ -370,6 +370,28 @@ function seatKey(run: Scope, seat: RegistrationSecrets): void {
   // A key outside its seat would sign messages no checker attributes to it.
   if (!equalBytes(identityKey(seat.identitySecret), key))
     throw new RangeError("nullifier key: identitySecret is not the key of seat index");
+}
+
+/**
+ * The seat's round-1 message must carry the keys it holds: a node that
+ * regenerated them after signing round 1 would fail to open every honest
+ * dealer's share, and its complaints would make honest dealers publish its
+ * shares, `k` points of their polynomials with the corrupt seats' `k − 1`
+ * (docs/spec/nullifier-key.md, Round 1).
+ */
+function ownKeys(
+  keys: readonly RegistrationKeysMessage[],
+  index: number,
+  kem: KemPublicKey,
+  signingKey?: Uint8Array,
+): void {
+  const own = keys.find((m) => m.index === index);
+  if (own === undefined) throw new RangeError("nullifier key: the seat has no round-1 message");
+  if (
+    !equalBytes(encode(KEM_PUBLIC_KEY, own.kem_key), encode(KEM_PUBLIC_KEY, kem)) ||
+    (signingKey !== undefined && !equalBytes(own.signing_key, signingKey))
+  )
+    throw new RangeError("nullifier key: the seat's round-1 message doesn't carry its keys");
 }
 
 /** Round 1: the seat's registration KEM key and signing key, with the signing key's signature. */
@@ -547,8 +569,7 @@ export function dealingMessageWith(
   const run = runOf(params);
   seatKey(run, seat);
   const h = checkedPrefix(run, { keys });
-  if (!keys.some((m) => m.index === seat.index))
-    throw new RangeError("nullifier key: the seat has no round-1 message");
+  ownKeys(keys, seat.index, seat.kem.publicKey, identityKey(seat.signingSecret));
   checkPolynomials(polynomials, run.threshold);
   const f = [...polynomials.f];
   const g = [...polynomials.g];
@@ -649,13 +670,14 @@ export function checkDealtShare(
 ): DealtShareResult {
   const run = runOf(params);
   checkedPrefix(run, rounds);
-  if (
-    !Number.isSafeInteger(recipient.index) ||
-    !rounds.keys.some((m) => m.index === recipient.index)
-  )
-    throw new RangeError("nullifier key: the recipient has no round-1 message");
   // Round-trips the secret key: a 64-byte seed and x in 1 to ℓ − 1.
   const secret = decode(KEM_SECRET_KEY, encode(KEM_SECRET_KEY, recipient.secretKey));
+  // Only the key the seat registered: with any other, every honest share
+  // would fail to open and look like grounds for a complaint.
+  ownKeys(rounds.keys, recipient.index, {
+    ek: ml_kem768.keygen(secret.seed).publicKey,
+    dh: G.multiply(secret.x),
+  });
   let msg: DealtShare;
   try {
     msg = decodeDealtShare(bytes, 1);
@@ -732,8 +754,7 @@ export function complaintsMessage(
   const run = runOf(params);
   seatKey(run, seat);
   const h = checkedPrefix(run, rounds);
-  if (!rounds.keys.some((m) => m.index === seat.index))
-    throw new RangeError("nullifier key: the seat has no round-1 message");
+  ownKeys(rounds.keys, seat.index, seat.kem.publicKey, identityKey(seat.signingSecret));
   const s2 = rounds.dealings.map((m) => m.index);
   if (
     dealers.length === 0 ||
@@ -804,8 +825,7 @@ export type NullifierKeyErrorCode =
   | "key-order"
   | "key-shape"
   | "key-signature"
-  | "key-quorum"
-  | "key-commitment";
+  | "key-quorum";
 
 /** Why a seat isn't qualified, in the order docs/spec/nullifier-key.md lists them. */
 export type KeySeatReason =
@@ -814,7 +834,8 @@ export type KeySeatReason =
   | "duplicate-key"
   | "no-dealing"
   | "unanswered"
-  | "bad-reveal";
+  | "bad-reveal"
+  | "identity-commitment";
 
 export interface KeySeatResult {
   readonly index: number;
@@ -835,6 +856,8 @@ export type NullifierKeyCheck =
       readonly keyId: Uint8Array;
       readonly seats: readonly KeySeatResult[];
       readonly qualified: readonly KeySeat[];
+      /** The qualified dealers (GJKR's `QUAL`), whose polynomials make up the key. */
+      readonly dealers: readonly number[];
       /** What the answer check takes (docs/spec/keyed-nullifier.md, Answer check). */
       readonly key: NullifierKey;
     }
@@ -950,7 +973,7 @@ function seatResults(run: Run, t: Rounds): KeySeatResult[] {
 
 /**
  * The transcript check of docs/spec/nullifier-key.md: the context rebuilt
- * from `scope` (never from the transcript), checks 1 to 6 in order, and for
+ * from `scope` (never from the transcript), checks 1 to 5 in order, and for
  * a valid transcript the key: `key_id`, the threshold and each qualified
  * seat's registration keys and share commitment.
  */
@@ -970,18 +993,24 @@ export function checkNullifierKeyTranscript(
   const code = structureCode(run, t);
   if (code !== null) return { ok: false, code };
   const seats = seatResults(run, t);
-  const indices = seats.filter((s) => s.reasons.length === 0).map((s) => s.index);
-  if (indices.length < run.threshold) return { ok: false, code: "key-quorum", seats };
-  const qualifiedDealings = t.dealings.filter((m) => indices.includes(m.index));
-  const qualified = indices.map((index) => {
+  // The qualified dealers; a dealer whose own share commitment is the identity
+  // still deals, but holds nothing (identity-commitment).
+  const dealers = seats.filter((s) => s.reasons.length === 0).map((s) => s.index);
+  const qualifiedDealings = t.dealings.filter((m) => dealers.includes(m.index));
+  const holders = dealers.flatMap((index) => {
     let commitment = BJJ_G.subtract(BJJ_G);
     for (const d of qualifiedDealings)
       commitment = commitment.add(commitmentAt(d.commitments, index));
+    if (commitment.is0()) {
+      const seat = seats.find((s) => s.index === index) as KeySeatResult;
+      (seat.reasons as KeySeatReason[]).push("identity-commitment");
+      return [];
+    }
     const m = t.keys.find((k) => k.index === index) as RegistrationKeysMessage;
-    return { index, kemKey: m.kem_key, signingKey: m.signing_key, commitment };
+    return [{ index, kemKey: m.kem_key, signingKey: m.signing_key, commitment }];
   });
-  if (qualified.some((s) => s.commitment.is0()))
-    return { ok: false, code: "key-commitment", seats };
+  if (holders.length < run.threshold) return { ok: false, code: "key-quorum", seats };
+  const qualified = holders;
   const keyId = nullifierKeyId(bytes);
   const n = run.keys.length;
   const key: NullifierKey = {
@@ -996,7 +1025,7 @@ export function checkNullifierKeyTranscript(
       (_, i) => qualified.find((s) => s.index === i + 1)?.commitment ?? null,
     ),
   };
-  return { ok: true, keyId, seats, qualified, key };
+  return { ok: true, keyId, seats, dealers, qualified, key };
 }
 
 /** What a seat received from one other dealer: its dealt share, or the dealer's reveal. */
@@ -1024,18 +1053,18 @@ export function seatShareOf(
   if (seat === undefined) throw new RangeError("nullifier key: the seat isn't qualified");
   let sk = 0n;
   let s = 0n;
-  for (const q of check.qualified) {
+  for (const dealer of check.dealers) {
     let value: { share: bigint; blind: bigint } | undefined;
-    if (q.index === index)
+    if (dealer === index)
       value = { share: evaluatePolynomial(own.f, index), blind: evaluatePolynomial(own.g, index) };
     else
       value =
         transcript.responses
-          .find((m) => m.index === q.index)
+          .find((m) => m.index === dealer)
           ?.reveals.find((r) => r.complainer === index) ??
-        received.find((r) => r.dealer === q.index);
+        received.find((r) => r.dealer === dealer);
     if (value === undefined)
-      throw new RangeError(`nullifier key: no share from qualified dealer ${q.index}`);
+      throw new RangeError(`nullifier key: no share from qualified dealer ${dealer}`);
     sk = modL(sk + value.share);
     s = modL(s + value.blind);
   }

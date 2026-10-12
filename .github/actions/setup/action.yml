@@ -27,13 +27,16 @@ runs:
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: vp install --frozen-lockfile --ignore-scripts -- --ignore-pnpmfile
-    # Workspace packages import @abolishus/crypto through its exports, which
-    # point at dist/, so type-aware lint, checks, tests and packs of its
-    # dependants need it built first (the verifier, P1-19).
+    # Workspace packages import @abolishus/crypto and @abolishus/sdk through
+    # their exports, which point at dist/, so type-aware lint, checks, tests
+    # and packs of their dependants need them built first (the verifier,
+    # P1-19; admin-cli's simulations, P1-21). The sdk's build needs crypto's.
     - name: Build the workspace libraries other packages import
       shell: bash
       working-directory: ${{ inputs.working-directory }}
-      run: vp run --no-cache --filter @abolishus/crypto build
+      run: |
+        vp run --no-cache --filter @abolishus/crypto build
+        vp run --no-cache --filter @abolishus/sdk build
     - name: Install Noir, Barretenberg and Foundry
       if: inputs.toolchain == 'true'
       shell: bash

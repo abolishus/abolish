@@ -449,3 +449,20 @@ export {
   verifyCeremonyRegistration,
   verifyStatement,
 } from "./trustee.ts";
+export {
+  checkTier1Addition,
+  decodeTier1Addition,
+  encodeTier1Addition,
+  type Tier1Addition,
+  type Tier1AdditionDecodeResult,
+  type Tier1AdditionResult,
+  type Vouch,
+  type VouchContext,
+  type VouchRole,
+  VOUCH_K,
+  VOUCH_LENGTH,
+  VOUCH_SLOTS,
+  vouchMessage,
+  vouchScope,
+  vouchSlotScope,
+} from "./vouch.ts";

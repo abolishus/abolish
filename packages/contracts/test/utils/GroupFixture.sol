@@ -18,12 +18,12 @@ contract GroupHarness {
         return GroupRegistryLib.addMembersHash(groupId, tier, firstIndex, commitmentsHash);
     }
 
-    function removeMembersHash(uint64 groupId, uint8 tier, bytes32 indicesHash)
+    function removeMembersHash(uint64 groupId, uint8 tier, uint64 size, bytes32 indicesHash)
         external
         pure
         returns (bytes32)
     {
-        return GroupRegistryLib.removeMembersHash(groupId, tier, indicesHash);
+        return GroupRegistryLib.removeMembersHash(groupId, tier, size, indicesHash);
     }
 
     function digest(bytes32 separator, bytes32 structHash) external pure returns (bytes32) {
@@ -123,11 +123,13 @@ library GroupFixture {
         );
     }
 
-    /// The `RemoveMembers` digest `registry` checks for these indices.
+    /// The `RemoveMembers` digest `registry` checks for these indices,
+    /// signed at member count `size`.
     function removeDigest(
         GroupRegistry registry,
         uint64 groupId,
         uint8 tier,
+        uint64 size,
         uint64[] memory indices
     ) internal view returns (bytes32) {
         uint256[] memory words = new uint256[](indices.length);
@@ -136,7 +138,9 @@ library GroupFixture {
         }
         return GroupRegistryLib.digest(
             registry.domainSeparator(),
-            GroupRegistryLib.removeMembersHash(groupId, tier, keccak256(abi.encodePacked(words)))
+            GroupRegistryLib.removeMembersHash(
+                groupId, tier, size, keccak256(abi.encodePacked(words))
+            )
         );
     }
 
@@ -166,13 +170,14 @@ library GroupFixture {
         );
     }
 
-    /// `u64(group_id) ‖ u16(count) ‖ u64(index) × count ‖ u8(approvals) ‖ approvals`.
-    function encodeRemove(uint64 groupId, uint64[] memory indices, Approval[] memory a)
+    /// `u64(group_id) ‖ u64(size) ‖ u16(count) ‖ u64(index) × count ‖
+    /// u8(approvals) ‖ approvals`.
+    function encodeRemove(uint64 groupId, uint64 size, uint64[] memory indices, Approval[] memory a)
         internal
         pure
         returns (bytes memory out)
     {
-        out = abi.encodePacked(groupId, uint16(indices.length));
+        out = abi.encodePacked(groupId, size, uint16(indices.length));
         for (uint256 i; i < indices.length; i++) {
             out = abi.encodePacked(out, indices[i]);
         }
@@ -192,7 +197,7 @@ library GroupFixture {
         return encodeAdd(groupId, count, commitments, approve(secrets, seats, d));
     }
 
-    /// A signed removal of `indices` from `groupId`.
+    /// A signed removal of `indices` from `groupId`, at its current count.
     function removal(
         GroupRegistry registry,
         uint256[] memory secrets,
@@ -200,9 +205,22 @@ library GroupFixture {
         uint64 groupId,
         uint64[] memory indices
     ) internal view returns (bytes memory) {
+        (,, uint64 count) = registry.groupOf(groupId);
+        return removalAt(registry, secrets, seats, groupId, count, indices);
+    }
+
+    /// A signed removal of `indices` from `groupId`, signed at `size`.
+    function removalAt(
+        GroupRegistry registry,
+        uint256[] memory secrets,
+        uint8[] memory seats,
+        uint64 groupId,
+        uint64 size,
+        uint64[] memory indices
+    ) internal view returns (bytes memory) {
         (uint8 tier,,) = registry.groupOf(groupId);
-        bytes32 d = removeDigest(registry, groupId, tier, indices);
-        return encodeRemove(groupId, indices, approve(secrets, seats, d));
+        bytes32 d = removeDigest(registry, groupId, tier, size, indices);
+        return encodeRemove(groupId, size, indices, approve(secrets, seats, d));
     }
 
     /// `count` distinct valid commitments derived from `seed`.

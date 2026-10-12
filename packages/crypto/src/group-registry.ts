@@ -31,7 +31,8 @@ export const GROUP_REGISTRY_DOMAIN_TYPE =
 export const ADD_MEMBERS_TYPE =
   "AddMembers(uint64 groupId,uint8 tier,uint64 firstIndex,uint256[] commitments)";
 /** The EIP-712 type of a removal's approval. */
-export const REMOVE_MEMBERS_TYPE = "RemoveMembers(uint64 groupId,uint8 tier,uint64[] indices)";
+export const REMOVE_MEMBERS_TYPE =
+  "RemoveMembers(uint64 groupId,uint8 tier,uint64 size,uint64[] indices)";
 
 const DOMAIN_NAME = "Abolish group registry";
 const DOMAIN_VERSION = "1";
@@ -41,7 +42,7 @@ const HALF_N = (N - 1n) / 2n;
 const MAX_U64 = (1n << 64n) - 1n;
 const MAX_U256 = (1n << 256n) - 1n;
 const ADDITION_HEADER = 18; // u64(group_id) ‖ u64(first_index) ‖ u16(count)
-const REMOVAL_HEADER = 10; // u64(group_id) ‖ u16(count)
+const REMOVAL_HEADER = 18; // u64(group_id) ‖ u64(size) ‖ u16(count)
 const APPROVAL = 66; // u8(seat) ‖ bytes[32](r) ‖ bytes[32](s) ‖ u8(v)
 
 const utf8 = new TextEncoder();
@@ -69,12 +70,19 @@ export interface GroupAddition {
 /** A decoded `removeMembers` record. */
 export interface GroupRemoval {
   readonly groupId: bigint;
+  /** The group's member count when the registrars signed; every index is below it. */
+  readonly size: bigint;
   readonly indices: readonly bigint[];
   readonly approvals: readonly GroupApproval[];
 }
 
 /** The stateless decode errors of docs/spec/vectors/group-registry.json. */
-export type GroupRecordError = "length" | "batch" | "forbidden-commitment" | "index-order";
+export type GroupRecordError =
+  | "length"
+  | "batch"
+  | "forbidden-commitment"
+  | "index-order"
+  | "index-range";
 
 export type GroupRecordResult<T> =
   | { readonly ok: true; readonly value: T }
@@ -179,15 +187,17 @@ export function decodeGroupAddition(bytes: Uint8Array): GroupRecordResult<GroupA
 
 /**
  * Decodes a `removeMembers` record, applying the registry's stateless checks
- * in its order: length, batch, strictly increasing indices. Whether each
- * index is below the member count and not yet removed needs the registry's
- * state, and the approvals are `checkGroupApprovals`'.
+ * in its order: length, batch, then index by index, greater than the one
+ * before and below the signed `size`. Whether `size` is at most the group's
+ * member count and an index is not yet removed needs the registry's state,
+ * and the approvals are `checkGroupApprovals`'.
  */
 export function decodeGroupRemoval(bytes: Uint8Array): GroupRecordResult<GroupRemoval> {
   const b = copyRecord(bytes);
   if (!exactLength(b, REMOVAL_HEADER, 8)) return { ok: false, error: "length" };
   const r = new Reader(b);
   const groupId = u64Of(r);
+  const size = u64Of(r);
   const count = r.uint(2);
   if (count < 1 || count > GROUP_REGISTRY_MAX_BATCH) return { ok: false, error: "batch" };
   const indices: bigint[] = [];
@@ -196,11 +206,15 @@ export function decodeGroupRemoval(bytes: Uint8Array): GroupRecordResult<GroupRe
     // Strictly increasing: a record removes each leaf once, and has one order.
     const last = indices.at(-1);
     if (last !== undefined && index <= last) return { ok: false, error: "index-order" };
+    // Below the signed size: every index named was a member's when signed, so
+    // a removal signed ahead of an addition can't later remove whoever lands
+    // there (T-06).
+    if (index >= size) return { ok: false, error: "index-range" };
     indices.push(index);
   }
   const approvals = readApprovals(r);
   r.end();
-  return { ok: true, value: { groupId, indices, approvals } };
+  return { ok: true, value: { groupId, size, indices, approvals } };
 }
 
 function checkU64(v: unknown, what: string): bigint {
@@ -255,15 +269,18 @@ export function encodeGroupAddition(addition: GroupAddition): Uint8Array {
 
 /** The `removeMembers` record of `removal`; see `encodeGroupAddition`. */
 export function encodeGroupRemoval(removal: GroupRemoval): Uint8Array {
-  const { groupId, indices, approvals } = removal;
+  const { groupId, size, indices, approvals } = removal;
   const w = new Writer();
   w.bytes(word(checkU64(groupId, "groupId")).subarray(24));
+  const bound = checkU64(size, "size");
+  w.bytes(word(bound).subarray(24));
   const items = checkBatch(indices, "indices");
   w.uint(2, items.length);
   let last = -1n;
   for (const x of items) {
     const index = checkU64(x, "indices");
     if (index <= last) throw new EncodeError("indices: must be strictly increasing");
+    if (index >= bound) throw new EncodeError("indices: must be below size");
     last = index;
     w.bytes(word(index).subarray(24));
   }
@@ -341,6 +358,7 @@ export interface AddMembersMessage {
 export interface RemoveMembersMessage {
   readonly groupId: bigint;
   readonly tier: number;
+  readonly size: bigint;
   readonly indices: readonly bigint[];
 }
 
@@ -361,14 +379,18 @@ export function addMembersStructHash(message: AddMembersMessage): Uint8Array {
   );
 }
 
-/** `hashStruct(RemoveMembers)`. */
+/**
+ * `hashStruct(RemoveMembers)`. Binding `size` bounds the indices a signed
+ * removal can ever name to members present when it was signed (T-06).
+ */
 export function removeMembersStructHash(message: RemoveMembersMessage): Uint8Array {
-  const { groupId, tier, indices } = message;
+  const { groupId, tier, size, indices } = message;
   return keccak(
     concat([
       REMOVE_MEMBERS_TYPE_HASH,
       word(uintArg(groupId, MAX_U64, "groupId")),
       word(tierArg(tier)),
+      word(uintArg(size, MAX_U64, "size")),
       arrayHash(indices, MAX_U64, "indices"),
     ]),
   );

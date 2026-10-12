@@ -87,31 +87,34 @@ contract GroupHandler is TestBase {
     }
 
     /// Removes up to three indices drawn from the group's members and the
-    /// index just past them,
-    /// in the order drawn when `howMany` is below 128 (so often unordered or
-    /// repeated), else each above the one before.
+    /// index just past them, in the order drawn when `howMany` is below 128
+    /// (so often unordered or repeated), else each above the one before.
+    /// The signed size is the group's count, or (by `sizeSkew`) one past it
+    /// or half of it, so some indices fall at or beyond it.
     function remove(
         uint8 groupSeed,
         uint64[3] memory draws,
         uint8 howMany,
+        uint8 sizeSkew,
         uint8 seatMask,
         uint8 forgeSeed
     ) external {
         uint64 groupId = uint64(groupSeed % (groups + 1));
         uint64 count = shadowCount[groupId];
+        uint64 size = sizeSkew % 8 == 0 ? count + 1 : (sizeSkew % 8 == 1 ? count / 2 : count);
         uint64[] memory idx = new uint64[](howMany % 3 + 1);
-        bool allowed = groupId < groups;
+        bool allowed = groupId < groups && size <= count;
         for (uint256 i; i < idx.length; i++) {
             idx[i] = draws[i] % (count + 1);
             if (howMany >= 128 && i > 0) idx[i] = idx[i - 1] + 1 + draws[i] % 2;
-            if (idx[i] >= count || shadowRemoved[groupId][idx[i]]) allowed = false;
+            if (idx[i] >= size || shadowRemoved[groupId][idx[i]]) allowed = false;
             if (i > 0 && idx[i] <= idx[i - 1]) allowed = false;
         }
-        bytes32 d = GroupFixture.removeDigest(registry, groupId, 0, idx);
+        bytes32 d = GroupFixture.removeDigest(registry, groupId, 0, size, idx);
         (GroupFixture.Approval[] memory a, bool forged) = _approvals(seatMask, forgeSeed, d);
         allowed = allowed && a.length >= 2 && !forged;
 
-        try registry.removeMembers(GroupFixture.encodeRemove(groupId, idx, a)) {
+        try registry.removeMembers(GroupFixture.encodeRemove(groupId, size, idx, a)) {
             if (!allowed) unexpected = true;
             for (uint256 i; i < idx.length; i++) {
                 shadowRemoved[groupId][idx[i]] = true;
@@ -152,8 +155,9 @@ contract GroupHandler is TestBase {
 
 /// Invariants, over any sequence of handler calls:
 /// 1. A record is accepted exactly when its group exists, its position is the
-///    group's count (additions), its indices are strictly increasing members
-///    not yet removed (removals), and at least the threshold of distinct
+///    group's count (additions), its indices are strictly increasing, below
+///    the signed size (itself at most the group's count) and not yet removed
+///    (removals), and at least the threshold of distinct
 ///    registrars signed it with every signature valid (T-06, T-62, T-71).
 /// 2. Member counts never decrease, and equal the sum of the accepted
 ///    additions' sizes: every accepted addition's first index was the count

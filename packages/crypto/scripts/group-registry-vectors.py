@@ -194,7 +194,7 @@ def type_hash(t):
 
 DOMAIN_TYPE = "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"
 ADD_TYPE = "AddMembers(uint64 groupId,uint8 tier,uint64 firstIndex,uint256[] commitments)"
-REMOVE_TYPE = "RemoveMembers(uint64 groupId,uint8 tier,uint64[] indices)"
+REMOVE_TYPE = "RemoveMembers(uint64 groupId,uint8 tier,uint64 size,uint64[] indices)"
 NAME, VERSION = "Abolish group registry", "1"
 
 
@@ -218,9 +218,9 @@ def add_struct_hash(group_id, tier, first_index, commitments):
     return keccak256(type_hash(ADD_TYPE) + word(group_id) + word(tier) + word(first_index) + arr)
 
 
-def remove_struct_hash(group_id, tier, indices):
+def remove_struct_hash(group_id, tier, size, indices):
     arr = keccak256(b"".join(word(i) for i in indices))
-    return keccak256(type_hash(REMOVE_TYPE) + word(group_id) + word(tier) + arr)
+    return keccak256(type_hash(REMOVE_TYPE) + word(group_id) + word(tier) + word(size) + arr)
 
 
 # --------------------------------------------------------------- self-checks
@@ -316,9 +316,10 @@ def add_record(group_id, first_index, commitments, approvals):
     )
 
 
-def remove_record(group_id, indices, approvals):
+def remove_record(group_id, size, indices, approvals):
     return (
         group_id.to_bytes(8, "big")
+        + size.to_bytes(8, "big")
         + len(indices).to_bytes(2, "big")
         + b"".join(i.to_bytes(8, "big") for i in indices)
         + bytes([len(approvals)])
@@ -333,8 +334,8 @@ def add_digest(group_id, first_index, commitments, tier=0, sep=SEP):
     return eip712_digest(sep, add_struct_hash(group_id, tier, first_index, commitments))
 
 
-def remove_digest(group_id, indices, tier=0, sep=SEP):
-    return eip712_digest(sep, remove_struct_hash(group_id, tier, indices))
+def remove_digest(group_id, size, indices, tier=0, sep=SEP):
+    return eip712_digest(sep, remove_struct_hash(group_id, tier, size, indices))
 
 
 def check_approvals(digest, approvals):
@@ -375,21 +376,26 @@ def parse_add(rec):
 
 
 def parse_remove(rec):
-    if len(rec) < 11:
+    if len(rec) < 19:
         raise ValueError("length")
-    count = int.from_bytes(rec[8:10], "big")
-    at = 10 + 8 * count
+    count = int.from_bytes(rec[16:18], "big")
+    at = 18 + 8 * count
     if len(rec) < at + 1:
         raise ValueError("length")
     n = rec[at]
-    if len(rec) != 11 + 8 * count + 66 * n:
+    if len(rec) != 19 + 8 * count + 66 * n:
         raise ValueError("length")
     if not 1 <= count <= MAX_BATCH:
         raise ValueError("batch")
-    idx = [int.from_bytes(rec[10 + 8 * i : 18 + 8 * i], "big") for i in range(count)]
-    if any(b <= a for a, b in zip(idx, idx[1:])):
-        raise ValueError("index-order")
-    return int.from_bytes(rec[0:8], "big"), idx, parse_approvals(rec[at + 1 :], n)
+    size = int.from_bytes(rec[8:16], "big")
+    idx = [int.from_bytes(rec[18 + 8 * i : 26 + 8 * i], "big") for i in range(count)]
+    # Index by index: above the one before, then below size (spec, Removals).
+    for i, x in enumerate(idx):
+        if i and x <= idx[i - 1]:
+            raise ValueError("index-order")
+        if x >= size:
+            raise ValueError("index-range")
+    return int.from_bytes(rec[0:8], "big"), size, idx, parse_approvals(rec[at + 1 :], n)
 
 
 def parse_approvals(b, n):
@@ -410,10 +416,10 @@ def verdict_add(rec):
 
 def verdict_remove(rec):
     try:
-        g, idx, aps = parse_remove(rec)
+        g, size, idx, aps = parse_remove(rec)
     except ValueError as e:
         return {"error": str(e)}
-    bad = check_approvals(remove_digest(g, idx), aps)
+    bad = check_approvals(remove_digest(g, size, idx), aps)
     return {"error": bad[0], **({"seat": bad[1]} if bad[1] is not None else {})} if bad else None
 
 
@@ -469,19 +475,19 @@ def main():
 
     removals = []
 
-    def valid_remove(id_, desc, g, idx, seats):
-        d = remove_digest(g, idx)
+    def valid_remove(id_, desc, g, size, idx, seats):
+        d = remove_digest(g, size, idx)
         aps = approvals_for(d, seats)
-        rec = remove_record(g, idx, aps)
+        rec = remove_record(g, size, idx, aps)
         assert verdict_remove(rec) is None
         removals.append({
-            "id": id_, "description": desc, "groupId": g, "tier": 0, "indices": idx,
-            "structHash": hexs(remove_struct_hash(g, 0, idx)), "digest": hexs(d),
+            "id": id_, "description": desc, "groupId": g, "tier": 0, "size": size, "indices": idx,
+            "structHash": hexs(remove_struct_hash(g, 0, size, idx)), "digest": hexs(d),
             "approvals": ap_json(aps, d), "record": hexs(rec),
         })
 
-    valid_remove("one-index", "Remove member 0", 0, [0], [1, 2])
-    valid_remove("several", "Remove three members, signed by every seat", 3, [1, 5, 2**32 - 1], [1, 2, 3])
+    valid_remove("one-index", "Remove member 0 of a group of 1", 0, 1, [0], [1, 2])
+    valid_remove("several", "Remove three members of a full group, signed by every seat", 3, 2**32, [1, 5, 2**32 - 1], [1, 2, 3])
 
     # Rejected records: each breaks exactly one rule.
     rejected = []
@@ -540,20 +546,23 @@ def main():
     for id_, desc, d in others:
         reject("add", id_, desc, add_record(0, 0, cs1, approvals_for(d, [1, 2])), {"error": "signature", "seat": 1})
     # A removal's signature doesn't authorise an addition, and vice versa.
-    rd = remove_digest(0, [0])
+    rd = remove_digest(0, 1, [0])
     reject("add", "removal-signature", "Signed as a removal", add_record(0, 0, cs1, approvals_for(rd, [1, 2])), {"error": "signature", "seat": 1})
 
     idx = [0]
     good_r = approvals_for(rd, [1, 2])
-    rrec = remove_record(0, idx, good_r)
-    reject("remove", "remove-short", "10 bytes", rrec[:10], {"error": "length"})
+    rrec = remove_record(0, 1, idx, good_r)
+    reject("remove", "remove-short", "18 bytes: no approvals byte", rrec[:18], {"error": "length"})
     reject("remove", "remove-trailing", "One byte appended", rrec + b"\x00", {"error": "length"})
-    reject("remove", "remove-count-zero", "No indices", remove_record(0, [], approvals_for(remove_digest(0, []), [1, 2])), {"error": "batch"})
-    reject("remove", "remove-descending", "Indices 2 then 1", remove_record(0, [2, 1], approvals_for(remove_digest(0, [2, 1]), [1, 2])), {"error": "index-order"})
-    reject("remove", "remove-repeated", "Index 3 twice", remove_record(0, [3, 3], approvals_for(remove_digest(0, [3, 3]), [1, 2])), {"error": "index-order"})
-    reject("remove", "remove-below-threshold", "One approval", remove_record(0, idx, good_r[:1]), {"error": "approvals"})
-    reject("remove", "remove-other-index", "Signed for index 1", remove_record(0, idx, approvals_for(remove_digest(0, [1]), [1, 2])), {"error": "signature", "seat": 1})
-    reject("remove", "addition-signature", "Signed as an addition", remove_record(0, idx, approvals_for(add_digest(0, 0, [0]), [1, 2])), {"error": "signature", "seat": 1})
+    reject("remove", "remove-count-zero", "No indices", remove_record(0, 1, [], approvals_for(remove_digest(0, 1, []), [1, 2])), {"error": "batch"})
+    reject("remove", "remove-descending", "Indices 2 then 1", remove_record(0, 4, [2, 1], approvals_for(remove_digest(0, 4, [2, 1]), [1, 2])), {"error": "index-order"})
+    reject("remove", "remove-repeated", "Index 3 twice", remove_record(0, 4, [3, 3], approvals_for(remove_digest(0, 4, [3, 3]), [1, 2])), {"error": "index-order"})
+    reject("remove", "remove-at-size", "Index 1 with size 1", remove_record(0, 1, [1], approvals_for(remove_digest(0, 1, [1]), [1, 2])), {"error": "index-range"})
+    reject("remove", "remove-size-zero", "Size 0", remove_record(0, 0, [0], approvals_for(remove_digest(0, 0, [0]), [1, 2])), {"error": "index-range"})
+    reject("remove", "remove-other-size", "Signed for size 2", remove_record(0, 1, idx, approvals_for(remove_digest(0, 2, [0]), [1, 2])), {"error": "signature", "seat": 1})
+    reject("remove", "remove-below-threshold", "One approval", remove_record(0, 1, idx, good_r[:1]), {"error": "approvals"})
+    reject("remove", "remove-other-index", "Signed for index 1", remove_record(0, 1, idx, approvals_for(remove_digest(0, 2, [1]), [1, 2])), {"error": "signature", "seat": 1})
+    reject("remove", "addition-signature", "Signed as an addition", remove_record(0, 1, idx, approvals_for(add_digest(0, 0, [0]), [1, 2])), {"error": "signature", "seat": 1})
 
     doc = {
         "format": "abolish-group-registry-vectors/1",

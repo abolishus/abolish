@@ -84,7 +84,10 @@ interface GroupRegistryVectors {
     readonly firstIndex: number | bigint;
     readonly commitments: readonly string[];
   })[];
-  readonly removals: readonly (RecordVector & { readonly indices: readonly (number | bigint)[] })[];
+  readonly removals: readonly (RecordVector & {
+    readonly size: number | bigint;
+    readonly indices: readonly (number | bigint)[];
+  })[];
   readonly rejected: readonly {
     readonly id: string;
     readonly kind: "add" | "remove";
@@ -131,7 +134,12 @@ const additionDigest = (a: GroupAddition) =>
     commitments: a.commitments,
   });
 const removalDigest = (rm: GroupRemoval) =>
-  groupRemovalDigest(DOMAIN, { groupId: rm.groupId, tier: TIER, indices: rm.indices });
+  groupRemovalDigest(DOMAIN, {
+    groupId: rm.groupId,
+    tier: TIER,
+    size: rm.size,
+    indices: rm.indices,
+  });
 
 /** What a verifier does with an addition record: decode, then rules 7 and 8. */
 function verifyAddition(record: Uint8Array): { error?: string; seat?: number } {
@@ -182,12 +190,9 @@ const approvalOf = (a: ApprovalVector): GroupApproval => ({
 function rawParse(record: Uint8Array, kind: "add" | "remove") {
   const view = new DataView(record.buffer, record.byteOffset, record.byteLength);
   const groupId = view.getBigUint64(0);
-  let at = 8;
-  let firstIndex = 0n;
-  if (kind === "add") {
-    firstIndex = view.getBigUint64(8);
-    at = 16;
-  }
+  // `first_index` for an addition, `size` for a removal.
+  const position = view.getBigUint64(8);
+  let at = 16;
   const count = view.getUint16(at);
   at += 2;
   const items: bigint[] = [];
@@ -210,8 +215,13 @@ function rawParse(record: Uint8Array, kind: "add" | "remove") {
     });
   const digest =
     kind === "add"
-      ? groupAdditionDigest(DOMAIN, { groupId, tier: TIER, firstIndex, commitments: items })
-      : groupRemovalDigest(DOMAIN, { groupId, tier: TIER, indices: items });
+      ? groupAdditionDigest(DOMAIN, {
+          groupId,
+          tier: TIER,
+          firstIndex: position,
+          commitments: items,
+        })
+      : groupRemovalDigest(DOMAIN, { groupId, tier: TIER, size: position, indices: items });
   return { digest, approvals };
 }
 
@@ -298,6 +308,7 @@ describe("group-registry vectors", () => {
       expect(d.ok).toBe(true);
       if (!d.ok) return;
       expect(d.value.groupId).toBe(BigInt(v.groupId));
+      expect(d.value.size).toBe(BigInt(v.size));
       expect(d.value.indices).toEqual(v.indices.map((x) => BigInt(x)));
       expect(d.value.approvals).toEqual(v.approvals.map(approvalOf));
       expect(toHex(encodeGroupRemoval(d.value))).toBe(v.record);
@@ -307,6 +318,7 @@ describe("group-registry vectors", () => {
       const message = {
         groupId: BigInt(v.groupId),
         tier: v.tier,
+        size: BigInt(v.size),
         indices: v.indices.map((x) => BigInt(x)),
       };
       expect(toHex(removeMembersStructHash(message))).toBe(v.structHash);
@@ -339,7 +351,7 @@ describe("each check is what refuses its vectors", () => {
   // Without the rule a vector breaks, the rest of the checks would accept it:
   // its approvals are genuine signatures over what it says.
   const signedElsewhereFine = vectors.rejected.filter((v) =>
-    ["forbidden-commitment", "index-order", "batch"].includes(v.error),
+    ["forbidden-commitment", "index-order", "index-range", "batch"].includes(v.error),
   );
   test.each(signedElsewhereFine)("$id carries valid approvals", (v) => {
     const { digest, approvals } = rawParse(hex(v.record), v.kind);
@@ -430,9 +442,11 @@ describe("each check is what refuses its vectors", () => {
     for (const c of [0n, 1n, POSEIDON2_ZERO_ONE, BN254_R])
       expect(() => encodeGroupAddition({ ...base, commitments: [c] })).toThrow(EncodeError);
     expect(() => encodeGroupAddition({ ...base, groupId: 1n << 64n })).toThrow(EncodeError);
-    const removal: GroupRemoval = { groupId: 0n, indices: [2n, 1n], approvals: [] };
+    const removal: GroupRemoval = { groupId: 0n, size: 3n, indices: [2n, 1n], approvals: [] };
     expect(() => encodeGroupRemoval(removal)).toThrow(EncodeError);
     expect(() => encodeGroupRemoval({ ...removal, indices: [1n, 1n] })).toThrow(EncodeError);
+    expect(() => encodeGroupRemoval({ ...removal, indices: [1n, 3n] })).toThrow(EncodeError);
+    expect(() => encodeGroupRemoval({ ...removal, size: 0n, indices: [0n] })).toThrow(EncodeError);
   });
 });
 
@@ -453,13 +467,19 @@ const addition = fc.record({
   commitments: fc.array(commitment, { minLength: 1, maxLength: 8 }),
   approvals: fc.array(approval, { maxLength: 4 }),
 });
-const removal = fc.record({
-  groupId: u64,
-  indices: fc
-    .uniqueArray(u64, { minLength: 1, maxLength: 8 })
-    .map((xs) => xs.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))),
-  approvals: fc.array(approval, { maxLength: 4 }),
-});
+const removal = fc
+  .record({
+    groupId: u64,
+    indices: fc
+      .uniqueArray(fc.bigInt({ min: 0n, max: (1n << 64n) - 2n }), { minLength: 1, maxLength: 8 })
+      .map((xs) => xs.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))),
+    approvals: fc.array(approval, { maxLength: 4 }),
+  })
+  .chain((rm) =>
+    fc
+      .bigInt({ min: (rm.indices.at(-1) ?? 0n) + 1n, max: (1n << 64n) - 1n })
+      .map((size) => ({ groupId: rm.groupId, size, indices: rm.indices, approvals: rm.approvals })),
+  );
 
 describe("group-registry properties", () => {
   test("decode(encode(x)) = x for additions and removals", () => {
@@ -485,7 +505,7 @@ describe("group-registry properties", () => {
   const shaped = (kind: "add" | "remove") =>
     fc
       .tuple(
-        fc.uint8Array({ minLength: kind === "add" ? 16 : 8, maxLength: kind === "add" ? 16 : 8 }),
+        fc.uint8Array({ minLength: 16, maxLength: 16 }),
         fc.integer({ min: 0, max: 4 }),
         fc.integer({ min: 0, max: 3 }),
         fc.uint8Array({ minLength: 0, maxLength: 400 }),
@@ -500,6 +520,20 @@ describe("group-registry properties", () => {
         out.set(fill.subarray(0, 66 * n), head.length + 3 + item * count);
         return out;
       });
+
+  test("a removal naming an index at or beyond its signed size is refused as index-range", () => {
+    fc.assert(
+      fc.property(removal, fc.bigInt({ min: 0n, max: (1n << 64n) - 1n }), (rm, size) => {
+        // The record re-encoded with another size, bypassing the encoder's check.
+        const b = encodeGroupRemoval(rm);
+        new DataView(b.buffer).setBigUint64(8, size);
+        const d = decodeGroupRemoval(b);
+        const reaches = rm.indices.every((i) => i < size);
+        expect(d.ok ? null : d.error).toBe(reaches ? null : "index-range");
+      }),
+      { numRuns },
+    );
+  });
 
   test.each(["add", "remove"] as const)(
     "%s: any bytes are refused or decode and re-encode to themselves",

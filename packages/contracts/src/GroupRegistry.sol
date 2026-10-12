@@ -24,9 +24,9 @@ library GroupRegistryLib {
     /// keccak256("AddMembers(uint64 groupId,uint8 tier,uint64 firstIndex,uint256[] commitments)")
     bytes32 internal constant ADD_MEMBERS_TYPEHASH =
         keccak256("AddMembers(uint64 groupId,uint8 tier,uint64 firstIndex,uint256[] commitments)");
-    /// keccak256("RemoveMembers(uint64 groupId,uint8 tier,uint64[] indices)")
+    /// keccak256("RemoveMembers(uint64 groupId,uint8 tier,uint64 size,uint64[] indices)")
     bytes32 internal constant REMOVE_MEMBERS_TYPEHASH =
-        keccak256("RemoveMembers(uint64 groupId,uint8 tier,uint64[] indices)");
+        keccak256("RemoveMembers(uint64 groupId,uint8 tier,uint64 size,uint64[] indices)");
 
     /// secp256k1's group order `N`.
     uint256 internal constant N =
@@ -65,12 +65,12 @@ library GroupRegistryLib {
     }
 
     /// `hashStruct(RemoveMembers)`, given `keccak256` of the indices' words.
-    function removeMembersHash(uint64 groupId, uint8 tier, bytes32 indicesHash)
+    function removeMembersHash(uint64 groupId, uint8 tier, uint64 size, bytes32 indicesHash)
         internal
         pure
         returns (bytes32)
     {
-        return keccak256(abi.encode(REMOVE_MEMBERS_TYPEHASH, groupId, tier, indicesHash));
+        return keccak256(abi.encode(REMOVE_MEMBERS_TYPEHASH, groupId, tier, size, indicesHash));
     }
 
     /// `keccak256(0x19 ‖ 0x01 ‖ hashStruct(domain) ‖ hashStruct(message))`.
@@ -139,7 +139,8 @@ contract GroupRegistry is EventAccumulator {
     error GroupFull(uint64 firstIndex, uint256 count);
     error ForbiddenCommitment(uint256 position);
     error IndicesOutOfOrder(uint256 position);
-    error NotAMember(uint64 index);
+    error SizeBeyondCount(uint64 size, uint64 memberCount);
+    error IndexBeyondSize(uint64 index);
     error AlreadyRemoved(uint64 index);
     error TooFewApprovals(uint256 approvals, uint8 threshold);
     error InvalidSeat(uint8 seat);
@@ -147,10 +148,14 @@ contract GroupRegistry is EventAccumulator {
 
     /// `u64(group_id) ‖ u64(first_index) ‖ u16(count)`.
     uint256 private constant ADD_HEADER = 18;
-    /// `u64(group_id) ‖ u16(count)`.
-    uint256 private constant REMOVE_HEADER = 10;
+    /// `u64(group_id) ‖ u64(size) ‖ u16(count)`.
+    uint256 private constant REMOVE_HEADER = 18;
     /// `u8(seat) ‖ bytes[32](r) ‖ bytes[32](s) ‖ u8(v)`.
     uint256 private constant APPROVAL_LENGTH = 66;
+
+    // The three immutables are the ones verifier 1.2 masks and compares with
+    // its release's values; the registrars are in storage and checked
+    // through `RegistrarsPinned` (docs/spec/contracts.md, Group registry).
 
     /// How many registrar signatures a record needs, `2 ≤ threshold ≤ n`.
     uint8 public immutable threshold;
@@ -285,15 +290,17 @@ contract GroupRegistry is EventAccumulator {
     }
 
     /// @notice Removes members of a group. The record is
-    /// `u64(group_id) ‖ u16(count) ‖ u64(index) × count ‖ u8(approvals) ‖
-    /// approvals × (u8(seat) ‖ r ‖ s ‖ u8(v))`, checked in the order of
-    /// docs/spec/contracts.md (Group registry, Removals). Each index must
-    /// name a member added and not yet removed, so a replay reverts.
+    /// `u64(group_id) ‖ u64(size) ‖ u16(count) ‖ u64(index) × count ‖
+    /// u8(approvals) ‖ approvals × (u8(seat) ‖ r ‖ s ‖ u8(v))`, checked in the
+    /// order of docs/spec/contracts.md (Group registry, Removals). `size` is
+    /// the member count the registrars signed at: each index must be below
+    /// it, so a removal can only name members that existed when it was
+    /// signed, and not be removed yet, so a replay reverts.
     function removeMembers(bytes calldata record) external {
         CanonicalCalldata.requireOneBytesArgument(record);
         uint256 len = record.length;
         if (len < REMOVE_HEADER + 1) revert MalformedRecord();
-        uint256 count = uint16(bytes2(record[8:10]));
+        uint256 count = uint16(bytes2(record[16:18]));
         uint256 indicesEnd = REMOVE_HEADER + 8 * count;
         if (len < indicesEnd + 1) revert MalformedRecord();
         uint256 approvals = uint8(record[indicesEnd]);
@@ -303,6 +310,10 @@ contract GroupRegistry is EventAccumulator {
         Group memory group = _groups[groupId];
         _requireTierZeroGroup(groupId, group);
         if (count == 0 || count > GroupRegistryLib.MAX_BATCH) revert BatchSize(count);
+        // A signed size the group hasn't reached yet would let a removal
+        // signed early wait for a member to land at an index it names.
+        uint64 size = uint64(bytes8(record[8:16]));
+        if (size > group.memberCount) revert SizeBeyondCount(size, group.memberCount);
 
         // Each index widened to a 32-byte word, EIP-712's encoding of the
         // uint64[], hashed below.
@@ -313,13 +324,14 @@ contract GroupRegistry is EventAccumulator {
             uint64 index = uint64(bytes8(record[at:at + 8]));
             // Strictly increasing, so no index is named twice.
             if (i > 0 && index <= words[i - 1]) revert IndicesOutOfOrder(i);
-            if (index >= group.memberCount) revert NotAMember(index);
+            // Below size, so below the member count too.
+            if (index >= size) revert IndexBeyondSize(index);
             if (removed[index >> 8] & (1 << (index & 0xff)) != 0) revert AlreadyRemoved(index);
             words[i] = index;
         }
 
         bytes32 structHash = GroupRegistryLib.removeMembersHash(
-            groupId, group.tier, keccak256(abi.encodePacked(words))
+            groupId, group.tier, size, keccak256(abi.encodePacked(words))
         );
         _requireApprovals(record, indicesEnd, approvals, structHash);
 

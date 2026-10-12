@@ -215,6 +215,7 @@ contract GroupRegistryVectorsTest is GroupTestBase {
         string id;
         uint64 groupId;
         uint8 tier;
+        /// `first_index` for an addition, `size` for a removal.
         uint64 firstIndex;
         uint256[] words;
         bytes32 digest;
@@ -241,9 +242,11 @@ contract GroupRegistryVectorsTest is GroupTestBase {
                 v.groupId, v.tier, v.firstIndex, keccak256(abi.encodePacked(v.words))
             );
         } else {
+            v.firstIndex = uint64(vm.parseJsonUint(json, string.concat(at, ".size")));
             v.words = vm.parseJsonUintArray(json, string.concat(at, ".indices"));
-            structHash =
-                lib.removeMembersHash(v.groupId, v.tier, keccak256(abi.encodePacked(v.words)));
+            structHash = lib.removeMembersHash(
+                v.groupId, v.tier, v.firstIndex, keccak256(abi.encodePacked(v.words))
+            );
         }
         assertEq(structHash, _word(string.concat(at, ".structHash")), v.id);
         v.digest = lib.digest(registry.domainSeparator(), structHash);
@@ -291,9 +294,18 @@ contract GroupRegistryVectorsTest is GroupTestBase {
         }
         GroupFixture.Approval[] memory a = _vectorApprovals(at, v.digest);
         assertTrue(
-            keccak256(v.record) == keccak256(GroupFixture.encodeRemove(v.groupId, idx, a)), v.id
+            keccak256(v.record)
+                == keccak256(GroupFixture.encodeRemove(v.groupId, v.firstIndex, idx, a)),
+            v.id
         );
-        uint64 count = idx[n - 1] + 1;
+        // Refused while the group is below the signed size, accepted at it.
+        uint64 count = v.firstIndex;
+        GroupFixture.setGroup(registry, v.groupId, v.tier, true, count - 1);
+        _expectRemoveRefused(
+            registry,
+            v.record,
+            abi.encodeWithSelector(GroupRegistry.SizeBeyondCount.selector, count, count - 1)
+        );
         GroupFixture.setGroup(registry, v.groupId, v.tier, true, count);
         vm.recordLogs();
         registry.removeMembers(v.record);
@@ -321,7 +333,8 @@ contract GroupRegistryVectorsTest is GroupTestBase {
 
     /// Every rejected record is refused with the error the vectors give: group
     /// 0 is empty for additions (so their position is right) and holds four
-    /// members for removals (so their indices name members).
+    /// members for removals (at least every vector's signed size, so the size
+    /// check passes and the check each vector breaks is the one that fires).
     function test_RejectedVectors() public {
         GroupRegistry registry = _deployAtVectorAddress();
         registry.createGroup(0);
@@ -382,8 +395,8 @@ contract GroupRegistryVectorsTest is GroupTestBase {
         if (e == keccak256("length")) {
             return abi.encodeWithSelector(GroupRegistry.MalformedRecord.selector);
         }
-        uint256 count = uint16(bytes2(_slice(record, add ? 16 : 8, 2)));
-        uint256 itemsEnd = add ? 18 + 32 * count : 10 + 8 * count;
+        uint256 count = uint16(bytes2(_slice(record, 16, 2)));
+        uint256 itemsEnd = add ? 18 + 32 * count : 18 + 8 * count;
         if (e == keccak256("batch")) {
             return abi.encodeWithSelector(GroupRegistry.BatchSize.selector, count);
         }
@@ -399,11 +412,21 @@ contract GroupRegistryVectorsTest is GroupTestBase {
         if (e == keccak256("index-order")) {
             for (uint256 k = 1; k < count; k++) {
                 if (
-                    uint64(bytes8(_slice(record, 10 + 8 * k, 8)))
-                        <= uint64(bytes8(_slice(record, 2 + 8 * k, 8)))
+                    uint64(bytes8(_slice(record, 18 + 8 * k, 8)))
+                        <= uint64(bytes8(_slice(record, 10 + 8 * k, 8)))
                 ) return abi.encodeWithSelector(GroupRegistry.IndicesOutOfOrder.selector, k);
             }
             revert("indices in order");
+        }
+        if (e == keccak256("index-range")) {
+            uint64 size = uint64(bytes8(_slice(record, 8, 8)));
+            for (uint256 k; k < count; k++) {
+                uint64 index = uint64(bytes8(_slice(record, 18 + 8 * k, 8)));
+                if (index >= size) {
+                    return abi.encodeWithSelector(GroupRegistry.IndexBeyondSize.selector, index);
+                }
+            }
+            revert("indices below size");
         }
         if (e == keccak256("approvals")) {
             return abi.encodeWithSelector(
@@ -881,7 +904,7 @@ contract GroupRegistryTest is GroupTestBase {
             ),
             GroupRegistryLib.digest(
                 registry.domainSeparator(),
-                GroupRegistryLib.removeMembersHash(0, 0, commitmentsHash)
+                GroupRegistryLib.removeMembersHash(0, 0, 0, commitmentsHash)
             )
         ];
         for (uint256 i; i < digests.length; i++) {
@@ -997,14 +1020,14 @@ contract GroupRegistryTest is GroupTestBase {
         );
     }
 
-    /// An index must name a member: added already and not removed, so a
+    /// An index must be below the signed size and not removed already, so a
     /// replayed removal reverts.
     function test_RemovalRefusesStrayIndices() public {
         registry.addMembers(_addition(0, GroupFixture.commitments(1, 4)));
         _expectRemoveRefused(
             registry,
             _removal(0, GroupFixture.indices(1, 4)),
-            abi.encodeWithSelector(GroupRegistry.NotAMember.selector, 4)
+            abi.encodeWithSelector(GroupRegistry.IndexBeyondSize.selector, 4)
         );
         bytes memory record = _removal(0, GroupFixture.indices(1, 3));
         registry.removeMembers(record);
@@ -1019,30 +1042,72 @@ contract GroupRegistryTest is GroupTestBase {
         registry.removeMembers(_removal(0, GroupFixture.indices(0, 2)));
     }
 
+    /// The signed size can't exceed the group's member count: a removal is
+    /// signed for members the group already has.
+    function test_RemovalRefusesASizeBeyondTheCount() public {
+        registry.addMembers(_addition(0, GroupFixture.commitments(1, 2)));
+        _expectRemoveRefused(
+            registry,
+            _removalAt(0, 3, GroupFixture.indices(1)),
+            abi.encodeWithSelector(GroupRegistry.SizeBeyondCount.selector, 3, 2)
+        );
+        // A size below the count is fine: the group grew since it was signed.
+        registry.removeMembers(_removalAt(0, 1, GroupFixture.indices(0)));
+    }
+
+    /// A removal signed at size `s` never removes index `s` or beyond, even
+    /// once the group has grown past it and a member landed there: what
+    /// `size` is signed for (docs/spec/contracts.md, Removals).
+    function test_RemovalSignedAtASizeCantReachLaterMembers() public {
+        registry.addMembers(_addition(0, GroupFixture.commitments(1, 2)));
+        bytes memory early = _removalAt(0, 2, GroupFixture.indices(1, 2));
+        bytes memory refusal = abi.encodeWithSelector(GroupRegistry.IndexBeyondSize.selector, 2);
+        _expectRemoveRefused(registry, early, refusal);
+        registry.addMembers(_addition(0, GroupFixture.commitments(2, 8)));
+        (,, uint64 count) = registry.groupOf(0);
+        assertEq(count, 10, "grown");
+        _expectRemoveRefused(registry, early, refusal);
+        assertTrue(!registry.isRemoved(0, 2), "later member untouched");
+        // The same size cannot be relabelled: the signature covers it.
+        bytes memory relabelled = bytes.concat(early);
+        relabelled[15] = bytes1(uint8(10));
+        _expectRemoveRefused(
+            registry, relabelled, abi.encodeWithSelector(GroupRegistry.InvalidSignature.selector, 2)
+        );
+    }
+
     function test_RemovalRefusesBadApprovals() public {
         registry.addMembers(_addition(0, GroupFixture.commitments(1, 2)));
         uint64[] memory idx = GroupFixture.indices(1);
-        bytes32 d = GroupFixture.removeDigest(registry, 0, 0, idx);
+        bytes32 d = GroupFixture.removeDigest(registry, 0, 0, 2, idx);
         uint8[] memory one = new uint8[](1);
         one[0] = 1;
         _expectRemoveRefused(
             registry,
-            GroupFixture.encodeRemove(0, idx, GroupFixture.approve(secrets, one, d)),
+            GroupFixture.encodeRemove(0, 2, idx, GroupFixture.approve(secrets, one, d)),
             abi.encodeWithSelector(GroupRegistry.TooFewApprovals.selector, 1, 2)
         );
         _expectRemoveRefused(
             registry,
             GroupFixture.encodeRemove(
-                0, idx, GroupFixture.approve(secrets, GroupFixture.seats(2, 1), d)
+                0, 2, idx, GroupFixture.approve(secrets, GroupFixture.seats(2, 1), d)
             ),
             abi.encodeWithSelector(GroupRegistry.InvalidSeat.selector, 1)
         );
-        // Signed for another index, and as an addition.
-        bytes32 other = GroupFixture.removeDigest(registry, 0, 0, GroupFixture.indices(0));
+        // Signed for another size, another index, and as an addition.
+        bytes32 otherSize = GroupFixture.removeDigest(registry, 0, 0, 1, idx);
         _expectRemoveRefused(
             registry,
             GroupFixture.encodeRemove(
-                0, idx, GroupFixture.approve(secrets, GroupFixture.seats(1, 2), other)
+                0, 2, idx, GroupFixture.approve(secrets, GroupFixture.seats(1, 2), otherSize)
+            ),
+            abi.encodeWithSelector(GroupRegistry.InvalidSignature.selector, 1)
+        );
+        bytes32 other = GroupFixture.removeDigest(registry, 0, 0, 2, GroupFixture.indices(0));
+        _expectRemoveRefused(
+            registry,
+            GroupFixture.encodeRemove(
+                0, 2, idx, GroupFixture.approve(secrets, GroupFixture.seats(1, 2), other)
             ),
             abi.encodeWithSelector(GroupRegistry.InvalidSignature.selector, 1)
         );
@@ -1052,7 +1117,7 @@ contract GroupRegistryTest is GroupTestBase {
         _expectRemoveRefused(
             registry,
             GroupFixture.encodeRemove(
-                0, idx, GroupFixture.approve(secrets, GroupFixture.seats(1, 2), asAdd)
+                0, 2, idx, GroupFixture.approve(secrets, GroupFixture.seats(1, 2), asAdd)
             ),
             abi.encodeWithSelector(GroupRegistry.InvalidSignature.selector, 1)
         );
@@ -1064,6 +1129,8 @@ contract GroupRegistryTest is GroupTestBase {
         _expectRemoveRefused(registry, "", malformed);
         _expectRemoveRefused(registry, _slice(record, 0, 10), malformed);
         _expectRemoveRefused(registry, _slice(record, 0, 18), malformed);
+        // count names an index the record doesn't hold.
+        _expectRemoveRefused(registry, _slice(record, 0, 26), malformed);
         _expectRemoveRefused(registry, _slice(record, 0, record.length - 1), malformed);
         _expectRemoveRefused(registry, bytes.concat(record, hex"00"), malformed);
     }
@@ -1248,6 +1315,15 @@ contract GroupRegistryTest is GroupTestBase {
 
     function _removal(uint64 groupId, uint64[] memory idx) internal view returns (bytes memory) {
         return GroupFixture.removal(registry, secrets, GroupFixture.seats(2, 3), groupId, idx);
+    }
+
+    function _removalAt(uint64 groupId, uint64 size, uint64[] memory idx)
+        internal
+        view
+        returns (bytes memory)
+    {
+        return
+            GroupFixture.removalAt(registry, secrets, GroupFixture.seats(2, 3), groupId, size, idx);
     }
 
     /// Adds `n` members to group 0 and returns a removal of member 0.

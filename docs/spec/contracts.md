@@ -191,18 +191,23 @@ Threats: T-06 (group stuffing by the operator), T-62 (contract admin abuse), T-7
 
 The group registry holds the deployment's Semaphore groups. It fixes each group's tier when it creates the group and logs every addition and removal together with the authorisation a verifier rechecks, so [[verifier]] 2.4 rebuilds each tier tree ([[membership]], Tier tree) from the chain and the board alone. It keeps no Merkle tree: the roots elections use are tier-tree roots that verifiers compute from these events, and direct submission checks a ballot's proof against the root registered with its definition ([[membership]], Owned elsewhere), so a root kept on chain would be a second answer nothing may use. It is immutable: no owner, proxy, pause or upgrade path, and it inherits the event accumulator above.
 
-This version adds members to **Tier 0** groups only. Tier 1 additions (anonymous vouches, [[0014-tier1-vouching]], P3-3) and Tier 2 additions (document proofs, [[0010-tier2-identity-provider]], P3-4) are specified here before any group registry is deployed, since a deployed registry's rules can't change; until then `createGroup` refuses those tiers.
+This version adds members to **Tier 0** groups only. Tier 1 additions (anonymous vouches, [[0014-tier1-vouching]], P3-3) and Tier 2 additions (document proofs, [[0010-tier2-identity-provider]], P3-4) will be specified here before any group registry is deployed, since a deployed registry's rules can't change; until then `createGroup` refuses those tiers.
 
 ### Deployment
 
-The registry is deployed with its **registrars**: `n` Ethereum addresses (secp256k1 keys) and a threshold `t`, the owners and threshold of our Safe at deployment ([[0004-l2-choice]], Governance as an adversary: Tier 0 additions carry a threshold signature of the Safe's owners, checked by the contract and again by the verifier). The set is copied into the registry rather than read from the Safe. A Safe's owners, threshold and modules can change after deployment (Board anchor, Known-weak), and a verifier reading them would have to prove the Safe's state at every addition's block; pinned, the set a verifier checks is the one the registry's first event logs and its release pins. Rotating the registrars means deploying a new registry, whose groups are new groups. Deployment reverts unless, in this order:
+The registry is deployed with its **registrars**: `n` Ethereum addresses (secp256k1 keys) and a threshold `t`. [[0004-l2-choice]] (Governance as an adversary) has Tier 0 additions carry a threshold signature of our Safe's owners, checked by the contract and again by the verifier. This registry keeps that rule's purpose (no transaction spoofed from any address, by L2 governance or anyone else, adds members without `t` keys) with two departures, listed under Decisions to review in STATUS:
+
+- **Pinned, not read from the Safe.** A Safe's owners, threshold and modules can change after deployment (Board anchor, Known-weak), and a verifier reading them would have to prove the Safe's state at every addition's block. Pinned, the set a verifier checks is the one the registry's first event logs and its release pins.
+- **Dedicated keys, not the Safe's owner keys.** Tier 0 registration is automatic, so the signing service holds `t` registrar keys online (Known-weak). Registrar keys MUST be used for nothing else, never as owners of the Safe that holds the anchoring authority or any timelock, so that seizing the registration service seizes Tier 0 additions and nothing more (T-69, T-62). The deployment record names the registrars and who holds each key.
+
+`t`, the cached EIP-712 domain separator and the chain ID it was computed for are immutables, which [[verifier]] 1.2 masks and compares with the values its release pins; the addresses are in storage, so the verifier checks them through `RegistrarsPinned` (Verification). Rotating the registrars means deploying a new registry, whose groups are new groups. Deployment reverts unless, in this order:
 
 1. `2 ≤ n ≤ MAX_REGISTRARS = 16` (`size`);
 2. `2 ≤ t ≤ n` (`threshold`): no single key adds or removes members (T-62);
 3. no address is zero, and the addresses are strictly ascending as 160-bit integers (`order`), so none repeats and the set has one encoding;
 4. the chain ID fits a `u64`, as for every contract.
 
-`RegistrarsPinned` logs `t` and the addresses. The deployment record (`packages/contracts/deployments/<chain-id>.json`) names the Safe the set was copied from.
+`RegistrarsPinned` logs `t` and the addresses, and the deployment record (`packages/contracts/deployments/<chain-id>.json`) carries them.
 
 ### Groups
 
@@ -241,7 +246,7 @@ so the record is exactly `19 + 32 · count + 66 · approvals` bytes, with `appro
 
 It then adds `count` to the group's member count and emits `MembersAdded`. Member `first_index + i`, leaf `first_index + i` of the tier tree, is the record's `i`-th commitment.
 
-**Why the position is signed.** Binding `first_index` makes each signed batch land at one place, at most once: a replay, or a batch submitted out of order, reverts. So the group's sequence is exactly the one the registrars signed, and no relay can inflate a group's size by replaying a batch (T-06, T-13). Two batches signed for one position can't both land; the one submitted second is dead, and its members must be signed again at a later position.
+**Why the position is signed.** Binding `first_index` makes each signed batch land at one place, at most once: a replay, or a batch submitted out of order, reverts. So the group's sequence is exactly the one the registrars signed, and no relay can inflate a group's size by replaying a batch (T-06, T-13). Two batches signed for one position can't both land; the one submitted second is dead, and its members must be signed again at a later position. So the signing service MUST sign at most one batch per position, submit its records itself, and sign the next position only once the previous batch is final; a record handed to anyone else could be withheld to stall the group's queue (liveness only).
 
 A commitment may repeat, within a group or across groups ([[membership]], Commitments and removals): the registry can't refuse a repeat without storing every commitment, and a repeated commitment is one identity with two leaves, which adds no voting identity but counts twice in `group_size`. The signing path MUST refuse a commitment the group already holds, and the forbidden ones (above).
 
@@ -250,16 +255,18 @@ A commitment may repeat, within a group or across groups ([[membership]], Commit
 `removeMembers(bytes record)` takes one record:
 
 ```
-record = u64(group_id) ‖ u16(count) ‖ u64(index) × count ‖ u8(approvals) ‖ approval × approvals
+record = u64(group_id) ‖ u64(size) ‖ u16(count) ‖ u64(index) × count ‖ u8(approvals) ‖ approval × approvals
 ```
 
-exactly `11 + 8 · count + 66 · approvals` bytes, with `approvals` the byte at offset `10 + 8 · count`. The registry checks, in this order: canonical calldata; the length; the group, as for additions (it exists and its tier is 0); `1 ≤ count ≤ MAX_BATCH`; index by index, that it is greater than the one before, below the group's member count and not removed already; then rules 7 and 8 of Additions over the `RemoveMembers` digest. It then marks each index removed and emits `MembersRemoved`. A removal sets that leaf of the tier tree to 0 ([[membership]], Commitments and removals); the member count doesn't change, so leaf numbering never shifts.
+exactly `19 + 8 · count + 66 · approvals` bytes, with `approvals` the byte at offset `18 + 8 · count`. `size` is the group's member count when the registrars signed. The registry checks, in this order: canonical calldata; the length; the group, as for additions (it exists and its tier is 0); `1 ≤ count ≤ MAX_BATCH`; `size` is at most the group's member count; index by index, that it is greater than the one before, below `size` and not removed already; then rules 7 and 8 of Additions over the `RemoveMembers` digest. It then marks each index removed and emits `MembersRemoved`. A removal sets that leaf of the tier tree to 0 ([[membership]], Commitments and removals); the member count doesn't change, so leaf numbering never shifts.
+
+**Why `size` is signed.** Without it, a removal signed (by mistake or in a race) for an index no member has reached yet would stay valid for good: whoever holds it could submit it once a legitimate member lands there, removing that member at a moment of their choosing, just before an election's `root_l2_block`, say. With it, every index a signed removal names was a member's when it was signed. The signing path MUST set `size` to the member count in finalized L2 history and remove only members it has identified there.
 
 [[membership]] lets a verifier meet stray removals (an index no addition has reached, a leaf already removed) and ignore them. This registry refuses them, so each of its removals changes exactly the leaves it names; a replayed removal reverts.
 
 ### Signed messages
 
-Registrars sign [EIP-712](https://eips.ethereum.org/EIPS/eip-712) typed data, an external format ([[domain-separation]]), so the hardware wallets that hold the Safe's owner keys show what is signed ([[0004-l2-choice]]). The domain is
+Registrars sign [EIP-712](https://eips.ethereum.org/EIPS/eip-712) typed data, an external format ([[domain-separation]]), so a registrar's signer, and anyone auditing it, sees what is signed in the standard's readable form ([[0004-l2-choice]]). The domain is
 
 ```
 EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)
@@ -270,7 +277,7 @@ and the two message types are
 
 ```
 AddMembers(uint64 groupId,uint8 tier,uint64 firstIndex,uint256[] commitments)
-RemoveMembers(uint64 groupId,uint8 tier,uint64[] indices)
+RemoveMembers(uint64 groupId,uint8 tier,uint64 size,uint64[] indices)
 ```
 
 with `tier` the group's tier as the registry recorded it, `commitments` and `indices` the record's in record order. As EIP-712 defines them, `hashStruct(s) = keccak256(typeHash ‖ enc(s))`, where each integer is one 32-byte big-endian word and an array is `keccak256` of its elements' words concatenated, and the digest is
@@ -279,7 +286,7 @@ with `tier` the group's tier as the registry recorded it, `commitments` and `ind
 keccak256(0x19 ‖ 0x01 ‖ hashStruct(domain) ‖ hashStruct(message))
 ```
 
-The domain binds the chain ID and the registry's address, and the message the group, its tier and, for additions, the position, so a signed batch can't be replayed on another chain or deployment, into another group or tier, or at another place in its group ([[verifier]] 2.4; T-30, T-32, T-06). The record carries the signatures, never the digest: the registry and every verifier recompute it.
+The domain binds the chain ID and the registry's address, and the message the group, its tier and, for additions, the position (for removals, `size`), so a signed batch can't be replayed on another chain or deployment, into another group or tier, or at another place in its group ([[verifier]] 2.4; T-30, T-32, T-06). The record carries the signatures, never the digest: the registry and every verifier recompute it.
 
 ### Events
 
@@ -298,11 +305,12 @@ The registrars are logged at deployment, so they are the registry's first event.
 
 Like the other registries, the group registry is shared by every election, so a verifier replays its whole event sequence from the archive, authenticated by the accumulator ([[verifier]] 4.4; Election registry, The shared event sequence). For each tier group a definition names, the verifier ([[verifier]] 2.4):
 
+- requires the registry's `RegistrarsPinned` to name exactly the set and `t` its release pins, and otherwise fails every group of that registry: a registry deployed from the release's bytecode with other registrars would accept additions the verifier doesn't count, and its removals, which name indices in the registry's numbering, would then zero other members' leaves in the verifier's;
 - takes the group's tier from its `GroupCreated` event;
-- decodes each `MembersAdded` and `MembersRemoved` record naming the group, logged at or before the tier's `root_l2_block`, strictly as above, recomputes its digest with the chain ID and registry address its release pins and the tier from `GroupCreated`, and counts the record only if at least the threshold its release pins of distinct registrars of the set its release pins sign it, never the set or `t` in `RegistrarsPinned`, which it compares with its own and reports if they differ;
+- decodes each `MembersAdded` and `MembersRemoved` record naming the group, logged at or before the tier's `root_l2_block`, strictly as above, recomputes its digest with the chain ID and registry address its release pins and the tier from `GroupCreated`, and counts the record only if it carries at least the threshold its release pins of approvals, by distinct registrars of the set its release pins, in increasing seat order, and every one of them verifies (the contract's rules 7 and 8, so conforming verifiers never diverge);
 - numbers leaves by counted additions in log order, applies removals by index, and rebuilds the root and the member count as [[membership]] defines them.
 
-The registry refuses every record a verifier would not count, every forbidden commitment and every `first_index` other than the running count, so on the release's bytecode ([[verifier]] 1.2) every logged record counts, holds no forbidden commitment, and its member `first_index + i` is leaf `first_index + i`. A record the registry would have refused can only come from other code, which 1.2 already reports; the verifier still applies [[membership]]'s rules to it unchanged (a record without enough valid approvals doesn't count; a forbidden commitment in a counted one keeps its index with leaf 0), so no logged record can fail a definition by itself.
+The registry refuses every record a verifier would not count, every forbidden commitment and every `first_index` other than the running count, so on the release's bytecode ([[verifier]] 1.2) with the pinned registrars (above) every logged record counts, holds no forbidden commitment, and its member `first_index + i` is leaf `first_index + i`. A record the registry would have refused can only come from other code, which 1.2 already reports; the verifier still applies [[membership]]'s rules to it unchanged (a record without enough valid approvals doesn't count; a forbidden commitment in a counted one keeps its index with leaf 0), so no logged record can fail a definition by itself.
 
 `packages/crypto` decodes both records, computes both digests and counts a record's valid seats (`group-registry.ts`), for the verifier and for the signing service; the contract and that code are checked against the same vectors.
 

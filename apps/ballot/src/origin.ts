@@ -10,8 +10,10 @@
  * Browsers keep percent-encoding in `location.pathname` (`/%69pfs/` stays as
  * written) while gateways decode it, so the path is decoded until it stops
  * changing, as a server might, before its first segment is compared.
- * Undecodable or still-changing paths, and empty or `.` segments that a
- * server would drop, count as a gateway path: refusing is the safe answer.
+ * Empty and `.` segments are dropped as a server would; a `..` segment, an
+ * undecodable path or one still changing after four rounds counts as a
+ * gateway path. Refusing is the safe answer, and no path the client itself
+ * uses (it is served at the root and routes by hash) looks like any of these.
  */
 export function onSharedGatewayPath(pathname: string): boolean {
   let path = pathname;
@@ -26,7 +28,12 @@ export function onSharedGatewayPath(pathname: string): boolean {
     if (round === MAX_DECODE_ROUNDS) return true;
     path = decoded;
   }
-  const first = path.split(/[/\\]/).find((segment) => segment !== "" && segment !== ".");
+  const segments = path.split(/[/\\]/).filter((segment) => segment !== "" && segment !== ".");
+  // A `..` left after decoding (`/x/%2F..%2Fipfs/`) was hidden from the
+  // browser's own normalisation; a server that resolves it after decoding
+  // could route anywhere, so it is refused rather than resolved.
+  if (segments.includes("..")) return true;
+  const first = segments[0];
   return first !== undefined && /^(ipfs|ipns)$/i.test(first);
 }
 

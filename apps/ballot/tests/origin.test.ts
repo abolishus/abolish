@@ -27,6 +27,9 @@ describe("onSharedGatewayPath", () => {
       "\\ipfs\\x\\",
       "/%2Fipfs/x/",
       "/i%70f%73/x/",
+      "/x/%2F..%2Fipfs/x/",
+      "/x/..%2Fipfs/x/",
+      "/x/%5C..%5Cipfs/x/",
     ])
       expect(onSharedGatewayPath(path), path).toBe(true);
   });

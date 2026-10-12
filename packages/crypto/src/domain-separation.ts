@@ -58,6 +58,11 @@ export const TAG_REGISTRY = Object.freeze(
       { tag: "abolish/v1/sig/ceremony-signing-key", primitive: "signature", status: "specified" },
       { tag: "abolish/v1/sig/tally-opening", primitive: "signature", status: "specified" },
       { tag: "abolish/v1/tally-aggregate", primitive: "plain", status: "specified" },
+      { tag: "abolish/v1/identity-backup/prf-salt", primitive: "plain", status: "specified" },
+      { tag: "abolish/v1/identity-backup/wrap-key", primitive: "kdf-aead", status: "specified" },
+      { tag: "abolish/v1/identity-backup/locator", primitive: "kdf-aead", status: "specified" },
+      { tag: "abolish/v1/identity-backup/id", primitive: "plain", status: "specified" },
+      { tag: "abolish/v1/identity-backup/aad", primitive: "kdf-aead", status: "specified" },
     ] as const
   ).map((e) => Object.freeze(e)),
 );

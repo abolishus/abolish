@@ -26,6 +26,7 @@ One JSON file per spec section or record type, named after it (`primitives.json`
 | `receipt.json`             | Receipts: the record and its signed statement, rejected encodings and the checks at cast ([[receipts]])                                                                                                                                   |
 | `ceremony.json`            | Key-ceremony transcripts: honest runs with the secrets that made them, every seat disqualification and transcript-level failure, the registered key sets and hashes, and decode rejections ([[ceremony]])                                 |
 | `circuit.json`             | Circuit-facing values: each registered tag's field element and the two byte packings ([[notation]], [[domain-separation]])                                                                                                                |
+| `identity-backup.json`     | Identity secrets at their boundaries and their sampling, the PRF salt, backups with their keys, locator, row id, associated data and envelope, and envelopes that don't open, with their codes ([[identity-backup]])                      |
 | `l1-anchor.json`           | Board anchors read from L1 state: Anvil's raw headers and `eth_getProof` trie nodes for a deployed board anchor, with the anchors a verifier reads or the code it stops with ([[verifier]], Anchors from L1; [[contracts]], Board anchor) |
 
 ## Format
@@ -210,3 +211,12 @@ Type descriptors:
 - A vector, once its layout is frozen ([[versioning]]), is never edited or removed. New vectors are added. `packages/crypto/tests/vectors/trustee-published.json` pins every published `trustee.json` vector by the sha256 of its JSON; a PR that adds vectors there adds their digests in the same PR.
 - Every rejection rule in a spec section has at least one invalid vector, and every field type at least one valid vector at each boundary (zero, maximum, maximum plus one where representable). Rejections that need an election's context (`profile-mismatch`) are covered by the record vectors above.
 - Generated vectors are checked by hand, or by a second implementation written independently from the spec, before they are committed. The `generator` field says which.
+
+## Identity-backup vectors
+
+`identity-backup.json` covers [[identity-backup]] with its own format, `abolish-identity-backup-vectors/1`, and the same top-level fields, plus `tags` (the five registered tags, as ASCII strings), `order` (`l`, decimal) and `prfSalt` (hex), and:
+
+- `secrets`: each has `id`, `encoding` (hex) and `isSecret`, whether it encodes an identity secret (exactly 32 bytes, `1 ≤ s < l`).
+- `sampling`: each has `id`, `draws` (32-byte hex values, in the order the CSPRNG returns them) and `secret`, the value the sampler keeps: the last draw, with its top 5 bits cleared. Every earlier draw is rejected.
+- `backups`: each has `id`, `description`, `prfOutput`, `secret` and `nonce` (the inputs), and `wrapKey`, `locator`, `backupId` (the server's row id), `aad` and `envelope` (the 63-byte record), all hex.
+- `open`: envelopes that don't give a secret. Each has `id`, `description`, `prfOutput`, `envelope` (hex) and `code`: a decode error code ([[notation]]), `backup-open` or `backup-secret`.

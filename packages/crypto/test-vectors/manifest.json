@@ -99,6 +99,17 @@
       "license": "IETF Trust Legal Provisions (BCP 78); code components under the Revised BSD License",
       "retrieved": "2026-10-11",
       "covers": "AEAD_CHACHA20_POLY1305: Section 2.8.2 (encryption) and Appendix A.5 (decryption)"
+    },
+    {
+      "path": "rfc/rfc5869.txt",
+      "sha256": "7a40eb3835b35fc947eb12a2ed614db079d43b26e50dbc537c31fba16397089c",
+      "source": "https://www.rfc-editor.org/rfc/rfc5869.txt",
+      "tag": "rfc5869",
+      "origin": "RFC 5869, HMAC-based Extract-and-Expand Key Derivation Function (HKDF) (IETF), plain-text rendering as published by the RFC Editor",
+      "originUrl": "https://www.rfc-editor.org/rfc/rfc5869",
+      "license": "IETF Trust Legal Provisions (BCP 78); code components under the Revised BSD License",
+      "retrieved": "2026-10-12",
+      "covers": "HKDF with SHA-256: Appendix A.1 to A.3 (test cases 1 to 3)"
     }
   ]
 }

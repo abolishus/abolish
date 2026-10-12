@@ -407,8 +407,12 @@ export function verifyBundle(bundle: Bundle): Report {
         ? []
         : [["8.5", NOT_APPLICABLE] as const]),
       // 1.3 also covers the keys inside the verifier contracts the election
-      // uses, which aren't read yet: it can fail here, never pass.
+      // uses, which aren't read yet: it can fail here, never pass. Only
+      // ballot version 1's key is pinned here; a version this verifier
+      // doesn't read may have a key a later release pins, so releases agree
+      // (T-36).
       ...(definition.definition !== undefined &&
+      pinnedVersion(definition.definition, RECORD_TYPES.ballot) === 1 &&
       !equal(definition.definition.membership_vk_hash, membershipVkHash())
         ? [["1.3", { status: "fail", code: "membership-key", at: {} }] as const]
         : []),

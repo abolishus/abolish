@@ -81,9 +81,12 @@ def decode_ballot(payload):
 
 
 def combination(d):
-    """2.3's profile-combination for a definition version 1, from docs/spec/verifier.md 2.3: ballot version 2 pairs only with definition versions 3 and 4."""
+    """2.3's profile-combination for a definition version 1, from docs/spec/verifier.md 2.3: ballot version 2 pairs only with definition versions 3 and 4, and an unknown ballot version is a later release's to judge."""
     pins = dict(d["profile"]["pins"])
     board, ballot, opening = pins[BOARD_ENTRY_TYPE], pins.get(BALLOT_TYPE), pins.get(0x0006)
+    if ballot not in (1, 2):
+        # A version this verifier doesn't know: a later release judges it.
+        return NOT_IMPLEMENTED
     fits = ballot == 1 and board in (3, 4) and (opening != 1 or board == 4)
     return NOT_IMPLEMENTED if fits else outcome("fail", "profile-combination", {})
 
@@ -101,8 +104,7 @@ def build(constants):
         root, path = pos.tree(leaves)
         groups[name] = {"tier": tier, "secrets": secrets, "leaves": leaves, "root": root, "path": path}
 
-    panels = {"panel-4": cv.make_panel("panel-4", 3, 4)}
-    panel = panels["panel-4"]
+    panels = {"panel-4": cv.make_panel("panel-4", 3, 4), "panel-4-k2": cv.make_panel("panel-4-k2", 2, 4)}
     pins = [(t, 4 if t == BOARD_ENTRY_TYPE else 1) for t, _ in dv.ALL_PINS]
     base = dict(
         profile={"protocol_major": 1, "pins": pins},
@@ -117,8 +119,9 @@ def build(constants):
     checks = []
     bundles = []
 
-    def election_for(label, seats, cheat=None, **changes):
-        """A definition for panel-4 and its transcript, made for the definition's own stub."""
+    def election_for(label, seats, cheat=None, panel_name="panel-4", **changes):
+        """A definition for the panel and its transcript, made for the definition's own stub."""
+        panel = panels[panel_name]
         fields = dict(base, **changes)
         ctx = vc.election_of(vc.definition_for(panel, bytes(32), **fields))
         t = vc.transcript(f"verifier-ballots/{label}", panel, seats, ctx, cheat)
@@ -135,6 +138,7 @@ def build(constants):
             "panelSize": d["panel_size"],
             "tiers": tiers,
         }
+        e["panel"] = panel_name
         return d, t, e
 
     def nullifier(group, index, e, tier):
@@ -280,6 +284,17 @@ def build(constants):
     d_vk, t_vk, e_vk = election_for("other-key", [1, 2, 3], membership_vk_hash=bal.det("verifier other key"))
     bundle("other-key", "The definition names another membership key: 1.3 fails, and no ballot is checked under it.", d_vk, t_vk, e_vk, [1, 2, 3], [t_vk, (ok0, None)], "other-key")
 
+    # A 2-of-4 panel with two qualified seats meets k but not n − 1 = 3
+    # (ADR 0006 rule 7): 3.2 fails, and its key set judges no ballot.
+    d_p, t_p, e_p = election_for("participation", [1, 2], panel_name="panel-4-k2")
+    bundle("participation", "A 2-of-4 panel where only seats 1 and 2 take part: the transcript registers a key set (k = 2) but 3.2 fails ceremony-participation, so no ballot is checked under it.", d_p, t_p, e_p, None, [t_p, (ok0, None)], "not-reached")
+
+    # A ballot version this verifier doesn't know may name a key a later
+    # release pins for it: 1.3 can't fail (T-36).
+    v3_key_pins = [(ty, 3 if ty == BALLOT_TYPE else v) for ty, v in pins]
+    d_v3, t_v3, e_v3 = election_for("ballot-v3-other-key", [1, 2, 3], profile={"protocol_major": 1, "pins": v3_key_pins}, membership_vk_hash=bal.det("verifier other key"))
+    bundle("ballot-v3-other-key", "The profile pins ballot version 3, unknown here, with another membership key: 1.3 isn't failed, since a later release may pin that key for version 3, and 5.1 to 5.4 are unsupported.", d_v3, t_v3, e_v3, [1, 2, 3], [t_v3, (ok0, None)], "unsupported")
+
     zero_root = [dict(g, root=0) if g["tier"] == 2 else g for g in base["electorate"]]
     d_z, t_z, e_z = election_for("root-zero", [1, 2, 3], electorate=zero_root)
     bundle("root-zero", "The definition gives tier 2 a root of 0, which anyone can prove membership of (T-04): no ballot is checked under it.", d_z, t_z, e_z, [1, 2, 3], [t_z, (ok0, None)], "not-reached")
@@ -334,7 +349,7 @@ def assemble(constants, proofs_path, out_dir):
             proof = proof_bytes[pid] if pid is not None else proof_bytes["ok-tier-0"]
             payloads.append(("ballot", bal.enc_ballot(dict(b, proof=proof)), b, pid))
         entries = [vc.entry(4, eid, i, 0, rec) for i, (_, rec, _, _) in enumerate(payloads)]
-        panel = s["panels"]["panel-4"]
+        panel = s["panels"][e["panel"]]
         ceremony_rows, ceremony = vc.expected(panel, d, entries, panel, 4)
         assert ceremony_rows["3.2"] == (outcome("pass") if bnd["registered"] is not None else ceremony_rows["3.2"])
         if bnd["registered"] is not None and ceremony is not None:
@@ -342,8 +357,9 @@ def assemble(constants, proofs_path, out_dir):
         else:
             assert ceremony_rows["3.2"]["status"] == "fail"
         expect = bnd["expect"]
-        vk_ok = d["membership_vk_hash"] == MEMBERSHIP_VK_HASH
-        rows = {"1.3": NOT_IMPLEMENTED if vk_ok else outcome("fail", "membership-key", {}), "2.3": combination(d)}
+        # 1.3 knows only ballot version 1's key (docs/spec/verifier.md, Procedure, step 7).
+        vk_fails = dict(d["profile"]["pins"]).get(BALLOT_TYPE) == 1 and d["membership_vk_hash"] != MEMBERSHIP_VK_HASH
+        rows = {"1.3": outcome("fail", "membership-key", {}) if vk_fails else NOT_IMPLEMENTED, "2.3": combination(d)}
         rows.update({k: v for k, v in ceremony_rows.items() if k == "3.2"})
         ballots = None
         if expect in ("mixed", "admitted"):
@@ -381,7 +397,7 @@ def assemble(constants, proofs_path, out_dir):
         case = {
             "id": bnd["id"],
             "description": bnd["description"],
-            "panel": "panel-4",
+            "panel": e["panel"],
             "definition": dv.enc_definition(d).hex(),
             "board": b"".join(entries).hex(),
             "expected": rows,

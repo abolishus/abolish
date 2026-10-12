@@ -1,9 +1,11 @@
 export {
   type Bundle,
   BUNDLE_FORMAT,
+  BUNDLE_FORMAT_CEREMONY,
   BUNDLE_FORMAT_DEFINITION,
   BUNDLE_FORMAT_L1,
   BundleError,
+  type CeremonyBundle,
   type DefinitionBundle,
   type InputSource,
   type InputSources,
@@ -12,6 +14,7 @@ export {
   parseBundle,
   splitEntries,
 } from "./bundle.ts";
+export { type CeremonyCode, type CeremonyReport } from "./ceremony.ts";
 export { CHECKS, type CheckKind, type CheckSpec } from "./checks.ts";
 export { type CliOutput, EXIT_CODES, runCli } from "./cli.ts";
 export { readBundle } from "./files.ts";

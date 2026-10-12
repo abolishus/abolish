@@ -496,6 +496,26 @@ describe("2.3's profile combination", () => {
     expect(profileCombinationRule(pinning(4, 1, 1))).toBeUndefined();
   });
 
+  test("definition version 3 refuses ballot version 1, which names no cell", () => {
+    // The rule reads only the profile, so version 1's value with 0x0001
+    // pinned at 3 stands in for a version-3 definition.
+    const v3 = (ballot: number) => {
+      const d = pinning(4, ballot, 1);
+      return {
+        ...d,
+        profile: {
+          ...d.profile,
+          pins: d.profile.pins.map((p) =>
+            p.record_type === RECORD_TYPES.electionDefinition ? { ...p, version: 3 } : p,
+          ),
+        },
+      };
+    };
+    expect(profileCombinationRule(v3(1))).toBe("profile-combination");
+    expect(profileCombinationRule(v3(2))).toBeUndefined();
+    expect(profileCombinationRule(pinning(4, 1, 1))).toBeUndefined();
+  });
+
   test("a definition pinning no board-entry version is unsupported, never a failure", () => {
     const none = {
       ...sampleDefinition,

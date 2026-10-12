@@ -2,6 +2,7 @@ import { describe, expect, test } from "vite-plus/test";
 import {
   DecodeError,
   decodeElectionDefinition,
+  decodeElectionDefinitionRecord,
   DISPLAY_TEXT,
   type DisplayText,
   displayTextCommitment,
@@ -10,8 +11,13 @@ import {
   electionDefinitionHash,
   electionStubHash,
   electionDefinitionRule,
+  type ElectionDefinitionV3,
+  electionDefinitionV3Hash,
+  electionDefinitionV3Rule,
+  electionStubV3Hash,
   encodeDisplayText,
   encodeElectionDefinition,
+  encodeElectionDefinitionV3,
 } from "../src/index.ts";
 import { PROTOCOL_SCHEMA } from "../src/protocol.ts";
 import { buildSchema, hex, readVectorFile, type Vector } from "./spec-vectors.ts";
@@ -88,6 +94,38 @@ describe("election definition (docs/spec/election-definition.md)", () => {
     const [, dt] = readVectorFile("display-text.json").vectors.map((v) => [v.id, v] as const)[0]!; // the file has vectors (checked above)
     expect(decodeError(() => decodeElectionDefinition(hex(dt.encoding)))).toBe(
       "unexpected-record-type",
+    );
+  });
+});
+
+describe("election definition version 3 (docs/spec/election-definition.md, Layout (version 3))", () => {
+  const { valid, invalid } = checkFile("election-definition-v3.json", 42);
+
+  test.each(valid)("%s decodes, re-encodes, hashes and meets its rules", (_id, v, expected) => {
+    const value = expected(v) as ElectionDefinitionV3;
+    const record = decodeElectionDefinitionRecord(hex(v.encoding));
+    expect(record.version).toBe(3);
+    const decoded = record.value as ElectionDefinitionV3;
+    expect(decoded).toEqual(value);
+    expect(toHex(encodeElectionDefinitionV3(decoded))).toBe(v.encoding);
+    expect(toHex(electionDefinitionV3Hash(decoded))).toBe(v.hash);
+    expect(toHex(electionStubV3Hash(decoded))).toBe(v.stubHash);
+    expect(electionDefinitionV3Rule(decoded)).toBe(v.illFormed);
+  });
+
+  test.each(invalid)("%s is rejected", (_id, v) => {
+    expect(decodeError(() => decodeElectionDefinitionRecord(hex(v.encoding)))).toBe(v.error);
+  });
+
+  test("a version-3 definition is unknown-version to callers that read only version 1", () => {
+    for (const [, v] of valid)
+      expect(decodeError(() => decodeElectionDefinition(hex(v.encoding)))).toBe("unknown-version");
+  });
+
+  test("covers every rule of version 3 that version 1 doesn't share, and rules on both sides", () => {
+    const rules = new Set(valid.map(([, v]) => v.illFormed).filter((r) => r !== undefined));
+    expect([...rules].toSorted()).toEqual(
+      ["protocol-major", "selections", "electorate", "cells", "panel"].toSorted(),
     );
   });
 });

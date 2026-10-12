@@ -32,6 +32,7 @@ export {
   putIdentityBackup,
   readIdentityBackup,
 } from "./identity-backups.ts";
+export { listPolls, MAX_LISTING_PAGE } from "./listing.ts";
 export { loadMigrations, migrate, type Migration } from "./db/migrate.ts";
 export {
   accountCredentials,

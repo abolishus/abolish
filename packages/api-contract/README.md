@@ -6,6 +6,7 @@ The public API's contract: the oRPC procedures `apps/api` implements and the bal
 
 | Procedure                   | Route                           |
 | --------------------------- | ------------------------------- |
+| `elections.list`            | `GET /elections`                |
 | `elections.getDefinition`   | `GET /elections/definition`     |
 | `board.getHead`             | `GET /board/head`               |
 | `board.getEntries`          | `GET /board/entries`            |

@@ -4,6 +4,7 @@ import {
   deleteIdentityBackup,
   hasDefinition,
   IdentityBackupStoreError,
+  listPolls,
   ModerationError,
   moderationStatus,
   putIdentityBackup,
@@ -56,6 +57,12 @@ async function knownElection(sql: Sql, electionId: string, notFound: () => Error
 
 export const router = os.router({
   elections: {
+    // Discovery leaves out delisted and hidden polls (docs/moderation-policy.md; T-68).
+    list: os.elections.list.handler(async ({ input, context }) => {
+      const after = input.after === undefined ? undefined : fromHex(input.after);
+      const elections = await listPolls(context.sql, after, Number(input.limit));
+      return { elections: elections.map(toHex) };
+    }),
     getDefinition: os.elections.getDefinition.handler(async ({ input, context, errors }) => {
       const definition = await readDefinition(context.sql, fromHex(input.electionId));
       if (definition === undefined) throw errors.ELECTION_NOT_FOUND();

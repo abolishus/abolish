@@ -202,6 +202,8 @@ export {
   encodeElectionDefinition,
   newDisplayTextSalt,
   pinnedVersion,
+  profileCombinationRule,
+  type ProfileCombinationRule,
   type ShowCheck,
   type ShowRefusal,
   UnsupportedVersionError,

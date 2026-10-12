@@ -107,7 +107,7 @@ def expected(panel, defn, entries, bundle_panel):
         if isinstance(d, str) or d["electionId"] != defn["election_id"]:
             continue
         payload = d["payload"]
-        if int.from_bytes(payload[:2], "big") == cv.TRANSCRIPT_TYPE and H(ds(TRANSCRIPT_TAG, payload)) == defn["ceremony_transcript_hash"]:
+        if H(ds(TRANSCRIPT_TAG, payload)) == defn["ceremony_transcript_hash"]:
             found = (at, payload)
             break
     if found is None:
@@ -185,6 +185,11 @@ def main(out):
 
     trailing = honest + b"\x00"
     assert add("decode", "The transcript the definition names has a trailing byte.", trailing, [trailing])["3.1"] == outcome("fail", "decode", {"entry": 0, "decodeError": "trailing-bytes"})
+
+    # A tally opening's header (0x0006, version 1) and a byte: allowed on the
+    # board, but not a transcript.
+    opening = bytes([0x00, 0x06, 0x01, 0x00])
+    assert add("not-a-transcript", "The definition binds a boarded payload of another record type: it fails decoding as a transcript, not missing.", opening, [opening])["3.1"] == outcome("fail", "decode", {"entry": 0, "decodeError": "unknown-record-type"})
 
     assert add("missing", "The board carries only the abandoned run's transcript.", honest, [stray])["3.1"]["code"] == "ceremony-transcript-missing"
 

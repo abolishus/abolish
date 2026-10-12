@@ -68,8 +68,9 @@ const equal = (a: Uint8Array, b: Uint8Array) =>
 
 /**
  * The first entry of the copy that is the definition's transcript: an entry
- * of this election, under the pinned version, whose payload is a ceremony
- * transcript record hashing to `ceremony_transcript_hash`. The hash
+ * of this election, under the pinned version, whose payload hashes to
+ * `ceremony_transcript_hash`, whatever its record type: bytes the definition
+ * binds that aren't a transcript fail its decoding, never go missing. The hash
  * authenticates the bytes wherever they sit, so its position, and whether it
  * is inside the anchored extent, don't matter; any copy of them is the
  * transcript.
@@ -90,8 +91,6 @@ function findTranscript(
       if (e instanceof DecodeError) continue;
       throw e;
     }
-    // The payload's record type is its first two bytes (docs/spec/notation.md).
-    if (((payload[0] ?? 0) << 8) + (payload[1] ?? 0) !== RECORD_TYPES.ceremonyTranscript) continue;
     if (equal(ceremonyTranscriptHash(payload), d.ceremony_transcript_hash))
       return { entry: at, bytes: payload };
   }

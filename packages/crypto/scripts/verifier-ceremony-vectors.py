@@ -186,9 +186,9 @@ def main(out):
     trailing = honest + b"\x00"
     assert add("decode", "The transcript the definition names has a trailing byte.", trailing, [trailing])["3.1"] == outcome("fail", "decode", {"entry": 0, "decodeError": "trailing-bytes"})
 
-    # A tally opening's header (0x0006, version 1) and a byte: allowed on the
-    # board, but not a transcript.
-    opening = bytes([0x00, 0x06, 0x01, 0x00])
+    # A ballot's header (0x0002, reserved: no layout yet, so every decoder
+    # reports it unknown) and a byte: allowed on the board, but not a transcript.
+    opening = bytes([0x00, 0x02, 0x01, 0x00])
     assert add("not-a-transcript", "The definition binds a boarded payload of another record type: it fails decoding as a transcript, not missing.", opening, [opening])["3.1"] == outcome("fail", "decode", {"entry": 0, "decodeError": "unknown-record-type"})
 
     assert add("missing", "The board carries only the abandoned run's transcript.", honest, [stray])["3.1"]["code"] == "ceremony-transcript-missing"

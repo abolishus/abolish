@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 pragma solidity 0.8.30;
 
+import {CanonicalCalldata} from "./CanonicalCalldata.sol";
 import {ElectionDefinitionLib} from "./ElectionDefinition.sol";
 import {EventAccumulator} from "./EventAccumulator.sol";
 import {ITrusteeRegistry} from "./ITrusteeRegistry.sol";
@@ -145,7 +146,7 @@ contract ElectionRegistry is EventAccumulator {
     /// @notice Registers the definition of an election the caller created.
     /// Reverts unless every admission rule holds; see the contract's notice.
     function registerDefinition(bytes calldata definition) external {
-        _requireCanonicalBytesCalldata(definition);
+        CanonicalCalldata.requireOneBytesArgument(definition);
         ElectionDefinitionLib.Definition memory def = ElectionDefinitionLib.decode(definition);
         ElectionDefinitionLib.Rule r = ElectionDefinitionLib.rule(def);
         if (r != ElectionDefinitionLib.Rule.None) revert DefinitionIllFormed(r);
@@ -205,24 +206,5 @@ contract ElectionRegistry is EventAccumulator {
         }
         if (def.l1Anchor != l1Anchor) revert WrongDeployment(DeploymentField.L1Anchor);
         if (def.l1Relay != l1Relay) revert WrongDeployment(DeploymentField.L1Relay);
-    }
-
-    /// The calldata is exactly the standard ABI encoding of one `bytes`
-    /// argument: offset 0x20, zero padding, nothing after it. Solidity's
-    /// decoder accepts other offsets and trailing bytes, which would let a
-    /// transaction carry bytes no record defines (docs/spec/notation.md,
-    /// Result-critical fields; T-17).
-    function _requireCanonicalBytesCalldata(bytes calldata b) private pure {
-        uint256 len = b.length;
-        uint256 padded = (len + 31) & ~uint256(31);
-        uint256 offsetWord;
-        uint256 lastWord;
-        assembly ("memory-safe") {
-            offsetWord := calldataload(4)
-            // The word holding the last data bytes and the padding after them.
-            if mod(len, 32) { lastWord := calldataload(add(68, sub(padded, 32))) }
-        }
-        if (msg.data.length != 68 + padded || offsetWord != 0x20) revert NonCanonicalCalldata();
-        if (len % 32 != 0 && lastWord << (8 * (len % 32)) != 0) revert NonCanonicalCalldata();
     }
 }

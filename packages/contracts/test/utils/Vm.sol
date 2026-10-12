@@ -13,6 +13,7 @@ interface Vm {
 
     function assume(bool condition) external pure;
     function chainId(uint256 newChainId) external;
+    function etch(address target, bytes calldata newRuntimeBytecode) external;
     function expectRevert(bytes calldata revertData) external;
     function getRecordedLogs() external returns (Log[] memory logs);
     function keyExistsJson(string calldata json, string calldata key) external view returns (bool);

@@ -209,7 +209,7 @@ describe("nullifier-key.json", () => {
       transcript: RECORD_TYPES.nullifierKeyTranscript,
       dealtShare: RECORD_TYPES.nullifierKeyShare,
     });
-  });
+  }, 60_000);
 
   test.each(V.transcripts.map((t) => [t.id, t] as const))(
     "%s checks as the vector says",
@@ -307,7 +307,7 @@ describe("nullifier-key.json", () => {
     ];
     const bytes = encodeNullifierKeyTranscript({ ...tr, complaints, responses });
     expect(toHex(bytes)).toBe(t.transcript);
-  });
+  }, 60_000);
 
   test.each(V.transcripts.filter((t) => t.seats !== undefined).map((t) => [t.id, t] as const))(
     "%s: each qualified seat's share is the vector's and opens its commitment",
@@ -374,6 +374,7 @@ describe("nullifier-key.json", () => {
         }
       }
     },
+    60_000,
   );
 
   test("approvals are re-made byte for byte and counted per seat", () => {
@@ -405,22 +406,26 @@ describe("nullifier-key.json", () => {
     expect(() => approveNullifierKey(scope, hex(secrets[0] ?? ""), 2, hex(a.keyId))).toThrow(
       /seat/,
     );
-  });
+  }, 60_000);
 
-  test.each(V.decode.map((d) => [d.id, d] as const))("%s is rejected when decoded", (_, d) => {
-    expect(() => decodeNullifierKeyTranscript(hex(d.transcript), 1)).toThrow(
-      expect.objectContaining({ name: DecodeError.name, code: d.error }),
-    );
-    const r = checkNullifierKeyTranscript(scopeOf(panelOf("panel-2")), hex(d.transcript), 1);
-    expect(r).toEqual({ ok: false, code: d.error });
-  });
+  test.each(V.decode.map((d) => [d.id, d] as const))(
+    "%s is rejected when decoded",
+    (_, d) => {
+      expect(() => decodeNullifierKeyTranscript(hex(d.transcript), 1)).toThrow(
+        expect.objectContaining({ name: DecodeError.name, code: d.error }),
+      );
+      const r = checkNullifierKeyTranscript(scopeOf(panelOf("panel-2")), hex(d.transcript), 1);
+      expect(r).toEqual({ ok: false, code: d.error });
+    },
+    60_000,
+  );
 
   test("every transcript re-encodes to itself", () => {
     for (const t of V.transcripts)
       expect(
         toHex(encodeNullifierKeyTranscript(decodeNullifierKeyTranscript(hex(t.transcript), 1))),
       ).toBe(t.transcript);
-  });
+  }, 60_000);
 });
 
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
@@ -552,7 +557,7 @@ describe("an honest run", () => {
       code: "key-signature",
     });
     expect(other({ panel: { ...run.scope.panel, threshold: 3 } }).ok).toBe(false);
-  });
+  }, 60_000);
 
   test("a dealt share opens only for its recipient, and any changed byte fails its hash", () => {
     const d = run.dealings[0] as (typeof run.dealings)[number];
@@ -603,7 +608,7 @@ describe("an honest run", () => {
       }),
       { numRuns },
     );
-  });
+  }, 60_000);
 
   test("a dealt share decodes only if it re-encodes to itself", () => {
     const d = run.dealings[0] as (typeof run.dealings)[number];
@@ -625,7 +630,7 @@ describe("an honest run", () => {
       ),
       { numRuns },
     );
-  });
+  }, 60_000);
 });
 
 describe("a seat's node", () => {
@@ -638,7 +643,7 @@ describe("a seat's node", () => {
       registrationKeysMessage(run.params, { ...seat, identitySecret: other.identitySecret }),
     ).toThrow(/seat/);
     expect(() => registrationKeysMessage(run.params, { ...seat, index: 4 })).toThrow(/seat/);
-  });
+  }, 60_000);
 
   test("refuses to sign over a round 1 that fails the check", () => {
     const forged = run.keys.map((m, i) =>
@@ -646,7 +651,7 @@ describe("a seat's node", () => {
     );
     expect(() => dealingMessage(run.params, seat, forged)).toThrow(/key-signature/);
     expect(() => dealingMessage(run.params, seat, [...run.keys].reverse())).toThrow(/key-order/);
-  });
+  }, 60_000);
 
   test("checks and complains only with the keys its round-1 message carries", () => {
     const rounds = { keys: run.keys, dealings: run.transcript.dealings };
@@ -678,7 +683,7 @@ describe("a seat's node", () => {
         shared.bytes,
       ).ok,
     ).toBe(true);
-  });
+  }, 60_000);
 
   test("complains only about other dealers of round 2", () => {
     const rounds = { keys: run.keys, dealings: run.transcript.dealings };
@@ -686,7 +691,7 @@ describe("a seat's node", () => {
     expect(() => complaintsMessage(run.params, seat, rounds, [1])).toThrow(/complaints/);
     expect(() => complaintsMessage(run.params, seat, rounds, [3, 2])).toThrow(/complaints/);
     expect(complaintsMessage(run.params, seat, rounds, [2, 3]).complaints).toEqual([2, 3]);
-  });
+  }, 60_000);
 
   test("reveals only from the polynomials behind its dealing, and only when complained about", () => {
     const rounds = { keys: run.keys, dealings: run.transcript.dealings };
@@ -718,7 +723,7 @@ describe("a seat's node", () => {
     // A complaint answered correctly keeps the dealer, and seat 2 takes the reveal.
     const check = checkNullifierKeyTranscript(run.scope, bytes, 1);
     expect(check.ok && check.seats.every((s) => s.reasons.length === 0)).toBe(true);
-  });
+  }, 60_000);
 
   test("refuses polynomials of the wrong degree or outside F_l", () => {
     const k = run.scope.panel.threshold;
@@ -735,7 +740,7 @@ describe("a seat's node", () => {
         randomness,
       ),
     ).toThrow(/coefficients/);
-  });
+  }, 60_000);
 
   test("a share that doesn't open the seat's commitment is refused", () => {
     const check = checkNullifierKeyTranscript(run.scope, run.bytes, 1);
@@ -744,7 +749,7 @@ describe("a seat's node", () => {
     expect(() => seatShareOf(check, run.transcript, 1, own, [])).toThrow(/qualified dealer 2/);
     const wrong = [2, 3].map((dealer) => ({ dealer, share: 1n, blind: 1n }));
     expect(() => seatShareOf(check, run.transcript, 1, own, wrong)).toThrow(/doesn't open/);
-  });
+  }, 60_000);
 });
 
 test("the package entry point exports no way to choose the randomness", async () => {

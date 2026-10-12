@@ -66,6 +66,8 @@ t_e(A) = definition_hash ‖ u16(0x0002) ‖ u8(1) ‖ u8(i) ‖ encode(dh_i) �
 
 with `A` encoded with the identity allowed. Anyone checks it by recomputing `A = g^{pok_z} · ct_DH^{−pok_c}` and comparing the challenge. Without it, an attacker could copy a victim's `ct_DH` into a ciphertext of its own ballot, with its own `ct_M` and a garbage seal, and post it: the posting passes, the trustee's decryption fails, and its honest complaint would reveal `ct_DH^x`, the victim's DH value, so anyone holding the victim's `ss_M` (published by a posting, or seen in transit) reads the victim's share. With the proof, only the party that knows `e_i` can make a ciphertext with that `ct_DH` for that seat, key, committed vote and seal, and a complaint reveals only `dh_i^{e_i}`, which the poster already knows (T-15, T-41).
 
+`u16(0x0002) ‖ u8(1)` in `aad` and `t_e` names ballot version 1's share-ciphertext rules. Ballot version 2 keeps them unchanged, so its ciphertexts carry the same bytes; the definition hash, which both bind, pins the election's ballot version ([[ballot-validity]], Ballot record (version 2)).
+
 `share_ciphertext`:
 
 | Field      | Type          | Meaning                                                                                                                  |

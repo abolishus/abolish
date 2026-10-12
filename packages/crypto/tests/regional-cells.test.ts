@@ -142,6 +142,9 @@ describe("regional-cells vectors (docs/spec/vectors/regional-cells.json)", () =>
         }
       }
     },
+    // The split tier hashes about 3,200 leaves through Poseidon2 several times:
+    // a few seconds alone, more beside every other package's tests.
+    60_000,
   );
 
   test("a definition stating exactly the derived electorate matches, and each wrong field is found", () => {

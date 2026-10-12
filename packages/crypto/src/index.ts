@@ -1,6 +1,8 @@
 export {
   ballotHash,
   type BallotHashContext,
+  type BallotLabel,
+  type BallotVersion,
   type BitProof,
   type Branch,
   checkShares,
@@ -22,15 +24,24 @@ export {
 export {
   BALLOT,
   type BallotCheck,
+  type BallotCheckV2,
   type BallotCode,
   type BallotElection,
   ballotElection,
   type BallotRecord,
+  type BallotRecordV2,
   ballotSignals,
+  ballotSignalsV2,
+  type BallotV2Code,
+  type CellBallotElection,
+  cellBallotElection,
   checkBallot,
+  checkBallotV2,
   decodeBallot,
   encodeBallot,
+  encodeBallotV2,
   type UnprovenBallot,
+  type UnprovenBallotV2,
 } from "./ballot.ts";
 export {
   type BallotCore,

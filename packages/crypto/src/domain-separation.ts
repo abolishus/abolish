@@ -20,7 +20,7 @@ export const TAG_REGISTRY = Object.freeze(
       { tag: "abolish/v1/merkle/node", primitive: "plain", status: "specified" },
       { tag: "abolish/v1/board-checkpoint", primitive: "plain", status: "specified" },
       { tag: "abolish/v1/ballot", primitive: "plain", status: "reserved" },
-      { tag: "abolish/v1/receipt", primitive: "plain", status: "reserved" },
+      { tag: "abolish/v1/sig/receipt", primitive: "signature", status: "specified" },
       { tag: "abolish/v1/nullifier-scope", primitive: "plain", status: "specified" },
       { tag: "abolish/v1/membership-message", primitive: "plain", status: "specified" },
       { tag: "abolish/v1/membership-vk", primitive: "plain", status: "reserved" },

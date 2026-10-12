@@ -298,7 +298,7 @@ describe("board entry version 3", () => {
   });
 
   test("no version encodes a share posting: postings reach the board only as contract events", () => {
-    for (const version of [1, 3] as const)
+    for (const version of [1, 3, 4] as const)
       expect(() =>
         encodeBoardEntry({ ...base, payload: record(RECORD_TYPES.sharePosting) }, version),
       ).toThrow(EncodeError);

@@ -3,14 +3,21 @@ import fc from "fast-check";
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vite-plus/test";
 import {
+  BOARD_PAYLOAD_TYPES_V3,
+  BOARD_PAYLOAD_TYPES_V4,
+  type BoardEntryVersion,
   checkDestruction,
   DecodeError,
+  decodeBoardEntry,
   decodeDestructionStatement,
   type DestructionElection,
   destructionSegment,
   type DestructionStatement,
   destructionStatementMessage,
+  encodeBoardEntry,
   encodeDestructionStatement,
+  EncodeError,
+  RECORD_TYPES,
   signDestructionStatement,
   verifyStatement,
 } from "../src/index.ts";
@@ -52,6 +59,12 @@ interface Vectors {
     readonly windowSegment: number;
     readonly entries: readonly { readonly segment: number; readonly payload: string }[];
     readonly result: unknown;
+  }[];
+  readonly boardEntries: readonly {
+    readonly id: string;
+    readonly version: BoardEntryVersion;
+    readonly encoding: string;
+    readonly error: string | null;
   }[];
 }
 
@@ -123,6 +136,36 @@ describe("destruction statement vectors (docs/spec/vectors/destruction.json)", (
       1,
     );
     expect(JSON.parse(JSON.stringify(got))).toEqual(v.result);
+  });
+
+  test.each(vectors.boardEntries.map((v) => [v.id, v] as const))("board entry %s", (_id, v) => {
+    const b = hex(v.encoding);
+    if (v.error === null) {
+      expect(encodeBoardEntry(decodeBoardEntry(b, v.version), v.version)).toEqual(b);
+    } else {
+      expect(() => decodeBoardEntry(b, v.version)).toThrow(
+        expect.objectContaining({ code: v.error }) as Error,
+      );
+    }
+  });
+});
+
+describe("board entry version 4", () => {
+  const entry = { election_id: new Uint8Array(32), index: 0n, segment: 0, payload: honest };
+
+  test("allows exactly version 3's types and the destruction statement", () => {
+    expect([...BOARD_PAYLOAD_TYPES_V4].sort((a, b) => a - b)).toEqual(
+      [...BOARD_PAYLOAD_TYPES_V3, RECORD_TYPES.destructionStatement].sort((a, b) => a - b),
+    );
+    expect(Object.isFrozen(BOARD_PAYLOAD_TYPES_V4)).toBe(true);
+  });
+
+  test("only version 4 encodes a destruction statement", () => {
+    for (const version of [1, 3] as const)
+      expect(() => encodeBoardEntry(entry, version)).toThrow(EncodeError);
+    const b = encodeBoardEntry(entry, 4);
+    expect(b[2]).toBe(4);
+    expect(decodeBoardEntry(b, 4).payload).toEqual(honest);
   });
 });
 

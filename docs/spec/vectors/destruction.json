@@ -610,5 +610,63 @@
         "rejected": []
       }
     }
+  ],
+  "boardEntries": [
+    {
+      "id": "v4-statement",
+      "description": "A version-4 entry carrying a destruction statement",
+      "version": 4,
+      "encoding": "00070467e79b9b50a36dce9f874b2f26841618e19a93716ac786c30d2dbb9d6939900200000000000000090000000d00000064000f01e56671f9b518eb79eb92b82bfa256a16b31aee40bf9d1a5e2cbf535c758a27e30172dd0fa6d5aacd0f223115d222a3ecd6f855dfa7b0da869beb53dfe68a80cc800ac972d5f9eedbd22a5190ff09fedd2142f411fbe72ae2f0ecf8e928d0260096",
+      "error": null
+    },
+    {
+      "id": "v3-statement",
+      "description": "A version-3 entry can't carry a destruction statement",
+      "version": 3,
+      "encoding": "00070367e79b9b50a36dce9f874b2f26841618e19a93716ac786c30d2dbb9d6939900200000000000000090000000d00000064000f01e56671f9b518eb79eb92b82bfa256a16b31aee40bf9d1a5e2cbf535c758a27e30172dd0fa6d5aacd0f223115d222a3ecd6f855dfa7b0da869beb53dfe68a80cc800ac972d5f9eedbd22a5190ff09fedd2142f411fbe72ae2f0ecf8e928d0260096",
+      "error": "unexpected-record-type"
+    },
+    {
+      "id": "v1-statement",
+      "description": "A version-1 entry can't carry a destruction statement",
+      "version": 1,
+      "encoding": "00070167e79b9b50a36dce9f874b2f26841618e19a93716ac786c30d2dbb9d6939900200000000000000090000000d00000064000f01e56671f9b518eb79eb92b82bfa256a16b31aee40bf9d1a5e2cbf535c758a27e30172dd0fa6d5aacd0f223115d222a3ecd6f855dfa7b0da869beb53dfe68a80cc800ac972d5f9eedbd22a5190ff09fedd2142f411fbe72ae2f0ecf8e928d0260096",
+      "error": "unexpected-record-type"
+    },
+    {
+      "id": "v4-receipt-type",
+      "description": "A version-4 entry carrying a share-receipt header, as version 3 allows",
+      "version": 4,
+      "encoding": "00070467e79b9b50a36dce9f874b2f26841618e19a93716ac786c30d2dbb9d6939900200000000000000090000000d00000004000c0100",
+      "error": null
+    },
+    {
+      "id": "v4-complaint-type",
+      "description": "A version-4 entry carrying a share-complaint header, as version 3 allows",
+      "version": 4,
+      "encoding": "00070467e79b9b50a36dce9f874b2f26841618e19a93716ac786c30d2dbb9d6939900200000000000000090000000d00000004000e0100",
+      "error": null
+    },
+    {
+      "id": "v4-ballot-type",
+      "description": "A version-4 entry carrying a ballot header, as version 1 allows",
+      "version": 4,
+      "encoding": "00070467e79b9b50a36dce9f874b2f26841618e19a93716ac786c30d2dbb9d6939900200000000000000090000000d0000000400020100",
+      "error": null
+    },
+    {
+      "id": "v4-posting-type",
+      "description": "A version-4 entry still refuses a share posting (0x000d): postings reach the board only as contract events",
+      "version": 4,
+      "encoding": "00070467e79b9b50a36dce9f874b2f26841618e19a93716ac786c30d2dbb9d6939900200000000000000090000000d00000004000d0100",
+      "error": "unexpected-record-type"
+    },
+    {
+      "id": "v4-summed-share-type",
+      "description": "A version-4 entry refuses a summed-share message (0x000b), which never leaves the trustees",
+      "version": 4,
+      "encoding": "00070467e79b9b50a36dce9f874b2f26841618e19a93716ac786c30d2dbb9d6939900200000000000000090000000d00000004000b0100",
+      "error": "unexpected-record-type"
+    }
   ]
 }

@@ -25,6 +25,7 @@ export {
   BOARD_ENTRY,
   BOARD_PAYLOAD_TYPES,
   BOARD_PAYLOAD_TYPES_V3,
+  BOARD_PAYLOAD_TYPES_V4,
   type BoardEntryVersion,
   type BoardEntry,
   boardEntryHash,

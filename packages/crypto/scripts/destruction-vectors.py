@@ -45,6 +45,34 @@ def u8(x):
     return bytes([x])
 
 
+# --- Board entries ---------------------------------------------------------------
+
+BOARD_ENTRY = 0x0007
+# docs/spec/board.md, Allowed payloads: version 3 adds share receipts (0x000c) and
+# complaints (0x000e) to version 1's set; version 4 adds the destruction statement.
+ALLOWED = {1: {0x0002, 0x0003, 0x0005, 0x0006, 0x0008}}
+ALLOWED[3] = ALLOWED[1] | {0x000C, 0x000E}
+ALLOWED[4] = ALLOWED[3] | {RECORD_TYPE}
+
+
+def board_entry(version, election_id, index, segment, payload):
+    return (
+        BOARD_ENTRY.to_bytes(2, "big")
+        + u8(version)
+        + election_id
+        + index.to_bytes(8, "big")
+        + segment.to_bytes(4, "big")
+        + len(payload).to_bytes(4, "big")
+        + payload
+    )
+
+
+def entry_error(b):
+    """The board-entry envelope's own check of its payload's type."""
+    payload = b[3 + 32 + 8 + 4 + 4 :]
+    return None if int.from_bytes(payload[:2], "big") in ALLOWED[b[2]] else "unexpected-record-type"
+
+
 # --- The record ------------------------------------------------------------------
 
 
@@ -320,6 +348,23 @@ def main():
     )
     report("empty-board", "No statements at all", [], *tally, {"seats": [{"seat": i, "code": "destruction-missing"} for i in (1, 2, 4)]})
 
+    entries = []
+
+    def entry(id_, desc, version, payload, error):
+        enc = board_entry(version, ecdsa.sha256(b"destruction/election-id"), 9, 13, payload)
+        assert entry_error(enc) == error, id_
+        entries.append({"id": id_, "description": desc, "version": version, "encoding": enc.hex(), "error": error})
+
+    s1_bytes = encode(s1)
+    entry("v4-statement", "A version-4 entry carrying a destruction statement", 4, s1_bytes, None)
+    entry("v3-statement", "A version-3 entry can't carry a destruction statement", 3, s1_bytes, "unexpected-record-type")
+    entry("v1-statement", "A version-1 entry can't carry a destruction statement", 1, s1_bytes, "unexpected-record-type")
+    entry("v4-receipt-type", "A version-4 entry carrying a share-receipt header, as version 3 allows", 4, bytes.fromhex("000c0100"), None)
+    entry("v4-complaint-type", "A version-4 entry carrying a share-complaint header, as version 3 allows", 4, bytes.fromhex("000e0100"), None)
+    entry("v4-ballot-type", "A version-4 entry carrying a ballot header, as version 1 allows", 4, bytes.fromhex("00020100"), None)
+    entry("v4-posting-type", "A version-4 entry still refuses a share posting (0x000d): postings reach the board only as contract events", 4, bytes.fromhex("000d0100"), "unexpected-record-type")
+    entry("v4-summed-share-type", "A version-4 entry refuses a summed-share message (0x000b), which never leaves the trustees", 4, bytes.fromhex("000b0100"), "unexpected-record-type")
+
     data = {
         "format": "abolish-destruction-vectors/1",
         "title": "Destruction statements: the record, its signature and the report over a board's statements",
@@ -339,6 +384,7 @@ def main():
         "statements": statements,
         "decodeErrors": decode_errors,
         "reports": reports,
+        "boardEntries": entries,
     }
     with open(f"{out}/destruction.json", "w") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)

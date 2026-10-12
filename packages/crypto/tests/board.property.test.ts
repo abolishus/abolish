@@ -6,6 +6,7 @@ import {
   BOARD_PAYLOAD_TYPES,
   BOARD_PAYLOAD_TYPES_V3,
   BOARD_PAYLOAD_TYPES_V4,
+  boardPayloadTypes,
   BOARD_TREE,
   type BoardEntry,
   type BoardEntryVersion,
@@ -757,6 +758,12 @@ describe("board checks under board-entry versions 3 and 4", () => {
   };
 
   const either = fc.oneof(boardUnder(3), boardUnder(4));
+
+  test("boardPayloadTypes gives each version's allowed set", () => {
+    expect(boardPayloadTypes(1)).toBe(BOARD_PAYLOAD_TYPES);
+    expect(boardPayloadTypes(3)).toBe(BOARD_PAYLOAD_TYPES_V3);
+    expect(boardPayloadTypes(4)).toBe(BOARD_PAYLOAD_TYPES_V4);
+  });
 
   test("a well-formed board passes under its version, with the checkpoint of every segment", () => {
     run(

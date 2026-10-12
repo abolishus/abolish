@@ -11,7 +11,7 @@ import {
   type DisplayTextRule,
   displayTextShapeRule,
 } from "./display-text.ts";
-import { BOARD_ENTRY } from "./board.ts";
+import { BOARD_ENTRY, type BoardEntryVersion, boardPayloadTypes } from "./board.ts";
 import { ds } from "./domain-separation.ts";
 import {
   ELECTION_DEFINITION,
@@ -92,6 +92,9 @@ export function pinnedVersion(d: ElectionDefinition, recordType: number): number
   return pins.length === 1 ? pins[0]?.version : undefined;
 }
 
+const isBoardEntryVersion = (v: number | undefined): v is BoardEntryVersion =>
+  v !== undefined && Object.hasOwn(BOARD_ENTRY.versions, v);
+
 /** Why 2.3's profile combination refuses a definition's pins. */
 export type ProfileCombinationRule = "profile-combination" | "unsupported-version";
 
@@ -106,17 +109,21 @@ export type ProfileCombinationRule = "profile-combination" | "unsupported-versio
  * package doesn't read is `unsupported-version`, never a failure: a later
  * version may add itself to the rule (T-36), but a client that must refuse
  * such an election treats any result but `undefined` as a refusal: it can't
- * cast to a board it can't read. Call it only on a definition that passes
- * `electionDefinitionRule`, whose profile pins each of these types once; a
- * duplicate pin would hide its version from `pinnedVersion` and the rule.
+ * cast to a board it can't read. A ballot or tally-opening type pinned twice
+ * or not at all is `profile-combination` too, so a caller that skipped
+ * `electionDefinitionRule` still refuses rather than casting (T-34).
  */
 export function profileCombinationRule(d: ElectionDefinition): ProfileCombinationRule | undefined {
   const board = pinnedVersion(d, RECORD_TYPES.boardEntry);
-  if (board === undefined || !Object.hasOwn(BOARD_ENTRY.versions, board))
-    return "unsupported-version";
+  if (!isBoardEntryVersion(board)) return "unsupported-version";
   const ballot = pinnedVersion(d, RECORD_TYPES.ballot);
   const opening = pinnedVersion(d, RECORD_TYPES.tallyOpening);
-  const fits = (ballot !== 1 || board === 3 || board === 4) && (opening !== 1 || board === 4);
+  if (ballot === undefined || opening === undefined) return "profile-combination";
+  const allowed = boardPayloadTypes(board);
+  const carriesDelivery =
+    allowed.includes(RECORD_TYPES.shareReceipt) && allowed.includes(RECORD_TYPES.shareComplaint);
+  const carriesDestruction = allowed.includes(RECORD_TYPES.destructionStatement);
+  const fits = (ballot !== 1 || carriesDelivery) && (opening !== 1 || carriesDestruction);
   return fits ? undefined : "profile-combination";
 }
 

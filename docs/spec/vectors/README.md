@@ -171,7 +171,7 @@ Type descriptors:
 `ceremony.json` covers [[ceremony]] with its own format, `abolish-ceremony-vectors/1`, and the same top-level fields, plus `tags` (the ceremony's tags, ASCII) and:
 
 - `election`: the fields every transcript's context is rebuilt from: `l2ChainId` (decimal), `trusteeRegistry`, `electionId` and `stubHash` (hex).
-- `panels`: by name (`panel-4`, 3-of-4; `panel-4-k2`, 2-of-4; `panel-2`, 2-of-2; `panel-16`, 11-of-16), each with `threshold`, `identitySecrets` (32 bytes big-endian, hex, seat 1 first) and `keys` (the `p256-key` encodings, hex).
+- `panels`: by name (`panel-4`, 3-of-4; `panel-4-k2`, 2-of-4; `panel-2`, 2-of-2; `panel-3`, 2-of-3; `panel-16`, 11-of-16), each with `threshold`, `identitySecrets` (32 bytes big-endian, hex, seat 1 first) and `keys` (the `p256-key` encodings, hex).
 - `transcripts`: each has `id`, `description`, `panel`, `transcript` (the record's full encoding, hex) and `result`, the transcript check's output: `ok`; for a valid transcript, `hash` (the transcript hash), `seats` (every panel seat with its `reasons`, empty for a qualified seat) and `registered` (each qualified seat's `index`, `kemKey` and `signingKey`, hex); otherwise `code`, with `seats` for `ceremony-quorum`. The honest runs (`honest-4`, `honest-2`, `honest-16`, `absent`) also carry `runId`, `context` and, per seat taking part, `kemSeed` (hex), `kemX` and `pokNonce` (decimal), `signingSecret` (hex) and `challengeSecrets` (the `μ`s in target order, hex), from which every message is reproduced byte for byte (ECDSA nonces are RFC 6979's).
 - `decode`: each has `id`, `description`, `transcript` (hex) and `error`, the decode error code; the context is `panel-2`'s.
 

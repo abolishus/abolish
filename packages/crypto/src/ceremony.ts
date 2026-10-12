@@ -459,7 +459,7 @@ export function challengesMessage(
   );
 }
 
-/** Round 3: the shared secret of every challenge addressed to the seat, by decapsulation. */
+/** Round 3: for every challenge addressed to the seat, the pair-bound hash of its decapsulated shared secret. */
 export function answersMessage(
   params: CeremonyParams,
   seat: SeatSecrets,
@@ -494,7 +494,13 @@ export function answersMessage(
   });
 }
 
-/** Round 4: the seat's challenge secrets, once every answer is fixed. */
+/**
+ * Round 4: the seat's challenge secrets, once every answer is fixed. This
+ * function keeps no state: a node MUST call it at most once per run, record
+ * that before sending, and never reveal again over another round 3, or a
+ * coordinator could collect its reveals and then build a round 3 from them
+ * (docs/spec/ceremony.md, Soundness).
+ */
 export function revealsMessage(
   params: CeremonyParams,
   seat: SeatSecrets,
@@ -684,8 +690,9 @@ function seatResults(run: Run, t: Rounds): SeatResult[] {
     const a = answers.get(i);
     if (a !== undefined)
       s2.filter((j) => j !== i).forEach((j, at) => {
-        const ss = valid.get(`${j}>${i}`);
-        if (ss != null && !equalBytes(ss, a.answers[at] as Uint8Array)) add(i, "wrong-answer");
+        const expected = valid.get(`${j}>${i}`);
+        if (expected != null && !equalBytes(expected, a.answers[at] as Uint8Array))
+          add(i, "wrong-answer");
       });
   }
   return Array.from(reasons, ([index, r]) => ({ index, reasons: r }));

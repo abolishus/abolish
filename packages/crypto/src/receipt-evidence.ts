@@ -84,7 +84,10 @@ export function receiptCommitment(salt: Uint8Array, encodedReceipt: Uint8Array):
  * Commitment; opening checks 2 and 3): the calldata's length is a multiple of
  * 32 and one of its 32-byte words at an offset that is a multiple of 32 is
  * `commitment`. Alignment makes the word's position unambiguous, so a relayer
- * can batch any number of voters' words as a bare concatenation.
+ * can batch any number of voters' words as a bare concatenation. A false
+ * result doesn't say which check failed: a length that isn't a multiple of 32
+ * is check 2's `opening-transaction`, a missing word check 3's
+ * `opening-commitment`, so an opening checker tests the length itself first.
  */
 export function calldataCarries(calldata: Uint8Array, commitment: Uint8Array): boolean {
   const d = copyBytes(calldata, "calldata");
@@ -112,6 +115,16 @@ export type ReceiptOpeningErrorCode =
 export type ReceiptOpeningCheck =
   | { readonly ok: true }
   | { readonly ok: false; readonly code: ReceiptOpeningErrorCode | "opening-fork-unknown" };
+
+const OPENING_CODES: ReadonlySet<string> = new Set([
+  "opening-decode",
+  "opening-transaction",
+  "opening-commitment",
+  "opening-late",
+  "opening-payload",
+  "opening-canonical",
+  "opening-fork-unknown",
+]);
 
 /**
  * The receipt keys that judge the election (docs/spec/receipts.md, Receipt
@@ -314,6 +327,9 @@ export function judgeReceipt(input: ReceiptJudgeInput): ReceiptVerdict {
   if (now >= disputeEnd(c)) {
     const openings = input.openings ?? [];
     if (!Array.isArray(openings)) throw new TypeError("openings must be an array");
+    for (const o of openings)
+      if (o.ok !== true && !(o.ok === false && OPENING_CODES.has(o.code)))
+        throw new TypeError("every opening check must be a pass or a known code");
     if (!openings.some((o) => o.ok)) {
       // An opening from a fork this release doesn't know may well pass under
       // one that does, so the receipt is unjudged here, never not evidence.
@@ -331,7 +347,12 @@ export function judgeReceipt(input: ReceiptJudgeInput): ReceiptVerdict {
   try {
     // Anchors for segments before f belong to no reading of this election.
     if (!Array.isArray(input.anchors)) throw new TypeError("anchors must be an array");
-    const anchors = input.anchors.filter((a) => a.checkpoint.segment >= f);
+    const anchors = input.anchors.filter((a) => {
+      const { segment } = a.checkpoint;
+      if (!Number.isInteger(segment) || segment < 0 || segment > 0xffffffff)
+        throw new RangeError("every anchor's segment must be a u32");
+      return segment >= f;
+    });
     counted = anchoredCheckpoints(input.electionId, anchors, c, now);
   } catch (e) {
     if (!(e instanceof BoardError)) throw e;
@@ -370,27 +391,25 @@ export function judgeReceipt(input: ReceiptJudgeInput): ReceiptVerdict {
       const root = roots.get(Number(cp.size));
       return root !== undefined && equalBytes(root, cp.root);
     });
-    const proofs = matched.map((cp) => ({
+    // Proofs only where a verdict needs them: each costs a pass over its
+    // checkpoint's leaves (T-52).
+    const proofTo = (cp: Checkpoint): ConsistencyToCheckpoint => ({
       checkpoint: cp,
       proof: consistencyProof(BOARD_TREE, hashes.slice(0, Number(cp.size)), n),
-    }));
+    });
     if (!equalBytes(rootAtIndex, r.root)) {
       // Two roots of one size can't both extend an anchored root without a
       // collision of the tagged tree hashes (T-24).
-      const shown = proofs.find(({ checkpoint, proof }) =>
-        verifyConsistency(
-          BOARD_TREE,
-          BigInt(n),
-          checkpoint.size,
-          rootAtIndex,
-          checkpoint.root,
-          proof,
-        ),
-      );
-      if (shown !== undefined)
-        return { verdict: "forked", by: "copy", rootAtIndex, consistency: shown };
+      const first = matched[0];
+      if (first !== undefined) {
+        const shown = proofTo(first);
+        if (
+          verifyConsistency(BOARD_TREE, BigInt(n), first.size, rootAtIndex, first.root, shown.proof)
+        )
+          return { verdict: "forked", by: "copy", rootAtIndex, consistency: shown };
+      }
     } else if (includedBy === undefined && matched.length === later.length) {
-      includedBy = proofs;
+      includedBy = matched.map(proofTo);
     }
   }
   // A fork shown by any source settles it before inclusion: an honest

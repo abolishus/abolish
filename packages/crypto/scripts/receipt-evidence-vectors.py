@@ -265,11 +265,16 @@ def main(out_dir):
         ("included-index-0", {"receipt": receipt_for(0), "payload": payloads[0]}),
         ("included-seal-entry", {"receipt": receipt_for(6), "payload": payloads[6]}),
         ("included-before-seal", {"now": window_end(clock, 1) + 1, "anchors": honest_anchors[:2]}),
+        ("included-seal-window-open", {"now": window_end(clock, 4), "anchors": honest_anchors[:3]}),
+        ("included-later-anchors-after-now", {"now": window_end(clock, 1) + 1}),
+        ("included-anchor-before-first-ignored", {"firstSegment": 1, "anchors": [anchor(0, size=1000)] + honest_anchors[1:]}),
         ("included-opening-passes", {"now": t_e, "openings": ["opening-late", "ok"]}),
         ("not-evidence-key", {"keys": {"kind": "pinned", "keys": [retired_key]}}),
         ("not-evidence-key-not-judging", {"keys": {"kind": "definition", "keys": [(pinned[0], "unregistered")]}}),
         ("not-evidence-signature-stranger", {"receipt": (lambda b: b[:143] + pinned[0] + b[176:])(receipt_for(3, d=stranger))}),
         ("not-evidence-entry", {"payload": payloads[4]}),
+        ("not-evidence-election", {"receipt": rv.sign(operator, sha256(b"other election"), 3, 1, hashes[3], links[3], board.BOARD.mth(hashes[:4]), board.BOARD.path(3, hashes[:4]))}),
+        ("not-evidence-inclusion", {"receipt": rv.sign(operator, E, 3, 1, hashes[3], links[3], board.BOARD.mth(hashes[:4]), board.BOARD.path(2, hashes[:4]))}),
         ("not-evidence-segment-before-first", {"firstSegment": 2}),
         ("not-evidence-decode", {"receipt": r3 + b"\x00"}),
         ("not-evidence-expired", {"now": t_e}),
@@ -281,6 +286,7 @@ def main(out_dir):
         ("board-failed-size", {"anchors": honest_anchors + [anchor(2, size=0, head=bytes(32), root=bytes(32))]}),
         ("board-failed-wrong-election", {"anchors": [anchor(0, electionId=sha256(b"other"))] + honest_anchors[1:]}),
         ("board-failed-unsealed", {"anchors": honest_anchors[:3]}),
+        ("board-failed-key-unregistered", {"keys": {"kind": "definition", "keys": [(pinned[0], "judges"), (retired_key, "unregistered")]}}),
         ("board-failed-key-retired", {"keys": {"kind": "definition", "keys": [(pinned[0], "judges"), (retired_key, "retired")]}}),
         ("pending", {"now": window_end(clock, 1)}),
         ("unanchored", {"anchors": [honest_anchors[0]] + honest_anchors[2:]}),
@@ -344,6 +350,9 @@ def main(out_dir):
     assert expected["not-evidence-signature-stranger"]["reason"] == "receipt-signature"
     assert expected["not-evidence-expired-opening-code"]["opening"] == "opening-commitment"
     assert expected["board-failed-unsealed"]["reason"] == "unsealed"
+    assert expected["not-evidence-election"]["reason"] == "receipt-election"
+    assert expected["not-evidence-inclusion"]["reason"] == "receipt-inclusion"
+    assert len(expected["included-later-anchors-after-now"]["consistency"]) == 1
     assert expected["forked-copy"]["by"] == "copy" and expected["forked-l1-earlier-covers"]["by"] == "l1"
     assert len(expected["included"]["consistency"]) == 3  # segments 1, 3 and 4
 

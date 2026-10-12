@@ -439,6 +439,18 @@ describe("judgeReceipt", () => {
     const input = inputOf(included);
     expect(() => judgeReceipt({ ...input, now: -1n })).toThrow(RangeError);
     expect(() => judgeReceipt({ ...input, firstSegment: 5 })).toThrow(RangeError);
+    const first = input.anchors[0] as Anchor;
+    expect(() =>
+      judgeReceipt({
+        ...input,
+        anchors: [{ ...first, checkpoint: { ...first.checkpoint, segment: Number.NaN } }],
+      }),
+    ).toThrow(RangeError);
+    const tE = disputeEnd(input.clock);
+    for (const bad of [{ ok: 1 }, { ok: false, code: "opening-maybe" }, { ok: false }])
+      expect(() =>
+        judgeReceipt({ ...input, now: tE, openings: [bad as unknown as ReceiptOpeningCheck] }),
+      ).toThrow(TypeError);
     expect(() =>
       judgeReceipt({
         ...input,

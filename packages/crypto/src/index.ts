@@ -158,6 +158,20 @@ export {
   selectBallots,
 } from "./revoting.ts";
 export {
+  type CastExpectation,
+  checkReceiptAtCast,
+  decodeReceipt,
+  encodeReceipt,
+  RECEIPT,
+  type Receipt,
+  type ReceiptCastCheck,
+  type ReceiptCastErrorCode,
+  type ReceiptStatement,
+  receiptStatement,
+  signReceipt,
+  type UnsignedReceipt,
+} from "./receipt.ts";
+export {
   aggregateCell,
   type CellAggregate,
   type CellOpening,

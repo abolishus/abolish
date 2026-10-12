@@ -22,6 +22,7 @@ One JSON file per spec section or record type, named after it (`primitives.json`
 | `ballot-validity.json`     | Committed votes with the randomness that made them, their validity verdicts, trustees' share checks and codec rejections ([[ballot-validity]])                                                                      |
 | `share-encryption.json`    | Trustee KEM keys, share ciphertexts with the randomness that made them, decryptions, postings and complaints with their verdicts, and codec rejections ([[share-encryption]])                                       |
 | `tally.json`               | Cell aggregates, trustees' per-ballot and summed shares with their check verdicts, combined seats, Lagrange coefficients and openings; published openings with the verifier's verdicts; a derived total ([[tally]]) |
+| `receipt.json`             | Receipts: the record and its signed statement, rejected encodings and the checks at cast ([[receipts]])                                                                                                             |
 | `circuit.json`             | Circuit-facing values: each registered tag's field element and the two byte packings ([[notation]], [[domain-separation]])                                                                                          |
 
 ## Format

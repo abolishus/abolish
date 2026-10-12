@@ -150,6 +150,10 @@ function checkRules(rules: ValidityRules): void {
 
 function checkContext(ctx: ValidityContext): void {
   checkRules(ctx);
+  checkBallotContext(ctx);
+}
+
+function checkBallotContext(ctx: BallotHashContext): void {
   const d = ctx.definitionHash;
   if (!(d instanceof Uint8Array) || !ArrayBuffer.isView(d) || new Uint8Array(d).length !== 32)
     throw new TypeError("context: definitionHash must be 32 bytes");
@@ -179,6 +183,29 @@ export function statementHash(
   VSS.write(w, vss);
   SHARE_HASHES.write(w, shareHashes);
   return H(ds("abolish/v1/ballot-statement", w.finish()));
+}
+
+/** What names a ballot beside its committed vote: the election, its tier and its nullifier. */
+export type BallotHashContext = Pick<ValidityContext, "definitionHash" | "tier" | "nullifier">;
+
+/**
+ * `ballot_hash`: the hash of the ballot's public part, the statement hash's
+ * inputs followed by the validity proofs (docs/spec/ballot-validity.md,
+ * Ballot hash). The membership proof's message and every share receipt bind
+ * it (T-38, T-41); it leaves out the membership proof, which anyone can
+ * re-randomise, and the L1 reference, which `M` binds itself.
+ */
+export function ballotHash(ctx: BallotHashContext, vote: CommittedVote): Uint8Array {
+  checkBallotContext(ctx);
+  const w = new Writer();
+  w.bytes(new Uint8Array(ctx.definitionHash));
+  u16.write(w, BALLOT_RECORD_TYPE);
+  u8.write(w, BALLOT_VERSION);
+  u8.write(w, ctx.tier);
+  fieldBn254.write(w, ctx.nullifier);
+  // vss ‖ share_hashes ‖ option_proofs ‖ sum_proof, exactly as the ballot carries them.
+  COMMITTED_VOTE.write(w, vote);
+  return H(ds("abolish/v1/ballot", w.finish()));
 }
 
 type FsTag = SpecifiedTagOf<"fiat-shamir">;

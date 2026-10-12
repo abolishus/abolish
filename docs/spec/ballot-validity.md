@@ -5,7 +5,7 @@ How a plurality or approval ballot commits to its vote on the public board, how 
 What this page doesn't cover yet, by the part of P1-12 that owns it:
 
 - **Share encryption** is specified in [[share-encryption]] (part 2): the hybrid KEM and AEAD that carry each trustee's shares, and the hash `H(ct_i)` of each ciphertext. This page takes the `n` ciphertext hashes as 32-byte values and binds them into the statement.
-- **The ballot record** (`0x0002`, part 3, with P1-13 and P1-17b): the record that carries the committed vote below with its tier, nullifier, L1 block reference and membership proof, and the ballot hash. The committed vote is a structure nested in that record, and its layout here is the one version 1 of the record carries.
+- **The ballot record** (`0x0002`, with P1-13 and P1-17b): the record that carries the committed vote below with its tier, nullifier, L1 block reference and membership proof. It waits for P1-17b's encoding of the membership proof. The committed vote is a structure nested in that record, and its layout here is the one version 1 of the record carries; the ballot hash (below) is over it and the values the record carries beside it.
 
 ## Sources
 
@@ -98,6 +98,31 @@ statement_hash = H(DS("abolish/v1/ballot-statement",
 | `share_hashes`    | as in the ballot | Every share ciphertext, so the shares the trustees hold are fixed by the proved statement ([[0002-everlasting-privacy]], T-30)                                                                                                     |
 
 The statement is hashed once and each challenge binds its digest: the full statement can be over 33 KB, and repeating it in every one of a ballot's up to 65 challenge inputs would multiply what every verifier hashes per ballot. `H` is collision-resistant, so the digest binds the statement as the statement itself would; ElectionGuard 2.0's extended base hash `H_E` does the same. `definition_hash` is the first input, as [[domain-separation]] requires.
+
+## Ballot hash
+
+A ballot is named by the hash of its public part ([[0002-everlasting-privacy]], Delivery):
+
+```
+ballot_hash = H(DS("abolish/v1/ballot",
+    definition_hash ‖ u16(0x0002) ‖ u8(1) ‖ u8(tier) ‖ encode(nullifier)
+    ‖ encode(vss) ‖ encode(share_hashes) ‖ encode(option_proofs) ‖ encode(sum_proof)))
+```
+
+The inputs are the statement hash's, in the same order and encodings, followed by the validity proofs as the ballot carries them (Committed vote): `encode(vss) ‖ … ‖ encode(sum_proof)` is the committed vote's own encoding. The input after the tag is `68 + len(encode(committed_vote))` bytes.
+
+What binds it:
+
+- **The membership proof's message** `M` ([[revoting]], Message), so a membership proof can't be moved to another ballot (T-38).
+- **Every share receipt** ([[share-encryption]], Intake and receipts), so a receipt counts only for the public part the trustee checked, and a client can't collect receipts for one public part and publish another ([[0002-everlasting-privacy]], Delivery; T-41).
+- **Everything that decides later whether a selected ballot counts** (postings, complaints, the voter's receipt checks) keys on it, never on a board entry, since anyone can get a copy of a ballot boarded first ([[revoting]], Owned elsewhere).
+
+What it leaves out, and why:
+
+- **The membership proof.** A proof can't bind its own hash, and anyone can re-randomise a Groth16 proof without the witness ([[membership]], Security notes): a re-randomised copy of a ballot keeps its ballot hash, and so its receipts, and is a repeat ([[revoting]], Selection step 1).
+- **The L1 reference.** `M` binds it beside the ballot hash. The same public part under a newer reference carries the same shares, so the receipts the trustees gave for it still hold.
+
+Only the voter can give a statement a second ballot hash. The validity proofs are proofs of knowledge of the commitments' openings (CDS94), so no one without them can make other proofs of the same statement, and changing any byte of a proof makes it fail (T-31, T-32).
 
 ## Validity proofs
 

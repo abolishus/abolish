@@ -95,7 +95,7 @@ describe("domain-separation tag registry", () => {
   });
 
   test("only specified plain-hash and KDF tags frame a hash input", () => {
-    expect(() => ds("abolish/v1/ballot" as never, new Uint8Array())).toThrow(RangeError);
+    expect(() => ds("abolish/v1/membership-vk" as never, new Uint8Array())).toThrow(RangeError);
     // Specified, but a hash-to-curve DST: DS framing would give it a second layout.
     expect(() => ds("abolish/v1/generator-h" as never, new Uint8Array())).toThrow(RangeError);
     // Specified, but a Signature tag: a signed message never doubles as a hash input.

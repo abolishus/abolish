@@ -1,0 +1,832 @@
+{
+  "format": "abolish-share-receipt-vectors/1",
+  "title": "Ballot hash, trustee intake and share receipts",
+  "spec": "docs/spec/share-encryption.md",
+  "generator": "Printed by packages/crypto/scripts/share-receipt-vectors.py, an implementation of docs/spec/ballot-validity.md (Ballot hash) and docs/spec/share-encryption.md (Intake and receipts) in Python's integers and hashlib, sharing no code with packages/crypto or any @noble library. It reuses share-encryption-vectors.py's ballots and decryption, re-made from their labels and checked against share-encryption.json byte for byte, and trustee-vectors.py's P-256 ECDSA, checked against RFC 6979 Appendix A.2.5 first. Signing secrets are SHA-256 of fixed labels: test data only.",
+  "tags": {
+    "ballot": "abolish/v1/ballot",
+    "receipt": "abolish/v1/sig/share-receipt"
+  },
+  "panels": {
+    "panel-3": [
+      {
+        "seat": 1,
+        "signingSecret": "0a6df3430e7cba77ab23a25f8b8e1dc4d6056c39f57373a9ea2467af0ad54ff9",
+        "signingKey": "02787bf9d0a9b8931a0db1ef25ed568194a4e6e256cd1d027f49c38a48b23a8b12",
+        "identityKey": "036521247cf8f33fec68b52e40055329be2d99bdbdc88c34361eea107d37b8d502"
+      },
+      {
+        "seat": 2,
+        "signingSecret": "e313da95f678d60f8bc18d683a5254e1907ef72732c7322180b34601df8835b8",
+        "signingKey": "02b48101943895a3bf9b240c48582cef1965e5f7503b65e82900ca3307585acd85",
+        "identityKey": "02ab5a55ccd1cf339a4715c598ed92cc8c233e13d90ba79e345acd5708b0e94e05"
+      },
+      {
+        "seat": 3,
+        "signingSecret": "035582e6b7469f7e8407f7ae7c9b35ff57e06316e9bab45e611e1ed54d426ebe",
+        "signingKey": "02bd1b7d92a6b65e05010affbb74a339bb111d9c696db95a1ed0a7055cc00c0cec",
+        "identityKey": "0343a4df84b07e34c2d850aae9c171d4853d678b72e92ef367b4350d1296263bc7"
+      }
+    ],
+    "panel-2": [
+      {
+        "seat": 1,
+        "signingSecret": "85d92ad9c29c6c6d30492d96e9f47d137c88b8e4c8e8ea82c13d84692a983345",
+        "signingKey": "032155f51888226f6e0ba52ea141b25ab98c2a7d5c7b55e841bb7d81475e909d2a",
+        "identityKey": "0346cb0335fc0dbfaed8acd7f7cf9f9fe03ec11b7bdcd7cc0591b0daae7fc7323a"
+      },
+      {
+        "seat": 2,
+        "signingSecret": "ead45071adf2f36b9e0d9f9c7dac9c4fbb2ee5ef836932dcdfec9a63fc9f8947",
+        "signingKey": "0218a327808e09b2e8624f2ce67236d389a87906ae3e7f0da38592447132681c50",
+        "identityKey": "037295c9fbd6924e70a2412897cb5a3b41ae403ab9d1a1fb94f495d363407fe833"
+      }
+    ],
+    "panel-16": [
+      {
+        "seat": 1,
+        "signingSecret": "0d2850c35e7b11f1b0e70a0bccb438fb2a6c0bb13ccc2feee4015f75bc1ea460",
+        "signingKey": "03e13b3bd55b5839a77a83b2b5efe87bdfc1f6f79596a3d7ba036d8e9c0597452e",
+        "identityKey": "03ffd97bf96bb2e970235419748145d19b970950cb66bfb904a422bcb13a4b7fc9"
+      },
+      {
+        "seat": 2,
+        "signingSecret": "f1415acd86c212d7ff8f20466e62c69bb7e39c0933ef208dfe1d897e0d373e1b",
+        "signingKey": "0374145c83e455ca1cdf699b054d61813a9b41d50d3a6b567eb1ba2aae9c81365c",
+        "identityKey": "03b0be1337f0af87188b8daa08c70f236d854cb0b6c0fc2b3b7f3f13b4451c6adf"
+      },
+      {
+        "seat": 3,
+        "signingSecret": "f8e3334d18d6fb82d61ba451f995626c49bc5eb45c148adcecc02237377aa502",
+        "signingKey": "02955852a310ffc4c803d92802fcbe77f7bfd5bf03099ef0007369832e53a565dd",
+        "identityKey": "029d5bf1642e2973e706b7353cef02342541fc522bd99c6ed5c207fad96b8e08bf"
+      },
+      {
+        "seat": 4,
+        "signingSecret": "705fc1b091cdfa159cbb171a5ca611120ad10aa507d4e7dcc54bf3746afeeb32",
+        "signingKey": "02185ffa1a9398e649312192b8c72e3ad590e21a0673edbce9047db67ffe30ce93",
+        "identityKey": "035af361d193b79ebc34bd666e47dd3096f5e98a53791bcf4510fc568a58d7ff01"
+      },
+      {
+        "seat": 5,
+        "signingSecret": "ade1f9412713d37ad8bc2021db22cc7a7bff638d42fb9f592a30ec856365fe00",
+        "signingKey": "027cd47928212d9471eb68e2e7c060f7ee91c79571807b2f49b961b56e6617c89d",
+        "identityKey": "02a91048dcc857ebe5a3a4bdf6da82b3f328c386ba674b32d6611c8a99384d063b"
+      },
+      {
+        "seat": 6,
+        "signingSecret": "332ac99abeb5a8470d6e4042a0836e4c45de665b5bcf02b92d6d7ca967334a98",
+        "signingKey": "02103a7b1a08b4b91dfaca23f0e289223f76850356d8174547d1e207973f7aeeba",
+        "identityKey": "0276388e440c6cca25ab8f3cc531d552ddd4e9f5a9ef957f97f28018512d861ba0"
+      },
+      {
+        "seat": 7,
+        "signingSecret": "7e279bdba2a8b48fe8572c7f9e79ea543d243d2b69a66de79a038180640774fb",
+        "signingKey": "02124fc574c0df13aae5b7083f3f4b0fe6f73043c41a5a9d2a08f761e256b0addc",
+        "identityKey": "02c95df4d79a2e2c3e64ba1d6f74a2e27b5fb897f6a275d4aa0c5d130452fffed0"
+      },
+      {
+        "seat": 8,
+        "signingSecret": "f97bef2c627b41b136650b3a0b6abc0a9b0ef7fddd11947f9e3630258ab9b64a",
+        "signingKey": "03cf41a46f8dedb9d25c0721dd7909fe4f33950f0c6551ac2ec8a41054c9705bc5",
+        "identityKey": "03faf659d0b084ae9f3e5c56eb388464fbf9772a13aebffcdac33dd9cf95518e34"
+      },
+      {
+        "seat": 9,
+        "signingSecret": "590a29b59ce7c2aff8caf53a059e9a36b186000474693b73a600f5d5e2719e58",
+        "signingKey": "02d0cc31dcce64aa36f6d8fc2529e27916049f71810df3890c0c0575f274e044f1",
+        "identityKey": "02ad553fa93056c40befd6cb2d629039db2c2ba798ec37a037151c0ba0d21c64d5"
+      },
+      {
+        "seat": 10,
+        "signingSecret": "a774b0256563749069767643c46848953c5e3c6538cf39cf3645d7c607b3dd2f",
+        "signingKey": "0323763f92cc1d95fa3a533264c06cea013dc1d5278af98845757bf6b384feb6b2",
+        "identityKey": "03994e0c0d55abb62666e0b6cea1358d978b86002355e1fd8ff2d6d93ecc03d615"
+      },
+      {
+        "seat": 11,
+        "signingSecret": "6a57d9939c4aa2b7790ebf0143e49157d4b41c1c201c8802747a7c9e3c5a6d75",
+        "signingKey": "029a0adfcba04cd47f5aed9b0f097c69fa99d333347cb3ab64cb350430a1d48650",
+        "identityKey": "02fed9497d583ed0c102d2c5f1836e971bc32c60eb1c95e52e232eda88f26a662f"
+      },
+      {
+        "seat": 12,
+        "signingSecret": "960bebd3d6bff3c89930b0466ddfe5264e2e1bf343b3a332c7ad0b516bbf7a0a",
+        "signingKey": "03640ebe6996aefbe38b540342543c98c2d0a7e69c437b493ee8f1f9e11e41603d",
+        "identityKey": "0323a242cabd24bc8a8b079cc9d4bef8cfce1c5deebcb8841ff2eba69ec365290e"
+      },
+      {
+        "seat": 13,
+        "signingSecret": "3d8283fe6990f25deb6b4ea6ec884c8eee077e99a314c10a41ae0ac305e3817f",
+        "signingKey": "03e64371280429dffbd6d6cd3d4b4d54a7cdb23665ee54d877adf49086306be8b1",
+        "identityKey": "02e2eb29b109e402a0359a347012ad35fb2db51d34b3bcdd7827616c25c848081a"
+      },
+      {
+        "seat": 14,
+        "signingSecret": "5fb386c86cb4bbcd5b791bb60a1ce63327f1585835b7d0a8170a70eb2a89d99a",
+        "signingKey": "020fe027599be969cc113fd2d51f4e5310c318b5af857122c350225294a4321f27",
+        "identityKey": "02687c3e3062749277cf95fb9b7f2540d5cce11d393f6b14478b44f1cfc3fee5e2"
+      },
+      {
+        "seat": 15,
+        "signingSecret": "f6b848ea8627dd576e1f5850bd54c42d22f5c144de489c1cd57f2f63c4dd35fd",
+        "signingKey": "029d7b2d47bef28c39c80bad83b63fe9d7c6ced3e98fea32a69f4526f243114801",
+        "identityKey": "03de23ec199177696144c11126f4e3441e50fe130d023d1cf0654a8ac25ca0ae46"
+      },
+      {
+        "seat": 16,
+        "signingSecret": "0d142e3f0e7032d6bd40491ed1ae1892a2220db2b5d1fdd0ddc8052fe428728d",
+        "signingKey": "03f10481a048083768bde8aeda48b881340e9007fa321428a5e44d1958c6720e98",
+        "identityKey": "028b98ef766971ece8a81a018c2b2dc3b42d6a3d84e25bc89fe44b335e397d203d"
+      }
+    ]
+  },
+  "ballotHashes": [
+    {
+      "source": "ballot-validity.json",
+      "ballot": "plurality-first",
+      "ballotHash": "38a8574c02026581ffe3f696bfb256a518797013d589accab2df8a730a779f53"
+    },
+    {
+      "source": "ballot-validity.json",
+      "ballot": "plurality-last",
+      "ballotHash": "92706bf51f8bcb85fa84c3ac9c64207670533eae7a1d3f350e02d721f846b2d2"
+    },
+    {
+      "source": "ballot-validity.json",
+      "ballot": "plurality-blank",
+      "ballotHash": "5d3145bdd24b0e1a32d4cda6a248df02820fb6f95a88dd13628d45f42c7b5087"
+    },
+    {
+      "source": "ballot-validity.json",
+      "ballot": "approval-two",
+      "ballotHash": "2a11fcbf078638fa2547aa6c96baed1a87719be60e2168c839456248df16d45a"
+    },
+    {
+      "source": "ballot-validity.json",
+      "ballot": "approval-at-limit",
+      "ballotHash": "61a14518fec3eb978f0c7a813c651eb68f7e0d55671a55b2868a8877153d6d7e"
+    },
+    {
+      "source": "ballot-validity.json",
+      "ballot": "approval-minimum",
+      "ballotHash": "b993a27a0258788cfae6550100b8a1897a459ab4ee04f56e11a43c7e5268978d"
+    },
+    {
+      "source": "ballot-validity.json",
+      "ballot": "approval-all",
+      "ballotHash": "69a41bdefac75e518a97eeff442a6c2ad1cafd67da4b4f78116f0f450b37aa9d"
+    },
+    {
+      "source": "ballot-validity.json",
+      "ballot": "trustees-max",
+      "ballotHash": "86c0aa63a337c9a785fba29df5098f8dce1a382d9bd3980973d4c7b23c79eff5"
+    },
+    {
+      "source": "ballot-validity.json",
+      "ballot": "options-max",
+      "ballotHash": "806e3c145c1664fff9b3a65ef51b058fd750d17b4d286d0b07e6f1ed9c2b685a"
+    },
+    {
+      "source": "share-encryption.json",
+      "ballot": "plurality",
+      "ballotHash": "706978f898ec696288772d04b79b504adeafb419687683cb2303fe2a12b54a94"
+    },
+    {
+      "source": "share-encryption.json",
+      "ballot": "options-max",
+      "ballotHash": "ce3f2de8614fb23547fa29e69573b5ff01b4ecb58004bf72b97f90143ccffc92"
+    },
+    {
+      "source": "share-encryption.json",
+      "ballot": "trustees-max",
+      "ballotHash": "e0a942838cdfdc6d600bd4a00b84e578141c05f4abaf4249416e8881b87629b6"
+    },
+    {
+      "source": "share-encryption.json",
+      "ballot": "bad-share",
+      "ballotHash": "250096e7480f8c23558268b05020b11fca96cc81d0258a0a1be48159e30375a3"
+    },
+    {
+      "source": "share-encryption.json",
+      "ballot": "bad-seal",
+      "ballotHash": "cd94053eb61e76dd2c6fed5c8d45a8821c088043bb4fea6944f4797c5853b285"
+    },
+    {
+      "source": "share-encryption.json",
+      "ballot": "short-list",
+      "ballotHash": "8d9596bcaa6e6b5223da415378e06fcc23346fbd62ae2a6f230b407301af377b"
+    },
+    {
+      "source": "share-encryption.json",
+      "ballot": "copied-ephemeral",
+      "ballotHash": "5f14efc423389e8c3163d089eede4476c50721d13109cd29b3ebf9e6a84660d4"
+    }
+  ],
+  "intakes": [
+    {
+      "ballot": "plurality",
+      "seat": 1,
+      "result": "ok",
+      "ballotHash": "706978f898ec696288772d04b79b504adeafb419687683cb2303fe2a12b54a94",
+      "shareHash": "e457acb3a011cd265eaf79f949647389fcf41d29243e73034e9794d83c998a3f",
+      "statement": "2d4ceb20e6b30ceee1b503bd0b58022e9fbab0a575f5b636c26130b775dbe9e7706978f898ec696288772d04b79b504adeafb419687683cb2303fe2a12b54a9401e457acb3a011cd265eaf79f949647389fcf41d29243e73034e9794d83c998a3f",
+      "receipt": "8fbfa0c727fab13f0fc66e3b1eb94fb9eb332a881c8649fbb4574674c3b8ed1168f40358326de49e32285f2d5a6e8aba2b97e158a3505846ee944359fcff5b68"
+    },
+    {
+      "ballot": "plurality",
+      "seat": 2,
+      "result": "ok",
+      "ballotHash": "706978f898ec696288772d04b79b504adeafb419687683cb2303fe2a12b54a94",
+      "shareHash": "1ded68d6316388310a3780fd31d40fef09112fa51e20f94f87d914cde6f47aee",
+      "statement": "2d4ceb20e6b30ceee1b503bd0b58022e9fbab0a575f5b636c26130b775dbe9e7706978f898ec696288772d04b79b504adeafb419687683cb2303fe2a12b54a94021ded68d6316388310a3780fd31d40fef09112fa51e20f94f87d914cde6f47aee",
+      "receipt": "892d1adb81af77f8e8ad284d31ca1cced550611c269949c6e82593f65c3945234c03654d0d66e404a113c06048584e9429b81f5a5331e505246b16aa51369e25"
+    },
+    {
+      "ballot": "plurality",
+      "seat": 3,
+      "result": "ok",
+      "ballotHash": "706978f898ec696288772d04b79b504adeafb419687683cb2303fe2a12b54a94",
+      "shareHash": "10cde6249de6c5072de9619b3965f2b410e2e8bafd487b557069aa94f21d5052",
+      "statement": "2d4ceb20e6b30ceee1b503bd0b58022e9fbab0a575f5b636c26130b775dbe9e7706978f898ec696288772d04b79b504adeafb419687683cb2303fe2a12b54a940310cde6249de6c5072de9619b3965f2b410e2e8bafd487b557069aa94f21d5052",
+      "receipt": "851b152255a3e13653ba7ba245e4d112ffb7846f0011e8b147a99ad2fa13fd6b25db8b076d03d9f10735bf8e15378a7df0397f404eebdc03de5268b2dcf26e6b"
+    },
+    {
+      "ballot": "options-max",
+      "seat": 1,
+      "result": "ok",
+      "ballotHash": "ce3f2de8614fb23547fa29e69573b5ff01b4ecb58004bf72b97f90143ccffc92",
+      "shareHash": "288a4979c9f410a03a30691a75cd405066ee3aef9c0e03b4db5165e8f2f395d9",
+      "statement": "6ca885568365aa27b3fa85e19be6f55ca61070e41a1bb96284de4c4887ec9a8fce3f2de8614fb23547fa29e69573b5ff01b4ecb58004bf72b97f90143ccffc9201288a4979c9f410a03a30691a75cd405066ee3aef9c0e03b4db5165e8f2f395d9",
+      "receipt": "c7967ea620bc0ab492731f29408a869fa7ed1e52dda71ed56ddfffa59de2d0467ff6a3a4a1240e43ca3145d89e9db11ee9b3b22aa16f171ec2c5f0138ceebe3d"
+    },
+    {
+      "ballot": "options-max",
+      "seat": 2,
+      "result": "ok",
+      "ballotHash": "ce3f2de8614fb23547fa29e69573b5ff01b4ecb58004bf72b97f90143ccffc92",
+      "shareHash": "6beb128733956406bff3c1668bf2896bddc9a3227191d74d693103c02ee357cd",
+      "statement": "6ca885568365aa27b3fa85e19be6f55ca61070e41a1bb96284de4c4887ec9a8fce3f2de8614fb23547fa29e69573b5ff01b4ecb58004bf72b97f90143ccffc92026beb128733956406bff3c1668bf2896bddc9a3227191d74d693103c02ee357cd",
+      "receipt": "4bde527d9ca5a4e5763dde50b002c2762fef071b8d484eb24d5f8229f65f87347c5887eb23de86ed194879a11e58bf6d0b9cab4bfc4b370955786a823bbcd1b1"
+    },
+    {
+      "ballot": "trustees-max",
+      "seat": 1,
+      "result": "ok",
+      "ballotHash": "e0a942838cdfdc6d600bd4a00b84e578141c05f4abaf4249416e8881b87629b6",
+      "shareHash": "3cf8662f7f69764a7ada0e964e6229f4ee8bfe4c1b50d0760439af7a28af38a4",
+      "statement": "ece16921b711d365e7f61f11f3edb1373ae1164380aca7eadf1c1692aa6cf24ee0a942838cdfdc6d600bd4a00b84e578141c05f4abaf4249416e8881b87629b6013cf8662f7f69764a7ada0e964e6229f4ee8bfe4c1b50d0760439af7a28af38a4",
+      "receipt": "7f1143864565483cfd9a5b571778f4d28967d121d0348d4676dcf55f101747677c8b7c670f684c05e3bfdac11fa5f211ccf9f62c3f2276c251418bca1e79d45f"
+    },
+    {
+      "ballot": "trustees-max",
+      "seat": 2,
+      "result": "ok",
+      "ballotHash": "e0a942838cdfdc6d600bd4a00b84e578141c05f4abaf4249416e8881b87629b6",
+      "shareHash": "a96936677a5a4b9ae82dafb2d6ce0699ff2ce5bb706b21bf7ac6024fd87d17b9",
+      "statement": "ece16921b711d365e7f61f11f3edb1373ae1164380aca7eadf1c1692aa6cf24ee0a942838cdfdc6d600bd4a00b84e578141c05f4abaf4249416e8881b87629b602a96936677a5a4b9ae82dafb2d6ce0699ff2ce5bb706b21bf7ac6024fd87d17b9",
+      "receipt": "127d64f31eb795579e45ac3847444a2769f1b6dc49481adf47b1018ceff9a08703d8d6a88e60aeeb68962373669a6d864b0898fe03600e84bc08b1cdd37b55b1"
+    },
+    {
+      "ballot": "trustees-max",
+      "seat": 3,
+      "result": "ok",
+      "ballotHash": "e0a942838cdfdc6d600bd4a00b84e578141c05f4abaf4249416e8881b87629b6",
+      "shareHash": "b284afce7b1ebffa90be4bdc0f651d84aebfb07080a51a8f7f2cef9087d32b2e",
+      "statement": "ece16921b711d365e7f61f11f3edb1373ae1164380aca7eadf1c1692aa6cf24ee0a942838cdfdc6d600bd4a00b84e578141c05f4abaf4249416e8881b87629b603b284afce7b1ebffa90be4bdc0f651d84aebfb07080a51a8f7f2cef9087d32b2e",
+      "receipt": "02eefba7146bf5b76d7856118533339a9b2655e6cf932d857a6fb3e790eb11213ef680bda347297e95ef3379c28a9710028abfd82ffca8ae489685a6e12886c7"
+    },
+    {
+      "ballot": "trustees-max",
+      "seat": 4,
+      "result": "ok",
+      "ballotHash": "e0a942838cdfdc6d600bd4a00b84e578141c05f4abaf4249416e8881b87629b6",
+      "shareHash": "c0eb378632f78ecd35d9fe9398e06816a2abc484c1ec0b2bf9cfbada8b2186f8",
+      "statement": "ece16921b711d365e7f61f11f3edb1373ae1164380aca7eadf1c1692aa6cf24ee0a942838cdfdc6d600bd4a00b84e578141c05f4abaf4249416e8881b87629b604c0eb378632f78ecd35d9fe9398e06816a2abc484c1ec0b2bf9cfbada8b2186f8",
+      "receipt": "a0651d14f5c475a3af8b6f5dfffe7918aff57292df3fbe12d1283632541ed2794824af7b69bd28991482df6d670db97ac011e68d3adc1d661a638f46e4d9c7b7"
+    },
+    {
+      "ballot": "trustees-max",
+      "seat": 5,
+      "result": "ok",
+      "ballotHash": "e0a942838cdfdc6d600bd4a00b84e578141c05f4abaf4249416e8881b87629b6",
+      "shareHash": "d107964c599f96ee1e202a71f768d39c5417fb7c620c0b252734d17be89d5b1a",
+      "statement": "ece16921b711d365e7f61f11f3edb1373ae1164380aca7eadf1c1692aa6cf24ee0a942838cdfdc6d600bd4a00b84e578141c05f4abaf4249416e8881b87629b605d107964c599f96ee1e202a71f768d39c5417fb7c620c0b252734d17be89d5b1a",
+      "receipt": "9a8ae43b58193b9acbde69aca7b3c444d8661f44f44b5570cf038553dec1cd6544b7aa858ede24447ae761b18f0ad0fc30fa9d40571df40a88fff8dbef797506"
+    },
+    {
+      "ballot": "trustees-max",
+      "seat": 6,
+      "result": "ok",
+      "ballotHash": "e0a942838cdfdc6d600bd4a00b84e578141c05f4abaf4249416e8881b87629b6",
+      "shareHash": "f15c35c1131c5882f2a63c16d8933bd1644ba05f056ef42b69bcae4f67b10ca1",
+      "statement": "ece16921b711d365e7f61f11f3edb1373ae1164380aca7eadf1c1692aa6cf24ee0a942838cdfdc6d600bd4a00b84e578141c05f4abaf4249416e8881b87629b606f15c35c1131c5882f2a63c16d8933bd1644ba05f056ef42b69bcae4f67b10ca1",
+      "receipt": "892ac16318667e706c5d5af87bda3fdd0e1b881b5c887a830729cc27f9bdde7910ad7521f5191ddaba6b47a21cadec69d2fea2888396b6fb0f4c8d8c48f87b7f"
+    },
+    {
+      "ballot": "trustees-max",
+      "seat": 7,
+      "result": "ok",
+      "ballotHash": "e0a942838cdfdc6d600bd4a00b84e578141c05f4abaf4249416e8881b87629b6",
+      "shareHash": "8c0044d89a22ca7f9105f3725e015cdac44fad19e5086e56a88e70b63b724271",
+      "statement": "ece16921b711d365e7f61f11f3edb1373ae1164380aca7eadf1c1692aa6cf24ee0a942838cdfdc6d600bd4a00b84e578141c05f4abaf4249416e8881b87629b6078c0044d89a22ca7f9105f3725e015cdac44fad19e5086e56a88e70b63b724271",
+      "receipt": "ee29ca519f0b45bd935e4afec9d515cd7376b0b5dc079d45bcf2bd6fcc64f9d56d06446f23e78d7912c8a936b6bd61cbf0130b1fc44e9ce75149b66b34f05ec7"
+    },
+    {
+      "ballot": "trustees-max",
+      "seat": 8,
+      "result": "ok",
+      "ballotHash": "e0a942838cdfdc6d600bd4a00b84e578141c05f4abaf4249416e8881b87629b6",
+      "shareHash": "c417e8b722eae940da95a46a57f35c2d1d9410a83a53f916fc04efef3748e817",
+      "statement": "ece16921b711d365e7f61f11f3edb1373ae1164380aca7eadf1c1692aa6cf24ee0a942838cdfdc6d600bd4a00b84e578141c05f4abaf4249416e8881b87629b608c417e8b722eae940da95a46a57f35c2d1d9410a83a53f916fc04efef3748e817",
+      "receipt": "f46da7a392062b85d0d4b99336f9c55790b19bbae4c897892d6d2921750f7951222fc8e35115c47febfab55c07212ffb90471b8fd4a70eb356a795e4de2bd3e5"
+    },
+    {
+      "ballot": "trustees-max",
+      "seat": 9,
+      "result": "ok",
+      "ballotHash": "e0a942838cdfdc6d600bd4a00b84e578141c05f4abaf4249416e8881b87629b6",
+      "shareHash": "db4499999a24cbbd3c301801805aa2d969d05793d3d1f3b9ec671f1883d8983c",
+      "statement": "ece16921b711d365e7f61f11f3edb1373ae1164380aca7eadf1c1692aa6cf24ee0a942838cdfdc6d600bd4a00b84e578141c05f4abaf4249416e8881b87629b609db4499999a24cbbd3c301801805aa2d969d05793d3d1f3b9ec671f1883d8983c",
+      "receipt": "a4ffce296d03ad32278cb32880ca2d3006e047a976d936ab565a85dd9e12f3056523b8814e53bee2d7fa34157c7231cea216bc9a1435423a9a4594500b86c639"
+    },
+    {
+      "ballot": "trustees-max",
+      "seat": 10,
+      "result": "ok",
+      "ballotHash": "e0a942838cdfdc6d600bd4a00b84e578141c05f4abaf4249416e8881b87629b6",
+      "shareHash": "cd30e69eaa5201bc09a6ef0ea79187e47dace4108dd4f33a469c8a0605b8ec49",
+      "statement": "ece16921b711d365e7f61f11f3edb1373ae1164380aca7eadf1c1692aa6cf24ee0a942838cdfdc6d600bd4a00b84e578141c05f4abaf4249416e8881b87629b60acd30e69eaa5201bc09a6ef0ea79187e47dace4108dd4f33a469c8a0605b8ec49",
+      "receipt": "77e70ca171aec814e5f6e4012e9cc004cc958a77be54f276c55b822eb1ca62a82d0f1712b5c6c4b15e0ce70cb3d17ee990cd39da3736c09e3fc66e9b092c375e"
+    },
+    {
+      "ballot": "trustees-max",
+      "seat": 11,
+      "result": "ok",
+      "ballotHash": "e0a942838cdfdc6d600bd4a00b84e578141c05f4abaf4249416e8881b87629b6",
+      "shareHash": "2d08256871843d71d568035aedc6798ba5a4aefce9c8cc7b0df585cd11634135",
+      "statement": "ece16921b711d365e7f61f11f3edb1373ae1164380aca7eadf1c1692aa6cf24ee0a942838cdfdc6d600bd4a00b84e578141c05f4abaf4249416e8881b87629b60b2d08256871843d71d568035aedc6798ba5a4aefce9c8cc7b0df585cd11634135",
+      "receipt": "84f1f20aef55596423af395a38413db78f0cdcd71b18e34126c0124f1247f056592e29b8739abce0cad45df2e17be42e1190af1286485de91e48d6301a4627fc"
+    },
+    {
+      "ballot": "trustees-max",
+      "seat": 12,
+      "result": "ok",
+      "ballotHash": "e0a942838cdfdc6d600bd4a00b84e578141c05f4abaf4249416e8881b87629b6",
+      "shareHash": "fb6bf6d6f9beb826f47f031d5fc1ba206e9b9428f10f6a8d23c731eed57343ca",
+      "statement": "ece16921b711d365e7f61f11f3edb1373ae1164380aca7eadf1c1692aa6cf24ee0a942838cdfdc6d600bd4a00b84e578141c05f4abaf4249416e8881b87629b60cfb6bf6d6f9beb826f47f031d5fc1ba206e9b9428f10f6a8d23c731eed57343ca",
+      "receipt": "159ddcc03ac566c0dccad75f46269c57f06222495f0e24ef4a450c29841674725e7fbf773d756453c91573c829173cbafd295ad0c1ac58420e42cebc49779697"
+    },
+    {
+      "ballot": "trustees-max",
+      "seat": 13,
+      "result": "ok",
+      "ballotHash": "e0a942838cdfdc6d600bd4a00b84e578141c05f4abaf4249416e8881b87629b6",
+      "shareHash": "46d8b2466b5a5937bb93310f65e1181d5295e311de715e7ab3f422b3c5a9c742",
+      "statement": "ece16921b711d365e7f61f11f3edb1373ae1164380aca7eadf1c1692aa6cf24ee0a942838cdfdc6d600bd4a00b84e578141c05f4abaf4249416e8881b87629b60d46d8b2466b5a5937bb93310f65e1181d5295e311de715e7ab3f422b3c5a9c742",
+      "receipt": "a59106b98b109bee154108964a2de59f680703b76b10565939f375333db932fe7c34389b85b1dc1256141cc4cfb8197f37a59c96f8e2b2a9267c011573f35c08"
+    },
+    {
+      "ballot": "trustees-max",
+      "seat": 14,
+      "result": "ok",
+      "ballotHash": "e0a942838cdfdc6d600bd4a00b84e578141c05f4abaf4249416e8881b87629b6",
+      "shareHash": "d41f31e8a79fa582d1488362e8cec84f4740383d1c7de2f97d9ba296952dcdc2",
+      "statement": "ece16921b711d365e7f61f11f3edb1373ae1164380aca7eadf1c1692aa6cf24ee0a942838cdfdc6d600bd4a00b84e578141c05f4abaf4249416e8881b87629b60ed41f31e8a79fa582d1488362e8cec84f4740383d1c7de2f97d9ba296952dcdc2",
+      "receipt": "7ba764825b8e3273b68cea80a0d88faa82d3fb776f047dbf38ef3e21d55ca6da32d4647ef90a04787ca8f8a770384fa733ede8691a7d1f9f7a98a5e1afc0082b"
+    },
+    {
+      "ballot": "trustees-max",
+      "seat": 15,
+      "result": "ok",
+      "ballotHash": "e0a942838cdfdc6d600bd4a00b84e578141c05f4abaf4249416e8881b87629b6",
+      "shareHash": "09024a29c689d5eb6577f93a1b03c1384df6f1cb792ce9c1daf11e46ae893fb0",
+      "statement": "ece16921b711d365e7f61f11f3edb1373ae1164380aca7eadf1c1692aa6cf24ee0a942838cdfdc6d600bd4a00b84e578141c05f4abaf4249416e8881b87629b60f09024a29c689d5eb6577f93a1b03c1384df6f1cb792ce9c1daf11e46ae893fb0",
+      "receipt": "efda088781b82df656e78583841db05be35765c75371cef525174e5c3ec1298063129b9da2e30e7c06224eb837213448552c8ac924cd9819cb3adb10d792a303"
+    },
+    {
+      "ballot": "trustees-max",
+      "seat": 16,
+      "result": "ok",
+      "ballotHash": "e0a942838cdfdc6d600bd4a00b84e578141c05f4abaf4249416e8881b87629b6",
+      "shareHash": "f7f723b3b01796c3cb75586d5d5bc9b4ca5eea58365dc981ce7ae348d5132e44",
+      "statement": "ece16921b711d365e7f61f11f3edb1373ae1164380aca7eadf1c1692aa6cf24ee0a942838cdfdc6d600bd4a00b84e578141c05f4abaf4249416e8881b87629b610f7f723b3b01796c3cb75586d5d5bc9b4ca5eea58365dc981ce7ae348d5132e44",
+      "receipt": "3aeceb14a594ccb5d913bad5c860076745cc1aa00a5537feb7ae779c35e361261e6eb635f1d471f9dcb5a71a417f695115dd3c64109addc9f8e4dba38517447f"
+    },
+    {
+      "ballot": "bad-share",
+      "seat": 1,
+      "result": "ok",
+      "ballotHash": "250096e7480f8c23558268b05020b11fca96cc81d0258a0a1be48159e30375a3",
+      "shareHash": "4bd527514f070245c242bc90aea33cce4d5f1a969ecffd32c97a918fe2df5d37",
+      "statement": "2d4ceb20e6b30ceee1b503bd0b58022e9fbab0a575f5b636c26130b775dbe9e7250096e7480f8c23558268b05020b11fca96cc81d0258a0a1be48159e30375a3014bd527514f070245c242bc90aea33cce4d5f1a969ecffd32c97a918fe2df5d37",
+      "receipt": "09fb4a9d62b5999513a38b831551faed6b0e53ae2fc92f268adf18791d7c4304170f913431114ab1834c1345333939c3441b799b00d04462bbc89fcec92d9e0b"
+    },
+    {
+      "ballot": "bad-share",
+      "seat": 2,
+      "result": "share-check"
+    },
+    {
+      "ballot": "bad-share",
+      "seat": 3,
+      "result": "ok",
+      "ballotHash": "250096e7480f8c23558268b05020b11fca96cc81d0258a0a1be48159e30375a3",
+      "shareHash": "e2321132a0c99d9d2777b389b576ae3266fdb4ee1ec9f42370cf1db1631dd7c4",
+      "statement": "2d4ceb20e6b30ceee1b503bd0b58022e9fbab0a575f5b636c26130b775dbe9e7250096e7480f8c23558268b05020b11fca96cc81d0258a0a1be48159e30375a303e2321132a0c99d9d2777b389b576ae3266fdb4ee1ec9f42370cf1db1631dd7c4",
+      "receipt": "236bddc18154dbfa18010ddc48ea8ded071ae500dc3bd03cd6c4867063d624dc5972a5deebe1938fcd5f2f0fb2395719acacac583265084b0f94b9ff20b133a5"
+    },
+    {
+      "ballot": "bad-seal",
+      "seat": 1,
+      "result": "ok",
+      "ballotHash": "cd94053eb61e76dd2c6fed5c8d45a8821c088043bb4fea6944f4797c5853b285",
+      "shareHash": "6e37cac6c1f36c9df2af0851d1a2619946873ea6b7cd5383f3800a4478b9c424",
+      "statement": "2d4ceb20e6b30ceee1b503bd0b58022e9fbab0a575f5b636c26130b775dbe9e7cd94053eb61e76dd2c6fed5c8d45a8821c088043bb4fea6944f4797c5853b285016e37cac6c1f36c9df2af0851d1a2619946873ea6b7cd5383f3800a4478b9c424",
+      "receipt": "143e5f1d5ab724598ea8c3a432602625be0981a71415acb25a326948a368a6e71c9cc951c13f8798adc0ddd2976c617a6298039300670997c65d379cd26432d2"
+    },
+    {
+      "ballot": "bad-seal",
+      "seat": 2,
+      "result": "share-decrypt"
+    },
+    {
+      "ballot": "bad-seal",
+      "seat": 3,
+      "result": "ok",
+      "ballotHash": "cd94053eb61e76dd2c6fed5c8d45a8821c088043bb4fea6944f4797c5853b285",
+      "shareHash": "537fb3d3dc031a9ef10ddc6bc1eadbd0f25138021f31cc906c9d64df7d65a977",
+      "statement": "2d4ceb20e6b30ceee1b503bd0b58022e9fbab0a575f5b636c26130b775dbe9e7cd94053eb61e76dd2c6fed5c8d45a8821c088043bb4fea6944f4797c5853b28503537fb3d3dc031a9ef10ddc6bc1eadbd0f25138021f31cc906c9d64df7d65a977",
+      "receipt": "2583d56f6f7b2dbf9f2f424412833e37986cb2914dec1a183dc0fd622ff6a8f07fbe966185d0d53c67f36275e10e505444837587ac76096ba66a65873de93e5f"
+    },
+    {
+      "ballot": "short-list",
+      "seat": 1,
+      "result": "share-decrypt"
+    },
+    {
+      "ballot": "short-list",
+      "seat": 2,
+      "result": "ok",
+      "ballotHash": "8d9596bcaa6e6b5223da415378e06fcc23346fbd62ae2a6f230b407301af377b",
+      "shareHash": "9db13b3f994b71a6f9bf1c15633bc86c79a7b0953adab76e4ec3dd7c9255d8a6",
+      "statement": "2d4ceb20e6b30ceee1b503bd0b58022e9fbab0a575f5b636c26130b775dbe9e78d9596bcaa6e6b5223da415378e06fcc23346fbd62ae2a6f230b407301af377b029db13b3f994b71a6f9bf1c15633bc86c79a7b0953adab76e4ec3dd7c9255d8a6",
+      "receipt": "4fbc57a9f25a7bbfd06caf6b6940f09f4c8f89f8648a7de2c66bb6fcc325cea46463615e85e56c3495d1bf731fe69a41d135f0d59698d1e73540072391152f8d"
+    },
+    {
+      "ballot": "short-list",
+      "seat": 3,
+      "result": "ok",
+      "ballotHash": "8d9596bcaa6e6b5223da415378e06fcc23346fbd62ae2a6f230b407301af377b",
+      "shareHash": "e58a65ced122a145a8185346e274937a634de3b3af1c87baeee271c8d00f56bd",
+      "statement": "2d4ceb20e6b30ceee1b503bd0b58022e9fbab0a575f5b636c26130b775dbe9e78d9596bcaa6e6b5223da415378e06fcc23346fbd62ae2a6f230b407301af377b03e58a65ced122a145a8185346e274937a634de3b3af1c87baeee271c8d00f56bd",
+      "receipt": "31bdd5a0e5b4e57c462796fedb2533746cf28bf22a37e1eb7023415ad5178fa57a0036d633832cc25e0d1efba31608532d5af133f20acbca0ce4f956d8ae7e5a"
+    },
+    {
+      "ballot": "copied-ephemeral",
+      "seat": 1,
+      "result": "share-proof"
+    },
+    {
+      "ballot": "copied-ephemeral",
+      "seat": 2,
+      "result": "ok",
+      "ballotHash": "5f14efc423389e8c3163d089eede4476c50721d13109cd29b3ebf9e6a84660d4",
+      "shareHash": "4922bdf124c7fe970ad33c7311d62bc137f44a1e8c01f5c88334e1ff97bdf754",
+      "statement": "2d4ceb20e6b30ceee1b503bd0b58022e9fbab0a575f5b636c26130b775dbe9e75f14efc423389e8c3163d089eede4476c50721d13109cd29b3ebf9e6a84660d4024922bdf124c7fe970ad33c7311d62bc137f44a1e8c01f5c88334e1ff97bdf754",
+      "receipt": "c1151b522aaa60b27a5f9d72a36f06c7fe1df6f371d6c5fc994454c2948f49512625ff1a718368bd265e144c151fa6191f9808578f77c0bb93c29c5e595ebc5f"
+    },
+    {
+      "ballot": "copied-ephemeral",
+      "seat": 3,
+      "result": "ok",
+      "ballotHash": "5f14efc423389e8c3163d089eede4476c50721d13109cd29b3ebf9e6a84660d4",
+      "shareHash": "3fd75a07d386b7dc24ead10c5cd61345a8210eeeaafde69e1751067b2c74bb10",
+      "statement": "2d4ceb20e6b30ceee1b503bd0b58022e9fbab0a575f5b636c26130b775dbe9e75f14efc423389e8c3163d089eede4476c50721d13109cd29b3ebf9e6a84660d4033fd75a07d386b7dc24ead10c5cd61345a8210eeeaafde69e1751067b2c74bb10",
+      "receipt": "ef51081289957788f679bbe6ed8a4a32336b8799bc5076048fb1cbf129e41ca460560fa15a6f3f72d87eb9c6ad000a8f27861718cb16189ab67ce09914a393c4"
+    }
+  ],
+  "intakeFailures": [
+    {
+      "id": "other-options",
+      "description": "Delivered under a definition with 4 options",
+      "context": {
+        "definitionHash": "2d4ceb20e6b30ceee1b503bd0b58022e9fbab0a575f5b636c26130b775dbe9e7",
+        "optionCount": 4,
+        "minSelections": 0,
+        "maxSelections": 1,
+        "threshold": 2,
+        "panelSize": 3,
+        "tier": 0,
+        "nullifier": "418470225973920448902615739260071273989025593755332804233448676776386950996"
+      },
+      "seat": 1,
+      "committedVote": "0000000300000002ac3b780e010d9b0947596978eb0d2a950799bcbdb0153b0c6720f45c33f3c838d6dde38f69b40e5f8f4d7725deed5ffcce271141f13e59d6b0ffa5d5b24b6c24000000029ec04e081105b76d3dbcb01489e4e0efa5f1df6ae2e349bbcf7b11e01bac8b2bbc17cb58c8a04fee8dc6593f7a2ffde1ea000b9de31835be02aeeb76a8d94d01000000022c36549b9568a554a229ddbff434055cea90810c7fb30813ea9595df10712721d4f8c0792968bf654fc63c28db985c46cd7b3d5bce42e91bf580790576aeca2700000003e457acb3a011cd265eaf79f949647389fcf41d29243e73034e9794d83c998a3f1ded68d6316388310a3780fd31d40fef09112fa51e20f94f87d914cde6f47aee10cde6249de6c5072de9619b3965f2b410e2e8bafd487b557069aa94f21d505200000003bf8dac46c8c36586789ef41036a263da420eee1db97ef2aaf8dc4d4df97891048084dc64c1e4c3bb42eefda8f00dad68a58874306a0ba1da24760045cfd5370b282bd9a4108350708ad136aeec380842c836d461f4e4a9f226c138120dcd06000a20f6f72efbb3888dfa2278b6581eba1c5d0a874c3eaab1c71e609fc6b19b0b136c4789928b840a49b10b5c969da0931921ea038341718c1b79c4a0463afc0b3b3f74735908c9cb9d3787fce260c24e2a38cff60e258e0219a66f4e8c9ba60546903244c59dc9e989e9359614aaf9519f5f10e45e975fa1bb16dc7315cdcf0057cb0c8785d11ae173d923bd231c722b42adea40dbe1c5780a959f2f1410420f9d854bc4c6610704cb96545a24ee916a31eb3c1cc50566a139f45081e4648b0cb8b949fa6508a7abcab053c91e88d083fe5dc96da3df97431138129df22b720ac29f97c591589d45428d8bfb8710889102e51a03544f065afb95b474b7a3c906e97485fbc7814cb73b5e7ca60d46f05cbba784fef9eb80a04ea9fb963b676d01000000029a0ca181bc5dbab853fca35e1683ff3fc990ad5472854956995606e0112d460297d7adb47d9138a614885e3c33125066b32d36b994f65e1cbc09ad1df915360a135f3536e567a6d4d79c759af8187095e795779372deaef86c14c18ba2f5350e3cc7ecff7b691c1ce3bfa1965cfbeffa246dba539edfb1b38807f3f63461280d",
+      "ciphertext": "d9d19af5a92658743544be6a1ce1d73e9bf4e4b81a58b71565cf07528ea26561b7fa7e1e44006b79179b2f2f0f5441216e217954e2b10eab34a72f016f2e173abac140e72bf4147b4306597ecc7829883d3becc02b2a1cc907ec6f0e7b7deb8e231180ed0093c6cffff371c3a7ae355fbfc32ee1cb18a79db988a95542f40c95ce5faf60325f76945daa5e289c540de5e40f3e1e01a83dffb59164a29fa5b58115c9f14458186b77ce96467b83ceb3343a661073bd9811919f672838149f9d91ed6aa0e7a97e329b0c1b6d78d7fb0f31482d68389b7406814c0d1355ba1c95ca881f75d481f9130a8fa807091bb4de6a74cf4c61675fbee9323941c6f9617853fb3a7341dd20c5210780d113d2e5d6210a7c54cb65910069635384c7d3ae23071bb80553b8c5832a35218273e49373fe69ef55ba4ad567fcd7c93fd9350f55f8b10bb1b6dc4d211be3d69d2463a0b148f45d33832bfd47fb48dd60b5fa227f2524dc91dacdb10da5859214475076b286bbadce7339fadb59d19c5b41a092e729ff815310170e1dcee46892d94b7714a47b9f2337265dca874fae8ad4cf73512b593fc9dc7b540a752bf9995f47ace749aeac927e22e1715c3b10aac12000a3358af878e6802457c7b62157ebfcc98ecbf3c3deba332f8041b3d95b6bb166f5f21fe9541105f1aebf19f7f1a7ef3822c5d3fca45e53d968d0b8082c12daf43f11148e3bad127c32e3560130b8249eeb2b19ec3f6954c6373892f0406727bf2e27ca7d95280590fe684b99e61a7917b4c0d29b16bfaa2ca99109b5f711a8384d2388f89708ce1e82357863b80e5a250608babba5088689e6d12f8446c7042e7aab2e0b42a09985be092d5a01c862bcb8b40580c479f1818a5b73cdd612a29553941c6af7af3eff5fc6c994c2fedfb7a263f309408430a288a33fdeb6455d781a37d20953c47879a2cf613a3dfab108628c2e17066c5d93f4afe957534bf018a987908533292a5f2dc9048024b3d272db4a280e3da35dac69f76e5262c156d175101aae19930915f46b5e64ecf7d51e9e7dd2019d50d62c5f4e52c22d1f08ed1bb9bbb8249894f1e12c8f091aa0027e29e03828d27f724bb4e15fa6bbb2fe9eafe7e95dc9edf674c69722bd4ef6a1c0c16078276c5e652192b82521213697e20287b1b1c014a604fe64c3d07137a27fb21a349dae5ba457c998000c8b2fbd4b36a07ee1c460e232d182396f098c5fbb277f9ed672d0c94bc179d85111e48b873116dadf2966aacbc7c1dc778e952c9b5de437ed782f8ba7126ca53680626f774f6052569ce56332ae9f333fbaa5b82726d1be1938d0440560524478dd567791789519f611929b3e55be29000e7a0cf67e3303ceb271df303cc0f130333238500a9f35996d7db9a7d84fe855ffc0d3a88fa2feba5874d721b02513991ce26e42cddaf107555329d9d9bc1cff8a5444a6080c4671d6bcdef312609cff67156841231cec4f1462814c9485cccf70f93a043b8daaa3b80d9c70356e042bd53ef0a076a8b6d5c8d4e4da905095b14161bebd70428a9f46b77dead245eafcbcb8509c516b71d12ee4ce231e5c70a15812ee200425b259f3505e6973ab9b86fe590b80d504b88b4a9ddeb975bc4a473c9775503311d8ba6cea119f8a53a0b23030178bd409000000d4d253a07ee55dae5d270fdb23d4a0da40bc2ad588c5fe33afd0394cf51dcd3bbc7572f1f44fffe1298d2d6ac2da2314368d79e1371288f3f7563ac0c8d39282912a2d0c8565fe69a90d1e679edbc4f5add7ff8eb19c0efe03abaf695cfb8c7c50edd644fb1f3901c9763f89cb3ae7d1a1c8c7718c3a67a2421bd3402b85199b02836af40368378bbd0740b18a91b84e75386ddd0aab21decf804f3b51e1ddb8d2331ccc8a53a15a79a46bdbe13f6290fa1809e7fd9c31c7d95715b05eb641a1ad4e8dd53e87a95abf3fd3984a99ec83862b4dea66",
+      "result": "validity-shape"
+    },
+    {
+      "id": "other-panel",
+      "description": "Delivered under a panel of 4 seats: 3 share hashes",
+      "context": {
+        "definitionHash": "2d4ceb20e6b30ceee1b503bd0b58022e9fbab0a575f5b636c26130b775dbe9e7",
+        "optionCount": 3,
+        "minSelections": 0,
+        "maxSelections": 1,
+        "threshold": 2,
+        "panelSize": 4,
+        "tier": 0,
+        "nullifier": "418470225973920448902615739260071273989025593755332804233448676776386950996"
+      },
+      "seat": 1,
+      "committedVote": "0000000300000002ac3b780e010d9b0947596978eb0d2a950799bcbdb0153b0c6720f45c33f3c838d6dde38f69b40e5f8f4d7725deed5ffcce271141f13e59d6b0ffa5d5b24b6c24000000029ec04e081105b76d3dbcb01489e4e0efa5f1df6ae2e349bbcf7b11e01bac8b2bbc17cb58c8a04fee8dc6593f7a2ffde1ea000b9de31835be02aeeb76a8d94d01000000022c36549b9568a554a229ddbff434055cea90810c7fb30813ea9595df10712721d4f8c0792968bf654fc63c28db985c46cd7b3d5bce42e91bf580790576aeca2700000003e457acb3a011cd265eaf79f949647389fcf41d29243e73034e9794d83c998a3f1ded68d6316388310a3780fd31d40fef09112fa51e20f94f87d914cde6f47aee10cde6249de6c5072de9619b3965f2b410e2e8bafd487b557069aa94f21d505200000003bf8dac46c8c36586789ef41036a263da420eee1db97ef2aaf8dc4d4df97891048084dc64c1e4c3bb42eefda8f00dad68a58874306a0ba1da24760045cfd5370b282bd9a4108350708ad136aeec380842c836d461f4e4a9f226c138120dcd06000a20f6f72efbb3888dfa2278b6581eba1c5d0a874c3eaab1c71e609fc6b19b0b136c4789928b840a49b10b5c969da0931921ea038341718c1b79c4a0463afc0b3b3f74735908c9cb9d3787fce260c24e2a38cff60e258e0219a66f4e8c9ba60546903244c59dc9e989e9359614aaf9519f5f10e45e975fa1bb16dc7315cdcf0057cb0c8785d11ae173d923bd231c722b42adea40dbe1c5780a959f2f1410420f9d854bc4c6610704cb96545a24ee916a31eb3c1cc50566a139f45081e4648b0cb8b949fa6508a7abcab053c91e88d083fe5dc96da3df97431138129df22b720ac29f97c591589d45428d8bfb8710889102e51a03544f065afb95b474b7a3c906e97485fbc7814cb73b5e7ca60d46f05cbba784fef9eb80a04ea9fb963b676d01000000029a0ca181bc5dbab853fca35e1683ff3fc990ad5472854956995606e0112d460297d7adb47d9138a614885e3c33125066b32d36b994f65e1cbc09ad1df915360a135f3536e567a6d4d79c759af8187095e795779372deaef86c14c18ba2f5350e3cc7ecff7b691c1ce3bfa1965cfbeffa246dba539edfb1b38807f3f63461280d",
+      "ciphertext": "d9d19af5a92658743544be6a1ce1d73e9bf4e4b81a58b71565cf07528ea26561b7fa7e1e44006b79179b2f2f0f5441216e217954e2b10eab34a72f016f2e173abac140e72bf4147b4306597ecc7829883d3becc02b2a1cc907ec6f0e7b7deb8e231180ed0093c6cffff371c3a7ae355fbfc32ee1cb18a79db988a95542f40c95ce5faf60325f76945daa5e289c540de5e40f3e1e01a83dffb59164a29fa5b58115c9f14458186b77ce96467b83ceb3343a661073bd9811919f672838149f9d91ed6aa0e7a97e329b0c1b6d78d7fb0f31482d68389b7406814c0d1355ba1c95ca881f75d481f9130a8fa807091bb4de6a74cf4c61675fbee9323941c6f9617853fb3a7341dd20c5210780d113d2e5d6210a7c54cb65910069635384c7d3ae23071bb80553b8c5832a35218273e49373fe69ef55ba4ad567fcd7c93fd9350f55f8b10bb1b6dc4d211be3d69d2463a0b148f45d33832bfd47fb48dd60b5fa227f2524dc91dacdb10da5859214475076b286bbadce7339fadb59d19c5b41a092e729ff815310170e1dcee46892d94b7714a47b9f2337265dca874fae8ad4cf73512b593fc9dc7b540a752bf9995f47ace749aeac927e22e1715c3b10aac12000a3358af878e6802457c7b62157ebfcc98ecbf3c3deba332f8041b3d95b6bb166f5f21fe9541105f1aebf19f7f1a7ef3822c5d3fca45e53d968d0b8082c12daf43f11148e3bad127c32e3560130b8249eeb2b19ec3f6954c6373892f0406727bf2e27ca7d95280590fe684b99e61a7917b4c0d29b16bfaa2ca99109b5f711a8384d2388f89708ce1e82357863b80e5a250608babba5088689e6d12f8446c7042e7aab2e0b42a09985be092d5a01c862bcb8b40580c479f1818a5b73cdd612a29553941c6af7af3eff5fc6c994c2fedfb7a263f309408430a288a33fdeb6455d781a37d20953c47879a2cf613a3dfab108628c2e17066c5d93f4afe957534bf018a987908533292a5f2dc9048024b3d272db4a280e3da35dac69f76e5262c156d175101aae19930915f46b5e64ecf7d51e9e7dd2019d50d62c5f4e52c22d1f08ed1bb9bbb8249894f1e12c8f091aa0027e29e03828d27f724bb4e15fa6bbb2fe9eafe7e95dc9edf674c69722bd4ef6a1c0c16078276c5e652192b82521213697e20287b1b1c014a604fe64c3d07137a27fb21a349dae5ba457c998000c8b2fbd4b36a07ee1c460e232d182396f098c5fbb277f9ed672d0c94bc179d85111e48b873116dadf2966aacbc7c1dc778e952c9b5de437ed782f8ba7126ca53680626f774f6052569ce56332ae9f333fbaa5b82726d1be1938d0440560524478dd567791789519f611929b3e55be29000e7a0cf67e3303ceb271df303cc0f130333238500a9f35996d7db9a7d84fe855ffc0d3a88fa2feba5874d721b02513991ce26e42cddaf107555329d9d9bc1cff8a5444a6080c4671d6bcdef312609cff67156841231cec4f1462814c9485cccf70f93a043b8daaa3b80d9c70356e042bd53ef0a076a8b6d5c8d4e4da905095b14161bebd70428a9f46b77dead245eafcbcb8509c516b71d12ee4ce231e5c70a15812ee200425b259f3505e6973ab9b86fe590b80d504b88b4a9ddeb975bc4a473c9775503311d8ba6cea119f8a53a0b23030178bd409000000d4d253a07ee55dae5d270fdb23d4a0da40bc2ad588c5fe33afd0394cf51dcd3bbc7572f1f44fffe1298d2d6ac2da2314368d79e1371288f3f7563ac0c8d39282912a2d0c8565fe69a90d1e679edbc4f5add7ff8eb19c0efe03abaf695cfb8c7c50edd644fb1f3901c9763f89cb3ae7d1a1c8c7718c3a67a2421bd3402b85199b02836af40368378bbd0740b18a91b84e75386ddd0aab21decf804f3b51e1ddb8d2331ccc8a53a15a79a46bdbe13f6290fa1809e7fd9c31c7d95715b05eb641a1ad4e8dd53e87a95abf3fd3984a99ec83862b4dea66",
+      "result": "validity-shape"
+    },
+    {
+      "id": "other-tier",
+      "description": "Delivered under tier 1: every proof binds tier 0",
+      "context": {
+        "definitionHash": "2d4ceb20e6b30ceee1b503bd0b58022e9fbab0a575f5b636c26130b775dbe9e7",
+        "optionCount": 3,
+        "minSelections": 0,
+        "maxSelections": 1,
+        "threshold": 2,
+        "panelSize": 3,
+        "tier": 1,
+        "nullifier": "418470225973920448902615739260071273989025593755332804233448676776386950996"
+      },
+      "seat": 1,
+      "committedVote": "0000000300000002ac3b780e010d9b0947596978eb0d2a950799bcbdb0153b0c6720f45c33f3c838d6dde38f69b40e5f8f4d7725deed5ffcce271141f13e59d6b0ffa5d5b24b6c24000000029ec04e081105b76d3dbcb01489e4e0efa5f1df6ae2e349bbcf7b11e01bac8b2bbc17cb58c8a04fee8dc6593f7a2ffde1ea000b9de31835be02aeeb76a8d94d01000000022c36549b9568a554a229ddbff434055cea90810c7fb30813ea9595df10712721d4f8c0792968bf654fc63c28db985c46cd7b3d5bce42e91bf580790576aeca2700000003e457acb3a011cd265eaf79f949647389fcf41d29243e73034e9794d83c998a3f1ded68d6316388310a3780fd31d40fef09112fa51e20f94f87d914cde6f47aee10cde6249de6c5072de9619b3965f2b410e2e8bafd487b557069aa94f21d505200000003bf8dac46c8c36586789ef41036a263da420eee1db97ef2aaf8dc4d4df97891048084dc64c1e4c3bb42eefda8f00dad68a58874306a0ba1da24760045cfd5370b282bd9a4108350708ad136aeec380842c836d461f4e4a9f226c138120dcd06000a20f6f72efbb3888dfa2278b6581eba1c5d0a874c3eaab1c71e609fc6b19b0b136c4789928b840a49b10b5c969da0931921ea038341718c1b79c4a0463afc0b3b3f74735908c9cb9d3787fce260c24e2a38cff60e258e0219a66f4e8c9ba60546903244c59dc9e989e9359614aaf9519f5f10e45e975fa1bb16dc7315cdcf0057cb0c8785d11ae173d923bd231c722b42adea40dbe1c5780a959f2f1410420f9d854bc4c6610704cb96545a24ee916a31eb3c1cc50566a139f45081e4648b0cb8b949fa6508a7abcab053c91e88d083fe5dc96da3df97431138129df22b720ac29f97c591589d45428d8bfb8710889102e51a03544f065afb95b474b7a3c906e97485fbc7814cb73b5e7ca60d46f05cbba784fef9eb80a04ea9fb963b676d01000000029a0ca181bc5dbab853fca35e1683ff3fc990ad5472854956995606e0112d460297d7adb47d9138a614885e3c33125066b32d36b994f65e1cbc09ad1df915360a135f3536e567a6d4d79c759af8187095e795779372deaef86c14c18ba2f5350e3cc7ecff7b691c1ce3bfa1965cfbeffa246dba539edfb1b38807f3f63461280d",
+      "ciphertext": "d9d19af5a92658743544be6a1ce1d73e9bf4e4b81a58b71565cf07528ea26561b7fa7e1e44006b79179b2f2f0f5441216e217954e2b10eab34a72f016f2e173abac140e72bf4147b4306597ecc7829883d3becc02b2a1cc907ec6f0e7b7deb8e231180ed0093c6cffff371c3a7ae355fbfc32ee1cb18a79db988a95542f40c95ce5faf60325f76945daa5e289c540de5e40f3e1e01a83dffb59164a29fa5b58115c9f14458186b77ce96467b83ceb3343a661073bd9811919f672838149f9d91ed6aa0e7a97e329b0c1b6d78d7fb0f31482d68389b7406814c0d1355ba1c95ca881f75d481f9130a8fa807091bb4de6a74cf4c61675fbee9323941c6f9617853fb3a7341dd20c5210780d113d2e5d6210a7c54cb65910069635384c7d3ae23071bb80553b8c5832a35218273e49373fe69ef55ba4ad567fcd7c93fd9350f55f8b10bb1b6dc4d211be3d69d2463a0b148f45d33832bfd47fb48dd60b5fa227f2524dc91dacdb10da5859214475076b286bbadce7339fadb59d19c5b41a092e729ff815310170e1dcee46892d94b7714a47b9f2337265dca874fae8ad4cf73512b593fc9dc7b540a752bf9995f47ace749aeac927e22e1715c3b10aac12000a3358af878e6802457c7b62157ebfcc98ecbf3c3deba332f8041b3d95b6bb166f5f21fe9541105f1aebf19f7f1a7ef3822c5d3fca45e53d968d0b8082c12daf43f11148e3bad127c32e3560130b8249eeb2b19ec3f6954c6373892f0406727bf2e27ca7d95280590fe684b99e61a7917b4c0d29b16bfaa2ca99109b5f711a8384d2388f89708ce1e82357863b80e5a250608babba5088689e6d12f8446c7042e7aab2e0b42a09985be092d5a01c862bcb8b40580c479f1818a5b73cdd612a29553941c6af7af3eff5fc6c994c2fedfb7a263f309408430a288a33fdeb6455d781a37d20953c47879a2cf613a3dfab108628c2e17066c5d93f4afe957534bf018a987908533292a5f2dc9048024b3d272db4a280e3da35dac69f76e5262c156d175101aae19930915f46b5e64ecf7d51e9e7dd2019d50d62c5f4e52c22d1f08ed1bb9bbb8249894f1e12c8f091aa0027e29e03828d27f724bb4e15fa6bbb2fe9eafe7e95dc9edf674c69722bd4ef6a1c0c16078276c5e652192b82521213697e20287b1b1c014a604fe64c3d07137a27fb21a349dae5ba457c998000c8b2fbd4b36a07ee1c460e232d182396f098c5fbb277f9ed672d0c94bc179d85111e48b873116dadf2966aacbc7c1dc778e952c9b5de437ed782f8ba7126ca53680626f774f6052569ce56332ae9f333fbaa5b82726d1be1938d0440560524478dd567791789519f611929b3e55be29000e7a0cf67e3303ceb271df303cc0f130333238500a9f35996d7db9a7d84fe855ffc0d3a88fa2feba5874d721b02513991ce26e42cddaf107555329d9d9bc1cff8a5444a6080c4671d6bcdef312609cff67156841231cec4f1462814c9485cccf70f93a043b8daaa3b80d9c70356e042bd53ef0a076a8b6d5c8d4e4da905095b14161bebd70428a9f46b77dead245eafcbcb8509c516b71d12ee4ce231e5c70a15812ee200425b259f3505e6973ab9b86fe590b80d504b88b4a9ddeb975bc4a473c9775503311d8ba6cea119f8a53a0b23030178bd409000000d4d253a07ee55dae5d270fdb23d4a0da40bc2ad588c5fe33afd0394cf51dcd3bbc7572f1f44fffe1298d2d6ac2da2314368d79e1371288f3f7563ac0c8d39282912a2d0c8565fe69a90d1e679edbc4f5add7ff8eb19c0efe03abaf695cfb8c7c50edd644fb1f3901c9763f89cb3ae7d1a1c8c7718c3a67a2421bd3402b85199b02836af40368378bbd0740b18a91b84e75386ddd0aab21decf804f3b51e1ddb8d2331ccc8a53a15a79a46bdbe13f6290fa1809e7fd9c31c7d95715b05eb641a1ad4e8dd53e87a95abf3fd3984a99ec83862b4dea66",
+      "result": "option-proof",
+      "option": 0
+    },
+    {
+      "id": "other-nullifier",
+      "description": "Delivered under another nullifier",
+      "context": {
+        "definitionHash": "2d4ceb20e6b30ceee1b503bd0b58022e9fbab0a575f5b636c26130b775dbe9e7",
+        "optionCount": 3,
+        "minSelections": 0,
+        "maxSelections": 1,
+        "threshold": 2,
+        "panelSize": 3,
+        "tier": 0,
+        "nullifier": "418470225973920448902615739260071273989025593755332804233448676776386950997"
+      },
+      "seat": 1,
+      "committedVote": "0000000300000002ac3b780e010d9b0947596978eb0d2a950799bcbdb0153b0c6720f45c33f3c838d6dde38f69b40e5f8f4d7725deed5ffcce271141f13e59d6b0ffa5d5b24b6c24000000029ec04e081105b76d3dbcb01489e4e0efa5f1df6ae2e349bbcf7b11e01bac8b2bbc17cb58c8a04fee8dc6593f7a2ffde1ea000b9de31835be02aeeb76a8d94d01000000022c36549b9568a554a229ddbff434055cea90810c7fb30813ea9595df10712721d4f8c0792968bf654fc63c28db985c46cd7b3d5bce42e91bf580790576aeca2700000003e457acb3a011cd265eaf79f949647389fcf41d29243e73034e9794d83c998a3f1ded68d6316388310a3780fd31d40fef09112fa51e20f94f87d914cde6f47aee10cde6249de6c5072de9619b3965f2b410e2e8bafd487b557069aa94f21d505200000003bf8dac46c8c36586789ef41036a263da420eee1db97ef2aaf8dc4d4df97891048084dc64c1e4c3bb42eefda8f00dad68a58874306a0ba1da24760045cfd5370b282bd9a4108350708ad136aeec380842c836d461f4e4a9f226c138120dcd06000a20f6f72efbb3888dfa2278b6581eba1c5d0a874c3eaab1c71e609fc6b19b0b136c4789928b840a49b10b5c969da0931921ea038341718c1b79c4a0463afc0b3b3f74735908c9cb9d3787fce260c24e2a38cff60e258e0219a66f4e8c9ba60546903244c59dc9e989e9359614aaf9519f5f10e45e975fa1bb16dc7315cdcf0057cb0c8785d11ae173d923bd231c722b42adea40dbe1c5780a959f2f1410420f9d854bc4c6610704cb96545a24ee916a31eb3c1cc50566a139f45081e4648b0cb8b949fa6508a7abcab053c91e88d083fe5dc96da3df97431138129df22b720ac29f97c591589d45428d8bfb8710889102e51a03544f065afb95b474b7a3c906e97485fbc7814cb73b5e7ca60d46f05cbba784fef9eb80a04ea9fb963b676d01000000029a0ca181bc5dbab853fca35e1683ff3fc990ad5472854956995606e0112d460297d7adb47d9138a614885e3c33125066b32d36b994f65e1cbc09ad1df915360a135f3536e567a6d4d79c759af8187095e795779372deaef86c14c18ba2f5350e3cc7ecff7b691c1ce3bfa1965cfbeffa246dba539edfb1b38807f3f63461280d",
+      "ciphertext": "d9d19af5a92658743544be6a1ce1d73e9bf4e4b81a58b71565cf07528ea26561b7fa7e1e44006b79179b2f2f0f5441216e217954e2b10eab34a72f016f2e173abac140e72bf4147b4306597ecc7829883d3becc02b2a1cc907ec6f0e7b7deb8e231180ed0093c6cffff371c3a7ae355fbfc32ee1cb18a79db988a95542f40c95ce5faf60325f76945daa5e289c540de5e40f3e1e01a83dffb59164a29fa5b58115c9f14458186b77ce96467b83ceb3343a661073bd9811919f672838149f9d91ed6aa0e7a97e329b0c1b6d78d7fb0f31482d68389b7406814c0d1355ba1c95ca881f75d481f9130a8fa807091bb4de6a74cf4c61675fbee9323941c6f9617853fb3a7341dd20c5210780d113d2e5d6210a7c54cb65910069635384c7d3ae23071bb80553b8c5832a35218273e49373fe69ef55ba4ad567fcd7c93fd9350f55f8b10bb1b6dc4d211be3d69d2463a0b148f45d33832bfd47fb48dd60b5fa227f2524dc91dacdb10da5859214475076b286bbadce7339fadb59d19c5b41a092e729ff815310170e1dcee46892d94b7714a47b9f2337265dca874fae8ad4cf73512b593fc9dc7b540a752bf9995f47ace749aeac927e22e1715c3b10aac12000a3358af878e6802457c7b62157ebfcc98ecbf3c3deba332f8041b3d95b6bb166f5f21fe9541105f1aebf19f7f1a7ef3822c5d3fca45e53d968d0b8082c12daf43f11148e3bad127c32e3560130b8249eeb2b19ec3f6954c6373892f0406727bf2e27ca7d95280590fe684b99e61a7917b4c0d29b16bfaa2ca99109b5f711a8384d2388f89708ce1e82357863b80e5a250608babba5088689e6d12f8446c7042e7aab2e0b42a09985be092d5a01c862bcb8b40580c479f1818a5b73cdd612a29553941c6af7af3eff5fc6c994c2fedfb7a263f309408430a288a33fdeb6455d781a37d20953c47879a2cf613a3dfab108628c2e17066c5d93f4afe957534bf018a987908533292a5f2dc9048024b3d272db4a280e3da35dac69f76e5262c156d175101aae19930915f46b5e64ecf7d51e9e7dd2019d50d62c5f4e52c22d1f08ed1bb9bbb8249894f1e12c8f091aa0027e29e03828d27f724bb4e15fa6bbb2fe9eafe7e95dc9edf674c69722bd4ef6a1c0c16078276c5e652192b82521213697e20287b1b1c014a604fe64c3d07137a27fb21a349dae5ba457c998000c8b2fbd4b36a07ee1c460e232d182396f098c5fbb277f9ed672d0c94bc179d85111e48b873116dadf2966aacbc7c1dc778e952c9b5de437ed782f8ba7126ca53680626f774f6052569ce56332ae9f333fbaa5b82726d1be1938d0440560524478dd567791789519f611929b3e55be29000e7a0cf67e3303ceb271df303cc0f130333238500a9f35996d7db9a7d84fe855ffc0d3a88fa2feba5874d721b02513991ce26e42cddaf107555329d9d9bc1cff8a5444a6080c4671d6bcdef312609cff67156841231cec4f1462814c9485cccf70f93a043b8daaa3b80d9c70356e042bd53ef0a076a8b6d5c8d4e4da905095b14161bebd70428a9f46b77dead245eafcbcb8509c516b71d12ee4ce231e5c70a15812ee200425b259f3505e6973ab9b86fe590b80d504b88b4a9ddeb975bc4a473c9775503311d8ba6cea119f8a53a0b23030178bd409000000d4d253a07ee55dae5d270fdb23d4a0da40bc2ad588c5fe33afd0394cf51dcd3bbc7572f1f44fffe1298d2d6ac2da2314368d79e1371288f3f7563ac0c8d39282912a2d0c8565fe69a90d1e679edbc4f5add7ff8eb19c0efe03abaf695cfb8c7c50edd644fb1f3901c9763f89cb3ae7d1a1c8c7718c3a67a2421bd3402b85199b02836af40368378bbd0740b18a91b84e75386ddd0aab21decf804f3b51e1ddb8d2331ccc8a53a15a79a46bdbe13f6290fa1809e7fd9c31c7d95715b05eb641a1ad4e8dd53e87a95abf3fd3984a99ec83862b4dea66",
+      "result": "option-proof",
+      "option": 0
+    },
+    {
+      "id": "swapped-proofs",
+      "description": "Options 0 and 1 carry each other's proofs",
+      "context": {
+        "definitionHash": "2d4ceb20e6b30ceee1b503bd0b58022e9fbab0a575f5b636c26130b775dbe9e7",
+        "optionCount": 3,
+        "minSelections": 0,
+        "maxSelections": 1,
+        "threshold": 2,
+        "panelSize": 3,
+        "tier": 0,
+        "nullifier": "418470225973920448902615739260071273989025593755332804233448676776386950996"
+      },
+      "seat": 1,
+      "committedVote": "0000000300000002ac3b780e010d9b0947596978eb0d2a950799bcbdb0153b0c6720f45c33f3c838d6dde38f69b40e5f8f4d7725deed5ffcce271141f13e59d6b0ffa5d5b24b6c24000000029ec04e081105b76d3dbcb01489e4e0efa5f1df6ae2e349bbcf7b11e01bac8b2bbc17cb58c8a04fee8dc6593f7a2ffde1ea000b9de31835be02aeeb76a8d94d01000000022c36549b9568a554a229ddbff434055cea90810c7fb30813ea9595df10712721d4f8c0792968bf654fc63c28db985c46cd7b3d5bce42e91bf580790576aeca2700000003e457acb3a011cd265eaf79f949647389fcf41d29243e73034e9794d83c998a3f1ded68d6316388310a3780fd31d40fef09112fa51e20f94f87d914cde6f47aee10cde6249de6c5072de9619b3965f2b410e2e8bafd487b557069aa94f21d505200000003136c4789928b840a49b10b5c969da0931921ea038341718c1b79c4a0463afc0b3b3f74735908c9cb9d3787fce260c24e2a38cff60e258e0219a66f4e8c9ba60546903244c59dc9e989e9359614aaf9519f5f10e45e975fa1bb16dc7315cdcf0057cb0c8785d11ae173d923bd231c722b42adea40dbe1c5780a959f2f1410420fbf8dac46c8c36586789ef41036a263da420eee1db97ef2aaf8dc4d4df97891048084dc64c1e4c3bb42eefda8f00dad68a58874306a0ba1da24760045cfd5370b282bd9a4108350708ad136aeec380842c836d461f4e4a9f226c138120dcd06000a20f6f72efbb3888dfa2278b6581eba1c5d0a874c3eaab1c71e609fc6b19b0b9d854bc4c6610704cb96545a24ee916a31eb3c1cc50566a139f45081e4648b0cb8b949fa6508a7abcab053c91e88d083fe5dc96da3df97431138129df22b720ac29f97c591589d45428d8bfb8710889102e51a03544f065afb95b474b7a3c906e97485fbc7814cb73b5e7ca60d46f05cbba784fef9eb80a04ea9fb963b676d01000000029a0ca181bc5dbab853fca35e1683ff3fc990ad5472854956995606e0112d460297d7adb47d9138a614885e3c33125066b32d36b994f65e1cbc09ad1df915360a135f3536e567a6d4d79c759af8187095e795779372deaef86c14c18ba2f5350e3cc7ecff7b691c1ce3bfa1965cfbeffa246dba539edfb1b38807f3f63461280d",
+      "ciphertext": "d9d19af5a92658743544be6a1ce1d73e9bf4e4b81a58b71565cf07528ea26561b7fa7e1e44006b79179b2f2f0f5441216e217954e2b10eab34a72f016f2e173abac140e72bf4147b4306597ecc7829883d3becc02b2a1cc907ec6f0e7b7deb8e231180ed0093c6cffff371c3a7ae355fbfc32ee1cb18a79db988a95542f40c95ce5faf60325f76945daa5e289c540de5e40f3e1e01a83dffb59164a29fa5b58115c9f14458186b77ce96467b83ceb3343a661073bd9811919f672838149f9d91ed6aa0e7a97e329b0c1b6d78d7fb0f31482d68389b7406814c0d1355ba1c95ca881f75d481f9130a8fa807091bb4de6a74cf4c61675fbee9323941c6f9617853fb3a7341dd20c5210780d113d2e5d6210a7c54cb65910069635384c7d3ae23071bb80553b8c5832a35218273e49373fe69ef55ba4ad567fcd7c93fd9350f55f8b10bb1b6dc4d211be3d69d2463a0b148f45d33832bfd47fb48dd60b5fa227f2524dc91dacdb10da5859214475076b286bbadce7339fadb59d19c5b41a092e729ff815310170e1dcee46892d94b7714a47b9f2337265dca874fae8ad4cf73512b593fc9dc7b540a752bf9995f47ace749aeac927e22e1715c3b10aac12000a3358af878e6802457c7b62157ebfcc98ecbf3c3deba332f8041b3d95b6bb166f5f21fe9541105f1aebf19f7f1a7ef3822c5d3fca45e53d968d0b8082c12daf43f11148e3bad127c32e3560130b8249eeb2b19ec3f6954c6373892f0406727bf2e27ca7d95280590fe684b99e61a7917b4c0d29b16bfaa2ca99109b5f711a8384d2388f89708ce1e82357863b80e5a250608babba5088689e6d12f8446c7042e7aab2e0b42a09985be092d5a01c862bcb8b40580c479f1818a5b73cdd612a29553941c6af7af3eff5fc6c994c2fedfb7a263f309408430a288a33fdeb6455d781a37d20953c47879a2cf613a3dfab108628c2e17066c5d93f4afe957534bf018a987908533292a5f2dc9048024b3d272db4a280e3da35dac69f76e5262c156d175101aae19930915f46b5e64ecf7d51e9e7dd2019d50d62c5f4e52c22d1f08ed1bb9bbb8249894f1e12c8f091aa0027e29e03828d27f724bb4e15fa6bbb2fe9eafe7e95dc9edf674c69722bd4ef6a1c0c16078276c5e652192b82521213697e20287b1b1c014a604fe64c3d07137a27fb21a349dae5ba457c998000c8b2fbd4b36a07ee1c460e232d182396f098c5fbb277f9ed672d0c94bc179d85111e48b873116dadf2966aacbc7c1dc778e952c9b5de437ed782f8ba7126ca53680626f774f6052569ce56332ae9f333fbaa5b82726d1be1938d0440560524478dd567791789519f611929b3e55be29000e7a0cf67e3303ceb271df303cc0f130333238500a9f35996d7db9a7d84fe855ffc0d3a88fa2feba5874d721b02513991ce26e42cddaf107555329d9d9bc1cff8a5444a6080c4671d6bcdef312609cff67156841231cec4f1462814c9485cccf70f93a043b8daaa3b80d9c70356e042bd53ef0a076a8b6d5c8d4e4da905095b14161bebd70428a9f46b77dead245eafcbcb8509c516b71d12ee4ce231e5c70a15812ee200425b259f3505e6973ab9b86fe590b80d504b88b4a9ddeb975bc4a473c9775503311d8ba6cea119f8a53a0b23030178bd409000000d4d253a07ee55dae5d270fdb23d4a0da40bc2ad588c5fe33afd0394cf51dcd3bbc7572f1f44fffe1298d2d6ac2da2314368d79e1371288f3f7563ac0c8d39282912a2d0c8565fe69a90d1e679edbc4f5add7ff8eb19c0efe03abaf695cfb8c7c50edd644fb1f3901c9763f89cb3ae7d1a1c8c7718c3a67a2421bd3402b85199b02836af40368378bbd0740b18a91b84e75386ddd0aab21decf804f3b51e1ddb8d2331ccc8a53a15a79a46bdbe13f6290fa1809e7fd9c31c7d95715b05eb641a1ad4e8dd53e87a95abf3fd3984a99ec83862b4dea66",
+      "result": "option-proof",
+      "option": 0
+    },
+    {
+      "id": "altered-sum-proof",
+      "description": "The sum proof's first response + 1",
+      "context": {
+        "definitionHash": "2d4ceb20e6b30ceee1b503bd0b58022e9fbab0a575f5b636c26130b775dbe9e7",
+        "optionCount": 3,
+        "minSelections": 0,
+        "maxSelections": 1,
+        "threshold": 2,
+        "panelSize": 3,
+        "tier": 0,
+        "nullifier": "418470225973920448902615739260071273989025593755332804233448676776386950996"
+      },
+      "seat": 1,
+      "committedVote": "0000000300000002ac3b780e010d9b0947596978eb0d2a950799bcbdb0153b0c6720f45c33f3c838d6dde38f69b40e5f8f4d7725deed5ffcce271141f13e59d6b0ffa5d5b24b6c24000000029ec04e081105b76d3dbcb01489e4e0efa5f1df6ae2e349bbcf7b11e01bac8b2bbc17cb58c8a04fee8dc6593f7a2ffde1ea000b9de31835be02aeeb76a8d94d01000000022c36549b9568a554a229ddbff434055cea90810c7fb30813ea9595df10712721d4f8c0792968bf654fc63c28db985c46cd7b3d5bce42e91bf580790576aeca2700000003e457acb3a011cd265eaf79f949647389fcf41d29243e73034e9794d83c998a3f1ded68d6316388310a3780fd31d40fef09112fa51e20f94f87d914cde6f47aee10cde6249de6c5072de9619b3965f2b410e2e8bafd487b557069aa94f21d505200000003bf8dac46c8c36586789ef41036a263da420eee1db97ef2aaf8dc4d4df97891048084dc64c1e4c3bb42eefda8f00dad68a58874306a0ba1da24760045cfd5370b282bd9a4108350708ad136aeec380842c836d461f4e4a9f226c138120dcd06000a20f6f72efbb3888dfa2278b6581eba1c5d0a874c3eaab1c71e609fc6b19b0b136c4789928b840a49b10b5c969da0931921ea038341718c1b79c4a0463afc0b3b3f74735908c9cb9d3787fce260c24e2a38cff60e258e0219a66f4e8c9ba60546903244c59dc9e989e9359614aaf9519f5f10e45e975fa1bb16dc7315cdcf0057cb0c8785d11ae173d923bd231c722b42adea40dbe1c5780a959f2f1410420f9d854bc4c6610704cb96545a24ee916a31eb3c1cc50566a139f45081e4648b0cb8b949fa6508a7abcab053c91e88d083fe5dc96da3df97431138129df22b720ac29f97c591589d45428d8bfb8710889102e51a03544f065afb95b474b7a3c906e97485fbc7814cb73b5e7ca60d46f05cbba784fef9eb80a04ea9fb963b676d01000000029a0ca181bc5dbab853fca35e1683ff3fc990ad5472854956995606e0112d460298d7adb47d9138a614885e3c33125066b32d36b994f65e1cbc09ad1df915360a135f3536e567a6d4d79c759af8187095e795779372deaef86c14c18ba2f5350e3cc7ecff7b691c1ce3bfa1965cfbeffa246dba539edfb1b38807f3f63461280d",
+      "ciphertext": "d9d19af5a92658743544be6a1ce1d73e9bf4e4b81a58b71565cf07528ea26561b7fa7e1e44006b79179b2f2f0f5441216e217954e2b10eab34a72f016f2e173abac140e72bf4147b4306597ecc7829883d3becc02b2a1cc907ec6f0e7b7deb8e231180ed0093c6cffff371c3a7ae355fbfc32ee1cb18a79db988a95542f40c95ce5faf60325f76945daa5e289c540de5e40f3e1e01a83dffb59164a29fa5b58115c9f14458186b77ce96467b83ceb3343a661073bd9811919f672838149f9d91ed6aa0e7a97e329b0c1b6d78d7fb0f31482d68389b7406814c0d1355ba1c95ca881f75d481f9130a8fa807091bb4de6a74cf4c61675fbee9323941c6f9617853fb3a7341dd20c5210780d113d2e5d6210a7c54cb65910069635384c7d3ae23071bb80553b8c5832a35218273e49373fe69ef55ba4ad567fcd7c93fd9350f55f8b10bb1b6dc4d211be3d69d2463a0b148f45d33832bfd47fb48dd60b5fa227f2524dc91dacdb10da5859214475076b286bbadce7339fadb59d19c5b41a092e729ff815310170e1dcee46892d94b7714a47b9f2337265dca874fae8ad4cf73512b593fc9dc7b540a752bf9995f47ace749aeac927e22e1715c3b10aac12000a3358af878e6802457c7b62157ebfcc98ecbf3c3deba332f8041b3d95b6bb166f5f21fe9541105f1aebf19f7f1a7ef3822c5d3fca45e53d968d0b8082c12daf43f11148e3bad127c32e3560130b8249eeb2b19ec3f6954c6373892f0406727bf2e27ca7d95280590fe684b99e61a7917b4c0d29b16bfaa2ca99109b5f711a8384d2388f89708ce1e82357863b80e5a250608babba5088689e6d12f8446c7042e7aab2e0b42a09985be092d5a01c862bcb8b40580c479f1818a5b73cdd612a29553941c6af7af3eff5fc6c994c2fedfb7a263f309408430a288a33fdeb6455d781a37d20953c47879a2cf613a3dfab108628c2e17066c5d93f4afe957534bf018a987908533292a5f2dc9048024b3d272db4a280e3da35dac69f76e5262c156d175101aae19930915f46b5e64ecf7d51e9e7dd2019d50d62c5f4e52c22d1f08ed1bb9bbb8249894f1e12c8f091aa0027e29e03828d27f724bb4e15fa6bbb2fe9eafe7e95dc9edf674c69722bd4ef6a1c0c16078276c5e652192b82521213697e20287b1b1c014a604fe64c3d07137a27fb21a349dae5ba457c998000c8b2fbd4b36a07ee1c460e232d182396f098c5fbb277f9ed672d0c94bc179d85111e48b873116dadf2966aacbc7c1dc778e952c9b5de437ed782f8ba7126ca53680626f774f6052569ce56332ae9f333fbaa5b82726d1be1938d0440560524478dd567791789519f611929b3e55be29000e7a0cf67e3303ceb271df303cc0f130333238500a9f35996d7db9a7d84fe855ffc0d3a88fa2feba5874d721b02513991ce26e42cddaf107555329d9d9bc1cff8a5444a6080c4671d6bcdef312609cff67156841231cec4f1462814c9485cccf70f93a043b8daaa3b80d9c70356e042bd53ef0a076a8b6d5c8d4e4da905095b14161bebd70428a9f46b77dead245eafcbcb8509c516b71d12ee4ce231e5c70a15812ee200425b259f3505e6973ab9b86fe590b80d504b88b4a9ddeb975bc4a473c9775503311d8ba6cea119f8a53a0b23030178bd409000000d4d253a07ee55dae5d270fdb23d4a0da40bc2ad588c5fe33afd0394cf51dcd3bbc7572f1f44fffe1298d2d6ac2da2314368d79e1371288f3f7563ac0c8d39282912a2d0c8565fe69a90d1e679edbc4f5add7ff8eb19c0efe03abaf695cfb8c7c50edd644fb1f3901c9763f89cb3ae7d1a1c8c7718c3a67a2421bd3402b85199b02836af40368378bbd0740b18a91b84e75386ddd0aab21decf804f3b51e1ddb8d2331ccc8a53a15a79a46bdbe13f6290fa1809e7fd9c31c7d95715b05eb641a1ad4e8dd53e87a95abf3fd3984a99ec83862b4dea66",
+      "result": "sum-proof"
+    },
+    {
+      "id": "other-seat-ciphertext",
+      "description": "Seat 1 is delivered seat 2's ciphertext",
+      "context": {
+        "definitionHash": "2d4ceb20e6b30ceee1b503bd0b58022e9fbab0a575f5b636c26130b775dbe9e7",
+        "optionCount": 3,
+        "minSelections": 0,
+        "maxSelections": 1,
+        "threshold": 2,
+        "panelSize": 3,
+        "tier": 0,
+        "nullifier": "418470225973920448902615739260071273989025593755332804233448676776386950996"
+      },
+      "seat": 1,
+      "committedVote": "0000000300000002ac3b780e010d9b0947596978eb0d2a950799bcbdb0153b0c6720f45c33f3c838d6dde38f69b40e5f8f4d7725deed5ffcce271141f13e59d6b0ffa5d5b24b6c24000000029ec04e081105b76d3dbcb01489e4e0efa5f1df6ae2e349bbcf7b11e01bac8b2bbc17cb58c8a04fee8dc6593f7a2ffde1ea000b9de31835be02aeeb76a8d94d01000000022c36549b9568a554a229ddbff434055cea90810c7fb30813ea9595df10712721d4f8c0792968bf654fc63c28db985c46cd7b3d5bce42e91bf580790576aeca2700000003e457acb3a011cd265eaf79f949647389fcf41d29243e73034e9794d83c998a3f1ded68d6316388310a3780fd31d40fef09112fa51e20f94f87d914cde6f47aee10cde6249de6c5072de9619b3965f2b410e2e8bafd487b557069aa94f21d505200000003bf8dac46c8c36586789ef41036a263da420eee1db97ef2aaf8dc4d4df97891048084dc64c1e4c3bb42eefda8f00dad68a58874306a0ba1da24760045cfd5370b282bd9a4108350708ad136aeec380842c836d461f4e4a9f226c138120dcd06000a20f6f72efbb3888dfa2278b6581eba1c5d0a874c3eaab1c71e609fc6b19b0b136c4789928b840a49b10b5c969da0931921ea038341718c1b79c4a0463afc0b3b3f74735908c9cb9d3787fce260c24e2a38cff60e258e0219a66f4e8c9ba60546903244c59dc9e989e9359614aaf9519f5f10e45e975fa1bb16dc7315cdcf0057cb0c8785d11ae173d923bd231c722b42adea40dbe1c5780a959f2f1410420f9d854bc4c6610704cb96545a24ee916a31eb3c1cc50566a139f45081e4648b0cb8b949fa6508a7abcab053c91e88d083fe5dc96da3df97431138129df22b720ac29f97c591589d45428d8bfb8710889102e51a03544f065afb95b474b7a3c906e97485fbc7814cb73b5e7ca60d46f05cbba784fef9eb80a04ea9fb963b676d01000000029a0ca181bc5dbab853fca35e1683ff3fc990ad5472854956995606e0112d460297d7adb47d9138a614885e3c33125066b32d36b994f65e1cbc09ad1df915360a135f3536e567a6d4d79c759af8187095e795779372deaef86c14c18ba2f5350e3cc7ecff7b691c1ce3bfa1965cfbeffa246dba539edfb1b38807f3f63461280d",
+      "ciphertext": "6dc0ec5ac7dd7455ba144fe9aa4748da22a2a16f0c985ef840be0cbe70b8ba35bb68ec42735068e57f7386dee9650006046080502e13f065c082fcf5d8894be6d2d3189ed58561c2b410cae65055bddeaff277d5c252288e5fae417d3d800c0b78cfaa18855c1591407c74a6c8c495007dd738bc45c3eed0b9561cf0c5b96985c6eb11af997e82b2f2dfce55e102e452873ca26ae6f17156777610bea9b43550b4912b112d3207f0e221637ca4f5d9dac27909001050d601237bebc49e900cd339ef0cfe26ca178f5de9218eb0a18473ecd80aeaabd84615b4f4a5c55f8210cf50fd75d57a245cb0b67f37854055561a6305939606242666d007d4051b578b4650a84133d5a57fce8d1ae4696755aefd36e08db006ef3eef75d3687c2333a5400252eb1f8e15cd2ff39b6aa1e5d700c03e18f2478eb823c89eb56af12fac66a5f3b2669518f6375dad75d2b3264850d8c72e7f065daee9761fef659668cb6fd9bd626decf840465038ee0c33d1f9bfb6d0cc03ed9c041c59a2922033f43a9496a28556266334d4eca980212e1006ceea658ca067ba378590fdfaee51542bf57c6b57255c9a58db92ad9530356977f9eb6aec22e6fb2a7b3eea8f61a57c4ebb08ee61607ddbbdb29de2d082491af96618c3cc3e9626734d9c47c8dfc495446c6080e69eb13a2f116756dec784c56b637471d2ab127c10e1265b7ab432d60f4b6ed862b0dc59c22a80cd0d582eef5adac26779131baa15a5c3e7d1942b910227be96a437bb39b519c52f1e84b48ee9c3e7e4a23bc7ade994d4bba41248cf9d6d1a5a1b8b958531bb3f3fc3fa6c3a1e3c4fa79b53df30d9594f8d89ee68a1ecad012e1f5f9843b708fa26bb297886e648b519a3ec3a54b5b4d03196c94e30966eef7aa6c1d2b3694e8a7015587253e905f4c5f0231e76af9ccea36d46af7e03cdb3d4799698ea0361429e07dd74b53918e7a0aad0f7d848e7a1284865c747c90817624312cbd5b9301243515b1ace9ed22dd7421cd3dab5b8a568d4b613c7df41f26fa4464679cb9c03b1f19f82d08c39b156113fb65f410abce0ea4f15f5fb0363270fd8ddadb9e0a64518eeec07bd0824edf4752d5ff8cdfc8999dada9edd97d8b8f2066f235902ada1339013e5fe6578244ab7bb45712742ae333de4eab6c816742f2b5d26e7e4c5931897af3f4be6284e68dad248e522d83e4751c8b628805d27c97dd939c11a7108a221f37a5f691aade5e35234a321d04c7c0d41ca04ba93ec9c6a59cff6f36286fba924f5c6e5ccd0fe248f535b8983ee6e8a614fdce65d2c551fd62bfe8443756621eb82a7f0a434b5d79a2ca0658493940c33a7d06fb69ef8bb501aa78e0577cc4fb0206bd4d6328841c55a025fe710ed15bd3363e05f4a2f7d798d6480ab1a1ad11c6456324b671acbaa99f93912d5a006e7a87ceda417b3f3b213f54a0d3a165e418c7921c25a6bdafaf55e3b9e93a9ff493b51548f292f31e1a4267d15cf508bef74b1ab6703b9e829f3461c4f3d195640f14c1c91c6d84865191ce6b52a6e5aec6f8b93409d36fcc8c7ad4adf8ccd3aac8eda4c437a6a9a5dda1bb527add57c7f2c491526fe72c9bea288b8b63aeca08a94e6cb0f8a5f81e9e803e948ffd70f2fd0da89d6752fb90a0616aa67a21c8ebf14db6a00000000d413ae6787c649b5f412b31c375e04affad60e8f252f10f5e4446eb97b5301d3d2a4ef83c6e6e21fb78ab3beaa1ab958e2afa2927d9aefbde85c02f0222c1380bb74b685fd4bf1de0bacf46e2c0b8b787e68a7a8f25ec364c2a14b48c6a1423791d17e9de524002f0e73471708bbf7f490ce37773f5c1c0bd6b5d82883a16b1b28558196ff4da5c700a8efc4ba38f6eb0681bc117760fdc21882f29652c066927dbe5dc35e231f83164127d8784498e29a35460c5b7c279272b89a6ca2b5c50721b1de4b6fc1ea682e0b5f535a3cf0e714b554525c",
+      "result": "share-hash"
+    },
+    {
+      "id": "altered-ciphertext",
+      "description": "Seat 1's ciphertext with its last byte flipped",
+      "context": {
+        "definitionHash": "2d4ceb20e6b30ceee1b503bd0b58022e9fbab0a575f5b636c26130b775dbe9e7",
+        "optionCount": 3,
+        "minSelections": 0,
+        "maxSelections": 1,
+        "threshold": 2,
+        "panelSize": 3,
+        "tier": 0,
+        "nullifier": "418470225973920448902615739260071273989025593755332804233448676776386950996"
+      },
+      "seat": 1,
+      "committedVote": "0000000300000002ac3b780e010d9b0947596978eb0d2a950799bcbdb0153b0c6720f45c33f3c838d6dde38f69b40e5f8f4d7725deed5ffcce271141f13e59d6b0ffa5d5b24b6c24000000029ec04e081105b76d3dbcb01489e4e0efa5f1df6ae2e349bbcf7b11e01bac8b2bbc17cb58c8a04fee8dc6593f7a2ffde1ea000b9de31835be02aeeb76a8d94d01000000022c36549b9568a554a229ddbff434055cea90810c7fb30813ea9595df10712721d4f8c0792968bf654fc63c28db985c46cd7b3d5bce42e91bf580790576aeca2700000003e457acb3a011cd265eaf79f949647389fcf41d29243e73034e9794d83c998a3f1ded68d6316388310a3780fd31d40fef09112fa51e20f94f87d914cde6f47aee10cde6249de6c5072de9619b3965f2b410e2e8bafd487b557069aa94f21d505200000003bf8dac46c8c36586789ef41036a263da420eee1db97ef2aaf8dc4d4df97891048084dc64c1e4c3bb42eefda8f00dad68a58874306a0ba1da24760045cfd5370b282bd9a4108350708ad136aeec380842c836d461f4e4a9f226c138120dcd06000a20f6f72efbb3888dfa2278b6581eba1c5d0a874c3eaab1c71e609fc6b19b0b136c4789928b840a49b10b5c969da0931921ea038341718c1b79c4a0463afc0b3b3f74735908c9cb9d3787fce260c24e2a38cff60e258e0219a66f4e8c9ba60546903244c59dc9e989e9359614aaf9519f5f10e45e975fa1bb16dc7315cdcf0057cb0c8785d11ae173d923bd231c722b42adea40dbe1c5780a959f2f1410420f9d854bc4c6610704cb96545a24ee916a31eb3c1cc50566a139f45081e4648b0cb8b949fa6508a7abcab053c91e88d083fe5dc96da3df97431138129df22b720ac29f97c591589d45428d8bfb8710889102e51a03544f065afb95b474b7a3c906e97485fbc7814cb73b5e7ca60d46f05cbba784fef9eb80a04ea9fb963b676d01000000029a0ca181bc5dbab853fca35e1683ff3fc990ad5472854956995606e0112d460297d7adb47d9138a614885e3c33125066b32d36b994f65e1cbc09ad1df915360a135f3536e567a6d4d79c759af8187095e795779372deaef86c14c18ba2f5350e3cc7ecff7b691c1ce3bfa1965cfbeffa246dba539edfb1b38807f3f63461280d",
+      "ciphertext": "d9d19af5a92658743544be6a1ce1d73e9bf4e4b81a58b71565cf07528ea26561b7fa7e1e44006b79179b2f2f0f5441216e217954e2b10eab34a72f016f2e173abac140e72bf4147b4306597ecc7829883d3becc02b2a1cc907ec6f0e7b7deb8e231180ed0093c6cffff371c3a7ae355fbfc32ee1cb18a79db988a95542f40c95ce5faf60325f76945daa5e289c540de5e40f3e1e01a83dffb59164a29fa5b58115c9f14458186b77ce96467b83ceb3343a661073bd9811919f672838149f9d91ed6aa0e7a97e329b0c1b6d78d7fb0f31482d68389b7406814c0d1355ba1c95ca881f75d481f9130a8fa807091bb4de6a74cf4c61675fbee9323941c6f9617853fb3a7341dd20c5210780d113d2e5d6210a7c54cb65910069635384c7d3ae23071bb80553b8c5832a35218273e49373fe69ef55ba4ad567fcd7c93fd9350f55f8b10bb1b6dc4d211be3d69d2463a0b148f45d33832bfd47fb48dd60b5fa227f2524dc91dacdb10da5859214475076b286bbadce7339fadb59d19c5b41a092e729ff815310170e1dcee46892d94b7714a47b9f2337265dca874fae8ad4cf73512b593fc9dc7b540a752bf9995f47ace749aeac927e22e1715c3b10aac12000a3358af878e6802457c7b62157ebfcc98ecbf3c3deba332f8041b3d95b6bb166f5f21fe9541105f1aebf19f7f1a7ef3822c5d3fca45e53d968d0b8082c12daf43f11148e3bad127c32e3560130b8249eeb2b19ec3f6954c6373892f0406727bf2e27ca7d95280590fe684b99e61a7917b4c0d29b16bfaa2ca99109b5f711a8384d2388f89708ce1e82357863b80e5a250608babba5088689e6d12f8446c7042e7aab2e0b42a09985be092d5a01c862bcb8b40580c479f1818a5b73cdd612a29553941c6af7af3eff5fc6c994c2fedfb7a263f309408430a288a33fdeb6455d781a37d20953c47879a2cf613a3dfab108628c2e17066c5d93f4afe957534bf018a987908533292a5f2dc9048024b3d272db4a280e3da35dac69f76e5262c156d175101aae19930915f46b5e64ecf7d51e9e7dd2019d50d62c5f4e52c22d1f08ed1bb9bbb8249894f1e12c8f091aa0027e29e03828d27f724bb4e15fa6bbb2fe9eafe7e95dc9edf674c69722bd4ef6a1c0c16078276c5e652192b82521213697e20287b1b1c014a604fe64c3d07137a27fb21a349dae5ba457c998000c8b2fbd4b36a07ee1c460e232d182396f098c5fbb277f9ed672d0c94bc179d85111e48b873116dadf2966aacbc7c1dc778e952c9b5de437ed782f8ba7126ca53680626f774f6052569ce56332ae9f333fbaa5b82726d1be1938d0440560524478dd567791789519f611929b3e55be29000e7a0cf67e3303ceb271df303cc0f130333238500a9f35996d7db9a7d84fe855ffc0d3a88fa2feba5874d721b02513991ce26e42cddaf107555329d9d9bc1cff8a5444a6080c4671d6bcdef312609cff67156841231cec4f1462814c9485cccf70f93a043b8daaa3b80d9c70356e042bd53ef0a076a8b6d5c8d4e4da905095b14161bebd70428a9f46b77dead245eafcbcb8509c516b71d12ee4ce231e5c70a15812ee200425b259f3505e6973ab9b86fe590b80d504b88b4a9ddeb975bc4a473c9775503311d8ba6cea119f8a53a0b23030178bd409000000d4d253a07ee55dae5d270fdb23d4a0da40bc2ad588c5fe33afd0394cf51dcd3bbc7572f1f44fffe1298d2d6ac2da2314368d79e1371288f3f7563ac0c8d39282912a2d0c8565fe69a90d1e679edbc4f5add7ff8eb19c0efe03abaf695cfb8c7c50edd644fb1f3901c9763f89cb3ae7d1a1c8c7718c3a67a2421bd3402b85199b02836af40368378bbd0740b18a91b84e75386ddd0aab21decf804f3b51e1ddb8d2331ccc8a53a15a79a46bdbe13f6290fa1809e7fd9c31c7d95715b05eb641a1ad4e8dd53e87a95abf3fd3984a99ec83862b4dea67",
+      "result": "share-hash"
+    },
+    {
+      "id": "malformed-ciphertext",
+      "description": "A dishonest client: seat 1's share hash is the hash of 40 bytes that aren't a ciphertext",
+      "context": {
+        "definitionHash": "2d4ceb20e6b30ceee1b503bd0b58022e9fbab0a575f5b636c26130b775dbe9e7",
+        "optionCount": 3,
+        "minSelections": 0,
+        "maxSelections": 1,
+        "threshold": 2,
+        "panelSize": 3,
+        "tier": 0,
+        "nullifier": "418470225973920448902615739260071273989025593755332804233448676776386950996"
+      },
+      "seat": 1,
+      "committedVote": "0000000300000002d0d4cbb5206d0a28bc12420d58c30e623becd917827101a64b1ec1dbb3077f0974f0a9a317e41ed7a19659cc3dfd97339a72c483f3c96aeeee1d131c221b7d2f0000000248c718378b133f34cdd13519177018c810b182af35df614e009bd377b1164a54ee3337a87bbaa83eaa3df3b310625ec992cda36a9d46b7615afd47740e5eb91d00000002f026c471e17c35b272f648d5c61abc8e1dbbbfb3f7088a4092788443b2caef609aff8cdfbec9ba9a1359d7928c5569dc64ad9fae54674cc9c3b10c83de841b2700000003cdb0b680a0999afb726f0cd537ac22003eef478782b29ee5eb4d7ed8dd4f435f050c680bef5f1c61f5a7c33a216ab8f3b746a619a550037b81ebe8b2b16ace7d17099fd1116c80ae8af3885234fcf278f122848d99bae6a91f34fc5b84ea2c6100000003d76f83018d10d08d7e9467800cb91d84d066612ce8b9291780e538a4196e810eb757d04fe614c0b68631c2e3cc754e65c4a95f4db659487c863a3125384a600e2cec194f0789d81479ce4f0d6e86323e4bd692eea9b0c3335430d6720d37650bf2dedc8bdfb0fdd1ecfaa38a74b216f6dbfd7713dd0ec8ea8cfa844a7f490205e51b2bb5dd82c5beb9159e5ebd69393b401f22af93d562d7d7a23ad01b5f580e9807e127841f96da2e9cfb8a9aae20767727f5ae83ac57321270ef86806239086e5097cea99c2f15733a4059551efb07b5191233f98e536a40734ef3924bb706be23f6bbea907c91a1f77f131f44daccbb3ef3ffe710b26c50056bf004598801e1c6858562419fe52101c0dd279df00781f7d54866285832017530edf5af1d028603238a4dfacfeeed4186d0f37fba7333ff15b8d1992cd7ff10297c2171710c776f2dd0831038693fd4b1e2d8ec96c78d90c79d0ef5b49b7bc918a8bd4e26058b2a0cab60ad8af5ab651abe7cde2f651a5804df1a532ac5110ddacf8e778505000000028120ffcb320917ef410776ebdc95e25f4033594b673b2bbd21f2247fc76e70049a8c52bc3823c9be77b6f74eba6477697573f4ff924ce9f9f626d17448fab502bdc713cf123967dc556b3a9fdf1d50db633cb036d1c37cd808586147b59ab104ebaaacfcb3107e3e4c120a7d65875c5bcea9127314820e1f508b05290c19e205",
+      "ciphertext": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f2021222324252627",
+      "result": "share-malformed"
+    }
+  ],
+  "receiptChecks": [
+    {
+      "id": "valid",
+      "description": "Seat 1's receipt for the plurality ballot",
+      "panel": "panel-3",
+      "definitionHash": "2d4ceb20e6b30ceee1b503bd0b58022e9fbab0a575f5b636c26130b775dbe9e7",
+      "ballotHash": "706978f898ec696288772d04b79b504adeafb419687683cb2303fe2a12b54a94",
+      "seat": 1,
+      "shareHash": "e457acb3a011cd265eaf79f949647389fcf41d29243e73034e9794d83c998a3f",
+      "signature": "8fbfa0c727fab13f0fc66e3b1eb94fb9eb332a881c8649fbb4574674c3b8ed1168f40358326de49e32285f2d5a6e8aba2b97e158a3505846ee944359fcff5b68",
+      "valid": true
+    },
+    {
+      "id": "valid-seat-2",
+      "description": "Seat 2's receipt for the plurality ballot",
+      "panel": "panel-3",
+      "definitionHash": "2d4ceb20e6b30ceee1b503bd0b58022e9fbab0a575f5b636c26130b775dbe9e7",
+      "ballotHash": "706978f898ec696288772d04b79b504adeafb419687683cb2303fe2a12b54a94",
+      "seat": 2,
+      "shareHash": "1ded68d6316388310a3780fd31d40fef09112fa51e20f94f87d914cde6f47aee",
+      "signature": "892d1adb81af77f8e8ad284d31ca1cced550611c269949c6e82593f65c3945234c03654d0d66e404a113c06048584e9429b81f5a5331e505246b16aa51369e25",
+      "valid": true
+    },
+    {
+      "id": "other-seat",
+      "description": "Seat 1's receipt presented as seat 2's",
+      "panel": "panel-3",
+      "definitionHash": "2d4ceb20e6b30ceee1b503bd0b58022e9fbab0a575f5b636c26130b775dbe9e7",
+      "ballotHash": "706978f898ec696288772d04b79b504adeafb419687683cb2303fe2a12b54a94",
+      "seat": 2,
+      "shareHash": "1ded68d6316388310a3780fd31d40fef09112fa51e20f94f87d914cde6f47aee",
+      "signature": "8fbfa0c727fab13f0fc66e3b1eb94fb9eb332a881c8649fbb4574674c3b8ed1168f40358326de49e32285f2d5a6e8aba2b97e158a3505846ee944359fcff5b68",
+      "valid": false
+    },
+    {
+      "id": "other-seat-key",
+      "description": "Seat 1's statement signed with seat 2's signing key",
+      "panel": "panel-3",
+      "definitionHash": "2d4ceb20e6b30ceee1b503bd0b58022e9fbab0a575f5b636c26130b775dbe9e7",
+      "ballotHash": "706978f898ec696288772d04b79b504adeafb419687683cb2303fe2a12b54a94",
+      "seat": 1,
+      "shareHash": "e457acb3a011cd265eaf79f949647389fcf41d29243e73034e9794d83c998a3f",
+      "signature": "9ce13dba237e087d032c5d1f260cecd214264d7181b9b2e2e170c8cc544cb9dc5632a54fb94954959b3d84ee57a40b90c64953595db872feb40be6bf300458c0",
+      "valid": false
+    },
+    {
+      "id": "identity-key",
+      "description": "Seat 1's statement signed with seat 1's identity key, not its per-election key",
+      "panel": "panel-3",
+      "definitionHash": "2d4ceb20e6b30ceee1b503bd0b58022e9fbab0a575f5b636c26130b775dbe9e7",
+      "ballotHash": "706978f898ec696288772d04b79b504adeafb419687683cb2303fe2a12b54a94",
+      "seat": 1,
+      "shareHash": "e457acb3a011cd265eaf79f949647389fcf41d29243e73034e9794d83c998a3f",
+      "signature": "a8777260cd7533a3f106de528cd32826f2317ccb3c888b3feaa34d28166b6fd92ca0932b296a085bb9e09b7f05cf71dd2f8fccaa952d9a3f89f991fc939b9dbb",
+      "valid": false
+    },
+    {
+      "id": "unregistered-seat",
+      "description": "A receipt for seat 4 of a 3-seat panel, signed with seat 1's key",
+      "panel": "panel-3",
+      "definitionHash": "2d4ceb20e6b30ceee1b503bd0b58022e9fbab0a575f5b636c26130b775dbe9e7",
+      "ballotHash": "706978f898ec696288772d04b79b504adeafb419687683cb2303fe2a12b54a94",
+      "seat": 4,
+      "shareHash": "e457acb3a011cd265eaf79f949647389fcf41d29243e73034e9794d83c998a3f",
+      "signature": "c7d00253700f1333d9e7a85ab2a533ca4f231df36c66d3660e7a4dccfccf62ee3f2e481e49586132e5e1412f393e853e55afe2c0b0d67efcd24650e23d490023",
+      "valid": false
+    },
+    {
+      "id": "other-definition",
+      "description": "Seat 1's receipt checked under another definition hash",
+      "panel": "panel-3",
+      "definitionHash": "1367d8c783f611d94ade9ee7542ff01a49456a004ba83f2d33ec81557a12fb12",
+      "ballotHash": "706978f898ec696288772d04b79b504adeafb419687683cb2303fe2a12b54a94",
+      "seat": 1,
+      "shareHash": "e457acb3a011cd265eaf79f949647389fcf41d29243e73034e9794d83c998a3f",
+      "signature": "8fbfa0c727fab13f0fc66e3b1eb94fb9eb332a881c8649fbb4574674c3b8ed1168f40358326de49e32285f2d5a6e8aba2b97e158a3505846ee944359fcff5b68",
+      "valid": false
+    },
+    {
+      "id": "other-ballot",
+      "description": "Seat 1's receipt checked against the bad-share ballot",
+      "panel": "panel-3",
+      "definitionHash": "2d4ceb20e6b30ceee1b503bd0b58022e9fbab0a575f5b636c26130b775dbe9e7",
+      "ballotHash": "250096e7480f8c23558268b05020b11fca96cc81d0258a0a1be48159e30375a3",
+      "seat": 1,
+      "shareHash": "e457acb3a011cd265eaf79f949647389fcf41d29243e73034e9794d83c998a3f",
+      "signature": "8fbfa0c727fab13f0fc66e3b1eb94fb9eb332a881c8649fbb4574674c3b8ed1168f40358326de49e32285f2d5a6e8aba2b97e158a3505846ee944359fcff5b68",
+      "valid": false
+    },
+    {
+      "id": "other-ciphertext",
+      "description": "Seat 1's receipt checked against seat 2's share hash",
+      "panel": "panel-3",
+      "definitionHash": "2d4ceb20e6b30ceee1b503bd0b58022e9fbab0a575f5b636c26130b775dbe9e7",
+      "ballotHash": "706978f898ec696288772d04b79b504adeafb419687683cb2303fe2a12b54a94",
+      "seat": 1,
+      "shareHash": "1ded68d6316388310a3780fd31d40fef09112fa51e20f94f87d914cde6f47aee",
+      "signature": "8fbfa0c727fab13f0fc66e3b1eb94fb9eb332a881c8649fbb4574674c3b8ed1168f40358326de49e32285f2d5a6e8aba2b97e158a3505846ee944359fcff5b68",
+      "valid": false
+    },
+    {
+      "id": "other-tag",
+      "description": "Seat 1's statement signed under abolish/v1/sig/tally-opening",
+      "panel": "panel-3",
+      "definitionHash": "2d4ceb20e6b30ceee1b503bd0b58022e9fbab0a575f5b636c26130b775dbe9e7",
+      "ballotHash": "706978f898ec696288772d04b79b504adeafb419687683cb2303fe2a12b54a94",
+      "seat": 1,
+      "shareHash": "e457acb3a011cd265eaf79f949647389fcf41d29243e73034e9794d83c998a3f",
+      "signature": "e8aab3128b2c1bcb37c9f2d079a4d151ffd53313c403f9c2ac25938deca780ef6a121419b1e0032c0f7886e9cab4349308dc1cbebb13bd9a45f1225407d3083c",
+      "valid": false
+    },
+    {
+      "id": "altered",
+      "description": "Seat 1's receipt with its last byte flipped",
+      "panel": "panel-3",
+      "definitionHash": "2d4ceb20e6b30ceee1b503bd0b58022e9fbab0a575f5b636c26130b775dbe9e7",
+      "ballotHash": "706978f898ec696288772d04b79b504adeafb419687683cb2303fe2a12b54a94",
+      "seat": 1,
+      "shareHash": "e457acb3a011cd265eaf79f949647389fcf41d29243e73034e9794d83c998a3f",
+      "signature": "8fbfa0c727fab13f0fc66e3b1eb94fb9eb332a881c8649fbb4574674c3b8ed1168f40358326de49e32285f2d5a6e8aba2b97e158a3505846ee944359fcff5b69",
+      "valid": false
+    },
+    {
+      "id": "high-s",
+      "description": "Seat 1's receipt with s replaced by n − s",
+      "panel": "panel-3",
+      "definitionHash": "2d4ceb20e6b30ceee1b503bd0b58022e9fbab0a575f5b636c26130b775dbe9e7",
+      "ballotHash": "706978f898ec696288772d04b79b504adeafb419687683cb2303fe2a12b54a94",
+      "seat": 1,
+      "shareHash": "e457acb3a011cd265eaf79f949647389fcf41d29243e73034e9794d83c998a3f",
+      "signature": "8fbfa0c727fab13f0fc66e3b1eb94fb9eb332a881c8649fbb4574674c3b8ed11970bfca6cd921b62cdd7a0d2a5917545914f195503c7463e05258768ff63c9e9",
+      "valid": false
+    },
+    {
+      "id": "short",
+      "description": "Seat 1's receipt one byte short",
+      "panel": "panel-3",
+      "definitionHash": "2d4ceb20e6b30ceee1b503bd0b58022e9fbab0a575f5b636c26130b775dbe9e7",
+      "ballotHash": "706978f898ec696288772d04b79b504adeafb419687683cb2303fe2a12b54a94",
+      "seat": 1,
+      "shareHash": "e457acb3a011cd265eaf79f949647389fcf41d29243e73034e9794d83c998a3f",
+      "signature": "8fbfa0c727fab13f0fc66e3b1eb94fb9eb332a881c8649fbb4574674c3b8ed1168f40358326de49e32285f2d5a6e8aba2b97e158a3505846ee944359fcff5b",
+      "valid": false
+    },
+    {
+      "id": "other-panel",
+      "description": "Seat 1's receipt checked against the 2-seat panel's keys",
+      "panel": "panel-2",
+      "definitionHash": "2d4ceb20e6b30ceee1b503bd0b58022e9fbab0a575f5b636c26130b775dbe9e7",
+      "ballotHash": "706978f898ec696288772d04b79b504adeafb419687683cb2303fe2a12b54a94",
+      "seat": 1,
+      "shareHash": "e457acb3a011cd265eaf79f949647389fcf41d29243e73034e9794d83c998a3f",
+      "signature": "8fbfa0c727fab13f0fc66e3b1eb94fb9eb332a881c8649fbb4574674c3b8ed1168f40358326de49e32285f2d5a6e8aba2b97e158a3505846ee944359fcff5b68",
+      "valid": false
+    }
+  ]
+}

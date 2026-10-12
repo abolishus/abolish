@@ -6,6 +6,9 @@ const enUS = {
   lede: "To vote, open the ballot link for your election.",
   local:
     "This page loads nothing from any other site, and your choices leave this device only encrypted.",
+  sharedOriginTitle: "This address isn't safe for voting",
+  sharedOrigin:
+    "This copy of the ballot is served from an address other sites share, so they could read it. Open the ballot from abolish.us or another address listed by Abolish instead.",
 } as const;
 
 export type Messages = Record<keyof typeof enUS, string>;

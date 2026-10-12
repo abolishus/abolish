@@ -13,9 +13,11 @@ import { build, preview, type PreviewServer } from "vite-plus";
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "vite-plus/test";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
+const GATEWAY_PATH = "/ipfs/bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi/";
 
 let outDir: string;
 let server: PreviewServer;
+let gateway: PreviewServer;
 let origin: string;
 let browser: Browser;
 let page: Page;
@@ -43,12 +45,21 @@ beforeAll(async () => {
   const url = server.resolvedUrls?.local[0];
   if (url === undefined) throw new Error("the preview server has no local URL");
   origin = new URL(url).origin;
+  // The same bytes under a path gateway's /ipfs/<cid>/.
+  gateway = await preview({
+    root,
+    base: GATEWAY_PATH,
+    logLevel: "silent",
+    build: { outDir },
+    preview: { host: "127.0.0.1", port: 0, strictPort: false },
+  });
   browser = await chromium.launch();
 });
 
 afterAll(async () => {
   await browser?.close();
   await server?.close();
+  await gateway?.close();
   if (outDir !== undefined) await rm(outDir, { recursive: true, force: true });
 });
 
@@ -168,5 +179,15 @@ describe("the served ballot client", () => {
     });
     await expect.poll(() => violations).toContain("img-src https://example.com/pixel.gif");
     expect(foreignResponses).toEqual([]);
+  });
+
+  test("refuses to run from a path gateway, where other content shares its origin", async () => {
+    const url = gateway.resolvedUrls?.local[0];
+    if (url === undefined) throw new Error("the gateway server has no local URL");
+    expect(new URL(url).pathname).toBe(GATEWAY_PATH);
+    await page.goto(url);
+    await expect(page.getByRole("heading", { level: 1 }).textContent()).resolves.toBe(
+      "This address isn't safe for voting",
+    );
   });
 });

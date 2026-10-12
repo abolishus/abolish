@@ -8,6 +8,7 @@
 //   API's origin is added with the screens that fetch an election (P2-8).
 // - Trusted Types with no policy: any write of a string into a DOM sink that
 //   parses HTML or script throws, so an injected string can't become markup.
+//   The Web Worker (part 2) needs one named policy for its own script URL.
 // - base-uri and form-action 'none': no <base> can redirect relative URLs and
 //   no form can post a choice anywhere.
 // A <meta> policy can't set frame-ancestors, report-uri or sandbox; framing

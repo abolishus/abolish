@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, within } from "storybook/test";
 
-import { App } from "./app.tsx";
+import { App, SharedOrigin } from "./app.tsx";
 
 const meta = { component: App } satisfies Meta<typeof App>;
 
@@ -17,3 +17,12 @@ const play: Story["play"] = async ({ canvasElement }) => {
 export const Default: Story = { play };
 
 export const Dark: Story = { parameters: { theme: "dark" }, play };
+
+export const OnASharedOrigin: Story = {
+  render: () => <SharedOrigin />,
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByRole("heading", { level: 1 })).toHaveTextContent(
+      "This address isn't safe for voting",
+    );
+  },
+};

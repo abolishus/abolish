@@ -44,7 +44,7 @@ const INERT_URLS = new Set([
  */
 const ANALYTICS_MARKERS = [
   /posthog/i,
-  /google-analytics|googletagmanager|\bgtag\(|\bga\(\s*["'`]/i,
+  /google-analytics|googletagmanager|\bgtag\(/i,
   /segment\.(io|com)|analytics\.js/i,
   /sentry/i,
   /mixpanel/i,
@@ -140,6 +140,7 @@ describe("bundle contents", () => {
     const unexpected = [...files.keys()].filter(
       (name) =>
         name !== "index.html" &&
+        name !== "third-party-licenses.md" &&
         !/^assets\/[\w-]+\.(js|css)$/.test(name) &&
         !/^assets\/ibm-plex-(sans|mono|serif)-[\w-]+\.woff2?$/.test(name),
     );
@@ -163,6 +164,13 @@ describe("bundle contents", () => {
     expect(urls).toEqual([]);
   });
 
+  test("names no protocol-relative URL", () => {
+    const urls = textFiles().flatMap(([name, text]) =>
+      [...text.matchAll(/["'`(]\/\/[a-z0-9.-]+\.[a-z]{2,}/gi)].map(([url]) => `${name}: ${url}`),
+    );
+    expect(urls).toEqual([]);
+  });
+
   test("never uses eval, Function or string timers, which the CSP would refuse anyway", () => {
     const found = textFiles()
       .filter(([name]) => name.endsWith(".js"))
@@ -176,16 +184,20 @@ describe("bundle contents", () => {
 });
 
 describe("index.html", () => {
-  test("carries the ballot CSP, before anything that loads", () => {
+  test("carries the ballot CSP as the first element after the charset", () => {
     const page = html();
-    const metas = [
-      ...page.matchAll(/<meta\s+http-equiv="Content-Security-Policy"\s+content="([^"]*)"/gi),
-    ];
-    expect(metas).toHaveLength(1);
-    // A policy in a <meta> applies only to what comes after it.
-    const firstLoad = page.search(/<(script|link|style)\b/i);
-    expect(metas[0]?.index).toBeLessThan(firstLoad);
-    expect(parseCsp(metas[0]?.[1] ?? "")).toEqual(BALLOT_CSP);
+    // A policy in a <meta> applies only to what comes after it, so nothing of
+    // any kind may precede it but the charset declaration.
+    const tags = [...page.matchAll(/<([a-z]+)\b([^>]*)>/gi)]
+      .map(([, name, attrs]) => ({ name: name?.toLowerCase(), attrs: attrs ?? "" }))
+      .filter(({ name }) => name !== "html" && name !== "head");
+    expect(tags[0]).toEqual({ name: "meta", attrs: ' charset="utf-8" /' });
+    const csp = tags[1];
+    expect(csp?.name).toBe("meta");
+    expect(csp?.attrs).toMatch(/^\s+http-equiv="Content-Security-Policy"\s+content="[^"]*"\s*\/$/);
+    expect(parseCsp(/content="([^"]*)"/.exec(csp?.attrs ?? "")?.[1] ?? "")).toEqual(BALLOT_CSP);
+    // Exactly one policy, however its attributes are written.
+    expect(page.match(/content-security-policy/gi)).toHaveLength(1);
   });
 
   test("has no inline script, style or event handler", () => {

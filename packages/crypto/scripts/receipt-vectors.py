@@ -212,7 +212,6 @@ def main(out_dir):
                 "inclusion": [h(x) for x in f["inclusion"]],
                 "statement": h(stmt_of(f)),
                 "encoding": h(b),
-                # A fixed salt per vector; clients draw theirs from a CSPRNG.
             }
         )
 

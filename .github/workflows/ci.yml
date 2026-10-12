@@ -130,10 +130,6 @@ jobs:
       # packed bundles inline no node_modules code. See gated.ts.
       - name: Gated packages stay inside the gate
         run: vp node .github/tools/ci/src/cli.ts gated
-      # apps/ballot bundles no npm code but React's, no analytics SDK and no URL
-      # but inert ones, under the pinned CSP. See ballot.ts.
-      - name: The ballot client's bundle and CSP policy
-        run: vp node .github/tools/ci/src/cli.ts ballot
       - name: Vendored test vectors match their pinned sources
         run: vp node .github/tools/ci/src/cli.ts vectors-provenance
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -142,6 +138,22 @@ jobs:
           name: lockfile-diff
           path: lockfile-diff.md
           if-no-files-found: ignore
+
+  # apps/ballot bundles no npm code but React's, no analytics SDK and no URL
+  # but inert ones, under the pinned CSP (ballot.ts). Its own job: building it
+  # runs the PR's Vite config, which must not share a runner with the
+  # supply-chain steps (T-59).
+  ballot:
+    name: ballot
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      - name: The ballot client's bundle and CSP policy
+        run: vp node .github/tools/ci/src/cli.ts ballot
 
   check:
     name: check
@@ -285,7 +297,7 @@ jobs:
   ci:
     name: ci
     if: always()
-    needs: [plan, supply-chain, check, test, build, e2e, storybook]
+    needs: [plan, supply-chain, ballot, check, test, build, e2e, storybook]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -310,4 +322,4 @@ jobs:
       - name: All jobs passed or were not needed
         env:
           NEEDS: ${{ toJSON(needs) }}
-        run: python3 .github/scripts/require-jobs.py plan supply-chain check
+        run: python3 .github/scripts/require-jobs.py plan supply-chain ballot check

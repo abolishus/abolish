@@ -41,10 +41,10 @@ import {
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { build, parseSync, type Plugin } from "vite-plus";
+import { parseSync } from "vite-plus";
 import { parseDocument } from "yaml";
 import { findUnpinned } from "./actions-pinned.ts";
-import { distViolations, moduleViolations } from "./ballot.ts";
+import { distViolations, moduleViolations, packageOf } from "./ballot.ts";
 import {
   GATED_PACKAGES,
   changedFiles,
@@ -743,7 +743,7 @@ async function toolchain(): Promise<void> {
   console.log(`toolchain pins agree: Noir ${script.noir}, bb ${script.bb}`);
 }
 
-async function ballot(): Promise<void> {
+function ballot(): void {
   const dir = "apps/ballot";
   if (!existsSync(dir)) {
     console.log("apps/ballot doesn't exist yet: no ballot client to check");
@@ -754,23 +754,15 @@ async function ballot(): Promise<void> {
     console.error(`${dir}/package.json: missing`);
     process.exit(1);
   }
-  const outDir = mkdtempSync(join(tmpdir(), "abolish-ballot-"));
-  const ids: string[] = [];
-  const collect: Plugin = {
-    name: "abolish-ci-collect-module-ids",
-    buildEnd() {
-      ids.push(...this.getModuleIds());
-    },
-  };
+  const work = mkdtempSync(join(tmpdir(), "abolish-ballot-"));
+  const outDir = join(work, "dist");
+  const idsFile = join(work, "ids.json");
   try {
-    // The build `vp build` runs: production React, the app's own config.
-    process.env["NODE_ENV"] = "production";
-    await build({
-      root: resolve(dir),
-      mode: "production",
-      logLevel: "warn",
-      build: { outDir, emptyOutDir: true },
-      plugins: [collect],
+    // apps/ballot's Vite config is the PR's code: it runs only in this child,
+    // and everything below is judged here, in code it can't reach (T-59).
+    execFileSync(process.execPath, [".github/tools/ci/src/ballot-build.ts", outDir, idsFile], {
+      stdio: "inherit",
+      env: { ...process.env, NODE_ENV: "production" },
     });
     const files = new Map<string, string>();
     for (const entry of readdirSync(outDir, { recursive: true, withFileTypes: true }))
@@ -784,20 +776,24 @@ async function ballot(): Promise<void> {
           readFileSync(path, "latin1"),
         );
       }
-    const violations = [
-      ...(ids.some((id) => id.includes("react-dom"))
-        ? []
-        : ["apps/ballot: the build saw no react-dom, so the module check would be vacuous"]),
-      ...moduleViolations(ids, resolve(".")),
-      ...distViolations(files),
-    ];
+    const ids: unknown = JSON.parse(readFileSync(idsFile, "utf8"));
+    const violations =
+      Array.isArray(ids) && ids.every((id) => typeof id === "string")
+        ? [
+            ...(ids.some((id) => packageOf(id) === "react-dom")
+              ? []
+              : [
+                  "apps/ballot: the build reported no react-dom, so the module check would be vacuous",
+                ]),
+            ...moduleViolations(ids, resolve(".")),
+          ]
+        : ["apps/ballot: the build's module list isn't a list of strings"];
+    violations.push(...distViolations(files));
     for (const v of violations) console.error(v);
     if (violations.length > 0) process.exit(1);
-    console.log(
-      `apps/ballot: ${ids.length} modules and ${files.size} files pass the bundle and CSP policy`,
-    );
+    console.log(`apps/ballot: ${files.size} files pass the bundle and CSP policy`);
   } finally {
-    rmSync(outDir, { recursive: true, force: true });
+    rmSync(work, { recursive: true, force: true });
   }
 }
 
@@ -819,7 +815,7 @@ switch (command) {
     gated();
     break;
   case "ballot":
-    await ballot();
+    ballot();
     break;
   case "vectors-provenance":
     await vectorsProvenance();

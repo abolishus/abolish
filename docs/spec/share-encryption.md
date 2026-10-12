@@ -33,7 +33,7 @@ The public key, `kem_key`:
 
 A key failing the modulus check is a decode error (`non-canonical`): with it, `ByteEncode12(ByteDecode12(ek)) = ek`, so each key has one encoding (T-31, T-39).
 
-The secret key, `kem_secret`, is what a trustee node stores, never posts or sends, and destroys after the tally ([[0002-everlasting-privacy]], Consequences; P1-15 part 3; T-14):
+The same key also receives other trustees' summed shares in the tally, under separate tags ([[tally]], Summed-share message). The secret key, `kem_secret`, is what a trustee node stores, never posts or sends, and destroys after the tally ([[0002-everlasting-privacy]], Consequences; P1-15 part 3; T-14):
 
 | Field  | Type        | Meaning                                    |
 | ------ | ----------- | ------------------------------------------ |
@@ -194,7 +194,7 @@ Notes:
 ## Residuals
 
 - **Only computationally hiding in transit.** A recorded `ct_i` falls to an adversary who breaks both ML-KEM-768 and discrete logs in ristretto255 (A-11, T-15). A posted `ct_i` falls to discrete logs alone.
-- **Unaudited ML-KEM code.** `@noble/post-quantum` has no independent audit; testnets only until one exists ([[0002-everlasting-privacy]], Decision).
+- **Unaudited ML-KEM code.** `@noble/post-quantum` has no independent audit; testnets only until one exists ([[0002-everlasting-privacy]], Decision). The audit covers both compositions of this hybrid: share encryption here and the summed-share message of [[tally]].
 - **Not X-Wing.** The combiner follows X-Wing over another group and hash, so X-Wing's vectors and proofs don't apply directly ([[0016-share-kem-dh-group]], T-36).
 - **Intake is an open write.** Anyone can make a valid ballot, under any nullifier, with no credential, so anyone can make a trustee node verify proofs, decapsulate and store a ciphertext and its shares until the tally. Storage and work are bounded only by the node's rate limits and quotas, which a node operator must set (T-39, T-52, T-54).
 - **Not constant time.** ML-KEM's arithmetic in `@noble/post-quantum` is JavaScript and makes no constant-time claim; the scalar multiplications are `@noble/curves`' constant-time ladder. A timing attacker could learn about `dk` or `x`, and not only a local one: trustee intake decapsulates any well-formed ciphertext with a valid proof of knowledge next to a valid ballot core, and the proof doesn't cover `ct_M`, so it is a remote, unauthenticated decapsulation endpoint for a chosen `ct_M`. The mainnet audit must cover ML-KEM's timing, and intake needs rate limits (T-39, T-14).

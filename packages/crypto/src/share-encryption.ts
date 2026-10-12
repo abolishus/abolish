@@ -53,11 +53,11 @@ const { MAX_OPTIONS, MAX_TRUSTEES } = PARAMETERS;
 
 /** FIPS 203 Table 3, ML-KEM-768: encapsulation key, ciphertext and shared-secret sizes. */
 const MLKEM_EK_LEN = 1184;
-const MLKEM_CT_LEN = 1088;
+export const MLKEM_CT_LEN = 1088;
 const MLKEM_SEED_LEN = 64;
-const MLKEM_MSG_LEN = 32;
+export const MLKEM_MSG_LEN = 32;
 const MLKEM_Q = 3329;
-const AEAD_TAG_LEN = 16;
+export const AEAD_TAG_LEN = 16;
 
 /** The longest sealed shares: `SHARES` at `MAX_OPTIONS` (a 4-byte count, 64 bytes per option) and the tag. */
 const MAX_SEALED = 4 + 64 * MAX_OPTIONS + AEAD_TAG_LEN;
@@ -377,7 +377,8 @@ export function encryptShares(
   );
 }
 
-function nonZeroRandom(): bigint {
+/** A scalar uniform on 1 to ℓ − 1 from the CSPRNG. Internal: the package entry point doesn't export it. */
+export function nonZeroRandom(): bigint {
   let v = randomScalar();
   // 0 has probability about 2⁻²⁵²; drawing again keeps v uniform on 1 to ℓ − 1.
   while (v === 0n) v = randomScalar();

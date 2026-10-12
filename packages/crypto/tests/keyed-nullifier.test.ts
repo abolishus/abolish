@@ -88,8 +88,8 @@ interface Vectors {
       readonly sk: string;
       readonly s: string;
       readonly commitment: string;
-      readonly identitySecret: string;
-      readonly identityKey: string;
+      readonly signingSecret: string;
+      readonly signingKey: string;
     }[];
   };
   readonly queries: readonly {
@@ -141,7 +141,7 @@ const ascii = (s: string) => Uint8Array.from(s, (c) => c.charCodeAt(0));
 
 const key: NullifierKey = {
   keyId: hex(vectors.key.keyId),
-  identityKeys: vectors.key.seats.map((s) => hex(s.identityKey)),
+  signingKeys: vectors.key.seats.map((s) => hex(s.signingKey)),
   commitments: vectors.key.seats.map((s) => point(s.commitment)),
   threshold: vectors.key.k,
 };
@@ -244,7 +244,7 @@ describe("keyed-nullifier.json", () => {
       key,
       query(a.query),
       { seat: a.seat, sk: BigInt(s.sk), s: BigInt(s.s) },
-      hex(s.identitySecret),
+      hex(s.signingSecret),
       BigInt(a.w1),
       BigInt(a.w2),
     );
@@ -303,7 +303,7 @@ describe("keyed nullifier", () => {
               key,
               q,
               { seat, sk: BigInt(s.sk), s: BigInt(s.s) },
-              hex(s.identitySecret),
+              hex(s.signingSecret),
             );
             const checked = checkNullifierAnswer(key, q, encodeNullifierAnswer(a));
             expect(checked.ok).toBe(true);
@@ -359,15 +359,15 @@ describe("keyed nullifier", () => {
     expect(() => encode(bjjPointOrIdentity, gEip)).toThrow(EncodeError);
   });
 
-  test("evaluation refuses a share its commitment doesn't open, and another seat's identity key", () => {
+  test("evaluation refuses a share its commitment doesn't open, and another seat's signing key", () => {
     const s = seatOf(2);
     const q = query("query-0");
     const share = { seat: 2, sk: BigInt(s.sk), s: BigInt(s.s) };
     expect(() =>
-      evaluate(key, q, { ...share, sk: (share.sk + 1n) % BJJ_ORDER }, hex(s.identitySecret)),
+      evaluate(key, q, { ...share, sk: (share.sk + 1n) % BJJ_ORDER }, hex(s.signingSecret)),
     ).toThrow(RangeError);
-    expect(() => evaluate(key, q, share, hex(seatOf(3).identitySecret))).toThrow(RangeError);
-    expect(identityKey(hex(s.identitySecret))).toEqual(key.identityKeys[1]);
+    expect(() => evaluate(key, q, share, hex(seatOf(3).signingSecret))).toThrow(RangeError);
+    expect(identityKey(hex(s.signingSecret))).toEqual(key.signingKeys[1]);
   });
 
   test("combination refuses too few, repeated or mismatched answers", () => {
@@ -386,6 +386,47 @@ describe("keyed nullifier", () => {
     expect(() => combineAnswers({ ...key, threshold: 2 }, [a1, a2])).not.toThrow();
     expect(() => combineAnswers(key, [a1, a2])).toThrow(RangeError);
     expect(() => combineAnswers({ ...key, threshold: 6 }, [a1, a2, a3])).toThrow(RangeError);
+  });
+
+  test("a seat the key doesn't qualify fails answer-seat, and can't evaluate", () => {
+    const a = vectors.answers.find((x) => x.id === "query-0-seat-2");
+    const unqualified: NullifierKey = {
+      ...key,
+      signingKeys: key.signingKeys.map((k, i) => (i === 1 ? null : k)),
+      commitments: key.commitments.map((c, i) => (i === 1 ? null : c)),
+    };
+    expect(checkNullifierAnswer(unqualified, query("query-0"), hex(a?.record ?? ""))).toEqual({
+      ok: false,
+      code: "answer-seat",
+    });
+    const s = seatOf(2);
+    expect(() =>
+      evaluate(
+        unqualified,
+        query("query-0"),
+        { seat: 2, sk: BigInt(s.sk), s: BigInt(s.s) },
+        hex(s.signingSecret),
+      ),
+    ).toThrow(RangeError);
+    // A key must mark a seat unqualified in both lists, and keep k qualified seats.
+    expect(() =>
+      checkNullifierAnswer(
+        { ...key, signingKeys: key.signingKeys.map((k, i) => (i === 1 ? null : k)) },
+        query("query-0"),
+        hex(a?.record ?? ""),
+      ),
+    ).toThrow(RangeError);
+    expect(() =>
+      checkNullifierAnswer(
+        {
+          ...key,
+          signingKeys: key.signingKeys.map((k, i) => (i < 3 ? null : k)),
+          commitments: key.commitments.map((c, i) => (i < 3 ? null : c)),
+        },
+        query("query-0"),
+        hex(a?.record ?? ""),
+      ),
+    ).toThrow(RangeError);
   });
 
   test("the Fiat–Shamir (Baby Jubjub) challenge takes only its own tags", () => {

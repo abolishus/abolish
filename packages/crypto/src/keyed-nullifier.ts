@@ -301,14 +301,20 @@ export function nullifierAnswerMessage(fields: NullifierAnswerFields): Uint8Arra
   return w.finish();
 }
 
-/** The Tier 2 key as a client or attester has it from the key's checked transcript. */
+/**
+ * The Tier 2 key as a client or attester has it from the key's checked
+ * transcript (`checkNullifierKeyTranscript`, docs/spec/nullifier-key.md).
+ */
 export interface NullifierKey {
-  /** `key_id`, 32 bytes (part 2b-2). */
+  /** `key_id`, 32 bytes: the hash of the key's transcript. */
   readonly keyId: Uint8Array;
-  /** The panel's identity keys, seat `i` at index `i − 1`; `n` is the length. */
-  readonly identityKeys: readonly Uint8Array[];
-  /** Each seat's share commitment `C_i`, at index `i − 1`. */
-  readonly commitments: readonly BjjPoint[];
+  /**
+   * Each seat's registration signing key, seat `i` at index `i − 1`, or
+   * `null` for a seat that isn't qualified; `n` is the length.
+   */
+  readonly signingKeys: readonly (Uint8Array | null)[];
+  /** Each qualified seat's share commitment `C_i`, at index `i − 1`; `null` where the key is. */
+  readonly commitments: readonly (BjjPoint | null)[];
   /**
    * `k`, the sharing's threshold, from the transcript. Never from a client:
    * fewer answers combine to a `Z` the client can compute, and so to a second
@@ -358,14 +364,22 @@ function evaluationChallenge(
 
 /** Validates the key once, so a malformed one is an explicit error, never a result code. */
 function checkKey(key: NullifierKey): number {
-  const n = key.identityKeys.length;
+  const n = key.signingKeys.length;
   if (n < 1 || n > MAX_TRUSTEES || key.commitments.length !== n)
     throw new RangeError("key: needs 1 to MAX_TRUSTEES seats, each with its commitment");
   if (!Number.isInteger(key.threshold) || key.threshold < 1 || key.threshold > n)
     throw new RangeError("key: the threshold must be from 1 to n");
   if (!(key.keyId instanceof Uint8Array) || key.keyId.length !== 32)
     throw new RangeError("key: keyId must be 32 bytes");
-  for (const c of key.commitments) checkedPoint(c, "key: commitment");
+  let qualified = 0;
+  for (const [i, c] of key.commitments.entries()) {
+    if ((c === null) !== (key.signingKeys[i] === null))
+      throw new RangeError("key: a seat has a commitment without a signing key, or the reverse");
+    if (c === null) continue;
+    checkedPoint(c, "key: commitment");
+    qualified++;
+  }
+  if (qualified < key.threshold) throw new RangeError("key: fewer qualified seats than k");
   return n;
 }
 
@@ -382,7 +396,7 @@ export function evaluateWith(
   key: NullifierKey,
   query: NullifierQuery,
   share: SeatShare,
-  identitySecret: Uint8Array,
+  signingSecret: Uint8Array,
   w1: bigint,
   w2: bigint,
 ): NullifierAnswer {
@@ -392,7 +406,11 @@ export function evaluateWith(
     throw new RangeError("evaluate: the share must be scalars below l, sk non-zero");
   if (!isNonZeroScalar(w1) || !isNonZeroScalar(w2))
     throw new RangeError("evaluate: nonces must be scalars from 1 to l − 1");
-  const ci = checkedPoint(key.commitments[share.seat - 1] as BjjPoint, "evaluate: C_i");
+  const commitment = key.commitments[share.seat - 1];
+  const signingKey = key.signingKeys[share.seat - 1];
+  if (commitment == null || signingKey == null)
+    throw new RangeError("evaluate: the seat isn't qualified in the key");
+  const ci = checkedPoint(commitment, "evaluate: C_i");
   // A seat that answers from a share its commitment doesn't open would sign a
   // wrong answer and be attributed for it (T-29).
   // Constant-time multiplication for the secret s_i too: with C_i, it gives
@@ -415,16 +433,9 @@ export function evaluateWith(
     z1: mod(w1 + c * share.sk, BJJ_ORDER),
     z2: mod(w2 + c * share.s, BJJ_ORDER),
   };
-  const signature = signStatement(identitySecret, TAG, nullifierAnswerMessage(fields));
-  if (
-    !verifyStatement(
-      key.identityKeys[share.seat - 1] as Uint8Array,
-      TAG,
-      nullifierAnswerMessage(fields),
-      signature,
-    )
-  )
-    throw new RangeError("evaluate: the identity secret isn't the seat's");
+  const signature = signStatement(signingSecret, TAG, nullifierAnswerMessage(fields));
+  if (!verifyStatement(signingKey, TAG, nullifierAnswerMessage(fields), signature))
+    throw new RangeError("evaluate: the signing secret isn't the seat's registration key");
   return { ...fields, signature };
 }
 
@@ -442,7 +453,7 @@ function randomNonZeroScalar(): bigint {
  * Seat `share.seat`'s answer to a query whose proof it has checked
  * (docs/spec/keyed-nullifier.md, Evaluation): `Z_i = sk_i · B`, a proof of
  * knowledge of an opening of `C_i` whose first half is `log_B Z_i`, with fresh
- * nonces from the CSPRNG, signed with the seat's identity key. A seat MUST
+ * nonces from the CSPRNG, signed with the seat's registration signing key. A seat MUST
  * check the query proof first: without it, answers are a static
  * Diffie–Hellman oracle (Security notes).
  */
@@ -450,13 +461,13 @@ export function evaluate(
   key: NullifierKey,
   query: NullifierQuery,
   share: SeatShare,
-  identitySecret: Uint8Array,
+  signingSecret: Uint8Array,
 ): NullifierAnswer {
   return evaluateWith(
     key,
     query,
     share,
-    identitySecret,
+    signingSecret,
     randomNonZeroScalar(),
     randomNonZeroScalar(),
   );
@@ -496,11 +507,11 @@ export function checkNullifierAnswer(
   if (!sameBytes(a.key_id, key.keyId)) return { ok: false, code: "answer-key" };
   if (!sameBytes(a.query_hash, query.queryHash) || !a.b.equals(query.b))
     return { ok: false, code: "answer-query" };
-  if (a.seat < 1 || a.seat > n) return { ok: false, code: "answer-seat" };
-  const message = nullifierAnswerMessage(a);
-  if (!verifyStatement(key.identityKeys[a.seat - 1] as Uint8Array, TAG, message, a.signature))
+  const signingKey = a.seat >= 1 && a.seat <= n ? key.signingKeys[a.seat - 1] : null;
+  const ci = a.seat >= 1 && a.seat <= n ? key.commitments[a.seat - 1] : null;
+  if (signingKey == null || ci == null) return { ok: false, code: "answer-seat" };
+  if (!verifyStatement(signingKey, TAG, nullifierAnswerMessage(a), a.signature))
     return { ok: false, code: "answer-signature" };
-  const ci = key.commitments[a.seat - 1] as BjjPoint;
   // Public values only: the recomputed prover commitments.
   const t1 = a.b.multiplyUnsafe(a.z1).subtract(a.z.multiplyUnsafe(a.c));
   const t2 = BJJ_G.multiplyUnsafe(a.z1)

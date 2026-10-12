@@ -4,7 +4,7 @@ A Tier 2 member's nullifier `N` is keyed by the trustees: the 2HashDH OPRF `N = 
 
 What this page doesn't yet specify is P3-4 part 2b's later steps, and nothing registers at Tier 2 through the panel until they are:
 
-- **2b-2:** the key's sharing and resharing transcripts (which dealers qualify, and so the share commitments below), the key identifier `key_id`, and the registration KEM keys.
+- **2b-2:** the key's sharing transcript, which dealers qualify (and so the share commitments below), `key_id` and the registration keys, are specified in [[nullifier-key]] (part 2b-2a); resharing is part 2b-2b.
 - **2b-3:** `H1` and `H2`, the query and output records and the statements of their circuits (and so `query_hash`), with the diff of TACEO's gadgets against the audited code ([[0022-tier2-keyed-nullifier]], Amendment).
 - **2b-4:** the attestation's group position and quorum, the delivery of `N` to every seat, and [[verifier]] 2.4's count of attested additions.
 
@@ -92,7 +92,7 @@ J.y = 10553488570390859937420497111327893599154543854763640328936151110745772360
 
 ## Share commitments
 
-Seats are numbered `1` to `n` as in [[trustee-identity]], with `n ≤ MAX_TRUSTEES` ([[parameters]]) and `1 ≤ k ≤ n`. The key's sharing transcript (part 2b-2) gives, for each qualified dealer `d`, the coefficient commitments
+Seats are numbered `1` to `n` as in [[trustee-identity]], with `n ≤ MAX_TRUSTEES` ([[parameters]]) and `1 ≤ k ≤ n`. The key's transcript ([[nullifier-key]]) gives, for each qualified dealer `d`, the coefficient commitments
 
 ```
 A_{d,j} = a_{d,j} · G + b_{d,j} · J,    j = 0, …, k − 1
@@ -106,11 +106,11 @@ C_i = Σ_{d ∈ QUAL} Σ_{j=0}^{k−1} (i^j mod l) · A_{d,j}
 
 and its secret share is the pair `(sk_i, s_i) = (Σ_d f_d(i), Σ_d f'_d(i)) mod l`, so `C_i = sk_i · G + s_i · J`. The OPRF key is `sk = Σ_d f_d(0)`, which no one holds. Anyone recomputes `C_i` from the transcript; a client and an attester take it from the transcript they checked, never from an answer. `C_i` is perfectly hiding, so nothing published fixes `sk` even to an unbounded adversary; Pedersen binding, which rests on no one knowing `log_G J`, is what makes `sk_i` the only first half of an opening a seat can prove knowledge of (T-15, T-40).
 
-`C_i` is the identity only if `sk_i · G = −s_i · J`, which happens with negligible probability for an honest sharing; part 2b-2's transcript check rejects it.
+`C_i` is the identity only if `sk_i · G = −s_i · J`, which happens with negligible probability for an honest sharing; the transcript check rejects it ([[nullifier-key]], `key-commitment`).
 
 ## Evaluation
 
-A query names the key by `key_id` (32 bytes, part 2b-2), is named itself by `query_hash` (32 bytes, part 2b-3) and carries the blinded point `B = r · H1(x)`, a `bjj-point` that isn't the identity. A seat answers only after checking the query proof (part 2b-3), and never for a `B` it can't decode. Seat `i` answers with
+A query names the key by `key_id` (32 bytes, [[nullifier-key]], Transcript), is named itself by `query_hash` (32 bytes, part 2b-3) and carries the blinded point `B = r · H1(x)`, a `bjj-point` that isn't the identity. A seat answers only after checking the query proof (part 2b-3), and never for a `B` it can't decode. Seat `i` answers with
 
 ```
 Z_i = sk_i · B
@@ -142,13 +142,13 @@ and accepts if the recomputed `c` equals the proof's. Every point is a `bjj-poin
 
 ## Answer record
 
-A seat's answer is a record, never on the board, never in the archive and never pinned by a profile: the Tier 2 key fixes its version (part 2b-2). It travels to the client encrypted (part 2b-2's registration KEM), and the client forwards the `k` it combined to every attester (part 2b-4).
+A seat's answer is a record, never on the board, never in the archive and never pinned by a profile: the Tier 2 key fixes its version (version 1 of the key transcript, [[nullifier-key]], uses version 1). It travels to the client encrypted to a fresh client key (part 2b-3), and the client forwards the `k` it combined to every attester (part 2b-4).
 
 Record type `0x0010`, version 1:
 
 | Field        | Type         | Meaning                                                                 |
 | ------------ | ------------ | ----------------------------------------------------------------------- |
-| `key_id`     | `bytes[32]`  | The key the seat answered under (part 2b-2)                             |
+| `key_id`     | `bytes[32]`  | The key the seat answered under ([[nullifier-key]])                     |
 | `query_hash` | `bytes[32]`  | The query it answered (part 2b-3)                                       |
 | `seat`       | `u8`         | The answering seat `i`, `1 ≤ i ≤ n`                                     |
 | `b`          | `bjj-point`  | `B`, the query's blinded point. Never the identity                      |
@@ -164,20 +164,20 @@ The record is 356 bytes. The signature is [[trustee-identity]]'s scheme under `a
 m = u16(0x0010) ‖ u8(1) ‖ key_id ‖ query_hash ‖ u8(seat) ‖ encode(b) ‖ encode(z) ‖ encode(c) ‖ encode(z1) ‖ encode(z2)
 ```
 
-the record without its signature, so a later version can't reuse a version 1 signature (T-31). It is made with the seat's **identity key**, not a per-election key: registration happens between elections, when no per-election key exists, and the identity key is the one every client and attester already pins ([[trustee-identity]], Which key signs what). The signature makes a wrong answer attributable to its seat (T-29). The cost: the identity key, until now needed only at ceremonies, signs automatically in answer to client queries, so it can't be held cold or behind a person's approval between ceremonies, and a compromised node holds a signing oracle for its seat (T-37). Part 2b-2 decides whether answers move to a registration signing key that the identity key certifies in the key's transcript.
+the record without its signature, so a later version can't reuse a version 1 signature (T-31). It is made with the seat's **registration signing key**, which the seat registers in the key's transcript under its identity key ([[nullifier-key]], Round 1), not with a per-election key: registration happens between elections, when no per-election key exists. Nor with the identity key, which would then sign automatically in answer to client queries and couldn't be held cold or behind a person's approval between ceremonies (T-37). The signature makes a wrong answer attributable to its seat (T-29). A stolen registration signing key signs answers attributed to its seat, which fail `answer-proof` without the share ([[nullifier-key]], Security notes).
 
 ## Answer check
 
-A client checks every answer before combining, and every attester checks each of the `k` answers a client forwards before recombining (part 2b-4). Each takes `key_id`, the panel's identity keys and `C_i` from the key's transcript it checked, and `query_hash` and `B` from the query it made or received, never from the answer. In this order, the first failure is the result:
+A client checks every answer before combining, and every attester checks each of the `k` answers a client forwards before recombining (part 2b-4). Each takes `key_id`, `k`, each qualified seat's registration signing key and `C_i` from the key's transcript it checked ([[nullifier-key]], Transcript check), and `query_hash` and `B` from the query it made or received, never from the answer. In this order, the first failure is the result:
 
-| Code               | Check                                                                                   |
-| ------------------ | --------------------------------------------------------------------------------------- |
-| decode codes       | The answer decodes strictly as version 1 ([[notation]], Strict decoding).               |
-| `answer-key`       | `key_id` is the key's.                                                                  |
-| `answer-query`     | `query_hash` and `b` are the query's.                                                   |
-| `answer-seat`      | `seat` is a seat of the key's panel, `1 ≤ seat ≤ n`.                                    |
-| `answer-signature` | `signature` verifies under that seat's identity key ([[trustee-identity]], Signatures). |
-| `answer-proof`     | The evaluation proof verifies against `C_seat`, `b` and `z` (Evaluation, above).        |
+| Code               | Check                                                                                               |
+| ------------------ | --------------------------------------------------------------------------------------------------- |
+| decode codes       | The answer decodes strictly as version 1 ([[notation]], Strict decoding).                           |
+| `answer-key`       | `key_id` is the key's.                                                                              |
+| `answer-query`     | `query_hash` and `b` are the query's.                                                               |
+| `answer-seat`      | `seat` is a qualified seat of the key ([[nullifier-key]], Transcript check).                        |
+| `answer-signature` | `signature` verifies under that seat's registration signing key ([[trustee-identity]], Signatures). |
+| `answer-proof`     | The evaluation proof verifies against `C_seat`, `b` and `z` (Evaluation, above).                    |
 
 The signature is checked before the proof, so an answer that fails only `answer-proof` is a wrong answer the seat signed, which is attributed to it (T-29). An answer that fails an earlier check is attributed to no one: anyone can relay garbage.
 
@@ -204,7 +204,7 @@ with `r⁻¹` the inverse modulo `l`, and derives `N = H2(x, U)` (part 2b-3). `U
 
 - **The query proof is what stops a static Diffie–Hellman oracle.** Each answer is `sk_i` times a point the client sent. A seat that answered any well-formed `B` would let a client chain queries (`B`, then `sk_i · B` as its next `B`, and so on) and run Cheon's attack (EUROCRYPT 2006). The small factors of `l − 1` are `2⁴ · 3 · 5 · 11² · 17 · 967` (about 2²⁸·⁸ in all, by trial division below 2·10⁶) and of `l + 1` are `2 · 19 · 31 · 67 · 641`, so that attack would cut about 14 bits from `sk_i` with about 2²⁹ chained queries. The query proof (part 2b-3) shows the client knows `r` with `B = r · H1(x)`, and `sk_i · B = (r · sk_i) · H1(x)` can't be proven as a next query without knowing `r · sk_i`. So a seat MUST check the query proof before it answers (part 2b-3 makes `packages/crypto`'s evaluation take only a query whose proof has been checked; until then its `evaluate` answers any well-formed `B`, and nothing calls it outside tests), and the panel's published query counts (part 2b-4) bound what a client with many valid proofs gets.
 - **Threshold one-more Diffie–Hellman.** Fewer than `k` seats can't evaluate, and `q` queries give no more than `q` evaluations, under the threshold one-more Diffie–Hellman assumption in the random-oracle model (TOPPSS; [[0022-tier2-keyed-nullifier]], Pros).
-- **A discrete-log break gives the shares.** Any recorded `(B, Z_i)` gives `sk_i` to an adversary who solves discrete logs in `𝔾`, and `k` of them give `sk` (A-11, T-15). That is [[0022-tier2-keyed-nullifier]]'s second limit; encrypting queries and answers in transit (part 2b-2) narrows it to clients and seats.
+- **A discrete-log break gives the shares.** Any recorded `(B, Z_i)` gives `sk_i` to an adversary who solves discrete logs in `𝔾`, and `k` of them give `sk` (A-11, T-15). That is [[0022-tier2-keyed-nullifier]]'s second limit; encrypting queries and answers in transit (part 2b-3, to the registration KEM keys of [[nullifier-key]]) narrows it to clients and seats.
 - **Not constant time everywhere.** `@noble/curves`' scalar multiplication is constant time, and `packages/crypto` uses it for every secret (`sk_i`, `s_i`, `w_1`, `w_2`, `r⁻¹`): `s_i` with the public `C_i` gives `sk_i · G`, which the commitment's hiding must keep. `sk_i`, `s_i`, `w_1` and `w_2` are `bigint`s, which JavaScript can't zeroise, and the response arithmetic is plain `bigint` arithmetic. A seat's node runs on hardware it controls; the mainnet audit covers it (T-14).
 
 ## Test vectors

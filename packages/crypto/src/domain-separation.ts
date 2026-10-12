@@ -85,6 +85,31 @@ export const TAG_REGISTRY = Object.freeze(
       },
       { tag: "abolish/v1/sig/nullifier-answer", primitive: "signature", status: "specified" },
       { tag: "abolish/v1/ballot-core", primitive: "plain", status: "specified" },
+      {
+        tag: "abolish/v1/keyed-nullifier/key-context",
+        primitive: "plain",
+        status: "specified",
+      },
+      { tag: "abolish/v1/keyed-nullifier/key-round", primitive: "plain", status: "specified" },
+      { tag: "abolish/v1/keyed-nullifier/key", primitive: "plain", status: "specified" },
+      { tag: "abolish/v1/keyed-nullifier/key-share", primitive: "plain", status: "specified" },
+      { tag: "abolish/v1/kem/nullifier-key-share", primitive: "kdf-aead", status: "specified" },
+      {
+        tag: "abolish/v1/kem/nullifier-key-share-aad",
+        primitive: "kdf-aead",
+        status: "specified",
+      },
+      { tag: "abolish/v1/sig/nullifier-key-message", primitive: "signature", status: "specified" },
+      {
+        tag: "abolish/v1/sig/nullifier-key-signing-key",
+        primitive: "signature",
+        status: "specified",
+      },
+      {
+        tag: "abolish/v1/sig/nullifier-key-approval",
+        primitive: "signature",
+        status: "specified",
+      },
     ] as const
   ).map((e) => Object.freeze(e)),
 );

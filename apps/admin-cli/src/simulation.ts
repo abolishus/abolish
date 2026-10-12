@@ -15,14 +15,13 @@ function scenarioOf(values: Values): Scenario {
   const file = values["file"];
   if ((inline === undefined) === (file === undefined))
     throw new UsageError("give exactly one of --scenario <json> or --file <path>");
-  let text = String(inline);
-  // parseArgs gives a string option's value as a string.
-  if (typeof file === "string")
-    try {
-      text = readFileSync(file, "utf8");
-    } catch {
-      throw new UsageError("--file can't be read");
-    }
+  let text: string;
+  try {
+    // parseArgs gives a string option's value as a string.
+    text = typeof file === "string" ? readFileSync(file, "utf8") : String(inline);
+  } catch {
+    throw new UsageError("--file can't be read");
+  }
   let json: unknown;
   try {
     json = JSON.parse(text);

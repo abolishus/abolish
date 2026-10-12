@@ -72,6 +72,10 @@ describe("simulation", { timeout: 60_000 }, () => {
       (await cli("simulation", "plan", "--scenario", "{}", "--file", "/nonexistent")).code,
     ).toBe(2);
     expect((await cli("simulation", "plan", "--file", "/nonexistent")).code).toBe(2);
+    // An inherited property is no command.
+    const inherited = await cli("simulation", "constructor");
+    expect(inherited.code).toBe(2);
+    expect(inherited.err[0]).toMatchObject({ detail: "unknown command" });
   });
 
   test("run prints a report that differs from its plan, then refuses with simulation-mismatch", async () => {

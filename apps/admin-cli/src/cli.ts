@@ -57,7 +57,12 @@ export function usage(): string {
  */
 export async function run(argv: readonly string[], connect: () => Sql, io: CliIo): Promise<number> {
   const [group, name, ...rest] = argv;
-  const command = group === undefined || name === undefined ? undefined : GROUPS[group]?.[name];
+  // Own properties only, so a name such as `constructor` is an unknown command.
+  const commands = group !== undefined && Object.hasOwn(GROUPS, group) ? GROUPS[group] : undefined;
+  const command =
+    commands !== undefined && name !== undefined && Object.hasOwn(commands, name)
+      ? commands[name]
+      : undefined;
   try {
     if (command === undefined) throw new UsageError("unknown command");
     let parsed;

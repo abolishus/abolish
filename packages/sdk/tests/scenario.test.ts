@@ -111,10 +111,8 @@ describe("parseScenario", () => {
     Object.assign(t, { panel: 5, threshold: 3 });
     expect(parseScenario({ ...valid, trustees: t })).toMatchObject({ ok: true });
     expect(refusal({ ...valid, tiers: Object.create({ "0": 1 }) })).toBe("$.tiers");
-    const inherited = Object.assign(Object.create({ outage: { from: 0, to: 1 } }), valid, {
-      outage: undefined,
-    });
-    delete inherited.outage;
+    const { outage: _, ...noOutage } = valid;
+    const inherited = Object.assign(Object.create({ outage: { from: 0, to: 1 } }), noOutage);
     expect(parseScenario(inherited)).toMatchObject({ ok: true, scenario: { outage: null } });
   });
 
@@ -161,6 +159,8 @@ describe("parseScenario", () => {
     expect(t({ faulty: [1], offline: [1] })).toBe("$.trustees.faulty");
     expect(t({ offline: 2 })).toBe("$.trustees.offline");
     expect(t({ offline: null })).toBe("$.trustees.offline");
+    // oxlint-disable-next-line no-sparse-arrays -- the hole is the input under test
+    expect(t({ offline: [1, , 3] })).toBe("$.trustees.offline[1]");
     expect(t({ faulty: null })).toBe("$.trustees.faulty");
   });
 

@@ -95,7 +95,8 @@ function fraction(v: unknown, path: string): number {
 
 function seats(v: unknown, path: string, panel: number): number[] {
   if (!Array.isArray(v)) throw new Refusal(path, "expected an array of seats");
-  const out = v.map((s, i) => integer(s, `${path}[${i}]`, 1, panel));
+  // Array.from visits holes too, so a sparse array is refused rather than skipped.
+  const out = Array.from(v, (s: unknown, i) => integer(s, `${path}[${i}]`, 1, panel));
   for (let i = 1; i < out.length; i++)
     if ((out[i - 1] as number) >= (out[i] as number))
       throw new Refusal(path, "seats are distinct and ascending");

@@ -29,7 +29,7 @@ A malformed scenario is a usage error naming the field (exit 2). A run whose cel
 
 ## Running
 
-From `apps/admin-cli`: `vp node src/main.ts moderation queue` with `DATABASE_URL` (a user granted `abolish_app`, never the owner). Only the moderation commands read it.
+From `apps/admin-cli`: `vp node src/main.ts moderation queue` with `DATABASE_URL` (a user granted `abolish_app`, never the owner). Only the moderation commands read it; a missing or malformed one is refused as `{ "error": "database-url" }` (exit 1).
 
 ## Tests
 

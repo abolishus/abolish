@@ -11,6 +11,9 @@
 //                           match the manifest and the file
 //   gated                   enforce the dependency, import, symlink and bundle policy
 //                           of the crypto-review-gated packages (see gated.ts)
+//   ballot                  build apps/ballot and enforce its bundle and CSP policy:
+//                           no npm runtime code but React's, no analytics SDK, no URL
+//                           but inert ones, the pinned CSP (see ballot.ts)
 //   toolchain               fail unless install-toolchain.sh, the catalog, the lockfile
 //                           and AGENTS.md pin one Noir and one bb, and bbup's
 //                           bb-versions.json (pinned commit and next) maps one to the other
@@ -38,9 +41,10 @@ import {
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { parseSync } from "vite-plus";
+import { build, parseSync, type Plugin } from "vite-plus";
 import { parseDocument } from "yaml";
 import { findUnpinned } from "./actions-pinned.ts";
+import { distViolations, moduleViolations } from "./ballot.ts";
 import {
   GATED_PACKAGES,
   changedFiles,
@@ -739,6 +743,64 @@ async function toolchain(): Promise<void> {
   console.log(`toolchain pins agree: Noir ${script.noir}, bb ${script.bb}`);
 }
 
+async function ballot(): Promise<void> {
+  const dir = "apps/ballot";
+  if (!existsSync(dir)) {
+    console.log("apps/ballot doesn't exist yet: no ballot client to check");
+    return;
+  }
+  // A ballot directory is the client or nothing: it mustn't pass vacuously.
+  if (!existsSync(join(dir, "package.json"))) {
+    console.error(`${dir}/package.json: missing`);
+    process.exit(1);
+  }
+  const outDir = mkdtempSync(join(tmpdir(), "abolish-ballot-"));
+  const ids: string[] = [];
+  const collect: Plugin = {
+    name: "abolish-ci-collect-module-ids",
+    buildEnd() {
+      ids.push(...this.getModuleIds());
+    },
+  };
+  try {
+    // The build `vp build` runs: production React, the app's own config.
+    process.env["NODE_ENV"] = "production";
+    await build({
+      root: resolve(dir),
+      mode: "production",
+      logLevel: "warn",
+      build: { outDir, emptyOutDir: true },
+      plugins: [collect],
+    });
+    const files = new Map<string, string>();
+    for (const entry of readdirSync(outDir, { recursive: true, withFileTypes: true }))
+      if (entry.isFile()) {
+        const path = join(entry.parentPath, entry.name);
+        files.set(
+          path
+            .slice(outDir.length + 1)
+            .split("\\")
+            .join("/"),
+          readFileSync(path, "latin1"),
+        );
+      }
+    const violations = [
+      ...(ids.some((id) => id.includes("react-dom"))
+        ? []
+        : ["apps/ballot: the build saw no react-dom, so the module check would be vacuous"]),
+      ...moduleViolations(ids, resolve(".")),
+      ...distViolations(files),
+    ];
+    for (const v of violations) console.error(v);
+    if (violations.length > 0) process.exit(1);
+    console.log(
+      `apps/ballot: ${ids.length} modules and ${files.size} files pass the bundle and CSP policy`,
+    );
+  } finally {
+    rmSync(outDir, { recursive: true, force: true });
+  }
+}
+
 const command = process.argv[2];
 switch (command) {
   case "affected":
@@ -755,6 +817,9 @@ switch (command) {
     break;
   case "gated":
     gated();
+    break;
+  case "ballot":
+    await ballot();
     break;
   case "vectors-provenance":
     await vectorsProvenance();

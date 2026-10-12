@@ -17,4 +17,7 @@ export const PARAMETERS = Object.freeze({
   // Seconds after t_D; the destruction window of tally-opening version 1.
   DESTRUCTION_WINDOW: 86_400,
   DISPLAY_TEXT_SALT_LEN: 32,
+  // Constants of the group registry's deployment (docs/spec/vouching.md).
+  VOUCH_K: 3,
+  VOUCH_SLOTS: 12,
 } as const);

@@ -14,6 +14,7 @@ One JSON file per spec section or record type, named after it (`primitives.json`
 | `membership.json`          | The nullifier scope, the Semaphore field mapping `F` and the protocol-wide tree depth ([[membership]])                                                                                                                                            |
 | `tier-tree.json`           | circomlib's `Poseidon2`, the empty-subtree chain, tier trees replayed from additions and removals (forbidden and stray ones included), roots and paths ([[membership]], Tier tree)                                                                |
 | `membership-proof.json`    | The pinned depth-32 key and its hash, real Semaphore proofs with snarkjs's verdicts, tampered proofs and signals, and rejected encodings ([[membership]], Verification key, Proof encoding)                                                       |
+| `vouch.json`               | Tier 1 vouches: scopes, messages, a Tier 2 tier tree, and Tier 1 addition records with real Semaphore proofs, honest and refused by each check, and rejected encodings ([[vouching]])                                                             |
 | `revoting.json`            | The membership message `M` and `F(M)`, and the selection of counted ballots, ties and repeats included ([[revoting]])                                                                                                                             |
 | `hash.json`                | `H`, `HashToScalar` under each Fiat–Shamir tag, and `h`, with intermediate bytes ([[group]])                                                                                                                                                      |
 | `election-definition.json` | Election definition version 1: codec, definition hash, self-pin and well-formedness ([[election-definition]])                                                                                                                                     |
@@ -174,6 +175,18 @@ Type descriptors:
 - `fieldMapping`: `scopeBytes` (`S_g` over `definitionHash`, the `tier` and the `root`) with `scope` (`F(S_g)`), or `messageBytes` with `message` (`F(M)`), all from Semaphore's own `hash`.
 - `proofs`: each has `name`, `note`, `proof` (256 bytes, hex), `signals` (`root`, `nullifier`, `message`, `scope`, decimal, as given to the verifier), `snarkjs` (snarkjs's verdict), `valid` (the spec's) and, when invalid, `reason`: `proof` (the pairing check fails), `signal` (a signal at or above `r`) or `root` (`ρ = 0`, which snarkjs accepts).
 - `decode`: proof encodings every decoder rejects, each with `name`, `note` and `proof` (hex). The errors are `truncated` for `short`, `trailing-bytes` for `long`, and otherwise `non-canonical` at the broken point's offset (0, 64 or 192).
+
+The proofs are randomised: regenerating gives other proof bytes for the same statements, so the committed file is the record.
+
+## Vouch vectors
+
+`vouch.json` covers [[vouching]] with format `abolish-vouch-vectors/1` and the same top-level fields, plus `source` (Semaphore's commit and the depth-32 artifacts' URLs and sha256s), `parameters` (`k` and `slots`, JSON numbers), `context` (`chainId`, decimal, and `registry`, 20 bytes, hex), and:
+
+- `tier2`: the Tier 2 group the vouchers prove against: `groupId` and `rootBlock` (decimal), `leaves` and `root` (decimal), which a consumer rebuilds as a tier tree ([[membership]], Tier tree).
+- `scopes`: each has `id`, `kind` (`vouchee` or `slot`), `chainId`, `registry`, either `groupId` and `commitment` (decimal) or `slot` (a JSON number), `scope` (`S_V` or `S_j`, hex) and `scopeField` (`F` of it, decimal, from Semaphore's own `hash`).
+- `messages`: each has `id`, `role` (0 or 1), `chainId`, `registry`, `groupId`, `commitment`, `tier2GroupId`, `rootBlock` and `otherNullifier` (decimal), `message` (hex) and `messageField` (decimal).
+- `additions`: Tier 1 addition records. Each has `id`, `description`, `context` (as above; some differ from the file's), `groupId` and `commitment` (decimal), `record` (hex) and `valid`; an invalid one has `error`, the first failing check of [[vouching]], Checks of one addition (`forbidden-commitment`, `slot`, `root`, `duplicate-voucher`, `duplicate-slot` or `proof`), `vouch` (the failing vouch's position, except for the first) and, for `proof`, `which` (`vouchee` or `slot`). Every addition also has `snarkjs`: whether every proof in it passes snarkjs's `groth16.verify` with the signals recomputed from the spec. Cases refused by a cheap check have `snarkjs: true`, so each shows its check is needed; `root-zero` carries forged proofs of root 0 that snarkjs accepts. `pooled-slot` is valid (one vouch's two proofs come from two members), and so is `mixed-root-blocks` (its vouches name different root blocks).
+- `decode`: records every strict decoder refuses, each with `name`, `record` (hex), `error` (`length` or `non-canonical`) and, for `non-canonical`, `offset` in the record. `two-vouches`, `four-vouches` and `no-vouches` are consistently framed records with a count other than `k`.
 
 The proofs are randomised: regenerating gives other proof bytes for the same statements, so the committed file is the record.
 

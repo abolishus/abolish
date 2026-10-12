@@ -69,6 +69,9 @@ export const TAG_REGISTRY = Object.freeze(
       { tag: "abolish/v1/kem/summed-share-aad", primitive: "kdf-aead", status: "specified" },
       { tag: "abolish/v1/sig/summed-share", primitive: "signature", status: "specified" },
       { tag: "abolish/v1/sig/destruction", primitive: "signature", status: "specified" },
+      { tag: "abolish/v1/vouch", primitive: "plain", status: "specified" },
+      { tag: "abolish/v1/vouch-slot", primitive: "plain", status: "specified" },
+      { tag: "abolish/v1/vouch-message", primitive: "plain", status: "specified" },
     ] as const
   ).map((e) => Object.freeze(e)),
 );

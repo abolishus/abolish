@@ -337,6 +337,9 @@ describe("ballots.submit", () => {
     const e = await election();
     expect((await post("/ballots", "{", {})).status).toBe(400);
     expect((await post("/ballots", { electionId: e.idHex, ballot, extra: 1 })).status).toBe(400);
+    // T-31: a repeated key, last one wins in JSON.parse, never reaches a procedure.
+    const twice = `{"electionId":"${e.idHex}","ballot":"${ballot}","ballot":"${ballot}"}`;
+    expect((await post("/ballots", twice)).status).toBe(400);
     expect(
       (await post("/ballots", { electionId: e.idHex, ballot }, { "content-type": "text/plain" }))
         .status,

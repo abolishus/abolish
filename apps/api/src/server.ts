@@ -4,6 +4,7 @@ import { ACCOUNT_COOKIE_PREFIX } from "@abolishus/core";
 import { OpenAPIHandler } from "@orpc/openapi/node";
 import { onError, ORPCError } from "@orpc/server";
 import type { Sql } from "postgres";
+import { hasDuplicateKey } from "./json.ts";
 import { router } from "./router.ts";
 
 // The HTTP transport: oRPC's OpenAPI handler on node:http, behind a front
@@ -108,11 +109,17 @@ async function readJsonBody(req: IncomingMessage): Promise<unknown> {
     req.once("end", () => resolve(Buffer.concat(chunks)));
     req.once("error", reject);
   });
+  let text: string;
+  let parsed: unknown;
   try {
-    return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(body)) as unknown;
+    text = new TextDecoder("utf-8", { fatal: true }).decode(body);
+    parsed = JSON.parse(text) as unknown;
   } catch {
     throw new BodyError(400);
   }
+  // T-31: two equal keys would let components in front read another input.
+  if (hasDuplicateKey(text)) throw new BodyError(400);
+  return parsed;
 }
 
 const REFUSALS: Record<number, string> = {

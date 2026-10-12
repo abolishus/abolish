@@ -1,21 +1,18 @@
 import { describe, expect, test } from "vite-plus/test";
 
 import {
-  BALLOT_CSP,
+  BALLOT_CSP_TEXT,
   distViolations,
   htmlViolations,
   moduleViolations,
   packageOf,
-  parseCsp,
 } from "../src/ballot.ts";
 
 const repo = "/repo";
 const pnpm = (name: string, file: string) =>
   `${repo}/node_modules/.pnpm/${name.replace("/", "+")}@1.0.0/node_modules/${name}/${file}`;
 
-const policy = Object.entries(BALLOT_CSP)
-  .map(([k, v]) => `${k} ${v.join(" ")}`)
-  .join("; ");
+const policy = BALLOT_CSP_TEXT;
 
 const page = (csp = policy, extra = "") => `<!doctype html>
 <html lang="en-US">
@@ -100,19 +97,6 @@ describe("moduleViolations", () => {
   });
 });
 
-describe("parseCsp", () => {
-  test("parses directives, case-insensitively by name", () => {
-    expect(parseCsp("Default-Src 'none';  script-src 'self' ;")).toEqual({
-      "default-src": ["'none'"],
-      "script-src": ["'self'"],
-    });
-  });
-
-  test("rejects a repeated directive, which browsers would ignore", () => {
-    expect(() => parseCsp("script-src 'self'; script-src *")).toThrow(/repeated/);
-  });
-});
-
 describe("htmlViolations", () => {
   test("accepts the client's page", () => {
     expect(htmlViolations(page())).toEqual([]);
@@ -124,6 +108,8 @@ describe("htmlViolations", () => {
       policy.replace("connect-src 'none'", "connect-src https:"),
       policy.replace("; trusted-types 'none'", ""),
       `${policy}; worker-src *`,
+      policy.replace("; ", ";"),
+      ` ${policy}`,
       `${policy}; script-src *`,
     ])
       expect(htmlViolations(page(csp)).length, csp).toBeGreaterThan(0);
@@ -157,6 +143,30 @@ describe("htmlViolations", () => {
       "<base href=x>",
     ])
       expect(htmlViolations(page(policy, extra)).length, extra).toBeGreaterThan(0);
+  });
+
+  test("rejects pages a browser parses with no policy", () => {
+    const csp = `<meta\n      http-equiv="Content-Security-Policy"\n      content="${policy}"\n    />`;
+    for (const [label, edit] of [
+      ["bogus comment <?", (p: string) => p.replace(csp, `<?${csp}`)],
+      ["bogus comment </<", (p: string) => p.replace(csp, `</${csp}`)],
+      ["text closes <head>", (p: string) => p.replace("<head>", "<head>&nbsp;")],
+      ["invisible text closes <head>", (p: string) => p.replace("<head>", "<head>\u200b")],
+      ["no doctype", (p: string) => p.replace("<!doctype html>", "")],
+      [
+        "vertical tab in the meta tag",
+        (p: string) => p.replace("<meta\n      http-equiv", "<meta\vhttp-equiv"),
+      ],
+      [
+        "vertical tab in the policy",
+        (p: string) => p.replace("default-src 'none'", "default-src\v'none'"),
+      ],
+      ["policy after the title", (p: string) => p.replace(csp, "<title>x</title>" + csp)],
+    ] as const) {
+      const edited = edit(page());
+      expect(edited, label).not.toBe(page());
+      expect(htmlViolations(edited).length, label).toBeGreaterThan(0);
+    }
   });
 
   test("rejects a second policy, however it is written", () => {

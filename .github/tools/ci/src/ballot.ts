@@ -121,24 +121,14 @@ export function moduleViolations(ids: readonly string[], repoRoot: string): stri
   return violations;
 }
 
-/** Parses a serialised policy; a repeated directive, which browsers ignore, is an error. */
-export function parseCsp(policy: string): Record<string, string[]> {
-  const parsed: Record<string, string[]> = {};
-  for (const part of policy.split(";")) {
-    const [name, ...values] = part.trim().split(/\s+/);
-    if (name === undefined || name === "") continue;
-    const key = name.toLowerCase();
-    if (Object.hasOwn(parsed, key)) throw new Error(`repeated CSP directive ${key}`);
-    parsed[key] = values;
-  }
-  return parsed;
-}
-
-const sameCsp = (a: Record<string, readonly string[]>, b: Record<string, readonly string[]>) =>
-  Object.keys(a).length === Object.keys(b).length &&
-  Object.entries(a).every(
-    ([k, v]) => Object.hasOwn(b, k) && JSON.stringify(v) === JSON.stringify(b[k]),
-  );
+/**
+ * The pinned policy's one accepted serialisation. The page must carry exactly
+ * these bytes: comparing parsed directives would need our parser to agree
+ * with every browser's on whitespace and separators, and it needn't.
+ */
+export const BALLOT_CSP_TEXT = Object.entries(BALLOT_CSP)
+  .map(([name, values]) => [name, ...values].join(" "))
+  .join("; ");
 
 /** The only elements index.html may contain. */
 const PAGE_ELEMENTS: ReadonlySet<string> = new Set([
@@ -152,39 +142,41 @@ const PAGE_ELEMENTS: ReadonlySet<string> = new Set([
   "div",
 ]);
 
+const WS = "[\\t\\n\\f\\r ]";
+/** The start every page must have, up to and including the CSP <meta>, whose content it captures. */
+const PAGE_PREFIX = new RegExp(
+  `^${WS}*<!doctype html>${WS}*<html(?:${WS}+lang="[A-Za-z-]+")?>${WS}*<head>${WS}*` +
+    `<meta${WS}+charset="utf-8"${WS}*/?>${WS}*` +
+    `<meta${WS}+http-equiv="Content-Security-Policy"${WS}+content="([^"<>]*)"${WS}*/?>`,
+  "i",
+);
+
 /** Problems with index.html: the CSP's presence, place and value, inline code, non-relative references. */
 export function htmlViolations(page: string): string[] {
   const violations: string[] = [];
   const at = (msg: string) => violations.push(`apps/ballot: index.html: ${msg}`);
-  // Comments, CDATA and raw-text elements hide markup from the tag scan
-  // below (a commented-out policy would pass it while the browser applies
-  // none), so the page may hold only the doctype and a fixed set of elements.
-  if (/<!(?!doctype html>)/i.test(page)) at("no comment, CDATA or declaration but <!doctype html>");
-  for (const [, name] of page.matchAll(/<\/?([a-z][a-z0-9-]*)/gi))
-    if (!PAGE_ELEMENTS.has((name ?? "").toLowerCase())) at(`no <${name}> element`);
-  // A policy in a <meta> applies only to what comes after it, so nothing of
-  // any kind may precede it but the charset declaration.
-  const tags = [...page.matchAll(/<([a-z][a-z0-9-]*)\b([^>]*)>/gi)]
-    .map(([, name, attrs]) => ({ name: (name ?? "").toLowerCase(), attrs: attrs ?? "" }))
-    .filter(({ name }) => name !== "html" && name !== "head");
-  if (!(tags[0]?.name === "meta" && /^\s+charset="utf-8"\s*\/?$/i.test(tags[0].attrs)))
-    at('the first element must be <meta charset="utf-8">');
-  const csp = tags[1];
-  const content =
-    csp?.name === "meta"
-      ? /^\s+http-equiv="Content-Security-Policy"\s+content="([^"]*)"\s*\/?$/.exec(csp.attrs)?.[1]
-      : undefined;
-  if (content === undefined) at("the second element must be the Content-Security-Policy <meta>");
-  else {
-    try {
-      if (!sameCsp(parseCsp(content), BALLOT_CSP))
-        at(
-          `CSP ${JSON.stringify(content)} differs from the pinned policy (.github/tools/ci/src/ballot.ts)`,
-        );
-    } catch (e) {
-      at(`CSP: ${(e as Error).message}`);
-    }
+  // A regex scan doesn't parse HTML as a browser does: a comment (`<!--`,
+  // or a bogus one opened by `<?` or `</` before a non-letter) can hide a
+  // policy the scan sees, and any text before the metas closes <head>, where
+  // a CSP meta is ignored. So the page is ASCII, every `<` opens an allowed
+  // element, and it starts with one exact, anchored prefix ending in the CSP.
+  if (/[^\t\n\r\x20-\x7e]/.test(page)) at("must be printable ASCII");
+  for (const [tag] of page.matchAll(/<(?!!doctype html>)[^>]*/gi)) {
+    const name = /^<\/?([a-z][a-z0-9-]*)(?=[\t\n\f\r />]|$)/i.exec(tag)?.[1];
+    if (name === undefined || !PAGE_ELEMENTS.has(name.toLowerCase()))
+      at(
+        `${JSON.stringify(tag.slice(0, 40))}: only <${[...PAGE_ELEMENTS].join(">, <")}> may appear`,
+      );
   }
+  const content = PAGE_PREFIX.exec(page)?.[1];
+  if (content === undefined)
+    at(
+      'must begin <!doctype html><html lang="…"><head><meta charset="utf-8"> and then the Content-Security-Policy <meta>, with only whitespace between',
+    );
+  else if (content !== BALLOT_CSP_TEXT)
+    at(
+      `CSP ${JSON.stringify(content)} isn't the pinned policy ${JSON.stringify(BALLOT_CSP_TEXT)} (.github/tools/ci/src/ballot.ts)`,
+    );
   if ((page.match(/content-security-policy/gi) ?? []).length !== 1)
     at("must name Content-Security-Policy exactly once");
   for (const [, attrs, body] of page.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi))

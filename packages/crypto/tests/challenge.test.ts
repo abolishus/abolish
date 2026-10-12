@@ -8,6 +8,7 @@ import {
   type BallotElection,
   ballotCore,
   ballotCoreHash,
+  openedCommitments,
   opensBallotCommitment,
   ballotElection,
   type ChallengeOpeningCheck,
@@ -236,7 +237,7 @@ describe("challenge.json", () => {
         shareHashes: c.core.shareHashes.map(hex),
       };
       expect(toHex(coreHash(core))).toBe(c.coreHash);
-      expect(opensBallotCommitment(opening, core)).toBe(c.opened);
+      expect(opensBallotCommitment(openedCommitments(opening), core)).toBe(c.opened);
     },
   );
 

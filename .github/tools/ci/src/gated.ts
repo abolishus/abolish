@@ -710,6 +710,10 @@ export const VECTOR_PUBLISHERS: Readonly<Record<string, readonly string[]>> = {
   noble: ["paulmillr/noble-hashes", "paulmillr/noble-curves", "paulmillr/noble-ciphers"],
   // RFC 6962 / RFC 9162 Merkle-tree roots and proofs, for the board tree (P1-16).
   "transparency-dev": ["transparency-dev/merkle"],
+  // Semaphore v4's Groth16 verification keys, for membership proofs (P1-17b).
+  semaphore: ["semaphore-protocol/semaphore"],
+  // circomlib's Poseidon parameters and known answers, for the tier tree (P1-17b).
+  iden3: ["iden3/circomlib", "iden3/circomlibjs"],
   rfc: [],
 };
 

@@ -16,8 +16,13 @@ export const PARAMETERS = Object.freeze({
   COMPLAINT_WINDOW: 432_000,
   // Seconds after t_D; the destruction window of tally-opening version 1.
   DESTRUCTION_WINDOW: 86_400,
+  // Seconds after the seal's anchoring window until the dispute end t_E; a
+  // constant of receipt version 1 (docs/spec/receipts.md).
+  DISPUTE_WINDOW: 2_592_000,
   DISPLAY_TEXT_SALT_LEN: 32,
   // Constants of the group registry's deployment (docs/spec/vouching.md).
   VOUCH_K: 3,
   VOUCH_SLOTS: 12,
+  // Registered members; the regional-cell floor of election-definition version 3.
+  MIN_CELL_ELECTORATE: 1000,
 } as const);

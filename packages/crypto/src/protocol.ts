@@ -16,6 +16,7 @@ import { ds } from "./domain-separation.ts";
 import {
   ELECTION_DEFINITION,
   type ElectionDefinition,
+  type ElectionDefinitionV3,
   electionDefinitionRule,
   type ElectionDefinitionRule,
 } from "./election-definition.ts";
@@ -50,27 +51,62 @@ export function encodeElectionDefinition(d: ElectionDefinition): Uint8Array {
   return PROTOCOL_SCHEMA.encode(ELECTION_DEFINITION, 1, d);
 }
 
+export function encodeElectionDefinitionV3(d: ElectionDefinitionV3): Uint8Array {
+  return PROTOCOL_SCHEMA.encode(ELECTION_DEFINITION, 3, d);
+}
+
+/** A decoded definition of any version this package reads. */
+export type ElectionDefinitionRecord =
+  | { readonly version: 1; readonly value: ElectionDefinition }
+  | { readonly version: 3; readonly value: ElectionDefinitionV3 };
+
 /**
- * Strictly decodes an election definition, then checks it against its own
- * profile: the pin for 0x0001 must exist and equal the record's version, or
- * the result is `profile-mismatch` (docs/spec/election-definition.md,
- * Decoding). Otherwise a new election could be created under a retired
- * layout by labelling it with an older version byte (T-34, T-31).
+ * Strictly decodes an election definition of any version, then checks it
+ * against its own profile: the pin for 0x0001 must exist and equal the
+ * record's version, or the result is `profile-mismatch`
+ * (docs/spec/election-definition.md, Decoding). Otherwise a new election
+ * could be created under a retired layout by labelling it with an older
+ * version byte (T-34, T-31).
  */
-export function decodeElectionDefinition(bytes: Uint8Array): ElectionDefinition {
-  const { version, value } = PROTOCOL_SCHEMA.decode(ELECTION_DEFINITION, bytes, UNPINNED);
+export function decodeElectionDefinitionRecord(bytes: Uint8Array): ElectionDefinitionRecord {
+  const record = PROTOCOL_SCHEMA.decode(ELECTION_DEFINITION, bytes, UNPINNED);
   // Exactly one pin for 0x0001, at the record's own version; a second pin,
   // whatever its order, is a mismatch too, so every decoder agrees.
-  const pins = value.profile.pins.filter((p) => p.record_type === RECORD_TYPES.electionDefinition);
+  const pins = record.value.profile.pins.filter(
+    (p) => p.record_type === RECORD_TYPES.electionDefinition,
+  );
   // Offset 2: the version byte, the field that disagrees with the profile.
-  if (pins.length !== 1 || pins[0]?.version !== version)
+  if (pins.length !== 1 || pins[0]?.version !== record.version)
     throw new DecodeError("profile-mismatch", 2);
-  return value;
+  return record;
+}
+
+/**
+ * `decodeElectionDefinitionRecord` for callers that read only version 1: a
+ * definition of any other version is `unknown-version` to them, as it was
+ * before version 3 existed, so each refuses it (the verifier as unsupported,
+ * 2.3) until it reads regional cells (P1-15 part 4b, part 2).
+ */
+export function decodeElectionDefinition(bytes: Uint8Array): ElectionDefinition {
+  const record = decodeElectionDefinitionRecord(bytes);
+  if (record.version !== 1) throw new DecodeError("unknown-version", 2);
+  return record.value;
 }
 
 /** `H(DS("abolish/v1/election-definition", encode(definition)))`. */
 export function electionDefinitionHash(d: ElectionDefinition): Uint8Array {
   return H(ds("abolish/v1/election-definition", encodeElectionDefinition(d)));
+}
+
+/** `electionDefinitionHash` for version 3: the same tag over the version-3 encoding. */
+export function electionDefinitionV3Hash(d: ElectionDefinitionV3): Uint8Array {
+  return H(ds("abolish/v1/election-definition", encodeElectionDefinitionV3(d)));
+}
+
+/** `electionStubHash` for version 3. */
+export function electionStubV3Hash(d: ElectionDefinitionV3): Uint8Array {
+  const stub = { ...d, ceremony_transcript_hash: new Uint8Array(32) };
+  return H(ds("abolish/v1/election-stub", encodeElectionDefinitionV3(stub)));
 }
 
 /**
@@ -87,13 +123,20 @@ export function electionStubHash(d: ElectionDefinition): Uint8Array {
  * The version a definition's profile pins for `recordType`: `undefined` unless
  * exactly one pin names it, so the answer never depends on pin order.
  */
-export function pinnedVersion(d: ElectionDefinition, recordType: number): number | undefined {
+export function pinnedVersion(
+  d: Pick<ElectionDefinition, "profile">,
+  recordType: number,
+): number | undefined {
   const pins = d.profile.pins.filter((p) => p.record_type === recordType);
   return pins.length === 1 ? pins[0]?.version : undefined;
 }
 
 const isBoardEntryVersion = (v: number | undefined): v is BoardEntryVersion =>
   v !== undefined && Object.hasOwn(BOARD_ENTRY.versions, v);
+
+// Ballot versions that name their cell, which definition version 3 needs;
+// P1-12 adds the first.
+const CELL_BALLOT_VERSIONS: ReadonlySet<number> = new Set<number>();
 
 /** Why 2.3's profile combination refuses a definition's pins. */
 export type ProfileCombinationRule = "profile-combination" | "unsupported-version";
@@ -115,12 +158,20 @@ export type ProfileCombinationRule = "profile-combination" | "unsupported-versio
  * skipped `electionDefinitionRule` still refuses (T-34). It doesn't replace
  * that rule: run it first.
  */
-export function profileCombinationRule(d: ElectionDefinition): ProfileCombinationRule | undefined {
+export function profileCombinationRule(
+  d: ElectionDefinition | ElectionDefinitionV3,
+): ProfileCombinationRule | undefined {
   const board = pinnedVersion(d, RECORD_TYPES.boardEntry);
   if (!isBoardEntryVersion(board)) return "unsupported-version";
   const ballot = pinnedVersion(d, RECORD_TYPES.ballot);
   const opening = pinnedVersion(d, RECORD_TYPES.tallyOpening);
   if (ballot === undefined || opening === undefined) return "profile-combination";
+  // Regional cells need a ballot that names its cell. Ballot version 1 names
+  // only a tier and no version names a cell yet, so every ballot version is
+  // refused until one does, never only the known one (docs/spec/
+  // election-definition.md, Notes; T-16, T-34).
+  if (pinnedVersion(d, RECORD_TYPES.electionDefinition) === 3 && !CELL_BALLOT_VERSIONS.has(ballot))
+    return "profile-combination";
   const allowed = boardPayloadTypes(board);
   const carriesDelivery =
     allowed.includes(RECORD_TYPES.shareReceipt) && allowed.includes(RECORD_TYPES.shareComplaint);

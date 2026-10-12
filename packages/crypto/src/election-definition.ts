@@ -1,6 +1,7 @@
-// The election definition, record type 0x0001 version 1
-// (docs/spec/election-definition.md): the layout, and the well-formedness
-// rules a decoded definition must also meet. Its hash, registered on L2 before
+// The election definition, record type 0x0001 versions 1 and 3
+// (docs/spec/election-definition.md): the layouts, and the well-formedness
+// rules a decoded definition must also meet. Version 2 is never assigned: a
+// frozen vector uses it as the version with no layout. Its hash, registered on L2 before
 // voting opens and bound into every ballot and proof, is what stops an
 // election's rules changing or differing between voters (T-34).
 
@@ -17,6 +18,7 @@ import {
   u8,
 } from "./codec.ts";
 import { RECORD_TYPES, recordType } from "./record.ts";
+import { foldRegions } from "./regional-cells.ts";
 
 const address = bytesFixed(20);
 const hash = bytesFixed(32);
@@ -45,7 +47,8 @@ const tierGroup = struct([
 export const ELECTION_TYPES = Object.freeze({ plurality: 1, approval: 2 } as const);
 export const TALLY_SCHEMES = Object.freeze({ pedersenVss: 1 } as const);
 
-const electionDefinitionV1 = struct([
+// The fields before and after `electorate`, the same in every version.
+const HEAD = [
   ["profile", profile],
   ["election_id", hash],
   ["l2_chain_id", u64],
@@ -61,7 +64,9 @@ const electionDefinitionV1 = struct([
   ["option_count", u16],
   ["min_selections", u16],
   ["max_selections", u16],
-  ["electorate", list(tierGroup, 3)],
+] as const;
+
+const TAIL = [
   ["membership_vk_hash", hash],
   ["panel_id", hash],
   ["threshold", u8],
@@ -73,14 +78,58 @@ const electionDefinitionV1 = struct([
   ["sequencing_window", u64],
   ["max_sequencer_drift", u64],
   ["display_text_commitment", hash],
+] as const;
+
+const electionDefinitionV1 = struct([
+  ...HEAD,
+  ["electorate", list(tierGroup, 3)],
+  ...TAIL,
 ] as const);
 
-/** Record type 0x0001, version 1 (docs/spec/election-definition.md). */
+const regionGroup = struct([
+  ["group_id", u64],
+  ["region", u16],
+] as const);
+
+const cell = struct([
+  ["root", fieldBn254],
+  ["members", u64],
+] as const);
+
+/** Version 3's per-tier limits (docs/spec/election-definition.md, Layout (version 3)). */
+export const DEFINITION_V3_LIMITS = Object.freeze({
+  groupsPerTier: 1024,
+  regionsPerTier: 1024,
+  // The range of the u8 `cell` in tally-opening version 1 and the summed-share
+  // message: a partition with more cells couldn't be opened.
+  cells: 256,
+} as const);
+
+const tierElectorate = struct([
+  ["tier", enum8(TIERS)],
+  ["root_l2_block", u64],
+  ["groups", list(regionGroup, DEFINITION_V3_LIMITS.groupsPerTier)],
+  ["regions", list(u64, DEFINITION_V3_LIMITS.regionsPerTier)],
+  ["cells", list(cell, DEFINITION_V3_LIMITS.cells)],
+] as const);
+
+// Version 1's fields, in order, with the electorate replaced by regional
+// cells (0019-regional-cells).
+const electionDefinitionV3 = struct([
+  ...HEAD,
+  ["electorate", list(tierElectorate, 3)],
+  ...TAIL,
+] as const);
+
+/** Record type 0x0001, versions 1 and 3 (docs/spec/election-definition.md). */
 export const ELECTION_DEFINITION = recordType(RECORD_TYPES.electionDefinition, {
   1: electionDefinitionV1,
+  3: electionDefinitionV3,
 });
 
 export type ElectionDefinition = CodecValue<typeof electionDefinitionV1>;
+export type ElectionDefinitionV3 = CodecValue<typeof electionDefinitionV3>;
+export type TierElectorate = CodecValue<typeof tierElectorate>;
 
 // Version 1's limits, written out rather than read from PARAMETERS: raising a
 // protocol-wide limit is a new record version (parameters.md), so it must
@@ -124,6 +173,31 @@ const pairwiseDistinct = (xs: readonly Uint8Array[]) =>
  * these rules.
  */
 export function electionDefinitionRule(d: ElectionDefinition): ElectionDefinitionRule | undefined {
+  return headRule(d) ?? electorateV1Rule(d) ?? tailRule(d);
+}
+
+/** The well-formedness rule codes of version 3, in checking order: version 1's, with `cells` after `electorate`. */
+export type ElectionDefinitionV3Rule = ElectionDefinitionRule | "cells";
+
+/**
+ * Version 3's `electionDefinitionRule`: version 1's rules, with `electorate`
+ * read for regional cells and `cells` after it (docs/spec/election-definition.md,
+ * Well-formedness). `cells` checks the stated cells against the fold of the
+ * stated region counts, so the floor on every split tier follows from the
+ * counts, which the verifier checks against the board (2.4; T-16, T-34).
+ */
+export function electionDefinitionV3Rule(
+  d: ElectionDefinitionV3,
+): ElectionDefinitionV3Rule | undefined {
+  return headRule(d) ?? electorateV3Rule(d) ?? cellsRule(d) ?? tailRule(d);
+}
+
+type Head = Pick<
+  ElectionDefinition,
+  "profile" | "election_type" | "option_count" | "min_selections" | "max_selections"
+>;
+
+function headRule(d: Head): ElectionDefinitionRule | undefined {
   const pinnedTypes = d.profile.pins.map((p) => p.record_type);
   if (d.profile.protocol_major !== 1) return "protocol-major";
   if (!strictlyAscending(pinnedTypes)) return "profile-order";
@@ -144,6 +218,10 @@ export function electionDefinitionRule(d: ElectionDefinition): ElectionDefinitio
       (d.min_selections !== 0 || d.max_selections !== 1))
   )
     return "selections";
+  return undefined;
+}
+
+function electorateV1Rule(d: ElectionDefinition): ElectionDefinitionRule | undefined {
   // Ascending tiers make the tiers-only partition one cell per tier, none
   // repeated (verifier 2.8; T-29, T-36). Distinct roots keep two cells from
   // sharing one membership proof, which would let a voter's claimed tier pick
@@ -159,6 +237,70 @@ export function electionDefinitionRule(d: ElectionDefinition): ElectionDefinitio
     d.electorate.some((g) => g.group_size < 1n)
   )
     return "electorate";
+  return undefined;
+}
+
+function electorateV3Rule(d: ElectionDefinitionV3): ElectionDefinitionRule | undefined {
+  const tiers = d.electorate.map((t) => t.tier);
+  if (tiers.length === 0 || !strictlyAscending(tiers)) return "electorate";
+  const seen = new Set<bigint>();
+  for (const t of d.electorate) {
+    if (t.groups.length === 0 || t.regions.length === 0) return "electorate";
+    // Ascending group IDs put each group in one region; distinct across tiers
+    // puts it in one tier, so no member is counted in two cells (T-01, G-2).
+    for (const [i, g] of t.groups.entries()) {
+      if (i > 0 && (t.groups[i - 1] as (typeof t.groups)[number]).group_id >= g.group_id)
+        return "electorate";
+      if (seen.has(g.group_id)) return "electorate";
+      seen.add(g.group_id);
+    }
+    const named = new Set(t.groups.map((g) => g.region));
+    if (t.groups.some((g) => g.region >= t.regions.length) || named.size !== t.regions.length)
+      return "electorate";
+    if (t.regions.some((n) => n < 1n)) return "electorate";
+  }
+  return undefined;
+}
+
+function cellsRule(d: ElectionDefinitionV3): ElectionDefinitionV3Rule | undefined {
+  let total = 0;
+  const roots = new Set<bigint>();
+  for (const t of d.electorate) {
+    const derived = foldRegions(t.regions);
+    if (derived.length !== t.cells.length) return "cells";
+    for (const [i, regions] of derived.entries()) {
+      const stated = t.cells[i] as (typeof t.cells)[number];
+      // Over unbounded integers: a sum above u64 never equals a stated count.
+      const sum = regions.reduce((n, r) => n + (t.regions[r] as bigint), 0n);
+      if (stated.members !== sum) return "cells";
+      roots.add(stated.root);
+    }
+    total += t.cells.length;
+  }
+  // Distinct roots keep one membership proof from fitting two cells (T-01,
+  // T-16); 256 cells is the range of the tally opening's u8 `cell`.
+  if (roots.size !== total || total > DEFINITION_V3_LIMITS.cells) return "cells";
+  return undefined;
+}
+
+type Tail = Pick<
+  ElectionDefinition,
+  | "threshold"
+  | "panel_size"
+  | "election_registry"
+  | "board"
+  | "trustee_registry"
+  | "group_registry"
+  | "l1_anchor"
+  | "l1_relay"
+  | "l2_chain_id"
+  | "l1_chain_id"
+  | "opens_at"
+  | "closes_at"
+  | "l1_inclusion_bound"
+>;
+
+function tailRule(d: Tail): ElectionDefinitionRule | undefined {
   // At least two trustees must combine shares: a 1-of-n panel lets one party
   // open every voter's sharing alone, which the brief forbids (T-14).
   if (

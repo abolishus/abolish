@@ -1,6 +1,9 @@
 import { Check, Circle, Clock } from "lucide-react";
 import { cn } from "cn";
 
+import { formatMessage } from "../i18n/format.ts";
+import { useI18n } from "../i18n/context.tsx";
+
 /** Where a step stands. */
 export type StepState = "complete" | "pending" | "upcoming";
 
@@ -22,6 +25,12 @@ export interface StatusTrailProps {
   steps: readonly StatusStep[];
   /** The words for each state, translated by the caller and read with each step. */
   stateLabels: Record<StepState, string>;
+  /**
+   * How a screen reader hears a step and its state, translated by the caller
+   * with `{step}` and `{state}` placeholders ("{step}, {state}"), so the
+   * joining punctuation is the locale's.
+   */
+  stepTemplate: string;
 }
 
 const icons = { complete: Check, pending: Clock, upcoming: Circle } as const;
@@ -33,7 +42,8 @@ const icons = { complete: Check, pending: Clock, upcoming: Circle } as const;
  * would claim more than the board shows (T-53), so the steps must run
  * complete, then at most one pending, then upcoming.
  */
-export function StatusTrail({ label, steps, stateLabels }: StatusTrailProps) {
+export function StatusTrail({ label, steps, stateLabels, stepTemplate }: StatusTrailProps) {
+  const { locale } = useI18n();
   const order: Record<StepState, number> = { complete: 0, pending: 1, upcoming: 2 };
   steps.forEach((step, i) => {
     const previous = steps[i - 1];
@@ -82,8 +92,13 @@ export function StatusTrail({ label, steps, stateLabels }: StatusTrailProps) {
                   step.state === "upcoming" ? "text-muted-foreground" : "text-foreground",
                 )}
               >
-                {step.label}
-                <span className="sr-only">, {stateLabels[step.state]}</span>
+                <span aria-hidden="true">{step.label}</span>
+                <span className="sr-only">
+                  {formatMessage(locale, stepTemplate, {
+                    step: step.label,
+                    state: stateLabels[step.state],
+                  })}
+                </span>
               </span>
               {step.detail !== undefined && (
                 <span className="text-xs text-muted-foreground">{step.detail}</span>

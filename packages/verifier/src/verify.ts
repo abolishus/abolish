@@ -223,8 +223,10 @@ function fromDefinition(bundle: Bundle):
     // A definition version this verifier doesn't know may be one a later
     // release reads, so, like an unknown board-entry version below, it
     // leaves the election unverifiable, never failed: releases must not
-    // disagree on a verdict (T-36). Version 0 is never valid.
-    if (e.code === "unknown-version" && bundle.definition[2] !== 0)
+    // disagree on a verdict (T-36). Version 0 can't be any release's:
+    // `profile-version` forbids pinning it, and the self-pin check requires
+    // the record's version to equal its pin. The version byte is offset 2.
+    if (e.code === "unknown-version" && e.offset === 2 && bundle.definition[2] !== 0)
       return stopped("2.3", UNSUPPORTED);
     return stopped("2.1", { status: "fail", code: "decode", at: { decodeError: e.code } });
   }

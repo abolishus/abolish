@@ -16,4 +16,4 @@ export {
   type QueueSpec,
   type Side,
 } from "./queues.ts";
-export { type RunningWorker, startWorker, type WorkerOptions } from "./worker.ts";
+export { PRUNE_EVERY_MS, type RunningWorker, startWorker, type WorkerOptions } from "./worker.ts";

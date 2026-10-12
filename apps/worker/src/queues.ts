@@ -5,8 +5,9 @@ import * as z from "zod";
 //
 // - Each queue is on one side. A board queue's jobs never carry an account,
 //   a session or anything about a person; an account queue's jobs never carry
-//   a ballot, a nullifier or anything about who took part in which poll. No
-//   job crosses sides, and `tests/no-join.test.ts` checks every schema here.
+//   a ballot, a nullifier or anything about who took part in which poll; an
+//   operational queue's jobs carry neither. No job crosses sides, and
+//   `tests/no-join.test.ts` checks every schema here.
 // - Job data is a strict object, parsed before it is queued and again before
 //   it is handled, so no field the schema doesn't name reaches Redis or a
 //   handler. Job IDs are BullMQ's counters, never derived from the data.
@@ -18,7 +19,7 @@ import * as z from "zod";
 
 export const KEY_PREFIX = "abolish";
 
-export type Side = "board" | "account";
+export type Side = "board" | "account" | "operational";
 
 export interface QueueSpec<Data extends z.ZodObject = z.ZodObject> {
   /** The queue's name, `{name}`: its own hash tag. */
@@ -33,6 +34,16 @@ export const QUEUES = {
    * T-23, T-66). Runs on a schedule and takes no data.
    */
   boardAudit: { name: "{board-audit}", side: "board", data: z.strictObject({}) },
+  /**
+   * Deletes expired identity backups (core's pruneIdentityBackups; T-52,
+   * T-66). Runs on a schedule and takes no data: the table is on neither
+   * side's queues, and nothing about a backup is ever queued (T-10, T-20).
+   */
+  identityBackupPrune: {
+    name: "{identity-backup-prune}",
+    side: "operational",
+    data: z.strictObject({}),
+  },
 } as const satisfies Record<string, QueueSpec>;
 
 export type QueueKey = keyof typeof QUEUES;

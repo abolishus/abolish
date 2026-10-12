@@ -2,7 +2,8 @@ import fc from "fast-check";
 import { describe, expect, test } from "vite-plus/test";
 import { QUEUES, type QueueSpec } from "../src/index.ts";
 
-// Queues never join accounts to ballots (T-10): each queue is on one side,
+// Queues never join accounts to ballots (T-10): each queue is on one side
+// (or, for upkeep such as the identity-backup prune, on neither),
 // its job data can't name the other side's values, and data is a strict
 // object, so a producer can't slip a field past the schema. Field names are
 // matched by a deny-list, as the schema's no-join test does for columns, so
@@ -21,9 +22,15 @@ describe.each(specs)("queue %s", (_key, spec) => {
   const fields = Object.keys(spec.data.shape);
 
   test("is on one side, and its fields name nothing from the other", () => {
-    expect(["board", "account"]).toContain(spec.side);
-    const other = spec.side === "board" ? ACCOUNT_LIKE : BALLOT_LIKE;
-    expect(fields.filter((f) => other.test(f))).toEqual([]);
+    expect(["board", "account", "operational"]).toContain(spec.side);
+    // An operational queue is on neither side, so it may name neither.
+    const others =
+      spec.side === "board"
+        ? [ACCOUNT_LIKE]
+        : spec.side === "account"
+          ? [BALLOT_LIKE]
+          : [ACCOUNT_LIKE, BALLOT_LIKE];
+    expect(fields.filter((f) => others.some((o) => o.test(f)))).toEqual([]);
   });
 
   test("is a strict object, so data with a field it doesn't name is refused", () => {

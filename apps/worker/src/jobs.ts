@@ -1,7 +1,7 @@
 // The job handlers. Each parses nothing itself (the worker has parsed the job
 // data against its queue's schema) and calls core: transports stay thin.
 
-import { auditBoard, BoardAuditError, listBoards } from "@abolishus/core";
+import { auditBoard, BoardAuditError, listBoards, pruneIdentityBackups } from "@abolishus/core";
 import type { Sql } from "postgres";
 import type { ErrorKind, Log } from "./log.ts";
 import type { JobData, QueueKey } from "./queues.ts";
@@ -19,6 +19,8 @@ export class JobError extends Error {
 export interface JobContext {
   readonly sql: Sql;
   readonly log: Log;
+  /** The clock expiry is judged by; injected so tests can move it. */
+  readonly now: () => Date;
 }
 
 const hex = (b: Uint8Array) => Buffer.from(b).toString("hex");
@@ -46,6 +48,18 @@ async function boardAudit(ctx: JobContext, _data: JobData<"boardAudit">): Promis
   if (findings > 0) throw new JobError("board-audit-findings");
 }
 
+/**
+ * Deletes every identity backup past its retention, judged by the UTC month
+ * of `now`. Daily runs remove a month's expired rows within a day of the
+ * month turning (T-52, T-66).
+ */
+async function identityBackupPrune(
+  ctx: JobContext,
+  _data: JobData<"identityBackupPrune">,
+): Promise<void> {
+  await pruneIdentityBackups(ctx.sql, ctx.now());
+}
+
 export const HANDLERS: {
   readonly [K in QueueKey]: (ctx: JobContext, data: JobData<K>) => Promise<void>;
-} = { boardAudit };
+} = { boardAudit, identityBackupPrune };

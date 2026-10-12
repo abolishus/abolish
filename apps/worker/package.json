@@ -2,7 +2,7 @@
   "name": "@abolishus/worker",
   "version": "0.0.0",
   "private": true,
-  "description": "Background jobs on BullMQ: board audits now; proof batches, pinning and tally coordination to come. Source-only.",
+  "description": "Background jobs on BullMQ: board audits and identity-backup expiry now; proof batches, pinning and tally coordination to come. Source-only.",
   "license": "AGPL-3.0-only",
   "type": "module",
   "exports": {

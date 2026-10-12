@@ -1,7 +1,7 @@
 // A worker for every queue over one Redis (or Dragonfly) connection, and the
-// schedule that queues the board audit. Job data is parsed against its
-// queue's schema before it is handled, and every outcome is logged by kind
-// (T-10).
+// schedules that queue the board audit and the identity-backup prune. Job
+// data is parsed against its queue's schema before it is handled, and every
+// outcome is logged by kind (T-10).
 
 import { Queue, Worker } from "bullmq";
 import type { Redis } from "ioredis";
@@ -18,11 +18,18 @@ export interface WorkerOptions {
   readonly log: Log;
   /** How often every board is audited. */
   readonly auditEveryMs: number;
+  /** How often expired identity backups are deleted; daily unless a test says otherwise. */
+  readonly pruneEveryMs?: number;
+  /** The clock handlers judge time by; the system clock unless a test moves it. */
+  readonly now?: () => Date;
   /** The first segment of every key; tests give each run its own. */
   readonly prefix?: string;
   /** The handlers, `HANDLERS` unless a test replaces them to make one fail. */
   readonly handlers?: typeof HANDLERS;
 }
+
+/** Expiry is counted in whole UTC months, so once a day is plenty. */
+export const PRUNE_EVERY_MS = 24 * 60 * 60_000;
 
 export interface RunningWorker {
   close(): Promise<void>;
@@ -37,7 +44,7 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
   const { connection, sql, log } = options;
   const prefix = options.prefix ?? KEY_PREFIX;
   const handlers = options.handlers ?? HANDLERS;
-  const ctx = { sql, log };
+  const ctx = { sql, log, now: options.now ?? (() => new Date()) };
   const workers = (Object.keys(QUEUES) as QueueKey[]).map((key) => {
     const spec = QUEUES[key];
     const worker = new Worker(
@@ -84,25 +91,42 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
     worker.on("error", () => log({ queue: spec.name, error: "worker" }));
     return { name: spec.name, worker };
   });
-  const audits = new Queue(QUEUES.boardAudit.name, { connection, prefix });
-  // Unheard, BullMQ prints the error and its stack to stderr.
-  audits.on("error", () => log({ queue: QUEUES.boardAudit.name, error: "worker" }));
+  // Each scheduled job takes no data, and runs once at start, then every
+  // `every` milliseconds.
+  const schedules = [
+    { key: "boardAudit", id: "board-audit", every: options.auditEveryMs },
+    {
+      key: "identityBackupPrune",
+      id: "identity-backup-prune",
+      every: options.pruneEveryMs ?? PRUNE_EVERY_MS,
+    },
+  ] as const satisfies readonly { key: QueueKey; id: string; every: number }[];
+  const queues = schedules.map((schedule) => {
+    const name = QUEUES[schedule.key].name;
+    const queue = new Queue(name, { connection, prefix });
+    // Unheard, BullMQ prints the error and its stack to stderr.
+    queue.on("error", () => log({ queue: name, error: "worker" }));
+    return { schedule, queue };
+  });
   const close = async () => {
-    const closed = await Promise.allSettled(workers.map(({ worker }) => worker.close()));
-    await audits.close();
+    const closed = await Promise.allSettled([
+      ...workers.map(({ worker }) => worker.close()),
+      ...queues.map(({ queue }) => queue.close()),
+    ]);
     for (const c of closed) if (c.status === "rejected") throw c.reason;
   };
   try {
-    await audits.upsertJobScheduler(
-      "board-audit",
-      { every: options.auditEveryMs },
-      { name: "boardAudit", data: {}, opts: JOB_OPTIONS },
-    );
+    for (const { schedule, queue } of queues)
+      await queue.upsertJobScheduler(
+        schedule.id,
+        { every: schedule.every },
+        { name: schedule.key, data: {}, opts: JOB_OPTIONS },
+      );
   } catch (e) {
     await close();
     throw e;
   }
-  // Started only once the schedule is in place, so a failure there leaves
+  // Started only once the schedules are in place, so a failure there leaves
   // nothing running.
   for (const { name, worker } of workers)
     worker.run().catch(() => log({ queue: name, error: "worker" }));

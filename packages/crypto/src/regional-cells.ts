@@ -116,7 +116,9 @@ export function deriveTierCells(
   const cells = foldRegions(regions).map((cellRegions): DerivedCell => {
     const inCell = new Set(cellRegions);
     const at = tier.groups.flatMap((g, i) => (inCell.has(g.region) ? [i] : []));
-    // tierTreeRoot refuses more than 2^32 leaves, which no cell tree has.
+    // tierTreeRoot throws a RangeError for more than 2^32 leaves, which 1024
+    // groups can reach: such a cell has no tree, and the caller fails the
+    // definition (2.4).
     const cellLeaves = at.flatMap((i) => leaves[i] as bigint[]);
     return {
       regions: cellRegions,

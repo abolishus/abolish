@@ -496,7 +496,7 @@ describe("2.3's profile combination", () => {
     expect(profileCombinationRule(pinning(4, 1, 1))).toBeUndefined();
   });
 
-  test("definition version 3 refuses ballot version 1, which names no cell", () => {
+  test("definition version 3 refuses every ballot version until one names its cell", () => {
     // The rule reads only the profile, so version 1's value with 0x0001
     // pinned at 3 stands in for a version-3 definition.
     const v3 = (ballot: number) => {
@@ -512,7 +512,7 @@ describe("2.3's profile combination", () => {
       };
     };
     expect(profileCombinationRule(v3(1))).toBe("profile-combination");
-    expect(profileCombinationRule(v3(2))).toBeUndefined();
+    expect(profileCombinationRule(v3(2))).toBe("profile-combination");
     expect(profileCombinationRule(pinning(4, 1, 1))).toBeUndefined();
   });
 

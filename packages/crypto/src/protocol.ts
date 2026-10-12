@@ -134,6 +134,10 @@ export function pinnedVersion(
 const isBoardEntryVersion = (v: number | undefined): v is BoardEntryVersion =>
   v !== undefined && Object.hasOwn(BOARD_ENTRY.versions, v);
 
+// Ballot versions that name their cell, which definition version 3 needs;
+// P1-12 adds the first.
+const CELL_BALLOT_VERSIONS: ReadonlySet<number> = new Set<number>();
+
 /** Why 2.3's profile combination refuses a definition's pins. */
 export type ProfileCombinationRule = "profile-combination" | "unsupported-version";
 
@@ -162,10 +166,11 @@ export function profileCombinationRule(
   const ballot = pinnedVersion(d, RECORD_TYPES.ballot);
   const opening = pinnedVersion(d, RECORD_TYPES.tallyOpening);
   if (ballot === undefined || opening === undefined) return "profile-combination";
-  // Regional cells need a ballot that names its cell; ballot version 1 names
-  // only a tier, so its ballots couldn't be placed in a split tier's cells
-  // (docs/spec/election-definition.md, Notes; T-16, T-34).
-  if (pinnedVersion(d, RECORD_TYPES.electionDefinition) === 3 && ballot === 1)
+  // Regional cells need a ballot that names its cell. Ballot version 1 names
+  // only a tier and no version names a cell yet, so every ballot version is
+  // refused until one does, never only the known one (docs/spec/
+  // election-definition.md, Notes; T-16, T-34).
+  if (pinnedVersion(d, RECORD_TYPES.electionDefinition) === 3 && !CELL_BALLOT_VERSIONS.has(ballot))
     return "profile-combination";
   const allowed = boardPayloadTypes(board);
   const carriesDelivery =

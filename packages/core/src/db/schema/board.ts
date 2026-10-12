@@ -1,4 +1,4 @@
-import { bigint, pgTable, primaryKey } from "drizzle-orm/pg-core";
+import { bigint, pgTable, primaryKey, smallint } from "drizzle-orm/pg-core";
 import { bytea } from "./bytea.ts";
 
 // Drizzle view of migrations/0000_board.sql; a test checks the two agree.
@@ -17,4 +17,17 @@ export const boardEntries = pgTable(
     link: bytea("link").notNull(),
   },
   (t) => [primaryKey({ columns: [t.electionId, t.idx] })],
+);
+
+// Drizzle view of migrations/0006_board_subtrees.sql: the board tree's
+// perfect subtrees, append-only like the board (T-52).
+export const boardSubtrees = pgTable(
+  "board_subtrees",
+  {
+    electionId: bytea("election_id").notNull(),
+    level: smallint("level").notNull(),
+    idx: bigint("idx", { mode: "bigint" }).notNull(),
+    hash: bytea("hash").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.electionId, t.level, t.idx] })],
 );

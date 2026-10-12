@@ -243,11 +243,18 @@ export {
   UnsupportedVersionError,
 } from "./protocol.ts";
 export {
+  appendSubtrees,
   BOARD_TREE,
   consistencyProof,
+  consistencyProofSubtrees,
+  foldSubtrees,
   inclusionProof,
+  inclusionProofSubtrees,
   merkleRoot,
   merkleRoots,
+  rootSubtrees,
+  type Subtree,
+  type SubtreeId,
   type TreeHash,
   verifyConsistency,
   verifyInclusion,

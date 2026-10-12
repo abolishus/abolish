@@ -271,3 +271,142 @@ export function verifyConsistency(
   }
   return equal(fr, root1) && equal(sr, root2) && sn === 0n;
 }
+
+/**
+ * A perfect subtree of the tree: the `2^level` leaves from `index · 2^level`.
+ * Its hash is `MTH` of those leaves, and it never changes once the tree has
+ * them all, so a store can keep it and build roots and proofs from O(log n)
+ * stored hashes instead of rehashing every leaf (T-52).
+ */
+export interface SubtreeId {
+  readonly level: number;
+  readonly index: number;
+}
+
+export interface Subtree extends SubtreeId {
+  readonly hash: Uint8Array;
+}
+
+/**
+ * `MTH(D[from:to])` as the perfect subtrees it folds, left to right. Every
+ * range §2.1's recursion hashes starts at a multiple of the smallest power of
+ * two at least its size, so each block taken here, the largest power of two
+ * that fits, is aligned, and the decomposition is the recursion unrolled: the
+ * first block is `D[from:from+k]` and the rest is `D[from+k:to]`.
+ */
+function blocks(from: number, to: number): SubtreeId[] {
+  const out: SubtreeId[] = [];
+  while (from < to) {
+    let level = 0;
+    let k = 1;
+    while (from + k * 2 <= to) {
+      k *= 2;
+      level++;
+    }
+    out.push({ level, index: from / k });
+    from += k;
+  }
+  return out;
+}
+
+function checkSize(size: number): void {
+  if (!Number.isSafeInteger(size) || size < 1) throw new RangeError("a tree has at least one leaf");
+}
+
+/**
+ * The perfect subtrees whose hashes fold, left to right, into `root_size`
+ * (see `foldSubtrees`): the binary decomposition of `size`, largest first.
+ */
+export function rootSubtrees(size: number): SubtreeId[] {
+  checkSize(size);
+  return blocks(0, size);
+}
+
+/**
+ * `MTH` of a range from the hashes of its perfect subtrees, as a `*Subtrees`
+ * function lists them: `node(s_0, node(s_1, … node(s_{m−2}, s_{m−1})))`.
+ */
+export function foldSubtrees(h: TreeHash, hashes: readonly Uint8Array[]): Uint8Array {
+  if (!Array.isArray(hashes) || hashes.length === 0)
+    throw new RangeError("a range has at least one subtree");
+  let r = hashes.at(-1) as Uint8Array;
+  for (let i = hashes.length - 2; i >= 0; i--) r = h.node(hashes[i] as Uint8Array, r);
+  return r;
+}
+
+/** `PATH(m, D[from:to])` as ranges, §2.1.3.1. */
+function pathRanges(m: number, from: number, to: number): SubtreeId[][] {
+  const n = to - from;
+  if (n === 1) return [];
+  const k = split(n);
+  return m < k
+    ? [...pathRanges(m, from, from + k), blocks(from + k, to)]
+    : [...pathRanges(m - k, from + k, to), blocks(from, from + k)];
+}
+
+/**
+ * The audit path of leaf `index` in the tree of `size` leaves (as
+ * `inclusionProof` computes it), one entry per hash of the path, each the
+ * perfect subtrees `foldSubtrees` turns into that hash.
+ */
+export function inclusionProofSubtrees(index: number, size: number): SubtreeId[][] {
+  checkSize(size);
+  if (!Number.isSafeInteger(index) || index < 0 || index >= size)
+    throw new RangeError("index must be a leaf of the tree");
+  return pathRanges(index, 0, size);
+}
+
+/** `SUBPROOF(m, D[from:to], b)` as ranges, §2.1.4.1. */
+function subproofRanges(m: number, from: number, to: number, b: boolean): SubtreeId[][] {
+  const n = to - from;
+  if (m === n) return b ? [] : [blocks(from, to)];
+  const k = split(n);
+  return m <= k
+    ? [...subproofRanges(m, from, from + k, b), blocks(from + k, to)]
+    : [...subproofRanges(m - k, from + k, to, false), blocks(from, from + k)];
+}
+
+/**
+ * The consistency proof from the tree of `size1` leaves to the tree of
+ * `size2` (as `consistencyProof` computes it), one entry per hash of the
+ * proof, each the perfect subtrees `foldSubtrees` turns into that hash.
+ */
+export function consistencyProofSubtrees(size1: number, size2: number): SubtreeId[][] {
+  checkSize(size2);
+  if (!Number.isSafeInteger(size1) || size1 < 1 || size1 > size2)
+    throw new RangeError("size1 must be from 1 to the tree's size");
+  return size1 === size2 ? [] : subproofRanges(size1, 0, size2, true);
+}
+
+/**
+ * The perfect subtrees that leaf `size` completes when it is appended to a
+ * tree of `size` leaves, smallest first: its own leaf hash, then each parent
+ * it closes. `frontier` holds the hashes of `rootSubtrees(size)` in order (none
+ * for an empty tree); the last of them pairs with the new leaf first, as in
+ * `merkleRoots`.
+ */
+export function appendSubtrees(
+  h: TreeHash,
+  frontier: readonly Uint8Array[],
+  size: number,
+  leaf: Uint8Array,
+): Subtree[] {
+  if (!Number.isSafeInteger(size) || size < 0 || size >= Number.MAX_SAFE_INTEGER)
+    throw new RangeError("size must be a safe integer below the largest one");
+  const expected = size === 0 ? 0 : blocks(0, size).length;
+  if (!Array.isArray(frontier) || frontier.length !== expected || !frontier.every(isHash))
+    throw new RangeError("frontier must hold one 32-byte hash per subtree of the tree");
+  if (!(leaf instanceof Uint8Array) || !ArrayBuffer.isView(leaf))
+    throw new TypeError("leaf must be bytes");
+  let hash = h.leaf(new Uint8Array(leaf));
+  let level = 0;
+  let index = size;
+  const out: Subtree[] = [{ level, index, hash }];
+  for (let j = frontier.length - 1; index % 2 === 1; j--) {
+    hash = h.node(frontier[j] as Uint8Array, hash);
+    index = (index - 1) / 2;
+    level++;
+    out.push({ level, index, hash });
+  }
+  return out;
+}

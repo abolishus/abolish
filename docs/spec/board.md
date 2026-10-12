@@ -190,7 +190,7 @@ The checks run in this order, failing at the first problem:
 
 Every other code is an election check: the operator writes the envelopes, the order and the segments, and the anchoring authority the checkpoints, so any such failure is theirs (T-23). A failure of the record inside a payload isn't one of these ([[verifier]], Admission checks). While an election runs, a segment whose window is still open isn't failed for lacking a checkpoint, so live monitoring (P4-5) can run these checks too.
 
-Entries the operator dropped before anchoring are, to the public verifier, simply not part of the board: it can't tell a dropped entry from a forged one. Only the voter whose entry it was can detect the drop, by the client checks above, and its receipt is then evidence a third party can check: an `unanchored` or `forked` receipt, and a drop when no admitted entry carries its ballot by content ([[receipts]], Later checks; T-23, T-25, T-26).
+Entries the operator dropped before anchoring are, to the public verifier, simply not part of the board: it can't tell a dropped entry from a forged one. Only the voter whose entry it was can detect the drop, by the client checks above, and, once the receipt keys are the anchoring authority's (P1-13b part 2b), its receipt is evidence a third party can check: an `unanchored` or `forked` receipt, and a drop when no admitted entry carries its ballot by content ([[receipts]], Later checks; T-23, T-25, T-26).
 
 ## Why both a chain and a tree
 

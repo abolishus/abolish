@@ -58,17 +58,26 @@ export async function startAnvil(chainId: bigint): Promise<Anvil> {
     ["--host", "127.0.0.1", "--port", String(port), "--chain-id", chainId.toString(), "--silent"],
     { stdio: ["ignore", "ignore", "inherit"] },
   );
-  const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
+  // A binary that isn't on PATH emits "error" and never "exit".
+  const exited = new Promise<void>((resolve) => {
+    child.once("exit", () => resolve());
+    child.once("error", () => resolve());
+  });
   const spawnError = new Promise<never>((_, reject) => child.once("error", reject));
+  spawnError.catch(() => {});
   const url = `http://127.0.0.1:${port}`;
   const rpc = rpcClient(url);
   const stop = async () => {
-    if (child.exitCode === null) child.kill("SIGTERM");
+    if (child.exitCode === null && child.pid !== undefined) child.kill("SIGTERM");
     await exited;
   };
   for (let attempt = 0; ; attempt++) {
     try {
-      await Promise.race([rpc.call("eth_chainId"), spawnError]);
+      const answered = await Promise.race([rpc.call<string>("eth_chainId"), spawnError]);
+      // The port was free when chosen, not reserved: make sure the node that
+      // answered is the one started here.
+      if (child.exitCode !== null || BigInt(answered) !== chainId)
+        throw new Error(`another node answered on port ${port}`);
       return { url, call: rpc.call, stop };
     } catch (e) {
       if (attempt >= 100 || child.exitCode !== null) {

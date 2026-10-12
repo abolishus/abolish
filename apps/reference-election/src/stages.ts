@@ -17,8 +17,8 @@ export const STAGES: readonly Stage[] = Object.freeze([
   {
     id: 1,
     name: "Trustee key ceremony with public transcript",
-    coverage: "covered",
-    note: "a 4-of-7 panel runs the four-round ceremony through @abolishus/crypto with every seat; the transcript is board entry 0, and the verifier's 3.2 must pass on it",
+    coverage: "partial",
+    note: "a 4-of-7 panel runs the four-round ceremony through @abolishus/crypto with every seat; the transcript is board entry 0, and the verifier's 3.2 must pass on it; the panel isn't pinned and nothing is registered on L2, so 3.1 can't pass (P1-18, P1-19)",
   },
   {
     id: 2,

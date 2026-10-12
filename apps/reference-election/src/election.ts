@@ -110,11 +110,23 @@ export function displayText(): DisplayText {
   };
 }
 
+export interface CeremonyOptions {
+  /** The election registry's counter: each election of a run needs its own. */
+  readonly counter: bigint;
+  /** How many seats, from the last, send nothing at all. */
+  readonly absent: number;
+}
+
 /**
- * Creates the election's stub, runs the key ceremony over it with every seat
- * taking part, and returns the definition that binds the transcript.
+ * Creates the election's stub, runs the key ceremony over it with all but
+ * `absent` seats taking part, and returns the definition that binds the
+ * transcript.
  */
-export function runCeremony(timing: Timing, text: DisplayText): Ceremony {
+export function runCeremony(
+  timing: Timing,
+  text: DisplayText,
+  { counter, absent }: CeremonyOptions,
+): Ceremony {
   const trustees: Trustee[] = Array.from({ length: PANEL.size }, (_, i) => ({
     index: i + 1,
     identitySecret: crypto.getRandomValues(new Uint8Array(32)),
@@ -126,8 +138,7 @@ export function runCeremony(timing: Timing, text: DisplayText): Ceremony {
   const electionRegistry = placeholder("election-registry");
   const stub: ElectionDefinition = {
     profile: profile(),
-    // The registry's first election: the counter starts at 0.
-    election_id: electionId(L2_CHAIN_ID, electionRegistry, 0n),
+    election_id: electionId(L2_CHAIN_ID, electionRegistry, counter),
     l2_chain_id: L2_CHAIN_ID,
     l1_chain_id: timing.l1ChainId,
     election_registry: electionRegistry,
@@ -162,7 +173,9 @@ export function runCeremony(timing: Timing, text: DisplayText): Ceremony {
     panel,
     runId: crypto.getRandomValues(new Uint8Array(32)),
   };
-  const seats = trustees.map((t) => ceremonyKeygen(t.index, t.identitySecret));
+  const seats = trustees
+    .slice(0, trustees.length - absent)
+    .map((t) => ceremonyKeygen(t.index, t.identitySecret));
   const keys = seats.map((s) => keysMessage(params, s));
   const challenges = seats.map((s) => challengesMessage(params, s, keys));
   const round2 = challenges.map((c) => c.message);

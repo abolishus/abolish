@@ -1,5 +1,5 @@
 import { expect, test } from "vite-plus/test";
-import { checkExpectations, checkTamperedCopy, REQUIRED_PASSES } from "../src/expectations.ts";
+import { checkControl, checkExpectations, REQUIRED_PASSES } from "../src/expectations.ts";
 import type { ReportRow } from "../src/verify.ts";
 import { STAGES } from "../src/stages.ts";
 
@@ -52,16 +52,24 @@ test("any failed row, a failed verdict or a verified one stops the run", () => {
   ]);
 });
 
-test("the tampered control must not pass 3.2", () => {
-  expect(checkTamperedCopy(honest)).toEqual([
-    "check 3.2 passed on a copy with an altered transcript",
+test("a control must show each row it pins, with its code", () => {
+  const report = { verdict: "unverifiable", checks: rows({ "3.2": "unverifiable" }) };
+  expect(checkControl("c", { report }, { "3.2": { status: "unverifiable", code: "x" } })).toEqual(
+    [],
+  );
+  expect(checkControl("c", { report }, { "3.2": { status: "unverifiable", code: "y" } })).toEqual([
+    "control c: check 3.2 must be unverifiable y, got unverifiable x",
   ]);
-  expect(
-    checkTamperedCopy({ report: { ...honest.report, checks: rows({ "3.2": "unverifiable" }) } }),
-  ).toEqual([]);
+  expect(checkControl("c", { report }, { "4.1": { status: "fail" } })).toEqual([
+    "control c: check 4.1 must be fail , got pass ",
+  ]);
+  expect(checkControl("c", { report }, { "9.9": { status: "pass" } })).toEqual([
+    "control c: check 9.9 must be pass , got no row ",
+  ]);
 });
 
 test("the transcript lists the nine stages of AGENTS.md once each, in order", () => {
   expect(STAGES.map((s) => s.id)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
-  expect(STAGES.find((s) => s.id === 1)?.coverage).toBe("covered");
+  // A stage not yet covered names the items that bring it.
+  for (const s of STAGES) if (s.coverage !== "covered") expect(s.note).toMatch(/P\d-\d+/);
 });

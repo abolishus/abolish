@@ -2,7 +2,7 @@
 // that becomes covered adds the rows it must make pass; a row that fails, or
 // a failed verdict, always stops the run.
 
-import type { VerifierRun } from "./verify.ts";
+import type { ReportRow, VerifierRun } from "./verify.ts";
 
 /**
  * Rows that must pass on the honest run: 3.2 (the ceremony, stage 1) and 4.1
@@ -38,12 +38,30 @@ export function checkExpectations(run: Pick<VerifierRun, "report" | "exitCode">)
   return problems;
 }
 
+/** A row as a control expects it. */
+export interface ExpectedRow {
+  readonly status: ReportRow["status"];
+  readonly code?: string;
+}
+
 /**
- * Why a run over a copy whose transcript was altered isn't what it must be:
- * the ceremony check can't pass on bytes the definition doesn't bind, so a
- * pass on the honest run isn't vacuous.
+ * Why a control's report differs from the rows it must show; empty if it
+ * doesn't. A control pins each row's code, not only that it didn't pass, so
+ * it can't be satisfied by an unrelated reason such as a rejected bundle.
  */
-export function checkTamperedCopy(run: Pick<VerifierRun, "report">): string[] {
-  const row = run.report.checks.find((c) => c.id === "3.2");
-  return row?.status === "pass" ? ["check 3.2 passed on a copy with an altered transcript"] : [];
+export function checkControl(
+  name: string,
+  run: Pick<VerifierRun, "report">,
+  expected: Readonly<Record<string, ExpectedRow>>,
+): string[] {
+  const rows = new Map(run.report.checks.map((c) => [c.id, c]));
+  const problems: string[] = [];
+  for (const [id, want] of Object.entries(expected)) {
+    const got = rows.get(id);
+    if (got?.status !== want.status || got.code !== want.code)
+      problems.push(
+        `control ${name}: check ${id} must be ${want.status} ${want.code ?? ""}, got ${got?.status ?? "no row"} ${got?.code ?? ""}`,
+      );
+  }
+  return problems;
 }

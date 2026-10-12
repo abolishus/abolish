@@ -53,6 +53,3 @@ reference-election-output/
 
 # Python bytecode (vector generators run with python3 -I -B)
 __pycache__/
-
-# Reference election (P1-20)
-reference-election-output/

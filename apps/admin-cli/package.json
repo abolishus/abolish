@@ -2,7 +2,7 @@
   "name": "@abolishus/admin-cli",
   "version": "0.0.0",
   "private": true,
-  "description": "The operator's command line: moderation and simulations. Source-only.",
+  "description": "The operator's command line: moderation now; simulations to come. Source-only.",
   "license": "AGPL-3.0-only",
   "type": "module",
   "exports": {
@@ -16,7 +16,6 @@
   },
   "dependencies": {
     "@abolishus/core": "workspace:*",
-    "@abolishus/sdk": "workspace:*",
     "postgres": "catalog:",
     "zod": "catalog:"
   },

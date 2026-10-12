@@ -56,7 +56,7 @@ const bytes = (id: string) => new Uint8Array(Buffer.from(id, "hex"));
 async function cli(...argv: string[]) {
   const out: Record<string, unknown>[] = [];
   const err: Record<string, unknown>[] = [];
-  const code = await run(argv, () => app, {
+  const code = await run(argv, app, {
     // Through JSON, as main.ts prints them: a bigint or Date left unconverted
     // fails here.
     out: (v) => out.push(JSON.parse(JSON.stringify(v))),
@@ -238,7 +238,7 @@ test("any other failure exits 3 with its kind only, never its message", async ()
   const closed = await db.as("abolish_app");
   await closed.end();
   const err: unknown[] = [];
-  const code = await run(["moderation", "status", "00".repeat(32)], () => closed, {
+  const code = await run(["moderation", "status", "00".repeat(32)], closed, {
     out: () => expect.unreachable(),
     err: (v) => err.push(v),
   });

@@ -7,7 +7,6 @@ import type { Sql } from "postgres";
 import { parseArgs } from "node:util";
 import { CliError, UsageError } from "./errors.ts";
 import { moderationCommands } from "./moderation.ts";
-import { simulationCommands } from "./simulation.ts";
 
 export interface CliIo {
   /** One JSON value per call; each becomes a line on stdout. */
@@ -16,28 +15,20 @@ export interface CliIo {
   readonly err: (value: unknown) => void;
 }
 
-type Values = Readonly<Record<string, string | boolean | (string | boolean)[] | undefined>>;
-
-interface CommandShape {
+export interface Command {
   readonly usage: string;
   readonly options: NonNullable<Parameters<typeof parseArgs>[0]>["options"];
   readonly positionals: number;
+  run(
+    sql: Sql,
+    positionals: readonly string[],
+    values: Readonly<Record<string, string | boolean | (string | boolean)[] | undefined>>,
+    io: CliIo,
+  ): Promise<void>;
 }
 
-/** A command on the operator's database. */
-export interface Command extends CommandShape {
-  run(sql: Sql, positionals: readonly string[], values: Values, io: CliIo): Promise<void>;
-}
-
-/** A command that never touches the database, such as a simulation, so it runs without one. */
-export interface OfflineCommand extends CommandShape {
-  readonly offline: true;
-  run(positionals: readonly string[], values: Values, io: CliIo): Promise<void>;
-}
-
-const GROUPS: Readonly<Record<string, Readonly<Record<string, Command | OfflineCommand>>>> = {
+const GROUPS: Readonly<Record<string, Readonly<Record<string, Command>>>> = {
   moderation: moderationCommands,
-  simulation: simulationCommands,
 };
 
 export function usage(): string {
@@ -51,11 +42,9 @@ export function usage(): string {
 /**
  * Runs one command and returns its exit code: 0 on success, 1 when core
  * refuses it, 2 for malformed arguments, 3 for any other failure, so a caller
- * can tell a refusal from a broken deployment. `connect` opens the database
- * connection; only a command on the database calls it, so a simulation runs
- * where no database is configured.
+ * can tell a refusal from a broken deployment.
  */
-export async function run(argv: readonly string[], connect: () => Sql, io: CliIo): Promise<number> {
+export async function run(argv: readonly string[], sql: Sql, io: CliIo): Promise<number> {
   const [group, name, ...rest] = argv;
   const command = group === undefined || name === undefined ? undefined : GROUPS[group]?.[name];
   try {
@@ -73,8 +62,7 @@ export async function run(argv: readonly string[], connect: () => Sql, io: CliIo
     }
     if (parsed.positionals.length !== command.positionals)
       throw new UsageError("wrong number of arguments");
-    if ("offline" in command) await command.run(parsed.positionals, parsed.values, io);
-    else await command.run(connect(), parsed.positionals, parsed.values, io);
+    await command.run(sql, parsed.positionals, parsed.values, io);
     return 0;
   } catch (e) {
     if (e instanceof UsageError) {

@@ -596,6 +596,36 @@ contract BoardAnchorTest is TestBase {
         );
     }
 
+    /// A representative version-1 locator (a 32-byte Arweave transaction ID)
+    /// passes the detector in calldata, log and storage. The body isn't
+    /// interpreted, so text in it is accepted: the authority's chosen bytes
+    /// are T-17's stated residual, and this test keeps that residual honest.
+    function test_LocatorCarriesNoTextButCould() public {
+        bytes memory loc = abi.encodePacked(uint16(1), sha256("arweave transaction"));
+        vm.recordLogs();
+        vm.prank(authority);
+        anchor.anchor("", loc);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        assertTrue(
+            !_looksLikeText(abi.encodeCall(BoardAnchor.anchor, (bytes(""), loc))), "calldata"
+        );
+        assertTrue(!_looksLikeText(logs[0].data), "event data");
+        uint256 base = uint256(0x16eba4501d0a9dddbfa03518d843c364be664629e6d99efb7169d8f090095b00);
+        bytes32 data = keccak256(abi.encode(base + 2));
+        bytes memory stored = bytes.concat(
+            vm.load(address(anchor), bytes32(uint256(data))),
+            vm.load(address(anchor), bytes32(uint256(data) + 1))
+        );
+        assertTrue(!_looksLikeText(stored), "storage");
+
+        bytes memory text = abi.encodePacked(uint16(1), "Alice Smith, alice@example.com");
+        assertTrue(_looksLikeText(text), "detector misses the text");
+        vm.prank(authority);
+        anchor.anchor("", text);
+        (bytes memory got,) = anchor.latestLocator();
+        assertTrue(keccak256(got) == keccak256(text), "text accepted (T-17 residual)");
+    }
+
     // --- fuzz ----------------------------------------------------------------
 
     /// Far from any window, nothing is stored.

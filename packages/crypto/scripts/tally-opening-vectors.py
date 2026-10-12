@@ -345,13 +345,17 @@ def main():
     # Elections: the checks over every opening on a board.
     elections = []
 
-    def election(id_, desc, cells, records, expect):
-        """`records` are tally openings, or raw payloads (bytes) that may not decode."""
+    def election(id_, desc, cells, records, expect, boarded_after=None):
+        """`records` are tally openings, or raw payloads (bytes) that may not decode. `boarded_after`
+        lists, per cell, ballots boarded after the counted extent: they never enter `cells`."""
         recs = [o if isinstance(o, bytes) else encode(o) for o in records]
         got = check_tally(definition_hash, m, k, registered, cells, recs)
         for key, want in expect.items():
             assert got.get(key) == want, (id_, key, got.get(key), want)
-        elections.append({"id": id_, "description": desc, "cells": [[bv.enc_vss(b).hex() for b in c] for c in cells], "openings": [b.hex() for b in recs], "result": got})
+        entry = {"id": id_, "description": desc, "cells": [[bv.enc_vss(b).hex() for b in c] for c in cells], "openings": [b.hex() for b in recs], "result": got}
+        if boarded_after is not None:
+            entry["boardedAfter"] = [[bv.enc_vss(b).hex() for b in c] for c in boarded_after]
+        elections.append(entry)
 
     honest0, honest1 = record(0, 1, open0), record(1, 2, open1)
 
@@ -474,6 +478,18 @@ def main():
         [record(0, 1, open_stale, agg=agg_of(stale)), record(0, 2, open0), honest1],
         {"ok": True},
     )
+
+    late = make_cell("tier-0-late", [[0, 1, 0]])[0]
+    election(
+        "late-ballot",
+        "Honest openings over the counted extent; a valid ballot for cell 0 is boarded only after it (listed in boardedAfter). The counted set never includes it, so the cell passes and no trustee is blamed; counting it would make both openings tally-aggregate",
+        two,
+        [honest0, honest1],
+        {"ok": True},
+        boarded_after=[late, []],
+    )
+    widened = check_tally(definition_hash, m, k, registered, [tier0 + late, tier1], [encode(honest0), encode(honest1)])
+    assert widened["cells"][0]["failing"] == [{"at": 0, "signer": 1, "code": "tally-aggregate"}]
 
     by_id = {e["id"]: e["result"] for e in elections}
     assert by_id["failing-attributed"]["cells"][0]["failing"] == [{"at": 0, "signer": 1, "code": "tally-opening", "option": 1}]

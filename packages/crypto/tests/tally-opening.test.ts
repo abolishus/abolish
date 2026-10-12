@@ -81,6 +81,7 @@ interface Vectors {
     readonly id: string;
     readonly cells: readonly (readonly string[])[];
     readonly openings: readonly string[];
+    readonly boardedAfter?: readonly (readonly string[])[];
     readonly result: {
       readonly ok: boolean;
       readonly failure?: { readonly cell: number; readonly code: string; readonly option?: number };
@@ -157,6 +158,18 @@ describe("tally-opening.json", () => {
     const cells = v.cells.map((c) => c.map((b) => decode(VSS, hex(b)) as CommittedVote["vss"]));
     const payloads = v.openings.map((b) => hex(b));
     expect(asVector(checkTally(election, cells, payloads, 1))).toEqual(v.result);
+    if (v.boardedAfter === undefined) return;
+    // What the counted extent rule prevents: counting a ballot boarded after
+    // it would turn every honest opening of its cell into tally-aggregate.
+    const widened = cells.map((c, i) => [
+      ...c,
+      ...(v.boardedAfter?.[i] ?? []).map((b) => decode(VSS, hex(b)) as CommittedVote["vss"]),
+    ]);
+    const r = checkTally(election, widened, payloads, 1);
+    expect(r.ok).toBe(false);
+    for (const [i, extra] of v.boardedAfter.entries())
+      if (extra.length > 0)
+        expect(r.cells[i]?.failing.every((f) => f.code === "tally-aggregate")).toBe(true);
   });
 });
 

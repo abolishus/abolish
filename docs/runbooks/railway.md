@@ -89,7 +89,7 @@ _(part 2)_ Every merge to `main`, once `ci`, `repro-build` and `reference-electi
 
 ## Rolling back
 
-Redeploy `api` at the previous digest, from the last successful deploy run or the service's deployment history in Railway. Never by tag.
+Redeploy `api` at the previous digest in Railway, from the service's deployment history (each deploy run's summary also names its digest). Never by tag, and never by re-running an old deploy run: the workflow deploys only `main`'s head and fails such a re-run before it touches anything (#74).
 
 Migrations are forward-only (`packages/core`, Database), and `migrate.mjs` refuses to run if an applied file changed or disappeared, so a rollback never migrates: in Railway, redeploy the `api` service's earlier deployment, which keeps its digest. A migration must therefore keep the previous release working: add, never rename or drop, in the release that introduces it, and remove what's unused only in a later one. A release that can't follow that rule says so in its PR, and rolling back past it means restoring the database (below) rather than redeploying.
 

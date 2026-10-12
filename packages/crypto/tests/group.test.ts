@@ -245,7 +245,11 @@ describe("hash layer", () => {
 
   test("every specified tag used as a DST is at least 16 bytes", () => {
     for (const { tag, primitive } of TAG_REGISTRY)
-      if (primitive === "fiat-shamir" || primitive === "hash-to-curve")
+      if (
+        primitive === "fiat-shamir" ||
+        primitive === "fiat-shamir-bjj" ||
+        primitive === "hash-to-curve"
+      )
         expect(tag.length, tag).toBeGreaterThanOrEqual(16);
   });
 
@@ -259,8 +263,12 @@ describe("hash layer", () => {
       // The generic layer (expand_message_xmd, hash_to_field) takes a DST too,
       // but src/ has no reason to reach it except through ristretto255_hasher.
       // abstract/poseidon.js (the tier tree's Poseidon) is the one abstract
-      // module allowed, and it has no hash-to-curve.
-      if (/@noble\/curves\/abstract\/(?!poseidon\.js")/.test(source))
+      // module allowed everywhere, and it has no hash-to-curve. The keyed
+      // nullifier's HashToScalarBJJ is RFC 9380 hash_to_field itself
+      // (docs/spec/keyed-nullifier.md), so that file alone may import it, and
+      // only with an explicit DST (checked below).
+      const abstract = /@noble\/curves\/abstract\/(?!poseidon\.js")/;
+      if (name !== "keyed-nullifier.ts" && abstract.test(source))
         throw new Error(`${name}: imports the generic hash-to-curve layer`);
       // Only these two names, so no OPRF or other bundle with its own default
       // DSTs, and the hasher only in the call form checked below (no
@@ -289,6 +297,12 @@ describe("hash layer", () => {
             'import { bn254 } from "@noble/curves/bn254.js";',
             'import { bn254_Fr } from "@noble/curves/bn254.js";',
             'import { grainGenConstants, poseidon, type PoseidonFn } from "@noble/curves/abstract/poseidon.js";',
+            ...(name === "keyed-nullifier.ts"
+              ? [
+                  'import { hash_to_field } from "@noble/curves/abstract/hash-to-curve.js";',
+                  'import { babyjubjub } from "@noble/curves/misc.js";',
+                ]
+              : []),
           ],
           `${name}: ${line}`,
         ).toContain(line);
@@ -298,6 +312,15 @@ describe("hash layer", () => {
         expect(code, name).not.toMatch(/hashToCurve|hash_to_curve|hasher/);
       if (code.includes("@noble/curves/secp256k1.js"))
         expect(code, name).not.toMatch(/secp256k1_|schnorr|hashToCurve|hash_to_curve|hasher/);
+      // Baby Jubjub's group only (its EdDSA bundle hashes with its own
+      // conventions), and hash_to_field only with the checked DST.
+      if (code.includes("@noble/curves/misc.js"))
+        expect(code.match(/babyjubjub(?!\.Point\b)/g)?.length, name).toBe(1);
+      if (code.includes("@noble/curves/abstract/hash-to-curve.js")) {
+        const uses = [...code.matchAll(/hash_to_field\(([^;]*?\})\)/gs)];
+        expect(uses.length, name).toBe(1);
+        expect(uses[0]?.[1], name).toMatch(/\{\s*DST: new Uint8Array\(dst\),/);
+      }
       for (const m of source.matchAll(/ristretto255_hasher\.(\w+)\(([^;]*?)\);/gs)) {
         calls++;
         expect(m[2], `${name}: ${m[0]}`).toMatch(/, \{ DST: checkDst\(dst\) \}$/);

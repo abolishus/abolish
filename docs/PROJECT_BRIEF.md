@@ -42,7 +42,7 @@ We're building a production-grade, open-source, publicly auditable voting platfo
   - `claude-review`: general correctness and threat-model review.
   - `crypto-review`: adversarial review at the highest effort, with its own prompt.
   - Both fail the check on any blocking finding.
-- At most 2 open PRs at once. Each run: fix your red PRs first, then rebase conflicting ones, then start the next unblocked STATUS.md item. After 3 failed attempts on one PR, label it `blocked`, record why in STATUS.md, and move on.
+- At most 3 PRs in flight at once (a draft, or ready with checks pending or failing; green PRs waiting only on owner review don't count). Each run: fix your red PRs first, then rebase conflicting ones, then start the next unblocked STATUS.md item. After 3 failed attempts on one PR, label it `blocked`, record why in STATUS.md, and move on.
 - Always work from the latest `main`. Other runs merge constantly, so:
   - Before any work on a branch (a new item, a fix, a rebase, a review response), run `git fetch origin` and rebase the branch onto `origin/main`. Create new branches from `origin/main`, never from a local `main`.
   - Right before every push, fetch and rebase again. If `main` moved, rerun the affected tests before pushing.

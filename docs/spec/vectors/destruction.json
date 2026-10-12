@@ -662,6 +662,20 @@
       "error": "unexpected-record-type"
     },
     {
+      "id": "v4-receipt-record-type",
+      "description": "A version-4 entry still refuses the voter's receipt (0x0004), which stays with its voter",
+      "version": 4,
+      "encoding": "00070467e79b9b50a36dce9f874b2f26841618e19a93716ac786c30d2dbb9d6939900200000000000000090000000d0000000400040100",
+      "error": "unexpected-record-type"
+    },
+    {
+      "id": "v4-definition-type",
+      "description": "A version-4 entry refuses an election definition (0x0001), which reaches the board only as its registration's contract event",
+      "version": 4,
+      "encoding": "00070467e79b9b50a36dce9f874b2f26841618e19a93716ac786c30d2dbb9d6939900200000000000000090000000d0000000400010100",
+      "error": "unexpected-record-type"
+    },
+    {
       "id": "v4-summed-share-type",
       "description": "A version-4 entry refuses a summed-share message (0x000b), which never leaves the trustees",
       "version": 4,

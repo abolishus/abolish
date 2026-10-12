@@ -244,7 +244,7 @@ Type descriptors:
 - `statements`: signed statements. Each has `id`, `description`, `signingSecret` (32 bytes big-endian, hex; test data), `signingKey`, `definitionHash`, `signer`, `message` (the signed bytes, header included, hex), `signature` (RFC 6979 after the low-s rule) and `encoding` (the record, hex).
 - `decodeErrors`: each has `id`, `description`, `encoding` (hex), `error` (the decode error code) and `offset`; the known type is `0x000f`, version 1.
 - `reports`: each has `id`, `description`, `firstPassing` (per cell, the segment of its first passing opening, or `null`), `windowSegment` (`s_T`), `entries` (the destruction-statement payloads in the sealed extent, in board order, each with its `segment` and `payload`, hex; some don't decode) and `result`: `from` (the destruction segment), `seats` (per registered seat, `seat`, `code` and, unless it is `destruction-missing`, `at`), `duplicates` (`at`, `seat`), `unattributed` (`at`), `stray` (`at`, `signer` or `null`) and `rejected` (`at`, `error`); every `at` is a position in `entries`.
-- `boardEntries`: board-entry envelopes under version 1, 3 or 4, in the shape of `delivery.json`'s: version 4 carries a destruction statement and still refuses a share posting and a summed-share message; versions 1 and 3 refuse the statement.
+- `boardEntries`: board-entry envelopes under version 1, 3 or 4, in the shape of `delivery.json`'s: version 4 carries a destruction statement and still refuses a share posting, a summed-share message, a voter's receipt and a definition; versions 1 and 3 refuse the statement.
 
 ## Circuit vectors
 

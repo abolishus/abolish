@@ -363,6 +363,8 @@ def main():
     entry("v4-complaint-type", "A version-4 entry carrying a share-complaint header, as version 3 allows", 4, bytes.fromhex("000e0100"), None)
     entry("v4-ballot-type", "A version-4 entry carrying a ballot header, as version 1 allows", 4, bytes.fromhex("00020100"), None)
     entry("v4-posting-type", "A version-4 entry still refuses a share posting (0x000d): postings reach the board only as contract events", 4, bytes.fromhex("000d0100"), "unexpected-record-type")
+    entry("v4-receipt-record-type", "A version-4 entry still refuses the voter's receipt (0x0004), which stays with its voter", 4, bytes.fromhex("00040100"), "unexpected-record-type")
+    entry("v4-definition-type", "A version-4 entry refuses an election definition (0x0001), which reaches the board only as its registration's contract event", 4, bytes.fromhex("00010100"), "unexpected-record-type")
     entry("v4-summed-share-type", "A version-4 entry refuses a summed-share message (0x000b), which never leaves the trustees", 4, bytes.fromhex("000b0100"), "unexpected-record-type")
 
     data = {

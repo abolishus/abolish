@@ -93,6 +93,10 @@ How it is set up:
 - better-auth's rate limiter is off: it keys on addresses, which we don't keep. Per-address limits are the proxy's (P2-11); Turnstile comes in P2-5 part 2.
 - better-auth reads the clock itself, so session expiry isn't on an injected clock.
 
+### Auditing the board (`src/audit.ts`; T-23, T-66)
+
+The table's triggers check order and chaining but never hash, so a writer that bypassed `appendEntry`, or a corrupted or restored database, can store columns the payloads don't produce. `auditBoard(sql, id)` reads the board in one query, recomputes it with the verifier's own `checkBoard`, and compares every row's `entry_hash`, `prev_link` and `link`; it returns the size or throws `BoardAuditError` (`board-invalid`, `entry-hash-mismatch` or `link-mismatch`) with the first wrong index. `listBoards(sql)` lists every election with entries. `apps/worker` runs the audit on a schedule. It detects and repairs nothing: Postgres isn't authoritative.
+
 ### No joins (T-10)
 
 Accounts and ballots never join. The tests fail on a table missing from `TABLE_CLASSES`, on any foreign key that starts or ends at a board table or that leaves the account tables, on a board column with an account-like name, on an account column with a ballot-like name, and on any view, or any function naming tables of both classes.

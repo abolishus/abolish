@@ -3,8 +3,10 @@
 // than misread a message. Each request carries an id its response repeats.
 //
 // The worker holds what must never leave the device (from part 3, the
-// plaintext choice and its randomness), and the page does all I/O; a worker
-// takes no CSP from the page, so it has no network of its own (T-43).
+// plaintext choice and its randomness), and the page does all I/O. A worker
+// takes no CSP from the page's <meta>, so on a host that sends no CSP header
+// nothing in the browser restricts it: only the absence of network APIs from
+// its bytes keeps it off the network (T-43).
 
 import type { ElectionCheck } from "../election.ts";
 

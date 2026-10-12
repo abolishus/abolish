@@ -153,6 +153,23 @@ describe("the election definition", () => {
     ).toMatchObject({ ok: true });
   });
 
+  // A refusal names the first check that failed, in the spec's order.
+  test("names the first check that failed when several do", () => {
+    const illFormed = hex(vector(definitionVectors, "definition-one-option").encoding);
+    const other = new Uint8Array(32).fill(0xee);
+    expect(show(other, illFormed, anyText)).toEqual({ ok: false, problem: "another-election" });
+    const own = decodeElectionDefinition(illFormed).election_id;
+    expect(checkElectionToShow(own, new Uint8Array(32), illFormed, anyText)).toEqual({
+      ok: false,
+      problem: "unregistered-definition",
+    });
+    // A well-formed definition with text that is both foreign and malformed.
+    expect(show(typical.election_id, goodDefinition, new Uint8Array(3))).toEqual({
+      ok: false,
+      problem: "display-text-undecodable",
+    });
+  });
+
   test("refuses ids and hashes that aren't 32 bytes", () => {
     const registered = specHash("abolish/v1/election-definition", goodDefinition);
     for (const bad of [new Uint8Array(31), new Uint8Array(33)]) {

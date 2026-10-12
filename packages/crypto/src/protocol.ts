@@ -163,7 +163,9 @@ export type ShowCheck =
  * for `electionId`, read by the caller from the chain (or a proof of its
  * state), never from whoever served the records: without it, a server that
  * serves both records could commit a forged definition to relabelled text
- * (T-34, T-41).
+ * (T-34, T-41). The registry and chain are the deployment the caller's own
+ * release pins, never the `election_registry` or `l2_chain_id` a definition
+ * names, which a forged definition could point at a registry of its own.
  */
 export function checkElectionToShow(
   electionId: Uint8Array,

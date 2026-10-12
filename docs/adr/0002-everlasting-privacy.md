@@ -207,3 +207,8 @@ On 2026-10-11 the owner answered the three open questions:
 1. **Trustee duties (P1-7): accepted.** Trustees run synchronous intake, stay online during voting, keep the share ciphertexts until the tally, and then destroy their keys and stored shares. These duties run in automated trustee nodes ([[0006-trustees]]), not by hand. Naming the trustees remains a separate owner decision.
 2. **ML-KEM audit: hybrid now, audit before mainnet.** Share encryption uses a hybrid KEM (X25519 combined with ML-KEM-768 from `@noble/post-quantum`), so breaking a share needs both broken; a flaw in the unaudited ML-KEM code can't leave privacy below the Diffie–Hellman-only option. This is allowed on testnets only. An independent audit of the ML-KEM code in use is a mainnet prerequisite; funding one is an owner decision.
 3. **Election key: accepted.** The brief now says each ballot's opening is split across k-of-n trustees, matching option B. The trust property is unchanged.
+
+On 2026-10-12 the owner answered [[0016-share-kem-dh-group]] with its option A, which refines answer 2 and the Private part:
+
+- **"X25519" in answer 2 covers Curve25519 Diffie–Hellman in its ristretto255 encoding,** the commitment group, as share encryption uses it ([[share-encryption]]). Testnets only and the audit before mainnet still hold; the audit covers the hybrid's combiner and composition as well as the ML-KEM code.
+- **The AEAD's associated data binds the definition, ballot record type and version, seat and VSS commitments,** not the tier and nullifier the Private part lists, so a challenged ballot's ciphertexts can be made before its nullifier. The validity proofs bind both.

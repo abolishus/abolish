@@ -108,3 +108,28 @@ export function parseFields(
   }
   return out;
 }
+
+/**
+ * RFC 8439 §2.8.2 and Appendix A.5: hex blocks, each after a label line (its
+ * colon optional), as hex dumps (`000  4c 61 …  Ladies`) or colon-separated
+ * bytes. Prose and page breaks end a block; the caller checks each block's
+ * length, so a line the patterns miss fails there.
+ */
+export function parseLabelledHex(lines: readonly string[]): Map<string, string> {
+  const out = new Map<string, string>();
+  let label: string | undefined;
+  for (const line of lines) {
+    const data =
+      /^ {2,3}\d{3} {2}((?:[0-9a-f]{2} )*[0-9a-f]{2})(?: {2}|$)/.exec(line) ??
+      /^ {2,3}((?:[0-9a-f]{2}:)*[0-9a-f]{2}):?$/.exec(line);
+    const head = /^ {2,3}([A-Za-z0-9][A-Za-z0-9 -]*?):{0,2}\s*$/.exec(line);
+    if (data !== null) {
+      if (label !== undefined)
+        out.set(label, out.get(label) + (data[1] ?? "").replaceAll(/[ :]/g, ""));
+    } else if (head !== null) {
+      label = head[1] ?? "";
+      out.set(label, "");
+    } else if (line.trim() !== "") label = undefined;
+  }
+  return out;
+}

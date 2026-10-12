@@ -479,6 +479,14 @@ def main():
     flip = reblinded("flip", bp, lambda j: False)
     flipped = [{"f": [(1 - bp[0]["f"][0]) % L] + flip[0]["f"][1:], "g": [bp[0]["g"][0]] + flip[0]["g"][1:]}] + flip[1:]
     shift = reblinded("shift", bp, lambda j: False)
+    coef_r = reblinded("coef", bp, lambda j: False)
+    coef = [{"f": [bp[0]["f"][0]] + coef_r[0]["f"][1:], "g": [bp[0]["g"][1]] + coef_r[0]["g"][1:]}] + coef_r[1:]
+    seat_r = reblinded("seatshare", bp, lambda j: False)
+    fcoef_r = reblinded("fcoef", bp, lambda j: False)
+    fcoef = [{"f": [bp[0]["f"][0]] + fcoef_r[0]["f"][1:], "g": [bp[1]["f"][1]] + fcoef_r[0]["g"][1:]}] + fcoef_r[1:]
+    eph_r = reblinded("eph", bp, lambda j: False)
+    eph = [{"f": [bp[0]["f"][0]] + eph_r[0]["f"][1:], "g": [base["seats"][0]["e"]] + eph_r[0]["g"][1:]}] + eph_r[1:]
+    seatshare = [{"f": [bp[0]["f"][0]] + seat_r[0]["f"][1:], "g": [bv.evaluate(bp[0]["g"], 2)] + seat_r[0]["g"][1:]}] + seat_r[1:]
     shifted = [{"f": [bp[0]["f"][0]] + shift[0]["f"][1:], "g": [(bp[0]["g"][0] + 1) % L] + shift[0]["g"][1:]}] + shift[1:]
     moved = reblinded("moved", [bp[1], bp[0], bp[2]], lambda j: j == 0)
     cases = (
@@ -492,6 +500,10 @@ def main():
         ("fresh-randomness", "The same votes with a fresh r_j for every option: no commitment in common", core_from("fresh-r", reblinded("none", bp, lambda j: False)), False),
         ("other-vote", "The blank opening's core", honest["plurality-blank"], False),
         ("other-election", "The same commitments named under the approval election's definition hash (an opened C_j cast in another election is a residual, challenge.md)", {**base, "definitionHash": approval["definitionHash"]}, False),
+        ("higher-coefficient", "Option 0's vote under b_{0,1}, g_0's revealed higher coefficient, every other commitment fresh", core_from("coef", coef), True),
+        ("seat-share", "Option 0's vote under g_0(2), seat 2's revealed share, every other commitment fresh", core_from("seatshare", seatshare), True),
+        ("vote-coefficient", "Option 0's vote under a_{1,1}, f_1's revealed higher coefficient, every other commitment fresh", core_from("fcoef", fcoef), True),
+        ("seat-ephemeral", "Option 0's vote under seat 1's revealed e_1, every other commitment fresh", core_from("eph", eph), True),
     )
     opened_commitments = []
     base_code = core_hash(base["definitionHash"], base["tier"], base["vss"], base["shareHashes"])
@@ -500,8 +512,19 @@ def main():
         opened_set = set()
         for row, p in zip(base["vss"], bp):
             opened_set.add(grp.encode(row[0]))
-            opened_set.add(grp.encode(bv.pedersen(0, p["g"][0])))
-            opened_set.add(grp.encode(bv.pedersen(1, p["g"][0])))
+
+        # Every scalar the opening reveals: each coefficient of every f_j
+        # and g_j, each seat's shares f_j(i) and g_j(i), each seat's e and w.
+        revealed = set()
+        for p in bp:
+            for poly in (p["f"], p["g"]):
+                revealed.update(poly)
+                revealed.update(bv.evaluate(poly, i) for i in range(1, plural["panelSize"] + 1))
+        for st in base["seats"]:
+            revealed.update((st["e"], st["w"]))
+        for sc in revealed:
+            opened_set.add(grp.encode(bv.pedersen(0, sc)))
+            opened_set.add(grp.encode(bv.pedersen(1, sc)))
         shared = c["definitionHash"] == base["definitionHash"] and any(grp.encode(row[0]) in opened_set for row in c["vss"])
         assert shared == want, id_
         code = core_hash(c["definitionHash"], c["tier"], c["vss"], c["shareHashes"])

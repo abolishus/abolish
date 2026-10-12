@@ -222,6 +222,11 @@ def main(out):
     assert add("participation-six", "A 4-of-7 panel where seat 7 sends nothing: six qualified seats meet n − 1 (ADR 0006, rule 7).", six, [six], bundle_panel="panel-7", named="panel-7")["3.2"] == outcome("pass")
     five = transcript("verifier/panel-7-five", panel7, [1, 2, 3, 4, 5], election7)
     assert add("participation-five", "A 4-of-7 panel where seats 6 and 7 send nothing: five qualified seats meet k = 4 but not n − 1 = 6.", five, [five], bundle_panel="panel-7", named="panel-7")["3.2"]["code"] == "ceremony-participation"
+    def six_seven_bad(i, answers, *_):
+        return [bytes(32)] * len(answers) if i in (6, 7) else answers
+
+    disqualified = transcript("verifier/panel-7-disqualified", panel7, [1, 2, 3, 4, 5, 6, 7], election7, {"answers": six_seven_bad})
+    assert add("participation-disqualified", "A 4-of-7 panel where all seven seats send every round but seats 6 and 7 answer wrongly: five qualified seats, below n − 1, though seven took part in the messages.", disqualified, [disqualified], bundle_panel="panel-7", named="panel-7")["3.2"]["code"] == "ceremony-participation"
     four = transcript("verifier/panel-7-four", panel7, [1, 2, 3, 4], election7)
     assert add("participation-four", "A 4-of-7 panel where only seats 1 to 4 take part: exactly k, two short of n − 1.", four, [four], bundle_panel="panel-7", named="panel-7")["3.2"]["code"] == "ceremony-participation"
 

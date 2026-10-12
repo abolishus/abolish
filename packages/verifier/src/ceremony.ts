@@ -36,7 +36,7 @@ export interface CeremonyReport {
   /** The position in the copy, from 0, of the entry that carries the transcript (not its `index` field). */
   readonly entry: number;
   readonly seats: readonly { readonly index: number; readonly reasons: readonly SeatReason[] }[];
-  /** The qualified seats and their per-election signing keys; empty below quorum. */
+  /** The qualified seats and their per-election signing keys; empty when `ceremony-quorum` fails. */
   readonly registered: readonly { readonly index: number; readonly signingKey: string }[];
 }
 

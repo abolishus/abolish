@@ -147,6 +147,16 @@ describe("the served ballot client", () => {
           ).trustedTypes;
           tt.createPolicy("injected", {});
         },
+        // main.tsx creates ballot-worker before anything else runs, so code
+        // that runs later can't claim it to mint script URLs (T-43).
+        "the worker's policy": () => {
+          const tt = (
+            globalThis as unknown as {
+              trustedTypes: { createPolicy(n: string, r: object): unknown };
+            }
+          ).trustedTypes;
+          tt.createPolicy("ballot-worker", {});
+        },
       };
       return Object.fromEntries(
         Object.entries(attempts).map(([name, attempt]) => {
@@ -166,6 +176,7 @@ describe("the served ballot client", () => {
       insertAdjacentHTML: "refused",
       "event handler": "refused",
       "another policy": "refused",
+      "the worker's policy": "refused",
     });
     await expect
       .poll(() => violations.filter((v) => v.startsWith("require-trusted-types-for")).length)

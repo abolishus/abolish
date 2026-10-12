@@ -384,6 +384,9 @@ importers:
 
   apps/ballot:
     dependencies:
+      '@abolishus/crypto':
+        specifier: workspace:*
+        version: link:../../packages/crypto
       '@abolishus/ui':
         specifier: workspace:*
         version: link:../../packages/ui

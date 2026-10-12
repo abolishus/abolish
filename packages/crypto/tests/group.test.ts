@@ -319,6 +319,8 @@ describe("hash layer", () => {
       if (code.includes("@noble/curves/abstract/hash-to-curve.js")) {
         const uses = [...code.matchAll(/hash_to_field\(([^;]*?\})\)/gs)];
         expect(uses.length, name).toBe(1);
+        // The import and that one call: no alias can reach it without the DST check.
+        expect(code.match(/hash_to_field/g)?.length, name).toBe(2);
         expect(uses[0]?.[1], name).toMatch(/\{\s*DST: new Uint8Array\(dst\),/);
       }
       for (const m of source.matchAll(/ristretto255_hasher\.(\w+)\(([^;]*?)\);/gs)) {

@@ -164,7 +164,7 @@ The record is 356 bytes. The signature is [[trustee-identity]]'s scheme under `a
 m = u16(0x0010) ‖ u8(1) ‖ key_id ‖ query_hash ‖ u8(seat) ‖ encode(b) ‖ encode(z) ‖ encode(c) ‖ encode(z1) ‖ encode(z2)
 ```
 
-the record without its signature, so a later version can't reuse a version 1 signature (T-31). It is made with the seat's **identity key**, not a per-election key: registration happens between elections, when no per-election key exists, and the identity key is the one every client and attester already pins ([[trustee-identity]], Which key signs what). The signature makes a wrong answer attributable to its seat (T-29).
+the record without its signature, so a later version can't reuse a version 1 signature (T-31). It is made with the seat's **identity key**, not a per-election key: registration happens between elections, when no per-election key exists, and the identity key is the one every client and attester already pins ([[trustee-identity]], Which key signs what). The signature makes a wrong answer attributable to its seat (T-29). The cost: the identity key, until now needed only at ceremonies, signs automatically in answer to client queries, so it can't be held cold or behind a person's approval between ceremonies, and a compromised node holds a signing oracle for its seat (T-37). Part 2b-2 decides whether answers move to a registration signing key that the identity key certifies in the key's transcript.
 
 ## Answer check
 
@@ -183,7 +183,7 @@ The signature is checked before the proof, so an answer that fails only `answer-
 
 ## Combination and unblinding
 
-From answers that pass the check, from a set `S` of exactly `k` distinct seats, the combined evaluation is
+From answers that pass the check, from a set `S` of exactly `k` distinct seats, with `k` the threshold of the key's transcript (never a count a client supplies: fewer answers combine to a `Z` the client can compute itself, and so to a second `N` for one document, T-03), the combined evaluation is
 
 ```
 λ_i = Π_{j ∈ S, j ≠ i} j · (j − i)⁻¹   mod l
@@ -202,10 +202,10 @@ with `r⁻¹` the inverse modulo `l`, and derives `N = H2(x, U)` (part 2b-3). `U
 
 ## Security notes
 
-- **The query proof is what stops a static Diffie–Hellman oracle.** Each answer is `sk_i` times a point the client sent. A seat that answered any well-formed `B` would let a client chain queries (`B`, then `sk_i · B` as its next `B`, and so on) and run Cheon's attack (EUROCRYPT 2006). The small factors of `l − 1` are `2⁴ · 3 · 5 · 11² · 17 · 967` (about 2²⁸·⁸ in all, by trial division below 2·10⁶) and of `l + 1` are `2 · 19 · 31 · 67 · 641`, so that attack would cut about 14 bits from `sk_i` with about 2²⁹ chained queries. The query proof (part 2b-3) shows the client knows `r` with `B = r · H1(x)`, and `sk_i · B = (r · sk_i) · H1(x)` can't be proven as a next query without knowing `r · sk_i`. So a seat MUST check the query proof before it answers, and the panel's published query counts (part 2b-4) bound what a client with many valid proofs gets.
+- **The query proof is what stops a static Diffie–Hellman oracle.** Each answer is `sk_i` times a point the client sent. A seat that answered any well-formed `B` would let a client chain queries (`B`, then `sk_i · B` as its next `B`, and so on) and run Cheon's attack (EUROCRYPT 2006). The small factors of `l − 1` are `2⁴ · 3 · 5 · 11² · 17 · 967` (about 2²⁸·⁸ in all, by trial division below 2·10⁶) and of `l + 1` are `2 · 19 · 31 · 67 · 641`, so that attack would cut about 14 bits from `sk_i` with about 2²⁹ chained queries. The query proof (part 2b-3) shows the client knows `r` with `B = r · H1(x)`, and `sk_i · B = (r · sk_i) · H1(x)` can't be proven as a next query without knowing `r · sk_i`. So a seat MUST check the query proof before it answers (part 2b-3 makes `packages/crypto`'s evaluation take only a query whose proof has been checked; until then its `evaluate` answers any well-formed `B`, and nothing calls it outside tests), and the panel's published query counts (part 2b-4) bound what a client with many valid proofs gets.
 - **Threshold one-more Diffie–Hellman.** Fewer than `k` seats can't evaluate, and `q` queries give no more than `q` evaluations, under the threshold one-more Diffie–Hellman assumption in the random-oracle model (TOPPSS; [[0022-tier2-keyed-nullifier]], Pros).
 - **A discrete-log break gives the shares.** Any recorded `(B, Z_i)` gives `sk_i` to an adversary who solves discrete logs in `𝔾`, and `k` of them give `sk` (A-11, T-15). That is [[0022-tier2-keyed-nullifier]]'s second limit; encrypting queries and answers in transit (part 2b-2) narrows it to clients and seats.
-- **Not constant time everywhere.** `@noble/curves`' scalar multiplication is constant time; `sk_i`, `s_i`, `w_1` and `w_2` are `bigint`s, which JavaScript can't zeroise, and the response arithmetic is plain `bigint` arithmetic. A seat's node runs on hardware it controls; the mainnet audit covers it (T-14).
+- **Not constant time everywhere.** `@noble/curves`' scalar multiplication is constant time, and `packages/crypto` uses it for every secret (`sk_i`, `s_i`, `w_1`, `w_2`, `r⁻¹`): `s_i` with the public `C_i` gives `sk_i · G`, which the commitment's hiding must keep. `sk_i`, `s_i`, `w_1` and `w_2` are `bigint`s, which JavaScript can't zeroise, and the response arithmetic is plain `bigint` arithmetic. A seat's node runs on hardware it controls; the mainnet audit covers it (T-14).
 
 ## Test vectors
 

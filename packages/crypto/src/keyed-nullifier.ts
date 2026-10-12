@@ -309,6 +309,12 @@ export interface NullifierKey {
   readonly identityKeys: readonly Uint8Array[];
   /** Each seat's share commitment `C_i`, at index `i − 1`. */
   readonly commitments: readonly BjjPoint[];
+  /**
+   * `k`, the sharing's threshold, from the transcript. Never from a client:
+   * fewer answers combine to a `Z` the client can compute, and so to a second
+   * nullifier for one document (T-03).
+   */
+  readonly threshold: number;
 }
 
 /** The query an answer is for, as its client made it or an attester received it. */
@@ -350,10 +356,16 @@ function evaluationChallenge(
   return challengeBjj("abolish/v1/fs/keyed-nullifier/evaluation", w.finish());
 }
 
+/** Validates the key once, so a malformed one is an explicit error, never a result code. */
 function checkKey(key: NullifierKey): number {
   const n = key.identityKeys.length;
   if (n < 1 || n > MAX_TRUSTEES || key.commitments.length !== n)
     throw new RangeError("key: needs 1 to MAX_TRUSTEES seats, each with its commitment");
+  if (!Number.isInteger(key.threshold) || key.threshold < 1 || key.threshold > n)
+    throw new RangeError("key: the threshold must be from 1 to n");
+  if (!(key.keyId instanceof Uint8Array) || key.keyId.length !== 32)
+    throw new RangeError("key: keyId must be 32 bytes");
+  for (const c of key.commitments) checkedPoint(c, "key: commitment");
   return n;
 }
 
@@ -383,7 +395,10 @@ export function evaluateWith(
   const ci = checkedPoint(key.commitments[share.seat - 1] as BjjPoint, "evaluate: C_i");
   // A seat that answers from a share its commitment doesn't open would sign a
   // wrong answer and be attributed for it (T-29).
-  if (!BJJ_G.multiply(share.sk).add(GENERATOR_J.multiplyUnsafe(share.s)).equals(ci))
+  // Constant-time multiplication for the secret s_i too: with C_i, it gives
+  // sk_i · G, which the commitment's hiding must keep (T-15, T-39).
+  const sJ = share.s === 0n ? BJJ_IDENTITY : GENERATOR_J.multiply(share.s);
+  if (!BJJ_G.multiply(share.sk).add(sJ).equals(ci))
     throw new RangeError("evaluate: the share doesn't open the seat's commitment");
   const b = checkedPoint(query.b, "evaluate: B");
   const zi = b.multiply(share.sk);
@@ -514,13 +529,13 @@ export function bjjLagrangeAtZero(seat: number, seats: readonly number[]): bigin
 
 /**
  * `Z = Σ λ_i · Z_i` over exactly `k` answers from distinct seats, all for one
- * key and query (docs/spec/keyed-nullifier.md, Combination and unblinding).
- * Only answers `checkNullifierAnswer` passed: by their proofs, any `k` of
- * them give the same `sk · B`.
+ * key and query (docs/spec/keyed-nullifier.md, Combination and unblinding),
+ * with `k` the key's own threshold. Only answers `checkNullifierAnswer`
+ * passed: by their proofs, any `k` of them give the same `sk · B`.
  */
-export function combineAnswers(answers: readonly NullifierAnswer[], k: number): BjjPoint {
-  if (!Number.isInteger(k) || k < 1 || k > MAX_TRUSTEES)
-    throw new RangeError("combineAnswers: k must be from 1 to MAX_TRUSTEES");
+export function combineAnswers(key: NullifierKey, answers: readonly NullifierAnswer[]): BjjPoint {
+  checkKey(key);
+  const k = key.threshold;
   if (answers.length !== k) throw new RangeError("combineAnswers: needs exactly k answers");
   const [first] = answers as [NullifierAnswer];
   const seats = answers.map((a) => a.seat);
@@ -528,6 +543,7 @@ export function combineAnswers(answers: readonly NullifierAnswer[], k: number): 
   let z = BJJ_IDENTITY;
   for (const a of answers) {
     if (
+      !sameBytes(a.key_id, key.keyId) ||
       !sameBytes(a.key_id, first.key_id) ||
       !sameBytes(a.query_hash, first.query_hash) ||
       !a.b.equals(first.b)

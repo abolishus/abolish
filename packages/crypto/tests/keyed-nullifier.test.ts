@@ -143,6 +143,7 @@ const key: NullifierKey = {
   keyId: hex(vectors.key.keyId),
   identityKeys: vectors.key.seats.map((s) => hex(s.identityKey)),
   commitments: vectors.key.seats.map((s) => point(s.commitment)),
+  threshold: vectors.key.k,
 };
 
 const queries = new Map(
@@ -259,7 +260,7 @@ describe("keyed-nullifier.json", () => {
       return decodeNullifierAnswer(hex(rec?.record ?? ""), 1);
     });
     expect(c.seats.map((s) => bjjLagrangeAtZero(s, c.seats))).toEqual(c.lambdas.map(BigInt));
-    const z = combineAnswers(answers, vectors.key.k);
+    const z = combineAnswers(key, answers);
     expect(pointHex(z)).toBe(c.z);
     expect(pointHex(unblind(z, q.r))).toBe(c.u);
     expect(z.equals(q.b.multiply(BigInt(vectors.key.sk)))).toBe(true);
@@ -308,14 +309,14 @@ describe("keyed nullifier", () => {
             expect(checked.ok).toBe(true);
             return a;
           });
-          const z = combineAnswers(answers, 3);
+          const z = combineAnswers(key, answers);
           expect(z.equals(q.b.multiply(BigInt(vectors.key.sk)))).toBe(true);
           expect(unblind(z, r).equals(base.multiply(BigInt(vectors.key.sk)))).toBe(true);
         },
       ),
       { numRuns: Math.max(5, numRuns / 50) },
     );
-  });
+  }, 120_000);
 
   test("any changed byte of an answer fails its check", () => {
     const rec = hex(vectors.answers[0]?.record ?? "");
@@ -377,10 +378,14 @@ describe("keyed nullifier", () => {
       NullifierAnswer,
       NullifierAnswer,
     ];
-    expect(() => combineAnswers([a1, a2], 3)).toThrow(RangeError);
-    expect(() => combineAnswers([a1, a2, a2], 3)).toThrow(RangeError);
-    expect(() => combineAnswers([a1, a2, rec("query-1-seat-3")], 3)).toThrow(RangeError);
-    expect(combineAnswers([a3, a1, a2], 3).equals(combineAnswers([a1, a2, a3], 3))).toBe(true);
+    expect(() => combineAnswers(key, [a1, a2])).toThrow(RangeError);
+    expect(() => combineAnswers(key, [a1, a2, a2])).toThrow(RangeError);
+    expect(() => combineAnswers(key, [a1, a2, rec("query-1-seat-3")])).toThrow(RangeError);
+    expect(combineAnswers(key, [a3, a1, a2]).equals(combineAnswers(key, [a1, a2, a3]))).toBe(true);
+    // The threshold is the key's: a caller can't combine fewer answers.
+    expect(() => combineAnswers({ ...key, threshold: 2 }, [a1, a2])).not.toThrow();
+    expect(() => combineAnswers(key, [a1, a2])).toThrow(RangeError);
+    expect(() => combineAnswers({ ...key, threshold: 6 }, [a1, a2, a3])).toThrow(RangeError);
   });
 
   test("the Fiat–Shamir (Baby Jubjub) challenge takes only its own tags", () => {

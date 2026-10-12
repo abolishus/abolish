@@ -126,8 +126,13 @@ export async function auditBoard(client: Sql, electionId: Uint8Array): Promise<n
   // ones, so a subtree that agrees with a wrong entry_hash still fails.
   const computed = new Map<string, Uint8Array>();
   for (let i = 0; i < rows.length; i++) {
-    const frontier =
-      i === 0 ? [] : rootSubtrees(i).map((t) => computed.get(`${t.level}/${t.index}`) ?? zero);
+    const frontier = (i === 0 ? [] : rootSubtrees(i)).map((t) => {
+      const hash = computed.get(`${t.level}/${t.index}`);
+      // Filled in append order, so every frontier subtree is there already.
+      if (hash === undefined)
+        throw new Error(`audit: subtree (${t.level}, ${t.index}) not computed`);
+      return hash;
+    });
     for (const t of appendSubtrees(BOARD_TREE, frontier, i, board.entryHashes[i] as Uint8Array)) {
       const key = `${t.level}/${t.index}`;
       computed.set(key, t.hash);

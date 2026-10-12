@@ -59,6 +59,7 @@ async function subtreeHashes(
   id: Uint8Array,
   ids: readonly SubtreeId[],
 ): Promise<Uint8Array[]> {
+  if (ids.length === 0) return [];
   const key = (level: number, index: bigint | number) => `${level}/${index}`;
   const wanted = new Map(ids.map((s) => [key(s.level, s.index), s]));
   const rows = await db

@@ -2,7 +2,15 @@ import { randomBytes } from "node:crypto";
 import { getTableConfig } from "drizzle-orm/pg-core";
 import postgres, { type Sql } from "postgres";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
-import { appendEntry, boardSubtrees, loadMigrations, migrate } from "../src/index.ts";
+import {
+  appendEntry,
+  boardSubtrees,
+  loadMigrations,
+  migrate,
+  readConsistencyProof,
+  readHead,
+  readInclusionProof,
+} from "../src/index.ts";
 import { type TestDb, testDb } from "./db.ts";
 
 // The board_subtrees table's guarantees (migrations/0006_board_subtrees.sql;
@@ -155,6 +163,22 @@ describe("append order", () => {
     ).toBe("23514");
     await app`DROP TABLE pg_temp.board_entries, pg_temp.board_subtrees`;
     expect(await count(e)).toBe(0);
+  });
+});
+
+describe("reads", () => {
+  test("fail closed when a subtree they need is missing", async () => {
+    // An entry written around appendEntry has no subtrees: reads covering it
+    // refuse rather than answer from what is there.
+    const e = await board(2);
+    await app`INSERT INTO board_entries (election_id, idx, segment, payload, entry_hash, prev_link, link)
+      SELECT election_id, 2, 0, ${ballot(9)}, ${b32()}, link, ${b32()} FROM board_entries
+      WHERE election_id = ${e} AND idx = 1`;
+    await expect(readHead(app, e)).rejects.toThrow(/subtree/);
+    await expect(readInclusionProof(app, e, 0n, 3n)).rejects.toThrow(/subtree/);
+    await expect(readConsistencyProof(app, e, 1n, 3n)).rejects.toThrow(/subtree/);
+    // Trees within the entries appendEntry wrote still answer.
+    expect(await readInclusionProof(app, e, 0n, 2n)).toHaveLength(1);
   });
 });
 

@@ -164,12 +164,13 @@ describe("board tree from stored subtrees", () => {
   };
   const symFold = (ids: readonly SubtreeId[]) => foldSubtrees(SYMBOLIC, ids.map(perfect));
   const bigSize = fc.integer({ min: 1, max: Number.MAX_SAFE_INTEGER });
+  const unit = fc.double({ min: 0, max: 1, noNaN: true });
 
   test("roots and proofs of trees up to 2^53 leaves verify under RFC 9162", () => {
     run(
-      fc.property(bigSize, fc.double({ min: 0, max: 1, noNaN: true }), (n, t) => {
+      fc.property(bigSize, unit, unit, (n, t, u) => {
         const i = Math.min(n - 1, Math.floor(t * n));
-        const m = i + 1;
+        const m = Math.min(n, Math.floor(u * n) + 1);
         const root = mth(0, n);
         expect(symFold(rootSubtrees(n))).toEqual(root);
         const path = inclusionProofSubtrees(i, n).map(symFold);

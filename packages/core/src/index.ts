@@ -1,3 +1,4 @@
+export { auditBoard, BoardAuditError, type BoardAuditCode, listBoards } from "./audit.ts";
 export {
   appendEntry,
   type AppendedEntry,
@@ -23,6 +24,11 @@ export {
 } from "./definitions.ts";
 export { loadMigrations, migrate, type Migration } from "./db/migrate.ts";
 export {
+  accountCredentials,
+  accountPasskeys,
+  accountSessions,
+  accountUsers,
+  accountVerifications,
   boardEntries,
   electionDefinitions,
   moderationActions,
@@ -46,6 +52,19 @@ export {
   RESTORE_REASONS,
   type RestoreReason,
 } from "./moderation.ts";
+export {
+  ACCOUNT_COOKIE_PREFIX,
+  ACCOUNT_ROUTES,
+  type AccountLogLine,
+  type AccountRoute,
+  type Accounts,
+  type AccountsOptions,
+  createAccounts,
+  MAX_ACCOUNT_BODY,
+  newAccountId,
+  PASSKEY_USER_NAME,
+  pruneAccountVerifications,
+} from "./accounts.ts";
 export {
   MAX_REPORT_QUEUE,
   type PendingReport,

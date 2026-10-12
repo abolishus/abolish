@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { contract, MAX_BOARD_PAYLOAD } from "@abolishus/api-contract";
+import { ACCOUNT_COOKIE_PREFIX } from "@abolishus/core";
 import { OpenAPIHandler } from "@orpc/openapi/node";
 import { onError, ORPCError } from "@orpc/server";
 import type { Sql } from "postgres";
@@ -49,6 +50,28 @@ function routeOf(req: IncomingMessage): string {
   const path = (req.url ?? "").split("?", 1)[0];
   const key = `${req.method} ${path}`;
   return ROUTES.has(key) ? key : "unmatched";
+}
+
+/**
+ * Whether a request carries an account credential: an account cookie (with or
+ * without the `__Secure-` prefix) or any `Authorization` header. The account
+ * system lives on apps/web's origin, so its host-only cookies never reach this
+ * host from a browser; one arriving anyway means a misconfigured or hostile
+ * client. It is refused rather than ignored, so no ballot or board request is
+ * ever handled next to an account (T-10; ADR 0017).
+ */
+function carriesAccountCredential(req: IncomingMessage): boolean {
+  if (req.headers.authorization !== undefined) return true;
+  const cookie = req.headers.cookie;
+  if (cookie === undefined) return false;
+  return cookie.split(";").some((c) => {
+    const name = c
+      .trim()
+      .split("=", 1)[0]!
+      .replace(/^__(?:Secure|Host)-/i, "");
+    // better-auth reads both `<prefix>.<name>` and `<prefix>-<name>`.
+    return name.toLowerCase().startsWith(ACCOUNT_COOKIE_PREFIX);
+  });
 }
 
 class BodyError extends Error {
@@ -192,6 +215,7 @@ export function createApiServer({
         inFlight--;
       });
       try {
+        if (carriesAccountCredential(req)) return refuse(res, 400);
         if (route === "unmatched") return refuse(res, 404);
         if (req.method === "POST") {
           // A POST takes its input from the body alone, so nothing that keys on

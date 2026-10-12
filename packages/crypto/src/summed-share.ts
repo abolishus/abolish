@@ -124,6 +124,13 @@ interface DefinitionContext {
   readonly definitionHash: Uint8Array;
   readonly ceremonyTranscriptHash: Uint8Array;
   readonly rules: TallyRules;
+  /**
+   * The number of cells in the registered partition: under definition version
+   * 1, one per `electorate` entry (verifier 2.8). A trustee sums only for
+   * these cells, so no request for another cell, over a subset of a counted
+   * set, can make it disclose a difference of sums (T-14, T-16).
+   */
+  readonly cells: number;
 }
 
 function contextOf(d: ElectionDefinition): DefinitionContext {
@@ -131,6 +138,7 @@ function contextOf(d: ElectionDefinition): DefinitionContext {
     definitionHash: electionDefinitionHash(d),
     ceremonyTranscriptHash: Uint8Array.from(d.ceremony_transcript_hash),
     rules: { optionCount: d.option_count, threshold: d.threshold, panelSize: d.panel_size },
+    cells: d.electorate.length,
   };
 }
 
@@ -207,8 +215,8 @@ function checkSeat(seat: number, n: number, what: string): void {
 function checkCell(c: SummedShareCellContext): void {
   if (!(c.definitionHash instanceof Uint8Array) || c.definitionHash.length !== 32)
     throw new RangeError("summed share: definitionHash must be 32 bytes");
-  if (!Number.isSafeInteger(c.cell) || c.cell < 0 || c.cell > 0xff)
-    throw new RangeError("summed share: cell must be a u8");
+  if (!Number.isSafeInteger(c.cell) || c.cell < 0 || c.cell >= c.cells)
+    throw new RangeError("summed share: cell must be a cell of the registered partition");
   const { optionCount: m, threshold: k } = c.rules;
   if (c.aggregate.length !== m || c.aggregate.some((row) => row.length !== k))
     throw new RangeError("summed share: the aggregate doesn't match the rules");
@@ -394,6 +402,9 @@ export function openSummedSharesWith(
   // message reach decapsulation (T-39, T-37).
   requireCheckedSet(election.registered, election.ceremonyTranscriptHash);
   const { optionCount, threshold } = election.rules;
+  // One aggregate per cell of the registered partition, no more (T-14, T-16).
+  if (election.aggregates.length !== election.cells)
+    throw new RangeError("summed share: one aggregate per cell of the registered partition");
   if (
     election.aggregates.some(
       (a) => a.length !== optionCount || a.some((row) => row.length !== threshold),

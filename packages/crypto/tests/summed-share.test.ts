@@ -129,6 +129,7 @@ const registered = checkedKeySetForTests(
 const election: SummedShareElectionContext = {
   definitionHash,
   ceremonyTranscriptHash,
+  cells: aggregates.length,
   rules,
   aggregates,
   registered,
@@ -159,6 +160,7 @@ describe("summed-share.json", () => {
       {
         definitionHash,
         ceremonyTranscriptHash,
+        cells: aggregates.length,
         rules,
         cell: v.cell,
         aggregate: aggregates[v.cell] ?? [],
@@ -217,8 +219,11 @@ describe("summed-share messages", () => {
   // transcript hash and the rules from it.
   const typical = DEFINITIONS.vectors.find((v) => v.id === "definition-typical");
   if (typical?.encoding === undefined) throw new Error("no typical definition vector");
+  const base = decodeElectionDefinition(hex(typical.encoding));
   const definition: ElectionDefinition = {
-    ...decodeElectionDefinition(hex(typical.encoding)),
+    ...base,
+    // One tier, so the partition is one cell.
+    electorate: base.electorate.slice(0, 1),
     option_count: 3,
     threshold: 2,
     panel_size: 3,
@@ -498,6 +503,28 @@ describe("summed-share messages", () => {
     // only the definition's checked set decides who reaches decapsulation (T-39).
     expect(() => open(fresh.election.registered.map((k) => ({ ...k })))).toThrow(TypeError);
     expect(open(fresh.election.registered).ok).toBe(true);
+  });
+
+  test("only cells of the registered partition are sent or received", () => {
+    // A cell the definition's partition doesn't have, even over a real
+    // aggregate: summing for it could disclose a difference of sums (T-14, T-16).
+    expect(() =>
+      sealSummedShares(
+        { definition, cell: 1, aggregate: fresh.aggregate },
+        fresh.election.registered,
+        { index: 1, signingSecret: seat(1).signingSecret },
+        2,
+        fresh.summed[0] as Share[],
+      ),
+    ).toThrow(RangeError);
+    // A recipient given more aggregates than the partition has cells refuses them all.
+    expect(() =>
+      openSummedShares(
+        { ...fresh.election, aggregates: [fresh.aggregate, fresh.aggregate] },
+        { index: 2, secretKey: seat(2).kem.secretKey },
+        send(1, 2),
+      ),
+    ).toThrow(RangeError);
   });
 
   test("a sender refuses sums that fail its own check, and never sends to itself", () => {

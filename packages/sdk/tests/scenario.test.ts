@@ -1,6 +1,11 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vite-plus/test";
-import { MAX_SIMULATED_VOTERS, parseScenario, type Scenario } from "../src/index.ts";
+import {
+  MAX_SIMULATED_VOTERS,
+  MAX_SIMULATED_WORK,
+  parseScenario,
+  type Scenario,
+} from "../src/index.ts";
 
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
 
@@ -17,7 +22,7 @@ const seatsOf = (panel: number) =>
 
 const scenario: fc.Arbitrary<Scenario> = fc.integer({ min: 2, max: 16 }).chain((panel) =>
   fc.record({
-    voters: fc.integer({ min: 1, max: MAX_SIMULATED_VOTERS }),
+    voters: fc.integer({ min: 1, max: Math.floor(MAX_SIMULATED_WORK / (64 * panel)) }),
     election: fc.constantFrom("plurality" as const, "approval" as const),
     options: fc.integer({ min: 2, max: 64 }),
     trustees: fc
@@ -142,6 +147,27 @@ describe("parseScenario", () => {
     expect(t({ offline: [3, 2] })).toBe("$.trustees.offline");
     expect(t({ faulty: [1], offline: [1] })).toBe("$.trustees.faulty");
     expect(t({ offline: 2 })).toBe("$.trustees.offline");
+    expect(t({ offline: null })).toBe("$.trustees.offline");
+    expect(t({ faulty: null })).toBe("$.trustees.faulty");
+  });
+
+  it("refuses a scenario whose voters × options × panel exceeds the work bound", () => {
+    const at = {
+      ...valid,
+      voters: MAX_SIMULATED_WORK / 50,
+      options: 5,
+      trustees: { panel: 10, threshold: 2 },
+    };
+    expect(parseScenario(at).ok).toBe(true);
+    expect(refusal({ ...at, voters: at.voters + 1 })).toBe("$");
+    expect(
+      refusal({
+        ...valid,
+        voters: MAX_SIMULATED_VOTERS,
+        options: 2,
+        trustees: { panel: 16, threshold: 2 },
+      }),
+    ).toBe("$");
   });
 
   it("refuses an empty electorate and an empty or reversed outage", () => {

@@ -144,9 +144,34 @@ describe("dist/node/main.mjs", () => {
     expect(web.err()).toContain("ACCOUNT_SECRET");
     expect(web.err()).not.toContain(password);
   }, 30_000);
+
+  test("refuses half a PostHog configuration, quoting none of it", async () => {
+    const web = run({
+      DATABASE_URL: database(),
+      API_URL: "http://127.0.0.1:9",
+      WEB_ORIGIN: "https://abolish.test",
+      ACCOUNT_SECRET: SECRET,
+      POSTHOG_KEY: "phc_unpaired",
+    });
+    const [code] = (await once(web.child, "exit")) as [number];
+    expect(code).not.toBe(0);
+    expect(web.err()).toContain("POSTHOG_HOST and POSTHOG_KEY go together");
+    expect(web.err()).not.toContain("phc_unpaired");
+  }, 30_000);
 });
 
 describe("the client bundle", () => {
+  test("carries no analytics SDK, and reports errors only to our own origin", () => {
+    const assets = join(pkg, "dist", "client", "assets");
+    const code = readdirSync(assets)
+      .filter((f) => f.endsWith(".js"))
+      .map((f) => readFileSync(join(assets, f), "utf8"))
+      .join("\n");
+    for (const sdk of ["posthog", "PostHog", "i.posthog.com", "phc_"])
+      expect([sdk, code.includes(sdk)]).toEqual([sdk, false]);
+    expect(code).toMatch(/[`"']\/ingest\/error[`"']/);
+  });
+
   test("carries none of the account system's server code", () => {
     const assets = join(pkg, "dist", "client", "assets");
     for (const file of readdirSync(assets).filter((f) => f.endsWith(".js"))) {

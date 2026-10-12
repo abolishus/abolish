@@ -1,5 +1,7 @@
 import { useTranslate } from "@abolishus/ui";
-import type { ReactNode } from "react";
+import { type ReactNode, useEffect } from "react";
+
+import { reportCaught } from "../error-reports.ts";
 
 import { catalogs } from "../messages.ts";
 
@@ -45,8 +47,10 @@ export function NotFound() {
 }
 
 // Says nothing about the error itself: its message could quote an answer
-// from the API or the visitor's input, and the page is public.
-export function Failed() {
+// from the API or the visitor's input, and the page is public. Error
+// tracking gets its name and frames only (src/error-reports.ts).
+export function Failed({ error }: { error?: unknown }) {
   const t = useTranslate(catalogs);
+  useEffect(() => reportCaught(error), [error]);
   return <Notice title={t("errorTitle")}>{t("error")}</Notice>;
 }

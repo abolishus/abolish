@@ -1,8 +1,9 @@
 import { formatMessage, I18nProvider } from "@abolishus/ui";
 import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router";
-import type { ReactNode } from "react";
+import { type ReactNode, useEffect } from "react";
 
 import { Failed, NotFound, SiteLayout } from "../components/site-layout.tsx";
+import { reportErrors } from "../error-reports.ts";
 import { catalogs, LOCALE } from "../messages.ts";
 import stylesheet from "../styles.css?url";
 
@@ -10,6 +11,8 @@ import stylesheet from "../styles.css?url";
 const siteName = catalogs[LOCALE]!.siteName;
 
 function Document({ children }: { children: ReactNode }) {
+  // Error tracking, in the browser only (src/error-reports.ts).
+  useEffect(() => reportErrors(window), []);
   return (
     <html lang={LOCALE}>
       <head>

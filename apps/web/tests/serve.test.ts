@@ -21,6 +21,8 @@ import {
   requestOptions,
   toBase64url,
 } from "../src/account/webauthn.ts";
+import type { ClientError, Page } from "../src/analytics.ts";
+import type { Analytics } from "../src/node/analytics.ts";
 import { createWebServer, type Log, MAX_BODY } from "../src/node/serve.ts";
 
 const ORIGIN = "https://abolish.test";
@@ -34,6 +36,16 @@ let clientDir: string;
 let server: Server;
 let base: string;
 const logged: Parameters<Log>[0][] = [];
+/** Everything the front reported to analytics. */
+const reported: (
+  | { kind: "pageview"; page: Page; status: number }
+  | { kind: "exception"; source: "client" | "server"; error: ClientError }
+)[] = [];
+const analytics: Analytics = {
+  pageview: (page, status) => void reported.push({ kind: "pageview", page, status }),
+  exception: (source, error) => void reported.push({ kind: "exception", source, error }),
+  close: async () => {},
+};
 /** Every request the stub Start handler received. */
 const started: Request[] = [];
 
@@ -96,6 +108,7 @@ beforeAll(async () => {
     clientDir,
     origin: ORIGIN,
     log: (line) => logged.push(line),
+    analytics,
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -434,6 +447,82 @@ describe("failures", () => {
     req.destroy();
     await new Promise((r) => setTimeout(r, 100));
     expect(logged.filter((l) => "error" in l)).toEqual([]);
+  });
+});
+
+describe("analytics", () => {
+  const report = {
+    page: "/polls/:id",
+    name: "TypeError",
+    frames: ["assets/index-AbC_12-x.js:1:2345"],
+  };
+  const post = (body: unknown, headers: Record<string, string> = {}, target = "/ingest/error") =>
+    raw(target, {
+      method: "POST",
+      headers: { origin: ORIGIN, "content-type": "application/json", ...headers },
+      body: Buffer.from(typeof body === "string" ? body : JSON.stringify(body)),
+    });
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 50));
+
+  test("a page view is its template and status, never its path or query", async () => {
+    reported.length = 0;
+    const id = "cd".repeat(32);
+    await raw(`/polls/${id}?q=1`, { headers: { cookie: `${SESSION}=tok` } });
+    await raw("/moderation?after=7");
+    await raw("/somewhere/else");
+    await raw("/broken");
+    // Not page views: assets, accounts, server functions, refusals, HEAD.
+    await raw("/assets/index-AbC_12-x.js");
+    await raw("/auth/get-session");
+    await raw("/_serverFn/abc", { method: "POST", body: Buffer.from("{}") });
+    await raw("//evil.test/");
+    await raw("/polls", { method: "HEAD" });
+    await settle();
+    expect(reported).toEqual([
+      { kind: "pageview", page: "/polls/:id", status: 200 },
+      { kind: "pageview", page: "/moderation", status: 200 },
+      { kind: "pageview", page: "other", status: 200 },
+      { kind: "exception", source: "server", error: { page: "other", name: "Error", frames: [] } },
+      { kind: "pageview", page: "other", status: 500 },
+    ]);
+    expect(JSON.stringify(reported)).not.toContain(id);
+  });
+
+  test("a report from one of our pages is passed on exactly, and never reaches Start", async () => {
+    reported.length = 0;
+    started.length = 0;
+    const res = await post(report);
+    expect(res.status).toBe(204);
+    expect(res.headers["cache-control"]).toBe("no-store");
+    expect(reported).toEqual([{ kind: "exception", source: "client", error: report }]);
+    expect(started).toHaveLength(0);
+  });
+
+  test("refuses reports from other origins, of other shapes, or by other means", async () => {
+    reported.length = 0;
+    started.length = 0;
+    const id = "ef".repeat(32);
+    const refusals: [Promise<{ status: number }>, number][] = [
+      [post(report, { origin: "https://evil.test" }), 403],
+      [raw("/ingest/error", { method: "POST", body: Buffer.from(JSON.stringify(report)) }), 403],
+      [post(report, { "content-type": "text/plain" }), 415],
+      [post(report, { "content-type": "application/json; charset=utf-8" }), 415],
+      // Well-formed, but not a bundle this server serves.
+      [post({ ...report, frames: ["assets/main-Ab1.js:1:2"] }), 400],
+      [post("{"), 400],
+      [post({ ...report, message: "x" }), 400],
+      [post({ ...report, page: `/polls/${id}` }), 400],
+      [post({ ...report, name: "Type Error: x" }), 400],
+      [post({ ...report, frames: [`https://abolish.test/polls/${id}:1:2`] }), 400],
+      [post({ ...report, frames: Array(21).fill(report.frames[0]) }), 400],
+      [post("x".repeat(MAX_BODY + 1)), 413],
+      [post(report, {}, "/ingest/error?x=1"), 404],
+      [post(report, {}, "/ingest/other"), 404],
+      [raw("/ingest/error"), 405],
+    ];
+    for (const [res, status] of refusals) expect((await res).status).toBe(status);
+    expect(reported).toEqual([]);
+    expect(started).toHaveLength(0);
   });
 });
 

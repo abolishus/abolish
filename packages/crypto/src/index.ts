@@ -56,6 +56,8 @@ export {
   encodeOpening,
   openChallenge,
   openingCoreHash,
+  openedCommitments,
+  type OpenedCommitments,
   SPOILED_BALLOT_OPENING,
   type SpoiledBallotOpening,
   trackingCode,

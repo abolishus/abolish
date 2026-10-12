@@ -223,60 +223,79 @@ export function trackingCode(
   return coreHash(ballotCore(election, tier, encrypted));
 }
 
+/** What one published opening opens, built once by `openedCommitments`. */
+export interface OpenedCommitments {
+  readonly definitionHash: Uint8Array;
+  /** Whether `commitment` is one the opening opens. */
+  readonly has: (commitment: Element) => boolean;
+}
+
 /**
- * Whether a published opening would open a commitment of `ballot`
- * (docs/spec/challenge.md, Opened commitments): the same definition hash,
- * and some ballot commitment `C_{j'}`, at any option, equal to an opened
- * `C_j`, or to `h^s` or `g · h^s` for a secret scalar `s` the opening
- * reveals: a coefficient of any `g_j`, a coefficient of any `f_j` but its
- * constant term (the vote), a seat's share `f_j(i)` or `g_j(i)`,
- * or a seat's `e_i` or `w_i`. An opened `C_j` is opened wherever it is cast
- * (under fresh share hashes, another tier, re-blinded higher coefficients or
- * another option), and so is any commitment to 0 or 1 whose randomness is a
- * revealed scalar. So `opening-cast` and the checker's warning compare this,
- * never tracking codes or whole VSS lists (T-45, T-47). Randomness derived
- * from revealed scalars by a chosen relation isn't caught: a residual. It
- * takes an opening that passed `checkChallengeOpening`, whose share hashes
- * give `n`.
+ * What a published opening opens (docs/spec/challenge.md, Opened
+ * commitments): each opened `C_j`, and `h^s` and `g · h^s` for every scalar
+ * `s` it reveals (every coefficient of every `f_j` and `g_j`, each seat's
+ * shares `f_j(i)` and `g_j(i)`, each registered seat's `e_i` and `w_i`)
+ * except 0 and 1. Those two are public, an honest vote is one of them, and
+ * `h^s` or `g · h^s` for them opens nothing, so matching them would let one
+ * ballot carrying `g` or `h` block every opening; an out-of-rules vote is
+ * kept, since a ballot could use it as randomness. Built once per opening,
+ * so a verifier tests each ballot against it with no group operations (T-52).
+ * It takes an opening that passed `checkChallengeOpening`, whose share hashes
+ * give `n`. Randomness derived from revealed scalars by a chosen relation
+ * isn't caught: a residual.
  */
-export function opensBallotCommitment(
-  opening: SpoiledBallotOpening,
-  ballot: Pick<BallotCore, "definitionHash" | "vss">,
-): boolean {
-  if (!equalBytes(opening.definition_hash, ballot.definitionHash)) return false;
-  // Encoded, so an element is compared by its one canonical encoding.
-  const enc = (e: Element) => toHex(encode(elementOrIdentity, e));
-  const opened = new Set<string>();
+export function openedCommitments(opening: SpoiledBallotOpening): OpenedCommitments {
+  const encodings = new Set<string>();
   for (const row of opening.vss) {
     const c = row[0];
     if (c === undefined) throw new RangeError("vss: an option without commitments");
-    opened.add(enc(c));
+    encodings.add(encodeHex(c));
   }
   const seats = opening.share_hashes.map((_, i) => BigInt(i + 1));
   const revealed = new Set<bigint>();
-  for (const { f, g } of opening.polynomials) {
-    // f_j's constant term is the vote, 0 or 1, never randomness: h^{v_j} and
-    // g · h^{v_j} are commitments anyone can open, so matching them would let
-    // one such ballot block every opening, and reveal nothing (challenge.md).
-    for (const c of f.slice(1)) revealed.add(c);
-    for (const c of g) revealed.add(c);
-    for (const poly of [f, g]) for (const x of seats) revealed.add(evaluate(poly, x));
-  }
+  for (const { f, g } of opening.polynomials)
+    for (const poly of [f, g]) {
+      for (const c of poly) revealed.add(c);
+      for (const x of seats) revealed.add(evaluate(poly, x));
+    }
   for (const { e, w } of opening.seats) {
     revealed.add(e);
     revealed.add(w);
   }
+  revealed.delete(0n);
+  revealed.delete(1n);
   for (const s of revealed) {
     const hs = mul(GENERATOR_H, s);
-    opened.add(enc(hs));
-    opened.add(enc(hs.add(G)));
+    encodings.add(encodeHex(hs));
+    encodings.add(encodeHex(hs.add(G)));
   }
+  // The set stays private: callers can only look commitments up in it.
+  return Object.freeze({
+    definitionHash: Uint8Array.from(opening.definition_hash),
+    has: (commitment: Element) => encodings.has(encodeHex(commitment)),
+  });
+}
+
+/**
+ * Whether a published opening opens a commitment of `ballot`: the same
+ * definition hash, and some ballot commitment `C_{j'}`, at any option, in
+ * the opening's `openedCommitments`. `opening-cast` and the checker's warning
+ * compare this, never tracking codes or whole VSS lists (T-45, T-47).
+ */
+export function opensBallotCommitment(
+  opened: OpenedCommitments,
+  ballot: Pick<BallotCore, "definitionHash" | "vss">,
+): boolean {
+  if (!equalBytes(opened.definitionHash, ballot.definitionHash)) return false;
   return ballot.vss.some((row) => {
     const c = row[0];
     if (c === undefined) throw new RangeError("vss: an option without commitments");
-    return opened.has(enc(c));
+    return opened.has(c);
   });
 }
+
+// Canonical encoding, hex, so an element is compared by its one encoding.
+const encodeHex = (e: Element) => toHex(encode(elementOrIdentity, e));
 
 /**
  * The client's side of a challenge (docs/spec/challenge.md, Client rules 2):

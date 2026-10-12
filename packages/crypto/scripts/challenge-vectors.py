@@ -449,9 +449,10 @@ def main():
 
     # Opened commitments under other tracking codes (challenge.md, Opened
     # commitments): the opened core's C_j re-used with fresh share hashes,
-    # another tier, re-blinded higher coefficients or at another option, or
-    # an opened r_j under the other vote, are opened; fresh r_j for the same
-    # vote, another vote, a shifted r_j or another election's hash aren't.
+    # another tier, re-blinded higher coefficients or at another option, and
+    # any revealed scalar but 0 and 1 used as randomness, are opened; fresh
+    # r_j for the same vote, another vote, a shifted r_j, another election's
+    # hash and public randomness aren't.
     def encrypt_all(label, polys, vss):
         r = bv.Rng("re-encrypted/" + label)
         hashes = []
@@ -506,34 +507,47 @@ def main():
         ("seat-ephemeral", "Option 0's vote under seat 1's revealed e_1, every other commitment fresh", core_from("eph", eph), True),
         ("public-randomness", "A counted core whose option 0 commits to 1 with r = 0 (C = g) and option 1 to 0 with r = 1 (C = h): anyone can open them already, and the opening's votes are never matched as randomness", {"definitionHash": base["definitionHash"], "tier": 0, "vss": [[bv.pedersen(1, 0), bv.pedersen(0, 5)], [bv.pedersen(0, 1), bv.pedersen(0, 7)], [bv.pedersen(0, 11), bv.pedersen(0, 13)]], "shareHashes": [bytes(32)] * plural["panelSize"]}, False),
     )
+    def opened_set_of(o):
+        """What a published opening opens: each C_j, and h^s and g · h^s for every scalar it reveals."""
+        out = {grp.encode(row[0]) for row in o["vss"]}
+        n = len(o["shareHashes"])
+        revealed = set()
+        for p in o["polynomials"]:
+            for poly in (p["f"], p["g"]):
+                revealed.update(poly)
+                revealed.update(bv.evaluate(poly, i) for i in range(1, n + 1))
+        for st in o["seats"]:
+            revealed.update((st["e"], st["w"]))
+        # 0 and 1 are public (an honest vote is one of them): h^s and g · h^s
+        # for them open nothing, and matching them would let one ballot
+        # carrying g or h block every opening.
+        revealed -= {0, 1}
+        for sc in revealed:
+            out.add(grp.encode(bv.pedersen(0, sc)))
+            out.add(grp.encode(bv.pedersen(1, sc)))
+        return out
+
+    # An opening of a vote outside the rules, appended after the frozen
+    # openings: its "vote" is a uniform scalar, which a ballot can use as
+    # randomness, so it is matched like any revealed scalar.
+    x = bv.Rng("vote-random").scalar()
+    opening("vote-random", "Option 0's committed value is a uniform scalar, outside the rules: the opening passes, flagged", plural, 0, [x, 0, 0], expect="ok-outside")
+    vr = honest["vote-random"]
+    late_cases = [
+        ("vote-outside-as-randomness", "A ballot whose option 0 commits to 1 under the vote-random opening's out-of-rules value x: opened", {"definitionHash": plural["definitionHash"], "tier": 0, "vss": [[bv.pedersen(1, x), bv.pedersen(0, 5)], [bv.pedersen(0, 9), bv.pedersen(0, 7)], [bv.pedersen(0, 11), bv.pedersen(0, 13)]], "shareHashes": [bytes(32)] * plural["panelSize"]}, True, "vote-random"),
+    ]
     opened_commitments = []
     base_code = core_hash(base["definitionHash"], base["tier"], base["vss"], base["shareHashes"])
-    for id_, desc, c, want in cases:
-        # What the opening opens: each C_j, and h^{r_j} and g · h^{r_j}.
-        opened_set = set()
-        for row, p in zip(base["vss"], bp):
-            opened_set.add(grp.encode(row[0]))
-
-        # Every scalar the opening reveals: each coefficient of every f_j
-        # and g_j, each seat's shares f_j(i) and g_j(i), each seat's e and w.
-        revealed = set()
-        for p in bp:
-            # f_j's constant term is the vote, never randomness.
-            revealed.update(p["f"][1:])
-            revealed.update(p["g"])
-            for poly in (p["f"], p["g"]):
-                revealed.update(bv.evaluate(poly, i) for i in range(1, plural["panelSize"] + 1))
-        for st in base["seats"]:
-            revealed.update((st["e"], st["w"]))
-        for sc in revealed:
-            opened_set.add(grp.encode(bv.pedersen(0, sc)))
-            opened_set.add(grp.encode(bv.pedersen(1, sc)))
-        shared = c["definitionHash"] == base["definitionHash"] and any(grp.encode(row[0]) in opened_set for row in c["vss"])
+    for id_, desc, c, want, opening_id in [(*x, "plurality") for x in cases] + late_cases:
+        o = honest[opening_id]
+        opened_set = opened_set_of(o)
+        shared = c["definitionHash"] == o["definitionHash"] and any(grp.encode(row[0]) in opened_set for row in c["vss"])
         assert shared == want, id_
         code = core_hash(c["definitionHash"], c["tier"], c["vss"], c["shareHashes"])
-        assert (code == base_code) == (id_ == "same-core"), id_
-        assert (bv.enc_vss(c["vss"]) == bv.enc_vss(base["vss"])) == (id_ in ("fresh-share-hashes", "other-tier", "same-core", "other-election")), id_
-        opened_commitments.append({"id": id_, "description": desc, "opening": "plurality", "core": core_json(c), "coreHash": hexs(code), "opened": shared})
+        if opening_id == "plurality":
+            assert (code == base_code) == (id_ == "same-core"), id_
+            assert (bv.enc_vss(c["vss"]) == bv.enc_vss(base["vss"])) == (id_ in ("fresh-share-hashes", "other-tier", "same-core", "other-election")), id_
+        opened_commitments.append({"id": id_, "description": desc, "opening": opening_id, "core": core_json(c), "coreHash": hexs(code), "opened": shared})
 
     # Cast ballots' core hashes, from the frozen ballot.json.
     ballots = json.loads((VECTORS / "ballot.json").read_text())

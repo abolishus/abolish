@@ -258,7 +258,9 @@ describe("hash layer", () => {
       const source = readFileSync(new URL(name, dir), "utf8");
       // The generic layer (expand_message_xmd, hash_to_field) takes a DST too,
       // but src/ has no reason to reach it except through ristretto255_hasher.
-      if (/@noble\/curves\/abstract\//.test(source))
+      // abstract/poseidon.js (the tier tree's Poseidon) is the one abstract
+      // module allowed, and it has no hash-to-curve.
+      if (/@noble\/curves\/abstract\/(?!poseidon\.js")/.test(source))
         throw new Error(`${name}: imports the generic hash-to-curve layer`);
       // Only these two names, so no OPRF or other bundle with its own default
       // DSTs, and the hasher only in the call form checked below (no
@@ -271,10 +273,12 @@ describe("hash layer", () => {
       );
       // No namespace, dynamic or re-export route around the named import.
       const code = source.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "");
-      // ECDSA P-256 (trustee signatures, ADR 0012) and secp256k1 (the group
-      // registry's EIP-712 approvals, docs/spec/contracts.md) are the only
-      // other imports: each curve's ECDSA object alone, which has no
-      // hash-to-curve; their hasher, OPRF, FROST and Schnorr bundles are
+      // ECDSA P-256 (trustee signatures, ADR 0012), secp256k1 (the group
+      // registry's EIP-712 approvals, docs/spec/contracts.md) and BN254 with
+      // Poseidon (membership proofs and the tier tree, docs/spec/membership.md)
+      // are the only other imports: each curve's ECDSA object, BN254's pairing
+      // object (which exposes no hash-to-curve) and its scalar field, none
+      // with hash-to-curve; their hasher, OPRF, FROST and Schnorr bundles are
       // separate exports and stay out.
       for (const line of code.split("\n").filter((l) => l.includes("@noble/curves")))
         expect(
@@ -282,11 +286,16 @@ describe("hash layer", () => {
             'import { ristretto255, ristretto255_hasher } from "@noble/curves/ed25519.js";',
             'import { p256 } from "@noble/curves/nist.js";',
             'import { secp256k1 } from "@noble/curves/secp256k1.js";',
+            'import { bn254 } from "@noble/curves/bn254.js";',
+            'import { bn254_Fr } from "@noble/curves/bn254.js";',
+            'import { grainGenConstants, poseidon, type PoseidonFn } from "@noble/curves/abstract/poseidon.js";',
           ],
           `${name}: ${line}`,
         ).toContain(line);
       if (code.includes("@noble/curves/nist.js"))
         expect(code, name).not.toMatch(/p256_|hashToCurve|hash_to_curve|hasher/);
+      if (code.includes("@noble/curves/bn254.js"))
+        expect(code, name).not.toMatch(/hashToCurve|hash_to_curve|hasher/);
       if (code.includes("@noble/curves/secp256k1.js"))
         expect(code, name).not.toMatch(/secp256k1_|schnorr|hashToCurve|hash_to_curve|hasher/);
       for (const m of source.matchAll(/ristretto255_hasher\.(\w+)\(([^;]*?)\);/gs)) {

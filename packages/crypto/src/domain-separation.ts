@@ -23,7 +23,7 @@ export const TAG_REGISTRY = Object.freeze(
       { tag: "abolish/v1/sig/receipt", primitive: "signature", status: "specified" },
       { tag: "abolish/v1/nullifier-scope", primitive: "plain", status: "specified" },
       { tag: "abolish/v1/membership-message", primitive: "plain", status: "specified" },
-      { tag: "abolish/v1/membership-vk", primitive: "plain", status: "reserved" },
+      { tag: "abolish/v1/membership-vk", primitive: "plain", status: "specified" },
       { tag: "abolish/v1/ballot-statement", primitive: "plain", status: "specified" },
       {
         tag: "abolish/v1/fs/ballot-validity/option",

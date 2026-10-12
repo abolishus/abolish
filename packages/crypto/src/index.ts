@@ -167,6 +167,28 @@ export {
   sealIdentityBackup,
 } from "./identity-backup.ts";
 export { MEMBERSHIP_DEPTH, membershipScope, nullifierScope, semaphoreField } from "./membership.ts";
+export {
+  decodeMembershipProof,
+  encodeMembershipProof,
+  MEMBERSHIP_PROOF_LENGTH,
+  MEMBERSHIP_ZKEY_SHA256,
+  type MembershipProof,
+  membershipProof,
+  type MembershipSignals,
+  membershipVkEncoding,
+  membershipVkHash,
+  verifyMembershipProof,
+} from "./membership-proof.ts";
+export { poseidon2 } from "./poseidon.ts";
+export {
+  replayTierGroup,
+  TIER_TREE_MAX_LEAVES,
+  type TierGroupEvent,
+  type TierGroupReplay,
+  tierTreePath,
+  tierTreeRoot,
+  tierTreeZeros,
+} from "./tier-tree.ts";
 export { PARAMETERS } from "./parameters.ts";
 export {
   checkElectionToShow,

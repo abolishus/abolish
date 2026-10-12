@@ -95,7 +95,8 @@ describe("domain-separation tag registry", () => {
   });
 
   test("only specified plain-hash and KDF tags frame a hash input", () => {
-    expect(() => ds("abolish/v1/membership-vk" as never, new Uint8Array())).toThrow(RangeError);
+    // Retired: its layout is gone, so nothing may hash under it again.
+    expect(() => ds("abolish/v1/tally-transcript" as never, new Uint8Array())).toThrow(RangeError);
     // Specified, but a hash-to-curve DST: DS framing would give it a second layout.
     expect(() => ds("abolish/v1/generator-h" as never, new Uint8Array())).toThrow(RangeError);
     // Specified, but a Signature tag: a signed message never doubles as a hash input.

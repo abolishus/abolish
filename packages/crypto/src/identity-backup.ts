@@ -56,18 +56,42 @@ function bytesOf(b: unknown, length: number, what: string): Uint8Array {
   return copy;
 }
 
-function bigEndian(b: Uint8Array): bigint {
-  let v = 0n;
-  for (const x of b) v = (v << 8n) | BigInt(x);
-  return v;
+// `l` as 32 bytes, big-endian, so a secret is range-checked byte by byte and
+// never becomes a BigInt, which can't be wiped (T-41).
+const ORDER_BYTES = Uint8Array.from(
+  BABYJUBJUB_ORDER.toString(16)
+    .padStart(2 * LEN, "0")
+    .match(/../g) ?? [],
+  (x) => Number.parseInt(x, 16),
+);
+
+/** `1 ≤ b < l` for 32 big-endian bytes, without branching on where they first differ from `l`. */
+function inRange(b: Uint8Array): boolean {
+  let lt = 0;
+  let gt = 0;
+  let nonZero = 0;
+  for (let i = 0; i < LEN; i++) {
+    const x = b[i] as number;
+    const y = ORDER_BYTES[i] as number;
+    const open = 1 ^ (lt | gt);
+    lt |= open & Number(x < y);
+    gt |= open & Number(x > y);
+    nonZero |= x;
+  }
+  return lt === 1 && nonZero !== 0;
 }
 
 /** Whether `b` encodes an identity secret: 32 bytes, big-endian, `1 ≤ s < l`. */
 export function isIdentitySecret(b: Uint8Array): boolean {
   if (!(b instanceof Uint8Array) || !ArrayBuffer.isView(b) || b.length !== LEN) return false;
-  const s = bigEndian(new Uint8Array(b));
-  return s >= 1n && s < BABYJUBJUB_ORDER;
+  const copy = new Uint8Array(b);
+  const ok = copy.length === LEN && inRange(copy);
+  copy.fill(0);
+  return ok;
 }
+
+/** Draws before the sampler gives up: each is kept with probability about 0.76, so 128 rejections happen with probability below 2⁻²⁶⁰. */
+const MAX_DRAWS = 128;
 
 /**
  * Draws an identity secret uniformly on 1 to `l − 1` by rejection: 251 random
@@ -75,13 +99,17 @@ export function isIdentitySecret(b: Uint8Array): boolean {
  * another (T-18). `draw` is the test seam; the entry point doesn't export it.
  */
 export function newIdentitySecretWith(draw: (n: number) => Uint8Array): Uint8Array {
-  for (;;) {
-    const b = bytesOf(draw(LEN), LEN, "draw");
+  for (let i = 0; i < MAX_DRAWS; i++) {
+    const raw = draw(LEN);
+    const b = bytesOf(raw, LEN, "draw");
+    // The draw is the secret but for its top bits; the copy is all we keep.
+    if (raw instanceof Uint8Array) raw.fill(0);
     // 2²⁵⁰ < l < 2²⁵¹: clearing the top 5 bits leaves a value below 2²⁵¹.
     b[0] = (b[0] as number) & 0x07;
     if (isIdentitySecret(b)) return b;
     b.fill(0);
   }
+  throw new Error("the random source gave no identity secret in 128 draws");
 }
 
 /** A fresh identity secret's 32-byte encoding, from the CSPRNG. */
@@ -193,6 +221,7 @@ export function openIdentityBackup(prfOutput: Uint8Array, envelope: Uint8Array):
     throw new IdentityBackupError("backup-open");
   } finally {
     wrapKey.fill(0);
+    locator.fill(0);
   }
   if (!isIdentitySecret(plain)) {
     plain.fill(0);

@@ -73,7 +73,7 @@ describe("identity-backup vectors", () => {
   test("the file is the format this test reads, with every section populated", () => {
     expect(V.format).toBe("abolish-identity-backup-vectors/1");
     expect([V.secrets.length, V.sampling.length, V.backups.length, V.open.length]).toEqual([
-      10, 5, 4, 18,
+      10, 5, 4, 20,
     ]);
     expect(BigInt(V.order)).toBe(BABYJUBJUB_ORDER);
   });
@@ -230,6 +230,21 @@ describe("identity-backup inputs", () => {
     sealIdentityBackup(p, secret);
     expect(bytesToHex(p)).toBe(bytesToHex(prf));
     expect(bytesToHex(secret)).toBe(bytesToHex(s));
+  });
+
+  test("the sampler wipes each draw and gives up on a source that never lands in range", () => {
+    const draws: Uint8Array[] = [];
+    expect(() =>
+      newIdentitySecretWith((n) => {
+        const d = new Uint8Array(n);
+        draws.push(d);
+        return d;
+      }),
+    ).toThrow(Error);
+    expect(draws.length).toBe(128);
+    const kept = new Uint8Array(32).fill(0x01);
+    newIdentitySecretWith(() => kept);
+    expect(kept.every((x) => x === 0)).toBe(true);
   });
 
   test("the entry point doesn't export the seams that take randomness", () => {

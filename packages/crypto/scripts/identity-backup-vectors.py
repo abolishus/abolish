@@ -284,6 +284,8 @@ def main():
         ("decode-empty", "No bytes", prf, b"", "truncated"),
         ("decode-header-only", "Only the record type", prf, env[:2], "truncated"),
         ("decode-short", "One byte short", prf, env[:-1], "truncated"),
+        ("decode-header-and-version-only", "The record type and version, no fields", prf, env[:3], "truncated"),
+        ("decode-type-test-range", "Record type 0xff00, the test range", prf, b"\xff\x00" + env[2:], "unknown-record-type"),
         ("decode-trailing", "One byte more", prf, env + b"\x00", "trailing-bytes"),
         ("decode-type-zero", "Record type 0x0000", prf, b"\x00\x00" + env[2:], "unknown-record-type"),
         ("decode-type-receipt", "Record type 0x0004, a receipt", prf, b"\x00\x04" + env[2:], "unknown-record-type"),

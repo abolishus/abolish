@@ -239,6 +239,20 @@
       "code": "truncated"
     },
     {
+      "id": "decode-header-and-version-only",
+      "description": "The record type and version, no fields",
+      "prfOutput": "4798c69ce02618f2eb0774f98ebec580663844d6146e25f759b3a2f983c637fd",
+      "envelope": "000a01",
+      "code": "truncated"
+    },
+    {
+      "id": "decode-type-test-range",
+      "description": "Record type 0xff00, the test range",
+      "prfOutput": "4798c69ce02618f2eb0774f98ebec580663844d6146e25f759b3a2f983c637fd",
+      "envelope": "ff0001bc2bc3c709a859fd5f59bdaac8fbc8f6a567a3758eb571feedcdc16420d3ad778bfa1775f5f2d1ea84e21ae1483d9b6f7b0d0cbad211380a563d11e1",
+      "code": "unknown-record-type"
+    },
+    {
       "id": "decode-trailing",
       "description": "One byte more",
       "prfOutput": "4798c69ce02618f2eb0774f98ebec580663844d6146e25f759b3a2f983c637fd",

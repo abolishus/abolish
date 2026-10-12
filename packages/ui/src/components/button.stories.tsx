@@ -39,3 +39,50 @@ export const Disabled: Story = {
     await expect(args.onClick).not.toHaveBeenCalled();
   },
 };
+
+export const Secondary: Story = {
+  args: { variant: "secondary" },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByRole("button", { name: "Continue" })).toBeEnabled();
+  },
+};
+
+export const Quiet: Story = {
+  args: { variant: "quiet" },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByRole("button", { name: "Continue" })).toBeEnabled();
+  },
+};
+
+export const SubmitsOnlyWhenAsked: Story = {
+  play: async ({ canvasElement }) => {
+    // A button inside a form must not submit it by accident.
+    await expect(within(canvasElement).getByRole("button", { name: "Continue" })).toHaveAttribute(
+      "type",
+      "button",
+    );
+  },
+};
+
+export const DarkPrimary: Story = {
+  parameters: { theme: "dark" },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByRole("button", { name: "Continue" })).toBeVisible();
+  },
+};
+
+export const DarkSecondary: Story = {
+  args: { variant: "secondary" },
+  parameters: { theme: "dark" },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByRole("button", { name: "Continue" })).toBeVisible();
+  },
+};
+
+export const DarkQuiet: Story = {
+  args: { variant: "quiet" },
+  parameters: { theme: "dark" },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByRole("button", { name: "Continue" })).toBeVisible();
+  },
+};

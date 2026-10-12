@@ -64,6 +64,7 @@ import {
   lockfileViolations,
   manifestViolations,
   moduleReferences,
+  packEntries,
   provenanceUrls,
   referenceViolation,
   RULES,
@@ -494,12 +495,13 @@ function bundleViolations(
   name: GatedName,
   dir: string,
   declared: ReadonlyMap<string, string>,
+  entries: readonly string[],
 ): string[] {
   const out = mkdtempSync(join(tmpdir(), `gated-${name}-`));
   const bare = mkdtempSync(join(tmpdir(), `gated-${name}-bare-`));
   try {
-    const built = pack(dir, out, []);
-    const unconfigured = pack(dir, bare, ["--no-config"]);
+    const built = pack(dir, out, entries);
+    const unconfigured = pack(dir, bare, [...entries, "--no-config"]);
     const differs = [...new Set([...built.keys(), ...unconfigured.keys()])].filter((f) => {
       const a = built.get(f);
       const b = unconfigured.get(f);
@@ -612,7 +614,15 @@ function gated(): void {
     );
     // A banned config would run inside the packs below; report it instead.
     if (RULES[name].packed && configs.length === 0)
-      violations.push(...bundleViolations(name, dir, declared));
+      violations.push(
+        ...bundleViolations(
+          name,
+          dir,
+          declared,
+          // A script packEntries rejects is reported above; pack the default then.
+          packEntries(manifest) ?? [],
+        ),
+      );
     for (const dep of declared.keys())
       if (dep.startsWith("@abolishus/")) workspaceDeps.push([dir, dep]);
   }

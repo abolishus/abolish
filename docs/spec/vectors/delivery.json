@@ -1421,7 +1421,7 @@
     },
     {
       "id": "rejected-entries",
-      "description": "A truncated receipt and a posting whose ciphertext doesn't decode are rejected entries; the ballot is delivered by the rest",
+      "description": "A truncated receipt, a posting whose ciphertext doesn't decode, a ballot header and a payload shorter than a record header are rejected entries; the ballot is delivered by the rest",
       "registered": [1, 2, 3],
       "segments": {
         "delivery": "40",
@@ -1455,7 +1455,15 @@
         },
         {
           "segment": 3,
+          "payload": "00020100"
+        },
+        {
+          "segment": 3,
           "payload": "000c014459913af27b23a4f7fe95bedfca78f3a2e1695d8a42b4bdc4555885ac4be8b1d0d46569ca141ff6dd30eb1d9b95fd3e2fe8ba3735a561250eb1a96e72a4281703a0cfde5cc3d25aa0586ae834c328dac97bb7a05ccc20812b0f39007c39889d40126788d2b4457d210320f135e801ad90da647cb4283c7d4ac1dffcda4dcad954479627013e255ebae832bc266f4e1f24d59e70e28db730190c23087ba2c67837"
+        },
+        {
+          "segment": 3,
+          "payload": "000c"
         }
       ],
       "result": {
@@ -1477,6 +1485,14 @@
           {
             "at": 2,
             "error": "non-canonical"
+          },
+          {
+            "at": 4,
+            "error": "unexpected-record-type"
+          },
+          {
+            "at": 6,
+            "error": "truncated"
           }
         ]
       }

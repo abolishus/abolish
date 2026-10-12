@@ -277,7 +277,7 @@ describe("board entry version 3", () => {
       RECORD_TYPES.sharePosting,
       RECORD_TYPES.shareComplaint,
     ]) {
-      expect(() => encodeBoardEntry({ ...base, payload: record(t) })).toThrow(EncodeError);
+      expect(() => encodeBoardEntry({ ...base, payload: record(t) }, 1)).toThrow(EncodeError);
       const b = encodeBoardEntry({ ...base, payload: record(t) }, 3);
       expect(b[2]).toBe(3);
       expect(decodeBoardEntry(b, 3).payload).toEqual(record(t));
@@ -294,15 +294,10 @@ describe("board entry version 3", () => {
 describe("input checks", () => {
   const v = V.elections[0] as ElectionVector;
 
-  test("refuses a payload that isn't a delivery record", () => {
-    expect(() =>
-      checkDelivery(
-        electionOf(v),
-        ballotsOf(v),
-        [{ segment: 0, payload: Uint8Array.of(0, 2, 1) }],
-        1,
-      ),
-    ).toThrow(RangeError);
+  test("refuses a registered key set listing a seat twice", () => {
+    const e = electionOf(v);
+    const twice = { ...e, registered: [...e.registered, ...e.registered.slice(0, 1)] };
+    expect(() => checkDelivery(twice, ballotsOf(v), [], 1)).toThrow(RangeError);
   });
 
   test("refuses a ballot that didn't pass validity-shape and a seat outside the panel", () => {

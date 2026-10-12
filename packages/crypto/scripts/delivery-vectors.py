@@ -520,8 +520,18 @@ def main():
     assert strip(first) == strip(second)
 
     junk_ct = ct3[:1088] + bytes(32) + ct3[1120:]
-    r = election("rejected-entries", "A truncated receipt and a posting whose ciphertext doesn't decode are rejected entries; the ballot is delivered by the rest", ["alice"], at(3, a1[:-1], R("alice", 1), P("alice", 3, ct=junk_ct), R("alice", 2), R("alice", 3)))
-    assert r["ballots"][0]["counted"] and r["rejected"] == [{"at": 0, "error": "truncated"}, {"at": 2, "error": "non-canonical"}]
+    r = election(
+        "rejected-entries",
+        "A truncated receipt, a posting whose ciphertext doesn't decode, a ballot header and a payload shorter than a record header are rejected entries; the ballot is delivered by the rest",
+        ["alice"],
+        at(3, a1[:-1], R("alice", 1), P("alice", 3, ct=junk_ct), R("alice", 2), header(BALLOT) + b"\x00", R("alice", 3), b"\x00\x0c"),
+    )
+    assert r["ballots"][0]["counted"] and r["rejected"] == [
+        {"at": 0, "error": "truncated"},
+        {"at": 2, "error": "non-canonical"},
+        {"at": 4, "error": "unexpected-record-type"},
+        {"at": 6, "error": "truncated"},
+    ]
 
     data = {
         "format": "abolish-delivery-vectors/1",

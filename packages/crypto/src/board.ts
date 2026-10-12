@@ -118,10 +118,10 @@ export type BoardEntryVersion = RecordVersion<typeof BOARD_ENTRY.versions>;
 const SCHEMA = new RecordSchema([BOARD_ENTRY]);
 
 /**
- * Encodes a board entry under `version`, the one the election's profile pins
- * (version 1 unless given, as every caller before version 3 assumed).
+ * Encodes a board entry under `version`, the one the election's profile pins.
+ * It has no default: an entry hashed under the wrong version matches nothing.
  */
-export function encodeBoardEntry(entry: BoardEntry, version: BoardEntryVersion = 1): Uint8Array {
+export function encodeBoardEntry(entry: BoardEntry, version: BoardEntryVersion): Uint8Array {
   return SCHEMA.encode(BOARD_ENTRY, version, entry);
 }
 

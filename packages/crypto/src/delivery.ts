@@ -253,7 +253,8 @@ type Decoded =
   | { readonly kind: "complaint"; readonly record: ShareComplaintRecord };
 
 function decodeDelivery(payload: Uint8Array, pinned: 1): Decoded {
-  const type = payload.length < 2 ? -1 : ((payload[0] as number) << 8) | (payload[1] as number);
+  if (payload.length < 3) throw new DecodeError("truncated", 0);
+  const type = ((payload[0] as number) << 8) | (payload[1] as number);
   switch (type) {
     case RECORD_TYPES.shareReceipt:
       return { kind: "receipt", record: decodeShareReceipt(payload, pinned) };
@@ -262,7 +263,9 @@ function decodeDelivery(payload: Uint8Array, pinned: 1): Decoded {
     case RECORD_TYPES.shareComplaint:
       return { kind: "complaint", record: decodeShareComplaint(payload, pinned) };
     default:
-      throw new RangeError("checkDelivery: every payload must be a delivery record");
+      // Another record type, which the caller shouldn't have passed: rejected
+      // like any undecodable entry, so board content can't stop the check.
+      throw new DecodeError("unexpected-record-type", 0);
   }
 }
 
@@ -287,7 +290,10 @@ function complaintSigner(
  * The delivery check (docs/spec/delivery.md, Delivery check; verifier 5.9).
  * `ballots` are the ballots selected for every cell from the counted extent;
  * `entries` every share-receipt, posting and complaint payload in the counted
- * extent, in board order, and `at` in every report is a position in it. A
+ * extent that reached the board through the board path, in board order, and
+ * `at` in every report is a position in it: their segment is their submission
+ * time. Records sent through the contract path are judged by their L2
+ * submission time, which waits on P1-18's contract-event record. A
  * ballot stays in the counted set only if every qualified seat has a receipt
  * or a passing posting in time and no complaint about it is proven. Neither
  * depends on the records' order, duplicates or records for other ballots (R3).
@@ -307,6 +313,8 @@ export function checkDelivery(
     if (!Number.isSafeInteger(k.index) || k.index < 1 || k.index > panelSize)
       throw new RangeError("checkDelivery: every registered seat must be from 1 to n");
   const keyOf = new Map(registered.map((k) => [k.index, k]));
+  if (keyOf.size !== registered.length)
+    throw new RangeError("checkDelivery: a registered seat is listed twice");
 
   const hashes = ballots.map((b) => {
     if (b.vote.share_hashes.length !== panelSize)

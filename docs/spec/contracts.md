@@ -300,9 +300,9 @@ Like the other registries, the group registry is shared by every election, so a 
 
 - takes the group's tier from its `GroupCreated` event;
 - decodes each `MembersAdded` and `MembersRemoved` record naming the group, logged at or before the tier's `root_l2_block`, strictly as above, recomputes its digest with the chain ID and registry address its release pins and the tier from `GroupCreated`, and counts the record only if at least the threshold its release pins of distinct registrars of the set its release pins sign it, never the set or `t` in `RegistrarsPinned`, which it compares with its own and reports if they differ;
-- numbers leaves by `first_index`, applies removals by index, and rebuilds the root and the member count as [[membership]] defines them.
+- numbers leaves by counted additions in log order, applies removals by index, and rebuilds the root and the member count as [[membership]] defines them.
 
-The registry refuses every record a verifier would not count, so on the release's bytecode ([[verifier]] 1.2) every logged record counts. A logged record that doesn't (a bad signature, a forbidden commitment, a `first_index` other than the running count) can only come from other code, and the verifier fails the tier's definition rather than guess which leaves were meant.
+The registry refuses every record a verifier would not count, every forbidden commitment and every `first_index` other than the running count, so on the release's bytecode ([[verifier]] 1.2) every logged record counts, holds no forbidden commitment, and its member `first_index + i` is leaf `first_index + i`. A record the registry would have refused can only come from other code, which 1.2 already reports; the verifier still applies [[membership]]'s rules to it unchanged (a record without enough valid approvals doesn't count; a forbidden commitment in a counted one keeps its index with leaf 0), so no logged record can fail a definition by itself.
 
 `packages/crypto` decodes both records, computes both digests and counts a record's valid seats (`group-registry.ts`), for the verifier and for the signing service; the contract and that code are checked against the same vectors.
 

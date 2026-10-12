@@ -4,7 +4,7 @@ How Abolish runs on Railway: what the owner creates by hand, how images are buil
 
 Postgres is not authoritative: wiping it loses no result (T-66). Nothing on Railway holds a ballot's plaintext; the API sees ciphertexts and proofs only (T-09).
 
-Status: the API image (this runbook, Building) exists. The workflow that builds, signs and deploys it, `.github/workflows/deploy.yml`, is P2-11 part 2 (#69, owner review); until it merges, nothing deploys, and the steps below marked _(part 2)_ describe what it does. Production deploys wait on the reference election against staging (P1-20). The worker (P2-4), web (P2-9) and ballot client (P2-8) add their own sections as they land.
+Status: the API image (this runbook, Building) exists. `.github/workflows/deploy.yml` builds, signs and deploys it to staging on every push to `main` (#69, #74). Production deploys wait on the reference election against staging (P1-20). The worker (P2-4), web (P2-9) and ballot client (P2-8) add their own sections as they land.
 
 ## What the owner creates by hand
 
@@ -33,7 +33,7 @@ Not used by the API. The worker (P2-4) needs it: a service from `docker.dragonfl
 
 ### Services
 
-Each service's source is a container image, set by digest by the deploy workflow _(part 2)_, never a repository: Railway never builds (T-61). Each service has no public domain unless listed.
+Each service's source is a container image, set by digest by the deploy workflow, never a repository: Railway never builds (T-61). Each service has no public domain unless listed.
 
 | Service | Command                    | Variables                                       | Notes                                                                                                                                                                                                                                     |
 | ------- | -------------------------- | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -79,17 +79,17 @@ SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)" docker buildx build \
 
 - `apps/api/dist` is the whole program: `main.mjs`, `migrate.mjs`, one shared chunk with every dependency inlined, and `migrations/`, the SQL files from `packages/core`. `repro-build` already checks that it's byte-identical across checkouts.
 - The image (`apps/api/Dockerfile`) is the Node base pinned by digest, at the version in `.node-version` (a test checks it), with the package managers removed and `dist/` copied in root-owned and read-only, run as `node`. `.dockerignore` lets only `dist/` into the context.
-- Attestations are off here (buildx would otherwise wrap the image in an index with them), so the digest compared is the image alone; part 2 adds signatures and provenance afterwards. `rewrite-timestamp` needs BuildKit 0.13 or later.
+- Attestations are off here (buildx would otherwise wrap the image in an index with them), so the digest compared is the image alone; the deploy workflow adds signatures and provenance afterwards. `rewrite-timestamp` needs BuildKit 0.13 or later.
 - `SOURCE_DATE_EPOCH` plus `rewrite-timestamp=true` clamp every file time in the new layers to the commit time, so the digest doesn't depend on when or where it was built. Checked on 2026-10-11: two builds of the same commit, one with a fresh `dist/` built under a different umask, gave the same OCI archive, byte for byte.
-- _(part 2)_ The workflow builds on a BuildKit container pinned by digest (the runner's default driver can't export OCI archives), pushes the archive with `skopeo copy --preserve-digests` so the registry holds exactly the compared digest, signs it with cosign keyless signing and attaches SLSA provenance. Provenance and signatures are separate manifests that refer to the image; they don't change its digest.
+- The workflow builds on a BuildKit container pinned by digest (the runner's default driver can't export OCI archives), pushes the archive with `skopeo copy --preserve-digests` so the registry holds exactly the compared digest, signs it with cosign keyless signing and attaches SLSA provenance. Provenance and signatures are separate manifests that refer to the image; they don't change its digest.
 
 ## Deploying
 
-_(part 2)_ Every merge to `main`, once `ci`, `repro-build` and `reference-election` have passed on it: build twice and compare, push, sign, then in the `staging` environment verify the signature and provenance, run the digest's `node migrate.mjs` with `MIGRATE_DATABASE_URL`, and once it exits 0 set the `api` service's source to the digest and deploy, waiting until Railway reports it live. The reference election against staging comes with P1-20. A production deploy (not built yet: it needs that reference election) happens only when the owner fast-forwards `prod` to a commit on `main`; it never rebuilds. It finds that commit's digest, verifies its signature and provenance, checks that the reference election passed on staging for that digest, waits for the owner's approval, and deploys the digest the same way. Agents list release candidates (commit, digest, reference-election result) in STATUS and never touch `prod`.
+Every merge to `main`, once `ci`, `repro-build` and `reference-election` have passed on it: build twice and compare, push, sign, then in the `staging` environment verify the signature and provenance, run the digest's `node migrate.mjs` with `MIGRATE_DATABASE_URL`, and once it exits 0 set the `api` service's source to the digest and deploy, waiting until Railway reports it live. The reference election against staging comes with P1-20. A production deploy (not built yet: it needs that reference election) happens only when the owner fast-forwards `prod` to a commit on `main`; it never rebuilds. It finds that commit's digest, verifies its signature and provenance, checks that the reference election passed on staging for that digest, waits for the owner's approval, and deploys the digest the same way. Agents list release candidates (commit, digest, reference-election result) in STATUS and never touch `prod`.
 
 ## Rolling back
 
-Redeploy `api` at the previous digest, from the last successful deploy run or the service's deployment history in Railway. Never by tag.
+Redeploy `api` at the previous digest in Railway, from the service's deployment history (each deploy run's summary also names its digest). Never by tag, and never by re-running an old deploy run: the workflow deploys only `main`'s head and fails such a re-run before it touches anything (#74).
 
 Migrations are forward-only (`packages/core`, Database), and `migrate.mjs` refuses to run if an applied file changed or disappeared, so a rollback never migrates: in Railway, redeploy the `api` service's earlier deployment, which keeps its digest. A migration must therefore keep the previous release working: add, never rename or drop, in the release that introduces it, and remove what's unused only in a later one. A release that can't follow that rule says so in its PR, and rolling back past it means restoring the database (below) rather than redeploying.
 

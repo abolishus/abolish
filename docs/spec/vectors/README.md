@@ -25,6 +25,7 @@ One JSON file per spec section or record type, named after it (`primitives.json`
 | `ballot-validity.json`     | Committed votes with the randomness that made them, their validity verdicts, trustees' share checks and codec rejections ([[ballot-validity]])                                                                                                    |
 | `share-encryption.json`    | Trustee KEM keys, share ciphertexts with the randomness that made them, decryptions, postings and complaints with their verdicts, and codec rejections ([[share-encryption]])                                                                     |
 | `share-receipt.json`       | Ballot hashes; each seat's intake of the share-encryption ballots with its share receipt, intakes failing each check, and receipt checks ([[ballot-validity]], Ballot hash; [[share-encryption]], Intake and receipts)                            |
+| `ballot.json`              | Ballot records (`0x0002`) with real Semaphore membership proofs: encodings, ballot hashes, `M`, the derived signals, snarkjs's verdicts, admission results and decode rejections ([[ballot-validity]], Ballot record)                             |
 | `delivery.json`            | Share receipts, postings and complaints as records, their decode rejections, board entries under version 3, the deadline segments and deadlines, and elections with the delivery check's verdicts ([[delivery]])                                  |
 | `tally.json`               | Cell aggregates, trustees' per-ballot and summed shares with their check verdicts, combined seats, Lagrange coefficients and openings; published openings with the verifier's verdicts; a derived total ([[tally]])                               |
 | `tally-opening.json`       | Tally openings (record type `0x0006`): signed records re-made byte for byte, decode rejections, and elections with the verifier's per-cell verdicts and attributions ([[tally]], Opening record)                                                  |
@@ -214,6 +215,17 @@ The proofs are randomised: regenerating gives other proof bytes for the same sta
 - `intakes`: every seat's intake of every `share-encryption.json` ballot, with that file's KEM keys and this file's signing secrets. Each has `ballot`, `seat` and `result`: `"ok"`, with `ballotHash`, `shareHash`, `statement` (the signed `m`, hex) and `receipt` (the signature, RFC 6979 after the low-s rule, hex), or an intake code.
 - `intakeFailures`: intakes by `panel-3`'s seats that fail. Each has `id`, `description`, `context` (as in the ballot-validity vectors), `seat`, `committedVote` (hex), `ciphertext` (hex), `result` (the first failing code) and, for `option-proof`, `option`.
 - `receiptChecks`: each has `id`, `description`, `panel` (whose signing keys are registered), `definitionHash`, `ballotHash`, `seat`, `shareHash` (the statement the checker builds, hex), `signature` (hex) and `valid`.
+
+## Ballot vectors
+
+`ballot.json` covers [[ballot-validity]] (Ballot record) with its own format, `abolish-ballot-vectors/1`, and the same top-level fields, plus `recordType` (`0x0002`) and `version` (1), and:
+
+- `groups`: the tier groups the elections list, plus `outsiders` (a tree no election lists). Each has `id`, `tier`, `secrets` (each member's identity secret `s`, decimal; test data), `leaves` (their identity commitments `Poseidon2(s · B8)`, decimal) and `root` (the depth-32 tier tree's root, decimal).
+- `elections`: by name (`plurality`: 3 options, `k = 2`, `n = 3`, tiers 0 and 2; `approval`: 4 options, 1 to 2 selections, `k = 3`, `n = 4`, tier 1). Each has `definition` (the election definition's encoding, hex), `definitionHash` (hex) and `tiers` (each listed tier's `tier`, `group`, `root` and `scope`, `F(S_g)`, decimal).
+- `ballots`: each has `id`, `description`, `election` (the one it is checked against), `registered` (the seats of the registered key set), `encoding` (the record, hex; it decodes and re-encodes to itself), `ballotHash` (hex, over the record's own fields) and `result`: `ok` or the first failing admission code, with `option` for `option-proof`. Where the admission check reaches the membership step's inputs (the definition hash and tier match), it also has `message` (`M`, hex), `signals` (`root`, `nullifier`, `message` and `scope`, decimal: the public signals the check derives from the record and the definition) and `snarkjs` (snarkjs 0.7.5's `groth16.verify` on the record's proof with those signals).
+- `decode`: each has `id`, `description`, `encoding` (hex), `error` (the decode error code) and, where fixed, `offset`; the pinned version is 1, and the only known record type is `0x0002`.
+
+The proofs are randomised: regenerating gives other proof bytes for the same statements, so the committed file is the record.
 
 ## Delivery vectors
 

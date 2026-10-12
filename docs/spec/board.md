@@ -29,7 +29,7 @@ The payload is a complete record whose `record_type` is one the entry's version 
 
 | `record_type` | Name                   | Versions | Why it is on the board                                                                                                |
 | ------------- | ---------------------- | -------- | --------------------------------------------------------------------------------------------------------------------- |
-| `0x0002`      | ballot                 | 1, 3, 4  | A ballot cast or challenged through our API                                                                           |
+| `0x0002`      | ballot                 | 1, 3, 4  | A ballot cast through our API ([[ballot-validity]], Ballot record); how a challenged ballot is boarded is P1-13's     |
 | `0x0003`      | spoiled-ballot opening | 1, 3, 4  | A published Benaloh opening (P1-13); ordered canonically, below                                                       |
 | `0x0005`      | ceremony transcript    | 1, 3, 4  | The key ceremony's public transcript (P1-14)                                                                          |
 | `0x0006`      | tally opening          | 1, 3, 4  | One cell's opening of the tally (P1-15, [[tally]])                                                                    |

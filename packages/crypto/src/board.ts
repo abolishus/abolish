@@ -151,6 +151,77 @@ export function checkpointHash(checkpoint: Checkpoint): Uint8Array {
   return H(ds("abolish/v1/board-checkpoint", encode(checkpointV1, checkpoint)));
 }
 
+/** `encode(checkpoint)`: 108 bytes, `election_id ‖ u32(segment) ‖ u64(size) ‖ head ‖ root`. */
+export function encodeCheckpoint(checkpoint: Checkpoint): Uint8Array {
+  return encode(checkpointV1, checkpoint);
+}
+
+/** Strictly decodes `encode(checkpoint)`. Throws `DecodeError` on any other length. */
+export function decodeCheckpoint(bytes: Uint8Array): Checkpoint {
+  return decode(checkpointV1, copyBytes(bytes, "bytes"));
+}
+
+// The version-1 entry layout: the segment is the u32 after the record header
+// (3), election_id (32) and index (8).
+const SEGMENT_AT = 3 + 32 + 8;
+
+/**
+ * The checkpoint a board copy gives after each segment in `segments`, from
+ * its raw bytes, before anything in it is authenticated or decoded
+ * (docs/spec/contracts.md, Board anchor, Verification). After segment `s`
+ * the copy's prefix is its entries up to the first whose segment field is
+ * over `s`. Nothing here is trusted: a verifier only compares the result's
+ * hash with a word proven on L1, and a copy that gives a wrong checkpoint
+ * simply matches nothing (T-53). A segment the copy holds no entry for is
+ * left out.
+ */
+export function copyCheckpoints(
+  electionId: Uint8Array,
+  encodedEntries: readonly Uint8Array[],
+  segments: readonly number[],
+): Map<number, Checkpoint> {
+  if (!Array.isArray(encodedEntries)) throw new TypeError("encodedEntries must be an array");
+  if (!Array.isArray(segments)) throw new TypeError("segments must be an array");
+  const id = copyBytes(electionId, "electionId");
+  if (id.length !== 32) throw new RangeError("electionId must be 32 bytes");
+  for (const s of segments)
+    if (!Number.isInteger(s) || s < 0 || s > 0xffffffff)
+      throw new RangeError("every segment must be a u32");
+  // An entry too short to carry a segment field ends every prefix there.
+  const fields: number[] = [];
+  for (const e of encodedEntries) {
+    const b = copyBytes(e, "entry");
+    if (b.length < SEGMENT_AT + 4) break;
+    fields.push(new DataView(b.buffer, b.byteOffset + SEGMENT_AT, 4).getUint32(0));
+  }
+  // The first entry past `s` never moves back as `s` grows, even in a copy
+  // whose segments decrease, so one pass serves every segment.
+  const sizes = new Map<number, number>();
+  let i = 0;
+  for (const s of [...segments].sort((a, b) => a - b)) {
+    while (i < fields.length && (fields[i] as number) <= s) i++;
+    sizes.set(s, i);
+  }
+  // A loop, not a spread: the segment count grows with the election's length.
+  let extent = 0;
+  for (const size of sizes.values()) extent = Math.max(extent, size);
+  const hashes = encodedEntries.slice(0, extent).map(boardEntryHash);
+  const links: Uint8Array[] = [];
+  for (const h of hashes) links.push(chainLink(links.at(-1) ?? new Uint8Array(32), h));
+  const roots = merkleRoots(BOARD_TREE, hashes, new Set(sizes.values()));
+  const out = new Map<number, Checkpoint>();
+  for (const [segment, size] of sizes)
+    if (size > 0)
+      out.set(segment, {
+        election_id: id.slice(),
+        segment,
+        size: BigInt(size),
+        head: (links[size - 1] as Uint8Array).slice(),
+        root: roots.get(size) as Uint8Array,
+      });
+  return out;
+}
+
 /** The board-check failures of docs/spec/board.md, Board checks. */
 export type BoardErrorCode =
   | "decode"

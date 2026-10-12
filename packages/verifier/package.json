@@ -28,7 +28,8 @@
     "test": "vp test run"
   },
   "dependencies": {
-    "@abolishus/crypto": "workspace:*"
+    "@abolishus/crypto": "workspace:*",
+    "@noble/hashes": "catalog:"
   },
   "devDependencies": {
     "@types/node": "catalog:",

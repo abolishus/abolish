@@ -146,6 +146,20 @@ describe("a rejected bundle", () => {
     expect(malformed.stdout).toBe("");
   });
 
+  test("rejects a format-2 bundle whose header isn't one, as a bundle and not a crash", () => {
+    const l1 = JSON.stringify({
+      format: "abolish-verifier-bundle/2",
+      electionId: "ab".repeat(32),
+      boardEntryVersion: 1,
+      clock: { epoch: "0", period: "1", deadline: "0", lastSegment: "0" },
+      l1: { anchor: "00".repeat(20), firstSegment: "0", header: "c0", nodes: [], checkpoints: [] },
+    });
+    const r = run(bundleDir(l1, new Uint8Array()));
+    expect(r.code).toBe(EXIT_CODES.bundleRejected);
+    expect(r.stdout).toBe("");
+    expect(r.stderr).toMatch(/^bundle rejected: l1\.header: /);
+  });
+
   test("rejects a board.bin that isn't a regular file instead of reading it forever", () => {
     const ok = vectorDir(okId);
     const json = readFileSync(join(ok, "bundle.json"));
@@ -173,7 +187,12 @@ describe("a rejected bundle", () => {
 
   test("can't put terminal control characters on stderr through a member name", () => {
     const hostile = "a\u001b[2J\u009b31m\u202eb\\u{1b}\r\n\u0000";
-    const r = run(bundleDir(JSON.stringify({ [hostile]: 1 }), new Uint8Array()));
+    const r = run(
+      bundleDir(
+        JSON.stringify({ format: "abolish-verifier-bundle/1", [hostile]: 1 }),
+        new Uint8Array(),
+      ),
+    );
     expect(r.code).toBe(EXIT_CODES.bundleRejected);
     expect(r.stderr).toBe(
       "bundle rejected: bundle.json: unknown member a\\u{1b}[2J\\u{9b}31m\\u{202e}b\\u{5c}u{1b}\\u{d}\\u{a}\\u{0}\n",

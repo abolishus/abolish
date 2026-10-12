@@ -9,7 +9,11 @@ import {
   BoardError,
   checkBoard,
   type Checkpoint,
+  checkpointHash,
   checkpointOf,
+  copyCheckpoints,
+  decodeCheckpoint,
+  encodeCheckpoint,
   isTimely,
   consistencyProof,
   DecodeError,
@@ -542,5 +546,113 @@ describe("board checks", () => {
     // The entry's own version byte (after the 2-byte record type) claims 2.
     entry[2] = 2;
     expect(() => checkBoard(ELECTION, [entry], 1)).toThrow(BoardError);
+  });
+});
+
+describe("checkpoints from a raw copy", () => {
+  test("a well-formed board's copy gives the checkpoint of every segment", () => {
+    run(
+      fc.property(boardArb, ({ entries, last }) => {
+        const board = checkBoard(ELECTION, entries, 1);
+        const segments = Array.from({ length: last + 2 }, (_, s) => s);
+        const got = copyCheckpoints(ELECTION, entries, segments);
+        for (const s of segments) expect(got.get(s)).toEqual(checkpointOf(board, s));
+      }),
+    );
+  });
+
+  test("a changed copy gives a checkpoint with another hash, never the anchored one", () => {
+    run(
+      fc.property(
+        boardArb,
+        fc.nat(),
+        fc.nat(),
+        fc.integer({ min: 1, max: 255 }),
+        ({ entries, last }, e, at, x) => {
+          const changed = entries.map((b) => b.slice());
+          const i = e % changed.length;
+          const target = changed[i] as Uint8Array;
+          target[at % target.length] = (target[at % target.length] as number) ^ x;
+          const honest = copyCheckpoints(ELECTION, entries, [last]).get(last) as Checkpoint;
+          const got = copyCheckpoints(ELECTION, changed, [last]).get(last);
+          if (got !== undefined) expect(checkpointHash(got)).not.toEqual(checkpointHash(honest));
+        },
+      ),
+    );
+  });
+
+  test("each size is the index of the first entry past the segment, for any copy and segment list", () => {
+    run(
+      fc.property(
+        fc.array(fc.oneof(fc.integer({ min: 0, max: 0xffffffff }), fc.constant(-1)), {
+          maxLength: 30,
+        }),
+        fc.array(fc.integer({ min: 0, max: 0xffffffff }), { maxLength: 10 }),
+        fc.array(fc.integer({ min: 0, max: 40 }), { maxLength: 10 }),
+        (fields, wide, small) => {
+          // -1 is an entry too short to carry a segment field.
+          const copy = fields.map((f, i) =>
+            f === -1
+              ? new Uint8Array(46)
+              : encodeBoardEntry({
+                  election_id: ELECTION,
+                  index: BigInt(i),
+                  segment: f,
+                  payload: recordOf(allowedTypes[0] as number, Uint8Array.of(i)),
+                }),
+          );
+          const readable = fields.indexOf(-1) === -1 ? fields : fields.slice(0, fields.indexOf(-1));
+          const segments = [...wide, ...small, ...small, ...readable.slice(0, 3)];
+          const got = copyCheckpoints(ELECTION, copy, segments);
+          for (const s of segments) {
+            const first = readable.findIndex((f) => f > s);
+            const size = first === -1 ? readable.length : first;
+            expect(got.get(s)?.size).toBe(size === 0 ? undefined : BigInt(size));
+          }
+        },
+      ),
+    );
+  });
+
+  test("the prefix ends at the first entry past the segment, and a short entry ends it", () => {
+    const entry = (index: number, segment: number) =>
+      encodeBoardEntry({
+        election_id: ELECTION,
+        index: BigInt(index),
+        segment,
+        payload: recordOf(allowedTypes[0] as number, Uint8Array.of(index)),
+      });
+    // Segments 0, 2, 1: a copy that isn't a board still gives prefixes.
+    const copy = [entry(0, 0), entry(1, 2), entry(2, 1)];
+    const got = copyCheckpoints(ELECTION, copy, [0, 1, 2, 3]);
+    expect([0, 1, 2, 3].map((s) => got.get(s)?.size)).toEqual([1n, 1n, 3n, 3n]);
+    const short = copyCheckpoints(ELECTION, [entry(0, 0), new Uint8Array(46), entry(2, 0)], [0]);
+    expect(short.get(0)?.size).toBe(1n);
+    expect(copyCheckpoints(ELECTION, [entry(0, 5)], [4]).has(4)).toBe(false);
+    expect(copyCheckpoints(ELECTION, [], [0]).size).toBe(0);
+    expect(() => copyCheckpoints(ELECTION, copy, [-1])).toThrow(RangeError);
+    expect(() => copyCheckpoints(ELECTION, copy, [2 ** 32])).toThrow(RangeError);
+    expect(() => copyCheckpoints(ELECTION.slice(1), copy, [0])).toThrow(RangeError);
+  });
+
+  test("decodeCheckpoint(encodeCheckpoint(c)) = c, and only 108 bytes decode", () => {
+    run(
+      fc.property(
+        hash32,
+        fc.integer({ min: 0, max: 0xffffffff }),
+        fc.bigInt({ min: 0n, max: (1n << 64n) - 1n }),
+        hash32,
+        hash32,
+        fc.uint8Array({ maxLength: 120 }),
+        (election_id, segment, size, head, root, junk) => {
+          const cp: Checkpoint = { election_id, segment, size, head, root };
+          const bytes = encodeCheckpoint(cp);
+          expect(bytes.length).toBe(108);
+          expect(decodeCheckpoint(bytes)).toEqual(cp);
+          if (junk.length !== 108) expect(() => decodeCheckpoint(junk)).toThrow(DecodeError);
+          else expect(encodeCheckpoint(decodeCheckpoint(junk))).toEqual(junk);
+        },
+      ),
+    );
   });
 });

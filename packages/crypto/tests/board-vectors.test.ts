@@ -9,6 +9,7 @@ import {
   boardEntryHash,
   BoardError,
   checkpointHash,
+  copyCheckpoints,
   consistencyProof,
   DecodeError,
   decodeBoardEntry,
@@ -256,4 +257,18 @@ describe("board checks", () => {
       }
       expect(got).toEqual(v.result);
     });
+});
+
+test("a valid board's copy gives every anchored checkpoint, read from its raw bytes", () => {
+  const valid = file.boards.filter((v) => v.id.startsWith("valid"));
+  expect(valid.length).toBe(4);
+  for (const v of valid) {
+    const segments = v.checkpoints.map((c) => Number(dec(c.segment)));
+    const got = copyCheckpoints(hex(v.electionId), v.entries.map(hex), segments);
+    for (const c of v.checkpoints) {
+      const cp = got.get(Number(dec(c.segment)));
+      if (cp === undefined) throw new Error(`${v.id}: no checkpoint for segment ${c.segment}`);
+      expect(bytesToHex(checkpointHash(cp))).toBe(c.hash);
+    }
+  }
 });

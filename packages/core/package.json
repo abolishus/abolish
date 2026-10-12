@@ -7,6 +7,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./turnstile": "./src/turnstile.ts",
     "./test-db": "./tests/db.ts",
     "./test-authenticator": "./tests/authenticator.ts"
   },

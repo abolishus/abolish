@@ -11,6 +11,7 @@ import {
   accountUsers,
   accountVerifications,
 } from "./db/schema/index.ts";
+import { TURNSTILE_HEADER, type Turnstile, type TurnstileAction } from "./turnstile.ts";
 
 // Accounts: who someone is to the app (poll creation, moderation,
 // notifications), with better-auth and passkeys. Never a voting identity:
@@ -64,10 +65,23 @@ const FRESH_SESSION_SECONDS = 24 * 60 * 60;
 /** The label a new passkey shows in the user's passkey manager: nothing about the person. */
 export const PASSKEY_USER_NAME = "Abolish account";
 
-/** better-auth's own warnings and errors, by level only: their messages and arguments can quote input. */
-export interface AccountLogLine {
-  readonly auth: "warn" | "error";
-}
+/**
+ * The two ceremony starts, each writing a challenge row for whoever asks:
+ * each needs a Turnstile token solved for its action (T-01, T-52).
+ */
+const CEREMONY_STARTS: ReadonlyMap<string, TurnstileAction> = new Map([
+  ["/auth/passkey/generate-register-options", "passkey-register"],
+  ["/auth/passkey/generate-authenticate-options", "passkey-authenticate"],
+]);
+
+/**
+ * better-auth's own warnings and errors, by level only: their messages and
+ * arguments can quote input. And Turnstile being unreachable, which refuses
+ * every sign-up and sign-in until it's back.
+ */
+export type AccountLogLine =
+  | { readonly auth: "warn" | "error" }
+  | { readonly turnstile: "unavailable" };
 
 export interface AccountsOptions {
   readonly sql: Sql;
@@ -77,6 +91,8 @@ export interface AccountsOptions {
   readonly origin: string;
   /** The passkeys' RP ID: `origin`'s host or a registrable suffix of it, and never the ballot client's (ADR 0017). */
   readonly rpID: string;
+  /** Checks the Turnstile token each ceremony start carries in `TURNSTILE_HEADER`. */
+  readonly turnstile: Turnstile;
   readonly log: (line: AccountLogLine) => void;
 }
 
@@ -101,7 +117,13 @@ export function newAccountId(): string {
   return id;
 }
 
-const REFUSALS = { 400: "BAD_REQUEST", 404: "NOT_FOUND", 413: "PAYLOAD_TOO_LARGE" } as const;
+const REFUSALS = {
+  400: "BAD_REQUEST",
+  403: "TURNSTILE_REFUSED",
+  404: "NOT_FOUND",
+  413: "PAYLOAD_TOO_LARGE",
+  503: "TURNSTILE_UNAVAILABLE",
+} as const;
 
 function refuse(status: keyof typeof REFUSALS): Response {
   return Response.json(
@@ -147,7 +169,14 @@ function namesPasskey(body: Uint8Array): boolean {
   }
 }
 
-export function createAccounts({ sql, secret, origin, rpID, log }: AccountsOptions): Accounts {
+export function createAccounts({
+  sql,
+  secret,
+  origin,
+  rpID,
+  turnstile,
+  log,
+}: AccountsOptions): Accounts {
   const url = new URL(origin);
   if (url.protocol !== "https:" || url.origin !== origin)
     throw new Error("origin must be a bare https origin");
@@ -279,6 +308,17 @@ export function createAccounts({ sql, secret, origin, rpID, log }: AccountsOptio
       // passkey's `name` is whatever the client calls it ("Jane's iPhone"):
       // neither is kept (the migration refuses a name).
       if (new URL(request.url).searchParams.has("context")) return refuse(400);
+      // Signing up, signing in and adding a passkey all start here, and so
+      // does every challenge row: one solved challenge per ceremony (T-52).
+      const action = CEREMONY_STARTS.get(path);
+      if (action !== undefined) {
+        const verdict = await turnstile.verify(request.headers.get(TURNSTILE_HEADER), action);
+        if (verdict === "unavailable") {
+          log({ turnstile: "unavailable" });
+          return refuse(503);
+        }
+        if (verdict !== "passed") return refuse(403);
+      }
       if (request.method !== "POST") return auth.handler(request);
       const body = await boundedBody(request);
       if (!body) return refuse(413);

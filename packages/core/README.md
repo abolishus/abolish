@@ -87,7 +87,7 @@ Voting-identity recovery backups (ADR 0017, option A, step 5; `docs/spec/identit
 
 Who someone is to the app (poll creation, moderation, notifications), with better-auth and passkeys. Never a voting identity: that and its recovery passkey live in the ballot client, on its own RP ID ([ADR 0017](../../docs/adr/0017-identity-recovery-backup.md)).
 
-`createAccounts({ sql, secret, origin, rpID, log })` returns:
+`createAccounts({ sql, secret, origin, rpID, turnstile, log })` returns:
 
 - `handler(request)`: a `Request` → `Response` handler that `apps/web` serves on its own origin under `/auth/`. Only `ACCOUNT_ROUTES` reach better-auth (sessions, sign-out, account deletion, the passkey ceremonies, and listing and deleting passkeys); every other path, including better-auth's password, e-mail, social and profile routes, is 404. POST bodies over `MAX_ACCOUNT_BODY` (64 KiB) are 413.
 - `accountOf(headers)`: the account ID behind a request's session cookie, for `apps/web`'s server code.
@@ -100,7 +100,13 @@ How it is set up:
 - **Nothing about the person.** No e-mail (a random `@account.invalid` placeholder, since better-auth requires one), name, picture, address or user agent: IP tracking is off, a hook clears both on every session, and the migration's checks refuse them. The passkey's user name is a fixed label. A passkey `name` (clients send device or owner names) and the plugin's `context` parameter are refused with 400, and renaming passkeys isn't routed. The authenticator model (AAGUID) is kept, as the plugin stores it; most platform authenticators report zeros. Passwords and OAuth tokens have a table because better-auth reads it, but every row is refused.
 - **Cookies.** `__Secure-abolish-account.*`, host-only, `HttpOnly`, `SameSite=Strict`. Requests with cookies must come from `origin` (better-auth's origin check, pinned on even under a test runner, which would otherwise turn it off).
 - **No telemetry.** Off in the options, and `createAccounts` throws if `BETTER_AUTH_TELEMETRY` is set, since that variable switches it on whatever the options say. better-auth's own warnings and errors reach `log` by level only, since their messages can quote input.
-- better-auth's rate limiter is off: it keys on addresses, which we don't keep. Per-address limits are the proxy's (P2-11); Turnstile comes in P2-5 part 2.
+- **Turnstile on every ceremony start** (T-01, T-52). Both `GET /auth/passkey/generate-register-options` (signing up, or adding a passkey) and `GET /auth/passkey/generate-authenticate-options` (signing in) write a challenge row for whoever asks, so each needs a Turnstile token in the `x-turnstile-token` header, solved on `origin`'s host for its own action (`passkey-register` or `passkey-authenticate`), before better-auth sees the request. A refused token is 403 `TURNSTILE_REFUSED` and an unreachable Cloudflare 503 `TURNSTILE_UNAVAILABLE` (logged as `{ turnstile: "unavailable" }`); neither writes anything. The verify routes need no token of their own: they finish a ceremony a start paid for.
+- better-auth's rate limiter is off: it keys on addresses, which we don't keep. Per-address limits are the proxy's (P2-11).
+
+### Turnstile (`src/turnstile.ts`, also `@abolishus/core/turnstile`; T-01, T-11, T-52)
+
+`createTurnstile({ secretKey, hostname })` checks a token with Cloudflare's siteverify and answers `passed`, `refused` or `unavailable`. Only `success: true` with this `hostname` and the expected `action` passes; a token solved on another site or for another action is refused, and Cloudflare refuses a spent or expired one (each token passes once, within 300 seconds). Network failures, timeouts (5 s), non-200 answers, Cloudflare's `internal-error` and a wrong secret key are `unavailable`, never a pass. Malformed tokens (empty, over 2048 characters, not printable ASCII) are refused without asking. The request carries only the secret and the token: no `remoteip`, since we keep no addresses (T-11). The subpath export has no dependencies, so `apps/web`'s client can take the header name and action names from it. Never used on the ballot path (T-25).
+
 - better-auth reads the clock itself, so session expiry isn't on an injected clock.
 
 ### Auditing the board (`src/audit.ts`; T-23, T-66)

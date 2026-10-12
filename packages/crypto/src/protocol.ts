@@ -151,9 +151,19 @@ export function pinnedVersion(
 const isBoardEntryVersion = (v: number | undefined): v is BoardEntryVersion =>
   v !== undefined && Object.hasOwn(BOARD_ENTRY.versions, v);
 
-// Ballot versions that name their cell, which definition versions 3 and 4 need;
-// P1-12 adds the first.
-const CELL_BALLOT_VERSIONS: ReadonlySet<number> = new Set<number>();
+// Ballot versions that name their cell, which definition versions 3 and 4
+// need and no other definition version may pin (docs/spec/ballot-validity.md,
+// Ballot record (version 2)).
+const CELL_BALLOT_VERSIONS: ReadonlySet<number> = new Set<number>([2]);
+// Ballot versions whose delivery records reach the board as share receipts
+// and complaints (docs/spec/delivery.md, Versions).
+const DELIVERED_BALLOT_VERSIONS: ReadonlySet<number> = new Set<number>([1, 2]);
+// The spoiled-ballot opening versions that open ballot version 2's cores
+// (docs/spec/challenge.md, Versions; opening version 1 opens version 1's
+// only). None does yet, so a profile pinning ballot version 2 is refused
+// whatever opening it pins: a ballot that can't be challenged can't be
+// checked as cast-as-intended (T-42, T-47). P1-13 adds the first.
+const CELL_CORE_OPENINGS: ReadonlySet<number> = new Set<number>();
 
 /** Why 2.3's profile combination refuses a definition's pins. */
 export type ProfileCombinationRule = "profile-combination" | "unsupported-version";
@@ -161,8 +171,11 @@ export type ProfileCombinationRule = "profile-combination" | "unsupported-versio
 /**
  * 2.3's `profile-combination` (docs/spec/verifier.md, 2.3), for the verifier
  * and for any client that must refuse an election bound to fail it
- * (docs/spec/delivery.md, Versions): ballot version 1 needs a board-entry
- * version that carries share receipts and complaints (3 or 4), and
+ * (docs/spec/delivery.md, Versions): ballot versions 1 and 2 need a
+ * board-entry version that carries share receipts and complaints (3 or 4),
+ * definition versions 3 and 4 need ballot version 2 and only they pair with
+ * it, ballot version 2 needs a spoiled-ballot opening version that opens its
+ * cores (none yet, so it is refused for now), and
  * tally-opening version 1 one that carries destruction statements (4,
  * docs/spec/tally.md, Destruction), so an election's creator can't leave
  * delivery or destruction off the board (T-34). A board-entry version this
@@ -183,18 +196,23 @@ export function profileCombinationRule(
   const ballot = pinnedVersion(d, RECORD_TYPES.ballot);
   const opening = pinnedVersion(d, RECORD_TYPES.tallyOpening);
   if (ballot === undefined || opening === undefined) return "profile-combination";
-  // Regional cells need a ballot that names its cell. Ballot version 1 names
-  // only a tier and no version names a cell yet, so every ballot version is
-  // refused until one does, never only the known one (docs/spec/
-  // election-definition.md, Notes; T-16, T-34).
+  // Regional cells need a ballot that names its cell, and a ballot naming a
+  // cell needs a partition of cells: definition versions 3 and 4 pin exactly
+  // the ballot versions that name their cell, and every other definition
+  // version none of them (docs/spec/election-definition.md, Notes; T-16, T-34).
   const definition = pinnedVersion(d, RECORD_TYPES.electionDefinition);
-  if ((definition === 3 || definition === 4) && !CELL_BALLOT_VERSIONS.has(ballot))
+  const regional = definition === 3 || definition === 4;
+  if (regional !== CELL_BALLOT_VERSIONS.has(ballot)) return "profile-combination";
+  const spoiled = pinnedVersion(d, RECORD_TYPES.spoiledBallotOpening);
+  if (ballot === 2 && (spoiled === undefined || !CELL_CORE_OPENINGS.has(spoiled)))
     return "profile-combination";
   const allowed = boardPayloadTypes(board);
   const carriesDelivery =
     allowed.includes(RECORD_TYPES.shareReceipt) && allowed.includes(RECORD_TYPES.shareComplaint);
   const carriesDestruction = allowed.includes(RECORD_TYPES.destructionStatement);
-  const fits = (ballot !== 1 || carriesDelivery) && (opening !== 1 || carriesDestruction);
+  const fits =
+    (!DELIVERED_BALLOT_VERSIONS.has(ballot) || carriesDelivery) &&
+    (opening !== 1 || carriesDestruction);
   return fits ? undefined : "profile-combination";
 }
 

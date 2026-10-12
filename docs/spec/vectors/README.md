@@ -31,6 +31,7 @@ One JSON file per spec section or record type, named after it (`primitives.json`
 | `share-encryption.json`       | Trustee KEM keys, share ciphertexts with the randomness that made them, decryptions, postings and complaints with their verdicts, and codec rejections ([[share-encryption]])                                                                                                                                                                             |
 | `share-receipt.json`          | Ballot hashes; each seat's intake of the share-encryption ballots with its share receipt, intakes failing each check, and receipt checks ([[ballot-validity]], Ballot hash; [[share-encryption]], Intake and receipts)                                                                                                                                    |
 | `ballot.json`                 | Ballot records (`0x0002`) with real Semaphore membership proofs: encodings, ballot hashes, `M`, the derived signals, snarkjs's verdicts, admission results and decode rejections ([[ballot-validity]], Ballot record)                                                                                                                                     |
+| `ballot-v2.json`              | Ballot records version 2, each naming its cell in a definition-version-3 election, with real Semaphore membership proofs against cell trees: encodings, statement and ballot hashes, `M`, signals, snarkjs's verdicts, admission results and decode rejections ([[ballot-validity]], Ballot record (version 2))                                           |
 | `delivery.json`               | Share receipts, postings and complaints as records, their decode rejections, board entries under version 3, the deadline segments and deadlines, and elections with the delivery check's verdicts ([[delivery]])                                                                                                                                          |
 | `tally.json`                  | Cell aggregates, trustees' per-ballot and summed shares with their check verdicts, combined seats, Lagrange coefficients and openings; published openings with the verifier's verdicts; a derived total ([[tally]])                                                                                                                                       |
 | `tally-opening.json`          | Tally openings (record type `0x0006`): signed records re-made byte for byte, decode rejections, and elections with the verifier's per-cell verdicts and attributions ([[tally]], Opening record)                                                                                                                                                          |
@@ -257,6 +258,13 @@ The proofs are randomised: regenerating gives other proof bytes for the same sta
 - `decode`: each has `id`, `description`, `encoding` (hex), `error` (the decode error code) and, where fixed, `offset`; the pinned version is 1, and the only known record type is `0x0002`.
 
 The proofs are randomised: regenerating gives other proof bytes for the same statements, so the committed file is the record.
+
+`ballot-v2.json` covers [[ballot-validity]] (Ballot record (version 2)) in the same format, `abolish-ballot-vectors/1`, with `version` 2, and:
+
+- `groups`: each group of the election's electorate (`groupId`, `tier`, `region`), its `leafCount`, the indices first occurrence set to 0 (`zeroedByFirstOccurrence`) and its `voters` (`index` in the group, a `label` and the identity secret, decimal; test data). The other leaves are filler commitments derived from fixed labels by `ballot-v2-vectors.py`; the cell roots, which the definition states, cover them.
+- `elections`: by name (`regional`: plurality over 3 options, `k = 2`, `n = 3`; `other`: the same electorate under another `election_id`). Each has `definition` (a version-3 definition's encoding, hex), `definitionHash` and `cells` (each cell's `cell`, `tier`, `regions`, `groups`, `root`, `members` and `scope`, decimal).
+- `ballots`: as in `ballot.json`, plus `statementHash` (hex) and, for an admitted ballot, `tier`, its cell's tier. `message` and `signals` are present where the definition hash and cell match.
+- `decode`: as in `ballot.json`, with the pinned version 2.
 
 ## Delivery vectors
 

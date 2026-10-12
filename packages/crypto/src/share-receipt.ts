@@ -71,12 +71,13 @@ export type IntakeResult =
 /**
  * Trustee intake of one ballot's ciphertext (docs/spec/share-encryption.md,
  * Intake and receipts): `validity-shape`, then `share-hash`, then the option
- * and sum proofs under the delivered tier and nullifier, then decryption. The
- * first failure is the result, and nothing is signed. The caller has run
- * verifier 2.5 for the election (the rules, the panel and its own registered
- * keys), decoded the delivery strictly (`COMMITTED_VOTE`, a `u8` tier, a
- * `field<bn254>` nullifier) and refused one that doesn't decode, and refused a
- * tier the definition doesn't list.
+ * and sum proofs under the delivered tier (ballot version 2: cell) and
+ * nullifier, then decryption. The first failure is the result, and nothing is
+ * signed. The caller has run verifier 2.5 for the election (the rules, the
+ * panel and its own registered keys), decoded the delivery strictly
+ * (`COMMITTED_VOTE`, a `u8` tier or cell, a `field<bn254>` nullifier) and
+ * refused one that doesn't decode, and refused a tier the definition doesn't
+ * list or a cell its partition doesn't have.
  */
 export function intake(
   ctx: ValidityContext,

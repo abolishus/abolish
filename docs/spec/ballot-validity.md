@@ -94,6 +94,8 @@ statement_hash = H(DS("abolish/v1/ballot-statement",
 | `vss`             | as in the ballot | Every commitment the proofs speak about, and every VSS commitment                                                                                                                                                                  |
 | `share_hashes`    | as in the ballot | Every share ciphertext, so the shares the trustees hold are fixed by the proved statement ([[0002-everlasting-privacy]], T-30)                                                                                                     |
 
+Under ballot version 2 the version input is 2 and the ballot's `cell` takes the place of `tier`, as a `u8` at the same position (Ballot record (version 2)); nothing else changes, so the input after the tag has the same length, and no proof made under one version verifies under the other (T-31).
+
 The statement is hashed once and each challenge binds its digest: the full statement can be over 33 KB, and repeating it in every one of a ballot's up to 65 challenge inputs would multiply what every verifier hashes per ballot. `H` is collision-resistant, so the digest binds the statement as the statement itself would; ElectionGuard 2.0's extended base hash `H_E` does the same. `definition_hash` is the first input, as [[domain-separation]] requires.
 
 ## Ballot hash
@@ -106,7 +108,7 @@ ballot_hash = H(DS("abolish/v1/ballot",
     ‖ encode(vss) ‖ encode(share_hashes) ‖ encode(option_proofs) ‖ encode(sum_proof)))
 ```
 
-The inputs are the statement hash's, in the same order and encodings, followed by the validity proofs as the ballot carries them (Committed vote): `encode(vss) ‖ … ‖ encode(sum_proof)` is the committed vote's own encoding. The input after the tag is `68 + len(encode(committed_vote))` bytes.
+The inputs are the statement hash's, in the same order and encodings, followed by the validity proofs as the ballot carries them (Committed vote): `encode(vss) ‖ … ‖ encode(sum_proof)` is the committed vote's own encoding. The input after the tag is `68 + len(encode(committed_vote))` bytes. Under ballot version 2 the version input is 2 and `cell` takes the place of `tier`, as in the statement hash.
 
 What binds it:
 
@@ -119,7 +121,7 @@ What it leaves out, and why:
 - **The membership proof.** A proof can't bind its own hash, and anyone can re-randomise a Groth16 proof without the witness ([[membership]], Security notes): a re-randomised copy of a ballot keeps its ballot hash, and so its receipts, and is a repeat ([[revoting]], Selection step 1).
 - **The L1 reference.** `M` binds it beside the ballot hash. The same public part under a newer reference carries the same shares, so the receipts the trustees gave for it still hold.
 
-**Every other field is bound.** Every field of the ballot record (`0x0002`, version 1) other than the membership proof, `l1_ref_number` and `l1_ref_hash` MUST be an input to `ballot_hash`, so whoever specifies the record and adds a field there adds it here, before anything freezes. A verifier computes `ballot_hash` from the strictly decoded record, never takes one a record or relay carries.
+**Every other field is bound.** Every field of the ballot record (`0x0002`, versions 1 and 2) other than the membership proof, `l1_ref_number` and `l1_ref_hash` MUST be an input to `ballot_hash`, so whoever specifies the record and adds a field there adds it here, before anything freezes. A verifier computes `ballot_hash` from the strictly decoded record, never takes one a record or relay carries.
 
 Only someone who knows the commitments' openings can give a statement a second ballot hash: the voter's client, or `k` trustees together, who can interpolate them from their shares. The validity proofs are proofs of knowledge of those openings (CDS94), so no one else can make another accepting proof of the same statement (T-31, T-32). A second ballot hash also needs a new membership proof, and so the voter's identity secret, before it is a ballot.
 
@@ -273,6 +275,52 @@ A retry sends the identical record ([[revoting]], Client rule 3).
 - **Random-looking fields.** VSS commitments, a qualified seat's share hash and the proofs' scalars look random, so a malicious client can hide chosen bytes in them, as in every field that must be random ([[notation]], Result-critical fields; T-17).
 - **Malleable proofs.** Anyone can re-randomise the membership proof of a ballot they have seen and post the copy; it is a repeat, recognised by (`tier`, `ν`, `M`), never by its bytes ([[revoting]], Selection; T-38).
 
+## Ballot record (version 2)
+
+Record type `0x0002`, version 2: one cast ballot in an election whose definition is version 3 or 4 ([[election-definition]], Layout (version 3); version 4's partition is version 3's), naming the cell it was cast in rather than a tier ([[0019-regional-cells]], Ballot version 2; T-16). Everything not stated here is version 1's: the committed vote, the shares and their ciphertexts, the checks and the casting order.
+
+| Field              | Type               | Meaning                                                                                    |
+| ------------------ | ------------------ | ------------------------------------------------------------------------------------------ |
+| `definition_hash`  | `bytes[32]`        | The election's definition hash                                                             |
+| `cell`             | `u8`               | The cell's position in the partition ([[election-definition]], Layout (version 3)), from 0 |
+| `nullifier`        | `field<bn254>`     | `ν`, the voter's nullifier for this poll and cell ([[membership]], Scope)                  |
+| `l1_ref_number`    | `u64`              | As in version 1                                                                            |
+| `l1_ref_hash`      | `bytes[32]`        | As in version 1                                                                            |
+| `membership_proof` | `membership_proof` | As in version 1, against the cell's cell tree ([[membership]], Cell tree)                  |
+| `committed_vote`   | `committed_vote`   | As in version 1                                                                            |
+
+Notes:
+
+- **The same offsets.** `cell` is version 1's `tier` byte, at offset 35, so every field keeps version 1's offset and a record has version 1's size. A contract reads the cell where it read the tier (P1-18, P1-12c).
+- **Bound by the ballot hash.** `statement_hash` and `ballot_hash` take version 2 and `cell` in place of version 1 and `tier` (Statement hash, Ballot hash), so every field but the membership proof and the L1 reference is bound, as Ballot hash requires, and a proof under one version never verifies under the other (T-31).
+- **The cell decides the tier.** A ballot's tier is its cell's tier in the definition, never a field of the record, and `M` ([[revoting]], Message) is computed with it. The cell is bound into `M` through `ballot_hash`. The re-vote rule ranks by that tier and the nullifier ([[revoting]], Selection), unchanged: the cells of one tier hold disjoint commitments (first occurrence), so one secret has one leaf, one cell and one nullifier per tier ([[membership]], Cell tree).
+- **Shares and delivery are version 1's.** The share ciphertexts' associated data and proof of knowledge name ballot version 1 (`u16(0x0002) ‖ u8(1)`, [[share-encryption]], Ciphertext): version 2 keeps version 1's share-ciphertext layout and rules unchanged, and the definition hash, which they also bind, pins the ballot version, so a ciphertext still can't serve two elections or two versions. Version 2 fixes the delivery records (`0x000c` to `0x000e`) at version 1 with the same windows, as version 1 does ([[delivery]], Versions).
+- **Only with definition versions 3 and 4.** A profile pairs ballot version 2 with definition version 3 or 4 and nothing else, and definition versions 3 and 4 with ballot version 2 and nothing else ([[verifier]] 2.3, `profile-combination`): version 1's tiers-only partition has no cells to name, and a partition of cells can't be read from a tier. Ballot version 2 also needs a spoiled-ballot opening version that opens its cores, and none does yet ([[challenge]], Versions), so until P1-13 specifies one 2.3 refuses every profile pinning it and no regional-cell election can be registered: its voters couldn't challenge a ballot (T-42, T-47).
+
+### Decoding (version 2)
+
+As version 1, except that `cell` is any `u8`: decoding never compares it with the partition, so a ballot naming a cell the definition doesn't have is still read, and rejected at admission (`ballot-cell`). A record of another version is `profile-mismatch` under a profile pinning version 2, as under one pinning version 1.
+
+### Admission (version 2)
+
+The checks of version 1 (Admission), in the same order, with two changes:
+
+| Code               | Rejects a ballot when                                                                                                                                                                                                                                                                                                                                          |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ballot-cell`      | In place of `ballot-tier`: `cell` is at or above the number of cells in the definition's partition.                                                                                                                                                                                                                                                            |
+| `membership-proof` | The membership proof fails [[membership]] (Checks) with `ρ` the cell's `root` and `ŝ` the scope of the cell's tier and root ([[membership]], Scope), both from the definition, `ν` the record's `nullifier`, and `m̂ = F(M)`, with `M` recomputed from the record's `ballot_hash` and L1 reference, the cell's tier and the definition ([[revoting]], Message). |
+
+A ballot that passes gives its `ballot_hash`, its cell, and the tuple (`tier`, `ν`, `M`, `l1_ref_number`) that [[revoting]] ranks, with `tier` its cell's tier. The voter can't choose a cell by choosing a root to prove against: the cell's root and scope come from the definition, and a commitment has a leaf in only one cell of its tier ([[verifier]] 2.8; [[membership]], Cell tree). A ballot naming a cell its voter has no leaf in fails `membership-proof`.
+
+### Casting (version 2)
+
+As version 1, with the cell in place of the tier: the client finds the cell holding its own counted leaf (its group's region, by the fold), checks that the leaf is the counted occurrence in the region it registered in and refuses to cast and alarms otherwise ([[election-definition]], The electorate is in the past; [[0019-regional-cells]], Consequences), and proves against that cell's tree, root and scope, all rebuilt from the board and the definition, never from a server.
+
+### Residuals (version 2)
+
+- **The cell is public.** A ballot shows its cell, and so its region unless the cell is a remainder; that is the result's granularity, which 2.8's floor bounds (T-16). A remainder cell shows which cell, never which of its regions.
+- **What the contract path leaves free** is version 1's, with `ballot-cell` in place of `ballot-tier` among the cheap checks a direct-submit contract MUST run (P1-18).
+
 ## Residuals
 
 - **Trustees can open any ballot.** Any `k` trustees can combine their shares and open a ballot's commitments, publicly and verifiably (T-14, [[0002-everlasting-privacy]]). This page doesn't change that.
@@ -283,5 +331,7 @@ A retry sends the identical record ([[revoting]], Client rule 3).
 ## Test vectors
 
 `docs/spec/vectors/ballot-validity.json` ([[vectors/README|vectors]]): ballots for plurality and approval, blank ballots, ballots at `MAX_OPTIONS` and at `MAX_TRUSTEES`, each with the randomness that produced it so an implementation can reproduce every byte; one ballot failing each check, including a proof copied to another nullifier, option or election, a vote of 2, an over-vote, and challenges that don't sum; codec rejections of the committed vote and of shares; and valid and invalid shares for every trustee of a ballot. They are printed by `packages/crypto/scripts/ballot-validity-vectors.py`, an implementation of this page in Python's integers and `hashlib`, reusing only the independent ristretto255 and RFC 9380 code of `group-vectors.py`, which checks itself against the RFCs first.
+
+`docs/spec/vectors/ballot-v2.json`: version-2 ballot records of an election whose definition is version 3, with tier 0 split into a large region's cell and a remainder of two small regions, and tier 2 unsplit (three cells), each with its encoding, statement hash, ballot hash, `M`, the public signals the admission check derives and the result: admitted ballots in every cell (both regions of the remainder, a re-vote, a share hash at every seat, a commitment repeated in two groups counted in its first one), one ballot rejected by each code (`ballot-cell` at the first cell past the partition and at 255), and membership failures including a proof under another cell's root and scope (of the same tier and of another), another ballot's proof, a changed L1 reference and a repeated commitment proving from its zeroed leaf; the two order cases; and decode rejections. They are printed by `packages/crypto/scripts/ballot-v2-vectors.py`, which builds each cell tree itself by the first-occurrence rule and reuses `ballot-vectors.py` and `regional-cells-vectors.py`, with membership proofs by `ballot-proofs.mjs` as for version 1.
 
 `docs/spec/vectors/ballot.json`: ballot records of two elections (plurality over tiers 0 and 2, approval over tier 1), each with its encoding, ballot hash, `M`, the public signals the admission check derives and the result: admitted ballots (each tier, a re-vote, the same ballot proved twice, a share hash at every seat), and one ballot rejected by each code, the membership failures including a changed L1 reference, another ballot's proof, a proof under another tier's root and scope, a nullifier that isn't the circuit's and a non-member; two ballots failing two checks each, which pin the order; and decode rejections. They are printed by `packages/crypto/scripts/ballot-vectors.py`, an implementation of Ballot record in Python's integers and `hashlib` (reusing this folder's other independent generators, with its own Baby Jubjub), with membership proofs from snarkjs over Semaphore's depth-32 circuit (`ballot-proofs.mjs`), which checks that each proof's root and nullifier are the ones the Python computed; every pairing verdict in the file is snarkjs's.

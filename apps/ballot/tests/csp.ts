@@ -7,9 +7,12 @@
 //   no inline code, no eval, no other site.
 // - connect-src 'none': this part of the client makes no request at all. The
 //   API's origin is added with the screens that fetch an election (P2-8).
-// - Trusted Types with no policy: any write of a string into a DOM sink that
-//   parses HTML or script throws, so an injected string can't become markup.
-//   The Web Worker (part 2) needs one named policy for its own script URL.
+// - worker-src 'self': the Web Worker that encrypts and proves (part 2) loads
+//   only from the client's own origin.
+// - Trusted Types: any write of a string into a DOM sink that parses HTML or
+//   script throws, so an injected string can't become markup. One named
+//   policy, ballot-worker, may exist, for the worker's own script URL
+//   (`new Worker(url)` is a script-URL sink); part 2 creates it.
 // - base-uri and form-action 'none': no <base> can redirect relative URLs and
 //   no form can post a choice anywhere.
 // A <meta> policy can't set frame-ancestors, report-uri or sandbox; framing
@@ -24,10 +27,11 @@ export const BALLOT_CSP: Csp = {
   "font-src": ["'self'"],
   "img-src": ["'self'"],
   "connect-src": ["'none'"],
+  "worker-src": ["'self'"],
   "base-uri": ["'none'"],
   "form-action": ["'none'"],
   "require-trusted-types-for": ["'script'"],
-  "trusted-types": ["'none'"],
+  "trusted-types": ["ballot-worker"],
 };
 
 /** Parses a serialised policy; a repeated directive, which browsers ignore, is an error. */

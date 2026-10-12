@@ -137,6 +137,16 @@ describe("the served ballot client", () => {
         "event handler": () => {
           document.body.setAttribute("onclick", "window.injected = true");
         },
+        // Only the worker's policy, ballot-worker, may be created.
+        "another policy": () => {
+          // TypeScript's DOM library has no Trusted Types yet.
+          const tt = (
+            globalThis as unknown as {
+              trustedTypes: { createPolicy(n: string, r: object): unknown };
+            }
+          ).trustedTypes;
+          tt.createPolicy("injected", {});
+        },
       };
       return Object.fromEntries(
         Object.entries(attempts).map(([name, attempt]) => {
@@ -155,6 +165,7 @@ describe("the served ballot client", () => {
       innerHTML: "refused",
       insertAdjacentHTML: "refused",
       "event handler": "refused",
+      "another policy": "refused",
     });
     await expect
       .poll(() => violations.filter((v) => v.startsWith("require-trusted-types-for")).length)

@@ -8,8 +8,8 @@ import {EventAccumulator} from "./EventAccumulator.sol";
 /// @title The group registry's EIP-712 messages and constants
 /// (docs/spec/contracts.md, Group registry, Signed messages).
 /// @notice EIP-712 is an external format (docs/spec/domain-separation.md),
-/// used so the hardware wallets holding the registrars' keys show what they
-/// sign. Signatures are recovered only through OpenZeppelin's audited
+/// used so a registrar's signer, and anyone auditing it, sees what is signed
+/// in the standard's readable form. Signatures are recovered only through OpenZeppelin's audited
 /// `ECDSA` (vendored, see the package README); no curve arithmetic is
 /// implemented here.
 library GroupRegistryLib {

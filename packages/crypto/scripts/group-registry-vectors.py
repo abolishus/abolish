@@ -423,6 +423,32 @@ def verdict_remove(rec):
     return {"error": bad[0], **({"seat": bad[1]} if bad[1] is not None else {})} if bad else None
 
 
+def apply_group(records):
+    """The verifier's replay of one group (spec, Group registry, Verification):
+    its own member count and removed set, every registry check, no chain
+    state. Returns the leaves (0 where removed) or the first failing record."""
+    count, leaves = 0, []
+    for at, (kind, rec) in enumerate(records):
+        bad = verdict_add(rec) if kind == "add" else verdict_remove(rec)
+        if bad:
+            return {"error": "group-history", "at": at, "reason": bad["error"]}
+        if kind == "add":
+            _, first, cs, _ = parse_add(rec)
+            if first != count or count + len(cs) > 2**32:
+                return {"error": "group-history", "at": at, "reason": "position"}
+            leaves += cs
+            count += len(cs)
+        else:
+            _, size, idx, _ = parse_remove(rec)
+            if size > count:
+                return {"error": "group-history", "at": at, "reason": "size"}
+            if any(leaves[i] == 0 for i in idx):
+                return {"error": "group-history", "at": at, "reason": "removed"}
+            for i in idx:
+                leaves[i] = 0
+    return {"count": count, "leaves": ["%064x" % c for c in leaves], "groupSize": sum(1 for c in leaves if c)}
+
+
 def commitments(n, seed):
     out = []
     i = 0
@@ -564,6 +590,41 @@ def main():
     reject("remove", "remove-other-index", "Signed for index 1", remove_record(0, 1, idx, approvals_for(remove_digest(0, 2, [1]), [1, 2])), {"error": "signature", "seat": 1})
     reject("remove", "addition-signature", "Signed as an addition", remove_record(0, 1, idx, approvals_for(add_digest(0, 0, [0]), [1, 2])), {"error": "signature", "seat": 1})
 
+    # Group histories the verifier replays (spec, Group registry, Verification).
+    def signed_add(f, cs, seats=(1, 2)):
+        return ("add", add_record(0, f, cs, approvals_for(add_digest(0, f, cs), seats)))
+
+    def signed_remove(size, idx, seats=(1, 2)):
+        return ("remove", remove_record(0, size, idx, approvals_for(remove_digest(0, size, idx), seats)))
+
+    b0 = signed_add(0, commitments(2, 20))
+    b1 = signed_add(2, commitments(2, 21))
+    b2 = signed_add(4, commitments(1, 22))
+    r1 = signed_remove(4, [1])
+    cs_b1 = commitments(2, 21)
+    unsigned_b1 = ("add", add_record(0, 2, cs_b1, approvals_for(add_digest(0, 2, cs_b1), [1])))
+    forbidden_b1 = signed_add(2, [commitments(1, 23)[0], POSEIDON2_0_1])
+    sequences = []
+    for id_, desc, recs in (
+        ("honest", "Two batches, a removal signed at size 4, then a third batch", [b0, b1, r1, b2]),
+        ("omitted-tail", "The last batch left out: a shorter history that still checks (the T-71 residual)", [b0, b1]),
+        ("replayed", "The second batch logged twice", [b0, b1, b1]),
+        ("reordered", "The second batch before the first", [b1, b0]),
+        ("omitted-middle", "The second batch left out, the third logged", [b0, b2]),
+        ("stale-size", "A removal signed at size 4 after only 2 members", [b0, r1]),
+        ("removal-replayed", "The removal logged twice", [b0, b1, r1, r1]),
+        ("removal-beyond-size", "A removal of index 2 signed at size 2", [b0, b1, signed_remove(2, [2])]),
+        ("unsigned", "The second batch with one approval of the two needed", [b0, unsigned_b1]),
+        ("forbidden", "The second batch holding Poseidon2(0, 1), validly signed", [b0, forbidden_b1]),
+    ):
+        sequences.append({
+            "id": id_, "description": desc, "groupId": 0,
+            "records": [{"kind": k, "record": hexs(r)} for k, r in recs],
+            **apply_group(recs),
+        })
+    assert sequences[0]["groupSize"] == 4 and "error" not in sequences[1]
+    assert all(q["error"] == "group-history" for q in sequences[2:])
+
     doc = {
         "format": "abolish-group-registry-vectors/1",
         "title": "Group registry: addition and removal records, their EIP-712 digests and approvals",
@@ -595,6 +656,7 @@ def main():
         "additions": additions,
         "removals": removals,
         "rejected": rejected,
+        "sequences": sequences,
     }
     assert REGISTRARS == sorted(REGISTRARS) and len(set(REGISTRARS)) == 3
     (out / "group-registry.json").write_text(json.dumps(doc, indent=2) + "\n")

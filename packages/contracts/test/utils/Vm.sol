@@ -42,6 +42,7 @@ interface Vm {
     function prank(address msgSender) external;
     function readFile(string calldata path) external view returns (string memory data);
     function recordLogs() external;
+    function revertToState(uint256 snapshotId) external returns (bool success);
     function roll(uint256 newHeight) external;
     function sign(uint256 privateKey, bytes32 digest)
         external
@@ -51,6 +52,7 @@ interface Vm {
         external
         pure
         returns (bytes32 r, bytes32 s);
+    function snapshotState() external returns (uint256 snapshotId);
     function store(address target, bytes32 slot, bytes32 value) external;
     function toString(uint256 value) external pure returns (string memory);
     function warp(uint256 newTimestamp) external;

@@ -6,6 +6,7 @@ import { describe, expect, test } from "vite-plus/test";
 import {
   ADD_MEMBERS_TYPE,
   addMembersStructHash,
+  applyGroupRecords,
   BN254_R,
   checkGroupApprovals,
   decodeGroupAddition,
@@ -16,6 +17,7 @@ import {
   type GroupAddition,
   groupAdditionDigest,
   type GroupApproval,
+  type GroupLogRecord,
   GROUP_REGISTRY_DOMAIN_TYPE,
   GROUP_REGISTRY_MAX_BATCH,
   GROUP_REGISTRY_MAX_REGISTRARS,
@@ -88,6 +90,18 @@ interface GroupRegistryVectors {
     readonly size: number | bigint;
     readonly indices: readonly (number | bigint)[];
   })[];
+  readonly sequences: readonly {
+    readonly id: string;
+    readonly description: string;
+    readonly groupId: number;
+    readonly records: readonly { readonly kind: "add" | "remove"; readonly record: string }[];
+    readonly count?: number;
+    readonly leaves?: readonly string[];
+    readonly groupSize?: number;
+    readonly error?: string;
+    readonly at?: number;
+    readonly reason?: string;
+  }[];
   readonly rejected: readonly {
     readonly id: string;
     readonly kind: "add" | "remove";
@@ -639,6 +653,242 @@ describe("group-registry properties", () => {
             });
           },
         ),
+        { numRuns },
+      );
+    },
+    SLOW,
+  );
+});
+
+const REPLAY = {
+  groupId: 0n,
+  domainSeparator: DOMAIN,
+  tier: TIER,
+  registrars: REGISTRARS,
+  threshold: THRESHOLD,
+};
+
+describe("group replay", () => {
+  test.each(vectors.sequences)("replays $id ($description)", (v) => {
+    const records = v.records.map((r) => ({ kind: r.kind, record: hex(r.record) }));
+    const result = applyGroupRecords(records, { ...REPLAY, groupId: BigInt(v.groupId) });
+    if (v.error === undefined)
+      expect(result).toEqual({
+        ok: true,
+        count: BigInt(v.count ?? -1),
+        leaves: (v.leaves ?? []).map(big),
+        groupSize: v.groupSize,
+      });
+    else expect(result).toEqual({ ok: false, error: v.error, at: v.at, reason: v.reason });
+  });
+
+  test("refuses a record of another group", () => {
+    const honest = vectors.sequences.find((x) => x.id === "honest");
+    if (honest === undefined) throw new Error("no honest sequence");
+    const records = honest.records.map((r) => ({ kind: r.kind, record: hex(r.record) }));
+    expect(applyGroupRecords(records, { ...REPLAY, groupId: 1n })).toEqual({
+      ok: false,
+      error: "group-history",
+      at: 0,
+      reason: "group",
+    });
+  });
+
+  test("checks the digest under the context's tier", () => {
+    const honest = vectors.sequences.find((x) => x.id === "honest");
+    if (honest === undefined) throw new Error("no honest sequence");
+    const records = honest.records.map((r) => ({ kind: r.kind, record: hex(r.record) }));
+    expect(applyGroupRecords(records, { ...REPLAY, tier: 1 })).toMatchObject({
+      ok: false,
+      at: 0,
+      reason: "signature",
+    });
+  });
+
+  test("an empty history is an empty group", () => {
+    expect(applyGroupRecords([], REPLAY)).toEqual({
+      ok: true,
+      count: 0n,
+      leaves: [],
+      groupSize: 0,
+    });
+  });
+
+  // An honest history: batches at the running count and removals of members
+  // present, signed at a size the history has reached, by 2 or 3 seats.
+  const op = fc.oneof(
+    {
+      arbitrary: fc.record({
+        kind: fc.constant("add" as const),
+        commitments: fc.array(commitment, { minLength: 1, maxLength: 3 }),
+      }),
+      weight: 2,
+    },
+    {
+      arbitrary: fc.record({
+        kind: fc.constant("remove" as const),
+        size: fc.double({ min: 0, max: 1, noNaN: true }),
+        picks: fc.array(fc.boolean(), { minLength: 12, maxLength: 12 }),
+      }),
+      weight: 1,
+    },
+  );
+  const seats = fc.constantFrom([1, 2], [1, 3], [2, 3], [1, 2, 3]);
+
+  interface Planned {
+    readonly entry: GroupLogRecord;
+    readonly kind: "add" | "remove";
+    readonly n: number;
+    readonly size: bigint;
+  }
+
+  type Op = typeof op extends fc.Arbitrary<infer T> ? T : never;
+
+  function plan(ops: readonly Op[], who: readonly number[]) {
+    const leaves: bigint[] = [];
+    const out: Planned[] = [];
+    const approve = (digest: Uint8Array) =>
+      who.map((seat) => sign(SECRETS[seat - 1] as Uint8Array, digest, seat));
+    for (const o of ops) {
+      if (o.kind === "add") {
+        const firstIndex = BigInt(leaves.length);
+        const message = { groupId: 0n, tier: TIER, firstIndex, commitments: o.commitments };
+        const record = encodeGroupAddition({
+          groupId: 0n,
+          firstIndex,
+          commitments: o.commitments,
+          approvals: approve(groupAdditionDigest(DOMAIN, message)),
+        });
+        out.push({
+          entry: { kind: "add", record },
+          kind: "add",
+          n: o.commitments.length,
+          size: 0n,
+        });
+        leaves.push(...o.commitments);
+      } else {
+        const size = BigInt(Math.ceil(o.size * leaves.length));
+        const indices = [];
+        for (let i = 0n; i < size; i++)
+          if (leaves[Number(i)] !== 0n && o.picks[Number(i) % o.picks.length]) indices.push(i);
+        if (indices.length === 0) continue;
+        const message = { groupId: 0n, tier: TIER, size, indices };
+        const record = encodeGroupRemoval({
+          groupId: 0n,
+          size,
+          indices,
+          approvals: approve(groupRemovalDigest(DOMAIN, message)),
+        });
+        out.push({ entry: { kind: "remove", record }, kind: "remove", n: indices.length, size });
+        for (const i of indices) leaves[Number(i)] = 0n;
+      }
+    }
+    return { out, leaves };
+  }
+
+  // Opens with an addition, so every history has a record.
+  const history = fc
+    .tuple(
+      op.filter((o) => o.kind === "add"),
+      fc.array(op, { maxLength: 4 }),
+      seats,
+    )
+    .map(([first, ops, who]) => plan([first, ...ops], who));
+
+  test(
+    "an honest history replays to its leaves",
+    () => {
+      fc.assert(
+        fc.property(history, ({ out, leaves }) => {
+          expect(
+            applyGroupRecords(
+              out.map((p) => p.entry),
+              REPLAY,
+            ),
+          ).toEqual({
+            ok: true,
+            count: BigInt(leaves.length),
+            leaves,
+            groupSize: leaves.filter((l) => l !== 0n).length,
+          });
+        }),
+        { numRuns },
+      );
+    },
+    SLOW,
+  );
+
+  test(
+    "a record logged twice fails at its second copy",
+    () => {
+      fc.assert(
+        fc.property(history, fc.nat(), fc.nat(), ({ out }, i, j) => {
+          const k = i % out.length;
+          const at = k + 1 + (j % (out.length - k));
+          const entries = out.map((p) => p.entry);
+          entries.splice(at, 0, entries[k] as GroupLogRecord);
+          const kind = (out[k] as Planned).kind;
+          expect(applyGroupRecords(entries, REPLAY)).toEqual({
+            ok: false,
+            error: "group-history",
+            at,
+            reason: kind === "add" ? "position" : "removed",
+          });
+        }),
+        { numRuns },
+      );
+    },
+    SLOW,
+  );
+
+  test(
+    "two additions swapped fail at the first",
+    () => {
+      fc.assert(
+        fc.property(history, fc.nat(), fc.nat(), ({ out }, i, j) => {
+          const adds = out.flatMap((p, at) => (p.kind === "add" ? [at] : []));
+          fc.pre(adds.length >= 2);
+          const a = adds[i % adds.length] as number;
+          const b = adds[j % adds.length] as number;
+          fc.pre(a !== b);
+          const entries = out.map((p) => p.entry);
+          [entries[a], entries[b]] = [entries[b] as GroupLogRecord, entries[a] as GroupLogRecord];
+          expect(applyGroupRecords(entries, REPLAY)).toEqual({
+            ok: false,
+            error: "group-history",
+            at: Math.min(a, b),
+            reason: "position",
+          });
+        }),
+        { numRuns },
+      );
+    },
+    SLOW,
+  );
+
+  test(
+    "an addition dropped before a later one fails where the history breaks",
+    () => {
+      fc.assert(
+        fc.property(history, fc.nat(), ({ out }, i) => {
+          const adds = out.flatMap((p, at) => (p.kind === "add" ? [at] : []));
+          fc.pre(adds.length >= 2);
+          const k = adds[i % (adds.length - 1)] as number;
+          const before = out.slice(0, k).reduce((c, p) => (p.kind === "add" ? c + p.n : c), 0);
+          // After the drop the count stays `before`: a removal signed at a size
+          // within it still applies, the first above it or the next addition fails.
+          let at = k + 1;
+          while ((out[at] as Planned).kind === "remove" && (out[at] as Planned).size <= before)
+            at++;
+          const entries = out.map((p) => p.entry);
+          entries.splice(k, 1);
+          expect(applyGroupRecords(entries, REPLAY)).toEqual({
+            ok: false,
+            error: "group-history",
+            at: at - 1,
+            reason: (out[at] as Planned).kind === "add" ? "position" : "size",
+          });
+        }),
         { numRuns },
       );
     },

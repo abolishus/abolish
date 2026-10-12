@@ -331,6 +331,84 @@ contract GroupRegistryVectorsTest is GroupTestBase {
         );
     }
 
+    /// Each group history a verifier replays: a fresh registry at the vectors'
+    /// address accepts every record of a history the verifier accepts, ending
+    /// with its count and removed leaves, and refuses a rejected history's
+    /// record `at` after accepting those before it, so the contract refuses
+    /// exactly the histories the verifier rejects. `omitted-tail`, a shorter
+    /// history that still checks (the T-71 residual), is accepted like any
+    /// other (docs/spec/contracts.md, Group registry, Verification).
+    function test_SequenceVectors() public {
+        uint256 i;
+        uint256 rejected;
+        // Each sequence starts from this state, so its registry is the
+        // deployer's first contract, at the vectors' address.
+        uint256 fresh = vm.snapshotState();
+        for (; vm.keyExistsJson(json, _at(".sequences", i, "")); i++) {
+            if (_checkSequence(_at(".sequences", i, ""))) rejected++;
+            assertTrue(vm.revertToState(fresh), "revert to the fresh state");
+        }
+        assertTrue(i >= 3 && rejected > 0 && rejected < i, "sequence vector coverage");
+    }
+
+    /// Replays one sequence; returns whether it is a rejected history.
+    function _checkSequence(string memory at) internal returns (bool rejected) {
+        string memory id = vm.parseJsonString(json, string.concat(at, ".id"));
+        assertEq(vm.parseJsonUint(json, string.concat(at, ".groupId")), 0, id);
+        GroupRegistry registry = _deployAtVectorAddress();
+        registry.createGroup(0);
+        rejected = vm.keyExistsJson(json, string.concat(at, ".error"));
+        uint256 failAt =
+            rejected ? vm.parseJsonUint(json, string.concat(at, ".at")) : type(uint256).max;
+        string memory records = string.concat(at, ".records");
+        uint256 n;
+        for (; vm.keyExistsJson(json, _at(records, n, "")); n++) {
+            bool add = keccak256(bytes(vm.parseJsonString(json, _at(records, n, ".kind"))))
+                == keccak256("add");
+            bytes memory record =
+                vm.parseBytes(vm.parseJsonString(json, _at(records, n, ".record")));
+            (bool ok, bytes memory ret) = _call(
+                registry,
+                add ? GroupRegistry.addMembers.selector : GroupRegistry.removeMembers.selector,
+                record
+            );
+            if (n < failAt) {
+                assertTrue(ok, string.concat(id, ": record refused at ", vm.toString(n)));
+                continue;
+            }
+            assertTrue(!ok, string.concat(id, ": rejected record accepted"));
+            bytes4 expected = _historyError(vm.parseJsonString(json, string.concat(at, ".reason")));
+            if (expected != bytes4(0)) {
+                assertTrue(ret.length >= 4 && bytes4(ret) == expected, string.concat(id, ": error"));
+            }
+            return rejected;
+        }
+        assertTrue(!rejected, string.concat(id, ": no record at `at`"));
+
+        string[] memory leaves = vm.parseJsonStringArray(json, string.concat(at, ".leaves"));
+        (,, uint64 count) = registry.groupOf(0);
+        assertEq(count, vm.parseJsonUint(json, string.concat(at, ".count")), id);
+        assertEq(count, leaves.length, id);
+        for (uint256 k; k < leaves.length; k++) {
+            bool zero = bytes32(vm.parseBytes(leaves[k])) == bytes32(0);
+            assertTrue(registry.isRemoved(0, uint64(k)) == zero, string.concat(id, ": leaf"));
+        }
+    }
+
+    /// The registry's error for a history `reason`, or zero where none maps cleanly.
+    function _historyError(string memory reason) internal pure returns (bytes4) {
+        bytes32 r = keccak256(bytes(reason));
+        if (r == keccak256("position")) return GroupRegistry.WrongPosition.selector;
+        if (r == keccak256("size")) return GroupRegistry.SizeBeyondCount.selector;
+        if (r == keccak256("removed")) return GroupRegistry.AlreadyRemoved.selector;
+        if (r == keccak256("index-range")) return GroupRegistry.IndexBeyondSize.selector;
+        if (r == keccak256("approvals")) return GroupRegistry.TooFewApprovals.selector;
+        if (r == keccak256("forbidden-commitment")) {
+            return GroupRegistry.ForbiddenCommitment.selector;
+        }
+        return bytes4(0);
+    }
+
     /// Every rejected record is refused with the error the vectors give: group
     /// 0 is empty for additions (so their position is right) and holds four
     /// members for removals (at least every vector's signed size, so the size

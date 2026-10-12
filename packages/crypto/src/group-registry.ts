@@ -513,3 +513,131 @@ export function checkGroupApprovals(
   }
   return { ok: true };
 }
+
+/** What `applyGroupRecords` checks one group's records against: the release's pins. */
+export interface GroupReplayContext {
+  /** The group the records belong to; a record naming another fails as `group`. */
+  readonly groupId: bigint;
+  /** `groupRegistryDomainSeparator` of the pinned chain ID and registry address. */
+  readonly domainSeparator: Uint8Array;
+  /** The group's tier, from its `GroupCreated` event. */
+  readonly tier: number;
+  readonly registrars: readonly Uint8Array[];
+  readonly threshold: number;
+}
+
+/** One logged record of a group, in log order. */
+export interface GroupLogRecord {
+  readonly kind: "add" | "remove";
+  readonly record: Uint8Array;
+}
+
+/** Why a replayed record breaks the group's history. */
+export type GroupHistoryReason =
+  | GroupRecordError
+  | GroupApprovalError
+  | "group"
+  | "position"
+  | "size"
+  | "removed";
+
+export type GroupReplayResult =
+  | {
+      readonly ok: true;
+      /** The member count: every leaf ever added, removed ones included. */
+      readonly count: bigint;
+      /** The tier tree's leaves in order, `0n` where a member was removed. */
+      readonly leaves: readonly bigint[];
+      /** The members not removed. */
+      readonly groupSize: number;
+    }
+  | {
+      readonly ok: false;
+      readonly error: "group-history";
+      /** The first failing record's position in `records`. */
+      readonly at: number;
+      readonly reason: GroupHistoryReason;
+    };
+
+const MAX_LEAVES = 1n << 32n;
+
+/**
+ * The verifier's replay of one group (docs/spec/contracts.md, Group registry,
+ * Verification): its own member count and removed set, every check the
+ * registry applies, and no state taken from the chain. Each record must
+ * decode strictly, name the group, carry the approvals rules 7 and 8 require
+ * over its digest, and fit the replayed history: an addition at exactly the
+ * running count and within 2^32 leaves, a removal signed at a size the
+ * history has reached, naming no removed leaf. The first record that doesn't
+ * fails the group as `group-history`: a history the registry's rules forbid
+ * was rewritten or comes from other code, so the verifier fails closed
+ * rather than guess which leaves were meant (T-71, T-06, T-13). Only a
+ * dropped tail goes unnoticed here; the accumulator's storage proof covers it.
+ */
+export function applyGroupRecords(
+  records: readonly GroupLogRecord[],
+  ctx: GroupReplayContext,
+): GroupReplayResult {
+  if (ctx === null || typeof ctx !== "object") throw new TypeError("ctx: expected an object");
+  // Each field read once, so a getter can't show one record one set and the next another.
+  const { groupId, domainSeparator, tier, registrars, threshold } = ctx;
+  const group = uintArg(groupId, MAX_U64, "groupId");
+  const domain = bytesArg(domainSeparator, 32, "domainSeparator");
+  const set = checkedRegistrars(registrars, threshold);
+  tierArg(tier);
+  if (!Array.isArray(records)) throw new TypeError("records: expected an array");
+  const leaves: bigint[] = [];
+  // Forbidden commitments are refused, so no added leaf is 0 and 0 marks a removal.
+  const fail = (at: number, reason: GroupHistoryReason): GroupReplayResult => ({
+    ok: false,
+    error: "group-history",
+    at,
+    reason,
+  });
+  for (const [at, entry] of records.slice().entries()) {
+    const { kind, record } = entry;
+    if (kind === "add") {
+      const d = decodeGroupAddition(record);
+      if (!d.ok) return fail(at, d.error);
+      const a = d.value;
+      if (a.groupId !== group) return fail(at, "group");
+      const digest = groupAdditionDigest(domain, {
+        groupId: a.groupId,
+        tier,
+        firstIndex: a.firstIndex,
+        commitments: a.commitments,
+      });
+      const c = checkGroupApprovals(digest, a.approvals, set, threshold);
+      if (!c.ok) return fail(at, c.error);
+      // The signed position against our own count: a replayed, reordered or
+      // omitted-before batch breaks the sequence the registrars signed.
+      const count = BigInt(leaves.length);
+      if (a.firstIndex !== count || count + BigInt(a.commitments.length) > MAX_LEAVES)
+        return fail(at, "position");
+      leaves.push(...a.commitments);
+    } else if (kind === "remove") {
+      const d = decodeGroupRemoval(record);
+      if (!d.ok) return fail(at, d.error);
+      const rm = d.value;
+      if (rm.groupId !== group) return fail(at, "group");
+      const digest = groupRemovalDigest(domain, {
+        groupId: rm.groupId,
+        tier,
+        size: rm.size,
+        indices: rm.indices,
+      });
+      const c = checkGroupApprovals(digest, rm.approvals, set, threshold);
+      if (!c.ok) return fail(at, c.error);
+      // Indices are below `size` (decoded), so below the count once size is.
+      if (rm.size > BigInt(leaves.length)) return fail(at, "size");
+      if (rm.indices.some((i) => leaves[Number(i)] === 0n)) return fail(at, "removed");
+      for (const i of rm.indices) leaves[Number(i)] = 0n;
+    } else throw new TypeError(`records[${at}]: kind must be "add" or "remove"`);
+  }
+  return {
+    ok: true,
+    count: BigInt(leaves.length),
+    leaves,
+    groupSize: leaves.reduce((n, leaf) => (leaf === 0n ? n : n + 1), 0),
+  };
+}

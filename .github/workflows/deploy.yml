@@ -183,9 +183,37 @@ jobs:
           subject-digest: ${{ needs.image-a.outputs.digest }}
           push-to-registry: true
 
+  # A newer push to main supersedes this run: skip the staging job (shown as
+  # skipped, not failed) instead of deploying an older commit. The check in
+  # the staging job stays as the fail-safe for a push landing in between.
+  current:
+    name: still main's head
+    needs: publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      is_head: ${{ steps.head.outputs.is_head }}
+    steps:
+      - id: head
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          head="$(gh api "repos/$REPO/commits/main" --jq .sha)"
+          if [ "$head" = "$SHA" ]; then
+            echo "is_head=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "is_head=false" >>"$GITHUB_OUTPUT"
+            echo "::notice::$SHA was superseded by $head on main; skipping the staging deploy"
+          fi
+
   staging:
     name: staging
-    needs: publish
+    needs: [publish, current]
+    if: needs.current.outputs.is_head == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     # Secrets live only in this environment, which allows `main` alone

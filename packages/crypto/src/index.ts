@@ -219,6 +219,7 @@ export {
   type TallyRules,
 } from "./tally.ts";
 export {
+  aggregateHash,
   type CellCheck,
   type CellCode,
   checkTally,

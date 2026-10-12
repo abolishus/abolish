@@ -2,6 +2,8 @@ import fc from "fast-check";
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vite-plus/test";
 import {
+  aggregateCell,
+  aggregateHash,
   type CellCheck,
   checkTally,
   type CommittedVote,
@@ -62,6 +64,7 @@ interface Vectors {
     readonly signingKey: string;
     readonly definitionHash: string;
     readonly cell: number;
+    readonly aggregateHash: string;
     readonly signer: number;
     readonly opening: readonly { readonly v: string; readonly r: string }[];
     readonly message: string;
@@ -126,6 +129,7 @@ describe("tally-opening.json", () => {
     expect(toHex(identityKey(secret))).toBe(v.signingKey);
     const statement = {
       definition_hash: hex(v.definitionHash),
+      aggregate_hash: hex(v.aggregateHash),
       cell: v.cell,
       signer: v.signer,
       opening: v.opening.map((s) => ({ v: BigInt(s.v), r: BigInt(s.r) })),
@@ -221,6 +225,7 @@ function honestTally(input: {
       signTallyOpening(SECRETS[input.signer - 1] as Uint8Array, {
         definition_hash: input.definitionHash,
         cell,
+        aggregate_hash: aggregateHash(aggregateCell(input.rules, c.ballots)),
         signer: input.signer,
         opening: c.opening,
       }),
@@ -314,12 +319,14 @@ describe("properties", () => {
       fc.property(
         fc.uint8Array({ minLength: 32, maxLength: 32 }),
         fc.nat(255),
+        fc.uint8Array({ minLength: 32, maxLength: 32 }),
         fc.integer({ min: 1, max: 4 }),
         fc.array(fc.record({ v: scalarArb, r: scalarArb }), { maxLength: 64 }),
-        (definitionHash, cell, signer, opening) => {
+        (definitionHash, cell, aggregate, signer, opening) => {
           const o = signTallyOpening(SECRETS[signer - 1] as Uint8Array, {
             definition_hash: definitionHash,
             cell,
+            aggregate_hash: aggregate,
             signer,
             opening,
           });
@@ -349,9 +356,9 @@ describe("checks without vectors", () => {
       votes: [[[1, 0]]],
     });
     const bad = Uint8Array.from(records[0] as Uint8Array);
-    // Option 0's V, little-endian after the 3-byte header, 34 bytes of fields
+    // Option 0's V, little-endian after the 3-byte header, 66 bytes of fields
     // and the 4-byte count: adding ℓ keeps it under 2²⁵⁶ for a count of 0 or 1.
-    const v = bad.subarray(41, 73);
+    const v = bad.subarray(73, 105);
     let x = 0n;
     for (let i = 31; i >= 0; i--) x = (x << 8n) | BigInt(v[i] as number);
     x += GROUP_ORDER;

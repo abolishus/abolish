@@ -57,6 +57,7 @@ export const TAG_REGISTRY = Object.freeze(
       { tag: "abolish/v1/sig/ceremony-message", primitive: "signature", status: "specified" },
       { tag: "abolish/v1/sig/ceremony-signing-key", primitive: "signature", status: "specified" },
       { tag: "abolish/v1/sig/tally-opening", primitive: "signature", status: "specified" },
+      { tag: "abolish/v1/tally-aggregate", primitive: "plain", status: "specified" },
     ] as const
   ).map((e) => Object.freeze(e)),
 );

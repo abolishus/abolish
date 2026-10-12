@@ -12,10 +12,13 @@ import {
   DecodeError,
   type DecodeErrorCode,
   encode,
+  list,
   struct,
   u8,
 } from "./codec.ts";
-import { type Element, G, GENERATOR_H, IDENTITY } from "./group.ts";
+import { ds } from "./domain-separation.ts";
+import { type Element, elementOrIdentity, G, GENERATOR_H, H, IDENTITY } from "./group.ts";
+import { PARAMETERS } from "./parameters.ts";
 import { RECORD_TYPES, RecordSchema, recordType } from "./record.ts";
 import { aggregateCell, type CellAggregate, type TallyRules } from "./tally.ts";
 import { p256Sig, signStatement, verifyStatement } from "./trustee.ts";
@@ -25,9 +28,12 @@ const TAG = "abolish/v1/sig/tally-opening";
 /** Cells are named by a `u8`; version 1 of the definition has at most three. */
 const MAX_CELLS = 256;
 
+const COMMITMENTS = list(elementOrIdentity, PARAMETERS.MAX_OPTIONS);
+
 const statementFields = [
   ["definition_hash", bytesFixed(32)],
   ["cell", u8],
+  ["aggregate_hash", bytesFixed(32)],
   ["signer", u8],
   ["opening", SHARES],
 ] as const;
@@ -57,12 +63,31 @@ export function decodeTallyOpening(bytes: Uint8Array, pinned: 1): TallyOpening {
   return SCHEMA.decode(TALLY_OPENING, bytes, pinned).value;
 }
 
-/** `m = definition_hash ‖ u8(cell) ‖ u8(signer) ‖ encode(opening)`: the record's fields without header or signature. */
+/**
+ * `H(DS("abolish/v1/tally-aggregate", encode(Ĉ_0, …, Ĉ_{m−1})))`: which
+ * counted set an opening is over, so a trustee whose view of the counted set
+ * differs from the verifier's is told apart from one whose opening is wrong
+ * (docs/spec/tally.md, Opening record; T-29).
+ */
+export function aggregateHash(aggregate: CellAggregate): Uint8Array {
+  return H(
+    ds(
+      "abolish/v1/tally-aggregate",
+      encode(
+        COMMITMENTS,
+        aggregate.map((row) => row[0] as Element),
+      ),
+    ),
+  );
+}
+
+/** `m = definition_hash ‖ u8(cell) ‖ aggregate_hash ‖ u8(signer) ‖ encode(opening)`: the record's fields without header or signature. */
 export function tallyOpeningStatement(statement: TallyOpeningStatement): Uint8Array {
-  // Through the struct, so only the four fields are read even from a whole record.
+  // Through the struct, so only these fields are read even from a whole record.
   return encode(statementV1, {
     definition_hash: statement.definition_hash,
     cell: statement.cell,
+    aggregate_hash: statement.aggregate_hash,
     signer: statement.signer,
     opening: statement.opening,
   });
@@ -81,6 +106,7 @@ export function signTallyOpening(
   return {
     definition_hash: Uint8Array.from(statement.definition_hash),
     cell: statement.cell,
+    aggregate_hash: Uint8Array.from(statement.aggregate_hash),
     signer: statement.signer,
     opening: statement.opening.map(({ v, r }) => ({ v, r })),
     signature: signStatement(signingSecret, TAG, m),
@@ -105,9 +131,13 @@ export interface OpeningReport {
   readonly signer: number | null;
 }
 
-/** An opening of a cell that fails: with another number of entries, or not opening an option. */
+/**
+ * An opening of a cell that fails: with another number of entries
+ * (`tally-missing`), over another counted set (`tally-aggregate`), or not
+ * opening an option (`tally-opening`).
+ */
 export interface FailingOpening extends OpeningReport {
-  readonly code: "tally-missing" | "tally-opening";
+  readonly code: "tally-missing" | "tally-aggregate" | "tally-opening";
   readonly option?: number;
 }
 
@@ -188,6 +218,7 @@ function checkCell(
   openings: readonly { readonly at: number; readonly opening: TallyOpening }[],
 ): CellCheck {
   const aggregate = aggregateCell(election.rules, ballots);
+  const expected = aggregateHash(aggregate);
   const m = election.rules.optionCount;
   const passing: (OpeningReport & { readonly opening: readonly Share[] })[] = [];
   const failing: FailingOpening[] = [];
@@ -195,6 +226,10 @@ function checkCell(
     const signer = attribution(election, o);
     if (o.opening.length !== m) {
       failing.push({ at, signer, code: "tally-missing" });
+      continue;
+    }
+    if (!sameBytes(o.aggregate_hash, expected)) {
+      failing.push({ at, signer, code: "tally-aggregate" });
       continue;
     }
     const option = firstUnopened(aggregate, o.opening);
@@ -208,11 +243,13 @@ function checkCell(
   const first = passing[0];
   if (first === undefined) {
     // 1. tally-missing: no opening of the cell has exactly m entries. 2.
-    // tally-opening: none of those opens every option; the first, in board order.
-    const f = failing.find((x) => x.code === "tally-opening");
-    return f === undefined
-      ? { ok: false, code: "tally-missing", ...reports }
-      : { ok: false, code: "tally-opening", option: f.option as number, ...reports };
+    // tally-opening: none of those passes; the first of them in board order
+    // names its first failing option, unless it is over another counted set.
+    const f = failing.find((x) => x.code !== "tally-missing");
+    if (f === undefined) return { ok: false, code: "tally-missing", ...reports };
+    return f.option === undefined
+      ? { ok: false, code: "tally-opening", ...reports }
+      : { ok: false, code: "tally-opening", option: f.option, ...reports };
   }
   // 3. tally-conflict: two passing openings differ, which only a break of binding allows.
   if (passing.some((p) => differ(p.opening, first.opening)))

@@ -44,6 +44,7 @@ RECORD_TYPE = 0x0006
 VERSION = 1
 MAX_OPTIONS = 64
 TAG = b"abolish/v1/sig/tally-opening"
+AGGREGATE_TAG = b"abolish/v1/tally-aggregate"
 
 u8, u32 = bv.u8, bv.u32
 
@@ -60,10 +61,15 @@ def enc_opening_list(opening):
     return u32(len(opening)) + b"".join(scalar(s["v"]) + scalar(s["r"]) for s in opening)
 
 
-def statement(definition_hash, cell, signer, opening):
-    """m = definition_hash ‖ u8(cell) ‖ u8(signer) ‖ encode(opening)."""
-    assert len(definition_hash) == 32
-    return definition_hash + u8(cell) + u8(signer) + enc_opening_list(opening)
+def statement(definition_hash, cell, aggregate_hash, signer, opening):
+    """m = definition_hash ‖ u8(cell) ‖ aggregate_hash ‖ u8(signer) ‖ encode(opening)."""
+    assert len(definition_hash) == 32 and len(aggregate_hash) == 32
+    return definition_hash + u8(cell) + aggregate_hash + u8(signer) + enc_opening_list(opening)
+
+
+def aggregate_hash(agg):
+    """H(DS("abolish/v1/tally-aggregate", list<element, MAX_OPTIONS> of each option's Ĉ)), identity allowed."""
+    return bv.H(bv.ds(AGGREGATE_TAG, u32(len(agg)) + b"".join(grp.encode(row[0]) for row in agg)))
 
 
 def sign(d, m):
@@ -79,7 +85,7 @@ def encode(o, record_type=RECORD_TYPE, version=VERSION):
     return (
         record_type.to_bytes(2, "big")
         + u8(version)
-        + statement(o["definitionHash"], o["cell"], o["signer"], o["opening"])
+        + statement(o["definitionHash"], o["cell"], o["aggregateHash"], o["signer"], o["opening"])
         + o["signature"]
     )
 
@@ -111,6 +117,7 @@ def decode(b, pinned=VERSION):
         raise Reject("profile-mismatch", v_at)
     definition_hash = take(32)
     cell = take(1)[0]
+    agg = take(32)
     signer = take(1)[0]
     count_at = at
     count = int.from_bytes(take(4), "big")
@@ -133,7 +140,7 @@ def decode(b, pinned=VERSION):
         raise Reject("non-canonical", sig_at)
     if at != len(b):
         raise Reject("trailing-bytes", at)
-    return {"definitionHash": definition_hash, "cell": cell, "signer": signer, "opening": opening, "signature": sig}
+    return {"definitionHash": definition_hash, "cell": cell, "aggregateHash": agg, "signer": signer, "opening": opening, "signature": sig}
 
 
 # --- The checks --------------------------------------------------------------------
@@ -144,7 +151,7 @@ def attribution(registered, o):
     key = registered.get(o["signer"])
     if key is None:
         return None
-    m = statement(o["definitionHash"], o["cell"], o["signer"], o["opening"])
+    m = statement(o["definitionHash"], o["cell"], o["aggregateHash"], o["signer"], o["opening"])
     return o["signer"] if ecdsa.verify(key, bv.ds(TAG, m), o["signature"]) else None
 
 
@@ -158,11 +165,15 @@ def opens(agg, opening):
 
 def check_cell(m, k, registered, ballots, openings):
     agg = tv.aggregate(m, k, ballots)
+    expected = aggregate_hash(agg)
     passing, failing = [], []
     for at, o in openings:
         signer = attribution(registered, o)
         if len(o["opening"]) != m:
             failing.append({"at": at, "signer": signer, "code": "tally-missing"})
+            continue
+        if o["aggregateHash"] != expected:
+            failing.append({"at": at, "signer": signer, "code": "tally-aggregate"})
             continue
         j = opens(agg, o["opening"])
         if j is None:
@@ -171,9 +182,11 @@ def check_cell(m, k, registered, ballots, openings):
             failing.append({"at": at, "signer": signer, "code": "tally-opening", "option": j})
     out = {"passing": [{"at": at, "signer": s} for at, s, _ in passing], "failing": failing}
     if not passing:
-        first_bad = next((f for f in failing if f["code"] == "tally-opening"), None)
+        first_bad = next((f for f in failing if f["code"] != "tally-missing"), None)
         if first_bad is None:
             return {"ok": False, "code": "tally-missing", **out}
+        if "option" not in first_bad:
+            return {"ok": False, "code": "tally-opening", **out}
         return {"ok": False, "code": "tally-opening", "option": first_bad["option"], **out}
     first = passing[0][2]
     if any(p[2] != first for p in passing):
@@ -241,14 +254,19 @@ def main():
     vote2, open_vote2 = make_cell("vote-of-two", [[2, 0, 0]])
     assert [s["v"] for s in open0] == [2, 0, 1] and [s["v"] for s in open1] == [0, 2, 0]
     assert open_empty == [{"v": 0, "r": 0}] * 3
+    agg_of = lambda cell: aggregate_hash(tv.aggregate(m, k, cell))  # noqa: E731
+    two = [tier0, tier1]
 
-    def record(cell, signer, opening, d=None, definition=definition_hash, signed_as=None):
-        """A tally opening; `d` signs (default: the signer's own secret), over `signed_as` if given."""
+    def record(cell, signer, opening, d=None, definition=definition_hash, signed_as=None, cells=two, agg=None):
+        """A tally opening over `cells[cell]`'s aggregate (or `agg`); `d` signs (default: the signer's own secret), over `signed_as` if given."""
         d = secrets[signer] if d is None else d
-        what = signed_as or (definition, cell, signer, opening)
+        if agg is None:
+            agg = agg_of(cells[cell]) if cell < len(cells) else bv.Rng("tally-opening/no-cell").bytes32()
+        what = signed_as or (definition, cell, agg, signer, opening)
         return {
             "definitionHash": definition,
             "cell": cell,
+            "aggregateHash": agg,
             "signer": signer,
             "opening": opening,
             "signature": sign(d, statement(*what)),
@@ -260,8 +278,9 @@ def main():
     # Records reproduced byte for byte.
     openings = []
 
-    def published(id_, desc, cell, signer, opening, definition=definition_hash):
-        o = record(cell, signer, opening, definition=definition)
+    def published(id_, desc, cell, signer, opening, cells=two, agg=None):
+        o = record(cell, signer, opening, cells=cells, agg=agg)
+        definition = definition_hash
         b = encode(o)
         assert decode(b) == o
         openings.append(
@@ -272,9 +291,10 @@ def main():
                 "signingKey": keys[signer].hex(),
                 "definitionHash": definition.hex(),
                 "cell": cell,
+                "aggregateHash": o["aggregateHash"].hex(),
                 "signer": signer,
                 "opening": [{"v": str(s["v"]), "r": str(s["r"])} for s in opening],
-                "message": statement(definition, cell, signer, opening).hex(),
+                "message": statement(definition, cell, o["aggregateHash"], signer, opening).hex(),
                 "signature": o["signature"].hex(),
                 "encoding": b.hex(),
             }
@@ -283,9 +303,9 @@ def main():
 
     honest_b = published("tier-0-seat-1", "Cell 0's opening, signed by seat 1", 0, 1, open0)
     published("tier-1-seat-2", "Cell 1's opening, signed by seat 2", 1, 2, open1)
-    published("empty-cell", "An empty cell's opening: every (V, R) is (0, 0)", 0, 2, open_empty)
+    published("empty-cell", "An empty cell's opening: every (V, R) is (0, 0), over the identity aggregate", 0, 2, open_empty, cells=[empty])
     options_max = [{"v": j % 3, "r": (j * 0x1234567) % L} for j in range(MAX_OPTIONS)]
-    max_b = published("options-max", "MAX_OPTIONS entries (any values: this vector is about the bytes)", 1, 1, options_max)
+    max_b = published("options-max", "MAX_OPTIONS entries (any values and aggregate hash: this vector is about the bytes)", 1, 1, options_max, agg=bv.Rng("tally-opening/options-max").bytes32())
 
     # Decode rejections.
     decode_errors = []
@@ -300,7 +320,7 @@ def main():
         decode_errors.append({"id": id_, "description": desc, "encoding": b.hex(), "error": code, "offset": offset})
 
     sig_at = len(honest_b) - 64
-    count_at = 3 + 32 + 2
+    count_at = 3 + 32 + 1 + 32 + 1
     rejected("empty", "No bytes", b"", "truncated", 0)
     rejected("header-only", "A header and nothing else", honest_b[:3], "truncated", 3)
     rejected("ceremony-type", "Record type 0x0005 where a tally opening is read", b"\x00\x05" + honest_b[2:], "unknown-record-type", 0)
@@ -313,7 +333,7 @@ def main():
     rejected("r-equals-order", "Option 1's randomness encoded as ℓ", encode(r_is_l), "non-canonical", count_at + 4 + 64 + 32)
     over = honest_b[:count_at] + u32(MAX_OPTIONS + 1) + honest_b[count_at + 4 :]
     rejected("options-over-max", "A count of MAX_OPTIONS + 1", over, "length-over-max", count_at)
-    rejected("truncated-list", "MAX_OPTIONS entries announced, one present", honest_b[: count_at + 4 + 64], "truncated", count_at + 4 + 64)
+    rejected("truncated-list", "Three entries announced, one present", honest_b[: count_at + 4 + 64], "truncated", count_at + 4 + 64)
     high_s = bytearray(honest_b)
     s_val = int.from_bytes(honest_b[sig_at + 32 :], "big")
     high_s[sig_at + 32 :] = (ecdsa.N - s_val).to_bytes(32, "big")
@@ -333,7 +353,6 @@ def main():
             assert got.get(key) == want, (id_, key, got.get(key), want)
         elections.append({"id": id_, "description": desc, "cells": [[bv.enc_vss(b).hex() for b in c] for c in cells], "openings": [b.hex() for b in recs], "result": got})
 
-    two = [tier0, tier1]
     honest0, honest1 = record(0, 1, open0), record(1, 2, open1)
 
     election("signed", "Two cells, each with one opening signed by a registered seat", two, [honest0, honest1], {"ok": True})
@@ -348,7 +367,7 @@ def main():
         "failing-unattributed",
         "Cell 0's failing opening carries seat 1's signature on the honest opening, so it is no one's",
         two,
-        [record(0, 1, bump(open0, 0, "r"), signed_as=(definition_hash, 0, 1, open0)), honest0, honest1],
+        [record(0, 1, bump(open0, 0, "r"), signed_as=(definition_hash, 0, agg_of(tier0), 1, open0)), honest0, honest1],
         {"ok": True},
     )
     election(
@@ -375,10 +394,10 @@ def main():
     )
     election(
         "replay-into-cell",
-        "Seat 1's signed opening of cell 0 relabelled as cell 1, beside an honest cell 0: cell 1 fails tally-opening, unattributed, so seat 1 isn't framed",
+        "Seat 1's signed opening of cell 0 relabelled as cell 1, beside an honest cell 0: it is over another aggregate (tally-aggregate) and unattributed, so seat 1 isn't framed, and cell 1 fails tally-opening",
         two,
-        [record(0, 2, open0), record(1, 1, open0, signed_as=(definition_hash, 0, 1, open0))],
-        {"ok": False, "failure": {"cell": 1, "code": "tally-opening", "option": 0}},
+        [record(0, 2, open0), record(1, 1, open0, agg=agg_of(tier0), signed_as=(definition_hash, 0, agg_of(tier0), 1, open0))],
+        {"ok": False, "failure": {"cell": 1, "code": "tally-opening"}},
     )
     election(
         "stray",
@@ -398,14 +417,14 @@ def main():
         "empty-cell",
         "Cell 0 is empty and its opening is all (0, 0); cell 1 is honest",
         [empty, tier1],
-        [record(0, 2, open_empty), honest1],
+        [record(0, 2, open_empty, cells=[empty, tier1]), honest1],
         {"ok": True},
     )
     election(
         "range",
         "A single cell whose only ballot holds a vote of 2: the opening opens the aggregate with a count of 2 over 1 ballot (tally-range)",
         [vote2],
-        [record(0, 1, open_vote2)],
+        [record(0, 1, open_vote2, cells=[vote2])],
         {"ok": False, "failure": {"cell": 0, "code": "tally-range", "option": 0}},
     )
     election(
@@ -438,13 +457,33 @@ def main():
         {"ok": False, "failure": {"cell": 0, "code": "tally-opening", "option": 1}},
     )
 
+    # make_cell derives each ballot from its label and position, so these are tier 0's first two ballots.
+    stale, open_stale = make_cell("tier-0", [[1, 0, 0], [0, 0, 1]])
+    assert stale == tier0[:2]
+    election(
+        "other-counted-set",
+        "Seat 1 opened cell 0 over a counted set without its last ballot: its opening is correct for that set but names another aggregate, so it is reported tally-aggregate against seat 1 (not a wrong sum), and cell 0 fails tally-opening with no option",
+        two,
+        [record(0, 1, open_stale, agg=agg_of(stale)), honest1],
+        {"ok": False, "failure": {"cell": 0, "code": "tally-opening"}},
+    )
+    election(
+        "other-counted-set-beside-honest",
+        "Seat 1's opening over the stale counted set, then seat 2's over the right one: the cell passes",
+        two,
+        [record(0, 1, open_stale, agg=agg_of(stale)), record(0, 2, open0), honest1],
+        {"ok": True},
+    )
+
     by_id = {e["id"]: e["result"] for e in elections}
     assert by_id["failing-attributed"]["cells"][0]["failing"] == [{"at": 0, "signer": 1, "code": "tally-opening", "option": 1}]
     assert by_id["failing-unattributed"]["cells"][0]["failing"][0]["signer"] is None
     assert by_id["only-failing"]["cells"][0]["failing"][0]["signer"] == 2
     assert by_id["short"]["cells"][1]["failing"] == [{"at": 1, "signer": 1, "code": "tally-missing"}]
     assert [p["signer"] for c in by_id["unattributed-pass"]["cells"] for p in c["passing"]] == [None, None]
-    assert by_id["replay-into-cell"]["cells"][1]["failing"][0]["signer"] is None
+    assert by_id["replay-into-cell"]["cells"][1]["failing"] == [{"at": 1, "signer": None, "code": "tally-aggregate"}]
+    assert by_id["other-counted-set"]["cells"][0]["failing"] == [{"at": 0, "signer": 1, "code": "tally-aggregate"}]
+    assert by_id["other-counted-set-beside-honest"]["cells"][0]["ok"]
     assert by_id["stray"]["stray"] == [{"at": 1, "signer": 1}, {"at": 2, "signer": 2}, {"at": 4, "signer": None}]
     assert [p["signer"] for p in by_id["duplicates"]["cells"][0]["passing"]] == [1, 2, None]
 

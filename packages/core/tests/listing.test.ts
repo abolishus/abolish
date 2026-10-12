@@ -154,11 +154,15 @@ describe("listPolls", () => {
       await expect(listPolls(app, undefined, limit)).rejects.toThrow(TypeError);
   });
 
-  test("reads only definitions and the moderation log, and writes nothing", () => {
-    // A structural guard (T-68): listing is a view for our front ends; it
-    // never reaches a board or a result, and never changes what it reads.
+  test("reads only definitions and the moderation log, and writes nothing", async () => {
+    // T-68: listing is a view for our front ends; it never reaches a board or
+    // a result, and never changes what it reads. A read-only session refuses
+    // any write, however it is spelt.
     const src = readFileSync(new URL("../src/listing.ts", import.meta.url), "utf8");
     expect(src).not.toMatch(/boardEntries|board_entries|appendEntry|storeDefinition/);
-    expect(src).not.toMatch(/\.insert\(|\.update\(|\.delete\(|INSERT|UPDATE|DELETE/);
+    const readOnly = await db.as("abolish_app");
+    await readOnly`SET default_transaction_read_only = on`;
+    const id = await election();
+    expect((await listPolls(readOnly, undefined, MAX_LISTING_PAGE)).map(hex)).toContain(hex(id));
   });
 });

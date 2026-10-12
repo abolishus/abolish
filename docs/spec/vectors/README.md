@@ -23,6 +23,7 @@ One JSON file per spec section or record type, named after it (`primitives.json`
 | `share-encryption.json`    | Trustee KEM keys, share ciphertexts with the randomness that made them, decryptions, postings and complaints with their verdicts, and codec rejections ([[share-encryption]])                                                             |
 | `tally.json`               | Cell aggregates, trustees' per-ballot and summed shares with their check verdicts, combined seats, Lagrange coefficients and openings; published openings with the verifier's verdicts; a derived total ([[tally]])                       |
 | `receipt.json`             | Receipts: the record and its signed statement, rejected encodings and the checks at cast ([[receipts]])                                                                                                                                   |
+| `ceremony.json`            | Key-ceremony transcripts: honest runs with the secrets that made them, every seat disqualification and transcript-level failure, the registered key sets and hashes, and decode rejections ([[ceremony]])                                 |
 | `circuit.json`             | Circuit-facing values: each registered tag's field element and the two byte packings ([[notation]], [[domain-separation]])                                                                                                                |
 | `l1-anchor.json`           | Board anchors read from L1 state: Anvil's raw headers and `eth_getProof` trie nodes for a deployed board anchor, with the anchors a verifier reads or the code it stops with ([[verifier]], Anchors from L1; [[contracts]], Board anchor) |
 
@@ -164,6 +165,15 @@ Type descriptors:
 - `postings`: each has `id`, `description`, `ballot`, `seat`, `ciphertext`, `m` and `result`: `"ok"` or a posting code.
 - `complaints`: each has `id`, `description`, `ballot`, `seat`, `ciphertext`, `m` (the posting complained about), `proof` (the `complaint_proof` encoding, hex), `w` (decimal, where the proof is honest and reproducible) and `result`: `"ok"` for a proven complaint, or a posting or complaint code.
 - `decode`: each has `id`, `description`, `type` (`kem-key`, `kem-secret`, `share-ciphertext` or `complaint-proof`), `encoding` (hex) and `error`: a decode error code, or `null` for an encoding that must decode and re-encode to itself.
+
+## Ceremony vectors
+
+`ceremony.json` covers [[ceremony]] with its own format, `abolish-ceremony-vectors/1`, and the same top-level fields, plus `tags` (the ceremony's tags, ASCII) and:
+
+- `election`: the fields every transcript's context is rebuilt from: `l2ChainId` (decimal), `trusteeRegistry`, `electionId` and `stubHash` (hex).
+- `panels`: by name (`panel-4`, 3-of-4; `panel-4-k2`, 2-of-4; `panel-2`, 2-of-2; `panel-16`, 11-of-16), each with `threshold`, `identitySecrets` (32 bytes big-endian, hex, seat 1 first) and `keys` (the `p256-key` encodings, hex).
+- `transcripts`: each has `id`, `description`, `panel`, `transcript` (the record's full encoding, hex) and `result`, the transcript check's output: `ok`; for a valid transcript, `hash` (the transcript hash), `seats` (every panel seat with its `reasons`, empty for a qualified seat) and `registered` (each qualified seat's `index`, `kemKey` and `signingKey`, hex); otherwise `code`, with `seats` for `ceremony-quorum`. The honest runs (`honest-4`, `honest-2`, `honest-16`, `absent`) also carry `runId`, `context` and, per seat taking part, `kemSeed` (hex), `kemX` and `pokNonce` (decimal), `signingSecret` (hex) and `challengeSecrets` (the `μ`s in target order, hex), from which every message is reproduced byte for byte (ECDSA nonces are RFC 6979's).
+- `decode`: each has `id`, `description`, `transcript` (hex) and `error`, the decode error code; the context is `panel-2`'s.
 
 ## Circuit vectors
 

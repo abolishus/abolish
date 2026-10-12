@@ -121,6 +121,20 @@ contract BoardAnchorTest is TestBase {
         }
     }
 
+    /// An EOA with an EIP-7702 delegation has code, but it is still one key.
+    function test_DeploymentRefusesADelegatedEoa() public {
+        address eoa = address(0x7702);
+        vm.etch(eoa, abi.encodePacked(hex"ef0100", address(authority)));
+        try new BoardAnchor(BoardAnchor.Clock(EPOCH, PERIOD, DEADLINE), eoa) {
+            revert("deployed");
+        } catch (bytes memory ret) {
+            _assertData(ret, abi.encodeWithSelector(BoardAnchor.InvalidDeployment.selector));
+        }
+        // Code of the same length that isn't a delegation is a contract.
+        vm.etch(eoa, abi.encodePacked(hex"5f0100", address(authority)));
+        new BoardAnchor(BoardAnchor.Clock(EPOCH, PERIOD, DEADLINE), eoa);
+    }
+
     // --- anchoring -----------------------------------------------------------
 
     function test_AnchorStoresTheHashAndLogsTheFullCheckpoint() public {
@@ -265,6 +279,33 @@ contract BoardAnchorTest is TestBase {
         assertEq(anchor.checkpointHashOf(ID, 1), bytes32(0), "a refused call stored");
     }
 
+    /// The lowest anchored segment is kept per election and only ever
+    /// lowered, so a verifier knows where its slots start (T-24).
+    function test_TracksTheLowestAnchoredSegment() public {
+        assertEq(anchor.lowestSegmentPlusOne(ID), 0, "none yet");
+        vm.warp(EPOCH + 3 * PERIOD); // periods 0 to 2 have ended, all in their windows
+        vm.prank(authority);
+        anchor.anchor(_encode(ID, 2, 1, "h", "r"));
+        assertEq(anchor.lowestSegmentPlusOne(ID), 3, "first");
+        vm.prank(authority);
+        anchor.anchor(
+            bytes.concat(_encode(keccak256("x"), 0, 2, "h", "r"), _encode(ID, 1, 1, "h", "r"))
+        );
+        assertEq(anchor.lowestSegmentPlusOne(ID), 2, "lowered");
+        vm.prank(authority);
+        anchor.anchor(_encode(ID, 0, 1, "h", "r"));
+        assertEq(anchor.lowestSegmentPlusOne(ID), 1, "segment 0");
+        assertEq(anchor.lowestSegmentPlusOne(keccak256("x")), 1, "another election");
+        assertEq(anchor.lowestSegmentPlusOne(keccak256("y")), 0, "none");
+        // At the documented slot: the second mapping of the namespace.
+        bytes32 slot = keccak256(
+            abi.encode(
+                ID, uint256(0x16eba4501d0a9dddbfa03518d843c364be664629e6d99efb7169d8f090095b00) + 1
+            )
+        );
+        assertEq(uint256(vm.load(address(anchor), slot)), 1, "slot");
+    }
+
     /// A call is all or nothing: one bad checkpoint anchors none of them.
     function test_OneBadCheckpointAnchorsNone() public {
         vm.warp(EPOCH + PERIOD);
@@ -358,6 +399,18 @@ contract BoardAnchorTest is TestBase {
 
     // --- fuzz ----------------------------------------------------------------
 
+    /// Far from any window, nothing is stored.
+    function testFuzz_NothingStoredFarFromTheWindow(uint32 segment, uint256 t) public {
+        uint256 end = anchor.periodEnd(segment);
+        t = t % (uint256(EPOCH) + (uint256(1) << 32) * PERIOD + 2 * DEADLINE);
+        vm.assume(t < end || t - end > DEADLINE);
+        vm.warp(t);
+        vm.prank(authority);
+        (bool ok,) = address(anchor)
+            .call(abi.encodeCall(BoardAnchor.anchor, (_encode(ID, segment, 1, "h", "r"))));
+        assertTrue(!ok, "stored outside the window");
+    }
+
     /// Any checkpoint at any time is stored exactly when it is non-empty and
     /// inside its window, and then under its hash.
     function testFuzz_StoredExactlyInsideTheWindow(
@@ -368,9 +421,10 @@ contract BoardAnchorTest is TestBase {
         bytes32 root,
         uint256 t
     ) public {
-        t = t % (uint256(EPOCH) + (uint256(1) << 32) * PERIOD + 2 * DEADLINE);
-        vm.warp(t);
+        // Around the window, so both outcomes are common.
         uint256 end = anchor.periodEnd(segment);
+        t = end - PERIOD + t % (PERIOD + DEADLINE + 2);
+        vm.warp(t);
         bool allowed = size != 0 && t >= end && t - end <= DEADLINE;
         vm.prank(authority);
         (bool ok,) = address(anchor)

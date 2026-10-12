@@ -64,6 +64,8 @@ contract BoardAnchor is EventAccumulator {
     /// @custom:storage-location erc7201:abolish.board-anchor
     struct AnchorStorage {
         mapping(bytes32 electionId => mapping(uint32 segment => bytes32)) checkpointHash;
+        /// One more than the lowest segment anchored for the election; 0 if none.
+        mapping(bytes32 electionId => uint256) lowestSegmentPlusOne;
     }
 
     /// keccak256(abi.encode(uint256(keccak256("abolish.board-anchor")) - 1)) & ~bytes32(uint256(0xff)):
@@ -79,10 +81,11 @@ contract BoardAnchor is EventAccumulator {
     address public immutable authority;
 
     constructor(Clock memory clock, address authority_) {
-        // An address without code is a single key (or nothing). Code doesn't
-        // prove a multisig, so the deployment record names the Safe and its
-        // threshold, but the plain mistake is refused here.
-        if (clock.period == 0 || authority_.code.length == 0) revert InvalidDeployment();
+        // An address without code, or with only an EIP-7702 delegation
+        // (`0xef0100 ‖ address`), is a single key. Code doesn't prove a
+        // multisig, so the deployment record names the Safe, but the plain
+        // mistake is refused here.
+        if (clock.period == 0 || !_isContract(authority_)) revert InvalidDeployment();
         epoch = clock.epoch;
         period = clock.period;
         deadline = clock.deadline;
@@ -93,6 +96,12 @@ contract BoardAnchor is EventAccumulator {
     /// A verifier uses a storage proof of the slot instead.
     function checkpointHashOf(bytes32 electionId, uint32 segment) external view returns (bytes32) {
         return _anchorStorage().checkpointHash[electionId][segment];
+    }
+
+    /// @notice One more than the lowest segment anchored for an election, or
+    /// 0 if none. With it, a verifier knows which per-segment slots to prove.
+    function lowestSegmentPlusOne(bytes32 electionId) external view returns (uint256) {
+        return _anchorStorage().lowestSegmentPlusOne[electionId];
     }
 
     /// @notice The L1 time at which period `segment` ends.
@@ -136,6 +145,12 @@ contract BoardAnchor is EventAccumulator {
 
             bytes32 h = CheckpointLib.hash(id, segment, size, head, root);
             s.checkpointHash[id][segment] = h;
+            // Lowered only, never raised: the verifier proves every slot from
+            // it to the seal, so no anchored checkpoint goes unread (T-24).
+            uint256 lowest = s.lowestSegmentPlusOne[id];
+            if (lowest == 0 || segment < lowest - 1) {
+                s.lowestSegmentPlusOne[id] = uint256(segment) + 1;
+            }
             _log4(
                 CheckpointAnchored.selector,
                 id,
@@ -144,6 +159,12 @@ contract BoardAnchor is EventAccumulator {
                 abi.encode(size, head, root)
             );
         }
+    }
+
+    function _isContract(address a) private view returns (bool) {
+        bytes memory code = a.code;
+        if (code.length == 0) return false;
+        return !(code.length == 23 && code[0] == 0xef && code[1] == 0x01 && code[2] == 0x00);
     }
 
     function _anchorStorage() private pure returns (AnchorStorage storage s) {

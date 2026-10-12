@@ -19,6 +19,8 @@ contract AnchorHandler is TestBase {
     bytes32[] public keys;
     mapping(bytes32 key => bool) internal touched;
     mapping(bytes32 key => bytes32) public shadow;
+    /// One more than the lowest segment anchored per election, as the anchor keeps it.
+    mapping(bytes32 id => uint256) public shadowLowest;
     uint256 public anchored;
     /// Set if a call succeeded or failed against the rules.
     bool public unexpected;
@@ -48,7 +50,7 @@ contract AnchorHandler is TestBase {
         for (uint256 i; i < count; i++) {
             uint256 r = uint256(keccak256(abi.encode(seed, i)));
             bytes32 id = bytes32(r % 3);
-            uint32 segment = uint32((r >> 8) % 8);
+            uint32 segment = _segment(r);
             uint64 size = uint64((r >> 16) % 4); // 0 sometimes: an empty board
             bytes32 head = keccak256(abi.encode(r, "head"));
             bytes32 root = keccak256(abi.encode(r, "root"));
@@ -74,11 +76,23 @@ contract AnchorHandler is TestBase {
             if (!allowed) unexpected = true;
             for (uint256 i; i < count; i++) {
                 shadow[batch[i]] = hashes[i];
+                bytes32 id = bytes32(uint256(batch[i]) >> 32);
+                uint256 s = uint256(uint32(uint256(batch[i]))) + 1;
+                if (shadowLowest[id] == 0 || s < shadowLowest[id]) shadowLowest[id] = s;
             }
             anchored += count;
         } catch {
             if (allowed) unexpected = true;
         }
+    }
+
+    /// Half the time one of the two periods that ended last, so anchors
+    /// succeed often; otherwise any of segments 0–7.
+    function _segment(uint256 r) internal view returns (uint32) {
+        uint256 elapsed = (block.timestamp - EPOCH) / anchor.period();
+        uint256 back = 1 + (r >> 9) % 2;
+        if ((r >> 8) % 2 == 0 && elapsed >= back) return uint32(elapsed - back);
+        return uint32((r >> 10) % 8);
     }
 
     function _key(bytes32 id, uint32 segment) internal pure returns (bytes32) {
@@ -93,7 +107,11 @@ contract AnchorHandler is TestBase {
 /// 2. A call succeeds exactly when it comes from the authority and every
 ///    checkpoint in it is non-empty, inside its window and the first for its
 ///    election and segment, in the anchor and within the call (T-52, T-53).
-/// 3. The event accumulator counts one log per anchored checkpoint.
+/// 3. The anchor keeps, per election, one more than the lowest segment
+///    anchored, or 0 (T-24: a verifier proves every slot from there).
+/// 4. The event accumulator counts one log per anchored checkpoint.
+/// `test_HandlerAnchors` shows the handler reaches the success path, so the
+/// invariants aren't checked only against an empty anchor.
 contract BoardAnchorInvariantTest is TestBase {
     BoardAnchor internal anchor;
     AnchorHandler internal handler;
@@ -119,6 +137,24 @@ contract BoardAnchorInvariantTest is TestBase {
                 "stored hash"
             );
         }
+    }
+
+    function invariant_LowestSegmentMatchesTheShadow() public view {
+        for (uint256 id; id < 3; id++) {
+            assertEq(
+                anchor.lowestSegmentPlusOne(bytes32(id)),
+                handler.shadowLowest(bytes32(id)),
+                "lowest segment"
+            );
+        }
+    }
+
+    function test_HandlerAnchors() public {
+        for (uint256 i; i < 16; i++) {
+            handler.wait(3600);
+            handler.send(i, uint8(i), false);
+        }
+        assertTrue(handler.anchored() > 0, "nothing was anchored");
     }
 
     function invariant_CallsFollowTheRules() public view {

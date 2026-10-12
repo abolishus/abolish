@@ -25,7 +25,7 @@ import {
 import { ds } from "./domain-separation.ts";
 import { type Element, element, G, GROUP_ORDER, H } from "./group.ts";
 import { PARAMETERS } from "./parameters.ts";
-import { checkedTranscriptHash, type RegisteredKeys } from "./ceremony.ts";
+import { checkedKeySetBinding, type RegisteredKeys } from "./ceremony.ts";
 import { RECORD_TYPES, RecordSchema, recordType } from "./record.ts";
 import {
   AEAD_TAG_LEN,
@@ -38,7 +38,7 @@ import {
 } from "./share-encryption.ts";
 import { type CellAggregate, checkSummedShares, type TallyRules } from "./tally.ts";
 import type { ElectionDefinition } from "./election-definition.ts";
-import { electionDefinitionHash } from "./protocol.ts";
+import { electionDefinitionHash, electionStubHash } from "./protocol.ts";
 import { aggregateHash } from "./tally-opening.ts";
 import { identityKey, p256Sig, signStatement, verifyStatement } from "./trustee.ts";
 
@@ -123,6 +123,12 @@ export interface SummedShareCell {
 interface DefinitionContext {
   readonly definitionHash: Uint8Array;
   readonly ceremonyTranscriptHash: Uint8Array;
+  /**
+   * The definition with its transcript hash zeroed, which the ceremony's
+   * context bound: with the transcript hash it pins the whole definition to
+   * the key set, so the rules and partition are the ceremony's election's.
+   */
+  readonly stubHash: Uint8Array;
   readonly rules: TallyRules;
   /**
    * The number of cells in the registered partition: under definition version
@@ -137,6 +143,7 @@ function contextOf(d: ElectionDefinition): DefinitionContext {
   return {
     definitionHash: electionDefinitionHash(d),
     ceremonyTranscriptHash: Uint8Array.from(d.ceremony_transcript_hash),
+    stubHash: electionStubHash(d),
     rules: { optionCount: d.option_count, threshold: d.threshold, panelSize: d.panel_size },
     cells: d.electorate.length,
   };
@@ -190,19 +197,20 @@ const sameBytes = (a: Uint8Array, b: Uint8Array) =>
  * file, or another run's or another election's, could put a key its holder
  * controls under any seat (T-37, T-15).
  */
-function requireCheckedSet(
-  registered: readonly RegisteredKeys[],
-  ceremonyTranscriptHash: Uint8Array,
-): void {
-  const hash = checkedTranscriptHash(registered);
-  if (hash === undefined)
+function requireCheckedSet(registered: readonly RegisteredKeys[], ctx: DefinitionContext): void {
+  const binding = checkedKeySetBinding(registered);
+  if (binding === undefined)
     throw new TypeError(
       "summed share: the key set must come from checkCeremonyTranscript, unchanged",
     );
-  if (!(ceremonyTranscriptHash instanceof Uint8Array) || !sameBytes(hash, ceremonyTranscriptHash))
+  if (!sameBytes(binding.transcriptHash, ctx.ceremonyTranscriptHash))
     throw new TypeError(
       "summed share: the key set is from a transcript this definition doesn't name",
     );
+  // The ceremony's context bound the stub, so a definition with the right
+  // transcript hash but any other field changed (more tiers, say) is refused.
+  if (!sameBytes(binding.stubHash, ctx.stubHash))
+    throw new TypeError("summed share: the key set's ceremony was for another definition");
   if (new Set(registered.map((k) => k.index)).size !== registered.length)
     throw new RangeError("summed share: the registered key set names a seat twice");
 }
@@ -251,7 +259,7 @@ export function sealSummedSharesWith(
   // The recipient's KEM key is looked up by seat in the key set the
   // definition's transcript registered, never taken from the caller (ADR 0015;
   // T-37, T-15). The sender must be registered under its own key.
-  requireCheckedSet(registered, cell.ceremonyTranscriptHash);
+  requireCheckedSet(registered, cell);
   const recipient = registered.find((k) => k.index === recipientIndex);
   if (recipient === undefined)
     throw new RangeError("summed share: the recipient isn't a registered seat");
@@ -400,7 +408,7 @@ export function openSummedSharesWith(
   checkSeat(recipient.index, n, "recipient");
   // Only the definition's checked key set decides whose signature lets a
   // message reach decapsulation (T-39, T-37).
-  requireCheckedSet(election.registered, election.ceremonyTranscriptHash);
+  requireCheckedSet(election.registered, election);
   const { optionCount, threshold } = election.rules;
   // One aggregate per cell of the registered partition, no more (T-14, T-16).
   if (election.aggregates.length !== election.cells)

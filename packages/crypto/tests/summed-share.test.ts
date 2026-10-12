@@ -3,12 +3,14 @@ import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vite-plus/test";
 import {
   aggregateCell,
+  type CellAggregate,
   type CommittedVote,
   decode,
   DecodeError,
   decodeElectionDefinition,
   decodeSummedShareMessage,
   type ElectionDefinition,
+  electionStubHash,
   element,
   encode,
   encodeSummedShareMessage,
@@ -118,18 +120,24 @@ const seat = (i: number) => {
 /** The registered key set: seat 4 has keys but isn't qualified. */
 /** The definition's `ceremony_transcript_hash` the key sets below are checked against (test data). */
 const ceremonyTranscriptHash = new Uint8Array(32).fill(0x5a);
+/** What the vector key set is checked for: that transcript and a stub hash (test data). */
+const vectorBinding = {
+  transcriptHash: ceremonyTranscriptHash,
+  stubHash: new Uint8Array(32).fill(0x6b),
+};
 const registered = checkedKeySetForTests(
   vectors.election.registered.map((k) => ({
     index: k.index,
     kemKey: seat(k.index).kem.publicKey,
     signingKey: hex(k.signingKey),
   })),
-  ceremonyTranscriptHash,
+  vectorBinding,
 );
 const election: SummedShareElectionContext = {
   definitionHash,
   ceremonyTranscriptHash,
   cells: aggregates.length,
+  stubHash: vectorBinding.stubHash,
   rules,
   aggregates,
   registered,
@@ -161,6 +169,7 @@ describe("summed-share.json", () => {
         definitionHash,
         ceremonyTranscriptHash,
         cells: aggregates.length,
+        stubHash: vectorBinding.stubHash,
         rules,
         cell: v.cell,
         aggregate: aggregates[v.cell] ?? [],
@@ -222,12 +231,15 @@ describe("summed-share messages", () => {
   const base = decodeElectionDefinition(hex(typical.encoding));
   const definition: ElectionDefinition = {
     ...base,
-    // One tier, so the partition is one cell.
-    electorate: base.electorate.slice(0, 1),
     option_count: 3,
     threshold: 2,
     panel_size: 3,
     ceremony_transcript_hash: ceremonyTranscriptHash,
+  };
+  // The key sets below are checked for this definition's stub and transcript.
+  const freshBinding = {
+    transcriptHash: ceremonyTranscriptHash,
+    stubHash: electionStubHash(definition),
   };
 
   // A fresh 2-of-3 election with one cell of random ballots, all seats registered.
@@ -247,14 +259,15 @@ describe("summed-share messages", () => {
     );
     const e: SummedShareElection = {
       definition,
-      aggregates: [aggregate],
+      // Two tiers, two cells: cell 1 counts no ballots.
+      aggregates: [aggregate, aggregateCell(r, [])],
       registered: checkedKeySetForTests(
         [1, 2, 3].map((i) => ({
           index: i,
           kemKey: seat(i).kem.publicKey,
           signingKey: identityKey(seat(i).signingSecret),
         })),
-        ceremonyTranscriptHash,
+        freshBinding,
       ),
     };
     return { rules: r, aggregate, summed, election: e };
@@ -441,7 +454,7 @@ describe("summed-share messages", () => {
       fresh.election.registered.map((k) =>
         k.index === 2 ? { ...k, kemKey: seat(3).kem.publicKey } : k,
       ),
-      ceremonyTranscriptHash,
+      freshBinding,
     );
     const bytes = sealSummedShares(
       cell,
@@ -471,7 +484,10 @@ describe("summed-share messages", () => {
   test("a checked key set from another transcript is refused on both sides", () => {
     // Another run's or another election's checked set: its transcript isn't
     // the one this definition names.
-    const other = checkedKeySetForTests(fresh.election.registered, new Uint8Array(32).fill(0x11));
+    const other = checkedKeySetForTests(fresh.election.registered, {
+      ...freshBinding,
+      transcriptHash: new Uint8Array(32).fill(0x11),
+    });
     expect(() =>
       sealSummedShares(
         cell,
@@ -505,12 +521,61 @@ describe("summed-share messages", () => {
     expect(open(fresh.election.registered).ok).toBe(true);
   });
 
+  test("every cell of a two-tier partition is sent and received; the next one isn't", () => {
+    // An under-counted partition would leave a tier's cell without sums, and
+    // the election without its opening (T-54).
+    const zero = [0n, 0n, 0n].map((v) => ({ v, r: 0n }));
+    const empty = fresh.election.aggregates[1] as CellAggregate;
+    const bytes = sealSummedShares(
+      { definition, cell: 1, aggregate: empty },
+      fresh.election.registered,
+      { index: 1, signingSecret: seat(1).signingSecret },
+      2,
+      zero,
+    );
+    expect(receive(2, bytes)).toEqual({ ok: true, cell: 1, sender: 1, summed: zero });
+    expect(() =>
+      sealSummedShares(
+        { definition, cell: 2, aggregate: empty },
+        fresh.election.registered,
+        { index: 1, signingSecret: seat(1).signingSecret },
+        2,
+        zero,
+      ),
+    ).toThrow(RangeError);
+  });
+
+  test("a definition other than the ceremony's is refused, even naming its transcript", () => {
+    // Same transcript hash, one more tier: the stub differs, so the key set,
+    // and with it the partition, belongs to another definition (T-37, T-16).
+    const wider = {
+      ...definition,
+      electorate: [...definition.electorate, definition.electorate[0]],
+    };
+    expect(() =>
+      sealSummedShares(
+        { definition: wider as ElectionDefinition, cell: 2, aggregate: fresh.aggregate },
+        fresh.election.registered,
+        { index: 1, signingSecret: seat(1).signingSecret },
+        2,
+        fresh.summed[0] as Share[],
+      ),
+    ).toThrow(TypeError);
+    expect(() =>
+      openSummedShares(
+        { ...fresh.election, definition: wider as ElectionDefinition },
+        { index: 2, secretKey: seat(2).kem.secretKey },
+        send(1, 2),
+      ),
+    ).toThrow(TypeError);
+  });
+
   test("only cells of the registered partition are sent or received", () => {
     // A cell the definition's partition doesn't have, even over a real
     // aggregate: summing for it could disclose a difference of sums (T-14, T-16).
     expect(() =>
       sealSummedShares(
-        { definition, cell: 1, aggregate: fresh.aggregate },
+        { definition, cell: 2, aggregate: fresh.aggregate },
         fresh.election.registered,
         { index: 1, signingSecret: seat(1).signingSecret },
         2,
@@ -520,7 +585,7 @@ describe("summed-share messages", () => {
     // A recipient given more aggregates than the partition has cells refuses them all.
     expect(() =>
       openSummedShares(
-        { ...fresh.election, aggregates: [fresh.aggregate, fresh.aggregate] },
+        { ...fresh.election, aggregates: [...fresh.election.aggregates, fresh.aggregate] },
         { index: 2, secretKey: seat(2).kem.secretKey },
         send(1, 2),
       ),
@@ -557,7 +622,7 @@ describe("summed-share messages", () => {
         fresh.election.registered.map((k) =>
           k.index === 1 ? { ...k, signingKey: identityKey(seat(3).signingSecret) } : k,
         ),
-        ceremonyTranscriptHash,
+        freshBinding,
       ),
     };
     expect(openSummedShares(e, { index: 2, secretKey: seat(2).kem.secretKey }, send(1, 2))).toEqual(

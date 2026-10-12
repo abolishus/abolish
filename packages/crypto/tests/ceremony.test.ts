@@ -25,7 +25,7 @@ import {
   revealsMessage,
 } from "../src/index.ts";
 import { encode } from "../src/codec.ts";
-import { checkedTranscriptHash } from "../src/ceremony.ts";
+import { checkedKeySetBinding } from "../src/ceremony.ts";
 import { kemKeyPairWith } from "../src/share-encryption.ts";
 import { hex, SPEC_VECTORS } from "./spec-vectors.ts";
 
@@ -136,7 +136,11 @@ describe("ceremony.json", () => {
     (_, t) => {
       const r = checkCeremonyTranscript(election(panelOf(t.panel)), hex(t.transcript), 1);
       // Only a set this check returned is accepted where keys are used to send secrets.
-      if (r.ok) expect(checkedTranscriptHash(r.registered)).toEqual(r.hash);
+      if (r.ok)
+        expect(checkedKeySetBinding(r.registered)).toEqual({
+          transcriptHash: r.hash,
+          stubHash: hex(V.election.stubHash),
+        });
       expect(asVector(r)).toEqual(t.result);
     },
   );

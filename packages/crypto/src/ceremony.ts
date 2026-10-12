@@ -570,38 +570,50 @@ export interface SeatResult {
 }
 
 /**
- * Every registered key set `checkCeremonyTranscript` returned, with the hash
- * of the transcript it came from: the only sets summed shares are sent and
- * received under, and only for the election whose definition names that
- * transcript, so a node can't use a key set served from anywhere else, or
- * another run's or another election's (T-37, T-15; ADR 0015).
+ * Every registered key set `checkCeremonyTranscript` returned, with the
+ * transcript it came from and the definition stub its ceremony context bound:
+ * the only sets summed shares are sent and received under, and only for the
+ * definition whose stub and `ceremony_transcript_hash` they are, so a node
+ * can't use a key set served from anywhere else, another run's or another
+ * election's, or a definition other than the one the ceremony was for (T-37,
+ * T-15, T-16; ADR 0015).
  */
-const CHECKED_KEY_SETS = new WeakMap<readonly RegisteredKeys[], Uint8Array>();
+const CHECKED_KEY_SETS = new WeakMap<readonly RegisteredKeys[], CheckedKeySetBinding>();
 
-/**
- * Internal: the hash of the transcript `checkCeremonyTranscript` checked to
- * return this key set (the set and its entries are frozen, its byte arrays
- * copied), or `undefined` for any other set.
- */
-export function checkedTranscriptHash(keys: readonly RegisteredKeys[]): Uint8Array | undefined {
-  const hash = CHECKED_KEY_SETS.get(keys);
-  return hash === undefined ? undefined : Uint8Array.from(hash);
+/** What a checked key set is bound to: its transcript's hash and the definition stub hash. */
+export interface CheckedKeySetBinding {
+  readonly transcriptHash: Uint8Array;
+  readonly stubHash: Uint8Array;
 }
 
 /**
- * Internal, for tests: marks a key set as checked for a transcript hash,
+ * Internal: the transcript and stub `checkCeremonyTranscript` checked to
+ * return this key set (the set and its entries are frozen, its byte arrays
+ * copied), or `undefined` for any other set.
+ */
+export function checkedKeySetBinding(
+  keys: readonly RegisteredKeys[],
+): CheckedKeySetBinding | undefined {
+  const b = CHECKED_KEY_SETS.get(keys);
+  return b === undefined
+    ? undefined
+    : { transcriptHash: Uint8Array.from(b.transcriptHash), stubHash: Uint8Array.from(b.stubHash) };
+}
+
+/**
+ * Internal, for tests: marks a key set as checked for a transcript and stub,
  * without a transcript. The package entry point doesn't export this.
  */
 export function checkedKeySetForTests(
   keys: readonly RegisteredKeys[],
-  transcriptHash: Uint8Array,
+  binding: CheckedKeySetBinding,
 ): readonly RegisteredKeys[] {
-  return markChecked([...keys], transcriptHash);
+  return markChecked([...keys], binding);
 }
 
 function markChecked(
   keys: RegisteredKeys[],
-  transcriptHash: Uint8Array,
+  binding: CheckedKeySetBinding,
 ): readonly RegisteredKeys[] {
   // Byte arrays are copied (their contents can't be frozen), so a later change
   // to a caller's buffer can't change what the marked set holds.
@@ -614,7 +626,13 @@ function markChecked(
       }),
     ),
   );
-  CHECKED_KEY_SETS.set(set, Uint8Array.from(transcriptHash));
+  CHECKED_KEY_SETS.set(
+    set,
+    Object.freeze({
+      transcriptHash: Uint8Array.from(binding.transcriptHash),
+      stubHash: Uint8Array.from(binding.stubHash),
+    }),
+  );
   return set;
 }
 
@@ -776,7 +794,8 @@ export function checkCeremonyTranscript(
       const m = t.keys.find((k) => k.index === index) as KeysMessage;
       return { index, kemKey: m.kem_key, signingKey: m.signing_key };
     }),
-    hash,
+    // The run's context bound the stub hash, so the set is this stub's.
+    { transcriptHash: hash, stubHash: params.stubHash },
   );
   return { ok: true, hash, seats, registered };
 }

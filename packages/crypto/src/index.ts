@@ -20,6 +20,19 @@ export {
   type VoteSharing,
 } from "./ballot-validity.ts";
 export {
+  BALLOT,
+  type BallotCheck,
+  type BallotCode,
+  type BallotElection,
+  ballotElection,
+  type BallotRecord,
+  ballotSignals,
+  checkBallot,
+  decodeBallot,
+  encodeBallot,
+  type UnprovenBallot,
+} from "./ballot.ts";
+export {
   type Anchor,
   type AnchorClock,
   BOARD_ENTRY,

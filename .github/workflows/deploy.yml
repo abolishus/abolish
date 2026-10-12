@@ -195,6 +195,20 @@ jobs:
       contents: read
       packages: read
     steps:
+      # A re-run of an older run would point staging back at an older digest
+      # with nobody meaning to roll back. Only main's head deploys; a rollback
+      # is a redeploy of an earlier deployment in Railway (docs/runbooks/railway.md).
+      - name: This commit is still main's head
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          head="$(gh api "repos/$REPO/commits/main" --jq .sha)"
+          if [ "$head" != "$SHA" ]; then
+            echo "::error::$SHA is no longer main's head ($head); not deploying an older commit"
+            exit 1
+          fi
       # Before anything reads the image: the package may still be private.
       - name: Log in to GHCR
         env:

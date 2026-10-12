@@ -342,7 +342,7 @@ def check_answer(J, key, query, rec):
         return "answer-query"
     if not 1 <= a["seat"] <= key["n"]:
         return "answer-seat"
-    seat_key = key["identity_keys"][a["seat"] - 1]
+    seat_key = key["signing_keys"][a["seat"] - 1]
     if not ecdsa.verify(seat_key, ds(SIG_TAG, rec[:-64]), a["signature"]):
         return "answer-signature"
     c_i = key["commitments"][a["seat"] - 1]
@@ -453,10 +453,10 @@ def main():
         shares.append({"seat": i, "sk": sk_i, "s": s_i, "commitment": c_i})
         commitments.append(c_i)
 
-    id_secrets = [ecdsa.secret(b"keyed nullifier seat %d" % i) for i in range(1, n + 1)]
-    id_keys = [ecdsa.compress(ecdsa.mul(d, ecdsa.G)) for d in id_secrets]
+    signing_secrets = [ecdsa.secret(b"keyed nullifier seat %d" % i) for i in range(1, n + 1)]
+    signing_keys = [ecdsa.compress(ecdsa.mul(d, ecdsa.G)) for d in signing_secrets]
     key_id = bytes32(b"key")
-    key = {"key_id": key_id, "n": n, "identity_keys": id_keys, "commitments": commitments}
+    key = {"key_id": key_id, "n": n, "signing_keys": signing_keys, "commitments": commitments}
 
     # --- Queries: B = r * P, with P a stand-in for H1(x) (part 2b-3) ---------------
     queries = []
@@ -481,7 +481,7 @@ def main():
         z1 = (w1 + c * sk_i) % L
         z2 = (w2 + c * s_i) % L
         msg = answer_message(key_id, q["query_hash"], seat, q["b"], z_i, c, z1, z2)
-        _, rr, ss = ecdsa.ecdsa_sign(id_secrets[seat - 1], ds(SIG_TAG, msg))
+        _, rr, ss = ecdsa.ecdsa_sign(signing_secrets[seat - 1], ds(SIG_TAG, msg))
         rec = msg + ecdsa.sig_bytes(rr, ss)
         return {
             "w1": w1,
@@ -560,7 +560,7 @@ def main():
         checks.append({"id": id_, "description": desc, "query": query["id"], "record": rec.hex(), "result": code})
 
     def resign(msg, seat):
-        _, rr, ss = ecdsa.ecdsa_sign(id_secrets[seat - 1], ds(SIG_TAG, msg))
+        _, rr, ss = ecdsa.ecdsa_sign(signing_secrets[seat - 1], ds(SIG_TAG, msg))
         return msg + ecdsa.sig_bytes(rr, ss)
 
     def splice(rec, off, b):
@@ -661,8 +661,8 @@ def main():
                     "sk": str(sh["sk"]),
                     "s": str(sh["s"]),
                     "commitment": enc_point(sh["commitment"]).hex(),
-                    "identitySecret": id_secrets[sh["seat"] - 1].to_bytes(32, "big").hex(),
-                    "identityKey": id_keys[sh["seat"] - 1].hex(),
+                    "signingSecret": signing_secrets[sh["seat"] - 1].to_bytes(32, "big").hex(),
+                    "signingKey": signing_keys[sh["seat"] - 1].hex(),
                 }
                 for sh in shares
             ],

@@ -18,6 +18,9 @@ export function SiteLayout({ children }: { children: ReactNode }) {
           <a href="/" className="text-xl font-semibold">
             {t("siteName")}
           </a>
+          <a href="/polls" className="underline-offset-4 hover:underline">
+            {t("navPolls")}
+          </a>
           <a href="/moderation" className="underline-offset-4 hover:underline">
             {t("navModeration")}
           </a>

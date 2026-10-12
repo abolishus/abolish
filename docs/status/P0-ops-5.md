@@ -1,6 +1,6 @@
 # P0-ops-5: partition and verifier follow-ups from #27
 
-- State: done when #29 merges
+- State: done (#29)
 - PR: #29
 - Branch: `claude/p0-ops-5`
 

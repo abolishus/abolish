@@ -1,0 +1,26 @@
+{
+  "name": "@abolishus/reference-election",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The reference election (P1-20): the end-to-end proof that the system works, run as a CLI fixture on Anvil. Source-only.",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "scripts": {
+    "build": "vp exec tsc -p tsconfig.json",
+    "check": "vp check",
+    "test": "vp test run"
+  },
+  "dependencies": {
+    "@abolishus/crypto": "workspace:*",
+    "@noble/hashes": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "fast-check": "catalog:",
+    "typescript": "catalog:",
+    "vite-plus": "catalog:"
+  },
+  "abolish": {
+    "buildOutputs": []
+  }
+}

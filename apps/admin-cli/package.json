@@ -1,0 +1,32 @@
+{
+  "name": "@abolishus/admin-cli",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The operator's command line: moderation now; simulations to come. Source-only.",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "vp exec tsc -p tsconfig.json",
+    "check": "vp check",
+    "start": "vp node src/main.ts",
+    "test": "vp run test:services"
+  },
+  "dependencies": {
+    "@abolishus/core": "workspace:*",
+    "postgres": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@abolishus/crypto": "workspace:*",
+    "@types/node": "catalog:",
+    "fast-check": "catalog:",
+    "typescript": "catalog:",
+    "vite-plus": "catalog:"
+  },
+  "abolish": {
+    "buildOutputs": []
+  }
+}

@@ -1,6 +1,6 @@
 # P0-ops-6: one cell per electorate tier
 
-- State: done when its PR merges
+- State: done (#33)
 - Branch: `claude/p0-ops-6`
 
 ## Scope

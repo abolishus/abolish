@@ -37,4 +37,5 @@ export const CHECKS: readonly CheckSpec[] = Object.freeze([
   ...election("7.1", "7.2", "7.3"),
   ...reportOnly("7.4"),
   ...election("8.1", "8.2", "8.3", "8.4"),
+  ...reportOnly("8.5"),
 ]);

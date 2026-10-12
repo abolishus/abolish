@@ -9,13 +9,13 @@ The circuit is Semaphore v4's, unchanged:
 - Repository `semaphore-protocol/semaphore`, tag `v4.14.3`, commit `4dbc39b83a4066bf5084fd7f5d336202aad2f815`.
 - Circuit: `packages/circuits/src/semaphore.circom`, sha256 `d67fbae4504476569c03ce7beb23bacf4c4ebb9cbd8f49888f57ed14b288e486`.
 - Field mapping of message and scope: `packages/proof/src/hash.ts` at the same commit.
-- Proving and verification keys: Semaphore's multi-party trusted setup, which produced one key pair per maximum tree depth from 1 to 32. Abolish uses only the depth-32 pair (Tree depth). How it is pinned, hashed into the election definition and checked is P1-17b's.
+- Proving and verification keys: Semaphore's multi-party trusted setup, which produced one key pair per maximum tree depth from 1 to 32. Abolish uses only the depth-32 pair (Tree depth), pinned as Verification key below.
 
 A later Semaphore release is adopted only by an ADR, and only if the statement below is unchanged; otherwise it is a new ballot version ([[versioning]]).
 
 ## Statement
 
-Notation: `r` is the BN254 scalar field order ([[notation]], `field<bn254>`); `l` = 2736030358979909402780800718157159386076813972158567259200215660948447373041 is the order of Baby Jubjub's prime subgroup and `B8` its generator (EIP-2494); `Poseidon2` is the two-input Poseidon hash over BN254 of circomlib; `MerkleRoot` is the root that zk-kit's `BinaryMerkleRoot(D)` computes from a leaf, a proof length, a path index and `D` siblings, with `Poseidon2` at every node.
+Notation: `r` is the BN254 scalar field order ([[notation]], `field<bn254>`); `l` = 2736030358979909402780800718157159386076813972158567259200215660948447373041 is the order of Baby Jubjub's prime subgroup and `B8` its generator (EIP-2494); `Poseidon2` is the two-input Poseidon hash over BN254 of circomlib (`Poseidon(2)`: width 3, 8 full and 57 partial rounds, S-box `x⁵`, state `[0, a, b]`, output its first element, with the round constants and MDS matrix of the Poseidon authors' Grain LFSR as circomlibjs v0.1.7 publishes them in `src/poseidon_constants.json`, vendored under `packages/crypto/test-vectors/iden3/` with circomlib's known answers); `MerkleRoot` is the root that zk-kit's `BinaryMerkleRoot(D)` computes from a leaf, a proof length, a path index and `D` siblings, with `Poseidon2` at every node.
 
 Public inputs, in this order: `(ρ, ν, m̂, ŝ)`. Witness: `s`, the proof length `len`, the path index `index` (one field element, which the circuit decomposes into `D` bits) and `D` siblings, exactly Semaphore's `merkleProofLength`, `merkleProofIndex` and `merkleProofSiblings`. The circuit for depth `D` proves:
 
@@ -93,6 +93,88 @@ Every membership proof, in every tier and every election, uses the verification 
 - **The tier tree's own depth.** The tier tree has depth exactly 32, so every member's path has exactly 32 levels (Tier tree). A tier group with more than 2³² additions (removed members included: a removal sets a leaf to 0 but never frees it) has no tier tree, and a verifier fails a definition that has one.
 - **Cost.** The depth-32 proving key is Semaphore's largest, and a proof hashes 32 levels whatever the group size. P2-8 and P5-4 measure proving time on target devices; if it is too slow, a later ballot version can fix a smaller protocol-wide depth or carry a depth in the election definition that the verifier checks, never one a server supplies.
 
+## Verification key
+
+The pinned key is Semaphore's depth-32 Groth16 verification key: entry 31 of `vk_delta_2` and `IC` in `packages/proof/src/verification-keys.json` at the commit above (sha256 `d96ec60593b6fc2334f1f04e008e07425d5536d7777f6ac21d996fc80779b3c9`), with the `vk_alpha_1`, `vk_beta_2` and `vk_gamma_2` every depth shares. `packages/crypto` vendors that file ([[vectors/README|vectors]]; `packages/crypto/test-vectors/semaphore/`) and carries the key as constants a test compares with it. Its `IC` has exactly 5 points, one more than the 4 public signals.
+
+The proving key that goes with it is `semaphore-32.zkey` as Semaphore 4.14.3's prover downloads it, `https://snark-artifacts.pse.dev/semaphore/4.13.0/semaphore-32.zkey`, sha256 `2e5f7a9f880c337134ee4c7fc4e53573813b4c9c6ae46221c0b56e7992304650`. Its embedded verification key equals the pinned one, and its reference string is well formed (Reference-string check).
+
+```
+vk                = G1(α) ‖ G2(β) ‖ G2(γ) ‖ G2(δ) ‖ G1(IC_0) ‖ … ‖ G1(IC_4)        768 bytes
+membership_vk_hash = H(DS("abolish/v1/membership-vk", u8(32) ‖ vk ‖ zkey_sha256))
+```
+
+`G1` and `G2` are the point encodings of Proof encoding below, and `zkey_sha256` is the proving key's sha256 above (32 bytes). The input after the tag is exactly 801 bytes. The election definition's `membership_vk_hash` carries it ([[election-definition]]). A verifier compares the two and never verifies under a key a definition, a ballot or a server names ([[verifier]] 1.3). The hash binds the proving key too, so a prover can check that it holds exactly the key whose reference string was checked (Security notes) and that the election uses it; a prover whose proving key's sha256 differs MUST NOT prove (P2-8, P5-4; T-07, T-12). A new key, at any depth, is a new hash and a new ballot version ([[versioning]]).
+
+## Proof encoding
+
+`membership_proof` is a fixed 256-byte structure, `A ‖ B ‖ C`, in the encoding Ethereum's precompiles and Semaphore's Solidity verifier use (EIP-196, EIP-197):
+
+| Field | Type     | Bytes | Encoding                                                                    |
+| ----- | -------- | ----- | --------------------------------------------------------------------------- |
+| `A`   | G1 point | 64    | `x ‖ y`, each 32 bytes big-endian                                           |
+| `B`   | G2 point | 128   | `x.c1 ‖ x.c0 ‖ y.c1 ‖ y.c0`, each 32 bytes big-endian, imaginary part first |
+| `C`   | G1 point | 64    | `x ‖ y`                                                                     |
+
+`x = x.c0 + x.c1·u` in `Fp² = Fp[u]/(u² + 1)`. Every coordinate is a base-field element below `p` = 21888242871839275222246405745257275088696311157297823662689037894645226208583. A decoder rejects, with `non-canonical` at the point's offset ([[notation]], Strict decoding):
+
+- a coordinate at or above `p`;
+- the identity, whose only would-be encodings are all zeros;
+- a G1 point not on `y² = x³ + 3`, or a G2 point not on the twist `y² = x³ + 3/(u + 9)`;
+- a G2 point outside the order-`r` subgroup (G1's cofactor is 1). Without this check a forger could move the pairing into a small subgroup (T-05).
+
+Semaphore's packed proof (`packGroth16Proof`) lists the same eight values in the same order as decimal strings, so a stock proof converts by writing each as 32 bytes. snarkjs's own JSON lists `B`'s components real part first; the decoder never guesses an order, and a swapped `B` fails decoding (vector `b-component-order`) or verification.
+
+## Verification
+
+For a proof `(A, B, C)` and public signals `[ρ, ν, m̂, ŝ]`, the verifier checks Groth16's equation (Groth, EUROCRYPT 2016, §3.2) under the pinned key:
+
+```
+L = IC_0 + ρ·IC_1 + ν·IC_2 + m̂·IC_3 + ŝ·IC_4
+e(A, B) = e(α, β) · e(L, γ) · e(C, δ)
+```
+
+over the BN254 optimal ate pairing, computed with `@noble/curves`' audited implementation ([[0009-membership-proof]], Consequences). It rejects first, without pairing, if the proof doesn't decode, any signal is at or above `r` (signals are never reduced, so one proof can't stand for two values; T-31), or `ρ = 0` (Statement). A Groth16 verifier that reduces signals modulo `r`, or skips the subgroup check, isn't conforming.
+
+## Reference-string check
+
+Groth16's zero knowledge against a subverted setup needs a well-formed reference string (Fuchsbauer, PKC 2018; Abdolmaleki, Baghery, Lipmaa and Zając, ASIACRYPT 2017). It was checked once, publicly, for the pinned proving key (P1-17b part 2; T-07, T-12). The check is `packages/crypto/scripts/membership-crs-check.ts`, which uses only `@noble/curves`' BN254 group, MSM and pairing code, and its tests (`packages/crypto/tests/membership-crs-check.test.ts`) build an honest key for a toy circuit and show that breaking each relation below fails exactly the check that names it.
+
+Inputs, each pinned by sha256 in the script:
+
+| Input               | Source                                                                                                                                                          | sha256                                                             |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `semaphore-32.zkey` | Verification key above                                                                                                                                          | `2e5f7a9f880c337134ee4c7fc4e53573813b4c9c6ae46221c0b56e7992304650` |
+| `ppot_0080_14.ptau` | `https://pse-trusted-setup-ppot.s3.eu-central-1.amazonaws.com/pot28_0080/ppot_0080_14.ptau`, the Perpetual Powers of Tau (contribution 80) cut to 2¹⁴, prepared | `3ca1149e9349b22b0ee0649399cfb787677129b7b1189d1899fc0d615d9583db` |
+| `semaphore-32.r1cs` | compiled below                                                                                                                                                  | `82ffde9b18278ae0881a6fcfcc7884ad97fd69db94534779a8923182e9f4780b` |
+
+The R1CS comes from the circuit file Source pins (the same sha256 in `@semaphore-protocol/circuits` 4.13.0 on npm), with `circomlib` 2.0.5 and `@zk-kit/binary-merkle-root.circom` 2.0.0 from npm (Semaphore's pinned dependencies), compiled by circom 2.1.9 (the `circom-linux-amd64` release binary, sha256 `e5575829252d763b7818049df9de2ef9304df834697de77fa63ce7babc23c967`) with Semaphore's `circomkit.json` setting `--O2`, from a main file `component main {public [message, scope]} = Semaphore(32);` under `pragma circom 2.1.5;` and `include "semaphore.circom";`. It has 9418 wires, 4 public signals and 9383 constraints, so the key's domain is `N = 2¹⁴`.
+
+The ptau isn't trusted: the check proves its points are powers of one `τ`. It passes when the key is an honest Groth16 key for that R1CS, up to a component of `H` no proof uses (check 18): there are `α`, `β`, `γ ≠ 0`, `δ ≠ 0` and `τ` with `τ^N ≠ 1` such that every point equals its formula. Every point is decoded canonically and checked in its order-`r` group first, and each family of equations is checked as one random linear combination with fresh CSPRNG scalars (small-exponent batching, Bellare, Garay and Rabin, EUROCRYPT 1998), so a wrong point passes with probability at most `1/r` per family. In order:
+
+1. R1CS shape matches the key: wires, public signals, and room for the constraints and snarkjs's `nPublic + 1` extra rows in the domain.
+2. A matrix equals the R1CS's: the key's A coefficients are the R1CS's plus `A[nConstraints + i][i] = 1` for the constant and each public signal.
+3. B matrix equals the R1CS's.
+4. powers start at the generators: `[τ⁰]₁` and `[τ⁰]₂`.
+5. τ ≠ 0.
+6. [τ]_1 and [τ]_2 agree.
+7. G1 powers are consecutive: `[τ^i]₁` for `i ≤ 2N − 2`.
+8. G2 powers are consecutive: `[τ^i]₂` for `i ≤ N − 1`.
+9. τ isn't on the domain: `τ^N ≠ 1`.
+10. α, β, γ, δ are nonzero.
+11. [β]_1 and [β]_2 agree.
+12. [δ]_1 and [δ]_2 agree.
+13. A points are [u_i(τ)]_1, with `u_i`, `v_i` and `w_i` the Lagrange interpolations of the A, B and C columns over the domain `ω^j`, `ω` snarkjs's root of unity (ffjavascript's `Fr.w`).
+14. B points in G1 are [v_i(τ)]_1.
+15. B points in G2 are [v_i(τ)]_2.
+16. IC points are [(β·u_i + α·v_i + w_i)(τ)/γ]_1, for the constant and the public signals (the pinned `IC`).
+17. L points are [(β·u_i + α·v_i + w_i)(τ)/δ]_1, for the private signals.
+18. H points are [L_{2i+1}(τ)/δ]_1: the Lagrange basis on the `2N` domain at its odd points, where snarkjs's prover evaluates `A·B − C`. The ptau has no `τ^{2N−1}`, so this basis carries some fixed point in its place, adding `κ_i·Z` to `H_i` with `κ_i = ω₂ₙ^{2i+1}/(2N)`. A proof never uses it: the prover computes `C` as `A·B` on the `N`-point domain, so `A·B − C` vanishes there and has degree at most `2N − 2`, and so `Σ h_i·κ_i = 0`, its coefficient of `X^{2N−1}`; the check tests `H` up to exactly that direction.
+
+Then for every witness of the circuit an honest proof's `A` and `B` are uniform and independent of the witness (through the prover's `r` and `s`, as `δ ≠ 0`), and `C` is fixed by `A`, `B` and the public signals through the verification equation, so a proof reveals nothing about the witness whoever ran the ceremony.
+
+**Result (2026-10-12): well formed.** All 18 checks pass (`MEMBERSHIP_CRS_DIR=<dir> vp test run tests/membership-crs-check.test.ts` in `packages/crypto`, or `vp node --experimental-transform-types packages/crypto/scripts/membership-crs-check.ts <zkey> <ptau> <r1cs>`, about 4 minutes). As an independent cross-check, snarkjs 0.7.5's `zkey verify` with the same three files reports `ZKey Ok!`: the key is the one snarkjs derives from that R1CS and ptau, followed by 320 recorded phase-2 contributions and a beacon.
+
 ## Checks
 
 A verifier fails the election definition if any tier's root differs from the tier tree it recomputes from the group's additions, is 0, or the group has more than 2³² additions ([[verifier]] 2.4). It also fails a definition that lists a tier whose group has no counted addition (one whose commitment isn't forbidden, Commitments and removals) still unremoved at the root's block, which is exactly when the tier tree's root is `Z_32`: which no one can prove against, so it would be a cell that can't hold a ballot (P1-10b, [[verifier]] 2.8). Then, for each ballot that claims tier group `g` ([[verifier]] 5.1–5.3), it:
@@ -101,13 +183,13 @@ A verifier fails the election definition if any tier's root differs from the tie
 2. Takes `ρ = root_g` from the definition, never from the ballot; `ρ` is never 0 (Statement).
 3. Decodes the ballot's nullifier `ν` as a `field<bn254>`, rejecting a non-canonical value (T-31).
 4. Recomputes `m̂ = F(M)` from the ballot record and the definition ([[revoting]], Message).
-5. Verifies the Groth16 proof under the pinned depth-32 verification key, with public signals `[ρ, ν, m̂, ŝ_g]`. Any failure rejects the ballot.
+5. Verifies the Groth16 proof under the pinned depth-32 verification key, with public signals `[ρ, ν, m̂, ŝ_g]` (Verification). Any failure rejects the ballot.
 
 Because the scope binds the tier, a proof made for one tier never verifies as another, even if the two tiers have the same root: no relay or operator can move a ballot between tally cells ([[verifier]] 2.8).
 
 ## Security notes
 
-- **Zero knowledge.** Groth16 proofs are perfectly zero-knowledge for a well-formed reference string (Groth, EUROCRYPT 2016), so a proof reveals nothing about `s`, the leaf or the path, even to an unbounded adversary ([[0002-everlasting-privacy]]). Against a subverted setup this holds only if the proving key's reference string is well formed (Fuchsbauer, PKC 2018), so it MUST be checked: once per pinned key, publicly, by P1-17b, which binds the checked key into `abolish/v1/membership-vk`, and the prover MUST use exactly that key. It also holds only if the prover's Groth16 randomisers come from a CSPRNG (P2-8, P5-4 check their prover's randomness source).
+- **Zero knowledge.** Groth16 proofs are perfectly zero-knowledge for a well-formed reference string (Groth, EUROCRYPT 2016), so a proof reveals nothing about `s`, the leaf or the path, even to an unbounded adversary ([[0002-everlasting-privacy]]). Against a subverted setup this holds only if the proving key's reference string is well formed (Fuchsbauer, PKC 2018), so it MUST be checked once per pinned key, publicly, and the prover MUST use exactly that key, whose sha256 `membership_vk_hash` binds (Verification key). The pinned key passed that check (Reference-string check), so zero knowledge holds even if every participant in Semaphore's ceremony colluded. A new key, at any depth, needs the check again before any election uses it. It also holds only if the prover's Groth16 randomisers come from a CSPRNG, and only for proofs that verify: a witness that doesn't satisfy the circuit (a faulty witness generator, which the check doesn't cover) or a prover with other basis conventions leaves a witness-dependent term in `C`. So the prover MUST verify its own proof under the pinned key before it leaves the device (P2-8, P5-4 check their prover's randomness source and add that check).
 - **Nullifier privacy is computational.** `ν = Poseidon2(ŝ, s)`: linking nullifiers across scopes, or a nullifier to an identity commitment, needs `s` or a Poseidon preimage (T-12, T-15).
 - **Soundness** rests on Semaphore's ceremony (T-07), on the circuit (T-05) and on BN254, whose discrete-log security is about 100–110 bits after the tower number field sieve ([[0007-group-and-hash]]): a forged proof would admit a non-member. A second nullifier for one identity would need a Poseidon collision, and a second identity for one registration a Poseidon collision or preimage (Tier tree).
 - **Chosen-scope linkage.** `S_g` is public, so any other Semaphore application that holds the voter's identity could ask for a proof under scope `int(S_g)` and so learn the voter's nullifier for that poll and tier. The domain tag stops accidental collisions, not this. The prover MUST therefore use the Abolish identity secret for nothing but Abolish membership proofs, never export it to another Semaphore application, and prove only under a scope it recomputed from a definition it verified, with the tier and root taken from that definition (P2-6, P2-8, P5-4; T-12).
@@ -116,9 +198,8 @@ Because the scope binds the tier, a proof made for one tier never verifies as an
 
 ## Owned elsewhere
 
-- The verification keys, their hash in the election definition, the proof encoding and the Groth16 verification itself: P1-17b.
 - `M`: specified in [[revoting]]; the ballot hash inside it is P1-12's.
 - The tier encoding: the election definition's tier field (P1-10b) and the group registry's tier attribution (P1-18, P3-2) MUST use exactly the values this page binds into the scope (0, 1, 2), and the verifier takes `t_g` from the registry binding it checks in [[verifier]] 2.4, never from the definition's label alone.
 - Groups and their additions and removals: P3-2, with the commitment and removal rules above (P1-18 emits them).
-- On-chain membership checks (direct submit, P1-18): a contract MUST verify the ballot's Groth16 proof under the pinned depth-32 key against the tier root registered with the election's definition, with `ŝ_g` recomputed on chain from the definition hash, tier and root (SHA-256 and Keccak are EVM precompiles or opcodes), and revert otherwise, so non-members can't post at all ([[verifier]], Principles; T-52). It never verifies against a group contract's own current root, a LeanIMT root or a depth from the caller, so it needs no on-chain tree, and [[verifier]] 2.4 still checks the registered root against the board.
+- On-chain membership checks (direct submit, P1-18): a contract MUST verify the ballot's Groth16 proof under the pinned depth-32 key against the tier root registered with the election's definition, with `ŝ_g` recomputed on chain from the definition hash, tier and root (SHA-256 and Keccak are EVM precompiles or opcodes), and revert otherwise, so non-members can't post at all. It MUST decode the proof as Proof encoding does, rejecting the identity in `A`, `B` and `C` (which EIP-197's precompile and stock verifiers accept), so it and the verifier accept exactly the same proofs ([[verifier]], Principles; T-52). It never verifies against a group contract's own current root, a LeanIMT root or a depth from the caller, so it needs no on-chain tree, and [[verifier]] 2.4 still checks the registered root against the board.
 - The prover in the ballot client and native app: P2-8, P5-4. The client MUST build its 32-level path from the whole tier's additions (from the board, or by fetching every leaf) and check the rebuilt root against the definition; asking a server for its own path would reveal its leaf index (T-10, T-13).

@@ -114,6 +114,13 @@ const forElection = (anchor: string, change: Partial<ElectionDefinition> = {}) =
   );
 
 const row = (r: Report, id: string) => r.checks.find((c) => c.id === id) as CheckResult;
+const COMBINATION_FAILS = {
+  id: "2.3",
+  kind: "election",
+  status: "fail",
+  code: "profile-combination",
+  at: {},
+};
 const notReached = (r: Report) => {
   expect(row(r, "4.1")).toMatchObject({ status: "unverifiable", code: "not-reached" });
   expect(row(r, "4.2")).toMatchObject({ status: "unverifiable", code: "not-reached" });
@@ -188,17 +195,84 @@ describe("2.1: the definition decodes strictly and is well formed", () => {
     });
 });
 
+describe("2.3: the profile's versions fit together", () => {
+  const pinning = (versions: Partial<Record<number, number>>) =>
+    forElection(closed.anchor, {
+      profile: {
+        ...typical.profile,
+        pins: typical.profile.pins.map((p) => ({
+          ...p,
+          version: versions[p.record_type] ?? p.version,
+        })),
+      },
+    });
+
+  // [board entry, ballot, tally opening, fits]: ballot version 1 needs board
+  // entries that carry share receipts and complaints (3 or 4), and
+  // tally-opening version 1 needs ones that carry destruction statements (4).
+  const table: readonly (readonly [number, number, number, boolean])[] = [
+    [4, 1, 1, true],
+    [3, 1, 1, false],
+    [1, 1, 1, false],
+    [3, 1, 2, true],
+    [1, 1, 2, false],
+    [4, 2, 1, true],
+    [3, 2, 1, false],
+    [1, 2, 1, false],
+    [1, 2, 2, true],
+    [3, 2, 2, true],
+    [4, 2, 2, true],
+  ];
+  for (const [board, ballot, opening, fits] of table)
+    test(`board entry ${board}, ballot ${ballot}, tally opening ${opening}: ${fits ? "fits" : "fails"}`, () => {
+      const r = format3(
+        pinning({
+          [RECORD_TYPES.boardEntry]: board,
+          [RECORD_TYPES.ballot]: ballot,
+          [RECORD_TYPES.tallyOpening]: opening,
+        }),
+        closed,
+      );
+      if (fits)
+        expect(row(r, "2.3")).toMatchObject({ status: "unverifiable", code: "not-implemented" });
+      else {
+        expect(row(r, "2.3")).toEqual(COMBINATION_FAILS);
+        expect(r.verdictAgainstInputs).toBe("failed");
+      }
+      // The version is one this verifier reads, so the board checks ran.
+      expect(row(r, "4.1").code).not.toBe("not-reached");
+      // Only version 4 carries destruction statements (8.5, report-only).
+      expect(row(r, "8.5")).toMatchObject(
+        board === 4
+          ? { status: "unverifiable", code: "not-implemented" }
+          : { status: "unverifiable", code: "not-applicable" },
+      );
+      expect(r.verdict).toBe("unverifiable");
+    });
+
+  test("a version this verifier can't read is unsupported before any combination", () => {
+    for (const board of [2, 5]) {
+      const r = format3(pinning({ [RECORD_TYPES.boardEntry]: board }), closed);
+      expect(row(r, "2.3")).toMatchObject({ status: "unverifiable", code: "unsupported-version" });
+      notReached(r);
+    }
+  });
+});
+
 describe("the board checks' inputs come from the definition", () => {
   for (const v of l1File.vectors)
     test(`${v.id}: the same checks as format 2 with the definition's fields`, () => {
+      // These boards are board-entry version 1, and the typical definition
+      // pins it beside ballot and tally-opening version 1: a combination 2.3
+      // fails, which stops none of the other checks.
       const r3 = format3(forElection(v.anchor), v);
       const r2 = format2(v);
-      expect(r3.checks.filter((c) => c.id !== "2.1")).toEqual(
-        r2.checks.filter((c) => c.id !== "2.1"),
-      );
+      const others = (r: Report) => r.checks.filter((c) => c.id !== "2.1" && c.id !== "2.3");
+      expect(others(r3)).toEqual(others(r2));
+      expect(row(r3, "2.3")).toEqual(COMBINATION_FAILS);
       expect(r3.board).toEqual(r2.board);
       expect(r3.l1).toEqual(r2.l1);
-      expect(r3.verdictAgainstInputs).toBe(r2.verdictAgainstInputs);
+      expect(r3.verdictAgainstInputs).toBe("failed");
       expect(r3.verdict).toBe("unverifiable");
       // Only format 3 has a definition to report.
       expect(r2.definition).toBeUndefined();
@@ -290,7 +364,7 @@ describe("the report", () => {
       expect(code).toBe(EXIT_CODES.unverifiable);
       expect(stderr.split("\n")[0]).toBe(
         "verdict: unverifiable (unauthenticated inputs: clock, l1Header, firstSegment, definition; " +
-          "against those inputs: unverifiable)",
+          "against those inputs: failed)",
       );
     } finally {
       rmSync(dir, { recursive: true });

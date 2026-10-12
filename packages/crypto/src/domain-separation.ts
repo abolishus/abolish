@@ -23,7 +23,7 @@ export const TAG_REGISTRY = Object.freeze(
       { tag: "abolish/v1/sig/receipt", primitive: "signature", status: "specified" },
       { tag: "abolish/v1/nullifier-scope", primitive: "plain", status: "specified" },
       { tag: "abolish/v1/membership-message", primitive: "plain", status: "specified" },
-      { tag: "abolish/v1/membership-vk", primitive: "plain", status: "reserved" },
+      { tag: "abolish/v1/membership-vk", primitive: "plain", status: "specified" },
       { tag: "abolish/v1/ballot-statement", primitive: "plain", status: "specified" },
       {
         tag: "abolish/v1/fs/ballot-validity/option",
@@ -44,6 +44,7 @@ export const TAG_REGISTRY = Object.freeze(
       { tag: "abolish/v1/fs/share-ephemeral", primitive: "fiat-shamir", status: "specified" },
       { tag: "abolish/v1/fs/share-complaint", primitive: "fiat-shamir", status: "specified" },
       { tag: "abolish/v1/sig/share-receipt", primitive: "signature", status: "specified" },
+      { tag: "abolish/v1/sig/share-complaint", primitive: "signature", status: "specified" },
       { tag: "abolish/v1/circuit-tag", primitive: "plain", status: "specified" },
       { tag: "abolish/v1/panel", primitive: "plain", status: "specified" },
       {
@@ -67,6 +68,10 @@ export const TAG_REGISTRY = Object.freeze(
       { tag: "abolish/v1/kem/summed-share", primitive: "kdf-aead", status: "specified" },
       { tag: "abolish/v1/kem/summed-share-aad", primitive: "kdf-aead", status: "specified" },
       { tag: "abolish/v1/sig/summed-share", primitive: "signature", status: "specified" },
+      { tag: "abolish/v1/sig/destruction", primitive: "signature", status: "specified" },
+      { tag: "abolish/v1/vouch", primitive: "plain", status: "specified" },
+      { tag: "abolish/v1/vouch-slot", primitive: "plain", status: "specified" },
+      { tag: "abolish/v1/vouch-message", primitive: "plain", status: "specified" },
     ] as const
   ).map((e) => Object.freeze(e)),
 );

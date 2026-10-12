@@ -1,6 +1,6 @@
 # P0-ops-8: a ballot's cell is its own tier
 
-- State: done when its PR merges
+- State: done (#36)
 - Branch: `claude/p0-ops-8`
 
 ## Scope

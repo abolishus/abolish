@@ -9,12 +9,20 @@
 // nothing, since Postgres isn't authoritative and a board is rebuilt from
 // chain and IPFS (P4-6).
 
-import { BoardError, checkBoard, encodeBoardEntry, UNPINNED } from "@abolishus/crypto";
+import {
+  appendSubtrees,
+  BOARD_TREE,
+  BoardError,
+  checkBoard,
+  encodeBoardEntry,
+  rootSubtrees,
+  UNPINNED,
+} from "@abolishus/crypto";
 import { asc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import type { Sql } from "postgres";
 import { isBytes } from "./bytes.ts";
-import { boardEntries } from "./db/schema/index.ts";
+import { boardEntries, boardSubtrees } from "./db/schema/index.ts";
 
 export type BoardAuditCode =
   /** The stored entries fail the verifier's checkBoard (its `BoardError` is the cause). */
@@ -22,7 +30,11 @@ export type BoardAuditCode =
   /** A row's `entry_hash` isn't the hash of its encoded entry. */
   | "entry-hash-mismatch"
   /** A row's `prev_link` or `link` isn't the chain link checkBoard recomputes. */
-  | "link-mismatch";
+  | "link-mismatch"
+  /** A subtree the entry completes isn't stored: reads covering it fail. */
+  | "subtree-missing"
+  /** A stored subtree isn't the one the recomputed entry hashes give: roots and proofs over it are wrong. */
+  | "subtree-mismatch";
 
 export class BoardAuditError extends Error {
   override readonly name = "BoardAuditError";
@@ -67,12 +79,15 @@ export async function auditBoard(client: Sql, electionId: Uint8Array): Promise<n
     .orderBy(asc(boardEntries.idx));
   // The table's CHECKs take only payloads the entry envelope encodes.
   const encoded = rows.map((r) =>
-    encodeBoardEntry({
-      election_id: id,
-      index: r.idx,
-      segment: Number(r.segment),
-      payload: new Uint8Array(r.payload),
-    }),
+    encodeBoardEntry(
+      {
+        election_id: id,
+        index: r.idx,
+        segment: Number(r.segment),
+        payload: new Uint8Array(r.payload),
+      },
+      1,
+    ),
   );
   let board;
   try {
@@ -96,6 +111,35 @@ export async function auditBoard(client: Sql, electionId: Uint8Array): Promise<n
       !equal(r.link, board.links[i] as Uint8Array)
     )
       throw new BoardAuditError("link-mismatch", i);
+  }
+  // Subtrees appended after these rows are read cover later entries only, and
+  // each one stored for these rows was committed with its entry.
+  const stored = new Map(
+    (
+      await drizzle({ client })
+        .select({ level: boardSubtrees.level, idx: boardSubtrees.idx, hash: boardSubtrees.hash })
+        .from(boardSubtrees)
+        .where(eq(boardSubtrees.electionId, id))
+    ).map((t) => [`${t.level}/${t.idx}`, new Uint8Array(t.hash)]),
+  );
+  // Recomputed from the entry hashes checkBoard derived, never the stored
+  // ones, so a subtree that agrees with a wrong entry_hash still fails.
+  const computed = new Map<string, Uint8Array>();
+  for (let i = 0; i < rows.length; i++) {
+    const frontier = (i === 0 ? [] : rootSubtrees(i)).map((t) => {
+      const hash = computed.get(`${t.level}/${t.index}`);
+      // Filled in append order, so every frontier subtree is there already.
+      if (hash === undefined)
+        throw new Error(`audit: subtree (${t.level}, ${t.index}) not computed`);
+      return hash;
+    });
+    for (const t of appendSubtrees(BOARD_TREE, frontier, i, board.entryHashes[i] as Uint8Array)) {
+      const key = `${t.level}/${t.index}`;
+      computed.set(key, t.hash);
+      const hash = stored.get(key);
+      if (hash === undefined) throw new BoardAuditError("subtree-missing", i);
+      if (!equal(hash, t.hash)) throw new BoardAuditError("subtree-mismatch", i);
+    }
   }
   return rows.length;
 }

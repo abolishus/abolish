@@ -40,14 +40,14 @@ m = election_id ‖ u64(index) ‖ u32(segment) ‖ entry_hash ‖ link ‖ root
 
 ## Checks at cast
 
-The client runs these as soon as it gets the receipt, before telling the voter that the ballot was received. Its inputs are the receipt's bytes, the election identifier it cast in, the payload it submitted (the complete record, header included), the pinned receipt keys, and the segments it accepts under [[board]]'s client rule 1, capped at the election's seal (`lastSegment`): rule 1's one-period tolerance never reaches past it, since no later segment is ever anchored. In order, the first failure being the result:
+The client runs these as soon as it gets the receipt, before telling the voter that the ballot was received. Its inputs are the receipt's bytes, the election identifier it cast in, the payload it submitted (the complete record, header included), the board-entry version the election's profile pins, the pinned receipt keys, and the segments it accepts under [[board]]'s client rule 1, capped at the election's seal (`lastSegment`): rule 1's one-period tolerance never reaches past it, since no later segment is ever anchored. In order, the first failure being the result:
 
 1. `decode`: the receipt doesn't decode strictly as a version 1 receipt (with the [[notation]] code).
 2. `receipt-key`: `operator_key` isn't one of the pinned receipt keys.
 3. `receipt-signature`: `signature` doesn't verify on `m` under `operator_key` and the tag.
 4. `receipt-election`: `election_id` isn't the election cast in.
 5. `receipt-segment`: `segment` isn't one the client accepts under client rule 1.
-6. `receipt-entry`: `entry_hash` isn't `H(DS("abolish/v1/board-entry", encode(entry)))` for the board entry (record `0x0007`, version 1) with this receipt's `election_id`, `index` and `segment`, and the payload the client submitted.
+6. `receipt-entry`: `entry_hash` isn't `H(DS("abolish/v1/board-entry", encode(entry)))` for the board entry (record `0x0007`, under the board-entry version the election's profile pins) with this receipt's `election_id`, `index` and `segment`, and the payload the client submitted.
 7. `receipt-inclusion`: `inclusion` doesn't verify, by [[board]]'s inclusion-proof procedure, `entry_hash` as entry `index` of the tree of `index + 1` entries with root `root`. An `index` of 2⁶⁴ − 1 always fails here, since the size doesn't fit a `u64`.
 
 A receipt that fails any of these isn't a receipt: the client tells the voter the ballot isn't confirmed, keeps the ballot, and resubmits the identical bytes ([[revoting]], Client rules) or submits it directly (P4-2). These failures aren't alarms: nothing in them is evidence a third party can check, since before step 3 the operator hasn't signed anything, and after it the payload and the accepted segments are known only to the client.
@@ -61,7 +61,7 @@ The checks after the segment's deadline against the checkpoints anchored on L1, 
 - **Time.** A receipt carries no time of its own, so a key obtained after an election could otherwise forge evidence against it for good; the evidence a receipt gives must be bounded in time, and a voter's evidence of a real drop must survive that bound.
 - **Withheld boards.** An operator can anchor a fork that no checkpoint contradicts from L1 alone and withhold the board until any bound has passed.
 - **Keys.** The receipt keys that judge an election must be fixed before voting starts (bound in the election definition, or recorded per election), so a later release can't void receipts, and keys not bound to an election can't forge against it.
-- **Presence.** A dropped ballot is shown only by a valid ballot that no admitted entry of the anchored board carries by content (`(tier, ν, M)`); a rejected or re-randomised copy proves nothing either way. That needs P1-12's ballot record.
+- **Presence.** A dropped ballot is shown only by a valid ballot that no admitted entry of the anchored board carries by content (`(tier, ν, M)`); a rejected or re-randomised copy proves nothing either way. The ballot record and its admission checks are specified ([[ballot-validity]], Ballot record); the check itself is P1-13b's.
 - **Privacy.** Anything a voter posts or fetches to keep or check evidence must not name the entry to the operator or to the source (T-45, T-11).
 
 Until P1-13b, [[board]]'s client rule 2 is unchanged, and a receipt is the voter's own check at cast.

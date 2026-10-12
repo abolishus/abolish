@@ -225,18 +225,28 @@ describe("report", () => {
 
   test("gives each check the kind the spec's Principles give it", () => {
     const of = (kind: string) => report.checks.filter((c) => c.kind === kind).map((c) => c.id);
-    expect(of("report-only")).toEqual(["1.1", "2.7", "7.4"]);
+    expect(of("report-only")).toEqual(["1.1", "2.7", "7.4", "8.5"]);
     expect(of("admission")).toEqual(["5.1", "5.2", "5.3", "5.4", "5.5", "5.7", "5.8", "6.2"]);
   });
 
   test("reports every unimplemented check as unverifiable, never as pass", () => {
-    for (const c of report.checks.filter((x) => x.id !== "4.1" && x.id !== "4.2"))
+    const implemented = new Set(["4.1", "4.2", "8.5"]);
+    for (const c of report.checks.filter((x) => !implemented.has(x.id)))
       expect(c).toEqual({
         id: c.id,
         kind: c.kind,
         status: "unverifiable",
         code: "not-implemented",
       });
+  });
+
+  test("8.5 is not applicable: board-entry version 1 can't carry a destruction statement", () => {
+    expect(report.checks.find((c) => c.id === "8.5")).toEqual({
+      id: "8.5",
+      kind: "report-only",
+      status: "unverifiable",
+      code: "not-applicable",
+    });
   });
 
   test("records every input as a local file and keeps the verdict unverifiable", () => {

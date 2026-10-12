@@ -4,7 +4,7 @@
 // signature suite is the trustees' (docs/spec/trustee-identity.md); the
 // proofs are the board's. The later checks are P1-13b's.
 
-import { boardEntryHash, encodeBoardEntry } from "./board.ts";
+import { boardEntryHash, type BoardEntryVersion, encodeBoardEntry } from "./board.ts";
 import {
   bytesFixed,
   type CodecValue,
@@ -127,6 +127,11 @@ export interface CastExpectation {
   readonly electionId: Uint8Array;
   /** The complete record the client submitted, header included. */
   readonly payload: Uint8Array;
+  /**
+   * The board-entry version the election's profile pins: the entry is rebuilt
+   * under it, so a receipt for an entry under any other version can't pass.
+   */
+  readonly boardEntryVersion: BoardEntryVersion;
   /** The receipt keys the ballot client's release pins. */
   readonly receiptKeys: readonly Uint8Array[];
   /**
@@ -191,12 +196,15 @@ export function checkReceiptAtCast(bytes: Uint8Array, expected: CastExpectation)
   // other payload, election, index or segment can't pass (T-38).
   let entry: Uint8Array;
   try {
-    entry = encodeBoardEntry({
-      election_id: electionId,
-      index: r.index,
-      segment: r.segment,
-      payload,
-    });
+    entry = encodeBoardEntry(
+      {
+        election_id: electionId,
+        index: r.index,
+        segment: r.segment,
+        payload,
+      },
+      expected.boardEntryVersion,
+    );
   } catch (e) {
     // A payload no board entry can carry: no receipt can be for it.
     if (!(e instanceof EncodeError)) throw e;

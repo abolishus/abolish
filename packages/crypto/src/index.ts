@@ -20,10 +20,27 @@ export {
   type VoteSharing,
 } from "./ballot-validity.ts";
 export {
+  BALLOT,
+  type BallotCheck,
+  type BallotCode,
+  type BallotElection,
+  ballotElection,
+  type BallotRecord,
+  ballotSignals,
+  checkBallot,
+  decodeBallot,
+  encodeBallot,
+  type UnprovenBallot,
+} from "./ballot.ts";
+export {
   type Anchor,
   type AnchorClock,
   BOARD_ENTRY,
   BOARD_PAYLOAD_TYPES,
+  BOARD_PAYLOAD_TYPES_V3,
+  BOARD_PAYLOAD_TYPES_V4,
+  boardPayloadTypes,
+  type BoardEntryVersion,
   type BoardEntry,
   boardEntryHash,
   BoardError,
@@ -164,6 +181,28 @@ export {
   sealIdentityBackup,
 } from "./identity-backup.ts";
 export { MEMBERSHIP_DEPTH, membershipScope, nullifierScope, semaphoreField } from "./membership.ts";
+export {
+  decodeMembershipProof,
+  encodeMembershipProof,
+  MEMBERSHIP_PROOF_LENGTH,
+  MEMBERSHIP_ZKEY_SHA256,
+  type MembershipProof,
+  membershipProof,
+  type MembershipSignals,
+  membershipVkEncoding,
+  membershipVkHash,
+  verifyMembershipProof,
+} from "./membership-proof.ts";
+export { poseidon2 } from "./poseidon.ts";
+export {
+  replayTierGroup,
+  TIER_TREE_MAX_LEAVES,
+  type TierGroupEvent,
+  type TierGroupReplay,
+  tierTreePath,
+  tierTreeRoot,
+  tierTreeZeros,
+} from "./tier-tree.ts";
 export { PARAMETERS } from "./parameters.ts";
 export {
   checkElectionToShow,
@@ -177,16 +216,25 @@ export {
   encodeElectionDefinition,
   newDisplayTextSalt,
   pinnedVersion,
+  profileCombinationRule,
+  type ProfileCombinationRule,
   type ShowCheck,
   type ShowRefusal,
   UnsupportedVersionError,
 } from "./protocol.ts";
 export {
+  appendSubtrees,
   BOARD_TREE,
   consistencyProof,
+  consistencyProofSubtrees,
+  foldSubtrees,
   inclusionProof,
+  inclusionProofSubtrees,
   merkleRoot,
   merkleRoots,
+  rootSubtrees,
+  type Subtree,
+  type SubtreeId,
   type TreeHash,
   verifyConsistency,
   verifyInclusion,
@@ -285,6 +333,22 @@ export {
   type SummedShareSender,
 } from "./summed-share.ts";
 export {
+  checkDestruction,
+  decodeDestructionStatement,
+  DESTRUCTION_STATEMENT,
+  type DestructionElection,
+  type DestructionEntry,
+  type DestructionReport,
+  destructionSegment,
+  type DestructionStatement,
+  type DestructionStatementFields,
+  destructionStatementMessage,
+  type DestructionTiming,
+  encodeDestructionStatement,
+  type SeatDestruction,
+  signDestructionStatement,
+} from "./destruction.ts";
+export {
   aggregateHash,
   type CellCheck,
   type CellCode,
@@ -339,6 +403,41 @@ export {
   shareReceiptStatement,
   type ShareReceiptStatement,
 } from "./share-receipt.ts";
+export {
+  type BallotDelivery,
+  checkDelivery,
+  COMPLAINT_WINDOW,
+  type DeliveryBallot,
+  type DeliveryCheck,
+  type DeliveryElection,
+  type DeliveryEntry,
+  type DeliveryRecordCode,
+  type DeliveryRecordReport,
+  type DeliveryDeadlines,
+  type DeliverySegments,
+  DELIVERY_WINDOW,
+  decodeShareComplaint,
+  decodeSharePosting,
+  decodeShareReceipt,
+  deliveryDeadlines,
+  deliveryWindowFits,
+  deliverySegments,
+  encodeShareComplaint,
+  encodeSharePosting,
+  encodeShareReceipt,
+  type PeriodClock,
+  type ProvenComplaint,
+  SHARE_COMPLAINT,
+  SHARE_POSTING,
+  SHARE_RECEIPT,
+  type ShareComplaintRecord,
+  type ShareComplaintStatement,
+  shareComplaintStatement,
+  type SharePostingRecord,
+  type ShareReceiptRecord,
+  shareReceiptRecord,
+  signShareComplaint,
+} from "./delivery.ts";
 export { isWellFormedUtf8 } from "./utf8.ts";
 export {
   type CeremonyRegistration,
@@ -357,3 +456,20 @@ export {
   verifyCeremonyRegistration,
   verifyStatement,
 } from "./trustee.ts";
+export {
+  checkTier1Addition,
+  decodeTier1Addition,
+  encodeTier1Addition,
+  type Tier1Addition,
+  type Tier1AdditionDecodeResult,
+  type Tier1AdditionResult,
+  type Vouch,
+  type VouchContext,
+  type VouchRole,
+  VOUCH_K,
+  VOUCH_LENGTH,
+  VOUCH_SLOTS,
+  vouchMessage,
+  vouchScope,
+  vouchSlotScope,
+} from "./vouch.ts";

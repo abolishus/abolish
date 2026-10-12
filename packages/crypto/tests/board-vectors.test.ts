@@ -140,7 +140,7 @@ describe("board entries", () => {
         payload: hex(want.payload),
       };
       expect(decodeBoardEntry(bytes, 1)).toEqual(entry);
-      expect(bytesToHex(encodeBoardEntry(entry))).toBe(v.encoding);
+      expect(bytesToHex(encodeBoardEntry(entry, 1))).toBe(v.encoding);
       expect(bytesToHex(boardEntryHash(bytes))).toBe(v.entryHash);
     });
 });

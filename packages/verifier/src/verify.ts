@@ -1,7 +1,9 @@
 // Runs the checks of docs/spec/verifier.md over one bundle and builds the
-// report (Procedure, Verdicts, Report). Only the board checks (4.1, 4.2) and
-// the definition's decoding and well-formedness (part of 2.1) are
-// implemented; every other check is reported unverifiable, so no run can
+// report (Procedure, Verdicts, Report). Only the board checks (4.1, 4.2), the
+// definition's decoding and well-formedness (part of 2.1), 2.3's profile
+// combination, 8.5's not-applicable case and, for format 4, the key-ceremony
+// transcript check (3.2, and the parts of 2.5 and 3.1 that need no L2 state)
+// are implemented; every other check is reported unverifiable, so no run can
 // report an election verified yet. A run on unauthenticated inputs reports
 // what the checks found against them, but its verdict stays unverifiable, so
 // a crafted bundle can neither verify nor fail an election (T-53, T-24).
@@ -9,20 +11,25 @@
 import {
   type Anchor,
   BoardError,
+  type BoardEntryVersion,
+  boardPayloadTypes,
   type BoardErrorAt,
   type BoardErrorCode,
   DecodeError,
   type DecodeErrorCode,
   decodeElectionDefinition,
+  type ElectionDefinition,
   electionDefinitionHash,
   electionDefinitionRule,
   type ElectionDefinitionRule,
   pinnedVersion,
+  profileCombinationRule,
   RECORD_TYPES,
   verifyBoard,
 } from "@abolishus/crypto";
 import { bytesToHex } from "@noble/hashes/utils.js";
 import type { Bundle, InputSource, InputSources } from "./bundle.ts";
+import { type CeremonyCode, ceremonyChecks, type CeremonyReport } from "./ceremony.ts";
 import { CHECKS, type CheckKind } from "./checks.ts";
 import {
   anchorsFromState,
@@ -38,8 +45,11 @@ export type CheckCode =
   | BoardErrorCode
   | L1ErrorCode
   | ElectionDefinitionRule
+  | CeremonyCode
+  | "profile-combination"
   | "unsupported-version"
   | "not-reached"
+  | "not-applicable"
   | "not-implemented";
 
 /**
@@ -66,14 +76,16 @@ export interface Report {
   readonly verdict: Verdict;
   readonly verdictAgainstInputs: Verdict;
   readonly inputs: InputSources;
-  /** A format-3 bundle's definition hash, once the definition decodes. */
+  /** A format-3 or format-4 bundle's definition hash, once the definition decodes. */
   readonly definition?: { readonly hash: string };
+  /** A format-4 bundle's transcript check, once it reached the seats. */
+  readonly ceremony?: CeremonyReport;
   readonly board: {
     readonly entries: number;
     readonly unreadableBytes: number;
     readonly unauthenticated?: number;
   };
-  /** The L1 block a format-2 or format-3 bundle was proven at, and the anchors read from its state. */
+  /** The L1 block a format-2, 3 or 4 bundle was proven at, and the anchors read from its state. */
   readonly l1?: {
     readonly blockHash: string;
     readonly blockNumber: string;
@@ -94,6 +106,11 @@ type Outcome = Pick<CheckResult, "status" | "code" | "at">;
 const PASS: Outcome = { status: "pass" };
 const NOT_REACHED: Outcome = { status: "unverifiable", code: "not-reached" };
 const UNSUPPORTED: Outcome = { status: "unverifiable", code: "unsupported-version", at: {} };
+// 8.5 under a board-entry version that can't carry a destruction statement:
+// reported, never `destruction-missing` for every seat (docs/spec/verifier.md, 8.5).
+const NOT_APPLICABLE: Outcome = { status: "unverifiable", code: "not-applicable" };
+const carriesDestruction = (v: BoardEntryVersion) =>
+  boardPayloadTypes(v).includes(RECORD_TYPES.destructionStatement);
 
 function copyAt(at: BoardErrorAt): CheckAt {
   if ("entry" in at)
@@ -181,24 +198,30 @@ function judge(checks: readonly CheckResult[]): Verdict {
 type BoardInputs =
   | {
       readonly electionId: Uint8Array;
-      readonly boardEntryVersion: 1;
+      readonly boardEntryVersion: BoardEntryVersion;
       readonly now: bigint;
       readonly anchors: readonly Anchor[];
     }
   | {
       readonly electionId: Uint8Array;
-      readonly boardEntryVersion: 1;
+      readonly boardEntryVersion: BoardEntryVersion;
       readonly l1: L1Evidence;
     };
 
 /**
- * A format-3 bundle's definition (docs/spec/verifier.md, Definition): its
+ * A format-3 or format-4 bundle's definition (docs/spec/verifier.md, Definition): its
  * decoding and well-formedness, which are part of 2.1, the board-entry
  * version its profile pins, and the board checks' inputs taken from it. Any
  * other format gives them as they are.
  */
 function fromDefinition(bundle: Bundle):
-  | { readonly inputs: BoardInputs; readonly hash?: Uint8Array }
+  | {
+      readonly inputs: BoardInputs;
+      readonly hash?: Uint8Array;
+      readonly definition?: ElectionDefinition;
+      /** 2.3's row when the profile's versions don't fit together. */
+      readonly profile?: Outcome;
+    }
   | {
       readonly rows: ReadonlyMap<string, Outcome>;
       readonly hash?: Uint8Array;
@@ -206,13 +229,18 @@ function fromDefinition(bundle: Bundle):
   if (bundle.format === "abolish-verifier-bundle/1") return { inputs: bundle };
   if (bundle.format === "abolish-verifier-bundle/2") return { inputs: bundle };
   // The board checks need the election and the version: without them they
-  // can't run, so 4.1 and 4.2 are not reached.
+  // can't run, so 4.1 and 4.2 are not reached, and neither are the ceremony
+  // checks of format 4, which read the transcript from the board.
+  const ceremonyRows: [string, Outcome][] =
+    bundle.format === "abolish-verifier-bundle/4"
+      ? [
+          ["2.5", NOT_REACHED],
+          ["3.1", NOT_REACHED],
+          ["3.2", NOT_REACHED],
+        ]
+      : [];
   const stopped = (row: string, outcome: Outcome, hash?: Uint8Array) => ({
-    rows: new Map([
-      [row, outcome],
-      ["4.1", NOT_REACHED],
-      ["4.2", NOT_REACHED],
-    ]),
+    rows: new Map([...ceremonyRows, [row, outcome], ["4.1", NOT_REACHED], ["4.2", NOT_REACHED]]),
     ...(hash !== undefined && { hash }),
   });
   let definition;
@@ -236,9 +264,28 @@ function fromDefinition(bundle: Bundle):
   // A version this verifier can't read may be one a later release supports,
   // so it leaves the election unverifiable here, never failed (2.3).
   const version = pinnedVersion(definition, RECORD_TYPES.boardEntry);
-  if (version !== 1) return stopped("2.3", UNSUPPORTED, hash);
+  if (!isReadable(version)) return stopped("2.3", UNSUPPORTED, hash);
+  let combination: Outcome | undefined;
+  const pins = profileCombinationRule(definition);
+  switch (pins) {
+    case undefined:
+      break;
+    case "profile-combination":
+      combination = { status: "fail", code: "profile-combination", at: {} };
+      break;
+    case "unsupported-version":
+      // Not reached while READABLE is within crypto's versions; if they ever
+      // drift, the version is unsupported here too, never a pass (T-36).
+      return stopped("2.3", UNSUPPORTED, hash);
+    default: {
+      const unknown: never = pins;
+      throw new Error(`unmapped profile rule ${String(unknown)}`);
+    }
+  }
   return {
     hash,
+    definition,
+    ...(combination !== undefined && { profile: combination }),
     inputs: {
       electionId: definition.election_id,
       boardEntryVersion: version,
@@ -246,6 +293,10 @@ function fromDefinition(bundle: Bundle):
     },
   };
 }
+
+const READABLE: ReadonlySet<number> = new Set<BoardEntryVersion>([1, 3, 4]);
+const isReadable = (v: number | undefined): v is BoardEntryVersion =>
+  v !== undefined && READABLE.has(v);
 
 /** The board checks' anchors and `now`: given as they are, or read from L1 state. */
 function anchoring(
@@ -308,6 +359,7 @@ export function verifyBundle(bundle: Bundle): Report {
   let board: Report["board"] = unsplit;
   let input: ReturnType<typeof anchoring> | undefined;
   let implemented: ReadonlyMap<string, Outcome>;
+  let ceremony: CeremonyReport | undefined;
   if ("rows" in definition) implemented = definition.rows;
   else {
     input = anchoring(bundle, definition.inputs);
@@ -327,7 +379,25 @@ export function verifyBundle(bundle: Bundle): Report {
     implemented = new Map([
       ["4.1", outcomes[0]],
       ["4.2", outcomes[1]],
+      // A failing combination doesn't stop the checks: the pinned version is
+      // one this verifier reads, so the report still shows what the board holds.
+      ...(definition.profile !== undefined ? [["2.3", definition.profile] as const] : []),
+      ...(carriesDestruction(definition.inputs.boardEntryVersion)
+        ? []
+        : [["8.5", NOT_APPLICABLE] as const]),
     ]);
+    // The transcript's bytes are authenticated by the definition's hash of
+    // them, not by the board checks, so they run whatever 4.1 and 4.2 found.
+    if (bundle.format === "abolish-verifier-bundle/4" && definition.definition !== undefined) {
+      const checked = ceremonyChecks(
+        definition.definition,
+        bundle.panel,
+        bundle.entries,
+        definition.inputs.boardEntryVersion,
+      );
+      implemented = new Map([...implemented, ...checked.rows]);
+      ceremony = checked.report;
+    }
   }
   const checks = CHECKS.map((c): CheckResult => ({
     id: c.id,
@@ -342,6 +412,7 @@ export function verifyBundle(bundle: Bundle): Report {
     verdictAgainstInputs,
     inputs: { ...bundle.sources },
     ...(definition.hash !== undefined && { definition: { hash: bytesToHex(definition.hash) } }),
+    ...(ceremony !== undefined && { ceremony }),
     board,
     ...(bundle.format !== "abolish-verifier-bundle/1" && {
       l1: {

@@ -2,6 +2,7 @@ import fc from "fast-check";
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vite-plus/test";
 import {
+  type BoardEntryVersion,
   BOARD_TREE,
   boardEntryHash,
   chainLink,
@@ -121,6 +122,7 @@ describe("receipt vectors (docs/spec/vectors/receipt.json)", () => {
     const got = checkReceiptAtCast(hex(v.receipt), {
       electionId: hex(v.electionId),
       payload: hex(v.payload),
+      boardEntryVersion: 1,
       receiptKeys: v.receiptKeys.map(hex),
       segments: v.segments,
     });
@@ -148,14 +150,21 @@ const KEYS = [identityKey(OPERATOR)];
 
 const ballot = (body: Uint8Array) => new Uint8Array([0x00, 0x02, 0x01, ...body]);
 
-function makeBoard(payloads: readonly Uint8Array[], segments: readonly number[]) {
+function makeBoard(
+  payloads: readonly Uint8Array[],
+  segments: readonly number[],
+  version: BoardEntryVersion,
+) {
   const entries = payloads.map((payload, i) =>
-    encodeBoardEntry({ election_id: E, index: BigInt(i), segment: segments[i] ?? 0, payload }),
+    encodeBoardEntry(
+      { election_id: E, index: BigInt(i), segment: segments[i] ?? 0, payload },
+      version,
+    ),
   );
   const hashes = entries.map(boardEntryHash);
   const links: Uint8Array[] = [];
   for (const h of hashes) links.push(chainLink(links.at(-1) ?? new Uint8Array(32), h));
-  return { entries, hashes, links, segments };
+  return { entries, hashes, links, segments, version };
 }
 
 type Board = ReturnType<typeof makeBoard>;
@@ -174,17 +183,20 @@ function receiptFor(b: Board, i: number): Receipt {
 }
 
 const arbBoard = fc
-  .array(fc.tuple(fc.uint8Array({ maxLength: 24 }), fc.integer({ min: 0, max: 2 })), {
-    minLength: 1,
-    maxLength: 24,
-  })
-  .map((rows) => {
+  .tuple(
+    fc.array(fc.tuple(fc.uint8Array({ maxLength: 24 }), fc.integer({ min: 0, max: 2 })), {
+      minLength: 1,
+      maxLength: 24,
+    }),
+    fc.constantFrom<BoardEntryVersion>(1, 3, 4),
+  )
+  .map(([rows, version]) => {
     // Segment steps of 0 to 2, capped at the clock's last segment, so
     // segments never decrease; each payload is made distinct by its position.
     let s = 0;
     const segments = rows.map(([, step], i) => (i === 0 ? 0 : (s = Math.min(6, s + step))));
     const payloads = rows.map(([body], i) => ballot(new Uint8Array([i, ...body])));
-    return makeBoard(payloads, segments);
+    return makeBoard(payloads, segments, version);
   })
   .chain((b) => fc.tuple(fc.constant(b), fc.nat({ max: b.entries.length - 1 })));
 
@@ -199,10 +211,20 @@ describe("receipt properties", () => {
           const cast = checkReceiptAtCast(encodeReceipt(r), {
             electionId: E,
             payload: ballotOf(b, i),
+            boardEntryVersion: b.version,
             receiptKeys: KEYS,
             segments: { min: s, max: s },
           });
           expect(cast).toEqual({ ok: true, receipt: r });
+          // The same receipt checked under the other board-entry version.
+          const other = checkReceiptAtCast(encodeReceipt(r), {
+            electionId: E,
+            payload: ballotOf(b, i),
+            boardEntryVersion: b.version === 1 ? 3 : 1,
+            receiptKeys: KEYS,
+            segments: { min: s, max: s },
+          });
+          expect(other).toEqual({ ok: false, code: "receipt-entry" });
         }),
         { numRuns },
       );
@@ -222,6 +244,7 @@ describe("receipt properties", () => {
           const got = checkReceiptAtCast(bytes, {
             electionId: E,
             payload: ballotOf(b, i),
+            boardEntryVersion: b.version,
             receiptKeys: KEYS,
             segments: { min: s, max: s },
           });

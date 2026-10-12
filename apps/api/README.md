@@ -8,6 +8,7 @@ Every answer is a claim the caller checks with `@abolishus/crypto`: a definition
 
 | Procedure                   | State                                                                                                                                                             |
 | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `elections.list`            | Election IDs in ascending order, paged by `after`, leaving out delisted and hidden polls (`listPolls` in core; docs/moderation-policy.md).                        |
 | `elections.getDefinition`   | Serves a stored definition (`storeDefinition` in core decodes and checks it first).                                                                               |
 | `board.getHead`             | Size, chain head and tree root. An empty board answers size 0 with zeros.                                                                                         |
 | `board.getEntries`          | Pages of encoded entries, at most `MAX_PAGE_BYTES` unless a page holds one entry.                                                                                 |

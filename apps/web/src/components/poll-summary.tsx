@@ -15,7 +15,7 @@ export interface PollSummaryProps {
 const TIER_LABEL = { 0: "tier0", 1: "tier1", 2: "tier2" } as const satisfies Record<Tier, string>;
 
 /** An instant from the definition, or its raw seconds past what `Date` holds. */
-function When({ instant }: { instant: Instant }) {
+export function When({ instant }: { instant: Instant }) {
   const t = useTranslate(catalogs);
   const { locale } = useI18n();
   if (instant.iso === undefined) return <span className="tabular-nums">{instant.seconds}</span>;

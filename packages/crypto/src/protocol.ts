@@ -11,7 +11,7 @@ import {
   type DisplayTextRule,
   displayTextShapeRule,
 } from "./display-text.ts";
-import { BOARD_ENTRY } from "./board.ts";
+import { BOARD_ENTRY, type BoardEntryVersion, boardPayloadTypes } from "./board.ts";
 import { ds } from "./domain-separation.ts";
 import {
   ELECTION_DEFINITION,
@@ -90,6 +90,43 @@ export function electionStubHash(d: ElectionDefinition): Uint8Array {
 export function pinnedVersion(d: ElectionDefinition, recordType: number): number | undefined {
   const pins = d.profile.pins.filter((p) => p.record_type === recordType);
   return pins.length === 1 ? pins[0]?.version : undefined;
+}
+
+const isBoardEntryVersion = (v: number | undefined): v is BoardEntryVersion =>
+  v !== undefined && Object.hasOwn(BOARD_ENTRY.versions, v);
+
+/** Why 2.3's profile combination refuses a definition's pins. */
+export type ProfileCombinationRule = "profile-combination" | "unsupported-version";
+
+/**
+ * 2.3's `profile-combination` (docs/spec/verifier.md, 2.3), for the verifier
+ * and for any client that must refuse an election bound to fail it
+ * (docs/spec/delivery.md, Versions): ballot version 1 needs a board-entry
+ * version that carries share receipts and complaints (3 or 4), and
+ * tally-opening version 1 one that carries destruction statements (4,
+ * docs/spec/tally.md, Destruction), so an election's creator can't leave
+ * delivery or destruction off the board (T-34). A board-entry version this
+ * package doesn't read is `unsupported-version`, never a failure: a later
+ * version may add itself to the rule (T-36), but a client that must refuse
+ * such an election treats any result but `undefined` as a refusal: it can't
+ * cast to a board it can't read. A ballot or tally-opening type pinned twice
+ * or not at all is `profile-combination` too, and a board-entry type pinned
+ * twice or not at all `unsupported-version`, so in those cases a caller that
+ * skipped `electionDefinitionRule` still refuses (T-34). It doesn't replace
+ * that rule: run it first.
+ */
+export function profileCombinationRule(d: ElectionDefinition): ProfileCombinationRule | undefined {
+  const board = pinnedVersion(d, RECORD_TYPES.boardEntry);
+  if (!isBoardEntryVersion(board)) return "unsupported-version";
+  const ballot = pinnedVersion(d, RECORD_TYPES.ballot);
+  const opening = pinnedVersion(d, RECORD_TYPES.tallyOpening);
+  if (ballot === undefined || opening === undefined) return "profile-combination";
+  const allowed = boardPayloadTypes(board);
+  const carriesDelivery =
+    allowed.includes(RECORD_TYPES.shareReceipt) && allowed.includes(RECORD_TYPES.shareComplaint);
+  const carriesDestruction = allowed.includes(RECORD_TYPES.destructionStatement);
+  const fits = (ballot !== 1 || carriesDelivery) && (opening !== 1 || carriesDestruction);
+  return fits ? undefined : "profile-combination";
 }
 
 export function encodeDisplayText(t: DisplayText): Uint8Array {

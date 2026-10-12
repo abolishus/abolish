@@ -1,4 +1,11 @@
-import { boardEntryHash, chainLink, encodeBoardEntry } from "@abolishus/crypto";
+import {
+  appendSubtrees,
+  BOARD_TREE,
+  boardEntryHash,
+  chainLink,
+  encodeBoardEntry,
+  rootSubtrees,
+} from "@abolishus/crypto";
 import { randomBytes } from "node:crypto";
 import fc from "fast-check";
 import type { Sql } from "postgres";
@@ -44,7 +51,7 @@ async function auditFailure(id: Uint8Array): Promise<[BoardAuditCode, number]> {
  * Appends to `id`'s board through the table directly, as a writer bypassing
  * appendEntry could: the entry hash and link are correct unless overridden,
  * and `prev_link` is always the stored previous link, so the triggers accept
- * the row.
+ * the row. It stores no subtrees; `storeSubtrees` adds them.
  */
 async function appendRaw(
   id: Uint8Array,
@@ -58,9 +65,27 @@ async function appendRaw(
   const prevLink = prev === undefined ? new Uint8Array(32) : Uint8Array.from(prev["link"]);
   const entryHash =
     override.entryHash ??
-    boardEntryHash(encodeBoardEntry({ election_id: id, index: idx, segment, payload }));
+    boardEntryHash(encodeBoardEntry({ election_id: id, index: idx, segment, payload }, 1));
   const link = override.link ?? chainLink(prevLink, entryHash);
   await insertRow(id, idx, segment, payload, entryHash, prevLink, link);
+  return { idx, entryHash };
+}
+
+/**
+ * Stores the subtrees entry `idx` completes, from `leaf` (its stored entry
+ * hash unless overridden) and the stored frontier, as appendEntry would.
+ */
+async function storeSubtrees(id: Uint8Array, idx: bigint, leaf: Uint8Array, level0?: Uint8Array) {
+  const size = Number(idx);
+  const frontier: Uint8Array[] = [];
+  for (const t of size === 0 ? [] : rootSubtrees(size)) {
+    const [row] = await app`SELECT hash FROM board_subtrees
+      WHERE election_id = ${id} AND level = ${t.level} AND idx = ${t.index}`;
+    frontier.push(Uint8Array.from(row?.["hash"]));
+  }
+  for (const t of appendSubtrees(BOARD_TREE, frontier, size, leaf))
+    await app`INSERT INTO board_subtrees (election_id, level, idx, hash)
+      VALUES (${id}, ${t.level}, ${t.index}, ${t.level === 0 ? (level0 ?? t.hash) : t.hash})`;
 }
 
 async function insertRow(
@@ -102,17 +127,41 @@ describe("auditBoard", () => {
   test("passes rows stored without appendEntry when their columns are right", async () => {
     const id = b32();
     await appendEntry(app, id, 0, ballot(0));
-    await appendRaw(id, ballot(1));
-    expect(await auditBoard(app, id)).toBe(2);
+    const { idx, entryHash } = await appendRaw(id, ballot(1));
+    await storeSubtrees(id, idx, entryHash);
+    // appendEntry continues from subtrees stored by hand.
+    await appendEntry(app, id, 0, ballot(2));
+    expect(await auditBoard(app, id)).toBe(3);
   });
 
   test("fails a row whose entry hash isn't its entry's, at that row", async () => {
     const id = b32();
     await appendEntry(app, id, 0, ballot(0));
     await appendEntry(app, id, 0, ballot(1));
-    await appendRaw(id, ballot(2), { entryHash: b32() });
+    const row = await appendRaw(id, ballot(2), { entryHash: b32() });
+    // Subtrees agreeing with the wrong entry hash don't hide it.
+    await storeSubtrees(id, row.idx, row.entryHash);
     await appendEntry(app, id, 0, ballot(3));
     expect(await auditFailure(id)).toEqual(["entry-hash-mismatch", 2]);
+  });
+
+  test("fails an entry stored without its subtrees, at that entry", async () => {
+    const id = b32();
+    await appendEntry(app, id, 0, ballot(0));
+    await appendRaw(id, ballot(1));
+    expect(await auditFailure(id)).toEqual(["subtree-missing", 1]);
+    // And nothing can be appended after it.
+    await expect(appendEntry(app, id, 0, ballot(2))).rejects.toThrow(/subtree/);
+  });
+
+  test("fails a stored subtree that isn't its entries', at the entry that completes it", async () => {
+    const id = b32();
+    await appendEntry(app, id, 0, ballot(0));
+    await appendEntry(app, id, 0, ballot(1));
+    const row = await appendRaw(id, ballot(2));
+    // The leaf is wrong; its parent, (1, 1) at entry 3, is never written.
+    await storeSubtrees(id, row.idx, row.entryHash, b32());
+    expect(await auditFailure(id)).toEqual(["subtree-mismatch", 2]);
   });
 
   test("fails a row whose link isn't chained from its entry hash", async () => {

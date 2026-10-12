@@ -129,6 +129,59 @@ describe("elections.getDefinition", () => {
   });
 });
 
+describe("elections.list (T-68)", () => {
+  /** Every listed election, `limit` at a time, kept to `mine`. */
+  async function listed(mine: string[], limit = "256") {
+    const all: string[] = [];
+    let after: string | undefined;
+    for (;;) {
+      const r = await get("/elections", after === undefined ? { limit } : { after, limit });
+      expect(r.status).toBe(200);
+      const page = (await json(r))["elections"] as string[];
+      all.push(...page);
+      if (page.length < Number(limit)) return all.filter((id) => mine.includes(id));
+      after = page.at(-1);
+    }
+  }
+
+  test("pages through the stored polls in order of election ID", async () => {
+    const mine: string[] = [];
+    for (let i = 0; i < 5; i++) mine.push((await election()).idHex);
+    expect(await listed(mine)).toEqual([...mine].sort());
+    expect(await listed(mine, "2")).toEqual([...mine].sort());
+  });
+
+  test("leaves out delisted and hidden polls, which stay served by ID", async () => {
+    const [shown, delisted, hidden] = [await election(), await election(), await election()];
+    await moderate(app, delisted.id, { action: "delist", reason: "spam", moderator: "mod-1" });
+    await moderate(app, hidden.id, { action: "hide", reason: "illegal", moderator: "mod-1" });
+    expect(await listed([shown.idHex, delisted.idHex, hidden.idHex])).toEqual([shown.idHex]);
+    for (const e of [delisted, hidden])
+      expect((await get("/elections/definition", { electionId: e.idHex })).status).toBe(200);
+    await moderate(app, hidden.id, { action: "restore", reason: "error", moderator: "mod-2" });
+    expect(await listed([shown.idHex, delisted.idHex, hidden.idHex])).toEqual(
+      [shown.idHex, hidden.idHex].sort(),
+    );
+  });
+
+  test("refuses cursors and page sizes outside their bounds, and extra fields", async () => {
+    const e = await election();
+    for (const query of [
+      {},
+      { limit: "0" },
+      { limit: "257" },
+      { limit: "01" },
+      { after: e.idHex.toUpperCase(), limit: "1" },
+      { after: e.idHex.slice(2), limit: "1" },
+      { after: "", limit: "1" },
+      { limit: "1", state: "hidden" },
+    ])
+      expect((await get("/elections", query)).status, JSON.stringify(query)).toBe(400);
+    const r = await get("/elections", { after: "ff".repeat(32), limit: "1" });
+    expect(await json(r)).toEqual({ elections: [] });
+  });
+});
+
 describe("board", () => {
   test("an empty board's head is size 0 with zeros", async () => {
     const e = await election();
@@ -284,6 +337,9 @@ describe("ballots.submit", () => {
     const e = await election();
     expect((await post("/ballots", "{", {})).status).toBe(400);
     expect((await post("/ballots", { electionId: e.idHex, ballot, extra: 1 })).status).toBe(400);
+    // T-31: a repeated key, last one wins in JSON.parse, never reaches a procedure.
+    const twice = `{"electionId":"${e.idHex}","ballot":"${ballot}","ballot":"${ballot}"}`;
+    expect((await post("/ballots", twice)).status).toBe(400);
     expect(
       (await post("/ballots", { electionId: e.idHex, ballot }, { "content-type": "text/plain" }))
         .status,

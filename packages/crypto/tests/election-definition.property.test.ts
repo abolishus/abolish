@@ -20,6 +20,8 @@ import {
   UnsupportedVersionError,
   DEFINITION_V1_LIMITS,
   pinnedVersion,
+  profileCombinationRule,
+  RECORD_TYPES,
 } from "../src/index.ts";
 
 // Properties of the election definition and display-text records
@@ -446,5 +448,91 @@ describe("record types other than the definition", () => {
     }
     expect(caught).toBeInstanceOf(DecodeError);
     expect((caught as DecodeError).code).toBe(code);
+  });
+});
+
+describe("2.3's profile combination", () => {
+  const pinning = (board: number, ballot: number, opening: number): ElectionDefinition => ({
+    ...sampleDefinition,
+    profile: {
+      ...sampleDefinition.profile,
+      pins: sampleDefinition.profile.pins.map((p) => ({
+        ...p,
+        version:
+          p.record_type === RECORD_TYPES.boardEntry
+            ? board
+            : p.record_type === RECORD_TYPES.ballot
+              ? ballot
+              : p.record_type === RECORD_TYPES.tallyOpening
+                ? opening
+                : p.version,
+      })),
+    },
+  });
+
+  // From docs/spec/verifier.md 2.3: ballot version 1 needs board-entry 3 or
+  // 4, tally-opening version 1 needs 4, and a board-entry version this
+  // package doesn't read is unsupported, never a failure (T-36).
+  const expected = (board: number, ballot: number, opening: number) => {
+    if (![1, 3, 4].includes(board)) return "unsupported-version";
+    const carriesDelivery = board === 3 || board === 4;
+    const carriesDestruction = board === 4;
+    const fits = (ballot !== 1 || carriesDelivery) && (opening !== 1 || carriesDestruction);
+    return fits ? undefined : "profile-combination";
+  };
+
+  test("board-entry versions 1 to 6 against ballot and tally-opening versions 1 to 3", () => {
+    for (let board = 1; board <= 6; board++)
+      for (let ballot = 1; ballot <= 3; ballot++)
+        for (let opening = 1; opening <= 3; opening++)
+          expect(profileCombinationRule(pinning(board, ballot, opening))).toBe(
+            expected(board, ballot, opening),
+          );
+  });
+
+  test("the typical profile, all at version 1, fails; with board-entry version 4 it fits", () => {
+    expect(electionDefinitionRule(sampleDefinition)).toBeUndefined();
+    expect(profileCombinationRule(pinning(1, 1, 1))).toBe("profile-combination");
+    expect(profileCombinationRule(pinning(4, 1, 1))).toBeUndefined();
+  });
+
+  test("a definition pinning no board-entry version is unsupported, never a failure", () => {
+    const none = {
+      ...sampleDefinition,
+      profile: {
+        ...sampleDefinition.profile,
+        pins: sampleDefinition.profile.pins.filter(
+          (p) => p.record_type !== RECORD_TYPES.boardEntry,
+        ),
+      },
+    };
+    expect(profileCombinationRule(none)).toBe("unsupported-version");
+  });
+
+  test("a ballot or tally-opening type pinned twice or not at all is refused, never a fit", () => {
+    // electionDefinitionRule refuses these too; a caller that skipped it
+    // must still refuse to cast (T-34).
+    for (const type of [RECORD_TYPES.ballot, RECORD_TYPES.tallyOpening]) {
+      const fitting = pinning(4, 2, 2);
+      const without = {
+        ...fitting,
+        profile: {
+          ...fitting.profile,
+          pins: fitting.profile.pins.filter((p) => p.record_type !== type),
+        },
+      };
+      const twice = {
+        ...fitting,
+        profile: {
+          ...fitting.profile,
+          pins: [...fitting.profile.pins, { record_type: type, version: 2 }],
+        },
+      };
+      expect(profileCombinationRule(fitting)).toBeUndefined();
+      expect(electionDefinitionRule(without)).toBeDefined();
+      expect(profileCombinationRule(without)).toBe("profile-combination");
+      expect(electionDefinitionRule(twice)).toBeDefined();
+      expect(profileCombinationRule(twice)).toBe("profile-combination");
+    }
   });
 });

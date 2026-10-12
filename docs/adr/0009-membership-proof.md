@@ -1,6 +1,6 @@
 # ADR 0009: Membership and nullifier proof
 
-- Status: Accepted (agent) — owner may veto (2026-10-11, rule A): option B
+- Status: Accepted (agent, 2026-10-11): option B; reading confirmed by the owner (2026-10-12)
 - Date: 2026-10-11
 - Deciders: agent, owner may veto (rule A)
 - Threats addressed: T-04, T-05, T-07, T-12, T-13, T-15, T-38 (see [[THREAT_MODEL]])
@@ -82,3 +82,5 @@ What would change it: a published, reviewed proof that bb's zero-knowledge Ultra
 ## Decision
 
 Under rule A (`AGENTS.md`): **option B**, with status `Accepted (agent) — owner may veto`, listed under Decisions to review in [[STATUS]].
+
+On 2026-10-12 the owner confirmed the reading this ADR depends on: verifying Semaphore's Groth16 proofs with the BN254 pairing from the audited `@noble/curves` composes a published protocol; it is not implementing a proof system. The `crypto-review` skill now says so. P1-17b may start.

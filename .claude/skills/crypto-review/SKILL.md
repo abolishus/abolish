@@ -7,7 +7,7 @@ description: Rules and the in-session adversarial review procedure for protocol 
 
 ## Design rules
 
-- Never implement a primitive (curve arithmetic, hash, AEAD, KDF, signature, pairing, proof system). Use `@noble/curves`, `@noble/hashes` and `@noble/ciphers` (audited) in TypeScript; Semaphore and Noir stdlib in circuits; OpenZeppelin or Semaphore contracts in Solidity, only at audited releases.
+- Never implement a primitive (curve arithmetic, hash, AEAD, KDF, signature, pairing, proof system). Use `@noble/curves`, `@noble/hashes` and `@noble/ciphers` (audited) in TypeScript; Semaphore and Noir stdlib in circuits; OpenZeppelin or Semaphore contracts in Solidity, only at audited releases. Verifying a published proof system's proofs (for example Semaphore's Groth16) with `@noble/curves`' audited pairing composes a published protocol and is allowed; implementing the pairing or a new proof system is not (owner, 2026-10-12, ADR 0009).
 - Composing published protocols is expected. Cite the exact source in `docs/spec/`: ElectionGuard spec version and section, Helios/Belenios papers, Benaloh challenge, Chaum–Pedersen, disjunctive Chaum–Pedersen (CDS), the Fiat–Shamir transform with full statement binding, Pedersen/Feldman VSS, Semaphore v4.
 - Every hash use has a unique ASCII domain-separation tag registered in `docs/spec/`, `abolish/v1/<purpose>`.
 - Fiat–Shamir challenges hash the **entire** statement: domain tag, election ID / manifest hash, public key, every commitment, every ciphertext, and context such as the poll ID and the chain ID plus contract address where relevant.
@@ -36,7 +36,7 @@ Spawn a fresh subagent: general-purpose, with no access to your reasoning. Pass 
 Ask it to return findings as severity, file:line, attack, and fix. Then:
 
 1. Fix every blocking finding, or rebut it in writing with an argument a cryptographer would accept.
-2. If you changed code, re-run the subagent on the new diff.
+2. Don't re-run the subagent on your fixes: one in-session round, then mark the PR ready and let CI's `crypto-review` check them. Re-run it only if a fix changed the protocol's design rather than patching code.
 3. Summarise the subagent review (findings and dispositions) in the PR body under "Independent review".
 
 ## Red flags: stop and write an ADR instead

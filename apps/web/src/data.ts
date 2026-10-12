@@ -4,7 +4,7 @@
 import { createServerFn } from "@tanstack/react-start";
 
 import { api } from "./server/api.ts";
-import { loadModerationLog, loadPoll } from "./server/load.ts";
+import { loadModerationLog, loadPoll, loadPollList } from "./server/load.ts";
 import { isCanonicalU64, isElectionId } from "./values.ts";
 
 /**
@@ -35,3 +35,12 @@ export const fetchModerationLog = createServerFn({ method: "GET" })
     return after;
   })
   .handler(({ data }) => opaque(() => loadModerationLog(api(), data)));
+
+export const fetchPollList = createServerFn({ method: "GET" })
+  .inputValidator((after: unknown) => {
+    // `""` starts the list; `undefined` is refused, so a call must say where it starts.
+    if (after !== "" && !isElectionId(after))
+      throw new TypeError("expected an election ID or an empty string");
+    return after;
+  })
+  .handler(({ data }) => opaque(() => loadPollList(api(), data)));

@@ -1,6 +1,6 @@
 # ADR 0006: Trustees, k-of-n and named trustees
 
-- Status: needs-decision (owner decides; never defaulted)
+- Status: structure decided by the owner (2026-10-12): option B (4-of-7) with rule 7 (an election opens only with at least n − 1 = 6 trustees); names pending
 - Date: 2026-10-09
 - Deciders: owner (one-way door)
 - Threats addressed: T-14, T-54, T-37, T-40, T-61, T-16, T-69, T-15, T-29; worsens T-11 (see [[THREAT_MODEL]])
@@ -96,7 +96,7 @@ What would change the recommendation:
 
 - **Names.** The owner fills in the panel below (name, jurisdiction, hosting provider, contact for key verification). No agent picks or contacts trustees.
 - **Development (P1-14, P1-20, P1-21).** The test ceremony uses seven simulated trustees with k = 4 by default, and simulations take k and n as parameters, including the brief's "two offline" run. Nothing simulated is ever registered on a mainnet contract.
-- **Trustee node (new work).** A trustee node is a separate deployable (an app, or a mode of `apps/node`) that each trustee runs. It enforces the "one aggregate per disjoint partition over the anchored counted set" rule in code, checks the counted set against the L1 anchor before releasing any share, and refuses to release a share for any partition the spec doesn't require that falls below the minimum size the election definition sets, because an aggregate over one or two ballots is those ballots (T-16). Per-tier results are required by the brief, so a node never withholds a tier on its own. **Owner question:** whether a tier below the floor may be withheld or merged; until the owner says so, every tier is decrypted and small tiers carry T-16's warning. These rules bind honest nodes only: a trustee can change its own node, and k trustees together can decrypt anything. A STATUS item for it is added once the owner decides.
+- **Trustee node (new work).** A trustee node is a separate deployable (an app, or a mode of `apps/node`) that each trustee runs. It enforces the "one aggregate per disjoint partition over the anchored counted set" rule in code, checks the counted set against the L1 anchor before releasing any share, and refuses to release a share for any partition the spec doesn't require that falls below the minimum size the election definition sets, because an aggregate over one or two ballots is those ballots (T-16). Per-tier results are required by the brief, so a node never withholds a tier on its own. A tier below the floor is never withheld or merged: it is decrypted with T-16's warning, and only regions within a tier are merged (Owner decision, Small cells). These rules bind honest nodes only: a trustee can change its own node, and k trustees together can decrypt anything. A STATUS item for it is added once the owner decides.
 - **Election definitions (P1-8, P1-18).** Each election definition binds its panel: trustee keys, k, n and the panel's identifier. The verifier reports which panel held the key and whether rule 3's seat took part.
 - **Rotation.** Proactive resharing (changing the panel without a new key) is out of scope; a panel change means a new ceremony for future elections.
 - **Known-weak:**
@@ -105,6 +105,7 @@ What would change the recommendation:
   - T-37: under per-election keys, each trustee's key check is done by its node software, so it is only as good as rule 6.
   - T-54: if more than n − k trustees disappear after close, the tally of every open election is lost. There is no recovery by design. A trustee absent at an election's ceremony is out of that election's panel, so with one absent at open, 4-of-6 tolerates only two more failures.
   - T-69: a jurisdiction rule counts legal seats, not influence. A state can pressure a trustee abroad, and blocs other than the ones counted can cooperate.
+  - T-25, T-69 (added after the owner's 2026-10-12 decision, for the owner to confirm): under rule 7 any two seats can stop elections from opening, by staying away from the ceremony or refusing to sign its registration. Rule 1 lets one state hold `k − 1` seats and rule 2 one provider `k − 1` nodes, so a single state or provider can block, and a node can do it selectively for polls it dislikes while looking like an outage. Without rule 7 blocking needed `n − k + 1` seats, which is more than any one state or provider may hold when `n ≥ 2k − 1` (4 seats for 4-of-7). A refusal shows only as absence.
   - The rules can't be checked by contract or verifier; they are checked by the owner when the panel is chosen, and published so others can check them.
 
 ## Panel (owner to fill in)
@@ -112,6 +113,14 @@ What would change the recommendation:
 | Seat | Trustee | Jurisdiction | Node hosting | Key verification contact |
 | ---- | ------- | ------------ | ------------ | ------------------------ |
 | 1    |         |              |              |                          |
+
+## Owner decision (2026-10-12)
+
+- **Structure:** option B, one 4-of-7 panel of trustee nodes, under rules 1 to 7. Option C's civic panel is revisited before Phase 5.
+- **Rule 7 adopted:** an election opens only when at least n − 1 = 6 trustees take part in its ceremony. Contracts' registration quorum for a pinned panel is therefore `q = n − 1`, not `q = k`.
+- **Names:** pending; the owner is recruiting. No agent picks or contacts trustees.
+- **Tier 2 attestation (2026-10-12, [[0010-tier2-identity-provider]]):** trustees also attest Tier 2 additions: a threshold checks each passport proof and its nullifier's uniqueness off the board and signs the addition. Attesters see each nullifier next to its identity commitment (T-13). The role description and the invitation say so.
+- **Small cells (2026-10-12):** merge regions, never tiers, and never withhold. Each tier is always opened in its own cell, and a tier below the floor is opened with T-16's warning: merging tiers would mix their Sybil resistance (T-01, T-29, T-36; verifier 2.8's "each cell is exactly one tier" stays), and withholding drops a per-tier result the brief requires. Within a tier, a region whose registered electorate is below the protocol-wide floor in [[parameters]] is folded into one remainder cell for that tier; if the remainder is also below the floor, the tier isn't split into regions. Which regions are folded is decided by the creator from the electorate registered in the definition, before voting opens, never from turnout or counted ballots, and the definition names them so results can say so. Trustee nodes still never release a share for a cell below the floor. [[P1-15]] part 4 builds it.
 
 ## Default
 

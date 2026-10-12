@@ -1,8 +1,8 @@
 # Moderation policy
 
-How we moderate user-created polls, and the limits we hold ourselves to. The brief requires this policy and its tooling before Phase 2 goes public, and fixes its one rule: **moderation acts on poll content, never on results** ([[PROJECT_BRIEF]]). Threats: T-68 (moderation abuse), T-17 (personal data in poll text), T-10 (accounts and ballots never join), T-52 (spam). Tooling: `packages/core` (`moderate`, `moderationStatus`, `readModerationLog`, `report`, `readReportQueue`, `reviewReports`; P2-10) and the public API (`GET /moderation/log`, `GET /moderation/status`, `POST /moderation/reports`).
+How we moderate user-created polls, and the limits we hold ourselves to. The brief requires this policy and its tooling before Phase 2 goes public, and fixes its one rule: **moderation acts on poll content, never on results** ([[PROJECT_BRIEF]]). Threats: T-68 (moderation abuse), T-17 (personal data in poll text), T-10 (accounts and ballots never join), T-52 (spam). Tooling: `packages/core` (`moderate`, `moderationStatus`, `readModerationLog`, `listPolls`, `report`, `readReportQueue`, `reviewReports`; P2-10), the public API (`GET /elections`, the listing, which leaves out delisted and hidden polls; `GET /moderation/log`, `GET /moderation/status`, `POST /moderation/reports`) and the operator's commands in `apps/admin-cli` (`moderation queue`, `review`, `decide`, `status`, `log`).
 
-Status: written by the agent under rule A (P2-10 part 1). The parts that are legal matters are the owner's and are marked **Owner** below; until the owner answers them, they say what we do in the meantime.
+Status: written by the agent under rule A (P2-10 part 1); Open polls narrowed by the owner's decision of 2026-10-12 (P2-10 part 5). The parts that are legal matters are the owner's and are marked **Owner** below; until the owner answers them, they say what we do in the meantime.
 
 ## What moderation can and can't touch
 
@@ -13,19 +13,32 @@ A poll has two kinds of data ([[display-text]]):
 
 ## Actions
 
-| Action    | What our front ends do                                                                                                                                                                       |
-| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `delist`  | The poll leaves discovery, search and recommendations. Anyone with its link still sees the text, can vote and sees the result.                                                               |
-| `hide`    | As `delist`, and the display text is withheld: the poll page shows a notice naming the reason code instead, and the result is shown by option number ("Option 3: 1,204"). We unpin the text. |
-| `restore` | Back to listed, text shown.                                                                                                                                                                  |
+| Action    | What our front ends do                                                                                                                                                                                                               |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `delist`  | The poll leaves discovery, search and recommendations. Anyone with its link still sees the text, can vote and sees the result.                                                                                                       |
+| `hide`    | As `delist`, and the display text is withheld: the poll page shows a notice naming the reason code instead, and the result is shown by option number ("Option 3: 1,204"). We unpin the text, except as Open polls says for `threat`. |
+| `restore` | Back to listed, text shown.                                                                                                                                                                                                          |
 
 An election's state is its newest decision (`visible`, `delisted` or `hidden`). A decision that neither changes the state nor cites a new reason is refused.
 
 Use the least restrictive action that addresses the harm: delist unless showing the text itself does harm (personal data, a threat, illegal content, a scam link).
 
-Hiding an open poll's text means our ballot client can't show the question, and the ballot client must refuse to show a ballot whose text it can't check against the definition ([[display-text]], Checks). So hiding an open poll stops voting through our client until it is restored. Because that comes close to suppressing a poll, a poll is hidden before it closes (until `closes_at` plus `l1_inclusion_bound`, while ballots can still land) only for `illegal`, `personal-data` or `threat`, and delisted otherwise. The tooling refuses any other hide of an open poll (`open-poll`). Voting itself stays possible: anyone holding a copy of the text can check it against the commitment, and the direct-submit path doesn't go through us (G-10). Even so, an open-poll hide can lower turnout through our client, and so can change an outcome, on a reason code nobody outside can check; a compelled operator (A-1) could misuse `threat` this way. That is the one place moderation reaches a result, indirectly, and it is listed for the owner under Decisions to review in [[STATUS]]. A later part may narrow it, for example by letting the ballot client keep showing a `threat`-hidden poll's committed text from IPFS while our web pages withhold it.
-
 What moderation can't do: copies of display text that others pinned on IPFS stay where they are, and community nodes (`apps/node`) decide for themselves whether to follow our log (T-17 residual, T-68 residual). We publish the log so they can.
+
+## Open polls
+
+A poll is open from when it is registered until `closes_at` plus `l1_inclusion_bound`, while ballots can still land. Our ballot client must refuse to show a ballot whose text it can't check against the definition ([[display-text]], Checks), so withholding an open poll's text from it stops voting through our client. Because that comes close to suppressing a poll, an open poll is hidden only for `illegal`, `personal-data` or `threat`, and delisted otherwise; the tooling refuses any other hide of an open poll (`open-poll`).
+
+Of those three, only `illegal` and `personal-data` stop voting through our client. The owner decided on 2026-10-12 that a `threat` hide must not ([[STATUS]], Decisions to review). Our reading of why: a threat shown to someone who has chosen to vote on that poll does far less harm than one broadcast through discovery and our pages, and `threat` is the code a compelled operator (A-1) could most easily stretch over political speech. So, while a poll is open:
+
+- **`threat`.** Our web pages withhold the text as for any hide. Our ballot client keeps showing the committed text: it fetches the display-text record from IPFS, checks it against the definition as it always does, and shows it under a notice that the text was hidden on our pages as a threat. We keep the text pinned until the poll closes, so the client can fetch it, and unpin it then.
+- **`illegal` and `personal-data`.** Our ballot client withholds the text, as our web pages do, shows the notice, and points to the direct-submit path. We unpin the text at once. Here showing the text is itself the harm (hosting illegal content; exposing a private person), so the trade-off stays: voting through our client stops until the poll is restored.
+- **The newest decision decides.** A `threat`-hidden poll re-cited under `personal-data` is withheld from the ballot client from then on, and the re-citation is in the public log like any decision.
+- **The ballot client reads the state from `GET /moderation/status`.** If it can't get an answer it treats the poll as visible: a moderation outage, or someone blocking that route, must not stop voting. The text it can show is then whatever it can fetch from IPFS and check, and the text of an `illegal` or `personal-data` hide is no longer pinned by us.
+
+Once a poll has closed, voting is over and a `threat` hide withholds the text everywhere, our ballot client included, like any other hide.
+
+Voting itself always stays possible: anyone holding a copy of the text can check it against the commitment, and the direct-submit path doesn't go through us (G-10). Even so, an open-poll hide for `illegal` or `personal-data` lowers turnout through our client, and so can change an outcome, on a reason code nobody outside can check; a compelled operator (A-1) could misuse either. That is the one place moderation still reaches a result, indirectly, and it is listed for the owner under Decisions to review in [[STATUS]].
 
 ## Reasons
 
@@ -82,8 +95,10 @@ Until then, content that appears illegal is hidden with `illegal` and escalated 
 
 - The log lives in Postgres. A wipe loses it, and every poll goes back to visible; an insider can withhold rows from what we serve. Neither changes a result (T-68 residual).
 - Hidden display text survives in copies others pinned, and in the hands of anyone who downloaded it (T-17 residual).
-- Hiding an open poll stops voting through our client; voters then need the text from elsewhere, or the direct-submit path.
-- Appeals, the moderators' own tooling, and the front-end behaviour above are later parts (P2-9, P2-8). Until the tooling exists, a moderator acts through `packages/core` directly.
+- Hiding an open poll for `illegal` or `personal-data` stops voting through our client; voters then need the text from elsewhere, or the direct-submit path. A `threat` hide doesn't (Open polls).
+- While a poll is open, the text of a `threat` hide stays pinned by us and shown in our ballot client, so anyone can read it there; our web pages only stop broadcasting it.
+- If the ballot client can't read a poll's state it shows whatever text it can fetch and check, so during an outage of `GET /moderation/status` it can show the text of an `illegal` or `personal-data` hide that someone else still pins.
+- Appeals and the front-end behaviour above are later parts (P2-9, P2-8), and keeping a `threat`-hidden open poll's text pinned until it closes is the pinning job's (P4-3). The moderators' tooling is a command line for the operator (`apps/admin-cli`), the only moderator until the owner names others; it can't check that a moderator has no stake in the poll they decide on, since nothing records who created a poll yet.
 - Anyone can report any poll as often as the proxy lets them, so the pending counts can be inflated; volume is never a ground, and the queue is ordered by how long reports have waited, not by count. A poll's reports can't be withdrawn, and the app role can't delete them.
 - A report can be timed by an insider (counters read repeatedly, the write-ahead log, backups) and matched to an address in proxy or platform logs (T-11).
 

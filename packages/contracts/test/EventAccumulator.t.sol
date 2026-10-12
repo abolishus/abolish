@@ -6,11 +6,12 @@ import {AccumulatorHarness, AccumulatorLibHarness} from "./utils/AccumulatorHarn
 import {TestBase, Vm} from "./utils/Vm.sol";
 
 /// The event accumulator of docs/spec/contracts.md (T-71, T-25). The library
-/// is checked against docs/spec/vectors/event-accumulator.json, which an
+/// is checked against docs/spec/vectors/event-accumulator-2.json, which an
 /// independent Python implementation produced; the contract is checked
-/// against the library and against the logs it actually emits.
+/// against the library and against the logs it actually emits, each in its
+/// own block (docs/adr/0025-contract-event-evidence.md).
 contract EventAccumulatorTest is TestBase {
-    string internal constant VECTORS = "../../docs/spec/vectors/event-accumulator.json";
+    string internal constant VECTORS = "../../docs/spec/vectors/event-accumulator-2.json";
 
     AccumulatorHarness internal harness;
     AccumulatorLibHarness internal lib;
@@ -27,7 +28,7 @@ contract EventAccumulatorTest is TestBase {
     function test_VectorFileFormat() public view {
         assertTrue(
             keccak256(bytes(vm.parseJsonString(json, ".format")))
-                == keccak256("abolish-event-accumulator-vectors/1"),
+                == keccak256("abolish-event-accumulator-vectors/2"),
             "unknown vector format"
         );
         assertTrue(
@@ -63,7 +64,14 @@ contract EventAccumulatorTest is TestBase {
             uint256 n;
             for (; vm.keyExistsJson(json, _key(string.concat(seq, ".events"), n, "")); n++) {
                 string memory ev = _key(string.concat(seq, ".events"), n, "");
-                acc = lib.step(acc, uint64(n), _topics(ev), _bytes(string.concat(ev, ".data")));
+                acc = lib.step(
+                    acc,
+                    uint64(n),
+                    vm.parseUint(_str(string.concat(ev, ".block"))),
+                    vm.parseUint(_str(string.concat(ev, ".timestamp"))),
+                    _topics(ev),
+                    _bytes(string.concat(ev, ".data"))
+                );
                 assertEq(
                     acc, _bytes32(_key(string.concat(seq, ".accumulators"), n, "")), "sequence step"
                 );
@@ -99,10 +107,26 @@ contract EventAccumulatorTest is TestBase {
             // call under test would consume the expectation.
             bytes32[] memory topics = _topics(r);
             bytes memory data = _bytes(string.concat(r, ".data"));
-            vm.expectRevert(
-                abi.encodeWithSelector(EventAccumulatorLib.TopicCount.selector, topics.length)
-            );
-            lib.step(bytes32(0), 0, topics, data);
+            uint256 blockNumber = vm.parseUint(_str(string.concat(r, ".block")));
+            uint256 timestamp = vm.parseUint(_str(string.concat(r, ".timestamp")));
+            if (blockNumber > type(uint64).max) {
+                vm.expectRevert(
+                    abi.encodeWithSelector(
+                        EventAccumulatorLib.BlockNumberTooLarge.selector, blockNumber
+                    )
+                );
+            } else if (timestamp > type(uint64).max) {
+                vm.expectRevert(
+                    abi.encodeWithSelector(
+                        EventAccumulatorLib.TimestampTooLarge.selector, timestamp
+                    )
+                );
+            } else {
+                vm.expectRevert(
+                    abi.encodeWithSelector(EventAccumulatorLib.TopicCount.selector, topics.length)
+                );
+            }
+            lib.step(bytes32(0), 0, blockNumber, timestamp, topics, data);
         }
         assertTrue(i > 0, "no rejected vectors");
     }
@@ -151,9 +175,45 @@ contract EventAccumulatorTest is TestBase {
         bytes32 acc = lib.genesis(uint64(block.chainid), address(harness));
         for (uint256 i; i < logs.length; i++) {
             assertTrue(logs[i].emitter == address(harness), "emitter");
-            acc = lib.step(acc, uint64(i), logs[i].topics, logs[i].data);
+            acc = lib.step(
+                acc, uint64(i), block.number, block.timestamp, logs[i].topics, logs[i].data
+            );
         }
         _assertStored(harness, acc, logs.length);
+    }
+
+    /// Each step binds the block and time of the call that emitted it, so the
+    /// same log in another block or at another time gives another value.
+    function testFuzz_StepBindsEmittingBlock(uint32 blockGap, uint32 timeGap) public {
+        bytes32[] memory topics = new bytes32[](1);
+        topics[0] = keccak256("Ping()");
+        bytes32 acc = lib.genesis(uint64(block.chainid), address(harness));
+        harness.emitLog(topics, "");
+        acc = lib.step(acc, 0, block.number, block.timestamp, topics, "");
+        uint256 b = block.number + uint256(blockGap) + 1;
+        uint256 t = block.timestamp + uint256(timeGap);
+        vm.roll(b);
+        vm.warp(t);
+        harness.emitLog(topics, "");
+        bytes32 expected = lib.step(acc, 1, b, t, topics, "");
+        _assertStored(harness, expected, 2);
+        assertTrue(expected != lib.step(acc, 1, b - 1, t, topics, ""), "block not bound");
+        assertTrue(expected != lib.step(acc, 1, b, t + 1, topics, ""), "timestamp not bound");
+    }
+
+    function test_BlockAndTimestampAboveU64Revert() public {
+        bytes32[] memory topics = new bytes32[](1);
+        topics[0] = keccak256("Ping()");
+        uint256 big = uint256(type(uint64).max) + 1;
+        vm.roll(big);
+        vm.expectRevert(
+            abi.encodeWithSelector(EventAccumulatorLib.BlockNumberTooLarge.selector, big)
+        );
+        harness.emitLog(topics, "");
+        vm.roll(1);
+        vm.warp(big);
+        vm.expectRevert(abi.encodeWithSelector(EventAccumulatorLib.TimestampTooLarge.selector, big));
+        harness.emitLog(topics, "");
     }
 
     function test_TypedEventIsAbiDecodable() public {

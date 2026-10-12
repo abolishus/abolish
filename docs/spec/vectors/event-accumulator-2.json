@@ -1,0 +1,1205 @@
+{
+  "format": "abolish-event-accumulator-vectors/2",
+  "title": "Event accumulator binding each log's block: genesis, steps, proof checks and rejected inputs",
+  "spec": "docs/spec/contracts.md",
+  "generator": "packages/crypto/scripts/event-accumulator-2-vectors.py: an independent Python implementation of docs/spec/contracts.md (Event accumulator) using hashlib only, sharing no code with packages/crypto or packages/contracts. Topic values are deterministic stand-ins (SHA-256 of a label), not real event signature hashes: the accumulator treats topics as opaque bytes.",
+  "tag": "abolish/v1/event-accumulator-2",
+  "genesis": [
+    {
+      "id": "zero",
+      "description": "Chain ID 0 and the zero address",
+      "chainId": "0",
+      "address": "0000000000000000000000000000000000000000",
+      "accumulator": "5b6c6a81a7b0ff34f5b0ebaf873aeab24adb5a60e8d0cebff497517d41465882"
+    },
+    {
+      "id": "base-sepolia",
+      "description": "Base Sepolia, an Anvil-style first deployment address",
+      "chainId": "84532",
+      "address": "5fbdb2315678afecb367f032d93f642f64180aa3",
+      "accumulator": "4efd36778f8ee4f3375788ccdf9d82af964e98f108d70dc8ba80592115c4bfea"
+    },
+    {
+      "id": "anvil",
+      "description": "Anvil's default chain ID, same address",
+      "chainId": "31337",
+      "address": "5fbdb2315678afecb367f032d93f642f64180aa3",
+      "accumulator": "7ae4196e6c17651441e1631af3f9ece66921bd96a878dd8cfe3ba198b9e2d2a6"
+    },
+    {
+      "id": "max-chain-id",
+      "description": "The largest chain ID with a u64 encoding",
+      "chainId": "18446744073709551615",
+      "address": "ffffffffffffffffffffffffffffffffffffffff",
+      "accumulator": "9f21e8d37463fb536f4afe3600e9c0e387815bfe1a59642f7056855e148dafc4"
+    }
+  ],
+  "sequences": [
+    {
+      "id": "one-topic-empty-data",
+      "description": "One log with only topic 0 and no data",
+      "chainId": "84532",
+      "address": "5fbdb2315678afecb367f032d93f642f64180aa3",
+      "genesis": "4efd36778f8ee4f3375788ccdf9d82af964e98f108d70dc8ba80592115c4bfea",
+      "events": [
+        {
+          "block": "1",
+          "timestamp": "1760000000",
+          "topics": ["5c18b5afab74db2b794b16733ec4e03e096be8e134806caecfa149000c2d0bd4"],
+          "data": ""
+        }
+      ],
+      "accumulators": ["12bc171a0cb37c8dab22bae0aad498e520083d8e00c949fdb447d5dab95a2875"]
+    },
+    {
+      "id": "every-topic-count",
+      "description": "Logs with 1, 2, 3 and 4 topics, then 1 again, two of them in one block",
+      "chainId": "84532",
+      "address": "5fbdb2315678afecb367f032d93f642f64180aa3",
+      "genesis": "4efd36778f8ee4f3375788ccdf9d82af964e98f108d70dc8ba80592115c4bfea",
+      "events": [
+        {
+          "block": "100",
+          "timestamp": "1760000000",
+          "topics": ["2701b4acb79b9e492edfd702f1e5eb0ea070a1de6b05845055e36ff39b83587a"],
+          "data": "314ba75571622cc42f641480fa5cfd0e31ce09f44968788a30ebd63bc09cd88a"
+        },
+        {
+          "block": "100",
+          "timestamp": "1760000000",
+          "topics": [
+            "72b4e1a22c326d772127ce653e753c308a21c2ff96970f259d527ce6b73af9b9",
+            "4aa0000c26bfe37fd1317113382faf060415737e73ca1093b7211413ffbcc7e3"
+          ],
+          "data": "4247ed3fd22fb165d6cb4b40d982ae59d6efddb5ec300e7ea6524d8db6ebbd2b"
+        },
+        {
+          "block": "101",
+          "timestamp": "1760000002",
+          "topics": [
+            "ddb33e845d467749d7a748ef8f8b4236c264792d89f4fe22b907d1571484ed21",
+            "f1836439832f60fe6249eef46c7fbf224c1b9f73e5cf210e90ffda3c5f80c75a",
+            "323bab0ddee868a17926ad1d9e0c8acf4ab2c526370e7f95e76891ee2627c977"
+          ],
+          "data": "5588da44ea7bd595ba9ea2ee8e2c60227f4bb7f9ab845341ac92287f296642e19575e7632204e3c2bc38f3f7424cc72957df4877dbd1ccc36b22ac5acc6f2f474c3ffe1e8f93ac2410f16379c01f96e83a52d0b1a30818f37fc9001b0d32565d"
+        },
+        {
+          "block": "250",
+          "timestamp": "1760000300",
+          "topics": [
+            "4b107d79a039980aca79e37d6fd2e016a5699c39a21da1dd050674eae3e5d3c9",
+            "2be1d478fb3241661ee62163ef102a600443ebae0093afe160ab4501b116ef6d",
+            "70734081aacfa41b6e5ba855d7a5091d1f9fe1bd87b7bf2edd567d35092fc32a",
+            "fa466e5aae36e4e601692ba3f276d588a2577533def2ef3e67a9c8fe8219f209"
+          ],
+          "data": ""
+        },
+        {
+          "block": "251",
+          "timestamp": "1760000302",
+          "topics": ["2701b4acb79b9e492edfd702f1e5eb0ea070a1de6b05845055e36ff39b83587a"],
+          "data": "8321f98a7cf13c22c3c17f1da966dd7d7dd7a9e2b63c4ea90df3f7474876abbc"
+        }
+      ],
+      "accumulators": [
+        "02f6ce6f2779449593b91ea30a1e8a55a8228c8e2e8fdc0b649099031722fbf8",
+        "58c26033743d4ad99605e2466e399364969736600392461dac10be43cc6dc561",
+        "94d3dab5b4f00dca9829bfce7e2593638d5130ac646700f11bd9b3d0d9001e76",
+        "eaaae88638167910165d6d06bd64438ff8d42fc79c118e5aa32b58fe69716541",
+        "0efdc0dde60239c5c2239f457c3e3131418236d09732ffa3b872261b1370b1fd"
+      ]
+    },
+    {
+      "id": "odd-data-lengths",
+      "description": "Data lengths that aren't a multiple of 32, including 1 and 33 bytes",
+      "chainId": "31337",
+      "address": "5fbdb2315678afecb367f032d93f642f64180aa3",
+      "genesis": "7ae4196e6c17651441e1631af3f9ece66921bd96a878dd8cfe3ba198b9e2d2a6",
+      "events": [
+        {
+          "block": "7",
+          "timestamp": "1760000000",
+          "topics": ["133142a07da881e216e088b1a95e87c13b5b0d5767a30c4ce33b09e071dc81df"],
+          "data": "c5"
+        },
+        {
+          "block": "8",
+          "timestamp": "1760000001",
+          "topics": ["133142a07da881e216e088b1a95e87c13b5b0d5767a30c4ce33b09e071dc81df"],
+          "data": "6420a0cd3ee5b88b099486ca3bdcf34554c92c40745919e5ae78b0c174cab707d1"
+        },
+        {
+          "block": "9",
+          "timestamp": "1760000002",
+          "topics": ["133142a07da881e216e088b1a95e87c13b5b0d5767a30c4ce33b09e071dc81df"],
+          "data": "4ddf58a67dd9112041db1d410f034a09e83cdb9de39571ab2b9dbac1938e67da1fde984839e5bc5216578cc18b1811a63c033312d40f4472fb7c52c1f1b564fe85882817a996dad073eb470bcf625d14be823c618c11906a2bdcb099f6572eb3f03db946b0d0e45e229e5f989d30e95599b7f9e78bfd583c8f4c71286d5690d7c86ae178ca73efc4e5cb05f813162103b3978de5ce5306c5d0fb21d415e207e16572058fbd4bcdab981bc846849f1b63873efd5570bed729be0b5bf48ccda7109422f1cbf6056486dddd366abe97bf686fc60af6ac3368d4122f9fb7054b07ae7b88680d9178441d906df0bc0032a491ea9da3b31bd91e9b2bf7e26b707aaa3428afa87574a97094f43fe67c6fa87c46b310df6bdb3eec7ae974bc3bdf93d0633058d6c1cbfdd4474458781c"
+        }
+      ],
+      "accumulators": [
+        "4984725384e4db4cb99e95457cb4ee85fb221c1e4ed8fac4418a6a4145797ad9",
+        "929a295429f45fef766a913647da14ebe78c0ad3d37a159b4daf49627aaba345",
+        "a0869a678cd071ed5417594eb4a5ac3047769dc6330348041fe2a61334ee5a11"
+      ]
+    },
+    {
+      "id": "same-log-twice",
+      "description": "The same log twice in one block gives two different accumulators: the index changes",
+      "chainId": "84532",
+      "address": "5fbdb2315678afecb367f032d93f642f64180aa3",
+      "genesis": "4efd36778f8ee4f3375788ccdf9d82af964e98f108d70dc8ba80592115c4bfea",
+      "events": [
+        {
+          "block": "5",
+          "timestamp": "1760000000",
+          "topics": ["5c18b5afab74db2b794b16733ec4e03e096be8e134806caecfa149000c2d0bd4"],
+          "data": ""
+        },
+        {
+          "block": "5",
+          "timestamp": "1760000000",
+          "topics": ["5c18b5afab74db2b794b16733ec4e03e096be8e134806caecfa149000c2d0bd4"],
+          "data": ""
+        }
+      ],
+      "accumulators": [
+        "eb47d52c238e00f477585b4b2dd05d50e873f4bcb890a81024f40e7213299cc3",
+        "4a38b4270375b1831d355954e7efbc46c4a8d8a972898f223665d651fc3a8b33"
+      ]
+    },
+    {
+      "id": "same-log-other-block",
+      "description": "The one-topic-empty-data log in another block: the block number alone changes the accumulator",
+      "chainId": "84532",
+      "address": "5fbdb2315678afecb367f032d93f642f64180aa3",
+      "genesis": "4efd36778f8ee4f3375788ccdf9d82af964e98f108d70dc8ba80592115c4bfea",
+      "events": [
+        {
+          "block": "2",
+          "timestamp": "1760000000",
+          "topics": ["5c18b5afab74db2b794b16733ec4e03e096be8e134806caecfa149000c2d0bd4"],
+          "data": ""
+        }
+      ],
+      "accumulators": ["e9f9392a7e2edd44f21412ab17107ab441308a74821562081e0a99f64a0ffe75"]
+    },
+    {
+      "id": "same-log-other-timestamp",
+      "description": "The one-topic-empty-data log at another timestamp: the timestamp alone changes the accumulator",
+      "chainId": "84532",
+      "address": "5fbdb2315678afecb367f032d93f642f64180aa3",
+      "genesis": "4efd36778f8ee4f3375788ccdf9d82af964e98f108d70dc8ba80592115c4bfea",
+      "events": [
+        {
+          "block": "1",
+          "timestamp": "1760000001",
+          "topics": ["5c18b5afab74db2b794b16733ec4e03e096be8e134806caecfa149000c2d0bd4"],
+          "data": ""
+        }
+      ],
+      "accumulators": ["ad865df0f7c2244352550cf2862d5d06aacd065db6464dd4656d78daf4833bb3"]
+    },
+    {
+      "id": "max-block-and-timestamp",
+      "description": "The largest block number and timestamp with a u64 encoding",
+      "chainId": "84532",
+      "address": "5fbdb2315678afecb367f032d93f642f64180aa3",
+      "genesis": "4efd36778f8ee4f3375788ccdf9d82af964e98f108d70dc8ba80592115c4bfea",
+      "events": [
+        {
+          "block": "18446744073709551615",
+          "timestamp": "18446744073709551615",
+          "topics": ["5c18b5afab74db2b794b16733ec4e03e096be8e134806caecfa149000c2d0bd4"],
+          "data": ""
+        }
+      ],
+      "accumulators": ["f0215e1bbd3bcaf4c619db03481b2c3e5c158ba4bd344053462086d1946ab397"]
+    },
+    {
+      "id": "other-address",
+      "description": "The first every-topic-count logs from another address on the same chain, so every value differs",
+      "chainId": "84532",
+      "address": "e7f1725e7734ce288f8367e1bb143e90bb3f0512",
+      "genesis": "099f159c27455bfe6e950f1d37bc7bd059c839abf5b3e9dd7fe07a35d95ccbdb",
+      "events": [
+        {
+          "block": "100",
+          "timestamp": "1760000000",
+          "topics": ["2701b4acb79b9e492edfd702f1e5eb0ea070a1de6b05845055e36ff39b83587a"],
+          "data": "314ba75571622cc42f641480fa5cfd0e31ce09f44968788a30ebd63bc09cd88a"
+        },
+        {
+          "block": "100",
+          "timestamp": "1760000000",
+          "topics": [
+            "72b4e1a22c326d772127ce653e753c308a21c2ff96970f259d527ce6b73af9b9",
+            "4aa0000c26bfe37fd1317113382faf060415737e73ca1093b7211413ffbcc7e3"
+          ],
+          "data": "4247ed3fd22fb165d6cb4b40d982ae59d6efddb5ec300e7ea6524d8db6ebbd2b"
+        }
+      ],
+      "accumulators": [
+        "2d19fdee247fb8b5afa07babf6f9e9a4999c52244cc4e694503c400537e61626",
+        "e13bc403a877f34254f4f0f4b812ce24d9bc59a4a426bc94bc46979da8af4b4d"
+      ]
+    }
+  ],
+  "proofs": [
+    {
+      "id": "whole-at-last-block",
+      "description": "The whole archive against a proof at its last block",
+      "chainId": "84532",
+      "address": "5fbdb2315678afecb367f032d93f642f64180aa3",
+      "events": [
+        {
+          "n": "0",
+          "block": "100",
+          "timestamp": "1760000000",
+          "topics": ["2701b4acb79b9e492edfd702f1e5eb0ea070a1de6b05845055e36ff39b83587a"],
+          "data": "314ba75571622cc42f641480fa5cfd0e31ce09f44968788a30ebd63bc09cd88a"
+        },
+        {
+          "n": "1",
+          "block": "100",
+          "timestamp": "1760000000",
+          "topics": [
+            "72b4e1a22c326d772127ce653e753c308a21c2ff96970f259d527ce6b73af9b9",
+            "4aa0000c26bfe37fd1317113382faf060415737e73ca1093b7211413ffbcc7e3"
+          ],
+          "data": "4247ed3fd22fb165d6cb4b40d982ae59d6efddb5ec300e7ea6524d8db6ebbd2b"
+        },
+        {
+          "n": "2",
+          "block": "101",
+          "timestamp": "1760000002",
+          "topics": [
+            "ddb33e845d467749d7a748ef8f8b4236c264792d89f4fe22b907d1571484ed21",
+            "f1836439832f60fe6249eef46c7fbf224c1b9f73e5cf210e90ffda3c5f80c75a",
+            "323bab0ddee868a17926ad1d9e0c8acf4ab2c526370e7f95e76891ee2627c977"
+          ],
+          "data": "5588da44ea7bd595ba9ea2ee8e2c60227f4bb7f9ab845341ac92287f296642e19575e7632204e3c2bc38f3f7424cc72957df4877dbd1ccc36b22ac5acc6f2f474c3ffe1e8f93ac2410f16379c01f96e83a52d0b1a30818f37fc9001b0d32565d"
+        },
+        {
+          "n": "3",
+          "block": "250",
+          "timestamp": "1760000300",
+          "topics": [
+            "4b107d79a039980aca79e37d6fd2e016a5699c39a21da1dd050674eae3e5d3c9",
+            "2be1d478fb3241661ee62163ef102a600443ebae0093afe160ab4501b116ef6d",
+            "70734081aacfa41b6e5ba855d7a5091d1f9fe1bd87b7bf2edd567d35092fc32a",
+            "fa466e5aae36e4e601692ba3f276d588a2577533def2ef3e67a9c8fe8219f209"
+          ],
+          "data": ""
+        },
+        {
+          "n": "4",
+          "block": "251",
+          "timestamp": "1760000302",
+          "topics": ["2701b4acb79b9e492edfd702f1e5eb0ea070a1de6b05845055e36ff39b83587a"],
+          "data": "8321f98a7cf13c22c3c17f1da966dd7d7dd7a9e2b63c4ea90df3f7474876abbc"
+        }
+      ],
+      "proof": {
+        "count": "5",
+        "block": "251",
+        "accumulator": "0efdc0dde60239c5c2239f457c3e3131418236d09732ffa3b872261b1370b1fd"
+      },
+      "error": null
+    },
+    {
+      "id": "prefix-at-boundary",
+      "description": "A proof at block 101 covers the first three logs; the fourth, at block 250, is after it",
+      "chainId": "84532",
+      "address": "5fbdb2315678afecb367f032d93f642f64180aa3",
+      "events": [
+        {
+          "n": "0",
+          "block": "100",
+          "timestamp": "1760000000",
+          "topics": ["2701b4acb79b9e492edfd702f1e5eb0ea070a1de6b05845055e36ff39b83587a"],
+          "data": "314ba75571622cc42f641480fa5cfd0e31ce09f44968788a30ebd63bc09cd88a"
+        },
+        {
+          "n": "1",
+          "block": "100",
+          "timestamp": "1760000000",
+          "topics": [
+            "72b4e1a22c326d772127ce653e753c308a21c2ff96970f259d527ce6b73af9b9",
+            "4aa0000c26bfe37fd1317113382faf060415737e73ca1093b7211413ffbcc7e3"
+          ],
+          "data": "4247ed3fd22fb165d6cb4b40d982ae59d6efddb5ec300e7ea6524d8db6ebbd2b"
+        },
+        {
+          "n": "2",
+          "block": "101",
+          "timestamp": "1760000002",
+          "topics": [
+            "ddb33e845d467749d7a748ef8f8b4236c264792d89f4fe22b907d1571484ed21",
+            "f1836439832f60fe6249eef46c7fbf224c1b9f73e5cf210e90ffda3c5f80c75a",
+            "323bab0ddee868a17926ad1d9e0c8acf4ab2c526370e7f95e76891ee2627c977"
+          ],
+          "data": "5588da44ea7bd595ba9ea2ee8e2c60227f4bb7f9ab845341ac92287f296642e19575e7632204e3c2bc38f3f7424cc72957df4877dbd1ccc36b22ac5acc6f2f474c3ffe1e8f93ac2410f16379c01f96e83a52d0b1a30818f37fc9001b0d32565d"
+        },
+        {
+          "n": "3",
+          "block": "250",
+          "timestamp": "1760000300",
+          "topics": [
+            "4b107d79a039980aca79e37d6fd2e016a5699c39a21da1dd050674eae3e5d3c9",
+            "2be1d478fb3241661ee62163ef102a600443ebae0093afe160ab4501b116ef6d",
+            "70734081aacfa41b6e5ba855d7a5091d1f9fe1bd87b7bf2edd567d35092fc32a",
+            "fa466e5aae36e4e601692ba3f276d588a2577533def2ef3e67a9c8fe8219f209"
+          ],
+          "data": ""
+        },
+        {
+          "n": "4",
+          "block": "251",
+          "timestamp": "1760000302",
+          "topics": ["2701b4acb79b9e492edfd702f1e5eb0ea070a1de6b05845055e36ff39b83587a"],
+          "data": "8321f98a7cf13c22c3c17f1da966dd7d7dd7a9e2b63c4ea90df3f7474876abbc"
+        }
+      ],
+      "proof": {
+        "count": "3",
+        "block": "101",
+        "accumulator": "94d3dab5b4f00dca9829bfce7e2593638d5130ac646700f11bd9b3d0d9001e76"
+      },
+      "error": null
+    },
+    {
+      "id": "prefix-between-blocks",
+      "description": "A proof at block 200, between the third and fourth logs' blocks",
+      "chainId": "84532",
+      "address": "5fbdb2315678afecb367f032d93f642f64180aa3",
+      "events": [
+        {
+          "n": "0",
+          "block": "100",
+          "timestamp": "1760000000",
+          "topics": ["2701b4acb79b9e492edfd702f1e5eb0ea070a1de6b05845055e36ff39b83587a"],
+          "data": "314ba75571622cc42f641480fa5cfd0e31ce09f44968788a30ebd63bc09cd88a"
+        },
+        {
+          "n": "1",
+          "block": "100",
+          "timestamp": "1760000000",
+          "topics": [
+            "72b4e1a22c326d772127ce653e753c308a21c2ff96970f259d527ce6b73af9b9",
+            "4aa0000c26bfe37fd1317113382faf060415737e73ca1093b7211413ffbcc7e3"
+          ],
+          "data": "4247ed3fd22fb165d6cb4b40d982ae59d6efddb5ec300e7ea6524d8db6ebbd2b"
+        },
+        {
+          "n": "2",
+          "block": "101",
+          "timestamp": "1760000002",
+          "topics": [
+            "ddb33e845d467749d7a748ef8f8b4236c264792d89f4fe22b907d1571484ed21",
+            "f1836439832f60fe6249eef46c7fbf224c1b9f73e5cf210e90ffda3c5f80c75a",
+            "323bab0ddee868a17926ad1d9e0c8acf4ab2c526370e7f95e76891ee2627c977"
+          ],
+          "data": "5588da44ea7bd595ba9ea2ee8e2c60227f4bb7f9ab845341ac92287f296642e19575e7632204e3c2bc38f3f7424cc72957df4877dbd1ccc36b22ac5acc6f2f474c3ffe1e8f93ac2410f16379c01f96e83a52d0b1a30818f37fc9001b0d32565d"
+        },
+        {
+          "n": "3",
+          "block": "250",
+          "timestamp": "1760000300",
+          "topics": [
+            "4b107d79a039980aca79e37d6fd2e016a5699c39a21da1dd050674eae3e5d3c9",
+            "2be1d478fb3241661ee62163ef102a600443ebae0093afe160ab4501b116ef6d",
+            "70734081aacfa41b6e5ba855d7a5091d1f9fe1bd87b7bf2edd567d35092fc32a",
+            "fa466e5aae36e4e601692ba3f276d588a2577533def2ef3e67a9c8fe8219f209"
+          ],
+          "data": ""
+        },
+        {
+          "n": "4",
+          "block": "251",
+          "timestamp": "1760000302",
+          "topics": ["2701b4acb79b9e492edfd702f1e5eb0ea070a1de6b05845055e36ff39b83587a"],
+          "data": "8321f98a7cf13c22c3c17f1da966dd7d7dd7a9e2b63c4ea90df3f7474876abbc"
+        }
+      ],
+      "proof": {
+        "count": "3",
+        "block": "200",
+        "accumulator": "94d3dab5b4f00dca9829bfce7e2593638d5130ac646700f11bd9b3d0d9001e76"
+      },
+      "error": null
+    },
+    {
+      "id": "both-logs-of-a-block",
+      "description": "A proof at block 100 covers both of its logs",
+      "chainId": "84532",
+      "address": "5fbdb2315678afecb367f032d93f642f64180aa3",
+      "events": [
+        {
+          "n": "0",
+          "block": "100",
+          "timestamp": "1760000000",
+          "topics": ["2701b4acb79b9e492edfd702f1e5eb0ea070a1de6b05845055e36ff39b83587a"],
+          "data": "314ba75571622cc42f641480fa5cfd0e31ce09f44968788a30ebd63bc09cd88a"
+        },
+        {
+          "n": "1",
+          "block": "100",
+          "timestamp": "1760000000",
+          "topics": [
+            "72b4e1a22c326d772127ce653e753c308a21c2ff96970f259d527ce6b73af9b9",
+            "4aa0000c26bfe37fd1317113382faf060415737e73ca1093b7211413ffbcc7e3"
+          ],
+          "data": "4247ed3fd22fb165d6cb4b40d982ae59d6efddb5ec300e7ea6524d8db6ebbd2b"
+        },
+        {
+          "n": "2",
+          "block": "101",
+          "timestamp": "1760000002",
+          "topics": [
+            "ddb33e845d467749d7a748ef8f8b4236c264792d89f4fe22b907d1571484ed21",
+            "f1836439832f60fe6249eef46c7fbf224c1b9f73e5cf210e90ffda3c5f80c75a",
+            "323bab0ddee868a17926ad1d9e0c8acf4ab2c526370e7f95e76891ee2627c977"
+          ],
+          "data": "5588da44ea7bd595ba9ea2ee8e2c60227f4bb7f9ab845341ac92287f296642e19575e7632204e3c2bc38f3f7424cc72957df4877dbd1ccc36b22ac5acc6f2f474c3ffe1e8f93ac2410f16379c01f96e83a52d0b1a30818f37fc9001b0d32565d"
+        },
+        {
+          "n": "3",
+          "block": "250",
+          "timestamp": "1760000300",
+          "topics": [
+            "4b107d79a039980aca79e37d6fd2e016a5699c39a21da1dd050674eae3e5d3c9",
+            "2be1d478fb3241661ee62163ef102a600443ebae0093afe160ab4501b116ef6d",
+            "70734081aacfa41b6e5ba855d7a5091d1f9fe1bd87b7bf2edd567d35092fc32a",
+            "fa466e5aae36e4e601692ba3f276d588a2577533def2ef3e67a9c8fe8219f209"
+          ],
+          "data": ""
+        },
+        {
+          "n": "4",
+          "block": "251",
+          "timestamp": "1760000302",
+          "topics": ["2701b4acb79b9e492edfd702f1e5eb0ea070a1de6b05845055e36ff39b83587a"],
+          "data": "8321f98a7cf13c22c3c17f1da966dd7d7dd7a9e2b63c4ea90df3f7474876abbc"
+        }
+      ],
+      "proof": {
+        "count": "2",
+        "block": "100",
+        "accumulator": "58c26033743d4ad99605e2466e399364969736600392461dac10be43cc6dc561"
+      },
+      "error": null
+    },
+    {
+      "id": "empty-before-first",
+      "description": "A proof at block 99 with count 0 covers nothing; the first log is after it",
+      "chainId": "84532",
+      "address": "5fbdb2315678afecb367f032d93f642f64180aa3",
+      "events": [
+        {
+          "n": "0",
+          "block": "100",
+          "timestamp": "1760000000",
+          "topics": ["2701b4acb79b9e492edfd702f1e5eb0ea070a1de6b05845055e36ff39b83587a"],
+          "data": "314ba75571622cc42f641480fa5cfd0e31ce09f44968788a30ebd63bc09cd88a"
+        },
+        {
+          "n": "1",
+          "block": "100",
+          "timestamp": "1760000000",
+          "topics": [
+            "72b4e1a22c326d772127ce653e753c308a21c2ff96970f259d527ce6b73af9b9",
+            "4aa0000c26bfe37fd1317113382faf060415737e73ca1093b7211413ffbcc7e3"
+          ],
+          "data": "4247ed3fd22fb165d6cb4b40d982ae59d6efddb5ec300e7ea6524d8db6ebbd2b"
+        },
+        {
+          "n": "2",
+          "block": "101",
+          "timestamp": "1760000002",
+          "topics": [
+            "ddb33e845d467749d7a748ef8f8b4236c264792d89f4fe22b907d1571484ed21",
+            "f1836439832f60fe6249eef46c7fbf224c1b9f73e5cf210e90ffda3c5f80c75a",
+            "323bab0ddee868a17926ad1d9e0c8acf4ab2c526370e7f95e76891ee2627c977"
+          ],
+          "data": "5588da44ea7bd595ba9ea2ee8e2c60227f4bb7f9ab845341ac92287f296642e19575e7632204e3c2bc38f3f7424cc72957df4877dbd1ccc36b22ac5acc6f2f474c3ffe1e8f93ac2410f16379c01f96e83a52d0b1a30818f37fc9001b0d32565d"
+        },
+        {
+          "n": "3",
+          "block": "250",
+          "timestamp": "1760000300",
+          "topics": [
+            "4b107d79a039980aca79e37d6fd2e016a5699c39a21da1dd050674eae3e5d3c9",
+            "2be1d478fb3241661ee62163ef102a600443ebae0093afe160ab4501b116ef6d",
+            "70734081aacfa41b6e5ba855d7a5091d1f9fe1bd87b7bf2edd567d35092fc32a",
+            "fa466e5aae36e4e601692ba3f276d588a2577533def2ef3e67a9c8fe8219f209"
+          ],
+          "data": ""
+        },
+        {
+          "n": "4",
+          "block": "251",
+          "timestamp": "1760000302",
+          "topics": ["2701b4acb79b9e492edfd702f1e5eb0ea070a1de6b05845055e36ff39b83587a"],
+          "data": "8321f98a7cf13c22c3c17f1da966dd7d7dd7a9e2b63c4ea90df3f7474876abbc"
+        }
+      ],
+      "proof": {
+        "count": "0",
+        "block": "99",
+        "accumulator": "4efd36778f8ee4f3375788ccdf9d82af964e98f108d70dc8ba80592115c4bfea"
+      },
+      "error": null
+    },
+    {
+      "id": "log-left-out",
+      "description": "The archive leaves out the third log",
+      "chainId": "84532",
+      "address": "5fbdb2315678afecb367f032d93f642f64180aa3",
+      "events": [
+        {
+          "n": "0",
+          "block": "100",
+          "timestamp": "1760000000",
+          "topics": ["2701b4acb79b9e492edfd702f1e5eb0ea070a1de6b05845055e36ff39b83587a"],
+          "data": "314ba75571622cc42f641480fa5cfd0e31ce09f44968788a30ebd63bc09cd88a"
+        },
+        {
+          "n": "1",
+          "block": "100",
+          "timestamp": "1760000000",
+          "topics": [
+            "72b4e1a22c326d772127ce653e753c308a21c2ff96970f259d527ce6b73af9b9",
+            "4aa0000c26bfe37fd1317113382faf060415737e73ca1093b7211413ffbcc7e3"
+          ],
+          "data": "4247ed3fd22fb165d6cb4b40d982ae59d6efddb5ec300e7ea6524d8db6ebbd2b"
+        },
+        {
+          "n": "2",
+          "block": "250",
+          "timestamp": "1760000300",
+          "topics": [
+            "4b107d79a039980aca79e37d6fd2e016a5699c39a21da1dd050674eae3e5d3c9",
+            "2be1d478fb3241661ee62163ef102a600443ebae0093afe160ab4501b116ef6d",
+            "70734081aacfa41b6e5ba855d7a5091d1f9fe1bd87b7bf2edd567d35092fc32a",
+            "fa466e5aae36e4e601692ba3f276d588a2577533def2ef3e67a9c8fe8219f209"
+          ],
+          "data": ""
+        },
+        {
+          "n": "3",
+          "block": "251",
+          "timestamp": "1760000302",
+          "topics": ["2701b4acb79b9e492edfd702f1e5eb0ea070a1de6b05845055e36ff39b83587a"],
+          "data": "8321f98a7cf13c22c3c17f1da966dd7d7dd7a9e2b63c4ea90df3f7474876abbc"
+        }
+      ],
+      "proof": {
+        "count": "4",
+        "block": "251",
+        "accumulator": "0efdc0dde60239c5c2239f457c3e3131418236d09732ffa3b872261b1370b1fd"
+      },
+      "error": "accumulator"
+    },
+    {
+      "id": "index-gap",
+      "description": "The archive numbers the logs 0, 1, 3, \u2026",
+      "chainId": "84532",
+      "address": "5fbdb2315678afecb367f032d93f642f64180aa3",
+      "events": [
+        {
+          "n": "0",
+          "block": "100",
+          "timestamp": "1760000000",
+          "topics": ["2701b4acb79b9e492edfd702f1e5eb0ea070a1de6b05845055e36ff39b83587a"],
+          "data": "314ba75571622cc42f641480fa5cfd0e31ce09f44968788a30ebd63bc09cd88a"
+        },
+        {
+          "n": "1",
+          "block": "100",
+          "timestamp": "1760000000",
+          "topics": [
+            "72b4e1a22c326d772127ce653e753c308a21c2ff96970f259d527ce6b73af9b9",
+            "4aa0000c26bfe37fd1317113382faf060415737e73ca1093b7211413ffbcc7e3"
+          ],
+          "data": "4247ed3fd22fb165d6cb4b40d982ae59d6efddb5ec300e7ea6524d8db6ebbd2b"
+        },
+        {
+          "n": "3",
+          "block": "101",
+          "timestamp": "1760000002",
+          "topics": [
+            "ddb33e845d467749d7a748ef8f8b4236c264792d89f4fe22b907d1571484ed21",
+            "f1836439832f60fe6249eef46c7fbf224c1b9f73e5cf210e90ffda3c5f80c75a",
+            "323bab0ddee868a17926ad1d9e0c8acf4ab2c526370e7f95e76891ee2627c977"
+          ],
+          "data": "5588da44ea7bd595ba9ea2ee8e2c60227f4bb7f9ab845341ac92287f296642e19575e7632204e3c2bc38f3f7424cc72957df4877dbd1ccc36b22ac5acc6f2f474c3ffe1e8f93ac2410f16379c01f96e83a52d0b1a30818f37fc9001b0d32565d"
+        },
+        {
+          "n": "3",
+          "block": "250",
+          "timestamp": "1760000300",
+          "topics": [
+            "4b107d79a039980aca79e37d6fd2e016a5699c39a21da1dd050674eae3e5d3c9",
+            "2be1d478fb3241661ee62163ef102a600443ebae0093afe160ab4501b116ef6d",
+            "70734081aacfa41b6e5ba855d7a5091d1f9fe1bd87b7bf2edd567d35092fc32a",
+            "fa466e5aae36e4e601692ba3f276d588a2577533def2ef3e67a9c8fe8219f209"
+          ],
+          "data": ""
+        },
+        {
+          "n": "4",
+          "block": "251",
+          "timestamp": "1760000302",
+          "topics": ["2701b4acb79b9e492edfd702f1e5eb0ea070a1de6b05845055e36ff39b83587a"],
+          "data": "8321f98a7cf13c22c3c17f1da966dd7d7dd7a9e2b63c4ea90df3f7474876abbc"
+        }
+      ],
+      "proof": {
+        "count": "5",
+        "block": "251",
+        "accumulator": "0efdc0dde60239c5c2239f457c3e3131418236d09732ffa3b872261b1370b1fd"
+      },
+      "error": "index"
+    },
+    {
+      "id": "block-decreases",
+      "description": "The fourth log is placed in block 99, before the third",
+      "chainId": "84532",
+      "address": "5fbdb2315678afecb367f032d93f642f64180aa3",
+      "events": [
+        {
+          "n": "0",
+          "block": "100",
+          "timestamp": "1760000000",
+          "topics": ["2701b4acb79b9e492edfd702f1e5eb0ea070a1de6b05845055e36ff39b83587a"],
+          "data": "314ba75571622cc42f641480fa5cfd0e31ce09f44968788a30ebd63bc09cd88a"
+        },
+        {
+          "n": "1",
+          "block": "100",
+          "timestamp": "1760000000",
+          "topics": [
+            "72b4e1a22c326d772127ce653e753c308a21c2ff96970f259d527ce6b73af9b9",
+            "4aa0000c26bfe37fd1317113382faf060415737e73ca1093b7211413ffbcc7e3"
+          ],
+          "data": "4247ed3fd22fb165d6cb4b40d982ae59d6efddb5ec300e7ea6524d8db6ebbd2b"
+        },
+        {
+          "n": "2",
+          "block": "101",
+          "timestamp": "1760000002",
+          "topics": [
+            "ddb33e845d467749d7a748ef8f8b4236c264792d89f4fe22b907d1571484ed21",
+            "f1836439832f60fe6249eef46c7fbf224c1b9f73e5cf210e90ffda3c5f80c75a",
+            "323bab0ddee868a17926ad1d9e0c8acf4ab2c526370e7f95e76891ee2627c977"
+          ],
+          "data": "5588da44ea7bd595ba9ea2ee8e2c60227f4bb7f9ab845341ac92287f296642e19575e7632204e3c2bc38f3f7424cc72957df4877dbd1ccc36b22ac5acc6f2f474c3ffe1e8f93ac2410f16379c01f96e83a52d0b1a30818f37fc9001b0d32565d"
+        },
+        {
+          "n": "3",
+          "block": "99",
+          "timestamp": "1760000300",
+          "topics": [
+            "4b107d79a039980aca79e37d6fd2e016a5699c39a21da1dd050674eae3e5d3c9",
+            "2be1d478fb3241661ee62163ef102a600443ebae0093afe160ab4501b116ef6d",
+            "70734081aacfa41b6e5ba855d7a5091d1f9fe1bd87b7bf2edd567d35092fc32a",
+            "fa466e5aae36e4e601692ba3f276d588a2577533def2ef3e67a9c8fe8219f209"
+          ],
+          "data": ""
+        },
+        {
+          "n": "4",
+          "block": "251",
+          "timestamp": "1760000302",
+          "topics": ["2701b4acb79b9e492edfd702f1e5eb0ea070a1de6b05845055e36ff39b83587a"],
+          "data": "8321f98a7cf13c22c3c17f1da966dd7d7dd7a9e2b63c4ea90df3f7474876abbc"
+        }
+      ],
+      "proof": {
+        "count": "5",
+        "block": "251",
+        "accumulator": "0efdc0dde60239c5c2239f457c3e3131418236d09732ffa3b872261b1370b1fd"
+      },
+      "error": "order"
+    },
+    {
+      "id": "timestamp-decreases",
+      "description": "The fourth log's timestamp is set below the third's",
+      "chainId": "84532",
+      "address": "5fbdb2315678afecb367f032d93f642f64180aa3",
+      "events": [
+        {
+          "n": "0",
+          "block": "100",
+          "timestamp": "1760000000",
+          "topics": ["2701b4acb79b9e492edfd702f1e5eb0ea070a1de6b05845055e36ff39b83587a"],
+          "data": "314ba75571622cc42f641480fa5cfd0e31ce09f44968788a30ebd63bc09cd88a"
+        },
+        {
+          "n": "1",
+          "block": "100",
+          "timestamp": "1760000000",
+          "topics": [
+            "72b4e1a22c326d772127ce653e753c308a21c2ff96970f259d527ce6b73af9b9",
+            "4aa0000c26bfe37fd1317113382faf060415737e73ca1093b7211413ffbcc7e3"
+          ],
+          "data": "4247ed3fd22fb165d6cb4b40d982ae59d6efddb5ec300e7ea6524d8db6ebbd2b"
+        },
+        {
+          "n": "2",
+          "block": "101",
+          "timestamp": "1760000002",
+          "topics": [
+            "ddb33e845d467749d7a748ef8f8b4236c264792d89f4fe22b907d1571484ed21",
+            "f1836439832f60fe6249eef46c7fbf224c1b9f73e5cf210e90ffda3c5f80c75a",
+            "323bab0ddee868a17926ad1d9e0c8acf4ab2c526370e7f95e76891ee2627c977"
+          ],
+          "data": "5588da44ea7bd595ba9ea2ee8e2c60227f4bb7f9ab845341ac92287f296642e19575e7632204e3c2bc38f3f7424cc72957df4877dbd1ccc36b22ac5acc6f2f474c3ffe1e8f93ac2410f16379c01f96e83a52d0b1a30818f37fc9001b0d32565d"
+        },
+        {
+          "n": "3",
+          "block": "250",
+          "timestamp": "1760000000",
+          "topics": [
+            "4b107d79a039980aca79e37d6fd2e016a5699c39a21da1dd050674eae3e5d3c9",
+            "2be1d478fb3241661ee62163ef102a600443ebae0093afe160ab4501b116ef6d",
+            "70734081aacfa41b6e5ba855d7a5091d1f9fe1bd87b7bf2edd567d35092fc32a",
+            "fa466e5aae36e4e601692ba3f276d588a2577533def2ef3e67a9c8fe8219f209"
+          ],
+          "data": ""
+        },
+        {
+          "n": "4",
+          "block": "251",
+          "timestamp": "1760000302",
+          "topics": ["2701b4acb79b9e492edfd702f1e5eb0ea070a1de6b05845055e36ff39b83587a"],
+          "data": "8321f98a7cf13c22c3c17f1da966dd7d7dd7a9e2b63c4ea90df3f7474876abbc"
+        }
+      ],
+      "proof": {
+        "count": "5",
+        "block": "251",
+        "accumulator": "0efdc0dde60239c5c2239f457c3e3131418236d09732ffa3b872261b1370b1fd"
+      },
+      "error": "order"
+    },
+    {
+      "id": "moved-block",
+      "description": "The third log is moved from block 101 to block 102, keeping the order",
+      "chainId": "84532",
+      "address": "5fbdb2315678afecb367f032d93f642f64180aa3",
+      "events": [
+        {
+          "n": "0",
+          "block": "100",
+          "timestamp": "1760000000",
+          "topics": ["2701b4acb79b9e492edfd702f1e5eb0ea070a1de6b05845055e36ff39b83587a"],
+          "data": "314ba75571622cc42f641480fa5cfd0e31ce09f44968788a30ebd63bc09cd88a"
+        },
+        {
+          "n": "1",
+          "block": "100",
+          "timestamp": "1760000000",
+          "topics": [
+            "72b4e1a22c326d772127ce653e753c308a21c2ff96970f259d527ce6b73af9b9",
+            "4aa0000c26bfe37fd1317113382faf060415737e73ca1093b7211413ffbcc7e3"
+          ],
+          "data": "4247ed3fd22fb165d6cb4b40d982ae59d6efddb5ec300e7ea6524d8db6ebbd2b"
+        },
+        {
+          "n": "2",
+          "block": "102",
+          "timestamp": "1760000002",
+          "topics": [
+            "ddb33e845d467749d7a748ef8f8b4236c264792d89f4fe22b907d1571484ed21",
+            "f1836439832f60fe6249eef46c7fbf224c1b9f73e5cf210e90ffda3c5f80c75a",
+            "323bab0ddee868a17926ad1d9e0c8acf4ab2c526370e7f95e76891ee2627c977"
+          ],
+          "data": "5588da44ea7bd595ba9ea2ee8e2c60227f4bb7f9ab845341ac92287f296642e19575e7632204e3c2bc38f3f7424cc72957df4877dbd1ccc36b22ac5acc6f2f474c3ffe1e8f93ac2410f16379c01f96e83a52d0b1a30818f37fc9001b0d32565d"
+        },
+        {
+          "n": "3",
+          "block": "250",
+          "timestamp": "1760000300",
+          "topics": [
+            "4b107d79a039980aca79e37d6fd2e016a5699c39a21da1dd050674eae3e5d3c9",
+            "2be1d478fb3241661ee62163ef102a600443ebae0093afe160ab4501b116ef6d",
+            "70734081aacfa41b6e5ba855d7a5091d1f9fe1bd87b7bf2edd567d35092fc32a",
+            "fa466e5aae36e4e601692ba3f276d588a2577533def2ef3e67a9c8fe8219f209"
+          ],
+          "data": ""
+        },
+        {
+          "n": "4",
+          "block": "251",
+          "timestamp": "1760000302",
+          "topics": ["2701b4acb79b9e492edfd702f1e5eb0ea070a1de6b05845055e36ff39b83587a"],
+          "data": "8321f98a7cf13c22c3c17f1da966dd7d7dd7a9e2b63c4ea90df3f7474876abbc"
+        }
+      ],
+      "proof": {
+        "count": "5",
+        "block": "251",
+        "accumulator": "0efdc0dde60239c5c2239f457c3e3131418236d09732ffa3b872261b1370b1fd"
+      },
+      "error": "accumulator"
+    },
+    {
+      "id": "moved-timestamp",
+      "description": "The third log's timestamp is moved by one second, keeping the order",
+      "chainId": "84532",
+      "address": "5fbdb2315678afecb367f032d93f642f64180aa3",
+      "events": [
+        {
+          "n": "0",
+          "block": "100",
+          "timestamp": "1760000000",
+          "topics": ["2701b4acb79b9e492edfd702f1e5eb0ea070a1de6b05845055e36ff39b83587a"],
+          "data": "314ba75571622cc42f641480fa5cfd0e31ce09f44968788a30ebd63bc09cd88a"
+        },
+        {
+          "n": "1",
+          "block": "100",
+          "timestamp": "1760000000",
+          "topics": [
+            "72b4e1a22c326d772127ce653e753c308a21c2ff96970f259d527ce6b73af9b9",
+            "4aa0000c26bfe37fd1317113382faf060415737e73ca1093b7211413ffbcc7e3"
+          ],
+          "data": "4247ed3fd22fb165d6cb4b40d982ae59d6efddb5ec300e7ea6524d8db6ebbd2b"
+        },
+        {
+          "n": "2",
+          "block": "101",
+          "timestamp": "1760000003",
+          "topics": [
+            "ddb33e845d467749d7a748ef8f8b4236c264792d89f4fe22b907d1571484ed21",
+            "f1836439832f60fe6249eef46c7fbf224c1b9f73e5cf210e90ffda3c5f80c75a",
+            "323bab0ddee868a17926ad1d9e0c8acf4ab2c526370e7f95e76891ee2627c977"
+          ],
+          "data": "5588da44ea7bd595ba9ea2ee8e2c60227f4bb7f9ab845341ac92287f296642e19575e7632204e3c2bc38f3f7424cc72957df4877dbd1ccc36b22ac5acc6f2f474c3ffe1e8f93ac2410f16379c01f96e83a52d0b1a30818f37fc9001b0d32565d"
+        },
+        {
+          "n": "3",
+          "block": "250",
+          "timestamp": "1760000300",
+          "topics": [
+            "4b107d79a039980aca79e37d6fd2e016a5699c39a21da1dd050674eae3e5d3c9",
+            "2be1d478fb3241661ee62163ef102a600443ebae0093afe160ab4501b116ef6d",
+            "70734081aacfa41b6e5ba855d7a5091d1f9fe1bd87b7bf2edd567d35092fc32a",
+            "fa466e5aae36e4e601692ba3f276d588a2577533def2ef3e67a9c8fe8219f209"
+          ],
+          "data": ""
+        },
+        {
+          "n": "4",
+          "block": "251",
+          "timestamp": "1760000302",
+          "topics": ["2701b4acb79b9e492edfd702f1e5eb0ea070a1de6b05845055e36ff39b83587a"],
+          "data": "8321f98a7cf13c22c3c17f1da966dd7d7dd7a9e2b63c4ea90df3f7474876abbc"
+        }
+      ],
+      "proof": {
+        "count": "5",
+        "block": "251",
+        "accumulator": "0efdc0dde60239c5c2239f457c3e3131418236d09732ffa3b872261b1370b1fd"
+      },
+      "error": "accumulator"
+    },
+    {
+      "id": "counted-after-proof",
+      "description": "A proof at block 101 claiming four logs: the fourth is after it",
+      "chainId": "84532",
+      "address": "5fbdb2315678afecb367f032d93f642f64180aa3",
+      "events": [
+        {
+          "n": "0",
+          "block": "100",
+          "timestamp": "1760000000",
+          "topics": ["2701b4acb79b9e492edfd702f1e5eb0ea070a1de6b05845055e36ff39b83587a"],
+          "data": "314ba75571622cc42f641480fa5cfd0e31ce09f44968788a30ebd63bc09cd88a"
+        },
+        {
+          "n": "1",
+          "block": "100",
+          "timestamp": "1760000000",
+          "topics": [
+            "72b4e1a22c326d772127ce653e753c308a21c2ff96970f259d527ce6b73af9b9",
+            "4aa0000c26bfe37fd1317113382faf060415737e73ca1093b7211413ffbcc7e3"
+          ],
+          "data": "4247ed3fd22fb165d6cb4b40d982ae59d6efddb5ec300e7ea6524d8db6ebbd2b"
+        },
+        {
+          "n": "2",
+          "block": "101",
+          "timestamp": "1760000002",
+          "topics": [
+            "ddb33e845d467749d7a748ef8f8b4236c264792d89f4fe22b907d1571484ed21",
+            "f1836439832f60fe6249eef46c7fbf224c1b9f73e5cf210e90ffda3c5f80c75a",
+            "323bab0ddee868a17926ad1d9e0c8acf4ab2c526370e7f95e76891ee2627c977"
+          ],
+          "data": "5588da44ea7bd595ba9ea2ee8e2c60227f4bb7f9ab845341ac92287f296642e19575e7632204e3c2bc38f3f7424cc72957df4877dbd1ccc36b22ac5acc6f2f474c3ffe1e8f93ac2410f16379c01f96e83a52d0b1a30818f37fc9001b0d32565d"
+        },
+        {
+          "n": "3",
+          "block": "250",
+          "timestamp": "1760000300",
+          "topics": [
+            "4b107d79a039980aca79e37d6fd2e016a5699c39a21da1dd050674eae3e5d3c9",
+            "2be1d478fb3241661ee62163ef102a600443ebae0093afe160ab4501b116ef6d",
+            "70734081aacfa41b6e5ba855d7a5091d1f9fe1bd87b7bf2edd567d35092fc32a",
+            "fa466e5aae36e4e601692ba3f276d588a2577533def2ef3e67a9c8fe8219f209"
+          ],
+          "data": ""
+        },
+        {
+          "n": "4",
+          "block": "251",
+          "timestamp": "1760000302",
+          "topics": ["2701b4acb79b9e492edfd702f1e5eb0ea070a1de6b05845055e36ff39b83587a"],
+          "data": "8321f98a7cf13c22c3c17f1da966dd7d7dd7a9e2b63c4ea90df3f7474876abbc"
+        }
+      ],
+      "proof": {
+        "count": "4",
+        "block": "101",
+        "accumulator": "eaaae88638167910165d6d06bd64438ff8d42fc79c118e5aa32b58fe69716541"
+      },
+      "error": "block-range"
+    },
+    {
+      "id": "uncounted-before-proof",
+      "description": "A proof at block 250 claiming three logs while the fourth is at block 250",
+      "chainId": "84532",
+      "address": "5fbdb2315678afecb367f032d93f642f64180aa3",
+      "events": [
+        {
+          "n": "0",
+          "block": "100",
+          "timestamp": "1760000000",
+          "topics": ["2701b4acb79b9e492edfd702f1e5eb0ea070a1de6b05845055e36ff39b83587a"],
+          "data": "314ba75571622cc42f641480fa5cfd0e31ce09f44968788a30ebd63bc09cd88a"
+        },
+        {
+          "n": "1",
+          "block": "100",
+          "timestamp": "1760000000",
+          "topics": [
+            "72b4e1a22c326d772127ce653e753c308a21c2ff96970f259d527ce6b73af9b9",
+            "4aa0000c26bfe37fd1317113382faf060415737e73ca1093b7211413ffbcc7e3"
+          ],
+          "data": "4247ed3fd22fb165d6cb4b40d982ae59d6efddb5ec300e7ea6524d8db6ebbd2b"
+        },
+        {
+          "n": "2",
+          "block": "101",
+          "timestamp": "1760000002",
+          "topics": [
+            "ddb33e845d467749d7a748ef8f8b4236c264792d89f4fe22b907d1571484ed21",
+            "f1836439832f60fe6249eef46c7fbf224c1b9f73e5cf210e90ffda3c5f80c75a",
+            "323bab0ddee868a17926ad1d9e0c8acf4ab2c526370e7f95e76891ee2627c977"
+          ],
+          "data": "5588da44ea7bd595ba9ea2ee8e2c60227f4bb7f9ab845341ac92287f296642e19575e7632204e3c2bc38f3f7424cc72957df4877dbd1ccc36b22ac5acc6f2f474c3ffe1e8f93ac2410f16379c01f96e83a52d0b1a30818f37fc9001b0d32565d"
+        },
+        {
+          "n": "3",
+          "block": "250",
+          "timestamp": "1760000300",
+          "topics": [
+            "4b107d79a039980aca79e37d6fd2e016a5699c39a21da1dd050674eae3e5d3c9",
+            "2be1d478fb3241661ee62163ef102a600443ebae0093afe160ab4501b116ef6d",
+            "70734081aacfa41b6e5ba855d7a5091d1f9fe1bd87b7bf2edd567d35092fc32a",
+            "fa466e5aae36e4e601692ba3f276d588a2577533def2ef3e67a9c8fe8219f209"
+          ],
+          "data": ""
+        },
+        {
+          "n": "4",
+          "block": "251",
+          "timestamp": "1760000302",
+          "topics": ["2701b4acb79b9e492edfd702f1e5eb0ea070a1de6b05845055e36ff39b83587a"],
+          "data": "8321f98a7cf13c22c3c17f1da966dd7d7dd7a9e2b63c4ea90df3f7474876abbc"
+        }
+      ],
+      "proof": {
+        "count": "3",
+        "block": "250",
+        "accumulator": "94d3dab5b4f00dca9829bfce7e2593638d5130ac646700f11bd9b3d0d9001e76"
+      },
+      "error": "block-range"
+    },
+    {
+      "id": "archive-short",
+      "description": "A proof claiming five logs against an archive of four",
+      "chainId": "84532",
+      "address": "5fbdb2315678afecb367f032d93f642f64180aa3",
+      "events": [
+        {
+          "n": "0",
+          "block": "100",
+          "timestamp": "1760000000",
+          "topics": ["2701b4acb79b9e492edfd702f1e5eb0ea070a1de6b05845055e36ff39b83587a"],
+          "data": "314ba75571622cc42f641480fa5cfd0e31ce09f44968788a30ebd63bc09cd88a"
+        },
+        {
+          "n": "1",
+          "block": "100",
+          "timestamp": "1760000000",
+          "topics": [
+            "72b4e1a22c326d772127ce653e753c308a21c2ff96970f259d527ce6b73af9b9",
+            "4aa0000c26bfe37fd1317113382faf060415737e73ca1093b7211413ffbcc7e3"
+          ],
+          "data": "4247ed3fd22fb165d6cb4b40d982ae59d6efddb5ec300e7ea6524d8db6ebbd2b"
+        },
+        {
+          "n": "2",
+          "block": "101",
+          "timestamp": "1760000002",
+          "topics": [
+            "ddb33e845d467749d7a748ef8f8b4236c264792d89f4fe22b907d1571484ed21",
+            "f1836439832f60fe6249eef46c7fbf224c1b9f73e5cf210e90ffda3c5f80c75a",
+            "323bab0ddee868a17926ad1d9e0c8acf4ab2c526370e7f95e76891ee2627c977"
+          ],
+          "data": "5588da44ea7bd595ba9ea2ee8e2c60227f4bb7f9ab845341ac92287f296642e19575e7632204e3c2bc38f3f7424cc72957df4877dbd1ccc36b22ac5acc6f2f474c3ffe1e8f93ac2410f16379c01f96e83a52d0b1a30818f37fc9001b0d32565d"
+        },
+        {
+          "n": "3",
+          "block": "250",
+          "timestamp": "1760000300",
+          "topics": [
+            "4b107d79a039980aca79e37d6fd2e016a5699c39a21da1dd050674eae3e5d3c9",
+            "2be1d478fb3241661ee62163ef102a600443ebae0093afe160ab4501b116ef6d",
+            "70734081aacfa41b6e5ba855d7a5091d1f9fe1bd87b7bf2edd567d35092fc32a",
+            "fa466e5aae36e4e601692ba3f276d588a2577533def2ef3e67a9c8fe8219f209"
+          ],
+          "data": ""
+        }
+      ],
+      "proof": {
+        "count": "5",
+        "block": "251",
+        "accumulator": "0efdc0dde60239c5c2239f457c3e3131418236d09732ffa3b872261b1370b1fd"
+      },
+      "error": "accumulator"
+    },
+    {
+      "id": "other-address",
+      "description": "The archive's logs against another contract's proof",
+      "chainId": "84532",
+      "address": "5fbdb2315678afecb367f032d93f642f64180aa3",
+      "events": [
+        {
+          "n": "0",
+          "block": "100",
+          "timestamp": "1760000000",
+          "topics": ["2701b4acb79b9e492edfd702f1e5eb0ea070a1de6b05845055e36ff39b83587a"],
+          "data": "314ba75571622cc42f641480fa5cfd0e31ce09f44968788a30ebd63bc09cd88a"
+        },
+        {
+          "n": "1",
+          "block": "100",
+          "timestamp": "1760000000",
+          "topics": [
+            "72b4e1a22c326d772127ce653e753c308a21c2ff96970f259d527ce6b73af9b9",
+            "4aa0000c26bfe37fd1317113382faf060415737e73ca1093b7211413ffbcc7e3"
+          ],
+          "data": "4247ed3fd22fb165d6cb4b40d982ae59d6efddb5ec300e7ea6524d8db6ebbd2b"
+        },
+        {
+          "n": "2",
+          "block": "101",
+          "timestamp": "1760000002",
+          "topics": [
+            "ddb33e845d467749d7a748ef8f8b4236c264792d89f4fe22b907d1571484ed21",
+            "f1836439832f60fe6249eef46c7fbf224c1b9f73e5cf210e90ffda3c5f80c75a",
+            "323bab0ddee868a17926ad1d9e0c8acf4ab2c526370e7f95e76891ee2627c977"
+          ],
+          "data": "5588da44ea7bd595ba9ea2ee8e2c60227f4bb7f9ab845341ac92287f296642e19575e7632204e3c2bc38f3f7424cc72957df4877dbd1ccc36b22ac5acc6f2f474c3ffe1e8f93ac2410f16379c01f96e83a52d0b1a30818f37fc9001b0d32565d"
+        },
+        {
+          "n": "3",
+          "block": "250",
+          "timestamp": "1760000300",
+          "topics": [
+            "4b107d79a039980aca79e37d6fd2e016a5699c39a21da1dd050674eae3e5d3c9",
+            "2be1d478fb3241661ee62163ef102a600443ebae0093afe160ab4501b116ef6d",
+            "70734081aacfa41b6e5ba855d7a5091d1f9fe1bd87b7bf2edd567d35092fc32a",
+            "fa466e5aae36e4e601692ba3f276d588a2577533def2ef3e67a9c8fe8219f209"
+          ],
+          "data": ""
+        },
+        {
+          "n": "4",
+          "block": "251",
+          "timestamp": "1760000302",
+          "topics": ["2701b4acb79b9e492edfd702f1e5eb0ea070a1de6b05845055e36ff39b83587a"],
+          "data": "8321f98a7cf13c22c3c17f1da966dd7d7dd7a9e2b63c4ea90df3f7474876abbc"
+        }
+      ],
+      "proof": {
+        "count": "5",
+        "block": "251",
+        "accumulator": "c134ee5026b18909a02d29fbb16661e20dfc8d84c713f9401ed948faf160d24c"
+      },
+      "error": "accumulator"
+    }
+  ],
+  "rejected": [
+    {
+      "id": "chain-id-too-large",
+      "description": "A chain ID of 2^64 has no u64 encoding; deployment reverts",
+      "kind": "genesis",
+      "chainId": "18446744073709551616",
+      "address": "5fbdb2315678afecb367f032d93f642f64180aa3"
+    },
+    {
+      "id": "no-topics",
+      "description": "An anonymous log (no topics) is never accumulated",
+      "kind": "step",
+      "block": "1",
+      "timestamp": "1760000000",
+      "topics": [],
+      "data": ""
+    },
+    {
+      "id": "five-topics",
+      "description": "A log has at most 4 topics",
+      "kind": "step",
+      "block": "1",
+      "timestamp": "1760000000",
+      "topics": [
+        "e8bd5027340e20aaf10e39cc70091d5518c4db3c277fbccb281bc0067eeabf08",
+        "704a1e38ceeb435315ff27587a7adc43abbe6e9a9bfcec8642a012a8acd23a27",
+        "f013712b472ffcfc6f7c137cbb7fced255c415a766f660565f011a4726be5ecf",
+        "b11dd2011cd4996befbf388478d1972f1b8b0a8b2cc51ce1b163bc818a43ed60",
+        "65e736fb6f714d38781a4510c6967c3c86a89c0099b3380b34d46c360b54cc37"
+      ],
+      "data": ""
+    },
+    {
+      "id": "short-topic",
+      "description": "A topic is exactly 32 bytes",
+      "kind": "step",
+      "block": "1",
+      "timestamp": "1760000000",
+      "topics": ["91cde4046fc260eb77922b64f116868ee1e041665a9a0adffad90052cd867b"],
+      "data": ""
+    },
+    {
+      "id": "block-too-large",
+      "description": "A block number of 2^64 has no u64 encoding; the emitting call reverts",
+      "kind": "step",
+      "block": "18446744073709551616",
+      "timestamp": "1760000000",
+      "topics": ["5c18b5afab74db2b794b16733ec4e03e096be8e134806caecfa149000c2d0bd4"],
+      "data": ""
+    },
+    {
+      "id": "timestamp-too-large",
+      "description": "A timestamp of 2^64 has no u64 encoding; the emitting call reverts",
+      "kind": "step",
+      "block": "1",
+      "timestamp": "18446744073709551616",
+      "topics": ["5c18b5afab74db2b794b16733ec4e03e096be8e134806caecfa149000c2d0bd4"],
+      "data": ""
+    }
+  ]
+}

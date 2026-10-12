@@ -130,10 +130,14 @@ export {
   TAG_REGISTRY,
 } from "./domain-separation.ts";
 export {
+  type ArchivedContractLog,
+  checkEventAccumulatorProof,
   type ContractLog,
   eventAccumulatorGenesis,
   eventAccumulatorStep,
+  type EventAccumulatorProofError,
   type EventAccumulatorState,
+  type ProvenEventAccumulator,
   replayEventAccumulator,
 } from "./event-accumulator.ts";
 export { electionId } from "./election-registry.ts";

@@ -727,7 +727,15 @@ contract BoardAnchorTest is TestBase {
         assertEq(logs[1].topics[0], BoardAnchor.ReceiptKeyRetired.selector, "topic 0");
         assertEq(logs[1].topics[1], _x(key), "x");
         assertTrue(keccak256(logs[1].data) == keccak256(abi.encode(uint8(3))), "prefix");
-        _assertAccumulated(logs);
+        // The two logs were emitted at different times, each bound in its step.
+        bytes32 acc = EventAccumulatorLib.genesis(uint64(block.chainid), address(anchor));
+        acc = EventAccumulatorLib.step(acc, 0, block.number, EPOCH, logs[0].topics, logs[0].data);
+        acc = EventAccumulatorLib.step(
+            acc, 1, block.number, EPOCH + 3600, logs[1].topics, logs[1].data
+        );
+        (bytes32 stored, uint64 count) = anchor.eventAccumulator();
+        assertEq(stored, acc, "accumulator");
+        assertEq(count, 2, "count");
         assertEq(
             uint256(vm.load(address(anchor), _receiptKeySlot(key))),
             (uint256(EPOCH + 3600) << 64) | EPOCH,
@@ -1115,7 +1123,9 @@ contract BoardAnchorTest is TestBase {
     function _assertAccumulated(Vm.Log[] memory logs) internal view {
         bytes32 acc = EventAccumulatorLib.genesis(uint64(block.chainid), address(anchor));
         for (uint256 i; i < logs.length; i++) {
-            acc = EventAccumulatorLib.step(acc, uint64(i), logs[i].topics, logs[i].data);
+            acc = EventAccumulatorLib.step(
+                acc, uint64(i), block.number, block.timestamp, logs[i].topics, logs[i].data
+            );
         }
         (bytes32 stored, uint64 count) = anchor.eventAccumulator();
         assertEq(stored, acc, "accumulator");

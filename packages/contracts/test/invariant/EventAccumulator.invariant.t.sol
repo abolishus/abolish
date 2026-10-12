@@ -3,11 +3,13 @@ pragma solidity 0.8.30;
 
 import {EventAccumulatorLib} from "../../src/EventAccumulator.sol";
 import {AccumulatorHarness} from "../utils/AccumulatorHarness.sol";
-import {TestBase} from "../utils/Vm.sol";
+import {TestBase, Vm} from "../utils/Vm.sol";
 
-/// Drives the harness with random logs and keeps a shadow replay of every
-/// log that succeeded.
+/// Drives the harness with random logs across blocks and keeps a shadow
+/// replay of every log that succeeded, each in the block that emitted it.
 contract AccumulatorHandler {
+    Vm internal constant vm = Vm(address(uint160(uint256(keccak256("hevm cheat code")))));
+
     AccumulatorHarness public immutable target;
     bytes32 public shadow;
     uint64 public shadowCount;
@@ -24,7 +26,9 @@ contract AccumulatorHandler {
             topics[t] = keccak256(abi.encode(seed, t));
         }
         target.emitLog(topics, data);
-        shadow = EventAccumulatorLib.step(shadow, shadowCount, topics, data);
+        shadow = EventAccumulatorLib.step(
+            shadow, shadowCount, block.number, block.timestamp, topics, data
+        );
         shadowCount++;
         _observe();
     }
@@ -35,9 +39,17 @@ contract AccumulatorHandler {
         topics[0] = AccumulatorHarness.Example.selector;
         topics[1] = id;
         topics[2] = bytes32(seq);
-        shadow = EventAccumulatorLib.step(shadow, shadowCount, topics, abi.encode(value, payload));
+        shadow = EventAccumulatorLib.step(
+            shadow, shadowCount, block.number, block.timestamp, topics, abi.encode(value, payload)
+        );
         shadowCount++;
         _observe();
+    }
+
+    /// Moves to a later block and time, so logs land in many blocks.
+    function advance(uint8 blocks, uint16 secs) external {
+        vm.roll(block.number + uint256(blocks) + 1);
+        vm.warp(block.timestamp + uint256(secs));
     }
 
     /// A call that reverts must leave the accumulator as it was.
@@ -58,7 +70,8 @@ contract AccumulatorHandler {
 
 /// Invariants, over any sequence of handler calls:
 /// 1. The stored accumulator equals the replay of exactly the logs whose calls
-///    succeeded, in order (nothing dropped, added or reordered; T-25, T-71).
+///    succeeded, in order, each with its own block number and timestamp
+///    (nothing dropped, added, reordered or moved; T-25, T-71).
 /// 2. The stored count equals the number of those logs.
 /// 3. The count never decreases.
 /// 4. Both values sit at the ERC-7201 slot a storage proof reads.

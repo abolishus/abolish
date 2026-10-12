@@ -8,7 +8,6 @@ import {
   semaphoreField,
   tierTreeRoot,
   type VouchContext,
-  verifyMembershipProof,
   VOUCH_K,
   VOUCH_LENGTH,
   VOUCH_SLOTS,
@@ -64,6 +63,7 @@ interface Vectors {
     readonly commitment: string;
     readonly record: string;
     readonly valid: boolean;
+    readonly snarkjs: boolean;
     readonly error?: string;
     readonly vouch?: number;
     readonly which?: "vouchee" | "slot";
@@ -155,55 +155,27 @@ describe("vouch vectors", () => {
 });
 
 describe("each check is needed", () => {
-  // The vectors refused by a cheap check carry proofs that verify, so each
-  // case shows that without its check the addition would pass.
-  const proofsVerify = (id: string) => {
-    const a = vectors.additions.find((x) => x.id === id);
-    if (a === undefined) throw new Error(id);
-    const decoded = decodeTier1Addition(hex(a.record));
-    if (!decoded.ok) throw new Error(`${id} doesn't decode`);
-    const { groupId, commitment, vouches } = decoded.value;
-    const ctx = ctxOf(a.context);
-    return vouches.every(
-      (v) =>
-        verifyMembershipProof(v.voucheeProof, {
-          root: v.root,
-          nullifier: v.voucheeNullifier,
-          message: semaphoreField(
-            vouchMessage(ctx, 0, groupId, commitment, v.tier2GroupId, v.rootBlock, v.slotNullifier),
-          ),
-          scope: semaphoreField(vouchScope(ctx, groupId, commitment)),
-        }) &&
-        verifyMembershipProof(v.slotProof, {
-          root: v.root,
-          nullifier: v.slotNullifier,
-          message: semaphoreField(
-            vouchMessage(
-              ctx,
-              1,
-              groupId,
-              commitment,
-              v.tier2GroupId,
-              v.rootBlock,
-              v.voucheeNullifier,
-            ),
-          ),
-          scope: semaphoreField(vouchSlotScope(ctx, v.slot)),
-        }),
-    );
-  };
+  // The vectors refused by a cheap check carry proofs that snarkjs accepts
+  // with the recomputed signals (root-zero's are forged for root 0), so
+  // without that check the addition would pass.
+  test.each(vectors.additions.filter((a) => !a.valid && a.error !== "proof"))(
+    "$id carries proofs snarkjs accepts",
+    (a) => {
+      expect(a.snarkjs).toBe(true);
+    },
+  );
 
-  test.each([
-    "forbidden-one",
-    "forbidden-zero-one",
-    "four-vouches",
-    "slot-equals-L",
-    "slot-max",
-    "duplicate-voucher",
-    "duplicate-slot",
-    "pooled-slot",
-  ])("%s carries proofs that verify", (id) => {
-    expect(proofsVerify(id)).toBe(true);
+  test("every check appears among the vectors", () => {
+    const errors = new Set(vectors.additions.map((a) => a.error));
+    for (const e of [
+      "forbidden-commitment",
+      "slot",
+      "root",
+      "duplicate-voucher",
+      "duplicate-slot",
+      "proof",
+    ])
+      expect(errors.has(e)).toBe(true);
   });
 });
 
@@ -219,6 +191,31 @@ describe("the record", () => {
     expect(HONEST.length).toBe(41 + VOUCH_LENGTH * VOUCH_K);
   });
 
+  test("only exactly k vouches decode", () => {
+    for (let n = 0; n <= 5; n++) {
+      const bytes = new Uint8Array(41 + VOUCH_LENGTH * n);
+      bytes[40] = n;
+      if (n !== VOUCH_K) expect(decodeTier1Addition(bytes)).toEqual({ ok: false, error: "length" });
+    }
+    const wrongCount = new Uint8Array(HONEST);
+    wrongCount[40] = VOUCH_K + 1;
+    expect(decodeTier1Addition(wrongCount)).toEqual({ ok: false, error: "length" });
+  });
+
+  test("the encoder refuses a proof that isn't 256 bytes", () => {
+    const decoded = decodeTier1Addition(HONEST);
+    if (!decoded.ok) throw new Error("honest doesn't decode");
+    const [v, ...rest] = decoded.value.vouches;
+    if (v === undefined) throw new Error("no vouch");
+    for (const proof of [new Uint8Array([...v.voucheeProof, 0]), v.voucheeProof.subarray(1)])
+      expect(() =>
+        encodeTier1Addition({
+          ...decoded.value,
+          vouches: [{ ...v, voucheeProof: proof }, ...rest],
+        }),
+      ).toThrow();
+  });
+
   test("arbitrary bytes decode or are refused, never throw", () => {
     fc.assert(
       fc.property(fc.uint8Array({ maxLength: 2000 }), (bytes) => {
@@ -230,24 +227,21 @@ describe("the record", () => {
   });
 
   test("a well-framed record with arbitrary contents never throws", () => {
-    // The right length for its count, so decoding reaches the values.
+    // The one length and count that decode, so decoding reaches the values.
     fc.assert(
-      fc.property(
-        fc.integer({ min: 0, max: 3 }),
-        fc.integer({ min: 0, max: 2 ** 31 }),
-        (n, seed) => {
-          const bytes = new Uint8Array(41 + VOUCH_LENGTH * n);
-          let x = seed;
-          for (let i = 0; i < bytes.length; i++) {
-            x = (x * 1103515245 + 12345) % 2 ** 31;
-            bytes[i] = x & 0xff;
-          }
-          bytes[40] = n;
-          const r = decodeTier1Addition(bytes);
-          if (r.ok) expect(encodeTier1Addition(r.value)).toEqual(bytes);
-          else expect(r.error).toBe("non-canonical");
-        },
-      ),
+      fc.property(fc.integer({ min: 0, max: 2 ** 31 }), (seed) => {
+        const n = VOUCH_K;
+        const bytes = new Uint8Array(41 + VOUCH_LENGTH * n);
+        let x = seed;
+        for (let i = 0; i < bytes.length; i++) {
+          x = (x * 1103515245 + 12345) % 2 ** 31;
+          bytes[i] = x & 0xff;
+        }
+        bytes[40] = n;
+        const r = decodeTier1Addition(bytes);
+        if (r.ok) expect(encodeTier1Addition(r.value)).toEqual(bytes);
+        else expect(r.error).toBe("non-canonical");
+      }),
       { numRuns: runs },
     );
   });
@@ -266,6 +260,20 @@ describe("the record", () => {
       // Each run verifies up to six proofs.
       { numRuns: Math.min(runs, 40) },
     );
+  });
+
+  test("a changed byte in every field of every vouch fails the honest addition", () => {
+    // Field offsets within a vouch: group, block, root, slot, both
+    // nullifiers, and each point of both proofs (A, B, C).
+    const fields = [0, 8, 16, 48, 50, 82, 114, 178, 306, 370, 434, 562];
+    const offsets = [0, 8];
+    for (let i = 0; i < VOUCH_K; i++)
+      for (const f of fields) offsets.push(41 + VOUCH_LENGTH * i + f);
+    for (const at of offsets) {
+      const bytes = new Uint8Array(HONEST);
+      bytes[at + 1] = ((bytes[at + 1] as number) + 1) % 256;
+      expect(checkTier1Addition(bytes, CTX).ok, `byte ${at + 1}`).toBe(false);
+    }
   });
 
   test("the honest addition fails under any other chain or registry", () => {

@@ -2,7 +2,7 @@
 
 A Tier 1 member is admitted by vouches from `k` distinct Tier 2 members, each spending one of a lifetime budget of `L` slots, anonymously and checkably from the board ([[0014-tier1-vouching]], option C). Each vouch is a pair of Semaphore proofs under the pinned depth-32 key ([[membership]]): one under a scope per vouchee, so the vouchers are distinct, and one under a scope per slot, so each voucher's budget is bounded. This page fixes the parameters, the binding, both scopes, both messages, the vouch and the Tier 1 addition record, and the checks of one addition on its own. Threats: T-02, T-06, T-22, T-13, T-12, T-31, T-52.
 
-What one addition can't show on its own is P3-3 part 2b's, and is added here before any group registry accepts Tier 1 additions ([[contracts]], Group registry): that each vouch's Tier 2 root is the root of a tier-2 group of the same registry at an anchoring period boundary within the root window `W` of the addition, that no earlier counted vouch in the deployment used its slot nullifiers, that its commitment isn't already an unremoved leaf, the rule for MOCK Tier 2 members, the total order over additions, and batched verification ([[0014-tier1-vouching]], Rules for P3-3 part 2). Until then no addition is counted toward Tier 1, and [[verifier]] 2.4 is unchanged.
+What one addition can't show on its own is P3-3 part 2b's, and is added here before any group registry accepts Tier 1 additions ([[contracts]], Group registry): that each vouch's Tier 2 root is the root of a tier-2 group of the same registry at an anchoring period boundary within the root window `W` of the addition, that no earlier counted vouch in the deployment used its slot nullifiers, that its commitment isn't already an unremoved leaf, the rule for MOCK Tier 2 members, the total order over additions, and batched verification ([[0014-tier1-vouching]], Rules for P3-3 part 2). Until then no vouched addition counts toward Tier 1, and no Tier 1 group can be created: the group registry refuses tier 1 until its addition path exists ([[contracts]], Group registry, Groups), so [[verifier]] 2.4's Safe wording for Tier 1, which 2b replaces, applies to no group.
 
 ## Parameters
 
@@ -77,14 +77,14 @@ A vouch is a fixed 626-byte structure:
 A Tier 1 addition carries its vouchee's commitment and exactly `k` vouches:
 
 ```
-tier1_addition = u64(group_id) ‖ field<bn254>(C_V) ‖ u8(vouches) ‖ vouch × vouches
+tier1_addition = u64(group_id) ‖ field<bn254>(C_V) ‖ u8(k) ‖ vouch × k
 ```
 
-so a record is exactly `41 + 626 · vouches` bytes, with `vouches` the byte at offset 40. `group_id` is the Tier 1 group; the chain ID and the registry's address come from where the record was logged ([[contracts]], Group registry, Verification), never from the record. Like the group registry's other records, it is contract calldata with no record header ([[notation]]): its layout is fixed by the registry deployment that accepts it (the release pins the registry), and a new layout is a new registry, never a second layout in one ([[versioning]]).
+so a record is exactly `41 + 626 · k` bytes, 1,919 at `k = 3`, and the byte at offset 40 is `k`. Exactly `k` leaves no choice of subset, so every verifier reaches the same answer, and a vouchee's spare vouches can't be split into a second addition that burns honest slots ([[0014-tier1-vouching]], Authorisation); the count byte makes the record self-describing, never variable. `group_id` is the Tier 1 group; the chain ID and the registry's address come from where the record was logged ([[contracts]], Group registry, Verification), never from the record. Like the group registry's other records, it is contract calldata with no record header ([[notation]]): its layout is fixed by the registry deployment that accepts it (the release pins the registry), and a new layout is a new registry, never a second layout in one. So it takes no entry in [[versioning]]'s record-type registry, which [[0014-tier1-vouching]] listed among the pages part 2 changes: the group registry's records never have.
 
 A strict decoder refuses, with these codes:
 
-- a record shorter than 41 bytes, or whose length isn't exactly `41 + 626 · vouches` (`length`, as for the group registry's other records, checked before anything else is read, so a hostile length costs nothing to refuse; T-52);
+- a record whose length isn't exactly `41 + 626 · k`, or whose count byte isn't `k` (`length`, as for the group registry's other records). Both are checked before any field is read, so a short addition, or one padded with 255 vouches' worth of points to check, costs nothing to refuse (T-52), and a contract that mirrors the decoder archives nothing longer (T-17). An addition with more or fewer than `k` vouches is refused here and consumes nothing;
 - `C_V`, a `root` or either nullifier at or above `r` (`non-canonical`, at the field's offset);
 - a proof that doesn't decode as a `membership_proof` (`non-canonical`, at the broken point's offset within the record; [[membership]], Proof encoding).
 
@@ -96,14 +96,15 @@ Given the binding's `chain_id` and `registry`, an addition passes if all of the 
 
 1. **`decode`**: the record decodes strictly (above).
 2. **`forbidden-commitment`**: `C_V` isn't forbidden ([[membership]], Commitments and removals). A vouch for a forbidden commitment counts for nothing, and a voucher's client refuses to make one.
-3. **`vouch-count`**: `vouches = k`. Exactly `k` leaves no choice of subset, so every verifier reaches the same answer, and a vouchee's spare vouches can't be split into a second addition that burns honest slots ([[0014-tier1-vouching]], Authorisation).
-4. **`slot`**: each vouch's `j < L`.
-5. **`root`**: each vouch's `ρ ≠ 0`. Semaphore's circuit proves membership of root 0 for any secret ([[membership]], Statement).
-6. **`duplicate-voucher`**: the `k` vouchee nullifiers are pairwise distinct (the position is the later of the first equal pair).
-7. **`duplicate-slot`**: the `k` slot nullifiers are pairwise distinct (likewise). One slot can't fund two vouches of one addition.
-8. **`proof`**: in record order, each vouch's vouchee proof (reported as `vouchee`) verifies under the pinned key with signals `[ρ, ν_V, m̂_V, ŝ_V]`, and then its slot proof (`slot`) with `[ρ, ν_S, m̂_S, ŝ_j]`, every scope and message recomputed from the binding, `C_V` and the vouch's own fields ([[membership]], Verification).
+3. **`slot`**: each vouch's `j < L`.
+4. **`root`**: each vouch's `ρ ≠ 0`. Semaphore's circuit proves membership of root 0 for any secret ([[membership]], Statement).
+5. **`duplicate-voucher`**: the `k` vouchee nullifiers are pairwise distinct; the position reported is that of the first vouch whose nullifier equals an earlier vouch's.
+6. **`duplicate-slot`**: the `k` slot nullifiers are pairwise distinct, reported likewise. One slot can't fund two vouches of one addition.
+7. **`proof`**: in record order, each vouch's vouchee proof (reported as `vouchee`) verifies under the pinned key with signals `[ρ, ν_V, m̂_V, ŝ_V]`, and then its slot proof (`slot`) with `[ρ, ν_S, m̂_S, ŝ_j]`, every scope and message recomputed from the binding, `C_V` and the vouch's own fields ([[membership]], Verification).
 
-The cheap checks come first, so a malformed or duplicated addition is refused before any pairing (T-52). Proofs are malleable: a re-randomised proof is the same vouch, with the same nullifiers, and its nullifiers, never its bytes, are what part 2b's slot accounting counts ([[membership]], Malleability; T-38).
+The cheap checks come first, so a malformed or duplicated addition is refused before any pairing (T-52).
+
+**A failing addition never fails anything else.** An addition that fails any check, here or in part 2b, doesn't count: it takes no leaf of the tier tree and consumes no slot, and it never fails the group or any definition naming it. That differs from the group registry's signed Tier 0 records, whose failure means a rewritten history (`group-history`, [[contracts]], Group registry, Verification): anyone can submit a Tier 1 addition, so treating a bad one as a fault would let anyone fail every election naming the group (T-25, T-53). How the registry numbers additions it logs but the verifier doesn't count is part 3's, with part 2b. Proofs are malleable: a re-randomised proof is the same vouch, with the same nullifiers, and its nullifiers, never its bytes, are what part 2b's slot accounting counts ([[membership]], Malleability; T-38).
 
 `checkTier1Addition` in `packages/crypto` runs exactly these checks; `vouchScope`, `vouchSlotScope` and `vouchMessage` compute the scopes and messages for the prover (P2-8) and the verifier.
 
@@ -124,4 +125,5 @@ These bind the ballot client (P2-6, P2-8), and part 3 builds them:
 
 - **One addition proves nothing about the deployment.** Until part 2b, a vouch's root isn't checked against Tier 2, its slot nullifiers aren't checked against earlier additions, and no addition counts toward Tier 1.
 - **The vouchee's IP address.** Whoever receives an addition sees the sender's network address next to `C_V` (T-11, T-22); [[0014-tier1-vouching]] states it.
+- **Sync time.** Each vouch's public `root_block` shows when the voucher's client last synced Tier 2 to that block; part 2b's rule that it be an anchoring period boundary coarsens this to the period (T-22).
 - **Size.** An addition is 1,919 bytes at `k = 3`, and checking one costs `2k = 6` Groth16 verifications; part 2b batches them.

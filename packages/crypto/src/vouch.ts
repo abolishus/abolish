@@ -3,7 +3,7 @@
 // one addition on its own. Which Tier 2 roots count, slot consumption across
 // the deployment and the root window are P3-3 part 2b's.
 
-import { DecodeError, Reader, encode, fieldBn254, u16, u64, u8 } from "./codec.ts";
+import { DecodeError, EncodeError, Reader, encode, fieldBn254, u16, u64, u8 } from "./codec.ts";
 import { ds } from "./domain-separation.ts";
 import { isForbiddenCommitment } from "./group-registry.ts";
 import { H } from "./group.ts";
@@ -12,8 +12,9 @@ import { PARAMETERS } from "./parameters.ts";
 import {
   MEMBERSHIP_PROOF_LENGTH,
   encodeMembershipProof,
+  type MembershipProof,
   membershipProof,
-  verifyMembershipProof,
+  verifyDecodedMembershipProof,
 } from "./membership-proof.ts";
 
 /** `k`: the vouches a Tier 1 addition carries. */
@@ -23,6 +24,7 @@ export const VOUCH_SLOTS = PARAMETERS.VOUCH_SLOTS;
 /** A vouch's encoded length. */
 export const VOUCH_LENGTH = 8 + 8 + 32 + 2 + 32 + 32 + 2 * MEMBERSHIP_PROOF_LENGTH;
 const ADDITION_HEADER = 8 + 32 + 1;
+const ADDITION_LENGTH = ADDITION_HEADER + VOUCH_K * VOUCH_LENGTH;
 
 /** Where a Tier 1 addition was logged: the L2's chain ID and the group registry's address. */
 export interface VouchContext {
@@ -56,7 +58,7 @@ export type Tier1AdditionDecodeResult =
 export type Tier1AdditionResult =
   | { readonly ok: true; readonly value: Tier1Addition }
   | { readonly ok: false; readonly error: "decode"; readonly decode: Tier1AdditionDecodeResult }
-  | { readonly ok: false; readonly error: "forbidden-commitment" | "vouch-count" }
+  | { readonly ok: false; readonly error: "forbidden-commitment" }
   | {
       readonly ok: false;
       readonly error: "slot" | "root" | "duplicate-voucher" | "duplicate-slot";
@@ -160,55 +162,68 @@ export function vouchMessage(
 
 // A proof is decoded for strictness (every point canonical, on its curve and
 // in its subgroup; T-05, T-31) and kept as the bytes the record carries.
-function readProof(r: Reader): Uint8Array {
+function readProof(r: Reader): { bytes: Uint8Array; points: MembershipProof } {
   const at = r.offset;
   const bytes = new Uint8Array(r.take(MEMBERSHIP_PROOF_LENGTH));
   try {
-    membershipProof.read(new Reader(bytes));
+    return { bytes, points: membershipProof.read(new Reader(bytes)) };
   } catch (e) {
     if (e instanceof DecodeError) throw new DecodeError(e.code, at + e.offset);
     throw e;
   }
-  return bytes;
 }
 
-function readVouch(r: Reader): Vouch {
+// The decoded points of each vouch's two proofs, kept so a check verifies
+// them without decoding and subgroup-checking them again (T-52).
+type DecodedProofs = readonly (readonly [MembershipProof, MembershipProof])[];
+
+function readVouch(r: Reader, proofs: (readonly [MembershipProof, MembershipProof])[]): Vouch {
+  const tier2GroupId = u64.read(r);
+  const rootBlock = u64.read(r);
+  const root = fieldBn254.read(r);
+  const slot = r.uint(2);
+  const voucheeNullifier = fieldBn254.read(r);
+  const slotNullifier = fieldBn254.read(r);
+  const voucheeProof = readProof(r);
+  const slotProof = readProof(r);
+  proofs.push([voucheeProof.points, slotProof.points]);
   return {
-    tier2GroupId: u64.read(r),
-    rootBlock: u64.read(r),
-    root: fieldBn254.read(r),
-    slot: r.uint(2),
-    voucheeNullifier: fieldBn254.read(r),
-    slotNullifier: fieldBn254.read(r),
-    voucheeProof: readProof(r),
-    slotProof: readProof(r),
+    tier2GroupId,
+    rootBlock,
+    root,
+    slot,
+    voucheeNullifier,
+    slotNullifier,
+    voucheeProof: voucheeProof.bytes,
+    slotProof: slotProof.bytes,
   };
 }
 
-/**
- * Decodes a Tier 1 addition record strictly:
- * `u64(group_id) ‖ field<bn254>(C_V) ‖ u8(vouches) ‖ vouch × vouches`. The
- * length is checked against the count byte before anything else is read, so
- * a hostile length costs nothing to refuse (T-52, T-17); then every field
- * element must be canonical and every proof point valid (T-31).
- */
-export function decodeTier1Addition(bytes: Uint8Array): Tier1AdditionDecodeResult {
+type Decoded =
+  | { readonly ok: true; readonly value: Tier1Addition; readonly proofs: DecodedProofs }
+  | Exclude<Tier1AdditionDecodeResult, { ok: true }>;
+
+function decodeAddition(bytes: Uint8Array): Decoded {
   if (!(bytes instanceof Uint8Array) || !ArrayBuffer.isView(bytes))
     throw new TypeError("decodeTier1Addition: expected a Uint8Array");
   // Copied once, so the length checked is the length read.
   const b = new Uint8Array(bytes);
-  if (b.length < ADDITION_HEADER) return { ok: false, error: "length" };
-  const count = b[ADDITION_HEADER - 1] as number;
-  if (b.length !== ADDITION_HEADER + VOUCH_LENGTH * count) return { ok: false, error: "length" };
+  // k is fixed by the layout: any other count, or a length that doesn't match
+  // it, is refused before a single field is read, so neither a short addition
+  // nor 255 vouches' worth of points costs a verifier anything (T-52), and no
+  // contract mirroring this decoder archives an oversize record (T-17).
+  if (b.length !== ADDITION_LENGTH || b[ADDITION_HEADER - 1] !== VOUCH_K)
+    return { ok: false, error: "length" };
   const r = new Reader(b);
   try {
     const groupId = u64.read(r);
     const commitment = fieldBn254.read(r);
     r.uint(1);
     const vouches: Vouch[] = [];
-    for (let i = 0; i < count; i++) vouches.push(readVouch(r));
+    const proofs: (readonly [MembershipProof, MembershipProof])[] = [];
+    for (let i = 0; i < VOUCH_K; i++) vouches.push(readVouch(r, proofs));
     r.end();
-    return { ok: true, value: { groupId, commitment, vouches } };
+    return { ok: true, value: { groupId, commitment, vouches }, proofs };
   } catch (e) {
     // The length is exact, so the only decode failure left is a value.
     if (e instanceof DecodeError && e.code === "non-canonical")
@@ -217,12 +232,28 @@ export function decodeTier1Addition(bytes: Uint8Array): Tier1AdditionDecodeResul
   }
 }
 
+/**
+ * Decodes a Tier 1 addition record strictly:
+ * `u64(group_id) ‖ field<bn254>(C_V) ‖ u8(k) ‖ vouch × k`, exactly
+ * `41 + 626·k` bytes. A record of any other length or count is `length`;
+ * then every field element must be canonical and every proof point valid
+ * (`non-canonical` at its offset; T-31).
+ */
+export function decodeTier1Addition(bytes: Uint8Array): Tier1AdditionDecodeResult {
+  const decoded = decodeAddition(bytes);
+  return decoded.ok ? { ok: true, value: decoded.value } : decoded;
+}
+
 /** Encodes a Tier 1 addition record; every accepted encoding re-encodes to itself. */
 export function encodeTier1Addition(addition: Tier1Addition): Uint8Array {
   const { groupId, commitment, vouches } = addition;
   if (!Array.isArray(vouches)) throw new TypeError("encodeTier1Addition: vouches must be an array");
   const parts = [encode(u64, groupId), encode(fieldBn254, commitment), encode(u8, vouches.length)];
   for (const v of vouches as readonly Vouch[]) {
+    // A longer or shorter array would otherwise be cut or misread silently.
+    for (const proof of [v.voucheeProof, v.slotProof])
+      if (!(proof instanceof Uint8Array) || proof.length !== MEMBERSHIP_PROOF_LENGTH)
+        throw new EncodeError("encodeTier1Addition: a proof must be 256 bytes");
     const voucheeProof = encodeMembershipProof(membershipProof.read(new Reader(v.voucheeProof)));
     const slotProof = encodeMembershipProof(membershipProof.read(new Reader(v.slotProof)));
     parts.push(
@@ -255,8 +286,8 @@ function firstRepeat(
 /**
  * The checks of one Tier 1 addition on its own (docs/spec/vouching.md, Checks
  * of one addition), in the spec's order, reporting the first failure and the
- * failing vouch's position: decoding, a forbidden commitment, exactly `k`
- * vouches, every slot below `L`, every root nonzero, pairwise-distinct
+ * failing vouch's position: decoding (which fixes exactly `k` vouches), a
+ * forbidden commitment, every slot below `L`, every root nonzero, pairwise-distinct
  * vouchee nullifiers (distinct vouchers, T-02), pairwise-distinct slot
  * nullifiers (one slot funds one vouch), then both proofs of each vouch under
  * the pinned key with every scope and message recomputed here, never taken
@@ -267,11 +298,10 @@ function firstRepeat(
  */
 export function checkTier1Addition(record: Uint8Array, ctx: VouchContext): Tier1AdditionResult {
   const c = context(ctx);
-  const decoded = decodeTier1Addition(record);
+  const decoded = decodeAddition(record);
   if (!decoded.ok) return { ok: false, error: "decode", decode: decoded };
   const { groupId, commitment, vouches } = decoded.value;
   if (isForbiddenCommitment(commitment)) return { ok: false, error: "forbidden-commitment" };
-  if (vouches.length !== VOUCH_K) return { ok: false, error: "vouch-count" };
   for (const [i, v] of vouches.entries())
     if (v.slot >= VOUCH_SLOTS) return { ok: false, error: "slot", vouch: i };
   for (const [i, v] of vouches.entries())
@@ -286,14 +316,15 @@ export function checkTier1Addition(record: Uint8Array, ctx: VouchContext): Tier1
       semaphoreField(
         vouchMessage(c, role, groupId, commitment, v.tier2GroupId, v.rootBlock, other),
       );
-    const voucheeOk = verifyMembershipProof(v.voucheeProof, {
+    const [voucheeProof, slotProof] = decoded.proofs[i] as DecodedProofs[number];
+    const voucheeOk = verifyDecodedMembershipProof(voucheeProof, {
       root: v.root,
       nullifier: v.voucheeNullifier,
       message: message(0, v.slotNullifier),
       scope: voucheeScope,
     });
     if (!voucheeOk) return { ok: false, error: "proof", vouch: i, which: "vouchee" };
-    const slotOk = verifyMembershipProof(v.slotProof, {
+    const slotOk = verifyDecodedMembershipProof(slotProof, {
       root: v.root,
       nullifier: v.slotNullifier,
       message: message(1, v.voucheeNullifier),

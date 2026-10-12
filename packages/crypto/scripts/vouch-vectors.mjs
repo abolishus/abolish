@@ -102,6 +102,7 @@ const message = (ctx, role, groupId, cv, t2, block, other) => {
 };
 const CTX = { chainId: CHAIN_ID, registry: REGISTRY };
 const OTHER_CTX = { chainId: 8453n, registry: REGISTRY };
+const OTHER_REGISTRY = Buffer.from("5a0b5a0b5a0b5a0b5a0b5a0b5a0b5a0b5a0b5a0c", "hex");
 
 // --- The Tier 2 tier tree (docs/spec/membership.md, Tier tree). ---
 const Z = [0n];
@@ -180,19 +181,27 @@ const nullifierOf = (voucherIndex, scopeBytes) =>
  * `voucher` and the slot proof by `slotVoucher` (the same member unless the
  * slot is pooled), spending slot `j`.
  */
-async function vouch({ ctx = CTX, groupId = TIER1_GROUP, cv, voucher, slotVoucher = voucher, j }) {
+async function vouch({
+  ctx = CTX,
+  groupId = TIER1_GROUP,
+  cv,
+  voucher,
+  slotVoucher = voucher,
+  j,
+  rootBlock = ROOT_BLOCK,
+}) {
   const sV = vouchScope(ctx, groupId, cv);
   const sJ = slotScope(ctx, j);
   const nV = nullifierOf(voucher, sV);
   const nS = nullifierOf(slotVoucher, sJ);
-  const mV = message(ctx, 0, groupId, cv, T2_GROUP, ROOT_BLOCK, nS);
-  const mS = message(ctx, 1, groupId, cv, T2_GROUP, ROOT_BLOCK, nV);
+  const mV = message(ctx, 0, groupId, cv, T2_GROUP, rootBlock, nS);
+  const mS = message(ctx, 1, groupId, cv, T2_GROUP, rootBlock, nV);
   const pV = await prove(voucher, sV, mV);
   const pS = await prove(slotVoucher, sJ, mS);
   if (pV.nullifier !== nV || pS.nullifier !== nS) throw new Error("nullifier");
   return {
     tier2GroupId: T2_GROUP,
-    rootBlock: ROOT_BLOCK,
+    rootBlock,
     root: t2.root,
     slot: j,
     voucheeNullifier: nV,
@@ -244,7 +253,6 @@ async function snarkjsVerdicts(ctx, groupId, cv, v) {
 async function expected(ctx, groupId, cv, vouches) {
   const forbidden = cv < 2n || cv >= R || cv === POSEIDON2_ZERO_ONE;
   if (forbidden) return { error: "forbidden-commitment" };
-  if (vouches.length !== K) return { error: "vouch-count" };
   for (const [i, v] of vouches.entries()) if (v.slot >= L) return { error: "slot", vouch: i };
   for (const [i, v] of vouches.entries()) if (v.root === 0n) return { error: "root", vouch: i };
   for (const field of ["voucheeNullifier", "slotNullifier"])
@@ -264,6 +272,11 @@ async function expected(ctx, groupId, cv, vouches) {
 const additions = [];
 async function addition(id, description, { ctx = CTX, groupId = TIER1_GROUP, cv, vouches, want }) {
   const got = await expected(ctx, groupId, cv, vouches);
+  // Whether every proof passes snarkjs with the recomputed signals: a case a
+  // cheap check refuses but whose proofs all pass shows that check is needed.
+  let snarkjs = true;
+  for (const v of vouches)
+    if ((await snarkjsVerdicts(ctx, groupId, cv, v)).includes(false)) snarkjs = false;
   if (JSON.stringify(got) !== JSON.stringify(want))
     throw new Error(
       `${id}: expected ${JSON.stringify(want)}, the checks give ${JSON.stringify(got)}`,
@@ -275,6 +288,7 @@ async function addition(id, description, { ctx = CTX, groupId = TIER1_GROUP, cv,
     groupId: String(groupId),
     commitment: String(cv),
     record: encodeAddition(groupId, cv, vouches).toString("hex"),
+    snarkjs,
     ...(want.error === undefined ? { valid: true } : { valid: false, ...want }),
   });
 }
@@ -359,21 +373,24 @@ await addition("same-vouch-twice", "one vouch repeated: the vouchee duplicate is
   want: { error: "duplicate-voucher", vouch: 2 },
 });
 
-await addition("two-vouches", "k − 1 vouches", {
-  cv: c0,
-  vouches: [h0, h1],
-  want: { error: "vouch-count" },
-});
+// Any count but k is refused by the decoder's length rule (`decode` below).
 const h3 = await vouch({ cv: c0, voucher: 3, j: 4 });
-await addition("four-vouches", "k + 1 valid vouches from four vouchers", {
-  cv: c0,
-  vouches: [h0, h1, h2, h3],
-  want: { error: "vouch-count" },
-});
-await addition("no-vouches", "no vouch at all", {
-  cv: c0,
-  vouches: [],
-  want: { error: "vouch-count" },
+const countRecords = [
+  ["two-vouches", "k − 1 vouches, framed consistently", encodeAddition(TIER1_GROUP, c0, [h0, h1])],
+  [
+    "four-vouches",
+    "k + 1 valid vouches from four vouchers",
+    encodeAddition(TIER1_GROUP, c0, [h0, h1, h2, h3]),
+  ],
+  ["no-vouches", "no vouch at all", encodeAddition(TIER1_GROUP, c0, [])],
+];
+
+// Vouches may name different blocks (and groups): each binds its own.
+const late = await vouch({ cv: c1, voucher: 3, j: 8, rootBlock: ROOT_BLOCK + 100n });
+await addition("mixed-root-blocks", "one vouch names a later root block than the other two", {
+  cv: c1,
+  vouches: [late, p1, p2],
+  want: {},
 });
 
 // Slot out of range: proofs valid for S_12, refused by the range check alone.
@@ -427,12 +444,47 @@ for (const [id, cv] of [
   );
 }
 
-// Root 0: the vouch's root field set to 0 (its proofs no longer matter).
-await addition("root-zero", "a vouch naming root 0", {
-  cv: c0,
-  vouches: [h0, { ...h1, root: 0n }, h2],
-  want: { error: "root", vouch: 1 },
-});
+// Root 0: Semaphore's circuit outputs ρ = 0 for a proof length above the
+// depth, for any secret, and snarkjs accepts such proofs. Only the root check
+// refuses this vouch (docs/spec/membership.md, Statement).
+async function forged(voucherIndex, scopeBytes, messageBytes) {
+  const identity = vouchers[voucherIndex];
+  const { proof, publicSignals } = await groth16.fullProve(
+    {
+      secret: identity.secretScalar,
+      merkleProofLength: DEPTH + 1,
+      merkleProofIndex: 0,
+      merkleProofSiblings: Array(DEPTH).fill(0n),
+      scope: F(scopeBytes),
+      message: F(messageBytes),
+    },
+    art.wasm,
+    art.zkey,
+  );
+  if (BigInt(publicSignals[0]) !== 0n) throw new Error("forged proof should output root 0");
+  return proof;
+}
+{
+  const sV = vouchScope(CTX, TIER1_GROUP, c0);
+  const sJ = slotScope(CTX, 9);
+  const nV = nullifierOf(4, sV);
+  const nS = nullifierOf(4, sJ);
+  const zero = {
+    tier2GroupId: T2_GROUP,
+    rootBlock: ROOT_BLOCK,
+    root: 0n,
+    slot: 9,
+    voucheeNullifier: nV,
+    slotNullifier: nS,
+    voucheeProof: await forged(4, sV, message(CTX, 0, TIER1_GROUP, c0, T2_GROUP, ROOT_BLOCK, nS)),
+    slotProof: await forged(4, sJ, message(CTX, 1, TIER1_GROUP, c0, T2_GROUP, ROOT_BLOCK, nV)),
+  };
+  await addition(
+    "root-zero",
+    "a vouch with forged proofs of root 0 (proof length 33), which snarkjs accepts",
+    { cv: c0, vouches: [h0, zero, h2], want: { error: "root", vouch: 1 } },
+  );
+}
 
 // Moved and rewritten vouches: every proof check recomputes the signals.
 await addition("other-group", "the honest vouches submitted for another Tier 1 group", {
@@ -554,6 +606,7 @@ const decode = [
     error: "non-canonical",
     offset: V0 + 370 + 192,
   },
+  ...countRecords.map(([name, note, record]) => ({ name, note, record, error: "length" })),
 ].map((d) => ({ ...d, record: d.record.toString("hex") }));
 if (good.length !== 1919) throw new Error("addition length");
 
@@ -575,6 +628,29 @@ const scopes = [
     slot: j,
   })),
   {
+    id: "vouchee-other-group",
+    kind: "vouchee",
+    chainId: String(CHAIN_ID),
+    registry: REGISTRY.toString("hex"),
+    groupId: String(TIER1_GROUP + 1n),
+    commitment: String(c0),
+  },
+  {
+    id: "vouchee-other-registry",
+    kind: "vouchee",
+    chainId: String(CHAIN_ID),
+    registry: OTHER_REGISTRY.toString("hex"),
+    groupId: String(TIER1_GROUP),
+    commitment: String(c0),
+  },
+  {
+    id: "slot-0-other-registry",
+    kind: "slot",
+    chainId: String(CHAIN_ID),
+    registry: OTHER_REGISTRY.toString("hex"),
+    slot: 0,
+  },
+  {
     id: "slot-0-other-chain",
     kind: "slot",
     chainId: String(OTHER_CTX.chainId),
@@ -582,10 +658,11 @@ const scopes = [
     slot: 0,
   },
 ].map((s) => {
+  const ctx = { chainId: BigInt(s.chainId), registry: Buffer.from(s.registry, "hex") };
   const bytes =
     s.kind === "vouchee"
-      ? vouchScope(CTX, BigInt(s.groupId), BigInt(s.commitment))
-      : slotScope({ chainId: BigInt(s.chainId), registry: REGISTRY }, s.slot);
+      ? vouchScope(ctx, BigInt(s.groupId), BigInt(s.commitment))
+      : slotScope(ctx, s.slot);
   return { ...s, scope: bytes.toString("hex"), scopeField: String(F(bytes)) };
 });
 const messages = [0, 1].map((role) => {

@@ -561,7 +561,7 @@
     },
     {
       "id": "failing-receipts",
-      "description": "Seat 1's receipt fails four ways: a share_hash field that isn't the ballot's (over a signature on the right statement), another seat's key, the identity key, and a signature over seat 2's ciphertext",
+      "description": "Seat 1's receipt fails four ways: a share_hash field that isn't the ballot's (over a signature on the right statement), another seat's key, the identity key, and seat 1's own signature over seat 2's ciphertext (attributed to seat 1)",
       "registered": [1, 2, 3],
       "segments": {
         "delivery": "40",
@@ -615,19 +615,23 @@
         "records": [
           {
             "at": 0,
-            "code": "share-receipt"
+            "code": "share-receipt",
+            "signer": null
           },
           {
             "at": 1,
-            "code": "share-receipt"
+            "code": "share-receipt",
+            "signer": null
           },
           {
             "at": 2,
-            "code": "share-receipt"
+            "code": "share-receipt",
+            "signer": null
           },
           {
             "at": 3,
-            "code": "share-receipt"
+            "code": "share-receipt",
+            "signer": 1
           }
         ],
         "rejected": []

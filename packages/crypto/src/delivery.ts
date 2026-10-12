@@ -218,7 +218,10 @@ export type DeliveryRecordCode =
 export interface DeliveryRecordReport {
   readonly at: number;
   readonly code: DeliveryRecordCode;
-  /** The seat its signature attributes it to, where the code is attributable; otherwise `null`. */
+  /**
+   * The seat its signature attributes it to, or `null`, for the attributable
+   * codes (`share-receipt`, `complaint-unfounded`, `receipt-contradicted`).
+   */
   readonly signer?: number | null;
 }
 
@@ -375,7 +378,12 @@ export function checkDelivery(
           d.record.signature,
         );
       if (!ok) {
-        records.push({ at, code: "share-receipt" });
+        // T-29: a seat whose signature verifies over the record's own fields
+        // signed a share hash other than the ballot's for this ballot.
+        const signer = checkReceiptStatement(registered, d.record, d.record.signature)
+          ? r.seat
+          : null;
+        records.push({ at, code: "share-receipt", signer });
         return;
       }
       (delivered[ballot] as Set<number>).add(r.seat);

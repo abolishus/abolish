@@ -217,7 +217,9 @@ def check_delivery(definition_hash, registered, seg_d, seg_k, ballots, entries):
                 key["signingKey"], bv.ds(RECEIPT_TAG, sr.statement(definition_hash, hashes[i], seat, shares[seat - 1])), f["signature"]
             )
             if not ok:
-                reports.append({"at": at, "code": "share-receipt"})
+                own = sr.statement(definition_hash, f["ballotHash"], seat, f["shareHash"])
+                signer = seat if ecdsa.verify(key["signingKey"], bv.ds(RECEIPT_TAG, own), f["signature"]) else None
+                reports.append({"at": at, "code": "share-receipt", "signer": signer})
                 continue
             delivered[i].add(seat)
             receipts.append((at, i, seat))
@@ -465,11 +467,13 @@ def main():
     other_ct = receipt_record(definition_hash, b_["hash"], 1, sh[1], sr.sign(signing_secret(1), m_other_ct))
     r = election(
         "failing-receipts",
-        "Seat 1's receipt fails four ways: a share_hash field that isn't the ballot's (over a signature on the right statement), another seat's key, the identity key, and a signature over seat 2's ciphertext",
+        "Seat 1's receipt fails four ways: a share_hash field that isn't the ballot's (over a signature on the right statement), another seat's key, the identity key, and seat 1's own signature over seat 2's ciphertext (attributed to seat 1)",
         ["alice"],
         at(3, wrong_field, wrong_key, identity, other_ct, R("alice", 2), R("alice", 3)),
     )
     assert r["ballots"][0]["missing"] == [1] and [x["code"] for x in r["records"]] == ["share-receipt"] * 4
+    # Only the last is seat 1's signature over its own fields: a share hash other than the ballot's, attributed.
+    assert [x["signer"] for x in r["records"]] == [None, None, None, 1]
 
     r = election("unqualified-seat", "Seat 3 isn't qualified: seats 1 and 2 deliver the ballot, and seat 3's receipt names an unregistered seat", ["alice"], at(3, R("alice", 1), R("alice", 2), R("alice", 3)), seats=(1, 2))
     assert r["ballots"][0]["counted"] and r["records"] == [{"at": 2, "code": "delivery-seat"}]

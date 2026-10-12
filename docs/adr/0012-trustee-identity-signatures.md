@@ -1,6 +1,6 @@
 # ADR 0012: Trustee identity signatures
 
-- Status: Accepted (agent) — owner may veto (2026-10-11, rule A): option B
+- Status: Accepted (agent) — owner may veto (2026-10-11, rule A): option B; confirmed by the owner (2026-10-12)
 - Date: 2026-10-11
 - Deciders: agent, owner may veto (rule A)
 - Threats addressed: T-37, T-14, T-29, T-31, T-30, T-71 (see [[THREAT_MODEL]])

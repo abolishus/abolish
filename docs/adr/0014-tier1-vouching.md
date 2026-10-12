@@ -1,6 +1,6 @@
 # ADR 0014: Tier 1 vouching
 
-- Status: Accepted (agent) — owner may veto (2026-10-11, rule A): option C
+- Status: Accepted (agent) — owner may veto (2026-10-11, rule A): option C; confirmed by the owner (2026-10-12)
 - Date: 2026-10-11
 - Deciders: agent, owner may veto (rule A)
 - Threats addressed: T-02, T-06, T-22, T-13, T-10, T-11, T-12, T-15, T-17, T-18, T-20, T-25, T-27, T-52, T-69 (see [[THREAT_MODEL]])

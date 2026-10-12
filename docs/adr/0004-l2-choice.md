@@ -1,6 +1,6 @@
 # ADR 0004: L2 choice
 
-- Status: Accepted (agent) — owner may veto (2026-10-10, rule A): option B, for development and testnet only; mainnet waits for the owner
+- Status: Accepted (agent) — owner may veto (2026-10-10, rule A): option B, for development and testnet only; mainnet waits for the owner; confirmed by the owner for development and testnet (2026-10-12); before mainnet the owner revisits Base vs Arbitrum One against L2BEAT's stages and sequencer jurisdiction
 - Date: 2026-10-09
 - Deciders: agent, owner may veto (rule A); owner: mainnet
 - Threats addressed: T-50, T-71 (new), T-35, T-11, T-13, T-26, T-06, T-33, T-34, T-37, T-38, T-62, T-69 (see [[THREAT_MODEL]])

@@ -1,6 +1,6 @@
 # ADR 0006: Trustees, k-of-n and named trustees
 
-- Status: needs-decision (owner decides; never defaulted)
+- Status: structure decided by the owner (2026-10-12): option B (4-of-7) with rule 7 (an election opens only with at least n − 1 = 6 trustees); names pending
 - Date: 2026-10-09
 - Deciders: owner (one-way door)
 - Threats addressed: T-14, T-54, T-37, T-40, T-61, T-16, T-69, T-15, T-29; worsens T-11 (see [[THREAT_MODEL]])
@@ -112,6 +112,13 @@ What would change the recommendation:
 | Seat | Trustee | Jurisdiction | Node hosting | Key verification contact |
 | ---- | ------- | ------------ | ------------ | ------------------------ |
 | 1    |         |              |              |                          |
+
+## Owner decision (2026-10-12)
+
+- **Structure:** option B, one 4-of-7 panel of trustee nodes, under rules 1 to 7. Option C's civic panel is revisited before Phase 5.
+- **Rule 7 adopted:** an election opens only when at least n − 1 = 6 trustees take part in its ceremony. Contracts' registration quorum for a pinned panel is therefore `q = n − 1`, not `q = k`.
+- **Names:** pending; the owner is recruiting. No agent picks or contacts trustees.
+- **Still open:** the tier-floor question under Consequences (whether a tier below the minimum size may be withheld or merged). Until answered, every tier is decrypted and small tiers carry T-16's warning.
 
 ## Default
 

@@ -1,6 +1,6 @@
 # ADR 0011: Re-vote rule
 
-- Status: Accepted (agent) — owner may veto (2026-10-11, rule A): option C
+- Status: Accepted (agent) — owner may veto (2026-10-11, rule A): option C; confirmed by the owner (2026-10-12)
 - Date: 2026-10-11
 - Deciders: agent, owner may veto (rule A)
 - Threats addressed: T-33, T-38, T-45, T-25, T-23, T-35 (see [[THREAT_MODEL]])

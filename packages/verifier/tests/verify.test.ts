@@ -230,7 +230,7 @@ describe("report", () => {
   });
 
   test("reports every unimplemented check as unverifiable, never as pass", () => {
-    const implemented = new Set(["2.9", "4.1", "4.2", "8.5"]);
+    const implemented = new Set(["4.1", "4.2", "8.5"]);
     for (const c of report.checks.filter((x) => !implemented.has(x.id)))
       expect(c).toEqual({
         id: c.id,
@@ -240,11 +240,12 @@ describe("report", () => {
       });
   });
 
-  test("2.9 passes a version-1 definition, which lists no receipt keys to check", () => {
+  test("2.9 is unverifiable for a bundle that carries no definition", () => {
     expect(report.checks.find((c) => c.id === "2.9")).toEqual({
       id: "2.9",
       kind: "election",
-      status: "pass",
+      status: "unverifiable",
+      code: "not-implemented",
     });
   });
 

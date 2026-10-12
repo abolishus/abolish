@@ -61,8 +61,9 @@ function selectPlural(locale: string, message: Plural, params: Params): string {
   if (typeof count !== "number" && typeof count !== "bigint") {
     throw new MessageFormatError('a plural message needs a numeric "count" parameter');
   }
-  // `Intl.PluralRules.select` takes a number; above 2^53 every locale's
-  // category is already decided by magnitude, so the conversion loses nothing.
+  // `Intl.PluralRules.select` takes a number, so above
+  // Number.MAX_SAFE_INTEGER the category is approximate (CLDR's `many` in
+  // fr, es, it and pt tests `i % 1000000 = 0`). No count gets near that.
   const category = new Intl.PluralRules(locale).select(Number(count));
   return message[category] ?? message.other;
 }

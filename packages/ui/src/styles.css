@@ -74,9 +74,11 @@
 }
 
 @layer base {
+  /* The raw tokens, not --color-*: `@theme inline` resolves those at :root,
+     so they wouldn't follow a data-theme set on <body>. */
   body {
-    background-color: var(--color-paper);
-    color: var(--color-ink);
+    background-color: var(--abolish-paper);
+    color: var(--abolish-ink);
     font-family: var(--font-sans);
   }
 }

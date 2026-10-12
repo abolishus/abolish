@@ -6,10 +6,10 @@ import tailwindcss from "@tailwindcss/vite";
 import { defineConfig, type Plugin } from "vite-plus";
 import { playwright } from "vite-plus/test/browser-playwright";
 
-// The IBM Plex fonts reach the bundle through @abolishus/ui's CSS, which
+// The fonts (Oxanium, JetBrains Mono) reach the bundle through @abolishus/ui's CSS, which
 // build.license doesn't see, and their OFL-1.1 must go with every copy.
 const fromUi = createRequire(new URL("../../packages/ui/package.json", import.meta.url));
-const FONT_PACKAGES = ["ibm-plex-sans", "ibm-plex-mono", "ibm-plex-serif"];
+const FONT_PACKAGES = ["@fontsource-variable/oxanium", "@fontsource-variable/jetbrains-mono"];
 const fontLicenses: Plugin = {
   name: "font-licenses",
   apply: "build",
@@ -18,8 +18,7 @@ const fontLicenses: Plugin = {
       type: "asset",
       fileName: "font-licenses.txt",
       source: FONT_PACKAGES.map(
-        (name) =>
-          `@fontsource/${name}\n\n${readFileSync(fromUi.resolve(`@fontsource/${name}/LICENSE`), "utf8")}`,
+        (name) => `${name}\n\n${readFileSync(fromUi.resolve(`${name}/LICENSE`), "utf8")}`,
       ).join("\n\n"),
     });
   },

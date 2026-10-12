@@ -17,8 +17,29 @@ import { BALLOT_CSP, parseCsp } from "./csp.ts";
 const root = fileURLToPath(new URL("..", import.meta.url));
 const repo = join(root, "..", "..");
 
-/** npm packages whose code may run in the ballot client: the framework only. */
-const RUNTIME_PACKAGES = new Set(["react", "react-dom", "scheduler"]);
+/**
+ * npm packages whose code may run in the ballot client: React, and the shadcn/ui
+ * runtime the owner allowed (Base UI and its dependencies, cva, cn, lucide).
+ * Anything else fails; adding to this list is a reviewed change.
+ */
+const RUNTIME_PACKAGES = new Set([
+  "react",
+  "react-dom",
+  "scheduler",
+  "@base-ui/react",
+  "@base-ui/utils",
+  "@floating-ui/core",
+  "@floating-ui/dom",
+  "@floating-ui/react-dom",
+  "@floating-ui/utils",
+  "@babel/runtime",
+  "reselect",
+  "use-sync-external-store",
+  "class-variance-authority",
+  "clsx",
+  "cn",
+  "lucide-react",
+]);
 /** Workspace source the client may bundle. */
 const WORKSPACE_SOURCES = ["apps/ballot/src/", "apps/ballot/index.html", "packages/ui/src/"];
 
@@ -136,14 +157,14 @@ describe("bundle contents", () => {
     expect(outside).toEqual([]);
   });
 
-  test("emits only the page, scripts, styles and self-hosted IBM Plex fonts", () => {
+  test("emits only the page, scripts, styles and self-hosted fonts", () => {
     const unexpected = [...files.keys()].filter(
       (name) =>
         name !== "index.html" &&
         name !== "third-party-licenses.md" &&
         name !== "font-licenses.txt" &&
         !/^assets\/[\w-]+\.(js|css)$/.test(name) &&
-        !/^assets\/ibm-plex-(sans|mono|serif)-[\w-]+\.woff2?$/.test(name),
+        !/^assets\/(oxanium|jetbrains-mono)-[\w-]+\.woff2?$/.test(name),
     );
     expect(unexpected).toEqual([]);
   });
@@ -151,9 +172,9 @@ describe("bundle contents", () => {
   test("ships the licences of the code and fonts it redistributes", () => {
     expect(files.get("third-party-licenses.md")).toMatch(/## react-dom - [\d.]+ \(MIT\)/);
     const fonts = files.get("font-licenses.txt") ?? "";
-    for (const name of ["sans", "mono", "serif"])
-      expect(fonts).toContain(`@fontsource/ibm-plex-${name}\n`);
-    expect(fonts.match(/SIL Open Font License, Version 1\.1/g)?.length).toBeGreaterThanOrEqual(3);
+    for (const name of ["oxanium", "jetbrains-mono"])
+      expect(fonts).toContain(`@fontsource-variable/${name}\n`);
+    expect(fonts.match(/SIL Open Font License, Version 1\.1/g)?.length).toBeGreaterThanOrEqual(2);
   });
 
   test("contains no analytics, tracking or error-reporting SDK", () => {

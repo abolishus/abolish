@@ -97,15 +97,15 @@ describe("the served ballot client", () => {
     await expect(page.getByRole("heading", { level: 1 }).textContent()).resolves.toBe(
       "Abolish ballot",
     );
-    // The stylesheet applied: the ground is ballot paper, not the browser's white.
+    // The stylesheet applied: the ground is the theme's background (light theme).
     await expect(
       page.evaluate(() => getComputedStyle(document.body).backgroundColor),
-    ).resolves.toBe("rgb(246, 243, 236)");
-    // The self-hosted serif loaded (font-src 'self').
+    ).resolves.toMatch(/^(rgb\(255, 255, 255\)|oklch\(1 0 0\))$/);
+    // The self-hosted interface font loaded (font-src 'self').
     await expect(
       page.evaluate(async () => {
         await document.fonts.ready;
-        return document.fonts.check('600 16px "IBM Plex Serif"');
+        return document.fonts.check('600 16px "Oxanium Variable"');
       }),
     ).resolves.toBe(true);
     expect(violations).toEqual([]);

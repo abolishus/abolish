@@ -5,6 +5,11 @@
   "description": "Shared UI components with Storybook stories, interaction tests and axe accessibility checks. Source-only.",
   "license": "AGPL-3.0-only",
   "type": "module",
+  "imports": {
+    "#/components/*": "./src/components/*.tsx",
+    "#/lib/*": "./src/lib/*.ts",
+    "#/hooks/*": "./src/hooks/*.ts"
+  },
   "exports": {
     ".": "./src/index.ts",
     "./styles.css": "./src/styles.css"
@@ -18,11 +23,15 @@
     "build-storybook": "storybook build"
   },
   "dependencies": {
-    "@fontsource/ibm-plex-mono": "catalog:",
-    "@fontsource/ibm-plex-sans": "catalog:",
-    "@fontsource/ibm-plex-serif": "catalog:",
+    "@base-ui/react": "catalog:",
+    "@fontsource-variable/jetbrains-mono": "catalog:",
+    "@fontsource-variable/oxanium": "catalog:",
+    "class-variance-authority": "catalog:",
+    "cn": "catalog:",
+    "lucide-react": "catalog:",
     "react": "catalog:",
-    "react-dom": "catalog:"
+    "react-dom": "catalog:",
+    "tw-animate-css": "catalog:"
   },
   "devDependencies": {
     "@storybook/addon-a11y": "catalog:",
@@ -34,6 +43,7 @@
     "@vitest/browser-playwright": "catalog:",
     "fast-check": "catalog:",
     "playwright": "catalog:",
+    "shadcn": "catalog:",
     "storybook": "catalog:",
     "tailwindcss": "catalog:",
     "typescript": "catalog:",

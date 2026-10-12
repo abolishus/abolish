@@ -11,7 +11,7 @@ const withProviders: Decorator = (Story, { parameters }) => {
   const theme = parameters["theme"] === "dark" ? "dark" : "light";
   return (
     <I18nProvider locale={locale}>
-      <div data-theme={theme} lang={locale} className="bg-paper p-6 font-sans text-ink">
+      <div data-theme={theme} lang={locale} className="bg-background p-6 font-sans text-foreground">
         <Story />
       </div>
     </I18nProvider>

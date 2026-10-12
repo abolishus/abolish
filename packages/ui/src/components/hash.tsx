@@ -29,10 +29,10 @@ export function Hash({ value, label }: HashProps) {
   // derives a figure's name from its figcaption.
   return (
     <figure className="m-0" aria-labelledby={labelId}>
-      <figcaption id={labelId} className="text-sm text-pencil">
+      <figcaption id={labelId} className="text-sm text-muted-foreground">
         {label}
       </figcaption>
-      <code translate="no" className="font-mono text-base break-all text-ink">
+      <code translate="no" className="font-mono text-base break-all text-foreground">
         {groupHex(value).map((group, i) => (
           <span key={i} className="mr-[0.5ch] last:mr-0">
             {group}

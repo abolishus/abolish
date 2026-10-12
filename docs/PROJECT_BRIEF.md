@@ -117,7 +117,7 @@ We're building a production-grade, open-source, publicly auditable voting platfo
 - Data: Postgres via Drizzle. Dragonfly in production (Redis protocol; Redis locally). BullMQ for jobs: `--cluster_mode=emulated --lock_on_hashtags` and hashtagged queue names.
 - Chain: Solidity + Foundry, Noir + Barretenberg, Semaphore, viem, Ponder for indexing.
 - IPFS mirroring of the bulletin board and the ballot client (Helia in-process for tests; pinning service and permanent archive decided by ADR).
-- PostHog for product analytics and error tracking, only in `apps/web`, proxied through our own domain. `apps/ballot` ships zero third-party code under a strict CSP; a test asserts its bundle contains no analytics SDK.
+- PostHog for product analytics and error tracking, only in `apps/web`, proxied through our own domain. `apps/ballot` ships no third-party code beyond React and the shadcn/ui runtime (Base UI, `class-variance-authority`, `cn`, `lucide-react`), under a strict CSP; its bundle test allowlists exactly those packages and asserts the bundle contains no analytics SDK. Adding a runtime package to the ballot client is an owner-reviewed change.
 - Railway hosting: staging + production + PR environments. Railway deploys prebuilt signed images (via `RAILWAY_TOKEN` in CI) and never builds from source.
 - Cloudflare in front of Railway, with Turnstile on Tier 0 actions.
 - `docs/` is an Obsidian vault: brief, ADRs, threat model, protocol spec, runbooks, STATUS, linked with [[wikilinks]].
@@ -135,8 +135,9 @@ Principles:
 - **Permanent.** The board is forever; the feel is archival (printed matter, a ledger, a court record), not a feed.
 
 Starting system:
-- Type: IBM Plex. Sans for the interface, Mono for evidence (hashes, receipts, proofs, board entries), Serif for public-record moments (final results, certifications, ceremony transcripts). Tabular figures for every count. Self-host the fonts (e.g. fontsource packages); never load them from a third-party CDN.
-- Color: paper and ink plus one signal color. Ballot paper `#F6F3EC` (ground), Ink `#1B1A17` (text, rules), Pencil `#5A5650` (secondary text), Ink violet `#5B4B8A` (the single accent; purple reads as "both sides" in US politics, kept dusty so it doesn't read as crypto). Status only: Recorded `#2F6B5E`, Pending `#8A5A12`. Dark mode is ink on dark paper, not neon. Never red or blue as a primary or brand color. **Keep** (the no-red/blue rule).
+- Components: shadcn/ui everywhere (both apps), from the owner's preset `b2CQ2Q281` (style `base-lyra` on Base UI, Lucide icons, inverted bold menus). Add components with the shadcn CLI and adapt them; keep one design paradigm across `apps/web` and `apps/ballot`.
+- Type: Oxanium for the interface and headings, JetBrains Mono for evidence (hashes, receipts, proofs, board entries). Tabular figures for every count. Self-host the fonts (fontsource packages); never load them from a third-party CDN.
+- Color: the preset's zinc neutrals with an emerald primary, light and dark themes, as defined in `packages/ui/src/styles.css`. Status only: Recorded (emerald) and Pending (amber); destructive red only for errors. Never red or blue as a primary or brand color. **Keep** (the no-red/blue rule).
 - Signature elements:
   - The receipt: a ticket-stub component (perforated divider) holding the receipt hash, board entry number and time.
   - The visual fingerprint: a deterministic, symmetric glyph drawn from a receipt or election hash, so people can compare "does mine match the board's?" without reading hex. Shown on the receipt and on the board.

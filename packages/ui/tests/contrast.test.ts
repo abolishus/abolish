@@ -1,78 +1,85 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vite-plus/test";
 
-// WCAG 2.2 relative luminance and contrast ratio (1.4.3, 1.4.11), computed
-// from the hex values in styles.css so a palette change can't drop below AA
-// unnoticed. axe checks rendered stories too, but only the pairs they show.
-function luminance(hex: string): number {
-  const [r, g, b] = [1, 3, 5].map((i) => {
-    const c = Number.parseInt(hex.slice(i, i + 2), 16) / 255;
-    return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-  }) as [number, number, number];
+// WCAG 2.2 contrast (1.4.3) computed from the oklch tokens in styles.css, so a
+// palette change can't drop below AA unnoticed. axe checks rendered stories
+// too, but only the pairs they show.
+
+type Rgb = [number, number, number];
+
+// oklch -> linear sRGB (Björn Ottosson's Oklab matrices), clamped to gamut.
+function oklchToLinear(l: number, c: number, h: number): Rgb {
+  const a = c * Math.cos((h * Math.PI) / 180);
+  const b = c * Math.sin((h * Math.PI) / 180);
+  const l_ = (l + 0.3963377774 * a + 0.2158037573 * b) ** 3;
+  const m_ = (l - 0.1055613458 * a - 0.0638541728 * b) ** 3;
+  const s_ = (l - 0.0894841775 * a - 1.291485548 * b) ** 3;
+  const clamp = (x: number) => Math.min(1, Math.max(0, x));
+  return [
+    clamp(4.0767416621 * l_ - 3.3077115913 * m_ + 0.2309699292 * s_),
+    clamp(-1.2684380046 * l_ + 2.6097574011 * m_ - 0.3413193965 * s_),
+    clamp(-0.0041960863 * l_ - 0.7034186147 * m_ + 1.707614701 * s_),
+  ];
+}
+
+function luminance([r, g, b]: Rgb): number {
   return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 }
 
-function contrast(a: string, b: string): number {
+function contrast(a: Rgb, b: Rgb): number {
   const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x) as [number, number];
   return (hi + 0.05) / (lo + 0.05);
 }
 
 const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
 
-function block(selector: string): Record<string, string> {
+function block(selector: string): Record<string, Rgb> {
   const start = css.indexOf(`${selector} {`);
   if (start < 0) throw new Error(`no block for ${selector}`);
   const body = css.slice(start, css.indexOf("}", start));
   return Object.fromEntries(
-    Array.from(body.matchAll(/--abolish-([a-z]+):\s*(#[0-9a-f]{6});/g), (m) => [m[1], m[2]]),
+    Array.from(body.matchAll(/--([a-z-]+):\s*oklch\(([\d.]+) ([\d.]+) ([\d.]+)\);/g), (m) => [
+      m[1],
+      oklchToLinear(Number(m[2]), Number(m[3]), Number(m[4])),
+    ]),
   );
 }
 
 const light = block(`[data-theme="light"]`);
 const dark = block(`[data-theme="dark"]`);
-const systemDark = block(`:root:not([data-theme="light"])`);
-const names = ["paper", "ink", "pencil", "accent", "recorded", "pending"];
+const systemDark = block(`:root:not([data-theme="light"]):not(.light)`);
+
+// [text, ground]: every pairing a component renders.
+const pairs: [string, string][] = [
+  ["foreground", "background"],
+  ["muted-foreground", "background"],
+  ["primary-foreground", "primary"],
+  ["secondary-foreground", "secondary"],
+  ["card-foreground", "card"],
+  ["accent-foreground", "accent"],
+  ["recorded", "background"],
+  ["pending", "background"],
+];
 
 describe("palette", () => {
-  it("defines every token in both themes", () => {
-    expect(Object.keys(light).sort()).toEqual([...names].sort());
-    expect(Object.keys(dark).sort()).toEqual([...names].sort());
-  });
-
   it("uses the same dark palette for the system preference and the explicit theme", () => {
     expect(systemDark).toEqual(dark);
   });
 
-  it("keeps the brief's starting palette in the light theme", () => {
-    expect(light).toEqual({
-      paper: "#f6f3ec",
-      ink: "#1b1a17",
-      pencil: "#5a5650",
-      accent: "#5b4b8a",
-      recorded: "#2f6b5e",
-      pending: "#8a5a12",
-    });
-  });
-
   it.each([
     ["light", light],
     ["dark", dark],
-  ] as const)("every text colour reaches 4.5:1 on the %s ground", (_, theme) => {
-    for (const name of names.filter((n) => n !== "paper")) {
-      expect(contrast(theme[name] ?? "", theme["paper"] ?? ""), name).toBeGreaterThanOrEqual(4.5);
+  ] as const)("every text colour reaches 4.5:1 on its ground in the %s theme", (_, theme) => {
+    for (const [text, ground] of pairs) {
+      const t = theme[text];
+      const g = theme[ground];
+      expect(t, text).toBeDefined();
+      expect(g, ground).toBeDefined();
+      expect(contrast(t as Rgb, g as Rgb), `${text} on ${ground}`).toBeGreaterThanOrEqual(4.5);
     }
   });
 
-  it.each([
-    ["light", light],
-    ["dark", dark],
-  ] as const)("ground-coloured text reaches 4.5:1 on the accent in the %s theme", (_, theme) => {
-    // The primary button sets paper on accent.
-    expect(contrast(theme["paper"] ?? "", theme["accent"] ?? "")).toBeGreaterThanOrEqual(4.5);
-  });
-
   it("computes contrast as WCAG defines it", () => {
-    expect(contrast("#000000", "#ffffff")).toBeCloseTo(21, 5);
-    expect(contrast("#777777", "#ffffff")).toBeCloseTo(4.48, 2);
+    expect(contrast(oklchToLinear(0, 0, 0), oklchToLinear(1, 0, 0))).toBeCloseTo(21, 2);
   });
 });

@@ -36,11 +36,11 @@ catalog:
   # Proving toolchain: must match NOIR_VERSION / BB_VERSION in
   # .github/scripts/install-toolchain.sh (AGENTS.md "Toolchain pins").
   "@aztec/bb.js": 5.0.0-nightly.20260522
+  "@base-ui/react": 1.8.0
   "@better-auth/passkey": 1.7.7
   "@changesets/cli": 3.0.3
-  "@fontsource/ibm-plex-mono": 5.3.0
-  "@fontsource/ibm-plex-sans": 5.3.0
-  "@fontsource/ibm-plex-serif": 5.3.0
+  "@fontsource-variable/jetbrains-mono": 5.3.0
+  "@fontsource-variable/oxanium": 5.3.0
   "@noble/ciphers": 2.4.0
   "@noble/curves": 2.4.0
   "@noble/hashes": 2.4.0
@@ -60,15 +60,20 @@ catalog:
   "@vitest/browser-playwright": 5.0.1
   better-auth: 1.7.7
   bullmq: 6.3.11
+  class-variance-authority: 0.7.1
+  cn: 0.4.0
   drizzle-orm: 0.45.3
   fast-check: 4.10.2
   ioredis: 5.11.1
+  lucide-react: 1.52.0
   playwright: 1.63.0
   postgres: 3.4.9
   react: 19.3.0
   react-dom: 19.3.0
+  shadcn: 4.21.1
   storybook: 10.6.1
   tailwindcss: 4.3.3
+  tw-animate-css: 1.4.0
   typescript: 7.0.2
   vite: npm:@voidzero-dev/vite-plus-core@1.0.0
   vite-plus: 1.0.0

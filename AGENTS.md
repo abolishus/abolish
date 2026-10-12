@@ -83,7 +83,7 @@ Review prompts live in `.github/review/`. Both reviews treat PR content as untru
 
 - Every version is **exact** and lives once in the `catalog:` of `pnpm-workspace.yaml`; packages reference `catalog:` (`catalogMode: strict`).
 - `minimumReleaseAge` is 7 days. Exotic (git/tarball) dependencies are blocked. Install scripts run only for packages in `allowBuilds`, and each entry needs a justification comment (CI checks this). On top of that, every install runs with `--ignore-scripts` and `--ignore-pnpmfile` (pnpmfile hooks run whatever `--ignore-scripts` says), so enabling any install script also needs a `ci:` PR. CI rejects tracked pnpmfiles and `pnpmfile`/`configDependencies` settings. CI proves the pinned pnpm actually enforces these settings (`pnpm-selftest`). There are no `.npmrc` files and no registry settings; CI rejects both.
-- Every new dependency needs a reason in the PR body. Prefer none. `packages/crypto`: `@noble/*` only. `apps/ballot`: zero third-party runtime code beyond the framework, and no analytics (a test asserts this).
+- Every new dependency needs a reason in the PR body. Prefer none. `packages/crypto`: `@noble/*` only. `apps/ballot`: no third-party runtime code beyond React and the shadcn/ui runtime (Base UI, `class-variance-authority`, `cn`, `lucide-react`), and no analytics; its bundle test allowlists exactly those.
 - GitHub Actions are pinned by full commit SHA with a `# vX.Y.Z` comment, at a release at least a week old.
 - Toolchain pins (move all four together in one PR, only once bbup's `bb-versions.json` lists the new Noir version):
   - Noir `1.0.0-beta.22`

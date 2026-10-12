@@ -10,12 +10,17 @@
 // request, and a line never carries an address, a header (so no cookie), a
 // query string, a body or a page's path (a poll page's path names the poll a
 // visitor looked at): only the method, a route class from a fixed list, the
-// status and the duration.
+// status and the duration. What PostHog gets is as narrow: a page's
+// template, never its path, and our own code's failures by name and bundle
+// position (src/analytics.ts, src/node/analytics.ts).
 
 import { once } from "node:events";
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { join } from "node:path";
+
+import { type ClientError, ERROR_NAME, pageOf, parseClientError } from "../analytics.ts";
+import { type Analytics, noAnalytics } from "./analytics.ts";
 
 /** The built Start server (`dist/server/server.js`'s default export). */
 export interface StartHandler {
@@ -26,7 +31,7 @@ export interface StartHandler {
 export type AccountHandler = (request: Request) => Promise<Response>;
 
 /** What a request was, from a fixed list: never its path. */
-export type RouteClass = "page" | "server-fn" | "auth" | "asset" | "refused";
+export type RouteClass = "page" | "server-fn" | "auth" | "asset" | "ingest" | "refused";
 
 /** One request-log line: nothing a person, a session or a poll can be read from. */
 export interface RequestLogLine {
@@ -75,6 +80,8 @@ export interface WebServerOptions {
    */
   readonly origin: string;
   readonly log: Log;
+  /** Where page views and failures are reported; nowhere by default. */
+  readonly analytics?: Analytics;
   /** Most requests handled at once; past it, 503 before anything is read (T-52). */
   readonly maxInFlight?: number;
   /** A connection idle this long is destroyed, freeing its slot (T-52). Default 15 s. */
@@ -120,6 +127,7 @@ async function readBody(req: IncomingMessage): Promise<Uint8Array<ArrayBuffer>> 
 function classify(method: string, path: string): RouteClass {
   if (path === "/auth" || path.startsWith("/auth/")) return "auth";
   if (path.startsWith(SERVER_FN_PREFIX)) return "server-fn";
+  if (path === "/ingest" || path.startsWith("/ingest/")) return "ingest";
   if (path.startsWith("/assets/") && (method === "GET" || method === "HEAD")) return "asset";
   return "page";
 }
@@ -185,6 +193,7 @@ export function createWebServer({
   clientDir,
   origin,
   log,
+  analytics = noAnalytics,
   maxInFlight = 64,
   idleTimeoutMs = 15_000,
   deadlineMs = 60_000,
@@ -240,6 +249,8 @@ export function createWebServer({
       return void res.end(method === "HEAD" ? undefined : file);
     }
 
+    if (route === "ingest") return ingest(req, res, url);
+
     let body: Uint8Array<ArrayBuffer> | undefined;
     if (method === "POST") body = await readBody(req);
     else if (req.headers["content-length"] !== undefined || req.headers["transfer-encoding"])
@@ -273,6 +284,31 @@ export function createWebServer({
     await send(res, response, method === "HEAD");
   }
 
+  /**
+   * `/ingest/error`: a failure in one of our pages, reported by the page's
+   * own code (src/error-reports.ts) and passed to PostHog only if it is
+   * exactly a `ClientError`, so a report can carry nothing else (T-67).
+   */
+  async function ingest(req: IncomingMessage, res: ServerResponse, url: URL) {
+    if (url.pathname !== "/ingest/error" || url.search !== "") throw new Refusal(404);
+    if (req.method !== "POST") throw new Refusal(405);
+    // Only our own pages report: a browser always sends Origin on a POST.
+    if (req.headers.origin !== base.origin) throw new Refusal(403);
+    if (req.headers["content-type"] !== "application/json") throw new Refusal(415);
+    const body = new TextDecoder().decode(await readBody(req));
+    let report: ClientError | undefined;
+    try {
+      report = parseClientError(JSON.parse(body));
+    } catch {
+      throw new Refusal(400);
+    }
+    if (report === undefined) throw new Refusal(400);
+    analytics.exception("client", report);
+    res.statusCode = 204;
+    res.setHeader("cache-control", "no-store");
+    res.end();
+  }
+
   const server = createServer(
     {
       requestTimeout: REQUEST_TIMEOUT_MS,
@@ -285,9 +321,11 @@ export function createWebServer({
       // Classed on the path the handlers will see, `..` segments resolved.
       const url = urlOf(req);
       let route: RouteClass = url === undefined ? "refused" : classify(method, url.pathname);
-      res.on("finish", () =>
-        log({ method, route, status: res.statusCode, ms: Math.round(performance.now() - started) }),
-      );
+      res.on("finish", () => {
+        log({ method, route, status: res.statusCode, ms: Math.round(performance.now() - started) });
+        if (route === "page" && method === "GET" && url !== undefined)
+          analytics.pageview(pageOf(url.pathname), res.statusCode);
+      });
       // On every answer, refusals and assets included; pages and account
       // answers set it again.
       res.setHeader("x-content-type-options", "nosniff");
@@ -310,7 +348,13 @@ export function createWebServer({
         }
         // A client that went away mid-request isn't a server failure.
         if (req.destroyed || res.destroyed) return void res.destroy();
-        log({ error: e instanceof Error ? e.name : typeof e });
+        const name = e instanceof Error ? e.name : typeof e;
+        log({ error: name });
+        analytics.exception("server", {
+          page: route === "page" && url !== undefined ? pageOf(url.pathname) : "other",
+          name: ERROR_NAME.test(name) ? name : "Error",
+          frames: [],
+        });
         if (!res.headersSent) refuse(res, 500);
         else res.destroy();
       }

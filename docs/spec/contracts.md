@@ -406,7 +406,7 @@ A verifier proves both at `B`, follows the last locator to its manifest, and fro
 
 The contract doesn't check that `x` is on the curve, which would need a modular square root on chain: a definition can list only canonical keys ([[trustee-identity]], Identity key), so a registered non-key judges nothing, and only the authority can pay to register one. Then:
 
-- `registerReceiptKey` reverts if the key has ever been registered, retired or not; otherwise it sets the key's `registered_at` to `block.timestamp`.
+- `registerReceiptKey` reverts if the key has ever been registered, retired or not, or if its twin has: the key with the other prefix and the same `x`, which is its negation, whose secret key anyone holding the key's own also holds (so retiring a seized key also keeps its negation out); otherwise it sets the key's `registered_at` to `block.timestamp`.
 - `retireReceiptKey` reverts unless the key is registered and not retired; otherwise it sets its `retired_at` to `block.timestamp`.
 
 Nothing else writes either field and neither is ever cleared, so the record is append-only: a key is registered once, retired at most once, and never re-registered (T-69). Each emits, through the event accumulator,
@@ -422,7 +422,7 @@ Custody and use:
 
 - The receipt keys themselves sit in the board server's key service ([[receipts]], Residuals); the authority's quorum only registers and retires them, so it holds no receipt key.
 - The authority registers a key well before any election lists it, and retires it as soon as a leak is suspected, and every key when it rotates it, so a seized key can't be listed in a later election by a hostile creator ([[0023-receipt-evidence]]). A retirement after an election's `opens_at` changes nothing for it.
-- A registration costs about 45,000 gas (a new storage word, the accumulator and a log), once per key, never per election.
+- A registration costs about 65,000 gas, its transaction's base cost included (a new storage word, the accumulator and a log), once per key, never per election.
 
 The anchor doesn't know an election's seal ([[board]], Timing): it is computed from the definition, which lives on L2. A verifier ignores an anchor for a segment after the seal. Nor does it check that an election's checkpoints grow with their segments: with a 12-hour deadline, a later segment can be anchored before an earlier one, and [[board]], Board checks, catches an inconsistent pair from L1 alone (`checkpoint-inconsistent`).
 

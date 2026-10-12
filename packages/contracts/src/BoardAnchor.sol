@@ -32,8 +32,11 @@ library CheckpointLib {
 /// closed election nor hide a fork (T-24, T-53); and only one per election and
 /// segment, so it holds no equivocation. Each call may also carry an archive
 /// locator naming where the board is archived (docs/adr/0005-permanent-archive.md),
-/// so the archive can be found from L1 alone (T-49, T-51). There is no admin, proxy, pause or
-/// upgrade path: the clock and the authority are fixed at deployment.
+/// so the archive can be found from L1 alone (T-49, T-51). It also keeps the
+/// append-only record of receipt keys (docs/adr/0023-receipt-evidence.md), so
+/// the keys that judge an election's receipts are fixed by the same authority
+/// on L1 (T-26, T-71). There is no admin, proxy, pause or upgrade path: the
+/// clock and the authority are fixed at deployment.
 contract BoardAnchor is EventAccumulator {
     /// The anchoring clock: period `s` is `[epoch + s·period, epoch + (s+1)·period)`,
     /// and its checkpoint is taken from the period's end to `deadline` seconds after.
@@ -61,8 +64,19 @@ contract BoardAnchor is EventAccumulator {
     /// don't know.
     event ArchiveLocated(uint16 indexed version, bytes locator);
 
+    /// @notice A receipt key `prefix ‖ x` (a compressed P-256 key) was
+    /// registered; its `registeredAt` is now the block's time.
+    event ReceiptKeyRegistered(bytes32 indexed x, uint8 prefix);
+
+    /// @notice A registered receipt key was retired; its `retiredAt` is now
+    /// the block's time.
+    event ReceiptKeyRetired(bytes32 indexed x, uint8 prefix);
+
     /// The longest locator accepted, so the authority's chosen bytes on L1 stay bounded (T-17).
     uint256 public constant MAX_LOCATOR_LENGTH = 128;
+
+    /// A compressed P-256 key: `0x02` or `0x03`, then `x`.
+    uint256 internal constant RECEIPT_KEY_LENGTH = 33;
 
     error InvalidDeployment();
     error EmptyCall();
@@ -73,6 +87,17 @@ contract BoardAnchor is EventAccumulator {
     error PeriodNotOver(uint32 segment, uint256 periodEnd, uint256 timestamp);
     error PastDeadline(uint32 segment, uint256 periodEnd, uint256 timestamp);
     error AlreadyAnchored(bytes32 electionId, uint32 segment);
+    error MalformedReceiptKey();
+    error ReceiptKeyAlreadyRegistered(uint8 prefix, bytes32 x);
+    error ReceiptKeyNotActive(uint8 prefix, bytes32 x);
+
+    /// A receipt key's record: when it was registered and retired, in L1
+    /// time; zero means never. One storage word, so a verifier proves both
+    /// with one storage proof (docs/spec/contracts.md, Receipt keys).
+    struct ReceiptKeyRecord {
+        uint64 registeredAt;
+        uint64 retiredAt;
+    }
 
     /// @custom:storage-location erc7201:abolish.board-anchor
     struct AnchorStorage {
@@ -84,6 +109,9 @@ contract BoardAnchor is EventAccumulator {
         /// carried locators have expired from L1 history (EIP-4444).
         bytes latestLocator;
         uint256 locatorCount;
+        /// Receipt keys by prefix and `x`, at `A + 4`: written only by
+        /// `registerReceiptKey` and `retireReceiptKey`, never cleared.
+        mapping(uint8 prefix => mapping(bytes32 x => ReceiptKeyRecord)) receiptKeys;
     }
 
     /// keccak256(abi.encode(uint256(keccak256("abolish.board-anchor")) - 1)) & ~bytes32(uint256(0xff)):
@@ -127,6 +155,18 @@ contract BoardAnchor is EventAccumulator {
     function latestLocator() external view returns (bytes memory locator, uint256 count) {
         AnchorStorage storage s = _anchorStorage();
         return (s.latestLocator, s.locatorCount);
+    }
+
+    /// @notice A receipt key's record, `(registeredAt, retiredAt)`, zero
+    /// where never. A verifier and the ballot client use a storage proof of
+    /// the word instead.
+    function receiptKeyRecord(uint8 prefix, bytes32 x)
+        external
+        view
+        returns (uint64 registeredAt, uint64 retiredAt)
+    {
+        ReceiptKeyRecord storage r = _anchorStorage().receiptKeys[prefix][x];
+        return (r.registeredAt, r.retiredAt);
     }
 
     /// @notice The L1 time at which period `segment` ends.
@@ -200,6 +240,50 @@ contract BoardAnchor is EventAccumulator {
             s.locatorCount += 1;
             _log2(ArchiveLocated.selector, bytes32(uint256(version)), abi.encode(locator));
         }
+    }
+
+    /// @notice Registers a receipt key, a compressed P-256 key, so elections
+    /// opening later may list it (docs/spec/election-definition.md, Receipt
+    /// keys). Reverts unless the caller is the authority, the calldata is
+    /// exactly one 33-byte `bytes` argument, the key is framed as compressed,
+    /// and neither the key nor its twin (the other prefix with the same `x`)
+    /// has ever been registered: a retired key never comes back, so a seized
+    /// one can't be listed again by a hostile creator, and nor can its
+    /// negation, whose secret key is the seized one's negated (T-69).
+    function registerReceiptKey(bytes calldata key) external {
+        (uint8 prefix, bytes32 x) = _receiptKey(key);
+        AnchorStorage storage s = _anchorStorage();
+        ReceiptKeyRecord storage r = s.receiptKeys[prefix][x];
+        if (r.registeredAt != 0 || s.receiptKeys[prefix ^ 1][x].registeredAt != 0) {
+            revert ReceiptKeyAlreadyRegistered(prefix, x);
+        }
+        r.registeredAt = uint64(block.timestamp);
+        _log2(ReceiptKeyRegistered.selector, x, abi.encode(prefix));
+    }
+
+    /// @notice Retires a registered receipt key: no election opening at or
+    /// after this block is judged by it. Reverts unless the caller is the
+    /// authority, the calldata is framed as for `registerReceiptKey`, and the
+    /// key is registered and not yet retired, so `retiredAt` is written once.
+    function retireReceiptKey(bytes calldata key) external {
+        (uint8 prefix, bytes32 x) = _receiptKey(key);
+        ReceiptKeyRecord storage r = _anchorStorage().receiptKeys[prefix][x];
+        if (r.registeredAt == 0 || r.retiredAt != 0) revert ReceiptKeyNotActive(prefix, x);
+        r.retiredAt = uint64(block.timestamp);
+        _log2(ReceiptKeyRetired.selector, x, abi.encode(prefix));
+    }
+
+    /// The caller and framing checks both receipt-key calls share. The key
+    /// isn't checked on the curve, which would need a modular square root:
+    /// a definition lists only canonical keys, so a registered non-key judges
+    /// nothing (docs/spec/contracts.md, Known-weak; T-17).
+    function _receiptKey(bytes calldata key) private view returns (uint8 prefix, bytes32 x) {
+        if (msg.sender != authority) revert NotAuthority(msg.sender);
+        CanonicalCalldata.requireOneBytesArgument(key);
+        if (key.length != RECEIPT_KEY_LENGTH) revert MalformedReceiptKey();
+        prefix = uint8(key[0]);
+        if (prefix != 0x02 && prefix != 0x03) revert MalformedReceiptKey();
+        x = bytes32(key[1:]);
     }
 
     function _isContract(address a) private view returns (bool) {

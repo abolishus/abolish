@@ -58,6 +58,18 @@ const getDefinition = oc
   .input(ElectionQuery)
   .output(z.strictObject({ definition: hexBytes(MAX_BOARD_PAYLOAD) }));
 
+const listElections = oc
+  .route({
+    method: "GET",
+    path: "/elections",
+    summary: "A page of the polls this server lists",
+    description:
+      "Election IDs of the polls our front ends list for discovery, in ascending order, from just above `after` (or from the first without it): at most `limit`. Fewer than `limit` means the listing ends there for now. A poll that is delisted or hidden (docs/moderation-policy.md) is left out, though its definition, board and moderation state stay served by ID. The listing is a convenience, never a source of truth: the election registry on the L2 names every poll, and callers check each definition against it (T-34, T-68).",
+    tags: ["elections"],
+  })
+  .input(z.strictObject({ after: z.optional(Hash32), limit: PageSize }))
+  .output(z.strictObject({ elections: z.array(Hash32).check(z.maxLength(MAX_PAGE)) }));
+
 const getHead = oc
   .route({
     method: "GET",
@@ -295,7 +307,7 @@ const deleteBackup = oc
 
 /** The public API contract. `apps/api` implements it; clients call it. */
 export const contract = {
-  elections: { getDefinition },
+  elections: { list: listElections, getDefinition },
   board: { getHead, getEntries, getInclusionProof, getConsistencyProof },
   ballots: { submit: submitBallot },
   moderation: { getLog: getModerationLog, getStatus: getModerationStatus, report: reportPoll },

@@ -79,6 +79,11 @@ contract BoardAnchor is EventAccumulator {
         mapping(bytes32 electionId => mapping(uint32 segment => bytes32)) checkpointHash;
         /// One more than the lowest segment anchored for the election; 0 if none.
         mapping(bytes32 electionId => uint256) lowestSegmentPlusOne;
+        /// The last locator posted, and how many have been: state, so the
+        /// archive is found from a storage proof even once the logs that
+        /// carried locators have expired from L1 history (EIP-4444).
+        bytes latestLocator;
+        uint256 locatorCount;
     }
 
     /// keccak256(abi.encode(uint256(keccak256("abolish.board-anchor")) - 1)) & ~bytes32(uint256(0xff)):
@@ -115,6 +120,13 @@ contract BoardAnchor is EventAccumulator {
     /// 0 if none. With it, a verifier knows which per-segment slots to prove.
     function lowestSegmentPlusOne(bytes32 electionId) external view returns (uint256) {
         return _anchorStorage().lowestSegmentPlusOne[electionId];
+    }
+
+    /// @notice The last archive locator posted, and how many have been.
+    /// A verifier uses a storage proof of the slots instead.
+    function latestLocator() external view returns (bytes memory locator, uint256 count) {
+        AnchorStorage storage s = _anchorStorage();
+        return (s.latestLocator, s.locatorCount);
     }
 
     /// @notice The L1 time at which period `segment` ends.
@@ -184,6 +196,8 @@ contract BoardAnchor is EventAccumulator {
             );
         }
         if (locator.length != 0) {
+            s.latestLocator = locator;
+            s.locatorCount += 1;
             _log2(ArchiveLocated.selector, bytes32(uint256(version)), abi.encode(locator));
         }
     }

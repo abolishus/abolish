@@ -115,7 +115,8 @@ contract AnchorHandler is TestBase {
 ///    election and segment, in the anchor and within the call (T-52, T-53).
 /// 3. The anchor keeps, per election, one more than the lowest segment
 ///    anchored, or 0 (T-24: a verifier proves every slot from there).
-/// 4. The event accumulator counts one log per anchored checkpoint and per
+/// 4. The anchor's locator count equals the locators posted.
+/// 5. The event accumulator counts one log per anchored checkpoint and per
 ///    locator.
 /// `test_HandlerAnchors` shows the handler reaches the success path, so the
 /// invariants aren't checked only against an empty anchor.
@@ -166,6 +167,11 @@ contract BoardAnchorInvariantTest is TestBase {
 
     function invariant_CallsFollowTheRules() public view {
         assertTrue(!handler.unexpected(), "a call broke the rules");
+    }
+
+    function invariant_LocatorCountMatches() public view {
+        (, uint256 count) = anchor.latestLocator();
+        assertEq(count, handler.locators(), "locator count");
     }
 
     function invariant_EveryAnchorIsAccumulated() public view {

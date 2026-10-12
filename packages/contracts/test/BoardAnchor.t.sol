@@ -479,6 +479,82 @@ contract BoardAnchorTest is TestBase {
         anchor.anchor("", _locator(0xffff, 126));
     }
 
+    /// The last locator and the count stay in state at the documented slots,
+    /// so the archive is found from a storage proof after L1 history expiry.
+    function test_KeepsTheLatestLocatorInState() public {
+        (bytes memory none, uint256 zero) = anchor.latestLocator();
+        assertEq(none.length + zero, 0, "nothing yet");
+        vm.warp(EPOCH + PERIOD);
+        vm.prank(authority);
+        anchor.anchor(_encode(ID, 0, 1, "h", "r"), "");
+        (none, zero) = anchor.latestLocator();
+        assertEq(none.length + zero, 0, "a call without a locator keeps none");
+        vm.prank(authority);
+        anchor.anchor("", _locator(1, 32));
+        bytes memory last = _locator(2, 100);
+        vm.prank(authority);
+        anchor.anchor("", last);
+        (bytes memory got, uint256 count) = anchor.latestLocator();
+        assertTrue(keccak256(got) == keccak256(last), "latest");
+        assertEq(count, 2, "count");
+        // Solidity's layout for a long `bytes` at slot A + 2: the slot holds
+        // 2·len + 1, the data starts at keccak256(A + 2); the count is A + 3.
+        uint256 base = uint256(0x16eba4501d0a9dddbfa03518d843c364be664629e6d99efb7169d8f090095b00);
+        assertEq(uint256(vm.load(address(anchor), bytes32(base + 2))), 2 * 102 + 1, "length");
+        assertEq(uint256(vm.load(address(anchor), bytes32(base + 3))), 2, "count slot");
+        bytes32 data = keccak256(abi.encode(base + 2));
+        bytes memory fromSlots;
+        for (uint256 i; i < 4; i++) {
+            fromSlots =
+                bytes.concat(fromSlots, vm.load(address(anchor), bytes32(uint256(data) + i)));
+        }
+        for (uint256 i; i < last.length; i++) {
+            assertTrue(fromSlots[i] == last[i], "data");
+        }
+    }
+
+    /// Any calldata the authority sends is accepted only if it is exactly
+    /// the canonical encoding of the arguments it decodes to (T-17).
+    function testFuzz_AcceptedCalldataIsCanonical(bytes calldata tail, uint8 cut, bool dirty)
+        public
+    {
+        vm.warp(EPOCH + 2 * PERIOD);
+        bytes memory good = abi.encodeCall(
+            BoardAnchor.anchor, (_encode(keccak256(tail), 0, 1, "h", "r"), _locator(1, 32))
+        );
+        // Mutate a canonical call: truncate, append, or flip one byte.
+        bytes memory call;
+        if (dirty && good.length > 4) {
+            call = bytes.concat(good);
+            uint256 at = 4 + uint256(keccak256(tail)) % (good.length - 4);
+            call[at] = bytes1(uint8(call[at]) ^ (1 + cut % 255));
+        } else if (cut % 2 == 0) {
+            call = bytes.concat(good, tail);
+        } else {
+            uint256 keep = good.length - cut % (good.length - 3);
+            call = new bytes(keep);
+            for (uint256 i; i < keep; i++) {
+                call[i] = good[i];
+            }
+        }
+        vm.prank(authority);
+        (bool ok,) = address(anchor).call(call);
+        if (!ok) return;
+        (bytes memory a, bytes memory b) = this.decodeAnchorCall(call);
+        assertTrue(
+            keccak256(call) == keccak256(abi.encodeCall(BoardAnchor.anchor, (a, b))),
+            "accepted a non-canonical call"
+        );
+    }
+
+    function decodeAnchorCall(bytes calldata call)
+        external
+        pure
+        returns (bytes memory, bytes memory)
+    {
+        return abi.decode(call[4:], (bytes, bytes));
+    }
+
     /// Only the authority can post a locator, so no one can point verifiers
     /// at a fake archive (T-52).
     function test_RefusesALocatorFromAnyoneElse() public {

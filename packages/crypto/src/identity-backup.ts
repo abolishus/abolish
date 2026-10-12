@@ -65,7 +65,7 @@ const ORDER_BYTES = Uint8Array.from(
   (x) => Number.parseInt(x, 16),
 );
 
-/** `1 ≤ b < l` for 32 big-endian bytes, without branching on where they first differ from `l`. */
+/** `1 ≤ b < l` for 32 big-endian bytes, reading every byte with no early exit (best effort: the JIT decides what branches). */
 function inRange(b: Uint8Array): boolean {
   let lt = 0;
   let gt = 0;
@@ -109,7 +109,7 @@ export function newIdentitySecretWith(draw: (n: number) => Uint8Array): Uint8Arr
     if (isIdentitySecret(b)) return b;
     b.fill(0);
   }
-  throw new Error("the random source gave no identity secret in 128 draws");
+  throw new Error(`the random source gave no identity secret in ${MAX_DRAWS} draws`);
 }
 
 /** A fresh identity secret's 32-byte encoding, from the CSPRNG. */

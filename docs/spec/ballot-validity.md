@@ -123,6 +123,17 @@ What it leaves out, and why:
 
 Only someone who knows the commitments' openings can give a statement a second ballot hash: the voter's client, or `k` trustees together, who can interpolate them from their shares. The validity proofs are proofs of knowledge of those openings (CDS94), so no one else can make another accepting proof of the same statement (T-31, T-32). A second ballot hash also needs a new membership proof, and so the voter's identity secret, before it is a ballot.
 
+## Core hash
+
+A ballot's **core** is the part of it made before the voter chooses to cast or to challenge (Casting step 1): the definition, the tier, `vss` and `share_hashes`. Its hash is the **tracking code** of [[challenge]]:
+
+```
+core_hash = H(DS("abolish/v1/ballot-core",
+    definition_hash ‖ u16(0x0002) ‖ u8(1) ‖ u8(tier) ‖ encode(vss) ‖ encode(share_hashes)))
+```
+
+The inputs are the statement hash's without the nullifier, in the same order and encodings. The client shows it before the choice; a challenge's opening ([[challenge]], `0x0003`) rebuilds it; and anyone computes it from a cast ballot record, so the voter's checker finds the cast ballot by it. It binds the ballot record type and version, as `statement_hash`, `aad` and `t_e` do, so one code never names cores of two ballot versions (T-42, T-47).
+
 ## Validity proofs
 
 For a commitment `Y` and a value `s`, let `Y_s = Y · g^{−s}`. "`Y` commits to `s`" means the prover knows `ρ` with `Y_s = h^ρ`, and each branch of a proof is a Schnorr proof of that knowledge. A disjunctive proof over the values `s_0, …, s_{L−1}` has branches `(c_b, z_b)` and is checked as:
@@ -165,11 +176,11 @@ To prove `Y` commits to `s_v` with randomness `ρ` (an option proof: `ρ = r_j`,
 2. For every other branch `b ≠ v`, draw `c_b` and `z_b` uniformly from the scalars and set `A_b = h^{z_b} · Y_{s_b}^{−c_b}`.
 3. Compute `c` from `t` as above, then `c_v = c − Σ_{b≠v} c_b` and `z_v = w + c_v · ρ`, both mod `ℓ`.
 
-This is the standard simulation of the false branches (CDS94): whatever the committed value, an honest proof is distributed as a uniformly random accepting transcript, so the proof is witness-indistinguishable against an unbounded adversary and reveals nothing about which value was committed (T-15). The only distance from perfect is the scalar sampling: each scalar is 64 CSPRNG bytes reduced mod `ℓ`, within about 2⁻²⁶² of uniform, so a ballot's proofs and commitments are within a statistical distance of about 2⁻²⁵⁰ of their ideal distribution. `w`, the simulated `c_b` and `z_b`, and every polynomial coefficient come from the platform CSPRNG through `packages/crypto` and are never reused. A caller can't supply them: `packages/crypto` proves only a sharing it made itself, unchanged. Once the voter casts, the client discards them with `r_j`, except where P1-13's challenge reveals them on a spoiled ballot ([[0002-everlasting-privacy]], T-18, T-45); in JavaScript that means dropping every reference, since a `bigint` can't be overwritten.
+This is the standard simulation of the false branches (CDS94): whatever the committed value, an honest proof is distributed as a uniformly random accepting transcript, so the proof is witness-indistinguishable against an unbounded adversary and reveals nothing about which value was committed (T-15). The only distance from perfect is the scalar sampling: each scalar is 64 CSPRNG bytes reduced mod `ℓ`, within about 2⁻²⁶² of uniform, so a ballot's proofs and commitments are within a statistical distance of about 2⁻²⁵⁰ of their ideal distribution. `w`, the simulated `c_b` and `z_b`, and every polynomial coefficient come from the platform CSPRNG through `packages/crypto` and are never reused. A caller can't supply them: `packages/crypto` proves only a sharing it made itself, unchanged. Once the voter casts, the client discards them with `r_j`; a challenge reveals the polynomials of a core that is never cast, and never any proof's randomness, since no proof exists before the choice ([[challenge]]; [[0002-everlasting-privacy]], T-18, T-45); in JavaScript that means dropping every reference, since a `bigint` can't be overwritten.
 
 Order of construction: the vote's polynomials and `vss` first, then the shares and their ciphertexts ([[share-encryption]]) and `share_hashes`, then `statement_hash`, then the option proofs and the sum proof.
 
-Every validity proof binds the ballot's nullifier. The share ciphertexts don't: their associated data binds the definition, the seat and `vss` but not the tier or the nullifier ([[share-encryption]], Ciphertext), so the sharing, the ciphertexts and `share_hashes` can be made without the nullifier. P1-13 requires a challenged ballot to carry nothing that depends on the nullifier ([[verifier]] 6.2, [[board]]), so a challenged ballot can be that nullifier-independent core without the proofs, or with a tracking code over it. P1-13 fixes its format (T-42, T-47).
+Every validity proof binds the ballot's nullifier. The share ciphertexts don't: their associated data binds the definition, the seat and `vss` but not the tier or the nullifier ([[share-encryption]], Ciphertext), so the sharing, the ciphertexts and `share_hashes` can be made without the nullifier. A challenged ballot is that nullifier-independent core, named by its core hash (above) and opened by a spoiled-ballot opening ([[challenge]]; T-42, T-47).
 
 ## Shares
 
@@ -219,7 +230,7 @@ Notes:
 - **Bound by the ballot hash.** `definition_hash`, `tier`, `nullifier` and `committed_vote` are exactly the inputs of `ballot_hash` beside the record type and version. The other three fields are the two it leaves out: the membership proof, and the L1 reference, which `M` binds (Ballot hash). So every field is bound, as Ballot hash requires.
 - **Fixed offsets.** Counting the 3-byte header, `definition_hash` starts at byte 3, `tier` at 35, `nullifier` at 36, `l1_ref_number` at 68, `l1_ref_hash` at 76, `membership_proof` at 108 (its `A`, `B` and `C` at 108, 172 and 300) and `committed_vote` at 364. A contract reads every field it checks at a fixed offset without parsing the committed vote (P1-18). A record is 364 bytes plus its committed vote: 1,192 bytes at 3 options, `k = 2` and `n = 3`; about 3.3 KB at 10 options, `k = 4` and `n = 7`; about 45 KB at `MAX_OPTIONS` and `MAX_TRUSTEES`, well within `MAX_BOARD_PAYLOAD`.
 - **It names its election.** Like the delivery records ([[delivery]], Records), a ballot carries its definition hash, so a ballot posted to another election's board is reported as stray rather than read under that election's rules.
-- **Cast ballots only.** A ballot challenged at cast carries nothing that depends on the nullifier ([[verifier]] 6.2; [[revoting]], Client rule 6), so it has no nullifier, L1 reference, validity proofs or membership proof, and isn't a record of this version. An election pins one version of `0x0002`, so a challenged ballot can't be a second layout beside this one either. How it reaches the board is P1-13's: its own record type, whose version the spoiled-ballot opening's version fixes (as this version fixes the delivery records') and which a board-entry version allows ([[board]], Allowed payloads), or a place inside the opening itself.
+- **Cast ballots only.** A ballot challenged at cast carries nothing that depends on the nullifier ([[verifier]] 6.2; [[revoting]], Client rule 6), so it has no nullifier, L1 reference, validity proofs or membership proof, and isn't a record of this version. An election pins one version of `0x0002`, so a challenged ballot can't be a second layout beside this one either. It never reaches the board on its own: its core travels inside its opening, the spoiled-ballot opening record (`0x0003`), published only at the voter's request, after close ([[challenge]]; [[0021-challenged-ballots]]).
 
 ### Decoding
 
@@ -249,7 +260,7 @@ Why this order: the first two need only the record's header fields; the shape an
 
 The ballot client (P2-8, P5-4) builds a record in this order, after running [[verifier]] 2.5 and 2.8 for the election:
 
-1. The vote's sharing, the share ciphertexts and `share_hashes` (Proving; [[share-encryption]]), with 32 zero bytes for each seat outside the registered key set. Nothing so far depends on the nullifier, so this is what P1-13's challenge can audit.
+1. The vote's sharing, the share ciphertexts and `share_hashes` (Proving; [[share-encryption]]), with 32 zero bytes for each seat outside the registered key set. Nothing so far depends on the nullifier: this is the core, whose hash the client shows before the voter chooses to cast or to challenge ([[challenge]], Client rules).
 2. Once the voter chooses to cast: the validity proofs, which bind `ν`; the L1 block ([[revoting]], Client rules 1 to 3); `ballot_hash`; and then the public signals of the admission row `membership-proof`, from the definition it checked and never from a server ([[membership]], Security notes).
 3. The membership proof under the pinned depth-32 key, with the proving key whose sha256 `membership_vk_hash` binds ([[membership]], Verification key).
 4. Before the record leaves the device, the client runs the admission checks above on the finished record, the membership proof's verification included ([[membership]], Security notes), and never sends a record that fails them.

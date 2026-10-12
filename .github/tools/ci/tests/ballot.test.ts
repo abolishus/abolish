@@ -48,15 +48,20 @@ const dist = (overrides: Record<string, string> = {}) =>
   );
 
 describe("packageOf", () => {
-  test("names the package of a pnpm path, scoped or not", () => {
-    expect(packageOf(pnpm("react-dom", "cjs/react-dom.production.js"))).toBe("react-dom");
-    expect(packageOf(pnpm("@scope/pkg", "index.js"))).toBe("@scope/pkg");
-    // The last node_modules decides: a package nested inside another.
-    expect(packageOf(`${repo}/node_modules/react/node_modules/evil/index.js`)).toBe("evil");
+  test("names the package of a file in its pnpm store entry, scoped or not", () => {
+    expect(packageOf(pnpm("react-dom", "cjs/react-dom.production.js"), repo)).toBe("react-dom");
+    expect(packageOf(pnpm("@scope/pkg", "index.js"), repo)).toBe("@scope/pkg");
   });
 
-  test("leaves workspace files alone", () => {
-    expect(packageOf(`${repo}/apps/ballot/src/main.tsx`)).toBeUndefined();
+  test("names nothing for paths that only look like a package", () => {
+    for (const id of [
+      `${repo}/apps/ballot/src/main.tsx`,
+      `${repo}/node_modules/react/index.js`,
+      `${repo}/tools/node_modules/react/x.js`,
+      `${repo}/node_modules/.pnpm/evil@1.0.0/node_modules/evil/node_modules/react/x.js`,
+      "/elsewhere/node_modules/.pnpm/react@1.0.0/node_modules/react/x.js",
+    ])
+      expect(packageOf(id, repo), id).toBeUndefined();
   });
 });
 
@@ -94,6 +99,17 @@ describe("moduleViolations", () => {
 
   test("rejects virtual modules a plugin makes up", () => {
     expect(moduleViolations(["\0virtual:tracker", "virtual:tracker"], repo)).toHaveLength(2);
+    expect(moduleViolations([`\0${pnpm("react", "index.js")}`], repo)).toHaveLength(1);
+  });
+
+  test("rejects React-named code outside its store entry", () => {
+    for (const id of [
+      `${repo}/tools/node_modules/react/x.js`,
+      `${repo}/apps/ballot/src/node_modules/react/x.js`,
+      "/elsewhere/node_modules/react/x.js",
+      `${repo}/node_modules/.pnpm/evil@1.0.0/node_modules/evil/node_modules/react/x.js`,
+    ])
+      expect(moduleViolations([id], repo), id).toHaveLength(1);
   });
 });
 
@@ -175,6 +191,17 @@ describe("htmlViolations", () => {
         page(policy, `<meta content="script-src *" http-equiv=content-security-policy>`),
       ).length,
     ).toBeGreaterThan(0);
+  });
+
+  test("rejects any <meta> but the four the client uses", () => {
+    for (const extra of [
+      '<meta http-equiv="refresh" content="0;//evil.example/ballot">',
+      '<meta http-equiv="refresh" content="0; url= //evil.example">',
+      '<meta http-equiv="refresh" content="0;url=\\\\evil.example">',
+      '<meta name="referrer" content="unsafe-url" />',
+      '<meta name="viewport" content="width=device-width, initial-scale=1" http-equiv="refresh" />',
+    ])
+      expect(htmlViolations(page(policy, extra)).length, extra).toBeGreaterThan(0);
   });
 
   test("rejects inline code and foreign references", () => {

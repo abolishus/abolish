@@ -86,20 +86,28 @@ const EMITTED = [
   /^font-licenses\.txt$/,
 ];
 
-/** The npm package a resolved module id belongs to, or undefined for anything else. */
-export function packageOf(id: string): string | undefined {
-  const parts = id.split(/[\\/]/);
-  const at = parts.lastIndexOf("node_modules");
-  if (at < 0) return undefined;
-  const scope = parts[at + 1];
-  return scope?.startsWith("@") ? `${scope}/${parts[at + 2] ?? ""}` : scope;
+/**
+ * The npm package a resolved module id belongs to: only a file inside the
+ * package's own pnpm store entry under the repository's node_modules, with no
+ * node_modules nested below it. Anything else, a directory merely named
+ * node_modules included, is undefined and judged as workspace code.
+ */
+export function packageOf(id: string, repoRoot: string): string | undefined {
+  const path = relative(repoRoot, id).split(sep).join(posix.sep);
+  const m = /^node_modules\/\.pnpm\/[^/]+\/node_modules\/((?:@[^/]+\/)?[^/@][^/]*)\/(.+)$/.exec(
+    path,
+  );
+  if (m === null || m[2]?.split("/").includes("node_modules")) return undefined;
+  return m[1];
 }
 
 /** Modules in the build that come from neither an allowed package nor allowed workspace source. */
 export function moduleViolations(ids: readonly string[], repoRoot: string): string[] {
   const violations: string[] = [];
   for (const id of ids) {
-    const pkg = packageOf(id);
+    // Virtual modules (a leading NUL, or anything outside the repository) are
+    // code a plugin made up, whatever path they name.
+    const pkg = id.startsWith("\0") ? undefined : packageOf(id, repoRoot);
     if (pkg !== undefined) {
       if (!RUNTIME_PACKAGES.has(pkg))
         violations.push(
@@ -107,11 +115,11 @@ export function moduleViolations(ids: readonly string[], repoRoot: string): stri
         );
       continue;
     }
-    // Virtual modules (a leading NUL or a scheme) are code a plugin made up.
     const path = relative(repoRoot, id).split(sep).join(posix.sep);
     if (
       id.startsWith("\0") ||
       path.startsWith("..") ||
+      path.split("/").includes("node_modules") ||
       !WORKSPACE_SOURCES.some((allowed) => path.startsWith(allowed))
     )
       violations.push(
@@ -129,6 +137,21 @@ export function moduleViolations(ids: readonly string[], repoRoot: string): stri
 export const BALLOT_CSP_TEXT = Object.entries(BALLOT_CSP)
   .map(([name, values]) => [name, ...values].join(" "))
   .join("; ");
+
+const META_END = "[\\t\\n\\f\\r ]*/?>$";
+/** The <meta> elements index.html may contain, attributes exact. */
+const ALLOWED_METAS: readonly RegExp[] = [
+  new RegExp(`^<meta[\\t\\n\\f\\r ]+charset="utf-8"${META_END}`, "i"),
+  new RegExp(
+    `^<meta[\\t\\n\\f\\r ]+http-equiv="Content-Security-Policy"[\\t\\n\\f\\r ]+content="[^"<>]*"${META_END}`,
+  ),
+  new RegExp(
+    `^<meta[\\t\\n\\f\\r ]+name="referrer"[\\t\\n\\f\\r ]+content="no-referrer"${META_END}`,
+  ),
+  new RegExp(
+    `^<meta[\\t\\n\\f\\r ]+name="viewport"[\\t\\n\\f\\r ]+content="width=device-width, initial-scale=1"${META_END}`,
+  ),
+];
 
 /** The only elements index.html may contain. */
 const PAGE_ELEMENTS: ReadonlySet<string> = new Set([
@@ -168,6 +191,11 @@ export function htmlViolations(page: string): string[] {
         `${JSON.stringify(tag.slice(0, 40))}: only <${[...PAGE_ELEMENTS].join(">, <")}> may appear`,
       );
   }
+  // Every <meta> is one of the four the client uses: a refresh, say, would
+  // navigate voters away, and CSP doesn't govern navigation.
+  for (const [meta] of page.matchAll(/<meta\b[^>]*>/gi))
+    if (!ALLOWED_METAS.some((allowed) => allowed.test(meta)))
+      at(`${JSON.stringify(meta.slice(0, 60))}: not an allowed <meta>`);
   const content = PAGE_PREFIX.exec(page)?.[1];
   if (content === undefined)
     at(

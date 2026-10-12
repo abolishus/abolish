@@ -745,11 +745,8 @@ async function toolchain(): Promise<void> {
 
 function ballot(): void {
   const dir = "apps/ballot";
-  if (!existsSync(dir)) {
-    console.log("apps/ballot doesn't exist yet: no ballot client to check");
-    return;
-  }
-  // A ballot directory is the client or nothing: it mustn't pass vacuously.
+  // The client exists on main: a PR that removes or moves it mustn't pass the
+  // gate vacuously.
   if (!existsSync(join(dir, "package.json"))) {
     console.error(`${dir}/package.json: missing`);
     process.exit(1);
@@ -780,7 +777,7 @@ function ballot(): void {
     const violations =
       Array.isArray(ids) && ids.every((id) => typeof id === "string")
         ? [
-            ...(ids.some((id) => packageOf(id) === "react-dom")
+            ...(ids.some((id) => packageOf(id, resolve(".")) === "react-dom")
               ? []
               : [
                   "apps/ballot: the build reported no react-dom, so the module check would be vacuous",

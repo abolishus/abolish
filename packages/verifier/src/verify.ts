@@ -1,17 +1,18 @@
 // Runs the checks of docs/spec/verifier.md over one bundle and builds the
 // report (Procedure, Verdicts, Report). Only the board checks (4.1, 4.2), the
 // definition's decoding and well-formedness (part of 2.1), 2.3's profile
-// combination and, for format 4, the key-ceremony transcript check (3.2, and
-// the parts of 2.5 and 3.1 that need no L2 state) are implemented; every other
-// check is reported unverifiable, so no run can report an election verified
-// yet. A run on unauthenticated inputs reports what the checks found against
-// them, but its verdict stays unverifiable, so a crafted bundle can neither
-// verify nor fail an election (T-53, T-24).
+// combination, 8.5's not-applicable case and, for format 4, the key-ceremony
+// transcript check (3.2, and the parts of 2.5 and 3.1 that need no L2 state)
+// are implemented; every other check is reported unverifiable, so no run can
+// report an election verified yet. A run on unauthenticated inputs reports
+// what the checks found against them, but its verdict stays unverifiable, so
+// a crafted bundle can neither verify nor fail an election (T-53, T-24).
 
 import {
   type Anchor,
   BoardError,
   type BoardEntryVersion,
+  boardPayloadTypes,
   type BoardErrorAt,
   type BoardErrorCode,
   DecodeError,
@@ -22,6 +23,7 @@ import {
   electionDefinitionRule,
   type ElectionDefinitionRule,
   pinnedVersion,
+  profileCombinationRule,
   RECORD_TYPES,
   verifyBoard,
 } from "@abolishus/crypto";
@@ -47,6 +49,7 @@ export type CheckCode =
   | "profile-combination"
   | "unsupported-version"
   | "not-reached"
+  | "not-applicable"
   | "not-implemented";
 
 /**
@@ -103,6 +106,11 @@ type Outcome = Pick<CheckResult, "status" | "code" | "at">;
 const PASS: Outcome = { status: "pass" };
 const NOT_REACHED: Outcome = { status: "unverifiable", code: "not-reached" };
 const UNSUPPORTED: Outcome = { status: "unverifiable", code: "unsupported-version", at: {} };
+// 8.5 under a board-entry version that can't carry a destruction statement:
+// reported, never `destruction-missing` for every seat (docs/spec/verifier.md, 8.5).
+const NOT_APPLICABLE: Outcome = { status: "unverifiable", code: "not-applicable" };
+const carriesDestruction = (v: BoardEntryVersion) =>
+  boardPayloadTypes(v).includes(RECORD_TYPES.destructionStatement);
 
 function copyAt(at: BoardErrorAt): CheckAt {
   if ("entry" in at)
@@ -257,7 +265,23 @@ function fromDefinition(bundle: Bundle):
   // so it leaves the election unverifiable here, never failed (2.3).
   const version = pinnedVersion(definition, RECORD_TYPES.boardEntry);
   if (!isReadable(version)) return stopped("2.3", UNSUPPORTED, hash);
-  const combination = profileCombination(definition, version);
+  let combination: Outcome | undefined;
+  const pins = profileCombinationRule(definition);
+  switch (pins) {
+    case undefined:
+      break;
+    case "profile-combination":
+      combination = { status: "fail", code: "profile-combination", at: {} };
+      break;
+    case "unsupported-version":
+      // Not reached while READABLE is within crypto's versions; if they ever
+      // drift, the version is unsupported here too, never a pass (T-36).
+      return stopped("2.3", UNSUPPORTED, hash);
+    default: {
+      const unknown: never = pins;
+      throw new Error(`unmapped profile rule ${String(unknown)}`);
+    }
+  }
   return {
     hash,
     definition,
@@ -273,26 +297,6 @@ function fromDefinition(bundle: Bundle):
 const READABLE: ReadonlySet<number> = new Set<BoardEntryVersion>([1, 3, 4]);
 const isReadable = (v: number | undefined): v is BoardEntryVersion =>
   v !== undefined && READABLE.has(v);
-
-/**
- * 2.3's `profile-combination` (docs/spec/verifier.md, 2.3): ballot version 1
- * needs a board-entry version that carries share receipts and complaints (3
- * or 4, docs/spec/delivery.md, Versions), and tally-opening version 1 one
- * that carries destruction statements (4, docs/spec/tally.md, Destruction).
- * A profile that pins either with any other version fails, so an election's
- * creator can't leave delivery or destruction off the board (T-34).
- */
-function profileCombination(
-  definition: ElectionDefinition,
-  boardEntryVersion: BoardEntryVersion,
-): Outcome | undefined {
-  const ballot = pinnedVersion(definition, RECORD_TYPES.ballot);
-  const opening = pinnedVersion(definition, RECORD_TYPES.tallyOpening);
-  const fits =
-    (ballot !== 1 || boardEntryVersion === 3 || boardEntryVersion === 4) &&
-    (opening !== 1 || boardEntryVersion === 4);
-  return fits ? undefined : { status: "fail", code: "profile-combination", at: {} };
-}
 
 /** The board checks' anchors and `now`: given as they are, or read from L1 state. */
 function anchoring(
@@ -378,6 +382,9 @@ export function verifyBundle(bundle: Bundle): Report {
       // A failing combination doesn't stop the checks: the pinned version is
       // one this verifier reads, so the report still shows what the board holds.
       ...(definition.profile !== undefined ? [["2.3", definition.profile] as const] : []),
+      ...(carriesDestruction(definition.inputs.boardEntryVersion)
+        ? []
+        : [["8.5", NOT_APPLICABLE] as const]),
     ]);
     // The transcript's bytes are authenticated by the definition's hash of
     // them, not by the board checks, so they run whatever 4.1 and 4.2 found.

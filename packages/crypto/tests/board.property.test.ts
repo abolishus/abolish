@@ -4,6 +4,9 @@ import {
   type Anchor,
   type AnchorClock,
   BOARD_PAYLOAD_TYPES,
+  BOARD_PAYLOAD_TYPES_V3,
+  BOARD_PAYLOAD_TYPES_V4,
+  boardPayloadTypes,
   BOARD_TREE,
   type BoardEntry,
   type BoardEntryVersion,
@@ -678,6 +681,176 @@ describe("checkpoints from a raw copy", () => {
           else expect(encodeCheckpoint(decodeCheckpoint(junk))).toEqual(junk);
         },
       ),
+    );
+  });
+});
+
+// Board-entry versions 3 and 4 differ from version 1 only in the record types
+// they allow (docs/spec/board.md, Allowed payloads), so the board checks must
+// pass and fail on them exactly as on version 1 (T-23, T-31).
+describe("board checks under board-entry versions 3 and 4", () => {
+  const ADDED: Record<3 | 4, readonly number[]> = {
+    3: [RECORD_TYPES.shareReceipt, RECORD_TYPES.shareComplaint],
+    4: [RECORD_TYPES.shareReceipt, RECORD_TYPES.shareComplaint, RECORD_TYPES.destructionStatement],
+  };
+  const allowed = { 3: BOARD_PAYLOAD_TYPES_V3, 4: BOARD_PAYLOAD_TYPES_V4 } as const;
+
+  /** A valid board under `version`, carrying at least one of the types it adds. */
+  const boardUnder = (version: 3 | 4) =>
+    fc
+      .tuple(
+        fc.array(
+          fc.record({
+            gap: fc.integer({ min: 0, max: 2 }),
+            type: fc.constantFrom(
+              ...allowed[version].filter((t) => t !== RECORD_TYPES.spoiledBallotOpening),
+            ),
+            body: fc.uint8Array({ maxLength: 6 }),
+          }),
+          { minLength: 1, maxLength: 12 },
+        ),
+        fc.constantFrom(...ADDED[version]),
+        fc.uint8Array({ maxLength: 6 }),
+      )
+      .map(([rows, added, body]) => {
+        const entries: Uint8Array[] = [];
+        let segment = 0;
+        for (const r of [...rows, { gap: 0, type: added, body }]) {
+          segment += r.gap;
+          entries.push(
+            encodeBoardEntry(
+              {
+                election_id: ELECTION,
+                index: BigInt(entries.length),
+                segment,
+                payload: recordOf(r.type, r.body),
+              },
+              version,
+            ),
+          );
+        }
+        return { entries, last: segment, version };
+      });
+
+  const anchorsUnder = (entries: readonly Uint8Array[], last: number, version: 3 | 4) => {
+    const board = checkBoard(ELECTION, entries, version);
+    const out: Anchor[] = [];
+    for (let s = 0; s <= last; s++) {
+      const cp = checkpointOf(board, s);
+      if (cp !== undefined) out.push(anchorOf(cp));
+    }
+    return out;
+  };
+
+  const verdictUnder = (
+    entries: readonly Uint8Array[],
+    anchors: readonly Anchor[],
+    last: number,
+    version: BoardEntryVersion,
+  ) => {
+    try {
+      verifyBoard(ELECTION, entries, version, anchors, clockFor(last), closedAt(last));
+    } catch (e) {
+      if (e instanceof BoardError) return e.code;
+      throw e;
+    }
+    return "ok";
+  };
+
+  const either = fc.oneof(boardUnder(3), boardUnder(4));
+
+  test("boardPayloadTypes gives each version's allowed set", () => {
+    expect(boardPayloadTypes(1)).toBe(BOARD_PAYLOAD_TYPES);
+    expect(boardPayloadTypes(3)).toBe(BOARD_PAYLOAD_TYPES_V3);
+    expect(boardPayloadTypes(4)).toBe(BOARD_PAYLOAD_TYPES_V4);
+    for (const bad of [2, 5, "constructor", "toString"])
+      expect(() => boardPayloadTypes(bad as never)).toThrow(RangeError);
+  });
+
+  test("a well-formed board passes under its version, with the checkpoint of every segment", () => {
+    run(
+      fc.property(either, ({ entries, last, version }) => {
+        expect(verdictUnder(entries, anchorsUnder(entries, last, version), last, version)).toBe(
+          "ok",
+        );
+      }),
+    );
+  });
+
+  test("any change to one byte of an anchored board fails a check", () => {
+    run(
+      fc.property(
+        either,
+        fc.nat(),
+        fc.nat(),
+        fc.integer({ min: 1, max: 255 }),
+        ({ entries, last, version }, e, at, x) => {
+          const anchors = anchorsUnder(entries, last, version);
+          const changed = entries.map((b) => b.slice());
+          const target = changed[e % changed.length] as Uint8Array;
+          target[at % target.length] = (target[at % target.length] as number) ^ x;
+          expect(verdictUnder(changed, anchors, last, version)).toBe("copy-mismatch");
+        },
+      ),
+    );
+  });
+
+  test("the same board under any other pinned version fails decoding at its first entry", () => {
+    run(
+      fc.property(either, ({ entries, last, version }) => {
+        for (const other of [1, 3, 4] as const) {
+          if (other === version) continue;
+          let caught: unknown;
+          try {
+            checkBoard(ELECTION, entries, other);
+          } catch (e) {
+            caught = e;
+          }
+          expect(caught).toBeInstanceOf(BoardError);
+          expect((caught as BoardError).code).toBe("decode");
+          expect((caught as BoardError).at).toMatchObject({ entry: 0 });
+          // verifyBoard too: honest anchors authenticate the bytes, which then
+          // fail decoding under the wrong pin.
+          expect(verdictUnder(entries, anchorsUnder(entries, last, version), last, other)).toBe(
+            "decode",
+          );
+        }
+      }),
+    );
+  });
+
+  test("relabelled as version 3, a version-4 board is refused at its first destruction statement", () => {
+    run(
+      fc.property(boardUnder(4), ({ entries, last }) => {
+        const relabelled = entries.map((b) =>
+          Uint8Array.of(b[0] as number, b[1] as number, 3, ...b.slice(3)),
+        );
+        const first = relabelled.findIndex(
+          (b) =>
+            (((b[51] as number) << 8) | (b[52] as number)) === RECORD_TYPES.destructionStatement,
+        );
+        let caught: unknown;
+        try {
+          checkBoard(ELECTION, relabelled, 3);
+        } catch (e) {
+          caught = e;
+        }
+        if (first === -1) expect(caught).toBeUndefined();
+        else {
+          expect(caught).toBeInstanceOf(BoardError);
+          expect((caught as BoardError).at).toEqual({
+            entry: first,
+            decodeError: "unexpected-record-type",
+          });
+          // Anchored as it is, the relabelled copy still fails verifyBoard
+          // under version 3, by its decoding, not its bytes.
+          const segments = Array.from({ length: last + 1 }, (_, s) => s);
+          const anchors = [...copyCheckpoints(ELECTION, relabelled, segments).values()].map(
+            anchorOf,
+          );
+          expect(verdictUnder(relabelled, anchors, last, 3)).toBe("decode");
+        }
+      }),
     );
   });
 });

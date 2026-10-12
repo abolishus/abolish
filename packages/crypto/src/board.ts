@@ -64,6 +64,24 @@ export const BOARD_PAYLOAD_TYPES_V4: readonly number[] = Object.freeze([
   RECORD_TYPES.destructionStatement,
 ]);
 
+const PAYLOAD_TYPES_BY_VERSION = {
+  1: BOARD_PAYLOAD_TYPES,
+  3: BOARD_PAYLOAD_TYPES_V3,
+  4: BOARD_PAYLOAD_TYPES_V4,
+} as const;
+
+/**
+ * The record types a board-entry version allows (docs/spec/board.md,
+ * Allowed payloads), so a rule about what a version carries asks it rather
+ * than naming versions.
+ */
+export function boardPayloadTypes(version: BoardEntryVersion): readonly number[] {
+  // An untyped caller can pass anything; own keys only, never the prototype's.
+  if (!Object.hasOwn(PAYLOAD_TYPES_BY_VERSION, version))
+    throw new RangeError(`boardPayloadTypes: no board-entry version ${String(version)}`);
+  return PAYLOAD_TYPES_BY_VERSION[version];
+}
+
 const RECORD_HEADER_LENGTH = 3;
 
 const recordTypeOf = (record: Uint8Array) => ((record[0] as number) << 8) | (record[1] as number);

@@ -230,13 +230,23 @@ describe("report", () => {
   });
 
   test("reports every unimplemented check as unverifiable, never as pass", () => {
-    for (const c of report.checks.filter((x) => x.id !== "4.1" && x.id !== "4.2"))
+    const implemented = new Set(["4.1", "4.2", "8.5"]);
+    for (const c of report.checks.filter((x) => !implemented.has(x.id)))
       expect(c).toEqual({
         id: c.id,
         kind: c.kind,
         status: "unverifiable",
         code: "not-implemented",
       });
+  });
+
+  test("8.5 is not applicable: board-entry version 1 can't carry a destruction statement", () => {
+    expect(report.checks.find((c) => c.id === "8.5")).toEqual({
+      id: "8.5",
+      kind: "report-only",
+      status: "unverifiable",
+      code: "not-applicable",
+    });
   });
 
   test("records every input as a local file and keeps the verdict unverifiable", () => {

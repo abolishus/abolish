@@ -94,7 +94,7 @@ Each check names the threats it closes and the STATUS item that specifies it. A 
 
 ## Inputs, procedure and report
 
-How `packages/verifier` runs the checks above and reports them (P1-19). This section grows with the checks: today the verifier reads local inputs, can read the anchors and `now` from an L1 state proof and the election identifier, pinned version and anchor address from the election definition, and runs 4.1, 4.2, the decoding and well-formedness part of 2.1 and, given a pinned panel, the key-ceremony transcript check: 3.2, and the parts of 2.5 and 3.1 that need no L2 state ([Key ceremony](#key-ceremony)). Every other check is reported unverifiable with `not-implemented`, so no run can report an election verified yet. The bundle and the report are tool formats, not protocol bytes: nothing hashes, signs or anchors them. They are versioned so that a reader rejects a format it doesn't know.
+How `packages/verifier` runs the checks above and reports them (P1-19). This section grows with the checks: today the verifier reads local inputs, can read the anchors and `now` from an L1 state proof and the election identifier, pinned version and anchor address from the election definition, and runs 4.1, 4.2, the decoding and well-formedness part of 2.1, 2.3's profile combination (Definition), 8.5's not-applicable case and, given a pinned panel, the key-ceremony transcript check: 3.2, and the parts of 2.5 and 3.1 that need no L2 state ([Key ceremony](#key-ceremony)). Every other check is reported unverifiable with `not-implemented`, so no run can report an election verified yet; 8.5 under board-entry version 4 is one of them until the tally checks exist. The bundle and the report are tool formats, not protocol bytes: nothing hashes, signs or anchors them. They are versioned so that a reader rejects a format it doesn't know.
 
 ### Bundle
 
@@ -194,7 +194,7 @@ Once the check reaches the seats, the report's `ceremony` gives what it found, s
 | `checkpoint-boundary`, `unanchored`, `unsealed`                                                           | pass                        | fail, with the code         |
 
 6. For format 4, unless step 3 stopped the board checks, run the key-ceremony checks ([Key ceremony](#key-ceremony)); if it did, 2.5, 3.1 and 3.2 are unverifiable with `not-reached`.
-7. Report every other check unverifiable with `not-implemented`.
+7. Unless step 3 stopped the board checks, report 8.5 unverifiable with `not-applicable` if the board-entry version they use (the bundle's for formats 1 and 2, the definition's for 3 and 4) doesn't allow `0x000f` (8.5). Report every other check unverifiable with `not-implemented`.
 
 ### Verdicts
 

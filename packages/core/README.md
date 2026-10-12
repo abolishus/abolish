@@ -109,7 +109,7 @@ The table's triggers check order and chaining but never hash, so a writer that b
 
 ### No joins (T-10)
 
-Accounts and ballots never join. The tests fail on a table missing from `TABLE_CLASSES`, on any foreign key that starts or ends at a board table or that leaves the account tables, on a board column with an account-like name, on an account column with a ballot-like name, and on any view, or any function naming tables of both classes.
+Accounts and ballots never join. Identity tables (`identity_backups`) are on the ballot side. The tests fail on a table missing from `TABLE_CLASSES`, on any foreign key that starts or ends at a board or identity table or that leaves the account tables, on a board or identity column with an account-like name, on an account column with a ballot-like name, and on any view, or any function naming an account table and a board or identity table.
 
 ## Tests
 

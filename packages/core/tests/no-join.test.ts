@@ -31,13 +31,15 @@ test("every table is classified", async () => {
   expect(tables.map((t) => t["table_name"])).toEqual(classified);
 });
 
-test("no foreign key starts or ends at a board table", async () => {
+test("no foreign key starts or ends at a board or identity table", async () => {
   const fks = await db.admin`
     SELECT conrelid::regclass::text AS src, confrelid::regclass::text AS dst FROM pg_constraint
     WHERE contype = 'f' AND connamespace = ${db.schema}::regnamespace`;
-  const board = new Set<string>(TABLE_CLASSES.board);
+  const ballotSide = new Set<string>([...TABLE_CLASSES.board, ...TABLE_CLASSES.identity]);
   const bare = (t: string) => t.split(".").pop()!.replaceAll('"', "");
-  expect(fks.filter((f) => board.has(bare(f["src"])) || board.has(bare(f["dst"])))).toEqual([]);
+  expect(
+    fks.filter((f) => ballotSide.has(bare(f["src"])) || ballotSide.has(bare(f["dst"]))),
+  ).toEqual([]);
 });
 
 test("every foreign key from or to an account table stays among the account tables", async () => {

@@ -6,24 +6,25 @@ Cross-language vectors for the encodings and computations in this spec. TypeScri
 
 One JSON file per spec section or record type, named after it (`primitives.json`, `election-definition.json`, …). Each file is UTF-8 JSON, formatted by `vp check`.
 
-| File                       | Covers                                                                                                                                                                                                              |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `primitives.json`          | Primitive types, record framing and strict-decoding rejections ([[notation]])                                                                                                                                       |
-| `group.json`               | `scalar` and `element` codecs: valid boundaries and every rejected class ([[group]])                                                                                                                                |
-| `board.json`               | Board entries, the board tree with every inclusion and consistency proof, checkpoints, board checks ([[board]])                                                                                                     |
-| `membership.json`          | The nullifier scope, the Semaphore field mapping `F` and the protocol-wide tree depth ([[membership]])                                                                                                              |
-| `revoting.json`            | The membership message `M` and `F(M)`, and the selection of counted ballots, ties and repeats included ([[revoting]])                                                                                               |
-| `hash.json`                | `H`, `HashToScalar` under each Fiat–Shamir tag, and `h`, with intermediate bytes ([[group]])                                                                                                                        |
-| `election-definition.json` | Election definition version 1: codec, definition hash, self-pin and well-formedness ([[election-definition]])                                                                                                       |
-| `display-text.json`        | Display-text record version 1: codec, commitment and well-formedness ([[display-text]])                                                                                                                             |
-| `event-accumulator.json`   | The event accumulator: genesis values, event sequences step by step, rejected inputs ([[contracts]])                                                                                                                |
-| `election-registry.json`   | Election identifiers the election registry assigns, and inputs with no `u64` encoding ([[contracts]], Election registry)                                                                                            |
-| `trustee.json`             | Trustee identity keys and signatures, accepted and rejected; panel identifiers; ceremony-registration statements ([[trustee-identity]])                                                                             |
-| `ballot-validity.json`     | Committed votes with the randomness that made them, their validity verdicts, trustees' share checks and codec rejections ([[ballot-validity]])                                                                      |
-| `share-encryption.json`    | Trustee KEM keys, share ciphertexts with the randomness that made them, decryptions, postings and complaints with their verdicts, and codec rejections ([[share-encryption]])                                       |
-| `tally.json`               | Cell aggregates, trustees' per-ballot and summed shares with their check verdicts, combined seats, Lagrange coefficients and openings; published openings with the verifier's verdicts; a derived total ([[tally]]) |
-| `receipt.json`             | Receipts: the record and its signed statement, rejected encodings and the checks at cast ([[receipts]])                                                                                                             |
-| `circuit.json`             | Circuit-facing values: each registered tag's field element and the two byte packings ([[notation]], [[domain-separation]])                                                                                          |
+| File                       | Covers                                                                                                                                                                                                                                    |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `primitives.json`          | Primitive types, record framing and strict-decoding rejections ([[notation]])                                                                                                                                                             |
+| `group.json`               | `scalar` and `element` codecs: valid boundaries and every rejected class ([[group]])                                                                                                                                                      |
+| `board.json`               | Board entries, the board tree with every inclusion and consistency proof, checkpoints, board checks ([[board]])                                                                                                                           |
+| `membership.json`          | The nullifier scope, the Semaphore field mapping `F` and the protocol-wide tree depth ([[membership]])                                                                                                                                    |
+| `revoting.json`            | The membership message `M` and `F(M)`, and the selection of counted ballots, ties and repeats included ([[revoting]])                                                                                                                     |
+| `hash.json`                | `H`, `HashToScalar` under each Fiat–Shamir tag, and `h`, with intermediate bytes ([[group]])                                                                                                                                              |
+| `election-definition.json` | Election definition version 1: codec, definition hash, self-pin and well-formedness ([[election-definition]])                                                                                                                             |
+| `display-text.json`        | Display-text record version 1: codec, commitment and well-formedness ([[display-text]])                                                                                                                                                   |
+| `event-accumulator.json`   | The event accumulator: genesis values, event sequences step by step, rejected inputs ([[contracts]])                                                                                                                                      |
+| `election-registry.json`   | Election identifiers the election registry assigns, and inputs with no `u64` encoding ([[contracts]], Election registry)                                                                                                                  |
+| `trustee.json`             | Trustee identity keys and signatures, accepted and rejected; panel identifiers; ceremony-registration statements ([[trustee-identity]])                                                                                                   |
+| `ballot-validity.json`     | Committed votes with the randomness that made them, their validity verdicts, trustees' share checks and codec rejections ([[ballot-validity]])                                                                                            |
+| `share-encryption.json`    | Trustee KEM keys, share ciphertexts with the randomness that made them, decryptions, postings and complaints with their verdicts, and codec rejections ([[share-encryption]])                                                             |
+| `tally.json`               | Cell aggregates, trustees' per-ballot and summed shares with their check verdicts, combined seats, Lagrange coefficients and openings; published openings with the verifier's verdicts; a derived total ([[tally]])                       |
+| `receipt.json`             | Receipts: the record and its signed statement, rejected encodings and the checks at cast ([[receipts]])                                                                                                                                   |
+| `circuit.json`             | Circuit-facing values: each registered tag's field element and the two byte packings ([[notation]], [[domain-separation]])                                                                                                                |
+| `l1-anchor.json`           | Board anchors read from L1 state: Anvil's raw headers and `eth_getProof` trie nodes for a deployed board anchor, with the anchors a verifier reads or the code it stops with ([[verifier]], Anchors from L1; [[contracts]], Board anchor) |
 
 ## Format
 
@@ -171,6 +172,16 @@ Type descriptors:
 - `tags`: `tag_field` ([[domain-separation]], In-circuit hashes). Each has `tag` (ASCII), `digest` (the SHA-256 digest under `abolish/v1/circuit-tag`, hex) and `field` (decimal). They cover every registered tag to test the derivation; only a tag registered In-circuit may be used in a circuit. A tag registered after the file was generated may have no vector yet; consumers check the ones present.
 - `packBytes`: `bytes[N]` packing ([[notation]], Circuit-facing values). Each has `id`, `bytes` (hex; `N` is its length) and `fields` (decimal strings).
 - `packBoundedBytes`: `bytes<M>` packing. Each has `id`, `max` (`M`, a JSON number), `bytes` (the content, hex) and either `fields` (the length, then the packed padded content, decimal strings) or `error`: `too-long` for content longer than `M`. A Noir consumer passes the content zero-padded to `M` bytes, and checks that a non-zero padding byte fails.
+
+## L1 anchor vectors
+
+`l1-anchor.json` checks reading the board anchor from L1 state, so it has its own format, `abolish-l1-anchor-vectors/1`, with the same top-level fields, plus `clock` (the anchor's clock with `lastSegment`, as in `board.json`), `electionId` (hex) and `vectors`. The generator deploys the board anchor on Anvil with `board.json`'s clock and anchors `board.json`'s `valid` board, and a second anchor holds a segment-4 checkpoint with another head. Headers, block hashes and trie nodes are Anvil's own, from an implementation that shares no code with ours; the expected anchors are the checkpoints the generator sent. Each vector has:
+
+- `id`, `description`;
+- `block`: `header` (the raw RLP header, hex), `number` and `timestamp` (decimal), and `hash` (hex) unless the header was changed;
+- `anchor` (the address, hex), `firstSegment` (decimal), `nodes` and `checkpoints`: a format-2 bundle's `l1` member ([[verifier]], Bundle);
+- `copy`: the `board.json` board whose entries make `board.bin`, cut to the first `copyEntries` entries when that is present;
+- `result`: either `anchors` (each `segment`, `hash` and `source`, in segment order) with `board` (`"ok"`, or the board-check code and its `at` for 4.1 or 4.2), or `error` (the L1 code and, for `l1-checkpoint-unknown`, its `segment`).
 
 ## Rules
 

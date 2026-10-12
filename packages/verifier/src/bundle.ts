@@ -4,10 +4,16 @@
 // no evidence about any election. A short or unreadable board copy is not
 // rejected here; the board checks decide what it means (T-53).
 
-import type { Anchor, AnchorClock } from "@abolishus/crypto";
+import { type Anchor, type AnchorClock, DecodeError, decodeCheckpoint } from "@abolishus/crypto";
+import { decodeHeader, type L1Evidence, NodePool, RlpError } from "./l1.ts";
 
-/** Where an input came from. Only L1 or the pinned roots authenticate one; a local file never does. */
-export type InputSource = "local-file";
+/**
+ * Where an input came from. A local file authenticates nothing; an
+ * `l1-state-proof` input is proven against the state root of the header the
+ * bundle gives, so it is exactly as authentic as the header, the anchor's
+ * address and the first segment, which are listed as inputs of their own.
+ */
+export type InputSource = "local-file" | "l1-state-proof";
 
 export interface InputSources {
   readonly electionId: InputSource;
@@ -15,15 +21,15 @@ export interface InputSources {
   readonly clock: InputSource;
   readonly now: InputSource;
   readonly anchors: InputSource;
+  readonly l1Header?: InputSource;
+  readonly anchorAddress?: InputSource;
+  readonly firstSegment?: InputSource;
 }
 
-/** One election's inputs: the board copy, and what the board checks judge it against. */
-export interface Bundle {
+interface BundleCommon {
   readonly electionId: Uint8Array;
   readonly boardEntryVersion: 1;
   readonly clock: AnchorClock;
-  readonly now: bigint;
-  readonly anchors: readonly Anchor[];
   /** The board copy, split into encoded entries in index order. */
   readonly entries: readonly Uint8Array[];
   /** Bytes of board.bin after the last entry that could be split off. */
@@ -31,12 +37,29 @@ export interface Bundle {
   readonly sources: InputSources;
 }
 
+/** Format 1: `now` and every anchor given as they are. */
+export interface LocalBundle extends BundleCommon {
+  readonly format: typeof BUNDLE_FORMAT;
+  readonly now: bigint;
+  readonly anchors: readonly Anchor[];
+}
+
+/** Format 2: `now` and the anchors read from the board anchor's L1 state. */
+export interface L1Bundle extends BundleCommon {
+  readonly format: typeof BUNDLE_FORMAT_L1;
+  readonly l1: L1Evidence;
+}
+
+/** One election's inputs: the board copy, and what the board checks judge it against. */
+export type Bundle = LocalBundle | L1Bundle;
+
 /** A bundle that doesn't follow docs/spec/verifier.md, Bundle. */
 export class BundleError extends Error {
   override readonly name = "BundleError";
 }
 
 export const BUNDLE_FORMAT = "abolish-verifier-bundle/1";
+export const BUNDLE_FORMAT_L1 = "abolish-verifier-bundle/2";
 
 const U32_MAX = 2n ** 32n - 1n;
 const U64_MAX = 2n ** 64n - 1n;
@@ -51,13 +74,21 @@ function object(value: unknown, keys: readonly string[], what: string): Record<s
   return o;
 }
 
-function hex32(value: unknown, what: string): Uint8Array {
-  if (typeof value !== "string" || !/^[0-9a-f]{64}$/.test(value))
-    throw new BundleError(`${what}: expected 64 lowercase hex digits`);
-  const b = new Uint8Array(32);
-  for (let i = 0; i < 32; i++) b[i] = Number.parseInt(value.slice(2 * i, 2 * i + 2), 16);
+function hexBytes(value: unknown, what: string, length?: number): Uint8Array {
+  if (
+    typeof value !== "string" ||
+    !/^(?:[0-9a-f]{2})+$/.test(value) ||
+    (length !== undefined && value.length !== 2 * length)
+  )
+    throw new BundleError(
+      `${what}: expected ${length === undefined ? "non-empty" : `${2 * length} digits of`} lowercase hex`,
+    );
+  const b = new Uint8Array(value.length / 2);
+  for (let i = 0; i < b.length; i++) b[i] = Number.parseInt(value.slice(2 * i, 2 * i + 2), 16);
   return b;
 }
+
+const hex32 = (value: unknown, what: string) => hexBytes(value, what, 32);
 
 // Canonical decimal only, so two readers can't take one string for two values.
 function integer(value: unknown, max: bigint, what: string): bigint {
@@ -92,6 +123,38 @@ function parseAnchor(value: unknown, j: number): Anchor {
       root: hex32(a["root"], `${what}.root`),
     },
     anchoredAt: integer(a["anchoredAt"], U64_MAX, `${what}.anchoredAt`),
+  };
+}
+
+function array(value: unknown, what: string): readonly unknown[] {
+  if (!Array.isArray(value)) throw new BundleError(`${what}: expected an array`);
+  return value;
+}
+
+function parseL1(value: unknown): L1Evidence {
+  const l = object(value, ["anchor", "firstSegment", "header", "nodes", "checkpoints"], "l1");
+  const raw = hexBytes(l["header"], "l1.header");
+  let header: L1Evidence["header"];
+  try {
+    header = decodeHeader(raw);
+  } catch (e) {
+    if (e instanceof RlpError) throw new BundleError(`l1.header: ${e.message}`);
+    throw e;
+  }
+  return {
+    header,
+    anchor: hexBytes(l["anchor"], "l1.anchor", 20),
+    firstSegment: Number(integer(l["firstSegment"], U32_MAX, "l1.firstSegment")),
+    nodes: new NodePool(array(l["nodes"], "l1.nodes").map((n, i) => hexBytes(n, `l1.nodes[${i}]`))),
+    checkpoints: array(l["checkpoints"], "l1.checkpoints").map((c, i) => {
+      const what = `l1.checkpoints[${i}]`;
+      try {
+        return decodeCheckpoint(hexBytes(c, what, 108));
+      } catch (e) {
+        if (e instanceof DecodeError) throw new BundleError(`${what}: ${e.code}`);
+        throw e;
+      }
+    }),
   };
 }
 
@@ -171,22 +234,52 @@ export function parseBundle(json: string, board: Uint8Array): Bundle {
     throw new BundleError("bundle.json: not JSON");
   }
   rejectDuplicateMembers(json);
+  const format =
+    value !== null && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)["format"]
+      : undefined;
+  if (format !== BUNDLE_FORMAT && format !== BUNDLE_FORMAT_L1)
+    throw new BundleError(`bundle.json: format must be ${BUNDLE_FORMAT} or ${BUNDLE_FORMAT_L1}`);
   const b = object(
     value,
-    ["format", "electionId", "boardEntryVersion", "clock", "now", "anchors"],
+    format === BUNDLE_FORMAT
+      ? ["format", "electionId", "boardEntryVersion", "clock", "now", "anchors"]
+      : ["format", "electionId", "boardEntryVersion", "clock", "l1"],
     "bundle.json",
   );
-  if (b["format"] !== BUNDLE_FORMAT)
-    throw new BundleError(`bundle.json: format must be ${BUNDLE_FORMAT}`);
   if (b["boardEntryVersion"] !== 1)
     throw new BundleError("bundle.json: boardEntryVersion must be the number 1");
-  const anchors = b["anchors"];
-  if (!Array.isArray(anchors)) throw new BundleError("anchors: expected an array");
-  const split = splitEntries(board);
-  return {
+  const common = {
     electionId: hex32(b["electionId"], "electionId"),
     boardEntryVersion: 1,
     clock: parseClock(b["clock"]),
+  } as const;
+  if (format === BUNDLE_FORMAT_L1) {
+    const l1 = parseL1(b["l1"]);
+    const split = splitEntries(board);
+    return {
+      format,
+      ...common,
+      l1,
+      entries: split.entries,
+      unreadableBytes: split.unreadableBytes,
+      sources: {
+        electionId: "local-file",
+        boardEntryVersion: "local-file",
+        clock: "local-file",
+        now: "l1-state-proof",
+        anchors: "l1-state-proof",
+        l1Header: "local-file",
+        anchorAddress: "local-file",
+        firstSegment: "local-file",
+      },
+    };
+  }
+  const anchors = array(b["anchors"], "anchors");
+  const split = splitEntries(board);
+  return {
+    format,
+    ...common,
     now: integer(b["now"], U64_MAX, "now"),
     anchors: anchors.map(parseAnchor),
     entries: split.entries,

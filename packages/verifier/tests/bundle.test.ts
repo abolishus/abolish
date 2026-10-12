@@ -4,7 +4,14 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vite-plus/test";
-import { BundleError, parseBundle, readBundle, splitEntries } from "../src/index.ts";
+import {
+  BUNDLE_FORMAT,
+  BundleError,
+  type LocalBundle,
+  parseBundle,
+  readBundle,
+  splitEntries,
+} from "../src/index.ts";
 
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
 const run = <T>(p: fc.IPropertyWithHooks<T> | fc.IProperty<T>) => fc.assert(p, { numRuns });
@@ -109,7 +116,11 @@ type Mutable = Record<string, unknown> & {
   clock: Record<string, unknown>;
   anchors: Record<string, unknown>[];
 };
-const parse = (o: unknown) => parseBundle(JSON.stringify(o), new Uint8Array());
+const parse = (o: unknown): LocalBundle => {
+  const b = parseBundle(JSON.stringify(o), new Uint8Array());
+  if (b.format !== BUNDLE_FORMAT) throw new Error("expected a format-1 bundle");
+  return b;
+};
 
 describe("parseBundle", () => {
   test("reads a valid bundle", () => {
@@ -188,7 +199,12 @@ describe("parseBundle", () => {
   const rejected: [string, (o: Mutable) => unknown][] = [
     ["an unknown member", (o) => ({ ...o, extra: 1 })],
     ["a missing member", ({ now: _now, ...o }) => o],
-    ["an unknown format", (o) => ({ ...o, format: "abolish-verifier-bundle/2" })],
+    ["an unknown format", (o) => ({ ...o, format: "abolish-verifier-bundle/3" })],
+    [
+      "format 2's members under format 1",
+      ({ now: _now, anchors: _anchors, ...o }) => ({ ...o, l1: {} }),
+    ],
+    ["format 1's members under format 2", (o) => ({ ...o, format: "abolish-verifier-bundle/2" })],
     ["a board-entry version as a string", (o) => ({ ...o, boardEntryVersion: "1" })],
     ["a board-entry version other than 1", (o) => ({ ...o, boardEntryVersion: 2 })],
     ["uppercase hex", (o) => ({ ...o, electionId: ID.toUpperCase() })],

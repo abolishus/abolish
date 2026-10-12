@@ -173,7 +173,12 @@ describe("a rejected bundle", () => {
 
   test("can't put terminal control characters on stderr through a member name", () => {
     const hostile = "a\u001b[2J\u009b31m\u202eb\\u{1b}\r\n\u0000";
-    const r = run(bundleDir(JSON.stringify({ [hostile]: 1 }), new Uint8Array()));
+    const r = run(
+      bundleDir(
+        JSON.stringify({ format: "abolish-verifier-bundle/1", [hostile]: 1 }),
+        new Uint8Array(),
+      ),
+    );
     expect(r.code).toBe(EXIT_CODES.bundleRejected);
     expect(r.stderr).toBe(
       "bundle rejected: bundle.json: unknown member a\\u{1b}[2J\\u{9b}31m\\u{202e}b\\u{5c}u{1b}\\u{d}\\u{a}\\u{0}\n",

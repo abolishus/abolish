@@ -578,6 +578,9 @@ importers:
       '@abolishus/crypto':
         specifier: workspace:*
         version: link:../crypto
+      '@noble/hashes':
+        specifier: 'catalog:'
+        version: 2.4.0
     devDependencies:
       '@types/node':
         specifier: 'catalog:'

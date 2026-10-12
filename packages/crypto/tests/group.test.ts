@@ -271,19 +271,24 @@ describe("hash layer", () => {
       );
       // No namespace, dynamic or re-export route around the named import.
       const code = source.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "");
-      // ECDSA P-256 (trustee signatures, ADR 0012) is the one other import:
-      // the curve's ECDSA object alone, which has no hash-to-curve; its
-      // hasher, OPRF and FROST bundles are separate exports and stay out.
+      // ECDSA P-256 (trustee signatures, ADR 0012) and secp256k1 (the group
+      // registry's EIP-712 approvals, docs/spec/contracts.md) are the only
+      // other imports: each curve's ECDSA object alone, which has no
+      // hash-to-curve; their hasher, OPRF, FROST and Schnorr bundles are
+      // separate exports and stay out.
       for (const line of code.split("\n").filter((l) => l.includes("@noble/curves")))
         expect(
           [
             'import { ristretto255, ristretto255_hasher } from "@noble/curves/ed25519.js";',
             'import { p256 } from "@noble/curves/nist.js";',
+            'import { secp256k1 } from "@noble/curves/secp256k1.js";',
           ],
           `${name}: ${line}`,
         ).toContain(line);
       if (code.includes("@noble/curves/nist.js"))
         expect(code, name).not.toMatch(/p256_|hashToCurve|hash_to_curve|hasher/);
+      if (code.includes("@noble/curves/secp256k1.js"))
+        expect(code, name).not.toMatch(/secp256k1_|schnorr|hashToCurve|hash_to_curve|hasher/);
       for (const m of source.matchAll(/ristretto255_hasher\.(\w+)\(([^;]*?)\);/gs)) {
         calls++;
         expect(m[2], `${name}: ${m[0]}`).toMatch(/, \{ DST: checkDst\(dst\) \}$/);

@@ -112,6 +112,39 @@ export {
   scalar,
 } from "./group.ts";
 export { circuitTagField, PACK_CHUNK, packBoundedBytes, packBytes } from "./circuit.ts";
+export {
+  ADD_MEMBERS_TYPE,
+  type AddMembersMessage,
+  addMembersStructHash,
+  applyGroupRecords,
+  checkGroupApprovals,
+  decodeGroupAddition,
+  decodeGroupRemoval,
+  encodeGroupAddition,
+  encodeGroupRemoval,
+  type GroupAddition,
+  groupAdditionDigest,
+  type GroupApproval,
+  type GroupApprovalError,
+  type GroupApprovalResult,
+  type GroupHistoryReason,
+  type GroupLogRecord,
+  type GroupRecordError,
+  type GroupRecordResult,
+  GROUP_REGISTRY_DOMAIN_TYPE,
+  GROUP_REGISTRY_MAX_BATCH,
+  GROUP_REGISTRY_MAX_REGISTRARS,
+  groupRegistryDomainSeparator,
+  type GroupRemoval,
+  groupRemovalDigest,
+  type GroupReplayContext,
+  type GroupReplayResult,
+  isForbiddenCommitment,
+  POSEIDON2_ZERO_ONE,
+  REMOVE_MEMBERS_TYPE,
+  type RemoveMembersMessage,
+  removeMembersStructHash,
+} from "./group-registry.ts";
 // Not exported: `newIdentitySecretWith` and `sealIdentityBackupWith`, the test
 // seams that take their randomness, so production code can't reuse a nonce.
 export {

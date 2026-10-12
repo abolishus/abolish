@@ -119,9 +119,9 @@ A verifier takes the definition's registration from `DefinitionRegistered` on th
 
 ## Board anchor
 
-Threats: T-23 (board tampering), T-24 (equivocation), T-52 (front-running an election's anchor), T-53 (discreditation), T-49 and T-50 (outages and censorship that miss a deadline), T-17 (chosen bytes on L1), T-69 (a compelled or seized anchoring key).
+Threats: T-23 (board tampering), T-24 (equivocation), T-52 (front-running an election's anchor), T-53 (discreditation), T-49 and T-50 (outages and censorship that miss a deadline, and finding the archive once our domain and hosting are gone), T-51 (data loss), T-17 (chosen bytes on L1), T-69 (a compelled or seized anchoring key).
 
-The board anchor is our one contract on L1. It records, once per election and segment, the hash of the board's checkpoint after that segment ([[board]], Segments and checkpoints), and publishes the checkpoint itself in the same log, so every checkpoint is attributable to its election and segment from L1 alone. It is immutable: no owner, proxy, pause or upgrade path. Its clock and its anchoring authority are fixed at deployment as immutables, which solc writes into the runtime code. A verifier release pins the anchor's address together with its `epoch`, `period`, `deadline` and `authority`; [[verifier]] 1.2 compares the runtime code with the release build with the immutables' byte ranges masked, and requires the masked words to equal those pinned values, so the clock a verifier applies is the deployed one, read from code, never from a call. The definition's `l1_anchor` names it.
+The board anchor is our one contract on L1. It records, once per election and segment, the hash of the board's checkpoint after that segment ([[board]], Segments and checkpoints), and publishes the checkpoint itself in the same log, so every checkpoint is attributable to its election and segment from L1 alone. Each call may also carry the `archiveLocator` [[0005-permanent-archive]] requires (Archive objects and how they are found), so the archive is found from L1 alone. It is immutable: no owner, proxy, pause or upgrade path. Its clock and its anchoring authority are fixed at deployment as immutables, which solc writes into the runtime code. A verifier release pins the anchor's address together with its `epoch`, `period`, `deadline` and `authority`; [[verifier]] 1.2 compares the runtime code with the release build with the immutables' byte ranges masked, and requires the masked words to equal those pinned values, so the clock a verifier applies is the deployed one, read from code, never from a call. The definition's `l1_anchor` names it.
 
 ### Deployment
 
@@ -140,10 +140,10 @@ Deployment reverts if `period` is 0, or if `authority` has no code or only an [E
 
 ### Anchoring
 
-`anchor(bytes checkpoints)` takes one or more checkpoints, each `encode(checkpoint)` of [[board]] (108 bytes: `election_id ‖ u32(segment) ‖ u64(size) ‖ head ‖ root`), concatenated, so one transaction can carry several elections' checkpoints. The call reverts, anchoring none of them, unless:
+`anchor(bytes checkpoints, bytes locator)` takes zero or more checkpoints, each `encode(checkpoint)` of [[board]] (108 bytes: `election_id ‖ u32(segment) ‖ u64(size) ‖ head ‖ root`), concatenated, so one transaction can carry several elections' checkpoints, and an archive locator, possibly empty (Archive locator, below). The call reverts, anchoring nothing, unless:
 
 1. the caller is `authority` (T-52: no one else can front-run an election's checkpoint with a bogus one);
-2. the calldata is exactly the ABI encoding of one `bytes` argument (offset `0x20`, zero padding, nothing after it), and its length is a non-zero multiple of 108 (T-17);
+2. the calldata is exactly the ABI encoding of the two `bytes` arguments (offsets `0x40` and `0x60 + pad32(len(checkpoints))`, tails in that order, zero padding, nothing after the second), the call carries a checkpoint or a locator, `checkpoints` is a multiple of 108 bytes, and a non-empty `locator` is well framed (T-17);
 3. every checkpoint has `size ≥ 1`: an empty board's checkpoint fails the election (`checkpoint-size`), so it is never stored;
 4. for every checkpoint, `end ≤ block.timestamp ≤ end + deadline`, where `end = epoch + (segment + 1)·period` is the end of its period ([[board]], Timing);
 5. no checkpoint has been stored for its election and segment, in an earlier call or earlier in this one, even an equal one. Refusing an equal one too keeps the rule a plain write-once; the job that anchors (P4-1 part 2) reads the slots first, so a batch never carries a checkpoint another runner already anchored.
@@ -154,7 +154,19 @@ For each checkpoint, in order, it stores `checkpoint_hash = H(DS("abolish/v1/boa
 | ------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- | ----------------------------------- |
 | `CheckpointAnchored(bytes32 indexed electionId, uint32 indexed segment, bytes32 indexed checkpointHash, uint64 size, bytes32 head, bytes32 root)` | `election_id`, `segment` as a 32-byte word, `checkpoint_hash` | `size`, `head`, `root`, ABI-encoded |
 
-through the event accumulator (above), which the anchor inherits like every Abolish contract, with `chain_id` the L1's.
+through the event accumulator (above), which the anchor inherits like every Abolish contract, with `chain_id` the L1's. After the checkpoints, a non-empty locator is logged as
+
+| Event                                                   | Topics                      | Data                                      |
+| ------------------------------------------------------- | --------------------------- | ----------------------------------------- |
+| `ArchiveLocated(uint16 indexed version, bytes locator)` | `version` as a 32-byte word | the whole locator, ABI-encoded as `bytes` |
+
+### Archive locator
+
+[[0005-permanent-archive]] has every L1 anchor carry a generic, versioned `archiveLocator` naming the latest confirmed archive manifest, with no storage scheme fixed in the contract, so the archive can change without a redeploy. The anchor frames it and doesn't interpret it: `locator = u16(version) ‖ body`, with `version ≠ 0` (so a zero word never reads as a locator), a body of at least 1 byte, and at most `MAX_LOCATOR_LENGTH = 128` bytes in all, which bounds the bytes the authority can put on L1 (T-17). Each version's body, starting with version 1 for an Arweave manifest, is specified with the manifest by P4-3, as a fixed length per version, with vectors. A verifier walks every `ArchiveLocated` log of the anchor and ignores versions it doesn't know, reporting them ([[verifier]] 4.3).
+
+A call may carry a locator alone, with no checkpoint, at any time: the locator isn't tied to a period. So the closing locator [[0005-permanent-archive]] asks for, once every manifest holding a closed election's CARs is confirmed, is a locator-only call made whenever the archive confirms. The seal's checkpoint doesn't wait for it, so a slow archive can't push the seal past its deadline, and the deadline justification above is unchanged.
+
+Locators are found from logs, so their completeness rests on the anchor's event accumulator: a verifier proves its two words at a finalized L1 block, replays every log of the anchor up to that block ([[contracts]], Event accumulator, Verification), and so knows it has every locator, not a selection an RPC node chose.
 
 The anchor doesn't know an election's seal ([[board]], Timing): it is computed from the definition, which lives on L2. A verifier ignores an anchor for a segment after the seal. Nor does it check that an election's checkpoints grow with their segments: with a 12-hour deadline, a later segment can be anchored before an earlier one, and [[board]], Board checks, catches an inconsistent pair from L1 alone (`checkpoint-inconsistent`).
 
@@ -188,6 +200,7 @@ The checkpoint hash and the window rule are the ones `vectors/board.json` alread
 - **The Safe's owners and threshold can change after deployment**, and the anchor pins only its address. A verifier doesn't yet check the Safe's configuration at each anchoring block, so a Safe reduced to one owner would go unnoticed except in its own public transactions.
 - **Withheld tails and late forks** remain [[board]]'s residual: an authority that anchors a checkpoint extending every receipt with entries it never publishes makes the election unverifiable, not failed. [[board]], Residuals, names binding a content address of each segment object into what is anchored as a candidate fix; this anchor's 108-byte checkpoint doesn't carry one. P4-1 leaves that fix to P4-3, which adds the segment objects' content addresses: adopting it means a new anchor deployment, a registry naming it and a new verifier pin. Before mainnet that costs only a redeploy, and nothing is deployed yet.
 - **No checkpoint for a segment past the seal is refused on L1**: the anchor can't read the definition. Verifiers ignore it; it costs the authority gas and changes no result.
-- **The authority chooses 108 bytes per checkpoint** that land on L1 for good, such as a checkpoint for an election that doesn't exist (T-17). Only the authority can, and the deployment's Safe is accountable for it.
+- **The authority chooses 108 bytes per checkpoint and up to 126 per locator** that land on L1 for good, such as a checkpoint for an election that doesn't exist, or a locator body of a version no one defined (T-17). Only the authority can, and the deployment's Safe is accountable for it.
+- **A locator only names where the archive is.** A wrong or stale one can send verifiers nowhere, which makes an election unverifiable, never verified: everything found is checked against the anchored checkpoints. The manifest chain ([[0005-permanent-archive]]) gives a second path to every manifest.
 - **Gas.** In the tests a call with one checkpoint costs about 84,000 gas, and each further checkpoint in the same call about 34,000: a storage write, a read of the lowest-segment word, two SHA-256 calls (the hash and the accumulator) and a log. An election's first anchor costs about 22,000 more, for its lowest-segment word. At 100 live elections, hourly, that is about 3.4 million gas an hour, a recurring L1 cost: on testnets it is free, and spending real funds on it is the owner's decision.
 - **The deployment, the Safe and the hourly job don't exist yet** (P4-1 part 2, with the worker and a `ci:` deploy workflow for Sepolia). Until then, nothing is anchored and every board is unanchored.

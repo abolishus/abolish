@@ -30,7 +30,9 @@ library CheckpointLib {
 /// front-run an election's checkpoint with a bogus one (T-52); only inside
 /// the window after the period ends, so a late anchor can neither fail a
 /// closed election nor hide a fork (T-24, T-53); and only one per election and
-/// segment, so it holds no equivocation. There is no admin, proxy, pause or
+/// segment, so it holds no equivocation. Each call may also carry an archive
+/// locator naming where the board is archived (docs/adr/0005-permanent-archive.md),
+/// so the archive can be found from L1 alone (T-49, T-51). There is no admin, proxy, pause or
 /// upgrade path: the clock and the authority are fixed at deployment.
 contract BoardAnchor is EventAccumulator {
     /// The anchoring clock: period `s` is `[epoch + s·period, epoch + (s+1)·period)`,
@@ -53,7 +55,18 @@ contract BoardAnchor is EventAccumulator {
         bytes32 root
     );
 
+    /// @notice An archive locator: `u16(version) ‖ body`, naming the latest
+    /// confirmed archive manifest. The anchor fixes no storage scheme: each
+    /// version's body is specified by P4-3, and verifiers ignore versions they
+    /// don't know.
+    event ArchiveLocated(uint16 indexed version, bytes locator);
+
+    /// The longest locator accepted, so the authority's chosen bytes on L1 stay bounded (T-17).
+    uint256 public constant MAX_LOCATOR_LENGTH = 128;
+
     error InvalidDeployment();
+    error EmptyCall();
+    error MalformedLocator(uint256 length);
     error NotAuthority(address caller);
     error MalformedCheckpoints(uint256 length);
     error EmptyBoard(bytes32 electionId, uint32 segment);
@@ -110,16 +123,27 @@ contract BoardAnchor is EventAccumulator {
         return uint256(epoch) + (uint256(segment) + 1) * period;
     }
 
-    /// @notice Anchors one or more checkpoints, each `encode(checkpoint)` of
-    /// docs/spec/board.md, concatenated. Reverts, anchoring none, unless the
-    /// caller is the authority and every checkpoint is non-empty, inside its
-    /// window and the first for its election and segment.
-    function anchor(bytes calldata checkpoints) external {
+    /// @notice Anchors zero or more checkpoints, each `encode(checkpoint)` of
+    /// docs/spec/board.md, concatenated, and publishes an archive locator if
+    /// `locator` is non-empty. Reverts, anchoring none, unless the caller is
+    /// the authority, the call carries at least one of the two, every
+    /// checkpoint is non-empty, inside its window and the first for its
+    /// election and segment, and the locator is well framed.
+    function anchor(bytes calldata checkpoints, bytes calldata locator) external {
         if (msg.sender != authority) revert NotAuthority(msg.sender);
-        CanonicalCalldata.requireOneBytesArgument(checkpoints);
+        CanonicalCalldata.requireTwoBytesArguments(checkpoints, locator);
         uint256 len = checkpoints.length;
-        if (len == 0 || len % CheckpointLib.ENCODED_LENGTH != 0) {
-            revert MalformedCheckpoints(len);
+        if (len == 0 && locator.length == 0) revert EmptyCall();
+        if (len % CheckpointLib.ENCODED_LENGTH != 0) revert MalformedCheckpoints(len);
+        uint16 version;
+        if (locator.length != 0) {
+            // A version, then a body of at least one byte; version 0 is
+            // reserved so a zero word never reads as a locator.
+            if (locator.length < 3 || locator.length > MAX_LOCATOR_LENGTH) {
+                revert MalformedLocator(locator.length);
+            }
+            version = uint16(bytes2(locator[0:2]));
+            if (version == 0) revert MalformedLocator(locator.length);
         }
         AnchorStorage storage s = _anchorStorage();
         for (uint256 at; at < len; at += CheckpointLib.ENCODED_LENGTH) {
@@ -158,6 +182,9 @@ contract BoardAnchor is EventAccumulator {
                 h,
                 abi.encode(size, head, root)
             );
+        }
+        if (locator.length != 0) {
+            _log2(ArchiveLocated.selector, bytes32(uint256(version)), abi.encode(locator));
         }
     }
 

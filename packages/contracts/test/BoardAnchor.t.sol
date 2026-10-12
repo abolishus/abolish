@@ -84,7 +84,7 @@ contract BoardAnchorTest is TestBase {
                 _parseCheckpoint(json, c);
             vm.warp(vm.parseUint(vm.parseJsonString(json, string.concat(c, ".anchoredAt"))));
             vm.prank(authority);
-            anchor.anchor(abi.encodePacked(id, s, size, head, root));
+            anchor.anchor(abi.encodePacked(id, s, size, head, root), "");
             assertEq(anchor.checkpointHashOf(id, s), _bytes32(json, string.concat(c, ".hash")), c);
         }
         assertTrue(j >= 4, "valid board has too few anchors");
@@ -141,7 +141,7 @@ contract BoardAnchorTest is TestBase {
         vm.warp(EPOCH + 3 * PERIOD);
         vm.recordLogs();
         vm.prank(authority);
-        anchor.anchor(_encode(ID, 2, 5, bytes32("head"), bytes32("root")));
+        anchor.anchor(_encode(ID, 2, 5, bytes32("head"), bytes32("root")), "");
         Vm.Log[] memory logs = vm.getRecordedLogs();
         bytes32 h = lib.hash(ID, 2, 5, bytes32("head"), bytes32("root"));
         assertEq(anchor.checkpointHashOf(ID, 2), h, "stored hash");
@@ -172,7 +172,7 @@ contract BoardAnchorTest is TestBase {
         );
         vm.warp(EPOCH + 8 * PERIOD);
         vm.prank(authority);
-        anchor.anchor(_encode(ID, 6, 1, bytes32("h"), bytes32("r")));
+        anchor.anchor(_encode(ID, 6, 1, bytes32("h"), bytes32("r")), "");
         assertEq(vm.load(address(anchor), _slot(ID, 6)), anchor.checkpointHashOf(ID, 6), "slot");
         assertTrue(vm.load(address(anchor), _slot(ID, 6)) != bytes32(0), "unset");
     }
@@ -187,7 +187,8 @@ contract BoardAnchorTest is TestBase {
                 _encode(ID, 0, 1, bytes32("a"), bytes32("b")),
                 _encode(other, 0, 9, bytes32("c"), bytes32("d")),
                 _encode(ID, 1, 3, bytes32("e"), bytes32("f"))
-            )
+            ),
+            ""
         );
         assertEq(vm.getRecordedLogs().length, 3, "logs");
         assertEq(anchor.checkpointHashOf(ID, 0), lib.hash(ID, 0, 1, "a", "b"), "first");
@@ -204,7 +205,7 @@ contract BoardAnchorTest is TestBase {
         for (uint256 i; i < 3; i++) {
             vm.prank(callers[i]);
             (bool ok, bytes memory ret) =
-                address(anchor).call(abi.encodeCall(BoardAnchor.anchor, (cp)));
+                address(anchor).call(abi.encodeCall(BoardAnchor.anchor, (cp, bytes(""))));
             _assertRefused(
                 ok, ret, abi.encodeWithSelector(BoardAnchor.NotAuthority.selector, callers[i])
             );
@@ -240,10 +241,10 @@ contract BoardAnchorTest is TestBase {
         );
         vm.warp(end);
         vm.prank(authority);
-        anchor.anchor(_encode(ID, 4, 1, "h", "r"));
+        anchor.anchor(_encode(ID, 4, 1, "h", "r"), "");
         vm.warp(end + PERIOD + DEADLINE); // period 5's last second
         vm.prank(authority);
-        anchor.anchor(_encode(ID, 5, 1, "h", "r"));
+        anchor.anchor(_encode(ID, 5, 1, "h", "r"), "");
     }
 
     /// A segment before the epoch doesn't exist: any time before the epoch
@@ -263,7 +264,7 @@ contract BoardAnchorTest is TestBase {
     function test_RefusesASecondCheckpointForASegment() public {
         vm.warp(EPOCH + PERIOD);
         vm.prank(authority);
-        anchor.anchor(_encode(ID, 0, 2, "h", "r"));
+        anchor.anchor(_encode(ID, 0, 2, "h", "r"), "");
         bytes32 first = anchor.checkpointHashOf(ID, 0);
         bytes memory refusal =
             abi.encodeWithSelector(BoardAnchor.AlreadyAnchored.selector, ID, uint32(0));
@@ -285,15 +286,15 @@ contract BoardAnchorTest is TestBase {
         assertEq(anchor.lowestSegmentPlusOne(ID), 0, "none yet");
         vm.warp(EPOCH + 3 * PERIOD); // periods 0 to 2 have ended, all in their windows
         vm.prank(authority);
-        anchor.anchor(_encode(ID, 2, 1, "h", "r"));
+        anchor.anchor(_encode(ID, 2, 1, "h", "r"), "");
         assertEq(anchor.lowestSegmentPlusOne(ID), 3, "first");
         vm.prank(authority);
         anchor.anchor(
-            bytes.concat(_encode(keccak256("x"), 0, 2, "h", "r"), _encode(ID, 1, 1, "h", "r"))
+            bytes.concat(_encode(keccak256("x"), 0, 2, "h", "r"), _encode(ID, 1, 1, "h", "r")), ""
         );
         assertEq(anchor.lowestSegmentPlusOne(ID), 2, "lowered");
         vm.prank(authority);
-        anchor.anchor(_encode(ID, 0, 1, "h", "r"));
+        anchor.anchor(_encode(ID, 0, 1, "h", "r"), "");
         assertEq(anchor.lowestSegmentPlusOne(ID), 1, "segment 0");
         assertEq(anchor.lowestSegmentPlusOne(keccak256("x")), 1, "another election");
         assertEq(anchor.lowestSegmentPlusOne(keccak256("y")), 0, "none");
@@ -320,26 +321,59 @@ contract BoardAnchorTest is TestBase {
 
     function test_RefusesLengthsThatAreNotWholeCheckpoints() public {
         vm.warp(EPOCH + PERIOD);
-        uint256[5] memory lengths = [uint256(0), 1, 107, 109, 215];
-        for (uint256 i; i < 5; i++) {
+        uint256[4] memory lengths = [uint256(1), 107, 109, 215];
+        for (uint256 i; i < 4; i++) {
             _expectRefused(
                 new bytes(lengths[i]),
                 abi.encodeWithSelector(BoardAnchor.MalformedCheckpoints.selector, lengths[i])
             );
         }
+        _expectRefused("", abi.encodeWithSelector(BoardAnchor.EmptyCall.selector));
     }
 
-    /// T-17: the calldata is exactly the ABI encoding of the checkpoints, so
-    /// no transaction to the anchor carries bytes no checkpoint defines.
+    /// T-17: the calldata is exactly the ABI encoding of the two arguments,
+    /// so no transaction to the anchor carries bytes no checkpoint or
+    /// locator defines.
     function test_RefusesNonCanonicalCalldata() public {
         vm.warp(EPOCH + PERIOD);
         bytes memory cp = _encode(ID, 0, 1, "h", "r");
-        bytes memory good = abi.encodeCall(BoardAnchor.anchor, (cp));
-        bytes[] memory bad = new bytes[](3);
+        bytes memory loc = _locator(1, 32);
+        bytes memory good = abi.encodeCall(BoardAnchor.anchor, (cp, loc));
+        // Offsets in the head: 0x40, then 0x40 + 32 + 128 (108 bytes padded).
+        assertEq(_word(good, 4), 0x40, "first offset");
+        assertEq(_word(good, 36), 0x40 + 32 + 128, "second offset");
+        bytes[] memory bad = new bytes[](6);
         bad[0] = bytes.concat(good, bytes32(0)); // a trailing word
         bad[1] = bytes.concat(good, hex"00"); // a trailing byte
         bad[2] = bytes.concat(good); // a copy: `good` must stay canonical
-        bad[2][good.length - 1] = 0x01; // dirty padding (108 bytes end mid-word)
+        bad[2][4 + 64 + 32 + 108] = 0x01; // dirty padding after the checkpoints
+        bad[3] = bytes.concat(good);
+        bad[3][good.length - 1] = 0x01; // dirty padding after the locator (34 bytes)
+        // The tails swapped: the second offset points before the first.
+        bad[4] = abi.encodePacked(
+            BoardAnchor.anchor.selector,
+            uint256(0x40 + 32 + 64),
+            uint256(0x40),
+            uint256(loc.length),
+            loc,
+            bytes30(0),
+            uint256(cp.length),
+            cp,
+            bytes20(0)
+        );
+        // A junk word between the head and the first tail.
+        bad[5] = abi.encodePacked(
+            BoardAnchor.anchor.selector,
+            uint256(0x60),
+            uint256(0x60 + 32 + 128),
+            uint256(0),
+            uint256(cp.length),
+            cp,
+            bytes20(0),
+            uint256(loc.length),
+            loc,
+            bytes30(0)
+        );
         for (uint256 i; i < bad.length; i++) {
             vm.prank(authority);
             (bool ok, bytes memory ret) = address(anchor).call(bad[i]);
@@ -350,21 +384,110 @@ contract BoardAnchorTest is TestBase {
         assertTrue(success, "canonical calldata refused");
     }
 
-    /// The same bytes at offset 0x40, after a junk word, are refused too.
-    function test_RefusesAMovedArgument() public {
+    /// The second offset can't point back into the first argument's data:
+    /// here it points at the last word of eight checkpoints (whose last root
+    /// is 34), so the locator's "length" is read from a root and 32 junk bytes
+    /// trail the call at the canonical total length.
+    function test_RefusesASecondArgumentInsideTheFirst() public {
         vm.warp(EPOCH + PERIOD);
-        bytes memory cp = _encode(ID, 0, 1, "h", "r");
-        bytes memory moved = abi.encodePacked(
+        bytes memory cps;
+        for (uint256 i; i < 7; i++) {
+            cps = bytes.concat(cps, _encode(bytes32(i), 0, 1, "h", "r"));
+        }
+        cps = bytes.concat(cps, _encode(bytes32(uint256(7)), 0, 1, "h", bytes32(uint256(34))));
+        assertEq(cps.length, 864, "a whole number of words");
+        bytes memory loc = _locator(1, 32);
+        bytes memory call = abi.encodePacked(
             BoardAnchor.anchor.selector,
             uint256(0x40),
-            uint256(0),
-            uint256(cp.length),
-            cp,
-            bytes20(0)
+            uint256(0x40 + 32 + 864 - 32),
+            uint256(cps.length),
+            cps,
+            loc,
+            bytes30(0),
+            bytes32("junk")
         );
+        assertEq(call.length, 4 + 128 + 864 + 64, "the canonical total length");
         vm.prank(authority);
-        (bool ok, bytes memory ret) = address(anchor).call(moved);
+        (bool ok, bytes memory ret) = address(anchor).call(call);
         _assertRefused(ok, ret, abi.encodeWithSelector(_nonCanonical()));
+    }
+
+    // --- archive locator -------------------------------------------------------
+
+    /// ADR 0005: each call can carry the locator of the latest confirmed
+    /// archive manifest, logged after the checkpoints through the accumulator,
+    /// so the archive is found from L1 alone (T-49, T-51).
+    function test_LogsTheLocatorAfterTheCheckpoints() public {
+        vm.warp(EPOCH + PERIOD);
+        bytes memory loc = _locator(1, 32);
+        vm.recordLogs();
+        vm.prank(authority);
+        anchor.anchor(_encode(ID, 0, 1, "h", "r"), loc);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        assertEq(logs.length, 2, "two logs");
+        assertEq(logs[0].topics[0], BoardAnchor.CheckpointAnchored.selector, "checkpoint first");
+        assertEq(logs[1].topics.length, 2, "locator topics");
+        assertEq(logs[1].topics[0], BoardAnchor.ArchiveLocated.selector, "locator topic 0");
+        assertEq(logs[1].topics[1], bytes32(uint256(1)), "version topic");
+        assertTrue(keccak256(logs[1].data) == keccak256(abi.encode(loc)), "locator data");
+        _assertAccumulated(logs);
+    }
+
+    /// A locator alone, with no checkpoint, at any time: the closing locator
+    /// ADR 0005 asks for can wait for the archive to confirm without holding
+    /// up the seal's checkpoint, whose deadline it doesn't share.
+    function test_ALocatorAloneNeedsNoWindow() public {
+        vm.warp(EPOCH + 1000 * PERIOD);
+        vm.recordLogs();
+        vm.prank(authority);
+        anchor.anchor("", _locator(7, 3));
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        assertEq(logs.length, 1, "one log");
+        assertEq(logs[0].topics[1], bytes32(uint256(7)), "version");
+        _assertAccumulated(logs);
+    }
+
+    /// The locator is framed but not interpreted: a version other than 0 and
+    /// 1 to 126 body bytes, so the anchor fixes no storage scheme and the
+    /// authority's chosen bytes on L1 stay bounded (T-17).
+    function test_LocatorFraming() public {
+        vm.warp(EPOCH + PERIOD);
+        uint256[3] memory lengths = [uint256(1), 2, 129];
+        for (uint256 i; i < 3; i++) {
+            bytes memory loc = new bytes(lengths[i]);
+            if (loc.length > 1) loc[1] = 0x01; // version 1
+            _expectRefusedWith(
+                "", loc, abi.encodeWithSelector(BoardAnchor.MalformedLocator.selector, lengths[i])
+            );
+        }
+        _expectRefusedWith(
+            "",
+            _locator(0, 32),
+            abi.encodeWithSelector(BoardAnchor.MalformedLocator.selector, uint256(34))
+        );
+        // A bad locator anchors no checkpoint either.
+        _expectRefusedWith(
+            _encode(ID, 0, 1, "h", "r"),
+            _locator(0, 32),
+            abi.encodeWithSelector(BoardAnchor.MalformedLocator.selector, uint256(34))
+        );
+        assertEq(anchor.checkpointHashOf(ID, 0), bytes32(0), "stored");
+        vm.prank(authority);
+        anchor.anchor("", _locator(1, 1));
+        vm.prank(authority);
+        anchor.anchor("", _locator(0xffff, 126));
+    }
+
+    /// Only the authority can post a locator, so no one can point verifiers
+    /// at a fake archive (T-52).
+    function test_RefusesALocatorFromAnyoneElse() public {
+        vm.prank(address(0xA11CE));
+        (bool ok, bytes memory ret) =
+            address(anchor).call(abi.encodeCall(BoardAnchor.anchor, (bytes(""), _locator(1, 32))));
+        _assertRefused(
+            ok, ret, abi.encodeWithSelector(BoardAnchor.NotAuthority.selector, address(0xA11CE))
+        );
     }
 
     /// No personal data on-chain (contracts skill, Rules): the calldata and
@@ -379,9 +502,9 @@ contract BoardAnchorTest is TestBase {
         vm.warp(EPOCH + PERIOD);
         vm.recordLogs();
         vm.prank(authority);
-        anchor.anchor(cp);
+        anchor.anchor(cp, "");
         Vm.Log[] memory logs = vm.getRecordedLogs();
-        assertTrue(!_looksLikeText(abi.encodeCall(BoardAnchor.anchor, (cp))), "calldata");
+        assertTrue(!_looksLikeText(abi.encodeCall(BoardAnchor.anchor, (cp, bytes("")))), "calldata");
         assertEq(logs.length, 1, "one log");
         assertTrue(!_looksLikeText(logs[0].data), "event data");
         for (uint256 t; t < logs[0].topics.length; t++) {
@@ -407,7 +530,9 @@ contract BoardAnchorTest is TestBase {
         vm.warp(t);
         vm.prank(authority);
         (bool ok,) = address(anchor)
-            .call(abi.encodeCall(BoardAnchor.anchor, (_encode(ID, segment, 1, "h", "r"))));
+            .call(
+                abi.encodeCall(BoardAnchor.anchor, (_encode(ID, segment, 1, "h", "r"), bytes("")))
+            );
         assertTrue(!ok, "stored outside the window");
     }
 
@@ -428,7 +553,11 @@ contract BoardAnchorTest is TestBase {
         bool allowed = size != 0 && t >= end && t - end <= DEADLINE;
         vm.prank(authority);
         (bool ok,) = address(anchor)
-            .call(abi.encodeCall(BoardAnchor.anchor, (_encode(id, segment, size, head, root))));
+            .call(
+                abi.encodeCall(
+                    BoardAnchor.anchor, (_encode(id, segment, size, head, root), bytes(""))
+                )
+            );
         assertTrue(ok == allowed, "acceptance");
         assertEq(
             anchor.checkpointHashOf(id, segment),
@@ -462,6 +591,31 @@ contract BoardAnchorTest is TestBase {
         return false;
     }
 
+    /// `u16(version)` and a body of `bodyLength` bytes of 0xab.
+    function _locator(uint16 version, uint256 bodyLength) internal pure returns (bytes memory b) {
+        b = new bytes(2 + bodyLength);
+        b[0] = bytes1(uint8(version >> 8));
+        b[1] = bytes1(uint8(version));
+        for (uint256 i = 2; i < b.length; i++) {
+            b[i] = 0xab;
+        }
+    }
+
+    function _word(bytes memory b, uint256 at) internal pure returns (uint256 w) {
+        assembly ("memory-safe") {
+            w := mload(add(add(b, 0x20), at))
+        }
+    }
+
+    function _expectRefusedWith(bytes memory checkpoints, bytes memory loc, bytes memory expected)
+        internal
+    {
+        vm.prank(authority);
+        (bool ok, bytes memory ret) =
+            address(anchor).call(abi.encodeCall(BoardAnchor.anchor, (checkpoints, loc)));
+        _assertRefused(ok, ret, expected);
+    }
+
     function _nonCanonical() internal pure returns (bytes4) {
         return bytes4(keccak256("NonCanonicalCalldata()"));
     }
@@ -484,7 +638,7 @@ contract BoardAnchorTest is TestBase {
     function _expectRefused(bytes memory checkpoints, bytes memory expected) internal {
         vm.prank(authority);
         (bool ok, bytes memory ret) =
-            address(anchor).call(abi.encodeCall(BoardAnchor.anchor, (checkpoints)));
+            address(anchor).call(abi.encodeCall(BoardAnchor.anchor, (checkpoints, bytes(""))));
         _assertRefused(ok, ret, expected);
     }
 

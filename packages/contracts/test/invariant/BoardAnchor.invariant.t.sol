@@ -22,6 +22,8 @@ contract AnchorHandler is TestBase {
     /// One more than the lowest segment anchored per election, as the anchor keeps it.
     mapping(bytes32 id => uint256) public shadowLowest;
     uint256 public anchored;
+    /// Locators logged by successful calls.
+    uint256 public locators;
     /// Set if a call succeeded or failed against the rules.
     bool public unexpected;
 
@@ -71,8 +73,12 @@ contract AnchorHandler is TestBase {
                 keys.push(key);
             }
         }
+        // A well-framed locator now and then: it changes no checkpoint rule.
+        bytes memory locator =
+            seed % 4 == 0 ? abi.encodePacked(uint16(1), keccak256(abi.encode(seed))) : bytes("");
         vm.prank(stranger ? address(0x5742) : authority);
-        try anchor.anchor(cps) {
+        try anchor.anchor(cps, locator) {
+            if (locator.length != 0) locators++;
             if (!allowed) unexpected = true;
             for (uint256 i; i < count; i++) {
                 shadow[batch[i]] = hashes[i];
@@ -109,7 +115,8 @@ contract AnchorHandler is TestBase {
 ///    election and segment, in the anchor and within the call (T-52, T-53).
 /// 3. The anchor keeps, per election, one more than the lowest segment
 ///    anchored, or 0 (T-24: a verifier proves every slot from there).
-/// 4. The event accumulator counts one log per anchored checkpoint.
+/// 4. The event accumulator counts one log per anchored checkpoint and per
+///    locator.
 /// `test_HandlerAnchors` shows the handler reaches the success path, so the
 /// invariants aren't checked only against an empty anchor.
 contract BoardAnchorInvariantTest is TestBase {
@@ -163,6 +170,6 @@ contract BoardAnchorInvariantTest is TestBase {
 
     function invariant_EveryAnchorIsAccumulated() public view {
         (, uint64 count) = anchor.eventAccumulator();
-        assertEq(count, handler.anchored(), "event count");
+        assertEq(count, handler.anchored() + handler.locators(), "event count");
     }
 }

@@ -26,8 +26,9 @@ Abolish's contracts (the L2 contracts and the L1 board anchor), built with Found
 `src/BoardAnchor.sol` implements [`docs/spec/contracts.md`](../../docs/spec/contracts.md), Board anchor, our one contract on L1:
 
 - Its clock (`epoch`, `period`, `deadline`) and its anchoring `authority` are immutable; deployment refuses a zero period and an authority without code (a single key; T-53, T-69).
-- `anchor(bytes)` takes concatenated checkpoint encodings from the authority only, with canonical calldata, each non-empty, inside its window (`[end, end + deadline]` after its period ends) and the first for its election and segment, and stores `H(DS("abolish/v1/board-checkpoint", encode(checkpoint)))` at a per-segment slot under the ERC-7201 namespace `abolish.board-anchor`, so a verifier proves every anchor of an election from state (T-23, T-24, T-52).
+- `anchor(bytes checkpoints, bytes locator)` takes concatenated checkpoint encodings from the authority only, with canonical calldata, each non-empty, inside its window (`[end, end + deadline]` after its period ends) and the first for its election and segment, and stores `H(DS("abolish/v1/board-checkpoint", encode(checkpoint)))` at a per-segment slot under the ERC-7201 namespace `abolish.board-anchor`, so a verifier proves every anchor of an election from state (T-23, T-24, T-52).
 - `CheckpointAnchored` publishes the full checkpoint, through the event accumulator.
+- A call may carry the `archiveLocator` of ADR 0005 (`u16(version) ‖ body`, at most 128 bytes, framed but not interpreted), alone or with checkpoints; `ArchiveLocated` logs it, so the archive is found from L1 alone (T-49, T-51).
 - `src/CanonicalCalldata.sol` is the calldata check it shares with the election registry.
 - The hourly job and the Sepolia deployment are P4-1 part 2.
 

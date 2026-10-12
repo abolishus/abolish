@@ -8,7 +8,11 @@ import { isForbiddenCommitment } from "./group-registry.ts";
 import { MEMBERSHIP_DEPTH } from "./membership.ts";
 import { poseidon2 } from "./poseidon.ts";
 
-/** The most leaves a tier tree has; a group with more additions has none. */
+/**
+ * The most leaves a tier tree has; a group with more additions has none. A
+ * JavaScript array holds at most 2^32 − 1 elements, so in practice memory
+ * gives out first; the checks state the spec's bound.
+ */
 export const TIER_TREE_MAX_LEAVES = 2 ** MEMBERSHIP_DEPTH;
 
 let zeroChain: readonly bigint[] | undefined;
@@ -78,8 +82,11 @@ export function tierTreePath(leaves: readonly bigint[], index: number): bigint[]
   const all = levels(copy);
   const z = tierTreeZeros();
   const path: bigint[] = [];
-  for (let h = 0; h < MEMBERSHIP_DEPTH; h++)
-    path.push(all[h]?.[Math.floor(index / 2 ** h) ^ 1] ?? (z[h] as bigint));
+  for (let h = 0; h < MEMBERSHIP_DEPTH; h++) {
+    // Arithmetic, not `^ 1`: bitwise operators wrap above 2^31.
+    const n = Math.floor(index / 2 ** h);
+    path.push(all[h]?.[n % 2 === 0 ? n + 1 : n - 1] ?? (z[h] as bigint));
+  }
   return path;
 }
 

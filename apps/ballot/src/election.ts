@@ -1,27 +1,22 @@
-// The check the ballot client runs before it shows an election: decode the
-// definition and its display text with @abolishus/crypto, the verifier's own
-// code, and refuse anything that doesn't decode, names another election, is
-// ill-formed, or whose text doesn't match the definition's commitment
-// (docs/spec/display-text.md, Checks). Otherwise whoever serves the text could
-// swap option labels for one voter, who would then honestly encrypt the index
-// they picked under a false label (T-34, T-41, G-6). It runs in the Web
-// Worker, beside the code that will encrypt the ballot (worker/worker.ts).
+// What the ballot client shows of an election, once @abolishus/crypto's
+// `checkElectionToShow` has passed it: the definition decodes, names the
+// election in the ballot link and is well formed, and the display text matches
+// the definition's commitment and the spec's rules (docs/spec/display-text.md,
+// Checks). Otherwise whoever serves the text could swap option labels for one
+// voter, who would then honestly encrypt the index they picked under a false
+// label (T-34, T-41, G-6). The checks live in the crypto-review gate; this
+// file only turns a passed election into what the screens show. It runs in
+// the Web Worker, beside the code that will encrypt the ballot.
 //
 // Not checked here: that the definition's hash is the one registered on L2.
 // The client can't read the chain yet (P2-8 part 2b), so it shows the hash for
 // a voter or the verifier to compare (T-34).
 
 import {
-  DecodeError,
-  decodeDisplayText,
-  decodeElectionDefinition,
-  type DisplayTextRule,
-  displayTextRule,
+  checkElectionToShow,
   ELECTION_TYPES,
   electionDefinitionHash,
-  electionDefinitionRule,
-  type ElectionDefinitionRule,
-  UnsupportedVersionError,
+  type ShowRefusal,
 } from "@abolishus/crypto";
 
 export interface OptionText {
@@ -55,17 +50,9 @@ export interface CheckedElection {
   readonly translations: readonly Translation[];
 }
 
-/** Why the client refuses to show an election. */
-export type Refusal =
-  | { readonly problem: "definition-undecodable" }
-  | { readonly problem: "another-election" }
-  | { readonly problem: "definition-ill-formed"; readonly rule: ElectionDefinitionRule }
-  | { readonly problem: "display-text-undecodable" }
-  | { readonly problem: "display-text-ill-formed"; readonly rule: DisplayTextRule };
-
 export type ElectionCheck =
   | { readonly ok: true; readonly election: CheckedElection }
-  | ({ readonly ok: false } & Refusal);
+  | ({ readonly ok: false } & ShowRefusal);
 
 const toHex = (bytes: Uint8Array) =>
   Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
@@ -75,9 +62,6 @@ const toHex = (bytes: Uint8Array) =>
 // in place of bytes we didn't check.
 const utf8 = new TextDecoder("utf-8", { fatal: true });
 const text = (bytes: Uint8Array) => utf8.decode(bytes);
-
-const sameBytes = (a: Uint8Array, b: Uint8Array) =>
-  a.length === b.length && a.every((x, i) => x === b[i]);
 
 /**
  * Checks the election the client was asked to show: `electionId` is the one
@@ -89,40 +73,15 @@ export function checkElection(
   definitionBytes: Uint8Array,
   displayTextBytes: Uint8Array,
 ): ElectionCheck {
-  let definition;
-  try {
-    definition = decodeElectionDefinition(definitionBytes);
-  } catch (error) {
-    if (error instanceof DecodeError) return { ok: false, problem: "definition-undecodable" };
-    throw error;
-  }
-  // Not secret, so no constant-time comparison is needed.
-  if (!sameBytes(definition.election_id, electionId))
-    return { ok: false, problem: "another-election" };
-  const definitionRule = electionDefinitionRule(definition);
-  if (definitionRule !== undefined)
-    return { ok: false, problem: "definition-ill-formed", rule: definitionRule };
-
-  let displayText;
-  try {
-    displayText = decodeDisplayText(displayTextBytes, definition);
-  } catch (error) {
-    // A well-formed definition pins display text version 1, which this
-    // package decodes; an unsupported pin is refused all the same.
-    if (error instanceof DecodeError || error instanceof UnsupportedVersionError)
-      return { ok: false, problem: "display-text-undecodable" };
-    throw error;
-  }
-  const textRule = displayTextRule(displayText, definition);
-  if (textRule !== undefined)
-    return { ok: false, problem: "display-text-ill-formed", rule: textRule };
-
+  const checked = checkElectionToShow(electionId, definitionBytes, displayTextBytes);
+  if (!checked.ok) return checked;
+  const { definition, displayText } = checked;
   return {
     ok: true,
     election: {
       electionId: toHex(definition.election_id),
       definitionHash: toHex(electionDefinitionHash(definition)),
-      electionType: definition.election_type === ELECTION_TYPES.approval ? "approval" : "plurality",
+      electionType: electionType(definition.election_type),
       minSelections: definition.min_selections,
       maxSelections: definition.max_selections,
       opensAt: definition.opens_at,
@@ -135,4 +94,12 @@ export function checkElection(
       })),
     },
   };
+}
+
+// Named one by one, so a counting rule a later version adds is an error here
+// rather than shown as another.
+function electionType(value: number): CheckedElection["electionType"] {
+  if (value === ELECTION_TYPES.plurality) return "plurality";
+  if (value === ELECTION_TYPES.approval) return "approval";
+  throw new RangeError(`unknown election type ${value}`);
 }

@@ -208,6 +208,16 @@ describe("the ballot worker", () => {
     });
   });
 
+  test("once stopped, fails a request at once rather than at its timeout", async () => {
+    const outcome = await page.evaluate(() =>
+      (
+        globalThis as unknown as { ballotHarness: { stopThenCheck(): Promise<string> } }
+      ).ballotHarness.stopThenCheck(),
+    );
+    expect(outcome).toMatch(/^WorkerFailure after \d+ ms$/);
+    expect(Number(/(\d+) ms/.exec(outcome)?.[1])).toBeLessThan(1000);
+  });
+
   test("can't be spawned from any other URL, and its policy can't be created again", async () => {
     const outcomes = await page.evaluate(() => {
       const tt = (

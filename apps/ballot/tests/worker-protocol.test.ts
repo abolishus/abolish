@@ -6,7 +6,7 @@
 import fc from "fast-check";
 import { describe, expect, test } from "vite-plus/test";
 
-import { allowWorkerUrl, WORKER_URL } from "../src/worker-client.ts";
+import { allowWorkerUrl, WORKER_URL } from "../src/worker-policy.ts";
 import { parseRequest, PROTOCOL_VERSION, requestId, responseId } from "../src/worker/protocol.ts";
 
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);

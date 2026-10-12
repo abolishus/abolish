@@ -257,6 +257,17 @@ describe("the Web Worker", () => {
     return [...files].filter(([name]) => name.endsWith(".js") && !loaded.has(name));
   };
 
+  // T-43: whoever creates the policy first holds the only way to mint a
+  // script URL, so the page's script creates it before any module's code.
+  test("is spawned through ballot-worker, which the page creates before React's code", () => {
+    const [entry] = [...html().matchAll(/<script\b[^>]*\ssrc="\.\/(assets\/[\w-]+\.js)"/g)].map(
+      ([, name]) => files.get(name ?? "") ?? "",
+    );
+    const claim = entry?.search(/createPolicy\(\s*[`"']ballot-worker[`"']/) ?? -1;
+    expect(claim).toBeGreaterThanOrEqual(0);
+    expect(claim).toBeLessThan(entry?.indexOf("react.transitional.element") ?? -1);
+  });
+
   test("is one script of its own, which the page doesn't load", () => {
     expect(unloaded().map(([name]) => name)).toEqual([
       expect.stringMatching(/^assets\/worker-[\w-]+\.js$/),

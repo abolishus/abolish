@@ -19,6 +19,7 @@ Version 1 of record types `0x0001` and `0x0009` ([`docs/spec/election-definition
 
 - `encodeElectionDefinition` and `decodeElectionDefinition`. The decoder decodes strictly, then rejects with `profile-mismatch` unless the definition's own profile pins `0x0001` at the record's version. `electionDefinitionHash` is `H(DS("abolish/v1/election-definition", ·))`. `electionDefinitionRule` returns the first well-formedness rule a decoded definition breaks.
 - `encodeDisplayText`, `decodeDisplayText` (against the version a definition pins), `displayTextCommitment` and `displayTextRule`, which a client runs before showing any text: commitment first, then shape.
+- `checkElectionToShow`: every check software must pass before it shows an election to a voter or labels a Benaloh opening ([[display-text]], Checks): the definition decodes, names the election asked for and is well formed, and the display text decodes under its pin and passes `displayTextRule`. Returns the decoded records or the first check that failed. It doesn't check the definition against the L2 registry; the caller must, or say it hasn't (T-34).
 - `newDisplayTextSalt` draws 32 bytes from the platform CSPRNG (`@noble/hashes` `randomBytes`). `election_id` isn't drawn here: the election registry assigns it (P1-18).
 - `PARAMETERS` mirrors `docs/spec/parameters.md`. The production record schema (these types and no others) stays internal.
 

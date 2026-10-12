@@ -1,8 +1,9 @@
-// The check the client runs before showing an election (src/election.ts),
-// against the published vectors in docs/spec/vectors/: every definition the
-// vectors call undecodable or ill-formed is refused, every display-text record
-// is shown only if it decodes, matches the definition's commitment and is
-// well-formed, and the text shown is the vector's own (T-34, T-41).
+// What the client shows of a checked election (src/election.ts): the text
+// exactly as the record holds it, the definition's own hash and counting rule,
+// and a refusal passed on as @abolishus/crypto's `checkElectionToShow` gave it.
+// The checks themselves are tested against every vector in packages/crypto
+// (tests/show-election.test.ts); here, one refusal of each kind shows none is
+// lost on the way (T-34, T-41).
 
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -12,12 +13,9 @@ import {
   type ElectionDefinition,
   encodeElectionDefinition,
 } from "@abolishus/crypto";
-import fc from "fast-check";
 import { describe, expect, test } from "vite-plus/test";
 
 import { checkElection } from "../src/election.ts";
-
-const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
 
 interface DefinitionVector {
   id: string;
@@ -80,55 +78,14 @@ const goodDefinition = () => {
   );
 };
 
-describe("the election definition", () => {
+describe("the election", () => {
   const anyText = hex(goodText.encoding);
 
-  test.each(definitionVectors.filter((v) => v.error !== undefined))(
-    "refuses $id, which doesn't decode",
-    ({ encoding }) => {
-      expect(checkElection(new Uint8Array(32), hex(encoding), anyText)).toEqual({
-        ok: false,
-        problem: "definition-undecodable",
-      });
-    },
-  );
-
-  test.each(definitionVectors.filter((v) => v.illFormed !== undefined))(
-    "refuses $id, which breaks $illFormed",
-    ({ encoding, illFormed }) => {
-      const id = decodeElectionDefinition(hex(encoding)).election_id;
-      expect(checkElection(id, hex(encoding), anyText)).toEqual({
-        ok: false,
-        problem: "definition-ill-formed",
-        rule: illFormed,
-      });
-    },
-  );
-
-  test.each(definitionVectors.filter((v) => v.error === undefined && v.illFormed === undefined))(
-    "refuses $id under any other election's id",
-    ({ encoding }) => {
-      const own = decodeElectionDefinition(hex(encoding)).election_id;
-      fc.assert(
-        fc.property(fc.uint8Array({ minLength: 32, maxLength: 32 }), (other) => {
-          fc.pre(!own.every((b, i) => b === other[i]));
-          expect(checkElection(other, hex(encoding), anyText)).toEqual({
-            ok: false,
-            problem: "another-election",
-          });
-        }),
-        { numRuns },
-      );
-    },
-  );
-
-  test("shows the definition's own hash, as the vector gives it", () => {
+  test("shows the definition's own hash, by the spec's formula over its bytes", () => {
     const encoding = encodeElectionDefinition(goodDefinition());
-    const result = checkElection(typical.election_id, encoding, hex(goodText.encoding));
+    const result = checkElection(typical.election_id, encoding, anyText);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    // The vector's hash is of another definition; this one is recomputed by
-    // the spec's formula over the bytes, independently of the client's code.
     const tag = Buffer.from("abolish/v1/election-definition", "ascii");
     expect(result.election.definitionHash).toBe(
       createHash("sha256")
@@ -137,14 +94,44 @@ describe("the election definition", () => {
     );
   });
 
-  test("never throws on arbitrary bytes, and shows nothing it can't decode", () => {
-    fc.assert(
-      fc.property(fc.uint8Array({ maxLength: 512 }), (bytes) => {
-        const result = checkElection(typical.election_id, bytes, hex(goodText.encoding));
-        expect(result.ok).toBe(false);
-      }),
-      { numRuns },
+  test("names an approval election as one", () => {
+    const approval = decodeElectionDefinition(
+      hex(vector(definitionVectors, "definition-approval").encoding),
     );
+    const definition = {
+      ...goodDefinition(),
+      election_type: approval.election_type,
+      min_selections: 1,
+      max_selections: 2,
+    };
+    expect(
+      checkElection(definition.election_id, encodeElectionDefinition(definition), anyText),
+    ).toMatchObject({
+      ok: true,
+      election: { electionType: "approval", minSelections: 1, maxSelections: 2 },
+    });
+  });
+
+  test.each([
+    ["definition-truncated", "definition-undecodable", undefined],
+    ["definition-one-option", "definition-ill-formed", "option-count"],
+  ])("passes on the refusal of %s", (id, problem, rule) => {
+    const encoding = hex(vector(definitionVectors, id).encoding);
+    const electionId =
+      rule === undefined ? typical.election_id : decodeElectionDefinition(encoding).election_id;
+    expect(checkElection(electionId, encoding, anyText)).toEqual(
+      rule === undefined ? { ok: false, problem } : { ok: false, problem, rule },
+    );
+  });
+
+  test("passes on the refusal of another election's definition", () => {
+    expect(
+      checkElection(
+        new Uint8Array(32).fill(0xff),
+        encodeElectionDefinition(goodDefinition()),
+        anyText,
+      ),
+    ).toEqual({ ok: false, problem: "another-election" });
   });
 });
 
@@ -219,9 +206,9 @@ describe("the display text", () => {
     },
   );
 
-  // The attack the check exists for: text served for one election, or
-  // relabelled for one voter, under a definition that commits to other text.
-  test("refuses well-formed text the definition doesn't commit to", () => {
+  // The attack the check exists for: text relabelled for one voter, under a
+  // definition that commits to the original.
+  test("refuses text the definition doesn't commit to", () => {
     for (const v of withDefinition.filter((x) => x.illFormed === undefined && x !== goodText))
       expect(
         checkElection(
@@ -229,33 +216,6 @@ describe("the display text", () => {
           encodeElectionDefinition(goodDefinition()),
           hex(v.encoding),
         ),
-      ).toMatchObject({ ok: false });
-  });
-
-  test("refuses the text after any change to any byte", () => {
-    const definition = encodeElectionDefinition(goodDefinition());
-    const original = hex(goodText.encoding);
-    fc.assert(
-      fc.property(
-        fc.nat({ max: original.length - 1 }),
-        fc.integer({ min: 1, max: 255 }),
-        (at, flip) => {
-          const changed = original.slice();
-          changed[at] = (changed[at] as number) ^ flip;
-          expect(checkElection(typical.election_id, definition, changed).ok).toBe(false);
-        },
-      ),
-      { numRuns },
-    );
-  });
-
-  test("refuses text that doesn't decode, whatever its bytes", () => {
-    const definition = encodeElectionDefinition(goodDefinition());
-    fc.assert(
-      fc.property(fc.uint8Array({ maxLength: 512 }), (bytes) => {
-        expect(checkElection(typical.election_id, definition, bytes).ok).toBe(false);
-      }),
-      { numRuns },
-    );
+      ).toEqual({ ok: false, problem: "display-text-ill-formed", rule: "commitment" });
   });
 });

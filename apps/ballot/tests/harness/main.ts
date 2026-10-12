@@ -2,9 +2,11 @@
 // CSP, for tests/worker.e2e.ts. The production page has no such hook; part 2b
 // wires the worker to the election screens.
 
-import { BallotWorker, claimWorkerPolicy } from "../../src/worker-client.ts";
+// First, as in main.tsx.
+import "../../src/worker-policy.ts";
 
-claimWorkerPolicy();
+import { BallotWorker } from "../../src/worker-client.ts";
+
 const worker = new BallotWorker();
 
 const fromHex = (hex: string) =>
@@ -19,6 +21,17 @@ const harness = {
       fromHex(displayText),
     );
     return JSON.stringify(result, (_, v: unknown) => (typeof v === "bigint" ? v.toString() : v));
+  },
+  /** Stops the worker, then reports how a request fares: at once, or at its timeout. */
+  async stopThenCheck(): Promise<string> {
+    worker.terminate();
+    const started = performance.now();
+    try {
+      await worker.checkElection(new Uint8Array(32), new Uint8Array(), new Uint8Array());
+      return "answered";
+    } catch (e) {
+      return `${e instanceof Error ? e.name : "?"} after ${Math.round(performance.now() - started)} ms`;
+    }
   },
 };
 

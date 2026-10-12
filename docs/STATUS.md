@@ -89,6 +89,8 @@ One-off items: [[P0-ops]] split shared hot files; [[P0-ops-2]] P0-ops review fol
 
 ## Blocked
 
+- On 2026-10-12 the owner decided the two fallback findings that blocked [[P1-12]] part 3b (#101): no forced posting (receipts through the contract path; posting only by the voter's explicit choice) and contract-path postings only ([[0002-everlasting-privacy]], Decision). #101 resumes on that design.
+
 - On 2026-10-12 the owner answered [[0016-share-kem-dh-group]] (option A), unblocking [[P1-12]] part 2 (#58) and so P1-14 part 2, P1-12 part 3 and P1-15 parts 2 and 3.
 - On 2026-10-11 the owner unblocked [[P0-2]] (`trustPolicyExclude: [semver@6.3.1]`), [[P1-12]] and [[P1-14]] part 2 (answers recorded in [[0002-everlasting-privacy]], Decision).
 

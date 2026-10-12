@@ -212,3 +212,8 @@ On 2026-10-12 the owner answered [[0016-share-kem-dh-group]] with its option A, 
 
 - **"X25519" in answer 2 covers Curve25519 Diffie–Hellman in its ristretto255 encoding,** the commitment group, as share encryption uses it ([[share-encryption]]). Testnets only and the audit before mainnet still hold; the audit covers the hybrid's combiner and composition as well as the ML-KEM code.
 - **The AEAD's associated data binds the definition, ballot record type and version, seat and VSS commitments,** not the tier and nullifier the Private part lists, so a challenged ballot's ciphertexts can be made before its nullifier. The validity proofs bind both.
+
+On 2026-10-12 the owner decided the two fallback questions `crypto-review` raised on P1-12 part 3b (#101):
+
+- **No forced posting.** A client never posts a seat's shares when that seat's delivery receipt passes. Trustee nodes return receipts through the contract path, so an operator that withholds receipts can't push a voter into posting. Posting stays a last resort, used only when the voter explicitly chooses it after private delivery to a seat has failed, and the client tells the voter that it lowers that ballot's long-term privacy for that seat. The owner accepts this voter-chosen last resort as an extension of this ADR's fallback.
+- **Only contract-path postings deliver.** A posting counts for delivery and complaints only when it arrives through the contract, whose L2 data is available to every trustee; a posting boarded only by the operator delivers nothing. The complaint window therefore never runs while a posting's data is withheld. `checkDelivery`, the boarding rules and the vectors change to match.

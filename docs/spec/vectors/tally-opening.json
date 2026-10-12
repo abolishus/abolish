@@ -1487,7 +1487,7 @@
         ],
         []
       ],
-      "election": {
+      "electionFailure": {
         "code": "tally-late",
         "attributedTo": "operator"
       }

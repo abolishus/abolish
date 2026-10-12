@@ -82,7 +82,7 @@ interface Vectors {
     readonly cells: readonly (readonly string[])[];
     readonly openings: readonly string[];
     readonly boardedAfter?: readonly (readonly string[])[];
-    readonly election?: { readonly code: string; readonly attributedTo: string };
+    readonly electionFailure?: { readonly code: string; readonly attributedTo: string };
     readonly result: {
       readonly ok: boolean;
       readonly failure?: { readonly cell: number; readonly code: string; readonly option?: number };
@@ -162,7 +162,7 @@ describe("tally-opening.json", () => {
     if (v.boardedAfter === undefined) return;
     // A late ballot that would be selected isn't ignored: verifier 7.1 fails
     // the election against the operator, while the tally check still passes.
-    expect(v.election).toEqual({ code: "tally-late", attributedTo: "operator" });
+    expect(v.electionFailure).toEqual({ code: "tally-late", attributedTo: "operator" });
     // What the counted extent rule prevents: counting a ballot boarded after
     // it would turn every honest opening of its cell into tally-aggregate.
     const widened = cells.map((c, i) => [

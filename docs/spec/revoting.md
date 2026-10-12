@@ -70,7 +70,7 @@ A verifier applies this to the ballots that passed every admission check, in any
 
 The selected ballots, one per group at most, are the input to the tally ([[verifier]] 7.1).
 
-The result is a function of the set of admitted ballots alone: permuting the board, delaying an entry or moving it to another segment changes no selection (R3). The tally selects over the counted extent ([[tally]], Tally window), and the segment is a deadline, never a rank: an entry boarded after that extent that would change the selection doesn't count and fails the election as the operator's (`tally-late`, [[verifier]] 7.1), so delaying a ballot past it can't choose which ballot counts either. Only a ballot's own `M` and `l1_ref_number`, both fixed by the voter when the proof was made, decide its rank.
+The result is a function of the set of admitted ballots alone: permuting the board, delaying an entry or moving it to another segment changes no selection (R3). The tally selects over the counted extent ([[tally]], Tally window), and the segment is a deadline, never a rank: an entry boarded after that extent that would change a cell's counted set doesn't count and fails the election, as the operator's wherever it could have boarded it in time (`tally-late`, [[verifier]] 7.1), so delaying a ballot past it can't choose which ballot counts either. Only a ballot's own `M` and `l1_ref_number`, both fixed by the voter when the proof was made, decide its rank.
 
 ## Client rules
 

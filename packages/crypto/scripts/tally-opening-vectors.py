@@ -358,7 +358,7 @@ def main():
         if boarded_after is not None:
             entry["boardedAfter"] = [[bv.enc_vss(b).hex() for b in c] for c in boarded_after]
             if any(boarded_after):
-                entry["election"] = {"code": "tally-late", "attributedTo": "operator"}
+                entry["electionFailure"] = {"code": "tally-late", "attributedTo": "operator"}
         elections.append(entry)
 
     honest0, honest1 = record(0, 1, open0), record(1, 2, open1)

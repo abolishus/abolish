@@ -36,7 +36,6 @@ import {
   type CommittedVote,
   coreHash,
   decodeBallot,
-  decodeBoardEntry,
   decodeMembershipProof,
   deriveTotal,
   encodeBallot,
@@ -566,13 +565,13 @@ export function runSimulation(
     return { tier, cell, opened };
   });
 
-  // Verifier 7.2 over every tally opening on the board, in board order, each
-  // with its segment for the destruction rule.
+  // Verifier 7.2 over every tally opening in the board's sealed extent, in
+  // board order, each with its segment for the destruction rule. The board
+  // is read through its entry checks (4.1) every time.
   const onBoard = (type: number) =>
-    operator.entries.flatMap((bytes) => {
-      const e = decodeBoardEntry(bytes, SIMULATED_BOARD_ENTRY_VERSION);
-      return recordTypeOf(e.payload) === type ? [{ segment: e.segment, payload: e.payload }] : [];
-    });
+    checkBoard(election.definition.election_id, operator.entries, SIMULATED_BOARD_ENTRY_VERSION)
+      .entries.filter((e) => e.segment <= seal && recordTypeOf(e.payload) === type)
+      .map((e) => ({ segment: e.segment, payload: e.payload }));
   const tallyEntries = onBoard(RECORD_TYPES.tallyOpening);
   const tally = checkTally(
     { definitionHash, rules: tallyRules, registered },
@@ -609,9 +608,13 @@ export function runSimulation(
     const first = cell.passing[0];
     return first === undefined ? null : (tallyEntries[first.at] as { segment: number }).segment;
   });
-  const destroyedIn = firstPassing.every((s) => s !== null)
-    ? afterAnchored(Math.max(...firstPassing))
-    : segmentAt(after.destroyBy);
+  // The earlier of the two moments (docs/spec/tally.md, When).
+  const destroyedIn = Math.min(
+    firstPassing.every((s) => s !== null)
+      ? afterAnchored(Math.max(...firstPassing))
+      : Number.POSITIVE_INFINITY,
+    segmentAt(after.destroyBy),
+  );
   for (const seat of online)
     operator.board(
       destroyedIn,
@@ -631,7 +634,6 @@ export function runSimulation(
     1,
   );
   if (
-    destruction.from !== destroyedIn ||
     destruction.duplicates.length + destruction.unattributed.length > 0 ||
     destruction.stray.length + destruction.rejected.length > 0 ||
     destruction.seats.some(

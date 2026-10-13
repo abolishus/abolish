@@ -476,6 +476,8 @@ export const electionRegistryAbi = [
           { name: "panelSize", internalType: "uint8", type: "uint8" },
           { name: "optionCount", internalType: "uint16", type: "uint16" },
           { name: "cellCount", internalType: "uint16", type: "uint16" },
+          { name: "authorThreshold", internalType: "uint8", type: "uint8" },
+          { name: "authorPanelSize", internalType: "uint8", type: "uint8" },
           {
             name: "questions",
             internalType: "struct ElectionRegistry.Question[]",

@@ -19,7 +19,9 @@ Abolish's contracts (the L2 contracts and the L1 board anchor), built with Found
 
 - `createElection()` assigns `election_id = H(DS("abolish/v1/election-id", u64(chain_id) ‖ registry ‖ u64(counter)))` and makes the caller the election's creator.
 - `registerDefinition(bytes)` admits the creator's one definition, write-once, only with canonical calldata, if it decodes strictly (`src/ElectionDefinition.sol`), is well formed, names this deployment, opens after the anchoring epoch and after registration, has every electorate root in an earlier block, and its stub was recorded with its ceremony transcript hash by the trustee registry (`src/ITrusteeRegistry.sol`; T-34, T-17, T-37, T-08, T-13, T-25).
-- Its unit tests use a stand-in trustee registry (`test/utils/DefinitionHarness.sol`); `test/TrusteeRegistry.t.sol` runs it against the real one.
+- It decodes definition versions 1 and 3 to 6, each under its own layout and rules, and records with each definition the parameters the board reads (`parameters`, `cellTiers`, `cell`): the ballot pin, the default and author panels' thresholds and sizes, each question and their total, and each cell's tier and root ([`docs/adr/0028-board-contract-checks.md`](../../docs/adr/0028-board-contract-checks.md), 1C).
+- A listed `p256-key` (receipt and author keys) decodes only if its `x` is on P-256: a candidate square root from `Math.modExp` must pass `P256.isValidPublicKey` (both OpenZeppelin, vendored, below), so a definition can't list a key that names no point (T-31, T-17).
+- Its unit tests use a stand-in trustee registry (`test/utils/DefinitionHarness.sol`); `test/TrusteeRegistry.t.sol` runs it against the real one. `test/ElectionDefinition.t.sol` runs every vector of `election-definition.json` and its version-3 to version-6 files through the decoder, rules and hashes.
 
 ## Trustee registry
 

@@ -3,6 +3,9 @@
 // their state: no lead, share, ordering or tier row can be put in one, so no
 // card or description drawn from it can show a result (T-67).
 
+import { shortCode as codeOf } from "@abolishus/core/short-codes";
+import { fromHex } from "../values.ts";
+
 /** The latest released lead of the first question, as a sentence and its share (0–1). */
 export interface Lead {
   readonly sentence: string;
@@ -114,23 +117,12 @@ export function checkPreview(model: PollPreview): void {
   if (shares.some((s) => !(s >= 0 && s <= 1))) throw new RangeError("a share is from 0 to 1");
 }
 
-/** Crockford base32, lower case: no i, l, o or u. */
-const ALPHABET = "0123456789abcdefghjkmnpqrstvwxyz";
-
 /**
- * A poll's short code: the first 35 bits of its definition hash as 7 base32
- * characters (docs/design/sharing.md, "Short links"). A later poll whose
- * prefix is taken needs more; the board decides, so this is the 7-character
- * form only.
+ * A poll's 7-character short code, from its seal in hex (`@abolishus/core`'s
+ * short codes). A later poll whose prefix is taken needs more; the registry
+ * decides, so a preview prints the 7-character form only.
  */
-export function shortCode(seal: string): string {
-  let bits = "";
-  for (const digit of seal.slice(0, 9))
-    bits += Number.parseInt(digit, 16).toString(2).padStart(4, "0");
-  let code = "";
-  for (let i = 0; i < 35; i += 5) code += ALPHABET[Number.parseInt(bits.slice(i, i + 5), 2)];
-  return code;
-}
+export const shortCode = (seal: string): string => codeOf(fromHex(seal));
 
 /** "abolish.us/p/3j55dw1": the link as printed, without the scheme. */
 export const shortLink = (model: Pick<PollPreview, "host" | "seal">) =>

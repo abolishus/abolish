@@ -116,6 +116,7 @@ const RESPONSES = list(ROUND_4, MAX_TRUSTEES);
 const transcriptV1 = struct([
   ["run_id", bytesFixed(32)],
   ["predecessor", bytesFixed(32)],
+  ["deadline", u64],
   ["keys", KEYS],
   ["dealings", DEALINGS],
   ["complaints", COMPLAINTS],
@@ -209,9 +210,13 @@ export interface NullifierReshareScope {
   readonly newPanel: Panel;
 }
 
-/** A reshare scope and the run identifier of one run. */
+/**
+ * A reshare scope and one run: its identifier and its deadline, the L2 block
+ * by which the successor's approvals must be recorded to count.
+ */
 export interface NullifierReshareParams extends NullifierReshareScope {
   readonly runId: Uint8Array;
+  readonly deadline: bigint;
 }
 
 interface PanelPins {
@@ -284,6 +289,7 @@ const CONTEXT = struct([
   ["predecessor", bytesFixed(32)],
   ["new_panel_id", bytesFixed(32)],
   ["run_id", bytesFixed(32)],
+  ["deadline", u64],
 ] as const);
 
 function runOf(params: NullifierReshareParams): Run {
@@ -298,6 +304,7 @@ function runOf(params: NullifierReshareParams): Run {
         predecessor: scope.predecessorId,
         new_panel_id: scope.next.id,
         run_id: params.runId,
+        deadline: params.deadline,
       }),
     ),
   );
@@ -654,6 +661,8 @@ export type NullifierReshareCheck =
       readonly ok: true;
       readonly keyId: Uint8Array;
       readonly predecessor: Uint8Array;
+      /** The L2 block by which the successor's approvals must be recorded to count. */
+      readonly deadline: bigint;
       /** Each old seat of round 2, in order, with its reasons. */
       readonly dealerResults: readonly ReshareDealerResult[];
       /** The qualified dealers `Q`, whose reshares make up the successor's shares. */
@@ -784,7 +793,7 @@ export function checkNullifierReshareTranscript(
     if (e instanceof DecodeError) return { ok: false, code: e.code };
     throw e;
   }
-  const run = runOf({ ...scope, runId: t.run_id });
+  const run = runOf({ ...scope, runId: t.run_id, deadline: t.deadline });
   if (!equalBytes(t.predecessor, run.predecessorId)) return { ok: false, code: "key-predecessor" };
   const code = structureCode(run, t);
   if (code !== null) return { ok: false, code };
@@ -840,6 +849,7 @@ export function checkNullifierReshareTranscript(
     ok: true,
     keyId,
     predecessor: Uint8Array.from(t.predecessor),
+    deadline: t.deadline,
     dealerResults,
     dealers,
     seats,
@@ -910,9 +920,10 @@ export function nullifierReshareApprovalMessage(
 
 /**
  * New seat `index`'s approval of a successor. The caller MUST have checked
- * the approval rules of docs/spec/nullifier-reshare.md first, rules 4 and 5
- * above all: the predecessor counts and has no counted successor, and a seat
- * approves at most one successor of any key.
+ * the approval rules of docs/spec/nullifier-reshare.md first, rules 4 to 6
+ * above all: the predecessor counts and has no counted successor, the run's
+ * deadline hasn't passed, and every other successor of this predecessor the
+ * seat approved passed its deadline without counting.
  */
 export function approveNullifierReshare(
   scope: NullifierReshareScope,

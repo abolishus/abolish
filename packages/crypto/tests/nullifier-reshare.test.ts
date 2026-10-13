@@ -14,6 +14,7 @@ import {
   type NullifierKey,
   type SeatShare,
 } from "../src/keyed-nullifier.ts";
+import { opening } from "../src/nullifier-key.ts";
 import { reshareDealingWith } from "../src/nullifier-reshare.ts";
 import {
   approveNullifierReshare,
@@ -68,6 +69,7 @@ interface Result {
   readonly code?: string;
   readonly keyId?: string;
   readonly predecessor?: string;
+  readonly deadline?: string;
   readonly dealerResults?: readonly {
     readonly index: number;
     readonly reasons: readonly string[];
@@ -118,6 +120,7 @@ interface TranscriptVector {
   readonly result: Result;
   readonly shares?: readonly ShareVector[];
   readonly runId?: string;
+  readonly deadline?: string;
   readonly context?: string;
   readonly dealers?: readonly DealerVector[];
   readonly seats?: readonly SeatVector[];
@@ -219,6 +222,7 @@ const vectorOf = (id: string) => {
 const paramsOf = (t: TranscriptVector): NullifierReshareParams => ({
   ...scopeOf(t.newPanel),
   runId: hex(t.runId ?? ""),
+  deadline: BigInt(t.deadline ?? ""),
 });
 
 const oldShareOf = (index: number): SeatShare => {
@@ -258,6 +262,7 @@ function asVector(r: NullifierReshareCheck): Result {
     ok: true,
     keyId: toHex(r.keyId),
     predecessor: toHex(r.predecessor),
+    deadline: String(r.deadline),
     dealerResults: r.dealerResults,
     dealers: r.dealers,
     seats: r.seats,
@@ -300,8 +305,14 @@ describe("nullifier-reshare.json", () => {
     const sk = BigInt(V.predecessor.sk);
     for (const pair of subsets(V.predecessor.shares, oldPanel.threshold))
       expect(interpolate(pair.map((s) => ({ index: s.index, sk: BigInt(s.sk) })))).toBe(sk);
-    // Each opens its seat's commitment: the dealers' precondition.
     expect(tr.keys.length).toBe(3);
+    // Each opens its seat's commitment: the dealers' precondition.
+    for (const x of V.predecessor.shares)
+      expect(
+        opening(BigInt(x.sk), BigInt(x.s)).equals(
+          predecessor.commitments[x.index - 1] as NonNullable<NullifierKey["commitments"][number]>,
+        ),
+      ).toBe(true);
   }, 60_000);
 
   test.each(V.transcripts.map((t) => [t.id, t] as const))(
@@ -351,6 +362,7 @@ describe("nullifier-reshare.json", () => {
       const bytes = encodeNullifierReshareTranscript({
         run_id: params.runId,
         predecessor: predecessor.keyId,
+        deadline: params.deadline,
         keys,
         dealings,
         complaints: [],
@@ -591,7 +603,11 @@ function reshareTo(from: Holders, threshold: number, n: number, salt: number, de
     predecessor: from.key,
     newPanel: panel,
   };
-  const params: NullifierReshareParams = { ...scope, runId: new Uint8Array(32).fill(salt) };
+  const params: NullifierReshareParams = {
+    ...scope,
+    runId: new Uint8Array(32).fill(salt),
+    deadline: 40_000_000n,
+  };
   const seats = secrets.map((d, i) => registrationKeygen(i + 1, d));
   const keys = seats.map((s) => reshareKeysMessage(params, s));
   const dealings = dealers.map((i) =>
@@ -605,6 +621,7 @@ function reshareTo(from: Holders, threshold: number, n: number, salt: number, de
   const transcript: NullifierReshareTranscript = {
     run_id: params.runId,
     predecessor: from.key.keyId,
+    deadline: params.deadline,
     keys,
     dealings: dealings.map((d) => d.message),
     complaints: [],
@@ -881,7 +898,11 @@ describe("a reshare's transcript check", () => {
   test("excludes new seats sharing a signing key or using an identity key", () => {
     const { secrets, panel } = testPanel(2, 4, 0x48);
     const scope: NullifierReshareScope = { ...run.scope, newPanel: panel };
-    const params: NullifierReshareParams = { ...scope, runId: new Uint8Array(32).fill(0x48) };
+    const params: NullifierReshareParams = {
+      ...scope,
+      runId: new Uint8Array(32).fill(0x48),
+      deadline: 40_000_000n,
+    };
     const seats = secrets.map((d, i) => registrationKeygen(i + 1, d));
     const shared = (seats[0] as RegistrationSecrets).signingSecret;
     const tweaked = seats.map((s, i) =>
@@ -906,6 +927,7 @@ describe("a reshare's transcript check", () => {
       encodeNullifierReshareTranscript({
         run_id: params.runId,
         predecessor: initial.key.keyId,
+        deadline: params.deadline,
         keys,
         dealings,
         complaints: [],

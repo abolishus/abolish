@@ -19,21 +19,22 @@ Old seats deal; new seats register keys, receive and complain. Each new seat `j`
 
 ## Reshare context
 
-The coordinator picks `run_id`, 32 bytes from the CSPRNG, fresh for every run. Every message of the run binds
+The coordinator picks `run_id`, 32 bytes from the CSPRNG, fresh for every run, and the run's `deadline`, an L2 block number by which the successor's approvals must be recorded to count (Approval). Every message of the run binds
 
 ```
 reshare_context = H(DS("abolish/v1/keyed-nullifier/reshare-context",
-    u64(l2_chain_id) ‖ group_registry ‖ old_panel_id ‖ predecessor ‖ new_panel_id ‖ run_id))
+    u64(l2_chain_id) ‖ group_registry ‖ old_panel_id ‖ predecessor ‖ new_panel_id ‖ run_id ‖ u64(deadline)))
 ```
 
-| Field            | Type        | Source                                                                |
-| ---------------- | ----------- | --------------------------------------------------------------------- |
-| `l2_chain_id`    | `u64`       | The L2 chain ID the release pins                                      |
-| `group_registry` | `bytes[20]` | The group registry's address the release pins                         |
-| `old_panel_id`   | `bytes[32]` | Recomputed from the predecessor's pinned panel, never taken from data |
-| `predecessor`    | `bytes[32]` | The predecessor's `key_id`                                            |
-| `new_panel_id`   | `bytes[32]` | Recomputed from the new pinned panel, never taken from data           |
-| `run_id`         | `bytes[32]` | The run identifier, from the transcript                               |
+| Field            | Type        | Source                                                                                |
+| ---------------- | ----------- | ------------------------------------------------------------------------------------- |
+| `l2_chain_id`    | `u64`       | The L2 chain ID the release pins                                                      |
+| `group_registry` | `bytes[20]` | The group registry's address the release pins                                         |
+| `old_panel_id`   | `bytes[32]` | Recomputed from the predecessor's pinned panel, never taken from data                 |
+| `predecessor`    | `bytes[32]` | The predecessor's `key_id`                                                            |
+| `new_panel_id`   | `bytes[32]` | Recomputed from the new pinned panel, never taken from data                           |
+| `run_id`         | `bytes[32]` | The run identifier, from the transcript                                               |
+| `deadline`       | `u64`       | The L2 block by which the successor's approvals must be recorded, from the transcript |
 
 The tag is not [[nullifier-key]]'s, so no reshare message checks as a message of an initial run, or the reverse, even between the same panels. A node refuses a run whose (`new_panel_id`, `run_id`) it has seen before, and never reuses a key, a polynomial, a nonce or a KEM message across runs.
 
@@ -153,14 +154,15 @@ Only a message that matched its signed hash and then failed `share-decrypt` or `
 
 The reshare transcript is record type `0x0013`, version 1:
 
-| Field         | Type                                  | Meaning                              |
-| ------------- | ------------------------------------- | ------------------------------------ |
-| `run_id`      | `bytes[32]`                           | The run identifier                   |
-| `predecessor` | `bytes[32]`                           | The predecessor's `key_id`           |
-| `keys`        | `list<round-1 message, MAX_TRUSTEES>` | `R_1`, new seats in increasing order |
-| `dealings`    | `list<round-2 message, MAX_TRUSTEES>` | `R_2`, old seats in increasing order |
-| `complaints`  | `list<round-3 message, MAX_TRUSTEES>` | `R_3`, new seats in increasing order |
-| `responses`   | `list<round-4 message, MAX_TRUSTEES>` | `R_4`, old seats in increasing order |
+| Field         | Type                                  | Meaning                                |
+| ------------- | ------------------------------------- | -------------------------------------- |
+| `run_id`      | `bytes[32]`                           | The run identifier                     |
+| `predecessor` | `bytes[32]`                           | The predecessor's `key_id`             |
+| `deadline`    | `u64`                                 | The run's deadline, an L2 block number |
+| `keys`        | `list<round-1 message, MAX_TRUSTEES>` | `R_1`, new seats in increasing order   |
+| `dealings`    | `list<round-2 message, MAX_TRUSTEES>` | `R_2`, old seats in increasing order   |
+| `complaints`  | `list<round-3 message, MAX_TRUSTEES>` | `R_3`, new seats in increasing order   |
+| `responses`   | `list<round-4 message, MAX_TRUSTEES>` | `R_4`, old seats in increasing order   |
 
 Each message is its table's fields in order, `index` first and `signature` last; `encode(R_r)` is that list field's encoding, count included. The successor's identifier is
 
@@ -241,11 +243,12 @@ m = u64(l2_chain_id) ‖ group_registry ‖ new_panel_id ‖ u8(j) ‖ predecess
 2. seat `j` is qualified, and its share computed above opens its `C'_j`: it holds a reshared share or a reveal from every qualified dealer;
 3. the transcript holds every message `j` sent, as it sent it, and every round-2 or round-4 message `j` received from a dealer of the transcript's run, as received;
 4. the predecessor is the key that counts for the scope today: its own approvals counted, and no successor of it counts yet;
-5. `j` hasn't approved another successor of this predecessor. A new seat approves **at most one successor of any key**.
+5. the run's `deadline` hasn't passed: the L2 chain's latest block is below it, with margin for the approval to be recorded;
+6. every other successor of this predecessor that `j` approved has passed its own deadline without counting. A new seat approves **at most one live successor of any key**: a run that stalls releases its seats at its deadline, so a later run can count.
 
-A successor counts only with approvals from `q' = max(k', n' − 1)` **distinct new seats**, each verifying under its pinned identity key, counted per seat, never per signature. Two such quorums share at least one seat, so a second successor of one key needs a seat that broke rule 5. So a scope's keys form one chain from its initial key, each link a reshare whose successor counts, and a checker follows the chain in order, each reshare's check taking the key the one before produced. Where the approvals are recorded and checked is part 2b-4's. A scope has only one initial key, too: it comes only from the initial panel the release pins ([[nullifier-key]], Parties and keys), whose seats approve at most one key of any kind for the scope, and a new seat that approved a successor never approves an initial key ([[nullifier-key]], Approval, rule 4). Part 2b-4's registry must accept at most one initial key per scope.
+A successor counts only with approvals from `q' = max(k', n' − 1)` **distinct new seats**, each verifying under its pinned identity key, counted per seat, never per signature, and each recorded at or before the run's `deadline` (the transcript fixes it, and `key_id` binds the transcript). Whether a successor counts is so settled at its deadline. Two such quorums share at least one seat, so two counted successors of one key need a seat that approved the second before the first's deadline passed, or while the first counted, which rule 6 forbids. An earlier draft let a seat approve one successor of a key ever, with no expiry; an in-session review found that one corrupt dealer withholding a share from two honest new seats, or a re-signed transcript shown to half the seats, then blocked every later successor of that key for good. So a scope's keys form one chain from its initial key, each link a reshare whose successor counts, and a checker follows the chain in order, each reshare's check taking the key the one before produced. Where the approvals are recorded and checked is part 2b-4's. A scope has only one initial key, too: it comes only from the initial panel the release pins ([[nullifier-key]], Parties and keys), whose seats approve at most one key of any kind for the scope, and a new seat that approved a successor never approves an initial key ([[nullifier-key]], Approval, rule 4). Part 2b-4's registry must accept at most one initial key per scope.
 
-Once a successor counts, the predecessor is retired: its seats stop answering under its `key_id`, and attesters stop accepting its answers (part 2b-4). Each old seat then erases its share `(sk_i, s_i)`, its reshare polynomials and the predecessor's registration secrets. It keeps them until then, so a run that fails leaves the predecessor whole. A run that doesn't reach a counted successor is abandoned, and another starts with a fresh `run_id`.
+Once a successor counts, the predecessor is retired: its seats stop answering under its `key_id`, and attesters stop accepting its answers (part 2b-4). Each old seat then erases its share `(sk_i, s_i)`, its reshare polynomials and the predecessor's registration secrets. It keeps them until then, so a run that fails leaves the predecessor whole. A run whose successor hasn't counted by its deadline is abandoned, its approvals with it, and another starts with a fresh `run_id` and a later deadline.
 
 ## Security notes
 
@@ -253,12 +256,12 @@ Once a successor counts, the predecessor is retired: its seats stop answering un
 - **Erasure is the mitigation for a mobile adversary.** An adversary that holds at most `k − 1` old shares and at most `k' − 1` new shares, in any mix, learns nothing about `sk` (Desmedt–Jajodia; Herzberg et al.), so a resharing bounds what each epoch's corruptions give. That holds only if old seats erase their shares once the successor counts; `k` old shares kept anywhere, by a seat or by whoever seized or compelled one, still give `sk`, and nothing can prove an erasure (T-14, T-40; [[0022-tier2-keyed-nullifier]], A long-lived key). The trustee role description (P1-7) must say so before real documents register.
 - **Perfectly hiding transcript.** The transcript holds Pedersen commitments, the `B_{i,0}` of which are the predecessor's `C_i`, already public; hashes of reshared-share messages, statistically hiding as in [[nullifier-key]] (Security notes); and reveals, which publish only a corrupt dealer's points or a complaining corrupt new seat's own share. An honest new seat, opening with the keys its round-1 message carries, never complains about an honest dealer. So nothing published fixes `sk`, even to an unbounded adversary (T-15). The reshared-share messages themselves fall to an adversary who records them and breaks both ML-KEM-768 and discrete logs in ristretto255; they are never archived.
 - **Rushing.** A corrupt dealer may choose its polynomial after seeing every other round-2 message, and may drop out of `Q` after seeing the complaints (by not answering one), which changes the Lagrange coefficients. Neither moves `sk`, which `constant` fixes. Each honest dealer's higher coefficients are hidden by its commitments, and its `λ_i` is never zero, so the new polynomial's higher coefficients are uniform as long as `Q` holds an honest dealer, which `key-dealers` gives under the predecessor's threshold.
-- **Withholding.** As in [[nullifier-key]] (Security notes): a dealer or the coordinator can withhold a reshared share from a new seat, which then can't approve. Under rule 7 one corrupt dealer that withholds from one honest new seat, with one new seat that refuses to approve, stalls the successor, unattributably; the predecessor stays in force, so it stalls a panel change but loses nothing (T-54).
+- **Withholding.** As in [[nullifier-key]] (Security notes): a dealer or the coordinator can withhold a reshared share from a new seat, which then can't approve. Under rule 7 one corrupt dealer that withholds from one honest new seat, with one new seat that refuses to approve, stalls that run's successor, unattributably; the predecessor stays in force, and the stalled run's approvals expire at its deadline (Approval, rule 6), so it delays a panel change by a run for as long as the adversary keeps withholding, and loses nothing (T-54).
 - **The old panel can't be bypassed, nor the new one chosen by the old.** A successor needs `k` of the predecessor's seats to deal, so at least one honest old seat, which deals only to the panel the release pins as the next one; and it needs `q'` of that panel's seats to approve. A panel the release doesn't pin has no identity keys any checker accepts.
-- **Re-signing.** As in [[nullifier-key]]: a seat with a message in the last non-empty round can, with the coordinator, make a second transcript of the same resharing with another `key_id`, splitting approvals. That costs liveness only: both carry the same shares and the same `sk`.
+- **Re-signing.** As in [[nullifier-key]]: a seat with a message in the last non-empty round can, with the coordinator, make a second transcript of the same resharing with another `key_id`, splitting approvals. That costs liveness only: both carry the same shares and the same `sk`, and once the run's deadline passes neither binds any seat.
 - **Registration keys.** As in [[nullifier-key]]: the successor's registration secrets live as long as its shares (T-37, T-29).
 - **Not constant time everywhere.** Polynomial evaluation, Lagrange coefficients and share sums are `bigint` arithmetic, and secrets can't be zeroised in JavaScript (T-39, T-14).
 
 ## Test vectors
 
-`docs/spec/vectors/nullifier-reshare.json` ([[vectors/README|vectors]]): a predecessor key made by [[nullifier-key]]'s rounds on a 2-of-3 panel; reshares of it to a 3-of-4 panel and to the same panel (a refresh), each re-made byte for byte from its seats' secrets (round messages, every reshared share and its hash), with every new seat's share recomputed from the reshared shares and shown to interpolate, with any `k'` of the others, to the predecessor's `sk`; transcripts with their results: a dealer whose wrong and unopenable shares draw complaints that its reveals answer, a wrong reveal (`bad-reveal`), no response (`unanswered`), a dealer that shares something other than its own share (`constant`), one dealer too few (`key-dealers`), an absent new seat, a bad signing-key proof, a new seat reusing its predecessor signing key (`duplicate-key`), too few new seats (`key-quorum`), and transcripts failing `key-predecessor`, `key-order` (a dealer that isn't a qualified seat of the predecessor, a complaint from an absent seat), `key-shape` and `key-signature` (a message signed by the other panel's key for its seat, the run identifier); reshared-share checks failing each code; approval statements and signatures; and rejected encodings. They are printed by `packages/crypto/scripts/nullifier-reshare-vectors.py`, which reuses only `nullifier-key-vectors.py`'s independent code (and through it the Baby Jubjub, ML-KEM-768, ChaCha20-Poly1305, ristretto255 and P-256 code it reuses); it shares nothing with `packages/crypto` or any `@noble` library.
+`docs/spec/vectors/nullifier-reshare.json` ([[vectors/README|vectors]]): a predecessor key made by [[nullifier-key]]'s rounds on a 2-of-4 panel with seat 4 absent; reshares of it to a 3-of-4 panel and to the same panel (a refresh), each re-made byte for byte from its seats' secrets (round messages, every reshared share and its hash), with every new seat's share recomputed from the reshared shares and shown to interpolate, with any `k'` of the others, to the predecessor's `sk`; transcripts with their results: a dealer whose wrong and unopenable shares draw complaints that its reveals answer, a wrong reveal (`bad-reveal`), no response (`unanswered`), a dealer that shares something other than its own share (`constant`), one dealer too few (`key-dealers`), an absent new seat, a bad signing-key proof, a new seat reusing its predecessor signing key (`duplicate-key`), too few new seats (`key-quorum`), and transcripts failing `key-predecessor`, `key-signature` on a changed deadline, `key-order` (a dealer that isn't a qualified seat of the predecessor, a complaint from an absent seat), `key-shape` and `key-signature` (a message signed by the other panel's key for its seat, the run identifier); reshared-share checks failing each code; approval statements and signatures; and rejected encodings. They are printed by `packages/crypto/scripts/nullifier-reshare-vectors.py`, which reuses only `nullifier-key-vectors.py`'s independent code (and through it the Baby Jubjub, ML-KEM-768, ChaCha20-Poly1305, ristretto255 and P-256 code it reuses); it shares nothing with `packages/crypto` or any `@noble` library.

@@ -55,6 +55,8 @@ CT_LEN = 1088
 SEALED_LEN = 80
 NONCE = bytes(12)
 SCOPE = nk.SCOPE
+# The L2 block every vector run's approvals must be recorded by: test data.
+DEADLINE = 40_000_000
 
 CONTEXT_TAG = b"abolish/v1/keyed-nullifier/reshare-context"
 ROUND_TAG = b"abolish/v1/keyed-nullifier/reshare-round"
@@ -71,8 +73,8 @@ def pid(panel):
     return panel_id(panel["k"], panel["keys"])
 
 
-def context(old, pred_id, new, run_id, scope=SCOPE):
-    return H(ds(CONTEXT_TAG, u64(scope["l2ChainId"]) + scope["groupRegistry"] + pid(old) + pred_id + pid(new) + run_id))
+def context(old, pred_id, new, run_id, deadline, scope=SCOPE):
+    return H(ds(CONTEXT_TAG, u64(scope["l2ChainId"]) + scope["groupRegistry"] + pid(old) + pred_id + pid(new) + run_id + u64(deadline)))
 
 
 def lagrange(i, q):
@@ -99,8 +101,8 @@ def enc_round(msgs):
     return lst([u8(m["index"]) + m["body"] + m["sig"] for m in msgs])
 
 
-def enc_transcript(run_id, pred_id, rounds, record_type=TRANSCRIPT_TYPE, version=VERSION):
-    return u16(record_type) + u8(version) + run_id + pred_id + b"".join(enc_round(r) for r in rounds)
+def enc_transcript(run_id, pred_id, deadline, rounds, record_type=TRANSCRIPT_TYPE, version=VERSION):
+    return u16(record_type) + u8(version) + run_id + pred_id + u64(deadline) + b"".join(enc_round(r) for r in rounds)
 
 
 def enc_commitments(points):
@@ -155,7 +157,7 @@ def reshare(label, old, pred, new, dealers, seats, cheat=None, scope=SCOPE):
     cheat = cheat or {}
     k_new = new["k"]
     run_id = H(f"nullifier-reshare-run/{label}".encode())
-    ctx = context(old, pred["keyId"], new, run_id, scope)
+    ctx = context(old, pred["keyId"], new, run_id, DEADLINE, scope)
     news = {j: new_seat_secrets(label, j) for j in seats}
     olds = {i: dealer_secrets(label, i, pred["shares"].get(i), k_new) for i in dealers}
     for s in news.values():
@@ -267,7 +269,7 @@ def decode_transcript(b):
         raise DecodeFail("unexpected-record-type")
     if r.uint(1) != VERSION:
         raise DecodeFail("profile-mismatch")
-    run_id, pred_id = r.take(32), r.take(32)
+    run_id, pred_id, deadline = r.take(32), r.take(32), r.uint(8)
     rounds = [
         read_list(r, MAX_TRUSTEES, nk.read_keys_msg),
         read_list(r, MAX_TRUSTEES, read_dealing_msg),
@@ -276,7 +278,7 @@ def decode_transcript(b):
     ]
     if r.o != len(b):
         raise DecodeFail("trailing-bytes")
-    return run_id, pred_id, rounds
+    return run_id, pred_id, deadline, rounds
 
 
 def decode_share(b):
@@ -328,11 +330,11 @@ def check_share(ctx, recipient, secret, r1, r2, b):
 
 def check(old, pred, new, b, scope=SCOPE):
     try:
-        run_id, pred_id, rounds = decode_transcript(b)
+        run_id, pred_id, deadline, rounds = decode_transcript(b)
     except DecodeFail as e:
         return {"ok": False, "code": e.code}
     n_old, n, k_old, k = len(old["keys"]), len(new["keys"]), old["k"], new["k"]
-    ctx = context(old, pred["keyId"], new, run_id, scope)
+    ctx = context(old, pred["keyId"], new, run_id, deadline, scope)
     r1, r2, r3, r4 = rounds
     s1 = [m["index"] for m in r1]
     s2 = [m["index"] for m in r2]
@@ -424,6 +426,7 @@ def check(old, pred, new, b, scope=SCOPE):
         "ok": True,
         "keyId": H(ds(KEY_TAG, b)).hex(),
         "predecessor": pred_id.hex(),
+        "deadline": str(deadline),
         "dealerResults": dealer_results,
         "dealers": q,
         "seats": seats,
@@ -509,7 +512,7 @@ def main(out):
     def add(id_, desc, new_name, dealers, seats, cheat=None, honest=False, expect=None, mutate=None, pred_=pred):
         np_ = panels[new_name]
         r = reshare(id_, old, pred_, np_, dealers, seats, cheat)
-        b = enc_transcript(r["runId"], pred["keyId"], r["rounds"])
+        b = enc_transcript(r["runId"], pred["keyId"], DEADLINE, r["rounds"])
         if mutate is not None:
             b = mutate(b, r)
         result = check(old, pred, np_, b)
@@ -528,6 +531,7 @@ def main(out):
             v["shares"] = [{"index": x["index"], "sk": str(x["sk"]), "s": str(x["s"])} for x in shares]
         if honest:
             v["runId"] = r["runId"].hex()
+            v["deadline"] = str(DEADLINE)
             v["context"] = r["context"].hex()
             v["dealers"] = [
                 {
@@ -642,6 +646,7 @@ def main(out):
         return [r1, [resign(m, 2, h1, new["secrets"][0]) if m["index"] == 1 else m for m in r2], r3, r4]
 
     add("signature-panel", "Dealer 1's round-2 message is signed by the new panel's seat 1 instead of the old panel's.", "new-4", [1, 2, 3], [1, 2, 3, 4], {"rounds": signed_by_new_panel}, expect="key-signature")
+    add("signature-deadline", "The deadline is changed: every message was signed under the original context.", "new-4", [1, 2, 3], [1, 2, 3, 4], expect="key-signature", mutate=lambda b, r: b[:67] + u64(DEADLINE + 1) + b[75:])
     add("signature-run", "The run identifier is changed: every message was signed under the original context.", "new-4", [1, 2, 3], [1, 2, 3, 4], expect="key-signature", mutate=lambda b, r: b[:3] + bytes(32) + b[35:])
 
     # Reshared-share checks, as new seat `recipient` of a run sees them.
@@ -698,9 +703,9 @@ def main(out):
     dec("version-2", "Version 2, which doesn't exist.", base[:2] + u8(2) + base[3:])
     dec("record-type", "Record type 0x0014, the reshared share, where a transcript is expected.", u16(0x0014) + base[2:])
     dec("initial-type", "Record type 0x0011, the initial key's transcript, which this file doesn't list.", u16(0x0011) + base[2:])
-    dec("keys-over-max", "Round 1 claims 17 messages.", base[:67] + u32(17) + base[71:])
+    dec("keys-over-max", "Round 1 claims 17 messages.", base[:75] + u32(17) + base[79:])
     r1_len = 4 + 4 * (1 + 1216 + 33 + 64 + 64)
-    at_c = 67 + r1_len + 4 + 1 + 4
+    at_c = 75 + r1_len + 4 + 1 + 4
     dec("commitment-identity", "Dealer 1's first coefficient commitment is the identity.", base[:at_c] + kn.enc_point(BID) + base[at_c + 64 :])
     at_h = at_c + 64 * 3
     dec("hashes-over-max", "Dealer 1 claims 17 share hashes.", base[:at_h] + u32(17) + base[at_h + 4 :])

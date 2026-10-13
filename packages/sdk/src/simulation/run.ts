@@ -35,6 +35,7 @@ import {
   checkL1Reference,
   checkReceiptAtCast,
   checkShareReceipt,
+  checkSummedShares,
   checkTally,
   type CommittedVote,
   coreHash,
@@ -100,7 +101,7 @@ export const SIMULATION_STUBS = Object.freeze([
   "membership: no membership proofs; each voter's nullifier is its index plus one, and each ballot record carries a placeholder proof, the verification key's own alpha, beta and alpha points, which decodes but proves nothing and is never checked, so admission (5.1 to 5.4) isn't run and each ballot's M for the re-vote rule is computed from its record here rather than taken from crypto's checkBallot (P1-17b, P3-2)",
   "board: the operator boards each server ballot as it arrives and signs a receipt the voter's client checks at cast, under one receipt key fresh per run that no definition lists or registry holds; the anchoring clock (hourly from the Unix epoch, with a half-hour deadline) is a placeholder, the post-close windows other than the tally, openings' and destruction windows are taken as zero, so the counted extent ends one period after close and the seal is the destruction window's end, and nothing is anchored, so trustees act on segments the run computes rather than on checkpoints they saw on L1 (P1-13b, P4-1, P1-18)",
   "delivery: ciphertexts reach trustees in memory, with no contract path; a direct ballot is boarded by the operator when the servers return, with no receipt, never as a contract event (P1-12c, P4-2)",
-  "trustees: offline seats go down after the ceremony, for the whole voting period, tally and destruction; faulty seats lie only in their summed shares, which their own node's check refuses to seal, so no lie reaches another seat as a summed-share message and no recipient's refusal is shown; summed-share messages travel in memory, never over a channel, every honest seat combines, and the lowest seat combined signs each cell's opening",
+  "trustees: offline seats go down after the ceremony, for the whole voting period, tally and destruction; faulty seats lie only in their summed shares, which their own node's check refuses to seal, so no lie reaches another seat as a summed-share message, no recipient's refusal is shown, and a cell's excluded seats are those that sent nothing (openCell never sees a failing sum); summed-share messages travel in memory, never over a channel, every honest seat combines, and the lowest seat combined signs each cell's opening",
   "challenges: the checker records each tracking code and checks the opening in memory, with the election the run built rather than one fetched from chain and IPFS; a voter who publishes asks once, in the first period after the counted extent, and the operator's boarding rules are applied here rather than by the verifier's 6.2, which isn't run (P1-21 part 2)",
   "re-voting: L1 is simulated, a block every 12 seconds with random hashes, all finalized; every reference is admitted and every voter's last ballot selected, so no ballot is replayed, ties, or names a block before opening, after close or reorganised away (P1-21 part 2)",
   "destruction: every online seat signs its statement at the moment the tally rule sets, and the operator boards each one; nothing destroys the run's key material, which lives until the report is returned",
@@ -172,7 +173,8 @@ export interface SimulationReport {
     readonly faulty: readonly number[];
     /**
      * Summed-share messages sealed, one per cell from each honest online
-     * seat to each other online seat, every one opened and passing.
+     * seat to each other online seat, every one opened by its recipient and
+     * passing.
      */
     readonly summedShareMessages: number;
   };
@@ -584,17 +586,24 @@ export function runSimulation(
     const cell = cellOf(tier);
     const aggregate = aggregates[c] as (typeof aggregates)[number];
     const where = { definition: election.definition, cell: c, aggregate };
-    const outbox: { readonly to: number; readonly bytes: Uint8Array }[] = [];
+    const outbox: { readonly from: number; readonly to: number; readonly bytes: Uint8Array }[] = [];
     for (const seat of online) {
       const sum = sumOf(cell, seat);
       const sender = { index: seat, signingSecret: (seats[seat - 1] as SeatSecrets).signingSecret };
       for (const to of online) {
         if (to === seat) continue;
         if (!faulty.includes(seat)) {
-          outbox.push({ to, bytes: sealSummedShares(where, registered, sender, to, sum) });
+          outbox.push({
+            from: seat,
+            to,
+            bytes: sealSummedShares(where, registered, sender, to, sum),
+          });
           continue;
         }
-        // The sender's own summed-share check refuses the lie.
+        // The sender's own summed-share check refuses the lie: crypto's check
+        // fails it, and so the seal is refused.
+        if (checkSummedShares(aggregate, seat, corrupt(sum)))
+          throw new Error("simulation: a faulty seat's sums pass the summed-share check");
         let sealed = false;
         try {
           sealSummedShares(where, registered, sender, to, corrupt(sum));
@@ -605,24 +614,31 @@ export function runSimulation(
         if (sealed) throw new Error("simulation: a faulty seat's node sealed failing sums");
       }
     }
-    // Each honest seat's view: its own sums, then every message sent to it.
-    // An honest sender's message failing any check is a bug.
+    // Each online seat opens every message sent to it, and an honest
+    // sender's message failing any check, or naming another sender or cell,
+    // is a bug. Each honest seat's view: its own sums, then the senders'.
+    const received = new Map<number, Map<number, readonly Share[]>>();
+    for (const m of outbox) {
+      const secretKey = (seats[m.to - 1] as SeatSecrets).kem.secretKey;
+      const got = openSummedShares(summedElection, { index: m.to, secretKey }, m.bytes);
+      if (!got.ok || got.cell !== c || got.sender !== m.from)
+        throw new Error("simulation: an honest seat's summed-share message didn't pass");
+      const inbox = received.get(m.to) ?? new Map<number, readonly Share[]>();
+      inbox.set(got.sender, got.summed);
+      received.set(m.to, inbox);
+    }
     const views = honest.map((seat) => {
       const held = new Map<number, readonly Share[]>([[seat, sumOf(cell, seat)]]);
-      const secretKey = (seats[seat - 1] as SeatSecrets).kem.secretKey;
-      for (const m of outbox.filter((m) => m.to === seat)) {
-        const got = openSummedShares(summedElection, { index: seat, secretKey }, m.bytes);
-        if (!got.ok || got.cell !== c || held.has(got.sender))
-          throw new Error("simulation: an honest seat's summed-share message didn't pass");
-        held.set(got.sender, got.summed);
-      }
-      return { held, opened: openCell(tallyRules, cell.vss, held) };
+      for (const [from, summed] of received.get(seat) ?? []) held.set(from, summed);
+      const opened = openCell(tallyRules, cell.vss, held);
+      if (opened.excluded.length > 0)
+        throw new Error("simulation: sums that passed a summed-share message failed openCell");
+      return { held, opened };
     });
     // Seats whose passing summed shares the honest seats don't hold: each
     // faulty one, if its node's check stopped its lie.
     const first = views[0];
-    const holds = (s: number) =>
-      first !== undefined && first.held.has(s) && !first.opened.excluded.includes(s);
+    const holds = (s: number) => first?.held.has(s) === true;
     const excluded = online.filter((s) => !holds(s));
     // Every honest seat holds the same passing sums, so each combines the
     // same seats to the same opening, or none can.

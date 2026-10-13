@@ -21,7 +21,7 @@ const parsed = parseScenario({
 if (parsed.ok) console.log(runSimulation(parsed.scenario).ok);
 ```
 
-The seed decides only the plan; every secret comes from the CSPRNG. Every report lists in `stubs` what this part models only in outline (placeholder contracts, chains and tier roots, an unpinned panel, and no membership proofs, board, challenges, re-voting or anchoring yet). Offline seats take part in the ceremony and are down from the opening on.. A run costs about 0.3 s per ballot at 7 seats.
+The seed decides only the plan; every secret comes from the CSPRNG. Every report lists in `stubs` what this part models only in outline (placeholder contracts, chains and tier roots, an unpinned panel, and no membership proofs, board, challenges, re-voting or anchoring yet). Offline seats take part in the ceremony and are down from the opening on. A run costs about 0.3 s per ballot at 7 seats.
 
 ## Test
 

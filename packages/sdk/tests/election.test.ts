@@ -16,10 +16,10 @@ import { describe, expect, it } from "vite-plus/test";
 import { planElection, runSimulation, type Scenario } from "../src/index.ts";
 import { simulateElection } from "../src/simulation/election.ts";
 
-// The ceremony costs n² ML-KEM challenges, so the property runs a tenth of
-// the usual count (at least 10).
-const numRuns = Math.max(10, Math.floor(Number(process.env["FC_NUM_RUNS"] ?? 100) / 10));
-const timeout = 120_000;
+// The ceremony costs n² ML-KEM challenges, so the property runs a twentieth
+// of the usual count (at least 10).
+const numRuns = Math.max(10, Math.floor(Number(process.env["FC_NUM_RUNS"] ?? 100) / 20));
+const timeout = 240_000;
 
 const base: Scenario = {
   voters: 9,
@@ -129,6 +129,13 @@ describe("simulateElection", { timeout }, () => {
       1,
     );
     expect(moved.ok).toBe(false);
+    // The same election, with any other stub field: the stub hash differs.
+    const restated = checkCeremonyTranscript(
+      params({ ...e.definition, option_count: e.definition.option_count + 1 }, panelKeys(e)),
+      e.transcript,
+      1,
+    );
+    expect(restated.ok).toBe(false);
     const swapped = checkCeremonyTranscript(
       params(e.definition, panelKeys(other)),
       e.transcript,

@@ -1,5 +1,5 @@
 // Runs a simulated election in memory through @abolishus/crypto's own code:
-// a registered definition and its signed key ceremony (./election.ts), each
+// a well-formed definition and its signed key ceremony (./election.ts), each
 // voter's sharing, share encryption and
 // validity proof, each online trustee's intake (proof checks, decryption,
 // share checks, receipt) and the receipt's check under the seat's registered
@@ -36,7 +36,7 @@ import type { Scenario, SimulatedTier } from "./scenario.ts";
  * result is mistaken for a run of the whole protocol.
  */
 export const SIMULATION_STUBS = Object.freeze([
-  "definition: a well-formed version-1 definition, but its contracts, chains, clock and tier roots are placeholders and nothing registers it on L2 (P1-18, P3-2)",
+  "definition: a well-formed version-1 definition, but its contracts, chain IDs, election counter, clock and tier roots are placeholders and nothing registers it on L2 (P1-18, P3-2)",
   "ceremony: every seat takes part in the four signed rounds; no release pins the panel, whose identity keys are fresh per run (P1-7)",
   "membership: no membership proofs; each voter's nullifier is its index plus one (P1-17b, P3-2)",
   "delivery: ciphertexts reach trustees in memory, with no board, receipts at cast or contract path; a direct ballot differs only in its label (P1-12c, P4-2)",

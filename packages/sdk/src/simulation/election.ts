@@ -5,7 +5,7 @@
 // crypto's `checkCeremonyTranscript` with its context rebuilt from the
 // definition, never from the transcript, and ballots are encrypted only to
 // the keys that check registered, so a run exercises the same binding a
-// voter's client and a trustee node rely on (T-37, T-15). Nothing here
+// voter's client and a trustee node rely on (T-37). Nothing here
 // reimplements a check the verifier makes (AGENTS.md, Architecture).
 
 import {
@@ -38,9 +38,13 @@ import {
 import { type Plan, selectionRange } from "./plan.ts";
 import type { Scenario } from "./scenario.ts";
 
-/** Base Sepolia and Sepolia ([[0004-l2-choice]]): the chains the definition names. Nothing is sent to either. */
-export const SIMULATED_L2_CHAIN_ID = 84532n;
-export const SIMULATED_L1_CHAIN_ID = 11155111n;
+/**
+ * Local chain IDs (Anvil's 31337 for L1, the next for L2), never a public
+ * network's, so a simulated definition can't be taken for one on a testnet.
+ * Nothing is sent to either.
+ */
+export const SIMULATED_L2_CHAIN_ID = 31338n;
+export const SIMULATED_L1_CHAIN_ID = 31337n;
 
 // Recognisable placeholder values: an address repeats one byte, and a tier's
 // root is 2²⁰⁰ plus its tier, so none can be mistaken for a deployment's or a
@@ -116,7 +120,8 @@ export function simulateElection(scenario: Scenario, plan: Plan): SimulatedElect
   for (const v of plan.voters) voters.set(v.tier, (voters.get(v.tier) ?? 0n) + 1n);
   const stub: ElectionDefinition = {
     profile: profile(),
-    // A fresh counter per run: two runs never share an election identifier.
+    // A random counter, not a registry's count of elections: two runs never
+    // share an election identifier.
     election_id: electionId(
       SIMULATED_L2_CHAIN_ID,
       electionRegistry,

@@ -325,7 +325,7 @@ describe("owedReceipts", () => {
     ).toThrow(RangeError);
   });
 
-  test("owes at most one ballot per tier and nullifier, whatever the view's order", () => {
+  test("owes at most two receipted ballots per tier and nullifier, whatever the view's order", () => {
     const ballot = fc.record({
       id: fc.integer({ min: 0, max: 255 }),
       block: fc.bigInt({ min: 0n, max: 110n }),

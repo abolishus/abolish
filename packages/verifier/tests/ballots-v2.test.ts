@@ -12,8 +12,9 @@ import {
 // Format-4 bundles under definition versions 3 and 4, whose ballots (version
 // 2) name their cell: ballot admission, 5.1 to 5.4 and 5.7, against the
 // cell's root and scope in the definition and the key set its transcript
-// check registered, and 6.2, which this verifier can't judge until it reads
-// the openings of version-2 cores (P2-14 part 5) (docs/spec/verifier.md, Ballot admission). Fixtures:
+// check registered, and 6.2, which passes on these boards, holding no opening,
+// wherever admission runs (docs/spec/verifier.md, Ballot admission;
+// verifier-openings-v2.json covers the openings). Fixtures:
 // docs/spec/vectors/verifier-ballots-v2.json
 // (packages/crypto/scripts/verifier-ballots-v2-vectors.py, an independent
 // implementation that builds each cell tree by the first-occurrence rule,
@@ -112,8 +113,9 @@ describe("1.3, 2.3, 3.2, 5.1 to 5.4, 5.7 and 6.2 against the independent impleme
       const r = format4(c);
       expect(rows(r, Object.keys(c.expected))).toEqual(c.expected);
       expect(r.ballots).toEqual(c.ballots);
-      // This verifier doesn't read the openings of version-2 cores yet.
-      expect(r.openings).toBeUndefined();
+      // These boards hold no opening: where 6.2 runs past its step 1, it
+      // passes over none.
+      expect(r.openings).toEqual(c.expected["6.2"]?.["status"] === "pass" ? [] : undefined);
       expect(r.verdict).toBe("unverifiable");
       // A rejected ballot rejects its entry only, never the election (T-52):
       // only an election check (here 1.3, 2.3 or 3.2) can make it fail.
@@ -194,7 +196,7 @@ describe("admission is decided per entry", () => {
   });
 });
 
-test("the report gives the ballots after the ceremony, then the tallies, with no spoiled-ballot openings", () => {
+test("the report gives the ballots after the ceremony, then the spoiled-ballot openings and the tallies", () => {
   const r = format4(byId("mixed"));
   expect(Object.keys(r)).toEqual([
     "format",
@@ -204,6 +206,7 @@ test("the report gives the ballots after the ceremony, then the tallies, with no
     "definition",
     "ceremony",
     "ballots",
+    "openings",
     "tallies",
     "board",
     "l1",

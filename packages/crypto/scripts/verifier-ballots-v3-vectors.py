@@ -306,7 +306,7 @@ def build(constants):
     )
     bundle(
         "admitted",
-        "Definition version 5 with only admitted ballots after the transcript: one in each cell and a re-vote. 5.1 to 5.4 pass, and 6.2 is unsupported, since this verifier doesn't yet read the openings of version-3 cores (P2-14 part 5b).",
+        "Definition version 5 with only admitted ballots after the transcript: one in each cell and a re-vote. 5.1 to 5.4 pass, and so does 6.2, with no opening on the board.",
         d, t, e, [1, 2, 3],
         [t, ok["cell-0"], ok["remainder-region-1"], ok["tier-2"], ok["revote"]],
         "ballots",
@@ -345,7 +345,7 @@ def build(constants):
     ok_o1 = honest(e_o1)
     bundle(
         "opening-1",
-        "Definition version 5 pinning spoiled-ballot opening version 1, which can't open version-3 cores: 2.3 fails profile-combination, and admission still judges every ballot.",
+        "Definition version 5 pinning spoiled-ballot opening version 1, which can't open version-3 cores: 2.3 fails profile-combination, admission still judges every ballot, and 6.2 is not reached: no opening is judged against an election it can't open the ballots of.",
         d_o1, t_o1, e_o1, [1, 2, 3],
         [t_o1, ok_o1["cell-0"], ok_o1["tier-2"], (ok_o1["remainder-region-1"][0], ok_o1["cell-0"][1])],
         "ballots",
@@ -380,10 +380,14 @@ def build(constants):
     return {"panels": panels, "proofs": proofs, "checks": checks, "bundles": bundles, "eid": eid, "cells": cells}
 
 
-def opening_row(d):
-    """6.2 (docs/spec/verifier.md, Spoiled-ballot openings, step 1): unsupported under a ballot or opening pin other than version 1, since this verifier doesn't yet read the openings of version-3 cores (P2-14 part 5b); with both at version 1 (a profile 2.3 fails), not reached, as admission is."""
+def opening_row(d, admitted):
+    """6.2 (docs/spec/verifier.md, Spoiled-ballot openings, step 1): unsupported under an opening version this verifier doesn't read (it reads 1 and 2) or a ballot version other than the definition's own (3) and version 1, as admission is; not reached under any other pins but ballot version 3 beside opening version 2, the one that opens version-3 cores (a profile 2.3 fails), or where admission doesn't run; otherwise these boards carry no opening, so it passes."""
     pins = dict(d["profile"]["pins"])
-    return NOT_REACHED if pins[BALLOT_TYPE] == 1 and pins[SPOILED_OPENING_TYPE] == 1 else UNSUPPORTED
+    if pins[SPOILED_OPENING_TYPE] not in (1, 2) or pins[BALLOT_TYPE] not in (3, 1):
+        return UNSUPPORTED
+    if pins[BALLOT_TYPE] != 3 or pins[SPOILED_OPENING_TYPE] != 2 or not admitted:
+        return NOT_REACHED
+    return outcome("pass")
 
 
 def tally_row(d, registered):
@@ -498,7 +502,7 @@ def assemble(constants, proofs_path, out_dir):
             ballots = {"admitted": len(admitted), "rejected": rejected, "repeats": repeats}
         else:
             rows.update(rows_for(bnd["expect"]))
-        rows["6.2"] = opening_row(d)
+        rows["6.2"] = opening_row(d, bnd["expect"] == "ballots")
         rows["7.4"] = tally_row(d, bnd["registered"])
         case = {
             "id": bnd["id"],
@@ -530,7 +534,9 @@ def assemble(constants, proofs_path, out_dir):
     assert by["ballot-v2"]["expected"]["2.3"]["code"] == "profile-combination"
     assert by["ballot-v4"]["expected"]["2.3"]["code"] == "profile-combination"
     assert by["ballot-v5"]["expected"]["2.3"] == UNSUPPORTED
-    assert by["quorum"]["expected"]["6.2"] == UNSUPPORTED and by["ballot-v1"]["expected"]["6.2"] == NOT_REACHED
+    assert by["quorum"]["expected"]["6.2"] == NOT_REACHED and by["ballot-v1"]["expected"]["6.2"] == NOT_REACHED
+    assert by["admitted"]["expected"]["6.2"] == outcome("pass") and by["opening-1"]["expected"]["6.2"] == NOT_REACHED
+    assert by["ballot-v5"]["expected"]["6.2"] == UNSUPPORTED
     assert by["quorum"]["expected"]["7.4"] == NOT_REACHED and by["admitted"]["expected"]["7.4"] == outcome("pass")
 
     doc = {

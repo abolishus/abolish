@@ -312,8 +312,8 @@ test("under definition versions 3 and 4, the tally openings are read against the
     expect(row(r, "1.3")).toMatchObject({ status: "fail", code: "membership-key" });
     for (const check of ["5.1", "5.2", "5.3", "5.4", "5.7"])
       expect(row(r, check)).toMatchObject({ status: "unverifiable", code: "not-reached" });
-    // No opening version this verifier reads opens a version-2 core.
-    expect(row(r, "6.2")).toMatchObject({ status: "unverifiable", code: "unsupported-version" });
+    // 6.2 is reached exactly where admission is.
+    expect(row(r, "6.2")).toMatchObject({ status: "unverifiable", code: "not-reached" });
     expect(r.ballots).toBeUndefined();
     expect(row(r, "7.4")).toMatchObject({ status: "pass" });
     expect(r.tallies).toEqual([]);

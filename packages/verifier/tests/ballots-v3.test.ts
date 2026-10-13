@@ -13,9 +13,9 @@ import {
 // their cell and carry one range proof per question: ballot admission, 5.1 to
 // 5.4 and 5.7, against the cell's root and scope and the questions in the
 // definition and the key set its transcript check registered, 7.4 against its
-// cells, and 6.2, which this verifier can't judge until it reads the openings
-// of version-3 cores (P2-14 part 5b) (docs/spec/verifier.md, Ballot
-// admission). Fixtures: docs/spec/vectors/verifier-ballots-v3.json
+// cells, and 6.2, which passes on these boards, holding no opening, wherever
+// admission runs (docs/spec/verifier.md, Ballot admission;
+// verifier-openings-v2.json covers the openings). Fixtures: docs/spec/vectors/verifier-ballots-v3.json
 // (packages/crypto/scripts/verifier-ballots-v3-vectors.py, an independent
 // implementation of the version-3 record, its range proofs and its admission
 // order, with snarkjs's verdict on every membership proof), and
@@ -131,8 +131,9 @@ describe("1.3, 2.3, 3.2, 5.1 to 5.4, 5.7, 6.2 and 7.4 against the independent im
         const r = format4(c);
         expect(rows(r, Object.keys(c.expected))).toEqual(c.expected);
         expect(r.ballots).toEqual(c.ballots);
-        // This verifier doesn't read the openings of version-3 cores yet.
-        expect(r.openings).toBeUndefined();
+        // These boards hold no opening: where 6.2 runs past its step 1, it
+        // passes over none.
+        expect(r.openings).toEqual(c.expected["6.2"]?.["status"] === "pass" ? [] : undefined);
         expect(r.verdict).toBe("unverifiable");
         // A rejected ballot rejects its entry only, never the election (T-52):
         // only an election check (here 1.3, 2.3 or 3.2) can make it fail.
@@ -233,7 +234,7 @@ test("a ballot record of another version is refused whatever its bytes, never re
   }
 });
 
-test("the report gives the ballots after the ceremony, then the tallies, with no spoiled-ballot openings", () => {
+test("the report gives the ballots after the ceremony, then the spoiled-ballot openings and the tallies", () => {
   const r = format4(byId("mixed"));
   expect(Object.keys(r)).toEqual([
     "format",
@@ -243,6 +244,7 @@ test("the report gives the ballots after the ceremony, then the tallies, with no
     "definition",
     "ceremony",
     "ballots",
+    "openings",
     "tallies",
     "board",
     "l1",

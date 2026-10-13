@@ -1,7 +1,9 @@
 // The simulated board operator (docs/spec/board.md, docs/spec/receipts.md):
 // it appends each entry under the board-entry version the definition pins,
 // keeps the hash chain and the board tree as it grows, and signs a receipt
-// for every ballot submitted through our API, right after appending it.
+// for every ballot submitted through our API, right after appending it. It
+// also fixes the run's post-close timing: the counted extent, the tally
+// window, the destruction moment and the seal (docs/spec/tally.md).
 // Every encoding, hash, tree and signature is @abolishus/crypto's; this file
 // only keeps the operator's state. The voter's client checks each receipt
 // with crypto's `checkReceiptAtCast` and the verifier checks the board with
@@ -22,6 +24,7 @@ import {
   signReceipt,
   type SubtreeId,
   type UnsignedReceipt,
+  PARAMETERS,
 } from "@abolishus/crypto";
 
 /**
@@ -31,15 +34,66 @@ import {
 export const SIMULATED_ANCHOR_PERIOD = 3600n;
 
 /**
- * The seal, as periods after the one holding `closes_at`: a placeholder for
- * the latest end of the post-close windows (docs/spec/election-definition.md,
- * The seal), which a version-1 definition doesn't carry.
+ * The anchor's deadline: an anchor for period `s` counts if its L1 block is
+ * at most this long after the end of `s` (docs/spec/board.md, Timing). A
+ * placeholder until the run reads the anchor contract's own clock.
  */
-export const SIMULATED_SEAL_PERIODS = 24;
+export const SIMULATED_ANCHOR_DEADLINE = 1800n;
 
 /** The anchoring period that L1 time `seconds` falls in. */
 export function segmentAt(seconds: bigint): number {
   return Number(seconds / SIMULATED_ANCHOR_PERIOD);
+}
+
+/** The L1 time at which period `segment` ends. */
+const endOf = (segment: number) => BigInt(segment + 1) * SIMULATED_ANCHOR_PERIOD;
+
+/** The post-close segments and times the tally and destruction follow (docs/spec/tally.md). */
+export interface PostClose {
+  /** `s_S`: the counted extent's last segment. */
+  readonly counted: number;
+  /** `t_S`: when the checkpoint for `s_S` is due, after which trustees combine. */
+  readonly tallyFrom: bigint;
+  /** `s_T`: the anchoring period containing `t_S + TALLY_WINDOW`. */
+  readonly windowSegment: number;
+  /** `t_D`: when a node destroys if the tally hasn't completed. */
+  readonly destroyBy: bigint;
+  /** The seal: the period containing the destruction window's end. */
+  readonly seal: number;
+}
+
+/**
+ * Tally window and Destruction of docs/spec/tally.md, from `closes_at`. The
+ * windows that make up `W_S` (delivery, complaints, the contract-event
+ * window) and `l1_inclusion_bound` are taken as 0, since nothing here
+ * delivers through the contract path, so `s_S` is its floor,
+ * `period(closes_at) + 1`; the seal is the destruction window's end, the
+ * latest post-close window the run has (SIMULATION_STUBS).
+ */
+export function postClose(closesAt: bigint): PostClose {
+  const counted = segmentAt(closesAt) + 1;
+  const tallyFrom = endOf(counted) + SIMULATED_ANCHOR_DEADLINE;
+  const tallyEnd = tallyFrom + BigInt(PARAMETERS.TALLY_WINDOW);
+  const windowSegment = segmentAt(tallyEnd);
+  // The later of the tally window's end and segment s_T − 1's anchoring deadline.
+  const lastDeadline = endOf(windowSegment - 1) + SIMULATED_ANCHOR_DEADLINE;
+  const destroyBy = tallyEnd > lastDeadline ? tallyEnd : lastDeadline;
+  return {
+    counted,
+    tallyFrom,
+    windowSegment,
+    destroyBy,
+    seal: segmentAt(destroyBy + BigInt(PARAMETERS.DESTRUCTION_WINDOW)),
+  };
+}
+
+/**
+ * The segment in which a node that has seen period `segment`'s checkpoint
+ * anchored acts: the one holding that checkpoint's deadline (docs/spec/tally.md,
+ * Destruction, When).
+ */
+export function afterAnchored(segment: number): number {
+  return segmentAt(endOf(segment) + SIMULATED_ANCHOR_DEADLINE);
 }
 
 const id = (s: SubtreeId) => `${s.level}:${s.index}`;
@@ -118,7 +172,10 @@ export class SimulatedBoard {
     return signReceipt(this.#receiptSecret, this.#append(segment, payload));
   }
 
-  /** A ballot delivered without our API: appended with no receipt. */
+  /**
+   * An entry boarded without a submission through our API (a direct ballot,
+   * a tally opening, a destruction statement): appended with no receipt.
+   */
   board(segment: number, payload: Uint8Array): number {
     return Number(this.#append(segment, payload).index);
   }

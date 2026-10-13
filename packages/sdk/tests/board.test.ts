@@ -6,11 +6,18 @@ import {
   identityKey,
   inclusionProof,
   merkleRoot,
+  PARAMETERS,
   RECORD_TYPES,
 } from "@abolishus/crypto";
 import fc from "fast-check";
 import { describe, expect, it } from "vite-plus/test";
-import { SimulatedBoard, segmentAt } from "../src/simulation/board.ts";
+import {
+  afterAnchored,
+  postClose,
+  SIMULATED_ANCHOR_DEADLINE,
+  SimulatedBoard,
+  segmentAt,
+} from "../src/simulation/board.ts";
 
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
 
@@ -113,5 +120,42 @@ describe("SimulatedBoard", { timeout: 120_000 }, () => {
     expect(segmentAt(3599n)).toBe(0);
     expect(segmentAt(3600n)).toBe(1);
     expect(segmentAt(1_000_000n)).toBe(277);
+  });
+
+  it("fixes the post-close segments from closes_at", () => {
+    // Closes in period 10: s_S is 11, its checkpoint is due half an hour
+    // after it ends, and the tally window runs 7 days from there.
+    const close = 10n * 3600n + 100n;
+    expect(postClose(close)).toEqual({
+      counted: 11,
+      tallyFrom: 12n * 3600n + 1800n,
+      windowSegment: 180,
+      destroyBy: 12n * 3600n + 1800n + 604_800n,
+      seal: 204,
+    });
+    expect(afterAnchored(11)).toBe(12);
+  });
+
+  it("orders the post-close moments as the tally rule needs, whatever closes_at", () => {
+    fc.assert(
+      fc.property(fc.bigInt({ min: 0n, max: 2n ** 40n }), (close) => {
+        const t = postClose(close);
+        const tallyEnd = t.tallyFrom + BigInt(PARAMETERS.TALLY_WINDOW);
+        // s_S is the floor period(closes_at) + 1, and t_S its checkpoint's deadline.
+        expect(t.counted).toBe(segmentAt(close) + 1);
+        expect(t.tallyFrom).toBe(BigInt(t.counted + 1) * 3600n + SIMULATED_ANCHOR_DEADLINE);
+        expect(t.windowSegment).toBe(segmentAt(tallyEnd));
+        // t_D: no earlier than the window's end or s_T − 1's deadline, and in s_T.
+        expect(t.destroyBy >= tallyEnd).toBe(true);
+        expect(t.destroyBy >= BigInt(t.windowSegment) * 3600n + SIMULATED_ANCHOR_DEADLINE).toBe(
+          true,
+        );
+        expect(segmentAt(t.destroyBy)).toBe(t.windowSegment);
+        expect(t.seal).toBe(segmentAt(t.destroyBy + BigInt(PARAMETERS.DESTRUCTION_WINDOW)));
+        // A node that saw a segment's checkpoint acts in the next one.
+        expect(afterAnchored(t.counted)).toBe(t.counted + 1);
+      }),
+      { numRuns },
+    );
   });
 });

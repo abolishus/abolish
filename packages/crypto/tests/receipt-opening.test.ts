@@ -9,6 +9,7 @@ import {
   decodeReceiptOpening,
   encodeReceiptOpening,
   type ReceiptOpeningInput,
+  receiptOpeningStateEntry,
   transactionCalldata,
   transactionTrieValue,
   type TrustedBeaconState,
@@ -146,7 +147,7 @@ function nestedLists(d: number): Uint8Array {
 describe("receipt-opening.json", () => {
   test("is the expected format, with every vector parsed", () => {
     expect(V.format).toBe("abolish-receipt-opening-vectors/1");
-    expect(V.openings).toHaveLength(81);
+    expect(V.openings).toHaveLength(82);
     expect(V.blocks.map((b) => b.proofs.length)).toEqual([8, 5, 3]);
     expect(V.trieRejections).toHaveLength(8);
     expect(V.calldata).toHaveLength(13);
@@ -228,7 +229,31 @@ describe("checkReceiptOpening", () => {
       fc.property(fc.nat({ max: b.length * 8 - 1 }), (bit) => {
         const flipped = b.slice();
         flipped[bit >> 3] = (flipped[bit >> 3] as number) ^ (1 << (bit & 7));
-        expect(checkReceiptOpening({ ...input(v), opening: flipped }).ok).toBe(false);
+        // A judge with the whole state holds whatever entry a moved slot
+        // names; this one holds another root there.
+        const s = state(v.state);
+        const entry = receiptOpeningStateEntry(flipped, 1n);
+        const other = new Uint8Array(32).fill(0xee);
+        const blockSummaryRoots = new Map(s.blockSummaryRoots);
+        const blockRoots = new Map(s.blockRoots);
+        if (
+          entry !== undefined &&
+          "summaryIndex" in entry &&
+          !blockSummaryRoots.has(entry.summaryIndex)
+        )
+          blockSummaryRoots.set(entry.summaryIndex, other);
+        if (
+          entry !== undefined &&
+          "blockRootIndex" in entry &&
+          !blockRoots.has(entry.blockRootIndex)
+        )
+          blockRoots.set(entry.blockRootIndex, other);
+        const r = checkReceiptOpening({
+          ...input(v),
+          opening: flipped,
+          state: { ...s, blockSummaryRoots, blockRoots },
+        });
+        expect(r.ok).toBe(false);
       }),
       { numRuns: NUM_RUNS },
     );
@@ -243,6 +268,20 @@ describe("checkReceiptOpening", () => {
       ok: false,
       code: "opening-late",
     });
+  });
+
+  test("names the one state entry a passing opening reads", () => {
+    for (const v of passing) {
+      const entry = receiptOpeningStateEntry(hex(v.opening), BigInt(v.l1ChainId));
+      if (entry === undefined) throw new Error(`${v.id} names no entry`);
+      const [map, i] =
+        "summaryIndex" in entry
+          ? [v.state.blockSummaryRoots, entry.summaryIndex]
+          : [v.state.blockRoots, entry.blockRootIndex];
+      expect(Object.keys(map), v.id).toEqual([String(i)]);
+    }
+    expect(receiptOpeningStateEntry(new Uint8Array(3), 1n)).toBeUndefined();
+    expect(receiptOpeningStateEntry(hex(byId("ok-summary").opening), 31337n)).toBeUndefined();
   });
 
   test("refuses a state whose known fork version isn't its slot's", () => {

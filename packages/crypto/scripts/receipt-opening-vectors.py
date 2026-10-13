@@ -521,21 +521,21 @@ def check_opening(opening, receipt, t_e, chain, state):
         return "opening-payload"
     if chain not in SCHEDULES:
         return "opening-fork-unknown"
-    capella = [f for f in SCHEDULES[chain] if f[0] == "capella"][0][1] * 32
-    if slot < capella:
-        return "opening-payload"
-    g = GINDEX.get(fork_at(chain, slot)[0])
-    if g is None:
-        return "opening-fork-unknown"
-    depth = g.bit_length() - 1
-    if len(o["payloadProof"]) != depth or fold(keccak256(o["header"]), o["payloadProof"], g - (1 << depth)) != o["bodyRoot"]:
-        return "opening-payload"
+    # The state's fork before any payload check: from a fork this release
+    # doesn't know, an honest payload branch may follow another layout.
     known = [f for f in SCHEDULES[chain] if f[2] == state["forkVersion"]]
     if not known:
         return "opening-fork-unknown"
     assert known[0] == fork_at(chain, state["slot"]), "a state's version is its slot's fork's"
     if known[0][0] not in GINDEX:
         return "opening-fork-unknown"
+    capella = [f for f in SCHEDULES[chain] if f[0] == "capella"][0][1] * 32
+    if slot < capella:
+        return "opening-payload"
+    g = GINDEX[fork_at(chain, slot)[0]]
+    depth = g.bit_length() - 1
+    if len(o["payloadProof"]) != depth or fold(keccak256(o["header"]), o["payloadProof"], g - (1 << depth)) != o["bodyRoot"]:
+        return "opening-payload"
     # 6.
     r = header_root(slot, o["proposerIndex"], o["parentRoot"], o["stateRoot"], o["bodyRoot"])
     if len(o["summaryProof"]) == 13:
@@ -877,7 +877,12 @@ def main(out_dir, configs_dir=None):
     add("fork-unknown-sepolia-gloas-state", o, s, "opening-fork-unknown", chain=11155111)
     o, s = build(chain=11155111, slot=353024 * 32 + 5, state_slot=353024 * 32 + 10, summary=False)
     add("fork-unknown-sepolia-gloas-block", o, s, "opening-fork-unknown", chain=11155111)
-    add("payload-before-fork-unknown-state", dict(good, bodyRoot=label("other body")), dict(good_state, forkVersion="07000000"), "opening-payload")
+    add("fork-unknown-state-before-payload", dict(good, bodyRoot=label("other body")), dict(good_state, forkVersion="07000000"), "opening-fork-unknown")
+    # An honest opening from a fork this release doesn't know, its payload
+    # branch at another index (as Gloas's bid would put it): unjudged, never failed.
+    other_branch = [label(f"unknown-fork sibling {i}") for i in range(9)]
+    other_body = fold(keccak256(good["header"]), other_branch, 813 - 512)
+    add("fork-unknown-payload-other-index", dict(good, payloadProof=other_branch, bodyRoot=other_body), dict(good_state, forkVersion="07000000"), "opening-fork-unknown")
     add("payload-slot-before-unknown-chain", dict(good, beaconSlot=good_state["slot"]), good_state, "opening-payload", chain=31337)
 
     # 6. opening-canonical

@@ -382,6 +382,8 @@ export {
   RECEIPT_OPENING,
   type ReceiptOpening,
   type ReceiptOpeningInput,
+  receiptOpeningStateEntry,
+  type StateEntryNamed,
   transactionCalldata,
   transactionTrieValue,
   type TrustedBeaconState,

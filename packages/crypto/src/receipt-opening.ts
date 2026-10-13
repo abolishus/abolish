@@ -404,6 +404,48 @@ function stateEntry(map: ReadonlyMap<number, Uint8Array>, i: number, what: strin
   return r;
 }
 
+const capellaFirstSlot = (schedule: BeaconForkSchedule) =>
+  (schedule.forks.find((f) => f.name === "capella") as BeaconFork).epoch * SLOTS_PER_EPOCH;
+
+/** The state entry step 6 reads, by the summary proof's length; none for any other length. */
+export type StateEntryNamed =
+  | { readonly summaryIndex: number }
+  | { readonly blockRootIndex: number };
+
+function stateEntryNamed(o: ReceiptOpening, capellaSlot: bigint): StateEntryNamed | undefined {
+  if (o.summary_proof.length === 13)
+    return o.beacon_slot < capellaSlot
+      ? undefined
+      : { summaryIndex: Number(o.beacon_slot / PERIOD - capellaSlot / PERIOD) };
+  if (o.summary_proof.length === 0) return { blockRootIndex: Number(o.beacon_slot % PERIOD) };
+  return undefined;
+}
+
+/**
+ * Which entry of the judge's state an opening's step 6 reads, so a
+ * light-client judge proves just that one (docs/spec/receipts.md, Fork
+ * schedule): `historical_summaries[summaryIndex]` for a 13-hash
+ * `summary_proof`, `block_roots[blockRootIndex]` for an empty one.
+ * Undefined if the opening doesn't decode, `l1ChainId` has no schedule, or
+ * it names no entry (its slot is before Capella, or its proof has another
+ * length); `checkReceiptOpening` then needs neither.
+ */
+export function receiptOpeningStateEntry(
+  opening: Uint8Array,
+  l1ChainId: bigint,
+): StateEntryNamed | undefined {
+  let o: ReceiptOpening;
+  try {
+    o = decodeReceiptOpening(opening);
+  } catch (e) {
+    if (e instanceof DecodeError) return undefined;
+    throw e;
+  }
+  const schedule = BEACON_FORK_SCHEDULES.find((s) => s.chainId === l1ChainId);
+  if (schedule === undefined) return undefined;
+  return stateEntryNamed(o, capellaFirstSlot(schedule));
+}
+
 /**
  * Checks an opening (docs/spec/receipts.md, Opening), in order, the first
  * failure being the result:
@@ -422,9 +464,11 @@ function stateEntry(map: ReadonlyMap<number, Uint8Array>, i: number, what: strin
  *    record of the block at `beacon_slot`, through the period's
  *    `block_summary_root` (13 hashes) or `block_roots` (none).
  *
- * `opening-fork-unknown` instead of 5 or 6 when this release can't check
- * them: no schedule for `l1ChainId`, `beacon_slot` in a fork after Fulu, or
- * a state whose fork version is unknown or after Fulu. That is a property of
+ * `opening-fork-unknown` instead of the rest of 5, and 6, when this release
+ * can't check them, decided right after the slot check and before any
+ * payload check: no schedule for `l1ChainId`, or a state whose fork version
+ * is unknown or after Fulu (and so, `beacon_slot` being earlier, its fork is
+ * a checked one whenever the state's is). That is a property of
  * the judge, never of the opening (`judgeReceipt` leaves the receipt
  * unjudged). Throws on a state that isn't one of the chain's: a known fork
  * version that isn't its slot's, or a missing entry the opening names.
@@ -462,12 +506,18 @@ export function checkReceiptOpening(input: ReceiptOpeningInput): ReceiptOpeningC
   if (o.beacon_slot >= state.slot) return fail("opening-payload");
   const schedule = BEACON_FORK_SCHEDULES.find((s) => s.chainId === l1ChainId);
   if (schedule === undefined) return fail("opening-fork-unknown");
-  const capella = schedule.forks.find((f) => f.name === "capella") as BeaconFork;
-  const capellaSlot = capella.epoch * SLOTS_PER_EPOCH;
+  // The state's fork first: under a fork this release doesn't know, an
+  // honest opening's payload branch may follow another layout, so no
+  // payload failure is reported from such a state.
+  const known = schedule.forks.find((f) => equalBytes(f.version, state.forkVersion));
+  if (known === undefined) return fail("opening-fork-unknown");
+  if (known !== forkAt(schedule, state.slot))
+    throw new RangeError("state.forkVersion isn't the version of its slot's fork");
+  if (!SUPPORTED_STATE_FORKS.has(known.name)) return fail("opening-fork-unknown");
+  const capellaSlot = capellaFirstSlot(schedule);
   if (o.beacon_slot < capellaSlot) return fail("opening-payload");
-  const gindex = PAYLOAD_GINDEX[forkAt(schedule, o.beacon_slot).name];
-  // EIP-7732 (Gloas) moves the payload out of the block body.
-  if (gindex === undefined) return fail("opening-fork-unknown");
+  // beacon_slot is before the state's slot, so its fork is Capella to Fulu too.
+  const gindex = PAYLOAD_GINDEX[forkAt(schedule, o.beacon_slot).name] as number;
   const depth = Math.floor(Math.log2(gindex));
   if (
     o.payload_proof.length !== depth ||
@@ -479,27 +529,22 @@ export function checkReceiptOpening(input: ReceiptOpeningInput): ReceiptOpeningC
     )
   )
     return fail("opening-payload");
-  // A fork the release doesn't know may change the state's containers.
-  const known = schedule.forks.find((f) => equalBytes(f.version, state.forkVersion));
-  if (known === undefined) return fail("opening-fork-unknown");
-  if (known !== forkAt(schedule, state.slot))
-    throw new RangeError("state.forkVersion isn't the version of its slot's fork");
-  if (!SUPPORTED_STATE_FORKS.has(known.name)) return fail("opening-fork-unknown");
 
   // 6.
   const root = beaconBlockHeaderRoot(o);
-  const leaf = Number(o.beacon_slot % PERIOD);
-  if (o.summary_proof.length === 13) {
-    const i = Number(o.beacon_slot / PERIOD - capellaSlot / PERIOD);
+  const entry = stateEntryNamed(o, capellaSlot);
+  if (entry === undefined) return fail("opening-canonical");
+  if ("summaryIndex" in entry) {
+    const i = entry.summaryIndex;
     if (i >= state.historicalSummaryCount) return fail("opening-canonical");
     const summary = stateEntry(state.blockSummaryRoots, i, "blockSummaryRoots");
-    if (!isValidMerkleBranch(root, o.summary_proof, BigInt(leaf), summary))
+    if (!isValidMerkleBranch(root, o.summary_proof, o.beacon_slot % PERIOD, summary))
       return fail("opening-canonical");
-  } else if (o.summary_proof.length === 0) {
+  } else {
     // block_roots holds the 8192 slots before the state's.
     if (state.slot > o.beacon_slot + PERIOD) return fail("opening-canonical");
-    if (!equalBytes(root, stateEntry(state.blockRoots, leaf, "blockRoots")))
+    if (!equalBytes(root, stateEntry(state.blockRoots, entry.blockRootIndex, "blockRoots")))
       return fail("opening-canonical");
-  } else return fail("opening-canonical");
+  }
   return { ok: true };
 }

@@ -80,35 +80,60 @@ const signsUp: Story["play"] = async ({ canvasElement }) => {
   await userEvent.click(
     await canvas.findByRole("button", { name: "Create an account with a passkey" }),
   );
-  await expect(await canvas.findByText(/^Synced passkey, added/)).toBeVisible();
+  await expect(await canvas.findByText("Synced passkey")).toBeVisible();
   await expect(canvas.getByRole("status")).toHaveTextContent("You're signed in.");
   // The button that had focus is gone: focus is back on the heading.
-  await expect(canvas.getByRole("heading", { level: 1 })).toHaveFocus();
+  await expect(canvas.getByRole("heading", { level: 1, name: "Your account" })).toHaveFocus();
   // One passkey: it can't be removed.
-  await expect(canvas.queryByRole("button", { name: "Remove" })).toBeNull();
+  await expect(canvas.queryByRole("button", { name: /^Remove/ })).toBeNull();
+  await expect(canvas.getByText("Your last passkey")).toBeVisible();
+  // Signed in, the page no longer explains the separation; it lists the passkeys.
+  await expect(canvas.queryByRole("region", { name: "Your account is not your vote" })).toBeNull();
   await userEvent.click(canvas.getByRole("button", { name: "Sign out" }));
   await expect(await canvas.findByRole("button", { name: "Sign in with a passkey" })).toBeVisible();
   await expect(canvas.getByRole("status")).toHaveTextContent("You're signed out.");
 };
 
-export const SignedOut: Story = { args: { client: fakeClient() }, play: signsUp };
+const separates: Story["play"] = async ({ canvasElement }) => {
+  const canvas = within(canvasElement);
+  await expect(
+    await canvas.findByRole("heading", { level: 1, name: "Sign in, or create an account" }),
+  ).toBeVisible();
+  const separation = canvas.getByRole("region", { name: "Your account is not your vote" });
+  await expect(within(separation).getByText("Never joined")).toBeVisible();
+  await expect(
+    within(separation).getByRole("heading", { level: 3, name: "Your voting identity" }),
+  ).toBeVisible();
+};
+
+export const SignedOut: Story = {
+  args: { client: fakeClient() },
+  play: async (context) => {
+    await separates(context);
+    await signsUp(context);
+  },
+};
 
 export const SignedOutDark: Story = {
   args: { client: fakeClient() },
   parameters: { theme: "dark" },
-  play: signsUp,
+  play: separates,
 };
 
 export const SignedIn: Story = {
   args: { client: fakeClient({ signedIn: true, passkeys: TWO }) },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement);
-    await expect(await canvas.findByText(/^Device passkey, added/)).toBeVisible();
-    const remove = canvas.getAllByRole("button", { name: "Remove" });
+    await expect(await canvas.findByText("Device passkey")).toBeVisible();
+    await expect(canvas.getByText("Added October 2, 2026 at 5:40 PM UTC")).toBeVisible();
+    const remove = canvas.getAllByRole("button", { name: /^Remove the passkey added/ });
     await expect(remove).toHaveLength(2);
+    await expect(remove[1]).toHaveAccessibleName(
+      "Remove the passkey added October 2, 2026 at 5:40 PM UTC",
+    );
     await userEvent.click(remove[1]!);
-    await waitFor(() => expect(canvas.queryByText(/^Device passkey/)).toBeNull());
-    await expect(canvas.queryByRole("button", { name: "Remove" })).toBeNull();
+    await waitFor(() => expect(canvas.queryByText("Device passkey")).toBeNull());
+    await expect(canvas.queryByRole("button", { name: /^Remove/ })).toBeNull();
     await userEvent.click(canvas.getByRole("button", { name: "Add a passkey" }));
     await expect(await canvas.findByRole("status")).toHaveTextContent("Passkey added.");
     await userEvent.click(canvas.getByRole("button", { name: "Sign out everywhere else" }));
@@ -124,7 +149,7 @@ export const SignedInDark: Story = {
   args: { client: fakeClient({ signedIn: true, passkeys: TWO }) },
   parameters: { theme: "dark" },
   play: async ({ canvasElement }) => {
-    await expect(await within(canvasElement).findByText(/^Device passkey, added/)).toBeVisible();
+    await expect(await within(canvasElement).findByText("Device passkey")).toBeVisible();
   },
 };
 
@@ -136,7 +161,12 @@ export const DeleteAccount: Story = {
     // Asks once more, and can step back.
     await userEvent.click(canvas.getByRole("button", { name: "Keep account" }));
     await userEvent.click(canvas.getByRole("button", { name: "Delete account…" }));
-    await userEvent.click(canvas.getByRole("button", { name: "Delete account permanently" }));
+    const confirm = canvas.getByRole("group", {
+      name: "Delete this account? This can't be undone.",
+    });
+    await userEvent.click(
+      within(confirm).getByRole("button", { name: "Delete account permanently" }),
+    );
     await expect(
       await canvas.findByRole("button", { name: "Create an account with a passkey" }),
     ).toBeVisible();

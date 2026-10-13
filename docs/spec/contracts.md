@@ -1,12 +1,12 @@
 # Contracts
 
-What our L2 contracts commit to, for a verifier that reads them from the chain and the archive alone. So far this page specifies the event accumulator every Abolish contract keeps, the contract-event record (`0x0008`) that archives each of its events, the election registry, the trustee registry, the group registry with its Tier 0 additions (P3-2), the board, our direct-submit contract, with its ballot and delivery checks, calls and events, and the board anchor, our one contract on L1 (P4-1). The group registry's Tier 1 and Tier 2 additions (P3-3, P3-4) and the close rule's contracts (the L1 relay, the board's window check and the statements' contract path, P1-18 part 4c-2b; the rule itself is [[close]]) are added here as they are built. Notation is from [[notation]], tags from [[domain-separation]].
+What our L2 contracts commit to, for a verifier that reads them from the chain and the archive alone. So far this page specifies the event accumulator every Abolish contract keeps, the contract-event record (`0x0008`) that archives each of its events, the election registry, the trustee registry, the group registry with its Tier 0 additions (P3-2), the board, our direct-submit contract, with its ballot and delivery checks, calls and events, and our two contracts on L1: the board anchor (P4-1) and the relay that carries forced ballots to the board (P1-18 part 4c-2b). The group registry's Tier 1 and Tier 2 additions (P3-3, P3-4) and the rest of the close rule's contracts (the board's window check, its relayed-ballot call and the statements' contract path, P1-18 part 4c-2b; the rule itself is [[close]]) are added here as they are built. Notation is from [[notation]], tags from [[domain-separation]].
 
 ## Event accumulator
 
 Threats: T-71 (L2 governance or our server hiding an event), T-25 (a direct-submitted ballot withheld from the board), T-24 (equivocation). Decided by [[0005-permanent-archive]], Consequences, "L2 events".
 
-Our server writes the board, and inclusion proofs show only that an event exists, never that none was left out. So every Abolish contract keeps a running hash and a counter over every log it emits, in its own storage, and each step also binds the block that emitted the log. Storage is committed by the L2 state root, which L1 output roots commit to, so an account and storage proof (`eth_getProof`) of these two values at an L2 block pins the contract's whole event sequence up to that block, each event with its block number and timestamp. The block is always the emitting chain's: the board anchor, our one contract on L1, binds L1 blocks, and its evidence is L1's own state (Board anchor). A verifier replays the archived sequence and compares ([[verifier]] 4.4, P1-19). This is the only evidence archived for our contracts' events: no transaction, receipt or block header ([[0025-contract-event-evidence]]).
+Our server writes the board, and inclusion proofs show only that an event exists, never that none was left out. So every Abolish contract keeps a running hash and a counter over every log it emits, in its own storage, and each step also binds the block that emitted the log. Storage is committed by the L2 state root, which L1 output roots commit to, so an account and storage proof (`eth_getProof`) of these two values at an L2 block pins the contract's whole event sequence up to that block, each event with its block number and timestamp. The block is always the emitting chain's: the board anchor and the relay, our contracts on L1, bind L1 blocks, and their evidence is L1's own state (Board anchor, L1 relay). A verifier replays the archived sequence and compares ([[verifier]] 4.4, P1-19). This is the only evidence archived for our contracts' events: no transaction, receipt or block header ([[0025-contract-event-evidence]]).
 
 The tag is `abolish/v1/event-accumulator-2`. The first layout, under `abolish/v1/event-accumulator`, bound no block; it stays frozen with its vectors (`vectors/event-accumulator.json`) and no Abolish contract is deployed with it ([[0025-contract-event-evidence]], Consequences).
 
@@ -88,7 +88,7 @@ Every event of every one of our L2 contracts is archived, and the ones an electi
 
 The fields are the step's input, re-framed in [[notation]]'s primitives: the step counts topics with a `u8`, the record with a `list`'s `u32`, so a third-party decoder needs no construct of its own, and the step is recomputed from the decoded values, `k` being the number of topics. Decoding is strict ([[notation]], Strict decoding) and context-free; a record with no topics, or with topics or data that aren't an event of its contract, decodes and then fails the event check below. A record's `chain_id` is the definition's `l2_chain_id`, never a field.
 
-The board anchor, our one contract on L1, has no contract-event records: a verifier reads its anchors and locators from L1 state, never from its logs (Board anchor, Verification).
+Our contracts on L1 have no contract-event records: a verifier reads the board anchor's anchors and locators, and the relay's recorded calls, from L1 state, never from their logs (Board anchor, Verification; L1 relay, Verification).
 
 Version 2 has version 1's layout, field for field; the two differ only in their event tables (Event check). The election's profile pins one version for every contract's events, and a record of the other is `profile-mismatch` ([[versioning]], Election profile).
 
@@ -611,7 +611,7 @@ The ballot check runs every record of `vectors/ballot.json`, `vectors/ballot-v2.
 
 Threats: T-23 (board tampering), T-24 (equivocation), T-52 (front-running an election's anchor), T-53 (discreditation), T-49 and T-50 (outages and censorship that miss a deadline, and finding the archive once our domain and hosting are gone), T-51 (data loss), T-17 (chosen bytes on L1), T-69 (a compelled or seized anchoring key), T-26 (unprovable drops: receipt keys fixed before voting).
 
-The board anchor is our one contract on L1. It records, once per election and segment, the hash of the board's checkpoint after that segment ([[board]], Segments and checkpoints), and publishes the checkpoint itself in the same log, so every checkpoint is attributable to its election and segment from L1 alone. Each call may also carry the `archiveLocator` [[0005-permanent-archive]] requires (Archive objects and how they are found), so the archive is found from L1 alone. It also keeps the record of receipt keys that [[0023-receipt-evidence]] requires (Receipt keys, below), so the keys that judge an election's receipts are the same authority's. It is immutable: no owner, proxy, pause or upgrade path. Its clock and its anchoring authority are fixed at deployment as immutables, which solc writes into the runtime code. A verifier release pins the anchor's address together with its `epoch`, `period`, `deadline` and `authority`; [[verifier]] 1.2 compares the runtime code with the release build with the immutables' byte ranges masked, and requires the masked words to equal those pinned values, so the clock a verifier applies is the deployed one, read from code, never from a call. The definition's `l1_anchor` names it.
+The board anchor is our first contract on L1. It records, once per election and segment, the hash of the board's checkpoint after that segment ([[board]], Segments and checkpoints), and publishes the checkpoint itself in the same log, so every checkpoint is attributable to its election and segment from L1 alone. Each call may also carry the `archiveLocator` [[0005-permanent-archive]] requires (Archive objects and how they are found), so the archive is found from L1 alone. It also keeps the record of receipt keys that [[0023-receipt-evidence]] requires (Receipt keys, below), so the keys that judge an election's receipts are the same authority's. It is immutable: no owner, proxy, pause or upgrade path. Its clock and its anchoring authority are fixed at deployment as immutables, which solc writes into the runtime code. A verifier release pins the anchor's address together with its `epoch`, `period`, `deadline` and `authority`; [[verifier]] 1.2 compares the runtime code with the release build with the immutables' byte ranges masked, and requires the masked words to equal those pinned values, so the clock a verifier applies is the deployed one, read from code, never from a call. The definition's `l1_anchor` names it.
 
 ### Deployment
 
@@ -743,3 +743,114 @@ The checkpoint hash and the window rule are the ones `vectors/board.json` alread
 - **A locator only names where the archive is.** A wrong or stale one can send verifiers nowhere, which makes an election unverifiable, never verified: everything found is checked against the anchored checkpoints. The manifest chain ([[0005-permanent-archive]]) gives a second path to every manifest.
 - **Gas.** In the tests a call with one checkpoint costs about 89,000 gas, and each further checkpoint in the same call about 39,000: a storage write, a read of the lowest-segment word, two SHA-256 calls (the hash and the accumulator) and a log. The two CIDs of checkpoint version 2 cost about 5,000 of that per checkpoint (72 more bytes of calldata, and their framing, hashing and logging). A locator adds about 24,000 (its slots and log). An election's first anchor costs about 22,000 more, for its lowest-segment word. At 100 live elections, hourly, that is about 3.9 million gas an hour, a recurring L1 cost: on testnets it is free, and spending real funds on it is the owner's decision.
 - **The deployment, the Safe and the hourly job don't exist yet** (P4-1 part 2, with the worker and a `ci:` deploy workflow for Sepolia). Until then, nothing is anchored and every board is unanchored.
+
+## L1 relay
+
+Threats: T-50 (the sequencer censoring direct submission), T-71 (L2 governance forging a deposit from the relay's address), T-35 and T-45 (a ballot made after close), T-25 (a forced ballot kept off the board), T-17 (chosen bytes), T-52 (oversized input). Decided by [[0030-close-rule]] (Recommendation, Forced ballots) and [[0004-l2-choice]] (Consequences, Close rule).
+
+A voter whose direct submissions the sequencer censors forces its ballot through L1: it calls the relay, our second contract on L1, with its ballot record, and the relay records the call in L1 state, with the number and timestamp of the L1 block the call ran in, and deposits the record to the board through the L2's portal. The L2 must include the deposit within its sequencing window (12 hours, [[0004-l2-choice]], Forced inclusion), whatever the sequencer wants. On L2 the board accepts a relayed ballot only from the relay's aliased address, and the close rule judges it in the window by the L1 timestamp the relay recorded, its **stamp**, never by when the deposit reached L2 ([[close]], Window). A verifier matches each relayed ballot on the board with exactly the call recorded here (Verification), so a deposit that L2 governance forges from the aliased address matches no call and fails ([[verifier]] 4.5). The relay is immutable: no owner, proxy, pause or upgrade path, and it holds no funds. It inherits the event accumulator (above), with `chain_id` the L1's, like the board anchor. The definition's `l1_relay` names it, and the election registry pins it (Election registry, Deployment).
+
+This page specifies the relay: its call, what it records, its deposit and its event. The board's side (the relayed-ballot call, its sender and window checks, and the event that carries the call's index, block and stamp) and contract-event version 3, which archives that event, follow in P1-18 part 4c-2b, and the contract in part 4c-3.
+
+### Deployment
+
+The relay is deployed with two immutables:
+
+| Value    | Meaning                                                                                                                                                                             |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `portal` | The L2's deposit contract on L1 (`OptimismPortal`, the proxy's address), the canonical portal the verifier's release pins ([[verifier]], Pinned trust roots).                       |
+| `board`  | The board's address on L2, which every deposit calls. Fixed before deployment from the deployer's nonces or by CREATE2, as the board's and the registries' are (Board, Deployment). |
+
+Deployment reverts if `portal` has no code or `board` is zero, and, as every contract's, if `block.chainid` is 2⁶⁴ or more (Event accumulator, Values). [[verifier]] 1.2 masks both immutables and requires `portal` to equal the pinned portal and `board` the definition's `board` (T-64).
+
+### Relaying
+
+`relayBallot(uint64 gasLimit, bytes record) returns (uint64 index)` reverts, recording and depositing nothing, unless, in this order:
+
+1. **Calldata** (`relay-calldata`): the calldata is exactly the ABI encoding of the two arguments: the selector, `gasLimit` as a word below 2⁶⁴, the offset `0x40`, the record's length, the record, zero padding to a whole word, and nothing after, so a call carries no byte its arguments don't define (T-17).
+2. **Size** (`relay-too-large`): `record` is at most `MAX_RELAY_RECORD = 119,808` bytes ([[parameters]]), the longest whose deposit data (below: 164 bytes and the record padded to whole words) fits the portal's cap of 120,000 bytes. Checked before anything is read from the record (T-52).
+3. **Header** (`relay-truncated`, `relay-record-type`): `record` is at least 35 bytes, a record type, a version and a `definition_hash`, and its type is `0x0002`, a ballot record ([[ballot-validity]], Ballot record).
+
+The relay reads nothing else: not the version, the election or any field after the definition hash. It can't read the definition, which lives on L2, so it can't judge the window, the version or the ballot; the board judges all of them, as it judges a direct submission (Board, Ballots), and a record it refuses leaves a recorded call with no event (Verification). The header check only keeps the event's topic meaningful and stops calls that can't be a ballot.
+
+Then, with `i` the number of calls the relay recorded before this one, `b = block.number` and `τ = block.timestamp` (the call reverts if either is 2⁶⁴ or more, as the accumulator does), it:
+
+1. stores call `i`'s **call hash**
+
+   ```
+   call_hash = H(DS("abolish/v1/relay-call",
+                    u64(l1_chain_id) ‖ bytes[20](relay) ‖ u64(i) ‖ u64(b) ‖ u64(τ) ‖ record))
+   ```
+
+   where `l1_chain_id` is `block.chainid` and `relay` the relay's own address, and sets its count to `i + 1`;
+
+2. emits
+
+   | Event                                                                                   | Topics                                        | Data                     |
+   | --------------------------------------------------------------------------------------- | --------------------------------------------- | ------------------------ |
+   | `BallotRelayed(bytes32 indexed definitionHash, uint64 indexed index, bytes32 callHash)` | the record's `definition_hash`, `i` as a word | `call_hash`, ABI-encoded |
+
+   through its event accumulator;
+
+3. calls `portal.depositTransaction(board, 0, gasLimit, false, data)` with
+
+   ```
+   data = abi.encodeCall(submitRelayedBallot, (i, b, τ, record))
+   ```
+
+   the selector of `submitRelayedBallot(uint64,uint64,uint64,bytes)`, the words of `i`, `b` and `τ`, the offset `0x80`, the record's length, the record and its zero padding: `164 + pad32(len(record))` bytes;
+
+4. returns `i`.
+
+The writes come before the external call, so a call re-entering through the portal would only record a call of its own after this one; a reverting deposit (a gas limit below the portal's minimum for the data's length, or above what its metering allows) reverts the whole call, so every recorded call made a deposit. The call is not payable and the deposit carries no value: the caller's own L1 transaction pays the portal's metering for the deposit's gas, so the relay never holds funds. On L2 the deposit's sender is the relay's alias,
+
+```
+alias(relay) = (relay + 0x1111000000000000000000000000000000001111) mod 2¹⁶⁰
+```
+
+which the portal applies to every contract caller, and the deposit runs as a call from it to `board` with `data` and `gasLimit` gas. The board's relayed-ballot call accepts only that sender (part 4c-2b).
+
+**Why the whole record.** The call hash binds every byte of the record, not its `ballot_hash`. The ballot hash leaves out the membership proof and the L1 reference ([[ballot-validity]], Ballot hash), so a forged deposit carrying the same ballot with another proof or reference would match a call that bound only the hash; binding the record means the only relayed event that matches a call is the record its caller sent (T-71, T-31). Hashing it costs the caller about 12 gas per 32 bytes.
+
+**Why a word per call.** The relay also keeps the event accumulator every contract keeps, over its `BallotRelayed` logs, which binds each call's index, block and stamp. Matching an event against the accumulator alone would need every earlier call's preimage, and a call whose deposit failed on L2 has no event to supply it, so a verifier couldn't match any later call. With one word per index, each relayed ballot is matched by itself, whatever else the relay recorded.
+
+**The gas limit is the caller's.** The board's check of the largest ballots costs a few million gas (Board, Gas), and its membership check needs about 620,000 available for the pairing whatever it spends (Board, Membership proofs), so a client gives a limit above what its ballot needs; the portal's own minimum for the data's length applies too. Too low a limit leaves the call recorded and the deposit reverted on L2, which costs only the caller (Verification). [[0004-l2-choice]]'s metered budget (20,000,000 gas per L1 block) bounds how many forced ballots one L1 block takes. Who pays, and through which address, is P2-8's and P4-2's; the paying address is linked to the ballot as any direct submission's is (T-11, T-13).
+
+**Size.** Every ballot record this spec defines fits `MAX_RELAY_RECORD`: the largest version-3 record is 48,380 bytes (Board, Gas), and version 4's author half adds at most 33,544 bytes ([[ballot-validity]], Ballot record (version 4), Sizes), about 82 KB; version 5 adds its `step`. A ballot version whose largest record exceeds it can't be forced through this relay, so it MUST NOT be pinned by a definition naming this relay ([[0030-close-rule]], Consequences).
+
+### State
+
+The values sit at the [ERC-7201](https://eips.ethereum.org/EIPS/eip-7201) namespace `abolish.ballot-relay`:
+
+```
+R = keccak256(abi.encode(uint256(keccak256("abolish.ballot-relay")) − 1)) & ~0xff
+  = 0xeddbfcaa40c756990a5dda7c565d5921d82a1a88a4b83bd8b0415aeae8667900
+```
+
+- the count of recorded calls is the word at `R`, a big-endian integer whose top 192 bits are zero;
+- call `i`'s call hash is the word at `keccak256(abi.encode(uint256(i), R + 1))` (Solidity's `mapping(uint64 => bytes32)` at `R + 1`); zero means no call `i`.
+
+Nothing else writes either, and neither is ever cleared: call `i`'s word is written once, by call `i`. The accumulator sits at `S` and `S + 1`, as every contract's (Event accumulator, Rules for every contract).
+
+### Verification
+
+For each relayed ballot on the board, the board's event names the call's index `i`, block `b` and stamp `τ` and carries the record (part 4c-2b). A verifier proves the count word and call `i`'s word with `eth_getProof` against the state root of its finalized L1 block `B`, the block it proves anchors at (Board anchor, Verification), never from an `eth_call` answer, and the event **matches** call `i` when `i` is below the count, `b ≤ number(B)` and the word equals `call_hash` recomputed from the definition's `l1_chain_id` and `l1_relay` and the event's `i`, `b`, `τ` and record. It never reads the relay's logs or an L1 receipt for this, so the match survives L1 history expiry ([EIP-4444](https://eips.ethereum.org/EIPS/eip-4444)), as the anchors do.
+
+- **`relay-unmatched`**: an event that matches no call fails [[verifier]] 4.5. Only L2 governance (or a false output root) can make one, since only a deposit from the relay's alias reaches the board's relayed-ballot call, and every such deposit was made by a recorded call with exactly these fields (T-71).
+- **`relay-duplicate`**: two events that name one index fail 4.5 too. A word holds one hash, so at most one record matches it, and a deposit runs once on L2; the board emits nothing for a byte-identical repeat (Board, Calls, Repeats), so two events for one index are a forgery, whichever matches.
+
+The stamp of a matched event is then the timestamp of the L1 block the call ran in, written by the relay itself, which no sequencer or caller chooses; it is what [[close]] (Window) judges. The match rests on the release relay code (1.2): its constructor's storage isn't bound yet, like every contract's (Board anchor, Known-weak, Constructor effects aren't bound), so until it is, a deployer's initcode could pre-write call words for future indexes that a forged deposit would then match.
+
+**Calls with no event**, reported, never failed: a call whose deposit reverted on L2 (too little gas, a record the board refuses, a stamp outside the window) or that the L2 hasn't yet included leaves a word with no event. While L1 history serves the relay's logs, a verifier reads the `BallotRelayed` logs naming the election's definition hash, checked against the relay's accumulator (Event accumulator, Verification), and reports each call no board event matches, with its stamp, as [[0030-close-rule]] (Consequences, The verifier) requires; once the logs have expired, only the count and the words remain, which don't say which election a call was for. A call outside the window is refused by the board and counts nothing either way.
+
+### Vectors
+
+`vectors/relay.json` (format `abolish-relay-vectors/1`, see [[vectors/README|vectors]]) gives the selectors and the event's topic 0, the storage slots, L2 aliases (one wrapping modulo 2¹⁶⁰), calls with their call hashes, deposit data, topics and event data (the shortest record, a record relayed twice, another relay, another L1, the `u64` extremes, about the largest version-4 record and a record of `MAX_RELAY_RECORD` bytes), the framing of records at and around each bound and each refused type, canonical and non-canonical calldata, and the relay's event accumulator over three calls. `packages/crypto` consumes it; the contract's tests will (part 4c-3), as will the verifier's 4.5 (P1-19).
+
+### Known-weak
+
+- **Anyone can record calls.** The relay frames only the header, so a call with a record the board refuses, or too little gas, is recorded and deposited and produces no event: each costs its caller L1 gas and leaves a word and a report, never a failure. Such a record's bytes reach L1 calldata and logs (a 32-byte hash, a topic), never the board or the archive, since the board refuses it (T-17).
+- **The portal is the L2's.** L2 governance can upgrade the portal or change how deposits are derived, which can censor forced ballots (T-50, T-71); it can also forge a deposit from the relay's alias, which 4.5 catches (`relay-unmatched`). A portal upgraded to refuse deposits makes every relay call revert, so nothing is recorded that wasn't deposited.
+- **The stamp is the L1 slot's start.** A proposer can include a call made a few seconds after `closes_at` in a block stamped at or before it ([[close]], Residuals, The relay's seconds; T-35, T-45).
+- **Unmatched calls are reported only while L1 serves the relay's logs** (above); the words and the count stay in state for good.
+- **Not built.** The contract, the board's relayed-ballot call and event, contract-event version 3 and verifier 4.5 are later parts (P1-18 part 4c-2b and 4c-3; P1-19). Until the board accepts relayed ballots, a forced ballot can't be counted, and no board may be deployed before it does (Board).

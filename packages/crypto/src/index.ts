@@ -901,3 +901,21 @@ export {
   objectCar,
   objectCid,
 } from "./content-addressing.ts";
+export {
+  ALIAS_OFFSET,
+  decodeRelayBallotCalldata,
+  frameRelayRecord,
+  l2Alias,
+  MAX_RELAY_RECORD,
+  PORTAL_MAX_DATA,
+  RELAY_DEPOSIT_SIGNATURE,
+  RELAY_EVENT_SIGNATURE,
+  RELAY_SIGNATURE,
+  relayBallotCalldata,
+  type RelayCall,
+  relayCallHash,
+  relayDepositData,
+  relayEvent,
+  type RelayFraming,
+  type RelayFramingCode,
+} from "./relay.ts";

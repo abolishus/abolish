@@ -29,6 +29,9 @@ export const PARAMETERS = Object.freeze({
   // (L1 blocks) and max_sequencer_drift (seconds) (docs/spec/contracts.md).
   MAX_SEQUENCING_WINDOW: 3600,
   MAX_SEQUENCER_DRIFT: 1800,
+  // Bytes; the longest record the L1 relay takes, so its deposit fits the
+  // portal's 120,000-byte data cap (docs/spec/contracts.md, L1 relay).
+  MAX_RELAY_RECORD: 119_808,
   // Seconds after the seal's anchoring window until the dispute end t_E; a
   // constant of receipt version 1 (docs/spec/receipts.md).
   DISPUTE_WINDOW: 2_592_000,

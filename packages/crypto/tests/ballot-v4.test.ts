@@ -21,10 +21,12 @@ import {
   decode,
   DecodeError,
   encode,
+  encryptShares,
   G,
   GENERATOR_H,
   GROUP_ORDER,
   IDENTITY,
+  proveValidity,
   proveValidityV3,
   proveValidityV4,
   type QuestionRules,
@@ -510,6 +512,23 @@ describe("ballot version 4 sharing and proving", () => {
     ).toThrow(TypeError);
   });
 
+  test("version 1's prover and share encryption refuse a version-4 sharing", () => {
+    const v4 = shareVoteV4(rules, [1, 0, 0, 1, 0]);
+    const v1Ctx = {
+      optionCount: 5,
+      minSelections: 0,
+      maxSelections: 5,
+      threshold: 2,
+      panelSize: 3,
+      definitionHash: new Uint8Array(32),
+      tier: 0,
+      nullifier: 1n,
+    };
+    expect(() => proveValidity(v1Ctx, v4, hashes(3, 0))).toThrow(TypeError);
+    // Its halves never reach a seat as one sharing (share-encryption.md, Ballot version 4, in part 2b-3).
+    expect(() => encryptShares({ definitionHash: new Uint8Array(32) }, v4, [])).toThrow(TypeError);
+  });
+
   test("refuses share-hash lists of the wrong length for either panel", () => {
     const sharing = shareVoteV4(rules, [0, 1, 0, 1, 0]);
     expect(() => proveValidityV4(ctx, sharing, hashes(2, 0), hashes(2, 9))).toThrow(RangeError);
@@ -523,6 +542,15 @@ describe("ballot version 4 sharing and proving", () => {
     expect(() => proveValidityV4(plain, sharing, hashes(3, 0), [])).toThrow(RangeError);
     const wider = { ...ctx, authorThreshold: 3, authorPanelSize: 3 };
     expect(() => proveValidityV4(wider, sharing, hashes(3, 0), hashes(3, 9))).toThrow(RangeError);
+    // The same thresholds over more seats: no seat may be named without its shares.
+    const moreAuthors = { ...ctx, authorPanelSize: 3 };
+    expect(() => proveValidityV4(moreAuthors, sharing, hashes(3, 0), hashes(3, 9))).toThrow(
+      RangeError,
+    );
+    const moreDefaults = { ...ctx, panelSize: 4 };
+    expect(() => proveValidityV4(moreDefaults, sharing, hashes(4, 0), hashes(2, 9))).toThrow(
+      RangeError,
+    );
   });
 
   test("a prover never proves a sharing a challenge opened", () => {
@@ -546,7 +574,6 @@ describe("ballot version 4 sharing and proving", () => {
       toHex(statementHashV4(plain, vote)),
     );
     expect(toHex(ballotHashV3(v3Ctx, v3))).not.toBe(toHex(ballotHashV4(plain, vote)));
-    expect(COMMITTED_VOTE_V3).not.toBe(COMMITTED_VOTE_V4);
   });
 
   test("voteCommitmentsV4 refuses an author list of another length than vss", () => {

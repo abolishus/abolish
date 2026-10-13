@@ -1315,11 +1315,6 @@ export function shareVoteV4(rules: ValidityRulesV4, votes: readonly (0 | 1)[]): 
   }
 }
 
-/** Internal: whether `shareVoteV4` made this sharing (unchanged, since it is frozen). */
-export function isRegisteredSharingV4(sharing: VoteSharingV4): boolean {
-  return SHARINGS_V4.has(sharing);
-}
-
 /**
  * Internal: proves a version-4 sharing valid with the given randomness.
  * Production code calls `proveValidityV4`; the package entry point doesn't
@@ -1343,7 +1338,9 @@ export function proveValidityV4With(
     sharing.vss.length !== total ||
     sharing.vss.some((e) => e.length !== ctx.threshold) ||
     sharing.authorVss.length !== (nA === 0 ? 0 : total) ||
-    sharing.authorVss.some((e) => e.length !== ctx.authorThreshold)
+    sharing.authorVss.some((e) => e.length !== ctx.authorThreshold) ||
+    sharing.shares.length !== ctx.panelSize ||
+    sharing.authorShares.length !== nA
   )
     throw new RangeError("prove: the sharing doesn't match the election");
   if (shareHashes.length !== ctx.panelSize)

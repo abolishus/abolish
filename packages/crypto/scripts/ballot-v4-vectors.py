@@ -401,6 +401,9 @@ def ballot_vectors(elections):
     invalid("author-halves-swapped", "Options 0 and 1's author halves swapped: C_0 and C_1 change, and so does the statement", four, f_ctx, with_(f_vote, authorVss=swapped), op)
     _, _, b_vote, _, _ = made["author-four-blanks"]
     invalid("author-half-spliced", "The author half (author_vss and author_share_hashes) of another ballot in the same election (T-30, T-32)", four, f_ctx, with_(f_vote, authorVss=b_vote["authorVss"], authorShareHashes=b_vote["authorShareHashes"]), op)
+    higher = copy.deepcopy(f_vote["authorVss"])
+    higher[0][1] = f_vote["authorVss"][1][1]
+    invalid("author-higher-coefficient-changed", "Option 0's author commitment of degree 1 replaced by option 1's: every C_j is unchanged, and the statement binds the whole author half", four, f_ctx, with_(f_vote, authorVss=higher), op)
     invalid("halves-exchanged", "vss and author_vss exchanged (k_D = k_A): every C_j is unchanged, but the statement names which half is which", four, f_ctx, with_(f_vote, vss=f_vote["authorVss"], authorVss=f_vote["vss"]), op)
     hs = list(f_vote["authorShareHashes"])
     hs[2] = bytes(32)
@@ -419,7 +422,7 @@ def ballot_vectors(elections):
     invalid("statement-version-3", "The author-four ballot with its proofs made over the same statement with version input 3 (T-31)", four, f_ctx, v3, op)
     dh, _, _, _ = make_ballot("author-four", four, f_ctx, votes0, over_default_half=True)
     assert halves(dh) == halves(f_vote)
-    invalid("proved-over-default-half", "The author-four ballot proved over E^D_{j,0} alone, as if it were C_j: the vote commitment is the product of both halves", four, f_ctx, dh, op)
+    invalid("proved-over-default-half", "The author-four ballot's proofs made with E^D_{j,0} and r_j − s_j in place of C_j and r_j: the vote commitment is the product of both halves", four, f_ctx, dh, op)
     pv3, _, _, _ = make_ballot("no-author", plain, p_ctx, ballots[2]["votes"], version=3)
     invalid("plain-statement-version-3", "The no-author ballot proved over version input 3: without an author panel C_j is version 3's, but the statement isn't", plain, p_ctx, pv3, op)
 

@@ -197,11 +197,9 @@ function WeakPoints() {
                 {t(`howWeak${w.id}Title`)}
               </h3>
               {w.threats.length === 0 ? null : (
-                <p className="m-0 flex flex-wrap gap-x-3 font-mono text-xs">
-                  <span className="sr-only">{t("howWeakThreats")}</span>
-                  {w.threats.map((id) => (
-                    <span key={id}>{id}</span>
-                  ))}
+                <p className="m-0 font-mono text-xs text-muted-foreground">
+                  <span className="sr-only">{t("howWeakThreats")} </span>
+                  {w.threats.join(", ")}
                 </p>
               )}
             </div>

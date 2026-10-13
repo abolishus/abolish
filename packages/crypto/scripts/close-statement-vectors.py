@@ -52,9 +52,6 @@ def u64(x):
     return x.to_bytes(8, "big")
 
 
-# --- Window (verifier 5.5) -----------------------------------------------------------
-
-
 # --- Board entries ---------------------------------------------------------------
 
 BOARD_ENTRY = 0x0007
@@ -83,6 +80,9 @@ def entry_error(b):
     """The board-entry envelope's own check of its payload's type."""
     payload = b[3 + 32 + 8 + 4 + 4 :]
     return None if int.from_bytes(payload[:2], "big") in ALLOWED[b[2]] else "unexpected-record-type"
+
+
+# --- Window (verifier 5.5) -----------------------------------------------------------
 
 
 def window(path, value, opens_at, closes_at, s_a):

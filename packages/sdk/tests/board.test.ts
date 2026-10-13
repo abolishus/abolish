@@ -115,6 +115,49 @@ describe("SimulatedBoard", { timeout: 120_000 }, () => {
     );
   });
 
+  it("boards a period's openings last, in byte order, whatever order they arrived in", () => {
+    const opening = fc
+      .uint8Array({ maxLength: 16 })
+      .map((body) =>
+        Uint8Array.from([
+          RECORD_TYPES.spoiledBallotOpening >> 8,
+          RECORD_TYPES.spoiledBallotOpening & 0xff,
+          1,
+          ...body,
+        ]),
+      );
+    fc.assert(
+      fc.property(
+        fc.uniqueArray(opening, { selector: (o) => o.join(), maxLength: 12 }),
+        payload,
+        (openings, other) => {
+          const board = new SimulatedBoard(electionId, VERSION);
+          board.board(4, other);
+          const at = board.boardOpenings(4, openings);
+          const checked = checkBoard(electionId, board.entries, VERSION);
+          const boarded = checked.entries.slice(1).map((e) => e.payload);
+          // Each opening's index, in the order given.
+          expect(at.map((i) => checked.entries[i]?.payload)).toEqual(openings);
+          expect(boarded).toEqual(
+            [...openings].sort((a, b) => {
+              for (let i = 0; i < Math.min(a.length, b.length); i++)
+                if (a[i] !== b[i]) return (a[i] as number) - (b[i] as number);
+              return a.length - b.length;
+            }),
+          );
+        },
+      ),
+      { numRuns },
+    );
+  });
+
+  it("refuses to hold one opening twice in a period", () => {
+    const board = new SimulatedBoard(electionId, VERSION);
+    const o = Uint8Array.from([0, 3, 1, 5]);
+    expect(() => board.boardOpenings(4, [o, Uint8Array.from(o)])).toThrow(/twice/);
+    expect(board.entries).toHaveLength(0);
+  });
+
   it("labels entries with hourly periods", () => {
     expect(segmentAt(0n)).toBe(0);
     expect(segmentAt(3599n)).toBe(0);
@@ -129,6 +172,8 @@ describe("SimulatedBoard", { timeout: 120_000 }, () => {
     expect(postClose(close)).toEqual({
       counted: 11,
       tallyFrom: 12n * 3600n + 1800n,
+      // The openings' window is as long as the tally window, from t_S.
+      openingsUntil: 180,
       windowSegment: 180,
       destroyBy: 12n * 3600n + 1800n + 604_800n,
       seal: 204,
@@ -145,6 +190,10 @@ describe("SimulatedBoard", { timeout: 120_000 }, () => {
         expect(t.counted).toBe(segmentAt(close) + 1);
         expect(t.tallyFrom).toBe(BigInt(t.counted + 1) * 3600n + SIMULATED_ANCHOR_DEADLINE);
         expect(t.windowSegment).toBe(segmentAt(tallyEnd));
+        // Openings: after s_S, up to the period holding t_S + OPENING_WINDOW, before the seal.
+        expect(t.openingsUntil).toBe(segmentAt(t.tallyFrom + BigInt(PARAMETERS.OPENING_WINDOW)));
+        expect(t.openingsUntil).toBeGreaterThan(t.counted);
+        expect(t.openingsUntil).toBeLessThanOrEqual(t.seal);
         // t_D: no earlier than the window's end or s_T − 1's deadline, and in s_T.
         expect(t.destroyBy >= tallyEnd).toBe(true);
         expect(t.destroyBy >= BigInt(t.windowSegment) * 3600n + SIMULATED_ANCHOR_DEADLINE).toBe(

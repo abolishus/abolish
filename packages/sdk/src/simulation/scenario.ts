@@ -22,6 +22,20 @@ export const MAX_SIMULATED_VOTERS = 100_000;
  */
 export const MAX_SIMULATED_WORK = 2_000_000;
 
+/**
+ * The most `openings × ballots × options` a scenario with published
+ * openings may ask for, taking every voter's challenged attempt as
+ * published and every voter as re-voting when the shares allow it. Before
+ * boarding an opening the operator compares each counted ballot's
+ * commitments with what it opens (docs/spec/challenge.md, Publication:
+ * `opening-cast`), one point encoding each, about 0.1 ms, so this bounds
+ * that check at about a quarter of an hour. Each published opening also
+ * costs its own checks and about `4 × options × (threshold + panel)` scalar
+ * multiplications to list what it opens, so a run where many voters
+ * publish takes noticeably longer per ballot than one where none do.
+ */
+export const MAX_SIMULATED_OPENING_LOOKUPS = 10_000_000;
+
 /** The definition's tiers, each one cell of the electorate. */
 export const SIMULATED_TIERS = TIERS;
 export type SimulatedTier = (typeof SIMULATED_TIERS)[number];
@@ -63,6 +77,13 @@ export interface Scenario {
    * ballot counts. 0 (or no field) for none.
    */
   readonly revotes: number;
+  /**
+   * The share of challenging voters, in `[0, 1]`, who ask after close for
+   * their challenged attempt's opening to be published on the board
+   * (docs/spec/challenge.md, Client rule 4): publishing is the voter's
+   * choice, so 0 (or no field) for none.
+   */
+  readonly publications: number;
   /** Seeds the plan only (who votes how and when), never a secret. */
   readonly seed: number;
 }
@@ -125,7 +146,7 @@ function parse(input: unknown): Scenario {
     input,
     "$",
     ["voters", "election", "options", "trustees", "tiers", "seed"],
-    ["outage", "challenges", "revotes"],
+    ["outage", "challenges", "revotes", "publications"],
   );
   const voters = integer(o["voters"], "$.voters", 1, MAX_SIMULATED_VOTERS);
   const election = o["election"];
@@ -167,6 +188,21 @@ function parse(input: unknown): Scenario {
       "$",
       `voters × options × panel (doubled with re-votes) is at most ${MAX_SIMULATED_WORK}`,
     );
+  const publications = Object.hasOwn(o, "publications")
+    ? fraction(o["publications"], "$.publications")
+    : 0;
+  // Who publishes is drawn by the plan too, so the bound takes every voter
+  // publishing against every ballot cast.
+  const ballots = (revotes > 0 ? 2 : 1) * voters;
+  if (
+    challenges > 0 &&
+    publications > 0 &&
+    voters * ballots * options > MAX_SIMULATED_OPENING_LOOKUPS
+  )
+    throw new Refusal(
+      "$",
+      `with published openings, voters × ballots × options is at most ${MAX_SIMULATED_OPENING_LOOKUPS}`,
+    );
   const seed = integer(o["seed"], "$.seed", 0, 0xffff_ffff);
   return {
     voters,
@@ -177,6 +213,7 @@ function parse(input: unknown): Scenario {
     outage,
     challenges,
     revotes,
+    publications,
     seed,
   };
 }

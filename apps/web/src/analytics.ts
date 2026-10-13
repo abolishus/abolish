@@ -12,6 +12,7 @@ export const PAGES = [
   "/p/:code",
   "/moderation",
   "/account",
+  "/how-it-works",
   "other",
 ] as const;
 
@@ -20,7 +21,7 @@ export type Page = (typeof PAGES)[number];
 /** The template for `pathname`; anything not a known page is `other`. */
 export function pageOf(pathname: string): Page {
   if (pathname === "/" || pathname === "/polls" || pathname === "/moderation") return pathname;
-  if (pathname === "/account") return pathname;
+  if (pathname === "/account" || pathname === "/how-it-works") return pathname;
   // Any single segment: a malformed ID is still a poll page's 404, and the
   // segment itself is never kept.
   if (/^\/polls\/[^/]+$/.test(pathname)) return "/polls/:id";

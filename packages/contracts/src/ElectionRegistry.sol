@@ -74,6 +74,10 @@ contract ElectionRegistry is EventAccumulator {
         uint16 optionCount;
         /// How many cells the definition's partition has.
         uint16 cellCount;
+        /// `k_A`, the author panel's threshold; 0 with no author panel.
+        uint8 authorThreshold;
+        /// `n_A`, the author panel's size; 0 with no author panel.
+        uint8 authorPanelSize;
         /// In the order the ballot asks them.
         Question[] questions;
     }
@@ -249,14 +253,7 @@ contract ElectionRegistry is EventAccumulator {
         // starts (verifier 2.1, 2.6).
         if (def.opensAt < epoch) revert OpensBeforeEpoch(def.opensAt, epoch);
         if (block.timestamp >= def.opensAt) revert AlreadyOpen(def.opensAt, block.timestamp);
-        // The electorate is in the past: every root names an L2 block before
-        // this one, so its additions are public before anyone votes (T-08, T-13).
-        for (uint256 i; i < def.electorate.length; i++) {
-            ElectionDefinitionLib.TierGroup memory g = def.electorate[i];
-            if (g.rootL2Block >= block.number) {
-                revert RootNotInPast(g.tier, g.rootL2Block, block.number);
-            }
-        }
+        _requireElectorateInPast(def);
 
         // The ceremony was run for exactly this definition: the check compares
         // hashes the panel signed, never who sent the transaction (T-37, T-71).
@@ -284,6 +281,23 @@ contract ElectionRegistry is EventAccumulator {
         return abi.encode(n, t, hash, definition);
     }
 
+    /// The electorate is in the past: every root names an L2 block before
+    /// this one, so its additions are public before anyone votes (T-08, T-13).
+    function _requireElectorateInPast(ElectionDefinitionLib.Definition memory def) private view {
+        for (uint256 i; i < def.electorate.length; i++) {
+            ElectionDefinitionLib.TierGroup memory g = def.electorate[i];
+            if (g.rootL2Block >= block.number) {
+                revert RootNotInPast(g.tier, g.rootL2Block, block.number);
+            }
+        }
+        for (uint256 i; i < def.tiers.length; i++) {
+            ElectionDefinitionLib.TierElectorate memory t = def.tiers[i];
+            if (t.rootL2Block >= block.number) {
+                revert RootNotInPast(t.tier, t.rootL2Block, block.number);
+            }
+        }
+    }
+
     /// Records what the board reads for definition `h`. The definition hash
     /// names one election and is set once, so these are written once too.
     function _recordParameters(bytes32 h, ElectionDefinitionLib.Definition memory def) private {
@@ -293,17 +307,42 @@ contract ElectionRegistry is EventAccumulator {
         p.ballotVersion = def.pinVersions[1];
         p.threshold = def.threshold;
         p.panelSize = def.panelSize;
-        p.optionCount = def.optionCount;
-        // Version 1 asks one question, over all its options, by selection
-        // (plurality is the limits (0, 1)).
-        p.questions.push(Question(1, def.optionCount, def.minSelections, def.maxSelections));
-        // Version 1's cells are its tiers, one per electorate entry in order
-        // (docs/spec/election-definition.md, Tally partition).
-        p.cellCount = uint16(def.electorate.length);
+        // Version 6 only; `author-panel` and the decoder's 16-key limit keep
+        // the size within a uint8.
+        p.authorThreshold = def.authorThreshold;
+        p.authorPanelSize = uint8(def.authorKeys.length);
+        if (def.version < 5) {
+            // One question over all the options, by selection (plurality is
+            // the limits (0, 1)).
+            p.optionCount = def.optionCount;
+            p.questions.push(Question(1, def.optionCount, def.minSelections, def.maxSelections));
+        } else {
+            // `option-count` held, so the total is at most MAX_OPTIONS.
+            uint16 total;
+            for (uint256 i; i < def.questions.length; i++) {
+                ElectionDefinitionLib.Question memory q = def.questions[i];
+                total += q.optionCount;
+                p.questions
+                    .push(Question(q.method, q.optionCount, q.minSelections, q.maxSelections));
+            }
+            p.optionCount = total;
+        }
+        // The partition (docs/spec/election-definition.md, Tally partition):
+        // version 1's cells are its tiers, one per electorate entry in order;
+        // later versions' are every tier's `cells`, tier by tier. `cells`
+        // held, so there are at most 256.
         for (uint256 i; i < def.electorate.length; i++) {
             _cellTiers[h].push(def.electorate[i].tier);
             _cellRoots[h].push(def.electorate[i].root);
         }
+        for (uint256 i; i < def.tiers.length; i++) {
+            ElectionDefinitionLib.TierElectorate memory t = def.tiers[i];
+            for (uint256 j; j < t.cells.length; j++) {
+                _cellTiers[h].push(t.tier);
+                _cellRoots[h].push(t.cells[j].root);
+            }
+        }
+        p.cellCount = uint16(_cellTiers[h].length);
     }
 
     /// The current block's L1 origin (number, timestamp, hash), as the events

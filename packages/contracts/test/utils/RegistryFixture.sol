@@ -57,6 +57,7 @@ library RegistryFixture {
         view
         returns (ElectionDefinitionLib.Definition memory d)
     {
+        d.version = 1;
         d.protocolMajor = 1;
         d.pinTypes = new uint16[](9);
         d.pinVersions = new uint8[](9);
@@ -96,6 +97,129 @@ library RegistryFixture {
         d.sequencingWindow = 3600;
         d.maxSequencerDrift = 1800;
         d.displayTextCommitment = sha256("display-text");
+    }
+
+    /// P-256's generator and its double and triple, as `p256-key`s: keys any
+    /// definition may list.
+    function key(uint256 i) internal pure returns (ElectionDefinitionLib.P256Key memory) {
+        if (i == 0) {
+            return ElectionDefinitionLib.P256Key(
+                3, 0x6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296
+            );
+        }
+        if (i == 1) {
+            return ElectionDefinitionLib.P256Key(
+                3, 0x7cf27b188d034f7e8a52380304b51ac3c08969e277f21b35a60b48fc47669978
+            );
+        }
+        return ElectionDefinitionLib.P256Key(
+            2, 0x5ecbe4d1a6330a44c8f7ef951d4bf165e6c6b721efada985fb41661bc6e7fd6c
+        );
+    }
+
+    /// `template` under definition version 3, 4, 5 or 6, with each field its
+    /// layout adds: Tier 0 split into two regional cells and Tier 2 one cell
+    /// (versions 3 to 6); one receipt key (4 to 6); two questions in place of
+    /// the one (5 and 6); and a sealed everyday poll with a 2-of-3 author
+    /// panel (6). The ballot pin is the version each pairs with, 3 standing
+    /// in for version 6's, which isn't specified yet.
+    function templateV(ElectionRegistry registry, bytes32 electionId, uint8 version)
+        internal
+        view
+        returns (ElectionDefinitionLib.Definition memory d)
+    {
+        d = template(registry, electionId);
+        d.version = version;
+        d.pinVersions[0] = version;
+        d.pinVersions[1] = version < 5 ? 2 : 3;
+        d.electorate = new ElectionDefinitionLib.TierGroup[](0);
+        d.tiers = new ElectionDefinitionLib.TierElectorate[](2);
+        d.tiers[0].tier = 0;
+        d.tiers[0].rootL2Block = ROOT_BLOCK;
+        d.tiers[0].groups = new ElectionDefinitionLib.RegionGroup[](3);
+        d.tiers[0].groups[0] = ElectionDefinitionLib.RegionGroup(1, 0);
+        d.tiers[0].groups[1] = ElectionDefinitionLib.RegionGroup(2, 1);
+        d.tiers[0].groups[2] = ElectionDefinitionLib.RegionGroup(4, 0);
+        d.tiers[0].regions = new uint64[](2);
+        d.tiers[0].regions[0] = 3000;
+        d.tiers[0].regions[1] = 2000;
+        d.tiers[0].cells = new ElectionDefinitionLib.Cell[](2);
+        d.tiers[0].cells[0] = ElectionDefinitionLib.Cell(0x1234, 3000);
+        d.tiers[0].cells[1] = ElectionDefinitionLib.Cell(0x1235, 2000);
+        d.tiers[1].tier = 2;
+        d.tiers[1].rootL2Block = ROOT_BLOCK;
+        d.tiers[1].groups = new ElectionDefinitionLib.RegionGroup[](1);
+        d.tiers[1].groups[0] = ElectionDefinitionLib.RegionGroup(3, 0);
+        d.tiers[1].regions = new uint64[](1);
+        d.tiers[1].regions[0] = 800;
+        d.tiers[1].cells = new ElectionDefinitionLib.Cell[](1);
+        d.tiers[1].cells[0] = ElectionDefinitionLib.Cell(0x5678, 800);
+        if (version >= 4) {
+            d.receiptKeys = new ElectionDefinitionLib.P256Key[](1);
+            d.receiptKeys[0] = key(0);
+        }
+        if (version >= 5) {
+            d.electionType = 0;
+            d.optionCount = 0;
+            d.maxSelections = 0;
+            d.questions = new ElectionDefinitionLib.Question[](2);
+            d.questions[0] = ElectionDefinitionLib.Question(1, 3, 0, 1);
+            d.questions[1] = ElectionDefinitionLib.Question(1, 5, 2, 2);
+        }
+        if (version == 6) {
+            d.pollClass = 1;
+            d.resultsMode = 1;
+            d.authorThreshold = 2;
+            d.authorKeys = new ElectionDefinitionLib.P256Key[](3);
+            for (uint256 i; i < 3; i++) {
+                d.authorKeys[i] = key(i);
+            }
+            d.authorTranscriptHash = sha256(abi.encode("author transcript", electionId));
+        }
+    }
+
+    /// The board's questions for `d` (docs/spec/contracts.md, Parameters),
+    /// written from the spec's table rather than read from the registry.
+    function questionsOf(ElectionDefinitionLib.Definition memory d)
+        internal
+        pure
+        returns (ElectionDefinitionLib.Question[] memory qs, uint256 total)
+    {
+        if (d.version >= 5) {
+            qs = d.questions;
+        } else {
+            qs = new ElectionDefinitionLib.Question[](1);
+            qs[0] =
+                ElectionDefinitionLib.Question(1, d.optionCount, d.minSelections, d.maxSelections);
+        }
+        for (uint256 i; i < qs.length; i++) {
+            total += qs[i].optionCount;
+        }
+    }
+
+    /// `d`'s partition in order: each cell's tier and root.
+    function cellsOf(ElectionDefinitionLib.Definition memory d)
+        internal
+        pure
+        returns (uint8[] memory tiers, uint256[] memory roots)
+    {
+        uint256 n = d.electorate.length;
+        for (uint256 i; i < d.tiers.length; i++) {
+            n += d.tiers[i].cells.length;
+        }
+        tiers = new uint8[](n);
+        roots = new uint256[](n);
+        uint256 c;
+        for (uint256 i; i < d.electorate.length; i++) {
+            (tiers[c], roots[c]) = (d.electorate[i].tier, d.electorate[i].root);
+            c++;
+        }
+        for (uint256 i; i < d.tiers.length; i++) {
+            for (uint256 j; j < d.tiers[i].cells.length; j++) {
+                (tiers[c], roots[c]) = (d.tiers[i].tier, d.tiers[i].cells[j].root);
+                c++;
+            }
+        }
     }
 
     /// Encodes `d` and has the mock trustee registry record its stub with its

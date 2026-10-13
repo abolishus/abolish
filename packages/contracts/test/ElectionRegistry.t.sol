@@ -188,6 +188,163 @@ contract ElectionRegistryTest is TestBase {
         _assertParameters(lib.hash(enc), d);
     }
 
+    /// Versions 3 to 6 (docs/spec/contracts.md, Parameters): the cells are
+    /// every tier's `cells`, tier by tier; versions 5 and 6 record each
+    /// question and their total; version 6 its author panel's threshold and
+    /// size.
+    function test_RecordsEachVersionsParameters() public {
+        for (uint8 version = 3; version <= 6; version++) {
+            bytes32 id = _create();
+            ElectionDefinitionLib.Definition memory d =
+                RegistryFixture.templateV(registry, id, version);
+            bytes memory enc = RegistryFixture.approve(lib, trustees, d);
+            vm.prank(CREATOR);
+            registry.registerDefinition(enc);
+            bytes32 h = lib.hash(enc);
+            assertEq(registry.definitionHashOf(id), h, "registered");
+            _assertParameters(h, d);
+            ElectionRegistry.Parameters memory p = registry.parameters(h);
+            // The values, written out, so a wrong reading in the fixture's
+            // helpers can't hide one in the registry.
+            assertEq(p.cellCount, 3, "three cells");
+            (uint8 tier, uint256 root) = registry.cell(h, 1);
+            assertEq(tier, 0, "Tier 0's second cell");
+            assertEq(root, 0x1235, "its root");
+            (tier, root) = registry.cell(h, 2);
+            assertEq(tier, 2, "Tier 2's cell");
+            assertEq(p.optionCount, version < 5 ? 3 : 8, "T");
+            assertEq(p.questions.length, version < 5 ? 1 : 2, "questions");
+            assertEq(p.authorPanelSize, version == 6 ? 3 : 0, "author panel");
+        }
+    }
+
+    /// Fuzzed questions of a version-5 or version-6 definition: each is
+    /// recorded in order, with their total.
+    function testFuzz_QuestionsAreTheDefinitions(uint256 seed, bool v6) public {
+        bytes32 id = _create();
+        ElectionDefinitionLib.Definition memory d =
+            RegistryFixture.templateV(registry, id, v6 ? 6 : 5);
+        uint256 count = _bound(seed, 1, 32);
+        d.questions = new ElectionDefinitionLib.Question[](count);
+        uint256 budget = 64;
+        for (uint256 i; i < count; i++) {
+            uint256 r = uint256(keccak256(abi.encode(seed, i)));
+            // Leave two options for every later question.
+            uint256 m = _bound(r, 2, budget - 2 * (count - 1 - i));
+            budget -= m;
+            uint256 mx = _bound(r >> 64, 1, m);
+            d.questions[i] = ElectionDefinitionLib.Question(
+                1, uint16(m), uint16(_bound(r >> 128, 0, mx)), uint16(mx)
+            );
+        }
+        bytes memory enc = RegistryFixture.approve(lib, trustees, d);
+        vm.prank(CREATOR);
+        registry.registerDefinition(enc);
+        _assertParameters(lib.hash(enc), d);
+    }
+
+    /// A version-6 poll with no author panel records zeros for it.
+    function test_RecordsNoAuthorPanel() public {
+        bytes32 id = _create();
+        ElectionDefinitionLib.Definition memory d = RegistryFixture.templateV(registry, id, 6);
+        d.authorThreshold = 0;
+        d.authorKeys = new ElectionDefinitionLib.P256Key[](0);
+        d.authorTranscriptHash = bytes32(0);
+        bytes memory enc = RegistryFixture.approve(lib, trustees, d);
+        vm.prank(CREATOR);
+        registry.registerDefinition(enc);
+        _assertParameters(lib.hash(enc), d);
+        assertEq(registry.parameters(lib.hash(enc)).authorPanelSize, 0, "no author panel");
+    }
+
+    /// Each version's own rules are applied at registration: an ill-formed
+    /// definition of any version is refused with its rule.
+    function test_RefusesEachVersionsIllFormedDefinitions() public {
+        ElectionDefinitionLib.Rule[4] memory rules = [
+            ElectionDefinitionLib.Rule.Cells,
+            ElectionDefinitionLib.Rule.ReceiptKeys,
+            ElectionDefinitionLib.Rule.Selections,
+            ElectionDefinitionLib.Rule.AuthorPanel
+        ];
+        for (uint8 version = 3; version <= 6; version++) {
+            bytes32 id = _create();
+            ElectionDefinitionLib.Definition memory d =
+                RegistryFixture.templateV(registry, id, version);
+            if (version == 3) d.tiers[0].cells[1].members = 1999;
+            if (version == 4) d.receiptKeys = new ElectionDefinitionLib.P256Key[](0);
+            if (version == 5) d.questions[1].minSelections = 3;
+            if (version == 6) d.authorKeys[2] = d.authorKeys[0];
+            bytes memory enc = RegistryFixture.approve(lib, trustees, d);
+            _expectRefused(
+                CREATOR,
+                enc,
+                abi.encodeWithSelector(
+                    ElectionRegistry.DefinitionIllFormed.selector, rules[version - 3]
+                )
+            );
+            _assertNoParameters(lib.hash(enc));
+        }
+    }
+
+    /// A version-4 definition listing a key that isn't on P-256 doesn't
+    /// decode, so it is never registered or archived (T-17, T-31).
+    function test_RefusesAReceiptKeyOffTheCurve() public {
+        bytes32 id = _create();
+        ElectionDefinitionLib.Definition memory d = RegistryFixture.templateV(registry, id, 4);
+        // x = 1 has no point: 1 − 3 + b isn't a square mod p.
+        d.receiptKeys[0] = ElectionDefinitionLib.P256Key(2, bytes32(uint256(1)));
+        bytes memory enc = DefinitionEncoder.encode(d);
+        uint256 at = enc.length - 33;
+        _expectRefused(
+            CREATOR,
+            enc,
+            abi.encodeWithSelector(
+                ElectionDefinitionLib.DefinitionMalformed.selector,
+                ElectionDefinitionLib.DecodeError.NonCanonical,
+                at
+            )
+        );
+    }
+
+    /// The fold at its floor, and a group shared with an earlier tier's
+    /// last group (docs/spec/election-definition.md, Regional cells; T-16,
+    /// T-01): cases the vectors don't reach.
+    function test_FoldAndGroupEdges() public {
+        bytes32 id = _create();
+        ElectionDefinitionLib.Definition memory d = RegistryFixture.templateV(registry, id, 3);
+        // Tier 0: one large region and two small ones summing to exactly the
+        // floor, so the tier is split, with the remainder as its own cell.
+        d.tiers[0].regions = new uint64[](3);
+        d.tiers[0].regions[0] = 3000;
+        d.tiers[0].regions[1] = 600;
+        d.tiers[0].regions[2] = 400;
+        d.tiers[0].groups[2].region = 2;
+        d.tiers[0].cells[1].members = 1000;
+        assertTrue(_rule(d) == ElectionDefinitionLib.Rule.None, "remainder at the floor");
+        // The remainder cell must state its regions' sum.
+        d.tiers[0].cells[1].members = 999;
+        assertTrue(_rule(d) == ElectionDefinitionLib.Rule.Cells, "remainder misstated");
+        // One member fewer: the remainder is below the floor, so the tier is
+        // one cell of every region.
+        d.tiers[0].regions[2] = 399;
+        d.tiers[0].cells[1].members = 999;
+        assertTrue(_rule(d) == ElectionDefinitionLib.Rule.Cells, "split below the floor");
+        d.tiers[0].cells = new ElectionDefinitionLib.Cell[](1);
+        d.tiers[0].cells[0] = ElectionDefinitionLib.Cell(0x1234, 3999);
+        assertTrue(_rule(d) == ElectionDefinitionLib.Rule.None, "unsplit");
+        // Tier 2 names Tier 0's largest group.
+        d.tiers[1].groups[0].groupId = 4;
+        assertTrue(_rule(d) == ElectionDefinitionLib.Rule.Electorate, "group in two tiers");
+    }
+
+    function _rule(ElectionDefinitionLib.Definition memory d)
+        internal
+        view
+        returns (ElectionDefinitionLib.Rule)
+    {
+        return lib.rule(DefinitionEncoder.encode(d));
+    }
+
     function test_AnUnregisteredHashHasNoParameters() public {
         (, bytes memory enc) = _created();
         // Approved and created, but not yet registered.
@@ -462,6 +619,28 @@ contract ElectionRegistryTest is TestBase {
         registry.registerDefinition(enc);
     }
 
+    /// The same for a tier of regional cells (versions 3 to 6): the tier's
+    /// one `root_l2_block` names a block before the registering one.
+    function test_RefusesATierRootNotInThePast() public {
+        bytes32 id = _create();
+        ElectionDefinitionLib.Definition memory d = RegistryFixture.templateV(registry, id, 5);
+        d.tiers[1].rootL2Block = uint64(block.number);
+        bytes memory enc = RegistryFixture.approve(lib, trustees, d);
+        _expectRefused(
+            CREATOR,
+            enc,
+            abi.encodeWithSelector(
+                ElectionRegistry.RootNotInPast.selector,
+                uint8(2),
+                uint64(block.number),
+                block.number
+            )
+        );
+        vm.roll(block.number + 1);
+        vm.prank(CREATOR);
+        registry.registerDefinition(enc);
+    }
+
     /// T-37: a ceremony counts only for the stub it was recorded with.
     function test_RefusesACeremonyNotRecordedForThisStub() public {
         bytes32 id = _create();
@@ -666,26 +845,32 @@ contract ElectionRegistryTest is TestBase {
 
     function _assertParameters(bytes32 h, ElectionDefinitionLib.Definition memory d) internal view {
         ElectionRegistry.Parameters memory p = registry.parameters(h);
+        (ElectionDefinitionLib.Question[] memory qs, uint256 total) = RegistryFixture.questionsOf(d);
+        (uint8[] memory cellTiers, uint256[] memory roots) = RegistryFixture.cellsOf(d);
         assertEq(p.ballotVersion, d.pinVersions[1], "ballot version");
         assertEq(p.threshold, d.threshold, "threshold");
         assertEq(p.panelSize, d.panelSize, "panel size");
-        assertEq(p.optionCount, d.optionCount, "option count");
-        assertEq(p.cellCount, d.electorate.length, "cell count");
-        assertEq(p.questions.length, 1, "one question");
-        assertEq(p.questions[0].method, 1, "selection");
-        assertEq(p.questions[0].optionCount, d.optionCount, "question options");
-        assertEq(p.questions[0].minSelections, d.minSelections, "min selections");
-        assertEq(p.questions[0].maxSelections, d.maxSelections, "max selections");
-        uint8[] memory tiers = registry.cellTiers(h);
-        assertEq(tiers.length, d.electorate.length, "cell tiers");
-        for (uint256 i; i < d.electorate.length; i++) {
-            assertEq(tiers[i], d.electorate[i].tier, "tiers");
-            (uint8 tier, uint256 root) = registry.cell(h, i);
-            assertEq(tier, d.electorate[i].tier, "tier");
-            assertEq(root, d.electorate[i].root, "root");
+        assertEq(p.authorThreshold, d.authorThreshold, "author threshold");
+        assertEq(p.authorPanelSize, d.authorKeys.length, "author panel size");
+        assertEq(p.optionCount, total, "option count");
+        assertEq(p.cellCount, cellTiers.length, "cell count");
+        assertEq(p.questions.length, qs.length, "questions");
+        for (uint256 i; i < qs.length; i++) {
+            assertEq(p.questions[i].method, qs[i].method, "method");
+            assertEq(p.questions[i].optionCount, qs[i].optionCount, "question options");
+            assertEq(p.questions[i].minSelections, qs[i].minSelections, "min selections");
+            assertEq(p.questions[i].maxSelections, qs[i].maxSelections, "max selections");
         }
-        (bool ok,) = address(registry)
-            .staticcall(abi.encodeCall(ElectionRegistry.cell, (h, d.electorate.length)));
+        uint8[] memory tiers = registry.cellTiers(h);
+        assertEq(tiers.length, cellTiers.length, "cell tiers");
+        for (uint256 i; i < cellTiers.length; i++) {
+            assertEq(tiers[i], cellTiers[i], "tiers");
+            (uint8 tier, uint256 root) = registry.cell(h, i);
+            assertEq(tier, cellTiers[i], "tier");
+            assertEq(root, roots[i], "root");
+        }
+        (bool ok,) =
+            address(registry).staticcall(abi.encodeCall(ElectionRegistry.cell, (h, tiers.length)));
         assertTrue(!ok, "a cell past the last");
     }
 
@@ -694,6 +879,8 @@ contract ElectionRegistryTest is TestBase {
         assertEq(p.ballotVersion, 0, "ballot version");
         assertEq(p.threshold, 0, "threshold");
         assertEq(p.panelSize, 0, "panel size");
+        assertEq(p.authorThreshold, 0, "author threshold");
+        assertEq(p.authorPanelSize, 0, "author panel size");
         assertEq(p.optionCount, 0, "option count");
         assertEq(p.cellCount, 0, "cell count");
         assertEq(p.questions.length, 0, "questions");

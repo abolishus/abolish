@@ -7,11 +7,16 @@ import {DefinitionEncoder, DefinitionHarness} from "./utils/DefinitionHarness.so
 import {TestBase} from "./utils/Vm.sol";
 
 /// The election definition's decoder, rules and hashes, and the election
-/// identifier, against docs/spec/vectors/election-definition.json and
-/// election-registry.json, which independent Python implementations produced
-/// (T-31, T-34, T-17). Every expected value comes from the files.
+/// identifier, against docs/spec/vectors/election-definition.json (and its
+/// files for versions 3 to 6) and election-registry.json, which independent
+/// Python implementations produced (T-31, T-34, T-17). Every expected value
+/// comes from the files.
 contract ElectionDefinitionVectorsTest is TestBase {
     string internal constant DEFINITIONS = "../../docs/spec/vectors/election-definition.json";
+    string internal constant DEFINITIONS_V3 = "../../docs/spec/vectors/election-definition-v3.json";
+    string internal constant DEFINITIONS_V4 = "../../docs/spec/vectors/election-definition-v4.json";
+    string internal constant DEFINITIONS_V5 = "../../docs/spec/vectors/election-definition-v5.json";
+    string internal constant DEFINITIONS_V6 = "../../docs/spec/vectors/election-definition-v6.json";
     string internal constant REGISTRY = "../../docs/spec/vectors/election-registry.json";
 
     DefinitionHarness internal lib;
@@ -41,30 +46,89 @@ contract ElectionDefinitionVectorsTest is TestBase {
     /// Every vector: rejected with its decode error, or accepted with its
     /// hash, stub hash and well-formedness label, and re-encoding to itself.
     function test_DefinitionVectors() public view {
-        string memory json = vm.readFile(DEFINITIONS);
+        _checkFile(DEFINITIONS, 1);
+    }
+
+    function test_DefinitionV3Vectors() public view {
+        _checkFile(DEFINITIONS_V3, 3);
+    }
+
+    function test_DefinitionV4Vectors() public view {
+        _checkFile(DEFINITIONS_V4, 4);
+    }
+
+    function test_DefinitionV5Vectors() public view {
+        _checkFile(DEFINITIONS_V5, 5);
+    }
+
+    function test_DefinitionV6Vectors() public view {
+        _checkFile(DEFINITIONS_V6, 6);
+    }
+
+    /// The rules each file exercises, so a vector file that stopped covering
+    /// one (or a mapping that stopped reading it) fails here.
+    function test_VectorsCoverEveryRule() public view {
+        bool[17] memory seen;
+        string[5] memory files =
+            [DEFINITIONS, DEFINITIONS_V3, DEFINITIONS_V4, DEFINITIONS_V5, DEFINITIONS_V6];
+        for (uint256 f; f < 5; f++) {
+            string memory json = vm.readFile(files[f]);
+            for (uint256 i; vm.keyExistsJson(json, _key(i, "")); i++) {
+                if (vm.keyExistsJson(json, _key(i, ".illFormed"))) {
+                    seen[uint256(_rule(_str(json, _key(i, ".illFormed"))))] = true;
+                }
+            }
+        }
+        for (uint256 r = 1; r < 17; r++) {
+            assertTrue(seen[r], string.concat("no vector for rule ", vm.toString(r)));
+        }
+    }
+
+    /// A file's vectors, each read by the version its header names. A file
+    /// written before a later version existed labels that version's byte
+    /// `unknown-version`; the decoder now reads such bytes under the later
+    /// layout, so those are only checked to be refused (the later file
+    /// labels the same bytes, as `definition-v4-labelled-five` does).
+    function _checkFile(string memory path, uint8 version) internal view {
+        string memory json = vm.readFile(path);
         uint256 i;
         uint256 rejected;
+        uint256 accepted;
         for (; vm.keyExistsJson(json, _key(i, "")); i++) {
             bytes memory b = _bytes(json, _key(i, ".encoding"));
+            string memory id = _str(json, _key(i, ".id"));
             if (vm.keyExistsJson(json, _key(i, ".error"))) {
-                _assertDecodeError(b, _str(json, _key(i, ".error")), _str(json, _key(i, ".id")));
+                string memory code = _str(json, _key(i, ".error"));
+                if (
+                    keccak256(bytes(code)) == keccak256("unknown-version") && b.length > 2
+                        && _known(uint8(b[2]))
+                ) {
+                    assertTrue(uint8(b[2]) > version, id);
+                    _assertRefused(b, id);
+                } else {
+                    _assertDecodeError(b, code, id);
+                }
                 rejected++;
                 continue;
             }
-            assertEq(lib.hash(b), _bytes32(json, _key(i, ".hash")), _str(json, _key(i, ".id")));
-            assertEq(
-                lib.stubHash(b), _bytes32(json, _key(i, ".stubHash")), _str(json, _key(i, ".id"))
-            );
+            assertEq(lib.decode(b).version, version, id);
+            assertEq(lib.hash(b), _bytes32(json, _key(i, ".hash")), id);
+            assertEq(lib.stubHash(b), _bytes32(json, _key(i, ".stubHash")), id);
             ElectionDefinitionLib.Rule expected = vm.keyExistsJson(json, _key(i, ".illFormed"))
                 ? _rule(_str(json, _key(i, ".illFormed")))
                 : ElectionDefinitionLib.Rule.None;
-            assertTrue(lib.rule(b) == expected, _str(json, _key(i, ".id")));
+            assertTrue(lib.rule(b) == expected, id);
             assertTrue(
                 keccak256(DefinitionEncoder.encode(lib.decode(b))) == keccak256(b),
-                "re-encoding differs"
+                string.concat("re-encoding differs: ", id)
             );
+            accepted++;
         }
-        assertTrue(i > 0 && rejected > 0 && rejected < i, "vector coverage");
+        assertTrue(accepted > 0 && rejected > 0, "vector coverage");
+    }
+
+    function _known(uint8 version) internal pure returns (bool) {
+        return version == 1 || (version >= 3 && version <= 6);
     }
 
     function test_ElectionIdVectors() public view {
@@ -141,6 +205,21 @@ contract ElectionDefinitionVectorsTest is TestBase {
         }
     }
 
+    function _assertRefused(bytes memory b, string memory id) internal view {
+        try lib.decode(b) {
+            revert(string.concat("accepted ", id));
+        } catch (bytes memory reason) {
+            bytes4 selector;
+            assembly ("memory-safe") {
+                selector := mload(add(reason, 0x20))
+            }
+            assertTrue(
+                selector == ElectionDefinitionLib.DefinitionMalformed.selector,
+                string.concat("unexpected revert for ", id)
+            );
+        }
+    }
+
     function _decodeError(string memory code)
         internal
         pure
@@ -179,12 +258,18 @@ contract ElectionDefinitionVectorsTest is TestBase {
         if (c == keccak256("profile-order")) return ElectionDefinitionLib.Rule.ProfileOrder;
         if (c == keccak256("profile-types")) return ElectionDefinitionLib.Rule.ProfileTypes;
         if (c == keccak256("profile-version")) return ElectionDefinitionLib.Rule.ProfileVersion;
+        if (c == keccak256("questions")) return ElectionDefinitionLib.Rule.Questions;
         if (c == keccak256("option-count")) return ElectionDefinitionLib.Rule.OptionCount;
         if (c == keccak256("selections")) return ElectionDefinitionLib.Rule.Selections;
         if (c == keccak256("electorate")) return ElectionDefinitionLib.Rule.Electorate;
+        if (c == keccak256("cells")) return ElectionDefinitionLib.Rule.Cells;
         if (c == keccak256("panel")) return ElectionDefinitionLib.Rule.Panel;
         if (c == keccak256("chain")) return ElectionDefinitionLib.Rule.Chain;
         if (c == keccak256("timing")) return ElectionDefinitionLib.Rule.Timing;
+        if (c == keccak256("receipt-keys")) return ElectionDefinitionLib.Rule.ReceiptKeys;
+        if (c == keccak256("results")) return ElectionDefinitionLib.Rule.Results;
+        if (c == keccak256("civic-sealed")) return ElectionDefinitionLib.Rule.CivicSealed;
+        if (c == keccak256("author-panel")) return ElectionDefinitionLib.Rule.AuthorPanel;
         revert(string.concat("unknown rule ", code));
     }
 

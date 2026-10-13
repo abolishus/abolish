@@ -924,8 +924,12 @@ describe("board checks under board-entry versions 3, 4 and 5", () => {
   ] as const)(
     "relabelled down, a version-%i board is refused as version %i at its first %s",
     (version, lower, _name, added) => {
+      // Only boards carrying the type the version adds, so the rule is always exercised.
+      const carrying = boardUnder(version).filter(({ entries }) =>
+        entries.some((b) => (((b[51] as number) << 8) | (b[52] as number)) === added),
+      );
       run(
-        fc.property(boardUnder(version), ({ entries, last }) => {
+        fc.property(carrying, ({ entries, last }) => {
           const relabelled = entries.map((b) =>
             Uint8Array.of(b[0] as number, b[1] as number, lower, ...b.slice(3)),
           );
@@ -938,21 +942,19 @@ describe("board checks under board-entry versions 3, 4 and 5", () => {
           } catch (e) {
             caught = e;
           }
-          if (first === -1) expect(caught).toBeUndefined();
-          else {
-            expect(caught).toBeInstanceOf(BoardError);
-            expect((caught as BoardError).at).toEqual({
-              entry: first,
-              decodeError: "unexpected-record-type",
-            });
-            // Anchored as it is, the relabelled copy still fails verifyBoard
-            // under the lower version, by its decoding, not its bytes.
-            const segments = Array.from({ length: last + 1 }, (_, s) => s);
-            const anchors = [...copyCheckpoints(ELECTION, relabelled, segments).values()].map(
-              anchorOf,
-            );
-            expect(verdictUnder(relabelled, anchors, last, lower)).toBe("decode");
-          }
+          expect(first).not.toBe(-1);
+          expect(caught).toBeInstanceOf(BoardError);
+          expect((caught as BoardError).at).toEqual({
+            entry: first,
+            decodeError: "unexpected-record-type",
+          });
+          // Anchored as it is, the relabelled copy still fails verifyBoard
+          // under the lower version, by its decoding, not its bytes.
+          const segments = Array.from({ length: last + 1 }, (_, s) => s);
+          const anchors = [...copyCheckpoints(ELECTION, relabelled, segments).values()].map(
+            anchorOf,
+          );
+          expect(verdictUnder(relabelled, anchors, last, lower)).toBe("decode");
         }),
       );
     },

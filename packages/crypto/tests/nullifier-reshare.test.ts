@@ -36,6 +36,7 @@ import {
   nullifierReshareApprovalMessage,
   type NullifierReshareCheck,
   nullifierReshareContext,
+  nullifierReshareCounts,
   nullifierReshareDealerQuorum,
   nullifierReshareKeyId,
   type NullifierReshareParams,
@@ -508,6 +509,27 @@ describe("nullifier-reshare.json", () => {
     expect(nullifierReshareDealerQuorum(scope)).toBe(3);
     expect(vectorOf("honest").result.dealers?.length).toBe(3);
     expect(vectorOf("two-dealers").result.dealers?.length).toBe(2);
+    // Counting applies the dealer quorum itself: honest counts with every new
+    // seat's approval, two-dealers doesn't however many approve it.
+    const honest = checkNullifierReshareTranscript(scope, hex(vectorOf("honest").transcript), 1);
+    if (!honest.ok) throw new Error("expected a valid transcript");
+    expect(nullifierReshareCounts(scope, honest, all)).toBe(true);
+    expect(nullifierReshareCounts(scope, honest, all.slice(0, 2))).toBe(false);
+    const two = vectorOf("two-dealers");
+    const twoCheck = checkNullifierReshareTranscript(scope, hex(two.transcript), 1);
+    if (!twoCheck.ok) throw new Error("expected a valid transcript");
+    const twoApprovals = [1, 2, 3, 4].map((index) => ({
+      index,
+      signature: approveNullifierReshare(
+        scope,
+        secrets[index - 1] as Uint8Array,
+        index,
+        twoCheck,
+        twoCheck.deadline - 1000n,
+      ),
+    }));
+    expect(reshareApprovingSeats(scope, twoCheck.keyId, twoApprovals)).toEqual([1, 2, 3, 4]);
+    expect(nullifierReshareCounts(scope, twoCheck, twoApprovals)).toBe(false);
     // An old seat's key signs nothing for the new panel.
     expect(() =>
       approveNullifierReshare(

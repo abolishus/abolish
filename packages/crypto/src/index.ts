@@ -548,6 +548,7 @@ export {
   nullifierReshareApprovalMessage,
   type NullifierReshareCheck,
   nullifierReshareContext,
+  nullifierReshareCounts,
   nullifierReshareDealerQuorum,
   type NullifierReshareErrorCode,
   nullifierReshareKeyId,

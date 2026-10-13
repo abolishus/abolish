@@ -1023,6 +1023,26 @@ export function nullifierReshareDealerQuorum(scope: NullifierReshareScope): numb
   return Math.max(s.old.threshold, s.old.keys.length - 1);
 }
 
+/**
+ * Whether a successor counts on the approvals given (docs/spec/
+ * nullifier-reshare.md, Approval): its check gave at least
+ * `max(k, n − 1)` qualified dealers, the old panel's consent, and `q'`
+ * distinct new seats approved it. The dealer quorum is checked here, not only
+ * by honest approvers, because a panel of an insider's own keys has no honest
+ * seat to check it. That every approval was recorded by the run's deadline is
+ * the registry's to check (part 2b-4).
+ */
+export function nullifierReshareCounts(
+  scope: NullifierReshareScope,
+  check: Extract<NullifierReshareCheck, { ok: true }>,
+  approvals: readonly { readonly index: number; readonly signature: Uint8Array }[],
+): boolean {
+  return (
+    check.dealers.length >= nullifierReshareDealerQuorum(scope) &&
+    reshareApprovingSeats(scope, check.keyId, approvals).length >= nullifierReshareQuorum(scope)
+  );
+}
+
 /** `q' = max(k', n' − 1)`: the approvals a successor needs, and the qualified new seats an honest seat requires. */
 export function nullifierReshareQuorum(scope: NullifierReshareScope): number {
   const s = scopeOf(scope);

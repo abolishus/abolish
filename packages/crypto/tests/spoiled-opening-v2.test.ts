@@ -493,5 +493,8 @@ describe("opening version 2", () => {
     const record = decodeOpening(honest, 2);
     const result = checkChallengeOpeningV2(four, { ...record, cell: four.cells.length, vss: [] });
     expect(codeOf(result)).toBe("opening-cell");
+    // Nor is any cell that isn't a u8 a decoder could have returned.
+    for (const cell of [-1, 0.5])
+      expect(codeOf(checkChallengeOpeningV2(four, { ...record, cell }))).toBe("opening-cell");
   });
 });

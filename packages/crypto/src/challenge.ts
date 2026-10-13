@@ -388,8 +388,9 @@ export interface OpenedCommitments {
  * so a verifier tests each ballot against it with no group operations (T-52).
  * It takes an opening of either version that passed `checkChallengeOpening`
  * or `checkChallengeOpeningV2`, whose share hashes give `n`; a version-2
- * opening opens commitments whatever their ballot's cell (Opening version 2). Randomness derived from revealed scalars by a chosen relation
- * isn't caught: a residual.
+ * opening opens commitments whatever their ballot's cell (Opening version
+ * 2). Randomness derived from revealed scalars by a chosen relation isn't
+ * caught: a residual.
  */
 export function openedCommitments(
   opening: SpoiledBallotOpening | SpoiledBallotOpeningV2,
@@ -787,7 +788,8 @@ export function checkChallengeOpeningV2(
     seats,
   } = opening;
   if (!equalBytes(claimed, definitionHash)) return { ok: false, code: "opening-stray" };
-  if (cell >= election.cells.length) return { ok: false, code: "opening-cell" };
+  if (!Number.isInteger(cell) || cell < 0 || cell >= election.cells.length)
+    return { ok: false, code: "opening-cell" };
   const questions = questionsOf(election);
   const failed = checkOpenedCore(
     definitionHash,

@@ -329,14 +329,14 @@ def main(out_dir):
         keys=registered_of(d4_, t4, s4),
     )
 
-    # Spoiled-ballot opening version 2, which opens version-2 cores and which
-    # this verifier doesn't read yet: 2.3 is unsupported, never failed, and
-    # the tally openings are still judged.
+    # Spoiled-ballot opening version 2, which opens version-2 cores: 2.3's
+    # combination passes beside another pin than the typical profile's, and
+    # the tally openings are judged as under it.
     do2, to2, so2 = election_for("definition-v3-opening-2", [1, 2, 3], base=rc.TYPICAL, opening_version=2)
     open_o2, _ = opener(do2, so2)
     c = case(
         "v3-opening-2",
-        "A version-3 definition pinning spoiled-ballot opening version 2, which 2.3 leaves unsupported: an opening of cell 3 by seat 1 (undecided) and one of cell 4 by seat 2 (stray). 7.4 is unverifiable.",
+        "A version-3 definition pinning spoiled-ballot opening version 2, whose pairing with ballot version 2 passes 2.3: an opening of cell 3 by seat 1 (undecided) and one of cell 4 by seat 2 (stray). 7.4 is unverifiable.",
         [open_o2(3, 1), open_o2(4, 2)],
         "unverifiable",
         defn=do2,
@@ -345,7 +345,7 @@ def main(out_dir):
     )
     # This case also gives 2.3's row, to show 7.4 runs beside it.
     c["expected"]["2.3"] = vc.combination(do2)
-    assert c["expected"]["2.3"] == outcome("unverifiable", "unsupported-version", {}), c["expected"]["2.3"]
+    assert c["expected"]["2.3"] == vc.NOT_IMPLEMENTED, c["expected"]["2.3"]
     assert [o.get("cell") for o in c["tallies"]] == [3, None]
 
     dq3, tq3, _ = election_for("quorum-v3", [1, 2, 3, 4], {"answers": two_bad}, base=rc.TYPICAL)

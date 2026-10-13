@@ -1,4 +1,10 @@
-export { contract, type Contract, REMOVAL_REASONS, RESTORE_REASONS } from "./contract.ts";
+export {
+  contract,
+  type Contract,
+  MAX_SHORT_CODE_LENGTH,
+  REMOVAL_REASONS,
+  RESTORE_REASONS,
+} from "./contract.ts";
 export {
   Hash32,
   hexBytes,

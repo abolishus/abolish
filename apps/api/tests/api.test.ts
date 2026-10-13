@@ -18,16 +18,20 @@ import {
   IDENTITY_BACKUP_ENVELOPE_LENGTH,
   IDENTITY_BACKUP_RETENTION_MONTHS,
   MAX_REPORT_QUEUE,
+  MAX_SHORT_CODE_LENGTH as CORE_MAX_SHORT_CODE_LENGTH,
   moderate,
   readBoard,
   readReportQueue,
+  recordRegistration,
   REMOVAL_REASONS as CORE_REMOVAL_REASONS,
   RESTORE_REASONS as CORE_RESTORE_REASONS,
+  shortCode,
   storeDefinition,
 } from "@abolishus/core";
 import {
   IDENTITY_BACKUP_ENVELOPE,
   IDENTITY_BACKUP_RETENTION_MONTHS as CONTRACT_RETENTION_MONTHS,
+  MAX_SHORT_CODE_LENGTH,
   REMOVAL_REASONS,
   RESTORE_REASONS,
 } from "@abolishus/api-contract";
@@ -179,6 +183,119 @@ describe("elections.list (T-68)", () => {
       expect((await get("/elections", query)).status, JSON.stringify(query)).toBe(400);
     const r = await get("/elections", { after: "ff".repeat(32), limit: "1" });
     expect(await json(r)).toEqual({ elections: [] });
+  });
+});
+
+describe("elections.resolveCode (P2-18; T-49, T-53, T-67)", () => {
+  /** Registration positions in increasing order, as the indexer records them. */
+  let block = 1n;
+
+  /** A stored election whose registration is recorded, with its definition hash's code. */
+  async function registered() {
+    const e = await election();
+    const { definitionHash } = await storeDefinition(app, e.definition);
+    await recordRegistration(app, {
+      electionId: e.id,
+      definitionHash,
+      l2Block: block++,
+      logIndex: 0,
+    });
+    return { ...e, definitionHash, code: shortCode(definitionHash) };
+  }
+
+  const resolve = (code: string) => get("/elections/by-code", { code });
+
+  test("the contract's longest code is core's", () => {
+    expect(MAX_SHORT_CODE_LENGTH).toBe(CORE_MAX_SHORT_CODE_LENGTH);
+  });
+
+  test("resolves a poll's code in any forgiven form to its election and canonical code", async () => {
+    const e = await registered();
+    const forms = [
+      e.code,
+      e.code.toUpperCase(),
+      e.code.replaceAll("0", "o").replaceAll("1", "l"),
+      e.code.replaceAll("1", "I").replaceAll("0", "O"),
+    ];
+    for (const code of forms) {
+      const r = await resolve(code);
+      expect(r.status).toBe(200);
+      expect(await json(r)).toEqual({ electionId: e.idHex, code: e.code });
+    }
+  });
+
+  test("a later poll ground to an earlier poll's prefix never takes its code", async () => {
+    const first = await registered();
+    // A registered definition this server didn't store (one it refused, say)
+    // with the same first 255 bits.
+    const ground = b32();
+    const collided = first.definitionHash.slice();
+    collided[31] = (collided[31] ?? 0) ^ 1;
+    await recordRegistration(app, {
+      electionId: ground,
+      definitionHash: collided,
+      l2Block: block++,
+      logIndex: 0,
+    });
+    expect(await json(await resolve(first.code))).toEqual({
+      electionId: first.idHex,
+      code: first.code,
+    });
+    expect((await resolve(shortCode(collided, 8))).status).toBe(404);
+    const full = shortCode(collided, MAX_SHORT_CODE_LENGTH);
+    expect(await json(await resolve(full))).toEqual({ electionId: hex(ground), code: full });
+  });
+
+  test("delisted and hidden polls resolve as they do by ID", async () => {
+    const delisted = await registered();
+    const hidden = await registered();
+    await moderate(app, delisted.id, { action: "delist", reason: "spam", moderator: "mod-1" });
+    await moderate(app, hidden.id, { action: "hide", reason: "illegal", moderator: "mod-1" });
+    for (const e of [delisted, hidden])
+      expect(await json(await resolve(e.code))).toEqual({ electionId: e.idHex, code: e.code });
+  });
+
+  test("unknown codes, unregistered polls and malformed input are CODE_NOT_FOUND, never quoted", async () => {
+    const unregistered = await election();
+    const { definitionHash } = await storeDefinition(app, unregistered.definition);
+    const inputs = [
+      shortCode(definitionHash),
+      "zzzzzzz",
+      "zuzzzzz",
+      "abc",
+      "abc-def",
+      "0".repeat(MAX_SHORT_CODE_LENGTH + 1),
+      `${"0".repeat(51)}1`,
+      "",
+    ];
+    for (const code of inputs) {
+      const r = await resolve(code);
+      expect(r.status).toBe(404);
+      const body = await r.text();
+      expect(JSON.parse(body)["code"]).toBe("CODE_NOT_FOUND");
+      if (code.length > 0) expect(body).not.toContain(code);
+    }
+  });
+
+  test("input past the transport bound is BAD_REQUEST, never quoted", async () => {
+    const code = "q".repeat(65);
+    const r = await resolve(code);
+    expect(r.status).toBe(400);
+    expect(await r.text()).not.toContain("qqqqqqq");
+  });
+
+  test("the request log records the route and never the code", async () => {
+    const e = await registered();
+    logs.length = 0;
+    await resolve(e.code.toUpperCase());
+    await resolve("zuzzzzz");
+    await new Promise((r) => setTimeout(r, 50));
+    expect(logs).toEqual([
+      expect.objectContaining({ route: "GET /elections/by-code", status: 200 }),
+      expect.objectContaining({ route: "GET /elections/by-code", status: 404 }),
+    ]);
+    const text = JSON.stringify(logs).toLowerCase();
+    for (const value of [e.code, e.idHex, "zuzzzzz"]) expect(text).not.toContain(value);
   });
 });
 

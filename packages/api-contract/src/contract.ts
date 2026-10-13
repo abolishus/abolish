@@ -70,6 +70,30 @@ const listElections = oc
   .input(z.strictObject({ after: z.optional(Hash32), limit: PageSize }))
   .output(z.strictObject({ elections: z.array(Hash32).check(z.maxLength(MAX_PAGE)) }));
 
+/** The longest short code (docs/design/sharing.md); a test ties this copy to `@abolishus/core`. */
+export const MAX_SHORT_CODE_LENGTH = 52;
+
+/** The most characters of input `elections.resolveCode` reads as a possible code. */
+const MAX_CODE_INPUT = 64;
+
+/** A short code in its canonical form: lower-case Crockford base32, 7 to 52 characters. */
+const ShortCode = z
+  .string()
+  .check(z.regex(new RegExp(`^[0-9a-hjkmnp-tv-z]{7,${MAX_SHORT_CODE_LENGTH}}$`)));
+
+const resolveCode = oc
+  .route({
+    method: "GET",
+    path: "/elections/by-code",
+    summary: "The poll a short code names",
+    description: `The election ID of the poll that owns \`code\`, and the code in its canonical form. A code is a prefix of a poll's definition hash in lower-case Crockford base32 (docs/design/sharing.md, Short links): input is case-insensitive, with \`o\` read as \`0\` and \`i\` and \`l\` as \`1\`. Among registered polls in registration order, the earliest whose hash has a 7-character prefix owns it, and a later poll whose prefix is taken gets one more character than it shares with any earlier poll, so a code never moves to a later poll. Anything that isn't a code (up to ${MAX_CODE_INPUT} characters; longer input is a \`BAD_REQUEST\`), and any code no poll owns, is \`CODE_NOT_FOUND\`, which never quotes the input. Delisted and hidden polls resolve as they do by ID. The answer is a claim: anyone can recompute it from the election registry's events, and callers check the definition they then fetch against the registry (T-34, T-49).`,
+    tags: ["elections"],
+  })
+  .errors({ CODE_NOT_FOUND: { status: 404, message: "No poll owns this code." } })
+  // A transport bound only: what isn't a code within it is CODE_NOT_FOUND (T-52).
+  .input(z.strictObject({ code: z.string().check(z.maxLength(MAX_CODE_INPUT, { abort: true })) }))
+  .output(z.strictObject({ electionId: Hash32, code: ShortCode }));
+
 const getHead = oc
   .route({
     method: "GET",
@@ -307,7 +331,7 @@ const deleteBackup = oc
 
 /** The public API contract. `apps/api` implements it; clients call it. */
 export const contract = {
-  elections: { list: listElections, getDefinition },
+  elections: { list: listElections, getDefinition, resolveCode },
   board: { getHead, getEntries, getInclusionProof, getConsistencyProof },
   ballots: { submit: submitBallot },
   moderation: { getLog: getModerationLog, getStatus: getModerationStatus, report: reportPoll },

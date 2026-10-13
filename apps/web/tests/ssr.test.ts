@@ -270,9 +270,19 @@ describe("every page", () => {
         else expect(attrs).toContain(`nonce="${nonce}"`);
       }
       expect(html).not.toMatch(/\son[a-z]+="/);
+      // The CSP's style-src 'self' would block an inline style (P2-19).
+      expect(html).not.toMatch(/\sstyle="/);
       expect(html).not.toMatch(/(?:src|href)="(?:https?:)?\/\//);
     },
   );
+
+  test("the frame marks the page the visitor is on, and only that one", async () => {
+    const html = await (await get("/polls")).text();
+    const current = [...html.matchAll(/<a\b[^>]*aria-current="page"[^>]*>/g)].map((m) => m[0]);
+    expect(current).toHaveLength(1);
+    expect(current[0]).toContain('href="/polls"');
+    expect(await (await get("/nowhere")).text()).not.toContain('aria-current="page"');
+  });
 
   test("each response gets a nonce of its own", async () => {
     const nonces = new Set<string>();
@@ -356,7 +366,7 @@ describe("poll page", () => {
   ])("%s is not found", async (_, id) => {
     const response = await get(`/polls/${id}`);
     expect(response.status).toBe(404);
-    expect(await response.text()).toContain("knows no poll or page");
+    expect(await response.text()).toContain("There is no page at this address");
   });
 });
 
@@ -431,7 +441,7 @@ describe("short links", () => {
     expect(response.headers.get("location")).toBeNull();
     expect(response.headers.get("cache-control")).toBe("no-store");
     const html = await response.text();
-    expect(html).toContain("knows no poll or page");
+    expect(html).toContain("There is no page at this address");
     expect(html).not.toContain(code());
   });
 
@@ -604,7 +614,7 @@ describe("failures", () => {
       expect(response.headers.get("location")).toBeNull();
       expect(response.headers.get("cache-control")).toBe("no-store");
       const html = await response.text();
-      expect(html).toContain("Something went wrong");
+      expect(html).toContain("Something went wrong on our side");
       expect(html).not.toContain("127.0.0.1");
       expect(html).not.toMatch(/ECONNREFUSED|ECONNRESET|fetch failed|socket hang up/);
     } finally {
@@ -618,7 +628,7 @@ describe("failures", () => {
       const response = await get(`/polls/${ID}`);
       expect(response.status).toBe(500);
       const html = await response.text();
-      expect(html).toContain("Something went wrong");
+      expect(html).toContain("Something went wrong on our side");
       expect(html).not.toContain("127.0.0.1");
       expect(html).not.toMatch(/ECONNREFUSED|fetch failed/);
       expect(html).not.toMatch(/ECONNRESET|socket hang up/);

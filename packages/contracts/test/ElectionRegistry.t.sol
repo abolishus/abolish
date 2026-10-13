@@ -158,6 +158,40 @@ contract ElectionRegistryTest is TestBase {
         assertEq(logs[1].topics[1], id, "election id topic");
     }
 
+    /// Any origin the predeploy reports, the extremes included, reaches each
+    /// event exactly as reported: the registry neither checks nor alters it
+    /// (the verifier does, 4.4), and the accumulator covers it.
+    function testFuzz_EventsCarryTheReportedOrigin(uint64 number, uint64 timestamp, bytes32 hash)
+        public
+    {
+        l1.set(number, timestamp, hash);
+        vm.recordLogs();
+        (bytes32 id, bytes memory enc) = _created();
+        vm.prank(CREATOR);
+        registry.registerDefinition(enc);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        assertTrue(
+            keccak256(logs[0].data) == keccak256(abi.encode(uint64(0), number, timestamp, hash)),
+            "creation data"
+        );
+        assertTrue(
+            keccak256(logs[1].data) == keccak256(abi.encode(number, timestamp, hash, enc)),
+            "registration data"
+        );
+        assertEq(logs[1].topics[1], id, "election id topic");
+        _assertAccumulated(logs);
+    }
+
+    function test_EventsCarryAZeroOrigin() public {
+        testFuzz_EventsCarryTheReportedOrigin(0, 0, bytes32(0));
+    }
+
+    function test_EventsCarryAMaximalOrigin() public {
+        testFuzz_EventsCarryTheReportedOrigin(
+            type(uint64).max, type(uint64).max, bytes32(type(uint256).max)
+        );
+    }
+
     /// With no predeploy (a chain that isn't an OP Stack chain, or a test
     /// that forgot it) nothing is created or registered, so no event ever
     /// lacks its origin.

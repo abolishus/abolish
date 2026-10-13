@@ -11,7 +11,7 @@ import {
   encode,
   encryptShares,
   identityKey,
-  intake,
+  intakeShares,
   type IntakeCode,
   type KemKeyPair,
   kemKeygen,
@@ -182,7 +182,7 @@ describe("share-receipt.json", () => {
     (_, v) => {
       const b = encryptedBallot(v.ballot);
       const vote = decode(COMMITTED_VOTE, hex(b.committedVote as string));
-      const r = intake(
+      const r = intakeShares(
         validityContext(b.context),
         seatKeys(b.panel as string, v.seat),
         vote,
@@ -218,7 +218,7 @@ describe("share-receipt.json", () => {
   );
 
   test.each(vectors.intakeFailures.map((v) => [v.id, v] as const))("intake fails: %s", (_, v) => {
-    const r = intake(
+    const r = intakeShares(
       validityContext(v.context),
       seatKeys("panel-3", v.seat),
       decode(COMMITTED_VOTE, hex(v.committedVote)),
@@ -325,7 +325,7 @@ describe("properties", () => {
           const { sharing, enc, vote } = castBallot(ctx, votes);
           for (let seat = 1; seat <= ctx.panelSize; seat++) {
             const ct = enc.ciphertexts[seat - 1] as Uint8Array;
-            const r = intake(ctx, keysOf(seat), vote, ct);
+            const r = intakeShares(ctx, keysOf(seat), vote, ct);
             if (!r.ok) throw new Error(`intake failed: ${r.code}`);
             expect(bytesHex(encode(SHARES, r.shares))).toBe(
               bytesHex(encode(SHARES, sharing.shares[seat - 1] as never)),
@@ -344,7 +344,7 @@ describe("properties", () => {
               checkShareReceipt(SIGNERS, { ...ctx, tier: ctx.tier ^ 1 }, vote, seat, r.receipt),
             ).toBe(false);
             // Delivered again, the same receipt (RFC 6979).
-            const again = intake(ctx, keysOf(seat), vote, ct);
+            const again = intakeShares(ctx, keysOf(seat), vote, ct);
             expect(again.ok && bytesHex(again.receipt)).toBe(bytesHex(r.receipt));
           }
         }),
@@ -362,7 +362,7 @@ describe("properties", () => {
           const { enc, vote } = castBallot(ctx, votes);
           const seat = (pick % ctx.panelSize) + 1;
           const other = (seat % ctx.panelSize) + 1;
-          const r = intake(ctx, keysOf(seat), vote, enc.ciphertexts[other - 1] as Uint8Array);
+          const r = intakeShares(ctx, keysOf(seat), vote, enc.ciphertexts[other - 1] as Uint8Array);
           expect(r).toEqual({ ok: false, code: "share-hash" });
         }),
         { numRuns: keyRuns },

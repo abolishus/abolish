@@ -20,6 +20,7 @@ import {
   type DeliveryEntry,
   deliveryDeadlines,
   deliveryWindowFits,
+  intakeCutoff,
   deliverySegments,
   encodeBoardEntry,
   EncodeError,
@@ -377,18 +378,13 @@ describe("input checks", () => {
     expect(deliveryWindowFits({ ...deployed, deadline: DELIVERY_WINDOW })).toBe(false);
     expect(deliveryWindowFits({ ...deployed, margin: DELIVERY_WINDOW })).toBe(false);
     expect(deliveryWindowFits({ ...deployed, contractEventWindow: DELIVERY_WINDOW })).toBe(false);
+    // R counts once on top of both terms: the contract-event window alone now
+    // needs W_C + R + F.
+    expect(deliveryWindowFits({ ...deployed, contractEventWindow: 34n * hour })).toBe(true);
+    expect(deliveryWindowFits({ ...deployed, contractEventWindow: 34n * hour + 1n })).toBe(false);
     const delivery = DELIVERY_WINDOW - 15n * hour;
     expect(deliveryWindowFits({ ...deployed, forcedInclusion: delivery })).toBe(true);
     expect(deliveryWindowFits({ ...deployed, forcedInclusion: delivery + 1n })).toBe(false);
-    // A small F lets the delivery bound pass while the complaint bound fails.
-    expect(
-      deliveryWindowFits({
-        ...deployed,
-        forcedInclusion: 0n,
-        contractEventWindow: DELIVERY_WINDOW,
-        margin: DELIVERY_WINDOW - 14n * hour,
-      }),
-    ).toBe(false);
     // The complaint bound (W_C + F + R within the three days after the delivery
     // deadline) is checked too: nothing that breaks it passes.
     fc.assert(
@@ -406,6 +402,18 @@ describe("input checks", () => {
       { numRuns },
     );
     expect(() => deliveryWindowFits({ ...deployed, period: -1n })).toThrow(RangeError);
+  });
+
+  test("the intake cutoff is the delivery deadline less F and R: 34 hours after the close rule's deadline", () => {
+    const hour = 3600n;
+    const closesAt = 1_800_000_000n;
+    const bound = 2n * hour;
+    const constants = { forcedInclusion: 13n * hour, margin: hour };
+    expect(intakeCutoff(closesAt, bound, constants)).toBe(
+      deliveryDeadlines(closesAt, bound).delivery - 14n * hour,
+    );
+    expect(intakeCutoff(closesAt, bound, constants)).toBe(closesAt + bound + 34n * hour);
+    expect(() => intakeCutoff(closesAt, bound, { ...constants, margin: -1n })).toThrow(RangeError);
   });
 
   test("refuses a close before the anchoring clock's epoch", () => {

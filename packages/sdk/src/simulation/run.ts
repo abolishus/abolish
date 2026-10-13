@@ -3,7 +3,7 @@
 // voter's sharing and share encryption, the tracking code shown before the
 // cast-or-challenge choice, a challenged attempt's opening and its checker's
 // verdict (./challenge.ts), the cast attempt's validity proof, each online
-// trustee's intake (proof checks, decryption,
+// trustee's share intake (proof checks, decryption,
 // share checks, receipt) and the receipt's check under the seat's registered
 // signing key, each ballot's L1 reference on a simulated L1 (./l1.ts), the
 // ballot record on the board (./board.ts) with the operator's receipt and
@@ -61,7 +61,7 @@ import {
   encodeTallyOpening,
   encryptShares,
   GROUP_ORDER,
-  intake,
+  intakeShares,
   l1RefMin,
   membershipMessage,
   membershipVkEncoding,
@@ -466,7 +466,7 @@ export function runSimulation(
     const receipts: Uint8Array[] = [];
     for (const seat of online) {
       const s = seats[seat - 1] as SeatSecrets;
-      const result = intake(
+      const result = intakeShares(
         ctx,
         { seat, kemSecret: s.kem.secretKey, signingSecret: s.signingSecret },
         vote,

@@ -19,6 +19,7 @@ import {
 import type { RegisteredKeys } from "./ceremony.ts";
 import { PARAMETERS } from "./parameters.ts";
 import { RECORD_TYPES, RecordSchema, recordType } from "./record.ts";
+import { checkL1Reference, type FinalizedL1, selectBallots } from "./revoting.ts";
 import {
   checkComplaint,
   checkPosting,
@@ -201,12 +202,33 @@ export function deliveryDeadlines(closesAt: bigint, l1InclusionBound: bigint): D
 }
 
 /**
+ * The intake cutoff `c_I = t_D − F − R` (docs/spec/delivery.md, What a node
+ * owes): every trustee node keeps intake open until it, decides once at it
+ * what it owes through the contract path, and refuses intake from it on, so
+ * its obligation is one decision's, never the union of several over a
+ * changing view. `forcedInclusion` (`F`) and `margin` (`R`) are the release's,
+ * the values `deliveryWindowFits` checks, so every node and client agrees.
+ */
+export function intakeCutoff(
+  closesAt: bigint,
+  l1InclusionBound: bigint,
+  constants: { readonly forcedInclusion: bigint; readonly margin: bigint },
+): bigint {
+  const { forcedInclusion, margin } = constants;
+  for (const v of [forcedInclusion, margin])
+    if (typeof v !== "bigint" || v < 0n)
+      throw new RangeError("forcedInclusion and margin must be bigints ≥ 0");
+  return deliveryDeadlines(closesAt, l1InclusionBound).delivery - forcedInclusion - margin;
+}
+
+/**
  * The bounds P4-1's anchoring clock and P1-18's contract-event window must
  * keep (docs/spec/delivery.md, Direct submit), in seconds as bigints:
- * `DELIVERY_WINDOW ≥ max(2 · period + deadline + R, W_C) + F`, so every
+ * `DELIVERY_WINDOW ≥ max(2 · period + deadline, W_C) + R + F`, so every
  * counted ballot's anchoring or contract recording is confirmable on finalized
- * L1 in time for a trustee node to send its receipts through the contract
- * path, even forced through L1; and `COMPLAINT_WINDOW − DELIVERY_WINDOW ≥ W_C
+ * L1 by the intake cutoff `c_I = t_D − F − R`, where a trustee node decides
+ * what it owes, with `R` left to send its receipts through the contract path,
+ * even forced through L1; and `COMPLAINT_WINDOW − DELIVERY_WINDOW ≥ W_C
  * + F + R`, so a trustee can read the last posting and still send a complaint.
  * `margin` is `R`, for L1 finality and the node's own reaction.
  */
@@ -221,12 +243,116 @@ export function deliveryWindowFits(constants: {
   for (const v of [period, deadline, contractEventWindow, forcedInclusion, margin])
     if (typeof v !== "bigint" || v < 0n)
       throw new RangeError("every constant must be a bigint ≥ 0");
-  const anchored = 2n * period + deadline + margin;
+  const anchored = 2n * period + deadline;
   const seen = anchored > contractEventWindow ? anchored : contractEventWindow;
   return (
-    seen + forcedInclusion <= DELIVERY_WINDOW &&
+    seen + margin + forcedInclusion <= DELIVERY_WINDOW &&
     contractEventWindow + forcedInclusion + margin <= COMPLAINT_WINDOW - DELIVERY_WINDOW
   );
+}
+
+/**
+ * One ballot of a trustee node's view (docs/spec/delivery.md, What a node
+ * owes): a ballot it receipted and can't show absent, or one it holds from
+ * the anchored board or the contract's records. Whether the node receipted
+ * it is decided by its ballot hash against the node's receipts, never by the
+ * copy (`owedReceipts`). Each passed the admission
+ * checks (verifier 5.1 to 5.4, at intake or as the node checked it), and
+ * `message` is `M` recomputed from its record, never a decoded field.
+ */
+export interface ViewBallot {
+  readonly ballotHash: Uint8Array;
+  readonly tier: number;
+  readonly nullifier: bigint;
+  readonly message: Uint8Array;
+  readonly l1RefNumber: bigint;
+  readonly l1RefHash: Uint8Array;
+}
+
+/**
+ * The ballot hashes whose receipts a trustee node owes through the contract
+ * path (docs/spec/delivery.md, What a node owes). For each tier and nullifier:
+ * the ballot [[revoting]]'s selection picks from the node's view, among those
+ * whose L1 reference is admitted, if `receipts` holds its ballot hash (under
+ * any L1 reference: a receipt covers the public part, and a copy the node
+ * showed absent leaves its receipt in `receipts`), and nothing on a tie or
+ * when the pick is a ballot it didn't receipt; and, since the view may lack
+ * the copy that counts, the ballot hash of its newest view ballot with a
+ * receipt whose reference isn't admitted (a block reorganised away, whose core the client
+ * cast again, revoting Client rule 4). At most two per tier and nullifier, so
+ * with membership-checked intake at most two per member of each tier,
+ * however many ballots anyone delivers or an operator withholds (ADR 0002,
+ * Decision, 2026-10-12; T-52, T-25, T-54). `l1` must have finalized a block
+ * after `closesAt`, so no reference is pending and every node reaches the
+ * same verdicts; the function throws otherwise. A node calls it once, at the
+ * intake cutoff (`intakeCutoff`), and refuses intake afterwards: the union of
+ * several calls over a changing view isn't bounded. Sorted by ballot hash.
+ */
+export function owedReceipts(
+  view: Iterable<ViewBallot>,
+  /** The ballot hash of every receipt the node issued, never reduced by absence. */
+  receipts: Iterable<Uint8Array>,
+  l1: FinalizedL1,
+  window: { readonly l1RefMin: bigint; readonly closesAt: bigint },
+): Uint8Array[] {
+  const receipted = new Set<string>();
+  for (const h of receipts) receipted.add(hex(h));
+  const hashOf = new Map<string, Uint8Array>();
+  // Per tier and nullifier, the newest receipted ballot whose reference isn't
+  // admitted (ties broken by the smaller ballot hash, so every node agrees).
+  const unadmitted = new Map<string, { l1RefNumber: bigint; hash: Uint8Array }>();
+  const admitted: {
+    tier: number;
+    nullifier: bigint;
+    message: Uint8Array;
+    l1RefNumber: bigint;
+    index: bigint;
+  }[] = [];
+  for (const b of view) {
+    const verdict = checkL1Reference(b, l1, window);
+    if (verdict === "pending")
+      throw new RangeError("owedReceipts: L1 hasn't finalized a block after close");
+    if (verdict !== "admitted") {
+      if (receipted.has(hex(b.ballotHash))) {
+        const key = `${b.tier}:${b.nullifier}`;
+        const prev = unadmitted.get(key);
+        if (
+          prev === undefined ||
+          b.l1RefNumber > prev.l1RefNumber ||
+          (b.l1RefNumber === prev.l1RefNumber && hex(b.ballotHash) < hex(prev.hash))
+        )
+          unadmitted.set(key, { l1RefNumber: b.l1RefNumber, hash: Uint8Array.from(b.ballotHash) });
+      }
+      continue;
+    }
+    const m = hex(b.message);
+    const h = hashOf.get(m);
+    // M binds the ballot hash, so two copies with one message are one ballot.
+    if (h !== undefined && hex(h) !== hex(b.ballotHash))
+      throw new RangeError("owedReceipts: one message names two ballot hashes");
+    hashOf.set(m, Uint8Array.from(b.ballotHash));
+    admitted.push({
+      tier: b.tier,
+      nullifier: b.nullifier,
+      message: b.message,
+      l1RefNumber: b.l1RefNumber,
+      index: BigInt(admitted.length),
+    });
+  }
+  const owed: Uint8Array[] = [];
+  for (const b of selectBallots(admitted).selected) {
+    const m = hex(b.message);
+    const hash = hashOf.get(m) as Uint8Array;
+    // A receipt is for a ballot hash, so it covers the same public part cast
+    // again under another L1 reference (a new M), as the delivery check reads
+    // it (T-25).
+    if (receipted.has(hex(hash))) owed.push(hash);
+  }
+  // Without the board's data the node can't see the copy cast again after a
+  // reorganisation; its receipt for the first copy delivers that one (T-25).
+  for (const { hash } of unadmitted.values())
+    if (!owed.some((h) => hex(h) === hex(hash))) owed.push(hash);
+  return owed.sort((a, b) => (hex(a) < hex(b) ? -1 : hex(a) > hex(b) ? 1 : 0));
 }
 
 /** What the delivery check runs against, all from data the verifier has already checked. */

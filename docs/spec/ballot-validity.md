@@ -266,6 +266,7 @@ The ballot client (P2-8, P5-4) builds a record in this order, after running [[ve
 2. Once the voter chooses to cast: the validity proofs, which bind `ν`; the L1 block ([[revoting]], Client rules 1 to 3); `ballot_hash`; and then the public signals of the admission row `membership-proof`, from the definition it checked and never from a server ([[membership]], Security notes).
 3. The membership proof under the pinned depth-32 key, with the proving key whose sha256 `membership_vk_hash` binds ([[membership]], Verification key).
 4. Before the record leaves the device, the client runs the admission checks above on the finished record, the membership proof's verification included ([[membership]], Security notes), and never sends a record that fails them.
+5. It delivers the finished record, with `ct_i`, to each qualified seat `i`'s intake ([[share-encryption]], Intake and receipts), which checks the record's admission, membership proof included, before it receipts, and it boards the record ([[delivery]], Client rules). The ciphertexts go nowhere before this step, so a challenged ballot, which never has a membership proof, never reaches a trustee.
 
 A retry sends the identical record ([[revoting]], Client rule 3).
 

@@ -10,7 +10,8 @@
 // version 2 against its cell under definition versions 3 and 4) and the
 // spoiled-ballot openings (6.2, as far as the floor of s_S decides them) and
 // the tally openings' sorting, attribution and boarding breaches (7.4, as far
-// as they need no counted set) are implemented; every other check is reported unverifiable, so no run can
+// as they need no counted set; against the cells under definition versions 3
+// and 4) are implemented; every other check is reported unverifiable, so no run can
 // report an election verified yet. A run on unauthenticated inputs reports
 // what the checks found against them, but its verdict stays unverifiable, so
 // a crafted bundle can neither verify nor fail an election (T-53, T-24).
@@ -520,6 +521,7 @@ export function verifyBundle(bundle: Bundle): Report {
     if (
       bundle.format === "abolish-verifier-bundle/4" &&
       definition.definition !== undefined &&
+      definition.hash !== undefined &&
       definition.stubHash !== undefined
     ) {
       const checked = ceremonyChecks(
@@ -542,6 +544,19 @@ export function verifyBundle(bundle: Bundle): Report {
       );
       implemented = new Map<string, Outcome>([...implemented, ...admission.rows]);
       ballots = admission.report;
+      // Sorting and attribution need only the definition and the registered
+      // signing keys, so 7.4 runs wherever 3.2 passed, under definition
+      // versions 3 and 4 against their cells (docs/spec/verifier.md, Tally
+      // openings).
+      const opened = tallyChecks(
+        definition.definition,
+        definition.hash,
+        checked.registered,
+        bundle.entries,
+        definition.inputs.boardEntryVersion,
+      );
+      implemented = new Map<string, Outcome>([...implemented, ["7.4", opened.row]]);
+      tallies = opened.report;
       if (definition.definition.version === 1) {
         // An opening is checked against the same registered election, and
         // `opening-cast` against the ballots admission admitted, so 6.2 is
@@ -558,17 +573,6 @@ export function verifyBundle(bundle: Bundle): Report {
         );
         implemented = new Map<string, Outcome>([...implemented, ["6.2", spoiled.row]]);
         openings = spoiled.report;
-        // Sorting and attribution need only the definition and the
-        // registered signing keys, so 7.4 runs wherever 3.2 passed.
-        const opened = tallyChecks(
-          definition.definition.value,
-          electionDefinitionHash(definition.definition.value),
-          checked.registered,
-          bundle.entries,
-          definition.inputs.boardEntryVersion,
-        );
-        implemented = new Map<string, Outcome>([...implemented, ["7.4", opened.row]]);
-        tallies = opened.report;
       } else {
         // Under definition versions 3 and 4 an opening opens a version-2
         // core, which only spoiled-ballot opening version 2 does, and this

@@ -6,6 +6,10 @@
 // tally.md's Boarding rule as far as the bundle decides it. None of it counts
 // or fails anything: 7.4 reports and attributes (T-29, T-15, T-17).
 //
+// The partition is the definition's (2.8): under version 1 its tiers, under
+// versions 3 and 4 every tier's stated cells, numbered across the tiers, so
+// an opening's `cell` is a position among those, never a tier (T-16).
+//
 // What is decided without the counted set: a stray opening, an opening of a
 // cell with another number of entries than options (`tally-missing`), an
 // unattributed one, and a second one by the same seat for the same cell
@@ -21,7 +25,7 @@ import {
   type DecodeErrorCode,
   decodeBoardEntry,
   type BoardEntryVersion,
-  type ElectionDefinition,
+  type ElectionDefinitionRecord,
   pinnedVersion,
   RECORD_TYPES,
   type RegisteredKeys,
@@ -73,18 +77,40 @@ const equal = (a: Uint8Array, b: Uint8Array) =>
   a.length === b.length && a.every((x, i) => x === b[i]);
 
 /**
- * The row 7.4 and the report's `tallies`, for a version-1 definition, whose
- * cells are its tiers in `electorate` order. `registered` is the key set the
+ * The number of cells in a definition's partition (docs/spec/
+ * election-definition.md, Notes, Tally partition): version 1's tiers, or
+ * versions 3 and 4's cells of every tier, as the definition states them.
+ * 2.1's rules keep it from 1 to 256, as `sortTallyOpenings` requires: a
+ * non-empty electorate, and under versions 3 and 4 the `cells` rule, which
+ * caps the total and gives every tier at least one cell.
+ */
+function partitionSize(definition: ElectionDefinitionRecord): number {
+  switch (definition.version) {
+    case 1:
+      return definition.value.electorate.length;
+    case 3:
+    case 4:
+      return definition.value.electorate.reduce((n, t) => n + t.cells.length, 0);
+    default: {
+      const unread: never = definition;
+      throw new Error(`unread definition version ${String(unread)}`);
+    }
+  }
+}
+
+/**
+ * The row 7.4 and the report's `tallies`. `registered` is the key set the
  * transcript check registered, or `undefined` when 3.2 didn't pass: with no
  * registered key set no opening can be attributed, so nothing is judged.
  */
 export function tallyChecks(
-  d: ElectionDefinition,
+  definition: ElectionDefinitionRecord,
   definitionHash: Uint8Array,
   registered: readonly RegisteredKeys[] | undefined,
   entries: readonly Uint8Array[],
   boardEntryVersion: BoardEntryVersion,
 ): { readonly row: TallyOutcome; readonly report?: readonly TallyReport[] } {
+  const d = definition.value;
   // A tally-opening version this verifier doesn't read, or none pinned (a
   // later tally scheme's record), may be one a later release reads:
   // unverifiable, never failed, so releases agree (2.3; T-36).
@@ -112,7 +138,7 @@ export function tallyChecks(
   }
   const sorted = sortTallyOpenings(
     { definitionHash, registered },
-    d.electorate.length,
+    partitionSize(definition),
     payloads,
     1,
   );

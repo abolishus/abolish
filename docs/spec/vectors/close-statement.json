@@ -469,7 +469,8 @@
             "number": "40001000",
             "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
           }
-        ]
+        ],
+        "belowFloor": []
       }
     },
     {
@@ -569,7 +570,8 @@
             "number": "40002500",
             "hash": "21397c5b551141722e434c62d719e4f1fcda77eea65958c3f2f7f3c9294205c4"
           }
-        ]
+        ],
+        "belowFloor": []
       }
     },
     {
@@ -669,7 +671,8 @@
             "number": "40002500",
             "hash": "21397c5b551141722e434c62d719e4f1fcda77eea65958c3f2f7f3c9294205c4"
           }
-        ]
+        ],
+        "belowFloor": []
       }
     },
     {
@@ -765,7 +768,8 @@
             "number": "40001000",
             "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
           }
-        ]
+        ],
+        "belowFloor": []
       }
     },
     {
@@ -847,12 +851,13 @@
             "number": "40001000",
             "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
           }
-        ]
+        ],
+        "belowFloor": []
       }
     },
     {
-      "id": "floor-excludes-low",
-      "description": "A permissionless game resolved by t_S shows block 40,000,500 derivable by L_δ: seat 5's claim below it is false and doesn't count, so B is the honest head",
+      "id": "floor-reports-low",
+      "description": "A permissionless game shows block 40,000,500 derivable by L_δ: seat 5's claim below it is listed, but still counts, and the honest claims above it give B",
       "floor": "40000500",
       "entries": [
         {
@@ -927,7 +932,7 @@
           },
           {
             "seat": 5,
-            "code": "close-below-floor",
+            "code": "close-counted",
             "claim": {
               "number": "40000100",
               "hash": "7a09cbd760bb3076269cb312ae43b522f365de0830b391b5cd332d928350d5fa"
@@ -943,12 +948,13 @@
             "number": "40001000",
             "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
           }
-        ]
+        ],
+        "belowFloor": [5]
       }
     },
     {
-      "id": "floor-leaves-too-few",
-      "description": "Seats 1 and 2 state the honest head and seat 5 a low one, below the floor: two counted seats, fewer than k, so there is no close head",
+      "id": "floor-never-removes",
+      "description": "Seats 1 and 2 state the honest head and seat 5 a low one, below the floor: all three count, so B is the low claim. A floor that removed it would leave the close unchecked, which whoever controls one false game could force",
       "floor": "40000500",
       "entries": [
         {
@@ -968,7 +974,7 @@
         }
       ],
       "result": {
-        "head": null,
+        "head": "40000100",
         "statements": [
           {
             "at": 0,
@@ -1009,7 +1015,7 @@
           },
           {
             "seat": 5,
-            "code": "close-below-floor",
+            "code": "close-counted",
             "claim": {
               "number": "40000100",
               "hash": "7a09cbd760bb3076269cb312ae43b522f365de0830b391b5cd332d928350d5fa"
@@ -1025,7 +1031,87 @@
             "number": "40001000",
             "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
           }
-        ]
+        ],
+        "belowFloor": [5]
+      }
+    },
+    {
+      "id": "false-floor",
+      "description": "A floor above every honest claim (a false game) lists every seat, and changes nothing: B is still the honest head",
+      "floor": "40002500",
+      "entries": [
+        {
+          "path": "board",
+          "segment": 27821,
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16010000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005328af6066108d0aba6df1dd199ea1a9a9bfa4643f7481647d205a1a8226f8bc15abf41f9c49a111949e1a6ef24a9f9b3645deba56f87f73d941bb9a122280cb8"
+        },
+        {
+          "path": "board",
+          "segment": 27821,
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16020000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db500508e0c0662196d15585c731af4ef5f5291a762d8de7a64fd9ce6b0e56440cf81f43d57304ea50dcbdb30b4918c3ed74379ebfefd0b8ad8fde30741b61d63749f5"
+        },
+        {
+          "path": "board",
+          "segment": 27821,
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16030000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db500554be46e5e1927dbc995dbddb96c24f7ad7b029131328c6a4bafb1cf39dcb249b5b563679a5885e491428d4a9cf1d1a33582a05fe631183bd7bf21b2ecc3f1996"
+        }
+      ],
+      "result": {
+        "head": "40001000",
+        "statements": [
+          {
+            "at": 0,
+            "code": "valid",
+            "seat": 1
+          },
+          {
+            "at": 1,
+            "code": "valid",
+            "seat": 2
+          },
+          {
+            "at": 2,
+            "code": "valid",
+            "seat": 3
+          }
+        ],
+        "seats": [
+          {
+            "seat": 1,
+            "code": "close-counted",
+            "claim": {
+              "number": "40001000",
+              "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
+            }
+          },
+          {
+            "seat": 2,
+            "code": "close-counted",
+            "claim": {
+              "number": "40001000",
+              "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
+            }
+          },
+          {
+            "seat": 3,
+            "code": "close-counted",
+            "claim": {
+              "number": "40001000",
+              "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
+            }
+          },
+          {
+            "seat": 5,
+            "code": "close-missing"
+          }
+        ],
+        "claims": [
+          {
+            "number": "40001000",
+            "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
+          }
+        ],
+        "belowFloor": [1, 2, 3]
       }
     },
     {
@@ -1131,7 +1217,8 @@
             "number": "40002500",
             "hash": "21397c5b551141722e434c62d719e4f1fcda77eea65958c3f2f7f3c9294205c4"
           }
-        ]
+        ],
+        "belowFloor": []
       }
     },
     {
@@ -1229,7 +1316,8 @@
             "number": "40001000",
             "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
           }
-        ]
+        ],
+        "belowFloor": []
       }
     },
     {
@@ -1313,7 +1401,8 @@
             "number": "40001000",
             "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
           }
-        ]
+        ],
+        "belowFloor": []
       }
     },
     {
@@ -1391,7 +1480,8 @@
             "number": "40001000",
             "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
           }
-        ]
+        ],
+        "belowFloor": []
       }
     },
     {
@@ -1479,7 +1569,8 @@
             "number": "40001000",
             "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
           }
-        ]
+        ],
+        "belowFloor": []
       }
     },
     {
@@ -1567,7 +1658,8 @@
             "number": "40001000",
             "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
           }
-        ]
+        ],
+        "belowFloor": []
       }
     },
     {
@@ -1692,7 +1784,8 @@
             "number": "40001000",
             "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
           }
-        ]
+        ],
+        "belowFloor": []
       }
     },
     {
@@ -1790,7 +1883,8 @@
             "number": "40001000",
             "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
           }
-        ]
+        ],
+        "belowFloor": []
       }
     },
     {
@@ -1819,7 +1913,8 @@
             "code": "close-missing"
           }
         ],
-        "claims": []
+        "claims": [],
+        "belowFloor": []
       }
     }
   ],

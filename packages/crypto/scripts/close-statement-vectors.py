@@ -196,7 +196,7 @@ def close_head(election, entries, floor):
         else:
             statements.append({"at": at, "code": "valid", "seat": seat})
             valid.setdefault(seat, set()).add((st["l2Number"], st["l2Hash"]))
-    seats, counted = [], []
+    seats, counted, below = [], [], []
     for i in sorted(registered):
         claims = valid.get(i)
         if claims is None:
@@ -205,15 +205,15 @@ def close_head(election, entries, floor):
             seats.append({"seat": i, "code": "close-equivocation"})
         else:
             (claim,) = claims
+            seats.append({"seat": i, "code": "close-counted", "claim": claim})
+            counted.append(claim[0])
+            # The floor only reports: a claim below it still counts.
             if floor is not None and claim[0] < floor:
-                seats.append({"seat": i, "code": "close-below-floor", "claim": claim})
-            else:
-                seats.append({"seat": i, "code": "close-counted", "claim": claim})
-                counted.append(claim[0])
+                below.append(i)
     k = election["threshold"]
     head = sorted(counted, reverse=True)[k - 1] if len(counted) >= k else None
     claims = sorted(set().union(*valid.values())) if valid else []
-    return {"head": head, "statements": statements, "seats": seats, "claims": claims}
+    return {"head": head, "statements": statements, "seats": seats, "claims": claims, "belowFloor": below}
 
 
 # --- Close check -----------------------------------------------------------------------
@@ -440,6 +440,7 @@ def main():
                         {**s, "claim": {"number": str(s["claim"][0]), "hash": s["claim"][1].hex()}} if "claim" in s else s for s in got["seats"]
                     ],
                     "claims": [{"number": str(n), "hash": hb.hex()} for n, hb in got["claims"]],
+                    "belowFloor": got["belowFloor"],
                 },
             }
         )
@@ -481,18 +482,25 @@ def main():
         low[0],
     )
     head_case(
-        "floor-excludes-low",
-        "A permissionless game resolved by t_S shows block 40,000,500 derivable by L_δ: seat 5's claim below it is false and doesn't count, so B is the honest head",
+        "floor-reports-low",
+        "A permissionless game shows block 40,000,500 derivable by L_δ: seat 5's claim below it is listed, but still counts, and the honest claims above it give B",
         [("board", on_time, s1), ("board", on_time, s2), ("board", on_time, statement(5, claim=low)), ("board", on_time, s3)],
         floor_block,
         honest[0],
     )
     head_case(
-        "floor-leaves-too-few",
-        "Seats 1 and 2 state the honest head and seat 5 a low one, below the floor: two counted seats, fewer than k, so there is no close head",
+        "floor-never-removes",
+        "Seats 1 and 2 state the honest head and seat 5 a low one, below the floor: all three count, so B is the low claim. A floor that removed it would leave the close unchecked, which whoever controls one false game could force",
         [("board", on_time, s1), ("board", on_time, s2), ("board", on_time, statement(5, claim=low))],
         floor_block,
-        None,
+        low[0],
+    )
+    head_case(
+        "false-floor",
+        "A floor above every honest claim (a false game) lists every seat, and changes nothing: B is still the honest head",
+        [("board", on_time, s1), ("board", on_time, s2), ("board", on_time, s3)],
+        higher[0],
+        honest[0],
     )
     head_case(
         "equivocation",

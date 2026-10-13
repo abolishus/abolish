@@ -432,12 +432,15 @@ describe("the close head's rules", () => {
     expect(r.head).toBeNull();
   });
 
-  test("a claim below the floor never counts", () => {
+  test("a claim below the floor is reported and still counts", () => {
+    // If the floor removed claims, one false game could raise it over every
+    // honest claim and leave the close unchecked (docs/spec/close.md, The floor).
     const r = closeHead({ ...election, floor: 6n }, [at(1, 7n), at(2, 7n), at(3, 5n)], 1);
-    expect(r.seats[2]).toMatchObject({ seat: 3, code: "close-below-floor" });
-    expect(r.head).toBeNull();
-    expect(closeHead({ ...election, floor: 5n }, [at(1, 7n), at(2, 7n), at(3, 5n)], 1).head).toBe(
-      5n,
+    expect(r.seats[2]).toMatchObject({ seat: 3, code: "close-counted" });
+    expect(r.belowFloor).toEqual([3]);
+    expect(r.head).toBe(5n);
+    expect(closeHead({ ...election, floor: 100n }, [at(1, 7n), at(2, 7n), at(3, 7n)], 1).head).toBe(
+      7n,
     );
   });
 

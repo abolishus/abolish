@@ -256,9 +256,11 @@ export interface CloseElection {
   readonly lDelta: { readonly number: bigint; readonly hash: Uint8Array };
   readonly deadline: CloseDeadline;
   /**
-   * `g`: the highest L2 block a permissionless dispute game claims, with its
-   * L1 head at or before `L_δ`, resolved in its claim's favour by `t_S`; or
-   * `null` if there is none (docs/spec/close.md, The floor).
+   * `g`: the highest L2 block a pinned permissionless dispute game claims,
+   * with its L1 head at or before `L_δ`, valid and resolved in its claim's
+   * favour at `t_S`; or `null` if there is none (docs/spec/close.md, The
+   * floor). It only reports: a claim below it still counts, so one false game
+   * can never raise the head or leave the close unchecked (T-71, T-35).
    */
   readonly floor: bigint | null;
 }
@@ -283,11 +285,7 @@ export type StatementVerdict =
   | { readonly at: number; readonly code: "valid"; readonly seat: number };
 
 export type SeatClose =
-  | {
-      readonly seat: number;
-      readonly code: "close-counted" | "close-below-floor";
-      readonly claim: CloseClaim;
-    }
+  | { readonly seat: number; readonly code: "close-counted"; readonly claim: CloseClaim }
   | { readonly seat: number; readonly code: "close-missing" | "close-equivocation" };
 
 export interface CloseHeadReport {
@@ -299,6 +297,8 @@ export interface CloseHeadReport {
   readonly seats: readonly SeatClose[];
   /** Every distinct claim among the valid statements, by number then hash: more than one proves a false statement. */
   readonly claims: readonly CloseClaim[];
+  /** Counted seats whose claim is below the floor, in key-set order: reported against them, still counted. */
+  readonly belowFloor: readonly number[];
 }
 
 /** The seat a statement's signature attributes it to, or `null` (T-29). */
@@ -316,12 +316,15 @@ function inTime(entry: CloseStatementEntry, deadline: CloseDeadline): boolean {
   throw new RangeError("closeHead: unknown path");
 }
 
-const compareClaims = (a: CloseClaim, b: CloseClaim) =>
-  a.number !== b.number
-    ? a.number < b.number
-      ? -1
-      : 1
-    : toHex(a.hash).localeCompare(toHex(b.hash));
+function compareClaims(a: CloseClaim, b: CloseClaim): number {
+  if (a.number !== b.number) return a.number < b.number ? -1 : 1;
+  for (let i = 0; i < 32; i++) {
+    const x = a.hash[i] ?? 0;
+    const y = b.hash[i] ?? 0;
+    if (x !== y) return x < y ? -1 : 1;
+  }
+  return 0;
+}
 
 /**
  * The close head over every close-statement payload in the board's sealed
@@ -337,7 +340,9 @@ export function closeHead(
   const definitionHash = bytes32(election.definitionHash, "closeHead: definitionHash");
   const l1Hash = bytes32(election.lDelta.hash, "closeHead: lDelta.hash");
   checkU64(election.lDelta.number, "closeHead: lDelta.number");
-  checkU64(election.deadline.time, "closeHead: deadline.time");
+  // `t_C` may pass 2^64 − 1 when `closes_at + δ` is near it: a deadline, never encoded.
+  if (typeof election.deadline.time !== "bigint")
+    throw new TypeError("closeHead: deadline.time must be a bigint");
   if (typeof election.deadline.segment !== "bigint")
     throw new TypeError("closeHead: deadline.segment must be a bigint");
   if (election.floor !== null) checkU64(election.floor, "closeHead: floor");
@@ -372,6 +377,7 @@ export function closeHead(
     }
   });
   const counted: bigint[] = [];
+  const belowFloor: number[] = [];
   const seats = election.registered.map(({ index }): SeatClose => {
     const claims = valid.get(index);
     if (claims === undefined) return { seat: index, code: "close-missing" };
@@ -380,9 +386,8 @@ export function closeHead(
     if (claims.size > 1) return { seat: index, code: "close-equivocation" };
     const [claim] = claims.values();
     if (claim === undefined) throw new Error("unreachable: a seat with no claim is missing");
-    if (election.floor !== null && claim.number < election.floor)
-      return { seat: index, code: "close-below-floor", claim };
     counted.push(claim.number);
+    if (election.floor !== null && claim.number < election.floor) belowFloor.push(index);
     return { seat: index, code: "close-counted", claim };
   });
   // With fewer than k false claims and at least k honest ones counted, the
@@ -392,7 +397,7 @@ export function closeHead(
   const head = counted.length >= k ? (counted[k - 1] ?? null) : null;
   const all = new Map<string, CloseClaim>();
   for (const claims of valid.values()) for (const [key, c] of claims) all.set(key, c);
-  return { head, statements, seats, claims: [...all.values()].sort(compareClaims) };
+  return { head, statements, seats, claims: [...all.values()].sort(compareClaims), belowFloor };
 }
 
 /**

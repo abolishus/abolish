@@ -48,6 +48,7 @@ export const TAG_REGISTRY = Object.freeze(
       { tag: "abolish/v1/sig/share-complaint", primitive: "signature", status: "specified" },
       { tag: "abolish/v1/circuit-tag", primitive: "plain", status: "specified" },
       { tag: "abolish/v1/panel", primitive: "plain", status: "specified" },
+      { tag: "abolish/v1/author-panel", primitive: "plain", status: "specified" },
       {
         tag: "abolish/v1/sig/ceremony-registration",
         primitive: "signature",

@@ -84,6 +84,23 @@ with each `Q_i` as its 33-byte `p256-key` encoding. A panel is valid only if (ch
 
 `panel_id` binds `k`, `n`, every key and its seat, so a definition can't name a known panel with a lower threshold, a reordered seat list or a substituted key and keep the same identifier (T-37, T-14). It is the value the election definition carries as `panel_id` (P1-10b). Releases pin panels by their keys and `k`; the verifier and the ballot client recompute `panel_id` from what they pin and never take it from election data ([[verifier]], Pinned trust roots).
 
+### Author panel identifier
+
+Under election-definition version 6 a poll may have an **author panel** beside the default panel: trustees its author chose, listed in the definition rather than pinned in a release, holding one additive half of each ballot's opening so that a ballot opens only with both panels' thresholds ([[0027-trustee-panels-and-live-results]], Part 1; [[election-definition]], Author panel). It is an ordered list of `n_A` identity keys and a threshold `k_A`, with seats numbered as for a default panel, and its identifier is
+
+```
+author_panel_id = H(DS("abolish/v1/author-panel", u8(k_A) ‖ u8(n_A) ‖ Q_1 ‖ … ‖ Q_{n_A}))
+```
+
+under its own tag, so an author panel never has the identifier of a pinned default panel with the same keys and threshold, and a statement bound to one can't stand for the other (T-37). It is never stored: the verifier, the ballot client and every seat recompute it from the definition's `author_threshold` and `author_keys`. An author panel is valid only if (checked in this order, with these codes):
+
+1. `n_A ≤ MAX_TRUSTEES` ([[parameters]]) (`size`);
+2. `1 ≤ k_A ≤ n_A` (`threshold`). Unlike a default panel, `k_A = 1` is allowed: an author panel is never alone, since its half of a ballot's opening is worthless without the default half, so one author trustee holding a whole half lowers nothing (T-14);
+3. for each seat in order, `Q_i` decodes as a `p256-key` (`key`) and differs from every earlier key (`duplicate-key`), for the reason a default panel's keys are distinct;
+4. against the default panel the election names, no `Q_i` equals a default seat's key (`default-seat`). A trustee holding a seat in both panels would hold shares of both halves, so a coalition could open ballots with fewer default trustees than `k` (T-14). Rules 1 to 3 need only the definition and are its `author-panel` well-formedness rule ([[election-definition]], Well-formedness); rule 4 needs the pinned default panel and is [[verifier]] 2.5's.
+
+`docs/spec/vectors/election-definition-v6.json` (`authorPanels`) holds valid author panels with their identifiers and one failing each rule.
+
 ## Signed statements
 
 Each statement type has its own tag under `abolish/v1/sig/` and a fixed layout. The layouts below are complete: `m` is exactly the concatenation shown, with no header or length prefix of its own, and its length is fixed.

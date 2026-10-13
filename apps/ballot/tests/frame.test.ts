@@ -7,6 +7,7 @@ import { App, SharedOrigin } from "../src/app.tsx";
 import { ArrivalCheck, ArrivalChecklist, ElectionRefused } from "../src/check.tsx";
 import type { ElectionRefusal } from "../src/election.ts";
 import { Frame, Note, Part, ScreenTitle, type PollClass } from "../src/frame.tsx";
+import { AnswerQuestions, CheckAnswers, QuestionStep } from "../src/questions.tsx";
 
 // The client's CSP has `style-src 'self'`, which blocks every inline `style`
 // attribute (T-43); the e2e test renders only the screens without a poll, so
@@ -100,5 +101,102 @@ describe("the frame under the client's CSP", () => {
       ),
     ])
       expect(html).not.toMatch(/\sstyle=/i);
+  });
+
+  const QUESTIONS = [
+    {
+      question: "Which one improvement matters most?",
+      description: "Pick the one you'd use most.",
+      options: [
+        { label: "Lighting", description: "On the river path" },
+        { label: "Toilets", description: "" },
+      ],
+      minSelections: 0,
+      maxSelections: 1,
+    },
+    {
+      question: "Which events would you go to?",
+      description: "",
+      options: [
+        { label: "Market", description: "" },
+        { label: "Cinema", description: "" },
+        { label: "Clean-up", description: "" },
+      ],
+      minSelections: 2,
+      maxSelections: 2,
+    },
+  ];
+  const none = () => {};
+
+  test.each([undefined, 1, 2, 3] as const)(
+    "the question screens of poll class %s render no inline style",
+    (pollClass) => {
+      for (const html of [
+        render(
+          createElement(AnswerQuestions, {
+            pollClass,
+            poll: POLL,
+            questions: QUESTIONS,
+            arrival: createElement(ArrivalCheck, { definitionHash: POLL.definitionHash }),
+            onSend: none,
+            onChallenge: none,
+          }),
+        ),
+        render(
+          createElement(QuestionStep, {
+            pollClass,
+            poll: POLL,
+            questions: QUESTIONS,
+            index: 1,
+            selection: [0, 2],
+            toCheck: true,
+            onChange: none,
+            onBack: none,
+            onNext: none,
+            onSkip: none,
+          }),
+        ),
+        render(
+          createElement(CheckAnswers, {
+            pollClass,
+            poll: POLL,
+            questions: QUESTIONS,
+            answers: [[], [0, 2]],
+            onChange: none,
+            onSend: none,
+            onChallenge: none,
+          }),
+        ),
+      ]) {
+        expect(html).toContain("Which");
+        expect(html).not.toMatch(/\sstyle=/i);
+      }
+    },
+  );
+
+  test("the questions start with nothing chosen", () => {
+    const html = render(
+      createElement(AnswerQuestions, {
+        poll: POLL,
+        questions: QUESTIONS,
+        onSend: none,
+        onChallenge: none,
+      }),
+    );
+    expect(html).toContain("Question 1 of 2");
+    expect(html).not.toMatch(/\schecked/i);
+  });
+
+  test("an election with no questions isn't shown", () => {
+    expect(() =>
+      render(
+        createElement(AnswerQuestions, {
+          poll: POLL,
+          questions: [],
+          onSend: none,
+          onChallenge: none,
+        }),
+      ),
+    ).toThrow(RangeError);
   });
 });

@@ -21,7 +21,12 @@ if (root === null) throw new Error("index.html has no #root");
 createRoot(root).render(
   <StrictMode>
     <I18nProvider locale={locale}>
-      {onSharedGatewayPath(location.pathname) ? <SharedOrigin /> : <App />}
+      {onSharedGatewayPath(location.pathname) ? (
+        // Without the query or fragment, which a ballot link may use to carry the poll.
+        <SharedOrigin address={location.origin + location.pathname} />
+      ) : (
+        <App />
+      )}
     </I18nProvider>
   </StrictMode>,
 );

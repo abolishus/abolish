@@ -12,6 +12,7 @@ import {TrusteeIdentityLib, TrusteeRegistry} from "../src/TrusteeRegistry.sol";
 import {BallotHarness} from "./utils/BallotHarness.sol";
 import {ElectionsStub, TrusteesStub} from "./utils/BoardFixture.sol";
 import {
+    ByteWriter,
     DefinitionEncoder,
     DefinitionHarness,
     MockTrusteeRegistry
@@ -25,17 +26,25 @@ import {TestBase, Vm} from "./utils/Vm.sol";
 /// Records and Direct submit) against the vectors: delivery.json (an honest
 /// receipt, posting and complaint, their decode rejections, and every
 /// delivery record of its elections with the delivery check's verdicts),
-/// share-receipt.json (receipt signature checks) and ballot.json (records
-/// with real membership proofs). Every expected value comes from the files
+/// share-receipt.json (receipt signature checks), and ballot.json and
+/// ballot-v3-records.json (records with real membership proofs). Every expected value comes from the files
 /// or from the spec's field offsets, never from the code under test; the
 /// registries are stubs set from the files, and one test each runs against
 /// a real election registry and a real trustee registry. Threats: T-25
 /// (records kept off the board), T-17 (chosen bytes in the archive), T-54
 /// (a record occupying a slot), T-52 (input that costs others work), T-31.
 contract BoardTest is TestBase {
+    using ByteWriter for ByteWriter.Writer;
+
     string internal constant DELIVERY = "../../docs/spec/vectors/delivery.json";
     string internal constant RECEIPTS = "../../docs/spec/vectors/share-receipt.json";
     string internal constant V1 = "../../docs/spec/vectors/ballot.json";
+    string internal constant V3 = "../../docs/spec/vectors/ballot-v3-records.json";
+    /// Framed values with no zero byte, for the largest record's elements and scalars.
+    uint256 internal constant DENSE_ELEMENT =
+        0x2222222222222222222222222222222222222222222222222222222222222222;
+    uint256 internal constant DENSE_SCALAR =
+        0x0101010101010101010101010101010101010101010101010101010101010101;
 
     /// The ceremonies the stubs record the vectors' key sets under: any
     /// values, since the board only passes them from one registry to the other.
@@ -247,9 +256,84 @@ contract BoardTest is TestBase {
         elections.setCeremony(approval, keccak256("approval stub"), PANEL);
         uint256 i;
         for (; vm.keyExistsJson(bj, _at(".ballots", i, "")); i++) {
-            _ballotVector(bj, _at(".ballots", i, ""));
+            _ballotVector(bj, _at(".ballots", i, ""), ["plurality", "approval"], 1);
         }
         assertEq(i, 20, "ballot coverage");
+    }
+
+    /// Every ballot of ballot-v3-records.json, as ballot.json's above, under
+    /// its version-5 definition's questions and cells: a ballot whose range
+    /// proof fails (`sum-proof`) is accepted, the verifier's to reject, and
+    /// one shaped for other questions is `validity-shape` (T-28).
+    function test_BallotVectorsV3UnderTheRegisteredKeySet() public {
+        string memory bj = vm.readFile(V3);
+        bytes32 questions = _b32(bj, ".elections.questions.definitionHash");
+        elections.setCeremony(questions, keccak256("questions stub"), PANEL);
+        uint256 i;
+        for (; vm.keyExistsJson(bj, _at(".ballots", i, "")); i++) {
+            _ballotVector(bj, _at(".ballots", i, ""), ["questions", "other"], 3);
+        }
+        assertEq(i, 20, "v3 ballot coverage");
+    }
+
+    /// The largest version-3 record a definition allows ([[ballot-validity]],
+    /// Committed vote (version 3)): `T = MAX_OPTIONS` options of `k = n =
+    /// MAX_TRUSTEES` commitments and `MAX_QUESTIONS` two-option questions of
+    /// range 0 to 2, whose 96 range branches are the most `T + Q` allows. It
+    /// fits one direct submission: the board frames and checks it whole and
+    /// emits it, with the pairing mocked (an honest ballot's proof, whose
+    /// pairing the honest ballot below prices), and the transaction stays
+    /// under EIP-7825's per-transaction gas cap and op-geth's 128 KiB
+    /// transaction size (T-25, T-52).
+    function test_TheLargestVersion3BallotFitsOneSubmission() public {
+        bytes32 dh = keccak256("largest version-3 definition");
+        ElectionRegistry.Parameters memory p;
+        (p.ballotVersion, p.threshold, p.panelSize, p.optionCount) = (3, 16, 16, 64);
+        p.questions = new ElectionRegistry.Question[](32);
+        for (uint256 q; q < 32; q++) {
+            p.questions[q] = ElectionRegistry.Question(1, 2, 0, 2);
+        }
+        uint8[] memory tiers = new uint8[](1);
+        uint256[] memory roots = new uint256[](1);
+        roots[0] = 1;
+        elections.set(dh, p, tiers, roots);
+        elections.setCeremony(dh, keccak256("largest stub"), PANEL);
+        trustees.setKeySet(keccak256("largest stub"), PANEL, ((1 << 17) - 1) ^ 1);
+        bytes memory record = _largestV3(dh);
+        // 364 bytes before the vote; `vss` 4 + 64 · (4 + 16 · 32), `share_hashes`
+        // 4 + 16 · 32, `option_proofs` 4 + 64 · 128, `sum_proofs` 4 + 32 · 4 + 96 · 64.
+        assertEq(record.length, 364 + 33_028 + 516 + 8196 + 6276, "the largest record");
+        bytes memory data = _ballotCall(record);
+        assertTrue(data.length < 128 * 1024, "op-geth's transaction size");
+        // Each measurement on a fresh board, so none is a repeat's no-op.
+        uint256 pairing = _gas(_ballotCall(honestBallot));
+        _mockPairing();
+        board = new Board(address(elections), address(trustees));
+        pairing -= _gas(_ballotCall(honestBallot));
+        board = new Board(address(elections), address(trustees));
+        uint256 used = _gas(data);
+        board = new Board(address(elections), address(trustees));
+        Vm.Log[] memory logs = _accept(data);
+        assertEq(logs.length, 1, "one event");
+        _assertEvent(logs[0], BALLOT_SUBMITTED, dh, ballots.ballotHash(record), record);
+        // The transaction under EIP-7623: 21,000 plus the larger of its
+        // execution (`used` already counts its calldata at the standard
+        // price, and the pairing is added back) and its calldata at the
+        // floor price (10 a token, 4 tokens a non-zero byte).
+        uint256 tokens;
+        for (uint256 i; i < data.length; i++) {
+            tokens += data[i] == 0 ? 1 : 4;
+        }
+        uint256 execution = used + pairing;
+        uint256 total = 21_000 + (execution > 10 * tokens ? execution : 10 * tokens);
+        // Measured about 2.7 million in the call (calldata, framing, the
+        // ballot hash over 48 KB, the event and its accumulator step) and
+        // 2.9 million for the transaction. Every slot the check reads is
+        // warm here, as the test wrote it; a real call pays tens of
+        // thousands more for cold reads.
+        assertTrue(used < 3_000_000, "the call");
+        assertTrue(total < 3_500_000, "the transaction");
+        assertTrue(total < 1 << 24, "EIP-7825's cap");
     }
 
     /// `qualified` is the key set the trustee registry recorded for the
@@ -1492,20 +1576,21 @@ contract BoardTest is TestBase {
         return vm.computeCreateAddress(address(this), vm.getNonce(address(this)));
     }
 
-    /// One ballot of ballot.json on a board of its own (two of the file's
+    /// One ballot of a record file (ballot.json, ballot-v3-records.json) on a board of its own (two of the file's
     /// ballots share their bytes under different key sets, and a repeat
     /// checks nothing, Calls), under the key set the file lists for it.
-    function _ballotVector(string memory bj, string memory b) internal {
+    function _ballotVector(string memory bj, string memory b, string[2] memory names, uint8 version)
+        internal
+    {
         string memory id = _str(bj, string.concat(b, ".id"));
         board = new Board(address(elections), address(trustees));
         // Only the ballot's own election is registered, so another's is stray.
         string memory named = _str(bj, string.concat(b, ".election"));
-        string[2] memory names = ["plurality", "approval"];
         for (uint256 k; k < 2; k++) {
             string memory e = string.concat(".elections.", names[k]);
             if (_eq(names[k], named)) {
                 (ElectionRegistry.Parameters memory p, uint8[] memory t, uint256[] memory r) =
-                    _electionV1(bj, e);
+                    version == 1 ? _electionV1(bj, e) : _electionV3(bj, e);
                 elections.set(_b32(bj, string.concat(e, ".definitionHash")), p, t, r);
             } else {
                 ElectionRegistry.Parameters memory none;
@@ -1868,6 +1953,84 @@ contract BoardTest is TestBase {
         }
     }
 
+    /// ballot-v3-records.json's election `e`: its version-5 definition's panel,
+    /// questions and pin, and its cells' tiers and roots.
+    function _electionV3(string memory bj, string memory e)
+        internal
+        view
+        returns (ElectionRegistry.Parameters memory p, uint8[] memory tiers, uint256[] memory roots)
+    {
+        ElectionDefinitionLib.Definition memory d =
+            defs.decode(_bytes(bj, string.concat(e, ".definition")));
+        assertEq(d.version, 5, "definition version 5");
+        p.threshold = d.threshold;
+        p.panelSize = d.panelSize;
+        p.questions = new ElectionRegistry.Question[](d.questions.length);
+        for (uint256 q; q < d.questions.length; q++) {
+            ElectionDefinitionLib.Question memory dq = d.questions[q];
+            p.questions[q] = ElectionRegistry.Question(
+                dq.method, dq.optionCount, dq.minSelections, dq.maxSelections
+            );
+            p.optionCount += dq.optionCount;
+        }
+        for (uint256 i; i < d.pinTypes.length; i++) {
+            if (d.pinTypes[i] == 2) p.ballotVersion = d.pinVersions[i];
+        }
+        assertEq(p.ballotVersion, 3, "ballot version 3");
+        uint256 n;
+        while (vm.keyExistsJson(bj, _at(string.concat(e, ".cells"), n, ""))) n++;
+        tiers = new uint8[](n);
+        roots = new uint256[](n);
+        for (uint256 i; i < n; i++) {
+            string memory c = _at(string.concat(e, ".cells"), i, "");
+            assertEq(vm.parseJsonUint(bj, string.concat(c, ".cell")), i, "cells in order");
+            tiers[i] = uint8(vm.parseJsonUint(bj, string.concat(c, ".tier")));
+            roots[i] = vm.parseUint(_str(bj, string.concat(c, ".root")));
+        }
+    }
+
+    /// The largest version-3 record for `dh` (see its test): cell 0,
+    /// nullifier 1, an honest ballot's proof, every element 32 bytes of 0x22
+    /// (even and below `p`, so framed) and every scalar 32 bytes of 0x01
+    /// (below `ℓ`): dense bytes, so calldata is priced as an honest
+    /// ballot's, whose bytes are uniformly random, would be.
+    function _largestV3(bytes32 dh) internal view returns (bytes memory) {
+        ByteWriter.Writer memory w = ByteWriter.create();
+        w.put(0x0002, 2);
+        w.put(3, 1);
+        w.put(uint256(dh), 32);
+        w.put(0, 1);
+        w.put(1, 32);
+        w.put(L1_NUMBER, 8);
+        w.put(uint256(L1_HASH), 32);
+        for (uint256 i; i < 256; i += 32) {
+            w.put(_word(proof, i), 32);
+        }
+        w.put(64, 4);
+        for (uint256 j; j < 64; j++) {
+            w.put(16, 4);
+            for (uint256 t; t < 16; t++) {
+                w.put(DENSE_ELEMENT, 32);
+            }
+        }
+        w.put(16, 4);
+        for (uint256 i; i < 16; i++) {
+            w.put(uint256(keccak256(abi.encode("share", i))), 32);
+        }
+        w.put(64, 4);
+        for (uint256 i; i < 64 * 4; i++) {
+            w.put(DENSE_SCALAR, 32);
+        }
+        w.put(32, 4);
+        for (uint256 q; q < 32; q++) {
+            w.put(3, 4);
+            for (uint256 i; i < 3 * 2; i++) {
+                w.put(DENSE_SCALAR, 32);
+            }
+        }
+        return w.finish();
+    }
+
     /// Sets the share-receipt stub's key set and signing keys to `panel`'s.
     function _setPanel(string memory sr, string memory panel) internal {
         uint256 mask;
@@ -1929,6 +2092,7 @@ contract BoardTest is TestBase {
         bytes32 c = keccak256(bytes(s));
         if (c == keccak256("ballot-stray")) return BallotCheckLib.Code.BallotStray;
         if (c == keccak256("ballot-tier")) return BallotCheckLib.Code.BallotTier;
+        if (c == keccak256("ballot-cell")) return BallotCheckLib.Code.BallotCell;
         if (c == keccak256("validity-shape")) return BallotCheckLib.Code.ValidityShape;
         if (c == keccak256("share-hash-unqualified")) {
             return BallotCheckLib.Code.ShareHashUnqualified;

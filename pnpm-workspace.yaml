@@ -41,6 +41,10 @@ catalog:
   "@changesets/cli": 3.0.3
   "@fontsource-variable/jetbrains-mono": 5.3.0
   "@fontsource-variable/oxanium": 5.3.0
+  # Static fonts for apps/web's link previews: satori reads TTF, OTF and WOFF,
+  # and the variable packages ship only WOFF2.
+  "@fontsource/jetbrains-mono": 5.3.0
+  "@fontsource/oxanium": 5.3.0
   "@noble/ciphers": 2.4.0
   "@noble/curves": 2.4.0
   "@noble/hashes": 2.4.0
@@ -52,6 +56,8 @@ catalog:
   "@orpc/openapi-client": 1.15.4
   "@orpc/server": 1.15.4
   "@orpc/zod": 1.15.4
+  # apps/web's link previews: SVG to PNG in WebAssembly, no native binary.
+  "@resvg/resvg-wasm": 2.6.2
   "@shadcn/react": 0.3.1
   "@storybook/addon-a11y": 10.6.1
   "@storybook/addon-vitest": 10.6.1
@@ -83,6 +89,9 @@ catalog:
   react-day-picker: 10.0.2
   react-dom: 19.3.0
   react-resizable-panels: 4.14.2
+  # apps/web's link previews: card layout and text to SVG paths. 0.26.0, the
+  # last release before harfbuzzjs joined its dependencies.
+  satori: 0.26.0
   recharts: 3.8.0
   # Only for the recharts>reselect override below.
   reselect: 5.3.0

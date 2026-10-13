@@ -15,7 +15,7 @@ The brief's two registers share every token, component and motion rule; they dif
 - The question is the hero: large, warm, sentence case, nothing above it but who asked and when it closes. Options are big, friendly targets; answering is a tap or two.
 - Results are sentences first ("Most people here want better lighting on the river path"), then bars with plain percentages and counts. The tier still leads the result, in words ("among 2,418 people with an account"), never as a code ("Tier 0").
 - Evidence lives one step down, behind "How do we know this is real?": a sheet or expandable section holding the fingerprint, receipt, board entry, trustees and the link to the civic record of the same poll. On the surface, the fingerprint appears only as a small seal.
-- No `SectionMark` numbering, fewer mono labels, rounder rhythm: more air, larger type, cards with `rounded-xl` where it helps grouping, softer rules (`border-border` only, no heavy totals rules).
+- No `SectionMark` numbering, fewer mono labels, more air, larger type, softer rules (`border-border` only, no heavy totals rules). Still square: the preset (`base-lyra`) draws every component with square corners, and both registers keep them. Warmth comes from type, spacing, copy and colour, never from rounding.
 - Live results move with the data: when the poll has live results, bars ease to each newly published total (a real batch, never interpolated) and say when ("updated 14:00, 38 new answers"). Sealed polls say plainly when results appear.
 - Discovery is a calm stream of questions: one question per card, answerable from the card (handing off to the ballot client), filters by topic and place. No infinite autoplay, no ranking by outrage, no counts of "people viewing now".
 - Copy is conversational but plain: "You answered", "Change your answer", "Results so far". Still no exclamation marks, hype or emoji.
@@ -29,6 +29,10 @@ The brief's two registers share every token, component and motion rule; they dif
 - **Large, quiet headings.** Page titles in Oxanium at `text-5xl`–`text-7xl`, `font-semibold`, tight leading, never centred over more than one line of body copy. Body copy at `text-base`/`text-lg`, `max-w-prose`.
 - **Evidence in the evidence face.** Hashes, entry numbers, times (UTC), CIDs, client hashes and trustee keys are JetBrains Mono (`font-mono`), usually `text-xs` with `tracking-wide`, paired with a `Fingerprint` where a person might compare them.
 - **One task per screen** on the ballot client, and on any web page that takes input.
+
+## Shape
+
+Square corners everywhere (`rounded-none`, the preset's own choice), in both registers: cards, buttons, chips, inputs, bars and dialogs. The only circles are a single-choice mark on a ballot (a radio, beside square checkboxes, so the two read differently) and the preset's own round parts (switch thumbs, slider thumbs, avatars). Don't add `rounded-*` classes.
 
 ## Colour
 

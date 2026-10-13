@@ -114,7 +114,7 @@ function Phone({ challenged }: { challenged: boolean }) {
       aria-hidden="true"
       className="w-36 shrink-0 rounded-[1.75rem] border-2 border-foreground p-2.5 sm:w-48 sm:p-3"
     >
-      <span className="mx-auto mb-3 block h-1 w-10 rounded-full bg-foreground/25" />
+      <span className="mx-auto mb-3 block h-1 w-10 bg-foreground/25" />
       <p className="m-0 font-mono text-[0.625rem] tracking-wide text-muted-foreground uppercase sm:text-xs">
         {LEVY.title}
       </p>
@@ -129,7 +129,7 @@ function Phone({ challenged }: { challenged: boolean }) {
           >
             <span
               className={cn(
-                "mt-0.5 size-3 shrink-0 rounded-full border border-foreground",
+                "mt-0.5 size-3 shrink-0 border border-foreground",
                 i === 0 && "bg-foreground",
               )}
             />

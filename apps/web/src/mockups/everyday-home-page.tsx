@@ -36,7 +36,7 @@ function Hero() {
       </div>
       <section
         aria-labelledby="featured-title"
-        className="grid content-start gap-5 rounded-xl border border-border p-5 sm:p-7 lg:col-span-5"
+        className="grid content-start gap-5 border border-border p-5 sm:p-7 lg:col-span-5"
       >
         <Byline className="text-sm">
           <span>Asked by {RIVERSIDE.askedBy}</span>
@@ -139,7 +139,7 @@ const TRUST: readonly TrustStep[] = [
 
 function Panel({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="grid content-start gap-3 rounded-xl border border-border p-4">
+    <div className="grid content-start gap-3 border border-border p-4">
       <span className="text-sm text-muted-foreground">{label}</span>
       {children}
     </div>
@@ -155,9 +155,9 @@ function MiniBars() {
   return (
     <span className="grid gap-2">
       {rows.map((r, i) => (
-        <span key={r.key} className="block h-2.5 overflow-hidden rounded-full bg-muted">
+        <span key={r.key} className="block h-2.5 overflow-hidden bg-muted">
           <span
-            className={cn("block h-full rounded-full", i === 0 ? "bg-primary" : "bg-foreground/55")}
+            className={cn("block h-full ", i === 0 ? "bg-primary" : "bg-foreground/55")}
             style={{ width: `${r.share * 100}%` }}
           />
         </span>
@@ -177,7 +177,7 @@ function TrustGraphic({ step }: { step: number }) {
       {step === 0 ? (
         <div className="grid items-center gap-4 sm:grid-cols-[1fr_auto_1fr]">
           <Panel label="Your answer">
-            <span className="rounded-lg border border-border px-3 py-2 text-base">
+            <span className="border border-border px-3 py-2 text-base">
               {FEATURED.options[0]!.label}
             </span>
           </Panel>
@@ -199,12 +199,12 @@ function TrustGraphic({ step }: { step: number }) {
                 <li
                   key={hash}
                   className={cn(
-                    "flex items-center gap-3 rounded-lg border px-3 py-2",
+                    "flex items-center gap-3 border px-3 py-2",
                     mine ? "border-primary" : "border-border",
                   )}
                 >
                   <Fingerprint value={hash} label="Board entry" size={24} />
-                  <span className="h-2 flex-1 rounded-full bg-muted" />
+                  <span className="h-2 flex-1 bg-muted" />
                   {mine ? <span className="text-sm font-medium">Yours</span> : null}
                 </li>
               );
@@ -219,7 +219,7 @@ function TrustGraphic({ step }: { step: number }) {
             {["Abolish", ...RIVERSIDE.trustees.added].map((name) => (
               <span
                 key={name}
-                className="inline-flex items-center gap-2 rounded-full border border-border px-3 py-1.5 text-sm"
+                className="inline-flex items-center gap-2 border border-border px-3 py-1.5 text-sm"
               >
                 <KeyRound className="size-4" />
                 {name}

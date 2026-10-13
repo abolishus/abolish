@@ -51,3 +51,19 @@ export function securityHeaders(nonce: string): Readonly<Record<string, string>>
       "camera=(), microphone=(), geolocation=(), usb=(), serial=(), hid=(), bluetooth=(), payment=(), browsing-topics=()",
   };
 }
+
+/**
+ * The headers on a link-preview image. No document runs in it, so the policy
+ * only refuses everything; other origins may load it (a chat's web client
+ * shows it from our URL), and its caching is the route's own: a preview
+ * carries no nonce and nothing about whoever fetched it.
+ */
+export function imageHeaders(): Readonly<Record<string, string>> {
+  return {
+    "content-security-policy": "default-src 'none'; frame-ancestors 'none'; sandbox",
+    "x-content-type-options": "nosniff",
+    "referrer-policy": "no-referrer",
+    "cross-origin-resource-policy": "cross-origin",
+    "strict-transport-security": "max-age=31536000",
+  };
+}

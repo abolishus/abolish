@@ -52,7 +52,7 @@ export function EmbedCard({
       aria-labelledby={titleId}
       data-theme={theme}
       data-testid="embed-card"
-      className="@container grid gap-4 rounded-xl border border-border bg-background p-5 font-sans text-foreground"
+      className="@container grid gap-4 border border-border bg-background p-5 font-sans text-foreground"
     >
       <header className="flex items-center gap-3">
         <SealMark id={poll.id} size={40} />
@@ -73,7 +73,7 @@ export function EmbedCard({
             <li key={text} className="grid grid-cols-[1.75rem_1fr] gap-2 text-base">
               <span
                 aria-hidden="true"
-                className="grid size-7 place-items-center rounded-full bg-muted text-sm font-semibold"
+                className="grid size-7 place-items-center bg-muted text-sm font-semibold"
               >
                 {i + 1}
               </span>
@@ -98,7 +98,7 @@ export function EmbedCard({
                     href={ballotHref(poll.id, option.key)}
                     target="_blank"
                     rel="noopener"
-                    className="grid min-h-12 gap-1.5 rounded-lg border border-border px-4 py-3 hover:border-foreground focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none"
+                    className="grid min-h-12 gap-1.5 border border-border px-4 py-3 hover:border-foreground focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none"
                   >
                     <span className="flex items-baseline justify-between gap-3">
                       <span className="text-base text-pretty">{option.label}</span>
@@ -109,9 +109,9 @@ export function EmbedCard({
                       )}
                     </span>
                     {share === undefined ? null : (
-                      <span aria-hidden="true" className="block h-1.5 rounded-full bg-muted">
+                      <span aria-hidden="true" className="block h-1.5 bg-muted">
                         <span
-                          className="block h-full rounded-full bg-foreground/55"
+                          className="block h-full bg-foreground/55"
                           style={{ width: `${share * 100}%` }}
                         />
                       </span>
@@ -226,7 +226,7 @@ export function EmbedPanel({ poll }: { poll: SharePoll }) {
             <Label
               key={k.key}
               className={cn(
-                "flex min-h-12 items-start gap-3 rounded-lg border p-4 text-base leading-normal font-normal",
+                "flex min-h-12 items-start gap-3 border p-4 text-base leading-normal font-normal",
                 kind === k.key ? "border-primary" : "border-border",
               )}
             >
@@ -283,7 +283,7 @@ export function EmbedPanel({ poll }: { poll: SharePoll }) {
         {kind === "card" ? (
           <EmbedCard poll={poll} theme={theme === "auto" ? undefined : theme} />
         ) : (
-          <p className="m-0 rounded-lg border border-dashed border-border p-4">
+          <p className="m-0 border border-dashed border-border p-4">
             <a href={shortHref(poll.id)} className="underline underline-offset-4">
               {poll.title}
             </a>

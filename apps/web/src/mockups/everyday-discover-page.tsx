@@ -8,7 +8,7 @@ import { EverydayShell, Frame, ROUND } from "./everyday-parts.tsx";
 import { StreamCard } from "./everyday-stream.tsx";
 
 const CHIP =
-  "h-12 rounded-full px-4 text-sm font-normal aria-pressed:bg-foreground aria-pressed:text-background";
+  "h-12 px-4 text-sm font-normal aria-pressed:bg-foreground aria-pressed:text-background";
 
 function Filter({
   label,
@@ -99,7 +99,7 @@ export function DiscoverPage({
             Questions
           </h2>
           {shown.length === 0 ? (
-            <div className="grid gap-2 rounded-xl border border-dashed border-border p-8">
+            <div className="grid gap-2 border border-dashed border-border p-8">
               <p className="m-0 font-heading text-xl font-semibold">Nothing here yet</p>
               <p className="m-0 text-base text-muted-foreground">
                 No open questions match both filters. Try one of them on its own, or ask the first

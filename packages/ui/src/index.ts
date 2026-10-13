@@ -3,6 +3,35 @@ export {
   type BoardLedgerProps,
   type LedgerEntry,
 } from "./components/board-ledger.tsx";
+export {
+  AnchorMark,
+  BOARD_KINDS,
+  BoardMap,
+  boardKindCode,
+  KindSwatch,
+  type BoardEntryKind,
+  type BoardMapLabels,
+  type BoardMapProps,
+  type BoardMapSegment,
+} from "./components/board-map.tsx";
+export {
+  BOARD_ZOOM_VIEWS,
+  BoardZoom,
+  BoardZoomGraphic,
+  type BoardZoomEntry,
+  type BoardZoomGraphicProps,
+  type BoardZoomProps,
+  type BoardZoomView,
+} from "./components/board-zoom.tsx";
+export {
+  InclusionPath,
+  type InclusionAnchor,
+  type InclusionPathLabels,
+  type InclusionPathProps,
+  type InclusionSibling,
+  type InclusionVerdict,
+} from "./components/inclusion-path.tsx";
+export { auditPath, type AuditStep, type EntryRange } from "./lib/board-tree.ts";
 export { Button, buttonVariants, type ButtonProps } from "./components/ui/button.tsx";
 export {
   Card,
@@ -23,6 +52,17 @@ export {
   type FingerprintProps,
 } from "./components/fingerprint.tsx";
 export { groupHex, Hash, type HashProps } from "./components/hash.tsx";
+export { QrCode, type QrCodeProps } from "./components/qr-code.tsx";
+export {
+  encodeQr,
+  QR_MAX_VERSION,
+  QR_MIN_VERSION,
+  QR_QUIET_ZONE,
+  type QrLevel,
+  type QrMode,
+  type QrOptions,
+  type QrSymbol,
+} from "./lib/qr.ts";
 export { ScrollScene, type ScrollSceneProps } from "./components/scroll-scene.tsx";
 export { SectionMark, type SectionMarkProps } from "./components/section-mark.tsx";
 export { StatFigure, type StatFigureProps } from "./components/stat-figure.tsx";

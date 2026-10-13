@@ -66,7 +66,7 @@ export function OgCard({ poll, format = "landscape" }: { poll: SharePoll; format
         <span aria-hidden="true">·</span>
         <span>{poll.place}</span>
         {many ? (
-          <span className="ms-auto rounded-full border-2 border-border px-5 text-foreground">
+          <span className="ms-auto border-2 border-border px-5 text-foreground">
             {poll.questions.length} questions
           </span>
         ) : null}
@@ -98,14 +98,8 @@ export function OgCard({ poll, format = "landscape" }: { poll: SharePoll; format
             </p>
           ) : null}
           <p className={cn("m-0 font-semibold text-pretty", t.lead)}>{lead.sentence}</p>
-          <span
-            aria-hidden="true"
-            className={cn("block overflow-hidden rounded-full bg-muted", t.bar)}
-          >
-            <span
-              className="block h-full rounded-full bg-primary"
-              style={{ width: `${lead.share * 100}%` }}
-            />
+          <span aria-hidden="true" className={cn("block overflow-hidden bg-muted", t.bar)}>
+            <span className="block h-full bg-primary" style={{ width: `${lead.share * 100}%` }} />
           </span>
           <p className={cn("m-0 text-muted-foreground tabular-nums", t.small)}>
             {poll.state === "closed"
@@ -243,7 +237,7 @@ export function OgPreview({
   const size = OG_SIZE[format];
   return (
     <figure className={cn("m-0 grid gap-3", className)}>
-      <div className="overflow-hidden rounded-lg border border-border">
+      <div className="overflow-hidden border border-border">
         <ScaleToFit width={size.width} height={size.height}>
           {civic || poll === undefined ? (
             <CivicOgCard format={format} />
@@ -275,7 +269,7 @@ export function ChatUnfurl({
   return (
     <div
       className={cn(
-        "grid w-full gap-2 rounded-2xl bg-muted p-3",
+        "grid w-full gap-2 bg-muted p-3",
         width === 600 ? "max-w-[600px]" : "max-w-[300px]",
       )}
     >
@@ -286,7 +280,7 @@ export function ChatUnfurl({
       >
         {shortHref(poll.id)}
       </a>
-      <div className="overflow-hidden rounded-xl border border-border bg-background">
+      <div className="overflow-hidden border border-border bg-background">
         <ScaleToFit width={1200} height={630}>
           <OgCard poll={poll} />
         </ScaleToFit>

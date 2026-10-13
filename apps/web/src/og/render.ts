@@ -1,0 +1,72 @@
+// Link previews as PNG, rendered on our own server: satori lays the card out
+// and turns its text into paths, resvg (WebAssembly) rasterises the SVG. The
+// fonts and the resvg module are inlined into the server bundle, so the
+// deployable reads nothing from node_modules or the network at run time, and
+// the same model always gives the same bytes.
+
+import oxanium400Ext from "@fontsource/oxanium/files/oxanium-latin-ext-400-normal.woff?bytes";
+import oxanium600Ext from "@fontsource/oxanium/files/oxanium-latin-ext-600-normal.woff?bytes";
+import oxanium400 from "@fontsource/oxanium/files/oxanium-latin-400-normal.woff?bytes";
+import oxanium600 from "@fontsource/oxanium/files/oxanium-latin-600-normal.woff?bytes";
+import jetbrainsMono400 from "@fontsource/jetbrains-mono/files/jetbrains-mono-latin-400-normal.woff?bytes";
+import { initWasm, Resvg } from "@resvg/resvg-wasm";
+import resvgWasm from "@resvg/resvg-wasm/index_bg.wasm?bytes";
+import { createElement } from "react";
+import satori, { type SatoriOptions } from "satori";
+
+import { PreviewCard } from "./card.tsx";
+import { checkPreview, type PollPreview, type PreviewFormat, PREVIEW_SIZE } from "./model.ts";
+
+/** The bytes of a `?bytes` import (vite.config.ts). */
+const bytesOf = (base64: string): Uint8Array<ArrayBuffer> =>
+  Uint8Array.from(Buffer.from(base64, "base64"));
+
+const font = (name: string, weight: 400 | 600, base64: string) =>
+  ({ name, weight, style: "normal", data: bytesOf(base64).buffer }) as const;
+
+const FONTS: SatoriOptions["fonts"] = [
+  font("Oxanium", 400, oxanium400),
+  font("Oxanium", 600, oxanium600),
+  font("Oxanium", 400, oxanium400Ext),
+  font("Oxanium", 600, oxanium600Ext),
+  font("JetBrains Mono", 400, jetbrainsMono400),
+];
+
+let ready: Promise<void> | undefined;
+
+/** resvg's module, instantiated once per process. */
+function resvg(): Promise<void> {
+  ready ??= initWasm(bytesOf(resvgWasm)).catch((error: unknown) => {
+    // Another copy of this module (a test's fresh import) got there first.
+    if (error instanceof Error && error.message.startsWith("Already initialized")) return;
+    ready = undefined;
+    throw error;
+  });
+  return ready;
+}
+
+/** The card for `model` as SVG, text drawn as paths. */
+export async function previewSvg(model: PollPreview, format: PreviewFormat): Promise<string> {
+  checkPreview(model);
+  const { width, height } = PREVIEW_SIZE[format];
+  return satori(createElement(PreviewCard, { model, format }), { width, height, fonts: FONTS });
+}
+
+/** The card for `model` as a PNG of `PREVIEW_SIZE[format]`. */
+export async function renderPreview(
+  model: PollPreview,
+  format: PreviewFormat,
+): Promise<Uint8Array<ArrayBuffer>> {
+  const [svg] = await Promise.all([previewSvg(model, format), resvg()]);
+  const image = new Resvg(svg, { fitTo: { mode: "original" }, font: { loadSystemFonts: false } });
+  try {
+    const rendered = image.render();
+    try {
+      return Uint8Array.from(rendered.asPng());
+    } finally {
+      rendered.free();
+    }
+  } finally {
+    image.free();
+  }
+}

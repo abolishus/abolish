@@ -427,3 +427,84 @@ describe("failures", () => {
     }
   });
 });
+
+describe("link preview", () => {
+  /** A PNG's width and height, from its IHDR chunk, after checking the signature. */
+  async function pngSize(response: Response) {
+    const png = new Uint8Array(await response.arrayBuffer());
+    expect([...png.subarray(0, 8)]).toEqual([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    expect(new TextDecoder().decode(png.subarray(12, 16))).toBe("IHDR");
+    const view = new DataView(png.buffer);
+    return [view.getUint32(16), view.getUint32(20)];
+  }
+
+  /** The poll page's og:image, which names the preview's current version. */
+  async function ogImage(): Promise<URL> {
+    const html = await (await get(`/polls/${ID}`)).text();
+    const image = /<meta property="og:image" content="([^"]+)"/.exec(html)?.[1];
+    if (image === undefined) throw new Error("no og:image");
+    expect(html).toContain('<meta name="twitter:card" content="summary_large_image"');
+    expect(html).toContain('<meta property="og:image:width" content="1200"');
+    expect(html).toContain('<meta name="twitter:image" content="');
+    return new URL(image.replaceAll("&amp;", "&"));
+  }
+
+  test("the poll page names a versioned image, cached for good, with no cookie", async () => {
+    const image = await ogImage();
+    expect(image.origin).toBe("http://localhost");
+    expect(image.pathname).toBe(`/polls/${ID}/preview.png`);
+    expect(image.searchParams.get("v")).toMatch(/^[0-9a-f]{24}$/);
+    const response = await get(image.pathname + image.search, {
+      cookie: "__Secure-abolish-account.session_token=secret",
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("image/png");
+    expect(response.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
+    expect(response.headers.get("etag")).toBe(`"${image.searchParams.get("v")}"`);
+    expect(response.headers.get("set-cookie")).toBeNull();
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(response.headers.get("referrer-policy")).toBe("no-referrer");
+    // Chats' web clients show it from our URL.
+    expect(response.headers.get("cross-origin-resource-policy")).toBe("cross-origin");
+    expect(response.headers.get("content-security-policy")).toBe(
+      "default-src 'none'; frame-ancestors 'none'; sandbox",
+    );
+    expect(await pngSize(response)).toEqual([1200, 630]);
+  });
+
+  test("an unversioned or stale URL gets the current image, briefly cached and revalidated", async () => {
+    for (const path of [
+      `/polls/${ID}/preview.png`,
+      `/polls/${ID}/preview.png?v=${"0".repeat(24)}`,
+    ]) {
+      const response = await get(path);
+      expect(response.status).toBe(200);
+      expect(response.headers.get("cache-control")).toBe("public, max-age=300, must-revalidate");
+      const etag = response.headers.get("etag") ?? "";
+      expect(etag).toMatch(/^"[0-9a-f]{24}"$/);
+      await response.body?.cancel();
+      const again = await get(path, { "if-none-match": etag });
+      expect(again.status).toBe(304);
+      expect(await again.text()).toBe("");
+    }
+  });
+
+  test("comes square on request", async () => {
+    const response = await get(`/polls/${ID}/preview.png?format=square`);
+    expect(response.headers.get("content-type")).toBe("image/png");
+    expect(await pngSize(response)).toEqual([1080, 1080]);
+  });
+
+  test.each([
+    ["an unknown poll", `/polls/${UNKNOWN_ID}/preview.png`, 404],
+    ["a non-canonical ID", `/polls/${ID.toUpperCase()}/preview.png`, 404],
+    ["another election's definition", `/polls/${SWAPPED_ID}/preview.png`, 404],
+    ["an unknown format", `/polls/${ID}/preview.png?format=tall`, 400],
+    ["an unknown parameter", `/polls/${ID}/preview.png?utm_source=chat`, 400],
+  ])("refuses %s", async (_, path, status) => {
+    const response = await get(path);
+    expect(response.status).toBe(status);
+    expect(response.headers.get("content-type")).not.toBe("image/png");
+    expect(response.headers.get("cache-control")).toBe("no-store");
+  });
+});

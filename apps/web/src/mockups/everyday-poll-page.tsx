@@ -70,7 +70,7 @@ export function EverydayPollPage({ answered = false, results = "live" }: Everyda
 }
 
 const CHECK_TRIGGER =
-  "inline-flex min-h-12 items-center rounded-lg pe-3 text-start underline-offset-4 hover:underline focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none";
+  "inline-flex min-h-12 items-center pe-3 text-start underline-offset-4 hover:underline focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none";
 
 function Hero({ poll, answered }: { poll: EverydayPoll; answered: boolean }) {
   const count = poll.questions.length;
@@ -94,11 +94,11 @@ function Hero({ poll, answered }: { poll: EverydayPoll; answered: boolean }) {
         {poll.questions.map((q, i) => (
           <li
             key={q.key}
-            className="grid grid-cols-[2.5rem_1fr] gap-x-4 rounded-xl border border-border p-5 sm:p-6"
+            className="grid grid-cols-[2.5rem_1fr] gap-x-4 border border-border p-5 sm:p-6"
           >
             <span
               aria-hidden="true"
-              className="grid size-10 place-items-center rounded-full bg-muted font-heading text-lg font-semibold"
+              className="grid size-10 place-items-center bg-muted font-heading text-lg font-semibold"
             >
               {i + 1}
             </span>
@@ -113,7 +113,7 @@ function Hero({ poll, answered }: { poll: EverydayPoll; answered: boolean }) {
               </p>
               <ul className="m-0 flex list-none flex-wrap gap-2 p-0">
                 {q.options.map((o) => (
-                  <li key={o.key} className="rounded-full border border-border px-3 py-1 text-sm">
+                  <li key={o.key} className="border border-border px-3 py-1 text-sm">
                     {o.label}
                   </li>
                 ))}
@@ -126,7 +126,7 @@ function Hero({ poll, answered }: { poll: EverydayPoll; answered: boolean }) {
         {answered ? (
           <Answered />
         ) : (
-          <div className="grid gap-4 rounded-xl bg-muted/60 p-5 sm:p-6">
+          <div className="grid gap-4 bg-muted/60 p-5 sm:p-6">
             <a
               href={answerHref("riverside")}
               className={cn(buttonVariants({ size: "lg" }), ROUND, "justify-between")}
@@ -154,7 +154,7 @@ function Answered() {
   return (
     <section
       aria-labelledby="answered-title"
-      className="grid gap-4 rounded-xl border-2 border-primary p-5 sm:p-6"
+      className="grid gap-4 border-2 border-primary p-5 sm:p-6"
     >
       <h2
         id="answered-title"
@@ -170,7 +170,7 @@ function Answered() {
       <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
         <a
           href={`/receipt/${MY_ANSWER.receipt}`}
-          className="inline-flex min-h-12 items-center rounded-lg underline-offset-4 hover:underline"
+          className="inline-flex min-h-12 items-center underline-offset-4 hover:underline"
         >
           <Seal hash={MY_ANSWER.receipt} subject="your receipt">
             Your receipt
@@ -318,7 +318,7 @@ function SealedResults({ poll }: { poll: EverydayPoll }) {
             can’t see them either.
           </p>
         </div>
-        <div className="grid content-start gap-2 rounded-xl border border-border p-5 sm:p-6 lg:col-span-5">
+        <div className="grid content-start gap-2 border border-border p-5 sm:p-6 lg:col-span-5">
           <Lock aria-hidden="true" className="size-6" />
           <p className="m-0 font-heading text-4xl font-semibold tabular-nums">
             {num(LATEST.ballots)}

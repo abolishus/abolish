@@ -4,6 +4,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vite-plus/test";
 
 import { App, SharedOrigin } from "../src/app.tsx";
+import { ArrivalCheck, ArrivalChecklist, ElectionRefused } from "../src/check.tsx";
+import type { ElectionRefusal } from "../src/election.ts";
 import { Frame, Note, Part, ScreenTitle, type PollClass } from "../src/frame.tsx";
 
 // The client's CSP has `style-src 'self'`, which blocks every inline `style`
@@ -65,5 +67,38 @@ describe("the frame under the client's CSP", () => {
       expect(framed(c)).not.toContain("Election 3f8a 0c51");
       expect(framed(c)).toContain("Question 2 of 5");
     }
+  });
+
+  test.each<ElectionRefusal>([
+    { problem: "definition-undecodable" },
+    { problem: "another-election" },
+    { problem: "unregistered-definition", servedHash: "ab".repeat(32) },
+    { problem: "definition-ill-formed", rule: "timing" },
+    { problem: "display-text-undecodable" },
+    { problem: "display-text-ill-formed", rule: "commitment" },
+    { problem: "display-text-ill-formed", rule: "labels" },
+  ])("the refusal of $problem renders no inline style", (refusal) => {
+    const html = render(
+      createElement(ElectionRefused, {
+        refusal,
+        registeredHash: POLL.definitionHash,
+        origin: "https://ballot.example",
+      }),
+    );
+    expect(html).toContain("Don&#x27;t vote from this link");
+    expect(html).not.toMatch(/\sstyle=/i);
+  });
+
+  test("the arrival checks render no inline style", () => {
+    for (const html of [
+      render(createElement(ArrivalCheck, { definitionHash: POLL.definitionHash })),
+      render(
+        createElement(ArrivalChecklist, {
+          definitionHash: POLL.definitionHash,
+          origin: "https://ballot.example",
+        }),
+      ),
+    ])
+      expect(html).not.toMatch(/\sstyle=/i);
   });
 });

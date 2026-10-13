@@ -2,14 +2,7 @@ import { Button } from "@abolishus/ui";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, within } from "storybook/test";
 
-import {
-  CLIENT,
-  ENTRY_POINTS,
-  LEVY,
-  SHARED_GATEWAY_URL,
-  TAMPERED_DEFINITION_HASH,
-  type BallotElection,
-} from "./fixtures.ts";
+import { CLIENT, ENTRY_POINTS, LEVY, SHARED_GATEWAY_URL, type BallotElection } from "./fixtures.ts";
 import {
   ACTION,
   BallotFrame,
@@ -17,8 +10,6 @@ import {
   CheckItem,
   Evidence,
   Facts,
-  linkAction,
-  Notice,
   NumberedSteps,
   ScreenTitle,
   Section,
@@ -131,58 +122,6 @@ function OriginRefused() {
   );
 }
 
-function CheckFailed({ election }: { election: BallotElection }) {
-  return (
-    <BallotFrame
-      step="Check"
-      primary={
-        <a className={linkAction("outline")} href="https://abolish.us/verify">
-          How to report this
-        </a>
-      }
-    >
-      <ScreenTitle title="Don't vote from this link">
-        <p className="m-0">
-          The election this link opened doesn't match the one in the public registry, so this device
-          stopped before showing a ballot. Nothing was sent.
-        </p>
-      </ScreenTitle>
-      <Section index="01" title="What this device checked">
-        <Checklist label="Checks before voting">
-          <CheckItem state="passed" title={`This is the signed ballot client ${CLIENT.version}`}>
-            <Evidence label="Signed release hash" hash={CLIENT.hash} of="the signed release" />
-          </CheckItem>
-          <CheckItem state="failed" title="The election doesn't match the registry">
-            <p className="m-0 text-sm">
-              The definition this link served has a different hash from the one registered for{" "}
-              {election.title}. The two fingerprints below should be identical, and they are not.
-            </p>
-            <Evidence
-              label="Registered definition hash"
-              hash={election.definitionHash}
-              of="the registered definition"
-            />
-            <Evidence
-              label="Hash of the definition this link served"
-              hash={TAMPERED_DEFINITION_HASH}
-              of="the definition this link served"
-            />
-          </CheckItem>
-        </Checklist>
-      </Section>
-      <Section index="02" title="What you can do">
-        <Notice title="Try another entry point">
-          <p className="m-0">
-            Open the poll from {ENTRY_POINTS.map((e) => e.name).join(", ")}. If the check fails
-            there too, the organiser's published record may be wrong; tell them, and don't vote
-            until it is fixed.
-          </p>
-        </Notice>
-      </Section>
-    </BallotFrame>
-  );
-}
-
 const meta = {
   title: "Mockups/Ballot/Welcome",
   component: Welcome,
@@ -223,26 +162,5 @@ export const OriginRefusedScreen: Story = {
     // No way forward from here but another address: no ballot, no start button.
     await expect(canvas.queryByRole("button")).toBeNull();
     await expect(canvas.getByText("abolishus.eth")).toBeVisible();
-  },
-};
-
-export const ElectionCheckFailed: Story = {
-  name: "Election check failed",
-  render: (args) => <CheckFailed {...args} />,
-  play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
-    await expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent(
-      "Don't vote from this link",
-    );
-    const failed = canvas.getByText("The election doesn't match the registry").closest("li");
-    await expect(failed).toHaveTextContent("Failed");
-    // Both fingerprints are shown, so a voter sees the difference without reading hex.
-    await expect(
-      canvas.getByRole("img", { name: /^Fingerprint of the registered definition/ }),
-    ).toBeVisible();
-    await expect(
-      canvas.getByRole("img", { name: /^Fingerprint of the definition this link served/ }),
-    ).toBeVisible();
-    await expect(canvas.queryByRole("button", { name: "Start" })).toBeNull();
   },
 };

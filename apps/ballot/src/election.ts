@@ -11,6 +11,7 @@
 
 import {
   checkElectionToShow,
+  decodeElectionDefinition,
   ELECTION_TYPES,
   electionDefinitionHash,
   type ShowRefusal,
@@ -47,9 +48,22 @@ export interface CheckedElection {
   readonly translations: readonly Translation[];
 }
 
+/**
+ * Why the client refuses an election: the first check that failed. A
+ * definition the registry doesn't hold also carries its own hash, so the
+ * refusal can show both fingerprints side by side (T-34).
+ */
+export type ElectionRefusal =
+  | Exclude<ShowRefusal, { readonly problem: "unregistered-definition" }>
+  | {
+      readonly problem: "unregistered-definition";
+      /** Lowercase hex: the hash of the definition that was served. */
+      readonly servedHash: string;
+    };
+
 export type ElectionCheck =
   | { readonly ok: true; readonly election: CheckedElection }
-  | ({ readonly ok: false } & ShowRefusal);
+  | ({ readonly ok: false } & ElectionRefusal);
 
 const toHex = (bytes: Uint8Array) =>
   Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
@@ -79,7 +93,12 @@ export function checkElection(
     definitionBytes,
     displayTextBytes,
   );
-  if (!checked.ok) return checked;
+  if (!checked.ok) {
+    if (checked.problem !== "unregistered-definition") return checked;
+    // The check decoded this definition before comparing its hash, so it decodes again here.
+    const served = electionDefinitionHash(decodeElectionDefinition(definitionBytes));
+    return { ok: false, problem: checked.problem, servedHash: toHex(served) };
+  }
   const { definition, displayText } = checked;
   return {
     ok: true,

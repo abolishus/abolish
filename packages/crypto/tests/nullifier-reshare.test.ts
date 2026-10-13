@@ -354,6 +354,7 @@ describe("nullifier-reshare.json", () => {
           keys,
           polynomialsOf(d),
           d.shareRandomness.map((x) => ({ mu: hex(x.mu), e: BigInt(x.e) })),
+          params.deadline - 1000n,
         );
         expect(out.shares.map((x) => ({ recipient: x.recipient, bytes: toHex(x.bytes) }))).toEqual(
           d.resharedShares.map((x) => ({ recipient: x.recipient, bytes: x.bytes })),
@@ -641,6 +642,7 @@ function reshareTo(from: Holders, threshold: number, n: number, salt: number, de
       { index: i, identitySecret: from.secrets[i - 1] as Uint8Array },
       from.shares[i - 1] as SeatShare,
       keys,
+      params.deadline - 1000n,
     ),
   );
   const transcript: NullifierReshareTranscript = {
@@ -945,6 +947,7 @@ describe("a reshare's transcript check", () => {
           { index: i, identitySecret: initial.secrets[i - 1] as Uint8Array },
           initial.shares[i - 1] as SeatShare,
           keys,
+          params.deadline - 1000n,
         ).message,
     );
     const r = checkNullifierReshareTranscript(
@@ -990,9 +993,10 @@ describe("a node", () => {
   test("reshares only its own share, as its polynomials' constant terms", () => {
     const randomness = run.keys.map(() => ({ mu: new Uint8Array(32), e: 1n }));
     const other = initial.shares[1] as SeatShare;
-    expect(() => reshareDealing(run.params, dealer, other, run.keys)).toThrow(/doesn't open/);
+    const now = run.params.deadline - 1000n;
+    expect(() => reshareDealing(run.params, dealer, other, run.keys, now)).toThrow(/doesn't open/);
     expect(() =>
-      reshareDealing(run.params, dealer, { ...share, sk: share.sk + 1n }, run.keys),
+      reshareDealing(run.params, dealer, { ...share, sk: share.sk + 1n }, run.keys, now),
     ).toThrow(/doesn't open/);
     expect(() =>
       reshareDealingWith(
@@ -1002,6 +1006,7 @@ describe("a node", () => {
         run.keys,
         { f: [share.sk + 1n, 1n], g: [share.s, 1n] },
         randomness,
+        now,
       ),
     ).toThrow(/constant terms/);
     expect(() =>
@@ -1010,8 +1015,20 @@ describe("a node", () => {
         { ...dealer, identitySecret: initial.secrets[1] as Uint8Array },
         share,
         run.keys,
+        now,
       ),
     ).toThrow(/seat/);
+  }, 60_000);
+
+  test("an old seat deals only in a run whose deadline is ahead, and not too far", () => {
+    const d = run.params.deadline;
+    expect(() => reshareDealing(run.params, dealer, share, run.keys, d)).toThrow(/passed/);
+    expect(() =>
+      reshareDealing(run.params, dealer, share, run.keys, d - MAX_RESHARE_WINDOW - 1n),
+    ).toThrow(/too far ahead/);
+    expect(
+      reshareDealing(run.params, dealer, share, run.keys, d - MAX_RESHARE_WINDOW).message.index,
+    ).toBe(1);
   }, 60_000);
 
   test("complains only about dealers of round 2, and with its own round-1 keys", () => {

@@ -439,7 +439,8 @@ export interface ReshareDealing {
  * Internal: old seat `dealer.index`'s round-2 message from the given
  * polynomials and sealing randomness, one per new seat of round 1 in order.
  * The polynomials' constant terms must be `share`, which must open the
- * seat's `C_i`. Production code calls `reshareDealing`; the package entry
+ * seat's `C_i`, and the run's deadline must lie ahead of `currentL2Block` by
+ * at most `MAX_RESHARE_WINDOW`. Production code calls `reshareDealing`; the package entry
  * point doesn't export this.
  */
 export function reshareDealingWith(
@@ -449,9 +450,13 @@ export function reshareDealingWith(
   keys: readonly RegistrationKeysMessage[],
   polynomials: Polynomials,
   randomness: readonly ShareRandomness[],
+  currentL2Block: bigint,
 ): ReshareDealing {
   const run = runOf(params);
   seatKey(run.old, dealer);
+  // A dealer is held to one successor panel while a run to it is live, so it
+  // deals only in a run whose deadline is bounded (Round 2).
+  checkDeadline(params.deadline, currentL2Block);
   const h = checkedPrefix(run, { keys });
   checkPolynomials(polynomials, run.next.threshold);
   const own = run.commitments[dealer.index - 1];
@@ -511,6 +516,7 @@ export function reshareDealing(
   dealer: OldSeat,
   share: SeatShare,
   keys: readonly RegistrationKeysMessage[],
+  currentL2Block: bigint,
 ): ReshareDealing {
   const k = runOf(params).next.threshold;
   const f: bigint[] = [share.sk];
@@ -529,6 +535,7 @@ export function reshareDealing(
     keys,
     { f, g },
     keys.map(() => ({ mu: randomBytes(MLKEM_MSG_LEN), e: nonZeroRandom() })),
+    currentL2Block,
   );
 }
 

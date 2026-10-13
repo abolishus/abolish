@@ -455,14 +455,14 @@ export function sharingVersion(sharing: VoteSharing): 1 | 3 | undefined {
 // opened (the voter challenged it). One sharing is never both: an opened core
 // is never cast, and a cast core's randomness is never revealed
 // (docs/spec/challenge.md, Client rules; T-42, T-45).
-const SPENT = new WeakMap<VoteSharing, "proved" | "opened">();
+const SPENT = new WeakMap<VoteSharing | VoteSharingV4, "proved" | "opened">();
 
 /**
  * Internal: marks a sharing as opened by a challenge, or throws if it was
  * proved. Only `openChallenge` calls this; the package entry point doesn't
  * export it.
  */
-export function markOpened(sharing: VoteSharing): void {
+export function markOpened(sharing: VoteSharing | VoteSharingV4): void {
   if (SPENT.get(sharing) === "proved")
     throw new TypeError("open: this sharing was proved for casting; it is never opened");
   SPENT.set(sharing, "opened");
@@ -772,13 +772,13 @@ function checkBallotContextV3(ctx: BallotHashContextV3): void {
     throw new RangeError("context: the cell must be a u8");
 }
 
-// definition_hash ‖ u16(0x0002) ‖ u8(3) ‖ u8(cell) ‖ encode(nullifier): the
-// inputs before the committed vote's own encoding, at version 2's offsets.
-function headerV3(ctx: BallotHashContextV3): Writer {
+// definition_hash ‖ u16(0x0002) ‖ u8(version) ‖ u8(cell) ‖ encode(nullifier):
+// the inputs before the committed vote's own encoding, at version 2's offsets.
+function headerV3(ctx: BallotHashContextV3, version = BALLOT_VERSION_3): Writer {
   const w = new Writer();
   w.bytes(new Uint8Array(ctx.definitionHash));
   u16.write(w, BALLOT_RECORD_TYPE);
-  u8.write(w, BALLOT_VERSION_3);
+  u8.write(w, version);
   u8.write(w, ctx.cell);
   fieldBn254.write(w, ctx.nullifier);
   return w;
@@ -1022,6 +1022,405 @@ export function proveValidityV3(
 ): CommittedVoteV3 {
   checkContextV3(ctx);
   return proveValidityV3With(ctx, sharing, shareHashes, {
+    options: sharing.vss.map(() => randomOrNonces(2)),
+    questions: ctx.questions.map((q) => randomOrNonces(q.maxSelections - q.minSelections + 1)),
+  });
+}
+
+// Ballot version 4 (docs/spec/ballot-validity.md, Ballot record (version 4);
+// ADR 0027, Part 1, option A): version 3's committed vote with each option's
+// opening split additively in two, the default half Pedersen-shared to the
+// default panel and, when the definition has an author panel, the author half
+// to the author panel, so a vote opens only with both thresholds (T-14). The
+// vote commitment `C_j = E^D_{j,0} · E^A_{j,0}` is computed, never carried,
+// and the proofs are version 3's over it (T-17, T-30, T-31, T-32).
+
+/** The committed vote of ballot version 4: version 3's, with the author half after the default half. */
+export const COMMITTED_VOTE_V4 = struct([
+  ["vss", VSS],
+  ["share_hashes", SHARE_HASHES],
+  ["author_vss", VSS],
+  ["author_share_hashes", SHARE_HASHES],
+  ["option_proofs", list(bitProof, MAX_OPTIONS)],
+  ["sum_proofs", list(list(branch, MAX_OPTIONS + 1), MAX_QUESTIONS)],
+]);
+
+export type CommittedVoteV4 = CodecValue<typeof COMMITTED_VOTE_V4>;
+
+/** What the statement and core hashes bind of a version-4 committed vote: both halves and both share-hash lists. */
+export type VoteHalvesV4 = Pick<
+  CommittedVoteV4,
+  "vss" | "share_hashes" | "author_vss" | "author_share_hashes"
+>;
+
+/**
+ * The rules a version-4 ballot is shared and proved under (Context (version
+ * 4)): version 3's, with the author panel's `k_A` and `n_A`, both 0 when the
+ * definition has none.
+ */
+export interface ValidityRulesV4 extends ValidityRulesV3 {
+  readonly authorThreshold: number;
+  readonly authorPanelSize: number;
+}
+
+export type ValidityContextV4 = ValidityRulesV4 & BallotHashContextV3;
+
+const BALLOT_VERSION_4 = 4;
+
+function checkRulesV4(rules: ValidityRulesV4): void {
+  checkRulesV3(rules);
+  const { authorThreshold: k, authorPanelSize: n } = rules;
+  if (![k, n].every((x) => Number.isSafeInteger(x)))
+    throw new TypeError("rules: expected integers");
+  // No author panel, or one of 1 ≤ k_A ≤ n_A ≤ MAX_TRUSTEES (trustee-identity.md, Author panel identifier).
+  if (!(k === 0 && n === 0) && !(k >= 1 && k <= n && n <= MAX_TRUSTEES))
+    throw new RangeError("rules: author panel out of range");
+}
+
+function checkContextV4(ctx: ValidityContextV4): void {
+  checkRulesV4(ctx);
+  checkBallotContextV3(ctx);
+}
+
+/**
+ * `statement_hash` under ballot version 4 (Hashes (version 4)): version 3's
+ * with version input 4 and the author half after the default half, so the
+ * proved statement fixes the shares of both panels (T-30, T-31, T-32).
+ */
+export function statementHashV4(ctx: ValidityContextV4, halves: VoteHalvesV4): Uint8Array {
+  checkContextV4(ctx);
+  const w = headerV3(ctx, BALLOT_VERSION_4);
+  VSS.write(w, halves.vss);
+  SHARE_HASHES.write(w, halves.share_hashes);
+  VSS.write(w, halves.author_vss);
+  SHARE_HASHES.write(w, halves.author_share_hashes);
+  return H(ds("abolish/v1/ballot-statement", w.finish()));
+}
+
+/** `ballot_hash` under ballot version 4 (Hashes (version 4)): the header, then the committed vote's own encoding. */
+export function ballotHashV4(ctx: BallotHashContextV3, vote: CommittedVoteV4): Uint8Array {
+  checkBallotContextV3(ctx);
+  const w = headerV3(ctx, BALLOT_VERSION_4);
+  COMMITTED_VOTE_V4.write(w, vote);
+  return H(ds("abolish/v1/ballot", w.finish()));
+}
+
+/**
+ * Each flat option's vote commitment `C_j = E^D_{j,0} · E^A_{j,0}`, with
+ * `E^A_{j,0}` the identity when the ballot has no author half (Committed vote
+ * (version 4)). A product may be the identity; the proofs allow it.
+ */
+export function voteCommitmentsV4(halves: Pick<VoteHalvesV4, "vss" | "author_vss">): Element[] {
+  const { vss, author_vss } = halves;
+  if (author_vss.length !== 0 && author_vss.length !== vss.length)
+    throw new RangeError("voteCommitmentsV4: one author entry per option, or none");
+  return vss.map((e, j) => {
+    const d = e[0];
+    const a = author_vss.length === 0 ? IDENTITY : (author_vss[j] as readonly Element[])[0];
+    if (d === undefined || a === undefined)
+      throw new RangeError("voteCommitmentsV4: an option without its constant term");
+    return d.add(a);
+  });
+}
+
+/**
+ * `validity-shape` under version 4 alone (Checks (version 4)): version 3's
+ * counts for the default half, and the author half's against the author
+ * panel, both of its lists empty when the definition has none, so a ballot of
+ * a poll without one has exactly one encoding.
+ */
+export function shapeOkV4(ctx: ValidityContextV4, vote: CommittedVoteV4): boolean {
+  checkContextV4(ctx);
+  const { authorThreshold: kA, authorPanelSize: nA } = ctx;
+  const { total } = offsetsOf(ctx.questions);
+  const author =
+    nA === 0
+      ? vote.author_vss.length === 0 && vote.author_share_hashes.length === 0
+      : vote.author_vss.length === total &&
+        vote.author_vss.every((e) => e.length === kA) &&
+        vote.author_share_hashes.length === nA;
+  return author && shapeOkV3(ctx, vote);
+}
+
+/**
+ * The validity check of a version-4 committed vote (Checks (version 4);
+ * verifier 5.4): the shape, then version 3's option and range proofs over the
+ * computed `C_j`, under the version-4 statement. The first failure is the
+ * result, naming the flat option or the question.
+ */
+export function checkValidityV4(ctx: ValidityContextV4, vote: CommittedVoteV4): ValidityResultV3 {
+  checkContextV4(ctx);
+  if (!shapeOkV4(ctx, vote)) return { ok: false, code: "validity-shape" };
+  const statement = statementHashV4(ctx, vote);
+  const commitments = voteCommitmentsV4(vote);
+  for (const [j, p] of vote.option_proofs.entries()) {
+    const branches = [
+      { c: p.c0, z: p.z0 },
+      { c: p.c1, z: p.z1 },
+    ];
+    const y = commitments[j] as Element;
+    if (!verifyOr(OPTION_TAG, optionPrefix(statement, j), y, [0, 1], branches))
+      return { ok: false, code: "option-proof", option: j };
+  }
+  const { offsets } = offsetsOf(ctx.questions);
+  for (const [q, rules] of ctx.questions.entries()) {
+    const o = offsets[q] as number;
+    const { optionCount: m, minSelections: min, maxSelections: max } = rules;
+    const y = commitments.slice(o, o + m).reduce((acc, c) => acc.add(c), IDENTITY);
+    if (
+      !verifyOr(
+        QUESTION_SUM_TAG,
+        questionPrefix(statement, q, o, rules),
+        y,
+        range(min, max),
+        vote.sum_proofs[q] as readonly Branch[],
+      )
+    )
+      return { ok: false, code: "sum-proof", question: q };
+  }
+  return { ok: true };
+}
+
+/**
+ * The client's secret state of a version-4 ballot between sharing and
+ * proving: the votes, each half's polynomials, VSS commitments and seat
+ * shares. The author lists are empty when the definition has no author
+ * panel. Only `shareVoteV4` makes one, frozen, and only `proveValidityV4`
+ * proves it; version 1 and 3's provers and share encryption refuse it, so its
+ * halves never reach a seat as one sharing. The caller drops every reference
+ * once the voter casts (T-18, T-45).
+ */
+export interface VoteSharingV4 {
+  readonly votes: readonly (0 | 1)[];
+  /** The default half: `f^D_j` holds `v_j − a_j` then its higher coefficients, `g^D_j` holds `r_j − s_j` then its. */
+  readonly polynomials: readonly OptionPolynomials[];
+  readonly vss: CommittedVoteV4["vss"];
+  /** `shares[i − 1]` is default seat `i`'s list. */
+  readonly shares: readonly (readonly Share[])[];
+  /** The author half: `f^A_j` holds `a_j`, `g^A_j` holds `s_j`, then their higher coefficients. */
+  readonly authorPolynomials: readonly OptionPolynomials[];
+  readonly authorVss: CommittedVoteV4["author_vss"];
+  /** `authorShares[i − 1]` is author seat `i`'s list. */
+  readonly authorShares: readonly (readonly Share[])[];
+}
+
+const SHARINGS_V4 = new WeakSet<VoteSharingV4>();
+
+function checkPolynomials(polynomials: readonly OptionPolynomials[], count: number, k: number) {
+  if (polynomials.length !== count) throw new RangeError("polynomials: one per option");
+  for (const p of polynomials) {
+    if (p.f.length !== k || p.g.length !== k) throw new RangeError("polynomials: k coefficients");
+    for (const c of [...p.f, ...p.g])
+      if (typeof c !== "bigint" || c < 0n || c >= GROUP_ORDER)
+        throw new RangeError("polynomials: coefficients must be scalars");
+  }
+}
+
+function commitAll(polynomials: readonly OptionPolynomials[], first: (j: number) => Element) {
+  return polynomials.map((p, j) =>
+    p.f.map((a, t) => {
+      const e = t === 0 ? first(j) : pedersen(a, p.g[t] as bigint);
+      // About 2⁻²⁵² for random coefficients; the codec rejects it, so the
+      // caller draws again (Committed vote (version 4)).
+      if (e.is0()) throw new RangeError("polynomials: a VSS commitment is the identity");
+      return e;
+    }),
+  );
+}
+
+const sharesOf = (polynomials: readonly OptionPolynomials[], n: number) =>
+  Array.from({ length: n }, (_, i) =>
+    polynomials.map((p) => ({ v: evaluate(p.f, BigInt(i + 1)), r: evaluate(p.g, BigInt(i + 1)) })),
+  );
+
+/**
+ * Internal: shares a version-4 vote with the given polynomials, the default
+ * half's and the author half's (none without an author panel). Production
+ * code calls `shareVoteV4`; the package entry point doesn't export this.
+ */
+export function shareVoteV4With(
+  rules: ValidityRulesV4,
+  votes: readonly (0 | 1)[],
+  polynomials: readonly OptionPolynomials[],
+  authorPolynomials: readonly OptionPolynomials[],
+): VoteSharingV4 {
+  checkRulesV4(rules);
+  checkVotesV3(rules, votes);
+  const T = votes.length;
+  const nA = rules.authorPanelSize;
+  checkPolynomials(polynomials, T, rules.threshold);
+  checkPolynomials(authorPolynomials, nA === 0 ? 0 : T, rules.authorThreshold);
+  const authorConstant = (j: number, c: "f" | "g") =>
+    nA === 0 ? 0n : ((authorPolynomials[j] as OptionPolynomials)[c][0] as bigint);
+  polynomials.forEach((p, j) => {
+    if (mod((p.f[0] as bigint) + authorConstant(j, "f")) !== BigInt(votes[j] as number))
+      throw new RangeError("polynomials: the halves' constant terms don't add to the vote");
+  });
+  const vss = commitAll(polynomials, (j) => {
+    const p = polynomials[j] as OptionPolynomials;
+    // Without an author half the constant term is the vote itself, committed
+    // with the same multiplications whatever it is (Residuals).
+    return nA === 0
+      ? commitVote(p.f[0] as bigint, p.g[0] as bigint)
+      : pedersen(p.f[0] as bigint, p.g[0] as bigint);
+  });
+  const authorVss = commitAll(authorPolynomials, (j) => {
+    const p = authorPolynomials[j] as OptionPolynomials;
+    return pedersen(p.f[0] as bigint, p.g[0] as bigint);
+  });
+  // Frozen and registered, so `proveValidityV4` proves only a sharing made
+  // here: a caller choosing r_j or a half could publish a commitment anyone
+  // can open (T-15).
+  const sharing: VoteSharingV4 = deepFreeze({
+    votes: [...votes],
+    polynomials: polynomials.map((p) => ({ f: [...p.f], g: [...p.g] })),
+    vss,
+    shares: sharesOf(polynomials, rules.panelSize),
+    authorPolynomials: authorPolynomials.map((p) => ({ f: [...p.f], g: [...p.g] })),
+    authorVss,
+    authorShares: sharesOf(authorPolynomials, nA),
+  });
+  SHARINGS_V4.add(sharing);
+  return sharing;
+}
+
+/**
+ * Shares a version-4 vote between the default panel and, when the definition
+ * has one, the author panel, every value from the CSPRNG, uniformly and
+ * independently (Committed vote (version 4)): `r_j`, the default half's
+ * higher coefficients, then the author half `(a_j, s_j)` and its higher
+ * coefficients. The author panel's protection rests on this draw (T-14, T-41).
+ */
+export function shareVoteV4(rules: ValidityRulesV4, votes: readonly (0 | 1)[]): VoteSharingV4 {
+  checkRulesV4(rules);
+  checkVotesV3(rules, votes);
+  const { threshold: kD, authorThreshold: kA, authorPanelSize: nA } = rules;
+  const draw = (n: number) => Array.from({ length: n }, randomScalar);
+  for (;;) {
+    const polynomials: OptionPolynomials[] = [];
+    const authorPolynomials: OptionPolynomials[] = [];
+    for (const v of votes) {
+      const r = randomScalar();
+      const [aD, bD] = [draw(kD - 1), draw(kD - 1)];
+      const [a, s] = nA === 0 ? [0n, 0n] : [randomScalar(), randomScalar()];
+      polynomials.push({ f: [mod(BigInt(v) - a), ...aD], g: [mod(r - s), ...bD] });
+      if (nA !== 0) authorPolynomials.push({ f: [a, ...draw(kA - 1)], g: [s, ...draw(kA - 1)] });
+    }
+    try {
+      return shareVoteV4With(rules, votes, polynomials, authorPolynomials);
+    } catch (e) {
+      // Only an identity VSS commitment is retried; anything else is a bug.
+      if (!(e instanceof RangeError && e.message.includes("identity"))) throw e;
+    }
+  }
+}
+
+/**
+ * Internal: proves a version-4 sharing valid with the given randomness.
+ * Production code calls `proveValidityV4`; the package entry point doesn't
+ * export this.
+ */
+export function proveValidityV4With(
+  ctx: ValidityContextV4,
+  sharing: VoteSharingV4,
+  shareHashes: CommittedVoteV4["share_hashes"],
+  authorShareHashes: CommittedVoteV4["author_share_hashes"],
+  nonces: ValidityNoncesV3,
+): CommittedVoteV4 {
+  checkContextV4(ctx);
+  if (!SHARINGS_V4.has(sharing))
+    throw new TypeError("prove: the sharing must come from shareVoteV4, unchanged");
+  if (SPENT.get(sharing) === "opened")
+    throw new TypeError("prove: this sharing was opened by a challenge; it is never cast");
+  const { offsets, total } = offsetsOf(ctx.questions);
+  const nA = ctx.authorPanelSize;
+  if (
+    sharing.vss.length !== total ||
+    sharing.vss.some((e) => e.length !== ctx.threshold) ||
+    sharing.authorVss.length !== (nA === 0 ? 0 : total) ||
+    sharing.authorVss.some((e) => e.length !== ctx.authorThreshold) ||
+    sharing.shares.length !== ctx.panelSize ||
+    sharing.authorShares.length !== nA
+  )
+    throw new RangeError("prove: the sharing doesn't match the election");
+  if (shareHashes.length !== ctx.panelSize)
+    throw new RangeError("prove: one share hash per default seat");
+  if (authorShareHashes.length !== nA)
+    throw new RangeError("prove: one share hash per author seat");
+  if (nonces.options.length !== total) throw new RangeError("prove: one nonce set per option");
+  if (nonces.questions.length !== ctx.questions.length)
+    throw new RangeError("prove: one nonce set per question");
+  // The sharing's votes were checked against rules when it was made; these
+  // rules may differ, so each question's count is checked again before proving.
+  checkVotesV3(ctx, sharing.votes);
+  const halves = {
+    vss: sharing.vss,
+    share_hashes: shareHashes,
+    author_vss: sharing.authorVss,
+    author_share_hashes: authorShareHashes,
+  };
+  const statement = statementHashV4(ctx, halves);
+  const commitments = voteCommitmentsV4(halves);
+  // The client knows the whole r_j, never only a half (Validity proofs (version 4)).
+  const rs = sharing.polynomials.map((p, j) =>
+    mod(
+      (p.g[0] as bigint) +
+        (nA === 0 ? 0n : ((sharing.authorPolynomials[j] as OptionPolynomials).g[0] as bigint)),
+    ),
+  );
+  const option_proofs = commitments.map((y, j) => {
+    const branches = proveOr(
+      OPTION_TAG,
+      optionPrefix(statement, j),
+      y,
+      [0, 1],
+      sharing.votes[j] as 0 | 1,
+      rs[j] as bigint,
+      nonces.options[j] as OrNonces,
+    );
+    // proveOr returns one branch per value, here two.
+    const [b0, b1] = branches as [Branch, Branch];
+    return { c0: b0.c, z0: b0.z, c1: b1.c, z1: b1.z };
+  });
+  // After every option proof, in question order (Question range proof, Proving).
+  const sum_proofs = ctx.questions.map((rules, q) => {
+    const o = offsets[q] as number;
+    const { optionCount: m, minSelections: min, maxSelections: max } = rules;
+    const count = sharing.votes.slice(o, o + m).reduce<number>((a, v) => a + v, 0);
+    const rho = mod(rs.slice(o, o + m).reduce((a, r) => a + r, 0n));
+    const y = commitments.slice(o, o + m).reduce((acc, c) => acc.add(c), IDENTITY);
+    return proveOr(
+      QUESTION_SUM_TAG,
+      questionPrefix(statement, q, o, rules),
+      y,
+      range(min, max),
+      count - min,
+      rho,
+      nonces.questions[q] as OrNonces,
+    );
+  });
+  const vote = { ...halves, option_proofs, sum_proofs };
+  // Round-trips the result through the codec, so a ballot this returns always encodes.
+  encode(COMMITTED_VOTE_V4, vote);
+  SPENT.set(sharing, "proved");
+  return vote;
+}
+
+/**
+ * Proves a version-4 sharing valid: an option proof per flat option over its
+ * computed `C_j`, then a range proof per question, all randomness from the
+ * CSPRNG (Validity proofs (version 4)). The share-hash lists are the
+ * ciphertexts' hashes in seat order, the author list empty without an author
+ * panel.
+ */
+export function proveValidityV4(
+  ctx: ValidityContextV4,
+  sharing: VoteSharingV4,
+  shareHashes: CommittedVoteV4["share_hashes"],
+  authorShareHashes: CommittedVoteV4["author_share_hashes"],
+): CommittedVoteV4 {
+  checkContextV4(ctx);
+  return proveValidityV4With(ctx, sharing, shareHashes, authorShareHashes, {
     options: sharing.vss.map(() => randomOrNonces(2)),
     questions: ctx.questions.map((q) => randomOrNonces(q.maxSelections - q.minSelections + 1)),
   });

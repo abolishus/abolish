@@ -10,6 +10,7 @@ import {
   BALLOT_RECORD_TYPE,
   BALLOT_VERSION,
   type CommittedVote,
+  type CommittedVoteV4,
   markOpened,
   type Share,
   sharingVersion,
@@ -157,6 +158,37 @@ export function cellCoreHash(core: CellBallotCore): Uint8Array {
   u8.write(w, core.cell);
   VSS.write(w, core.vss);
   SHARE_HASHES.write(w, core.shareHashes);
+  return H(ds("abolish/v1/ballot-core", w.finish()));
+}
+
+/** The core of a ballot of version 4: version 3's, with the author half (empty without an author panel). */
+export interface CellBallotCoreV4 {
+  readonly definitionHash: Uint8Array;
+  readonly cell: number;
+  readonly vss: CommittedVoteV4["vss"];
+  readonly shareHashes: CommittedVoteV4["share_hashes"];
+  readonly authorVss: CommittedVoteV4["author_vss"];
+  readonly authorShareHashes: CommittedVoteV4["author_share_hashes"];
+}
+
+/**
+ * The tracking code of a core of ballot version 4 (docs/spec/ballot-validity.md,
+ * Hashes (version 4)): version 3's inputs with version input 4 and the author
+ * half after the default half, so the code names both halves and a challenge
+ * opens both (T-42, T-47, T-31).
+ */
+export function coreHashV4(core: CellBallotCoreV4): Uint8Array {
+  if (!(core.definitionHash instanceof Uint8Array) || core.definitionHash.length !== 32)
+    throw new RangeError("coreHashV4: definitionHash must be 32 bytes");
+  const w = new Writer();
+  w.bytes(core.definitionHash);
+  u16.write(w, BALLOT_RECORD_TYPE);
+  u8.write(w, 4);
+  u8.write(w, core.cell);
+  VSS.write(w, core.vss);
+  SHARE_HASHES.write(w, core.shareHashes);
+  VSS.write(w, core.authorVss);
+  SHARE_HASHES.write(w, core.authorShareHashes);
   return H(ds("abolish/v1/ballot-core", w.finish()));
 }
 

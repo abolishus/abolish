@@ -19,12 +19,12 @@ m̂ = F(M)
 ```
 
 - `definition_hash` is the election definition's hash (P1-10b), the same value the nullifier scope binds.
-- `tier` is the ballot's tier (0, 1 or 2), the same value its scope binds ([[membership]], Scope). Under ballot version 2, which names a cell, it is the tier of that cell in the definition ([[ballot-validity]], Ballot record (version 2)); the cell itself is bound through `ballot_hash`, so `M` names one cell, and the layout and the tag are unchanged.
+- `tier` is the ballot's tier (0, 1 or 2), the same value its scope binds ([[membership]], Scope). Under ballot versions 2 and 3, which name a cell, it is the tier of that cell in the definition ([[ballot-validity]], Ballot record (version 2)); the cell itself is bound through `ballot_hash`, so `M` names one cell, and the layout and the tag are unchanged.
 - `ballot_hash` is the ballot's hash under `abolish/v1/ballot` ([[ballot-validity]], Ballot hash): its tier, nullifier, commitments, share-ciphertext hashes and validity proofs, never its membership proof (which can't bind its own hash) and never the L1 reference (which `M` binds itself).
 - `l1_ref_number` (`u64`) and `l1_ref_hash` (`bytes[32]`) name the L1 block: its number, and its execution-layer block hash as the block header's Keccak-256 (the `hash` that Ethereum's JSON-RPC `eth_getBlockByNumber` returns).
 - The input after the tag is exactly 105 bytes. `F` is [[membership]]'s field mapping.
 
-The ballot record (`0x0002`, [[ballot-validity]], Ballot record) carries `tier` (version 2: `cell`, whose tier the definition gives), `l1_ref_number` and `l1_ref_hash` as fields, so a verifier recomputes `M` from the record and the definition alone, never from anything a server supplies.
+The ballot record (`0x0002`, [[ballot-validity]], Ballot record) carries `tier` (versions 2 and 3: `cell`, whose tier the definition gives), `l1_ref_number` and `l1_ref_hash` as fields, so a verifier recomputes `M` from the record and the definition alone, never from anything a server supplies.
 
 **Why each part is bound.** The ballot hash stops a proof from being moved to another ballot (T-38). The definition hash and tier are bound by the scope already; binding them again makes `M` self-describing, so no message is valid for two polls or two tiers even if a scope were mistaken. The block hash is what makes the reference unpredictable: a block number alone could be chosen in advance, so a coercer could have a voter make ballots for future numbers while watching once and post them later (T-45). The number is bound so a verifier looks up exactly one block, never searches for one.
 
@@ -60,7 +60,7 @@ Membership, validity and timing ([[verifier]] 5.1 to 5.6) are checked as before;
 
 ## Selection
 
-A verifier applies this to the ballots that passed every admission check, in any order. Each ballot gives a tuple (`tier`, `ν`, `M`, `l1_ref_number`, `index`) (under ballot version 2, `tier` is its cell's tier), where `ν` is its nullifier as a `field<bn254>` and `index` its board position.
+A verifier applies this to the ballots that passed every admission check, in any order. Each ballot gives a tuple (`tier`, `ν`, `M`, `l1_ref_number`, `index`) (under ballot versions 2 and 3, `tier` is its cell's tier), where `ν` is its nullifier as a `field<bn254>` and `index` its board position.
 
 1. **Repeats (R1, [[verifier]] 5.7).** Ballots with equal (`tier`, `ν`, `M`) are one ballot: the one with the smallest `index` stands, and every other is a repeat, rejected with `repeat` and listed. Groth16 proofs can be re-randomised by anyone, so a repeat's bytes can differ from the original's; `M` can't, because a new `M` needs a new proof, and that needs the voter's secret. The ballot that stands has the same `ballot_hash` as every repeat of it, so which entry stands never changes what is counted.
 2. **Grouping.** The remaining ballots are grouped by (`tier`, `ν`). Ballots in different tiers are never compared: one secret in two tier groups has two unrelated nullifiers ([[membership]], Scope; T-13).

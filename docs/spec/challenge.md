@@ -1,6 +1,6 @@
 # Benaloh challenge
 
-How a voter checks that their ballot client encrypts the vote they chose (cast-as-intended): the tracking code the client commits to before the voter chooses to cast or to challenge, the opening a challenge reveals, the spoiled-ballot opening record (`0x0003`, version 1) that carries it, the checks anyone runs on an opening, and how a published opening reaches the board. The design is [[0021-challenged-ballots]] (option B): a challenged ballot never reaches the board on its own; its commitment is the tracking code held by a second device the voter chooses, and its opening is published only at the voter's request, after close. Notation is from [[notation]], the group and hashes from [[group]], the committed vote from [[ballot-validity]] and the ciphertexts from [[share-encryption]]. Threats: T-42, T-44, T-47, T-41, T-45, T-11, T-12, T-17, T-52, T-31.
+How a voter checks that their ballot client encrypts the vote they chose (cast-as-intended): the tracking code the client commits to before the voter chooses to cast or to challenge, the opening a challenge reveals, the spoiled-ballot opening record (`0x0003`, version 1, and version 2 for cores that name a cell) that carries it, the checks anyone runs on an opening, and how a published opening reaches the board. The design is [[0021-challenged-ballots]] (option B): a challenged ballot never reaches the board on its own; its commitment is the tracking code held by a second device the voter chooses, and its opening is published only at the voter's request, after close. Notation is from [[notation]], the group and hashes from [[group]], the committed vote from [[ballot-validity]] and the ciphertexts from [[share-encryption]]. Threats: T-42, T-44, T-47, T-41, T-45, T-11, T-12, T-17, T-52, T-31.
 
 ## Sources
 
@@ -64,7 +64,7 @@ Notes:
 - **Decoding** is strict ([[notation]]): a `tier` other than 0, 1 or 2 is `invalid-enum`; an identity VSS commitment, a non-canonical element and a scalar at or above `ℓ` are `non-canonical`; a list over its maximum is `length-over-max`. Decoding compares nothing with the election: the checks below do, so an opening naming another election is still read, and reported. A record under a version the profile doesn't pin is `profile-mismatch` ([[verifier]] 2.3).
 - **The vote is a scalar.** `f_j`'s constant term is read as the scalar it is, never as a bit, so an opening shows what the client actually committed to, even a vote outside the election's rules (Checks).
 - **Sizes.** At 3 options, `k = 2` and `n = 3`, about 1.1 KB; at 10 options, `k = 4` and `n = 7`, about 4.9 KB; at `MAX_OPTIONS` and `MAX_TRUSTEES`, about 101 KB (33 KB of VSS commitments and 66 KB of coefficients), within `MAX_BOARD_PAYLOAD`.
-- **Versions.** Opening version 1 opens cores of ballot version 1 only, whose record type and version its core hash binds. Every plurality or approval profile pins both ([[election-definition]], `profile-types`). Whoever specifies another ballot version specifies the opening version for its cores and adds the pairing to [[verifier]] 2.3. Ballot version 2 ([[ballot-validity]], Ballot record (version 2), which names a regional cell) has no opening version for its cores yet: until P1-13 specifies one (a core naming the cell, and the opening that rebuilds it), [[verifier]] 2.3 refuses every profile pinning ballot version 2, whatever opening version it pins (one a verifier doesn't know leaves 2.3 unsupported rather than failed, since a later release may define it), so no regional-cell election runs without a challenge.
+- **Versions.** Opening version 1 opens cores of ballot version 1 only, whose record type and version its core hash binds. Every plurality or approval profile pins both ([[election-definition]], `profile-types`). Opening version 2 (below) opens the cores of ballot versions 2 and 3, which name a cell. Whoever specifies another ballot version specifies the opening version for its cores and adds the pairing to [[verifier]] 2.3, which refuses a profile pinning a ballot version beside an opening version that doesn't open its cores, so no election runs without a challenge (an opening version a verifier doesn't know leaves 2.3 unsupported rather than failed, since a later release may define it).
 
 ## Checks
 
@@ -84,6 +84,47 @@ An opening that passes **opens** its core: it gives the core hash and the vote `
 Why this order: the first two need only the header fields, the next two only lengths and zeros, and `opening-vss` runs before the costly ML-KEM encapsulations of `opening-ciphertext`, which build each seat's shares from polynomials already checked against `vss`. An honest client's `e_i` and `w_i` are drawn from 1 to `ℓ − 1` ([[share-encryption]], Ciphertext); `e_i = 0` would make `ct_DH` the identity, which no ciphertext carries.
 
 The checks never read the board. Whether an opening's core was cast, and where an opening was boarded, are the board checks of Publication below.
+
+## Opening version 2
+
+Record type `0x0003`, version 2: the opening of a core of ballot version 2 or 3 ([[ballot-validity]], Ballot record (version 2) and (version 3)), whose cores name a cell of the definition's partition rather than a tier. One layout serves both ballot versions: their cores have the same fields, and the profile's pinned ballot version, which the core hash binds, says which one an opening's core is (T-42, T-47, T-31; [[0026-multi-question-ballots]], Re-voting, challenge and receipts).
+
+**Core and tracking code.** A version-2 or version-3 core is `definition_hash`, `cell`, `vss` and `share_hashes`, and its tracking code is its ballot version's core hash ([[ballot-validity]], Core hash; Hashes (version 3)):
+
+```
+core_hash = H(DS("abolish/v1/ballot-core",
+    definition_hash ‖ u16(0x0002) ‖ u8(b) ‖ u8(cell) ‖ encode(vss) ‖ encode(share_hashes)))
+```
+
+with `b` the ballot version the election's profile pins, 2 or 3. An opening carries no ballot version of its own: `definition_hash` fixes the profile, so the same opening bytes under two elections are two openings, each with its own election's code, and one code never names cores of two ballot versions.
+
+**Layout.** Version 1's fields, in the same order and encodings, with `cell` (`u8`) in place of `tier`:
+
+| Field             | Type                                             | Meaning                                                                                          |
+| ----------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------ |
+| `definition_hash` | `bytes[32]`                                      | The election's definition hash                                                                   |
+| `cell`            | `u8`                                             | The cell the core was made for, its position in the partition ([[election-definition]])          |
+| `vss`             | `list<list<element, MAX_TRUSTEES>, MAX_OPTIONS>` | The core's VSS commitments, over the ballot's options (under ballot version 3, `T` flat options) |
+| `share_hashes`    | `list<bytes[32], MAX_TRUSTEES>`                  | As version 1                                                                                     |
+| `polynomials`     | `list<option_opening, MAX_OPTIONS>`              | As version 1, for each option (flat option) in order                                             |
+| `seats`           | `list<seat_opening, MAX_TRUSTEES>`               | As version 1                                                                                     |
+
+The core comes first, as in version 1, so `cell` is at byte 35 and `vss` at 36, and the record has version 1's size. Decoding is version 1's, except that `cell` is any `u8`: decoding never compares it with the partition, so an opening naming a cell the definition doesn't have is still read, and refused by `opening-cell`.
+
+**Checks.** Version 1's (Checks), in the same order, with two changes:
+
+| Code            | Rejects an opening when                                                                                                                                                                             |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `opening-cell`  | In place of `opening-tier`: `cell` is at or above the number of cells in the definition's partition.                                                                                                |
+| `opening-shape` | As version 1, with `m` the definition's option count: under definition versions 3 and 4 its `option_count`, under version 5 `T`, the total over its questions ([[election-definition]], Questions). |
+
+`opening-vss` names the first failing (flat) option and `opening-ciphertext` the first failing seat, as in version 1. Each registered seat's ciphertext is rebuilt from its shares of every option exactly as [[share-encryption]] (Ciphertext) makes it, under ballot version 1's ciphertext rules, which ballot versions 2 and 3 keep.
+
+**Votes outside the rules.** A passing opening gives its core hash and `v_j = coef_0(f_j)` for every option, and is reported `opening-vote-outside`, naming the first question `q` in order, if some `v_j` of question `q` is neither 0 nor 1, or the question's sum `v_{o_q} + … + v_{o_q + m_q − 1}` is outside `min_q` to `max_q`. Under definition versions 3 and 4 the one question is the definition's `option_count`, `min_selections` and `max_selections`, at `q = 0`. As under version 1, it is evidence against the client that made the core, never a failure of the opening.
+
+**Opened commitments and Publication** are version 1's, with the cell in place of the tier: an opening opens a ballot's commitment by the rule of Opened commitments, under an equal `definition_hash`, whatever that ballot's cell, so a core's commitments cast under another cell are opened too. The checker (Client rules, checker rule 3) rejects an opening whose `cell` isn't the voter's own.
+
+**Sizes.** Version 1's: the options of all questions together are at most `MAX_OPTIONS`, so an opening is at most about 101 KB. The owner's four methods in one poll (`T = 18`), at `k = 4` and `n = 7`, make an opening of about 8.1 KB.
 
 ## Client rules
 
@@ -143,5 +184,7 @@ A verifier ([[verifier]] 6.2) runs the same rules over the openings in the seale
 - **Public evidence waits for close,** when the voters a cheating client misled can no longer re-vote.
 
 ## Test vectors
+
+`docs/spec/vectors/spoiled-opening-v2.json`: openings of version-3 cores over version-5 definitions (the owner's four methods, in two cells, one with a seat outside the registered key set) and of version-2 cores over a version-4 definition, each with the randomness that made it, its core hash and votes; passing openings outside the rules, each naming its first question outside (an over-vote, an under-`exactly` answer, a vote of 2, a version-2 core's over-vote); openings failing each check (another election, a cell past the partition and cell 255, a short option list or only the first question's options, a polynomial too long, an unregistered seat's randomness, a non-zero unqualified share hash, a vote claimed at another option of the same question, a changed randomness at the last flat option, a changed ML-KEM message or ephemeral) and two order cases; decode rejections; and each core's hash under ballot versions 2 and 3, which differ. They are printed by `packages/crypto/scripts/ballot-v3-vectors.py` ([[ballot-validity]], Test vectors), reusing `share-encryption-vectors.py`'s ML-KEM-768 and ChaCha20-Poly1305.
 
 `docs/spec/vectors/challenge.json` ([[vectors/README|vectors]]): elections with their definitions and registered KEM keys; openings that pass (plurality, approval with a seat outside the registered key set, a blank vote, `MAX_OPTIONS`, `MAX_TRUSTEES`) with the randomness that made each, its core hash, its votes and its encoding, re-made byte for byte by `openChallenge`; passing openings of votes outside the rules; openings failing each check, and five failing two checks each, which pin the order; decode rejections; cores with a commitment an opening opens under other tracking codes (fresh share hashes, another tier, re-blinded coefficients, a commitment at another option, the same randomness under the other vote, randomness taken from a higher coefficient, a seat's share, a seat's `e_i` or an out-of-rules vote) and cores without one (fresh `r_j` for the same vote, another vote, randomness shifted by one, another election, commitments `g` and `h` with public randomness); and the core hashes of cast ballots from `ballot.json`. They are printed by `packages/crypto/scripts/challenge-vectors.py`, an implementation of this page in Python's integers and `hashlib`, reusing only `share-encryption-vectors.py` (ML-KEM-768 from FIPS 203 and ChaCha20-Poly1305 from RFC 8439, each checked against published vectors first), `ballot-validity-vectors.py` and `definition-vectors.py`.

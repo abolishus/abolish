@@ -408,6 +408,11 @@
       "tag": "abolish/v1/keyed-nullifier/h2",
       "digest": "9950fce47e12fcc845981d3ea8e18001b74da98d79ab9da77656a8c714349c07",
       "field": "270886558588462575102209621375966098914851209126235848035484108296260170908"
+    },
+    {
+      "tag": "abolish/v1/fs/ballot-validity/question-sum",
+      "digest": "3fc77cbded2b03adccba0ce63ddff1efbb9b11c7d38699d20b147aa1f3cfedb2",
+      "field": "112688175639024653444136469296598507391174418104057137160938993299360042989"
     }
   ],
   "packBytes": [

@@ -14,6 +14,12 @@ export interface PlannedBallot {
   readonly at: number;
   /** `direct` when our servers are down at `at`: the voter submits without them. */
   readonly path: "server" | "direct";
+  /**
+   * Whether the voter, finding an offline seat's intake unreachable for this
+   * ballot, posts that seat's share through the contract path: drawn for
+   * every ballot, and acted on only when a seat is offline.
+   */
+  readonly posts: boolean;
 }
 
 /** A voter and the ballot that counts for it: its last. */
@@ -25,15 +31,10 @@ export interface PlannedVoter extends PlannedBallot {
   /** Whether a challenging voter asks after close for that attempt's opening to be published. */
   readonly published: boolean;
   /**
-   * Whether the voter, finding an offline seat's intake unreachable, posts
-   * that seat's share through the contract path: drawn for every voter, and
-   * acted on only when a seat is offline.
-   */
-  readonly posts: boolean;
-  /**
    * Whether every qualified seat gets a receipt or a posting for the
-   * voter's ballots, so its last one counts (docs/spec/delivery.md, Delivery
-   * check): with no offline seat, or when the voter posts.
+   * voter's last ballot, so it counts (docs/spec/delivery.md, Delivery
+   * check): with no offline seat, or when the voter posts it. An earlier
+   * ballot delivered never counts in its place (No fallback).
    */
   readonly delivered: boolean;
   /**
@@ -127,7 +128,9 @@ export function planElection(scenario: Scenario): Plan {
     const revotes = nextRevote() < scenario.revotes;
     const earlierVotes = drawVotes(scenario, nextRevote);
     const earlierAt = nextRevote() * at;
+    // Two draws for every voter, so whether one re-votes changes no other's.
     const posts = nextPosting() < scenario.postings;
+    const earlierPosts = nextPosting() < scenario.postings;
     const delivered = scenario.trustees.offline.length === 0 || posts;
     if (delivered) {
       const counts = expected.get(tier) as number[];
@@ -136,7 +139,12 @@ export function planElection(scenario: Scenario): Plan {
       });
     }
     const earlier = revotes
-      ? { votes: earlierVotes, at: earlierAt, path: pathAt(scenario, earlierAt) }
+      ? {
+          votes: earlierVotes,
+          at: earlierAt,
+          path: pathAt(scenario, earlierAt),
+          posts: earlierPosts,
+        }
       : null;
     voters.push({
       index,

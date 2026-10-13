@@ -134,7 +134,12 @@ describe("planElection", { timeout: 60_000 }, () => {
   it("draws postings apart, and counts only the delivered voters: all of them with no offline seat", () => {
     fc.assert(
       fc.property(scenario, fc.double({ min: 0, max: 1, noNaN: true }), (s, p) => {
-        const strip = (v: PlannedVoter) => ({ ...v, posts: false, delivered: false });
+        const strip = (v: PlannedVoter) => ({
+          ...v,
+          posts: false,
+          delivered: false,
+          earlier: v.earlier === null ? null : { ...v.earlier, posts: false },
+        });
         const other = planElection({ ...s, postings: p });
         expect(other.voters.map(strip)).toEqual(planElection(s).voters.map(strip));
         expect(other.voters.every((v) => v.delivered)).toBe(true);

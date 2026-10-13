@@ -198,7 +198,7 @@ describe("runSimulation", { timeout }, () => {
     expect(r.ballots.cast).toBe(18);
     expect(r.ballots.superseded).toBe(9);
     expect(r.board.counted).toBe(18 + 18 * 3);
-    // A re-voter posts each ballot, superseded ones included.
+    // Every ballot is posted, superseded ones included.
     expect(r.ballots.postings).toBe(18);
     expect(r.ballots.server + r.ballots.direct).toBe(18);
     expect(progress.filter((s) => s === "cast")).toHaveLength(18);
@@ -227,6 +227,18 @@ describe("runSimulation", { timeout }, () => {
     expect(some.ballots.undelivered).toBe(declined);
     expect(some.cells.reduce((a, c) => a + c.ballots, 0)).toBe(9 - declined);
     for (const c of some.cells) expect(c.counts).toEqual(c.expected);
+  });
+
+  it("counts nothing for a re-voter whose last ballot is undelivered, though its earlier one was posted", () => {
+    const s = { ...base, revotes: 1, postings: 0.5 };
+    const voters = planElection(s).voters;
+    const stranded = voters.filter((v) => v.earlier?.posts === true && !v.posts).length;
+    expect(stranded).toBeGreaterThan(0);
+    const r = runSimulation(s);
+    expect(r.ok).toBe(true);
+    expect(r.ballots.undelivered).toBe(voters.filter((v) => !v.delivered).length);
+    expect(r.cells.reduce((a, c) => a + c.ballots, 0)).toBe(9 - r.ballots.undelivered);
+    for (const c of r.cells) expect(c.counts).toEqual(c.expected);
   });
 
   it("needs no posting when every seat is online, whatever the voters would choose", () => {

@@ -118,7 +118,7 @@ export const SIMULATION_STUBS = Object.freeze([
   "ceremony: every seat takes part in the four signed rounds; no release pins the panel, whose identity keys are fresh per run (P1-7)",
   "membership: no membership proofs; each voter's nullifier is its index plus one, and each ballot record carries a placeholder proof, the verification key's own alpha, beta and alpha points, which decodes but proves nothing and is never checked, so admission (5.1 to 5.4) isn't run and each ballot's M for the re-vote rule is computed from its record here rather than taken from crypto's checkBallot (P1-17b, P3-2)",
   "board: the operator boards each server ballot as it arrives and signs a receipt the voter's client checks at cast, under one receipt key fresh per run that no definition lists or registry holds; the anchoring clock (hourly from the Unix epoch, with a half-hour deadline) is a placeholder, the post-close windows other than the tally, openings' and destruction windows are taken as zero for the counted extent, though the delivery check applies the real delivery deadline (every delivery record is boarded or sent long before it), so the counted extent ends one period after close and the seal is the destruction window's end, and nothing is anchored, so trustees act on segments the run computes rather than on checkpoints they saw on L1 (P1-13b, P4-1, P1-18)",
-  "delivery: ciphertexts reach trustees in memory, with no contract path; a direct ballot is boarded by the operator when the servers return, with no receipt, never as a contract event; each online seat's node boards its share receipt right after the ballot, and the operator boards it unchecked rather than under the delivery boarding rules; a posting voter's client posts each offline seat once, right after cast, as a contract-path record the delivery check reads with its cast time as its submission time, though no contract records it and nothing puts it on the board or the archive; offline seats never come back, so no seat catches up on postings or complains, and nothing is resent (P1-12c, P1-18, P4-2)",
+  "delivery: ciphertexts reach trustees in memory, and no contract records anything; a direct ballot is boarded by the operator when the servers return, with no operator receipt, never as a contract event; each online seat's node boards its share receipt right after the ballot, and the operator boards it unchecked rather than under the delivery boarding rules; a posting voter's client posts each offline seat of that ballot once, right after cast, as a contract-path record the delivery check reads with its cast time as its submission time, though no contract records it and nothing puts it on the board or the archive; offline seats never come back, so no seat catches up on postings or complains, and nothing is resent (P1-12c, P1-18, P4-2)",
   "trustees: offline seats go down after the ceremony, for the whole voting period, tally and destruction; faulty seats lie only in their summed shares, which their own node's check refuses to seal, so no lie reaches another seat as a summed-share message, no recipient's refusal is shown, and a cell's excluded seats are those that sent nothing (openCell never sees a failing sum); summed-share messages travel in memory, never over a channel, every honest seat combines, and the lowest seat combined signs each cell's opening",
   "challenges: the checker records each tracking code and checks the opening in memory, with the election the run built rather than one fetched from chain and IPFS; a voter who publishes asks once, in the first period after the counted extent, and the operator's boarding rules are applied here rather than by the verifier's 6.2, which isn't run (P1-21 part 2)",
   "re-voting: L1 is simulated, a block every 12 seconds with random hashes, all finalized; every reference is admitted and every voter's last ballot selected, so no ballot is replayed, ties, or names a block before opening, after close or reorganised away (P1-21 part 2)",
@@ -506,7 +506,7 @@ export function runSimulation(
     // by every route, so a voter who chooses to posts that seat's ciphertext
     // and ML-KEM message through the contract path, which our outage doesn't
     // touch; any other voter's ballot stays undelivered (T-15, T-25).
-    if (voter.posts)
+    if (ballot.posts)
       for (const seat of offline) {
         const at = seat - 1;
         postings.push({
@@ -636,9 +636,11 @@ export function runSimulation(
       const b = ballotOf(s.index);
       return { tier: b.tier, nullifier: b.nullifier, vote: b.committed_vote };
     }),
+    // Every entry of the counted extent but the ballots, so crypto, not this
+    // file, decides what each is.
     [
       ...checked.entries
-        .filter((e) => recordTypeOf(e.payload) === RECORD_TYPES.shareReceipt)
+        .filter((e) => recordTypeOf(e.payload) !== RECORD_TYPES.ballot)
         .map((e): DeliveryEntry => ({ path: "board", segment: e.segment, payload: e.payload })),
       ...postings,
     ],

@@ -393,6 +393,7 @@ function sealSeat(
   shares: readonly Share[],
   randomness: ShareEncapsulation,
 ): Uint8Array {
+  checkSeat(b.seat, MAX_TRUSTEES);
   // Round-trips the key through its codec: the modulus check and a
   // non-identity DH key, whatever the caller passed (T-39).
   const k = decode(KEM_PUBLIC_KEY, encode(KEM_PUBLIC_KEY, key));

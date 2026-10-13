@@ -438,6 +438,10 @@ def main():
     posting("author-short-m", "A 31-byte m for author seat 1", a, AUTHOR, 1, aa1, m_of(a, AUTHOR, 1)[:31], "posting-malformed")
     af = made["author-as-default"]
     posting("author-named-default", "The dishonest author seat 1 ciphertext that names the default panel: its proof fails", af, AUTHOR, 1, ct_of(af, AUTHOR, 1), m_of(af, AUTHOR, 1), "posting-proof")
+    vo = made["version-one-rules"]
+    posting("author-version-one-rules", "The dishonest author seat 3 ciphertext made under ballot version 1's rules: its proof fails", vo, AUTHOR, 3, ct_of(vo, AUTHOR, 3), m_of(vo, AUTHOR, 3), "posting-proof")
+    dh1 = made["default-half-only"]
+    posting("default-half-only", "The dishonest default seat 1 ciphertext binding only the default half: its proof fails", dh1, DEFAULT, 1, ct_of(dh1, DEFAULT, 1), m_of(dh1, DEFAULT, 1), "posting-proof")
     bs = made["bad-author-share"]
     posting("author-pass-bad-share", "The dishonest client's author seat 2 ciphertext: the public check passes", bs, AUTHOR, 2, ct_of(bs, AUTHOR, 2), m_of(bs, AUTHOR, 2), "ok")
 
@@ -459,6 +463,7 @@ def main():
         ("bad-default-seal", DEFAULT, 2, "Proven: default seat 2's posted ciphertext doesn't open", "ok"),
         ("author-short-list", AUTHOR, 1, "Proven: author seat 1's posted plaintext has T − 1 shares", "ok"),
         ("author", AUTHOR, 1, "Unfounded: author seat 1's posted shares are valid", "complaint-unfounded"),
+        ("author", DEFAULT, 1, "Unfounded: default seat 1's posted shares are valid", "complaint-unfounded"),
     ):
         b = made[b_id]
         w = nonzero_scalar(rng)
@@ -470,7 +475,7 @@ def main():
             # An honest trustee never makes this one: its preconditions fail.
             proof = raw_complaint(defh, panel, seat, key, ct, w)
             w = None
-        complaint(b_id + "-complaint", desc, b, panel, seat, ct, mm, proof, expect, w)
+        complaint(b_id + ("-default" if (b_id, panel) == ("author", DEFAULT) else "") + "-complaint", desc, b, panel, seat, ct, mm, proof, expect, w)
 
     ct, mm = ct_of(bs, AUTHOR, 2), m_of(bs, AUTHOR, 2)
     key = bs["keys"][AUTHOR][1]

@@ -12,8 +12,10 @@
 // spoiled-ballot openings (6.2, as far as the floor of s_S decides them) and
 // the tally openings' sorting, attribution and boarding breaches (7.4, as far
 // as they need no counted set; against the cells under definition versions 3
-// to 5) are implemented; every other check is reported unverifiable, so no run can
-// report an election verified yet. A run on unauthenticated inputs reports
+// to 5) are implemented, and, for formats 3 and 4, 4.4's event check over
+// the board's contract-event records, which can fail 4.4 but never pass it;
+// every other check is reported unverifiable, so no run can report an
+// election verified yet. A run on unauthenticated inputs reports
 // what the checks found against them, but its verdict stays unverifiable, so
 // a crafted bundle can neither verify nor fail an election (T-53, T-24).
 
@@ -45,6 +47,7 @@ import {
   readDefinition,
   type VerifiedDefinition,
 } from "./definition.ts";
+import { eventChecks, type EventCode } from "./events.ts";
 import { openingChecks, type OpeningCode, type OpeningReport } from "./openings.ts";
 import { type ReceiptKeyCode, receiptKeyRow } from "./receipt-keys.ts";
 import { tallyChecks, type TallyCode, type TallyReport } from "./tallies.ts";
@@ -67,6 +70,7 @@ export type CheckCode =
   | OpeningCode
   | TallyCode
   | ReceiptKeyCode
+  | EventCode
   | "decode"
   | "membership-key"
   | "profile-combination"
@@ -270,11 +274,13 @@ function fromDefinition(bundle: Bundle):
   if (bundle.format === "abolish-verifier-bundle/1") return { inputs: bundle };
   if (bundle.format === "abolish-verifier-bundle/2") return { inputs: bundle };
   // The board checks need the election and the version: without them they
-  // can't run, so 4.1 and 4.2 are not reached, and neither are the ceremony
-  // checks and ballot admission of format 4, which read the board.
-  const ceremonyRows: [string, Outcome][] =
-    bundle.format === "abolish-verifier-bundle/4"
-      ? [
+  // can't run, so 4.1 and 4.2 are not reached, and neither are 4.4's event
+  // check nor the ceremony checks and ballot admission of format 4, which
+  // read the board.
+  const boardRows: [string, Outcome][] = [
+    ["4.4", NOT_REACHED],
+    ...(bundle.format === "abolish-verifier-bundle/4"
+      ? ([
           ["2.5", NOT_REACHED],
           ["3.1", NOT_REACHED],
           ["3.2", NOT_REACHED],
@@ -285,10 +291,11 @@ function fromDefinition(bundle: Bundle):
           ["5.7", NOT_REACHED],
           ["6.2", NOT_REACHED],
           ["7.4", NOT_REACHED],
-        ]
-      : [];
+        ] satisfies [string, Outcome][])
+      : []),
+  ];
   const stopped = (row: string, outcome: Outcome, hash?: Uint8Array) => ({
-    rows: new Map([...ceremonyRows, [row, outcome], ["4.1", NOT_REACHED], ["4.2", NOT_REACHED]]),
+    rows: new Map([...boardRows, [row, outcome], ["4.1", NOT_REACHED], ["4.2", NOT_REACHED]]),
     ...(hash !== undefined && { hash }),
   });
   let record;
@@ -461,6 +468,26 @@ export function verifyBundle(bundle: Bundle): Report {
                   : // Never a pass without the record: every definition-bearing
                     // format carries L1 evidence today.
                     NOT_IMPLEMENTED,
+            ] as const,
+          ]),
+      // A contract-event record is judged from its own bytes and the
+      // definition's L2 contracts, whatever 4.1 and 4.2 found, but fails 4.4
+      // only inside the extent they authenticated (docs/spec/verifier.md,
+      // Contract events; T-53).
+      ...(definition.definition === undefined
+        ? []
+        : [
+            [
+              "4.4",
+              eventChecks(
+                definition.definition,
+                bundle.entries,
+                definition.inputs.boardEntryVersion,
+                // Set only when 4.1 and 4.2 pass: the anchored extent.
+                board.unauthenticated === undefined
+                  ? undefined
+                  : board.entries - board.unauthenticated,
+              ),
             ] as const,
           ]),
       ...(carriesDestruction(definition.inputs.boardEntryVersion)

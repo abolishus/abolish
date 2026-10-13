@@ -767,14 +767,22 @@ export {
 } from "./share-encryption.ts";
 export {
   checkShareReceipt,
+  checkShareReceiptV4,
   intakeBallot,
+  intakeBallotV4,
   type IntakeCode,
+  type IntakeCodeV4,
   type IntakeKeys,
+  type IntakeKeysV4,
   type IntakeResult,
+  type IntakeResultV4,
   intakeShares,
+  type PanelReceiptSigners,
   type ReceiptSigner,
   shareReceiptStatement,
   type ShareReceiptStatement,
+  shareReceiptStatementV4,
+  type ShareReceiptStatementV4,
 } from "./share-receipt.ts";
 export {
   type BallotDelivery,

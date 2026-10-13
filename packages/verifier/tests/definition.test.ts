@@ -245,6 +245,24 @@ describe("2.1: the definition decodes strictly and is well formed", () => {
     });
 });
 
+test("definition versions 6 and 7 stay unverifiable at their version byte, never failed", () => {
+  // This release reads version 5; a later one reads 6 and 7 (T-36).
+  for (const name of ["election-definition-v6.json", "election-definition-v7.json"]) {
+    const later = vectorsOf(name).filter((d) => {
+      const v = hex(d.encoding)[2];
+      return d.error === undefined && (v === 6 || v === 7);
+    });
+    expect(later.length).toBeGreaterThan(0);
+    for (const d of later) {
+      const r = format3(d.encoding, closed);
+      expect(row(r, "2.3")).toMatchObject({ status: "unverifiable", code: "unsupported-version" });
+      expect(row(r, "2.1").status).not.toBe("fail");
+      expect(r.verdictAgainstInputs).toBe("unverifiable");
+      notReached(r);
+    }
+  }
+});
+
 test("version 4's layout labelled version 5 is read under version 5's, and doesn't decode", () => {
   const r = format3(vector(V4_LABELLED_FIVE).encoding, closed);
   expect(row(r, "2.1")).toMatchObject({ status: "fail", code: "decode" });

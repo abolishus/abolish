@@ -20,6 +20,9 @@ contract RegistryHandler is TestBase {
     mapping(bytes32 => bytes32) public shadowHash;
     /// The registered definition's cell count.
     mapping(bytes32 => uint256) public shadowCells;
+    /// The registered definition's ceremony: its stub hash and panel.
+    mapping(bytes32 => bytes32) public shadowStub;
+    mapping(bytes32 => bytes32) public shadowPanel;
     uint256 public registrations;
     /// Set if a registration succeeded or failed against the rules.
     bool public unexpected;
@@ -65,16 +68,23 @@ contract RegistryHandler is TestBase {
             shadowHash[id] = lib.hash(enc);
             (uint8[] memory tiers,) = RegistryFixture.cellsOf(d);
             shadowCells[id] = tiers.length;
+            shadowStub[id] = lib.stubHash(enc);
+            shadowPanel[id] = d.panelId;
             registrations++;
             if (!_recorded(lib.hash(enc), d)) unexpected = true;
+            (bytes32 stub, bytes32 panel) = registry.ceremony(lib.hash(enc));
+            if (stub != lib.stubHash(enc) || panel != d.panelId) unexpected = true;
         } catch {
             if (allowed) unexpected = true;
             // A refused definition records nothing, unless it is the one
             // already registered for this election.
-            if (
-                lib.hash(enc) != shadowHash[id]
-                    && registry.parameters(lib.hash(enc)).ballotVersion != 0
-            ) unexpected = true;
+            if (lib.hash(enc) != shadowHash[id]) {
+                (bytes32 stub, bytes32 panel) = registry.ceremony(lib.hash(enc));
+                if (
+                    registry.parameters(lib.hash(enc)).ballotVersion != 0 || stub != bytes32(0)
+                        || panel != bytes32(0)
+                ) unexpected = true;
+            }
         }
     }
 
@@ -125,6 +135,9 @@ contract RegistryHandler is TestBase {
 /// 6. The board's parameters are recorded for exactly the registered
 ///    definitions of every version, each exactly the registered definition's,
 ///    and a refused definition records none (ADR 0028, 1C).
+/// 7. A registered definition's ceremony is its stub hash and panel, under
+///    which the trustee registry approved it, and an unregistered or refused
+///    definition has none (zero for both) (ADR 0028, 2B).
 contract ElectionRegistryInvariantTest is TestBase {
     ElectionRegistry internal registry;
     RegistryHandler internal handler;
@@ -159,6 +172,9 @@ contract ElectionRegistryInvariantTest is TestBase {
             // Set exactly for the registered definitions; what was recorded
             // is checked against the definition at registration.
             assertEq(registry.parameters(h).cellCount, handler.shadowCells(id), "parameters");
+            (bytes32 stub, bytes32 panel) = registry.ceremony(h);
+            assertEq(stub, handler.shadowStub(id), "ceremony stub hash");
+            assertEq(panel, handler.shadowPanel(id), "ceremony panel");
         }
     }
 

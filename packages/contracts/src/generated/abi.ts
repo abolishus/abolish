@@ -1,4 +1,241 @@
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Board
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+export const boardAbi = [
+  {
+    type: "constructor",
+    inputs: [
+      { name: "elections", internalType: "address", type: "address" },
+      { name: "trustees", internalType: "address", type: "address" },
+    ],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    inputs: [],
+    name: "electionRegistry",
+    outputs: [{ name: "", internalType: "contract IBoardElections", type: "address" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    inputs: [],
+    name: "eventAccumulator",
+    outputs: [
+      { name: "accumulator", internalType: "bytes32", type: "bytes32" },
+      { name: "count", internalType: "uint64", type: "uint64" },
+    ],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    inputs: [{ name: "record", internalType: "bytes", type: "bytes" }],
+    name: "submitBallot",
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    inputs: [{ name: "record", internalType: "bytes", type: "bytes" }],
+    name: "submitComplaint",
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    inputs: [
+      { name: "posting", internalType: "bytes", type: "bytes" },
+      { name: "ballot", internalType: "bytes", type: "bytes" },
+    ],
+    name: "submitPosting",
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    inputs: [{ name: "receipts", internalType: "bytes", type: "bytes" }],
+    name: "submitReceipts",
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    inputs: [],
+    name: "trusteeRegistry",
+    outputs: [{ name: "", internalType: "contract IBoardTrustees", type: "address" }],
+    stateMutability: "view",
+  },
+  {
+    type: "event",
+    anonymous: false,
+    inputs: [
+      {
+        name: "definitionHash",
+        internalType: "bytes32",
+        type: "bytes32",
+        indexed: true,
+      },
+      {
+        name: "ballotHash",
+        internalType: "bytes32",
+        type: "bytes32",
+        indexed: true,
+      },
+      { name: "record", internalType: "bytes", type: "bytes", indexed: false },
+    ],
+    name: "BallotSubmitted",
+  },
+  {
+    type: "event",
+    anonymous: false,
+    inputs: [
+      {
+        name: "definitionHash",
+        internalType: "bytes32",
+        type: "bytes32",
+        indexed: true,
+      },
+      {
+        name: "ballotHash",
+        internalType: "bytes32",
+        type: "bytes32",
+        indexed: true,
+      },
+      { name: "record", internalType: "bytes", type: "bytes", indexed: false },
+    ],
+    name: "ShareComplaintSubmitted",
+  },
+  {
+    type: "event",
+    anonymous: false,
+    inputs: [
+      {
+        name: "definitionHash",
+        internalType: "bytes32",
+        type: "bytes32",
+        indexed: true,
+      },
+      {
+        name: "ballotHash",
+        internalType: "bytes32",
+        type: "bytes32",
+        indexed: true,
+      },
+      { name: "record", internalType: "bytes", type: "bytes", indexed: false },
+    ],
+    name: "SharePosted",
+  },
+  {
+    type: "event",
+    anonymous: false,
+    inputs: [
+      {
+        name: "definitionHash",
+        internalType: "bytes32",
+        type: "bytes32",
+        indexed: true,
+      },
+      {
+        name: "ballotHash",
+        internalType: "bytes32",
+        type: "bytes32",
+        indexed: true,
+      },
+      { name: "record", internalType: "bytes", type: "bytes", indexed: false },
+    ],
+    name: "ShareReceiptSubmitted",
+  },
+  {
+    type: "error",
+    inputs: [
+      {
+        name: "code",
+        internalType: "enum ElectionDefinitionLib.DecodeError",
+        type: "uint8",
+      },
+      { name: "offset", internalType: "uint256", type: "uint256" },
+    ],
+    name: "BallotMalformed",
+  },
+  {
+    type: "error",
+    inputs: [{ name: "code", internalType: "enum BallotCheckLib.Code", type: "uint8" }],
+    name: "BallotRefused",
+  },
+  {
+    type: "error",
+    inputs: [{ name: "blockNumber", internalType: "uint256", type: "uint256" }],
+    name: "BlockNumberTooLarge",
+  },
+  {
+    type: "error",
+    inputs: [{ name: "chainId", internalType: "uint256", type: "uint256" }],
+    name: "ChainIdTooLarge",
+  },
+  {
+    type: "error",
+    inputs: [{ name: "length", internalType: "uint256", type: "uint256" }],
+    name: "DataTooLong",
+  },
+  {
+    type: "error",
+    inputs: [
+      { name: "record", internalType: "uint256", type: "uint256" },
+      {
+        name: "code",
+        internalType: "enum ElectionDefinitionLib.DecodeError",
+        type: "uint8",
+      },
+      { name: "offset", internalType: "uint256", type: "uint256" },
+    ],
+    name: "DeliveryMalformed",
+  },
+  {
+    type: "error",
+    inputs: [
+      { name: "record", internalType: "uint256", type: "uint256" },
+      {
+        name: "code",
+        internalType: "enum DeliveryCheckLib.Code",
+        type: "uint8",
+      },
+    ],
+    name: "DeliveryRefused",
+  },
+  { type: "error", inputs: [], name: "InsufficientGas" },
+  { type: "error", inputs: [], name: "InvalidDeployment" },
+  { type: "error", inputs: [], name: "NonCanonicalCalldata" },
+  {
+    type: "error",
+    inputs: [{ name: "root", internalType: "uint256", type: "uint256" }],
+    name: "NonCanonicalRoot",
+  },
+  { type: "error", inputs: [], name: "PrecompileFailed" },
+  {
+    type: "error",
+    inputs: [{ name: "length", internalType: "uint256", type: "uint256" }],
+    name: "ReceiptBatchLength",
+  },
+  {
+    type: "error",
+    inputs: [{ name: "timestamp", internalType: "uint256", type: "uint256" }],
+    name: "TimestampTooLarge",
+  },
+  {
+    type: "error",
+    inputs: [{ name: "count", internalType: "uint256", type: "uint256" }],
+    name: "TopicCount",
+  },
+  {
+    type: "error",
+    inputs: [{ name: "tier", internalType: "uint8", type: "uint8" }],
+    name: "UnknownTier",
+  },
+  { type: "error", inputs: [], name: "ZeroRoot" },
+] as const;
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // BoardAnchor
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -379,6 +616,16 @@ export const electionRegistryAbi = [
     inputs: [{ name: "definitionHash", internalType: "bytes32", type: "bytes32" }],
     name: "cellTiers",
     outputs: [{ name: "", internalType: "uint8[]", type: "uint8[]" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    inputs: [{ name: "definitionHash", internalType: "bytes32", type: "bytes32" }],
+    name: "ceremony",
+    outputs: [
+      { name: "stubHash", internalType: "bytes32", type: "bytes32" },
+      { name: "panelId", internalType: "bytes32", type: "bytes32" },
+    ],
     stateMutability: "view",
   },
   {

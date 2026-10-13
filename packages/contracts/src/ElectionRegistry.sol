@@ -82,6 +82,15 @@ contract ElectionRegistry is EventAccumulator {
         Question[] questions;
     }
 
+    /// The ceremony a registered definition's default panel ran: the stub
+    /// hash the trustee registry recorded its transcript under, and the
+    /// panel. The board finds the election's registered key set by them
+    /// (docs/spec/contracts.md, Parameters; ADR 0028, 2B).
+    struct Ceremony {
+        bytes32 stubHash;
+        bytes32 panelId;
+    }
+
     /// A definition field that names something other than this deployment.
     enum DeploymentField {
         L2ChainId,
@@ -156,6 +165,7 @@ contract ElectionRegistry is EventAccumulator {
     /// board reads one cell, not every cell of a large partition.
     mapping(bytes32 definitionHash => uint8[]) private _cellTiers;
     mapping(bytes32 definitionHash => uint256[]) private _cellRoots;
+    mapping(bytes32 definitionHash => Ceremony) private _ceremonies;
 
     constructor(Deployment memory dep) {
         // The same rule a definition's `chain` check applies, so a deployment
@@ -197,6 +207,18 @@ contract ElectionRegistry is EventAccumulator {
     /// names its tier finds its cell. Empty if no definition has this hash.
     function cellTiers(bytes32 definitionHash) external view returns (uint8[] memory) {
         return _cellTiers[definitionHash];
+    }
+
+    /// @notice The stub hash and panel under which the trustee registry
+    /// recorded the ceremony of the registered definition whose hash is
+    /// `definitionHash`, or both zero if none is.
+    function ceremony(bytes32 definitionHash)
+        external
+        view
+        returns (bytes32 stubHash, bytes32 panelId)
+    {
+        Ceremony storage c = _ceremonies[definitionHash];
+        return (c.stubHash, c.panelId);
     }
 
     /// @notice Cell `c`'s tier and root. Reverts unless `c` is below the
@@ -269,6 +291,7 @@ contract ElectionRegistry is EventAccumulator {
 
         bytes32 h = ElectionDefinitionLib.hash(definition);
         definitionHashOf[id] = h;
+        _ceremonies[h] = Ceremony(stub, def.panelId);
         _recordParameters(h, def);
         _log3(DefinitionRegistered.selector, id, h, _registrationData(definition));
     }

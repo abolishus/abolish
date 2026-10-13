@@ -63,16 +63,8 @@ contract Board is EventAccumulator {
         bytes32 key = keccak256(record);
         // Only an accepted record is remembered, so a repeat passed before.
         if (_accepted[key]) return;
-        uint256 qualified;
-        // A record too short to name an election fails the check's header
-        // before `qualified` is read.
-        if (record.length >= BallotCheckLib.TIER_AT) {
-            (bytes32 stub, bytes32 panel) = electionRegistry.ceremony(
-                bytes32(record[BallotCheckLib.DEFINITION_AT:BallotCheckLib.TIER_AT])
-            );
-            (, qualified) = trusteeRegistry.keySetOf(stub, panel);
-        }
-        BallotCheckLib.Admitted memory a = BallotCheckLib.check(record, electionRegistry, qualified);
+        BallotCheckLib.Admitted memory a =
+            BallotCheckLib.check(record, electionRegistry, _qualified(record));
         _accepted[key] = true;
         _log3(BallotSubmitted.selector, a.definitionHash, a.ballotHash, abi.encode(record));
     }
@@ -99,14 +91,16 @@ contract Board is EventAccumulator {
     }
 
     /// @notice Submits a share posting with the record of the ballot it
-    /// delivers, from which the board recomputes the ballot hash and reads
-    /// the seat's share hash. Only the posting is emitted.
+    /// delivers, which must pass the ballot check, and whose share hash for
+    /// the seat the posting's ciphertext must match. Only the posting is
+    /// emitted.
     function submitPosting(bytes calldata posting, bytes calldata ballot) external {
         CanonicalCalldata.requireTwoBytesArguments(posting, ballot);
         bytes32 key = keccak256(posting);
         if (_accepted[key]) return;
-        (bytes32 definitionHash, bytes32 ballotHash) =
-            DeliveryCheckLib.checkPosting(posting, ballot, electionRegistry, trusteeRegistry);
+        (bytes32 definitionHash, bytes32 ballotHash) = DeliveryCheckLib.checkPosting(
+            posting, ballot, electionRegistry, trusteeRegistry, _qualified(ballot)
+        );
         _accepted[key] = true;
         _log3(SharePosted.selector, definitionHash, ballotHash, abi.encode(posting));
     }
@@ -120,5 +114,17 @@ contract Board is EventAccumulator {
             DeliveryCheckLib.checkComplaint(record, 0, electionRegistry, trusteeRegistry);
         _accepted[key] = true;
         _log3(ShareComplaintSubmitted.selector, definitionHash, ballotHash, abi.encode(record));
+    }
+
+    /// The seats of the key set the trustee registry recorded for the
+    /// ceremony of the election a ballot record names, never a submitter's
+    /// (ADR 0028, 2B). Zero for a record too short to name an election,
+    /// which the ballot check's header refuses first.
+    function _qualified(bytes calldata record) private view returns (uint256 qualified) {
+        if (record.length < BallotCheckLib.TIER_AT) return 0;
+        (bytes32 stub, bytes32 panel) = electionRegistry.ceremony(
+            bytes32(record[BallotCheckLib.DEFINITION_AT:BallotCheckLib.TIER_AT])
+        );
+        (, qualified) = trusteeRegistry.keySetOf(stub, panel);
     }
 }

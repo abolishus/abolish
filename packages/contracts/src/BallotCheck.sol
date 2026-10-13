@@ -117,7 +117,19 @@ library BallotCheckLib {
         view
         returns (Admitted memory a)
     {
-        (ElectionRegistry.Parameters memory p, Layout memory l) = frame(record, registry, a);
+        (a,) = checkWithLayout(record, registry, qualified);
+    }
+
+    /// `check`, also returning the committed vote's layout, so the board's
+    /// posting path finds the admitted ballot's share hashes without
+    /// framing it twice.
+    function checkWithLayout(bytes calldata record, IElectionParameters registry, uint256 qualified)
+        internal
+        view
+        returns (Admitted memory a, Layout memory l)
+    {
+        ElectionRegistry.Parameters memory p;
+        (p, l) = frame(record, registry, a);
         uint256 named = _uint(record, TIER_AT, 1);
 
         uint256 root;
@@ -147,8 +159,7 @@ library BallotCheckLib {
     /// strictly. Fills `a`'s definition hash, version and nullifier and
     /// returns the election's parameters and the vote's layout; reverts with
     /// `BallotMalformed`, or `BallotRefused(BallotStray)`, on the first
-    /// failure. The board's posting path frames the ballot it binds with
-    /// this alone (docs/spec/delivery.md, Direct submit).
+    /// failure.
     function frame(bytes calldata record, IElectionParameters registry, Admitted memory a)
         internal
         view

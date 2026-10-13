@@ -55,8 +55,8 @@ library DeliveryCheckLib {
         DeliverySignature,
         /// `sealed` isn't `4 + 64·T + 16` bytes for the definition's `T`.
         PostingLength,
-        /// The ballot carried with a posting names another election, or its
-        /// ballot hash isn't the posting's.
+        /// The ballot carried with a posting, which passed the ballot check,
+        /// isn't the one the posting names: its ballot hash differs.
         PostingBallot,
         /// The ciphertext's hash isn't the ballot's share hash for the seat.
         PostingHash
@@ -133,14 +133,18 @@ library DeliveryCheckLib {
     }
 
     /// Checks a share posting against `ballot`, the record (0x0002) of the
-    /// ballot it delivers, and returns the hashes it names. The ballot is
-    /// framed only to recompute its ballot hash and find its share hash:
-    /// a posting never admits a ballot (docs/spec/delivery.md, Direct submit).
+    /// ballot it delivers, and returns the hashes it names. The ballot must
+    /// pass the whole ballot check under `qualified`, its election's key-set
+    /// seats, membership proof included, though it is never admitted or
+    /// emitted here (docs/spec/delivery.md, Direct submit): otherwise anyone
+    /// could make up a ballot committing to a ciphertext of their choice and
+    /// archive it whole as a posting (T-17, T-52).
     function checkPosting(
         bytes calldata r,
         bytes calldata ballot,
         IBoardElections elections,
-        IBoardTrustees trustees
+        IBoardTrustees trustees,
+        uint256 qualified
     ) internal view returns (bytes32 definitionHash, bytes32 ballotHash) {
         (definitionHash, ballotHash) = _header(r, 0, POSTING_TYPE, elections);
         uint256 seat = _uint(r, 0, SEAT_AT, 1);
@@ -170,20 +174,33 @@ library DeliveryCheckLib {
         uint256 options = elections.parameters(definitionHash).optionCount;
         if (sealedLength != 4 + 64 * options + 16) revert DeliveryRefused(0, Code.PostingLength);
 
-        BallotCheckLib.Admitted memory a;
-        (, BallotCheckLib.Layout memory l) = BallotCheckLib.frame(ballot, elections, a);
-        if (a.definitionHash != definitionHash || BallotCheckLib.ballotHash(ballot) != ballotHash) {
-            revert DeliveryRefused(0, Code.PostingBallot);
+        _bindBallot(r, ballot, elections, qualified, seat, ballotHash);
+    }
+
+    /// A posting's ballot: it passes the whole ballot check, its ballot
+    /// hash is the posting's, and its share hash for `seat` is the hash of
+    /// the posting's ciphertext.
+    function _bindBallot(
+        bytes calldata r,
+        bytes calldata ballot,
+        IBoardElections elections,
+        uint256 qualified,
+        uint256 seat,
+        bytes32 ballotHash
+    ) private view {
+        (BallotCheckLib.Admitted memory a, BallotCheckLib.Layout memory l) =
+            BallotCheckLib.checkWithLayout(ballot, elections, qualified);
+        // The ballot hash binds the definition hash, so a ballot of another
+        // election fails here too.
+        if (a.ballotHash != ballotHash) revert DeliveryRefused(0, Code.PostingBallot);
+        // The ballot passed `validity-shape`, so it has `n` share hashes, and
+        // the seat is a key-set seat, so at most `n`. One SHA-256 over `ct_i`
+        // as the posting encodes it, its one encoding (docs/spec/delivery.md,
+        // Share posting).
+        uint256 at = l.shareHashesAt + 32 * (seat - 1);
+        if (sha256(bytes.concat(DS_CIPHERTEXT, r[CIPHERTEXT_AT:])) != bytes32(ballot[at:at + 32])) {
+            revert DeliveryRefused(0, Code.PostingHash);
         }
-        // One SHA-256 over `ct_i` as the posting encodes it, its one
-        // encoding (docs/spec/delivery.md, Share posting).
-        if (
-            seat > l.shareCount
-                || sha256(bytes.concat(DS_CIPHERTEXT, r[CIPHERTEXT_AT:]))
-                    != bytes32(
-                        ballot[l.shareHashesAt + 32 * (seat - 1):l.shareHashesAt + 32 * seat]
-                    )
-        ) revert DeliveryRefused(0, Code.PostingHash);
     }
 
     /// The header and the election: type, then the election the record

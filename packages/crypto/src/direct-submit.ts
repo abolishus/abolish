@@ -1,13 +1,13 @@
 // The board contract's stateless framing of the records it accepts
 // (docs/spec/contracts.md, Board, Ballots steps 1 and 3 to 5 and the proof's
 // points, Delivery records steps 1, 3 and 4), for the contract-event record's
-// version-2 check of the board's events. It frames exactly what the contract
-// frames and decodes nothing it doesn't: a ristretto255 element is only
+// version-2 check of the board's events. It runs the contract's framing, and
+// none of its shape checks (seat 0, counts that disagree, a posting's length),
+// and decodes nothing the contract doesn't: a ristretto255 element is only
 // checked to be an even value below 2²⁵⁵ − 19 and not 0, never decoded, since
 // the board admits a member's ballot whose elements aren't points and the
 // verifier rejects it later (T-53). Checking more here would let any member
-// fail a deployment's events by direct-submitting such a ballot; checking
-// less would admit records the board never emits (T-17, T-31).
+// fail a deployment's events by direct-submitting such a ballot (T-17, T-31).
 
 import {
   bytesFixed,

@@ -698,6 +698,28 @@ def main(root):
             v1_rec[:proofs_at] + ELL.to_bytes(32, "little") + v1_rec[proofs_at + 32:])
     mutated("event-data-ballot-options-over-max", "BallotSubmitted whose option count is MAX_OPTIONS + 1",
             v1_rec[:364] + (MAX_OPTIONS + 1).to_bytes(4, "big") + v1_rec[368:])
+    def sum_at(rec):
+        """The offset of the sum proof's (version 3: the range proofs') count."""
+        at, options = 368, int.from_bytes(rec[364:368], "big")
+        for _ in range(options):
+            at += 4 + 32 * int.from_bytes(rec[at : at + 4], "big")
+        at += 4 + 32 * int.from_bytes(rec[at : at + 4], "big")
+        return at + 4 + 128 * int.from_bytes(rec[at : at + 4], "big")
+
+    def set_count(rec, at, count):
+        return rec[:at] + count.to_bytes(4, "big") + rec[at + 4:]
+
+    mutated("event-data-ballot-degree-over-max", "BallotSubmitted whose first option has MAX_TRUSTEES + 1 "
+            "commitments", set_count(v1_rec, 368, MAX_TRUSTEES + 1))
+    mutated("event-data-ballot-shares-over-max", "BallotSubmitted with MAX_TRUSTEES + 1 share hashes",
+            set_count(v1_rec, n_at, MAX_TRUSTEES + 1))
+    mutated("event-data-ballot-branches-over-max", "BallotSubmitted whose sum proof has MAX_OPTIONS + 2 branches",
+            set_count(v1_rec, sum_at(v1_rec), MAX_BRANCHES + 1))
+    v3_owners = ballots["v3/owners-four"]
+    mutated("event-data-ballot-v3-questions-over-max", "BallotSubmitted carrying a version-3 ballot with "
+            "MAX_QUESTIONS + 1 range proofs", set_count(v3_owners, sum_at(v3_owners), MAX_QUESTIONS + 1))
+    mutated("event-data-ballot-v3-branches-over-max", "BallotSubmitted carrying a version-3 ballot whose first "
+            "range proof has MAX_OPTIONS + 2 branches", set_count(v3_owners, sum_at(v3_owners) + 4, MAX_BRANCHES + 1))
     mutated("event-data-ballot-trailing", "BallotSubmitted whose record has a byte after its last field",
             v1_rec + b"\x00")
     mutated("event-data-ballot-truncated", "BallotSubmitted whose record ends a byte early", v1_rec[:-1])
@@ -722,6 +744,13 @@ def main(root):
         delivery_fail(f"event-data-{r['id']}", f"{name} carrying delivery.json's {r['id']} ({r['description']})",
                       name, bytes.fromhex(r["encoding"]))
     cp = delivery["complaint"]
+    rc = delivery["receipt"]
+    for label, r_, s_ in (("r-zero", 0, 1), ("r-n", P256_N, 1), ("s-zero", 1, 0)):
+        delivery_fail(f"event-data-receipt-{label}", f"ShareReceiptSubmitted whose signature has {label.replace('-', ' = ')}",
+                      "ShareReceiptSubmitted", rc[:100] + r_.to_bytes(32, "big") + s_.to_bytes(32, "big"))
+    for label, value in (("odd", 3), ("p-plus-1", P25519 + 1)):
+        delivery_fail(f"event-data-posting-dh-{label}", f"SharePosted whose ct_dh is {label.replace('-', ' ')}",
+                      "SharePosted", post[:dh_at] + value.to_bytes(32, "little") + post[dh_at + 32:])
     delivery_fail("event-data-complaint-dh-odd", "ShareComplaintSubmitted whose D is odd", "ShareComplaintSubmitted",
                   cp[:68] + (3).to_bytes(32, "little") + cp[100:])
 

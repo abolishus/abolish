@@ -44,10 +44,10 @@ import { MAX_TRUSTEES, p256Key } from "./trustee.ts";
 
 /**
  * `MAX_EVENT_DATA`: the framing bound on a record's `data`, checked before
- * anything is allocated (T-52). Every event of version 1's tables is far
- * smaller (the largest, a `MembersAdded`, is at most 25,120 bytes), and so is
- * every event of version 2's but the largest definitions (about 66 KB); an
- * event that needs more is a new record version.
+ * anything is allocated (T-52). Every event of either version's tables is
+ * far smaller: version 1's largest, a `MembersAdded`, is 25,120 bytes, and
+ * version 2's a framed `BallotSubmitted`, about 175 KB. An event that needs
+ * more is a new record version.
  */
 export const MAX_EVENT_DATA = 1 << 20;
 

@@ -37,7 +37,12 @@ import {
   verifyBoard,
 } from "@abolishus/crypto";
 import { bytesToHex } from "@noble/hashes/utils.js";
-import { type AdmissionCode, ballotChecks, type BallotsReport } from "./ballots.ts";
+import {
+  type AdmissionCode,
+  ballotChecks,
+  type BallotsReport,
+  type WindowCode,
+} from "./ballots.ts";
 import type { Bundle, InputSource, InputSources } from "./bundle.ts";
 import { type CeremonyCode, ceremonyChecks, type CeremonyReport } from "./ceremony.ts";
 import { CHECKS, type CheckKind } from "./checks.ts";
@@ -67,6 +72,8 @@ export type CheckCode =
   | ElectionDefinitionV5Rule
   | CeremonyCode
   | AdmissionCode
+  | WindowCode
+  | "repeat"
   | OpeningCode
   | TallyCode
   | ReceiptKeyCode
@@ -288,6 +295,7 @@ function fromDefinition(bundle: Bundle):
           ["5.2", NOT_REACHED],
           ["5.3", NOT_REACHED],
           ["5.4", NOT_REACHED],
+          ["5.5", NOT_REACHED],
           ["5.7", NOT_REACHED],
           ["6.2", NOT_REACHED],
           ["7.4", NOT_REACHED],
@@ -530,6 +538,7 @@ export function verifyBundle(bundle: Bundle): Report {
         checked.registered,
         bundle.entries,
         definition.inputs.boardEntryVersion,
+        bundle.clock,
       );
       implemented = new Map<string, Outcome>([...implemented, ...admission.rows]);
       ballots = admission.report;

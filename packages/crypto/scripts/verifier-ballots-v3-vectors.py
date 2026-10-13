@@ -3,9 +3,9 @@
 
 Elections for the verifier's ballot admission under definition version 5,
 whose ballots (version 3) name their cell and carry one range proof per
-question (docs/spec/verifier.md, Ballot admission; 5.1 to 5.4, 5.7): each is
+question (docs/spec/verifier.md, Ballot admission; 5.1 to 5.5, 5.7): each is
 a definition, a board copy and the panel a bundle pins, with the rows 1.3,
-2.3, 3.2, 5.1 to 5.4, 5.7, 6.2 and 7.4 a verifier reports and the report's
+2.3, 3.2, 5.1 to 5.5, 5.7, 6.2 and 7.4 a verifier reports and the report's
 `ballots`. Every transcript is made for the stub of the definition it is
 checked against, under definition version 5, and every ballot proves
 membership of its cell's tree under that definition's hash, so a verifier
@@ -53,6 +53,8 @@ def _load(name, file):
 
 r3 = _load("ballot_v3_records_vectors", "ballot-v3-records-vectors.py")
 vc = _load("verifier_ceremony_vectors", "verifier-ceremony-vectors.py")
+# The anchoring clock and the close rule's window (5.5) are verifier-ballots-vectors.py's.
+vb = _load("verifier_ballots_vectors", "verifier-ballots-vectors.py")
 b1, b2, b3, mem, rev = r3.b1, r3.b2, r3.b3, r3.mem, r3.rev
 cv, d5 = vc.cv, vc.d5
 
@@ -306,19 +308,19 @@ def build(constants):
     )
     bundle(
         "admitted",
-        "Definition version 5 with only admitted ballots after the transcript: one in each cell and a re-vote. 5.1 to 5.4 pass, and so does 6.2, with no opening on the board.",
+        "Definition version 5 with only admitted ballots after the transcript: one in each cell and a re-vote. 5.1 to 5.5 and 5.7 pass, and so does 6.2, with no opening on the board.",
         d, t, e, [1, 2, 3],
         [t, ok["cell-0"], ok["remainder-region-1"], ok["tier-2"], ok["revote"]],
         "ballots",
     )
     bundle(
         "repeats",
-        "Copies of the cell 0 ballot: one with the tier 2 ballot's proof (rejected, so it makes no copy a repeat, R4), the original, a copy with its proof negated, the tier 2 ballot, a byte-identical copy and the re-vote (another M). 5.7 lists the two copies after the original.",
+        "Copies of the cell 0 ballot: one with the tier 2 ballot's proof (rejected, so it makes no copy a repeat, R4), the original, a copy with its proof negated, the tier 2 ballot, a byte-identical copy and the re-vote (another M). 5.7 rejects the two copies after the original.",
         d, t, e, [1, 2, 3],
         [t, (b_a, ok["tier-2"][1]), ok["cell-0"], ("negated", b_a, p_a), ok["tier-2"], ok["cell-0"], ok["revote"]],
         "ballots",
     )
-    bundle("no-ballots", "The transcript and no ballot: 5.1 to 5.4 pass, with nothing admitted.", d, t, e, [1, 2, 3], [t], "ballots")
+    bundle("no-ballots", "The transcript and no ballot: 5.1 to 5.5 and 5.7 pass, with nothing admitted.", d, t, e, [1, 2, 3], [t], "ballots")
 
     d_all, t_all, e_all = election_for("v5-every-seat", [1, 2, 3, 4], profile=pins_for())
     b_all = ballot("every-seat", e_all, 0, nullifier("r0/2", e_all, 0), [(3, [2]), (4, [3]), (2, [0])], full4)
@@ -369,13 +371,13 @@ def build(constants):
     bundle("ballot-v1", "Definition version 5 pinning ballot version 1, which names a tier and carries one range, beside opening version 1: 2.3 fails profile-combination, and no ballot or opening can be judged against the cells and questions.", d_b1, t_b1, e_b1, [1, 2, 3], [t_b1, (b_a, None)], "not-reached")
 
     d_b2, t_b2, e_b2 = election_for("v5-ballot-2", [1, 2, 3], profile=pins_for(ballot=2))
-    bundle("ballot-v2", "Definition version 5 pinning ballot version 2, which carries no question: 2.3 fails profile-combination, and, as for any ballot version but the definition's own and version 1, 5.1 to 5.4, 5.7 and 6.2 are unsupported.", d_b2, t_b2, e_b2, [1, 2, 3], [t_b2, (b_a, None)], "unsupported")
+    bundle("ballot-v2", "Definition version 5 pinning ballot version 2, which carries no question: 2.3 fails profile-combination, and, as for any ballot version but the definition's own and version 1, 5.1 to 5.5, 5.7 and 6.2 are unsupported.", d_b2, t_b2, e_b2, [1, 2, 3], [t_b2, (b_a, None)], "unsupported")
 
     d_b4, t_b4, e_b4 = election_for("v5-ballot-4", [1, 2, 3], profile=pins_for(ballot=4))
-    bundle("ballot-v4", "Definition version 5 pinning ballot version 4, which carries an author half and pairs with definition version 6 alone: 2.3 fails profile-combination, and 5.1 to 5.4, 5.7 and 6.2 are unsupported, as for version 2.", d_b4, t_b4, e_b4, [1, 2, 3], [t_b4, (b_a, None)], "unsupported")
+    bundle("ballot-v4", "Definition version 5 pinning ballot version 4, which carries an author half and pairs with definition version 6 alone: 2.3 fails profile-combination, and 5.1 to 5.5, 5.7 and 6.2 are unsupported, as for version 2.", d_b4, t_b4, e_b4, [1, 2, 3], [t_b4, (b_a, None)], "unsupported")
 
     d_b5, t_b5, e_b5 = election_for("v5-ballot-5", [1, 2, 3], profile=pins_for(ballot=5))
-    bundle("ballot-v5", "Definition version 5 pinning ballot version 5, which a later release may define to carry questions: 2.3, 5.1 to 5.4, 5.7 and 6.2 are unsupported.", d_b5, t_b5, e_b5, [1, 2, 3], [t_b5, (b_a, None)], "unsupported")
+    bundle("ballot-v5", "Definition version 5 pinning ballot version 5, which a later release may define to carry questions: 2.3, 5.1 to 5.5, 5.7 and 6.2 are unsupported.", d_b5, t_b5, e_b5, [1, 2, 3], [t_b5, (b_a, None)], "unsupported")
 
     return {"panels": panels, "proofs": proofs, "checks": checks, "bundles": bundles, "eid": eid, "cells": cells}
 
@@ -397,17 +399,22 @@ def tally_row(d, registered):
     return NOT_REACHED if registered is None else outcome("pass")
 
 
-def rows_for(kind, rejected=(), repeats=()):
-    """5.1 to 5.4 and 5.7. Each admission row fails at the first entry whose code is one of its own; 5.7 passes only with no candidate repeat (the close rule decides which copies are admitted)."""
+def rows_for(kind, rejected=()):
+    """5.1 to 5.5 and 5.7. Each row fails at the first entry whose code is one of its own: 5.5's are the window's, 5.7's `repeat`."""
     if kind == "not-reached":
-        return {r: NOT_REACHED for r in ADMISSION_ROWS + ("5.7",)}
+        return {r: NOT_REACHED for r in ADMISSION_ROWS + ("5.5", "5.7")}
     if kind == "unsupported":
-        return {r: UNSUPPORTED for r in ADMISSION_ROWS + ("5.7",)}
+        return {r: UNSUPPORTED for r in ADMISSION_ROWS + ("5.5", "5.7")}
     rows = {}
+
+    def first(codes):
+        x = next((x for x in rejected if x["code"] in codes), None)
+        return outcome("pass") if x is None else outcome("fail", x["code"], {"entry": x["entry"]})
+
     for r in ADMISSION_ROWS:
-        first = next((x for x in rejected if r in ROWS_OF.get(x["code"], ())), None)
-        rows[r] = outcome("pass") if first is None else outcome("fail", first["code"], {"entry": first["entry"]})
-    rows["5.7"] = outcome("pass") if not repeats else outcome("unverifiable", "not-reached", {"entry": repeats[0]["entry"]})
+        rows[r] = first([c for c, rs in ROWS_OF.items() if r in rs])
+    rows["5.5"] = first(vb.WINDOW_CODES)
+    rows["5.7"] = first(("repeat",))
     return rows
 
 
@@ -482,10 +489,17 @@ def assemble(constants, proofs_path, out_dir):
                 code, where = r3.admission(e, bnd["registered"], b, verdict)
                 assert verdict is not None or code not in ("ok", "option-proof", "sum-proof"), (bnd["id"], i)
                 assert sig is not None or verdict is None, (bnd["id"], i)
-                if code == "ok":
+                # Every ballot here is a board-path one in segment 0; the
+                # profiles pin contract-event version 1, under which the board
+                # emits no event (docs/spec/close.md, Window).
+                assert dict(d["profile"]["pins"])[vb.CONTRACT_EVENT_TYPE] == 1
+                late = vb.window(d, {"kind": "board", "segment": 0}) if code == "ok" else None
+                if late is not None:
+                    rejected.append({"entry": i, "code": late})
+                elif code == "ok":
                     admitted.append(i)
-                    # Step 1 of revoting.md's Selection over the admitted
-                    # ballots, in board order: (tier, ν, M), the tier the cell's.
+                    # Step 1 of revoting.md's Selection over the ballots 5.1
+                    # to 5.5 admit, in board order: (tier, ν, M), the tier the cell's.
                     tier = e["cells"][b["cell"]]["tier"]
                     k = (tier, b["nullifier"], rev.message(b["definitionHash"], tier, r3.bh_of(b), b["l1RefNumber"], b["l1RefHash"]))
                     if k in firsts:
@@ -498,8 +512,11 @@ def assemble(constants, proofs_path, out_dir):
                     elif code == "sum-proof":
                         r["question"] = where
                     rejected.append(r)
-            rows.update(rows_for("ballots", rejected, repeats))
-            ballots = {"admitted": len(admitted), "rejected": rejected, "repeats": repeats}
+            # Every copy left passed 5.1 to 5.5, so a repeat is rejected (5.7).
+            rejected = sorted(rejected + [{"entry": r["entry"], "code": "repeat"} for r in repeats], key=lambda r: r["entry"])
+            admitted = [i for i in admitted if {"entry": i} not in repeats]
+            rows.update(rows_for("ballots", rejected))
+            ballots = {"admitted": len(admitted), "rejected": rejected, "repeats": []}
         else:
             rows.update(rows_for(bnd["expect"]))
         rows["6.2"] = opening_row(d, bnd["expect"] == "ballots")
@@ -518,12 +535,12 @@ def assemble(constants, proofs_path, out_dir):
 
     by = {c["id"]: c for c in cases}
     mixed = by["mixed"]["ballots"]
-    assert {r["code"] for r in mixed["rejected"]} == set(ROWS_OF) | {"decode"}, mixed
-    assert mixed["admitted"] == 6 and mixed["repeats"] == [{"entry": 18}], mixed
+    assert {r["code"] for r in mixed["rejected"]} == set(ROWS_OF) | {"decode", "repeat"}, mixed
+    assert mixed["admitted"] == 5 and {"entry": 18, "code": "repeat"} in mixed["rejected"], mixed
     assert [r.get("option") for r in mixed["rejected"] if r["code"] == "option-proof"] == [4], mixed
     assert [r.get("question") for r in mixed["rejected"] if r["code"] == "sum-proof"] == [1, 2], mixed
     assert by["admitted"]["ballots"] == {"admitted": 4, "rejected": [], "repeats": []}
-    assert by["repeats"]["ballots"]["repeats"] == [{"entry": 3}, {"entry": 5}]
+    assert [r for r in by["repeats"]["ballots"]["rejected"] if r["code"] == "repeat"] == [{"entry": 3, "code": "repeat"}, {"entry": 5, "code": "repeat"}]
     assert by["every-seat"]["ballots"] == {"admitted": 1, "rejected": [], "repeats": []}
     assert by["other-questions"]["ballots"] == {"admitted": 2, "rejected": [{"entry": 3, "code": "validity-shape"}], "repeats": []}
     assert by["admitted"]["expected"]["2.3"] == NOT_IMPLEMENTED
@@ -541,7 +558,7 @@ def assemble(constants, proofs_path, out_dir):
 
     doc = {
         "format": "abolish-verifier-ballots-vectors/1",
-        "title": "The verifier's ballot admission under definition version 5 (ballot version 3): definitions, boards and pinned panels, with the rows 1.3, 2.3, 3.2, 5.1 to 5.4, 5.7, 6.2 and 7.4 and the report's ballots",
+        "title": "The verifier's ballot admission under definition version 5 (ballot version 3): definitions, boards and pinned panels, with the rows 1.3, 2.3, 3.2, 5.1 to 5.5, 5.7, 6.2 and 7.4 and the report's ballots",
         "spec": "docs/spec/verifier.md",
         "generator": (
             "packages/crypto/scripts/verifier-ballots-v3-vectors.py, from verifier-ceremony-vectors.py and ballot-v3-records-vectors.py "
@@ -549,6 +566,7 @@ def assemble(constants, proofs_path, out_dir):
             "the workspace with Semaphore 4.14.3's depth-32 circuit artifacts and snarkjs 0.7.5, whose groth16.verify gives "
             "every pairing verdict on the signals derived here from each record"
         ),
+        "clock": {k: str(v) for k, v in vb.CLOCK.items()},
         "panels": {name: {"threshold": str(p["k"]), "keys": [k.hex() for k in p["keys"]]} for name, p in s["panels"].items()},
         "cases": cases,
     }

@@ -20,7 +20,12 @@ export {
   electionAdmission,
   type ElectionAdmissionCode,
 } from "./admission.ts";
-export { type AdmissionCode, type BallotsReport, type RejectedBallot } from "./ballots.ts";
+export {
+  type AdmissionCode,
+  type BallotsReport,
+  type RejectedBallot,
+  type WindowCode,
+} from "./ballots.ts";
 export { type EventCode } from "./events.ts";
 export { type OpeningBreak, type OpeningReport } from "./openings.ts";
 export { type CeremonyCode, type CeremonyReport } from "./ceremony.ts";

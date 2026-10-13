@@ -125,8 +125,15 @@ describe("boards what the verifier admits, and nothing else", () => {
     const c = byId("mixed");
     const app = await election(c);
     const a = admissions();
-    const rejected = new Map((c.ballots?.rejected ?? []).map((r) => [r.entry, r.code] as const));
-    const repeats = new Set((c.ballots?.repeats ?? []).map((r) => r.entry));
+    // A repeat (5.7) is decided against the board's earlier copies, as below.
+    const repeats = new Set(
+      (c.ballots?.rejected ?? []).filter((r) => r.code === "repeat").map((r) => r.entry),
+    );
+    const rejected = new Map(
+      (c.ballots?.rejected ?? [])
+        .filter((r) => r.code !== "repeat")
+        .map((r) => [r.entry, r.code] as const),
+    );
     expect(rejected.size).toBeGreaterThan(0);
     let size = 1;
     for (const [at, b] of entriesOf(c).entries()) {
@@ -152,8 +159,14 @@ describe("boards what the verifier admits, and nothing else", () => {
     const c = byId("repeats");
     const app = await election(c);
     const a = admissions();
-    const rejected = new Map((c.ballots?.rejected ?? []).map((r) => [r.entry, r.code] as const));
-    const repeats = new Set((c.ballots?.repeats ?? []).map((r) => r.entry));
+    const repeats = new Set(
+      (c.ballots?.rejected ?? []).filter((r) => r.code === "repeat").map((r) => r.entry),
+    );
+    const rejected = new Map(
+      (c.ballots?.rejected ?? [])
+        .filter((r) => r.code !== "repeat")
+        .map((r) => [r.entry, r.code] as const),
+    );
     expect(repeats.size).toBe(2);
     const ballots = entriesOf(c).map((e) => e.payload);
     const boarded = new Map<number, bigint>();

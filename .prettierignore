@@ -1,2 +1,4 @@
 # Vendored vectors are byte-for-byte copies of published files (test-vectors/README.md).
 packages/crypto/test-vectors/*/
+# ethereum/tests' trie vectors, byte-for-byte copies checked by sha256 (packages/sdk/tests/trie.test.ts).
+packages/sdk/tests/vectors/

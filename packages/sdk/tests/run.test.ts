@@ -39,14 +39,14 @@ describe("runSimulation", { timeout }, () => {
     expect(r.ballots.challenged).toBe(0);
     expect(r.ballots.published).toBe(0);
     expect(r.ballots.superseded).toBe(0);
-    // Every ballot is boarded, direct ones when the servers return, each
-    // followed by each online seat's share receipt; then an opening per cell
-    // and a destruction statement per online seat.
+    // The ceremony transcript first, then every ballot, direct ones when the
+    // servers return, each followed by each online seat's share receipt;
+    // then an opening per cell and a destruction statement per online seat.
     expect(r.board.shareReceipts).toBe(9 * 3);
-    expect(r.board.counted).toBe(9 + 9 * 3);
+    expect(r.board.counted).toBe(1 + 9 + 9 * 3);
     expect(r.board.openings).toBe(3);
     expect(r.board.spoiled).toBe(0);
-    expect(r.board.entries).toBe(9 + 9 * 3 + 3 + 3);
+    expect(r.board.entries).toBe(1 + 9 + 9 * 3 + 3 + 3);
     // Every voter posts the offline seat, so every ballot is delivered.
     expect(r.ballots.postings).toBe(9);
     expect(r.ballots.undelivered).toBe(0);
@@ -150,7 +150,7 @@ describe("runSimulation", { timeout }, () => {
     // No opening reaches the board, so the online seats destroy at t_D, in s_T.
     expect(r.board.openings).toBe(0);
     expect(r.board.spoiled).toBe(9);
-    expect(r.board.entries).toBe(9 + 9 * 2 + 9 + 2);
+    expect(r.board.entries).toBe(1 + 9 + 9 * 2 + 9 + 2);
     expect(r.ballots.postings).toBe(9 * 2);
     const ran = await runSimulation(base);
     expect(r.destruction.from).toBeGreaterThan(ran.destruction.from + 100);
@@ -192,8 +192,8 @@ describe("runSimulation", { timeout }, () => {
     expect(r.ballots.challenged).toBe(9);
     expect(r.ballots.published).toBe(9);
     expect(r.board.spoiled).toBe(9);
-    expect(r.board.counted).toBe(18 + 18 * 3);
-    expect(r.board.entries).toBe(18 + 18 * 3 + 3 + 9 + 3);
+    expect(r.board.counted).toBe(1 + 18 + 18 * 3);
+    expect(r.board.entries).toBe(1 + 18 + 18 * 3 + 3 + 9 + 3);
     for (const c of r.cells) expect(c.counts).toEqual(c.expected);
     // Publishing is the voter's choice: only those who asked.
     const some = await runSimulation({ ...base, challenges: 1, publications: 0.5 });
@@ -225,7 +225,7 @@ describe("runSimulation", { timeout }, () => {
     expect(r.ok).toBe(true);
     expect(r.ballots.cast).toBe(18);
     expect(r.ballots.superseded).toBe(9);
-    expect(r.board.counted).toBe(18 + 18 * 3);
+    expect(r.board.counted).toBe(1 + 18 + 18 * 3);
     // Every ballot is posted, superseded ones included.
     expect(r.ballots.postings).toBe(18);
     expect(r.ballots.server + r.ballots.direct).toBe(18);
@@ -521,7 +521,7 @@ describe("runSimulation under L1 reorganisations", { timeout }, () => {
     expect(r.ballots.server + r.ballots.direct).toBe(18);
     // Nothing goes to the trustees again: one share receipt per online seat per first cast.
     expect(r.board.shareReceipts).toBe(9 * 3);
-    expect(r.board.counted).toBe(18 + 9 * 3);
+    expect(r.board.counted).toBe(1 + 18 + 9 * 3);
     expect(r.cells.reduce((a, c) => a + c.ballots, 0)).toBe(9);
     for (const c of r.cells) expect(c.counts).toEqual(c.expected);
   });

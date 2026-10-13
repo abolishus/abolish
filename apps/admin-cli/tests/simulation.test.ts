@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vite-plus/test";
@@ -77,6 +77,38 @@ describe("simulation", { timeout: 60_000 }, () => {
         detail: expect.stringContaining("--workers"),
       });
     }
+  });
+
+  test("run with --bundle writes the verifier bundle it reports on, and never overwrites one", async () => {
+    const dir = join(mkdtempSync(join(tmpdir(), "sim-")), "bundle");
+    const json = JSON.stringify(scenario);
+    const r = await cli("simulation", "run", "--scenario", json, "--bundle", dir);
+    expect(r.code).toBe(0);
+    const report = r.out[0] as {
+      board: { entries: number; anchors: unknown[] };
+      verifier: { block: { number: number }; rejectedBallots: number };
+      ballots: { cast: number };
+    };
+    expect(readdirSync(dir).sort()).toEqual(["board.bin", "bundle.json"]);
+    const bundle = JSON.parse(readFileSync(join(dir, "bundle.json"), "utf8")) as {
+      format: string;
+      l1: { header: string };
+      panel: { threshold: string; keys: string[] };
+    };
+    expect(bundle.format).toBe("abolish-verifier-bundle/4");
+    expect(bundle.panel).toMatchObject({ threshold: "2" });
+    expect(bundle.panel.keys).toHaveLength(3);
+    // Each version-1 entry is 51 bytes and its payload, so the board holds every entry.
+    expect(readFileSync(join(dir, "board.bin")).length).toBeGreaterThan(51 * report.board.entries);
+    expect(report.verifier.rejectedBallots).toBe(report.ballots.cast);
+    // A second run into the same directory is refused before it starts.
+    const again = await cli("simulation", "run", "--scenario", json, "--bundle", dir);
+    expect(again.code).toBe(2);
+    expect(again.err[0]).toMatchObject({
+      error: "usage",
+      detail: expect.stringContaining("already holds a bundle"),
+    });
+    expect(again.out).toEqual([]);
   });
 
   test("plan reads a scenario file and prints the expected counts, ballots, challenges, re-votes, publications and postings, matching run's", async () => {

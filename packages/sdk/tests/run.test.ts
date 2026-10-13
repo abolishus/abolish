@@ -52,6 +52,23 @@ describe("runSimulation", { timeout }, () => {
     expect(r.ballots.undelivered).toBe(0);
     expect(r.board.head).toMatch(/^[0-9a-f]{64}$/);
     expect(r.board.receiptKey).toMatch(/^0[23][0-9a-f]{64}$/);
+    // Anchored: each period that added entries once, in order, the last
+    // before the seal's being the destruction statements', then the seal's,
+    // which holds the whole board; each in the first block after its period.
+    const { anchors, seal } = r.board;
+    expect(anchors.at(-1)).toMatchObject({ segment: seal, size: r.board.entries });
+    expect(anchors.at(-2)?.size).toBe(r.board.entries);
+    for (const [i, a] of anchors.entries()) {
+      expect(a.hash).toMatch(/^[0-9a-f]{64}$/);
+      expect(a.anchoredAt).toBe((a.segment + 1) * 3600 + 12);
+      if (i > 0) {
+        const before = anchors[i - 1] as (typeof anchors)[number];
+        expect(a.segment).toBeGreaterThan(before.segment);
+        expect(a.size > before.size || a.segment === seal).toBe(true);
+      }
+    }
+    // The counted extent's last anchor holds every ballot and share receipt.
+    expect(anchors.filter((a) => a.size === r.board.counted)).toHaveLength(1);
     // Each online seat seals its sums for each cell to each other online seat.
     expect(r.trustees).toEqual({
       online: [1, 3, 4],
@@ -563,7 +580,12 @@ describe("runSimulation with intake in worker threads", { timeout }, () => {
   const outcome = (r: SimulationReport) => ({
     ok: r.ok,
     ballots: r.ballots,
-    board: { ...r.board, head: undefined, receiptKey: undefined },
+    board: {
+      ...r.board,
+      head: undefined,
+      receiptKey: undefined,
+      anchors: r.board.anchors.map((a) => ({ ...a, hash: undefined })),
+    },
     trustees: r.trustees,
     cells: r.cells,
     destruction: r.destruction,

@@ -7,8 +7,9 @@
 // (docs/spec/tally.md, docs/spec/challenge.md).
 // Every encoding, hash, tree and signature is @abolishus/crypto's; this file
 // only keeps the operator's state. The voter's client checks each receipt
-// with crypto's `checkReceiptAtCast` and the verifier checks the board with
-// `checkBoard` (T-23, T-25, T-26).
+// with crypto's `checkReceiptAtCast`, and the board is checked with
+// `checkBoard`, and with `verifyBoard` against the checkpoints ./anchor.ts
+// anchors (T-23, T-25, T-26).
 
 import {
   appendSubtrees,
@@ -47,7 +48,7 @@ export function segmentAt(seconds: bigint): number {
 }
 
 /** The L1 time at which period `segment` ends. */
-const endOf = (segment: number) => BigInt(segment + 1) * SIMULATED_ANCHOR_PERIOD;
+export const endOf = (segment: number) => BigInt(segment + 1) * SIMULATED_ANCHOR_PERIOD;
 
 /** The post-close segments and times the tally and destruction follow (docs/spec/tally.md). */
 export interface PostClose {

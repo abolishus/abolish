@@ -9,6 +9,8 @@ import {
   encodeElectionDefinitionV4,
   identityKey,
   receiptKeyJudgement,
+  receiptKeyRecordFromWord,
+  receiptKeysCastCheck,
 } from "../src/index.ts";
 import { hex, readVectorFile } from "./spec-vectors.ts";
 
@@ -158,6 +160,72 @@ describe("a listed key's judgement", () => {
           r.registeredAt < opensAt &&
           (r.retiredAt === 0n || r.retiredAt > opensAt);
         expect(receiptKeyJudgement(r, opensAt, at) === "judges").toBe(judges);
+      }),
+      opts,
+    );
+  });
+
+  const word = (r: { registeredAt: bigint; retiredAt: bigint }, high = 0n) =>
+    hex(((high << 128n) | (r.retiredAt << 64n) | r.registeredAt).toString(16).padStart(64, "0"));
+
+  test("a word round-trips to its record at any block at or after its last write", () => {
+    fc.assert(
+      fc.property(record, u64, (r, x) => {
+        const at = latest(r) + (x % ((1n << 64n) - latest(r)));
+        expect(receiptKeyRecordFromWord(word(r), at)).toEqual(r);
+        // A block before the last write can't hold it.
+        if (latest(r) > 0n)
+          expect(receiptKeyRecordFromWord(word(r), latest(r) - 1n)).toBeUndefined();
+      }),
+      opts,
+    );
+  });
+
+  test("a word with any of its high 128 bits set is never read", () => {
+    fc.assert(
+      fc.property(record, fc.bigInt({ min: 1n, max: (1n << 128n) - 1n }), (r, high) => {
+        expect(receiptKeyRecordFromWord(word(r, high), (1n << 64n) - 1n)).toBeUndefined();
+        expect(receiptKeysCastCheck([word(r, high)], 0n, (1n << 64n) - 1n)).toEqual({
+          castable: false,
+          code: "receipt-key-unjudged",
+          key: 0,
+        });
+      }),
+      opts,
+    );
+  });
+
+  test("read at or after opens_at, the client casts exactly when every key judges", () => {
+    fc.assert(
+      fc.property(fc.array(record, { minLength: 1, maxLength: 4 }), u64, (rs, opensAt) => {
+        const at = rs.reduce((m, r) => (latest(r) > m ? latest(r) : m), opensAt);
+        const firstNot = rs.findIndex((r) => receiptKeyJudgement(r, opensAt, at) !== "judges");
+        expect(
+          receiptKeysCastCheck(
+            rs.map((r) => word(r)),
+            opensAt,
+            at,
+          ),
+        ).toEqual(
+          firstNot === -1
+            ? { castable: true }
+            : { castable: false, code: "receipt-key-unjudged", key: firstNot },
+        );
+      }),
+      opts,
+    );
+  });
+
+  test("a key the client accepts before opens_at judges unless retired in between", () => {
+    fc.assert(
+      fc.property(record, u64, u64, (r, opensAt, x) => {
+        fc.pre(latest(r) < opensAt);
+        // A block before opens_at, at or after the record's last write.
+        const at = latest(r) + (x % (opensAt - latest(r)));
+        const accepted = receiptKeysCastCheck([word(r)], opensAt, at).castable;
+        expect(accepted).toBe(r.registeredAt !== 0n && r.retiredAt === 0n);
+        // With no write between the read and opens_at, it judges the election.
+        expect(receiptKeyJudgement(r, opensAt, opensAt) === "judges").toBe(accepted);
       }),
       opts,
     );

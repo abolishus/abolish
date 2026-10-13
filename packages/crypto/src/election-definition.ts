@@ -289,6 +289,73 @@ export function receiptKeyJudgement(
   return registeredBefore ? "judges" : "unregistered";
 }
 
+const U64_MASK = (1n << 64n) - 1n;
+
+/**
+ * The record a key's 32-byte word in the anchor's receipt-key record holds
+ * (docs/spec/contracts.md, Board anchor, Receipt keys: `registered_at` in its
+ * low 64 bits, `retired_at` in the next 64), proven at an L1 block whose
+ * timestamp is `provenAt`; undefined for a word the release code can't write
+ * there: a high bit set, a retirement without a registration or before it,
+ * or a time after the block (the anchor writes `block.timestamp`). The
+ * verifier fails the election on such a word (2.9, `receipt-key-record`) and
+ * the ballot client refuses to cast (T-26).
+ */
+export function receiptKeyRecordFromWord(
+  word: Uint8Array,
+  provenAt: bigint,
+): ReceiptKeyRecord | undefined {
+  if (word.length !== 32) throw new RangeError("a storage word is 32 bytes");
+  if (typeof provenAt !== "bigint" || provenAt < 0n || provenAt > U64_MASK)
+    throw new RangeError("provenAt must be a u64 bigint");
+  let w = 0n;
+  for (const x of word) w = (w << 8n) | BigInt(x);
+  const registeredAt = w & U64_MASK;
+  const retiredAt = (w >> 64n) & U64_MASK;
+  if (w >> 128n !== 0n) return undefined;
+  if (retiredAt !== 0n && (registeredAt === 0n || registeredAt > retiredAt)) return undefined;
+  if (registeredAt > provenAt || retiredAt > provenAt) return undefined;
+  return { registeredAt, retiredAt };
+}
+
+/** The ballot client's check of a definition's listed receipt keys before casting. */
+export type ReceiptKeysCastCheck =
+  | { readonly castable: true }
+  | { readonly castable: false; readonly code: "receipt-key-unjudged"; readonly key: number };
+
+/**
+ * Whether the ballot client may cast in a version-4 election that opens at
+ * `opensAt`, from the receipt-key record's words of every key the definition
+ * lists, in list order, proven at the latest finalized L1 block the client
+ * knows, whose timestamp is `provenAt` (docs/spec/election-definition.md,
+ * Receipt keys). Each key must be registered before `opensAt` and not
+ * retired by then: a key that `receiptKeyJudgement` calls `judges`, or, read
+ * before `opensAt`, `unsettled` but already registered. Otherwise, or for a
+ * word the release code can't write, the client refuses at the first such
+ * key (`receipt-key-unjudged`), so it never casts for a receipt no listed key
+ * may give as evidence (T-26, T-69).
+ *
+ * Read before `opensAt`, a retirement between that block and `opensAt` can't
+ * be seen yet; it fails the election ([[verifier]] 2.9), which the client's
+ * later checks report as `board-failed`. A definition lists at least one key
+ * (`receipt-keys`), so an empty list throws.
+ */
+export function receiptKeysCastCheck(
+  words: readonly Uint8Array[],
+  opensAt: bigint,
+  provenAt: bigint,
+): ReceiptKeysCastCheck {
+  if (words.length === 0) throw new RangeError("a version-4 definition lists receipt keys");
+  for (const [i, word] of words.entries()) {
+    const r = receiptKeyRecordFromWord(word, provenAt);
+    const judgement = r === undefined ? undefined : receiptKeyJudgement(r, opensAt, provenAt);
+    const registered =
+      judgement === "judges" || (judgement === "unsettled" && r?.registeredAt !== 0n);
+    if (!registered) return { castable: false, code: "receipt-key-unjudged", key: i };
+  }
+  return { castable: true };
+}
+
 type Head = Pick<
   ElectionDefinition,
   "profile" | "election_type" | "option_count" | "min_selections" | "max_selections"

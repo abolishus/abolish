@@ -2,7 +2,8 @@
 """Prints docs/spec/vectors/election-definition-v4.json.
 
 Written from docs/spec/election-definition.md (Layout (version 4), Receipt
-keys, Well-formedness) alone, independently of packages/crypto, with only the
+keys, Well-formedness) and docs/spec/contracts.md (Board anchor, Receipt keys:
+the record's word) alone, independently of packages/crypto, with only the
 Python standard library. It reuses regional-cells-vectors.py's version-3
 encoder, values and rules, and trustee-vectors.py's P-256 arithmetic and
 `p256-key` decoding (self-checked there against the curve's order), both
@@ -252,6 +253,60 @@ IMPOSSIBLE = [
 ]
 
 
+def castable(registered_at, retired_at, opens_at, proven_at):
+    """Written from the spec's prose on the ballot client: it casts only if the
+    key's word is one the anchor can hold at the block it read, registered with
+    registered_at < opens_at and not retired with retired_at <= opens_at."""
+    if not possible(registered_at, retired_at, proven_at):
+        return False
+    return registered_at != 0 and registered_at < opens_at and (retired_at == 0 or retired_at > opens_at)
+
+
+def word(registered_at, retired_at, high=0):
+    """The key's storage word (contracts.md, Board anchor, Receipt keys)."""
+    return ((high << 128) | (retired_at << 64) | registered_at).to_bytes(32, "big").hex()
+
+
+CASTING = [
+    # id, opensAt, provenAt, [(registeredAt, retiredAt, high bits)], note
+    ("all-judge", 1000, 5000, [(100, 0, 0), (200, 1500, 0)], "two keys that judge, one retired after opens_at"),
+    ("four-judge", 1000, 5000, [(100, 0, 0), (200, 0, 0), (300, 0, 0), (999, 0, 0)], "four keys that judge"),
+    ("before-opens-registered", 1000, 999, [(100, 0, 0), (999, 0, 0)], "read before opens_at, both registered: a retirement may still come, which 2.9 catches"),
+    ("before-opens-unregistered", 1000, 999, [(100, 0, 0), (0, 0, 0)], "read before opens_at, the second not registered yet"),
+    ("before-opens-retired", 1000, 999, [(100, 500, 0), (100, 0, 0)], "read before opens_at, the first already retired"),
+    ("retired-first", 1000, 5000, [(100, 500, 0), (0, 0, 0)], "the first retired before opens_at and the second never registered: the first is reported"),
+    ("registered-at-opens-third", 1000, 5000, [(100, 0, 0), (200, 0, 0), (1000, 0, 0), (300, 0, 0)], "the third registered at opens_at, too late"),
+    ("retired-at-opens", 1000, 5000, [(100, 1000, 0)], "retired at opens_at, so by then"),
+    ("high-bits", 1000, 5000, [(100, 0, 0), (100, 0, 1)], "the second word has a high bit set, which the release code never writes"),
+    ("impossible-first", 1000, 5000, [(0, 500, 0), (100, 0, 0)], "the first word retired but never registered"),
+    ("written-after-read", 1000, 999, [(100, 0, 0), (2000, 0, 0)], "the second word registered after the block it was read at"),
+]
+
+
+def casting_vectors():
+    out = []
+    for id_, opens, proven, records, note in CASTING:
+        refused = next(
+            (i for i, (reg, ret, high) in enumerate(records) if high != 0 or not castable(reg, ret, opens, proven)),
+            None,
+        )
+        v = {
+            "id": id_,
+            "note": note,
+            "opensAt": str(opens),
+            "provenAt": str(proven),
+            "words": [word(reg, ret, high) for reg, ret, high in records],
+        }
+        if refused is None:
+            v["castable"] = True
+        else:
+            v["castable"] = False
+            v["refusedKey"] = refused
+        out.append(v)
+    assert {v["castable"] for v in out} == {True, False}
+    return out
+
+
 def judging_vectors():
     out = []
     for id_, reg, ret, opens, proven, note in JUDGING:
@@ -265,6 +320,8 @@ def judging_vectors():
                 "opensAt": str(opens),
                 "provenAt": str(proven),
                 "judgement": judgement(reg, ret, opens, proven),
+                "word": word(reg, ret),
+                "castable": castable(reg, ret, opens, proven),
             }
         )
     for id_, reg, ret, opens, proven, note in IMPOSSIBLE:
@@ -278,6 +335,8 @@ def judging_vectors():
                 "opensAt": str(opens),
                 "provenAt": str(proven),
                 "error": "impossible-record",
+                "word": word(reg, ret),
+                "castable": False,
             }
         )
     seen = {v.get("judgement") for v in out}
@@ -292,7 +351,7 @@ def main():
         "(Layout (version 4), Receipt keys, Well-formedness) with only the Python standard library, independently of "
         "packages/crypto, reusing regional-cells-vectors.py's version-3 encoder and rules and trustee-vectors.py's "
         "P-256 arithmetic. Its own implementation of the rules confirms every valid vector's illFormed label (or its "
-        "absence) and every judgement; decode errors are labelled by hand."
+        "absence), every judgement and the ballot client's check before casting; decode errors are labelled by hand."
     )
     content = {
         "format": "abolish-vectors/1",
@@ -302,6 +361,7 @@ def main():
         "types": DEF_TYPES,
         "vectors": def_vectors(),
         "judging": judging_vectors(),
+        "casting": casting_vectors(),
     }
     (out_dir / "election-definition-v4.json").write_text(
         json.dumps(content, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"

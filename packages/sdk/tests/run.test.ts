@@ -22,6 +22,7 @@ const base: Scenario = {
   revotes: 0,
   publications: 0,
   postings: 1,
+  reorgs: 0,
   seed: 3,
 };
 
@@ -464,5 +465,88 @@ describe("judgeCell", () => {
         },
       }),
     ).toEqual({ outcome: "opened", excluded: [], combined: [3, 4] });
+  });
+});
+
+describe("runSimulation under L1 reorganisations", { timeout }, () => {
+  // The first seed whose plan has a voter whose block is finalized after
+  // close, so it can't cast again (docs/spec/revoting.md, Residuals).
+  const lostSeed = (s: Scenario) => {
+    for (let seed = 0; ; seed++)
+      if (planElection({ ...s, seed }).voters.some((v) => v.reorg?.recast === null)) return seed;
+  };
+
+  it("rejects each ballot naming a reorganised block, counts its recast with the first cast's receipts, and opens to the plan", () => {
+    const s = { ...base, reorgs: 1 };
+    const plan = planElection(s);
+    const recast = plan.voters.filter((v) => v.reorg?.recast != null);
+    expect(recast.length).toBe(9);
+    // Some recasts go through our servers, some directly during the outage.
+    expect(recast.some((v) => v.reorg?.recast?.path === "direct")).toBe(true);
+    expect(recast.some((v) => v.reorg?.recast?.path === "server")).toBe(true);
+    const r = runSimulation(s);
+    expect(r.ok).toBe(true);
+    expect(r.ballots).toMatchObject({
+      cast: 18,
+      reorged: 9,
+      recast: 9,
+      superseded: 0,
+      postings: 9,
+      undelivered: 0,
+    });
+    expect(r.ballots.server + r.ballots.direct).toBe(18);
+    // Nothing goes to the trustees again: one share receipt per online seat per first cast.
+    expect(r.board.shareReceipts).toBe(9 * 3);
+    expect(r.board.counted).toBe(18 + 9 * 3);
+    expect(r.cells.reduce((a, c) => a + c.ballots, 0)).toBe(9);
+    for (const c of r.cells) expect(c.counts).toEqual(c.expected);
+  });
+
+  it("selects a re-voter's earlier ballot when its last is lost to a reorganisation near close", () => {
+    const s = {
+      ...base,
+      revotes: 1,
+      reorgs: 1,
+      seed: lostSeed({ ...base, revotes: 1, reorgs: 1 }),
+    };
+    const plan = planElection(s);
+    const lost = plan.voters.filter((v) => v.reorg?.recast === null);
+    expect(lost.length).toBeGreaterThan(0);
+    expect(lost.every((v) => v.selected === "earlier")).toBe(true);
+    const r = runSimulation(s);
+    expect(r.ok).toBe(true);
+    expect(r.ballots.reorged).toBe(9);
+    expect(r.ballots.recast).toBe(9 - lost.length);
+    // Every earlier ballot but the lost voters' is superseded.
+    expect(r.ballots.superseded).toBe(9 - lost.length);
+    expect(r.ballots.cast).toBe(9 * 2 + 9 - lost.length);
+    expect(r.cells.reduce((a, c) => a + c.ballots, 0)).toBe(9);
+    for (const c of r.cells) expect(c.counts).toEqual(c.expected);
+  });
+
+  it("counts nothing for a voter casting once whose ballot is lost to a reorganisation near close", () => {
+    const s = { ...base, reorgs: 1, seed: lostSeed({ ...base, reorgs: 1 }) };
+    const lost = planElection(s).voters.filter((v) => v.reorg?.recast === null);
+    expect(lost.length).toBeGreaterThan(0);
+    expect(lost.every((v) => v.selected === null)).toBe(true);
+    const r = runSimulation(s);
+    expect(r.ok).toBe(true);
+    expect(r.ballots.reorged).toBe(9);
+    expect(r.ballots.recast).toBe(9 - lost.length);
+    expect(r.ballots.superseded).toBe(0);
+    expect(r.cells.reduce((a, c) => a + c.ballots, 0)).toBe(9 - lost.length);
+    for (const c of r.cells) expect(c.counts).toEqual(c.expected);
+  });
+
+  it("keeps a recast undelivered when its first cast was: the receipts and postings are the first cast's", () => {
+    const s = { ...base, reorgs: 1, postings: 0.5 };
+    const voters = planElection(s).voters;
+    expect(voters.some((v) => v.reorg?.recast != null && !v.delivered)).toBe(true);
+    const r = runSimulation(s);
+    expect(r.ok).toBe(true);
+    expect(r.ballots.undelivered).toBe(
+      voters.filter((v) => v.selected === "last" && !v.delivered).length,
+    );
+    for (const c of r.cells) expect(c.counts).toEqual(c.expected);
   });
 });

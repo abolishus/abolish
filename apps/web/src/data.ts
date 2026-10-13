@@ -4,8 +4,8 @@
 import { createServerFn } from "@tanstack/react-start";
 
 import { api } from "./server/api.ts";
-import { loadModerationLog, loadPoll, loadPollList } from "./server/load.ts";
-import { isCanonicalU64, isElectionId } from "./values.ts";
+import { loadModerationLog, loadPoll, loadPollList, resolveShortLink } from "./server/load.ts";
+import { isCanonicalU64, isElectionId, isShortCode } from "./values.ts";
 
 /**
  * Runs `load`, replacing any failure with one fixed error. A server
@@ -44,3 +44,10 @@ export const fetchPollList = createServerFn({ method: "GET" })
     return after;
   })
   .handler(({ data }) => opaque(() => loadPollList(api(), data)));
+
+export const fetchShortLink = createServerFn({ method: "GET" })
+  .inputValidator((code: unknown) => {
+    if (!isShortCode(code)) throw new TypeError("expected a canonical short code");
+    return code;
+  })
+  .handler(({ data }) => opaque(() => resolveShortLink(api(), data)));

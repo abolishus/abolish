@@ -15,6 +15,7 @@ const base: Scenario = {
   revotes: 0.5,
   publications: 0.5,
   postings: 0.5,
+  reorgs: 0,
   seed: 7,
 };
 
@@ -39,6 +40,7 @@ const scenario = fc.record({
   revotes: fc.double({ min: 0, max: 1, noNaN: true }),
   publications: fc.double({ min: 0, max: 1, noNaN: true }),
   postings: fc.double({ min: 0, max: 1, noNaN: true }),
+  reorgs: fc.constant(0),
   seed: fc.integer({ min: 0, max: 0xffff_ffff }),
 });
 
@@ -272,5 +274,106 @@ describe("planElection", { timeout: 60_000 }, () => {
     expect(plan.voters.filter((v) => v.earlier !== null).length / 4000).toBeCloseTo(0.5, 1);
     // Half of the challengers.
     expect(plan.voters.filter((v) => v.published).length / 4000).toBeCloseTo(0.25, 1);
+  });
+
+  describe("reorganisations", () => {
+    const reorgs = fc.double({ min: 0, max: 1, noNaN: true });
+    const withReorgs = fc.tuple(scenario, reorgs).map(([s, r]) => ({ ...s, reorgs: r }));
+
+    // An independent reading of the clocks the plan uses: a one-day period
+    // from 1,000,000 s, a 12 s slot, a block named 2 deep and strictly after
+    // the voter's earlier one, finalized 64 slots after its timestamp.
+    const seconds = (at: number) => 1_000_000 + Math.floor(at * 86_400);
+    const named = (at: number, before?: number) => {
+      const settled = Math.max(0, Math.floor(seconds(at) / 12) - 2);
+      return before !== undefined && settled <= before ? before + 1 : settled;
+    };
+    const pathOf = (s: Scenario, at: number) =>
+      s.outage !== null && at >= s.outage.from && at < s.outage.to ? "direct" : "server";
+
+    it("draws reorganisations apart: the share changes nothing but which ballots are reorganised", () => {
+      fc.assert(
+        fc.property(withReorgs, reorgs, (s, other) => {
+          const strip = (r: number) =>
+            planElection({ ...s, reorgs: r }).voters.map((v) => ({
+              ...v,
+              reorg: null,
+              selected: null,
+            }));
+          expect(strip(other)).toEqual(strip(s.reorgs));
+        }),
+        { numRuns },
+      );
+    });
+
+    it("reorganises no voter at share 0 and every voter at share 1", () => {
+      const none = planElection({ ...base, reorgs: 0 }).voters;
+      expect(none.every((v) => v.reorg === null && v.selected === "last")).toBe(true);
+      expect(planElection({ ...base, reorgs: 1 }).voters.every((v) => v.reorg !== null)).toBe(true);
+      const plan = planElection({ ...base, voters: 4000, reorgs: 0.5 });
+      expect(plan.voters.filter((v) => v.reorg !== null).length / 4000).toBeCloseTo(0.5, 1);
+    });
+
+    it("casts again once the named block is finalized, before close or never, and selects the earlier ballot when the last is lost", () => {
+      fc.assert(
+        fc.property(withReorgs, (s) => {
+          for (const v of planElection(s).voters) {
+            if (v.reorg === null) {
+              expect(v.selected).toBe("last");
+              continue;
+            }
+            const before = v.earlier === null ? undefined : named(v.earlier.at);
+            const final = named(v.at, before) * 12 + 768;
+            if (final < 1_086_400) {
+              const at = (final - 1_000_000) / 86_400;
+              expect(v.reorg.recast).toEqual({ seconds: BigInt(final), at, path: pathOf(s, at) });
+              expect(final).toBeGreaterThan(seconds(v.at));
+              expect(v.selected).toBe("last");
+            } else {
+              expect(v.reorg.recast).toBeNull();
+              expect(v.selected).toBe(v.earlier === null ? null : "earlier");
+            }
+          }
+        }),
+        { numRuns },
+      );
+    });
+
+    it("loses a ballot whose block is finalized at or after close: one cast in about the last 12 minutes", () => {
+      const plan = planElection({ ...base, voters: 4000, reorgs: 1, revotes: 0 });
+      for (const v of plan.voters) {
+        const lost = v.reorg?.recast === null;
+        // The named block is 24 to 36 seconds old, and finality 768 s after it.
+        if (seconds(v.at) < 1_086_400 - 768 + 23) expect(lost).toBe(false);
+        if (seconds(v.at) >= 1_086_400 - 768 + 36) expect(lost).toBe(true);
+        if (lost) expect(v.selected).toBeNull();
+      }
+      expect(plan.voters.some((v) => v.reorg?.recast === null)).toBe(true);
+    });
+
+    it("expects each voter's selected ballot when delivered: its last, its earlier one if the last is lost, or nothing", () => {
+      fc.assert(
+        fc.property(withReorgs, (s) => {
+          const offline = { ...s, trustees: { ...s.trustees, offline: [1] } };
+          for (const sc of [s, offline]) {
+            const plan = planElection(sc);
+            for (const tier of plan.tiers)
+              expect(plan.expected.get(tier)).toEqual(
+                Array.from({ length: s.options }, (_, j) =>
+                  plan.voters
+                    .filter((v) => v.tier === tier)
+                    .reduce((a, v) => {
+                      const b =
+                        v.selected === "earlier" ? v.earlier : v.selected === "last" ? v : null;
+                      const delivered = b !== null && (downAt(sc, b.at).length === 0 || b.posts);
+                      return a + (delivered ? (b.votes[j] as number) : 0);
+                    }, 0),
+                ),
+              );
+          }
+        }),
+        { numRuns },
+      );
+    });
   });
 });

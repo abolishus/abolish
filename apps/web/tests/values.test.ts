@@ -1,3 +1,4 @@
+import { shortCode } from "@abolishus/core/short-codes";
 import fc from "fast-check";
 import { describe, expect, test } from "vite-plus/test";
 
@@ -5,6 +6,7 @@ import {
   fromHex,
   isCanonicalU64,
   isElectionId,
+  isShortCode,
   normalizeElectionId,
   searchText,
   toHex,
@@ -113,4 +115,29 @@ describe("searchText", () => {
     expect(searchText(["1"])).toBeUndefined();
     expect(searchText(null)).toBeUndefined();
   });
+});
+
+describe("short codes", () => {
+  const code = fc
+    .tuple(fc.uint8Array({ minLength: 32, maxLength: 32 }), fc.integer({ min: 7, max: 52 }))
+    .map(([hash, length]) => shortCode(hash, length));
+
+  test("accept every code in its canonical form, and no other spelling of it", () => {
+    fc.assert(
+      fc.property(code, (c) => {
+        expect(isShortCode(c)).toBe(true);
+        const upper = c.toUpperCase();
+        expect(isShortCode(upper)).toBe(upper === c);
+        expect(isShortCode(` ${c}`)).toBe(false);
+      }),
+      runs,
+    );
+  });
+
+  test.each(["", "3j55dw", "3j55dwu", "3j55dwo", "3J55DW1", "3".repeat(53), 7, null, undefined])(
+    "rejects %j",
+    (value) => {
+      expect(isShortCode(value)).toBe(false);
+    },
+  );
 });

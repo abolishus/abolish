@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from "./routes/__root.tsx";
 import { Route as IndexRouteImport } from "./routes/index.tsx";
 import { Route as AccountRouteImport } from "./routes/account.tsx";
 import { Route as ModerationRouteImport } from "./routes/moderation.tsx";
+import { Route as PCodeRouteImport } from "./routes/p.$code.tsx";
 import { Route as PollsIndexRouteImport } from "./routes/polls.index.tsx";
 import { Route as PollsElectionIdRouteImport } from "./routes/polls.$electionId.tsx";
 import { Route as PollsElectionIdPreviewDotpngRouteImport } from "./routes/polls.$electionId.preview[.]png.ts";
@@ -29,6 +30,11 @@ const AccountRoute = AccountRouteImport.update({
 const ModerationRoute = ModerationRouteImport.update({
   id: "/moderation",
   path: "/moderation",
+  getParentRoute: () => rootRouteImport,
+} as any);
+const PCodeRoute = PCodeRouteImport.update({
+  id: "/p/$code",
+  path: "/p/$code",
   getParentRoute: () => rootRouteImport,
 } as any);
 const PollsIndexRoute = PollsIndexRouteImport.update({
@@ -51,6 +57,7 @@ export interface FileRoutesByFullPath {
   "/": typeof IndexRoute;
   "/account": typeof AccountRoute;
   "/moderation": typeof ModerationRoute;
+  "/p/$code": typeof PCodeRoute;
   "/polls/$electionId": typeof PollsElectionIdRouteWithChildren;
   "/polls/": typeof PollsIndexRoute;
   "/polls/$electionId/preview.png": typeof PollsElectionIdPreviewDotpngRoute;
@@ -59,6 +66,7 @@ export interface FileRoutesByTo {
   "/": typeof IndexRoute;
   "/account": typeof AccountRoute;
   "/moderation": typeof ModerationRoute;
+  "/p/$code": typeof PCodeRoute;
   "/polls/$electionId": typeof PollsElectionIdRouteWithChildren;
   "/polls": typeof PollsIndexRoute;
   "/polls/$electionId/preview.png": typeof PollsElectionIdPreviewDotpngRoute;
@@ -68,6 +76,7 @@ export interface FileRoutesById {
   "/": typeof IndexRoute;
   "/account": typeof AccountRoute;
   "/moderation": typeof ModerationRoute;
+  "/p/$code": typeof PCodeRoute;
   "/polls/$electionId": typeof PollsElectionIdRouteWithChildren;
   "/polls/": typeof PollsIndexRoute;
   "/polls/$electionId/preview.png": typeof PollsElectionIdPreviewDotpngRoute;
@@ -78,6 +87,7 @@ export interface FileRouteTypes {
     | "/"
     | "/account"
     | "/moderation"
+    | "/p/$code"
     | "/polls/$electionId"
     | "/polls/"
     | "/polls/$electionId/preview.png";
@@ -86,6 +96,7 @@ export interface FileRouteTypes {
     | "/"
     | "/account"
     | "/moderation"
+    | "/p/$code"
     | "/polls/$electionId"
     | "/polls"
     | "/polls/$electionId/preview.png";
@@ -94,6 +105,7 @@ export interface FileRouteTypes {
     | "/"
     | "/account"
     | "/moderation"
+    | "/p/$code"
     | "/polls/$electionId"
     | "/polls/"
     | "/polls/$electionId/preview.png";
@@ -103,6 +115,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute;
   AccountRoute: typeof AccountRoute;
   ModerationRoute: typeof ModerationRoute;
+  PCodeRoute: typeof PCodeRoute;
   PollsElectionIdRoute: typeof PollsElectionIdRouteWithChildren;
   PollsIndexRoute: typeof PollsIndexRoute;
 }
@@ -128,6 +141,13 @@ declare module "@tanstack/react-router" {
       path: "/moderation";
       fullPath: "/moderation";
       preLoaderRoute: typeof ModerationRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/p/$code": {
+      id: "/p/$code";
+      path: "/p/$code";
+      fullPath: "/p/$code";
+      preLoaderRoute: typeof PCodeRouteImport;
       parentRoute: typeof rootRouteImport;
     };
     "/polls/": {
@@ -170,6 +190,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AccountRoute: AccountRoute,
   ModerationRoute: ModerationRoute,
+  PCodeRoute: PCodeRoute,
   PollsElectionIdRoute: PollsElectionIdRouteWithChildren,
   PollsIndexRoute: PollsIndexRoute,
 };

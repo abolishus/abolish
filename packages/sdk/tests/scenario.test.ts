@@ -63,11 +63,12 @@ const scenario: fc.Arbitrary<Scenario> = fc.integer({ min: 2, max: 16 }).chain((
       revotes: fc.double({ min: 0, max: 1, noNaN: true }),
       publications: fc.double({ min: 0, max: 1, noNaN: true }),
       postings: fc.double({ min: 0, max: 1, noNaN: true }),
+      reorgs: fc.double({ min: 0, max: 1, noNaN: true }),
       seed: fc.integer({ min: 0, max: 0xffff_ffff }),
     })
-    // Published openings only where their own bound holds, at either re-vote share.
+    // Published openings only where their own bound holds, at any re-vote and reorganisation share.
     .map((s) =>
-      2 * s.voters * s.voters * s.options <= MAX_SIMULATED_OPENING_LOOKUPS
+      3 * s.voters * s.voters * s.options <= MAX_SIMULATED_OPENING_LOOKUPS
         ? s
         : { ...s, publications: 0 },
     ),
@@ -84,6 +85,7 @@ const valid: Scenario = {
   revotes: 0.2,
   publications: 0.5,
   postings: 0.5,
+  reorgs: 0.1,
   seed: 1,
 };
 
@@ -103,7 +105,7 @@ describe("parseScenario", () => {
     );
   });
 
-  it("defaults only the optional fields: no outage, challenges, re-votes, publications or postings, no offline or faulty seats, missing tiers at 0", () => {
+  it("defaults only the optional fields: no outage, challenges, re-votes, publications, postings or reorganisations, no offline or faulty seats, missing tiers at 0", () => {
     const r = parseScenario({
       voters: 1,
       election: "approval",
@@ -125,6 +127,7 @@ describe("parseScenario", () => {
         revotes: 0,
         publications: 0,
         postings: 0,
+        reorgs: 0,
         seed: 0,
       },
     });
@@ -171,6 +174,9 @@ describe("parseScenario", () => {
     const { postings: _____, ...noPostings } = valid;
     const inheritedPostings = Object.assign(Object.create({ postings: 1 }), noPostings);
     expect(parseScenario(inheritedPostings)).toMatchObject({ ok: true, scenario: { postings: 0 } });
+    const { reorgs: ______, ...noReorgs } = valid;
+    const inheritedReorgs = Object.assign(Object.create({ reorgs: 1 }), noReorgs);
+    expect(parseScenario(inheritedReorgs)).toMatchObject({ ok: true, scenario: { reorgs: 0 } });
   });
 
   it("refuses missing required fields", () => {
@@ -216,6 +222,10 @@ describe("parseScenario", () => {
     expect(refusal({ ...valid, postings: 1.1 })).toBe("$.postings");
     expect(refusal({ ...valid, postings: "1" })).toBe("$.postings");
     expect(refusal({ ...valid, postings: null })).toBe("$.postings");
+    expect(refusal({ ...valid, reorgs: -0.1 })).toBe("$.reorgs");
+    expect(refusal({ ...valid, reorgs: 1.1 })).toBe("$.reorgs");
+    expect(refusal({ ...valid, reorgs: "0.5" })).toBe("$.reorgs");
+    expect(refusal({ ...valid, reorgs: null })).toBe("$.reorgs");
     expect(refusal({ ...valid, outage: { from: 0, to: 1.1 } })).toBe("$.outage.to");
     expect(refusal({ ...valid, outage: { from: 0, to: Number.NaN } })).toBe("$.outage.to");
     expect(refusal([])).toBe("$");
@@ -280,6 +290,8 @@ describe("parseScenario", () => {
     expect(refusal({ ...at, revotes: Number.MIN_VALUE })).toBe("$");
     expect(parseScenario({ ...at, voters: at.voters / 2, revotes: 1 }).ok).toBe(true);
     expect(refusal({ ...at, voters: at.voters / 2 + 1, revotes: 1 })).toBe("$");
+    // A recast after a reorganisation carries the first cast's committed vote: no more work.
+    expect(parseScenario({ ...at, reorgs: 1 }).ok).toBe(true);
     expect(
       refusal({
         ...valid,
@@ -292,12 +304,16 @@ describe("parseScenario", () => {
 
   it("refuses published openings whose voters × ballots × options exceeds the opening bound", () => {
     // 1,000 voters casting once at 10 options: exactly the bound.
-    const at = { ...valid, voters: 1000, options: 10, revotes: 0, challenges: 0.1 };
+    const at = { ...valid, voters: 1000, options: 10, revotes: 0, reorgs: 0, challenges: 0.1 };
     expect(MAX_SIMULATED_OPENING_LOOKUPS).toBe(1000 * 1000 * 10);
     expect(parseScenario(at).ok).toBe(true);
     expect(refusal({ ...at, voters: 1001 })).toBe("$");
     // Re-votes double the ballots each opening is compared with.
     expect(refusal({ ...at, revotes: Number.MIN_VALUE })).toBe("$");
+    // So do recasts after a reorganisation, and both together triple them.
+    expect(refusal({ ...at, reorgs: Number.MIN_VALUE })).toBe("$");
+    expect(parseScenario({ ...at, voters: 577, revotes: 0.5, reorgs: 0.5 }).ok).toBe(true);
+    expect(refusal({ ...at, voters: 578, revotes: 0.5, reorgs: 0.5 })).toBe("$");
     // Without publishing, or without challenges, nothing is published: no bound.
     expect(parseScenario({ ...at, voters: 1001, publications: 0 }).ok).toBe(true);
     expect(parseScenario({ ...at, voters: 1001, challenges: 0 }).ok).toBe(true);

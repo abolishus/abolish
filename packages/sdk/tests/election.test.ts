@@ -32,6 +32,7 @@ const base: Scenario = {
   revotes: 0,
   publications: 0,
   postings: 0,
+  reorgs: 0,
   seed: 3,
 };
 
@@ -74,6 +75,7 @@ const scenario = fc.record({
   revotes: fc.constant(0),
   publications: fc.constant(0),
   postings: fc.constant(0),
+  reorgs: fc.constant(0),
   seed: fc.integer({ min: 0, max: 0xffff_ffff }),
 });
 

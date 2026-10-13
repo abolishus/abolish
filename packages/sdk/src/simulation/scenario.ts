@@ -29,7 +29,10 @@ export const MAX_SIMULATED_WORK = 2_000_000;
  * boarding an opening the operator compares each counted ballot's
  * commitments with what it opens (docs/spec/challenge.md, Publication:
  * `opening-cast`), one point encoding each, about 0.1 ms, so this bounds
- * that check at about a quarter of an hour.
+ * that check at about a quarter of an hour. Each published opening also
+ * costs its own checks and about `4 × options × (threshold + panel)` scalar
+ * multiplications to list what it opens, so a run where many voters
+ * publish takes noticeably longer per ballot than one where none do.
  */
 export const MAX_SIMULATED_OPENING_LOOKUPS = 10_000_000;
 

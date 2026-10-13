@@ -69,7 +69,8 @@ export interface PostClose {
 }
 
 /**
- * Tally window and Destruction of docs/spec/tally.md, from `closes_at`. The
+ * Tally window and Destruction of docs/spec/tally.md, and the openings'
+ * window of docs/spec/challenge.md (Publication), from `closes_at`. The
  * windows that make up `W_S` (delivery, complaints, the contract-event
  * window) and `l1_inclusion_bound` are taken as 0, since nothing here
  * delivers through the contract path, so `s_S` is its floor,

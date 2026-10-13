@@ -18,6 +18,11 @@ API was reachable from the session that wrote this; the SSZ rules are the
 consensus specs'.
 
 Usage: python3 -I -B packages/crypto/scripts/receipt-opening-vectors.py <out-dir> [<configs-dir>],
+where <configs-dir>, if given, holds the consensus specs' configs/mainnet.yaml
+(as mainnet.yaml), eth-clients/sepolia's metadata/config.yaml (as
+sepolia.yaml) and, from consensus specs v1.7.0-beta.4,
+specs/gloas/light-client/sync-protocol.md (as sync-protocol.md, checked
+against the sha256 the spec gives);
 then `vp check --fix` (the committed file is formatted; its values are what
 this prints).
 """
@@ -419,7 +424,48 @@ SCHEDULES = {
         ("gloas", 353024, "90000076"),
     ],
 }
-GINDEX = {"capella": 412, "deneb": 812, "electra": 812, "fulu": 812}
+
+
+def container_gindex(parent, field, fields):
+    """The generalized index of field `field` of an SSZ container of `fields` fields at `parent`."""
+    width = 1
+    while width < fields:
+        width *= 2
+    return parent * width + field
+
+
+def progressive_gindex(parent, field):
+    """The generalized index of field `field` of an EIP-7495 ProgressiveContainer at `parent`.
+
+    Its root mixes the active-field bits into the root of the progressive tree
+    (the left child); that tree (EIP-7916) hangs subtrees of 1, 4, 16, ...
+    leaves to the left of each level and the rest of the fields to the right.
+    """
+    g, first, width = parent * 2, 0, 1
+    while field >= first + width:
+        g, first, width = g * 2 + 1, first + width, width * 4
+    return container_gindex(g * 2, field - first, width)
+
+
+# Gloas (consensus specs v1.7.0-beta.4, specs/gloas/beacon-chain.md):
+# BeaconBlockBody is a ProgressiveContainer whose field 10 is
+# signed_execution_payload_bid, a Container (message, signature), whose
+# message is a ProgressiveContainer with parent_block_hash first. The block's
+# bid names its parent payload's hash, which the state transition asserts is
+# `state.latest_block_hash`: the latest payload revealed on its chain.
+GLOAS_GINDEX = progressive_gindex(container_gindex(progressive_gindex(1, 10), 0, 2), 0)
+# The light-client spec's EXECUTION_BLOCK_HASH_GINDEX_GLOAS
+# (specs/gloas/light-client/sync-protocol.md) is the same field; main() reads
+# it from the pinned file when given it, and checks a branch the consensus
+# specs' own SSZ library built (gloas-body-branch.json).
+assert GLOAS_GINDEX == 2856
+# The bid's own block_hash, field 2: a payload committed to, maybe never revealed.
+GLOAS_BID_BLOCK_HASH_GINDEX = progressive_gindex(container_gindex(progressive_gindex(1, 10), 0, 2), 2)
+# Capella's and Deneb's body pad to 16 fields with execution_payload at 9;
+# block_hash is field 12 of an ExecutionPayload of 15 and 17 fields.
+assert container_gindex(container_gindex(1, 9, 12), 12, 15) == 412
+assert container_gindex(container_gindex(1, 9, 12), 12, 17) == 812
+GINDEX = {"capella": 412, "deneb": 812, "electra": 812, "fulu": 812, "gloas": GLOAS_GINDEX}
 
 
 def fork_at(chain, slot):
@@ -483,7 +529,7 @@ def decode_opening(b):
     o["beaconSlot"] = int.from_bytes(take(8), "big")
     o["proposerIndex"] = int.from_bytes(take(8), "big")
     o["parentRoot"], o["stateRoot"], o["bodyRoot"] = take(32), take(32), take(32)
-    o["payloadProof"] = [take(32) for _ in range(count(9))]
+    o["payloadProof"] = [take(32) for _ in range(count(11))]
     o["summaryProof"] = [take(32) for _ in range(count(13))]
     if at != len(b):
         raise Bad
@@ -567,6 +613,15 @@ def main(out_dir, configs_dir=None):
 
     # With a directory holding the two config files (their sources and sha256s
     # are in the spec), the schedules are checked against them.
+    # And with Gloas's light-client spec beside them, its constant is read from it.
+    if configs_dir is not None:
+        sync = (pathlib.Path(configs_dir) / "sync-protocol.md").read_bytes()
+        assert h(sha256(sync)) == "e0bd1537ff3bdcddafa708ddce35f97de0cac9aac19b08f022ee6c57db1b4f5e"
+        row = next(line for line in sync.decode().splitlines() if line.startswith("| `EXECUTION_BLOCK_HASH_GINDEX_GLOAS`"))
+        assert '"signed_execution_payload_bid", "message", "parent_block_hash"' in row, row
+        assert int(row.split("(= ")[1].split(")")[0].replace(",", "")) == GLOAS_GINDEX, row
+    upstream = json.loads(HERE.with_name("gloas-body-branch.json").read_text())
+    assert upstream["gindex"] == GLOAS_GINDEX and upstream["blockHashGindex"] == GLOAS_BID_BLOCK_HASH_GINDEX
     for chain, file in ((1, "mainnet.yaml"), (11155111, "sepolia.yaml")):
         if configs_dir is not None:
             cfg = config(pathlib.Path(configs_dir) / file)
@@ -692,6 +747,8 @@ def main(out_dir, configs_dir=None):
         txs_override=None,
         state_slot=None,
         cd=None,
+        gindex=None,
+        upstream=None,
     ):
         data = cd if cd is not None else bytes(32) * position + C + bytes(32)
         txs = txs_override or [tx(2, bytes(32), nonce=n) for n in range(filler)]
@@ -700,10 +757,16 @@ def main(out_dir, configs_dir=None):
         hdr = hdr_bytes or header(trie_root(txs), timestamp, tweak=hdr_tweak)
         slot = slot if slot is not None else FULU_STATE_SLOT - 50_000
         fork = fork_at(chain, slot)
-        g = GINDEX.get(fork[0], 812)
+        g = gindex if gindex is not None else GINDEX.get(fork[0], 812)
         depth = g.bit_length() - 1
         payload = [label(f"payload sibling {i}") for i in range(depth)]
         body = fold(keccak256(hdr), payload, g - (1 << depth))
+        if upstream is not None:
+            # A body root and branch from eth-ssz-specs, for this very header.
+            assert upstream["leaf"] == h(keccak256(hdr)), f"rerun gloas-body-branch.py with {h(keccak256(hdr))}"
+            payload = [bytes.fromhex(x) for x in upstream["branch"]]
+            body = bytes.fromhex(upstream["bodyRoot"])
+            assert fold(keccak256(hdr), payload, g - (1 << depth)) == body
         o = {
             "salt": salt,
             "txIndex": tx_index,
@@ -788,14 +851,33 @@ def main(out_dir, configs_dir=None):
     add("ok-slot-before-state", o, s, "ok")
     o, s = build(chain=11155111, slot=272640 * 32 + 5000, state_slot=272640 * 32 + 90_000)
     add("ok-sepolia-fulu", o, s, "ok", chain=11155111)
+    # Gloas: the branch is to the bid's parent_block_hash, at 2856 (depth 11).
+    GLOAS_SLOT = 353024 * 32
+    o, s = build(chain=11155111, slot=GLOAS_SLOT + 5000, state_slot=GLOAS_SLOT + 90_000)
+    assert len(o["payloadProof"]) == 11 and s["forkVersion"] == "90000076"
+    add("ok-sepolia-gloas", o, s, "ok", chain=11155111)
+    gloas_good, gloas_state = o, s
+    o, s = build(chain=11155111, slot=GLOAS_SLOT + 5000, summary=False)
+    add("ok-sepolia-gloas-block-roots", o, s, "ok", chain=11155111)
+    # The same header in a body the consensus specs' own SSZ library merkleized.
+    o, s = build(chain=11155111, slot=GLOAS_SLOT + 5000, state_slot=GLOAS_SLOT + 90_000, upstream=upstream)
+    add("ok-sepolia-gloas-upstream-body", o, s, "ok", chain=11155111)
+    o, s = build(chain=11155111, slot=GLOAS_SLOT, state_slot=GLOAS_SLOT + 90_000)
+    add("ok-sepolia-first-gloas-slot", o, s, "ok", chain=11155111)
+    # A block from before Gloas keeps its own fork's branch under a Gloas state.
+    o, s = build(chain=11155111, slot=GLOAS_SLOT - 1, state_slot=GLOAS_SLOT + 90_000)
+    assert len(o["payloadProof"]) == 9
+    add("ok-sepolia-last-fulu-slot-gloas-state", o, s, "ok", chain=11155111)
+    o, s = build(chain=11155111, slot=272640 * 32 + 5000, state_slot=GLOAS_SLOT + 10)
+    add("ok-sepolia-fulu-block-gloas-state", o, s, "ok", chain=11155111)
 
     # 1. opening-decode
     enc = encode_opening(good)
     add("decode-truncated", good, good_state, "opening-decode", raw=enc[:-1])
     add("decode-trailing-byte", good, good_state, "opening-decode", raw=enc + b"\x00")
     add("decode-empty", good, good_state, "opening-decode", raw=b"")
-    over = dict(good, payloadProof=good["payloadProof"] + [bytes(32)])
-    add("decode-payload-proof-10", over, good_state, "opening-decode")
+    over = dict(good, payloadProof=good["payloadProof"] + [bytes(32)] * 3)
+    add("decode-payload-proof-12", over, good_state, "opening-decode")
     over = dict(good, txProof=(good["txProof"] * 17)[:17])
     add("decode-tx-proof-17", over, good_state, "opening-decode")
     over = dict(good, summaryProof=good["summaryProof"] + [bytes(32)])
@@ -857,6 +939,25 @@ def main(out_dir, configs_dir=None):
     # 5. opening-payload
     add("payload-sibling-flipped", dict(good, payloadProof=[label("flip")] + good["payloadProof"][1:]), good_state, "opening-payload")
     add("payload-depth-8-in-fulu", dict(good, payloadProof=good["payloadProof"][:8]), good_state, "opening-payload")
+    add("payload-depth-11-in-fulu", dict(good, payloadProof=good["payloadProof"] + [bytes(32)] * 2), good_state, "opening-payload")
+    # Gloas: each fork's branch only at its own index, the block's fork deciding.
+    o, s = build(chain=11155111, slot=GLOAS_SLOT + 5000, state_slot=GLOAS_SLOT + 90_000, gindex=812)
+    add("payload-fulu-index-in-gloas", o, s, "opening-payload", chain=11155111)
+    o, s = build(chain=11155111, slot=GLOAS_SLOT - 1, state_slot=GLOAS_SLOT + 90_000, gindex=GLOAS_GINDEX)
+    add("payload-gloas-index-in-fulu", o, s, "opening-payload", chain=11155111)
+    # The bid's other words at depth 11 (2857 roots its fields 1 to 11) prove nothing.
+    o, s = build(chain=11155111, slot=GLOAS_SLOT + 5000, state_slot=GLOAS_SLOT + 90_000, gindex=GLOAS_GINDEX + 1)
+    add("payload-other-index-in-gloas", o, s, "opening-payload", chain=11155111)
+    # A progressive tree mirrored (each level's subtree on the right) would put
+    # the field at 2217; EIP-7916 and eth-ssz-specs put it at 2856.
+    o, s = build(chain=11155111, slot=GLOAS_SLOT + 5000, state_slot=GLOAS_SLOT + 90_000, gindex=2217)
+    add("payload-mirrored-layout-2217", o, s, "opening-payload", chain=11155111)
+    add("payload-gloas-sibling-flipped", dict(gloas_good, payloadProof=gloas_good["payloadProof"][:10] + [label("flip")]), gloas_state, "opening-payload", chain=11155111)
+    # The bid's own block_hash (22857, depth 14) is a payload committed to,
+    # maybe never revealed: no opening's branch can reach it.
+    o, s = build(chain=11155111, slot=GLOAS_SLOT + 5000, state_slot=GLOAS_SLOT + 90_000, gindex=GLOAS_BID_BLOCK_HASH_GINDEX)
+    assert len(o["payloadProof"]) == 14
+    add("decode-bid-block-hash-branch", o, s, "opening-decode", chain=11155111)
     add("payload-body-root", dict(good, bodyRoot=label("other body")), good_state, "opening-payload")
     o, s = build(slot=194048 * 32 + 100)
     add("payload-depth-9-in-capella", dict(o, payloadProof=o["payloadProof"] + [bytes(32)]), s, "opening-payload")
@@ -873,13 +974,11 @@ def main(out_dir, configs_dir=None):
     add("fork-unknown-chain", good, good_state, "opening-fork-unknown", chain=31337)
     add("fork-unknown-state-version", good, dict(good_state, forkVersion="07000000"), "opening-fork-unknown")
     add("fork-unknown-other-chain-version", good, dict(good_state, forkVersion="90000075"), "opening-fork-unknown")
-    o, s = build(chain=11155111, slot=272640 * 32 + 5000, state_slot=353024 * 32 + 10)
-    add("fork-unknown-sepolia-gloas-state", o, s, "opening-fork-unknown", chain=11155111)
-    o, s = build(chain=11155111, slot=353024 * 32 + 5, state_slot=353024 * 32 + 10, summary=False)
-    add("fork-unknown-sepolia-gloas-block", o, s, "opening-fork-unknown", chain=11155111)
+    # A version after Gloas on Sepolia, which no schedule lists yet.
+    add("fork-unknown-sepolia-next-version", gloas_good, dict(gloas_state, forkVersion="90000077"), "opening-fork-unknown", chain=11155111)
     add("fork-unknown-state-before-payload", dict(good, bodyRoot=label("other body")), dict(good_state, forkVersion="07000000"), "opening-fork-unknown")
     # An honest opening from a fork this release doesn't know, its payload
-    # branch at another index (as Gloas's bid would put it): unjudged, never failed.
+    # branch at another index (as a later fork might put it): unjudged, never failed.
     other_branch = [label(f"unknown-fork sibling {i}") for i in range(9)]
     other_body = fold(keccak256(good["header"]), other_branch, 813 - 512)
     add("fork-unknown-payload-other-index", dict(good, payloadProof=other_branch, bodyRoot=other_body), dict(good_state, forkVersion="07000000"), "opening-fork-unknown")

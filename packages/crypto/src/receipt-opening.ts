@@ -37,7 +37,8 @@ import { decodeRlp, type RlpItem, rlpEncodeUint, rlpUint } from "./rlp.ts";
  * Receipt version 1's opening layout (docs/spec/receipts.md, Opening). The
  * bounds: the largest transaction the execution clients' pools relay
  * (128 KiB) plus its trie leaf's framing; 16 nodes, far deeper than any
- * block's transaction trie; and the header's 1 KiB, several times today's.
+ * block's transaction trie; the header's 1 KiB, several times today's; and
+ * the deepest payload branch of a fork this release checks (Gloas's 11).
  */
 export const RECEIPT_OPENING = struct([
   ["salt", bytesFixed(RECEIPT_COMMITMENT_SALT_LEN)],
@@ -49,7 +50,7 @@ export const RECEIPT_OPENING = struct([
   ["parent_root", bytesFixed(32)],
   ["state_root", bytesFixed(32)],
   ["body_root", bytesFixed(32)],
-  ["payload_proof", list(bytesFixed(32), 9)],
+  ["payload_proof", list(bytesFixed(32), 11)],
   ["summary_proof", list(bytesFixed(32), 13)],
 ]);
 
@@ -104,9 +105,8 @@ const schedule = (chainId: bigint, forks: readonly [BeaconForkName, bigint, stri
 /**
  * The fork schedules this release pins (docs/spec/receipts.md, Fork schedule),
  * from the consensus specs' `configs/mainnet.yaml` and eth-clients/sepolia's
- * `metadata/config.yaml`. A fork listed without a payload index (Sepolia's
- * Gloas) is known, so its states are recognised, but not supported: an
- * opening judged from one is `opening-fork-unknown`.
+ * `metadata/config.yaml`. Mainnet hasn't scheduled Gloas, so a mainnet state
+ * in it is `opening-fork-unknown` until a release lists it.
  */
 export const BEACON_FORK_SCHEDULES: readonly BeaconForkSchedule[] = Object.freeze([
   schedule(1n, [
@@ -131,23 +131,37 @@ export const BEACON_FORK_SCHEDULES: readonly BeaconForkSchedule[] = Object.freez
 ]);
 
 /**
- * The generalized index of `body.execution_payload.block_hash` under a beacon
- * block's `body_root`, by fork: `BeaconBlockBody` pads to 16 fields with the
- * payload at 9, and `ExecutionPayload`, with `block_hash` at 12, pads to 16
- * fields in Capella and 32 from Deneb on. Forks before Capella have no such
- * field to prove, and forks after Fulu aren't specified yet.
+ * The generalized index under a beacon block's `body_root` of the execution
+ * block hash its opening proves, by fork. Capella to Fulu:
+ * `body.execution_payload.block_hash`, the block's own payload
+ * (`BeaconBlockBody` pads to 16 fields with the payload at 9, and
+ * `ExecutionPayload`, with `block_hash` at 12, pads to 16 fields in Capella
+ * and 32 from Deneb on). Gloas (EIP-7732, with EIP-7688's progressive
+ * containers): `body.signed_execution_payload_bid.message.parent_block_hash`,
+ * which the state transition asserts is `state.latest_block_hash`, the latest
+ * payload a child declared full, which fork choice accepts only once the
+ * execution layer has verified it (`on_block`, and `notify_forkchoice_updated`
+ * finalizes exactly this hash); never the bid's own `block_hash`, a payload
+ * committed to that may never be revealed. It is the light-client spec's
+ * `EXECUTION_BLOCK_HASH_GINDEX_GLOAS`. Forks before Capella have no such field
+ * to prove, and forks after Gloas aren't specified yet. Keyed by name only
+ * because every chain pinned here runs one layout per fork: a release adding a
+ * fork's row (mainnet's Gloas) re-derives its index from the specification the
+ * fork activated with there (docs/spec/receipts.md, Fork schedule).
  */
 const PAYLOAD_GINDEX: Partial<Record<BeaconForkName, number>> = {
   capella: 412,
   deneb: 812,
   electra: 812,
   fulu: 812,
+  gloas: 2856,
 };
 const SUPPORTED_STATE_FORKS: ReadonlySet<BeaconForkName> = new Set([
   "capella",
   "deneb",
   "electra",
   "fulu",
+  "gloas",
 ]);
 
 /**
@@ -456,10 +470,9 @@ export function receiptOpeningStateEntry(
  *    calldata's length isn't a multiple of 32.
  * 3. `opening-commitment`: no aligned word of the calldata is `C`.
  * 4. `opening-late`: the header's timestamp is after `t_E`.
- * 5. `opening-payload`: `keccak256(header)` isn't proven as the beacon
- *    block's `execution_payload.block_hash` under `body_root` at its fork's
- *    index and depth, or `beacon_slot` is before Capella or not before the
- *    state's slot.
+ * 5. `opening-payload`: `keccak256(header)` isn't proven under `body_root`
+ *    at the index and depth of `beacon_slot`'s fork (`PAYLOAD_GINDEX`), or
+ *    `beacon_slot` is before Capella or not before the state's slot.
  * 6. `opening-canonical`: the beacon block header's root isn't the state's
  *    record of the block at `beacon_slot`, through the period's
  *    `block_summary_root` (13 hashes) or `block_roots` (none).
@@ -467,7 +480,7 @@ export function receiptOpeningStateEntry(
  * `opening-fork-unknown` instead of the rest of 5, and 6, when this release
  * can't check them, decided right after the slot check and before any
  * payload check: no schedule for `l1ChainId`, or a state whose fork version
- * is unknown or after Fulu (and so, `beacon_slot` being earlier, its fork is
+ * is unknown or after Gloas (and so, `beacon_slot` being earlier, its fork is
  * a checked one whenever the state's is). That is a property of
  * the judge, never of the opening (`judgeReceipt` leaves the receipt
  * unjudged). Throws on a state that isn't one of the chain's: a known fork
@@ -516,7 +529,7 @@ export function checkReceiptOpening(input: ReceiptOpeningInput): ReceiptOpeningC
   if (!SUPPORTED_STATE_FORKS.has(known.name)) return fail("opening-fork-unknown");
   const capellaSlot = capellaFirstSlot(schedule);
   if (o.beacon_slot < capellaSlot) return fail("opening-payload");
-  // beacon_slot is before the state's slot, so its fork is Capella to Fulu too.
+  // beacon_slot is before the state's slot, so its fork is Capella to Gloas too.
   const gindex = PAYLOAD_GINDEX[forkAt(schedule, o.beacon_slot).name] as number;
   const depth = Math.floor(Math.log2(gindex));
   if (

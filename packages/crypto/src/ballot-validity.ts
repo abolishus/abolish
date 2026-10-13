@@ -433,12 +433,22 @@ export interface VoteSharing {
   readonly shares: readonly (readonly Share[])[];
 }
 
-/** Every sharing `shareVoteWith` made: the only ones `proveValidityWith` and share encryption accept. */
-const SHARINGS = new WeakSet<VoteSharing>();
+/**
+ * Every sharing `shareVoteWith` or `shareVoteV3With` made, with the ballot
+ * version whose rules its votes were checked against: the only sharings the
+ * provers and share encryption accept, and each prover only its own
+ * version's, so a version-3 sharing is never proved under one sum's limits.
+ */
+const SHARINGS = new WeakMap<VoteSharing, 1 | 3>();
 
-/** Internal: whether `shareVote` made this sharing (unchanged, since it is frozen). */
+/** Internal: whether `shareVote` or `shareVoteV3` made this sharing (unchanged, since it is frozen). */
 export function isRegisteredSharing(sharing: VoteSharing): boolean {
   return SHARINGS.has(sharing);
+}
+
+/** Internal: the ballot version whose rules this sharing's votes were checked against, if it is registered. */
+export function sharingVersion(sharing: VoteSharing): 1 | 3 | undefined {
+  return SHARINGS.get(sharing);
 }
 
 // What each sharing has been used for: proved (the voter chose to cast it) or
@@ -496,6 +506,17 @@ export function shareVoteWith(
 ): VoteSharing {
   checkRules(rules);
   checkVotes(rules, votes);
+  return makeSharing(rules, votes, polynomials, 1);
+}
+
+// The sharing of Committed vote over `votes.length` options, which the
+// caller has checked against its version's rules.
+function makeSharing(
+  rules: { readonly threshold: number; readonly panelSize: number },
+  votes: readonly (0 | 1)[],
+  polynomials: readonly OptionPolynomials[],
+  version: 1 | 3,
+): VoteSharing {
   const k = rules.threshold;
   if (polynomials.length !== votes.length) throw new RangeError("polynomials: one per option");
   polynomials.forEach((p, j) => {
@@ -527,7 +548,7 @@ export function shareVoteWith(
     vss,
     shares,
   });
-  SHARINGS.add(sharing);
+  SHARINGS.set(sharing, version);
   return sharing;
 }
 
@@ -543,13 +564,23 @@ export function randomScalar(): bigint {
 export function shareVote(rules: ValidityRules, votes: readonly (0 | 1)[]): VoteSharing {
   checkRules(rules);
   checkVotes(rules, votes);
+  return drawSharing(rules.threshold, votes, (p) => shareVoteWith(rules, votes, p));
+}
+
+// Draws every coefficient from the CSPRNG and shares, drawing again only
+// after an identity VSS commitment (Committed vote, Notes).
+function drawSharing(
+  k: number,
+  votes: readonly (0 | 1)[],
+  shareWith: (polynomials: readonly OptionPolynomials[]) => VoteSharing,
+): VoteSharing {
   for (;;) {
     const polynomials = votes.map((v) => ({
-      f: [BigInt(v), ...Array.from({ length: rules.threshold - 1 }, randomScalar)],
-      g: Array.from({ length: rules.threshold }, randomScalar),
+      f: [BigInt(v), ...Array.from({ length: k - 1 }, randomScalar)],
+      g: Array.from({ length: k }, randomScalar),
     }));
     try {
-      return shareVoteWith(rules, votes, polynomials);
+      return shareWith(polynomials);
     } catch (e) {
       // Only an identity VSS commitment is retried; anything else is a bug.
       if (!(e instanceof RangeError && e.message.includes("identity"))) throw e;
@@ -574,7 +605,7 @@ export function proveValidityWith(
   nonces: ValidityNonces,
 ): CommittedVote {
   checkContext(ctx);
-  if (!SHARINGS.has(sharing))
+  if (SHARINGS.get(sharing) !== 1)
     throw new TypeError("prove: the sharing must come from shareVote, unchanged");
   if (SPENT.get(sharing) === "opened")
     throw new TypeError("prove: this sharing was opened by a challenge; it is never cast");
@@ -645,5 +676,353 @@ export function proveValidity(
   return proveValidityWith(ctx, sharing, shareHashes, {
     options: sharing.vss.map(() => randomOrNonces(2)),
     sum: randomOrNonces(ctx.maxSelections - ctx.minSelections + 1),
+  });
+}
+
+// Ballot version 3 (docs/spec/ballot-validity.md, Ballot record (version 3);
+// ADR 0026): the committed vote of a poll of several questions, shared and
+// proved over the flat options, with one range proof per question in place of
+// version 1's one sum proof, so no count moves from one question to another
+// and each question's limits hold (T-28, T-30, T-31, T-32).
+
+const { MAX_QUESTIONS } = PARAMETERS;
+
+/** The committed vote of ballot version 3: `sum_proofs` holds one range proof per question. */
+export const COMMITTED_VOTE_V3 = struct([
+  ["vss", VSS],
+  ["share_hashes", SHARE_HASHES],
+  ["option_proofs", list(bitProof, MAX_OPTIONS)],
+  ["sum_proofs", list(list(branch, MAX_OPTIONS + 1), MAX_QUESTIONS)],
+]);
+
+export type CommittedVoteV3 = CodecValue<typeof COMMITTED_VOTE_V3>;
+
+/** One question's option count and limits, from the registered version-5 definition. */
+export interface QuestionRules {
+  readonly optionCount: number;
+  readonly minSelections: number;
+  readonly maxSelections: number;
+}
+
+/** The rules a version-3 ballot is shared and proved under (Context (version 3)). */
+export interface ValidityRulesV3 {
+  readonly questions: readonly QuestionRules[];
+  readonly threshold: number;
+  readonly panelSize: number;
+}
+
+/** What names a version-3 ballot beside its committed vote: the election, its cell and its nullifier. */
+export interface BallotHashContextV3 {
+  readonly definitionHash: Uint8Array;
+  readonly cell: number;
+  readonly nullifier: bigint;
+}
+
+export type ValidityContextV3 = ValidityRulesV3 & BallotHashContextV3;
+
+export type ValidityResultV3 =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly code: "validity-shape" }
+  | { readonly ok: false; readonly code: "option-proof"; readonly option: number }
+  | { readonly ok: false; readonly code: "sum-proof"; readonly question: number };
+
+const BALLOT_VERSION_3 = 3;
+
+/** `o_q` for every question, and `T`: the flat index of each question's first option, and the poll's option count. */
+function offsetsOf(questions: readonly QuestionRules[]): {
+  readonly offsets: readonly number[];
+  readonly total: number;
+} {
+  const offsets: number[] = [];
+  let total = 0;
+  for (const q of questions) {
+    offsets.push(total);
+    total += q.optionCount;
+  }
+  return { offsets, total };
+}
+
+function checkRulesV3(rules: ValidityRulesV3): void {
+  const { questions, threshold: k, panelSize: n } = rules;
+  const int = (x: unknown) => Number.isSafeInteger(x);
+  if (!Array.isArray(questions) || questions.length < 1 || questions.length > MAX_QUESTIONS)
+    throw new RangeError("rules: from 1 to MAX_QUESTIONS questions");
+  for (const q of questions as readonly QuestionRules[]) {
+    const { optionCount: m, minSelections: min, maxSelections: max } = q;
+    if (![m, min, max].every(int)) throw new TypeError("rules: expected integers");
+    if (m < 1) throw new RangeError("rules: optionCount out of range");
+    if (min < 0 || min > max || max > m) throw new RangeError("rules: selections out of range");
+  }
+  if (offsetsOf(questions).total > MAX_OPTIONS)
+    throw new RangeError("rules: more than MAX_OPTIONS options over the poll");
+  if (![k, n].every(int)) throw new TypeError("rules: expected integers");
+  if (k < 2 || k > n || n > MAX_TRUSTEES) throw new RangeError("rules: panel out of range");
+}
+
+function checkContextV3(ctx: ValidityContextV3): void {
+  checkRulesV3(ctx);
+  checkBallotContextV3(ctx);
+}
+
+function checkBallotContextV3(ctx: BallotHashContextV3): void {
+  const d = ctx.definitionHash;
+  if (!(d instanceof Uint8Array) || !ArrayBuffer.isView(d) || new Uint8Array(d).length !== 32)
+    throw new TypeError("context: definitionHash must be 32 bytes");
+  if (!Number.isSafeInteger(ctx.cell) || ctx.cell < 0 || ctx.cell > 0xff)
+    throw new RangeError("context: the cell must be a u8");
+}
+
+// definition_hash ‖ u16(0x0002) ‖ u8(3) ‖ u8(cell) ‖ encode(nullifier): the
+// inputs before the committed vote's own encoding, at version 2's offsets.
+function headerV3(ctx: BallotHashContextV3): Writer {
+  const w = new Writer();
+  w.bytes(new Uint8Array(ctx.definitionHash));
+  u16.write(w, BALLOT_RECORD_TYPE);
+  u8.write(w, BALLOT_VERSION_3);
+  u8.write(w, ctx.cell);
+  fieldBn254.write(w, ctx.nullifier);
+  return w;
+}
+
+/**
+ * `statement_hash` under ballot version 3 (Hashes (version 3)): version 2's
+ * with version input 3, so no proof made under another version verifies
+ * here (T-31).
+ */
+export function statementHashV3(
+  ctx: ValidityContextV3,
+  vss: CommittedVoteV3["vss"],
+  shareHashes: CommittedVoteV3["share_hashes"],
+): Uint8Array {
+  checkContextV3(ctx);
+  const w = headerV3(ctx);
+  VSS.write(w, vss);
+  SHARE_HASHES.write(w, shareHashes);
+  return H(ds("abolish/v1/ballot-statement", w.finish()));
+}
+
+/**
+ * `ballot_hash` under ballot version 3 (Hashes (version 3)): the statement
+ * hash's inputs followed by the proofs, `encode(sum_proofs)` last, which is
+ * the committed vote's own encoding (T-38, T-41).
+ */
+export function ballotHashV3(ctx: BallotHashContextV3, vote: CommittedVoteV3): Uint8Array {
+  checkBallotContextV3(ctx);
+  const w = headerV3(ctx);
+  COMMITTED_VOTE_V3.write(w, vote);
+  return H(ds("abolish/v1/ballot", w.finish()));
+}
+
+// statement_hash ‖ u16(q) ‖ u16(o_q) ‖ u16(m_q) ‖ u16(min_q) ‖ u16(max_q): the
+// question, which commitments Y_q multiplies, and its allowed values, so a
+// range proof can't move to another question or range (Question range proof).
+function questionPrefix(statement: Uint8Array, q: number, o: number, rules: QuestionRules) {
+  const w = new Writer();
+  w.bytes(statement);
+  for (const x of [q, o, rules.optionCount, rules.minSelections, rules.maxSelections])
+    u16.write(w, x);
+  return w.finish();
+}
+
+/** `Y_q`: the product of question `q`'s commitments `E_{j,0}`, flat options `o` to `o + m − 1`. */
+function questionSum(vss: CommittedVoteV3["vss"], o: number, m: number): Element {
+  return vss.slice(o, o + m).reduce((acc, e) => acc.add(e[0] as Element), IDENTITY);
+}
+
+const QUESTION_SUM_TAG = "abolish/v1/fs/ballot-validity/question-sum";
+const OPTION_TAG = "abolish/v1/fs/ballot-validity/option";
+
+/**
+ * `validity-shape` under version 3 alone (Checks (version 3)): `T` flat
+ * options of `k` commitments, `n` share hashes, `T` option proofs, and one
+ * range proof per question of exactly `max_q − min_q + 1` branches.
+ */
+export function shapeOkV3(ctx: ValidityContextV3, vote: CommittedVoteV3): boolean {
+  checkContextV3(ctx);
+  const { questions, threshold: k } = ctx;
+  const { total } = offsetsOf(questions);
+  return (
+    vote.vss.length === total &&
+    vote.vss.every((e) => e.length === k) &&
+    vote.share_hashes.length === ctx.panelSize &&
+    vote.option_proofs.length === total &&
+    vote.sum_proofs.length === questions.length &&
+    vote.sum_proofs.every(
+      (b, q) =>
+        b.length ===
+        (questions[q] as QuestionRules).maxSelections -
+          (questions[q] as QuestionRules).minSelections +
+          1,
+    )
+  );
+}
+
+/**
+ * The validity check of a version-3 committed vote (Checks (version 3);
+ * verifier 5.4): the shape, each option proof in flat order, then each
+ * question's range proof in question order. The first failure is the
+ * result, naming the flat option or the question.
+ */
+export function checkValidityV3(ctx: ValidityContextV3, vote: CommittedVoteV3): ValidityResultV3 {
+  checkContextV3(ctx);
+  if (!shapeOkV3(ctx, vote)) return { ok: false, code: "validity-shape" };
+  const { vss, share_hashes, option_proofs, sum_proofs } = vote;
+  const statement = statementHashV3(ctx, vss, share_hashes);
+  for (const [j, p] of option_proofs.entries()) {
+    const branches = [
+      { c: p.c0, z: p.z0 },
+      { c: p.c1, z: p.z1 },
+    ];
+    const y = (vss[j] as readonly Element[])[0] as Element;
+    if (!verifyOr(OPTION_TAG, optionPrefix(statement, j), y, [0, 1], branches))
+      return { ok: false, code: "option-proof", option: j };
+  }
+  const { offsets } = offsetsOf(ctx.questions);
+  for (const [q, rules] of ctx.questions.entries()) {
+    const o = offsets[q] as number;
+    const { optionCount: m, minSelections: min, maxSelections: max } = rules;
+    if (
+      !verifyOr(
+        QUESTION_SUM_TAG,
+        questionPrefix(statement, q, o, rules),
+        questionSum(vss, o, m),
+        range(min, max),
+        sum_proofs[q] as readonly Branch[],
+      )
+    )
+      return { ok: false, code: "sum-proof", question: q };
+  }
+  return { ok: true };
+}
+
+function checkVotesV3(rules: ValidityRulesV3, votes: readonly number[]): void {
+  const { offsets, total } = offsetsOf(rules.questions);
+  if (!Array.isArray(votes) || votes.length !== total)
+    throw new RangeError("votes: one entry per flat option");
+  if (!votes.every((v) => v === 0 || v === 1)) throw new RangeError("votes: each must be 0 or 1");
+  rules.questions.forEach((q, i) => {
+    const o = offsets[i] as number;
+    const count = votes.slice(o, o + q.optionCount).reduce((a, v) => a + v, 0);
+    if (count < q.minSelections || count > q.maxSelections)
+      throw new RangeError("votes: a question's selection count is outside its limits");
+  });
+}
+
+/**
+ * Internal: shares a version-3 vote, flat options in question order, with the
+ * given polynomials. Production code calls `shareVoteV3`; the package entry
+ * point doesn't export this.
+ */
+export function shareVoteV3With(
+  rules: ValidityRulesV3,
+  votes: readonly (0 | 1)[],
+  polynomials: readonly OptionPolynomials[],
+): VoteSharing {
+  checkRulesV3(rules);
+  checkVotesV3(rules, votes);
+  return makeSharing(rules, votes, polynomials, 3);
+}
+
+/**
+ * Shares a version-3 vote among the trustees, one flat option per entry in
+ * question order, every coefficient from the CSPRNG; each question's count
+ * must be within its limits (Context (version 3)).
+ */
+export function shareVoteV3(rules: ValidityRulesV3, votes: readonly (0 | 1)[]): VoteSharing {
+  checkRulesV3(rules);
+  checkVotesV3(rules, votes);
+  return drawSharing(rules.threshold, votes, (p) => shareVoteV3With(rules, votes, p));
+}
+
+/** The randomness of a version-3 ballot's proofs: one set per flat option, one per question. */
+export interface ValidityNoncesV3 {
+  readonly options: readonly OrNonces[];
+  readonly questions: readonly OrNonces[];
+}
+
+/**
+ * Internal: proves a version-3 sharing valid with the given randomness.
+ * Production code calls `proveValidityV3`; the package entry point doesn't
+ * export this.
+ */
+export function proveValidityV3With(
+  ctx: ValidityContextV3,
+  sharing: VoteSharing,
+  shareHashes: CommittedVoteV3["share_hashes"],
+  nonces: ValidityNoncesV3,
+): CommittedVoteV3 {
+  checkContextV3(ctx);
+  if (SHARINGS.get(sharing) !== 3)
+    throw new TypeError("prove: the sharing must come from shareVoteV3, unchanged");
+  if (SPENT.get(sharing) === "opened")
+    throw new TypeError("prove: this sharing was opened by a challenge; it is never cast");
+  const { offsets, total } = offsetsOf(ctx.questions);
+  if (sharing.vss.length !== total || sharing.vss.some((e) => e.length !== ctx.threshold))
+    throw new RangeError("prove: the sharing doesn't match the election");
+  if (shareHashes.length !== ctx.panelSize)
+    throw new RangeError("prove: one share hash per trustee");
+  if (nonces.options.length !== total) throw new RangeError("prove: one nonce set per option");
+  if (nonces.questions.length !== ctx.questions.length)
+    throw new RangeError("prove: one nonce set per question");
+  // The sharing's votes were checked against rules when it was made; these
+  // rules may differ, so each question's count is checked again before proving.
+  checkVotesV3(ctx, sharing.votes);
+  const statement = statementHashV3(ctx, sharing.vss, shareHashes);
+  const option_proofs = sharing.vss.map((e, j) => {
+    const v = sharing.votes[j] as 0 | 1;
+    const r = (sharing.polynomials[j] as OptionPolynomials).g[0] as bigint;
+    const branches = proveOr(
+      OPTION_TAG,
+      optionPrefix(statement, j),
+      e[0] as Element,
+      [0, 1],
+      v,
+      r,
+      nonces.options[j] as OrNonces,
+    );
+    // proveOr returns one branch per value, here two.
+    const [b0, b1] = branches as [Branch, Branch];
+    return { c0: b0.c, z0: b0.z, c1: b1.c, z1: b1.z };
+  });
+  // After every option proof, in question order (Question range proof, Proving).
+  const sum_proofs = ctx.questions.map((rules, q) => {
+    const o = offsets[q] as number;
+    const { optionCount: m, minSelections: min, maxSelections: max } = rules;
+    const count = sharing.votes.slice(o, o + m).reduce<number>((a, v) => a + v, 0);
+    const rho = mod(
+      sharing.polynomials.slice(o, o + m).reduce((a, p) => a + (p.g[0] as bigint), 0n),
+    );
+    return proveOr(
+      QUESTION_SUM_TAG,
+      questionPrefix(statement, q, o, rules),
+      questionSum(sharing.vss, o, m),
+      range(min, max),
+      count - min,
+      rho,
+      nonces.questions[q] as OrNonces,
+    );
+  });
+  const vote = { vss: sharing.vss, share_hashes: shareHashes, option_proofs, sum_proofs };
+  // Round-trips the result through the codec, so a ballot this returns always encodes.
+  encode(COMMITTED_VOTE_V3, vote);
+  SPENT.set(sharing, "proved");
+  return vote;
+}
+
+/**
+ * Proves a version-3 sharing valid: an option proof per flat option, then a
+ * range proof per question, all randomness from the CSPRNG (Question range
+ * proof, Proving). `shareHashes` are the share ciphertexts' hashes in seat
+ * order.
+ */
+export function proveValidityV3(
+  ctx: ValidityContextV3,
+  sharing: VoteSharing,
+  shareHashes: CommittedVoteV3["share_hashes"],
+): CommittedVoteV3 {
+  checkContextV3(ctx);
+  return proveValidityV3With(ctx, sharing, shareHashes, {
+    options: sharing.vss.map(() => randomOrNonces(2)),
+    questions: ctx.questions.map((q) => randomOrNonces(q.maxSelections - q.minSelections + 1)),
   });
 }

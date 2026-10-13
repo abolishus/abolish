@@ -27,6 +27,7 @@ import {
   proveValidity,
   type RegisteredKeys,
   shareVote,
+  shareVoteV3,
   type SpoiledBallotOpening,
   trackingCode,
   type ValidityContext,
@@ -384,6 +385,16 @@ describe("Benaloh challenge", () => {
     expect(() => openChallenge(election, 0, swapped)).toThrow(/registered key/);
     // A tier the election doesn't list.
     expect(() => openChallenge(election, 1, encrypted)).toThrow(/tier/);
+    // A version-3 sharing of the same width, its votes checked against
+    // questions rather than this election's range: no version-1 core.
+    const rulesV3 = {
+      questions: [{ optionCount: 3, minSelections: 0, maxSelections: 3 }],
+      threshold: election.threshold,
+      panelSize: election.panelSize,
+    };
+    const v3 = encryptShares(ctx, shareVoteV3(rulesV3, [1, 1, 0]), keys3);
+    expect(() => openChallenge(election, 0, v3)).toThrow(/version-1 sharing/);
+    expect(() => trackingCode(election, 0, v3)).toThrow(/version-1 sharing/);
     // Changing the exposed fields changes nothing openChallenge reveals.
     (encrypted.hashes[0] as Uint8Array).fill(0);
     const { opening } = openChallenge(election, 0, encrypted);

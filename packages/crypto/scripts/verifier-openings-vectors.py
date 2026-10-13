@@ -323,7 +323,7 @@ def main(constants, out_dir):
             "definition": vc.dv.enc_definition(defn).hex(),
             "clock": {k: str(v) for k, v in the_clock.items()},
             "board": b"".join(entries).hex(),
-            "expected": {"6.2": row},
+            "expected": {"2.3": vc.combination(defn), "6.2": row},
         }
         if report is not None:
             c["openings"] = report
@@ -396,7 +396,7 @@ def main(constants, out_dir):
     t2 = vc.transcript("verifier-openings/opening-v2", panel, src["registered"], ctx)
     d2 = vc.definition_for(panel, vb.H(vb.ds(vc.TRANSCRIPT_TAG, t2)), **fields)
     assert vc.dv.definition_rule(d2) is None
-    case("opening-v2", "The profile pins spoiled-ballot opening version 2, unknown here: 6.2 is unsupported.", [(0, ["t"])], "unverifiable", defn=d2, transcript=t2)
+    case("opening-v2", "The profile pins spoiled-ballot opening version 2 beside ballot version 1, whose cores only opening version 1 opens: 2.3 fails, and 6.2, which can't read version 2 here, is unsupported.", [(0, ["t"])], "unverifiable", defn=d2, transcript=t2)
 
     doc = {
         "format": "abolish-verifier-openings-vectors/1",

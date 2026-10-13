@@ -1,6 +1,6 @@
-// The ballot record, type 0x0002 versions 1 and 2 (docs/spec/ballot-validity.md,
-// Ballot record): a cast ballot's committed vote with its tier (version 2: its
-// cell), nullifier, L1 reference and membership proof, and its admission
+// The ballot record, type 0x0002 versions 1 to 3 (docs/spec/ballot-validity.md,
+// Ballot record): a cast ballot's committed vote with its tier (versions 2
+// and 3: its cell), nullifier, L1 reference and membership proof, and its admission
 // checks (verifier 5.1 to 5.4): the election it names, its tier or cell, the
 // committed vote's shape, the share hashes of seats outside the registered
 // key set, the membership proof over the message the verifier recomputes,
@@ -11,12 +11,22 @@
 import {
   ballotHash,
   type BallotHashContext,
+  type BallotHashContextV3,
+  ballotHashV3,
   checkValidity,
+  checkValidityV3,
   COMMITTED_VOTE,
+  COMMITTED_VOTE_V3,
   type CommittedVote,
+  type CommittedVoteV3,
   shapeOk,
+  shapeOkV3,
   type ValidityContext,
+  type ValidityContextV3,
+  type ValidityResult,
+  type ValidityResultV3,
   type ValidityRules,
+  type ValidityRulesV3,
 } from "./ballot-validity.ts";
 import { checkedTranscriptHash, type RegisteredKeys } from "./ceremony.ts";
 import {
@@ -34,6 +44,8 @@ import {
   type ElectionDefinition,
   type ElectionDefinitionV3,
   type ElectionDefinitionV4,
+  type ElectionDefinitionV5,
+  electionDefinitionV5Rule,
   TIERS,
 } from "./election-definition.ts";
 import { membershipScope, semaphoreField } from "./membership.ts";
@@ -47,6 +59,7 @@ import {
   electionDefinitionHash,
   electionDefinitionV3Hash,
   electionDefinitionV4Hash,
+  electionDefinitionV5Hash,
   pinnedVersion,
   UnsupportedVersionError,
 } from "./protocol.ts";
@@ -81,11 +94,28 @@ const ballotV2 = struct([
   ["committed_vote", COMMITTED_VOTE],
 ] as const);
 
+// Version 2's fields and offsets with version 3's committed vote, whose last
+// field holds one range proof per question (docs/spec/ballot-validity.md,
+// Ballot record (version 3); 0026-multi-question-ballots). A contract reads
+// the cell where it reads version 2's.
+const ballotV3 = struct([
+  ["definition_hash", bytesFixed(32)],
+  ["cell", u8],
+  ["nullifier", fieldBn254],
+  ["l1_ref_number", u64],
+  ["l1_ref_hash", bytesFixed(32)],
+  ["membership_proof", membershipProof],
+  ["committed_vote", COMMITTED_VOTE_V3],
+] as const);
+
 /** Ballot record, version 1: one cast ballot, naming its tier. */
 export type BallotRecord = CodecValue<typeof ballotV1>;
 
 /** Ballot record, version 2: one cast ballot, naming its cell (definition version 3). */
 export type BallotRecordV2 = CodecValue<typeof ballotV2>;
+
+/** Ballot record, version 3: one cast ballot of a poll with questions (definition version 5), naming its cell. */
+export type BallotRecordV3 = CodecValue<typeof ballotV3>;
 
 /** The fields a ballot's membership proof is made over: every field but the proof. */
 export type UnprovenBallot = Omit<BallotRecord, "membership_proof">;
@@ -93,8 +123,11 @@ export type UnprovenBallot = Omit<BallotRecord, "membership_proof">;
 /** The fields a version-2 ballot's membership proof is made over. */
 export type UnprovenBallotV2 = Omit<BallotRecordV2, "membership_proof">;
 
+/** The fields a version-3 ballot's membership proof is made over. */
+export type UnprovenBallotV3 = Omit<BallotRecordV3, "membership_proof">;
+
 /** Record type `0x0002`. The election's profile pins its version. */
-export const BALLOT = recordType(RECORD_TYPES.ballot, { 1: ballotV1, 2: ballotV2 });
+export const BALLOT = recordType(RECORD_TYPES.ballot, { 1: ballotV1, 2: ballotV2, 3: ballotV3 });
 
 const SCHEMA = new RecordSchema([BALLOT]);
 
@@ -106,16 +139,24 @@ export function encodeBallotV2(record: BallotRecordV2): Uint8Array {
   return SCHEMA.encode(BALLOT, 2, record);
 }
 
+export function encodeBallotV3(record: BallotRecordV3): Uint8Array {
+  return SCHEMA.encode(BALLOT, 3, record);
+}
+
 /**
  * Strictly decodes a ballot record against the version the election's profile
  * pins. Decoding doesn't compare the definition hash, tier or cell with the
- * election; `checkBallot` and `checkBallotV2` do, so a ballot naming another
- * election is still read, and reported (docs/spec/ballot-validity.md, Ballot
- * record).
+ * election; `checkBallot`, `checkBallotV2` and `checkBallotV3` do, so a
+ * ballot naming another election is still read, and reported
+ * (docs/spec/ballot-validity.md, Ballot record).
  */
 export function decodeBallot(bytes: Uint8Array, pinned: 1): BallotRecord;
 export function decodeBallot(bytes: Uint8Array, pinned: 2): BallotRecordV2;
-export function decodeBallot(bytes: Uint8Array, pinned: 1 | 2): BallotRecord | BallotRecordV2 {
+export function decodeBallot(bytes: Uint8Array, pinned: 3): BallotRecordV3;
+export function decodeBallot(
+  bytes: Uint8Array,
+  pinned: 1 | 2 | 3,
+): BallotRecord | BallotRecordV2 | BallotRecordV3 {
   return SCHEMA.decode(BALLOT, bytes, pinned).value;
 }
 
@@ -144,12 +185,27 @@ export interface BallotElection extends ValidityRules {
 export interface CellBallotElection extends ValidityRules {
   readonly definitionHash: Uint8Array;
   /** The partition's cells; `cells[c]` is cell `c`. */
-  readonly cells: readonly {
-    readonly cell: number;
-    readonly tier: number;
-    readonly root: bigint;
-    readonly scope: bigint;
-  }[];
+  readonly cells: readonly BallotCell[];
+  readonly qualified: readonly number[];
+}
+
+/** One cell of a partition: its position, its tier, its cell-tree root and the scope derived from them. */
+export interface BallotCell {
+  readonly cell: number;
+  readonly tier: number;
+  readonly root: bigint;
+  readonly scope: bigint;
+}
+
+/**
+ * The same for a definition version 5, whose ballots (version 3) name their
+ * cell and answer its questions: the questions' option counts and limits in
+ * place of one option count and one range (docs/spec/ballot-validity.md,
+ * Context (version 3)), and version 4's partition.
+ */
+export interface QuestionBallotElection extends ValidityRulesV3 {
+  readonly definitionHash: Uint8Array;
+  readonly cells: readonly BallotCell[];
   readonly qualified: readonly number[];
 }
 
@@ -226,33 +282,88 @@ export function cellBallotElection(
   const definitionHash = v4
     ? electionDefinitionV4Hash(definition)
     : electionDefinitionV3Hash(definition);
-  const cells = definition.electorate.flatMap((t) =>
-    t.cells.map((c) => ({ tier: t.tier, root: c.root })),
-  );
-  // The u8 a ballot names; the definition's `cells` rule caps it at 256 too.
-  if (cells.length > 256) throw new RangeError("cellBallotElection: more than 256 cells");
   const election: CellBallotElection = Object.freeze({
     definitionHash: Uint8Array.from(definitionHash),
     ...rulesOf(definition),
-    cells: Object.freeze(
-      cells.map((c, cell) =>
-        Object.freeze({
-          cell,
-          tier: c.tier,
-          root: c.root,
-          // The tier and the cell's root: cells of one tier have distinct
-          // roots, so distinct scopes (docs/spec/membership.md, Scope).
-          scope: membershipScope(definitionHash, c.tier, c.root),
-        }),
-      ),
-    ),
+    cells: cellsOf("cellBallotElection", definition, definitionHash),
     qualified: Object.freeze(registered.map((k) => k.index)),
   });
   MADE.set(election, { definitionHash, version: 2 });
   return election;
 }
 
-type AnyDefinition = ElectionDefinition | ElectionDefinitionV3 | ElectionDefinitionV4;
+/**
+ * `ballotElection` for a definition version 5, which pins ballot version 3
+ * (verifier 2.3, `profile-combination`): each question's option count and
+ * limits, in order, and version 4's cells. The caller has run 2.x for the
+ * definition; one that isn't well-formed is refused here too, since its
+ * questions could hold a range no ballot can prove (T-28, T-34), and so is a
+ * cell root of 0 (T-04).
+ */
+export function questionBallotElection(
+  definition: ElectionDefinitionV5,
+  registered: readonly RegisteredKeys[],
+): QuestionBallotElection {
+  const own = pinnedVersion(definition, RECORD_TYPES.electionDefinition);
+  const pinned = pinnedVersion(definition, RECORD_TYPES.ballot);
+  if (own !== 5) throw new UnsupportedVersionError(RECORD_TYPES.electionDefinition, own);
+  if (pinned !== 3) throw new UnsupportedVersionError(RECORD_TYPES.ballot, pinned);
+  if (electionDefinitionV5Rule(definition) !== undefined)
+    throw new RangeError("questionBallotElection: the definition isn't well-formed");
+  checkKeys("questionBallotElection", definition, registered);
+  const definitionHash = electionDefinitionV5Hash(definition);
+  const election: QuestionBallotElection = Object.freeze({
+    definitionHash: Uint8Array.from(definitionHash),
+    questions: Object.freeze(
+      definition.questions.map((q) =>
+        Object.freeze({
+          optionCount: q.option_count,
+          minSelections: q.min_selections,
+          maxSelections: q.max_selections,
+        }),
+      ),
+    ),
+    threshold: definition.threshold,
+    panelSize: definition.panel_size,
+    cells: cellsOf("questionBallotElection", definition, definitionHash),
+    qualified: Object.freeze(registered.map((k) => k.index)),
+  });
+  MADE.set(election, { definitionHash, version: 3 });
+  return election;
+}
+
+// Cells are numbered across the tiers in order, as the definition lists them
+// (docs/spec/election-definition.md, Layout (version 3); versions 4 and 5
+// keep its partition).
+function cellsOf(
+  caller: string,
+  definition: ElectionDefinitionV3 | ElectionDefinitionV4 | ElectionDefinitionV5,
+  definitionHash: Uint8Array,
+): readonly BallotCell[] {
+  const cells = definition.electorate.flatMap((t) =>
+    t.cells.map((c) => ({ tier: t.tier, root: c.root })),
+  );
+  // The u8 a ballot names; the definition's `cells` rule caps it at 256 too.
+  if (cells.length > 256) throw new RangeError(`${caller}: more than 256 cells`);
+  return Object.freeze(
+    cells.map((c, cell) =>
+      Object.freeze({
+        cell,
+        tier: c.tier,
+        root: c.root,
+        // The tier and the cell's root: cells of one tier have distinct
+        // roots, so distinct scopes (docs/spec/membership.md, Scope).
+        scope: membershipScope(definitionHash, c.tier, c.root),
+      }),
+    ),
+  );
+}
+
+type AnyDefinition =
+  | ElectionDefinition
+  | ElectionDefinitionV3
+  | ElectionDefinitionV4
+  | ElectionDefinitionV5;
 
 function checkKeys(
   caller: string,
@@ -266,7 +377,9 @@ function checkKeys(
     throw new RangeError(`${caller}: the definition names another membership key`);
 }
 
-function rulesOf(definition: AnyDefinition): ValidityRules {
+function rulesOf(
+  definition: ElectionDefinition | ElectionDefinitionV3 | ElectionDefinitionV4,
+): ValidityRules {
   return {
     optionCount: definition.option_count,
     minSelections: definition.min_selections,
@@ -276,7 +389,7 @@ function rulesOf(definition: AnyDefinition): ValidityRules {
   };
 }
 
-// Contexts `ballotElection` and `cellBallotElection` made, each with its own
+// Contexts `ballotElection`, `cellBallotElection` and `questionBallotElection` made, each with its own
 // copy of the definition hash and the ballot version it checks: a hand-built
 // context, or one whose exposed hash was overwritten in place (a frozen
 // object's byte array isn't frozen), could pair a definition hash with
@@ -284,15 +397,15 @@ function rulesOf(definition: AnyDefinition): ValidityRules {
 // must never check the other's records.
 const MADE = new WeakMap<
   object,
-  { readonly definitionHash: Uint8Array; readonly version: 1 | 2 }
+  { readonly definitionHash: Uint8Array; readonly version: 1 | 2 | 3 }
 >();
 
-function madeHashOf(election: object, version: 1 | 2): Uint8Array {
+const MAKERS = { 1: "ballotElection", 2: "cellBallotElection", 3: "questionBallotElection" };
+
+function madeHashOf(election: object, version: 1 | 2 | 3): Uint8Array {
   const made = MADE.get(election);
   if (made === undefined || made.version !== version)
-    throw new TypeError(
-      `expected a context made by ${version === 1 ? "ballotElection" : "cellBallotElection"}`,
-    );
+    throw new TypeError(`expected a context made by ${MAKERS[version]}`);
   return made.definitionHash;
 }
 
@@ -322,7 +435,10 @@ interface Target {
 const tierTarget = (election: BallotElection, tier: number): Target | undefined =>
   election.tiers.find((g) => g.tier === tier);
 
-const cellTarget = (election: CellBallotElection, cell: number): Target | undefined =>
+const cellTarget = (
+  election: CellBallotElection | QuestionBallotElection,
+  cell: number,
+): Target | undefined =>
   Number.isSafeInteger(cell) && cell >= 0 ? election.cells[cell] : undefined;
 
 /**
@@ -371,12 +487,44 @@ export function ballotSignalsV2(
   return signalsOf(definitionHash, target, fields, hash).signals;
 }
 
-type Fields = ReturnType<typeof fieldsOf>;
+/**
+ * `ballotSignals` for a version-3 ballot: version 2's, with `M` over the
+ * version-3 ballot hash (docs/spec/ballot-validity.md, Hashes (version 3)).
+ * `undefined` if the ballot names another definition, or a cell the
+ * partition doesn't have.
+ */
+export function ballotSignalsV3(
+  election: QuestionBallotElection,
+  ballot: UnprovenBallotV3,
+): MembershipSignals | undefined {
+  const definitionHash = madeHashOf(election, 3);
+  const fields = fieldsOf(ballot);
+  const { cell } = ballot;
+  if (!equalBytes(fields.definitionHash, definitionHash)) return undefined;
+  const target = cellTarget(election, cell);
+  if (target === undefined) return undefined;
+  const hash = ballotHashV3({ definitionHash, cell, nullifier: fields.nullifier }, fields.vote);
+  return signalsOf(definitionHash, target, fields, hash).signals;
+}
+
+interface Fields<V> {
+  readonly definitionHash: Uint8Array;
+  readonly nullifier: bigint;
+  readonly l1RefNumber: bigint;
+  readonly l1RefHash: Uint8Array;
+  readonly vote: V;
+}
 
 // Reads each common field once, so a record with getters can't show one
 // check one value and the next another. The tier or cell is read once by
 // the caller.
-function fieldsOf(ballot: Omit<UnprovenBallot, "tier"> | Omit<UnprovenBallotV2, "cell">) {
+function fieldsOf<V>(ballot: {
+  readonly definition_hash: Uint8Array;
+  readonly nullifier: bigint;
+  readonly l1_ref_number: bigint;
+  readonly l1_ref_hash: Uint8Array;
+  readonly committed_vote: V;
+}): Fields<V> {
   const { definition_hash, nullifier, l1_ref_number, l1_ref_hash, committed_vote } = ballot;
   return {
     definitionHash: definition_hash,
@@ -387,9 +535,14 @@ function fieldsOf(ballot: Omit<UnprovenBallot, "tier"> | Omit<UnprovenBallotV2, 
   };
 }
 
-function signalsOf(definitionHash: Uint8Array, target: Target, fields: Fields, hash: Uint8Array) {
+function signalsOf(
+  definitionHash: Uint8Array,
+  target: Target,
+  fields: Fields<unknown>,
+  hash: Uint8Array,
+) {
   // M binds the election, the tier, the ballot hash (and through it a
-  // version-2 ballot's cell) and the L1 block (T-38, T-45).
+  // version-2 or version-3 ballot's cell) and the L1 block (T-38, T-45).
   const message = membershipMessage({
     definitionHash,
     tier: target.tier,
@@ -416,7 +569,7 @@ export type BallotCode =
   | "option-proof"
   | "sum-proof";
 
-/** Version 2's admission codes: `ballot-cell` in place of `ballot-tier`. */
+/** Version 2's admission codes, which version 3 keeps: `ballot-cell` in place of `ballot-tier`. */
 export type BallotV2Code = Exclude<BallotCode, "ballot-tier"> | "ballot-cell";
 
 type Admitted = {
@@ -424,18 +577,28 @@ type Admitted = {
   readonly ballotHash: Uint8Array;
   /** `M`, recomputed: what 5.7 compares, never the proof's bytes (T-38). */
   readonly message: Uint8Array;
-  /** The tier the re-vote rule ranks by (version 2: the cell's tier). */
+  /** The tier the re-vote rule ranks by (versions 2 and 3: the cell's tier). */
   readonly tier: number;
   readonly nullifier: bigint;
   readonly l1RefNumber: bigint;
   readonly l1RefHash: Uint8Array;
 };
 
-type Rejected<C> = { readonly ok: false; readonly code: C; readonly option?: number };
+type Rejected<C> = {
+  readonly ok: false;
+  readonly code: C;
+  /** Under `option-proof`, the first failing option (version 3: flat option). */
+  readonly option?: number;
+  /** Under version 3's `sum-proof`, the first failing question. */
+  readonly question?: number;
+};
 
 export type BallotCheck = Admitted | Rejected<BallotCode>;
 
 export type BallotCheckV2 = (Admitted & { readonly cell: number }) | Rejected<BallotV2Code>;
+
+/** A version-3 ballot's admission: version 2's, every question in it. */
+export type BallotCheckV3 = BallotCheckV2;
 
 /**
  * The admission checks of a decoded ballot record (docs/spec/ballot-validity.md,
@@ -452,13 +615,8 @@ export function checkBallot(election: BallotElection, ballot: BallotRecord): Bal
     return { ok: false, code: "ballot-stray" };
   const target = tierTarget(election, tier);
   if (target === undefined) return { ok: false, code: "ballot-tier" };
-  return admit(
-    election,
-    { definitionHash, tier, nullifier: fields.nullifier },
-    target,
-    fields,
-    proof,
-  );
+  const named = { definitionHash, tier, nullifier: fields.nullifier };
+  return admit(election, checksOf(election, named), target, fields, proof);
 }
 
 /**
@@ -477,13 +635,34 @@ export function checkBallotV2(election: CellBallotElection, ballot: BallotRecord
     return { ok: false, code: "ballot-stray" };
   const target = cellTarget(election, cell);
   if (target === undefined) return { ok: false, code: "ballot-cell" };
-  const result = admit(
-    election,
-    { definitionHash, ballotVersion: 2, cell, nullifier: fields.nullifier },
-    target,
-    fields,
-    proof,
-  );
+  const named = { definitionHash, ballotVersion: 2, cell, nullifier: fields.nullifier } as const;
+  const result = admit(election, checksOf(election, named), target, fields, proof);
+  return result.ok ? { ...result, cell } : result;
+}
+
+/**
+ * The admission checks of a decoded version-3 ballot (docs/spec/ballot-validity.md,
+ * Admission (version 3)): version 2's, in its order, with the shape and
+ * proofs over the definition's questions: `option-proof` names the first
+ * failing flat option and `sum-proof` the first failing question. The
+ * questions and the cell's root and scope come from the definition, never
+ * from the ballot (T-16, T-28). A ballot that passes is ranked by the cell's
+ * tier, so a re-vote replaces every answer at once.
+ */
+export function checkBallotV3(
+  election: QuestionBallotElection,
+  ballot: BallotRecordV3,
+): BallotCheckV3 {
+  const definitionHash = madeHashOf(election, 3);
+  const proof = ballot.membership_proof;
+  const fields = fieldsOf(ballot);
+  const { cell } = ballot;
+  if (!equalBytes(fields.definitionHash, definitionHash))
+    return { ok: false, code: "ballot-stray" };
+  const target = cellTarget(election, cell);
+  if (target === undefined) return { ok: false, code: "ballot-cell" };
+  const named = { definitionHash, cell, nullifier: fields.nullifier };
+  const result = admit(election, checksOfV3(election, named), target, fields, proof);
   return result.ok ? { ...result, cell } : result;
 }
 
@@ -501,6 +680,50 @@ function contextOf(election: ValidityRules, named: BallotHashContext): ValidityC
   };
 }
 
+function contextOfV3(election: ValidityRulesV3, named: BallotHashContextV3): ValidityContextV3 {
+  return {
+    questions: election.questions,
+    threshold: election.threshold,
+    panelSize: election.panelSize,
+    ...named,
+  };
+}
+
+// What admission runs on a committed vote of one ballot version, under the
+// context the election and the record's named fields give.
+interface VoteChecks<V, C extends { readonly definitionHash: Uint8Array }> {
+  readonly ctx: C;
+  readonly shape: (vote: V) => boolean;
+  readonly hash: (vote: V) => Uint8Array;
+  readonly validity: (vote: V) => ValidityResult | ValidityResultV3;
+}
+
+function checksOf(
+  election: ValidityRules,
+  named: BallotHashContext,
+): VoteChecks<CommittedVote, ValidityContext> {
+  const ctx = contextOf(election, named);
+  return {
+    ctx,
+    shape: (vote) => shapeOk(ctx, vote),
+    hash: (vote) => ballotHash(ctx, vote),
+    validity: (vote) => checkValidity(ctx, vote),
+  };
+}
+
+function checksOfV3(
+  election: ValidityRulesV3,
+  named: BallotHashContextV3,
+): VoteChecks<CommittedVoteV3, ValidityContextV3> {
+  const ctx = contextOfV3(election, named);
+  return {
+    ctx,
+    shape: (vote) => shapeOkV3(ctx, vote),
+    hash: (vote) => ballotHashV3(ctx, vote),
+    validity: (vote) => checkValidityV3(ctx, vote),
+  };
+}
+
 // A trustee's own seat and the hash of the ciphertext delivered for it,
 // checked against the ballot's share hash after the cheap admission checks
 // and before the proofs (docs/spec/share-encryption.md, Intake and receipts).
@@ -510,34 +733,33 @@ interface SeatCiphertext {
 }
 
 // 5.1 to 5.4 once the election and the tier or cell are known, shared by
-// both versions: they differ only in what the ballot names, and so in where
-// the root and scope come from.
-function admit(
-  election: ValidityRules & { readonly qualified: readonly number[] },
-  named: BallotHashContext,
+// every version: they differ in what the ballot names, and so in where the
+// root and scope come from, and in the committed vote's checks.
+function admit<V extends { readonly share_hashes: readonly Uint8Array[] }>(
+  election: { readonly panelSize: number; readonly qualified: readonly number[] },
+  checks: VoteChecks<V, { readonly definitionHash: Uint8Array }>,
   target: Target,
-  fields: Fields,
+  fields: Fields<V>,
   proof: BallotRecord["membership_proof"],
 ): Admitted | Rejected<AdmitCode>;
-function admit(
-  election: ValidityRules & { readonly qualified: readonly number[] },
-  named: BallotHashContext,
+function admit<V extends { readonly share_hashes: readonly Uint8Array[] }>(
+  election: { readonly panelSize: number; readonly qualified: readonly number[] },
+  checks: VoteChecks<V, { readonly definitionHash: Uint8Array }>,
   target: Target,
-  fields: Fields,
+  fields: Fields<V>,
   proof: BallotRecord["membership_proof"],
   delivered: SeatCiphertext,
 ): Admitted | Rejected<AdmitCode | "share-hash">;
-function admit(
-  election: ValidityRules & { readonly qualified: readonly number[] },
-  named: BallotHashContext,
+function admit<V extends { readonly share_hashes: readonly Uint8Array[] }>(
+  election: { readonly panelSize: number; readonly qualified: readonly number[] },
+  checks: VoteChecks<V, { readonly definitionHash: Uint8Array }>,
   target: Target,
-  fields: Fields,
+  fields: Fields<V>,
   proof: BallotRecord["membership_proof"],
   delivered?: SeatCiphertext,
 ): Admitted | Rejected<AdmitCode | "share-hash"> {
   const { vote } = fields;
-  const ctx = contextOf(election, named);
-  if (!shapeOk(ctx, vote)) return { ok: false, code: "validity-shape" };
+  if (!checks.shape(vote)) return { ok: false, code: "validity-shape" };
   // A seat outside the registered key set gets no shares, and its hash is
   // fixed, so it carries no chosen bytes into the archive (T-17).
   for (let seat = 1; seat <= election.panelSize; seat++)
@@ -552,11 +774,11 @@ function admit(
     !equalBytes(delivered.shareHash, vote.share_hashes[delivered.seat - 1] as Uint8Array)
   )
     return { ok: false, code: "share-hash" };
-  const hash = ballotHash(ctx, vote);
-  const derived = signalsOf(named.definitionHash, target, fields, hash);
+  const hash = checks.hash(vote);
+  const derived = signalsOf(checks.ctx.definitionHash, target, fields, hash);
   if (!verifyDecodedMembershipProof(proof, derived.signals))
     return { ok: false, code: "membership-proof" };
-  const validity = checkValidity(ctx, vote);
+  const validity = checks.validity(vote);
   if (!validity.ok) return validity;
   return {
     ok: true,
@@ -573,14 +795,23 @@ function admit(
 export type IntakeAdmissionCode = "delivery-malformed" | BallotCode | BallotV2Code | "share-hash";
 
 export type IntakeAdmission =
-  | (Admitted & {
-      /** What the trustee's decryption and the ballot hash run under. */
-      readonly ctx: ValidityContext;
-      /** The decoded committed vote, whose `vss` the trustee's shares are checked against. */
-      readonly vote: CommittedVote;
-      /** The ballot's cell, under ballot version 2. */
-      readonly cell?: number;
-    })
+  | (Admitted &
+      (
+        | {
+            /** What the trustee's decryption and the ballot hash run under. */
+            readonly ctx: ValidityContext;
+            /** The decoded committed vote, whose `vss` the trustee's shares are checked against. */
+            readonly vote: CommittedVote;
+            /** The ballot's cell, under ballot version 2. */
+            readonly cell?: number;
+          }
+        | {
+            readonly ctx: ValidityContextV3;
+            readonly vote: CommittedVoteV3;
+            /** The ballot's cell, under ballot version 3. */
+            readonly cell: number;
+          }
+      ))
   | Rejected<IntakeAdmissionCode>;
 
 /**
@@ -596,20 +827,43 @@ export type IntakeAdmission =
  * the registered key set.
  */
 export function admitForIntake(
-  election: BallotElection | CellBallotElection,
+  election: BallotElection | CellBallotElection | QuestionBallotElection,
   record: Uint8Array,
   seat: number,
   shareHash: Uint8Array,
 ): IntakeAdmission {
   const made = MADE.get(election);
   if (made === undefined)
-    throw new TypeError("expected a context made by ballotElection or cellBallotElection");
+    throw new TypeError(
+      "expected a context made by ballotElection, cellBallotElection or questionBallotElection",
+    );
   if (!Number.isSafeInteger(seat) || !election.qualified.includes(seat))
     throw new RangeError("admitForIntake: seat must be a seat of the registered key set");
   if (!(shareHash instanceof Uint8Array) || shareHash.length !== 32)
     throw new RangeError("admitForIntake: shareHash must be 32 bytes");
   const delivered = { seat, shareHash: Uint8Array.from(shareHash) };
   const { definitionHash, version } = made;
+  // The context's version, from the map, decides which layout the record is
+  // read under, never a property the record or the context could fake.
+  if (version === 3) {
+    let ballot: BallotRecordV3;
+    try {
+      ballot = decodeBallot(record, 3);
+    } catch {
+      return { ok: false, code: "delivery-malformed" };
+    }
+    const questions = election as QuestionBallotElection;
+    const fields = fieldsOf(ballot);
+    if (!equalBytes(fields.definitionHash, definitionHash))
+      return { ok: false, code: "ballot-stray" };
+    const { cell } = ballot;
+    const target = cellTarget(questions, cell);
+    if (target === undefined) return { ok: false, code: "ballot-cell" };
+    const checks = checksOfV3(questions, { definitionHash, cell, nullifier: fields.nullifier });
+    const result = admit(questions, checks, target, fields, ballot.membership_proof, delivered);
+    if (!result.ok) return result;
+    return { ...result, ctx: checks.ctx, vote: fields.vote, cell };
+  }
   let ballot: BallotRecord | BallotRecordV2;
   try {
     ballot = version === 1 ? decodeBallot(record, 1) : decodeBallot(record, 2);
@@ -632,9 +886,11 @@ export function admitForIntake(
     if (target === undefined) return { ok: false, code: "ballot-tier" };
     named = { definitionHash, tier, nullifier: fields.nullifier };
   }
-  const result = admit(election, named, target, fields, ballot.membership_proof, delivered);
+  const rules = election as BallotElection | CellBallotElection;
+  const checks = checksOf(rules, named);
+  const result = admit(rules, checks, target, fields, ballot.membership_proof, delivered);
   if (!result.ok) return result;
-  const ctx = contextOf(election, named);
+  const { ctx } = checks;
   const vote = fields.vote;
   return named.ballotVersion === 2
     ? { ...result, ctx, vote, cell: named.cell }

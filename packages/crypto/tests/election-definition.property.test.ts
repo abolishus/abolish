@@ -473,13 +473,15 @@ describe("2.3's profile combination", () => {
     },
   });
 
-  // From docs/spec/verifier.md 2.3: ballot versions 1 and 2 need board-entry
+  // From docs/spec/verifier.md 2.3: ballot versions 1 to 3 need board-entry
   // 3 or 4, tally-opening version 1 needs 4, ballot version 2 needs
-  // definition version 3 or 4 (these are version 1), and a board-entry version
-  // this package doesn't read is unsupported, never a failure (T-36).
+  // definition version 3 or 4 and ballot version 3 definition version 5
+  // (these are version 1, which pins ballot version 1 with opening version 1),
+  // and a board-entry version this package doesn't read is unsupported, never
+  // a failure (T-36).
   const expected = (board: number, ballot: number, opening: number) => {
     if (![1, 3, 4].includes(board)) return "unsupported-version";
-    if (ballot === 2) return "profile-combination";
+    if (ballot !== 1) return "profile-combination";
     const carriesDelivery = board === 3 || board === 4;
     const carriesDestruction = board === 4;
     const fits = (ballot !== 1 || carriesDelivery) && (opening !== 1 || carriesDestruction);
@@ -511,7 +513,7 @@ describe("2.3's profile combination", () => {
     );
   });
 
-  test("definition version 3 pairs only with ballot version 2, which no opening can challenge yet", () => {
+  test("definition version 3 pairs only with ballot version 2, whose opening this package doesn't read yet", () => {
     // The rule reads only the profile, so version 1's value with 0x0001
     // pinned at 3 stands in for a version-3 definition.
     const v3 = (ballot: number) => {
@@ -527,14 +529,17 @@ describe("2.3's profile combination", () => {
       };
     };
     expect(profileCombinationRule(v3(1))).toBe("profile-combination");
+    // Ballot version 3 carries questions, which definition version 5 alone has.
+    expect(profileCombinationRule(v3(3))).toBe("profile-combination");
     // A ballot version this package doesn't know may be a later release's
     // cell-naming ballot: unsupported, never failed (T-36).
-    expect(profileCombinationRule(v3(3))).toBe("unsupported-version");
-    // Ballot version 2 is the only one that could fit, and no spoiled-ballot
-    // opening version opens its cores yet, so it is refused under every one
-    // this package knows (docs/spec/challenge.md, Versions; T-42). One it
-    // doesn't know may be a later release's that does, so it is unsupported,
-    // never a failure that release would disagree with (T-36).
+    expect(profileCombinationRule(v3(4))).toBe("unsupported-version");
+    // Ballot version 2 is the only one that could fit, and only opening
+    // version 2 opens its cores, so it is refused beside opening version 1
+    // (docs/spec/challenge.md, Versions; T-42). This package doesn't read
+    // opening version 2 yet (P2-14 part 3c), nor one it doesn't know, which a
+    // later release may: unsupported, never a failure that release would
+    // disagree with (T-36).
     for (const spoiled of [1, 2, 255]) {
       const d = v3(2);
       const pinned = {
@@ -592,7 +597,8 @@ describe("2.3's profile combination", () => {
       };
     };
     expect(profileCombinationRule(v4(1))).toBe("profile-combination");
-    expect(profileCombinationRule(v4(3))).toBe("unsupported-version");
+    expect(profileCombinationRule(v4(3))).toBe("profile-combination");
+    expect(profileCombinationRule(v4(4))).toBe("unsupported-version");
     expect(profileCombinationRule(v4(2))).toBe("profile-combination");
     const v4Board = (board: number) => ({
       ...v4(2),
@@ -625,7 +631,7 @@ describe("2.3's profile combination", () => {
     // electionDefinitionRule refuses these too; a caller that skipped it
     // must still refuse to cast (T-34).
     for (const type of [RECORD_TYPES.ballot, RECORD_TYPES.tallyOpening]) {
-      const fitting = pinning(4, 3, 2);
+      const fitting = pinning(4, 1, 2);
       const without = {
         ...fitting,
         profile: {
@@ -703,5 +709,85 @@ describe("2.3's profile combination", () => {
     expect(profileCombinationRule(withDisplayText(pinning(6, 1, 1), 2))).toBe(
       "unsupported-version",
     );
+  });
+
+  // The rule reads only the profile, so version 1's value with its pins
+  // changed stands in for each definition version.
+  const withPins = (d: ElectionDefinition, pins: Readonly<Record<number, number | undefined>>) => ({
+    ...d,
+    profile: {
+      ...d.profile,
+      pins: [
+        ...d.profile.pins.filter((p) => !Object.hasOwn(pins, p.record_type)).map((p) => ({ ...p })),
+        ...Object.entries(pins)
+          .filter((e): e is [string, number] => e[1] !== undefined)
+          .map(([t, version]) => ({ record_type: Number(t), version })),
+      ].sort((a, b) => a.record_type - b.record_type),
+    },
+  });
+  const v5 = (pins: Readonly<Record<number, number | undefined>> = {}) =>
+    withPins(pinning(4, 3, 1), {
+      [RECORD_TYPES.electionDefinition]: 5,
+      [RECORD_TYPES.displayText]: 2,
+      [RECORD_TYPES.spoiledBallotOpening]: 2,
+      ...pins,
+    });
+
+  test("definition version 5 pairs only with ballot version 3, display-text version 2 and opening version 2", () => {
+    // Opening version 2 opens version-3 cores, but this package doesn't read
+    // it until P2-14 part 3c, so the typical version-5 profile is
+    // unverifiable here, never failed (T-36).
+    expect(profileCombinationRule(v5())).toBe("unsupported-version");
+    for (const ballot of [1, 2])
+      expect(profileCombinationRule(v5({ [RECORD_TYPES.ballot]: ballot }))).toBe(
+        "profile-combination",
+      );
+    // A ballot version it doesn't know may be a later release's question ballot.
+    expect(profileCombinationRule(v5({ [RECORD_TYPES.ballot]: 4 }))).toBe("unsupported-version");
+    // Display-text version 1 has no questions; an unknown one fails too.
+    for (const displayText of [1, 3, undefined])
+      expect(profileCombinationRule(v5({ [RECORD_TYPES.displayText]: displayText }))).toBe(
+        "profile-combination",
+      );
+    // Opening version 1 opens version-1 cores only; none pinned can't challenge.
+    for (const spoiled of [1, undefined])
+      expect(profileCombinationRule(v5({ [RECORD_TYPES.spoiledBallotOpening]: spoiled }))).toBe(
+        "profile-combination",
+      );
+    expect(profileCombinationRule(v5({ [RECORD_TYPES.spoiledBallotOpening]: 255 }))).toBe(
+      "unsupported-version",
+    );
+    // Ballot version 3 needs a board that carries its delivery records, and
+    // that failure is reported beside an opening this package doesn't read.
+    expect(profileCombinationRule(v5({ [RECORD_TYPES.boardEntry]: 1 }))).toBe(
+      "profile-combination",
+    );
+    // Ballot version 3 pairs with definition version 5 alone.
+    for (const definition of [1, 3, 4])
+      expect(profileCombinationRule(v5({ [RECORD_TYPES.electionDefinition]: definition }))).toBe(
+        "profile-combination",
+      );
+  });
+
+  test("a definition version without known pairings fails, never borrowing version 1's", () => {
+    for (const definition of [2, 6, 7, 255, undefined])
+      expect(
+        profileCombinationRule(
+          withPins(pinning(4, 1, 1), { [RECORD_TYPES.electionDefinition]: definition }),
+        ),
+      ).toBe("profile-combination");
+  });
+
+  test("ballot version 1 pairs only with opening version 1, which opens its cores", () => {
+    expect(profileCombinationRule(pinning(4, 1, 1))).toBeUndefined();
+    // Opening version 2 opens cells' cores; one this package doesn't know
+    // can't be a later release's opening of version-1 cores either: the
+    // spec gives version 1 its opening (docs/spec/verifier.md, 2.3).
+    for (const spoiled of [2, 255, undefined])
+      expect(
+        profileCombinationRule(
+          withPins(pinning(4, 1, 1), { [RECORD_TYPES.spoiledBallotOpening]: spoiled }),
+        ),
+      ).toBe("profile-combination");
   });
 });

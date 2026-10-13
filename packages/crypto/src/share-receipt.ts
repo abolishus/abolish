@@ -22,6 +22,7 @@ import {
   type BallotElection,
   type CellBallotElection,
   type IntakeAdmissionCode,
+  type QuestionBallotElection,
 } from "./ballot.ts";
 import {
   type KemSecretKey,
@@ -80,7 +81,13 @@ export type IntakeResult =
       readonly l1RefNumber: bigint;
       readonly l1RefHash: Uint8Array;
     }
-  | { readonly ok: false; readonly code: IntakeCode; readonly option?: number };
+  | {
+      readonly ok: false;
+      readonly code: IntakeCode;
+      readonly option?: number;
+      /** Under ballot version 3's `sum-proof`, the first failing question. */
+      readonly question?: number;
+    };
 
 /**
  * Trustee intake of one delivered ballot (docs/spec/share-encryption.md,
@@ -92,13 +99,13 @@ export type IntakeResult =
  * bounded by the electorate (docs/spec/delivery.md, What a node owes; ADR
  * 0002, Decision, 2026-10-12; T-52, T-25, T-54). The L1 reference isn't
  * checked here: the node reads it from finalized L1 when it decides what it
- * owes. `election` is the context `ballotElection` or `cellBallotElection`
- * made from the definition and key set the node checked (verifier 1.3, 2.4,
+ * owes. `election` is the context `ballotElection`, `cellBallotElection` or
+ * `questionBallotElection` made from the definition and key set the node checked (verifier 1.3, 2.4,
  * 2.5, 2.8, 3.2), and `keys.seat` must be a seat of that key set, whose KEM
  * key matches `keys.kemSecret`.
  */
 export function intakeBallot(
-  election: BallotElection | CellBallotElection,
+  election: BallotElection | CellBallotElection | QuestionBallotElection,
   keys: IntakeKeys,
   record: Uint8Array,
   ciphertext: Uint8Array,

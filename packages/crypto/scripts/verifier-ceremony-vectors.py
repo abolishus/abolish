@@ -142,25 +142,36 @@ def combination(defn):
     """2.3's profile-combination (docs/spec/verifier.md, 2.3), from the spec's text."""
     pins = dict(defn["profile"]["pins"])
     board, ballot, opening = pins[BOARD_ENTRY_TYPE], pins.get(BALLOT_TYPE), pins.get(TALLY_OPENING_TYPE)
+    spoiled = pins.get(SPOILED_OPENING_TYPE)
     failed = outcome("fail", "profile-combination", {})
-    regional = pins[0x0001] in (3, 4)
-    # Ballot versions 1 and 2 are the ones specified; any other may be a later
-    # release's, which might name its cell (T-36).
-    unknown_ballot = ballot not in (1, 2)
-    # Definition versions 3 and 4 pin ballot version 2, which names its cell, and only they do.
-    if not (regional and unknown_ballot) and regional != (ballot == 2):
+    unsupported = outcome("unverifiable", "unsupported-version", {})
+    definition = pins[0x0001]
+    # Definition versions 1, 3 and 4 pin display-text version 1, version 5
+    # display-text version 2; an unknown one fails.
+    if pins.get(0x0009) != (2 if definition == 5 else 1):
         return failed
-    if ballot == 2 and SPOILED_OPENING_TYPE not in pins:
+    # Each definition version pins one ballot version, and only it: 2 under
+    # 3 and 4 (regional cells), 3 under 5 (questions), 1 under 1. Any other
+    # ballot version may be a later release's, which might name its cell or
+    # carry questions (T-36).
+    wanted = {3: 2, 4: 2, 5: 3}.get(definition, 1)
+    known = ballot in (1, 2, 3)
+    if known and ballot != wanted:
         return failed
-    if not ((ballot not in (1, 2) or board in (3, 4)) and (opening != 1 or board == 4)):
+    # Ballot versions 1 to 3 need the opening version that opens their
+    # cores: 1 for version 1, 2 for versions 2 and 3 (challenge.md, Versions).
+    if known and spoiled is None:
         return failed
-    if regional and unknown_ballot:
-        return outcome("unverifiable", "unsupported-version", {})
-    if ballot == 2:
-        # No spoiled-ballot opening version opens version-2 cores yet: version
-        # 1, the only one specified, opens version 1's, and any other is one a
-        # later release may define (challenge.md, Versions; T-36).
-        return failed if pins.get(SPOILED_OPENING_TYPE) == 1 else outcome("unverifiable", "unsupported-version", {})
+    if ballot == 1 and spoiled != 1:
+        return failed
+    if not ((not known or board in (3, 4)) and (opening != 1 or board == 4)):
+        return failed
+    if not known and wanted != 1:
+        return unsupported
+    if ballot in (2, 3):
+        # Opening version 1 opens version 1's cores only; version 2, which
+        # opens theirs, and any other are ones this verifier doesn't read yet.
+        return failed if spoiled == 1 else unsupported
     return NOT_IMPLEMENTED
 
 

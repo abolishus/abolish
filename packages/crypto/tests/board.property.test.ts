@@ -689,6 +689,39 @@ describe("checkpoints from a raw copy", () => {
     );
   });
 
+  test("a copy is hashed into CIDs once however many segments name the same extent", () => {
+    // A hostile mirror labels every entry with segment 0, so every word's
+    // prefix is the whole copy: naming more segments must not hash it again
+    // (T-53). Timed rather than counted, with a wide margin: without the
+    // memo the 200-segment run takes about 200 times as long.
+    const big = Array.from({ length: 16 }, (_, i) =>
+      encodeBoardEntry(
+        {
+          election_id: ELECTION,
+          index: BigInt(i),
+          segment: 0,
+          // Built in place: spreading 256 KiB into `recordOf` overflows the stack.
+          payload: (() => {
+            const p = new Uint8Array(3 + 256 * 1024).fill(i);
+            p.set([0, 2, 1]);
+            return p;
+          })(),
+        },
+        1,
+      ),
+    );
+    const time = (segments: number[]) => {
+      const start = performance.now();
+      const got = copyCheckpoints(ELECTION, big, segments);
+      expect(new Set([...got.values()].map((c) => c.object_cid.join())).size).toBe(1);
+      return performance.now() - start;
+    };
+    time([0]);
+    const one = Math.max(time([0]), 1);
+    const many = time(Array.from({ length: 200 }, (_, s) => s));
+    expect(many).toBeLessThan(20 * one + 50);
+  });
+
   test("the prefix ends at the first entry past the segment, and a short entry ends it", () => {
     const entry = (index: number, segment: number) =>
       encodeBoardEntry(

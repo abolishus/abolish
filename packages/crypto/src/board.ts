@@ -315,17 +315,24 @@ export function copyCheckpoints(
   const links: Uint8Array[] = [];
   for (const h of hashes) links.push(chainLink(links.at(-1) ?? new Uint8Array(32), h));
   const roots = merkleRoots(BOARD_TREE, hashes, new Set(sizes.values()));
+  const cids = new Map<number, ReturnType<typeof segmentCids>>();
   const out = new Map<number, Checkpoint>();
-  for (const [segment, size] of sizes)
-    if (size > 0)
-      out.set(segment, {
-        election_id: id.slice(),
-        segment,
-        size: BigInt(size),
-        head: (links[size - 1] as Uint8Array).slice(),
-        root: roots.get(size) as Uint8Array,
-        ...segmentCids(encodings, hashes, fields, size),
-      });
+  for (const [segment, size] of sizes) {
+    if (size === 0) continue;
+    // Once per size: the runs of distinct sizes are disjoint, so the copy is
+    // hashed once however many words name the same extent (T-53).
+    let c = cids.get(size);
+    if (c === undefined) cids.set(size, (c = segmentCids(encodings, hashes, fields, size)));
+    out.set(segment, {
+      election_id: id.slice(),
+      segment,
+      size: BigInt(size),
+      head: (links[size - 1] as Uint8Array).slice(),
+      root: roots.get(size) as Uint8Array,
+      object_cid: c.object_cid.slice(),
+      hashes_cid: c.hashes_cid.slice(),
+    });
+  }
   return out;
 }
 
@@ -654,6 +661,7 @@ export function verifyBoard(
   const board = checkBoard(id, prefix, pinned);
   const { entries } = board;
   const segments = entries.map((e) => e.segment);
+  const cidsBySize = new Map<number, ReturnType<typeof segmentCids>>();
   for (const [j, cp] of counted) {
     const size = Number(cp.size);
     const last = entries[size - 1] as BoardEntry;
@@ -663,7 +671,13 @@ export function verifyBoard(
     // The prefix is the anchored board, so CIDs that don't name its bytes
     // are the anchoring authority's, never a mirror's: a fetch by CID from
     // L1 would find another object, or none (T-24, T-49).
-    const cids = segmentCids(board.encodings, board.entryHashes, segments, size);
+    // Once per size, so re-anchors don't hash a segment again (T-53).
+    let cids = cidsBySize.get(size);
+    if (cids === undefined)
+      cidsBySize.set(
+        size,
+        (cids = segmentCids(board.encodings, board.entryHashes, segments, size)),
+      );
     if (!equalBytes(cids.object_cid, cp.object_cid) || !equalBytes(cids.hashes_cid, cp.hashes_cid))
       throw new BoardError("checkpoint-cid", { checkpoint: j });
   }

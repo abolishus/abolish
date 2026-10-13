@@ -109,7 +109,7 @@ const vectors = JSON.parse(
   readonly electionId: string;
   readonly vectors: readonly {
     readonly id: string;
-    readonly block: { readonly header: string; readonly hash: string };
+    readonly block: { readonly header: string; readonly hash: string; readonly number: string };
   }[];
 };
 const closed = vectors.vectors.find((v) => v.id === "closed");
@@ -123,13 +123,15 @@ describe("block headers", () => {
     const h = decodeHeader(hex(closed.block.header));
     expect(toHex(h.hash)).toBe(closed.block.hash);
     expect(h.stateRoot).toEqual(fields[3]);
-    expect(h.number).toBe(13n);
+    expect(h.number).toBe(BigInt(closed.block.number));
     expect(h.timestamp).toBe(1800032401n);
   });
 
   test("accepts any number of fields from 15, as forks append them", () => {
     expect(decodeHeader(rlp(fields.slice(0, 15))).timestamp).toBe(1800032401n);
-    expect(decodeHeader(rlp([...fields, new Uint8Array(32)])).number).toBe(13n);
+    expect(decodeHeader(rlp([...fields, new Uint8Array(32)])).number).toBe(
+      BigInt(closed.block.number),
+    );
   });
 
   const with_ = (i: number, v: Item) => rlp(fields.map((f, j) => (j === i ? v : f)));

@@ -4523,6 +4523,74 @@
       }
     },
     {
+      "id": "checkpoint-cid-before-next-boundary",
+      "description": "Anchor 0 names segment 1's object and anchor 1 stops inside segment 1: each anchor's CIDs are checked before the next anchor's boundary",
+      "electionId": "ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d",
+      "now": "1800032401",
+      "entries": [
+        "000701ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d0000000000000000000000000000000b000501636572656d6f6e79",
+        "000701ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d0000000000000001000000000000000f000801726567697374726174696f6e",
+        "000701ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d0000000000000002000000010000000b00020162616c6c6f740001",
+        "000701ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d0000000000000003000000010000000b00020162616c6c6f740002",
+        "000701ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d0000000000000004000000010000000400030101",
+        "000701ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d000000000000000500000001000000050003010100",
+        "000701ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d0000000000000006000000010000000400030102",
+        "000701ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d0000000000000007000000040000000b00020162616c6c6f740003",
+        "000701ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d0000000000000008000000060000000800060174616c6c79",
+        "000701ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d0000000000000009000000060000000400030100"
+      ],
+      "checkpoints": [
+        {
+          "electionId": "ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d",
+          "segment": "0",
+          "size": "2",
+          "head": "c8cd5d204649795025a967df6adcd7b1d4c180becf883f9dbd9718e51b24809d",
+          "root": "de1032561f26c96ea22ed88d8b1cde78335321d16999c30a0ff493f7330ef879",
+          "objectCid": "01551220876fe5b6b60a85536b6f261e84c397de9e747b02e77929c94f86a94b21a36ac0",
+          "hashesCid": "01551220912ce1a842282425a1f36e9dc5a510288ce72aacb4856723719d56cc2f718ac3",
+          "hash": "8750fec5a7a185183116e279b26e924ea319c1ddd323bd7716e68e39d39b91c2",
+          "anchoredAt": "1800003660"
+        },
+        {
+          "electionId": "ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d",
+          "segment": "1",
+          "size": "3",
+          "head": "ae58b1e4b8c6de877ce9b4eb883ddbdca8970d03e406e3f52534fb534c6f6f1b",
+          "root": "dbdd07aa69c2864b82b96e8c67dcbe9a67c8e3ad13c1c39e40c40453dd31de0d",
+          "objectCid": "01551220ca70981119149ac0e26d51ba24ac2b7d19e9a2d27be19b662d6eaa407987b4d3",
+          "hashesCid": "01551220840e441a1ae1d6faa8b48a313c412eb4de1488003bfddd44aecd3e4888853275",
+          "hash": "ad5855ec9ab757848312f523c37bbe8c8a1a51d2f35dc9296a04b01b88a1c3b9",
+          "anchoredAt": "1800007260"
+        },
+        {
+          "electionId": "ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d",
+          "segment": "4",
+          "size": "8",
+          "head": "0f7b9ca34aba27f28bf127a5795fabaeee84c1fb3a5520ad8f6bcde197a231d6",
+          "root": "4835c73c0fcfef0126e94a16f2ea7a6792d4d9f4ace1df1baee5628842478cf0",
+          "objectCid": "015512201e3eba0f6a09398a0d665d883535025b38275b82daa0e6bc50b8f9583810b385",
+          "hashesCid": "01551220c58aeae8fdff12d04c26068f109fde860a99953d852589b86c0a00d7d494ff3c",
+          "hash": "79ba36ba733e4d9c52717d334b092f2aefe4a1981f074b8c955a975be1c75979",
+          "anchoredAt": "1800018060"
+        },
+        {
+          "electionId": "ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d",
+          "segment": "6",
+          "size": "10",
+          "head": "fc87f28192f272702cf7d1cdea1075188ee5b9c8d0a8bc800b0016e8fbe1a003",
+          "root": "bd58f626279773b51885eb3d7bd5064cabc3a5bbb1000ea09c15758f4c5c4d4e",
+          "objectCid": "01551220297a5b7c2af412d76e0347c43a65e5c82c7f8d572a0fbfbd00bd0a18183f23f8",
+          "hashesCid": "015512208e68e2bf8cff9342f520fc13db297f5ed187ca9f6016e78f21dd2135be8efebc",
+          "hash": "e0c48e0e712f8d8826aa418f728396ac48aee5e3fb230e816ed768063351a019",
+          "anchoredAt": "1800025260"
+        }
+      ],
+      "result": {
+        "code": "checkpoint-cid",
+        "checkpoint": 0
+      }
+    },
+    {
       "id": "checkpoint-cid-of-prefix",
       "description": "Segment 1's checkpoint names the whole prefix as one object, not segment 1's entries",
       "electionId": "ab9ec7a6b367362c48aee10f4ea81bf886d90a266dfda8c924bfe478e9b04f9d",

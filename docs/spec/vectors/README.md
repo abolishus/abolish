@@ -391,7 +391,7 @@ The proofs are randomised: regenerating gives other proof bytes for the same sta
 
 ## L1 anchor vectors
 
-`l1-anchor.json` checks reading the board anchor from L1 state, so it has its own format, `abolish-l1-anchor-vectors/1`, with the same top-level fields, plus `clock` (the anchor's clock with `lastSegment`, as in `board.json`), `electionId` (hex) and `vectors`. The generator deploys the board anchor on Anvil with `board.json`'s clock and anchors `board.json`'s `valid` board, and a second anchor holds a segment-4 checkpoint with another head. Headers, block hashes and trie nodes are Anvil's own, from an implementation that shares no code with ours; the expected anchors are the checkpoints the generator sent. Each vector has:
+`l1-anchor.json` checks reading the board anchor from L1 state, so it has its own format, `abolish-l1-anchor-vectors/1`, with the same top-level fields, plus `clock` (the anchor's clock with `lastSegment`, as in `board.json`), `electionId` (hex) and `vectors`. The generator deploys the board anchor on Anvil with `board.json`'s clock and anchors `board.json`'s `valid` board, a second anchor holds a segment-4 checkpoint with another head, and a third one with the honest head and root but segment 1's object CID. Headers, block hashes and trie nodes are Anvil's own, from an implementation that shares no code with ours; the expected anchors are the checkpoints the generator sent. Each vector has:
 
 - `id`, `description`;
 - `block`: `header` (the raw RLP header, hex), `number` and `timestamp` (decimal), and `hash` (hex) unless the header was changed;

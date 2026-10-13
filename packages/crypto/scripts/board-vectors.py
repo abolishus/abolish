@@ -816,6 +816,13 @@ def main(out_dir):
         [c[0], mid[:6] + (seg0[6],)] + c[2:],
         ("checkpoint-cid", {"checkpoint": 1}),
     )
+    board(
+        "checkpoint-cid-before-next-boundary",
+        "Anchor 0 names segment 1's object and anchor 1 stops inside segment 1: each anchor's CIDs are checked before the next anchor's boundary",
+        g,
+        [seg0[:5] + (mid[5], seg0[6]), inside] + cps(g, [4, 6]),
+        ("checkpoint-cid", {"checkpoint": 0}),
+    )
     whole = raw_cid(b"".join(g[:7]))
     board(
         "checkpoint-cid-of-prefix",

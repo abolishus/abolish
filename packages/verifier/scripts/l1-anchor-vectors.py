@@ -191,15 +191,19 @@ def main():
         rpc("anvil_impersonateAccount", AUTHORITY)
         honest = deploy(code, clock)
         forked = deploy(code, clock)
+        misnamed = deploy(code, clock)
 
         # The forked anchor holds a checkpoint for segment 4 that no board
-        # matches: the honest one with another head.
+        # matches: the honest one with another head. The misnamed one holds
+        # segment 4's honest head and root with segment 1's object CID.
         bogus = dict(cps[2], head="ee" * 32)
+        wrong_cid = dict(cps[2], objectCid=cps[1]["objectCid"])
         before = mine_at(1_800_000_100)
         for i, cp in enumerate(cps):
             t = int(cp["anchoredAt"])
             anchor(honest, [checkpoint_bytes(cp)], t)
             anchor(forked, [checkpoint_bytes(bogus if i == 2 else cp)], t + 1)
+            anchor(misnamed, [checkpoint_bytes(wrong_cid if i == 2 else cp)], t + 2)
             if i == 1:
                 running = mine_at(1_800_010_000)
         closed = mine_at(int(valid["now"]))
@@ -313,6 +317,31 @@ def main():
         )
         v["checkpoints"] = [bogus_bytes, checkpoint_bytes(cps[0])]
         vectors.append(v)
+        v, _, _ = case(
+            "word-misnames-cid",
+            "The misnamed anchor's segment-4 word has the copy's head and root but another object CID, "
+            "so no copy matches it and, with no checkpoint given, it is unknown",
+            closed, misnamed, 0, {"error": {"code": "l1-checkpoint-unknown", "segment": 4}},
+        )
+        vectors.append(v)
+        wrong_cid_bytes = checkpoint_bytes(wrong_cid)
+        v, _, _ = case(
+            "word-cid-from-checkpoint-fails",
+            "The misnamed anchor's segment-4 checkpoint, from its log: the copy matches its head and root, "
+            "so the CID that names segment 1's object fails the election",
+            closed, misnamed, 0,
+            {
+                "anchors": [
+                    {"segment": cps[0]["segment"], "hash": cps[0]["hash"], "source": "copy"},
+                    {"segment": cps[1]["segment"], "hash": cps[1]["hash"], "source": "copy"},
+                    {"segment": "4", "hash": checkpoint_hash(wrong_cid_bytes), "source": "checkpoint"},
+                    {"segment": cps[3]["segment"], "hash": cps[3]["hash"], "source": "copy"},
+                ]
+            },
+            board={"code": "checkpoint-cid", "checkpoint": 2},
+        )
+        v["checkpoints"] = [wrong_cid_bytes]
+        vectors.append(v)
         v, by_slot, slots = case(
             "missing-node",
             "The leaf proving segment 6's word is left out",
@@ -354,7 +383,7 @@ def main():
         "generator": (
             "packages/verifier/scripts/l1-anchor-vectors.py: deploys packages/contracts' BoardAnchor on Anvil "
             "with board.json's clock, anchors board.json's valid board (and, on a second anchor, a segment-4 "
-            "checkpoint with another head), and records Anvil's raw headers, block hashes and eth_getProof "
+            "checkpoint with another head, and on a third, one naming segment 1's object CID), and records Anvil's raw headers, block hashes and eth_getProof "
             "trie nodes. Expected anchors are the checkpoints it sent."
         ),
         "clock": clock,

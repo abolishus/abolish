@@ -306,6 +306,45 @@ contract ElectionRegistryTest is TestBase {
         );
     }
 
+    /// The fold at its floor, and a group shared with an earlier tier's
+    /// last group (docs/spec/election-definition.md, Regional cells; T-16,
+    /// T-01): cases the vectors don't reach.
+    function test_FoldAndGroupEdges() public {
+        bytes32 id = _create();
+        ElectionDefinitionLib.Definition memory d = RegistryFixture.templateV(registry, id, 3);
+        // Tier 0: one large region and two small ones summing to exactly the
+        // floor, so the tier is split, with the remainder as its own cell.
+        d.tiers[0].regions = new uint64[](3);
+        d.tiers[0].regions[0] = 3000;
+        d.tiers[0].regions[1] = 600;
+        d.tiers[0].regions[2] = 400;
+        d.tiers[0].groups[2].region = 2;
+        d.tiers[0].cells[1].members = 1000;
+        assertTrue(_rule(d) == ElectionDefinitionLib.Rule.None, "remainder at the floor");
+        // The remainder cell must state its regions' sum.
+        d.tiers[0].cells[1].members = 999;
+        assertTrue(_rule(d) == ElectionDefinitionLib.Rule.Cells, "remainder misstated");
+        // One member fewer: the remainder is below the floor, so the tier is
+        // one cell of every region.
+        d.tiers[0].regions[2] = 399;
+        d.tiers[0].cells[1].members = 999;
+        assertTrue(_rule(d) == ElectionDefinitionLib.Rule.Cells, "split below the floor");
+        d.tiers[0].cells = new ElectionDefinitionLib.Cell[](1);
+        d.tiers[0].cells[0] = ElectionDefinitionLib.Cell(0x1234, 3999);
+        assertTrue(_rule(d) == ElectionDefinitionLib.Rule.None, "unsplit");
+        // Tier 2 names Tier 0's largest group.
+        d.tiers[1].groups[0].groupId = 4;
+        assertTrue(_rule(d) == ElectionDefinitionLib.Rule.Electorate, "group in two tiers");
+    }
+
+    function _rule(ElectionDefinitionLib.Definition memory d)
+        internal
+        view
+        returns (ElectionDefinitionLib.Rule)
+    {
+        return lib.rule(DefinitionEncoder.encode(d));
+    }
+
     function test_AnUnregisteredHashHasNoParameters() public {
         (, bytes memory enc) = _created();
         // Approved and created, but not yet registered.

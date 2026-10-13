@@ -37,8 +37,8 @@ contract DefinitionHarness {
 }
 
 /// Appends big-endian integers to a buffer that doubles when full, so
-/// encoding a definition at its list limits (about 30 KB) costs linear
-/// memory, where repeated `abi.encodePacked` would copy it at every field.
+/// encoding a definition with a tier at its list limits (about 30 KB) costs
+/// linear memory, where repeated `abi.encodePacked` would copy it at every field.
 library ByteWriter {
     struct Writer {
         bytes buf;

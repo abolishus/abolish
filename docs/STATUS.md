@@ -64,6 +64,7 @@ Each item's state (`todo`, `in progress`, `blocked`, `needs owner decision`, `do
 - [[P2-15]] Live results
 - [[P2-16]] Author-added trustees and the transitional panel
 - [[P2-17]] Rolling electorates
+- [[P2-18]] Short links
 - [[P2-12]] Phase 2 exit
 
 ### Phase 3: Tier 2 ZK identity, Semaphore groups, indexer, per-tier results

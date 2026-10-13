@@ -174,7 +174,7 @@ over the record's full encoding, header included. Every answer and evaluation pr
 
 ## Transcript check
 
-A checker holds the scope's pins, the predecessor's pinned panel and its key (the output of its own check: [[nullifier-key]]'s for the initial key, this one for a reshare), and the new pinned panel. It decodes the transcript under version 1, rebuilds `reshare_context` from those and the transcript's `run_id`, and checks, in order. Checks 1 to 4, 6 and 8 make the whole transcript invalid.
+A checker holds the scope's pins, the predecessor's pinned panel and its key (the output of its own check: [[nullifier-key]]'s for the initial key, this one for a reshare), and the new pinned panel. It decodes the transcript under version 1, rebuilds `reshare_context` from those and the transcript's `run_id` and `deadline`, and checks, in order. Checks 1 to 4, 6 and 8 make the whole transcript invalid.
 
 1. **Predecessor** (`key-predecessor`). `predecessor` is the predecessor's `key_id`.
 2. **Order** (`key-order`). In each round, seats are strictly increasing: from 1 to `n'` in rounds 1 and 3, from 1 to `n` in rounds 2 and 4. A round-2 message comes from a qualified seat of the predecessor, a round-3 message from a seat of `S_1`, and a round-4 message from a seat of `S_2`.

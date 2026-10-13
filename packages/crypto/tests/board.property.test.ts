@@ -6,6 +6,7 @@ import {
   BOARD_PAYLOAD_TYPES,
   BOARD_PAYLOAD_TYPES_V3,
   BOARD_PAYLOAD_TYPES_V4,
+  BOARD_PAYLOAD_TYPES_V5,
   boardPayloadTypes,
   BOARD_TREE,
   type BoardEntry,
@@ -772,18 +773,28 @@ describe("checkpoints from a raw copy", () => {
   });
 });
 
-// Board-entry versions 3 and 4 differ from version 1 only in the record types
-// they allow (docs/spec/board.md, Allowed payloads), so the board checks must
-// pass and fail on them exactly as on version 1 (T-23, T-31).
-describe("board checks under board-entry versions 3 and 4", () => {
-  const ADDED: Record<3 | 4, readonly number[]> = {
+// Board-entry versions 3, 4 and 5 differ from version 1 only in the record
+// types they allow (docs/spec/board.md, Allowed payloads), so the board checks
+// must pass and fail on them exactly as on version 1 (T-23, T-31).
+describe("board checks under board-entry versions 3, 4 and 5", () => {
+  const ADDED: Record<3 | 4 | 5, readonly number[]> = {
     3: [RECORD_TYPES.shareReceipt, RECORD_TYPES.shareComplaint],
     4: [RECORD_TYPES.shareReceipt, RECORD_TYPES.shareComplaint, RECORD_TYPES.destructionStatement],
+    5: [
+      RECORD_TYPES.shareReceipt,
+      RECORD_TYPES.shareComplaint,
+      RECORD_TYPES.destructionStatement,
+      RECORD_TYPES.closeStatement,
+    ],
   };
-  const allowed = { 3: BOARD_PAYLOAD_TYPES_V3, 4: BOARD_PAYLOAD_TYPES_V4 } as const;
+  const allowed = {
+    3: BOARD_PAYLOAD_TYPES_V3,
+    4: BOARD_PAYLOAD_TYPES_V4,
+    5: BOARD_PAYLOAD_TYPES_V5,
+  } as const;
 
   /** A valid board under `version`, carrying at least one of the types it adds. */
-  const boardUnder = (version: 3 | 4) =>
+  const boardUnder = (version: 3 | 4 | 5) =>
     fc
       .tuple(
         fc.array(
@@ -819,7 +830,7 @@ describe("board checks under board-entry versions 3 and 4", () => {
         return { entries, last: segment, version };
       });
 
-  const anchorsUnder = (entries: readonly Uint8Array[], last: number, version: 3 | 4) => {
+  const anchorsUnder = (entries: readonly Uint8Array[], last: number, version: 3 | 4 | 5) => {
     const board = checkBoard(ELECTION, entries, version);
     const out: Anchor[] = [];
     for (let s = 0; s <= last; s++) {
@@ -844,13 +855,14 @@ describe("board checks under board-entry versions 3 and 4", () => {
     return "ok";
   };
 
-  const either = fc.oneof(boardUnder(3), boardUnder(4));
+  const either = fc.oneof(boardUnder(3), boardUnder(4), boardUnder(5));
 
   test("boardPayloadTypes gives each version's allowed set", () => {
     expect(boardPayloadTypes(1)).toBe(BOARD_PAYLOAD_TYPES);
     expect(boardPayloadTypes(3)).toBe(BOARD_PAYLOAD_TYPES_V3);
     expect(boardPayloadTypes(4)).toBe(BOARD_PAYLOAD_TYPES_V4);
-    for (const bad of [2, 5, "constructor", "toString"])
+    expect(boardPayloadTypes(5)).toBe(BOARD_PAYLOAD_TYPES_V5);
+    for (const bad of [2, 6, "constructor", "toString"])
       expect(() => boardPayloadTypes(bad as never)).toThrow(RangeError);
   });
 
@@ -885,7 +897,7 @@ describe("board checks under board-entry versions 3 and 4", () => {
   test("the same board under any other pinned version fails decoding at its first entry", () => {
     run(
       fc.property(either, ({ entries, last, version }) => {
-        for (const other of [1, 3, 4] as const) {
+        for (const other of [1, 3, 4, 5] as const) {
           if (other === version) continue;
           let caught: unknown;
           try {
@@ -906,38 +918,43 @@ describe("board checks under board-entry versions 3 and 4", () => {
     );
   });
 
-  test("relabelled as version 3, a version-4 board is refused at its first destruction statement", () => {
-    run(
-      fc.property(boardUnder(4), ({ entries, last }) => {
-        const relabelled = entries.map((b) =>
-          Uint8Array.of(b[0] as number, b[1] as number, 3, ...b.slice(3)),
-        );
-        const first = relabelled.findIndex(
-          (b) =>
-            (((b[51] as number) << 8) | (b[52] as number)) === RECORD_TYPES.destructionStatement,
-        );
-        let caught: unknown;
-        try {
-          checkBoard(ELECTION, relabelled, 3);
-        } catch (e) {
-          caught = e;
-        }
-        if (first === -1) expect(caught).toBeUndefined();
-        else {
-          expect(caught).toBeInstanceOf(BoardError);
-          expect((caught as BoardError).at).toEqual({
-            entry: first,
-            decodeError: "unexpected-record-type",
-          });
-          // Anchored as it is, the relabelled copy still fails verifyBoard
-          // under version 3, by its decoding, not its bytes.
-          const segments = Array.from({ length: last + 1 }, (_, s) => s);
-          const anchors = [...copyCheckpoints(ELECTION, relabelled, segments).values()].map(
-            anchorOf,
+  test.each([
+    [4, 3, "destruction statement", RECORD_TYPES.destructionStatement],
+    [5, 4, "close statement", RECORD_TYPES.closeStatement],
+  ] as const)(
+    "relabelled down, a version-%i board is refused as version %i at its first %s",
+    (version, lower, _name, added) => {
+      run(
+        fc.property(boardUnder(version), ({ entries, last }) => {
+          const relabelled = entries.map((b) =>
+            Uint8Array.of(b[0] as number, b[1] as number, lower, ...b.slice(3)),
           );
-          expect(verdictUnder(relabelled, anchors, last, 3)).toBe("decode");
-        }
-      }),
-    );
-  });
+          const first = relabelled.findIndex(
+            (b) => (((b[51] as number) << 8) | (b[52] as number)) === added,
+          );
+          let caught: unknown;
+          try {
+            checkBoard(ELECTION, relabelled, lower);
+          } catch (e) {
+            caught = e;
+          }
+          if (first === -1) expect(caught).toBeUndefined();
+          else {
+            expect(caught).toBeInstanceOf(BoardError);
+            expect((caught as BoardError).at).toEqual({
+              entry: first,
+              decodeError: "unexpected-record-type",
+            });
+            // Anchored as it is, the relabelled copy still fails verifyBoard
+            // under the lower version, by its decoding, not its bytes.
+            const segments = Array.from({ length: last + 1 }, (_, s) => s);
+            const anchors = [...copyCheckpoints(ELECTION, relabelled, segments).values()].map(
+              anchorOf,
+            );
+            expect(verdictUnder(relabelled, anchors, last, lower)).toBe("decode");
+          }
+        }),
+      );
+    },
+  );
 });

@@ -2495,5 +2495,119 @@
         "late": []
       }
     }
+  ],
+  "boardEntries": [
+    {
+      "id": "v5-statement",
+      "description": "A version-5 entry carrying a close statement",
+      "version": 5,
+      "encoding": "0007058a54623295314236683f76f6a20fda20280ab064c5c1e36004b3b3bb5b84b304000000000000000900006cb2000000b40015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16010000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005328af6066108d0aba6df1dd199ea1a9a9bfa4643f7481647d205a1a8226f8bc15abf41f9c49a111949e1a6ef24a9f9b3645deba56f87f73d941bb9a122280cb8",
+      "error": null
+    },
+    {
+      "id": "v4-statement",
+      "description": "A version-4 entry can't carry a close statement",
+      "version": 4,
+      "encoding": "0007048a54623295314236683f76f6a20fda20280ab064c5c1e36004b3b3bb5b84b304000000000000000900006cb2000000b40015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16010000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005328af6066108d0aba6df1dd199ea1a9a9bfa4643f7481647d205a1a8226f8bc15abf41f9c49a111949e1a6ef24a9f9b3645deba56f87f73d941bb9a122280cb8",
+      "error": "unexpected-record-type"
+    },
+    {
+      "id": "v3-statement",
+      "description": "A version-3 entry can't carry a close statement",
+      "version": 3,
+      "encoding": "0007038a54623295314236683f76f6a20fda20280ab064c5c1e36004b3b3bb5b84b304000000000000000900006cb2000000b40015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16010000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005328af6066108d0aba6df1dd199ea1a9a9bfa4643f7481647d205a1a8226f8bc15abf41f9c49a111949e1a6ef24a9f9b3645deba56f87f73d941bb9a122280cb8",
+      "error": "unexpected-record-type"
+    },
+    {
+      "id": "v1-statement",
+      "description": "A version-1 entry can't carry a close statement",
+      "version": 1,
+      "encoding": "0007018a54623295314236683f76f6a20fda20280ab064c5c1e36004b3b3bb5b84b304000000000000000900006cb2000000b40015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16010000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005328af6066108d0aba6df1dd199ea1a9a9bfa4643f7481647d205a1a8226f8bc15abf41f9c49a111949e1a6ef24a9f9b3645deba56f87f73d941bb9a122280cb8",
+      "error": "unexpected-record-type"
+    },
+    {
+      "id": "v5-statement-v2-header",
+      "description": "A version-5 entry carrying a close-statement header of version 2: the envelope reads only the type, and the record is refused when decoded (profile-mismatch)",
+      "version": 5,
+      "encoding": "0007058a54623295314236683f76f6a20fda20280ab064c5c1e36004b3b3bb5b84b304000000000000000900006cb20000000400150200",
+      "error": null
+    },
+    {
+      "id": "v5-destruction-type",
+      "description": "A version-5 entry carrying a destruction-statement header, as version 4 allows",
+      "version": 5,
+      "encoding": "0007058a54623295314236683f76f6a20fda20280ab064c5c1e36004b3b3bb5b84b304000000000000000900006cb200000004000f0100",
+      "error": null
+    },
+    {
+      "id": "v5-share-receipt-type",
+      "description": "A version-5 entry carrying a share-receipt header, as version 3 allows",
+      "version": 5,
+      "encoding": "0007058a54623295314236683f76f6a20fda20280ab064c5c1e36004b3b3bb5b84b304000000000000000900006cb200000004000c0100",
+      "error": null
+    },
+    {
+      "id": "v5-complaint-type",
+      "description": "A version-5 entry carrying a share-complaint header, as version 3 allows",
+      "version": 5,
+      "encoding": "0007058a54623295314236683f76f6a20fda20280ab064c5c1e36004b3b3bb5b84b304000000000000000900006cb200000004000e0100",
+      "error": null
+    },
+    {
+      "id": "v5-ballot-type",
+      "description": "A version-5 entry carrying a ballot header, as version 1 allows",
+      "version": 5,
+      "encoding": "0007058a54623295314236683f76f6a20fda20280ab064c5c1e36004b3b3bb5b84b304000000000000000900006cb20000000400020100",
+      "error": null
+    },
+    {
+      "id": "v5-event-type",
+      "description": "A version-5 entry carrying a contract-event header, as version 1 allows: the statement's contract path",
+      "version": 5,
+      "encoding": "0007058a54623295314236683f76f6a20fda20280ab064c5c1e36004b3b3bb5b84b304000000000000000900006cb20000000400080200",
+      "error": null
+    },
+    {
+      "id": "v5-posting-type",
+      "description": "A version-5 entry still refuses a share posting (0x000d): postings reach the board only as contract events",
+      "version": 5,
+      "encoding": "0007058a54623295314236683f76f6a20fda20280ab064c5c1e36004b3b3bb5b84b304000000000000000900006cb200000004000d0100",
+      "error": "unexpected-record-type"
+    },
+    {
+      "id": "v5-voter-receipt-type",
+      "description": "A version-5 entry still refuses the voter's receipt (0x0004), which stays with its voter",
+      "version": 5,
+      "encoding": "0007058a54623295314236683f76f6a20fda20280ab064c5c1e36004b3b3bb5b84b304000000000000000900006cb20000000400040100",
+      "error": "unexpected-record-type"
+    },
+    {
+      "id": "v5-definition-type",
+      "description": "A version-5 entry refuses an election definition (0x0001), which reaches the board only as its registration's contract event",
+      "version": 5,
+      "encoding": "0007058a54623295314236683f76f6a20fda20280ab064c5c1e36004b3b3bb5b84b304000000000000000900006cb20000000400010100",
+      "error": "unexpected-record-type"
+    },
+    {
+      "id": "v5-summed-share-type",
+      "description": "A version-5 entry refuses a summed-share message (0x000b), which never leaves the trustees",
+      "version": 5,
+      "encoding": "0007058a54623295314236683f76f6a20fda20280ab064c5c1e36004b3b3bb5b84b304000000000000000900006cb200000004000b0100",
+      "error": "unexpected-record-type"
+    },
+    {
+      "id": "v5-entry-type",
+      "description": "A version-5 entry refuses a board entry (0x0007): entries never nest",
+      "version": 5,
+      "encoding": "0007058a54623295314236683f76f6a20fda20280ab064c5c1e36004b3b3bb5b84b304000000000000000900006cb20000000400070500",
+      "error": "unexpected-record-type"
+    },
+    {
+      "id": "v5-next-type",
+      "description": "A version-5 entry refuses 0x0016, a type it doesn't allow",
+      "version": 5,
+      "encoding": "0007058a54623295314236683f76f6a20fda20280ab064c5c1e36004b3b3bb5b84b304000000000000000900006cb20000000400160100",
+      "error": "unexpected-record-type"
+    }
   ]
 }

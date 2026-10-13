@@ -3,6 +3,9 @@ import fc from "fast-check";
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vite-plus/test";
 import {
+  BOARD_PAYLOAD_TYPES_V4,
+  BOARD_PAYLOAD_TYPES_V5,
+  type BoardEntryVersion,
   ballotWindow,
   boardBallotSegment,
   CLOSE_WINDOW,
@@ -15,7 +18,10 @@ import {
   type CloseStatementFields,
   closeStatementMessage,
   DecodeError,
+  decodeBoardEntry,
   decodeCloseStatement,
+  EncodeError,
+  encodeBoardEntry,
   encodeCloseStatement,
   type FinalizedL1,
   lDelta,
@@ -113,6 +119,12 @@ interface Vectors {
     }[];
     readonly undelivered: readonly string[];
     readonly result: unknown;
+  }[];
+  readonly boardEntries: readonly {
+    readonly id: string;
+    readonly version: BoardEntryVersion;
+    readonly encoding: string;
+    readonly error: string | null;
   }[];
 }
 
@@ -275,6 +287,17 @@ describe("close statement vectors (docs/spec/vectors/close-statement.json)", () 
   test.each(vectors.checks.map((v) => [v.id, v] as const))("close check %s", (_id, v) => {
     const head = v.head === null ? null : BigInt(v.head);
     expect(plain(closeCheck(ballots(v.ballots), head, notIn(v.undelivered)))).toEqual(v.result);
+  });
+
+  test.each(vectors.boardEntries.map((v) => [v.id, v] as const))("board entry %s", (_id, v) => {
+    const b = hex(v.encoding);
+    if (v.error === null) {
+      expect(encodeBoardEntry(decodeBoardEntry(b, v.version), v.version)).toEqual(b);
+    } else {
+      expect(() => decodeBoardEntry(b, v.version)).toThrow(
+        expect.objectContaining({ code: v.error }) as Error,
+      );
+    }
   });
 });
 
@@ -567,5 +590,32 @@ describe("the close check's rules", () => {
   test("with no head the check is unchecked and never fails", () => {
     const r = closeCheck([ballot(0n, 1n, 5n, "ordinary", 50n)], null, all);
     expect(r).toEqual({ status: "unchecked", unchecked: [0n] });
+  });
+});
+
+describe("board entry version 5", () => {
+  const entry = (payload: Uint8Array) => ({
+    election_id: new Uint8Array(32),
+    index: 0n,
+    segment: 0,
+    payload,
+  });
+
+  test("allows exactly version 4's types and the close statement", () => {
+    expect([...BOARD_PAYLOAD_TYPES_V5].sort((a, b) => a - b)).toEqual(
+      [...BOARD_PAYLOAD_TYPES_V4, RECORD_TYPES.closeStatement].sort((a, b) => a - b),
+    );
+    expect(Object.isFrozen(BOARD_PAYLOAD_TYPES_V5)).toBe(true);
+  });
+
+  test("only version 5 encodes a close statement, and the statement in it decodes as version 1", () => {
+    const statement = hex(seat1.encoding);
+    for (const version of [1, 3, 4] as const)
+      expect(() => encodeBoardEntry(entry(statement), version)).toThrow(EncodeError);
+    const b = encodeBoardEntry(entry(statement), 5);
+    expect(b[2]).toBe(5);
+    const carried = decodeBoardEntry(b, 5).payload;
+    expect(carried).toEqual(statement);
+    expect(encodeCloseStatement(decodeCloseStatement(carried, 1))).toEqual(statement);
   });
 });

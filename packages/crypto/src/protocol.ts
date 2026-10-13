@@ -329,10 +329,10 @@ export type ProfileCombinationRule = "profile-combination" | "unsupported-versio
  * those definition versions only; ballot version 4 pairs with definition
  * version 6 only, which this function doesn't take, so it fails under every
  * definition version here; ballot versions 1 to 4 need a board-entry
- * version that carries share receipts and complaints (3 or 4) and the
+ * version that carries share receipts and complaints (3, 4 or 5) and the
  * spoiled-ballot opening version that opens their cores (1 for version 1, 2
  * for versions 2 and 3, 3 for version 4); and tally-opening version 1 needs one that carries
- * destruction statements (4, docs/spec/tally.md, Destruction), so an
+ * destruction statements (4 or 5, docs/spec/tally.md, Destruction), so an
  * election's creator can't leave delivery, challenge or destruction off the
  * board (T-34, T-42). A board-entry version this package doesn't read is
  * `unsupported-version`, never a failure: a later version may add itself to

@@ -86,6 +86,8 @@ const ADMISSION = ["5.1", "5.2", "5.3", "5.4", "5.7"];
 
 // The copy's entries, re-joined after a change.
 const entriesOf = (c: Case) => parseBundle(json(c, c.definition), hex(c.board)).entries;
+const equal = (a: Uint8Array, b: Uint8Array) =>
+  a.length === b.length && a.every((x, i) => x === b[i]);
 const join = (entries: readonly Uint8Array[]) => Uint8Array.from(entries.flatMap((e) => [...e]));
 
 test("the fixtures reject a ballot for every admission code and for decoding", () => {
@@ -165,6 +167,11 @@ describe("admission is decided per entry", () => {
     // M); entry 1 is a copy with another voter's proof, so it is rejected and
     // never makes another a repeat.
     const copies = new Set([2, 3, 5]);
+    // Past the 51-byte envelope, the negated copy's record differs from the
+    // original's (its proof), so only the recomputed M finds it; the other
+    // copy's record is byte-identical.
+    expect(equal((all[3] as Uint8Array).slice(51), (all[2] as Uint8Array).slice(51))).toBe(false);
+    expect(equal((all[5] as Uint8Array).slice(51), (all[2] as Uint8Array).slice(51))).toBe(true);
     fc.assert(
       fc.property(fc.subarray([...all.keys()].slice(1)), (kept) => {
         const r = format4(repeats, join([0, ...kept].map((i) => all[i] as Uint8Array)));

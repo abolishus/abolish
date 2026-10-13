@@ -221,3 +221,14 @@ test("under definition versions 3 and 4 an opening names a cell numbered across 
   // same way, and one naming the version-3 definition is stray there.
   expect(run(byId("v4-cells")).tallies?.map((o) => o.cell)).toEqual([3, 3, undefined]);
 });
+
+test("7.4 runs whatever 2.3 finds for another pin", () => {
+  // Spoiled-ballot opening version 2 leaves 2.3 unsupported (T-36); sorting
+  // and attribution read only the tally-opening version, so 7.4 is judged.
+  const c = byId("v3-opening-2");
+  const r = run(c);
+  const { status, code, at } = r.checks.find((x) => x.id === "2.3") as CheckResult;
+  expect({ status, code, at }).toEqual(c.expected["2.3"]);
+  expect(row(r)).toEqual(c.expected["7.4"]);
+  expect(r.tallies).toEqual(c.tallies);
+});

@@ -80,11 +80,23 @@ const equal = (a: Uint8Array, b: Uint8Array) =>
  * The number of cells in a definition's partition (docs/spec/
  * election-definition.md, Notes, Tally partition): version 1's tiers, or
  * versions 3 and 4's cells of every tier, as the definition states them.
+ * 2.1's rules keep it from 1 to 256, as `sortTallyOpenings` requires: a
+ * non-empty electorate, and under versions 3 and 4 the `cells` rule, which
+ * caps the total and gives every tier at least one cell.
  */
-const partitionSize = (definition: ElectionDefinitionRecord): number =>
-  definition.version === 1
-    ? definition.value.electorate.length
-    : definition.value.electorate.reduce((n, t) => n + t.cells.length, 0);
+function partitionSize(definition: ElectionDefinitionRecord): number {
+  switch (definition.version) {
+    case 1:
+      return definition.value.electorate.length;
+    case 3:
+    case 4:
+      return definition.value.electorate.reduce((n, t) => n + t.cells.length, 0);
+    default: {
+      const unread: never = definition;
+      throw new Error(`unread definition version ${String(unread)}`);
+    }
+  }
+}
 
 /**
  * The row 7.4 and the report's `tallies`. `registered` is the key set the

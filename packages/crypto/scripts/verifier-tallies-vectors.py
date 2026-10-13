@@ -54,6 +54,7 @@ outcome = vc.outcome
 
 TALLY_TYPE = 0x0006
 BALLOT_TYPE = 0x0002
+SPOILED_OPENING_TYPE = 0x0003
 BOARD_ENTRY_TYPE = 0x0007
 MEMBERSHIP_VK_HASH = bytes.fromhex(json.loads((VECTORS / "membership-proof.json").read_text())["verificationKey"]["hash"])
 
@@ -133,10 +134,10 @@ def main(out_dir):
     panel = cv.make_panel("panel-4", 3, 4)
     eid = dv.TYPICAL["election_id"]
 
-    def election_for(label, seats, cheat=None, tally_version=1, base=dv.TYPICAL):
+    def election_for(label, seats, cheat=None, tally_version=1, base=dv.TYPICAL, opening_version=1):
         """A definition of `base`'s version pinning board-entry version 4 (and ballot version 2 under versions 3 and 4, which name a cell), its transcript for its own stub, and the seats' per-election signing secrets."""
         regional = base is not dv.TYPICAL
-        pin = {BOARD_ENTRY_TYPE: 4, TALLY_TYPE: tally_version, **({BALLOT_TYPE: 2} if regional else {})}
+        pin = {BOARD_ENTRY_TYPE: 4, TALLY_TYPE: tally_version, SPOILED_OPENING_TYPE: opening_version, **({BALLOT_TYPE: 2} if regional else {})}
         pins = [(ty, pin.get(ty, v)) for ty, v in base["profile"]["pins"]]
         fields = {"profile": {"protocol_major": 1, "pins": pins}, "membership_vk_hash": MEMBERSHIP_VK_HASH}
         ctx = vc.election_of(vc.definition_for(panel, bytes(32), base, **fields))
@@ -327,6 +328,25 @@ def main(out_dir):
         transcript=t4,
         keys=registered_of(d4_, t4, s4),
     )
+
+    # Spoiled-ballot opening version 2, which opens version-2 cores and which
+    # this verifier doesn't read yet: 2.3 is unsupported, never failed, and
+    # the tally openings are still judged.
+    do2, to2, so2 = election_for("definition-v3-opening-2", [1, 2, 3], base=rc.TYPICAL, opening_version=2)
+    open_o2, _ = opener(do2, so2)
+    c = case(
+        "v3-opening-2",
+        "A version-3 definition pinning spoiled-ballot opening version 2, which 2.3 leaves unsupported: an opening of cell 3 by seat 1 (undecided) and one of cell 4 by seat 2 (stray). 7.4 is unverifiable.",
+        [open_o2(3, 1), open_o2(4, 2)],
+        "unverifiable",
+        defn=do2,
+        transcript=to2,
+        keys=registered_of(do2, to2, so2),
+    )
+    # This case also gives 2.3's row, to show 7.4 runs beside it.
+    c["expected"]["2.3"] = vc.combination(do2)
+    assert c["expected"]["2.3"] == outcome("unverifiable", "unsupported-version", {}), c["expected"]["2.3"]
+    assert [o.get("cell") for o in c["tallies"]] == [3, None]
 
     dq3, tq3, _ = election_for("quorum-v3", [1, 2, 3, 4], {"answers": two_bad}, base=rc.TYPICAL)
     case("quorum-v3", "A version-3 definition whose seats 3 and 4 answer wrongly: no key set is registered, so 7.4 is not reached.", [open3(0, 1)], "unverifiable", defn=dq3, transcript=tq3, ceremony="fail")

@@ -45,6 +45,199 @@ const enUS = {
   graphicPublished: "Published count",
   graphicRecount: "Anyone's recount",
   graphicMatch: "They match.",
+  navHowItWorks: "How it works",
+  howEyebrow: "How it works · {count} sections",
+  howTitle: "How a ballot stays secret, gets recorded and is counted in public",
+  howLede:
+    "Abolish is built so that you don't have to trust it. This page follows a ballot through every stage, says what each step proves and what it doesn't, and ends with the weaknesses we haven't solved. Abolish is still being built: where a step isn't running yet, it says so.",
+  howContents: "On this page",
+  howStep: "Step {step}",
+  howSceneLabel: "{section}, step by step",
+  howTiersMark: "Who can vote",
+  howTiersTitle: "Who is counted, and how sure we are",
+  howTiersIntro:
+    "Abolish can't check everyone the same way, so every result says how its voters were checked, with one result per tier. Tiers are never added together.",
+  howTiers1Title: "Tier 0: a passkey",
+  howTiers1Body:
+    "Anyone can create an account with a passkey, and anyone can create several. A Tier 0 result counts accounts, not people, and says so. Today's polls run at Tier 0.",
+  howTiers2Title: "Tier 1: vouched for (planned)",
+  howTiers2Body:
+    "People who are already verified will be able to vouch for someone, so faking a voter needs accomplices willing to put their own standing behind it. This tier is being built.",
+  howTiers3Title: "Tier 2: a government document (planned)",
+  howTiers3Body:
+    "A voter will prove on their own phone, with a zero-knowledge proof, that they hold a government-signed passport or ID with a readable chip. The proof shows neither the document nor the person, only that the same document hasn't been used to join twice. This tier is being built.",
+  howTiers4Title: "Side by side, never summed",
+  howTiers4Body:
+    "Each tier's result is reported on its own, with its number of ballots and who could vote. One blended figure would mostly report whoever opened the most accounts.",
+  howSecrecyMark: "Ballot secrecy",
+  howSecrecyTitle: "Your choice is sealed on your own device",
+  howSecrecyIntro:
+    "Secrecy doesn't rest on this website behaving. The ballot app seals your choice on the device that shows it to you, before anything is sent.",
+  howSecrecy1Title: "You choose in the ballot app",
+  howSecrecy1Body:
+    "Ballots are cast only in the ballot app, never on this website. It shows the question and options exactly as the poll's published definition fixes them, and your choice stays in your device's memory.",
+  howSecrecy2Title: "Your choice is locked in a commitment",
+  howSecrecy2Body:
+    "The app turns your choice into a commitment: a value that fixes the choice but hides it completely, whatever computing power arrives later. The commitment is what goes on the public board.",
+  howSecrecy3Title: "The key to it is split between trustees",
+  howSecrecy3Body:
+    "The numbers that open the commitment are split into shares, one for each trustee seat, and each share is encrypted to its seat alone, with encryption meant to hold against future quantum computers as well as today's. No single seat can open a ballot. During launch every seat is run by Abolish, so these ballots are private from everyone except us (section 5).",
+  howSecrecy4Title: "With proofs that it is a valid vote",
+  howSecrecy4Body:
+    "The app attaches zero-knowledge proofs that the commitment holds an allowed answer, so a ballot can't carry a hundred votes or a negative one, and that the voter belongs to the poll's electorate, without saying which answer or which member. Your account is never part of the ballot.",
+  howChallengeMark: "Cast as intended",
+  howChallengeTitle: "Checking that the app sealed what you chose",
+  howChallengeIntro:
+    "No one can see inside a sealed ballot, including you. A check lets you open one and see what the app really sealed, at the cost of that ballot.",
+  howChallenge1Title: "The app seals first, then asks",
+  howChallenge1Body:
+    "After sealing your choice, the app asks whether to cast the ballot or check it. It has already committed to the sealed ballot before it knows which you will pick.",
+  howChallenge2Title: "Checking opens the ballot",
+  howChallenge2Body:
+    "If you check, the app reveals the choice and every random number it used, so the sealed ballot can be rebuilt from them and compared. A checked ballot is never counted.",
+  howChallenge3Title: "Then you vote again",
+  howChallenge3Body:
+    "The app seals your choice afresh, with new random numbers, and asks again. You can check as many times as you like before you cast.",
+  howChallenge4Title: "Why a cheating app gets caught",
+  howChallenge4Body:
+    "An app that changed votes can't tell which ballots will be checked, so every check is a chance to catch it. Few voters check, so this protection is statistical. Publishing a checked ballot's opening is your choice, off by default, and happens only after the poll closes.",
+  howRecordedMark: "Recorded as cast",
+  howRecordedTitle: "Finding your ballot on the public board",
+  howRecordedIntro:
+    "Each poll has a public board that only ever grows. Your receipt names the entry that holds your sealed ballot, so you can check that it is there and stays there.",
+  howRecorded1Title: "Every ballot becomes an entry",
+  howRecorded1Body:
+    "Each sealed ballot is added to the poll's board as a numbered entry. Every entry extends a hash chain and a Merkle tree, so changing or removing an earlier one shows.",
+  howRecorded2Title: "You keep a receipt",
+  howRecorded2Body:
+    "When your ballot is added, the board's operator signs a receipt naming its entry and the board that holds it. The app checks that the entry is really in that board before telling you the ballot was received, and keeps the receipt.",
+  howRecorded3Title: "It proves recording, not your choice",
+  howRecorded3Body:
+    "With the receipt and a short inclusion proof, anyone can check that a later board still holds your entry. The receipt says nothing about how you voted, so it can't be sold as proof of a vote.",
+  howRecorded4Title: "Anchored on Ethereum (planned)",
+  howRecorded4Body:
+    "Every hour, the board's root will be anchored on Ethereum. A receipted entry missing from a later anchored board is evidence of tampering that anyone can publish. Hourly anchoring isn't running yet.",
+  howCountedMark: "Counted as recorded",
+  howCountedTitle: "Counting without opening a single ballot",
+  howCountedIntro:
+    "The count is arithmetic on sealed ballots. Trustees open only the totals, and every step publishes something anyone can check.",
+  howCounted1Title: "Commitments add up",
+  howCounted1Body:
+    "Commitments can be added together without being opened. Adding every counted ballot's commitment gives one sealed total for each tier.",
+  howCounted2Title: "Each seat sums its shares",
+  howCounted2Body:
+    "After the poll closes, each trustee seat adds up the shares it received and publishes the sum. Anyone can check each sum against public values the ballots carried, so a seat can't publish a wrong one unnoticed.",
+  howCounted3Title: "{threshold} of {seats} seats open the totals",
+  howCounted3Body:
+    "Once {threshold} of the {seats} seats have published, their sums open each tier's total, and only the totals: no single ballot is opened. During launch all {seats} seats are run by Abolish. Independent trustees take over before the first civic vote, and askers will be able to add trustees of their own.",
+  howCounted4Title: "Anyone can count again",
+  howCounted4Body:
+    "The open-source verifier takes the public board and checks every proof, every sum and the count. If its result matches ours, no one has to take our word for it. Afterwards the seats destroy their keys and shares, though no one can verify that they did.",
+  howSurvivesMark: "If abolish.us is taken down",
+  howSurvivesTitle: "What survives without us",
+  howSurvivesIntro:
+    "A record that disappears with its publisher isn't much of a record. These pieces are meant to let voting, the board and the count outlast our domain, our servers and us. Most of them are still being built.",
+  howSurvives1Title: "Polls registered on chain (planned)",
+  howSurvives1Body:
+    "Each poll's definition hash and its trustees' keys will be registered on an Ethereum layer 2 network, so a poll's rules can't be swapped after it opens.",
+  howSurvives2Title: "Submitting without us (planned)",
+  howSurvives2Body:
+    "If our servers refuse a ballot, the ballot app will be able to post it straight to the contracts, bypassing us entirely.",
+  howSurvives3Title: "Copies of the board (planned)",
+  howSurvives3Body:
+    "The board will be mirrored to IPFS and a permanent archive, its root anchored on Ethereum, and anyone will be able to run a lightweight node that serves it.",
+  howSurvives4Title: "A verifier that needs none of us (planned)",
+  howSurvives4Body:
+    "The verifier will work from the chain and IPFS alone, with our servers and domain offline. Wiping our database loses no result: everything that affects one can be rebuilt from the public copies.",
+  howWeakMark: "What remains open",
+  howWeakTitle: "Where it is weak, stated plainly",
+  howWeakIntro:
+    "No voting system is safe against everything. These are the limits we know of today. Where a limit has an entry in our public threat model, its number is beside it, and this list changes as they do.",
+  howWeakLimit: "What limits it:",
+  howWeakThreats: "Threat model entries:",
+  howWeakPanelTitle: "During launch, we hold every trustee seat",
+  howWeakPanelMeans:
+    "Abolish runs every seat of the launch panel, so we could open any single ballot, and anyone who can compel us could make us.",
+  howWeakPanelLimit:
+    "An opened ballot shows what one anonymous voting identity answered, not who it is. Independent trustees take over before the first civic vote, but polls opened before then stay readable with our shares until we destroy them, which no one can verify.",
+  howWeakSybilTitle: "Tier 0 can be faked at scale",
+  howWeakSybilMeans:
+    "Anyone can create many passkey accounts. A Tier 0 result describes what accounts said, not what people think.",
+  howWeakSybilLimit:
+    "It is always reported on its own and labelled as such, never blended into a total.",
+  howWeakWatchTitle: "Someone can watch you vote",
+  howWeakWatchMeans:
+    "A receipt proves your ballot was recorded, not your choice, so it can't be sold. But nothing stops someone standing over your screen.",
+  howWeakWatchLimit:
+    "You can vote again later and only your last ballot counts, so a vote someone watched needn't be your final one. That is a partial defence, not a cure.",
+  howWeakColludeTitle: "Trustees could collude",
+  howWeakColludeMeans:
+    "Any group of seats that meets a poll's threshold, acting together, could open single ballots, not only totals.",
+  howWeakColludeLimit:
+    "Every sum a seat publishes is public and checked, and each poll's page says how many seats it takes.",
+  howWeakDeviceTitle: "A compromised device",
+  howWeakDeviceMeans: "Malware on a voter's device could change a choice before it is sealed.",
+  howWeakDeviceLimit:
+    "Checks catch a cheating app, but only if people use them. Most voters won't, so the protection is statistical.",
+  howWeakAnchorTitle: "Before the board is anchored",
+  howWeakAnchorMeans:
+    "Until a board's root is anchored on Ethereum, the board is only our word, and an entry could be dropped.",
+  howWeakAnchorLimit:
+    "Keep your receipt: a later board that leaves out a receipted entry is evidence anyone can publish. Hourly anchoring isn't running yet.",
+  howWeakNetworkTitle: "We see where a ballot comes from",
+  howWeakNetworkMeans:
+    "Our servers receive each ballot with the network address it was sent from, which could help link a ballot to a person.",
+  howWeakNetworkLimit:
+    "Not mitigated yet. We don't log it, but you can't check that; a VPN or Tor hides your address from us.",
+  howWeakTurnoutTitle: "Turnout is self-selected",
+  howWeakTurnoutMeans:
+    "Voters choose to take part, so a result describes who answered, not everyone. Results are advisory and bind no one.",
+  howWeakTurnoutLimit: "Every result carries its tier and how many could vote.",
+  howSource:
+    "The protocol, its threat model (with every entry named above) and the source code are published in the open at github.com/abolishus/abolish.",
+  dgTitle: "{section}: step {step} of {total}",
+  dgFake: "To fake one",
+  dgFake0: "another passkey",
+  dgFake1: "people willing to vouch falsely",
+  dgFake2: "a forged government document",
+  dgPlanned: "Planned",
+  dgToday: "Today",
+  dgResult: "Its own result",
+  dgNoTotal: "No total row.",
+  dgDevice: "Your device",
+  dgLeaves: "What leaves it",
+  dgChoice: "Your choice",
+  dgCommitment: "Commitment",
+  dgShares: "A share for each seat",
+  dgProofs: "Validity proofs",
+  dgToBoard: "To the public board",
+  dgToSeats: "Each to its own seat, encrypted",
+  dgSealed: "Sealed ballot",
+  dgCast: "Cast",
+  dgCheck: "Check",
+  dgOpened: "Opened: choice and random numbers",
+  dgRebuilt: "Rebuilt and compared",
+  dgNotCounted: "Never counted",
+  dgSealedAgain: "Sealed again, new random numbers",
+  dgChecked: "Checked",
+  dgEntry: "Entry {index}",
+  dgYours: "Yours",
+  dgReceipt: "Your receipt",
+  dgReceiptEntry: "Entry and board, signed",
+  dgInclusion: "Inclusion proof",
+  dgStillThere: "Still on the board",
+  dgAnchor: "Root anchored on Ethereum",
+  dgSum: "Sum",
+  dgTotal: "Sealed total for each tier",
+  dgOurs: "During launch, all run by Abolish",
+  dgDomain: "abolish.us",
+  dgServers: "Our servers",
+  dgRegistry: "Poll registry on layer 2",
+  dgDirect: "Ballots sent straight to the contracts",
+  dgMirrors: "IPFS, archive and community nodes",
+  dgAnchors: "Anchors on Ethereum",
+  dgVerifier: "The verifier",
+  dgDown: "Offline",
   lookupLabel: "Poll ID",
   lookupHint: "The 64-character ID from a poll link or a receipt.",
   lookupSubmit: "Open poll",

@@ -247,6 +247,7 @@ describe("every page", () => {
     "/moderation",
     "/polls",
     "/account",
+    "/how-it-works",
     "/nowhere",
     `/p/${UNKNOWN_CODE}`,
   ])(
@@ -639,6 +640,35 @@ describe("home", () => {
     } finally {
       down = false;
     }
+  });
+});
+
+describe("how it works", () => {
+  test("renders every chapter and the limits from the server, without asking the API", async () => {
+    seen.length = 0;
+    const response = await get("/how-it-works");
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    const current = [...html.matchAll(/<a\b[^>]*aria-current="page"[^>]*>/g)].map((m) => m[0]);
+    expect(current).toHaveLength(1);
+    expect(current[0]).toContain('href="/how-it-works"');
+    for (const id of [
+      "tiers",
+      "secrecy",
+      "cast-as-intended",
+      "recorded-as-cast",
+      "counted-as-recorded",
+      "takedown",
+      "weak-points",
+    ]) {
+      expect(html).toContain(`id="${id}"`);
+      expect(html).toContain(`href="#${id}"`);
+    }
+    // The launch panel is ours, and the page says so ([[0027-trustee-panels-and-live-results]]).
+    expect(html).toContain("we hold every trustee seat");
+    // Each diagram draws its first step on the server.
+    expect([...html.matchAll(/data-testid="diagram-[a-z]+" data-step="0"/g)]).toHaveLength(6);
+    expect(seen).toHaveLength(0);
   });
 });
 

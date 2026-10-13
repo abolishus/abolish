@@ -50,13 +50,21 @@ describe("pages", () => {
       }),
       runs,
     );
-    expect(["/", "/polls", "/moderation", "/account"].map(pageOf)).toEqual([
+    expect(["/", "/polls", "/moderation", "/account", "/how-it-works"].map(pageOf)).toEqual([
       "/",
       "/polls",
       "/moderation",
       "/account",
+      "/how-it-works",
     ]);
-    for (const path of ["/polls/", "/polls/a/b", "/account/x", "/moderation/", "/x"])
+    for (const path of [
+      "/polls/",
+      "/polls/a/b",
+      "/account/x",
+      "/moderation/",
+      "/how-it-works/",
+      "/x",
+    ])
       expect(pageOf(path)).toBe("other");
   });
 });

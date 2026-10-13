@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from "./routes/__root.tsx";
 import { Route as IndexRouteImport } from "./routes/index.tsx";
 import { Route as AccountRouteImport } from "./routes/account.tsx";
+import { Route as HowItWorksRouteImport } from "./routes/how-it-works.tsx";
 import { Route as ModerationRouteImport } from "./routes/moderation.tsx";
 import { Route as PCodeRouteImport } from "./routes/p.$code.tsx";
 import { Route as PollsIndexRouteImport } from "./routes/polls.index.tsx";
@@ -25,6 +26,11 @@ const IndexRoute = IndexRouteImport.update({
 const AccountRoute = AccountRouteImport.update({
   id: "/account",
   path: "/account",
+  getParentRoute: () => rootRouteImport,
+} as any);
+const HowItWorksRoute = HowItWorksRouteImport.update({
+  id: "/how-it-works",
+  path: "/how-it-works",
   getParentRoute: () => rootRouteImport,
 } as any);
 const ModerationRoute = ModerationRouteImport.update({
@@ -56,6 +62,7 @@ const PollsElectionIdPreviewDotpngRoute = PollsElectionIdPreviewDotpngRouteImpor
 export interface FileRoutesByFullPath {
   "/": typeof IndexRoute;
   "/account": typeof AccountRoute;
+  "/how-it-works": typeof HowItWorksRoute;
   "/moderation": typeof ModerationRoute;
   "/p/$code": typeof PCodeRoute;
   "/polls/$electionId": typeof PollsElectionIdRouteWithChildren;
@@ -65,6 +72,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   "/": typeof IndexRoute;
   "/account": typeof AccountRoute;
+  "/how-it-works": typeof HowItWorksRoute;
   "/moderation": typeof ModerationRoute;
   "/p/$code": typeof PCodeRoute;
   "/polls/$electionId": typeof PollsElectionIdRouteWithChildren;
@@ -75,6 +83,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport;
   "/": typeof IndexRoute;
   "/account": typeof AccountRoute;
+  "/how-it-works": typeof HowItWorksRoute;
   "/moderation": typeof ModerationRoute;
   "/p/$code": typeof PCodeRoute;
   "/polls/$electionId": typeof PollsElectionIdRouteWithChildren;
@@ -86,6 +95,7 @@ export interface FileRouteTypes {
   fullPaths:
     | "/"
     | "/account"
+    | "/how-it-works"
     | "/moderation"
     | "/p/$code"
     | "/polls/$electionId"
@@ -95,6 +105,7 @@ export interface FileRouteTypes {
   to:
     | "/"
     | "/account"
+    | "/how-it-works"
     | "/moderation"
     | "/p/$code"
     | "/polls/$electionId"
@@ -104,6 +115,7 @@ export interface FileRouteTypes {
     | "__root__"
     | "/"
     | "/account"
+    | "/how-it-works"
     | "/moderation"
     | "/p/$code"
     | "/polls/$electionId"
@@ -114,6 +126,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute;
   AccountRoute: typeof AccountRoute;
+  HowItWorksRoute: typeof HowItWorksRoute;
   ModerationRoute: typeof ModerationRoute;
   PCodeRoute: typeof PCodeRoute;
   PollsElectionIdRoute: typeof PollsElectionIdRouteWithChildren;
@@ -134,6 +147,13 @@ declare module "@tanstack/react-router" {
       path: "/account";
       fullPath: "/account";
       preLoaderRoute: typeof AccountRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/how-it-works": {
+      id: "/how-it-works";
+      path: "/how-it-works";
+      fullPath: "/how-it-works";
+      preLoaderRoute: typeof HowItWorksRouteImport;
       parentRoute: typeof rootRouteImport;
     };
     "/moderation": {
@@ -189,6 +209,7 @@ const PollsElectionIdRouteWithChildren = PollsElectionIdRoute._addFileChildren(
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AccountRoute: AccountRoute,
+  HowItWorksRoute: HowItWorksRoute,
   ModerationRoute: ModerationRoute,
   PCodeRoute: PCodeRoute,
   PollsElectionIdRoute: PollsElectionIdRouteWithChildren,

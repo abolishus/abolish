@@ -138,12 +138,16 @@ export const BEACON_FORK_SCHEDULES: readonly BeaconForkSchedule[] = Object.freez
  * `ExecutionPayload`, with `block_hash` at 12, pads to 16 fields in Capella
  * and 32 from Deneb on). Gloas (EIP-7732, with EIP-7688's progressive
  * containers): `body.signed_execution_payload_bid.message.parent_block_hash`,
- * which the state transition asserts is `state.latest_block_hash`, so the
- * latest payload revealed on the block's chain; never the bid's own
- * `block_hash`, a payload committed to that may never be revealed. It is the
- * light-client spec's `EXECUTION_BLOCK_HASH_GINDEX_GLOAS`. Forks before
- * Capella have no such field to prove, and forks after Gloas aren't
- * specified yet.
+ * which the state transition asserts is `state.latest_block_hash`, the latest
+ * payload a child declared full, which fork choice accepts only once the
+ * execution layer has verified it (`on_block`, and `notify_forkchoice_updated`
+ * finalizes exactly this hash); never the bid's own `block_hash`, a payload
+ * committed to that may never be revealed. It is the light-client spec's
+ * `EXECUTION_BLOCK_HASH_GINDEX_GLOAS`. Forks before Capella have no such field
+ * to prove, and forks after Gloas aren't specified yet. Keyed by name only
+ * because every chain pinned here runs one layout per fork: a release adding a
+ * fork's row (mainnet's Gloas) re-derives its index from the specification the
+ * fork activated with there (docs/spec/receipts.md, Fork schedule).
  */
 const PAYLOAD_GINDEX: Partial<Record<BeaconForkName, number>> = {
   capella: 412,

@@ -659,3 +659,13 @@ export {
   vouchScope,
   vouchSlotScope,
 } from "./vouch.ts";
+export {
+  type Block,
+  CHUNK_SIZE,
+  cidText,
+  type ContentDag,
+  contentDag,
+  MAX_LINKS,
+  objectCar,
+  objectCid,
+} from "./content-addressing.ts";

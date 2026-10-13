@@ -27,6 +27,10 @@ describe("runSimulation", { timeout }, () => {
     expect(r.ballots.direct).toBeGreaterThan(0);
     expect(r.ballots.challenged).toBe(0);
     expect(r.ballots.superseded).toBe(0);
+    // Every ballot is boarded, direct ones when the servers return.
+    expect(r.board.entries).toBe(9);
+    expect(r.board.head).toMatch(/^[0-9a-f]{64}$/);
+    expect(r.board.receiptKey).toMatch(/^0[23][0-9a-f]{64}$/);
     expect(r.trustees).toEqual({ online: [1, 3, 4], offline: [2], faulty: [] });
     expect(r.cells.map((c) => c.tier)).toEqual([0, 1, 2]);
     for (const c of r.cells) {
@@ -99,6 +103,7 @@ describe("runSimulation", { timeout }, () => {
     expect(r.ok).toBe(true);
     expect(r.ballots.cast).toBe(18);
     expect(r.ballots.superseded).toBe(9);
+    expect(r.board.entries).toBe(18);
     expect(r.ballots.server + r.ballots.direct).toBe(18);
     expect(progress.filter((s) => s === "cast")).toHaveLength(18);
     expect(r.cells.reduce((a, c) => a + c.ballots, 0)).toBe(9);

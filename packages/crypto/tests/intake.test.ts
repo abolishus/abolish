@@ -33,7 +33,10 @@ import { hex, SPEC_VECTORS } from "./spec-vectors.ts";
 interface Vectors {
   readonly format: string;
   readonly elections: Readonly<
-    Record<string, { readonly version: 1 | 2; readonly definition: string }>
+    Record<
+      string,
+      { readonly version: 1 | 2; readonly definition: string; readonly definitionHash: string }
+    >
   >;
   readonly panel: readonly {
     readonly seat: number;
@@ -126,7 +129,7 @@ describe("intake.json", () => {
       expect(
         toHex(
           shareReceiptStatement({
-            definition_hash: hex(c.statement as string).subarray(0, 32),
+            definition_hash: hex(vectors.elections[c.election]?.definitionHash as string),
             ballot_hash: r.ballotHash,
             seat: c.seat,
             share_hash: r.shareHash,
@@ -226,9 +229,14 @@ const window = { l1RefMin: 10n, closesAt: 1_000_000n + 12n * 100n };
 const closed = l1At(101n);
 
 const view = (
-  b: Partial<ViewBallot> & { readonly id: number; readonly block: bigint },
+  b: Partial<ViewBallot> & {
+    readonly id: number;
+    readonly block: bigint;
+    /** The public part's id, when two casts share one ballot hash (default: `id`). */
+    readonly core?: number;
+  },
 ): ViewBallot => ({
-  ballotHash: Uint8Array.of(b.id, ...new Uint8Array(31)),
+  ballotHash: Uint8Array.of(b.core ?? b.id, ...new Uint8Array(31)),
   tier: b.tier ?? 0,
   nullifier: b.nullifier ?? 7n,
   message: Uint8Array.of(0xaa, b.id, ...new Uint8Array(30)),
@@ -270,6 +278,17 @@ describe("owedReceipts", () => {
     expect(
       owed([view({ id: 1, block: 20n }), { ...view({ id: 1, block: 20n }), receipted: false }]),
     ).toEqual([1]);
+  });
+
+  test("a receipt for a ballot hash covers its public part cast again under another block", () => {
+    // Revoting Client rule 4: the first cast's block was reorganised away, and
+    // the client cast the same core again; the node only receipted the first.
+    expect(
+      owed([
+        view({ id: 1, core: 9, block: 20n, l1RefHash: new Uint8Array(32).fill(7) }),
+        view({ id: 2, core: 9, block: 25n, receipted: false }),
+      ]),
+    ).toEqual([9]);
   });
 
   test("ignores ballots whose L1 reference isn't admitted, so they can't supersede", () => {
@@ -318,6 +337,39 @@ describe("owedReceipts", () => {
           }),
         );
         expect(groups.size).toBe(got.length);
+      }),
+      { numRuns },
+    );
+  });
+
+  test("agrees with a direct reading of the rule", () => {
+    const ballot = fc.record({
+      id: fc.integer({ min: 0, max: 255 }),
+      core: fc.integer({ min: 0, max: 7 }),
+      block: fc.bigInt({ min: 0n, max: 110n }),
+      tier: fc.constantFrom(0, 2),
+      nullifier: fc.bigInt({ min: 1n, max: 3n }),
+      receipted: fc.boolean(),
+    });
+    fc.assert(
+      fc.property(fc.uniqueArray(ballot, { selector: (b) => b.id, maxLength: 30 }), (bs) => {
+        // Few cores, so casts often share a ballot hash under distinct messages.
+        const v = bs.map((b) => view(b));
+        const receipted = new Set(v.filter((b) => b.receipted).map((b) => toHex(b.ballotHash)));
+        // Admitted references: blocks 10 to 100 (the window, closing at block 100).
+        const admitted = v.filter((b) => b.l1RefNumber >= 10n && b.l1RefNumber <= 100n);
+        const want: string[] = [];
+        for (const key of new Set(admitted.map((b) => `${b.tier}:${b.nullifier}`))) {
+          const group = admitted.filter((b) => `${b.tier}:${b.nullifier}` === key);
+          const top = group.reduce((m, b) => (b.l1RefNumber > m ? b.l1RefNumber : m), -1n);
+          const best = new Map(
+            group.filter((b) => b.l1RefNumber === top).map((b) => [toHex(b.message), b]),
+          );
+          if (best.size !== 1) continue;
+          const [only] = [...best.values()] as [ViewBallot];
+          if (receipted.has(toHex(only.ballotHash))) want.push(toHex(only.ballotHash));
+        }
+        expect(owedReceipts(v, closed, window).map(toHex)).toEqual(want.sort());
       }),
       { numRuns },
     );

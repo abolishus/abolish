@@ -252,7 +252,8 @@ export interface ViewBallot {
  * The ballot hashes whose receipts a trustee node owes through the contract
  * path (docs/spec/delivery.md, What a node owes): for each tier and nullifier,
  * the ballot [[revoting]]'s selection picks from the node's view, among those
- * whose L1 reference is admitted, if the node receipted it; nothing on a tie
+ * whose L1 reference is admitted, if the node receipted its ballot hash (under
+ * any L1 reference: a receipt covers the public part); nothing on a tie
  * or when the pick is a ballot it didn't receipt. At most one per tier and
  * nullifier, so with membership-checked intake at most one per member of
  * each tier, however many ballots anyone delivers or an operator withholds
@@ -279,6 +280,9 @@ export function owedReceipts(
     const verdict = checkL1Reference(b, l1, window);
     if (verdict === "pending")
       throw new RangeError("owedReceipts: L1 hasn't finalized a block after close");
+    // Before the L1 filter: a receipt for a ballot whose reference was
+    // reorganised away still covers its public part cast again.
+    if (b.receipted) receipted.add(hex(b.ballotHash));
     if (verdict !== "admitted") continue;
     const m = hex(b.message);
     const h = hashOf.get(m);
@@ -286,7 +290,6 @@ export function owedReceipts(
     if (h !== undefined && hex(h) !== hex(b.ballotHash))
       throw new RangeError("owedReceipts: one message names two ballot hashes");
     hashOf.set(m, Uint8Array.from(b.ballotHash));
-    if (b.receipted) receipted.add(m);
     admitted.push({
       tier: b.tier,
       nullifier: b.nullifier,
@@ -298,7 +301,11 @@ export function owedReceipts(
   const owed: Uint8Array[] = [];
   for (const b of selectBallots(admitted).selected) {
     const m = hex(b.message);
-    if (receipted.has(m)) owed.push(hashOf.get(m) as Uint8Array);
+    const hash = hashOf.get(m) as Uint8Array;
+    // A receipt is for a ballot hash, so it covers the same public part cast
+    // again under another L1 reference (a new M), as the delivery check reads
+    // it (T-25).
+    if (receipted.has(hex(hash))) owed.push(hash);
   }
   return owed.sort((a, b) => (hex(a) < hex(b) ? -1 : hex(a) > hex(b) ? 1 : 0));
 }

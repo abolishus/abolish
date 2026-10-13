@@ -229,6 +229,8 @@ def build(constants):
     case("validity-shape", "A committed vote with four options in a three-option election", shape, 1, shape["cts"][0])
     case("share-hash-unqualified", "The tier 0 ballot under a key set without seat 3, whose share hash isn't zero", ok, 1, ok["cts"][0], registered=(1, 2))
     case("share-hash", "Seat 2's ciphertext delivered to seat 1", ok, 1, ok["cts"][1])
+    case("order-shape-before-share-hash", "A four-option vote and seat 2's ciphertext at seat 1: validity-shape comes first", shape, 1, shape["cts"][1], expect="validity-shape")
+    case("order-unqualified-before-share-hash", "Seat 3 unregistered with a share hash, and seat 2's ciphertext at seat 1: share-hash-unqualified comes first", ok, 1, ok["cts"][1], registered=(1, 2), expect="share-hash-unqualified")
     moved = dict(ok, l1RefNumber=ok["l1RefNumber"] + 1)
     case("membership-ref-changed", "The tier 0 ballot naming the next L1 block: M changes, so its proof fails", moved, 1, ok["cts"][0], expect="membership-proof")
     case("order-share-hash-before-membership", "A failing membership proof and seat 2's ciphertext at seat 1: share-hash comes first", moved, 1, ok["cts"][1], expect="share-hash")

@@ -50,7 +50,7 @@ const enUS = {
   refusedTitle: "Don't vote from this link",
   refused:
     "A check on the election this link opened failed, so this device stopped before showing a ballot. Nothing you chose was sent.",
-  ruleBroken: "The rule it breaks: {rule}",
+  ruleBroken: "The rule it breaks, as the specification names it:",
   definitionUndecodable: "The election's definition can't be read",
   definitionUndecodableDetail:
     "What this link served as the election's definition isn't a valid record, so this device can't tell what the election is.",

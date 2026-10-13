@@ -55,7 +55,8 @@ export function ArrivalCheck({ definitionHash }: { definitionHash: string }) {
 /**
  * The civic record's account of the same checks, as a list: the client runs
  * from an address of its own, and the election is the one registered, with
- * its hash. `origin` is the page's own origin.
+ * its hash. `origin` is the page's own origin. Render it only on the path
+ * where `onSharedGatewayPath` passed (main.tsx): it states that check passed.
  */
 export function ArrivalChecklist({
   definitionHash,
@@ -91,7 +92,8 @@ export function ArrivalChecklist({
  * shown: the frame stays in the everyday register with no poll.
  *
  * `registeredHash` is the definition hash the registry holds for the election
- * (lowercase hex), `origin` the page's own origin.
+ * (lowercase hex), `origin` the page's own origin. Like `ArrivalChecklist`,
+ * render it only where the origin check passed: it states that it did.
  */
 export function ElectionRefused({
   refusal,
@@ -104,8 +106,11 @@ export function ElectionRefused({
 }) {
   const t = useTranslate(catalogs);
   const { title, detail } = failedCheck(refusal);
+  // The rule's name as the spec gives it, for whoever the voter reports this
+  // to; the commitment's failure is already named in words.
   const rule =
-    refusal.problem === "definition-ill-formed" || refusal.problem === "display-text-ill-formed"
+    refusal.problem === "definition-ill-formed" ||
+    (refusal.problem === "display-text-ill-formed" && refusal.rule !== "commitment")
       ? refusal.rule
       : undefined;
   return (
@@ -119,7 +124,12 @@ export function ElectionRefused({
           <CheckItem passed={false} title={t(title)}>
             <p className="m-0 text-sm">{t(detail)}</p>
             {rule === undefined ? null : (
-              <p className="m-0 text-sm text-muted-foreground">{t("ruleBroken", { rule })}</p>
+              <p className="m-0 text-sm text-muted-foreground">
+                {t("ruleBroken")}{" "}
+                <code translate="no" className="font-mono">
+                  {rule}
+                </code>
+              </p>
             )}
             <Evidence
               hash={registeredHash}

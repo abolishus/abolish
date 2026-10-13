@@ -92,7 +92,7 @@ export const DefinitionIllFormed: Story = {
   args: { refusal: { problem: "definition-ill-formed", rule: "timing" } },
   play: async ({ canvasElement }) => {
     const canvas = await refusedFor(canvasElement, "The election's definition breaks the rules");
-    await expect(canvas.getByText("The rule it breaks: timing")).toBeVisible();
+    await expect(canvas.getByText("timing", { selector: "code" })).toBeVisible();
   },
 };
 
@@ -117,7 +117,7 @@ export const TextIllFormed: Story = {
   args: { refusal: { problem: "display-text-ill-formed", rule: "labels" } },
   play: async ({ canvasElement }) => {
     const canvas = await refusedFor(canvasElement, "The wording of the questions breaks the rules");
-    await expect(canvas.getByText("The rule it breaks: labels")).toBeVisible();
+    await expect(canvas.getByText("labels", { selector: "code" })).toBeVisible();
   },
 };
 

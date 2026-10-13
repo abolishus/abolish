@@ -316,6 +316,11 @@ contract BallotCheckTest is TestBase {
             short[i] = honest[i];
         }
         _expect(short, stub, _malformedData(ElectionDefinitionLib.DecodeError.Truncated, 108));
+        bytes memory inNumber = new bytes(70);
+        for (uint256 i; i < 70; i++) {
+            inNumber[i] = honest[i];
+        }
+        _expect(inNumber, stub, _malformedData(ElectionDefinitionLib.DecodeError.Truncated, 68));
     }
 
     // --- the real registry ---------------------------------------------------

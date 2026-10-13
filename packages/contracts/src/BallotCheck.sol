@@ -141,7 +141,7 @@ library BallotCheckLib {
         // The registry doesn't yet refuse every profile combination
         // (contracts.md, Registration): a pin this library doesn't know
         // admits no ballot.
-        if (version == 0 || version > 3) {
+        if (version > 3) {
             _malformed(ElectionDefinitionLib.DecodeError.UnknownVersion, 2);
         }
         a.version = version;
@@ -154,6 +154,7 @@ library BallotCheckLib {
         if (a.nullifier >= MembershipProofLib.R) {
             _malformed(ElectionDefinitionLib.DecodeError.NonCanonical, NULLIFIER_AT);
         }
+        _uint(record, L1_NUMBER_AT, 8);
         _uint(record, L1_HASH_AT, 32);
         // The proof's points are decoded as the proof is checked, last, by
         // MembershipProofLib; here only its length is read.
@@ -310,6 +311,9 @@ library BallotCheckLib {
     /// offset; a root the registry recorded as 0 is refused as the proof,
     /// since anyone can prove membership of it (T-04).
     function _membership(bytes calldata record, Admitted memory a, uint256 root) private view {
+        // The registry records only canonical roots of tiers 0 to 2; the
+        // tier and `r` bounds keep `scope` from reverting with an error of
+        // its own if that ever changed.
         if (root == 0 || root >= MembershipProofLib.R || a.tier > 2) {
             revert BallotRefused(Code.MembershipProof);
         }

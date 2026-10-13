@@ -25,7 +25,7 @@ const base: Scenario = {
   voters: 9,
   election: "plurality",
   options: 3,
-  trustees: { panel: 4, threshold: 2, offline: [2], faulty: [] },
+  trustees: { panel: 4, threshold: 2, offline: [2], faulty: [], departures: [] },
   tiers: { "0": 2, "1": 1, "2": 1 },
   outage: null,
   challenges: 0,
@@ -61,6 +61,7 @@ const scenario = fc.record({
       threshold,
       offline: [] as number[],
       faulty: [] as number[],
+      departures: [],
     })),
   ),
   tiers: fc.record({

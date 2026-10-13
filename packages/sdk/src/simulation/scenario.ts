@@ -57,6 +57,14 @@ export interface Scenario {
     readonly offline: readonly number[];
     /** Seats that take part but send wrong summed shares at the tally. */
     readonly faulty: readonly number[];
+    /**
+     * Seats that take part in the ceremony and take ballots, then go down at
+     * `at`, a share of the voting period in `(0, 1]`, for the rest of the
+     * voting period, the tally and destruction: each takes every ballot cast
+     * before `at` and none from then on. Ascending by seat; empty (or no
+     * field) for none.
+     */
+    readonly departures: readonly { readonly seat: number; readonly at: number }[];
   };
   /** Each tier's relative share of the voters; a tier of weight 0 isn't in the electorate. */
   readonly tiers: Readonly<Record<`${SimulatedTier}`, number>>;
@@ -85,11 +93,11 @@ export interface Scenario {
    */
   readonly publications: number;
   /**
-   * The share of ballots, in `[0, 1]`, whose voter, finding an offline
-   * seat's intake unreachable by every route, chooses to post that seat's share publicly
-   * through the contract path (docs/spec/delivery.md, Client rules 4), which
-   * lowers that seat's long-term privacy for the ballot, and with `k` or
-   * more seats offline makes the ballot readable whole to anyone who later
+   * The share of ballots, in `[0, 1]`, whose voter, finding the intake of a
+   * seat down at its cast (offline or departed) unreachable by every route,
+   * chooses to post that seat's share publicly through the contract path
+   * (docs/spec/delivery.md, Client rules 4), which lowers that seat's
+   * long-term privacy for the ballot, and with `k` or more seats down makes the ballot readable whole to anyone who later
    * breaks the shares' classical encryption (T-15). A voter who declines
    * leaves that ballot undelivered, and it counts nothing, nor does an
    * earlier one in its place: every qualified seat needs a receipt or a
@@ -154,6 +162,24 @@ function seats(v: unknown, path: string, panel: number): number[] {
   return out;
 }
 
+function departing(v: unknown, path: string, panel: number): Scenario["trustees"]["departures"] {
+  if (!Array.isArray(v)) throw new Refusal(path, "expected an array of departures");
+  // Array.from visits holes too, so a sparse array is refused rather than skipped.
+  const out = Array.from(v, (d: unknown, i) => {
+    const o = object(d, `${path}[${i}]`, ["seat", "at"]);
+    const seat = integer(o["seat"], `${path}[${i}].seat`, 1, panel);
+    const at = fraction(o["at"], `${path}[${i}].at`);
+    // A seat down from the start is an offline one.
+    if (at === 0)
+      throw new Refusal(`${path}[${i}].at`, "above 0: a seat down from the start is offline");
+    return { seat, at };
+  });
+  for (let i = 1; i < out.length; i++)
+    if ((out[i - 1]?.seat as number) >= (out[i]?.seat as number))
+      throw new Refusal(path, "seats are distinct and ascending");
+  return out;
+}
+
 function parse(input: unknown): Scenario {
   const o = object(
     input,
@@ -167,7 +193,12 @@ function parse(input: unknown): Scenario {
     throw new Refusal("$.election", 'expected "plurality" or "approval"');
   const options = integer(o["options"], "$.options", 2, PARAMETERS.MAX_OPTIONS);
 
-  const t = object(o["trustees"], "$.trustees", ["panel", "threshold"], ["offline", "faulty"]);
+  const t = object(
+    o["trustees"],
+    "$.trustees",
+    ["panel", "threshold"],
+    ["offline", "faulty", "departures"],
+  );
   const panel = integer(t["panel"], "$.trustees.panel", 2, PARAMETERS.MAX_TRUSTEES);
   const threshold = integer(t["threshold"], "$.trustees.threshold", 2, panel);
   const offline = Object.hasOwn(t, "offline")
@@ -176,6 +207,15 @@ function parse(input: unknown): Scenario {
   const faulty = Object.hasOwn(t, "faulty") ? seats(t["faulty"], "$.trustees.faulty", panel) : [];
   if (faulty.some((s) => offline.includes(s)))
     throw new Refusal("$.trustees.faulty", "a seat is either offline or faulty");
+  const departures = Object.hasOwn(t, "departures")
+    ? departing(t["departures"], "$.trustees.departures", panel)
+    : [];
+  for (const [i, d] of departures.entries())
+    if (offline.includes(d.seat) || faulty.includes(d.seat))
+      throw new Refusal(
+        `$.trustees.departures[${i}].seat`,
+        "a departing seat is neither offline nor faulty",
+      );
 
   const w = object(o["tiers"], "$.tiers", [], ["0", "1", "2"]);
   const tiers = { "0": 0, "1": 0, "2": 0 };
@@ -222,7 +262,7 @@ function parse(input: unknown): Scenario {
     voters,
     election,
     options,
-    trustees: { panel, threshold, offline, faulty },
+    trustees: { panel, threshold, offline, faulty, departures },
     tiers,
     outage,
     challenges,

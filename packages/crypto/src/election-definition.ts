@@ -346,6 +346,8 @@ export function receiptKeysCastCheck(
   provenAt: bigint,
 ): ReceiptKeysCastCheck {
   if (words.length === 0) throw new RangeError("a version-4 definition lists receipt keys");
+  if (typeof opensAt !== "bigint" || opensAt < 0n || opensAt > U64_MASK)
+    throw new RangeError("opensAt must be a u64 bigint");
   for (const [i, word] of words.entries()) {
     const r = receiptKeyRecordFromWord(word, provenAt);
     const judgement = r === undefined ? undefined : receiptKeyJudgement(r, opensAt, provenAt);

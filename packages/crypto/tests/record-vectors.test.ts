@@ -235,10 +235,14 @@ describe("election definition version 4 (docs/spec/election-definition.md, Layou
     );
   });
 
-  test("the cast check refuses no list and words that aren't 32 bytes", () => {
+  test("the cast check throws on no list, words that aren't 32 bytes and opens_at outside u64", () => {
     expect(() => receiptKeysCastCheck([], 0n, 0n)).toThrow(RangeError);
     expect(() => receiptKeysCastCheck([new Uint8Array(31)], 0n, 0n)).toThrow(RangeError);
     expect(() => receiptKeysCastCheck([new Uint8Array(33)], 0n, 0n)).toThrow(RangeError);
+    expect(() => receiptKeysCastCheck([new Uint8Array(32).fill(0xff)], -1n, 0n)).toThrow(
+      RangeError,
+    );
+    expect(() => receiptKeysCastCheck([new Uint8Array(32)], 1n << 64n, 0n)).toThrow(RangeError);
   });
 });
 

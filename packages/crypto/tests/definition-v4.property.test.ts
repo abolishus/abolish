@@ -185,7 +185,13 @@ describe("a listed key's judgement", () => {
     fc.assert(
       fc.property(record, fc.bigInt({ min: 1n, max: (1n << 128n) - 1n }), (r, high) => {
         expect(receiptKeyRecordFromWord(word(r, high), (1n << 64n) - 1n)).toBeUndefined();
-        expect(receiptKeysCastCheck([word(r, high)], 0n, (1n << 64n) - 1n)).toEqual({
+        // An opens_at the record alone would let the client cast under.
+        const opensAt = latest(r) + 1n;
+        fc.pre(opensAt < 1n << 64n);
+        expect(receiptKeysCastCheck([word(r)], opensAt, opensAt).castable).toBe(
+          r.registeredAt !== 0n && r.retiredAt === 0n,
+        );
+        expect(receiptKeysCastCheck([word(r, high)], opensAt, opensAt)).toEqual({
           castable: false,
           code: "receipt-key-unjudged",
           key: 0,

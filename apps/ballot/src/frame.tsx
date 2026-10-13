@@ -1,4 +1,4 @@
-import { cn, Fingerprint, useTranslate } from "@abolishus/ui";
+import { cn, Fingerprint, groupHex, useTranslate } from "@abolishus/ui";
 import { Check, Info, TriangleAlert } from "lucide-react";
 import type { ReactNode } from "react";
 
@@ -25,9 +25,9 @@ export interface FramePoll {
 /** The poll's class, from its definition (version 6's `poll_class`): 1 everyday, 2 organisational vote, 3 civic referendum. */
 export type PollClass = 1 | 2 | 3;
 
-/** The two short groups of four hex digits a hash is read aloud by. */
-export function shortHex(hash: string): string {
-  return `${hash.slice(0, 4)} ${hash.slice(4, 8)}`;
+/** A hash's first two groups of four hex digits, as a label reads it aloud. */
+function shortHex(hash: string): string {
+  return groupHex(hash).slice(0, 2).join(" ");
 }
 
 interface FrameProps {
@@ -76,7 +76,9 @@ export function EverydayFrame({ poll, progress, primary, secondary, children }: 
                 label={t("sealLabel", { hash: shortHex(poll.definitionHash) })}
                 size={36}
               />
-              <p className="m-0 min-w-0 flex-1 truncate text-sm">
+              {/* The whole name, never cut short: a look-alike poll could
+                  hide what tells it apart past an ellipsis (T-53). */}
+              <p className="m-0 min-w-0 flex-1 text-sm break-words">
                 {t("askedBy", { name: poll.name })}
               </p>
               <p className="m-0 shrink-0 text-sm text-muted-foreground">
@@ -121,10 +123,13 @@ export function CivicFrame({ poll, progress, stepName, primary, secondary, child
                 size={36}
               />
               <div className="min-w-0 flex-1">
-                <p className="m-0 truncate font-heading text-base leading-tight font-semibold">
+                <p className="m-0 font-heading text-base leading-tight font-semibold break-words">
                   {poll.name}
                 </p>
-                <p className="m-0 font-mono text-xs tracking-wide whitespace-nowrap text-muted-foreground">
+                <p
+                  translate="no"
+                  className="m-0 font-mono text-xs tracking-wide whitespace-nowrap text-muted-foreground"
+                >
                   {t("election", { hash: shortHex(poll.definitionHash) })}
                 </p>
               </div>
@@ -137,17 +142,13 @@ export function CivicFrame({ poll, progress, stepName, primary, secondary, child
         {progress === undefined ? null : (
           <div className="border-t border-border">
             <div className="mx-auto flex max-w-xl items-center gap-4 px-4 py-2">
-              <p className="m-0 shrink-0 text-sm">
-                <span className="tabular-nums">
-                  {t("stepOf", { current: progress.current, total: progress.total })}
-                </span>
-                {stepName === undefined ? null : (
-                  <>
-                    <span aria-hidden="true"> · </span>
-                    <span className="sr-only">: </span>
-                    <span className="font-semibold">{stepName}</span>
-                  </>
-                )}
+              <p className="m-0 shrink-0 text-sm font-semibold tabular-nums">
+                {stepName === undefined
+                  ? t("stepOf", { current: progress.current, total: progress.total })
+                  : t("stepNamed", {
+                      step: t("stepOf", { current: progress.current, total: progress.total }),
+                      name: stepName,
+                    })}
               </p>
               <Steps progress={progress} done="bg-foreground" height="h-1" gap="gap-1" />
             </div>

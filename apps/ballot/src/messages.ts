@@ -11,6 +11,7 @@ const enUS = {
   closes: "Closes {when}",
   questionOf: "Question {current} of {total}",
   stepOf: "Step {current} of {total}",
+  stepNamed: "{step}: {name}",
   // What this client is, before any poll is open.
   title: "Abolish ballot",
   lede: "To vote, open the ballot link for your election.",
@@ -24,7 +25,7 @@ const enUS = {
   sharedOriginAddress: "The address you opened",
   nothingSentTitle: "Nothing was sent",
   nothingSent:
-    "No ballot was shown and nothing left this device. You haven't lost your chance to vote.",
+    "No ballot was shown and nothing you chose was sent. You haven't lost your chance to vote.",
   otherAddressTitle: "Open the ballot from another address",
   otherAddress: "Open the ballot from abolishus.eth or another address Abolish lists instead.",
 } as const;

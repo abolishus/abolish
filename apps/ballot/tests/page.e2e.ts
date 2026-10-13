@@ -213,11 +213,17 @@ describe("the served ballot client", () => {
     const url = gateway.resolvedUrls?.local[0];
     if (url === undefined) throw new Error("the gateway server has no local URL");
     expect(new URL(url).pathname).toBe(GATEWAY_PATH);
-    await page.goto(url);
+    // A ballot link may carry the poll in its query or fragment: the refusal
+    // shows the refused address without either.
+    await page.goto(`${url}?poll=query-secret#fragment-secret`);
     await expect(page.getByRole("heading", { level: 1 }).textContent()).resolves.toBe(
       "This address isn't safe for voting",
     );
     await expect(page.getByText(/open the ballot link/).count()).resolves.toBe(0);
+    await expect(page.getByText(GATEWAY_PATH).count()).resolves.toBe(1);
+    const text = await page.locator("body").innerText();
+    expect(text).not.toContain("query-secret");
+    expect(text).not.toContain("fragment-secret");
     expect(violations).toEqual([]);
     expect(consoleErrors).toEqual([]);
   });

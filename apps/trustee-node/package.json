@@ -2,7 +2,7 @@
   "name": "@abolishus/trustee-node",
   "version": "0.0.0",
   "private": true,
-  "description": "The node each trustee runs: its ceremony duties so far (docs/STATUS.md P2-13). Source-only.",
+  "description": "The node each trustee runs: its ceremony duties and the transport to the coordinator so far (docs/STATUS.md P2-13). Source-only.",
   "license": "AGPL-3.0-only",
   "type": "module",
   "exports": {
@@ -11,10 +11,12 @@
   "scripts": {
     "build": "vp exec tsc -p tsconfig.json",
     "check": "vp check",
+    "start": "vp node src/main.ts",
     "test": "vp test run"
   },
   "dependencies": {
-    "@abolishus/crypto": "workspace:*"
+    "@abolishus/crypto": "workspace:*",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@types/node": "catalog:",

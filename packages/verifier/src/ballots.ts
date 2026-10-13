@@ -203,13 +203,17 @@ export function ballotChecks(
 }
 
 /** One ballot payload's strict decoding and admission checks, with its core. */
-type Judge = (payload: Uint8Array) => {
+export type Judge = (payload: Uint8Array) => {
   readonly core: AdmittedCore["core"];
   /** Versions 2 and 3 share `BallotCheckV2`. */
   readonly checked: BallotCheck | BallotCheckV2;
 };
 
-const UNSUPPORTED: BallotOutcome = { status: "unverifiable", code: "unsupported-version", at: {} };
+export const UNSUPPORTED: BallotOutcome = {
+  status: "unverifiable",
+  code: "unsupported-version",
+  at: {},
+};
 
 /**
  * How this definition's ballots are judged, or the outcome every row takes
@@ -221,7 +225,7 @@ const UNSUPPORTED: BallotOutcome = { status: "unverifiable", code: "unsupported-
  * proof per question, judged against the definition's questions, never
  * against limits the ballot states (T-28).
  */
-function judgeFor(
+export function judgeFor(
   definition: VerifiedDefinition,
   registered: readonly RegisteredKeys[] | undefined,
 ): BallotOutcome | Judge {

@@ -1,0 +1,152 @@
+// Ballot admission for one ballot at a time, as a board operator runs it
+// before boarding (docs/spec/board.md, Envelope: the operator MUST append
+// only payloads that decode strictly under the election's profile). It is
+// the verifier's own admission (5.1 to 5.4), under the same definition
+// checks (2.1, 2.3, 1.3), the same transcript check (2.5's panel, 3.2) and
+// the same per-ballot judge `ballotChecks` runs, so a ballot the operator
+// boards is one the verifier admits by those rows, and no server code
+// reimplements them (AGENTS.md, The verifier's trust base; T-17, T-52).
+//
+// What it can't decide from the definition, the panel and the transcript
+// alone stays with the caller or the verifier: the L1 reference (5.8), the
+// close rule (5.5), repeats (5.7) and the L2 side of 3.1.
+
+import {
+  DecodeError,
+  type DecodeErrorCode,
+  pinnedVersion,
+  profileCombinationRule,
+  RECORD_TYPES,
+  type Panel,
+} from "@abolishus/crypto";
+import { type AdmissionCode, judgeFor } from "./ballots.ts";
+import { type CeremonyCode, ceremonyChecks } from "./ceremony.ts";
+import { decodeDefinition, isReadable, readDefinition } from "./definition.ts";
+
+/** Why no ballot of an election can be admitted: the first check that stops them all. */
+export type ElectionAdmissionCode =
+  /** The definition doesn't decode strictly (2.1). */
+  | "definition-decode"
+  /** It breaks a well-formedness rule (2.1). */
+  | "definition-rule"
+  /** It pins a version this verifier doesn't read, or a profile 2.3 refuses. */
+  | "unsupported-version"
+  | "profile-combination"
+  /** The definition doesn't name this panel (2.5). */
+  | "panel-unpinned"
+  /** No entry given is the transcript the definition names (3.2 unverifiable). */
+  | "ceremony-transcript-missing"
+  /** The transcript check didn't pass (3.2): its code. */
+  | Exclude<CeremonyCode, "panel-unpinned" | "ceremony-transcript-missing">
+  | "ceremony-decode"
+  /** 3.2 passed, but its ballots can't be judged: another membership key (1.3) or a zero root. */
+  | "not-reached";
+
+/** One ballot's verdict: admitted by 5.1 to 5.4, or the code it was rejected under. */
+export type BallotAdmission =
+  | {
+      readonly ok: true;
+      readonly tier: number;
+      readonly nullifier: bigint;
+      /** `M`, recomputed from the record, so a re-randomised proof doesn't hide a repeat (T-38). */
+      readonly message: Uint8Array;
+      readonly l1RefNumber: bigint;
+    }
+  | {
+      readonly ok: false;
+      readonly code: AdmissionCode | "decode";
+      readonly decodeError?: DecodeErrorCode;
+    };
+
+/** An election whose ballots can be judged, with the window its definition sets. */
+export interface ElectionAdmission {
+  readonly ok: true;
+  readonly electionId: Uint8Array;
+  readonly opensAt: bigint;
+  readonly closesAt: bigint;
+  /** Strictly decodes one ballot payload and runs 5.1 to 5.4 on it; never throws on its bytes. */
+  readonly admit: (payload: Uint8Array) => BallotAdmission;
+}
+
+/**
+ * How an election's ballots are admitted, from its definition's bytes, the
+ * panel the release pins for it and the board entries that may carry its
+ * transcript (each an encoded entry; only an entry of this election, under
+ * the pinned board-entry version, whose payload hashes to the definition's
+ * `ceremony_transcript_hash` counts). Every input is what the verifier
+ * would read, never a ballot's or a submitter's choice (T-37, T-04).
+ */
+export function electionAdmission(
+  definitionBytes: Uint8Array,
+  panel: Panel,
+  entries: readonly Uint8Array[],
+): ElectionAdmission | { readonly ok: false; readonly code: ElectionAdmissionCode } {
+  const refuse = (code: ElectionAdmissionCode) => ({ ok: false, code }) as const;
+  let record;
+  try {
+    record = decodeDefinition(definitionBytes);
+  } catch (e) {
+    if (!(e instanceof DecodeError)) throw e;
+    return refuse(
+      // As 2.1 reads it: version 0 is no release's, so it fails decoding.
+      e.code === "unknown-version" && e.offset === 2 && definitionBytes[2] !== 0
+        ? "unsupported-version"
+        : "definition-decode",
+    );
+  }
+  const { stubHash, rule } = readDefinition(record);
+  if (rule !== undefined) return refuse("definition-rule");
+  const d = record.value;
+  const boardEntryVersion = pinnedVersion(d, RECORD_TYPES.boardEntry);
+  if (!isReadable(boardEntryVersion)) return refuse("unsupported-version");
+  const combination = profileCombinationRule(d);
+  if (combination !== undefined) return refuse(combination);
+  const { rows, registered } = ceremonyChecks(d, stubHash, panel, entries, boardEntryVersion);
+  if (registered === undefined) {
+    // The first failing row decides: 2.5 (another panel), 3.1 (a transcript
+    // that doesn't decode or fails a transcript-level check), then 3.2
+    // (quorum or participation). Otherwise 3.1 says why nothing was checked.
+    for (const id of ["2.5", "3.1", "3.2"]) {
+      const o = rows.get(id);
+      if (o?.status !== "fail" || o.code === undefined) continue;
+      return refuse(o.code === "decode" ? "ceremony-decode" : (o.code as ElectionAdmissionCode));
+    }
+    const why = rows.get("3.1")?.code;
+    return refuse(
+      why === "ceremony-transcript-missing" || why === "unsupported-version" ? why : "not-reached",
+    );
+  }
+  const judge = judgeFor(record, registered);
+  if (typeof judge !== "function")
+    return refuse(judge.code === "unsupported-version" ? "unsupported-version" : "not-reached");
+  return {
+    ok: true,
+    electionId: new Uint8Array(d.election_id),
+    opensAt: d.opens_at,
+    closesAt: d.closes_at,
+    admit: (payload) => {
+      // The envelope's record type first: a payload of another type is no
+      // ballot, whatever its bytes after the type would decode to.
+      if (
+        payload.length < 2 ||
+        (((payload[0] as number) << 8) | (payload[1] as number)) !== RECORD_TYPES.ballot
+      )
+        return { ok: false, code: "decode", decodeError: "unexpected-record-type" };
+      let checked;
+      try {
+        checked = judge(payload).checked;
+      } catch (e) {
+        if (!(e instanceof DecodeError)) throw e;
+        return { ok: false, code: "decode", decodeError: e.code };
+      }
+      if (!checked.ok) return { ok: false, code: checked.code };
+      return {
+        ok: true,
+        tier: checked.tier,
+        nullifier: checked.nullifier,
+        message: checked.message,
+        l1RefNumber: checked.l1RefNumber,
+      };
+    },
+  };
+}

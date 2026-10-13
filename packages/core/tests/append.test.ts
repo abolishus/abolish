@@ -122,6 +122,21 @@ describe("appendEntry", () => {
     await assertVerifiable(id, 1);
   });
 
+  test("raises a lower segment to the previous entry's only when asked", async () => {
+    const id = await newElection(app);
+    await appendEntry(app, id, 5, ballot(1));
+    const raised = await appendEntry(app, id, 4, ballot(2), { raiseToPrevious: true });
+    expect(raised.index).toBe(1n);
+    const [, entry] = await readBoard(app, id);
+    expect(entry).toEqual(raised.entry);
+    // A later segment is kept as given.
+    await appendEntry(app, id, 7, ballot(3), { raiseToPrevious: true });
+    await assertVerifiable(id, 3);
+    const segments =
+      await app`SELECT segment FROM board_entries WHERE election_id = ${id} ORDER BY idx`;
+    expect(segments.map((r) => Number(r["segment"]))).toEqual([5, 5, 7]);
+  });
+
   test("keeps openings last in a segment, in increasing byte order (T-42, T-47)", async () => {
     const id = await newElection(app);
     await appendEntry(app, id, 0, ballot());

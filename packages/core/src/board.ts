@@ -147,6 +147,8 @@ async function storedBoardVersion(client: Sql, id: Uint8Array): Promise<BoardEnt
 }
 
 export interface AppendedEntry {
+  /** The entry as encoded under the board's version: what a receipt is checked against. */
+  readonly entry: Uint8Array;
   readonly index: bigint;
   readonly entryHash: Uint8Array;
   readonly link: Uint8Array;
@@ -180,6 +182,15 @@ export async function appendEntry(
   electionId: Uint8Array,
   segment: number,
   payload: Uint8Array,
+  options: {
+    /**
+     * Label the entry with the previous entry's segment when that is later
+     * than `segment`, rather than refuse it: for a caller that labels by its
+     * clock before slow work, so two appends racing across a period boundary
+     * both land (the later-labelled one first), never `segment-decreased`.
+     */
+    readonly raiseToPrevious?: boolean;
+  } = {},
 ): Promise<AppendedEntry> {
   if (!Number.isInteger(segment) || segment < 0 || segment > MAX_SEGMENT)
     throw new AppendError("invalid-entry");
@@ -208,7 +219,10 @@ export async function appendEntry(
         .limit(1);
       if (prev !== undefined) {
         const prevSegment = Number(prev.segment);
-        if (segment < prevSegment) throw new AppendError("segment-decreased");
+        if (segment < prevSegment) {
+          if (options.raiseToPrevious !== true) throw new AppendError("segment-decreased");
+          segment = prevSegment;
+        }
         if (
           segment === prevSegment &&
           recordTypeOf(prev.payload) === SPOILED_BALLOT_OPENING &&
@@ -250,7 +264,7 @@ export async function appendEntry(
           hash: t.hash,
         })),
       );
-      return { index, entryHash, link };
+      return { entry: encoded, index, entryHash, link };
     },
     // The previous entry must be read after the lock is taken. Under a
     // snapshot isolation level the snapshot would predate the lock, and

@@ -1,3 +1,9 @@
+export {
+  BallotAdmissions,
+  type BallotAdmissionOptions,
+  SubmitError,
+  type SubmitErrorCode,
+} from "./admission.ts";
 export { auditBoard, BoardAuditError, type BoardAuditCode, listBoards } from "./audit.ts";
 export {
   appendEntry,

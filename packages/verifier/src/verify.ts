@@ -27,19 +27,7 @@ import {
   type BoardErrorCode,
   DecodeError,
   type DecodeErrorCode,
-  electionDefinitionHash,
-  electionDefinitionRule,
-  electionDefinitionV3Hash,
-  electionDefinitionV3Rule,
-  electionDefinitionV4Hash,
-  electionDefinitionV4Rule,
-  electionDefinitionV5Hash,
-  electionDefinitionV5Rule,
   type ElectionDefinitionV5Rule,
-  electionStubHash,
-  electionStubV3Hash,
-  electionStubV4Hash,
-  electionStubV5Hash,
   membershipVkHash,
   pinnedVersion,
   profileCombinationRule,
@@ -51,7 +39,12 @@ import { type AdmissionCode, ballotChecks, type BallotsReport } from "./ballots.
 import type { Bundle, InputSource, InputSources } from "./bundle.ts";
 import { type CeremonyCode, ceremonyChecks, type CeremonyReport } from "./ceremony.ts";
 import { CHECKS, type CheckKind } from "./checks.ts";
-import { decodeDefinition, type VerifiedDefinition } from "./definition.ts";
+import {
+  decodeDefinition,
+  isReadable,
+  readDefinition,
+  type VerifiedDefinition,
+} from "./definition.ts";
 import { openingChecks, type OpeningCode, type OpeningReport } from "./openings.ts";
 import { type ReceiptKeyCode, receiptKeyRow } from "./receipt-keys.ts";
 import { tallyChecks, type TallyCode, type TallyReport } from "./tallies.ts";
@@ -256,54 +249,6 @@ function provedUnderPinnedKey(d: VerifiedDefinition["value"]): boolean {
 }
 
 /**
- * What the checks take from a decoded definition, by its version: its hash,
- * its stub hash (which the key ceremony binds) and the first well-formedness
- * rule it breaks. Exhaustive: a version crypto adds doesn't compile until it
- * is read here (docs/spec/election-definition.md, Layout; T-34, T-37).
- */
-function readDefinition(record: VerifiedDefinition): {
-  readonly hash: Uint8Array;
-  readonly stubHash: Uint8Array;
-  readonly rule: ElectionDefinitionV5Rule | undefined;
-  /** Under version 5, `option-count`'s and `selections`' first failing question. */
-  readonly question?: number;
-} {
-  switch (record.version) {
-    case 1:
-      return {
-        hash: electionDefinitionHash(record.value),
-        stubHash: electionStubHash(record.value),
-        rule: electionDefinitionRule(record.value),
-      };
-    case 3:
-      return {
-        hash: electionDefinitionV3Hash(record.value),
-        stubHash: electionStubV3Hash(record.value),
-        rule: electionDefinitionV3Rule(record.value),
-      };
-    case 4:
-      return {
-        hash: electionDefinitionV4Hash(record.value),
-        stubHash: electionStubV4Hash(record.value),
-        rule: electionDefinitionV4Rule(record.value),
-      };
-    case 5: {
-      const failure = electionDefinitionV5Rule(record.value);
-      return {
-        hash: electionDefinitionV5Hash(record.value),
-        stubHash: electionStubV5Hash(record.value),
-        rule: failure?.rule,
-        ...(failure !== undefined && "question" in failure && { question: failure.question }),
-      };
-    }
-    default: {
-      const unread: never = record;
-      throw new Error(`unread definition version ${String(unread)}`);
-    }
-  }
-}
-
-/**
  * A format-3 or format-4 bundle's definition (docs/spec/verifier.md, Definition): its
  * decoding and well-formedness, which are part of 2.1, the board-entry
  * version its profile pins, and the board checks' inputs taken from it. Any
@@ -408,10 +353,6 @@ function fromDefinition(bundle: Bundle):
 
 const equal = (a: Uint8Array, b: Uint8Array) =>
   a.length === b.length && a.every((x, i) => x === b[i]);
-
-const READABLE: ReadonlySet<number> = new Set<BoardEntryVersion>([1, 3, 4]);
-const isReadable = (v: number | undefined): v is BoardEntryVersion =>
-  v !== undefined && READABLE.has(v);
 
 /** The board checks' anchors and `now`: given as they are, or read from L1 state. */
 function anchoring(

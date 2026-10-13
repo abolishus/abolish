@@ -22,6 +22,7 @@ const scenario: Scenario = {
   outage: null,
   challenges: 0,
   revotes: 0,
+  publications: 0,
   seed: 5,
 };
 

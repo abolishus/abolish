@@ -22,6 +22,8 @@ export interface PlannedVoter extends PlannedBallot {
   readonly tier: SimulatedTier;
   /** Whether the voter challenges one attempt before casting the ballot that counts. */
   readonly challenged: boolean;
+  /** Whether a challenging voter asks after close for that attempt's opening to be published. */
+  readonly published: boolean;
   /**
    * A ballot the voter cast earlier, at a time no later than `at`, which the
    * re-vote rule must not count (docs/spec/revoting.md); `null` if the
@@ -59,11 +61,12 @@ export function selectionRange(scenario: Scenario): { min: number; max: number }
   return scenario.election === "plurality" ? { min: 0, max: 1 } : { min: 0, max: scenario.options };
 }
 
-// Seed the challenge and re-vote draws apart from the rest of the plan and
+// Seed the challenge, re-vote and publication draws apart from the rest of the plan and
 // from each other, so a scenario's voters, votes and times don't change with
-// either share.
+// any of the shares.
 const CHALLENGE_STREAM = 0x9e37_79b9;
 const REVOTE_STREAM = 0x85eb_ca6b;
+const PUBLISH_STREAM = 0xc2b2_ae35;
 
 function drawVotes(scenario: Scenario, next: () => number): (0 | 1)[] {
   if (scenario.election === "plurality") {
@@ -82,6 +85,7 @@ export function planElection(scenario: Scenario): Plan {
   const next = generator(scenario.seed);
   const nextChallenge = generator(scenario.seed ^ CHALLENGE_STREAM);
   const nextRevote = generator(scenario.seed ^ REVOTE_STREAM);
+  const nextPublish = generator(scenario.seed ^ PUBLISH_STREAM);
   const tiers = SIMULATED_TIERS.filter((t) => scenario.tiers[`${t}`] > 0);
   const total = tiers.reduce<number>((a, t) => a + scenario.tiers[`${t}`], 0);
   const expected = new Map(
@@ -106,6 +110,8 @@ export function planElection(scenario: Scenario): Plan {
       counts[j] = (counts[j] as number) + v;
     });
     const challenged = nextChallenge() < scenario.challenges;
+    // Drawn for every voter, so who publishes changes with neither share.
+    const published = nextPublish() < scenario.publications && challenged;
     // Every voter draws the same number of values, so whether one voter
     // re-votes changes no other voter's earlier ballot.
     const revotes = nextRevote() < scenario.revotes;
@@ -114,7 +120,16 @@ export function planElection(scenario: Scenario): Plan {
     const earlier = revotes
       ? { votes: earlierVotes, at: earlierAt, path: pathAt(scenario, earlierAt) }
       : null;
-    voters.push({ index, tier, votes, at, path: pathAt(scenario, at), challenged, earlier });
+    voters.push({
+      index,
+      tier,
+      votes,
+      at,
+      path: pathAt(scenario, at),
+      challenged,
+      published,
+      earlier,
+    });
   }
   // Cast in time order, as voters would.
   voters.sort((a, b) => a.at - b.at || a.index - b.index);

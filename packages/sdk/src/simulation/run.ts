@@ -11,7 +11,9 @@
 // boarded records: each ballot's admission check, the re-vote rule's
 // selection of each voter's counted ballot, the summed shares of those, each
 // cell's combination from the k lowest passing seats, its signed opening on
-// the board and the verifier's tally check over the board's openings, then
+// the board and the verifier's tally check over the board's openings, the
+// challenged attempts' openings their voters ask to publish, which the
+// operator boards after the counted extent (./publication.ts), then
 // each online seat's destruction statement and the verifier's destruction
 // report, and the board check over the whole board. Nothing
 // here reimplements a check the verifier makes (AGENTS.md, Architecture): it
@@ -41,6 +43,8 @@ import {
   encodeBallot,
   encodeDestructionStatement,
   encodeOpening,
+  decodeOpening,
+  openingCoreHash,
   encodeReceipt,
   encodeTallyOpening,
   encryptShares,
@@ -70,9 +74,16 @@ import {
 } from "@abolishus/crypto";
 import { afterAnchored, postClose, SimulatedBoard, segmentAt } from "./board.ts";
 import { checkChallenge } from "./challenge.ts";
+import { admitOpening } from "./publication.ts";
 import { SIMULATED_BOARD_ENTRY_VERSION, simulateElection } from "./election.ts";
 import { SimulatedL1 } from "./l1.ts";
-import { type Plan, type PlannedBallot, planElection, selectionRange } from "./plan.ts";
+import {
+  type Plan,
+  type PlannedBallot,
+  type PlannedVoter,
+  planElection,
+  selectionRange,
+} from "./plan.ts";
 import type { Scenario, SimulatedTier } from "./scenario.ts";
 
 /**
@@ -87,7 +98,7 @@ export const SIMULATION_STUBS = Object.freeze([
   "board: the operator boards each server ballot as it arrives and signs a receipt the voter's client checks at cast, under one receipt key fresh per run that no definition lists or registry holds; the anchoring clock (hourly from the Unix epoch, with a half-hour deadline) is a placeholder, the post-close windows other than the tally and destruction windows are taken as zero, so the counted extent ends one period after close and the seal is the destruction window's end, and nothing is anchored, so trustees act on segments the run computes rather than on checkpoints they saw on L1 (P1-13b, P4-1, P1-18)",
   "delivery: ciphertexts reach trustees in memory, with no contract path; a direct ballot is boarded by the operator when the servers return, with no receipt, never as a contract event (P1-12c, P4-2)",
   "trustees: offline seats go down after the ceremony, for the whole voting period, tally and destruction; faulty seats lie only in their summed shares; summed shares reach the combiner in memory, never as summed-share messages, and the lowest seat combined signs each cell's opening",
-  "challenges: the checker records each tracking code and checks the opening in memory, with the election the run built rather than one fetched from chain and IPFS; no opening is published to the board after close (P1-21 part 2)",
+  "challenges: the checker records each tracking code and checks the opening in memory, with the election the run built rather than one fetched from chain and IPFS; a voter who publishes asks once, in the first period after the counted extent, and the operator's boarding rules are applied here rather than by the verifier's 6.2, which isn't run (P1-21 part 2)",
   "re-voting: L1 is simulated, a block every 12 seconds with random hashes, all finalized; every reference is admitted and every voter's last ballot selected, so no ballot is replayed, ties, or names a block before opening, after close or reorganised away (P1-21 part 2)",
   "destruction: every online seat signs its statement at the moment the tally rule sets, and the operator boards each one; nothing destroys the run's key material, which lives until the report is returned",
   "not yet simulated: anchoring and wipe-and-rebuild (P1-21 part 2)",
@@ -134,6 +145,8 @@ export interface SimulationReport {
     readonly superseded: number;
     /** Attempts challenged before a fresh one was cast, each opening checked by the voter's checker. */
     readonly challenged: number;
+    /** Challenged attempts whose openings their voters asked to publish, each boarded after the counted extent. */
+    readonly published: number;
   };
   /** The board the operator wrote, which passed the verifier's entry checks (4.1); nothing anchors it. */
   readonly board: {
@@ -142,6 +155,8 @@ export interface SimulationReport {
     readonly counted: number;
     /** Tally openings, one per opened cell. */
     readonly openings: number;
+    /** Spoiled-ballot openings, one per published challenge. */
+    readonly spoiled: number;
     /** The chain head after its last entry, in hex. */
     readonly head: string;
     /** The key that signed every receipt, which the voters' clients pinned, in hex. */
@@ -343,6 +358,13 @@ export function runSimulation(
   const named = new Map<number, bigint>();
   let server = 0;
   let challenged = 0;
+  // The openings voters will ask to publish after close, each with the
+  // tracking code their checker recorded before the choice.
+  const publications: {
+    readonly voter: PlannedVoter;
+    readonly recorded: Uint8Array;
+    readonly payload: Uint8Array;
+  }[] = [];
   casts.forEach(({ voter, ballot, last }, done) => {
     const ctx: ValidityContext = {
       ...rules,
@@ -356,16 +378,13 @@ export function runSimulation(
     if (last && voter.challenged) {
       const attempt = encryptShares({ definitionHash }, shareVote(rules, ballot.votes), keys);
       const recorded = trackingCode(ballots, voter.tier, attempt);
-      const verdict = checkChallenge(
-        ballots,
-        recorded,
-        voter,
-        encodeOpening(openChallenge(ballots, voter.tier, attempt).opening),
-      );
+      const handed = encodeOpening(openChallenge(ballots, voter.tier, attempt).opening);
+      const verdict = checkChallenge(ballots, recorded, voter, handed);
       if (!verdict.ok)
         throw new Error(`simulation: an honest challenge failed its check (${verdict.code})`);
       opening = verdict.opening;
       challenged++;
+      if (voter.published) publications.push({ voter, recorded, payload: handed });
     }
     // The cast attempt is a fresh sharing: crypto refuses to prove an opened one.
     const sharing = shareVote(rules, ballot.votes);
@@ -600,6 +619,32 @@ export function runSimulation(
     return judgeCell({ tier, ballots: cell.vss.length, expected }, want, opened, verified);
   });
 
+  // The openings voters asked to publish (docs/spec/challenge.md, Client
+  // rule 4 and Publication): each asks once, after s_S has ended, and the
+  // operator, holding the counted extent, applies the boarding rules to
+  // each, then appends them sorted when the period ends, after the cells'
+  // tally openings of that period. An honest voter's opening refused, or
+  // admitted as another core or vote than its checker recorded, is a bug.
+  const publishedIn = after.counted + 1;
+  const desk = {
+    election: ballots,
+    counted: boarded.map((b) => ({ definitionHash, vss: b.vss })),
+    countedUntil: after.counted,
+    openingsUntil: after.openingsUntil,
+  };
+  const held = new Set<string>();
+  for (const { voter, recorded, payload } of publications) {
+    const admitted = admitOpening(desk, held, publishedIn, payload);
+    if (!admitted.ok)
+      throw new Error(`simulation: the operator refused an honest opening (${admitted.code})`);
+    if (!same32(admitted.coreHash, recorded) || !same(admitted.votes.map(Number), voter.votes))
+      throw new Error("simulation: an opening admitted as another core or vote than recorded");
+  }
+  operator.boardOpenings(
+    publishedIn,
+    publications.map((p) => p.payload),
+  );
+
   // Destruction (docs/spec/tally.md, When): with every cell's first passing
   // opening seen anchored, a node destroys once that checkpoint is due;
   // otherwise at t_D. Each online seat then signs its statement, the signing
@@ -653,6 +698,20 @@ export function runSimulation(
     throw new Error("simulation: the board's chain doesn't end at the operator's head");
   if (sealed.entries.some((e) => e.segment > seal))
     throw new Error("simulation: an entry after the seal");
+  // The sealed board carries exactly the published openings, by the codes
+  // their checkers recorded, and its entry checks held them in order.
+  const spoiled = onBoard(RECORD_TYPES.spoiledBallotOpening).map((e) =>
+    hex(openingCoreHash(decodeOpening(e.payload, 1))),
+  );
+  if (
+    spoiled.length !== publications.length ||
+    [...spoiled].sort().join() !==
+      publications
+        .map((p) => hex(p.recorded))
+        .sort()
+        .join()
+  )
+    throw new Error("simulation: the board's openings aren't the published ones");
 
   const allOpened = reports.every((c) => c.counts !== undefined);
   return {
@@ -669,11 +728,13 @@ export function runSimulation(
       direct: casts.length - server,
       superseded: casts.length - selection.selected.length,
       challenged,
+      published: publications.length,
     },
     board: {
       entries: sealed.entries.length,
       counted: checked.entries.length,
       openings: tallyEntries.length,
+      spoiled: spoiled.length,
       head: hex(operator.head),
       receiptKey: hex(operator.receiptKey),
     },

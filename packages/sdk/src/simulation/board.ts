@@ -3,7 +3,8 @@
 // keeps the hash chain and the board tree as it grows, and signs a receipt
 // for every ballot submitted through our API, right after appending it. It
 // also fixes the run's post-close timing: the counted extent, the tally
-// window, the destruction moment and the seal (docs/spec/tally.md).
+// window, the openings' window, the destruction moment and the seal
+// (docs/spec/tally.md, docs/spec/challenge.md).
 // Every encoding, hash, tree and signature is @abolishus/crypto's; this file
 // only keeps the operator's state. The voter's client checks each receipt
 // with crypto's `checkReceiptAtCast` and the verifier checks the board with
@@ -54,6 +55,11 @@ export interface PostClose {
   readonly counted: number;
   /** `t_S`: when the checkpoint for `s_S` is due, after which trustees combine. */
   readonly tallyFrom: bigint;
+  /**
+   * The last segment an opening may be boarded in: the anchoring period
+   * containing `t_S + OPENING_WINDOW` (docs/spec/challenge.md, Publication).
+   */
+  readonly openingsUntil: number;
   /** `s_T`: the anchoring period containing `t_S + TALLY_WINDOW`. */
   readonly windowSegment: number;
   /** `t_D`: when a node destroys if the tally hasn't completed. */
@@ -81,6 +87,7 @@ export function postClose(closesAt: bigint): PostClose {
   return {
     counted,
     tallyFrom,
+    openingsUntil: segmentAt(tallyFrom + BigInt(PARAMETERS.OPENING_WINDOW)),
     windowSegment,
     destroyBy,
     seal: segmentAt(destroyBy + BigInt(PARAMETERS.DESTRUCTION_WINDOW)),
@@ -94,6 +101,13 @@ export function postClose(closesAt: bigint): PostClose {
  */
 export function afterAnchored(segment: number): number {
   return segmentAt(endOf(segment) + SIMULATED_ANCHOR_DEADLINE);
+}
+
+// The first differing byte decides; a prefix comes first.
+function compareBytes(a: Uint8Array, b: Uint8Array): number {
+  for (let i = 0; i < Math.min(a.length, b.length); i++)
+    if (a[i] !== b[i]) return (a[i] as number) - (b[i] as number);
+  return a.length - b.length;
 }
 
 const id = (s: SubtreeId) => `${s.level}:${s.index}`;
@@ -170,6 +184,24 @@ export class SimulatedBoard {
   /** A submission through our API: appended, then answered with a signed receipt. */
   submit(segment: number, payload: Uint8Array): Receipt {
     return signReceipt(this.#receiptSecret, this.#append(segment, payload));
+  }
+
+  /**
+   * The spoiled-ballot openings the operator held in `segment`, appended
+   * when it ends, after every other entry of the segment and in strictly
+   * increasing byte order, so an opening's position says nothing about when
+   * in the period it was sent (docs/spec/board.md, Spoiled-ballot openings;
+   * T-42, T-47). They get no receipt: whether openings do is left open by
+   * docs/spec/receipts.md (Signing). Returns their board indices, in
+   * the order given.
+   */
+  boardOpenings(segment: number, payloads: readonly Uint8Array[]): number[] {
+    const sorted = [...payloads].sort(compareBytes);
+    for (let i = 1; i < sorted.length; i++)
+      if (compareBytes(sorted[i - 1] as Uint8Array, sorted[i] as Uint8Array) === 0)
+        throw new Error("simulation: one opening held twice in a period");
+    const at = new Map(sorted.map((p) => [p, this.board(segment, p)]));
+    return payloads.map((p) => at.get(p) as number);
   }
 
   /**

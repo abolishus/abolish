@@ -30,6 +30,7 @@ const base: Scenario = {
   outage: null,
   challenges: 0,
   revotes: 0,
+  publications: 0,
   seed: 3,
 };
 
@@ -69,6 +70,7 @@ const scenario = fc.record({
   outage: fc.constant(null),
   challenges: fc.constant(0),
   revotes: fc.constant(0),
+  publications: fc.constant(0),
   seed: fc.integer({ min: 0, max: 0xffff_ffff }),
 });
 

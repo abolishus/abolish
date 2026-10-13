@@ -1,6 +1,6 @@
 # Membership and nullifier
 
-Every ballot proves that its voter is a member of one tier's group, at the root the election definition fixes for that tier, and carries a nullifier that is the same for every ballot the voter casts in that poll and tier, and unrelated anywhere else. This page fixes the statement, its public inputs, how Abolish derives the scope and the message, and what a verifier checks. The proof system is Semaphore v4's own circuit with its Groth16 keys ([[0009-membership-proof]]). Threats: T-04, T-05, T-07, T-12, T-13, T-38.
+Every ballot proves that its voter is a member of one tier's group, at the root the election definition fixes for that tier, and carries a nullifier that is the same for every ballot the voter casts in that poll and tier, and unrelated anywhere else. This page fixes the statement, its public inputs, how Abolish derives the scope and the message, and what a verifier checks. The proof system is Semaphore v4's own circuit with its Groth16 keys ([[0009-membership-proof]]). Under definition version 7 a poll's electorate may instead be rolling, so people who register after it opens can answer it: each tier's ballots then prove membership at a step of a public root clock under a scope with no root in it (Rolling tier tree; [[0028-rolling-electorates]]). Threats: T-04, T-05, T-07, T-12, T-13, T-38, T-01, T-16.
 
 ## Source
 
@@ -65,6 +65,38 @@ So a cell tree is a tier tree over a list of leaves, and everything Tier tree sa
 
 **Why first occurrence.** Commitments are public and can repeat across groups (anyone can register a commitment someone else holds). Without the rule one secret could have a leaf in two cells of one tier, with two scopes and so two nullifiers, and vote twice in the tier (G-2); and a repeat could inflate a region past the floor. The rule resolves a repeat rather than failing it, so no registrant can stop a tier from being split, and no two cells of a tier hold the same commitment: one secret registered in a tier is in exactly one cell and has one nullifier for the tier, and [[revoting]], which ranks per tier and nullifier, is unchanged. The cost: registrars who break the no-repeat rule (T-06) can add a victim's commitment to a lower-numbered group in another region, zeroing the victim's own leaf and moving them to a cell they didn't register in. The ballot client MUST check, before casting, that its own leaf is the counted occurrence, in the region it registered in, and alarm otherwise (P2-8; [[0019-regional-cells]], Consequences).
 
+## Rolling tier tree
+
+Under definition version 7 with `electorate_mode` 2 (rolling; [[election-definition]], Layout (version 7)), a tier lists its groups and has no regions or cells, and its ballots prove membership of its **rolling tier tree** at a step of the root clock (below), never of a root the definition states ([[0028-rolling-electorates]], option B):
+
+- The tier tree above (depth exactly 32, `Poseidon2`, empty leaves 0, at most 2³² leaves), whose leaves are the tier's listed groups' additions in **chain order**: walking the group registry's event sequence in log order (L2 block number, then log index; [[contracts]], Group registry, Verification), each `MembersAdded` of a listed group appends its record's commitments, in record order, from the group's creation on. Groups the tier doesn't list are skipped, whatever their tier.
+- Each listed group is replayed strictly, as [[contracts]] (Group registry, Verification) replays it, and a record that fails the replay fails every definition naming the group (`group-history`). The registry refuses forbidden commitments, so every leaf an addition appends is a commitment.
+- A `MembersRemoved` of a listed group sets to 0 the leaf its named index's addition appended: member `i` of group `g` is the leaf appended for `g`'s `i`-th commitment, never another occurrence of the same value.
+- **No first-occurrence rule.** A commitment added twice to a group, added to two listed groups, or removed and added again keeps a leaf per occurrence. Every occurrence is the same secret and so has the same nullifier in the poll (Scope), so a repeat gives no second ballot. The rule exists to keep one secret in one cell of a tier (Cell tree), and a rolling tier is one cell.
+- The **member count** of a rolling tier tree is the number of distinct values among its nonzero leaves, so a repeated commitment never inflates a reported anonymity set (T-16). A fixed tier's `group_size` counts additions; this one counts identities.
+
+Everything Tier tree proves holds for a rolling tier tree, which is a tier tree over a list of leaves: one registration is at most one identity, and its root is never 0.
+
+**Why chain order.** The cell tree concatenates groups by `group_id`, so an addition to a lower group shifts every later group's leaves, and each step's root would be a rebuild of the whole tier. In chain order a step's tree is the previous step's with its own additions appended and its removals zeroed, 32 hashes each, so computing every step of a poll costs 32 hashes per event of its groups, the same as replaying them once ([[0028-rolling-electorates]], The rolling tier tree; T-36, T-53). The listed groups share one registry, so their events have one total order.
+
+### Root clock and steps
+
+Boundary `n` of the **root clock**, for `n` a `u32`, is
+
+```
+τ_n = n · ROOT_PERIOD + ROOT_OFFSET
+```
+
+in seconds of UNIX time, compared with L2 `block.timestamp` and L1 block timestamps as numbers ([[parameters]]; the same clock for every poll and every deployment, never chosen per poll, T-34).
+
+- **Step `n`'s tree** for a rolling tier is its rolling tier tree over the events in L2 blocks whose timestamp is at most `τ_n`; its **step root** `ρ_n` is that tree's root and its **step count** that tree's member count. L2 timestamps never decrease along the chain, and the event accumulator binds each event's L2 block number and timestamp ([[contracts]], Event accumulator; [[0025-contract-event-evidence]]), so every verifier derives the same step from the archived events alone, with no headers.
+- **The opening state.** A rolling tier's `root` and `group_size` in the definition are the root and member count of its rolling tier tree over the events in L2 blocks up to and including `root_l2_block`, a block number. They report the electorate the poll opened with ([[verifier]] 2.4, 8.1); no ballot proves against the opening root as such.
+- **Accepted steps.** A rolling poll accepts step `n` for tier `t` if `τ_n` is later than `root_l2_block`'s timestamp and at most `closes_at`, step `n`'s tree has at most 2³² leaves, and at least one of them is nonzero (its root isn't `Z_32`, the root no one can prove against). A step after the tier's tree has outgrown 2³² leaves is never accepted, and neither is any later one.
+- **Settled and final.** Step `n` is **settled** once L2 history containing a block whose timestamp is later than `τ_n` is posted to L1, since no later block can carry an earlier timestamp; it is **final** once that L1 data is finalized ([[0004-l2-choice]], Finality). An honest client proves only against a settled step, checks it again once it is final, and makes a new ballot if the final root differs. So an insider who sequences hidden additions before a boundary can only invalidate ballots whose clients didn't wait for L1, and a root that only the insider's own commitments could prove against needs an L1 reorganisation (T-08, T-13, T-25).
+- **The window.** A ballot whose L1 reference ([[revoting]], Message) has timestamp `t` may name step `n` only if `t − ROOT_WINDOW < τ_n ≤ t`; the ballot version that carries the step, and the admission codes for a step outside the accepted ones or the window, are [[P2-17]] part 2's. The window depends only on the ballot, the definition and finalized L1, like every other admission check ([[revoting]], Admission).
+- **The client's step.** A conforming client names the newest settled step whose `τ_n` is at or before its L1 reference's timestamp and whose tree holds its own live leaf: for anyone who joined before that step, the newest settled step, whoever they are. So ballots made at about the same time name the same step or two, and the step says no more about a voter than the L1 reference already does, in particular not when they joined (T-13; [[0028-rolling-electorates]], Anonymity). A client that names an older step is limited to `ROOT_WINDOW` of its reference, which bounds what its choice can reveal.
+- **Removals take effect** after `ROOT_WINDOW`: a member removed during the poll can't make a new ballot naming a later step. A ballot it made earlier still counts, as in a fixed poll.
+
 ## Scope
 
 Each tier group `g` of the election definition, with tier `t_g` and root `root_g`, has its own scope (under definition version 3, each cell `c`, with its tier `t_c` and its cell-tree root `root_c` in place of `t_g` and `root_g`):
@@ -80,6 +112,18 @@ S_g = H(DS("abolish/v1/nullifier-scope", definition_hash ‖ u8(t_g) ‖ encode(
 - **Per cell.** Under definition version 3 each cell has its own scope, and the cells of one tier never hold the same commitment (Cell tree), so a member has one nullifier per tier. The definition's cells have distinct roots ([[election-definition]], `cells`), and the scope binds the tier, so no proof made for one cell verifies for another.
 - **Per tier group.** A person whose secret is in two tier groups has two unrelated nullifiers in one poll, even when the two groups have the same root. Their ballots in different tiers can't be linked through the nullifier (T-13), and each tier counts at most one of their ballots (G-2).
 - **Never from the ballot.** A verifier computes `ŝ_g` itself from the definition, and never takes a scope from a ballot, a relay or a server ([[verifier]] 5.2).
+
+**Rolling scope.** Under a rolling electorate (Rolling tier tree), every ballot of tier `t` uses one scope, with no root in it:
+
+```
+S_t = H(DS("abolish/v1/rolling-nullifier-scope", definition_hash ‖ u8(t)))
+ŝ_t = F(S_t)
+```
+
+- The input after the tag is exactly 33 bytes. The tag is its own, so a rolling scope never equals a fixed one, even by construction, and no reader can mistake which formula an election uses; `definition_hash` binds the electorate mode as well as the poll, so the two never apply to one election.
+- **One nullifier per secret, per tier, per poll.** Every admitted ballot of tier `t` verifies with public inputs `[ρ_n, ν, m̂, ŝ_t]`, `ρ_n` the root the verifier computed for its step and `ŝ_t` the same for every ballot of the tier. By the proof's soundness and Tier tree's argument, its prover knows a secret `s` whose commitment is a leaf of `ρ_n`, and `ν = Poseidon2(ŝ_t, s)`. So one secret has the same `ν` at every step, in every listed group, at every leaf, and after a removal and a re-addition; two secrets with one `ν` would need a Poseidon collision. [[revoting]] selects at most one ballot per tier and `ν`, so a tier's counted ballots are at most the distinct secrets live at some accepted step: the tier's own registration bound, over the poll's span ([[0028-rolling-electorates]], Nullifier scope; T-01, T-02, T-03).
+- **The tier is still bound,** so two tiers with equal trees have different scopes, as above, and a ballot can't move between them ([[verifier]] 2.8).
+- **Never from the ballot,** as above: the verifier computes `ŝ_t` from the definition (5.2).
 
 ## Message
 
@@ -190,7 +234,7 @@ Then for every witness of the circuit an honest proof's `A` and `B` are uniform 
 
 ## Checks
 
-A verifier fails the election definition if any tier's root differs from the tier tree it recomputes from the group's additions, is 0, or the group has more than 2³² additions ([[verifier]] 2.4); under definition version 3, the same for each cell's root and its cell tree. It also fails a definition that lists a tier whose group has no counted addition (one whose commitment isn't forbidden, Commitments and removals) still unremoved at the root's block, which is exactly when the tier tree's root is `Z_32`: which no one can prove against, so it would be a cell that can't hold a ballot (P1-10b, [[verifier]] 2.8). Then, for each ballot that claims tier group `g` ([[verifier]] 5.1–5.3), or under definition version 3 cell `c` (the `cell` of ballot version 2, [[ballot-validity]]), with its tier and root in place of the group's, it:
+Under a rolling electorate, 2.4 and the checks below change as Rolling checks (below) says. Otherwise, a verifier fails the election definition if any tier's root differs from the tier tree it recomputes from the group's additions, is 0, or the group has more than 2³² additions ([[verifier]] 2.4); under definition version 3, the same for each cell's root and its cell tree. It also fails a definition that lists a tier whose group has no counted addition (one whose commitment isn't forbidden, Commitments and removals) still unremoved at the root's block, which is exactly when the tier tree's root is `Z_32`: which no one can prove against, so it would be a cell that can't hold a ballot (P1-10b, [[verifier]] 2.8). Then, for each ballot that claims tier group `g` ([[verifier]] 5.1–5.3), or under definition version 3 cell `c` (the `cell` of ballot version 2, [[ballot-validity]]), with its tier and root in place of the group's, it:
 
 1. Recomputes `ŝ_g` from the definition (Scope).
 2. Takes `ρ = root_g` from the definition, never from the ballot; `ρ` is never 0 (Statement).
@@ -199,6 +243,14 @@ A verifier fails the election definition if any tier's root differs from the tie
 5. Verifies the Groth16 proof under the pinned depth-32 verification key, with public signals `[ρ, ν, m̂, ŝ_g]` (Verification). Any failure rejects the ballot.
 
 Because the scope binds the tier, a proof made for one tier never verifies as another, even if the two tiers have the same root: no relay or operator can move a ballot between tally cells ([[verifier]] 2.8).
+
+**Rolling checks.** Under a rolling electorate a verifier replays each tier's listed groups through the last accepted step (Rolling tier tree), and fails the definition if a tier's `root` or `group_size` differs from the root or member count of its rolling tier tree at `root_l2_block` ([[verifier]] 2.4). A rolling tier with no live member at opening states `Z_32` and a count of 0; it holds no ballot until a step has a member. Then, for each ballot of tier `t`, it:
+
+1. Recomputes `ŝ_t` from the definition (Scope, Rolling scope).
+2. Takes `ρ = ρ_n`, the step root it computed itself for the step `n` the ballot names, once that step is accepted and inside the ballot's window (Root clock and steps); never a root from the ballot, a relay or a submitter.
+3. Decodes `ν`, recomputes `m̂` and verifies the proof as steps 3 to 5 above do, with public signals `[ρ_n, ν, m̂, ŝ_t]`.
+
+The verifier computes a step's root only for steps some ballot names, from the same replay, so its work stays linear in the groups' events ([[0028-rolling-electorates]], requirement 6).
 
 ## Security notes
 
@@ -215,4 +267,5 @@ Because the scope binds the tier, a proof made for one tier never verifies as an
 - The tier encoding: the election definition's tier field (P1-10b) and the group registry's tier attribution (P1-18, P3-2) MUST use exactly the values this page binds into the scope (0, 1, 2), and the verifier takes `t_g` from the registry binding it checks in [[verifier]] 2.4, never from the definition's label alone.
 - Groups and their additions and removals: P3-2, with the commitment and removal rules above (P1-18 emits them).
 - On-chain membership checks (direct submit, P1-18): a contract MUST verify the ballot's Groth16 proof under the pinned depth-32 key against the tier root registered with the election's definition, with `ŝ_g` recomputed on chain from the definition hash, tier and root (SHA-256 and Keccak are EVM precompiles or opcodes), and revert otherwise, so non-members can't post at all. It MUST decode the proof as Proof encoding does, rejecting the identity in `A`, `B` and `C` (which EIP-197's precompile and stock verifiers accept), so it and the verifier accept exactly the same proofs ([[verifier]], Principles; T-52). It never verifies against a group contract's own current root, a LeanIMT root or a depth from the caller, so it needs no on-chain tree, and [[verifier]] 2.4 still checks the registered root against the board.
+- On-chain checks of rolling ballots (direct submit, P1-18, [[P2-17]] part 5): no root of a rolling poll is registered anywhere, so the submitter supplies the root it proved against beside the ballot; the contract recomputes `ŝ_t` from the definition hash and tier, verifies the proof with that root under the strict decoding above, and logs the root. The verifier rejects a ballot whose supplied root isn't its own step root, and the board still carries it as a rejected entry ([[0028-rolling-electorates]], Direct submission). So direct submission works with nothing but the chain (T-25), and its spam control in a rolling poll is gas only (T-52).
 - The prover in the ballot client and native app: P2-8, P5-4. The client MUST build its 32-level path from the whole tier's additions (from the board, or by fetching every leaf) and check the rebuilt root against the definition; asking a server for its own path would reveal its leaf index (T-10, T-13).

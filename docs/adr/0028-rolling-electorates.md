@@ -91,6 +91,7 @@ Its tree is [[membership]]'s tier tree (depth exactly 32, `Poseidon2`, empty lea
 ### Accepted roots: the root clock
 
 - **The clock.** Boundary `n` of the root clock is the time `τ_n = epoch + n · ROOT_PERIOD`, with `epoch` the anchoring clock's ([[board]], Timing). `ROOT_PERIOD` is a protocol constant of the definition version, in [[parameters]], never chosen per poll (T-34).
+  - Amended by P2-17 part 1 (agent, owner may veto): the clock is UNIX time, `τ_n = n · ROOT_PERIOD + ROOT_OFFSET` with `ROOT_OFFSET` 300 seconds, not the anchoring clock's `epoch`. A boundary then follows from protocol constants alone, as [[registration]]'s periods do, so a verifier needs no pinned anchor deployment to judge a step, and each root boundary falls half a period after a registration boundary, so a batch formed there lands before the next step instead of just after one ([[parameters]], `ROOT_OFFSET`).
   - Proposed: 600 seconds. That is ADR 0024's registration period (at most 10 minutes), and it divides the hourly anchoring period.
   - The registration service times each batch to land shortly before a boundary, so a new member waits one batch, not a batch and a step.
 - **Step `n`'s root** for a rolling tier is the rolling tier tree over the listed groups' events in L2 blocks whose timestamp is at most `τ_n`. L2 timestamps never decrease along the chain and the accumulator binds each event's block and timestamp ([[contracts]], Event accumulator), so every verifier derives the same step from archived events alone, with no headers.

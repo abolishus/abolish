@@ -1,0 +1,435 @@
+{
+  "format": "abolish-rolling-tier-tree-vectors/1",
+  "title": "Rolling tier trees, the root clock, accepted steps, the window and rolling scopes",
+  "spec": "docs/spec/membership.md",
+  "generator": "Printed by packages/crypto/scripts/rolling-electorate-vectors.py, written from docs/spec/election-definition.md (Layout (version 7), Rolling electorates, Well-formedness), docs/spec/membership.md (Rolling tier tree, Root clock and steps, Scope) and docs/spec/parameters.md with only the Python standard library, independently of packages/crypto, reusing definition-v6-vectors.py's version-6 encoder, values and rules, tier-tree-vectors.py's self-checked Poseidon2 and tier tree, and membership-vectors.py's self-checked Keccak-256. Its encoder is checked against version 6's: version 7's bytes are version 6's followed by the new fields. Its own implementation of the rules confirms every valid vector's illFormed label (or its absence); decode errors are labelled by hand.",
+  "rootPeriod": "600",
+  "rootOffset": "300",
+  "rootWindow": "7200",
+  "trees": [
+    {
+      "id": "chain-order",
+      "note": "two listed groups interleaved in log order, an unlisted group skipped, and additions at, one second before and one second after boundaries; the opening block's timestamp is a boundary, which is never accepted",
+      "groups": ["1", "2"],
+      "events": [
+        {
+          "block": "100",
+          "timestamp": "1779839100",
+          "group": "1",
+          "add": ["1000000000001", "1000000000002"]
+        },
+        {
+          "block": "101",
+          "timestamp": "1779839402",
+          "group": "7",
+          "add": ["1000000000900"]
+        },
+        {
+          "block": "101",
+          "timestamp": "1779839402",
+          "group": "2",
+          "add": ["1000000000003"]
+        },
+        {
+          "block": "150",
+          "timestamp": "1779840299",
+          "group": "1",
+          "add": ["1000000000004"]
+        },
+        {
+          "block": "151",
+          "timestamp": "1779840300",
+          "group": "2",
+          "add": ["1000000000005", "1000000000006"]
+        },
+        {
+          "block": "152",
+          "timestamp": "1779840301",
+          "group": "1",
+          "add": ["1000000000007"]
+        },
+        {
+          "block": "450",
+          "timestamp": "1779840899",
+          "group": "9",
+          "add": ["1000000000901"]
+        },
+        {
+          "block": "451",
+          "timestamp": "1779840900",
+          "group": "1",
+          "add": ["1000000000008"]
+        },
+        {
+          "block": "452",
+          "timestamp": "1779840901",
+          "group": "2",
+          "add": ["1000000000009"]
+        }
+      ],
+      "rootL2Block": "100",
+      "rootL2Timestamp": "1779839100",
+      "closesAt": "1779840900",
+      "opening": {
+        "leaves": ["1000000000001", "1000000000002"],
+        "root": "5918373636752332317695594167073505670888852965846183485255648423297687386748",
+        "memberCount": "2"
+      },
+      "steps": [
+        {
+          "step": "2966398",
+          "tau": "1779839100",
+          "leaves": ["1000000000001", "1000000000002"],
+          "root": "5918373636752332317695594167073505670888852965846183485255648423297687386748",
+          "memberCount": "2",
+          "accepted": false
+        },
+        {
+          "step": "2966399",
+          "tau": "1779839700",
+          "leaves": ["1000000000001", "1000000000002", "1000000000003"],
+          "root": "15138283731212466804542435271669983741996501805202262252667951195603543174154",
+          "memberCount": "3",
+          "accepted": true
+        },
+        {
+          "step": "2966400",
+          "tau": "1779840300",
+          "leaves": [
+            "1000000000001",
+            "1000000000002",
+            "1000000000003",
+            "1000000000004",
+            "1000000000005",
+            "1000000000006"
+          ],
+          "root": "19143266109041592798750414462513132374134353069598710882786671814768224707728",
+          "memberCount": "6",
+          "accepted": true
+        },
+        {
+          "step": "2966401",
+          "tau": "1779840900",
+          "leaves": [
+            "1000000000001",
+            "1000000000002",
+            "1000000000003",
+            "1000000000004",
+            "1000000000005",
+            "1000000000006",
+            "1000000000007",
+            "1000000000008"
+          ],
+          "root": "17480168538926960386203221777147693124765383006484076560950432052874980528850",
+          "memberCount": "8",
+          "accepted": true
+        },
+        {
+          "step": "2966402",
+          "tau": "1779841500",
+          "leaves": [
+            "1000000000001",
+            "1000000000002",
+            "1000000000003",
+            "1000000000004",
+            "1000000000005",
+            "1000000000006",
+            "1000000000007",
+            "1000000000008",
+            "1000000000009"
+          ],
+          "root": "16752079999325973253542994830516400092147876674906463758819414914344328488821",
+          "memberCount": "9",
+          "accepted": false
+        }
+      ]
+    },
+    {
+      "id": "repeats-and-re-additions",
+      "note": "a commitment in both groups and twice in one, removals by member index that zero one occurrence only, and re-additions: the member count counts distinct live commitments",
+      "groups": ["1", "2"],
+      "events": [
+        {
+          "block": "200",
+          "timestamp": "1779839600",
+          "group": "1",
+          "add": ["1000000000010", "1000000000011"]
+        },
+        {
+          "block": "201",
+          "timestamp": "1779839650",
+          "group": "2",
+          "add": ["1000000000011", "1000000000012"]
+        },
+        {
+          "block": "202",
+          "timestamp": "1779839660",
+          "group": "1",
+          "add": ["1000000000010"]
+        },
+        {
+          "block": "260",
+          "timestamp": "1779840290",
+          "group": "1",
+          "remove": ["0"]
+        },
+        {
+          "block": "400",
+          "timestamp": "1779840600",
+          "group": "2",
+          "remove": ["0"]
+        },
+        {
+          "block": "410",
+          "timestamp": "1779840700",
+          "group": "1",
+          "remove": ["2"]
+        },
+        {
+          "block": "700",
+          "timestamp": "1779841200",
+          "group": "2",
+          "add": ["1000000000010", "1000000000011"]
+        }
+      ],
+      "rootL2Block": "200",
+      "rootL2Timestamp": "1779839600",
+      "closesAt": "1779840900",
+      "opening": {
+        "leaves": ["1000000000010", "1000000000011"],
+        "root": "20228685188730094995117165780806851773450167035392265111612325463951058999918",
+        "memberCount": "2"
+      },
+      "steps": [
+        {
+          "step": "2966399",
+          "tau": "1779839700",
+          "leaves": [
+            "1000000000010",
+            "1000000000011",
+            "1000000000011",
+            "1000000000012",
+            "1000000000010"
+          ],
+          "root": "5333148652008541991284518587443580854126618704614001220839139090995599032092",
+          "memberCount": "3",
+          "accepted": true
+        },
+        {
+          "step": "2966400",
+          "tau": "1779840300",
+          "leaves": ["0", "1000000000011", "1000000000011", "1000000000012", "1000000000010"],
+          "root": "18000861502529083976073641951265468155978992999311393370491473092567946333772",
+          "memberCount": "3",
+          "accepted": true
+        },
+        {
+          "step": "2966401",
+          "tau": "1779840900",
+          "leaves": ["0", "1000000000011", "0", "1000000000012", "0"],
+          "root": "3562693773196603090260048696617160143656620435797807188259182226658931667701",
+          "memberCount": "2",
+          "accepted": true
+        },
+        {
+          "step": "2966402",
+          "tau": "1779841500",
+          "leaves": [
+            "0",
+            "1000000000011",
+            "0",
+            "1000000000012",
+            "0",
+            "1000000000010",
+            "1000000000011"
+          ],
+          "root": "4796342975083457293121749346461858120510750867313934844891516005249819248318",
+          "memberCount": "3",
+          "accepted": false
+        }
+      ]
+    },
+    {
+      "id": "empty-opening",
+      "note": "a tier that opens with no live member (Z_32, count 0), gains one, loses it to a removal, and gains another: steps with no live leaf are never accepted",
+      "groups": ["1"],
+      "events": [
+        {
+          "block": "300",
+          "timestamp": "1779840000",
+          "group": "7",
+          "add": ["1000000000030"]
+        },
+        {
+          "block": "320",
+          "timestamp": "1779840100",
+          "group": "1",
+          "add": ["1000000000031"]
+        },
+        {
+          "block": "600",
+          "timestamp": "1779840800",
+          "group": "1",
+          "remove": ["0"]
+        },
+        {
+          "block": "900",
+          "timestamp": "1779841400",
+          "group": "1",
+          "add": ["1000000000032"]
+        }
+      ],
+      "rootL2Block": "310",
+      "rootL2Timestamp": "1779840050",
+      "closesAt": "1779840900",
+      "opening": {
+        "leaves": [],
+        "root": "21443572485391568159800782191812935835534334817699172242223315142338162256601",
+        "memberCount": "0"
+      },
+      "steps": [
+        {
+          "step": "2966399",
+          "tau": "1779839700",
+          "leaves": [],
+          "root": "21443572485391568159800782191812935835534334817699172242223315142338162256601",
+          "memberCount": "0",
+          "accepted": false
+        },
+        {
+          "step": "2966400",
+          "tau": "1779840300",
+          "leaves": ["1000000000031"],
+          "root": "5868279263041476739895914195865220600208328926229203397923223122675538730455",
+          "memberCount": "1",
+          "accepted": true
+        },
+        {
+          "step": "2966401",
+          "tau": "1779840900",
+          "leaves": ["0"],
+          "root": "21443572485391568159800782191812935835534334817699172242223315142338162256601",
+          "memberCount": "0",
+          "accepted": false
+        },
+        {
+          "step": "2966402",
+          "tau": "1779841500",
+          "leaves": ["0", "1000000000032"],
+          "root": "12716070037864373039539687118624076786949006285558958605926201875499791176650",
+          "memberCount": "1",
+          "accepted": false
+        }
+      ]
+    }
+  ],
+  "windows": [
+    {
+      "id": "at-boundary",
+      "note": "the reference's timestamp equals τ_n",
+      "step": "2966400",
+      "l1Timestamp": "1779840300",
+      "window": "in"
+    },
+    {
+      "id": "one-second-early",
+      "note": "the reference is one second before τ_n",
+      "step": "2966400",
+      "l1Timestamp": "1779840299",
+      "window": "future"
+    },
+    {
+      "id": "inside",
+      "note": "half an hour after τ_n",
+      "step": "2966400",
+      "l1Timestamp": "1779842100",
+      "window": "in"
+    },
+    {
+      "id": "last-second",
+      "note": "ROOT_WINDOW − 1 seconds after τ_n",
+      "step": "2966400",
+      "l1Timestamp": "1779847499",
+      "window": "in"
+    },
+    {
+      "id": "window-edge",
+      "note": "exactly ROOT_WINDOW after τ_n: the window is open at its old end",
+      "step": "2966400",
+      "l1Timestamp": "1779847500",
+      "window": "stale"
+    },
+    {
+      "id": "long-after",
+      "note": "ten windows after τ_n",
+      "step": "2966400",
+      "l1Timestamp": "1779912300",
+      "window": "stale"
+    }
+  ],
+  "scopes": [
+    {
+      "id": "rolling-scope-zeros-tier-0",
+      "definitionHash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "tier": 0,
+      "scope": "2b46dfc3f7550bc42f6bbb067f94f2a207f335ee78427150aa6da742e75caeb9",
+      "scopeField": "136066114422243721811807872970556432734806811324140869555526465714899559350"
+    },
+    {
+      "id": "rolling-scope-zeros-tier-1",
+      "definitionHash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "tier": 1,
+      "scope": "c1e30489b4248f671c722dbcdb398bf5436ad3e3f3440828d6693d350eef4b9f",
+      "scopeField": "444008677619794363406264459432341601913286004316109783934275856560275300702"
+    },
+    {
+      "id": "rolling-scope-zeros-tier-2",
+      "definitionHash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "tier": 2,
+      "scope": "9edd1deb7c5be3cc11e949d9569b4289878dd51ef99cffd97a57eb96cb2a6dde",
+      "scopeField": "346458812530482617428434805958962554126013670637224312162036427620111269570"
+    },
+    {
+      "id": "rolling-scope-ones-tier-0",
+      "definitionHash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "tier": 0,
+      "scope": "c72b9bbe6c42383dceb28877fc97dacf8a087a9089a0557c33433647f88b94c7",
+      "scopeField": "227302864160800466249605180616763495004102922597202684621870351828623117074"
+    },
+    {
+      "id": "rolling-scope-ones-tier-1",
+      "definitionHash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "tier": 1,
+      "scope": "37effdd417db63c5b7417480460f5060bf20cee416c2041f381f71049368a252",
+      "scopeField": "113723814022230149981509302709051041442617366393880945715719066733937786309"
+    },
+    {
+      "id": "rolling-scope-ones-tier-2",
+      "definitionHash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "tier": 2,
+      "scope": "41dae1976bc2dbd3c585b0ca9b8a28ab76f143bd2b81d4b25f8acebb9110cb8a",
+      "scopeField": "341427765645720196940669845499197680174106918900223467330209750016382327451"
+    },
+    {
+      "id": "rolling-scope-counting-tier-0",
+      "definitionHash": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "tier": 0,
+      "scope": "2b2c9134ff35dbbf3ffa766a38981fbb26aa0d3b7f9db71921a4e01a552e76eb",
+      "scopeField": "80121308519179255365569488268043052486955676546123233269900016612150478842"
+    },
+    {
+      "id": "rolling-scope-counting-tier-1",
+      "definitionHash": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "tier": 1,
+      "scope": "01113917a372fd568c5cb903436d990cbf2035d00b9a57d3058d840f0860713d",
+      "scopeField": "97810394175154722229277935977526413336127963646039785603999933375025136842"
+    },
+    {
+      "id": "rolling-scope-counting-tier-2",
+      "definitionHash": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "tier": 2,
+      "scope": "95920dfc71318b463a4512d6b293e6591e5beeee9bbeff084ec5842a36b3818b",
+      "scopeField": "206542745446783660506755648774642659749361564977393118741488035454268912765"
+    }
+  ]
+}

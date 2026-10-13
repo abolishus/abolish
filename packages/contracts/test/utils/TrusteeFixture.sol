@@ -32,11 +32,18 @@ contract TrusteeHarness {
         bytes32 panel,
         uint8 index,
         bytes32 stubHash,
-        bytes32 transcriptHash
+        bytes32 transcriptHash,
+        bytes32 keySetHash
     ) external pure returns (bytes32) {
         return TrusteeIdentityLib.registrationDigest(
-            chainId, registry, panel, index, stubHash, transcriptHash
+            chainId, registry, panel, index, stubHash, transcriptHash, keySetHash
         );
+    }
+
+    /// `key_set_hash` of `seats`, `count × (u8(index) ‖ kem_key_hash ‖ x ‖ y)`.
+    function keySetHash(bytes calldata seats) external pure returns (bytes32) {
+        return
+            TrusteeIdentityLib.hashKeySet(seats, 0, seats.length / TrusteeIdentityLib.SEAT_LENGTH);
     }
 }
 
@@ -47,6 +54,7 @@ library TrusteeFixture {
     Vm internal constant vm = Vm(address(uint160(uint256(keccak256("hevm cheat code")))));
 
     string internal constant VECTORS = "../../docs/spec/vectors/trustee.json";
+    string internal constant KEY_SET_VECTORS = "../../docs/spec/vectors/key-set.json";
 
     uint256 internal constant P =
         0xffffffff00000001000000000000000000000000ffffffffffffffffffffffff;
@@ -58,6 +66,48 @@ library TrusteeFixture {
         uint8 index;
         uint256 r;
         uint256 s;
+    }
+
+    /// A seat of the registered key set, as the registration record carries it.
+    struct Seat {
+        uint8 index;
+        bytes32 kemKeyHash;
+        uint256 x;
+        uint256 y;
+    }
+
+    /// The key set `id` of docs/spec/vectors/key-set.json (an independent
+    /// Python implementation), with its seats' points.
+    function keySet(string memory json, string memory id)
+        internal
+        view
+        returns (Seat[] memory seats)
+    {
+        uint256 i = _find(json, ".keySets", id);
+        string memory at = string.concat(".keySets[", vm.toString(i), "].entries");
+        uint256 n;
+        while (vm.keyExistsJson(json, string.concat(at, "[", vm.toString(n), "]"))) n++;
+        seats = new Seat[](n);
+        for (uint256 k; k < n; k++) {
+            string memory e = string.concat(at, "[", vm.toString(k), "]");
+            seats[k] = Seat({
+                index: uint8(vm.parseJsonUint(json, string.concat(e, ".index"))),
+                kemKeyHash: bytes32(
+                    vm.parseBytes(vm.parseJsonString(json, string.concat(e, ".kemKeyHash")))
+                ),
+                x: uint256(
+                    bytes32(vm.parseBytes(vm.parseJsonString(json, string.concat(e, ".x"))))
+                ),
+                y: uint256(bytes32(vm.parseBytes(vm.parseJsonString(json, string.concat(e, ".y")))))
+            });
+        }
+    }
+
+    /// `seats × (u8(index) ‖ kem_key_hash ‖ x ‖ y)`, without the count.
+    function seatBytes(Seat[] memory seats) internal pure returns (bytes memory out) {
+        for (uint256 i; i < seats.length; i++) {
+            out = abi.encodePacked(out, seats[i].index, seats[i].kemKeyHash, seats[i].x, seats[i].y);
+        }
     }
 
     /// The point a 33-byte encoding names, decompressed here (test code, not
@@ -115,14 +165,29 @@ library TrusteeFixture {
         if (s > TrusteeIdentityLib.HALF_N) s = TrusteeIdentityLib.N - s;
     }
 
-    /// `panel_id ‖ stub_hash ‖ ceremony_transcript_hash ‖ u8(count) ‖
+    /// `panel_id ‖ stub_hash ‖ ceremony_transcript_hash ‖ u8(seats) ‖
+    /// seats × (u8(index) ‖ kem_key_hash ‖ x ‖ y) ‖ u8(count) ‖
     /// count × (u8(index) ‖ r ‖ s)`.
-    function encode(bytes32 panelId, bytes32 stub, bytes32 transcript, Approval[] memory a)
-        internal
-        pure
-        returns (bytes memory out)
-    {
-        out = abi.encodePacked(panelId, stub, transcript, uint8(a.length));
+    function encode(
+        bytes32 panelId,
+        bytes32 stub,
+        bytes32 transcript,
+        Seat[] memory seats,
+        Approval[] memory a
+    ) internal pure returns (bytes memory) {
+        return encode(panelId, stub, transcript, uint8(seats.length), seatBytes(seats), a);
+    }
+
+    /// The same, with the key set's seats already encoded.
+    function encode(
+        bytes32 panelId,
+        bytes32 stub,
+        bytes32 transcript,
+        uint8 seatCount,
+        bytes memory seats,
+        Approval[] memory a
+    ) internal pure returns (bytes memory out) {
+        out = abi.encodePacked(panelId, stub, transcript, seatCount, seats, uint8(a.length));
         for (uint256 i; i < a.length; i++) {
             out = abi.encodePacked(out, a[i].index, a[i].r, a[i].s);
         }

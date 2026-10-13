@@ -202,6 +202,29 @@ The challenge hash `m` adds attribution: a seat that relays another pair's ciphe
 
 The check's output is the **registered key set**: for each qualified seat in increasing order, its `index`, `kem_key` and `signing_key`. [[verifier]] 3.1 compares it with what the definition and L2 bind; [[verifier]] 2.5 and the ballot client's panel check use it before any share is made ([[election-definition]], The panel is checked before any share exists).
 
+### Key set hash
+
+The registered key set is bound on L2 by its hash, which every seat signs in its ceremony registration ([[trustee-identity]], Ceremony registration; [[0028-board-contract-checks]], 2B):
+
+```
+kem_key_hash = H(DS("abolish/v1/kem-key", encode(kem_key)))
+key_set_hash = H(DS("abolish/v1/key-set", encode(key_set)))
+```
+
+| Field     | Type                                | Meaning                                                |
+| --------- | ----------------------------------- | ------------------------------------------------------ |
+| `key_set` | `list<key_set_entry, MAX_TRUSTEES>` | One entry per qualified seat, in increasing seat order |
+
+| `key_set_entry` field | Type        | Meaning                                                         |
+| --------------------- | ----------- | --------------------------------------------------------------- |
+| `index`               | `u8`        | The seat                                                        |
+| `kem_key_hash`        | `bytes[32]` | `kem_key_hash` of its `kem_key`, over the 1,216 bytes `ek ‖ dh` |
+| `signing_key`         | `p256-key`  | Its per-election signing key `P_i`                              |
+
+An entry is 66 bytes, and the hashed input `4 + 66 · c` bytes for `c` qualified seats. A valid transcript has at least `k ≥ 2` qualified seats (Transcript check, 5), so a key set is never empty, and its seats are distinct and increasing because the check returns them so.
+
+**Why each KEM key is hashed on its own.** The trustee registry recomputes `key_set_hash` from what a registration carries ([[contracts]], Trustee registry), and the board needs only the seats and their signing keys. Carrying each seat's 32-byte `kem_key_hash` instead of its 1,216-byte key keeps a registration of all 16 seats, approvals included, near 2.7 KB rather than 22 KB, in calldata and in the archived event every verifier replays (T-17, T-52), while still binding every KEM key: whoever needs one (the ballot client, a trustee, the verifier) takes it from the transcript the definition binds, and the transcript check's set hashes to the registered one exactly when its keys are the registered keys (SHA-256's collision resistance).
+
 ## Stub checks
 
 The stub's contents reach the permanent archive once the definition is registered, so a trustee node checks them before it lends its keys to the election. Before it sends its round-1 message, and again before it signs the ceremony registration, a node MUST:
@@ -214,13 +237,13 @@ A node refuses a run whose stub fails any of these, and never signs a registrati
 
 ## Approval and re-runs
 
-A seat signs the ceremony registration ([[trustee-identity]], Ceremony registration) only for a stub that passes the stub checks (above) and a transcript that passes this check with at least `max(k, n − 1)` qualified seats ([[0006-trustees]] rule 7, adopted by the owner on 2026-10-12; [[verifier]] 3.2 fails any other with `ceremony-participation`), that holds every message it sent as it sent it, and whose round chain it signed over. It approves **at most one transcript per `stub_hash`**, whatever the run, and its node keeps that record for as long as the stub can be registered.
+A seat signs the ceremony registration ([[trustee-identity]], Ceremony registration) only for a stub that passes the stub checks (above) and a transcript that passes this check with at least `max(k, n − 1)` qualified seats ([[0006-trustees]] rule 7, adopted by the owner on 2026-10-12; [[verifier]] 3.2 fails any other with `ceremony-participation`), that holds every message it sent as it sent it, and whose round chain it signed over. It signs with `key_set_hash` computed from the registered key set its own transcript check returned, never one taken from the coordinator or another seat, so the quorum that approves a transcript also approves exactly the keys it registers ([[trustee-identity]], Ceremony registration; T-37, T-14). It approves **at most one transcript per `stub_hash`**, whatever the run, and its node keeps that record for as long as the stub can be registered.
 
 A run that stops before a quorum approves it is abandoned: the creator starts another with a fresh `run_id` and the same stub, and every seat generates fresh keys. A run whose transcript a quorum has approved is final for that stub. With a quorum `q > n / 2` ([[contracts]], Trustee registry) two quorums share a seat, so a second approved transcript for one stub needs a seat that broke the rule above; [[verifier]] 3.1 still accepts only the transcript the definition binds. The trustee registry records at most one transcript per `stub_hash` and panel and refuses any other once one has its quorum ([[contracts]], Trustee registry), so a quorum can't hold a second set of keys in reserve for the same definition. Only the panel can register a transcript, so this first-come rule can't be raced by anyone outside it ([[election-definition]], Stub hash and the ceremony).
 
 ## Vectors
 
-`docs/spec/vectors/ceremony.json`, from an independent implementation: complete transcripts (honest panels, every disqualification reason, and transcripts that fail each of the four transcript-level codes) with each one's expected result, the registered key set or the reason per seat, and its hash.
+`docs/spec/vectors/ceremony.json`, from an independent implementation: complete transcripts (honest panels, every disqualification reason, and transcripts that fail each of the four transcript-level codes) with each one's expected result, the registered key set or the reason per seat, and its hash. `docs/spec/vectors/key-set.json` gives KEM-key and key-set hashes, key sets no seat should sign, and ceremony registration statements over key-set hashes ([[contracts]], Trustee registry).
 
 ## Security notes
 

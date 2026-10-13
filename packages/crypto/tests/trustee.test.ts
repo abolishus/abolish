@@ -21,6 +21,7 @@ import {
   verifyCeremonyRegistration,
   verifyStatement,
 } from "../src/index.ts";
+import { signMessage, verifyMessage } from "../src/trustee.ts";
 import { hex, SPEC_VECTORS } from "./spec-vectors.ts";
 
 // docs/spec/vectors/trustee.json comes from an independent Python
@@ -71,7 +72,11 @@ const vectors = JSON.parse(
   readFileSync(new URL("trustee.json", SPEC_VECTORS), "utf8"),
 ) as TrusteeVectors;
 
-const TAG = "abolish/v1/sig/ceremony-registration";
+const TAG = "abolish/v1/sig/ceremony-registration-2";
+// trustee.json frames its signature vectors under the first registration
+// tag, retired before any deployment, so they are checked over their framed
+// `dsMessage` (verifyMessage), which is what that tag's statements were.
+const FROZEN_TAG = "abolish/v1/sig/ceremony-registration";
 const toHex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
 // Each run signs and verifies with pure-JS ECDSA (a few ms), and CI runs 1000.
@@ -80,16 +85,11 @@ const N = p256.Point.Fn.ORDER;
 const HALF_N = (N - 1n) / 2n;
 const be32 = (v: bigint) => hex(v.toString(16).padStart(64, "0"));
 const secretKey = fc.bigInt({ min: 1n, max: N - 1n }).map((d) => be32(d));
-const panelById = (id: string) => {
-  const p = vectors.panels.find((x) => x.id === id);
-  if (p === undefined) throw new Error(`no panel ${id}`);
-  return { threshold: p.threshold, keys: p.keys.map(hex) };
-};
 
 describe("trustee vectors (docs/spec/vectors/trustee.json)", () => {
   test("the file has the expected format, tags and counts", () => {
     expect(vectors.format).toBe("abolish-trustee-vectors/1");
-    expect(vectors.tags).toEqual({ panel: "abolish/v1/panel", registration: TAG });
+    expect(vectors.tags).toEqual({ panel: "abolish/v1/panel", registration: FROZEN_TAG });
     // A consumer that dropped vectors would otherwise check fewer.
     expect([
       vectors.keys.length,
@@ -177,7 +177,7 @@ describe("trustee vectors (docs/spec/vectors/trustee.json)", () => {
           lowS: true,
         }),
       ).toBe(true);
-      expect(verifyStatement(key, TAG, hex(v?.message ?? ""), hex(v?.signature ?? ""))).toBe(false);
+      expect(verifyMessage(key, hex(v?.dsMessage ?? ""), hex(v?.signature ?? ""))).toBe(false);
     }
   });
 
@@ -185,7 +185,8 @@ describe("trustee vectors (docs/spec/vectors/trustee.json)", () => {
     const key = hex(v.key);
     const m = hex(v.message);
     const sig = hex(v.signature);
-    expect(verifyStatement(key, TAG, m, sig)).toBe(v.valid);
+    expect(toHex(frame(m, FROZEN_TAG))).toBe(v.dsMessage);
+    expect(verifyMessage(key, hex(v.dsMessage), sig)).toBe(v.valid);
     if (!v.valid) return;
     expect(toHex(sha256(hex(v.dsMessage)))).toBe(v.digest);
     // RFC 6979 is deterministic: the seat's own key reproduces the bytes.
@@ -195,7 +196,7 @@ describe("trustee vectors (docs/spec/vectors/trustee.json)", () => {
       expect(v.id).toBe("sig-x-of-r-at-least-n");
       return;
     }
-    expect(toHex(signStatement(hex(seat?.secretKey ?? ""), TAG, m))).toBe(v.signature);
+    expect(toHex(signMessage(hex(seat?.secretKey ?? ""), hex(v.dsMessage)))).toBe(v.signature);
   });
 
   test.each(vectors.panels)("panel $id", (v) => {
@@ -213,27 +214,12 @@ describe("trustee vectors (docs/spec/vectors/trustee.json)", () => {
     }
   });
 
-  test.each(vectors.registrations)("registration $id", (v) => {
-    const panel = panelById(v.panel);
-    const reg = {
-      l2ChainId: BigInt(v.l2ChainId),
-      trusteeRegistry: hex(v.trusteeRegistry),
-      index: v.index,
-      stubHash: hex(v.stubHash),
-      ceremonyTranscriptHash: hex(v.ceremonyTranscriptHash),
-    };
-    expect(toHex(ceremonyRegistrationMessage(panel, reg))).toBe(v.message);
-    expect(verifyCeremonyRegistration(panel, reg, hex(v.signature))).toBe(true);
-    // Every other seat's key, and every other seat number, rejects it.
-    for (let i = 1; i <= panel.keys.length; i++)
-      if (i !== v.index)
-        expect(verifyCeremonyRegistration(panel, { ...reg, index: i }, hex(v.signature))).toBe(
-          false,
-        );
-    const seat = vectors.keys.find((k) => k.encoding === toHex(panel.keys[v.index - 1] ?? hex("")));
-    expect(toHex(signCeremonyRegistration(hex(seat?.secretKey ?? ""), panel, reg))).toBe(
-      v.signature,
-    );
+  test("the first layout's registrations are retired: their tag frames nothing", () => {
+    // Frozen in the file, pinned above, and read by no code
+    // (docs/spec/trustee-identity.md, Ceremony registration).
+    expect(() =>
+      signStatement(be32(1n), FROZEN_TAG as never, hex(vectors.registrations[0]?.message ?? "")),
+    ).toThrow();
   });
 });
 
@@ -447,6 +433,7 @@ describe("ceremony registration", () => {
     index: 2,
     stubHash: new Uint8Array(32).fill(1),
     ceremonyTranscriptHash: new Uint8Array(32).fill(2),
+    keySetHash: new Uint8Array(32).fill(4),
   };
 
   test("binds every field: changing any one fails verification", () => {
@@ -458,6 +445,7 @@ describe("ceremony registration", () => {
       { ...reg, index: 3 },
       { ...reg, stubHash: new Uint8Array(32).fill(3) },
       { ...reg, ceremonyTranscriptHash: new Uint8Array(32).fill(3) },
+      { ...reg, keySetHash: new Uint8Array(32).fill(3) },
     ])
       expect(verifyCeremonyRegistration(panel, changed, sig)).toBe(false);
     // Another panel (here: another threshold) changes panel_id.
@@ -488,14 +476,18 @@ describe("ceremony registration", () => {
     expect(() =>
       ceremonyRegistrationMessage(panel, { ...reg, trusteeRegistry: new Uint8Array(19) }),
     ).toThrow(EncodeError);
+    expect(() =>
+      ceremonyRegistrationMessage(panel, { ...reg, keySetHash: new Uint8Array(33) }),
+    ).toThrow(EncodeError);
   });
 
-  test("the message is 125 bytes in the spec's field order", () => {
+  test("the message is 157 bytes in the spec's field order", () => {
     const m = ceremonyRegistrationMessage(panel, reg);
-    expect(m.length).toBe(125);
+    expect(m.length).toBe(157);
     expect(toHex(m.subarray(0, 8))).toBe("0000000000014a34");
     expect(toHex(m.subarray(28, 60))).toBe(toHex(panelId(panel)));
     expect(m[60]).toBe(2);
+    expect(toHex(m.subarray(125))).toBe("04".repeat(32));
   });
 });
 

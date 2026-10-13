@@ -251,6 +251,8 @@ export interface CeremonyRegistration {
   readonly index: number;
   readonly stubHash: Uint8Array;
   readonly ceremonyTranscriptHash: Uint8Array;
+  /** `key_set_hash` of the key set the signer's own transcript check returned. */
+  readonly keySetHash: Uint8Array;
 }
 
 const CEREMONY_REGISTRATION = struct([
@@ -260,10 +262,11 @@ const CEREMONY_REGISTRATION = struct([
   ["index", u8],
   ["stub_hash", bytesFixed(32)],
   ["ceremony_transcript_hash", bytesFixed(32)],
+  ["key_set_hash", bytesFixed(32)],
 ] as const);
 
 /**
- * The 125-byte statement `abolish/v1/sig/ceremony-registration` signs. The
+ * The 157-byte statement `abolish/v1/sig/ceremony-registration-2` signs. The
  * panel identifier is computed from `panel`, never taken from the caller, and
  * the seat must be one of its seats.
  */
@@ -278,8 +281,8 @@ export function ceremonyRegistrationMessage(panel: Panel, reg: CeremonyRegistrat
 function snapshot(reg: CeremonyRegistration): CeremonyRegistration {
   if (reg === null || typeof reg !== "object")
     throw new TypeError("ceremony registration: expected an object");
-  const { l2ChainId, trusteeRegistry, index, stubHash, ceremonyTranscriptHash } = reg;
-  return { l2ChainId, trusteeRegistry, index, stubHash, ceremonyTranscriptHash };
+  const { l2ChainId, trusteeRegistry, index, stubHash, ceremonyTranscriptHash, keySetHash } = reg;
+  return { l2ChainId, trusteeRegistry, index, stubHash, ceremonyTranscriptHash, keySetHash };
 }
 
 function registration(
@@ -297,6 +300,7 @@ function registration(
     index: reg.index,
     stub_hash: reg.stubHash,
     ceremony_transcript_hash: reg.ceremonyTranscriptHash,
+    key_set_hash: reg.keySetHash,
   });
   return { message, key };
 }
@@ -311,7 +315,7 @@ export function signCeremonyRegistration(
   // A key outside its seat would sign a statement no verifier attributes to it.
   if (!equalBytes(identityKey(secretKey), key))
     throw new RangeError("ceremony registration: secretKey is not the key of seat index");
-  return signStatement(secretKey, "abolish/v1/sig/ceremony-registration", message);
+  return signStatement(secretKey, "abolish/v1/sig/ceremony-registration-2", message);
 }
 
 /**
@@ -339,7 +343,7 @@ export function verifyCeremonyRegistration(
   }
   return verifyStatement(
     statement.key,
-    "abolish/v1/sig/ceremony-registration",
+    "abolish/v1/sig/ceremony-registration-2",
     statement.message,
     sig,
   );

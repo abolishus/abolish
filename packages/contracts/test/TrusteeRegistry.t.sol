@@ -28,9 +28,19 @@ contract TrusteeIdentityVectorsTest is TestBase {
         string memory json = vm.readFile(TrusteeFixture.VECTORS);
         _assertString(json, ".format", "abolish-trustee-vectors/1");
         _assertTag(TrusteeIdentityLib.DS_PANEL, vm.parseJsonString(json, ".tags.panel"));
+        // trustee.json's registration tag is the first layout's, retired
+        // before any deployment; the registry signs under key-set.json's.
+        string memory ks = vm.readFile(TrusteeFixture.KEY_SET_VECTORS);
+        _assertString(ks, ".format", "abolish-key-set-vectors/1");
         _assertTag(
             TrusteeIdentityLib.DS_CEREMONY_REGISTRATION,
-            vm.parseJsonString(json, ".tags.registration")
+            vm.parseJsonString(ks, ".tags.registration")
+        );
+        _assertTag(TrusteeIdentityLib.DS_KEY_SET, vm.parseJsonString(ks, ".tags.keySet"));
+        assertTrue(
+            keccak256(bytes(vm.parseJsonString(json, ".tags.registration")))
+                == keccak256("abolish/v1/sig/ceremony-registration"),
+            "frozen tag"
         );
     }
 
@@ -152,19 +162,48 @@ contract TrusteeIdentityVectorsTest is TestBase {
         assertTrue(refused > 0 && refused < i, "panel vector coverage");
     }
 
-    /// Each registration vector's message is the 125-byte layout, its digest
-    /// is what the contract signs over, and its signature verifies under the
-    /// seat's key and nowhere else.
-    function test_RegistrationVectors() public view {
-        string memory json = vm.readFile(TrusteeFixture.VECTORS);
+    /// Each key set of key-set.json hashes, from the seats a registration
+    /// carries, to the file's `key_set_hash`, and each seat's point is the
+    /// one its `p256-key` encodes.
+    function test_KeySetVectors() public view {
+        string memory ks = vm.readFile(TrusteeFixture.KEY_SET_VECTORS);
         uint256 i;
-        for (; vm.keyExistsJson(json, _at(".registrations", i, "")); i++) {
-            _checkRegistration(json, i);
+        for (; vm.keyExistsJson(ks, _at(".keySets", i, "")); i++) {
+            string memory id = vm.parseJsonString(ks, _at(".keySets", i, ".id"));
+            TrusteeFixture.Seat[] memory seats = TrusteeFixture.keySet(ks, id);
+            assertEq(
+                lib.keySetHash(TrusteeFixture.seatBytes(seats)),
+                _bytes32(ks, _at(".keySets", i, ".keySetHash")),
+                id
+            );
+            for (uint256 k; k < seats.length; k++) {
+                bytes memory enc = vm.parseBytes(
+                    vm.parseJsonString(
+                        ks,
+                        string.concat(
+                            _at(".keySets", i, ".entries"), "[", vm.toString(k), "].signingKey"
+                        )
+                    )
+                );
+                assertTrue(lib.keyMatches(enc, seats[k].x, seats[k].y), id);
+            }
         }
-        assertTrue(i >= 4, "registration vector coverage");
+        assertTrue(i >= 6, "key set vector coverage");
     }
 
-    struct Registration {
+    /// Each statement of key-set.json is the 157-byte layout, its digest is
+    /// what the registry signs over, and its signature verifies under the
+    /// seat's key and nowhere else.
+    function test_StatementVectors() public view {
+        string memory ks = vm.readFile(TrusteeFixture.KEY_SET_VECTORS);
+        uint256 i;
+        for (; vm.keyExistsJson(ks, _at(".statements", i, "")); i++) {
+            _checkStatement(ks, i);
+        }
+        assertTrue(i >= 5, "statement vector coverage");
+    }
+
+    struct Statement {
         string id;
         uint64 chainId;
         address registry;
@@ -172,47 +211,78 @@ contract TrusteeIdentityVectorsTest is TestBase {
         uint8 index;
         bytes32 stub;
         bytes32 transcript;
+        bytes32 keySetHash;
     }
 
-    function _checkRegistration(string memory json, uint256 i) internal view {
-        Registration memory v;
-        v.id = vm.parseJsonString(json, _at(".registrations", i, ".id"));
-        TrusteeRegistry.PanelInput memory p = TrusteeFixture.panel(
-            json, vm.parseJsonString(json, _at(".registrations", i, ".panel")), 4
-        );
+    function _checkStatement(string memory ks, uint256 i) internal view {
+        string memory json = vm.readFile(TrusteeFixture.VECTORS);
+        Statement memory v;
+        v.id = vm.parseJsonString(ks, _at(".statements", i, ".id"));
+        TrusteeRegistry.PanelInput memory p =
+            TrusteeFixture.panel(json, vm.parseJsonString(ks, _at(".statements", i, ".panel")), 4);
         v.panel = lib.panelId(p.threshold, uint8(p.points.length), p.keys);
         v.chainId =
-            uint64(vm.parseUint(vm.parseJsonString(json, _at(".registrations", i, ".l2ChainId"))));
-        v.registry = address(bytes20(_bytes(json, _at(".registrations", i, ".trusteeRegistry"))));
-        v.index = uint8(vm.parseJsonUint(json, _at(".registrations", i, ".index")));
-        v.stub = _bytes32(json, _at(".registrations", i, ".stubHash"));
-        v.transcript = _bytes32(json, _at(".registrations", i, ".ceremonyTranscriptHash"));
+            uint64(vm.parseUint(vm.parseJsonString(ks, _at(".statements", i, ".l2ChainId"))));
+        v.registry = address(bytes20(_bytes(ks, _at(".statements", i, ".trusteeRegistry"))));
+        v.index = uint8(vm.parseJsonUint(ks, _at(".statements", i, ".index")));
+        v.stub = _bytes32(ks, _at(".statements", i, ".stubHash"));
+        v.transcript = _bytes32(ks, _at(".statements", i, ".ceremonyTranscriptHash"));
+        v.keySetHash = _bytes32(ks, _at(".statements", i, ".keySetHash"));
+        // The key set named is the one whose hash the statement carries.
+        TrusteeFixture.Seat[] memory seats =
+            TrusteeFixture.keySet(ks, vm.parseJsonString(ks, _at(".statements", i, ".keySet")));
+        assertEq(lib.keySetHash(TrusteeFixture.seatBytes(seats)), v.keySetHash, v.id);
 
-        bytes memory message = _bytes(json, _at(".registrations", i, ".message"));
-        assertEq(message.length, 125, v.id);
+        bytes memory message = _bytes(ks, _at(".statements", i, ".message"));
+        assertEq(message.length, 157, v.id);
         assertTrue(
             keccak256(message)
                 == keccak256(
-                    abi.encodePacked(v.chainId, v.registry, v.panel, v.index, v.stub, v.transcript)
+                    abi.encodePacked(
+                        v.chainId, v.registry, v.panel, v.index, v.stub, v.transcript, v.keySetHash
+                    )
                 ),
             v.id
         );
-        bytes32 digest =
-            lib.registrationDigest(v.chainId, v.registry, v.panel, v.index, v.stub, v.transcript);
+        bytes32 digest = lib.registrationDigest(
+            v.chainId, v.registry, v.panel, v.index, v.stub, v.transcript, v.keySetHash
+        );
+        assertEq(digest, _bytes32(ks, _at(".statements", i, ".digest")), v.id);
         assertEq(
             digest, sha256(bytes.concat(TrusteeIdentityLib.DS_CEREMONY_REGISTRATION, message)), v.id
         );
 
-        (uint256 r, uint256 s) =
-            abi.decode(_bytes(json, _at(".registrations", i, ".signature")), (uint256, uint256));
-        uint256[2] memory q = p.points[v.index - 1];
-        assertTrue(lib.verify(digest, r, s, q[0], q[1]), v.id);
-        uint256[2] memory other = p.points[v.index % p.points.length];
-        assertTrue(!lib.verify(digest, r, s, other[0], other[1]), v.id);
-        bytes32 elsewhere = lib.registrationDigest(
-            v.chainId, address(0x5EC0), v.panel, v.index, v.stub, v.transcript
+        _checkStatementSignature(
+            v, digest, _bytes(ks, _at(".statements", i, ".signature")), p.points
         );
-        assertTrue(!lib.verify(elsewhere, r, s, q[0], q[1]), v.id);
+    }
+
+    /// The statement's signature verifies under its seat's key, and not
+    /// under another seat's, for another registry or over another key set.
+    function _checkStatementSignature(
+        Statement memory v,
+        bytes32 digest,
+        bytes memory sig,
+        uint256[2][] memory points
+    ) internal view {
+        (uint256 r, uint256 s) = abi.decode(sig, (uint256, uint256));
+        uint256[2] memory q = points[v.index - 1];
+        assertTrue(lib.verify(digest, r, s, q[0], q[1]), v.id);
+        uint256[2] memory other = points[v.index % points.length];
+        assertTrue(!lib.verify(digest, r, s, other[0], other[1]), v.id);
+        assertTrue(!lib.verify(_digestOf(v, address(0x5EC0), v.keySetHash), r, s, q[0], q[1]), v.id);
+        bytes32 otherSet = keccak256(abi.encode(v.keySetHash));
+        assertTrue(!lib.verify(_digestOf(v, v.registry, otherSet), r, s, q[0], q[1]), v.id);
+    }
+
+    function _digestOf(Statement memory v, address registry, bytes32 keySetHash)
+        internal
+        view
+        returns (bytes32)
+    {
+        return lib.registrationDigest(
+            v.chainId, registry, v.panel, v.index, v.stub, v.transcript, keySetHash
+        );
     }
 
     function _expectPanelError(
@@ -287,12 +357,16 @@ contract TrusteeRegistryTest is TestBase {
     bytes32 internal constant TRANSCRIPT = keccak256("transcript");
 
     string internal json;
+    string internal keySets;
+    TrusteeHarness internal lib;
     TrusteeRegistry internal registry;
     bytes32 internal panel;
     uint256[8] internal secrets;
 
     function setUp() public {
         json = vm.readFile(TrusteeFixture.VECTORS);
+        keySets = vm.readFile(TrusteeFixture.KEY_SET_VECTORS);
+        lib = new TrusteeHarness();
         for (uint8 seat = 1; seat <= 7; seat++) {
             secrets[seat] = TrusteeFixture.secret(json, seat);
         }
@@ -439,13 +513,13 @@ contract TrusteeRegistryTest is TestBase {
         // Seat 3 again, with its own valid signature.
         twice[3] = TrusteeFixture.Approval(3, a[2].r, a[2].s);
         _expectRefused(
-            TrusteeFixture.encode(panel, STUB, TRANSCRIPT, twice),
+            _encode(panel, STUB, TRANSCRIPT, twice),
             abi.encodeWithSelector(TrusteeRegistry.SeatsOutOfOrder.selector, 3)
         );
         TrusteeFixture.Approval[] memory swapped = _approvals(STUB, TRANSCRIPT, _seats(1, 2, 3, 4));
         (swapped[1], swapped[2]) = (swapped[2], swapped[1]);
         _expectRefused(
-            TrusteeFixture.encode(panel, STUB, TRANSCRIPT, swapped),
+            _encode(panel, STUB, TRANSCRIPT, swapped),
             abi.encodeWithSelector(TrusteeRegistry.SeatsOutOfOrder.selector, 2)
         );
     }
@@ -454,13 +528,13 @@ contract TrusteeRegistryTest is TestBase {
         TrusteeFixture.Approval[] memory a = _approvals(STUB, TRANSCRIPT, _seats(1, 2, 3, 4));
         a[0].index = 0;
         _expectRefused(
-            TrusteeFixture.encode(panel, STUB, TRANSCRIPT, a),
+            _encode(panel, STUB, TRANSCRIPT, a),
             abi.encodeWithSelector(TrusteeRegistry.SeatsOutOfOrder.selector, 0)
         );
         a = _approvals(STUB, TRANSCRIPT, _seats(1, 2, 3, 4));
         a[3].index = 8;
         _expectRefused(
-            TrusteeFixture.encode(panel, STUB, TRANSCRIPT, a),
+            _encode(panel, STUB, TRANSCRIPT, a),
             abi.encodeWithSelector(TrusteeRegistry.SeatsOutOfOrder.selector, 8)
         );
     }
@@ -503,12 +577,13 @@ contract TrusteeRegistryTest is TestBase {
     function test_RefusesSignaturesForAnotherChainOrRegistry() public {
         uint64[2] memory chains = [uint64(block.chainid) + 1, uint64(block.chainid)];
         address[2] memory registries = [address(registry), address(0x5EC0)];
+        bytes32 keySetHash = lib.keySetHash(TrusteeFixture.seatBytes(_keySetFor(registry, panel)));
         for (uint256 c; c < 2; c++) {
             uint8[] memory seats = _seats(1, 2, 3, 4);
             TrusteeFixture.Approval[] memory a = new TrusteeFixture.Approval[](4);
             for (uint256 i; i < 4; i++) {
                 bytes32 digest = TrusteeIdentityLib.registrationDigest(
-                    chains[c], registries[c], panel, seats[i], STUB, TRANSCRIPT
+                    chains[c], registries[c], panel, seats[i], STUB, TRANSCRIPT, keySetHash
                 );
                 (uint256 r, uint256 s) = TrusteeFixture.sign(secrets[seats[i]], digest);
                 a[i] = TrusteeFixture.Approval(seats[i], r, s);
@@ -544,6 +619,7 @@ contract TrusteeRegistryTest is TestBase {
                 small,
                 STUB,
                 keccak256("theirs"),
+                _keySetFor(two, small),
                 _approvalsFor(two, small, STUB, keccak256("theirs"), _range(1, 2))
             )
         );
@@ -557,7 +633,7 @@ contract TrusteeRegistryTest is TestBase {
         TrusteeFixture.Approval[] memory a = _approvals(STUB, TRANSCRIPT, _range(1, 4));
         bytes32 unknown = keccak256("panel");
         _expectRefused(
-            TrusteeFixture.encode(unknown, STUB, TRANSCRIPT, a),
+            _encode(unknown, STUB, TRANSCRIPT, a),
             abi.encodeWithSelector(TrusteeRegistry.UnknownPanel.selector, unknown)
         );
         _expectRefused(
@@ -573,10 +649,170 @@ contract TrusteeRegistryTest is TestBase {
         _expectRefused(_slice(reg, 0, 96), malformed);
         _expectRefused(_slice(reg, 0, reg.length - 1), malformed);
         _expectRefused(bytes.concat(reg, hex"00"), malformed);
+        // The approvals' count, after the 7 key-set seats.
         bytes memory moreCounted = bytes.concat(reg);
-        moreCounted[96] = bytes1(uint8(5));
+        moreCounted[97 + 97 * 7] = bytes1(uint8(5));
         _expectRefused(moreCounted, malformed);
+        // The key set's count, one more (the record ends inside the seats
+        // and approvals it then reads) and one fewer.
+        bytes memory moreSeats = bytes.concat(reg);
+        moreSeats[96] = bytes1(uint8(8));
+        _expectRefused(moreSeats, malformed);
+        bytes memory fewerSeats = bytes.concat(reg);
+        fewerSeats[96] = bytes1(uint8(6));
+        _expectRefused(fewerSeats, malformed);
+        // A count of seats the record can't hold before its approvals' count.
+        bytes memory header = _slice(reg, 0, 97);
+        header[96] = bytes1(uint8(1));
+        _expectRefused(bytes.concat(header, new bytes(97)), malformed);
         _expectRefused("", malformed);
+    }
+
+    // --- the key set -------------------------------------------------------------
+
+    /// The registry records the key set's hash (the one key-set.json gives,
+    /// and every approval signed), its seats and each one's signing key.
+    function test_RecordsTheKeySet() public {
+        string[2] memory ids = ["key-set-7", "key-set-gaps"];
+        for (uint256 v; v < 2; v++) {
+            bytes32 stub = keccak256(abi.encode("stub", v));
+            TrusteeFixture.Seat[] memory ks = TrusteeFixture.keySet(keySets, ids[v]);
+            registry.registerCeremony(
+                TrusteeFixture.encode(panel, stub, TRANSCRIPT, ks, _signed(stub, ks, _range(1, 4)))
+            );
+            (bytes32 h, uint256 mask) = registry.keySetOf(stub, panel);
+            assertEq(h, _keySetHash(ids[v]), ids[v]);
+            uint256 expected;
+            for (uint256 i; i < ks.length; i++) {
+                expected |= 1 << ks[i].index;
+                (uint256 x, uint256 y) = registry.signingKeyOf(stub, panel, ks[i].index);
+                assertTrue(x == ks[i].x && y == ks[i].y, "signing key");
+            }
+            assertEq(mask, expected, "seats");
+            for (uint256 seat; seat <= 8; seat++) {
+                if (expected & (1 << seat) != 0) continue;
+                (uint256 x, uint256 y) = registry.signingKeyOf(stub, panel, seat);
+                assertTrue(x == 0 && y == 0, "no key outside the set");
+            }
+        }
+        (bytes32 none, uint256 noSeats) = registry.keySetOf(keccak256("unrecorded"), panel);
+        assertTrue(none == bytes32(0) && noSeats == 0, "unrecorded");
+    }
+
+    /// An approving seat needn't be in the key set: a seat the transcript
+    /// check disqualified can still have checked the transcript.
+    function test_ApproversNeedNotBeInTheKeySet() public {
+        TrusteeFixture.Seat[] memory ks = TrusteeFixture.keySet(keySets, "key-set-gaps");
+        registry.registerCeremony(
+            TrusteeFixture.encode(
+                panel, STUB, TRANSCRIPT, ks, _signed(STUB, ks, _seats(3, 4, 5, 6))
+            )
+        );
+        assertTrue(registry.ceremonyRecorded(STUB, TRANSCRIPT, panel, 4, 7), "recorded");
+    }
+
+    /// Approvals over another key set's hash don't count for this one, so
+    /// a set no quorum signed is never recorded (T-37, T-14).
+    function test_RefusesApprovalsOfAnotherKeySet() public {
+        TrusteeFixture.Seat[] memory signed = TrusteeFixture.keySet(keySets, "key-set-gaps");
+        TrusteeFixture.Seat[] memory sent = TrusteeFixture.keySet(keySets, "key-set-7");
+        _expectRefused(
+            TrusteeFixture.encode(
+                panel, STUB, TRANSCRIPT, sent, _signed(STUB, signed, _range(1, 4))
+            ),
+            abi.encodeWithSelector(TrusteeRegistry.InvalidSignature.selector, 1)
+        );
+        // Dropping a seat, or changing one's KEM-key hash, is another set.
+        TrusteeFixture.Seat[] memory ks = TrusteeFixture.keySet(keySets, "key-set-7");
+        TrusteeFixture.Approval[] memory a = _signed(STUB, ks, _range(1, 4));
+        ks[3].kemKeyHash = keccak256("another KEM key");
+        _expectRefused(
+            TrusteeFixture.encode(panel, STUB, TRANSCRIPT, ks, a),
+            abi.encodeWithSelector(TrusteeRegistry.InvalidSignature.selector, 1)
+        );
+        ks = TrusteeFixture.keySet(keySets, "key-set-7");
+        _expectRefused(
+            TrusteeFixture.encode(panel, STUB, TRANSCRIPT, _drop(ks, 6), a),
+            abi.encodeWithSelector(TrusteeRegistry.InvalidSignature.selector, 1)
+        );
+    }
+
+    function test_RefusesAKeySetBelowTheThreshold() public {
+        TrusteeFixture.Seat[] memory ks = _drop(_drop(_drop(_drop(_set7(), 6), 5), 4), 3);
+        _expectKeySetRefused(
+            ks, abi.encodeWithSelector(TrusteeRegistry.KeySetTooSmall.selector, 3, 4)
+        );
+        _expectKeySetRefused(
+            new TrusteeFixture.Seat[](0),
+            abi.encodeWithSelector(TrusteeRegistry.KeySetTooSmall.selector, 0, 4)
+        );
+    }
+
+    function test_RefusesKeySetSeatsOutOfOrder() public {
+        TrusteeFixture.Seat[] memory ks = _set7();
+        (ks[1], ks[2]) = (ks[2], ks[1]);
+        _expectKeySetRefused(
+            ks, abi.encodeWithSelector(TrusteeRegistry.KeySetSeatsOutOfOrder.selector, 2)
+        );
+        ks = _set7();
+        ks[2].index = 2;
+        _expectKeySetRefused(
+            ks, abi.encodeWithSelector(TrusteeRegistry.KeySetSeatsOutOfOrder.selector, 2)
+        );
+        ks = _set7();
+        ks[0].index = 0;
+        _expectKeySetRefused(
+            ks, abi.encodeWithSelector(TrusteeRegistry.KeySetSeatsOutOfOrder.selector, 0)
+        );
+        ks = _set7();
+        ks[6].index = 8;
+        _expectKeySetRefused(
+            ks, abi.encodeWithSelector(TrusteeRegistry.KeySetSeatsOutOfOrder.selector, 8)
+        );
+    }
+
+    function test_RefusesSigningKeysThatAreNotPoints() public {
+        TrusteeFixture.Seat[] memory ks = _set7();
+        ks[2].y = TrusteeFixture.P - ks[2].y + 1;
+        _expectKeySetRefused(
+            ks, abi.encodeWithSelector(TrusteeRegistry.InvalidSigningKey.selector, 3)
+        );
+        // A coordinate at p is never reduced.
+        ks = _set7();
+        ks[2].x = TrusteeFixture.P;
+        _expectKeySetRefused(
+            ks, abi.encodeWithSelector(TrusteeRegistry.InvalidSigningKey.selector, 3)
+        );
+        ks = _set7();
+        (ks[4].x, ks[4].y) = (0, 0);
+        _expectKeySetRefused(
+            ks, abi.encodeWithSelector(TrusteeRegistry.InvalidSigningKey.selector, 5)
+        );
+    }
+
+    /// One key never signs for two seats, and an identity key never signs as
+    /// a per-election key (trustee-identity.md, Which key signs what; T-37).
+    function test_RefusesRepeatedOrIdentitySigningKeys() public {
+        TrusteeFixture.Seat[] memory ks = _set7();
+        (ks[5].x, ks[5].y) = (ks[1].x, ks[1].y);
+        _expectKeySetRefused(
+            ks, abi.encodeWithSelector(TrusteeRegistry.DuplicateSigningKey.selector, 6)
+        );
+        // Any seat's identity key, its own or another's.
+        for (uint256 seat = 1; seat <= 7; seat++) {
+            ks = _set7();
+            (ks[3].x, ks[3].y) = registry.keyOf(panel, seat);
+            _expectKeySetRefused(
+                ks, abi.encodeWithSelector(TrusteeRegistry.DuplicateSigningKey.selector, 4)
+            );
+        }
+        // The point's other root is another key: a valid, distinct point.
+        ks = _set7();
+        ks[5].y = TrusteeFixture.P - ks[1].y;
+        ks[5].x = ks[1].x;
+        registry.registerCeremony(
+            TrusteeFixture.encode(panel, STUB, TRANSCRIPT, ks, _signed(STUB, ks, _range(1, 4)))
+        );
     }
 
     function test_RefusesNonCanonicalCalldata() public {
@@ -682,7 +918,7 @@ contract TrusteeRegistryTest is TestBase {
         view
         returns (bytes memory)
     {
-        return TrusteeFixture.encode(panel, stub, transcript, _approvals(stub, transcript, seats));
+        return _encode(panel, stub, transcript, _approvals(stub, transcript, seats));
     }
 
     function _registrationFor(
@@ -692,7 +928,11 @@ contract TrusteeRegistryTest is TestBase {
         uint8[] memory seats
     ) internal view returns (bytes memory) {
         return TrusteeFixture.encode(
-            panel, stub, transcript, _approvalsFor(reg, panel, stub, transcript, seats)
+            panel,
+            stub,
+            transcript,
+            _keySetFor(reg, panel),
+            _approvalsFor(reg, panel, stub, transcript, seats)
         );
     }
 
@@ -713,14 +953,98 @@ contract TrusteeRegistryTest is TestBase {
         bytes32 transcript,
         uint8[] memory seats
     ) internal view returns (TrusteeFixture.Approval[] memory a) {
+        bytes32 keySetHash = lib.keySetHash(TrusteeFixture.seatBytes(_keySetFor(reg, panelId)));
         a = new TrusteeFixture.Approval[](seats.length);
         for (uint256 i; i < seats.length; i++) {
             bytes32 digest = TrusteeIdentityLib.registrationDigest(
-                uint64(block.chainid), address(reg), panelId, seats[i], stub, transcript
+                uint64(block.chainid), address(reg), panelId, seats[i], stub, transcript, keySetHash
             );
             (uint256 r, uint256 s) = TrusteeFixture.sign(secrets[seats[i]], digest);
             a[i] = TrusteeFixture.Approval(seats[i], r, s);
         }
+    }
+
+    function _set7() internal view returns (TrusteeFixture.Seat[] memory) {
+        return TrusteeFixture.keySet(keySets, "key-set-7");
+    }
+
+    function _keySetHash(string memory id) internal view returns (bytes32 h) {
+        for (uint256 i;; i++) {
+            string memory at = string.concat(".keySets[", vm.toString(i), "]");
+            if (
+                keccak256(bytes(vm.parseJsonString(keySets, string.concat(at, ".id"))))
+                    == keccak256(bytes(id))
+            ) {
+                return bytes32(
+                    vm.parseBytes(vm.parseJsonString(keySets, string.concat(at, ".keySetHash")))
+                );
+            }
+        }
+    }
+
+    function _drop(TrusteeFixture.Seat[] memory ks, uint256 at)
+        internal
+        pure
+        returns (TrusteeFixture.Seat[] memory out)
+    {
+        out = new TrusteeFixture.Seat[](ks.length - 1);
+        for (uint256 i; i < out.length; i++) {
+            out[i] = ks[i < at ? i : i + 1];
+        }
+    }
+
+    /// Approvals by `seats` of the default panel over key set `ks`.
+    function _signed(bytes32 stub, TrusteeFixture.Seat[] memory ks, uint8[] memory seats)
+        internal
+        view
+        returns (TrusteeFixture.Approval[] memory a)
+    {
+        bytes32 keySetHash = lib.keySetHash(TrusteeFixture.seatBytes(ks));
+        a = new TrusteeFixture.Approval[](seats.length);
+        for (uint256 i; i < seats.length; i++) {
+            bytes32 digest = TrusteeIdentityLib.registrationDigest(
+                uint64(block.chainid),
+                address(registry),
+                panel,
+                seats[i],
+                stub,
+                TRANSCRIPT,
+                keySetHash
+            );
+            (uint256 r, uint256 s) = TrusteeFixture.sign(secrets[seats[i]], digest);
+            a[i] = TrusteeFixture.Approval(seats[i], r, s);
+        }
+    }
+
+    /// A record with key set `ks` is refused with `expected`, whatever its
+    /// approvals: the key set is checked before any signature.
+    function _expectKeySetRefused(TrusteeFixture.Seat[] memory ks, bytes memory expected) internal {
+        _expectRefused(
+            TrusteeFixture.encode(
+                panel, STUB, TRANSCRIPT, ks, _approvals(STUB, TRANSCRIPT, _range(1, 4))
+            ),
+            expected
+        );
+    }
+
+    /// The key set registered for `panelId`: every seat of the 7-seat
+    /// panels, both seats of `panel-2-of-2` (key-set.json).
+    function _keySetFor(TrusteeRegistry reg, bytes32 panelId)
+        internal
+        view
+        returns (TrusteeFixture.Seat[] memory)
+    {
+        (, uint8 size,) = reg.panelOf(panelId);
+        return TrusteeFixture.keySet(keySets, size == 2 ? "key-set-2" : "key-set-7");
+    }
+
+    function _encode(
+        bytes32 panelId,
+        bytes32 stub,
+        bytes32 transcript,
+        TrusteeFixture.Approval[] memory a
+    ) internal view returns (bytes memory) {
+        return TrusteeFixture.encode(panelId, stub, transcript, _keySetFor(registry, panelId), a);
     }
 
     function _withQuorum(uint8 quorum)
@@ -766,7 +1090,7 @@ contract TrusteeRegistryTest is TestBase {
 
     function _expectInvalidSignature(TrusteeFixture.Approval[] memory a, uint8 index) internal {
         _expectRefused(
-            TrusteeFixture.encode(panel, STUB, TRANSCRIPT, a),
+            _encode(panel, STUB, TRANSCRIPT, a),
             abi.encodeWithSelector(TrusteeRegistry.InvalidSignature.selector, index)
         );
     }

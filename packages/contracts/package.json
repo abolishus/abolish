@@ -5,6 +5,9 @@
   "description": "Abolish's contracts (Foundry): the event accumulator, the election, trustee and group registries, the direct-submit board and the L1 board anchor so far, with their wagmi bindings (P1-18).",
   "license": "AGPL-3.0-only",
   "type": "module",
+  "exports": {
+    "./abi": "./src/generated/abi.ts"
+  },
   "scripts": {
     "build": "forge build && rm -rf out/build-info && wagmi generate && vp fmt src/generated",
     "check": "forge fmt --check && forge build --sizes",

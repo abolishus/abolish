@@ -93,7 +93,7 @@ describe("election definition version 5 (docs/spec/election-definition.md, Layou
       expect(decodeError(() => schema.decode(type(v.type).recordType, bytes, UNPINNED))).toBe(
         v.error,
       );
-      expect(decodeError(() => decodeElectionDefinitionV5(bytes))).toBeDefined();
+      expect(decodeError(() => decodeElectionDefinitionV5(bytes))).toBe("truncated");
       return;
     }
     expect(decodeError(() => decodeElectionDefinitionV5(bytes))).toBe(v.error);

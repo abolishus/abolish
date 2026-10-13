@@ -3,7 +3,7 @@
 - Status: Accepted (agent) — owner may veto (2026-10-13, rule A): option D
 - Date: 2026-10-13
 - Deciders: agent, owner may veto (rule A)
-- Threats addressed: T-24, T-53, T-25, T-51, T-49, T-69, T-54 (see [[THREAT_MODEL]])
+- Threats addressed: T-24, T-53, T-25, T-54, T-51, T-49, T-69, T-17 (see [[THREAT_MODEL]])
 
 ## Context
 
@@ -45,38 +45,64 @@ Pros: availability is guaranteed by L1 consensus, not by anyone's honesty, for t
 
 Cons:
 
-- **Capacity and cost.** A blob is 128 KiB. Ethereum's whole blob space is a few blobs per 12-second block, shared by every rollup, at a market price. A ballot with its membership proof is tens of kilobytes, so a 10,000-voter election spread over 12 hours needs hundreds of blobs an hour, a significant share of all Ethereum blob space; a national one is impossible. Mainnet blob fees are spending (owner-only).
+- **Capacity and cost.** A blob is 128 KiB. Ethereum's whole blob space is a handful of blobs per 12-second block (a target of 6 and maximum of 9 since Pectra, raised by later forks), shared by every rollup, at a market price. A ballot with its membership proof is tens of kilobytes, so a 10,000-voter election spread over 12 hours needs hundreds of blobs an hour, a significant share of all Ethereum blob space; a national one is impossible. Mainnet blob fees are spending (owner-only).
 - **Entry-hash lists only.** At 32 bytes per entry these fit (100,000 entries an hour is about 25 blobs). They make every anchored extent's entry hashes public, so a tail can't hide its size. But hashes aren't payloads: a counted ballot whose payload is withheld still can't be checked, and a trustee node still can't recognise a ballot from its entry hash (the header holds fields the operator chose).
 - **Tooling.** The anchoring job needs KZG commitments over the Ethereum trusted setup (an audited library such as c-kzg, in the worker, never in `packages/crypto`). The verifier needn't verify KZG, since it checks any copy against the anchored root, but a beacon node or blob archive becomes an input.
 
 Kept as a later upgrade for entry-hash lists (Consequences), not chosen now.
 
-### D. Content addresses in the checkpoint, plus the trustee panels as an availability committee
+### D. Content addresses in the checkpoint, plus the trustee panels as an availability committee before the result
 
-B's checkpoint, plus a rule that makes the election's own trustees hold the board. After the seal is anchored, every qualified seat's node fetches every anchored segment object by its CID (from IPFS, the archive, the operator or another seat), recomputes each counted checkpoint's root and head from it, and, if they all match, signs an **availability attestation** with its per-election signing key ([[trustee-identity]]) over the definition hash and the seal checkpoint's hash. An attestation states that the seat holds every segment object and entry-hash list of every counted checkpoint through the seal, and binds the seat to serving them. It is posted through the board or, since the operator is the adversary here, directly through the L2 contract path, like a share posting ([[delivery]], Direct submit). It counts if recorded by the **attestation deadline** `t_A`, which falls after the seal's anchoring deadline and no later than the intake cutoff `c_I`.
+B's checkpoint, plus a rule that makes the election's own trustees hold the board. The attestations come at two points, both before any result exists and while every seat still holds its per-election signing key. The key is destroyed only once every cell has a passing opening, or at the tally's own `t_D` after its window ([[tally]], Destruction).
 
-The verifier adds a check after the anchoring checks: for each panel, at least its threshold of qualified seats (`k_D` for the default panel, and `k_A` for an author panel, [[0027-trustee-panels-and-live-results]]) must have attested the seal checkpoint by `t_A`. Otherwise the election **fails `unavailable`**, attributed to the anchoring authority. The verdict lists the seats that attested and those that didn't, so trustee absence is visible too.
+1. **The ballot extent, by `t_A ≤ c_I`.** This is the extent whose checkpoint holds every ballot: those cast by the close, and those direct-submitted and recorded within `W_C`. The window bound already makes it confirmable by `c_I`: `DELIVERY_WINDOW ≥ max(2 · period + deadline, W_C) + R + F` ([[delivery]], Direct submit).
+2. **The counted extent, by `t_A'`.** This extent, due at `t_S`, fixes the counted set ([[tally]], Tally window). `t_A'` falls after `t_S` and before any seat sends a summed share. A seat sends its summed share only after it sees each panel's quorum of counted-extent attestations, so no one attests knowing a result.
+
+At each point, every qualified seat's node fetches every anchored segment object of the extent by its CID, from IPFS, the archive, the operator or another seat. It recomputes each counted checkpoint's root and head from those objects. If they all match, it signs an **availability attestation** with its per-election signing key ([[trustee-identity]]), under its own tag, over:
+
+- the definition hash;
+- the panel and seat;
+- the attested checkpoint's hash.
+
+An attestation states that the seat holds every segment object and entry-hash list of that extent. It binds the seat to publishing them: pinned on IPFS and served, through the archive's confirmation and the verification period after it.
+
+A seat that can't fetch posts a signed **fetch complaint** naming the CID instead. Both records travel like share postings: through the board, or directly through the L2 contract path ([[delivery]], Direct submit), since the operator may be the adversary. Both points fall before the seal, so every attestation and complaint lies in the anchored, sealed extent, evidenced like any other board entry or contract event ([[0025-contract-event-evidence]]). Each counts if submitted by `c_A = t_A − F` (or `t_A' − F`), so a sequencer can delay it but not exclude it.
+
+The verifier adds a check after the anchoring checks. For each point and each panel, at least the panel's threshold of qualified seats (`k_D` for the default panel, and `k_A` for an author panel, [[0027-trustee-panels-and-live-results]]) must have attested in time. Otherwise the election **fails `unavailable`**. The verdict is attributed to no single party. It lists:
+
+- the seats that attested;
+- those that complained, each complaint being that seat's signed word against the authority;
+- those that did nothing.
+
+The registered key set bounds who can post. The board and the contract refuse a second attestation or complaint from a seat for the same checkpoint, so nobody can flood the archive (T-17).
 
 This is a data availability committee, the pattern of Arbitrum AnyTrust ([docs](https://docs.arbitrum.io/how-arbitrum-works/anytrust-protocol)) and other DACs, with the committee chosen as the trustees we already trust for secrecy:
 
-- **The trust assumption doesn't grow.** For the authority to have a withheld extent counted, a panel's threshold of seats must attest to data they don't have. A coalition that large can already open individual ballots. So availability now rests on the same assumption as ballot secrecy, and no weaker one.
-- **Liveness doesn't shrink much.** A panel's threshold must be online after close anyway to publish the tally ([[tally]]), and `t_A` falls in the same window.
-- **Failure becomes a verdict.** A withheld tail can no longer reach a quorum, so the election fails `unavailable`, reproducibly from public data (L1 and the L2's events), instead of staying unverifiable for good. That closes [[board]]'s residual and [[receipts]]' `unresolved` limbo, except under a colluding threshold.
-- **It closes P1-12c's residual.** At `c_I` an honest attesting node holds the whole counted board, so it can show a receipted ballot absent (the delivery rule of [[delivery]], What a node owes). Either a threshold of seats held the board by `t_A ≤ c_I`, and an honest node that couldn't fetch it gets it from them, or the election fails `unavailable` and nothing is dropped silently.
-- **Attestation becomes attributable evidence.** If, after a quorum, no copy can be found, the signed attestations name who claimed to hold it.
+- **The trust assumption doesn't grow.** To get a withheld extent counted, the authority needs a panel's threshold of seats to attest to data they don't have. A coalition that large can already open individual ballots, since every seat still holds its shares at both points. Availability now rests on the same assumption as ballot secrecy, and no weaker one.
+- **No veto over a result.** Both points come before any summed share exists. A seat that refuses to attest aborts the election before anyone knows its outcome, which its panel's threshold could do anyway by withholding the tally. [[tally]] (Destruction checks) rejects any rule that hands trustees a veto after the result, and this rule hands none (T-54). The new liveness duty does fall on the same seats, earlier: by `c_I` for the first point and by `t_A'` for the second.
+- **Failure becomes a verdict.** A withheld ballot or counted extent can no longer reach a quorum. The election then fails `unavailable`, reproducibly from the sealed extent, instead of staying unverifiable for good. That closes [[board]]'s withheld-tail residual for everything the counted set depends on, and [[receipts]]' `unresolved` limbo for ballots, except under a colluding threshold.
+- **It closes P1-12c's residual.** At `c_I`, an honest node that attested the ballot extent holds every ballot, so it can show a receipted newest ballot absent ([[delivery]], What a node owes). Suppose the operator withholds until after `c_I` and releases later: honest seats couldn't attest in time, the election fails `unavailable`, and nothing is dropped silently. An honest node that couldn't fetch, while a quorum did, fetches from the quorum, which is bound to publish.
+- **Attestations are evidence.** If a quorum attested and no public copy can be found, the signed attestations name who claimed to hold it.
 
-Pros: everything B gives; availability failures become verdicts; it closes all three residuals under the secrecy assumption; one attestation per seat per election, on the L2 (cheap); no new primitives (ECDSA P-256 statements, as receipts and complaints use).
+Pros:
+
+- Everything B gives.
+- The ballots and the counted set become available or the election fails, under the secrecy assumption.
+- Two attestations per seat per election (cheap).
+- No new primitives: ECDSA P-256 statements, as receipts and complaints already use.
 
 Cons:
 
-- **The transitional panel.** Until independent trustees are named ([[P1-7]]), the default panel is the operator's alone ([[0027-trustee-panels-and-live-results]], decision 4). Its attestations are the operator vouching for itself. Under that panel this option gives only B's guarantees plus signed self-attestations. An author panel restores it for that author's polls.
-- **Trustees fetch the whole board.** Hundreds of megabytes to gigabytes per election, before `t_A`. That is heavier than intake alone, but every seat already reads the board for the tally.
-- **Withholding before the seal isn't caught until the seal.** Within an election, B's CIDs and the receipt checks are what a voter has; the quorum judges the seal.
-- **More parts.** A new checkpoint version and anchor deployment, a new record and contract call, a new verifier check and window, and a fetch-and-check job on every trustee node.
+- **The transitional panel.** Until independent trustees are named ([[P1-7]]), the default panel is the operator's alone ([[0027-trustee-panels-and-live-results]], decision 4). Its attestations are the operator vouching for itself, so under that panel this option gives only B's guarantees plus signed self-attestations. An author panel restores the protection for that author's polls.
+- **Trustees fetch the ballot extent quickly.** With the deployed constants (hourly periods, a 12-hour anchoring deadline, `F` = 13 hours, `R` = 1 hour), the ballot extent is due about 14 hours after `closes_at + l1_inclusion_bound`, and `c_I − F` falls at about 21 hours. That leaves about 7 hours to fetch and check hundreds of megabytes to gigabytes. Part 2c MUST add the attestation window to `deliveryWindowFits` (`DELIVERY_WINDOW ≥ max(2 · period + deadline, W_C) + A + 2F + R`, `A` the fetch allowance) and lengthen `DELIVERY_WINDOW` if 48 hours doesn't fit. Its value is a constant of delivery version 1, still unfrozen because no election can be registered yet.
+- **The tail after the counted extent isn't covered.** That tail holds spoiled-ballot openings, tally openings and destruction statements. A quorum over it would come after the result, so it stays as today: a withheld or forked tail there leaves the election unverifiable, never failed (T-54). The result rests on the tally openings in that tail, but anyone holding them, the publishing seats included, can complete the record.
+- **Withholding during the election isn't judged until the ballot extent.** Within an election, B's CIDs and the receipt checks are what a voter has.
+- **Attest, then withhold.** A quorum can attest, then every attesting seat and the authority can withhold. The election then stays unverifiable, with the attesters named; it isn't failed.
+- **More parts.** A new checkpoint version and anchor deployment, two records and a contract call, a new verifier check and a window term, and a fetch-and-check job on every trustee node.
 
 ## Recommendation
 
-**D.** It is the only option that turns withholding into a reproducible failure without putting the board on chain, and it does so under the assumption the system already makes for secrecy. B on its own leaves the authority able to claim and withhold. C makes the commitment layer available but not the payloads, at a cost that grows with turnout. A judges by the verifier's network.
+**D.** It is the only option that turns withholding of the ballots and the counted set into a reproducible failure without putting the board on chain. It does so under the assumption the system already makes for secrecy, and before any result, so it adds no veto. B on its own leaves the authority able to claim and withhold. C makes the commitment layer available but not the payloads, at a cost that grows with turnout. A judges by the verifier's network.
 
 What would change it:
 
@@ -86,30 +112,43 @@ What would change it:
 ## Consequences
 
 - **Checkpoint version 2** ([[board]], [[contracts]]; P4-3 part 2b, with P4-1):
-  - Fields: `election_id ‖ u32(segment) ‖ u64(size) ‖ head ‖ root ‖ object_cid ‖ hashes_cid`, 180 bytes, with each CID the 36-byte binary CIDv1 of [[content-addressing]].
-  - Empty segments: a checkpoint for a period with no new entries (a re-anchor, or an empty seal) carries the previous segment's CIDs, never zeros.
-  - Its own hash tag, so a version 1 and a version 2 encoding can never collide.
-  - A new `BoardAnchor` deployment taking 180-byte checkpoints and logging the CIDs. Nothing is deployed yet.
-  - Gas: about 1,200 more per checkpoint for calldata.
-- **The verifier fetches by CID from L1 alone.** A board copy is assembled from the anchored CIDs, every fetched object is checked against its CID and against the anchored roots, and sizes are capped (T-49, T-24, [[content-addressing]], Still to come). `board.bin` stays as a local input.
-- **Availability attestations** ([[board]] or [[delivery]]; P4-3 part 2c):
-  - A new record type, signed under its own tag by the seat's per-election signing key.
-  - A direct-submit call on the L2 board contract (P1-18).
-  - `t_A`, with the window relations `deliveryWindowFits` checks extended to `t_A ≤ c_I`.
-  - A verifier check after 4.2 that fails `unavailable` below a panel's threshold.
-  - The fetch-and-attest job on trustee nodes, which also pins what it attested until the archive confirms it (P4-5).
-- **Reference election.** Stage 8 rebuilds from L1 CIDs and IPFS, stage 9 verifies with our servers offline, and a run where the authority withholds the seal's tail must fail `unavailable` naming the authority.
+  - **Fields.** `election_id ‖ u32(segment) ‖ u64(size) ‖ head ‖ root ‖ object_cid ‖ hashes_cid`, 180 bytes, with each CID the 36-byte binary CIDv1 of [[content-addressing]].
+  - **Its own hash tag,** so no encoding of version 1 and version 2 can collide.
+  - **CID rules,** each violation a failure attributed to the anchoring authority, like `checkpoint-inconsistent`:
+    - each CID is `objectCid` of exactly the bytes whose entries give the anchored root and head, under [[content-addressing]]'s parameters, so no non-canonical CID (such as a single raw block over 1 MiB, which IPFS peers won't transfer) is valid;
+    - `hashes_cid` is the entry-hash list of the bytes `object_cid` names;
+    - a checkpoint with no new entries (a re-anchor, or an empty seal) carries the previous checkpoint's CIDs, and one with new entries carries fresh ones.
+  - **A new `BoardAnchor` deployment** taking 180-byte checkpoints and logging the CIDs. Nothing is deployed yet.
+  - **Gas:** about 2,000 more per checkpoint (calldata, log data, and the accumulator hashing them).
+- **The verifier fetches by CID from L1 alone.** A board copy is assembled from the anchored CIDs. Every fetched object is checked against its CID and the anchored roots, with sizes capped (T-49, T-24; [[content-addressing]], Still to come). `board.bin` stays as a local input.
+- **Availability attestations and fetch complaints** ([[board]] or [[delivery]]; P4-3 part 2c):
+  - two record types, signed under their own tags by the seat's per-election signing key;
+  - the direct-submit call on the L2 board contract (P1-18), refusing unregistered seats and repeats;
+  - the two points and their deadlines, with `deliveryWindowFits` extended as above;
+  - the rule that a seat sends no summed share before the counted extent's quorum ([[tally]]);
+  - a verifier check after 4.2 that fails `unavailable` below a panel's threshold at either point;
+  - the fetch, attest and publish job on trustee nodes, which pins what it attested at least until the archive confirms it and the verification period after the seal (P4-5).
+- **Reference election.** Stage 8 rebuilds from L1 CIDs and IPFS. Stage 9 verifies with our servers offline. A run where the authority withholds part of the ballot extent must fail `unavailable`, with the seats' complaints.
 - **Residuals closed once built** (each closes when 2b and 2c merge, not before):
-  - [[board]]'s withheld or forked tails, except under a colluding panel threshold;
-  - [[receipts]]' unresolved evidence, which then resolves to `unavailable`;
-  - [[delivery]]'s newest-ballot residual, which also needs the transitional panel to end, as below;
+  - [[board]]'s withheld or forked tails, through the counted extent, except under a colluding panel threshold;
+  - [[receipts]]' unresolved evidence for ballots;
+  - [[delivery]]'s newest-ballot residual (also needs the transitional panel to end, as below);
   - [[verifier]]'s anchored-encoding residual.
 - **New known-weak:**
   - Under the transitional panel, D reduces to B plus the operator's self-attestation. The [[P1-12c]] residual stays open until [[P1-7]] names independent trustees, or the owner accepts it for polls under the transitional panel.
-  - Withholding detected only at the seal, not during the election.
+  - The tail after the counted extent stays unverifiable, never failed, when withheld.
+  - Attest-then-withhold leaves the election unverifiable, with the attesters named.
   - A colluding panel threshold can attest to withheld data, as it can open ballots.
-- **Follow-up items:** P4-3 part 2b (checkpoint version 2 and the anchor), part 2c (attestations, the window and the verifier check), and part 2d (the reference election's withholding run). Part 3 (archive manifests) and part 4 (mirroring) keep their places in the plan.
+  - Compelling a threshold to sign a false attestation needs the same coalition as opening ballots, but leaves less trace than a decryption.
+- **Follow-up items:**
+  - P4-3 part 2b: checkpoint version 2 and the anchor.
+  - Part 2c: attestations, the window and the verifier check.
+  - Part 2d: the reference election's withholding run.
+  - Part 3 (archive manifests) and part 4 (mirroring) keep their places in the plan.
 
 ## Decision
 
-Under rule A (`AGENTS.md`): option D, `Accepted (agent) — owner may veto`, listed under Decisions to review in [[STATUS]]. The owner may prefer to accept the [[P1-12c]] residual for polls under the transitional panel instead of waiting for [[P1-7]]; that acceptance is the owner's (STATUS Known-weak already says so), and nothing here decides it. Mainnet blob fees, if C is ever added, are spending and wait for the owner.
+Under rule A (`AGENTS.md`): option D, `Accepted (agent) — owner may veto`, listed under Decisions to review in [[STATUS]].
+
+- The owner may prefer to accept the [[P1-12c]] residual for polls under the transitional panel rather than wait for [[P1-7]]. That acceptance is the owner's (STATUS Known-weak already says so), and nothing here decides it.
+- Mainnet blob fees, if C is ever added, are spending and wait for the owner.

@@ -228,14 +228,18 @@ const l1At = (head: bigint): FinalizedL1 => ({
 const window = { l1RefMin: 10n, closesAt: 1_000_000n + 12n * 100n };
 const closed = l1At(101n);
 
+// A view ballot with whether the node holds a receipt for its hash; `owed`
+// passes those hashes as the node's receipts.
+type TestBallot = ViewBallot & { readonly receipted: boolean };
+
 const view = (
-  b: Partial<ViewBallot> & {
+  b: Partial<TestBallot> & {
     readonly id: number;
     readonly block: bigint;
     /** The public part's id, when two casts share one ballot hash (default: `id`). */
     readonly core?: number;
   },
-): ViewBallot => ({
+): TestBallot => ({
   ballotHash: Uint8Array.of(b.core ?? b.id, ...new Uint8Array(31)),
   tier: b.tier ?? 0,
   nullifier: b.nullifier ?? 7n,
@@ -245,7 +249,10 @@ const view = (
   receipted: b.receipted ?? true,
 });
 
-const owed = (v: readonly ViewBallot[]) => owedReceipts(v, closed, window).map((h) => h[0]);
+const receiptsOf = (v: readonly TestBallot[]) =>
+  v.filter((b) => b.receipted).map((b) => b.ballotHash);
+const owed = (v: readonly TestBallot[]) =>
+  owedReceipts(v, receiptsOf(v), closed, window).map((h) => h[0]);
 
 describe("owedReceipts", () => {
   test("owes only the newest receipted ballot of a tier and nullifier", () => {
@@ -291,6 +298,17 @@ describe("owedReceipts", () => {
     ).toEqual([9]);
   });
 
+  test("a receipt still counts for a ballot hash whose receipted copy was shown absent", () => {
+    // The first copy's block was reorganised away and the full board shows it
+    // absent, so it leaves the view; the copy cast again is on the board, and
+    // the node's receipt for its ballot hash delivers it.
+    const recast = view({ id: 2, core: 9, block: 25n, receipted: false });
+    expect(owedReceipts([recast], [recast.ballotHash], closed, window).map((h) => h[0])).toEqual([
+      9,
+    ]);
+    expect(owedReceipts([recast], [], closed, window)).toEqual([]);
+  });
+
   test("ballots whose L1 reference isn't admitted can't supersede; the newest receipted one is owed too", () => {
     expect(
       owed([
@@ -313,7 +331,7 @@ describe("owedReceipts", () => {
   });
 
   test("throws while L1 hasn't finalized a block after close", () => {
-    expect(() => owedReceipts([view({ id: 1, block: 99n })], l1At(98n), window)).toThrow(
+    expect(() => owedReceipts([view({ id: 1, block: 99n })], [], l1At(98n), window)).toThrow(
       RangeError,
     );
   });
@@ -321,7 +339,7 @@ describe("owedReceipts", () => {
   test("throws when one message names two ballot hashes", () => {
     const a = view({ id: 1, block: 20n });
     expect(() =>
-      owedReceipts([a, { ...a, ballotHash: new Uint8Array(32).fill(3) }], closed, window),
+      owedReceipts([a, { ...a, ballotHash: new Uint8Array(32).fill(3) }], [], closed, window),
     ).toThrow(RangeError);
   });
 
@@ -336,13 +354,13 @@ describe("owedReceipts", () => {
     fc.assert(
       fc.property(fc.uniqueArray(ballot, { selector: (b) => b.id, maxLength: 40 }), (bs) => {
         const v = bs.map((b) => view(b));
-        const got = owedReceipts(v, closed, window).map(toHex);
-        const reversed = owedReceipts([...v].reverse(), closed, window).map(toHex);
+        const got = owedReceipts(v, receiptsOf(v), closed, window).map(toHex);
+        const reversed = owedReceipts([...v].reverse(), receiptsOf(v), closed, window).map(toHex);
         expect(reversed).toEqual(got);
         const perGroup = new Map<string, number>();
         for (const h of got) {
           const b = v.find((x) => toHex(x.ballotHash) === h) as ViewBallot;
-          expect(b.receipted).toBe(true);
+          expect(receiptsOf(v).map(toHex)).toContain(h);
           const key = `${b.tier}:${b.nullifier}`;
           perGroup.set(key, (perGroup.get(key) ?? 0) + 1);
         }
@@ -376,12 +394,13 @@ describe("owedReceipts", () => {
             group.filter((b) => b.l1RefNumber === top).map((b) => [toHex(b.message), b]),
           );
           if (best.size !== 1) continue;
-          const [only] = [...best.values()] as [ViewBallot];
+          const [only] = [...best.values()] as [TestBallot];
           if (receipted.has(toHex(only.ballotHash))) want.push(toHex(only.ballotHash));
         }
-        // And each group's newest receipted ballot whose reference isn't admitted.
+        // And each group's newest view ballot with a receipt whose reference isn't admitted.
         const failed = v.filter(
-          (b) => b.receipted && (b.l1RefNumber < 10n || b.l1RefNumber > 100n),
+          (b) =>
+            receipted.has(toHex(b.ballotHash)) && (b.l1RefNumber < 10n || b.l1RefNumber > 100n),
         );
         for (const key of new Set(failed.map((b) => `${b.tier}:${b.nullifier}`))) {
           const [newest] = failed
@@ -394,10 +413,10 @@ describe("owedReceipts", () => {
                 : toHex(a.ballotHash) < toHex(b.ballotHash)
                   ? -1
                   : 1,
-            ) as [ViewBallot];
+            ) as [TestBallot];
           if (!want.includes(toHex(newest.ballotHash))) want.push(toHex(newest.ballotHash));
         }
-        expect(owedReceipts(v, closed, window).map(toHex)).toEqual(want.sort());
+        expect(owedReceipts(v, receiptsOf(v), closed, window).map(toHex)).toEqual(want.sort());
       }),
       { numRuns },
     );
@@ -417,7 +436,7 @@ describe("owedReceipts", () => {
       head: r.l1RefNumber + 1n,
       block: (n) => ({ hash: n === r.l1RefNumber ? r.l1RefHash : blockHash(n), timestamp: n }),
     };
-    const got = owedReceipts([{ ...r, receipted: true }], l1, {
+    const got = owedReceipts([r], [r.ballotHash], l1, {
       l1RefMin: 0n,
       closesAt: r.l1RefNumber,
     });

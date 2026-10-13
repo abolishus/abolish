@@ -254,7 +254,9 @@ export function deliveryWindowFits(constants: {
 /**
  * One ballot of a trustee node's view (docs/spec/delivery.md, What a node
  * owes): a ballot it receipted and can't show absent, or one it holds from
- * the anchored board or the contract's records. Each passed the admission
+ * the anchored board or the contract's records. Whether the node receipted
+ * it is decided by its ballot hash against the node's receipts, never by the
+ * copy (`owedReceipts`). Each passed the admission
  * checks (verifier 5.1 to 5.4, at intake or as the node checked it), and
  * `message` is `M` recomputed from its record, never a decoded field.
  */
@@ -265,19 +267,18 @@ export interface ViewBallot {
   readonly message: Uint8Array;
   readonly l1RefNumber: bigint;
   readonly l1RefHash: Uint8Array;
-  /** Whether this node receipted it. */
-  readonly receipted: boolean;
 }
 
 /**
  * The ballot hashes whose receipts a trustee node owes through the contract
  * path (docs/spec/delivery.md, What a node owes). For each tier and nullifier:
  * the ballot [[revoting]]'s selection picks from the node's view, among those
- * whose L1 reference is admitted, if the node receipted its ballot hash (under
- * any L1 reference: a receipt covers the public part), and nothing on a tie or
+ * whose L1 reference is admitted, if `receipts` holds its ballot hash (under
+ * any L1 reference: a receipt covers the public part, and a copy the node
+ * showed absent leaves its receipt in `receipts`), and nothing on a tie or
  * when the pick is a ballot it didn't receipt; and, since the view may lack
- * the copy that counts, the ballot hash of its newest receipted ballot whose
- * reference isn't admitted (a block reorganised away, whose core the client
+ * the copy that counts, the ballot hash of its newest view ballot with a
+ * receipt whose reference isn't admitted (a block reorganised away, whose core the client
  * cast again, revoting Client rule 4). At most two per tier and nullifier, so
  * with membership-checked intake at most two per member of each tier,
  * however many ballots anyone delivers or an operator withholds (ADR 0002,
@@ -289,10 +290,13 @@ export interface ViewBallot {
  */
 export function owedReceipts(
   view: Iterable<ViewBallot>,
+  /** The ballot hash of every receipt the node issued, never reduced by absence. */
+  receipts: Iterable<Uint8Array>,
   l1: FinalizedL1,
   window: { readonly l1RefMin: bigint; readonly closesAt: bigint },
 ): Uint8Array[] {
   const receipted = new Set<string>();
+  for (const h of receipts) receipted.add(hex(h));
   const hashOf = new Map<string, Uint8Array>();
   // Per tier and nullifier, the newest receipted ballot whose reference isn't
   // admitted (ties broken by the smaller ballot hash, so every node agrees).
@@ -308,11 +312,8 @@ export function owedReceipts(
     const verdict = checkL1Reference(b, l1, window);
     if (verdict === "pending")
       throw new RangeError("owedReceipts: L1 hasn't finalized a block after close");
-    // Before the L1 filter: a receipt for a ballot whose reference was
-    // reorganised away still covers its public part cast again.
-    if (b.receipted) receipted.add(hex(b.ballotHash));
     if (verdict !== "admitted") {
-      if (b.receipted) {
+      if (receipted.has(hex(b.ballotHash))) {
         const key = `${b.tier}:${b.nullifier}`;
         const prev = unadmitted.get(key);
         if (

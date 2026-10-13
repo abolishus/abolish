@@ -1,6 +1,6 @@
-import { buttonVariants, cn, Fingerprint, groupHex, useActiveStep } from "@abolishus/ui";
+import { buttonVariants, cn, Fingerprint, groupHex } from "@abolishus/ui";
 import { ArrowRight } from "lucide-react";
-import { type ReactNode, useId, useRef } from "react";
+import { type ReactNode, useId } from "react";
 
 import type { EverydayPoll, EverydayQuestion, LiveBatch } from "./everyday-fixtures.ts";
 import {
@@ -18,6 +18,7 @@ import { CLIENT_RELEASE } from "./fixtures.ts";
 import { Frame } from "./shell.tsx";
 
 export { Frame };
+export { StepScene } from "../components/step-scene.tsx";
 
 /** Everyday buttons and answer targets: the kit's buttons, with the register's rounder corners. */
 export const ROUND = "";
@@ -264,49 +265,6 @@ export function audienceCaption(ballots: number, when: string) {
     <>
       Among <span className="text-foreground tabular-nums">{num(ballots)}</span> {PEOPLE} · {when}
     </>
-  );
-}
-
-/**
- * Scrollytelling in the everyday register: a sticky graphic beside
- * step cards. The graphic follows the step at the middle of the viewport, so
- * it moves only with the reader's own scrolling.
- */
-export function StepScene({
-  label,
-  steps,
-  graphic,
-  className,
-}: {
-  label: string;
-  steps: readonly ReactNode[];
-  graphic: (step: number) => ReactNode;
-  className?: string;
-}) {
-  const refs = useRef<(HTMLElement | null)[]>([]);
-  const active = useActiveStep(refs);
-  return (
-    <section aria-label={label} className={cn("relative grid gap-x-12 lg:grid-cols-12", className)}>
-      <div className="sticky top-0 z-0 bg-background py-4 lg:order-last lg:col-span-7 lg:flex lg:h-svh lg:items-center lg:py-0">
-        <div className="w-full">{graphic(active)}</div>
-      </div>
-      <ol className="relative z-10 m-0 list-none p-0 lg:col-span-5">
-        {steps.map((step, index) => (
-          <li
-            key={index}
-            ref={(element) => {
-              refs.current[index] = element;
-            }}
-            data-active={index === active ? "" : undefined}
-            className="flex min-h-[70svh] items-center py-10"
-          >
-            <div className="w-full border border-border bg-background p-6 transition-colors duration-300 in-data-active:border-primary motion-reduce:transition-none">
-              {step}
-            </div>
-          </li>
-        ))}
-      </ol>
-    </section>
   );
 }
 

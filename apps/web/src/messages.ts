@@ -5,9 +5,46 @@ import type { Message } from "@abolishus/ui";
 
 const enUS = {
   siteName: "Abolish",
-  homeTitle: "Public polls you can check yourself",
+  homeTitle: "Ask anything. Anyone can answer. Anyone can check the count.",
   homeLede:
-    "Every ballot is encrypted on the voter's device and posted to a public board. Anyone can recount a result from the board and the chain, without trusting us.",
+    "Questions big and small, from your street to your county. Every answer is sealed on the voter's own device and posted to a public board, so anyone who downloads the board can count it again.",
+  homeBrowse: "Browse polls",
+  homeNonBinding: "Non-binding, and run by citizens.",
+  homeLookupTitle: "Have a poll's ID?",
+  homeListUnavailable:
+    "The list of polls couldn't be loaded just now. Every poll still opens by its ID.",
+  trustTitle: "Why you can trust a casual poll",
+  trustLede:
+    "A question about street trees gets the same care as a referendum. Here is what happens to an answer, in four steps.",
+  trustLabel: "What happens to an answer",
+  trustStep: "Step {step} of {total}",
+  trust1Title: "Sealed on your device",
+  trust1Body:
+    "When you answer, the ballot app seals it on your own device before it goes anywhere. What travels is a locked box, not your answer.",
+  trust1Detail:
+    "The detail: it is split into shares, each encrypted to one of the poll's trustees.",
+  trust2Title: "Put on a public board",
+  trust2Body:
+    "Every sealed answer goes on a public board that anyone can read. You keep a tracking code, so you can find yours there and see that it was counted.",
+  trust2Detail: "The detail: each entry extends a hash chain, so removing or changing one shows.",
+  trust3Title: "Opened only after the poll closes",
+  trust3Body:
+    "The count is unlocked only when enough of the poll's trustees, each holding one share of the key, work together after it closes. No single seat can open it alone. During launch every seat is run by Abolish, so these polls are private from everyone except us. Independent trustees take over before the first civic vote, and askers will be able to add trustees of their own.",
+  trust3Detail: "The detail: it takes {threshold} of the {seats} seats.",
+  trust4Title: "Counted again by anyone",
+  trust4Body:
+    "Anyone can take the public board and count it again with the open-source verifier. If their count matches ours, nobody has to take our word for it.",
+  trust4Detail: "The detail: the verifier checks every proof as well as the count.",
+  graphicAnswer: "Your answer",
+  graphicOption: "Yes",
+  graphicSealed: "What leaves your device",
+  graphicBoard: "The public board",
+  graphicYours: "Yours",
+  graphicOpen: "To open the count",
+  graphicSeats: "{threshold} of {seats} seats",
+  graphicPublished: "Published count",
+  graphicRecount: "Anyone's recount",
+  graphicMatch: "They match.",
   lookupLabel: "Poll ID",
   lookupHint: "The 64-character ID from a poll link or a receipt.",
   lookupSubmit: "Open poll",
@@ -78,8 +115,7 @@ const enUS = {
   navModerationNote: "Every moderation decision, with its reason",
   navHomeNote: "Start again from the front page",
   footerClaim: "Non-binding, run by citizens, and every count can be checked.",
-  footerRecord:
-    "Every poll here is on a public board. The verifier recounts it from the chain, without our servers.",
+  footerRecord: "Every poll here is on a public board that anyone can download and count again.",
   footerNav: "The record",
   otherPlaces: "Other places to go",
   notFoundCode: "404 · Not found",

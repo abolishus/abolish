@@ -5,7 +5,7 @@
 // talked into breaking one by a crash, a retry or a race (docs/spec/ceremony.md,
 // Soundness and Approval and re-runs; T-14, T-37).
 import { constants } from "node:fs";
-import { link, mkdir, open, readFile, unlink } from "node:fs/promises";
+import { link, mkdir, open, readdir, readFile, stat, unlink } from "node:fs/promises";
 import { join } from "node:path";
 
 export interface PutOnce {
@@ -33,7 +33,10 @@ function checkedKey(key: string): string {
   return key;
 }
 
-/** In memory, for tests and for runs that may be lost with the process. */
+/**
+ * In memory, for tests only: a restart forgets every record, which breaks
+ * every duty the records keep. The package entry point doesn't export it.
+ */
 export class MemoryStore implements SeatStore {
   readonly #records = new Map<string, Uint8Array>();
 
@@ -53,18 +56,55 @@ export class MemoryStore implements SeatStore {
 const isCode = (e: unknown, code: string) =>
   e instanceof Error && (e as NodeJS.ErrnoException).code === code;
 
+/** Makes a directory's entries durable; injectable so tests can see which are synced. */
+export type SyncDirectory = (path: string) => Promise<void>;
+
+async function fsyncDirectory(path: string): Promise<void> {
+  const handle = await open(path, constants.O_RDONLY);
+  try {
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+}
+
 /**
  * One file per record under `root`. A record is written to a fresh temporary
  * file, synced, and then hard-linked to its name: `link` fails if the name
  * exists, so the write-once rule holds across processes sharing the
- * directory, and a crash leaves either no record or a whole one. Directories
- * are 0700 and files 0600: the records include the run's secret keys.
+ * directory, and a crash leaves either no record or a whole one. Then every
+ * directory from the record's up to the root is synced, so neither the
+ * record nor a directory created for it is lost in a crash once `putOnce`
+ * resolves. The root and every directory are 0700 and files 0600: the
+ * records include the run's secret keys.
+ *
+ * The write-once rule holds only if the store is never rolled back
+ * (restored from a backup or a snapshot) and a seat runs from exactly one
+ * store: either would let the node act twice where it must act once.
  */
 export class FileStore implements SeatStore {
   readonly #root: string;
+  readonly #sync: SyncDirectory;
 
-  constructor(root: string) {
+  private constructor(root: string, sync: SyncDirectory) {
     this.#root = root;
+    this.#sync = sync;
+  }
+
+  /**
+   * Opens the store at `root`, creating it 0700 if it doesn't exist. Refuses
+   * a root anyone but its owner can reach, and removes the temporary files a
+   * crash left behind, which may hold secrets of a record never written.
+   */
+  static async open(root: string, sync: SyncDirectory = fsyncDirectory): Promise<FileStore> {
+    await mkdir(root, { recursive: true, mode: 0o700 });
+    const { mode } = await stat(root);
+    if ((mode & 0o077) !== 0)
+      throw new Error(`store: ${root} must be reachable by its owner only (mode 0700)`);
+    for (const entry of await readdir(root, { recursive: true, withFileTypes: true }))
+      if (entry.isFile() && entry.name.startsWith(".tmp-"))
+        await unlink(join(entry.parentPath, entry.name));
+    return new FileStore(root, sync);
   }
 
   async get(key: string): Promise<Uint8Array | undefined> {
@@ -77,8 +117,9 @@ export class FileStore implements SeatStore {
   }
 
   async putOnce(key: string, value: Uint8Array): Promise<PutOnce> {
-    const path = join(this.#root, checkedKey(key));
-    const dir = join(path, "..");
+    const parts = checkedKey(key).split("/");
+    const path = join(this.#root, ...parts);
+    const dir = join(this.#root, ...parts.slice(0, -1));
     await mkdir(dir, { recursive: true, mode: 0o700 });
     const held = await this.get(key);
     if (held !== undefined) return { created: false, value: held };
@@ -106,13 +147,10 @@ export class FileStore implements SeatStore {
     } finally {
       await unlink(temporary);
     }
-    // The new name is durable only once its directory is synced.
-    const handle = await open(dir, constants.O_RDONLY);
-    try {
-      await handle.sync();
-    } finally {
-      await handle.close();
-    }
+    // A name is durable only once its directory is synced, and a directory
+    // created above only once its parent is: every level, up to the root.
+    for (let at = parts.length - 1; at >= 0; at--)
+      await this.#sync(join(this.#root, ...parts.slice(0, at)));
     const now = await this.get(key);
     if (now === undefined) throw new Error(`store: ${key} vanished after it was written`);
     return { created, value: now };

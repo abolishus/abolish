@@ -7,7 +7,7 @@ export {
   type SeatRefusal,
   type SeatResult,
 } from "./ceremony.ts";
-export { FileStore, MemoryStore, type PutOnce, type SeatStore } from "./store.ts";
+export { FileStore, type PutOnce, type SeatStore, type SyncDirectory } from "./store.ts";
 export {
   checkStub,
   type ElectorateCheck,

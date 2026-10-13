@@ -161,7 +161,16 @@ export class CeremonySeat {
       `${prefix}/begun`,
       encode(BEGUN, { election_id: checked.stub.election_id }),
     );
-    if (!begun.created) return refuse("run-seen");
+    if (!begun.created) {
+      // A retry after a lost response gets the message it already sent; a
+      // run without one (it crashed before recording it) stays abandoned.
+      const sent = await config.store.get(`${prefix}/round-1`);
+      const own =
+        sent === undefined
+          ? undefined
+          : decodeCeremonyTranscript(decode(SENT, sent).rounds, 1).keys[0];
+      return own === undefined ? refuse("run-seen") : { ok: true, value: own };
+    }
     const seat = ceremonyKeygen(config.index, config.identitySecret);
     const params = this.#params(checked.stub.election_id, checked.stubHash, runId);
     const message = keysMessage(params, seat);
@@ -177,12 +186,15 @@ export class CeremonySeat {
   async challenges(
     stubHash: Uint8Array,
     runId: Uint8Array,
-    keys: readonly KeysMessage[],
+    given: readonly KeysMessage[],
   ): Promise<SeatResult<ChallengesMessage>> {
     const run = await this.#run(stubHash, runId);
     if (run === undefined) return refuse("no-run");
     const own = await this.#own(run, 1);
     if (own === undefined) return refuse("no-run");
+    const copy = this.#snapshot(runId, { keys: given });
+    if (copy === undefined) return refuse("rounds");
+    const { keys } = copy;
     if (!this.#holds(runId, 1, keys, own)) return refuse("view");
     return this.#round(run, 2, { keys }, () => {
       const c = challengesMessage(run.params, run.seat, keys);
@@ -194,12 +206,15 @@ export class CeremonySeat {
   async answers(
     stubHash: Uint8Array,
     runId: Uint8Array,
-    rounds: Rounds12,
+    given: Rounds12,
   ): Promise<SeatResult<AnswersMessage>> {
     const run = await this.#run(stubHash, runId);
     if (run === undefined) return refuse("no-run");
     const sent = await this.#record(run, 2);
     if (sent === undefined) return refuse("no-run");
+    const copy = this.#snapshot(runId, given);
+    if (copy === undefined) return refuse("rounds");
+    const rounds: Rounds12 = { keys: copy.keys, challenges: copy.challenges };
     const own = (sent.transcript.challenges as readonly ChallengesMessage[])[0];
     if (
       own === undefined ||
@@ -221,13 +236,20 @@ export class CeremonySeat {
   async reveals(
     stubHash: Uint8Array,
     runId: Uint8Array,
-    rounds: Rounds123,
+    given: Rounds123,
   ): Promise<SeatResult<RevealsMessage>> {
     const run = await this.#run(stubHash, runId);
     if (run === undefined) return refuse("no-run");
     const challenged = await this.#record(run, 2);
     const sent = await this.#record(run, 3);
     if (challenged === undefined || sent === undefined) return refuse("no-run");
+    const copy = this.#snapshot(runId, given);
+    if (copy === undefined) return refuse("rounds");
+    const rounds: Rounds123 = {
+      keys: copy.keys,
+      challenges: copy.challenges,
+      answers: copy.answers,
+    };
     const own = (sent.transcript.answers as readonly AnswersMessage[])[0];
     if (
       own === undefined ||
@@ -415,6 +437,32 @@ export class CeremonySeat {
       }),
       mus,
     });
+  }
+
+  /**
+   * The caller's rounds as fresh decoded copies of their encoding, so what
+   * the checks read is what the node signs over and records, whatever
+   * objects a transport handed in; `undefined` for rounds with no encoding.
+   */
+  #snapshot(runId: Uint8Array, given: Partial<Rounds123>): CeremonyTranscript | undefined {
+    if (given === null || typeof given !== "object") return undefined;
+    const { keys, challenges, answers } = given;
+    let bytes: Uint8Array;
+    try {
+      bytes = this.#sent(
+        runId,
+        {
+          ...(keys !== undefined && { keys }),
+          ...(challenges !== undefined && { challenges }),
+          ...(answers !== undefined && { answers }),
+        },
+        [],
+      );
+    } catch (e) {
+      if (e instanceof EncodeError || e instanceof TypeError) return undefined;
+      throw e;
+    }
+    return decodeCeremonyTranscript(decode(SENT, bytes).rounds, 1);
   }
 
   /** Whether two lists of round-`r` messages encode to the same bytes. */

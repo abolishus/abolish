@@ -51,6 +51,17 @@ export type StubCheck =
   | { readonly ok: true; readonly stub: ElectionDefinition; readonly stubHash: Uint8Array }
   | { readonly ok: false; readonly code: StubRefusal };
 
+// The versions of the record types `profileCombinationRule` doesn't judge
+// that this release reads. Fixed here rather than read from crypto's record
+// types, so a version crypto adds reaches nodes only through a release that
+// lists it; the ceremony transcript is the one this node checks (1).
+const READ_VERSIONS: ReadonlyMap<number, ReadonlySet<number>> = new Map([
+  [RECORD_TYPES.receipt, new Set([1])],
+  [RECORD_TYPES.ceremonyTranscript, new Set([1])],
+  [RECORD_TYPES.tallyOpening, new Set([1])],
+  [RECORD_TYPES.contractEvent, new Set([1])],
+]);
+
 const equal = (a: Uint8Array, b: Uint8Array) =>
   a.length === b.length && a.every((x, i) => x === b[i]);
 
@@ -92,10 +103,19 @@ export async function checkStub(
   )
     return { ok: false, code: "stub-pins" };
   // 3, [[verifier]] 2.3: every pinned version is one this release reads, in
-  // a combination that fits. Unlike the verifier, which leaves an election
+  // a combination that fits. The well-formedness rule above makes the pins
+  // exactly types 0x0001 to 0x0009: `profileCombinationRule` judges five of
+  // them, and the rest are judged here. Unlike the verifier, which leaves an election
   // it can't read unverifiable, a node refuses: it can't check what it
   // can't read.
-  if (profileCombinationRule(stub) !== undefined) return { ok: false, code: "stub-profile" };
+  if (
+    profileCombinationRule(stub) !== undefined ||
+    stub.profile.pins.some((p) => {
+      const read = READ_VERSIONS.get(p.record_type);
+      return read !== undefined && !read.has(p.version);
+    })
+  )
+    return { ok: false, code: "stub-profile" };
   // 3, [[verifier]] 1.3: ballot versions 1 and 2 prove membership under the
   // one key this release pins; a later version's key isn't known here.
   const ballot = pinnedVersion(stub, RECORD_TYPES.ballot);

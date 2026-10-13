@@ -6,14 +6,15 @@ import {
   RECORD_TYPES,
 } from "@abolishus/crypto";
 import { describe, expect, test } from "vite-plus/test";
-import { CeremonySeat, checkStub, MemoryStore, type Pins } from "../src/index.ts";
+import { CeremonySeat, checkStub, type Pins } from "../src/index.ts";
+import { MemoryStore } from "../src/store.ts";
 import { L2_CHAIN_ID, panelOf, stubFor, TRUSTEE_REGISTRY } from "./fixture.ts";
 
 const { panel, secrets } = panelOf(4, 2);
-const pins: Pins = { panel, l2ChainId: L2_CHAIN_ID, trusteeRegistry: TRUSTEE_REGISTRY };
+const pinned: Pins = { panel, l2ChainId: L2_CHAIN_ID, trusteeRegistry: TRUSTEE_REGISTRY };
 const pass = () => Promise.resolve(true);
 const check = (stub: ElectionDefinition, electorate = pass) =>
-  checkStub(encodeElectionDefinition(stub), pins, electorate);
+  checkStub(encodeElectionDefinition(stub), pinned, electorate);
 
 describe("stub checks", () => {
   test("accepts a stub its pins fix, with the hash recomputed from its bytes", async () => {
@@ -23,7 +24,7 @@ describe("stub checks", () => {
 
   test("refuses bytes that don't decode", async () => {
     const bytes = encodeElectionDefinition(stubFor(panel));
-    expect(await checkStub(bytes.subarray(0, bytes.length - 1), pins, pass)).toEqual({
+    expect(await checkStub(bytes.subarray(0, bytes.length - 1), pinned, pass)).toEqual({
       ok: false,
       code: "stub-decode",
     });
@@ -34,8 +35,8 @@ describe("stub checks", () => {
     for (const version of [3, 5, 6, 7, 200]) {
       const other = Uint8Array.from(bytes);
       other[2] = version;
-      expect(await checkStub(other, pins, pass)).toMatchObject({ ok: false });
-      const result = await checkStub(other, pins, pass);
+      expect(await checkStub(other, pinned, pass)).toMatchObject({ ok: false });
+      const result = await checkStub(other, pinned, pass);
       expect(result.ok ? undefined : result.code).toMatch(/^stub-(version|decode)$/);
     }
   });
@@ -74,6 +75,41 @@ describe("stub checks", () => {
     expect(result.ok ? undefined : result.code).toMatch(/^stub-(profile|rule)$/);
   });
 
+  test("refuses a pinned version this release doesn't read, for every record type", async () => {
+    const stub = stubFor(panel);
+    for (const type of [
+      RECORD_TYPES.electionDefinition,
+      RECORD_TYPES.ballot,
+      RECORD_TYPES.spoiledBallotOpening,
+      RECORD_TYPES.receipt,
+      RECORD_TYPES.ceremonyTranscript,
+      RECORD_TYPES.tallyOpening,
+      RECORD_TYPES.boardEntry,
+      RECORD_TYPES.contractEvent,
+      RECORD_TYPES.displayText,
+    ])
+      for (const version of [2, 9]) {
+        const pins = stub.profile.pins.map((p) => (p.record_type === type ? { ...p, version } : p));
+        const result = await checkStub(
+          encodeElectionDefinition({ ...stub, profile: { ...stub.profile, pins } }),
+          pinned,
+          pass,
+        );
+        // Some versions are known but don't pair with definition version 1;
+        // either way the node lends no keys.
+        expect(result.ok, `0x${type.toString(16)} = ${version}`).toBe(false);
+      }
+  });
+
+  test("refuses a stub whose threshold or panel size alone differs from the pinned panel", async () => {
+    expect(await check(stubFor(panel, { threshold: 3 }))).toEqual({ ok: false, code: "stub-pins" });
+    const bigger = panelOf(5, 2).panel;
+    expect(await check(stubFor(panel, { panel_size: bigger.keys.length }))).toEqual({
+      ok: false,
+      code: "stub-pins",
+    });
+  });
+
   test("refuses a membership key other than the pinned one", async () => {
     expect(await check(stubFor(panel, { membership_vk_hash: new Uint8Array(32).fill(7) }))).toEqual(
       { ok: false, code: "stub-membership-key" },
@@ -98,7 +134,7 @@ describe("stub checks", () => {
   test("a seat refuses to join a run over a stub that fails, recording nothing", async () => {
     const store = new MemoryStore();
     const seat = new CeremonySeat({
-      ...pins,
+      ...pinned,
       index: 1,
       identitySecret: secrets[0] as Uint8Array,
       electorate: () => Promise.resolve(false),

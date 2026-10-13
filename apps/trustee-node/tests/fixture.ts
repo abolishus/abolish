@@ -22,7 +22,8 @@ import {
   TALLY_SCHEMES,
 } from "@abolishus/crypto";
 import { expect } from "vite-plus/test";
-import { CeremonySeat, type SeatResult, type SeatStore, MemoryStore } from "../src/index.ts";
+import { CeremonySeat, type SeatResult, type SeatStore } from "../src/index.ts";
+import { MemoryStore } from "../src/store.ts";
 
 export const L2_CHAIN_ID = 31338n;
 export const TRUSTEE_REGISTRY = new Uint8Array(20).fill(0xa3);

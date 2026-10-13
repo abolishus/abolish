@@ -597,6 +597,58 @@ contract ElectionRegistryTest is TestBase {
         registry.registerDefinition(enc);
     }
 
+    /// δ within the close rule's bounds (docs/spec/close.md; T-35, T-50): one
+    /// second outside either bound is refused, each bound itself is not.
+    function test_RefusesAnInclusionBoundOutsideItsBounds() public {
+        assertEq(registry.MIN_INCLUSION_BOUND(), 600, "floor, as docs/spec/parameters.md");
+        assertEq(registry.MAX_INCLUSION_BOUND(), 3600, "ceiling, as docs/spec/parameters.md");
+        uint32[4] memory refused = [uint32(0), 599, 3601, type(uint32).max - 1];
+        for (uint256 i; i < refused.length; i++) {
+            (bytes32 id,) = _created();
+            ElectionDefinitionLib.Definition memory d = RegistryFixture.template(registry, id);
+            d.l1InclusionBound = refused[i];
+            bytes memory enc = RegistryFixture.approve(lib, trustees, d);
+            _expectRefused(
+                CREATOR,
+                enc,
+                abi.encodeWithSelector(
+                    ElectionRegistry.InclusionBoundOutOfRange.selector, refused[i]
+                )
+            );
+            _assertNoParameters(lib.hash(enc));
+        }
+        uint32[2] memory admitted = [uint32(600), 3600];
+        for (uint256 i; i < admitted.length; i++) {
+            (bytes32 id,) = _created();
+            ElectionDefinitionLib.Definition memory d = RegistryFixture.template(registry, id);
+            d.l1InclusionBound = admitted[i];
+            bytes memory enc = RegistryFixture.approve(lib, trustees, d);
+            vm.prank(CREATOR);
+            registry.registerDefinition(enc);
+            _assertParameters(lib.hash(enc), d);
+        }
+    }
+
+    /// Any δ is admitted exactly when it is within the bounds, and an admitted
+    /// one is recorded with the poll's window, which the board's close-rule
+    /// checks read.
+    function testFuzz_InclusionBoundAdmittedExactlyWithinItsBounds(uint32 bound, uint64 length)
+        public
+    {
+        (bytes32 id,) = _created();
+        ElectionDefinitionLib.Definition memory d = RegistryFixture.template(registry, id);
+        d.l1InclusionBound = bound;
+        // Any poll length that keeps closes_at + δ within u64 (`timing`).
+        d.closesAt = uint64(_bound(length, d.opensAt + 1, type(uint64).max - type(uint32).max));
+        bytes memory enc = RegistryFixture.approve(lib, trustees, d);
+        vm.prank(CREATOR);
+        (bool ok,) =
+            address(registry).call(abi.encodeCall(ElectionRegistry.registerDefinition, (enc)));
+        assertTrue(ok == (bound >= 600 && bound <= 3600), "admitted exactly within the bounds");
+        if (ok) _assertParameters(lib.hash(enc), d);
+        else _assertNoParameters(lib.hash(enc));
+    }
+
     /// The electorate is in the past (T-08, T-13): a root at the registering
     /// block itself is refused, one block earlier is not.
     function test_RefusesARootNotInThePast() public {
@@ -852,6 +904,9 @@ contract ElectionRegistryTest is TestBase {
         assertEq(p.panelSize, d.panelSize, "panel size");
         assertEq(p.authorThreshold, d.authorThreshold, "author threshold");
         assertEq(p.authorPanelSize, d.authorKeys.length, "author panel size");
+        assertEq(p.opensAt, d.opensAt, "opens at");
+        assertEq(p.closesAt, d.closesAt, "closes at");
+        assertEq(p.l1InclusionBound, d.l1InclusionBound, "inclusion bound");
         assertEq(p.optionCount, total, "option count");
         assertEq(p.cellCount, cellTiers.length, "cell count");
         assertEq(p.questions.length, qs.length, "questions");
@@ -886,6 +941,9 @@ contract ElectionRegistryTest is TestBase {
         assertEq(p.panelSize, 0, "panel size");
         assertEq(p.authorThreshold, 0, "author threshold");
         assertEq(p.authorPanelSize, 0, "author panel size");
+        assertEq(p.opensAt, 0, "opens at");
+        assertEq(p.closesAt, 0, "closes at");
+        assertEq(p.l1InclusionBound, 0, "inclusion bound");
         assertEq(p.optionCount, 0, "option count");
         assertEq(p.cellCount, 0, "cell count");
         assertEq(p.questions.length, 0, "questions");

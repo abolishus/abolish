@@ -112,7 +112,7 @@ const CHAPTERS: readonly Chapter[] = [
 
 /** The known limits, each with the threat entries that describe it (docs/threats/). */
 const WEAK_POINTS = [
-  { id: "Panel", threats: ["T-14", "T-69"] },
+  { id: "Panel", threats: ["T-14", "T-11", "T-69"] },
   { id: "Sybil", threats: ["T-01"] },
   { id: "Watch", threats: ["T-45", "T-46"] },
   { id: "Collude", threats: ["T-14"] },

@@ -159,7 +159,7 @@ const enUS = {
   howWeakPanelMeans:
     "Abolish runs every seat of the launch panel, so we could open any single ballot, and anyone who can compel us could make us.",
   howWeakPanelLimit:
-    "An opened ballot shows what one anonymous voting identity answered, not who it is. Independent trustees take over before the first civic vote, but polls opened before then stay readable with our shares until we destroy them, which no one can verify.",
+    "An opened ballot shows what one anonymous voting identity answered, not who it is, unless it is joined to the network address the ballot came from (see the limit on addresses below). Independent trustees take over before the first civic vote, but polls opened before then stay readable with our shares until we destroy them, which no one can verify.",
   howWeakSybilTitle: "Tier 0 can be faked at scale",
   howWeakSybilMeans:
     "Anyone can create many passkey accounts. A Tier 0 result describes what accounts said, not what people think.",
@@ -188,7 +188,7 @@ const enUS = {
   howWeakNetworkMeans:
     "Our servers receive each ballot with the network address it was sent from, which could help link a ballot to a person.",
   howWeakNetworkLimit:
-    "Not mitigated yet. We don't log it, but you can't check that; a VPN or Tor hides your address from us.",
+    "Not mitigated. Our API's own request log leaves addresses out on the ballot path, but our hosting provider and the network edge in front of it may still see or record them, and the trustee seats receive each ballot with its address. You can't check what we keep: a VPN or Tor hides your address from us.",
   howWeakTurnoutTitle: "Turnout is self-selected",
   howWeakTurnoutMeans:
     "Voters choose to take part, so a result describes who answered, not everyone. Results are advisory and bind no one.",

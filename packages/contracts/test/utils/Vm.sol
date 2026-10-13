@@ -14,10 +14,7 @@ interface Vm {
     function addr(uint256 privateKey) external pure returns (address keyAddr);
     function assume(bool condition) external pure;
     function chainId(uint256 newChainId) external;
-    function computeCreateAddress(address deployer, uint256 nonce)
-        external
-        pure
-        returns (address);
+    function computeCreateAddress(address deployer, uint256 nonce) external pure returns (address);
     function envOr(string calldata name, bool defaultValue) external view returns (bool value);
     function etch(address target, bytes calldata newRuntimeBytecode) external;
     function expectRevert(bytes calldata revertData) external;
@@ -26,6 +23,10 @@ interface Vm {
     function keyExistsJson(string calldata json, string calldata key) external view returns (bool);
     function load(address target, bytes32 slot) external view returns (bytes32 data);
     function parseBytes(string calldata stringifiedValue) external pure returns (bytes memory);
+    function parseJson(string calldata json, string calldata key)
+        external
+        pure
+        returns (bytes memory abiEncodedData);
     function parseJsonBool(string calldata json, string calldata key) external pure returns (bool);
     function parseJsonString(string calldata json, string calldata key)
         external
@@ -60,6 +61,7 @@ interface Vm {
     function snapshotState() external returns (uint256 snapshotId);
     function store(address target, bytes32 slot, bytes32 value) external;
     function toString(uint256 value) external pure returns (string memory);
+    function toString(bytes calldata value) external pure returns (string memory);
     function warp(uint256 newTimestamp) external;
 }
 

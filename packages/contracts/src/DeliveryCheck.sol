@@ -229,7 +229,10 @@ library DeliveryCheckLib {
     ) private view returns (bytes32 stub, bytes32 panel) {
         (stub, panel) = elections.ceremony(definitionHash);
         (, uint256 seats) = trustees.keySetOf(stub, panel);
-        if ((seats >> seat) & 1 == 0) revert DeliveryRefused(index, Code.DeliverySeat);
+        // Seat 0 never exists, whatever a key set's bit 0 says.
+        if (seat == 0 || (seats >> seat) & 1 == 0) {
+            revert DeliveryRefused(index, Code.DeliverySeat);
+        }
     }
 
     /// The seat's signature, by its registered per-election signing key,

@@ -413,6 +413,41 @@ describe("showing a version-5 election (docs/spec/display-text.md, Checks)", () 
     });
   });
 
+  test("an earlier check wins when several fail at once", () => {
+    const illFormed = encodeElectionDefinitionV5({ ...definition, questions: [] });
+    const illHash = specHash("abolish/v1/election-definition", illFormed);
+    expect(show(illFormed, textBytes, new Uint8Array(32), illHash)).toEqual({
+      ok: false,
+      problem: "another-election",
+    });
+    expect(show(illFormed, textBytes.subarray(1), definition.election_id, illHash)).toEqual({
+      ok: false,
+      problem: "definition-ill-formed",
+      rule: "questions",
+    });
+    expect(show(definitionBytes, textBytes.subarray(1), definition.election_id, illHash)).toEqual({
+      ok: false,
+      problem: "unregistered-definition",
+    });
+  });
+
+  test("definition versions 3 and 4 are refused as undecodable, as checkElectionToShow refuses them", () => {
+    for (const [file, id] of [
+      ["election-definition-v3.json", "definition-v3-typical"],
+      ["election-definition-v4.json", "definition-v4-typical"],
+    ] as const) {
+      const bytes = hex(vector(file, id).encoding);
+      expect(
+        show(
+          bytes,
+          textBytes,
+          definition.election_id,
+          specHash("abolish/v1/election-definition", bytes),
+        ),
+      ).toEqual({ ok: false, problem: "definition-undecodable" });
+    }
+  });
+
   test("a version-5 definition pinning display-text version 1 has its text refused", () => {
     const pinsOne = encodeElectionDefinitionV5({
       ...definition,

@@ -176,7 +176,7 @@ Definition version 5, display-text version 2, ballot version 3, the version-3 op
 
 ### What remains open
 
-- **Abstaining on a pick-exactly-N question** (owner's wording, `min = max = N`). If the owner wants such a question skippable, the range proof can allow `{0, N}` instead of `[N, N]` at no real cost, decided before part 1's vectors.
+- **Abstaining on a pick-exactly-N question** (owner's wording, `min = max = N`). If the owner wants such a question skippable, the range proof can allow `{0, N}` instead of `[N, N]` at no real cost, decided before part 1's vectors. Settled by the agent in [[P2-14]] part 1a (owner may veto): no blank. A version-5 question's range is contiguous, `[min, max]`, so pick exactly N is exactly N. A skippable form would need a field that makes the range non-contiguous, beside the limits the instruction is rendered from, and a creator who wants a skippable question can ask pick up to N; the owner's word was "exactly". A veto adds a definition version with that field; version 5 keeps its meaning ([[election-definition]], Questions).
 - **Pick one with a required answer.** `(1, 1)` is allowed by the rules; whether the creation screens offer it beside the owner's `(0, 1)` is P2-9's.
 - **Blank counts for multi-select questions** would need an extra committed indicator per question; not specified.
 - **More than 64 options in total** (a long civic ballot) needs a higher `MAX_OPTIONS`: a new version of every per-option record, under either encoding ([[parameters]]).

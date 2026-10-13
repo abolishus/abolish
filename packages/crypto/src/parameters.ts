@@ -6,6 +6,8 @@ import { MAX_BOARD_PAYLOAD } from "./board.ts";
 export const PARAMETERS = Object.freeze({
   MAX_TAG_LEN: 255,
   MAX_OPTIONS: 64,
+  // Questions in a poll, under election-definition version 5.
+  MAX_QUESTIONS: 32,
   MAX_TRUSTEES: 16,
   MAX_BOARD_PAYLOAD,
   // Seconds; the tally window of tally-opening version 1 (docs/spec/tally.md).
@@ -23,6 +25,8 @@ export const PARAMETERS = Object.freeze({
   // is the last in which an opening of version 1 may be boarded
   // (docs/spec/challenge.md, Publication).
   OPENING_WINDOW: 604_800,
+  // Bytes; the whole-record cap of display-text version 2.
+  MAX_DISPLAY_TEXT: 4_194_304,
   DISPLAY_TEXT_SALT_LEN: 32,
   // Constants of the group registry's deployment (docs/spec/vouching.md).
   VOUCH_K: 3,

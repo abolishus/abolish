@@ -1301,6 +1301,7 @@ contract GroupRegistryTest is GroupTestBase {
     /// identifier or definition hash, and that its only events are its four.
     function test_NoPollLinkOnChain() public {
         DefinitionHarness defs = new DefinitionHarness();
+        RegistryFixture.installL1Block(vm);
         MockTrusteeRegistry trustees = new MockTrusteeRegistry();
         ElectionRegistry.Deployment memory dep = RegistryFixture.deployment(address(trustees));
         dep.groupRegistry = address(registry);

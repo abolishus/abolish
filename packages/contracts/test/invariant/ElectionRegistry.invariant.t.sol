@@ -81,6 +81,7 @@ contract ElectionRegistryInvariantTest is TestBase {
     RegistryHandler internal handler;
 
     function setUp() public {
+        RegistryFixture.installL1Block(vm);
         DefinitionHarness lib = new DefinitionHarness();
         MockTrusteeRegistry trustees = new MockTrusteeRegistry();
         registry = new ElectionRegistry(RegistryFixture.deployment(address(trustees)));

@@ -14,9 +14,14 @@ interface Vm {
     function addr(uint256 privateKey) external pure returns (address keyAddr);
     function assume(bool condition) external pure;
     function chainId(uint256 newChainId) external;
+    function computeCreateAddress(address deployer, uint256 nonce)
+        external
+        pure
+        returns (address);
     function envOr(string calldata name, bool defaultValue) external view returns (bool value);
     function etch(address target, bytes calldata newRuntimeBytecode) external;
     function expectRevert(bytes calldata revertData) external;
+    function getNonce(address account) external view returns (uint64 nonce);
     function getRecordedLogs() external returns (Log[] memory logs);
     function keyExistsJson(string calldata json, string calldata key) external view returns (bool);
     function load(address target, bytes32 slot) external view returns (bytes32 data);

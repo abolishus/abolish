@@ -104,10 +104,16 @@ export class HttpCoordinator implements Coordinator {
         }),
       });
     } catch (e) {
-      throw new TransportError(`coordinator: ${method} ${path} failed`, { cause: e });
+      // The cause's code (a timeout, DNS, TLS) tells an operator what failed, and holds no secret.
+      const cause = (e as { cause?: { code?: unknown } }).cause?.code;
+      const code = typeof cause === "string" ? cause : e instanceof Error ? e.name : "unknown";
+      throw new TransportError(`coordinator: ${method} ${path} failed (${code})`, {
+        cause: e,
+      });
     }
     if (!response.ok) {
-      await response.body?.cancel();
+      // A body that already errored (a reset after the headers) rejects its cancel.
+      await response.body?.cancel().catch(() => undefined);
       throw new TransportError(`coordinator: ${method} ${path} answered ${response.status}`);
     }
     return readCapped(response, MAX_BODY);

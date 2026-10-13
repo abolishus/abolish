@@ -4,10 +4,18 @@
 // asks again gets what the seat's records decide (the seat resends a
 // message it recorded, and refuses anything else).
 import { createHash } from "node:crypto";
+import { setTimeout as sleep } from "node:timers/promises";
 import { type CeremonyTranscript, DecodeError, encodeCeremonyTranscript } from "@abolishus/crypto";
 import type { CeremonySeat, SeatRefusal, SeatResult } from "./ceremony.ts";
 import { type Coordinator, TransportError } from "./client.ts";
-import { type Asked, asked, type CeremonyRequest, requestTranscript, stubHashOf } from "./wire.ts";
+import {
+  type Asked,
+  asked,
+  type CeremonyRequest,
+  encodeRequests,
+  requestTranscript,
+  stubHashOf,
+} from "./wire.ts";
 
 /**
  * What the node reports, one event per request it acts on. Never a secret:
@@ -41,8 +49,9 @@ export interface NodeOptions {
 const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
 
 // Refusals a later poll can't change, so the node doesn't redo the seat's
-// checks for them every poll; the electorate check can change as L2
-// finalizes, so `stub-electorate` is asked again.
+// checks for them every poll. The electorate check can change as L2
+// finalizes, and `no-run` once the node answers an earlier round listed
+// after it, so both are asked again.
 const FINAL: ReadonlySet<SeatRefusal | "request"> = new Set<SeatRefusal | "request">([
   "request",
   "stub-decode",
@@ -54,7 +63,6 @@ const FINAL: ReadonlySet<SeatRefusal | "request"> = new Set<SeatRefusal | "reque
   "stub-membership-key",
   "stub-approved",
   "run-seen",
-  "no-run",
   "view",
   "rounds",
   "transcript",
@@ -86,10 +94,9 @@ export class TrusteeNode {
     }
     const current = new Set<string>();
     for (const request of requests) {
+      // Over the request's encoding, which length-prefixes both fields.
       const id = createHash("sha256")
-        .update(request.stub)
-        .update(new Uint8Array(1))
-        .update(request.transcript)
+        .update(encodeRequests([request]))
         .digest("hex");
       current.add(id);
       if (this.#done.has(id)) continue;
@@ -112,14 +119,9 @@ export class TrusteeNode {
   async run(signal: AbortSignal, intervalMs: number): Promise<void> {
     while (!signal.aborted) {
       await this.poll();
-      await new Promise<void>((resolve) => {
-        const timer = setTimeout(done, intervalMs);
-        function done() {
-          clearTimeout(timer);
-          signal.removeEventListener("abort", done);
-          resolve();
-        }
-        signal.addEventListener("abort", done, { once: true });
+      // An abort during the poll or the wait ends the wait at once.
+      await sleep(intervalMs, undefined, { signal }).catch((e: unknown) => {
+        if (!signal.aborted) throw e;
       });
     }
   }

@@ -4,7 +4,8 @@
 // schema; the panel's keys are protocol bytes, so they are checked by
 // `@abolishus/crypto` (`panelId`) and must hash to the `panelId` the trustee
 // compared out of band, so a mistyped key can't pin another panel (T-17).
-import { lstat, readFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { open } from "node:fs/promises";
 import { panelId, PanelError, type Panel } from "@abolishus/crypto";
 import { z } from "zod";
 import { coordinatorUrl } from "./client.ts";
@@ -97,13 +98,25 @@ export function parseConfig(json: string): NodeConfig {
  * can read could sign the seat's approvals (T-37).
  */
 export async function readIdentityKey(path: string): Promise<Uint8Array> {
-  const info = await lstat(path);
-  if (!info.isFile()) throw new ConfigError("identity key: not a regular file");
-  if ((info.mode & 0o077) !== 0 || info.uid !== process.getuid?.())
-    throw new ConfigError(
-      "identity key: the file must be owned by this user and mode 0600 or 0400",
-    );
-  const text = (await readFile(path, "utf8")).replace(/\n$/, "");
-  if (!/^[0-9a-f]{64}$/.test(text)) throw new ConfigError("identity key: expected 64 hex digits");
-  return Uint8Array.from(Buffer.from(text, "hex"));
+  // Opened without following a link and checked through the same handle, so
+  // the file checked is the file read.
+  let file;
+  try {
+    file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  } catch (e) {
+    throw new ConfigError(`identity key: ${(e as NodeJS.ErrnoException).code ?? "unreadable"}`);
+  }
+  try {
+    const info = await file.stat();
+    if (!info.isFile()) throw new ConfigError("identity key: not a regular file");
+    if ((info.mode & 0o077) !== 0 || info.uid !== process.getuid?.())
+      throw new ConfigError(
+        "identity key: the file must be owned by this user and mode 0600 or 0400",
+      );
+    const text = (await file.readFile("utf8")).replace(/\n$/, "");
+    if (!/^[0-9a-f]{64}$/.test(text)) throw new ConfigError("identity key: expected 64 hex digits");
+    return Uint8Array.from(Buffer.from(text, "hex"));
+  } finally {
+    await file.close();
+  }
 }

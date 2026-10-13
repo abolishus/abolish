@@ -20,6 +20,8 @@ import {
   electionId,
   encodeCeremonyTranscript,
   type KeysMessage,
+  keySetEntry,
+  keySetHash,
   membershipVkHash,
   newDisplayTextSalt,
   type Panel,
@@ -205,6 +207,8 @@ export class LocalCoordinator implements Coordinator {
     if (
       !equal(post.stub_hash, this.#stubHash) ||
       !equal(post.ceremony_transcript_hash, outcome.check.hash) ||
+      // The key set the transcript registers, as every honest seat signs.
+      !equal(post.key_set_hash, keySetHash(outcome.check.registered.map(keySetEntry))) ||
       !verifyCeremonyRegistration(
         this.#o.panel,
         {

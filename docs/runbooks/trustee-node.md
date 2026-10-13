@@ -12,8 +12,8 @@ Status: not deployable yet. Until the node checks the electorate against finaliz
 
 ## Identity key
 
-- The identity secret key is 64 hex digits in a file owned by the user the node runs as, mode `0600` or `0400`; the node refuses any other. Its public key is the seat's key in the panel registered on chain ([[trustee-identity]]).
-- Generate it on the host. Any copy anyone else holds can sign the seat's approvals (T-37), so keep at most one sealed offline backup; losing every copy loses the seat until the panel is re-registered.
+- The identity secret key is 64 hex digits in a file owned by the user the node runs as, mode `0600` or `0400`, not a symbolic link; the node refuses any other, and a key that isn't the configured seat's. Its public key is the seat's key in the panel registered on chain ([[trustee-identity]]).
+- Generate it on the host with `trustee-node keygen --out <file>`, which writes a new `0600` file and prints only the public key to register for the seat. Any copy anyone else holds can sign the seat's approvals (T-37), so keep at most one sealed offline backup; losing every copy loses the seat until the panel is re-registered.
 
 ## Store
 

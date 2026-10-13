@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { panelId } from "@abolishus/crypto";
@@ -75,6 +75,14 @@ describe("the identity key file", () => {
       await chmod(path, mode);
       await expect(readIdentityKey(path), mode.toString(8)).rejects.toThrow(ConfigError);
     }
+  });
+
+  test("is never read through a symbolic link", async () => {
+    const target = join(dir, "target");
+    await writeFile(target, "11".repeat(32), { mode: 0o600 });
+    const link = join(dir, "link");
+    await symlink(target, link);
+    await expect(readIdentityKey(link)).rejects.toThrow(ConfigError);
   });
 
   test("refuses anything but 64 hex digits", async () => {

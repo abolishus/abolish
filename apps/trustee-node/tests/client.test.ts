@@ -56,6 +56,16 @@ describe("HttpCoordinator", () => {
   test("an error status, an unreachable coordinator, a body with no decoding and an oversized body are transport errors", async () => {
     const cases: (() => Response)[] = [
       () => new Response(null, { status: 503 }),
+      // A reset after the headers: the body errors, and so does cancelling it.
+      () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.error(new Error("reset"));
+            },
+          }),
+          { status: 503 },
+        ),
       () => {
         throw new TypeError("fetch failed");
       },

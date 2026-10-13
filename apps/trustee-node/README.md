@@ -32,13 +32,14 @@ The node only calls out: it polls the coordinator for what it asks of the seat a
 
 Bodies use [[notation]]'s encoding (`bytes` is `bytes<2^20>`), as `application/octet-stream`; they are this transport's envelopes, not protocol records: nothing hashes, signs or archives them whole. Inside them the stub is an election-definition record and the rounds a ceremony transcript record (version 1). A request's `transcript` holds the rounds the coordinator has closed, and asks for the first empty one; all four rounds ask for approval; a non-empty round after an empty one asks for nothing and is refused. The node recomputes `stub_hash` from the stub rather than taking it from the coordinator, and names a run by it and `run_id`.
 
-A lost poll, post or response costs nothing: the next poll asks again and the seat answers with the message it recorded. The node settles each request once (answered, or refused for a reason a later poll can't change) and asks the seat again only for `stub-electorate`, which can change as L2 finalizes. `HttpCoordinator` takes HTTPS only (HTTP only to loopback), follows no redirect, times requests out and stops reading a body past its bound.
+A lost poll, post or response costs nothing: the next poll asks again and the seat answers with the message it recorded. The node settles each request once (answered, or refused for a reason a later poll can't change) and asks the seat again only for `stub-electorate`, which can change as L2 finalizes, and `no-run`, which can change once it answers an earlier round listed after it. `HttpCoordinator` takes HTTPS only (HTTP only to loopback), follows no redirect, times requests out and stops reading a body past its bound.
 
 ## Configuration and commands
 
 `vp run --filter @abolishus/trustee-node start -- <command>`:
 
-- `run --config <file>`: one seat's node. The JSON file pins `panel` (`threshold` and the identity keys as hex), its `panelId` (compared with the panel's computed identifier, so a mistyped key fails), `l2ChainId`, `trusteeRegistry`, `seat`, `identityKeyFile` (64 hex digits in a file only its owner can reach), `store` (the `FileStore` root), `coordinator` and `pollSeconds`. It logs one JSON event per line, never a secret.
+- `keygen --out <file>`: a fresh identity key in a new owner-only file (never over an existing one); it prints only the public key, for the panel's registration.
+- `run --config <file>`: one seat's node. The JSON file pins `panel` (`threshold` and the identity keys as hex), its `panelId` (compared with the panel's computed identifier, so a mistyped key fails), `l2ChainId`, `trusteeRegistry`, `seat`, `identityKeyFile` (64 hex digits in a file only its owner can reach, never read through a symbolic link, and refused unless its key is the seat's), `store` (the `FileStore` root), `coordinator` and `pollSeconds`. It logs one JSON event per line, never a secret.
 - `local-ceremony [--seats n] [--threshold k] [--dir path]`: a whole ceremony between `n` local nodes and a local coordinator (`LocalCoordinator`, on loopback HTTP), with a panel and a stub made up for the run and no chain: the electorate check passes.
 
 ## Known-weak

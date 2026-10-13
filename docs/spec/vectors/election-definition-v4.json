@@ -2,7 +2,7 @@
   "format": "abolish-vectors/1",
   "title": "Election definition, version 4 (receipt keys)",
   "spec": "docs/spec/election-definition.md",
-  "generator": "Printed by packages/crypto/scripts/definition-v4-vectors.py, written from docs/spec/election-definition.md (Layout (version 4), Receipt keys, Well-formedness) with only the Python standard library, independently of packages/crypto, reusing regional-cells-vectors.py's version-3 encoder and rules and trustee-vectors.py's P-256 arithmetic. Its own implementation of the rules confirms every valid vector's illFormed label (or its absence) and every judgement; decode errors are labelled by hand.",
+  "generator": "Printed by packages/crypto/scripts/definition-v4-vectors.py, written from docs/spec/election-definition.md (Layout (version 4), Receipt keys, Well-formedness) with only the Python standard library, independently of packages/crypto, reusing regional-cells-vectors.py's version-3 encoder and rules and trustee-vectors.py's P-256 arithmetic. Its own implementation of the rules confirms every valid vector's illFormed label (or its absence), every judgement and the ballot client's check before casting; decode errors are labelled by hand.",
   "types": {
     "record-pin": {
       "kind": "struct",
@@ -7918,7 +7918,9 @@
       "retiredAt": "0",
       "opensAt": "1000",
       "provenAt": "1000",
-      "judgement": "judges"
+      "judgement": "judges",
+      "word": "0000000000000000000000000000000000000000000000000000000000000064",
+      "castable": true
     },
     {
       "id": "registered-one-second-before",
@@ -7927,7 +7929,9 @@
       "retiredAt": "0",
       "opensAt": "1000",
       "provenAt": "5000",
-      "judgement": "judges"
+      "judgement": "judges",
+      "word": "00000000000000000000000000000000000000000000000000000000000003e7",
+      "castable": true
     },
     {
       "id": "registered-at-opens",
@@ -7936,7 +7940,9 @@
       "retiredAt": "0",
       "opensAt": "1000",
       "provenAt": "5000",
-      "judgement": "unregistered"
+      "judgement": "unregistered",
+      "word": "00000000000000000000000000000000000000000000000000000000000003e8",
+      "castable": false
     },
     {
       "id": "registered-after",
@@ -7945,7 +7951,9 @@
       "retiredAt": "0",
       "opensAt": "1000",
       "provenAt": "5000",
-      "judgement": "unregistered"
+      "judgement": "unregistered",
+      "word": "00000000000000000000000000000000000000000000000000000000000003e9",
+      "castable": false
     },
     {
       "id": "never-registered",
@@ -7954,7 +7962,9 @@
       "retiredAt": "0",
       "opensAt": "1000",
       "provenAt": "5000",
-      "judgement": "unregistered"
+      "judgement": "unregistered",
+      "word": "0000000000000000000000000000000000000000000000000000000000000000",
+      "castable": false
     },
     {
       "id": "retired-before",
@@ -7963,7 +7973,9 @@
       "retiredAt": "500",
       "opensAt": "1000",
       "provenAt": "5000",
-      "judgement": "retired"
+      "judgement": "retired",
+      "word": "0000000000000000000000000000000000000000000001f40000000000000064",
+      "castable": false
     },
     {
       "id": "retired-at-opens",
@@ -7972,7 +7984,9 @@
       "retiredAt": "1000",
       "opensAt": "1000",
       "provenAt": "5000",
-      "judgement": "retired"
+      "judgement": "retired",
+      "word": "0000000000000000000000000000000000000000000003e80000000000000064",
+      "castable": false
     },
     {
       "id": "retired-after",
@@ -7981,7 +7995,9 @@
       "retiredAt": "1001",
       "opensAt": "1000",
       "provenAt": "5000",
-      "judgement": "judges"
+      "judgement": "judges",
+      "word": "0000000000000000000000000000000000000000000003e90000000000000064",
+      "castable": true
     },
     {
       "id": "registered-and-retired-same-block",
@@ -7990,7 +8006,9 @@
       "retiredAt": "100",
       "opensAt": "1000",
       "provenAt": "5000",
-      "judgement": "retired"
+      "judgement": "retired",
+      "word": "0000000000000000000000000000000000000000000000640000000000000064",
+      "castable": false
     },
     {
       "id": "registered-after-and-retired",
@@ -7999,7 +8017,9 @@
       "retiredAt": "3000",
       "opensAt": "1000",
       "provenAt": "5000",
-      "judgement": "unregistered"
+      "judgement": "unregistered",
+      "word": "000000000000000000000000000000000000000000000bb800000000000007d0",
+      "castable": false
     },
     {
       "id": "read-before-opens",
@@ -8008,7 +8028,9 @@
       "retiredAt": "0",
       "opensAt": "1000",
       "provenAt": "999",
-      "judgement": "unsettled"
+      "judgement": "unsettled",
+      "word": "0000000000000000000000000000000000000000000000000000000000000064",
+      "castable": true
     },
     {
       "id": "read-before-opens-unregistered",
@@ -8017,7 +8039,9 @@
       "retiredAt": "0",
       "opensAt": "1000",
       "provenAt": "999",
-      "judgement": "unsettled"
+      "judgement": "unsettled",
+      "word": "0000000000000000000000000000000000000000000000000000000000000000",
+      "castable": false
     },
     {
       "id": "read-before-opens-retired",
@@ -8026,7 +8050,9 @@
       "retiredAt": "500",
       "opensAt": "1000",
       "provenAt": "999",
-      "judgement": "retired"
+      "judgement": "retired",
+      "word": "0000000000000000000000000000000000000000000001f40000000000000064",
+      "castable": false
     },
     {
       "id": "timestamps-at-max",
@@ -8035,7 +8061,9 @@
       "retiredAt": "18446744073709551615",
       "opensAt": "18446744073709551614",
       "provenAt": "18446744073709551615",
-      "judgement": "judges"
+      "judgement": "judges",
+      "word": "00000000000000000000000000000000fffffffffffffffffffffffffffffffd",
+      "castable": true
     },
     {
       "id": "written-after-read",
@@ -8044,7 +8072,9 @@
       "retiredAt": "0",
       "opensAt": "1000",
       "provenAt": "99",
-      "error": "impossible-record"
+      "error": "impossible-record",
+      "word": "0000000000000000000000000000000000000000000000000000000000000064",
+      "castable": false
     },
     {
       "id": "retired-unregistered",
@@ -8053,7 +8083,9 @@
       "retiredAt": "500",
       "opensAt": "1000",
       "provenAt": "5000",
-      "error": "impossible-record"
+      "error": "impossible-record",
+      "word": "0000000000000000000000000000000000000000000001f40000000000000000",
+      "castable": false
     },
     {
       "id": "retired-before-registered",
@@ -8062,7 +8094,9 @@
       "retiredAt": "500",
       "opensAt": "1000",
       "provenAt": "5000",
-      "error": "impossible-record"
+      "error": "impossible-record",
+      "word": "0000000000000000000000000000000000000000000001f40000000000000258",
+      "castable": false
     },
     {
       "id": "retired-after-read",
@@ -8071,7 +8105,141 @@
       "retiredAt": "6000",
       "opensAt": "1000",
       "provenAt": "5000",
-      "error": "impossible-record"
+      "error": "impossible-record",
+      "word": "0000000000000000000000000000000000000000000017700000000000000064",
+      "castable": false
+    }
+  ],
+  "casting": [
+    {
+      "id": "all-judge",
+      "note": "two keys that judge, one retired after opens_at",
+      "opensAt": "1000",
+      "provenAt": "5000",
+      "words": [
+        "0000000000000000000000000000000000000000000000000000000000000064",
+        "0000000000000000000000000000000000000000000005dc00000000000000c8"
+      ],
+      "castable": true
+    },
+    {
+      "id": "four-judge",
+      "note": "four keys that judge",
+      "opensAt": "1000",
+      "provenAt": "5000",
+      "words": [
+        "0000000000000000000000000000000000000000000000000000000000000064",
+        "00000000000000000000000000000000000000000000000000000000000000c8",
+        "000000000000000000000000000000000000000000000000000000000000012c",
+        "00000000000000000000000000000000000000000000000000000000000003e7"
+      ],
+      "castable": true
+    },
+    {
+      "id": "before-opens-registered",
+      "note": "read before opens_at, both registered: a retirement may still come, which 2.9 catches",
+      "opensAt": "1000",
+      "provenAt": "999",
+      "words": [
+        "0000000000000000000000000000000000000000000000000000000000000064",
+        "00000000000000000000000000000000000000000000000000000000000003e7"
+      ],
+      "castable": true
+    },
+    {
+      "id": "before-opens-unregistered",
+      "note": "read before opens_at, the second not registered yet",
+      "opensAt": "1000",
+      "provenAt": "999",
+      "words": [
+        "0000000000000000000000000000000000000000000000000000000000000064",
+        "0000000000000000000000000000000000000000000000000000000000000000"
+      ],
+      "castable": false,
+      "refusedKey": 1
+    },
+    {
+      "id": "before-opens-retired",
+      "note": "read before opens_at, the first already retired",
+      "opensAt": "1000",
+      "provenAt": "999",
+      "words": [
+        "0000000000000000000000000000000000000000000001f40000000000000064",
+        "0000000000000000000000000000000000000000000000000000000000000064"
+      ],
+      "castable": false,
+      "refusedKey": 0
+    },
+    {
+      "id": "retired-first",
+      "note": "the first retired before opens_at and the second never registered: the first is reported",
+      "opensAt": "1000",
+      "provenAt": "5000",
+      "words": [
+        "0000000000000000000000000000000000000000000001f40000000000000064",
+        "0000000000000000000000000000000000000000000000000000000000000000"
+      ],
+      "castable": false,
+      "refusedKey": 0
+    },
+    {
+      "id": "registered-at-opens-third",
+      "note": "the third registered at opens_at, too late",
+      "opensAt": "1000",
+      "provenAt": "5000",
+      "words": [
+        "0000000000000000000000000000000000000000000000000000000000000064",
+        "00000000000000000000000000000000000000000000000000000000000000c8",
+        "00000000000000000000000000000000000000000000000000000000000003e8",
+        "000000000000000000000000000000000000000000000000000000000000012c"
+      ],
+      "castable": false,
+      "refusedKey": 2
+    },
+    {
+      "id": "retired-at-opens",
+      "note": "retired at opens_at, so by then",
+      "opensAt": "1000",
+      "provenAt": "5000",
+      "words": ["0000000000000000000000000000000000000000000003e80000000000000064"],
+      "castable": false,
+      "refusedKey": 0
+    },
+    {
+      "id": "high-bits",
+      "note": "the second word has a high bit set, which the release code never writes",
+      "opensAt": "1000",
+      "provenAt": "5000",
+      "words": [
+        "0000000000000000000000000000000000000000000000000000000000000064",
+        "0000000000000000000000000000000100000000000000000000000000000064"
+      ],
+      "castable": false,
+      "refusedKey": 1
+    },
+    {
+      "id": "impossible-first",
+      "note": "the first word retired but never registered",
+      "opensAt": "1000",
+      "provenAt": "5000",
+      "words": [
+        "0000000000000000000000000000000000000000000001f40000000000000000",
+        "0000000000000000000000000000000000000000000000000000000000000064"
+      ],
+      "castable": false,
+      "refusedKey": 0
+    },
+    {
+      "id": "written-after-read",
+      "note": "the second word registered after the block it was read at",
+      "opensAt": "1000",
+      "provenAt": "999",
+      "words": [
+        "0000000000000000000000000000000000000000000000000000000000000064",
+        "00000000000000000000000000000000000000000000000000000000000007d0"
+      ],
+      "castable": false,
+      "refusedKey": 1
     }
   ]
 }

@@ -2,7 +2,7 @@
 
 Abolish's contracts (the L2 contracts and the L1 board anchor), built with Foundry 1.8.3 and solc 0.8.30. Internal and source-only: deployed bytecode is checked against the release build of this source (verifier check 1.2, T-64; Release build, below).
 
-**Status: early (P1-18, P3-2, P4-1).** So far there are the event accumulator, the election registry, the trustee key registry, the group registry with its Tier 0 additions and the L1 board anchor. The deployable contracts have typed wagmi bindings (Bindings, below). Direct submission follows in a later P1-18 change. Nothing is deployed, and nothing may be until the close rule exists ([`docs/spec/contracts.md`](../../docs/spec/contracts.md), Election registry).
+**Status: early (P1-18, P3-2, P4-1).** So far there are the event accumulator, the election registry, the trustee key registry, the group registry with its Tier 0 additions, the board's membership-proof check and the L1 board anchor. The deployable contracts have typed wagmi bindings (Bindings, below). The rest of direct submission follows in later P1-18 changes. Nothing is deployed, and nothing may be until the close rule exists ([`docs/spec/contracts.md`](../../docs/spec/contracts.md), Election registry).
 
 ## Event accumulator
 
@@ -40,6 +40,14 @@ Abolish's contracts (the L2 contracts and the L1 board anchor), built with Found
 - `removeMembers(bytes)` takes `u64(group_id) ‖ u64(size) ‖ u16(count) ‖ count × u64(index) ‖ u8(approvals) ‖ approvals` likewise. `size` is the member count the registrars signed at: it must be at most the group's count, and each index strictly greater than the one before, below `size` and not removed already, so a removal signed before a member landed at an index can never remove that member later, and a replay reverts. The member count never changes. `MembersRemoved` logs the whole record.
 - Signatures are recovered through OpenZeppelin's `ECDSA.tryRecover` (vendored, below); the contract checks `v ∈ {27, 28}`, `1 ≤ r < N` and `1 ≤ s ≤ (N − 1) / 2` itself as well. The EIP-712 domain binds `block.chainid` and the registry's address, and each message the group, its tier and, for additions, the position (for removals, `size`; T-30, T-32). The threshold, the cached domain separator and its chain ID are immutables, which verifier 1.2 masks; the registrars are in storage and logged by `RegistrarsPinned`.
 - It keeps no Merkle tree, and takes no election identifier, definition or nullifier, so nothing it holds or logs links a member to a poll (T-12).
+
+## Membership proofs
+
+`src/MembershipProof.sol` implements [`docs/spec/contracts.md`](../../docs/spec/contracts.md), Board, Membership proofs, the first part of direct submission ([`docs/adr/0028-board-contract-checks.md`](../../docs/adr/0028-board-contract-checks.md)):
+
+- `MembershipProofLib.check(proof, signals)` decodes Semaphore v4's 256-byte Groth16 proof strictly (canonical coordinates, no identity, `A` and `C` on the curve), refuses a signal at or above `r` and a root of 0, and checks Groth16's equation under the pinned depth-32 key, held as constants, through the `ecMul`, `ecAdd` and `ecPairing` precompiles (EIP-196, EIP-197), which also refuse a `B` off the twist or outside its subgroup (T-05, T-31). The pairing gets a fixed 600,000 gas, so a failed call means a broken `B`, never a lack of gas.
+- `scope(definition_hash, tier, root)` and `field(x)` compute `ŝ = F(S)` and Semaphore's `F` on chain, so a contract takes no signal from a submitter (T-12).
+- It is a library for the board contract, which follows in later parts of P1-18 part 4b-3; nothing deployable uses it yet. `test/MembershipProof.t.sol` runs `docs/spec/vectors/membership-proof.json` and `membership.json` through it.
 
 ## Board anchor
 

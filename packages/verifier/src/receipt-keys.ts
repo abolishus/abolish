@@ -2,9 +2,11 @@
 // a version-4 definition lists judges the election, by its word in the board
 // anchor's receipt-key record, proven from L1 state at the verifier's block
 // `B`, never from a call or a list of logs (T-26, T-69, T-71). The judging
-// rule itself is packages/crypto's (`receiptKeyJudgement`).
+// rule and the word's reading are packages/crypto's (`receiptKeyJudgement`,
+// `receiptKeyRecordFromWord`), which the ballot client's check before casting
+// shares.
 
-import { receiptKeyJudgement, type ReceiptKeyRecord } from "@abolishus/crypto";
+import { receiptKeyJudgement, receiptKeyRecordFromWord } from "@abolishus/crypto";
 import { L1Error, type L1ErrorCode, type L1Evidence, receiptKeyWords } from "./l1.ts";
 
 export type ReceiptKeyCode =
@@ -20,25 +22,6 @@ export type ReceiptKeyRow =
       readonly code: ReceiptKeyCode | L1ErrorCode;
       readonly at: { readonly key: number } | Record<string, never>;
     };
-
-const U64 = (1n << 64n) - 1n;
-
-/**
- * The record a word holds, or undefined for a word the release code can't
- * write at a block whose timestamp is `provenAt`: a high bit set, a
- * retirement without a registration or before it, or a time after the block
- * (the anchor writes `block.timestamp`).
- */
-function record(word: Uint8Array, provenAt: bigint): ReceiptKeyRecord | undefined {
-  let w = 0n;
-  for (const x of word) w = (w << 8n) | BigInt(x);
-  const registeredAt = w & U64;
-  const retiredAt = (w >> 64n) & U64;
-  if (w >> 128n !== 0n) return undefined;
-  if (retiredAt !== 0n && (registeredAt === 0n || registeredAt > retiredAt)) return undefined;
-  if (registeredAt > provenAt || retiredAt > provenAt) return undefined;
-  return { registeredAt, retiredAt };
-}
 
 /**
  * 2.9's row for `keys` (a version-4 definition's `receipt_keys`) and
@@ -69,7 +52,7 @@ export function receiptKeyRow(
       unverifiable ??= { status: "unverifiable", code: w.code, at: { key: i } };
       continue;
     }
-    const r = record(w, provenAt);
+    const r = receiptKeyRecordFromWord(w, provenAt);
     if (r === undefined) return { status: "fail", code: "receipt-key-record", at: { key: i } };
     const judgement = receiptKeyJudgement(r, opensAt, provenAt);
     switch (judgement) {

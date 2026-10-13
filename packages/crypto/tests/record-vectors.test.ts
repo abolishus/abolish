@@ -24,6 +24,8 @@ import {
   encodeElectionDefinitionV3,
   encodeElectionDefinitionV4,
   receiptKeyJudgement,
+  receiptKeyRecordFromWord,
+  receiptKeysCastCheck,
 } from "../src/index.ts";
 import { PROTOCOL_SCHEMA } from "../src/protocol.ts";
 import { buildSchema, hex, readVectorFile, type Vector } from "./spec-vectors.ts";
@@ -177,6 +179,8 @@ describe("election definition version 4 (docs/spec/election-definition.md, Layou
     readonly provenAt: string;
     readonly judgement?: string;
     readonly error?: string;
+    readonly word: string;
+    readonly castable: boolean;
   }
   const cases = (judging ?? []).map((j) => [j.id, j] as const);
 
@@ -195,6 +199,50 @@ describe("election definition version 4 (docs/spec/election-definition.md, Layou
       );
     if (j.error === undefined) expect(judge()).toBe(j.judgement);
     else expect(judge).toThrow(RangeError);
+    const read = receiptKeyRecordFromWord(hex(j.word), BigInt(j.provenAt));
+    if (j.error === undefined)
+      expect(read).toEqual({
+        registeredAt: BigInt(j.registeredAt),
+        retiredAt: BigInt(j.retiredAt),
+      });
+    else expect(read).toBeUndefined();
+    expect(receiptKeysCastCheck([hex(j.word)], BigInt(j.opensAt), BigInt(j.provenAt))).toEqual(
+      j.castable ? { castable: true } : { castable: false, code: "receipt-key-unjudged", key: 0 },
+    );
+  });
+
+  interface Casting {
+    readonly id: string;
+    readonly opensAt: string;
+    readonly provenAt: string;
+    readonly words: readonly string[];
+    readonly castable: boolean;
+    readonly refusedKey?: number;
+  }
+  const casting = (readVectorFile("election-definition-v4.json") as { casting?: Casting[] })
+    .casting;
+  const castingCases = (casting ?? []).map((c) => [c.id, c] as const);
+
+  test("has casting vectors that cast and that refuse", () => {
+    expect(new Set(castingCases.map(([, c]) => c.castable))).toEqual(new Set([true, false]));
+  });
+
+  test.each(castingCases)("casting %s", (_id, c) => {
+    expect(receiptKeysCastCheck(c.words.map(hex), BigInt(c.opensAt), BigInt(c.provenAt))).toEqual(
+      c.castable
+        ? { castable: true }
+        : { castable: false, code: "receipt-key-unjudged", key: c.refusedKey },
+    );
+  });
+
+  test("the cast check throws on no list, words that aren't 32 bytes and opens_at outside u64", () => {
+    expect(() => receiptKeysCastCheck([], 0n, 0n)).toThrow(RangeError);
+    expect(() => receiptKeysCastCheck([new Uint8Array(31)], 0n, 0n)).toThrow(RangeError);
+    expect(() => receiptKeysCastCheck([new Uint8Array(33)], 0n, 0n)).toThrow(RangeError);
+    expect(() => receiptKeysCastCheck([new Uint8Array(32).fill(0xff)], -1n, 0n)).toThrow(
+      RangeError,
+    );
+    expect(() => receiptKeysCastCheck([new Uint8Array(32)], 1n << 64n, 0n)).toThrow(RangeError);
   });
 });
 

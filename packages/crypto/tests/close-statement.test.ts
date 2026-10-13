@@ -348,7 +348,15 @@ describe("the close head's rules", () => {
       .map((s) => [s.signer, hex(s.signingSecret)]),
   );
   const onTime = election.deadline.segment;
+  // Each run verifies every statement with pure-JS P-256, so the properties
+  // below are bounded like the other signing properties, and an unmodified
+  // statement is signed once.
+  const signingRuns = Math.min(numRuns, 40);
+  const signed = new Map<string, Uint8Array>();
   const at = (signer: number, claim: bigint, extra: Partial<CloseStatementFields> = {}) => {
+    const key = `${signer}:${claim}`;
+    const memo = Object.keys(extra).length === 0 ? signed.get(key) : undefined;
+    if (memo !== undefined) return { path: "board", segment: onTime, payload: memo } as const;
     const secret = secrets.get(signer);
     if (secret === undefined) throw new Error(`no secret for seat ${signer}`);
     const s = signCloseStatement(secret, {
@@ -358,7 +366,9 @@ describe("the close head's rules", () => {
       l2_hash: new Uint8Array(32).fill(Number(claim % 256n)),
       ...extra,
     });
-    return { path: "board", segment: onTime, payload: encodeCloseStatement(s) } as const;
+    const payload = encodeCloseStatement(s);
+    if (Object.keys(extra).length === 0) signed.set(key, payload);
+    return { path: "board", segment: onTime, payload } as const;
   };
 
   test("the k-th largest counted claim is the head, so k − 1 high liars can't move it", () => {
@@ -384,7 +394,7 @@ describe("the close head's rules", () => {
           if (liar3 >= honest || liar5 >= honest) expect(r.head).toBe(honest);
         },
       ),
-      { numRuns },
+      { numRuns: signingRuns },
     );
   });
 
@@ -407,7 +417,7 @@ describe("the close head's rules", () => {
           ]);
         },
       ),
-      { numRuns },
+      { numRuns: signingRuns },
     );
   });
 

@@ -90,8 +90,8 @@ export function decodeElectionDefinitionRecord(bytes: Uint8Array): ElectionDefin
 /**
  * `decodeElectionDefinitionRecord` for callers that read only version 1: a
  * definition of any other version is `unknown-version` to them, as it was
- * before version 3 existed, so each refuses it (the verifier as unsupported,
- * 2.3) until it reads regional cells (P1-15 part 4b, part 2).
+ * before version 3 existed, so each refuses it until it reads regional cells
+ * (the verifier reads every version through `decodeElectionDefinitionRecord`).
  */
 export function decodeElectionDefinition(bytes: Uint8Array): ElectionDefinition {
   const record = decodeElectionDefinitionRecord(bytes);
@@ -164,6 +164,13 @@ const DELIVERED_BALLOT_VERSIONS: ReadonlySet<number> = new Set<number>([1, 2]);
 // whatever opening it pins: a ballot that can't be challenged can't be
 // checked as cast-as-intended (T-42, T-47). P1-13 adds the first.
 const CELL_CORE_OPENINGS: ReadonlySet<number> = new Set<number>();
+// The spoiled-ballot opening versions this package reads (challenge.ts's
+// SPOILED_BALLOT_OPENING), written out because importing it here would be an
+// import cycle; a test ties the two.
+export const SPOILED_OPENING_VERSIONS: ReadonlySet<number> = new Set<number>([1]);
+// The ballot versions this package reads (ballot.ts's BALLOT), written out
+// for the same reason.
+export const BALLOT_VERSIONS: ReadonlySet<number> = new Set<number>([1, 2]);
 
 /** Why 2.3's profile combination refuses a definition's pins. */
 export type ProfileCombinationRule = "profile-combination" | "unsupported-version";
@@ -175,7 +182,9 @@ export type ProfileCombinationRule = "profile-combination" | "unsupported-versio
  * board-entry version that carries share receipts and complaints (3 or 4),
  * definition versions 3 and 4 need ballot version 2 and only they pair with
  * it, ballot version 2 needs a spoiled-ballot opening version that opens its
- * cores (none yet, so it is refused for now), and
+ * cores (none yet, so it is refused for now, though an opening version this
+ * package doesn't know is `unsupported-version`, and so is a ballot version
+ * it doesn't know under definition version 3 or 4), and
  * tally-opening version 1 one that carries destruction statements (4,
  * docs/spec/tally.md, Destruction), so an election's creator can't leave
  * delivery or destruction off the board (T-34). A board-entry version this
@@ -202,10 +211,14 @@ export function profileCombinationRule(
   // version none of them (docs/spec/election-definition.md, Notes; T-16, T-34).
   const definition = pinnedVersion(d, RECORD_TYPES.electionDefinition);
   const regional = definition === 3 || definition === 4;
-  if (regional !== CELL_BALLOT_VERSIONS.has(ballot)) return "profile-combination";
-  const spoiled = pinnedVersion(d, RECORD_TYPES.spoiledBallotOpening);
-  if (ballot === 2 && (spoiled === undefined || !CELL_CORE_OPENINGS.has(spoiled)))
+  // A ballot version this package doesn't know may be one a later release
+  // reads as naming its cell, so under a regional definition it is judged
+  // last, as unsupported (T-36).
+  const unknownBallot = !BALLOT_VERSIONS.has(ballot);
+  if (!(regional && unknownBallot) && regional !== CELL_BALLOT_VERSIONS.has(ballot))
     return "profile-combination";
+  const spoiled = pinnedVersion(d, RECORD_TYPES.spoiledBallotOpening);
+  if (ballot === 2 && spoiled === undefined) return "profile-combination";
   const allowed = boardPayloadTypes(board);
   const carriesDelivery =
     allowed.includes(RECORD_TYPES.shareReceipt) && allowed.includes(RECORD_TYPES.shareComplaint);
@@ -213,7 +226,16 @@ export function profileCombinationRule(
   const fits =
     (!DELIVERED_BALLOT_VERSIONS.has(ballot) || carriesDelivery) &&
     (opening !== 1 || carriesDestruction);
-  return fits ? undefined : "profile-combination";
+  if (!fits) return "profile-combination";
+  if (regional && unknownBallot) return "unsupported-version";
+  if (ballot === 2 && spoiled !== undefined && !CELL_CORE_OPENINGS.has(spoiled))
+    // An opening version this package doesn't know may be one a later
+    // release knows to open version-2 cores, so it is unsupported here,
+    // never a failure that release would disagree with (T-36); one it knows
+    // opens version-1 cores only, so the profile fails (T-42, T-47). Checked
+    // last, so a profile that fails whatever the opening fails here too.
+    return SPOILED_OPENING_VERSIONS.has(spoiled) ? "profile-combination" : "unsupported-version";
+  return undefined;
 }
 
 export function encodeDisplayText(t: DisplayText): Uint8Array {

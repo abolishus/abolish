@@ -3,8 +3,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   decodeElectionDefinition,
+  decodeElectionDefinitionRecord,
   type ElectionDefinition,
+  electionDefinitionV3Hash,
+  type ElectionDefinitionV3,
+  type ElectionDefinitionV4,
   encodeElectionDefinition,
+  encodeElectionDefinitionV3,
+  encodeElectionDefinitionV4,
   RECORD_TYPES,
 } from "@abolishus/crypto";
 import { describe, expect, test } from "vite-plus/test";
@@ -24,7 +30,10 @@ import {
 // (docs/spec/verifier.md, Definition). Fixtures: the definitions of
 // docs/spec/vectors/election-definition.json (packages/crypto/scripts/
 // definition-vectors.py, with each one's expected decode error, rule and
-// hash), and the L1 evidence and boards of l1-anchor.json and board.json.
+// hash), with versions 3 and 4 from election-definition-v3.json
+// (regional-cells-vectors.py) and election-definition-v4.json
+// (definition-v4-vectors.py), and the L1 evidence and boards of
+// l1-anchor.json and board.json.
 
 const VECTORS = new URL("../../../docs/spec/vectors/", import.meta.url);
 const read = (name: string) => JSON.parse(readFileSync(new URL(name, VECTORS), "utf8")) as unknown;
@@ -48,7 +57,10 @@ interface L1Vector {
   readonly copyEntries?: string;
 }
 
-const definitions = (read("election-definition.json") as { vectors: DefinitionVector[] }).vectors;
+const vectorsOf = (name: string) => (read(name) as { vectors: DefinitionVector[] }).vectors;
+const definitions = vectorsOf("election-definition.json");
+const definitionsV3 = vectorsOf("election-definition-v3.json");
+const definitionsV4 = vectorsOf("election-definition-v4.json");
 const l1File = read("l1-anchor.json") as {
   readonly clock: Readonly<Record<string, string>>;
   readonly electionId: string;
@@ -95,7 +107,7 @@ function format2(v: L1Vector): Report {
 }
 
 const vector = (id: string) => {
-  const d = definitions.find((x) => x.id === id);
+  const d = [...definitions, ...definitionsV3, ...definitionsV4].find((x) => x.id === id);
   if (d === undefined) throw new Error(`no definition ${id}`);
   return d;
 };
@@ -138,10 +150,25 @@ test("the fixtures cover undecodable, ill-formed and well-formed definitions", (
   expect(definitions.some((d) => d.error === undefined && d.illFormed === undefined)).toBe(true);
 });
 
+test("the version-3 and version-4 fixtures cover every outcome too", () => {
+  for (const file of [definitionsV3, definitionsV4]) {
+    expect(file.some((d) => d.error === "unknown-version")).toBe(true);
+    expect(file.some((d) => d.error !== undefined && d.error !== "unknown-version")).toBe(true);
+    expect(file.some((d) => d.illFormed !== undefined)).toBe(true);
+    expect(file.some((d) => d.error === undefined && d.illFormed === undefined)).toBe(true);
+  }
+  // Each version's own rule, reported on 2.1 like version 1's.
+  expect(definitionsV3.some((d) => d.illFormed === "cells")).toBe(true);
+  expect(definitionsV4.some((d) => d.illFormed === "receipt-keys")).toBe(true);
+});
+
 describe("2.1: the definition decodes strictly and is well formed", () => {
   // An empty definition is rejected with the bundle: bundle hex is never
-  // empty (bundle.test.ts).
-  for (const d of definitions.filter((x) => x.encoding !== ""))
+  // empty (bundle.test.ts). Definition versions 1, 3 and 4 are read, each
+  // under its own layout, hash and rules.
+  for (const d of [...definitions, ...definitionsV3, ...definitionsV4].filter(
+    (x) => x.encoding !== "",
+  ))
     test(d.id, () => {
       const r = format3(d.encoding, closed);
       // The definition is a local file: whatever it is, nothing can verify
@@ -192,6 +219,15 @@ describe("2.1: the definition decodes strictly and is well formed", () => {
       // Decoding and well-formedness pass, but whether L2 registered this
       // hash isn't checked yet, so 2.1 can't pass.
       expect(row(r, "2.1")).toMatchObject({ status: "unverifiable", code: "not-implemented" });
+      // Versions 1 and 3 list no receipt keys; version 4's need the anchor's
+      // record from L1, which isn't read yet (P1-13b). A board-entry version
+      // this verifier can't read stops every check after 2.3.
+      if (row(r, "4.1").code !== "not-reached")
+        expect(row(r, "2.9")).toMatchObject(
+          hex(d.encoding)[2] === 4
+            ? { status: "unverifiable", code: "not-implemented" }
+            : { status: "pass" },
+        );
     });
 });
 
@@ -387,5 +423,126 @@ describe("the report", () => {
     } finally {
       rmSync(dir, { recursive: true });
     }
+  });
+});
+
+describe("definition versions 3 and 4 (regional cells)", () => {
+  const v3 = decodeElectionDefinitionRecord(hex(vector("definition-v3-typical").encoding))
+    .value as ElectionDefinitionV3;
+  const v4 = decodeElectionDefinitionRecord(hex(vector("definition-v4-typical").encoding))
+    .value as ElectionDefinitionV4;
+  const pinned = (
+    pins: ElectionDefinition["profile"]["pins"],
+    versions: Partial<Record<number, number>>,
+  ) => pins.map((p) => ({ ...p, version: versions[p.record_type] ?? p.version }));
+  /** The typical version-3 definition, for the L1 vectors' election and anchor. */
+  const v3For = (anchor: string, versions: Partial<Record<number, number>> = {}) =>
+    toHex(
+      encodeElectionDefinitionV3({
+        ...v3,
+        election_id: hex(l1File.electionId),
+        l1_anchor: hex(anchor),
+        profile: { ...v3.profile, pins: pinned(v3.profile.pins, versions) },
+      }),
+    );
+  const v4For = (anchor: string, versions: Partial<Record<number, number>> = {}) =>
+    toHex(
+      encodeElectionDefinitionV4({
+        ...v4,
+        election_id: hex(l1File.electionId),
+        l1_anchor: hex(anchor),
+        profile: { ...v4.profile, pins: pinned(v4.profile.pins, versions) },
+      }),
+    );
+
+  for (const v of l1File.vectors)
+    test(`${v.id}: a version-3 definition gives the board checks the same inputs as version 1`, () => {
+      // Both typical profiles pin every other type at version 1, which 2.3
+      // fails under either definition version; the board checks run all the same.
+      const r3 = format3(v3For(v.anchor), v);
+      const r1 = format3(forElection(v.anchor), v);
+      expect(r3.checks).toEqual(r1.checks);
+      expect(r3.board).toEqual(r1.board);
+      expect(r3.l1).toEqual(r1.l1);
+      expect(row(r3, "2.3")).toEqual(COMBINATION_FAILS);
+      // The version-3 hash, over the version-3 encoding.
+      const decoded = decodeElectionDefinitionRecord(hex(v3For(v.anchor)))
+        .value as ElectionDefinitionV3;
+      expect(r3.definition).toEqual({ hash: toHex(electionDefinitionV3Hash(decoded)) });
+      expect(r3.definition).not.toEqual(r1.definition);
+    });
+
+  // [board entry, ballot, spoiled-ballot opening, 2.3]: definition versions 3
+  // and 4 need a ballot version that names its cell (2 is the only one known), which needs board entries that carry its
+  // delivery records and a spoiled-ballot opening version that opens its
+  // cores. None does yet: version 1 opens version-1 cores only, so it fails,
+  // and version 2 is one a later release may define, so it is unsupported,
+  // never a failure (T-36, T-42).
+  const table: readonly (readonly [number, number, number, string])[] = [
+    [4, 1, 1, "profile-combination"],
+    // Ballot version 3 stands for one a later release may define as naming
+    // its cell: unsupported, never failed, whatever the opening (T-36).
+    [4, 3, 1, "unsupported-version"],
+    [4, 3, 2, "unsupported-version"],
+    [4, 2, 1, "profile-combination"],
+    [4, 2, 2, "unsupported-version"],
+    [3, 2, 255, "unsupported-version"],
+    [1, 2, 1, "profile-combination"],
+    // A board that can't carry delivery fails whatever the opening.
+    [1, 2, 2, "profile-combination"],
+  ];
+  for (const [version, encode] of [
+    [3, v3For],
+    [4, v4For],
+  ] as const)
+    for (const [board, ballot, spoiled, code] of table)
+      test(`version ${version}: board entry ${board}, ballot ${ballot}, opening ${spoiled}: ${code}`, () => {
+        const r = format3(
+          encode(closed.anchor, {
+            [RECORD_TYPES.boardEntry]: board,
+            [RECORD_TYPES.ballot]: ballot,
+            [RECORD_TYPES.spoiledBallotOpening]: spoiled,
+            // Tally-opening version 2 stands for one with no board need, so
+            // only the ballot's needs decide.
+            [RECORD_TYPES.tallyOpening]: 2,
+          }),
+          closed,
+        );
+        expect(row(r, "2.3")).toEqual(
+          code === "profile-combination"
+            ? COMBINATION_FAILS
+            : { id: "2.3", kind: "election", status: "unverifiable", code, at: {} },
+        );
+        // The copy is board-entry version 1's, so the board checks may fail
+        // it under another pin; only a failing combination fails it here.
+        if (code === "profile-combination") expect(r.verdictAgainstInputs).toBe("failed");
+        // The board-entry version is one this verifier reads, so the board
+        // checks ran under it either way.
+        expect(row(r, "4.1").code).not.toBe("not-reached");
+        expect(r.verdict).toBe("unverifiable");
+      });
+
+  test("2.9 passes version 3, which lists no receipt keys, and leaves version 4's unverifiable", () => {
+    expect(row(format3(v3For(closed.anchor), closed), "2.9")).toEqual({
+      id: "2.9",
+      kind: "election",
+      status: "pass",
+    });
+    expect(row(format3(v4For(closed.anchor), closed), "2.9")).toEqual({
+      id: "2.9",
+      kind: "election",
+      status: "unverifiable",
+      code: "not-implemented",
+    });
+  });
+
+  test("a version-3 layout labelled version 1 doesn't decode as either", () => {
+    // Its own pin says 3, so read as version 1 its bytes run past the layout.
+    const bytes = hex(v3For(closed.anchor));
+    bytes[2] = 1;
+    const r = format3(toHex(bytes), closed);
+    expect(row(r, "2.1")).toMatchObject({ status: "fail", code: "decode" });
+    expect(r.definition).toBeUndefined();
+    notReached(r);
   });
 });

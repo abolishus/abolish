@@ -22,7 +22,7 @@ import {
   readHead,
   readInclusionProof,
 } from "../src/index.ts";
-import { type TestDb, testDb } from "./db.ts";
+import { newElection, type TestDb, testDb } from "./db.ts";
 
 // Reading the board as the API serves it (src/board.ts): heads, pages and
 // proofs computed from the stored board are the ones the verifier's own
@@ -48,7 +48,7 @@ afterAll(() => db?.close());
 
 /** A board of `n` ballots, `sizes[i]` bytes each (4 by default), one segment per 3 entries. */
 async function board(n: number, sizes: number[] = []) {
-  const id = b32();
+  const id = await newElection(app);
   for (let i = 0; i < n; i++) await appendEntry(app, id, Math.floor(i / 3), ballot(i, sizes[i]));
   const checked = checkBoard(id, await readBoard(app, id), UNPINNED);
   const root = (m: number) => merkleRoot(BOARD_TREE, checked.entryHashes.slice(0, m));
@@ -91,6 +91,19 @@ describe("readHead", () => {
 });
 
 describe("readEntries", () => {
+  test("serves entries under the board-entry version the definition pins", async () => {
+    const id = await newElection(app, 4);
+    for (let i = 0; i < 3; i++) await appendEntry(app, id, 0, ballot(i));
+    const page = await readEntries(app, id, 0n, 10, 1 << 20);
+    expect(page).toEqual(await readBoard(app, id));
+    const checked = checkBoard(id, page, 4);
+    expect(await readHead(app, id)).toEqual({
+      size: 3n,
+      head: checked.links[2],
+      root: merkleRoot(BOARD_TREE, checked.entryHashes),
+    });
+  });
+
   test("pages, read in turn, are the board readBoard returns", async () => {
     const { id } = await board(10);
     const all = await readBoard(app, id);

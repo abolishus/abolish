@@ -1,10 +1,10 @@
-import { checkBoard, UNPINNED } from "@abolishus/crypto";
+import { boardEntryHash, checkBoard, encodeBoardEntry, UNPINNED } from "@abolishus/crypto";
 import { randomBytes } from "node:crypto";
 import fc from "fast-check";
 import type { Sql } from "postgres";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import { appendEntry, AppendError, type AppendErrorCode, readBoard } from "../src/index.ts";
-import { type TestDb, testDb } from "./db.ts";
+import { newElection, type TestDb, testDb } from "./db.ts";
 
 // appendEntry and readBoard (src/board.ts): every entry's hash and link come
 // from @abolishus/crypto, so the stored board passes the verifier's own
@@ -12,7 +12,8 @@ import { type TestDb, testDb } from "./db.ts";
 
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
 
-const b32 = () => new Uint8Array(randomBytes(32));
+const equalBytes = (a: Uint8Array, b: Uint8Array) =>
+  a.length === b.length && a.every((x, i) => x === b[i]);
 /** A record of `type` with a 1-byte version and `body`: only the header matters here. */
 const record = (type: number, ...body: number[]) =>
   Uint8Array.of(type >> 8, type & 0xff, 1, ...body);
@@ -56,7 +57,7 @@ async function assertVerifiable(electionId: Uint8Array, expectedSize: number) {
 
 describe("appendEntry", () => {
   test("appends a chain the verifier's checkBoard accepts, from 32 zero bytes", async () => {
-    const id = b32();
+    const id = await newElection(app);
     const results = [];
     for (const [segment, payload] of [
       [0, ballot(1)],
@@ -75,8 +76,8 @@ describe("appendEntry", () => {
   });
 
   test("keeps each election's board separate", async () => {
-    const a = b32();
-    const b = b32();
+    const a = await newElection(app);
+    const b = await newElection(app);
     await appendEntry(app, a, 0, ballot(1));
     await appendEntry(app, b, 0, ballot(1));
     await appendEntry(app, a, 0, ballot(2));
@@ -86,7 +87,7 @@ describe("appendEntry", () => {
   });
 
   test("concurrent appends from several connections form one contiguous chain", async () => {
-    const id = b32();
+    const id = await newElection(app);
     const clients = await Promise.all([0, 1, 2, 3].map(() => db.as("abolish_app")));
     const results = await Promise.all(
       clients.flatMap((c, k) =>
@@ -102,7 +103,7 @@ describe("appendEntry", () => {
   test("still forms one chain when the connection defaults to repeatable read", async () => {
     // appendEntry sets READ COMMITTED itself: under a snapshot level the
     // previous entry would be read from a snapshot taken before the lock.
-    const id = b32();
+    const id = await newElection(app);
     const clients = await Promise.all([0, 1, 2, 3].map(() => db.as("abolish_app")));
     for (const c of clients)
       await c.unsafe("SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL REPEATABLE READ");
@@ -115,14 +116,14 @@ describe("appendEntry", () => {
   });
 
   test("refuses a segment below the previous entry's", async () => {
-    const id = b32();
+    const id = await newElection(app);
     await appendEntry(app, id, 5, ballot());
     expect(await refusedWith(appendEntry(app, id, 4, ballot()))).toBe("segment-decreased");
     await assertVerifiable(id, 1);
   });
 
   test("keeps openings last in a segment, in increasing byte order (T-42, T-47)", async () => {
-    const id = b32();
+    const id = await newElection(app);
     await appendEntry(app, id, 0, ballot());
     await appendEntry(app, id, 0, opening(5));
     expect(await refusedWith(appendEntry(app, id, 0, ballot()))).toBe("opening-order");
@@ -135,7 +136,7 @@ describe("appendEntry", () => {
   });
 
   test("refuses entries that don't encode", async () => {
-    const id = b32();
+    const id = await newElection(app);
     // Display text is never on the board (T-17); nor is a definition or a board entry.
     for (const type of [0x0001, 0x0007, 0x0009, 0x0004])
       expect(await refusedWith(appendEntry(app, id, 0, record(type)))).toBe("invalid-entry");
@@ -157,6 +158,65 @@ describe("appendEntry", () => {
     expect(await readBoard(app, id)).toEqual([]);
   });
 
+  test("encodes each board under the board-entry version its definition pins", async () => {
+    const v4 = await newElection(app, 4);
+    const v1 = await newElection(app);
+    const payloads = [ballot(1), opening(1)];
+    for (const id of [v4, v1]) for (const p of payloads) await appendEntry(app, id, 0, p);
+    const board = checkBoard(v4, await readBoard(app, v4), 4);
+    const rows = await stored(v4);
+    expect(rows.map((r) => Uint8Array.from(r["entry_hash"]))).toEqual(board.entryHashes);
+    expect(rows.map((r) => Uint8Array.from(r["link"]))).toEqual(board.links);
+    // The version byte is in every entry hashed, so a board read under another
+    // version matches nothing stored (T-23, T-34).
+    const asV1 = payloads.map((payload, i) =>
+      boardEntryHash(
+        encodeBoardEntry({ election_id: v4, index: BigInt(i), segment: 0, payload }, 1),
+      ),
+    );
+    expect(board.entryHashes.some((h, i) => equalBytes(h, asV1[i]!))).toBe(false);
+    const entries = await readBoard(app, v4);
+    expect(() => checkBoard(v4, entries, 1)).toThrow(/profile-mismatch/);
+    expect(checkBoard(v1, await readBoard(app, v1), 1).entries).toHaveLength(2);
+  });
+
+  test("refuses to start a board without a stored definition, or under a version it can't write", async () => {
+    const none = new Uint8Array(randomBytes(32));
+    expect(await refusedWith(appendEntry(app, none, 0, ballot()))).toBe("no-definition");
+    // Version 2 is never assigned, and 9 isn't one yet (T-36).
+    for (const version of [2, 9]) {
+      const id = await newElection(app, version);
+      expect(await refusedWith(appendEntry(app, id, 0, ballot()))).toBe("unsupported-version");
+      expect(await readBoard(app, id)).toEqual([]);
+    }
+    expect(await readBoard(app, none)).toEqual([]);
+    expect(
+      (await app`SELECT count(*)::int AS n FROM board_subtrees WHERE election_id = ${none}`)[0]![
+        "n"
+      ],
+    ).toBe(0);
+  });
+
+  test("takes only the payload types its board-entry version allows", async () => {
+    // docs/spec/board.md, Allowed payloads: share receipts and complaints from
+    // version 3, destruction statements from version 4.
+    const allowed: [number, number[]][] = [
+      [1, []],
+      [3, [0x000c, 0x000e]],
+      [4, [0x000c, 0x000e, 0x000f]],
+    ];
+    for (const [version, types] of allowed) {
+      const id = await newElection(app, version);
+      for (const type of [0x000c, 0x000e, 0x000f]) {
+        const append = appendEntry(app, id, 0, record(type));
+        if (types.includes(type))
+          // The table's CHECK still lists version 1's types only (Known-weak).
+          await expect(append).rejects.toMatchObject({ cause: { code: "23514" } });
+        else expect(await refusedWith(append)).toBe("invalid-entry");
+      }
+    }
+  });
+
   test("any sequence of appends leaves exactly the accepted ones, verifiable", async () => {
     const op = fc.record({
       segmentStep: fc.constantFrom(-1, 0, 0, 0, 1),
@@ -165,7 +225,7 @@ describe("appendEntry", () => {
     });
     await fc.assert(
       fc.asyncProperty(fc.array(op, { maxLength: 12 }), async (ops) => {
-        const id = b32();
+        const id = await newElection(app);
         let segment = 1;
         let accepted = 0;
         // The model: the spec's envelope rules, independently of src/board.ts.

@@ -344,8 +344,10 @@ describe("board", () => {
 
   test("board procedures need an election this server holds", async () => {
     const id = b32();
-    // Entries without a stored definition aren't served.
-    await appendEntry(app, id, 0, Uint8Array.of(0, 2, 1, 0));
+    // A board starts only once its definition is stored.
+    await expect(appendEntry(app, id, 0, Uint8Array.of(0, 2, 1, 0))).rejects.toThrow(
+      /no-definition/,
+    );
     for (const [path, extra] of [
       ["/board/head", {}],
       ["/board/entries", { start: "0", limit: "1" }],

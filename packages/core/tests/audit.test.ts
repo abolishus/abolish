@@ -16,8 +16,9 @@ import {
   BoardAuditError,
   type BoardAuditCode,
   listBoards,
+  readBoard,
 } from "../src/index.ts";
-import { type TestDb, testDb } from "./db.ts";
+import { newElection, type TestDb, testDb } from "./db.ts";
 
 // auditBoard (src/audit.ts): a board appended through appendEntry passes, and
 // rows a writer stored without it (the triggers check order and chaining, not
@@ -111,7 +112,7 @@ describe("auditBoard", () => {
       fc.asyncProperty(
         fc.array(fc.tuple(fc.nat(3), fc.uint8Array({ maxLength: 8 })), { maxLength: 6 }),
         async (steps) => {
-          const id = b32();
+          const id = await newElection(app);
           let segment = 0;
           for (const [gap, body] of steps) {
             segment += gap;
@@ -127,7 +128,7 @@ describe("auditBoard", () => {
   }, 60_000);
 
   test("passes rows stored without appendEntry when their columns are right", async () => {
-    const id = b32();
+    const id = await newElection(app);
     await appendEntry(app, id, 0, ballot(0));
     const { idx, entryHash } = await appendRaw(id, ballot(1));
     await storeSubtrees(id, idx, entryHash);
@@ -137,7 +138,7 @@ describe("auditBoard", () => {
   });
 
   test("fails a row whose entry hash isn't its entry's, at that row", async () => {
-    const id = b32();
+    const id = await newElection(app);
     await appendEntry(app, id, 0, ballot(0));
     await appendEntry(app, id, 0, ballot(1));
     const row = await appendRaw(id, ballot(2), { entryHash: b32() });
@@ -148,7 +149,7 @@ describe("auditBoard", () => {
   });
 
   test("fails an entry stored without its subtrees, at that entry", async () => {
-    const id = b32();
+    const id = await newElection(app);
     await appendEntry(app, id, 0, ballot(0));
     await appendRaw(id, ballot(1));
     expect(await auditFailure(id)).toEqual(["subtree-missing", 1]);
@@ -157,7 +158,7 @@ describe("auditBoard", () => {
   });
 
   test("fails a stored subtree that isn't its entries', at the entry that completes it", async () => {
-    const id = b32();
+    const id = await newElection(app);
     await appendEntry(app, id, 0, ballot(0));
     await appendEntry(app, id, 0, ballot(1));
     const row = await appendRaw(id, ballot(2));
@@ -167,7 +168,7 @@ describe("auditBoard", () => {
   });
 
   test("fails a row whose link isn't chained from its entry hash", async () => {
-    const id = b32();
+    const id = await newElection(app);
     await appendEntry(app, id, 0, ballot(0));
     await appendRaw(id, ballot(1), { link: b32() });
     // Later rows chain on the stored link, so the triggers keep accepting them.
@@ -176,13 +177,43 @@ describe("auditBoard", () => {
   });
 
   test("fails a board the verifier's checkBoard rejects, at the first bad entry", async () => {
-    const id = b32();
+    const id = await newElection(app);
     await appendEntry(app, id, 2, ballot(0));
     // The table checks segments are non-decreasing too, so the rejection here
     // is an opening followed by a ballot in its segment (T-42, T-47).
     await appendRaw(id, Uint8Array.of(0x00, 0x03, 1, 7), {}, 2);
     await appendRaw(id, ballot(1), {}, 2);
     expect(await auditFailure(id)).toEqual(["board-invalid", 2]);
+  });
+
+  test("hashes entries under the board-entry version the definition pins", async () => {
+    const id = await newElection(app, 4);
+    await appendEntry(app, id, 0, ballot(0));
+    await appendEntry(app, id, 0, ballot(1));
+    expect(await auditBoard(app, id)).toBe(2);
+    // appendRaw hashes under version 1: right for a version-1 board, wrong here.
+    const row = await appendRaw(id, ballot(2));
+    await storeSubtrees(id, row.idx, row.entryHash);
+    expect(await auditFailure(id)).toEqual(["entry-hash-mismatch", 2]);
+  });
+
+  test("fails a board stored without a definition that pins its version", async () => {
+    const id = b32();
+    await appendRaw(id, ballot(0));
+    expect(await auditFailure(id)).toEqual(["board-unpinned", 0]);
+    await expect(readBoard(app, id)).rejects.toThrow(/no-definition/);
+    const unsupported = await newElection(app, 2);
+    await appendRaw(unsupported, ballot(0));
+    expect(await auditFailure(unsupported)).toEqual(["board-unpinned", 0]);
+    // A definition inserted around storeDefinition that doesn't decode.
+    const undecodable = b32();
+    await app`INSERT INTO election_definitions (election_id, definition)
+      VALUES (${undecodable}, ${Uint8Array.of(0, 1, 1)})`;
+    await appendRaw(undecodable, ballot(0));
+    expect(await auditFailure(undecodable)).toEqual(["board-unpinned", 0]);
+    await expect(appendEntry(app, undecodable, 0, ballot(1))).rejects.toThrow(
+      /unsupported-version/,
+    );
   });
 
   test("refuses an election ID that isn't 32 bytes", async () => {
@@ -192,7 +223,7 @@ describe("auditBoard", () => {
 
 describe("listBoards", () => {
   test("lists every election with entries, once, in byte order", async () => {
-    const ids = [b32(), b32(), b32()];
+    const ids = [await newElection(app), await newElection(app), await newElection(app)];
     for (const id of ids) {
       await appendEntry(app, id, 0, ballot(0));
       await appendEntry(app, id, 0, ballot(1));

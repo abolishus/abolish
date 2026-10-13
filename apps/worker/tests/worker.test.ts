@@ -1,5 +1,5 @@
 import { appendEntry } from "@abolishus/core";
-import { type TestDb, testDb } from "@abolishus/core/test-db";
+import { newElection, type TestDb, testDb } from "@abolishus/core/test-db";
 import { Queue } from "bullmq";
 import { Redis } from "ioredis";
 import { randomBytes } from "node:crypto";
@@ -169,7 +169,7 @@ test("a prune deletes the backups expired by the worker's clock, and only those"
 });
 
 test("an audit of good boards completes, and its line holds only queue, outcome and duration", async () => {
-  const id = b32();
+  const id = await newElection(app);
   await appendEntry(app, id, 0, ballot(1));
   const lines = await audit({});
   expect(lines).toHaveLength(1);
@@ -278,7 +278,7 @@ test("msgpackr's native accelerator isn't installed, so no prebuilt binary loads
 
 // Last: the bad boards stay in the schema and fail every later audit.
 test("an audit names every bad board, then fails by kind", async () => {
-  const bad = [b32(), b32()];
+  const bad = [await newElection(app), await newElection(app)];
   for (const id of bad) {
     await appendEntry(app, id, 0, ballot(0));
     // A row a writer stored without appendEntry: its entry hash is random.

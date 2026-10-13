@@ -1,7 +1,12 @@
+import {
+  decodeElectionDefinition,
+  encodeElectionDefinition,
+  RECORD_TYPES,
+} from "@abolishus/crypto";
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import postgres, { type Sql } from "postgres";
-import { migrate } from "../src/index.ts";
+import { migrate, storeDefinition } from "../src/index.ts";
 
 // Each test file gets its own schema (AGENTS.md, Testing: Database), migrated
 // as abolish_migrator, and clients that act as each role through SET ROLE.
@@ -45,4 +50,39 @@ export async function testDb(): Promise<TestDb> {
       await admin.end();
     },
   };
+}
+
+const typical = decodeElectionDefinition(
+  Buffer.from(
+    (
+      JSON.parse(
+        readFileSync(
+          new URL("../../../docs/spec/vectors/election-definition.json", import.meta.url),
+          "utf8",
+        ),
+      ).vectors as { id: string; encoding: string }[]
+    ).find((v) => v.id === "definition-typical")!.encoding,
+    "hex",
+  ),
+);
+
+/**
+ * A fresh election with the typical vector's definition stored, so it can
+ * have a board: entries are encoded under the board-entry version a stored
+ * definition pins, `boardVersion` here (the vector's own 1 by default).
+ */
+export async function newElection(sql: Sql, boardVersion = 1): Promise<Uint8Array> {
+  const electionId = new Uint8Array(randomBytes(32));
+  const pins = typical.profile.pins.map((p) =>
+    p.record_type === RECORD_TYPES.boardEntry ? { ...p, version: boardVersion } : p,
+  );
+  await storeDefinition(
+    sql,
+    encodeElectionDefinition({
+      ...typical,
+      election_id: electionId,
+      profile: { ...typical.profile, pins },
+    }),
+  );
+  return electionId;
 }

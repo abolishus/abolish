@@ -35,7 +35,7 @@ The board tree's perfect subtrees: for each election, `level`, `idx` and `hash`,
 
 `appendEntry(sql, electionId, segment, payload)` appends the next entry of an election's board and returns its index, entry hash and link:
 
-- The entry is encoded, hashed and chained by `@abolishus/crypto` (`encodeBoardEntry`, `boardEntryHash`, `chainLink`), the same code the verifier runs.
+- The entry is encoded, hashed and chained by `@abolishus/crypto` (`encodeBoardEntry`, `boardEntryHash`, `chainLink`), the same code the verifier runs, under the board-entry version the election's stored definition pins. The version byte is in every hash, so an entry under another version matches nothing the verifier recomputes (2.3, `profile-mismatch`). A board starts only once its definition is stored (`no-definition`), and only under a version `@abolishus/crypto` encodes (`unsupported-version` otherwise, including a stored definition it can't decode; T-36). `readBoard`, `readEntries` and `auditBoard` read under the same version.
 - In the same transaction it stores the subtrees the entry completes, from the stored ones covering the board before it. A board missing one (rows written around `appendEntry`) can't be appended to.
 - Appends to one board are serialised by a transaction-scoped advisory lock on the election, so concurrent callers get consecutive indexes.
 - It refuses, with a typed `AppendError`, an entry that doesn't encode (a payload type the board doesn't allow, a bad election ID or segment), a segment below the previous entry's, and an entry that breaks the order of spoiled-ballot openings (within a segment they come last, in increasing byte order; T-42, T-47).
@@ -131,7 +131,7 @@ A poll's short link is `abolish.us/p/<code>` (docs/design/sharing.md, "Short lin
 
 ### Auditing the board (`src/audit.ts`; T-23, T-66)
 
-The table's triggers check order and chaining but never hash, so a writer that bypassed `appendEntry`, or a corrupted or restored database, can store columns the payloads don't produce. `auditBoard(sql, id)` reads the board in one query, recomputes it with the verifier's own `checkBoard`, and compares every row's `entry_hash`, `prev_link` and `link`, then every subtree each entry completes against one recomputed from those entry hashes; it returns the size or throws `BoardAuditError` (`board-invalid`, `entry-hash-mismatch`, `link-mismatch`, `subtree-missing` or `subtree-mismatch`) with the first wrong index. `listBoards(sql)` lists every election with entries. `apps/worker` runs the audit on a schedule. It detects and repairs nothing: Postgres isn't authoritative.
+The table's triggers check order and chaining but never hash, so a writer that bypassed `appendEntry`, or a corrupted or restored database, can store columns the payloads don't produce. `auditBoard(sql, id)` reads the board in one query, recomputes it with the verifier's own `checkBoard`, and compares every row's `entry_hash`, `prev_link` and `link`, then every subtree each entry completes against one recomputed from those entry hashes; it returns the size or throws `BoardAuditError` (`board-unpinned` for entries with no stored definition pinning a version this release reads, `board-invalid`, `entry-hash-mismatch`, `link-mismatch`, `subtree-missing` or `subtree-mismatch`) with the first wrong index. `listBoards(sql)` lists every election with entries. `apps/worker` runs the audit on a schedule. It detects and repairs nothing: Postgres isn't authoritative.
 
 ### No joins (T-10)
 

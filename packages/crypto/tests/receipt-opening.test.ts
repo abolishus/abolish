@@ -147,7 +147,7 @@ function nestedLists(d: number): Uint8Array {
 describe("receipt-opening.json", () => {
   test("is the expected format, with every vector parsed", () => {
     expect(V.format).toBe("abolish-receipt-opening-vectors/1");
-    expect(V.openings).toHaveLength(82);
+    expect(V.openings).toHaveLength(94);
     expect(V.blocks.map((b) => b.proofs.length)).toEqual([8, 5, 3]);
     expect(V.trieRejections).toHaveLength(8);
     expect(V.calldata).toHaveLength(13);
@@ -222,8 +222,8 @@ describe("checkReceiptOpening", () => {
     }
   });
 
-  test("no single flipped bit of a passing opening passes", () => {
-    const v = byId("ok-summary");
+  test.each(["ok-summary", "ok-sepolia-gloas"])("no single flipped bit of %s passes", (id) => {
+    const v = byId(id);
     const b = hex(v.opening);
     fc.assert(
       fc.property(fc.nat({ max: b.length * 8 - 1 }), (bit) => {
@@ -232,7 +232,7 @@ describe("checkReceiptOpening", () => {
         // A judge with the whole state holds whatever entry a moved slot
         // names; this one holds another root there.
         const s = state(v.state);
-        const entry = receiptOpeningStateEntry(flipped, 1n);
+        const entry = receiptOpeningStateEntry(flipped, BigInt(v.l1ChainId));
         const other = new Uint8Array(32).fill(0xee);
         const blockSummaryRoots = new Map(s.blockSummaryRoots);
         const blockRoots = new Map(s.blockRoots);

@@ -306,6 +306,35 @@ describe("runSimulation", { timeout }, () => {
     ]);
   });
 
+  it("judges each ballot by the seats down at its own cast when a re-voter crosses a departure", () => {
+    const s: Scenario = {
+      ...base,
+      revotes: 1,
+      postings: 0.5,
+      trustees: {
+        panel: 4,
+        threshold: 2,
+        offline: [2],
+        faulty: [],
+        departures: [{ seat: 3, at: 0.5 }],
+      },
+    };
+    const voters = planElection(s).voters;
+    const casts = voters.flatMap((v) => (v.earlier === null ? [v] : [v.earlier, v]));
+    // A voter whose earlier ballot went to seat 3 and whose last, unposted, didn't.
+    expect(
+      voters.some((v) => v.earlier !== null && v.earlier.at < 0.5 && v.at >= 0.5 && !v.posts),
+    ).toBe(true);
+    const r = runSimulation(s);
+    expect(r.ok).toBe(true);
+    expect(r.board.shareReceipts).toBe(casts.reduce((a, b) => a + 4 - downAt(s, b.at).length, 0));
+    expect(r.ballots.postings).toBe(
+      casts.filter((b) => b.posts).reduce((a, b) => a + downAt(s, b.at).length, 0),
+    );
+    expect(r.ballots.undelivered).toBe(voters.filter((v) => !v.delivered).length);
+    for (const c of r.cells) expect(c.counts).toEqual(c.expected);
+  });
+
   it("needs no posting from a seat that departs at close, which still misses the tally and destruction", () => {
     const s: Scenario = {
       ...base,

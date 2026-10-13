@@ -93,11 +93,11 @@ export interface Scenario {
    */
   readonly publications: number;
   /**
-   * The share of ballots, in `[0, 1]`, whose voter, finding an offline
-   * seat's intake unreachable by every route, chooses to post that seat's share publicly
-   * through the contract path (docs/spec/delivery.md, Client rules 4), which
-   * lowers that seat's long-term privacy for the ballot, and with `k` or
-   * more seats offline makes the ballot readable whole to anyone who later
+   * The share of ballots, in `[0, 1]`, whose voter, finding the intake of a
+   * seat down at its cast (offline or departed) unreachable by every route,
+   * chooses to post that seat's share publicly through the contract path
+   * (docs/spec/delivery.md, Client rules 4), which lowers that seat's
+   * long-term privacy for the ballot, and with `k` or more seats down makes the ballot readable whole to anyone who later
    * breaks the shares' classical encryption (T-15). A voter who declines
    * leaves that ballot undelivered, and it counts nothing, nor does an
    * earlier one in its place: every qualified seat needs a receipt or a

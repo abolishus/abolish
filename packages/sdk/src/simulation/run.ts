@@ -2,12 +2,12 @@
 // a well-formed definition and its signed key ceremony (./election.ts), each
 // voter's sharing and share encryption, the tracking code shown before the
 // cast-or-challenge choice, a challenged attempt's opening and its checker's
-// verdict (./challenge.ts), the cast attempt's validity proof, each online
-// trustee's share intake (proof checks, decryption,
+// verdict (./challenge.ts), the cast attempt's validity proof, the share
+// intake of each trustee up at its cast (proof checks, decryption,
 // share checks, receipt) and the receipt's check under the seat's registered
 // signing key, each ballot's L1 reference on a simulated L1 (./l1.ts), the
 // ballot record on the board (./board.ts) with the operator's receipt and
-// the client's check of it at cast, each online seat's share receipt on the
+// the client's check of it at cast, each such seat's share receipt on the
 // board and a posting voter's postings of the seats down at its cast, the verifier's
 // board check, and from the boarded records: each ballot's admission check,
 // the re-vote rule's selection of each voter's counted ballot, the delivery
@@ -401,10 +401,10 @@ export function runSimulation(
   const kept: Kept[] = [];
   // Ballots submitted directly while our servers are down, which the
   // operator boards when they return (SIMULATION_STUBS), each with its
-  // online seats' share receipts.
+  // share receipts from the seats up at its cast.
   let pending: (Kept & { readonly payload: Uint8Array; readonly receipts: Uint8Array[] })[] = [];
   const returnsAt = segmentAt(secondsAt(scenario.outage?.to ?? 1));
-  // Each online seat's node boards its share receipt once the ballot is on
+  // Each seat's node boards its share receipt once the ballot is on
   // the board (docs/spec/delivery.md, Boarding rule 2): a receipted seat is
   // delivered even when the client goes away (Client rules).
   let shareReceipts = 0;

@@ -177,12 +177,13 @@ describe("planElection", { timeout: 60_000 }, () => {
         const strip = (v: PlannedVoter) => ({ ...v, delivered: false });
         expect(plan.voters.map(strip)).toEqual(planElection(s).voters.map(strip));
         for (const v of plan.voters) {
-          const down = downAt(left, v.at);
-          expect(down).toEqual(
-            [2, 4, 5].filter(
-              (seat) => seat === 5 || departures.some((d) => d.seat === seat && d.at <= v.at),
-            ),
-          );
+          // Every ballot, a re-voter's earlier one too, by its own time.
+          for (const { at } of v.earlier === null ? [v] : [v.earlier, v])
+            expect(downAt(left, at)).toEqual(
+              [2, 4, 5].filter(
+                (seat) => seat === 5 || departures.some((d) => d.seat === seat && d.at <= at),
+              ),
+            );
           expect(v.delivered).toBe(v.posts);
         }
         const none = { ...left, trustees: { ...left.trustees, offline: [] } };

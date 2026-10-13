@@ -6,28 +6,31 @@ What our L2 contracts commit to, for a verifier that reads them from the chain a
 
 Threats: T-71 (L2 governance or our server hiding an event), T-25 (a direct-submitted ballot withheld from the board), T-24 (equivocation). Decided by [[0005-permanent-archive]], Consequences, "L2 events".
 
-Our server writes the board, and inclusion proofs show only that an event exists, never that none was left out. So every Abolish L2 contract keeps a running hash and a counter over every log it emits, in its own storage. Storage is committed by the L2 state root, which L1 output roots commit to, so an account and storage proof (`eth_getProof`) of these two values at an L2 block pins the contract's whole event sequence up to that block. A verifier replays the archived sequence and compares ([[verifier]] 4.4, P1-19).
+Our server writes the board, and inclusion proofs show only that an event exists, never that none was left out. So every Abolish contract keeps a running hash and a counter over every log it emits, in its own storage, and each step also binds the block that emitted the log. Storage is committed by the L2 state root, which L1 output roots commit to, so an account and storage proof (`eth_getProof`) of these two values at an L2 block pins the contract's whole event sequence up to that block, each event with its block number and timestamp. A verifier replays the archived sequence and compares ([[verifier]] 4.4, P1-19). This is the only evidence archived for our contracts' events: no transaction, receipt or block header ([[0025-contract-event-evidence]]).
+
+The tag is `abolish/v1/event-accumulator-2`. The first layout, under `abolish/v1/event-accumulator`, bound no block; it stays frozen with its vectors (`vectors/event-accumulator.json`) and no Abolish contract is deployed with it ([[0025-contract-event-evidence]], Consequences).
 
 ### Values
 
 - **Genesis.** At deployment the contract stores
 
   ```
-  acc_0 = H(DS("abolish/v1/event-accumulator", u8(0) ‖ u64(chain_id) ‖ bytes[20](address)))
+  acc_0 = H(DS("abolish/v1/event-accumulator-2", u8(0) ‖ u64(chain_id) ‖ bytes[20](address)))
   ```
 
   and a count of 0, where `chain_id` is the chain's EIP-155 identifier (`block.chainid`) and `address` the contract's own address. Binding both means one contract's event sequence can't be presented as another's, here or on another chain where the same address is deployed (T-71). It doesn't separate the two sides of a fork after deployment, which share the stored value: that is the job of the pinned L2 and the output root the storage proof is checked against (Verification). A contract MUST revert its deployment if `chain_id` is 2⁶⁴ or more, since it has no `u64` encoding.
 
-- **Step.** For its `n`-th log (0-based), with topics `t_0 … t_{k−1}` and data `d`, the contract sets
+- **Step.** For its `n`-th log (0-based), emitted in the block with number `b` and timestamp `τ` (`block.number` and `block.timestamp`, read in the call that emits it), with topics `t_0 … t_{k−1}` and data `d`, the contract sets
 
   ```
-  acc_{n+1} = H(DS("abolish/v1/event-accumulator",
-                   u8(1) ‖ acc_n ‖ u64(n) ‖ u8(k) ‖ t_0 ‖ … ‖ t_{k−1} ‖ u32(len(d)) ‖ d))
+  acc_{n+1} = H(DS("abolish/v1/event-accumulator-2",
+                   u8(1) ‖ acc_n ‖ u64(n) ‖ u64(b) ‖ u64(τ) ‖
+                   u8(k) ‖ t_0 ‖ … ‖ t_{k−1} ‖ u32(len(d)) ‖ d))
   ```
 
-  and the count to `n + 1`. Each topic is the log's 32-byte topic as emitted, and `d` its data bytes as emitted (the ABI encoding of the event's non-indexed fields). `k` is 1 to 4. A log with no topics (a Solidity anonymous event) is never emitted, so `t_0` is always the event's signature hash.
+  and the count to `n + 1`. A contract reverts the emitting call if `b` or `τ` is 2⁶⁴ or more, since it has no `u64` encoding. Each topic is the log's 32-byte topic as emitted, and `d` its data bytes as emitted (the ABI encoding of the event's non-indexed fields). `k` is 1 to 4. A log with no topics (a Solidity anonymous event) is never emitted, so `t_0` is always the event's signature hash.
 
-The leading `u8` separates the two input layouts, and fixed widths plus the length of `d` make each input parse one way. The index `n` is redundant with the chain but makes each step's position explicit, so a verifier can report which event diverged.
+The leading `u8` separates the two input layouts, and fixed widths plus the length of `d` make each input parse one way. The index `n` is redundant with the chain but makes each step's position explicit, so a verifier can report which event diverged. `b` and `τ` place each event on L2 for the checks that compare it with a block or a time ([[verifier]] 2.4, 5.5), with no header or receipt: the accumulator authenticates them with the rest of the step.
 
 ### Rules for every contract
 
@@ -45,16 +48,24 @@ The leading `u8` separates the two input layouts, and fixed widths plus the leng
 
 ### Verification
 
-Given a contract's address, the chain ID, its archived logs in L2 order (block number, then the receipt's `logIndex`, which counts within the block), and a storage proof of `S` and `S + 1` at an L2 block `B`, a verifier recomputes `acc` and the count from genesis over every archived log emitted at or before `B`. The archive matches the contract at `B` exactly when both equal the proven values. Anything else (a log left out, added, altered or reordered, or a log from another contract or chain) gives a different accumulator, except with negligible probability under SHA-256's collision resistance. This assumes the genesis and count the release constructor writes; until [[verifier]] 1.2 binds each deployment to the release creation code (Board anchor, Known-weak, Constructor effects aren't bound), a deployer's own initcode could start the accumulator elsewhere. The storage proof is an account proof for the contract's address as the verifier pins it ([[verifier]], Pinned trust roots; its bytecode is checked by 1.2) under the state root that the output root commits to, plus a storage proof of each slot. The storage trie holds each value as the RLP of its minimal big-endian bytes, and omits a zero value: the verifier decodes the value, left-pads it to 32 bytes, and reads an absent slot as zero. The accumulator commits to the order of logs, not to their blocks or transactions, so each log's place is bound by its own receipt inclusion evidence ([[verifier]] 4.4). [[verifier]] 4.4 says when this is checked and what the result is worth: a storage proof is only as good as the output root it is proven against ([[0004-l2-choice]], T-71 residual).
+Given a contract's address, the chain ID, its archived logs in order of `n`, each with its `b` and `τ`, and a storage proof of `S` and `S + 1` at an L2 block `B`, a verifier recomputes `acc` and the count from genesis over the logs. The archive matches the contract at `B` exactly when, for the proven count `c`:
+
+1. the logs are numbered `0, 1, …` with no gap, and `b` and `τ` never decrease from one log to the next;
+2. every log with `n < c` has `b ≤ B`, and the log `n = c`, if the archive holds one, has `b > B`;
+3. the accumulator over logs `0 … c − 1` equals the proven value.
+
+The rules are checked in that order, and the first that fails is reported: `index` (a log out of sequence: rule 1's numbering), `order` (a block number or timestamp that decreases), `block-range` (rule 2) or `accumulator` (rule 3, including an archive holding fewer than `c` logs).
+
+Anything else (a log left out, added, altered or reordered, a log from another contract or chain, or a log moved to another block) gives a different accumulator or breaks rule 1 or 2, except with negligible probability under SHA-256's collision resistance. The proof at `B` is of the state after `B`, so it covers `B`'s own logs; rule 2 keeps a log from being counted on the wrong side of `B` without changing the accumulator, and rule 1 holds for every honest history, since L2 block numbers and timestamps never decrease. This assumes the genesis and count the release constructor writes; until [[verifier]] 1.2 binds each deployment to the release creation code (Board anchor, Known-weak, Constructor effects aren't bound), a deployer's own initcode could start the accumulator elsewhere. The storage proof is an account proof for the contract's address as the verifier pins it ([[verifier]], Pinned trust roots; its bytecode is checked by 1.2) under the state root that the output root commits to, plus a storage proof of each slot. The storage trie holds each value as the RLP of its minimal big-endian bytes, and omits a zero value: the verifier decodes the value, left-pads it to 32 bytes, and reads an absent slot as zero. The accumulator commits to each log's order and block, never to its transaction: nothing about the transaction is archived ([[0025-contract-event-evidence]]). [[verifier]] 4.4 says when this is checked and what the result is worth: a storage proof is only as good as the output root it is proven against ([[0004-l2-choice]], T-71 residual).
 
 ### Vectors
 
-`vectors/event-accumulator.json` (format `abolish-event-accumulator-vectors/1`, see [[vectors/README|vectors]]) gives genesis values, event sequences with the accumulator after every step, and rejected inputs. TypeScript (`packages/crypto`) and Solidity (`packages/contracts`) tests both consume it.
+`vectors/event-accumulator-2.json` (format `abolish-event-accumulator-vectors/2`, see [[vectors/README|vectors]]) gives genesis values, event sequences with each event's block and the accumulator after every step, proof checks, including histories that break each rule of Verification, and rejected inputs. TypeScript (`packages/crypto`) and Solidity (`packages/contracts`) tests both consume it. `vectors/event-accumulator.json` is the frozen first layout's, consumed by nothing.
 
 ### Known-weak
 
 - The accumulator proves that the archive matches the contract's storage, not that the storage is honest: L2 governance that rewrites state can rewrite it too (T-71, detection only, through the evidence each event carries).
-- Each event costs one SHA-256 precompile call over its log, plus two storage writes: 60 gas plus 12 per 32-byte word for the hash. Voters don't transact to vote, so it is mostly our gas, but a direct submitter (T-25) pays it for their own submission.
+- Each event costs one SHA-256 precompile call over its log, plus two storage writes: 60 gas plus 12 per 32-byte word for the hash; binding `b` and `τ` adds at most one word. Voters don't transact to vote, so it is mostly our gas, but a direct submitter (T-25) pays it for their own submission.
 
 ## Election registry
 

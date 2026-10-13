@@ -50,7 +50,9 @@ abstract contract GroupTestBase is TestBase {
         uint256 n;
         for (uint256 i; i < logs.length; i++) {
             if (logs[i].emitter != address(registry)) continue;
-            acc = EventAccumulatorLib.step(acc, uint64(n++), logs[i].topics, logs[i].data);
+            acc = EventAccumulatorLib.step(
+                acc, uint64(n++), block.number, block.timestamp, logs[i].topics, logs[i].data
+            );
         }
         (bytes32 stored, uint64 count) = registry.eventAccumulator();
         assertEq(stored, acc, "accumulator");
@@ -1438,12 +1440,16 @@ contract GroupRegistryTest is GroupTestBase {
         bytes32 acc = EventAccumulatorLib.genesis(uint64(block.chainid), address(registry));
         bytes32[] memory t = new bytes32[](1);
         t[0] = GroupRegistry.RegistrarsPinned.selector;
-        acc = EventAccumulatorLib.step(acc, 0, t, abi.encode(threshold, pinned));
+        acc = EventAccumulatorLib.step(
+            acc, 0, block.number, block.timestamp, t, abi.encode(threshold, pinned)
+        );
         t = new bytes32[](3);
         (t[0], t[1], t[2]) = (GroupRegistry.GroupCreated.selector, bytes32(0), bytes32(0));
-        acc = EventAccumulatorLib.step(acc, 1, t, "");
+        acc = EventAccumulatorLib.step(acc, 1, block.number, block.timestamp, t, "");
         for (uint256 i; i < logs.length; i++) {
-            acc = EventAccumulatorLib.step(acc, uint64(2 + i), logs[i].topics, logs[i].data);
+            acc = EventAccumulatorLib.step(
+                acc, uint64(2 + i), block.number, block.timestamp, logs[i].topics, logs[i].data
+            );
         }
         (bytes32 stored, uint64 count) = registry.eventAccumulator();
         assertEq(stored, acc, "accumulator");

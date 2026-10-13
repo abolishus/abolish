@@ -45,11 +45,14 @@ contract AccumulatorLibHarness {
         return EventAccumulatorLib.genesis(chainId, emitter);
     }
 
-    function step(bytes32 acc, uint64 index, bytes32[] memory topics, bytes memory data)
-        external
-        pure
-        returns (bytes32)
-    {
-        return EventAccumulatorLib.step(acc, index, topics, data);
+    function step(
+        bytes32 acc,
+        uint64 index,
+        uint256 blockNumber,
+        uint256 timestamp,
+        bytes32[] memory topics,
+        bytes memory data
+    ) external pure returns (bytes32) {
+        return EventAccumulatorLib.step(acc, index, blockNumber, timestamp, topics, data);
     }
 }

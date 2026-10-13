@@ -3,12 +3,16 @@ pragma solidity 0.8.30;
 
 /// @title The event accumulator's hash steps (docs/spec/contracts.md, Event accumulator).
 /// @notice `H` is SHA-256 (docs/spec/group.md), through the EVM precompile, over
-/// `DS("abolish/v1/event-accumulator", m) = u8(28) ‖ tag ‖ m` (docs/spec/domain-separation.md).
+/// `DS("abolish/v1/event-accumulator-2", m) = u8(30) ‖ tag ‖ m` (docs/spec/domain-separation.md).
+/// Each step binds its log's block number and timestamp, so the accumulator alone
+/// places every event on L2 and no transaction is archived (docs/adr/0025-contract-event-evidence.md).
 library EventAccumulatorLib {
-    /// `u8(len(tag)) ‖ tag`: 0x1c = 28, the tag's length in bytes.
-    bytes internal constant DS_PREFIX = "\x1cabolish/v1/event-accumulator";
+    /// `u8(len(tag)) ‖ tag`: 0x1e = 30, the tag's length in bytes.
+    bytes internal constant DS_PREFIX = "\x1eabolish/v1/event-accumulator-2";
 
     error ChainIdTooLarge(uint256 chainId);
+    error BlockNumberTooLarge(uint256 blockNumber);
+    error TimestampTooLarge(uint256 timestamp);
     error TopicCount(uint256 count);
     error DataTooLong(uint256 length);
 
@@ -23,12 +27,20 @@ library EventAccumulatorLib {
         return sha256(abi.encodePacked(DS_PREFIX, uint8(0), chainId, emitter));
     }
 
-    /// `acc_{n+1} = H(DS(tag, u8(1) ‖ acc_n ‖ u64(n) ‖ u8(k) ‖ t_0 ‖ … ‖ t_{k−1} ‖ u32(len(d)) ‖ d))`.
-    function step(bytes32 acc, uint64 index, bytes32[] memory topics, bytes memory data)
-        internal
-        pure
-        returns (bytes32)
-    {
+    /// `acc_{n+1} = H(DS(tag, u8(1) ‖ acc_n ‖ u64(n) ‖ u64(b) ‖ u64(τ) ‖ u8(k) ‖
+    /// t_0 ‖ … ‖ t_{k−1} ‖ u32(len(d)) ‖ d))`, for log `n` emitted in block `b` at time `τ`.
+    function step(
+        bytes32 acc,
+        uint64 index,
+        uint256 blockNumber,
+        uint256 timestamp,
+        bytes32[] memory topics,
+        bytes memory data
+    ) internal pure returns (bytes32) {
+        // Neither fits a u64 on any chain for billions of years, but the check
+        // keeps the encoding total rather than silently truncating.
+        if (blockNumber > type(uint64).max) revert BlockNumberTooLarge(blockNumber);
+        if (timestamp > type(uint64).max) revert TimestampTooLarge(timestamp);
         if (topics.length < 1 || topics.length > 4) revert TopicCount(topics.length);
         // Unreachable in the EVM (4 GiB of memory can't be paid for), but it
         // keeps the u32 length encoding total rather than silently truncating.
@@ -41,6 +53,8 @@ library EventAccumulatorLib {
                 uint8(1),
                 acc,
                 index,
+                uint64(blockNumber),
+                uint64(timestamp),
                 uint8(topics.length),
                 topics,
                 uint32(data.length),
@@ -54,7 +68,8 @@ library EventAccumulatorLib {
 /// @notice Every Abolish contract inherits this and emits only through
 /// `_log1` … `_log4`, so its storage commits to its whole event sequence and a
 /// verifier can prove, from an L2 output root, that the archive left nothing
-/// out (T-71, T-25; docs/adr/0005-permanent-archive.md). It has no admin and
+/// out or moved to another block (T-71, T-25; docs/adr/0005-permanent-archive.md,
+/// docs/adr/0025-contract-event-evidence.md). It has no admin and
 /// no way to change either value except by emitting a log.
 abstract contract EventAccumulator {
     /// @custom:storage-location erc7201:abolish.event-accumulator
@@ -124,12 +139,13 @@ abstract contract EventAccumulator {
         }
     }
 
-    /// The step for the log about to be emitted, as log number `count`.
-    /// Checked arithmetic reverts rather than wrap the count.
+    /// The step for the log about to be emitted, as log number `count`, in
+    /// this block. Checked arithmetic reverts rather than wrap the count.
     function _accumulate(bytes32[] memory topics, bytes memory data) private {
         AccumulatorStorage storage s = _accumulatorStorage();
         uint64 n = s.count;
-        s.accumulator = EventAccumulatorLib.step(s.accumulator, n, topics, data);
+        s.accumulator =
+            EventAccumulatorLib.step(s.accumulator, n, block.number, block.timestamp, topics, data);
         s.count = n + 1;
     }
 

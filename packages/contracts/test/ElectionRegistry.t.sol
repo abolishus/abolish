@@ -462,7 +462,9 @@ contract ElectionRegistryTest is TestBase {
     function _assertAccumulated(Vm.Log[] memory logs) internal view {
         bytes32 acc = EventAccumulatorLib.genesis(uint64(block.chainid), address(registry));
         for (uint256 i; i < logs.length; i++) {
-            acc = EventAccumulatorLib.step(acc, uint64(i), logs[i].topics, logs[i].data);
+            acc = EventAccumulatorLib.step(
+                acc, uint64(i), block.number, block.timestamp, logs[i].topics, logs[i].data
+            );
         }
         (bytes32 stored, uint64 count) = registry.eventAccumulator();
         assertEq(stored, acc, "accumulator");

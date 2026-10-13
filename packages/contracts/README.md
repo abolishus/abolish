@@ -9,7 +9,7 @@ Abolish's contracts (the L2 contracts and the L1 board anchor), built with Found
 `src/EventAccumulator.sol` implements [`docs/spec/contracts.md`](../../docs/spec/contracts.md):
 
 - Every contract inherits `EventAccumulator` and emits only through `_log1` … `_log4`.
-- Each of those emits the log and, in the same call, folds it into a SHA-256 running hash and a count, at the ERC-7201 slot `abolish.event-accumulator`.
+- Each of those emits the log and, in the same call, folds it, with the block number and timestamp of the call, into a SHA-256 running hash and a count, at the ERC-7201 slot `abolish.event-accumulator` (tag `abolish/v1/event-accumulator-2`; [`docs/adr/0025-contract-event-evidence.md`](../../docs/adr/0025-contract-event-evidence.md)).
 - The verifier replays the archived logs (`replayEventAccumulator` in `@abolishus/crypto`) and compares them with a storage proof of that slot. So a log left off the board, such as a direct-submitted ballot, is detected (T-71, T-25).
 - There is no admin, proxy or upgrade path.
 
@@ -113,7 +113,7 @@ FOUNDRY_PROFILE=ci vp run --filter @abolishus/contracts test   # deeper fuzz and
 
 The tests cover:
 
-- the cross-language vectors in `docs/spec/vectors/event-accumulator.json`, `election-definition.json`, `election-registry.json`, `trustee.json`, `group-registry.json`, the checkpoints of `board.json` and the receipt-key records of `election-definition-v4.json`'s judging cases, which independent Python implementations produced;
+- the cross-language vectors in `docs/spec/vectors/event-accumulator-2.json`, `election-definition.json`, `election-registry.json`, `trustee.json`, `group-registry.json`, the checkpoints of `board.json` and the receipt-key records of `election-definition-v4.json`'s judging cases, which independent Python implementations produced;
 - fuzz tests that replay the logs the EVM recorded;
 - a test per admission rule of the election registry, per refusal of the trustee registry, of the group registry (its stateful ones included) and of the board anchor (with its window's exact boundaries), and fuzz tests that any one-bit change to an approved definition or a signed group record, or arbitrary bytes, is refused;
 - the group registry's gas for one member with two approvals, two members, a batch of 256 and a removal, each bounded in its own test;

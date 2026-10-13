@@ -216,6 +216,11 @@ export const boardAnchorAbi = [
   },
   {
     type: "error",
+    inputs: [{ name: "blockNumber", internalType: "uint256", type: "uint256" }],
+    name: "BlockNumberTooLarge",
+  },
+  {
+    type: "error",
     inputs: [{ name: "chainId", internalType: "uint256", type: "uint256" }],
     name: "ChainIdTooLarge",
   },
@@ -284,6 +289,11 @@ export const boardAnchorAbi = [
       { name: "x", internalType: "bytes32", type: "bytes32" },
     ],
     name: "ReceiptKeyNotActive",
+  },
+  {
+    type: "error",
+    inputs: [{ name: "timestamp", internalType: "uint256", type: "uint256" }],
+    name: "TimestampTooLarge",
   },
   {
     type: "error",
@@ -483,6 +493,11 @@ export const electionRegistryAbi = [
   },
   {
     type: "error",
+    inputs: [{ name: "blockNumber", internalType: "uint256", type: "uint256" }],
+    name: "BlockNumberTooLarge",
+  },
+  {
+    type: "error",
     inputs: [
       { name: "stubHash", internalType: "bytes32", type: "bytes32" },
       { name: "transcriptHash", internalType: "bytes32", type: "bytes32" },
@@ -549,6 +564,11 @@ export const electionRegistryAbi = [
       { name: "blockNumber", internalType: "uint256", type: "uint256" },
     ],
     name: "RootNotInPast",
+  },
+  {
+    type: "error",
+    inputs: [{ name: "timestamp", internalType: "uint256", type: "uint256" }],
+    name: "TimestampTooLarge",
   },
   {
     type: "error",
@@ -745,6 +765,11 @@ export const groupRegistryAbi = [
   },
   {
     type: "error",
+    inputs: [{ name: "blockNumber", internalType: "uint256", type: "uint256" }],
+    name: "BlockNumberTooLarge",
+  },
+  {
+    type: "error",
     inputs: [{ name: "chainId", internalType: "uint256", type: "uint256" }],
     name: "ChainIdTooLarge",
   },
@@ -806,6 +831,11 @@ export const groupRegistryAbi = [
       { name: "memberCount", internalType: "uint64", type: "uint64" },
     ],
     name: "SizeBeyondCount",
+  },
+  {
+    type: "error",
+    inputs: [{ name: "timestamp", internalType: "uint256", type: "uint256" }],
+    name: "TimestampTooLarge",
   },
   {
     type: "error",
@@ -1023,6 +1053,11 @@ export const trusteeRegistryAbi = [
   },
   {
     type: "error",
+    inputs: [{ name: "blockNumber", internalType: "uint256", type: "uint256" }],
+    name: "BlockNumberTooLarge",
+  },
+  {
+    type: "error",
     inputs: [{ name: "chainId", internalType: "uint256", type: "uint256" }],
     name: "ChainIdTooLarge",
   },
@@ -1055,6 +1090,11 @@ export const trusteeRegistryAbi = [
     type: "error",
     inputs: [{ name: "index", internalType: "uint8", type: "uint8" }],
     name: "SeatsOutOfOrder",
+  },
+  {
+    type: "error",
+    inputs: [{ name: "timestamp", internalType: "uint256", type: "uint256" }],
+    name: "TimestampTooLarge",
   },
   {
     type: "error",

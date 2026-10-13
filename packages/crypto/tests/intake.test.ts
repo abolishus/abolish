@@ -5,6 +5,7 @@ import { checkedKeySetForTests } from "../src/ceremony.ts";
 import { kemKeyPairWith } from "../src/share-encryption.ts";
 import {
   ballotElection,
+  BN254_R,
   type BallotElection,
   type CellBallotElection,
   cellBallotElection,
@@ -343,6 +344,19 @@ describe("owedReceipts", () => {
     ).toThrow(RangeError);
   });
 
+  test("throws for a tier or nullifier out of range, even on a reference that isn't admitted", () => {
+    // Block 5 is before l1RefMin, so these never reach selectBallots' checks.
+    for (const bad of [
+      { tier: 3 },
+      { nullifier: -1n },
+      { nullifier: BN254_R },
+      { nullifier: BN254_R + 7n },
+    ])
+      expect(() =>
+        owedReceipts([{ ...view({ id: 1, block: 5n }), ...bad }], [], closed, window),
+      ).toThrow(RangeError);
+  });
+
   test("owes at most two receipted ballots per tier and nullifier, whatever the view's order", () => {
     const ballot = fc.record({
       id: fc.integer({ min: 0, max: 255 }),
@@ -416,7 +430,10 @@ describe("owedReceipts", () => {
             ) as [TestBallot];
           if (!want.includes(toHex(newest.ballotHash))) want.push(toHex(newest.ballotHash));
         }
-        expect(owedReceipts(v, receiptsOf(v), closed, window).map(toHex)).toEqual(want.sort());
+        // A set of ballot hashes: test views may give one hash two tiers.
+        expect(owedReceipts(v, receiptsOf(v), closed, window).map(toHex)).toEqual(
+          [...new Set(want)].sort(),
+        );
       }),
       { numRuns },
     );

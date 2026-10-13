@@ -8,6 +8,7 @@
 
 import { ballotHash, type BallotLabel, type CommittedVote, labelOf } from "./ballot-validity.ts";
 import {
+  BN254_R,
   bytesFixed,
   type CodecValue,
   DecodeError,
@@ -218,6 +219,10 @@ export function intakeCutoff(
   for (const v of [forcedInclusion, margin])
     if (typeof v !== "bigint" || v < 0n)
       throw new RangeError("forcedInclusion and margin must be bigints ≥ 0");
+  // A cutoff at or before `closes_at + l1_inclusion_bound` would decide before
+  // every counted ballot is in; `deliveryWindowFits` is the full check.
+  if (forcedInclusion + margin >= DELIVERY_WINDOW)
+    throw new RangeError("forcedInclusion + margin must be less than DELIVERY_WINDOW");
   return deliveryDeadlines(closesAt, l1InclusionBound).delivery - forcedInclusion - margin;
 }
 
@@ -309,6 +314,12 @@ export function owedReceipts(
     index: bigint;
   }[] = [];
   for (const b of view) {
+    // Checked before either branch, as selectBallots checks the admitted, so a
+    // non-canonical ν can't start a group of its own.
+    if (b.tier !== 0 && b.tier !== 1 && b.tier !== 2)
+      throw new RangeError("owedReceipts: tier must be 0, 1 or 2");
+    if (typeof b.nullifier !== "bigint" || b.nullifier < 0n || b.nullifier >= BN254_R)
+      throw new RangeError("owedReceipts: nullifier is not a canonical field<bn254> value");
     const verdict = checkL1Reference(b, l1, window);
     if (verdict === "pending")
       throw new RangeError("owedReceipts: L1 hasn't finalized a block after close");
@@ -339,20 +350,20 @@ export function owedReceipts(
       index: BigInt(admitted.length),
     });
   }
-  const owed: Uint8Array[] = [];
+  // Keyed by hex, so the union and the sort stay linear in what is owed.
+  const owed = new Map<string, Uint8Array>();
   for (const b of selectBallots(admitted).selected) {
-    const m = hex(b.message);
-    const hash = hashOf.get(m) as Uint8Array;
+    const hash = hashOf.get(hex(b.message)) as Uint8Array;
     // A receipt is for a ballot hash, so it covers the same public part cast
     // again under another L1 reference (a new M), as the delivery check reads
     // it (T-25).
-    if (receipted.has(hex(hash))) owed.push(hash);
+    const key = hex(hash);
+    if (receipted.has(key)) owed.set(key, hash);
   }
   // Without the board's data the node can't see the copy cast again after a
   // reorganisation; its receipt for the first copy delivers that one (T-25).
-  for (const { hash } of unadmitted.values())
-    if (!owed.some((h) => hex(h) === hex(hash))) owed.push(hash);
-  return owed.sort((a, b) => (hex(a) < hex(b) ? -1 : hex(a) > hex(b) ? 1 : 0));
+  for (const { hash } of unadmitted.values()) owed.set(hex(hash), hash);
+  return [...owed.keys()].sort().map((k) => owed.get(k) as Uint8Array);
 }
 
 /** What the delivery check runs against, all from data the verifier has already checked. */

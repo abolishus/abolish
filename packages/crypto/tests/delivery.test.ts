@@ -414,6 +414,13 @@ describe("input checks", () => {
     );
     expect(intakeCutoff(closesAt, bound, constants)).toBe(closesAt + bound + 34n * hour);
     expect(() => intakeCutoff(closesAt, bound, { ...constants, margin: -1n })).toThrow(RangeError);
+    // F + R must leave the cutoff after closes_at + l1_inclusion_bound.
+    expect(
+      intakeCutoff(closesAt, bound, { forcedInclusion: DELIVERY_WINDOW - 1n, margin: 0n }),
+    ).toBe(closesAt + bound + 1n);
+    expect(() =>
+      intakeCutoff(closesAt, bound, { forcedInclusion: DELIVERY_WINDOW - hour, margin: hour }),
+    ).toThrow(RangeError);
   });
 
   test("refuses a close before the anchoring clock's epoch", () => {

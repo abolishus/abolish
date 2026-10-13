@@ -194,11 +194,16 @@ library DeliveryCheckLib {
         // election fails here too.
         if (a.ballotHash != ballotHash) revert DeliveryRefused(0, Code.PostingBallot);
         // The ballot passed `validity-shape`, so it has `n` share hashes, and
-        // the seat is a key-set seat, so at most `n`. One SHA-256 over `ct_i`
-        // as the posting encodes it, its one encoding (docs/spec/delivery.md,
-        // Share posting).
+        // a key-set seat is at most `n`; the bound is checked anyway, so the
+        // read never depends on the trustee registry's. One SHA-256 over
+        // `ct_i` as the posting encodes it, its one encoding
+        // (docs/spec/delivery.md, Share posting).
         uint256 at = l.shareHashesAt + 32 * (seat - 1);
-        if (sha256(bytes.concat(DS_CIPHERTEXT, r[CIPHERTEXT_AT:])) != bytes32(ballot[at:at + 32])) {
+        if (
+            seat > l.shareCount
+                || sha256(bytes.concat(DS_CIPHERTEXT, r[CIPHERTEXT_AT:]))
+                    != bytes32(ballot[at:at + 32])
+        ) {
             revert DeliveryRefused(0, Code.PostingHash);
         }
     }

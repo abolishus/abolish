@@ -69,6 +69,15 @@ contract BoardTest is TestBase {
     uint256 internal constant CT_DH_AT = 100 + 1088;
     uint256 internal constant POK_Z_AT = CT_DH_AT + 64;
     uint256 internal constant SEALED_AT = CT_DH_AT + 96;
+    uint256 internal constant POK_C_AT = CT_DH_AT + 32;
+    uint256 internal constant COMPLAINT_Z_AT = 132;
+
+    /// ristretto255's base field prime `2²⁵⁵ − 19` and group order `ℓ`
+    /// (RFC 9496), and P-256's group order `n` (SEC 2), as the spec states them.
+    uint256 internal constant P25519 = 2 ** 255 - 19;
+    uint256 internal constant ELL = 2 ** 252 + 27742317777372353535851937790883648493;
+    uint256 internal constant P256_N =
+        0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551;
 
     /// The L1 reference and proof of the ballot records built around the
     /// vectors' committed votes: posting framing checks neither.
@@ -105,6 +114,9 @@ contract BoardTest is TestBase {
     bytes32 internal hV1;
     bytes internal honestBallot;
     bytes32 internal honestBallotHash;
+    /// Its membership proof: valid points, which a posting's ballot built
+    /// around a delivery.json committed vote carries.
+    bytes internal proof;
 
     function setUp() public {
         string memory dj = vm.readFile(DELIVERY);
@@ -114,6 +126,11 @@ contract BoardTest is TestBase {
         board = new Board(address(elections), address(trustees));
         ballots = new BallotHarness();
         defs = new DefinitionHarness();
+
+        honestBallot = _bytes(bj, ".ballots[0].encoding");
+        proof = _slice(
+            honestBallot, BallotCheckLib.PROOF_AT, BallotCheckLib.VOTE_AT - BallotCheckLib.PROOF_AT
+        );
 
         h = _b32(dj, ".definitionHash");
         string memory e = _election(dj, "all-receipted");
@@ -146,6 +163,7 @@ contract BoardTest is TestBase {
         complaint = _vectorRecord(dj, "complaint", "share-complaint");
         aliceHash = _b32(dj, string.concat(a, ".ballotHash"));
         alice = _ballotRecord(dj, a);
+        assertEq(_nonZeroShareHashes(alice), registeredAll, "Alice's seats are the key set");
         carolHash = _b32(
             dj,
             string.concat(_ballot(dj, _election(dj, "proven-complaint"), "carol"), ".ballotHash")
@@ -161,7 +179,6 @@ contract BoardTest is TestBase {
         trustees.setKeySet(
             STUB_V1, PANEL, _mask(vm.parseJsonUintArray(bj, ".ballots[0].registered"))
         );
-        honestBallot = _bytes(bj, ".ballots[0].encoding");
         honestBallotHash = _b32(bj, ".ballots[0].ballotHash");
     }
 
@@ -458,6 +475,7 @@ contract BoardTest is TestBase {
     /// by its path alone (delivery.md, Decoding), which says nothing of the
     /// contract path, so it is skipped.
     function test_ElectionVectorsThroughTheContractPath() public {
+        _mockPairing();
         string memory dj = vm.readFile(DELIVERY);
         uint256[3] memory n; // accepted, refused, skipped
         for (uint256 i; vm.keyExistsJson(dj, _at(".elections", i, "")); i++) {
@@ -624,6 +642,7 @@ contract BoardTest is TestBase {
     /// the event carries the posting and nothing of the ballot. Its repeat
     /// is the posting's bytes, whatever ballot record carries it.
     function test_AcceptsAnHonestPostingWithItsEvent() public {
+        _mockPairing();
         Vm.Log[] memory logs = _accept(_postingCall(posting, alice));
         assertEq(logs.length, 1, "one event");
         _assertEvent(logs[0], SHARE_POSTED, h, aliceHash, posting);
@@ -635,6 +654,7 @@ contract BoardTest is TestBase {
     /// posting, accepted beside the first: none occupies a slot (delivery.md,
     /// Direct submit; T-54).
     function test_AnyNumberOfPostingsPerSeat() public {
+        _mockPairing();
         _accept(_postingCall(posting, alice));
         bytes memory otherM = _withWord(posting, M_AT, uint256(keccak256("another m")));
         Vm.Log[] memory logs = _accept(_postingCall(otherM, alice));
@@ -643,6 +663,7 @@ contract BoardTest is TestBase {
     }
 
     function test_PostingRefusals() public {
+        _mockPairing();
         trustees.setKeySet(STUB, PANEL, (1 << 1) | (1 << 2));
         _refuse(
             _postingCall(posting, alice),
@@ -664,7 +685,8 @@ contract BoardTest is TestBase {
         p.optionCount = t;
         _setParameters(h, p);
 
-        // The ballot must be the posting's: its election and ballot hash.
+        // The ballot, which passes its check, must be the posting's: its
+        // ballot hash, which binds its election.
         bytes memory otherNullifier = _withWord(
             alice, BallotCheckLib.NULLIFIER_AT, _word(alice, BallotCheckLib.NULLIFIER_AT) + 1
         );
@@ -681,6 +703,7 @@ contract BoardTest is TestBase {
             "a ballot of an unregistered definition"
         );
         _setParameters(other, p);
+        elections.setCeremony(other, STUB, PANEL);
         _refuse(
             _postingCall(posting, otherDefinition),
             _refused(0, DeliveryCheckLib.Code.PostingBallot),
@@ -693,13 +716,15 @@ contract BoardTest is TestBase {
             _refused(0, DeliveryCheckLib.Code.PostingHash),
             "another qualified seat"
         );
+        // Only a stub's key set has a seat beyond `n`: the real registries
+        // record key sets of the definition's own panel.
         _refuse(
             _postingCall(_withByte(posting, SEAT_AT, 4), alice),
             _refused(0, DeliveryCheckLib.Code.PostingHash),
             "a seat beyond the ballot's share count"
         );
 
-        // A ballot that fails framing gets the ballot check's error.
+        // A ballot that fails its check gets the ballot check's error.
         _refuse(
             _postingCall(posting, _slice(alice, 0, 1)),
             _ballotMalformed(ElectionDefinitionLib.DecodeError.Truncated, 0),
@@ -714,6 +739,11 @@ contract BoardTest is TestBase {
             _postingCall(posting, _withByte(alice, 2, 2)),
             _ballotMalformed(ElectionDefinitionLib.DecodeError.ProfileMismatch, 2),
             "a ballot of another version"
+        );
+        _refuse(
+            _postingCall(posting, _withByte(alice, BallotCheckLib.TIER_AT, 2)),
+            _ballotRefused(BallotCheckLib.Code.BallotTier),
+            "a ballot of a tier with no cell"
         );
         assertEq(_accept(_postingCall(posting, alice)).length, 1, "restored");
     }
@@ -743,12 +773,175 @@ contract BoardTest is TestBase {
         );
     }
 
+    /// The reviewer's attack: a ballot made up to commit to a ciphertext of
+    /// one's choice (no options, one share hash, no proofs) carrying a
+    /// posting of that ciphertext, which would archive chosen bytes (T-17).
+    /// The posting's ballot must pass the whole ballot check, so it fails
+    /// its shape, with the pairing mocked or not; a ballot of the right
+    /// shape fails its membership proof unmocked, and one with a share hash
+    /// at a seat outside the key set fails `share-hash-unqualified`.
+    function test_AFabricatedBallotCannotCarryAPosting() public {
+        uint256 options = elections.parameters(h).optionCount;
+        bytes memory mlkem = new bytes(1088);
+        for (uint256 i; i < mlkem.length; i++) {
+            mlkem[i] = bytes1(uint8(0x61 + (i % 26)));
+        }
+        bytes memory ct = abi.encodePacked(
+            mlkem,
+            _le(2),
+            uint256(0),
+            uint256(0),
+            uint32(4 + 64 * options + 16),
+            new bytes(4 + 64 * options + 16)
+        );
+        bytes32 shareHash = sha256(bytes.concat(_ds("abolish/v1/share-ciphertext"), ct));
+        bytes memory fabricated = abi.encodePacked(
+            _slice(alice, 0, BallotCheckLib.VOTE_AT),
+            uint32(0),
+            uint32(1),
+            shareHash,
+            uint32(0),
+            uint32(0)
+        );
+        bytes memory chosen = abi.encodePacked(
+            uint16(0x000d),
+            uint8(1),
+            h,
+            ballots.ballotHash(fabricated),
+            uint8(1),
+            keccak256("any m"),
+            ct
+        );
+        bytes memory shape = _ballotRefused(BallotCheckLib.Code.ValidityShape);
+        _refuse(_postingCall(chosen, fabricated), shape, "fabricated, unmocked");
+        _mockPairing();
+        _refuse(_postingCall(chosen, fabricated), shape, "fabricated, mocked");
+        vm.clearMockedCalls();
+
+        _refuse(
+            _postingCall(posting, alice),
+            _ballotRefused(BallotCheckLib.Code.MembershipProof),
+            "a ballot whose membership proof fails"
+        );
+        // Seat 1 outside the key set, where Alice's ballot has a share hash.
+        trustees.setKeySet(STUB, PANEL, (1 << 2) | (1 << 3));
+        _refuse(
+            _postingCall(posting, alice),
+            _ballotRefused(BallotCheckLib.Code.ShareHashUnqualified),
+            "a share hash at an unqualified seat"
+        );
+    }
+
+    /// A complaint's `D` is refused odd or at or above `2²⁵⁵ − 19` and
+    /// framed below it when even; its `z` is refused at `ℓ` and framed at
+    /// `ℓ − 1`. Each is re-signed by seat 2, so only framing can refuse it,
+    /// and a framed one is accepted: the board doesn't run the proof.
+    function test_ComplaintElementAndScalarFraming() public {
+        bytes memory body = _slice(complaint, 3, COMPLAINT_SIG_AT - 3);
+        uint256 d = _le(_word(complaint, COMPLAINT_D_AT));
+        assertTrue(d & 1 == 0 && d + 1 < P25519, "the honest D");
+        uint256 dAt = COMPLAINT_D_AT - 3;
+        uint256 zAt = COMPLAINT_Z_AT - 3;
+        bytes memory nonCanonicalD =
+            _malformed(0, ElectionDefinitionLib.DecodeError.NonCanonical, COMPLAINT_D_AT);
+        _refuse(
+            _complaintCall(_signed(0x000e, _withWord(body, dAt, _le(d + 1)), signingSecrets[2])),
+            nonCanonicalD,
+            "odd D"
+        );
+        _refuse(
+            _complaintCall(
+                _signed(0x000e, _withWord(body, dAt, _le(P25519 + 1)), signingSecrets[2])
+            ),
+            nonCanonicalD,
+            "even D above p"
+        );
+        _refuse(
+            _complaintCall(
+                _signed(0x000e, _withWord(body, dAt, _le(P25519 - 2)), signingSecrets[2])
+            ),
+            nonCanonicalD,
+            "odd D below p"
+        );
+        _refuse(
+            _complaintCall(_signed(0x000e, _withWord(body, zAt, _le(ELL)), signingSecrets[2])),
+            _malformed(0, ElectionDefinitionLib.DecodeError.NonCanonical, COMPLAINT_Z_AT),
+            "z at l"
+        );
+        assertEq(
+            _accept(
+                _complaintCall(
+                    _signed(0x000e, _withWord(body, dAt, _le(P25519 - 1)), signingSecrets[2])
+                )
+            )
+            .length,
+            1,
+            "even D below p"
+        );
+        assertEq(
+            _accept(
+                _complaintCall(
+                    _signed(0x000e, _withWord(body, zAt, _le(ELL - 1)), signingSecrets[2])
+                )
+            )
+            .length,
+            1,
+            "z below l"
+        );
+    }
+
+    /// A signature's `r` is refused at 0 and at `n`, and its `s` at 0, as
+    /// `non-canonical` at the signature, before any key is read.
+    function test_SignatureFraming() public {
+        bytes memory body = _slice(receipt, 3, RECEIPT_SIG_AT - 3);
+        uint256 r = _word(receipt, RECEIPT_SIG_AT);
+        uint256 s = _word(receipt, RECEIPT_SIG_AT + 32);
+        bytes memory nonCanonical =
+            _malformed(0, ElectionDefinitionLib.DecodeError.NonCanonical, RECEIPT_SIG_AT);
+        uint256[2][4] memory sigs = [[uint256(0), s], [P256_N, s], [P256_N + 1, s], [r, uint256(0)]];
+        for (uint256 i; i < sigs.length; i++) {
+            _refuse(
+                _receiptsCall(
+                    abi.encodePacked(uint16(0x000c), uint8(1), body, sigs[i][0], sigs[i][1])
+                ),
+                nonCanonical,
+                string.concat("signature ", vm.toString(i))
+            );
+        }
+        bytes memory cbody = _slice(complaint, 3, COMPLAINT_SIG_AT - 3);
+        _refuse(
+            _complaintCall(abi.encodePacked(uint16(0x000e), uint8(1), cbody, uint256(0), s)),
+            _malformed(0, ElectionDefinitionLib.DecodeError.NonCanonical, COMPLAINT_SIG_AT),
+            "a complaint's r at 0"
+        );
+    }
+
+    /// A posting's `pok_c` is refused at `ℓ`, before its ballot is read.
+    function test_PostingScalarFraming() public {
+        _refuse(
+            _postingCall(_withWord(posting, POK_C_AT, _le(ELL)), ""),
+            _malformed(0, ElectionDefinitionLib.DecodeError.NonCanonical, POK_C_AT),
+            "pok_c at l"
+        );
+        _refuse(
+            _postingCall(_withWord(posting, CT_DH_AT, _le(P25519 + 1)), ""),
+            _malformed(0, ElectionDefinitionLib.DecodeError.NonCanonical, CT_DH_AT),
+            "ct_dh above p"
+        );
+        _refuse(
+            _postingCall(_withWord(posting, CT_DH_AT, _le(3)), ""),
+            _malformed(0, ElectionDefinitionLib.DecodeError.NonCanonical, CT_DH_AT),
+            "odd ct_dh"
+        );
+    }
+
     // --- calls -----------------------------------------------------------------
 
     /// Every call takes exactly the standard ABI encoding of its arguments:
     /// a trailing word, dirty padding, a moved or zero offset, or (for the
     /// posting) tails in the other order is refused, and nothing is emitted.
     function test_EveryCallRefusesNonCanonicalCalldata() public {
+        _mockPairing();
         _assertCanonicalOnly(_ballotCall(honestBallot));
         _assertCanonicalOnly(_receiptsCall(receipt));
         _assertCanonicalOnly(_complaintCall(complaint));
@@ -790,6 +983,7 @@ contract BoardTest is TestBase {
     /// A byte-identical record is accepted again as a no-op by any call:
     /// it succeeds, emits nothing and leaves the accumulator as it was.
     function test_ByteIdenticalRepeatsAreNoOps() public {
+        _mockPairing();
         bytes[4] memory calls = [
             _ballotCall(honestBallot),
             _receiptsCall(receipt),
@@ -985,6 +1179,7 @@ contract BoardTest is TestBase {
 
     /// The honest posting with anything but a ballot record of its ballot.
     function testFuzz_ArbitraryBallotForAPostingRefused(bytes calldata b) public {
+        _mockPairing();
         _refuseFuzzed(_postingCall(posting, b));
     }
 
@@ -1015,6 +1210,7 @@ contract BoardTest is TestBase {
     function testFuzz_NoOneByteChangeToAPostingOutsideMAccepted(uint256 position, uint8 delta)
         public
     {
+        _mockPairing();
         vm.assume(delta != 0);
         position %= posting.length - 32;
         if (position >= M_AT) position += 32;
@@ -1025,6 +1221,7 @@ contract BoardTest is TestBase {
 
     /// Any `m` is accepted: the board can't check it (Known-weak below).
     function testFuzz_AnyMIsAccepted(bytes32 m) public {
+        _mockPairing();
         vm.assume(m != bytes32(_word(posting, M_AT)));
         assertEq(_accept(_postingCall(_withWord(posting, M_AT, uint256(m)), alice)).length, 1, "m");
     }
@@ -1034,6 +1231,7 @@ contract BoardTest is TestBase {
     /// The honest calls' calldata and events carry no text, and each event's
     /// data is exactly its record ABI-encoded (checked by `_assertEvent`).
     function test_NoPersonalDataInCalldataOrEvents() public {
+        _mockPairing();
         bytes[4] memory calls = [
             _ballotCall(honestBallot),
             _receiptsCall(receipt),
@@ -1111,19 +1309,28 @@ contract BoardTest is TestBase {
         bytes[3] memory r = allReceipted;
         uint256 ballot = _gas(_ballotCall(honestBallot));
         uint256 one = _gas(_receiptsCall(r[0]));
-        board = new Board(address(elections), address(trustees));
-        uint256 three = _gas(_receiptsCall(bytes.concat(r[0], r[1], r[2])));
-        uint256 post = _gas(_postingCall(posting, alice));
         uint256 compl = _gas(_complaintCall(complaint));
         uint256 repeat = _gas(_complaintCall(complaint));
+        board = new Board(address(elections), address(trustees));
+        uint256 three = _gas(_receiptsCall(bytes.concat(r[0], r[1], r[2])));
+        // The posting's ballot passes only with the pairing mocked
+        // (_mockPairing), so its real cost is the mocked one plus what the
+        // mock saves on the honest ballot's check: the four-pair pairing.
+        _mockPairing();
+        uint256 post = _gas(_postingCall(posting, alice));
+        board = new Board(address(elections), address(trustees));
+        uint256 pairing = ballot - _gas(_ballotCall(honestBallot));
         // Measured about 393,000 (ballot), 343,000 (one receipt), 950,000
-        // (three), 172,000 (posting), 342,000 (complaint) and 29,000 (a repeat).
+        // (three), 342,000 (complaint), 29,000 (a repeat), and for a posting
+        // 239,000 with the pairing mocked and 183,000 more for the pairing.
         assertTrue(ballot < 450_000, "ballot");
         assertTrue(one < 400_000, "one receipt");
         assertTrue(three < 1_100_000, "three receipts");
-        assertTrue(post < 200_000, "posting");
         assertTrue(compl < 400_000, "complaint");
         assertTrue(repeat < 35_000, "repeat");
+        assertTrue(pairing > 150_000 && pairing < 250_000, "the pairing");
+        assertTrue(post < 280_000, "posting, mocked");
+        assertTrue(post + pairing < 480_000, "posting");
     }
 
     // --- helpers: calls and verdicts ----------------------------------------------
@@ -1518,8 +1725,9 @@ contract BoardTest is TestBase {
     }
 
     /// A version-1 ballot record around a delivery.json ballot's tier,
-    /// nullifier and committed vote (ballot-validity.md, Ballot record),
-    /// checked against the file's ballot hash.
+    /// nullifier and committed vote (ballot-validity.md, Ballot record), with
+    /// ballot.json's honest proof points and any L1 reference (the ballot
+    /// hash binds neither), checked against the file's ballot hash.
     function _ballotRecord(string memory dj, string memory b)
         internal
         view
@@ -1533,7 +1741,7 @@ contract BoardTest is TestBase {
             vm.parseUint(_str(dj, string.concat(b, ".nullifier"))),
             L1_NUMBER,
             L1_HASH,
-            new bytes(BallotCheckLib.VOTE_AT - BallotCheckLib.PROOF_AT),
+            proof,
             _bytes(dj, string.concat(b, ".committedVote"))
         );
         assertEq(
@@ -1560,10 +1768,11 @@ contract BoardTest is TestBase {
         return alice;
     }
 
-    /// The parameters a delivery.json committed vote implies: ballot version
-    /// 1, `k` the first option's commitment count, `n` the share count and
-    /// `T` the option count (ballot-validity.md, Committed vote). Its
-    /// questions don't matter: a posting's ballot is framed, never shaped.
+    /// The parameters under which a delivery.json committed vote has its
+    /// shape (ballot-validity.md, Committed vote): ballot version 1, `k` the
+    /// first option's commitment count, `n` the share count, `T` the option
+    /// count, and one question of `T` options whose `max − min + 1` is the
+    /// sum proof's branch count, from a minimum of 0.
     function _shape(bytes memory vote)
         internal
         pure
@@ -1575,10 +1784,49 @@ contract BoardTest is TestBase {
         for (uint256 j; j < options; j++) {
             o += 4 + 32 * _u32(vote, o);
         }
+        uint256 n = _u32(vote, o);
+        o += 4 + 32 * n;
+        o += 4 + 128 * _u32(vote, o);
+        uint256 branches = _u32(vote, o);
         p.ballotVersion = 1;
         p.threshold = uint8(k);
-        p.panelSize = uint8(_u32(vote, o));
+        p.panelSize = uint8(n);
         p.optionCount = uint16(options);
+        p.questions = new ElectionRegistry.Question[](1);
+        p.questions[0] = ElectionRegistry.Question(1, uint16(options), 0, uint16(branches - 1));
+    }
+
+    /// The seats whose share hash in a ballot record is non-zero, as a mask.
+    function _nonZeroShareHashes(bytes memory record) internal pure returns (uint256 m) {
+        uint256 o = BallotCheckLib.VOTE_AT;
+        uint256 options = _u32(record, o);
+        o += 4;
+        for (uint256 j; j < options; j++) {
+            o += 4 + 32 * _u32(record, o);
+        }
+        uint256 n = _u32(record, o);
+        for (uint256 i; i < n; i++) {
+            if (_word(record, o + 4 + 32 * i) != 0) m |= 1 << (i + 1);
+        }
+    }
+
+    /// Makes the pairing precompile answer "valid", so a posting's ballot
+    /// passes its membership check. No vector pairs a real membership proof
+    /// with ciphertexts a posting can deliver: delivery.json's ballots carry
+    /// ballot.json's honest proof points here, which fail against their own
+    /// signals. The membership check itself is covered unmocked by
+    /// BallotCheck.t.sol and the ballot tests above, and
+    /// test_AFabricatedBallotCannotCarryAPosting shows a posting refused
+    /// without the mock.
+    function _mockPairing() internal {
+        vm.mockCall(address(8), "", abi.encode(uint256(1)));
+    }
+
+    /// `x` as 32 bytes little-endian, read back as a big-endian word.
+    function _le(uint256 x) internal pure returns (uint256 w) {
+        for (uint256 i; i < 32; i++) {
+            w = (w << 8) | ((x >> (8 * i)) & 0xff);
+        }
     }
 
     /// ballot.json's election `e`: its definition's panel, question and pin,
@@ -1658,8 +1906,9 @@ contract BoardTest is TestBase {
         }
     }
 
-    /// Parameters for `dh` with one cell, of tier 0: delivery records
-    /// never read the cells.
+    /// Parameters for `dh` with one cell, of tier 0 (every delivery.json
+    /// ballot's tier) and root 1, non-zero and below `r`, so a posting's
+    /// ballot reaches its membership proof.
     function _setParameters(bytes32 dh, ElectionRegistry.Parameters memory p) internal {
         uint8[] memory tiers = new uint8[](1);
         uint256[] memory roots = new uint256[](1);

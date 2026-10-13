@@ -83,6 +83,28 @@ import {
 
 const { MAX_TRUSTEES } = PARAMETERS;
 
+/**
+ * The longest a run's deadline may lie ahead, in L2 blocks: 7 days of 2-second
+ * blocks, a constant of transcript version 1. Without a bound a coordinator
+ * could set a deadline that never passes, and a stalled run would hold its
+ * approving seats for good (docs/spec/nullifier-reshare.md, Reshare context).
+ */
+export const MAX_RESHARE_WINDOW = 302_400n;
+
+/**
+ * Throws unless `deadline` is still ahead of `currentL2Block` and at most
+ * `MAX_RESHARE_WINDOW` blocks ahead: an honest new seat takes part in, and
+ * approves, only such a run.
+ */
+function checkDeadline(deadline: bigint, currentL2Block: bigint): void {
+  if (typeof deadline !== "bigint" || typeof currentL2Block !== "bigint")
+    throw new TypeError("nullifier reshare: the deadline and the L2 block must be bigints");
+  if (deadline <= currentL2Block)
+    throw new RangeError("nullifier reshare: the run's deadline has passed");
+  if (deadline - currentL2Block > MAX_RESHARE_WINDOW)
+    throw new RangeError("nullifier reshare: the run's deadline is too far ahead");
+}
+
 const MESSAGE_TAG = "abolish/v1/sig/nullifier-reshare-message";
 const SIGNING_KEY_TAG = "abolish/v1/sig/nullifier-reshare-signing-key";
 const APPROVAL_TAG = "abolish/v1/sig/nullifier-reshare-approval";
@@ -367,13 +389,20 @@ function possessionOk(context: Uint8Array, m: RegistrationKeysMessage): boolean 
   );
 }
 
-/** Round 1: a new seat's registration KEM key and signing key, with the signing key's signature. */
+/**
+ * Round 1: a new seat's registration KEM key and signing key, with the
+ * signing key's signature. `currentL2Block` is the latest L2 block the seat's
+ * node has seen: it takes part only in a run whose deadline is ahead of it by
+ * at most `MAX_RESHARE_WINDOW`.
+ */
 export function reshareKeysMessage(
   params: NullifierReshareParams,
   seat: RegistrationSecrets,
+  currentL2Block: bigint,
 ): RegistrationKeysMessage {
   const run = runOf(params);
   seatKey(run.next, seat);
+  checkDeadline(params.deadline, currentL2Block);
   const kemKey = seat.kem.publicKey;
   const signingKey = identityKey(seat.signingSecret);
   const pop = signStatement(
@@ -919,7 +948,9 @@ export function nullifierReshareApprovalMessage(
 }
 
 /**
- * New seat `index`'s approval of a successor. The caller MUST have checked
+ * New seat `index`'s approval of a successor, as its check gave it (its
+ * `keyId` and `deadline`), refused once the deadline has passed or if it lies
+ * more than `MAX_RESHARE_WINDOW` ahead of `currentL2Block`. The caller MUST have checked
  * the approval rules of docs/spec/nullifier-reshare.md first, rules 4 to 6
  * above all: the predecessor counts and has no counted successor, the run's
  * deadline hasn't passed, and every other successor of this predecessor the
@@ -929,9 +960,12 @@ export function approveNullifierReshare(
   scope: NullifierReshareScope,
   identitySecret: Uint8Array,
   index: number,
-  keyId: Uint8Array,
+  successor: { readonly keyId: Uint8Array; readonly deadline: bigint },
+  currentL2Block: bigint,
 ): Uint8Array {
   const s = scopeOf(scope);
+  const { keyId } = successor;
+  checkDeadline(successor.deadline, currentL2Block);
   const key = s.next.keys[index - 1];
   if (key === undefined || !equalBytes(identityKey(identitySecret), key))
     throw new RangeError("nullifier reshare: identitySecret is not the key of seat index");

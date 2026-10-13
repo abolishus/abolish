@@ -19,6 +19,7 @@ import { reshareDealingWith } from "../src/nullifier-reshare.ts";
 import {
   approveNullifierReshare,
   checkDealtShare,
+  MAX_RESHARE_WINDOW,
   checkNullifierKeyTranscript,
   checkNullifierReshareTranscript,
   checkResharedShare,
@@ -343,7 +344,7 @@ describe("nullifier-reshare.json", () => {
     (_, t) => {
       const params = paramsOf(t);
       expect(toHex(nullifierReshareContext(params))).toBe(t.context);
-      const keys = newSeatsOf(t).map((s) => reshareKeysMessage(params, s));
+      const keys = newSeatsOf(t).map((s) => reshareKeysMessage(params, s, params.deadline - 1000n));
       const dealings = (t.dealers ?? []).map((d) => {
         const out = reshareDealingWith(
           params,
@@ -469,11 +470,20 @@ describe("nullifier-reshare.json", () => {
     const a = V.approvals;
     const scope = scopeOf(a.newPanel);
     const secrets = secretsOf(a.newPanel);
+    const deadline = BigInt(vectorOf("honest").deadline ?? "");
+    const successor = { keyId: hex(a.keyId), deadline };
+    const now = deadline - 1000n;
     for (const x of a.approvals) {
       expect(toHex(nullifierReshareApprovalMessage(scope, x.index, hex(a.keyId)))).toBe(x.message);
       expect(
         toHex(
-          approveNullifierReshare(scope, secrets[x.index - 1] as Uint8Array, x.index, hex(a.keyId)),
+          approveNullifierReshare(
+            scope,
+            secrets[x.index - 1] as Uint8Array,
+            x.index,
+            successor,
+            now,
+          ),
         ),
       ).toBe(x.signature);
     }
@@ -498,9 +508,19 @@ describe("nullifier-reshare.json", () => {
         scope,
         secretsOf(V.predecessor.panel)[0] as Uint8Array,
         1,
-        hex(a.keyId),
+        successor,
+        now,
       ),
     ).toThrow(/seat/);
+    // Never once the deadline has passed, nor for a run whose deadline lies too far ahead.
+    const seat1 = secrets[0] as Uint8Array;
+    expect(() => approveNullifierReshare(scope, seat1, 1, successor, deadline)).toThrow(/passed/);
+    expect(() =>
+      approveNullifierReshare(scope, seat1, 1, successor, deadline - MAX_RESHARE_WINDOW - 1n),
+    ).toThrow(/too far ahead/);
+    expect(
+      approveNullifierReshare(scope, seat1, 1, successor, deadline - MAX_RESHARE_WINDOW).length,
+    ).toBe(64);
   }, 60_000);
 
   test.each(V.decode.map((d) => [d.id, d] as const))(
@@ -609,7 +629,7 @@ function reshareTo(from: Holders, threshold: number, n: number, salt: number, de
     deadline: 40_000_000n,
   };
   const seats = secrets.map((d, i) => registrationKeygen(i + 1, d));
-  const keys = seats.map((s) => reshareKeysMessage(params, s));
+  const keys = seats.map((s) => reshareKeysMessage(params, s, params.deadline - 1000n));
   const dealings = dealers.map((i) =>
     reshareDealing(
       params,
@@ -912,7 +932,7 @@ describe("a reshare's transcript check", () => {
           ? { ...s, signingSecret: secrets[2] as Uint8Array }
           : s,
     );
-    const keys = tweaked.map((s) => reshareKeysMessage(params, s));
+    const keys = tweaked.map((s) => reshareKeysMessage(params, s, params.deadline - 1000n));
     const dealings = [1, 2].map(
       (i) =>
         reshareDealing(
@@ -951,6 +971,16 @@ describe("a node", () => {
   const run = reshareTo(initial, 2, 3, 0x45, [1, 2]);
   const dealer = { index: 1, identitySecret: initial.secrets[0] as Uint8Array };
   const share = initial.shares[0] as SeatShare;
+
+  test("a new seat joins only a run whose deadline is ahead, and not too far", () => {
+    const seat = run.seats[0] as RegistrationSecrets;
+    const d = run.params.deadline;
+    expect(() => reshareKeysMessage(run.params, seat, d)).toThrow(/passed/);
+    expect(() => reshareKeysMessage(run.params, seat, d - MAX_RESHARE_WINDOW - 1n)).toThrow(
+      /too far ahead/,
+    );
+    expect(reshareKeysMessage(run.params, seat, d - MAX_RESHARE_WINDOW).index).toBe(1);
+  }, 60_000);
 
   test("reshares only its own share, as its polynomials' constant terms", () => {
     const randomness = run.keys.map(() => ({ mu: new Uint8Array(32), e: 1n }));

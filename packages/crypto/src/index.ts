@@ -542,6 +542,7 @@ export {
   decodeResharedShare,
   encodeNullifierReshareTranscript,
   encodeResharedShare,
+  MAX_RESHARE_WINDOW,
   NULLIFIER_RESHARE_SHARE,
   NULLIFIER_RESHARE_TRANSCRIPT,
   nullifierReshareApprovalMessage,

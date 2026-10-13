@@ -1,0 +1,2404 @@
+{
+  "format": "abolish-close-statement-vectors/1",
+  "title": "The close rule: windows, L_δ, close statements, the close head and the close check",
+  "spec": "docs/spec/close.md",
+  "generator": "packages/crypto/scripts/close-statement-vectors.py: an independent Python implementation of docs/spec/close.md with its own re-vote selection, and trustee-vectors.py's P-256 ECDSA, which reproduces RFC 6979 Appendix A.2.5 first",
+  "tag": "abolish/v1/sig/close-statement",
+  "recordType": "0x0015",
+  "version": 1,
+  "closeWindow": 172800,
+  "clock": {
+    "epoch": "1700000000",
+    "period": "3600"
+  },
+  "window": {
+    "opensAt": "1799913600",
+    "closesAt": "1800000000",
+    "boardSegment": 27778
+  },
+  "election": {
+    "definitionHash": "8492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16",
+    "registered": [
+      {
+        "index": 1,
+        "signingKey": "0219bf1718927015dba683dfc08829dad9904c6e54700bf4b7a11a61ecc2956841"
+      },
+      {
+        "index": 2,
+        "signingKey": "020d48d326b94cddf0094cb0a478c75424287c94787752ef726e3fe239095c3255"
+      },
+      {
+        "index": 3,
+        "signingKey": "03164c8599d735eefc54e580e7ed2e8ec3494523b0556178b92783ec7e01832631"
+      },
+      {
+        "index": 5,
+        "signingKey": "02b24562ed6b014af4209cd605f5d1cf9ba3b88864f4946cba31ab0693822bdb0a"
+      }
+    ],
+    "threshold": 3,
+    "closesAt": "1800000000",
+    "l1InclusionBound": 1800,
+    "lDelta": {
+      "number": "20000150",
+      "hash": "5089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a931"
+    },
+    "deadline": {
+      "time": "1800174600",
+      "segment": 27826
+    }
+  },
+  "statements": [
+    {
+      "id": "seat-1",
+      "description": "Seat 1's statement of the honest head",
+      "signingSecret": "9a17039cf6d55e428ee6b0fed94e8272b699a7439e270852e4313258f0416b9b",
+      "signingKey": "0219bf1718927015dba683dfc08829dad9904c6e54700bf4b7a11a61ecc2956841",
+      "definitionHash": "8492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16",
+      "signer": 1,
+      "l1Number": "20000150",
+      "l1Hash": "5089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a931",
+      "l2Number": "40001000",
+      "l2Hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005",
+      "message": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16010000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005",
+      "signature": "328af6066108d0aba6df1dd199ea1a9a9bfa4643f7481647d205a1a8226f8bc15abf41f9c49a111949e1a6ef24a9f9b3645deba56f87f73d941bb9a122280cb8",
+      "encoding": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16010000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005328af6066108d0aba6df1dd199ea1a9a9bfa4643f7481647d205a1a8226f8bc15abf41f9c49a111949e1a6ef24a9f9b3645deba56f87f73d941bb9a122280cb8"
+    },
+    {
+      "id": "seat-2",
+      "description": "Seat 2's statement of the same head",
+      "signingSecret": "bc2630054740b291e5bf933349a02d020d5d4da44db5796fecbbaea5ca4372f1",
+      "signingKey": "020d48d326b94cddf0094cb0a478c75424287c94787752ef726e3fe239095c3255",
+      "definitionHash": "8492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16",
+      "signer": 2,
+      "l1Number": "20000150",
+      "l1Hash": "5089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a931",
+      "l2Number": "40001000",
+      "l2Hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005",
+      "message": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16020000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005",
+      "signature": "08e0c0662196d15585c731af4ef5f5291a762d8de7a64fd9ce6b0e56440cf81f43d57304ea50dcbdb30b4918c3ed74379ebfefd0b8ad8fde30741b61d63749f5",
+      "encoding": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16020000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db500508e0c0662196d15585c731af4ef5f5291a762d8de7a64fd9ce6b0e56440cf81f43d57304ea50dcbdb30b4918c3ed74379ebfefd0b8ad8fde30741b61d63749f5"
+    },
+    {
+      "id": "seat-5-high",
+      "description": "Seat 5's statement of a head above the honest one",
+      "signingSecret": "fe02a1ac073f76a97bca1a38473ebfd824421ed86495ee1188d77ec787d20da7",
+      "signingKey": "02b24562ed6b014af4209cd605f5d1cf9ba3b88864f4946cba31ab0693822bdb0a",
+      "definitionHash": "8492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16",
+      "signer": 5,
+      "l1Number": "20000150",
+      "l1Hash": "5089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a931",
+      "l2Number": "40001900",
+      "l2Hash": "b3b4ca40c698c12bf1a5034936bef39fa2c48c51e1ea7acf7bb3e53aaaa16e2c",
+      "message": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16050000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a931000000000262616cb3b4ca40c698c12bf1a5034936bef39fa2c48c51e1ea7acf7bb3e53aaaa16e2c",
+      "signature": "83ac1066ff186a90e1913a6190165c1bce87871ddfcd858466b74535d2eab8c61bbf2088dd8be978073a8caa48838cce2dca12ad6a17a25ebe2e6f82815c3203",
+      "encoding": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16050000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a931000000000262616cb3b4ca40c698c12bf1a5034936bef39fa2c48c51e1ea7acf7bb3e53aaaa16e2c83ac1066ff186a90e1913a6190165c1bce87871ddfcd858466b74535d2eab8c61bbf2088dd8be978073a8caa48838cce2dca12ad6a17a25ebe2e6f82815c3203"
+    },
+    {
+      "id": "seat-3-extremes",
+      "description": "Seat 3's statement at the u64 extremes: block 0 claimed, L1 block 2^64 − 1",
+      "signingSecret": "fea197147b315bc7f2e2a02331055e38cbf2788fd75946cc92a8f170f4abde0e",
+      "signingKey": "03164c8599d735eefc54e580e7ed2e8ec3494523b0556178b92783ec7e01832631",
+      "definitionHash": "8492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16",
+      "signer": 3,
+      "l1Number": "18446744073709551615",
+      "l1Hash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "l2Number": "0",
+      "l2Hash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "message": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a1603ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff00000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "signature": "6dac3dd05942d02917642899d298d8e4f966b1a1d9c6c2f60719634ed28259056d1e2ffa90147feea1107e7280c09b27583332989682a5a79beac416e0d705e6",
+      "encoding": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a1603ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff000000000000000000000000000000000000000000000000000000000000000000000000000000006dac3dd05942d02917642899d298d8e4f966b1a1d9c6c2f60719634ed28259056d1e2ffa90147feea1107e7280c09b27583332989682a5a79beac416e0d705e6"
+    }
+  ],
+  "decodeErrors": [
+    {
+      "id": "empty",
+      "description": "No bytes",
+      "encoding": "",
+      "error": "truncated",
+      "offset": 0
+    },
+    {
+      "id": "header-only",
+      "description": "A header and nothing else",
+      "encoding": "001501",
+      "error": "truncated",
+      "offset": 3
+    },
+    {
+      "id": "destruction-type",
+      "description": "Record type 0x000f where a close statement is read",
+      "encoding": "000f018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16010000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005328af6066108d0aba6df1dd199ea1a9a9bfa4643f7481647d205a1a8226f8bc15abf41f9c49a111949e1a6ef24a9f9b3645deba56f87f73d941bb9a122280cb8",
+      "error": "unknown-record-type",
+      "offset": 0
+    },
+    {
+      "id": "version-2",
+      "description": "Version 2, which no board-entry version fixes",
+      "encoding": "0015028492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16010000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005328af6066108d0aba6df1dd199ea1a9a9bfa4643f7481647d205a1a8226f8bc15abf41f9c49a111949e1a6ef24a9f9b3645deba56f87f73d941bb9a122280cb8",
+      "error": "profile-mismatch",
+      "offset": 2
+    },
+    {
+      "id": "truncated-in-l2-hash",
+      "description": "The record cut inside l2_hash",
+      "encoding": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16010000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473",
+      "error": "truncated",
+      "offset": 84
+    },
+    {
+      "id": "truncated-in-signature",
+      "description": "The last byte of the signature missing",
+      "encoding": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16010000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005328af6066108d0aba6df1dd199ea1a9a9bfa4643f7481647d205a1a8226f8bc15abf41f9c49a111949e1a6ef24a9f9b3645deba56f87f73d941bb9a122280c",
+      "error": "truncated",
+      "offset": 116
+    },
+    {
+      "id": "trailing-byte",
+      "description": "One byte after the signature",
+      "encoding": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16010000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005328af6066108d0aba6df1dd199ea1a9a9bfa4643f7481647d205a1a8226f8bc15abf41f9c49a111949e1a6ef24a9f9b3645deba56f87f73d941bb9a122280cb800",
+      "error": "trailing-bytes",
+      "offset": 180
+    },
+    {
+      "id": "signature-high-s",
+      "description": "The signature's s replaced by n − s",
+      "encoding": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16010000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005328af6066108d0aba6df1dd199ea1a9a9bfa4643f7481647d205a1a8226f8bc1a540be053b65eee7b61e5910db56064c58890f08378fa7475f9e1121da3b1899",
+      "error": "non-canonical",
+      "offset": 116
+    },
+    {
+      "id": "signature-r-zero",
+      "description": "The signature's r is 0",
+      "encoding": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16010000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db500500000000000000000000000000000000000000000000000000000000000000005abf41f9c49a111949e1a6ef24a9f9b3645deba56f87f73d941bb9a122280cb8",
+      "error": "non-canonical",
+      "offset": 116
+    }
+  ],
+  "windows": [
+    {
+      "id": "ordinary-at-open",
+      "description": "An ordinary ballot in a block stamped exactly opens_at",
+      "path": "ordinary",
+      "value": "1799913600",
+      "result": "admitted"
+    },
+    {
+      "id": "ordinary-before-open",
+      "description": "An ordinary ballot one second before opens_at",
+      "path": "ordinary",
+      "value": "1799913599",
+      "result": "window-before-open"
+    },
+    {
+      "id": "ordinary-at-close",
+      "description": "An ordinary ballot in a block stamped exactly closes_at",
+      "path": "ordinary",
+      "value": "1800000000",
+      "result": "admitted"
+    },
+    {
+      "id": "ordinary-after-close",
+      "description": "An ordinary ballot one second after closes_at, however soon its batch reached L1",
+      "path": "ordinary",
+      "value": "1800000001",
+      "result": "window-after-close"
+    },
+    {
+      "id": "relayed-at-close",
+      "description": "A relayed ballot whose relay call is in an L1 block stamped closes_at, its L2 block hours later",
+      "path": "relayed",
+      "value": "1800000000",
+      "result": "admitted"
+    },
+    {
+      "id": "relayed-after-close",
+      "description": "A relayed ballot whose relay call is one slot after closes_at",
+      "path": "relayed",
+      "value": "1800000012",
+      "result": "window-after-close"
+    },
+    {
+      "id": "relayed-before-open",
+      "description": "A relayed ballot stamped before opens_at",
+      "path": "relayed",
+      "value": "1799913599",
+      "result": "window-before-open"
+    },
+    {
+      "id": "board-at-s-a",
+      "description": "A board-path ballot in segment s_A = period(closes_at) + 1",
+      "path": "board",
+      "value": "27778",
+      "result": "admitted"
+    },
+    {
+      "id": "board-after-s-a",
+      "description": "A board-path ballot in segment s_A + 1: the operator's breach",
+      "path": "board",
+      "value": "27779",
+      "result": "window-boarded-late"
+    },
+    {
+      "id": "board-early",
+      "description": "A board-path ballot in the election's first segment: the board path has no opening test",
+      "path": "board",
+      "value": "0",
+      "result": "admitted"
+    }
+  ],
+  "lDelta": [
+    {
+      "id": "between-slots",
+      "description": "The bound falls between two blocks: L_δ is the earlier",
+      "closesAt": "1800000000",
+      "bound": 1800,
+      "blocks": [
+        {
+          "number": "100",
+          "timestamp": "1800001776",
+          "hash": "bff57ba2b2ea3c9141741cddc9333806355542f8ea4a155d2a184f5f07e016a2"
+        },
+        {
+          "number": "101",
+          "timestamp": "1800001788",
+          "hash": "2b61f11dc8fbf2cd600c7cac69d1aa52d5b6b08486515bf4a29d1c266572a52a"
+        },
+        {
+          "number": "102",
+          "timestamp": "1800001799",
+          "hash": "3826e76f2a73bca83bf678c87cdd666a67a5aaec4e6dfd15c7b29e536aaab83e"
+        },
+        {
+          "number": "103",
+          "timestamp": "1800001811",
+          "hash": "51c58c9341570d0f383d46e85d3082b1c5653f31c5389f5256b365b75c3cffeb"
+        },
+        {
+          "number": "104",
+          "timestamp": "1800001823",
+          "hash": "afd1e20fa4aef35628f483b72cf044c291906cce8f051674f1043a0b74883f58"
+        }
+      ],
+      "result": "102"
+    },
+    {
+      "id": "at-a-slot",
+      "description": "A block stamped exactly closes_at + δ is L_δ",
+      "closesAt": "1800000000",
+      "bound": 1800,
+      "blocks": [
+        {
+          "number": "100",
+          "timestamp": "1800001776",
+          "hash": "bff57ba2b2ea3c9141741cddc9333806355542f8ea4a155d2a184f5f07e016a2"
+        },
+        {
+          "number": "101",
+          "timestamp": "1800001788",
+          "hash": "2b61f11dc8fbf2cd600c7cac69d1aa52d5b6b08486515bf4a29d1c266572a52a"
+        },
+        {
+          "number": "102",
+          "timestamp": "1800001800",
+          "hash": "3826e76f2a73bca83bf678c87cdd666a67a5aaec4e6dfd15c7b29e536aaab83e"
+        },
+        {
+          "number": "103",
+          "timestamp": "1800001812",
+          "hash": "51c58c9341570d0f383d46e85d3082b1c5653f31c5389f5256b365b75c3cffeb"
+        }
+      ],
+      "result": "102"
+    },
+    {
+      "id": "missed-slots",
+      "description": "Missed slots before the bound: L_δ is the last block that exists",
+      "closesAt": "1800000000",
+      "bound": 1800,
+      "blocks": [
+        {
+          "number": "100",
+          "timestamp": "1800001740",
+          "hash": "bff57ba2b2ea3c9141741cddc9333806355542f8ea4a155d2a184f5f07e016a2"
+        },
+        {
+          "number": "101",
+          "timestamp": "1800001824",
+          "hash": "2b61f11dc8fbf2cd600c7cac69d1aa52d5b6b08486515bf4a29d1c266572a52a"
+        }
+      ],
+      "result": "100"
+    },
+    {
+      "id": "not-yet",
+      "description": "No finalized block after the bound yet: L_δ isn't known",
+      "closesAt": "1800000000",
+      "bound": 1800,
+      "blocks": [
+        {
+          "number": "100",
+          "timestamp": "1800001776",
+          "hash": "bff57ba2b2ea3c9141741cddc9333806355542f8ea4a155d2a184f5f07e016a2"
+        },
+        {
+          "number": "101",
+          "timestamp": "1800001788",
+          "hash": "2b61f11dc8fbf2cd600c7cac69d1aa52d5b6b08486515bf4a29d1c266572a52a"
+        },
+        {
+          "number": "102",
+          "timestamp": "1800001800",
+          "hash": "3826e76f2a73bca83bf678c87cdd666a67a5aaec4e6dfd15c7b29e536aaab83e"
+        }
+      ],
+      "result": null
+    },
+    {
+      "id": "first-is-it",
+      "description": "The earliest block read is L_δ",
+      "closesAt": "1800000000",
+      "bound": 1800,
+      "blocks": [
+        {
+          "number": "7",
+          "timestamp": "1800001795",
+          "hash": "ce897007f71a66c74ed90bd7a34e707237cf6a6b94a3f95c5ac7d9a5e4c02cc9"
+        },
+        {
+          "number": "8",
+          "timestamp": "1800001807",
+          "hash": "f91776b7060e4945cdad70930a789d21700e561a555d51278ecb3f4e9b3f9e86"
+        },
+        {
+          "number": "9",
+          "timestamp": "1800001819",
+          "hash": "ebc84a3b1bccd9576c9be418c8833bf47b30ca0861f14da66f039c1a43c29603"
+        }
+      ],
+      "result": "7"
+    }
+  ],
+  "heads": [
+    {
+      "id": "all-honest",
+      "description": "Every registered seat states the honest head through the board path: B is it",
+      "floor": null,
+      "entries": [
+        {
+          "path": "board",
+          "segment": 27821,
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16010000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005328af6066108d0aba6df1dd199ea1a9a9bfa4643f7481647d205a1a8226f8bc15abf41f9c49a111949e1a6ef24a9f9b3645deba56f87f73d941bb9a122280cb8"
+        },
+        {
+          "path": "board",
+          "segment": 27821,
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16020000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db500508e0c0662196d15585c731af4ef5f5291a762d8de7a64fd9ce6b0e56440cf81f43d57304ea50dcbdb30b4918c3ed74379ebfefd0b8ad8fde30741b61d63749f5"
+        },
+        {
+          "path": "board",
+          "segment": 27821,
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16030000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db500554be46e5e1927dbc995dbddb96c24f7ad7b029131328c6a4bafb1cf39dcb249b5b563679a5885e491428d4a9cf1d1a33582a05fe631183bd7bf21b2ecc3f1996"
+        },
+        {
+          "path": "board",
+          "segment": 27821,
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16050000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005d2aefaa3b0b0c1c63a87aa17b8e7e00035eb24e204ed0a8f2571a08ca1e813705b109afe5450427f79679e435757e76a9c582c61884deb54bdae43582e2e7994"
+        }
+      ],
+      "result": {
+        "head": "40001000",
+        "statements": [
+          {
+            "at": 0,
+            "code": "valid",
+            "seat": 1
+          },
+          {
+            "at": 1,
+            "code": "valid",
+            "seat": 2
+          },
+          {
+            "at": 2,
+            "code": "valid",
+            "seat": 3
+          },
+          {
+            "at": 3,
+            "code": "valid",
+            "seat": 5
+          }
+        ],
+        "seats": [
+          {
+            "seat": 1,
+            "code": "close-counted",
+            "claim": {
+              "number": "40001000",
+              "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
+            }
+          },
+          {
+            "seat": 2,
+            "code": "close-counted",
+            "claim": {
+              "number": "40001000",
+              "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
+            }
+          },
+          {
+            "seat": 3,
+            "code": "close-counted",
+            "claim": {
+              "number": "40001000",
+              "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
+            }
+          },
+          {
+            "seat": 5,
+            "code": "close-counted",
+            "claim": {
+              "number": "40001000",
+              "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
+            }
+          }
+        ],
+        "claims": [
+          {
+            "number": "40001000",
+            "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
+          }
+        ]
+      }
+    },
+    {
+      "id": "liars-high-below-k",
+      "description": "Two seats state heads above the honest one: fewer than k = 3 liars, so the third largest claim is still the honest head",
+      "floor": null,
+      "entries": [
+        {
+          "path": "board",
+          "segment": 27821,
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16010000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005328af6066108d0aba6df1dd199ea1a9a9bfa4643f7481647d205a1a8226f8bc15abf41f9c49a111949e1a6ef24a9f9b3645deba56f87f73d941bb9a122280cb8"
+        },
+        {
+          "path": "board",
+          "segment": 27821,
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16020000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db500508e0c0662196d15585c731af4ef5f5291a762d8de7a64fd9ce6b0e56440cf81f43d57304ea50dcbdb30b4918c3ed74379ebfefd0b8ad8fde30741b61d63749f5"
+        },
+        {
+          "path": "board",
+          "segment": 27821,
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16030000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a931000000000262616cb3b4ca40c698c12bf1a5034936bef39fa2c48c51e1ea7acf7bb3e53aaaa16e2c5f14e1a5999e553594185ef1831c0f1b2d63f3dd1bd9bf758a59316ae87fa4d54ece6c057d6ca6939a249fda128db1511369a81a47272c006044fa83fc93ec91"
+        },
+        {
+          "path": "board",
+          "segment": 27821,
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16050000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a93100000000026263c421397c5b551141722e434c62d719e4f1fcda77eea65958c3f2f7f3c9294205c4e6136da25b39fa6421373b4131d104c56230391d9228fef6de7c0fcc78d387467439284b226e8974fefebb47de37876bbb00507b99e1c18a2b4a933eba39eb52"
+        }
+      ],
+      "result": {
+        "head": "40001000",
+        "statements": [
+          {
+            "at": 0,
+            "code": "valid",
+            "seat": 1
+          },
+          {
+            "at": 1,
+            "code": "valid",
+            "seat": 2
+          },
+          {
+            "at": 2,
+            "code": "valid",
+            "seat": 3
+          },
+          {
+            "at": 3,
+            "code": "valid",
+            "seat": 5
+          }
+        ],
+        "seats": [
+          {
+            "seat": 1,
+            "code": "close-counted",
+            "claim": {
+              "number": "40001000",
+              "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
+            }
+          },
+          {
+            "seat": 2,
+            "code": "close-counted",
+            "claim": {
+              "number": "40001000",
+              "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
+            }
+          },
+          {
+            "seat": 3,
+            "code": "close-counted",
+            "claim": {
+              "number": "40001900",
+              "hash": "b3b4ca40c698c12bf1a5034936bef39fa2c48c51e1ea7acf7bb3e53aaaa16e2c"
+            }
+          },
+          {
+            "seat": 5,
+            "code": "close-counted",
+            "claim": {
+              "number": "40002500",
+              "hash": "21397c5b551141722e434c62d719e4f1fcda77eea65958c3f2f7f3c9294205c4"
+            }
+          }
+        ],
+        "claims": [
+          {
+            "number": "40001000",
+            "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
+          },
+          {
+            "number": "40001900",
+            "hash": "b3b4ca40c698c12bf1a5034936bef39fa2c48c51e1ea7acf7bb3e53aaaa16e2c"
+          },
+          {
+            "number": "40002500",
+            "hash": "21397c5b551141722e434c62d719e4f1fcda77eea65958c3f2f7f3c9294205c4"
+          }
+        ]
+      }
+    },
+    {
+      "id": "liars-high-k",
+      "description": "Three seats, k of them, state heads above the honest one: B is the lowest of their claims, which can hide a rebuild",
+      "floor": null,
+      "entries": [
+        {
+          "path": "board",
+          "segment": 27821,
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16010000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005328af6066108d0aba6df1dd199ea1a9a9bfa4643f7481647d205a1a8226f8bc15abf41f9c49a111949e1a6ef24a9f9b3645deba56f87f73d941bb9a122280cb8"
+        },
+        {
+          "path": "board",
+          "segment": 27821,
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16020000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a931000000000262616cb3b4ca40c698c12bf1a5034936bef39fa2c48c51e1ea7acf7bb3e53aaaa16e2c235055c5585c8e020ab4028960ee48dbe92c737b9ac56e2d7fe71652b2f9a4b3098a63d80e2447f629febbca2e5422407726daada7573171601e548e2b3b8356"
+        },
+        {
+          "path": "board",
+          "segment": 27821,
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16030000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a931000000000262616cb3b4ca40c698c12bf1a5034936bef39fa2c48c51e1ea7acf7bb3e53aaaa16e2c5f14e1a5999e553594185ef1831c0f1b2d63f3dd1bd9bf758a59316ae87fa4d54ece6c057d6ca6939a249fda128db1511369a81a47272c006044fa83fc93ec91"
+        },
+        {
+          "path": "board",
+          "segment": 27821,
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16050000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a93100000000026263c421397c5b551141722e434c62d719e4f1fcda77eea65958c3f2f7f3c9294205c4e6136da25b39fa6421373b4131d104c56230391d9228fef6de7c0fcc78d387467439284b226e8974fefebb47de37876bbb00507b99e1c18a2b4a933eba39eb52"
+        }
+      ],
+      "result": {
+        "head": "40001900",
+        "statements": [
+          {
+            "at": 0,
+            "code": "valid",
+            "seat": 1
+          },
+          {
+            "at": 1,
+            "code": "valid",
+            "seat": 2
+          },
+          {
+            "at": 2,
+            "code": "valid",
+            "seat": 3
+          },
+          {
+            "at": 3,
+            "code": "valid",
+            "seat": 5
+          }
+        ],
+        "seats": [
+          {
+            "seat": 1,
+            "code": "close-counted",
+            "claim": {
+              "number": "40001000",
+              "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
+            }
+          },
+          {
+            "seat": 2,
+            "code": "close-counted",
+            "claim": {
+              "number": "40001900",
+              "hash": "b3b4ca40c698c12bf1a5034936bef39fa2c48c51e1ea7acf7bb3e53aaaa16e2c"
+            }
+          },
+          {
+            "seat": 3,
+            "code": "close-counted",
+            "claim": {
+              "number": "40001900",
+              "hash": "b3b4ca40c698c12bf1a5034936bef39fa2c48c51e1ea7acf7bb3e53aaaa16e2c"
+            }
+          },
+          {
+            "seat": 5,
+            "code": "close-counted",
+            "claim": {
+              "number": "40002500",
+              "hash": "21397c5b551141722e434c62d719e4f1fcda77eea65958c3f2f7f3c9294205c4"
+            }
+          }
+        ],
+        "claims": [
+          {
+            "number": "40001000",
+            "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
+          },
+          {
+            "number": "40001900",
+            "hash": "b3b4ca40c698c12bf1a5034936bef39fa2c48c51e1ea7acf7bb3e53aaaa16e2c"
+          },
+          {
+            "number": "40002500",
+            "hash": "21397c5b551141722e434c62d719e4f1fcda77eea65958c3f2f7f3c9294205c4"
+          }
+        ]
+      }
+    },
+    {
+      "id": "liar-low",
+      "description": "One seat states a low head: with three honest claims above it, B is the honest head",
+      "floor": null,
+      "entries": [
+        {
+          "path": "board",
+          "segment": 27821,
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16010000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005328af6066108d0aba6df1dd199ea1a9a9bfa4643f7481647d205a1a8226f8bc15abf41f9c49a111949e1a6ef24a9f9b3645deba56f87f73d941bb9a122280cb8"
+        },
+        {
+          "path": "board",
+          "segment": 27821,
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16020000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db500508e0c0662196d15585c731af4ef5f5291a762d8de7a64fd9ce6b0e56440cf81f43d57304ea50dcbdb30b4918c3ed74379ebfefd0b8ad8fde30741b61d63749f5"
+        },
+        {
+          "path": "board",
+          "segment": 27821,
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16030000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db500554be46e5e1927dbc995dbddb96c24f7ad7b029131328c6a4bafb1cf39dcb249b5b563679a5885e491428d4a9cf1d1a33582a05fe631183bd7bf21b2ecc3f1996"
+        },
+        {
+          "path": "board",
+          "segment": 27821,
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16050000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625a647a09cbd760bb3076269cb312ae43b522f365de0830b391b5cd332d928350d5fa33ecf798d1d5b268ef5fda326472a673b11b28e038b88228e0642981b220cdc67e039a4c3f4cf570926bd0e3e717ab7ab9f76ad1d789c207476ab5d6ebb47b71"
+        }
+      ],
+      "result": {
+        "head": "40001000",
+        "statements": [
+          {
+            "at": 0,
+            "code": "valid",
+            "seat": 1
+          },
+          {
+            "at": 1,
+            "code": "valid",
+            "seat": 2
+          },
+          {
+            "at": 2,
+            "code": "valid",
+            "seat": 3
+          },
+          {
+            "at": 3,
+            "code": "valid",
+            "seat": 5
+          }
+        ],
+        "seats": [
+          {
+            "seat": 1,
+            "code": "close-counted",
+            "claim": {
+              "number": "40001000",
+              "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
+            }
+          },
+          {
+            "seat": 2,
+            "code": "close-counted",
+            "claim": {
+              "number": "40001000",
+              "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
+            }
+          },
+          {
+            "seat": 3,
+            "code": "close-counted",
+            "claim": {
+              "number": "40001000",
+              "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
+            }
+          },
+          {
+            "seat": 5,
+            "code": "close-counted",
+            "claim": {
+              "number": "40000100",
+              "hash": "7a09cbd760bb3076269cb312ae43b522f365de0830b391b5cd332d928350d5fa"
+            }
+          }
+        ],
+        "claims": [
+          {
+            "number": "40000100",
+            "hash": "7a09cbd760bb3076269cb312ae43b522f365de0830b391b5cd332d928350d5fa"
+          },
+          {
+            "number": "40001000",
+            "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
+          }
+        ]
+      }
+    },
+    {
+      "id": "liars-low-honest-silent",
+      "description": "Seat 5 is silent and seats 2 and 3 state low: with one honest claim counted, the third largest is low, so B is the low claim, which may fail the election but never drops a ballot",
+      "floor": null,
+      "entries": [
+        {
+          "path": "board",
+          "segment": 27821,
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16010000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005328af6066108d0aba6df1dd199ea1a9a9bfa4643f7481647d205a1a8226f8bc15abf41f9c49a111949e1a6ef24a9f9b3645deba56f87f73d941bb9a122280cb8"
+        },
+        {
+          "path": "board",
+          "segment": 27821,
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16020000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625a647a09cbd760bb3076269cb312ae43b522f365de0830b391b5cd332d928350d5fa89bf5647bc887ce3d35b890860979ad2523fcebf7cc7f9b2eb86d0da7a1bd43a5580129797311eeb9747190c0e24d95e2c879376b2401ac72556c42997b6bce6"
+        },
+        {
+          "path": "contract",
+          "submittedAt": "1800174600",
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16030000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625a647a09cbd760bb3076269cb312ae43b522f365de0830b391b5cd332d928350d5fac35e5191065a35fd8e3c3215811b2b0f7733df7bcc0a5c81f8dfae581ad502bf4369a8feb5a3d1c34f1848611a5aa317fe026c88674b38982af7e5775d05cd7e"
+        }
+      ],
+      "result": {
+        "head": "40000100",
+        "statements": [
+          {
+            "at": 0,
+            "code": "valid",
+            "seat": 1
+          },
+          {
+            "at": 1,
+            "code": "valid",
+            "seat": 2
+          },
+          {
+            "at": 2,
+            "code": "valid",
+            "seat": 3
+          }
+        ],
+        "seats": [
+          {
+            "seat": 1,
+            "code": "close-counted",
+            "claim": {
+              "number": "40001000",
+              "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
+            }
+          },
+          {
+            "seat": 2,
+            "code": "close-counted",
+            "claim": {
+              "number": "40000100",
+              "hash": "7a09cbd760bb3076269cb312ae43b522f365de0830b391b5cd332d928350d5fa"
+            }
+          },
+          {
+            "seat": 3,
+            "code": "close-counted",
+            "claim": {
+              "number": "40000100",
+              "hash": "7a09cbd760bb3076269cb312ae43b522f365de0830b391b5cd332d928350d5fa"
+            }
+          },
+          {
+            "seat": 5,
+            "code": "close-missing"
+          }
+        ],
+        "claims": [
+          {
+            "number": "40000100",
+            "hash": "7a09cbd760bb3076269cb312ae43b522f365de0830b391b5cd332d928350d5fa"
+          },
+          {
+            "number": "40001000",
+            "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
+          }
+        ]
+      }
+    },
+    {
+      "id": "floor-excludes-low",
+      "description": "A permissionless game resolved by t_S shows block 40,000,500 derivable by L_δ: seat 5's claim below it is false and doesn't count, so B is the honest head",
+      "floor": "40000500",
+      "entries": [
+        {
+          "path": "board",
+          "segment": 27821,
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16010000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005328af6066108d0aba6df1dd199ea1a9a9bfa4643f7481647d205a1a8226f8bc15abf41f9c49a111949e1a6ef24a9f9b3645deba56f87f73d941bb9a122280cb8"
+        },
+        {
+          "path": "board",
+          "segment": 27821,
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16020000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db500508e0c0662196d15585c731af4ef5f5291a762d8de7a64fd9ce6b0e56440cf81f43d57304ea50dcbdb30b4918c3ed74379ebfefd0b8ad8fde30741b61d63749f5"
+        },
+        {
+          "path": "board",
+          "segment": 27821,
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16050000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625a647a09cbd760bb3076269cb312ae43b522f365de0830b391b5cd332d928350d5fa33ecf798d1d5b268ef5fda326472a673b11b28e038b88228e0642981b220cdc67e039a4c3f4cf570926bd0e3e717ab7ab9f76ad1d789c207476ab5d6ebb47b71"
+        },
+        {
+          "path": "board",
+          "segment": 27821,
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16030000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db500554be46e5e1927dbc995dbddb96c24f7ad7b029131328c6a4bafb1cf39dcb249b5b563679a5885e491428d4a9cf1d1a33582a05fe631183bd7bf21b2ecc3f1996"
+        }
+      ],
+      "result": {
+        "head": "40001000",
+        "statements": [
+          {
+            "at": 0,
+            "code": "valid",
+            "seat": 1
+          },
+          {
+            "at": 1,
+            "code": "valid",
+            "seat": 2
+          },
+          {
+            "at": 2,
+            "code": "valid",
+            "seat": 5
+          },
+          {
+            "at": 3,
+            "code": "valid",
+            "seat": 3
+          }
+        ],
+        "seats": [
+          {
+            "seat": 1,
+            "code": "close-counted",
+            "claim": {
+              "number": "40001000",
+              "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
+            }
+          },
+          {
+            "seat": 2,
+            "code": "close-counted",
+            "claim": {
+              "number": "40001000",
+              "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
+            }
+          },
+          {
+            "seat": 3,
+            "code": "close-counted",
+            "claim": {
+              "number": "40001000",
+              "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
+            }
+          },
+          {
+            "seat": 5,
+            "code": "close-below-floor",
+            "claim": {
+              "number": "40000100",
+              "hash": "7a09cbd760bb3076269cb312ae43b522f365de0830b391b5cd332d928350d5fa"
+            }
+          }
+        ],
+        "claims": [
+          {
+            "number": "40000100",
+            "hash": "7a09cbd760bb3076269cb312ae43b522f365de0830b391b5cd332d928350d5fa"
+          },
+          {
+            "number": "40001000",
+            "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
+          }
+        ]
+      }
+    },
+    {
+      "id": "floor-leaves-too-few",
+      "description": "Seats 1 and 2 state the honest head and seat 5 a low one, below the floor: two counted seats, fewer than k, so there is no close head",
+      "floor": "40000500",
+      "entries": [
+        {
+          "path": "board",
+          "segment": 27821,
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16010000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005328af6066108d0aba6df1dd199ea1a9a9bfa4643f7481647d205a1a8226f8bc15abf41f9c49a111949e1a6ef24a9f9b3645deba56f87f73d941bb9a122280cb8"
+        },
+        {
+          "path": "board",
+          "segment": 27821,
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16020000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db500508e0c0662196d15585c731af4ef5f5291a762d8de7a64fd9ce6b0e56440cf81f43d57304ea50dcbdb30b4918c3ed74379ebfefd0b8ad8fde30741b61d63749f5"
+        },
+        {
+          "path": "board",
+          "segment": 27821,
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16050000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625a647a09cbd760bb3076269cb312ae43b522f365de0830b391b5cd332d928350d5fa33ecf798d1d5b268ef5fda326472a673b11b28e038b88228e0642981b220cdc67e039a4c3f4cf570926bd0e3e717ab7ab9f76ad1d789c207476ab5d6ebb47b71"
+        }
+      ],
+      "result": {
+        "head": null,
+        "statements": [
+          {
+            "at": 0,
+            "code": "valid",
+            "seat": 1
+          },
+          {
+            "at": 1,
+            "code": "valid",
+            "seat": 2
+          },
+          {
+            "at": 2,
+            "code": "valid",
+            "seat": 5
+          }
+        ],
+        "seats": [
+          {
+            "seat": 1,
+            "code": "close-counted",
+            "claim": {
+              "number": "40001000",
+              "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
+            }
+          },
+          {
+            "seat": 2,
+            "code": "close-counted",
+            "claim": {
+              "number": "40001000",
+              "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
+            }
+          },
+          {
+            "seat": 3,
+            "code": "close-missing"
+          },
+          {
+            "seat": 5,
+            "code": "close-below-floor",
+            "claim": {
+              "number": "40000100",
+              "hash": "7a09cbd760bb3076269cb312ae43b522f365de0830b391b5cd332d928350d5fa"
+            }
+          }
+        ],
+        "claims": [
+          {
+            "number": "40000100",
+            "hash": "7a09cbd760bb3076269cb312ae43b522f365de0830b391b5cd332d928350d5fa"
+          },
+          {
+            "number": "40001000",
+            "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
+          }
+        ]
+      }
+    },
+    {
+      "id": "equivocation",
+      "description": "Seat 3 states the honest head through the board path and a high one through the contract path: neither counts, leaving seats 1, 2 and 5",
+      "floor": null,
+      "entries": [
+        {
+          "path": "board",
+          "segment": 27821,
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16010000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005328af6066108d0aba6df1dd199ea1a9a9bfa4643f7481647d205a1a8226f8bc15abf41f9c49a111949e1a6ef24a9f9b3645deba56f87f73d941bb9a122280cb8"
+        },
+        {
+          "path": "board",
+          "segment": 27821,
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16030000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db500554be46e5e1927dbc995dbddb96c24f7ad7b029131328c6a4bafb1cf39dcb249b5b563679a5885e491428d4a9cf1d1a33582a05fe631183bd7bf21b2ecc3f1996"
+        },
+        {
+          "path": "contract",
+          "submittedAt": "1800174500",
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16030000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a93100000000026263c421397c5b551141722e434c62d719e4f1fcda77eea65958c3f2f7f3c9294205c4ad27749b2d6de73c2136baed4887dede9bd4ed3f97c7ed9249f94cefa9f138187bc914431016ff02c5aedc5c4f8ba120f481d6ece35ddb07b7e23f7a5c73141b"
+        },
+        {
+          "path": "board",
+          "segment": 27821,
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16020000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db500508e0c0662196d15585c731af4ef5f5291a762d8de7a64fd9ce6b0e56440cf81f43d57304ea50dcbdb30b4918c3ed74379ebfefd0b8ad8fde30741b61d63749f5"
+        },
+        {
+          "path": "board",
+          "segment": 27821,
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16050000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a931000000000262616cb3b4ca40c698c12bf1a5034936bef39fa2c48c51e1ea7acf7bb3e53aaaa16e2c83ac1066ff186a90e1913a6190165c1bce87871ddfcd858466b74535d2eab8c61bbf2088dd8be978073a8caa48838cce2dca12ad6a17a25ebe2e6f82815c3203"
+        }
+      ],
+      "result": {
+        "head": "40001000",
+        "statements": [
+          {
+            "at": 0,
+            "code": "valid",
+            "seat": 1
+          },
+          {
+            "at": 1,
+            "code": "valid",
+            "seat": 3
+          },
+          {
+            "at": 2,
+            "code": "valid",
+            "seat": 3
+          },
+          {
+            "at": 3,
+            "code": "valid",
+            "seat": 2
+          },
+          {
+            "at": 4,
+            "code": "valid",
+            "seat": 5
+          }
+        ],
+        "seats": [
+          {
+            "seat": 1,
+            "code": "close-counted",
+            "claim": {
+              "number": "40001000",
+              "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
+            }
+          },
+          {
+            "seat": 2,
+            "code": "close-counted",
+            "claim": {
+              "number": "40001000",
+              "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
+            }
+          },
+          {
+            "seat": 3,
+            "code": "close-equivocation"
+          },
+          {
+            "seat": 5,
+            "code": "close-counted",
+            "claim": {
+              "number": "40001900",
+              "hash": "b3b4ca40c698c12bf1a5034936bef39fa2c48c51e1ea7acf7bb3e53aaaa16e2c"
+            }
+          }
+        ],
+        "claims": [
+          {
+            "number": "40001000",
+            "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
+          },
+          {
+            "number": "40001900",
+            "hash": "b3b4ca40c698c12bf1a5034936bef39fa2c48c51e1ea7acf7bb3e53aaaa16e2c"
+          },
+          {
+            "number": "40002500",
+            "hash": "21397c5b551141722e434c62d719e4f1fcda77eea65958c3f2f7f3c9294205c4"
+          }
+        ]
+      }
+    },
+    {
+      "id": "same-claim-twice",
+      "description": "Seat 1's statement through both paths and seat 2's twice through the board path: statements that agree are one",
+      "floor": null,
+      "entries": [
+        {
+          "path": "board",
+          "segment": 27821,
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16010000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005328af6066108d0aba6df1dd199ea1a9a9bfa4643f7481647d205a1a8226f8bc15abf41f9c49a111949e1a6ef24a9f9b3645deba56f87f73d941bb9a122280cb8"
+        },
+        {
+          "path": "contract",
+          "submittedAt": "1800174600",
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16010000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005328af6066108d0aba6df1dd199ea1a9a9bfa4643f7481647d205a1a8226f8bc15abf41f9c49a111949e1a6ef24a9f9b3645deba56f87f73d941bb9a122280cb8"
+        },
+        {
+          "path": "board",
+          "segment": 27821,
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16020000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db500508e0c0662196d15585c731af4ef5f5291a762d8de7a64fd9ce6b0e56440cf81f43d57304ea50dcbdb30b4918c3ed74379ebfefd0b8ad8fde30741b61d63749f5"
+        },
+        {
+          "path": "board",
+          "segment": 27822,
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16020000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db500508e0c0662196d15585c731af4ef5f5291a762d8de7a64fd9ce6b0e56440cf81f43d57304ea50dcbdb30b4918c3ed74379ebfefd0b8ad8fde30741b61d63749f5"
+        },
+        {
+          "path": "board",
+          "segment": 27821,
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16030000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db500554be46e5e1927dbc995dbddb96c24f7ad7b029131328c6a4bafb1cf39dcb249b5b563679a5885e491428d4a9cf1d1a33582a05fe631183bd7bf21b2ecc3f1996"
+        }
+      ],
+      "result": {
+        "head": "40001000",
+        "statements": [
+          {
+            "at": 0,
+            "code": "valid",
+            "seat": 1
+          },
+          {
+            "at": 1,
+            "code": "valid",
+            "seat": 1
+          },
+          {
+            "at": 2,
+            "code": "valid",
+            "seat": 2
+          },
+          {
+            "at": 3,
+            "code": "valid",
+            "seat": 2
+          },
+          {
+            "at": 4,
+            "code": "valid",
+            "seat": 3
+          }
+        ],
+        "seats": [
+          {
+            "seat": 1,
+            "code": "close-counted",
+            "claim": {
+              "number": "40001000",
+              "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
+            }
+          },
+          {
+            "seat": 2,
+            "code": "close-counted",
+            "claim": {
+              "number": "40001000",
+              "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
+            }
+          },
+          {
+            "seat": 3,
+            "code": "close-counted",
+            "claim": {
+              "number": "40001000",
+              "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
+            }
+          },
+          {
+            "seat": 5,
+            "code": "close-missing"
+          }
+        ],
+        "claims": [
+          {
+            "number": "40001000",
+            "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
+          }
+        ]
+      }
+    },
+    {
+      "id": "late",
+      "description": "Seat 3's statement through the board path in segment s_C + 1 (late, the operator may have held it), seat 5's through the contract path one second after t_C (late, its own): two counted seats, no close head",
+      "floor": null,
+      "entries": [
+        {
+          "path": "board",
+          "segment": 27821,
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16010000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005328af6066108d0aba6df1dd199ea1a9a9bfa4643f7481647d205a1a8226f8bc15abf41f9c49a111949e1a6ef24a9f9b3645deba56f87f73d941bb9a122280cb8"
+        },
+        {
+          "path": "board",
+          "segment": 27821,
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16020000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db500508e0c0662196d15585c731af4ef5f5291a762d8de7a64fd9ce6b0e56440cf81f43d57304ea50dcbdb30b4918c3ed74379ebfefd0b8ad8fde30741b61d63749f5"
+        },
+        {
+          "path": "board",
+          "segment": 27827,
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16030000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db500554be46e5e1927dbc995dbddb96c24f7ad7b029131328c6a4bafb1cf39dcb249b5b563679a5885e491428d4a9cf1d1a33582a05fe631183bd7bf21b2ecc3f1996"
+        },
+        {
+          "path": "contract",
+          "submittedAt": "1800174601",
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16050000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005d2aefaa3b0b0c1c63a87aa17b8e7e00035eb24e204ed0a8f2571a08ca1e813705b109afe5450427f79679e435757e76a9c582c61884deb54bdae43582e2e7994"
+        }
+      ],
+      "result": {
+        "head": null,
+        "statements": [
+          {
+            "at": 0,
+            "code": "valid",
+            "seat": 1
+          },
+          {
+            "at": 1,
+            "code": "valid",
+            "seat": 2
+          },
+          {
+            "at": 2,
+            "code": "close-late",
+            "seat": null
+          },
+          {
+            "at": 3,
+            "code": "close-late",
+            "seat": 5
+          }
+        ],
+        "seats": [
+          {
+            "seat": 1,
+            "code": "close-counted",
+            "claim": {
+              "number": "40001000",
+              "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
+            }
+          },
+          {
+            "seat": 2,
+            "code": "close-counted",
+            "claim": {
+              "number": "40001000",
+              "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
+            }
+          },
+          {
+            "seat": 3,
+            "code": "close-missing"
+          },
+          {
+            "seat": 5,
+            "code": "close-missing"
+          }
+        ],
+        "claims": [
+          {
+            "number": "40001000",
+            "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
+          }
+        ]
+      }
+    },
+    {
+      "id": "at-the-deadline",
+      "description": "Statements in segment s_C and submitted exactly at t_C are in time",
+      "floor": null,
+      "entries": [
+        {
+          "path": "board",
+          "segment": 27826,
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16010000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005328af6066108d0aba6df1dd199ea1a9a9bfa4643f7481647d205a1a8226f8bc15abf41f9c49a111949e1a6ef24a9f9b3645deba56f87f73d941bb9a122280cb8"
+        },
+        {
+          "path": "contract",
+          "submittedAt": "1800174600",
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16020000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db500508e0c0662196d15585c731af4ef5f5291a762d8de7a64fd9ce6b0e56440cf81f43d57304ea50dcbdb30b4918c3ed74379ebfefd0b8ad8fde30741b61d63749f5"
+        },
+        {
+          "path": "board",
+          "segment": 27826,
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16030000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db500554be46e5e1927dbc995dbddb96c24f7ad7b029131328c6a4bafb1cf39dcb249b5b563679a5885e491428d4a9cf1d1a33582a05fe631183bd7bf21b2ecc3f1996"
+        }
+      ],
+      "result": {
+        "head": "40001000",
+        "statements": [
+          {
+            "at": 0,
+            "code": "valid",
+            "seat": 1
+          },
+          {
+            "at": 1,
+            "code": "valid",
+            "seat": 2
+          },
+          {
+            "at": 2,
+            "code": "valid",
+            "seat": 3
+          }
+        ],
+        "seats": [
+          {
+            "seat": 1,
+            "code": "close-counted",
+            "claim": {
+              "number": "40001000",
+              "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
+            }
+          },
+          {
+            "seat": 2,
+            "code": "close-counted",
+            "claim": {
+              "number": "40001000",
+              "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
+            }
+          },
+          {
+            "seat": 3,
+            "code": "close-counted",
+            "claim": {
+              "number": "40001000",
+              "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
+            }
+          },
+          {
+            "seat": 5,
+            "code": "close-missing"
+          }
+        ],
+        "claims": [
+          {
+            "number": "40001000",
+            "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
+          }
+        ]
+      }
+    },
+    {
+      "id": "wrong-l1",
+      "description": "Seat 5 signs against the L1 block after L_δ: close-l1, attributed to it, and its claim doesn't count",
+      "floor": null,
+      "entries": [
+        {
+          "path": "board",
+          "segment": 27821,
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16010000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005328af6066108d0aba6df1dd199ea1a9a9bfa4643f7481647d205a1a8226f8bc15abf41f9c49a111949e1a6ef24a9f9b3645deba56f87f73d941bb9a122280cb8"
+        },
+        {
+          "path": "board",
+          "segment": 27821,
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16020000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db500508e0c0662196d15585c731af4ef5f5291a762d8de7a64fd9ce6b0e56440cf81f43d57304ea50dcbdb30b4918c3ed74379ebfefd0b8ad8fde30741b61d63749f5"
+        },
+        {
+          "path": "board",
+          "segment": 27821,
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16030000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db500554be46e5e1927dbc995dbddb96c24f7ad7b029131328c6a4bafb1cf39dcb249b5b563679a5885e491428d4a9cf1d1a33582a05fe631183bd7bf21b2ecc3f1996"
+        },
+        {
+          "path": "board",
+          "segment": 27821,
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16050000000001312d97d923573d3d4e0887c9e1093fbb3f2b2438bfa3cec77f308a483a51257d4128d0000000000262616cb3b4ca40c698c12bf1a5034936bef39fa2c48c51e1ea7acf7bb3e53aaaa16e2cf9fd7519d627ab1a60955585551cc60484d3a2311216ff852859a7fe7401d4291168872c7b92e676ace81279a26e83c850aeb0e4206cdfae127f7f30204cf20d"
+        }
+      ],
+      "result": {
+        "head": "40001000",
+        "statements": [
+          {
+            "at": 0,
+            "code": "valid",
+            "seat": 1
+          },
+          {
+            "at": 1,
+            "code": "valid",
+            "seat": 2
+          },
+          {
+            "at": 2,
+            "code": "valid",
+            "seat": 3
+          },
+          {
+            "at": 3,
+            "code": "close-l1",
+            "seat": 5
+          }
+        ],
+        "seats": [
+          {
+            "seat": 1,
+            "code": "close-counted",
+            "claim": {
+              "number": "40001000",
+              "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
+            }
+          },
+          {
+            "seat": 2,
+            "code": "close-counted",
+            "claim": {
+              "number": "40001000",
+              "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
+            }
+          },
+          {
+            "seat": 3,
+            "code": "close-counted",
+            "claim": {
+              "number": "40001000",
+              "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
+            }
+          },
+          {
+            "seat": 5,
+            "code": "close-missing"
+          }
+        ],
+        "claims": [
+          {
+            "number": "40001000",
+            "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
+          }
+        ]
+      }
+    },
+    {
+      "id": "wrong-l1-hash",
+      "description": "Seat 5 signs L_δ's number with another hash: close-l1",
+      "floor": null,
+      "entries": [
+        {
+          "path": "board",
+          "segment": 27821,
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16010000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005328af6066108d0aba6df1dd199ea1a9a9bfa4643f7481647d205a1a8226f8bc15abf41f9c49a111949e1a6ef24a9f9b3645deba56f87f73d941bb9a122280cb8"
+        },
+        {
+          "path": "board",
+          "segment": 27821,
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16020000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db500508e0c0662196d15585c731af4ef5f5291a762d8de7a64fd9ce6b0e56440cf81f43d57304ea50dcbdb30b4918c3ed74379ebfefd0b8ad8fde30741b61d63749f5"
+        },
+        {
+          "path": "board",
+          "segment": 27821,
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16050000000001312d960291e9c9a9421d9c2fc0fdcf521f4716916a3e9cfe8e28f9279afbacfd0bf9400000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db50058d1cf08313185fdf56c5d48113d2cfd1adf3f5939aeb4425a96551062ebbb63b39f994e65637df164dd0a8aa2d356bed5f3fe941ed4a23ba1188f40444590e67"
+        },
+        {
+          "path": "board",
+          "segment": 27821,
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16030000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db500554be46e5e1927dbc995dbddb96c24f7ad7b029131328c6a4bafb1cf39dcb249b5b563679a5885e491428d4a9cf1d1a33582a05fe631183bd7bf21b2ecc3f1996"
+        }
+      ],
+      "result": {
+        "head": "40001000",
+        "statements": [
+          {
+            "at": 0,
+            "code": "valid",
+            "seat": 1
+          },
+          {
+            "at": 1,
+            "code": "valid",
+            "seat": 2
+          },
+          {
+            "at": 2,
+            "code": "close-l1",
+            "seat": 5
+          },
+          {
+            "at": 3,
+            "code": "valid",
+            "seat": 3
+          }
+        ],
+        "seats": [
+          {
+            "seat": 1,
+            "code": "close-counted",
+            "claim": {
+              "number": "40001000",
+              "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
+            }
+          },
+          {
+            "seat": 2,
+            "code": "close-counted",
+            "claim": {
+              "number": "40001000",
+              "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
+            }
+          },
+          {
+            "seat": 3,
+            "code": "close-counted",
+            "claim": {
+              "number": "40001000",
+              "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
+            }
+          },
+          {
+            "seat": 5,
+            "code": "close-missing"
+          }
+        ],
+        "claims": [
+          {
+            "number": "40001000",
+            "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
+          }
+        ]
+      }
+    },
+    {
+      "id": "unattributed-and-stray",
+      "description": "Beside three honest statements: one by seat 4, which isn't registered; seat 5's fields signed with seat 1's key; seat 1's fields under the destruction tag; seat 2's key over another definition (stray, attributed); another definition signed by a key this election never registered (stray, unattributed)",
+      "floor": null,
+      "entries": [
+        {
+          "path": "board",
+          "segment": 27821,
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16010000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005328af6066108d0aba6df1dd199ea1a9a9bfa4643f7481647d205a1a8226f8bc15abf41f9c49a111949e1a6ef24a9f9b3645deba56f87f73d941bb9a122280cb8"
+        },
+        {
+          "path": "board",
+          "segment": 27821,
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16040000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db50051d6835099eddeaa615b4d819aa129d6c7077f7e75faa87985c8c46389b2aad115a904be30dabf075d9bebcc6155e9fac9bcfac56175e6328fcbedd3238b385fa"
+        },
+        {
+          "path": "board",
+          "segment": 27821,
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16050000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db50050c688f4e1a696e624568bbacece474ded4d1258b5fb98593e4f6315f7c3e78e2711d326ffe47a84fc6db80c56c18c570797526b2e5f4cb4a9c085bb93d70495c"
+        },
+        {
+          "path": "board",
+          "segment": 27821,
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16010000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005b43f90e9b3005156419c5f096a47833b908b1974be6ba5eee5ee5f0e834ef1c62a96f20b62d0c4aaa9c38e1934d71a722656987e931df8b4207814e2ede511d7"
+        },
+        {
+          "path": "board",
+          "segment": 27821,
+          "payload": "0015014f1804780b4e8cba91670f3fa7a694fa242e994c21bbfb82ea919ba2272a18b0020000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db50059c8058bbc1f1d643e1379a0d7e34c792e54518e66d2243822328cfd9d06c21570e33c11424674faafae8d4014f9d20dfd11a48278242dc81f886a4f12c15fec6"
+        },
+        {
+          "path": "board",
+          "segment": 27821,
+          "payload": "0015014f1804780b4e8cba91670f3fa7a694fa242e994c21bbfb82ea919ba2272a18b0050000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005203b84d2c78657639ad1a86b18969f3158c199dc40ccba8e688a90a92435a1061cbadd8371264270ccdcef52cf1dd46a0003be7460e7383aba98f5d9ad493e1a"
+        },
+        {
+          "path": "board",
+          "segment": 27821,
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16020000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db500508e0c0662196d15585c731af4ef5f5291a762d8de7a64fd9ce6b0e56440cf81f43d57304ea50dcbdb30b4918c3ed74379ebfefd0b8ad8fde30741b61d63749f5"
+        },
+        {
+          "path": "board",
+          "segment": 27821,
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16030000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db500554be46e5e1927dbc995dbddb96c24f7ad7b029131328c6a4bafb1cf39dcb249b5b563679a5885e491428d4a9cf1d1a33582a05fe631183bd7bf21b2ecc3f1996"
+        }
+      ],
+      "result": {
+        "head": "40001000",
+        "statements": [
+          {
+            "at": 0,
+            "code": "valid",
+            "seat": 1
+          },
+          {
+            "at": 1,
+            "code": "close-unattributed"
+          },
+          {
+            "at": 2,
+            "code": "close-unattributed"
+          },
+          {
+            "at": 3,
+            "code": "close-unattributed"
+          },
+          {
+            "at": 4,
+            "code": "close-stray",
+            "signer": 2
+          },
+          {
+            "at": 5,
+            "code": "close-stray",
+            "signer": null
+          },
+          {
+            "at": 6,
+            "code": "valid",
+            "seat": 2
+          },
+          {
+            "at": 7,
+            "code": "valid",
+            "seat": 3
+          }
+        ],
+        "seats": [
+          {
+            "seat": 1,
+            "code": "close-counted",
+            "claim": {
+              "number": "40001000",
+              "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
+            }
+          },
+          {
+            "seat": 2,
+            "code": "close-counted",
+            "claim": {
+              "number": "40001000",
+              "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
+            }
+          },
+          {
+            "seat": 3,
+            "code": "close-counted",
+            "claim": {
+              "number": "40001000",
+              "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
+            }
+          },
+          {
+            "seat": 5,
+            "code": "close-missing"
+          }
+        ],
+        "claims": [
+          {
+            "number": "40001000",
+            "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
+          }
+        ]
+      }
+    },
+    {
+      "id": "rejected",
+      "description": "A version-2 copy of seat 5's statement and a 3-byte payload are rejected entries; three honest statements give B",
+      "floor": null,
+      "entries": [
+        {
+          "path": "board",
+          "segment": 27821,
+          "payload": "0015028492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16050000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005d2aefaa3b0b0c1c63a87aa17b8e7e00035eb24e204ed0a8f2571a08ca1e813705b109afe5450427f79679e435757e76a9c582c61884deb54bdae43582e2e7994"
+        },
+        {
+          "path": "board",
+          "segment": 27821,
+          "payload": "001501"
+        },
+        {
+          "path": "board",
+          "segment": 27821,
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16010000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005328af6066108d0aba6df1dd199ea1a9a9bfa4643f7481647d205a1a8226f8bc15abf41f9c49a111949e1a6ef24a9f9b3645deba56f87f73d941bb9a122280cb8"
+        },
+        {
+          "path": "board",
+          "segment": 27821,
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16020000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db500508e0c0662196d15585c731af4ef5f5291a762d8de7a64fd9ce6b0e56440cf81f43d57304ea50dcbdb30b4918c3ed74379ebfefd0b8ad8fde30741b61d63749f5"
+        },
+        {
+          "path": "board",
+          "segment": 27821,
+          "payload": "0015018492fba4c7bf2de482924bd16cbcee5639ff714e3c695424220cf9952cf43a16030000000001312d965089d085230bd7799d4bc8e66a968b5b52bde7553c6a03f752ab71c29711a9310000000002625de86843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db500554be46e5e1927dbc995dbddb96c24f7ad7b029131328c6a4bafb1cf39dcb249b5b563679a5885e491428d4a9cf1d1a33582a05fe631183bd7bf21b2ecc3f1996"
+        }
+      ],
+      "result": {
+        "head": "40001000",
+        "statements": [
+          {
+            "at": 0,
+            "code": "decode",
+            "error": "profile-mismatch"
+          },
+          {
+            "at": 1,
+            "code": "decode",
+            "error": "truncated"
+          },
+          {
+            "at": 2,
+            "code": "valid",
+            "seat": 1
+          },
+          {
+            "at": 3,
+            "code": "valid",
+            "seat": 2
+          },
+          {
+            "at": 4,
+            "code": "valid",
+            "seat": 3
+          }
+        ],
+        "seats": [
+          {
+            "seat": 1,
+            "code": "close-counted",
+            "claim": {
+              "number": "40001000",
+              "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
+            }
+          },
+          {
+            "seat": 2,
+            "code": "close-counted",
+            "claim": {
+              "number": "40001000",
+              "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
+            }
+          },
+          {
+            "seat": 3,
+            "code": "close-counted",
+            "claim": {
+              "number": "40001000",
+              "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
+            }
+          },
+          {
+            "seat": 5,
+            "code": "close-missing"
+          }
+        ],
+        "claims": [
+          {
+            "number": "40001000",
+            "hash": "6843c39b0aaf608c0473194567919e0509eb758cde02f5157194a9d933db5005"
+          }
+        ]
+      }
+    },
+    {
+      "id": "empty",
+      "description": "No statements: every seat is missing and there is no close head",
+      "floor": null,
+      "entries": [],
+      "result": {
+        "head": null,
+        "statements": [],
+        "seats": [
+          {
+            "seat": 1,
+            "code": "close-missing"
+          },
+          {
+            "seat": 2,
+            "code": "close-missing"
+          },
+          {
+            "seat": 3,
+            "code": "close-missing"
+          },
+          {
+            "seat": 5,
+            "code": "close-missing"
+          }
+        ],
+        "claims": []
+      }
+    }
+  ],
+  "checks": [
+    {
+      "id": "no-late",
+      "description": "Every ordinary ballot is in a block at or before B: nothing to remove",
+      "head": "40001000",
+      "ballots": [
+        {
+          "index": "0",
+          "cell": 0,
+          "tier": 0,
+          "nullifier": "11",
+          "message": "9358d480084ea5b2cd41fa6e454935b22d33999bce8b8483fcfc1cb66ecbb248",
+          "l1RefNumber": "500",
+          "ballotHash": "fead68fa9195674cff45d7dceed9ac3cdf84a88997084881b438eb5162c9bae7",
+          "path": "ordinary",
+          "l2Block": "40000600"
+        },
+        {
+          "index": "1",
+          "cell": 1,
+          "tier": 1,
+          "nullifier": "12",
+          "message": "ab09c1e69a38a9f7e51dc4c37db49ec8aa58666c014a376cf5fd07c0c7877992",
+          "l1RefNumber": "501",
+          "ballotHash": "c5fb410f94df42ac65400b5fb56212a26e1f8ff6562421f8f8f26fa83d381538",
+          "path": "ordinary",
+          "l2Block": "40001000"
+        },
+        {
+          "index": "2",
+          "cell": 0,
+          "tier": 0,
+          "nullifier": "13",
+          "message": "4ef43f9025190625bca5f478eb2df3e0efbd1210a84be47b71058380f0dd1806",
+          "l1RefNumber": "502",
+          "ballotHash": "1ba67a31f8a9ac477987e63adb78ba5bf5133fc149500cbc9ca51c5fa0dcdac4",
+          "path": "board"
+        }
+      ],
+      "undelivered": [],
+      "result": {
+        "status": "pass",
+        "late": []
+      }
+    },
+    {
+      "id": "late-changes-cell",
+      "description": "Voter 11's re-vote is an ordinary ballot in a block after B: without it their earlier ballot counts, so cell 0 differs and the election fails close-contested",
+      "head": "40001000",
+      "ballots": [
+        {
+          "index": "0",
+          "cell": 0,
+          "tier": 0,
+          "nullifier": "11",
+          "message": "b27dcacf1e395a723664eef49e2aef81fc8d19c3672f9c8f1ec4e4fcd59c7ff3",
+          "l1RefNumber": "500",
+          "ballotHash": "76003d6f323fbc44ffd422ecba1bfb11633b3b56448696bcb514c011afd8bcdc",
+          "path": "board"
+        },
+        {
+          "index": "1",
+          "cell": 0,
+          "tier": 0,
+          "nullifier": "11",
+          "message": "d6479d4fcb210de580326937e092436fbc12bf765d84485e7e1f9082b66711df",
+          "l1RefNumber": "520",
+          "ballotHash": "a921c467aa2ee94999bcfdefe542885314db34ffa15d5becb6dabc2254ef8e3c",
+          "path": "ordinary",
+          "l2Block": "40001030"
+        },
+        {
+          "index": "2",
+          "cell": 1,
+          "tier": 1,
+          "nullifier": "12",
+          "message": "ab09c1e69a38a9f7e51dc4c37db49ec8aa58666c014a376cf5fd07c0c7877992",
+          "l1RefNumber": "501",
+          "ballotHash": "c5fb410f94df42ac65400b5fb56212a26e1f8ff6562421f8f8f26fa83d381538",
+          "path": "ordinary",
+          "l2Block": "40000600"
+        }
+      ],
+      "undelivered": [],
+      "result": {
+        "status": "fail",
+        "code": "close-contested",
+        "cell": 0,
+        "late": ["1"]
+      }
+    },
+    {
+      "id": "late-new-voter",
+      "description": "A voter's only ballot is a late ordinary one: removing it empties their place in cell 1",
+      "head": "40001000",
+      "ballots": [
+        {
+          "index": "0",
+          "cell": 0,
+          "tier": 0,
+          "nullifier": "11",
+          "message": "9358d480084ea5b2cd41fa6e454935b22d33999bce8b8483fcfc1cb66ecbb248",
+          "l1RefNumber": "500",
+          "ballotHash": "fead68fa9195674cff45d7dceed9ac3cdf84a88997084881b438eb5162c9bae7",
+          "path": "ordinary",
+          "l2Block": "40000600"
+        },
+        {
+          "index": "1",
+          "cell": 1,
+          "tier": 1,
+          "nullifier": "12",
+          "message": "ab09c1e69a38a9f7e51dc4c37db49ec8aa58666c014a376cf5fd07c0c7877992",
+          "l1RefNumber": "501",
+          "ballotHash": "c5fb410f94df42ac65400b5fb56212a26e1f8ff6562421f8f8f26fa83d381538",
+          "path": "ordinary",
+          "l2Block": "40001030"
+        }
+      ],
+      "undelivered": [],
+      "result": {
+        "status": "fail",
+        "code": "close-contested",
+        "cell": 1,
+        "late": ["1"]
+      }
+    },
+    {
+      "id": "late-outranked",
+      "description": "A late ordinary ballot that a newer timely ballot of the same voter outranks changes nothing",
+      "head": "40001000",
+      "ballots": [
+        {
+          "index": "0",
+          "cell": 0,
+          "tier": 0,
+          "nullifier": "11",
+          "message": "fa359c3e20c98f663f6d15bc6027c8991740def94ab09b7beb85aaa88d37fdd6",
+          "l1RefNumber": "510",
+          "ballotHash": "a67f671aa6182210eb9af0786c83949c3f097b6665c85ece1f6e6eefd41a690e",
+          "path": "ordinary",
+          "l2Block": "40001030"
+        },
+        {
+          "index": "1",
+          "cell": 0,
+          "tier": 0,
+          "nullifier": "11",
+          "message": "1daf0aa0d763722e3018ed7ebaa7de15d0aa9b5a983b95f8bc120863de8bc0d5",
+          "l1RefNumber": "530",
+          "ballotHash": "d3a89fa900dde0f684c178c2483f93346528276f0844a2f714c0c43100b3dd21",
+          "path": "board"
+        }
+      ],
+      "undelivered": [],
+      "result": {
+        "status": "pass",
+        "late": ["0"]
+      }
+    },
+    {
+      "id": "relayed-copy-stands",
+      "description": "The voter's ballot reached L2 late as an ordinary transaction and also through the L1 relay: the late copy is removed before repeats, the relayed copy stands, and nothing changes",
+      "head": "40001000",
+      "ballots": [
+        {
+          "index": "0",
+          "cell": 0,
+          "tier": 0,
+          "nullifier": "11",
+          "message": "18fd515070d21ebe587ffd8d2940e6db89d3753c4c7bb831ea1cea00d6e03a4d",
+          "l1RefNumber": "500",
+          "ballotHash": "b72c60f055bb0f8d8ae20072e1ef224651b12e1c20317b775ca98f0636d3a63d",
+          "path": "ordinary",
+          "l2Block": "40001030"
+        },
+        {
+          "index": "1",
+          "cell": 0,
+          "tier": 0,
+          "nullifier": "11",
+          "message": "18fd515070d21ebe587ffd8d2940e6db89d3753c4c7bb831ea1cea00d6e03a4d",
+          "l1RefNumber": "500",
+          "ballotHash": "b72c60f055bb0f8d8ae20072e1ef224651b12e1c20317b775ca98f0636d3a63d",
+          "path": "relayed"
+        }
+      ],
+      "undelivered": [],
+      "result": {
+        "status": "pass",
+        "late": ["0"]
+      }
+    },
+    {
+      "id": "board-copy-stands",
+      "description": "A late ordinary copy at a smaller index than the voter's board-path copy: the board-path copy stands once the late one is removed",
+      "head": "40001000",
+      "ballots": [
+        {
+          "index": "0",
+          "cell": 0,
+          "tier": 0,
+          "nullifier": "11",
+          "message": "18fd515070d21ebe587ffd8d2940e6db89d3753c4c7bb831ea1cea00d6e03a4d",
+          "l1RefNumber": "500",
+          "ballotHash": "b72c60f055bb0f8d8ae20072e1ef224651b12e1c20317b775ca98f0636d3a63d",
+          "path": "ordinary",
+          "l2Block": "40001030"
+        },
+        {
+          "index": "1",
+          "cell": 0,
+          "tier": 0,
+          "nullifier": "11",
+          "message": "18fd515070d21ebe587ffd8d2940e6db89d3753c4c7bb831ea1cea00d6e03a4d",
+          "l1RefNumber": "500",
+          "ballotHash": "b72c60f055bb0f8d8ae20072e1ef224651b12e1c20317b775ca98f0636d3a63d",
+          "path": "board"
+        }
+      ],
+      "undelivered": [],
+      "result": {
+        "status": "pass",
+        "late": ["0"]
+      }
+    },
+    {
+      "id": "timely-ordinary-copy-stands",
+      "description": "Two ordinary copies of one ballot (a re-randomised proof), one at or before B and one after: the timely copy stands",
+      "head": "40001000",
+      "ballots": [
+        {
+          "index": "0",
+          "cell": 0,
+          "tier": 0,
+          "nullifier": "11",
+          "message": "18fd515070d21ebe587ffd8d2940e6db89d3753c4c7bb831ea1cea00d6e03a4d",
+          "l1RefNumber": "500",
+          "ballotHash": "b72c60f055bb0f8d8ae20072e1ef224651b12e1c20317b775ca98f0636d3a63d",
+          "path": "ordinary",
+          "l2Block": "40001030"
+        },
+        {
+          "index": "1",
+          "cell": 0,
+          "tier": 0,
+          "nullifier": "11",
+          "message": "18fd515070d21ebe587ffd8d2940e6db89d3753c4c7bb831ea1cea00d6e03a4d",
+          "l1RefNumber": "500",
+          "ballotHash": "b72c60f055bb0f8d8ae20072e1ef224651b12e1c20317b775ca98f0636d3a63d",
+          "path": "ordinary",
+          "l2Block": "40001000"
+        }
+      ],
+      "undelivered": [],
+      "result": {
+        "status": "pass",
+        "late": ["0"]
+      }
+    },
+    {
+      "id": "late-undelivered-only",
+      "description": "A voter's only ballot is a late ordinary one that was never delivered: it counts nothing either way, so nothing changes",
+      "head": "40001000",
+      "ballots": [
+        {
+          "index": "0",
+          "cell": 0,
+          "tier": 0,
+          "nullifier": "11",
+          "message": "9358d480084ea5b2cd41fa6e454935b22d33999bce8b8483fcfc1cb66ecbb248",
+          "l1RefNumber": "500",
+          "ballotHash": "fead68fa9195674cff45d7dceed9ac3cdf84a88997084881b438eb5162c9bae7",
+          "path": "board"
+        },
+        {
+          "index": "1",
+          "cell": 0,
+          "tier": 0,
+          "nullifier": "12",
+          "message": "dce8b845661fcb4d1eb9fcf52527a59dfdbd723c03326fdb70b209fb6d94dc94",
+          "l1RefNumber": "520",
+          "ballotHash": "804e4c04ce6b7e9b6a24e9ac622b644e9db6e1e2e6920a86387408f67dbbfcb1",
+          "path": "ordinary",
+          "l2Block": "40001030"
+        }
+      ],
+      "undelivered": ["804e4c04ce6b7e9b6a24e9ac622b644e9db6e1e2e6920a86387408f67dbbfcb1"],
+      "result": {
+        "status": "pass",
+        "late": ["1"]
+      }
+    },
+    {
+      "id": "late-undelivered-revote",
+      "description": "A late ordinary re-vote that was never delivered makes its voter's group count nothing (no fallback); without it the earlier ballot counts, so cell 0 differs",
+      "head": "40001000",
+      "ballots": [
+        {
+          "index": "0",
+          "cell": 0,
+          "tier": 0,
+          "nullifier": "11",
+          "message": "b27dcacf1e395a723664eef49e2aef81fc8d19c3672f9c8f1ec4e4fcd59c7ff3",
+          "l1RefNumber": "500",
+          "ballotHash": "76003d6f323fbc44ffd422ecba1bfb11633b3b56448696bcb514c011afd8bcdc",
+          "path": "board"
+        },
+        {
+          "index": "1",
+          "cell": 0,
+          "tier": 0,
+          "nullifier": "11",
+          "message": "d6479d4fcb210de580326937e092436fbc12bf765d84485e7e1f9082b66711df",
+          "l1RefNumber": "520",
+          "ballotHash": "a921c467aa2ee94999bcfdefe542885314db34ffa15d5becb6dabc2254ef8e3c",
+          "path": "ordinary",
+          "l2Block": "40001030"
+        }
+      ],
+      "undelivered": ["a921c467aa2ee94999bcfdefe542885314db34ffa15d5becb6dabc2254ef8e3c"],
+      "result": {
+        "status": "fail",
+        "code": "close-contested",
+        "cell": 0,
+        "late": ["1"]
+      }
+    },
+    {
+      "id": "late-breaks-tie",
+      "description": "Two ballots of voter 11 on the same block tie and count nothing; removing the late one makes the other count, so cell 0 differs",
+      "head": "40001000",
+      "ballots": [
+        {
+          "index": "0",
+          "cell": 0,
+          "tier": 0,
+          "nullifier": "11",
+          "message": "32108b40e10141a2203d6d8ba1d15243f318fa7809b60f5398524054bca4f35f",
+          "l1RefNumber": "520",
+          "ballotHash": "cc1af539e5746b0a72a33e4fe18960a1db4090c3820cd2aedf186242e8da717f",
+          "path": "board"
+        },
+        {
+          "index": "1",
+          "cell": 0,
+          "tier": 0,
+          "nullifier": "11",
+          "message": "0dfebdbc98749ba9574cda4951fe41886d7e9c6d102fe3b80d8175be42648e90",
+          "l1RefNumber": "520",
+          "ballotHash": "1a3bf0e351e5cd26781dc00ddb99906d678cb051eed9b2f34951df7b0ccb63aa",
+          "path": "ordinary",
+          "l2Block": "40001030"
+        }
+      ],
+      "undelivered": [],
+      "result": {
+        "status": "fail",
+        "code": "close-contested",
+        "cell": 0,
+        "late": ["1"]
+      }
+    },
+    {
+      "id": "late-makes-tie",
+      "description": "A late ordinary ballot ties a timely one on the same block, so with it the group counts nothing; removing it makes the timely one count",
+      "head": "40001000",
+      "ballots": [
+        {
+          "index": "0",
+          "cell": 0,
+          "tier": 0,
+          "nullifier": "11",
+          "message": "32108b40e10141a2203d6d8ba1d15243f318fa7809b60f5398524054bca4f35f",
+          "l1RefNumber": "520",
+          "ballotHash": "cc1af539e5746b0a72a33e4fe18960a1db4090c3820cd2aedf186242e8da717f",
+          "path": "ordinary",
+          "l2Block": "40001030"
+        },
+        {
+          "index": "1",
+          "cell": 0,
+          "tier": 0,
+          "nullifier": "11",
+          "message": "0dfebdbc98749ba9574cda4951fe41886d7e9c6d102fe3b80d8175be42648e90",
+          "l1RefNumber": "520",
+          "ballotHash": "1a3bf0e351e5cd26781dc00ddb99906d678cb051eed9b2f34951df7b0ccb63aa",
+          "path": "ordinary",
+          "l2Block": "40000600"
+        },
+        {
+          "index": "2",
+          "cell": 1,
+          "tier": 1,
+          "nullifier": "12",
+          "message": "2de01145e383fc531ff16d1468b3d5c3075756582ff1984171c74897d64898b4",
+          "l1RefNumber": "500",
+          "ballotHash": "c5fb410f94df42ac65400b5fb56212a26e1f8ff6562421f8f8f26fa83d381538",
+          "path": "board"
+        }
+      ],
+      "undelivered": [],
+      "result": {
+        "status": "fail",
+        "code": "close-contested",
+        "cell": 0,
+        "late": ["0"]
+      }
+    },
+    {
+      "id": "first-cell-reported",
+      "description": "Late ballots change cells 2 and 1: the first in partition order, 1, is named",
+      "head": "40001000",
+      "ballots": [
+        {
+          "index": "0",
+          "cell": 2,
+          "tier": 2,
+          "nullifier": "21",
+          "message": "2f9f603a9d582340b3a0c79064fd21b4f1c9c0326e1c1373effce2b914deb268",
+          "l1RefNumber": "500",
+          "ballotHash": "bcac865bbc4fd5084e09fe52bf75cbff174e67293ec9afa4e263287bdd584c08",
+          "path": "ordinary",
+          "l2Block": "40001030"
+        },
+        {
+          "index": "1",
+          "cell": 1,
+          "tier": 1,
+          "nullifier": "12",
+          "message": "2de01145e383fc531ff16d1468b3d5c3075756582ff1984171c74897d64898b4",
+          "l1RefNumber": "500",
+          "ballotHash": "c5fb410f94df42ac65400b5fb56212a26e1f8ff6562421f8f8f26fa83d381538",
+          "path": "ordinary",
+          "l2Block": "40001030"
+        },
+        {
+          "index": "2",
+          "cell": 0,
+          "tier": 0,
+          "nullifier": "11",
+          "message": "9358d480084ea5b2cd41fa6e454935b22d33999bce8b8483fcfc1cb66ecbb248",
+          "l1RefNumber": "500",
+          "ballotHash": "fead68fa9195674cff45d7dceed9ac3cdf84a88997084881b438eb5162c9bae7",
+          "path": "board"
+        }
+      ],
+      "undelivered": [],
+      "result": {
+        "status": "fail",
+        "code": "close-contested",
+        "cell": 1,
+        "late": ["0", "1"]
+      }
+    },
+    {
+      "id": "regional-cells",
+      "description": "Two cells of tier 0 (regions): a late ballot in the second cell changes it",
+      "head": "40001000",
+      "ballots": [
+        {
+          "index": "0",
+          "cell": 0,
+          "tier": 0,
+          "nullifier": "11",
+          "message": "9358d480084ea5b2cd41fa6e454935b22d33999bce8b8483fcfc1cb66ecbb248",
+          "l1RefNumber": "500",
+          "ballotHash": "fead68fa9195674cff45d7dceed9ac3cdf84a88997084881b438eb5162c9bae7",
+          "path": "board"
+        },
+        {
+          "index": "1",
+          "cell": 1,
+          "tier": 0,
+          "nullifier": "12",
+          "message": "2de01145e383fc531ff16d1468b3d5c3075756582ff1984171c74897d64898b4",
+          "l1RefNumber": "500",
+          "ballotHash": "c5fb410f94df42ac65400b5fb56212a26e1f8ff6562421f8f8f26fa83d381538",
+          "path": "ordinary",
+          "l2Block": "40001030"
+        }
+      ],
+      "undelivered": [],
+      "result": {
+        "status": "fail",
+        "code": "close-contested",
+        "cell": 1,
+        "late": ["1"]
+      }
+    },
+    {
+      "id": "unchecked",
+      "description": "No close head: the check passes and lists the counted ballots with only ordinary copies (voters 11 and 13); voter 12 has a board-path copy, voter 14 a relayed one, and voter 15's ballot isn't delivered",
+      "head": null,
+      "ballots": [
+        {
+          "index": "0",
+          "cell": 0,
+          "tier": 0,
+          "nullifier": "11",
+          "message": "9358d480084ea5b2cd41fa6e454935b22d33999bce8b8483fcfc1cb66ecbb248",
+          "l1RefNumber": "500",
+          "ballotHash": "fead68fa9195674cff45d7dceed9ac3cdf84a88997084881b438eb5162c9bae7",
+          "path": "ordinary",
+          "l2Block": "40000600"
+        },
+        {
+          "index": "1",
+          "cell": 0,
+          "tier": 0,
+          "nullifier": "12",
+          "message": "3cac6cae8ba1c7472dbbb4a48c462a4edb9a55c3ab3f915fe6898f2de8f52b74",
+          "l1RefNumber": "500",
+          "ballotHash": "8340080d620187c1eba7d711a211b54ace6b92f054e42c53f827796db5347f36",
+          "path": "ordinary",
+          "l2Block": "40001030"
+        },
+        {
+          "index": "2",
+          "cell": 0,
+          "tier": 0,
+          "nullifier": "12",
+          "message": "3cac6cae8ba1c7472dbbb4a48c462a4edb9a55c3ab3f915fe6898f2de8f52b74",
+          "l1RefNumber": "500",
+          "ballotHash": "8340080d620187c1eba7d711a211b54ace6b92f054e42c53f827796db5347f36",
+          "path": "board"
+        },
+        {
+          "index": "3",
+          "cell": 1,
+          "tier": 1,
+          "nullifier": "13",
+          "message": "863478587adc71140edf7bac14078286fc78eaddf493cb01edebf7c046bbc0e1",
+          "l1RefNumber": "500",
+          "ballotHash": "8d6456d1da272b1709e9d490cb13c9952d8adc9a10f915e3c350a20a38c62c2a",
+          "path": "ordinary",
+          "l2Block": "40001030"
+        },
+        {
+          "index": "4",
+          "cell": 1,
+          "tier": 1,
+          "nullifier": "14",
+          "message": "8b16d510d128101b158a017aaeb81bd966bce907d13f580df73a87cadc412649",
+          "l1RefNumber": "500",
+          "ballotHash": "66f960c13f929b6d7b929c71feadfd38addad0fa8a225ff9a74dc8ff673460ce",
+          "path": "relayed"
+        },
+        {
+          "index": "5",
+          "cell": 1,
+          "tier": 1,
+          "nullifier": "15",
+          "message": "679f419d4628524f0e64ceefe37c1f30f1cbd0e23233a9cfef9910e84f31e47b",
+          "l1RefNumber": "500",
+          "ballotHash": "0ff6ef746fd0b8d88b7000e891529d9a8b3b68af10158b6a692889f7e48e059b",
+          "path": "ordinary",
+          "l2Block": "40000600"
+        }
+      ],
+      "undelivered": ["0ff6ef746fd0b8d88b7000e891529d9a8b3b68af10158b6a692889f7e48e059b"],
+      "result": {
+        "status": "unchecked",
+        "unchecked": ["0", "3"]
+      }
+    },
+    {
+      "id": "empty",
+      "description": "No ballots at all",
+      "head": "40001000",
+      "ballots": [],
+      "undelivered": [],
+      "result": {
+        "status": "pass",
+        "late": []
+      }
+    }
+  ]
+}

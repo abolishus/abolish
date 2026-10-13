@@ -1,6 +1,6 @@
 # Contracts
 
-What our L2 contracts commit to, for a verifier that reads them from the chain and the archive alone. So far this page specifies the event accumulator every Abolish contract keeps, the contract-event record (`0x0008`) that archives each of its events, the election registry, the trustee registry, the group registry with its Tier 0 additions (P3-2), the board, our direct-submit contract, with its ballot and delivery checks, calls and events, and the board anchor, our one contract on L1 (P4-1). The group registry's Tier 1 and Tier 2 additions (P3-3, P3-4) and the close rule are still P1-18's, and are added here as they are built. Notation is from [[notation]], tags from [[domain-separation]].
+What our L2 contracts commit to, for a verifier that reads them from the chain and the archive alone. So far this page specifies the event accumulator every Abolish contract keeps, the contract-event record (`0x0008`) that archives each of its events, the election registry, the trustee registry, the group registry with its Tier 0 additions (P3-2), the board, our direct-submit contract, with its ballot and delivery checks, calls and events, and the board anchor, our one contract on L1 (P4-1). The group registry's Tier 1 and Tier 2 additions (P3-3, P3-4) and the close rule's contracts (the L1 relay, the board's window check and the statements' contract path, P1-18 part 4c-2b; the rule itself is [[close]]) are added here as they are built. Notation is from [[notation]], tags from [[domain-separation]].
 
 ## Event accumulator
 
@@ -221,7 +221,7 @@ Each definition version records them from its own layout:
 - **The ceremony.** The stub hash is the one registration already computes to ask the trustee registry whether the ceremony was recorded, so the board's key set is the one the registry admitted the definition on (Board, Delivery records; [[0028-board-contract-checks]], 2B). An author panel's ceremony isn't recorded here: its seats receive no share of a ballot until [[P2-16]] part 2, which adds its own.
 - **The author panel.** `author_threshold` and `author_panel_size` are both 0 for a poll with no author panel and for every version before 6. The ballot that carries the author half is [[P2-16]] part 2's, so its check reads them.
 
-The close rule's fields are added before any registry is deployed (part 4c), since a deployed one's can't change.
+The close rule's fields ([[close]]) are added before any registry is deployed (part 4c-2b), since a deployed one's can't change.
 
 The parameters are a function of the registered definition alone, which `DefinitionRegistered` carries, so they need no event of their own. Counting never depends on them: [[verifier]] reads the definition, never the registry's storage, and a ballot the board admitted under a wrong parameter is still judged by the definition's own rules (5.1 to 5.4). Admission does: a wrong parameter would make the board refuse honest direct submissions, which the definition can't show, on the path a censored voter relies on (T-25). So the registry records them with the same code that decodes and checks the definition, and the tests compare each recorded field with the definition registered.
 

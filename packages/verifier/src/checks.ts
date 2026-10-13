@@ -34,6 +34,9 @@ export const CHECKS: readonly CheckSpec[] = Object.freeze([
   // or failure decides the election either way.
   ...election("6.1"),
   ...admission("6.2"),
+  // The close check decides whether the election fails, never which ballots
+  // count (docs/spec/close.md, Close check).
+  ...election("6.3"),
   ...election("7.1", "7.2", "7.3"),
   ...reportOnly("7.4"),
   ...election("8.1", "8.2", "8.3", "8.4"),

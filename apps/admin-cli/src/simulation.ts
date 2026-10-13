@@ -4,7 +4,7 @@
 // @abolishus/sdk; this file only reads it and prints the result.
 
 import { readFileSync } from "node:fs";
-import { parseScenario, planElection, runSimulation, type Scenario } from "@abolishus/sdk";
+import { downAt, parseScenario, planElection, runSimulation, type Scenario } from "@abolishus/sdk";
 import type { OfflineCommand } from "./cli.ts";
 import { CliError, UsageError } from "./errors.ts";
 
@@ -58,9 +58,11 @@ export function simulationCommandsWith(
             superseded: casts.length - plan.voters.length,
             challenged: plan.voters.filter((v) => v.challenged).length,
             published: plan.voters.filter((v) => v.published).length,
-            // Each ballot its voter posts carries one posting per offline seat.
-            postings: casts.filter((b) => b.posts).length * scenario.trustees.offline.length,
-            // A voter who doesn't post an offline seat leaves its last ballot undelivered.
+            // Each ballot its voter posts carries one posting per seat down at its cast.
+            postings: casts
+              .filter((b) => b.posts)
+              .reduce((a, b) => a + downAt(scenario, b.at).length, 0),
+            // A voter who doesn't post a seat down at its cast leaves its last ballot undelivered.
             undelivered: plan.voters.filter((v) => !v.delivered).length,
           },
           expected: plan.tiers.map((tier) => ({ tier, counts: plan.expected.get(tier) })),

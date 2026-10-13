@@ -17,7 +17,7 @@ const scenario: Scenario = {
   voters: 4,
   election: "plurality",
   options: 3,
-  trustees: { panel: 3, threshold: 2, offline: [], faulty: [] },
+  trustees: { panel: 3, threshold: 2, offline: [], faulty: [], departures: [] },
   tiers: { "0": 1, "1": 0, "2": 1 },
   outage: null,
   challenges: 0,

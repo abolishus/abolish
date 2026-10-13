@@ -3,7 +3,8 @@
 // our servers down halfway through"). The scenario is JSON, parsed and run by
 // @abolishus/sdk; this file only reads it and prints the result.
 
-import { readFileSync } from "node:fs";
+import { accessSync, constants, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   deliveredAt,
   downAt,
@@ -50,6 +51,29 @@ function workersOf(values: Values): number {
   if (!/^[0-9]+$/.test(text) || workers > MAX_INTAKE_WORKERS)
     throw new UsageError(`--workers must be an integer from 0 to ${MAX_INTAKE_WORKERS}`);
   return workers;
+}
+
+// The directory for the run's verifier bundle (docs/spec/verifier.md,
+// Bundle): bundle.json and board.bin, which packages/verifier reads.
+// Neither may exist yet, so a run never overwrites another's evidence.
+const BUNDLE_FILES = ["bundle.json", "board.bin"] as const;
+
+function bundleDirOf(values: Values): string | undefined {
+  const dir = values["bundle"];
+  if (dir === undefined) return undefined;
+  const path = String(dir);
+  if (path === "") throw new UsageError("--bundle needs a directory");
+  if (BUNDLE_FILES.some((f) => existsSync(join(path, f))))
+    throw new UsageError(`--bundle: ${path} already holds a bundle`);
+  // Made before the run, so a path that can't hold the bundle is refused
+  // now rather than after hours of simulation.
+  try {
+    mkdirSync(path, { recursive: true });
+    accessSync(path, constants.W_OK);
+  } catch {
+    throw new UsageError(`--bundle: ${path} isn't a writable directory`);
+  }
+  return path;
 }
 
 const scenarioOptions = { scenario: { type: "string" }, file: { type: "string" } } as const;
@@ -102,21 +126,32 @@ export function simulationCommandsWith(
       },
     },
     run: {
-      usage: "(--scenario <json> | --file <path>) [--progress] [--workers <n>]",
+      usage: "(--scenario <json> | --file <path>) [--progress] [--workers <n>] [--bundle <dir>]",
       options: {
         ...scenarioOptions,
         progress: { type: "boolean" },
         workers: { type: "string" },
+        bundle: { type: "string" },
       },
       positionals: 0,
       offline: true,
       async run(_, values, io) {
         const scenario = scenarioOf(values);
         const workers = workersOf(values);
+        const bundleDir = bundleDirOf(values);
         // At most about a hundred progress lines, whatever the electorate.
         let shown = -1;
         const report = await run(scenario, {
           workers,
+          // Written before the verifier judges it, so a disagreement can be inspected.
+          ...(bundleDir !== undefined
+            ? {
+                onBundle: (b) => {
+                  writeFileSync(join(bundleDir, "bundle.json"), b.json, { flag: "wx" });
+                  writeFileSync(join(bundleDir, "board.bin"), b.board, { flag: "wx" });
+                },
+              }
+            : {}),
           ...(values["progress"] === true
             ? {
                 onProgress: (p) => {

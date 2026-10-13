@@ -1,0 +1,2 @@
+# ethereum/tests vectors, byte-for-byte copies checked by sha256 (tests/trie.test.ts).
+tests/vectors/

@@ -94,7 +94,9 @@ import {
   type ValidityContext,
   verifyBoard,
 } from "@abolishus/crypto";
+import { parseBundle, type Verdict, verifyBundle } from "@abolishus/verifier";
 import { SimulatedAnchor } from "./anchor.ts";
+import { type VerifierBundle, verifierBundle } from "./bundle.ts";
 import {
   afterAnchored,
   endOf,
@@ -127,6 +129,7 @@ import {
   selectionRange,
 } from "./plan.ts";
 import type { Scenario, SimulatedTier } from "./scenario.ts";
+import { judgeVerifierReport } from "./verify.ts";
 
 /**
  * What this run models only in outline, until the items that build each
@@ -135,15 +138,16 @@ import type { Scenario, SimulatedTier } from "./scenario.ts";
  */
 export const SIMULATION_STUBS = Object.freeze([
   "definition: a well-formed version-1 definition, but its contracts, chain IDs, election counter, clock and tier roots are placeholders and nothing registers it on L2 (P1-18, P3-2)",
-  "ceremony: every seat takes part in the four signed rounds; no release pins the panel, whose identity keys are fresh per run (P1-7)",
-  "membership: no membership proofs; each voter's nullifier is its index plus one, and each ballot record carries a placeholder proof, the verification key's own alpha, beta and alpha points, which decodes but proves nothing and is never checked, so admission (5.1 to 5.4) isn't run and each ballot's M for the re-vote rule is computed from its record here rather than taken from crypto's checkBallot (P1-17b, P3-2)",
+  "ceremony: every seat takes part in the four signed rounds, and the operator boards the transcript as the board's first entry; no release pins the panel, whose identity keys are fresh per run, so the verifier's bundle gives it as a local input (P1-7)",
+  "membership: no membership proofs; each voter's nullifier is its index plus one, and each ballot record carries a placeholder proof, the verification key's own alpha, beta and alpha points, which decodes but proves nothing; the run never checks it, and each ballot's M for the re-vote rule is computed from its record here rather than taken from crypto's checkBallot, while the verifier's admission rejects every ballot for it (5.1 to 5.3, membership-proof), so it never verifies their validity proofs (5.4 covers only their shape and qualified share hashes) and its checks over admitted ballots (5.7, and 6.2's opening-cast) judge none (P1-17b, P3-2)",
   "board: the operator boards each server ballot as it arrives and signs a receipt the voter's client checks at cast, under one receipt key fresh per run that no definition lists or registry holds; the anchoring clock (hourly from the Unix epoch, with a half-hour deadline) is a placeholder, the post-close windows other than the tally, openings' and destruction windows are taken as zero for the counted extent, though the delivery check applies the real delivery deadline (every delivery record is boarded or sent long before it), so the counted extent ends one period after close and the seal is the destruction window's end (P1-13b, P1-18)",
-  "anchoring: an anchoring authority anchors the checkpoint of every period that added entries, and the seal's, in the first block after the period ends, and every reader judges them with crypto's verifyBoard; but the anchor contract, its clock and the authority's key are simulated, the anchors are held in memory rather than read from L1 state with storage proofs, every period's entries are boarded before its end, and the CIDs name segment objects that nothing publishes or pins; readers check the operator's copy, the tally and destruction checks read it before the final board check authenticates it, a node checks the whole board before destroying rather than each first passing opening's inclusion, and the trustees' moments come from the clock rather than from the blocks they saw (P4-1, P4-3)",
+  "anchoring: an anchoring authority anchors the checkpoint of every period that added entries, and the seal's, in the first block after the period ends, and every reader judges them with crypto's verifyBoard; but the anchor contract, its clock and the authority's key are simulated, readers during the election take the anchors from memory, and only the verifier's final read proves them from L1 state, a simulated one (the anchor's account alone, with placeholder code, under a header whose other fields are zero and whose hash isn't the simulated chain's block hash), every period's entries are boarded before its end, and the CIDs name segment objects that nothing publishes or pins; readers check the operator's copy, the tally and destruction checks read it before the final board check authenticates it, a node checks the whole board before destroying rather than each first passing opening's inclusion, and the trustees' moments come from the clock rather than from the blocks they saw (P4-1, P4-3)",
   "delivery: ciphertexts reach trustees in memory, and no contract records anything; a direct ballot is boarded by the operator when the servers return, with no operator receipt, never as a contract event; each online seat's node boards its share receipt right after the ballot, and the operator boards it unchecked rather than under the delivery boarding rules; a posting voter's client posts each seat down at that ballot's cast once, right after cast, as a contract-path record the delivery check reads with its cast time as its submission time, though no contract records it and nothing puts it on the board or the archive; a departing seat's receipts for ballots it took before going down are boarded with them, even a direct ballot's after the seat is down; offline and departed seats never come back, so no seat catches up on postings or complains, and nothing is resent (P1-12c, P1-18, P4-2)",
   "trustees: offline seats go down after the ceremony, for the whole voting period, tally and destruction, and departing seats at their scenario time, for the rest of it, and take no part in the tally or destruction, though they hold shares of every ballot cast before; nothing models a departing seat's node or disk afterwards; faulty seats lie only in their summed shares, which their own node's check refuses to seal, so no lie reaches another seat as a summed-share message, no recipient's refusal is shown, and a cell's excluded seats are those that sent nothing (openCell never sees a failing sum); summed-share messages travel in memory, never over a channel, every honest seat combines, and the lowest seat combined signs each cell's opening",
-  "challenges: the checker records each tracking code and checks the opening in memory, with the election the run built rather than one fetched from chain and IPFS; a voter who publishes asks once, in the first period after the counted extent, and the operator's boarding rules are applied here rather than by the verifier's 6.2, which isn't run (P1-21 part 2)",
+  "challenges: the checker records each tracking code and checks the opening in memory, with the election the run built rather than one fetched from chain and IPFS; a voter who publishes asks once, in the first period after the counted extent, and the operator's boarding rules are applied here; the verifier's 6.2 reports every published opening without a break but leaves its row unverifiable until it knows s_S, as 7.4 does the tally openings (P1-19, P1-21 part 2)",
   "re-voting: L1 is simulated, a block every 12 seconds with random hashes, all finalized; a reorganised ballot's block is replaced before it is finalized, which the client sees two epochs after the block and then casts the same committed vote again at once, with no light client or header range modelled; every other reference is admitted, so no ballot is replayed, ties, or names a block before opening or after close (P1-21 part 2)",
   "destruction: every online seat signs its statement at the moment the tally rule sets, and the operator boards each one; nothing destroys the run's key material, which lives until the report is returned",
+  "verifier: packages/verifier reads the closed election once, at the first block after the seal's window, from a bundle whose definition, clock and panel are local inputs, so its verdict is never better than unverifiable; the checks it doesn't implement yet, and 1.2's and 2.1's comparisons with pinned deployments, aren't exercised (P1-19)",
   "not yet simulated: wipe-and-rebuild (P1-21 part 2)",
 ] as const);
 
@@ -213,7 +217,7 @@ export interface SimulationReport {
    */
   readonly board: {
     readonly entries: number;
-    /** Entries in the counted extent, every one a ballot or a share receipt. */
+    /** Entries in the counted extent: the ceremony transcript, then ballots and share receipts. */
     readonly counted: number;
     /** Share receipts, one from each seat up at its cast per ballot cast. */
     readonly shareReceipts: number;
@@ -238,6 +242,27 @@ export interface SimulationReport {
       readonly hash: string;
       readonly anchoredAt: number;
     }[];
+  };
+  /**
+   * packages/verifier's report over the closed election's format-4 bundle,
+   * its anchors and `now` proven from the anchor's simulated L1 state at
+   * `block`: the rows it passed and failed, which must be exactly those
+   * ./verify.ts expects, and how many ballots admission rejected (each for
+   * its placeholder membership proof). Its verdict is unverifiable while
+   * any check it runs isn't implemented or the bundle's inputs are local.
+   */
+  readonly verifier: {
+    readonly verdict: Verdict;
+    readonly verdictAgainstInputs: Verdict;
+    /**
+     * The simulated block the proofs are against: its number, and the hash
+     * of the bundle's simulated header, which isn't the hash the simulated
+     * chain gives that block (SIMULATION_STUBS).
+     */
+    readonly block: { readonly number: number; readonly headerHash: string };
+    readonly passed: readonly string[];
+    readonly failed: readonly { readonly id: string; readonly code: string }[];
+    readonly rejectedBallots: number;
   };
   readonly trustees: {
     /** Every seat up from the ceremony through destruction, faulty ones included. */
@@ -280,6 +305,12 @@ export interface SimulationOptions {
    * report doesn't depend on it.
    */
   readonly workers?: number;
+  /**
+   * Called with the closed election's verifier bundle (docs/spec/verifier.md,
+   * Bundle, format 4) before the verifier judges it, so a caller can keep its
+   * two files even when the verifier disagrees.
+   */
+  readonly onBundle?: (bundle: VerifierBundle) => void;
 }
 
 // A faulty seat's lie: option 0's summed vote share plus one, which the
@@ -320,6 +351,13 @@ const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "
 // A record's type, the u16 at the head of its encoding (docs/spec/notation.md):
 // which records on the board each check reads.
 const recordTypeOf = (record: Uint8Array) => ((record[0] ?? 0) << 8) | (record[1] ?? 0);
+
+// What the delivery check reads (docs/spec/delivery.md, Delivery check).
+const DELIVERY_RECORD_TYPES: ReadonlySet<number> = new Set([
+  RECORD_TYPES.shareReceipt,
+  RECORD_TYPES.sharePosting,
+  RECORD_TYPES.shareComplaint,
+]);
 
 const same32 = (a: Uint8Array, b: Uint8Array) =>
   a.length === 32 && b.length === 32 && a.every((x, i) => x === b[i]);
@@ -465,6 +503,10 @@ export async function runSimulation(
     SIMULATED_BOARD_ENTRY_VERSION,
   );
   const firstSegment = segmentAt(opensAt);
+  // The ceremony's transcript, which the definition's hash of it names, is
+  // the board's first entry, in the election's first segment, so the
+  // verifier's 3.1 and 3.2 find it on the board alone (T-37).
+  operator.board(firstSegment, election.transcript);
   const after = postClose(closesAt);
   const { seal } = after;
   const anchor = new SimulatedAnchor(election.definition.election_id, firstSegment, seal, l1);
@@ -766,19 +808,24 @@ export async function runSimulation(
   // for s_S is due: the authority has anchored every period through s_S,
   // and the board checks pass over the anchors finalized by then (verifier
   // 4.1 and 4.2), so every entry is anchored, decodes under the pinned
-  // version and names the election and its index; each is a ballot or a
-  // share receipt boarded by s_S.
+  // version and names the election and its index; the first is the
+  // ceremony transcript and every other a ballot or a share receipt, each
+  // boarded by s_S.
   anchor.anchorThrough(operator.entries, after.counted);
   const checked = anchoredBoard(after.tallyFrom);
   if (
     checked.entries.some(
-      (e) =>
+      (e, i) =>
         e.segment > after.counted ||
-        (recordTypeOf(e.payload) !== RECORD_TYPES.ballot &&
+        (recordTypeOf(e.payload) === RECORD_TYPES.ceremonyTranscript) !== (i === 0) ||
+        (i > 0 &&
+          recordTypeOf(e.payload) !== RECORD_TYPES.ballot &&
           recordTypeOf(e.payload) !== RECORD_TYPES.shareReceipt),
     )
   )
-    throw new Error("simulation: an entry outside the counted extent's ballots and receipts");
+    throw new Error(
+      "simulation: the counted extent isn't the transcript, then ballots and share receipts",
+    );
 
   // From each boarded ballot record: its L1 reference's admission (5.8) and
   // M as the verifier recomputes it from the ballot and the definition (5.7).
@@ -853,11 +900,12 @@ export async function runSimulation(
       const b = ballotOf(s.index);
       return { tier: b.tier, nullifier: b.nullifier, vote: b.committed_vote };
     }),
-    // Every entry of the counted extent but the ballots, so crypto, not this
-    // file, decides what each is.
+    // Every delivery record of the counted extent (share receipts, postings
+    // and complaints, whichever the operator boarded), so crypto, not this
+    // file, decides what each says.
     [
       ...checked.entries
-        .filter((e) => recordTypeOf(e.payload) !== RECORD_TYPES.ballot)
+        .filter((e) => DELIVERY_RECORD_TYPES.has(recordTypeOf(e.payload)))
         .map((e): DeliveryEntry => ({ path: "board", segment: e.segment, payload: e.payload })),
       ...postings,
     ],
@@ -1142,6 +1190,7 @@ export async function runSimulation(
   const sealed = anchoredBoard(endOf(seal) + SIMULATED_ANCHOR_DEADLINE + 1n);
   if (!same32(sealed.links.at(-1) ?? new Uint8Array(32), operator.head))
     throw new Error("simulation: the anchored board's chain doesn't end at the operator's head");
+
   // The sealed board carries exactly the published openings, by the codes
   // their checkers recorded, and its entry checks held them in order.
   const spoiled = onBoard(RECORD_TYPES.spoiledBallotOpening).map((e) =>
@@ -1156,6 +1205,38 @@ export async function runSimulation(
         .join()
   )
     throw new Error("simulation: the board's openings aren't the published ones");
+
+  // The verifier over the output: the closed election as a format-4
+  // bundle, read by packages/verifier from its own two files at the same
+  // block as the read above, the anchors and `now` proven from the board
+  // anchor's simulated L1 state. Its report must agree with the run but for
+  // the stubs (./verify.ts): the caller gets the bundle first, so a
+  // disagreement can be inspected (T-23, T-24, T-37, T-54).
+  const verifierBlock = l1.firstAfter(endOf(seal) + SIMULATED_ANCHOR_DEADLINE);
+  const bundle = verifierBundle({
+    definition: election.definition,
+    panel: election.panel,
+    clock: anchor.clock,
+    entries: operator.entries,
+    anchors: anchor.anchors,
+    firstSegment,
+    block: { number: verifierBlock, timestamp: l1.block(verifierBlock).timestamp },
+  });
+  options.onBundle?.(bundle);
+  const verifier = verifyBundle(parseBundle(bundle.json, bundle.board));
+  const disagreements = judgeVerifierReport(verifier, {
+    entries: operator.entries.length,
+    ballots: onBoard(RECORD_TYPES.ballot).length,
+    openings: spoiled.length,
+    tallies: tallyEntries.length,
+    registered: registered.length,
+    anchors: anchor.anchors.map((a) => ({
+      segment: a.checkpoint.segment,
+      hash: hex(checkpointHash(a.checkpoint)),
+    })),
+  });
+  if (disagreements.length > 0)
+    throw new Error(`simulation: the verifier disagrees: ${disagreements.join("; ")}`);
 
   const allOpened = reports.every((c) => c.counts !== undefined);
   return {
@@ -1193,6 +1274,16 @@ export async function runSimulation(
         hash: hex(checkpointHash(a.checkpoint)),
         anchoredAt: Number(a.anchoredAt),
       })),
+    },
+    verifier: {
+      verdict: verifier.verdict,
+      verdictAgainstInputs: verifier.verdictAgainstInputs,
+      block: { number: Number(verifierBlock), headerHash: verifier.l1?.blockHash ?? "" },
+      passed: verifier.checks.filter((c) => c.status === "pass").map((c) => c.id),
+      failed: verifier.checks
+        .filter((c) => c.status === "fail")
+        .map((c) => ({ id: c.id, code: c.code ?? "" })),
+      rejectedBallots: verifier.ballots?.rejected.length ?? 0,
     },
     trustees: { online, offline, departed, faulty, summedShareMessages: messages },
     cells: reports,

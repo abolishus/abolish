@@ -66,6 +66,8 @@ export interface SimulatedElection {
   readonly definitionHash: Uint8Array;
   readonly transcript: Uint8Array;
   readonly transcriptHash: Uint8Array;
+  /** The panel the ceremony ran under, which the definition's `panel_id` names. */
+  readonly panel: Panel;
   /** Every seat's secrets, by seat from 1: online, offline and faulty seats all took part. */
   readonly seats: readonly SeatSecrets[];
   /** The keys `checkCeremonyTranscript` registered, by seat. */
@@ -206,6 +208,7 @@ export function simulateElection(scenario: Scenario, plan: Plan): SimulatedElect
     definitionHash: electionDefinitionHash(definition),
     transcript,
     transcriptHash: checked.hash,
+    panel,
     seats,
     registered: checked.registered,
   };

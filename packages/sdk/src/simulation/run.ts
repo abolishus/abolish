@@ -1,15 +1,17 @@
 // Runs a simulated election in memory through @abolishus/crypto's own code:
-// per-election trustee keys, each voter's sharing, share encryption and
+// a registered definition and its signed key ceremony (./election.ts), each
+// voter's sharing, share encryption and
 // validity proof, each online trustee's intake (proof checks, decryption,
-// share checks, receipt), the summed shares, each cell's combination from the
+// share checks, receipt) and the receipt's check under the seat's registered
+// signing key, the summed shares, each cell's combination from the
 // k lowest passing seats, and the verifier's check of every opening. Nothing
 // here reimplements a check the verifier makes (AGENTS.md, Architecture): it
 // only calls them and compares the result with the plan (T-29, T-54, T-25).
 
 import {
   type CellOpening,
-  ceremonyKeygen,
   checkOpening,
+  checkShareReceipt,
   type CommittedVote,
   deriveTotal,
   encryptShares,
@@ -24,6 +26,7 @@ import {
   type TallyRules,
   type ValidityContext,
 } from "@abolishus/crypto";
+import { simulateElection } from "./election.ts";
 import { type Plan, planElection, selectionRange } from "./plan.ts";
 import type { Scenario, SimulatedTier } from "./scenario.ts";
 
@@ -33,11 +36,11 @@ import type { Scenario, SimulatedTier } from "./scenario.ts";
  * result is mistaken for a run of the whole protocol.
  */
 export const SIMULATION_STUBS = Object.freeze([
-  "definition: a random 32-byte definition hash, not a registered election definition (P1-20)",
-  "ceremony: per-election keys from ceremonyKeygen without the four signed rounds (P1-20)",
+  "definition: a well-formed version-1 definition, but its contracts, chains, clock and tier roots are placeholders and nothing registers it on L2 (P1-18, P3-2)",
+  "ceremony: every seat takes part in the four signed rounds; no release pins the panel, whose identity keys are fresh per run (P1-7)",
   "membership: no membership proofs; each voter's nullifier is its index plus one (P1-17b, P3-2)",
   "delivery: ciphertexts reach trustees in memory, with no board, receipts at cast or contract path; a direct ballot differs only in its label (P1-12c, P4-2)",
-  "trustees: offline seats are down for the whole election; faulty seats lie only in their summed shares",
+  "trustees: offline seats go down after the ceremony, for the whole voting period and tally; faulty seats lie only in their summed shares",
   "not yet simulated: Benaloh challenges, re-voting, anchoring, destruction and wipe-and-rebuild (P1-21 part 2)",
 ] as const);
 
@@ -66,6 +69,10 @@ export interface SimulationReport {
   /** Every cell matched the plan. */
   readonly ok: boolean;
   readonly scenario: Scenario;
+  /** The definition's hash, which every ballot, receipt and opening binds, in hex. */
+  readonly definition: { readonly hash: string };
+  /** The ceremony transcript's hash, which the definition names, and the seats it registered. */
+  readonly ceremony: { readonly transcriptHash: string; readonly registered: readonly number[] };
   readonly ballots: { readonly cast: number; readonly server: number; readonly direct: number };
   readonly trustees: {
     /** Every seat not offline, faulty ones included. */
@@ -89,8 +96,6 @@ export interface SimulationOptions {
   /** Called after each ballot and each cell. */
   readonly onProgress?: (progress: SimulationProgress) => void;
 }
-
-const randomBytes = (n: number) => crypto.getRandomValues(new Uint8Array(n));
 
 // A faulty seat's lie: option 0's summed vote share plus one, which the
 // summed-share check must catch (verifier 7.2).
@@ -118,6 +123,8 @@ export function expectCells(scenario: Scenario): CellExpectation {
     combined: honest.slice(0, threshold),
   };
 }
+
+const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
 
 const same = (a: readonly number[], b: readonly number[]) =>
   a.length === b.length && a.every((x, i) => x === b[i]);
@@ -180,11 +187,10 @@ export function runSimulation(
     threshold: k,
     panelSize: n,
   };
-  const definitionHash = randomBytes(32);
-  const seats: SeatSecrets[] = Array.from({ length: n }, (_, i) =>
-    ceremonyKeygen(i + 1, randomBytes(32)),
-  );
-  const keys = seats.map((s) => s.kem.publicKey);
+  const election = simulateElection(scenario, plan);
+  const { definitionHash, seats, registered } = election;
+  // Ballots go only to the keys the ceremony check registered, by seat (T-37).
+  const keys = registered.map((r) => r.kemKey);
   const online = seats.map((s) => s.index).filter((i) => !offline.includes(i));
 
   const tallyRules: TallyRules = { optionCount: scenario.options, threshold: k, panelSize: n };
@@ -235,6 +241,10 @@ export function runSimulation(
       // An honest client's ballot that intake refuses is a bug in the protocol code.
       if (!result.ok)
         throw new Error(`simulation: intake refused an honest ballot (${result.code})`);
+      // The voter's client checks each receipt at cast against the seat's
+      // registered signing key ([[share-encryption]], Intake and receipts).
+      if (!checkShareReceipt(registered, ctx, vote, seat, result.receipt))
+        throw new Error("simulation: an honest seat's receipt failed its check");
       cell.sums.set(seat, sumShares(tallyRules, [sumOf(cell, seat), result.shares]));
     }
     cell.vss.push(vote.vss);
@@ -267,6 +277,11 @@ export function runSimulation(
   return {
     ok: reports.every((c) => c.matches),
     scenario,
+    definition: { hash: hex(definitionHash) },
+    ceremony: {
+      transcriptHash: hex(election.transcriptHash),
+      registered: registered.map((r) => r.index),
+    },
     ballots: { cast: plan.voters.length, server, direct: plan.voters.length - server },
     trustees: { online, offline, faulty },
     cells: reports,

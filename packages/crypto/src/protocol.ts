@@ -307,7 +307,7 @@ const CORE_OPENING: ReadonlyMap<number, number> = new Map([
 // The spoiled-ballot opening versions this package reads (challenge.ts's
 // SPOILED_BALLOT_OPENING), written out because importing it here would be an
 // import cycle; a test ties the two.
-export const SPOILED_OPENING_VERSIONS: ReadonlySet<number> = new Set<number>([1]);
+export const SPOILED_OPENING_VERSIONS: ReadonlySet<number> = new Set<number>([1, 2]);
 // The ballot versions this package reads (ballot.ts's BALLOT), written out
 // for the same reason.
 export const BALLOT_VERSIONS: ReadonlySet<number> = new Set<number>([1, 2, 3]);
@@ -393,9 +393,9 @@ export function profileCombinationRule(
     // (T-36, T-42, T-47). Checked last, so a profile that fails whatever the
     // opening fails here too.
     return SPOILED_OPENING_VERSIONS.has(spoiled) ? "profile-combination" : "unsupported-version";
-  // The opening version that opens these cores, which this package doesn't
-  // read yet (opening version 2 until P2-14 part 3c): unverifiable here,
-  // since 6.2 can't be checked, never a failure (T-36).
+  // An opening version this package doesn't read, beside a ballot version
+  // whose cores it doesn't know the opening of: unverifiable here, since
+  // 6.2 can't be checked, never a failure (T-36).
   if (spoiled !== undefined && !SPOILED_OPENING_VERSIONS.has(spoiled)) return "unsupported-version";
   return undefined;
 }

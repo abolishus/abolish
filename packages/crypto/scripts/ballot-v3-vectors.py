@@ -35,6 +35,7 @@ import pathlib
 import sys
 
 HERE = pathlib.Path(__file__)
+VECTORS = HERE.parents[3] / "docs" / "spec" / "vectors"
 
 
 def _load(name, file):
@@ -114,7 +115,15 @@ def cells_of(d):
     return sum(len(t["cells"]) for t in d["electorate"])
 
 
-def election_v5(label, questions, k, n, panel, registered):
+# The membership key the published Semaphore circuit's verification key
+# hashes to (membership-proof.json). The openings' elections name it, so an
+# implementation can make its ballot context from them, which refuses a
+# definition naming another key; the other elections keep the typical
+# definition's placeholder.
+MEMBERSHIP_VK_HASH = bytes.fromhex(json.loads((VECTORS / "membership-proof.json").read_text())["verificationKey"]["hash"])
+
+
+def election_v5(label, questions, k, n, panel, registered, vk_hash=None):
     d = d5.variant(
         d5.TYPICAL,
         profile={"protocol_major": 1, "pins": PINS_V5},
@@ -123,13 +132,14 @@ def election_v5(label, questions, k, n, panel, registered):
         threshold=k,
         panel_size=n,
         ceremony_transcript_hash=det("transcript " + label),
+        **({} if vk_hash is None else {"membership_vk_hash": vk_hash}),
     )
     assert d5.definition_rule(d) is None, (label, d5.definition_rule(d))
     enc = d5.enc_definition_v5(d)
     return finish(label, 5, d, enc, [{"optionCount": m, "min": lo, "max": hi} for m, lo, hi in questions], k, n, panel, registered)
 
 
-def election_v4(label, election_type, m, lo, hi, k, n, panel, registered):
+def election_v4(label, election_type, m, lo, hi, k, n, panel, registered, vk_hash=None):
     d = d4.variant(
         d4.TYPICAL,
         profile={"protocol_major": 1, "pins": PINS_V4},
@@ -141,6 +151,7 @@ def election_v4(label, election_type, m, lo, hi, k, n, panel, registered):
         threshold=k,
         panel_size=n,
         ceremony_transcript_hash=det("transcript " + label),
+        **({} if vk_hash is None else {"membership_vk_hash": vk_hash}),
     )
     assert d4.definition_rule(d) is None, (label, d4.definition_rule(d))
     enc = d4.enc_definition_v4(d)
@@ -826,8 +837,10 @@ def main():
             election_v5("questions-max", [(2, 0, 1)] * MAX_QUESTIONS, 2, 2, "panel-2", [1, 2]),
             election_v5("range-max", [(64, 0, 64)], 2, 2, "panel-2", [1, 2]),
             election_v5("trustees-max", [(2, 0, 1), (3, 1, 1)], 16, 16, "panel-16", list(range(1, 17))),
-            election_v5("opening-four", [(3, 0, 1), (5, 0, 5), (4, 0, 2), (6, 3, 3)], 3, 4, "panel-4", [1, 2, 4]),
-            election_v4("opening-regional", 1, 3, 0, 1, 2, 3, "panel-3", [1, 2, 3]),
+            election_v5(
+                "opening-four", [(3, 0, 1), (5, 0, 5), (4, 0, 2), (6, 3, 3)], 3, 4, "panel-4", [1, 2, 4], MEMBERSHIP_VK_HASH
+            ),
+            election_v4("opening-regional", 1, 3, 0, 1, 2, 3, "panel-3", [1, 2, 3], MEMBERSHIP_VK_HASH),
             election_v5("tally", [(2, 0, 1), (3, 0, 3), (3, 0, 2), (3, 2, 2)], 2, 3, "panel-3", [1, 2, 3]),
         )
     }

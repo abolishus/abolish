@@ -168,9 +168,9 @@ def combination(defn):
         return failed
     if not known and wanted != 1:
         return unsupported
-    if ballot in (2, 3):
-        # Opening version 1 opens version 1's cores only; version 2, which
-        # opens theirs, and any other are ones this verifier doesn't read yet.
+    if ballot in (2, 3) and spoiled != 2:
+        # Opening version 1 opens version 1's cores only; version 2 opens
+        # theirs, and any other is one a later release may read.
         return failed if spoiled == 1 else unsupported
     return NOT_IMPLEMENTED
 
@@ -377,15 +377,16 @@ def main(out):
     # Definition versions 3 and 4 (P1-15 part 4b-2b): the transcript binds the
     # stub under the definition's own version, so a transcript made for
     # another version's stub of the same election fails its signatures. Their
-    # profiles pin ballot version 2, which no spoiled-ballot opening version
-    # can challenge yet, so 2.3 fails, and the ceremony checks still run.
+    # typical profiles pin ballot version 2 beside spoiled-ballot opening
+    # version 1, which can't challenge it, so 2.3 fails, and the ceremony
+    # checks still run.
     def regional(base, label):
         pins = [(ty, {BOARD_ENTRY_TYPE: 4, BALLOT_TYPE: 2}.get(ty, v)) for ty, v in base["profile"]["pins"]]
         b = dict(base, profile={"protocol_major": 1, "pins": pins})
         return b, transcript(label, panel, seats, election_of(definition_for(panel, bytes(32), b)))
 
     v3_base, v3_t = regional(rc.TYPICAL, "verifier/definition-v3")
-    r = add("definition-v3", "A version-3 definition (regional cells) whose transcript binds its version-3 stub: every seat qualifies; 2.3 fails, since no opening version challenges ballot version 2 yet.", v3_t, [v3_t], board_version=4, base=v3_base)
+    r = add("definition-v3", "A version-3 definition (regional cells) whose transcript binds its version-3 stub: every seat qualifies; 2.3 fails, since its opening version 1 can't challenge ballot version 2.", v3_t, [v3_t], board_version=4, base=v3_base)
     assert r["3.2"] == outcome("pass") and r["2.3"]["code"] == "profile-combination", r
     r = add("definition-v3-v1-stub", "A version-3 definition naming a transcript made for a version-1 stub of the same election, chain and panel: every signature fails (T-37).", v4, [v4], board_version=4, base=v3_base)
     assert r["3.1"]["code"] == "ceremony-signature", r
@@ -397,8 +398,8 @@ def main(out):
     opening2 = [(ty, 2 if ty == SPOILED_OPENING_TYPE else v) for ty, v in v3_base["profile"]["pins"]]
     v3_o2_base = dict(v3_base, profile={"protocol_major": 1, "pins": opening2})
     _, v3_o2_t = regional(v3_o2_base, "verifier/definition-v3-opening-2")
-    r = add("definition-v3-opening-2", "A version-3 definition pinning spoiled-ballot opening version 2, which a later release may define to open version-2 cores: 2.3 is unsupported, never failed (T-36), and the ceremony checks still run.", v3_o2_t, [v3_o2_t], board_version=4, base=v3_o2_base)
-    assert r["2.3"]["code"] == "unsupported-version" and r["3.2"] == outcome("pass"), r
+    r = add("definition-v3-opening-2", "A version-3 definition pinning spoiled-ballot opening version 2, which opens version-2 cores: 2.3's combination passes, and every seat qualifies.", v3_o2_t, [v3_o2_t], board_version=4, base=v3_o2_base)
+    assert r["2.3"] == NOT_IMPLEMENTED and r["3.2"] == outcome("pass"), r
 
     doc = {
         "format": "abolish-verifier-ceremony-vectors/1",

@@ -479,8 +479,9 @@ describe("definition versions 3 and 4 (regional cells)", () => {
   // [board entry, ballot, spoiled-ballot opening, 2.3]: definition versions 3
   // and 4 need a ballot version that names its cell (2 is the only one known), which needs board entries that carry its
   // delivery records and a spoiled-ballot opening version that opens its
-  // cores: version 1 opens version-1 cores only, so it fails, and version 2,
-  // which opens them, is one this verifier doesn't read yet, so it is
+  // cores: version 1 opens version-1 cores only, so it fails, and version 2
+  // opens them, so the combination passes (2.3's other checks aren't
+  // implemented yet); an opening version this verifier doesn't know is
   // unsupported, never a failure (T-36, T-42).
   const table: readonly (readonly [number, number, number, string])[] = [
     [4, 1, 1, "profile-combination"],
@@ -492,7 +493,7 @@ describe("definition versions 3 and 4 (regional cells)", () => {
     [4, 4, 1, "unsupported-version"],
     [4, 4, 2, "unsupported-version"],
     [4, 2, 1, "profile-combination"],
-    [4, 2, 2, "unsupported-version"],
+    [4, 2, 2, "not-implemented"],
     [3, 2, 255, "unsupported-version"],
     [1, 2, 1, "profile-combination"],
     // A board that can't carry delivery fails whatever the opening.
@@ -518,7 +519,9 @@ describe("definition versions 3 and 4 (regional cells)", () => {
         expect(row(r, "2.3")).toEqual(
           code === "profile-combination"
             ? COMBINATION_FAILS
-            : { id: "2.3", kind: "election", status: "unverifiable", code, at: {} },
+            : code === "not-implemented"
+              ? { id: "2.3", kind: "election", status: "unverifiable", code }
+              : { id: "2.3", kind: "election", status: "unverifiable", code, at: {} },
         );
         // The copy is board-entry version 1's, so the board checks may fail
         // it under another pin; only a failing combination fails it here.

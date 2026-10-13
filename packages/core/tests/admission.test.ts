@@ -188,6 +188,14 @@ describe("boards what the verifier admits, and nothing else", () => {
       expect(await readBoard(app, electionId)).toHaveLength(size);
     }
     expect([identical, other]).toEqual([1, 1]);
+    // One key per boarded ballot: a refused repeat wrote none.
+    const keys = await app`SELECT count(*)::int AS n FROM board_ballot_keys`;
+    expect(keys[0]!["n"]).toBe(size - 1);
+    // A byte-identical retry after close is refused like any ballot then.
+    const original = [...boarded.keys()][0]!;
+    expect(await refusal(a.submit(app, electionId, ballots[original]!, closesAt + 1n))).toBe(
+      "not-open",
+    );
     const board = await readBoard(app, electionId);
     expect(() => checkBoard(electionId, board, VERSION)).not.toThrow();
   });

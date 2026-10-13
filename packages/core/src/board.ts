@@ -10,6 +10,7 @@ import {
   type BoardEntry,
   boardEntryHash,
   type BoardEntryVersion,
+  BN254_R,
   chainLink,
   consistencyProofSubtrees,
   decodeElectionDefinitionRecord,
@@ -177,9 +178,9 @@ export interface BallotKey {
   readonly message: Uint8Array;
 }
 
-/** `ν` as 32 big-endian bytes; a field<bn254> element is below 2^254. */
+/** `ν` as 32 big-endian bytes; a field<bn254> element, below `r`. */
 function nullifierBytes(nullifier: bigint): Uint8Array {
-  if (typeof nullifier !== "bigint" || nullifier < 0n || nullifier >= 1n << 256n)
+  if (typeof nullifier !== "bigint" || nullifier < 0n || nullifier >= BN254_R)
     throw new AppendError("invalid-entry");
   return Uint8Array.from(Buffer.from(nullifier.toString(16).padStart(64, "0"), "hex"));
 }

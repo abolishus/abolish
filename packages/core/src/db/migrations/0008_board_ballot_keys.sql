@@ -1,6 +1,6 @@
 -- Each boarded ballot's (tier, nullifier, M), the key repeats are found by
 -- (docs/spec/verifier.md 5.7; docs/spec/revoting.md, Selection step 1):
--- appendBallot writes one with each ballot it boards, in the same transaction,
+-- appendEntry writes one with each ballot it boards (its `ballot` option), in the same transaction,
 -- and refuses a ballot whose key is already here, so a re-randomised copy of a
 -- boarded ballot costs no board entry (T-38, T-52). The values come from
 -- @abolishus/verifier's admission of the entry's own payload, never from the

@@ -488,6 +488,7 @@ export {
   nullifierAnswerMessage,
   type NullifierKey,
   type NullifierQuery,
+  nullifierScopeField,
   type SeatShare,
   shareCommitment,
   unblind,

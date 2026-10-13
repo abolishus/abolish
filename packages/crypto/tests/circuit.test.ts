@@ -86,9 +86,12 @@ describe("tag field elements", () => {
     expect(new Set(fields).size).toBe(fields.length);
   });
 
-  test("circuitTagField refuses tags not registered as In-circuit", () => {
+  test("circuitTagField takes only tags registered as In-circuit", () => {
     // T-30: a plain-hash tag used in a circuit would get a second layout.
-    for (const { tag } of TAG_REGISTRY) expect(() => circuitTagField(tag)).toThrow(RangeError);
+    for (const { tag, primitive } of TAG_REGISTRY)
+      if ((primitive as string) === "in-circuit")
+        expect(circuitTagField(tag)).toBe(deriveTagField(tag));
+      else expect(() => circuitTagField(tag)).toThrow(RangeError);
     expect(() => circuitTagField("abolish/v1/not-registered")).toThrow(RangeError);
   });
 

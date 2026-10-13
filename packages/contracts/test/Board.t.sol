@@ -709,6 +709,15 @@ contract BoardTest is TestBase {
             _refused(0, DeliveryCheckLib.Code.PostingBallot),
             "a ballot of another definition"
         );
+        // The posting's own definition hash, which its ballot hash doesn't
+        // bind, must be the ballot's too: here it names another registered
+        // election with the same option count and key set, so every check
+        // judged against it passes, and only this comparison refuses it.
+        _refuse(
+            _postingCall(_withWord(posting, 3, uint256(other)), alice),
+            _refused(0, DeliveryCheckLib.Code.PostingBallot),
+            "a posting naming another registered election"
+        );
 
         // The ciphertext must be the one the ballot committed to for the seat.
         _refuse(

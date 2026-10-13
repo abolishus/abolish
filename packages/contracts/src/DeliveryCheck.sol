@@ -56,7 +56,8 @@ library DeliveryCheckLib {
         /// `sealed` isn't `4 + 64·T + 16` bytes for the definition's `T`.
         PostingLength,
         /// The ballot carried with a posting, which passed the ballot check,
-        /// isn't the one the posting names: its ballot hash differs.
+        /// isn't the one the posting names: its definition hash or its
+        /// ballot hash differs.
         PostingBallot,
         /// The ciphertext's hash isn't the ballot's share hash for the seat.
         PostingHash
@@ -174,7 +175,7 @@ library DeliveryCheckLib {
         uint256 options = elections.parameters(definitionHash).optionCount;
         if (sealedLength != 4 + 64 * options + 16) revert DeliveryRefused(0, Code.PostingLength);
 
-        _bindBallot(r, ballot, elections, qualified, seat, ballotHash);
+        _bindBallot(r, ballot, elections, qualified, seat, definitionHash, ballotHash);
     }
 
     /// A posting's ballot: it passes the whole ballot check, its ballot
@@ -186,13 +187,18 @@ library DeliveryCheckLib {
         IBoardElections elections,
         uint256 qualified,
         uint256 seat,
+        bytes32 definitionHash,
         bytes32 ballotHash
     ) private view {
         (BallotCheckLib.Admitted memory a, BallotCheckLib.Layout memory l) =
             BallotCheckLib.checkWithLayout(ballot, elections, qualified);
-        // The ballot hash binds the definition hash, so a ballot of another
-        // election fails here too.
-        if (a.ballotHash != ballotHash) revert DeliveryRefused(0, Code.PostingBallot);
+        // Both of the posting's names: its ballot hash binds the ballot's
+        // definition, never the posting's own `definition_hash`, which must
+        // be the same election, or the seat, key set and length judged above
+        // would be another election's than the ballot's.
+        if (a.definitionHash != definitionHash || a.ballotHash != ballotHash) {
+            revert DeliveryRefused(0, Code.PostingBallot);
+        }
         // The ballot passed `validity-shape`, so it has `n` share hashes, and
         // a key-set seat is at most `n`; the bound is checked anyway, so the
         // read never depends on the trustee registry's. One SHA-256 over

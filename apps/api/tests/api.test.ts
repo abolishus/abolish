@@ -50,7 +50,7 @@ import { createApiServer, MAX_REQUEST_BODY, type RequestLogLine } from "../src/i
 
 // The API end to end over HTTP, against a live Postgres: what it serves is
 // what the verifier's own code accepts (T-23, T-24, T-34), inputs are bounded
-// (T-31, T-52), no ballot is boarded before admission exists (T-53), and the
+// (T-31, T-52), no ballot is boarded without admission (T-53), and the
 // request log never carries anything that names a person, a session or a
 // ballot (T-10, T-11).
 
@@ -461,7 +461,7 @@ describe("board", () => {
 describe("ballots.submit", () => {
   const ballot = hex(Uint8Array.of(0, 2, 1, 7));
 
-  test("boards nothing before admission exists: ELECTION_NOT_OPEN", async () => {
+  test("without pinned panels, boards nothing: ELECTION_NOT_OPEN", async () => {
     const e = await election(1);
     const r = await post("/ballots", { electionId: e.idHex, ballot });
     expect(r.status).toBe(409);

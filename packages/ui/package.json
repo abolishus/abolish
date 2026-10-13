@@ -12,6 +12,8 @@
   },
   "exports": {
     ".": "./src/index.ts",
+    "./ui/*": "./src/components/ui/*.tsx",
+    "./hooks/*": "./src/hooks/*.ts",
     "./styles.css": "./src/styles.css"
   },
   "scripts": {
@@ -26,11 +28,19 @@
     "@base-ui/react": "catalog:",
     "@fontsource-variable/jetbrains-mono": "catalog:",
     "@fontsource-variable/oxanium": "catalog:",
+    "@shadcn/react": "catalog:",
     "class-variance-authority": "catalog:",
+    "cmdk": "catalog:",
     "cn": "catalog:",
+    "date-fns": "catalog:",
+    "embla-carousel-react": "catalog:",
+    "input-otp": "catalog:",
     "lucide-react": "catalog:",
     "react": "catalog:",
+    "react-day-picker": "catalog:",
     "react-dom": "catalog:",
+    "react-resizable-panels": "catalog:",
+    "recharts": "catalog:",
     "tw-animate-css": "catalog:"
   },
   "devDependencies": {

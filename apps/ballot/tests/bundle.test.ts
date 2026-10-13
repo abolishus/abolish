@@ -107,7 +107,8 @@ const ANALYTICS_MARKERS = [
   /logrocket/i,
   /bugsnag/i,
   /newrelic|nr-data\.net/i,
-  /rollbar/i,
+  // Word-bounded: Tailwind emits "scrollbar" utilities.
+  /\brollbar\b/i,
   /heap(analytics|-api)/i,
   /clarity\.ms/i,
   /cloudflareinsights|beacon\.min\.js/i,

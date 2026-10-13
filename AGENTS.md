@@ -146,7 +146,7 @@ pnpm workspace orchestrated by Vite+ (no Turborepo/Nx).
 - `packages/contracts`: Foundry
 - `packages/circuits`: Noir
 - `packages/sdk`
-- `packages/ui`: shadcn/ui, Tailwind, Storybook
+- `packages/ui`: shadcn/ui, Tailwind, Storybook. It holds the full shadcn/ui primitive set as the base for every screen: keep all of them even when unused, and build from them rather than new hand-rolled primitives (`packages/ui/README.md`, Primitives).
 - `packages/capacitor-nfc-passport`
 - `packages/capacitor-zk-prover`
 

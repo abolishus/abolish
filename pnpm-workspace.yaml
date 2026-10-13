@@ -52,6 +52,7 @@ catalog:
   "@orpc/openapi-client": 1.15.4
   "@orpc/server": 1.15.4
   "@orpc/zod": 1.15.4
+  "@shadcn/react": 0.3.1
   "@storybook/addon-a11y": 10.6.1
   "@storybook/addon-vitest": 10.6.1
   "@storybook/react-vite": 10.6.1
@@ -66,16 +67,25 @@ catalog:
   better-auth: 1.7.7
   bullmq: 6.3.11
   class-variance-authority: 0.7.1
+  cmdk: 1.1.1
   cn: 0.4.0
+  date-fns: 4.4.0
   drizzle-orm: 0.45.3
+  embla-carousel-react: 8.6.0
   esbuild: 0.28.2
   fast-check: 4.10.2
+  input-otp: 1.5.0
   ioredis: 5.11.1
   lucide-react: 1.52.0
   playwright: 1.63.0
   postgres: 3.4.9
   react: 19.3.0
+  react-day-picker: 10.0.2
   react-dom: 19.3.0
+  react-resizable-panels: 4.14.2
+  recharts: 3.8.0
+  # Only for the recharts>reselect override below.
+  reselect: 5.3.0
   shadcn: 4.21.1
   storybook: 10.6.1
   tailwindcss: 4.3.3
@@ -89,6 +99,11 @@ catalog:
 
 overrides:
   vite@*: "catalog:"
+  # recharts pins reselect 5.1.1 exactly, which was published with weaker
+  # provenance than the 5.0.x line (trustPolicy flags it). 5.3.0 is the same
+  # major, already in the tree via Base UI, and has provenance; the catalog
+  # pins it, since CI accepts only catalog-resolved overrides.
+  recharts>reselect: "catalog:"
 
 peerDependencyRules:
   allowAny:

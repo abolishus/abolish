@@ -122,22 +122,28 @@ test("option-proof names its flat option and sum-proof its question, and nothing
 });
 
 describe("1.3, 2.3, 3.2, 5.1 to 5.4, 5.7, 6.2 and 7.4 against the independent implementation", () => {
+  // A bundle checks up to 19 membership proofs (pairings) and every
+  // question's range proofs: seconds each on a CI runner.
   for (const c of file.cases)
-    test(c.id, () => {
-      const r = format4(c);
-      expect(rows(r, Object.keys(c.expected))).toEqual(c.expected);
-      expect(r.ballots).toEqual(c.ballots);
-      // This verifier doesn't read the openings of version-3 cores yet.
-      expect(r.openings).toBeUndefined();
-      expect(r.verdict).toBe("unverifiable");
-      // A rejected ballot rejects its entry only, never the election (T-52):
-      // only an election check (here 1.3, 2.3 or 3.2) can make it fail.
-      const failedElection = Object.entries(c.expected).some(
-        ([id, o]) =>
-          !ADMISSION.includes(id) && id !== "6.2" && id !== "7.4" && o["status"] === "fail",
-      );
-      expect(r.verdictAgainstInputs === "failed").toBe(failedElection);
-    });
+    test(
+      c.id,
+      () => {
+        const r = format4(c);
+        expect(rows(r, Object.keys(c.expected))).toEqual(c.expected);
+        expect(r.ballots).toEqual(c.ballots);
+        // This verifier doesn't read the openings of version-3 cores yet.
+        expect(r.openings).toBeUndefined();
+        expect(r.verdict).toBe("unverifiable");
+        // A rejected ballot rejects its entry only, never the election (T-52):
+        // only an election check (here 1.3, 2.3 or 3.2) can make it fail.
+        const failedElection = Object.entries(c.expected).some(
+          ([id, o]) =>
+            !ADMISSION.includes(id) && id !== "6.2" && id !== "7.4" && o["status"] === "fail",
+        );
+        expect(r.verdictAgainstInputs === "failed").toBe(failedElection);
+      },
+      120_000,
+    );
 });
 
 describe("admission is decided per entry", () => {

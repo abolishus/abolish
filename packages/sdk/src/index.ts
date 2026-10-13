@@ -27,3 +27,4 @@ export {
   type SimulationProgress,
   type SimulationReport,
 } from "./simulation/run.ts";
+export { MAX_INTAKE_WORKERS } from "./simulation/intake.ts";

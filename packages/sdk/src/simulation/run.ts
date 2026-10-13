@@ -61,7 +61,7 @@ import {
   encodeTallyOpening,
   encryptShares,
   GROUP_ORDER,
-  intakeShares,
+  type IntakeKeys,
   l1RefMin,
   membershipMessage,
   membershipVkEncoding,
@@ -96,6 +96,14 @@ import {
   segmentAt,
 } from "./board.ts";
 import { checkChallenge } from "./challenge.ts";
+import {
+  type Intake,
+  intakeInThread,
+  intakeInWorkers,
+  MAX_INTAKE_WORKERS,
+  type SeatCiphertext,
+  type SeatIntake,
+} from "./intake.ts";
 import { admitOpening } from "./publication.ts";
 import { SIMULATED_BOARD_ENTRY_VERSION, simulateElection } from "./election.ts";
 import { nameBlock, SimulatedL1 } from "./l1.ts";
@@ -240,6 +248,12 @@ export interface SimulationProgress {
 export interface SimulationOptions {
   /** Called after each ballot and each cell. */
   readonly onProgress?: (progress: SimulationProgress) => void;
+  /**
+   * Worker threads for the trustee seats' intake, most of a run's cost: 0
+   * (the default) runs it in the calling thread, one ballot at a time. The
+   * report doesn't depend on it.
+   */
+  readonly workers?: number;
 }
 
 // A faulty seat's lie: option 0's summed vote share plus one, which the
@@ -330,11 +344,18 @@ export function judgeCell(
   };
 }
 
-/** Runs `scenario` and reports each cell's result against the plan. Throws only on a bug. */
-export function runSimulation(
+/**
+ * Runs `scenario` and reports each cell's result against the plan. Rejects
+ * only on a bug, or a `workers` that isn't an integer from 0 to
+ * `MAX_INTAKE_WORKERS`.
+ */
+export async function runSimulation(
   scenario: Scenario,
   options: SimulationOptions = {},
-): SimulationReport {
+): Promise<SimulationReport> {
+  const workers = options.workers ?? 0;
+  if (!Number.isSafeInteger(workers) || workers < 0 || workers > MAX_INTAKE_WORKERS)
+    throw new RangeError(`simulation: workers must be an integer from 0 to ${MAX_INTAKE_WORKERS}`);
   const plan: Plan = planElection(scenario);
   const { panel: n, threshold: k, offline, faulty } = scenario.trustees;
   const { min, max } = selectionRange(scenario);
@@ -514,7 +535,21 @@ export function runSimulation(
       throw new Error(`simulation: an honest operator's receipt failed its check (${check.code})`);
     server++;
   };
-  casts.forEach(({ voter, ballot, kind, seconds }, done) => {
+  // Each cast in two steps: the client's, up to the ballot's intake, then,
+  // with each seat's intake back, the receipts' checks and the boarding.
+  // The first step runs in cast order, and so does the second, which waits
+  // for each ballot's intake in turn while later ones' run in the workers.
+  interface Casting {
+    readonly intake: Promise<readonly SeatIntake[]>;
+    readonly finish: (results: readonly SeatIntake[]) => void;
+  }
+  const castOne = (
+    intake: Intake,
+    { voter, ballot, kind, seconds }: Cast,
+    done: number,
+  ): Casting => {
+    const progress = () =>
+      options.onProgress?.({ stage: "cast", done: done + 1, total: casts.length });
     const ctx: ValidityContext = {
       ...rules,
       definitionHash,
@@ -534,21 +569,24 @@ export function runSimulation(
       membership_proof: placeholderProof,
       committed_vote: vote,
     });
-    if (kind === "recast") {
-      // Client rule 4: the client, finding the block it named reorganised
-      // away once it is finalized, casts the same committed vote under a new
-      // reference. Its ballot hash is the first cast's, so the trustees'
-      // receipts and the voter's postings already cover it, and nothing is
-      // sent to them again ([[share-encryption]], Intake and receipts).
-      const first = toRecast.get(voter.index);
-      if (first === undefined) throw new Error("simulation: a recast with no first cast");
-      const payload = encodeBallot(recordOf(first.vote, l1.block(l1RefNumber).hash));
-      const { shares, down } = first;
-      const k = { shares, down, selects: true, reorged: false, delivered: voter.delivered };
-      submit(ballot, seconds, payload, k, []);
-      options.onProgress?.({ stage: "cast", done: done + 1, total: casts.length });
-      return;
-    }
+    if (kind === "recast")
+      return {
+        intake: Promise.resolve([]),
+        finish: () => {
+          // Client rule 4: the client, finding the block it named reorganised
+          // away once it is finalized, casts the same committed vote under a new
+          // reference. Its ballot hash is the first cast's, so the trustees'
+          // receipts and the voter's postings already cover it, and nothing is
+          // sent to them again ([[share-encryption]], Intake and receipts).
+          const first = toRecast.get(voter.index);
+          if (first === undefined) throw new Error("simulation: a recast with no first cast");
+          const payload = encodeBallot(recordOf(first.vote, l1.block(l1RefNumber).hash));
+          const { shares, down } = first;
+          const k = { shares, down, selects: true, reorged: false, delivered: voter.delivered };
+          submit(ballot, seconds, payload, k, []);
+          progress();
+        },
+      };
     const last = kind === "last";
     // A challenged attempt: the checker records the code shown before the
     // choice, then checks the opening the device hands over (T-42).
@@ -585,67 +623,97 @@ export function runSimulation(
       opensBallotCommitment(openedCommitments(opening), { definitionHash, vss: vote.vss })
     )
       throw new Error("simulation: a challenged attempt opens the cast ballot");
-    const shares = new Map<number, readonly Share[]>();
-    const receipts: Uint8Array[] = [];
     const down = downAt(scenario, ballot.at);
-    for (const { index: seat } of seats) {
-      if (down.includes(seat)) continue;
-      const s = seats[seat - 1] as SeatSecrets;
-      const result = intakeShares(
-        ctx,
-        { seat, kemSecret: s.kem.secretKey, signingSecret: s.signingSecret },
-        vote,
-        encrypted.ciphertexts[seat - 1] as Uint8Array,
-      );
-      // An honest client's ballot that intake refuses is a bug in the protocol code.
-      if (!result.ok)
-        throw new Error(`simulation: intake refused an honest ballot (${result.code})`);
-      // The voter's client checks each receipt at cast against the seat's
-      // registered signing key ([[share-encryption]], Intake and receipts).
-      if (!checkShareReceipt(registered, ctx, vote, seat, result.receipt))
-        throw new Error("simulation: an honest seat's receipt failed its check");
-      if (online.includes(seat)) shares.set(seat, result.shares);
-      receipts.push(encodeShareReceipt(shareReceiptRecord(definitionHash, seat, result)));
-    }
-    // A last ballot the plan reorganises names the hash of a block that L1
-    // then replaced, which the client saw 2 deep (Client rule 2).
-    const lost = last && voter.reorg !== null;
-    const payload = encodeBallot(
-      recordOf(vote, lost ? l1.orphan(l1RefNumber) : l1.block(l1RefNumber).hash),
-    );
-    if (lost) {
-      toRecast.set(voter.index, { vote, shares, down });
-      reorged++;
-    }
-    // Client rule 4 (docs/spec/delivery.md): a down seat's intake fails by
-    // every route, so a voter who chooses to posts that seat's ciphertext
-    // and ML-KEM message through the contract path, which our outage doesn't
-    // touch; any other voter's ballot stays undelivered (T-15, T-25).
-    if (ballot.posts)
-      for (const seat of down) {
-        const at = seat - 1;
-        postings.push({
-          path: "contract",
-          submittedAt: seconds,
-          payload: encodeSharePosting({
-            definition_hash: definitionHash,
-            ballot_hash: ballotHash(ctx, vote),
-            seat,
-            m: (encrypted.randomness[at] as (typeof encrypted.randomness)[number]).m,
-            ciphertext: decode(SHARE_CIPHERTEXT, encrypted.ciphertexts[at] as Uint8Array),
-          }),
+    // Every seat up at the cast takes the ballot's intake.
+    const up: SeatCiphertext[] = seats
+      .filter(({ index: seat }) => !down.includes(seat))
+      .map(({ index: seat }) => ({
+        seat,
+        ciphertext: encrypted.ciphertexts[seat - 1] as Uint8Array,
+      }));
+    return {
+      intake: intake.run(ctx, vote, up),
+      finish: (results) => {
+        const shares = new Map<number, readonly Share[]>();
+        const receipts: Uint8Array[] = [];
+        up.forEach(({ seat }, i) => {
+          const result = results[i];
+          // An honest client's ballot that intake refuses is a bug in the protocol code.
+          if (result === undefined || !result.ok)
+            throw new Error(`simulation: intake refused an honest ballot (${result?.code})`);
+          // The voter's client checks each receipt at cast against the seat's
+          // registered signing key ([[share-encryption]], Intake and receipts).
+          if (!checkShareReceipt(registered, ctx, vote, seat, result.receipt))
+            throw new Error("simulation: an honest seat's receipt failed its check");
+          if (online.includes(seat)) shares.set(seat, result.shares);
+          receipts.push(encodeShareReceipt(shareReceiptRecord(definitionHash, seat, result)));
         });
-      }
-    const k: Kept = {
-      shares,
-      selects: last ? !lost : voter.selected === "earlier",
-      reorged: lost,
-      delivered: last ? voter.delivered : deliveredAt(scenario, ballot),
-      down,
+        // A last ballot the plan reorganises names the hash of a block that L1
+        // then replaced, which the client saw 2 deep (Client rule 2).
+        const lost = last && voter.reorg !== null;
+        const payload = encodeBallot(
+          recordOf(vote, lost ? l1.orphan(l1RefNumber) : l1.block(l1RefNumber).hash),
+        );
+        if (lost) {
+          toRecast.set(voter.index, { vote, shares, down });
+          reorged++;
+        }
+        // Client rule 4 (docs/spec/delivery.md): a down seat's intake fails by
+        // every route, so a voter who chooses to posts that seat's ciphertext
+        // and ML-KEM message through the contract path, which our outage doesn't
+        // touch; any other voter's ballot stays undelivered (T-15, T-25).
+        if (ballot.posts)
+          for (const seat of down) {
+            const at = seat - 1;
+            postings.push({
+              path: "contract",
+              submittedAt: seconds,
+              payload: encodeSharePosting({
+                definition_hash: definitionHash,
+                ballot_hash: ballotHash(ctx, vote),
+                seat,
+                m: (encrypted.randomness[at] as (typeof encrypted.randomness)[number]).m,
+                ciphertext: decode(SHARE_CIPHERTEXT, encrypted.ciphertexts[at] as Uint8Array),
+              }),
+            });
+          }
+        const k: Kept = {
+          shares,
+          selects: last ? !lost : voter.selected === "earlier",
+          reorged: lost,
+          delivered: last ? voter.delivered : deliveredAt(scenario, ballot),
+          down,
+        };
+        submit(ballot, seconds, payload, k, receipts);
+        progress();
+      },
     };
-    submit(ballot, seconds, payload, k, receipts);
-    options.onProgress?.({ stage: "cast", done: done + 1, total: casts.length });
-  });
+  };
+  // Each seat's keys for intake, which the workers hold for the run.
+  const intakeKeys: IntakeKeys[] = seats.map((s) => ({
+    seat: s.index,
+    kemSecret: s.kem.secretKey,
+    signingSecret: s.signingSecret,
+  }));
+  const intake = workers > 0 ? intakeInWorkers(intakeKeys, workers) : intakeInThread(intakeKeys);
+  try {
+    const queue: Casting[] = [];
+    const finishNext = async () => {
+      const next = queue.shift() as Casting;
+      next.finish(await next.intake);
+    };
+    for (const [done, c] of casts.entries()) {
+      const casting = castOne(intake, c, done);
+      // Awaited in order by finishNext; a failure there ends the run, and
+      // ballots still waiting are dropped with it.
+      casting.intake.catch(() => {});
+      queue.push(casting);
+      while (queue.length > intake.ahead) await finishNext();
+    }
+    while (queue.length > 0) await finishNext();
+  } finally {
+    await intake.close();
+  }
   boardPending();
 
   // The counted extent, as the trustees read it once its checkpoint is due:

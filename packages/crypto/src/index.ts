@@ -138,6 +138,7 @@ export {
   BOARD_PAYLOAD_TYPES,
   BOARD_PAYLOAD_TYPES_V3,
   BOARD_PAYLOAD_TYPES_V4,
+  BOARD_PAYLOAD_TYPES_V5,
   boardPayloadTypes,
   type BoardEntryVersion,
   type BoardEntry,

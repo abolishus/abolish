@@ -65,10 +65,23 @@ export const BOARD_PAYLOAD_TYPES_V4: readonly number[] = Object.freeze([
   RECORD_TYPES.destructionStatement,
 ]);
 
+/**
+ * Record types a version-5 entry may carry: version 4's, and the trustees'
+ * close statements after close (docs/spec/close.md, Close statement), so a
+ * seat can state the close through the board path. Version 5 fixes the
+ * close statement's version, 1. Version 4's set is frozen by its vectors, so
+ * allowing them is a new version.
+ */
+export const BOARD_PAYLOAD_TYPES_V5: readonly number[] = Object.freeze([
+  ...BOARD_PAYLOAD_TYPES_V4,
+  RECORD_TYPES.closeStatement,
+]);
+
 const PAYLOAD_TYPES_BY_VERSION = {
   1: BOARD_PAYLOAD_TYPES,
   3: BOARD_PAYLOAD_TYPES_V3,
   4: BOARD_PAYLOAD_TYPES_V4,
+  5: BOARD_PAYLOAD_TYPES_V5,
 } as const;
 
 /**
@@ -137,8 +150,9 @@ const entryV1 = entryFields(BOARD_PAYLOAD_TYPES);
 // The same layout: only the allowed payload types differ.
 const entryV3 = entryFields(BOARD_PAYLOAD_TYPES_V3);
 const entryV4 = entryFields(BOARD_PAYLOAD_TYPES_V4);
+const entryV5 = entryFields(BOARD_PAYLOAD_TYPES_V5);
 
-/** Board entry, version 1, 3 or 4 (docs/spec/board.md). */
+/** Board entry, version 1, 3, 4 or 5 (docs/spec/board.md). */
 export type BoardEntry = CodecValue<typeof entryV1>;
 
 /** Record type `0x0007`: the envelope that places a record on the board. */
@@ -146,6 +160,7 @@ export const BOARD_ENTRY = recordType(RECORD_TYPES.boardEntry, {
   1: entryV1,
   3: entryV3,
   4: entryV4,
+  5: entryV5,
 });
 
 /** A board-entry version this release reads and writes. */

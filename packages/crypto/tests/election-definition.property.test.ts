@@ -474,16 +474,16 @@ describe("2.3's profile combination", () => {
   });
 
   // From docs/spec/verifier.md 2.3: ballot versions 1 to 3 need board-entry
-  // 3 or 4, tally-opening version 1 needs 4, ballot version 2 needs
+  // 3, 4 or 5, tally-opening version 1 needs 4 or 5, ballot version 2 needs
   // definition version 3 or 4 and ballot version 3 definition version 5
   // (these are version 1, which pins ballot version 1 with opening version 1),
   // and a board-entry version this package doesn't read is unsupported, never
   // a failure (T-36).
   const expected = (board: number, ballot: number, opening: number) => {
-    if (![1, 3, 4].includes(board)) return "unsupported-version";
+    if (![1, 3, 4, 5].includes(board)) return "unsupported-version";
     if (ballot !== 1) return "profile-combination";
-    const carriesDelivery = board === 3 || board === 4;
-    const carriesDestruction = board === 4;
+    const carriesDelivery = board === 3 || board === 4 || board === 5;
+    const carriesDestruction = board === 4 || board === 5;
     const fits = (ballot !== 1 || carriesDelivery) && (opening !== 1 || carriesDestruction);
     return fits ? undefined : "profile-combination";
   };

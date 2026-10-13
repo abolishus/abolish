@@ -52,6 +52,36 @@ def u64(x):
     return x.to_bytes(8, "big")
 
 
+# --- Board entries ---------------------------------------------------------------
+
+BOARD_ENTRY = 0x0007
+# docs/spec/board.md, Allowed payloads: version 3 adds share receipts (0x000c) and
+# complaints (0x000e) to version 1's set, version 4 the destruction statement
+# (0x000f) and version 5 the close statement.
+ALLOWED = {1: {0x0002, 0x0003, 0x0005, 0x0006, 0x0008}}
+ALLOWED[3] = ALLOWED[1] | {0x000C, 0x000E}
+ALLOWED[4] = ALLOWED[3] | {0x000F}
+ALLOWED[5] = ALLOWED[4] | {RECORD_TYPE}
+
+
+def board_entry(version, election_id, index, segment, payload):
+    return (
+        BOARD_ENTRY.to_bytes(2, "big")
+        + u8(version)
+        + election_id
+        + index.to_bytes(8, "big")
+        + segment.to_bytes(4, "big")
+        + len(payload).to_bytes(4, "big")
+        + payload
+    )
+
+
+def entry_error(b):
+    """The board-entry envelope's own check of its payload's type."""
+    payload = b[3 + 32 + 8 + 4 + 4 :]
+    return None if int.from_bytes(payload[:2], "big") in ALLOWED[b[2]] else "unexpected-record-type"
+
+
 # --- Window (verifier 5.5) -----------------------------------------------------------
 
 
@@ -728,6 +758,37 @@ def main():
     )
     check("empty", "No ballots at all", [], B, {"status": "pass", "late": []})
 
+    entries = []
+
+    def entry(id_, desc, version, payload, error):
+        enc = board_entry(version, h("election-id"), 9, s_c, payload)
+        assert entry_error(enc) == error, id_
+        entries.append({"id": id_, "description": desc, "version": version, "encoding": enc.hex(), "error": error})
+
+    s1_bytes = encode(statement(1))
+    entry("v5-statement", "A version-5 entry carrying a close statement", 5, s1_bytes, None)
+    entry("v4-statement", "A version-4 entry can't carry a close statement", 4, s1_bytes, "unexpected-record-type")
+    entry("v3-statement", "A version-3 entry can't carry a close statement", 3, s1_bytes, "unexpected-record-type")
+    entry("v1-statement", "A version-1 entry can't carry a close statement", 1, s1_bytes, "unexpected-record-type")
+    entry(
+        "v5-statement-v2-header",
+        "A version-5 entry carrying a close-statement header of version 2: the envelope reads only the type, and the record is refused when decoded (profile-mismatch)",
+        5,
+        bytes.fromhex("00150200"),
+        None,
+    )
+    entry("v5-destruction-type", "A version-5 entry carrying a destruction-statement header, as version 4 allows", 5, bytes.fromhex("000f0100"), None)
+    entry("v5-share-receipt-type", "A version-5 entry carrying a share-receipt header, as version 3 allows", 5, bytes.fromhex("000c0100"), None)
+    entry("v5-complaint-type", "A version-5 entry carrying a share-complaint header, as version 3 allows", 5, bytes.fromhex("000e0100"), None)
+    entry("v5-ballot-type", "A version-5 entry carrying a ballot header, as version 1 allows", 5, bytes.fromhex("00020100"), None)
+    entry("v5-event-type", "A version-5 entry carrying a contract-event header, as version 1 allows: the statement's contract path", 5, bytes.fromhex("00080200"), None)
+    entry("v5-posting-type", "A version-5 entry still refuses a share posting (0x000d): postings reach the board only as contract events", 5, bytes.fromhex("000d0100"), "unexpected-record-type")
+    entry("v5-voter-receipt-type", "A version-5 entry still refuses the voter's receipt (0x0004), which stays with its voter", 5, bytes.fromhex("00040100"), "unexpected-record-type")
+    entry("v5-definition-type", "A version-5 entry refuses an election definition (0x0001), which reaches the board only as its registration's contract event", 5, bytes.fromhex("00010100"), "unexpected-record-type")
+    entry("v5-summed-share-type", "A version-5 entry refuses a summed-share message (0x000b), which never leaves the trustees", 5, bytes.fromhex("000b0100"), "unexpected-record-type")
+    entry("v5-entry-type", "A version-5 entry refuses a board entry (0x0007): entries never nest", 5, bytes.fromhex("00070500"), "unexpected-record-type")
+    entry("v5-next-type", "A version-5 entry refuses 0x0016, a type it doesn't allow", 5, bytes.fromhex("00160100"), "unexpected-record-type")
+
     data = {
         "format": "abolish-close-statement-vectors/1",
         "title": "The close rule: windows, L_δ, close statements, the close head and the close check",
@@ -758,6 +819,7 @@ def main():
         "lDelta": deltas,
         "heads": heads,
         "checks": checks,
+        "boardEntries": entries,
     }
     with open(f"{out}/close-statement.json", "w") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)

@@ -442,6 +442,80 @@ export function isTimely(clock: AnchorClock, segment: number, anchoredAt: bigint
 
 const segmentEnd = (c: AnchorClock, segment: number) => c.epoch + (BigInt(segment) + 1n) * c.period;
 
+/**
+ * Board checks, steps 1 and 2 (docs/spec/board.md): the anchors that count at
+ * `now`, each with its position in `anchors`, after the checks that need no
+ * copy of the board. Throws `BoardError` on the first failure, which no copy
+ * can cause or mask (T-24).
+ */
+function countedAnchors(
+  id: Uint8Array,
+  anchors: readonly Anchor[],
+  c: AnchorClock,
+  now: bigint,
+): [number, Checkpoint][] {
+  // Re-encoded and decoded, so every field is well formed and copied; the
+  // index of each counted anchor is its position in `anchors`.
+  const counted: [number, Checkpoint][] = [];
+  for (let j = 0; j < anchors.length; j++) {
+    const a = anchors[j] as Anchor;
+    const cp = decode(checkpointV1, encode(checkpointV1, a.checkpoint));
+    if (isTimely(c, cp.segment, a.anchoredAt) && a.anchoredAt <= now) counted.push([j, cp]);
+  }
+  const bySegment = new Map<number, Uint8Array>();
+  for (const [j, cp] of counted) {
+    if (!equalBytes(cp.election_id, id)) throw new BoardError("wrong-election", { checkpoint: j });
+    const encoded = encode(checkpointV1, cp);
+    const first = bySegment.get(cp.segment);
+    if (first === undefined) bySegment.set(cp.segment, encoded);
+    else if (!equalBytes(first, encoded))
+      throw new BoardError("checkpoint-equivocation", { checkpoint: j });
+  }
+  // From L1 alone, before any copy is read, so no mirror can mask it: a
+  // board only grows, so a later segment's checkpoint is never smaller than
+  // an earlier one's, and two of equal size are equal (T-24).
+  for (const [j, cp] of counted) {
+    if (cp.size === 0n) throw new BoardError("checkpoint-size", { checkpoint: j });
+    for (const [, other] of counted)
+      if (
+        other.segment < cp.segment &&
+        (other.size > cp.size ||
+          (other.size === cp.size &&
+            !(equalBytes(other.head, cp.head) && equalBytes(other.root, cp.root))))
+      )
+        throw new BoardError("checkpoint-inconsistent", { checkpoint: j });
+  }
+  return counted;
+}
+
+/**
+ * The checkpoints counted for an election at the finalized L1 time `now`,
+ * after every board check that needs no copy of the board: steps 1 and 2,
+ * then `unsealed` once the seal's window has closed (docs/spec/board.md,
+ * Board checks). For a judge of receipts, which holds no copy
+ * (docs/spec/receipts.md, Verdicts, `board-failed`): a failure here is
+ * attributed from L1 alone. Throws `BoardError`.
+ */
+export function anchoredCheckpoints(
+  electionId: Uint8Array,
+  anchors: readonly Anchor[],
+  clock: AnchorClock,
+  now: bigint,
+): Checkpoint[] {
+  if (!Array.isArray(anchors)) throw new TypeError("anchors must be an array");
+  if (typeof now !== "bigint") throw new TypeError("now must be a bigint");
+  const c = checkClock(clock);
+  const id = copyBytes(electionId, "electionId");
+  if (id.length !== 32) throw new RangeError("electionId must be 32 bytes");
+  const counted = countedAnchors(id, anchors, c, now).map(([, cp]) => cp);
+  if (
+    segmentEnd(c, c.lastSegment) + c.deadline < now &&
+    !counted.some((cp) => cp.segment === c.lastSegment)
+  )
+    throw new BoardError("unsealed", {});
+  return counted;
+}
+
 /** A verified board: its authenticated prefix, and how many entries past it were ignored. */
 export interface VerifiedBoard {
   readonly board: CheckedBoard;
@@ -480,37 +554,8 @@ export function verifyBoard(
   const c = checkClock(clock);
   const id = copyBytes(electionId, "electionId");
   if (id.length !== 32) throw new RangeError("electionId must be 32 bytes");
-  // Re-encoded and decoded, so every field is well formed and copied; the
-  // index of each counted anchor is its position in `anchors`.
-  const counted: [number, Checkpoint][] = [];
-  for (let j = 0; j < anchors.length; j++) {
-    const a = anchors[j] as Anchor;
-    const cp = decode(checkpointV1, encode(checkpointV1, a.checkpoint));
-    if (isTimely(c, cp.segment, a.anchoredAt) && a.anchoredAt <= now) counted.push([j, cp]);
-  }
-  const bySegment = new Map<number, Uint8Array>();
-  for (const [j, cp] of counted) {
-    if (!equalBytes(cp.election_id, id)) throw new BoardError("wrong-election", { checkpoint: j });
-    const encoded = encode(checkpointV1, cp);
-    const first = bySegment.get(cp.segment);
-    if (first === undefined) bySegment.set(cp.segment, encoded);
-    else if (!equalBytes(first, encoded))
-      throw new BoardError("checkpoint-equivocation", { checkpoint: j });
-  }
-  // From L1 alone, before any copy is read, so no mirror can mask it: a
-  // board only grows, so a later segment's checkpoint is never smaller than
-  // an earlier one's, and two of equal size are equal (T-24).
-  for (const [j, cp] of counted) {
-    if (cp.size === 0n) throw new BoardError("checkpoint-size", { checkpoint: j });
-    for (const [, other] of counted)
-      if (
-        other.segment < cp.segment &&
-        (other.size > cp.size ||
-          (other.size === cp.size &&
-            !(equalBytes(other.head, cp.head) && equalBytes(other.root, cp.root))))
-      )
-        throw new BoardError("checkpoint-inconsistent", { checkpoint: j });
-  }
+  const counted = countedAnchors(id, anchors, c, now);
+  const bySegment = new Set(counted.map(([, cp]) => cp.segment));
   // Authenticate the raw bytes before decoding anything. Entries are
   // unsigned, so a copy that doesn't match the anchored heads and roots is
   // that copy's fault, never the election's: the caller tries another source

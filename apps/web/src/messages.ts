@@ -113,7 +113,7 @@ const enUS = {
     "When your ballot is added, the board's operator signs a receipt naming its entry and the board that holds it. The app checks that the entry is really in that board before telling you the ballot was received, and keeps the receipt.",
   howRecorded3Title: "It proves recording, not your choice",
   howRecorded3Body:
-    "With the receipt and a short inclusion proof, anyone can check that a later board still holds your entry. The receipt says nothing about how you voted, so it can't be sold as proof of a vote.",
+    "With the receipt and a short inclusion proof, anyone can check that a later board still holds your entry. The receipt says nothing about how you voted, so it isn't proof of a vote. Keep it to yourself, though: it points to your ballot on the board, so whoever sees it can spot any later ballot you cast in the same poll.",
   howRecorded4Title: "Anchored on Ethereum (planned)",
   howRecorded4Body:
     "Every hour, the board's root will be anchored on Ethereum. A receipted entry missing from a later anchored board is evidence of tampering that anyone can publish. Hourly anchoring isn't running yet.",
@@ -167,9 +167,9 @@ const enUS = {
     "It is always reported on its own and labelled as such, never blended into a total.",
   howWeakWatchTitle: "Someone can watch you vote",
   howWeakWatchMeans:
-    "A receipt proves your ballot was recorded, not your choice, so it can't be sold. But nothing stops someone standing over your screen.",
+    "A receipt proves your ballot was recorded, not your choice. But nothing stops someone standing over your screen, or demanding your receipt.",
   howWeakWatchLimit:
-    "You can vote again later and only your last ballot counts, so a vote someone watched needn't be your final one. That is a partial defence, not a cure.",
+    "You can vote again later and only your last ballot counts, so a vote someone watched needn't be your final one. But anyone who has seen your receipt can see that you voted again, and selling a vote in secret isn't prevented. That is a partial defence, not a cure.",
   howWeakColludeTitle: "Trustees could collude",
   howWeakColludeMeans:
     "Any group of seats that meets a poll's threshold, acting together, could open single ballots, not only totals.",

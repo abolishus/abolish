@@ -127,3 +127,13 @@ A ballot outside it is rejected as an admission failure: it counts nothing and d
 ## Decision
 
 Under rule A (`AGENTS.md`): **option E** for ordinary contract-path ballots, the L1 relay for forced ballots, the operator's `s_A` rule with its stated residual for the board path, and resolved dispute games for attribution and as the statements' floor, with status `Accepted (agent) — owner may veto`, listed under Decisions to review in [[STATUS]]. E changes nothing about who can alter a tally, so it stays within rule A; D, which would let the panel exclude ballots, would not, and is left to the owner. A veto of E means A (the 12-hour silent rebuild window stated in T-35) or B (a proposer outage dropping or failing the elections it overlaps, stated in T-35 and T-50); either needs only the spec part changed, since the contracts' checks are the same.
+
+## Amendment (2026-10-13, P1-18 part 4c-2a)
+
+[[close]] specifies this decision with three changes, which it, not this ADR, states normatively:
+
+- **The floor only reports.** A claim below a resolved game's floor is listed against its seat but still counts toward the close head. Excluding it, as Consequences says, would let one false game, or a game type L2 governance re-points, raise the floor over every honest claim and leave a rebuild after `L_δ` unchecked (T-71, T-35). The head reads no game evidence.
+- **The statement's deadline** is `t_C = closes_at + δ + CLOSE_WINDOW`, with a node sending through the contract path by `t_C − F`, rather than `c_I`; it is in the counted extent either way.
+- **The unchecked report** lists the counted ballots that have only ordinary copies, rather than those "after `N_c − δ`".
+
+[[revoting]]'s MUST now lists five ways a ballot made after close can count: the three of Known-weak, the relay's seconds after close, and a rebuild past δ when `n − k + 1` seats stay silent and the close is unchecked, which needs fewer seats than `k` whenever `k > (n + 1) / 2` and no false statement.

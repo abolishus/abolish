@@ -18,6 +18,9 @@ export const PARAMETERS = Object.freeze({
   COMPLAINT_WINDOW: 432_000,
   // Seconds after t_D; the destruction window of tally-opening version 1.
   DESTRUCTION_WINDOW: 86_400,
+  // Seconds after closes_at + l1_inclusion_bound; the close window of the
+  // close statement's version 1 (docs/spec/close.md).
+  CLOSE_WINDOW: 172_800,
   // Seconds after the seal's anchoring window until the dispute end t_E; a
   // constant of receipt version 1 (docs/spec/receipts.md).
   DISPUTE_WINDOW: 2_592_000,

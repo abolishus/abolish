@@ -136,4 +136,4 @@ Under rule A (`AGENTS.md`): **option E** for ordinary contract-path ballots, the
 - **The statement's deadline** is `t_C = closes_at + δ + CLOSE_WINDOW`, with a node sending through the contract path by `t_C − F`, rather than `c_I`; it is in the counted extent either way.
 - **The unchecked report** lists the counted ballots that have only ordinary copies, rather than those "after `N_c − δ`".
 
-The relay's seconds after close are a fourth way a ballot made after close can count, now in [[revoting]]'s MUST.
+[[revoting]]'s MUST now lists five ways a ballot made after close can count: the three of Known-weak, the relay's seconds after close, and a rebuild past δ when `n − k + 1` seats stay silent and the close is unchecked, which needs fewer seats than `k` whenever `k > (n + 1) / 2` and no false statement.

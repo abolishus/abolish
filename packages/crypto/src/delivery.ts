@@ -19,6 +19,7 @@ import {
 import type { RegisteredKeys } from "./ceremony.ts";
 import { PARAMETERS } from "./parameters.ts";
 import { RECORD_TYPES, RecordSchema, recordType } from "./record.ts";
+import { checkL1Reference, type FinalizedL1, selectBallots } from "./revoting.ts";
 import {
   checkComplaint,
   checkPosting,
@@ -227,6 +228,79 @@ export function deliveryWindowFits(constants: {
     seen + forcedInclusion <= DELIVERY_WINDOW &&
     contractEventWindow + forcedInclusion + margin <= COMPLAINT_WINDOW - DELIVERY_WINDOW
   );
+}
+
+/**
+ * One ballot of a trustee node's view (docs/spec/delivery.md, What a node
+ * owes): a ballot it receipted and can't show absent, or one it holds from
+ * the anchored board or the contract's records. Each passed the admission
+ * checks (verifier 5.1 to 5.4, at intake or as the node checked it), and
+ * `message` is `M` recomputed from its record, never a decoded field.
+ */
+export interface ViewBallot {
+  readonly ballotHash: Uint8Array;
+  readonly tier: number;
+  readonly nullifier: bigint;
+  readonly message: Uint8Array;
+  readonly l1RefNumber: bigint;
+  readonly l1RefHash: Uint8Array;
+  /** Whether this node receipted it. */
+  readonly receipted: boolean;
+}
+
+/**
+ * The ballot hashes whose receipts a trustee node owes through the contract
+ * path (docs/spec/delivery.md, What a node owes): for each tier and nullifier,
+ * the ballot [[revoting]]'s selection picks from the node's view, among those
+ * whose L1 reference is admitted, if the node receipted it; nothing on a tie
+ * or when the pick is a ballot it didn't receipt. At most one per tier and
+ * nullifier, so with membership-checked intake at most one per member of
+ * each tier, however many ballots anyone delivers or an operator withholds
+ * (ADR 0002, Decision, 2026-10-12; T-52, T-25, T-54). `l1` must have
+ * finalized a block after `closesAt`, so no reference is pending and every
+ * node reaches the same verdicts; the function throws otherwise. Sorted by
+ * ballot hash.
+ */
+export function owedReceipts(
+  view: Iterable<ViewBallot>,
+  l1: FinalizedL1,
+  window: { readonly l1RefMin: bigint; readonly closesAt: bigint },
+): Uint8Array[] {
+  const receipted = new Set<string>();
+  const hashOf = new Map<string, Uint8Array>();
+  const admitted: {
+    tier: number;
+    nullifier: bigint;
+    message: Uint8Array;
+    l1RefNumber: bigint;
+    index: bigint;
+  }[] = [];
+  for (const b of view) {
+    const verdict = checkL1Reference(b, l1, window);
+    if (verdict === "pending")
+      throw new RangeError("owedReceipts: L1 hasn't finalized a block after close");
+    if (verdict !== "admitted") continue;
+    const m = hex(b.message);
+    const h = hashOf.get(m);
+    // M binds the ballot hash, so two copies with one message are one ballot.
+    if (h !== undefined && hex(h) !== hex(b.ballotHash))
+      throw new RangeError("owedReceipts: one message names two ballot hashes");
+    hashOf.set(m, Uint8Array.from(b.ballotHash));
+    if (b.receipted) receipted.add(m);
+    admitted.push({
+      tier: b.tier,
+      nullifier: b.nullifier,
+      message: b.message,
+      l1RefNumber: b.l1RefNumber,
+      index: BigInt(admitted.length),
+    });
+  }
+  const owed: Uint8Array[] = [];
+  for (const b of selectBallots(admitted).selected) {
+    const m = hex(b.message);
+    if (receipted.has(m)) owed.push(hashOf.get(m) as Uint8Array);
+  }
+  return owed.sort((a, b) => (hex(a) < hex(b) ? -1 : hex(a) > hex(b) ? 1 : 0));
 }
 
 /** What the delivery check runs against, all from data the verifier has already checked. */

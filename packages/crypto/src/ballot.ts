@@ -13,6 +13,7 @@ import {
   type BallotHashContext,
   checkValidity,
   COMMITTED_VOTE,
+  type CommittedVote,
   shapeOk,
   type ValidityContext,
   type ValidityRules,
@@ -488,6 +489,26 @@ export function checkBallotV2(election: CellBallotElection, ballot: BallotRecord
 
 type AdmitCode = Exclude<BallotCode, "ballot-stray" | "ballot-tier">;
 
+// The election's rules from the context, never from the ballot's committed vote.
+function contextOf(election: ValidityRules, named: BallotHashContext): ValidityContext {
+  return {
+    optionCount: election.optionCount,
+    minSelections: election.minSelections,
+    maxSelections: election.maxSelections,
+    threshold: election.threshold,
+    panelSize: election.panelSize,
+    ...named,
+  };
+}
+
+// A trustee's own seat and the hash of the ciphertext delivered for it,
+// checked against the ballot's share hash after the cheap admission checks
+// and before the proofs (docs/spec/share-encryption.md, Intake and receipts).
+interface SeatCiphertext {
+  readonly seat: number;
+  readonly shareHash: Uint8Array;
+}
+
 // 5.1 to 5.4 once the election and the tier or cell are known, shared by
 // both versions: they differ only in what the ballot names, and so in where
 // the root and scope come from.
@@ -497,16 +518,25 @@ function admit(
   target: Target,
   fields: Fields,
   proof: BallotRecord["membership_proof"],
-): Admitted | Rejected<AdmitCode> {
+): Admitted | Rejected<AdmitCode>;
+function admit(
+  election: ValidityRules & { readonly qualified: readonly number[] },
+  named: BallotHashContext,
+  target: Target,
+  fields: Fields,
+  proof: BallotRecord["membership_proof"],
+  delivered: SeatCiphertext,
+): Admitted | Rejected<AdmitCode | "share-hash">;
+function admit(
+  election: ValidityRules & { readonly qualified: readonly number[] },
+  named: BallotHashContext,
+  target: Target,
+  fields: Fields,
+  proof: BallotRecord["membership_proof"],
+  delivered?: SeatCiphertext,
+): Admitted | Rejected<AdmitCode | "share-hash"> {
   const { vote } = fields;
-  const ctx: ValidityContext = {
-    optionCount: election.optionCount,
-    minSelections: election.minSelections,
-    maxSelections: election.maxSelections,
-    threshold: election.threshold,
-    panelSize: election.panelSize,
-    ...named,
-  };
+  const ctx = contextOf(election, named);
   if (!shapeOk(ctx, vote)) return { ok: false, code: "validity-shape" };
   // A seat outside the registered key set gets no shares, and its hash is
   // fixed, so it carries no chosen bytes into the archive (T-17).
@@ -516,6 +546,12 @@ function admit(
       !(vote.share_hashes[seat - 1] as Uint8Array).every((b) => b === 0)
     )
       return { ok: false, code: "share-hash-unqualified" };
+  // The shape holds, so the ballot has exactly n share hashes.
+  if (
+    delivered !== undefined &&
+    !equalBytes(delivered.shareHash, vote.share_hashes[delivered.seat - 1] as Uint8Array)
+  )
+    return { ok: false, code: "share-hash" };
   const hash = ballotHash(ctx, vote);
   const derived = signalsOf(named.definitionHash, target, fields, hash);
   if (!verifyDecodedMembershipProof(proof, derived.signals))
@@ -531,6 +567,78 @@ function admit(
     l1RefNumber: fields.l1RefNumber,
     l1RefHash: fields.l1RefHash,
   };
+}
+
+/** A trustee's intake admission codes, in checking order: `share-hash` sits before the membership proof. */
+export type IntakeAdmissionCode = "delivery-malformed" | BallotCode | BallotV2Code | "share-hash";
+
+export type IntakeAdmission =
+  | (Admitted & {
+      /** What the trustee's decryption and the ballot hash run under. */
+      readonly ctx: ValidityContext;
+      /** The decoded committed vote, whose `vss` the trustee's shares are checked against. */
+      readonly vote: CommittedVote;
+      /** The ballot's cell, under ballot version 2. */
+      readonly cell?: number;
+    })
+  | Rejected<IntakeAdmissionCode>;
+
+/**
+ * Internal: steps 1 to 4 of trustee intake (docs/spec/share-encryption.md,
+ * Intake and receipts) on a delivered ballot record: strict decoding under
+ * the version the election pins (`delivery-malformed`), then the admission
+ * checks of verifier 5.1 to 5.4 in their order with `share-hash` (the
+ * delivered ciphertext's hash against the ballot's for `seat`) between
+ * `share-hash-unqualified` and `membership-proof`. So a trustee receipts only
+ * a ballot whose membership proof verifies against its tier's (or cell's)
+ * root in the definition (ADR 0002, Decision, 2026-10-12; T-52, T-25), and
+ * the costly checks run only after the cheap ones. `seat` must be a seat of
+ * the registered key set.
+ */
+export function admitForIntake(
+  election: BallotElection | CellBallotElection,
+  record: Uint8Array,
+  seat: number,
+  shareHash: Uint8Array,
+): IntakeAdmission {
+  const made = MADE.get(election);
+  if (made === undefined)
+    throw new TypeError("expected a context made by ballotElection or cellBallotElection");
+  if (!Number.isSafeInteger(seat) || !election.qualified.includes(seat))
+    throw new RangeError("admitForIntake: seat must be a seat of the registered key set");
+  if (!(shareHash instanceof Uint8Array) || shareHash.length !== 32)
+    throw new RangeError("admitForIntake: shareHash must be 32 bytes");
+  const delivered = { seat, shareHash: Uint8Array.from(shareHash) };
+  const { definitionHash, version } = made;
+  let ballot: BallotRecord | BallotRecordV2;
+  try {
+    ballot = version === 1 ? decodeBallot(record, 1) : decodeBallot(record, 2);
+  } catch {
+    return { ok: false, code: "delivery-malformed" };
+  }
+  const fields = fieldsOf(ballot);
+  if (!equalBytes(fields.definitionHash, definitionHash))
+    return { ok: false, code: "ballot-stray" };
+  let named: BallotHashContext;
+  let target: Target | undefined;
+  if ("cell" in ballot) {
+    const { cell } = ballot;
+    target = cellTarget(election as CellBallotElection, cell);
+    if (target === undefined) return { ok: false, code: "ballot-cell" };
+    named = { definitionHash, ballotVersion: 2, cell, nullifier: fields.nullifier };
+  } else {
+    const { tier } = ballot;
+    target = tierTarget(election as BallotElection, tier);
+    if (target === undefined) return { ok: false, code: "ballot-tier" };
+    named = { definitionHash, tier, nullifier: fields.nullifier };
+  }
+  const result = admit(election, named, target, fields, ballot.membership_proof, delivered);
+  if (!result.ok) return result;
+  const ctx = contextOf(election, named);
+  const vote = fields.vote;
+  return named.ballotVersion === 2
+    ? { ...result, ctx, vote, cell: named.cell }
+    : { ...result, ctx, vote };
 }
 
 // Public data, so a constant-time comparison isn't needed.

@@ -8,7 +8,9 @@
 //
 // What is decided without the counted set: a stray opening, an opening of a
 // cell with another number of entries than options (`tally-missing`), an
-// unattributed one, and a second one by the same seat for the same cell.
+// unattributed one, and a second one by the same seat for the same cell
+// (`tally-second` when the seat signed another message, `tally-repeat` for a
+// replay of the same one, which is the operator's alone).
 // Whether an opening is over the counted set (`tally-aggregate`) or opens it
 // (`tally-opening`) needs selection (6.1), which needs the close rule (5.5),
 // so an opening that breaks none of the decided rules stays unsettled and 7.4
@@ -24,6 +26,7 @@ import {
   RECORD_TYPES,
   type RegisteredKeys,
   sortTallyOpenings,
+  tallyOpeningStatement,
 } from "@abolishus/crypto";
 
 /** A boarding rule an opening is known to break (docs/spec/tally.md, Opening record, Boarding), in that rule's order. */
@@ -31,8 +34,17 @@ export type TallyBreak =
   | { readonly code: "tally-stray" }
   | { readonly code: "tally-missing" }
   | { readonly code: "tally-unattributed" }
-  /** `of`: the first earlier entry carrying an opening of the same cell attributed to the same seat. */
-  | { readonly code: "tally-second"; readonly of: number };
+  /**
+   * `of`: the first earlier entry carrying an opening of the same cell
+   * attributed to the same seat, over another signed message: evidence
+   * against that seat as well as the operator.
+   */
+  | { readonly code: "tally-second"; readonly of: number }
+  /**
+   * `of`: the same, over the same signed message. Anyone can replay a signed
+   * record, so it is the operator's breach alone, never its signer's (T-29).
+   */
+  | { readonly code: "tally-repeat"; readonly of: number };
 
 /** One tally-opening entry of the copy, by its position from 0. */
 export interface TallyReport {
@@ -73,8 +85,9 @@ export function tallyChecks(
   entries: readonly Uint8Array[],
   boardEntryVersion: BoardEntryVersion,
 ): { readonly row: TallyOutcome; readonly report?: readonly TallyReport[] } {
-  // A tally-opening version this verifier doesn't read may be one a later
-  // release reads: unverifiable, never failed, so releases agree (2.3; T-36).
+  // A tally-opening version this verifier doesn't read, or none pinned (a
+  // later tally scheme's record), may be one a later release reads:
+  // unverifiable, never failed, so releases agree (2.3; T-36).
   if (pinnedVersion(d, RECORD_TYPES.tallyOpening) !== 1)
     return { row: { status: "unverifiable", code: "unsupported-version", at: {} } };
   if (registered === undefined) return { row: { status: "unverifiable", code: "not-reached" } };
@@ -104,8 +117,8 @@ export function tallyChecks(
     1,
   );
   const report: TallyReport[] = [];
-  // Each (cell, seat)'s first attributed opening, by entry.
-  const first = new Map<string, number>();
+  // Each (cell, seat)'s first attributed opening: its entry and signed message.
+  const first = new Map<string, { readonly entry: number; readonly signed: Uint8Array }>();
   for (const o of sorted) {
     const entry = positions[o.at] as number;
     if ("error" in o) {
@@ -128,11 +141,19 @@ export function tallyChecks(
     if (o.signer === null) breaks.push({ code: "tally-unattributed" });
     else {
       // Any earlier opening of this cell by this seat, whatever its checks
-      // find: the operator boards at most one per seat and cell.
+      // find: the operator boards at most one per seat and cell. Only a
+      // different signed message shows the seat signed two openings; the
+      // same message again, under any signature, opens nothing new, and a
+      // byte-identical copy is anyone's replay.
       const key = `${o.cell}/${o.signer}`;
-      const of = first.get(key);
-      if (of === undefined) first.set(key, entry);
-      else breaks.push({ code: "tally-second", of });
+      const signed = tallyOpeningStatement(o.opening);
+      const earlier = first.get(key);
+      if (earlier === undefined) first.set(key, { entry, signed });
+      else
+        breaks.push({
+          code: equal(earlier.signed, signed) ? "tally-repeat" : "tally-second",
+          of: earlier.entry,
+        });
     }
     report.push({ entry, cell: o.cell, signer: o.signer, breaks });
   }

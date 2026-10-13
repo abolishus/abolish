@@ -87,13 +87,14 @@ test("the fixtures cover decoding, every decided boarding rule and every status"
     new Set(["decode"]),
   );
   expect(new Set(all.flatMap((o) => o.breaks.map((b) => b.code)))).toEqual(
-    new Set(["tally-stray", "tally-missing", "tally-unattributed", "tally-second"]),
+    new Set(["tally-stray", "tally-missing", "tally-unattributed", "tally-second", "tally-repeat"]),
   );
   expect(new Set(file.cases.map((c) => c.expected["7.4"]?.["code"]))).toEqual(
     new Set([
       undefined,
       "decode",
       "tally-stray",
+      "tally-missing",
       "tally-unattributed",
       "not-implemented",
       "not-reached",
@@ -134,15 +135,18 @@ describe("each opening is judged from its own entry", () => {
           expect(o?.code).toBe(want.code);
           expect(o?.cell).toBe(want.cell);
           expect(o?.signer).toBe(want.signer);
-          const others = (x: typeof o) => x?.breaks.filter((b) => b.code !== "tally-second");
+          const others = (x: typeof o) =>
+            x?.breaks.filter((b) => b.code !== "tally-second" && b.code !== "tally-repeat");
           expect(others(o)).toEqual(others(want));
           if (want.cell === undefined || want.signer === null || want.signer === undefined) return;
           const key = `${want.cell}/${want.signer}`;
           const of = firsts.get(key);
           if (of === undefined) firsts.set(key, at + 1);
-          expect(o?.breaks.find((b) => b.code === "tally-second")).toEqual(
-            of === undefined ? undefined : { code: "tally-second", of },
-          );
+          // The mixed copy's openings by one seat of one cell all differ, so
+          // a later one is a second, never a repeat.
+          expect(
+            o?.breaks.find((b) => b.code === "tally-second" || b.code === "tally-repeat"),
+          ).toEqual(of === undefined ? undefined : { code: "tally-second", of });
         });
       }),
       { numRuns: runs(30) },
@@ -182,4 +186,18 @@ describe("each opening is judged from its own entry", () => {
       breaks: [{ code: "tally-unattributed" }],
     });
   });
+});
+
+test("a replay of a seat's signed opening is a repeat, the operator's alone, never a second", () => {
+  // Entries 1 and 3 of second-by-seat are byte-identical; 4 and 5 are seat
+  // 1's other openings of the same cell. Dropping the first copy makes the
+  // replay the first and leaves the others seconds of it (T-29).
+  const c = byId("second-by-seat");
+  const entries = entriesOf(c);
+  const r = run(c, join([0, 3, 4, 5].map((i) => entries[i] as Uint8Array)));
+  expect(r.tallies?.map((o) => o.breaks)).toEqual([
+    [],
+    [{ code: "tally-second", of: 1 }],
+    [{ code: "tally-second", of: 1 }],
+  ]);
 });

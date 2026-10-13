@@ -66,6 +66,10 @@ def tally_entries(d, entries):
     return out
 
 
+def statement_of(o):
+    return tov.statement(o["definitionHash"], o["cell"], o["aggregateHash"], o["signer"], o["opening"])
+
+
 def expected(d, definition_hash, registered, entries):
     """7.4 and the report's tallies, computed here from tally.md and verifier.md."""
     cells = len(d["electorate"])
@@ -88,9 +92,13 @@ def expected(d, definition_hash, registered, entries):
         if signer is None:
             breaks.append({"code": "tally-unattributed"})
         elif (o["cell"], signer) in first:
-            breaks.append({"code": "tally-second", "of": first[(o["cell"], signer)]})
+            # A replay of the same signed message is the operator's alone; a
+            # different one shows the seat signed twice (tally.md, Signature).
+            of, m0 = first[(o["cell"], signer)]
+            same = m0 == statement_of(o)
+            breaks.append({"code": "tally-repeat" if same else "tally-second", "of": of})
         else:
-            first[(o["cell"], signer)] = at
+            first[(o["cell"], signer)] = (at, statement_of(o))
         report.append({"entry": at, "cell": o["cell"], "signer": signer, "breaks": breaks})
     if any("code" not in o and not o["breaks"] for o in report):
         return outcome("unverifiable", "not-implemented"), report
@@ -151,6 +159,8 @@ def main(out_dir):
     by_unregistered = opening(1, 4, key=unregistered)
     claimed_other = opening(1, 2, claimed=3)
     second0 = opening(0, 1, values=[{"v": 1, "r": 7}] + zeros[1:])
+    third0 = opening(0, 1, values=[{"v": 2, "r": 9}] + zeros[1:])
+    long = opening(1, 3, values=zeros + [{"v": 0, "r": 0}])
     trailing = honest0 + b"\x00"
     other_version = honest1[:2] + b"\x02" + honest1[3:]
 
@@ -215,9 +225,15 @@ def main(out_dir):
     )
     case(
         "second-by-seat",
-        "Seat 1 opens cell 0 twice with the same values, then cell 1 once: the copy of cell 0 is tally-second; the opening of another cell is not; the first ones stay undecided.",
-        [honest0, opening(1, 1), honest0],
+        "Seat 1 opens cell 0, then cell 1, then cell 0 again with the same signed record (a replay anyone can make: tally-repeat, the operator's alone), then twice more with other values (tally-second, each of the first, evidence against seat 1). The opening of another cell is no second; the first ones stay undecided.",
+        [honest0, opening(1, 1), honest0, second0, third0],
         "unverifiable",
+    )
+    case(
+        "too-many-entries",
+        "An opening of cell 1 by seat 3 with one more entry than options: tally-missing, and 7.4 fails.",
+        [long],
+        "fail",
     )
     case(
         "unattributed-twice",

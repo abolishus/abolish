@@ -10,31 +10,40 @@
 // the client's check of it at cast, the verifier's board check, and from the
 // boarded records: each ballot's admission check, the re-vote rule's
 // selection of each voter's counted ballot, the summed shares of those, each
-// cell's combination from the k lowest passing seats, and the verifier's
-// check of every opening. Nothing
+// cell's combination from the k lowest passing seats, its signed opening on
+// the board and the verifier's tally check over the board's openings, then
+// each online seat's destruction statement and the verifier's destruction
+// report, and the board check over the whole board. Nothing
 // here reimplements a check the verifier makes (AGENTS.md, Architecture): it
-// only calls them and compares the result with the plan (T-29, T-54, T-25).
+// only calls them and compares the result with the plan (T-29, T-54, T-25,
+// T-14).
 
 import {
   type AdmittedBallot,
+  aggregateCell,
+  aggregateHash,
   type BallotRecord,
   ballotCore,
   ballotElection,
   ballotHash,
   type CellOpening,
   checkBoard,
+  checkDestruction,
   checkL1Reference,
-  checkOpening,
   checkReceiptAtCast,
   checkShareReceipt,
+  checkTally,
   type CommittedVote,
   coreHash,
   decodeBallot,
+  decodeBoardEntry,
   decodeMembershipProof,
   deriveTotal,
   encodeBallot,
+  encodeDestructionStatement,
   encodeOpening,
   encodeReceipt,
+  encodeTallyOpening,
   encryptShares,
   GROUP_ORDER,
   intake,
@@ -46,17 +55,21 @@ import {
   openedCommitments,
   opensBallotCommitment,
   proveValidity,
+  RECORD_TYPES,
+  type SeatDestruction,
   type SeatSecrets,
   selectBallots,
   type Share,
   shareVote,
+  signDestructionStatement,
+  signTallyOpening,
   type SpoiledBallotOpening,
   sumShares,
   type TallyRules,
   trackingCode,
   type ValidityContext,
 } from "@abolishus/crypto";
-import { SIMULATED_SEAL_PERIODS, SimulatedBoard, segmentAt } from "./board.ts";
+import { afterAnchored, postClose, SimulatedBoard, segmentAt } from "./board.ts";
 import { checkChallenge } from "./challenge.ts";
 import { SIMULATED_BOARD_ENTRY_VERSION, simulateElection } from "./election.ts";
 import { SimulatedL1 } from "./l1.ts";
@@ -72,12 +85,13 @@ export const SIMULATION_STUBS = Object.freeze([
   "definition: a well-formed version-1 definition, but its contracts, chain IDs, election counter, clock and tier roots are placeholders and nothing registers it on L2 (P1-18, P3-2)",
   "ceremony: every seat takes part in the four signed rounds; no release pins the panel, whose identity keys are fresh per run (P1-7)",
   "membership: no membership proofs; each voter's nullifier is its index plus one, and each ballot record carries a placeholder proof, the verification key's own alpha, beta and alpha points, which decodes but proves nothing and is never checked, so admission (5.1 to 5.4) isn't run and each ballot's M for the re-vote rule is computed from its record here rather than taken from crypto's checkBallot (P1-17b, P3-2)",
-  "board: the operator boards each server ballot as it arrives and signs a receipt the voter's client checks at cast, under one receipt key fresh per run that no definition lists or registry holds; the anchoring clock (hourly from the Unix epoch), the first segment (the period of opens_at) and the seal are placeholders, and nothing is anchored (P1-13b, P4-1)",
+  "board: the operator boards each server ballot as it arrives and signs a receipt the voter's client checks at cast, under one receipt key fresh per run that no definition lists or registry holds; the anchoring clock (hourly from the Unix epoch, with a half-hour deadline) is a placeholder, the post-close windows other than the tally and destruction windows are taken as zero, so the counted extent ends one period after close and the seal is the destruction window's end, and nothing is anchored, so trustees act on segments the run computes rather than on checkpoints they saw on L1 (P1-13b, P4-1, P1-18)",
   "delivery: ciphertexts reach trustees in memory, with no contract path; a direct ballot is boarded by the operator when the servers return, with no receipt, never as a contract event (P1-12c, P4-2)",
-  "trustees: offline seats go down after the ceremony, for the whole voting period and tally; faulty seats lie only in their summed shares",
+  "trustees: offline seats go down after the ceremony, for the whole voting period, tally and destruction; faulty seats lie only in their summed shares; summed shares reach the combiner in memory, never as summed-share messages, and the lowest seat combined signs each cell's opening",
   "challenges: the checker records each tracking code and checks the opening in memory, with the election the run built rather than one fetched from chain and IPFS; no opening is published to the board after close (P1-21 part 2)",
   "re-voting: L1 is simulated, a block every 12 seconds with random hashes, all finalized; every reference is admitted and every voter's last ballot selected, so no ballot is replayed, ties, or names a block before opening, after close or reorganised away (P1-21 part 2)",
-  "not yet simulated: anchoring, destruction and wipe-and-rebuild (P1-21 part 2)",
+  "destruction: every online seat signs its statement at the moment the tally rule sets, and the operator boards each one; nothing destroys the run's key material, which lives until the report is returned",
+  "not yet simulated: anchoring and wipe-and-rebuild (P1-21 part 2)",
 ] as const);
 
 export type CellOutcome = "opened" | "tally-quorum" | "tally-opening" | "tally-range";
@@ -95,7 +109,10 @@ export interface CellReport {
   readonly combined?: readonly number[];
   /** Seats whose summed shares failed the check. */
   readonly excluded: readonly number[];
-  /** Whether the verifier's opening check passed on the opened counts. */
+  /**
+   * Whether the verifier's tally check over the board's openings (7.2)
+   * passed the cell, on the opened counts, with the combiner's signature.
+   */
   readonly verified: boolean;
   /** The outcome is the expected one and, when opened, the counts are the plan's. */
   readonly matches: boolean;
@@ -122,6 +139,10 @@ export interface SimulationReport {
   /** The board the operator wrote, which passed the verifier's entry checks (4.1); nothing anchors it. */
   readonly board: {
     readonly entries: number;
+    /** Entries in the counted extent, every one a ballot. */
+    readonly counted: number;
+    /** Tally openings, one per opened cell. */
+    readonly openings: number;
     /** The chain head after its last entry, in hex. */
     readonly head: string;
     /** The key that signed every receipt, which the voters' clients pinned, in hex. */
@@ -134,6 +155,12 @@ export interface SimulationReport {
     readonly faulty: readonly number[];
   };
   readonly cells: readonly CellReport[];
+  /**
+   * The verifier's destruction report (8.5) over the board's statements: the
+   * destruction segment and each registered seat's line, every online seat
+   * `destroyed` and every offline one `destruction-missing`.
+   */
+  readonly destruction: { readonly from: number; readonly seats: readonly SeatDestruction[] };
   /** The election's total, derived from the opened cells, when every cell opened. */
   readonly total?: readonly number[];
   readonly stubs: readonly string[];
@@ -178,6 +205,10 @@ export function expectCells(scenario: Scenario): CellExpectation {
 }
 
 const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+
+// A record's type, the u16 at the head of its encoding (docs/spec/notation.md):
+// which records on the board each check reads.
+const recordTypeOf = (record: Uint8Array) => ((record[0] ?? 0) << 8) | (record[1] ?? 0);
 
 const same32 = (a: Uint8Array, b: Uint8Array) =>
   a.length === 32 && b.length === 32 && a.every((x, i) => x === b[i]);
@@ -285,7 +316,8 @@ export function runSimulation(
     SIMULATED_BOARD_ENTRY_VERSION,
   );
   const firstSegment = segmentAt(opensAt);
-  const seal = segmentAt(closesAt) + SIMULATED_SEAL_PERIODS;
+  const after = postClose(closesAt);
+  const { seal } = after;
   // A ballot record's placeholder membership proof (SIMULATION_STUBS): the
   // verification key's alpha (G1) and beta (G2) points, which decode.
   const vk = membershipVkEncoding();
@@ -421,16 +453,20 @@ export function runSimulation(
   });
   boardPending();
 
-  // Verifier 4.1 over the board as the operator wrote it: every entry
-  // decodes under the pinned version, names the election and its index, and
-  // the chain it gives ends at the operator's head.
+  // The counted extent, as the trustees read it once its checkpoint is due:
+  // every entry decodes under the pinned version and names the election and
+  // its index (verifier 4.1), and each is a ballot boarded by s_S.
   const checked = checkBoard(
     election.definition.election_id,
     operator.entries,
     SIMULATED_BOARD_ENTRY_VERSION,
   );
-  if (!same32(checked.links.at(-1) ?? new Uint8Array(32), operator.head))
-    throw new Error("simulation: the board's chain doesn't end at the operator's head");
+  if (
+    checked.entries.some(
+      (e) => e.segment > after.counted || recordTypeOf(e.payload) !== RECORD_TYPES.ballot,
+    )
+  )
+    throw new Error("simulation: an entry outside the counted extent's ballots");
 
   // From each boarded ballot record: its L1 reference's admission (5.8) and
   // M as the verifier recomputes it from the ballot and the definition (5.7).
@@ -503,8 +539,12 @@ export function runSimulation(
     cell.vss.push(vss);
   }
 
-  const want = expectCells(scenario);
-  const reports: CellReport[] = plan.tiers.map((tier, done) => {
+  // Each cell, in partition order (the definition's electorate order), from
+  // t_S: the k lowest passing seats combine, and the lowest of them signs the
+  // opening, which the operator boards (docs/spec/tally.md, Combination and
+  // Opening record).
+  const openingSegment = segmentAt(after.tallyFrom);
+  const opens = plan.tiers.map((tier, c) => {
     const cell = cellOf(tier);
     const summed = new Map<number, readonly Share[]>();
     for (const seat of online) {
@@ -512,17 +552,105 @@ export function runSimulation(
       summed.set(seat, faulty.includes(seat) ? corrupt(sum) : sum);
     }
     const opened = openCell(tallyRules, cell.vss, summed);
+    if (opened.ok) {
+      const signer = opened.combined[0] as number;
+      const record = signTallyOpening((seats[signer - 1] as SeatSecrets).signingSecret, {
+        definition_hash: definitionHash,
+        cell: c,
+        aggregate_hash: aggregateHash(aggregateCell(tallyRules, cell.vss)),
+        signer,
+        opening: opened.counts.map((v, j) => ({ v, r: opened.randomness[j] as bigint })),
+      });
+      operator.board(openingSegment, encodeTallyOpening(record));
+    }
+    return { tier, cell, opened };
+  });
+
+  // Verifier 7.2 over every tally opening on the board, in board order, each
+  // with its segment for the destruction rule.
+  const onBoard = (type: number) =>
+    operator.entries.flatMap((bytes) => {
+      const e = decodeBoardEntry(bytes, SIMULATED_BOARD_ENTRY_VERSION);
+      return recordTypeOf(e.payload) === type ? [{ segment: e.segment, payload: e.payload }] : [];
+    });
+  const tallyEntries = onBoard(RECORD_TYPES.tallyOpening);
+  const tally = checkTally(
+    { definitionHash, rules: tallyRules, registered },
+    opens.map((o) => o.cell.vss),
+    tallyEntries.map((e) => e.payload),
+    1,
+  );
+  if (tally.stray.length > 0 || tally.rejected.length > 0)
+    throw new Error("simulation: a stray or rejected tally opening");
+
+  const want = expectCells(scenario);
+  const reports: CellReport[] = opens.map(({ tier, cell, opened }, c) => {
+    const check = tally.cells[c];
+    // Only an opened cell has an opening on the board; any other is tally-missing.
+    if (!opened.ok && (check === undefined || check.ok || check.code !== "tally-missing"))
+      throw new Error("simulation: an unopened cell's tally check found an opening");
     const verified =
       opened.ok &&
-      checkOpening(
-        tallyRules,
-        cell.vss,
-        opened.counts.map((v, j) => ({ v, r: opened.randomness[j] as bigint })),
-      ).ok;
-    options.onProgress?.({ stage: "tally", done: done + 1, total: plan.tiers.length });
+      check?.ok === true &&
+      same(check.counts.map(Number), opened.counts.map(Number)) &&
+      check.passing.length === 1 &&
+      check.failing.length === 0 &&
+      check.passing[0]?.signer === opened.combined[0];
+    options.onProgress?.({ stage: "tally", done: c + 1, total: plan.tiers.length });
     const expected = plan.expected.get(tier) as readonly number[];
     return judgeCell({ tier, ballots: cell.vss.length, expected }, want, opened, verified);
   });
+
+  // Destruction (docs/spec/tally.md, When): with every cell's first passing
+  // opening seen anchored, a node destroys once that checkpoint is due;
+  // otherwise at t_D. Each online seat then signs its statement, the signing
+  // key's last use, and the operator boards it (T-14, T-40, T-69).
+  const firstPassing = tally.cells.map((cell) => {
+    const first = cell.passing[0];
+    return first === undefined ? null : (tallyEntries[first.at] as { segment: number }).segment;
+  });
+  const destroyedIn = firstPassing.every((s) => s !== null)
+    ? afterAnchored(Math.max(...firstPassing))
+    : segmentAt(after.destroyBy);
+  for (const seat of online)
+    operator.board(
+      destroyedIn,
+      encodeDestructionStatement(
+        signDestructionStatement((seats[seat - 1] as SeatSecrets).signingSecret, {
+          definition_hash: definitionHash,
+          signer: seat,
+        }),
+      ),
+    );
+  // Verifier 8.5: every online seat destroyed in the destruction segment,
+  // every offline one missing, and nothing else on the board.
+  const destruction = checkDestruction(
+    { definitionHash, registered },
+    onBoard(RECORD_TYPES.destructionStatement),
+    { firstPassing, windowSegment: after.windowSegment },
+    1,
+  );
+  if (
+    destruction.from !== destroyedIn ||
+    destruction.duplicates.length + destruction.unattributed.length > 0 ||
+    destruction.stray.length + destruction.rejected.length > 0 ||
+    destruction.seats.some(
+      (d) => d.code !== (online.includes(d.seat) ? "destroyed" : "destruction-missing"),
+    )
+  )
+    throw new Error("simulation: the destruction report isn't every online seat's statement");
+
+  // Verifier 4.1 over the whole board, through the seal: the chain ends at
+  // the operator's head (T-23).
+  const sealed = checkBoard(
+    election.definition.election_id,
+    operator.entries,
+    SIMULATED_BOARD_ENTRY_VERSION,
+  );
+  if (!same32(sealed.links.at(-1) ?? new Uint8Array(32), operator.head))
+    throw new Error("simulation: the board's chain doesn't end at the operator's head");
+  if (sealed.entries.some((e) => e.segment > seal))
+    throw new Error("simulation: an entry after the seal");
 
   const allOpened = reports.every((c) => c.counts !== undefined);
   return {
@@ -541,12 +669,15 @@ export function runSimulation(
       challenged,
     },
     board: {
-      entries: checked.entries.length,
+      entries: sealed.entries.length,
+      counted: checked.entries.length,
+      openings: tallyEntries.length,
       head: hex(operator.head),
       receiptKey: hex(operator.receiptKey),
     },
     trustees: { online, offline, faulty },
     cells: reports,
+    destruction: { from: destruction.from, seats: destruction.seats },
     ...(allOpened
       ? {
           total: deriveTotal(reports.map((c) => (c.counts as readonly number[]).map(BigInt))).map(

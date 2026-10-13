@@ -27,8 +27,11 @@ describe("runSimulation", { timeout }, () => {
     expect(r.ballots.direct).toBeGreaterThan(0);
     expect(r.ballots.challenged).toBe(0);
     expect(r.ballots.superseded).toBe(0);
-    // Every ballot is boarded, direct ones when the servers return.
-    expect(r.board.entries).toBe(9);
+    // Every ballot is boarded, direct ones when the servers return; then an
+    // opening per cell and a destruction statement per online seat.
+    expect(r.board.counted).toBe(9);
+    expect(r.board.openings).toBe(3);
+    expect(r.board.entries).toBe(9 + 3 + 3);
     expect(r.board.head).toMatch(/^[0-9a-f]{64}$/);
     expect(r.board.receiptKey).toMatch(/^0[23][0-9a-f]{64}$/);
     expect(r.trustees).toEqual({ online: [1, 3, 4], offline: [2], faulty: [] });
@@ -41,6 +44,13 @@ describe("runSimulation", { timeout }, () => {
     }
     expect(r.cells.reduce((a, c) => a + c.ballots, 0)).toBe(9);
     expect(r.total?.reduce((a, x) => a + x, 0)).toBe(9);
+    // Every cell opened, so the destruction segment follows the openings'.
+    expect(r.destruction.seats).toEqual([
+      { seat: 1, code: "destroyed", at: 0 },
+      { seat: 2, code: "destruction-missing" },
+      { seat: 3, code: "destroyed", at: 1 },
+      { seat: 4, code: "destroyed", at: 2 },
+    ]);
     expect(r.stubs).toEqual(SIMULATION_STUBS);
     expect(progress.filter((s) => s === "cast")).toHaveLength(9);
     expect(progress.filter((s) => s === "tally")).toHaveLength(3);
@@ -59,6 +69,13 @@ describe("runSimulation", { timeout }, () => {
       expect(c.counts).toEqual(c.expected);
     }
     expect(r.trustees).toEqual({ online: [1, 2, 3], offline: [4], faulty: [1] });
+    // A faulty seat still states destruction: it lies only in its summed shares.
+    expect(r.destruction.seats.map((d) => d.code)).toEqual([
+      "destroyed",
+      "destroyed",
+      "destroyed",
+      "destruction-missing",
+    ]);
   });
 
   it("reports tally-quorum, as expected, when fewer than k honest seats remain", () => {
@@ -74,6 +91,17 @@ describe("runSimulation", { timeout }, () => {
       expect(c.counts).toBeUndefined();
     }
     expect(r.total).toBeUndefined();
+    // No opening reaches the board, so the online seats destroy at t_D, in s_T.
+    expect(r.board.openings).toBe(0);
+    expect(r.board.entries).toBe(9 + 2);
+    const ran = runSimulation(base);
+    expect(r.destruction.from).toBeGreaterThan(ran.destruction.from + 100);
+    expect(r.destruction.seats.map((d) => d.code)).toEqual([
+      "destruction-missing",
+      "destruction-missing",
+      "destroyed",
+      "destroyed",
+    ]);
   });
 
   it("checks every challenged attempt's opening, then casts a fresh one that still opens to the plan", () => {
@@ -103,7 +131,7 @@ describe("runSimulation", { timeout }, () => {
     expect(r.ok).toBe(true);
     expect(r.ballots.cast).toBe(18);
     expect(r.ballots.superseded).toBe(9);
-    expect(r.board.entries).toBe(18);
+    expect(r.board.counted).toBe(18);
     expect(r.ballots.server + r.ballots.direct).toBe(18);
     expect(progress.filter((s) => s === "cast")).toHaveLength(18);
     expect(r.cells.reduce((a, c) => a + c.ballots, 0)).toBe(9);

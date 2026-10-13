@@ -309,7 +309,7 @@ const CORE_OPENING: ReadonlyMap<number, number> = new Map([
 // The spoiled-ballot opening versions this package reads (challenge.ts's
 // SPOILED_BALLOT_OPENING), written out because importing it here would be an
 // import cycle; a test ties the two.
-export const SPOILED_OPENING_VERSIONS: ReadonlySet<number> = new Set<number>([1, 2]);
+export const SPOILED_OPENING_VERSIONS: ReadonlySet<number> = new Set<number>([1, 2, 3]);
 // The ballot versions this package reads (ballot.ts's BALLOT), written out
 // for the same reason. Version 4 pairs only with definition version 6, which
 // this function doesn't take yet, so under every definition version it does

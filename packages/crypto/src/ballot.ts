@@ -472,6 +472,7 @@ function panelElection(
     authorQualified: Object.freeze(seats),
   });
   MADE.set(election, { definitionHash, version: 4 });
+  KEYS.set(election, copyKeys(registered));
   return election;
 }
 
@@ -607,6 +608,22 @@ export function cellContextOf(election: CellBallotElection | QuestionBallotElect
   return {
     definitionHash: made.definitionHash,
     ballotVersion: made.version,
+    keys: KEYS.get(election) as readonly RegisteredKeys[],
+  };
+}
+
+/**
+ * Internal: what `panelBallotElection` (or `panelBallotElectionWith`) made
+ * this context from, its definition hash and the default panel's registered
+ * key set, for opening version 3's rebuild of default seats' ciphertexts
+ * (docs/spec/challenge.md, Opening version 3).
+ */
+export function panelContextOf(election: PanelBallotElection): {
+  readonly definitionHash: Uint8Array;
+  readonly keys: readonly RegisteredKeys[];
+} {
+  return {
+    definitionHash: madeHashOf(election, 4),
     keys: KEYS.get(election) as readonly RegisteredKeys[],
   };
 }

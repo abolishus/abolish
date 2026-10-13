@@ -1,5 +1,4 @@
-import { Button, Fingerprint, SectionMark } from "@abolishus/ui";
-import { ArrowRight, RotateCw } from "lucide-react";
+import { Fingerprint, SectionMark } from "@abolishus/ui";
 import type { ReactNode } from "react";
 
 import { CLIENT_RELEASE, ENTRY_POINTS, LEVY } from "./fixtures.ts";
@@ -24,84 +23,6 @@ function SystemHead({
       </h1>
       <div className="grid max-w-prose gap-4 text-lg text-pretty lg:col-span-7">{children}</div>
     </div>
-  );
-}
-
-const WAYS = [
-  { href: "/polls", label: "Polls", note: "Open, scheduled and counted polls" },
-  { href: "/board", label: "The board", note: "Every entry, in order" },
-  { href: "/verify", label: "Verify", note: "Find your receipt or recount a poll" },
-  { href: "/", label: "Home", note: "Start again from the front page" },
-] as const;
-
-function WayList({ label }: { label: string }) {
-  return (
-    <nav aria-label={label}>
-      <ul className="m-0 grid list-none border-t-2 border-foreground p-0 sm:grid-cols-2">
-        {WAYS.map((w) => (
-          <li key={w.href} className="border-b border-border sm:odd:border-e">
-            <a
-              href={w.href}
-              className="group grid min-h-12 grid-cols-[1fr_auto] items-center gap-x-4 px-1 py-5 hover:bg-muted sm:px-5"
-            >
-              <span className="grid gap-0.5">
-                <span className="text-lg font-semibold">{w.label}</span>
-                <span className="text-sm text-muted-foreground group-hover:text-foreground">
-                  {w.note}
-                </span>
-              </span>
-              <ArrowRight aria-hidden="true" className="size-5" />
-            </a>
-          </li>
-        ))}
-      </ul>
-    </nav>
-  );
-}
-
-export function NotFoundPage() {
-  return (
-    <MockShell>
-      <SystemHead code="404 · Not found" title="There is no page at this address">
-        <p className="m-0">
-          The link may be mistyped, or the page may have moved. Nothing on the record has been
-          removed: board entries, definitions and results are permanent.
-        </p>
-        <p className="m-0 text-base">
-          If you were looking for a poll, its 64-character ID finds it on the{" "}
-          <a href="/verify" className="underline underline-offset-4">
-            verify page
-          </a>
-          , here or through any other entry point.
-        </p>
-      </SystemHead>
-      <Frame>
-        <WayList label="Other places to go" />
-      </Frame>
-    </MockShell>
-  );
-}
-
-export function ErrorPage() {
-  return (
-    <MockShell>
-      <SystemHead code="Error" title="Something went wrong on our side">
-        <p className="m-0">
-          This page couldn’t be shown. Try again in a moment, or go somewhere else below. This
-          website never handles ballots: if you were voting, your ballot and receipt are safe in the
-          ballot client on your device.
-        </p>
-        <div>
-          <Button size="lg" onClick={() => window.location.reload()}>
-            <RotateCw aria-hidden="true" data-icon="inline-start" />
-            Try again
-          </Button>
-        </div>
-      </SystemHead>
-      <Frame>
-        <WayList label="Other places to go" />
-      </Frame>
-    </MockShell>
   );
 }
 

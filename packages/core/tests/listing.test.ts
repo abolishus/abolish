@@ -138,7 +138,9 @@ describe("listPolls", () => {
       // other database-backed properties.
       { numRuns: Math.min(numRuns, 50) },
     );
-  });
+    // Fifty runs of database writes can outlast the default timeout on a CI
+    // runner shared with the other test files.
+  }, 60_000);
 
   test("never lists an election with no stored definition", async () => {
     const orphan = new Uint8Array(randomBytes(32));

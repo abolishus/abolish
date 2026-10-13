@@ -119,6 +119,10 @@ How it is set up:
 
 - better-auth reads the clock itself, so session expiry isn't on an injected clock.
 
+### Short codes (`src/short-codes.ts`, also `@abolishus/core/short-codes`; T-49, T-53)
+
+A poll's short link is `abolish.us/p/<code>` (docs/design/sharing.md, "Short links and entry points"): a prefix of its definition hash in lower-case Crockford base32. `shortCode(hash, length)` spells the first `length` characters (7 to 52, the 52nd holding the hash's last bit). `parseShortCode(input)` takes what someone typed or scanned, any case, with `o` read as `0` and `i`/`l` as `1` (ASCII only), and returns the canonical code or `undefined`, never a message made from the input. `assignShortCodes(hashes)` gives each poll, in registration order, the shortest prefix of at least 7 characters that no earlier poll's hash shares, so a code never changes once given, a poll ground to share an earlier one's prefix only lengthens its own, and anyone holding the registered hashes (a mirror, `apps/node`, the verifier) resolves codes without us. `resolveShortCode(code, hashes)` is the position of the poll owning a code, or `undefined` for a prefix that isn't exactly some poll's code.
+
 ### Auditing the board (`src/audit.ts`; T-23, T-66)
 
 The table's triggers check order and chaining but never hash, so a writer that bypassed `appendEntry`, or a corrupted or restored database, can store columns the payloads don't produce. `auditBoard(sql, id)` reads the board in one query, recomputes it with the verifier's own `checkBoard`, and compares every row's `entry_hash`, `prev_link` and `link`, then every subtree each entry completes against one recomputed from those entry hashes; it returns the size or throws `BoardAuditError` (`board-invalid`, `entry-hash-mismatch`, `link-mismatch`, `subtree-missing` or `subtree-mismatch`) with the first wrong index. `listBoards(sql)` lists every election with entries. `apps/worker` runs the audit on a schedule. It detects and repairs nothing: Postgres isn't authoritative.

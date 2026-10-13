@@ -65,17 +65,10 @@ export interface FileRoutesById {
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath;
-  fullPaths:
-    "/" | "/account" | "/moderation" | "/polls/$electionId" | "/polls/";
+  fullPaths: "/" | "/account" | "/moderation" | "/polls/$electionId" | "/polls/";
   fileRoutesByTo: FileRoutesByTo;
   to: "/" | "/account" | "/moderation" | "/polls/$electionId" | "/polls";
-  id:
-    | "__root__"
-    | "/"
-    | "/account"
-    | "/moderation"
-    | "/polls/$electionId"
-    | "/polls/";
+  id: "__root__" | "/" | "/account" | "/moderation" | "/polls/$electionId" | "/polls/";
   fileRoutesById: FileRoutesById;
 }
 export interface RootRouteChildren {

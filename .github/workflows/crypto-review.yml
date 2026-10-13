@@ -5,6 +5,8 @@
 # Passes as not applicable otherwise, so it can be a required check on every
 # PR. Fails on any blocking finding and fails closed.
 # Model: repository variable REVIEW_MODEL (falls back to the CLI's `opus` alias).
+# A push that only rebases (the same changes, by patch-id) reuses the previous
+# head's passing verdict instead of running the model again (the `reuse` job).
 # Prompt: .github/review/crypto-review.md, read from the base commit.
 #
 # Two jobs, so nothing the model can influence decides the result:
@@ -34,10 +36,76 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  reuse:
+    name: crypto-review (reuse check)
+    # A rebase that leaves the pull request's own changes untouched doesn't
+    # need the model again. The previous head's verdict carries over only when
+    # the push is a synchronize, the diff against the base (by `git patch-id
+    # --stable`, which ignores line offsets) is identical before and after, and
+    # that head's `crypto-review` check concluded success. Anything else, including
+    # an error here, runs the full review.
+    if: github.event_name == 'pull_request' && !github.event.pull_request.draft && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      checks: read
+    outputs:
+      reuse: ${{ steps.compare.outputs.reuse }}
+      before: ${{ steps.compare.outputs.before }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - name: Compare with the previous head
+        id: compare
+        env:
+          ACTION: ${{ github.event.action }}
+          BEFORE: ${{ github.event.before }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          CHECK: crypto-review
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          echo "reuse=false" >>"$GITHUB_OUTPUT"
+          if [ "$ACTION" != synchronize ] || ! [[ "$BEFORE" =~ ^[0-9a-f]{40}$ ]] || [ "$BEFORE" = 0000000000000000000000000000000000000000 ]; then
+            echo "Not a push to an existing head: full review."
+            exit 0
+          fi
+          if ! git fetch --no-tags --quiet origin "$BEFORE"; then
+            echo "Previous head unavailable: full review."
+            exit 0
+          fi
+          changes() {
+            git -c core.quotePath=false diff --text --no-textconv --no-ext-diff --no-renames "$BASE_SHA...$1" |
+              git patch-id --stable | cut -d' ' -f1
+          }
+          old="$(changes "$BEFORE")"
+          new="$(changes "$HEAD_SHA")"
+          if [ -z "$old" ] || [ "$old" != "$new" ]; then
+            echo "The changes differ from $BEFORE: full review."
+            exit 0
+          fi
+          conclusion="$(gh api "repos/$GITHUB_REPOSITORY/commits/$BEFORE/check-runs?check_name=$CHECK&filter=latest" \
+            --jq '[.check_runs[] | select(.app.slug == "github-actions")] | first | .conclusion // ""')"
+          if [ "$conclusion" != success ]; then
+            echo "$CHECK on $BEFORE concluded '$conclusion': full review."
+            exit 0
+          fi
+          echo "Same changes as $BEFORE, whose $CHECK passed: reusing that review." | tee -a "$GITHUB_STEP_SUMMARY"
+          {
+            echo "reuse=true"
+            echo "before=$BEFORE"
+          } >>"$GITHUB_OUTPUT"
+
   review:
     name: crypto-review (model)
     # Drafts are skipped: iterate as a draft, and marking it ready runs the review.
-    if: github.event_name == 'pull_request' && !github.event.pull_request.draft && github.event.pull_request.head.repo.full_name == github.repository
+    needs: reuse
+    # always(): a failed reuse check must not skip the review; it runs it.
+    if: always() && github.event_name == 'pull_request' && !github.event.pull_request.draft && github.event.pull_request.head.repo.full_name == github.repository && needs.reuse.outputs.reuse != 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -166,7 +234,7 @@ jobs:
 
   crypto-review:
     name: crypto-review
-    needs: review
+    needs: [reuse, review]
     if: always() && github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -202,7 +270,13 @@ jobs:
         run: |
           echo "::error::crypto-review only runs on branches of this repository (forks get no secrets). A maintainer must re-open the change from an in-repo branch."
           exit 1
+      - name: Previous review reused
+        if: needs.reuse.outputs.reuse == 'true'
+        env:
+          BEFORE: ${{ needs.reuse.outputs.before }}
+        run: echo "Same changes as $BEFORE, whose crypto-review passed; the model did not run again."
       - name: The model job ran
+        if: needs.reuse.outputs.reuse != 'true'
         env:
           RESULT: ${{ needs.review.result }}
         run: |
@@ -211,6 +285,7 @@ jobs:
             exit 1
           fi
       - name: Scope was determined
+        if: needs.reuse.outputs.reuse != 'true'
         env:
           APPLIES: ${{ needs.review.outputs.applies }}
         run: |
@@ -219,26 +294,26 @@ jobs:
             exit 1
           fi
       - name: Not applicable
-        if: needs.review.outputs.applies != 'true'
+        if: needs.reuse.outputs.reuse != 'true' && (needs.review.outputs.applies != 'true')
         run: echo "No protocol code or agent instruction files changed; crypto-review is not applicable."
       # Verdict code comes from the base commit (the PR's copy only on the
       # bootstrap PR that adds it), on a runner the model never touched.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: needs.review.outputs.applies == 'true'
+        if: needs.reuse.outputs.reuse != 'true' && (needs.review.outputs.applies == 'true')
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           path: base
           sparse-checkout: .github/scripts
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: hashFiles('base/.github/scripts/review-verdict.py') == '' && needs.review.outputs.applies == 'true'
+        if: needs.reuse.outputs.reuse != 'true' && (hashFiles('base/.github/scripts/review-verdict.py') == '' && needs.review.outputs.applies == 'true')
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           path: base
           sparse-checkout: .github/scripts
           persist-credentials: false
       - name: Verdict
-        if: needs.review.outputs.applies == 'true'
+        if: needs.reuse.outputs.reuse != 'true' && (needs.review.outputs.applies == 'true')
         env:
           REVIEW_NAME: crypto-review
           REVIEW_JSON: ${{ needs.review.outputs.result }}
@@ -246,7 +321,7 @@ jobs:
           OUT_FILE: ${{ runner.temp }}/crypto-review.md
         run: python3 -I base/.github/scripts/review-verdict.py
       - name: Post review summary
-        if: always() && hashFiles('base/.github/scripts/upsert-comment.sh') != '' && needs.review.outputs.applies == 'true'
+        if: needs.reuse.outputs.reuse != 'true' && (always() && hashFiles('base/.github/scripts/upsert-comment.sh') != '' && needs.review.outputs.applies == 'true')
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}

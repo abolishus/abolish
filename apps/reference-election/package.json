@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@abolishus/crypto": "workspace:*",
+    "@noble/curves": "catalog:",
     "@noble/hashes": "catalog:"
   },
   "devDependencies": {

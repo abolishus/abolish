@@ -31,16 +31,15 @@ import {
 } from "@abolishus/crypto";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 
-/** Base Sepolia ([[0004-l2-choice]]): the L2 the definition names. Nothing is sent to it yet. */
-export const L2_CHAIN_ID = 84532n;
-
 /** Under rule 7 of [[0006-trustees]], 4-of-7 opens only with n − 1 = 6 seats taking part. */
 export const PANEL = Object.freeze({ threshold: 4, size: 7 });
 
 /** What this part stands in for, and the item that replaces each with the real thing. */
 export const STUBS = Object.freeze({
-  l2Contracts:
-    "the election, trustee and group registries and the L2 board are placeholder addresses: nothing is registered on L2 (P1-18 deploys them; verifier 2.1, 2.4 and 3.1 read them)",
+  l2: "the L2 is a second local Anvil, not Base Sepolia, with forge's MockL1Block at the L1Block predeploy reporting the L1 Anvil's latest block as each event's origin; the verifier reads nothing from it yet (verifier 2.1, 2.4, 3.1 and 4.4, P1-19)",
+  groupRegistrars:
+    "the group registry's two registrars are placeholder addresses: no group is created (stage 3, P3-2)",
+  l1Relay: "the L1 relay is a placeholder address: no relay is deployed (P4-2)",
   electorate:
     "one Tier 0 group with a placeholder root and size: no registration or membership yet (stage 2, P3-2)",
   panel:
@@ -54,17 +53,46 @@ export const STUBS = Object.freeze({
 // their label, so none can be mistaken for a deployment's.
 const label = (name: string) =>
   keccak_256(new TextEncoder().encode(`reference-election/placeholder/${name}`));
-const placeholder = (name: string) => label(name).slice(12);
+export const placeholder = (name: string) => label(name).slice(12);
 
 export interface Trustee {
   readonly index: number;
   readonly identitySecret: Uint8Array;
 }
 
+/** The panel's seats with their identity secrets, and the panel they make. */
+export interface Trustees {
+  readonly seats: readonly Trustee[];
+  readonly panel: Panel;
+}
+
+export function newTrustees(): Trustees {
+  const seats: Trustee[] = Array.from({ length: PANEL.size }, (_, i) => ({
+    index: i + 1,
+    identitySecret: crypto.getRandomValues(new Uint8Array(32)),
+  }));
+  return {
+    seats,
+    panel: { threshold: PANEL.threshold, keys: seats.map((t) => identityKey(t.identitySecret)) },
+  };
+}
+
+/** The L2 contracts a definition names (l2.ts deploys them). */
+export interface L2Deployment {
+  readonly l2ChainId: bigint;
+  readonly electionRegistry: Uint8Array;
+  readonly board: Uint8Array;
+  readonly trusteeRegistry: Uint8Array;
+  readonly groupRegistry: Uint8Array;
+  readonly l1Relay: Uint8Array;
+}
+
 export interface Ceremony {
   readonly panel: Panel;
   readonly definition: ElectionDefinition;
   readonly transcript: Uint8Array;
+  /** The seats that took part. */
+  readonly seats: readonly Trustee[];
 }
 
 export interface Timing {
@@ -110,42 +138,36 @@ export function displayText(): DisplayText {
 }
 
 export interface CeremonyOptions {
-  /** The election registry's counter: each election of a run needs its own. */
+  /** The election registry's counter of the election's creation. */
   readonly counter: bigint;
   /** How many seats, from the last, send nothing at all. */
   readonly absent: number;
 }
 
 /**
- * Creates the election's stub, runs the key ceremony over it with all but
- * `absent` seats taking part, and returns the definition that binds the
- * transcript.
+ * Writes the stub of the election `l2` created as number `counter`, runs the
+ * key ceremony over it with all but `absent` of `trustees` taking part, and
+ * returns the definition that binds the transcript.
  */
 export function runCeremony(
   timing: Timing,
+  l2: L2Deployment,
+  trustees: Trustees,
   text: DisplayText,
   { counter, absent }: CeremonyOptions,
 ): Ceremony {
-  const trustees: Trustee[] = Array.from({ length: PANEL.size }, (_, i) => ({
-    index: i + 1,
-    identitySecret: crypto.getRandomValues(new Uint8Array(32)),
-  }));
-  const panel: Panel = {
-    threshold: PANEL.threshold,
-    keys: trustees.map((t) => identityKey(t.identitySecret)),
-  };
-  const electionRegistry = placeholder("election-registry");
+  const { panel } = trustees;
   const stub: ElectionDefinition = {
     profile: profile(),
-    election_id: electionId(L2_CHAIN_ID, electionRegistry, counter),
-    l2_chain_id: L2_CHAIN_ID,
+    election_id: electionId(l2.l2ChainId, l2.electionRegistry, counter),
+    l2_chain_id: l2.l2ChainId,
     l1_chain_id: timing.l1ChainId,
-    election_registry: electionRegistry,
-    board: placeholder("board"),
-    trustee_registry: placeholder("trustee-registry"),
-    group_registry: placeholder("group-registry"),
+    election_registry: l2.electionRegistry,
+    board: l2.board,
+    trustee_registry: l2.trusteeRegistry,
+    group_registry: l2.groupRegistry,
     l1_anchor: timing.l1Anchor,
-    l1_relay: placeholder("l1-relay"),
+    l1_relay: l2.l1Relay,
     election_type: 1,
     tally_scheme: 1,
     option_count: 3,
@@ -173,9 +195,8 @@ export function runCeremony(
     panel,
     runId: crypto.getRandomValues(new Uint8Array(32)),
   };
-  const seats = trustees
-    .slice(0, trustees.length - absent)
-    .map((t) => ceremonyKeygen(t.index, t.identitySecret));
+  const present = trustees.seats.slice(0, trustees.seats.length - absent);
+  const seats = present.map((t) => ceremonyKeygen(t.index, t.identitySecret));
   const keys = seats.map((s) => keysMessage(params, s));
   const challenges = seats.map((s) => challengesMessage(params, s, keys));
   const round2 = challenges.map((c) => c.message);
@@ -193,7 +214,7 @@ export function runCeremony(
   const definition = { ...stub, ceremony_transcript_hash: ceremonyTranscriptHash(transcript) };
   const rule = electionDefinitionRule(definition);
   if (rule !== undefined) throw new Error(`the fixture's definition breaks ${rule}`);
-  return { panel, definition, transcript };
+  return { panel, definition, transcript, seats: present };
 }
 
 /** The board-entry version the definition pins. */

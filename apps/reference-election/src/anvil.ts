@@ -1,4 +1,4 @@
-// A local Anvil node for the fixture's L1, and a minimal JSON-RPC client.
+// Local Anvil nodes for the fixture's L1 and L2, and a minimal JSON-RPC client.
 // Anvil runs on loopback only, and the fixture never holds a private key: it
 // sends from Anvil's unlocked development account and from impersonated
 // addresses (AGENTS.md, Testnets only).
@@ -30,6 +30,15 @@ async function freePort(): Promise<number> {
   });
 }
 
+/** A JSON-RPC error, with its data: a reverted call's return data, as hex. */
+export class RpcError extends Error {
+  readonly data: unknown;
+  constructor(message: string, data: unknown) {
+    super(message);
+    this.data = data;
+  }
+}
+
 export function rpcClient(url: string): Rpc {
   let id = 0;
   return {
@@ -41,16 +50,19 @@ export function rpcClient(url: string): Rpc {
       });
       const body = (await response.json()) as {
         result?: T;
-        error?: { code: number; message: string };
+        error?: { code: number; message: string; data?: unknown };
       };
       if (body.error !== undefined)
-        throw new Error(`${method}: ${body.error.message} (${body.error.code})`);
+        throw new RpcError(
+          `${method}: ${body.error.message} (${body.error.code})`,
+          body.error.data,
+        );
       return body.result as T;
     },
   };
 }
 
-/** Starts Anvil with the given L1 chain ID and waits until it answers. */
+/** Starts Anvil with the given chain ID and waits until it answers. */
 export async function startAnvil(chainId: bigint): Promise<Anvil> {
   const port = await freePort();
   const child: ChildProcess = spawn(

@@ -10,7 +10,7 @@ From the repository root, with the toolchain on `PATH` (`.github/scripts/install
 vp run reference-election
 ```
 
-It builds `@abolishus/crypto`, `@abolishus/verifier` and `@abolishus/contracts`, starts its own Anvil on loopback, and writes `reference-election-output/`. The verifier's built package and forge's `BoardAnchor` artifact are read by path, not as workspace dependencies, so the verifier runs as a third party would install it; only the root script's `--filter … build` orders those builds.
+It builds `@abolishus/crypto`, `@abolishus/verifier` and `@abolishus/contracts`, starts two Anvils of its own on loopback (an L1, chain 31337, and an L2, chain 31338), and writes `reference-election-output/`. The verifier's built package and forge's contract artifacts are read by path, not as workspace dependencies, so the verifier runs as a third party would install it; only the root script's `--filter … build` orders those builds.
 
 | Path                                                                  | What it is                                                                                                                                      |
 | --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -26,12 +26,12 @@ It exits non-zero if any stage throws, any check of the honest report fails, a r
 
 A control is something the verifier must not pass, with the rows and codes it must show, so the honest run's passes can't be vacuous or pass for an unrelated reason:
 
-- **`rule-7`:** a second election through the same anchor whose ceremony only 5 of the 7 seats took part in. It is anchored and its quorum of 4 is met, so 4.1 and 4.2 pass, but 3.2 must fail with `ceremony-participation` (ADR 0006, rule 7; T-54).
+- **`rule-7`:** a second election, created by the same election registry and anchored through the same anchor, whose ceremony only 5 of the 7 seats took part in. The trustee registry must refuse its registration (`BelowQuorum`: the panel is pinned with rule 7's quorum of 6) and the election registry its definition (`CeremonyNotRecorded`). Offline, it is anchored and its threshold of 4 is met, so 4.1 and 4.2 pass, but 3.2 must fail with `ceremony-participation` (ADR 0006, rule 7; T-54).
 - **`tampered-copy`:** the honest bundle with its board copy altered. The copy no longer matches its anchors (4.2 `l1-checkpoint-unknown`) or the definition's transcript hash (3.1 `ceremony-transcript-missing`), so 3.2 isn't reached.
 
-## What part 1 covers
+## What it covers so far
 
-- **Stage 1, the key ceremony (partial):** a 4-of-7 panel with fresh identity keys runs the four rounds of `docs/spec/ceremony.md` through the production entry points, every seat taking part (ADR 0006, rule 7). The definition binds the transcript by its hash and the ceremony binds the definition's stub hash (T-37). The transcript is board entry 0, and the verifier's 3.2 must pass. The panel isn't pinned and nothing is registered on L2, so 3.1 can't pass yet.
+- **Stage 1, the key ceremony (partial):** a 4-of-7 panel with fresh identity keys runs the four rounds of `docs/spec/ceremony.md` through the production entry points, every seat taking part (ADR 0006, rule 7). The definition binds the transcript by its hash and the ceremony binds the definition's stub hash (T-37). The transcript is board entry 0, and the verifier's 3.2 must pass. On the L2 (part 2a, `src/l2.ts`), the trustee, group and election registries and the board are deployed from forge's build, the panel pinned in the trustee registry with a quorum of 6; the election is created there before its stub is written, so the definition names that deployment; every seat that took part checks the transcript and signs the key set the check returned, the trustee registry records the ceremony from those signatures, and the election registry registers the definition, whose hash and recorded ceremony the fixture reads back (T-37, T-14, T-71). The verifier doesn't read the L2 yet, so 3.1 can't pass, and no release pins the panel.
 - **Stage 7, in part:** `BoardAnchor` is deployed on Anvil with the 1-hour period and 12-hour deadline of `docs/spec/contracts.md`; the ceremony's segment and the seal are anchored inside their windows. The verifier reads both back from a finalized block's header and `eth_getProof` nodes, and 4.1 and 4.2 must pass (T-23, T-24, T-53).
 - **Stage 9, in part:** the verifier runs in a process of its own, from its built package, with an empty environment, over `bundle/` alone (T-36).
 
@@ -39,12 +39,12 @@ Everything else is listed as `not-yet` in `stages.json`, with the item that brin
 
 ## Stubs
 
-`STUBS` in `src/election.ts`, written into `stages.json`: the L2 contracts are placeholder addresses (nothing is registered on L2), the electorate is one placeholder Tier 0 group (the definition names the pinned membership key, which verifier 1.3 requires), the panel is given to the verifier as a local file, the anchoring authority is a one-byte contract Anvil lets the fixture send from rather than the Safe, and the seal is the segment after the ceremony's. Each placeholder is the Keccak-256 of a `reference-election/placeholder/…` label, so none can be taken for a deployment's.
+`STUBS` in `src/election.ts`, written into `stages.json`: the L2 is a local Anvil, not Base Sepolia, with forge's `MockL1Block` at the `L1Block` predeploy reporting the L1 Anvil's latest block as each event's origin; the group registry's registrars and the L1 relay are placeholder addresses; the electorate is one placeholder Tier 0 group (the definition names the pinned membership key, which verifier 1.3 requires), the panel is given to the verifier as a local file, the anchoring authority is a one-byte contract Anvil lets the fixture send from rather than the Safe, and the seal is the segment after the ceremony's. Each placeholder is the Keccak-256 of a `reference-election/placeholder/…` label, so none can be taken for a deployment's.
 
 ## Keys
 
-The fixture holds no private key (AGENTS.md, Testnets only): it sends from Anvil's unlocked development account and from an impersonated address. Trustee identity secrets are fresh random bytes for each run and never leave the process.
+The fixture holds no private key (AGENTS.md, Testnets only): it sends from each Anvil's unlocked development account and from an impersonated address. Trustee identity secrets are fresh random bytes for each run and never leave the process.
 
 ## Tests
 
-`vp run --filter @abolishus/reference-election test`: the RLP encoder against the published examples and a round-trip property, the anchor calldata's one canonical layout, the header rebuilt to an Anvil block's hash, and the report and control expectations. The end-to-end run itself is the `reference-election` check.
+`vp run --filter @abolishus/reference-election test`: the RLP encoder against the published examples and a round-trip property, the anchor calldata's and the one-`bytes`-argument calldata's canonical layouts, CREATE addresses, the ceremony registration record's layout with each seat's signature, the header rebuilt to an Anvil block's hash, and the report and control expectations. The end-to-end run itself is the `reference-election` check.

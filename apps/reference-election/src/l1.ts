@@ -30,7 +30,7 @@ export function word(n: bigint): Uint8Array {
   return w;
 }
 
-function padded(b: Uint8Array): Uint8Array {
+export function padded(b: Uint8Array): Uint8Array {
   const out = new Uint8Array(Math.ceil(b.length / 32) * 32);
   out.set(b);
   return out;
@@ -54,20 +54,20 @@ export function anchorCalldata(checkpoints: Uint8Array, locator: Uint8Array): Ui
   );
 }
 
-interface Receipt {
+export interface Receipt {
   readonly status: string;
   readonly contractAddress: string | null;
   readonly blockNumber: string;
 }
 
-async function send(rpc: Rpc, tx: Record<string, string>): Promise<Receipt> {
+export async function send(rpc: Rpc, tx: Record<string, string>): Promise<Receipt> {
   const hash = await rpc.call<string>("eth_sendTransaction", [tx]);
   // Anvil mines each transaction as it arrives, but may answer before the
   // receipt is stored.
   for (let attempt = 0; attempt < 50; attempt++) {
     const receipt = await rpc.call<Receipt | null>("eth_getTransactionReceipt", [hash]);
     if (receipt !== null) {
-      if (receipt.status !== "0x1") throw new Error(`transaction ${hash} reverted on L1`);
+      if (receipt.status !== "0x1") throw new Error(`transaction ${hash} reverted`);
       return receipt;
     }
     await new Promise((r) => setTimeout(r, 100));

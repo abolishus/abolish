@@ -250,17 +250,21 @@ export interface ViewBallot {
 
 /**
  * The ballot hashes whose receipts a trustee node owes through the contract
- * path (docs/spec/delivery.md, What a node owes): for each tier and nullifier,
+ * path (docs/spec/delivery.md, What a node owes). For each tier and nullifier:
  * the ballot [[revoting]]'s selection picks from the node's view, among those
  * whose L1 reference is admitted, if the node receipted its ballot hash (under
- * any L1 reference: a receipt covers the public part); nothing on a tie
- * or when the pick is a ballot it didn't receipt. At most one per tier and
- * nullifier, so with membership-checked intake at most one per member of
- * each tier, however many ballots anyone delivers or an operator withholds
- * (ADR 0002, Decision, 2026-10-12; T-52, T-25, T-54). `l1` must have
- * finalized a block after `closesAt`, so no reference is pending and every
- * node reaches the same verdicts; the function throws otherwise. Sorted by
- * ballot hash.
+ * any L1 reference: a receipt covers the public part), and nothing on a tie or
+ * when the pick is a ballot it didn't receipt; and, since the view may lack
+ * the copy that counts, the ballot hash of its newest receipted ballot whose
+ * reference isn't admitted (a block reorganised away, whose core the client
+ * cast again, revoting Client rule 4). At most two per tier and nullifier, so
+ * with membership-checked intake at most two per member of each tier,
+ * however many ballots anyone delivers or an operator withholds (ADR 0002,
+ * Decision, 2026-10-12; T-52, T-25, T-54). `l1` must have finalized a block
+ * after `closesAt`, so no reference is pending and every node reaches the
+ * same verdicts; the function throws otherwise. A node calls it once, at its
+ * decision point, and refuses intake afterwards: the union of several calls
+ * over a changing view isn't bounded. Sorted by ballot hash.
  */
 export function owedReceipts(
   view: Iterable<ViewBallot>,
@@ -269,6 +273,9 @@ export function owedReceipts(
 ): Uint8Array[] {
   const receipted = new Set<string>();
   const hashOf = new Map<string, Uint8Array>();
+  // Per tier and nullifier, the newest receipted ballot whose reference isn't
+  // admitted (ties broken by the smaller ballot hash, so every node agrees).
+  const unadmitted = new Map<string, { l1RefNumber: bigint; hash: Uint8Array }>();
   const admitted: {
     tier: number;
     nullifier: bigint;
@@ -283,7 +290,19 @@ export function owedReceipts(
     // Before the L1 filter: a receipt for a ballot whose reference was
     // reorganised away still covers its public part cast again.
     if (b.receipted) receipted.add(hex(b.ballotHash));
-    if (verdict !== "admitted") continue;
+    if (verdict !== "admitted") {
+      if (b.receipted) {
+        const key = `${b.tier}:${b.nullifier}`;
+        const prev = unadmitted.get(key);
+        if (
+          prev === undefined ||
+          b.l1RefNumber > prev.l1RefNumber ||
+          (b.l1RefNumber === prev.l1RefNumber && hex(b.ballotHash) < hex(prev.hash))
+        )
+          unadmitted.set(key, { l1RefNumber: b.l1RefNumber, hash: Uint8Array.from(b.ballotHash) });
+      }
+      continue;
+    }
     const m = hex(b.message);
     const h = hashOf.get(m);
     // M binds the ballot hash, so two copies with one message are one ballot.
@@ -307,6 +326,10 @@ export function owedReceipts(
     // it (T-25).
     if (receipted.has(hex(hash))) owed.push(hash);
   }
+  // Without the board's data the node can't see the copy cast again after a
+  // reorganisation; its receipt for the first copy delivers that one (T-25).
+  for (const { hash } of unadmitted.values())
+    if (!owed.some((h) => hex(h) === hex(hash))) owed.push(hash);
   return owed.sort((a, b) => (hex(a) < hex(b) ? -1 : hex(a) > hex(b) ? 1 : 0));
 }
 

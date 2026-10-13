@@ -291,15 +291,25 @@ describe("owedReceipts", () => {
     ).toEqual([9]);
   });
 
-  test("ignores ballots whose L1 reference isn't admitted, so they can't supersede", () => {
+  test("ballots whose L1 reference isn't admitted can't supersede; the newest receipted one is owed too", () => {
     expect(
       owed([
         view({ id: 1, block: 20n }),
         view({ id: 2, block: 30n, l1RefHash: new Uint8Array(32).fill(9) }),
         view({ id: 3, block: 5n }),
         view({ id: 4, block: 101n }),
+        view({ id: 5, block: 102n, receipted: false }),
       ]),
-    ).toEqual([1]);
+    ).toEqual([1, 4]);
+  });
+
+  test("owes a receipt whose ballot's block was reorganised away when the board's copy is withheld", () => {
+    // The client cast the same core again under a newer block (revoting
+    // Client rule 4); the operator anchored it and withholds its data, so the
+    // node holds only its own copy, which fails the L1 check.
+    expect(
+      owed([view({ id: 1, core: 9, block: 20n, l1RefHash: new Uint8Array(32).fill(7) })]),
+    ).toEqual([9]);
   });
 
   test("throws while L1 hasn't finalized a block after close", () => {
@@ -318,7 +328,7 @@ describe("owedReceipts", () => {
   test("owes at most one ballot per tier and nullifier, whatever the view's order", () => {
     const ballot = fc.record({
       id: fc.integer({ min: 0, max: 255 }),
-      block: fc.bigInt({ min: 10n, max: 100n }),
+      block: fc.bigInt({ min: 0n, max: 110n }),
       tier: fc.constantFrom(0, 1, 2),
       nullifier: fc.bigInt({ min: 1n, max: 4n }),
       receipted: fc.boolean(),
@@ -329,14 +339,14 @@ describe("owedReceipts", () => {
         const got = owedReceipts(v, closed, window).map(toHex);
         const reversed = owedReceipts([...v].reverse(), closed, window).map(toHex);
         expect(reversed).toEqual(got);
-        const groups = new Set(
-          got.map((h) => {
-            const b = v.find((x) => toHex(x.ballotHash) === h) as ViewBallot;
-            expect(b.receipted).toBe(true);
-            return `${b.tier}:${b.nullifier}`;
-          }),
-        );
-        expect(groups.size).toBe(got.length);
+        const perGroup = new Map<string, number>();
+        for (const h of got) {
+          const b = v.find((x) => toHex(x.ballotHash) === h) as ViewBallot;
+          expect(b.receipted).toBe(true);
+          const key = `${b.tier}:${b.nullifier}`;
+          perGroup.set(key, (perGroup.get(key) ?? 0) + 1);
+        }
+        for (const n of perGroup.values()) expect(n).toBeLessThanOrEqual(2);
       }),
       { numRuns },
     );
@@ -368,6 +378,24 @@ describe("owedReceipts", () => {
           if (best.size !== 1) continue;
           const [only] = [...best.values()] as [ViewBallot];
           if (receipted.has(toHex(only.ballotHash))) want.push(toHex(only.ballotHash));
+        }
+        // And each group's newest receipted ballot whose reference isn't admitted.
+        const failed = v.filter(
+          (b) => b.receipted && (b.l1RefNumber < 10n || b.l1RefNumber > 100n),
+        );
+        for (const key of new Set(failed.map((b) => `${b.tier}:${b.nullifier}`))) {
+          const [newest] = failed
+            .filter((b) => `${b.tier}:${b.nullifier}` === key)
+            .sort((a, b) =>
+              a.l1RefNumber !== b.l1RefNumber
+                ? a.l1RefNumber > b.l1RefNumber
+                  ? -1
+                  : 1
+                : toHex(a.ballotHash) < toHex(b.ballotHash)
+                  ? -1
+                  : 1,
+            ) as [ViewBallot];
+          if (!want.includes(toHex(newest.ballotHash))) want.push(toHex(newest.ballotHash));
         }
         expect(owedReceipts(v, closed, window).map(toHex)).toEqual(want.sort());
       }),

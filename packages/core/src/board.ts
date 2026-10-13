@@ -13,6 +13,7 @@ import {
   chainLink,
   consistencyProofSubtrees,
   decodeElectionDefinitionRecord,
+  DecodeError,
   encodeBoardEntry,
   foldSubtrees,
   inclusionProofSubtrees,
@@ -114,9 +115,16 @@ async function pinnedBoardVersion(
     .from(electionDefinitions)
     .where(eq(electionDefinitions.electionId, id));
   if (row === undefined) return "no-definition";
-  // storeDefinition decoded these bytes strictly before storing them.
-  const { value } = decodeElectionDefinitionRecord(new Uint8Array(row.definition));
-  const version = pinnedVersion(value, RECORD_TYPES.boardEntry);
+  // storeDefinition decodes before storing, but the app role may insert
+  // around it: bytes this release can't decode pin nothing it can write.
+  let version;
+  try {
+    const { value } = decodeElectionDefinitionRecord(new Uint8Array(row.definition));
+    version = pinnedVersion(value, RECORD_TYPES.boardEntry);
+  } catch (e) {
+    if (e instanceof DecodeError) return "unsupported-version";
+    throw e;
+  }
   return isBoardEntryVersion(version) ? version : "unsupported-version";
 }
 

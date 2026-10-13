@@ -205,6 +205,15 @@ describe("auditBoard", () => {
     const unsupported = await newElection(app, 2);
     await appendRaw(unsupported, ballot(0));
     expect(await auditFailure(unsupported)).toEqual(["board-unpinned", 0]);
+    // A definition inserted around storeDefinition that doesn't decode.
+    const undecodable = b32();
+    await app`INSERT INTO election_definitions (election_id, definition)
+      VALUES (${undecodable}, ${Uint8Array.of(0, 1, 1)})`;
+    await appendRaw(undecodable, ballot(0));
+    expect(await auditFailure(undecodable)).toEqual(["board-unpinned", 0]);
+    await expect(appendEntry(app, undecodable, 0, ballot(1))).rejects.toThrow(
+      /unsupported-version/,
+    );
   });
 
   test("refuses an election ID that isn't 32 bytes", async () => {

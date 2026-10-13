@@ -197,6 +197,26 @@ describe("appendEntry", () => {
     ).toBe(0);
   });
 
+  test("takes only the payload types its board-entry version allows", async () => {
+    // docs/spec/board.md, Allowed payloads: share receipts and complaints from
+    // version 3, destruction statements from version 4.
+    const allowed: [number, number[]][] = [
+      [1, []],
+      [3, [0x000c, 0x000e]],
+      [4, [0x000c, 0x000e, 0x000f]],
+    ];
+    for (const [version, types] of allowed) {
+      const id = await newElection(app, version);
+      for (const type of [0x000c, 0x000e, 0x000f]) {
+        const append = appendEntry(app, id, 0, record(type));
+        if (types.includes(type))
+          // The table's CHECK still lists version 1's types only (Known-weak).
+          await expect(append).rejects.toMatchObject({ cause: { code: "23514" } });
+        else expect(await refusedWith(append)).toBe("invalid-entry");
+      }
+    }
+  });
+
   test("any sequence of appends leaves exactly the accepted ones, verifiable", async () => {
     const op = fc.record({
       segmentStep: fc.constantFrom(-1, 0, 0, 0, 1),

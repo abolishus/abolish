@@ -113,6 +113,8 @@ const MISCODED_ID = FILLER[0]!;
 const MISCODED_CODE = codeOf(MISCODED_ID).startsWith("z")
   ? `y${codeOf(MISCODED_ID).slice(1)}`
   : `z${codeOf(MISCODED_ID).slice(1)}`;
+/** A listed poll whose code the stub fails to answer, as an API without the route would. */
+const CODE_FAILS_ID = FILLER[2]!;
 /** Each poll's canonical code as the stub claims it; the other polls have no registration. */
 const codes = new Map([
   [ID, CODE],
@@ -181,6 +183,7 @@ function stubApi(): Server {
           electionId === HIDDEN_ID ? { state: "hidden", latest: LATEST } : { state: "visible" },
         );
       case "/elections/code": {
+        if (electionId === CODE_FAILS_ID) return json(500, {});
         const code = codes.get(electionId);
         return code === undefined
           ? json(404, {
@@ -304,6 +307,7 @@ describe("poll page", () => {
   test.each([
     ["a code that isn't a prefix of the poll's hash (T-34)", MISCODED_ID, MISCODED_CODE],
     ["no recorded registration", FILLER[1]!, codeOf(FILLER[1]!)],
+    ["an API that fails to answer the code", CODE_FAILS_ID, codeOf(CODE_FAILS_ID)],
   ])("prints no code for %s", async (_, id, code) => {
     const response = await get(`/polls/${id}`);
     expect(response.status).toBe(200);

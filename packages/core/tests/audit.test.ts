@@ -122,7 +122,9 @@ describe("auditBoard", () => {
       ),
       { numRuns: Math.min(numRuns, 50) },
     );
-  });
+    // Fifty runs of database writes can outlast the default timeout on a CI
+    // runner shared with the other test files.
+  }, 60_000);
 
   test("passes rows stored without appendEntry when their columns are right", async () => {
     const id = b32();

@@ -23,7 +23,10 @@ const answers = (n: number) => `${count.format(n)} ${n === 1 ? "answer" : "answe
 export const answersSoFar = (n: number) => `${answers(n)} so far`;
 export const answersCounted = (n: number) => `${answers(n)} counted`;
 
-/** The headline: the question, or the poll's code while the question isn't served. */
+/**
+ * The headline: the question, or while it isn't served the poll's code, or
+ * the host for a poll with no code yet.
+ */
 export const headline = (model: PollPreview) =>
   model.question ?? (model.code === undefined ? `A poll on ${model.host}` : `Poll ${model.code}`);
 

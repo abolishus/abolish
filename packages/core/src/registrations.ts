@@ -177,7 +177,8 @@ export async function lookupShortCode(
 /** Whether a registration recorded before position (`l2Block`, `logIndex`) has `code`'s prefix. */
 async function sharedByEarlier(client: Sql, code: string, l2Block: bigint, logIndex: number) {
   const { from, to } = shortCodeRange(code);
-  // Materialized, as in `earliestWithPrefix`, so only the prefix's range is read.
+  // Materialized, as in `earliestWithPrefix`, so the prefix's range is read
+  // through the hash index rather than the planner walking the position index.
   const [row] = await client<{ one: number }[]>`
     WITH matches AS MATERIALIZED (
       SELECT l2_block, log_index FROM election_registrations

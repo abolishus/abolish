@@ -217,7 +217,12 @@ describe("the short code", () => {
   });
 
   test("must be a prefix of the seal", async () => {
-    for (const code of [CODE.startsWith("z") ? `y${CODE.slice(1)}` : `z${CODE.slice(1)}`, "abc"]) {
+    const nine = shortCode(fromHex(SEAL), 9);
+    const last = nine.endsWith("z") ? "y" : "z";
+    for (const code of [
+      CODE.startsWith("z") ? `y${CODE.slice(1)}` : `z${CODE.slice(1)}`,
+      `${nine.slice(0, -1)}${last}`,
+    ]) {
       const model = { ...VARIANTS["open"]!, code };
       expect(() => checkPreview(model)).toThrow(RangeError);
       await expect(renderPreview(model, "landscape")).rejects.toThrow(RangeError);

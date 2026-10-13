@@ -9,8 +9,12 @@ import type { PollView } from "../poll.ts";
 import type { PollPreview, PreviewFormat } from "./model.ts";
 import { previewText } from "./text.ts";
 
-/** Bumped whenever the card's layout changes, so every preview gets a new version. */
-const LAYOUT = 1;
+/**
+ * Bumped whenever the card's layout or the model's fields change, so every
+ * preview gets a new version: a model with no code serializes as one from
+ * before codes were optional, since `JSON.stringify` drops `undefined`.
+ */
+const LAYOUT = 2;
 
 export function pollPreview(
   poll: PollView,

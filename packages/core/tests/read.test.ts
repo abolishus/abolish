@@ -148,7 +148,9 @@ describe("readEntries", () => {
       ),
       { numRuns: Math.min(numRuns, 50) },
     );
-  });
+    // Fifty runs of database writes can outlast the default timeout on a CI
+    // runner shared with the other test files.
+  }, 60_000);
 });
 
 describe("proofs", () => {

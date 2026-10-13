@@ -60,14 +60,17 @@ export async function loadPoll(api: Api, electionId: string): Promise<PollPage> 
   return { kind: "poll", poll: view.poll, board, moderation, code };
 }
 
-/** The API's canonical code for `electionId`, or `undefined` while no registration is recorded. */
+/**
+ * The API's canonical code for `electionId`, or `undefined` while no
+ * registration is recorded. The code is optional on the page, so any failure
+ * to read it (an API rolled back to before the route, a slow query) prints no
+ * code rather than taking the poll page down.
+ */
 async function codeOf(api: Api, electionId: string): Promise<string | undefined> {
   try {
     return (await api.elections.getCode({ electionId })).code;
-  } catch (error) {
-    if (error instanceof ORPCError && error.defined && error.code === "CODE_NOT_FOUND")
-      return undefined;
-    throw error;
+  } catch {
+    return undefined;
   }
 }
 

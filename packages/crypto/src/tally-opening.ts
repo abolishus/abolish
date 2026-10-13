@@ -20,7 +20,12 @@ import { ds } from "./domain-separation.ts";
 import { type Element, elementOrIdentity, G, GENERATOR_H, H, IDENTITY } from "./group.ts";
 import { PARAMETERS } from "./parameters.ts";
 import { RECORD_TYPES, RecordSchema, recordType } from "./record.ts";
-import { aggregateCell, type CellAggregate, type TallyRules } from "./tally.ts";
+import {
+  aggregateCell,
+  type CellAggregate,
+  firstQuestionOutside,
+  type TallyRules,
+} from "./tally.ts";
 import { p256Sig, signStatement, verifyStatement } from "./trustee.ts";
 
 const TAG = "abolish/v1/sig/tally-opening";
@@ -141,7 +146,12 @@ export interface FailingOpening extends OpeningReport {
   readonly option?: number;
 }
 
-export type CellCode = "tally-missing" | "tally-opening" | "tally-conflict" | "tally-range";
+export type CellCode =
+  | "tally-missing"
+  | "tally-opening"
+  | "tally-conflict"
+  | "tally-range"
+  | "tally-question-range";
 
 /**
  * One cell's verdict (docs/spec/tally.md, Opening checks). `passing` lists
@@ -159,6 +169,8 @@ export type CellCheck =
       readonly ok: false;
       readonly code: CellCode;
       readonly option?: number;
+      /** For `tally-question-range`: the first question outside its limits. */
+      readonly question?: number;
       readonly passing: readonly OpeningReport[];
       readonly failing: readonly FailingOpening[];
     };
@@ -167,7 +179,12 @@ export interface TallyCheck {
   /** True only if every cell passes: the election's result is then every cell's counts. */
   readonly ok: boolean;
   /** The first failing cell, in cell order (verifier 7.2). */
-  readonly failure?: { readonly cell: number; readonly code: CellCode; readonly option?: number };
+  readonly failure?: {
+    readonly cell: number;
+    readonly code: CellCode;
+    readonly option?: number;
+    readonly question?: number;
+  };
   readonly cells: readonly CellCheck[];
   /** Openings naming another definition or a cell the partition doesn't have (verifier 7.4). */
   readonly stray: readonly OpeningReport[];
@@ -257,7 +274,12 @@ function checkCell(
   const bound = BigInt(ballots.length);
   const over = first.opening.findIndex((s) => s.v > bound);
   if (over !== -1) return { ok: false, code: "tally-range", option: over, ...reports };
-  return { ok: true, counts: first.opening.map((s) => s.v), ...reports };
+  // 5. tally-question-range under definition version 5: every question's
+  // total within its limits, since each question's result is its slice.
+  const counts = first.opening.map((s) => s.v);
+  const question = firstQuestionOutside(election.rules, ballots.length, counts);
+  if (question !== null) return { ok: false, code: "tally-question-range", question, ...reports };
+  return { ok: true, counts, ...reports };
 }
 
 /** A decoded tally opening, sorted and attributed (docs/spec/tally.md, Which openings are a cell's). */
@@ -339,9 +361,11 @@ export function checkTally(
   const at = checked.findIndex((c) => !c.ok);
   if (at === -1) return { ok: true, cells: checked, stray, rejected };
   const bad = checked[at] as Extract<CellCheck, { ok: false }>;
-  const failure =
-    bad.option === undefined
-      ? { cell: at, code: bad.code }
-      : { cell: at, code: bad.code, option: bad.option };
+  const failure = {
+    cell: at,
+    code: bad.code,
+    ...(bad.option === undefined ? {} : { option: bad.option }),
+    ...(bad.question === undefined ? {} : { question: bad.question }),
+  };
   return { ok: false, failure, cells: checked, stray, rejected };
 }

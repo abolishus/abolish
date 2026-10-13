@@ -36,9 +36,15 @@ import {
   MLKEM_MSG_LEN,
   nonZeroRandom,
 } from "./share-encryption.ts";
-import { type CellAggregate, checkSummedShares, type TallyRules } from "./tally.ts";
+import { type CellAggregate, checkSummedShares, type TallyRules, tallyRules } from "./tally.ts";
 import type { ElectionDefinition } from "./election-definition.ts";
-import { electionDefinitionHash } from "./protocol.ts";
+import {
+  type AnyElectionDefinitionRecord,
+  electionDefinitionHash,
+  electionDefinitionV3Hash,
+  electionDefinitionV4Hash,
+  electionDefinitionV5Hash,
+} from "./protocol.ts";
 import { aggregateHash } from "./tally-opening.ts";
 import { identityKey, p256Sig, signStatement, verifyStatement } from "./trustee.ts";
 
@@ -105,11 +111,18 @@ function signedBytes(m: CodecValue<typeof statementV1>): Uint8Array {
 }
 
 /**
+ * A registered definition a tally runs under: a version-1 definition, or a
+ * decoded record of version 1, 3, 4 or 5 (`tallyRules`; a version-6 one is
+ * refused until P2-16 tallies ballot version 4).
+ */
+export type SummedShareDefinition = ElectionDefinition | AnyElectionDefinitionRecord;
+
+/**
  * The cell a message is about: the registered definition, the cell's
  * position in its partition and its aggregate over the anchored counted set.
  */
 export interface SummedShareCell {
-  readonly definition: ElectionDefinition;
+  readonly definition: SummedShareDefinition;
   readonly cell: number;
   readonly aggregate: CellAggregate;
 }
@@ -126,20 +139,48 @@ interface DefinitionContext {
   readonly rules: TallyRules;
   /**
    * The number of cells in the registered partition: under definition version
-   * 1, one per `electorate` entry (verifier 2.8). A trustee sums only for
+   * 1, one per `electorate` entry, under versions 3 to 5 every tier's cells
+   * (verifier 2.8). A trustee sums only for
    * these cells, so no request for another cell, over a subset of a counted
    * set, can make it disclose a difference of sums (T-14, T-16).
    */
   readonly cells: number;
 }
 
-function contextOf(d: ElectionDefinition): DefinitionContext {
-  return {
-    definitionHash: electionDefinitionHash(d),
-    ceremonyTranscriptHash: Uint8Array.from(d.ceremony_transcript_hash),
-    rules: { optionCount: d.option_count, threshold: d.threshold, panelSize: d.panel_size },
-    cells: d.electorate.length,
-  };
+function contextOf(definition: SummedShareDefinition): DefinitionContext {
+  const record: AnyElectionDefinitionRecord =
+    "version" in definition && "value" in definition
+      ? definition
+      : { version: 1, value: definition };
+  // Refuses a version-6 definition and one that isn't well-formed (T-28, T-36).
+  const rules = tallyRules(record);
+  switch (record.version) {
+    case 1:
+      return {
+        definitionHash: electionDefinitionHash(record.value),
+        ceremonyTranscriptHash: Uint8Array.from(record.value.ceremony_transcript_hash),
+        rules,
+        cells: record.value.electorate.length,
+      };
+    case 3:
+    case 4:
+    case 5:
+      return {
+        definitionHash:
+          record.version === 3
+            ? electionDefinitionV3Hash(record.value)
+            : record.version === 4
+              ? electionDefinitionV4Hash(record.value)
+              : electionDefinitionV5Hash(record.value),
+        ceremonyTranscriptHash: Uint8Array.from(record.value.ceremony_transcript_hash),
+        rules,
+        // Every tier's cells, numbered across the definition (verifier 2.8).
+        cells: record.value.electorate.reduce((n, t) => n + t.cells.length, 0),
+      };
+    default:
+      // Unreachable: tallyRules refused every other version.
+      throw new RangeError("summed share: unsupported definition version");
+  }
 }
 
 /** Internal: a cell with its definition's values already derived (tests and vectors). */
@@ -344,7 +385,7 @@ export type SummedShareResult =
 /** What a recipient checks a message against, all from data it has already checked. */
 export interface SummedShareElection {
   /** The registered definition. */
-  readonly definition: ElectionDefinition;
+  readonly definition: SummedShareDefinition;
   /** Each cell's aggregate over the anchored counted set, in partition order. */
   readonly aggregates: readonly CellAggregate[];
   /**

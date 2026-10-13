@@ -6,32 +6,64 @@
 // (CFSY 1996, Section 3; T-29, T-54, T-16, T-15). Group operations are @noble's;
 // this module only composes them with scalar arithmetic modulo ℓ.
 
-import { checkShares, type CommittedVote, type Share } from "./ballot-validity.ts";
+import {
+  checkShares,
+  type CommittedVote,
+  type QuestionRules,
+  type Share,
+} from "./ballot-validity.ts";
+import {
+  electionDefinitionRule,
+  electionDefinitionV3Rule,
+  electionDefinitionV4Rule,
+  electionDefinitionV5Rule,
+} from "./election-definition.ts";
 import { type Element, G, GENERATOR_H, GROUP_ORDER, IDENTITY } from "./group.ts";
 import { PARAMETERS } from "./parameters.ts";
+import { type AnyElectionDefinitionRecord, UnsupportedVersionError } from "./protocol.ts";
+import { RECORD_TYPES } from "./record.ts";
 
-const { MAX_OPTIONS, MAX_TRUSTEES } = PARAMETERS;
+const { MAX_OPTIONS, MAX_QUESTIONS, MAX_TRUSTEES } = PARAMETERS;
 
 /** The election's rules a cell is tallied under, from its registered definition. */
 export interface TallyRules {
+  /** `m`: under definition version 5, `T`, the total over the questions, in flat order. */
   readonly optionCount: number;
   /** `k`: how many valid summed shares open a cell. */
   readonly threshold: number;
   /** `n`: summed shares come from seats 1 to `n`. */
   readonly panelSize: number;
+  /**
+   * Under definition version 5, each question's option count and limits, in
+   * order; their option counts sum to `optionCount`. Absent under versions 1,
+   * 3 and 4, which ask one question and have no `tally-question-range`.
+   */
+  readonly questions?: readonly QuestionRules[];
 }
 
 /** For each option, the cell's `k` aggregate VSS commitments `Ê_{j,0}, …, Ê_{j,k−1}`; `Ê_{j,0}` is `Ĉ_j`. */
 export type CellAggregate = readonly (readonly Element[])[];
 
-export type TallyCode = "tally-quorum" | "tally-opening" | "tally-range";
+export type TallyCode = "tally-quorum" | "tally-opening" | "tally-range" | "tally-question-range";
 
 /** The verifier's codes for a cell's published opening (docs/spec/tally.md, Opening checks). */
-export type OpeningCode = "tally-missing" | "tally-opening" | "tally-range";
+export type OpeningCode =
+  | "tally-missing"
+  | "tally-opening"
+  | "tally-range"
+  | "tally-question-range";
+
+/** A failing check on an opening: `option` for `tally-opening` and `tally-range`, `question` for `tally-question-range`. */
+type OpeningFailure<C> = {
+  readonly ok: false;
+  readonly code: C;
+  readonly option?: number;
+  readonly question?: number;
+};
 
 export type OpeningResult =
   | { readonly ok: true; readonly counts: readonly bigint[] }
-  | { readonly ok: false; readonly code: OpeningCode; readonly option?: number };
+  | OpeningFailure<OpeningCode>;
 
 export type CellOpening =
   | {
@@ -45,12 +77,7 @@ export type CellOpening =
       /** Seats whose summed shares failed the check, ascending. */
       readonly excluded: readonly number[];
     }
-  | {
-      readonly ok: false;
-      readonly code: TallyCode;
-      readonly option?: number;
-      readonly excluded: readonly number[];
-    };
+  | (OpeningFailure<TallyCode> & { readonly excluded: readonly number[] });
 
 const isScalar = (x: unknown) => typeof x === "bigint" && x >= 0n && x < GROUP_ORDER;
 
@@ -63,11 +90,79 @@ function mul(p: Element, s: bigint): Element {
 }
 
 function checkRules(rules: TallyRules): void {
-  const { optionCount: m, threshold: k, panelSize: n } = rules;
+  const { optionCount: m, threshold: k, panelSize: n, questions } = rules;
   if (![m, k, n].every((x) => Number.isSafeInteger(x)))
     throw new TypeError("rules: expected integers");
   if (m < 1 || m > MAX_OPTIONS) throw new RangeError("rules: optionCount out of range");
   if (k < 2 || k > n || n > MAX_TRUSTEES) throw new RangeError("rules: panel out of range");
+  if (questions === undefined) return;
+  if (!Array.isArray(questions) || questions.length < 1 || questions.length > MAX_QUESTIONS)
+    throw new RangeError("rules: from 1 to MAX_QUESTIONS questions");
+  let total = 0;
+  for (const q of questions as readonly QuestionRules[]) {
+    const { optionCount: mq, minSelections: min, maxSelections: max } = q;
+    if (![mq, min, max].every((x) => Number.isSafeInteger(x)))
+      throw new TypeError("rules: expected integers");
+    if (mq < 1 || min < 0 || min > max || max > mq)
+      throw new RangeError("rules: a question's limits out of range");
+    total += mq;
+  }
+  // The flat options are the questions' options in order (T-28): a question
+  // list over another number of options would slice the opening wrongly.
+  if (total !== m) throw new RangeError("rules: the questions' options don't sum to optionCount");
+}
+
+/**
+ * The rules a cell of a registered definition is tallied under
+ * (docs/spec/tally.md, Context): `m`, `k` and `n`, and under version 5 each
+ * question's option count and limits. Versions 1, 3, 4 and 5 only: a
+ * version-6 definition's ballots are version 4, whose tally (its default
+ * half, and with an author panel the sum of both panels' openings) is
+ * P2-16's, so it is `UnsupportedVersionError` here until then (T-36). A definition that isn't well-formed is refused: its questions could
+ * hold limits no ballot proves, which would make `tally-question-range`
+ * judge an honest cell (T-28, T-34).
+ */
+export function tallyRules(definition: AnyElectionDefinitionRecord): TallyRules {
+  const rules = (d: { readonly threshold: number; readonly panel_size: number }) => ({
+    threshold: d.threshold,
+    panelSize: d.panel_size,
+  });
+  switch (definition.version) {
+    case 1:
+      if (electionDefinitionRule(definition.value) !== undefined)
+        throw new RangeError("tallyRules: the definition isn't well-formed");
+      return { optionCount: definition.value.option_count, ...rules(definition.value) };
+    case 3:
+    case 4: {
+      const failure =
+        definition.version === 3
+          ? electionDefinitionV3Rule(definition.value)
+          : electionDefinitionV4Rule(definition.value);
+      if (failure !== undefined)
+        throw new RangeError("tallyRules: the definition isn't well-formed");
+      return { optionCount: definition.value.option_count, ...rules(definition.value) };
+    }
+    case 5: {
+      if (electionDefinitionV5Rule(definition.value) !== undefined)
+        throw new RangeError("tallyRules: the definition isn't well-formed");
+      const questions = Object.freeze(
+        definition.value.questions.map((q) =>
+          Object.freeze({
+            optionCount: q.option_count,
+            minSelections: q.min_selections,
+            maxSelections: q.max_selections,
+          }),
+        ),
+      );
+      return Object.freeze({
+        optionCount: questions.reduce((t, q) => t + q.optionCount, 0),
+        ...rules(definition.value),
+        questions,
+      });
+    }
+    default:
+      throw new UnsupportedVersionError(RECORD_TYPES.electionDefinition, definition.version);
+  }
 }
 
 /**
@@ -161,34 +256,69 @@ export function lagrangeAtZero(seats: readonly number[]): bigint[] {
   );
 }
 
-/** `tally-opening` then `tally-range` for each option in order, against the aggregate. */
+/**
+ * `tally-question-range` (docs/spec/tally.md, Opening checks), on an opening
+ * that passed `tally-range`: under definition version 5, the first question
+ * whose counts, summed, lie outside `[min_q · |S_c|, max_q · |S_c|]`, or
+ * `null`. Each question's result is its slice of the opening and rests on
+ * this check, though it can't fail while binding holds (T-29, T-28).
+ */
+export function firstQuestionOutside(
+  rules: TallyRules,
+  ballotCount: number,
+  counts: readonly bigint[],
+): number | null {
+  checkRules(rules);
+  if (!Number.isSafeInteger(ballotCount) || ballotCount < 0)
+    throw new RangeError("firstQuestionOutside: a ballot count");
+  if (!Array.isArray(counts) || counts.length !== rules.optionCount)
+    throw new RangeError("firstQuestionOutside: one count per option");
+  const s = BigInt(ballotCount);
+  let offset = 0;
+  for (const [q, { optionCount, minSelections, maxSelections }] of (
+    rules.questions ?? []
+  ).entries()) {
+    const total = counts.slice(offset, offset + optionCount).reduce((a, v) => a + v, 0n);
+    offset += optionCount;
+    if (total < BigInt(minSelections) * s || total > BigInt(maxSelections) * s) return q;
+  }
+  return null;
+}
+
+/**
+ * The opening checks in the spec's order against the aggregate:
+ * `tally-opening` for every option, then `tally-range` for every option,
+ * then `tally-question-range` for every question.
+ */
 function checkAgainst(
+  rules: TallyRules,
   aggregate: CellAggregate,
   ballotCount: number,
   opening: readonly Share[],
 ):
   | { readonly ok: true; readonly counts: readonly bigint[] }
-  | {
-      readonly ok: false;
-      readonly code: "tally-opening" | "tally-range";
-      readonly option: number;
-    } {
+  | OpeningFailure<"tally-opening" | "tally-range" | "tally-question-range"> {
   for (let j = 0; j < aggregate.length; j++) {
     const { v, r } = opening[j] as Share;
     const opens = mul(G, v)
       .add(mul(GENERATOR_H, r))
       .equals((aggregate[j] as readonly Element[])[0] as Element);
     if (!opens) return { ok: false, code: "tally-opening", option: j };
-    if (v > BigInt(ballotCount)) return { ok: false, code: "tally-range", option: j };
   }
-  return { ok: true, counts: opening.map((s) => s.v) };
+  const counts = opening.map((s) => s.v);
+  const over = counts.findIndex((v) => v > BigInt(ballotCount));
+  if (over !== -1) return { ok: false, code: "tally-range", option: over };
+  const question = firstQuestionOutside(rules, ballotCount, counts);
+  if (question !== null) return { ok: false, code: "tally-question-range", question };
+  return { ok: true, counts };
 }
 
 /**
  * The verifier's check of a cell's published opening (docs/spec/tally.md,
  * Opening checks; verifier 7.2): one `(V_j, R_j)` per option, each a
  * canonical scalar, opening the product of the counted ballots' commitments
- * with a count of at most the cell's ballots. `opening` comes from the board
+ * with a count of at most the cell's ballots and, under definition version
+ * 5, every question's total within its limits. `opening` comes from the board
  * and may be anything, or nothing (`undefined`).
  */
 export function checkOpening(
@@ -203,7 +333,7 @@ export function checkOpening(
     !opening.every((s) => isScalar(s?.v) && isScalar(s?.r))
   )
     return { ok: false, code: "tally-missing" };
-  return checkAgainst(aggregate, ballots.length, opening);
+  return checkAgainst(rules, aggregate, ballots.length, opening);
 }
 
 /**
@@ -244,7 +374,7 @@ export function openCell(
       { v: 0n, r: 0n },
     ),
   );
-  const checked = checkAgainst(aggregate, ballots.length, opening);
+  const checked = checkAgainst(rules, aggregate, ballots.length, opening);
   if (!checked.ok) return { ...checked, excluded };
   return {
     ok: true,
@@ -265,4 +395,25 @@ export function deriveTotal(cells: readonly (readonly bigint[])[]): bigint[] {
   const m = (cells[0] as readonly bigint[]).length;
   if (cells.some((c) => c.length !== m)) throw new RangeError("deriveTotal: one count per option");
   return Array.from({ length: m }, (_, j) => cells.reduce((acc, c) => acc + (c[j] as bigint), 0n));
+}
+
+/**
+ * Each question's result: its slice of a cell's counts, or of a coarser
+ * total, at its options in flat order (docs/spec/tally.md, Opening checks,
+ * Notes; election-definition.md, Questions). Under definition versions 1, 3
+ * and 4 the one question is every option. Nothing here relates two
+ * questions: a joint figure would need individual ballots, which no opening
+ * reveals (ADR 0026, No cross-tabulation; T-29, T-16).
+ */
+export function questionResults(
+  rules: TallyRules,
+  counts: readonly bigint[],
+): (readonly bigint[])[] {
+  checkRules(rules);
+  if (!Array.isArray(counts) || counts.length !== rules.optionCount)
+    throw new RangeError("questionResults: one count per option");
+  let offset = 0;
+  return (rules.questions ?? [{ optionCount: rules.optionCount }]).map(({ optionCount }) =>
+    counts.slice(offset, (offset += optionCount)),
+  );
 }

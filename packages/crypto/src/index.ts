@@ -525,9 +525,11 @@ export {
   openCell,
   type OpeningCode,
   type OpeningResult,
+  questionResults,
   sumShares,
   type TallyCode,
   type TallyRules,
+  tallyRules,
 } from "./tally.ts";
 export {
   decodeSummedShareMessage,
@@ -537,6 +539,7 @@ export {
   SUMMED_SHARE,
   type SummedShareCell,
   type SummedShareCode,
+  type SummedShareDefinition,
   type SummedShareElection,
   type SummedShareMessage,
   type SummedShareResult,

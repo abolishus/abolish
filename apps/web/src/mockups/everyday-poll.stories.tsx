@@ -94,8 +94,11 @@ export const Dark: Story = {
       ).toBeVisible(),
     );
     await userEvent.keyboard("{Escape}");
-    await waitFor(() =>
-      expect(within(canvasElement.ownerDocument.body).queryByRole("dialog")).toBeNull(),
+    // The sheet unmounts after its exit transition, which on a loaded CI
+    // runner can outlast waitFor's default second.
+    await waitFor(
+      () => expect(within(canvasElement.ownerDocument.body).queryByRole("dialog")).toBeNull(),
+      { timeout: 5_000 },
     );
   },
 };

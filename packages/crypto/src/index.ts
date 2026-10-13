@@ -617,6 +617,8 @@ export {
   type FailingOpening,
   type OpeningReport,
   signTallyOpening,
+  type SortedTallyOpening,
+  sortTallyOpenings,
   TALLY_OPENING,
   type TallyCheck,
   type TallyElection,

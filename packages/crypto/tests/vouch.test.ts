@@ -274,7 +274,9 @@ describe("the record", () => {
       bytes[at + 1] = ((bytes[at + 1] as number) + 1) % 256;
       expect(checkTier1Addition(bytes, CTX).ok, `byte ${at + 1}`).toBe(false);
     }
-  });
+    // 38 changed records, each verifying up to six Groth16 proofs: about 5 s
+    // on a shared CI runner, so the default timeout failed it there.
+  }, 60_000);
 
   test("the honest addition fails under any other chain or registry", () => {
     expect(checkTier1Addition(HONEST, CTX).ok).toBe(true);

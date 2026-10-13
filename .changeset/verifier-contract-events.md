@@ -1,0 +1,5 @@
+---
+"@abolishus/verifier": minor
+---
+
+Runs 4.4's event check on format-3 and format-4 bundles (`docs/spec/verifier.md`, Contract events): every contract-event record (`0x0008`) of the election on the copy is decoded under the contract-event version the profile pins and checked by `@abolishus/crypto`'s `checkContractEvent` against the definition's L2 contracts. The first record that doesn't decode or fails the check is reported on 4.4 with `decode` (and `decodeError`), `unknown-contract`, `unknown-event`, `event-topics` or `event-data` and its entry: `fail` when 4.1 and 4.2 pass and it is inside the anchored extent, so `verdictAgainstInputs` becomes `failed` for such bundles, and `unverifiable` on a copy the board checks don't authenticate. Otherwise 4.4 stays `unverifiable` (`not-implemented`), as before; a contract-event version other than 1 or 2 gives `unsupported-version`, and a definition that stops the board checks gives `not-reached`. `CheckCode` gains the four event-check codes. `verdict` is unchanged, because local inputs never verify or fail an election.

@@ -354,11 +354,28 @@ describe("the board checks' inputs come from the definition", () => {
       // fails, which stops none of the other checks.
       const r3 = format3(forElection(v.anchor), v);
       const r2 = format2(v);
-      // 1.3 and 2.9 need a decoded definition, which only format 3 carries.
+      // 1.3, 2.9 and 4.4 need a decoded definition, which only format 3 carries.
       const others = (r: Report) =>
-        r.checks.filter((c) => !["1.3", "2.1", "2.3", "2.9"].includes(c.id));
+        r.checks.filter((c) => !["1.3", "2.1", "2.3", "2.9", "4.4"].includes(c.id));
       expect(others(r3)).toEqual(others(r2));
       expect(row(r3, "2.3")).toEqual(COMBINATION_FAILS);
+      // board.json's entry 1 is a framing placeholder of type 0x0008, not a
+      // contract-event record. It fails 4.4 where 4.1 and 4.2 pass with it
+      // inside the anchored extent; with nothing anchored it isn't read; and
+      // where the board checks don't pass it leaves 4.4 unverifiable with
+      // its code (T-53).
+      expect(row(r2, "4.4")).toMatchObject({ status: "unverifiable", code: "not-implemented" });
+      const placeholder = { code: "decode", at: { entry: 1, decodeError: "truncated" } };
+      expect(row(r3, "4.4")).toEqual({
+        id: "4.4",
+        kind: "election",
+        ...(["closed", "running"].includes(v.id)
+          ? { status: "fail", ...placeholder }
+          : v.id === "before-any-anchor"
+            ? { status: "unverifiable", code: "not-implemented" }
+            : { status: "unverifiable", ...placeholder }),
+      });
+      if (v.id === "before-any-anchor") expect(r3.board.unauthenticated).toBe(r3.board.entries);
       // The typical definition names a placeholder membership key, not the pinned one.
       expect(row(r3, "1.3")).toMatchObject({ status: "fail", code: "membership-key" });
       expect(row(r3, "2.9")).toEqual({ id: "2.9", kind: "election", status: "pass" });

@@ -633,6 +633,7 @@ contract TrusteeRegistryTest is TestBase {
     /// The election registry admits a definition exactly when this registry
     /// recorded its stub with its transcript, for the panel it names.
     function test_ElectionRegistryAsksThisRegistry() public {
+        RegistryFixture.installL1Block(vm);
         DefinitionHarness defs = new DefinitionHarness();
         ElectionRegistry elections =
             new ElectionRegistry(RegistryFixture.deployment(address(registry)));

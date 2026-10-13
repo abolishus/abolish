@@ -330,6 +330,13 @@ export const electionRegistryAbi = [
   {
     type: "function",
     inputs: [],
+    name: "L1_BLOCK",
+    outputs: [{ name: "", internalType: "address", type: "address" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    inputs: [],
     name: "board",
     outputs: [{ name: "", internalType: "address", type: "address" }],
     stateMutability: "view",
@@ -445,6 +452,24 @@ export const electionRegistryAbi = [
         indexed: true,
       },
       {
+        name: "l1OriginNumber",
+        internalType: "uint64",
+        type: "uint64",
+        indexed: false,
+      },
+      {
+        name: "l1OriginTimestamp",
+        internalType: "uint64",
+        type: "uint64",
+        indexed: false,
+      },
+      {
+        name: "l1OriginHash",
+        internalType: "bytes32",
+        type: "bytes32",
+        indexed: false,
+      },
+      {
         name: "definition",
         internalType: "bytes",
         type: "bytes",
@@ -473,6 +498,24 @@ export const electionRegistryAbi = [
         name: "counter",
         internalType: "uint64",
         type: "uint64",
+        indexed: false,
+      },
+      {
+        name: "l1OriginNumber",
+        internalType: "uint64",
+        type: "uint64",
+        indexed: false,
+      },
+      {
+        name: "l1OriginTimestamp",
+        internalType: "uint64",
+        type: "uint64",
+        indexed: false,
+      },
+      {
+        name: "l1OriginHash",
+        internalType: "bytes32",
+        type: "bytes32",
         indexed: false,
       },
     ],

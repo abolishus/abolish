@@ -4,6 +4,8 @@ pragma solidity 0.8.30;
 import {ElectionDefinitionLib} from "../../src/ElectionDefinition.sol";
 import {ElectionRegistry} from "../../src/ElectionRegistry.sol";
 import {DefinitionEncoder, DefinitionHarness, MockTrusteeRegistry} from "./DefinitionHarness.sol";
+import {MockL1Block} from "./MockL1Block.sol";
+import {Vm} from "./Vm.sol";
 
 /// A deployment and well-formed definitions for it, shared by the unit and
 /// invariant tests.
@@ -15,6 +17,22 @@ library RegistryFixture {
     uint256 internal constant NOW = EPOCH + 1000;
     uint256 internal constant BLOCK = 5000;
     uint64 internal constant ROOT_BLOCK = 4000;
+    /// The OP Stack's `L1Block` predeploy, as the registry has it.
+    address internal constant L1_BLOCK = 0x4200000000000000000000000000000000000015;
+    /// The L1 origin the predeploy reports: a Sepolia-like block a minute
+    /// before `NOW`, within the template's `max_sequencer_drift`.
+    uint64 internal constant L1_ORIGIN_NUMBER = 7_000_000;
+    uint64 internal constant L1_ORIGIN_TIMESTAMP = uint64(NOW) - 60;
+    bytes32 internal constant L1_ORIGIN_HASH = keccak256("l1-origin");
+
+    /// Puts a mock `L1Block` at the predeploy's address, reporting the
+    /// fixture's origin. Every test that deploys a registry calls it, since a
+    /// registry with no predeploy refuses to create or register.
+    function installL1Block(Vm vm) internal returns (MockL1Block l1) {
+        vm.etch(L1_BLOCK, address(new MockL1Block()).code);
+        l1 = MockL1Block(L1_BLOCK);
+        l1.set(L1_ORIGIN_NUMBER, L1_ORIGIN_TIMESTAMP, L1_ORIGIN_HASH);
+    }
 
     function deployment(address trusteeRegistry)
         internal

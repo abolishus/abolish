@@ -9,6 +9,7 @@ import {
     DefinitionHarness,
     MockTrusteeRegistry
 } from "./utils/DefinitionHarness.sol";
+import {MockL1Block} from "./utils/MockL1Block.sol";
 import {RegistryFixture} from "./utils/RegistryFixture.sol";
 import {TestBase, Vm} from "./utils/Vm.sol";
 
@@ -22,8 +23,10 @@ contract ElectionRegistryTest is TestBase {
     DefinitionHarness internal lib;
     MockTrusteeRegistry internal trustees;
     ElectionRegistry internal registry;
+    MockL1Block internal l1;
 
     function setUp() public {
+        l1 = RegistryFixture.installL1Block(vm);
         lib = new DefinitionHarness();
         trustees = new MockTrusteeRegistry();
         registry = new ElectionRegistry(RegistryFixture.deployment(address(trustees)));
@@ -46,7 +49,7 @@ contract ElectionRegistryTest is TestBase {
         assertEq(registry.electionCount(), 3, "count");
     }
 
-    function test_CreateEmitsOnlyIdentifierCreatorAndCounter() public {
+    function test_CreateEmitsOnlyIdentifierCreatorCounterAndL1Origin() public {
         vm.recordLogs();
         vm.prank(CREATOR);
         bytes32 id = registry.createElection();
@@ -56,7 +59,18 @@ contract ElectionRegistryTest is TestBase {
         assertEq(logs[0].topics[0], ElectionRegistry.ElectionCreated.selector, "topic 0");
         assertEq(logs[0].topics[1], id, "election id topic");
         assertEq(logs[0].topics[2], bytes32(uint256(uint160(CREATOR))), "creator topic");
-        assertTrue(keccak256(logs[0].data) == keccak256(abi.encode(uint64(0))), "data");
+        assertTrue(
+            keccak256(logs[0].data)
+                == keccak256(
+                    abi.encode(
+                        uint64(0),
+                        RegistryFixture.L1_ORIGIN_NUMBER,
+                        RegistryFixture.L1_ORIGIN_TIMESTAMP,
+                        RegistryFixture.L1_ORIGIN_HASH
+                    )
+                ),
+            "data"
+        );
         _assertAccumulated(logs);
     }
 
@@ -81,11 +95,125 @@ contract ElectionRegistryTest is TestBase {
         assertEq(logs[0].topics[0], ElectionRegistry.DefinitionRegistered.selector, "topic 0");
         assertEq(logs[0].topics[1], id, "election id topic");
         assertEq(logs[0].topics[2], lib.hash(enc), "hash topic");
-        // T-17: the event carries the definition's canonical bytes and
-        // nothing else, so the board and archive hold only defined fields.
-        assertTrue(keccak256(logs[0].data) == keccak256(abi.encode(enc)), "data");
+        // T-17: the event carries the block's L1 origin and the definition's
+        // canonical bytes and nothing else, so the board and archive hold
+        // only defined fields.
+        assertTrue(
+            keccak256(logs[0].data)
+                == keccak256(
+                    abi.encode(
+                        RegistryFixture.L1_ORIGIN_NUMBER,
+                        RegistryFixture.L1_ORIGIN_TIMESTAMP,
+                        RegistryFixture.L1_ORIGIN_HASH,
+                        enc
+                    )
+                ),
+            "data"
+        );
         (, uint64 count) = registry.eventAccumulator();
         assertEq(count, 2, "both events accumulated");
+    }
+
+    // --- the L1 origin (ADR 0025; docs/spec/contracts.md, Events) -------------
+
+    /// The signatures [[contracts]] lists, so a changed field order or type
+    /// can't pass unnoticed.
+    function test_EventSignaturesAreTheSpecifiedOnes() public pure {
+        assertEq(
+            ElectionRegistry.ElectionCreated.selector,
+            keccak256("ElectionCreated(bytes32,address,uint64,uint64,uint64,bytes32)"),
+            "ElectionCreated"
+        );
+        assertEq(
+            ElectionRegistry.DefinitionRegistered.selector,
+            keccak256("DefinitionRegistered(bytes32,bytes32,uint64,uint64,bytes32,bytes)"),
+            "DefinitionRegistered"
+        );
+    }
+
+    /// Each event carries the origin of its own block, read in the emitting
+    /// call: a creation and a registration under different origins record
+    /// each its own, which `f` and a retired version's cutoff rest on.
+    function test_EachEventCarriesItsOwnBlocksL1Origin() public {
+        l1.set(100, 1_700_000_100, keccak256("first"));
+        vm.recordLogs();
+        (bytes32 id, bytes memory enc) = _created();
+        l1.set(101, 1_700_000_112, keccak256("second"));
+        vm.prank(CREATOR);
+        registry.registerDefinition(enc);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        assertEq(logs.length, 2, "two logs");
+        (uint64 counter, uint64 n0, uint64 t0, bytes32 h0) =
+            abi.decode(logs[0].data, (uint64, uint64, uint64, bytes32));
+        assertEq(counter, 0, "counter");
+        assertEq(n0, 100, "creation origin number");
+        assertEq(t0, 1_700_000_100, "creation origin timestamp");
+        assertEq(h0, keccak256("first"), "creation origin hash");
+        (uint64 n1, uint64 t1, bytes32 h1, bytes memory def) =
+            abi.decode(logs[1].data, (uint64, uint64, bytes32, bytes));
+        assertEq(n1, 101, "registration origin number");
+        assertEq(t1, 1_700_000_112, "registration origin timestamp");
+        assertEq(h1, keccak256("second"), "registration origin hash");
+        assertTrue(keccak256(def) == keccak256(enc), "definition");
+        assertEq(logs[1].topics[1], id, "election id topic");
+    }
+
+    /// Any origin the predeploy reports, the extremes included, reaches each
+    /// event exactly as reported: the registry neither checks nor alters it
+    /// (the verifier does, 4.4), and the accumulator covers it.
+    function testFuzz_EventsCarryTheReportedOrigin(uint64 number, uint64 timestamp, bytes32 hash)
+        public
+    {
+        l1.set(number, timestamp, hash);
+        vm.recordLogs();
+        (bytes32 id, bytes memory enc) = _created();
+        vm.prank(CREATOR);
+        registry.registerDefinition(enc);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        assertTrue(
+            keccak256(logs[0].data) == keccak256(abi.encode(uint64(0), number, timestamp, hash)),
+            "creation data"
+        );
+        assertTrue(
+            keccak256(logs[1].data) == keccak256(abi.encode(number, timestamp, hash, enc)),
+            "registration data"
+        );
+        assertEq(logs[1].topics[1], id, "election id topic");
+        _assertAccumulated(logs);
+    }
+
+    function test_EventsCarryAZeroOrigin() public {
+        testFuzz_EventsCarryTheReportedOrigin(0, 0, bytes32(0));
+    }
+
+    function test_EventsCarryAMaximalOrigin() public {
+        testFuzz_EventsCarryTheReportedOrigin(
+            type(uint64).max, type(uint64).max, bytes32(type(uint256).max)
+        );
+    }
+
+    /// With no predeploy (a chain that isn't an OP Stack chain, or a test
+    /// that forgot it) nothing is created or registered, so no event ever
+    /// lacks its origin.
+    function test_RefusesToRunWithoutThePredeploy() public {
+        (, bytes memory enc) = _created();
+        vm.etch(registry.L1_BLOCK(), "");
+        vm.prank(CREATOR);
+        (bool ok,) =
+            address(registry).call(abi.encodeCall(ElectionRegistry.registerDefinition, (enc)));
+        assertTrue(!ok, "registered without an origin");
+        vm.prank(CREATOR);
+        (ok,) = address(registry).call(abi.encodeCall(ElectionRegistry.createElection, ()));
+        assertTrue(!ok, "created without an origin");
+        assertEq(registry.electionCount(), 1, "count unchanged");
+        // Positive control: with the predeploy back, the same calls succeed,
+        // so its absence was the only cause.
+        RegistryFixture.installL1Block(vm);
+        vm.prank(CREATOR);
+        registry.registerDefinition(enc);
+        vm.prank(CREATOR);
+        registry.createElection();
+        assertEq(registry.electionCount(), 2, "created with the predeploy");
     }
 
     function test_RefusesASecondRegistration() public {
@@ -305,7 +433,8 @@ contract ElectionRegistryTest is TestBase {
 
     /// Representative inputs leave no free text in calldata or events: every
     /// input is a fixed-format field, and each event carries only the
-    /// identifier, creator, counter, hash and the definition's own encoding.
+    /// identifier, creator, counter, hash, the block's L1 origin and the
+    /// definition's own encoding.
     function test_NoFreeTextInCalldataOrEvents() public {
         vm.recordLogs();
         (, bytes memory enc) = _created();
@@ -431,6 +560,7 @@ contract ElectionRegistryTest is TestBase {
         assertTrue(registry.l1Relay() == dep.l1Relay, "relay");
         assertEq(registry.epoch(), dep.epoch, "epoch");
         assertEq(registry.electionCount(), 0, "no elections");
+        assertTrue(registry.L1_BLOCK() == RegistryFixture.L1_BLOCK, "predeploy");
     }
 
     // --- helpers -------------------------------------------------------------

@@ -4,6 +4,7 @@ pragma solidity 0.8.30;
 import {CanonicalCalldata} from "./CanonicalCalldata.sol";
 import {ElectionDefinitionLib} from "./ElectionDefinition.sol";
 import {EventAccumulator} from "./EventAccumulator.sol";
+import {IL1Block} from "./IL1Block.sol";
 import {ITrusteeRegistry} from "./ITrusteeRegistry.sol";
 
 /// @title The election identifier (docs/spec/contracts.md, Election registry).
@@ -57,14 +58,36 @@ contract ElectionRegistry is EventAccumulator {
         L1Relay
     }
 
-    /// @notice An election was created: `counter` elections were created before it.
-    event ElectionCreated(bytes32 indexed electionId, address indexed creator, uint64 counter);
+    /// The OP Stack's `L1Block` predeploy, at the same address on every OP
+    /// Stack chain. A constant, never a deployment input, so no deployer can
+    /// point the registry at a contract of its own; on a chain without it
+    /// every creation and registration reverts.
+    address public constant L1_BLOCK = 0x4200000000000000000000000000000000000015;
 
-    /// @notice The election's one definition was registered. `definition` is
-    /// its full canonical encoding, so the board and any verifier rebuild it
-    /// from the chain alone.
+    /// @notice An election was created: `counter` elections were created
+    /// before it, in an L2 block whose L1 origin is the block numbered
+    /// `l1OriginNumber`, with timestamp `l1OriginTimestamp` and hash
+    /// `l1OriginHash`. The origin fixes the election's first segment `f`.
+    event ElectionCreated(
+        bytes32 indexed electionId,
+        address indexed creator,
+        uint64 counter,
+        uint64 l1OriginNumber,
+        uint64 l1OriginTimestamp,
+        bytes32 l1OriginHash
+    );
+
+    /// @notice The election's one definition was registered, in an L2 block
+    /// with the given L1 origin, which retired versions' cutoffs are compared
+    /// with. `definition` is its full canonical encoding, so the board and any
+    /// verifier rebuild it from the chain alone.
     event DefinitionRegistered(
-        bytes32 indexed electionId, bytes32 indexed definitionHash, bytes definition
+        bytes32 indexed electionId,
+        bytes32 indexed definitionHash,
+        uint64 l1OriginNumber,
+        uint64 l1OriginTimestamp,
+        bytes32 l1OriginHash,
+        bytes definition
     );
 
     error InvalidDeployment();
@@ -124,12 +147,13 @@ contract ElectionRegistry is EventAccumulator {
 
     /// @notice Creates an election and makes the caller its creator, the only
     /// account that can register its definition. Takes no arguments, so its
-    /// event carries only the identifier, the caller and the counter; what
-    /// the surrounding transaction carries is T-17's residual
-    /// (docs/spec/contracts.md, The shared event sequence).
+    /// event carries only the identifier, the caller, the counter and the
+    /// block's L1 origin; what the surrounding transaction carries is T-17's
+    /// residual (docs/spec/contracts.md, The shared event sequence).
     function createElection() external returns (bytes32 electionId) {
         if (msg.data.length != 4) revert NonCanonicalCalldata();
         uint64 counter = electionCount;
+        (uint64 n, uint64 t, bytes32 hash) = _l1Origin();
         electionId = electionIdAt(counter);
         // Checked arithmetic: after 2^64 − 1 elections creation reverts
         // rather than reuse an identifier.
@@ -139,7 +163,7 @@ contract ElectionRegistry is EventAccumulator {
             ElectionCreated.selector,
             electionId,
             bytes32(uint256(uint160(msg.sender))),
-            abi.encode(counter)
+            abi.encode(counter, n, t, hash)
         );
     }
 
@@ -188,7 +212,25 @@ contract ElectionRegistry is EventAccumulator {
 
         bytes32 h = ElectionDefinitionLib.hash(definition);
         definitionHashOf[id] = h;
-        _log3(DefinitionRegistered.selector, id, h, abi.encode(definition));
+        _log3(DefinitionRegistered.selector, id, h, _registrationData(definition));
+    }
+
+    /// `DefinitionRegistered`'s ABI data: the block's L1 origin, then the
+    /// definition. A function of its own only to keep `registerDefinition`
+    /// within the stack.
+    function _registrationData(bytes calldata definition) private view returns (bytes memory) {
+        (uint64 n, uint64 t, bytes32 hash) = _l1Origin();
+        return abi.encode(n, t, hash, definition);
+    }
+
+    /// The current block's L1 origin (number, timestamp, hash), as the events
+    /// carry it, read from the predeploy alone in the emitting call. The verifier checks it names one
+    /// finalized L1 block within `max_sequencer_drift` of the event's L2
+    /// timestamp, so neither the sequencer nor a rewritten predeploy can name
+    /// an origin outside that bound (T-71, T-69, T-34).
+    function _l1Origin() private view returns (uint64 number, uint64 timestamp, bytes32 hash) {
+        IL1Block l1 = IL1Block(L1_BLOCK);
+        return (l1.number(), l1.timestamp(), l1.hash());
     }
 
     function _requireThisDeployment(ElectionDefinitionLib.Definition memory def) private view {

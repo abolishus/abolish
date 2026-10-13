@@ -499,6 +499,16 @@ describe("panel ballot context", () => {
     },
   });
 
+  test("the entry point exposes neither the author-seat seam nor version 4's intake admission", async () => {
+    // The seam takes author seats nothing has checked against
+    // `author_transcript_hash`; exported, it would let any caller pass seats
+    // it controls off as author seats (T-17, T-37). Part 3 replaces it.
+    const api: Record<string, unknown> = await import("../src/index.ts");
+    expect(api).not.toHaveProperty("panelBallotElectionWith");
+    expect(api).not.toHaveProperty("admitForIntakeV4");
+    expect(api).toHaveProperty("panelBallotElection");
+  });
+
   test("refuses a definition with an author panel until that panel's key set can be checked (P2-16 part 3)", () => {
     expect(() => panelBallotElection(d, keySet([1, 2], d.ceremony_transcript_hash))).toThrow(
       RangeError,

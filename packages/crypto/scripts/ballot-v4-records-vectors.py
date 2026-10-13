@@ -575,6 +575,8 @@ def assemble(constants, proofs_path, out_dir):
         ("nullifier-r", "A nullifier equal to the BN254 scalar field order", with_bytes(36, R.to_bytes(32, "big")), "non-canonical", 36),
         ("vss-identity", "A committed vote whose first default VSS commitment is the identity", with_bytes(first_element, bytes(32)), "non-canonical", first_element),
         ("author-vss-identity", "A committed vote whose first author VSS commitment is the identity", with_bytes(first_author_element, bytes(32)), "non-canonical", first_author_element),
+        ("author-vss-non-canonical", "A committed vote whose first author VSS commitment is 32 bytes of 0xff, no canonical encoding", with_bytes(first_author_element, b"\xff" * 32), "non-canonical", first_author_element),
+        ("author-vss-row-over-max", "An author half whose first option claims 17 commitments, one over MAX_TRUSTEES", with_bytes(author_vss_at + 4, (17).to_bytes(4, "big")), "length-over-max", author_vss_at + 4),
         ("author-vss-options-over-max", "An author half claiming 65 options, one over MAX_OPTIONS", with_bytes(author_vss_at, (65).to_bytes(4, "big")), "length-over-max", author_vss_at),
         ("author-share-hashes-over-max", "An author share-hash list claiming 17 seats, one over MAX_TRUSTEES", with_bytes(author_hashes_at, (17).to_bytes(4, "big")), "length-over-max", author_hashes_at),
         ("range-z-order", "The last range proof's last z equal to the group order ℓ", with_bytes(last_z, b4.L.to_bytes(32, "little")), "non-canonical", last_z),

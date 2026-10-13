@@ -649,6 +649,75 @@ contract ElectionRegistryTest is TestBase {
         else _assertNoParameters(lib.hash(enc));
     }
 
+    /// The sequencing bounds a definition assumes are at most what the windows
+    /// were sized for (docs/spec/parameters.md; T-50, T-35, T-71): one above
+    /// either ceiling is refused, each ceiling and zero are not.
+    function test_RefusesSequencingBoundsAboveTheirCeilings() public {
+        assertEq(registry.MAX_SEQUENCING_WINDOW(), 3600, "window, as docs/spec/parameters.md");
+        assertEq(registry.MAX_SEQUENCER_DRIFT(), 1800, "drift, as docs/spec/parameters.md");
+        uint64[2] memory refused = [uint64(3601), type(uint64).max];
+        for (uint256 i; i < refused.length; i++) {
+            (bytes32 id,) = _created();
+            ElectionDefinitionLib.Definition memory d = RegistryFixture.template(registry, id);
+            d.sequencingWindow = refused[i];
+            bytes memory enc = RegistryFixture.approve(lib, trustees, d);
+            _expectRefused(
+                CREATOR,
+                enc,
+                abi.encodeWithSelector(
+                    ElectionRegistry.SequencingWindowTooLarge.selector, refused[i]
+                )
+            );
+            _assertNoParameters(lib.hash(enc));
+        }
+        refused = [uint64(1801), type(uint64).max];
+        for (uint256 i; i < refused.length; i++) {
+            (bytes32 id,) = _created();
+            ElectionDefinitionLib.Definition memory d = RegistryFixture.template(registry, id);
+            d.maxSequencerDrift = refused[i];
+            bytes memory enc = RegistryFixture.approve(lib, trustees, d);
+            _expectRefused(
+                CREATOR,
+                enc,
+                abi.encodeWithSelector(ElectionRegistry.SequencerDriftTooLarge.selector, refused[i])
+            );
+            _assertNoParameters(lib.hash(enc));
+        }
+        uint64[2][3] memory admitted = [[uint64(3600), 1800], [uint64(0), 0], [uint64(1), 1]];
+        for (uint256 i; i < admitted.length; i++) {
+            (bytes32 id,) = _created();
+            ElectionDefinitionLib.Definition memory d = RegistryFixture.template(registry, id);
+            d.sequencingWindow = admitted[i][0];
+            d.maxSequencerDrift = admitted[i][1];
+            bytes memory enc = RegistryFixture.approve(lib, trustees, d);
+            vm.prank(CREATOR);
+            registry.registerDefinition(enc);
+            _assertParameters(lib.hash(enc), d);
+        }
+    }
+
+    /// Any pair of sequencing bounds is admitted exactly when each is within
+    /// its ceiling.
+    function testFuzz_SequencingBoundsAdmittedExactlyWithinTheirCeilings(
+        uint64 sequencingWindow,
+        uint64 maxSequencerDrift
+    ) public {
+        (bytes32 id,) = _created();
+        ElectionDefinitionLib.Definition memory d = RegistryFixture.template(registry, id);
+        d.sequencingWindow = sequencingWindow;
+        d.maxSequencerDrift = maxSequencerDrift;
+        bytes memory enc = RegistryFixture.approve(lib, trustees, d);
+        vm.prank(CREATOR);
+        (bool ok,) =
+            address(registry).call(abi.encodeCall(ElectionRegistry.registerDefinition, (enc)));
+        assertTrue(
+            ok == (sequencingWindow <= 3600 && maxSequencerDrift <= 1800),
+            "admitted exactly within the ceilings"
+        );
+        if (ok) _assertParameters(lib.hash(enc), d);
+        else _assertNoParameters(lib.hash(enc));
+    }
+
     /// The electorate is in the past (T-08, T-13): a root at the registering
     /// block itself is refused, one block earlier is not.
     function test_RefusesARootNotInThePast() public {

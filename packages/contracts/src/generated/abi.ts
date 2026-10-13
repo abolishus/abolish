@@ -601,6 +601,20 @@ export const electionRegistryAbi = [
   {
     type: "function",
     inputs: [],
+    name: "MAX_SEQUENCER_DRIFT",
+    outputs: [{ name: "", internalType: "uint64", type: "uint64" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    inputs: [],
+    name: "MAX_SEQUENCING_WINDOW",
+    outputs: [{ name: "", internalType: "uint64", type: "uint64" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    inputs: [],
     name: "MIN_INCLUSION_BOUND",
     outputs: [{ name: "", internalType: "uint32", type: "uint32" }],
     stateMutability: "view",
@@ -949,6 +963,16 @@ export const electionRegistryAbi = [
       { name: "blockNumber", internalType: "uint256", type: "uint256" },
     ],
     name: "RootNotInPast",
+  },
+  {
+    type: "error",
+    inputs: [{ name: "maxSequencerDrift", internalType: "uint64", type: "uint64" }],
+    name: "SequencerDriftTooLarge",
+  },
+  {
+    type: "error",
+    inputs: [{ name: "sequencingWindow", internalType: "uint64", type: "uint64" }],
+    name: "SequencingWindowTooLarge",
   },
   {
     type: "error",

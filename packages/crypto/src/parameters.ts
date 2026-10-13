@@ -25,6 +25,10 @@ export const PARAMETERS = Object.freeze({
   // definition's l1_inclusion_bound, δ (docs/spec/close.md, contracts.md).
   MIN_INCLUSION_BOUND: 600,
   MAX_INCLUSION_BOUND: 3600,
+  // The ceilings the same deployment puts on a definition's sequencing_window
+  // (L1 blocks) and max_sequencer_drift (seconds) (docs/spec/contracts.md).
+  MAX_SEQUENCING_WINDOW: 3600,
+  MAX_SEQUENCER_DRIFT: 1800,
   // Seconds after the seal's anchoring window until the dispute end t_E; a
   // constant of receipt version 1 (docs/spec/receipts.md).
   DISPUTE_WINDOW: 2_592_000,

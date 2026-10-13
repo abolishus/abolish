@@ -206,6 +206,14 @@ contract ElectionRegistryTest is TestBase {
         (ok,) = address(registry).call(abi.encodeCall(ElectionRegistry.createElection, ()));
         assertTrue(!ok, "created without an origin");
         assertEq(registry.electionCount(), 1, "count unchanged");
+        // Positive control: with the predeploy back, the same calls succeed,
+        // so its absence was the only cause.
+        RegistryFixture.installL1Block(vm);
+        vm.prank(CREATOR);
+        registry.registerDefinition(enc);
+        vm.prank(CREATOR);
+        registry.createElection();
+        assertEq(registry.electionCount(), 2, "created with the predeploy");
     }
 
     function test_RefusesASecondRegistration() public {

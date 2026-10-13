@@ -1,7 +1,9 @@
 // The data behind each page, fetched from the API on the server.
 
+import { shortCode } from "@abolishus/core/short-codes";
 import { ORPCError } from "@orpc/client";
 
+import { fromHex } from "../values.ts";
 import { definitionView, type DefinitionProblem, type PollView } from "../poll.ts";
 import type { Api } from "./api.ts";
 
@@ -44,6 +46,47 @@ export async function loadPoll(api: Api, electionId: string): Promise<PollPage> 
   const view = definitionView(electionId, definition);
   if (!view.ok) return { kind: "unavailable", problem: view.problem };
   return { kind: "poll", poll: view.poll, board, moderation };
+}
+
+export type ShortLink =
+  | { readonly kind: "poll"; readonly electionId: string }
+  | { readonly kind: "not-found" };
+
+/**
+ * The poll short code `code` names (docs/design/sharing.md, Short links),
+ * which the caller has put in its canonical form. The API's answer is a
+ * claim: before the page sends anyone on, it fetches the poll's definition,
+ * decodes and checks it as the poll page does (T-31, T-34), and requires the
+ * code to be a prefix of that definition's hash at the code's length. So a
+ * database that points a code at another poll can send a visitor only to a
+ * poll whose definition hash really starts with the code; which of several
+ * polls sharing it owns the code is the registry's order, which this page
+ * doesn't check (part 2's known-weak).
+ */
+export async function resolveShortLink(api: Api, code: string): Promise<ShortLink> {
+  let electionId;
+  try {
+    const answer = await api.elections.resolveCode({ code });
+    // The canonical form of a canonical code is itself: anything else is
+    // another code, whatever the API says.
+    if (answer.code !== code) return { kind: "not-found" };
+    electionId = answer.electionId;
+  } catch (error) {
+    if (error instanceof ORPCError && error.defined && error.code === "CODE_NOT_FOUND")
+      return { kind: "not-found" };
+    throw error;
+  }
+  let definition;
+  try {
+    ({ definition } = await api.elections.getDefinition({ electionId }));
+  } catch (error) {
+    if (notFound(error)) return { kind: "not-found" };
+    throw error;
+  }
+  const view = definitionView(electionId, definition);
+  if (!view.ok || shortCode(fromHex(view.poll.definitionHash), code.length) !== code)
+    return { kind: "not-found" };
+  return { kind: "poll", electionId };
 }
 
 /** Decisions per page of the moderation log. */

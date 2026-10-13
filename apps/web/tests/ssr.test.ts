@@ -7,7 +7,12 @@ import { createServer, type IncomingHttpHeaders, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { decodeElectionDefinition, encodeElectionDefinition } from "@abolishus/crypto";
+import { shortCode } from "@abolishus/core/short-codes";
+import {
+  decodeElectionDefinition,
+  electionDefinitionHash,
+  encodeElectionDefinition,
+} from "@abolishus/crypto";
 import { createBuilder } from "vite-plus";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 
@@ -83,6 +88,30 @@ for (const id of FILLER)
     ),
   );
 
+/** A poll's short code at `length`, from the definition the stub serves for it. */
+const codeOf = (id: string, length = 7) =>
+  shortCode(
+    electionDefinitionHash(decodeElectionDefinition(fromHex(definitions.get(id) ?? ""))),
+    length,
+  );
+const CODE = codeOf(ID);
+/** The hidden poll's code, as if an earlier poll's hash shared its first 7 characters. */
+const HIDDEN_CODE = codeOf(HIDDEN_ID, 8);
+/** A code the stub claims for the typical poll, though its hash doesn't start with it. */
+const FALSE_CODE = CODE.startsWith("z") ? `y${CODE.slice(1)}` : `z${CODE.slice(1)}`;
+/** A code the stub claims for the swapped poll, whose served definition names another. */
+const SWAPPED_CODE = "s".repeat(7);
+const UNKNOWN_CODE = "x".repeat(7);
+const owners = new Map([
+  [CODE, ID],
+  [HIDDEN_CODE, HIDDEN_ID],
+  [FALSE_CODE, ID],
+  [SWAPPED_CODE, SWAPPED_ID],
+]);
+
+/** A forgiving spelling of `code`: upper case, with `0` written `O` and `1` written `I`. */
+const forgiving = (code: string) => code.toUpperCase().replaceAll("0", "O").replaceAll("1", "I");
+
 /** While set, the stub drops every connection unanswered, as a dead API would. */
 let down = false;
 
@@ -104,6 +133,19 @@ function stubApi(): Server {
       const after = BigInt(url.searchParams.get("after") ?? "0");
       const entries = after < 7n ? [{ ...LATEST, electionId: HIDDEN_ID }] : [];
       return json(200, { entries });
+    }
+    if (url.pathname === "/elections/by-code") {
+      // The API's answer for a code it is given in any form; this stub knows only canonical ones.
+      const code = url.searchParams.get("code") ?? "";
+      const electionId = owners.get(code);
+      if (electionId === undefined)
+        return json(404, {
+          defined: true,
+          code: "CODE_NOT_FOUND",
+          status: 404,
+          message: "No poll owns this code.",
+        });
+      return json(200, { electionId, code });
     }
     if (url.pathname === "/elections") {
       const after = url.searchParams.get("after") ?? "";
@@ -174,7 +216,15 @@ function cspNonce(response: Response): string {
 }
 
 describe("every page", () => {
-  test.each(["/", `/polls/${ID}`, "/moderation", "/polls", "/account", "/nowhere"])(
+  test.each([
+    "/",
+    `/polls/${ID}`,
+    "/moderation",
+    "/polls",
+    "/account",
+    "/nowhere",
+    `/p/${UNKNOWN_CODE}`,
+  ])(
     "%s carries the security headers, and its inline scripts the response's nonce",
     async (path) => {
       const response = await get(path);
@@ -289,6 +339,93 @@ describe("lookup", () => {
   });
 });
 
+describe("short links", () => {
+  test("a poll's code sends the visitor to its page, cacheable for a day", async () => {
+    const response = await get(`/p/${CODE}`);
+    expect(response.status).toBe(301);
+    expect(new URL(response.headers.get("location") ?? "", "http://localhost").pathname).toBe(
+      `/polls/${ID}`,
+    );
+    expect(response.headers.get("cache-control")).toBe("public, max-age=86400");
+    expect(response.headers.get("content-security-policy")).toContain("default-src 'none'");
+    expect(response.headers.get("referrer-policy")).toBe("no-referrer");
+    expect(response.headers.get("set-cookie")).toBeNull();
+    const page = await get(`/polls/${ID}`);
+    expect(page.status).toBe(200);
+    expect((await page.text()).replace(/<[^>]+>/g, "")).toContain(typical.hash);
+  });
+
+  test.each([
+    ["as a QR code carries it", () => `/P/${CODE.toUpperCase()}`],
+    ["in a forgiving spelling", () => `/p/${forgiving(CODE)}`],
+    ["in mixed case", () => `/p/${CODE.slice(0, 3).toUpperCase()}${CODE.slice(3)}`],
+  ])("a code %s resolves the same", async (_, path) => {
+    seen.length = 0;
+    const response = await get(path());
+    expect(response.status).toBe(301);
+    expect(response.headers.get("location")).toMatch(new RegExp(`/polls/${ID}$`));
+    // The API is asked for the canonical code only.
+    expect(seen.find((r) => r.path === "/elections/by-code")).toBeDefined();
+  });
+
+  test("a code longer than 7 characters resolves when its poll owns it, hidden or not", async () => {
+    const response = await get(`/p/${HIDDEN_CODE}`);
+    expect(response.status).toBe(301);
+    expect(response.headers.get("location")).toMatch(new RegExp(`/polls/${HIDDEN_ID}$`));
+  });
+
+  test.each([
+    ["a code no poll owns", () => UNKNOWN_CODE],
+    ["a code the API claims for a poll whose hash doesn't start with it", () => FALSE_CODE],
+    ["a code whose poll's served definition names another election (T-34)", () => SWAPPED_CODE],
+  ])("%s is not found, and not cached", async (_, code) => {
+    const response = await get(`/p/${code()}`);
+    expect(response.status).toBe(404);
+    expect(response.headers.get("location")).toBeNull();
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    const html = await response.text();
+    expect(html).toContain("knows no poll or page");
+    expect(html).not.toContain(code());
+  });
+
+  test.each([
+    ["a u", "3j55dwu"],
+    ["too short", "3j55dw"],
+    ["too long", "3".repeat(53)],
+    ["far too long", "3".repeat(300)],
+    ["punctuation", "3j55-dw1"],
+    ["a non-ASCII letter", "3j55dw\u212a"],
+    ["padding bits set in the 52nd character", "0".repeat(51) + "1"],
+  ])("%s is not found without asking the API, quoting nothing", async (_, code) => {
+    seen.length = 0;
+    const response = await get(`/p/${encodeURIComponent(code)}`);
+    expect(response.status).toBe(404);
+    expect(seen.filter((r) => r.path === "/elections/by-code")).toEqual([]);
+    expect(await response.text()).not.toContain(code);
+  });
+
+  test("forwards nothing of the visitor's to the API (T-10)", async () => {
+    seen.length = 0;
+    await get(`/p/${CODE}`, {
+      cookie: "__Secure-abolish-account.session_token=secret",
+      "x-forwarded-for": "203.0.113.9",
+    });
+    expect(seen.map((r) => r.path)).toEqual(["/elections/by-code", "/elections/definition"]);
+    for (const { headers } of seen) {
+      expect(headers.cookie).toBeUndefined();
+      expect(JSON.stringify(headers)).not.toContain("secret");
+      expect(JSON.stringify(headers)).not.toContain("203.0.113.9");
+    }
+  });
+
+  test("other redirects stay uncached", async () => {
+    const response = await get(`/polls?id=${ID}`);
+    expect(response.status).toBeGreaterThanOrEqual(300);
+    expect(response.status).toBeLessThan(400);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+  });
+});
+
 describe("poll list", () => {
   /** The polls a page of the list links to, in order. */
   const linked = (html: string) =>
@@ -382,7 +519,7 @@ describe("server functions", () => {
       .filter((f) => f.endsWith(".js"))
       .flatMap((f) => [...readFileSync(`${dir}/${f}`, "utf8").matchAll(/\(`([0-9a-f]{64})`\)/g)])
       .map((m) => m[1] ?? "");
-    expect(ids.length).toBe(3);
+    expect(ids.length).toBe(4);
     return ids;
   }
 
@@ -405,13 +542,29 @@ describe("server functions", () => {
       });
       expect(own.status).toBe(200);
       expect(await own.text()).toMatch(
-        /expected an election ID|expected a canonical decimal u64|or an empty string/,
+        /expected an election ID|expected a canonical decimal u64|or an empty string|expected a canonical short code/,
       );
     }
   });
 });
 
 describe("failures", () => {
+  test("a short link while the API is unreachable fails uncached, quoting no error", async () => {
+    down = true;
+    try {
+      const response = await get(`/p/${CODE}`);
+      expect(response.status).toBe(500);
+      expect(response.headers.get("location")).toBeNull();
+      expect(response.headers.get("cache-control")).toBe("no-store");
+      const html = await response.text();
+      expect(html).toContain("Something went wrong");
+      expect(html).not.toContain("127.0.0.1");
+      expect(html).not.toMatch(/ECONNREFUSED|ECONNRESET|fetch failed|socket hang up/);
+    } finally {
+      down = false;
+    }
+  });
+
   test("an unreachable API gives an error page that quotes nothing", async () => {
     down = true;
     try {

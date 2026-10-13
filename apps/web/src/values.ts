@@ -1,3 +1,5 @@
+import { parseShortCode } from "@abolishus/core/short-codes";
+
 /** Lowercase hex, two digits per byte (docs/spec/notation.md). */
 export function toHex(bytes: Uint8Array): string {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
@@ -24,6 +26,11 @@ export function isElectionId(value: unknown): value is string {
 export function normalizeElectionId(input: string): string | undefined {
   const id = input.trim().replace(/^0x/i, "").toLowerCase();
   return isElectionId(id) ? id : undefined;
+}
+
+/** A poll's short code in its one canonical form: what the API resolves and a short link redirects on (T-31). */
+export function isShortCode(value: unknown): value is string {
+  return typeof value === "string" && parseShortCode(value) === value;
 }
 
 const U64_PATTERN = /^(?:0|[1-9][0-9]{0,19})$/;

@@ -4,6 +4,8 @@ How the result of a plurality or approval election is computed, and how anyone c
 
 Regional cells come from election-definition version 3 ([[election-definition]], Regional cells; [[0019-regional-cells]]): everything here holds per cell of its partition. Version 4's partition is version 3's. A ballot in a version-3 or version-4 election names its cell (ballot version 2, [[ballot-validity]], Ballot record (version 2)), and a cell's ballots are the admitted ballots naming it.
 
+Under ballot version 4 (definition version 6, and version 7 under `electorate_mode` 1; [[ballot-validity]], Ballot record (version 4)), a ballot's `E_{j,t}` here are its default half's, `vss`, and the trustees are the default panel's seats. Without an author panel that half is the whole sharing (`E^D_{j,0} = C_j`), so everything on this page applies unchanged, under tally-opening version 1. With an author panel each panel sums and opens its own half and the count is the sum of the two partial openings ([[0027-trustee-panels-and-live-results]], Part 1, Tally); that tally-opening version is [[P2-16]] part 3's, and until it exists no definition with an author panel passes [[verifier]] 2.3.
+
 ## Sources
 
 - **Summing Pedersen VSS sharings** and checking each sum against the product of the VSS commitments: R. Cramer, M. Franklin, B. Schoenmakers and M. Yung, "Multi-Authority Secret-Ballot Elections with Linear Work", EUROCRYPT 1996, Section 3 (each authority publishes the sum of its shares over the counted ballots; the sum is checked against the product of the ballots' commitments, and any `k` of them interpolate the tally). The commitments and the check are Pedersen's (T. P. Pedersen, CRYPTO 1991, Section 4), as in [[ballot-validity]], Shares.

@@ -2,7 +2,7 @@
 
 How a plurality or approval ballot commits to its vote on the public board, how the vote is shared among the trustees, and how anyone checks, before the tally, that the commitments hold a vote the election's rules allow. This is the public part of [[0002-everlasting-privacy]] (option B, accepted by the owner) for the homomorphic tally of [[0003-tally-scheme]]: perfectly hiding Pedersen commitments, Pedersen verifiable secret sharing, and disjunctive Chaum–Pedersen validity proofs under a Fiat–Shamir challenge that binds the whole statement. Notation is from [[notation]], the group and hashes from [[group]]. Threats: T-15, T-28, T-29, T-30, T-31, T-32, T-14, T-17, T-36, T-38, T-39, T-52.
 
-It also specifies the ballot record (`0x0002`, version 1) that carries the committed vote with its tier, nullifier, L1 block reference and membership proof, and that record's admission checks (Ballot record); version 2 names a regional cell (Ballot record (version 2)), and version 3 carries one range proof per question of a multi-question poll (Ballot record (version 3)). Share encryption is specified in [[share-encryption]] (P1-12 part 2): the hybrid KEM and AEAD that carry each trustee's shares, and the hash `H(ct_i)` of each ciphertext. This page takes the `n` ciphertext hashes as 32-byte values and binds them into the statement.
+It also specifies the ballot record (`0x0002`, version 1) that carries the committed vote with its tier, nullifier, L1 block reference and membership proof, and that record's admission checks (Ballot record); version 2 names a regional cell (Ballot record (version 2)), version 3 carries one range proof per question of a multi-question poll (Ballot record (version 3)), and version 4 shares each vote in two halves, one to the default panel and one to an author panel ([[0027-trustee-panels-and-live-results]], Ballot record (version 4)). Share encryption is specified in [[share-encryption]] (P1-12 part 2): the hybrid KEM and AEAD that carry each trustee's shares, and the hash `H(ct_i)` of each ciphertext. This page takes the `n` ciphertext hashes as 32-byte values and binds them into the statement.
 
 ## Sources
 
@@ -121,7 +121,7 @@ What it leaves out, and why:
 - **The membership proof.** A proof can't bind its own hash, and anyone can re-randomise a Groth16 proof without the witness ([[membership]], Security notes): a re-randomised copy of a ballot keeps its ballot hash, and so its receipts, and is a repeat ([[revoting]], Selection step 1).
 - **The L1 reference.** `M` binds it beside the ballot hash. The same public part under a newer reference carries the same shares, so the receipts the trustees gave for it still hold.
 
-**Every other field is bound.** Every field of the ballot record (`0x0002`, versions 1, 2 and 3) other than the membership proof, `l1_ref_number` and `l1_ref_hash` MUST be an input to `ballot_hash`, so whoever specifies the record and adds a field there adds it here, before anything freezes. A verifier computes `ballot_hash` from the strictly decoded record, never takes one a record or relay carries.
+**Every other field is bound.** Every field of the ballot record (`0x0002`, versions 1 to 4) other than the membership proof, `l1_ref_number` and `l1_ref_hash` MUST be an input to `ballot_hash`, so whoever specifies the record and adds a field there adds it here, before anything freezes. A verifier computes `ballot_hash` from the strictly decoded record, never takes one a record or relay carries.
 
 Only someone who knows the commitments' openings can give a statement a second ballot hash: the voter's client, or `k` trustees together, who can interpolate them from their shares. The validity proofs are proofs of knowledge of those openings (CDS94), so no one else can make another accepting proof of the same statement (T-31, T-32). A second ballot hash also needs a new membership proof, and so the voter's identity secret, before it is a ballot.
 
@@ -403,6 +403,143 @@ Version 2's (Casting (version 2)), with the proofs of Proving above. The ballot 
 - **Version 2's residuals hold**: the cell is public, and the contract path leaves the same fields free, with the range proofs (64 bytes per branch) in place of the sum proof; P1-18's direct-submit contract MUST run `validity-shape` per question, as it does for versions 1 and 2.
 - **Small cells reveal whole ballots.** A cell with one counted ballot shows every answer of that voter, all questions at once ([[0026-multi-question-ballots]], Consequences; T-16).
 
+## Ballot record (version 4)
+
+Record type `0x0002`, version 4: one cast ballot in an election whose definition is version 6, or version 7 with `electorate_mode` 1 ([[election-definition]], Layout (version 6); [[0027-trustee-panels-and-live-results]], Part 1, option A; T-14, T-15, T-30, T-31, T-32, T-37, T-54). Its committed vote shares each option's opening in two halves, the **default half** to the default panel and, when the definition has an author panel, the **author half** to the author panel, so a vote opens only with `k_D` default seats and `k_A` author seats together. It has version 3's fields, offsets and cell (the partition of definition version 6, and of version 7 under mode 1, is version 5's), its questions and its proofs; everything not stated here is version 3's.
+
+### Context (version 4)
+
+The values of Context (version 3), with the panel split in two:
+
+| Value                                    | Source                                                                                                                                                     |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Q`, `m_q`, `min_q`, `max_q`, `o_q`, `T` | As in Context (version 3)                                                                                                                                  |
+| `k_D`, `n_D`                             | The definition's `threshold` and `panel_size`: the default panel ([[verifier]] 2.5)                                                                        |
+| `k_A`, `n_A`                             | The definition's `author_threshold` and the number of its `author_keys`: the author panel, both 0 when it has none ([[election-definition]], Author panel) |
+| `cell`, `nullifier`                      | As in version 3                                                                                                                                            |
+
+A seat is named by its panel and its index in that panel: default seat `i` (`1 ≤ i ≤ n_D`) or author seat `i` (`1 ≤ i ≤ n_A`). Both panels evaluate their polynomials at `1, …, n_P`, so an index alone never says which panel a seat is in, and everything that names a seat (a ciphertext's associated data, its proof of knowledge, a receipt, a posting, a complaint, a spoiled-ballot opening) also names its panel, as `panel`, an `enum8<1, 2>`: 1 the default panel, 2 the author panel. The definition hash, which every one of them binds first, fixes both panels' identifiers (the default panel's `panel_id`, and the author panel's from `author_threshold` and `author_keys`, [[trustee-identity]], Author panel identifier), so beside it the byte names exactly one panel. That is how this version meets [[0027-trustee-panels-and-live-results]]'s rule that every signed statement names the seat's panel identifier: the byte stands for the identifier the definition fixes, and keeps every signed statement and record at a fixed length. A seat of one panel can never stand for the same index of the other, even where one party's per-election signing key were registered in both (T-37, T-29).
+
+### Committed vote (version 4)
+
+For each flat option `j`, the client draws, uniformly from the scalars and independently, with the CSPRNG through `packages/crypto` (Proving):
+
+- `r_j`, the randomness of the vote commitment, as in version 1;
+- the default half's higher coefficients `a^D_{j,1}, …, a^D_{j,k_D−1}` and `b^D_{j,1}, …, b^D_{j,k_D−1}`;
+- with an author panel, the author half `(a_j, s_j)` and its higher coefficients `a^A_{j,1}, …, a^A_{j,k_A−1}` and `b^A_{j,1}, …, b^A_{j,k_A−1}`.
+
+It forms each panel's sharing polynomials:
+
+```
+f^D_j(x) = (v_j − a_j) + a^D_{j,1}·x + … + a^D_{j,k_D−1}·x^{k_D−1}   (mod ℓ)
+g^D_j(x) = (r_j − s_j) + b^D_{j,1}·x + … + b^D_{j,k_D−1}·x^{k_D−1}   (mod ℓ)
+f^A_j(x) =  a_j        + a^A_{j,1}·x + … + a^A_{j,k_A−1}·x^{k_A−1}   (mod ℓ)
+g^A_j(x) =  s_j        + b^A_{j,1}·x + … + b^A_{j,k_A−1}·x^{k_A−1}   (mod ℓ)
+```
+
+With no author panel there is no author half: `a_j = s_j = 0`, there are no author polynomials, and `f^D_j` and `g^D_j` are version 1's `f_j` and `g_j`. With `k_A = 1` the author polynomials are constants and every author seat receives the whole author half, which on its own is uniform ([[trustee-identity]], Author panel identifier, rule 2).
+
+Each panel's VSS commitments are version 1's over its own polynomials: `E^D_{j,t} = g^{coef_t(f^D_j)} · h^{coef_t(g^D_j)}` for `t = 0, …, k_D − 1`, and `E^A_{j,t} = g^{coef_t(f^A_j)} · h^{coef_t(g^A_j)}` for `t = 0, …, k_A − 1`. Default seat `i` receives `(f^D_j(i), g^D_j(i))` for every option and author seat `i` receives `(f^A_j(i), g^A_j(i))`, each encrypted to its seat as [[share-encryption]] (Ballot version 4) specifies.
+
+**The vote commitment** of option `j` is
+
+```
+C_j = E^D_{j,0} · E^A_{j,0} = g^{v_j} · h^{r_j}
+```
+
+with `E^A_{j,0}` read as the identity when there is no author panel, so `C_j = E^D_{j,0}`, as under versions 1 to 3. It is computed, never carried: [[0027-trustee-panels-and-live-results]]'s public check `E^D_{j,0} · E^A_{j,0} = C_j` holds by construction, so there is no field for a ballot to fail it with, and no element a ballot could fill with chosen bytes beside the two halves (T-17). The validity proofs speak about `C_j` exactly as in version 3.
+
+**Hiding and secrecy.** The `h` exponents of the two constant terms, `r_j − s_j` and `s_j`, are uniform and independent of each other and of the vote, because `r_j` and `s_j` are, and every higher `h` exponent is uniform and independent too; so every `E^D_{j,t}` and `E^A_{j,t}` is perfectly hiding (up to Proving's sampling distance), as version 1's are (T-15). The halves are a 2-of-2 additive sharing of `(v_j, r_j)`, each half on its own a uniformly random pair, and each half is Pedersen-shared within its own panel: fewer than `k_D` default seats' shares are uniform and independent of the default half, and fewer than `k_A` author seats' shares of the author half. So a coalition short of either threshold learns nothing about any `v_j`, whatever its computing power, and a vote opens only to `k_D` default seats and `k_A` author seats together (J. Benaloh and J. Leichter, "Generalized Secret Sharing and Monotone Functions", CRYPTO 1988; M. Ito, A. Saito and T. Nishizeki, "Secret Sharing Scheme Realizing General Access Structure", Globecom 1987). In particular every author seat together knows `a_j` and `s_j` and learns nothing about `v_j − a_j`, which is shared to the default panel exactly as an author-free ballot's opening is: the author panel can never lower secrecy below the default panel's (T-14).
+
+**Binding.** A default seat's passing share is the evaluation at `i` of the polynomials `vss` commits to and an author seat's of those `author_vss` commits to (binding, under discrete log, Shares). So any `k_D` default seats can open `E^D_{j,0}` and any `k_A` author seats `E^A_{j,0}`, and the two openings add to an opening of `C_j`, which the validity proofs show is a valid vote (T-28, T-29).
+
+The committed vote:
+
+| Field                 | Type                                             | Meaning                                                                                                                                                                                         |
+| --------------------- | ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `vss`                 | `list<list<element, MAX_TRUSTEES>, MAX_OPTIONS>` | The default half: for each flat option `j = 0, …, T − 1` in order, its `k_D` VSS commitments `E^D_{j,0}, …, E^D_{j,k_D−1}`. None is the identity                                                |
+| `share_hashes`        | `list<bytes[32], MAX_TRUSTEES>`                  | `H(ct)` for each default seat `i = 1, …, n_D` in seat order: the hash of the ciphertext carrying its shares ([[share-encryption]])                                                              |
+| `author_vss`          | `list<list<element, MAX_TRUSTEES>, MAX_OPTIONS>` | The author half: for each flat option in order, its `k_A` VSS commitments `E^A_{j,0}, …, E^A_{j,k_A−1}`. None is the identity. Empty, with no entries at all, when the poll has no author panel |
+| `author_share_hashes` | `list<bytes[32], MAX_TRUSTEES>`                  | `H(ct)` for each author seat `i = 1, …, n_A` in seat order. Empty when the poll has no author panel                                                                                             |
+| `option_proofs`       | `list<bit_proof, MAX_OPTIONS>`                   | As version 3: for each flat option in order, the proof that `C_j` commits to 0 or 1                                                                                                             |
+| `sum_proofs`          | `list<list<branch, 65>, MAX_QUESTIONS>`          | As version 3: for each question, the range proof of `Y_q`, the product of its options' `C_j`                                                                                                    |
+
+Notes:
+
+- **One encoding with no author panel.** Without an author panel `author_vss` and `author_share_hashes` are empty lists (count 0), never `T` empty lists, so a ballot of a poll without one has exactly one encoding, its version-3 bytes with two zero counts inserted before `option_proofs`. The shape check below enforces it.
+- **Sizes.** The author half adds `8 + 32·T·k_A + 32·n_A` bytes: about 0.7 KB at 10 options with an author panel of `k_A = 2`, `n_A = 3`, and about 33 KB at `MAX_OPTIONS` and an author panel of `MAX_TRUSTEES`, so the largest committed vote is about 80 KB, within `MAX_BOARD_PAYLOAD` ([[parameters]]). Without an author panel a ballot is 8 bytes longer than version 3's.
+
+### Hashes (version 4)
+
+`statement_hash`, `ballot_hash` and `core_hash` are version 3's with version input 4, and with the author half after the default half:
+
+```
+statement_hash = H(DS("abolish/v1/ballot-statement",
+    definition_hash ‖ u16(0x0002) ‖ u8(4) ‖ u8(cell) ‖ encode(nullifier)
+    ‖ encode(vss) ‖ encode(share_hashes) ‖ encode(author_vss) ‖ encode(author_share_hashes)))
+
+ballot_hash = H(DS("abolish/v1/ballot",
+    definition_hash ‖ u16(0x0002) ‖ u8(4) ‖ u8(cell) ‖ encode(nullifier)
+    ‖ encode(committed_vote)))
+
+core_hash = H(DS("abolish/v1/ballot-core",
+    definition_hash ‖ u16(0x0002) ‖ u8(4) ‖ u8(cell)
+    ‖ encode(vss) ‖ encode(share_hashes) ‖ encode(author_vss) ‖ encode(author_share_hashes)))
+```
+
+`encode(committed_vote)` is the committed vote's own encoding, its six fields in the order of the table above, so `ballot_hash`'s input is the statement's followed by `encode(option_proofs) ‖ encode(sum_proofs)`, as in versions 1 to 3. The statement binds both halves' commitments and every seat's share hash of both panels, so the shares both panels hold are fixed by the proved statement (T-30, T-32); the core binds them too, so the tracking code names both halves and a challenge opens both ([[challenge]], Opening version 3). Each tag keeps its layout up to the version byte, which says how the rest reads, as for versions 2 and 3; version input 4 means no proof, ballot hash or tracking code made under one version is valid under another (T-31). Every field of the record but the membership proof and the L1 reference is bound, as Ballot hash requires. `M` ([[revoting]], Message) is version 2's.
+
+### Validity proofs (version 4)
+
+Version 3's option proofs and question range proofs (Validity proofs, Question range proof), over the computed `C_j`, under the same tags, with `statement_hash` above. `C_j` is computed, so in each option proof's `t` it is encoded as `element` with the identity allowed, as `C_Σ` and `Y_q` are (Encoding rules for `t`): an adversarial ballot can make a product the identity, and a ballot with no author panel encodes its `C_j = E^D_{j,0}` with the same bytes as version 3. Proving is version 1's, with `ρ = r_j` for option `j` and `ρ = r_{o_q} + … + r_{o_q + m_q − 1}` for question `q`: the client knows the whole `r_j`, never only a half.
+
+Order of construction: both halves' polynomials, `vss` and `author_vss`; then every default seat's and every author seat's ciphertext and the two share-hash lists ([[share-encryption]], Ballot version 4); then `statement_hash`; then the option proofs and the range proofs. Nothing before `statement_hash` depends on the nullifier, so the core is made before the cast-or-challenge choice, as in version 1.
+
+### Checks (version 4)
+
+The checks of Checks (version 3), in the same order:
+
+| Code             | Check                                                                                                                                                                                                                                                                                                                                                                            |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `validity-shape` | `vss` has `T` entries, each of exactly `k_D` elements; `share_hashes` has `n_D` entries; with an author panel, `author_vss` has `T` entries, each of exactly `k_A` elements, and `author_share_hashes` has `n_A` entries, and without one both are empty; `option_proofs` has `T` entries; `sum_proofs` has `Q` entries, and entry `q` has exactly `max_q − min_q + 1` branches. |
+| `option-proof`   | Each option proof verifies over `C_j`, in flat order. A report names the first failing flat option.                                                                                                                                                                                                                                                                              |
+| `sum-proof`      | Each question's range proof verifies over `Y_q`, in question order. A report names the first failing question.                                                                                                                                                                                                                                                                   |
+
+### Shares (version 4)
+
+Each seat checks its shares against its own panel's commitments, by Shares' equation over its panel's polynomials: a default seat `i` against `vss`, `g^{v} · h^{r} = E^D_{j,0} · E^D_{j,1}^{i} · … · E^D_{j,k_D−1}^{i^{k_D−1}}`, and an author seat `i` against `author_vss` with `k_A` terms. It receipts only a list of exactly `T` shares, each passing, of a ballot that passes the checks above. A share never crosses panels: no seat holds shares of both halves (`default-seat`, [[verifier]] 2.5), and the tally sums each half within its own panel ([[0027-trustee-panels-and-live-results]], Tally; P2-16 part 3).
+
+### Decoding (version 4)
+
+As version 3, with the committed vote above: `author_vss` decodes as `vss` does (an identity or non-canonical element is `non-canonical`, a list over its maximum `length-over-max`), and `author_share_hashes` as `share_hashes`. Decoding doesn't compare the lists' lengths with the election, so a ballot with an author half in a poll without an author panel is still read, and rejected at admission (`validity-shape`). A record of another version is `profile-mismatch` under a profile pinning version 4.
+
+### Admission (version 4)
+
+Version 3's checks (Admission (version 3)), in the same order, with `validity-shape`, `option-proof` and `sum-proof` as Checks (version 4) states them and one change:
+
+| Code                     | Rejects a ballot when                                                                                                                                                                                                                                                                                                                               |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `share-hash-unqualified` | A default seat `i` outside the default panel's registered key set has a `share_hashes[i]` other than 32 zero bytes, or an author seat `i` outside the author panel's registered key set has an `author_share_hashes[i]` other than 32 zero bytes. A report names the first such seat with its panel, default seats first, each panel in seat order. |
+
+The author panel's registered key set is the output of its own ceremony's transcript check ([[ceremony]], run for the author panel; [[P2-16]] part 3), as the default panel's is of its. A ballot that passes gives what a version-3 ballot gives: its `ballot_hash`, its cell and the tuple [[revoting]] ranks.
+
+### Casting (version 4)
+
+Version 3's (Casting (version 3)), with both halves:
+
+1. Before making any share, the client runs [[verifier]] 2.5 and 2.8 for the election, which under definition version 6 include `panel-kind` and `default-seat`, and, with an author panel, checks the author panel's transcript, its approvals under `author_keys` and its registered key set as P2-16 part 3 specifies ([[election-definition]], Notes, The panel is checked before any share exists; T-14, T-37). Until part 3 specifies them, no client casts in a poll with an author panel.
+2. The core: both halves' sharings, the ciphertexts to every qualified seat of both panels, and both share-hash lists, with 32 zero bytes for each seat of either panel outside its panel's registered key set. The client shows the core hash before the choice ([[challenge]], Client rules).
+3. On cast: the validity proofs, the L1 block, `ballot_hash`, the membership proof and the admission checks, as version 1's steps 2 to 4.
+4. It delivers the finished record, with each seat's ciphertext, to every qualified seat of both panels ([[share-encryption]], Ballot version 4), and treats the ballot as delivered only when every qualified seat of both panels is receipted or, at the voter's explicit choice, posted ([[delivery]], Version 2).
+
+### Residuals (version 4)
+
+- **Version 3's residuals hold**, with the author half among the random-looking fields a malicious client can hide chosen bytes in (`author_vss` and a qualified author seat's share hash, T-17), and among the fields the direct-submit contract checks only for their framing and lengths: P1-18's board contract MUST run `validity-shape` and `share-hash-unqualified` over both halves, which needs the author panel's registered key set on L2 ([[delivery]], Version 2, Direct submit; P2-16 part 5).
+- **Both panels' nodes must be live.** A ballot is delivered only when every qualified seat of both panels holds its shares, and opens only with both thresholds at the tally: an author panel that falls below `k_A` live seats leaves the poll uncountable for good (T-54).
+- **Author seats see intake metadata.** Every author seat runs membership-checked intake, so it sees each ballot record with the network address that delivered it, and can link addresses to nullifiers and re-votes, though not to votes (T-11, T-13).
+- **A half alone protects nothing against its panel.** The author half is worthless without the default half, and the reverse, so the protection the composition adds is only ever against a coalition short of one threshold: `k_D` default seats with `k_A` author seats read every ballot, as `k` seats do under versions 1 to 3 (T-14).
+- **Larger ballots.** An author panel adds up to about 33 KB to a ballot, all of it carried, hashed and archived; through the contract path it is calldata the voter pays for (T-50, T-52).
+
 ## Residuals
 
 - **Trustees can open any ballot.** Any `k` trustees can combine their shares and open a ballot's commitments, publicly and verifiably (T-14, [[0002-everlasting-privacy]]). This page doesn't change that.
@@ -419,5 +556,7 @@ Version 2's (Casting (version 2)), with the proofs of Proving above. The ballot 
 `docs/spec/vectors/ballot-v3.json`: version-3 committed votes over version-5 definitions (each listed with its encoding, hash, questions, offsets, cells and panel): valid ballots for the owner's four methods in one poll (every question at its least and at its most), one question, `MAX_QUESTIONS` questions of two options (`T = MAX_OPTIONS`), one question of `MAX_OPTIONS` options (65 range branches) and `MAX_TRUSTEES`, each with the randomness that made it, its shares, statement, ballot and core hashes; one failing each check, with the flat option or question it names: `validity-shape` per question (a missing, extra or swapped entry, a branch too many), option proofs swapped across a question boundary or made over version 2's statement hash, copies to another nullifier, cell or election, an over-vote, an over-limit and two under-`exactly` answers, a count moved from one question to another, two same-shaped questions' proofs swapped, and a range proof made as version 1's sum proof; and decode rejections of the committed vote. They are printed by `packages/crypto/scripts/ballot-v3-vectors.py`, an implementation of Ballot record (version 3) in Python's integers and `hashlib` that reuses `ballot-validity-vectors.py`'s proofs and `definition-v5-vectors.py`'s definitions. It prints `spoiled-opening-v2.json` ([[challenge]]) and `tally-questions.json` ([[tally]]) too.
 
 `docs/spec/vectors/ballot-v3-records.json`: version-3 ballot records of a version-5 election with three questions (pick one of three, pick up to two of four, pick exactly one of two) over `ballot-v2.json`'s partition (three cells), each with its encoding, statement hash, ballot hash, `M`, the public signals admission derives and the result: admitted ballots in every cell (a re-vote, a ballot skipping its pick-up-to-two question, one answering only its pick-exactly-one question, a share hash at every seat), one ballot rejected by each code (`ballot-cell` at the first cell past the partition and at 255; `validity-shape` for a range proof one branch too long and for one range proof too few over the same flat options; `option-proof` naming the flat option; `sum-proof` naming question 1 over its limit while the poll's total would fit, and question 2, pick exactly one, left blank), membership failures (a changed L1 reference, another ballot's proof, a proof under another cell's root and scope), three order cases, and decode rejections. They are printed by `packages/crypto/scripts/ballot-v3-records-vectors.py`, which reuses `ballot-v2-vectors.py`'s cell trees and `ballot-v3-vectors.py`'s committed votes, with membership proofs by `ballot-proofs.mjs` as for version 1. It prints `intake-v3.json` ([[share-encryption]], Test vectors) too.
+
+Ballot version 4 (Ballot record (version 4)), with its ciphertexts ([[share-encryption]], Ballot version 4), delivery records of version 2 ([[delivery]], Version 2) and opening version 3 ([[challenge]], Opening version 3), has no vectors yet: they come with `packages/crypto`'s implementation in [[P2-16]] part 2b, from an independent generator, and freeze the layouts this page specifies.
 
 `docs/spec/vectors/ballot.json`: ballot records of two elections (plurality over tiers 0 and 2, approval over tier 1), each with its encoding, ballot hash, `M`, the public signals the admission check derives and the result: admitted ballots (each tier, a re-vote, the same ballot proved twice, a share hash at every seat), and one ballot rejected by each code, the membership failures including a changed L1 reference, another ballot's proof, a proof under another tier's root and scope, a nullifier that isn't the circuit's and a non-member; two ballots failing two checks each, which pin the order; and decode rejections. They are printed by `packages/crypto/scripts/ballot-vectors.py`, an implementation of Ballot record in Python's integers and `hashlib` (reusing this folder's other independent generators, with its own Baby Jubjub), with membership proofs from snarkjs over Semaphore's depth-32 circuit (`ballot-proofs.mjs`), which checks that each proof's root and nullifier are the ones the Python computed; every pairing verdict in the file is snarkjs's.

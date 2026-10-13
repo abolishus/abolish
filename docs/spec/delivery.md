@@ -4,9 +4,9 @@ How a ballot's delivery to each trustee is shown on the board, and how anyone de
 
 ## Versions
 
-None of the three types is pinned in an election's profile. Versions 1, 2 and 3 of the ballot record (`0x0002`) fix all three at version 1, together with the windows below ([[versioning]], Three levels), so delivery can't drift from the ballots it delivers: the ciphertexts' associated data name ballot version 1's share-ciphertext rules, which versions 2 and 3 keep, and the ballot hash names the ballot's own version ([[share-encryption]], Ciphertext; [[ballot-validity]], Ballot hash, Ballot record (version 2), Ballot record (version 3)).
+None of the three types is pinned in an election's profile. Versions 1, 2 and 3 of the ballot record (`0x0002`) fix all three at version 1, and version 4 fixes all three at version 2, which names the seat's panel (Version 2), each together with the windows below ([[versioning]], Three levels), so delivery can't drift from the ballots it delivers: the ciphertexts' associated data name ballot version 1's share-ciphertext rules, which versions 2 and 3 keep, and the ballot hash names the ballot's own version ([[share-encryption]], Ciphertext; [[ballot-validity]], Ballot hash, Ballot record (version 2), Ballot record (version 3)).
 
-Share receipts and complaints reach the board through the board path only under board-entry versions 3 and 4, which allow them ([[board]], Allowed payloads); no board-entry version allows a share posting, which reaches the board only as a contract event (Direct submit); version 2 is never assigned, since a frozen vector of `board.json` uses it as the version that doesn't exist. Under board-entry version 1 no receipt could be boarded through the board path, so a profile that pins ballot version 1 or 2 MUST pin one of them: [[verifier]] 2.3 fails a profile pinning ballot version 1 or 2 with any other board-entry version (`profile-combination`), the ballot client refuses to cast in such an election, and P1-18's election registry MUST refuse to register such a definition, so the mistake is caught before the election exists rather than after. A later board-entry version that also allows receipts and complaints adds itself to this rule, as version 4 does; [[tally]], Destruction, narrows the choice to version 4 for every profile that pins tally-opening version 1.
+Share receipts and complaints reach the board through the board path only under board-entry versions 3 and 4, which allow them ([[board]], Allowed payloads); no board-entry version allows a share posting, which reaches the board only as a contract event (Direct submit); version 2 is never assigned, since a frozen vector of `board.json` uses it as the version that doesn't exist. Under board-entry version 1 no receipt could be boarded through the board path, so a profile that pins any ballot version from 1 to 4 MUST pin one of them: [[verifier]] 2.3 fails a profile pinning one with any other board-entry version (`profile-combination`), the ballot client refuses to cast in such an election, and P1-18's election registry MUST refuse to register such a definition, so the mistake is caught before the election exists rather than after. A later board-entry version that also allows receipts and complaints adds itself to this rule, as version 4 does; [[tally]], Destruction, narrows the choice to version 4 for every profile that pins tally-opening version 1.
 
 ## Records
 
@@ -175,6 +175,58 @@ Notes:
 - **Seats that aren't qualified.** A ceremony can end with fewer than `n` qualified seats ([[ceremony]], Transcript check), and shares are encrypted only to qualified seats' keys. For a seat outside the registered key set the client encrypts nothing and sets the ballot's `share_hashes[i]` to 32 zero bytes; that seat needs no delivery and is never summed, and its share of the vote is simply never sent, so the tally needs `k` of the qualified seats. The ballot record's admission checks reject any other value there (`share-hash-unqualified`, [[ballot-validity]], Ballot record), so a ballot can't carry chosen bytes in the share hashes of the `n − q` seats that aren't qualified (T-17).
 - **A receipt and a proven complaint for one seat.** A trustee receipts only shares that pass its own intake, and a proven complaint shows publicly that the same ciphertext's shares don't, so both can't be honest. The ballot is excluded, since the proof is public and the trustee can't sum it correctly either, and the receipt is reported against its seat (T-29).
 - **Postings next to receipts.** A passing posting for a seat that also has a receipt is redundant, and the client never makes one (Client rules); but the contract can't tell, so one found among the contract events still delivers, and [[verifier]] 8.2 counts it as readable ([[tally]], Residuals). Only the client and the seat's own trustee know `m_i`, and the trustee could publish the share anyway (T-14).
+
+## Version 2
+
+Ballot version 4 ([[ballot-validity]], Ballot record (version 4)) shares each vote to two panels, so its delivery records name the seat's panel as well as its index: the share receipt, posting and complaint at version 2, which ballot version 4 fixes with the same windows (Versions). Everything not stated here is version 1's: the windows, the boarding rules, the contract path, what a node owes, the client rules and the delivery check, each applied per seat of either panel. `panel` is an `enum8<1, 2>`, 1 the default panel and 2 the author panel ([[ballot-validity]], Context (version 4)); a seat's **panel key set** is the registered key set of its own panel ([[share-encryption]], Ballot version 4, Keys).
+
+### Records (version 2)
+
+**Share receipt (`0x000c`, version 2):**
+
+| Field             | Type          | Meaning                                                                           |
+| ----------------- | ------------- | --------------------------------------------------------------------------------- |
+| `definition_hash` | `bytes[32]`   | The election's definition hash                                                    |
+| `ballot_hash`     | `bytes[32]`   | The ballot hash of the public part the trustee checked                            |
+| `panel`           | `enum8<1, 2>` | The seat's panel                                                                  |
+| `seat`            | `u8`          | The seat's index in its panel, `i`                                                |
+| `share_hash`      | `bytes[32]`   | `H(ct_i)`                                                                         |
+| `signature`       | `p256-sig`    | The seat's signature under `abolish/v1/sig/share-receipt-2` over the first fields |
+
+The fields before `signature` are the 98-byte statement of [[share-encryption]] (Share receipt (ballot version 4)). 165 bytes with its header.
+
+**Share posting (`0x000d`, version 2):** version 1's fields with `panel` (`enum8<1, 2>`) between `ballot_hash` and `seat`; `ciphertext` is checked against the seat's own panel ([[share-encryption]], Public posting (ballot version 4)). 1,309 + 64·`T` bytes with its header, for `T` flat options.
+
+**Share complaint (`0x000e`, version 2):** version 1's fields with `panel` (`enum8<1, 2>`) between `ballot_hash` and `seat`, and its proof under [[share-encryption]]'s Complaints (ballot version 4). The signature is by the seat's per-election signing key, registered in its panel key set, under `abolish/v1/sig/share-complaint-2`, over
+
+```
+m = definition_hash ‖ ballot_hash ‖ u8(panel) ‖ u8(seat) ‖ encode(proof)
+```
+
+162 bytes, and attributes the complaint to seat `seat` of panel `panel` if and only if that seat has registered keys in its panel key set and the signature verifies under its registered signing key; any other complaint is unattributed. 229 bytes with its header. The signed tags are new for the reason [[share-encryption]] gives: version 1's statements name no version, so one tag over both would have two layouts.
+
+**Decoding.** As version 1's, with `panel` an `enum8<1, 2>`: any other value is `invalid-enum`. Decoding doesn't compare `panel` with the election, so a record naming the author panel in a poll without one is still read, and reported `delivery-seat` (that panel's key set is empty).
+
+### Boarding, direct submit and client rules (version 2)
+
+Version 1's rules, per seat of either panel, with each rule's "seat of the registered key set" read as a seat of the panel key set of the panel the record names, its signature checked against that key set, and rule 5 per ballot hash, panel and seat. So at most one passing record of each type per seat of each panel per boarded ballot reaches the board through the board path (T-17, T-52).
+
+**What a node owes** is version 1's, for each seat of either panel: an author seat runs membership-checked intake and decides at `c_I` over its own view exactly as a default seat does, so it owes at most two contract-path receipts per (`tier`, `ν`), and the bound holds per seat whatever panel it is in (T-52, T-54).
+
+**The contract path** MUST accept an author seat's receipts and complaints as it does a default seat's: signed by that seat's registered per-election key, checked on L2. The trustee registry records only the key sets of the panels its deployment pins ([[contracts]], Trustee registry), and an author panel is never pinned, so the board contract has no author key set to check them against yet. Giving it one (an author panel's key set, registered under a quorum of approvals by the definition's `author_keys`, as [[ceremony]] for the author panel will have them sign) is [[P2-16]] parts 3 and 5's. Until it exists, an author seat can't be delivered through the contract path, so the election registry MUST refuse to register a definition with an author panel, and P2-16 part 5 MUST give the contract that path before any registry accepts one (T-25, T-54). A posting names its panel, and the contract compares `H(ct)` with that panel's list (`share_hashes` or `author_share_hashes`) and `sealed`'s length with `4 + 64·T + 16`.
+
+**Client rules** apply to every qualified seat of both panels. Rule 4's route that bypasses the operator is, for an author seat, the author node's own intake endpoint; the release lists only pinned panels' endpoints, so where an author panel publishes its seats' endpoints, and how the client authenticates them, is P2-16 part 3's ([[ceremony]] for the author panel). Until then an author seat's only route is the operator's relay, and the client says so before casting (T-25, T-11).
+
+### Delivery check (version 2)
+
+The delivery check of version 1, over the seats of both panels. For each selected ballot `b`, with `bh` recomputed:
+
+- **Seat `i` of panel `P` is delivered** if it isn't in `P`'s panel key set, or if some record in time names this definition, `bh`, panel `P` and seat `i`, and is either a share receipt, by either path, whose `share_hash` is `b`'s share hash for that seat (`share_hashes[i]` for the default panel, `author_share_hashes[i]` for the author panel) and which passes `share-receipt` against `b`, or a contract-path posting that passes the public check against `b` for that seat.
+- **The ballot is delivered** if every seat of both panels is.
+- **A complaint about seat `i` of panel `P` is proven** as in version 1, against a passing contract-path posting for `b`, panel `P` and seat `i`.
+- **The ballot is excluded** if any complaint about any seat of either panel is proven, attributed or not.
+
+The report codes are version 1's, each reported with the record's panel and seat: `delivery-seat` for a seat outside the panel key set of the panel it names, and `receipt-contradicted` for a passing receipt of a seat whose complaint, about the same ballot and in the same panel, is proven. A record for one panel never delivers, excludes or contradicts a seat of the other.
 
 ## Residuals
 

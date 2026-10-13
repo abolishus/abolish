@@ -66,7 +66,7 @@ t_e(A) = definition_hash ‖ u16(0x0002) ‖ u8(1) ‖ u8(i) ‖ encode(dh_i) �
 
 with `A` encoded with the identity allowed. Anyone checks it by recomputing `A = g^{pok_z} · ct_DH^{−pok_c}` and comparing the challenge. Without it, an attacker could copy a victim's `ct_DH` into a ciphertext of its own ballot, with its own `ct_M` and a garbage seal, and post it: the posting passes, the trustee's decryption fails, and its honest complaint would reveal `ct_DH^x`, the victim's DH value, so anyone holding the victim's `ss_M` (published by a posting, or seen in transit) reads the victim's share. With the proof, only the party that knows `e_i` can make a ciphertext with that `ct_DH` for that seat, key, committed vote and seal, and a complaint reveals only `dh_i^{e_i}`, which the poster already knows (T-15, T-41).
 
-`u16(0x0002) ‖ u8(1)` in `aad` and `t_e` names ballot version 1's share-ciphertext rules. Ballot versions 2 and 3 keep them unchanged, so their ciphertexts carry the same bytes (under version 3 over the poll's `T` flat options); the definition hash, which both bind, pins the election's ballot version ([[ballot-validity]], Ballot record (version 2)).
+`u16(0x0002) ‖ u8(1)` in `aad` and `t_e` names ballot version 1's share-ciphertext rules. Ballot versions 2 and 3 keep them unchanged, so their ciphertexts carry the same bytes (under version 3 over the poll's `T` flat options); the definition hash, which both bind, pins the election's ballot version ([[ballot-validity]], Ballot record (version 2)). Ballot version 4, whose vote is shared to two panels, names its own rules and the seat's panel (Ballot version 4).
 
 `share_ciphertext`:
 
@@ -194,6 +194,63 @@ Notes:
 - **Only posted ciphertexts.** A trustee complains only about a posting that passes the public check, its proof of knowledge included, and whose shares fail its own decryption at step 4 or 5; `packages/crypto` refuses to make a complaint otherwise. A ciphertext delivered at intake that fails is refused there, with nothing published.
 - **No DH oracle.** A passing posting's `ct_i` proves that whoever made it knows `e_i` (the Schnorr proof is extractable in the random-oracle model, by rewinding with the forking lemma, Pointcheval and Stern, J. Cryptology 2000; composing many postings follows Bernhard, Pereira and Warinschi, ASIACRYPT 2012), so the `D = dh_i^{e_i}` a complaint reveals is a value the poster could already compute: the complaint answers no static Diffie–Hellman query ([[group]], Static Diffie–Hellman), and it can't be aimed at another ciphertext's ephemeral.
 - **Intake reveals nothing the sender lacks.** A trustee's accept or refuse at intake tells the sender whether the AEAD opened and the shares passed. With the proof of knowledge checked first, the sender already knows `ss_DH`, and the ML-KEM half stays behind implicit rejection.
+
+## Ballot version 4
+
+Ballot version 4 shares each vote in two halves, to the default panel and to an author panel ([[ballot-validity]], Ballot record (version 4); [[0027-trustee-panels-and-live-results]], Part 1). Its ciphertexts, intake, receipts, postings and complaints are the rules above with the seat's panel bound into each of them, so a ciphertext, receipt or complaint for one panel's seat `i` is never one for the other panel's seat `i` (T-30, T-37, T-29). Everything not stated here is as above. `panel` is the seat's panel, `u8(1)` for the default panel and `u8(2)` for the author panel ([[ballot-validity]], Context (version 4)).
+
+### Keys
+
+Each seat's key is the `kem_key` of the registered key set of its own panel: a default seat's from the default panel's ceremony, an author seat's from the author panel's ([[ceremony]]; P2-16 part 3). A seat's shares are `(f^P_j(i), g^P_j(i))` for its panel `P`, `T` of them.
+
+### Ciphertext (ballot version 4)
+
+As Ciphertext, with the associated data and the proof of knowledge's challenge input naming ballot version 4, the seat's panel and both halves' commitments:
+
+```
+aad    = DS("abolish/v1/kem/share-aad",
+             definition_hash ‖ u16(0x0002) ‖ u8(4) ‖ u8(panel) ‖ u8(i) ‖ encode(vss) ‖ encode(author_vss))
+t_e(A) = definition_hash ‖ u16(0x0002) ‖ u8(4) ‖ u8(panel) ‖ u8(i) ‖ encode(dh_i) ‖ encode(vss) ‖ encode(author_vss)
+         ‖ ct_M ‖ encode(ct_DH) ‖ u32(len(sealed)) ‖ sealed ‖ encode(A)
+```
+
+with `dh_i` the seat's key in its own panel. `K`, `sealed`, `share_ciphertext` and `H(ct_i)` are unchanged, and the share hash goes into `share_hashes[i]` for a default seat and `author_share_hashes[i]` for an author seat. Both tags keep their layouts up to the version byte, which says how the rest reads: versions 1 to 3 name ballot version 1's rules (`u8(1)`, then the seat), version 4 names its own (`u8(4)`, then the panel and the seat), so no ciphertext made under one opens or proves under the other (T-31).
+
+Why both halves' commitments, whichever panel the seat is in: `aad` then binds the seat's ciphertext to the whole core but the share hashes, as under version 1, so an author seat's ciphertext can't be moved to a ballot with another default half, or the reverse, without failing its seal and its proof. With no author panel `encode(author_vss)` is a zero count.
+
+### Decryption and intake (ballot version 4)
+
+Decryption is steps 1 to 5 above, with `aad` and `t_e` above, the seat's panel's `kem_secret`, and step 5 checking each share against its own panel's commitments ([[ballot-validity]], Shares (version 4)). Intake is Intake and receipts' order, run by a seat of either panel on the whole ballot record, with:
+
+- step 2's `share-hash-unqualified` over both panels ([[ballot-validity]], Admission (version 4));
+- step 3, `share-hash`, comparing `H(ct_i)` with its own panel's list: `share_hashes[i]` for a default seat, `author_share_hashes[i]` for an author seat.
+
+Before it takes any delivery, a seat of either panel runs what a default seat runs (Intake and receipts: [[verifier]] 2.5 with `panel-kind` and `default-seat`, 3.2 for its own panel, 1.3, 2.4, 2.8), and, with an author panel, checks the author panel's transcript and approvals as P2-16 part 3 specifies; an author seat also checks that the definition names its own identity key at its own index in `author_keys`, so a creator who substituted author keys finds no author node taking part (T-37). A node refuses intake for an election it can't check this way.
+
+### Share receipt (ballot version 4)
+
+A seat's receipt is an ECDSA P-256 signature by its per-election signing key, registered in its own panel's key set, under `abolish/v1/sig/share-receipt-2`, over
+
+```
+m = definition_hash ‖ ballot_hash ‖ u8(panel) ‖ u8(i) ‖ H(ct_i)
+```
+
+98 bytes. It is checked as `share-receipt` is, with the seat's registered keys and signing key taken from its own panel's registered key set, and the share hash from its own panel's list. The statement has a new tag because its layout names no version: under one tag, a 97-byte version-1 statement and a 98-byte version-4 one would be two layouts ([[domain-separation]], Rules).
+
+### Public posting (ballot version 4)
+
+Public posting's checks, with the seat's panel: `posting-hash` compares `H(ct_i)` with its own panel's share-hash list, `posting-proof` checks the proof of knowledge with `t_e` above and its own panel's `dh_i`, and `posting-encapsulation` uses its own panel's `ek_i`. A passing posting of an author seat publishes `ss_M` for that author seat's share only: classical privacy for that share of the author half, which on its own reveals nothing about the vote ([[0027-trustee-panels-and-live-results]], What an author panel does weaken).
+
+### Complaints (ballot version 4)
+
+Complaints' proof and checks, with the seat's panel in the challenge input, under its own tag:
+
+```
+t = definition_hash ‖ u8(panel) ‖ u8(i) ‖ encode(dh_i) ‖ H(ct_i) ‖ encode(ct_DH) ‖ encode(D) ‖ encode(A_1) ‖ encode(A_2)
+c = HashToScalar(t, DST = "abolish/v1/fs/share-complaint-2")
+```
+
+with `dh_i` from the seat's own panel. `complaint-unfounded` decrypts with `aad` above and checks against the seat's own panel's commitments. The tag is new because version 1's `t` names no version ([[domain-separation]], Rules), so a proof under one layout is never checked under the other.
 
 ## Residuals
 

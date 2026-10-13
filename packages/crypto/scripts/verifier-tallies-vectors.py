@@ -48,7 +48,7 @@ def _load(name, file):
 
 vc = _load("verifier_ceremony_vectors", "verifier-ceremony-vectors.py")
 tov = _load("tally_opening_vectors", "tally-opening-vectors.py")
-cv, dv, rc, d4 = vc.cv, vc.dv, vc.rc, vc.d4
+cv, dv, rc, d4, d5 = vc.cv, vc.dv, vc.rc, vc.d4, vc.d5
 H, ds = vc.H, vc.ds
 outcome = vc.outcome
 
@@ -76,10 +76,17 @@ def definition_hash_of(d):
 
 
 def partition_size(d):
-    """Version 1's cells are its tiers; versions 3 and 4 number every tier's stated cells across the tiers."""
+    """Version 1's cells are its tiers; versions 3 to 5 number every tier's stated cells across the tiers."""
     if vc.own_version(d) == 1:
         return len(d["electorate"])
     return sum(len(t["cells"]) for t in d["electorate"])
+
+
+def option_total(d):
+    """`m`, the options an opening opens (tally.md, Context): under version 5 the total over the questions."""
+    if vc.own_version(d) == 5:
+        return sum(q["option_count"] for q in d["questions"])
+    return d["option_count"]
 
 
 def statement_of(o):
@@ -103,7 +110,7 @@ def expected(d, definition_hash, registered, entries):
             report.append({"entry": at, "signer": signer, "breaks": breaks})
             continue
         breaks = []
-        if len(o["opening"]) != d["option_count"]:
+        if len(o["opening"]) != option_total(d):
             breaks.append({"code": "tally-missing"})
         if signer is None:
             breaks.append({"code": "tally-unattributed"})
@@ -135,9 +142,10 @@ def main(out_dir):
     eid = dv.TYPICAL["election_id"]
 
     def election_for(label, seats, cheat=None, tally_version=1, base=dv.TYPICAL, opening_version=1):
-        """A definition of `base`'s version pinning board-entry version 4 (and ballot version 2 under versions 3 and 4, which name a cell), its transcript for its own stub, and the seats' per-election signing secrets."""
-        regional = base is not dv.TYPICAL
-        pin = {BOARD_ENTRY_TYPE: 4, TALLY_TYPE: tally_version, SPOILED_OPENING_TYPE: opening_version, **({BALLOT_TYPE: 2} if regional else {})}
+        """A definition of `base`'s version pinning board-entry version 4 (and ballot version 2 under versions 3 and 4, which name a cell, and 3 under version 5, which carries questions), its transcript for its own stub, and the seats' per-election signing secrets."""
+        own = dict(base["profile"]["pins"])[0x0001]
+        ballot = {3: 2, 4: 2, 5: 3}.get(own)
+        pin = {BOARD_ENTRY_TYPE: 4, TALLY_TYPE: tally_version, SPOILED_OPENING_TYPE: opening_version, **({BALLOT_TYPE: ballot} if ballot is not None else {})}
         pins = [(ty, pin.get(ty, v)) for ty, v in base["profile"]["pins"]]
         fields = {"profile": {"protocol_major": 1, "pins": pins}, "membership_vk_hash": MEMBERSHIP_VK_HASH}
         ctx = vc.election_of(vc.definition_for(panel, bytes(32), base, **fields))
@@ -156,7 +164,7 @@ def main(out_dir):
 
     def opener(d, secrets):
         """Openings for `d`'s election: `opening(cell, signer, ...)` is a tally opening of `cell` signed by `key` (seat `signer`'s own secret by default), naming `claimed` (default `signer`) as its signer."""
-        m, k = d["option_count"], d["threshold"]
+        m, k = option_total(d), d["threshold"]
         empty = tov.aggregate_hash(tov.tv.aggregate(m, k, []))
         zeros = [{"v": 0, "r": 0} for _ in range(m)]
         own = definition_hash_of(d)
@@ -347,6 +355,27 @@ def main(out_dir):
     c["expected"]["2.3"] = vc.combination(do2)
     assert c["expected"]["2.3"] == vc.NOT_IMPLEMENTED, c["expected"]["2.3"]
     assert [o.get("cell") for o in c["tallies"]] == [3, None]
+
+    # Definition version 5: an opening opens every option of every question,
+    # `m` the total over them (tally.md, Context), over version 3's partition.
+    assert d5.TYPICAL["election_id"] == eid
+    d5_, t5, s5 = election_for("definition-v5", [1, 2, 3], base=d5.TYPICAL, opening_version=2)
+    assert vc.own_version(d5_) == 5 and [len(x["cells"]) for x in d5_["electorate"]] == [3, 1]
+    open5, zeros5 = opener(d5_, s5)
+    first_question = d5_["questions"][0]["option_count"]
+    assert len(zeros5) == 18 and first_question == 3
+    c = case(
+        "v5-questions",
+        "A version-5 definition with the owner's four questions (3, 5, 4 and 6 options, 18 in all) over version 3's partition: an honest opening of cell 3 by seat 1 (undecided), one of cell 0 by seat 2 with an entry per option of the first question only (tally-missing), one of cell 1 by seat 3 with 19 entries (tally-missing) and one of cell 4 by seat 1 (stray). 7.4 is unverifiable.",
+        [open5(3, 1), open5(0, 2, values=zeros5[:first_question]), open5(1, 3, values=zeros5 + [{"v": 0, "r": 0}]), open5(4, 1)],
+        "unverifiable",
+        defn=d5_,
+        transcript=t5,
+        keys=registered_of(d5_, t5, s5),
+    )
+    c["expected"]["2.3"] = vc.combination(d5_)
+    assert c["expected"]["2.3"] == vc.NOT_IMPLEMENTED, c["expected"]["2.3"]
+    assert [[b["code"] for b in o["breaks"]] for o in c["tallies"]] == [[], ["tally-missing"], ["tally-missing"], ["tally-stray"]]
 
     dq3, tq3, _ = election_for("quorum-v3", [1, 2, 3, 4], {"answers": two_bad}, base=rc.TYPICAL)
     case("quorum-v3", "A version-3 definition whose seats 3 and 4 answer wrongly: no key set is registered, so 7.4 is not reached.", [open3(0, 1)], "unverifiable", defn=dq3, transcript=tq3, ceremony="fail")

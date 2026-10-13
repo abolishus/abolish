@@ -1,17 +1,18 @@
 // Runs the checks of docs/spec/verifier.md over one bundle and builds the
 // report (Procedure, Verdicts, Report). Only the board checks (4.1, 4.2), the
 // definition's decoding and well-formedness (part of 2.1) under definition
-// versions 1, 3 and 4, 2.3's profile combination, 2.9's receipt keys from L1
+// versions 1, 3, 4 and 5, 2.3's profile combination, 2.9's receipt keys from L1
 // state, 8.5's not-applicable case,
 // 1.3's failure for a definition naming another membership key and, for
 // format 4, the key-ceremony
 // transcript check (3.2, and the parts of 2.5 and 3.1 that need no L2 state)
 // ballot admission (5.1 to 5.4, and 5.7 as far as 5.5 allows; ballot
-// version 2 against its cell under definition versions 3 and 4) and the
+// version 2 against its cell under definition versions 3 and 4, ballot
+// version 3 against its cell and questions under definition version 5) and the
 // spoiled-ballot openings (6.2, as far as the floor of s_S decides them) and
 // the tally openings' sorting, attribution and boarding breaches (7.4, as far
 // as they need no counted set; against the cells under definition versions 3
-// and 4) are implemented; every other check is reported unverifiable, so no run can
+// to 5) are implemented; every other check is reported unverifiable, so no run can
 // report an election verified yet. A run on unauthenticated inputs reports
 // what the checks found against them, but its verdict stays unverifiable, so
 // a crafted bundle can neither verify nor fail an election (T-53, T-24).
@@ -26,18 +27,19 @@ import {
   type BoardErrorCode,
   DecodeError,
   type DecodeErrorCode,
-  decodeElectionDefinitionRecord,
-  type ElectionDefinitionRecord,
   electionDefinitionHash,
   electionDefinitionRule,
   electionDefinitionV3Hash,
   electionDefinitionV3Rule,
   electionDefinitionV4Hash,
   electionDefinitionV4Rule,
-  type ElectionDefinitionV4Rule,
+  electionDefinitionV5Hash,
+  electionDefinitionV5Rule,
+  type ElectionDefinitionV5Rule,
   electionStubHash,
   electionStubV3Hash,
   electionStubV4Hash,
+  electionStubV5Hash,
   membershipVkHash,
   pinnedVersion,
   profileCombinationRule,
@@ -49,6 +51,7 @@ import { type AdmissionCode, ballotChecks, type BallotsReport } from "./ballots.
 import type { Bundle, InputSource, InputSources } from "./bundle.ts";
 import { type CeremonyCode, ceremonyChecks, type CeremonyReport } from "./ceremony.ts";
 import { CHECKS, type CheckKind } from "./checks.ts";
+import { decodeDefinition, type VerifiedDefinition } from "./definition.ts";
 import { openingChecks, type OpeningCode, type OpeningReport } from "./openings.ts";
 import { type ReceiptKeyCode, receiptKeyRow } from "./receipt-keys.ts";
 import { tallyChecks, type TallyCode, type TallyReport } from "./tallies.ts";
@@ -65,7 +68,7 @@ export type Verdict = "verified" | "failed" | "unverifiable";
 export type CheckCode =
   | BoardErrorCode
   | L1ErrorCode
-  | ElectionDefinitionV4Rule
+  | ElectionDefinitionV5Rule
   | CeremonyCode
   | AdmissionCode
   | OpeningCode
@@ -86,6 +89,8 @@ export type CheckCode =
 export type CheckAt =
   | { readonly entry: number; readonly decodeError?: DecodeErrorCode }
   | { readonly decodeError: DecodeErrorCode }
+  /** 2.1's first failing question under definition version 5. */
+  | { readonly question: number }
   | { readonly checkpoint: number }
   | { readonly segment: number }
   | { readonly key: number }
@@ -244,10 +249,10 @@ type BoardInputs =
       readonly l1: L1Evidence;
     };
 
-/** Whether the definition's ballots are proved under the one membership key this release pins (ballot versions 1 and 2). */
-function provedUnderPinnedKey(d: ElectionDefinitionRecord["value"]): boolean {
+/** Whether the definition's ballots are proved under the one membership key this release pins (ballot versions 1 to 3). */
+function provedUnderPinnedKey(d: VerifiedDefinition["value"]): boolean {
   const pinned = pinnedVersion(d, RECORD_TYPES.ballot);
-  return pinned === 1 || pinned === 2;
+  return pinned === 1 || pinned === 2 || pinned === 3;
 }
 
 /**
@@ -256,10 +261,12 @@ function provedUnderPinnedKey(d: ElectionDefinitionRecord["value"]): boolean {
  * rule it breaks. Exhaustive: a version crypto adds doesn't compile until it
  * is read here (docs/spec/election-definition.md, Layout; T-34, T-37).
  */
-function readDefinition(record: ElectionDefinitionRecord): {
+function readDefinition(record: VerifiedDefinition): {
   readonly hash: Uint8Array;
   readonly stubHash: Uint8Array;
-  readonly rule: ElectionDefinitionV4Rule | undefined;
+  readonly rule: ElectionDefinitionV5Rule | undefined;
+  /** Under version 5, `option-count`'s and `selections`' first failing question. */
+  readonly question?: number;
 } {
   switch (record.version) {
     case 1:
@@ -280,6 +287,15 @@ function readDefinition(record: ElectionDefinitionRecord): {
         stubHash: electionStubV4Hash(record.value),
         rule: electionDefinitionV4Rule(record.value),
       };
+    case 5: {
+      const failure = electionDefinitionV5Rule(record.value);
+      return {
+        hash: electionDefinitionV5Hash(record.value),
+        stubHash: electionStubV5Hash(record.value),
+        rule: failure?.rule,
+        ...(failure !== undefined && "question" in failure && { question: failure.question }),
+      };
+    }
     default: {
       const unread: never = record;
       throw new Error(`unread definition version ${String(unread)}`);
@@ -297,7 +313,7 @@ function fromDefinition(bundle: Bundle):
   | {
       readonly inputs: BoardInputs;
       readonly hash?: Uint8Array;
-      readonly definition?: ElectionDefinitionRecord;
+      readonly definition?: VerifiedDefinition;
       readonly stubHash?: Uint8Array;
       /** 2.3's row when the profile's versions don't fit together, or pin one this verifier doesn't know. */
       readonly profile?: Outcome;
@@ -332,7 +348,7 @@ function fromDefinition(bundle: Bundle):
   });
   let record;
   try {
-    record = decodeElectionDefinitionRecord(bundle.definition);
+    record = decodeDefinition(bundle.definition);
   } catch (e) {
     if (!(e instanceof DecodeError)) throw e;
     // A definition version this verifier doesn't know may be one a later
@@ -346,8 +362,13 @@ function fromDefinition(bundle: Bundle):
     return stopped("2.1", { status: "fail", code: "decode", at: { decodeError: e.code } });
   }
   const definition = record.value;
-  const { hash, stubHash, rule } = readDefinition(record);
-  if (rule !== undefined) return stopped("2.1", { status: "fail", code: rule, at: {} }, hash);
+  const { hash, stubHash, rule, question } = readDefinition(record);
+  if (rule !== undefined)
+    return stopped(
+      "2.1",
+      { status: "fail", code: rule, at: question === undefined ? {} : { question } },
+      hash,
+    );
   // A version this verifier can't read may be one a later release supports,
   // so it leaves the election unverifiable here, never failed (2.3).
   const version = pinnedVersion(definition, RECORD_TYPES.boardEntry);
@@ -480,15 +501,15 @@ export function verifyBundle(bundle: Bundle): Report {
       // one this verifier reads, so the report still shows what the board holds.
       ...(definition.profile !== undefined ? [["2.3", definition.profile] as const] : []),
       // Definition versions 1 and 3 list no receipt keys, so 2.9 has nothing
-      // to check; version 4's keys are judged by the anchor's record, read
-      // from L1 state whatever the board checks found. Formats 1 and 2 carry
+      // to check; version 4's and 5's keys are judged by the anchor's record,
+      // read from L1 state whatever the board checks found. Formats 1 and 2 carry
       // no definition, so 2.9 stays unverifiable there, never a pass.
       ...(definition.definition === undefined
         ? []
         : [
             [
               "2.9",
-              definition.definition.version !== 4
+              definition.definition.version === 1 || definition.definition.version === 3
                 ? PASS
                 : "l1" in definition.inputs
                   ? receiptKeyRow(
@@ -506,8 +527,8 @@ export function verifyBundle(bundle: Bundle): Report {
         : [["8.5", NOT_APPLICABLE] as const]),
       // 1.3 also covers the keys inside the verifier contracts the election
       // uses, which aren't read yet: it can fail here, never pass. Only
-      // ballot versions 1 and 2's key (one key: a version-2 ballot proves
-      // membership of its cell's tree under it) is pinned here; a version
+      // ballot versions 1 to 3's key (one key: a version-2 or version-3
+      // ballot proves membership of its cell's tree under it) is pinned here; a version
       // this verifier doesn't read may have a key a later release pins, so
       // releases agree (T-36).
       ...(definition.definition !== undefined &&
@@ -546,7 +567,7 @@ export function verifyBundle(bundle: Bundle): Report {
       ballots = admission.report;
       // Sorting and attribution need only the definition and the registered
       // signing keys, so 7.4 runs wherever 3.2 passed, under definition
-      // versions 3 and 4 against their cells (docs/spec/verifier.md, Tally
+      // versions 3 to 5 against their cells (docs/spec/verifier.md, Tally
       // openings).
       const opened = tallyChecks(
         definition.definition,
@@ -574,12 +595,12 @@ export function verifyBundle(bundle: Bundle): Report {
         implemented = new Map<string, Outcome>([...implemented, ["6.2", spoiled.row]]);
         openings = spoiled.report;
       } else {
-        // Under definition versions 3 and 4 an opening opens a version-2
-        // core, which only spoiled-ballot opening version 2 does, and this
-        // verifier doesn't read it yet (P2-14 part 5): unsupported under
-        // either pin other than version 1, whether or not admission ran
-        // (T-36); with both at version 1, which 2.3 fails, not reached, as
-        // admission is.
+        // Under definition versions 3 to 5 an opening opens a version-2 or
+        // version-3 core, which only spoiled-ballot opening version 2 does,
+        // and this verifier doesn't read it yet (P2-14 part 5b): unsupported
+        // under either pin other than version 1, whether or not admission
+        // ran (T-36); with both at version 1, which 2.3 fails, not reached,
+        // as admission is.
         const d = definition.definition.value;
         const v1Pins =
           pinnedVersion(d, RECORD_TYPES.ballot) === 1 &&

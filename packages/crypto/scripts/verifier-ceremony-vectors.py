@@ -39,6 +39,7 @@ dv = _load("definition_vectors", "definition-vectors.py")
 bdv = _load("board_vectors", "board-vectors.py")
 rc = _load("regional_cells_vectors", "regional-cells-vectors.py")
 d4 = _load("definition_v4_vectors", "definition-v4-vectors.py")
+d5 = _load("definition_v5_vectors", "definition-v5-vectors.py")
 
 H, ds = cv.H, cv.ds
 TRANSCRIPT_TAG = b"abolish/v1/ceremony-transcript"
@@ -47,8 +48,8 @@ STUB_TAG = b"abolish/v1/election-stub"
 
 # Each definition version's encoding and rules, by the version its own
 # profile pins for 0x0001 (election-definition.md, Decoding).
-ENCODE = {1: dv.enc_definition, 3: rc.enc_definition_v3, 4: d4.enc_definition_v4}
-RULE = {1: dv.definition_rule, 3: rc.definition_rule, 4: d4.definition_rule}
+ENCODE = {1: dv.enc_definition, 3: rc.enc_definition_v3, 4: d4.enc_definition_v4, 5: d5.enc_definition_v5}
+RULE = {1: dv.definition_rule, 3: rc.definition_rule, 4: d4.definition_rule, 5: d5.definition_rule}
 
 
 def own_version(d):

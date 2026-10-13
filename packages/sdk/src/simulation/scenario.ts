@@ -105,6 +105,17 @@ export interface Scenario {
    * choice, so 0 (or no field) for none.
    */
   readonly postings: number;
+  /**
+   * The share of voters, in `[0, 1]`, whose last ballot names an L1 block
+   * that is reorganised away after the client named it 2 deep (a reorganisation
+   * deeper than Client rule 2 allows for, docs/spec/revoting.md), so the
+   * verifier rejects it. The client sees this once the block is finalized
+   * and casts the same committed vote again under a new reference (Client
+   * rule 4); when that would be after close, the ballot is lost and the
+   * voter's earlier ballot, if any, counts instead (Residuals). 0 (or no
+   * field) for none.
+   */
+  readonly reorgs: number;
   /** Seeds the plan only (who votes how and when), never a secret. */
   readonly seed: number;
 }
@@ -185,7 +196,7 @@ function parse(input: unknown): Scenario {
     input,
     "$",
     ["voters", "election", "options", "trustees", "tiers", "seed"],
-    ["outage", "challenges", "revotes", "publications", "postings"],
+    ["outage", "challenges", "revotes", "publications", "postings", "reorgs"],
   );
   const voters = integer(o["voters"], "$.voters", 1, MAX_SIMULATED_VOTERS);
   const election = o["election"];
@@ -244,9 +255,11 @@ function parse(input: unknown): Scenario {
   const publications = Object.hasOwn(o, "publications")
     ? fraction(o["publications"], "$.publications")
     : 0;
+  const reorgs = Object.hasOwn(o, "reorgs") ? fraction(o["reorgs"], "$.reorgs") : 0;
   // Who publishes is drawn by the plan too, so the bound takes every voter
-  // publishing against every ballot cast.
-  const ballots = (revotes > 0 ? 2 : 1) * voters;
+  // publishing against every ballot cast, a recast after a reorganisation
+  // included.
+  const ballots = ((revotes > 0 ? 2 : 1) + (reorgs > 0 ? 1 : 0)) * voters;
   if (
     challenges > 0 &&
     publications > 0 &&
@@ -269,6 +282,7 @@ function parse(input: unknown): Scenario {
     revotes,
     publications,
     postings,
+    reorgs,
     seed,
   };
 }

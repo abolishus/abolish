@@ -35,7 +35,7 @@ import {
   type SeatSecrets,
   TALLY_SCHEMES,
 } from "@abolishus/crypto";
-import { type Plan, selectionRange } from "./plan.ts";
+import { type Plan, SIMULATED_CLOSES_AT, SIMULATED_OPENS_AT, selectionRange } from "./plan.ts";
 import type { Scenario } from "./scenario.ts";
 
 /**
@@ -158,9 +158,9 @@ export function simulateElection(scenario: Scenario, plan: Plan): SimulatedElect
     threshold: k,
     panel_size: n,
     ceremony_transcript_hash: new Uint8Array(32),
-    // A one-day voting period in L2 time; nothing reads the clock yet.
-    opens_at: 1_000_000n,
-    closes_at: 1_086_400n,
+    // A one-day voting period in L2 time (./plan.ts).
+    opens_at: SIMULATED_OPENS_AT,
+    closes_at: SIMULATED_CLOSES_AT,
     l1_inclusion_bound: 3600,
     sequencing_window: 3600n,
     max_sequencer_drift: 1800n,

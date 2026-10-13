@@ -7,6 +7,9 @@ import {
   decode,
   DecodeError,
   decodeElectionDefinition,
+  decodeElectionDefinitionRecord,
+  decodeElectionDefinitionV5,
+  decodeElectionDefinitionV6,
   decodeSummedShareMessage,
   type ElectionDefinition,
   element,
@@ -20,10 +23,13 @@ import {
   sealSummedShares,
   type Share,
   shareVote,
+  shareVoteV3,
   type SummedShareElection,
   sumShares,
   signStatement,
   type TallyRules,
+  tallyRules,
+  UnsupportedVersionError,
 } from "../src/index.ts";
 import { ristretto255 } from "@noble/curves/ed25519.js";
 import { checkedKeySetForTests } from "../src/ceremony.ts";
@@ -578,5 +584,152 @@ describe("summed-share messages", () => {
     // Only the ephemeral's owner can make a passing proof over these parts;
     // the tag separation behind it is the cross-use vector's.
     expect(r).toEqual({ ok: false, code: "share-proof" });
+  });
+});
+
+describe("summed-share messages under definition versions 3 to 5", () => {
+  const readVector = (name: string, id: string) => {
+    const f = JSON.parse(readFileSync(new URL(name, SPEC_VECTORS), "utf8")) as {
+      readonly vectors: readonly { readonly id: string; readonly encoding?: string }[];
+    };
+    const v = f.vectors.find((x) => x.id === id);
+    if (v?.encoding === undefined) throw new Error(`no ${id} in ${name}`);
+    return hex(v.encoding);
+  };
+  // tally-questions.json's version-5 election: four questions over 11 flat
+  // options, a 2-of-3 panel and four cells, naming the transcript the key
+  // set below is checked against.
+  const questionsFile = JSON.parse(
+    readFileSync(new URL("tally-questions.json", SPEC_VECTORS), "utf8"),
+  ) as { readonly election: { readonly definition: string } };
+  const v5 = {
+    version: 5 as const,
+    value: {
+      ...decodeElectionDefinitionV5(hex(questionsFile.election.definition)),
+      ceremony_transcript_hash: ceremonyTranscriptHash,
+    },
+  };
+  const r = tallyRules(v5);
+  const keys = checkedKeySetForTests(
+    [1, 2, 3].map((i) => ({
+      index: i,
+      kemKey: seat(i).kem.publicKey,
+      signingKey: identityKey(seat(i).signingSecret),
+    })),
+    ceremonyTranscriptHash,
+  );
+  const questions = r.questions ?? [];
+  const sharings = [
+    [1, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0],
+    [0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1],
+  ].map((v) => shareVoteV3({ questions, threshold: 2, panelSize: 3 }, v as (0 | 1)[]));
+  // The ballots are in cell 3; cells 0 to 2 are empty.
+  const aggregates = [[], [], [], sharings.map((s) => s.vss)].map((b) => aggregateCell(r, b));
+  const summedOf = (i: number) =>
+    sumShares(
+      r,
+      sharings.map((s) => s.shares[i - 1] as readonly Share[]),
+    );
+
+  test("a version-5 election's sums over its flat options open at another seat, in any of its cells", () => {
+    const bytes = sealSummedShares(
+      { definition: v5, cell: 3, aggregate: aggregates[3] as (typeof aggregates)[3] },
+      keys,
+      { index: 1, signingSecret: seat(1).signingSecret },
+      2,
+      summedOf(1),
+    );
+    const election = { definition: v5, aggregates, registered: keys };
+    expect(
+      openSummedShares(election, { index: 2, secretKey: seat(2).kem.secretKey }, bytes),
+    ).toEqual({ ok: true, cell: 3, sender: 1, summed: summedOf(1) });
+    // One aggregate per cell of the version-5 partition, no more.
+    expect(() =>
+      openSummedShares(
+        { ...election, aggregates: aggregates.slice(0, 3) },
+        { index: 2, secretKey: seat(2).kem.secretKey },
+        bytes,
+      ),
+    ).toThrow(RangeError);
+    // The AAD and signature bind the version-5 definition hash: the same
+    // values under a definition differing only in a question's limits fail.
+    const other = {
+      version: 5 as const,
+      value: {
+        ...v5.value,
+        questions: v5.value.questions.map((q, i) =>
+          i === 1 ? { ...q, max_selections: q.max_selections - 1 } : q,
+        ),
+      },
+    };
+    expect(
+      openSummedShares(
+        { ...election, definition: other },
+        { index: 2, secretKey: seat(2).kem.secretKey },
+        bytes,
+      ),
+    ).toEqual({ ok: false, code: "summed-context" });
+  });
+
+  test("versions 3 and 4 number their cells across the tiers", () => {
+    for (const [name, id] of [
+      ["election-definition-v3.json", "definition-v3-typical"],
+      ["election-definition-v4.json", "definition-v4-typical"],
+    ] as const) {
+      const record = decodeElectionDefinitionRecord(readVector(name, id));
+      if (record.version === 1) throw new Error("expected version 3 or 4");
+      const definition = {
+        ...record,
+        value: { ...record.value, ceremony_transcript_hash: ceremonyTranscriptHash },
+      } as typeof record;
+      const rr = tallyRules(definition);
+      const cells = record.value.electorate.reduce((n, t) => n + t.cells.length, 0);
+      const empty = aggregateCell(rr, []);
+      const zero = Array.from({ length: rr.optionCount }, () => ({ v: 0n, r: 0n }));
+      const bytes = sealSummedShares(
+        { definition, cell: cells - 1, aggregate: empty },
+        keys,
+        { index: 3, signingSecret: seat(3).signingSecret },
+        1,
+        zero,
+      );
+      const election = {
+        definition,
+        aggregates: Array.from({ length: cells }, () => empty),
+        registered: keys,
+      };
+      expect(
+        openSummedShares(election, { index: 1, secretKey: seat(1).kem.secretKey }, bytes),
+      ).toMatchObject({ ok: true, cell: cells - 1, sender: 3 });
+      // A cell past the partition is refused before sealing.
+      expect(() =>
+        sealSummedShares(
+          { definition, cell: cells, aggregate: empty },
+          keys,
+          { index: 3, signingSecret: seat(3).signingSecret },
+          1,
+          zero,
+        ),
+      ).toThrow(RangeError);
+    }
+  });
+
+  test("a version-6 definition has no single-panel tally here", () => {
+    const value = decodeElectionDefinitionV6(
+      readVector("election-definition-v6.json", "definition-v6-typical"),
+    );
+    expect(() =>
+      sealSummedShares(
+        {
+          definition: { version: 6, value },
+          cell: 0,
+          aggregate: aggregates[0] as (typeof aggregates)[0],
+        },
+        keys,
+        { index: 1, signingSecret: seat(1).signingSecret },
+        2,
+        summedOf(1),
+      ),
+    ).toThrow(UnsupportedVersionError);
   });
 });

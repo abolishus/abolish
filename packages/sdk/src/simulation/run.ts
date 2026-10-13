@@ -89,6 +89,7 @@ import {
   signTallyOpening,
   type SpoiledBallotOpening,
   sumShares,
+  type TallyCode,
   type TallyRules,
   trackingCode,
   type ValidityContext,
@@ -151,7 +152,7 @@ export const SIMULATION_STUBS = Object.freeze([
   "not yet simulated: wipe-and-rebuild (P1-21 part 2)",
 ] as const);
 
-export type CellOutcome = "opened" | "tally-quorum" | "tally-opening" | "tally-range";
+export type CellOutcome = "opened" | TallyCode;
 
 export interface CellReport {
   readonly tier: SimulatedTier;

@@ -34,7 +34,8 @@ import { hex, SPEC_VECTORS } from "./spec-vectors.ts";
 // checks over the production group and hash: the Python generator and this
 // reading must agree on every byte, hash and verdict (T-31, T-36).
 // ballot-v3.test.ts runs the committed votes through the production code
-// (part 3a); the opening and tally-question-range follow in parts 3c and 4.
+// (part 3a), spoiled-opening-v2.test.ts the openings (part 3c) and
+// tally-questions.test.ts tally-question-range (part 4).
 
 const MAX_TRUSTEES = 16;
 const MAX_OPTIONS = 64;

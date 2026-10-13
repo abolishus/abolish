@@ -201,7 +201,7 @@ export class PanelError extends RangeError {
   }
 }
 
-function checkedPanel(panel: Panel): { threshold: number; keys: Uint8Array[] } {
+function checkedPanel(panel: Panel, minThreshold = 2): { threshold: number; keys: Uint8Array[] } {
   if (panel === null || typeof panel !== "object") throw new TypeError("panel: expected an object");
   const { threshold } = panel;
   // Copied once, so the keys checked are the keys hashed.
@@ -211,9 +211,11 @@ function checkedPanel(panel: Panel): { threshold: number; keys: Uint8Array[] } {
   if (keys === null) throw new TypeError("panel: keys must be an array");
   const n = keys.length;
   if (n > MAX_TRUSTEES) throw new PanelError("size", `n must be at most ${MAX_TRUSTEES}`);
-  // T-14: k = 1 would let one trustee open every sharing alone.
-  if (!Number.isSafeInteger(threshold) || threshold < 2 || threshold > n)
-    throw new PanelError("threshold", "need 2 ≤ k ≤ n");
+  // T-14: k = 1 would let one trustee open every sharing alone. An author
+  // panel passes 1: its half of an opening is worthless without the default
+  // half, so one author trustee holding it lowers nothing.
+  if (!Number.isSafeInteger(threshold) || threshold < minThreshold || threshold > n)
+    throw new PanelError("threshold", `need ${minThreshold} ≤ k ≤ n`);
   const seen = new Set<string>();
   for (const [i, key] of keys.entries()) {
     if (key.length !== 33 || !isCanonicalKey(key))
@@ -237,11 +239,58 @@ export function panelId(panel: Panel): Uint8Array {
 }
 
 function panelIdOf({ threshold, keys }: { threshold: number; keys: Uint8Array[] }): Uint8Array {
+  return H(ds("abolish/v1/panel", panelIdInput(threshold, keys)));
+}
+
+// `u8(k) ‖ u8(n) ‖ Q_1 ‖ … ‖ Q_n`, the same for both panel identifiers.
+function panelIdInput(threshold: number, keys: readonly Uint8Array[]): Uint8Array {
   const input = new Uint8Array(2 + 33 * keys.length);
   input[0] = threshold;
   input[1] = keys.length;
   for (const [i, key] of keys.entries()) input.set(key, 2 + 33 * i);
-  return H(ds("abolish/v1/panel", input));
+  return input;
+}
+
+/** Why an author panel is invalid: a panel's codes, and `default-seat` against the default panel. */
+export type AuthorPanelRule = PanelErrorCode | "default-seat";
+
+/**
+ * The first rule of docs/spec/trustee-identity.md (Author panel identifier)
+ * an author panel breaks, in the spec's order: `size`, `threshold`
+ * (`1 ≤ k_A ≤ n_A`), then per seat `key` and `duplicate-key`; with
+ * `defaultKeys`, then `default-seat`. Rules 1 to 3 are the definition's
+ * `author-panel` well-formedness rule; rule 4 needs the pinned default panel
+ * and is [[verifier]] 2.5's. A key in both panels would let the default
+ * trustees holding it stand in for author trustees, so the author panel would
+ * add nothing against them (T-14, T-37).
+ */
+export function authorPanelRule(
+  panel: Panel,
+  defaultKeys?: readonly Uint8Array[],
+): AuthorPanelRule | undefined {
+  let keys: Uint8Array[];
+  try {
+    ({ keys } = checkedPanel(panel, 1));
+  } catch (e) {
+    if (e instanceof PanelError) return e.code;
+    throw e;
+  }
+  if (defaultKeys === undefined) return undefined;
+  const defaults = defaultKeys.map((k, i) => copyOf(k, `default key ${i + 1}`));
+  if (keys.some((k) => defaults.some((d) => equalBytes(k, d)))) return "default-seat";
+  return undefined;
+}
+
+/**
+ * `author_panel_id = H(DS("abolish/v1/author-panel", u8(k_A) ‖ u8(n_A) ‖ Q_1 ‖ … ‖ Q_{n_A}))`,
+ * for an author panel valid under rules 1 to 3 (`PanelError` otherwise).
+ * Its own tag keeps it from ever equalling a default panel's identifier over
+ * the same keys, so a statement bound to one can't stand for the other
+ * (T-37). Never stored: every reader recomputes it from the definition.
+ */
+export function authorPanelId(panel: Panel): Uint8Array {
+  const { threshold, keys } = checkedPanel(panel, 1);
+  return H(ds("abolish/v1/author-panel", panelIdInput(threshold, keys)));
 }
 
 /** The fields of a ceremony registration a signer supplies; the panel fixes the rest. */

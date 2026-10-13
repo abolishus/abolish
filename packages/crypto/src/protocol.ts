@@ -24,6 +24,7 @@ import {
   type ElectionDefinitionV4,
   type ElectionDefinitionV5,
   type ElectionDefinitionV5Failure,
+  type ElectionDefinitionV6,
   electionDefinitionRule,
   type ElectionDefinitionRule,
   electionDefinitionV5Rule,
@@ -71,6 +72,10 @@ export function encodeElectionDefinitionV5(d: ElectionDefinitionV5): Uint8Array 
   return PROTOCOL_SCHEMA.encode(ELECTION_DEFINITION, 5, d);
 }
 
+export function encodeElectionDefinitionV6(d: ElectionDefinitionV6): Uint8Array {
+  return PROTOCOL_SCHEMA.encode(ELECTION_DEFINITION, 6, d);
+}
+
 /** A decoded definition of any version the verifier reads (1, 3 and 4). */
 export type ElectionDefinitionRecord =
   | { readonly version: 1; readonly value: ElectionDefinition }
@@ -80,7 +85,8 @@ export type ElectionDefinitionRecord =
 /** A decoded definition of any version this package reads. */
 type AnyElectionDefinitionRecord =
   | ElectionDefinitionRecord
-  | { readonly version: 5; readonly value: ElectionDefinitionV5 };
+  | { readonly version: 5; readonly value: ElectionDefinitionV5 }
+  | { readonly version: 6; readonly value: ElectionDefinitionV6 };
 
 /**
  * Strictly decodes an election definition of any version, then checks it
@@ -105,10 +111,11 @@ function decodeAnyElectionDefinition(bytes: Uint8Array): AnyElectionDefinitionRe
 
 /**
  * `decodeAnyElectionDefinition` for the verifier, which reads definition
- * versions 1, 3 and 4: a version-5 definition is `unknown-version` at its
- * version byte, read before any field as it was before version 5 had a
- * layout, so the verifier leaves it unverifiable (2.3) until it reads
- * questions (P2-14 part 5; T-36).
+ * versions 1, 3 and 4: a version-5 or version-6 definition is
+ * `unknown-version` at its version byte, read before any field as it was
+ * before those versions had layouts, so the verifier leaves it unverifiable
+ * (2.3) until it reads questions (P2-14 part 5) and author panels (P2-16
+ * part 4; T-36).
  */
 export function decodeElectionDefinitionRecord(bytes: Uint8Array): ElectionDefinitionRecord {
   if (
@@ -116,12 +123,12 @@ export function decodeElectionDefinitionRecord(bytes: Uint8Array): ElectionDefin
     bytes.length >= 3 &&
     bytes[0] === 0 &&
     bytes[1] === RECORD_TYPES.electionDefinition &&
-    bytes[2] === 5
+    (bytes[2] === 5 || bytes[2] === 6)
   )
     throw new DecodeError("unknown-version", 2);
   const record = decodeAnyElectionDefinition(bytes);
   // Unreachable: the version byte was read above.
-  if (record.version === 5) throw new DecodeError("unknown-version", 2);
+  if (record.version === 5 || record.version === 6) throw new DecodeError("unknown-version", 2);
   return record;
 }
 
@@ -133,6 +140,18 @@ export function decodeElectionDefinitionRecord(bytes: Uint8Array): ElectionDefin
 export function decodeElectionDefinitionV5(bytes: Uint8Array): ElectionDefinitionV5 {
   const record = decodeAnyElectionDefinition(bytes);
   if (record.version !== 5) throw new DecodeError("unknown-version", 2);
+  return record.value;
+}
+
+/**
+ * `decodeAnyElectionDefinition` for callers that read only version 6 (the
+ * poll class, results mode and author panel): a definition of any other
+ * version is `unknown-version` to them, after it has decoded under its own
+ * layout and pin.
+ */
+export function decodeElectionDefinitionV6(bytes: Uint8Array): ElectionDefinitionV6 {
+  const record = decodeAnyElectionDefinition(bytes);
+  if (record.version !== 6) throw new DecodeError("unknown-version", 2);
   return record.value;
 }
 
@@ -166,6 +185,39 @@ export function electionDefinitionV4Hash(d: ElectionDefinitionV4): Uint8Array {
 /** `electionDefinitionHash` for version 5: the same tag over the version-5 encoding. */
 export function electionDefinitionV5Hash(d: ElectionDefinitionV5): Uint8Array {
   return H(ds("abolish/v1/election-definition", encodeElectionDefinitionV5(d)));
+}
+
+/** `electionDefinitionHash` for version 6: the same tag over the version-6 encoding. */
+export function electionDefinitionV6Hash(d: ElectionDefinitionV6): Uint8Array {
+  return H(ds("abolish/v1/election-definition", encodeElectionDefinitionV6(d)));
+}
+
+/**
+ * `electionStubHash` for version 6, the stub the default panel's ceremony
+ * binds: `ceremony_transcript_hash` zeroed and `author_transcript_hash`
+ * kept, so the default seats' registration binds the author panel's
+ * transcript, and once they approve no one can register the definition with
+ * another (docs/spec/election-definition.md, Stub hash and the ceremony;
+ * T-17, T-34, T-37). The poll class, results mode and author panel are in
+ * it, fixed before either ceremony.
+ */
+export function electionStubV6Hash(d: ElectionDefinitionV6): Uint8Array {
+  const stub = { ...d, ceremony_transcript_hash: new Uint8Array(32) };
+  return H(ds("abolish/v1/election-stub", encodeElectionDefinitionV6(stub)));
+}
+
+/**
+ * `author_stub_hash`, the stub the author panel's ceremony binds, run before
+ * the default panel's: both transcript hashes zeroed. With no author panel
+ * it equals `electionStubV6Hash`, and only the default ceremony runs.
+ */
+export function electionAuthorStubV6Hash(d: ElectionDefinitionV6): Uint8Array {
+  const stub = {
+    ...d,
+    ceremony_transcript_hash: new Uint8Array(32),
+    author_transcript_hash: new Uint8Array(32),
+  };
+  return H(ds("abolish/v1/election-stub", encodeElectionDefinitionV6(stub)));
 }
 
 /** `electionStubHash` for version 5: the questions are in the stub, fixed before the ceremony (T-34). */

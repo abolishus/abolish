@@ -17,6 +17,7 @@ import {
   encodeDisplayTextV2,
   encodeElectionDefinitionV5,
   RECORD_TYPES,
+  UNPINNED,
   UnsupportedVersionError,
 } from "../src/index.ts";
 import { buildSchema, hex, readVectorFile, type Vector, type VectorFile } from "./spec-vectors.ts";
@@ -56,7 +57,7 @@ type QuestionsVector = Vector & {
 
 describe("election definition version 5 (docs/spec/election-definition.md, Layout (version 5))", () => {
   const file = readVectorFile("election-definition-v5.json");
-  const { type } = buildSchema(
+  const { schema, type } = buildSchema(
     merged("election-definition-v5.json", "election-definition-v4.json"),
   );
   const vectors = file.vectors as readonly QuestionsVector[];
@@ -83,7 +84,19 @@ describe("election definition version 5 (docs/spec/election-definition.md, Layou
   });
 
   test.each(invalid)("%s is rejected", (_id, v) => {
-    expect(decodeError(() => decodeElectionDefinitionV5(hex(v.encoding)))).toBe(v.error);
+    const bytes = hex(v.encoding);
+    // An unknown-version vector is read by a decoder of its file's versions
+    // only (vectors README, Rules): this package also lays out version 6, so
+    // it rejects version 5's bytes labelled 6 under version 6's layout, as
+    // election-definition-v6.json's definition-v5-labelled-six gives.
+    if (v.error === "unknown-version" && bytes[2] === 6) {
+      expect(decodeError(() => schema.decode(type(v.type).recordType, bytes, UNPINNED))).toBe(
+        v.error,
+      );
+      expect(decodeError(() => decodeElectionDefinitionV5(bytes))).toBe("truncated");
+      return;
+    }
+    expect(decodeError(() => decodeElectionDefinitionV5(bytes))).toBe(v.error);
   });
 
   // The verifier reads versions 1, 3 and 4 until P2-14 part 5: a version-5

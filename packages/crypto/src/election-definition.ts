@@ -1,4 +1,4 @@
-// The election definition, record type 0x0001 versions 1, 3, 4 and 5
+// The election definition, record type 0x0001 versions 1, 3, 4, 5 and 6
 // (docs/spec/election-definition.md): the layouts, the well-formedness
 // rules a decoded definition must also meet, and when a listed receipt key
 // judges the election. Version 2 is never assigned: a
@@ -20,7 +20,7 @@ import {
 } from "./codec.ts";
 import { RECORD_TYPES, recordType } from "./record.ts";
 import { foldRegions } from "./regional-cells.ts";
-import { p256Key } from "./trustee.ts";
+import { authorPanelRule, p256Key } from "./trustee.ts";
 
 const address = bytesFixed(20);
 const hash = bytesFixed(32);
@@ -169,18 +169,59 @@ const electionDefinitionV5 = struct([
   ["receipt_keys", list(p256Key, DEFINITION_V4_LIMITS.receiptKeys)],
 ] as const);
 
-/** Record type 0x0001, versions 1, 3, 4 and 5 (docs/spec/election-definition.md). */
+/** The poll classes of version 6: classes 2 and 3 are on the civic record. */
+export const POLL_CLASSES = Object.freeze({
+  everyday: 1,
+  organisational: 2,
+  civicReferendum: 3,
+} as const);
+
+/** The results modes of version 6: sealed until the final tally, or live running totals. */
+export const RESULTS_MODES = Object.freeze({ sealed: 1, live: 2 } as const);
+
+/**
+ * Version 6's limits (docs/spec/election-definition.md, Layout (version 6)),
+ * written out like version 5's so changing a protocol-wide parameter can
+ * never change what version 6 accepts; a test ties them to PARAMETERS.
+ */
+export const DEFINITION_V6_LIMITS = Object.freeze({ authorKeys: 16, minLiveBatch: 20 } as const);
+
+// Version 5's fields, in order, then the poll class, the results mode and the
+// author panel (0027-trustee-panels-and-live-results), so version 6's bytes
+// are version 5's followed by the new fields.
+const electionDefinitionV6 = struct([
+  ...ADDRESSES,
+  ["questions", list(question, DEFINITION_V5_LIMITS.maxQuestions)],
+  ["tally_scheme", enum8([TALLY_SCHEMES.pedersenVss])],
+  ["electorate", list(tierElectorate, 3)],
+  ...TAIL,
+  ["receipt_keys", list(p256Key, DEFINITION_V4_LIMITS.receiptKeys)],
+  [
+    "poll_class",
+    enum8([POLL_CLASSES.everyday, POLL_CLASSES.organisational, POLL_CLASSES.civicReferendum]),
+  ],
+  ["results_mode", enum8([RESULTS_MODES.sealed, RESULTS_MODES.live])],
+  ["live_every", u32],
+  ["live_batch", u32],
+  ["author_threshold", u8],
+  ["author_keys", list(p256Key, DEFINITION_V6_LIMITS.authorKeys)],
+  ["author_transcript_hash", hash],
+] as const);
+
+/** Record type 0x0001, versions 1, 3, 4, 5 and 6 (docs/spec/election-definition.md). */
 export const ELECTION_DEFINITION = recordType(RECORD_TYPES.electionDefinition, {
   1: electionDefinitionV1,
   3: electionDefinitionV3,
   4: electionDefinitionV4,
   5: electionDefinitionV5,
+  6: electionDefinitionV6,
 });
 
 export type ElectionDefinition = CodecValue<typeof electionDefinitionV1>;
 export type ElectionDefinitionV3 = CodecValue<typeof electionDefinitionV3>;
 export type ElectionDefinitionV4 = CodecValue<typeof electionDefinitionV4>;
 export type ElectionDefinitionV5 = CodecValue<typeof electionDefinitionV5>;
+export type ElectionDefinitionV6 = CodecValue<typeof electionDefinitionV6>;
 export type Question = CodecValue<typeof question>;
 export type TierElectorate = CodecValue<typeof tierElectorate>;
 
@@ -305,6 +346,75 @@ export function electionDefinitionV5Rule(
   if (questionsFailure !== undefined) return questionsFailure;
   const rule = electorateV3Rule(d) ?? cellsRule(d) ?? tailRule(d) ?? receiptKeysRule(d);
   return rule === undefined ? undefined : { rule };
+}
+
+/**
+ * The well-formedness rule codes of version 6, in checking order: version
+ * 5's, then `results`, `civic-sealed` and `author-panel`.
+ */
+export type ElectionDefinitionV6Rule =
+  | ElectionDefinitionV5Rule
+  | "results"
+  | "civic-sealed"
+  | "author-panel";
+
+/** The first rule a version-6 definition breaks, as `ElectionDefinitionV5Failure`. */
+export type ElectionDefinitionV6Failure =
+  | ElectionDefinitionV5Failure
+  | { readonly rule: "results" | "civic-sealed" | "author-panel" };
+
+/**
+ * Version 6's `electionDefinitionRule` (docs/spec/election-definition.md,
+ * Well-formedness): version 5's rules, then `results` (a sealed poll carries
+ * no schedule or batch, and a live one has both, its batch at least
+ * `MIN_LIVE_BATCH`, so running totals are never released in batches small
+ * enough to be unanimous; T-16, T-17), `civic-sealed` (a civic referendum is
+ * sealed) and `author-panel` (no author panel at all, or a valid one under
+ * trustee-identity rules 1 to 3 with a non-zero transcript hash; T-14,
+ * T-17, T-37). That no author key is a default seat's is [[verifier]] 2.5's.
+ */
+export function electionDefinitionV6Rule(
+  d: ElectionDefinitionV6,
+): ElectionDefinitionV6Failure | undefined {
+  const v5 = electionDefinitionV5Rule(d);
+  if (v5 !== undefined) return v5;
+  const rule = resultsRule(d) ?? civicSealedRule(d) ?? authorPanelDefinitionRule(d);
+  return rule === undefined ? undefined : { rule };
+}
+
+function resultsRule(
+  d: Pick<ElectionDefinitionV6, "results_mode" | "live_every" | "live_batch">,
+): "results" | undefined {
+  if (d.results_mode === RESULTS_MODES.sealed)
+    return d.live_every === 0 && d.live_batch === 0 ? undefined : "results";
+  return d.live_every >= 1 && d.live_batch >= DEFINITION_V6_LIMITS.minLiveBatch
+    ? undefined
+    : "results";
+}
+
+function civicSealedRule(
+  d: Pick<ElectionDefinitionV6, "poll_class" | "results_mode">,
+): "civic-sealed" | undefined {
+  return d.poll_class === POLL_CLASSES.civicReferendum && d.results_mode !== RESULTS_MODES.sealed
+    ? "civic-sealed"
+    : undefined;
+}
+
+function authorPanelDefinitionRule(
+  d: Pick<ElectionDefinitionV6, "author_threshold" | "author_keys" | "author_transcript_hash">,
+): "author-panel" | undefined {
+  const transcript = d.author_transcript_hash;
+  if (d.author_keys.length === 0)
+    // No author panel is all three empty: a threshold or transcript hash
+    // with no keys would be chosen bytes (T-17).
+    return d.author_threshold === 0 && isZero(transcript) ? undefined : "author-panel";
+  // A zero transcript hash with a panel would make `author_stub_hash` and
+  // `stub_hash` the same bytes, so one stub hash could stand for both
+  // panels' stubs (T-37).
+  if (isZero(transcript)) return "author-panel";
+  return authorPanelRule({ threshold: d.author_threshold, keys: d.author_keys }) === undefined
+    ? undefined
+    : "author-panel";
 }
 
 function questionsRule(questions: readonly Question[]): ElectionDefinitionV5Failure | undefined {

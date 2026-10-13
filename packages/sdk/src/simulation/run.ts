@@ -71,7 +71,7 @@ import type { Scenario, SimulatedTier } from "./scenario.ts";
 export const SIMULATION_STUBS = Object.freeze([
   "definition: a well-formed version-1 definition, but its contracts, chain IDs, election counter, clock and tier roots are placeholders and nothing registers it on L2 (P1-18, P3-2)",
   "ceremony: every seat takes part in the four signed rounds; no release pins the panel, whose identity keys are fresh per run (P1-7)",
-  "membership: no membership proofs; each voter's nullifier is its index plus one, and each ballot record carries a placeholder proof, the verification key's own alpha, beta and alpha points, which decodes but proves nothing and is never checked (P1-17b, P3-2)",
+  "membership: no membership proofs; each voter's nullifier is its index plus one, and each ballot record carries a placeholder proof, the verification key's own alpha, beta and alpha points, which decodes but proves nothing and is never checked, so admission (5.1 to 5.4) isn't run and each ballot's M for the re-vote rule is computed from its record here rather than taken from crypto's checkBallot (P1-17b, P3-2)",
   "board: the operator boards each server ballot as it arrives and signs a receipt the voter's client checks at cast, under one receipt key fresh per run that no definition lists or registry holds; the anchoring clock (hourly from the Unix epoch), the first segment (the period of opens_at) and the seal are placeholders, and nothing is anchored (P1-13b, P4-1)",
   "delivery: ciphertexts reach trustees in memory, with no contract path; a direct ballot is boarded by the operator when the servers return, with no receipt, never as a contract event (P1-12c, P4-2)",
   "trustees: offline seats go down after the ceremony, for the whole voting period and tally; faulty seats lie only in their summed shares",
@@ -119,7 +119,7 @@ export interface SimulationReport {
     /** Attempts challenged before a fresh one was cast, each opening checked by the voter's checker. */
     readonly challenged: number;
   };
-  /** The board the operator wrote, which the verifier's board check passed. */
+  /** The board the operator wrote, which passed the verifier's entry checks (4.1); nothing anchors it. */
   readonly board: {
     readonly entries: number;
     /** The chain head after its last entry, in hex. */

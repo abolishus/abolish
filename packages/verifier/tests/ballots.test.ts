@@ -228,17 +228,17 @@ describe("admission is decided per entry", () => {
 describe("when ballot admission can't run", () => {
   const admitted = byId("admitted");
 
-  test("a definition that doesn't decode leaves 5.1 to 5.4 and 5.7 not reached", () => {
+  test("a definition that doesn't decode leaves 5.1 to 5.4, 5.7 and 6.2 not reached", () => {
     const r = format4(admitted, hex(admitted.board), "0001");
-    for (const id of ADMISSION)
+    for (const id of [...ADMISSION, "6.2"])
       expect(row(r, id)).toMatchObject({ status: "unverifiable", code: "not-reached" });
     expect(r.ballots).toBeUndefined();
   });
 
-  test("a tier root of 0 leaves them not reached, though the ceremony passed (T-04)", () => {
+  test("a tier root of 0 leaves them and 6.2 not reached, though the ceremony passed (T-04)", () => {
     const r = format4(byId("root-zero"));
     expect(row(r, "3.2").status).toBe("pass");
-    for (const id of ADMISSION)
+    for (const id of [...ADMISSION, "6.2"])
       expect(row(r, id)).toMatchObject({ status: "unverifiable", code: "not-reached" });
     expect(r.ballots).toBeUndefined();
   });
@@ -264,7 +264,7 @@ describe("when ballot admission can't run", () => {
   });
 });
 
-test("the report gives the ballots after the ceremony", () => {
+test("the report gives the ballots after the ceremony, then the openings", () => {
   const r = format4(byId("mixed"));
   expect(Object.keys(r)).toEqual([
     "format",
@@ -274,6 +274,7 @@ test("the report gives the ballots after the ceremony", () => {
     "definition",
     "ceremony",
     "ballots",
+    "openings",
     "board",
     "l1",
     "checks",

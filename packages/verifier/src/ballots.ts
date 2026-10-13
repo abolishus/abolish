@@ -14,6 +14,7 @@
 import {
   type AdmittedBallot,
   type BallotCode,
+  type BallotCore,
   ballotElection,
   type BoardEntryVersion,
   checkBallot,
@@ -53,6 +54,13 @@ export interface BallotsReport {
   readonly admitted: number;
   readonly rejected: readonly RejectedBallot[];
   readonly repeats: readonly RepeatedBallot[];
+}
+
+/** An admitted ballot's core and segment, which 6.2's `opening-cast` compares openings with. */
+export interface AdmittedCore {
+  readonly entry: number;
+  readonly segment: number;
+  readonly core: Pick<BallotCore, "definitionHash" | "vss">;
 }
 
 export interface BallotOutcome {
@@ -96,7 +104,11 @@ export function ballotChecks(
   registered: readonly RegisteredKeys[] | undefined,
   entries: readonly Uint8Array[],
   boardEntryVersion: BoardEntryVersion,
-): { readonly rows: ReadonlyMap<string, BallotOutcome>; readonly report?: BallotsReport } {
+): {
+  readonly rows: ReadonlyMap<string, BallotOutcome>;
+  readonly report?: BallotsReport;
+  readonly admitted?: readonly AdmittedCore[];
+} {
   // A ballot version this verifier doesn't read may be one a later release
   // reads: unverifiable, never failed, so releases agree (2.3; T-36).
   if (pinnedVersion(d, RECORD_TYPES.ballot) !== 1)
@@ -111,28 +123,38 @@ export function ballotChecks(
     return { rows: all(NOT_REACHED) };
   const election = ballotElection(d, registered);
   const admitted: AdmittedBallot[] = [];
+  const cores: AdmittedCore[] = [];
   const rejected: RejectedBallot[] = [];
   for (const [at, encoded] of entries.entries()) {
     let payload: Uint8Array;
+    let segment: number;
     try {
       const e = decodeBoardEntry(encoded, boardEntryVersion);
       // 4.1 reports an entry that doesn't decode or names another election.
       if (!equal(e.election_id, d.election_id)) continue;
       payload = e.payload;
+      segment = e.segment;
     } catch (e) {
       if (e instanceof DecodeError) continue;
       throw e;
     }
     if ((((payload[0] as number) << 8) | (payload[1] as number)) !== RECORD_TYPES.ballot) continue;
+    let record;
     let checked;
     try {
-      checked = checkBallot(election, decodeBallot(payload, 1));
+      record = decodeBallot(payload, 1);
+      checked = checkBallot(election, record);
     } catch (e) {
       if (!(e instanceof DecodeError)) throw e;
       rejected.push({ entry: at, code: "decode", decodeError: e.code });
       continue;
     }
-    if (checked.ok)
+    if (checked.ok) {
+      cores.push({
+        entry: at,
+        segment,
+        core: { definitionHash: record.definition_hash, vss: record.committed_vote.vss },
+      });
       admitted.push({
         tier: checked.tier,
         nullifier: checked.nullifier,
@@ -140,7 +162,7 @@ export function ballotChecks(
         l1RefNumber: checked.l1RefNumber,
         index: BigInt(at),
       });
-    else
+    } else
       rejected.push({
         entry: at,
         code: checked.code,
@@ -176,5 +198,5 @@ export function ballotChecks(
       ? { status: "pass" }
       : { status: "unverifiable", code: "not-reached", at: { entry: first.entry } },
   );
-  return { rows, report: { admitted: admitted.length, rejected, repeats } };
+  return { rows, report: { admitted: admitted.length, rejected, repeats }, admitted: cores };
 }

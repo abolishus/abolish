@@ -36,4 +36,10 @@ export const PARAMETERS = Object.freeze({
   // Changed nullifiers per cell; the live-results batch floor of
   // election-definition version 6.
   MIN_LIVE_BATCH: 20,
+  // Seconds; the root clock of rolling electorates, election-definition
+  // version 7: boundary n is n * ROOT_PERIOD + ROOT_OFFSET in UNIX time, and
+  // a ballot names a step within ROOT_WINDOW before its L1 reference.
+  ROOT_PERIOD: 600,
+  ROOT_OFFSET: 300,
+  ROOT_WINDOW: 7200,
 } as const);

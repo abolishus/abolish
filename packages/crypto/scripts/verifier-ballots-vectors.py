@@ -3,8 +3,8 @@
 
 Elections for the verifier's ballot admission (docs/spec/verifier.md, Ballot
 admission; 5.1 to 5.4): each is an election definition, a board copy and the
-panel a bundle pins, with the rows 1.3, 2.3, 3.2 and 5.1 to 5.4 a verifier reports
-and the report's `ballots`. Every transcript is made for the stub of the
+panel a bundle pins, with the rows 1.3, 2.3, 3.2, 5.1 to 5.4 and 5.7 a
+verifier reports and the report's `ballots`. Every transcript is made for the stub of the
 definition it is checked against, and every ballot proves membership under
 that definition's hash, so a verifier checks them with nothing but the bundle.
 
@@ -69,6 +69,8 @@ ROWS_OF = {
     "sum-proof": ("5.4",),
 }
 ADMISSION_ROWS = ("5.1", "5.2", "5.3", "5.4")
+# BN254's base field: negating a G1 or G2 point negates its y coordinate.
+BN254_P = 21888242871839275222246405745257275088696311157297823662689037894645226208583
 
 
 def decode_ballot(payload):
@@ -89,6 +91,20 @@ def combination(d):
         return NOT_IMPLEMENTED
     fits = ballot == 1 and board in (3, 4) and (opening != 1 or board == 4)
     return NOT_IMPLEMENTED if fits else outcome("fail", "profile-combination", {})
+
+
+def negated(proof):
+    """(−A, −B, C): another valid Groth16 proof of the same statement, since e(−A, −B) = e(A, B), made without the witness (docs/spec/membership.md, Proof encoding: A's y is word 1, B's y words 4 and 5)."""
+    words = [int.from_bytes(proof[i : i + 32], "big") for i in range(0, len(proof), 32)]
+    for i in (1, 4, 5):
+        words[i] = (BN254_P - words[i]) % BN254_P
+    return b"".join(w.to_bytes(32, "big") for w in words)
+
+
+def repeat_key(b):
+    """(tier, ν, M), with M recomputed from the record (docs/spec/revoting.md, Selection, step 1)."""
+    bh = bal.ballot_hash(b["definitionHash"], b["tier"], b["nullifier"], b["committedVote"])
+    return b["tier"], b["nullifier"], rev.message(b["definitionHash"], b["tier"], bh, b["l1RefNumber"], b["l1RefHash"])
 
 
 def build(constants):
@@ -186,16 +202,19 @@ def build(constants):
         return pid
 
     def bundle(bid, description, d, t, e, registered, payloads, expect):
-        """`payloads` is the board in order: a transcript's bytes, or (ballot, proof id) or (raw bytes, None)."""
+        """`payloads` is the board in order: a transcript's bytes, (ballot, proof id), or (how, ballot, proof id) with `how` "negated" (the proof re-randomised) or a way of making the record undecodable."""
         board = []
         for i, p in enumerate(payloads):
-            # A record that doesn't decode (a 3-tuple) never reaches the proof.
-            if isinstance(p, tuple) and len(p) == 2:
-                b, pid = p
+            # A record that doesn't decode never reaches the proof.
+            if isinstance(p, tuple) and (len(p) == 2 or p[0] == "negated"):
+                b, pid = p[-2:]
                 if pid is not None:
                     sig = bal.verifier_signals(e, b)
                     if sig is not None:
-                        checks.append({"case": f"{bid}/{i}", "proof": pid, "signals": {k: str(v) for k, v in sig.items()}})
+                        check = {"case": f"{bid}/{i}", "proof": pid, "signals": {k: str(v) for k, v in sig.items()}}
+                        if len(p) == 3:
+                            check["negate"] = True
+                        checks.append(check)
             board.append(p)
         bundles.append({"id": bid, "description": description, "definition": d, "transcript": t, "election": e, "registered": registered, "board": board, "expect": expect})
 
@@ -230,7 +249,7 @@ def build(constants):
     p_revote = prove("revote", "tier-0", 0, e, 0, revote)
     bundle(
         "mixed",
-        "Seat 4 sends nothing, so seats 1 to 3 are registered. The board holds the transcript, then two admitted ballots, a ballot of each admission failure, a record that doesn't decode, a second admitted ballot by the first voter (a re-vote, not this part's to decide) and a byte-identical repeat of the first.",
+        "Seat 4 sends nothing, so seats 1 to 3 are registered. The board holds the transcript, then two admitted ballots, a ballot of each admission failure, a record that doesn't decode, a second admitted ballot by the first voter (a re-vote, not this part's to decide) and a byte-identical repeat of the first, which 5.7 can't reject until the close rule runs.",
         d, t, e, [1, 2, 3],
         [
             t,
@@ -258,6 +277,20 @@ def build(constants):
         d, t, e, [1, 2, 3],
         [t, (ok0, p_ok0), (ok2, p_ok2), (revote, p_revote)],
         "admitted",
+    )
+    bundle(
+        "repeats",
+        "Copies of the first voter's ballot: one with another voter's proof (rejected, so it makes no copy a repeat, R4), then the original, a copy with its proof negated (other bytes, the same tier, nullifier and M), the second voter's ballot, a byte-identical copy and the first voter's re-vote (another M, so no repeat). 5.7 lists the two copies after the original and can't reject them until the close rule runs.",
+        d, t, e, [1, 2, 3],
+        [t, (ok0, p_ok2), (ok0, p_ok0), ("negated", ok0, p_ok0), (ok2, p_ok2), (ok0, p_ok0), (revote, p_revote)],
+        "repeats",
+    )
+    bundle(
+        "repeat-of-rejected",
+        "A copy of a ballot after a copy with another voter's proof, which is rejected: the admitted copy is no repeat (R4), so 5.7 passes.",
+        d, t, e, [1, 2, 3],
+        [t, (ok0, p_ok2), (ok0, p_ok0)],
+        "mixed",
     )
     bundle("no-ballots", "The transcript and no ballot: 5.1 to 5.4 pass, with nothing admitted.", d, t, e, [1, 2, 3], [t], "admitted")
     bundle(
@@ -306,16 +339,17 @@ def build(constants):
     return {"groups": groups, "panels": panels, "proofs": proofs, "checks": checks, "bundles": bundles, "eid": eid}
 
 
-def rows_for(kind, rejected):
-    """5.1 to 5.4 from the rejected entries: each row fails at the first entry whose code is one of its own."""
+def rows_for(kind, rejected, repeats=()):
+    """5.1 to 5.4 from the rejected entries: each row fails at the first entry whose code is one of its own. 5.7 can't reject a repeat before the close rule (5.5) says which copies are admitted, so it passes only with none."""
     if kind == "not-reached":
-        return {r: NOT_REACHED for r in ADMISSION_ROWS}
+        return {r: NOT_REACHED for r in ADMISSION_ROWS + ("5.7",)}
     if kind == "unsupported":
-        return {r: outcome("unverifiable", "unsupported-version", {}) for r in ADMISSION_ROWS}
+        return {r: outcome("unverifiable", "unsupported-version", {}) for r in ADMISSION_ROWS + ("5.7",)}
     rows = {}
     for r in ADMISSION_ROWS:
         first = next((x for x in rejected if r in ROWS_OF.get(x["code"], ())), None)
         rows[r] = outcome("pass") if first is None else outcome("fail", first["code"], {"entry": first["entry"]})
+    rows["5.7"] = outcome("pass") if not repeats else outcome("unverifiable", "not-reached", {"entry": repeats[0]["entry"]})
     return rows
 
 
@@ -338,6 +372,10 @@ def assemble(constants, proofs_path, out_dir):
         for p in bnd["board"]:
             if isinstance(p, bytes):
                 payloads.append(("transcript", p, None, None))
+                continue
+            if len(p) == 3 and p[0] == "negated":
+                _, b, pid = p
+                payloads.append(("ballot", bal.enc_ballot(dict(b, proof=negated(proof_bytes[pid]))), b, pid))
                 continue
             if len(p) == 3:
                 how, b, pid = p
@@ -362,8 +400,8 @@ def assemble(constants, proofs_path, out_dir):
         rows = {"1.3": outcome("fail", "membership-key", {}) if vk_fails else NOT_IMPLEMENTED, "2.3": combination(d)}
         rows.update({k: v for k, v in ceremony_rows.items() if k == "3.2"})
         ballots = None
-        if expect in ("mixed", "admitted"):
-            admitted, rejected = [], []
+        if expect in ("mixed", "admitted", "repeats"):
+            admitted, rejected, repeats, firsts = [], [], [], set()
             for i, (kind, rec, b, pid) in enumerate(payloads):
                 if kind == "transcript":
                     continue
@@ -381,15 +419,23 @@ def assemble(constants, proofs_path, out_dir):
                 code, option = bal.admission(e, bnd["registered"], b, verdict)
                 if code == "ok":
                     admitted.append(i)
+                    # Step 1 of revoting.md's Selection over the admitted
+                    # ballots, in board order: the first of each key stands.
+                    k = repeat_key(b)
+                    if k in firsts:
+                        repeats.append({"entry": i})
+                    firsts.add(k)
                 else:
                     r = {"entry": i, "code": code}
                     if option is not None:
                         r["option"] = option
                     rejected.append(r)
-            rows.update(rows_for("mixed", rejected))
-            ballots = {"admitted": len(admitted), "rejected": rejected}
+            rows.update(rows_for("mixed", rejected, repeats))
+            ballots = {"admitted": len(admitted), "rejected": rejected, "repeats": repeats}
             if expect == "admitted":
-                assert rejected == [], bnd["id"]
+                assert rejected == [] and repeats == [], bnd["id"]
+            elif expect == "repeats":
+                assert len(repeats) == 2, bnd["id"]
             else:
                 assert rejected != [], bnd["id"]
         else:
@@ -409,10 +455,12 @@ def assemble(constants, proofs_path, out_dir):
     mixed = next(c for c in cases if c["id"] == "mixed")
     assert {r["code"] for r in mixed["ballots"]["rejected"]} == set(ROWS_OF) | {"decode"}
     assert mixed["ballots"]["admitted"] == 4
+    assert mixed["ballots"]["repeats"] == [{"entry": 14}]
+    assert next(c for c in cases if c["id"] == "repeat-of-rejected")["ballots"]["repeats"] == []
 
     doc = {
         "format": "abolish-verifier-ballots-vectors/1",
-        "title": "The verifier's ballot admission: definitions, boards and pinned panels, with the rows 1.3, 2.3, 3.2 and 5.1 to 5.4 and the report's ballots",
+        "title": "The verifier's ballot admission: definitions, boards and pinned panels, with the rows 1.3, 2.3, 3.2, 5.1 to 5.4 and 5.7 and the report's ballots",
         "spec": "docs/spec/verifier.md",
         "generator": (
             "packages/crypto/scripts/verifier-ballots-vectors.py, from verifier-ceremony-vectors.py and ballot-vectors.py "

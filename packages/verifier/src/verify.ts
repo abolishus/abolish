@@ -5,7 +5,7 @@
 // 1.3's failure for a definition naming another membership key and, for
 // format 4, the key-ceremony
 // transcript check (3.2, and the parts of 2.5 and 3.1 that need no L2 state)
-// and ballot admission (5.1 to 5.4) are implemented; every other check is reported unverifiable, so no run can
+// and ballot admission (5.1 to 5.4, and 5.7 as far as 5.5 allows) are implemented; every other check is reported unverifiable, so no run can
 // report an election verified yet. A run on unauthenticated inputs reports
 // what the checks found against them, but its verdict stays unverifiable, so
 // a crafted bundle can neither verify nor fail an election (T-53, T-24).
@@ -94,7 +94,7 @@ export interface Report {
   readonly definition?: { readonly hash: string };
   /** A format-4 bundle's transcript check, once it reached the seats. */
   readonly ceremony?: CeremonyReport;
-  /** A format-4 bundle's ballot admission, once it ran (5.1 to 5.4). */
+  /** A format-4 bundle's ballot admission, once it ran (5.1 to 5.4 and 5.7). */
   readonly ballots?: BallotsReport;
   readonly board: {
     readonly entries: number;
@@ -295,6 +295,7 @@ function fromDefinition(bundle: Bundle):
           ["5.2", NOT_REACHED],
           ["5.3", NOT_REACHED],
           ["5.4", NOT_REACHED],
+          ["5.7", NOT_REACHED],
         ]
       : [];
   const stopped = (row: string, outcome: Outcome, hash?: Uint8Array) => ({

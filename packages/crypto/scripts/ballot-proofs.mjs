@@ -74,10 +74,22 @@ for (const { id, witness, expect } of proofs) {
   console.log(`${id}: proved`);
 }
 
+// BN254's base field. A check with `negate` verifies (−A, −B, C), a proof
+// anyone can make from (A, B, C) without the witness, since
+// e(−A, −B) = e(A, B): verifier-ballots-vectors.py's re-randomised repeat.
+const P = 21888242871839275222246405745257275088696311157297823662689037894645226208583n;
+const neg = (v) => ((P - BigInt(v)) % P).toString();
+const negated = (p) => ({
+  ...p,
+  pi_a: [p.pi_a[0], neg(p.pi_a[1]), p.pi_a[2]],
+  pi_b: [p.pi_b[0], p.pi_b[1].map(neg), p.pi_b[2]],
+});
+
 const verdicts = {};
-for (const { case: id, proof, signals } of checks) {
-  const p = made.get(proof);
-  if (p === undefined) throw new Error(`${id}: no proof ${proof}`);
+for (const { case: id, proof, signals, negate } of checks) {
+  const honest = made.get(proof);
+  if (honest === undefined) throw new Error(`${id}: no proof ${proof}`);
+  const p = negate === true ? negated(honest) : honest;
   const s = [signals.root, signals.nullifier, signals.message, signals.scope];
   verdicts[id] = await groth16.verify(vk, s, p);
   console.log(`${id}: snarkjs ${verdicts[id]}`);

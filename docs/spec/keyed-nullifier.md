@@ -5,7 +5,7 @@ A Tier 2 member's nullifier `N` is keyed by the trustees: the 2HashDH OPRF `N = 
 What this page doesn't yet specify is P3-4 part 2b's later steps, and nothing registers at Tier 2 through the panel until they are:
 
 - **2b-2:** the key's sharing transcript, which dealers qualify (and so the share commitments below), `key_id` and the registration keys, are specified in [[nullifier-key]] (part 2b-2a), and resharing to a new panel or epoch in [[nullifier-reshare]] (part 2b-2b), whose successor key the answer check takes in the same shape.
-- **2b-3:** `H1` and `H2`, the query and output records and the statements of their circuits (and so `query_hash`), with the diff of TACEO's gadgets against the audited code ([[0022-tier2-keyed-nullifier]], Amendment).
+- **2b-3:** `H1` and `H2`, with the diff of TACEO's gadgets against the audited code, are specified in [[keyed-nullifier-hashes]] (part 2b-3a); the query and output records and the statements of their circuits (and so `query_hash`) are part 2b-3b's.
 - **2b-4:** the attestation's group position and quorum, the delivery of `N` to every seat, and [[verifier]] 2.4's count of attested additions.
 
 ## Sources
@@ -198,7 +198,7 @@ The client then unblinds with its own `r` (part 2b-3):
 U = r⁻¹ · Z  = sk · H1(x)
 ```
 
-with `r⁻¹` the inverse modulo `l`, and derives `N = H2(x, U)` (part 2b-3). `U` never leaves the device; the output proof shows the attesters that `N` was derived from their `Z` ([[0022-tier2-keyed-nullifier]], Attestation).
+with `r⁻¹` the inverse modulo `l`, and derives `N = H2(x, U)` ([[keyed-nullifier-hashes]], H2), inside the output circuit. `U` never leaves the device; the output proof shows the attesters that `N` was derived from their `Z` ([[0022-tier2-keyed-nullifier]], Attestation).
 
 ## Security notes
 

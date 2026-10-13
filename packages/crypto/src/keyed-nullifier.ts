@@ -23,6 +23,7 @@ import {
   struct,
   u8,
   u16,
+  u64,
   Writer,
 } from "./codec.ts";
 import { assertSpecifiedTag, ds, type SpecifiedTagOf } from "./domain-separation.ts";
@@ -573,4 +574,28 @@ export function combineAnswers(key: NullifierKey, answers: readonly NullifierAns
 export function unblind(z: BjjPoint, r: bigint): BjjPoint {
   if (!isNonZeroScalar(r)) throw new RangeError("unblind: r must be a scalar from 1 to l − 1");
   return checkedPoint(z, "unblind").multiply(Point.Fn.inv(r));
+}
+
+const SCOPE = struct([
+  ["l2_chain_id", u64],
+  ["group_registry", bytesFixed(20)],
+] as const);
+
+/**
+ * `σ = int(H(DS("abolish/v1/keyed-nullifier/scope", u64(l2_chain_id) ‖
+ * group_registry))) >> 8`: the Tier 2 scope as one field element, which `H1`
+ * and `H2` take as their first input after the tag, so `N` is scoped to one
+ * registry on one chain (docs/spec/keyed-nullifier-hashes.md, Scope field;
+ * T-21). Both values come from the release's pins, never from a query.
+ */
+export function nullifierScopeField(l2ChainId: bigint, groupRegistry: Uint8Array): bigint {
+  const digest = H(
+    ds(
+      "abolish/v1/keyed-nullifier/scope",
+      encode(SCOPE, { l2_chain_id: l2ChainId, group_registry: groupRegistry }),
+    ),
+  );
+  let v = 0n;
+  for (const b of digest) v = (v << 8n) | BigInt(b);
+  return v >> 8n;
 }

@@ -33,10 +33,9 @@ function bigEndian(bytes: Uint8Array): bigint {
 export function circuitTagField(tag: string): bigint {
   // Only a tag registered for in-circuit use: deriving the constant of a
   // plain-hash tag would let a circuit give that tag a second primitive and
-  // layout (docs/spec/domain-separation.md, Rules; T-30). No tag is registered
-  // In-circuit yet, so this rejects every tag until the first circuit's PR.
+  // layout (docs/spec/domain-separation.md, Rules; T-30).
   const entry = TAG_REGISTRY.find((e) => e.tag === tag);
-  if (entry?.status !== "specified" || (entry.primitive as string) !== "in-circuit")
+  if (entry?.status !== "specified" || entry.primitive !== "in-circuit")
     throw new RangeError(`circuitTagField: ${String(tag)} is not a specified In-circuit tag`);
   return deriveTagField(tag);
 }

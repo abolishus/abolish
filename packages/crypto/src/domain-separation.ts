@@ -156,6 +156,9 @@ export const TAG_REGISTRY = Object.freeze(
         primitive: "signature",
         status: "specified",
       },
+      { tag: "abolish/v1/keyed-nullifier/scope", primitive: "plain", status: "specified" },
+      { tag: "abolish/v1/keyed-nullifier/h1", primitive: "in-circuit", status: "specified" },
+      { tag: "abolish/v1/keyed-nullifier/h2", primitive: "in-circuit", status: "specified" },
     ] as const
   ).map((e) => Object.freeze(e)),
 );

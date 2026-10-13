@@ -18,6 +18,11 @@ API was reachable from the session that wrote this; the SSZ rules are the
 consensus specs'.
 
 Usage: python3 -I -B packages/crypto/scripts/receipt-opening-vectors.py <out-dir> [<configs-dir>],
+where <configs-dir>, if given, holds the consensus specs' configs/mainnet.yaml
+(as mainnet.yaml), eth-clients/sepolia's metadata/config.yaml (as
+sepolia.yaml) and, from consensus specs v1.7.0-beta.4,
+specs/gloas/light-client/sync-protocol.md (as sync-protocol.md, checked
+against the sha256 the spec gives);
 then `vp check --fix` (the committed file is formatted; its values are what
 this prints).
 """

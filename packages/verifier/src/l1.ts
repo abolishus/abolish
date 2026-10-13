@@ -284,6 +284,19 @@ export function checkpointSlot(electionId: Uint8Array, segment: number): Uint8Ar
   return keccak_256(concatBytes(word(BigInt(segment)), inner));
 }
 
+/**
+ * `keccak256(abi.encode(x, keccak256(abi.encode(uint256(p), A + 4))))`: the
+ * receipt-key record of the 33-byte key `p ‖ x` (docs/spec/contracts.md,
+ * Board anchor, Receipt keys).
+ */
+export function receiptKeySlot(key: Uint8Array): Uint8Array {
+  if (key.length !== 33) throw new RangeError("a receipt key is 33 bytes");
+  const inner = keccak_256(
+    concatBytes(word(BigInt(key[0] as number)), word(ANCHOR_NAMESPACE + 4n)),
+  );
+  return keccak_256(concatBytes(key.subarray(1), inner));
+}
+
 /** The 32-byte word at `slot`, from a storage trie value: RLP of the word with its leading zeros removed. */
 function storageWord(value: Uint8Array | undefined): Uint8Array {
   if (value === undefined) return new Uint8Array(32);
@@ -380,5 +393,28 @@ export function anchorsFromState(
     if (cp !== undefined)
       return { anchor: { checkpoint: cp, anchoredAt }, hash: w, source: "checkpoint" };
     throw new L1Error("l1-checkpoint-unknown", s);
+  });
+}
+
+/**
+ * Each key's receipt-key record word, read from the board anchor's state at
+ * the header's block (docs/spec/verifier.md, Receipt keys from L1), in the
+ * order given: the word, or the L1 error that kept it from being read. One
+ * key's missing proof doesn't stop the others, so a later key's failure is
+ * still found (2.9). The account itself is read first, and an error there
+ * throws, since no word can be read without it.
+ */
+export function receiptKeyWords(
+  l1: L1Evidence,
+  keys: readonly Uint8Array[],
+): (Uint8Array | L1Error)[] {
+  const root = storageRoot(l1);
+  return keys.map((key) => {
+    try {
+      return storageWord(l1.nodes.get(root, keccak_256(receiptKeySlot(key))));
+    } catch (e) {
+      if (e instanceof L1Error) return e;
+      throw e;
+    }
   });
 }

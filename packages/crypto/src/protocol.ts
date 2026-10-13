@@ -334,6 +334,10 @@ export function profileCombinationRule(
   const opening = pinnedVersion(d, RECORD_TYPES.tallyOpening);
   if (ballot === undefined || opening === undefined) return "profile-combination";
   const definition = pinnedVersion(d, RECORD_TYPES.electionDefinition);
+  // A definition version this function doesn't know the pairings of (6 and 7
+  // until their ballot versions are specified, every version-6 and version-7
+  // profile fails 2.3) never falls back to another version's rules.
+  if (definition === undefined || ![1, 3, 4, 5].includes(definition)) return "profile-combination";
   // Definition versions 1, 3 and 4 have one question, so display-text
   // version 1; version 2 carries questions and pairs with definition version
   // 5 (or 6, which this package doesn't decode). A display-text version this
@@ -346,7 +350,7 @@ export function profileCombinationRule(
   // reads as naming its cell or carrying questions, so under definition
   // version 3, 4 or 5 it is judged last, as unsupported (T-36). Under
   // version 1 it isn't judged here: verifier 5.x refuses its records.
-  const wanted = DEFINITION_BALLOT.get(definition ?? 1) ?? 1;
+  const wanted = DEFINITION_BALLOT.get(definition) ?? 1;
   const unknownBallot = !BALLOT_VERSIONS.has(ballot);
   if (!unknownBallot && ballot !== wanted) return "profile-combination";
   const spoiled = pinnedVersion(d, RECORD_TYPES.spoiledBallotOpening);

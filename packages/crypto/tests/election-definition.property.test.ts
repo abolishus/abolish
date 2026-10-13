@@ -769,6 +769,15 @@ describe("2.3's profile combination", () => {
       );
   });
 
+  test("a definition version without known pairings fails, never borrowing version 1's", () => {
+    for (const definition of [2, 6, 7, 255, undefined])
+      expect(
+        profileCombinationRule(
+          withPins(pinning(4, 1, 1), { [RECORD_TYPES.electionDefinition]: definition }),
+        ),
+      ).toBe("profile-combination");
+  });
+
   test("ballot version 1 pairs only with opening version 1, which opens its cores", () => {
     expect(profileCombinationRule(pinning(4, 1, 1))).toBeUndefined();
     // Opening version 2 opens cells' cores; one this package doesn't know

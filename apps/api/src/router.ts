@@ -17,6 +17,7 @@ import {
   readInclusionProof,
   readModerationLog,
   report,
+  shortCodeOf,
 } from "@abolishus/core";
 import { implement, ORPCError } from "@orpc/server";
 import type { Sql } from "postgres";
@@ -75,6 +76,11 @@ export const router = os.router({
       const match = await lookupShortCode(context.sql, input.code);
       if (match === undefined) throw errors.CODE_NOT_FOUND();
       return { electionId: toHex(match.electionId), code: match.code };
+    }),
+    getCode: os.elections.getCode.handler(async ({ input, context, errors }) => {
+      const code = await shortCodeOf(context.sql, fromHex(input.electionId));
+      if (code === undefined) throw errors.CODE_NOT_FOUND();
+      return { code };
     }),
   },
   board: {

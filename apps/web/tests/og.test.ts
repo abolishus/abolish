@@ -8,25 +8,30 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test, vi } from "vite-plus/test";
 
+import { shortCode } from "@abolishus/core/short-codes";
+
 import { PALETTE, PreviewCard } from "../src/og/card.tsx";
 import {
   checkPreview,
   type PollPreview,
   type PreviewFormat,
   PREVIEW_SIZE,
-  shortCode,
+  shortLink,
 } from "../src/og/model.ts";
 import { pollPreview, previewVersion } from "../src/og/poll.ts";
 import { renderPreview } from "../src/og/render.ts";
 import { previewText } from "../src/og/text.ts";
 import type { PollView } from "../src/poll.ts";
+import { fromHex } from "../src/values.ts";
 
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
 const FORMATS: readonly PreviewFormat[] = ["landscape", "square"];
 const SEAL = "1c8a56f03dbcedea6909b56ab69cbec253c423da046f482587a01f1ebec1614f";
+const CODE = shortCode(fromHex(SEAL));
 
 const base = {
   seal: SEAL,
+  code: CODE,
   host: "abolish.us",
   question: "Which one improvement should Riverside ask the city for next year?",
   askedBy: "Riverside Residents' Association",
@@ -111,28 +116,35 @@ describe("a poll without released results", () => {
   const RESULT = /%|\bleads\b|came first|Final count|\byes\b|updated|Question 1 of/;
 
   const text = fc.string({ minLength: 1, maxLength: 60 }).filter((s) => !RESULT.test(s));
-  const unreleased = fc.record({
-    seal: fc
-      .uint8Array({ minLength: 32, maxLength: 32 })
-      .map((b) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("")),
-    host: fc.constant("abolish.us"),
-    question: fc.option(text, { nil: undefined }),
-    askedBy: fc.option(text, { nil: undefined }),
-    place: fc.option(text, { nil: undefined }),
-    questionCount: fc.integer({ min: 1, max: 9 }),
-    answers: fc.option(fc.nat(), { nil: undefined }),
-    closesAt: fc.option(
-      fc.integer({ min: 0, max: 4_102_444_800_000 }).map((ms) => new Date(ms).toISOString()),
-      { nil: undefined },
-    ),
-    civic: fc.boolean(),
-    kind: fc.constant("Referendum"),
-    results: fc.constantFrom(
-      { state: "sealed" } as const,
-      { state: "open" } as const,
-      { state: "counting" } as const,
-    ),
-  }) as fc.Arbitrary<PollPreview>;
+  const unreleased = fc
+    .record({
+      seal: fc
+        .uint8Array({ minLength: 32, maxLength: 32 })
+        .map((b) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("")),
+      host: fc.constant("abolish.us"),
+      question: fc.option(text, { nil: undefined }),
+      askedBy: fc.option(text, { nil: undefined }),
+      place: fc.option(text, { nil: undefined }),
+      questionCount: fc.integer({ min: 1, max: 9 }),
+      answers: fc.option(fc.nat(), { nil: undefined }),
+      closesAt: fc.option(
+        fc.integer({ min: 0, max: 4_102_444_800_000 }).map((ms) => new Date(ms).toISOString()),
+        { nil: undefined },
+      ),
+      civic: fc.boolean(),
+      kind: fc.constant("Referendum"),
+      results: fc.constantFrom(
+        { state: "sealed" } as const,
+        { state: "open" } as const,
+        { state: "counting" } as const,
+      ),
+      // A code of the seal, of any length a poll can get, or none.
+      codeLength: fc.option(fc.integer({ min: 7, max: 52 }), { nil: undefined }),
+    })
+    .map(({ codeLength, ...model }) => ({
+      ...model,
+      code: codeLength === undefined ? undefined : shortCode(fromHex(model.seal), codeLength),
+    })) as fc.Arbitrary<PollPreview>;
 
   test("shows no result in the card or its text", () => {
     fc.assert(
@@ -186,27 +198,35 @@ describe("a poll without released results", () => {
   });
 });
 
-describe("shortCode", () => {
-  test("is the definition hash's first 35 bits in Crockford base32", () => {
-    expect(shortCode("0".repeat(64))).toBe("0000000");
-    expect(shortCode("f".repeat(64))).toBe("zzzzzzz");
-    const alphabet = "0123456789abcdefghjkmnpqrstvwxyz";
-    fc.assert(
-      fc.property(fc.uint8Array({ minLength: 32, maxLength: 32 }), (bytes) => {
-        const seal = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
-        const code = shortCode(seal);
-        expect(code).toMatch(/^[0-9a-hjkmnp-tv-z]{7}$/);
-        const bits = code
-          .split("")
-          .map((c) => alphabet.indexOf(c).toString(2).padStart(5, "0"))
-          .join("");
-        const prefix = Array.from(bytes.subarray(0, 5), (b) => b.toString(2).padStart(8, "0"))
-          .join("")
-          .slice(0, 35);
-        expect(bits).toBe(prefix);
-      }),
-      { numRuns },
-    );
+describe("the short code", () => {
+  test("is printed as the link and headline only when the model has one", () => {
+    const open = VARIANTS["open"]!;
+    expect(shortLink(open)).toBe(`abolish.us/p/${CODE}`);
+    expect(previewText(open).title).toBe(`Poll ${CODE}`);
+    expect(cardText(open, "landscape")).toContain(`abolish.us/p/${CODE}`);
+    const uncoded = { ...open, code: undefined };
+    expect(shortLink(uncoded)).toBe("abolish.us");
+    expect(previewText(uncoded).title).toBe("A poll on abolish.us");
+    expect(cardText(uncoded, "landscape")).not.toContain("/p/");
+  });
+
+  test("a collided poll's longer code is printed whole", () => {
+    const longer = shortCode(fromHex(SEAL), 9);
+    expect(shortLink({ ...base, code: longer })).toBe(`abolish.us/p/${longer}`);
+    expect(() => checkPreview({ ...VARIANTS["open"]!, code: longer })).not.toThrow();
+  });
+
+  test("must be a prefix of the seal", async () => {
+    const nine = shortCode(fromHex(SEAL), 9);
+    const last = nine.endsWith("z") ? "y" : "z";
+    for (const code of [
+      CODE.startsWith("z") ? `y${CODE.slice(1)}` : `z${CODE.slice(1)}`,
+      `${nine.slice(0, -1)}${last}`,
+    ]) {
+      const model = { ...VARIANTS["open"]!, code };
+      expect(() => checkPreview(model)).toThrow(RangeError);
+      await expect(renderPreview(model, "landscape")).rejects.toThrow(RangeError);
+    }
   });
 });
 
@@ -219,19 +239,25 @@ describe("a poll page's preview today", () => {
   const closes = Date.parse("2026-11-15T20:00:00.000Z");
 
   test("is open until it closes, then counting, and never a result", () => {
-    expect(pollPreview(poll, "abolish.us", closes - 1).results).toEqual({ state: "open" });
-    expect(pollPreview(poll, "abolish.us", closes).results).toEqual({ state: "counting" });
+    expect(pollPreview(poll, CODE, "abolish.us", closes - 1).results).toEqual({ state: "open" });
+    expect(pollPreview(poll, CODE, "abolish.us", closes).results).toEqual({ state: "counting" });
   });
 
   test("gets a new version when what it draws changes, and only then", async () => {
-    const open = pollPreview(poll, "abolish.us", closes - 1);
+    const open = pollPreview(poll, CODE, "abolish.us", closes - 1);
     const version = await previewVersion(open, "landscape");
     expect(version).toMatch(/^[0-9a-f]{24}$/);
-    expect(await previewVersion(pollPreview(poll, "abolish.us", 0), "landscape")).toBe(version);
-    expect(await previewVersion(pollPreview(poll, "abolish.us", closes), "landscape")).not.toBe(
+    expect(await previewVersion(pollPreview(poll, CODE, "abolish.us", 0), "landscape")).toBe(
       version,
     );
+    expect(
+      await previewVersion(pollPreview(poll, CODE, "abolish.us", closes), "landscape"),
+    ).not.toBe(version);
     expect(await previewVersion(open, "square")).not.toBe(version);
+    // A registration recorded, or a longer code, is a new image.
+    expect(
+      await previewVersion(pollPreview(poll, undefined, "abolish.us", closes - 1), "landscape"),
+    ).not.toBe(version);
     expect(await previewVersion({ ...VARIANTS["live"]!, answers: 2419 }, "landscape")).not.toBe(
       await previewVersion(VARIANTS["live"]!, "landscape"),
     );

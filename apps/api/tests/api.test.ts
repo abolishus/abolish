@@ -186,7 +186,7 @@ describe("elections.list (T-68)", () => {
   });
 });
 
-describe("elections.resolveCode (P2-18; T-49, T-53, T-67)", () => {
+describe("elections.resolveCode and elections.getCode (P2-18; T-49, T-53, T-67)", () => {
   /** Registration positions in increasing order, as the indexer records them. */
   let block = 1n;
 
@@ -204,6 +204,7 @@ describe("elections.resolveCode (P2-18; T-49, T-53, T-67)", () => {
   }
 
   const resolve = (code: string) => get("/elections/by-code", { code });
+  const codeOf = (electionId: string) => get("/elections/code", { electionId });
 
   test("the contract's longest code is core's", () => {
     expect(MAX_SHORT_CODE_LENGTH).toBe(CORE_MAX_SHORT_CODE_LENGTH);
@@ -222,6 +223,7 @@ describe("elections.resolveCode (P2-18; T-49, T-53, T-67)", () => {
       expect(r.status).toBe(200);
       expect(await json(r)).toEqual({ electionId: e.idHex, code: e.code });
     }
+    expect(await json(await codeOf(e.idHex))).toEqual({ code: e.code });
   });
 
   test("a later poll ground to an earlier poll's prefix never takes its code", async () => {
@@ -244,6 +246,9 @@ describe("elections.resolveCode (P2-18; T-49, T-53, T-67)", () => {
     expect((await resolve(shortCode(collided, 8))).status).toBe(404);
     const full = shortCode(collided, MAX_SHORT_CODE_LENGTH);
     expect(await json(await resolve(full))).toEqual({ electionId: hex(ground), code: full });
+    // Each poll's own code is the one that resolves to it.
+    expect(await json(await codeOf(first.idHex))).toEqual({ code: first.code });
+    expect(await json(await codeOf(hex(ground)))).toEqual({ code: full });
   });
 
   test("delisted and hidden polls resolve as they do by ID", async () => {
@@ -251,8 +256,23 @@ describe("elections.resolveCode (P2-18; T-49, T-53, T-67)", () => {
     const hidden = await registered();
     await moderate(app, delisted.id, { action: "delist", reason: "spam", moderator: "mod-1" });
     await moderate(app, hidden.id, { action: "hide", reason: "illegal", moderator: "mod-1" });
-    for (const e of [delisted, hidden])
+    for (const e of [delisted, hidden]) {
       expect(await json(await resolve(e.code))).toEqual({ electionId: e.idHex, code: e.code });
+      expect(await json(await codeOf(e.idHex))).toEqual({ code: e.code });
+    }
+  });
+
+  test("an election with no recorded registration has no code, stored or not", async () => {
+    const unregistered = await election();
+    await storeDefinition(app, unregistered.definition);
+    for (const id of [unregistered.idHex, hex(b32())]) {
+      const r = await codeOf(id);
+      expect(r.status).toBe(404);
+      expect((await json(r))["code"]).toBe("CODE_NOT_FOUND");
+    }
+    // Not an election ID at all.
+    for (const id of ["00".repeat(31), "AB".repeat(32), ""])
+      expect((await codeOf(id)).status).toBe(400);
   });
 
   test("unknown codes, unregistered polls and malformed input are CODE_NOT_FOUND, never quoted", async () => {
@@ -289,10 +309,12 @@ describe("elections.resolveCode (P2-18; T-49, T-53, T-67)", () => {
     logs.length = 0;
     await resolve(e.code.toUpperCase());
     await resolve("zuzzzzz");
+    await codeOf(e.idHex);
     await new Promise((r) => setTimeout(r, 50));
     expect(logs).toEqual([
       expect.objectContaining({ route: "GET /elections/by-code", status: 200 }),
       expect.objectContaining({ route: "GET /elections/by-code", status: 404 }),
+      expect.objectContaining({ route: "GET /elections/code", status: 200 }),
     ]);
     const text = JSON.stringify(logs).toLowerCase();
     for (const value of [e.code, e.idHex, "zuzzzzz"]) expect(text).not.toContain(value);

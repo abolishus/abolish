@@ -9,6 +9,7 @@ The public API's contract: the oRPC procedures `apps/api` implements and the bal
 | `elections.list`            | `GET /elections`                |
 | `elections.getDefinition`   | `GET /elections/definition`     |
 | `elections.resolveCode`     | `GET /elections/by-code`        |
+| `elections.getCode`         | `GET /elections/code`           |
 | `board.getHead`             | `GET /board/head`               |
 | `board.getEntries`          | `GET /board/entries`            |
 | `board.getInclusionProof`   | `GET /board/proofs/inclusion`   |

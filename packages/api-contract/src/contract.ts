@@ -94,6 +94,20 @@ const resolveCode = oc
   .input(z.strictObject({ code: z.string().check(z.maxLength(MAX_CODE_INPUT, { abort: true })) }))
   .output(z.strictObject({ electionId: Hash32, code: ShortCode }));
 
+const getCode = oc
+  .route({
+    method: "GET",
+    path: "/elections/code",
+    summary: "A poll's short code",
+    description: `The canonical short code of the poll registered as \`electionId\`: the code \`elections.resolveCode\` resolves to it, the shortest prefix of its definition hash, at least 7 characters, that no poll registered before it shares (docs/design/sharing.md, Short links). \`CODE_NOT_FOUND\` if no registration is recorded for the election, since a code resolves only through one. Delisted and hidden polls keep their codes. The answer is a claim: a caller checks that the code is a prefix of the definition hash it checked against the registry (T-34), and which poll owns a shared prefix is the registry's order, which anyone can recompute from its events (T-49).`,
+    tags: ["elections"],
+  })
+  .errors({
+    CODE_NOT_FOUND: { status: 404, message: "No registration is recorded for this election." },
+  })
+  .input(ElectionQuery)
+  .output(z.strictObject({ code: ShortCode }));
+
 const getHead = oc
   .route({
     method: "GET",
@@ -331,7 +345,7 @@ const deleteBackup = oc
 
 /** The public API contract. `apps/api` implements it; clients call it. */
 export const contract = {
-  elections: { list: listElections, getDefinition, resolveCode },
+  elections: { list: listElections, getDefinition, resolveCode, getCode },
   board: { getHead, getEntries, getInclusionProof, getConsistencyProof },
   ballots: { submit: submitBallot },
   moderation: { getLog: getModerationLog, getStatus: getModerationStatus, report: reportPoll },

@@ -219,7 +219,12 @@ describe("the ballot worker", () => {
   test("refuses a definition the registry doesn't hold, however its text matches", async () => {
     await expect(
       check(hex(definition.election_id), definitionHex, textHex, "00".repeat(32)),
-    ).resolves.toEqual({ ok: false, problem: "unregistered-definition" });
+    ).resolves.toEqual({
+      ok: false,
+      problem: "unregistered-definition",
+      // The served definition's own hash, for the refusal to show beside the registered one.
+      servedHash: registered(definitionHex),
+    });
   });
 
   test("refuses the election under another election's id", async () => {

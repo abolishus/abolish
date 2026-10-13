@@ -122,10 +122,6 @@ export const ENTRY_POINTS = [
 export const SHARED_GATEWAY_URL =
   "https://ipfs.example.net/ipfs/bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi/";
 
-/** The definition hash served in the failed-check variant, unlike the registry's. */
-export const TAMPERED_DEFINITION_HASH =
-  "d121be3103007b41edf96f8262925f8c7d61894afe9a041843b631f69445bc57";
-
 /** The sealed (encrypted) ballot this device made, before casting or checking it. */
 export const SEALED = {
   hash: "5e3eb011cb673f6a53fbb6e4365e8dcc598b0f409d4267c5e9438b8020d913b1",

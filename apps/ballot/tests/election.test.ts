@@ -131,15 +131,13 @@ describe("the election", () => {
     );
   });
 
-  test("passes on the refusal of a definition the registry doesn't hold", () => {
-    expect(
-      checkElection(
-        typical.election_id,
-        new Uint8Array(32),
-        encodeElectionDefinition(goodDefinition()),
-        anyText,
-      ),
-    ).toEqual({ ok: false, problem: "unregistered-definition" });
+  test("passes on the refusal of a definition the registry doesn't hold, with the served hash", () => {
+    const served = encodeElectionDefinition(goodDefinition());
+    expect(checkElection(typical.election_id, new Uint8Array(32), served, anyText)).toEqual({
+      ok: false,
+      problem: "unregistered-definition",
+      servedHash: definitionHash(served).toString("hex"),
+    });
   });
 
   test("passes on the refusal of another election's definition", () => {

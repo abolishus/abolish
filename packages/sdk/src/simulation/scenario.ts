@@ -34,7 +34,10 @@ export interface Scenario {
     readonly panel: number;
     /** `k`. */
     readonly threshold: number;
-    /** Seats down for the whole election: they receive nothing and send nothing. */
+    /**
+     * Seats that take part in the key ceremony, then are down for the whole
+     * voting period and the tally: they receive no ballot and send nothing.
+     */
     readonly offline: readonly number[];
     /** Seats that take part but send wrong summed shares at the tally. */
     readonly faulty: readonly number[];

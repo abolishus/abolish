@@ -20,10 +20,10 @@ Election IDs are 64 lowercase hex digits, their one spelling (T-31). Exit codes:
 
 `docs/status/P1-21.md`. A scenario is JSON (see `@abolishus/sdk`'s README), given inline or as a file; these commands need no database.
 
-| Command                                                            | What it does                                                                                                                                                                                                      |
-| ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `simulation plan (--scenario <json> \| --file <path>)`             | The plan the seed fixes: ballots cast, how many went direct during the outage, and each tier's expected counts. No cryptography; instant.                                                                         |
-| `simulation run (--scenario <json> \| --file <path>) [--progress]` | Runs the election through the protocol code and prints the report (`ok`, each cell's outcome and counts against the plan, and the stubs). With `--progress`, about a hundred `{ "progress": … }` lines before it. |
+| Command                                                            | What it does                                                                                                                                                                                                                                                         |
+| ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `simulation plan (--scenario <json> \| --file <path>)`             | The plan the seed fixes: ballots cast, how many went direct during the outage, and each tier's expected counts. No cryptography; instant.                                                                                                                            |
+| `simulation run (--scenario <json> \| --file <path>) [--progress]` | Runs the election through the protocol code and prints the report (`ok`, the definition's and ceremony transcript's hashes, each cell's outcome and counts against the plan, and the stubs). With `--progress`, about a hundred `{ "progress": … }` lines before it. |
 
 A malformed scenario is a usage error naming the field (exit 2). A run whose cells differ from the plan prints the report, then `{ "error": "simulation-mismatch" }` (exit 1).
 

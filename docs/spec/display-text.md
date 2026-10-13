@@ -1,6 +1,6 @@
 # Display text
 
-An election has two kinds of data, kept apart so personal data never reaches permanent storage while every result stays verifiable ([[0005-permanent-archive]]). Threats: T-17 (PII on-chain or on IPFS), T-68 (content that can't be moderated), T-51 and T-53 (text that is lost leaves a result verifiable but not interpretable), G-12.
+An election has two kinds of data, kept apart so personal data never reaches permanent storage while every result stays verifiable ([[0005-permanent-archive]]). Threats: T-17 (PII on-chain or on IPFS), T-52 (a record's size), T-41 and T-34 (labels shown to a voter), T-68 (content that can't be moderated), T-51 and T-53 (text that is lost leaves a result verifiable but not interpretable), G-12.
 
 ## The split
 
@@ -64,17 +64,62 @@ A display-text record is well formed, for the definition it is checked against, 
 
 The record is pinned by the election's profile like any other ([[versioning]]): a decoder that knows the election reads it against the pinned version. Vectors: `docs/spec/vectors/display-text.json`.
 
+## Layout (version 2)
+
+Record type `0x0009`, version 2, for definition version 5's questions ([[election-definition]], Layout (version 5); [[0026-multi-question-ballots]]), frozen by its vectors. The commitment is unchanged: the same tag over the record's full encoding, whose header's version byte keeps the two versions apart. A profile pins display-text version 2 with definition version 5 only, and definition version 5 pins it only ([[verifier]] 2.3, `profile-combination`).
+
+| Field          | Type                       | Meaning                                                                                     |
+| -------------- | -------------------------- | ------------------------------------------------------------------------------------------- |
+| `salt`         | `bytes[32]`                | The commitment's salt, as version 1. Always the first field.                                |
+| `translations` | `list<translation_v2, 32>` | The text in each language it is offered in, in strictly ascending byte order of `language`. |
+
+`translation_v2`:
+
+| Field         | Type                                 | Meaning                                                                       |
+| ------------- | ------------------------------------ | ----------------------------------------------------------------------------- |
+| `language`    | `utf8<35>`                           | A BCP 47 language tag in lowercase, as version 1.                             |
+| `title`       | `utf8<1024>`                         | The poll's title.                                                             |
+| `description` | `utf8<8192>`                         | Longer text about the poll. May be empty.                                     |
+| `questions`   | `list<question_text, MAX_QUESTIONS>` | One entry per question of the definition, in question order ([[parameters]]). |
+
+`question_text`:
+
+| Field         | Type                             | Meaning                                                                                  |
+| ------------- | -------------------------------- | ---------------------------------------------------------------------------------------- |
+| `question`    | `utf8<1024>`                     | The question.                                                                            |
+| `description` | `utf8<8192>`                     | Longer text about it. May be empty.                                                      |
+| `options`     | `list<option_text, MAX_OPTIONS>` | One entry per option of the question, in option index order (version 1's `option_text`). |
+
+**Size.** By its list maxima a version-2 record could exceed 100 MB, so version 2 caps the whole record: an input longer than `MAX_DISPLAY_TEXT` bytes ([[parameters]]) is rejected with `length-over-max` before its header is read, whenever version 2 is the pinned version, so a hostile record stays cheap to reject (T-52). The cap is on the record's encoding, header and salt included; version 1's worst case, about 3.5 MB, is under it. A record within the cap decodes strictly as version 1's rules say ([[notation]]).
+
+Everything version 1 says about translations applies per question: they are equal in standing, nothing checks that they agree, and a client MUST show the voter which translation they are reading. The cast-confirmation screen and any challenge checker MUST show, for every question, the chosen options' labels in every translation, so a swapped label or a swapped question on any of them shows up next to the others (T-41, T-34).
+
+A version-2 record is well formed, for the definition it is checked against, when, in this order:
+
+| Code             | Rule                                                                                                                                                                                                                         |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `commitment`     | As version 1.                                                                                                                                                                                                                |
+| `translations`   | As version 1.                                                                                                                                                                                                                |
+| `language-tag`   | As version 1.                                                                                                                                                                                                                |
+| `question-count` | Every translation has exactly as many questions as the definition's `questions`.                                                                                                                                             |
+| `option-count`   | In every translation, question `q` has exactly the definition's `m_q` options.                                                                                                                                               |
+| `question`       | Every `title`, every `question` and every option `label` is non-empty.                                                                                                                                                       |
+| `labels`         | Within each question of each translation, no two options have the same `label`. Labels may repeat across questions (Yes and No under each), since a label is always shown with its question. Exact bytes only, as version 1. |
+| `question-texts` | Within each translation, no two questions have the same `question`, so a voter can always tell which question an answer belongs to. Exact bytes only.                                                                        |
+
+Vectors: `docs/spec/vectors/display-text-v2.json`, which also gives `MAX_DISPLAY_TEXT` as `maxDisplayText`; a consumer checks the cap with an input it builds one byte over it, since a vector that large would be most of the file.
+
 ## Checks
 
 A verifier ([[verifier]]):
 
 - MUST verify every result without the display text. Missing display text is reported (the result is then verifiable but not interpretable, T-53), never a verification failure.
 - MUST, when it has a display-text record, recompute the commitment and reject the text if it doesn't match the election definition, so a forged text can't relabel the options of a verified result.
-- MUST check that the display-text record names exactly as many options per question as the election definition has.
+- MUST check that the display-text record names exactly as many options per question as the election definition has, and under version 2 exactly as many questions.
 
 Software that shows an election to a voter (the ballot client, and anything that labels a Benaloh opening, such as a challenge checker):
 
-- MUST recompute the commitment from the display-text record it shows, compare it with the commitment in the election definition whose hash is registered on L2, and check that the record has exactly as many questions and options as the definition. On any mismatch it MUST refuse to show the ballot or label the opening. Otherwise whoever serves the text could swap option labels for one voter: the client would honestly encrypt the index the voter picked under a false label, and a challenge labelled from the same text would not catch it (T-34, T-41, G-6).
+- MUST recompute the commitment from the display-text record it shows, compare it with the commitment in the election definition whose hash is registered on L2, and check that the record is well formed for the definition (under version 2, exactly the definition's questions, each with exactly its options). On any mismatch it MUST refuse to show the ballot or label the opening. Otherwise whoever serves the text could swap option labels for one voter: the client would honestly encrypt the index the voter picked under a false label, and a challenge labelled from the same text would not catch it (T-34, T-41, G-6).
 
 ## Owned elsewhere
 

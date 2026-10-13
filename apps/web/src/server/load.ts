@@ -150,10 +150,10 @@ export interface PollList {
  * (T-31, T-34). A poll stops being served between the listing and its
  * definition only if the database lost it, so it drops out of the page.
  */
-export async function loadPollList(api: Api, after: string): Promise<PollList> {
+export async function loadPollList(api: Api, after: string, limit = LIST_PAGE): Promise<PollList> {
   const { elections } = await api.elections.list({
     ...(after === "" ? {} : { after }),
-    limit: String(LIST_PAGE),
+    limit: String(limit),
   });
   const answers = await Promise.all(
     elections.map(async (electionId) => {
@@ -179,6 +179,6 @@ export async function loadPollList(api: Api, after: string): Promise<PollList> {
   return {
     polls,
     // The listing's own cursor, not the last poll shown, so a dropped one doesn't end the list.
-    next: elections.length === LIST_PAGE ? elections.at(-1) : undefined,
+    next: elections.length === limit ? elections.at(-1) : undefined,
   };
 }

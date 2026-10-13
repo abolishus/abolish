@@ -576,7 +576,7 @@ describe("server functions", () => {
       .filter((f) => f.endsWith(".js"))
       .flatMap((f) => [...readFileSync(`${dir}/${f}`, "utf8").matchAll(/\(`([0-9a-f]{64})`\)/g)])
       .map((m) => m[1] ?? "");
-    expect(ids.length).toBe(4);
+    expect(ids.length).toBe(5);
     return ids;
   }
 
@@ -599,8 +599,45 @@ describe("server functions", () => {
       });
       expect(own.status).toBe(200);
       expect(await own.text()).toMatch(
-        /expected an election ID|expected a canonical decimal u64|or an empty string|expected a canonical short code/,
+        /expected an election ID|expected a canonical decimal u64|or an empty string|expected a canonical short code|expected a page size/,
       );
+    }
+  });
+});
+
+describe("home", () => {
+  test("lists the first polls, with the lookup form and a link to the rest", async () => {
+    const html = await (await get("/")).text();
+    const linked = [...html.matchAll(/<li\b[^>]*><a[^>]*href="\/polls\/([0-9a-f]{64})"/g)].map(
+      (m) => m[1],
+    );
+    expect(linked).toEqual(listed.slice(0, 6));
+    expect(html).toContain('name="id"');
+    // The rest of the list picks up after the last poll the home page asked for.
+    expect(html).toContain(`href="/polls?after=${listed[5]}"`);
+    expect(html).toContain("Why you can trust a casual poll");
+  });
+
+  test("asks the API for one short page (T-10)", async () => {
+    seen.length = 0;
+    await get("/");
+    // The listing, then each listed poll's definition: six, not a full page's twenty.
+    expect(seen.filter((r) => r.path === "/elections")).toHaveLength(1);
+    expect(seen).toHaveLength(7);
+  });
+
+  test("stays up without the API, leaving out only the list and quoting nothing", async () => {
+    down = true;
+    try {
+      const response = await get("/");
+      expect(response.status).toBe(200);
+      const html = await response.text();
+      expect(html).toContain('name="id"');
+      expect(html).toContain("couldn&#x27;t be loaded just now");
+      expect(html).not.toContain("127.0.0.1");
+      expect(html).not.toMatch(/ECONNREFUSED|ECONNRESET|fetch failed|socket hang up/);
+    } finally {
+      down = false;
     }
   });
 });

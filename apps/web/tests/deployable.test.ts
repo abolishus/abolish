@@ -86,7 +86,8 @@ describe("dist/node/main.mjs", () => {
     const port = await freePort();
     const web = run({
       DATABASE_URL: database(),
-      // Nothing here calls the API: the home page and the account page don't.
+      // No API answers: the account page doesn't call it, and the home page
+      // leaves its list of polls out when the API is unreachable.
       API_URL: "http://127.0.0.1:9",
       WEB_ORIGIN: "https://abolish.test",
       ACCOUNT_SECRET: SECRET,
@@ -100,7 +101,13 @@ describe("dist/node/main.mjs", () => {
         await new Promise((r) => setTimeout(r, 100));
         home = await fetch(`${at}/`).catch(() => undefined);
       }
-      expect(web.err()).toBe("");
+      // The one log line is the home page's failed listing, by error name only.
+      expect(
+        web
+          .err()
+          .split("\n")
+          .filter((line) => line !== "" && line !== "{ error: 'TypeError' }"),
+      ).toEqual([]);
       expect(home?.status).toBe(200);
       expect(home?.headers.get("content-security-policy")).toContain("default-src 'none'");
       const html = (await home?.text()) ?? "";

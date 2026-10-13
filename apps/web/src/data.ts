@@ -4,7 +4,13 @@
 import { createServerFn } from "@tanstack/react-start";
 
 import { api } from "./server/api.ts";
-import { loadModerationLog, loadPoll, loadPollList, resolveShortLink } from "./server/load.ts";
+import {
+  LIST_PAGE,
+  loadModerationLog,
+  loadPoll,
+  loadPollList,
+  resolveShortLink,
+} from "./server/load.ts";
 import { isCanonicalU64, isElectionId, isShortCode } from "./values.ts";
 
 /**
@@ -44,6 +50,16 @@ export const fetchPollList = createServerFn({ method: "GET" })
     return after;
   })
   .handler(({ data }) => opaque(() => loadPollList(api(), data)));
+
+/** The first `limit` listed polls, for the home page. */
+export const fetchFirstPolls = createServerFn({ method: "GET" })
+  .inputValidator((limit: unknown) => {
+    // Bounded by a page of the list, so a caller can't make one request fetch more definitions.
+    if (!Number.isSafeInteger(limit) || (limit as number) < 1 || (limit as number) > LIST_PAGE)
+      throw new TypeError("expected a page size from 1 to 20");
+    return limit as number;
+  })
+  .handler(({ data }) => opaque(() => loadPollList(api(), "", data)));
 
 export const fetchShortLink = createServerFn({ method: "GET" })
   .inputValidator((code: unknown) => {

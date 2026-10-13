@@ -7,8 +7,9 @@
 // format 4, the key-ceremony
 // transcript check (3.2, and the parts of 2.5 and 3.1 that need no L2 state)
 // ballot admission (5.1 to 5.4, and 5.7 as far as 5.5 allows) and the
-// spoiled-ballot openings (6.2, as far as the floor of s_S decides them) are
-// implemented; every other check is reported unverifiable, so no run can
+// spoiled-ballot openings (6.2, as far as the floor of s_S decides them) and
+// the tally openings' sorting, attribution and boarding breaches (7.4, as far
+// as they need no counted set) are implemented; every other check is reported unverifiable, so no run can
 // report an election verified yet. A run on unauthenticated inputs reports
 // what the checks found against them, but its verdict stays unverifiable, so
 // a crafted bundle can neither verify nor fail an election (T-53, T-24).
@@ -49,6 +50,7 @@ import { type CeremonyCode, ceremonyChecks, type CeremonyReport } from "./ceremo
 import { CHECKS, type CheckKind } from "./checks.ts";
 import { openingChecks, type OpeningCode, type OpeningReport } from "./openings.ts";
 import { type ReceiptKeyCode, receiptKeyRow } from "./receipt-keys.ts";
+import { tallyChecks, type TallyCode, type TallyReport } from "./tallies.ts";
 import {
   anchorsFromState,
   type L1Evidence,
@@ -66,6 +68,7 @@ export type CheckCode =
   | CeremonyCode
   | BallotCode
   | OpeningCode
+  | TallyCode
   | ReceiptKeyCode
   | "decode"
   | "membership-key"
@@ -108,6 +111,8 @@ export interface Report {
   readonly ballots?: BallotsReport;
   /** A format-4 bundle's spoiled-ballot openings, once 6.2 ran, in copy order. */
   readonly openings?: readonly OpeningReport[];
+  /** A format-4 bundle's tally openings, once 7.4 ran, in copy order. */
+  readonly tallies?: readonly TallyReport[];
   readonly board: {
     readonly entries: number;
     readonly unreadableBytes: number;
@@ -310,6 +315,7 @@ function fromDefinition(bundle: Bundle):
           ["5.4", NOT_REACHED],
           ["5.7", NOT_REACHED],
           ["6.2", NOT_REACHED],
+          ["7.4", NOT_REACHED],
         ]
       : [];
   const stopped = (row: string, outcome: Outcome, hash?: Uint8Array) => ({
@@ -442,6 +448,7 @@ export function verifyBundle(bundle: Bundle): Report {
   let ceremony: CeremonyReport | undefined;
   let ballots: BallotsReport | undefined;
   let openings: readonly OpeningReport[] | undefined;
+  let tallies: readonly TallyReport[] | undefined;
   if ("rows" in definition) implemented = definition.rows;
   else {
     input = anchoring(bundle, definition.inputs);
@@ -543,6 +550,17 @@ export function verifyBundle(bundle: Bundle): Report {
         );
         implemented = new Map<string, Outcome>([...implemented, ["6.2", spoiled.row]]);
         openings = spoiled.report;
+        // Sorting and attribution need only the definition and the
+        // registered signing keys, so 7.4 runs wherever 3.2 passed.
+        const opened = tallyChecks(
+          definition.definition.value,
+          electionDefinitionHash(definition.definition.value),
+          checked.registered,
+          bundle.entries,
+          definition.inputs.boardEntryVersion,
+        );
+        implemented = new Map<string, Outcome>([...implemented, ["7.4", opened.row]]);
+        tallies = opened.report;
       } else {
         // Under definition versions 3 and 4 a ballot is admitted against its
         // cell (ballot version 2), which this verifier doesn't do yet
@@ -576,6 +594,7 @@ export function verifyBundle(bundle: Bundle): Report {
     ...(ceremony !== undefined && { ceremony }),
     ...(ballots !== undefined && { ballots }),
     ...(openings !== undefined && { openings }),
+    ...(tallies !== undefined && { tallies }),
     board,
     ...(bundle.format !== "abolish-verifier-bundle/1" && {
       l1: {

@@ -1,0 +1,159 @@
+// Tally openings (docs/spec/verifier.md, Tally openings; 7.3, 7.4): every
+// tally opening (0x0006) of this election on the board copy is decoded under
+// the pinned version, sorted into an opening of a cell of the registered
+// partition or a stray opening, and attributed by the registered signing keys
+// through @abolishus/crypto's `sortTallyOpenings`, then judged against
+// tally.md's Boarding rule as far as the bundle decides it. None of it counts
+// or fails anything: 7.4 reports and attributes (T-29, T-15, T-17).
+//
+// What is decided without the counted set: a stray opening, an opening of a
+// cell with another number of entries than options (`tally-missing`), an
+// unattributed one, and a second one by the same seat for the same cell.
+// Whether an opening is over the counted set (`tally-aggregate`) or opens it
+// (`tally-opening`) needs selection (6.1), which needs the close rule (5.5),
+// so an opening that breaks none of the decided rules stays unsettled and 7.4
+// can't pass while one is on the copy.
+
+import {
+  DecodeError,
+  type DecodeErrorCode,
+  decodeBoardEntry,
+  type BoardEntryVersion,
+  type ElectionDefinition,
+  pinnedVersion,
+  RECORD_TYPES,
+  type RegisteredKeys,
+  sortTallyOpenings,
+} from "@abolishus/crypto";
+
+/** A boarding rule an opening is known to break (docs/spec/tally.md, Opening record, Boarding), in that rule's order. */
+export type TallyBreak =
+  | { readonly code: "tally-stray" }
+  | { readonly code: "tally-missing" }
+  | { readonly code: "tally-unattributed" }
+  /** `of`: the first earlier entry carrying an opening of the same cell attributed to the same seat. */
+  | { readonly code: "tally-second"; readonly of: number };
+
+/** One tally-opening entry of the copy, by its position from 0. */
+export interface TallyReport {
+  readonly entry: number;
+  /** `decode`: a rejected entry, which opens no cell. */
+  readonly code?: "decode";
+  readonly decodeError?: DecodeErrorCode;
+  /** The cell it is an opening of; absent for a stray opening or one that doesn't decode. */
+  readonly cell?: number;
+  /** The seat its signature attributes it to, or `null`; absent when it doesn't decode. */
+  readonly signer?: number | null;
+  readonly breaks: readonly TallyBreak[];
+}
+
+export type TallyCode = "decode" | TallyBreak["code"];
+
+export interface TallyOutcome {
+  readonly status: "pass" | "fail" | "unverifiable";
+  readonly code?: TallyCode | "unsupported-version" | "not-reached" | "not-implemented";
+  readonly at?:
+    | { readonly entry: number; readonly decodeError?: DecodeErrorCode }
+    | Record<string, never>;
+}
+
+const equal = (a: Uint8Array, b: Uint8Array) =>
+  a.length === b.length && a.every((x, i) => x === b[i]);
+
+/**
+ * The row 7.4 and the report's `tallies`, for a version-1 definition, whose
+ * cells are its tiers in `electorate` order. `registered` is the key set the
+ * transcript check registered, or `undefined` when 3.2 didn't pass: with no
+ * registered key set no opening can be attributed, so nothing is judged.
+ */
+export function tallyChecks(
+  d: ElectionDefinition,
+  definitionHash: Uint8Array,
+  registered: readonly RegisteredKeys[] | undefined,
+  entries: readonly Uint8Array[],
+  boardEntryVersion: BoardEntryVersion,
+): { readonly row: TallyOutcome; readonly report?: readonly TallyReport[] } {
+  // A tally-opening version this verifier doesn't read may be one a later
+  // release reads: unverifiable, never failed, so releases agree (2.3; T-36).
+  if (pinnedVersion(d, RECORD_TYPES.tallyOpening) !== 1)
+    return { row: { status: "unverifiable", code: "unsupported-version", at: {} } };
+  if (registered === undefined) return { row: { status: "unverifiable", code: "not-reached" } };
+  const positions: number[] = [];
+  const payloads: Uint8Array[] = [];
+  for (const [at, encoded] of entries.entries()) {
+    try {
+      const e = decodeBoardEntry(encoded, boardEntryVersion);
+      // 4.1 reports an entry that doesn't decode or names another election.
+      if (!equal(e.election_id, d.election_id)) continue;
+      if (
+        (((e.payload[0] as number) << 8) | (e.payload[1] as number)) !==
+        RECORD_TYPES.tallyOpening
+      )
+        continue;
+      positions.push(at);
+      payloads.push(e.payload);
+    } catch (e) {
+      if (e instanceof DecodeError) continue;
+      throw e;
+    }
+  }
+  const sorted = sortTallyOpenings(
+    { definitionHash, registered },
+    d.electorate.length,
+    payloads,
+    1,
+  );
+  const report: TallyReport[] = [];
+  // Each (cell, seat)'s first attributed opening, by entry.
+  const first = new Map<string, number>();
+  for (const o of sorted) {
+    const entry = positions[o.at] as number;
+    if ("error" in o) {
+      report.push({ entry, code: "decode", decodeError: o.error, breaks: [] });
+      continue;
+    }
+    if (o.cell === null) {
+      report.push({
+        entry,
+        signer: o.signer,
+        breaks: [
+          { code: "tally-stray" },
+          ...(o.signer === null ? [{ code: "tally-unattributed" as const }] : []),
+        ],
+      });
+      continue;
+    }
+    const breaks: TallyBreak[] = [];
+    if (o.opening.opening.length !== d.option_count) breaks.push({ code: "tally-missing" });
+    if (o.signer === null) breaks.push({ code: "tally-unattributed" });
+    else {
+      // Any earlier opening of this cell by this seat, whatever its checks
+      // find: the operator boards at most one per seat and cell.
+      const key = `${o.cell}/${o.signer}`;
+      const of = first.get(key);
+      if (of === undefined) first.set(key, entry);
+      else breaks.push({ code: "tally-second", of });
+    }
+    report.push({ entry, cell: o.cell, signer: o.signer, breaks });
+  }
+  return { row: rowOf(report), report };
+}
+
+// An opening is settled when it doesn't decode or broke a decided rule; one
+// that broke none may still be over another set or fail to open its cell's
+// aggregate, so it leaves 7.4 unverifiable, which also keeps a settled break
+// from passing the row for the others.
+function rowOf(report: readonly TallyReport[]): TallyOutcome {
+  const settled = (o: TallyReport) => o.code !== undefined || o.breaks.length > 0;
+  if (report.some((o) => !settled(o))) return { status: "unverifiable", code: "not-implemented" };
+  const head = report[0];
+  if (head === undefined) return { status: "pass" };
+  return {
+    status: "fail",
+    code: head.code ?? (head.breaks[0] as TallyBreak).code,
+    at: {
+      entry: head.entry,
+      ...(head.decodeError !== undefined && { decodeError: head.decodeError }),
+    },
+  };
+}

@@ -621,6 +621,31 @@ describe("moderation log", () => {
     const html = await (await get("/moderation?after=7")).text();
     expect(html).toContain("No decisions yet.");
   });
+
+  test("states what moderation can't reach and every ground, with the log or without it", async () => {
+    for (const path of ["/moderation", "/moderation?after=7"]) {
+      const html = await (await get(path)).text();
+      expect(html).toContain("Moderation acts on poll text, never on results");
+      expect(html).toContain("The count and the result");
+      expect(html).toContain("The only seven grounds");
+      for (const code of ["illegal", "personal-data", "legal-notice", "notice-withdrawn"])
+        expect(html).toContain(`>${code}</code>`);
+    }
+  });
+});
+
+describe("account page", () => {
+  test("renders signed out, with the separation, and leaves the session to the page's script", async () => {
+    seen.length = 0;
+    const response = await get("/account");
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("Sign in, or create an account");
+    expect(html).toContain("Your account is not your vote");
+    expect(html).toContain("Accounts use passkeys, which need this page&#x27;s script.");
+    expect(html).toMatch(/<meta name="robots" content="noindex"[^>]*>/);
+    expect(seen).toEqual([]);
+  });
 });
 
 describe("server functions", () => {

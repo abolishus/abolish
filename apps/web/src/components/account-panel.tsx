@@ -1,5 +1,6 @@
 import { Button, useI18n, useTranslate } from "@abolishus/ui";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Cloud, KeyRound, Server, Smartphone, UserPlus } from "lucide-react";
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 
 import {
   AccountError,
@@ -7,8 +8,9 @@ import {
   type AccountFailure,
   type PasskeyView,
 } from "../account/client.ts";
-import { catalogs } from "../messages.ts";
+import { catalogs, type Messages } from "../messages.ts";
 import { formatUtc } from "./format.ts";
+import { PageHeader, Section } from "./page-parts.tsx";
 
 type View =
   | { readonly kind: "loading" }
@@ -28,6 +30,64 @@ type Notice = Done | AccountFailure;
 
 const isFailure = (n: Notice): n is AccountFailure =>
   n === "cancelled" || n === "unsupported" || n === "failed";
+
+const RULED = "m-0 grid list-none border-t border-foreground p-0";
+
+/**
+ * The account on our servers beside the voting identity on the device, with
+ * nothing joining them (T-10): what each holds, as the design keeps it.
+ */
+function Separation() {
+  const t = useTranslate(catalogs);
+  const side = (
+    icon: ReactNode,
+    where: keyof Messages,
+    title: keyof Messages,
+    items: readonly (keyof Messages)[],
+    note: keyof Messages,
+  ) => (
+    <div className="grid content-start gap-4 py-6 md:px-8 md:first:ps-0 md:last:pe-0">
+      <p className="m-0 flex items-center gap-2 font-mono text-xs tracking-widest uppercase">
+        <span aria-hidden="true">{icon}</span>
+        {t(where)}
+      </p>
+      <h3 className="m-0 font-heading text-2xl font-semibold">{t(title)}</h3>
+      <ul className={RULED}>
+        {items.map((item) => (
+          <li key={item} className="border-b border-border py-3 text-base">
+            {t(item)}
+          </li>
+        ))}
+      </ul>
+      <p className="m-0 text-sm text-muted-foreground">{t(note)}</p>
+    </div>
+  );
+  return (
+    <div className="grid border-t-2 border-foreground md:grid-cols-[1fr_auto_1fr]">
+      {side(
+        <Server className="size-4" />,
+        "separationServer",
+        "separationAccount",
+        ["separationAccount_passkeys", "separationAccount_sessions"],
+        "separationAccountNote",
+      )}
+      <div className="flex items-center gap-3 border-y border-border py-3 md:flex-col md:justify-center md:border-y-0 md:border-x md:px-3 md:py-0">
+        <span aria-hidden="true" className="h-px flex-1 bg-foreground md:h-auto md:w-px" />
+        <span className="font-mono text-xs tracking-widest uppercase md:[writing-mode:vertical-rl]">
+          {t("separationNeverJoined")}
+        </span>
+        <span aria-hidden="true" className="h-px flex-1 bg-foreground md:h-auto md:w-px" />
+      </div>
+      {side(
+        <Smartphone className="size-4" />,
+        "separationDevice",
+        "separationIdentity",
+        ["separationIdentity_secret", "separationIdentity_receipts"],
+        "separationIdentityNote",
+      )}
+    </div>
+  );
+}
 
 export interface AccountPanelProps {
   readonly client: AccountClient;
@@ -86,72 +146,19 @@ export function AccountPanel({ client }: AccountPanelProps) {
     }
   };
 
+  const signedIn = view.kind === "signed-in";
+  const added = (p: PasskeyView) => formatUtc(locale, new Date(p.createdAt));
+
   return (
-    <section aria-labelledby="account-title" aria-busy={busy} className="grid max-w-prose gap-6">
-      <h1 id="account-title" ref={heading} tabIndex={-1} className="text-3xl font-semibold">
-        {t("accountTitle")}
-      </h1>
-      <p className="text-muted-foreground">{t("accountLede")}</p>
-      {view.kind === "loading" ? (
-        <noscript>
-          <p>{t("accountNeedsScript")}</p>
-        </noscript>
-      ) : null}
-      {view.kind === "signed-out" ? (
-        <div className="flex flex-wrap gap-2">
-          <Button disabled={busy} onClick={act(() => client.signUp(), "signedIn")}>
-            {t("accountSignUp")}
-          </Button>
-          <Button
-            variant="outline"
-            disabled={busy}
-            onClick={act(() => client.signIn(), "signedIn")}
-          >
-            {t("accountSignIn")}
-          </Button>
-        </div>
-      ) : null}
-      {view.kind === "signed-in" ? (
-        <>
-          <p>{t("accountSignedIn")}</p>
-          <section aria-labelledby="passkeys-title" className="grid gap-3">
-            <h2 id="passkeys-title" className="text-xl font-semibold">
-              {t("passkeysTitle")}
-            </h2>
-            <ul className="grid gap-2">
-              {view.passkeys.map((p) => (
-                <li
-                  key={p.id}
-                  className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border p-3"
-                >
-                  <span suppressHydrationWarning>
-                    {t(p.backedUp ? "passkeySynced" : "passkeyDevice", {
-                      created: formatUtc(locale, new Date(p.createdAt)),
-                    })}
-                  </span>
-                  {/* The last passkey stays: without one, nobody can sign in again. */}
-                  {view.passkeys.length > 1 ? (
-                    <Button
-                      variant="link"
-                      disabled={busy}
-                      onClick={act(() => client.removePasskey(p.id), "passkeyRemoved")}
-                    >
-                      {t("passkeyRemove")}
-                    </Button>
-                  ) : null}
-                </li>
-              ))}
-            </ul>
-            <div>
-              <Button
-                variant="outline"
-                disabled={busy}
-                onClick={act(() => client.addPasskey(), "passkeyAdded")}
-              >
-                {t("passkeyAdd")}
-              </Button>
-            </div>
-          </section>
+    <section aria-labelledby="account-title" aria-busy={busy} className="grid gap-16">
+      <PageHeader
+        eyebrow={t(signedIn ? "accountEyebrowSignedIn" : "accountEyebrow")}
+        title={t(signedIn ? "accountTitleSignedIn" : "accountTitle")}
+        titleId="account-title"
+        titleRef={heading}
+        lede={t(signedIn ? "accountLedeSignedIn" : "accountLede")}
+      >
+        {signedIn ? (
           <div className="flex flex-wrap gap-2">
             <Button
               variant="outline"
@@ -168,45 +175,184 @@ export function AccountPanel({ client }: AccountPanelProps) {
               {t("accountSignOutOthers")}
             </Button>
           </div>
-          <section aria-labelledby="delete-title" className="grid gap-3">
-            <h2 id="delete-title" className="text-xl font-semibold">
-              {t("accountDeleteTitle")}
-            </h2>
-            <p>{t("accountDeleteLede")}</p>
-            {confirmDelete ? (
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  disabled={busy}
-                  onClick={act(() => client.deleteAccount(), "accountDeleted")}
-                >
-                  {t("accountDeleteConfirm")}
-                </Button>
-                <Button variant="outline" disabled={busy} onClick={() => setConfirmDelete(false)}>
-                  {t("accountDeleteCancel")}
-                </Button>
-              </div>
-            ) : (
+        ) : null}
+      </PageHeader>
+
+      <div className="grid gap-4">
+        {view.kind === "loading" ? (
+          <noscript>
+            <p className="m-0 text-lg">{t("accountNeedsScript")}</p>
+          </noscript>
+        ) : null}
+        {view.kind === "signed-out" ? (
+          <div className="grid border-t-2 border-foreground md:grid-cols-2">
+            <div className="grid content-start gap-4 border-b border-border py-8 md:border-e md:border-b-0 md:pe-8">
+              <h2 className="m-0 text-2xl font-semibold">{t("accountHaveOne")}</h2>
+              <p className="m-0 max-w-prose text-base">{t("accountHaveOneLede")}</p>
               <div>
-                <Button variant="outline" disabled={busy} onClick={() => setConfirmDelete(true)}>
-                  {t("accountDelete")}
+                <Button size="lg" disabled={busy} onClick={act(() => client.signIn(), "signedIn")}>
+                  <KeyRound aria-hidden="true" data-icon="inline-start" />
+                  {t("accountSignIn")}
                 </Button>
               </div>
+            </div>
+            <div className="grid content-start gap-4 py-8 md:ps-8">
+              <h2 className="m-0 text-2xl font-semibold">{t("accountNew")}</h2>
+              <p className="m-0 max-w-prose text-base">{t("accountNewLede")}</p>
+              <div>
+                <Button
+                  size="lg"
+                  variant="outline"
+                  disabled={busy}
+                  onClick={act(() => client.signUp(), "signedIn")}
+                >
+                  <UserPlus aria-hidden="true" data-icon="inline-start" />
+                  {t("accountSignUp")}
+                </Button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+        <div role="status" className="min-h-6 text-base">
+          {notice !== undefined && !isFailure(notice) ? t(notice) : null}
+        </div>
+        {notice !== undefined && isFailure(notice) ? (
+          <p role="alert" className="m-0 text-destructive">
+            {t(
+              notice === "failed" && view.kind !== "signed-in"
+                ? "accountFailure_failedSignedOut"
+                : `accountFailure_${notice}`,
             )}
-          </section>
-        </>
-      ) : null}
-      <div role="status" className="min-h-6">
-        {notice !== undefined && !isFailure(notice) ? t(notice) : null}
+          </p>
+        ) : null}
       </div>
-      {notice !== undefined && isFailure(notice) ? (
-        <p role="alert" className="m-0 text-destructive">
-          {t(
-            notice === "failed" && view.kind !== "signed-in"
-              ? "accountFailure_failedSignedOut"
-              : `accountFailure_${notice}`,
-          )}
-        </p>
-      ) : null}
+
+      {view.kind === "signed-in" ? (
+        <>
+          <Section
+            index="01"
+            mark={t("passkeysTitle")}
+            title={t("passkeysHeading")}
+            id="passkeys-title"
+            lede={<p className="m-0">{t("passkeysLede")}</p>}
+          >
+            <ul className="m-0 grid list-none border-t-2 border-foreground p-0">
+              {view.passkeys.map((p) => (
+                <li
+                  key={p.id}
+                  className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-2 border-b border-border py-4 md:grid-cols-[auto_minmax(0,1fr)_minmax(0,16rem)_auto]"
+                >
+                  <span aria-hidden="true">
+                    {p.backedUp ? <Cloud className="size-5" /> : <KeyRound className="size-5" />}
+                  </span>
+                  <span className="grid gap-0.5">
+                    <span className="font-semibold">
+                      {t(p.backedUp ? "passkeySynced" : "passkeyDevice")}
+                    </span>
+                    <span className="text-sm text-muted-foreground">
+                      {t(p.backedUp ? "passkeySyncedHelp" : "passkeyDeviceHelp")}
+                    </span>
+                  </span>
+                  <span
+                    className="col-start-2 font-mono text-xs md:col-start-auto"
+                    suppressHydrationWarning
+                  >
+                    {t("passkeyAddedAt", { created: added(p) })}
+                  </span>
+                  <span className="col-start-2 md:col-start-auto">
+                    {/* The last passkey stays: without one, nobody can sign in again. */}
+                    {view.passkeys.length > 1 ? (
+                      <Button
+                        variant="link"
+                        className="px-0 md:px-5"
+                        disabled={busy}
+                        onClick={act(() => client.removePasskey(p.id), "passkeyRemoved")}
+                      >
+                        {t("passkeyRemove")}
+                        <span className="sr-only" suppressHydrationWarning>
+                          {" "}
+                          {t("passkeyRemoveWhich", { created: added(p) })}
+                        </span>
+                      </Button>
+                    ) : (
+                      <span className="text-sm text-muted-foreground">{t("passkeyLast")}</span>
+                    )}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <div>
+              <Button
+                variant="outline"
+                disabled={busy}
+                onClick={act(() => client.addPasskey(), "passkeyAdded")}
+              >
+                <KeyRound aria-hidden="true" data-icon="inline-start" />
+                {t("passkeyAdd")}
+              </Button>
+            </div>
+          </Section>
+
+          <Section
+            index="02"
+            mark={t("accountDeleteMark")}
+            title={t("accountDeleteTitle")}
+            id="delete-title"
+          >
+            <div className="grid max-w-prose gap-4 text-base text-pretty">
+              <p className="m-0">{t("accountDeleteLede")}</p>
+              <p className="m-0">{t("accountDeleteStays")}</p>
+              {confirmDelete ? (
+                <div
+                  role="group"
+                  aria-labelledby="delete-confirm"
+                  className="grid gap-4 border-2 border-destructive p-5"
+                >
+                  <p id="delete-confirm" className="m-0 font-semibold">
+                    {t("accountDeleteQuestion")}
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      variant="destructive"
+                      disabled={busy}
+                      onClick={act(() => client.deleteAccount(), "accountDeleted")}
+                    >
+                      {t("accountDeleteConfirm")}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      disabled={busy}
+                      onClick={() => setConfirmDelete(false)}
+                    >
+                      {t("accountDeleteCancel")}
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <Button
+                    variant="destructive"
+                    disabled={busy}
+                    onClick={() => setConfirmDelete(true)}
+                  >
+                    {t("accountDelete")}
+                  </Button>
+                </div>
+              )}
+            </div>
+          </Section>
+        </>
+      ) : (
+        <Section
+          index="01"
+          mark={t("separationMark")}
+          title={t("separationTitle")}
+          id="separate-title"
+          lede={<p className="m-0">{t("separationLede")}</p>}
+        >
+          <Separation />
+        </Section>
+      )}
     </section>
   );
 }

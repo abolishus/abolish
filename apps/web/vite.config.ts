@@ -96,6 +96,10 @@ export default defineConfig({
         plugins: [tailwindcss(), storybookTest({ configDir: ".storybook" })],
         test: {
           name: "storybook",
+          // The page mockups' play functions type whole sentences through
+          // userEvent and walk several steps, which on CI's runners can pass
+          // the 15-second default.
+          testTimeout: 60_000,
           browser: {
             enabled: true,
             headless: true,

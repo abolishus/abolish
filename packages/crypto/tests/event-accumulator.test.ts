@@ -363,5 +363,11 @@ describe("event accumulator", () => {
     expect(() =>
       checkEventAccumulatorProof(1n, new Uint8Array(20), [], { ...proof, count: 2n ** 64n }),
     ).toThrow(RangeError);
+    expect(() =>
+      checkEventAccumulatorProof(1n, new Uint8Array(20), [], {
+        ...proof,
+        accumulator: new Uint8Array(31),
+      }),
+    ).toThrow(RangeError);
   });
 });

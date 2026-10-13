@@ -146,10 +146,12 @@ export function replayEventAccumulator(
  * on the wrong side of the proof's block without changing the accumulator,
  * so an archive can't move an event across a period boundary (T-71, T-25).
  * The proof itself (account and storage proofs under an output root) is the
- * caller's to check first. Throws a RangeError or TypeError, as
- * `eventAccumulatorStep` does, on a log that isn't well formed (an `n`,
- * block or timestamp outside `u64`, or a malformed topic or data): that is
- * a malformed input, not an archive that fails to match.
+ * caller's to check first. Throws a RangeError or TypeError on malformed
+ * input rather than reporting a rule: a proven count, block or accumulator
+ * that isn't a `u64`, `u64` or 32 bytes, or any log's `n`, block or
+ * timestamp outside `u64`. A counted log's topics and data are checked as
+ * `eventAccumulatorStep` checks them, when rule 3 replays it; a log past the
+ * count is checked by the proof that later counts it.
  */
 export function checkEventAccumulatorProof(
   chainId: bigint,
@@ -159,14 +161,18 @@ export function checkEventAccumulatorProof(
 ): EventAccumulatorProofError | null {
   u64Arg(proven.block, "proven.block");
   u64Arg(proven.count, "proven.count");
+  const provenAccumulator = copyBytes(proven.accumulator, "proven.accumulator");
+  if (provenAccumulator.length !== 32) throw new RangeError("proven.accumulator must be 32 bytes");
   const logs = Array.from(archive);
   for (const log of logs) {
     u64Arg(log.n, "n");
     u64Arg(log.block, "block");
     u64Arg(log.timestamp, "timestamp");
   }
+  // Rule 1: the numbering over the whole archive, then the order, so an
+  // archive breaking both reports `index` (docs/spec/contracts.md, Verification).
+  if (logs.some((log, i) => log.n !== BigInt(i))) return "index";
   for (const [i, log] of logs.entries()) {
-    if (log.n !== BigInt(i)) return "index";
     const prev = logs[i - 1];
     if (prev !== undefined && (log.block < prev.block || log.timestamp < prev.timestamp))
       return "order";
@@ -180,7 +186,5 @@ export function checkEventAccumulatorProof(
   if (!short && next !== undefined && next.block <= proven.block) return "block-range";
   if (short) return "accumulator";
   const replayed = replayEventAccumulator(chainId, address, logs.slice(0, c));
-  return equalBytes(replayed.accumulator, copyBytes(proven.accumulator, "proven.accumulator"))
-    ? null
-    : "accumulator";
+  return equalBytes(replayed.accumulator, provenAccumulator) ? null : "accumulator";
 }

@@ -256,6 +256,7 @@ proof_cases = [
     ("log-left-out", "The archive leaves out the third log", [dict(e, n=i) for i, e in enumerate(HIST[:2] + HIST[3:])], 4, 251, HIST_ACCS[4]),
     ("index-gap", "The archive numbers the logs 0, 1, 3, …", moved(HIST, 2, n=3), 5, 251, HIST_ACCS[4]),
     ("block-decreases", "The fourth log is placed in block 99, before the third", moved(HIST, 3, block=99), 5, 251, HIST_ACCS[4]),
+    ("index-and-order", "The archive both numbers the logs 0, 1, 3, … and puts the second log in block 99: the numbering is reported", moved(moved(HIST, 1, block=99), 2, n=3), 5, 251, HIST_ACCS[4]),
     ("timestamp-decreases", "The fourth log's timestamp is set below the third's", moved(HIST, 3, timestamp=T0), 5, 251, HIST_ACCS[4]),
     ("moved-block", "The third log is moved from block 101 to block 102, keeping the order", moved(HIST, 2, block=102), 5, 251, HIST_ACCS[4]),
     ("moved-timestamp", "The third log's timestamp is moved by one second, keeping the order", moved(HIST, 2, timestamp=T0 + 3), 5, 251, HIST_ACCS[4]),

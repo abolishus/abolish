@@ -214,7 +214,7 @@ t_e(A) = definition_hash ‖ u16(0x0002) ‖ u8(4) ‖ u8(panel) ‖ u8(i) ‖ e
          ‖ ct_M ‖ encode(ct_DH) ‖ u32(len(sealed)) ‖ sealed ‖ encode(A)
 ```
 
-with `dh_i` the seat's key in its own panel. `K`, `sealed`, `share_ciphertext` and `H(ct_i)` are unchanged, and the share hash goes into `share_hashes[i]` for a default seat and `author_share_hashes[i]` for an author seat. Both tags keep their layouts up to the version byte, which says how the rest reads: versions 1 to 3 name ballot version 1's rules (`u8(1)`, then the seat), version 4 names its own (`u8(4)`, then the panel and the seat), so no ciphertext made under one opens or proves under the other (T-31).
+with `dh_i` the seat's key in its own panel. `K`, `sealed`, `share_ciphertext` and `H(ct_i)` are unchanged, and the share hash goes into `share_hashes[i]` for a default seat and `author_share_hashes[i]` for an author seat. Both tags keep their layouts up to the version byte, which says how the rest reads: versions 1 to 3 name ballot version 1's rules (`u8(1)`, then the seat), version 4 names its own (`u8(4)`, then the panel and the seat), which ballot version 5 keeps unchanged, as versions 2 and 3 keep version 1's, so no ciphertext made under one opens or proves under the other (T-31).
 
 Why both halves' commitments, whichever panel the seat is in: `aad` then binds the seat's ciphertext to the whole core but the share hashes, as under version 1, so an author seat's ciphertext can't be moved to a ballot with another default half, or the reverse, without failing its seal and its proof. With no author panel `encode(author_vss)` is a zero count.
 

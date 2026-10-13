@@ -19,12 +19,12 @@ m̂ = F(M)
 ```
 
 - `definition_hash` is the election definition's hash (P1-10b), the same value the nullifier scope binds.
-- `tier` is the ballot's tier (0, 1 or 2), the same value its scope binds ([[membership]], Scope). Under ballot versions 2 and 3, which name a cell, it is the tier of that cell in the definition ([[ballot-validity]], Ballot record (version 2)); the cell itself is bound through `ballot_hash`, so `M` names one cell, and the layout and the tag are unchanged.
+- `tier` is the ballot's tier (0, 1 or 2), the same value its scope binds ([[membership]], Scope). Under ballot versions 2 to 5, which name a cell, it is the tier of that cell in the definition (under version 5, a rolling tier, which is one cell) ([[ballot-validity]], Ballot record (version 2)); the cell itself is bound through `ballot_hash`, so `M` names one cell, and the layout and the tag are unchanged.
 - `ballot_hash` is the ballot's hash under `abolish/v1/ballot` ([[ballot-validity]], Ballot hash): its tier, nullifier, commitments, share-ciphertext hashes and validity proofs, never its membership proof (which can't bind its own hash) and never the L1 reference (which `M` binds itself).
 - `l1_ref_number` (`u64`) and `l1_ref_hash` (`bytes[32]`) name the L1 block: its number, and its execution-layer block hash as the block header's Keccak-256 (the `hash` that Ethereum's JSON-RPC `eth_getBlockByNumber` returns).
 - The input after the tag is exactly 105 bytes. `F` is [[membership]]'s field mapping.
 
-The ballot record (`0x0002`, [[ballot-validity]], Ballot record) carries `tier` (versions 2 and 3: `cell`, whose tier the definition gives), `l1_ref_number` and `l1_ref_hash` as fields, so a verifier recomputes `M` from the record and the definition alone, never from anything a server supplies.
+The ballot record (`0x0002`, [[ballot-validity]], Ballot record) carries `tier` (versions 2 to 5: `cell`, whose tier the definition gives), `l1_ref_number` and `l1_ref_hash` as fields, so a verifier recomputes `M` from the record and the definition alone, never from anything a server supplies.
 
 **Why each part is bound.** The ballot hash stops a proof from being moved to another ballot (T-38). The definition hash and tier are bound by the scope already; binding them again makes `M` self-describing, so no message is valid for two polls or two tiers even if a scope were mistaken. The block hash is what makes the reference unpredictable: a block number alone could be chosen in advance, so a coercer could have a voter make ballots for future numbers while watching once and post them later (T-45). The number is bound so a verifier looks up exactly one block, never searches for one.
 
@@ -38,15 +38,18 @@ A verifier reads the L1 chain named by the definition's `l1_chain_id` up to `hea
 2. Let `b` be the finalized block numbered `min(l1_ref_number, head)`. `l1-ref-after-close` if `b`'s timestamp is later than `closes_at`. When `l1_ref_number > head` this holds for the named block too, whether or not it exists yet: Ethereum's block timestamps strictly increase with the block number (one slot of 12 seconds or more per block).
 3. If `l1_ref_number > head`, the ballot is **pending**: neither admitted nor rejected, and checked again once `head` has moved. Live monitoring (P4-5) reports it.
 4. `l1-ref-unknown` if block `l1_ref_number` has a hash other than `l1_ref_hash`. A ballot naming a block that was reorganised away, or that never existed, fails.
-5. Otherwise the reference is admitted.
+5. Under ballot version 5 (a rolling poll), with `t` the timestamp of block `l1_ref_number` and `n` the ballot's `step` ([[membership]], Root clock and steps, The window): `root-step-stale` if `τ_n ≤ t − ROOT_WINDOW`, and `root-step-future` if `τ_n > t`.
+6. Otherwise the reference is admitted.
 
-| Code                 | Rejects a ballot when                                                                                     |
-| -------------------- | --------------------------------------------------------------------------------------------------------- |
-| `l1-ref-before-open` | It names a block before `l1_ref_min` (step 1).                                                            |
-| `l1-ref-after-close` | Its named block, or a finalized block numbered below it, has a timestamp later than `closes_at` (step 2). |
-| `l1-ref-unknown`     | Its named block is finalized before close with another hash (step 4).                                     |
+| Code                 | Rejects a ballot when                                                                                       |
+| -------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `l1-ref-before-open` | It names a block before `l1_ref_min` (step 1).                                                              |
+| `l1-ref-after-close` | Its named block, or a finalized block numbered below it, has a timestamp later than `closes_at` (step 2).   |
+| `l1-ref-unknown`     | Its named block is finalized before close with another hash (step 4).                                       |
+| `root-step-stale`    | Ballot version 5: its step's boundary is `ROOT_WINDOW` or more before its named block's timestamp (step 5). |
+| `root-step-future`   | Ballot version 5: its step's boundary is after its named block's timestamp (step 5).                        |
 
-**Every verifier reaches the same verdict.** Once `head` is past close, the verdict doesn't depend on `head`: step 2 decides every number at or above the first block after close, and every smaller number is at or below `head`. Verifiers that have read different heads past close therefore report the same code for each ballot (T-36).
+**Every verifier reaches the same verdict.** Once `head` is past close, the verdict doesn't depend on `head`: step 2 decides every number at or above the first block after close, and every smaller number is at or below `head`. Step 5 reads only the timestamp of the block step 4 has found, so it adds no lookup and no dependence on `head`. Verifiers that have read different heads past close therefore report the same code for each ballot (T-36).
 
 **Pending never lasts.** Once L1 finalizes its first block after `closes_at`, every ballot is decided, including one naming a number far beyond any block L1 will ever reach (`2⁶⁴ − 1`, say), which anyone can put on L2 by direct submit since contracts can't check it (Owned elsewhere). A verifier of a closed election waits for that block; until it is finalized the result is unverifiable, never verified. So no voter can keep an election unverifiable by naming a block that never comes (T-53).
 

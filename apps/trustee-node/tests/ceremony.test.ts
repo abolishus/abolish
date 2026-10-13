@@ -7,7 +7,7 @@ import {
   verifyCeremonyRegistration,
 } from "@abolishus/crypto";
 import fc from "fast-check";
-import { describe, expect, test } from "vite-plus/test";
+import { describe, expect, test, vi } from "vite-plus/test";
 import { CeremonySeat, FileStore, type SeatResult, type SeatStore } from "../src/index.ts";
 import { MemoryStore } from "../src/store.ts";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -52,6 +52,10 @@ function seatOver(e: Election, index: number, store: SeatStore): CeremonySeat {
     store,
   });
 }
+
+// Each test runs whole ceremonies: under a second here, but over the default
+// 5 s on a loaded CI runner.
+vi.setConfig({ testTimeout: 60_000 });
 
 const NUM_RUNS = Number(process.env.FC_NUM_RUNS ?? 100);
 // A whole ceremony per run, about a third of a second, so a tenth of the

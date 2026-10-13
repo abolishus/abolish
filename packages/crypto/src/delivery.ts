@@ -202,12 +202,33 @@ export function deliveryDeadlines(closesAt: bigint, l1InclusionBound: bigint): D
 }
 
 /**
+ * The intake cutoff `c_I = t_D − F − R` (docs/spec/delivery.md, What a node
+ * owes): every trustee node keeps intake open until it, decides once at it
+ * what it owes through the contract path, and refuses intake from it on, so
+ * its obligation is one decision's, never the union of several over a
+ * changing view. `forcedInclusion` (`F`) and `margin` (`R`) are the release's,
+ * the values `deliveryWindowFits` checks, so every node and client agrees.
+ */
+export function intakeCutoff(
+  closesAt: bigint,
+  l1InclusionBound: bigint,
+  constants: { readonly forcedInclusion: bigint; readonly margin: bigint },
+): bigint {
+  const { forcedInclusion, margin } = constants;
+  for (const v of [forcedInclusion, margin])
+    if (typeof v !== "bigint" || v < 0n)
+      throw new RangeError("forcedInclusion and margin must be bigints ≥ 0");
+  return deliveryDeadlines(closesAt, l1InclusionBound).delivery - forcedInclusion - margin;
+}
+
+/**
  * The bounds P4-1's anchoring clock and P1-18's contract-event window must
  * keep (docs/spec/delivery.md, Direct submit), in seconds as bigints:
- * `DELIVERY_WINDOW ≥ max(2 · period + deadline + R, W_C) + F`, so every
+ * `DELIVERY_WINDOW ≥ max(2 · period + deadline, W_C) + R + F`, so every
  * counted ballot's anchoring or contract recording is confirmable on finalized
- * L1 in time for a trustee node to send its receipts through the contract
- * path, even forced through L1; and `COMPLAINT_WINDOW − DELIVERY_WINDOW ≥ W_C
+ * L1 by the intake cutoff `c_I = t_D − F − R`, where a trustee node decides
+ * what it owes, with `R` left to send its receipts through the contract path,
+ * even forced through L1; and `COMPLAINT_WINDOW − DELIVERY_WINDOW ≥ W_C
  * + F + R`, so a trustee can read the last posting and still send a complaint.
  * `margin` is `R`, for L1 finality and the node's own reaction.
  */
@@ -222,10 +243,10 @@ export function deliveryWindowFits(constants: {
   for (const v of [period, deadline, contractEventWindow, forcedInclusion, margin])
     if (typeof v !== "bigint" || v < 0n)
       throw new RangeError("every constant must be a bigint ≥ 0");
-  const anchored = 2n * period + deadline + margin;
+  const anchored = 2n * period + deadline;
   const seen = anchored > contractEventWindow ? anchored : contractEventWindow;
   return (
-    seen + forcedInclusion <= DELIVERY_WINDOW &&
+    seen + margin + forcedInclusion <= DELIVERY_WINDOW &&
     contractEventWindow + forcedInclusion + margin <= COMPLAINT_WINDOW - DELIVERY_WINDOW
   );
 }
@@ -262,9 +283,9 @@ export interface ViewBallot {
  * however many ballots anyone delivers or an operator withholds (ADR 0002,
  * Decision, 2026-10-12; T-52, T-25, T-54). `l1` must have finalized a block
  * after `closesAt`, so no reference is pending and every node reaches the
- * same verdicts; the function throws otherwise. A node calls it once, at its
- * decision point, and refuses intake afterwards: the union of several calls
- * over a changing view isn't bounded. Sorted by ballot hash.
+ * same verdicts; the function throws otherwise. A node calls it once, at the
+ * intake cutoff (`intakeCutoff`), and refuses intake afterwards: the union of
+ * several calls over a changing view isn't bounded. Sorted by ballot hash.
  */
 export function owedReceipts(
   view: Iterable<ViewBallot>,

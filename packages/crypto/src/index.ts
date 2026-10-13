@@ -649,6 +649,7 @@ export {
   decodeShareReceipt,
   deliveryDeadlines,
   deliveryWindowFits,
+  intakeCutoff,
   owedReceipts,
   type ViewBallot,
   deliverySegments,

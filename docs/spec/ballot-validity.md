@@ -2,7 +2,7 @@
 
 How a plurality or approval ballot commits to its vote on the public board, how the vote is shared among the trustees, and how anyone checks, before the tally, that the commitments hold a vote the election's rules allow. This is the public part of [[0002-everlasting-privacy]] (option B, accepted by the owner) for the homomorphic tally of [[0003-tally-scheme]]: perfectly hiding Pedersen commitments, Pedersen verifiable secret sharing, and disjunctive Chaum–Pedersen validity proofs under a Fiat–Shamir challenge that binds the whole statement. Notation is from [[notation]], the group and hashes from [[group]]. Threats: T-15, T-28, T-29, T-30, T-31, T-32, T-14, T-17, T-36, T-38, T-39, T-52.
 
-It also specifies the ballot record (`0x0002`, version 1) that carries the committed vote with its tier, nullifier, L1 block reference and membership proof, and that record's admission checks (Ballot record). Share encryption is specified in [[share-encryption]] (P1-12 part 2): the hybrid KEM and AEAD that carry each trustee's shares, and the hash `H(ct_i)` of each ciphertext. This page takes the `n` ciphertext hashes as 32-byte values and binds them into the statement.
+It also specifies the ballot record (`0x0002`, version 1) that carries the committed vote with its tier, nullifier, L1 block reference and membership proof, and that record's admission checks (Ballot record); version 2 names a regional cell (Ballot record (version 2)), and version 3 carries one range proof per question of a multi-question poll (Ballot record (version 3)). Share encryption is specified in [[share-encryption]] (P1-12 part 2): the hybrid KEM and AEAD that carry each trustee's shares, and the hash `H(ct_i)` of each ciphertext. This page takes the `n` ciphertext hashes as 32-byte values and binds them into the statement.
 
 ## Sources
 
@@ -121,7 +121,7 @@ What it leaves out, and why:
 - **The membership proof.** A proof can't bind its own hash, and anyone can re-randomise a Groth16 proof without the witness ([[membership]], Security notes): a re-randomised copy of a ballot keeps its ballot hash, and so its receipts, and is a repeat ([[revoting]], Selection step 1).
 - **The L1 reference.** `M` binds it beside the ballot hash. The same public part under a newer reference carries the same shares, so the receipts the trustees gave for it still hold.
 
-**Every other field is bound.** Every field of the ballot record (`0x0002`, versions 1 and 2) other than the membership proof, `l1_ref_number` and `l1_ref_hash` MUST be an input to `ballot_hash`, so whoever specifies the record and adds a field there adds it here, before anything freezes. A verifier computes `ballot_hash` from the strictly decoded record, never takes one a record or relay carries.
+**Every other field is bound.** Every field of the ballot record (`0x0002`, versions 1, 2 and 3) other than the membership proof, `l1_ref_number` and `l1_ref_hash` MUST be an input to `ballot_hash`, so whoever specifies the record and adds a field there adds it here, before anything freezes. A verifier computes `ballot_hash` from the strictly decoded record, never takes one a record or relay carries.
 
 Only someone who knows the commitments' openings can give a statement a second ballot hash: the voter's client, or `k` trustees together, who can interpolate them from their shares. The validity proofs are proofs of knowledge of those openings (CDS94), so no one else can make another accepting proof of the same statement (T-31, T-32). A second ballot hash also needs a new membership proof, and so the voter's identity secret, before it is a ballot.
 
@@ -134,7 +134,7 @@ core_hash = H(DS("abolish/v1/ballot-core",
     definition_hash ‖ u16(0x0002) ‖ u8(1) ‖ u8(tier) ‖ encode(vss) ‖ encode(share_hashes)))
 ```
 
-The inputs are the statement hash's without the nullifier, in the same order and encodings. The client shows it before the choice; a challenge's opening ([[challenge]], `0x0003`) rebuilds it; and anyone computes it from a cast ballot record, so the voter's checker finds the cast ballot by it. It binds the ballot record type and version, as `statement_hash`, `aad` and `t_e` do, so one code never names cores of two ballot versions (T-42, T-47).
+The inputs are the statement hash's without the nullifier, in the same order and encodings; under ballot versions 2 and 3 the version input is 2 or 3 and `cell` takes the place of `tier`, as in the statement hash. The client shows it before the choice; a challenge's opening ([[challenge]], `0x0003`) rebuilds it; and anyone computes it from a cast ballot record, so the voter's checker finds the cast ballot by it. It binds the ballot record type and version, as `statement_hash`, `aad` and `t_e` do, so one code never names cores of two ballot versions (T-42, T-47).
 
 ## Validity proofs
 
@@ -296,7 +296,7 @@ Notes:
 - **Bound by the ballot hash.** `statement_hash` and `ballot_hash` take version 2 and `cell` in place of version 1 and `tier` (Statement hash, Ballot hash), so every field but the membership proof and the L1 reference is bound, as Ballot hash requires, and a proof under one version never verifies under the other (T-31).
 - **The cell decides the tier.** A ballot's tier is its cell's tier in the definition, never a field of the record, and `M` ([[revoting]], Message) is computed with it. The cell is bound into `M` through `ballot_hash`. The re-vote rule ranks by that tier and the nullifier ([[revoting]], Selection), unchanged: the cells of one tier hold disjoint commitments (first occurrence), so one secret has one leaf, one cell and one nullifier per tier ([[membership]], Cell tree).
 - **Shares and delivery are version 1's.** The share ciphertexts' associated data and proof of knowledge name ballot version 1 (`u16(0x0002) ‖ u8(1)`, [[share-encryption]], Ciphertext): version 2 keeps version 1's share-ciphertext layout and rules unchanged, and the definition hash, which they also bind, pins the ballot version, so a ciphertext still can't serve two elections or two versions. Version 2 fixes the delivery records (`0x000c` to `0x000e`) at version 1 with the same windows, as version 1 does ([[delivery]], Versions).
-- **Only with definition versions 3 and 4.** A profile pairs ballot version 2 with definition version 3 or 4 and nothing else, and definition versions 3 and 4 with ballot version 2 and nothing else ([[verifier]] 2.3, `profile-combination`): version 1's tiers-only partition has no cells to name, and a partition of cells can't be read from a tier. Ballot version 2 also needs a spoiled-ballot opening version that opens its cores, and none does yet ([[challenge]], Versions), so until P1-13 specifies one 2.3 refuses every profile pinning it and no regional-cell election can be registered: its voters couldn't challenge a ballot (T-42, T-47).
+- **Only with definition versions 3 and 4.** A profile pairs ballot version 2 with definition version 3 or 4 and nothing else, and definition versions 3 and 4 with ballot version 2 and nothing else ([[verifier]] 2.3, `profile-combination`): version 1's tiers-only partition has no cells to name, and a partition of cells can't be read from a tier. Ballot version 2 also needs a spoiled-ballot opening version that opens its cores: version 2 does ([[challenge]], Opening version 2), so a profile pinning ballot version 2 pins opening version 2, and 2.3 refuses one pinning opening version 1, whose voters couldn't challenge a ballot (T-42, T-47).
 
 ### Decoding (version 2)
 
@@ -322,6 +322,87 @@ As version 1, with the cell in place of the tier: the client finds the cell hold
 - **The cell is public.** A ballot shows its cell, and so its region unless the cell is a remainder; that is the result's granularity, which 2.8's floor bounds (T-16). A remainder cell shows which cell, never which of its regions.
 - **What the contract path leaves free** is version 1's, with `ballot-cell` in place of `ballot-tier` among the cheap checks a direct-submit contract MUST run (P1-18).
 
+## Ballot record (version 3)
+
+Record type `0x0002`, version 3: one cast ballot in an election whose definition is version 5, which asks several questions ([[election-definition]], Layout (version 5); [[0026-multi-question-ballots]]; T-28, T-30, T-31, T-32, T-34). It has version 2's fields, offsets and cell (the partition of definition version 5 is version 4's), with a committed vote whose last field is one range proof per question in place of version 1's one sum proof. Everything not stated here is version 2's: the shares and their ciphertexts, the decoding of the other fields, the admission order, the membership proof and the casting order.
+
+### Context (version 3)
+
+The values of Context, with the definition's questions in place of its one option count and limits:
+
+| Value                   | Source                                                                                                                                                |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Q`                     | The number of the definition's `questions`, numbered `q = 0, …, Q − 1`                                                                                |
+| `m_q`, `min_q`, `max_q` | Question `q`'s `option_count`, `min_selections` and `max_selections`                                                                                  |
+| `o_q`, `T`              | `o_q = m_0 + … + m_{q−1}`, question `q`'s first flat index, and `T = m_0 + … + m_{Q−1}`, the poll's option count ([[election-definition]], Questions) |
+| `k`, `n`                | As in Context                                                                                                                                         |
+| `cell`, `nullifier`     | The ballot record's own cell and nullifier, checked against its membership proof ([[verifier]] 5.1 to 5.3), as in version 2                           |
+
+Option `j` of question `q` is flat option `o_q + j`. The vote is `v_0, …, v_{T−1}` in flat order, question-major, each `v_j ∈ {0, 1}`, with `min_q ≤ v_{o_q} + … + v_{o_q + m_q − 1} ≤ max_q` for every question. Its sharing, VSS commitments and shares are Committed vote's over the `T` flat options: `m` there is `T` here.
+
+### Committed vote (version 3)
+
+| Field           | Type                                             | Meaning                                                                                                                              |
+| --------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `vss`           | `list<list<element, MAX_TRUSTEES>, MAX_OPTIONS>` | As version 1, for each flat option `j = 0, …, T − 1` in order                                                                        |
+| `share_hashes`  | `list<bytes[32], MAX_TRUSTEES>`                  | As version 1                                                                                                                         |
+| `option_proofs` | `list<bit_proof, MAX_OPTIONS>`                   | As version 1, for each flat option in order, its position `u16(j)` the flat index                                                    |
+| `sum_proofs`    | `list<list<branch, 65>, MAX_QUESTIONS>`          | For each question `q` in order, the proof that `Y_q` commits to a value from `min_q` to `max_q`: one branch per value, in that order |
+
+`T ≤ MAX_OPTIONS` (the definition's `option-count` rule), so a flat index fits version 1's `u16` and every per-option list its maximum, and a question's range has at most `m_q + 1 ≤ 65` values, version 1's branch maximum. The codec bounds `sum_proofs` by `MAX_QUESTIONS` ([[parameters]]) and each entry by 65; the shape check below compares both with the election. The range branches total `Σ (max_q − min_q + 1) ≤ T + Q ≤ 96`, so the largest committed vote is about 47 KB, against version 1's 45 KB.
+
+### Question range proof
+
+`Y_q = C_{o_q} · C_{o_q + 1} · … · C_{o_q + m_q − 1}`, the product of question `q`'s vote commitments, which commits to the question's number of selections with randomness `r_{o_q} + … + r_{o_q + m_q − 1}`. The proof is a disjunctive proof of Validity proofs over the values `min_q, min_q + 1, …, max_q` in that order, under the tag `abolish/v1/fs/ballot-validity/question-sum` ([[domain-separation]]), with
+
+```
+t = statement_hash ‖ u16(q) ‖ u16(o_q) ‖ u16(m_q) ‖ u16(min_q) ‖ u16(max_q)
+    ‖ encode(Y_q) ‖ encode(A_min) ‖ … ‖ encode(A_max)
+```
+
+`Y_q` and every `A_b` are encoded with the identity allowed, as version 1's `C_Σ` (Encoding rules for `t`). The question's number, its first flat index and its option count fix which commitments `Y_q` multiplies, and `min_q` and `max_q` the allowed-value set, so each is in the challenge as [[domain-separation]] requires: a range proof can't move to another question, even one of the same shape, or to another range, ballot or election, and the option and question proofs use different tags, as do version 1's sum proof and this one (T-30, T-32).
+
+**How it composes.** The option proofs show each `C_j` commits to 0 or 1, so each `Y_q` commits to the number of question `q`'s options selected; the range proofs show each of those numbers is within its question's limits. Together: no option counted twice or negatively, no over-vote on any question, each question's minimum met, and no count moved from one question to another, which a single sum over all `T` options wouldn't catch (T-28). Nothing relates two questions: the proofs never show how one question's answer bears on another's ([[0026-multi-question-ballots]], No cross-tabulation). With one question the construction is version 1's, under the new tag and with the position inputs.
+
+**Proving** is Proving's, with `ρ = r_{o_q} + … + r_{o_q + m_q − 1} mod ℓ` and `s_v` the question's number of selections; the client makes the range proofs after every option proof, in question order, and draws every `w`, simulated `c_b` and `z_b` fresh.
+
+### Hashes (version 3)
+
+`statement_hash`, `ballot_hash` and `core_hash` are version 2's with version input 3 (Statement hash, Ballot hash, Core hash): `u8(3)` in place of `u8(2)`, `cell` at the same position, and `encode(sum_proofs)` in place of `encode(sum_proof)` at the end of `ballot_hash`'s input, which is again the committed vote's own encoding. So no proof or tracking code made under one version is valid under another (T-31), and a version-3 core's tracking code differs from a version-2 core's over the same bytes ([[challenge]], Core and tracking code). Every field of the record but the membership proof and the L1 reference is bound, as Ballot hash requires. `M` ([[revoting]], Message) is version 2's.
+
+### Checks (version 3)
+
+The checks of Checks, in the same order, over the flat options and the questions:
+
+| Code             | Check                                                                                                                                                                                                       |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `validity-shape` | `vss` has `T` entries, each of exactly `k` elements; `share_hashes` has `n` entries; `option_proofs` has `T` entries; `sum_proofs` has `Q` entries, and entry `q` has exactly `max_q − min_q + 1` branches. |
+| `option-proof`   | Each option proof verifies, in flat order. A report names the first failing flat option.                                                                                                                    |
+| `sum-proof`      | Each question's range proof verifies, in question order. A report names the first failing question.                                                                                                         |
+
+A trustee's share check is Shares', over `T` options: it receipts only a list of exactly `T` shares, each passing.
+
+### Decoding (version 3)
+
+As version 2, with the committed vote above: `sum_proofs` over `MAX_QUESTIONS` entries, or an entry over 65 branches, is `length-over-max`, and a scalar at or above `ℓ` is `non-canonical`. A record of another version is `profile-mismatch` under a profile pinning version 3.
+
+### Admission (version 3)
+
+Version 2's checks (Admission (version 2)), in the same order, with `validity-shape`, `option-proof` and `sum-proof` as Checks (version 3) states them. `option-proof` reports the first failing flat option and `sum-proof` the first failing question. A ballot that passes gives what a version-2 ballot gives: its `ballot_hash`, its cell and the tuple [[revoting]] ranks, every question in it. Selection is per tier and nullifier over the whole ballot, so a re-vote replaces every answer and a tie voids every question ([[0026-multi-question-ballots]], Re-voting, challenge and receipts).
+
+### Shares and delivery (version 3)
+
+Version 1's, as version 2 keeps them: share plaintexts of `T` entries, each seat's ciphertext under [[share-encryption]]'s rules, whose associated data and proof of knowledge name ballot version 1 (`u16(0x0002) ‖ u8(1)`), the delivery records (`0x000c` to `0x000e`) at version 1 with the same windows ([[delivery]], Versions). The definition hash, which the ciphertexts bind, pins the ballot version, so a ciphertext still can't serve two elections or two versions. A plaintext of `T ≤ 64` shares fits `sealed`'s maximum.
+
+### Casting (version 3)
+
+Version 2's (Casting (version 2)), with the proofs of Proving above. The ballot client asks every question before it builds the core, shows every question's answers in the display text before the tracking code, and keeps no record of earlier answers to pre-fill a re-vote (T-45, T-47; [[display-text]], Client rules).
+
+### Residuals (version 3)
+
+- **Version 2's residuals hold**: the cell is public, and the contract path leaves the same fields free, with the range proofs (64 bytes per branch) in place of the sum proof; P1-18's direct-submit contract MUST run `validity-shape` per question, as it does for versions 1 and 2.
+- **Small cells reveal whole ballots.** A cell with one counted ballot shows every answer of that voter, all questions at once ([[0026-multi-question-ballots]], Consequences; T-16).
+
 ## Residuals
 
 - **Trustees can open any ballot.** Any `k` trustees can combine their shares and open a ballot's commitments, publicly and verifiably (T-14, [[0002-everlasting-privacy]]). This page doesn't change that.
@@ -334,5 +415,7 @@ As version 1, with the cell in place of the tier: the client finds the cell hold
 `docs/spec/vectors/ballot-validity.json` ([[vectors/README|vectors]]): ballots for plurality and approval, blank ballots, ballots at `MAX_OPTIONS` and at `MAX_TRUSTEES`, each with the randomness that produced it so an implementation can reproduce every byte; one ballot failing each check, including a proof copied to another nullifier, option or election, a vote of 2, an over-vote, and challenges that don't sum; codec rejections of the committed vote and of shares; and valid and invalid shares for every trustee of a ballot. They are printed by `packages/crypto/scripts/ballot-validity-vectors.py`, an implementation of this page in Python's integers and `hashlib`, reusing only the independent ristretto255 and RFC 9380 code of `group-vectors.py`, which checks itself against the RFCs first.
 
 `docs/spec/vectors/ballot-v2.json`: version-2 ballot records of an election whose definition is version 3, with tier 0 split into a large region's cell and a remainder of two small regions, and tier 2 unsplit (three cells), each with its encoding, statement hash, ballot hash, `M`, the public signals the admission check derives and the result: admitted ballots in every cell (both regions of the remainder, a re-vote, a share hash at every seat, a commitment repeated in two groups counted in its first one), one ballot rejected by each code (`ballot-cell` at the first cell past the partition and at 255), and membership failures including a proof under another cell's root and scope (of the same tier and of another), another ballot's proof, a changed L1 reference and a repeated commitment proving from its zeroed leaf; the two order cases; and decode rejections. They are printed by `packages/crypto/scripts/ballot-v2-vectors.py`, which builds each cell tree itself by the first-occurrence rule and reuses `ballot-vectors.py` and `regional-cells-vectors.py`, with membership proofs by `ballot-proofs.mjs` as for version 1.
+
+`docs/spec/vectors/ballot-v3.json`: version-3 committed votes over version-5 definitions (each listed with its encoding, hash, questions, offsets, cells and panel): valid ballots for the owner's four methods in one poll (every question at its least and at its most), one question, `MAX_QUESTIONS` questions of two options (`T = MAX_OPTIONS`), one question of `MAX_OPTIONS` options (65 range branches) and `MAX_TRUSTEES`, each with the randomness that made it, its shares, statement, ballot and core hashes; one failing each check, with the flat option or question it names: `validity-shape` per question (a missing, extra or swapped entry, a branch too many), option proofs swapped across a question boundary or made over version 2's statement hash, copies to another nullifier, cell or election, an over-vote, an over-limit and two under-`exactly` answers, a count moved from one question to another, two same-shaped questions' proofs swapped, and a range proof made as version 1's sum proof; and decode rejections of the committed vote. They are printed by `packages/crypto/scripts/ballot-v3-vectors.py`, an implementation of Ballot record (version 3) in Python's integers and `hashlib` that reuses `ballot-validity-vectors.py`'s proofs and `definition-v5-vectors.py`'s definitions. It prints `spoiled-opening-v2.json` ([[challenge]]) and `tally-questions.json` ([[tally]]) too. Admission vectors with membership proofs (version 2's order with version 3's checks) come with the verifier's reading of version 3 (P2-14 part 5).
 
 `docs/spec/vectors/ballot.json`: ballot records of two elections (plurality over tiers 0 and 2, approval over tier 1), each with its encoding, ballot hash, `M`, the public signals the admission check derives and the result: admitted ballots (each tier, a re-vote, the same ballot proved twice, a share hash at every seat), and one ballot rejected by each code, the membership failures including a changed L1 reference, another ballot's proof, a proof under another tier's root and scope, a nullifier that isn't the circuit's and a non-member; two ballots failing two checks each, which pin the order; and decode rejections. They are printed by `packages/crypto/scripts/ballot-vectors.py`, an implementation of Ballot record in Python's integers and `hashlib` (reusing this folder's other independent generators, with its own Baby Jubjub), with membership proofs from snarkjs over Semaphore's depth-32 circuit (`ballot-proofs.mjs`), which checks that each proof's root and nullifier are the ones the Python computed; every pairing verdict in the file is snarkjs's.

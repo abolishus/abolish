@@ -426,7 +426,7 @@ Like the other registries, the group registry is shared by every election, so a 
 
 `packages/crypto` decodes both records, computes both digests, counts a record's valid seats and replays a group (`group-registry.ts`), for the verifier and for the signing service; the contract and that code are checked against the same vectors.
 
-**No member is linked to a poll.** The registry takes no election identifier, definition or nullifier, and an addition names only a group, a position and commitments. An election names a group and a root, never a member; a ballot proves membership in zero knowledge and carries a nullifier unrelated to the commitment ([[membership]], Scope). So nothing on chain joins a member to the polls they vote in (T-12, T-13). When a commitment is added is public, and a passkey account's timing is the account holder's; T-13 records that residual.
+**No member is linked to a poll.** The registry takes no election identifier, definition or nullifier, and an addition names only a group, a position and commitments. An election names a group and a root, never a member; a ballot proves membership in zero knowledge and carries a nullifier unrelated to the commitment ([[membership]], Scope). So nothing on chain joins a member to the polls they vote in (T-12, T-13). When a commitment is added is public, to about the registration period of the batch that added it ([[registration]], The batch); T-13 records that residual.
 
 ### Vectors
 
@@ -437,11 +437,11 @@ Like the other registries, the group registry is shared by every election, so a 
 ### Known-weak
 
 - **Tier 0 is the registrars' word** (T-06, not mitigated): any `t` registrars can add any commitments. What this registry adds is that each addition is attributable to `t` named keys, that no one else (no relay, no single registrar) can add, replay or reorder one, that L2 governance rewriting the history to do so is detected by every verifier (Verification; dropping the latest additions, or any removal, isn't), and that group sizes are public.
-- **The quorum is held online.** Tier 0 registration is automatic (a passkey account behind Turnstile, P2-5), so the signing service holds `t` registrar keys hot, and seizing it is seizing Tier 0 additions (T-69). Hardware-held keys would need a person per registration.
+- **The quorum is held online.** Tier 0 registration is automatic (one Turnstile solve per registration and no account, [[registration]]), so the signing service holds `t` registrar keys hot, and seizing it is seizing Tier 0 additions (T-69). Hardware-held keys would need a person per registration.
 - **The registrars can't rotate.** A lost or compromised key means a new registry, and every member registers again in its new groups. That is the cost of a set a verifier can check without the Safe's history.
 - **Duplicates are the signing path's to refuse** (Additions): a repeated commitment overstates `group_size` by one.
 - **Tiers 1 and 2 have no addition path yet** (P3-3, P3-4), and no registry may be deployed until they do.
-- **No paymaster yet.** [[0004-l2-choice]] sponsors registration through our own ERC-4337 paymaster (P2-6, this item's later part); until then whoever submits an addition pays its gas.
+- **No paymaster yet.** [[0004-l2-choice]] sponsors registration through our own ERC-4337 paymaster (P3-2 part 4c); until then whoever submits an addition pays its gas.
 - **Gas.** In the tests, adding one member with two of three approvals costs about 67,000 gas beyond the transaction's base cost and calldata, each further commitment in the same batch about 1,500, and a batch of 256 about 430,000: two `ecrecover` calls, the keccak hashes of the digest, the storage write and the accumulator step. Removing one member costs about 85,000, mostly its first write to the removed-index bitmap.
 
 ## Board (direct submit)

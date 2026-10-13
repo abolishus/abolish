@@ -39,7 +39,12 @@ export interface PlannedBallot {
  * are the first cast's, which cover its ballot hash.
  */
 export interface PlannedRecast {
-  /** When the client, checking the named block once it is finalized, casts again, in `(0, 1)`. */
+  /**
+   * When the client, checking the named block once it is finalized, casts
+   * again: in seconds, exactly the block's finality, before close.
+   */
+  readonly seconds: bigint;
+  /** The same time as a share of the voting period, in `(0, 1)`, which decides its path. */
   readonly at: number;
   readonly path: PlannedBallot["path"];
 }
@@ -201,13 +206,20 @@ export function planElection(scenario: Scenario): Plan {
     // The client casts again once the named block is finalized, if that is
     // before close (Client rule 4); the block it named is the one the run
     // names, from the same clock and the voter's earlier block (Client rule 3).
+    // A recast at close itself is taken as too late: the close rule that
+    // would judge it isn't simulated (P1-18).
     const reorged = nextReorg() < scenario.reorgs;
     let reorg: PlannedVoter["reorg"] = null;
     if (reorged) {
       const before = earlier === null ? undefined : nameBlock(secondsAt(earlier.at), undefined);
-      const recastAt =
-        Number(finalizedAt(nameBlock(secondsAt(at), before)) - SIMULATED_OPENS_AT) / Number(PERIOD);
-      reorg = { recast: recastAt < 1 ? { at: recastAt, path: pathAt(scenario, recastAt) } : null };
+      const seconds = finalizedAt(nameBlock(secondsAt(at), before));
+      const recastAt = Number(seconds - SIMULATED_OPENS_AT) / Number(PERIOD);
+      reorg = {
+        recast:
+          seconds < SIMULATED_CLOSES_AT
+            ? { seconds, at: recastAt, path: pathAt(scenario, recastAt) }
+            : null,
+      };
     }
     const selected: PlannedVoter["selected"] =
       reorg !== null && reorg.recast === null ? (earlier === null ? null : "earlier") : "last";

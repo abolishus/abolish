@@ -375,20 +375,40 @@ export function runSimulation(
     readonly voter: PlannedVoter;
     readonly ballot: PlannedBallot;
     readonly kind: keyof typeof order;
+    readonly seconds: bigint;
   };
   const casts = plan.voters
-    .flatMap((voter): Cast[] => [
-      ...(voter.earlier === null
-        ? []
-        : [{ voter, ballot: voter.earlier, kind: "earlier" as const }]),
-      { voter, ballot: voter, kind: "last" },
-      ...(voter.reorg?.recast == null
-        ? []
-        : [{ voter, ballot: { ...voter, ...voter.reorg.recast }, kind: "recast" as const }]),
-    ])
-    .sort(
-      (a, b) =>
-        a.ballot.at - b.ballot.at || a.voter.index - b.voter.index || order[a.kind] - order[b.kind],
+    .flatMap((voter): Cast[] => {
+      const { earlier, reorg } = voter;
+      return [
+        ...(earlier === null
+          ? []
+          : [{ voter, ballot: earlier, kind: "earlier" as const, seconds: secondsAt(earlier.at) }]),
+        { voter, ballot: voter, kind: "last", seconds: secondsAt(voter.at) },
+        // A recast posts and challenges nothing: only its time and path are its own.
+        ...(reorg?.recast == null
+          ? []
+          : [
+              {
+                voter,
+                ballot: {
+                  votes: voter.votes,
+                  at: reorg.recast.at,
+                  path: reorg.recast.path,
+                  posts: false,
+                },
+                kind: "recast" as const,
+                seconds: reorg.recast.seconds,
+              },
+            ]),
+      ];
+    })
+    .sort((a, b) =>
+      a.seconds !== b.seconds
+        ? Number(a.seconds - b.seconds)
+        : a.ballot.at - b.ballot.at ||
+          a.voter.index - b.voter.index ||
+          order[a.kind] - order[b.kind],
     );
   // The board and its operator. The client accepts a receipt's segment
   // within one period of its cast's, from the election's first segment to
@@ -464,14 +484,20 @@ export function runSimulation(
   }[] = [];
   // Boards a ballot by its path, the client checking the operator's receipt
   // when it goes through our servers.
-  const submit = (ballot: PlannedBallot, payload: Uint8Array, k: Kept, receipts: Uint8Array[]) => {
+  const submit = (
+    ballot: PlannedBallot,
+    seconds: bigint,
+    payload: Uint8Array,
+    k: Kept,
+    receipts: Uint8Array[],
+  ) => {
     if (ballot.path === "direct") {
       pending.push({ payload, receipts, ...k });
       return;
     }
     // The servers are back: what was submitted directly is boarded first.
     boardPending();
-    const segment = segmentAt(secondsAt(ballot.at));
+    const segment = segmentAt(seconds);
     const receipt = operator.submit(segment, payload);
     kept[Number(receipt.index)] = k;
     boardReceipts(segment, receipts);
@@ -488,14 +514,13 @@ export function runSimulation(
       throw new Error(`simulation: an honest operator's receipt failed its check (${check.code})`);
     server++;
   };
-  casts.forEach(({ voter, ballot, kind }, done) => {
+  casts.forEach(({ voter, ballot, kind, seconds }, done) => {
     const ctx: ValidityContext = {
       ...rules,
       definitionHash,
       tier: voter.tier,
       nullifier: BigInt(voter.index + 1),
     };
-    const seconds = secondsAt(ballot.at);
     // The client's record of the newest block it named; the L1 reference is
     // made after the cast choice (Client rule 6).
     const l1RefNumber = nameBlock(seconds, named.get(voter.index));
@@ -518,8 +543,9 @@ export function runSimulation(
       const first = toRecast.get(voter.index);
       if (first === undefined) throw new Error("simulation: a recast with no first cast");
       const payload = encodeBallot(recordOf(first.vote, l1.block(l1RefNumber).hash));
-      const k = { ...first, selects: true, reorged: false, delivered: voter.delivered };
-      submit(ballot, payload, k, []);
+      const { shares, down } = first;
+      const k = { shares, down, selects: true, reorged: false, delivered: voter.delivered };
+      submit(ballot, seconds, payload, k, []);
       options.onProgress?.({ stage: "cast", done: done + 1, total: casts.length });
       return;
     }
@@ -617,7 +643,7 @@ export function runSimulation(
       delivered: last ? voter.delivered : deliveredAt(scenario, ballot),
       down,
     };
-    submit(ballot, payload, k, receipts);
+    submit(ballot, seconds, payload, k, receipts);
     options.onProgress?.({ stage: "cast", done: done + 1, total: casts.length });
   });
   boardPending();

@@ -323,10 +323,11 @@ describe("planElection", { timeout: 60_000 }, () => {
               continue;
             }
             const before = v.earlier === null ? undefined : named(v.earlier.at);
-            const finalAt = (named(v.at, before) * 12 + 768 - 1_000_000) / 86_400;
-            if (finalAt < 1) {
-              expect(v.reorg.recast).toEqual({ at: finalAt, path: pathOf(s, finalAt) });
-              expect(finalAt).toBeGreaterThan(v.at);
+            const final = named(v.at, before) * 12 + 768;
+            if (final < 1_086_400) {
+              const at = (final - 1_000_000) / 86_400;
+              expect(v.reorg.recast).toEqual({ seconds: BigInt(final), at, path: pathOf(s, at) });
+              expect(final).toBeGreaterThan(seconds(v.at));
               expect(v.selected).toBe("last");
             } else {
               expect(v.reorg.recast).toBeNull();
@@ -338,7 +339,7 @@ describe("planElection", { timeout: 60_000 }, () => {
       );
     });
 
-    it("loses a ballot whose block is finalized after close, for exactly the last 768 seconds or so", () => {
+    it("loses a ballot whose block is finalized at or after close: one cast in about the last 12 minutes", () => {
       const plan = planElection({ ...base, voters: 4000, reorgs: 1, revotes: 0 });
       for (const v of plan.voters) {
         const lost = v.reorg?.recast === null;

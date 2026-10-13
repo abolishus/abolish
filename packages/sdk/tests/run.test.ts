@@ -541,7 +541,7 @@ describe("runSimulation under L1 reorganisations", { timeout }, () => {
   it("keeps a recast undelivered when its first cast was: the receipts and postings are the first cast's", () => {
     const s = { ...base, reorgs: 1, postings: 0.5 };
     const voters = planElection(s).voters;
-    expect(voters.some((v) => !v.delivered)).toBe(true);
+    expect(voters.some((v) => v.reorg?.recast != null && !v.delivered)).toBe(true);
     const r = runSimulation(s);
     expect(r.ok).toBe(true);
     expect(r.ballots.undelivered).toBe(

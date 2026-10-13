@@ -46,7 +46,7 @@ A conforming verifier implements every check in [[verifier]] and decodes every r
 Sections still to be written, by the STATUS item that owns them:
 
 - Record layouts: the rest of the record-type registry, by each record's owning item. The election definition and display text are specified (P1-10b).
-- Contracts and events: P1-18 ([[contracts]] has the event accumulator, the registries, the board and the board anchor so far); the close rule's relay, contract path and registry bounds: P1-18 part 4c-2b ([[close]] has the rule).
+- Contracts and events: P1-18 ([[contracts]] has the event accumulator, the registries, the board and the board anchor so far); the close rule's relay and contract path: P1-18 part 4c-2b ([[close]] has the rule; [[contracts]], Registration, has the registry's bounds).
 - Verifier procedure and report format: P1-19 (extends [[verifier]]).
 
 ## Decisions this spec depends on

@@ -28,8 +28,9 @@ library ElectionIdLib {
 /// voting opens or differ between voters (T-34). It admits only a definition
 /// that decodes strictly, is well formed, names this deployment's chains and
 /// contracts, comes from the election's creator before it opens, has a δ
-/// within the close rule's bounds (T-35, T-50), has an electorate already
-/// public on L2, and whose stub the trustee registry
+/// within the close rule's bounds (T-35, T-50) and sequencing bounds no
+/// larger than its windows were sized for, has an electorate already public on
+/// L2, and whose stub the trustee registry
 /// recorded with its ceremony transcript (T-17, T-37, T-08, T-13). With each
 /// definition it records the parameters the board's checks read, so the board
 /// never takes them from a caller (ADR 0028, 1C; T-25). There is no admin,
@@ -128,6 +129,18 @@ contract ElectionRegistry is EventAccumulator {
     uint32 public constant MIN_INCLUSION_BOUND = 600;
     uint32 public constant MAX_INCLUSION_BOUND = 3600;
 
+    /// The ceilings on the L2 sequencing bounds a definition assumes
+    /// (docs/spec/parameters.md): `sequencing_window` in L1 blocks and
+    /// `max_sequencer_drift` in seconds, Base's values (ADR 0004). Verifier 2.6
+    /// requires the chain to have stayed within the definition's own values,
+    /// so a larger one would let it accept a chain whose forced inclusion
+    /// outruns the contract-event window (T-50, T-35), and absorb a governance
+    /// raise of the drift past the 30 minutes ADR 0004 assumes instead of
+    /// failing closed (T-35, T-71). No floor: a value below the chain's fails 2.6, the creator's own
+    /// loss. Constants of the bytecode, like δ's bounds.
+    uint64 public constant MAX_SEQUENCING_WINDOW = 3600;
+    uint64 public constant MAX_SEQUENCER_DRIFT = 1800;
+
     /// @notice An election was created: `counter` elections were created
     /// before it, in an L2 block whose L1 origin is the block numbered
     /// `l1OriginNumber`, with timestamp `l1OriginTimestamp` and hash
@@ -164,6 +177,8 @@ contract ElectionRegistry is EventAccumulator {
     error OpensBeforeEpoch(uint64 opensAt, uint64 epoch);
     error AlreadyOpen(uint64 opensAt, uint256 timestamp);
     error InclusionBoundOutOfRange(uint32 bound);
+    error SequencingWindowTooLarge(uint64 sequencingWindow);
+    error SequencerDriftTooLarge(uint64 maxSequencerDrift);
     error RootNotInPast(uint8 tier, uint64 rootL2Block, uint256 blockNumber);
     error CeremonyNotRecorded(bytes32 stubHash, bytes32 transcriptHash);
 
@@ -300,6 +315,14 @@ contract ElectionRegistry is EventAccumulator {
             def.l1InclusionBound < MIN_INCLUSION_BOUND || def.l1InclusionBound > MAX_INCLUSION_BOUND
         ) {
             revert InclusionBoundOutOfRange(def.l1InclusionBound);
+        }
+        // The sequencing bounds it assumes within what the windows were sized
+        // for (docs/spec/parameters.md; T-50, T-35, T-71).
+        if (def.sequencingWindow > MAX_SEQUENCING_WINDOW) {
+            revert SequencingWindowTooLarge(def.sequencingWindow);
+        }
+        if (def.maxSequencerDrift > MAX_SEQUENCER_DRIFT) {
+            revert SequencerDriftTooLarge(def.maxSequencerDrift);
         }
         _requireElectorateInPast(def);
 

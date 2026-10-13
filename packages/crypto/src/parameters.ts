@@ -33,4 +33,7 @@ export const PARAMETERS = Object.freeze({
   VOUCH_SLOTS: 12,
   // Registered members; the regional-cell floor of election-definition version 3.
   MIN_CELL_ELECTORATE: 1000,
+  // Changed nullifiers per cell; the live-results batch floor of
+  // election-definition version 6.
+  MIN_LIVE_BATCH: 20,
 } as const);

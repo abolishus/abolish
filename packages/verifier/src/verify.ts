@@ -6,7 +6,8 @@
 // 1.3's failure for a definition naming another membership key and, for
 // format 4, the key-ceremony
 // transcript check (3.2, and the parts of 2.5 and 3.1 that need no L2 state)
-// ballot admission (5.1 to 5.4, and 5.7 as far as 5.5 allows) and the
+// ballot admission (5.1 to 5.4, and 5.7 as far as 5.5 allows; ballot
+// version 2 against its cell under definition versions 3 and 4) and the
 // spoiled-ballot openings (6.2, as far as the floor of s_S decides them) and
 // the tally openings' sorting, attribution and boarding breaches (7.4, as far
 // as they need no counted set) are implemented; every other check is reported unverifiable, so no run can
@@ -16,7 +17,6 @@
 
 import {
   type Anchor,
-  type BallotCode,
   ballotElection,
   BoardError,
   type BoardEntryVersion,
@@ -44,7 +44,7 @@ import {
   verifyBoard,
 } from "@abolishus/crypto";
 import { bytesToHex } from "@noble/hashes/utils.js";
-import { ballotChecks, type BallotsReport } from "./ballots.ts";
+import { type AdmissionCode, ballotChecks, type BallotsReport } from "./ballots.ts";
 import type { Bundle, InputSource, InputSources } from "./bundle.ts";
 import { type CeremonyCode, ceremonyChecks, type CeremonyReport } from "./ceremony.ts";
 import { CHECKS, type CheckKind } from "./checks.ts";
@@ -66,7 +66,7 @@ export type CheckCode =
   | L1ErrorCode
   | ElectionDefinitionV4Rule
   | CeremonyCode
-  | BallotCode
+  | AdmissionCode
   | OpeningCode
   | TallyCode
   | ReceiptKeyCode
@@ -242,6 +242,12 @@ type BoardInputs =
       readonly boardEntryVersion: BoardEntryVersion;
       readonly l1: L1Evidence;
     };
+
+/** Whether the definition's ballots are proved under the one membership key this release pins (ballot versions 1 and 2). */
+function provedUnderPinnedKey(d: ElectionDefinitionRecord["value"]): boolean {
+  const pinned = pinnedVersion(d, RECORD_TYPES.ballot);
+  return pinned === 1 || pinned === 2;
+}
 
 /**
  * What the checks take from a decoded definition, by its version: its hash,
@@ -499,11 +505,12 @@ export function verifyBundle(bundle: Bundle): Report {
         : [["8.5", NOT_APPLICABLE] as const]),
       // 1.3 also covers the keys inside the verifier contracts the election
       // uses, which aren't read yet: it can fail here, never pass. Only
-      // ballot version 1's key is pinned here; a version this verifier
-      // doesn't read may have a key a later release pins, so releases agree
-      // (T-36).
+      // ballot versions 1 and 2's key (one key: a version-2 ballot proves
+      // membership of its cell's tree under it) is pinned here; a version
+      // this verifier doesn't read may have a key a later release pins, so
+      // releases agree (T-36).
       ...(definition.definition !== undefined &&
-      pinnedVersion(definition.definition.value, RECORD_TYPES.ballot) === 1 &&
+      provedUnderPinnedKey(definition.definition.value) &&
       !equal(definition.definition.value.membership_vk_hash, membershipVkHash())
         ? [["1.3", { status: "fail", code: "membership-key", at: {} }] as const]
         : []),
@@ -527,15 +534,15 @@ export function verifyBundle(bundle: Bundle): Report {
       // Admission is judged per entry from the record's own bytes, so, like
       // the transcript, it runs whatever 4.1 and 4.2 found: the verdict
       // rests on them anyway (docs/spec/verifier.md, Ballot admission).
+      const admission = ballotChecks(
+        definition.definition,
+        checked.registered,
+        bundle.entries,
+        definition.inputs.boardEntryVersion,
+      );
+      implemented = new Map<string, Outcome>([...implemented, ...admission.rows]);
+      ballots = admission.report;
       if (definition.definition.version === 1) {
-        const admission = ballotChecks(
-          definition.definition.value,
-          checked.registered,
-          bundle.entries,
-          definition.inputs.boardEntryVersion,
-        );
-        implemented = new Map<string, Outcome>([...implemented, ...admission.rows]);
-        ballots = admission.report;
         // An opening is checked against the same registered election, and
         // `opening-cast` against the ballots admission admitted, so 6.2 is
         // reached exactly where admission is.
@@ -563,18 +570,19 @@ export function verifyBundle(bundle: Bundle): Report {
         implemented = new Map<string, Outcome>([...implemented, ["7.4", opened.row]]);
         tallies = opened.report;
       } else {
-        // Under definition versions 3 and 4 a ballot is admitted against its
-        // cell (ballot version 2), which this verifier doesn't do yet
-        // (P1-19): another ballot pin may be a later release's (T-36), and
-        // ballot version 1, which 2.3 fails beside a cell partition, can't
-        // be judged against one.
-        const admission: Outcome =
-          pinnedVersion(definition.definition.value, RECORD_TYPES.ballot) === 1
-            ? NOT_REACHED
-            : UNSUPPORTED;
+        // Under definition versions 3 and 4 an opening opens a version-2
+        // core, which only spoiled-ballot opening version 2 does, and this
+        // verifier doesn't read it yet (P2-14 part 5): unsupported under
+        // either pin other than version 1, whether or not admission ran
+        // (T-36); with both at version 1, which 2.3 fails, not reached, as
+        // admission is.
+        const d = definition.definition.value;
+        const v1Pins =
+          pinnedVersion(d, RECORD_TYPES.ballot) === 1 &&
+          pinnedVersion(d, RECORD_TYPES.spoiledBallotOpening) === 1;
         implemented = new Map<string, Outcome>([
           ...implemented,
-          ...["5.1", "5.2", "5.3", "5.4", "5.7", "6.2"].map((id) => [id, admission] as const),
+          ["6.2", v1Pins ? NOT_REACHED : UNSUPPORTED],
         ]);
       }
     }

@@ -300,16 +300,20 @@ test("the report gives the ceremony after the definition, then the tallies, and 
   expect(Object.keys(r.inputs).at(-1)).toBe("panel");
 });
 
-test("under definition versions 3 and 4, ballot admission and the tally openings don't run yet", () => {
-  // Their ballots (version 2) are admitted against their cell, which this
-  // verifier doesn't do yet (P1-19): unsupported, never failed (T-36). Their
-  // tally openings name cells of the partition 2.8 reads, which it doesn't
-  // read yet either.
+test("under definition versions 3 and 4, the tally openings don't run yet", () => {
+  // Their tally openings name cells of the partition 2.8 reads, which this
+  // verifier doesn't read yet. Their ballots (version 2) are admitted
+  // against their cell (verifier-ballots-v2.json), under the one pinned
+  // membership key, which these definitions don't name: 1.3 fails, and no
+  // ballot is judged (T-05).
   for (const id of ["definition-v3", "definition-v4"]) {
     const r = format4(byId(id));
     expect(row(r, "3.2").status).toBe("pass");
+    expect(row(r, "1.3")).toMatchObject({ status: "fail", code: "membership-key" });
     for (const check of ["5.1", "5.2", "5.3", "5.4", "5.7"])
-      expect(row(r, check)).toMatchObject({ status: "unverifiable", code: "unsupported-version" });
+      expect(row(r, check)).toMatchObject({ status: "unverifiable", code: "not-reached" });
+    // No opening version this verifier reads opens a version-2 core.
+    expect(row(r, "6.2")).toMatchObject({ status: "unverifiable", code: "unsupported-version" });
     expect(r.ballots).toBeUndefined();
     expect(row(r, "7.4")).toMatchObject({ status: "unverifiable", code: "not-implemented" });
     expect(r.tallies).toBeUndefined();

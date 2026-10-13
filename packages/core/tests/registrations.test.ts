@@ -349,7 +349,10 @@ describe("lookupShortCode", () => {
       // other database-backed properties.
       { numRuns: Math.min(numRuns, 50) },
     );
-  });
+    // Fifty runs of database writes outlast the default timeout on a slow
+    // runner, and a property left running keeps writing on `isolated`'s shared
+    // connection under the tests after it.
+  }, 120_000);
 
   test("a poll ground to an earlier poll's 7-character prefix gets 8 characters", async () => {
     await isolated(async (tx) => {

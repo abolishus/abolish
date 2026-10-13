@@ -101,8 +101,8 @@ export {
   lookupShortCode,
   recordRegistration,
   RegistrationError,
+  type Registration,
   type RegistrationErrorCode,
-  type RegistrationPosition,
   type ShortCodeMatch,
 } from "./registrations.ts";
 export {

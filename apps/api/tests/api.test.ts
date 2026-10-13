@@ -194,7 +194,12 @@ describe("elections.resolveCode (P2-18; T-49, T-53, T-67)", () => {
   async function registered() {
     const e = await election();
     const { definitionHash } = await storeDefinition(app, e.definition);
-    await recordRegistration(app, e.id, { l2Block: block++, logIndex: 0 });
+    await recordRegistration(app, {
+      electionId: e.id,
+      definitionHash,
+      l2Block: block++,
+      logIndex: 0,
+    });
     return { ...e, definitionHash, code: shortCode(definitionHash) };
   }
 
@@ -221,19 +226,24 @@ describe("elections.resolveCode (P2-18; T-49, T-53, T-67)", () => {
 
   test("a later poll ground to an earlier poll's prefix never takes its code", async () => {
     const first = await registered();
-    const ground = await election();
-    // Written directly, as the database can't hash: the same first 255 bits.
+    // A registered definition this server didn't store (one it refused, say)
+    // with the same first 255 bits.
+    const ground = b32();
     const collided = first.definitionHash.slice();
     collided[31] = (collided[31] ?? 0) ^ 1;
-    await app`INSERT INTO election_registrations VALUES
-      (${ground.id}, ${collided}, ${(block++).toString()}, 0)`;
+    await recordRegistration(app, {
+      electionId: ground,
+      definitionHash: collided,
+      l2Block: block++,
+      logIndex: 0,
+    });
     expect(await json(await resolve(first.code))).toEqual({
       electionId: first.idHex,
       code: first.code,
     });
     expect((await resolve(shortCode(collided, 8))).status).toBe(404);
     const full = shortCode(collided, MAX_SHORT_CODE_LENGTH);
-    expect(await json(await resolve(full))).toEqual({ electionId: ground.idHex, code: full });
+    expect(await json(await resolve(full))).toEqual({ electionId: hex(ground), code: full });
   });
 
   test("delisted and hidden polls resolve as they do by ID", async () => {

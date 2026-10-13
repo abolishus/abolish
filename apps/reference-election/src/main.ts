@@ -1,5 +1,6 @@
 // `vp run reference-election`: the reference election (AGENTS.md, Reference
-// election; P1-20). It runs every stage built so far against a local Anvil,
+// election; P1-20). It runs every stage built so far against two local Anvils,
+// an L1 and an L2,
 // writes what it produced to reference-election-output/, has packages/verifier
 // check that output in a process of its own, and exits non-zero if any stage
 // or any expectation of the verifier's reports fails. Stages not built yet are
@@ -9,7 +10,9 @@
 // Besides the honest election, the run holds controls the verifier must not
 // pass, each with the rows it must show, so the honest run's passes can't be
 // vacuous: an election whose ceremony two seats sat out (rule 7 of
-// [[0006-trustees]]), and the honest bundle with its board copy altered.
+// [[0006-trustees]]), which the trustee registry must refuse to record and the
+// election registry to register, and the honest bundle with its board copy
+// altered.
 
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -24,9 +27,16 @@ import {
 } from "@abolishus/crypto";
 import { bytesToHex } from "@noble/hashes/utils.js";
 import { type Rpc, startAnvil } from "./anvil.ts";
-import { boardEntry, displayText, runCeremony, STUBS } from "./election.ts";
+import { boardEntry, displayText, newTrustees, PANEL, runCeremony, STUBS } from "./election.ts";
 import { checkControl, checkExpectations } from "./expectations.ts";
 import { anchorAt, type DeployedAnchor, deployAnchor, evidence, mineAt } from "./l1.ts";
+import {
+  ceremonyRegistration,
+  createElection,
+  deployL2,
+  registerCeremony,
+  registerDefinition,
+} from "./l2.ts";
 import { anchorSlots } from "./slots.ts";
 import { STAGES } from "./stages.ts";
 import { runVerifier } from "./verify.ts";
@@ -40,6 +50,13 @@ const BOARD_ANCHOR = new URL(
 
 /** Anvil's default chain ID: a local L1 that no real network uses. */
 const L1_CHAIN_ID = 31337n;
+/** The local L2's: the next one, also used by no real network. */
+const L2_CHAIN_ID = 31338n;
+/**
+ * Signatures a ceremony registration needs: rule 7's n − 1 of [[0006-trustees]],
+ * so the trustee registry itself refuses a ceremony that fewer seats ran.
+ */
+const QUORUM = PANEL.size - 1;
 // The deployed anchor's period and deadline (docs/spec/contracts.md, Board anchor).
 const PERIOD = 3600n;
 const DEADLINE = 43_200n;
@@ -94,7 +111,7 @@ function verify(dir: string, judge: (run: ReturnType<typeof runVerifier>) => str
   return judge(run);
 }
 
-async function run(anvil: Rpc, failures: string[]): Promise<void> {
+async function run(anvil: Rpc, l2Anvil: Rpc, failures: string[]): Promise<void> {
   const genesis = await anvil.call<{ timestamp: string }>("eth_getBlockByNumber", [
     "latest",
     false,
@@ -112,8 +129,23 @@ async function run(anvil: Rpc, failures: string[]): Promise<void> {
   const seal = first + 1;
   log(`L1: Anvil (chain ${L1_CHAIN_ID}), BoardAnchor at 0x${hex(anchor.address)}`);
 
-  // Stage 1: each election's ceremony, then its definition and its board,
-  // which holds the transcript in the first segment.
+  // The panel, pinned in the L2's trustee registry at deployment.
+  const trustees = newTrustees();
+  const l2 = await deployL2(l2Anvil, anvil, {
+    l2ChainId: L2_CHAIN_ID,
+    l1ChainId: L1_CHAIN_ID,
+    l1Anchor: anchor.address,
+    epoch,
+    panel: trustees.panel,
+    quorum: QUORUM,
+  });
+  log(
+    `L2: Anvil (chain ${L2_CHAIN_ID}), election registry at 0x${hex(l2.electionRegistry)}, trustee registry at 0x${hex(l2.trusteeRegistry)}`,
+  );
+
+  // Stage 1: each election created on L2, its ceremony, the ceremony and the
+  // definition registered there, and its board, which holds the transcript in
+  // the first segment.
   const timing = {
     l1ChainId: L1_CHAIN_ID,
     l1Anchor: anchor.address,
@@ -121,14 +153,23 @@ async function run(anvil: Rpc, failures: string[]): Promise<void> {
     closesAt: end(first) + PERIOD / 2n,
     inclusionBound: 600,
   };
-  const elections = (
-    [
-      ["honest", 0n, 0],
-      ["rule-7", 1n, 2],
-    ] as const
-  ).map(([name, counter, absent]): Election => {
+  const elections: Election[] = [];
+  for (const [name, absent] of [
+    ["honest", 0],
+    ["rule-7", 2],
+  ] as const) {
     const text = displayText();
-    const c = runCeremony(timing, text, { counter, absent });
+    const counter = await createElection(l2, anvil);
+    const c = runCeremony(timing, l2, trustees, text, { counter, absent });
+    const record = ceremonyRegistration(l2, trustees, c);
+    if (absent === 0) {
+      await registerCeremony(l2, anvil, record);
+      await registerDefinition(l2, anvil, c.definition);
+    } else {
+      // Its five seats are under the quorum, so no definition can name it.
+      await registerCeremony(l2, anvil, record, "BelowQuorum(uint256,uint8)");
+      await registerDefinition(l2, anvil, c.definition, "CeremonyNotRecorded(bytes32,bytes32)");
+    }
     const entries = [boardEntry(c.definition, 0n, first, c.transcript)];
     const atFirst = copyCheckpoints(c.definition.election_id, entries, [first]).get(first);
     if (atFirst === undefined) throw new Error("no checkpoint for the first segment");
@@ -138,17 +179,17 @@ async function run(anvil: Rpc, failures: string[]): Promise<void> {
     writeFileSync(join(dir, "ceremony-transcript.bin"), c.transcript);
     writeFileSync(join(dir, "display-text.bin"), encodeDisplayText(text));
     log(
-      `stage 1 (${name}): ${c.panel.threshold}-of-${c.panel.keys.length} ceremony with ${c.panel.keys.length - absent} seats, election 0x${hex(c.definition.election_id)}`,
+      `stage 1 (${name}): ${c.panel.threshold}-of-${c.panel.keys.length} ceremony with ${c.panel.keys.length - absent} seats, election 0x${hex(c.definition.election_id)}, ${absent === 0 ? "registered on L2" : "refused by both registries"}`,
     );
     // The seal repeats the board's state: nothing is appended in its period.
-    return {
+    elections.push({
       name,
       definition: c.definition,
       panel: c.panel,
       entries,
       checkpoints: [atFirst, { ...atFirst, segment: seal }],
-    };
-  });
+    });
+  }
 
   // Stage 7: each period's checkpoints anchored in one call, inside its window.
   await anchorAt(
@@ -222,7 +263,12 @@ async function main(): Promise<number> {
   try {
     const anvil = await startAnvil(L1_CHAIN_ID);
     try {
-      await run(anvil, failures);
+      const l2 = await startAnvil(L2_CHAIN_ID);
+      try {
+        await run(anvil, l2, failures);
+      } finally {
+        await l2.stop();
+      }
     } finally {
       await anvil.stop();
     }

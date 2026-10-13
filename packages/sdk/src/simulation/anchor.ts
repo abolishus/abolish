@@ -9,9 +9,9 @@
 // authority's key are simulated: anchors live in memory, never in L1 state
 // (SIMULATION_STUBS).
 
-import { type Anchor, type AnchorClock, checkpointHash, copyCheckpoints } from "@abolishus/crypto";
+import { type Anchor, type AnchorClock, copyCheckpoints } from "@abolishus/crypto";
 import { endOf, SIMULATED_ANCHOR_DEADLINE, SIMULATED_ANCHOR_PERIOD } from "./board.ts";
-import { SIMULATED_FINALITY, type SimulatedL1 } from "./l1.ts";
+import type { SimulatedL1 } from "./l1.ts";
 
 /** The anchoring clock of an election whose seal is `seal`: hourly from the Unix epoch. */
 export function anchorClock(seal: number): AnchorClock {
@@ -27,29 +27,34 @@ export class SimulatedAnchor {
   readonly #electionId: Uint8Array;
   readonly #l1: SimulatedL1;
   readonly #anchors: Anchor[] = [];
-  /** The last period anchored or passed over, or −1 before any. */
-  #through = -1;
+  /** The last period anchored or passed over. */
+  #through: number;
 
   readonly clock: AnchorClock;
 
-  constructor(electionId: Uint8Array, seal: number, l1: SimulatedL1) {
+  /**
+   * An authority for the election whose board starts in period `first` and
+   * is sealed at `seal`. Nothing is anchored before `first`: no reader looks
+   * at anchors for earlier periods (docs/spec/contracts.md, Board anchor,
+   * Verification).
+   */
+  constructor(electionId: Uint8Array, first: number, seal: number, l1: SimulatedL1) {
+    if (!Number.isSafeInteger(first) || first < 0 || first > seal)
+      throw new RangeError("simulation: the first period must be from 0 to the seal");
     this.#electionId = Uint8Array.from(electionId);
     this.clock = anchorClock(seal);
+    this.#through = first - 1;
     this.#l1 = l1;
   }
 
-  /** Every anchor made, in L1 order. */
+  /**
+   * Every anchor made, in L1 order. A reader passes them all to
+   * `verifyBoard` with the time of the newest finalized block it has read,
+   * which counts only those in blocks up to it (docs/spec/board.md, Board
+   * checks, step 1).
+   */
   get anchors(): readonly Anchor[] {
     return this.#anchors;
-  }
-
-  /**
-   * The anchors a reader at L1 time `now` sees: those in blocks finalized
-   * by then. A board check counts only finalized anchors (docs/spec/board.md,
-   * Board checks, step 1).
-   */
-  finalizedAt(now: bigint): Anchor[] {
-    return this.#anchors.filter((a) => a.anchoredAt + SIMULATED_FINALITY <= now);
   }
 
   /**
@@ -80,23 +85,4 @@ export class SimulatedAnchor {
     }
     this.#through = segment;
   }
-}
-
-/** An anchor as a report shows it: its segment, size, checkpoint hash in hex and L1 time. */
-export interface AnchorReport {
-  readonly segment: number;
-  readonly size: number;
-  readonly hash: string;
-  readonly anchoredAt: number;
-}
-
-const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
-
-export function reportAnchor(a: Anchor): AnchorReport {
-  return {
-    segment: a.checkpoint.segment,
-    size: Number(a.checkpoint.size),
-    hash: hex(checkpointHash(a.checkpoint)),
-    anchoredAt: Number(a.anchoredAt),
-  };
 }

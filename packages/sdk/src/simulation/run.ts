@@ -19,10 +19,10 @@
 // operator boards after the counted extent (./publication.ts), then
 // each online seat's destruction statement and the verifier's destruction
 // report. An anchoring authority anchors the board's checkpoints
-// (./anchor.ts), and every read of the board after close is the board
-// checks over them: the trustees' read of the counted extent, a node's of
-// the tally openings before it destroys, and the verifier's of the whole
-// board once the seal's window has closed. Nothing
+// (./anchor.ts), and three reads of the board run the board checks over
+// them: the trustees' read of the counted extent, a node's of the tally
+// openings before it destroys, and the verifier's of the whole board once
+// the seal's window has closed. Nothing
 // here reimplements a check the verifier makes (AGENTS.md, Architecture): it
 // only calls them and compares the result with the plan (T-29, T-54, T-25,
 // T-14).
@@ -38,6 +38,7 @@ import {
   type CellOpening,
   checkBoard,
   checkDelivery,
+  checkpointHash,
   checkDestruction,
   checkL1Reference,
   checkReceiptAtCast,
@@ -93,7 +94,7 @@ import {
   type ValidityContext,
   verifyBoard,
 } from "@abolishus/crypto";
-import { type AnchorReport, reportAnchor, SimulatedAnchor } from "./anchor.ts";
+import { SimulatedAnchor } from "./anchor.ts";
 import {
   afterAnchored,
   endOf,
@@ -137,7 +138,7 @@ export const SIMULATION_STUBS = Object.freeze([
   "ceremony: every seat takes part in the four signed rounds; no release pins the panel, whose identity keys are fresh per run (P1-7)",
   "membership: no membership proofs; each voter's nullifier is its index plus one, and each ballot record carries a placeholder proof, the verification key's own alpha, beta and alpha points, which decodes but proves nothing and is never checked, so admission (5.1 to 5.4) isn't run and each ballot's M for the re-vote rule is computed from its record here rather than taken from crypto's checkBallot (P1-17b, P3-2)",
   "board: the operator boards each server ballot as it arrives and signs a receipt the voter's client checks at cast, under one receipt key fresh per run that no definition lists or registry holds; the anchoring clock (hourly from the Unix epoch, with a half-hour deadline) is a placeholder, the post-close windows other than the tally, openings' and destruction windows are taken as zero for the counted extent, though the delivery check applies the real delivery deadline (every delivery record is boarded or sent long before it), so the counted extent ends one period after close and the seal is the destruction window's end (P1-13b, P1-18)",
-  "anchoring: an anchoring authority anchors the checkpoint of every period that added entries, and the seal's, in the first block after the period ends, and every reader judges them with crypto's verifyBoard; but the anchor contract, its clock and the authority's key are simulated, the anchors are held in memory rather than read from L1 state with storage proofs, every period's entries are boarded before its end, and the CIDs name segment objects that nothing publishes or pins (P4-1, P4-3)",
+  "anchoring: an anchoring authority anchors the checkpoint of every period that added entries, and the seal's, in the first block after the period ends, and every reader judges them with crypto's verifyBoard; but the anchor contract, its clock and the authority's key are simulated, the anchors are held in memory rather than read from L1 state with storage proofs, every period's entries are boarded before its end, and the CIDs name segment objects that nothing publishes or pins; readers check the operator's copy, the tally and destruction checks read it before the final board check authenticates it, a node checks the whole board before destroying rather than each first passing opening's inclusion, and the trustees' moments come from the clock rather than from the blocks they saw (P4-1, P4-3)",
   "delivery: ciphertexts reach trustees in memory, and no contract records anything; a direct ballot is boarded by the operator when the servers return, with no operator receipt, never as a contract event; each online seat's node boards its share receipt right after the ballot, and the operator boards it unchecked rather than under the delivery boarding rules; a posting voter's client posts each seat down at that ballot's cast once, right after cast, as a contract-path record the delivery check reads with its cast time as its submission time, though no contract records it and nothing puts it on the board or the archive; a departing seat's receipts for ballots it took before going down are boarded with them, even a direct ballot's after the seat is down; offline and departed seats never come back, so no seat catches up on postings or complains, and nothing is resent (P1-12c, P1-18, P4-2)",
   "trustees: offline seats go down after the ceremony, for the whole voting period, tally and destruction, and departing seats at their scenario time, for the rest of it, and take no part in the tally or destruction, though they hold shares of every ballot cast before; nothing models a departing seat's node or disk afterwards; faulty seats lie only in their summed shares, which their own node's check refuses to seal, so no lie reaches another seat as a summed-share message, no recipient's refusal is shown, and a cell's excluded seats are those that sent nothing (openCell never sees a failing sum); summed-share messages travel in memory, never over a channel, every honest seat combines, and the lowest seat combined signs each cell's opening",
   "challenges: the checker records each tracking code and checks the opening in memory, with the election the run built rather than one fetched from chain and IPFS; a voter who publishes asks once, in the first period after the counted extent, and the operator's boarding rules are applied here rather than by the verifier's 6.2, which isn't run (P1-21 part 2)",
@@ -226,8 +227,17 @@ export interface SimulationReport {
     readonly receiptKey: string;
     /** The seal: the last period the board may use, whose checkpoint fixes its extent. */
     readonly seal: number;
-    /** Every checkpoint anchored, in L1 order: one per period that added entries, and the seal's. */
-    readonly anchors: readonly AnchorReport[];
+    /**
+     * Every checkpoint anchored, in L1 order: one per period that added
+     * entries, and the seal's. Each with its size, its checkpoint hash in
+     * hex and the L1 time of its block.
+     */
+    readonly anchors: readonly {
+      readonly segment: number;
+      readonly size: number;
+      readonly hash: string;
+      readonly anchoredAt: number;
+    }[];
   };
   readonly trustees: {
     /** Every seat up from the ceremony through destruction, faulty ones included. */
@@ -457,16 +467,19 @@ export async function runSimulation(
   const firstSegment = segmentAt(opensAt);
   const after = postClose(closesAt);
   const { seal } = after;
-  const anchor = new SimulatedAnchor(election.definition.election_id, seal, l1);
-  // A board check at L1 time `now` over the anchors finalized by then, as
-  // the verifier's 4.1 and 4.2 make it: it authenticates the board up to the
+  const anchor = new SimulatedAnchor(election.definition.election_id, firstSegment, seal, l1);
+  // A reader's board check at `moment`, as the verifier's 4.1 and 4.2 make
+  // it: once the first L1 block at or after `moment` is finalized, it reads
+  // every anchor and takes that block's time as `now`, so only anchors in
+  // blocks up to it count. The check authenticates the board up to the
   // largest anchored size, and an honest board must be all of it (T-23, T-24).
-  const anchoredBoard = (now: bigint) => {
+  const anchoredBoard = (moment: bigint) => {
+    const now = l1.block(l1.firstAfter(moment - 1n)).timestamp;
     const verified = verifyBoard(
       election.definition.election_id,
       operator.entries,
       SIMULATED_BOARD_ENTRY_VERSION,
-      anchor.finalizedAt(now),
+      anchor.anchors,
       anchor.clock,
       now,
     );
@@ -1081,14 +1094,11 @@ export async function runSimulation(
     const first = cell.passing[0];
     return first === undefined ? null : (tallyEntries[first.at] as { segment: number }).segment;
   });
-  // A node sees every first passing opening anchored only from the board
-  // checks over the anchors finalized when that checkpoint is due: the
-  // board through the openings' period is then all authenticated.
-  if (firstPassing.every((s) => s !== null)) {
-    const due = endOf(Math.max(...firstPassing)) + SIMULATED_ANCHOR_DEADLINE;
-    if (anchoredBoard(due).entries.length !== operator.entries.length)
-      throw new Error("simulation: a node didn't see the tally openings anchored");
-  }
+  // A node sees every first passing opening anchored from the board checks
+  // once that checkpoint is due: they authenticate the whole board through
+  // the openings' period, or throw.
+  if (firstPassing.every((s) => s !== null))
+    anchoredBoard(endOf(Math.max(...firstPassing)) + SIMULATED_ANCHOR_DEADLINE);
   // The earlier of the two moments (docs/spec/tally.md, When).
   const destroyedIn = Math.min(
     firstPassing.every((s) => s !== null)
@@ -1129,14 +1139,9 @@ export async function runSimulation(
   // checkpoint fixes the board's extent, and its chain ends at the
   // operator's head (T-23, T-24, T-54).
   anchor.anchorThrough(operator.entries, seal);
-  const sealed = anchoredBoard(
-    l1.block(l1.firstAfter(endOf(seal) + SIMULATED_ANCHOR_DEADLINE)).timestamp,
-  );
-  if (
-    sealed.entries.length !== operator.entries.length ||
-    !same32(sealed.links.at(-1) ?? new Uint8Array(32), operator.head)
-  )
-    throw new Error("simulation: the anchored board isn't the operator's");
+  const sealed = anchoredBoard(endOf(seal) + SIMULATED_ANCHOR_DEADLINE + 1n);
+  if (!same32(sealed.links.at(-1) ?? new Uint8Array(32), operator.head))
+    throw new Error("simulation: the anchored board's chain doesn't end at the operator's head");
   // The sealed board carries exactly the published openings, by the codes
   // their checkers recorded, and its entry checks held them in order.
   const spoiled = onBoard(RECORD_TYPES.spoiledBallotOpening).map((e) =>
@@ -1182,7 +1187,12 @@ export async function runSimulation(
       head: hex(operator.head),
       receiptKey: hex(operator.receiptKey),
       seal,
-      anchors: anchor.anchors.map(reportAnchor),
+      anchors: anchor.anchors.map((a) => ({
+        segment: a.checkpoint.segment,
+        size: Number(a.checkpoint.size),
+        hash: hex(checkpointHash(a.checkpoint)),
+        anchoredAt: Number(a.anchoredAt),
+      })),
     },
     trustees: { online, offline, departed, faulty, summedShareMessages: messages },
     cells: reports,

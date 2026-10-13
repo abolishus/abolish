@@ -3,7 +3,7 @@ import fc from "fast-check";
 import { describe, expect, it } from "vite-plus/test";
 import { SimulatedAnchor } from "../src/simulation/anchor.ts";
 import { endOf, SIMULATED_ANCHOR_DEADLINE, SimulatedBoard } from "../src/simulation/board.ts";
-import { SIMULATED_FINALITY, SimulatedL1 } from "../src/simulation/l1.ts";
+import { SimulatedL1 } from "../src/simulation/l1.ts";
 
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
 
@@ -46,7 +46,7 @@ describe("SimulatedAnchor", { timeout: 120_000 }, () => {
           let segment = 10;
           const segments = appends.map((a) => (segment += a.step));
           const seal = segment + tail;
-          const anchor = new SimulatedAnchor(electionId, seal, l1);
+          const anchor = new SimulatedAnchor(electionId, 10, seal, l1);
           const at = new Set(cuts.map((c) => Math.min(c, appends.length)));
           appends.forEach((a, i) => {
             // Anchoring through the period before the next entry's: every
@@ -59,7 +59,7 @@ describe("SimulatedAnchor", { timeout: 120_000 }, () => {
             electionId,
             board.entries,
             VERSION,
-            anchor.finalizedAt(afterSeal(l1, seal)),
+            anchor.anchors,
             anchor.clock,
             afterSeal(l1, seal),
           );
@@ -72,9 +72,9 @@ describe("SimulatedAnchor", { timeout: 120_000 }, () => {
           );
           for (const a of anchor.anchors) {
             const end = endOf(a.checkpoint.segment);
-            // In a block after the period ends, finalized before the deadline.
+            // In a block after the period ends, within the deadline.
             expect(a.anchoredAt > end).toBe(true);
-            expect(a.anchoredAt + SIMULATED_FINALITY <= end + SIMULATED_ANCHOR_DEADLINE).toBe(true);
+            expect(a.anchoredAt <= end + SIMULATED_ANCHOR_DEADLINE).toBe(true);
           }
           // The seal's checkpoint is the whole board.
           expect(anchor.anchors.at(-1)?.checkpoint.size).toBe(BigInt(appends.length));
@@ -84,38 +84,30 @@ describe("SimulatedAnchor", { timeout: 120_000 }, () => {
     );
   });
 
-  it("shows a reader only the anchors finalized by its L1 time", () => {
+  it("counts for a reader only the anchors in blocks up to its L1 time", () => {
     const l1 = new SimulatedL1();
     const board = new SimulatedBoard(electionId, VERSION);
-    const anchor = new SimulatedAnchor(electionId, 12, l1);
+    const anchor = new SimulatedAnchor(electionId, 10, 12, l1);
     board.board(10, payload([1]));
     board.board(11, payload([2]));
     anchor.anchorThrough(board.entries, 11);
-    const [first, second] = anchor.anchors;
-    if (first === undefined || second === undefined) throw new Error("two anchors expected");
-    const final = first.anchoredAt + SIMULATED_FINALITY;
-    expect(anchor.finalizedAt(final - 1n)).toEqual([]);
-    expect(anchor.finalizedAt(final)).toEqual([first]);
-    expect(anchor.finalizedAt(second.anchoredAt + SIMULATED_FINALITY)).toEqual([first, second]);
-    // Before period 10's checkpoint is due, period 11's entry is past every
-    // finalized anchor: unauthenticated, never a failure.
-    const now = endOf(10) + SIMULATED_ANCHOR_DEADLINE;
-    const read = verifyBoard(
-      electionId,
-      board.entries,
-      VERSION,
-      anchor.finalizedAt(now),
-      anchor.clock,
-      now,
-    );
-    expect(read.board.entries).toHaveLength(1);
-    expect(read.unauthenticated).toBe(1);
+    const second = anchor.anchors[1];
+    if (second === undefined) throw new Error("two anchors expected");
+    const read = (now: bigint) =>
+      verifyBoard(electionId, board.entries, VERSION, anchor.anchors, anchor.clock, now);
+    // Before period 11's anchor, its entry is past every counted anchor:
+    // unauthenticated, never a failure.
+    for (const now of [endOf(10) + SIMULATED_ANCHOR_DEADLINE, second.anchoredAt - 1n]) {
+      expect(read(now).board.entries).toHaveLength(1);
+      expect(read(now).unauthenticated).toBe(1);
+    }
+    expect(read(second.anchoredAt).unauthenticated).toBe(0);
   });
 
   it("repeats the board's state at the seal when nothing was added in it", () => {
     const l1 = new SimulatedL1();
     const board = new SimulatedBoard(electionId, VERSION);
-    const anchor = new SimulatedAnchor(electionId, 20, l1);
+    const anchor = new SimulatedAnchor(electionId, 10, 20, l1);
     board.board(10, payload([1]));
     anchor.anchorThrough(board.entries, 20);
     const [first, seal] = anchor.anchors;
@@ -131,13 +123,15 @@ describe("SimulatedAnchor", { timeout: 120_000 }, () => {
   });
 
   it("refuses to anchor past the seal", () => {
-    const anchor = new SimulatedAnchor(electionId, 12, new SimulatedL1());
+    const anchor = new SimulatedAnchor(electionId, 10, 12, new SimulatedL1());
     expect(() => anchor.anchorThrough([], 13)).toThrow(/past the seal/);
     expect(anchor.anchors).toEqual([]);
   });
 
-  it("anchors nothing for periods before the board's first entry", () => {
-    const anchor = new SimulatedAnchor(electionId, 12, new SimulatedL1());
+  it("refuses a first period outside 0 to the seal, and anchors nothing while the board is empty", () => {
+    expect(() => new SimulatedAnchor(electionId, 13, 12, new SimulatedL1())).toThrow(RangeError);
+    expect(() => new SimulatedAnchor(electionId, -1, 12, new SimulatedL1())).toThrow(RangeError);
+    const anchor = new SimulatedAnchor(electionId, 5, 12, new SimulatedL1());
     anchor.anchorThrough([], 9);
     expect(anchor.anchors).toEqual([]);
   });
@@ -148,39 +142,32 @@ describe("SimulatedAnchor", { timeout: 120_000 }, () => {
     const l1 = new SimulatedL1();
     const seal = 13;
     const now = afterSeal(l1, seal);
-    const early = new SimulatedAnchor(electionId, seal, l1);
+    const early = new SimulatedAnchor(electionId, 10, seal, l1);
     const board = new SimulatedBoard(electionId, VERSION);
     board.board(10, payload([1]));
     early.anchorThrough(board.entries, 10);
     board.board(10, payload([2]));
     early.anchorThrough(board.entries, seal);
     const check = (a: SimulatedAnchor) => () =>
-      verifyBoard(electionId, board.entries, VERSION, a.finalizedAt(now), a.clock, now);
+      verifyBoard(electionId, board.entries, VERSION, a.anchors, a.clock, now);
     expect(code(check(early))).toBe("checkpoint-boundary");
 
     // Period 11's entry, boarded after the authority passed it over.
-    const skipped = new SimulatedAnchor(electionId, seal, l1);
+    const skipped = new SimulatedAnchor(electionId, 10, seal, l1);
     const other = new SimulatedBoard(electionId, VERSION);
     other.board(10, payload([1]));
     skipped.anchorThrough(other.entries, 11);
     other.board(11, payload([2]));
     skipped.anchorThrough(other.entries, seal);
     const late = () =>
-      verifyBoard(electionId, other.entries, VERSION, skipped.finalizedAt(now), skipped.clock, now);
+      verifyBoard(electionId, other.entries, VERSION, skipped.anchors, skipped.clock, now);
     expect(code(late)).toBe("unanchored");
 
     // Every entry anchored, but the seal never.
-    const unsealed = new SimulatedAnchor(electionId, seal, l1);
+    const unsealed = new SimulatedAnchor(electionId, 10, seal, l1);
     unsealed.anchorThrough(other.entries, seal - 1);
     const open = () =>
-      verifyBoard(
-        electionId,
-        other.entries,
-        VERSION,
-        unsealed.finalizedAt(now),
-        unsealed.clock,
-        now,
-      );
+      verifyBoard(electionId, other.entries, VERSION, unsealed.anchors, unsealed.clock, now);
     expect(code(open)).toBe("unsealed");
   });
 });

@@ -7,16 +7,14 @@ import { VOTING_APP_HOST } from "./everyday-first-fixtures.ts";
 import { Note, OneTapAway } from "./everyday-frame.tsx";
 import { shortHex } from "./fixtures.ts";
 
-/** The poll's seal as the website draws it: the fingerprint in a small round mount. */
+/** The poll's seal as the website draws it: the fingerprint on its own, no mount. */
 export function PollSeal({ poll }: { poll: EverydayPoll }) {
   return (
-    <span className="grid size-11 shrink-0 place-items-center rounded-full border border-border">
-      <Fingerprint
-        value={poll.definitionHash}
-        label={`Seal of this poll, ${shortHex(poll.definitionHash)}`}
-        size={26}
-      />
-    </span>
+    <Fingerprint
+      value={poll.definitionHash}
+      label={`Seal of this poll, ${shortHex(poll.definitionHash)}`}
+      size={44}
+    />
   );
 }
 
@@ -70,7 +68,7 @@ export function FirstFrame({
                 <li
                   key={q.key}
                   className={cn(
-                    "h-1.5 flex-1 rounded-full",
+                    "h-1.5 flex-1 ",
                     i + 1 < question && "bg-foreground/60",
                     i + 1 === question && "bg-primary",
                     i + 1 > question && "bg-border",
@@ -150,7 +148,7 @@ function CheckBox({ onDone }: { onDone: () => void }) {
     <div
       role="group"
       aria-label="Cloudflare's check"
-      className="flex h-16 w-full max-w-75 items-center justify-between gap-3 rounded-md border border-border bg-background px-3"
+      className="flex h-16 w-full max-w-75 items-center justify-between gap-3 border border-border bg-background px-3"
     >
       <label className="flex min-h-12 cursor-pointer items-center gap-3">
         <input type="checkbox" className="size-6 accent-primary" onChange={onDone} />
@@ -177,7 +175,7 @@ export function SetupLine({
   return (
     <div role="status" className="grid gap-3">
       {setup === "working" || setup === "ready" ? (
-        <div className="flex items-start gap-3 rounded-xl border border-border px-4 py-3">
+        <div className="flex items-start gap-3 border border-border px-4 py-3">
           {setup === "working" ? (
             <Clock aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-pending" />
           ) : (
@@ -246,7 +244,7 @@ export function BackupOffer({
   return (
     <section aria-labelledby="backup-title" className="mt-8 grid gap-4">
       {backup === "offer" ? (
-        <div className="grid gap-4 rounded-xl border border-border px-4 py-5">
+        <div className="grid gap-4 border border-border px-4 py-5">
           <h2 id="backup-title" className="m-0 font-heading text-xl font-semibold">
             Back up with a passkey?
           </h2>

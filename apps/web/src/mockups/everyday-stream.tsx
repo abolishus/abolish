@@ -6,7 +6,7 @@ import { answerHref, num, STREAM_DETAIL, type StreamItem } from "./everyday-data
 import { ROUND } from "./everyday-parts.tsx";
 
 const ANSWER =
-  "inline-flex min-h-12 w-full items-center justify-between gap-3 rounded-lg border border-border px-4 py-2 text-start text-base hover:border-foreground hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none";
+  "inline-flex min-h-12 w-full items-center justify-between gap-3 border border-border px-4 py-2 text-start text-base hover:border-foreground hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none";
 
 /** The big friendly answer targets. Each opens the ballot app with that answer picked. */
 export function AnswerLinks({
@@ -83,7 +83,7 @@ export function StreamCard({ item, level = 3 }: { item: StreamItem; level?: 2 | 
   return (
     <article
       aria-labelledby={titleId}
-      className="reveal grid content-start gap-5 rounded-xl border border-border p-5 sm:p-6"
+      className="reveal grid content-start gap-5 border border-border p-5 sm:p-6"
     >
       <p className="m-0 flex flex-wrap justify-between gap-x-4 gap-y-1 text-sm text-muted-foreground">
         <span>
@@ -104,7 +104,7 @@ export function StreamCard({ item, level = 3 }: { item: StreamItem; level?: 2 | 
           Asked by {item.askedBy} · {detail.asked}
         </p>
       </div>
-      <div className="grid gap-1 rounded-lg bg-muted/60 px-4 py-3">
+      <div className="grid gap-1 bg-muted/60 px-4 py-3">
         {live ? (
           <>
             <p className="m-0 text-base font-medium text-pretty">{item.lead}</p>

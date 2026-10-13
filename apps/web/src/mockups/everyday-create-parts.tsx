@@ -109,7 +109,7 @@ export function ChoiceCard({
   return (
     <Label
       className={cn(
-        "flex min-h-12 w-full items-start gap-4 rounded-xl border p-5 text-base leading-normal font-normal",
+        "flex min-h-12 w-full items-start gap-4 border p-5 text-base leading-normal font-normal",
         selected ? "border-2 border-primary p-[19px]" : "border-border",
       )}
     >
@@ -140,7 +140,7 @@ function Progress({ index, onJump }: { index: number; onJump: (i: number) => voi
               <span
                 aria-hidden="true"
                 className={cn(
-                  "block h-1.5 rounded-full",
+                  "block h-1.5 ",
                   here ? "bg-primary" : done ? "bg-foreground" : "bg-border",
                 )}
               />
@@ -196,7 +196,7 @@ function ErrorSummary({
       tabIndex={-1}
       role="alert"
       aria-labelledby="error-summary-title"
-      className="grid gap-2 rounded-xl border-2 border-destructive p-5 outline-none focus-visible:ring-3 focus-visible:ring-ring"
+      className="grid gap-2 border-2 border-destructive p-5 outline-none focus-visible:ring-3 focus-visible:ring-ring"
     >
       <h2 id="error-summary-title" className="m-0 text-lg font-semibold">
         There is a problem
@@ -301,7 +301,7 @@ export function PollPreview({ draft }: { draft: Draft }) {
           How people will see your poll. It changes as you edit.
         </p>
       </div>
-      <div className="grid gap-6 rounded-xl border border-border bg-card p-5 text-card-foreground sm:p-6">
+      <div className="grid gap-6 border border-border bg-card p-5 text-card-foreground sm:p-6">
         <div className="grid gap-3">
           <p className="m-0 text-sm text-muted-foreground">
             {ASKED_BY} asked
@@ -318,7 +318,7 @@ export function PollPreview({ draft }: { draft: Draft }) {
               {[draft.place, draft.topic]
                 .filter((t) => t.trim() !== "")
                 .map((t) => (
-                  <li key={t} className="rounded-full border border-border px-3 py-1 text-sm">
+                  <li key={t} className="border border-border px-3 py-1 text-sm">
                     {t}
                   </li>
                 ))}
@@ -350,13 +350,13 @@ export function PollPreview({ draft }: { draft: Draft }) {
                   {q.options.map((o, j) => (
                     <li
                       key={o.id}
-                      className="flex min-h-12 items-center gap-3 rounded-lg border border-border px-4 py-2"
+                      className="flex min-h-12 items-center gap-3 border border-border px-4 py-2"
                     >
                       <span
                         aria-hidden="true"
                         className={cn(
                           "size-5 shrink-0 border-2 border-muted-foreground",
-                          square ? "rounded-sm" : "rounded-full",
+                          square ? "" : "rounded-full",
                         )}
                       />
                       <span className="text-pretty">

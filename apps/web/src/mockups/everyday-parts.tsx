@@ -20,7 +20,7 @@ import { Frame } from "./shell.tsx";
 export { Frame };
 
 /** Everyday buttons and answer targets: the kit's buttons, with the register's rounder corners. */
-export const ROUND = "rounded-lg";
+export const ROUND = "";
 
 const NAV = [
   { href: "/discover", label: "Discover" },
@@ -154,7 +154,7 @@ export function Byline({ children, className }: { children: ReactNode; className
 }
 
 /**
- * Friendly result bars: label and plain percentage above a rounded bar, the
+ * Friendly result bars: label and plain percentage above a bar, the
  * count beside it. Widths ease when a new real total arrives, and stand still
  * under reduced motion.
  */
@@ -197,13 +197,10 @@ export function ResultBars({
                   ) : null}
                 </span>
               </span>
-              <span
-                aria-hidden="true"
-                className="block h-2.5 overflow-hidden rounded-full bg-muted"
-              >
+              <span aria-hidden="true" className="block h-2.5 overflow-hidden bg-muted">
                 <span
                   className={cn(
-                    "block h-full rounded-full transition-[width] duration-500 ease-out motion-reduce:transition-none",
+                    "block h-full transition-[width] duration-500 ease-out motion-reduce:transition-none",
                     lead ? "bg-primary" : "bg-foreground/55",
                   )}
                   style={{ width: `${row.share * 100}%` }}
@@ -233,7 +230,7 @@ export function QuestionResult({
   return (
     <article
       aria-labelledby={titleId}
-      className="reveal grid gap-6 rounded-xl border border-border p-5 sm:p-8 lg:grid-cols-12 lg:gap-x-10"
+      className="reveal grid gap-6 border border-border p-5 sm:p-8 lg:grid-cols-12 lg:gap-x-10"
     >
       <div className="grid content-start gap-3 lg:col-span-5">
         <p className="m-0 text-sm text-muted-foreground">
@@ -271,7 +268,7 @@ export function audienceCaption(ballots: number, when: string) {
 }
 
 /**
- * Scrollytelling in the everyday register: a sticky graphic beside rounded
+ * Scrollytelling in the everyday register: a sticky graphic beside
  * step cards. The graphic follows the step at the middle of the viewport, so
  * it moves only with the reader's own scrolling.
  */
@@ -303,7 +300,7 @@ export function StepScene({
             data-active={index === active ? "" : undefined}
             className="flex min-h-[70svh] items-center py-10"
           >
-            <div className="w-full rounded-xl border border-border bg-background p-6 transition-colors duration-300 in-data-active:border-primary motion-reduce:transition-none">
+            <div className="w-full border border-border bg-background p-6 transition-colors duration-300 in-data-active:border-primary motion-reduce:transition-none">
               {step}
             </div>
           </li>
@@ -325,13 +322,11 @@ export function Seal({
 }) {
   return (
     <span className="inline-flex items-center gap-3">
-      <span className="grid size-11 shrink-0 place-items-center rounded-full border border-border">
-        <Fingerprint
-          value={hash}
-          label={`Fingerprint of ${subject} ${hash.slice(0, 4)} ${hash.slice(4, 8)}`}
-          size={26}
-        />
-      </span>
+      <Fingerprint
+        value={hash}
+        label={`Fingerprint of ${subject} ${hash.slice(0, 4)} ${hash.slice(4, 8)}`}
+        size={44}
+      />
       <span className="text-sm">{children}</span>
     </span>
   );
@@ -390,14 +385,14 @@ export function EvidenceDetails({
           {launchKeyStatement(poll)}
         </p>
         <ul className="m-0 grid list-none gap-2 p-0 text-sm">
-          <li className="rounded-lg border border-border px-3 py-2">
+          <li className="border border-border px-3 py-2">
             <span className="font-medium">Abolish</span>
             <span className="block text-muted-foreground">
               Holds the key during launch; destroys it after the final count
             </span>
           </li>
           {poll.trustees.added.map((name) => (
-            <li key={name} className="rounded-lg border border-border px-3 py-2">
+            <li key={name} className="border border-border px-3 py-2">
               <span className="font-medium">{name}</span>
               <span className="block text-muted-foreground">Added by {poll.askedBy}</span>
             </li>

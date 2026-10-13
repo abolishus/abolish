@@ -41,7 +41,7 @@ export function EverydayFrame({
           <Fingerprint
             value={poll.definitionHash}
             label={`Seal of this poll, ${shortHex(poll.definitionHash)}`}
-            size={28}
+            size={36}
           />
           <p className="m-0 min-w-0 flex-1 truncate text-sm">
             <span className="font-semibold">{poll.askedBy}</span>
@@ -59,7 +59,7 @@ export function EverydayFrame({
                 <li
                   key={q.key}
                   className={cn(
-                    "h-1.5 flex-1 rounded-full",
+                    "h-1.5 flex-1 ",
                     i + 1 < question && "bg-foreground/60",
                     i + 1 === question && "bg-primary",
                     i + 1 > question && "bg-border",
@@ -140,7 +140,7 @@ export function Choice({
   return (
     <label
       className={cn(
-        "flex min-h-16 cursor-pointer items-center gap-4 rounded-xl border-2 px-4 py-3 has-focus-visible:ring-3 has-focus-visible:ring-ring",
+        "flex min-h-16 cursor-pointer items-center gap-4 border-2 px-4 py-3 has-focus-visible:ring-3 has-focus-visible:ring-ring",
         checked ? "border-primary bg-card" : "border-border hover:border-muted-foreground",
       )}
     >
@@ -156,7 +156,7 @@ export function Choice({
         aria-hidden="true"
         className={cn(
           "flex size-7 shrink-0 items-center justify-center border-2",
-          type === "radio" ? "rounded-full" : "rounded-md",
+          type === "radio" ? "rounded-full" : "",
           checked
             ? "border-primary bg-primary text-primary-foreground"
             : "border-foreground bg-background",
@@ -195,7 +195,7 @@ export function Note({
   return (
     <div
       className={cn(
-        "grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 rounded-xl border bg-card px-4 py-4",
+        "grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 border bg-card px-4 py-4",
         tone === "warn" ? "border-pending" : tone === "done" ? "border-recorded" : "border-border",
       )}
     >
@@ -229,8 +229,8 @@ export function OneTapAway({
   className?: string;
 }) {
   return (
-    <details className={cn("group rounded-xl border border-border", className)}>
-      <summary className="flex min-h-12 cursor-pointer list-none items-center gap-3 rounded-xl px-4 py-3 outline-none focus-visible:ring-3 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+    <details className={cn("group border border-border", className)}>
+      <summary className="flex min-h-12 cursor-pointer list-none items-center gap-3 px-4 py-3 outline-none focus-visible:ring-3 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
         <span className="flex flex-1 items-center gap-3">{summary}</span>
         <ChevronDown aria-hidden="true" className="size-5 shrink-0 group-open:rotate-180" />
       </summary>

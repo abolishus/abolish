@@ -104,17 +104,11 @@ export function SealMark({
   className?: string;
 }) {
   return (
-    <span
-      className={cn(
-        "grid shrink-0 place-items-center rounded-full border border-border",
-        className,
-      )}
-      style={{ width: size, height: size }}
-    >
+    <span className={cn("inline-flex shrink-0", className)}>
       <Fingerprint
         value={id}
         label={`Seal of this poll, ${id.slice(0, 4)} ${id.slice(4, 8)}`}
-        size={Math.round(size * 0.6)}
+        size={size}
       />
     </span>
   );

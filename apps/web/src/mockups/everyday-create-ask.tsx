@@ -108,7 +108,7 @@ function QuestionCard({
   return (
     <section
       aria-labelledby={`q-${q.id}-heading`}
-      className="grid gap-6 rounded-xl border border-border p-4 sm:p-6"
+      className="grid gap-6 border border-border p-4 sm:p-6"
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h3 id={`q-${q.id}-heading`} className="m-0 text-xl font-semibold">
@@ -173,7 +173,7 @@ function QuestionCard({
             <Label
               key={r.key}
               className={cn(
-                "flex min-h-12 items-center gap-3 rounded-full border px-4 text-sm leading-tight font-normal",
+                "flex min-h-12 items-center gap-3 border px-4 text-sm leading-tight font-normal",
                 q.rule === r.key
                   ? "border-2 border-primary px-[15px] font-semibold"
                   : "border-border",

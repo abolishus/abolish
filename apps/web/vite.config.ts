@@ -2,6 +2,8 @@ import { storybookTest } from "@storybook/addon-vitest/vitest-plugin";
 import tailwindcss from "@tailwindcss/vite";
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { basename } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { defineConfig, type Plugin } from "vite-plus";
@@ -45,6 +47,38 @@ const formatRouteTree: Plugin = {
   },
 };
 
+// `import data from "file?bytes"`: the file's bytes as base64, inlined into
+// the importing module. The link-preview renderer takes its fonts and resvg's
+// WebAssembly this way (src/og/render.ts), so the server bundle carries them
+// and reads nothing from node_modules at run time.
+// Keyed by file name, not path: an id under node_modules would be left to
+// Node by the test runner, and the bundle must not name a checkout's path.
+const inlined = new Map<string, string>();
+const inlineBytes: Plugin = {
+  name: "inline-bytes",
+  enforce: "pre",
+  async resolveId(source, importer) {
+    if (!source.endsWith("?bytes")) return null;
+    const resolved = await this.resolve(source.slice(0, -"?bytes".length), importer, {
+      skipSelf: true,
+    });
+    if (resolved === null) return null;
+    const name = basename(resolved.id);
+    const known = inlined.get(name);
+    if (known !== undefined && known !== resolved.id)
+      throw new Error(`two files inlined as ${name}: ${known} and ${resolved.id}`);
+    inlined.set(name, resolved.id);
+    return `\0inline-bytes:${name}`;
+  },
+  load(id) {
+    if (!id.startsWith("\0inline-bytes:")) return null;
+    const file = inlined.get(id.slice("\0inline-bytes:".length));
+    if (file === undefined) return null;
+    this.addWatchFile(file);
+    return `export default ${JSON.stringify(readFileSync(file).toString("base64"))};`;
+  },
+};
+
 // Every story in a real browser: its play function, then axe
 // (`test:storybook`). Components only, so without the Start plugin.
 // `viewport` names one of the preview's viewports (none: the default).
@@ -74,6 +108,7 @@ function storybook(name: string, viewport?: string) {
 export default defineConfig({
   plugins: [
     tailwindcss(),
+    inlineBytes,
     relativeSourcePaths,
     bundleServer,
     formatRouteTree,

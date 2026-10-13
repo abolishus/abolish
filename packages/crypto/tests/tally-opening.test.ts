@@ -19,6 +19,7 @@ import {
   type Share,
   shareVote,
   signTallyOpening,
+  sortTallyOpenings,
   sumShares,
   type TallyCheck,
   type TallyElection,
@@ -352,6 +353,43 @@ describe("properties", () => {
       ),
       { numRuns: Math.max(10, numRuns / 10) },
     );
+  });
+});
+
+describe("sortTallyOpenings", () => {
+  test.each(vectors.elections)("sorts and attributes $id as checkTally does", (v) => {
+    const payloads = v.openings.map((b) => hex(b));
+    const sorted = sortTallyOpenings(election, v.cells.length, payloads, 1);
+    const r = checkTally(
+      election,
+      v.cells.map((c) => c.map((b) => decode(VSS, hex(b)) as CommittedVote["vss"])),
+      payloads,
+      1,
+    );
+    expect(sorted.map((o) => o.at)).toEqual(payloads.map((_, at) => at));
+    expect(sorted.flatMap((o) => ("error" in o ? [o] : []))).toEqual(r.rejected);
+    expect(
+      sorted.flatMap((o) =>
+        "error" in o || o.cell !== null ? [] : [{ at: o.at, signer: o.signer }],
+      ),
+    ).toEqual(r.stray);
+    for (const [c, cell] of r.cells.entries()) {
+      const mine = sorted.flatMap((o) => ("error" in o || o.cell !== c ? [] : [o]));
+      const reported = [...cell.passing, ...cell.failing].sort((a, b) => a.at - b.at);
+      expect(mine.map((o) => ({ at: o.at, signer: o.signer }))).toEqual(
+        reported.map(({ at, signer }) => ({ at, signer })),
+      );
+    }
+  });
+
+  test("needs a 32-byte definition hash and from 1 to 256 cells", () => {
+    expect(() => sortTallyOpenings(election, 0, [], 1)).toThrow(RangeError);
+    expect(() => sortTallyOpenings(election, 257, [], 1)).toThrow(RangeError);
+    expect(() => sortTallyOpenings(election, 1.5, [], 1)).toThrow(RangeError);
+    expect(() =>
+      sortTallyOpenings({ ...election, definitionHash: new Uint8Array(31) }, 1, [], 1),
+    ).toThrow(RangeError);
+    expect(sortTallyOpenings(election, 256, [], 1)).toEqual([]);
   });
 });
 

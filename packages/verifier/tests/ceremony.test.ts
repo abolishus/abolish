@@ -283,7 +283,7 @@ describe("the bundle's panel", () => {
     });
 });
 
-test("the report gives the ceremony after the definition, and the panel last among the inputs", () => {
+test("the report gives the ceremony after the definition, then the tallies, and the panel last among the inputs", () => {
   const r = format4(byId("honest"));
   expect(Object.keys(r)).toEqual([
     "format",
@@ -292,6 +292,7 @@ test("the report gives the ceremony after the definition, and the panel last amo
     "inputs",
     "definition",
     "ceremony",
+    "tallies",
     "board",
     "l1",
     "checks",
@@ -299,14 +300,18 @@ test("the report gives the ceremony after the definition, and the panel last amo
   expect(Object.keys(r.inputs).at(-1)).toBe("panel");
 });
 
-test("under definition versions 3 and 4, ballot admission doesn't run yet", () => {
+test("under definition versions 3 and 4, ballot admission and the tally openings don't run yet", () => {
   // Their ballots (version 2) are admitted against their cell, which this
-  // verifier doesn't do yet (P1-19): unsupported, never failed (T-36).
+  // verifier doesn't do yet (P1-19): unsupported, never failed (T-36). Their
+  // tally openings name cells of the partition 2.8 reads, which it doesn't
+  // read yet either.
   for (const id of ["definition-v3", "definition-v4"]) {
     const r = format4(byId(id));
     expect(row(r, "3.2").status).toBe("pass");
     for (const check of ["5.1", "5.2", "5.3", "5.4", "5.7"])
       expect(row(r, check)).toMatchObject({ status: "unverifiable", code: "unsupported-version" });
     expect(r.ballots).toBeUndefined();
+    expect(row(r, "7.4")).toMatchObject({ status: "unverifiable", code: "not-implemented" });
+    expect(r.tallies).toBeUndefined();
   }
 });

@@ -189,7 +189,7 @@ function mul(p: Element, s: bigint): Element {
  * a registered seat and the signature verifies under the seat's registered
  * signing key over this record's own fields; otherwise `null` (T-29).
  */
-function attribution(election: TallyElection, o: TallyOpening): number | null {
+function attribution(election: Pick<TallyElection, "registered">, o: TallyOpening): number | null {
   const seat = election.registered.find((k) => k.index === o.signer);
   if (seat === undefined) return null;
   return verifyStatement(seat.signingKey, TAG, tallyOpeningStatement(o), o.signature)
@@ -215,15 +215,14 @@ export function differ(a: readonly Share[], b: readonly Share[]): boolean {
 function checkCell(
   election: TallyElection,
   ballots: readonly CommittedVote["vss"][],
-  openings: readonly { readonly at: number; readonly opening: TallyOpening }[],
+  openings: readonly SortedTallyOpening[],
 ): CellCheck {
   const aggregate = aggregateCell(election.rules, ballots);
   const expected = aggregateHash(aggregate);
   const m = election.rules.optionCount;
   const passing: (OpeningReport & { readonly opening: readonly Share[] })[] = [];
   const failing: FailingOpening[] = [];
-  for (const { at, opening: o } of openings) {
-    const signer = attribution(election, o);
+  for (const { at, signer, opening: o } of openings) {
     if (o.opening.length !== m) {
       failing.push({ at, signer, code: "tally-missing" });
       continue;
@@ -261,6 +260,53 @@ function checkCell(
   return { ok: true, counts: first.opening.map((s) => s.v), ...reports };
 }
 
+/** A decoded tally opening, sorted and attributed (docs/spec/tally.md, Which openings are a cell's). */
+export interface SortedTallyOpening extends OpeningReport {
+  /** The cell it is an opening of, or `null` for a stray opening. */
+  readonly cell: number | null;
+  readonly opening: TallyOpening;
+}
+
+/**
+ * Every tally-opening payload, in the order given, decoded under the pinned
+ * version and either sorted into an opening of a cell (this election's
+ * definition hash and a cell below `cellCount`) or a stray opening, with the
+ * seat its signature attributes it to; or, if it doesn't decode, its decoding
+ * code: a rejected entry, which opens no cell (docs/spec/tally.md, Which
+ * openings are a cell's). `at` is a position in `payloads`. Needs only the
+ * definition hash and the registered signing keys, never the counted set, so
+ * a verifier can sort and attribute before it knows the set (verifier 7.3,
+ * 7.4).
+ */
+export function sortTallyOpenings(
+  election: Pick<TallyElection, "definitionHash" | "registered">,
+  cellCount: number,
+  payloads: readonly Uint8Array[],
+  pinned: 1,
+): (SortedTallyOpening | { readonly at: number; readonly error: DecodeErrorCode })[] {
+  if (!(election.definitionHash instanceof Uint8Array) || election.definitionHash.length !== 32)
+    throw new RangeError("sortTallyOpenings: definitionHash must be 32 bytes");
+  if (!Number.isInteger(cellCount) || cellCount < 1 || cellCount > MAX_CELLS)
+    throw new RangeError("sortTallyOpenings: from 1 to 256 cells");
+  return payloads.map((payload, at) => {
+    let opening: TallyOpening;
+    try {
+      opening = decodeTallyOpening(payload, pinned);
+    } catch (e) {
+      if (!(e instanceof DecodeError)) throw e;
+      return { at, error: e.code };
+    }
+    const mine =
+      sameBytes(opening.definition_hash, election.definitionHash) && opening.cell < cellCount;
+    return {
+      at,
+      signer: attribution(election, opening),
+      cell: mine ? opening.cell : null,
+      opening,
+    };
+  });
+}
+
 /**
  * The verifier's tally check (docs/spec/tally.md, Opening record and Opening
  * checks; verifier 7.2 to 7.4). `cells` holds each cell's counted ballots, in
@@ -281,23 +327,14 @@ export function checkTally(
     throw new RangeError("checkTally: definitionHash must be 32 bytes");
   if (cells.length < 1 || cells.length > MAX_CELLS)
     throw new RangeError("checkTally: from 1 to 256 cells");
-  const byCell = cells.map(() => [] as { at: number; opening: TallyOpening }[]);
+  const byCell = cells.map(() => [] as SortedTallyOpening[]);
   const stray: OpeningReport[] = [];
   const rejected: { at: number; error: DecodeErrorCode }[] = [];
-  payloads.forEach((payload, at) => {
-    let opening: TallyOpening;
-    try {
-      opening = decodeTallyOpening(payload, pinned);
-    } catch (e) {
-      if (!(e instanceof DecodeError)) throw e;
-      rejected.push({ at, error: e.code });
-      return;
-    }
-    const mine = sameBytes(opening.definition_hash, election.definitionHash);
-    const list = mine ? byCell[opening.cell] : undefined;
-    if (list === undefined) stray.push({ at, signer: attribution(election, opening) });
-    else list.push({ at, opening });
-  });
+  for (const o of sortTallyOpenings(election, cells.length, payloads, pinned)) {
+    if ("error" in o) rejected.push(o);
+    else if (o.cell === null) stray.push({ at: o.at, signer: o.signer });
+    else byCell[o.cell]?.push(o);
+  }
   const checked = cells.map((ballots, c) => checkCell(election, ballots, byCell[c] ?? []));
   const at = checked.findIndex((c) => !c.ok);
   if (at === -1) return { ok: true, cells: checked, stray, rejected };

@@ -270,7 +270,7 @@ test("a ballot pin other than 1 leaves 6.2 unsupported: a later release may open
   expect(r.openings).toBeUndefined();
 });
 
-test("the report gives the ballots after the ceremony, then the openings", () => {
+test("the report gives the ballots after the ceremony, then the openings and the tallies", () => {
   const r = format4(byId("mixed"));
   expect(Object.keys(r)).toEqual([
     "format",
@@ -281,6 +281,7 @@ test("the report gives the ballots after the ceremony, then the openings", () =>
     "ceremony",
     "ballots",
     "openings",
+    "tallies",
     "board",
     "l1",
     "checks",

@@ -330,7 +330,7 @@ describe("apps/indexer on the group registry", () => {
     await add(1n, commitments(2));
     await remove(1n, [0n]);
     // Group 2 stays empty: it must still be listed, with no records.
-    // Past Ponder's reorg window (180 s), so these blocks are finalized and
+    // Past Ponder's reorg window (600 s), so these blocks are finalized and
     // reach the index through its backfill; the next ones arrive live.
     await publicClient.request({ method: "evm_increaseTime", params: [3600] } as never);
     await publicClient.request({ method: "evm_mine", params: [] } as never);
@@ -377,5 +377,32 @@ describe("apps/indexer on the group registry", () => {
       });
       expect(replay).toMatchObject({ ok: false, error: "group-history", at: 0 });
     }
+  });
+
+  test("replay catches a reordered row, but not a dropped removal: completeness needs the accumulator", async () => {
+    const groups = await readIndexedGroups(sql, schemas[1] as string);
+    const g = groups.find((x) => x.groupId === 0n);
+    if (g === undefined) throw new Error("group 0 isn't indexed");
+    const replay = (records: typeof g.records) =>
+      applyGroupRecords(records, {
+        groupId: 0n,
+        domainSeparator: groupRegistryDomainSeparator(BigInt(chainId), hexToBytes(registry)),
+        tier: 0,
+        registrars: registrars.map((a) => hexToBytes(a)),
+        threshold: 2,
+      });
+    const [first, second, ...rest] = g.records;
+    if (first === undefined || second === undefined) throw new Error("group 0 has too few records");
+    expect(replay([second, first, ...rest])).toMatchObject({
+      ok: false,
+      at: 0,
+      reason: "position",
+    });
+    // The last record is the live removal of member 0: without it the history
+    // still replays, to a tree that keeps member 0.
+    expect(g.records.at(-1)?.kind).toBe("remove");
+    const shorter = replay(g.records.slice(0, -1));
+    expect(shorter.ok).toBe(true);
+    if (shorter.ok) expect(shorter.leaves).not.toEqual(expected.get(0n));
   });
 });

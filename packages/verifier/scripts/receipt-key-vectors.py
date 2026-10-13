@@ -127,6 +127,8 @@ def checkpoint_bytes(cp):
         + int(cp["size"]).to_bytes(8, "big").hex()
         + cp["head"]
         + cp["root"]
+        + cp["objectCid"]
+        + cp["hashesCid"]
     )
 
 

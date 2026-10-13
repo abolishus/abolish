@@ -66,6 +66,8 @@ interface BoardVector {
     readonly size: string;
     readonly head: string;
     readonly root: string;
+    readonly objectCid: string;
+    readonly hashesCid: string;
     readonly hash: string;
     readonly anchoredAt: string;
   }[];
@@ -228,7 +230,7 @@ const clock: AnchorClock = {
 
 describe("board checks", () => {
   test("parses every vector", () => {
-    expect(file.boards.length).toBe(49);
+    expect(file.boards.length).toBe(56);
   });
 
   for (const v of file.boards)
@@ -240,6 +242,8 @@ describe("board checks", () => {
           size: dec(c.size),
           head: hex(c.head),
           root: hex(c.root),
+          object_cid: hex(c.objectCid),
+          hashes_cid: hex(c.hashesCid),
         };
         expect(bytesToHex(checkpointHash(cp))).toBe(c.hash);
         return { checkpoint: cp, anchoredAt: dec(c.anchoredAt) };

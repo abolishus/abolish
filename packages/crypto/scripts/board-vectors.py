@@ -241,8 +241,29 @@ def chain_links(entries):
     return links
 
 
-def checkpoint_hash(election_id, segment, size, head, root):
-    return tagged("abolish/v1/board-checkpoint")(election_id + u(4, segment) + u(8, size) + head + root)
+def checkpoint_hash(election_id, segment, size, head, root, object_cid, hashes_cid):
+    return tagged("abolish/v1/board-checkpoint-2")(
+        election_id + u(4, segment) + u(8, size) + head + root + object_cid + hashes_cid
+    )
+
+
+def raw_cid(obj):
+    """docs/spec/content-addressing.md: an object of at most one chunk is one raw block."""
+    assert 0 < len(obj) <= 1048576, "the board vectors' segments are single chunks"
+    return bytes([0x01, 0x55, 0x12, 0x20]) + sha256(obj)
+
+
+def segment_cids(entries, size):
+    """The CIDs of the segment object and entry-hash list of entry size-1's segment."""
+    # The segment field, read raw (after the record header, election and
+    # index), so an anchored board whose entries don't decode has CIDs too.
+    seg = lambda b: b[43:47]
+    last = seg(entries[size - 1])
+    start = size - 1
+    while start > 0 and seg(entries[start - 1]) == last:
+        start -= 1
+    run = entries[start:size]
+    return raw_cid(b"".join(run)), raw_cid(b"".join(entry_hash(b) for b in run))
 
 
 # The anchoring clock of the vectors (P4-1 fixes the real one): period s
@@ -315,8 +336,8 @@ def check_board(election_id, entries, anchors, now):
     hashes = [entry_hash(b) for b in prefix]
     links = chain_links(prefix)
     match = {
-        j: (size, links[size - 1] == head, BOARD.mth(hashes[:size]) == root)
-        for j, (cid, seg, size, head, root) in reach.items()
+        j: (cp[2], links[cp[2] - 1] == cp[3], BOARD.mth(hashes[: cp[2]]) == cp[4])
+        for j, cp in reach.items()
     }
     # A checkpoint no board can match is the anchoring authority's: the copy
     # matches its head but not its root (or the reverse), or fully matches a
@@ -334,9 +355,14 @@ def check_board(election_id, entries, anchors, now):
     decoded, err = check_entries(election_id, prefix)
     if err:
         return err
-    for j, (cid, seg, size, head, root) in counted.items():
+    for j, cp in counted.items():
+        seg, size = cp[1], cp[2]
         if decoded[size - 1]["segment"] > seg or (size < extent and decoded[size]["segment"] <= seg):
             return ("checkpoint-boundary", {"checkpoint": j})
+        # The prefix is the anchored board: CIDs that don't name its segment's
+        # bytes are the anchoring authority's.
+        if segment_cids(prefix, size) != cp[5:]:
+            return ("checkpoint-cid", {"checkpoint": j})
     segments = {cp[1] for cp in counted.values()}
     for e in decoded:
         if e["segment"] not in segments and segment_end(e["segment"]) + CLOCK["deadline"] < now:
@@ -615,14 +641,17 @@ def main(out_dir):
         for s in segments:
             size = sum(1 for b in entries if decode_entry(b)["segment"] <= s)
             hashes = [entry_hash(b) for b in entries[:size]]
-            out.append((election or eid, s, size, links[size - 1], BOARD.mth(hashes)))
+            out.append((election or eid, s, size, links[size - 1], BOARD.mth(hashes)) + segment_cids(entries, size))
         return out
 
     def anchored(entries, template):
         """The template's (election, segment, size), with head and root over these raw entries."""
         links = chain_links(entries)
         hashes = [entry_hash(b) for b in entries]
-        return [(e, s_, n_, links[n_ - 1], BOARD.mth(hashes[:n_])) for e, s_, n_, _, _ in template]
+        return [
+            (e, s_, n_, links[n_ - 1], BOARD.mth(hashes[:n_])) + segment_cids(entries, n_)
+            for e, s_, n_, *_ in template
+        ]
 
     board_vectors = []
 
@@ -648,10 +677,12 @@ def main(out_dir):
                     "size": str(n),
                     "head": h(hd),
                     "root": h(r),
-                    "hash": h(checkpoint_hash(c, s, n, hd, r)),
+                    "objectCid": h(oc),
+                    "hashesCid": h(hc),
+                    "hash": h(checkpoint_hash(c, s, n, hd, r, oc, hc)),
                     "anchoredAt": str(t),
                 }
-                for (c, s, n, hd, r), t in checkpoints
+                for (c, s, n, hd, r, oc, hc), t in checkpoints
             ],
         }
         if result[0] == "ok":
@@ -711,11 +742,11 @@ def main(out_dir):
     nxt = board_of(good[:5] + [(2, ballot(9))])
     board("opening-then-next-segment", "A ballot after an opening is fine in a later segment", nxt, cps(nxt, [0, 1, 2, 6]), ("ok", 6))
     board("checkpoint-other-election", "A checkpoint for another election", g, [c[0], (other,) + c[1][1:]] + c[2:], ("wrong-election", {"checkpoint": 1}))
-    board("checkpoint-size-zero", "A checkpoint of an empty board", g, [(eid, 2, 0, bytes(32), bytes(32))] + c, ("checkpoint-size", {"checkpoint": 0}))
+    board("checkpoint-size-zero", "A checkpoint of an empty board", g, [(eid, 2, 0, bytes(32), bytes(32), bytes(36), bytes(36))] + c, ("checkpoint-size", {"checkpoint": 0}))
     board("checkpoint-missing", "The anchored board is longer than the one held", g[:8], c, ("checkpoint-missing", {"checkpoint": 3}))
     mid = cps(g, [1])[0]
     rest = cps(g, [0, 4, 6])
-    inside = (eid, 1, 3, chain_links(g)[2], BOARD.mth([entry_hash(b) for b in g[:3]]))
+    inside = (eid, 1, 3, chain_links(g)[2], BOARD.mth([entry_hash(b) for b in g[:3]])) + segment_cids(g, 3)
     board(
         "checkpoint-mid-segment",
         "A checkpoint for segment 1 that stops inside segment 1",
@@ -727,8 +758,8 @@ def main(out_dir):
     seg0 = cps(g, [0])[0]
     forked = list(g)
     forked[2] = entry(eid, 2, 1, ballot(7))
-    board("checkpoint-wrong-head", "A checkpoint with the honest root and a wrong head: no board matches it, so the anchoring authority is at fault", g, [mid[:3] + (seg0[3], mid[4])] + rest, ("checkpoint-inconsistent", {"checkpoint": 0}))
-    board("checkpoint-wrong-root", "A checkpoint with the honest head and a wrong root: no board matches it, so the anchoring authority is at fault", g, [mid[:4] + (seg0[4],)] + rest, ("checkpoint-inconsistent", {"checkpoint": 0}))
+    board("checkpoint-wrong-head", "A checkpoint with the honest root and a wrong head: no board matches it, so the anchoring authority is at fault", g, [mid[:3] + (seg0[3],) + mid[4:]] + rest, ("checkpoint-inconsistent", {"checkpoint": 0}))
+    board("checkpoint-wrong-root", "A checkpoint with the honest head and a wrong root: no board matches it, so the anchoring authority is at fault", g, [mid[:4] + (seg0[4],) + mid[5:]] + rest, ("checkpoint-inconsistent", {"checkpoint": 0}))
     board(
         "checkpoint-contradicted-by-larger",
         "Segment 1's checkpoint is of a forked board, but the copy fully matches segment 4's larger checkpoint, which admits only the copy's prefix",
@@ -754,7 +785,7 @@ def main(out_dir):
         "checkpoint-split-before-missing",
         "A checkpoint with a wrong head is found from a short copy even when a larger checkpoint is missing from it",
         g[:8],
-        [mid[:3] + (seg0[3], mid[4])] + rest,
+        [mid[:3] + (seg0[3],) + mid[4:]] + rest,
         ("checkpoint-inconsistent", {"checkpoint": 0}),
     )
     board(
@@ -763,6 +794,57 @@ def main(out_dir):
         g,
         [inside, cps(forked, [4])[0], seg0],
         ("copy-mismatch", {"checkpoint": 1}),
+    )
+    board(
+        "checkpoint-equal-size-cid-differs",
+        "Segments 1 and 2 anchored at the same size, head and root, segment 2 naming other CIDs (from L1 alone)",
+        g,
+        c + [(eid, 2) + mid[2:5] + seg0[5:]],
+        ("checkpoint-inconsistent", {"checkpoint": 4}),
+    )
+    board(
+        "checkpoint-wrong-object-cid",
+        "Segment 1's checkpoint names segment 0's object: its head and root match, so the anchoring authority is at fault",
+        g,
+        [c[0], mid[:5] + (seg0[5], mid[6])] + c[2:],
+        ("checkpoint-cid", {"checkpoint": 1}),
+    )
+    board(
+        "checkpoint-wrong-hashes-cid",
+        "Segment 1's checkpoint names segment 0's entry-hash list",
+        g,
+        [c[0], mid[:6] + (seg0[6],)] + c[2:],
+        ("checkpoint-cid", {"checkpoint": 1}),
+    )
+    board(
+        "checkpoint-cid-before-next-boundary",
+        "Anchor 0 names segment 1's object and anchor 1 stops inside segment 1: each anchor's CIDs are checked before the next anchor's boundary",
+        g,
+        [seg0[:5] + (mid[5], seg0[6]), inside] + cps(g, [4, 6]),
+        ("checkpoint-cid", {"checkpoint": 0}),
+    )
+    whole = raw_cid(b"".join(g[:7]))
+    board(
+        "checkpoint-cid-of-prefix",
+        "Segment 1's checkpoint names the whole prefix as one object, not segment 1's entries",
+        g,
+        [c[0], mid[:5] + (whole, mid[6])] + c[2:],
+        ("checkpoint-cid", {"checkpoint": 1}),
+    )
+    seg1_object = b"".join(g[2:7])
+    board(
+        "checkpoint-cid-non-canonical",
+        "Segment 1's object named with the dag-pb codec over its digest: not the CID of the content-addressing spec",
+        g,
+        [c[0], mid[:5] + (bytes([0x01, 0x70, 0x12, 0x20]) + sha256(seg1_object), mid[6])] + c[2:],
+        ("checkpoint-cid", {"checkpoint": 1}),
+    )
+    board(
+        "checkpoint-reanchor-fresh-cid",
+        "Segment 2 re-anchors segment 1's state, but with no segment 1 checkpoint counted to compare from L1, names segment 0's CIDs instead of carrying segment 1's",
+        g,
+        [c[0], (eid, 2) + mid[2:5] + seg0[5:]] + c[2:],
+        ("checkpoint-cid", {"checkpoint": 1}),
     )
     board("checkpoint-forked", "The copy held differs from the anchored board in entry 2", forked, c, ("copy-mismatch", {"checkpoint": 1}))
     board("checkpoint-equivocation", "A second, different checkpoint anchored for segment 1 (a fork shown to some voters)", g, c + cps(forked, [1]), ("checkpoint-equivocation", {"checkpoint": 4}))

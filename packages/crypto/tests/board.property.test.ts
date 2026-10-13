@@ -28,6 +28,7 @@ import {
   MAX_BOARD_PAYLOAD,
   merkleRoot,
   merkleRoots,
+  objectCid,
   RECORD_TYPES,
   UNPINNED,
   verifyConsistency,
@@ -416,6 +417,55 @@ describe("board checks", () => {
     );
   });
 
+  test("a checkpoint whose CIDs don't name its segment's bytes fails the election", () => {
+    run(
+      fc.property(
+        boardArb,
+        fc.nat(),
+        fc.boolean(),
+        fc.uint8Array({ minLength: 36, maxLength: 36 }),
+        ({ entries, last }, k, wrongObject, bogus) => {
+          const checkpoints = checkpointsFor(entries, last);
+          const i = k % checkpoints.length;
+          const a = checkpoints[i] as Anchor;
+          const field = wrongObject ? "object_cid" : "hashes_cid";
+          fc.pre(!a.checkpoint[field].every((b, j) => b === bogus[j]));
+          const bad = { ...a, checkpoint: { ...a.checkpoint, [field]: bogus } };
+          const anchors = checkpoints.map((x, j) => (j === i ? bad : x));
+          // Its head and root match the copy, so the copy is the anchored
+          // board and the CIDs are the anchoring authority's (T-24, T-49).
+          expect(verdict(entries, anchors, last)).toMatch(
+            /^(checkpoint-cid|checkpoint-inconsistent)$/,
+          );
+          // Only one counted checkpoint of its size: nothing on L1 contradicts it.
+          if (checkpoints.filter((x) => x.checkpoint.size === a.checkpoint.size).length === 1)
+            expect(verdict(entries, anchors, last)).toBe("checkpoint-cid");
+        },
+      ),
+    );
+  });
+
+  test("a checkpoint names its segment's object and entry-hash list, carried over while nothing is added", () => {
+    run(
+      fc.property(boardArb, ({ entries, last }) => {
+        const board = checkBoard(ELECTION, entries, 1);
+        for (let s = 0; s <= last; s++) {
+          const cp = checkpointOf(board, s);
+          if (cp === undefined) continue;
+          const size = Number(cp.size);
+          const t = (board.entries[size - 1] as BoardEntry).segment;
+          const run_ = board.entries.flatMap((e, i) => (e.segment === t ? [i] : []));
+          const join = (parts: readonly Uint8Array[]) =>
+            Uint8Array.from(parts.flatMap((p) => [...p]));
+          expect(cp.object_cid).toEqual(objectCid(join(run_.map((i) => entries[i] as Uint8Array))));
+          expect(cp.hashes_cid).toEqual(
+            objectCid(join(run_.map((i) => board.entryHashes[i] as Uint8Array))),
+          );
+        }
+      }),
+    );
+  });
+
   test("a checkpoint with only its head or only its root wrong fails the election", () => {
     run(
       fc.property(
@@ -639,6 +689,39 @@ describe("checkpoints from a raw copy", () => {
     );
   });
 
+  test("a copy is hashed into CIDs once however many segments name the same extent", () => {
+    // A hostile mirror labels every entry with segment 0, so every word's
+    // prefix is the whole copy: naming more segments must not hash it again
+    // (T-53). Timed rather than counted, with a wide margin: without the
+    // memo the 200-segment run takes about 200 times as long.
+    const big = Array.from({ length: 16 }, (_, i) =>
+      encodeBoardEntry(
+        {
+          election_id: ELECTION,
+          index: BigInt(i),
+          segment: 0,
+          // Built in place: spreading 256 KiB into `recordOf` overflows the stack.
+          payload: (() => {
+            const p = new Uint8Array(3 + 256 * 1024).fill(i);
+            p.set([0, 2, 1]);
+            return p;
+          })(),
+        },
+        1,
+      ),
+    );
+    const time = (segments: number[]) => {
+      const start = performance.now();
+      const got = copyCheckpoints(ELECTION, big, segments);
+      expect(new Set([...got.values()].map((c) => c.object_cid.join())).size).toBe(1);
+      return performance.now() - start;
+    };
+    time([0]);
+    const one = Math.max(time([0]), 1);
+    const many = time(Array.from({ length: 200 }, (_, s) => s));
+    expect(many).toBeLessThan(20 * one + 50);
+  });
+
   test("the prefix ends at the first entry past the segment, and a short entry ends it", () => {
     const entry = (index: number, segment: number) =>
       encodeBoardEntry(
@@ -663,21 +746,25 @@ describe("checkpoints from a raw copy", () => {
     expect(() => copyCheckpoints(ELECTION.slice(1), copy, [0])).toThrow(RangeError);
   });
 
-  test("decodeCheckpoint(encodeCheckpoint(c)) = c, and only 108 bytes decode", () => {
+  test("decodeCheckpoint(encodeCheckpoint(c)) = c, and only 180 bytes decode", () => {
+    const cid = fc.uint8Array({ minLength: 36, maxLength: 36 });
     run(
       fc.property(
-        hash32,
-        fc.integer({ min: 0, max: 0xffffffff }),
-        fc.bigInt({ min: 0n, max: (1n << 64n) - 1n }),
-        hash32,
-        hash32,
-        fc.uint8Array({ maxLength: 120 }),
-        (election_id, segment, size, head, root, junk) => {
-          const cp: Checkpoint = { election_id, segment, size, head, root };
+        fc.record({
+          election_id: hash32,
+          segment: fc.integer({ min: 0, max: 0xffffffff }),
+          size: fc.bigInt({ min: 0n, max: (1n << 64n) - 1n }),
+          head: hash32,
+          root: hash32,
+          object_cid: cid,
+          hashes_cid: cid,
+        }),
+        fc.uint8Array({ maxLength: 200 }),
+        (cp: Checkpoint, junk) => {
           const bytes = encodeCheckpoint(cp);
-          expect(bytes.length).toBe(108);
+          expect(bytes.length).toBe(180);
           expect(decodeCheckpoint(bytes)).toEqual(cp);
-          if (junk.length !== 108) expect(() => decodeCheckpoint(junk)).toThrow(DecodeError);
+          if (junk.length !== 180) expect(() => decodeCheckpoint(junk)).toThrow(DecodeError);
           else expect(encodeCheckpoint(decodeCheckpoint(junk))).toEqual(junk);
         },
       ),

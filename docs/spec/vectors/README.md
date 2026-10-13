@@ -26,6 +26,7 @@ One JSON file per spec section or record type, named after it (`primitives.json`
 | `display-text.json`           | Display-text record version 1: codec, commitment and well-formedness ([[display-text]])                                                                                                                                                                                                                                                                                         |
 | `event-accumulator.json`      | The first event-accumulator layout (`abolish/v1/event-accumulator`, binding no block): frozen, retired before any deployment, consumed by nothing ([[0025-contract-event-evidence]])                                                                                                                                                                                            |
 | `event-accumulator-2.json`    | The event accumulator: genesis values, event sequences step by step with each event's block, proof checks against an archive, rejected inputs ([[contracts]])                                                                                                                                                                                                                   |
+| `contract-event.json`         | Contract-event records (`0x0008`): the event tables with each signature's topic 0, honest records of every event with their decoded fields, records failing each event-check code, decode rejections, and each contract's records replayed into its accumulator ([[contracts]], Contract-event record)                                                                          |
 | `election-registry.json`      | Election identifiers the election registry assigns, and inputs with no `u64` encoding ([[contracts]], Election registry)                                                                                                                                                                                                                                                        |
 | `group-registry.json`         | The group registry's EIP-712 domain and types, addition and removal records with their digests and signed approvals, rejected records and forbidden commitments ([[contracts]], Group registry)                                                                                                                                                                                 |
 | `trustee.json`                | Trustee identity keys and signatures, accepted and rejected; panel identifiers; ceremony-registration statements ([[trustee-identity]])                                                                                                                                                                                                                                         |
@@ -153,6 +154,17 @@ Type descriptors:
 - each event in `sequences` also has `block` and `timestamp` (decimal strings), which its step binds;
 - `proofs`: each has `id`, `description`, `chainId`, `address`, `events` (as in `sequences`, each also with `n`, its position as the archive numbers it), `proof` (`count`, `block`, decimal strings, and `accumulator`: the values a storage proof gave after that block) and `error`, `null` when the archive matches the proof or the first failing rule's code otherwise (`index`, `order`, `block-range` or `accumulator`; [[contracts]], Event accumulator, Verification). Solidity doesn't consume these: the check is the verifier's;
 - `rejected` steps also have `block` and `timestamp`, and include a block number and a timestamp of 2⁶⁴, which have no `u64` encoding.
+
+## Contract-event vectors
+
+`contract-event.json` covers [[contracts]], Contract-event record, with its own format, `abolish-contract-event-vectors/1`, and the same top-level fields, plus `recordType` (`"0x0008"`), `version` (1), `maxEventData` and `maxEventTopics`, `chainId` (decimal string) and:
+
+- `contracts`: the definition's L2 contract addresses the event check runs against, by role (`election-registry`, `trustee-registry`, `group-registry`, `board`; 20 bytes, hex).
+- `events`: each role's table, in order: `role`, the ABI `signature`, the `indexed` parameters' names and `topic0`, the signature's keccak-256.
+- `records`: honest records, each with `id`, `description`, `fields` (`contract`, `topics`, `data` as hex; `n`, `l2Block`, `l2Timestamp` as decimal strings), the record's `encoding`, its `role` and the decoded `event` (its name and fields: bytes as hex, `u64`s as decimal strings, `u8`s as numbers, and each embedded record or definition as its bytes).
+- `eventFailures`: records that decode but fail the event check, with `fields`, `encoding` and `error`, the code.
+- `decodeErrors`: inputs rejected by strict decoding with version 1 pinned, with `error` and `offset`.
+- `sequences`: for each registry, the ids of its records in order of `n`, the accumulator after each in turn (under `chainId` and the role's address) and the final `count`.
 
 ## Election-registry vectors
 

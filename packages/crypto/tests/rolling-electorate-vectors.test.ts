@@ -10,6 +10,7 @@ import {
   tierTreeZeros,
   UNPINNED,
 } from "../src/index.ts";
+import { memberCount, type RollingEvent, rollingLeaves, tau } from "./rolling-tree.ts";
 import { buildSchema, hex, readVectorFile, SPEC_VECTORS, type VectorFile } from "./spec-vectors.ts";
 
 // docs/spec/vectors/election-definition-v7.json and rolling-tier-tree.json,
@@ -119,14 +120,6 @@ describe("election definition version 7 (docs/spec/election-definition.md, Layou
   });
 });
 
-interface RollingEvent {
-  readonly block: string;
-  readonly timestamp: string;
-  readonly group: string;
-  readonly add?: readonly string[];
-  readonly remove?: readonly string[];
-}
-
 interface RollingTree {
   readonly leaves: readonly string[];
   readonly root: string;
@@ -166,31 +159,6 @@ interface RollingFile {
     readonly scopeField: string;
   }[];
 }
-
-/** Membership, Rolling tier tree: the listed groups' additions in chain order, removals by member index. */
-function rollingLeaves(
-  events: readonly RollingEvent[],
-  groups: readonly string[],
-  admit: (e: RollingEvent) => boolean,
-): bigint[] {
-  const leaves: bigint[] = [];
-  const at = new Map<string, number>();
-  const count = new Map<string, number>();
-  for (const e of events) {
-    if (!admit(e) || !groups.includes(e.group)) continue;
-    for (const c of e.add ?? []) {
-      const i = count.get(e.group) ?? 0;
-      at.set(`${e.group}/${i}`, leaves.length);
-      count.set(e.group, i + 1);
-      leaves.push(BigInt(c));
-    }
-    for (const i of e.remove ?? []) leaves[at.get(`${e.group}/${i}`)!] = 0n;
-  }
-  return leaves;
-}
-
-const memberCount = (leaves: readonly bigint[]) => new Set(leaves.filter((x) => x !== 0n)).size;
-const tau = (n: bigint) => n * BigInt(PARAMETERS.ROOT_PERIOD) + BigInt(PARAMETERS.ROOT_OFFSET);
 
 describe("rolling tier trees (docs/spec/membership.md, Rolling tier tree, Root clock and steps)", () => {
   const rolling = JSON.parse(

@@ -12,6 +12,7 @@ const scenario = {
   trustees: { panel: 3, threshold: 2, offline: [3] },
   tiers: { "0": 1, "2": 1 },
   outage: { from: 0.5, to: 1 },
+  challenges: 0.5,
   seed: 11,
 };
 
@@ -46,15 +47,23 @@ describe("simulation", { timeout: 60_000 }, () => {
     expect(progress.filter((s) => s === "tally")).toHaveLength(2);
   });
 
-  test("plan reads a scenario file and prints the expected counts, matching run's", async () => {
+  test("plan reads a scenario file and prints the expected counts and challenges, matching run's", async () => {
     const file = join(mkdtempSync(join(tmpdir(), "sim-")), "scenario.json");
     writeFileSync(file, JSON.stringify(scenario));
     const plan = await cli("simulation", "plan", "--file", file);
     expect(plan.code).toBe(0);
-    const out = plan.out[0] as { expected: { tier: number; counts: number[] }[] };
+    const out = plan.out[0] as {
+      ballots: { challenged: number };
+      expected: { tier: number; counts: number[] }[];
+    };
     const ran = await cli("simulation", "run", "--file", file);
-    const cells = (ran.out[0] as { cells: { tier: number; counts: number[] }[] }).cells;
-    expect(out.expected).toEqual(cells.map((c) => ({ tier: c.tier, counts: c.counts })));
+    const report = ran.out[0] as {
+      ballots: { challenged: number };
+      cells: { tier: number; counts: number[] }[];
+    };
+    expect(out.expected).toEqual(report.cells.map((c) => ({ tier: c.tier, counts: c.counts })));
+    expect(out.ballots.challenged).toBeGreaterThan(0);
+    expect(report.ballots.challenged).toBe(out.ballots.challenged);
   });
 
   test("refuses a malformed scenario as a usage error naming the field", async () => {

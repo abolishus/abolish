@@ -12,6 +12,7 @@ const base: Scenario = {
   trustees: { panel: 4, threshold: 2, offline: [2], faulty: [] },
   tiers: { "0": 2, "1": 1, "2": 1 },
   outage: { from: 0.5, to: 1 },
+  challenges: 0,
   seed: 3,
 };
 
@@ -23,6 +24,7 @@ describe("runSimulation", { timeout }, () => {
     expect(r.ballots.cast).toBe(9);
     expect(r.ballots.server + r.ballots.direct).toBe(9);
     expect(r.ballots.direct).toBeGreaterThan(0);
+    expect(r.ballots.challenged).toBe(0);
     expect(r.trustees).toEqual({ online: [1, 3, 4], offline: [2], faulty: [] });
     expect(r.cells.map((c) => c.tier)).toEqual([0, 1, 2]);
     for (const c of r.cells) {
@@ -66,6 +68,14 @@ describe("runSimulation", { timeout }, () => {
       expect(c.counts).toBeUndefined();
     }
     expect(r.total).toBeUndefined();
+  });
+
+  it("checks every challenged attempt's opening, then casts a fresh one that still opens to the plan", () => {
+    const r = runSimulation({ ...base, challenges: 1 });
+    expect(r.ok).toBe(true);
+    expect(r.ballots.challenged).toBe(9);
+    expect(r.cells.reduce((a, c) => a + c.ballots, 0)).toBe(9);
+    for (const c of r.cells) expect(c.counts).toEqual(c.expected);
   });
 
   it("opens an empty cell to zero", () => {

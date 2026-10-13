@@ -43,6 +43,7 @@ const scenario: fc.Arbitrary<Scenario> = fc.integer({ min: 2, max: 16 }).chain((
         .map(([from, to]) => ({ from, to })),
       { nil: null },
     ),
+    challenges: fc.double({ min: 0, max: 1, noNaN: true }),
     seed: fc.integer({ min: 0, max: 0xffff_ffff }),
   }),
 );
@@ -54,6 +55,7 @@ const valid: Scenario = {
   trustees: { panel: 7, threshold: 4, offline: [2, 5], faulty: [] },
   tiers: { "0": 50, "1": 30, "2": 20 },
   outage: { from: 0.5, to: 1 },
+  challenges: 0.1,
   seed: 1,
 };
 
@@ -73,7 +75,7 @@ describe("parseScenario", () => {
     );
   });
 
-  it("defaults only the optional fields: no outage, no offline or faulty seats, missing tiers at 0", () => {
+  it("defaults only the optional fields: no outage or challenges, no offline or faulty seats, missing tiers at 0", () => {
     const r = parseScenario({
       voters: 1,
       election: "approval",
@@ -91,6 +93,7 @@ describe("parseScenario", () => {
         trustees: { panel: 2, threshold: 2, offline: [], faulty: [] },
         tiers: { "0": 0, "1": 1, "2": 0 },
         outage: null,
+        challenges: 0,
         seed: 0,
       },
     });
@@ -114,6 +117,9 @@ describe("parseScenario", () => {
     const { outage: _, ...noOutage } = valid;
     const inherited = Object.assign(Object.create({ outage: { from: 0, to: 1 } }), noOutage);
     expect(parseScenario(inherited)).toMatchObject({ ok: true, scenario: { outage: null } });
+    const { challenges: __, ...noChallenges } = valid;
+    const inheritedShare = Object.assign(Object.create({ challenges: 1 }), noChallenges);
+    expect(parseScenario(inheritedShare)).toMatchObject({ ok: true, scenario: { challenges: 0 } });
   });
 
   it("refuses missing required fields", () => {
@@ -143,6 +149,10 @@ describe("parseScenario", () => {
     expect(refusal({ ...valid, seed: 2 ** 32 })).toBe("$.seed");
     expect(refusal({ ...valid, tiers: { "0": -1, "1": 1 } })).toBe("$.tiers.0");
     expect(refusal({ ...valid, outage: { from: -0.1, to: 1 } })).toBe("$.outage.from");
+    expect(refusal({ ...valid, challenges: -0.1 })).toBe("$.challenges");
+    expect(refusal({ ...valid, challenges: 1.1 })).toBe("$.challenges");
+    expect(refusal({ ...valid, challenges: "0.5" })).toBe("$.challenges");
+    expect(refusal({ ...valid, challenges: null })).toBe("$.challenges");
     expect(refusal({ ...valid, outage: { from: 0, to: 1.1 } })).toBe("$.outage.to");
     expect(refusal({ ...valid, outage: { from: 0, to: Number.NaN } })).toBe("$.outage.to");
     expect(refusal([])).toBe("$");

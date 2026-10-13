@@ -49,6 +49,12 @@ export interface Scenario {
    * refuse ballots; `null` (or no field) for none.
    */
   readonly outage: { readonly from: number; readonly to: number } | null;
+  /**
+   * The share of voters, in `[0, 1]`, who challenge one attempt (a Benaloh
+   * challenge, docs/spec/challenge.md) before casting a fresh one; 0 (or no
+   * field) for none.
+   */
+  readonly challenges: number;
   /** Seeds the plan only (who votes how and when), never a secret. */
   readonly seed: number;
 }
@@ -111,7 +117,7 @@ function parse(input: unknown): Scenario {
     input,
     "$",
     ["voters", "election", "options", "trustees", "tiers", "seed"],
-    ["outage"],
+    ["outage", "challenges"],
   );
   const voters = integer(o["voters"], "$.voters", 1, MAX_SIMULATED_VOTERS);
   const election = o["election"];
@@ -147,6 +153,7 @@ function parse(input: unknown): Scenario {
     if (from >= to) throw new Refusal("$.outage", "from is before to");
     outage = { from, to };
   }
+  const challenges = Object.hasOwn(o, "challenges") ? fraction(o["challenges"], "$.challenges") : 0;
   const seed = integer(o["seed"], "$.seed", 0, 0xffff_ffff);
   return {
     voters,
@@ -155,6 +162,7 @@ function parse(input: unknown): Scenario {
     trustees: { panel, threshold, offline, faulty },
     tiers,
     outage,
+    challenges,
     seed,
   };
 }

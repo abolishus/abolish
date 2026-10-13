@@ -28,6 +28,7 @@ const base: Scenario = {
   trustees: { panel: 4, threshold: 2, offline: [2], faulty: [] },
   tiers: { "0": 2, "1": 1, "2": 1 },
   outage: null,
+  challenges: 0,
   seed: 3,
 };
 
@@ -65,6 +66,7 @@ const scenario = fc.record({
     "2": fc.integer({ min: 1, max: 3 }),
   }),
   outage: fc.constant(null),
+  challenges: fc.constant(0),
   seed: fc.integer({ min: 0, max: 0xffff_ffff }),
 });
 

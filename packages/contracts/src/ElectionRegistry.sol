@@ -29,8 +29,10 @@ library ElectionIdLib {
 /// that decodes strictly, is well formed, names this deployment's chains and
 /// contracts, comes from the election's creator before it opens, has an
 /// electorate already public on L2, and whose stub the trustee registry
-/// recorded with its ceremony transcript (T-17, T-37, T-08, T-13). There is no
-/// admin, proxy, pause or upgrade path: every rule is fixed at deployment.
+/// recorded with its ceremony transcript (T-17, T-37, T-08, T-13). With each
+/// definition it records the parameters the board's checks read, so the board
+/// never takes them from a caller (ADR 0028, 1C; T-25). There is no admin,
+/// proxy, pause or upgrade path: every rule is fixed at deployment.
 contract ElectionRegistry is EventAccumulator {
     /// The contracts and clocks of the deployment, fixed at construction. A
     /// definition must name exactly these.
@@ -44,6 +46,35 @@ contract ElectionRegistry is EventAccumulator {
         /// The anchoring clock's `epoch` of the anchor contract `l1Anchor`
         /// (P4-1): no election opens before it.
         uint64 epoch;
+    }
+
+    /// One question's option count and selection limits (docs/spec/contracts.md,
+    /// Parameters).
+    struct Question {
+        uint16 optionCount;
+        uint16 minSelections;
+        uint16 maxSelections;
+    }
+
+    /// What the board's checks read for a registered definition, a function of
+    /// the definition alone (docs/spec/contracts.md, Parameters). All zero and
+    /// empty for a definition hash never registered.
+    struct Parameters {
+        /// The version the definition's profile pins for the ballot (0x0002);
+        /// never 0 once registered, since every pin is at least 1.
+        uint8 ballotVersion;
+        /// `k`, the default panel's threshold.
+        uint8 threshold;
+        /// `n`, the default panel's size.
+        uint8 panelSize;
+        /// `T`, every question's options together.
+        uint16 optionCount;
+        /// In the order the ballot asks them.
+        Question[] questions;
+        /// The partition's cells in order: `cellTiers[c]` is cell `c`'s tier
+        /// and `cellRoots[c]` the root its ballots prove membership against.
+        uint8[] cellTiers;
+        uint256[] cellRoots;
     }
 
     /// A definition field that names something other than this deployment.
@@ -114,6 +145,7 @@ contract ElectionRegistry is EventAccumulator {
     uint64 public electionCount;
     mapping(bytes32 electionId => address) public creatorOf;
     mapping(bytes32 electionId => bytes32) public definitionHashOf;
+    mapping(bytes32 definitionHash => Parameters) private _parameters;
 
     constructor(Deployment memory dep) {
         // The same rule a definition's `chain` check applies, so a deployment
@@ -143,6 +175,12 @@ contract ElectionRegistry is EventAccumulator {
     /// (0-based) by this registry. The deployment refused any chain ID above u64.
     function electionIdAt(uint64 counter) public view returns (bytes32) {
         return ElectionIdLib.electionId(uint64(block.chainid), address(this), counter);
+    }
+
+    /// @notice The board's parameters for the registered definition whose hash
+    /// is `definitionHash`, or all zero (`ballotVersion` 0) if none is.
+    function parameters(bytes32 definitionHash) external view returns (Parameters memory) {
+        return _parameters[definitionHash];
     }
 
     /// @notice Creates an election and makes the caller its creator, the only
@@ -212,6 +250,7 @@ contract ElectionRegistry is EventAccumulator {
 
         bytes32 h = ElectionDefinitionLib.hash(definition);
         definitionHashOf[id] = h;
+        _recordParameters(h, def);
         _log3(DefinitionRegistered.selector, id, h, _registrationData(definition));
     }
 
@@ -221,6 +260,26 @@ contract ElectionRegistry is EventAccumulator {
     function _registrationData(bytes calldata definition) private view returns (bytes memory) {
         (uint64 n, uint64 t, bytes32 hash) = _l1Origin();
         return abi.encode(n, t, hash, definition);
+    }
+
+    /// Records what the board reads for definition `h`. The definition hash
+    /// names one election and is set once, so these are written once too.
+    function _recordParameters(bytes32 h, ElectionDefinitionLib.Definition memory def) private {
+        Parameters storage p = _parameters[h];
+        // `profile-types` fixed the pins as 0x0001 to 0x0009 in order, so the
+        // ballot's is the second.
+        p.ballotVersion = def.pinVersions[1];
+        p.threshold = def.threshold;
+        p.panelSize = def.panelSize;
+        p.optionCount = def.optionCount;
+        // Version 1 asks one question, over all its options.
+        p.questions.push(Question(def.optionCount, def.minSelections, def.maxSelections));
+        // Version 1's cells are its tiers, one per electorate entry in order
+        // (docs/spec/election-definition.md, Tally partition).
+        for (uint256 i; i < def.electorate.length; i++) {
+            p.cellTiers.push(def.electorate[i].tier);
+            p.cellRoots.push(def.electorate[i].root);
+        }
     }
 
     /// The current block's L1 origin (number, timestamp, hash), as the events

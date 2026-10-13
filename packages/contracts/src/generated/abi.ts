@@ -423,6 +423,37 @@ export const electionRegistryAbi = [
   },
   {
     type: "function",
+    inputs: [{ name: "definitionHash", internalType: "bytes32", type: "bytes32" }],
+    name: "parameters",
+    outputs: [
+      {
+        name: "",
+        internalType: "struct ElectionRegistry.Parameters",
+        type: "tuple",
+        components: [
+          { name: "ballotVersion", internalType: "uint8", type: "uint8" },
+          { name: "threshold", internalType: "uint8", type: "uint8" },
+          { name: "panelSize", internalType: "uint8", type: "uint8" },
+          { name: "optionCount", internalType: "uint16", type: "uint16" },
+          {
+            name: "questions",
+            internalType: "struct ElectionRegistry.Question[]",
+            type: "tuple[]",
+            components: [
+              { name: "optionCount", internalType: "uint16", type: "uint16" },
+              { name: "minSelections", internalType: "uint16", type: "uint16" },
+              { name: "maxSelections", internalType: "uint16", type: "uint16" },
+            ],
+          },
+          { name: "cellTiers", internalType: "uint8[]", type: "uint8[]" },
+          { name: "cellRoots", internalType: "uint256[]", type: "uint256[]" },
+        ],
+      },
+    ],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
     inputs: [{ name: "definition", internalType: "bytes", type: "bytes" }],
     name: "registerDefinition",
     outputs: [],

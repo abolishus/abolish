@@ -18,6 +18,7 @@ contract RegistryHandler is TestBase {
     bytes32[] public ids;
     mapping(bytes32 => address) public shadowCreator;
     mapping(bytes32 => bytes32) public shadowHash;
+    mapping(bytes32 => uint16) public shadowOptions;
     uint256 public registrations;
     /// Set if a registration succeeded or failed against the rules.
     bool public unexpected;
@@ -56,6 +57,7 @@ contract RegistryHandler is TestBase {
         try registry.registerDefinition(enc) {
             if (!allowed) unexpected = true;
             shadowHash[id] = lib.hash(enc);
+            shadowOptions[id] = d.optionCount;
             registrations++;
         } catch {
             if (allowed) unexpected = true;
@@ -76,6 +78,8 @@ contract RegistryHandler is TestBase {
 /// 4. A registration succeeds exactly when its caller is the creator and the
 ///    election has no definition yet.
 /// 5. The event accumulator counts one event per creation and per registration.
+/// 6. The board's parameters are recorded for exactly the registered
+///    definitions, from the definition that was registered (ADR 0028, 1C).
 contract ElectionRegistryInvariantTest is TestBase {
     ElectionRegistry internal registry;
     RegistryHandler internal handler;
@@ -105,7 +109,11 @@ contract ElectionRegistryInvariantTest is TestBase {
             bytes32 id = handler.ids(i);
             assertEq(id, registry.electionIdAt(uint64(i)), "identifier");
             assertTrue(registry.creatorOf(id) == handler.shadowCreator(id), "creator");
-            assertEq(registry.definitionHashOf(id), handler.shadowHash(id), "definition hash");
+            bytes32 h = handler.shadowHash(id);
+            assertEq(registry.definitionHashOf(id), h, "definition hash");
+            ElectionRegistry.Parameters memory p = registry.parameters(h);
+            assertEq(p.optionCount, handler.shadowOptions(id), "parameters");
+            assertEq(p.cellRoots.length, h == bytes32(0) ? 0 : 2, "cells");
         }
     }
 

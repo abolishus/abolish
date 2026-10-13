@@ -72,14 +72,17 @@ export interface SimulatedElection {
   readonly registered: readonly RegisteredKeys[];
 }
 
-/**
- * The profile: every type from 0x0001 to 0x0009 pinned, with board-entry
- * version 4, which ballot and tally-opening version 1 need ([[verifier]] 2.3).
- */
+/** The board-entry version the profile pins: 4, which ballot and tally-opening version 1 need ([[verifier]] 2.3). */
+export const SIMULATED_BOARD_ENTRY_VERSION = 4;
+
+/** The profile: every type from 0x0001 to 0x0009 pinned, at version 1 but board entries. */
 function profile(): ElectionDefinition["profile"] {
   const pins = [];
   for (let t: number = RECORD_TYPES.electionDefinition; t <= RECORD_TYPES.displayText; t++)
-    pins.push({ record_type: t, version: t === RECORD_TYPES.boardEntry ? 4 : 1 });
+    pins.push({
+      record_type: t,
+      version: t === RECORD_TYPES.boardEntry ? SIMULATED_BOARD_ENTRY_VERSION : 1,
+    });
   return { protocol_major: 1, pins };
 }
 

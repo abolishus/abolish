@@ -41,12 +41,11 @@ const PollsElectionIdRoute = PollsElectionIdRouteImport.update({
   path: "/polls/$electionId",
   getParentRoute: () => rootRouteImport,
 } as any);
-const PollsElectionIdPreviewDotpngRoute =
-  PollsElectionIdPreviewDotpngRouteImport.update({
-    id: "/preview.png",
-    path: "/preview.png",
-    getParentRoute: () => PollsElectionIdRoute,
-  } as any);
+const PollsElectionIdPreviewDotpngRoute = PollsElectionIdPreviewDotpngRouteImport.update({
+  id: "/preview.png",
+  path: "/preview.png",
+  getParentRoute: () => PollsElectionIdRoute,
+} as any);
 
 export interface FileRoutesByFullPath {
   "/": typeof IndexRoute;

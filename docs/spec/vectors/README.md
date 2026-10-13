@@ -331,7 +331,7 @@ The proofs are randomised: regenerating gives other proof bytes for the same sta
 - `elections`: `panels` (a 2-of-3 author panel) and `default-only` (none), `ballot-v4-records.json`'s, each with `version` (6), `definition` and `definitionHash`.
 - `seats`: `default` and `author`, seats 1 to 3 of each panel, each as in `intake.json`'s `panel`, plus `identityKey` (a key that is never a receipt signer). The author seats' KEM keys are test keys: an author panel's come from its own ceremony (P2-16 part 3).
 - `cases`: as in `intake.json`, with `registered` and `authorRegistered` (each panel's qualified seats), `panel` and `seat` (the seat taking the delivery), and the `statement` of version 4's receipt; an admitted ballot also has `cell`. A `share-hash-unqualified` result has `unqualifiedPanel` and `unqualifiedSeat`, the first such seat.
-- `checks`: each has `id`, `description`, `definitionHash`, `ballotHash`, `panel`, `seat`, `shareHash` (the statement the checker builds, hex), `authorRegistered` (the author seats whose signing keys are registered; every default seat's is), `signature` (hex) and `valid`.
+- `checks`: each has `id`, `description`, `definitionHash`, `ballotHash`, `panel`, `seat`, `shareHash` (with the others, the statement the checker builds; hex), `authorRegistered` (the author seats whose signing keys are registered; every default seat's is), `signature` (hex) and `valid`.
 
 ## Challenge vectors
 

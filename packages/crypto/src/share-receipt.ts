@@ -297,10 +297,12 @@ export type IntakeResultV4 =
       readonly ok: true;
       readonly ballotHash: Uint8Array;
       readonly shareHash: Uint8Array;
-      /** The seat's shares of its own panel's half, to store under the ballot hash until the tally. */
+      /** The seat's shares of its own panel's half, to store under the ballot hash and the panel until the tally. */
       readonly shares: readonly Share[];
       /** The share receipt: the signature over `shareReceiptStatementV4`. */
       readonly receipt: Uint8Array;
+      /** The panel whose half `shares` are: the intake seat's own. */
+      readonly panel: SeatPanel;
       readonly tier: number;
       readonly cell: number;
       readonly nullifier: bigint;
@@ -314,7 +316,7 @@ export type IntakeResultV4 =
       readonly code: IntakeCodeV4;
       readonly option?: number;
       readonly question?: number;
-      /** Under `share-hash-unqualified`, the first such seat's panel and index. */
+      /** Under `share-hash-unqualified`, the first unqualified seat's panel and index, never the intake seat's. */
       readonly panel?: SeatPanel;
       readonly seat?: number;
     };
@@ -362,6 +364,7 @@ export function intakeBallotV4(
         share_hash: shareHash,
       }),
     ),
+    panel,
     tier: admitted.tier,
     cell: admitted.cell,
     nullifier: admitted.nullifier,
@@ -387,9 +390,33 @@ export interface PanelReceiptSigners {
  * signing key over the statement built from the ballot itself: its
  * recomputed ballot hash and its own panel's share hash for the seat, never
  * values that came with the receipt. The caller has strictly decoded the
- * ballot.
+ * ballot. `registered.author` must be empty: an author panel's signing keys
+ * come from its own ceremony's transcript check, which P2-16 part 3
+ * specifies, and until then none is taken on trust, so an author seat's
+ * receipt never checks here (T-37), as `panelBallotElection` refuses an
+ * author panel.
  */
 export function checkShareReceiptV4(
+  registered: PanelReceiptSigners,
+  ctx: BallotHashContextV3,
+  vote: CommittedVoteV4,
+  panel: SeatPanel,
+  seat: number,
+  signature: Uint8Array,
+): boolean {
+  if (registered.author.length !== 0)
+    throw new RangeError(
+      "checkShareReceiptV4: an author panel's signing keys come from its own ceremony (P2-16 part 3)",
+    );
+  return checkShareReceiptV4With(registered, ctx, vote, panel, seat, signature);
+}
+
+/**
+ * Internal: `checkShareReceiptV4` with the author panel's signing keys taken
+ * as given, so author seats' receipts can be tested before P2-16 part 3,
+ * which then replaces this. The package entry point doesn't export it.
+ */
+export function checkShareReceiptV4With(
   registered: PanelReceiptSigners,
   ctx: BallotHashContextV3,
   vote: CommittedVoteV4,
@@ -414,8 +441,9 @@ export function checkShareReceiptV4(
 }
 
 /**
- * The same check over a statement the caller built. Exported internally for
- * the vectors, which name a statement's hashes directly.
+ * Internal: the same check over a statement the caller built, for the
+ * vectors, which name a statement's hashes directly. The package entry point
+ * doesn't export it.
  */
 export function checkReceiptStatementV4(
   registered: PanelReceiptSigners,

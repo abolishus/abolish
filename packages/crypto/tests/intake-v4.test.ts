@@ -7,6 +7,7 @@ import { kemKeyPairWith } from "../src/share-encryption.ts";
 import {
   checkReceiptStatement,
   checkReceiptStatementV4,
+  checkShareReceiptV4With,
   type PanelReceiptSigners,
 } from "../src/share-receipt.ts";
 import * as entry from "../src/index.ts";
@@ -215,10 +216,21 @@ describe("intake-v4.json", () => {
       expect(toHex(ballotHashV4(ctx, ballot.committed_vote))).toBe(c.ballotHash);
       const signers = panelSigners(c.registered, c.authorRegistered);
       const vote = ballot.committed_vote;
-      expect(checkShareReceiptV4(signers, ctx, vote, c.panel, c.seat, r.receipt)).toBe(true);
-      expect(checkShareReceiptV4(signers, ctx, vote, other(c.panel), c.seat, r.receipt)).toBe(
+      expect(checkShareReceiptV4With(signers, ctx, vote, c.panel, c.seat, r.receipt)).toBe(true);
+      expect(checkShareReceiptV4With(signers, ctx, vote, other(c.panel), c.seat, r.receipt)).toBe(
         false,
       );
+      expect(r.panel).toBe(c.panel);
+      // The exported check reads only the default panel's keys until P2-16
+      // part 3 gives the author panel's a checked source.
+      const defaultOnly = { default: signers.default, author: [] };
+      expect(checkShareReceiptV4(defaultOnly, ctx, vote, c.panel, c.seat, r.receipt)).toBe(
+        c.panel === SEAT_PANELS.default,
+      );
+      if (c.authorRegistered.length !== 0)
+        expect(() => checkShareReceiptV4(signers, ctx, vote, c.panel, c.seat, r.receipt)).toThrow(
+          RangeError,
+        );
       // Its shares are its own panel's half: one per flat option.
       expect(r.shares).toHaveLength(vote.vss.length);
     });
@@ -364,6 +376,7 @@ describe("intakeBallotV4", () => {
 
   test("the internal statement checks aren't exported from the entry point", () => {
     expect("checkReceiptStatementV4" in entry).toBe(false);
+    expect("checkShareReceiptV4With" in entry).toBe(false);
     expect("admitForIntakeV4" in entry).toBe(false);
   });
 });

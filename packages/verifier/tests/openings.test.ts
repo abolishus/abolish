@@ -106,8 +106,10 @@ test("the fixtures cover every check, decoding, every decided rule and a vote ou
 });
 
 describe("6.2 against the independent implementation", () => {
+  // Each case runs the verifier over a whole board copy; the mixed one has
+  // taken over the 5-second default on CI's runners.
   for (const c of file.cases)
-    test(c.id, () => {
+    test(c.id, { timeout: 60_000 }, () => {
       const r = run(c);
       expect(row(r)).toEqual(c.expected["6.2"]);
       expect(r.openings).toEqual(c.openings);

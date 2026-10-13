@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
-import { planElection, runSimulation, type Scenario, SIMULATION_STUBS } from "../src/index.ts";
+import {
+  downAt,
+  planElection,
+  runSimulation,
+  type Scenario,
+  SIMULATION_STUBS,
+} from "../src/index.ts";
 import { type CellExpectation, expectCells, judgeCell } from "../src/simulation/run.ts";
 
 // Each ballot costs about 0.1 s per online seat (intake checks its proofs).
@@ -9,7 +15,7 @@ const base: Scenario = {
   voters: 9,
   election: "plurality",
   options: 3,
-  trustees: { panel: 4, threshold: 2, offline: [2], faulty: [] },
+  trustees: { panel: 4, threshold: 2, offline: [2], faulty: [], departures: [] },
   tiers: { "0": 2, "1": 1, "2": 1 },
   outage: { from: 0.5, to: 1 },
   challenges: 0,
@@ -47,6 +53,7 @@ describe("runSimulation", { timeout }, () => {
     expect(r.trustees).toEqual({
       online: [1, 3, 4],
       offline: [2],
+      departed: [],
       faulty: [],
       summedShareMessages: 3 * 2 * 3,
     });
@@ -75,7 +82,7 @@ describe("runSimulation", { timeout }, () => {
     const r = runSimulation({
       ...base,
       election: "approval",
-      trustees: { panel: 4, threshold: 2, offline: [4], faulty: [1] },
+      trustees: { panel: 4, threshold: 2, offline: [4], faulty: [1], departures: [] },
     });
     expect(r.ok).toBe(true);
     for (const c of r.cells) {
@@ -88,6 +95,7 @@ describe("runSimulation", { timeout }, () => {
     expect(r.trustees).toEqual({
       online: [1, 2, 3],
       offline: [4],
+      departed: [],
       faulty: [1],
       summedShareMessages: 2 * 2 * 3,
     });
@@ -107,7 +115,7 @@ describe("runSimulation", { timeout }, () => {
       ...base,
       challenges: 1,
       publications: 1,
-      trustees: { panel: 4, threshold: 2, offline: [1, 2], faulty: [3] },
+      trustees: { panel: 4, threshold: 2, offline: [1, 2], faulty: [3], departures: [] },
     });
     expect(r.ok).toBe(true);
     for (const c of r.cells) {
@@ -137,7 +145,7 @@ describe("runSimulation", { timeout }, () => {
   it("reports tally-quorum with every online seat excluded when every online seat is faulty", () => {
     const r = runSimulation({
       ...base,
-      trustees: { panel: 4, threshold: 2, offline: [4], faulty: [1, 2, 3] },
+      trustees: { panel: 4, threshold: 2, offline: [4], faulty: [1, 2, 3], departures: [] },
     });
     expect(r.ok).toBe(true);
     expect(r.trustees.summedShareMessages).toBe(0);
@@ -246,13 +254,115 @@ describe("runSimulation", { timeout }, () => {
       ...base,
       voters: 4,
       postings: 0,
-      trustees: { panel: 3, threshold: 2, offline: [], faulty: [] },
+      trustees: { panel: 3, threshold: 2, offline: [], faulty: [], departures: [] },
     });
     expect(r.ok).toBe(true);
     expect(r.ballots.postings).toBe(0);
     expect(r.ballots.undelivered).toBe(0);
     expect(r.board.shareReceipts).toBe(4 * 3);
     expect(r.cells.reduce((a, c) => a + c.ballots, 0)).toBe(4);
+  });
+
+  it("takes a departing seat's receipts until it goes down, counts later ballots only when posted, and leaves it out of the tally", () => {
+    // Seat 3 goes down during the outage, so it takes some direct ballots,
+    // whose receipts are boarded when the servers return, and misses the rest.
+    const s: Scenario = {
+      ...base,
+      outage: { from: 0.2, to: 0.6 },
+      postings: 0.5,
+      trustees: {
+        panel: 4,
+        threshold: 2,
+        offline: [],
+        faulty: [],
+        departures: [{ seat: 3, at: 0.3 }],
+      },
+    };
+    const plan = planElection(s);
+    const before = plan.voters.filter((v) => v.at < 0.3);
+    const after = plan.voters.filter((v) => v.at >= 0.3);
+    expect(before.some((v) => v.path === "direct")).toBe(true);
+    expect(after.some((v) => v.path === "direct" && !v.posts)).toBe(true);
+    expect(after.some((v) => v.path === "server" && v.posts)).toBe(true);
+    const r = runSimulation(s);
+    expect(r.ok).toBe(true);
+    expect(r.board.shareReceipts).toBe(before.length * 4 + after.length * 3);
+    expect(r.ballots.postings).toBe(after.filter((v) => v.posts).length);
+    expect(r.ballots.undelivered).toBe(after.filter((v) => !v.posts).length);
+    expect(r.trustees).toMatchObject({ online: [1, 2, 4], offline: [], departed: [3] });
+    for (const c of r.cells) {
+      expect(c.outcome).toBe("opened");
+      expect(c.counts).toEqual(c.expected);
+      expect(c.combined).toEqual([1, 2]);
+    }
+    expect(r.cells.reduce((a, c) => a + c.ballots, 0)).toBe(
+      before.length + after.filter((v) => v.posts).length,
+    );
+    expect(r.destruction.seats.map((d) => d.code)).toEqual([
+      "destroyed",
+      "destroyed",
+      "destruction-missing",
+      "destroyed",
+    ]);
+  });
+
+  it("needs no posting from a seat that departs at close, which still misses the tally and destruction", () => {
+    const s: Scenario = {
+      ...base,
+      postings: 0,
+      revotes: 1,
+      trustees: {
+        panel: 3,
+        threshold: 2,
+        offline: [],
+        faulty: [],
+        departures: [{ seat: 1, at: 1 }],
+      },
+    };
+    const r = runSimulation(s);
+    expect(r.ok).toBe(true);
+    expect(r.ballots.cast).toBe(18);
+    expect(r.board.shareReceipts).toBe(18 * 3);
+    expect(r.ballots.postings).toBe(0);
+    expect(r.ballots.undelivered).toBe(0);
+    for (const c of r.cells) {
+      expect(c.counts).toEqual(c.expected);
+      expect(c.combined).toEqual([2, 3]);
+    }
+    expect(r.cells.reduce((a, c) => a + c.ballots, 0)).toBe(9);
+    expect(r.destruction.seats.map((d) => d.code)).toEqual([
+      "destruction-missing",
+      "destroyed",
+      "destroyed",
+    ]);
+  });
+
+  it("reports tally-quorum, as expected, when departures leave fewer than k seats", () => {
+    const s: Scenario = {
+      ...base,
+      voters: 4,
+      trustees: {
+        panel: 3,
+        threshold: 2,
+        offline: [],
+        faulty: [],
+        departures: [
+          { seat: 1, at: 0.3 },
+          { seat: 3, at: 0.6 },
+        ],
+      },
+    };
+    const plan = planElection(s);
+    const r = runSimulation(s);
+    expect(r.ok).toBe(true);
+    expect(r.ballots.postings).toBe(
+      plan.voters.filter((v) => v.posts).reduce((a, v) => a + downAt(s, v.at).length, 0),
+    );
+    expect(r.trustees.summedShareMessages).toBe(0);
+    for (const c of r.cells) {
+      expect(c.expectedOutcome).toBe("tally-quorum");
+      expect(c.outcome).toBe("tally-quorum");
+    }
   });
 
   it("opens an empty cell to zero", () => {
@@ -303,11 +413,27 @@ describe("judgeCell", () => {
     expect(
       expectCells({
         ...base,
-        trustees: { panel: 7, threshold: 3, offline: [1, 4], faulty: [2, 7] },
+        trustees: { panel: 7, threshold: 3, offline: [1, 4], faulty: [2, 7], departures: [] },
       }),
     ).toEqual({ outcome: "opened", excluded: [2, 7], combined: [3, 5, 6] });
     expect(
-      expectCells({ ...base, trustees: { panel: 4, threshold: 3, offline: [1], faulty: [2] } }),
+      expectCells({
+        ...base,
+        trustees: { panel: 4, threshold: 3, offline: [1], faulty: [2], departures: [] },
+      }),
     ).toEqual({ outcome: "tally-quorum", excluded: [2], combined: [3, 4] });
+    // A departed seat sums nothing, however late it went down.
+    expect(
+      expectCells({
+        ...base,
+        trustees: {
+          panel: 5,
+          threshold: 2,
+          offline: [1],
+          faulty: [],
+          departures: [{ seat: 2, at: 1 }],
+        },
+      }),
+    ).toEqual({ outcome: "opened", excluded: [], combined: [3, 4] });
   });
 });

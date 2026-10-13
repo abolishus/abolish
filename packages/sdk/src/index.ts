@@ -8,7 +8,13 @@ export {
   SIMULATED_TIERS,
   type SimulatedTier,
 } from "./simulation/scenario.ts";
-export { type Plan, planElection, type PlannedVoter, selectionRange } from "./simulation/plan.ts";
+export {
+  downAt,
+  type Plan,
+  planElection,
+  type PlannedVoter,
+  selectionRange,
+} from "./simulation/plan.ts";
 export {
   type CellOutcome,
   type CellReport,

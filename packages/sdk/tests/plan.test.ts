@@ -1,6 +1,6 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vite-plus/test";
-import { planElection, type PlannedVoter, type Scenario } from "../src/index.ts";
+import { downAt, planElection, type PlannedVoter, type Scenario } from "../src/index.ts";
 
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
 
@@ -8,7 +8,7 @@ const base: Scenario = {
   voters: 500,
   election: "plurality",
   options: 4,
-  trustees: { panel: 5, threshold: 3, offline: [], faulty: [] },
+  trustees: { panel: 5, threshold: 3, offline: [], faulty: [], departures: [] },
   tiers: { "0": 2, "1": 1, "2": 1 },
   outage: { from: 0.5, to: 1 },
   challenges: 0.5,
@@ -146,6 +146,48 @@ describe("planElection", { timeout: 60_000 }, () => {
         const offline = { ...s, postings: p, trustees: { ...s.trustees, offline: [1] } };
         const plan = planElection(offline);
         for (const v of plan.voters) expect(v.delivered).toBe(v.posts);
+        for (const tier of plan.tiers)
+          expect(plan.expected.get(tier)).toEqual(
+            Array.from({ length: s.options }, (_, j) =>
+              plan.voters
+                .filter((v) => v.tier === tier && v.delivered)
+                .reduce((a, v) => a + (v.votes[j] as number), 0),
+            ),
+          );
+      }),
+      { numRuns },
+    );
+  });
+
+  it("takes a departing seat down from its time on: a ballot cast then is delivered only if its voter posts", () => {
+    const departing = fc
+      .tuple(
+        fc.double({ min: 0, max: 1, noNaN: true, minExcluded: true }),
+        fc.double({ min: 0, max: 1, noNaN: true, minExcluded: true }),
+      )
+      .map(([a, b]) => [
+        { seat: 2, at: a },
+        { seat: 4, at: b },
+      ]);
+    fc.assert(
+      fc.property(scenario, departing, (s, departures) => {
+        const left = { ...s, trustees: { ...s.trustees, offline: [5], departures } };
+        const plan = planElection(left);
+        // Departures change no draw: only who is delivered, and so the counts.
+        const strip = (v: PlannedVoter) => ({ ...v, delivered: false });
+        expect(plan.voters.map(strip)).toEqual(planElection(s).voters.map(strip));
+        for (const v of plan.voters) {
+          const down = downAt(left, v.at);
+          expect(down).toEqual(
+            [2, 4, 5].filter(
+              (seat) => seat === 5 || departures.some((d) => d.seat === seat && d.at <= v.at),
+            ),
+          );
+          expect(v.delivered).toBe(v.posts);
+        }
+        const none = { ...left, trustees: { ...left.trustees, offline: [] } };
+        for (const v of planElection(none).voters)
+          expect(v.delivered).toBe(downAt(none, v.at).length === 0 || v.posts);
         for (const tier of plan.tiers)
           expect(plan.expected.get(tier)).toEqual(
             Array.from({ length: s.options }, (_, j) =>

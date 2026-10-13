@@ -8,7 +8,7 @@
 // signing key, each ballot's L1 reference on a simulated L1 (./l1.ts), the
 // ballot record on the board (./board.ts) with the operator's receipt and
 // the client's check of it at cast, each online seat's share receipt on the
-// board and a posting voter's postings of its offline seats, the verifier's
+// board and a posting voter's postings of the seats down at its cast, the verifier's
 // board check, and from the boarded records: each ballot's admission check,
 // the re-vote rule's selection of each voter's counted ballot, the delivery
 // check that keeps only delivered ones, the summed shares of those, sent
@@ -100,6 +100,7 @@ import { admitOpening } from "./publication.ts";
 import { SIMULATED_BOARD_ENTRY_VERSION, simulateElection } from "./election.ts";
 import { SimulatedL1 } from "./l1.ts";
 import {
+  downAt,
   type Plan,
   type PlannedBallot,
   type PlannedVoter,
@@ -118,8 +119,8 @@ export const SIMULATION_STUBS = Object.freeze([
   "ceremony: every seat takes part in the four signed rounds; no release pins the panel, whose identity keys are fresh per run (P1-7)",
   "membership: no membership proofs; each voter's nullifier is its index plus one, and each ballot record carries a placeholder proof, the verification key's own alpha, beta and alpha points, which decodes but proves nothing and is never checked, so admission (5.1 to 5.4) isn't run and each ballot's M for the re-vote rule is computed from its record here rather than taken from crypto's checkBallot (P1-17b, P3-2)",
   "board: the operator boards each server ballot as it arrives and signs a receipt the voter's client checks at cast, under one receipt key fresh per run that no definition lists or registry holds; the anchoring clock (hourly from the Unix epoch, with a half-hour deadline) is a placeholder, the post-close windows other than the tally, openings' and destruction windows are taken as zero for the counted extent, though the delivery check applies the real delivery deadline (every delivery record is boarded or sent long before it), so the counted extent ends one period after close and the seal is the destruction window's end, and nothing is anchored, so trustees act on segments the run computes rather than on checkpoints they saw on L1 (P1-13b, P4-1, P1-18)",
-  "delivery: ciphertexts reach trustees in memory, and no contract records anything; a direct ballot is boarded by the operator when the servers return, with no operator receipt, never as a contract event; each online seat's node boards its share receipt right after the ballot, and the operator boards it unchecked rather than under the delivery boarding rules; a posting voter's client posts each offline seat of that ballot once, right after cast, as a contract-path record the delivery check reads with its cast time as its submission time, though no contract records it and nothing puts it on the board or the archive; offline seats never come back, so no seat catches up on postings or complains, and nothing is resent (P1-12c, P1-18, P4-2)",
-  "trustees: offline seats go down after the ceremony, for the whole voting period, tally and destruction; faulty seats lie only in their summed shares, which their own node's check refuses to seal, so no lie reaches another seat as a summed-share message, no recipient's refusal is shown, and a cell's excluded seats are those that sent nothing (openCell never sees a failing sum); summed-share messages travel in memory, never over a channel, every honest seat combines, and the lowest seat combined signs each cell's opening",
+  "delivery: ciphertexts reach trustees in memory, and no contract records anything; a direct ballot is boarded by the operator when the servers return, with no operator receipt, never as a contract event; each online seat's node boards its share receipt right after the ballot, and the operator boards it unchecked rather than under the delivery boarding rules; a posting voter's client posts each seat down at that ballot's cast once, right after cast, as a contract-path record the delivery check reads with its cast time as its submission time, though no contract records it and nothing puts it on the board or the archive; a departing seat's receipts for ballots it took before going down are boarded with them, even a direct ballot's after the seat is down; offline and departed seats never come back, so no seat catches up on postings or complains, and nothing is resent (P1-12c, P1-18, P4-2)",
+  "trustees: offline seats go down after the ceremony, for the whole voting period, tally and destruction, and departing seats at their scenario time, for the rest of it, and take no part in the tally or destruction, though they hold shares of every ballot cast before; nothing models a departing seat's node or disk afterwards; faulty seats lie only in their summed shares, which their own node's check refuses to seal, so no lie reaches another seat as a summed-share message, no recipient's refusal is shown, and a cell's excluded seats are those that sent nothing (openCell never sees a failing sum); summed-share messages travel in memory, never over a channel, every honest seat combines, and the lowest seat combined signs each cell's opening",
   "challenges: the checker records each tracking code and checks the opening in memory, with the election the run built rather than one fetched from chain and IPFS; a voter who publishes asks once, in the first period after the counted extent, and the operator's boarding rules are applied here rather than by the verifier's 6.2, which isn't run (P1-21 part 2)",
   "re-voting: L1 is simulated, a block every 12 seconds with random hashes, all finalized; every reference is admitted and every voter's last ballot selected, so no ballot is replayed, ties, or names a block before opening, after close or reorganised away (P1-21 part 2)",
   "destruction: every online seat signs its statement at the moment the tally rule sets, and the operator boards each one; nothing destroys the run's key material, which lives until the report is returned",
@@ -169,12 +170,12 @@ export interface SimulationReport {
     readonly challenged: number;
     /** Challenged attempts whose openings their voters asked to publish, each boarded after the counted extent. */
     readonly published: number;
-    /** Shares posted through the contract path: one per offline seat for each ballot of a posting voter. */
+    /** Shares posted through the contract path: one per seat down at its cast for each ballot of a posting voter. */
     readonly postings: number;
     /**
      * Ballots the re-vote rule selected that the delivery check kept out of
-     * the counted set: a voter's last ballot that has an offline seat it
-     * didn't post.
+     * the counted set: a voter's last ballot that has a seat down at its
+     * cast it didn't post.
      */
     readonly undelivered: number;
   };
@@ -183,7 +184,7 @@ export interface SimulationReport {
     readonly entries: number;
     /** Entries in the counted extent, every one a ballot or a share receipt. */
     readonly counted: number;
-    /** Share receipts, one from each online seat per ballot cast. */
+    /** Share receipts, one from each seat up at its cast per ballot cast. */
     readonly shareReceipts: number;
     /** Tally openings, one per opened cell. */
     readonly openings: number;
@@ -195,9 +196,11 @@ export interface SimulationReport {
     readonly receiptKey: string;
   };
   readonly trustees: {
-    /** Every seat not offline, faulty ones included. */
+    /** Every seat up from the ceremony through destruction, faulty ones included. */
     readonly online: readonly number[];
     readonly offline: readonly number[];
+    /** Seats that took ballots, then went down before the tally. */
+    readonly departed: readonly number[];
     readonly faulty: readonly number[];
     /**
      * Summed-share messages sealed, one per cell from each honest online
@@ -210,7 +213,7 @@ export interface SimulationReport {
   /**
    * The verifier's destruction report (8.5) over the board's statements: the
    * destruction segment and each registered seat's line, every online seat
-   * `destroyed` and every offline one `destruction-missing`.
+   * `destroyed` and every offline or departed one `destruction-missing`.
    */
   readonly destruction: { readonly from: number; readonly seats: readonly SeatDestruction[] };
   /** The election's total, derived from the opened cells, when every cell opened. */
@@ -244,11 +247,17 @@ export interface CellExpectation {
   readonly combined: readonly number[];
 }
 
-export function expectCells(scenario: Scenario): CellExpectation {
-  const { panel, threshold, offline, faulty } = scenario.trustees;
-  const honest = Array.from({ length: panel }, (_, i) => i + 1).filter(
-    (s) => !offline.includes(s) && !faulty.includes(s),
+/** Every seat up through the tally: neither offline nor departing. */
+const onlineSeats = (scenario: Scenario): number[] => {
+  const { panel, offline, departures } = scenario.trustees;
+  return Array.from({ length: panel }, (_, i) => i + 1).filter(
+    (s) => !offline.includes(s) && !departures.some((d) => d.seat === s),
   );
+};
+
+export function expectCells(scenario: Scenario): CellExpectation {
+  const { threshold, faulty } = scenario.trustees;
+  const honest = onlineSeats(scenario).filter((s) => !faulty.includes(s));
   return {
     outcome: honest.length >= threshold ? "opened" : "tally-quorum",
     excluded: faulty,
@@ -333,7 +342,9 @@ export function runSimulation(
   // The checker's election and the casting device's: one definition and the
   // key set its ceremony check registered.
   const ballots = ballotElection(election.definition, registered);
-  const online = seats.map((s) => s.index).filter((i) => !offline.includes(i));
+  // The seats that sum, combine and destroy: a departed seat's shares go down with it.
+  const online = onlineSeats(scenario);
+  const departed = scenario.trustees.departures.map((d) => d.seat);
 
   const tallyRules: TallyRules = { optionCount: scenario.options, threshold: k, panelSize: n };
   // The L1 window the re-vote rule reads (docs/spec/revoting.md, Admission):
@@ -382,8 +393,10 @@ export function runSimulation(
   interface Kept {
     readonly shares: ReadonlyMap<number, readonly Share[]>;
     readonly last: boolean;
-    /** Whether the plan expects the voter's ballots delivered to every qualified seat. */
+    /** Whether the plan expects the voter's last ballot delivered to every qualified seat. */
     readonly delivered: boolean;
+    /** The seats down at the ballot's cast, which took no share of it. */
+    readonly down: readonly number[];
   }
   const kept: Kept[] = [];
   // Ballots submitted directly while our servers are down, which the
@@ -464,7 +477,9 @@ export function runSimulation(
       throw new Error("simulation: a challenged attempt opens the cast ballot");
     const shares = new Map<number, readonly Share[]>();
     const receipts: Uint8Array[] = [];
-    for (const seat of online) {
+    const down = downAt(scenario, ballot.at);
+    for (const { index: seat } of seats) {
+      if (down.includes(seat)) continue;
       const s = seats[seat - 1] as SeatSecrets;
       const result = intakeShares(
         ctx,
@@ -479,7 +494,7 @@ export function runSimulation(
       // registered signing key ([[share-encryption]], Intake and receipts).
       if (!checkShareReceipt(registered, ctx, vote, seat, result.receipt))
         throw new Error("simulation: an honest seat's receipt failed its check");
-      shares.set(seat, result.shares);
+      if (online.includes(seat)) shares.set(seat, result.shares);
       receipts.push(encodeShareReceipt(shareReceiptRecord(definitionHash, seat, result)));
     }
     // The L1 reference, made after the cast choice (Client rule 6): the
@@ -502,12 +517,12 @@ export function runSimulation(
       committed_vote: vote,
     };
     const payload = encodeBallot(record);
-    // Client rule 4 (docs/spec/delivery.md): an offline seat's intake fails
-    // by every route, so a voter who chooses to posts that seat's ciphertext
+    // Client rule 4 (docs/spec/delivery.md): a down seat's intake fails by
+    // every route, so a voter who chooses to posts that seat's ciphertext
     // and ML-KEM message through the contract path, which our outage doesn't
     // touch; any other voter's ballot stays undelivered (T-15, T-25).
     if (ballot.posts)
-      for (const seat of offline) {
+      for (const seat of down) {
         const at = seat - 1;
         postings.push({
           path: "contract",
@@ -522,13 +537,14 @@ export function runSimulation(
         });
       }
     const { delivered } = voter;
-    if (ballot.path === "direct") pending.push({ payload, receipts, shares, last, delivered });
+    if (ballot.path === "direct")
+      pending.push({ payload, receipts, shares, last, delivered, down });
     else {
       // The servers are back: what was submitted directly is boarded first.
       boardPending();
       const segment = segmentAt(seconds);
       const receipt = operator.submit(segment, payload);
-      kept[Number(receipt.index)] = { shares, last, delivered };
+      kept[Number(receipt.index)] = { shares, last, delivered, down };
       boardReceipts(segment, receipts);
       // The client's checks at cast, before it tells the voter the ballot
       // was received ([[receipts]], Checks at cast; T-25, T-26).
@@ -610,10 +626,10 @@ export function runSimulation(
 
   // Verifier 5.9 (docs/spec/delivery.md, Delivery check): a selected ballot
   // stays in the counted set only if every qualified seat has a share
-  // receipt or a passing contract-path posting in time. Every online seat
-  // receipted every ballot, so a ballot is delivered exactly when its voter
-  // posted each offline seat; anything else is a bug, as is any record the
-  // check reports (T-25, T-41).
+  // receipt or a passing contract-path posting in time. Every seat up at a
+  // ballot's cast receipted it, so a ballot is delivered exactly when its
+  // voter posted each seat down then; anything else is a bug, as is any
+  // record the check reports (T-25, T-41).
   const ballotOf = (index: bigint): BallotRecord => {
     const b = boarded.get(Number(index));
     if (b === undefined) throw new Error("simulation: a selected entry isn't a boarded ballot");
@@ -646,16 +662,18 @@ export function runSimulation(
     ],
     1,
   );
-  const unposted = registered.map((r) => r.index).filter((s) => offline.includes(s));
   if (
     delivery.records.length > 0 ||
     delivery.rejected.length > 0 ||
     delivery.ballots.some((d, i) => {
-      const { delivered } = kept[Number(selection.selected[i]?.index)] as Kept;
+      const { delivered, down } = kept[Number(selection.selected[i]?.index)] as Kept;
       return (
         d.counted !== delivered ||
         d.excludedBy.length > 0 ||
-        !same(d.missing, delivered ? [] : unposted)
+        !same(
+          d.missing,
+          delivered ? [] : registered.map((r) => r.index).filter((s) => down.includes(s)),
+        )
       );
     })
   )
@@ -892,7 +910,7 @@ export function runSimulation(
       ),
     );
   // Verifier 8.5: every online seat destroyed in the destruction segment,
-  // every offline one missing, and nothing else on the board.
+  // every offline or departed one missing, and nothing else on the board.
   const destruction = checkDestruction(
     { definitionHash, registered },
     onBoard(RECORD_TYPES.destructionStatement),
@@ -962,7 +980,7 @@ export function runSimulation(
       head: hex(operator.head),
       receiptKey: hex(operator.receiptKey),
     },
-    trustees: { online, offline, faulty, summedShareMessages: messages },
+    trustees: { online, offline, departed, faulty, summedShareMessages: messages },
     cells: reports,
     destruction: { from: destruction.from, seats: destruction.seats },
     ...(allOpened

@@ -57,6 +57,8 @@ Each item's state (`todo`, `in progress`, `blocked`, `needs owner decision`, `do
 - [[P2-7]] `packages/ui`
 - [[P2-8]] `apps/ballot`
 - [[P2-9]] `apps/web`
+- [[P2-19]] The website's UI from the design mockups
+- [[P2-20]] The ballot client's UI from the design mockups
 - [[P2-10]] Moderation
 - [[P2-11]] `ci: deploy`
 - [[P2-13]] Trustee node

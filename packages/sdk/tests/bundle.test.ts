@@ -147,14 +147,16 @@ describe("judgeVerifierReport", { timeout }, () => {
       ballots: r.ballots.cast,
       openings: r.board.spoiled,
       tallies: r.board.openings,
-      anchors: r.board.anchors.length,
+      registered: r.ceremony.registered.length,
+      anchors: r.board.anchors.map((a) => ({ segment: a.segment, hash: a.hash })),
     };
     expect(expected.openings).toBeGreaterThan(0);
+    expect(expected.registered).toBe(base.trustees.panel);
     expect(judgeVerifierReport(report, expected)).toEqual([]);
     expect(r.verifier).toEqual({
       verdict: "unverifiable",
       verdictAgainstInputs: "unverifiable",
-      block: { number: Number(report.l1?.blockNumber), hash: report.l1?.blockHash },
+      block: { number: Number(report.l1?.blockNumber), headerHash: report.l1?.blockHash },
       passed: ["2.9", "3.2", "4.1", "4.2", "5.4", "5.7"],
       failed: ["5.1", "5.2", "5.3"].map((id) => ({ id, code: "membership-proof" })),
       rejectedBallots: r.ballots.cast,
@@ -190,8 +192,12 @@ describe("judgeVerifierReport", { timeout }, () => {
     expect(judged({ tallies: report.tallies?.slice(1) ?? [] })).toEqual([
       "7.4 didn't report every tally opening without a break",
     ]);
-    expect(judgeVerifierReport(report, { ...expected, anchors: expected.anchors + 1 })).toEqual([
+    const [, ...later] = expected.anchors;
+    expect(judgeVerifierReport(report, { ...expected, anchors: later })).toEqual([
       "the anchors read from L1 state aren't the authority's, matched by the copy",
+    ]);
+    expect(judgeVerifierReport(report, { ...expected, registered: 3 })).toEqual([
+      "3.2 didn't register every seat from the board's first entry",
     ]);
   });
 });

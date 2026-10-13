@@ -3,7 +3,7 @@
 // our servers down halfway through"). The scenario is JSON, parsed and run by
 // @abolishus/sdk; this file only reads it and prints the result.
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { accessSync, constants, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   deliveredAt,
@@ -65,6 +65,14 @@ function bundleDirOf(values: Values): string | undefined {
   if (path === "") throw new UsageError("--bundle needs a directory");
   if (BUNDLE_FILES.some((f) => existsSync(join(path, f))))
     throw new UsageError(`--bundle: ${path} already holds a bundle`);
+  // Made before the run, so a path that can't hold the bundle is refused
+  // now rather than after hours of simulation.
+  try {
+    mkdirSync(path, { recursive: true });
+    accessSync(path, constants.W_OK);
+  } catch {
+    throw new UsageError(`--bundle: ${path} isn't a writable directory`);
+  }
   return path;
 }
 
@@ -139,7 +147,6 @@ export function simulationCommandsWith(
           ...(bundleDir !== undefined
             ? {
                 onBundle: (b) => {
-                  mkdirSync(bundleDir, { recursive: true });
                   writeFileSync(join(bundleDir, "bundle.json"), b.json, { flag: "wx" });
                   writeFileSync(join(bundleDir, "board.bin"), b.board, { flag: "wx" });
                 },

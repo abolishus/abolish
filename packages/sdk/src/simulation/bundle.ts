@@ -24,6 +24,10 @@ import { buildTrie, encodeRlp, uintBytes } from "./trie.ts";
 
 export const BUNDLE_FORMAT_CEREMONY = "abolish-verifier-bundle/4";
 
+// The anchor's storage layout, written here from docs/spec/contracts.md
+// rather than imported from the verifier's reader, so a slot either side
+// derives wrongly fails the run instead of agreeing with itself.
+
 /** BoardAnchor's ERC-7201 namespace `abolish.board-anchor` (docs/spec/contracts.md, Board anchor). */
 const ANCHOR_NAMESPACE = 0x16eba4501d0a9dddbfa03518d843c364be664629e6d99efb7169d8f090095b00n;
 

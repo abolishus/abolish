@@ -7,6 +7,13 @@
 // (SIMULATION_STUBS), and nothing may fail the election. Any other row is a
 // disagreement between the simulation and the verifier, which the run
 // treats as a bug (T-23, T-37, T-54).
+//
+// Three of the passing rows check little here: admission rejects on the
+// membership proof before it verifies the validity proofs, so 5.4 covers
+// only each ballot's shape and qualified share hashes; 5.7 runs over no
+// admitted ballot; and a version-1 definition lists no receipt keys, so 2.9
+// has nothing to read. They are required anyway, so a change that fails
+// them is caught.
 
 import type { CheckCode, Report } from "@abolishus/verifier";
 
@@ -27,10 +34,13 @@ const MEMBERSHIP_CODE: CheckCode = "membership-proof";
 /** What the run boarded, which the verifier's report must account for. */
 export interface VerifierExpectation {
   readonly entries: number;
+  /** Seats the ceremony registered: every seat takes part. */
+  readonly registered: number;
   readonly ballots: number;
   readonly openings: number;
   readonly tallies: number;
-  readonly anchors: number;
+  /** Every anchor the authority made, in L1 order: its segment and checkpoint hash in hex. */
+  readonly anchors: readonly { readonly segment: number; readonly hash: string }[];
 }
 
 /**
@@ -55,8 +65,19 @@ export function judgeVerifierReport(report: Report, expected: VerifierExpectatio
     problems.push("the verifier split another board");
   if ((report.board.unauthenticated ?? 0) !== 0) problems.push("an entry no anchor authenticates");
   const anchors = report.l1?.anchors ?? [];
-  if (anchors.length !== expected.anchors || anchors.some((a) => a.source !== "copy"))
+  if (
+    anchors.length !== expected.anchors.length ||
+    anchors.some(
+      (a, i) =>
+        a.source !== "copy" ||
+        a.segment !== expected.anchors[i]?.segment ||
+        a.hash !== expected.anchors[i]?.hash,
+    )
+  )
     problems.push("the anchors read from L1 state aren't the authority's, matched by the copy");
+  // The transcript is the board's first entry, and every seat qualifies.
+  if (report.ceremony?.entry !== 0 || report.ceremony.registered.length !== expected.registered)
+    problems.push("3.2 didn't register every seat from the board's first entry");
   const ballots = report.ballots;
   if (
     ballots === undefined ||

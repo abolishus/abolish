@@ -109,6 +109,13 @@ describe("simulation", { timeout: 60_000 }, () => {
       detail: expect.stringContaining("already holds a bundle"),
     });
     expect(again.out).toEqual([]);
+    // So is a path that can't be a directory.
+    const file = join(dir, "board.bin", "x");
+    const blocked = await cli("simulation", "run", "--scenario", json, "--bundle", file);
+    expect(blocked.code).toBe(2);
+    expect(blocked.err[0]).toMatchObject({
+      detail: expect.stringContaining("isn't a writable directory"),
+    });
   });
 
   test("plan reads a scenario file and prints the expected counts, ballots, challenges, re-votes, publications and postings, matching run's", async () => {

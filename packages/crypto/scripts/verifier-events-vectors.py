@@ -193,7 +193,7 @@ def main(out_dir):
 
     case(
         "first-failure",
-        "Contract-event version 2: an honest creation, a ballot whose hash topic disagrees with its record (event-data), then a log from an address the definition doesn't name (unknown-contract). The first failure in copy order decides 4.4: event-data at entry 1.",
+        "Contract-event version 2: an honest creation, a ballot whose hash topic disagrees with its record (event-data), then a version-1 encoding, which doesn't decode under the version-2 pin (decode, profile-mismatch). The first failure in copy order decides 4.4: event-data at entry 1.",
         d2,
         [rec(V2, "election-created"), rec(V2, "event-data-ballot-hash-topic"), rec(V1, "unknown-contract")],
         outcome("unverifiable", "event-data", {"entry": 1}),

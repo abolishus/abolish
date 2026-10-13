@@ -133,8 +133,7 @@ const entry = (version: number, election: Uint8Array, index: number, payload: Ui
 const board = (version: number, election: Uint8Array, payloads: readonly Uint8Array[]) =>
   Uint8Array.from(payloads.flatMap((p, i) => [...entry(version, election, i, p)]));
 
-// The election and board-entry version a vector case's board uses, read from
-// its first entry.
+// The election a vector case's board uses.
 const electionOf = (c: Case) => hex(c.board).slice(3, 35);
 
 test("the fixtures cover every event-check code, decoding and every unverifiable reason", () => {
@@ -233,11 +232,14 @@ describe("4.4 is the first failing record in copy order", () => {
   }[] = [
     ...ev.records.slice(0, 6).map((r) => ({ bytes: hex(r.encoding) })),
     ...ev.eventFailures.slice(0, 6).map((r) => ({ bytes: hex(r.encoding), code: r.error })),
-    ...ev.decodeErrors.map((r) => ({
-      bytes: hex(r.encoding),
-      code: "decode",
-      decodeError: r.error,
-    })),
+    // Only these decode failures can be boarded (as in the test above).
+    ...ev.decodeErrors
+      .filter((r) => r.encoding.startsWith("0008") && r.encoding.length >= 6)
+      .map((r) => ({
+        bytes: hex(r.encoding),
+        code: "decode",
+        decodeError: r.error,
+      })),
   ];
   const other = new Uint8Array(32).fill(0xee);
 

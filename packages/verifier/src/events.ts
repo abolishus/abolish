@@ -12,6 +12,9 @@
 // one can fail an election by appending entries to a copy of its board, or
 // by serving a copy the anchors don't match (T-53). Without that extent a
 // failing record leaves 4.4 unverifiable, with the code it would fail with.
+// The L2 addresses are the definition's, unauthenticated until 2.1 proves
+// its hash against the election registry, so a crafted definition can make
+// honest records fail against the inputs, never the verdict (T-53).
 //
 // Nothing here can pass 4.4. Which events the board must carry (the
 // required entries) needs the L2 reads that 2.4, 2.5 and 3.1 wait on too,

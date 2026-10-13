@@ -48,7 +48,7 @@ export interface BallotAdmissionOptions {
   readonly panels: readonly Panel[];
   /** The anchoring clock of the anchor contract our definitions name: it labels each entry's segment. */
   readonly clock: PeriodClock;
-  /** Elections whose admission is kept in memory at once (default 1,024). */
+  /** Elections whose admission, and others whose refusal, are kept in memory at once (default 1,024 each). */
   readonly cacheSize?: number;
 }
 
@@ -59,14 +59,16 @@ type Decided = ElectionAdmission | { readonly ok: false };
  * Admits and boards ballots. One per process: it keeps each election's
  * admission (its definition decoded, its transcript checked, its registered
  * key set) once decided, so a ballot costs its own checks, never the
- * ceremony's. That is sound because the definition is write-once and so is
- * the board's first entry, where the operator boards the transcript.
+ * ceremony's. That is sound because the definition is write-once and binds
+ * the transcript by its hash, and the board's first entry, where the operator
+ * boards the transcript, is write-once too.
  */
 export class BallotAdmissions {
   readonly #panels: readonly Panel[];
   readonly #clock: PeriodClock;
   readonly #cacheSize: number;
-  readonly #decided = new Map<string, Decided>();
+  readonly #admitted = new Map<string, Decided>();
+  readonly #refused = new Map<string, Decided>();
 
   constructor({ panels, clock, cacheSize = 1024 }: BallotAdmissionOptions) {
     if (panels.length === 0) throw new RangeError("panels must name at least one panel");
@@ -110,34 +112,52 @@ export class BallotAdmissions {
     if (!verdict.ok) throw new SubmitError("rejected", verdict.code);
     const segment = (now - this.#clock.epoch) / this.#clock.period;
     if (segment > 0xffffffffn) throw new SubmitError("not-open");
-    return appendEntry(client, id, Number(segment), ballot);
+    // Labelled before the proofs ran, so a later-labelled ballot may have
+    // been boarded meanwhile: this one then takes that segment, never a lower
+    // one (a ballot boarded under a segment whose checkpoint may already be
+    // taken would fail it, checkpoint-boundary).
+    return appendEntry(client, id, Number(segment), ballot, { raiseToPrevious: true });
   }
 
   async #admission(client: Sql, id: Uint8Array): Promise<Decided> {
     const key = Buffer.from(id).toString("hex");
-    const known = this.#decided.get(key);
-    if (known !== undefined) return known;
+    for (const cache of [this.#admitted, this.#refused]) {
+      const known = cache.get(key);
+      if (known === undefined) continue;
+      // Least recently used goes first: a hit moves the election to the end.
+      cache.delete(key);
+      cache.set(key, known);
+      return known;
+    }
     const definition = await readDefinition(client, id);
     if (definition === undefined) throw new SubmitError("unknown-election");
     // The operator boards the transcript as the board's first entry (as the
     // reference election does), so only that entry is read: a ballot never
     // costs a scan of the board (T-52).
     const first = await readEntries(client, id, 0n, 1, BOARD_ENTRY_OVERHEAD + MAX_BOARD_PAYLOAD);
-    let decided: Decided = { ok: false };
     for (const panel of this.#panels) {
       const r = electionAdmission(definition, panel, first);
       if (!r.ok && r.code === "panel-unpinned") continue;
-      // An empty board may yet get its transcript: decided only once its
-      // first entry exists, which never changes after.
-      if (!r.ok && r.code === "ceremony-transcript-missing" && first.length === 0) return r;
-      decided = r.ok ? r : { ok: false };
-      break;
+      // A missing transcript is never kept: costing only the definition, the
+      // first entry and its hash, it is decided again on the next ballot.
+      if (!r.ok && r.code === "ceremony-transcript-missing") return r;
+      // Admissions and refusals are kept apart, so refusals (cheap to cause
+      // with definitions naming no pinned panel) never evict an admission.
+      if (r.ok) remember(this.#admitted, key, r, this.#cacheSize);
+      else remember(this.#refused, key, r, this.#cacheSize);
+      return r;
     }
-    if (this.#decided.size >= this.#cacheSize) {
-      const oldest = this.#decided.keys().next();
-      if (!oldest.done) this.#decided.delete(oldest.value);
-    }
-    this.#decided.set(key, decided);
-    return decided;
+    const refused: Decided = { ok: false };
+    remember(this.#refused, key, refused, this.#cacheSize);
+    return refused;
   }
+}
+
+/** Keeps `value` under `key`, dropping the least recently used beyond `size`. */
+function remember(cache: Map<string, Decided>, key: string, value: Decided, size: number) {
+  if (cache.size >= size) {
+    const oldest = cache.keys().next();
+    if (!oldest.done) cache.delete(oldest.value);
+  }
+  cache.set(key, value);
 }

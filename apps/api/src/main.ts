@@ -46,6 +46,12 @@ const env = Env.parse({
 });
 
 let admissions: BallotAdmissions | undefined;
+if (
+  env.API_PINNED_PANELS === undefined &&
+  (env.API_ANCHOR_EPOCH !== undefined || env.API_ANCHOR_PERIOD !== undefined)
+)
+  // A clock without panels is a misconfiguration that would board nothing.
+  throw new Error("API_ANCHOR_EPOCH and API_ANCHOR_PERIOD need API_PINNED_PANELS");
 if (env.API_PINNED_PANELS !== undefined) {
   if (env.API_ANCHOR_EPOCH === undefined || env.API_ANCHOR_PERIOD === undefined)
     throw new Error("API_PINNED_PANELS needs API_ANCHOR_EPOCH and API_ANCHOR_PERIOD");

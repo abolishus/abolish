@@ -88,7 +88,10 @@ export function electionAdmission(
   } catch (e) {
     if (!(e instanceof DecodeError)) throw e;
     return refuse(
-      e.code === "unknown-version" && e.offset === 2 ? "unsupported-version" : "definition-decode",
+      // As 2.1 reads it: version 0 is no release's, so it fails decoding.
+      e.code === "unknown-version" && e.offset === 2 && definitionBytes[2] !== 0
+        ? "unsupported-version"
+        : "definition-decode",
     );
   }
   const { stubHash, rule } = readDefinition(record);

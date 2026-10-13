@@ -167,6 +167,12 @@ describe("refuses every ballot of an election the verifier can't admit ballots f
     expect(refusal({ ...c, definition: Buffer.from(bytes.subarray(0, 40)).toString("hex") })).toBe(
       "definition-decode",
     );
+    // Version 0 is no release's: a decoding failure, as 2.1 reports it.
+    const zero = bytes.slice();
+    zero[2] = 0;
+    expect(refusal({ ...c, definition: Buffer.from(zero).toString("hex") })).toBe(
+      "definition-decode",
+    );
   });
 });
 

@@ -149,6 +149,20 @@ describe("boards what the verifier admits, and nothing else", () => {
   });
 });
 
+test("a ballot labelled before a later-labelled one was boarded takes that segment", async () => {
+  // Two submissions racing across a period boundary: the earlier-labelled
+  // one lands second, and never below the board's last segment.
+  const c = byId("admitted");
+  const app = await election(c);
+  const [, first, second] = entriesOf(c);
+  const a = admissions();
+  const late = await a.submit(app, electionId, first!.payload, during + 3_600n);
+  const early = await a.submit(app, electionId, second!.payload, during);
+  const segment = (r: { entry: Uint8Array }) => decodeBoardEntry(r.entry, VERSION).segment;
+  expect(segment(early)).toBe(segment(late));
+  expect(segment(late)).toBe(Number((during + 3_600n - clock.epoch) / clock.period));
+});
+
 describe("takes ballots only while the election can admit them", () => {
   const ballot = () => entriesOf(byId("admitted"))[1]!.payload;
 

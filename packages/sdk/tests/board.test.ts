@@ -33,7 +33,9 @@ const expectation = (board: SimulatedBoard, p: Uint8Array, segment: number) => (
   segments: { min: segment, max: segment },
 });
 
-describe("SimulatedBoard", () => {
+// The receipt property checks every receipt and the board under FC_NUM_RUNS
+// (1000 in CI), well past the default 5-second limit.
+describe("SimulatedBoard", { timeout: 60_000 }, () => {
   it("gives receipts that pass the checks at cast, over the board the verifier checks", () => {
     fc.assert(
       fc.property(

@@ -445,6 +445,9 @@ export interface OpenedCommitments {
 export function openedCommitments(
   opening: SpoiledBallotOpening | SpoiledBallotOpeningV2,
 ): OpenedCommitments {
+  // A version-3 opening's C_j spans both halves: `openedCommitmentsV3` (T-47).
+  if ("author_vss" in opening)
+    throw new TypeError("openedCommitments: a version-3 opening needs openedCommitmentsV3");
   const encodings = new Set<string>();
   for (const row of opening.vss) {
     const c = row[0];
@@ -486,6 +489,9 @@ export function opensBallotCommitment(
   opened: OpenedCommitments,
   ballot: Pick<BallotCore, "definitionHash" | "vss">,
 ): boolean {
+  // A version-4 ballot's C' spans both halves: `opensBallotCommitmentV4` (T-47).
+  if ("authorVss" in ballot || "hasHalf" in opened)
+    throw new TypeError("opensBallotCommitment: version-4 ballots need opensBallotCommitmentV4");
   if (!equalBytes(opened.definitionHash, ballot.definitionHash)) return false;
   return ballot.vss.some((row) => {
     const c = row[0];

@@ -23,8 +23,10 @@ import {
   encodeOpeningV3,
   KEM_PUBLIC_KEY,
   openChallengeV3,
+  openedCommitments,
   openedCommitmentsV3,
   openingV3CoreHash,
+  opensBallotCommitment,
   opensBallotCommitmentV4,
   type PanelBallotElection,
   panelBallotCore,
@@ -582,6 +584,10 @@ describe("opening version 3", () => {
     expect(
       opensBallotCommitmentV4(opened, { ...core, definitionHash: new Uint8Array(32).fill(1) }),
     ).toBe(false);
+    // Versions 1 and 2's matching never takes a version-3 opening or a
+    // version-4 ballot: it would miss the author half (T-47).
+    expect(() => openedCommitments(record as never)).toThrow(/openedCommitmentsV3/);
+    expect(() => opensBallotCommitment(opened, core as never)).toThrow(/opensBallotCommitmentV4/);
     // The opened set is private: only lookups are exposed.
     expect(Object.keys(opened).sort()).toEqual(["definitionHash", "has", "hasHalf"]);
   });

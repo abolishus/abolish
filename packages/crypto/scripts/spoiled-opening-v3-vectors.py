@@ -411,6 +411,18 @@ def main():
         panel=AUTHOR,
     )
 
+    opening(
+        "default-seat-bound-author",
+        "Default seat 2's ciphertext bound to the author panel's seat 2: it hashes to the share hash, but isn't the one a default seat's rebuild makes",
+        "author",
+        0,
+        flat({1}, {0}),
+        bind=lambda panel, seat: AUTHOR if (panel, seat) == (DEFAULT, 2) else panel,
+        expect="opening-ciphertext",
+        seat=2,
+        panel=DEFAULT,
+    )
+
     base = honest["author"]
     plain = honest["no-author"]
 
@@ -590,6 +602,7 @@ def main():
     ballot_case("product-randomness-r", "C'_1 = g · h^{r_0}, r_0 the sum of both halves' randomness, a coefficient of neither", "author", *ballot_with_product(grp.add(G, grp.mul(rand[0], HGEN)), at=1), expect=True)
     ballot_case("product-author-share", "C'_0 = h^{g^A_3(1)}, author seat 1's randomness share at flat option 3", "author", *ballot_with_product(grp.mul(bv.evaluate(o["authorPolynomials"][3]["g"], 1), HGEN), at=0), expect=True)
     ballot_case("product-unregistered-author-share", "C'_0 = g · h^{f^A_0(2)}, unregistered author seat 2's share, which the opening reveals too", "author", *ballot_with_product(grp.add(G, grp.mul(bv.evaluate(o["authorPolynomials"][0]["f"], 2), HGEN)), at=0), expect=True)
+    ballot_case("product-unregistered-default-share", "C'_1 = h^{g^D_2(3)}, unregistered default seat 3's randomness share, which the opening reveals too", "author", *ballot_with_product(grp.mul(bv.evaluate(o["polynomials"][2]["g"], 3), HGEN), at=1), expect=True)
     ballot_case("product-author-e", "C'_4 = h^{e}, author seat 3's ephemeral", "author", *ballot_with_product(grp.mul(o["authorSeats"][1]["e"], HGEN), at=4), expect=True)
     ballot_case("product-default-w", "C'_3 = g · h^{w}, default seat 4's proof nonce", "author", *ballot_with_product(grp.add(G, grp.mul(o["seats"][2]["w"], HGEN)), at=3), expect=True)
     ballot_case("product-h", "C'_0 = h: the scalar 1 is public, never matched", "author", *ballot_with_product(HGEN, at=0), expect=False)

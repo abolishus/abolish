@@ -16,8 +16,14 @@ const headers = createMiddleware().server(async ({ next }) => {
   // A copy: a response's own headers can be immutable (redirects, fetches).
   const response = new Response(result.response.body, result.response);
   const image = response.headers.get("content-type") === "image/png";
+  // A redirect carries no document, so no nonce: one its route made cacheable
+  // (a short link, src/routes/p.$code.tsx) keeps its caching. Every other
+  // redirect sets none and gets `no-store` like a page.
+  const redirectCaching =
+    response.status >= 300 && response.status < 400 ? response.headers.get("cache-control") : null;
   for (const [name, value] of Object.entries(image ? imageHeaders() : securityHeaders(nonce)))
     response.headers.set(name, value);
+  if (redirectCaching !== null) response.headers.set("cache-control", redirectCaching);
   if (image) response.headers.delete("set-cookie");
   return { ...result, response };
 });

@@ -471,6 +471,7 @@ describe("analytics", () => {
     const id = "cd".repeat(32);
     await raw(`/polls/${id}?q=1`, { headers: { cookie: `${SESSION}=tok` } });
     await raw("/moderation?after=7");
+    await raw("/P/3J55DW1");
     await raw("/somewhere/else");
     await raw("/broken");
     // Not page views: assets, accounts, server functions, refusals, HEAD.
@@ -483,11 +484,13 @@ describe("analytics", () => {
     expect(reported).toEqual([
       { kind: "pageview", page: "/polls/:id", status: 200 },
       { kind: "pageview", page: "/moderation", status: 200 },
+      { kind: "pageview", page: "/p/:code", status: 200 },
       { kind: "pageview", page: "other", status: 200 },
       { kind: "exception", source: "server", error: { page: "other", name: "Error", frames: [] } },
       { kind: "pageview", page: "other", status: 500 },
     ]);
     expect(JSON.stringify(reported)).not.toContain(id);
+    expect(JSON.stringify(reported).toLowerCase()).not.toContain("3j55dw1");
   });
 
   test("a report from one of our pages is passed on exactly, and never reaches Start", async () => {

@@ -32,6 +32,17 @@ describe("pages", () => {
     );
   });
 
+  test("a short link is its template, in either case, whatever its code", () => {
+    fc.assert(
+      fc.property(fc.constantFrom("/p/", "/P/"), fc.stringMatching(/^[^/?#]+$/), (at, code) => {
+        expect(pageOf(`${at}${code}`)).toBe("/p/:code");
+      }),
+      runs,
+    );
+    for (const path of ["/p", "/p/", "/p/a/b", "/pp/a", "/x/p/a"])
+      expect(pageOf(path)).toBe("other");
+  });
+
   test("every path is one of the fixed templates, so none carries a path's text", () => {
     fc.assert(
       fc.property(fc.webPath(), (path) => {

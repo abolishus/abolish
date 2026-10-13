@@ -5,7 +5,15 @@
 // visitor from one event to the next (T-67, T-10, T-11).
 
 /** Every page, as a template: a poll page is `/polls/:id`, never its ID. */
-export const PAGES = ["/", "/polls", "/polls/:id", "/moderation", "/account", "other"] as const;
+export const PAGES = [
+  "/",
+  "/polls",
+  "/polls/:id",
+  "/p/:code",
+  "/moderation",
+  "/account",
+  "other",
+] as const;
 
 export type Page = (typeof PAGES)[number];
 
@@ -16,6 +24,9 @@ export function pageOf(pathname: string): Page {
   // Any single segment: a malformed ID is still a poll page's 404, and the
   // segment itself is never kept.
   if (/^\/polls\/[^/]+$/.test(pathname)) return "/polls/:id";
+  // A short link, in either case (a QR code carries `/P/<CODE>`): the code
+  // names a poll as surely as its ID does, so it is never kept either.
+  if (/^\/[pP]\/[^/]+$/.test(pathname)) return "/p/:code";
   return "other";
 }
 

@@ -34,11 +34,12 @@ import {
   decodeBoardEntry,
   decodeContractEvent,
   type BoardEntryVersion,
-  type ElectionDefinitionRecord,
   type EventContracts,
   pinnedVersion,
   RECORD_TYPES,
 } from "@abolishus/crypto";
+
+import type { VerifiedDefinition } from "./definition.ts";
 
 export type EventCode = "decode" | ContractEventError;
 
@@ -68,7 +69,7 @@ const isReadable = (v: number | undefined): v is ContractEventVersion => v === 1
  * leaves 4.4 unverifiable, with its code.
  */
 export function eventChecks(
-  definition: ElectionDefinitionRecord,
+  definition: VerifiedDefinition,
   entries: readonly Uint8Array[],
   boardEntryVersion: BoardEntryVersion,
   anchored: number | undefined,

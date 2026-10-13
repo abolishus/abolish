@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import fc from "fast-check";
 import { describe, expect, test } from "vite-plus/test";
+import { RECORD_TYPES } from "@abolishus/crypto";
 import {
   BUNDLE_FORMAT_CEREMONY,
   type CheckResult,
@@ -8,6 +9,8 @@ import {
   type Report,
   verifyBundle,
 } from "../src/index.ts";
+import { decodeDefinition, type VerifiedDefinition } from "../src/definition.ts";
+import { openingChecks } from "../src/openings.ts";
 
 // Format-4 bundles under definition versions 3 to 5: spoiled-ballot opening
 // version 2, of ballot versions 2 and 3's cores, checked against the
@@ -175,4 +178,62 @@ describe("each opening is judged from its own entry", () => {
       { numRuns: runs(40) },
     );
   }, 120_000);
+});
+
+describe("opening-cast compares with admitted ballots only", () => {
+  test("a ballot at the floor that admission rejects makes no opening cast", () => {
+    // cast-at-floor: entry 2 is the tier-2 ballot in segment 3, entry 3 the
+    // opening re-using its commitment. A changed last byte of the ballot's
+    // last range proof rejects it, leaving its C_j as they were.
+    const c = byId("cast-at-floor");
+    const entries = entriesOf(c);
+    const ballot = Uint8Array.from(entries[2] as Uint8Array);
+    ballot[ballot.length - 1] = (ballot[ballot.length - 1] as number) ^ 1;
+    const r = run(c, join([entries[0], entries[1], ballot, entries[3]] as Uint8Array[]));
+    expect(r.ballots?.rejected.map((b) => b.entry)).toEqual([2]);
+    expect(r.openings?.[0]?.breaks).toEqual([]);
+    expect(row(r)).toEqual({ status: "unverifiable", code: "not-implemented" });
+  });
+});
+
+describe("when 6.2 runs (step 1)", () => {
+  const repinned = (d: VerifiedDefinition, type: number, version: number) =>
+    ({
+      ...d,
+      value: {
+        ...d.value,
+        profile: {
+          ...d.value.profile,
+          pins: d.value.profile.pins.map((p) => (p.record_type === type ? { ...p, version } : p)),
+        },
+      },
+    }) as VerifiedDefinition;
+  const clock = { epoch: 0n, period: 3600n, deadline: 0n, lastSegment: 0 };
+  const opening1 = (read("verifier-openings.json") as { cases: Case[] }).cases[0] as Case;
+
+  test("an opening version this release doesn't read is unsupported, before anything else is asked (T-36)", () => {
+    for (const c of [byId("none"), byId("regional"), opening1]) {
+      const d = repinned(decodeDefinition(hex(c.definition)), RECORD_TYPES.spoiledBallotOpening, 3);
+      expect(openingChecks(d, undefined, undefined, [], 4, clock)).toEqual({
+        row: { status: "unverifiable", code: "unsupported-version", at: {} },
+      });
+    }
+  });
+
+  test("an opening version this release reads, of other cores than the definition's ballots, is not reached", () => {
+    for (const [c, version] of [
+      [byId("none"), 1],
+      [byId("regional"), 1],
+      [opening1, 2],
+    ] as const) {
+      const d = repinned(
+        decodeDefinition(hex(c.definition)),
+        RECORD_TYPES.spoiledBallotOpening,
+        version,
+      );
+      expect(openingChecks(d, undefined, undefined, [], 4, clock)).toEqual({
+        row: { status: "unverifiable", code: "not-reached" },
+      });
+    }
+  });
 });

@@ -372,6 +372,23 @@ export {
   type ReceiptVerdict,
 } from "./receipt-evidence.ts";
 export {
+  BEACON_FORK_SCHEDULES,
+  type BeaconFork,
+  type BeaconForkName,
+  type BeaconForkSchedule,
+  checkReceiptOpening,
+  decodeReceiptOpening,
+  encodeReceiptOpening,
+  RECEIPT_OPENING,
+  type ReceiptOpening,
+  type ReceiptOpeningInput,
+  receiptOpeningStateEntry,
+  type StateEntryNamed,
+  transactionCalldata,
+  transactionTrieValue,
+  type TrustedBeaconState,
+} from "./receipt-opening.ts";
+export {
   type CastExpectation,
   checkReceiptAtCast,
   decodeReceipt,

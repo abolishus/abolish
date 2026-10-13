@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { expect, within } from "storybook/test";
+import { expect, userEvent, within } from "storybook/test";
 
 import type { PollView } from "../poll.ts";
 import { PollSummary } from "./poll-summary.tsx";
@@ -22,25 +22,54 @@ const poll: PollView = {
   closesAt: { seconds: "18446744073709551615", iso: undefined },
 };
 
+/** Between the poll's opening and its close. */
+const OPEN_AT = { seconds: "1767571200", iso: "2026-01-05T00:00:00.000Z" };
+
 const board = { treeSize: "1234", chainHead: "1f".repeat(32), root: "2e".repeat(32) };
 
 const meta = {
   component: PollSummary,
-  args: { poll, board, moderation: { state: "visible" }, code: "mhanrsz" },
+  args: { poll, board, moderation: { state: "visible" }, asOf: OPEN_AT, code: "mhanrsz" },
 } satisfies Meta<typeof PollSummary>;
 
 export default meta;
 type Story = StoryObj<typeof meta>;
 
+/** Opens "How do we know this is real?", where the definition and board facts are. */
+async function openEvidence(canvasElement: HTMLElement) {
+  const canvas = within(canvasElement);
+  const summary = canvas.getByRole("heading", { name: "How do we know this is real?" });
+  // Closed, the evidence is in the page but not shown.
+  const details = canvasElement.querySelector("details");
+  await expect(details).not.toHaveAttribute("open");
+  await expect(canvas.getByText(/^Definition hash/, { selector: "figcaption" })).not.toBeVisible();
+  await userEvent.click(summary);
+  await expect(details).toHaveAttribute("open");
+  await expect(canvas.getByRole("figure", { name: /^Definition hash/ })).toBeVisible();
+}
+
 const play: Story["play"] = async ({ canvasElement }) => {
   const canvas = within(canvasElement);
-  await expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent("Poll");
-  await expect(canvas.getByText("One choice")).toBeVisible();
+  await expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent(
+    "Poll 1011121314151617…",
+  );
+  // The surface: where the poll stands, who can vote, when, and how answering works.
+  await expect(canvas.getByText("Open for answers")).toBeVisible();
+  await expect(canvas.getByText("3 options")).toBeVisible();
+  await expect(canvas.getByRole("heading", { name: "Answering" })).toBeVisible();
+  await expect(canvas.getByText(/only in the ballot app, never on this website/)).toBeVisible();
+  await openEvidence(canvasElement);
+  await expect(canvas.getByText(/what our server says about this poll/)).toBeVisible();
+  await expect(canvas.getByRole("figure", { name: "Poll ID" })).toBeVisible();
+  await expect(
+    canvas.getByRole("img", { name: "Fingerprint of definition a4555c67" }),
+  ).toBeVisible();
   await expect(canvas.getByText("4 of 7")).toBeVisible();
   await expect(canvas.getByText("5,000 members")).toBeVisible();
   // A singular plural, and an instant past what Date holds shown as seconds.
   await expect(canvas.getByText("1 member")).toBeVisible();
-  await expect(canvas.getByText("18446744073709551615")).toBeVisible();
+  // On the surface and in the evidence.
+  await expect(canvas.getAllByText("18446744073709551615")).toHaveLength(2);
   await expect(canvas.getByRole("figure", { name: "Chain head" })).toBeVisible();
   await expect(canvas.queryByRole("note")).toBeNull();
   await expect(canvas.getByRole("link", { name: "/p/mhanrsz" })).toHaveAttribute(
@@ -53,11 +82,36 @@ export const Default: Story = { play };
 
 export const Dark: Story = { parameters: { theme: "dark" }, play };
 
+/** Before `opens_at`: not open yet, with its opening time on the surface. */
+export const Scheduled: Story = {
+  args: { asOf: { seconds: "1767225599", iso: "2025-12-31T23:59:59.000Z" } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByText("Not open yet")).toBeVisible();
+    await expect(canvas.queryByText("Open for answers")).toBeNull();
+  },
+};
+
+/** Past `closes_at`: closed, and answering says the board stays public. */
+export const Closed: Story = {
+  args: {
+    poll: { ...poll, closesAt: { seconds: "1767830400", iso: "2026-01-08T00:00:00.000Z" } },
+    asOf: { seconds: "1767830401", iso: "2026-01-08T00:00:01.000Z" },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByText("Closed")).toBeVisible();
+    await expect(canvas.getByText(/This poll has closed/)).toBeVisible();
+    await expect(canvas.queryByText(/only in the ballot app/)).toBeNull();
+  },
+};
+
 /** No registration recorded yet: no code resolves, so none is printed. */
 export const NoShortCode: Story = {
   args: { code: undefined },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
+    await openEvidence(canvasElement);
     await expect(canvas.queryByText("Short link")).toBeNull();
     await expect(canvas.queryByRole("link")).toBeNull();
   },
@@ -67,6 +121,7 @@ export const EmptyBoard: Story = {
   args: { board: { treeSize: "0", chainHead: "00".repeat(32), root: "00".repeat(32) } },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
+    await openEvidence(canvasElement);
     await expect(canvas.getByText("No entries yet.")).toBeVisible();
     // An empty board's all-zero head is never shown as if it were one.
     await expect(canvas.queryByRole("figure", { name: "Chain head" })).toBeNull();
@@ -87,6 +142,7 @@ export const Hidden: Story = {
   },
   play: async ({ canvasElement }) => {
     const note = within(canvasElement).getByRole("note");
+    await expect(within(canvasElement).getByText("Text hidden")).toBeVisible();
     await expect(note).toHaveTextContent("withheld (Personal data)");
     await expect(
       within(note).getByRole("link", { name: "See the moderation log" }),
@@ -106,6 +162,7 @@ export const Delisted: Story = {
     await expect(within(canvasElement).getByRole("note")).toHaveTextContent(
       "left out of discovery and search (Spam)",
     );
+    await expect(within(canvasElement).getByText("Delisted")).toBeVisible();
   },
 };
 
@@ -114,6 +171,6 @@ export const IllFormed: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(canvas.getByRole("alert")).toHaveTextContent("(trustee panel)");
-    await expect(canvas.getByText("Approve any number")).toBeVisible();
+    await expect(canvas.getAllByText("Approve any number")[0]).toBeVisible();
   },
 };

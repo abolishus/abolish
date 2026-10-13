@@ -42,6 +42,7 @@ const meta = {
         { kind: "unavailable", electionId: THIRD, problem: "undecodable" },
       ],
       next: FOURTH,
+      asOf: { seconds: "1767571200", iso: "2026-01-05T00:00:00.000Z" },
     },
   },
 } satisfies Meta<typeof PollList>;
@@ -56,7 +57,11 @@ const play: Story["play"] = async ({ canvasElement }) => {
   await expect(items).toHaveLength(3);
   await expect(within(items[0]!).getByRole("link")).toHaveAttribute("href", `/polls/${FIRST}`);
   await expect(within(items[0]!).getByText("One choice")).toBeVisible();
+  await expect(within(items[0]!).getByText("Open")).toBeVisible();
   await expect(within(items[0]!).getByText(/January 8, 2026/)).toBeVisible();
+  await expect(
+    within(items[0]!).getByRole("img", { name: "Fingerprint of poll 10101010" }),
+  ).toBeVisible();
   // An ill-formed definition is flagged, and an instant past `Date` shown as seconds.
   await expect(within(items[1]!).getByText(/verifier fails it/)).toBeVisible();
   await expect(within(items[1]!).getByText("18446744073709551615")).toBeVisible();
@@ -74,7 +79,7 @@ export const Default: Story = { play };
 export const Dark: Story = { parameters: { theme: "dark" }, play };
 
 export const Empty: Story = {
-  args: { list: { polls: [], next: undefined } },
+  args: { list: { polls: [], next: undefined, asOf: meta.args.list.asOf } },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(canvas.getByText("No polls listed.")).toBeVisible();

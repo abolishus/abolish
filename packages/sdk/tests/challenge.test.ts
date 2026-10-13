@@ -24,6 +24,7 @@ const scenario: Scenario = {
   revotes: 0,
   publications: 0,
   postings: 0,
+  reorgs: 0,
   seed: 5,
 };
 

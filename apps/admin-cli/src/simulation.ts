@@ -4,7 +4,14 @@
 // @abolishus/sdk; this file only reads it and prints the result.
 
 import { readFileSync } from "node:fs";
-import { downAt, parseScenario, planElection, runSimulation, type Scenario } from "@abolishus/sdk";
+import {
+  deliveredAt,
+  downAt,
+  parseScenario,
+  planElection,
+  runSimulation,
+  type Scenario,
+} from "@abolishus/sdk";
 import type { OfflineCommand } from "./cli.ts";
 import { CliError, UsageError } from "./errors.ts";
 
@@ -48,22 +55,35 @@ export function simulationCommandsWith(
       async run(_, values, io) {
         const scenario = scenarioOf(values);
         const plan = planElection(scenario);
-        // Every ballot cast: each voter's last, and a re-voter's earlier one.
-        const casts = plan.voters.flatMap((v) => (v.earlier === null ? [v] : [v.earlier, v]));
+        // Every ballot cast: a re-voter's earlier one, each voter's last, and
+        // its recast after a reorganisation, which posts nothing again.
+        const recasts = plan.voters.flatMap((v) =>
+          v.reorg?.recast == null ? [] : [v.reorg.recast],
+        );
+        const ballots = plan.voters.flatMap((v) => (v.earlier === null ? [v] : [v.earlier, v]));
+        const casts = [...ballots, ...recasts];
+        const selected = plan.voters.filter((v) => v.selected !== null);
         io.out({
           scenario,
           ballots: {
             cast: casts.length,
             direct: casts.filter((b) => b.path === "direct").length,
-            superseded: casts.length - plan.voters.length,
+            superseded: plan.voters.filter((v) => v.earlier !== null && v.selected !== "earlier")
+              .length,
+            reorged: plan.voters.filter((v) => v.reorg !== null).length,
+            recast: recasts.length,
             challenged: plan.voters.filter((v) => v.challenged).length,
             published: plan.voters.filter((v) => v.published).length,
             // Each ballot its voter posts carries one posting per seat down at its cast.
-            postings: casts
+            postings: ballots
               .filter((b) => b.posts)
               .reduce((a, b) => a + downAt(scenario, b.at).length, 0),
-            // A voter who doesn't post a seat down at its cast leaves its last ballot undelivered.
-            undelivered: plan.voters.filter((v) => !v.delivered).length,
+            // A selected ballot with a seat down at its cast that its voter didn't post.
+            undelivered: selected.filter((v) =>
+              v.selected === "earlier" && v.earlier !== null
+                ? !deliveredAt(scenario, v.earlier)
+                : !v.delivered,
+            ).length,
           },
           expected: plan.tiers.map((tier) => ({ tier, counts: plan.expected.get(tier) })),
         });

@@ -52,13 +52,18 @@ describe("simulation", { timeout: 60_000 }, () => {
     const file = join(mkdtempSync(join(tmpdir(), "sim-")), "scenario.json");
     // Seat 4 goes down halfway, so later ballots need one more posting.
     const trustees = { panel: 4, threshold: 2, offline: [3], departures: [{ seat: 4, at: 0.5 }] };
-    writeFileSync(file, JSON.stringify({ ...scenario, trustees, revotes: 0.5, publications: 1 }));
+    writeFileSync(
+      file,
+      JSON.stringify({ ...scenario, trustees, revotes: 0.5, publications: 1, reorgs: 0.5 }),
+    );
     const plan = await cli("simulation", "plan", "--file", file);
     expect(plan.code).toBe(0);
     type Ballots = {
       cast: number;
       direct: number;
       superseded: number;
+      reorged: number;
+      recast: number;
       challenged: number;
       published: number;
       postings: number;
@@ -76,6 +81,7 @@ describe("simulation", { timeout: 60_000 }, () => {
     expect(out.expected).toEqual(report.cells.map((c) => ({ tier: c.tier, counts: c.counts })));
     expect(out.ballots.challenged).toBeGreaterThan(0);
     expect(out.ballots.superseded).toBeGreaterThan(0);
+    expect(out.ballots.recast).toBeGreaterThan(0);
     // Every challenger publishes at share 1.
     expect(out.ballots.published).toBe(out.ballots.challenged);
     // Some voters post the down seats and the rest leave their ballots undelivered.
@@ -83,6 +89,31 @@ describe("simulation", { timeout: 60_000 }, () => {
     expect(out.ballots.undelivered).toBeGreaterThan(0);
     const { server: _, ...ballots } = report.ballots;
     expect(ballots).toEqual(out.ballots);
+  });
+
+  test("plan agrees with run when a reorganisation near close loses a re-voter's last ballot", async () => {
+    // The first seed whose plan has a voter whose block is finalized after close.
+    const at = { ...scenario, revotes: 1, reorgs: 1, challenges: 0 };
+    let seed = 0;
+    for (; ; seed++) {
+      const out = (await cli("simulation", "plan", "--scenario", JSON.stringify({ ...at, seed })))
+        .out[0] as { ballots: { reorged: number; recast: number } };
+      if (out.ballots.recast < out.ballots.reorged) break;
+    }
+    const json = JSON.stringify({ ...at, seed });
+    const plan = (await cli("simulation", "plan", "--scenario", json)).out[0] as {
+      ballots: Record<string, number>;
+      expected: { tier: number; counts: number[] }[];
+    };
+    const ran = await cli("simulation", "run", "--scenario", json);
+    expect(ran.code).toBe(0);
+    const report = ran.out[0] as {
+      ballots: Record<string, number>;
+      cells: { tier: number; counts: number[] }[];
+    };
+    expect(plan.expected).toEqual(report.cells.map((c) => ({ tier: c.tier, counts: c.counts })));
+    const { server: _, ...ballots } = report.ballots;
+    expect(ballots).toEqual(plan.ballots);
   });
 
   test("refuses a malformed scenario as a usage error naming the field", async () => {

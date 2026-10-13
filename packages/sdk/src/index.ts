@@ -9,8 +9,11 @@ export {
   type SimulatedTier,
 } from "./simulation/scenario.ts";
 export {
+  deliveredAt,
   downAt,
   type Plan,
+  type PlannedBallot,
+  type PlannedRecast,
   planElection,
   type PlannedVoter,
   selectionRange,

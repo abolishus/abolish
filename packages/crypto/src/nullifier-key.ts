@@ -26,7 +26,7 @@ import {
   u8,
   Writer,
 } from "./codec.ts";
-import { ds } from "./domain-separation.ts";
+import { ds, type SpecifiedTagOf } from "./domain-separation.ts";
 import { type Element, element, G, GROUP_ORDER, H } from "./group.ts";
 import {
   BJJ_G,
@@ -56,6 +56,7 @@ import {
   identityKey,
   type Panel,
   panelId,
+  type SignatureTag,
   p256Key,
   p256Sig,
   signStatement,
@@ -68,7 +69,8 @@ const MESSAGE_TAG = "abolish/v1/sig/nullifier-key-message";
 const SIGNING_KEY_TAG = "abolish/v1/sig/nullifier-key-signing-key";
 const APPROVAL_TAG = "abolish/v1/sig/nullifier-key-approval";
 
-const ROUND_1 = struct([
+/** @internal Round 1's layout, which resharing's round 1 shares. */
+export const ROUND_1 = struct([
   ["index", u8],
   ["kem_key", KEM_PUBLIC_KEY],
   ["signing_key", p256Key],
@@ -89,7 +91,8 @@ const ROUND_3 = struct([
   ["signature", p256Sig],
 ] as const);
 
-const REVEALED_SHARE = struct([
+/** @internal A reveal's layout, which resharing's round 4 shares. */
+export const REVEALED_SHARE = struct([
   ["complainer", u8],
   ["share", bjjScalar],
   ["blind", bjjScalar],
@@ -288,17 +291,31 @@ function signedMessage(round: number, prev: Uint8Array, encoded: Uint8Array): Ui
   return w.finish();
 }
 
+/**
+ * @internal Whether `msg`, a round-`round` message in `codec`, carries `key`'s
+ * signature under `tag` over `u8(round) ‖ prev ‖ u8(i) ‖ body`.
+ */
+export function roundMessageOk(
+  codec: unknown,
+  tag: SignatureTag,
+  key: Uint8Array | undefined,
+  round: number,
+  prev: Uint8Array,
+  msg: { index: number; signature: Uint8Array },
+): boolean {
+  if (key === undefined) return false;
+  const encoded = encode(codec as never, msg as never);
+  return verifyStatement(key, tag, signedMessage(round, prev, encoded), msg.signature);
+}
+
 function messageOk(
   run: Run,
   round: number,
   prev: Uint8Array,
   msg: { index: number; signature: Uint8Array },
 ): boolean {
-  const key = run.keys[msg.index - 1];
-  if (key === undefined) return false;
   const codec = ROUND_CODECS[round - 1] as (typeof ROUND_CODECS)[number];
-  const encoded = encode(codec as never, msg as never);
-  return verifyStatement(key, MESSAGE_TAG, signedMessage(round, prev, encoded), msg.signature);
+  return roundMessageOk(codec, MESSAGE_TAG, run.keys[msg.index - 1], round, prev, msg);
 }
 
 // r = s = 1: a canonical encoding no real signature takes the place of.
@@ -316,16 +333,29 @@ function sign<T extends { signature: Uint8Array }>(
   unsigned: Omit<T, "signature">,
 ): T {
   const codec = ROUND_CODECS[round - 1] as (typeof ROUND_CODECS)[number];
+  return signRoundMessage<T>(codec, MESSAGE_TAG, identitySecret, round, prev, unsigned);
+}
+
+/** @internal A round-`round` message in `codec`, signed under `tag` over `u8(round) ‖ prev ‖ u8(i) ‖ body`. */
+export function signRoundMessage<T extends { signature: Uint8Array }>(
+  codec: unknown,
+  tag: SignatureTag,
+  identitySecret: Uint8Array,
+  round: number,
+  prev: Uint8Array,
+  unsigned: Omit<T, "signature">,
+): T {
   // Encoded with a placeholder signature: the body is everything before it.
   const placeholder = { ...unsigned, signature: PLACEHOLDER_SIG } as unknown as T;
   const encoded = encode(codec as never, placeholder as never);
-  const signature = signStatement(identitySecret, MESSAGE_TAG, signedMessage(round, prev, encoded));
+  const signature = signStatement(identitySecret, tag, signedMessage(round, prev, encoded));
   const signed = { ...unsigned, signature } as unknown as T;
   // Round-tripped, so only an encodable message with its own copies leaves here.
   return decode(codec as never, encode(codec as never, signed as never)) as T;
 }
 
-function signingPopMessage(
+/** @internal `context ‖ u8(i) ‖ encode(kem_key) ‖ signing_key`, what a signing key's proof signs. */
+export function signingPopMessage(
   context: Uint8Array,
   index: number,
   kemKey: KemPublicKey,
@@ -363,7 +393,11 @@ export function registrationKeygen(index: number, identitySecret: Uint8Array): R
   return { index, identitySecret, kem: kemKeygen(), signingSecret: p256.utils.randomSecretKey() };
 }
 
-function seatKey(run: Scope, seat: RegistrationSecrets): void {
+/** @internal Throws unless `seat`'s identity secret is the pinned key of its seat. */
+export function seatKey(
+  run: { readonly keys: readonly Uint8Array[] },
+  seat: { readonly index: number; readonly identitySecret: Uint8Array },
+): void {
   const key = Number.isSafeInteger(seat.index) ? run.keys[seat.index - 1] : undefined;
   if (key === undefined || seat.index < 1)
     throw new RangeError("nullifier key: index must be a seat of the panel");
@@ -377,9 +411,9 @@ function seatKey(run: Scope, seat: RegistrationSecrets): void {
  * regenerated them after signing round 1 would fail to open every honest
  * dealer's share, and its complaints would make honest dealers publish its
  * shares, `k` points of their polynomials with the corrupt seats' `k − 1`
- * (docs/spec/nullifier-key.md, Round 1).
+ * (docs/spec/nullifier-key.md, Round 1). @internal: resharing's round 1 too.
  */
-function ownKeys(
+export function ownKeys(
   keys: readonly RegistrationKeysMessage[],
   index: number,
   kem: KemPublicKey,
@@ -416,18 +450,19 @@ export function registrationKeysMessage(
   });
 }
 
-const modL = (a: bigint) => ((a % BJJ_ORDER) + BJJ_ORDER) % BJJ_ORDER;
+/** @internal */
+export const modL = (a: bigint) => ((a % BJJ_ORDER) + BJJ_ORDER) % BJJ_ORDER;
 
-/** `f(z) mod l` by Horner's rule; `coefficients[j]` is the coefficient of `z^j`. */
-function evaluatePolynomial(coefficients: readonly bigint[], z: number): bigint {
+/** @internal `f(z) mod l` by Horner's rule; `coefficients[j]` is the coefficient of `z^j`. */
+export function evaluatePolynomial(coefficients: readonly bigint[], z: number): bigint {
   let v = 0n;
   for (let j = coefficients.length - 1; j >= 0; j--)
     v = modL(v * BigInt(z) + (coefficients[j] as bigint));
   return v;
 }
 
-/** `Σ_j (i^j mod l) · A_j`: a dealer's commitment to its share for seat `i`. Public values only. */
-function commitmentAt(commitments: readonly BjjPoint[], i: number): BjjPoint {
+/** @internal `Σ_j (i^j mod l) · A_j`: a dealer's commitment to its share for seat `i`. Public values only. */
+export function commitmentAt(commitments: readonly BjjPoint[], i: number): BjjPoint {
   let c = BJJ_G.subtract(BJJ_G);
   let power = 1n;
   for (const a of commitments) {
@@ -442,8 +477,8 @@ function bjjMul(p: BjjPoint, s: bigint): BjjPoint {
   return s === 0n ? p.subtract(p) : p.multiply(s);
 }
 
-/** `σ · G + σ' · J`, constant time in the secrets. */
-function opening(share: bigint, blind: bigint): BjjPoint {
+/** @internal `σ · G + σ' · J`, constant time in the secrets. */
+export function opening(share: bigint, blind: bigint): BjjPoint {
   return bjjMul(BJJ_G, share).add(bjjMul(GENERATOR_J, blind));
 }
 
@@ -470,39 +505,65 @@ export interface Dealing {
   readonly polynomials: Polynomials;
 }
 
-/** `K`: share-encryption's X-Wing-style combiner, under this message's own tag. */
-function combine(ssM: Uint8Array, ssDh: Element, ctDh: Element, dh: Element): Uint8Array {
+/**
+ * @internal The record type and tags of one sealed-share message: the dealt
+ * share here, the reshared share in resharing. Each has its own, so a message
+ * of one never opens as the other.
+ */
+export interface ShareChannel {
+  readonly recordType: number;
+  readonly kemTag: SpecifiedTagOf<"kdf-aead">;
+  readonly aadTag: SpecifiedTagOf<"kdf-aead">;
+}
+
+const DEALT_SHARE_CHANNEL: ShareChannel = {
+  recordType: RECORD_TYPES.nullifierKeyShare,
+  kemTag: "abolish/v1/kem/nullifier-key-share",
+  aadTag: "abolish/v1/kem/nullifier-key-share-aad",
+};
+
+/** `K`: share-encryption's X-Wing-style combiner, under the message's own tag. */
+function combine(
+  channel: ShareChannel,
+  ssM: Uint8Array,
+  ssDh: Element,
+  ctDh: Element,
+  dh: Element,
+): Uint8Array {
   const w = new Writer();
   w.bytes(ssM);
   element.write(w, ssDh);
   element.write(w, ctDh);
   element.write(w, dh);
-  return H(ds("abolish/v1/kem/nullifier-key-share", w.finish()));
+  return H(ds(channel.kemTag, w.finish()));
 }
 
 const COMMITMENTS = list(bjjPoint, MAX_TRUSTEES);
 
 function associatedData(
+  channel: ShareChannel,
   context: Uint8Array,
   dealer: number,
   recipient: number,
   commitments: readonly BjjPoint[],
 ): Uint8Array {
   const w = new Writer();
-  u16.write(w, RECORD_TYPES.nullifierKeyShare);
+  u16.write(w, channel.recordType);
   u8.write(w, 1);
   w.bytes(context);
   u8.write(w, dealer);
   u8.write(w, recipient);
   COMMITMENTS.write(w, commitments);
-  return ds("abolish/v1/kem/nullifier-key-share-aad", w.finish());
+  return ds(channel.aadTag, w.finish());
 }
 
 // Each AEAD key seals exactly one message: it hashes a fresh 32-byte ML-KEM
 // message and a fresh ephemeral, so a fixed nonce never repeats under a key.
 const NONCE = new Uint8Array(12);
 
-function sealShare(
+/** @internal The sealed fields of a share message: `ct_mlkem`, `ct_dh` and `sealed`. */
+export function sealShareWith(
+  channel: ShareChannel,
   context: Uint8Array,
   dealer: number,
   recipient: RegistrationKeysMessage,
@@ -510,7 +571,7 @@ function sealShare(
   share: bigint,
   blind: bigint,
   randomness: ShareRandomness,
-): Uint8Array {
+): { readonly ct_mlkem: Uint8Array; readonly ct_dh: Element; readonly sealed: Uint8Array } {
   const { mu, e } = randomness;
   if (!(mu instanceof Uint8Array) || mu.length !== MLKEM_MSG_LEN)
     throw new RangeError("nullifier key: mu must be 32 bytes");
@@ -521,7 +582,7 @@ function sealShare(
   const key = decode(KEM_PUBLIC_KEY, encode(KEM_PUBLIC_KEY, recipient.kem_key));
   const { cipherText, sharedSecret } = ml_kem768.encapsulate(key.ek, mu);
   const ctDh = G.multiply(e);
-  const k = combine(sharedSecret, key.dh.multiply(e), ctDh, key.dh);
+  const k = combine(channel, sharedSecret, key.dh.multiply(e), ctDh, key.dh);
   sharedSecret.fill(0);
   const w = new Writer();
   bjjScalar.write(w, share);
@@ -530,21 +591,41 @@ function sealShare(
   const sealed = chacha20poly1305(
     k,
     NONCE,
-    associatedData(context, dealer, recipient.index, commitments),
+    associatedData(channel, context, dealer, recipient.index, commitments),
   ).encrypt(plain);
   k.fill(0);
   plain.fill(0);
+  return { ct_mlkem: cipherText, ct_dh: ctDh, sealed };
+}
+
+function sealShare(
+  context: Uint8Array,
+  dealer: number,
+  recipient: RegistrationKeysMessage,
+  commitments: readonly BjjPoint[],
+  share: bigint,
+  blind: bigint,
+  randomness: ShareRandomness,
+): Uint8Array {
   return encodeDealtShare({
     key_context: Uint8Array.from(context),
     dealer,
     recipient: recipient.index,
-    ct_mlkem: cipherText,
-    ct_dh: ctDh,
-    sealed,
+    ...sealShareWith(
+      DEALT_SHARE_CHANNEL,
+      context,
+      dealer,
+      recipient,
+      commitments,
+      share,
+      blind,
+      randomness,
+    ),
   });
 }
 
-function checkPolynomials(p: Polynomials, k: number): void {
+/** @internal Throws unless both polynomials have `k` coefficients below `l`. */
+export function checkPolynomials(p: Polynomials, k: number): void {
   for (const c of [p.f, p.g])
     if (
       !Array.isArray(c) ||
@@ -600,8 +681,8 @@ export function dealingMessageWith(
   return { message, shares, polynomials: { f, g } };
 }
 
-/** A scalar uniform on 0 to `l − 1` from the CSPRNG: 64 bytes reduced, within 2⁻²⁶⁰ of uniform. */
-function randomBjjScalar(): bigint {
+/** @internal A scalar uniform on 0 to `l − 1` from the CSPRNG: 64 bytes reduced, within 2⁻²⁶⁰ of uniform. */
+export function randomBjjScalar(): bigint {
   let v = 0n;
   for (const x of randomBytes(64)) v = (v << 8n) | BigInt(x);
   return v % BJJ_ORDER;
@@ -699,13 +780,38 @@ export function checkDealtShare(
   const signed = dealing.share_hashes[position];
   if (signed === undefined || !equalBytes(dealtShareHash(bytes), signed))
     return { ok: false, code: "share-hash" };
+  return openShareWith(
+    DEALT_SHARE_CHANNEL,
+    run.context,
+    secret,
+    msg.dealer,
+    recipient.index,
+    dealing.commitments,
+    msg,
+  );
+}
+
+/**
+ * @internal The last two steps of a share check, on a message whose hash
+ * matched its dealer's signed one: it opens, and opens the dealer's
+ * commitment at the recipient.
+ */
+export function openShareWith(
+  channel: ShareChannel,
+  context: Uint8Array,
+  secret: KemSecretKey,
+  dealer: number,
+  recipient: number,
+  commitments: readonly BjjPoint[],
+  msg: { readonly ct_mlkem: Uint8Array; readonly ct_dh: Element; readonly sealed: Uint8Array },
+): DealtShareResult {
   const { secretKey: dk } = ml_kem768.keygen(secret.seed);
   // FIPS 203 Decaps: implicit rejection returns a pseudorandom secret for a
   // ciphertext that fails re-encryption, so the AEAD then fails. Nothing
   // about the decapsulation is ever revealed: a complaint names the dealer.
   const ssM = ml_kem768.decapsulate(msg.ct_mlkem, dk);
   dk.fill(0);
-  const k = combine(ssM, msg.ct_dh.multiply(secret.x), msg.ct_dh, G.multiply(secret.x));
+  const k = combine(channel, ssM, msg.ct_dh.multiply(secret.x), msg.ct_dh, G.multiply(secret.x));
   ssM.fill(0);
   let share: bigint;
   let blind: bigint;
@@ -714,18 +820,18 @@ export function checkDealtShare(
     plain = chacha20poly1305(
       k,
       NONCE,
-      associatedData(run.context, msg.dealer, msg.recipient, dealing.commitments),
+      associatedData(channel, context, dealer, recipient, commitments),
     ).decrypt(msg.sealed);
     [share, blind] = decode(SHARE_PAIR, plain);
   } catch {
-    return { ok: false, code: "share-decrypt", dealer: msg.dealer };
+    return { ok: false, code: "share-decrypt", dealer };
   } finally {
     k.fill(0);
     plain?.fill(0);
   }
-  if (!opening(share, blind).equals(commitmentAt(dealing.commitments, recipient.index)))
-    return { ok: false, code: "share-verify", dealer: msg.dealer };
-  return { ok: true, dealer: msg.dealer, share, blind };
+  if (!opening(share, blind).equals(commitmentAt(commitments, recipient)))
+    return { ok: false, code: "share-verify", dealer };
+  return { ok: true, dealer, share, blind };
 }
 
 const SHARE_PAIR = {
@@ -867,7 +973,8 @@ export type NullifierKeyCheck =
       readonly seats?: readonly KeySeatResult[];
     };
 
-function increasing(indices: readonly number[], n: number): boolean {
+/** @internal Strictly increasing seats from 1 to `n`. */
+export function increasing(indices: readonly number[], n: number): boolean {
   return indices.every(
     (i, at) => i >= 1 && i <= n && (at === 0 || i > (indices[at - 1] as number)),
   );
@@ -921,7 +1028,9 @@ function structureCode(run: Run, t: Partial<Rounds>): NullifierKeyErrorCode | nu
   return null;
 }
 
-const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+/** @internal */
+export const hex = (b: Uint8Array) =>
+  Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
 
 // Check 4: each seat's reasons, from the transcript alone.
 function seatResults(run: Run, t: Rounds): KeySeatResult[] {
@@ -1156,7 +1265,8 @@ export function nullifierKeyQuorum(scope: NullifierKeyScope): number {
 }
 
 // Public values, so timing doesn't matter; written without early exit anyway.
-function equalBytes(a: Uint8Array, b: Uint8Array): boolean {
+/** @internal */
+export function equalBytes(a: Uint8Array, b: Uint8Array): boolean {
   if (a.length !== b.length) return false;
   let d = 0;
   for (let i = 0; i < a.length; i++) d |= (a[i] ?? 0) ^ (b[i] ?? 0);

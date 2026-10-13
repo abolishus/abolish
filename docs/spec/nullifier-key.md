@@ -4,7 +4,7 @@ How the trustee panel creates the Tier 2 keyed nullifier's OPRF key `sk` ([[keye
 
 What this page doesn't cover yet (P3-4 part 2b's later steps):
 
-- **Resharing** the key to a new panel or epoch (Herzberg, Jarecki, Krawczyk and Yung; Desmedt and Jajodia), and how a later epoch's key succeeds this one: part 2b-2b. Until then a key is created once per Tier 2 scope and never changes.
+- **Resharing** the key to a new panel or epoch, and how a later epoch's key succeeds this one, are [[nullifier-reshare]]'s (part 2b-2b). A scope's initial key is made once, here; every later key is a reshare of the one before it.
 - **Where approvals are recorded** (the group registry) and [[verifier]] 2.4's use of the key: part 2b-4. This page defines the approval statement and the rule an honest seat follows.
 - **Queries** sent to the registration KEM keys this page registers: part 2b-3.
 
@@ -16,7 +16,7 @@ What this page doesn't cover yet (P3-4 part 2b's later steps):
 
 ## Parties and keys
 
-The panel is the one the deployment's release pins for the Tier 2 scope ([[trustee-identity]], Panel identifier): `k`, `n` and the identity keys `Q_1 … Q_n`. Each seat `i` that takes part generates, fresh for this key and this run, from the CSPRNG:
+The panel is the scope's **initial panel**, the one the deployment's release pins for the Tier 2 scope's initial key ([[trustee-identity]], Panel identifier). That pin is kept apart from the panel that holds the key today and never changes, even after a reshare hands the key to another panel ([[nullifier-reshare]]); a checker accepts an initial key only under it. The panel has `k`, `n` and the identity keys `Q_1 … Q_n`. Each seat `i` that takes part generates, fresh for this key and this run, from the CSPRNG:
 
 - a **registration KEM key** pair (`kem_key_i`, `kem_secret_i`) ([[share-encryption]], Trustee KEM key). It receives the seat's dealt shares in round 2 and, from part 2b-3, clients' queries. Unlike a per-election KEM key, it lives as long as the seat's share of `sk`;
 - a **registration signing key** `P_i = d_i · G` on P-256, `d_i` uniform on 1 to `n_P256 − 1`. It signs the seat's keyed-nullifier answers ([[keyed-nullifier]], Answer record), so the identity key signs only this page's messages and approval, at a ceremony with a person present, and never automatically (T-37).
@@ -255,7 +255,7 @@ m = u64(l2_chain_id) ‖ group_registry ‖ panel_id ‖ u8(i) ‖ key_id
 1. the transcript passes the check, with at least `max(k, n − 1)` qualified seats ([[0006-trustees]] rule 7, the quorum attestations use too, [[0022-tier2-keyed-nullifier]], Uniqueness across quorums);
 2. seat `i` is qualified, and the share it computed opens its `C_i`: it holds a dealt share or a reveal from every other qualified seat;
 3. the transcript holds every message `i` sent, as it sent it, so every round chain it signed over is the transcript's;
-4. `i` hasn't approved another key for this (`l2_chain_id`, `group_registry`). A seat approves **at most one key per Tier 2 scope**, whatever the run (resharing, part 2b-2b, is how a later key succeeds it).
+4. `i` hasn't approved any key for this (`l2_chain_id`, `group_registry`), initial or reshared, and no key counts for the scope yet. A seat approves **at most one key per Tier 2 scope** by this statement, whatever the run; a later key is a reshare of this one ([[nullifier-reshare]]), approved under that page's own statement and rule, never a second initial key. An in-session review found that a rule allowing one initial key per seat let a later panel, whose seats had approved only reshares, make a second initial key with a fresh `sk`, and so a second nullifier for every document; the initial-panel pin above closes it as well.
 
 A key counts only with approvals from `q = max(k, n − 1)` **distinct seats**, each verifying under its seat's pinned identity key; signatures are counted per seat, never per signature ([[trustee-identity]], Ceremony registration). Two such quorums share `2q − n` seats, at least one, so a second key for one scope needs a seat that broke rule 4. Where the approvals are recorded and checked is part 2b-4's.
 

@@ -1,6 +1,6 @@
 import { cn, Fingerprint, groupHex, useTranslate } from "@abolishus/ui";
 import { Check, Info, TriangleAlert } from "lucide-react";
-import type { ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 
 import { catalogs } from "./messages.ts";
 
@@ -216,11 +216,31 @@ function ActionBar({
   );
 }
 
-/** The screen's one heading, with a lede below it. */
-export function ScreenTitle({ title, children }: { title: string; children?: ReactNode }) {
+/**
+ * The screen's one heading, with a lede below it. With `focus`, the heading
+ * takes focus when it appears, so a screen reader starts the new screen from
+ * its title rather than from wherever the last one left off.
+ */
+export function ScreenTitle({
+  title,
+  focus = false,
+  children,
+}: {
+  title: string;
+  focus?: boolean;
+  children?: ReactNode;
+}) {
+  const heading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    if (focus) heading.current?.focus();
+  }, [focus]);
   return (
     <div className="grid gap-4">
-      <h1 className="m-0 font-heading text-3xl leading-tight font-semibold tracking-tight text-balance sm:text-4xl">
+      <h1
+        ref={heading}
+        tabIndex={focus ? -1 : undefined}
+        className="m-0 font-heading text-3xl leading-tight font-semibold tracking-tight text-balance outline-none sm:text-4xl"
+      >
         {title}
       </h1>
       {children === undefined ? null : (

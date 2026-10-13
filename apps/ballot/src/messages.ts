@@ -1,3 +1,5 @@
+import type { Message } from "@abolishus/ui";
+
 // The ballot client's own strings. Every locale's catalog has `en-US`'s type,
 // so a missing key fails type-checking (@abolishus/ui, i18n).
 
@@ -75,8 +77,65 @@ const enUS = {
   whatToDoNoteTitle: "Try another address",
   whatToDo:
     "Open the poll from abolishus.eth or another address Abolish lists. If the check fails there too, tell whoever asked you to vote, and don't vote until it is fixed.",
+  // The question screens (questions.tsx); each instruction from the question's limits (answers.ts).
+  questionNumber: "Question {number}",
+  checkStep: "Check your answers",
+  chooseOne: "Choose one.",
+  chooseAny: "Choose as many as you like.",
+  chooseUpTo: "Choose up to {count}.",
+  chooseExactly: { one: "Choose one.", other: "Choose exactly {count}." },
+  chooseAtLeast: { one: "Choose at least one.", other: "Choose at least {count}." },
+  chooseBetween: "Choose from {min} to {max}.",
+  changeSingle: "To change your answer, choose a different one.",
+  changeMulti: "To remove a choice, choose it again.",
+  cantSkip: "This question can't be skipped.",
+  selected: "Selected",
+  chosenOf: "{count} of {max} chosen",
+  moreAllowed: "{count} more allowed",
+  noMoreAllowed: "No more choices left",
+  nothingChosen: "Nothing chosen yet.",
+  youChose: "You chose: {label}.",
+  overvoteTitle: "You've already chosen {count}",
+  overvote:
+    "That's the most this question allows, so nothing changed. To choose “{label}”, first remove one of your other choices.",
+  skipTitle: "Skip this question?",
+  skipExplained:
+    "A skipped question counts as no answer. Your other answers still count, and you can come back to this one before you send.",
+  skipClears: "Skipping clears what you chose here.",
+  skipAndGoOn: "Skip and go on",
+  keepAnswering: "Keep answering",
+  skipQuestion: "Skip this question",
+  shortExactlyTitle: {
+    one: "This question needs an answer",
+    other: "This question needs exactly {count}",
+  },
+  shortAtLeastTitle: {
+    one: "This question needs at least one",
+    other: "This question needs at least {count}",
+  },
+  shortExplained: "Choose {count} more to go on.",
+  nextQuestion: "Next question",
+  toCheck: "Check your answers",
+  back: "Back",
+  // Check your answers (questions.tsx).
+  checkTitle: "Check your answers",
+  checkLede: "Nothing has been sent yet. Change anything you like.",
+  answersLabel: "Your answers",
+  skippedOne: "You skipped question {number}",
+  skippedMany: "You skipped {count} questions",
+  skippedExplained: "A skipped question counts as no answer. To answer it, use Change.",
+  skippedAnswer: "Skipped: counts as no answer",
+  unfitOne: "Question {number} needs an answer",
+  unfitMany: "{count} questions need an answer",
+  unfitExplained: "Those questions can't be skipped. To answer one, use Change.",
+  change: "Change",
+  changeLabel: "Change your answer to question {number}",
+  send: "Send my answers",
+  challenge: "Check the encryption first",
+  challengeExplained:
+    "Checking the encryption first opens a sealed copy of your answers to show it holds exactly what you chose. That copy can never be counted, so you then send a fresh one.",
 } as const;
 
-export type Messages = Record<keyof typeof enUS, string>;
+export type Messages = Record<keyof typeof enUS, Message>;
 
 export const catalogs: Readonly<Record<string, Messages>> = { "en-US": enUS };

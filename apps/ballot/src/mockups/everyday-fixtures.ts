@@ -120,14 +120,6 @@ export const RIVERSIDE: EverydayPoll = {
 
 export const RIVERSIDE_SEALED: EverydayPoll = { ...RIVERSIDE, results: "sealed" };
 
-/** The same poll with its second question as pick exactly two, which can't be skipped. */
-export const RIVERSIDE_EXACTLY: EverydayPoll = {
-  ...RIVERSIDE,
-  questions: RIVERSIDE.questions.map((q) =>
-    q.key === "events" ? { ...q, rule: { kind: "exactly", count: 2 } } : q,
-  ),
-};
-
 /** What the person tapped on the website before the client opened. */
 export const TAPPED: Answers = { priority: ["toilets"] };
 

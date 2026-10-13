@@ -14,6 +14,7 @@ import { Route as AccountRouteImport } from "./routes/account.tsx";
 import { Route as ModerationRouteImport } from "./routes/moderation.tsx";
 import { Route as PollsIndexRouteImport } from "./routes/polls.index.tsx";
 import { Route as PollsElectionIdRouteImport } from "./routes/polls.$electionId.tsx";
+import { Route as PollsElectionIdPreviewDotpngRouteImport } from "./routes/polls.$electionId.preview[.]png.ts";
 
 const IndexRoute = IndexRouteImport.update({
   id: "/",
@@ -40,42 +41,69 @@ const PollsElectionIdRoute = PollsElectionIdRouteImport.update({
   path: "/polls/$electionId",
   getParentRoute: () => rootRouteImport,
 } as any);
+const PollsElectionIdPreviewDotpngRoute = PollsElectionIdPreviewDotpngRouteImport.update({
+  id: "/preview.png",
+  path: "/preview.png",
+  getParentRoute: () => PollsElectionIdRoute,
+} as any);
 
 export interface FileRoutesByFullPath {
   "/": typeof IndexRoute;
   "/account": typeof AccountRoute;
   "/moderation": typeof ModerationRoute;
-  "/polls/$electionId": typeof PollsElectionIdRoute;
+  "/polls/$electionId": typeof PollsElectionIdRouteWithChildren;
   "/polls/": typeof PollsIndexRoute;
+  "/polls/$electionId/preview.png": typeof PollsElectionIdPreviewDotpngRoute;
 }
 export interface FileRoutesByTo {
   "/": typeof IndexRoute;
   "/account": typeof AccountRoute;
   "/moderation": typeof ModerationRoute;
-  "/polls/$electionId": typeof PollsElectionIdRoute;
+  "/polls/$electionId": typeof PollsElectionIdRouteWithChildren;
   "/polls": typeof PollsIndexRoute;
+  "/polls/$electionId/preview.png": typeof PollsElectionIdPreviewDotpngRoute;
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport;
   "/": typeof IndexRoute;
   "/account": typeof AccountRoute;
   "/moderation": typeof ModerationRoute;
-  "/polls/$electionId": typeof PollsElectionIdRoute;
+  "/polls/$electionId": typeof PollsElectionIdRouteWithChildren;
   "/polls/": typeof PollsIndexRoute;
+  "/polls/$electionId/preview.png": typeof PollsElectionIdPreviewDotpngRoute;
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath;
-  fullPaths: "/" | "/account" | "/moderation" | "/polls/$electionId" | "/polls/";
+  fullPaths:
+    | "/"
+    | "/account"
+    | "/moderation"
+    | "/polls/$electionId"
+    | "/polls/"
+    | "/polls/$electionId/preview.png";
   fileRoutesByTo: FileRoutesByTo;
-  to: "/" | "/account" | "/moderation" | "/polls/$electionId" | "/polls";
-  id: "__root__" | "/" | "/account" | "/moderation" | "/polls/$electionId" | "/polls/";
+  to:
+    | "/"
+    | "/account"
+    | "/moderation"
+    | "/polls/$electionId"
+    | "/polls"
+    | "/polls/$electionId/preview.png";
+  id:
+    | "__root__"
+    | "/"
+    | "/account"
+    | "/moderation"
+    | "/polls/$electionId"
+    | "/polls/"
+    | "/polls/$electionId/preview.png";
   fileRoutesById: FileRoutesById;
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute;
   AccountRoute: typeof AccountRoute;
   ModerationRoute: typeof ModerationRoute;
-  PollsElectionIdRoute: typeof PollsElectionIdRoute;
+  PollsElectionIdRoute: typeof PollsElectionIdRouteWithChildren;
   PollsIndexRoute: typeof PollsIndexRoute;
 }
 
@@ -116,14 +144,33 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof PollsElectionIdRouteImport;
       parentRoute: typeof rootRouteImport;
     };
+    "/polls/$electionId/preview.png": {
+      id: "/polls/$electionId/preview.png";
+      path: "/preview.png";
+      fullPath: "/polls/$electionId/preview.png";
+      preLoaderRoute: typeof PollsElectionIdPreviewDotpngRouteImport;
+      parentRoute: typeof PollsElectionIdRoute;
+    };
   }
 }
+
+interface PollsElectionIdRouteChildren {
+  PollsElectionIdPreviewDotpngRoute: typeof PollsElectionIdPreviewDotpngRoute;
+}
+
+const PollsElectionIdRouteChildren: PollsElectionIdRouteChildren = {
+  PollsElectionIdPreviewDotpngRoute: PollsElectionIdPreviewDotpngRoute,
+};
+
+const PollsElectionIdRouteWithChildren = PollsElectionIdRoute._addFileChildren(
+  PollsElectionIdRouteChildren,
+);
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AccountRoute: AccountRoute,
   ModerationRoute: ModerationRoute,
-  PollsElectionIdRoute: PollsElectionIdRoute,
+  PollsElectionIdRoute: PollsElectionIdRouteWithChildren,
   PollsIndexRoute: PollsIndexRoute,
 };
 export const routeTree = rootRouteImport

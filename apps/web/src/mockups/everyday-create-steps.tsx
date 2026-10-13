@@ -55,7 +55,7 @@ const AUDIENCE_ICONS: Record<Audience, ReactNode> = {
 const selectClass =
   "h-12 w-full max-w-60 rounded-none border border-input bg-background px-3 text-base text-foreground outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring";
 
-const card = "grid gap-3 rounded-xl border border-border p-5 sm:p-6";
+const card = "grid gap-3 border border-border p-5 sm:p-6";
 
 /** Step 2: who can answer, in words, and the reminder that each group is shown on its own. */
 export function WhoFields({ draft, onChange }: { draft: Draft; onChange: (d: Draft) => void }) {
@@ -100,7 +100,7 @@ export function WhoFields({ draft, onChange }: { draft: Draft; onChange: (d: Dra
               <li
                 key={g}
                 data-shown={shown}
-                className="flex min-h-12 flex-wrap items-center justify-between gap-x-4 gap-y-1 rounded-lg border border-border px-4 py-2"
+                className="flex min-h-12 flex-wrap items-center justify-between gap-x-4 gap-y-1 border border-border px-4 py-2"
               >
                 <span className={cn(!shown && "text-muted-foreground")}>{GROUP_NAMES[g]}</span>
                 <span className={cn("text-sm", shown ? "font-semibold" : "text-muted-foreground")}>
@@ -170,7 +170,7 @@ export function ResultsFields({ draft, onChange }: { draft: Draft; onChange: (d:
                 <Label
                   key={c.key}
                   className={cn(
-                    "flex min-h-12 items-center gap-3 rounded-full border px-4 text-sm font-normal",
+                    "flex min-h-12 items-center gap-3 border px-4 text-sm font-normal",
                     draft.cadence === c.key
                       ? "border-2 border-primary px-[15px] font-semibold"
                       : "border-border",
@@ -205,7 +205,7 @@ export function ResultsFields({ draft, onChange }: { draft: Draft; onChange: (d:
           ) : null}
           <p
             data-testid="release-sentence"
-            className="m-0 rounded-xl border border-border p-5 text-lg text-pretty"
+            className="m-0 border border-border p-5 text-lg text-pretty"
           >
             We publish new totals {scheduleText(draft)}, and only when at least {BATCH_FLOOR} new
             answers have come in, so no update can reveal one person’s answer.
@@ -221,7 +221,7 @@ export function ResultsFields({ draft, onChange }: { draft: Draft; onChange: (d:
       ) : (
         <p
           data-testid="sealed-sentence"
-          className="m-0 rounded-xl border border-border p-5 text-lg text-pretty"
+          className="m-0 border border-border p-5 text-lg text-pretty"
         >
           Results appear once, when the poll closes. Until then, nobody can see a running total.
         </p>
@@ -297,7 +297,7 @@ function TrusteeFields({
   return (
     <section
       aria-labelledby={`t-${t.id}-heading`}
-      className="grid gap-5 rounded-xl border border-border p-4 sm:p-6"
+      className="grid gap-5 border border-border p-4 sm:p-6"
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h3 id={`t-${t.id}-heading`} className="m-0 text-lg font-semibold">
@@ -357,7 +357,7 @@ function TrusteeFields({
             <Label
               key={value}
               className={cn(
-                "flex min-h-12 items-center gap-3 rounded-full border px-4 text-sm font-normal",
+                "flex min-h-12 items-center gap-3 border px-4 text-sm font-normal",
                 t.connect === value
                   ? "border-2 border-primary px-[15px] font-semibold"
                   : "border-border",
@@ -450,7 +450,7 @@ export function KeyFields({
       </section>
 
       <Collapsible open={open} onOpenChange={onOpenChange} className="grid gap-6">
-        <CollapsibleTrigger className="group/advanced flex min-h-12 w-full items-center justify-between gap-4 rounded-xl border border-border px-5 py-3 text-start outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring">
+        <CollapsibleTrigger className="group/advanced flex min-h-12 w-full items-center justify-between gap-4 border border-border px-5 py-3 text-start outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring">
           <span className="grid gap-0.5">
             <span className="text-sm text-muted-foreground group-hover/advanced:text-foreground">
               Advanced
@@ -524,10 +524,7 @@ export function KeyFields({
                 </div>
               </div>
 
-              <div
-                data-testid="consequence"
-                className="grid gap-2 rounded-xl border-2 border-foreground p-5"
-              >
+              <div data-testid="consequence" className="grid gap-2 border-2 border-foreground p-5">
                 <p className="m-0 text-lg font-semibold text-pretty">
                   Your trustees add protection: no one can open answers without both panels. If your
                   trustees go offline, your poll can’t be counted.
@@ -771,7 +768,7 @@ export function ReviewBody({
           <li>Who holds the key, and the opening and closing times</li>
           <li>Every answer, sealed, and the final count</li>
         </ul>
-        <div className="flex flex-wrap items-start gap-5 rounded-xl border border-border p-5">
+        <div className="flex flex-wrap items-start gap-5 border border-border p-5">
           <Fingerprint
             value={DEFINITION_HASH}
             label={`Fingerprint of this poll ${DEFINITION_HASH.slice(0, 8)}`}
@@ -803,7 +800,7 @@ export function ReviewBody({
       </section>
 
       {published ? (
-        <p role="status" className="m-0 rounded-xl border-2 border-recorded p-5 font-semibold">
+        <p role="status" className="m-0 border-2 border-recorded p-5 font-semibold">
           Published. Your poll opens {opens === undefined ? "" : formatUtc(opens)}.
         </p>
       ) : null}

@@ -101,7 +101,7 @@ export function ShareThisPoll({
           readOnly
           value={url}
           onFocus={(event) => event.currentTarget.select()}
-          className="h-12 w-full min-w-0 rounded-lg border border-input bg-transparent px-3.5 text-base font-medium outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring"
+          className="h-12 w-full min-w-0 border border-input bg-transparent px-3.5 text-base font-medium outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring"
         />
         <div className="flex flex-col gap-3 sm:flex-row">
           <Button

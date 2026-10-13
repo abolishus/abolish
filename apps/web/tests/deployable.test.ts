@@ -8,12 +8,17 @@ import { execFileSync, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { once } from "node:events";
 import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { createServer as createHttpServer } from "node:http";
 import { createServer, type AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createBuilder } from "vite-plus";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
+
+import { definitionView } from "../src/poll.ts";
+import { pollPreview } from "../src/og/poll.ts";
+import { renderPreview } from "../src/og/render.ts";
 
 const pkg = fileURLToPath(new URL("..", import.meta.url));
 const url = new URL(process.env["TEST_DATABASE_URL"] ?? "");
@@ -176,6 +181,78 @@ describe("dist/node/main.mjs", () => {
   }, 30_000);
 });
 
+describe("link previews from the bundle", () => {
+  const typical = (
+    JSON.parse(
+      readFileSync(
+        new URL("../../../docs/spec/vectors/election-definition.json", import.meta.url),
+        "utf8",
+      ),
+    ) as { vectors: { id: string; value?: { election_id: string }; encoding: string }[] }
+  ).vectors.find((v) => v.id === "definition-typical");
+  if (typical?.value === undefined) throw new Error("vector missing");
+  const id = typical.value.election_id;
+
+  /** Just enough of the API for a poll page and its preview. */
+  const api = createHttpServer((req, res) => {
+    const url = new URL(req.url ?? "/", "http://stub");
+    const body: Record<string, unknown> = {
+      "/elections/definition": { definition: typical.encoding },
+      "/board/head": { treeSize: "1", chainHead: "1f".repeat(32), root: "2e".repeat(32) },
+      "/moderation/status": { state: "visible" },
+    };
+    const known = url.searchParams.get("electionId") === id && url.pathname in body;
+    res.writeHead(known ? 200 : 404, { "content-type": "application/json" });
+    res.end(JSON.stringify(known ? body[url.pathname] : {}));
+  });
+
+  beforeAll(() => new Promise<void>((resolve) => api.listen(0, "127.0.0.1", resolve)));
+  afterAll(() => new Promise((resolve) => api.close(resolve)));
+
+  test("renders the same PNG as the sources, with nothing from node_modules", async () => {
+    const port = await freePort();
+    const web = run({
+      DATABASE_URL: database(),
+      API_URL: `http://127.0.0.1:${(api.address() as AddressInfo).port}`,
+      WEB_ORIGIN: "https://abolish.test",
+      ACCOUNT_SECRET: SECRET,
+      TURNSTILE_SECRET_KEY: "turnstile-secret",
+      WEB_PORT: String(port),
+    });
+    try {
+      const at = `http://127.0.0.1:${port}`;
+      let page: Response | undefined;
+      for (let i = 0; i < 100 && page === undefined && web.child.exitCode === null; i++) {
+        await new Promise((r) => setTimeout(r, 100));
+        page = await fetch(`${at}/polls/${id}`).catch(() => undefined);
+      }
+      expect(page?.status).toBe(200);
+      const image = /<meta property="og:image" content="([^"]+)"/.exec((await page?.text()) ?? "");
+      const url = new URL(image?.[1]?.replaceAll("&amp;", "&") ?? "");
+      expect(url.origin).toBe("https://abolish.test");
+      const preview = await fetch(`${at}${url.pathname}${url.search}`);
+      expect(web.err()).toBe("");
+      expect(preview.status).toBe(200);
+      expect(preview.headers.get("content-type")).toBe("image/png");
+      expect(preview.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
+      expect(preview.headers.get("set-cookie")).toBeNull();
+      const view = definitionView(id, typical.encoding);
+      if (!view.ok) throw new Error("vector doesn't decode");
+      const expected = await renderPreview(
+        pollPreview(view.poll, "abolish.test", Date.now()),
+        "landscape",
+      );
+      expect(new Uint8Array(await preview.arrayBuffer())).toEqual(expected);
+    } finally {
+      if (web.child.exitCode === null) {
+        const exited = once(web.child, "exit");
+        web.child.kill("SIGTERM");
+        await exited;
+      }
+    }
+  }, 60_000);
+});
+
 describe("the client bundle", () => {
   test("carries no analytics SDK, and reports errors only to our own origin", () => {
     const assets = join(pkg, "dist", "client", "assets");
@@ -186,6 +263,17 @@ describe("the client bundle", () => {
     for (const sdk of ["posthog", "PostHog", "i.posthog.com", "phc_"])
       expect([sdk, code.includes(sdk)]).toEqual([sdk, false]);
     expect(code).toMatch(/[`"']\/ingest\/error[`"']/);
+  });
+
+  test("carries none of the link-preview renderer", () => {
+    const assets = join(pkg, "dist", "client", "assets");
+    for (const file of readdirSync(assets)) {
+      expect([file, /\.(wasm|woff)$/.test(file)]).toEqual([file, false]);
+      if (!file.endsWith(".js")) continue;
+      const code = readFileSync(join(assets, file), "utf8");
+      for (const marker of ["AGFzbQ", "d09GRg", "initWasm", "satori"])
+        expect([file, marker, code.includes(marker)]).toEqual([file, marker, false]);
+    }
   });
 
   test("carries none of the account system's server code", () => {

@@ -33,7 +33,7 @@ export const NEVER_YOUR_ANSWER =
   "Sharing sends the question and this link, never your answer. The link is the same for everyone, so it doesn’t say who shared it or whether they answered.";
 
 const ROW =
-  "flex min-h-12 w-full items-center gap-3 rounded-lg px-3 text-start text-base hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none";
+  "flex min-h-12 w-full items-center gap-3 px-3 text-start text-base hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none";
 
 const hasWebShare = () => typeof navigator !== "undefined" && typeof navigator.share === "function";
 

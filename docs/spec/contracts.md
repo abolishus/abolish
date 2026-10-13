@@ -1,6 +1,6 @@
 # Contracts
 
-What our L2 contracts commit to, for a verifier that reads them from the chain and the archive alone. So far this page specifies the event accumulator every Abolish contract keeps, the contract-event record (`0x0008`) that archives each of its events, the election registry, the trustee registry, the group registry with its Tier 0 additions (P3-2), and the board anchor, our one contract on L1 (P4-1). The group registry's Tier 1 and Tier 2 additions (P3-3, P3-4), direct submission with the board's events, and the close rule are still P1-18's, and are added here as they are built. Notation is from [[notation]], tags from [[domain-separation]].
+What our L2 contracts commit to, for a verifier that reads them from the chain and the archive alone. So far this page specifies the event accumulator every Abolish contract keeps, the contract-event record (`0x0008`) that archives each of its events, the election registry, the trustee registry, the group registry with its Tier 0 additions (P3-2), the board's membership check (the direct-submit contract's first part), and the board anchor, our one contract on L1 (P4-1). The group registry's Tier 1 and Tier 2 additions (P3-3, P3-4), the rest of direct submission with the board's events, and the close rule are still P1-18's, and are added here as they are built. Notation is from [[notation]], tags from [[domain-separation]].
 
 ## Event accumulator
 
@@ -423,6 +423,39 @@ Like the other registries, the group registry is shared by every election, so a 
 - **Tiers 1 and 2 have no addition path yet** (P3-3, P3-4), and no registry may be deployed until they do.
 - **No paymaster yet.** [[0004-l2-choice]] sponsors registration through our own ERC-4337 paymaster (P2-6, this item's later part); until then whoever submits an addition pays its gas.
 - **Gas.** In the tests, adding one member with two of three approvals costs about 67,000 gas beyond the transaction's base cost and calldata, each further commitment in the same batch about 1,500, and a batch of 256 about 430,000: two `ecrecover` calls, the keccak hashes of the digest, the storage write and the accumulator step. Removing one member costs about 85,000, mostly its first write to the removed-index bitmap.
+
+## Board (direct submit)
+
+Threats: T-25 (a ballot or delivery record kept off the board), T-05 (an unsound proof check), T-31 (two readings of one proof), T-17 (chosen bytes in the archive), T-52 (input that costs others work). Decided by [[0028-board-contract-checks]].
+
+The `board` contract on L2 is the direct-submit path: anyone submits a ballot there, bypassing our servers ([[0004-l2-choice]]), and every share receipt, complaint and posting has its contract path there ([[delivery]], Direct submit). It is immutable, inherits the event accumulator above, and emits its events as contract-event records ([[0025-contract-event-evidence]]). It is specified and built in parts of P1-18 part 4b-3 ([[0028-board-contract-checks]], Consequences): so far, the membership check below. Its ballot check, the parameters it reads from the election registry, the registered key set, its calls and events, and the close rule (part 4c) follow, and no board may be deployed before they are specified here.
+
+### Membership proofs
+
+The board accepts a ballot only if its membership proof verifies ([[membership]], Owned elsewhere), so non-members can't post at all, and it accepts exactly the proofs [[membership]] (Proof encoding, Verification) accepts, so the contract and the verifier never disagree about one (T-31; [[verifier]], Principles). `MembershipProofLib` (`packages/contracts`) checks a proof `A ‖ B ‖ C` against signals `[ρ, ν, m̂, ŝ]` in this order, and the first failure is its verdict:
+
+| Verdict          | When                                                                                                                                                                                                                 |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `truncated`      | The proof is shorter than 256 bytes (at offset 0)                                                                                                                                                                    |
+| `trailing-bytes` | It is longer (at offset 256)                                                                                                                                                                                         |
+| `non-canonical`  | At offset 0 or 192: `A` or `C` has a coordinate at or above `p`, is the identity (both coordinates 0), or isn't on `y² = x³ + 3`. At offset 64: `B` has a coordinate at or above `p` or is the identity (all four 0) |
+| `signal`         | A signal is at or above `r`. Signals are never reduced                                                                                                                                                               |
+| `root`           | `ρ = 0`, which any secret can prove membership of ([[membership]], Statement)                                                                                                                                        |
+| `non-canonical`  | At offset 64: `B` isn't on the twist or isn't in the order-`r` subgroup, which only `ecPairing` checks (below), so it is reported after `signal` and `root`                                                          |
+| `pairing`        | Groth16's equation fails                                                                                                                                                                                             |
+
+The equation is [[membership]]'s, under the pinned depth-32 key, which the contract holds as constants (the 768-byte `vk` of [[membership]], Verification key; a test compares it and its hash with `vectors/membership-proof.json`), never an input, a depth or another contract's key. It computes `L = IC_0 + ρ·IC_1 + ν·IC_2 + m̂·IC_3 + ŝ·IC_4` with the `ecMul` and `ecAdd` precompiles (EIP-196) and checks `e(−A, B) · e(α, β) · e(L, γ) · e(C, δ) = 1` with one `ecPairing` call of four pairs (EIP-197), in the precompiles' encoding, which is the proof's. `ecPairing` fails on a G2 point that isn't on the twist or isn't in the order-`r` subgroup; every other input is a valid point by then, so a failed call is `B`'s `non-canonical`. A failed precompile call consumes all the gas it was given, so the pairing is given exactly 600,000 gas, over three times what four pairs cost under EIP-1108 (181,000), and the check reverts unless that much is available (with the 1/64 a call keeps back, EIP-150): a call that ran out of gas never reads as a broken `B`. The whole check costs about 200,000 gas, but needs about 620,000 available to run; every decode failure except `B`'s twist and subgroup check is found before any precompile runs. The cap is a trade-off: a successful call consumes only the pairing's price, so a larger cap costs nothing but gas limit, which a forced deposit buys on L1 ([[0004-l2-choice]], Forced-deposit limits), and a smaller one sooner fails every proof after a repricing (Known-weak).
+
+The signals come from the definition the registry recorded and from the ballot itself, never from the submitter: `ρ` is the tier's (or cell's) root, `ŝ = F(S)` with `S = H(DS("abolish/v1/nullifier-scope", definition_hash ‖ u8(tier) ‖ encode(root)))` computed on chain, refusing a tier other than 0, 1 or 2, a root of 0 and a root at or above `r`, in that order ([[membership]], Scope), and `m̂ = F(M)` with `M` from [[revoting]] (Message), `F(x) = int(keccak256(x)) >> 8` ([[membership]], Field mapping). Proofs are malleable, so nothing compares proof bytes to detect a repeat (T-38).
+
+### Vectors
+
+`packages/contracts` runs every proof and decode vector of `vectors/membership-proof.json` through `MembershipProofLib` (each gets the spec's verdict, and each broken point its offset), its field mappings, and every scope and `F` vector of `vectors/membership.json`, including the three rejected scopes. It also checks `A.y + p`, `C.y + p` and a `C` off the curve at their offsets, and runs under the `osaka` EVM as well as `cancun`. Fuzz tests: no one-bit change to an honest proof, no other value of one signal, and no arbitrary input passes, and none reverts.
+
+### Known-weak
+
+- **A pairing repriced above 600,000 gas** for four pairs would make every proof fail as `non-canonical`, and the immutable board would need replacing. `ecPairing` has only been repriced downwards (EIP-1108), but other precompiles have gone up (EIP-7883 raised `ModExp`), which is why the cap is over three times today's price.
+- **Soundness rests on the L2's precompiles**: a bug in its `ecPairing`, or one that skips G2's subgroup check, would admit forged proofs on chain, though never past the verifier, which checks every proof with `@noble/curves` ([[membership]], Verification; T-05, T-71). The vectors include a `B` outside the subgroup, so a test run against an EVM that skips the check fails.
 
 ## Board anchor
 

@@ -48,10 +48,7 @@ export function EverydayPollClosedPage({ evidenceOpen = false }: { evidenceOpen?
           </p>
           <ul aria-label="In short" className="m-0 grid list-none gap-4 p-0 md:grid-cols-3">
             {POLL.questions.map((q) => (
-              <li
-                key={q.key}
-                className="reveal grid content-start gap-2 rounded-xl bg-muted/60 p-5"
-              >
+              <li key={q.key} className="reveal grid content-start gap-2 bg-muted/60 p-5">
                 <span className="text-sm text-foreground/80">{q.text}</span>
                 <span className="font-heading text-xl leading-snug font-semibold text-pretty">
                   {headline(q, FINAL)}
@@ -77,7 +74,7 @@ export function EverydayPollClosedPage({ evidenceOpen = false }: { evidenceOpen?
           </dl>
           <a
             href="#evidence"
-            className="inline-flex min-h-12 items-center self-start rounded-lg pe-3 underline-offset-4 hover:underline"
+            className="inline-flex min-h-12 items-center self-start pe-3 underline-offset-4 hover:underline"
           >
             <Seal hash={POLL.id} subject="poll">
               How do we know this is real?
@@ -148,7 +145,7 @@ export function EverydayPollClosedPage({ evidenceOpen = false }: { evidenceOpen?
                   </CollapsibleTrigger>
                 </div>
               </div>
-              <CollapsibleContent className="rounded-xl border border-border p-5 sm:p-8">
+              <CollapsibleContent className="border border-border p-5 sm:p-8">
                 <EvidenceDetails poll={POLL} />
               </CollapsibleContent>
             </Collapsible>

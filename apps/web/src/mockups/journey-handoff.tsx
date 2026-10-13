@@ -12,7 +12,7 @@ import {
 } from "./journey-data.ts";
 
 const ANSWER =
-  "inline-flex min-h-12 w-full items-center justify-between gap-3 rounded-lg border border-border px-4 py-2 text-start text-base hover:border-foreground hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none";
+  "inline-flex min-h-12 w-full items-center justify-between gap-3 border border-border px-4 py-2 text-start text-base hover:border-foreground hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none";
 
 /** What was tapped, carried into the interstitial. */
 export interface Tapped {
@@ -43,7 +43,7 @@ export function JourneyCard({
   return (
     <article
       aria-labelledby={titleId}
-      className="grid content-start gap-5 rounded-xl border border-border p-5 sm:p-6"
+      className="grid content-start gap-5 border border-border p-5 sm:p-6"
     >
       <div className="grid gap-3">
         <h2
@@ -100,7 +100,7 @@ export function Opening({ tapped, onStay }: { tapped: Tapped; onStay: () => void
   const label = first?.options.find((o) => o.key === pick)?.label ?? pick;
   return (
     <Frame className="grid max-w-xl gap-8 pt-12 pb-16 md:pt-20">
-      <div className="grid gap-4 rounded-xl border border-border p-5 sm:p-6">
+      <div className="grid gap-4 border border-border p-5 sm:p-6">
         <Seal hash={poll.hash} subject="poll">
           <span className="text-muted-foreground">Asked by {poll.askedBy}</span>
         </Seal>
@@ -192,7 +192,7 @@ export function BackOnSite() {
       <Frame className="grid gap-8 pt-12 pb-16">
         <section
           aria-labelledby="back-title"
-          className="grid max-w-prose gap-2 rounded-xl border border-border bg-muted/60 p-5"
+          className="grid max-w-prose gap-2 border border-border bg-muted/60 p-5"
         >
           <h1 id="back-title" className="m-0 font-heading text-2xl font-semibold">
             Back from the voting app

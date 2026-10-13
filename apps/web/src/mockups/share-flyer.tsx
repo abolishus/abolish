@@ -66,7 +66,7 @@ export function Flyer({
           </p>
         ) : null}
         <div className="grid grid-cols-[auto_1fr] items-center gap-10">
-          <div className={cn("rounded-2xl border-4 p-3", mono ? "border-black" : "border-primary")}>
+          <div className={cn(" border-4 p-3", mono ? "border-black" : "border-primary")}>
             <QrPlaceholder id={poll.id} size={200} caption={false} />
           </div>
           <div className="grid content-center gap-4">
@@ -83,7 +83,7 @@ export function Flyer({
             </p>
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-6 rounded-2xl border-2 border-zinc-300 p-5 text-[18px] leading-snug">
+        <div className="grid grid-cols-2 gap-6 border-2 border-zinc-300 p-5 text-[18px] leading-snug">
           <div className="grid content-start gap-2">
             <p className="m-0 text-[20px] font-semibold">How to answer</p>
             <p className="m-0 text-pretty">

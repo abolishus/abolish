@@ -364,7 +364,7 @@ function CheckAnswers({
         {poll.questions.map((question, i) => {
           const chosen = answers[question.key] ?? [];
           return (
-            <li key={question.key} className="grid gap-3 rounded-xl border border-border px-4 py-4">
+            <li key={question.key} className="grid gap-3 border border-border px-4 py-4">
               <p className="m-0 text-sm text-muted-foreground">Question {i + 1}</p>
               <h2 className="m-0 text-base font-normal text-pretty">{question.text}</h2>
               {chosen.length === 0 ? (
@@ -425,7 +425,7 @@ function Opened({
           inside.
         </p>
       </EverydayTitle>
-      <div className="mt-8 grid gap-4 rounded-xl border-2 border-foreground px-4 py-5">
+      <div className="mt-8 grid gap-4 border-2 border-foreground px-4 py-5">
         <div className="flex items-center gap-3">
           <Fingerprint
             value={EVERYDAY_SEALED.hash}
@@ -468,7 +468,7 @@ function Sending({ poll }: { poll: EverydayPoll }) {
       <EverydayTitle title="Sending your answers">
         <p className="m-0">Keep this open. It usually takes a few seconds.</p>
       </EverydayTitle>
-      <div className="mt-8 rounded-xl border border-border px-4 py-5">
+      <div className="mt-8 border border-border px-4 py-5">
         <StatusTrail
           label="Your answers"
           steps={[

@@ -632,14 +632,14 @@ contract ElectionRegistryTest is TestBase {
     /// Any δ is admitted exactly when it is within the bounds, and an admitted
     /// one is recorded with the poll's window, which the board's close-rule
     /// checks read.
-    function testFuzz_InclusionBoundAdmittedExactlyWithinItsBounds(uint32 bound, uint64 length)
+    function testFuzz_InclusionBoundAdmittedExactlyWithinItsBounds(uint32 bound, uint64 closesAt)
         public
     {
         (bytes32 id,) = _created();
         ElectionDefinitionLib.Definition memory d = RegistryFixture.template(registry, id);
         d.l1InclusionBound = bound;
-        // Any poll length that keeps closes_at + δ within u64 (`timing`).
-        d.closesAt = uint64(_bound(length, d.opensAt + 1, type(uint64).max - type(uint32).max));
+        // Any close after opening that keeps closes_at + δ within u64 (`timing`).
+        d.closesAt = uint64(_bound(closesAt, d.opensAt + 1, type(uint64).max - type(uint32).max));
         bytes memory enc = RegistryFixture.approve(lib, trustees, d);
         vm.prank(CREATOR);
         (bool ok,) =

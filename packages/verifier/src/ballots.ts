@@ -1,20 +1,24 @@
 // Ballot admission (docs/spec/verifier.md, Ballot admission): 5.1 to 5.4 over
-// every ballot record of this election on the board copy, by
-// @abolishus/crypto's `checkBallot` (under definition versions 3 and 4,
-// `checkBallotV2`, against the ballot's cell; under definition version 5,
-// `checkBallotV3`, against its cell and the questions) with the definition and the key set
-// the transcript check registered, never against anything a ballot or the
-// bundle chooses (T-37, T-04). A failure rejects that entry only: the rows
-// report each check's first rejected entry and the report lists every one
-// (8.3), so a bad ballot never fails the election (T-52, T-53). Repeats
-// (5.7) are found among the admitted ballots by @abolishus/crypto's
-// `selectBallots`, keyed by (tier, ν, M) with M recomputed, never by bytes
-// (T-38); they are rejected only once the close rule (5.5) can say which
-// copies are admitted. L1 references, the close rule and selection (5.5,
-// 5.8, 6.1) are decided over the admitted ballots, later.
+// every ballot of this election on the board copy, by @abolishus/crypto's
+// `checkBallot` (under definition versions 3 and 4, `checkBallotV2`, against
+// the ballot's cell; under definition version 5, `checkBallotV3`, against its
+// cell and the questions) with the definition and the key set the transcript
+// check registered, never against anything a ballot or the bundle chooses
+// (T-37, T-04). A ballot reaches the board by the board path, as a ballot
+// record in a board entry, or by the ordinary contract path, as the board
+// contract's `BallotSubmitted` event in a contract-event record; each copy is
+// judged by its own path's window, the close rule (5.5, docs/spec/close.md,
+// Window), so a late copy never stands in for a timely one (T-35, T-50). A
+// failure rejects that entry only: the rows report each check's first
+// rejected entry and the report lists every one (8.3), so a bad ballot never
+// fails the election (T-52, T-53). Repeats (5.7) are found among the ballots
+// 5.1 to 5.5 admit by @abolishus/crypto's `selectBallots`, keyed by
+// (tier, ν, M) with M recomputed, never by bytes (T-38). L1 references (5.8)
+// and selection (6.1) are decided over the admitted ballots, later.
 
 import {
   type AdmittedBallot,
+  type AnchorClock,
   type BallotCheck,
   type BallotCheckV2,
   type BallotCode,
@@ -26,10 +30,13 @@ import {
   checkBallot,
   checkBallotV2,
   checkBallotV3,
+  checkContractEvent,
+  type ContractEventVersion,
   DecodeError,
   type DecodeErrorCode,
   decodeBallot,
   decodeBoardEntry,
+  decodeContractEvent,
   membershipVkHash,
   pinnedVersion,
   questionBallotElection,
@@ -38,11 +45,12 @@ import {
   selectBallots,
 } from "@abolishus/crypto";
 import type { VerifiedDefinition } from "./definition.ts";
+import { countedFloor } from "./openings.ts";
 
 /** One rejected ballot entry: its position in the copy, from 0, and why. */
 export interface RejectedBallot {
   readonly entry: number;
-  readonly code: AdmissionCode | "decode";
+  readonly code: AdmissionCode | WindowCode | "repeat" | "decode";
   /** `option-proof`'s first failing option (ballot version 3: flat option). */
   readonly option?: number;
   /** Ballot version 3's `sum-proof`: the first failing question. */
@@ -53,7 +61,8 @@ export interface RejectedBallot {
 
 /**
  * An admitted ballot with the same tier, nullifier and message as one at an
- * earlier position: a repeat once the close rule (5.5) admits that one (5.7).
+ * earlier position, while the close rule (5.5) can't run: a repeat once it
+ * admits that one (5.7).
  */
 export interface RepeatedBallot {
   readonly entry: number;
@@ -61,9 +70,13 @@ export interface RepeatedBallot {
 
 /** The report's `ballots`, once the admission checks ran. */
 export interface BallotsReport {
-  /** Ballot entries 5.1 to 5.4 admit, repeats among them included. */
+  /**
+   * Ballot entries 5.1 to 5.5 and 5.7 admit; where 5.5 can't run, those 5.1
+   * to 5.4 admit, candidate repeats included.
+   */
   readonly admitted: number;
   readonly rejected: readonly RejectedBallot[];
+  /** Candidate repeats, listed only where 5.5 can't run; otherwise rejected with `repeat`. */
   readonly repeats: readonly RepeatedBallot[];
 }
 
@@ -77,14 +90,17 @@ export interface AdmittedCore {
 /** Every admission code: versions 2 and 3 have `ballot-cell` where version 1 has `ballot-tier`. */
 export type AdmissionCode = BallotCode | BallotV2Code;
 
+/** The close rule's codes (docs/spec/close.md, Window), checked after 5.1 to 5.4. */
+export type WindowCode = "window-before-open" | "window-after-close" | "window-boarded-late";
+
 export interface BallotOutcome {
   readonly status: "pass" | "fail" | "unverifiable";
-  readonly code?: AdmissionCode | "unsupported-version" | "not-reached";
+  readonly code?: AdmissionCode | WindowCode | "repeat" | "unsupported-version" | "not-reached";
   readonly at?: { readonly entry: number } | Record<string, never>;
 }
 
 const ROWS = ["5.1", "5.2", "5.3", "5.4"] as const;
-const ALL_ROWS = [...ROWS, "5.7"] as const;
+const ALL_ROWS = [...ROWS, "5.5", "5.7"] as const;
 
 // The rows each admission code fails (docs/spec/verifier.md, Ballot
 // admission). A membership proof is checked once against [ρ, ν, m̂, ŝ], so
@@ -101,6 +117,11 @@ const ROWS_OF: Readonly<Record<AdmissionCode, readonly (typeof ROWS)[number][]>>
   "option-proof": ["5.4"],
   "sum-proof": ["5.4"],
 };
+const WINDOW_CODES: ReadonlySet<string> = new Set<WindowCode>([
+  "window-before-open",
+  "window-after-close",
+  "window-boarded-late",
+]);
 
 const all = (o: BallotOutcome) => new Map(ALL_ROWS.map((id) => [id, o]));
 const NOT_REACHED: BallotOutcome = { status: "unverifiable", code: "not-reached" };
@@ -108,17 +129,28 @@ const NOT_REACHED: BallotOutcome = { status: "unverifiable", code: "not-reached"
 const equal = (a: Uint8Array, b: Uint8Array) =>
   a.length === b.length && a.every((x, i) => x === b[i]);
 
+// The contract-event versions this verifier reads; under version 1 the board
+// emits no event, so every ballot is a board-path one.
+const readsEvents = (v: number | undefined): v is ContractEventVersion => v === 1 || v === 2;
+
+/** Where one ballot copy came from: its own path decides its window (5.5). */
+type Path =
+  | { readonly kind: "board"; readonly segment: number }
+  | { readonly kind: "ordinary"; readonly segment: number; readonly l2Timestamp: bigint };
+
 /**
- * The rows 5.1 to 5.4 and 5.7, and the report's `ballots`. `registered` is the key set
- * the transcript check returned once 3.2 passed, or `undefined`, which leaves
- * every ballot unchecked: shares made to an unregistered panel can't be
- * judged (T-37).
+ * The rows 5.1 to 5.5 and 5.7, and the report's `ballots`. `registered` is
+ * the key set the transcript check returned once 3.2 passed, or `undefined`,
+ * which leaves every ballot unchecked: shares made to an unregistered panel
+ * can't be judged (T-37). `clock` is the anchoring clock, which gives the
+ * board path's last segment, `s_A = period(closes_at) + 1`.
  */
 export function ballotChecks(
   definition: VerifiedDefinition,
   registered: readonly RegisteredKeys[] | undefined,
   entries: readonly Uint8Array[],
   boardEntryVersion: BoardEntryVersion,
+  clock: AnchorClock,
 ): {
   readonly rows: ReadonlyMap<string, BallotOutcome>;
   readonly report?: BallotsReport;
@@ -126,24 +158,50 @@ export function ballotChecks(
 } {
   const judge = judgeFor(definition, registered);
   if (typeof judge !== "function") return { rows: all(judge) };
-  const electionId = definition.value.election_id;
-  const admitted: AdmittedBallot[] = [];
+  const d = definition.value;
+  const eventVersion = pinnedVersion(d, RECORD_TYPES.contractEvent);
+  // Under a contract-event version this verifier doesn't read, ordinary
+  // ballots can't be found, so no row may say none was rejected: 5.1 to 5.4
+  // report the board path's, and 5.5 and 5.7 are unverifiable, never passed
+  // (T-36).
+  const windows = readsEvents(eventVersion);
+  const contracts = {
+    electionRegistry: d.election_registry,
+    trusteeRegistry: d.trustee_registry,
+    groupRegistry: d.group_registry,
+    board: d.board,
+  };
+  const lastBoardSegment = countedFloor(d.closes_at, clock);
+  const passed: { readonly at: number; readonly path: Path; readonly ballot: AdmittedBallot }[] =
+    [];
   const cores: AdmittedCore[] = [];
   const rejected: RejectedBallot[] = [];
   for (const [at, encoded] of entries.entries()) {
     let payload: Uint8Array;
-    let segment: number;
+    let path: Path;
     try {
       const e = decodeBoardEntry(encoded, boardEntryVersion);
       // 4.1 reports an entry that doesn't decode or names another election.
-      if (!equal(e.election_id, electionId)) continue;
-      payload = e.payload;
-      segment = e.segment;
+      if (!equal(e.election_id, d.election_id)) continue;
+      const type = ((e.payload[0] as number) << 8) | (e.payload[1] as number);
+      if (type === RECORD_TYPES.ballot) {
+        payload = e.payload;
+        path = { kind: "board", segment: e.segment };
+      } else if (type === RECORD_TYPES.contractEvent && windows) {
+        // A record that doesn't decode or fails the event check is 4.4's,
+        // and carries no ballot: only the board's own `BallotSubmitted`, as
+        // its contract framed it, is an ordinary ballot (T-71, T-17).
+        const record = decodeContractEvent(e.payload, eventVersion);
+        const checked = checkContractEvent(record, contracts, eventVersion);
+        if (!checked.ok || checked.role !== "board" || checked.event.event !== "BallotSubmitted")
+          continue;
+        payload = checked.event.record;
+        path = { kind: "ordinary", segment: e.segment, l2Timestamp: record.l2_timestamp };
+      } else continue;
     } catch (e) {
       if (e instanceof DecodeError) continue;
       throw e;
     }
-    if ((((payload[0] as number) << 8) | (payload[1] as number)) !== RECORD_TYPES.ballot) continue;
     let judged;
     try {
       judged = judge(payload);
@@ -153,53 +211,103 @@ export function ballotChecks(
       continue;
     }
     const { core, checked } = judged;
-    if (checked.ok) {
-      cores.push({ entry: at, segment, core });
-      admitted.push({
-        tier: checked.tier,
-        nullifier: checked.nullifier,
-        message: checked.message,
-        l1RefNumber: checked.l1RefNumber,
-        index: BigInt(at),
-      });
-    } else
+    if (!checked.ok) {
       rejected.push({
         entry: at,
         code: checked.code,
         ...(checked.option !== undefined && { option: checked.option }),
         ...(checked.question !== undefined && { question: checked.question }),
       });
-  }
-  const judged = rejected.filter(
-    (r): r is RejectedBallot & { readonly code: AdmissionCode } => r.code !== "decode",
-  );
-  const rows = new Map<string, BallotOutcome>();
-  for (const id of ROWS) {
-    const first = judged.find((r) => ROWS_OF[r.code].includes(id));
-    rows.set(
-      id,
-      first === undefined
-        ? { status: "pass" }
-        : { status: "fail", code: first.code, at: { entry: first.entry } },
-    );
+      continue;
+    }
+    // The close rule (5.5) judges each copy by its own entry, after 5.1 to
+    // 5.4: an ordinary ballot by its L2 block's timestamp, a board-path one
+    // by its segment, at most `s_A`, the operator's word (docs/spec/close.md,
+    // Window; T-35, T-50).
+    const late = windows ? windowCode(path, d.opens_at, d.closes_at, lastBoardSegment) : undefined;
+    if (late !== undefined) {
+      rejected.push({ entry: at, code: late });
+      continue;
+    }
+    cores.push({ entry: at, segment: path.segment, core });
+    passed.push({
+      at,
+      path,
+      ballot: {
+        tier: checked.tier,
+        nullifier: checked.nullifier,
+        message: checked.message,
+        l1RefNumber: checked.l1RefNumber,
+        index: BigInt(at),
+      },
+    });
   }
   // `message` is M recomputed from the record, so a re-randomised proof
   // doesn't hide a repeat (T-38).
-  const repeats = selectBallots(admitted).repeats.map((b) => ({ entry: Number(b.index) }));
-  const first = repeats[0];
-  // The input to 5.7 is the ballots every other admission check admits. 5.8
-  // depends on M alone, which copies share, but the close rule (5.5) judges
-  // each entry by its own L2 block (ADR 0025), so an earlier copy may yet be
-  // rejected, and a rejected entry never makes another a repeat (6.1, R4).
-  // Until 5.5 runs, a candidate repeat can't be rejected, and 5.7 passes
-  // only when there is none.
-  rows.set(
-    "5.7",
-    first === undefined
+  const repeated = new Set(selectBallots(passed.map((p) => p.ballot)).repeats.map((b) => b.index));
+  let repeats: RepeatedBallot[] = [];
+  if (windows) {
+    // Every copy left has passed 5.1 to 5.5, so the first of each (tier, ν,
+    // M) stands and the others are rejected (5.7). 5.8 can't tell them
+    // apart: M binds the L1 reference, so it admits or rejects every copy
+    // of a ballot alike.
+    for (const b of repeated) rejected.push({ entry: Number(b), code: "repeat" });
+    rejected.sort((a, b) => a.entry - b.entry);
+  } else repeats = [...repeated].map((b) => ({ entry: Number(b) }));
+  const rows = new Map<string, BallotOutcome>();
+  const firstWith = (has: (r: RejectedBallot) => boolean): BallotOutcome => {
+    const first = rejected.find(has);
+    return first === undefined
       ? { status: "pass" }
-      : { status: "unverifiable", code: "not-reached", at: { entry: first.entry } },
-  );
-  return { rows, report: { admitted: admitted.length, rejected, repeats }, admitted: cores };
+      : {
+          status: "fail",
+          code: first.code as NonNullable<BallotOutcome["code"]>,
+          at: { entry: first.entry },
+        };
+  };
+  for (const id of ROWS)
+    rows.set(
+      id,
+      firstWith(
+        (r) => Object.hasOwn(ROWS_OF, r.code) && ROWS_OF[r.code as AdmissionCode].includes(id),
+      ),
+    );
+  if (windows) {
+    rows.set(
+      "5.5",
+      firstWith((r) => WINDOW_CODES.has(r.code)),
+    );
+    rows.set(
+      "5.7",
+      firstWith((r) => r.code === "repeat"),
+    );
+  } else {
+    rows.set("5.5", UNSUPPORTED);
+    rows.set("5.7", UNSUPPORTED);
+  }
+  const admitted = windows ? passed.filter((p) => !repeated.has(BigInt(p.at))) : passed;
+  return {
+    rows,
+    report: { admitted: admitted.length, rejected, repeats },
+    admitted: cores,
+  };
+}
+
+/** The close rule's code for an admitted copy, by its own path, or `undefined` inside the window. */
+function windowCode(
+  path: Path,
+  opensAt: bigint,
+  closesAt: bigint,
+  lastBoardSegment: bigint,
+): WindowCode | undefined {
+  if (path.kind === "board")
+    // No opening test: a segment bounds time only to a period, and 5.8
+    // bounds an early ballot's reference anyway (docs/spec/close.md, Why
+    // each path's test).
+    return BigInt(path.segment) > lastBoardSegment ? "window-boarded-late" : undefined;
+  if (path.l2Timestamp < opensAt) return "window-before-open";
+  if (path.l2Timestamp > closesAt) return "window-after-close";
+  return undefined;
 }
 
 /** One ballot payload's strict decoding and admission checks, with its core. */

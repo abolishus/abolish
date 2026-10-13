@@ -10,12 +10,14 @@ import {
   verifyBundle,
 } from "../src/index.ts";
 
-// Format-4 bundles: ballot admission, 5.1 to 5.4 and 5.7, against the definition and
-// the key set its transcript check registered (docs/spec/verifier.md, Ballot
-// admission). Fixtures: docs/spec/vectors/verifier-ballots.json
+// Format-4 bundles: ballot admission, 5.1 to 5.5 and 5.7, against the
+// definition and the key set its transcript check registered, with each copy
+// judged by its own path's window (docs/spec/verifier.md, Ballot admission).
+// Fixtures: docs/spec/vectors/verifier-ballots.json
 // (packages/crypto/scripts/verifier-ballots-vectors.py, an independent
-// implementation, with snarkjs's verdict on every membership proof), and
-// l1-anchor.json's L1 evidence and clock, which matter only to 4.1 and 4.2.
+// implementation, with snarkjs's verdict on every membership proof) and its
+// anchoring clock, and l1-anchor.json's L1 evidence, which matters only to
+// 4.1 and 4.2.
 
 const VECTORS = new URL("../../../docs/spec/vectors/", import.meta.url);
 const read = (name: string) => JSON.parse(readFileSync(new URL(name, VECTORS), "utf8")) as unknown;
@@ -30,13 +32,13 @@ interface Case {
 }
 
 const file = read("verifier-ballots.json") as {
+  readonly clock: Readonly<Record<string, string>>;
   readonly panels: Readonly<
     Record<string, { readonly threshold: string; readonly keys: string[] }>
   >;
   readonly cases: readonly Case[];
 };
 const l1File = read("l1-anchor.json") as {
-  readonly clock: Readonly<Record<string, string>>;
   readonly vectors: readonly {
     readonly id: string;
     readonly firstSegment: string;
@@ -66,7 +68,7 @@ const json = (c: Case, definition: string, format: string = BUNDLE_FORMAT_CEREMO
   JSON.stringify({
     format,
     definition,
-    clock: l1File.clock,
+    clock: file.clock,
     l1,
     ...(format === BUNDLE_FORMAT_CEREMONY && { panel: file.panels[c.panel] }),
   });
@@ -82,7 +84,7 @@ const rows = (r: Report, ids: readonly string[]) =>
       return [id, { status, ...(code !== undefined && { code }), ...(at !== undefined && { at }) }];
     }),
   );
-const ADMISSION = ["5.1", "5.2", "5.3", "5.4", "5.7"];
+const ADMISSION = ["5.1", "5.2", "5.3", "5.4", "5.5", "5.7"];
 
 // The copy's entries, re-joined after a change.
 const entriesOf = (c: Case) => parseBundle(json(c, c.definition), hex(c.board)).entries;
@@ -90,7 +92,7 @@ const equal = (a: Uint8Array, b: Uint8Array) =>
   a.length === b.length && a.every((x, i) => x === b[i]);
 const join = (entries: readonly Uint8Array[]) => Uint8Array.from(entries.flatMap((e) => [...e]));
 
-test("the fixtures reject a ballot for every admission code and for decoding", () => {
+test("the fixtures reject a ballot for every admission code, the window's, repeats and decoding", () => {
   const codes = new Set(file.cases.flatMap((c) => (c.ballots?.rejected ?? []).map((r) => r.code)));
   expect([...codes].sort()).toEqual(
     [
@@ -99,9 +101,13 @@ test("the fixtures reject a ballot for every admission code and for decoding", (
       "decode",
       "membership-proof",
       "option-proof",
+      "repeat",
       "share-hash-unqualified",
       "sum-proof",
       "validity-shape",
+      "window-after-close",
+      "window-before-open",
+      "window-boarded-late",
     ].sort(),
   );
   const outcomes = file.cases.flatMap((c) => ADMISSION.map((id) => c.expected[id]));
@@ -115,7 +121,7 @@ test("the fixtures reject a ballot for every admission code and for decoding", (
     );
 });
 
-describe("1.3, 2.3, 3.2, 5.1 to 5.4 and 5.7 against the independent implementation", () => {
+describe("1.3, 2.3, 3.2, 5.1 to 5.5 and 5.7 against the independent implementation", () => {
   // A bundle checks every ballot's membership proof (a pairing) and validity
   // proofs: the mixed one has taken over the 5-second default on CI's
   // runners while the other verifier files run beside it.
@@ -143,7 +149,12 @@ describe("admission is decided per entry", () => {
     new Map((r.ballots?.rejected ?? []).map((x) => [x.entry, x.code] as const));
   const full = verdicts(format4(mixed));
 
-  test("any subset of the copy gives every kept ballot the verdict it has in the whole copy (R4)", () => {
+  // Entry 14 repeats entry 1, so it is a repeat only while entry 1 is kept;
+  // every other verdict is the entry's own (R4).
+  const expected = (kept: readonly number[], i: number) =>
+    i === 14 && !kept.includes(1) ? undefined : full.get(i);
+
+  test("any subset of the copy gives every kept ballot the verdict it has in the whole copy, a repeat only with its original (R4)", () => {
     fc.assert(
       fc.property(fc.subarray([...entries.keys()], { minLength: 1 }), (kept) => {
         const r = format4(mixed, join(kept.map((i) => entries[i] as Uint8Array)));
@@ -153,8 +164,10 @@ describe("admission is decided per entry", () => {
             expect(row(r, id)).toMatchObject({ status: "unverifiable", code: "not-reached" });
         else {
           const got = verdicts(r);
-          kept.forEach((i, at) => expect(got.get(at)).toBe(full.get(i)));
-          expect(r.ballots?.admitted).toBe(kept.filter((i) => i > 0 && !full.has(i)).length);
+          kept.forEach((i, at) => expect(got.get(at)).toBe(expected(kept, i)));
+          expect(r.ballots?.admitted).toBe(
+            kept.filter((i) => i > 0 && expected(kept, i) === undefined).length,
+          );
         }
       }),
       { numRuns: runs(20) },
@@ -163,7 +176,7 @@ describe("admission is decided per entry", () => {
     // Groth16 pairing, about 0.2 s on a shared CI runner.
   }, 120_000);
 
-  test("a copy is a candidate repeat exactly when an admitted copy precedes it, whatever its proof bytes (5.7, R4)", () => {
+  test("a copy is rejected as a repeat exactly when an admitted copy precedes it, whatever its proof bytes (5.7, R4)", () => {
     const repeats = byId("repeats");
     const all = entriesOf(repeats);
     // Entries 2, 3 (its proof negated) and 5 (byte-identical) share (tier, ν,
@@ -179,14 +192,17 @@ describe("admission is decided per entry", () => {
       fc.property(fc.subarray([...all.keys()].slice(1)), (kept) => {
         const r = format4(repeats, join([0, ...kept].map((i) => all[i] as Uint8Array)));
         const positions = kept.flatMap((i, at) => (copies.has(i) ? [at + 1] : []));
-        expect(r.ballots?.repeats).toEqual(positions.slice(1).map((entry) => ({ entry })));
+        expect(r.ballots?.repeats).toEqual([]);
+        expect(r.ballots?.rejected.filter((b) => b.code === "repeat")).toEqual(
+          positions.slice(1).map((entry) => ({ entry, code: "repeat" })),
+        );
         expect(row(r, "5.7")).toEqual(
           positions.length > 1
             ? {
                 id: "5.7",
                 kind: "admission",
-                status: "unverifiable",
-                code: "not-reached",
+                status: "fail",
+                code: "repeat",
                 at: { entry: positions[1] },
               }
             : { id: "5.7", kind: "admission", status: "pass" },
@@ -228,10 +244,80 @@ describe("admission is decided per entry", () => {
   });
 });
 
+describe("the close rule's window (5.5) judges each copy by its own path", () => {
+  const window = byId("window");
+  const entries = entriesOf(window);
+  const verdicts = (r: Report) =>
+    new Map((r.ballots?.rejected ?? []).map((x) => [x.entry, x.code] as const));
+  const full = verdicts(format4(window));
+  // Entries 5 and 7 are ordinary copies inside the window of entries 1 and 6:
+  // repeats only while their original is kept.
+  const originals = new Map([
+    [5, 1],
+    [7, 6],
+  ]);
+  const expected = (kept: readonly number[], i: number) => {
+    const original = originals.get(i);
+    return original !== undefined && !kept.includes(original) ? undefined : full.get(i);
+  };
+
+  test("the fixture reaches every window code through both paths", () => {
+    expect(full.get(3)).toBe("window-before-open");
+    expect(full.get(4)).toBe("window-after-close");
+    expect(full.get(11)).toBe("window-boarded-late");
+    // The same log from an address the definition doesn't name carries no ballot.
+    expect(full.has(9)).toBe(false);
+    expect(format4(window).ballots?.admitted).toBe(4);
+  });
+
+  test("any subset of the copy gives every kept ballot its own window verdict (R4)", () => {
+    fc.assert(
+      fc.property(fc.subarray([...entries.keys()].slice(1)), (kept) => {
+        const r = format4(window, join([0, ...kept].map((i) => entries[i] as Uint8Array)));
+        const got = verdicts(r);
+        kept.forEach((i, at) => expect(got.get(at + 1)).toBe(expected(kept, i)));
+        // Entry 9 is no ballot, and neither is the transcript.
+        expect(r.ballots?.admitted).toBe(
+          kept.filter((i) => i !== 9 && expected(kept, i) === undefined).length,
+        );
+      }),
+      { numRuns: runs(20) },
+    );
+  }, 120_000);
+
+  test("under contract-event version 1 the board emits no event, so a BallotSubmitted record is no ballot", () => {
+    const admitted = byId("admitted");
+    const own = entriesOf(admitted);
+    // The window case's in-window ordinary ballot: the fixtures share one
+    // election identifier, so it is an entry of this election's board.
+    const spliced = join([...own, entries[2] as Uint8Array]);
+    expect(format4(admitted, spliced).ballots).toEqual(format4(admitted).ballots);
+  });
+
+  test("a clock that puts s_A below a board-path ballot's segment rejects it as boarded late", () => {
+    const admitted = byId("admitted");
+    const late = verifyBundle(
+      parseBundle(
+        JSON.stringify({
+          ...(JSON.parse(json(admitted, admitted.definition)) as object),
+          // An epoch after close: s_A is below 0, under every segment.
+          clock: { ...file.clock, epoch: "1800000000" },
+        }),
+        hex(admitted.board),
+      ),
+    );
+    expect(late.ballots?.admitted).toBe(0);
+    expect(new Set(late.ballots?.rejected.map((b) => b.code))).toEqual(
+      new Set(["window-boarded-late"]),
+    );
+    expect(row(late, "5.5")).toMatchObject({ status: "fail", code: "window-boarded-late" });
+  });
+});
+
 describe("when ballot admission can't run", () => {
   const admitted = byId("admitted");
 
-  test("a definition that doesn't decode leaves 5.1 to 5.4, 5.7 and 6.2 not reached", () => {
+  test("a definition that doesn't decode leaves 5.1 to 5.5, 5.7 and 6.2 not reached", () => {
     const r = format4(admitted, hex(admitted.board), "0001");
     for (const id of [...ADMISSION, "6.2"])
       expect(row(r, id)).toMatchObject({ status: "unverifiable", code: "not-reached" });

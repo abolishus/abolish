@@ -8,10 +8,10 @@
 // disagreement between the simulation and the verifier, which the run
 // treats as a bug (T-23, T-37, T-54).
 //
-// Three of the passing rows check little here: admission rejects on the
+// Four of the passing rows check little here: admission rejects on the
 // membership proof before it verifies the validity proofs, so 5.4 covers
-// only each ballot's shape and qualified share hashes; 5.7 runs over no
-// admitted ballot; and a version-1 definition lists no receipt keys, so 2.9
+// only each ballot's shape and qualified share hashes; 5.5 and 5.7 run over
+// no admitted ballot; and a version-1 definition lists no receipt keys, so 2.9
 // has nothing to read. They are required anyway, so a change that fails
 // them is caught.
 
@@ -24,6 +24,7 @@ export const VERIFIER_PASSES: readonly string[] = Object.freeze([
   "4.1",
   "4.2",
   "5.4",
+  "5.5",
   "5.7",
 ]);
 

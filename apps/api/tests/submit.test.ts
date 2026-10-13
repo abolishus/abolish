@@ -48,9 +48,15 @@ const definition = decodeElectionDefinition(unhex(mixed.definition));
 const electionId = definition.election_id;
 // The fixtures pin board-entry version 4.
 const entries = splitEntries(unhex(mixed.board)).entries.map((e) => decodeBoardEntry(e, 4));
-const rejected = new Map((mixed.ballots?.rejected ?? []).map((r) => [r.entry, r.code] as const));
-// The case's one repeat is a byte-identical copy of an earlier ballot.
-const repeats = new Set((mixed.ballots?.repeats ?? []).map((r) => r.entry));
+// The case's one repeat (5.7) is a byte-identical copy of an earlier ballot.
+const repeats = new Set(
+  (mixed.ballots?.rejected ?? []).filter((r) => r.code === "repeat").map((r) => r.entry),
+);
+const rejected = new Map(
+  (mixed.ballots?.rejected ?? [])
+    .filter((r) => r.code !== "repeat")
+    .map((r) => [r.entry, r.code] as const),
+);
 
 let db: TestDb;
 let app: Sql;

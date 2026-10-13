@@ -10,7 +10,7 @@ import {
 } from "../src/index.ts";
 
 // Format-4 bundles under definition versions 3 and 4, whose ballots (version
-// 2) name their cell: ballot admission, 5.1 to 5.4 and 5.7, against the
+// 2) name their cell: ballot admission, 5.1 to 5.5 and 5.7, against the
 // cell's root and scope in the definition and the key set its transcript
 // check registered, and 6.2, which passes on these boards, holding no opening,
 // wherever admission runs (docs/spec/verifier.md, Ballot admission;
@@ -18,8 +18,8 @@ import {
 // docs/spec/vectors/verifier-ballots-v2.json
 // (packages/crypto/scripts/verifier-ballots-v2-vectors.py, an independent
 // implementation that builds each cell tree by the first-occurrence rule,
-// with snarkjs's verdict on every membership proof), and l1-anchor.json's L1
-// evidence and clock, which matter only to 4.1 and 4.2.
+// with snarkjs's verdict on every membership proof) and its anchoring clock,
+// and l1-anchor.json's L1 evidence, which matters only to 4.1 and 4.2.
 
 const VECTORS = new URL("../../../docs/spec/vectors/", import.meta.url);
 const read = (name: string) => JSON.parse(readFileSync(new URL(name, VECTORS), "utf8")) as unknown;
@@ -37,10 +37,10 @@ const file = read("verifier-ballots-v2.json") as {
   readonly panels: Readonly<
     Record<string, { readonly threshold: string; readonly keys: string[] }>
   >;
+  readonly clock: Readonly<Record<string, string>>;
   readonly cases: readonly Case[];
 };
 const l1File = read("l1-anchor.json") as {
-  readonly clock: Readonly<Record<string, string>>;
   readonly vectors: readonly {
     readonly id: string;
     readonly firstSegment: string;
@@ -70,7 +70,7 @@ const json = (c: Case) =>
   JSON.stringify({
     format: BUNDLE_FORMAT_CEREMONY,
     definition: c.definition,
-    clock: l1File.clock,
+    clock: file.clock,
     l1,
     panel: file.panels[c.panel],
   });
@@ -85,13 +85,13 @@ const rows = (r: Report, ids: readonly string[]) =>
       return [id, { status, ...(code !== undefined && { code }), ...(at !== undefined && { at }) }];
     }),
   );
-const ADMISSION = ["5.1", "5.2", "5.3", "5.4", "5.7"];
+const ADMISSION = ["5.1", "5.2", "5.3", "5.4", "5.5", "5.7"];
 
 const entriesOf = (c: Case) => parseBundle(json(c), hex(c.board)).entries;
 const join = (entries: readonly Uint8Array[]) => Uint8Array.from(entries.flatMap((e) => [...e]));
 const byCode = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
-test("the fixtures reject a ballot for every version-2 admission code and for decoding", () => {
+test("the fixtures reject a ballot for every version-2 admission code, repeats and decoding", () => {
   const codes = new Set(file.cases.flatMap((c) => (c.ballots?.rejected ?? []).map((r) => r.code)));
   expect([...codes].sort(byCode)).toEqual(
     [
@@ -100,6 +100,7 @@ test("the fixtures reject a ballot for every version-2 admission code and for de
       "decode",
       "membership-proof",
       "option-proof",
+      "repeat",
       "share-hash-unqualified",
       "sum-proof",
       "validity-shape",
@@ -107,7 +108,7 @@ test("the fixtures reject a ballot for every version-2 admission code and for de
   );
 });
 
-describe("1.3, 2.3, 3.2, 5.1 to 5.4, 5.7 and 6.2 against the independent implementation", () => {
+describe("1.3, 2.3, 3.2, 5.1 to 5.5, 5.7 and 6.2 against the independent implementation", () => {
   // Membership and validity proofs for every ballot: seconds on a loaded CI
   // runner, as in ballots.test.ts.
   for (const c of file.cases)
@@ -134,8 +135,17 @@ describe("admission is decided per entry", () => {
   const verdicts = (r: Report) =>
     new Map((r.ballots?.rejected ?? []).map((x) => [x.entry, x.code] as const));
   const full = verdicts(format4(mixed));
+  // Entry 18 repeats entry 1, so it is a repeat only while entry 1 is kept;
+  // every other verdict is the entry's own (R4).
+  const expected = (kept: readonly number[], i: number) =>
+    i === 18 && !kept.includes(1) ? undefined : full.get(i);
 
-  test("any subset of the copy gives every kept ballot the verdict it has in the whole copy (R4)", () => {
+  test("the repeat in the fixture is a byte-identical copy of entry 1", () => {
+    expect(full.get(18)).toBe("repeat");
+    expect((entries[18] as Uint8Array).slice(51)).toEqual((entries[1] as Uint8Array).slice(51));
+  });
+
+  test("any subset of the copy gives every kept ballot the verdict it has in the whole copy, a repeat only with its original (R4)", () => {
     fc.assert(
       fc.property(fc.subarray([...entries.keys()], { minLength: 1 }), (kept) => {
         const r = format4(mixed, join(kept.map((i) => entries[i] as Uint8Array)));
@@ -145,8 +155,10 @@ describe("admission is decided per entry", () => {
             expect(row(r, id)).toMatchObject({ status: "unverifiable", code: "not-reached" });
         else {
           const got = verdicts(r);
-          kept.forEach((i, at) => expect(got.get(at)).toBe(full.get(i)));
-          expect(r.ballots?.admitted).toBe(kept.filter((i) => i > 0 && !full.has(i)).length);
+          kept.forEach((i, at) => expect(got.get(at)).toBe(expected(kept, i)));
+          expect(r.ballots?.admitted).toBe(
+            kept.filter((i) => i > 0 && expected(kept, i) === undefined).length,
+          );
         }
       }),
       { numRuns: runs(20) },

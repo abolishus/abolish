@@ -28,13 +28,13 @@ interface Case {
 }
 
 const file = read("verifier-ballots.json") as {
+  readonly clock: Readonly<Record<string, string>>;
   readonly panels: Readonly<
     Record<string, { readonly threshold: string; readonly keys: string[] }>
   >;
   readonly cases: readonly Case[];
 };
 const l1File = read("l1-anchor.json") as {
-  readonly clock: Readonly<Record<string, string>>;
   readonly vectors: readonly {
     readonly id: string;
     readonly firstSegment: string;
@@ -63,7 +63,7 @@ const bundleOf = (c: Case) =>
     JSON.stringify({
       format: BUNDLE_FORMAT_CEREMONY,
       definition: c.definition,
-      clock: l1File.clock,
+      clock: file.clock,
       l1: {
         firstSegment: closed.firstSegment,
         header: closed.block.header,
@@ -94,9 +94,23 @@ function admissions(c: Case) {
   return verdicts;
 }
 
-/** The same, from the verifier's report over the whole copy. */
+// What `admit` can't decide from one ballot: its entry's window (5.5) and
+// whether an earlier copy stands (5.7). An entry rejected for either passed
+// 5.1 to 5.4.
+const LATER = new Set([
+  "window-before-open",
+  "window-after-close",
+  "window-boarded-late",
+  "repeat",
+]);
+
+/** The same, from the verifier's report over the whole copy, by 5.1 to 5.4. */
 function reported(r: Report, ballots: ReadonlyMap<number, string>) {
-  const rejected = new Map((r.ballots?.rejected ?? []).map((x) => [x.entry, x.code] as const));
+  const rejected = new Map(
+    (r.ballots?.rejected ?? [])
+      .filter((x) => !LATER.has(x.code))
+      .map((x) => [x.entry, x.code] as const),
+  );
   return new Map([...ballots.keys()].map((at) => [at, rejected.get(at) ?? "admitted"] as const));
 }
 

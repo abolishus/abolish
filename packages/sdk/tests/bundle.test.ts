@@ -157,7 +157,7 @@ describe("judgeVerifierReport", { timeout }, () => {
       verdict: "unverifiable",
       verdictAgainstInputs: "unverifiable",
       block: { number: Number(report.l1?.blockNumber), headerHash: report.l1?.blockHash },
-      passed: ["2.9", "3.2", "4.1", "4.2", "5.4", "5.7"],
+      passed: ["2.9", "3.2", "4.1", "4.2", "5.4", "5.5", "5.7"],
       failed: ["5.1", "5.2", "5.3"].map((id) => ({ id, code: "membership-proof" })),
       rejectedBallots: r.ballots.cast,
     });

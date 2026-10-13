@@ -600,7 +600,9 @@ export function cellContextOf(election: CellBallotElection | QuestionBallotElect
   readonly keys: readonly RegisteredKeys[];
 } {
   const made = MADE.get(election);
-  if (made === undefined || made.version === 1)
+  // Exactly versions 2 and 3: a version-4 context's cores carry an author
+  // half that opening version 2 never opens (opening version 3, part 2b-4).
+  if (made === undefined || (made.version !== 2 && made.version !== 3))
     throw new TypeError("expected a context made by cellBallotElection or questionBallotElection");
   return {
     definitionHash: made.definitionHash,

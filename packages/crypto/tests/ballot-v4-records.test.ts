@@ -10,6 +10,8 @@ import {
   ballotSignalsV4,
   checkBallotV3,
   checkBallotV4,
+  cellBallotCore,
+  checkChallengeOpeningV2,
   DecodeError,
   decodeBallot,
   decodeElectionDefinitionV6,
@@ -356,6 +358,11 @@ describe("ballot record version 4", () => {
     expect(() => ballotSignalsV3(panels as never, record as never)).toThrow(TypeError);
     // Version 1 to 3's intake never reads a version-4 context.
     expect(() => admitForIntake(panels as never, honest, 1, new Uint8Array(32))).toThrow(TypeError);
+    // Opening version 2 never opens a version-4 core, which carries an
+    // author half: its cores and checks refuse a version-4 context (T-42).
+    const notCell = /expected a context made by cellBallotElection or questionBallotElection/;
+    expect(() => cellBallotCore(panels as never, 0, {} as never)).toThrow(notCell);
+    expect(() => checkChallengeOpeningV2(panels as never, {} as never)).toThrow(notCell);
     // A version-6 definition has no question context of version 3.
     const d = definitionOf("default-only");
     expect(() =>

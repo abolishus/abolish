@@ -623,7 +623,10 @@ describe("definition version 5 (questions)", () => {
     [4, 1, 1, 2, "profile-combination"],
     [4, 3, 2, 1, "profile-combination"],
     [4, 3, 2, 3, "profile-combination"],
-    [4, 4, 2, 2, "unsupported-version"],
+    // Ballot version 4 pairs with definition version 6 alone; version 5
+    // stands for one a later release may define to carry questions.
+    [4, 4, 2, 2, "profile-combination"],
+    [4, 5, 2, 2, "unsupported-version"],
     [4, 3, 255, 2, "unsupported-version"],
   ];
   for (const [board, ballot, spoiled, text, code] of table)

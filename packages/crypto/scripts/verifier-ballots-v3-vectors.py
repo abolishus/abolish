@@ -372,7 +372,10 @@ def build(constants):
     bundle("ballot-v2", "Definition version 5 pinning ballot version 2, which carries no question: 2.3 fails profile-combination, and, as for any ballot version but the definition's own and version 1, 5.1 to 5.4, 5.7 and 6.2 are unsupported.", d_b2, t_b2, e_b2, [1, 2, 3], [t_b2, (b_a, None)], "unsupported")
 
     d_b4, t_b4, e_b4 = election_for("v5-ballot-4", [1, 2, 3], profile=pins_for(ballot=4))
-    bundle("ballot-v4", "Definition version 5 pinning ballot version 4, which a later release may define to carry questions: 2.3, 5.1 to 5.4, 5.7 and 6.2 are unsupported.", d_b4, t_b4, e_b4, [1, 2, 3], [t_b4, (b_a, None)], "unsupported")
+    bundle("ballot-v4", "Definition version 5 pinning ballot version 4, which carries an author half and pairs with definition version 6 alone: 2.3 fails profile-combination, and 5.1 to 5.4, 5.7 and 6.2 are unsupported, as for version 2.", d_b4, t_b4, e_b4, [1, 2, 3], [t_b4, (b_a, None)], "unsupported")
+
+    d_b5, t_b5, e_b5 = election_for("v5-ballot-5", [1, 2, 3], profile=pins_for(ballot=5))
+    bundle("ballot-v5", "Definition version 5 pinning ballot version 5, which a later release may define to carry questions: 2.3, 5.1 to 5.4, 5.7 and 6.2 are unsupported.", d_b5, t_b5, e_b5, [1, 2, 3], [t_b5, (b_a, None)], "unsupported")
 
     return {"panels": panels, "proofs": proofs, "checks": checks, "bundles": bundles, "eid": eid, "cells": cells}
 
@@ -525,7 +528,8 @@ def assemble(constants, proofs_path, out_dir):
     assert by["other-key"]["expected"]["1.3"]["code"] == "membership-key"
     assert by["ballot-v1"]["expected"]["2.3"]["code"] == "profile-combination"
     assert by["ballot-v2"]["expected"]["2.3"]["code"] == "profile-combination"
-    assert by["ballot-v4"]["expected"]["2.3"] == UNSUPPORTED
+    assert by["ballot-v4"]["expected"]["2.3"]["code"] == "profile-combination"
+    assert by["ballot-v5"]["expected"]["2.3"] == UNSUPPORTED
     assert by["quorum"]["expected"]["6.2"] == UNSUPPORTED and by["ballot-v1"]["expected"]["6.2"] == NOT_REACHED
     assert by["quorum"]["expected"]["7.4"] == NOT_REACHED and by["admitted"]["expected"]["7.4"] == outcome("pass")
 

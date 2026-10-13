@@ -8,6 +8,7 @@ import {
   SHORT_CODE_ALPHABET,
   SHORT_CODE_LENGTH,
   shortCode,
+  shortCodeRange,
 } from "../src/short-codes.ts";
 
 // Short codes (src/short-codes.ts; docs/design/sharing.md, "Short links and
@@ -259,5 +260,45 @@ describe("resolveShortCode", () => {
     expect(resolveShortCode("248h248", [first, ground])).toBe(0);
     expect(resolveShortCode("248h248", [ground, first])).toBe(0);
     expect(resolveShortCode("zzzzzzz", [first, ground])).toBeUndefined();
+  });
+});
+
+describe("shortCodeRange", () => {
+  const compare = (a: Uint8Array, b: Uint8Array) => Buffer.compare(a, b);
+
+  test("holds exactly the hashes the code is a prefix of", () => {
+    run(
+      fc.property(
+        hash,
+        hash,
+        fc.integer({ min: SHORT_CODE_LENGTH, max: MAX_SHORT_CODE_LENGTH }),
+        fc.boolean(),
+        (h, other, n, near) => {
+          const code = shortCode(h, n);
+          const { from, to } = shortCodeRange(code);
+          expect(compare(from, h)).toBeLessThanOrEqual(0);
+          if (to !== undefined) expect(compare(h, to)).toBeLessThan(0);
+          // Another hash, half the time sharing all but its last bits with h.
+          const x = near ? h.map((b, i) => (i < 31 ? b : other[i]!)) : other;
+          const inside = compare(from, x) <= 0 && (to === undefined || compare(x, to) < 0);
+          expect(inside).toBe(shortCode(x, n) === code);
+        },
+      ),
+    );
+  });
+
+  test("runs to the last hash only for a code of all ones", () => {
+    expect(shortCodeRange("zzzzzzz").to).toBeUndefined();
+    expect(shortCodeRange(`${"z".repeat(51)}g`)).toEqual({ from: new Uint8Array(32).fill(0xff) });
+    expect(shortCodeRange("0000000")).toEqual({
+      from: new Uint8Array(32),
+      // The next code up: the 35th bit, the code's last, set.
+      to: Uint8Array.of(0, 0, 0, 0, 0x20, ...new Uint8Array(27)),
+    });
+  });
+
+  test("refuses anything but a parsed code", () => {
+    for (const input of ["000000", "000000O", "000000U", "ABCDEFG", `${"0".repeat(51)}1`])
+      expect(() => shortCodeRange(input)).toThrow(RangeError);
   });
 });

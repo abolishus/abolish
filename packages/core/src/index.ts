@@ -43,6 +43,7 @@ export {
   boardEntries,
   boardSubtrees,
   electionDefinitions,
+  electionRegistrations,
   identityBackups,
   moderationActions,
   moderationReports,
@@ -97,6 +98,14 @@ export {
   reviewReports,
 } from "./reports.ts";
 export {
+  lookupShortCode,
+  recordRegistration,
+  RegistrationError,
+  type Registration,
+  type RegistrationErrorCode,
+  type ShortCodeMatch,
+} from "./registrations.ts";
+export {
   assignShortCodes,
   MAX_SHORT_CODE_LENGTH,
   parseShortCode,
@@ -104,4 +113,5 @@ export {
   SHORT_CODE_ALPHABET,
   SHORT_CODE_LENGTH,
   shortCode,
+  shortCodeRange,
 } from "./short-codes.ts";

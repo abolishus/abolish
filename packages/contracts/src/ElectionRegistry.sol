@@ -134,9 +134,9 @@ contract ElectionRegistry is EventAccumulator {
     /// `max_sequencer_drift` in seconds, Base's values (ADR 0004). Verifier 2.6
     /// requires the chain to have stayed within the definition's own values,
     /// so a larger one would let it accept a chain whose forced inclusion
-    /// outruns the contract-event window (T-50, T-35), or whose sequencer can
-    /// lead L1 by more than the 30 minutes `ROOT_WINDOW` was sized for (T-35,
-    /// T-71). No floor: a value below the chain's fails 2.6, the creator's own
+    /// outruns the contract-event window (T-50, T-35), and absorb a governance
+    /// raise of the drift past the 30 minutes ADR 0004 assumes instead of
+    /// failing closed (T-35, T-71). No floor: a value below the chain's fails 2.6, the creator's own
     /// loss. Constants of the bytecode, like δ's bounds.
     uint64 public constant MAX_SEQUENCING_WINDOW = 3600;
     uint64 public constant MAX_SEQUENCER_DRIFT = 1800;

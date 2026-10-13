@@ -291,7 +291,7 @@ def build(constants):
     )
     bundle(
         "admitted",
-        "Definition version 3 with only admitted ballots after the transcript: one in each cell and a re-vote. 5.1 to 5.4 pass, and 6.2 is unsupported, since this verifier doesn't yet read the openings of version-2 cores (P2-14 part 5).",
+        "Definition version 3 with only admitted ballots after the transcript: one in each cell and a re-vote. 5.1 to 5.4 pass, and so does 6.2, with no opening on the board.",
         d, t, e, [1, 2, 3],
         [t, ok["cell-0"], ok["remainder-region-1"], ok["tier-2"], ok["revote"]],
         "ballots",
@@ -316,7 +316,7 @@ def build(constants):
     ok_o1 = honest(e_o1)
     bundle(
         "opening-1",
-        "Definition version 3 pinning spoiled-ballot opening version 1, which can't open version-2 cores: 2.3 fails profile-combination, and admission still judges every ballot.",
+        "Definition version 3 pinning spoiled-ballot opening version 1, which can't open version-2 cores: 2.3 fails profile-combination, admission still judges every ballot, and 6.2 is not reached: no opening is judged against an election it can't open the ballots of.",
         d_o1, t_o1, e_o1, [1, 2, 3],
         [t_o1, ok_o1["cell-0"], ok_o1["tier-2"], (ok_o1["remainder-region-1"][0], ok_o1["cell-0"][1])],
         "ballots",
@@ -337,7 +337,7 @@ def build(constants):
         return [bytes(32)] * len(answers) if i in (3, 4) else answers
 
     d_q, t_q, e_q = election_for("v3-quorum", [1, 2, 3, 4], cheat={"answers": two_bad}, profile=pins_for(3))
-    bundle("quorum", "Seats 3 and 4 answer wrongly: no key set is registered, so no ballot is checked; 6.2 is unsupported all the same, since this verifier doesn't yet read the openings of version-2 cores (P2-14 part 5).", d_q, t_q, e_q, None, [t_q, (b_a, None)], "not-reached")
+    bundle("quorum", "Seats 3 and 4 answer wrongly: no key set is registered, so no ballot or opening is checked.", d_q, t_q, e_q, None, [t_q, (b_a, None)], "not-reached")
 
     d_vk, t_vk, e_vk = election_for("v3-other-key", [1, 2, 3], profile=pins_for(3), membership_vk_hash=det("other key"))
     bundle("other-key", "Ballot version 2's proofs are checked under the same pinned key as version 1's: a definition naming another fails 1.3, and no ballot is checked under it.", d_vk, t_vk, e_vk, [1, 2, 3], [t_vk, (b_a, None)], "not-reached")
@@ -356,10 +356,14 @@ def build(constants):
     return {"panels": panels, "proofs": proofs, "checks": checks, "bundles": bundles, "eid": eid, "cells": cells}
 
 
-def opening_row(d):
-    """6.2 (docs/spec/verifier.md, Spoiled-ballot openings, step 1): unsupported under a ballot or opening pin other than version 1, since this verifier doesn't yet read the openings of version-2 cores (P2-14 part 5); with both at version 1 (a profile 2.3 fails), not reached, as admission is."""
+def opening_row(d, admitted):
+    """6.2 (docs/spec/verifier.md, Spoiled-ballot openings, step 1): unsupported under an opening version this verifier doesn't read (it reads 1 and 2) or a ballot version other than the definition's own (2) and version 1, as admission is; not reached under any other pins but ballot version 2 beside opening version 2, the one that opens version-2 cores (a profile 2.3 fails), or where admission doesn't run; otherwise these boards carry no opening, so it passes."""
     pins = dict(d["profile"]["pins"])
-    return NOT_REACHED if pins[BALLOT_TYPE] == 1 and pins[SPOILED_OPENING_TYPE] == 1 else UNSUPPORTED
+    if pins[SPOILED_OPENING_TYPE] not in (1, 2) or pins[BALLOT_TYPE] not in (2, 1):
+        return UNSUPPORTED
+    if pins[BALLOT_TYPE] != 2 or pins[SPOILED_OPENING_TYPE] != 2 or not admitted:
+        return NOT_REACHED
+    return outcome("pass")
 
 
 def rows_for(kind, rejected=(), repeats=()):
@@ -458,7 +462,7 @@ def assemble(constants, proofs_path, out_dir):
             ballots = {"admitted": len(admitted), "rejected": rejected, "repeats": repeats}
         else:
             rows.update(rows_for(bnd["expect"]))
-        rows["6.2"] = opening_row(d)
+        rows["6.2"] = opening_row(d, bnd["expect"] == "ballots")
         case = {
             "id": bnd["id"],
             "description": bnd["description"],
@@ -484,7 +488,9 @@ def assemble(constants, proofs_path, out_dir):
     assert by["other-key"]["expected"]["1.3"]["code"] == "membership-key"
     assert by["ballot-v1"]["expected"]["2.3"]["code"] == "profile-combination"
     assert by["ballot-v5"]["expected"]["2.3"] == UNSUPPORTED
-    assert by["quorum"]["expected"]["6.2"] == UNSUPPORTED and by["ballot-v1"]["expected"]["6.2"] == NOT_REACHED
+    assert by["quorum"]["expected"]["6.2"] == NOT_REACHED and by["ballot-v1"]["expected"]["6.2"] == NOT_REACHED
+    assert by["admitted"]["expected"]["6.2"] == outcome("pass") and by["opening-1"]["expected"]["6.2"] == NOT_REACHED
+    assert by["ballot-v5"]["expected"]["6.2"] == UNSUPPORTED
 
     doc = {
         "format": "abolish-verifier-ballots-vectors/1",

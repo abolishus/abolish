@@ -110,12 +110,12 @@ function decodeAnyElectionDefinition(bytes: Uint8Array): AnyElectionDefinitionRe
 }
 
 /**
- * `decodeAnyElectionDefinition` for the verifier, which reads definition
- * versions 1, 3 and 4: a version-5 or version-6 definition is
- * `unknown-version` at its version byte, read before any field as it was
- * before those versions had layouts, so the verifier leaves it unverifiable
- * (2.3) until it reads questions (P2-14 part 5) and author panels (P2-16
- * part 4; T-36).
+ * `decodeAnyElectionDefinition` for definition versions 1, 3 and 4: a
+ * version-5 or version-6 definition is `unknown-version` at its version
+ * byte, read before any field as it was before those versions had layouts.
+ * The verifier reads version 5 with `decodeElectionDefinitionV5` beside it
+ * (P2-14 part 5a), and leaves version 6 unverifiable (2.3) until it reads
+ * author panels (P2-16 part 4; T-36).
  */
 export function decodeElectionDefinitionRecord(bytes: Uint8Array): ElectionDefinitionRecord {
   if (

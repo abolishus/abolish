@@ -99,9 +99,9 @@ describe("election definition version 5 (docs/spec/election-definition.md, Layou
     expect(decodeError(() => decodeElectionDefinitionV5(bytes))).toBe(v.error);
   });
 
-  // The verifier reads versions 1, 3 and 4 until P2-14 part 5: a version-5
-  // record is unknown-version at its version byte, read before any field,
-  // so 2.3 leaves it unverifiable whatever its fields hold (T-36).
+  // This decoder reads versions 1, 3 and 4 (the verifier reads version 5
+  // beside it, P2-14 part 5a): a version-5 record is unknown-version at its
+  // version byte, read before any field, whatever its fields hold (T-36).
   test("a version-5 definition is unknown-version at its version byte to the verifier's decoder", () => {
     for (const v of vectors.filter((x) => hex(x.encoding)[2] === 5)) {
       let error: unknown;

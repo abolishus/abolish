@@ -9,7 +9,8 @@
 // ballot admission (5.1 to 5.4, and 5.7 as far as 5.5 allows; ballot
 // version 2 against its cell under definition versions 3 and 4, ballot
 // version 3 against its cell and questions under definition version 5) and the
-// spoiled-ballot openings (6.2, as far as the floor of s_S decides them) and
+// spoiled-ballot openings (6.2, as far as the floor of s_S decides them;
+// opening version 2 under definition versions 3 to 5) and
 // the tally openings' sorting, attribution and boarding breaches (7.4, as far
 // as they need no counted set; against the cells under definition versions 3
 // to 5) are implemented, and, for formats 3 and 4, 4.4's event check over
@@ -21,7 +22,6 @@
 
 import {
   type Anchor,
-  ballotElection,
   BoardError,
   type BoardEntryVersion,
   boardPayloadTypes,
@@ -546,38 +546,19 @@ export function verifyBundle(bundle: Bundle): Report {
       );
       implemented = new Map<string, Outcome>([...implemented, ["7.4", opened.row]]);
       tallies = opened.report;
-      if (definition.definition.version === 1) {
-        // An opening is checked against the same registered election, and
-        // `opening-cast` against the ballots admission admitted, so 6.2 is
-        // reached exactly where admission is.
-        const spoiled = openingChecks(
-          definition.definition.value,
-          admission.admitted === undefined || checked.registered === undefined
-            ? undefined
-            : ballotElection(definition.definition.value, checked.registered),
-          admission.admitted,
-          bundle.entries,
-          definition.inputs.boardEntryVersion,
-          bundle.clock,
-        );
-        implemented = new Map<string, Outcome>([...implemented, ["6.2", spoiled.row]]);
-        openings = spoiled.report;
-      } else {
-        // Under definition versions 3 to 5 an opening opens a version-2 or
-        // version-3 core, which only spoiled-ballot opening version 2 does,
-        // and this verifier doesn't read it yet (P2-14 part 5b): unsupported
-        // under either pin other than version 1, whether or not admission
-        // ran (T-36); with both at version 1, which 2.3 fails, not reached,
-        // as admission is.
-        const d = definition.definition.value;
-        const v1Pins =
-          pinnedVersion(d, RECORD_TYPES.ballot) === 1 &&
-          pinnedVersion(d, RECORD_TYPES.spoiledBallotOpening) === 1;
-        implemented = new Map<string, Outcome>([
-          ...implemented,
-          ["6.2", v1Pins ? NOT_REACHED : UNSUPPORTED],
-        ]);
-      }
+      // An opening is checked against the same registered election, and
+      // `opening-cast` against the ballots admission admitted, so 6.2 is
+      // reached exactly where admission is.
+      const spoiled = openingChecks(
+        definition.definition,
+        checked.registered,
+        admission.admitted,
+        bundle.entries,
+        definition.inputs.boardEntryVersion,
+        bundle.clock,
+      );
+      implemented = new Map<string, Outcome>([...implemented, ["6.2", spoiled.row]]);
+      openings = spoiled.report;
     }
   }
   const checks = CHECKS.map((c): CheckResult => ({

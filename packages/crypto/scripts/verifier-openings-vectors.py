@@ -310,10 +310,13 @@ def main(constants, out_dir):
         entries = board([(seg, [transcript if p == "t" else p for p in ps]) for seg, ps in segments])
         ceremony_rows, _ = vc.expected(panel, defn, entries, panel, 4)
         assert ceremony_rows["3.2"] == outcome("pass"), id_
-        unsupported = dict(defn["profile"]["pins"]).get(OPENING_TYPE) != 1
-        if unsupported:
-            row, report = outcome("unverifiable", "unsupported-version", {}), None
+        # Step 1: opening version 2 is read, but opens other cores than
+        # ballot version 1's (a profile 2.3 fails), so nothing is judged.
+        pinned = dict(defn["profile"]["pins"]).get(OPENING_TYPE)
+        if pinned == 2:
+            row, report = NOT_REACHED, None
         else:
+            assert pinned == 1, id_
             row, report = expected(defn, election, entries, the_clock)
         assert row["status"] == want_status, (id_, row)
         c = {
@@ -389,14 +392,14 @@ def main(constants, out_dir):
         the_clock=dict(clock, epoch=d["closes_at"] + 10 * PERIOD),
     )
 
-    # An opening version this verifier doesn't read (T-36).
+    # An opening version this verifier reads, but not beside ballot version 1.
     fields = {k: d[k] for k in ("profile", "electorate", "membership_vk_hash")}
     fields["profile"] = dict(d["profile"], pins=[(ty, 2 if ty == OPENING_TYPE else v) for ty, v in d["profile"]["pins"]])
     ctx = vc.election_of(vc.definition_for(panel, bytes(32), **fields))
     t2 = vc.transcript("verifier-openings/opening-v2", panel, src["registered"], ctx)
     d2 = vc.definition_for(panel, vb.H(vb.ds(vc.TRANSCRIPT_TAG, t2)), **fields)
     assert vc.dv.definition_rule(d2) is None
-    case("opening-v2", "The profile pins spoiled-ballot opening version 2 beside ballot version 1, whose cores only opening version 1 opens: 2.3 fails, and 6.2, which can't read version 2 here, is unsupported.", [(0, ["t"])], "unverifiable", defn=d2, transcript=t2)
+    case("opening-v2", "The profile pins spoiled-ballot opening version 2 beside ballot version 1, whose cores only opening version 1 opens: 2.3 fails, and 6.2 is not reached, since no opening is judged against an election it can't open the ballots of.", [(0, ["t"])], "unverifiable", defn=d2, transcript=t2)
 
     doc = {
         "format": "abolish-verifier-openings-vectors/1",

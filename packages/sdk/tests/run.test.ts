@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { runSimulation, type Scenario, SIMULATION_STUBS } from "../src/index.ts";
+import { planElection, runSimulation, type Scenario, SIMULATION_STUBS } from "../src/index.ts";
 import { type CellExpectation, expectCells, judgeCell } from "../src/simulation/run.ts";
 
 // Each ballot costs about 0.1 s per online seat (intake checks its proofs).
@@ -13,6 +13,7 @@ const base: Scenario = {
   tiers: { "0": 2, "1": 1, "2": 1 },
   outage: { from: 0.5, to: 1 },
   challenges: 0,
+  revotes: 0,
   seed: 3,
 };
 
@@ -25,6 +26,7 @@ describe("runSimulation", { timeout }, () => {
     expect(r.ballots.server + r.ballots.direct).toBe(9);
     expect(r.ballots.direct).toBeGreaterThan(0);
     expect(r.ballots.challenged).toBe(0);
+    expect(r.ballots.superseded).toBe(0);
     expect(r.trustees).toEqual({ online: [1, 3, 4], offline: [2], faulty: [] });
     expect(r.cells.map((c) => c.tier)).toEqual([0, 1, 2]);
     for (const c of r.cells) {
@@ -74,6 +76,31 @@ describe("runSimulation", { timeout }, () => {
     const r = runSimulation({ ...base, challenges: 1 });
     expect(r.ok).toBe(true);
     expect(r.ballots.challenged).toBe(9);
+    expect(r.cells.reduce((a, c) => a + c.ballots, 0)).toBe(9);
+    for (const c of r.cells) expect(c.counts).toEqual(c.expected);
+  });
+
+  it("counts only each re-voter's last ballot, whatever it voted before", () => {
+    const s = { ...base, revotes: 1, challenges: 0.5 };
+    // Counting the earlier ballots instead would change some cell's counts.
+    const plan = planElection(s);
+    expect(
+      plan.tiers.some((tier) => {
+        const earlier = Array.from({ length: s.options }, (_, j) =>
+          plan.voters
+            .filter((v) => v.tier === tier)
+            .reduce((a, v) => a + ((v.earlier ?? v).votes[j] as number), 0),
+        );
+        return earlier.join() !== plan.expected.get(tier)?.join();
+      }),
+    ).toBe(true);
+    const progress: string[] = [];
+    const r = runSimulation(s, { onProgress: (p) => progress.push(p.stage) });
+    expect(r.ok).toBe(true);
+    expect(r.ballots.cast).toBe(18);
+    expect(r.ballots.superseded).toBe(9);
+    expect(r.ballots.server + r.ballots.direct).toBe(18);
+    expect(progress.filter((s) => s === "cast")).toHaveLength(18);
     expect(r.cells.reduce((a, c) => a + c.ballots, 0)).toBe(9);
     for (const c of r.cells) expect(c.counts).toEqual(c.expected);
   });

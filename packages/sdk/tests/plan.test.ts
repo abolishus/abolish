@@ -12,6 +12,7 @@ const base: Scenario = {
   tiers: { "0": 2, "1": 1, "2": 1 },
   outage: { from: 0.5, to: 1 },
   challenges: 0.5,
+  revotes: 0.5,
   seed: 7,
 };
 
@@ -33,6 +34,7 @@ const scenario = fc.record({
     { nil: null },
   ),
   challenges: fc.double({ min: 0, max: 1, noNaN: true }),
+  revotes: fc.double({ min: 0, max: 1, noNaN: true }),
   seed: fc.integer({ min: 0, max: 0xffff_ffff }),
 });
 
@@ -107,17 +109,57 @@ describe("planElection", () => {
     );
   });
 
+  it("draws re-votes apart: the share changes no voter's tier, last ballot or challenge", () => {
+    fc.assert(
+      fc.property(scenario, fc.double({ min: 0, max: 1, noNaN: true }), (s, other) => {
+        const strip = (r: number) =>
+          planElection({ ...s, revotes: r }).voters.map((v) => ({ ...v, earlier: null }));
+        expect(strip(other)).toEqual(strip(s.revotes));
+      }),
+      { numRuns },
+    );
+  });
+
+  it("plans a re-voter's earlier ballot no later than its last, with a ballot the election allows, sent direct exactly during the outage", () => {
+    fc.assert(
+      fc.property(scenario, (s) => {
+        for (const v of planElection(s).voters) {
+          if (v.earlier === null) continue;
+          const e = v.earlier;
+          expect(e.at).toBeGreaterThanOrEqual(0);
+          expect(e.at).toBeLessThanOrEqual(v.at);
+          expect(e.votes).toHaveLength(s.options);
+          if (s.election === "plurality")
+            expect(e.votes.reduce<number>((a, x) => a + x, 0)).toBe(1);
+          const down = s.outage !== null && e.at >= s.outage.from && e.at < s.outage.to;
+          expect(e.path).toBe(down ? "direct" : "server");
+        }
+      }),
+      { numRuns },
+    );
+  });
+
+  it("re-votes with no voter at share 0 and with every voter at share 1", () => {
+    expect(planElection({ ...base, revotes: 0 }).voters.some((v) => v.earlier !== null)).toBe(
+      false,
+    );
+    expect(planElection({ ...base, revotes: 1 }).voters.every((v) => v.earlier !== null)).toBe(
+      true,
+    );
+  });
+
   it("challenges with no voter at share 0 and with every voter at share 1", () => {
     expect(planElection({ ...base, challenges: 0 }).voters.some((v) => v.challenged)).toBe(false);
     expect(planElection({ ...base, challenges: 1 }).voters.every((v) => v.challenged)).toBe(true);
   });
 
-  it("spreads voters across tiers by weight, the outage across time and challenges by their share", () => {
+  it("spreads voters across tiers by weight, the outage across time, and challenges and re-votes by their shares", () => {
     const plan = planElection({ ...base, voters: 4000 });
     const share = (tier: number) => plan.voters.filter((v) => v.tier === tier).length / 4000;
     expect(share(0)).toBeCloseTo(0.5, 1);
     expect(share(1)).toBeCloseTo(0.25, 1);
     expect(plan.voters.filter((v) => v.path === "direct").length / 4000).toBeCloseTo(0.5, 1);
     expect(plan.voters.filter((v) => v.challenged).length / 4000).toBeCloseTo(0.5, 1);
+    expect(plan.voters.filter((v) => v.earlier !== null).length / 4000).toBeCloseTo(0.5, 1);
   });
 });

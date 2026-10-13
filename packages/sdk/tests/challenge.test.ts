@@ -21,6 +21,7 @@ const scenario: Scenario = {
   tiers: { "0": 1, "1": 0, "2": 1 },
   outage: null,
   challenges: 0,
+  revotes: 0,
   seed: 5,
 };
 

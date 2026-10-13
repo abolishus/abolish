@@ -2,7 +2,7 @@
 
 Abolish's contracts (the L2 contracts and the L1 board anchor), built with Foundry 1.8.3 and solc 0.8.30. Internal and source-only: deployed bytecode is checked against the release build of this source (verifier check 1.2, T-64; Release build, below).
 
-**Status: early (P1-18, P3-2, P4-1).** So far there are the event accumulator, the election registry, the trustee key registry, the group registry with its Tier 0 additions, the board's membership-proof and ballot checks and the L1 board anchor. The deployable contracts have typed wagmi bindings (Bindings, below). The rest of direct submission follows in later P1-18 changes. Nothing is deployed, and nothing may be until the close rule exists ([`docs/spec/contracts.md`](../../docs/spec/contracts.md), Election registry).
+**Status: early (P1-18, P3-2, P4-1).** So far there are the event accumulator, the election registry, the trustee key registry, the group registry with its Tier 0 additions, the board (direct submission of ballots, share receipts, postings and complaints, with its membership-proof, ballot and delivery checks) and the L1 board anchor. The deployable contracts have typed wagmi bindings (Bindings, below). The contract-event record's version that archives the board's events follows in a later P1-18 change. Nothing is deployed, and nothing may be until the close rule exists ([`docs/spec/contracts.md`](../../docs/spec/contracts.md), Election registry).
 
 ## Event accumulator
 
@@ -19,7 +19,7 @@ Abolish's contracts (the L2 contracts and the L1 board anchor), built with Found
 
 - `createElection()` assigns `election_id = H(DS("abolish/v1/election-id", u64(chain_id) ‖ registry ‖ u64(counter)))` and makes the caller the election's creator.
 - `registerDefinition(bytes)` admits the creator's one definition, write-once, only with canonical calldata, if it decodes strictly (`src/ElectionDefinition.sol`), is well formed, names this deployment, opens after the anchoring epoch and after registration, has every electorate root in an earlier block, and its stub was recorded with its ceremony transcript hash by the trustee registry (`src/ITrusteeRegistry.sol`; T-34, T-17, T-37, T-08, T-13, T-25).
-- It decodes definition versions 1 and 3 to 6, each under its own layout and rules, and records with each definition the parameters the board reads (`parameters`, `cellTiers`, `cell`): the ballot pin, the default and author panels' thresholds and sizes, each question and their total, and each cell's tier and root ([`docs/adr/0028-board-contract-checks.md`](../../docs/adr/0028-board-contract-checks.md), 1C).
+- It decodes definition versions 1 and 3 to 6, each under its own layout and rules, and records with each definition the parameters the board reads (`parameters`, `cellTiers`, `cell`, `ceremony`): the ballot pin, the default and author panels' thresholds and sizes, each question and their total, each cell's tier and root, and the stub hash and panel its ceremony was recorded under, where the board finds the key set ([`docs/adr/0028-board-contract-checks.md`](../../docs/adr/0028-board-contract-checks.md), 1C).
 - A listed `p256-key` (receipt and author keys) decodes only if its `x` is on P-256: a candidate square root from `Math.modExp` must pass `P256.isValidPublicKey` (both OpenZeppelin, vendored, below), so a definition can't list a key that names no point (T-31, T-17).
 - Its unit tests use a stand-in trustee registry (`test/utils/DefinitionHarness.sol`); `test/TrusteeRegistry.t.sol` runs it against the real one. `test/ElectionDefinition.t.sol` runs every vector of `election-definition.json` and its version-3 to version-6 files through the decoder, rules and hashes.
 
@@ -58,7 +58,7 @@ Abolish's contracts (the L2 contracts and the L1 board anchor), built with Found
 
 - `BallotCheckLib.check(record, registry, qualified)` checks a direct-submitted ballot record (`0x0002`, versions 1 to 3) against the parameters the election registry recorded for the definition it names (`IElectionParameters`, which `ElectionRegistry` implements), never against anything the submitter supplies (T-25, T-71): the header, `ballot-stray`, the pinned version, strict framing of every field (counts before what they count, enums, `field<bn254>` values, scalars below `ℓ`, and each ristretto255 element's encoding canonical, even and non-zero), then `ballot-tier` (`ballot-cell`), `validity-shape`, `share-hash-unqualified` and the membership proof over `M`, which it recomputes from the record, reverting on the first failure (T-17, T-31, T-52).
 - It runs no ristretto255 arithmetic (ADR 0028, 3B): the validity proofs and whether an element decodes to a point are the verifier's, which sets such a record aside as a rejected entry.
-- `qualified` (the registered key set's seats) is an input until the trustee registry records the set (P1-18 part 4b-3c); nothing deployable uses the library yet (4b-3d). `test/BallotCheck.t.sol` runs `ballot.json`, `ballot-v2.json`, `ballot-v3.json` and `ballot-validity.json` through it, and once against a real election registry.
+- `qualified` (the registered key set's seats) is an input, which the board reads from the trustee registry. `test/BallotCheck.t.sol` runs `ballot.json`, `ballot-v2.json`, `ballot-v3.json` and `ballot-validity.json` through it, and once against a real election registry.
 
 ## Board anchor
 
@@ -72,9 +72,18 @@ Abolish's contracts (the L2 contracts and the L1 board anchor), built with Found
 - `src/CanonicalCalldata.sol` is the calldata check it shares with the election registry.
 - The hourly job and the Sepolia deployment are P4-1 part 2.
 
+## Board
+
+`src/Board.sol` implements [`docs/spec/contracts.md`](../../docs/spec/contracts.md), Board, Deployment, Calls and Events, and `src/DeliveryCheck.sol` its Delivery records: the direct-submit path for ballots and every share receipt, posting and complaint ([`docs/spec/delivery.md`](../../docs/spec/delivery.md), Direct submit; T-25, T-54).
+
+- It pins the election and trustee registries at construction and reads each election's parameters, ceremony (`ceremony(definition_hash)`) and registered key set (`keySetOf`, `signingKeyOf`) from them alone (ADR 0028, 1C and 2B).
+- `submitBallot(bytes)` runs the ballot check with the key set's seats as `qualified`; `submitReceipts(bytes)` takes one or more 164-byte share receipts in one call, each signed by its seat's registered per-election key (P-256 through OpenZeppelin's `P256`); `submitComplaint(bytes)` the same for a complaint; `submitPosting(bytes posting, bytes ballot)` frames the ballot record it binds, recomputes its ballot hash and compares the ciphertext's hash with the ballot's share hash for the seat. Elements and scalars are framed as the ballot check frames them (ADR 0028, 3B).
+- Each accepted record is emitted whole (`BallotSubmitted`, `ShareReceiptSubmitted`, `SharePosted`, `ShareComplaintSubmitted`, topics `definitionHash` and `ballotHash`) through the event accumulator; a byte-identical repeat succeeds and emits nothing, and any other passing record is accepted, so none occupies a slot. Calldata must be canonical (T-17).
+- Its events have no contract-event record version yet (P1-18 part 4b-3d-2), and it takes ballots at any time until the close rule (part 4c), so it isn't deployable. `test/Board.t.sol` runs the ballot and delivery vectors through it against stubs set from the files, and once against a real election registry.
+
 ## Bindings
 
-`src/generated/abi.ts` holds the typed ABIs (`as const`) of the four deployable contracts, `BoardAnchor`, `ElectionRegistry`, `GroupRegistry` and `TrusteeRegistry`, made by the wagmi CLI's Foundry plugin from the build's `out/` (`wagmi.config.ts`). It is generated and never hand-edited:
+`src/generated/abi.ts` holds the typed ABIs (`as const`) of the five deployable contracts, `Board`, `BoardAnchor`, `ElectionRegistry`, `GroupRegistry` and `TrusteeRegistry`, made by the wagmi CLI's Foundry plugin from the build's `out/` (`wagmi.config.ts`). It is generated and never hand-edited:
 
 - the package build compiles, then runs `wagmi generate` and formats the file with `vp fmt`, so `repro-build` fails if a commit's bindings don't match its contracts (it rejects a build that changes a tracked file);
 - `test/bindings.test.ts` checks that the file binds exactly the concrete contracts in `src/`, each with the ABI in its compiled artifact.

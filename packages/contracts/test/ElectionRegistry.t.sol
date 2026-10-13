@@ -855,6 +855,11 @@ contract ElectionRegistryTest is TestBase {
         assertEq(p.optionCount, total, "option count");
         assertEq(p.cellCount, cellTiers.length, "cell count");
         assertEq(p.questions.length, qs.length, "questions");
+        // The ceremony the trustee registry recorded for it, so the board
+        // finds the election's key set (ADR 0028, 2B).
+        (bytes32 stub, bytes32 panel) = registry.ceremony(h);
+        assertEq(stub, lib.stubHash(DefinitionEncoder.encode(d)), "stub hash");
+        assertEq(panel, d.panelId, "panel");
         for (uint256 i; i < qs.length; i++) {
             assertEq(p.questions[i].method, qs[i].method, "method");
             assertEq(p.questions[i].optionCount, qs[i].optionCount, "question options");
@@ -885,6 +890,9 @@ contract ElectionRegistryTest is TestBase {
         assertEq(p.cellCount, 0, "cell count");
         assertEq(p.questions.length, 0, "questions");
         assertEq(registry.cellTiers(h).length, 0, "cell tiers");
+        (bytes32 stub, bytes32 panel) = registry.ceremony(h);
+        assertEq(stub, bytes32(0), "stub hash");
+        assertEq(panel, bytes32(0), "panel");
         (bool ok,) = address(registry).staticcall(abi.encodeCall(ElectionRegistry.cell, (h, 0)));
         assertTrue(!ok, "a cell");
     }

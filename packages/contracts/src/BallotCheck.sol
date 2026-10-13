@@ -117,6 +117,43 @@ library BallotCheckLib {
         view
         returns (Admitted memory a)
     {
+        (ElectionRegistry.Parameters memory p, Layout memory l) = frame(record, registry, a);
+        uint256 named = _uint(record, TIER_AT, 1);
+
+        uint256 root;
+        (a.cell, a.tier, root) =
+            _cell(registry, a.definitionHash, a.version, uint8(named), p.cellCount);
+        if (!shapeOk(record, l, p, a.version)) revert BallotRefused(Code.ValidityShape);
+        // A seat outside the registered key set gets no shares, so its hash
+        // is fixed and carries no chosen bytes into the archive (T-17).
+        for (uint256 seat = 1; seat <= p.panelSize; seat++) {
+            if (
+                (qualified >> seat) & 1 == 0
+                    && _uint(record, l.shareHashesAt + 32 * (seat - 1), 32) != 0
+            ) revert BallotRefused(Code.ShareHashUnqualified);
+        }
+
+        a.ballotHash = ballotHash(record);
+        a.message = sha256(
+            abi.encodePacked(
+                DS_MESSAGE, a.definitionHash, a.tier, a.ballotHash, record[L1_NUMBER_AT:PROOF_AT]
+            )
+        );
+        _membership(record, a, root);
+    }
+
+    /// Steps 1 to 5 of the check: the header, the election `record` names,
+    /// the version it pins, the fixed fields and the committed vote, framed
+    /// strictly. Fills `a`'s definition hash, version and nullifier and
+    /// returns the election's parameters and the vote's layout; reverts with
+    /// `BallotMalformed`, or `BallotRefused(BallotStray)`, on the first
+    /// failure. The board's posting path frames the ballot it binds with
+    /// this alone (docs/spec/delivery.md, Direct submit).
+    function frame(bytes calldata record, IElectionParameters registry, Admitted memory a)
+        internal
+        view
+        returns (ElectionRegistry.Parameters memory p, Layout memory l)
+    {
         uint256 v = _uint(record, 0, 2);
         if (v != RECORD_TYPE) {
             _malformed(
@@ -131,7 +168,7 @@ library BallotCheckLib {
         // The election comes first: the version a record must have is the
         // one its election pins, so a record naming no registered election
         // is refused before its version means anything.
-        ElectionRegistry.Parameters memory p = registry.parameters(a.definitionHash);
+        p = registry.parameters(a.definitionHash);
         if (p.ballotVersion == 0) revert BallotRefused(Code.BallotStray);
         // notation.md: the pin is checked before asking whether the version
         // is known, so an unpinned version is `profile-mismatch`.
@@ -161,28 +198,7 @@ library BallotCheckLib {
         if (record.length < VOTE_AT) {
             _malformed(ElectionDefinitionLib.DecodeError.Truncated, PROOF_AT);
         }
-        Layout memory l = frameVote(record, VOTE_AT, version, p.threshold);
-
-        uint256 root;
-        (a.cell, a.tier, root) =
-            _cell(registry, a.definitionHash, version, uint8(named), p.cellCount);
-        if (!shapeOk(record, l, p, version)) revert BallotRefused(Code.ValidityShape);
-        // A seat outside the registered key set gets no shares, so its hash
-        // is fixed and carries no chosen bytes into the archive (T-17).
-        for (uint256 seat = 1; seat <= p.panelSize; seat++) {
-            if (
-                (qualified >> seat) & 1 == 0
-                    && _uint(record, l.shareHashesAt + 32 * (seat - 1), 32) != 0
-            ) revert BallotRefused(Code.ShareHashUnqualified);
-        }
-
-        a.ballotHash = ballotHash(record);
-        a.message = sha256(
-            abi.encodePacked(
-                DS_MESSAGE, a.definitionHash, a.tier, a.ballotHash, record[L1_NUMBER_AT:PROOF_AT]
-            )
-        );
-        _membership(record, a, root);
+        l = frameVote(record, VOTE_AT, version, p.threshold);
     }
 
     /// `ballot_hash = H(DS("abolish/v1/ballot", definition_hash ‖ u16(0x0002)
@@ -346,7 +362,7 @@ library BallotCheckLib {
     /// needs a square root in that field, which is left to the verifier
     /// (ADR 0028, 3B).
     function _element(bytes calldata r, uint256 o) private pure returns (uint256) {
-        uint256 s = _reverse(_uint(r, o, 32));
+        uint256 s = reversed(_uint(r, o, 32));
         if (s == 0 || s >= P25519 || s & 1 == 1) {
             _malformed(ElectionDefinitionLib.DecodeError.NonCanonical, o);
         }
@@ -356,7 +372,7 @@ library BallotCheckLib {
     /// `count` scalars at `o`, each 32 bytes little-endian below `ℓ`.
     function _scalars(bytes calldata r, uint256 o, uint256 count) private pure returns (uint256) {
         for (uint256 i; i < count; i++) {
-            if (_reverse(_uint(r, o, 32)) >= L) {
+            if (reversed(_uint(r, o, 32)) >= L) {
                 _malformed(ElectionDefinitionLib.DecodeError.NonCanonical, o);
             }
             o += 32;
@@ -386,7 +402,7 @@ library BallotCheckLib {
 
     /// A 32-byte word with its bytes in reverse order: a little-endian
     /// encoding's value.
-    function _reverse(uint256 v) private pure returns (uint256) {
+    function reversed(uint256 v) internal pure returns (uint256) {
         v = ((v >> 8) & 0x00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff)
             | ((v & 0x00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff) << 8);
         v = ((v >> 16) & 0x0000ffff0000ffff0000ffff0000ffff0000ffff0000ffff0000ffff0000ffff)

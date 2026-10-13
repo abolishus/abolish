@@ -143,7 +143,7 @@ interface RollingFile {
     readonly groups: readonly string[];
     readonly events: readonly RollingEvent[];
     readonly rootL2Block: string;
-    readonly rootL2Timestamp: string;
+    readonly registeredAt: string;
     readonly closesAt: string;
     readonly opening: RollingTree;
     readonly steps: readonly (RollingTree & {
@@ -222,8 +222,9 @@ describe("rolling tier trees (docs/spec/membership.md, Rolling tier tree, Root c
       const leaves = rollingLeaves(t.events, t.groups, (e) => BigInt(e.timestamp) <= boundary);
       check(leaves, s);
       const accepted =
-        boundary > BigInt(t.rootL2Timestamp) &&
+        boundary > BigInt(t.registeredAt) &&
         boundary <= BigInt(t.closesAt) &&
+        leaves.length <= 2 ** 32 &&
         tierTreeRoot(leaves) !== z32;
       expect(accepted).toBe(s.accepted);
     }

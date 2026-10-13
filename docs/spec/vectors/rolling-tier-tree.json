@@ -9,7 +9,7 @@
   "trees": [
     {
       "id": "chain-order",
-      "note": "two listed groups interleaved in log order, an unlisted group skipped, and additions at, one second before and one second after boundaries; the opening block's timestamp is a boundary, which is never accepted",
+      "note": "two listed groups interleaved in log order, an unlisted group skipped, and additions at, one second before and one second after boundaries; the definition is registered at a boundary, which is never accepted",
       "groups": ["1", "2"],
       "events": [
         {
@@ -68,7 +68,7 @@
         }
       ],
       "rootL2Block": "100",
-      "rootL2Timestamp": "1779839100",
+      "registeredAt": "1779839700",
       "closesAt": "1779840900",
       "opening": {
         "leaves": ["1000000000001", "1000000000002"],
@@ -90,7 +90,7 @@
           "leaves": ["1000000000001", "1000000000002", "1000000000003"],
           "root": "15138283731212466804542435271669983741996501805202262252667951195603543174154",
           "memberCount": "3",
-          "accepted": true
+          "accepted": false
         },
         {
           "step": "2966400",
@@ -193,7 +193,7 @@
         }
       ],
       "rootL2Block": "200",
-      "rootL2Timestamp": "1779839600",
+      "registeredAt": "1779839660",
       "closesAt": "1779840900",
       "opening": {
         "leaves": ["1000000000010", "1000000000011"],
@@ -280,7 +280,7 @@
         }
       ],
       "rootL2Block": "310",
-      "rootL2Timestamp": "1779840050",
+      "registeredAt": "1779840060",
       "closesAt": "1779840900",
       "opening": {
         "leaves": [],

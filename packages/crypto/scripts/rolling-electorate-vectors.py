@@ -411,7 +411,7 @@ def tree_cases():
         {"block": 451, "timestamp": t + 600, "group": a, "add": [mem(8)]},
         {"block": 452, "timestamp": t + 601, "group": b, "add": [mem(9)]},
     ]
-    cases.append(("chain-order", "two listed groups interleaved in log order, an unlisted group skipped, and additions at, one second before and one second after boundaries; the opening block's timestamp is a boundary, which is never accepted", [a, b], (100, t - 1200), ev, [N0 - 2, N0 - 1, N0, N0 + 1, N0 + 2]))
+    cases.append(("chain-order", "two listed groups interleaved in log order, an unlisted group skipped, and additions at, one second before and one second after boundaries; the definition is registered at a boundary, which is never accepted", [a, b], (100, t - 600), ev, [N0 - 2, N0 - 1, N0, N0 + 1, N0 + 2]))
     # 2. Repeats, removal and re-addition: one leaf per occurrence, one member.
     ev = [
         {"block": 200, "timestamp": t - 700, "group": a, "add": [mem(10), mem(11)]},
@@ -422,7 +422,7 @@ def tree_cases():
         {"block": 410, "timestamp": t + 400, "group": a, "remove": [2]},
         {"block": 700, "timestamp": t + 900, "group": b, "add": [mem(10), mem(11)]},
     ]
-    cases.append(("repeats-and-re-additions", "a commitment in both groups and twice in one, removals by member index that zero one occurrence only, and re-additions: the member count counts distinct live commitments", [a, b], (200, t - 700), ev, [N0 - 1, N0, N0 + 1, N0 + 2]))
+    cases.append(("repeats-and-re-additions", "a commitment in both groups and twice in one, removals by member index that zero one occurrence only, and re-additions: the member count counts distinct live commitments", [a, b], (200, t - 640), ev, [N0 - 1, N0, N0 + 1, N0 + 2]))
     # 3. Opening empty; the first step with a member; every member removed.
     ev = [
         {"block": 300, "timestamp": t - 300, "group": x, "add": [mem(30)]},
@@ -430,16 +430,16 @@ def tree_cases():
         {"block": 600, "timestamp": t + 500, "group": a, "remove": [0]},
         {"block": 900, "timestamp": t + 1100, "group": a, "add": [mem(32)]},
     ]
-    cases.append(("empty-opening", "a tier that opens with no live member (Z_32, count 0), gains one, loses it to a removal, and gains another: steps with no live leaf are never accepted", [a], (310, t - 250), ev, [N0 - 1, N0, N0 + 1, N0 + 2]))
+    cases.append(("empty-opening", "a tier that opens with no live member (Z_32, count 0), gains one, loses it to a removal, and gains another: steps with no live leaf are never accepted", [a], (310, t - 240), ev, [N0 - 1, N0, N0 + 1, N0 + 2]))
     return cases
 
 
 def build_trees(c, m):
     z = tt.zeros(c, m)
     out = []
-    for cid, note, groups, (root_block, root_ts), events, steps in tree_cases():
-        # The opening block's timestamp sits between its neighbours' events.
-        assert all((e["block"] <= root_block) == (e["timestamp"] <= root_ts) for e in events)
+    for cid, note, groups, (root_block, registered_at), events, steps in tree_cases():
+        # The definition's registration, after the opening block's events.
+        assert all(e["timestamp"] < registered_at for e in events if e["block"] <= root_block)
         closes_at = tau(steps[-2])  # the last step but one closes the poll
         opening = rolling_leaves(events, groups, lambda e: e["block"] <= root_block)
         entry = {
@@ -456,7 +456,7 @@ def build_trees(c, m):
                 for e in events
             ],
             "rootL2Block": str(root_block),
-            "rootL2Timestamp": str(root_ts),
+            "registeredAt": str(registered_at),
             "closesAt": str(closes_at),
             "opening": {"leaves": [str(v) for v in opening], "root": str(tree_root(c, m, z, opening)), "memberCount": str(member_count(opening))},
             "steps": [],
@@ -465,7 +465,7 @@ def build_trees(c, m):
             leaves = rolling_leaves(events, groups, lambda e, n=n: e["timestamp"] <= tau(n))
             root = tree_root(c, m, z, leaves)
             live = member_count(leaves)
-            accepted = tau(n) > root_ts and tau(n) <= closes_at and len(leaves) <= 2**32 and live > 0
+            accepted = tau(n) > registered_at and tau(n) <= closes_at and len(leaves) <= 2**32 and live > 0
             assert (root == z[32]) == (live == 0)
             entry["steps"].append(
                 {"step": str(n), "tau": str(tau(n)), "leaves": [str(v) for v in leaves], "root": str(root), "memberCount": str(live), "accepted": accepted}

@@ -86,11 +86,31 @@ describe("file store", () => {
       synced.push(path);
       return Promise.resolve();
     });
+    expect(synced).toEqual([dir]);
+    synced.length = 0;
     await store.putOnce("approvals/ab", new Uint8Array([1]));
     expect(synced).toEqual([join(dir, "approvals"), dir]);
     synced.length = 0;
     await store.putOnce("runs/s/r/begun", new Uint8Array([1]));
     expect(synced).toEqual([join(dir, "runs/s/r"), join(dir, "runs/s"), join(dir, "runs"), dir]);
+    // A record another call linked is synced again before it is returned,
+    // since that call may not have synced it yet.
+    synced.length = 0;
+    expect((await store.putOnce("approvals/ab", new Uint8Array([2]))).created).toBe(false);
+    expect(synced).toEqual([join(dir, "approvals"), dir]);
+  });
+
+  test("opening syncs every directory, deepest first, so a record a crash left unsynced is durable", async () => {
+    const dir = join(root, "reopened");
+    const first = await FileStore.open(dir);
+    await first.putOnce("runs/s/begun", new Uint8Array([1]));
+    const synced: string[] = [];
+    await FileStore.open(dir, (path) => {
+      synced.push(path);
+      return Promise.resolve();
+    });
+    expect(new Set(synced)).toEqual(new Set([dir, join(dir, "runs"), join(dir, "runs/s")]));
+    expect(synced.at(-1)).toBe(dir);
   });
 
   test("refuses a root others can reach", async () => {

@@ -154,7 +154,7 @@ export class CeremonySeat {
     const checked = await checkStub(stubBytes, config, config.electorate);
     if (!checked.ok) return refuse(checked.code);
     const stubHash = hex(checked.stubHash);
-    if ((await config.store.get(`approvals/${stubHash}`)) !== undefined)
+    if ((await this.#durable(`approvals/${stubHash}`)) !== undefined)
       return refuse("stub-approved");
     const prefix = `runs/${stubHash}/${hex(runId)}`;
     const begun = await config.store.putOnce(
@@ -164,7 +164,7 @@ export class CeremonySeat {
     if (!begun.created) {
       // A retry after a lost response gets the message it already sent; a
       // run without one (it crashed before recording it) stays abandoned.
-      const sent = await config.store.get(`${prefix}/round-1`);
+      const sent = await this.#durable(`${prefix}/round-1`);
       const own =
         sent === undefined
           ? undefined
@@ -304,7 +304,7 @@ export class CeremonySeat {
     )
       return refuse("participation");
     const approvalKey = `approvals/${hex(checked.stubHash)}`;
-    const earlier = await config.store.get(approvalKey);
+    const earlier = await this.#durable(approvalKey);
     if (earlier !== undefined && !equal(decode(APPROVED, earlier).transcript_hash, result.hash))
       return refuse("approved-other");
     const registration: CeremonyRegistration = {
@@ -332,19 +332,29 @@ export class CeremonySeat {
     return { ok: true, value: { registration, signature: approved.signature } };
   }
 
+  /**
+   * A record, made durable before the node acts on it: another request may
+   * have linked it and not yet synced it, or crashed in between (the
+   * store's `putOnce` syncs a record it already holds).
+   */
+  async #durable(key: string): Promise<Uint8Array | undefined> {
+    const store = this.#config.store;
+    const value = await store.get(key);
+    return value === undefined ? undefined : (await store.putOnce(key, value)).value;
+  }
+
   #params(electionId: Uint8Array, stubHash: Uint8Array, runId: Uint8Array): CeremonyParams {
     const { l2ChainId, trusteeRegistry, panel } = this.#config;
     return { l2ChainId, trusteeRegistry, electionId, stubHash, panel, runId };
   }
 
   async #run(stubHash: Uint8Array, runId: Uint8Array): Promise<Run | undefined> {
-    const store = this.#config.store;
     if (!(stubHash instanceof Uint8Array) || stubHash.length !== 32) return undefined;
     if (!(runId instanceof Uint8Array) || runId.length !== 32) return undefined;
     const prefix = `runs/${hex(stubHash)}/${hex(runId)}`;
-    const begun = await store.get(`${prefix}/begun`);
-    const secrets = await store.get(`${prefix}/secrets`);
-    const round1 = await store.get(`${prefix}/round-1`);
+    const begun = await this.#durable(`${prefix}/begun`);
+    const secrets = await this.#durable(`${prefix}/secrets`);
+    const round1 = await this.#durable(`${prefix}/round-1`);
     // A crash between the run's records leaves it unusable: it is abandoned,
     // and the creator starts another with a fresh run_id.
     if (begun === undefined || secrets === undefined || round1 === undefined) return undefined;
@@ -366,7 +376,7 @@ export class CeremonySeat {
     run: Run,
     round: Round,
   ): Promise<{ transcript: CeremonyTranscript; mus: readonly Uint8Array[] } | undefined> {
-    const bytes = await this.#config.store.get(`${run.prefix}/round-${round}`);
+    const bytes = await this.#durable(`${run.prefix}/round-${round}`);
     if (bytes === undefined) return undefined;
     const sent = decode(SENT, bytes);
     return { transcript: decodeCeremonyTranscript(sent.rounds, 1), mus: sent.mus };

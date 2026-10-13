@@ -122,6 +122,10 @@ export async function checkStub(
   if ((ballot !== 1 && ballot !== 2) || !equal(stub.membership_vk_hash, membershipVkHash()))
     return { ok: false, code: "stub-membership-key" };
   // 3, [[verifier]] 2.4: the electorate, against the chain.
-  if (!(await electorate(stub))) return { ok: false, code: "stub-electorate" };
-  return { ok: true, stub, stubHash: electionStubHash(stub) };
+  // The hash is of the stub as checked above; the deployment's check gets
+  // its own decoded copy, so nothing it does can change what is hashed.
+  const stubHash = electionStubHash(stub);
+  if (!(await electorate(decodeElectionDefinitionRecord(bytes).value as ElectionDefinition)))
+    return { ok: false, code: "stub-electorate" };
+  return { ok: true, stub, stubHash };
 }

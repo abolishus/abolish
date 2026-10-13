@@ -6,14 +6,14 @@ import {
   RECORD_TYPES,
 } from "@abolishus/crypto";
 import { describe, expect, test } from "vite-plus/test";
-import { CeremonySeat, checkStub, type Pins } from "../src/index.ts";
+import { CeremonySeat, checkStub, type ElectorateCheck, type Pins } from "../src/index.ts";
 import { MemoryStore } from "../src/store.ts";
 import { L2_CHAIN_ID, panelOf, stubFor, TRUSTEE_REGISTRY } from "./fixture.ts";
 
 const { panel, secrets } = panelOf(4, 2);
 const pinned: Pins = { panel, l2ChainId: L2_CHAIN_ID, trusteeRegistry: TRUSTEE_REGISTRY };
 const pass = () => Promise.resolve(true);
-const check = (stub: ElectionDefinition, electorate = pass) =>
+const check = (stub: ElectionDefinition, electorate: ElectorateCheck = pass) =>
   checkStub(encodeElectionDefinition(stub), pinned, electorate);
 
 describe("stub checks", () => {
@@ -129,6 +129,15 @@ describe("stub checks", () => {
     expect(asked).toBe(1);
     await check(stubFor(panel, { l2_chain_id: 1n }), electorate);
     expect(asked).toBe(1);
+  });
+
+  test("the electorate check can't change the stub that is hashed and returned", async () => {
+    const stub = stubFor(panel);
+    const result = await check(stub, (seen) => {
+      (seen as { election_id: Uint8Array }).election_id = new Uint8Array(32).fill(9);
+      return Promise.resolve(true);
+    });
+    expect(result).toEqual({ ok: true, stub, stubHash: electionStubHash(stub) });
   });
 
   test("a seat refuses to join a run over a stub that fails, recording nothing", async () => {

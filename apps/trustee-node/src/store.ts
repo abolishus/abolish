@@ -101,10 +101,22 @@ export class FileStore implements SeatStore {
     const { mode } = await stat(root);
     if ((mode & 0o077) !== 0)
       throw new Error(`store: ${root} must be reachable by its owner only (mode 0700)`);
+    // Every directory is synced too, so a record a crash left linked but
+    // unsynced is durable before the node reads and acts on it.
+    const directories = [root];
     for (const entry of await readdir(root, { recursive: true, withFileTypes: true }))
       if (entry.isFile() && entry.name.startsWith(".tmp-"))
         await unlink(join(entry.parentPath, entry.name));
+      else if (entry.isDirectory()) directories.push(join(entry.parentPath, entry.name));
+    for (const directory of directories.reverse()) await sync(directory);
     return new FileStore(root, sync);
+  }
+
+  // A name is durable only once its directory is synced, and a directory
+  // created for it only once its parent is: every level, up to the root.
+  async #syncUp(parts: readonly string[]): Promise<void> {
+    for (let at = parts.length - 1; at >= 0; at--)
+      await this.#sync(join(this.#root, ...parts.slice(0, at)));
   }
 
   async get(key: string): Promise<Uint8Array | undefined> {
@@ -122,7 +134,12 @@ export class FileStore implements SeatStore {
     const dir = join(this.#root, ...parts.slice(0, -1));
     await mkdir(dir, { recursive: true, mode: 0o700 });
     const held = await this.get(key);
-    if (held !== undefined) return { created: false, value: held };
+    if (held !== undefined) {
+      // Another call linked it but may not have synced it yet (or crashed
+      // before it could): nothing acts on a record before it is durable.
+      await this.#syncUp(parts);
+      return { created: false, value: held };
+    }
     const random = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) =>
       b.toString(16).padStart(2, "0"),
     ).join("");
@@ -147,10 +164,7 @@ export class FileStore implements SeatStore {
     } finally {
       await unlink(temporary);
     }
-    // A name is durable only once its directory is synced, and a directory
-    // created above only once its parent is: every level, up to the root.
-    for (let at = parts.length - 1; at >= 0; at--)
-      await this.#sync(join(this.#root, ...parts.slice(0, at)));
+    await this.#syncUp(parts);
     const now = await this.get(key);
     if (now === undefined) throw new Error(`store: ${key} vanished after it was written`);
     return { created, value: now };

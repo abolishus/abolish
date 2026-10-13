@@ -14,9 +14,11 @@ import { PARAMETERS, TIERS } from "@abolishus/crypto";
 export const MAX_SIMULATED_VOTERS = 100_000;
 
 /**
- * The most `voters × options × panel` a scenario may ask for. A run keeps
- * every ballot's VSS commitments until the tally, `options × threshold`
- * points each, so this bounds its memory at a few hundred megabytes.
+ * The most `ballots × options × panel` a scenario may ask for, where a
+ * scenario with re-votes counts two ballots per voter. A run keeps every
+ * ballot's VSS commitments, `options × threshold` points, and each online
+ * seat's `options` shares of it until the re-vote rule has selected the
+ * counted ballots, so this bounds its memory under a gigabyte.
  */
 export const MAX_SIMULATED_WORK = 2_000_000;
 
@@ -55,6 +57,12 @@ export interface Scenario {
    * field) for none.
    */
   readonly challenges: number;
+  /**
+   * The share of voters, in `[0, 1]`, who cast a ballot earlier in the
+   * voting period and then re-vote (docs/spec/revoting.md): only the later
+   * ballot counts. 0 (or no field) for none.
+   */
+  readonly revotes: number;
   /** Seeds the plan only (who votes how and when), never a secret. */
   readonly seed: number;
 }
@@ -117,7 +125,7 @@ function parse(input: unknown): Scenario {
     input,
     "$",
     ["voters", "election", "options", "trustees", "tiers", "seed"],
-    ["outage", "challenges"],
+    ["outage", "challenges", "revotes"],
   );
   const voters = integer(o["voters"], "$.voters", 1, MAX_SIMULATED_VOTERS);
   const election = o["election"];
@@ -142,9 +150,6 @@ function parse(input: unknown): Scenario {
   if (tiers["0"] + tiers["1"] + tiers["2"] === 0)
     throw new Refusal("$.tiers", "at least one tier has a positive weight");
 
-  if (voters * options * panel > MAX_SIMULATED_WORK)
-    throw new Refusal("$", `voters × options × panel is at most ${MAX_SIMULATED_WORK}`);
-
   let outage: Scenario["outage"] = null;
   if (Object.hasOwn(o, "outage") && o["outage"] !== null) {
     const r = object(o["outage"], "$.outage", ["from", "to"]);
@@ -154,6 +159,14 @@ function parse(input: unknown): Scenario {
     outage = { from, to };
   }
   const challenges = Object.hasOwn(o, "challenges") ? fraction(o["challenges"], "$.challenges") : 0;
+  const revotes = Object.hasOwn(o, "revotes") ? fraction(o["revotes"], "$.revotes") : 0;
+  // How many voters re-vote is drawn by the plan, so the bound takes the most
+  // a positive share can give: every voter casting twice.
+  if ((revotes > 0 ? 2 : 1) * voters * options * panel > MAX_SIMULATED_WORK)
+    throw new Refusal(
+      "$",
+      `voters × options × panel (doubled with re-votes) is at most ${MAX_SIMULATED_WORK}`,
+    );
   const seed = integer(o["seed"], "$.seed", 0, 0xffff_ffff);
   return {
     voters,
@@ -163,6 +176,7 @@ function parse(input: unknown): Scenario {
     tiers,
     outage,
     challenges,
+    revotes,
     seed,
   };
 }

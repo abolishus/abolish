@@ -47,23 +47,26 @@ describe("simulation", { timeout: 60_000 }, () => {
     expect(progress.filter((s) => s === "tally")).toHaveLength(2);
   });
 
-  test("plan reads a scenario file and prints the expected counts and challenges, matching run's", async () => {
+  test("plan reads a scenario file and prints the expected counts, ballots, challenges and re-votes, matching run's", async () => {
     const file = join(mkdtempSync(join(tmpdir(), "sim-")), "scenario.json");
-    writeFileSync(file, JSON.stringify(scenario));
+    writeFileSync(file, JSON.stringify({ ...scenario, revotes: 0.5 }));
     const plan = await cli("simulation", "plan", "--file", file);
     expect(plan.code).toBe(0);
+    type Ballots = { cast: number; direct: number; superseded: number; challenged: number };
     const out = plan.out[0] as {
-      ballots: { challenged: number };
+      ballots: Ballots;
       expected: { tier: number; counts: number[] }[];
     };
     const ran = await cli("simulation", "run", "--file", file);
     const report = ran.out[0] as {
-      ballots: { challenged: number };
+      ballots: Ballots & { server: number };
       cells: { tier: number; counts: number[] }[];
     };
     expect(out.expected).toEqual(report.cells.map((c) => ({ tier: c.tier, counts: c.counts })));
     expect(out.ballots.challenged).toBeGreaterThan(0);
-    expect(report.ballots.challenged).toBe(out.ballots.challenged);
+    expect(out.ballots.superseded).toBeGreaterThan(0);
+    const { server: _, ...ballots } = report.ballots;
+    expect(ballots).toEqual(out.ballots);
   });
 
   test("refuses a malformed scenario as a usage error naming the field", async () => {

@@ -48,11 +48,14 @@ export function simulationCommandsWith(
       async run(_, values, io) {
         const scenario = scenarioOf(values);
         const plan = planElection(scenario);
+        // Every ballot cast: each voter's last, and a re-voter's earlier one.
+        const casts = plan.voters.flatMap((v) => (v.earlier === null ? [v] : [v.earlier, v]));
         io.out({
           scenario,
           ballots: {
-            cast: plan.voters.length,
-            direct: plan.voters.filter((v) => v.path === "direct").length,
+            cast: casts.length,
+            direct: casts.filter((b) => b.path === "direct").length,
+            superseded: casts.length - plan.voters.length,
             challenged: plan.voters.filter((v) => v.challenged).length,
           },
           expected: plan.tiers.map((tier) => ({ tier, counts: plan.expected.get(tier) })),

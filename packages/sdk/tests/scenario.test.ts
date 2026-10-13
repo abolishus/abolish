@@ -22,7 +22,8 @@ const seatsOf = (panel: number) =>
 
 const scenario: fc.Arbitrary<Scenario> = fc.integer({ min: 2, max: 16 }).chain((panel) =>
   fc.record({
-    voters: fc.integer({ min: 1, max: Math.floor(MAX_SIMULATED_WORK / (64 * panel)) }),
+    // Halved, so a positive re-vote share's doubled bound holds too.
+    voters: fc.integer({ min: 1, max: Math.floor(MAX_SIMULATED_WORK / (128 * panel)) }),
     election: fc.constantFrom("plurality" as const, "approval" as const),
     options: fc.integer({ min: 2, max: 64 }),
     trustees: fc
@@ -44,6 +45,7 @@ const scenario: fc.Arbitrary<Scenario> = fc.integer({ min: 2, max: 16 }).chain((
       { nil: null },
     ),
     challenges: fc.double({ min: 0, max: 1, noNaN: true }),
+    revotes: fc.double({ min: 0, max: 1, noNaN: true }),
     seed: fc.integer({ min: 0, max: 0xffff_ffff }),
   }),
 );
@@ -56,6 +58,7 @@ const valid: Scenario = {
   tiers: { "0": 50, "1": 30, "2": 20 },
   outage: { from: 0.5, to: 1 },
   challenges: 0.1,
+  revotes: 0.2,
   seed: 1,
 };
 
@@ -75,7 +78,7 @@ describe("parseScenario", () => {
     );
   });
 
-  it("defaults only the optional fields: no outage or challenges, no offline or faulty seats, missing tiers at 0", () => {
+  it("defaults only the optional fields: no outage, challenges or re-votes, no offline or faulty seats, missing tiers at 0", () => {
     const r = parseScenario({
       voters: 1,
       election: "approval",
@@ -94,6 +97,7 @@ describe("parseScenario", () => {
         tiers: { "0": 0, "1": 1, "2": 0 },
         outage: null,
         challenges: 0,
+        revotes: 0,
         seed: 0,
       },
     });
@@ -120,6 +124,9 @@ describe("parseScenario", () => {
     const { challenges: __, ...noChallenges } = valid;
     const inheritedShare = Object.assign(Object.create({ challenges: 1 }), noChallenges);
     expect(parseScenario(inheritedShare)).toMatchObject({ ok: true, scenario: { challenges: 0 } });
+    const { revotes: ___, ...noRevotes } = valid;
+    const inheritedRevotes = Object.assign(Object.create({ revotes: 1 }), noRevotes);
+    expect(parseScenario(inheritedRevotes)).toMatchObject({ ok: true, scenario: { revotes: 0 } });
   });
 
   it("refuses missing required fields", () => {
@@ -153,6 +160,10 @@ describe("parseScenario", () => {
     expect(refusal({ ...valid, challenges: 1.1 })).toBe("$.challenges");
     expect(refusal({ ...valid, challenges: "0.5" })).toBe("$.challenges");
     expect(refusal({ ...valid, challenges: null })).toBe("$.challenges");
+    expect(refusal({ ...valid, revotes: -0.1 })).toBe("$.revotes");
+    expect(refusal({ ...valid, revotes: 1.1 })).toBe("$.revotes");
+    expect(refusal({ ...valid, revotes: "0.5" })).toBe("$.revotes");
+    expect(refusal({ ...valid, revotes: null })).toBe("$.revotes");
     expect(refusal({ ...valid, outage: { from: 0, to: 1.1 } })).toBe("$.outage.to");
     expect(refusal({ ...valid, outage: { from: 0, to: Number.NaN } })).toBe("$.outage.to");
     expect(refusal([])).toBe("$");
@@ -174,15 +185,20 @@ describe("parseScenario", () => {
     expect(t({ faulty: null })).toBe("$.trustees.faulty");
   });
 
-  it("refuses a scenario whose voters × options × panel exceeds the work bound", () => {
+  it("refuses a scenario whose voters × options × panel, doubled with re-votes, exceeds the work bound", () => {
     const at = {
       ...valid,
+      revotes: 0,
       voters: MAX_SIMULATED_WORK / 50,
       options: 5,
       trustees: { panel: 10, threshold: 2 },
     };
     expect(parseScenario(at).ok).toBe(true);
     expect(refusal({ ...at, voters: at.voters + 1 })).toBe("$");
+    // Any positive re-vote share counts two ballots per voter.
+    expect(refusal({ ...at, revotes: Number.MIN_VALUE })).toBe("$");
+    expect(parseScenario({ ...at, voters: at.voters / 2, revotes: 1 }).ok).toBe(true);
+    expect(refusal({ ...at, voters: at.voters / 2 + 1, revotes: 1 })).toBe("$");
     expect(
       refusal({
         ...valid,

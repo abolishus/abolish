@@ -467,7 +467,7 @@ The committed vote:
 Notes:
 
 - **One encoding with no author panel.** Without an author panel `author_vss` and `author_share_hashes` are empty lists (count 0), never `T` empty lists, so a ballot of a poll without one has exactly one encoding, its version-3 bytes with two zero counts inserted before `option_proofs`. The shape check below enforces it.
-- **Sizes.** The author half adds `8 + 32·T·k_A + 32·n_A` bytes: about 0.7 KB at 10 options with an author panel of `k_A = 2`, `n_A = 3`, and about 33 KB at `MAX_OPTIONS` and an author panel of `MAX_TRUSTEES`, so the largest committed vote is about 80 KB, within `MAX_BOARD_PAYLOAD` ([[parameters]]). Without an author panel a ballot is 8 bytes longer than version 3's.
+- **Sizes.** The author half adds `8 + 4·T + 32·T·k_A + 32·n_A` bytes: about 0.7 KB at 10 options with an author panel of `k_A = 2`, `n_A = 3`, and about 33 KB at `MAX_OPTIONS` and an author panel of `MAX_TRUSTEES`, so the largest committed vote is about 80 KB, within `MAX_BOARD_PAYLOAD` ([[parameters]]). Without an author panel a ballot is 8 bytes longer than version 3's.
 
 ### Hashes (version 4)
 
@@ -538,6 +538,7 @@ Version 3's (Casting (version 3)), with both halves:
 - **Both panels' nodes must be live.** A ballot is delivered only when every qualified seat of both panels holds its shares, and opens only with both thresholds at the tally: an author panel that falls below `k_A` live seats leaves the poll uncountable for good (T-54).
 - **Author seats see intake metadata.** Every author seat runs membership-checked intake, so it sees each ballot record with the network address that delivered it, and can link addresses to nullifiers and re-votes, though not to votes (T-11, T-13).
 - **A half alone protects nothing against its panel.** The author half is worthless without the default half, and the reverse, so the protection the composition adds is only ever against a coalition short of one threshold: `k_D` default seats with `k_A` author seats read every ballot, as `k` seats do under versions 1 to 3 (T-14).
+- **The split rests on the client.** The author panel's protection holds only if the client draws `(a_j, s_j)` uniformly. A client that derives them from something the operator knows (a key and the nullifier, say) leaves every author half known to the operator, so under the transitional panel the operator reads the vote alone; nothing in the ballot shows it, and a Benaloh challenge checks the vote a core holds, not how its randomness was drawn. This is the existing trust in the ballot client, a signed reproducible release served by hash and checked by 1.1 (T-41, T-61, T-18), not a new one; an author who adds trustees to protect a poll from us relies on that release check.
 - **Larger ballots.** An author panel adds up to about 33 KB to a ballot, all of it carried, hashed and archived; through the contract path it is calldata the voter pays for (T-50, T-52).
 
 ## Residuals

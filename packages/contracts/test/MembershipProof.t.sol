@@ -202,9 +202,28 @@ contract MembershipProofTest is TestBase {
         bytes memory proof = _bytes(json, ".proofs[0].proof");
         MembershipProofLib.Signals memory s = _signals(json, ".proofs[0].signals");
         vm.expectRevert(abi.encodeWithSelector(MembershipProofLib.InsufficientGas.selector));
-        lib.check{gas: 300_000}(proof, s);
-        (MembershipProofLib.Verdict got,) = lib.check{gas: 400_000}(proof, s);
+        lib.check{gas: 600_000}(proof, s);
+        (MembershipProofLib.Verdict got,) = lib.check{gas: 700_000}(proof, s);
         assertTrue(got == MembershipProofLib.Verdict.Valid, "enough gas");
+    }
+
+    /// The coordinate rules the vectors don't cover on their own: `A.y + p`
+    /// and `C.y + p` are refused at their own offsets by the library, before
+    /// the precompiles see them (which would refuse `C` only as part of the
+    /// pairing, and fail on `A`'s negation), and a `C` off the curve at 192.
+    function test_CoordinateRulesAtEachPoint() public view {
+        string memory json = vm.readFile(PROOFS);
+        MembershipProofLib.Signals memory s = _signals(json, ".proofs[0].signals");
+        uint256[3] memory at = [uint256(32), 224, 224];
+        uint256[3] memory delta = [MembershipProofLib.P, MembershipProofLib.P, 1];
+        uint256[3] memory expected = [uint256(0), 192, 192];
+        for (uint256 k; k < 3; k++) {
+            bytes memory proof = _bytes(json, ".proofs[0].proof");
+            _setWord(proof, at[k], _word(proof, at[k]) + delta[k]);
+            (MembershipProofLib.Verdict got, uint256 offset) = lib.check(proof, s);
+            assertTrue(got == MembershipProofLib.Verdict.NonCanonical, "coordinate rule");
+            assertEq(offset, expected[k], "coordinate rule offset");
+        }
     }
 
     // --- properties -------------------------------------------------------
@@ -269,6 +288,18 @@ contract MembershipProofTest is TestBase {
     {
         (MembershipProofLib.Verdict got,) = lib.check(proof, s);
         return got == MembershipProofLib.Verdict.Valid;
+    }
+
+    function _word(bytes memory b, uint256 at) internal pure returns (uint256 w) {
+        for (uint256 i; i < 32; i++) {
+            w = (w << 8) | uint8(b[at + i]);
+        }
+    }
+
+    function _setWord(bytes memory b, uint256 at, uint256 w) internal pure {
+        for (uint256 i; i < 32; i++) {
+            b[at + 31 - i] = bytes1(uint8(w >> (8 * i)));
+        }
     }
 
     function _reason(string memory reason) internal pure returns (MembershipProofLib.Verdict) {

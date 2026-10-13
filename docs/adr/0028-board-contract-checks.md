@@ -41,7 +41,7 @@ Four inputs to those checks aren't settled, and each is one-way, since the contr
 ### 4. The Groth16 verifier
 
 - **A. Semaphore's `SemaphoreVerifier.sol`, vendored.** Audited with Semaphore, but it takes the tree depth as an argument and holds every depth's key, accepts the identity in every point, and has no decode step to report a broken point, so it needs a wrapper either way. [[0009-membership-proof]] rules out admitting ballots through a verifier that accepts any depth.
-- **B. snarkjs's generated verifier for the pinned key.** One key only, but generated code we would vendor and then wrap for the same decoding rules, and its assembly is a second implementation of what B below does in a few lines.
+- **B. snarkjs's generated verifier for the pinned key.** One key only, but generated code we would vendor and then wrap for the same decoding rules, and its assembly is a second implementation of what C below does in a few lines.
 - **C. Groth16's equation over the EVM's BN254 precompiles.** `ecAdd`, `ecMul` and `ecPairing` (EIP-196, EIP-197) with the pinned key as constants, the equation of [[membership]] (Verification), and the strict decoding of Proof encoding before it. This is the composition the owner confirmed for `packages/crypto` on 2026-10-12 ([[0009-membership-proof]], Decision): the curve arithmetic, the pairing and the G2 subgroup check are the precompiles', and the contract evaluates a published equation over them.
 
 ## Recommendation
@@ -72,7 +72,7 @@ Known-weak:
 
 - **A key set a corrupt quorum signs is recorded.** The board then accepts receipts from keys that aren't the transcript's, until verifier 3.1 fails the election; a quorum of `max(k, n − 1)` corrupt seats can already break the election's secrecy, so this adds failure, not a new attack (T-14).
 - **Elements reach the archive unchecked** by the contract (3B), as random-looking chosen bytes, bounded by each record's length (T-17).
-- **A repriced pairing.** A failed precompile call consumes all the gas it was given, so the pairing gets a fixed 300,000 gas (four pairs cost 181,000 under EIP-1108); a repricing above that would fail every proof, and the board would need replacing ([[contracts]], Board, Known-weak).
+- **A repriced pairing.** A failed precompile call consumes all the gas it was given, so the pairing gets a fixed 600,000 gas, over three times what four pairs cost under EIP-1108 (181,000); a repricing above that would fail every proof, and the board would need replacing ([[contracts]], Board, Known-weak). A larger cap costs a successful call nothing, since the precompile consumes only its price, but every submission needs that much gas limit, which a forced deposit buys on L1.
 
 ## Decision
 

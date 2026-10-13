@@ -24,10 +24,11 @@ library MembershipProofLib {
     /// The protocol-wide tree depth the pinned key is for (membership.md, Tree depth).
     uint8 internal constant DEPTH = 32;
     /// The gas `ecPairing` gets: four pairs cost 45,000 + 4 × 34,000 =
-    /// 181,000 under EIP-1108, with margin for a repricing. A pairing that
-    /// came to cost more would fail every proof, so an increase past this
-    /// needs a new contract (docs/spec/contracts.md, Board, Known-weak).
-    uint256 internal constant PAIRING_GAS = 300_000;
+    /// 181,000 under EIP-1108. A successful call consumes only its price, so
+    /// the margin costs callers only gas limit; a pairing repriced above it
+    /// would fail every proof and need a new contract (docs/spec/contracts.md,
+    /// Board, Known-weak).
+    uint256 internal constant PAIRING_GAS = 600_000;
 
     /// `u8(len(tag)) ‖ tag` for `abolish/v1/nullifier-scope` (0x1a = 26).
     bytes internal constant DS_SCOPE = "\x1aabolish/v1/nullifier-scope";

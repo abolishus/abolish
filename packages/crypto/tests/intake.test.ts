@@ -197,7 +197,9 @@ describe("intakeBallot", () => {
       ),
       { numRuns: Math.min(numRuns, 200) },
     );
-  });
+    // Each run checks a membership proof (a pairing), about 30 ms: 200 runs
+    // take about 6 s, past the 5 s default.
+  }, 60_000);
 
   test("throws for a seat outside the registered key set, and for a hand-built context", () => {
     const election = electionOf("plurality", [1, 2]);

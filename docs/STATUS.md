@@ -60,6 +60,9 @@ Each item's state (`todo`, `in progress`, `blocked`, `needs owner decision`, `do
 - [[P2-10]] Moderation
 - [[P2-11]] `ci: deploy`
 - [[P2-13]] Trustee node
+- [[P2-14]] Multi-question ballots
+- [[P2-15]] Live results
+- [[P2-16]] Author-added trustees and the transitional panel
 - [[P2-12]] Phase 2 exit
 
 ### Phase 3: Tier 2 ZK identity, Semaphore groups, indexer, per-tier results
@@ -96,6 +99,7 @@ One-off items: [[P0-ops]] split shared hot files; [[P0-ops-2]] P0-ops review fol
 - On 2026-10-12 the owner decided the open finding that blocked [[P1-12]] part 3b (#101) a second time: the unbounded trustee-node receipt obligation is accepted as a residual until [[P1-12c]] (membership-checked intake, after P1-17b and the ballot record, with P1-18's batched receipts) closes it, which MUST happen before any election registry is deployed ([[0002-everlasting-privacy]], Decision). #101 resumes.
 - On 2026-10-12 the owner decided the two fallback findings that blocked [[P1-12]] part 3b (#101): no forced posting (receipts through the contract path; posting only by the voter's explicit choice) and contract-path postings only ([[0002-everlasting-privacy]], Decision). #101 resumes on that design.
 
+- On 2026-10-12 the owner changed the brief: two design registers (everyday by default, the civic record for referendums and evidence; [[language]]); multi-question ballots with pick one, pick any, up to N and exactly N per question, never cross-tabulated ([[0026-multi-question-ballots]], [[P2-14]]); live results in minimum batches at the author's choice, always sealed for civic referendums ([[P2-15]]); trustees invisible in everyday polls, authors may add named trustees who only add protection, and a transitional default panel held by us alone at launch (everyday polls only, stated on every page and receipt, shares destroyed after each final count) until independent trustees are named before the first civic poll ([[0027-trustee-panels-and-live-results]], [[P2-16]]).
 - On 2026-10-12 the owner answered [[0016-share-kem-dh-group]] (option A), unblocking [[P1-12]] part 2 (#58) and so P1-14 part 2, P1-12 part 3 and P1-15 parts 2 and 3.
 - On 2026-10-11 the owner unblocked [[P0-2]] (`trustPolicyExclude: [semver@6.3.1]`), [[P1-12]] and [[P1-14]] part 2 (answers recorded in [[0002-everlasting-privacy]], Decision).
 

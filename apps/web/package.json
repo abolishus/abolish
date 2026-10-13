@@ -23,6 +23,7 @@
     "@orpc/openapi-client": "catalog:",
     "@tanstack/react-router": "catalog:",
     "@tanstack/react-start": "catalog:",
+    "lucide-react": "catalog:",
     "postgres": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",

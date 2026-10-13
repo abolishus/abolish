@@ -32,10 +32,13 @@ export {
   lowestSegmentSlot,
   MAX_SEGMENTS_READ,
   NodePool,
+  receiptKeySlot,
+  receiptKeyWords,
   type Rlp,
   RlpError,
   type StateAnchor,
 } from "./l1.ts";
+export { type ReceiptKeyCode, type ReceiptKeyRow, receiptKeyRow } from "./receipt-keys.ts";
 export {
   type CheckAt,
   type CheckCode,

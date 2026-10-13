@@ -1,7 +1,8 @@
 // Runs the checks of docs/spec/verifier.md over one bundle and builds the
 // report (Procedure, Verdicts, Report). Only the board checks (4.1, 4.2), the
 // definition's decoding and well-formedness (part of 2.1) under definition
-// versions 1, 3 and 4, 2.3's profile combination, 8.5's not-applicable case,
+// versions 1, 3 and 4, 2.3's profile combination, 2.9's receipt keys from L1
+// state, 8.5's not-applicable case,
 // 1.3's failure for a definition naming another membership key and, for
 // format 4, the key-ceremony
 // transcript check (3.2, and the parts of 2.5 and 3.1 that need no L2 state)
@@ -47,6 +48,7 @@ import type { Bundle, InputSource, InputSources } from "./bundle.ts";
 import { type CeremonyCode, ceremonyChecks, type CeremonyReport } from "./ceremony.ts";
 import { CHECKS, type CheckKind } from "./checks.ts";
 import { openingChecks, type OpeningCode, type OpeningReport } from "./openings.ts";
+import { type ReceiptKeyCode, receiptKeyRow } from "./receipt-keys.ts";
 import {
   anchorsFromState,
   type L1Evidence,
@@ -64,6 +66,7 @@ export type CheckCode =
   | CeremonyCode
   | BallotCode
   | OpeningCode
+  | ReceiptKeyCode
   | "decode"
   | "membership-key"
   | "profile-combination"
@@ -81,6 +84,7 @@ export type CheckAt =
   | { readonly decodeError: DecodeErrorCode }
   | { readonly checkpoint: number }
   | { readonly segment: number }
+  | { readonly key: number }
   | Record<string, never>;
 
 export interface CheckResult {
@@ -460,12 +464,23 @@ export function verifyBundle(bundle: Bundle): Report {
       // one this verifier reads, so the report still shows what the board holds.
       ...(definition.profile !== undefined ? [["2.3", definition.profile] as const] : []),
       // Definition versions 1 and 3 list no receipt keys, so 2.9 has nothing
-      // to check; version 4's keys need the anchor's record from L1 state
-      // (P1-13b), so 2.9 stays unverifiable for it. Formats 1 and 2 carry no
-      // definition, so 2.9 stays unverifiable there, never a pass.
-      ...(definition.definition !== undefined && definition.definition.version !== 4
-        ? [["2.9", PASS] as const]
-        : []),
+      // to check; version 4's keys are judged by the anchor's record, read
+      // from L1 state whatever the board checks found. Formats 1 and 2 carry
+      // no definition, so 2.9 stays unverifiable there, never a pass.
+      ...(definition.definition === undefined
+        ? []
+        : [
+            [
+              "2.9",
+              definition.definition.version === 4 && "l1" in definition.inputs
+                ? receiptKeyRow(
+                    definition.inputs.l1,
+                    definition.definition.value.receipt_keys,
+                    definition.definition.value.opens_at,
+                  )
+                : PASS,
+            ] as const,
+          ]),
       ...(carriesDestruction(definition.inputs.boardEntryVersion)
         ? []
         : [["8.5", NOT_APPLICABLE] as const]),

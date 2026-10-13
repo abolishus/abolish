@@ -13,6 +13,7 @@ const scenario = {
   tiers: { "0": 1, "2": 1 },
   outage: { from: 0.5, to: 1 },
   challenges: 0.5,
+  postings: 0.5,
   seed: 11,
 };
 
@@ -47,7 +48,7 @@ describe("simulation", { timeout: 60_000 }, () => {
     expect(progress.filter((s) => s === "tally")).toHaveLength(2);
   });
 
-  test("plan reads a scenario file and prints the expected counts, ballots, challenges, re-votes and publications, matching run's", async () => {
+  test("plan reads a scenario file and prints the expected counts, ballots, challenges, re-votes, publications and postings, matching run's", async () => {
     const file = join(mkdtempSync(join(tmpdir(), "sim-")), "scenario.json");
     writeFileSync(file, JSON.stringify({ ...scenario, revotes: 0.5, publications: 1 }));
     const plan = await cli("simulation", "plan", "--file", file);
@@ -58,6 +59,8 @@ describe("simulation", { timeout: 60_000 }, () => {
       superseded: number;
       challenged: number;
       published: number;
+      postings: number;
+      undelivered: number;
     };
     const out = plan.out[0] as {
       ballots: Ballots;
@@ -73,6 +76,9 @@ describe("simulation", { timeout: 60_000 }, () => {
     expect(out.ballots.superseded).toBeGreaterThan(0);
     // Every challenger publishes at share 1.
     expect(out.ballots.published).toBe(out.ballots.challenged);
+    // Some voters post the offline seat and the rest leave their ballots undelivered.
+    expect(out.ballots.postings).toBeGreaterThan(0);
+    expect(out.ballots.undelivered).toBeGreaterThan(0);
     const { server: _, ...ballots } = report.ballots;
     expect(ballots).toEqual(out.ballots);
   });

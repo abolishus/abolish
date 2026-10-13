@@ -23,6 +23,7 @@ const scenario: Scenario = {
   challenges: 0,
   revotes: 0,
   publications: 0,
+  postings: 0,
   seed: 5,
 };
 

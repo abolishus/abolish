@@ -25,6 +25,18 @@ export interface PlannedVoter extends PlannedBallot {
   /** Whether a challenging voter asks after close for that attempt's opening to be published. */
   readonly published: boolean;
   /**
+   * Whether the voter, finding an offline seat's intake unreachable, posts
+   * that seat's share through the contract path: drawn for every voter, and
+   * acted on only when a seat is offline.
+   */
+  readonly posts: boolean;
+  /**
+   * Whether every qualified seat gets a receipt or a posting for the
+   * voter's ballots, so its last one counts (docs/spec/delivery.md, Delivery
+   * check): with no offline seat, or when the voter posts.
+   */
+  readonly delivered: boolean;
+  /**
    * A ballot the voter cast earlier, at a time no later than `at`, which the
    * re-vote rule must not count (docs/spec/revoting.md); `null` if the
    * voter casts once.
@@ -36,7 +48,7 @@ export interface Plan {
   readonly voters: readonly PlannedVoter[];
   /** The tiers with a positive weight, ascending: the electorate's cells. */
   readonly tiers: readonly SimulatedTier[];
-  /** Per tier of `tiers`, per option, the count the tally must open: each voter's last ballot. */
+  /** Per tier of `tiers`, per option, the count the tally must open: each delivered voter's last ballot. */
   readonly expected: ReadonlyMap<SimulatedTier, readonly number[]>;
 }
 
@@ -61,12 +73,13 @@ export function selectionRange(scenario: Scenario): { min: number; max: number }
   return scenario.election === "plurality" ? { min: 0, max: 1 } : { min: 0, max: scenario.options };
 }
 
-// Seed the challenge, re-vote and publication draws apart from the rest of the plan and
+// Seed the challenge, re-vote, publication and posting draws apart from the rest of the plan and
 // from each other, so a scenario's voters, votes and times don't change with
 // any of the shares.
 const CHALLENGE_STREAM = 0x9e37_79b9;
 const REVOTE_STREAM = 0x85eb_ca6b;
 const PUBLISH_STREAM = 0xc2b2_ae35;
+const POSTING_STREAM = 0x27d4_eb2f;
 
 function drawVotes(scenario: Scenario, next: () => number): (0 | 1)[] {
   if (scenario.election === "plurality") {
@@ -86,6 +99,7 @@ export function planElection(scenario: Scenario): Plan {
   const nextChallenge = generator(scenario.seed ^ CHALLENGE_STREAM);
   const nextRevote = generator(scenario.seed ^ REVOTE_STREAM);
   const nextPublish = generator(scenario.seed ^ PUBLISH_STREAM);
+  const nextPosting = generator(scenario.seed ^ POSTING_STREAM);
   const tiers = SIMULATED_TIERS.filter((t) => scenario.tiers[`${t}`] > 0);
   const total = tiers.reduce<number>((a, t) => a + scenario.tiers[`${t}`], 0);
   const expected = new Map(
@@ -105,10 +119,6 @@ export function planElection(scenario: Scenario): Plan {
     }
     const votes = drawVotes(scenario, next);
     const at = next();
-    const counts = expected.get(tier) as number[];
-    votes.forEach((v, j) => {
-      counts[j] = (counts[j] as number) + v;
-    });
     const challenged = nextChallenge() < scenario.challenges;
     // Drawn for every voter, so who publishes changes with neither share.
     const published = nextPublish() < scenario.publications && challenged;
@@ -117,6 +127,14 @@ export function planElection(scenario: Scenario): Plan {
     const revotes = nextRevote() < scenario.revotes;
     const earlierVotes = drawVotes(scenario, nextRevote);
     const earlierAt = nextRevote() * at;
+    const posts = nextPosting() < scenario.postings;
+    const delivered = scenario.trustees.offline.length === 0 || posts;
+    if (delivered) {
+      const counts = expected.get(tier) as number[];
+      votes.forEach((v, j) => {
+        counts[j] = (counts[j] as number) + v;
+      });
+    }
     const earlier = revotes
       ? { votes: earlierVotes, at: earlierAt, path: pathAt(scenario, earlierAt) }
       : null;
@@ -128,6 +146,8 @@ export function planElection(scenario: Scenario): Plan {
       path: pathAt(scenario, at),
       challenged,
       published,
+      posts,
+      delivered,
       earlier,
     });
   }

@@ -130,6 +130,22 @@ export {
   TAG_REGISTRY,
 } from "./domain-separation.ts";
 export {
+  checkContractEvent,
+  CONTRACT_EVENT_SIGNATURES,
+  type ContractEvent,
+  type ContractEventError,
+  contractEventLog,
+  type ContractEventRecord,
+  type ContractEventResult,
+  type ContractRole,
+  decodeContractEvent,
+  encodeContractEvent,
+  type EventContracts,
+  type L1Origin,
+  MAX_EVENT_DATA,
+  MAX_EVENT_TOPICS,
+} from "./contract-event.ts";
+export {
   type ArchivedContractLog,
   checkEventAccumulatorProof,
   type ContractLog,

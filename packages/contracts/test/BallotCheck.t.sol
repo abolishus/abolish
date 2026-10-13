@@ -297,6 +297,11 @@ contract BallotCheckTest is TestBase {
         _expect(
             _withByte(honest, 1, 0x15),
             stub,
+            _malformedData(ElectionDefinitionLib.DecodeError.UnexpectedRecordType, 0)
+        );
+        _expect(
+            _withByte(honest, 1, 0x16),
+            stub,
             _malformedData(ElectionDefinitionLib.DecodeError.UnknownRecordType, 0)
         );
         _expect(

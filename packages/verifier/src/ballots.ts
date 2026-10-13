@@ -1,7 +1,8 @@
 // Ballot admission (docs/spec/verifier.md, Ballot admission): 5.1 to 5.4 over
 // every ballot record of this election on the board copy, by
 // @abolishus/crypto's `checkBallot` (under definition versions 3 and 4,
-// `checkBallotV2`, against the ballot's cell) with the definition and the key set
+// `checkBallotV2`, against the ballot's cell; under definition version 5,
+// `checkBallotV3`, against its cell and the questions) with the definition and the key set
 // the transcript check registered, never against anything a ballot or the
 // bundle chooses (T-37, T-04). A failure rejects that entry only: the rows
 // report each check's first rejected entry and the report lists every one
@@ -24,24 +25,28 @@ import {
   cellBallotElection,
   checkBallot,
   checkBallotV2,
+  checkBallotV3,
   DecodeError,
   type DecodeErrorCode,
   decodeBallot,
   decodeBoardEntry,
-  type ElectionDefinitionRecord,
   membershipVkHash,
   pinnedVersion,
+  questionBallotElection,
   RECORD_TYPES,
   type RegisteredKeys,
   selectBallots,
 } from "@abolishus/crypto";
+import type { VerifiedDefinition } from "./definition.ts";
 
 /** One rejected ballot entry: its position in the copy, from 0, and why. */
 export interface RejectedBallot {
   readonly entry: number;
   readonly code: AdmissionCode | "decode";
-  /** `option-proof`'s first failing option. */
+  /** `option-proof`'s first failing option (ballot version 3: flat option). */
   readonly option?: number;
+  /** Ballot version 3's `sum-proof`: the first failing question. */
+  readonly question?: number;
   /** `decode`'s strict-decoding code (docs/spec/notation.md). */
   readonly decodeError?: DecodeErrorCode;
 }
@@ -69,7 +74,7 @@ export interface AdmittedCore {
   readonly core: Pick<BallotCore, "definitionHash" | "vss">;
 }
 
-/** Every admission code: version 2 has `ballot-cell` where version 1 has `ballot-tier`. */
+/** Every admission code: versions 2 and 3 have `ballot-cell` where version 1 has `ballot-tier`. */
 export type AdmissionCode = BallotCode | BallotV2Code;
 
 export interface BallotOutcome {
@@ -110,7 +115,7 @@ const equal = (a: Uint8Array, b: Uint8Array) =>
  * judged (T-37).
  */
 export function ballotChecks(
-  definition: ElectionDefinitionRecord,
+  definition: VerifiedDefinition,
   registered: readonly RegisteredKeys[] | undefined,
   entries: readonly Uint8Array[],
   boardEntryVersion: BoardEntryVersion,
@@ -162,6 +167,7 @@ export function ballotChecks(
         entry: at,
         code: checked.code,
         ...(checked.option !== undefined && { option: checked.option }),
+        ...(checked.question !== undefined && { question: checked.question }),
       });
   }
   const judged = rejected.filter(
@@ -199,6 +205,7 @@ export function ballotChecks(
 /** One ballot payload's strict decoding and admission checks, with its core. */
 type Judge = (payload: Uint8Array) => {
   readonly core: AdmittedCore["core"];
+  /** Versions 2 and 3 share `BallotCheckV2`. */
   readonly checked: BallotCheck | BallotCheckV2;
 };
 
@@ -209,23 +216,28 @@ const UNSUPPORTED: BallotOutcome = { status: "unverifiable", code: "unsupported-
  * when none can be (docs/spec/verifier.md, Ballot admission, step 1).
  * Definition version 1's ballots (version 1) name a tier; versions 3 and 4
  * pin ballot version 2, which names a cell of the partition, so its root and
- * scope come from that cell, never from the ballot (2.8, T-16).
+ * scope come from that cell, never from the ballot (2.8, T-16); version 5
+ * pins ballot version 3, which names its cell too and carries one range
+ * proof per question, judged against the definition's questions, never
+ * against limits the ballot states (T-28).
  */
 function judgeFor(
-  definition: ElectionDefinitionRecord,
+  definition: VerifiedDefinition,
   registered: readonly RegisteredKeys[] | undefined,
 ): BallotOutcome | Judge {
   const d = definition.value;
   const pinned = pinnedVersion(d, RECORD_TYPES.ballot);
-  // A ballot version this verifier doesn't read may be one a later release
-  // reads: unverifiable, never failed, so releases agree (2.3; T-36).
-  if (pinned !== 1 && (definition.version === 1 || pinned !== 2)) return UNSUPPORTED;
+  const own = definition.version === 1 ? 1 : definition.version === 5 ? 3 : 2;
+  // A ballot version this verifier doesn't read under this definition
+  // version may be one a later release reads: unverifiable, never failed, so
+  // releases agree (2.3; T-36).
+  if (pinned !== own && pinned !== 1) return UNSUPPORTED;
   // Ballot version 1 names a tier, and a partition of cells can't be read
   // from one (2.3 fails that profile). Another membership key fails 1.3, and
   // a root of 0 is one anyone proves membership of (T-04, T-05): no ballot
   // is judged under any of them.
   if (
-    (definition.version !== 1 && pinned === 1) ||
+    pinned !== own ||
     registered === undefined ||
     !equal(d.membership_vk_hash, membershipVkHash())
   )
@@ -243,6 +255,16 @@ function judgeFor(
   }
   if (definition.value.electorate.some((t) => t.cells.some((c) => c.root === 0n)))
     return NOT_REACHED;
+  if (definition.version === 5) {
+    const election = questionBallotElection(definition.value, registered);
+    return (payload) => {
+      const record = decodeBallot(payload, 3);
+      return {
+        core: { definitionHash: record.definition_hash, vss: record.committed_vote.vss },
+        checked: checkBallotV3(election, record),
+      };
+    };
+  }
   const election = cellBallotElection(definition.value, registered);
   return (payload) => {
     const record = decodeBallot(payload, 2);

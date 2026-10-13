@@ -1,12 +1,13 @@
-import { buttonVariants, cn, SectionMark, useI18n, useTranslate } from "@abolishus/ui";
+import { buttonVariants, cn, useI18n, useTranslate } from "@abolishus/ui";
 import { ArrowRight } from "lucide-react";
-import { type ReactNode, useId } from "react";
+import { useId } from "react";
 
 import { catalogs, type Messages } from "../messages.ts";
 import { POLL_STATUSES, pollStatus, type PollStatus, type PollView } from "../poll.ts";
 import type { ListedPoll, PollList as List } from "../server/load.ts";
 import { formatUtc } from "./format.ts";
 import { LookupForm } from "./lookup-form.tsx";
+import { PageHeader, Section } from "./page-parts.tsx";
 import { PollRows } from "./poll-list.tsx";
 import { STATUS_MARK } from "./poll-status.ts";
 
@@ -59,44 +60,6 @@ function matches(entry: ListedPoll, filters: RegisterFilters, asOf: List["asOf"]
   return (
     (status === undefined || pollStatus(entry.poll, asOf) === status) &&
     (counting === undefined || entry.poll.electionType === counting)
-  );
-}
-
-function Section({
-  index,
-  mark,
-  title,
-  id,
-  lede,
-  children,
-}: {
-  index: string;
-  mark: string;
-  title: string;
-  id: string;
-  lede?: ReactNode;
-  children: ReactNode;
-}) {
-  return (
-    <section aria-labelledby={id} className="grid gap-8 border-t border-border pt-12 md:pt-16">
-      <div className="grid gap-5 md:grid-cols-12">
-        <SectionMark index={index} className="md:col-span-12">
-          {mark}
-        </SectionMark>
-        <h2
-          id={id}
-          className="m-0 font-heading text-3xl leading-tight font-semibold tracking-tight text-balance sm:text-4xl md:col-span-7"
-        >
-          {title}
-        </h2>
-        {lede === undefined ? null : (
-          <div className="m-0 max-w-prose text-base text-pretty text-muted-foreground md:col-span-5 md:pt-2">
-            {lede}
-          </div>
-        )}
-      </div>
-      {children}
-    </section>
   );
 }
 
@@ -188,15 +151,7 @@ export function PollRegister({ list, after, filters, invalid }: PollRegisterProp
   const clear = registerHref(after, { status: undefined, counting: undefined });
   return (
     <div className="grid gap-16">
-      <header className="grid gap-6 pt-2 md:pt-10">
-        <p className="m-0 font-mono text-xs tracking-widest text-muted-foreground uppercase">
-          {t("registerEyebrow")}
-        </p>
-        <h1 className="m-0 max-w-4xl font-heading text-4xl leading-[1.05] font-semibold tracking-tight text-balance sm:text-6xl">
-          {t("registerTitle")}
-        </h1>
-        <p className="m-0 max-w-prose text-lg text-pretty">{t("listLede")}</p>
-      </header>
+      <PageHeader eyebrow={t("registerEyebrow")} title={t("registerTitle")} lede={t("listLede")} />
 
       <section
         aria-labelledby="lookup-title"

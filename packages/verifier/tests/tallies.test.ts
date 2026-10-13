@@ -13,7 +13,7 @@ import {
 // attributed by the key set the transcript registered, and judged against
 // tally.md's Boarding rule as far as the bundle decides it without the
 // counted set (docs/spec/verifier.md, Tally openings), under definition
-// version 1 against its tiers and under versions 3 and 4 against their
+// version 1 against its tiers and under versions 3 to 5 against their
 // cells. Fixtures:
 // docs/spec/vectors/verifier-tallies.json
 // (packages/crypto/scripts/verifier-tallies-vectors.py, an independent
@@ -232,4 +232,20 @@ test("7.4 runs whatever 2.3 finds for another pin", () => {
   expect({ status, code, at }).toEqual(c.expected["2.3"]);
   expect(row(r)).toEqual(c.expected["7.4"]);
   expect(r.tallies).toEqual(c.tallies);
+});
+
+test("under definition version 5 an opening opens every option of every question", () => {
+  // The owner's four questions, 18 options in all: an opening with one entry
+  // per option of the first question only, or with 19, misses or adds
+  // options (tally-missing); cells are numbered as under version 3 (T-16, T-29).
+  const c = byId("v5-questions");
+  const r = run(c);
+  expect(r.tallies?.map((o) => [o.cell, o.breaks.map((b) => b.code)])).toEqual([
+    [3, []],
+    [0, ["tally-missing"]],
+    [1, ["tally-missing"]],
+    [undefined, ["tally-stray"]],
+  ]);
+  const { status, code, at } = r.checks.find((x) => x.id === "2.3") as CheckResult;
+  expect({ status, code, at }).toEqual(c.expected["2.3"]);
 });

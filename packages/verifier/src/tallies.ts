@@ -7,7 +7,7 @@
 // or fails anything: 7.4 reports and attributes (T-29, T-15, T-17).
 //
 // The partition is the definition's (2.8): under version 1 its tiers, under
-// versions 3 and 4 every tier's stated cells, numbered across the tiers, so
+// versions 3 to 5 every tier's stated cells, numbered across the tiers, so
 // an opening's `cell` is a position among those, never a tier (T-16).
 //
 // What is decided without the counted set: a stray opening, an opening of a
@@ -25,13 +25,14 @@ import {
   type DecodeErrorCode,
   decodeBoardEntry,
   type BoardEntryVersion,
-  type ElectionDefinitionRecord,
   pinnedVersion,
   RECORD_TYPES,
   type RegisteredKeys,
   sortTallyOpenings,
   tallyOpeningStatement,
+  tallyRules,
 } from "@abolishus/crypto";
+import type { VerifiedDefinition } from "./definition.ts";
 
 /** A boarding rule an opening is known to break (docs/spec/tally.md, Opening record, Boarding), in that rule's order. */
 export type TallyBreak =
@@ -79,17 +80,18 @@ const equal = (a: Uint8Array, b: Uint8Array) =>
 /**
  * The number of cells in a definition's partition (docs/spec/
  * election-definition.md, Notes, Tally partition): version 1's tiers, or
- * versions 3 and 4's cells of every tier, as the definition states them.
+ * versions 3 to 5's cells of every tier, as the definition states them.
  * 2.1's rules keep it from 1 to 256, as `sortTallyOpenings` requires: a
- * non-empty electorate, and under versions 3 and 4 the `cells` rule, which
+ * non-empty electorate, and under versions 3 to 5 the `cells` rule, which
  * caps the total and gives every tier at least one cell.
  */
-function partitionSize(definition: ElectionDefinitionRecord): number {
+function partitionSize(definition: VerifiedDefinition): number {
   switch (definition.version) {
     case 1:
       return definition.value.electorate.length;
     case 3:
     case 4:
+    case 5:
       return definition.value.electorate.reduce((n, t) => n + t.cells.length, 0);
     default: {
       const unread: never = definition;
@@ -104,7 +106,7 @@ function partitionSize(definition: ElectionDefinitionRecord): number {
  * registered key set no opening can be attributed, so nothing is judged.
  */
 export function tallyChecks(
-  definition: ElectionDefinitionRecord,
+  definition: VerifiedDefinition,
   definitionHash: Uint8Array,
   registered: readonly RegisteredKeys[] | undefined,
   entries: readonly Uint8Array[],
@@ -142,6 +144,10 @@ export function tallyChecks(
     payloads,
     1,
   );
+  // `m`, the options an opening of a cell opens: under definition version 5
+  // the total over the questions (tally.md, Context). 2.1 passed, so the
+  // definition is well formed.
+  const m = tallyRules(definition).optionCount;
   const report: TallyReport[] = [];
   // Each (cell, seat)'s first attributed opening: its entry and signed message.
   const first = new Map<string, { readonly entry: number; readonly signed: Uint8Array }>();
@@ -163,7 +169,7 @@ export function tallyChecks(
       continue;
     }
     const breaks: TallyBreak[] = [];
-    if (o.opening.opening.length !== d.option_count) breaks.push({ code: "tally-missing" });
+    if (o.opening.opening.length !== m) breaks.push({ code: "tally-missing" });
     if (o.signer === null) breaks.push({ code: "tally-unattributed" });
     else {
       // Any earlier opening of this cell by this seat, whatever its checks

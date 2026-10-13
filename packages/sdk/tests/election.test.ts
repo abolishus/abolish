@@ -157,8 +157,8 @@ describe("simulateElection", { timeout }, () => {
 });
 
 describe("runSimulation's ceremony", { timeout }, () => {
-  it("reports the definition and transcript hashes, with offline seats registered before they go down", () => {
-    const r = runSimulation(base);
+  it("reports the definition and transcript hashes, with offline seats registered before they go down", async () => {
+    const r = await runSimulation(base);
     expect(r.ok).toBe(true);
     expect(r.definition.hash).toMatch(/^[0-9a-f]{64}$/);
     expect(r.ceremony.transcriptHash).toMatch(/^[0-9a-f]{64}$/);

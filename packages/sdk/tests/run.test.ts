@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vite-plus/test";
 import {
   downAt,
+  MAX_INTAKE_WORKERS,
   planElection,
   runSimulation,
   type Scenario,
   SIMULATION_STUBS,
+  type SimulationReport,
 } from "../src/index.ts";
 import { type CellExpectation, expectCells, judgeCell } from "../src/simulation/run.ts";
 
@@ -27,9 +29,9 @@ const base: Scenario = {
 };
 
 describe("runSimulation", { timeout }, () => {
-  it("opens every cell to the plan's counts with offline seats below the margin, and verifies each opening", () => {
+  it("opens every cell to the plan's counts with offline seats below the margin, and verifies each opening", async () => {
     const progress: string[] = [];
-    const r = runSimulation(base, { onProgress: (p) => progress.push(p.stage) });
+    const r = await runSimulation(base, { onProgress: (p) => progress.push(p.stage) });
     expect(r.ok).toBe(true);
     expect(r.ballots.cast).toBe(9);
     expect(r.ballots.server + r.ballots.direct).toBe(9);
@@ -79,8 +81,8 @@ describe("runSimulation", { timeout }, () => {
     expect(progress.filter((s) => s === "tally")).toHaveLength(3);
   });
 
-  it("excludes faulty seats' summed shares and still opens from k honest seats", () => {
-    const r = runSimulation({
+  it("excludes faulty seats' summed shares and still opens from k honest seats", async () => {
+    const r = await runSimulation({
       ...base,
       election: "approval",
       trustees: { panel: 4, threshold: 2, offline: [4], faulty: [1], departures: [] },
@@ -109,10 +111,10 @@ describe("runSimulation", { timeout }, () => {
     ]);
   });
 
-  it("reports tally-quorum, as expected, when fewer than k honest seats remain", () => {
+  it("reports tally-quorum, as expected, when fewer than k honest seats remain", async () => {
     // Published openings still land after the counted extent, with no tally
     // opening in their segment, and before destruction at t_D.
-    const r = runSimulation({
+    const r = await runSimulation({
       ...base,
       challenges: 1,
       publications: 1,
@@ -133,7 +135,7 @@ describe("runSimulation", { timeout }, () => {
     expect(r.board.spoiled).toBe(9);
     expect(r.board.entries).toBe(9 + 9 * 2 + 9 + 2);
     expect(r.ballots.postings).toBe(9 * 2);
-    const ran = runSimulation(base);
+    const ran = await runSimulation(base);
     expect(r.destruction.from).toBeGreaterThan(ran.destruction.from + 100);
     expect(r.destruction.seats.map((d) => d.code)).toEqual([
       "destruction-missing",
@@ -143,8 +145,8 @@ describe("runSimulation", { timeout }, () => {
     ]);
   });
 
-  it("reports tally-quorum with every online seat excluded when every online seat is faulty", () => {
-    const r = runSimulation({
+  it("reports tally-quorum with every online seat excluded when every online seat is faulty", async () => {
+    const r = await runSimulation({
       ...base,
       trustees: { panel: 4, threshold: 2, offline: [4], faulty: [1, 2, 3], departures: [] },
     });
@@ -157,18 +159,18 @@ describe("runSimulation", { timeout }, () => {
     }
   });
 
-  it("checks every challenged attempt's opening, then casts a fresh one that still opens to the plan", () => {
-    const r = runSimulation({ ...base, challenges: 1 });
+  it("checks every challenged attempt's opening, then casts a fresh one that still opens to the plan", async () => {
+    const r = await runSimulation({ ...base, challenges: 1 });
     expect(r.ok).toBe(true);
     expect(r.ballots.challenged).toBe(9);
     expect(r.cells.reduce((a, c) => a + c.ballots, 0)).toBe(9);
     for (const c of r.cells) expect(c.counts).toEqual(c.expected);
   });
 
-  it("boards every opening its voter publishes after the counted extent, and still opens to the plan", () => {
+  it("boards every opening its voter publishes after the counted extent, and still opens to the plan", async () => {
     // Re-votes put superseded ballots in the counted extent, which every
     // opening is compared with too.
-    const r = runSimulation({ ...base, challenges: 1, publications: 1, revotes: 1 });
+    const r = await runSimulation({ ...base, challenges: 1, publications: 1, revotes: 1 });
     expect(r.ok).toBe(true);
     expect(r.ballots.challenged).toBe(9);
     expect(r.ballots.published).toBe(9);
@@ -177,7 +179,7 @@ describe("runSimulation", { timeout }, () => {
     expect(r.board.entries).toBe(18 + 18 * 3 + 3 + 9 + 3);
     for (const c of r.cells) expect(c.counts).toEqual(c.expected);
     // Publishing is the voter's choice: only those who asked.
-    const some = runSimulation({ ...base, challenges: 1, publications: 0.5 });
+    const some = await runSimulation({ ...base, challenges: 1, publications: 0.5 });
     const asked = planElection({ ...base, challenges: 1, publications: 0.5 }).voters.filter(
       (v) => v.published,
     ).length;
@@ -187,7 +189,7 @@ describe("runSimulation", { timeout }, () => {
     expect(some.board.spoiled).toBe(asked);
   });
 
-  it("counts only each re-voter's last ballot, whatever it voted before", () => {
+  it("counts only each re-voter's last ballot, whatever it voted before", async () => {
     const s = { ...base, revotes: 1, challenges: 0.5 };
     // Counting the earlier ballots instead would change some cell's counts.
     const plan = planElection(s);
@@ -202,7 +204,7 @@ describe("runSimulation", { timeout }, () => {
       }),
     ).toBe(true);
     const progress: string[] = [];
-    const r = runSimulation(s, { onProgress: (p) => progress.push(p.stage) });
+    const r = await runSimulation(s, { onProgress: (p) => progress.push(p.stage) });
     expect(r.ok).toBe(true);
     expect(r.ballots.cast).toBe(18);
     expect(r.ballots.superseded).toBe(9);
@@ -215,9 +217,9 @@ describe("runSimulation", { timeout }, () => {
     for (const c of r.cells) expect(c.counts).toEqual(c.expected);
   });
 
-  it("counts nothing from a voter who declines to post an offline seat, and opens the rest to the plan", () => {
+  it("counts nothing from a voter who declines to post an offline seat, and opens the rest to the plan", async () => {
     // Every voter declines: every ballot lacks the offline seat, so none counts.
-    const none = runSimulation({ ...base, postings: 0 });
+    const none = await runSimulation({ ...base, postings: 0 });
     expect(none.ok).toBe(true);
     expect(none.ballots.postings).toBe(0);
     expect(none.ballots.undelivered).toBe(9);
@@ -230,7 +232,7 @@ describe("runSimulation", { timeout }, () => {
     const declined = planElection(s).voters.filter((v) => !v.delivered).length;
     expect(declined).toBeGreaterThan(0);
     expect(declined).toBeLessThan(9);
-    const some = runSimulation(s);
+    const some = await runSimulation(s);
     expect(some.ok).toBe(true);
     expect(some.ballots.postings).toBe(9 - declined);
     expect(some.ballots.undelivered).toBe(declined);
@@ -238,20 +240,20 @@ describe("runSimulation", { timeout }, () => {
     for (const c of some.cells) expect(c.counts).toEqual(c.expected);
   });
 
-  it("counts nothing for a re-voter whose last ballot is undelivered, though its earlier one was posted", () => {
+  it("counts nothing for a re-voter whose last ballot is undelivered, though its earlier one was posted", async () => {
     const s = { ...base, revotes: 1, postings: 0.5 };
     const voters = planElection(s).voters;
     const stranded = voters.filter((v) => v.earlier?.posts === true && !v.posts).length;
     expect(stranded).toBeGreaterThan(0);
-    const r = runSimulation(s);
+    const r = await runSimulation(s);
     expect(r.ok).toBe(true);
     expect(r.ballots.undelivered).toBe(voters.filter((v) => !v.delivered).length);
     expect(r.cells.reduce((a, c) => a + c.ballots, 0)).toBe(9 - r.ballots.undelivered);
     for (const c of r.cells) expect(c.counts).toEqual(c.expected);
   });
 
-  it("needs no posting when every seat is online, whatever the voters would choose", () => {
-    const r = runSimulation({
+  it("needs no posting when every seat is online, whatever the voters would choose", async () => {
+    const r = await runSimulation({
       ...base,
       voters: 4,
       postings: 0,
@@ -264,7 +266,7 @@ describe("runSimulation", { timeout }, () => {
     expect(r.cells.reduce((a, c) => a + c.ballots, 0)).toBe(4);
   });
 
-  it("takes a departing seat's receipts until it goes down, counts later ballots only when posted, and leaves it out of the tally", () => {
+  it("takes a departing seat's receipts until it goes down, counts later ballots only when posted, and leaves it out of the tally", async () => {
     // Seat 3 goes down during the outage, so it takes some direct ballots,
     // whose receipts are boarded when the servers return, and misses the rest.
     const s: Scenario = {
@@ -285,7 +287,7 @@ describe("runSimulation", { timeout }, () => {
     expect(before.some((v) => v.path === "direct")).toBe(true);
     expect(after.some((v) => v.path === "direct" && !v.posts)).toBe(true);
     expect(after.some((v) => v.path === "server" && v.posts)).toBe(true);
-    const r = runSimulation(s);
+    const r = await runSimulation(s);
     expect(r.ok).toBe(true);
     expect(r.board.shareReceipts).toBe(before.length * 4 + after.length * 3);
     expect(r.ballots.postings).toBe(after.filter((v) => v.posts).length);
@@ -307,7 +309,7 @@ describe("runSimulation", { timeout }, () => {
     ]);
   });
 
-  it("judges each ballot by the seats down at its own cast when a re-voter crosses a departure", () => {
+  it("judges each ballot by the seats down at its own cast when a re-voter crosses a departure", async () => {
     const s: Scenario = {
       ...base,
       revotes: 1,
@@ -326,7 +328,7 @@ describe("runSimulation", { timeout }, () => {
     expect(
       voters.some((v) => v.earlier !== null && v.earlier.at < 0.5 && v.at >= 0.5 && !v.posts),
     ).toBe(true);
-    const r = runSimulation(s);
+    const r = await runSimulation(s);
     expect(r.ok).toBe(true);
     expect(r.board.shareReceipts).toBe(casts.reduce((a, b) => a + 4 - downAt(s, b.at).length, 0));
     expect(r.ballots.postings).toBe(
@@ -336,7 +338,7 @@ describe("runSimulation", { timeout }, () => {
     for (const c of r.cells) expect(c.counts).toEqual(c.expected);
   });
 
-  it("needs no posting from a seat that departs at close, which still misses the tally and destruction", () => {
+  it("needs no posting from a seat that departs at close, which still misses the tally and destruction", async () => {
     const s: Scenario = {
       ...base,
       postings: 0,
@@ -349,7 +351,7 @@ describe("runSimulation", { timeout }, () => {
         departures: [{ seat: 1, at: 1 }],
       },
     };
-    const r = runSimulation(s);
+    const r = await runSimulation(s);
     expect(r.ok).toBe(true);
     expect(r.ballots.cast).toBe(18);
     expect(r.board.shareReceipts).toBe(18 * 3);
@@ -367,7 +369,7 @@ describe("runSimulation", { timeout }, () => {
     ]);
   });
 
-  it("reports tally-quorum, as expected, when departures leave fewer than k seats", () => {
+  it("reports tally-quorum, as expected, when departures leave fewer than k seats", async () => {
     const s: Scenario = {
       ...base,
       voters: 4,
@@ -383,7 +385,7 @@ describe("runSimulation", { timeout }, () => {
       },
     };
     const plan = planElection(s);
-    const r = runSimulation(s);
+    const r = await runSimulation(s);
     expect(r.ok).toBe(true);
     expect(r.ballots.postings).toBe(
       plan.voters.filter((v) => v.posts).reduce((a, v) => a + downAt(s, v.at).length, 0),
@@ -395,8 +397,13 @@ describe("runSimulation", { timeout }, () => {
     }
   });
 
-  it("opens an empty cell to zero", () => {
-    const r = runSimulation({ ...base, voters: 1, tiers: { "0": 1, "1": 0, "2": 1 }, seed: 0 });
+  it("opens an empty cell to zero", async () => {
+    const r = await runSimulation({
+      ...base,
+      voters: 1,
+      tiers: { "0": 1, "1": 0, "2": 1 },
+      seed: 0,
+    });
     expect(r.ok).toBe(true);
     const empty = r.cells.find((c) => c.ballots === 0);
     expect(empty?.counts).toEqual([0, 0, 0]);
@@ -476,7 +483,7 @@ describe("runSimulation under L1 reorganisations", { timeout }, () => {
       if (planElection({ ...s, seed }).voters.some((v) => v.reorg?.recast === null)) return seed;
   };
 
-  it("rejects each ballot naming a reorganised block, counts its recast with the first cast's receipts, and opens to the plan", () => {
+  it("rejects each ballot naming a reorganised block, counts its recast with the first cast's receipts, and opens to the plan", async () => {
     const s = { ...base, reorgs: 1 };
     const plan = planElection(s);
     const recast = plan.voters.filter((v) => v.reorg?.recast != null);
@@ -484,7 +491,7 @@ describe("runSimulation under L1 reorganisations", { timeout }, () => {
     // Some recasts go through our servers, some directly during the outage.
     expect(recast.some((v) => v.reorg?.recast?.path === "direct")).toBe(true);
     expect(recast.some((v) => v.reorg?.recast?.path === "server")).toBe(true);
-    const r = runSimulation(s);
+    const r = await runSimulation(s);
     expect(r.ok).toBe(true);
     expect(r.ballots).toMatchObject({
       cast: 18,
@@ -502,7 +509,7 @@ describe("runSimulation under L1 reorganisations", { timeout }, () => {
     for (const c of r.cells) expect(c.counts).toEqual(c.expected);
   });
 
-  it("selects a re-voter's earlier ballot when its last is lost to a reorganisation near close", () => {
+  it("selects a re-voter's earlier ballot when its last is lost to a reorganisation near close", async () => {
     const s = {
       ...base,
       revotes: 1,
@@ -513,7 +520,7 @@ describe("runSimulation under L1 reorganisations", { timeout }, () => {
     const lost = plan.voters.filter((v) => v.reorg?.recast === null);
     expect(lost.length).toBeGreaterThan(0);
     expect(lost.every((v) => v.selected === "earlier")).toBe(true);
-    const r = runSimulation(s);
+    const r = await runSimulation(s);
     expect(r.ok).toBe(true);
     expect(r.ballots.reorged).toBe(9);
     expect(r.ballots.recast).toBe(9 - lost.length);
@@ -524,12 +531,12 @@ describe("runSimulation under L1 reorganisations", { timeout }, () => {
     for (const c of r.cells) expect(c.counts).toEqual(c.expected);
   });
 
-  it("counts nothing for a voter casting once whose ballot is lost to a reorganisation near close", () => {
+  it("counts nothing for a voter casting once whose ballot is lost to a reorganisation near close", async () => {
     const s = { ...base, reorgs: 1, seed: lostSeed({ ...base, reorgs: 1 }) };
     const lost = planElection(s).voters.filter((v) => v.reorg?.recast === null);
     expect(lost.length).toBeGreaterThan(0);
     expect(lost.every((v) => v.selected === null)).toBe(true);
-    const r = runSimulation(s);
+    const r = await runSimulation(s);
     expect(r.ok).toBe(true);
     expect(r.ballots.reorged).toBe(9);
     expect(r.ballots.recast).toBe(9 - lost.length);
@@ -538,15 +545,72 @@ describe("runSimulation under L1 reorganisations", { timeout }, () => {
     for (const c of r.cells) expect(c.counts).toEqual(c.expected);
   });
 
-  it("keeps a recast undelivered when its first cast was: the receipts and postings are the first cast's", () => {
+  it("keeps a recast undelivered when its first cast was: the receipts and postings are the first cast's", async () => {
     const s = { ...base, reorgs: 1, postings: 0.5 };
     const voters = planElection(s).voters;
     expect(voters.some((v) => v.reorg?.recast != null && !v.delivered)).toBe(true);
-    const r = runSimulation(s);
+    const r = await runSimulation(s);
     expect(r.ok).toBe(true);
     expect(r.ballots.undelivered).toBe(
       voters.filter((v) => v.selected === "last" && !v.delivered).length,
     );
     for (const c of r.cells) expect(c.counts).toEqual(c.expected);
+  });
+});
+
+describe("runSimulation with intake in worker threads", { timeout }, () => {
+  // What a run reports apart from its fresh keys and hashes.
+  const outcome = (r: SimulationReport) => ({
+    ok: r.ok,
+    ballots: r.ballots,
+    board: { ...r.board, head: undefined, receiptKey: undefined },
+    trustees: r.trustees,
+    cells: r.cells,
+    destruction: r.destruction,
+    total: r.total,
+  });
+
+  it("reports what the same scenario reports in the calling thread, with every stage in play", async () => {
+    // Challenges, publications, re-votes, reorganisations, an offline seat,
+    // a departure, a faulty seat, an outage and partial postings: each cast
+    // finished in its order while later ballots' intake runs ahead.
+    const s: Scenario = {
+      ...base,
+      voters: 12,
+      trustees: {
+        panel: 5,
+        threshold: 2,
+        offline: [2],
+        faulty: [5],
+        departures: [{ seat: 4, at: 0.6 }],
+      },
+      challenges: 0.5,
+      publications: 1,
+      revotes: 0.5,
+      reorgs: 0.5,
+      postings: 0.7,
+    };
+    const progress: number[] = [];
+    const inWorkers = await runSimulation(s, {
+      workers: 3,
+      onProgress: (p) => {
+        if (p.stage === "cast") progress.push(p.done);
+      },
+    });
+    const inThread = await runSimulation(s);
+    expect(inWorkers.ok).toBe(true);
+    expect(outcome(inWorkers)).toEqual(outcome(inThread));
+    // The comparison covers each of them.
+    const { challenged, published, superseded, reorged, direct, postings, undelivered } =
+      inThread.ballots;
+    for (const n of [challenged, published, superseded, reorged, direct, postings, undelivered])
+      expect(n).toBeGreaterThan(0);
+    // One progress line per cast, in cast order.
+    expect(progress).toEqual(Array.from({ length: inThread.ballots.cast }, (_, i) => i + 1));
+  });
+
+  it("refuses a worker count that isn't an integer from 0 to the maximum, before running", async () => {
+    for (const workers of [-1, 1.5, Number.NaN, MAX_INTAKE_WORKERS + 1])
+      await expect(runSimulation(base, { workers })).rejects.toThrow(RangeError);
   });
 });

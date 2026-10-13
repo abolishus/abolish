@@ -5,7 +5,9 @@
 // 1.3's failure for a definition naming another membership key and, for
 // format 4, the key-ceremony
 // transcript check (3.2, and the parts of 2.5 and 3.1 that need no L2 state)
-// and ballot admission (5.1 to 5.4, and 5.7 as far as 5.5 allows) are implemented; every other check is reported unverifiable, so no run can
+// ballot admission (5.1 to 5.4, and 5.7 as far as 5.5 allows) and the
+// spoiled-ballot openings (6.2, as far as the floor of s_S decides them) are
+// implemented; every other check is reported unverifiable, so no run can
 // report an election verified yet. A run on unauthenticated inputs reports
 // what the checks found against them, but its verdict stays unverifiable, so
 // a crafted bundle can neither verify nor fail an election (T-53, T-24).
@@ -13,6 +15,7 @@
 import {
   type Anchor,
   type BallotCode,
+  ballotElection,
   BoardError,
   type BoardEntryVersion,
   boardPayloadTypes,
@@ -43,6 +46,7 @@ import { ballotChecks, type BallotsReport } from "./ballots.ts";
 import type { Bundle, InputSource, InputSources } from "./bundle.ts";
 import { type CeremonyCode, ceremonyChecks, type CeremonyReport } from "./ceremony.ts";
 import { CHECKS, type CheckKind } from "./checks.ts";
+import { openingChecks, type OpeningCode, type OpeningReport } from "./openings.ts";
 import {
   anchorsFromState,
   type L1Evidence,
@@ -59,6 +63,8 @@ export type CheckCode =
   | ElectionDefinitionV4Rule
   | CeremonyCode
   | BallotCode
+  | OpeningCode
+  | "decode"
   | "membership-key"
   | "profile-combination"
   | "unsupported-version"
@@ -96,6 +102,8 @@ export interface Report {
   readonly ceremony?: CeremonyReport;
   /** A format-4 bundle's ballot admission, once it ran (5.1 to 5.4 and 5.7). */
   readonly ballots?: BallotsReport;
+  /** A format-4 bundle's spoiled-ballot openings, once 6.2 ran, in copy order. */
+  readonly openings?: readonly OpeningReport[];
   readonly board: {
     readonly entries: number;
     readonly unreadableBytes: number;
@@ -296,6 +304,7 @@ function fromDefinition(bundle: Bundle):
           ["5.3", NOT_REACHED],
           ["5.4", NOT_REACHED],
           ["5.7", NOT_REACHED],
+          ["6.2", NOT_REACHED],
         ]
       : [];
   const stopped = (row: string, outcome: Outcome, hash?: Uint8Array) => ({
@@ -427,6 +436,7 @@ export function verifyBundle(bundle: Bundle): Report {
   let implemented: ReadonlyMap<string, Outcome>;
   let ceremony: CeremonyReport | undefined;
   let ballots: BallotsReport | undefined;
+  let openings: readonly OpeningReport[] | undefined;
   if ("rows" in definition) implemented = definition.rows;
   else {
     input = anchoring(bundle, definition.inputs);
@@ -498,6 +508,21 @@ export function verifyBundle(bundle: Bundle): Report {
         );
         implemented = new Map<string, Outcome>([...implemented, ...admission.rows]);
         ballots = admission.report;
+        // An opening is checked against the same registered election, and
+        // `opening-cast` against the ballots admission admitted, so 6.2 is
+        // reached exactly where admission is.
+        const spoiled = openingChecks(
+          definition.definition.value,
+          admission.admitted === undefined || checked.registered === undefined
+            ? undefined
+            : ballotElection(definition.definition.value, checked.registered),
+          admission.admitted,
+          bundle.entries,
+          definition.inputs.boardEntryVersion,
+          bundle.clock,
+        );
+        implemented = new Map<string, Outcome>([...implemented, ["6.2", spoiled.row]]);
+        openings = spoiled.report;
       } else {
         // Under definition versions 3 and 4 a ballot is admitted against its
         // cell (ballot version 2), which this verifier doesn't do yet
@@ -510,7 +535,7 @@ export function verifyBundle(bundle: Bundle): Report {
             : UNSUPPORTED;
         implemented = new Map<string, Outcome>([
           ...implemented,
-          ...["5.1", "5.2", "5.3", "5.4", "5.7"].map((id) => [id, admission] as const),
+          ...["5.1", "5.2", "5.3", "5.4", "5.7", "6.2"].map((id) => [id, admission] as const),
         ]);
       }
     }
@@ -530,6 +555,7 @@ export function verifyBundle(bundle: Bundle): Report {
     ...(definition.hash !== undefined && { definition: { hash: bytesToHex(definition.hash) } }),
     ...(ceremony !== undefined && { ceremony }),
     ...(ballots !== undefined && { ballots }),
+    ...(openings !== undefined && { openings }),
     board,
     ...(bundle.format !== "abolish-verifier-bundle/1" && {
       l1: {

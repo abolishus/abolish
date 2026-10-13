@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { decodeBoardEntry, encodeBoardEntry } from "@abolishus/crypto";
 import fc from "fast-check";
 import { describe, expect, test } from "vite-plus/test";
 import {
@@ -292,6 +293,43 @@ describe("the close rule's window (5.5) judges each copy by its own path", () =>
     // election identifier, so it is an entry of this election's board.
     const spliced = join([...own, entries[2] as Uint8Array]);
     expect(format4(admitted, spliced).ballots).toEqual(format4(admitted).ballots);
+  });
+
+  test("another board event carries no ballot, so it is neither admitted nor rejected", () => {
+    // contract-event-v2.json's ShareReceiptSubmitted, re-addressed to this
+    // definition's board (bytes 3 to 22 of the record) and boarded where the
+    // in-window ordinary ballot was.
+    const events = read("contract-event-v2.json") as {
+      readonly records: readonly { readonly id: string; readonly encoding: string }[];
+    };
+    const receipt = events.records.find((x) => x.id === "share-receipt");
+    if (receipt === undefined) throw new Error("no share-receipt record");
+    const entry = decodeBoardEntry(entries[2] as Uint8Array, 4);
+    const record = hex(receipt.encoding);
+    record.set(entry.payload.subarray(3, 23), 3);
+    const swapped = encodeBoardEntry({ ...entry, payload: record }, 4);
+    const r = format4(window, join(entries.map((e, i) => (i === 2 ? swapped : e))));
+    expect(verdicts(r).has(2)).toBe(false);
+    expect(r.ballots?.admitted).toBe(3);
+  });
+
+  test("s_A takes the floor of a close before the epoch, so segment 1 is late when s_A is 0", () => {
+    const admitted = byId("admitted");
+    const all = entriesOf(admitted);
+    const entry = decodeBoardEntry(all[1] as Uint8Array, 4);
+    const moved = encodeBoardEntry({ ...entry, segment: 1 }, 4);
+    const r = verifyBundle(
+      parseBundle(
+        JSON.stringify({
+          ...(JSON.parse(json(admitted, admitted.definition)) as object),
+          // closes_at is half a period before the epoch: ⌊−1800 / 3600⌋ + 1 = 0,
+          // where truncating division would give 1.
+          clock: { ...file.clock, epoch: String(1767830400 + 1800) },
+        }),
+        join([all[0] as Uint8Array, moved, ...all.slice(2)]),
+      ),
+    );
+    expect(r.ballots?.rejected).toEqual([{ entry: 1, code: "window-boarded-late" }]);
   });
 
   test("a clock that puts s_A below a board-path ballot's segment rejects it as boarded late", () => {

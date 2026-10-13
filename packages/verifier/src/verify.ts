@@ -133,6 +133,7 @@ type Outcome = Pick<CheckResult, "status" | "code" | "at">;
 
 const PASS: Outcome = { status: "pass" };
 const NOT_REACHED: Outcome = { status: "unverifiable", code: "not-reached" };
+const NOT_IMPLEMENTED: Outcome = { status: "unverifiable", code: "not-implemented" };
 const UNSUPPORTED: Outcome = { status: "unverifiable", code: "unsupported-version", at: {} };
 // 8.5 under a board-entry version that can't carry a destruction statement:
 // reported, never `destruction-missing` for every seat (docs/spec/verifier.md, 8.5).
@@ -472,13 +473,17 @@ export function verifyBundle(bundle: Bundle): Report {
         : [
             [
               "2.9",
-              definition.definition.version === 4 && "l1" in definition.inputs
-                ? receiptKeyRow(
-                    definition.inputs.l1,
-                    definition.definition.value.receipt_keys,
-                    definition.definition.value.opens_at,
-                  )
-                : PASS,
+              definition.definition.version !== 4
+                ? PASS
+                : "l1" in definition.inputs
+                  ? receiptKeyRow(
+                      definition.inputs.l1,
+                      definition.definition.value.receipt_keys,
+                      definition.definition.value.opens_at,
+                    )
+                  : // Never a pass without the record: every definition-bearing
+                    // format carries L1 evidence today.
+                    NOT_IMPLEMENTED,
             ] as const,
           ]),
       ...(carriesDestruction(definition.inputs.boardEntryVersion)

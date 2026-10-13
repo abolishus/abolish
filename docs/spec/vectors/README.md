@@ -378,6 +378,7 @@ The proofs are randomised: regenerating gives other proof bytes for the same sta
 - `id`, `description`;
 - `block`: `header`, `number`, `timestamp` and `hash`, as in `l1-anchor.json`;
 - `anchor` (hex), `receiptKeys` (the listed keys, hex, ascending) and `nodes`: a format-3 bundle's `l1` member with `firstSegment` 0 and no checkpoints, and the definition's `l1_anchor` and `receipt_keys`;
+- `slots`: each key's record slot (`cast index`'s output, hex), whose Keccak-256 is its storage-trie key;
 - `records`: each key's word as `eth_getStorageAt` returns it (32 bytes, hex), empty when the anchor has no account; a word whose leaf a vector leaves out of `nodes` is still given;
 - `result`: 2.9's row, `status` and, unless it passed, `code` and `at`;
 - `board`: `"valid"` when `nodes` also prove the anchor's board slots at that block, so 4.1 and 4.2 pass over `board.json`'s `valid` board.

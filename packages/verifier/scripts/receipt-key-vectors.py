@@ -257,6 +257,7 @@ def main():
             K2: (0, 1_800_000_300, 0),
             K3: (1_800_000_300, 1_800_000_200, 0),
             K6: (closed_at + 1, 0, 0),
+            K5: (1_800_000_200, closed_at + 1, 0),
             # Possible words beside them: registered and retired in one second.
             K4: (1_800_000_200, 1_800_000_200, 0),
         }
@@ -290,6 +291,7 @@ def main():
                 "block": header(block),
                 "anchor": strip(address),
                 "receiptKeys": keys,
+                "slots": [strip(x) for x in slots],
                 "nodes": nodes,
                 "records": (
                     []
@@ -405,6 +407,11 @@ def main():
             "record-after-block",
             "A registration later than the block it is proven at",
             closed, "impossible", [K6], fail("receipt-key-record", 0),
+        )
+        add(
+            "record-retired-after-block",
+            "A retirement later than the block it is proven at, after a registration before it",
+            closed, "impossible", [K5], fail("receipt-key-record", 0),
         )
         add(
             "record-registered-and-retired-together",

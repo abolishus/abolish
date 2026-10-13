@@ -39,6 +39,7 @@ interface Vector {
   readonly block: { readonly hash: string; readonly timestamp: string; readonly header: string };
   readonly anchor: string;
   readonly receiptKeys: readonly string[];
+  readonly slots: readonly string[];
   readonly nodes: readonly string[];
   readonly records: readonly string[];
   readonly result: { readonly status: string; readonly code?: string; readonly at?: object };
@@ -71,7 +72,7 @@ const evidence = (v: Vector): L1Evidence => ({
 
 test("the file is the receipt-key record vector format", () => {
   expect(file.format).toBe("abolish-receipt-key-record-vectors/1");
-  expect(file.vectors.length).toBe(18);
+  expect(file.vectors.length).toBe(19);
   expect(new Set(file.vectors.map((v) => v.id)).size).toBe(file.vectors.length);
   // Every code of 2.9 appears, and every outcome.
   const codes = new Set(file.vectors.map((v) => v.result.code ?? v.result.status));
@@ -94,6 +95,8 @@ describe("receipt-key words and 2.9 from L1 state", () => {
       // The header's hash is Keccak-256 of its bytes, as Anvil computed it.
       expect(Buffer.from(l1.header.hash).toString("hex")).toBe(v.block.hash);
       const keys = v.receiptKeys.map(hex);
+      // The slots are Foundry's `cast index`, computed apart from ours.
+      expect(keys.map((k) => Buffer.from(receiptKeySlot(k)).toString("hex"))).toEqual(v.slots);
       expect(receiptKeyRow(l1, keys, opensAt)).toEqual(v.result);
       if (v.records.length === 0) {
         expect(() => receiptKeyWords(l1, keys)).toThrow(L1Error);
@@ -253,6 +256,12 @@ describe("2.9's record rule, over any word", () => {
           const [at, reg] = a < b ? [a, b] : [b, a];
           return { reg, ret: 0n, high: 0n, at };
         }),
+      // Registered by the block, retired after it.
+      fc
+        .tuple(u64, u64, u64)
+        .map((xs) => xs.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)))
+        .filter(([reg, at, ret]) => reg <= at && at < ret)
+        .map(([reg, at, ret]) => ({ reg, ret, high: 0n, at })),
     );
     fc.assert(
       fc.property(key, bad, u64, (k, w, opens) => {

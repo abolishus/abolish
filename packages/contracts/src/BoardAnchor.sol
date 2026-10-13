@@ -6,19 +6,30 @@ import {EventAccumulator} from "./EventAccumulator.sol";
 
 /// @title The board checkpoint hash (docs/spec/board.md, Segments and checkpoints).
 library CheckpointLib {
-    /// `u8(len(tag)) ‖ tag` for `abolish/v1/board-checkpoint` (0x1b = 27).
-    bytes internal constant DS_BOARD_CHECKPOINT = "\x1babolish/v1/board-checkpoint";
+    /// `u8(len(tag)) ‖ tag` for `abolish/v1/board-checkpoint-2` (0x1d = 29).
+    bytes internal constant DS_BOARD_CHECKPOINT = "\x1dabolish/v1/board-checkpoint-2";
 
-    /// `encode(checkpoint)`: `election_id ‖ u32(segment) ‖ u64(size) ‖ head ‖ root`.
-    uint256 internal constant ENCODED_LENGTH = 108;
+    /// `encode(checkpoint)`: `election_id ‖ u32(segment) ‖ u64(size) ‖ head ‖
+    /// root ‖ object_cid ‖ hashes_cid`, each CID 36 bytes.
+    uint256 internal constant ENCODED_LENGTH = 180;
 
-    /// `H(DS("abolish/v1/board-checkpoint", encode(checkpoint)))`.
-    function hash(bytes32 electionId, uint32 segment, uint64 size, bytes32 head, bytes32 root)
-        internal
-        pure
-        returns (bytes32)
-    {
-        return sha256(abi.encodePacked(DS_BOARD_CHECKPOINT, electionId, segment, size, head, root));
+    /// A binary CID: `0x01 ‖ codec ‖ 0x12 ‖ 0x20 ‖ sha256(block)`
+    /// (docs/spec/content-addressing.md).
+    uint256 internal constant CID_LENGTH = 36;
+
+    /// `H(DS("abolish/v1/board-checkpoint-2", encode(checkpoint)))`.
+    function hash(bytes memory encoded) internal pure returns (bytes32) {
+        return sha256(abi.encodePacked(DS_BOARD_CHECKPOINT, encoded));
+    }
+
+    /// Whether `cid` is framed as the content-addressing spec's CIDs are:
+    /// CIDv1, a raw (0x55) or dag-pb (0x70) block, and a 32-byte sha2-256
+    /// digest. Only the digest is then the authority's choice, as a head or
+    /// root is (T-17); whether it names the right bytes is the verifier's
+    /// check (`checkpoint-cid`).
+    function isFramedCid(bytes calldata cid) internal pure returns (bool) {
+        bytes4 prefix = bytes4(cid[0:4]);
+        return prefix == 0x01551220 || prefix == 0x01701220;
     }
 }
 
@@ -47,15 +58,19 @@ contract BoardAnchor is EventAccumulator {
     }
 
     /// @notice A checkpoint was anchored: its hash is now stored for
-    /// `(electionId, segment)`. The data is `(size, head, root)`, so with the
-    /// topics it is the full checkpoint.
+    /// `(electionId, segment)`. The data is `(size, head, root, objectCid,
+    /// hashesCid)`, so with the topics it is the full checkpoint, and the
+    /// segment's bytes can be fetched by CID from L1 alone
+    /// (docs/adr/0029-board-data-availability.md).
     event CheckpointAnchored(
         bytes32 indexed electionId,
         uint32 indexed segment,
         bytes32 indexed checkpointHash,
         uint64 size,
         bytes32 head,
-        bytes32 root
+        bytes32 root,
+        bytes objectCid,
+        bytes hashesCid
     );
 
     /// @notice An archive locator: `u16(version) ‖ body`, naming the latest
@@ -84,6 +99,7 @@ contract BoardAnchor is EventAccumulator {
     error NotAuthority(address caller);
     error MalformedCheckpoints(uint256 length);
     error EmptyBoard(bytes32 electionId, uint32 segment);
+    error MalformedCid(bytes32 electionId, uint32 segment);
     error PeriodNotOver(uint32 segment, uint256 periodEnd, uint256 timestamp);
     error PastDeadline(uint32 segment, uint256 periodEnd, uint256 timestamp);
     error AlreadyAnchored(bytes32 electionId, uint32 segment);
@@ -179,7 +195,7 @@ contract BoardAnchor is EventAccumulator {
     /// docs/spec/board.md, concatenated, and publishes an archive locator if
     /// `locator` is non-empty. Reverts, anchoring none, unless the caller is
     /// the authority, the call carries at least one of the two, every
-    /// checkpoint is non-empty, inside its window and the first for its
+    /// checkpoint has framed CIDs, is non-empty, inside its window and the first for its
     /// election and segment, and the locator is well framed.
     function anchor(bytes calldata checkpoints, bytes calldata locator) external {
         if (msg.sender != authority) revert NotAuthority(msg.sender);
@@ -199,47 +215,59 @@ contract BoardAnchor is EventAccumulator {
         }
         AnchorStorage storage s = _anchorStorage();
         for (uint256 at; at < len; at += CheckpointLib.ENCODED_LENGTH) {
-            bytes32 id = bytes32(checkpoints[at:at + 32]);
-            uint32 segment = uint32(bytes4(checkpoints[at + 32:at + 36]));
-            uint64 size = uint64(bytes8(checkpoints[at + 36:at + 44]));
-            bytes32 head = bytes32(checkpoints[at + 44:at + 76]);
-            bytes32 root = bytes32(checkpoints[at + 76:at + 108]);
-
-            // A checkpoint of an empty board fails the election
-            // (`checkpoint-size`), so it is never anchored.
-            if (size == 0) revert EmptyBoard(id, segment);
-            // The window of docs/spec/board.md, Timing: the verifier ignores
-            // an anchor outside it, so it is never stored.
-            uint256 end = periodEnd(segment);
-            if (block.timestamp < end) revert PeriodNotOver(segment, end, block.timestamp);
-            if (block.timestamp - end > deadline) {
-                revert PastDeadline(segment, end, block.timestamp);
-            }
-            // One checkpoint per election and segment, even an equal one, so
-            // L1 never holds an equivocation (T-24).
-            if (s.checkpointHash[id][segment] != bytes32(0)) revert AlreadyAnchored(id, segment);
-
-            bytes32 h = CheckpointLib.hash(id, segment, size, head, root);
-            s.checkpointHash[id][segment] = h;
-            // Lowered only, never raised: the verifier proves every slot from
-            // it to the seal, so no anchored checkpoint goes unread (T-24).
-            uint256 lowest = s.lowestSegmentPlusOne[id];
-            if (lowest == 0 || segment < lowest - 1) {
-                s.lowestSegmentPlusOne[id] = uint256(segment) + 1;
-            }
-            _log4(
-                CheckpointAnchored.selector,
-                id,
-                bytes32(uint256(segment)),
-                h,
-                abi.encode(size, head, root)
-            );
+            _anchorOne(s, checkpoints[at:at + CheckpointLib.ENCODED_LENGTH]);
         }
         if (locator.length != 0) {
             s.latestLocator = locator;
             s.locatorCount += 1;
             _log2(ArchiveLocated.selector, bytes32(uint256(version)), abi.encode(locator));
         }
+    }
+
+    /// Checks and stores one checkpoint, `encode(checkpoint)`, reverting on
+    /// any rule it breaks.
+    function _anchorOne(AnchorStorage storage s, bytes calldata cp) private {
+        bytes32 id = bytes32(cp[0:32]);
+        uint32 segment = uint32(bytes4(cp[32:36]));
+        uint64 size = uint64(bytes8(cp[36:44]));
+
+        if (!CheckpointLib.isFramedCid(cp[108:144]) || !CheckpointLib.isFramedCid(cp[144:180])) {
+            revert MalformedCid(id, segment);
+        }
+        // A checkpoint of an empty board fails the election
+        // (`checkpoint-size`), so it is never anchored.
+        if (size == 0) revert EmptyBoard(id, segment);
+        // The window of docs/spec/board.md, Timing: the verifier ignores
+        // an anchor outside it, so it is never stored.
+        uint256 end = periodEnd(segment);
+        if (block.timestamp < end) revert PeriodNotOver(segment, end, block.timestamp);
+        if (block.timestamp - end > deadline) {
+            revert PastDeadline(segment, end, block.timestamp);
+        }
+        // One checkpoint per election and segment, even an equal one, so
+        // L1 never holds an equivocation (T-24).
+        if (s.checkpointHash[id][segment] != bytes32(0)) revert AlreadyAnchored(id, segment);
+
+        bytes32 h = CheckpointLib.hash(cp);
+        s.checkpointHash[id][segment] = h;
+        // Lowered only, never raised: the verifier proves every slot from
+        // it to the seal, so no anchored checkpoint goes unread (T-24).
+        uint256 lowest = s.lowestSegmentPlusOne[id];
+        if (lowest == 0 || segment < lowest - 1) {
+            s.lowestSegmentPlusOne[id] = uint256(segment) + 1;
+        }
+        _log4(CheckpointAnchored.selector, id, bytes32(uint256(segment)), h, _eventData(cp));
+    }
+
+    /// `CheckpointAnchored`'s data: `(size, head, root, objectCid, hashesCid)`.
+    function _eventData(bytes calldata cp) private pure returns (bytes memory) {
+        return abi.encode(
+            uint64(bytes8(cp[36:44])),
+            bytes32(cp[44:76]),
+            bytes32(cp[76:108]),
+            cp[108:144],
+            cp[144:180]
+        );
     }
 
     /// @notice Registers a receipt key, a compressed P-256 key, so elections

@@ -55,6 +55,8 @@ function vectorDir(id: string): string {
       size: c["size"],
       head: c["head"],
       root: c["root"],
+      objectCid: c["objectCid"],
+      hashesCid: c["hashesCid"],
       anchoredAt: c["anchoredAt"],
     })),
   });

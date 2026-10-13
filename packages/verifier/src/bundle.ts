@@ -153,7 +153,11 @@ function parseClock(value: unknown): AnchorClock {
 
 function parseAnchor(value: unknown, j: number): Anchor {
   const what = `anchors[${j}]`;
-  const a = object(value, ["electionId", "segment", "size", "head", "root", "anchoredAt"], what);
+  const a = object(
+    value,
+    ["electionId", "segment", "size", "head", "root", "objectCid", "hashesCid", "anchoredAt"],
+    what,
+  );
   return {
     checkpoint: {
       election_id: hex32(a["electionId"], `${what}.electionId`),
@@ -161,6 +165,8 @@ function parseAnchor(value: unknown, j: number): Anchor {
       size: integer(a["size"], U64_MAX, `${what}.size`),
       head: hex32(a["head"], `${what}.head`),
       root: hex32(a["root"], `${what}.root`),
+      object_cid: hexBytes(a["objectCid"], `${what}.objectCid`, 36),
+      hashes_cid: hexBytes(a["hashesCid"], `${what}.hashesCid`, 36),
     },
     anchoredAt: integer(a["anchoredAt"], U64_MAX, `${what}.anchoredAt`),
   };
@@ -192,7 +198,7 @@ function parseL1(value: unknown, withAnchor = true): Omit<L1Evidence, "anchor"> 
     checkpoints: array(l["checkpoints"], "l1.checkpoints").map((c, i) => {
       const what = `l1.checkpoints[${i}]`;
       try {
-        return decodeCheckpoint(hexBytes(c, what, 108));
+        return decodeCheckpoint(hexBytes(c, what, 180));
       } catch (e) {
         if (e instanceof DecodeError) throw new BundleError(`${what}: ${e.code}`);
         throw e;

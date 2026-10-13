@@ -110,6 +110,8 @@ const valid = () => ({
       size: "2",
       head: "cd".repeat(32),
       root: "ef".repeat(32),
+      objectCid: `01551220${"a1".repeat(32)}`,
+      hashesCid: `01701220${"a2".repeat(32)}`,
       anchoredAt: "1800003660",
     },
   ],
@@ -138,6 +140,8 @@ describe("parseBundle", () => {
           size: 2n,
           head: Uint8Array.from(Buffer.from("cd".repeat(32), "hex")),
           root: Uint8Array.from(Buffer.from("ef".repeat(32), "hex")),
+          object_cid: Uint8Array.from(Buffer.from(`01551220${"a1".repeat(32)}`, "hex")),
+          hashes_cid: Uint8Array.from(Buffer.from(`01701220${"a2".repeat(32)}`, "hex")),
         },
         anchoredAt: 1800003660n,
       },
@@ -149,6 +153,7 @@ describe("parseBundle", () => {
     const u64 = fc.bigInt({ min: 0n, max: 2n ** 64n - 1n });
     const u32 = fc.integer({ min: 0, max: 2 ** 32 - 1 });
     const b32 = fc.uint8Array({ minLength: 32, maxLength: 32 });
+    const b36 = fc.uint8Array({ minLength: 36, maxLength: 36 });
     run(
       fc.property(
         b32,
@@ -157,7 +162,7 @@ describe("parseBundle", () => {
         u64,
         u32,
         u64,
-        fc.array(fc.tuple(b32, u32, u64, b32, b32, u64), { maxLength: 4 }),
+        fc.array(fc.tuple(b32, u32, u64, b32, b32, b36, b36, u64), { maxLength: 4 }),
         (id, epoch, period, deadline, lastSegment, now, anchors) => {
           const b = parse({
             format: "abolish-verifier-bundle/1",
@@ -170,12 +175,14 @@ describe("parseBundle", () => {
               lastSegment: `${lastSegment}`,
             },
             now: `${now}`,
-            anchors: anchors.map(([e, segment, size, head, root, at]) => ({
+            anchors: anchors.map(([e, segment, size, head, root, object, hashes, at]) => ({
               electionId: toHex(e),
               segment: `${segment}`,
               size: `${size}`,
               head: toHex(head),
               root: toHex(root),
+              objectCid: toHex(object),
+              hashesCid: toHex(hashes),
               anchoredAt: `${at}`,
             })),
           });
@@ -189,6 +196,8 @@ describe("parseBundle", () => {
               a.checkpoint.size,
               a.checkpoint.head,
               a.checkpoint.root,
+              a.checkpoint.object_cid,
+              a.checkpoint.hashes_cid,
               a.anchoredAt,
             ]),
           ).toEqual(anchors);
@@ -232,6 +241,14 @@ describe("parseBundle", () => {
     [
       "an anchor with an unknown member",
       (o) => ({ ...o, anchors: [{ ...o.anchors[0], hash: ID }] }),
+    ],
+    [
+      "an anchor CID of 35 bytes",
+      (o) => ({ ...o, anchors: [{ ...o.anchors[0], objectCid: `01551220${"a1".repeat(31)}` }] }),
+    ],
+    [
+      "an anchor missing its entry-hash list's CID",
+      (o) => ({ ...o, anchors: [{ ...o.anchors[0], hashesCid: undefined }] }),
     ],
     [
       "an anchor missing its time",
@@ -330,7 +347,7 @@ const l1File = JSON.parse(
 };
 const closed = l1File.vectors.find((v) => v.id === "closed");
 if (closed === undefined) throw new Error("no closed vector");
-const CHECKPOINT = `${l1File.electionId}${"00".repeat(76)}`;
+const CHECKPOINT = `${l1File.electionId}${"00".repeat(148)}`;
 const validL1 = () => ({
   format: "abolish-verifier-bundle/2",
   electionId: l1File.electionId,
@@ -387,8 +404,8 @@ describe("parseBundle, format 2", () => {
     ["an uppercase node", (l) => ({ ...l, nodes: [(l.nodes[0] as string).toUpperCase()] })],
     ["a node that isn't a string", (l) => ({ ...l, nodes: [1] })],
     ["checkpoints that aren't an array", (l) => ({ ...l, checkpoints: "" })],
-    ["a checkpoint of 107 bytes", (l) => ({ ...l, checkpoints: [CHECKPOINT.slice(2)] })],
-    ["a checkpoint of 109 bytes", (l) => ({ ...l, checkpoints: [`${CHECKPOINT}00`] })],
+    ["a checkpoint of 179 bytes", (l) => ({ ...l, checkpoints: [CHECKPOINT.slice(2)] })],
+    ["a checkpoint of 181 bytes", (l) => ({ ...l, checkpoints: [`${CHECKPOINT}00`] })],
     ["l1 that isn't an object", () => []],
   ];
   for (const [what, mutate] of rejected)

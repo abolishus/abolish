@@ -185,6 +185,18 @@ export const boardAnchorAbi = [
         type: "bytes32",
         indexed: false,
       },
+      {
+        name: "objectCid",
+        internalType: "bytes",
+        type: "bytes",
+        indexed: false,
+      },
+      {
+        name: "hashesCid",
+        internalType: "bytes",
+        type: "bytes",
+        indexed: false,
+      },
     ],
     name: "CheckpointAnchored",
   },
@@ -243,6 +255,14 @@ export const boardAnchorAbi = [
     type: "error",
     inputs: [{ name: "length", internalType: "uint256", type: "uint256" }],
     name: "MalformedCheckpoints",
+  },
+  {
+    type: "error",
+    inputs: [
+      { name: "electionId", internalType: "bytes32", type: "bytes32" },
+      { name: "segment", internalType: "uint32", type: "uint32" },
+    ],
+    name: "MalformedCid",
   },
   {
     type: "error",

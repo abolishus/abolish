@@ -189,6 +189,7 @@ function boardOutcomes(e: BoardError): readonly [Outcome, Outcome] {
       return [failed, NOT_REACHED];
     // Run only once every entry passed.
     case "checkpoint-boundary":
+    case "checkpoint-cid":
     case "unanchored":
     case "unsealed":
       return [PASS, failed];

@@ -79,7 +79,7 @@ def l1_checks(election_id, anchors, clock, now):
     for a in counted:
         if a["electionId"] != election_id:
             return "wrong-election"
-        key = (a["size"], a["head"], a["root"])
+        key = (a["size"], a["head"], a["root"], a["objectCid"], a["hashesCid"])
         if first.setdefault(a["segment"], key) != key:
             return "checkpoint-equivocation"
     for a in counted:
@@ -87,7 +87,7 @@ def l1_checks(election_id, anchors, clock, now):
             return "checkpoint-size"
         for o in counted:
             if o["segment"] < a["segment"] and (
-                o["size"] > a["size"] or (o["size"] == a["size"] and (o["head"], o["root"]) != (a["head"], a["root"]))
+                o["size"] > a["size"] or (o["size"] == a["size"] and (o["head"], o["root"], o["objectCid"], o["hashesCid"]) != (a["head"], a["root"], a["objectCid"], a["hashesCid"]))
             ):
                 return "checkpoint-inconsistent"
     if window_end(clock, clock["lastSegment"]) < now and not any(a["segment"] == clock["lastSegment"] for a in counted):
@@ -191,6 +191,8 @@ def main(out_dir):
             "size": size,
             "head": board.chain_links(entries[:size])[-1],
             "root": board.BOARD.mth(hs),
+            "objectCid": board.segment_cids(entries, size)[0],
+            "hashesCid": board.segment_cids(entries, size)[1],
         }
 
     def anchor(segment, entries=honest, late=0, **over):
@@ -283,6 +285,7 @@ def main(out_dir):
         ("unjudged-key-unsettled", {"keys": {"kind": "definition", "keys": [(pinned[0], "judges"), (retired_key, "unsettled")]}}),
         ("board-failed-equivocation", {"anchors": honest_anchors + [anchor(1, fork_late, late=5)]}),
         ("board-failed-inconsistent", {"anchors": [anchor(0), anchor(1, size=1), anchor(3), anchor(4)]}),
+        ("board-failed-inconsistent-cid", {"anchors": honest_anchors + [anchor(2, objectCid=checkpoint(0)["objectCid"])]}),
         ("board-failed-size", {"anchors": honest_anchors + [anchor(2, size=0, head=bytes(32), root=bytes(32))]}),
         ("board-failed-wrong-election", {"anchors": [anchor(0, electionId=sha256(b"other"))] + honest_anchors[1:]}),
         ("board-failed-unsealed", {"anchors": honest_anchors[:3]}),
@@ -292,7 +295,7 @@ def main(out_dir):
         ("unanchored", {"anchors": [honest_anchors[0]] + honest_anchors[2:]}),
         ("unanchored-late-anchor-ignored", {"anchors": [honest_anchors[0], anchor(1, late=clock["deadline"])] + honest_anchors[2:]}),
         ("forked-l1-earlier-covers", {"receipt": receipt_for(1, fork_early), "payload": payloads[7]}),
-        ("forked-l1-later-short", {"receipt": receipt_for(6), "payload": payloads[6], "anchors": honest_anchors[:3] + [anchor(4, size=6, head=links[5], root=board.BOARD.mth(hashes[:6]))]}),
+        ("forked-l1-later-short", {"receipt": receipt_for(6), "payload": payloads[6], "anchors": honest_anchors[:3] + [anchor(4, size=6, head=links[5], root=board.BOARD.mth(hashes[:6]), objectCid=checkpoint(3)["objectCid"], hashesCid=checkpoint(3)["hashesCid"])]}),
         ("forked-copy", {"receipt": receipt_for(3, fork_late), "payload": payloads[7]}),
         ("forked-copy-partial-source", {"receipt": receipt_for(3, fork_late), "payload": payloads[7], "sources": [bytes(wrong_list), honest_list]}),
         ("unresolved-no-source", {"sources": []}),
@@ -301,7 +304,7 @@ def main(out_dir):
     ]
     anchors_of = lambda xs: [
         {
-            "checkpoint": {"electionId": h(a["electionId"]), "segment": a["segment"], "size": str(a["size"]), "head": h(a["head"]), "root": h(a["root"])},
+            "checkpoint": {"electionId": h(a["electionId"]), "segment": a["segment"], "size": str(a["size"]), "head": h(a["head"]), "root": h(a["root"]), "objectCid": h(a["objectCid"]), "hashesCid": h(a["hashesCid"])},
             "anchoredAt": str(a["anchoredAt"]),
         }
         for a in xs

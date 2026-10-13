@@ -6,6 +6,7 @@ import {
   chainLink,
   MAX_BOARD_PAYLOAD,
   merkleRoot,
+  objectCid,
 } from "@abolishus/crypto";
 import { CHECKS, parseBundle, type Report, splitEntries, verifyBundle } from "../src/index.ts";
 
@@ -20,6 +21,8 @@ interface CheckpointVector {
   readonly size: string;
   readonly head: string;
   readonly root: string;
+  readonly objectCid: string;
+  readonly hashesCid: string;
   readonly anchoredAt: string;
 }
 
@@ -78,6 +81,8 @@ const bundleJson = (v: BoardVector) =>
       size: c.size,
       head: c.head,
       root: c.root,
+      objectCid: c.objectCid,
+      hashesCid: c.hashesCid,
       anchoredAt: c.anchoredAt,
     })),
   });
@@ -87,7 +92,7 @@ const row = (r: Report, id: string) => r.checks.find((c) => c.id === id);
 // The rows the spec's table gives for each board-check code (Procedure, step 5).
 const ANCHOR = ["checkpoint-equivocation", "checkpoint-size", "checkpoint-inconsistent"];
 const COPY = ["checkpoint-missing", "copy-mismatch"];
-const AFTER = ["checkpoint-boundary", "unanchored", "unsealed"];
+const AFTER = ["checkpoint-boundary", "checkpoint-cid", "unanchored", "unsealed"];
 
 // A board copy is self-delimiting, so an entry with trailing bytes can't be
 // written into board.bin as itself: the bytes become the start of the next
@@ -197,6 +202,8 @@ test("an anchored entry with a length over MAX_BOARD_PAYLOAD fails 4.1, attribut
         size: "1",
         head: Buffer.from(chainLink(new Uint8Array(32), e0)).toString("hex"),
         root: Buffer.from(merkleRoot(BOARD_TREE, [e0])).toString("hex"),
+        objectCid: Buffer.from(objectCid(entry)).toString("hex"),
+        hashesCid: Buffer.from(objectCid(e0)).toString("hex"),
         anchoredAt: "1800003660",
       },
     ],

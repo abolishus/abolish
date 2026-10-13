@@ -96,11 +96,13 @@ def checkpoint_bytes(cp):
         + int(cp["size"]).to_bytes(8, "big").hex()
         + cp["head"]
         + cp["root"]
+        + cp["objectCid"]
+        + cp["hashesCid"]
     )
 
 
 def checkpoint_hash(encoded):
-    tag = b"abolish/v1/board-checkpoint"
+    tag = b"abolish/v1/board-checkpoint-2"
     return hashlib.sha256(bytes([len(tag)]) + tag + bytes.fromhex(encoded)).hexdigest()
 
 

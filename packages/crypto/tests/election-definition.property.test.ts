@@ -647,4 +647,61 @@ describe("2.3's profile combination", () => {
       expect(profileCombinationRule(twice)).toBe("profile-combination");
     }
   });
+
+  test("definition versions 1, 3 and 4 pair with display-text version 1 only, and an unknown one fails", () => {
+    // From docs/spec/verifier.md 2.3: display-text version 2 carries
+    // questions and pairs with definition versions 5 and 6, and a
+    // display-text version this package doesn't know fails rather than being
+    // unsupported, whatever else the profile pins (T-34, T-36, T-41).
+    const withDisplayText = (d: ElectionDefinition, version: number, definition = 1) => ({
+      ...d,
+      profile: {
+        ...d.profile,
+        pins: d.profile.pins.map((p) =>
+          p.record_type === RECORD_TYPES.displayText
+            ? { ...p, version }
+            : p.record_type === RECORD_TYPES.electionDefinition
+              ? { ...p, version: definition }
+              : p,
+        ),
+      },
+    });
+    // Under 3 and 4, ballot version 2 beside a spoiled-ballot opening version
+    // this package doesn't know is unsupported when the display text fits;
+    // a display-text failure is never hidden behind it.
+    const regional = pinning(4, 2, 1);
+    const unknownOpening = {
+      ...regional,
+      profile: {
+        ...regional.profile,
+        pins: regional.profile.pins.map((p) =>
+          p.record_type === RECORD_TYPES.spoiledBallotOpening ? { ...p, version: 255 } : p,
+        ),
+      },
+    };
+    for (const definition of [1, 3, 4]) {
+      const fitting = definition === 1 ? pinning(4, 1, 1) : unknownOpening;
+      expect(profileCombinationRule(withDisplayText(fitting, 1, definition))).toBe(
+        definition === 1 ? undefined : "unsupported-version",
+      );
+      for (const version of [2, 3, 255])
+        expect(profileCombinationRule(withDisplayText(fitting, version, definition))).toBe(
+          "profile-combination",
+        );
+    }
+    const unpinned = {
+      ...sampleDefinition,
+      profile: {
+        ...sampleDefinition.profile,
+        pins: sampleDefinition.profile.pins.filter(
+          (p) => p.record_type !== RECORD_TYPES.displayText,
+        ),
+      },
+    };
+    expect(profileCombinationRule(unpinned)).toBe("profile-combination");
+    // A board-entry version this package doesn't read stays unsupported (2.3, step 2).
+    expect(profileCombinationRule(withDisplayText(pinning(6, 1, 1), 2))).toBe(
+      "unsupported-version",
+    );
+  });
 });

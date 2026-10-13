@@ -11,7 +11,7 @@ import {
   readHead,
   readInclusionProof,
 } from "../src/index.ts";
-import { type TestDb, testDb } from "./db.ts";
+import { newElection, type TestDb, testDb } from "./db.ts";
 
 // The board_subtrees table's guarantees (migrations/0006_board_subtrees.sql;
 // T-23, T-52): the app role can only read and append, nobody (the owner
@@ -47,7 +47,7 @@ const count = async (e: Uint8Array) =>
 
 /** A board of `n` entries, appended through appendEntry. */
 async function board(n: number): Promise<Uint8Array> {
-  const id = b32();
+  const id = await newElection(app);
   for (let i = 0; i < n; i++) await appendEntry(app, id, 0, ballot(i));
   return id;
 }

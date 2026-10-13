@@ -5,14 +5,19 @@
 
 import {
   appendSubtrees,
+  BOARD_ENTRY,
   BOARD_TREE,
   type BoardEntry,
   boardEntryHash,
+  type BoardEntryVersion,
   chainLink,
   consistencyProofSubtrees,
+  decodeElectionDefinitionRecord,
   encodeBoardEntry,
   foldSubtrees,
   inclusionProofSubtrees,
+  pinnedVersion,
+  RECORD_TYPES,
   rootSubtrees,
   type SubtreeId,
 } from "@abolishus/crypto";
@@ -20,7 +25,7 @@ import { and, asc, desc, eq, gte, lt, or, sql as q } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import type { Sql } from "postgres";
 import { isBytes } from "./bytes.ts";
-import { boardEntries, boardSubtrees } from "./db/schema/index.ts";
+import { boardEntries, boardSubtrees, electionDefinitions } from "./db/schema/index.ts";
 
 const SPOILED_BALLOT_OPENING = 0x0003;
 const MAX_SEGMENT = 2 ** 32 - 1;
@@ -32,6 +37,10 @@ const MAX_SEGMENT = 2 ** 32 - 1;
 const BOARD_LOCK_CLASS = 0x0b0a4d;
 
 export type AppendErrorCode =
+  /** No definition is stored for the election, so its board-entry version is unknown. */
+  | "no-definition"
+  /** The stored definition pins no board-entry version this release writes (T-36). */
+  | "unsupported-version"
   /** The entry doesn't encode: a payload type not allowed on the board, a bad length or election ID. */
   | "invalid-entry"
   /** The segment is below the previous entry's. */
@@ -83,6 +92,52 @@ async function subtreeHashes(
   });
 }
 
+/** Why an election's board has no version to encode its entries under. */
+export type BoardVersionCode = Extract<AppendErrorCode, "no-definition" | "unsupported-version">;
+
+const isBoardEntryVersion = (v: number | undefined): v is BoardEntryVersion =>
+  v !== undefined && Object.hasOwn(BOARD_ENTRY.versions, v);
+
+/**
+ * The board-entry version `id`'s stored definition pins, which every entry of
+ * its board is encoded, hashed and chained under: never a default, since an
+ * entry hashed under another version matches nothing the verifier recomputes
+ * and fails 2.3's `profile-mismatch` (docs/spec/board.md; T-23, T-34). A
+ * definition is write-once, so the answer never changes for a board.
+ */
+async function pinnedBoardVersion(
+  db: Pick<ReturnType<typeof drizzle>, "select">,
+  id: Uint8Array,
+): Promise<BoardEntryVersion | BoardVersionCode> {
+  const [row] = await db
+    .select({ definition: electionDefinitions.definition })
+    .from(electionDefinitions)
+    .where(eq(electionDefinitions.electionId, id));
+  if (row === undefined) return "no-definition";
+  // storeDefinition decoded these bytes strictly before storing them.
+  const { value } = decodeElectionDefinitionRecord(new Uint8Array(row.definition));
+  const version = pinnedVersion(value, RECORD_TYPES.boardEntry);
+  return isBoardEntryVersion(version) ? version : "unsupported-version";
+}
+
+/** `pinnedBoardVersion`, for readers outside an append's transaction. */
+export function boardVersion(
+  client: Sql,
+  id: Uint8Array,
+): Promise<BoardEntryVersion | BoardVersionCode> {
+  return pinnedBoardVersion(drizzle({ client }), id);
+}
+
+/**
+ * The version a board with entries is read under. Only `appendEntry` writes
+ * entries, under that version, so a board without one was written around it.
+ */
+async function storedBoardVersion(client: Sql, id: Uint8Array): Promise<BoardEntryVersion> {
+  const version = await boardVersion(client, id);
+  if (typeof version === "string") throw new Error(`a stored board has ${version}`);
+  return version;
+}
+
 export interface AppendedEntry {
   readonly index: bigint;
   readonly entryHash: Uint8Array;
@@ -103,7 +158,9 @@ function compareBytes(a: Uint8Array, b: Uint8Array): number {
  * Appends `payload` to `electionId`'s board in `segment`, as the next entry,
  * and returns its index, entry hash and chain link. Appends to one board are
  * serialised by a transaction-scoped advisory lock on the election, so
- * concurrent callers get consecutive indexes. The caller decides whether the
+ * concurrent callers get consecutive indexes. The entry is encoded under the
+ * board-entry version the election's stored definition pins, so a board can
+ * start only once its definition is stored. The caller decides whether the
  * payload may be boarded at all: it MUST decode strictly under the election's
  * profile (docs/spec/board.md, Allowed payloads); this checks only the
  * envelope's rules. `AppendError` covers those refusals; a database error
@@ -133,6 +190,8 @@ export async function appendEntry(
       await tx.execute(
         q`SELECT pg_advisory_xact_lock(${BOARD_LOCK_CLASS}::int, ('x' || encode(substring(${id}::bytea FROM 1 FOR 4), 'hex'))::bit(32)::int)`,
       );
+      const version = await pinnedBoardVersion(tx, id);
+      if (typeof version === "string") throw new AppendError(version);
       const [prev] = await tx
         .select()
         .from(boardEntries)
@@ -153,9 +212,8 @@ export async function appendEntry(
       const entry: BoardEntry = { election_id: id, index, segment, payload: body };
       let encoded: Uint8Array;
       try {
-        // Version 1 only: the delivery records of board-entry version 3 need the
-        // election's pinned version, which core doesn't read yet.
-        encoded = encodeBoardEntry(entry, 1);
+        // Refuses a payload type the version doesn't allow.
+        encoded = encodeBoardEntry(entry, version);
       } catch (e) {
         throw new AppendError("invalid-entry", { cause: e });
       }
@@ -212,6 +270,8 @@ export async function readBoard(client: Sql, electionId: Uint8Array): Promise<Ui
     .from(boardEntries)
     .where(eq(boardEntries.electionId, id))
     .orderBy(asc(boardEntries.idx));
+  if (rows.length === 0) return [];
+  const version = await storedBoardVersion(client, id);
   return rows.map((r) =>
     encodeBoardEntry(
       {
@@ -220,7 +280,7 @@ export async function readBoard(client: Sql, electionId: Uint8Array): Promise<Ui
         segment: Number(r.segment),
         payload: new Uint8Array(r.payload),
       },
-      1,
+      version,
     ),
   );
 }
@@ -372,6 +432,7 @@ export async function readEntries(
       ),
     )
     .orderBy(asc(boardEntries.idx));
+  const version = await storedBoardVersion(client, id);
   return rows.map((r) =>
     encodeBoardEntry(
       {
@@ -380,7 +441,7 @@ export async function readEntries(
         segment: Number(r.segment),
         payload: new Uint8Array(r.payload),
       },
-      1,
+      version,
     ),
   );
 }

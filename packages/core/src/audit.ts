@@ -16,15 +16,17 @@ import {
   checkBoard,
   encodeBoardEntry,
   rootSubtrees,
-  UNPINNED,
 } from "@abolishus/crypto";
 import { asc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import type { Sql } from "postgres";
+import { boardVersion } from "./board.ts";
 import { isBytes } from "./bytes.ts";
 import { boardEntries, boardSubtrees } from "./db/schema/index.ts";
 
 export type BoardAuditCode =
+  /** The board has entries but no stored definition pinning a board-entry version this release reads. */
+  | "board-unpinned"
   /** The stored entries fail the verifier's checkBoard (its `BoardError` is the cause). */
   | "board-invalid"
   /** A row's `entry_hash` isn't the hash of its encoded entry. */
@@ -77,7 +79,12 @@ export async function auditBoard(client: Sql, electionId: Uint8Array): Promise<n
     .from(boardEntries)
     .where(eq(boardEntries.electionId, id))
     .orderBy(asc(boardEntries.idx));
-  // The table's CHECKs take only payloads the entry envelope encodes.
+  if (rows.length === 0) return 0;
+  // Entries are hashed under the version the definition pins, as appendEntry
+  // hashed them; a board without one was written around it.
+  const version = await boardVersion(client, id);
+  if (typeof version === "string") throw new BoardAuditError("board-unpinned", 0);
+  // The table's CHECKs take only payloads every version's envelope encodes.
   const encoded = rows.map((r) =>
     encodeBoardEntry(
       {
@@ -86,14 +93,12 @@ export async function auditBoard(client: Sql, electionId: Uint8Array): Promise<n
         segment: Number(r.segment),
         payload: new Uint8Array(r.payload),
       },
-      1,
+      version,
     ),
   );
   let board;
   try {
-    // Unpinned: this checks storage, not admission. The verifier pins the
-    // version the election's definition names.
-    board = checkBoard(id, encoded, UNPINNED);
+    board = checkBoard(id, encoded, version);
   } catch (e) {
     if (e instanceof BoardError && "entry" in e.at)
       throw new BoardAuditError("board-invalid", e.at.entry, { cause: e });

@@ -169,9 +169,10 @@ export async function deployL2(rpc: Rpc, l1: Rpc, inputs: L2Inputs): Promise<L2>
 }
 
 /**
- * Sets the mock predeploy to the L1 Anvil's latest block, and the next L2
- * block's timestamp to that block's, so the next event's origin is a real L1
- * block, at its L2 timestamp (docs/spec/contracts.md, The L1 origin).
+ * Sets the mock predeploy to the L1 Anvil's latest block, so the next
+ * event's origin is a real L1 block (docs/spec/contracts.md, The L1 origin).
+ * Both Anvils keep wall-clock time until the run moves the L1's forward to
+ * anchor, which comes after every registration.
  */
 async function setL1Origin(rpc: Rpc, l1: Rpc, from: string): Promise<void> {
   const block = await l1.call<{ number: string; timestamp: string; hash: string }>(

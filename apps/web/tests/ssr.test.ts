@@ -303,6 +303,11 @@ describe("poll page", () => {
     expect(html.replace(/<[^>]+>/g, "")).toContain(HEAD.chainHead);
     expect(html).toContain("One choice");
     expect(html).toContain("4 of 7");
+    // The stub's poll closed on 8 January 2026, by its definition's own times.
+    expect(html).toContain(">Closed</span>");
+    expect(html).toContain("This poll has closed.");
+    // The evidence is one step down, but in the server's HTML, so it opens without script.
+    expect(html).toMatch(/<details\b[^>]*>\s*<summary\b/);
     expect(html).not.toContain('name="robots"');
     expect(html).toContain(`href="/p/${CODE}"`);
     expect(html).toContain(`<meta property="og:title" content="Poll ${CODE}"`);
@@ -487,7 +492,7 @@ describe("short links", () => {
 describe("poll list", () => {
   /** The polls a page of the list links to, in order. */
   const linked = (html: string) =>
-    [...html.matchAll(/<li\b[^>]*><a[^>]*href="\/polls\/([0-9a-f]{64})"/g)].map((m) => m[1]);
+    [...html.matchAll(/<h3\b[^>]*><a[^>]*href="\/polls\/([0-9a-f]{64})"/g)].map((m) => m[1]);
 
   test("pages through what the API lists, each poll's definition decoded", async () => {
     const first = await (await get("/polls")).text();
@@ -532,6 +537,55 @@ describe("poll list", () => {
       expect(html).not.toMatch(/new Error|expected an election ID/);
     },
   );
+
+  test("filters the page in hand by status and counting rule, with no script", async () => {
+    // Every stub poll closed on 8 January 2026, so none is open.
+    let response = await get("/polls?status=open");
+    expect(response.status).toBe(200);
+    let html = await response.text();
+    expect(linked(html)).toEqual([]);
+    expect(html).toContain("No polls on this page match");
+    expect(html).toContain("0 of 19 polls on this page match.");
+    expect(html).toMatch(/<input type="radio" [^>]*name="status" checked="" value="open"/);
+    // What the form sends, a group at All included, renders as sent, and the next page keeps it.
+    response = await get("/polls?status=closed&counting=plurality");
+    expect(response.status).toBe(200);
+    html = await response.text();
+    expect(linked(html)).toEqual(listed.slice(0, 19));
+    expect(html).toContain("19 of 19 polls on this page match.");
+    expect(html).toContain(
+      `href="/polls?after=${listed[19]}&amp;status=closed&amp;counting=plurality"`,
+    );
+    expect(html).toMatch(/href="\/polls">Clear filters<\/a>/);
+    response = await get("/polls?status=all&counting=approval");
+    expect(response.status).toBe(200);
+    expect(linked(await response.text())).toEqual([]);
+    // A definition that names another election never matches a filter (T-34).
+    html = await (await get(`/polls?after=${LOST_ID}&status=closed`)).text();
+    expect(linked(html)).not.toContain(SWAPPED_ID);
+    expect(html).toContain(`<input type="hidden" name="after" value="${LOST_ID}"/>`);
+    html = await (await get(`/polls?after=${LOST_ID}`)).text();
+    expect(linked(html)).toContain(SWAPPED_ID);
+  });
+
+  test.each(["?status=bogus", "?status=open&status=closed", "?counting=ranked"])(
+    "%s is no filter, quoting nothing",
+    async (search) => {
+      const response = await follow(`/polls${search}`);
+      expect(response.status).toBe(200);
+      const html = await response.text();
+      expect(linked(html)).toEqual(listed.slice(0, 19));
+      expect(html).not.toContain("bogus");
+      expect(html).not.toContain("ranked");
+    },
+  );
+
+  test("a filter asks the API for the same page as no filter", async () => {
+    seen.length = 0;
+    await get("/polls?status=open&counting=approval");
+    expect(seen.filter((r) => r.path === "/elections")).toHaveLength(1);
+    expect(seen.filter((r) => r.path === "/elections/definition")).toHaveLength(20);
+  });
 
   test("asks the API for nothing of the visitor's (T-10)", async () => {
     seen.length = 0;
@@ -609,7 +663,7 @@ describe("server functions", () => {
 describe("home", () => {
   test("lists the first polls, with the lookup form and a link to the rest", async () => {
     const html = await (await get("/")).text();
-    const linked = [...html.matchAll(/<li\b[^>]*><a[^>]*href="\/polls\/([0-9a-f]{64})"/g)].map(
+    const linked = [...html.matchAll(/<h3\b[^>]*><a[^>]*href="\/polls\/([0-9a-f]{64})"/g)].map(
       (m) => m[1],
     );
     expect(linked).toEqual(listed.slice(0, 6));

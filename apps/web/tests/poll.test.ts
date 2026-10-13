@@ -4,7 +4,7 @@ import { decodeElectionDefinition, encodeElectionDefinition } from "@abolishus/c
 import fc from "fast-check";
 import { describe, expect, test } from "vite-plus/test";
 
-import { definitionView } from "../src/poll.ts";
+import { definitionView, instant, pollStatus } from "../src/poll.ts";
 import { fromHex, toHex } from "../src/values.ts";
 
 const runs = { numRuns: Number(process.env["FC_NUM_RUNS"] ?? 100) };
@@ -124,5 +124,31 @@ describe("definitionView", () => {
     const result = definitionView(electionId, toHex(far));
     if (!result.ok) throw new Error(result.problem);
     expect(result.poll.closesAt).toEqual({ seconds: "18446744073709551615", iso: undefined });
+  });
+});
+
+describe("pollStatus", () => {
+  const U64_MAX = 2n ** 64n - 1n;
+  const u64 = fc.bigInt({ min: 0n, max: U64_MAX });
+
+  test("is scheduled before opens_at, open through closes_at and closed after", () => {
+    fc.assert(
+      fc.property(u64, u64, u64, (opens, closes, now) => {
+        const status = pollStatus(
+          { opensAt: instant(opens), closesAt: instant(closes) },
+          instant(now),
+        );
+        expect(status).toBe(now < opens ? "scheduled" : now <= closes ? "open" : "closed");
+      }),
+      runs,
+    );
+  });
+
+  test("decides at the boundaries by the second, past what Date holds too", () => {
+    const poll = { opensAt: instant(100n), closesAt: instant(U64_MAX - 1n) };
+    expect(pollStatus(poll, instant(99n))).toBe("scheduled");
+    expect(pollStatus(poll, instant(100n))).toBe("open");
+    expect(pollStatus(poll, instant(U64_MAX - 1n))).toBe("open");
+    expect(pollStatus(poll, instant(U64_MAX))).toBe("closed");
   });
 });

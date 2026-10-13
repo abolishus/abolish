@@ -4,7 +4,13 @@ import { shortCode } from "@abolishus/core/short-codes";
 import { ORPCError } from "@orpc/client";
 
 import { fromHex } from "../values.ts";
-import { definitionView, type DefinitionProblem, type PollView } from "../poll.ts";
+import {
+  definitionView,
+  type DefinitionProblem,
+  type Instant,
+  instant,
+  type PollView,
+} from "../poll.ts";
 import type { Api } from "./api.ts";
 
 export interface BoardHead {
@@ -22,6 +28,8 @@ export type PollPage =
       readonly poll: PollView;
       readonly board: BoardHead;
       readonly moderation: ModerationState;
+      /** When the page was loaded, for the poll's status. */
+      readonly asOf: Instant;
       /** Its canonical short code, checked against its hash; `undefined` if none is served. */
       readonly code: string | undefined;
     }
@@ -57,7 +65,7 @@ export async function loadPoll(api: Api, electionId: string): Promise<PollPage> 
     shortCode(fromHex(view.poll.definitionHash), claimed.length) === claimed
       ? claimed
       : undefined;
-  return { kind: "poll", poll: view.poll, board, moderation, code };
+  return { kind: "poll", poll: view.poll, board, moderation, asOf: now(), code };
 }
 
 /**
@@ -136,8 +144,19 @@ export type ListedPoll =
       readonly problem: DefinitionProblem;
     };
 
+/**
+ * This server's clock as a page loads, to the second: the time a page reads
+ * each poll's status at, carried in the page's data so the browser renders
+ * the same status the server did.
+ */
+export function now(): Instant {
+  return instant(BigInt(Math.floor(Date.now() / 1000)));
+}
+
 export interface PollList {
   readonly polls: readonly ListedPoll[];
+  /** When the page was loaded, for each poll's status. */
+  readonly asOf: Instant;
   /** Where the next page starts, if this one was full. */
   readonly next: string | undefined;
 }
@@ -178,6 +197,7 @@ export async function loadPollList(api: Api, after: string, limit = LIST_PAGE): 
   }
   return {
     polls,
+    asOf: now(),
     // The listing's own cursor, not the last poll shown, so a dropped one doesn't end the list.
     next: elections.length === limit ? elections.at(-1) : undefined,
   };

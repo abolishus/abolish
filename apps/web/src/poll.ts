@@ -51,7 +51,7 @@ export type DefinitionResult =
 // `Date` holds ±8.64e15 ms from the epoch.
 const MAX_DATE_SECONDS = 8_640_000_000_000n;
 
-function instant(seconds: bigint): Instant {
+export function instant(seconds: bigint): Instant {
   return {
     seconds: seconds.toString(),
     iso: seconds <= MAX_DATE_SECONDS ? new Date(Number(seconds) * 1000).toISOString() : undefined,
@@ -90,4 +90,25 @@ export function definitionView(electionId: string, definitionHex: string): Defin
       closesAt: instant(definition.closes_at),
     },
   };
+}
+
+/** Where a poll is in its window: before `opens_at`, up to `closes_at`, or after. */
+export type PollStatus = "scheduled" | "open" | "closed";
+
+export const POLL_STATUSES = [
+  "open",
+  "scheduled",
+  "closed",
+] as const satisfies readonly PollStatus[];
+
+/**
+ * `poll`'s status at `now`, from the definition's own times. A ballot counts
+ * up to and including `closes_at` (docs/spec/revoting.md), so a poll is open
+ * through that second. This is the page's reading of a claimed definition
+ * against the server's clock, never the close rule the verifier applies.
+ */
+export function pollStatus(poll: Pick<PollView, "opensAt" | "closesAt">, now: Instant): PollStatus {
+  const at = BigInt(now.seconds);
+  if (at < BigInt(poll.opensAt.seconds)) return "scheduled";
+  return at <= BigInt(poll.closesAt.seconds) ? "open" : "closed";
 }

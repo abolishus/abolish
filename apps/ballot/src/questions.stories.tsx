@@ -193,6 +193,34 @@ export const ExactlyTwo: Story = {
   },
 };
 
+export const EmptiedAfterChange: Story = {
+  name: "A required question left short after a Change",
+  args: { questions: [SAFE, EXACTLY_TWO] },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(canvas.getByText("Mostly safe"));
+    await next(canvas);
+    await userEvent.click(canvas.getByText("A Saturday farmers' market"));
+    await userEvent.click(canvas.getByText("Monthly river clean-up"));
+    await userEvent.click(canvas.getByRole("button", { name: "Check your answers" }));
+    // Change question 2, take an answer back, then leave by Back rather than
+    // Next: the check screen says it still needs an answer, never that it
+    // was skipped, and sending opens it again with the reason.
+    await userEvent.click(canvas.getByRole("button", { name: "Change your answer to question 2" }));
+    await userEvent.click(canvas.getByText("Monthly river clean-up"));
+    await userEvent.click(canvas.getByRole("button", { name: "Back" }));
+    await userEvent.click(canvas.getByRole("button", { name: "Check your answers" }));
+    await expect(canvas.getByText("Question 2 needs an answer")).toBeVisible();
+    await expect(canvas.getByText(/Choose 1 more to go on/)).toBeVisible();
+    await expect(canvas.queryByText(/You skipped/)).toBeNull();
+    await expect(canvas.queryByText("Skipped: counts as no answer")).toBeNull();
+    await userEvent.click(canvas.getByRole("button", { name: "Send my answers" }));
+    await expect(args.onSend).not.toHaveBeenCalled();
+    await expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent(EVENTS.question);
+    await expect(canvas.getByText("This question needs exactly 2")).toBeVisible();
+  },
+};
+
 const AT_LEAST_ONE: BallotQuestion = { ...EVENTS, minSelections: 1, maxSelections: 4 };
 
 export const AtLeastOne: Story = {

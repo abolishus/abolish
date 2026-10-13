@@ -80,7 +80,6 @@ const enUS = {
   // The question screens (questions.tsx); each instruction from the question's limits (answers.ts).
   questionNumber: "Question {number}",
   checkStep: "Check your answers",
-  questionCount: { one: "{count} question", other: "{count} questions" },
   chooseOne: "Choose one.",
   chooseAny: "Choose as many as you like.",
   chooseUpTo: "Choose up to {count}.",
@@ -126,6 +125,9 @@ const enUS = {
   skippedMany: "You skipped {count} questions",
   skippedExplained: "A skipped question counts as no answer. To answer it, use Change.",
   skippedAnswer: "Skipped: counts as no answer",
+  unfitOne: "Question {number} needs an answer",
+  unfitMany: "{count} questions need an answer",
+  unfitExplained: "Those questions can't be skipped. To answer one, use Change.",
   change: "Change",
   changeLabel: "Change your answer to question {number}",
   send: "Send my answers",

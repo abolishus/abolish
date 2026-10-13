@@ -6,6 +6,7 @@ import {
   type Answers,
   type BallotQuestion,
   firstUnfit,
+  fits,
   instructionOf,
   singleChoice,
   skippable,
@@ -136,6 +137,8 @@ export interface QuestionStepProps {
   arrival?: ReactNode;
   /** Take focus on the heading, as after moving from another screen. */
   focus?: boolean;
+  /** Open with the message that the answer is short, as when sending found it so. */
+  short?: boolean;
   /** The next step is "Check your answers": the last question, or a Change from it. */
   toCheck: boolean;
   onChange: (selection: readonly number[]) => void;
@@ -154,6 +157,7 @@ export function QuestionStep({
   selection,
   arrival,
   focus = false,
+  short = false,
   toCheck,
   onChange,
   onBack,
@@ -164,7 +168,7 @@ export function QuestionStep({
   const name = useId();
   // The option a tap couldn't add, so the overvote message can name it.
   const [refused, setRefused] = useState<number | null>(null);
-  const [asking, setAsking] = useState<"skip" | "short" | null>(null);
+  const [asking, setAsking] = useState<"skip" | "short" | null>(short ? "short" : null);
   const shown = questions[index];
   if (shown === undefined) throw new RangeError(`no question ${index}`);
   const question: BallotQuestion = shown;
@@ -331,7 +335,13 @@ export function CheckAnswers({
   onChallenge,
 }: CheckAnswersProps) {
   const t = useTranslate(catalogs);
-  const skipped = questions.flatMap((_, i) => ((answers[i] ?? []).length === 0 ? [i] : []));
+  // A question left blank where its limits allow it is skipped; one whose
+  // answer doesn't fit (a required question emptied after a Change) still
+  // needs an answer, and is never called skipped.
+  const unfit = questions.flatMap((q, i) => (fits(q, answers[i] ?? []) ? [] : [i]));
+  const skipped = questions.flatMap((q, i) =>
+    skippable(q) && (answers[i] ?? []).length === 0 ? [i] : [],
+  );
   return (
     <Frame
       pollClass={pollClass}
@@ -352,6 +362,20 @@ export function CheckAnswers({
       <ScreenTitle title={t("checkTitle")} focus={focus}>
         <p className="m-0">{t("checkLede")}</p>
       </ScreenTitle>
+      {unfit.length === 0 ? null : (
+        <div className="mt-6">
+          <Note
+            tone="warn"
+            title={
+              unfit.length === 1
+                ? t("unfitOne", { number: (unfit[0] ?? 0) + 1 })
+                : t("unfitMany", { count: unfit.length })
+            }
+          >
+            <p className="m-0">{t("unfitExplained")}</p>
+          </Note>
+        </div>
+      )}
       {skipped.length === 0 ? null : (
         <div className="mt-6">
           <Note
@@ -369,6 +393,7 @@ export function CheckAnswers({
       <ol aria-label={t("answersLabel")} className="m-0 mt-8 grid list-none gap-4 p-0">
         {questions.map((question, i) => {
           const chosen = answers[i] ?? [];
+          const needed = stillNeeded(question, chosen);
           return (
             <li key={i} className="grid gap-3 border border-border px-4 py-4">
               <p className="m-0 text-sm text-muted-foreground">
@@ -377,8 +402,15 @@ export function CheckAnswers({
               <h2 className="m-0 text-base font-normal break-words text-pretty">
                 {question.question}
               </h2>
+              {needed > 0 ? (
+                <p className="m-0 font-semibold">
+                  {t("shortExplained", { count: needed })} {t("cantSkip")}
+                </p>
+              ) : null}
               {chosen.length === 0 ? (
-                <p className="m-0 text-xl font-semibold">{t("skippedAnswer")}</p>
+                needed > 0 ? null : (
+                  <p className="m-0 text-xl font-semibold">{t("skippedAnswer")}</p>
+                )
               ) : (
                 <ul className="m-0 grid list-none gap-1 p-0">
                   {chosen.map((option) => (
@@ -423,10 +455,17 @@ export interface AnswerQuestionsProps {
   onChallenge: (answers: Answers) => void;
 }
 
+/** A question, opened with the short-answer message if sending found it short, or the check. */
+type Screen = { readonly index: number; readonly short?: boolean } | "check";
+
 /**
  * The questions one at a time, then "Check your answers", starting from
  * nothing chosen. Hands the caller the voter's answers, every one checked
  * against its question's limits, only when the voter sends or challenges.
+ *
+ * Key it by the election's definition hash: the answers are kept by
+ * question number, so another election's questions passed to the same
+ * instance would inherit them.
  */
 export function AnswerQuestions({
   pollClass,
@@ -436,7 +475,7 @@ export function AnswerQuestions({
   onSend,
   onChallenge,
 }: AnswerQuestionsProps) {
-  const [screen, setScreen] = useState<{ index: number } | "check">({ index: 0 });
+  const [screen, setScreen] = useState<Screen>({ index: 0 });
   const [answers, setAnswers] = useState<readonly (readonly number[])[]>(() =>
     questions.map(() => []),
   );
@@ -447,7 +486,7 @@ export function AnswerQuestions({
   // can't show "Question 1 of 0" (part 1's review).
   if (questions.length === 0) throw new RangeError("an election asks at least one question");
 
-  function go(next: { index: number } | "check") {
+  function go(next: Screen) {
     setScreen(next);
     setMoved(true);
     window.scrollTo?.(0, 0);
@@ -462,7 +501,7 @@ export function AnswerQuestions({
   function release(send: (answers: Answers) => void) {
     const unfit = firstUnfit(questions, answers);
     if (unfit === undefined) send(answers);
-    else go({ index: unfit });
+    else go({ index: unfit, short: true });
   }
 
   if (screen === "check")
@@ -482,7 +521,7 @@ export function AnswerQuestions({
       />
     );
 
-  const { index } = screen;
+  const { index, short = false } = screen;
   const toCheck = returnToCheck || index === questions.length - 1;
   const after = () => go(toCheck ? "check" : { index: index + 1 });
   return (
@@ -495,6 +534,7 @@ export function AnswerQuestions({
       selection={answers[index] ?? []}
       arrival={arrival}
       focus={moved}
+      short={short}
       toCheck={toCheck}
       onChange={(selection) => answered(index, selection)}
       onBack={() => go({ index: Math.max(0, index - 1) })}

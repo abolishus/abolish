@@ -128,7 +128,7 @@ def v6_rule(d):
     if k == 0 and not keys:
         if d["author_transcript_hash"] != bytes(32):
             return "author-panel"
-    elif author_panel_rule(k, keys) is not None:
+    elif d["author_transcript_hash"] == bytes(32) or author_panel_rule(k, keys) is not None:
         return "author-panel"
     return None
 
@@ -237,11 +237,6 @@ def def_vectors():
         variant(MINIMAL, poll_class=ORGANISATIONAL, results_mode=LIVE, live_every=1, live_batch=MIN_LIVE_BATCH),
         "An organisational vote with live results at the floor: every anchoring period, batches of 20",
     )
-    valid(
-        "definition-v6-author-panel-zero-transcript",
-        variant(MINIMAL, author_threshold=2, author_keys=AUTHOR_KEYS[:2], author_transcript_hash=bytes(32)),
-        "A 2-of-2 author panel whose transcript hash is zero: well formed, since only verifier 3.1 checks the transcript",
-    )
 
     te = enc_definition_v6(TYPICAL)
     end5 = len(d5.enc_definition_v5(as_v5(TYPICAL)))
@@ -322,6 +317,12 @@ def def_vectors():
             "definition-v6-author-transcript-no-panel",
             variant(MINIMAL, author_transcript_hash=TRANSCRIPT),
             "No author panel, but a non-zero author_transcript_hash: 32 chosen bytes with nothing to check them against",
+        ),
+        (
+            "author-panel",
+            "definition-v6-author-panel-zero-transcript",
+            variant(MINIMAL, author_threshold=2, author_keys=AUTHOR_KEYS[:2], author_transcript_hash=bytes(32)),
+            "A 2-of-2 author panel whose transcript hash is zero: its author stub would be its default stub",
         ),
         (
             "author-panel",

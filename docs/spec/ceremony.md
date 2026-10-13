@@ -32,14 +32,14 @@ ceremony_context = H(DS("abolish/v1/ceremony-context",
     u64(l2_chain_id) ‖ trustee_registry ‖ election_id ‖ stub_hash ‖ panel_id ‖ run_id))
 ```
 
-| Field              | Type        | Source                                                                                                                                             |
-| ------------------ | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `l2_chain_id`      | `u64`       | The definition's L2 chain ID                                                                                                                       |
-| `trustee_registry` | `bytes[20]` | The definition's `trustee_registry`                                                                                                                |
-| `election_id`      | `bytes[32]` | The definition's `election_id`                                                                                                                     |
-| `stub_hash`        | `bytes[32]` | `H(DS("abolish/v1/election-stub", stub))` of the definition ([[election-definition]]); for a version-6 author panel's ceremony, `author_stub_hash` |
-| `panel_id`         | `bytes[32]` | Recomputed from the pinned panel, never taken from data                                                                                            |
-| `run_id`           | `bytes[32]` | The run identifier, from the transcript                                                                                                            |
+| Field              | Type        | Source                                                                                                                                                                                                                              |
+| ------------------ | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `l2_chain_id`      | `u64`       | The definition's L2 chain ID                                                                                                                                                                                                        |
+| `trustee_registry` | `bytes[20]` | The definition's `trustee_registry`                                                                                                                                                                                                 |
+| `election_id`      | `bytes[32]` | The definition's `election_id`                                                                                                                                                                                                      |
+| `stub_hash`        | `bytes[32]` | `H(DS("abolish/v1/election-stub", stub))` of the definition ([[election-definition]]); for a version-6 author panel's ceremony, `author_stub_hash`                                                                                  |
+| `panel_id`         | `bytes[32]` | Recomputed from the pinned panel, never taken from data; for a version-6 author panel's ceremony, `author_panel_id` recomputed from the stub's `author_threshold` and `author_keys` ([[trustee-identity]], Author panel identifier) |
+| `run_id`           | `bytes[32]` | The run identifier, from the transcript                                                                                                                                                                                             |
 
 A verifier rebuilds the context from the definition it is verifying, the panel its release pins and the transcript's `run_id` ([[verifier]] 3.1), so a transcript made for one election, definition, registry, panel or run never checks for another (T-37, T-34). A trustee node refuses to take part in a run whose (`stub_hash`, `run_id`) it has seen before, and never reuses a key, a nonce or a challenge message across runs: an aborted run's messages then never check in the next (the run identifier of [[domain-separation]], Fiat–Shamir).
 

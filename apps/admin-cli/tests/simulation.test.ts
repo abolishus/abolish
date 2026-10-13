@@ -48,6 +48,37 @@ describe("simulation", { timeout: 60_000 }, () => {
     expect(progress.filter((s) => s === "tally")).toHaveLength(2);
   });
 
+  test("run with --workers prints the same plan-matching report as in this thread", async () => {
+    const json = JSON.stringify(scenario);
+    const shape = (out: Record<string, unknown>) => {
+      const r = out as { ok: boolean; ballots: unknown; cells: unknown };
+      return { ok: r.ok, ballots: r.ballots, cells: r.cells };
+    };
+    const inWorkers = await cli("simulation", "run", "--scenario", json, "--workers", "2");
+    expect(inWorkers.code).toBe(0);
+    const inThread = await cli("simulation", "run", "--scenario", json, "--workers", "0");
+    expect(inThread.code).toBe(0);
+    expect(shape(inWorkers.out[0] ?? {})).toMatchObject({ ok: true });
+    expect(shape(inWorkers.out[0] ?? {})).toEqual(shape(inThread.out[0] ?? {}));
+  });
+
+  test("refuses --workers other than an integer from 0 to the maximum as a usage error", async () => {
+    for (const workers of ["-1", "1.5", "two", "", "65", "1e1"]) {
+      const r = await cli(
+        "simulation",
+        "run",
+        "--scenario",
+        JSON.stringify(scenario),
+        `--workers=${workers}`,
+      );
+      expect(r.code).toBe(2);
+      expect(r.err[0]).toMatchObject({
+        error: "usage",
+        detail: expect.stringContaining("--workers"),
+      });
+    }
+  });
+
   test("plan reads a scenario file and prints the expected counts, ballots, challenges, re-votes, publications and postings, matching run's", async () => {
     const file = join(mkdtempSync(join(tmpdir(), "sim-")), "scenario.json");
     // Seat 4 goes down halfway, so later ballots need one more posting.
@@ -140,7 +171,8 @@ describe("simulation", { timeout: 60_000 }, () => {
   test("run prints a report that differs from its plan, then refuses with simulation-mismatch", async () => {
     const out: unknown[] = [];
     const differing = simulationCommandsWith(
-      () => ({ ok: false }) as ReturnType<Parameters<typeof simulationCommandsWith>[0]>,
+      async () =>
+        ({ ok: false }) as Awaited<ReturnType<Parameters<typeof simulationCommandsWith>[0]>>,
     );
     const command = differing["run"];
     await expect(

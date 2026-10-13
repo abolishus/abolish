@@ -7,6 +7,7 @@ import { readFileSync } from "node:fs";
 import {
   deliveredAt,
   downAt,
+  MAX_INTAKE_WORKERS,
   parseScenario,
   planElection,
   runSimulation,
@@ -38,6 +39,17 @@ function scenarioOf(values: Values): Scenario {
   const parsed = parseScenario(json);
   if (!parsed.ok) throw new UsageError(`scenario ${parsed.path}: ${parsed.error}`);
   return parsed.scenario;
+}
+
+// Worker threads for the seats' intake (0, the default, runs it in this thread).
+function workersOf(values: Values): number {
+  const given = values["workers"];
+  if (given === undefined) return 0;
+  const text = String(given);
+  const workers = Number(text);
+  if (!/^[0-9]+$/.test(text) || workers > MAX_INTAKE_WORKERS)
+    throw new UsageError(`--workers must be an integer from 0 to ${MAX_INTAKE_WORKERS}`);
+  return workers;
 }
 
 const scenarioOptions = { scenario: { type: "string" }, file: { type: "string" } } as const;
@@ -90,17 +102,22 @@ export function simulationCommandsWith(
       },
     },
     run: {
-      usage: "(--scenario <json> | --file <path>) [--progress]",
-      options: { ...scenarioOptions, progress: { type: "boolean" } },
+      usage: "(--scenario <json> | --file <path>) [--progress] [--workers <n>]",
+      options: {
+        ...scenarioOptions,
+        progress: { type: "boolean" },
+        workers: { type: "string" },
+      },
       positionals: 0,
       offline: true,
       async run(_, values, io) {
         const scenario = scenarioOf(values);
+        const workers = workersOf(values);
         // At most about a hundred progress lines, whatever the electorate.
         let shown = -1;
-        const report = run(
-          scenario,
-          values["progress"] === true
+        const report = await run(scenario, {
+          workers,
+          ...(values["progress"] === true
             ? {
                 onProgress: (p) => {
                   const percent = Math.floor((100 * p.done) / p.total);
@@ -109,8 +126,8 @@ export function simulationCommandsWith(
                   io.out({ progress: p });
                 },
               }
-            : {},
-        );
+            : {}),
+        });
         io.out(report);
         // The report says which cell differed from the plan.
         if (!report.ok) throw new CliError("simulation-mismatch");

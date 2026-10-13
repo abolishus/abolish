@@ -12,7 +12,9 @@ import {
 // Format-4 bundles: the tally openings, 7.4, sorted into cells or stray,
 // attributed by the key set the transcript registered, and judged against
 // tally.md's Boarding rule as far as the bundle decides it without the
-// counted set (docs/spec/verifier.md, Tally openings). Fixtures:
+// counted set (docs/spec/verifier.md, Tally openings), under definition
+// version 1 against its tiers and under versions 3 and 4 against their
+// cells. Fixtures:
 // docs/spec/vectors/verifier-tallies.json
 // (packages/crypto/scripts/verifier-tallies-vectors.py, an independent
 // implementation), with l1-anchor.json's L1 evidence, which matters only to
@@ -200,4 +202,22 @@ test("a replay of a seat's signed opening is a repeat, the operator's alone, nev
     [{ code: "tally-second", of: 1 }],
     [{ code: "tally-second", of: 1 }],
   ]);
+});
+
+test("under definition versions 3 and 4 an opening names a cell numbered across the tiers, never a tier", () => {
+  // TYPICAL's version-3 partition: cells 0 to 2 in tier 0, then cell 3, tier
+  // 2's one cell. Counted by tiers, cell 3 would be stray and cell 1 tier
+  // 2's; cell 4 is past the partition (T-16).
+  const r = run(byId("v3-cells"));
+  expect(r.tallies?.map((o) => [o.entry, o.cell, o.breaks[0]?.code])).toEqual([
+    [1, 0, undefined],
+    [2, 3, undefined],
+    [3, undefined, "tally-stray"],
+    [4, 2, "tally-missing"],
+    [5, 1, "tally-unattributed"],
+    [6, 3, "tally-second"],
+  ]);
+  // An opening of the same election's cell under version 4 is judged the
+  // same way, and one naming the version-3 definition is stray there.
+  expect(run(byId("v4-cells")).tallies?.map((o) => o.cell)).toEqual([3, 3, undefined]);
 });

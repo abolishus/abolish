@@ -10,11 +10,14 @@ keys the transcript gives (tally.md, Which openings are a cell's, Signature),
 then judged against tally.md's Boarding rule as far as it is decided without
 the counted set: stray, another number of entries than options
 (`tally-missing`), unattributed, and a second opening of a cell by one seat.
+The partition is the definition's: under version 1 its tiers, under versions
+3 and 4 every tier's stated cells, numbered across the tiers
+(election-definition.md, Layout (version 3), Notes, Tally partition).
 
 It reuses this folder's independent Python implementations, which share no
 code with packages/crypto or packages/verifier: verifier-ceremony-vectors.py
-(definitions, transcripts, board entries and the ceremony check, which gives
-the registered signing keys), ceremony-vectors.py (each seat's per-election
+(definitions of versions 1, 3 and 4, transcripts, board entries and the
+ceremony check, which gives the registered signing keys), ceremony-vectors.py (each seat's per-election
 signing secret, from the transcript's label) and tally-opening-vectors.py
 (the record, its signature over trustee-vectors.py's RFC 6979 P-256 ECDSA,
 its strict decoder and attribution) with tally-vectors.py's aggregate.
@@ -45,11 +48,12 @@ def _load(name, file):
 
 vc = _load("verifier_ceremony_vectors", "verifier-ceremony-vectors.py")
 tov = _load("tally_opening_vectors", "tally-opening-vectors.py")
-cv, dv = vc.cv, vc.dv
+cv, dv, rc, d4 = vc.cv, vc.dv, vc.rc, vc.d4
 H, ds = vc.H, vc.ds
 outcome = vc.outcome
 
 TALLY_TYPE = 0x0006
+BALLOT_TYPE = 0x0002
 BOARD_ENTRY_TYPE = 0x0007
 MEMBERSHIP_VK_HASH = bytes.fromhex(json.loads((VECTORS / "membership-proof.json").read_text())["verificationKey"]["hash"])
 
@@ -66,13 +70,24 @@ def tally_entries(d, entries):
     return out
 
 
+def definition_hash_of(d):
+    return H(ds(b"abolish/v1/election-definition", vc.encode(d)))
+
+
+def partition_size(d):
+    """Version 1's cells are its tiers; versions 3 and 4 number every tier's stated cells across the tiers."""
+    if vc.own_version(d) == 1:
+        return len(d["electorate"])
+    return sum(len(t["cells"]) for t in d["electorate"])
+
+
 def statement_of(o):
     return tov.statement(o["definitionHash"], o["cell"], o["aggregateHash"], o["signer"], o["opening"])
 
 
 def expected(d, definition_hash, registered, entries):
     """7.4 and the report's tallies, computed here from tally.md and verifier.md."""
-    cells = len(d["electorate"])
+    cells = partition_size(d)
     report = []
     first = {}
     for at, payload in tally_entries(d, entries):
@@ -118,36 +133,46 @@ def main(out_dir):
     panel = cv.make_panel("panel-4", 3, 4)
     eid = dv.TYPICAL["election_id"]
 
-    def election_for(label, seats, cheat=None, tally_version=1):
-        """A version-1 definition pinning board-entry version 4, its transcript for its own stub, and the seats' per-election signing secrets."""
-        pins = [(ty, 4 if ty == BOARD_ENTRY_TYPE else tally_version if ty == TALLY_TYPE else v) for ty, v in dv.ALL_PINS]
+    def election_for(label, seats, cheat=None, tally_version=1, base=dv.TYPICAL):
+        """A definition of `base`'s version pinning board-entry version 4 (and ballot version 2 under versions 3 and 4, which name a cell), its transcript for its own stub, and the seats' per-election signing secrets."""
+        regional = base is not dv.TYPICAL
+        pin = {BOARD_ENTRY_TYPE: 4, TALLY_TYPE: tally_version, **({BALLOT_TYPE: 2} if regional else {})}
+        pins = [(ty, pin.get(ty, v)) for ty, v in base["profile"]["pins"]]
         fields = {"profile": {"protocol_major": 1, "pins": pins}, "membership_vk_hash": MEMBERSHIP_VK_HASH}
-        ctx = vc.election_of(vc.definition_for(panel, bytes(32), **fields))
+        ctx = vc.election_of(vc.definition_for(panel, bytes(32), base, **fields))
         t = vc.transcript(f"verifier-tallies/{label}", panel, seats, ctx, cheat)
-        d = vc.definition_for(panel, H(ds(vc.TRANSCRIPT_TAG, t)), **fields)
+        d = vc.definition_for(panel, H(ds(vc.TRANSCRIPT_TAG, t)), base, **fields)
         secrets = {i: cv.seat_secrets(f"verifier-tallies/{label}", i)["signing"] for i in seats}
         return d, t, secrets
 
+    def registered_of(d, t, secrets):
+        checked = cv.check(panel, t, vc.election_of(d))
+        assert checked["ok"] and [k["index"] for k in checked["registered"]] == sorted(secrets)
+        registered = {k["index"]: bytes.fromhex(k["signingKey"]) for k in checked["registered"]}
+        for i, s in secrets.items():
+            assert tov.p256_key(s) == registered[i], i
+        return registered
+
+    def opener(d, secrets):
+        """Openings for `d`'s election: `opening(cell, signer, ...)` is a tally opening of `cell` signed by `key` (seat `signer`'s own secret by default), naming `claimed` (default `signer`) as its signer."""
+        m, k = d["option_count"], d["threshold"]
+        empty = tov.aggregate_hash(tov.tv.aggregate(m, k, []))
+        zeros = [{"v": 0, "r": 0} for _ in range(m)]
+        own = definition_hash_of(d)
+
+        def opening(cell, signer, values=zeros, key=None, definition=own, claimed=None):
+            named = signer if claimed is None else claimed
+            msg = tov.statement(definition, cell, empty, named, values)
+            sig = tov.sign(secrets[signer] if key is None else key, msg)
+            return tov.encode({"definitionHash": definition, "cell": cell, "aggregateHash": empty, "signer": named, "opening": values, "signature": sig})
+
+        return opening, zeros
+
     d, t, secrets = election_for("election", [1, 2, 3])
-    definition_hash = H(ds(b"abolish/v1/election-definition", dv.enc_definition(d)))
-    checked = cv.check(panel, t, vc.election_of(d))
-    assert checked["ok"] and [k["index"] for k in checked["registered"]] == [1, 2, 3]
-    registered = {k["index"]: bytes.fromhex(k["signingKey"]) for k in checked["registered"]}
-    for i, s in secrets.items():
-        assert tov.p256_key(s) == registered[i], i
+    registered = registered_of(d, t, secrets)
     # Seat 4 sends nothing, so its per-election key is never registered.
     unregistered = cv.seat_secrets("verifier-tallies/election", 4)["signing"]
-
-    m, k = d["option_count"], d["threshold"]
-    empty = tov.aggregate_hash(tov.tv.aggregate(m, k, []))
-    zeros = [{"v": 0, "r": 0} for _ in range(m)]
-
-    def opening(cell, signer, values=zeros, key=None, definition=definition_hash, claimed=None):
-        """A tally opening of `cell` signed by `key` (seat `signer`'s own secret by default), naming `claimed` (default `signer`) as its signer."""
-        named = signer if claimed is None else claimed
-        msg = tov.statement(definition, cell, empty, named, values)
-        sig = tov.sign(secrets[signer] if key is None else key, msg)
-        return tov.encode({"definitionHash": definition, "cell": cell, "aggregateHash": empty, "signer": named, "opening": values, "signature": sig})
+    opening, zeros = opener(d, secrets)
 
     honest0 = opening(0, 1)
     honest1 = opening(1, 2)
@@ -177,13 +202,13 @@ def main(out_dir):
         elif ceremony != "pass":
             row, report = vc.NOT_REACHED, None
         else:
-            row, report = expected(defn, H(ds(b"abolish/v1/election-definition", dv.enc_definition(defn))), keys, entries)
+            row, report = expected(defn, definition_hash_of(defn), keys, entries)
         assert row["status"] == want, (id_, row)
         c = {
             "id": id_,
             "description": description,
             "panel": "panel-4",
-            "definition": dv.enc_definition(defn).hex(),
+            "definition": vc.encode(defn).hex(),
             # Only 4.1 and 4.2 read the clock; every entry is in segment 0.
             "clock": {"epoch": str(defn["closes_at"] - 7200), "period": "3600", "deadline": "7200", "lastSegment": "8"},
             "board": b"".join(entries).hex(),
@@ -260,6 +285,53 @@ def main(out_dir):
     # A tally-opening version this verifier doesn't read (T-36).
     d2, t2, _ = election_for("tally-v2", [1, 2, 3], tally_version=2)
     case("tally-v2", "The profile pins tally-opening version 2, unknown here: 7.4 is unsupported.", [honest0], "unverifiable", defn=d2, transcript=t2)
+
+    # Definition versions 3 and 4: the partition is every tier's stated
+    # cells, numbered across the tiers. TYPICAL's tier 0 has three cells and
+    # tier 2 one, so cells 0 to 3 are the partition's and cell 3 is tier 2's
+    # one cell: counted by tiers instead, it would be stray, and cell 1 would
+    # be tier 2's. Their profiles pin ballot version 2 beside spoiled-ballot
+    # opening version 1, which 2.3 fails; the tally openings are read anyway.
+    assert rc.TYPICAL["election_id"] == eid == d4.TYPICAL["election_id"]
+    d3, t3, s3 = election_for("definition-v3", [1, 2, 3], base=rc.TYPICAL)
+    assert vc.own_version(d3) == 3 and [len(x["cells"]) for x in d3["electorate"]] == [3, 1]
+    r3 = registered_of(d3, t3, s3)
+    open3, zeros3 = opener(d3, s3)
+    unregistered3 = cv.seat_secrets("verifier-tallies/definition-v3", 4)["signing"]
+    v3 = dict(defn=d3, transcript=t3, keys=r3)
+    case(
+        "v3-cells",
+        "A version-3 definition with cells 0 to 2 in tier 0 and cell 3, tier 2's one cell. After the transcript: an honest opening of cell 0 by seat 1 and of cell 3 by seat 2 (openings of a cell, undecided until the counted set is known; cell 3 is past the number of tiers), one of cell 4 by seat 3 (stray: the partition has four cells), a two-entry opening of cell 2 by seat 1 (tally-missing), one of cell 1 signed by seat 4's unregistered key (unattributed) and seat 2's second opening of cell 3 with other values (tally-second). 7.4 is unverifiable.",
+        [open3(0, 1), open3(3, 2), open3(4, 3), open3(2, 1, values=zeros3[:2]), open3(1, 4, key=unregistered3), open3(3, 2, values=[{"v": 1, "r": 5}] + zeros3[1:])],
+        "unverifiable",
+        **v3,
+    )
+    case(
+        "v3-settled",
+        "A version-3 definition: an opening of cell 4 by seat 1 (stray), then one of cell 3 by seat 4's unregistered key (unattributed) and one naming the version-1 election's definition (stray). 7.4 fails at the first, tally-stray.",
+        [open3(4, 1), open3(3, 4, key=unregistered3), open3(0, 2, definition=definition_hash_of(d))],
+        "fail",
+        **v3,
+    )
+    case("v3-none", "A version-3 definition, the transcript and no tally opening: 7.4 passes.", [], "pass", **v3)
+
+    d4_, t4, s4 = election_for("definition-v4", [1, 2, 3], base=d4.TYPICAL)
+    assert vc.own_version(d4_) == 4 and [len(x["cells"]) for x in d4_["electorate"]] == [3, 1]
+    open4, zeros4 = opener(d4_, s4)
+    case(
+        "v4-cells",
+        "A version-4 definition (version 3's partition): an honest opening of cell 3 by seat 3, the same seat's opening of cell 3 replayed (tally-repeat), and the version-3 election's opening of cell 0 by its seat 1 (stray, naming another definition, and unattributed, since that seat's key isn't registered here). 7.4 is unverifiable.",
+        [open4(3, 3), open4(3, 3), open3(0, 1)],
+        "unverifiable",
+        defn=d4_,
+        transcript=t4,
+        keys=registered_of(d4_, t4, s4),
+    )
+
+    dq3, tq3, _ = election_for("quorum-v3", [1, 2, 3, 4], {"answers": two_bad}, base=rc.TYPICAL)
+    case("quorum-v3", "A version-3 definition whose seats 3 and 4 answer wrongly: no key set is registered, so 7.4 is not reached.", [open3(0, 1)], "unverifiable", defn=dq3, transcript=tq3, ceremony="fail")
+    d3t, t3t, _ = election_for("tally-v2-v3", [1, 2, 3], tally_version=2, base=rc.TYPICAL)
+    case("tally-v2-v3", "A version-3 definition pinning tally-opening version 2, unknown here: 7.4 is unsupported.", [open3(0, 1)], "unverifiable", defn=d3t, transcript=t3t)
 
     doc = {
         "format": "abolish-verifier-tallies-vectors/1",

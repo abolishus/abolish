@@ -194,7 +194,7 @@ describe("admission is decided per entry", () => {
   });
 });
 
-test("the report gives the ballots after the ceremony, with no openings", () => {
+test("the report gives the ballots after the ceremony, then the tallies, with no spoiled-ballot openings", () => {
   const r = format4(byId("mixed"));
   expect(Object.keys(r)).toEqual([
     "format",
@@ -204,6 +204,7 @@ test("the report gives the ballots after the ceremony, with no openings", () => 
     "definition",
     "ceremony",
     "ballots",
+    "tallies",
     "board",
     "l1",
     "checks",

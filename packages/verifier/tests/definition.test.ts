@@ -522,17 +522,20 @@ describe("definition versions 3 and 4 (regional cells)", () => {
         expect(r.verdict).toBe("unverifiable");
       });
 
-  test("2.9 passes version 3, which lists no receipt keys, and leaves version 4's unverifiable", () => {
+  test("2.9 passes version 3, which lists no receipt keys, and reads version 4's from L1 state", () => {
     expect(row(format3(v3For(closed.anchor), closed), "2.9")).toEqual({
       id: "2.9",
       kind: "election",
       status: "pass",
     });
+    // The L1-anchor vectors' anchor registered no receipt key, and their
+    // nodes prove the first listed key's slot empty after opens_at.
     expect(row(format3(v4For(closed.anchor), closed), "2.9")).toEqual({
       id: "2.9",
       kind: "election",
-      status: "unverifiable",
-      code: "not-implemented",
+      status: "fail",
+      code: "receipt-key-unregistered",
+      at: { key: 0 },
     });
   });
 

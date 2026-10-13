@@ -13,6 +13,7 @@ const base: Scenario = {
   outage: { from: 0.5, to: 1 },
   challenges: 0.5,
   revotes: 0.5,
+  publications: 0.5,
   seed: 7,
 };
 
@@ -35,10 +36,13 @@ const scenario = fc.record({
   ),
   challenges: fc.double({ min: 0, max: 1, noNaN: true }),
   revotes: fc.double({ min: 0, max: 1, noNaN: true }),
+  publications: fc.double({ min: 0, max: 1, noNaN: true }),
   seed: fc.integer({ min: 0, max: 0xffff_ffff }),
 });
 
-describe("planElection", () => {
+// Each property plans up to 300 voters per run, so CI's FC_NUM_RUNS=1000
+// runs take several seconds, past the 5 s default.
+describe("planElection", { timeout: 60_000 }, () => {
   it("is a function of the scenario: the same seed gives the same plan", () => {
     expect(planElection(base)).toEqual(planElection(base));
     expect(planElection({ ...base, seed: 8 })).not.toEqual(planElection(base));
@@ -101,8 +105,13 @@ describe("planElection", () => {
   it("draws challenges apart: the share changes no voter's tier, votes, time or path", () => {
     fc.assert(
       fc.property(scenario, fc.double({ min: 0, max: 1, noNaN: true }), (s, other) => {
+        // Only a challenger publishes, so the share changes who may.
         const strip = (c: number) =>
-          planElection({ ...s, challenges: c }).voters.map((v) => ({ ...v, challenged: false }));
+          planElection({ ...s, challenges: c }).voters.map((v) => ({
+            ...v,
+            challenged: false,
+            published: false,
+          }));
         expect(strip(other)).toEqual(strip(s.challenges));
       }),
       { numRuns },
@@ -118,6 +127,33 @@ describe("planElection", () => {
       }),
       { numRuns },
     );
+  });
+
+  it("draws publications apart: the share changes no voter's tier, ballots or challenge", () => {
+    fc.assert(
+      fc.property(scenario, fc.double({ min: 0, max: 1, noNaN: true }), (s, other) => {
+        const strip = (p: number) =>
+          planElection({ ...s, publications: p }).voters.map((v) => ({ ...v, published: false }));
+        expect(strip(other)).toEqual(strip(s.publications));
+      }),
+      { numRuns },
+    );
+  });
+
+  it("publishes only a challenged attempt: no voter who didn't challenge publishes", () => {
+    fc.assert(
+      fc.property(scenario, (s) => {
+        for (const v of planElection(s).voters) if (v.published) expect(v.challenged).toBe(true);
+      }),
+      { numRuns },
+    );
+  });
+
+  it("publishes with no voter at share 0 and with every challenger at share 1", () => {
+    expect(planElection({ ...base, publications: 0 }).voters.some((v) => v.published)).toBe(false);
+    const all = planElection({ ...base, publications: 1 }).voters;
+    expect(all.every((v) => v.published === v.challenged)).toBe(true);
+    expect(all.some((v) => v.published)).toBe(true);
   });
 
   it("plans a re-voter's earlier ballot no later than its last, with a ballot the election allows, sent direct exactly during the outage", () => {
@@ -153,7 +189,7 @@ describe("planElection", () => {
     expect(planElection({ ...base, challenges: 1 }).voters.every((v) => v.challenged)).toBe(true);
   });
 
-  it("spreads voters across tiers by weight, the outage across time, and challenges and re-votes by their shares", () => {
+  it("spreads voters across tiers by weight, the outage across time, and challenges, re-votes and publications by their shares", () => {
     const plan = planElection({ ...base, voters: 4000 });
     const share = (tier: number) => plan.voters.filter((v) => v.tier === tier).length / 4000;
     expect(share(0)).toBeCloseTo(0.5, 1);
@@ -161,5 +197,7 @@ describe("planElection", () => {
     expect(plan.voters.filter((v) => v.path === "direct").length / 4000).toBeCloseTo(0.5, 1);
     expect(plan.voters.filter((v) => v.challenged).length / 4000).toBeCloseTo(0.5, 1);
     expect(plan.voters.filter((v) => v.earlier !== null).length / 4000).toBeCloseTo(0.5, 1);
+    // Half of the challengers.
+    expect(plan.voters.filter((v) => v.published).length / 4000).toBeCloseTo(0.25, 1);
   });
 });

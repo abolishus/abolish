@@ -1,6 +1,7 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vite-plus/test";
 import {
+  MAX_SIMULATED_OPENING_LOOKUPS,
   MAX_SIMULATED_VOTERS,
   MAX_SIMULATED_WORK,
   parseScenario,
@@ -21,33 +22,41 @@ const seatsOf = (panel: number) =>
     );
 
 const scenario: fc.Arbitrary<Scenario> = fc.integer({ min: 2, max: 16 }).chain((panel) =>
-  fc.record({
-    // Halved, so a positive re-vote share's doubled bound holds too.
-    voters: fc.integer({ min: 1, max: Math.floor(MAX_SIMULATED_WORK / (128 * panel)) }),
-    election: fc.constantFrom("plurality" as const, "approval" as const),
-    options: fc.integer({ min: 2, max: 64 }),
-    trustees: fc
-      .tuple(fc.integer({ min: 2, max: panel }), seatsOf(panel))
-      .map(([threshold, s]) => ({ panel, threshold, ...s })),
-    tiers: fc.record({
-      "0": fc.integer({ min: 0, max: 1_000_000 }),
-      "1": fc.integer({ min: 0, max: 1_000_000 }),
-      "2": fc.integer({ min: 1, max: 1_000_000 }),
-    }),
-    outage: fc.option(
-      fc
-        .tuple(
-          fc.double({ min: 0, max: 1, noNaN: true }),
-          fc.double({ min: 0, max: 1, noNaN: true }),
-        )
-        .filter(([a, b]) => a < b)
-        .map(([from, to]) => ({ from, to })),
-      { nil: null },
+  fc
+    .record({
+      // Halved, so a positive re-vote share's doubled bound holds too.
+      voters: fc.integer({ min: 1, max: Math.floor(MAX_SIMULATED_WORK / (128 * panel)) }),
+      election: fc.constantFrom("plurality" as const, "approval" as const),
+      options: fc.integer({ min: 2, max: 64 }),
+      trustees: fc
+        .tuple(fc.integer({ min: 2, max: panel }), seatsOf(panel))
+        .map(([threshold, s]) => ({ panel, threshold, ...s })),
+      tiers: fc.record({
+        "0": fc.integer({ min: 0, max: 1_000_000 }),
+        "1": fc.integer({ min: 0, max: 1_000_000 }),
+        "2": fc.integer({ min: 1, max: 1_000_000 }),
+      }),
+      outage: fc.option(
+        fc
+          .tuple(
+            fc.double({ min: 0, max: 1, noNaN: true }),
+            fc.double({ min: 0, max: 1, noNaN: true }),
+          )
+          .filter(([a, b]) => a < b)
+          .map(([from, to]) => ({ from, to })),
+        { nil: null },
+      ),
+      challenges: fc.double({ min: 0, max: 1, noNaN: true }),
+      revotes: fc.double({ min: 0, max: 1, noNaN: true }),
+      publications: fc.double({ min: 0, max: 1, noNaN: true }),
+      seed: fc.integer({ min: 0, max: 0xffff_ffff }),
+    })
+    // Published openings only where their own bound holds, at either re-vote share.
+    .map((s) =>
+      2 * s.voters * s.voters * s.options <= MAX_SIMULATED_OPENING_LOOKUPS
+        ? s
+        : { ...s, publications: 0 },
     ),
-    challenges: fc.double({ min: 0, max: 1, noNaN: true }),
-    revotes: fc.double({ min: 0, max: 1, noNaN: true }),
-    seed: fc.integer({ min: 0, max: 0xffff_ffff }),
-  }),
 );
 
 const valid: Scenario = {
@@ -59,6 +68,7 @@ const valid: Scenario = {
   outage: { from: 0.5, to: 1 },
   challenges: 0.1,
   revotes: 0.2,
+  publications: 0.5,
   seed: 1,
 };
 
@@ -78,7 +88,7 @@ describe("parseScenario", () => {
     );
   });
 
-  it("defaults only the optional fields: no outage, challenges or re-votes, no offline or faulty seats, missing tiers at 0", () => {
+  it("defaults only the optional fields: no outage, challenges, re-votes or publications, no offline or faulty seats, missing tiers at 0", () => {
     const r = parseScenario({
       voters: 1,
       election: "approval",
@@ -98,6 +108,7 @@ describe("parseScenario", () => {
         outage: null,
         challenges: 0,
         revotes: 0,
+        publications: 0,
         seed: 0,
       },
     });
@@ -127,6 +138,12 @@ describe("parseScenario", () => {
     const { revotes: ___, ...noRevotes } = valid;
     const inheritedRevotes = Object.assign(Object.create({ revotes: 1 }), noRevotes);
     expect(parseScenario(inheritedRevotes)).toMatchObject({ ok: true, scenario: { revotes: 0 } });
+    const { publications: ____, ...noPublications } = valid;
+    const inheritedPublications = Object.assign(Object.create({ publications: 1 }), noPublications);
+    expect(parseScenario(inheritedPublications)).toMatchObject({
+      ok: true,
+      scenario: { publications: 0 },
+    });
   });
 
   it("refuses missing required fields", () => {
@@ -164,6 +181,10 @@ describe("parseScenario", () => {
     expect(refusal({ ...valid, revotes: 1.1 })).toBe("$.revotes");
     expect(refusal({ ...valid, revotes: "0.5" })).toBe("$.revotes");
     expect(refusal({ ...valid, revotes: null })).toBe("$.revotes");
+    expect(refusal({ ...valid, publications: -0.1 })).toBe("$.publications");
+    expect(refusal({ ...valid, publications: 1.1 })).toBe("$.publications");
+    expect(refusal({ ...valid, publications: "0.5" })).toBe("$.publications");
+    expect(refusal({ ...valid, publications: null })).toBe("$.publications");
     expect(refusal({ ...valid, outage: { from: 0, to: 1.1 } })).toBe("$.outage.to");
     expect(refusal({ ...valid, outage: { from: 0, to: Number.NaN } })).toBe("$.outage.to");
     expect(refusal([])).toBe("$");
@@ -189,6 +210,7 @@ describe("parseScenario", () => {
     const at = {
       ...valid,
       revotes: 0,
+      publications: 0,
       voters: MAX_SIMULATED_WORK / 50,
       options: 5,
       trustees: { panel: 10, threshold: 2 },
@@ -207,6 +229,19 @@ describe("parseScenario", () => {
         trustees: { panel: 16, threshold: 2 },
       }),
     ).toBe("$");
+  });
+
+  it("refuses published openings whose voters × ballots × options exceeds the opening bound", () => {
+    // 1,000 voters casting once at 10 options: exactly the bound.
+    const at = { ...valid, voters: 1000, options: 10, revotes: 0, challenges: 0.1 };
+    expect(MAX_SIMULATED_OPENING_LOOKUPS).toBe(1000 * 1000 * 10);
+    expect(parseScenario(at).ok).toBe(true);
+    expect(refusal({ ...at, voters: 1001 })).toBe("$");
+    // Re-votes double the ballots each opening is compared with.
+    expect(refusal({ ...at, revotes: Number.MIN_VALUE })).toBe("$");
+    // Without publishing, or without challenges, nothing is published: no bound.
+    expect(parseScenario({ ...at, voters: 1001, publications: 0 }).ok).toBe(true);
+    expect(parseScenario({ ...at, voters: 1001, challenges: 0 }).ok).toBe(true);
   });
 
   it("refuses an empty electorate and an empty or reversed outage", () => {

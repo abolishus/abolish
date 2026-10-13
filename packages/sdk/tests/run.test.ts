@@ -14,6 +14,7 @@ const base: Scenario = {
   outage: { from: 0.5, to: 1 },
   challenges: 0,
   revotes: 0,
+  publications: 0,
   seed: 3,
 };
 
@@ -26,11 +27,13 @@ describe("runSimulation", { timeout }, () => {
     expect(r.ballots.server + r.ballots.direct).toBe(9);
     expect(r.ballots.direct).toBeGreaterThan(0);
     expect(r.ballots.challenged).toBe(0);
+    expect(r.ballots.published).toBe(0);
     expect(r.ballots.superseded).toBe(0);
     // Every ballot is boarded, direct ones when the servers return; then an
     // opening per cell and a destruction statement per online seat.
     expect(r.board.counted).toBe(9);
     expect(r.board.openings).toBe(3);
+    expect(r.board.spoiled).toBe(0);
     expect(r.board.entries).toBe(9 + 3 + 3);
     expect(r.board.head).toMatch(/^[0-9a-f]{64}$/);
     expect(r.board.receiptKey).toMatch(/^0[23][0-9a-f]{64}$/);
@@ -79,8 +82,12 @@ describe("runSimulation", { timeout }, () => {
   });
 
   it("reports tally-quorum, as expected, when fewer than k honest seats remain", () => {
+    // Published openings still land after the counted extent, with no tally
+    // opening in their segment, and before destruction at t_D.
     const r = runSimulation({
       ...base,
+      challenges: 1,
+      publications: 1,
       trustees: { panel: 4, threshold: 2, offline: [1, 2], faulty: [3] },
     });
     expect(r.ok).toBe(true);
@@ -93,7 +100,8 @@ describe("runSimulation", { timeout }, () => {
     expect(r.total).toBeUndefined();
     // No opening reaches the board, so the online seats destroy at t_D, in s_T.
     expect(r.board.openings).toBe(0);
-    expect(r.board.entries).toBe(9 + 2);
+    expect(r.board.spoiled).toBe(9);
+    expect(r.board.entries).toBe(9 + 9 + 2);
     const ran = runSimulation(base);
     expect(r.destruction.from).toBeGreaterThan(ran.destruction.from + 100);
     expect(r.destruction.seats.map((d) => d.code)).toEqual([
@@ -110,6 +118,28 @@ describe("runSimulation", { timeout }, () => {
     expect(r.ballots.challenged).toBe(9);
     expect(r.cells.reduce((a, c) => a + c.ballots, 0)).toBe(9);
     for (const c of r.cells) expect(c.counts).toEqual(c.expected);
+  });
+
+  it("boards every opening its voter publishes after the counted extent, and still opens to the plan", () => {
+    // Re-votes put superseded ballots in the counted extent, which every
+    // opening is compared with too.
+    const r = runSimulation({ ...base, challenges: 1, publications: 1, revotes: 1 });
+    expect(r.ok).toBe(true);
+    expect(r.ballots.challenged).toBe(9);
+    expect(r.ballots.published).toBe(9);
+    expect(r.board.spoiled).toBe(9);
+    expect(r.board.counted).toBe(18);
+    expect(r.board.entries).toBe(18 + 3 + 9 + 3);
+    for (const c of r.cells) expect(c.counts).toEqual(c.expected);
+    // Publishing is the voter's choice: only those who asked.
+    const some = runSimulation({ ...base, challenges: 1, publications: 0.5 });
+    const asked = planElection({ ...base, challenges: 1, publications: 0.5 }).voters.filter(
+      (v) => v.published,
+    ).length;
+    expect(asked).toBeGreaterThan(0);
+    expect(asked).toBeLessThan(9);
+    expect(some.ballots.published).toBe(asked);
+    expect(some.board.spoiled).toBe(asked);
   });
 
   it("counts only each re-voter's last ballot, whatever it voted before", () => {

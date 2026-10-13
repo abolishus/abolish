@@ -1,5 +1,6 @@
 export {
   MAX_SIMULATED_VOTERS,
+  MAX_SIMULATED_OPENING_LOOKUPS,
   MAX_SIMULATED_WORK,
   parseScenario,
   type Scenario,

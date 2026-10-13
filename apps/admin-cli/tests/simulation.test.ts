@@ -47,12 +47,18 @@ describe("simulation", { timeout: 60_000 }, () => {
     expect(progress.filter((s) => s === "tally")).toHaveLength(2);
   });
 
-  test("plan reads a scenario file and prints the expected counts, ballots, challenges and re-votes, matching run's", async () => {
+  test("plan reads a scenario file and prints the expected counts, ballots, challenges, re-votes and publications, matching run's", async () => {
     const file = join(mkdtempSync(join(tmpdir(), "sim-")), "scenario.json");
-    writeFileSync(file, JSON.stringify({ ...scenario, revotes: 0.5 }));
+    writeFileSync(file, JSON.stringify({ ...scenario, revotes: 0.5, publications: 1 }));
     const plan = await cli("simulation", "plan", "--file", file);
     expect(plan.code).toBe(0);
-    type Ballots = { cast: number; direct: number; superseded: number; challenged: number };
+    type Ballots = {
+      cast: number;
+      direct: number;
+      superseded: number;
+      challenged: number;
+      published: number;
+    };
     const out = plan.out[0] as {
       ballots: Ballots;
       expected: { tier: number; counts: number[] }[];
@@ -65,6 +71,8 @@ describe("simulation", { timeout: 60_000 }, () => {
     expect(out.expected).toEqual(report.cells.map((c) => ({ tier: c.tier, counts: c.counts })));
     expect(out.ballots.challenged).toBeGreaterThan(0);
     expect(out.ballots.superseded).toBeGreaterThan(0);
+    // Every challenger publishes at share 1.
+    expect(out.ballots.published).toBe(out.ballots.challenged);
     const { server: _, ...ballots } = report.ballots;
     expect(ballots).toEqual(out.ballots);
   });

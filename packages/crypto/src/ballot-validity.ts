@@ -1206,6 +1206,11 @@ export interface VoteSharingV4 {
 
 const SHARINGS_V4 = new WeakSet<VoteSharingV4>();
 
+/** Internal: whether `shareVoteV4` made this sharing (unchanged, since it is frozen). */
+export function isRegisteredSharingV4(sharing: VoteSharingV4): boolean {
+  return SHARINGS_V4.has(sharing);
+}
+
 function checkPolynomials(polynomials: readonly OptionPolynomials[], count: number, k: number) {
   if (polynomials.length !== count) throw new RangeError("polynomials: one per option");
   for (const p of polynomials) {

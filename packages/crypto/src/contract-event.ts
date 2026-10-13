@@ -259,8 +259,9 @@ const ELECTION_CREATED: EventSpec = {
   },
 };
 
-// A definition's version-1 encoding is under 1 KB (docs/spec/election-definition.md);
-// the registry's own decoder refuses anything longer that isn't one.
+// An allocation bound only, above the largest version-1 definition (every
+// list at its maximum: 717 bytes), so any definition that could decode
+// reaches the decoder, which alone decides.
 const MAX_DEFINITION = 4096;
 
 const DEFINITION_REGISTERED: EventSpec = {
@@ -425,8 +426,9 @@ const TABLES: Readonly<Record<ContractRole, readonly EventSpec[]>> = {
   "election-registry": [ELECTION_CREATED, DEFINITION_REGISTERED],
   "trustee-registry": [PANEL_PINNED, CEREMONY_REGISTERED],
   "group-registry": [REGISTRARS_PINNED, GROUP_CREATED, MEMBERS_ADDED, MEMBERS_REMOVED],
-  // The board's events come with direct submission (P1-18): until its table
-  // is specified, every log it names is `unknown-event`.
+  // Version 1 has no board events: they come in a later version of the
+  // record with direct submission (P1-18), since a frozen version's tables
+  // never gain one (docs/spec/versioning.md).
   board: [],
 };
 

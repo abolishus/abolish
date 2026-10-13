@@ -159,6 +159,109 @@ function project(e: ContractEvent): unknown {
   }
 }
 
+// The test's own ABI encoder (the Solidity ABI specification, as
+// `abi.encode` produces it), so a passing record's topics and data can be
+// rebuilt from its decoded event alone.
+const sigTopic = (signature: string) => keccak_256(new TextEncoder().encode(signature));
+
+function uintWord(v: bigint | number): Uint8Array {
+  const w = new Uint8Array(32);
+  let x = BigInt(v);
+  for (let i = 31; i >= 0; i--) {
+    w[i] = Number(x & 0xffn);
+    x >>= 8n;
+  }
+  return w;
+}
+
+const leftPad = (b: Uint8Array) => {
+  const w = new Uint8Array(32);
+  w.set(b, 32 - b.length);
+  return w;
+};
+
+const concat = (parts: readonly Uint8Array[]) => {
+  const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+  let at = 0;
+  for (const p of parts) {
+    out.set(p, at);
+    at += p.length;
+  }
+  return out;
+};
+
+// `bytes` tail: length word, content, zero padding to a word.
+const tail = (b: Uint8Array) =>
+  concat([uintWord(b.length), b, new Uint8Array((32 - (b.length % 32)) % 32)]);
+
+/** The topics and data `abi.encode` gives for `e` (one dynamic field at most, last). */
+function reencode(e: ContractEvent): { topics: Uint8Array[]; data: Uint8Array } {
+  const dyn = (head: Uint8Array[], body: Uint8Array) =>
+    concat([...head, uintWord(32 * (head.length + 1)), body]);
+  const origin = (o: { number: bigint; timestamp: bigint; hash: Uint8Array }) => [
+    uintWord(o.number),
+    uintWord(o.timestamp),
+    o.hash,
+  ];
+  const sig = (name: string) =>
+    sigTopic(
+      CONTRACT_EVENT_SIGNATURES[ROLE_OF[e.event]].find((s) => s.startsWith(`${name}(`)) ?? "",
+    );
+  switch (e.event) {
+    case "ElectionCreated":
+      return {
+        topics: [sig(e.event), e.electionId, leftPad(e.creator)],
+        data: concat([uintWord(e.counter), ...origin(e.l1Origin)]),
+      };
+    case "DefinitionRegistered":
+      return {
+        topics: [sig(e.event), e.electionId, e.definitionHash],
+        data: dyn(origin(e.l1Origin), tail(e.definition)),
+      };
+    case "PanelPinned":
+      return {
+        topics: [sig(e.event), e.panelId],
+        data: dyn([uintWord(e.threshold), uintWord(e.quorum)], tail(concat(e.keys))),
+      };
+    case "CeremonyRegistered":
+      return {
+        topics: [sig(e.event), e.stubHash, e.panelId, e.transcriptHash],
+        data: dyn([], tail(e.registration)),
+      };
+    case "RegistrarsPinned":
+      return {
+        topics: [sig(e.event)],
+        data: dyn(
+          [uintWord(e.threshold)],
+          concat([uintWord(e.registrars.length), ...e.registrars.map(leftPad)]),
+        ),
+      };
+    case "GroupCreated":
+      return {
+        topics: [sig(e.event), uintWord(e.groupId), uintWord(e.tier)],
+        data: new Uint8Array(),
+      };
+    case "MembersAdded":
+      return {
+        topics: [sig(e.event), uintWord(e.groupId), uintWord(e.firstIndex)],
+        data: dyn([], tail(e.record)),
+      };
+    case "MembersRemoved":
+      return { topics: [sig(e.event), uintWord(e.groupId)], data: dyn([], tail(e.record)) };
+  }
+}
+
+const ROLE_OF: Readonly<Record<ContractEvent["event"], ContractRole>> = {
+  ElectionCreated: "election-registry",
+  DefinitionRegistered: "election-registry",
+  PanelPinned: "trustee-registry",
+  CeremonyRegistered: "trustee-registry",
+  RegistrarsPinned: "group-registry",
+  GroupCreated: "group-registry",
+  MembersAdded: "group-registry",
+  MembersRemoved: "group-registry",
+};
+
 describe("contract-event vectors (docs/spec/vectors/contract-event.json)", () => {
   test("the file is the contract-event format for record type 0x0008, version 1", () => {
     expect(vectors.format).toBe("abolish-contract-event-vectors/1");
@@ -308,41 +411,52 @@ describe("contract-event record properties", () => {
     ).toThrow(EncodeError);
   });
 
-  // One event, one encoding: changing any byte of an honest record's topics
-  // or data either fails the event check or changes the decoded event, so
-  // no field carries bytes its event doesn't define (T-17, T-31).
-  test("every change to an honest event's topics or data is refused or decodes differently", () => {
+  // One event, one encoding: every record that passes is exactly the
+  // re-encoding of its decoded event, so no field carries bytes its event
+  // doesn't define and no event has a second record (T-17, T-31). Mutations
+  // flip, drop, insert and append bytes, and add or remove topics.
+  test("every passing record's topics and data are those rebuilt from its decoded event", () => {
     const honest = vectors.records.map((v) => recordOf(v.fields));
+    const mutate = fc.tuple(
+      fc.nat({ max: honest.length - 1 }),
+      fc.constantFrom("flip", "drop", "insert", "append", "add-topic", "drop-topic"),
+      fc.nat(),
+      fc.integer({ min: 0, max: 255 }),
+    );
     fc.assert(
-      fc.property(
-        fc.nat({ max: honest.length - 1 }),
-        fc.nat(),
-        fc.integer({ min: 1, max: 255 }),
-        (which, at, xor) => {
-          const r = honest[which];
-          if (r === undefined) throw new Error("no record");
-          const before = checkContractEvent(r, contracts);
-          if (!before.ok) throw new Error("an honest record failed");
-          const bytes = [...r.topics.slice(1), r.data];
-          const total = bytes.reduce((s, b) => s + b.length, 0);
-          if (total === 0) return;
-          let k = at % total;
-          const changed = bytes.map((b) => {
-            const c = b.slice();
-            if (k >= 0 && k < c.length) c[k] = (c[k] ?? 0) ^ xor;
-            k -= b.length;
-            return c;
-          });
-          const data = changed.pop() ?? new Uint8Array();
-          const topic0 = r.topics[0];
-          if (topic0 === undefined) throw new Error("no topic 0");
-          const after = checkContractEvent({ ...r, topics: [topic0, ...changed], data }, contracts);
-          if (after.ok) expect(project(after.event)).not.toEqual(project(before.event));
-        },
-      ),
+      fc.property(mutate, ([which, how, at, value]) => {
+        const r = honest[which];
+        if (r === undefined) throw new Error("no record");
+        const d = r.data;
+        const i = d.length === 0 ? 0 : at % d.length;
+        const data =
+          how === "flip" && d.length > 0
+            ? d.map((x, j) => (j === i ? x ^ (value | 1) : x))
+            : how === "drop" && d.length > 0
+              ? concat([d.subarray(0, i), d.subarray(i + 1)])
+              : how === "insert"
+                ? concat([d.subarray(0, i), new Uint8Array([value]), d.subarray(i)])
+                : how === "append"
+                  ? concat([d, new Uint8Array([value])])
+                  : d;
+        const topics =
+          how === "add-topic"
+            ? [...r.topics, uintWord(value)]
+            : how === "drop-topic"
+              ? r.topics.slice(0, -1)
+              : r.topics;
+        for (const candidate of [r, { ...r, topics, data }]) {
+          const result = checkContractEvent(candidate, contracts);
+          if (!result.ok) continue;
+          const rebuilt = reencode(result.event);
+          // Compared as hex: the largest records are 25 KB.
+          expect(rebuilt.topics.map(bytesToHex)).toEqual(candidate.topics.map(bytesToHex));
+          expect(bytesToHex(rebuilt.data)).toBe(bytesToHex(candidate.data));
+        }
+      }),
       { numRuns },
     );
-  });
+  }, 120_000);
 
   test("a record of another role's address never passes as that role's", () => {
     const created = vectors.records.find((v) => v.id === "election-created");

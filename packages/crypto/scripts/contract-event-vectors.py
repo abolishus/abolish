@@ -438,6 +438,10 @@ def main(root):
         definitions[v["encoding"]] = "error" not in v
     for v in d3:
         definitions[v["encoding"]] = False
+    # A strict decoder consumes a whole valid encoding exactly, so every proper
+    # prefix of one runs out of input: the largest definition less its last
+    # byte doesn't decode.
+    definitions[by_id["definition-maximal"][:-1].hex()] = False
 
     key_vectors = json.loads((vec / "trustee.json").read_text())["keys"]
     # This file's decompression agrees with trustee.json on every key it lists.
@@ -530,6 +534,11 @@ def main(root):
            "right, and the quorum is verifier 3.1's", tr, 3, 161, 1_760_000_202,
            [T["CeremonyRegistered"], stub, det("panel-id-2", 32), transcript],
            word(32) + abi_bytes(det("panel-id-2", 32) + stub + transcript + bytes([0])))
+    max_registration = (det("panel-id-3", 32) + stub + transcript + bytes([255])
+                        + b"".join(bytes([i % 256]) + det(f"sig-max-{i}", 64) for i in range(255)))
+    record("ceremony-registered-max", "CeremonyRegistered with 255 approvals, the most its count byte names", tr, 4,
+           162, 1_760_000_204, [T["CeremonyRegistered"], stub, det("panel-id-3", 32), transcript],
+           word(32) + abi_bytes(max_registration))
 
     registrars = [det(f"registrar-{i}", 20) for i in range(3)]
     record("registrars-pinned", "RegistrarsPinned: the threshold and three addresses", gr, 0, 40, 1_759_999_980,
@@ -547,6 +556,14 @@ def main(root):
     record("group-created-max", "GroupCreated with the largest group identifier and tier word: the tier's range is "
            "the registry's to refuse, not the record's", gr, 4, 62, 1_760_000_024,
            [T["GroupCreated"], word(MAX_U64), word(255)], b"")
+    max_approvals = b"".join(bytes([s % 256]) + det(f"r-max-{s}", 32) + det(f"s-max-{s}", 32) + bytes([28]) for s in range(255))
+    max_addition = (u64(1) + u64(0) + (MAX_BATCH).to_bytes(2, "big")
+                    + b"".join(word(2 + i) for i in range(MAX_BATCH)) + bytes([255]) + max_approvals)
+    max_added_data = word(32) + abi_bytes(max_addition)
+    assert len(max_added_data) == 25_120
+    record("members-added-max", "MembersAdded at the largest record the stateless checks accept: a full batch and "
+           "255 approvals, 25,120 bytes of data", gr, 5, 63, 1_760_000_026, [T["MembersAdded"], word(1), word(0)],
+           max_added_data)
 
     # --- records that decode but fail the event check, one code at a time.
     def fail(rid, description, contract, topics, data):
@@ -592,6 +609,13 @@ def main(root):
          er, reg_topics, reg_data[:128] + abi_bytes(by_id["definition-profile-pins-other-version"]))
     fail("event-data-definition-v3", "DefinitionRegistered carrying a version-3 definition, which the registry "
          "doesn't decode", er, reg_topics, reg_data[:128] + abi_bytes(by_id["definition-v3-typical"]))
+    fail("event-data-definition-maximal-short", "DefinitionRegistered carrying the largest definition less its last "
+         "byte", er, reg_topics, reg_data[:128] + abi_bytes(by_id["definition-maximal"][:-1]))
+    fail("event-data-registration-max-extra-byte", "CeremonyRegistered with 255 approvals and one byte more", tr,
+         [T["CeremonyRegistered"], stub, det("panel-id-3", 32), transcript],
+         word(32) + abi_bytes(max_registration + b"\x00"))
+    fail("event-data-addition-max-extra-byte", "MembersAdded at the largest record and one byte more", gr,
+         [T["MembersAdded"], word(1), word(0)], word(32) + abi_bytes(max_addition + b"\x00"))
     panel_topics = [T["PanelPinned"], panel_id]
     fail("event-data-keys-length", "PanelPinned's encodings one byte past a multiple of 33", tr, panel_topics,
          word(2) + word(2) + word(96) + abi_bytes(b"".join(keys) + b"\x00"))

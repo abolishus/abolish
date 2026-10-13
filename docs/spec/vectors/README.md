@@ -358,7 +358,7 @@ The proofs are randomised: regenerating gives other proof bytes for the same sta
 `spoiled-opening-v2.json` covers [[challenge]] (Opening version 2) with its own format, `abolish-spoiled-opening-v2-vectors/1`, the challenge vectors' top-level fields, `recordType` (`0x0003`), `version` (2) and `tag`, and:
 
 - `panels`: as in `challenge.json`, under this file's own names.
-- `elections`: by name, as in `ballot-v3.json`, plus `panel` and `registered`; `opening-four` is a version-5 definition (ballot version 3) and `opening-regional` a version-4 one (ballot version 2, its one question at `offset` 0).
+- `elections`: by name, as in `ballot-v3.json`, plus `panel` and `registered`; `opening-four` is a version-5 definition (ballot version 3) and `opening-regional` a version-4 one (ballot version 2, its one question at `offset` 0); both name the published membership key (`membership-proof.json`), so an implementation makes its ballot context from them as it would for a registered election.
 - `openings`: as in `challenge.json`, except that a passing opening has `voteOutside` (`question`, the first question outside the rules) when `opening-vote-outside` applies, and no `withinRules`; `coreHash` is under the election's `ballotVersion`.
 - `decode`: as in `challenge.json`, under a profile pinning version 2. `decodedCells`: encodings that must decode, each with the `cell` it names.
 - `coreHashVersions`: for two openings, `coreHashVersion2` and `coreHashVersion3`, the same core's hash under each ballot version.

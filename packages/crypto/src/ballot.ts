@@ -244,18 +244,7 @@ export function ballotElection(
     qualified: Object.freeze(registered.map((k) => k.index)),
   });
   MADE.set(election, { definitionHash, version: 1 });
-  KEYS.set(
-    election,
-    Object.freeze(
-      registered.map((k) =>
-        Object.freeze({
-          index: k.index,
-          kemKey: decode(KEM_PUBLIC_KEY, encode(KEM_PUBLIC_KEY, k.kemKey)),
-          signingKey: Uint8Array.from(k.signingKey),
-        }),
-      ),
-    ),
-  );
+  KEYS.set(election, copyKeys(registered));
   return election;
 }
 
@@ -289,6 +278,7 @@ export function cellBallotElection(
     qualified: Object.freeze(registered.map((k) => k.index)),
   });
   MADE.set(election, { definitionHash, version: 2 });
+  KEYS.set(election, copyKeys(registered));
   return election;
 }
 
@@ -329,6 +319,7 @@ export function questionBallotElection(
     qualified: Object.freeze(registered.map((k) => k.index)),
   });
   MADE.set(election, { definitionHash, version: 3 });
+  KEYS.set(election, copyKeys(registered));
   return election;
 }
 
@@ -409,20 +400,51 @@ function madeHashOf(election: object, version: 1 | 2 | 3): Uint8Array {
   return made.definitionHash;
 }
 
-// The registered key set of each version-1 context, copied when it was made,
-// for checks that rebuild ciphertexts (docs/spec/challenge.md, Checks).
-const KEYS = new WeakMap<BallotElection, readonly RegisteredKeys[]>();
+// The registered key set of each context, copied when it was made, for
+// checks that rebuild ciphertexts (docs/spec/challenge.md, Checks).
+const KEYS = new WeakMap<object, readonly RegisteredKeys[]>();
+
+const copyKeys = (registered: readonly RegisteredKeys[]): readonly RegisteredKeys[] =>
+  Object.freeze(
+    registered.map((k) =>
+      Object.freeze({
+        index: k.index,
+        kemKey: decode(KEM_PUBLIC_KEY, encode(KEM_PUBLIC_KEY, k.kemKey)),
+        signingKey: Uint8Array.from(k.signingKey),
+      }),
+    ),
+  );
 
 /** Internal: the registered key set `ballotElection` made this context from. */
 export function registeredKeysOf(election: BallotElection): readonly RegisteredKeys[] {
-  const keys = KEYS.get(election);
-  if (keys === undefined) throw new TypeError("expected a context made by ballotElection");
-  return keys;
+  madeHashOf(election, 1);
+  return KEYS.get(election) as readonly RegisteredKeys[];
 }
 
 /** Internal: the definition hash `ballotElection` made this context from. */
 export function definitionHashOf(election: BallotElection): Uint8Array {
   return madeHashOf(election, 1);
+}
+
+/**
+ * Internal: what `cellBallotElection` or `questionBallotElection` made this
+ * context from (its definition hash and registered key set), with the ballot
+ * version it checks, which the core hash of its cores binds
+ * (docs/spec/challenge.md, Opening version 2).
+ */
+export function cellContextOf(election: CellBallotElection | QuestionBallotElection): {
+  readonly definitionHash: Uint8Array;
+  readonly ballotVersion: 2 | 3;
+  readonly keys: readonly RegisteredKeys[];
+} {
+  const made = MADE.get(election);
+  if (made === undefined || made.version === 1)
+    throw new TypeError("expected a context made by cellBallotElection or questionBallotElection");
+  return {
+    definitionHash: made.definitionHash,
+    ballotVersion: made.version,
+    keys: KEYS.get(election) as readonly RegisteredKeys[],
+  };
 }
 
 /** The root and scope a ballot proves against, and the tier its message and re-vote rule use. */

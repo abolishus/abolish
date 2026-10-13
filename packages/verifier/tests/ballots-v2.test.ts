@@ -12,8 +12,8 @@ import {
 // Format-4 bundles under definition versions 3 and 4, whose ballots (version
 // 2) name their cell: ballot admission, 5.1 to 5.4 and 5.7, against the
 // cell's root and scope in the definition and the key set its transcript
-// check registered, and 6.2, which no opening version this verifier reads
-// can judge (docs/spec/verifier.md, Ballot admission). Fixtures:
+// check registered, and 6.2, which this verifier can't judge until it reads
+// the openings of version-2 cores (P2-14 part 5) (docs/spec/verifier.md, Ballot admission). Fixtures:
 // docs/spec/vectors/verifier-ballots-v2.json
 // (packages/crypto/scripts/verifier-ballots-v2-vectors.py, an independent
 // implementation that builds each cell tree by the first-occurrence rule,
@@ -112,7 +112,7 @@ describe("1.3, 2.3, 3.2, 5.1 to 5.4, 5.7 and 6.2 against the independent impleme
       const r = format4(c);
       expect(rows(r, Object.keys(c.expected))).toEqual(c.expected);
       expect(r.ballots).toEqual(c.ballots);
-      // No opening version this verifier reads opens version-2 cores.
+      // This verifier doesn't read the openings of version-2 cores yet.
       expect(r.openings).toBeUndefined();
       expect(r.verdict).toBe("unverifiable");
       // A rejected ballot rejects its entry only, never the election (T-52):

@@ -141,10 +141,8 @@ describe("ballot-v3-records.json", () => {
       const d = definitionOf(name);
       expect(toHex(encodeElectionDefinitionV5(d))).toBe(e.definition);
       expect(electionDefinitionV5Rule(d)).toBeUndefined();
-      // Ballot version 3 with opening version 2, which this package doesn't
-      // read until P2-14 part 3c: unverifiable, never failed (T-36). The
-      // ballot checks below run under it all the same.
-      expect(profileCombinationRule(d)).toBe("unsupported-version");
+      // Ballot version 3 with opening version 2, which opens its cores.
+      expect(profileCombinationRule(d)).toBeUndefined();
       expect(toHex(electionDefinitionV5Hash(d))).toBe(e.definitionHash);
       const election = electionOf(name, [1, 2]);
       expect(toHex(election.definitionHash)).toBe(e.definitionHash);

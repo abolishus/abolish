@@ -233,7 +233,7 @@ def build(constants):
         }
 
     # Definition version 3 pinning ballot version 2 and spoiled-ballot opening
-    # version 2 (which this verifier doesn't read, so 2.3 is unsupported).
+    # version 2, which opens its cores, so 2.3's combination passes.
     # Seat 4 sends nothing, so the registered key set is seats 1 to 3 and
     # seat 4's share hash must be zero.
     d, t, e = election_for("v3", [1, 2, 3], profile=pins_for(3))
@@ -291,7 +291,7 @@ def build(constants):
     )
     bundle(
         "admitted",
-        "Definition version 3 with only admitted ballots after the transcript: one in each cell and a re-vote. 5.1 to 5.4 pass, and 6.2 is unsupported, since no opening version this verifier reads opens version-2 cores.",
+        "Definition version 3 with only admitted ballots after the transcript: one in each cell and a re-vote. 5.1 to 5.4 pass, and 6.2 is unsupported, since this verifier doesn't yet read the openings of version-2 cores (P2-14 part 5).",
         d, t, e, [1, 2, 3],
         [t, ok["cell-0"], ok["remainder-region-1"], ok["tier-2"], ok["revote"]],
         "ballots",
@@ -337,7 +337,7 @@ def build(constants):
         return [bytes(32)] * len(answers) if i in (3, 4) else answers
 
     d_q, t_q, e_q = election_for("v3-quorum", [1, 2, 3, 4], cheat={"answers": two_bad}, profile=pins_for(3))
-    bundle("quorum", "Seats 3 and 4 answer wrongly: no key set is registered, so no ballot is checked; 6.2 is unsupported all the same, since no opening version this verifier reads opens version-2 cores.", d_q, t_q, e_q, None, [t_q, (b_a, None)], "not-reached")
+    bundle("quorum", "Seats 3 and 4 answer wrongly: no key set is registered, so no ballot is checked; 6.2 is unsupported all the same, since this verifier doesn't yet read the openings of version-2 cores (P2-14 part 5).", d_q, t_q, e_q, None, [t_q, (b_a, None)], "not-reached")
 
     d_vk, t_vk, e_vk = election_for("v3-other-key", [1, 2, 3], profile=pins_for(3), membership_vk_hash=det("other key"))
     bundle("other-key", "Ballot version 2's proofs are checked under the same pinned key as version 1's: a definition naming another fails 1.3, and no ballot is checked under it.", d_vk, t_vk, e_vk, [1, 2, 3], [t_vk, (b_a, None)], "not-reached")
@@ -357,7 +357,7 @@ def build(constants):
 
 
 def opening_row(d):
-    """6.2 (docs/spec/verifier.md, Spoiled-ballot openings, step 1): unsupported under a ballot or opening pin other than version 1, since no opening version this verifier reads opens version-2 cores; with both at version 1 (a profile 2.3 fails), not reached, as admission is."""
+    """6.2 (docs/spec/verifier.md, Spoiled-ballot openings, step 1): unsupported under a ballot or opening pin other than version 1, since this verifier doesn't yet read the openings of version-2 cores (P2-14 part 5); with both at version 1 (a profile 2.3 fails), not reached, as admission is."""
     pins = dict(d["profile"]["pins"])
     return NOT_REACHED if pins[BALLOT_TYPE] == 1 and pins[SPOILED_OPENING_TYPE] == 1 else UNSUPPORTED
 

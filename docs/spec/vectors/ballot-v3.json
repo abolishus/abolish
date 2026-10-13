@@ -5581,7 +5581,7 @@
     },
     {
       "id": "question-proofs-swapped-same-shape",
-      "description": "The two same-shaped questions' range proofs swapped: each binds its question number and offset",
+      "description": "The two same-shaped questions' range proofs swapped: each question's Y_q differs, and the valid ballots pin t's layout, its question number and offset included",
       "election": "same-shape",
       "context": {
         "definitionHash": "cf314a219515355264522480973178ccd5b39e2c4981a284fcd283d77541ab0e",

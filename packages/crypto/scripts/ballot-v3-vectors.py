@@ -480,7 +480,7 @@ def ballot_vectors(elections):
     )
     sp = copy.deepcopy(s_vote["sumProofs"])
     sp[0], sp[1] = sp[1], sp[0]
-    invalid("question-proofs-swapped-same-shape", "The two same-shaped questions' range proofs swapped: each binds its question number and offset", two_same, s_ctx, with_(s_vote, sumProofs=sp), {"code": "sum-proof", "question": 0})
+    invalid("question-proofs-swapped-same-shape", "The two same-shaped questions' range proofs swapped: each question's Y_q differs, and the valid ballots pin t's layout, its question number and offset included", two_same, s_ctx, with_(s_vote, sumProofs=sp), {"code": "sum-proof", "question": 0})
 
     # A proof under version 1's sum tag in place of the question-sum tag.
     o_e, o_ctx, o_vote, o_polys = made["one-question"]

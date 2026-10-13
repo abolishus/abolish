@@ -32,14 +32,14 @@ ceremony_context = H(DS("abolish/v1/ceremony-context",
     u64(l2_chain_id) ‖ trustee_registry ‖ election_id ‖ stub_hash ‖ panel_id ‖ run_id))
 ```
 
-| Field              | Type        | Source                                                                                |
-| ------------------ | ----------- | ------------------------------------------------------------------------------------- |
-| `l2_chain_id`      | `u64`       | The definition's L2 chain ID                                                          |
-| `trustee_registry` | `bytes[20]` | The definition's `trustee_registry`                                                   |
-| `election_id`      | `bytes[32]` | The definition's `election_id`                                                        |
-| `stub_hash`        | `bytes[32]` | `H(DS("abolish/v1/election-stub", stub))` of the definition ([[election-definition]]) |
-| `panel_id`         | `bytes[32]` | Recomputed from the pinned panel, never taken from data                               |
-| `run_id`           | `bytes[32]` | The run identifier, from the transcript                                               |
+| Field              | Type        | Source                                                                                                                                             |
+| ------------------ | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `l2_chain_id`      | `u64`       | The definition's L2 chain ID                                                                                                                       |
+| `trustee_registry` | `bytes[20]` | The definition's `trustee_registry`                                                                                                                |
+| `election_id`      | `bytes[32]` | The definition's `election_id`                                                                                                                     |
+| `stub_hash`        | `bytes[32]` | `H(DS("abolish/v1/election-stub", stub))` of the definition ([[election-definition]]); for a version-6 author panel's ceremony, `author_stub_hash` |
+| `panel_id`         | `bytes[32]` | Recomputed from the pinned panel, never taken from data                                                                                            |
+| `run_id`           | `bytes[32]` | The run identifier, from the transcript                                                                                                            |
 
 A verifier rebuilds the context from the definition it is verifying, the panel its release pins and the transcript's `run_id` ([[verifier]] 3.1), so a transcript made for one election, definition, registry, panel or run never checks for another (T-37, T-34). A trustee node refuses to take part in a run whose (`stub_hash`, `run_id`) it has seen before, and never reuses a key, a nonce or a challenge message across runs: an aborted run's messages then never check in the next (the run identifier of [[domain-separation]], Fiat–Shamir).
 
@@ -206,7 +206,7 @@ The check's output is the **registered key set**: for each qualified seat in inc
 
 The stub's contents reach the permanent archive once the definition is registered, so a trustee node checks them before it lends its keys to the election. Before it sends its round-1 message, and again before it signs the ceremony registration, a node MUST:
 
-1. decode the stub as an election definition under the node's own pinned profile ([[election-definition]], Decoding), with `ceremony_transcript_hash` zero, and recompute `stub_hash` from it, never taking it from the coordinator;
+1. decode the stub as an election definition under the node's own pinned profile ([[election-definition]], Decoding), with `ceremony_transcript_hash` zero (and, for a version-6 author panel's ceremony, `author_transcript_hash` zero too, [[election-definition]], Stub hash and the ceremony), and recompute `stub_hash` (or `author_stub_hash`) from it, never taking it from the coordinator;
 2. check that the stub names the panel its release pins (`panel_id`, `threshold`, `panel_size`), the chain its deployment pins, and the `trustee_registry` it registers with;
 3. run [[verifier]] 1.3, 2.3 and 2.4 on the stub, against its own pins and finalized L2 state at each tier's `root_l2_block`: the verification-key hash equals the pinned one, every pinned version is supported and not retired, and every tier's `root`, `group_id` and `group_size` match the tier tree it rebuilds from that tier's additions.
 

@@ -2,7 +2,7 @@
 """Prints docs/spec/vectors/election-definition-v6.json.
 
 Written from docs/spec/election-definition.md (Layout (version 6), Poll class
-and results, Author panel, Well-formedness) and docs/spec/trustee-identity.md
+and results, Author panel, Stub hash and the ceremony, Well-formedness) and docs/spec/trustee-identity.md
 (Author panel identifier) alone, independently of packages/crypto, with only
 the Python standard library. It reuses definition-v5-vectors.py's version-5
 encoder, values and rules (and through it definition-v4-vectors.py's and
@@ -190,8 +190,12 @@ def def_vectors():
         e = enc_definition_v6(d)
         v = {"id": id_, "description": desc, "type": T, "value": def_json(d), "encoding": e.hex()}
         v["hash"] = H(ds("abolish/v1/election-definition", e)).hex()
-        stub = dict(d, ceremony_transcript_hash=bytes(32), author_transcript_hash=bytes(32))
+        # The default panel's stub keeps author_transcript_hash; the author panel's zeroes it too.
+        stub = dict(d, ceremony_transcript_hash=bytes(32))
         v["stubHash"] = H(ds("abolish/v1/election-stub", enc_definition_v6(stub))).hex()
+        author_stub = dict(stub, author_transcript_hash=bytes(32))
+        v["authorStubHash"] = H(ds("abolish/v1/election-stub", enc_definition_v6(author_stub))).hex()
+        assert (v["authorStubHash"] == v["stubHash"]) == (d["author_transcript_hash"] == bytes(32))
         want = None if rule is None else (rule, at)
         assert definition_rule(d) == want, (id_, definition_rule(d), want)
         if rule is not None:

@@ -99,15 +99,16 @@ describe("election definition version 6 (docs/spec/election-definition.md, Layou
     expect(record.value).toEqual(type(v.type).built.fromJson(v.value));
     expect(toHex(schema.encode(recordType, 6, record.value as never))).toBe(v.encoding);
     expect(toHex(H(ds("abolish/v1/election-definition", hex(v.encoding))))).toBe(v.hash);
-    // The stub zeroes both transcript hashes.
-    const stub = {
-      ...(record.value as object),
-      ceremony_transcript_hash: new Uint8Array(32),
-      author_transcript_hash: new Uint8Array(32),
-    };
-    expect(
-      toHex(H(ds("abolish/v1/election-stub", schema.encode(recordType, 6, stub as never)))),
-    ).toBe(v.stubHash);
+    // The default panel's stub zeroes its own transcript hash and keeps the
+    // author panel's, so its registration binds it; the author panel's stub
+    // zeroes both.
+    const stubHash = (stub: object) =>
+      toHex(H(ds("abolish/v1/election-stub", schema.encode(recordType, 6, stub as never))));
+    const stub = { ...(record.value as object), ceremony_transcript_hash: new Uint8Array(32) };
+    expect(stubHash(stub)).toBe(v.stubHash);
+    expect(stubHash({ ...stub, author_transcript_hash: new Uint8Array(32) })).toBe(
+      (v as typeof v & { authorStubHash?: string }).authorStubHash,
+    );
     const { author_threshold: k, author_keys: keys } = record.value as {
       author_threshold: number;
       author_keys: Uint8Array[];

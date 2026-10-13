@@ -111,6 +111,51 @@ export const TAG_REGISTRY = Object.freeze(
         status: "specified",
       },
       { tag: "abolish/v1/event-accumulator-2", primitive: "plain", status: "specified" },
+      {
+        tag: "abolish/v1/keyed-nullifier/reshare-context",
+        primitive: "plain",
+        status: "specified",
+      },
+      {
+        tag: "abolish/v1/keyed-nullifier/reshare-round",
+        primitive: "plain",
+        status: "specified",
+      },
+      {
+        tag: "abolish/v1/keyed-nullifier/reshared-key",
+        primitive: "plain",
+        status: "specified",
+      },
+      {
+        tag: "abolish/v1/keyed-nullifier/reshare-share",
+        primitive: "plain",
+        status: "specified",
+      },
+      {
+        tag: "abolish/v1/kem/nullifier-reshare-share",
+        primitive: "kdf-aead",
+        status: "specified",
+      },
+      {
+        tag: "abolish/v1/kem/nullifier-reshare-share-aad",
+        primitive: "kdf-aead",
+        status: "specified",
+      },
+      {
+        tag: "abolish/v1/sig/nullifier-reshare-message",
+        primitive: "signature",
+        status: "specified",
+      },
+      {
+        tag: "abolish/v1/sig/nullifier-reshare-signing-key",
+        primitive: "signature",
+        status: "specified",
+      },
+      {
+        tag: "abolish/v1/sig/nullifier-reshare-approval",
+        primitive: "signature",
+        status: "specified",
+      },
     ] as const
   ).map((e) => Object.freeze(e)),
 );

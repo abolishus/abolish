@@ -4,7 +4,7 @@ A Tier 2 member's nullifier `N` is keyed by the trustees: the 2HashDH OPRF `N = 
 
 What this page doesn't yet specify is P3-4 part 2b's later steps, and nothing registers at Tier 2 through the panel until they are:
 
-- **2b-2:** the key's sharing transcript, which dealers qualify (and so the share commitments below), `key_id` and the registration keys, are specified in [[nullifier-key]] (part 2b-2a); resharing is part 2b-2b.
+- **2b-2:** the key's sharing transcript, which dealers qualify (and so the share commitments below), `key_id` and the registration keys, are specified in [[nullifier-key]] (part 2b-2a), and resharing to a new panel or epoch in [[nullifier-reshare]] (part 2b-2b), whose successor key the answer check takes in the same shape.
 - **2b-3:** `H1` and `H2`, the query and output records and the statements of their circuits (and so `query_hash`), with the diff of TACEO's gadgets against the audited code ([[0022-tier2-keyed-nullifier]], Amendment).
 - **2b-4:** the attestation's group position and quorum, the delivery of `N` to every seat, and [[verifier]] 2.4's count of attested additions.
 
@@ -168,7 +168,7 @@ the record without its signature, so a later version can't reuse a version 1 sig
 
 ## Answer check
 
-A client checks every answer before combining, and every attester checks each of the `k` answers a client forwards before recombining (part 2b-4). Each takes `key_id`, `k`, each qualified seat's registration signing key and `C_i` from the key's transcript it checked ([[nullifier-key]], Transcript check), and `query_hash` and `B` from the query it made or received, never from the answer. In this order, the first failure is the result:
+A client checks every answer before combining, and every attester checks each of the `k` answers a client forwards before recombining (part 2b-4). Each takes `key_id`, `k`, each qualified seat's registration signing key and `C_i` from the key's transcript it checked ([[nullifier-key]], Transcript check; for a successor key, the chain of reshares it checked from the initial key, [[nullifier-reshare]], Transcript check), and `query_hash` and `B` from the query it made or received, never from the answer. In this order, the first failure is the result:
 
 | Code               | Check                                                                                               |
 | ------------------ | --------------------------------------------------------------------------------------------------- |

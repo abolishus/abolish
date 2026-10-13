@@ -31,6 +31,8 @@ export const RECORD_TYPES = Object.freeze({
   nullifierAnswer: 0x0010,
   nullifierKeyTranscript: 0x0011,
   nullifierKeyShare: 0x0012,
+  nullifierReshareTranscript: 0x0013,
+  nullifierReshareShare: 0x0014,
 } as const);
 
 /** `0xff00`–`0xffff`: used only by vector files to exercise framing. */

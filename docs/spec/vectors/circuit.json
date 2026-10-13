@@ -343,6 +343,51 @@
       "tag": "abolish/v1/event-accumulator-2",
       "digest": "7ec768e3ed42d02a5eea47add6daa13580d0c022699133bf629411c6398123f7",
       "field": "223999005523034849758506608410238905625002175505594598350009769100276498723"
+    },
+    {
+      "tag": "abolish/v1/keyed-nullifier/reshare-context",
+      "digest": "298fc3ac2ae5e40344c39933c186dbf6bcb46c7c8b431110fc79a994a3e2c9ea",
+      "field": "73432954704466287424464154184751528686412045375700423827709342469090173641"
+    },
+    {
+      "tag": "abolish/v1/keyed-nullifier/reshare-round",
+      "digest": "feced2ccc70bc07d23ce2e5bac19fe72f396783bf2d4bfeafa563db8b20f2fc2",
+      "field": "450206597355538814191562692307923227764373184061997078966887588333341511471"
+    },
+    {
+      "tag": "abolish/v1/keyed-nullifier/reshared-key",
+      "digest": "ca01e5c23acfa763413456191e316b7be1d286616d1e33ae67c86886adfa8ae9",
+      "field": "356916203114145289302247917431126596494566182304141772742375404345209256586"
+    },
+    {
+      "tag": "abolish/v1/keyed-nullifier/reshare-share",
+      "digest": "3ebafe0ff8003d08ea638f8161334b95eb22177cea09a922be22b01f795dcd52",
+      "field": "110835092344922370265223015275037177572022206042756866249896233085647281613"
+    },
+    {
+      "tag": "abolish/v1/kem/nullifier-reshare-share",
+      "digest": "b9d17fad0f3e6bb6365d25613f1ff8c17704500b942bd6e8219d299c440992b4",
+      "field": "328312614109004463962549427007009853691530894674929177501939096886473656722"
+    },
+    {
+      "tag": "abolish/v1/kem/nullifier-reshare-share-aad",
+      "digest": "f709eb88692bbb017a1caae64efc70915b68d54680f8f24459da062018810cad",
+      "field": "436479690670585258625115778616178348395761732921635766579157494992119300364"
+    },
+    {
+      "tag": "abolish/v1/sig/nullifier-reshare-message",
+      "digest": "6465c3e6471f0c0c624c01e072a9245d74707144b54957f68f4a7fcc1e8b19c3",
+      "field": "177387064299549054644471938345214566478565375878185949762246988289785367321"
+    },
+    {
+      "tag": "abolish/v1/sig/nullifier-reshare-signing-key",
+      "digest": "c397d3e68d89abc7f56dc4b34f5dade5396a369b23b204dcdc7bd1fcef0fde19",
+      "field": "345583054158949436398801231123712512220614059369296239106130866547658264542"
+    },
+    {
+      "tag": "abolish/v1/sig/nullifier-reshare-approval",
+      "digest": "5cc29deb40b9dcd112c0d5d6f2b9f38cf2bfe60f983eb4e3acbec4e3ff729d0a",
+      "field": "163893126237530755001982638777428539201878896407939063154010347856208032413"
     }
   ],
   "packBytes": [

@@ -6,7 +6,16 @@
 // no proven complaint excludes it (ADR 0002, Deadline, Complaints and the
 // owner's 2026-10-12 decision; T-41, T-29, T-25, T-54).
 
-import { ballotHash, type BallotLabel, type CommittedVote, labelOf } from "./ballot-validity.ts";
+import {
+  ballotHash,
+  ballotHashV4,
+  type BallotHashContextV3,
+  type BallotLabel,
+  type CommittedVote,
+  type CommittedVoteV4,
+  labelOf,
+} from "./ballot-validity.ts";
+import { SEAT_PANELS, type SeatPanel } from "./ballot.ts";
 import {
   BN254_R,
   bytesFixed,
@@ -14,6 +23,7 @@ import {
   DecodeError,
   type DecodeErrorCode,
   encode,
+  enum8,
   struct,
   u8,
 } from "./codec.ts";
@@ -23,15 +33,36 @@ import { RECORD_TYPES, RecordSchema, recordType } from "./record.ts";
 import { checkL1Reference, type FinalizedL1, selectBallots } from "./revoting.ts";
 import {
   checkComplaint,
+  checkComplaintV4,
   checkPosting,
+  checkPostingV4,
   COMPLAINT_PROOF,
+  type ComplaintProof,
+  type ComplaintResult,
+  type Posting,
   type PostingCode,
+  type PostingResult,
   SHARE_CIPHERTEXT,
 } from "./share-encryption.ts";
-import { checkReceiptStatement } from "./share-receipt.ts";
-import { MAX_TRUSTEES, p256Sig, signStatement, verifyStatement } from "./trustee.ts";
+import {
+  checkReceiptStatement,
+  checkReceiptStatementV4,
+  type PanelReceiptSigners,
+} from "./share-receipt.ts";
+import {
+  MAX_TRUSTEES,
+  p256Sig,
+  type SignatureTag,
+  signStatement,
+  verifyStatement,
+} from "./trustee.ts";
 
 const COMPLAINT_TAG = "abolish/v1/sig/share-complaint";
+
+// A new tag for version 2's 162-byte statement, which names no version: under
+// one tag it and version 1's 161 bytes would be two layouts
+// (docs/spec/delivery.md, Records (version 2); domain-separation.md).
+const COMPLAINT_TAG_V2 = "abolish/v1/sig/share-complaint-2";
 
 /** `DELIVERY_WINDOW`: seconds after `closes_at + l1_inclusion_bound` by which receipts and postings are sent. */
 export const DELIVERY_WINDOW = BigInt(PARAMETERS.DELIVERY_WINDOW);
@@ -66,6 +97,41 @@ const complaintStatementV1 = struct(complaintFields);
 
 const complaintV1 = struct([...complaintFields, ["signature", p256Sig]] as const);
 
+// Version 2, which ballot version 4 fixes: version 1's fields with the seat's
+// panel before the seat, so a record for one panel's seat `i` never reads as
+// the other's (docs/spec/delivery.md, Version 2; T-37).
+const SEAT_PANEL = enum8([SEAT_PANELS.default, SEAT_PANELS.author]);
+
+const receiptV2 = struct([
+  ["definition_hash", bytesFixed(32)],
+  ["ballot_hash", bytesFixed(32)],
+  ["panel", SEAT_PANEL],
+  ["seat", u8],
+  ["share_hash", bytesFixed(32)],
+  ["signature", p256Sig],
+] as const);
+
+const postingV2 = struct([
+  ["definition_hash", bytesFixed(32)],
+  ["ballot_hash", bytesFixed(32)],
+  ["panel", SEAT_PANEL],
+  ["seat", u8],
+  ["m", bytesFixed(32)],
+  ["ciphertext", SHARE_CIPHERTEXT],
+] as const);
+
+const complaintFieldsV2 = [
+  ["definition_hash", bytesFixed(32)],
+  ["ballot_hash", bytesFixed(32)],
+  ["panel", SEAT_PANEL],
+  ["seat", u8],
+  ["proof", COMPLAINT_PROOF],
+] as const;
+
+const complaintStatementV2 = struct(complaintFieldsV2);
+
+const complaintV2 = struct([...complaintFieldsV2, ["signature", p256Sig]] as const);
+
 /** Share receipt record, version 1: the 97-byte receipt statement and its signature. */
 export type ShareReceiptRecord = CodecValue<typeof receiptV1>;
 
@@ -78,14 +144,29 @@ export type ShareComplaintStatement = CodecValue<typeof complaintStatementV1>;
 /** Share complaint record, version 1. */
 export type ShareComplaintRecord = CodecValue<typeof complaintV1>;
 
-/** Record type `0x000c`. Ballot version 1 fixes it at version 1; it is never pinned. */
-export const SHARE_RECEIPT = recordType(RECORD_TYPES.shareReceipt, { 1: receiptV1 });
+/** Share receipt record, version 2: the 98-byte version-4 receipt statement and its signature. */
+export type ShareReceiptRecordV2 = CodecValue<typeof receiptV2>;
 
-/** Record type `0x000d`. Ballot version 1 fixes it at version 1; it is never pinned. */
-export const SHARE_POSTING = recordType(RECORD_TYPES.sharePosting, { 1: postingV1 });
+/** Share posting record, version 2: version 1's, naming the seat's panel. */
+export type SharePostingRecordV2 = CodecValue<typeof postingV2>;
 
-/** Record type `0x000e`. Ballot version 1 fixes it at version 1; it is never pinned. */
-export const SHARE_COMPLAINT = recordType(RECORD_TYPES.shareComplaint, { 1: complaintV1 });
+/** What a version-2 complaint's signature is over: every field but the signature. */
+export type ShareComplaintStatementV2 = CodecValue<typeof complaintStatementV2>;
+
+/** Share complaint record, version 2: version 1's, naming the seat's panel. */
+export type ShareComplaintRecordV2 = CodecValue<typeof complaintV2>;
+
+/** Record type `0x000c`. Ballot versions 1 to 3 fix it at version 1, version 4 at version 2; it is never pinned. */
+export const SHARE_RECEIPT = recordType(RECORD_TYPES.shareReceipt, { 1: receiptV1, 2: receiptV2 });
+
+/** Record type `0x000d`. Ballot versions 1 to 3 fix it at version 1, version 4 at version 2; it is never pinned. */
+export const SHARE_POSTING = recordType(RECORD_TYPES.sharePosting, { 1: postingV1, 2: postingV2 });
+
+/** Record type `0x000e`. Ballot versions 1 to 3 fix it at version 1, version 4 at version 2; it is never pinned. */
+export const SHARE_COMPLAINT = recordType(RECORD_TYPES.shareComplaint, {
+  1: complaintV1,
+  2: complaintV2,
+});
 
 const SCHEMA = new RecordSchema([SHARE_RECEIPT, SHARE_POSTING, SHARE_COMPLAINT]);
 
@@ -93,8 +174,17 @@ export function encodeShareReceipt(record: ShareReceiptRecord): Uint8Array {
   return SCHEMA.encode(SHARE_RECEIPT, 1, record);
 }
 
+export function encodeShareReceiptV2(record: ShareReceiptRecordV2): Uint8Array {
+  return SCHEMA.encode(SHARE_RECEIPT, 2, record);
+}
+
 /** Strictly decodes a share receipt record against the version the ballot version fixes. */
-export function decodeShareReceipt(bytes: Uint8Array, pinned: 1): ShareReceiptRecord {
+export function decodeShareReceipt(bytes: Uint8Array, pinned: 1): ShareReceiptRecord;
+export function decodeShareReceipt(bytes: Uint8Array, pinned: 2): ShareReceiptRecordV2;
+export function decodeShareReceipt(
+  bytes: Uint8Array,
+  pinned: 1 | 2,
+): ShareReceiptRecord | ShareReceiptRecordV2 {
   return SCHEMA.decode(SHARE_RECEIPT, bytes, pinned).value;
 }
 
@@ -102,8 +192,17 @@ export function encodeSharePosting(record: SharePostingRecord): Uint8Array {
   return SCHEMA.encode(SHARE_POSTING, 1, record);
 }
 
+export function encodeSharePostingV2(record: SharePostingRecordV2): Uint8Array {
+  return SCHEMA.encode(SHARE_POSTING, 2, record);
+}
+
 /** Strictly decodes a posting record; a ciphertext that doesn't decode fails the whole record. */
-export function decodeSharePosting(bytes: Uint8Array, pinned: 1): SharePostingRecord {
+export function decodeSharePosting(bytes: Uint8Array, pinned: 1): SharePostingRecord;
+export function decodeSharePosting(bytes: Uint8Array, pinned: 2): SharePostingRecordV2;
+export function decodeSharePosting(
+  bytes: Uint8Array,
+  pinned: 1 | 2,
+): SharePostingRecord | SharePostingRecordV2 {
   return SCHEMA.decode(SHARE_POSTING, bytes, pinned).value;
 }
 
@@ -111,8 +210,17 @@ export function encodeShareComplaint(record: ShareComplaintRecord): Uint8Array {
   return SCHEMA.encode(SHARE_COMPLAINT, 1, record);
 }
 
+export function encodeShareComplaintV2(record: ShareComplaintRecordV2): Uint8Array {
+  return SCHEMA.encode(SHARE_COMPLAINT, 2, record);
+}
+
 /** Strictly decodes a complaint record against the version the ballot version fixes. */
-export function decodeShareComplaint(bytes: Uint8Array, pinned: 1): ShareComplaintRecord {
+export function decodeShareComplaint(bytes: Uint8Array, pinned: 1): ShareComplaintRecord;
+export function decodeShareComplaint(bytes: Uint8Array, pinned: 2): ShareComplaintRecordV2;
+export function decodeShareComplaint(
+  bytes: Uint8Array,
+  pinned: 1 | 2,
+): ShareComplaintRecord | ShareComplaintRecordV2 {
   return SCHEMA.decode(SHARE_COMPLAINT, bytes, pinned).value;
 }
 
@@ -122,6 +230,17 @@ export function shareComplaintStatement(statement: ShareComplaintStatement): Uin
   return encode(complaintStatementV1, {
     definition_hash: statement.definition_hash,
     ballot_hash: statement.ballot_hash,
+    seat: statement.seat,
+    proof: statement.proof,
+  });
+}
+
+/** `m = definition_hash ‖ ballot_hash ‖ u8(panel) ‖ u8(seat) ‖ encode(proof)`: 162 bytes. */
+export function shareComplaintStatementV2(statement: ShareComplaintStatementV2): Uint8Array {
+  return encode(complaintStatementV2, {
+    definition_hash: statement.definition_hash,
+    ballot_hash: statement.ballot_hash,
+    panel: statement.panel,
     seat: statement.seat,
     proof: statement.proof,
   });
@@ -144,6 +263,27 @@ export function signShareComplaint(
     seat: statement.seat,
     proof: { dh, c, z },
     signature: signStatement(signingSecret, COMPLAINT_TAG, m),
+  };
+}
+
+/**
+ * Signs a version-2 complaint with the seat's per-election signing key from
+ * its own panel's key set, under `abolish/v1/sig/share-complaint-2`. A node
+ * makes the proof with `proveComplaintV4`.
+ */
+export function signShareComplaintV2(
+  signingSecret: Uint8Array,
+  statement: ShareComplaintStatementV2,
+): ShareComplaintRecordV2 {
+  const m = shareComplaintStatementV2(statement);
+  const { dh, c, z } = statement.proof;
+  return {
+    definition_hash: Uint8Array.from(statement.definition_hash),
+    ballot_hash: Uint8Array.from(statement.ballot_hash),
+    panel: statement.panel,
+    seat: statement.seat,
+    proof: { dh, c, z },
+    signature: signStatement(signingSecret, COMPLAINT_TAG_V2, m),
   };
 }
 
@@ -445,29 +585,74 @@ export interface DeliveryCheck {
   readonly rejected: readonly { readonly at: number; readonly error: DecodeErrorCode }[];
 }
 
-type Decoded =
-  | { readonly kind: "receipt"; readonly record: ShareReceiptRecord }
-  | { readonly kind: "posting"; readonly record: SharePostingRecord }
-  | { readonly kind: "complaint"; readonly record: ShareComplaintRecord };
+/** A seat of either panel: version 1's records and ballots name only default seats. */
+export interface PanelSeat {
+  readonly panel: SeatPanel;
+  readonly seat: number;
+}
 
-function decodeDelivery(payload: Uint8Array, pinned: 1, path: DeliveryEntry["path"]): Decoded {
-  if (payload.length < 3) throw new DecodeError("truncated", 0);
-  const type = ((payload[0] as number) << 8) | (payload[1] as number);
-  switch (type) {
-    case RECORD_TYPES.shareReceipt:
-      return { kind: "receipt", record: decodeShareReceipt(payload, pinned) };
-    case RECORD_TYPES.sharePosting:
-      // Board-entry version 3 doesn't allow a posting, so one here through the
-      // board path is rejected like the entry that would carry it.
-      if (path !== "contract") throw new DecodeError("unexpected-record-type", 0);
-      return { kind: "posting", record: decodeSharePosting(payload, pinned) };
-    case RECORD_TYPES.shareComplaint:
-      return { kind: "complaint", record: decodeShareComplaint(payload, pinned) };
-    default:
-      // Another record type, which the caller shouldn't have passed: rejected
-      // like any undecodable entry, so board content can't stop the check.
-      throw new DecodeError("unexpected-record-type", 0);
-  }
+/**
+ * One decoded delivery record of either version, as the check reads it:
+ * version 1's name the default panel.
+ */
+type DeliveryItem = PanelSeat & {
+  readonly definitionHash: Uint8Array;
+  readonly ballotHash: Uint8Array;
+} & (
+    | {
+        readonly kind: "receipt";
+        readonly shareHash: Uint8Array;
+        readonly signature: Uint8Array;
+      }
+    | { readonly kind: "posting"; readonly posting: Posting }
+    | {
+        readonly kind: "complaint";
+        readonly proof: ComplaintProof;
+        /** What its signature is over: the record's fields but the signature. */
+        readonly statement: Uint8Array;
+        readonly signature: Uint8Array;
+      }
+  );
+
+/** What differs between the versions: decoding, each panel's keys, and the per-seat checks. */
+interface DeliveryRules {
+  /** Strictly decodes a payload of `kind` under the version the ballot version fixes; throws `DecodeError`. */
+  decode(kind: DeliveryItem["kind"], payload: Uint8Array): DeliveryItem;
+  /** The tag a complaint's signature is under. */
+  readonly complaintTag: SignatureTag;
+  /** The seat's registered keys in its own panel's key set. */
+  keys(seat: PanelSeat): RegisteredKeys | undefined;
+  /** The selected ballot's share hash for the seat, from its own panel's list. */
+  shareHash(ballot: number, seat: PanelSeat): Uint8Array;
+  /** `share-receipt` over a statement: the seat's registered signing key signed it. */
+  receiptSigned(
+    statement: PanelSeat & { readonly ballotHash: Uint8Array; readonly shareHash: Uint8Array },
+    signature: Uint8Array,
+  ): boolean;
+  posting(ballot: number, seat: PanelSeat, key: RegisteredKeys, posting: Posting): PostingResult;
+  complaint(
+    ballot: number,
+    seat: PanelSeat,
+    key: RegisteredKeys,
+    posting: Posting,
+    proof: ComplaintProof,
+  ): ComplaintResult;
+}
+
+interface SeatDelivery {
+  readonly ballotHash: Uint8Array;
+  readonly counted: boolean;
+  readonly delivered: boolean;
+  readonly missing: readonly PanelSeat[];
+  readonly excludedBy: readonly (ProvenComplaint & { readonly panel: SeatPanel })[];
+}
+
+type SeatReport = DeliveryRecordReport & PanelSeat;
+
+interface SeatCheck {
+  readonly ballots: readonly SeatDelivery[];
+  readonly records: readonly SeatReport[];
+  readonly rejected: readonly { readonly at: number; readonly error: DecodeErrorCode }[];
 }
 
 const sameBytes = (a: Uint8Array, b: Uint8Array) =>
@@ -475,20 +660,211 @@ const sameBytes = (a: Uint8Array, b: Uint8Array) =>
 
 const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
 
-/** The seat a complaint's signature attributes it to, or `null` (T-29). */
-function complaintSigner(
-  registered: readonly RegisteredKeys[],
-  c: ShareComplaintRecord,
-): number | null {
-  const seat = registered.find((k) => k.index === c.seat);
-  if (seat === undefined) return null;
-  return verifyStatement(seat.signingKey, COMPLAINT_TAG, shareComplaintStatement(c), c.signature)
-    ? c.seat
-    : null;
+const seatKey = (s: PanelSeat) => `${s.panel}:${s.seat}`;
+
+const bySeat = (a: PanelSeat, b: PanelSeat) => a.panel - b.panel || a.seat - b.seat;
+
+// The record type, read before decoding: board-entry versions 3 and 4 don't
+// allow a posting, so one here through the board path is rejected like the
+// entry that would carry it, and another record type, which the caller
+// shouldn't have passed, is rejected like any undecodable entry, so board
+// content can't stop the check.
+function deliveryKind(payload: Uint8Array, path: DeliveryEntry["path"]): DeliveryItem["kind"] {
+  if (payload.length < 3) throw new DecodeError("truncated", 0);
+  const type = ((payload[0] as number) << 8) | (payload[1] as number);
+  if (type === RECORD_TYPES.shareReceipt) return "receipt";
+  if (type === RECORD_TYPES.sharePosting && path === "contract") return "posting";
+  if (type === RECORD_TYPES.shareComplaint) return "complaint";
+  throw new DecodeError("unexpected-record-type", 0);
+}
+
+function checkWindows(segments: DeliverySegments, deadlines: DeliveryDeadlines, name: string) {
+  // A malformed window would fail open (every record in time) or closed, so
+  // both pairs are checked, and each pair in order.
+  for (const pair of [segments, deadlines])
+    if (
+      typeof pair?.delivery !== "bigint" ||
+      typeof pair.complaint !== "bigint" ||
+      pair.delivery < 0n ||
+      pair.complaint < pair.delivery
+    )
+      throw new RangeError(`${name}: segments and deadlines must be bigints, delivery ≤ complaint`);
+}
+
+function checkEntries(entries: readonly DeliveryEntry[], name: string) {
+  for (const e of entries)
+    if (
+      e.path === "board"
+        ? !Number.isSafeInteger(e.segment) || e.segment < 0
+        : e.path !== "contract" || typeof e.submittedAt !== "bigint"
+    )
+      throw new RangeError(`${name}: every entry is a board-path or contract-path record`);
+}
+
+// A panel's registered key set, by seat: each seat from 1 to the panel's size, once.
+function keySet(registered: readonly RegisteredKeys[], size: number, name: string) {
+  for (const k of registered)
+    if (!Number.isSafeInteger(k.index) || k.index < 1 || k.index > size)
+      throw new RangeError(`${name}: every registered seat must be from 1 to its panel's size`);
+  const keyOf = new Map(registered.map((k) => [k.index, k]));
+  if (keyOf.size !== registered.length)
+    throw new RangeError(`${name}: a registered seat is listed twice`);
+  return keyOf;
 }
 
 /**
- * The delivery check (docs/spec/delivery.md, Delivery check; verifier 5.9).
+ * The delivery check over seats of either panel (docs/spec/delivery.md,
+ * Delivery check; Version 2), for `checkDelivery` and `checkDeliveryV2`:
+ * `hashes` are the selected ballots' recomputed ballot hashes, `qualified`
+ * every seat of each panel's registered key set. A record for one panel never
+ * delivers, excludes or contradicts a seat of the other.
+ */
+function deliveryCheck(
+  election: {
+    readonly definitionHash: Uint8Array;
+    readonly segments: DeliverySegments;
+    readonly deadlines: DeliveryDeadlines;
+  },
+  hashes: readonly Uint8Array[],
+  qualified: readonly PanelSeat[],
+  entries: readonly DeliveryEntry[],
+  rules: DeliveryRules,
+): SeatCheck {
+  const { definitionHash, segments, deadlines } = election;
+  // A ballot hash binds the tier or cell and the nullifier, so selected ballots never share one.
+  const byHash = new Map(hashes.map((h, i) => [hex(h), i]));
+
+  const delivered = hashes.map(() => new Set<string>());
+  const records: SeatReport[] = [];
+  const rejected: { at: number; error: DecodeErrorCode }[] = [];
+  // Passing receipts and complaints to check once every posting is known, by ballot.
+  const receipts: { at: number; ballot: number; seat: PanelSeat }[] = [];
+  const complaints: {
+    at: number;
+    ballot: number;
+    item: DeliveryItem & { readonly kind: "complaint" };
+  }[] = [];
+  const postings = hashes.map(() => new Map<string, Posting>());
+
+  entries.forEach((entry, at) => {
+    let d: DeliveryItem;
+    try {
+      d = rules.decode(deliveryKind(entry.payload, entry.path), entry.payload);
+    } catch (e) {
+      if (!(e instanceof DecodeError)) throw e;
+      rejected.push({ at, error: e.code });
+      return;
+    }
+    const seat: PanelSeat = { panel: d.panel, seat: d.seat };
+    if (!sameBytes(d.definitionHash, definitionHash)) {
+      records.push({ at, code: "delivery-stray", ...seat });
+      return;
+    }
+    const ballot = byHash.get(hex(d.ballotHash));
+    // A record for a ballot that isn't selected decides nothing.
+    if (ballot === undefined) return;
+    const key = rules.keys(seat);
+    if (key === undefined) {
+      records.push({ at, code: "delivery-seat", ...seat });
+      return;
+    }
+    const late =
+      entry.path === "board"
+        ? BigInt(entry.segment) > (d.kind === "complaint" ? segments.complaint : segments.delivery)
+        : entry.submittedAt > (d.kind === "complaint" ? deadlines.complaint : deadlines.delivery);
+    if (late) {
+      records.push({ at, code: "delivery-late", ...seat });
+      return;
+    }
+    const shareHash = rules.shareHash(ballot, seat);
+    if (d.kind === "receipt") {
+      const ok =
+        sameBytes(d.shareHash, shareHash) &&
+        rules.receiptSigned(
+          { ...seat, ballotHash: hashes[ballot] as Uint8Array, shareHash },
+          d.signature,
+        );
+      if (!ok) {
+        // T-29: a seat whose signature verifies over the record's own fields
+        // signed a share hash other than the ballot's for this ballot.
+        const signer = rules.receiptSigned(
+          { ...seat, ballotHash: d.ballotHash, shareHash: d.shareHash },
+          d.signature,
+        )
+          ? d.seat
+          : null;
+        records.push({ at, code: "share-receipt", signer, ...seat });
+        return;
+      }
+      (delivered[ballot] as Set<string>).add(seatKey(seat));
+      receipts.push({ at, ballot, seat });
+    } else if (d.kind === "posting") {
+      const p = rules.posting(ballot, seat, key, d.posting);
+      if (!p.ok) {
+        records.push({ at, code: p.code, ...seat });
+        return;
+      }
+      (delivered[ballot] as Set<string>).add(seatKey(seat));
+      postings[ballot]?.set(seatKey(seat), d.posting);
+    } else {
+      complaints.push({ at, ballot, item: d });
+    }
+  });
+
+  // Complaints, once every posting is known: the passing posting needn't come
+  // before the complaint on the board.
+  const excluded = hashes.map(() => [] as (ProvenComplaint & { readonly panel: SeatPanel })[]);
+  for (const { at, ballot, item } of complaints) {
+    const seat: PanelSeat = { panel: item.panel, seat: item.seat };
+    const posting = postings[ballot]?.get(seatKey(seat));
+    if (posting === undefined) {
+      records.push({ at, code: "complaint-void", ...seat });
+      continue;
+    }
+    const key = rules.keys(seat) as RegisteredKeys;
+    const result = rules.complaint(ballot, seat, key, posting, item.proof);
+    // T-29: attributed only under the seat's registered signing key, never its identity key.
+    const signer = verifyStatement(
+      key.signingKey,
+      rules.complaintTag,
+      item.statement,
+      item.signature,
+    )
+      ? item.seat
+      : null;
+    if (result.ok) excluded[ballot]?.push({ at, ...seat, signer });
+    else if (result.code === "complaint-unfounded")
+      records.push({ at, code: "complaint-unfounded", signer, ...seat });
+    else records.push({ at, code: "complaint-proof", ...seat });
+  }
+  // A passing receipt for a seat whose complaint about the same ballot, in the
+  // same panel, is proven: the seat signed that shares passed which a public
+  // proof shows don't (T-29).
+  for (const { at, ballot, seat } of receipts)
+    if (excluded[ballot]?.some((c) => c.panel === seat.panel && c.seat === seat.seat))
+      records.push({ at, code: "receipt-contradicted", signer: seat.seat, ...seat });
+
+  records.sort((a, b) => a.at - b.at);
+  const ballots = hashes.map((ballotHash, i) => {
+    const got = delivered[i] as Set<string>;
+    const missing = qualified.filter((s) => !got.has(seatKey(s))).sort(bySeat);
+    const excludedBy = (excluded[i] as (ProvenComplaint & { panel: SeatPanel })[]).sort(
+      (a, b) => a.at - b.at,
+    );
+    return {
+      ballotHash,
+      counted: missing.length === 0 && excludedBy.length === 0,
+      delivered: missing.length === 0,
+      missing,
+      excludedBy,
+    };
+  });
+  return { ballots, records, rejected };
+}
+
+/**
+ * The delivery check (docs/spec/delivery.md, Delivery check; verifier 5.9)
+ * for ballot versions 1 and 2, with delivery records of version 1.
  * `ballots` are the ballots selected for every cell from the counted extent;
  * `entries` every share-receipt, posting and complaint in the counted extent,
  * by either path, in board order, and `at` in every report is a position in
@@ -510,31 +886,9 @@ export function checkDelivery(
     throw new RangeError("checkDelivery: definitionHash must be 32 bytes");
   if (!Number.isSafeInteger(panelSize) || panelSize < 2 || panelSize > MAX_TRUSTEES)
     throw new RangeError("checkDelivery: panelSize must be from 2 to 16");
-  for (const k of registered)
-    if (!Number.isSafeInteger(k.index) || k.index < 1 || k.index > panelSize)
-      throw new RangeError("checkDelivery: every registered seat must be from 1 to n");
-  // A malformed window would fail open (every record in time) or closed, so
-  // both pairs are checked, and each pair in order.
-  for (const pair of [segments, deadlines])
-    if (
-      typeof pair?.delivery !== "bigint" ||
-      typeof pair.complaint !== "bigint" ||
-      pair.delivery < 0n ||
-      pair.complaint < pair.delivery
-    )
-      throw new RangeError(
-        "checkDelivery: segments and deadlines must be bigints, delivery ≤ complaint",
-      );
-  for (const e of entries)
-    if (
-      e.path === "board"
-        ? !Number.isSafeInteger(e.segment) || e.segment < 0
-        : e.path !== "contract" || typeof e.submittedAt !== "bigint"
-    )
-      throw new RangeError("checkDelivery: every entry is a board-path or contract-path record");
-  const keyOf = new Map(registered.map((k) => [k.index, k]));
-  if (keyOf.size !== registered.length)
-    throw new RangeError("checkDelivery: a registered seat is listed twice");
+  const keyOf = keySet(registered, panelSize, "checkDelivery");
+  checkWindows(segments, deadlines, "checkDelivery");
+  checkEntries(entries, "checkDelivery");
 
   const hashes = ballots.map((b) => {
     if (b.vote.share_hashes.length !== panelSize)
@@ -543,145 +897,275 @@ export function checkDelivery(
     const named: BallotLabel = version === 1 ? { tier: label } : { ballotVersion: 2, cell: label };
     return ballotHash({ definitionHash, ...named, nullifier: b.nullifier }, b.vote);
   });
-  // A ballot hash binds the tier or cell and the nullifier, so selected ballots never share one.
-  const byHash = new Map(hashes.map((h, i) => [hex(h), i]));
-
-  const delivered = ballots.map(() => new Set<number>());
-  const records: DeliveryRecordReport[] = [];
-  const rejected: { at: number; error: DecodeErrorCode }[] = [];
-  // Passing receipts and complaints to check once every posting is known, by ballot.
-  const receipts: { at: number; ballot: number; seat: number }[] = [];
-  const complaints: { at: number; ballot: number; record: ShareComplaintRecord }[] = [];
-  const postings = ballots.map(() => new Map<number, SharePostingRecord>());
-
-  entries.forEach((entry, at) => {
-    let d: Decoded;
-    try {
-      d = decodeDelivery(entry.payload, pinned, entry.path);
-    } catch (e) {
-      if (!(e instanceof DecodeError)) throw e;
-      rejected.push({ at, error: e.code });
-      return;
-    }
-    const r = d.record;
-    if (!sameBytes(r.definition_hash, definitionHash)) {
-      records.push({ at, code: "delivery-stray" });
-      return;
-    }
-    const ballot = byHash.get(hex(r.ballot_hash));
-    // A record for a ballot that isn't selected decides nothing.
-    if (ballot === undefined) return;
-    const key = keyOf.get(r.seat);
-    if (key === undefined) {
-      records.push({ at, code: "delivery-seat" });
-      return;
-    }
-    const late =
-      entry.path === "board"
-        ? BigInt(entry.segment) > (d.kind === "complaint" ? segments.complaint : segments.delivery)
-        : entry.submittedAt > (d.kind === "complaint" ? deadlines.complaint : deadlines.delivery);
-    if (late) {
-      records.push({ at, code: "delivery-late" });
-      return;
-    }
-    const b = ballots[ballot] as DeliveryBallot;
-    const shareHash = b.vote.share_hashes[r.seat - 1] as Uint8Array;
-    if (d.kind === "receipt") {
-      const ok =
-        sameBytes(d.record.share_hash, shareHash) &&
-        checkReceiptStatement(
-          registered,
-          {
-            definition_hash: definitionHash,
-            ballot_hash: hashes[ballot] as Uint8Array,
-            seat: r.seat,
-            share_hash: shareHash,
-          },
-          d.record.signature,
-        );
-      if (!ok) {
-        // T-29: a seat whose signature verifies over the record's own fields
-        // signed a share hash other than the ballot's for this ballot.
-        const signer = checkReceiptStatement(registered, d.record, d.record.signature)
-          ? r.seat
-          : null;
-        records.push({ at, code: "share-receipt", signer });
-        return;
+  const vote = (ballot: number) => (ballots[ballot] as DeliveryBallot).vote;
+  const ctx = { definitionHash };
+  const rules: DeliveryRules = {
+    complaintTag: COMPLAINT_TAG,
+    decode(kind, payload) {
+      const panel = SEAT_PANELS.default;
+      if (kind === "receipt") {
+        const r = decodeShareReceipt(payload, pinned);
+        const { definition_hash, ballot_hash, seat, share_hash, signature } = r;
+        return {
+          kind,
+          definitionHash: definition_hash,
+          ballotHash: ballot_hash,
+          panel,
+          seat,
+          shareHash: share_hash,
+          signature,
+        };
       }
-      (delivered[ballot] as Set<number>).add(r.seat);
-      receipts.push({ at, ballot, seat: r.seat });
-    } else if (d.kind === "posting") {
-      const p = checkPosting(
-        { definitionHash },
-        r.seat,
-        key.kemKey,
-        b.vote.vss,
-        b.vote.share_hashes,
+      if (kind === "posting") {
+        const r = decodeSharePosting(payload, pinned);
+        return {
+          kind,
+          definitionHash: r.definition_hash,
+          ballotHash: r.ballot_hash,
+          panel,
+          seat: r.seat,
+          posting: { ciphertext: encode(SHARE_CIPHERTEXT, r.ciphertext), m: r.m },
+        };
+      }
+      const r = decodeShareComplaint(payload, pinned);
+      return {
+        kind,
+        definitionHash: r.definition_hash,
+        ballotHash: r.ballot_hash,
+        panel,
+        seat: r.seat,
+        proof: r.proof,
+        statement: shareComplaintStatement(r),
+        signature: r.signature,
+      };
+    },
+    keys: ({ panel, seat }) => (panel === SEAT_PANELS.default ? keyOf.get(seat) : undefined),
+    shareHash: (ballot, { seat }) => vote(ballot).share_hashes[seat - 1] as Uint8Array,
+    receiptSigned: (s, signature) =>
+      checkReceiptStatement(
+        registered,
         {
-          ciphertext: encode(SHARE_CIPHERTEXT, d.record.ciphertext),
-          m: d.record.m,
+          definition_hash: definitionHash,
+          ballot_hash: s.ballotHash,
+          seat: s.seat,
+          share_hash: s.shareHash,
         },
-      );
-      if (!p.ok) {
-        records.push({ at, code: p.code });
-        return;
-      }
-      (delivered[ballot] as Set<number>).add(r.seat);
-      postings[ballot]?.set(r.seat, d.record);
-    } else {
-      complaints.push({ at, ballot, record: d.record });
-    }
-  });
+        signature,
+      ),
+    posting: (ballot, { seat }, key, posting) =>
+      checkPosting(ctx, seat, key.kemKey, vote(ballot).vss, vote(ballot).share_hashes, posting),
+    complaint: (ballot, { seat }, key, posting, proof) =>
+      checkComplaint(
+        ctx,
+        seat,
+        key.kemKey,
+        vote(ballot).vss,
+        vote(ballot).share_hashes,
+        posting,
+        proof,
+      ),
+  };
+  const qualified = registered.map((k) => ({ panel: SEAT_PANELS.default, seat: k.index }));
+  const r = deliveryCheck(election, hashes, qualified, entries, rules);
+  return {
+    ballots: r.ballots.map((b) => ({
+      ballotHash: b.ballotHash,
+      counted: b.counted,
+      delivered: b.delivered,
+      missing: b.missing.map((s) => s.seat),
+      excludedBy: b.excludedBy.map(({ at, seat, signer }) => ({ at, seat, signer })),
+    })),
+    records: r.records.map(({ at, code, signer }) =>
+      signer === undefined ? { at, code } : { at, code, signer },
+    ),
+    rejected: r.rejected,
+  };
+}
 
-  // Complaints, once every posting is known: the passing posting needn't come
-  // before the complaint on the board.
-  const excluded = ballots.map(() => [] as ProvenComplaint[]);
-  for (const { at, ballot, record } of complaints) {
-    const b = ballots[ballot] as DeliveryBallot;
-    const posting = postings[ballot]?.get(record.seat);
-    if (posting === undefined) {
-      records.push({ at, code: "complaint-void" });
-      continue;
-    }
-    const key = keyOf.get(record.seat) as RegisteredKeys;
-    const result = checkComplaint(
-      { definitionHash },
-      record.seat,
-      key.kemKey,
-      b.vote.vss,
-      b.vote.share_hashes,
-      { ciphertext: encode(SHARE_CIPHERTEXT, posting.ciphertext), m: posting.m },
-      record.proof,
+// --- Version 2 (docs/spec/delivery.md, Version 2) --------------------------------
+
+/**
+ * What the version-2 delivery check runs against: each panel's size and
+ * registered key set, from the definition and each panel's checked ceremony
+ * transcript. `authorPanelSize` is `n_A`, 0 without an author panel.
+ */
+export interface DeliveryElectionV2 {
+  readonly definitionHash: Uint8Array;
+  readonly panelSize: number;
+  readonly authorPanelSize: number;
+  readonly registered: {
+    readonly default: readonly RegisteredKeys[];
+    readonly author: readonly RegisteredKeys[];
+  };
+  readonly segments: DeliverySegments;
+  readonly deadlines: DeliveryDeadlines;
+}
+
+/** A selected version-4 ballot, decoded, with its cell and nullifier; it passed `validity-shape`. */
+export interface DeliveryBallotV4 {
+  readonly cell: number;
+  readonly nullifier: bigint;
+  readonly vote: CommittedVoteV4;
+}
+
+/** A version-2 record the check ignored or attributed, with the panel and seat the record names. */
+export type DeliveryRecordReportV2 = DeliveryRecordReport & PanelSeat;
+
+/** A proven version-2 complaint, with its panel. */
+export type ProvenComplaintV2 = ProvenComplaint & { readonly panel: SeatPanel };
+
+/** One selected version-4 ballot's delivery. */
+export interface BallotDeliveryV2 {
+  readonly ballotHash: Uint8Array;
+  readonly counted: boolean;
+  readonly delivered: boolean;
+  /** Qualified seats of either panel with no receipt or passing posting in time: default seats first, each panel ascending. */
+  readonly missing: readonly PanelSeat[];
+  readonly excludedBy: readonly ProvenComplaintV2[];
+}
+
+export interface DeliveryCheckV2 {
+  readonly ballots: readonly BallotDeliveryV2[];
+  readonly records: readonly DeliveryRecordReportV2[];
+  readonly rejected: readonly { readonly at: number; readonly error: DecodeErrorCode }[];
+}
+
+/**
+ * The delivery check for ballot version 4 (docs/spec/delivery.md, Delivery
+ * check (version 2); verifier 5.9), over delivery records of version 2 and
+ * every seat of both panels: each record checked against its own panel's
+ * share hashes and registered key set, so a record for one panel's seat `i`
+ * never delivers, excludes or contradicts the other's (T-37). Otherwise
+ * `checkDelivery`'s. The author panel must be absent (`authorPanelSize` 0,
+ * no author keys): its key set comes from its own ceremony's transcript
+ * check, which P2-16 part 3 specifies, and until then none is taken on trust,
+ * as `panelBallotElection` and `checkShareReceiptV4` refuse one.
+ */
+export function checkDeliveryV2(
+  election: DeliveryElectionV2,
+  ballots: readonly DeliveryBallotV4[],
+  entries: readonly DeliveryEntry[],
+): DeliveryCheckV2 {
+  if (election.authorPanelSize !== 0 || election.registered.author.length !== 0)
+    throw new RangeError(
+      "checkDeliveryV2: an author panel's key set comes from its own ceremony (P2-16 part 3)",
     );
-    const signer = complaintSigner(registered, record);
-    if (result.ok) excluded[ballot]?.push({ at, seat: record.seat, signer });
-    else if (result.code === "complaint-unfounded")
-      records.push({ at, code: "complaint-unfounded", signer });
-    else records.push({ at, code: "complaint-proof" });
-  }
-  // A passing receipt for a seat whose complaint is proven: the seat signed
-  // that shares passed which a public proof shows don't (T-29).
-  for (const { at, ballot, seat } of receipts)
-    if (excluded[ballot]?.some((c) => c.seat === seat))
-      records.push({ at, code: "receipt-contradicted", signer: seat });
+  return checkDeliveryV2With(election, ballots, entries);
+}
 
-  records.sort((a, b) => a.at - b.at);
-  const result = ballots.map((_, i) => {
-    const got = delivered[i] as Set<number>;
-    const missing = registered
-      .map((k) => k.index)
-      .filter((s) => !got.has(s))
-      .sort((a, b) => a - b);
-    const excludedBy = (excluded[i] as ProvenComplaint[]).sort((a, b) => a.at - b.at);
-    return {
-      ballotHash: hashes[i] as Uint8Array,
-      counted: missing.length === 0 && excludedBy.length === 0,
-      delivered: missing.length === 0,
-      missing,
-      excludedBy,
-    };
+/**
+ * Internal: `checkDeliveryV2` with the author panel's key set taken as given,
+ * so author seats' delivery can be tested before P2-16 part 3, which then
+ * replaces this. The package entry point doesn't export it. An author seat
+ * outside the given key set needs no delivery, as the spec says, so part 3's
+ * replacement must take the author key set from the checked transcript, with
+ * its quorum, never from the caller (T-37, T-25).
+ */
+export function checkDeliveryV2With(
+  election: DeliveryElectionV2,
+  ballots: readonly DeliveryBallotV4[],
+  entries: readonly DeliveryEntry[],
+): DeliveryCheckV2 {
+  const name = "checkDeliveryV2";
+  const { definitionHash, panelSize, authorPanelSize, registered, segments, deadlines } = election;
+  if (!(definitionHash instanceof Uint8Array) || definitionHash.length !== 32)
+    throw new RangeError(`${name}: definitionHash must be 32 bytes`);
+  if (!Number.isSafeInteger(panelSize) || panelSize < 2 || panelSize > MAX_TRUSTEES)
+    throw new RangeError(`${name}: panelSize must be from 2 to 16`);
+  if (
+    !Number.isSafeInteger(authorPanelSize) ||
+    authorPanelSize < 0 ||
+    authorPanelSize > MAX_TRUSTEES
+  )
+    throw new RangeError(`${name}: authorPanelSize must be from 0 to 16`);
+  const keyOf = {
+    [SEAT_PANELS.default]: keySet(registered.default, panelSize, name),
+    [SEAT_PANELS.author]: keySet(registered.author, authorPanelSize, name),
+  };
+  checkWindows(segments, deadlines, name);
+  checkEntries(entries, name);
+
+  const hashes = ballots.map((b) => {
+    const v = b.vote;
+    // validity-shape: one share hash per seat of each panel, and an author
+    // half exactly when the poll has an author panel.
+    if (
+      v.share_hashes.length !== panelSize ||
+      v.author_share_hashes.length !== authorPanelSize ||
+      (v.author_vss.length === 0) !== (authorPanelSize === 0)
+    )
+      throw new RangeError(`${name}: every ballot must have passed validity-shape`);
+    const ctx: BallotHashContextV3 = { definitionHash, cell: b.cell, nullifier: b.nullifier };
+    return ballotHashV4(ctx, v);
   });
-  return { ballots: result, records, rejected };
+  const vote = (ballot: number) => (ballots[ballot] as DeliveryBallotV4).vote;
+  const ctx = { definitionHash };
+  const signers: PanelReceiptSigners = { default: registered.default, author: registered.author };
+  const rules: DeliveryRules = {
+    complaintTag: COMPLAINT_TAG_V2,
+    decode(kind, payload) {
+      if (kind === "receipt") {
+        const r = decodeShareReceipt(payload, 2);
+        return {
+          kind,
+          definitionHash: r.definition_hash,
+          ballotHash: r.ballot_hash,
+          panel: r.panel,
+          seat: r.seat,
+          shareHash: r.share_hash,
+          signature: r.signature,
+        };
+      }
+      if (kind === "posting") {
+        const r = decodeSharePosting(payload, 2);
+        return {
+          kind,
+          definitionHash: r.definition_hash,
+          ballotHash: r.ballot_hash,
+          panel: r.panel,
+          seat: r.seat,
+          posting: { ciphertext: encode(SHARE_CIPHERTEXT, r.ciphertext), m: r.m },
+        };
+      }
+      const r = decodeShareComplaint(payload, 2);
+      return {
+        kind,
+        definitionHash: r.definition_hash,
+        ballotHash: r.ballot_hash,
+        panel: r.panel,
+        seat: r.seat,
+        proof: r.proof,
+        statement: shareComplaintStatementV2(r),
+        signature: r.signature,
+      };
+    },
+    keys: ({ panel, seat }) => keyOf[panel].get(seat),
+    shareHash: (ballot, { panel, seat }) =>
+      (panel === SEAT_PANELS.author ? vote(ballot).author_share_hashes : vote(ballot).share_hashes)[
+        seat - 1
+      ] as Uint8Array,
+    receiptSigned: (s, signature) =>
+      checkReceiptStatementV4(
+        signers,
+        {
+          definition_hash: definitionHash,
+          ballot_hash: s.ballotHash,
+          panel: s.panel,
+          seat: s.seat,
+          share_hash: s.shareHash,
+        },
+        signature,
+      ),
+    posting: (ballot, { panel, seat }, key, posting) =>
+      checkPostingV4(ctx, panel, seat, key.kemKey, vote(ballot), posting),
+    complaint: (ballot, { panel, seat }, key, posting, proof) =>
+      checkComplaintV4(ctx, panel, seat, key.kemKey, vote(ballot), posting, proof),
+  };
+  const qualified = [
+    ...registered.default.map((k) => ({ panel: SEAT_PANELS.default, seat: k.index })),
+    ...registered.author.map((k) => ({ panel: SEAT_PANELS.author, seat: k.index })),
+  ];
+  return deliveryCheck(election, hashes, qualified, entries, rules);
 }
 
 /** Builds a share receipt record from an intake result, for the client and the node to board. */
@@ -697,6 +1181,27 @@ export function shareReceiptRecord(
   return {
     definition_hash: Uint8Array.from(definitionHash),
     ballot_hash: Uint8Array.from(receipt.ballotHash),
+    seat,
+    share_hash: Uint8Array.from(receipt.shareHash),
+    signature: Uint8Array.from(receipt.receipt),
+  };
+}
+
+/** Builds a version-2 share receipt record from a version-4 intake result, naming the seat's panel. */
+export function shareReceiptRecordV2(
+  definitionHash: Uint8Array,
+  seat: number,
+  receipt: {
+    readonly panel: SeatPanel;
+    readonly ballotHash: Uint8Array;
+    readonly shareHash: Uint8Array;
+    readonly receipt: Uint8Array;
+  },
+): ShareReceiptRecordV2 {
+  return {
+    definition_hash: Uint8Array.from(definitionHash),
+    ballot_hash: Uint8Array.from(receipt.ballotHash),
+    panel: receipt.panel,
     seat,
     share_hash: Uint8Array.from(receipt.shareHash),
     signature: Uint8Array.from(receipt.receipt),

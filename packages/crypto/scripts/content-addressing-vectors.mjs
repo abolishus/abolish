@@ -6,11 +6,17 @@
 // with packages/crypto.
 //
 // It runs outside the workspace, because packages/crypto depends on @noble/*
-// only. In an empty directory:
+// only. In an empty directory holding a package.json of `{"type": "module"}`,
+// with a copy of this script (bare imports resolve from the script's own
+// directory):
 //
 //   vp add ipfs-unixfs-importer@17.1.1 @ipld/car@5.4.7 @ipld/dag-pb@4.1.5 blockstore-core@7.0.1 multiformats@14.0.5
-//   (Kubo 0.36.0 from github.com/ipfs/kubo/releases, sha512-checked)
-//   vp node content-addressing-vectors.mjs <ipfs-binary> <work-dir> <out.json>
+//   curl -LO https://github.com/ipfs/kubo/releases/download/v0.36.0/kubo_v0.36.0_linux-amd64.tar.gz
+//   tar xzf kubo_v0.36.0_linux-amd64.tar.gz
+//   vp node content-addressing-vectors.mjs <the tarball> kubo/ipfs <work-dir> <out.json>
+//
+// The script refuses a tarball whose sha512 isn't KUBO_SHA512 below, the
+// published one for that release.
 //
 // Objects are deterministic: `object(label, length)` is SHA-256(label ‖
 // u32be(i)) for i = 0, 1, … concatenated and cut to `length`, or `length`
@@ -25,12 +31,21 @@ import { fixedSize } from "ipfs-unixfs-importer/chunker";
 import { CID } from "multiformats/cid";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { argv, exit } from "node:process";
 
-const [ipfs, work, outPath] = argv.slice(2);
-if (outPath === undefined) throw new Error("usage: <ipfs-binary> <work-dir> <out.json>");
+const [tarball, ipfs, work, outPath] = argv.slice(2);
+if (outPath === undefined)
+  throw new Error("usage: <kubo-tarball> <ipfs-binary> <work-dir> <out.json>");
+
+// kubo_v0.36.0_linux-amd64.tar.gz, as github.com/ipfs/kubo/releases publishes it.
+const KUBO_SHA512 =
+  "bde93def3fbae2b86115efca8cbf82ecbe9fc11fcad6c24c204c37e717017ff143cc52987a0f57006561dc9c3fae3cc08e2898fb0bd55a5b70b75e61280df7f5";
+if (createHash("sha512").update(readFileSync(tarball)).digest("hex") !== KUBO_SHA512)
+  throw new Error("the Kubo tarball isn't the pinned release");
+if (!execFileSync(ipfs, ["version"]).toString().includes("0.36.0"))
+  throw new Error("the ipfs binary isn't Kubo 0.36.0");
 
 const sha256 = (b) => createHash("sha256").update(b).digest();
 
@@ -161,7 +176,7 @@ const out = {
   title: "Content addressing: objects' CIDs and CARs",
   spec: "docs/spec/content-addressing.md",
   generator:
-    "packages/crypto/scripts/content-addressing-vectors.mjs, run outside the workspace: every CID and CAR from Kubo 0.36.0 (`ipfs add --cid-version=1 --raw-leaves --chunker=size-N` with Import.UnixFSFileMaxLinks, then `ipfs dag export`) and from ipfs-unixfs-importer 17.1.1 with @ipld/car 5.4.7, which must agree byte for byte",
+    "packages/crypto/scripts/content-addressing-vectors.mjs, run outside the workspace: every CID from Kubo 0.36.0 (`ipfs add --cid-version=1 --raw-leaves --chunker=size-N` with Import.UnixFSFileMaxLinks; the release tarball's sha512 checked) and from ipfs-unixfs-importer 17.1.1, and every CAR from Kubo's `ipfs dag export`, matched by @ipld/car 5.4.7 writing the JavaScript blocks in depth-first pre-order; any disagreement is refused",
   profiles: PROFILES,
   object:
     'SHA-256(label ‖ u32be(i)) for i = 0, 1, … concatenated and cut to `length` bytes; `length` zero bytes for a label starting with "zeros"',

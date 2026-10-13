@@ -2,7 +2,7 @@
   "format": "abolish-content-addressing-vectors/1",
   "title": "Content addressing: objects' CIDs and CARs",
   "spec": "docs/spec/content-addressing.md",
-  "generator": "packages/crypto/scripts/content-addressing-vectors.mjs, run outside the workspace: every CID and CAR from Kubo 0.36.0 (`ipfs add --cid-version=1 --raw-leaves --chunker=size-N` with Import.UnixFSFileMaxLinks, then `ipfs dag export`) and from ipfs-unixfs-importer 17.1.1 with @ipld/car 5.4.7, which must agree byte for byte",
+  "generator": "packages/crypto/scripts/content-addressing-vectors.mjs, run outside the workspace: every CID from Kubo 0.36.0 (`ipfs add --cid-version=1 --raw-leaves --chunker=size-N` with Import.UnixFSFileMaxLinks; the release tarball's sha512 checked) and from ipfs-unixfs-importer 17.1.1, and every CAR from Kubo's `ipfs dag export`, matched by @ipld/car 5.4.7 writing the JavaScript blocks in depth-first pre-order; any disagreement is refused",
   "profiles": {
     "protocol": {
       "chunkSize": 1048576,

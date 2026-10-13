@@ -141,7 +141,8 @@ function parent(children: readonly Node[]): Node {
 /** Internal: a CARv1 of a DAG (`{roots: [root], version: 1}` in dag-cbor, then each block). */
 export function encodeCar(dag: ContentDag): Uint8Array {
   const root = dag.root;
-  if (root.length + 1 > 0xff) throw new RangeError("encodeCar: CID too long");
+  // The header's byte-string length byte is canonical only for this length.
+  if (root.length !== 36) throw new RangeError("encodeCar: the root must be a 36-byte CIDv1");
   // dag-cbor orders map keys by length, then bytewise: "roots" before "version".
   const header = concat([
     Uint8Array.of(0xa2, 0x65),

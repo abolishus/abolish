@@ -82,10 +82,18 @@ describe("runSimulation", { timeout }, () => {
 
   it("counts only each re-voter's last ballot, whatever it voted before", () => {
     const s = { ...base, revotes: 1, challenges: 0.5 };
-    // Counting an earlier ballot instead would change some count.
-    expect(planElection(s).voters.some((v) => v.earlier?.votes.join() !== v.votes.join())).toBe(
-      true,
-    );
+    // Counting the earlier ballots instead would change some cell's counts.
+    const plan = planElection(s);
+    expect(
+      plan.tiers.some((tier) => {
+        const earlier = Array.from({ length: s.options }, (_, j) =>
+          plan.voters
+            .filter((v) => v.tier === tier)
+            .reduce((a, v) => a + ((v.earlier ?? v).votes[j] as number), 0),
+        );
+        return earlier.join() !== plan.expected.get(tier)?.join();
+      }),
+    ).toBe(true);
     const progress: string[] = [];
     const r = runSimulation(s, { onProgress: (p) => progress.push(p.stage) });
     expect(r.ok).toBe(true);

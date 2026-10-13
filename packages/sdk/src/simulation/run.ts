@@ -340,7 +340,9 @@ export function runSimulation(
     }
     // The L1 reference, made after the cast choice (Client rule 6): the
     // newest settled block (Client rule 2), strictly newer than every block
-    // the voter named before (Client rule 3), waiting for one if need be.
+    // the voter named before (Client rule 3). With none yet, the client
+    // waits until the next block is settled and names that; the close rule
+    // that would refuse a wait past close isn't simulated (P1-18).
     const before = named.get(voter.index);
     const settled = l1.settledAt(secondsAt(ballot.at));
     const l1RefNumber = before !== undefined && settled <= before ? before + 1n : settled;

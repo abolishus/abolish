@@ -8,7 +8,7 @@
 import type { FinalizedL1, FinalizedL1Block } from "@abolishus/crypto";
 
 /** Ethereum's slot time: one block every 12 seconds. */
-export const SIMULATED_L1_SLOT = 12n;
+const SLOT = 12n;
 
 /** How deep a block is before a client names it (docs/spec/revoting.md, Client rule 2). */
 const DEPTH = 2n;
@@ -22,18 +22,18 @@ export class SimulatedL1 {
       hash = crypto.getRandomValues(new Uint8Array(32));
       this.#hashes.set(n, hash);
     }
-    return { hash: Uint8Array.from(hash), timestamp: n * SIMULATED_L1_SLOT };
+    return { hash: Uint8Array.from(hash), timestamp: n * SLOT };
   }
 
   /** The newest block at least `DEPTH` deep at `seconds` (Client rule 2). */
   settledAt(seconds: bigint): bigint {
-    const newest = seconds / SIMULATED_L1_SLOT;
+    const newest = seconds / SLOT;
     return newest > DEPTH ? newest - DEPTH : 0n;
   }
 
   /** The first block whose timestamp is later than `seconds`: a verifier's head past close. */
   firstAfter(seconds: bigint): bigint {
-    return seconds / SIMULATED_L1_SLOT + 1n;
+    return seconds / SLOT + 1n;
   }
 
   /** The chain as finalized up to `head`. */

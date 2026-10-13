@@ -18,7 +18,7 @@ export const MAX_SIMULATED_VOTERS = 100_000;
  * scenario with re-votes counts two ballots per voter. A run keeps every
  * ballot's VSS commitments, `options × threshold` points, and each online
  * seat's `options` shares of it until the re-vote rule has selected the
- * counted ballots, so this bounds its memory under a gigabyte.
+ * counted ballots, so this bounds its memory at about a gigabyte.
  */
 export const MAX_SIMULATED_WORK = 2_000_000;
 

@@ -8,9 +8,11 @@ import "../src/styles.css";
 // `parameters.theme` picks the dark palette.
 const withProviders: Decorator = (Story, { parameters }) => {
   const theme = parameters["theme"] === "dark" ? "dark" : "light";
+  // On the root too, so popups portalled to <body> share the story's theme.
+  document.documentElement.dataset["theme"] = theme;
   return (
     <I18nProvider locale="en-US">
-      <div data-theme={theme} lang="en-US" className="bg-paper">
+      <div data-theme={theme} lang="en-US" className="bg-background font-sans text-foreground">
         <Story />
       </div>
     </I18nProvider>

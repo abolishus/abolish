@@ -130,6 +130,22 @@ export {
   TAG_REGISTRY,
 } from "./domain-separation.ts";
 export {
+  checkContractEvent,
+  CONTRACT_EVENT_SIGNATURES,
+  type ContractEvent,
+  type ContractEventError,
+  contractEventLog,
+  type ContractEventRecord,
+  type ContractEventResult,
+  type ContractRole,
+  decodeContractEvent,
+  encodeContractEvent,
+  type EventContracts,
+  type L1Origin,
+  MAX_EVENT_DATA,
+  MAX_EVENT_TOPICS,
+} from "./contract-event.ts";
+export {
   type ArchivedContractLog,
   checkEventAccumulatorProof,
   type ContractLog,
@@ -371,6 +387,23 @@ export {
   type ReceiptOpeningErrorCode,
   type ReceiptVerdict,
 } from "./receipt-evidence.ts";
+export {
+  BEACON_FORK_SCHEDULES,
+  type BeaconFork,
+  type BeaconForkName,
+  type BeaconForkSchedule,
+  checkReceiptOpening,
+  decodeReceiptOpening,
+  encodeReceiptOpening,
+  RECEIPT_OPENING,
+  type ReceiptOpening,
+  type ReceiptOpeningInput,
+  receiptOpeningStateEntry,
+  type StateEntryNamed,
+  transactionCalldata,
+  transactionTrieValue,
+  type TrustedBeaconState,
+} from "./receipt-opening.ts";
 export {
   type CastExpectation,
   checkReceiptAtCast,

@@ -2,8 +2,8 @@
 // Later checks; ADR 0023): the dispute end, the salted commitment that keeps
 // a receipt evidence after it, and the verdicts against the checkpoints
 // anchored on L1 and the entry-hash lists of the anchored board (T-25, T-26,
-// T-69, T-24). The opening's checks against L1 are a later part; this module
-// takes their results.
+// T-69, T-24). The opening's checks against L1 are receipt-opening.ts's;
+// this module takes their results.
 
 import {
   type Anchor,

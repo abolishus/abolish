@@ -9,9 +9,16 @@ import "../src/styles.css";
 const withProviders: Decorator = (Story, { parameters }) => {
   const locale = typeof parameters["locale"] === "string" ? parameters["locale"] : "en-US";
   const theme = parameters["theme"] === "dark" ? "dark" : "light";
+  // On the root too, so popups portalled to <body> share the story's theme.
+  document.documentElement.dataset["theme"] = theme;
+  const padding = parameters["layout"] === "fullscreen" ? "" : "p-6";
   return (
     <I18nProvider locale={locale}>
-      <div data-theme={theme} lang={locale} className="bg-background p-6 font-sans text-foreground">
+      <div
+        data-theme={theme}
+        lang={locale}
+        className={`bg-background font-sans text-foreground ${padding}`}
+      >
         <Story />
       </div>
     </I18nProvider>

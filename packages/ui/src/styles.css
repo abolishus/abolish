@@ -194,3 +194,63 @@
     font-family: var(--font-sans);
   }
 }
+
+/*
+ * Scroll-linked motion, in CSS alone so nothing waits on hydration. Where the
+ * browser has view timelines and the reader hasn't asked for reduced motion,
+ * an element settles as it scrolls into view; everywhere else it renders in
+ * its final state. Motion only ever reveals what is already there: nothing
+ * loops, pulses or counts down (brief: calm and unmanipulative).
+ */
+@keyframes reveal-up {
+  from {
+    opacity: 0;
+    translate: 0 1.5rem;
+  }
+}
+
+@keyframes draw-x {
+  from {
+    scale: 0 1;
+  }
+}
+
+@keyframes wipe-in {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+}
+
+@utility reveal {
+  @media (prefers-reduced-motion: no-preference) {
+    @supports (animation-timeline: view()) {
+      animation: reveal-up linear both;
+      animation-timeline: view();
+      animation-range: entry 0% entry 70%;
+    }
+  }
+}
+
+@utility draw-x {
+  transform-origin: left;
+  &:dir(rtl) {
+    transform-origin: right;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    @supports (animation-timeline: view()) {
+      animation: draw-x linear both;
+      animation-timeline: view();
+      animation-range: entry 10% cover 40%;
+    }
+  }
+}
+
+@utility wipe-in {
+  @media (prefers-reduced-motion: no-preference) {
+    @supports (animation-timeline: view()) {
+      animation: wipe-in linear both;
+      animation-timeline: view();
+      animation-range: entry 0% cover 35%;
+    }
+  }
+}

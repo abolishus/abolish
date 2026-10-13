@@ -67,7 +67,9 @@ export default defineConfig({
           browser: {
             enabled: true,
             headless: true,
-            provider: playwright(),
+            // Motion is decorative and every animated element settles in its final
+            // state under reduced motion, so axe judges what a reader ends up seeing.
+            provider: playwright({ contextOptions: { reducedMotion: "reduce" } }),
             instances: [{ browser: "chromium" }],
           },
         },

@@ -40,7 +40,9 @@ const expectation = (board: SimulatedBoard, p: Uint8Array, segment: number) => (
   segments: { min: segment, max: segment },
 });
 
-describe("SimulatedBoard", () => {
+// The first property rechecks the whole board after every append, so its
+// FC_NUM_RUNS=1000 runs take several seconds in CI, past the 5 s default.
+describe("SimulatedBoard", { timeout: 120_000 }, () => {
   it("gives receipts that pass the checks at cast, over the board the verifier checks", () => {
     fc.assert(
       fc.property(

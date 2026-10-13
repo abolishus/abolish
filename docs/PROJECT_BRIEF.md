@@ -68,6 +68,14 @@ We're building a production-grade, open-source, publicly auditable voting platfo
 - Everlasting privacy: write an ADR on perfectly-hiding commitments on the public board vs standard threshold ElGamal, including a post-quantum "harvest now, decrypt later" analysis, before building the tally.
 - Coercion resistance for remote voting: at minimum, re-voting where the last ballot counts; document what remains open.
 - Threshold trust: each ballot's opening is split across k-of-n independent named trustees (I'll name them via ADR). No single party, including us, can decrypt individual ballots or alter a tally undetected. Ceremony tooling produces a public transcript.
+  - Every poll is held by the standing default panel. At launch, until independent trustees are named, the transitional panel is ours alone (owner, 2026-10-12), so for those polls ballot secrecy does not hold against us. The rules for that period:
+    - Every page and receipt says so plainly: "During launch, Abolish alone holds the key for this poll."
+    - Only everyday polls run under it; civic referendums and the civic record wait for an independent panel.
+    - Our seats sit on separate machines, providers and keyholders, and the shares are destroyed after each poll's final count; we state this as a commitment, since no one can verify it.
+    - Authors can add their own trustees, which protects their poll from us.
+    - Seats hand over to named independent trustees before the first civic poll. A handover protects only later polls.
+  - A poll's author may add any number of named trustees of their own, even to an everyday poll. They only add protection: a ballot opens only with the default panel's threshold and the author's trustees' threshold together.
+  - Trustee nodes are automatic, so trustees are invisible infrastructure in everyday polls and shown in full on the civic record.
 - Use only audited cryptographic libraries. Never roll our own primitives; composing published protocols is fine. One exception: ML-KEM from `@noble/post-quantum` may be used inside a hybrid KEM with X25519 on testnets before it is independently audited; an audit is a mainnet prerequisite.
 - One person, one vote. Weight never depends on tokens or wealth.
 - No PII on-chain, ever. Enforce this with tests on contract inputs.
@@ -125,6 +133,12 @@ We're building a production-grade, open-source, publicly auditable voting platfo
 ## Design direction
 The product's authority comes from people trusting what it shows them, including people who disagree with the result. It should look like civic infrastructure, not a movement or a crypto product: a public notice board crossed with a receipt. Plain, calm, permanent, covered in evidence.
 
+It speaks in two registers on one design system (owner, 2026-10-12):
+- **Everyday** (the default, and most polls): anyone can ask anything and anyone can answer. Relaxed, warm and inviting: the question is the hero, answering takes a tap or two, results read as plain sentences and friendly bars. The evidence is all there but one step down ("How do we know this is real?"), never on the surface. Scroll-reactive, data-driven motion is welcome here, in the spirit of long-form explainers whose charts answer the reader's scrolling. Discovery can be a browsable stream of questions.
+- **Civic record** (referendums, organisational votes, and anyone who opens the evidence): the archival look below, evidence-forward.
+
+The principles below hold in both; where they describe evidence on the surface, they describe the civic record.
+
 These are starting guidelines, not a locked spec. You may improve on them wherever usability, accessibility, clarity or trust gains: refine the palette, type scale, spacing, components and flows as you learn. Record a notable departure (a new primary color, a different type family, a changed core flow) as an agent-accepted ADR with the reasoning. Only the constraints marked **Keep** are fixed.
 
 Principles:
@@ -132,7 +146,7 @@ Principles:
 - **Ballots that can't be misread.** Ballot screens follow the Center for Civic Design's Field Guides to Ensuring Voter Intent (the AIGA Design for Democracy guidelines). **Keep.**
 - **Show your work.** Verification is visible, not a "trust us" badge: receipts, hashes, board entries, trustee counts and per-tier totals are first-class, well-designed elements.
 - **Calm and unmanipulative.** No confetti, streaks, urgency timers, engagement hooks or dark patterns. A vote is a serious act and the UI is quiet about it. **Keep.**
-- **Permanent.** The board is forever; the feel is archival (printed matter, a ledger, a court record), not a feed.
+- **Permanent.** The board is forever; the civic record feels archival (printed matter, a ledger, a court record). Everyday discovery may be a stream, never an engagement feed: no infinite autoplay, no algorithmic outrage ranking, no streaks.
 
 Starting system:
 - Components: shadcn/ui everywhere (both apps), from the owner's preset `b2CQ2Q281` (style `base-lyra` on Base UI, Lucide icons, inverted bold menus). Add components with the shadcn CLI and adapt them; keep one design paradigm across `apps/web` and `apps/ballot`.
@@ -145,7 +159,7 @@ Starting system:
   - The receipt's status trail: encrypted on device, recorded on the board, anchored to Ethereum, counted.
 - Results always show the verification tier as a first-class layer (a tier switcher, never a footnote) with counts and scope. Tiers are never blended into one headline number. **Keep.**
 - Every results page links to "verify it yourself" (find your receipt, recount with the verifier, the verifier doesn't need our servers).
-- Voice: plain, factual, slightly formal. Numbers carry their scope ("58.4% yes among 40,112 document-verified voters"). No hype words ("revolution", "decentralized future"), no exclamation marks, no emoji.
+- Voice: plain and factual; slightly formal on the civic record, warmer and conversational in everyday polls. Numbers carry their scope ("58.4% yes among 40,112 document-verified voters"). No hype words ("revolution", "decentralized future"), no exclamation marks, no emoji.
 - Avoid: crypto aesthetics (gradients, glowing nodes, 3D coins, dark-mode-only), patriotic imagery (flags, eagles, stars), protest-poster rawness, and generic AI-app styling.
 - Reference mockups (owner's design canvas, not reachable from sessions): a foundations board, a phone ballot screen, a phone receipt screen and a public results page, all following the system above.
 
@@ -187,6 +201,8 @@ Starting system:
 - Capacitor native projects live in `apps/ballot`. Native builds run in GitHub Actions on macOS runners only. CI uses `voidzero-dev/setup-vp` at the pinned Vite+ version.
 - Everything is fully controllable by AI agents through the CLI/SDK. I should be able to ask you to "run a 10,000-voter national referendum simulation with 7 trustees, two offline, mixed identity tiers, our servers down halfway through" and you have every tool you need without my intervention.
 - Election types: user-defined polls (open), organizational votes (closed electorate), civic referendums (US national/state/district first; plurality, approval and ranked-choice).
+  - A poll can ask several questions on one ballot, cast once with one receipt, each question with its own method: pick one, pick any, pick up to N, pick exactly N, and later ranked choice. Each question is tallied on its own; answers are never cross-tabulated, since that would mean decrypting individual ballots.
+  - Results are sealed until close, or live: running totals decrypted at intervals, never for fewer new ballots than a minimum batch, so no published difference reveals one ballot. The author chooses; civic referendums are always sealed.
 - User-created polls need moderation tooling and a written policy before Phase 2 goes public. Moderation acts on poll content, never on results.
 - WCAG 2.2 AA and i18n from the first UI component.
 

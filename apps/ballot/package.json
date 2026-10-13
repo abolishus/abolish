@@ -17,6 +17,7 @@
   "dependencies": {
     "@abolishus/crypto": "workspace:*",
     "@abolishus/ui": "workspace:*",
+    "lucide-react": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:"
   },

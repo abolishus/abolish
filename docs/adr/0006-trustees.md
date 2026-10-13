@@ -122,6 +122,15 @@ What would change the recommendation:
 - **Tier 2 attestation (2026-10-12, [[0010-tier2-identity-provider]]):** trustees also attest Tier 2 additions: a threshold checks each passport proof and its nullifier's uniqueness off the board and signs the addition. Attesters see each nullifier next to its identity commitment (T-13). The role description and the invitation say so.
 - **Small cells (2026-10-12):** merge regions, never tiers, and never withhold. Each tier is always opened in its own cell, and a tier below the floor is opened with T-16's warning: merging tiers would mix their Sybil resistance (T-01, T-29, T-36; verifier 2.8's "each cell is exactly one tier" stays), and withholding drops a per-tier result the brief requires. Within a tier, a region whose registered electorate is below the protocol-wide floor in [[parameters]] is folded into one remainder cell for that tier; if the remainder is also below the floor, the tier isn't split into regions. Which regions are folded is decided by the creator from the electorate registered in the definition, before voting opens, never from turnout or counted ballots, and the definition names them so results can say so. Trustee nodes still never release a share for a cell below the floor. [[P1-15]] part 4 builds it.
 
+## Owner decision (2026-10-12): transitional panel
+
+- **Until independent trustees are named, the default panel is ours alone.** For polls under it, ballot secrecy does not hold against us; rule 3 (at most one seat ours) is suspended for this panel only. Every page and receipt says "During launch, Abolish alone holds the key for this poll."
+- **Everyday polls only.** Civic referendums and anything on the civic record wait for an independent panel; a panel kind in the release pins and a poll class in the definition make this checkable.
+- **Our seats** sit on separate machines, providers and keyholders, which defends against one compromise, not against compulsion; shares are destroyed after each poll's final count, a commitment no one can verify.
+- **Authors can add their own trustees,** and a ballot then opens only with both panels, which protects their poll from us.
+- **Handover** to named independent trustees happens before the first civic poll and protects only later polls; ballots already cast stay readable with our shares until they are destroyed.
+- How each rule is built, the panel's shape (this ADR's 4-of-7, all seats ours) and the handover procedure are in [[0027-trustee-panels-and-live-results]] (Part 3), with author-added trustees (Part 1) and live results (Part 2).
+
 ## Default
 
 Opened 2026-10-09 20:40 UTC. **This ADR is never adopted by default** (AGENTS.md): trustee selection waits for the owner. Development continues with the simulated test ceremony.

@@ -124,3 +124,28 @@ export function resolveShortCode(code: string, hashes: Iterable<Uint8Array>): nu
   const index = assignShortCodes(hashes).indexOf(code);
   return index === -1 ? undefined : index;
 }
+
+/** `value` as a big-endian 32-byte hash. */
+function hashBytes(value: bigint): Uint8Array {
+  const out = new Uint8Array(HASH_LENGTH);
+  for (let i = HASH_LENGTH - 1; i >= 0; i--, value >>= 8n) out[i] = Number(value & 0xffn);
+  return out;
+}
+
+/**
+ * The hashes a code (as `parseShortCode` returns it) is a prefix of, as the
+ * range `from <= hash < to` in byte order, `to` absent when the range runs to
+ * the last hash: what an index on definition hashes is searched with.
+ */
+export function shortCodeRange(code: string): { from: Uint8Array; to?: Uint8Array } {
+  if (parseShortCode(code) !== code) throw new RangeError("not a short code in its parsed form");
+  let value = 0n;
+  for (const c of code) value = (value << 5n) | BigInt(SHORT_CODE_ALPHABET.indexOf(c));
+  // A 52-character code spells 260 bits: the last four are padding.
+  const bits = Math.min(5 * code.length, 8 * HASH_LENGTH);
+  value >>= BigInt(5 * code.length - bits);
+  const shift = BigInt(8 * HASH_LENGTH - bits);
+  const next = (value + 1n) << shift;
+  const from = hashBytes(value << shift);
+  return next >> BigInt(8 * HASH_LENGTH) === 0n ? { from, to: hashBytes(next) } : { from };
+}

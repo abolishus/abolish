@@ -49,6 +49,12 @@ One definition per election, as the API serves it: `election_id` and `definition
 
 `storeDefinition(sql, bytes)` decodes the definition strictly and checks the well-formedness rules with `@abolishus/crypto`, then stores it under the `election_id` it carries. Storing the same bytes again is a no-op; different bytes for a stored election are refused (`conflict`). It checks bytes, not registration: the caller reads definitions from the registry. `readDefinition(sql, electionId)` returns the stored bytes and `hasDefinition` says whether there are any, without reading them. A stored row is permanent, so callers store only definitions registered in a finalized L2 block.
 
+### `election_registrations` (`src/registrations.ts`; T-49, T-53)
+
+Where each stored definition was registered: `election_id`, `definition_hash` (unique, so its index serves prefix lookups) and the `DefinitionRegistered` event's position on L2, `l2_block` then `log_index`. Public chain data, rebuilt with the definitions (P3-5). Write-once like `election_definitions`, and a trigger refuses a row with no stored definition or a position that isn't after every recorded one, so rows arrive in chain order and a code that resolves never moves to a poll recorded late. A table of its own because `election_definitions` can't be updated: a definition stored before it simply has no code until its registration is recorded.
+
+`recordRegistration(sql, electionId, { l2Block, logIndex })` hashes the stored definition with `@abolishus/crypto` and records it; the same position again is a no-op, and it refuses (`RegistrationError`) an election with no stored definition (`unknown-election`), another position for a recorded election or a recorded position for another one (`conflict`), and a position before the latest (`out-of-order`). `lookupShortCode(sql, input)` parses the input as `parseShortCode` does and answers `assignShortCodes`' owner without reading every hash: the earliest registration whose hash starts with the code (one index range, `shortCodeRange`), which owns the code if it is 7 characters or an earlier registration shares the prefix one character shorter. Anything else is `undefined`. Moderation doesn't change the answer.
+
 ### Reading the board (`src/board.ts`)
 
 What the API serves, computed with `@abolishus/crypto`'s tree (`BOARD_TREE`), so a client checks it with the verifier's own functions:

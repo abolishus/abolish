@@ -5,6 +5,7 @@ import {
   hasDefinition,
   IdentityBackupStoreError,
   listPolls,
+  lookupShortCode,
   ModerationError,
   moderationStatus,
   putIdentityBackup,
@@ -67,6 +68,13 @@ export const router = os.router({
       const definition = await readDefinition(context.sql, fromHex(input.electionId));
       if (definition === undefined) throw errors.ELECTION_NOT_FOUND();
       return { definition: toHex(definition) };
+    }),
+    // Short links (docs/design/sharing.md). A refusal never quotes the input,
+    // and the request log records only the route (T-11, T-67).
+    resolveCode: os.elections.resolveCode.handler(async ({ input, context, errors }) => {
+      const match = await lookupShortCode(context.sql, input.code);
+      if (match === undefined) throw errors.CODE_NOT_FOUND();
+      return { electionId: toHex(match.electionId), code: match.code };
     }),
   },
   board: {

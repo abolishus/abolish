@@ -441,23 +441,26 @@ export async function runSimulation(
   const receiptSecret = crypto.getRandomValues(new Uint8Array(32));
   const election = simulateElection(scenario, plan, identityKey(receiptSecret));
   const { definitionHash, seats, registered } = election;
-  // Each tier is one cell, numbered in the electorate's order (./election.ts):
-  // a ballot names its cell, which the definition maps back to its tier.
-  const cellOfTier = (tier: SimulatedTier): number => {
-    const c = plan.tiers.indexOf(tier);
-    if (c < 0) throw new Error("simulation: a voter outside the electorate");
-    return c;
-  };
-  const tierOfCell = (cell: number): SimulatedTier => {
-    const tier = plan.tiers[cell];
-    if (tier === undefined) throw new Error("simulation: a ballot naming no cell");
-    return tier;
-  };
   // Ballots go only to the keys the ceremony check registered, by seat (T-37).
   const keys = registered.map((r) => r.kemKey);
   // The checker's election and the casting device's: one definition and the
   // key set its ceremony check registered.
   const ballots = cellBallotElection(election.definition, registered);
+  // A ballot names its cell, and the partition crypto derives from the
+  // definition maps each cell to its tier, by which M and the re-vote rule
+  // rank it. Each tier is one cell (./election.ts), so a voter's cell is its
+  // tier's only one.
+  const cellOfTier = (tier: SimulatedTier): number => {
+    const cells = ballots.cells.filter((c) => c.tier === tier);
+    if (cells.length !== 1) throw new Error("simulation: a voter's tier isn't one cell");
+    return (cells[0] as (typeof cells)[number]).cell;
+  };
+  const tierOfCell = (cell: number): SimulatedTier => {
+    const tier = ballots.cells[cell]?.tier;
+    if (tier === undefined || !plan.tiers.includes(tier as SimulatedTier))
+      throw new Error("simulation: a ballot naming no cell of the electorate");
+    return tier as SimulatedTier;
+  };
   // The seats that sum, combine and destroy: a departed seat's shares go down with it.
   const online = onlineSeats(scenario);
   const departed = scenario.trustees.departures.map((d) => d.seat);

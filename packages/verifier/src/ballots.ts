@@ -4,11 +4,15 @@
 // the transcript check registered, never against anything a ballot or the
 // bundle chooses (T-37, T-04). A failure rejects that entry only: the rows
 // report each check's first rejected entry and the report lists every one
-// (8.3), so a bad ballot never fails the election (T-52, T-53). Repeats,
-// L1 references, the close rule and selection (5.5, 5.7, 5.8, 6.1) are
-// decided over the admitted ballots, later.
+// (8.3), so a bad ballot never fails the election (T-52, T-53). Repeats
+// (5.7) are found among the admitted ballots by @abolishus/crypto's
+// `selectBallots`, keyed by (tier, ν, M) with M recomputed, never by bytes
+// (T-38); they are rejected only once the close rule (5.5) can say which
+// copies are admitted. L1 references, the close rule and selection (5.5,
+// 5.8, 6.1) are decided over the admitted ballots, later.
 
 import {
+  type AdmittedBallot,
   type BallotCode,
   ballotElection,
   type BoardEntryVersion,
@@ -22,6 +26,7 @@ import {
   pinnedVersion,
   RECORD_TYPES,
   type RegisteredKeys,
+  selectBallots,
 } from "@abolishus/crypto";
 
 /** One rejected ballot entry: its position in the copy, from 0, and why. */
@@ -34,10 +39,20 @@ export interface RejectedBallot {
   readonly decodeError?: DecodeErrorCode;
 }
 
+/**
+ * An admitted ballot with the same tier, nullifier and message as one at an
+ * earlier position: a repeat once the close rule (5.5) admits that one (5.7).
+ */
+export interface RepeatedBallot {
+  readonly entry: number;
+}
+
 /** The report's `ballots`, once the admission checks ran. */
 export interface BallotsReport {
+  /** Ballot entries 5.1 to 5.4 admit, repeats among them included. */
   readonly admitted: number;
   readonly rejected: readonly RejectedBallot[];
+  readonly repeats: readonly RepeatedBallot[];
 }
 
 export interface BallotOutcome {
@@ -47,6 +62,7 @@ export interface BallotOutcome {
 }
 
 const ROWS = ["5.1", "5.2", "5.3", "5.4"] as const;
+const ALL_ROWS = [...ROWS, "5.7"] as const;
 
 // The rows each admission code fails (docs/spec/verifier.md, Ballot
 // admission). A membership proof is checked once against [ρ, ν, m̂, ŝ], so
@@ -63,14 +79,14 @@ const ROWS_OF: Readonly<Record<BallotCode, readonly (typeof ROWS)[number][]>> = 
   "sum-proof": ["5.4"],
 };
 
-const all = (o: BallotOutcome) => new Map(ROWS.map((id) => [id, o]));
+const all = (o: BallotOutcome) => new Map(ALL_ROWS.map((id) => [id, o]));
 const NOT_REACHED: BallotOutcome = { status: "unverifiable", code: "not-reached" };
 
 const equal = (a: Uint8Array, b: Uint8Array) =>
   a.length === b.length && a.every((x, i) => x === b[i]);
 
 /**
- * The rows 5.1 to 5.4 and the report's `ballots`. `registered` is the key set
+ * The rows 5.1 to 5.4 and 5.7, and the report's `ballots`. `registered` is the key set
  * the transcript check returned once 3.2 passed, or `undefined`, which leaves
  * every ballot unchecked: shares made to an unregistered panel can't be
  * judged (T-37).
@@ -94,7 +110,7 @@ export function ballotChecks(
   )
     return { rows: all(NOT_REACHED) };
   const election = ballotElection(d, registered);
-  let admitted = 0;
+  const admitted: AdmittedBallot[] = [];
   const rejected: RejectedBallot[] = [];
   for (const [at, encoded] of entries.entries()) {
     let payload: Uint8Array;
@@ -116,7 +132,14 @@ export function ballotChecks(
       rejected.push({ entry: at, code: "decode", decodeError: e.code });
       continue;
     }
-    if (checked.ok) admitted++;
+    if (checked.ok)
+      admitted.push({
+        tier: checked.tier,
+        nullifier: checked.nullifier,
+        message: checked.message,
+        l1RefNumber: checked.l1RefNumber,
+        index: BigInt(at),
+      });
     else
       rejected.push({
         entry: at,
@@ -137,5 +160,21 @@ export function ballotChecks(
         : { status: "fail", code: first.code, at: { entry: first.entry } },
     );
   }
-  return { rows, report: { admitted, rejected } };
+  // `message` is M recomputed from the record, so a re-randomised proof
+  // doesn't hide a repeat (T-38).
+  const repeats = selectBallots(admitted).repeats.map((b) => ({ entry: Number(b.index) }));
+  const first = repeats[0];
+  // The input to 5.7 is the ballots every other admission check admits. 5.8
+  // depends on M alone, which copies share, but the close rule (5.5) judges
+  // each entry by its own L2 block (ADR 0025), so an earlier copy may yet be
+  // rejected, and a rejected entry never makes another a repeat (6.1, R4).
+  // Until 5.5 runs, a candidate repeat can't be rejected, and 5.7 passes
+  // only when there is none.
+  rows.set(
+    "5.7",
+    first === undefined
+      ? { status: "pass" }
+      : { status: "unverifiable", code: "not-reached", at: { entry: first.entry } },
+  );
+  return { rows, report: { admitted: admitted.length, rejected, repeats } };
 }

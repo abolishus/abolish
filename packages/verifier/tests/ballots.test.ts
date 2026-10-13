@@ -10,7 +10,7 @@ import {
   verifyBundle,
 } from "../src/index.ts";
 
-// Format-4 bundles: ballot admission, 5.1 to 5.4, against the definition and
+// Format-4 bundles: ballot admission, 5.1 to 5.4 and 5.7, against the definition and
 // the key set its transcript check registered (docs/spec/verifier.md, Ballot
 // admission). Fixtures: docs/spec/vectors/verifier-ballots.json
 // (packages/crypto/scripts/verifier-ballots-vectors.py, an independent
@@ -82,10 +82,12 @@ const rows = (r: Report, ids: readonly string[]) =>
       return [id, { status, ...(code !== undefined && { code }), ...(at !== undefined && { at }) }];
     }),
   );
-const ADMISSION = ["5.1", "5.2", "5.3", "5.4"];
+const ADMISSION = ["5.1", "5.2", "5.3", "5.4", "5.7"];
 
 // The copy's entries, re-joined after a change.
 const entriesOf = (c: Case) => parseBundle(json(c, c.definition), hex(c.board)).entries;
+const equal = (a: Uint8Array, b: Uint8Array) =>
+  a.length === b.length && a.every((x, i) => x === b[i]);
 const join = (entries: readonly Uint8Array[]) => Uint8Array.from(entries.flatMap((e) => [...e]));
 
 test("the fixtures reject a ballot for every admission code and for decoding", () => {
@@ -113,7 +115,7 @@ test("the fixtures reject a ballot for every admission code and for decoding", (
     );
 });
 
-describe("1.3, 2.3, 3.2 and 5.1 to 5.4 against the independent implementation", () => {
+describe("1.3, 2.3, 3.2, 5.1 to 5.4 and 5.7 against the independent implementation", () => {
   for (const c of file.cases)
     test(c.id, () => {
       const r = format4(c);
@@ -158,6 +160,39 @@ describe("admission is decided per entry", () => {
     // Groth16 pairing, about 0.2 s on a shared CI runner.
   }, 120_000);
 
+  test("a copy is a candidate repeat exactly when an admitted copy precedes it, whatever its proof bytes (5.7, R4)", () => {
+    const repeats = byId("repeats");
+    const all = entriesOf(repeats);
+    // Entries 2, 3 (its proof negated) and 5 (byte-identical) share (tier, ν,
+    // M); entry 1 is a copy with another voter's proof, so it is rejected and
+    // never makes another a repeat.
+    const copies = new Set([2, 3, 5]);
+    // Past the 51-byte envelope, the negated copy's record differs from the
+    // original's (its proof), so only the recomputed M finds it; the other
+    // copy's record is byte-identical.
+    expect(equal((all[3] as Uint8Array).slice(51), (all[2] as Uint8Array).slice(51))).toBe(false);
+    expect(equal((all[5] as Uint8Array).slice(51), (all[2] as Uint8Array).slice(51))).toBe(true);
+    fc.assert(
+      fc.property(fc.subarray([...all.keys()].slice(1)), (kept) => {
+        const r = format4(repeats, join([0, ...kept].map((i) => all[i] as Uint8Array)));
+        const positions = kept.flatMap((i, at) => (copies.has(i) ? [at + 1] : []));
+        expect(r.ballots?.repeats).toEqual(positions.slice(1).map((entry) => ({ entry })));
+        expect(row(r, "5.7")).toEqual(
+          positions.length > 1
+            ? {
+                id: "5.7",
+                kind: "admission",
+                status: "unverifiable",
+                code: "not-reached",
+                at: { entry: positions[1] },
+              }
+            : { id: "5.7", kind: "admission", status: "pass" },
+        );
+      }),
+      { numRuns: runs(20) },
+    );
+  }, 120_000);
+
   test("any change to an admitted ballot's record rejects it", () => {
     const admitted = byId("admitted");
     const all = entriesOf(admitted);
@@ -186,14 +221,14 @@ describe("admission is decided per entry", () => {
     const other = Uint8Array.from(all[1] as Uint8Array);
     other[3] = (other[3] as number) ^ 1;
     const r = format4(admitted, join([all[0] as Uint8Array, other]));
-    expect(r.ballots).toEqual({ admitted: 0, rejected: [] });
+    expect(r.ballots).toEqual({ admitted: 0, rejected: [], repeats: [] });
   });
 });
 
 describe("when ballot admission can't run", () => {
   const admitted = byId("admitted");
 
-  test("a definition that doesn't decode leaves 5.1 to 5.4 not reached", () => {
+  test("a definition that doesn't decode leaves 5.1 to 5.4 and 5.7 not reached", () => {
     const r = format4(admitted, hex(admitted.board), "0001");
     for (const id of ADMISSION)
       expect(row(r, id)).toMatchObject({ status: "unverifiable", code: "not-reached" });

@@ -83,10 +83,10 @@ def decode_ballot(payload):
 
 
 def combination(d):
-    """2.3's profile-combination for a definition version 1, from docs/spec/verifier.md 2.3: it pins ballot version 1 with spoiled-ballot opening version 1, ballot versions 2 and 3 pair only with definition versions 3, 4 and 5, and an unknown ballot version is a later release's to judge."""
+    """2.3's profile-combination for a definition version 1, from docs/spec/verifier.md 2.3: it pins ballot version 1 with spoiled-ballot opening version 1, ballot versions 2 to 4 pair only with definition versions 3 to 6, and an unknown ballot version is a later release's to judge."""
     pins = dict(d["profile"]["pins"])
     board, ballot, opening = pins[BOARD_ENTRY_TYPE], pins.get(BALLOT_TYPE), pins.get(0x0006)
-    if ballot not in (1, 2, 3):
+    if ballot not in (1, 2, 3, 4):
         # A version this verifier doesn't know: a later release judges it.
         return NOT_IMPLEMENTED
     fits = ballot == 1 and pins.get(0x0003) == 1 and board in (3, 4) and (opening != 1 or board == 4)
@@ -324,9 +324,9 @@ def build(constants):
 
     # A ballot version this verifier doesn't know may name a key a later
     # release pins for it: 1.3 can't fail (T-36).
-    v4_key_pins = [(ty, 4 if ty == BALLOT_TYPE else v) for ty, v in pins]
-    d_v4, t_v4, e_v4 = election_for("ballot-v4-other-key", [1, 2, 3], profile={"protocol_major": 1, "pins": v4_key_pins}, membership_vk_hash=bal.det("verifier other key"))
-    bundle("ballot-v4-other-key", "The profile pins ballot version 4, unknown here, with another membership key: 1.3 isn't failed, since a later release may pin that key for version 4, and 5.1 to 5.4 are unsupported.", d_v4, t_v4, e_v4, [1, 2, 3], [t_v4, (ok0, None)], "unsupported")
+    v5_key_pins = [(ty, 5 if ty == BALLOT_TYPE else v) for ty, v in pins]
+    d_v5, t_v5, e_v5 = election_for("ballot-v5-other-key", [1, 2, 3], profile={"protocol_major": 1, "pins": v5_key_pins}, membership_vk_hash=bal.det("verifier other key"))
+    bundle("ballot-v5-other-key", "The profile pins ballot version 5, unknown here, with another membership key: 1.3 isn't failed, since a later release may pin that key for version 5, and 5.1 to 5.4 are unsupported.", d_v5, t_v5, e_v5, [1, 2, 3], [t_v5, (ok0, None)], "unsupported")
 
     zero_root = [dict(g, root=0) if g["tier"] == 2 else g for g in base["electorate"]]
     d_z, t_z, e_z = election_for("root-zero", [1, 2, 3], electorate=zero_root)

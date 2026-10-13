@@ -529,11 +529,13 @@ describe("2.3's profile combination", () => {
       };
     };
     expect(profileCombinationRule(v3(1))).toBe("profile-combination");
-    // Ballot version 3 carries questions, which definition version 5 alone has.
+    // Ballot version 3 carries questions, which definition version 5 alone
+    // has, and version 4 an author half, which definition version 6 alone has.
     expect(profileCombinationRule(v3(3))).toBe("profile-combination");
+    expect(profileCombinationRule(v3(4))).toBe("profile-combination");
     // A ballot version this package doesn't know may be a later release's
     // cell-naming ballot: unsupported, never failed (T-36).
-    expect(profileCombinationRule(v3(4))).toBe("unsupported-version");
+    expect(profileCombinationRule(v3(5))).toBe("unsupported-version");
     // Ballot version 2 is the only one that could fit, and only opening
     // version 2 opens its cores, so it is refused beside opening version 1
     // (docs/spec/challenge.md, Versions; T-42). One this package doesn't
@@ -597,7 +599,8 @@ describe("2.3's profile combination", () => {
     };
     expect(profileCombinationRule(v4(1))).toBe("profile-combination");
     expect(profileCombinationRule(v4(3))).toBe("profile-combination");
-    expect(profileCombinationRule(v4(4))).toBe("unsupported-version");
+    expect(profileCombinationRule(v4(4))).toBe("profile-combination");
+    expect(profileCombinationRule(v4(5))).toBe("unsupported-version");
     expect(profileCombinationRule(v4(2))).toBe("profile-combination");
     const v4Board = (board: number) => ({
       ...v4(2),
@@ -740,8 +743,10 @@ describe("2.3's profile combination", () => {
       expect(profileCombinationRule(v5({ [RECORD_TYPES.ballot]: ballot }))).toBe(
         "profile-combination",
       );
-    // A ballot version it doesn't know may be a later release's question ballot.
-    expect(profileCombinationRule(v5({ [RECORD_TYPES.ballot]: 4 }))).toBe("unsupported-version");
+    // Ballot version 4 pairs with definition version 6 only; a ballot version
+    // it doesn't know may be a later release's question ballot.
+    expect(profileCombinationRule(v5({ [RECORD_TYPES.ballot]: 4 }))).toBe("profile-combination");
+    expect(profileCombinationRule(v5({ [RECORD_TYPES.ballot]: 5 }))).toBe("unsupported-version");
     // Display-text version 1 has no questions; an unknown one fails too.
     for (const displayText of [1, 3, undefined])
       expect(profileCombinationRule(v5({ [RECORD_TYPES.displayText]: displayText }))).toBe(

@@ -247,8 +247,9 @@ describe("2.3: the profile's versions fit together", () => {
   // entries that carry share receipts and complaints (3 or 4), tally-opening
   // version 1 needs ones that carry destruction statements (4), ballot
   // version 2, which names a cell, needs definition version 3 or 4, and ballot
-  // version 3, which carries questions, definition version 5 (these are
-  // version 1). Ballot version 4 stands for a version this verifier doesn't
+  // version 3, which carries questions, definition version 5, and ballot
+  // version 4, which carries an author half, definition version 6 (these are
+  // version 1). Ballot version 5 stands for a version this verifier doesn't
   // know, with neither need: a later release judges it.
   const table: readonly (readonly [number, number, number, boolean])[] = [
     [4, 1, 1, true],
@@ -260,12 +261,14 @@ describe("2.3: the profile's versions fit together", () => {
     [4, 2, 2, false],
     [4, 3, 1, false],
     [4, 3, 2, false],
-    [4, 4, 1, true],
-    [3, 4, 1, false],
-    [1, 4, 1, false],
-    [1, 4, 2, true],
-    [3, 4, 2, true],
-    [4, 4, 2, true],
+    [4, 4, 1, false],
+    [4, 4, 2, false],
+    [4, 5, 1, true],
+    [3, 5, 1, false],
+    [1, 5, 1, false],
+    [1, 5, 2, true],
+    [3, 5, 2, true],
+    [4, 5, 2, true],
   ];
   for (const [board, ballot, opening, fits] of table)
     test(`board entry ${board}, ballot ${ballot}, tally opening ${opening}: ${fits ? "fits" : "fails"}`, () => {
@@ -488,10 +491,13 @@ describe("definition versions 3 and 4 (regional cells)", () => {
     // Ballot version 3 carries questions, which definition version 5 alone has.
     [4, 3, 1, "profile-combination"],
     [4, 3, 2, "profile-combination"],
-    // Ballot version 4 stands for one a later release may define as naming
+    // Ballot version 4 carries an author half, which definition version 6 alone has.
+    [4, 4, 1, "profile-combination"],
+    [4, 4, 3, "profile-combination"],
+    // Ballot version 5 stands for one a later release may define as naming
     // its cell: unsupported, never failed, whatever the opening (T-36).
-    [4, 4, 1, "unsupported-version"],
-    [4, 4, 2, "unsupported-version"],
+    [4, 5, 1, "unsupported-version"],
+    [4, 5, 2, "unsupported-version"],
     [4, 2, 1, "profile-combination"],
     [4, 2, 2, "not-implemented"],
     [3, 2, 255, "unsupported-version"],

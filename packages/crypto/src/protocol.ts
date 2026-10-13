@@ -293,24 +293,28 @@ const DEFINITION_BALLOT: ReadonlyMap<number, number> = new Map([
 ]);
 // Ballot versions whose delivery records reach the board as share receipts
 // and complaints (docs/spec/delivery.md, Versions).
-const DELIVERED_BALLOT_VERSIONS: ReadonlySet<number> = new Set<number>([1, 2, 3]);
+const DELIVERED_BALLOT_VERSIONS: ReadonlySet<number> = new Set<number>([1, 2, 3, 4]);
 // The spoiled-ballot opening version that opens each ballot version's cores
 // (docs/spec/challenge.md, Versions): opening version 1 opens version 1's,
-// opening version 2 those of versions 2 and 3, which name a cell. A profile
+// opening version 2 those of versions 2 and 3, which name a cell, and
+// opening version 3 those of version 4, both halves. A profile
 // pinning another beside them is refused: a ballot that can't be challenged
 // can't be checked as cast-as-intended (T-42, T-47).
 const CORE_OPENING: ReadonlyMap<number, number> = new Map([
   [1, 1],
   [2, 2],
   [3, 2],
+  [4, 3],
 ]);
 // The spoiled-ballot opening versions this package reads (challenge.ts's
 // SPOILED_BALLOT_OPENING), written out because importing it here would be an
 // import cycle; a test ties the two.
 export const SPOILED_OPENING_VERSIONS: ReadonlySet<number> = new Set<number>([1, 2]);
 // The ballot versions this package reads (ballot.ts's BALLOT), written out
-// for the same reason.
-export const BALLOT_VERSIONS: ReadonlySet<number> = new Set<number>([1, 2, 3]);
+// for the same reason. Version 4 pairs only with definition version 6, which
+// this function doesn't take yet, so under every definition version it does
+// take a profile pinning ballot version 4 fails.
+export const BALLOT_VERSIONS: ReadonlySet<number> = new Set<number>([1, 2, 3, 4]);
 
 /** Why 2.3's profile combination refuses a definition's pins. */
 export type ProfileCombinationRule = "profile-combination" | "unsupported-version";

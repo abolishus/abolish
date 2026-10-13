@@ -116,8 +116,11 @@ test("the fixtures reject a ballot for every admission code and for decoding", (
 });
 
 describe("1.3, 2.3, 3.2, 5.1 to 5.4 and 5.7 against the independent implementation", () => {
+  // A bundle checks every ballot's membership proof (a pairing) and validity
+  // proofs: the mixed one has taken over the 5-second default on CI's
+  // runners while the other verifier files run beside it.
   for (const c of file.cases)
-    test(c.id, () => {
+    test(c.id, { timeout: 60_000 }, () => {
       const r = format4(c);
       expect(rows(r, Object.keys(c.expected))).toEqual(c.expected);
       expect(r.ballots).toEqual(c.ballots);

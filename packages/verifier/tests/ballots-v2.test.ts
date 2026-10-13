@@ -108,8 +108,10 @@ test("the fixtures reject a ballot for every version-2 admission code and for de
 });
 
 describe("1.3, 2.3, 3.2, 5.1 to 5.4, 5.7 and 6.2 against the independent implementation", () => {
+  // Membership and validity proofs for every ballot: seconds on a loaded CI
+  // runner, as in ballots.test.ts.
   for (const c of file.cases)
-    test(c.id, () => {
+    test(c.id, { timeout: 60_000 }, () => {
       const r = format4(c);
       expect(rows(r, Object.keys(c.expected))).toEqual(c.expected);
       expect(r.ballots).toEqual(c.ballots);

@@ -1,4 +1,4 @@
-import { bigint, pgTable, primaryKey, smallint } from "drizzle-orm/pg-core";
+import { bigint, pgTable, primaryKey, smallint, unique } from "drizzle-orm/pg-core";
 import { bytea } from "./bytea.ts";
 
 // Drizzle view of migrations/0000_board.sql; a test checks the two agree.
@@ -30,4 +30,22 @@ export const boardSubtrees = pgTable(
     hash: bytea("hash").notNull(),
   },
   (t) => [primaryKey({ columns: [t.electionId, t.level, t.idx] })],
+);
+
+// Drizzle view of migrations/0008_board_ballot_keys.sql: each boarded
+// ballot's (tier, nullifier, M), by which appendEntry refuses repeats
+// (verifier 5.7; T-38, T-52). Append-only like the board.
+export const boardBallotKeys = pgTable(
+  "board_ballot_keys",
+  {
+    electionId: bytea("election_id").notNull(),
+    tier: smallint("tier").notNull(),
+    nullifier: bytea("nullifier").notNull(),
+    message: bytea("message").notNull(),
+    idx: bigint("idx", { mode: "bigint" }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.electionId, t.tier, t.nullifier, t.message] }),
+    unique().on(t.electionId, t.idx),
+  ],
 );

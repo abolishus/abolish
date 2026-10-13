@@ -4,13 +4,21 @@
 // admits by those rows and never reimplements them (AGENTS.md, The
 // verifier's trust base; docs/spec/board.md, Envelope: the operator MUST
 // append only payloads that decode strictly under the profile; T-17, T-52).
+// A repeat of a boarded ballot (5.7), keyed by the (tier, ν, M) that
+// admission returns, is never boarded again (T-38).
 // Nothing here sees who submitted: no account, session or address reaches
 // this module (T-10).
 
 import { MAX_BOARD_PAYLOAD, type Panel, panelId, type PeriodClock } from "@abolishus/crypto";
 import { type AdmissionCode, type ElectionAdmission, electionAdmission } from "@abolishus/verifier";
 import type { Sql } from "postgres";
-import { appendEntry, type AppendedEntry, BOARD_ENTRY_OVERHEAD, readEntries } from "./board.ts";
+import {
+  appendEntry,
+  type AppendedEntry,
+  AppendError,
+  BOARD_ENTRY_OVERHEAD,
+  readEntries,
+} from "./board.ts";
 import { isBytes } from "./bytes.ts";
 import { readDefinition } from "./definitions.ts";
 
@@ -24,15 +32,18 @@ export type SubmitErrorCode =
    * definition the verifier refuses).
    */
   | "not-open"
-  /** The ballot doesn't decode strictly, or an admission check rejects it. */
+  /**
+   * The ballot doesn't decode strictly, an admission check rejects it, or it
+   * repeats a boarded ballot in other bytes (`repeat`, verifier 5.7).
+   */
   | "rejected";
 
 export class SubmitError extends Error {
   override readonly name = "SubmitError";
   readonly code: SubmitErrorCode;
-  /** Under `rejected`: the verifier's code (`decode` for strict decoding). */
-  readonly admission?: AdmissionCode | "decode";
-  constructor(code: SubmitErrorCode, admission?: AdmissionCode | "decode") {
+  /** Under `rejected`: the verifier's code (`decode` for strict decoding, `repeat` for 5.7). */
+  readonly admission?: AdmissionCode | "decode" | "repeat";
+  constructor(code: SubmitErrorCode, admission?: AdmissionCode | "decode" | "repeat") {
     super(`ballot refused: ${code}${admission === undefined ? "" : ` (${admission})`}`);
     this.code = code;
     if (admission !== undefined) this.admission = admission;
@@ -89,7 +100,9 @@ export class BallotAdmissions {
    * Judges `ballot` (a ballot record's bytes) for `electionId` at UNIX time
    * `now` (seconds, from the caller's clock) and, if admitted, appends it to
    * the board in the segment current at `now`. Throws `SubmitError` for a
-   * refusal, with nothing written.
+   * refusal, with nothing written. A byte-identical resubmission of a boarded
+   * ballot returns the entry that carries it, writing nothing, so a client
+   * that lost the answer can retry.
    */
   async submit(
     client: Sql,
@@ -116,7 +129,16 @@ export class BallotAdmissions {
     // been boarded meanwhile: this one then takes that segment, never a lower
     // one (a ballot boarded under a segment whose checkpoint may already be
     // taken would fail it, checkpoint-boundary).
-    return appendEntry(client, id, Number(segment), ballot, { raiseToPrevious: true });
+    try {
+      return await appendEntry(client, id, Number(segment), ballot, {
+        raiseToPrevious: true,
+        ballot: { tier: verdict.tier, nullifier: verdict.nullifier, message: verdict.message },
+      });
+    } catch (e) {
+      if (e instanceof AppendError && e.code === "repeat")
+        throw new SubmitError("rejected", "repeat");
+      throw e;
+    }
   }
 
   async #admission(client: Sql, id: Uint8Array): Promise<Decided> {

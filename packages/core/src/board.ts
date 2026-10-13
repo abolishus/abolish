@@ -10,6 +10,7 @@ import {
   type BoardEntry,
   boardEntryHash,
   type BoardEntryVersion,
+  BN254_R,
   chainLink,
   consistencyProofSubtrees,
   decodeElectionDefinitionRecord,
@@ -26,7 +27,12 @@ import { and, asc, desc, eq, gte, lt, or, sql as q } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import type { Sql } from "postgres";
 import { isBytes } from "./bytes.ts";
-import { boardEntries, boardSubtrees, electionDefinitions } from "./db/schema/index.ts";
+import {
+  boardBallotKeys,
+  boardEntries,
+  boardSubtrees,
+  electionDefinitions,
+} from "./db/schema/index.ts";
 
 const SPOILED_BALLOT_OPENING = 0x0003;
 const MAX_SEGMENT = 2 ** 32 - 1;
@@ -47,7 +53,12 @@ export type AppendErrorCode =
   /** The segment is below the previous entry's. */
   | "segment-decreased"
   /** Within a segment, openings come last, in strictly increasing byte order (T-42, T-47). */
-  | "opening-order";
+  | "opening-order"
+  /**
+   * A ballot with the key of one already boarded, in other bytes: a repeat
+   * (verifier 5.7), such as a copy with a re-randomised proof (T-38).
+   */
+  | "repeat";
 
 export class AppendError extends Error {
   override readonly name = "AppendError";
@@ -154,6 +165,29 @@ export interface AppendedEntry {
   readonly link: Uint8Array;
 }
 
+/**
+ * What makes two ballots one (docs/spec/revoting.md, Selection step 1): the
+ * tier (a cell's tier under ballot versions 2 and 3), the nullifier `ν` and
+ * the message `M`, as the verifier's admission returns them for the payload.
+ * Never compared as bytes of the record: anyone can re-randomise a Groth16
+ * proof without the witness, which keeps all three (T-38).
+ */
+export interface BallotKey {
+  readonly tier: number;
+  readonly nullifier: bigint;
+  readonly message: Uint8Array;
+}
+
+/** `ν` as 32 big-endian bytes; a field<bn254> element, below `r`. */
+function nullifierBytes(nullifier: bigint): Uint8Array {
+  if (typeof nullifier !== "bigint" || nullifier < 0n || nullifier >= BN254_R)
+    throw new AppendError("invalid-entry");
+  return Uint8Array.from(Buffer.from(nullifier.toString(16).padStart(64, "0"), "hex"));
+}
+
+const equalBytes = (a: Uint8Array, b: Uint8Array) =>
+  a.length === b.length && a.every((x, i) => x === b[i]);
+
 const recordTypeOf = (payload: Uint8Array) =>
   payload.length < 2 ? -1 : ((payload[0] as number) << 8) | (payload[1] as number);
 
@@ -190,6 +224,17 @@ export async function appendEntry(
      * both land (the later-labelled one first), never `segment-decreased`.
      */
     readonly raiseToPrevious?: boolean;
+    /**
+     * The payload is a ballot the caller admitted, with this key: it is
+     * stored with the entry, and a ballot whose key is already stored is
+     * never boarded again. The same bytes return the entry that carries them,
+     * so a client's retry gets its entry, as the board contract's no-op
+     * repeat does (docs/spec/contracts.md, Board, Repeats); other bytes are refused as
+     * `repeat`. The earlier copy is a board-path ballot boarded in the
+     * window, so it stands under the close rule, and the refused copy would
+     * be rejected by 5.7 (docs/spec/close.md; T-38, T-52, T-17).
+     */
+    readonly ballot?: BallotKey;
   } = {},
 ): Promise<AppendedEntry> {
   if (!Number.isInteger(segment) || segment < 0 || segment > MAX_SEGMENT)
@@ -201,6 +246,20 @@ export async function appendEntry(
     throw new AppendError("invalid-entry");
   const id = new Uint8Array(electionId);
   const body = new Uint8Array(payload);
+  let key: { tier: number; nullifier: Uint8Array; message: Uint8Array } | undefined;
+  if (options.ballot !== undefined) {
+    const { tier, nullifier, message } = options.ballot;
+    if (
+      recordTypeOf(body) !== RECORD_TYPES.ballot ||
+      !Number.isInteger(tier) ||
+      tier < 0 ||
+      tier > 255 ||
+      !isBytes(message) ||
+      message.length !== 32
+    )
+      throw new AppendError("invalid-entry");
+    key = { tier, nullifier: nullifierBytes(nullifier), message: new Uint8Array(message) };
+  }
   return drizzle({ client }).transaction(
     async (tx) => {
       // The lock's second key is the election ID's first 4 bytes, from a hash
@@ -211,6 +270,48 @@ export async function appendEntry(
       );
       const version = await pinnedBoardVersion(tx, id);
       if (typeof version === "string") throw new AppendError(version);
+      if (key !== undefined) {
+        // Read under the lock, so two copies racing in can't both be boarded.
+        const [seen] = await tx
+          .select({
+            idx: boardEntries.idx,
+            segment: boardEntries.segment,
+            payload: boardEntries.payload,
+            entryHash: boardEntries.entryHash,
+            link: boardEntries.link,
+          })
+          .from(boardBallotKeys)
+          .innerJoin(
+            boardEntries,
+            and(
+              eq(boardEntries.electionId, boardBallotKeys.electionId),
+              eq(boardEntries.idx, boardBallotKeys.idx),
+            ),
+          )
+          .where(
+            and(
+              eq(boardBallotKeys.electionId, id),
+              eq(boardBallotKeys.tier, key.tier),
+              eq(boardBallotKeys.nullifier, key.nullifier),
+              eq(boardBallotKeys.message, key.message),
+            ),
+          );
+        if (seen !== undefined) {
+          if (!equalBytes(seen.payload, body)) throw new AppendError("repeat");
+          const entry: BoardEntry = {
+            election_id: id,
+            index: seen.idx,
+            segment: Number(seen.segment),
+            payload: body,
+          };
+          return {
+            entry: encodeBoardEntry(entry, version),
+            index: seen.idx,
+            entryHash: new Uint8Array(seen.entryHash),
+            link: new Uint8Array(seen.link),
+          };
+        }
+      }
       const [prev] = await tx
         .select()
         .from(boardEntries)
@@ -251,6 +352,8 @@ export async function appendEntry(
         prevLink,
         link,
       });
+      if (key !== undefined)
+        await tx.insert(boardBallotKeys).values({ electionId: id, idx: index, ...key });
       // The subtrees this entry completes, from the ones covering the board
       // before it, in the same transaction: heads and proofs then never read
       // more than O(log n) of them (T-52).

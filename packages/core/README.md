@@ -31,6 +31,14 @@ The board tree's perfect subtrees: for each election, `level`, `idx` and `hash`,
 - The database can't hash, so `auditBoard` recomputes every subtree from the recomputed entry hashes (`subtree-missing`, `subtree-mismatch`).
 - The migration refuses to run over a board that already has entries (none can: nothing boards before it); such a board is wiped and rebuilt from chain + IPFS.
 
+### `board_ballot_keys` (T-38, T-52)
+
+Each ballot `BallotAdmissions` boards, keyed by what makes two ballots one (docs/spec/revoting.md, Selection step 1; verifier 5.7): `tier`, `nullifier` (ν as 32 big-endian bytes) and `message` (`M`), as `@abolishus/verifier`'s admission returns them for the entry's own payload, with the entry's `idx`. The key is the primary key, and each entry has at most one.
+
+- Public board data, derived from `board_entries` and rebuilt with it. It never decides what counts: the verifier finds repeats itself.
+- Append-only like the board (grants and triggers, for every role); an insert must name a ballot entry already on the board. The trigger runs with a fixed `search_path`, like the board's.
+- The migration refuses to run over a board that already holds ballots, whose keys SQL can't compute; such a board is wiped and rebuilt from chain + IPFS.
+
 ### Appending (`src/board.ts`)
 
 `appendEntry(sql, electionId, segment, payload)` appends the next entry of an election's board and returns its index, entry hash and link:
@@ -40,7 +48,8 @@ The board tree's perfect subtrees: for each election, `level`, `idx` and `hash`,
 - Appends to one board are serialised by a transaction-scoped advisory lock on the election, so concurrent callers get consecutive indexes.
 - It refuses, with a typed `AppendError`, an entry that doesn't encode (a payload type the board doesn't allow, a bad election ID or segment), a segment below the previous entry's, and an entry that breaks the order of spoiled-ballot openings (within a segment they come last, in increasing byte order; T-42, T-47).
 - It checks only the envelope. Whether a payload may be boarded (it must decode strictly under the election's profile) is the caller's to decide, at admission (P2-3).
-- `BallotAdmissions` is that caller for ballots. `submit(sql, electionId, ballot, now)` boards a ballot only once `@abolishus/verifier`'s `electionAdmission` admits it (the definition checks, the transcript check against the panel the release pins, then 5.1 to 5.4), only between the definition's `opens_at` and `closes_at` at `now`, and in the anchoring period of `now`. The transcript must be the board's first entry: only that entry is read, never the board. Each election's admission is kept in memory once decided (definitions and the first entry are write-once), admissions and refusals in separate least-recently-used caches; a missing transcript is decided again on the next ballot. The segment is raised to the board's last one if a later-labelled ballot was boarded while this one's proofs ran (`appendEntry`'s `raiseToPrevious` option). Refusals are a typed `SubmitError` (`unknown-election`, `not-open`, `rejected` with the verifier's code), with nothing written.
+- With the `ballot` option (a `BallotKey`), the payload is an admitted ballot: its key is stored with the entry, and a ballot whose key is already stored is never boarded again. The same bytes return the entry that carries them, so a client's retry gets its entry; other bytes (a copy with a re-randomised membership proof) are refused as `repeat`. The key is read under the board's lock, so concurrent copies board once.
+- `BallotAdmissions` is that caller for ballots. `submit(sql, electionId, ballot, now)` boards a ballot only once `@abolishus/verifier`'s `electionAdmission` admits it (the definition checks, the transcript check against the panel the release pins, then 5.1 to 5.4), only between the definition's `opens_at` and `closes_at` at `now`, and in the anchoring period of `now`. The transcript must be the board's first entry: only that entry is read, never the board. Each election's admission is kept in memory once decided (definitions and the first entry are write-once), admissions and refusals in separate least-recently-used caches; a missing transcript is decided again on the next ballot. The segment is raised to the board's last one if a later-labelled ballot was boarded while this one's proofs ran (`appendEntry`'s `raiseToPrevious` option). It passes the key admission returns, so a repeat is `rejected` with `repeat`. Refusals are a typed `SubmitError` (`unknown-election`, `not-open`, `rejected` with the verifier's code), with nothing written.
 
 `readBoard(sql, electionId)` returns the board as encoded entries in index order, the input to `checkBoard` and the verifier, which recompute every hash rather than trusting the stored columns.
 

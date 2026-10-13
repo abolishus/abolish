@@ -11,8 +11,10 @@ import { createApiServer } from "../src/index.ts";
 
 // `ballots.submit` with admission, over HTTP: an admitted ballot is boarded
 // and answered with its entry and link, a rejected one is BALLOT_REJECTED
-// with the verifier's code, and outside the window ELECTION_NOT_OPEN, with
-// nothing written either way (T-17, T-52). The request log still holds only
+// with the verifier's code, a repeat of a boarded ballot (5.7) is answered
+// with that ballot's entry if its bytes are the same and is BALLOT_REJECTED
+// with `repeat` otherwise, and outside the window ELECTION_NOT_OPEN, with
+// nothing written but the admitted ballot (T-17, T-38, T-52). The request log still holds only
 // the method, route, status and duration (T-10, T-11). Fixtures:
 // docs/spec/vectors/verifier-ballots.json (an independent implementation's
 // verdicts).
@@ -31,7 +33,10 @@ const file = JSON.parse(
     readonly id: string;
     readonly definition: string;
     readonly board: string;
-    readonly ballots?: { readonly rejected: readonly { entry: number; code: string }[] };
+    readonly ballots?: {
+      readonly rejected: readonly { entry: number; code: string }[];
+      readonly repeats: readonly { entry: number }[];
+    };
   }[];
 };
 const mixed = file.cases.find((c) => c.id === "mixed")!;
@@ -44,6 +49,8 @@ const electionId = definition.election_id;
 // The fixtures pin board-entry version 4.
 const entries = splitEntries(unhex(mixed.board)).entries.map((e) => decodeBoardEntry(e, 4));
 const rejected = new Map((mixed.ballots?.rejected ?? []).map((r) => [r.entry, r.code] as const));
+// The case's one repeat is a byte-identical copy of an earlier ballot.
+const repeats = new Set((mixed.ballots?.repeats ?? []).map((r) => r.entry));
 
 let db: TestDb;
 let app: Sql;
@@ -89,7 +96,16 @@ describe("ballots.submit with admission", () => {
       const r = await submit(e.payload);
       const body = (await r.json()) as Record<string, unknown>;
       const code = rejected.get(at);
-      if (code === undefined) {
+      if (repeats.has(at)) {
+        // Its earlier copy's entry, so a client that lost the answer can retry.
+        expect(r.status).toBe(201);
+        const board = await readBoard(app, electionId);
+        const earlier = board.findIndex(
+          (b, i) => i > 0 && hex(decodeBoardEntry(b, 4).payload) === hex(e.payload),
+        );
+        expect(earlier).toBeGreaterThan(0);
+        expect(body["entry"]).toBe(hex(board[earlier]!));
+      } else if (code === undefined) {
         expect(r.status).toBe(201);
         const entry = decodeBoardEntry(unhex(body["entry"] as string), 4);
         expect(entry.payload).toEqual(e.payload);
@@ -107,6 +123,49 @@ describe("ballots.submit with admission", () => {
     }
     expect(size).toBeGreaterThan(1);
     expect(rejected.size).toBeGreaterThan(0);
+    expect(repeats.size).toBe(1);
+  });
+
+  test("a copy of a boarded ballot in other bytes is BALLOT_REJECTED with repeat", async () => {
+    // The repeats case: entry 2 is a voter's ballot and entry 3 the same
+    // ballot with its proof negated (the same tier, ν and M).
+    const c = file.cases.find((x) => x.id === "repeats")!;
+    const [transcript, , original, negated] = splitEntries(unhex(c.board)).entries.map((e) =>
+      decodeBoardEntry(e, 4),
+    );
+    const own = await testDb();
+    const sql = await own.as("abolish_app");
+    await storeDefinition(sql, unhex(c.definition));
+    await appendEntry(sql, electionId, transcript!.segment, transcript!.payload);
+    const s = createApiServer({
+      sql,
+      log: () => {},
+      admissions: new BallotAdmissions({
+        panels: [panel],
+        clock: { epoch: definition.opens_at, period: 3_600n },
+      }),
+      now: () => definition.opens_at + 60n,
+    });
+    await new Promise<void>((r) => s.listen(0, "127.0.0.1", r));
+    const url = `http://127.0.0.1:${(s.address() as AddressInfo).port}/ballots`;
+    const post = (ballot: Uint8Array) =>
+      fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ electionId: hex(electionId), ballot: hex(ballot) }),
+      });
+    try {
+      expect((await post(original!.payload)).status).toBe(201);
+      const r = await post(negated!.payload);
+      expect(r.status).toBe(422);
+      const body = (await r.json()) as Record<string, unknown>;
+      expect(body["code"]).toBe("BALLOT_REJECTED");
+      expect(body["data"]).toEqual({ code: "repeat" });
+      expect(await readBoard(sql, electionId)).toHaveLength(2);
+    } finally {
+      await new Promise((r) => s.close(r));
+      await own.close();
+    }
   });
 
   test("outside the window is ELECTION_NOT_OPEN, and an unknown election ELECTION_NOT_FOUND", async () => {

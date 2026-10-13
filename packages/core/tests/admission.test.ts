@@ -34,13 +34,18 @@ interface Case {
   readonly panel: string;
   readonly definition: string;
   readonly board: string;
-  readonly ballots?: { readonly rejected: readonly { entry: number; code: string }[] };
+  readonly ballots?: {
+    readonly rejected: readonly { entry: number; code: string }[];
+    readonly repeats: readonly { entry: number }[];
+  };
 }
 
 const file = read("verifier-ballots.json") as {
   readonly panels: Readonly<Record<string, { threshold: string; keys: string[] }>>;
   readonly cases: readonly Case[];
 };
+const equal = (a: Uint8Array, b: Uint8Array) =>
+  a.length === b.length && a.every((x, i) => x === b[i]);
 const hex = (s: string) => Uint8Array.from(Buffer.from(s, "hex"));
 const byId = (id: string) => {
   const c = file.cases.find((x) => x.id === id);
@@ -121,18 +126,103 @@ describe("boards what the verifier admits, and nothing else", () => {
     const app = await election(c);
     const a = admissions();
     const rejected = new Map((c.ballots?.rejected ?? []).map((r) => [r.entry, r.code] as const));
+    const repeats = new Set((c.ballots?.repeats ?? []).map((r) => r.entry));
     expect(rejected.size).toBeGreaterThan(0);
     let size = 1;
     for (const [at, b] of entriesOf(c).entries()) {
       if (at === 0) continue;
       const code = rejected.get(at);
       const got = await refusal(a.submit(app, electionId, b.payload, during));
-      if (code === undefined) {
+      if (code !== undefined) expect(got).toBe(`rejected:${code}`);
+      else {
+        // The case's repeat is byte-identical: it gets its entry, and isn't boarded again.
         expect(got).toBe("boarded");
-        size++;
-      } else expect(got).toBe(`rejected:${code}`);
+        if (!repeats.has(at)) size++;
+      }
       expect(await readBoard(app, electionId)).toHaveLength(size);
     }
+  });
+
+  test("a repeat of a boarded ballot is never boarded again (5.7)", async () => {
+    // The case's copies of one ballot: one with another voter's proof
+    // (rejected, so it makes nothing a repeat, R4), the original, a copy with
+    // its proof negated (other bytes, the same tier, ν and M: refused), a
+    // byte-identical copy (its entry returned, nothing written) and a re-vote
+    // (another M: boarded). The verdicts are the independent implementation's.
+    const c = byId("repeats");
+    const app = await election(c);
+    const a = admissions();
+    const rejected = new Map((c.ballots?.rejected ?? []).map((r) => [r.entry, r.code] as const));
+    const repeats = new Set((c.ballots?.repeats ?? []).map((r) => r.entry));
+    expect(repeats.size).toBe(2);
+    const ballots = entriesOf(c).map((e) => e.payload);
+    const boarded = new Map<number, bigint>();
+    let size = 1;
+    let identical = 0;
+    let other = 0;
+    for (const [at, payload] of ballots.entries()) {
+      if (at === 0) continue;
+      const code = rejected.get(at);
+      if (code !== undefined) {
+        expect(await refusal(a.submit(app, electionId, payload, during))).toBe(`rejected:${code}`);
+        continue;
+      }
+      if (!repeats.has(at)) {
+        const r = await a.submit(app, electionId, payload, during);
+        expect(r.index).toBe(BigInt(size++));
+        boarded.set(at, r.index);
+      } else {
+        const same = [...boarded.keys()].find((k) => equal(ballots[k]!, payload));
+        if (same === undefined) {
+          other++;
+          expect(await refusal(a.submit(app, electionId, payload, during))).toBe("rejected:repeat");
+        } else {
+          identical++;
+          const r = await a.submit(app, electionId, payload, during + 3_600n);
+          // The entry that carries it, as boarded, in its own segment.
+          const board = await readBoard(app, electionId);
+          expect(r.index).toBe(boarded.get(same));
+          expect(r.entry).toEqual(board[Number(r.index)]);
+        }
+      }
+      expect(await readBoard(app, electionId)).toHaveLength(size);
+    }
+    expect([identical, other]).toEqual([1, 1]);
+    // One key per boarded ballot: a refused repeat wrote none.
+    const keys = await app`SELECT count(*)::int AS n FROM board_ballot_keys`;
+    expect(keys[0]!["n"]).toBe(size - 1);
+    // A byte-identical retry after close is refused like any ballot then.
+    const original = [...boarded.keys()][0]!;
+    expect(await refusal(a.submit(app, electionId, ballots[original]!, closesAt + 1n))).toBe(
+      "not-open",
+    );
+    const board = await readBoard(app, electionId);
+    expect(() => checkBoard(electionId, board, VERSION)).not.toThrow();
+  });
+
+  test("copies submitted at once board one entry", async () => {
+    // The key is read under the board's lock: concurrent copies can't both
+    // pass the lookup.
+    const c = byId("repeats");
+    const app = await election(c);
+    const db = dbs.at(-1)!;
+    const others = await Promise.all([1, 2, 3].map(() => db.as("abolish_app")));
+    const [, , original, negated] = entriesOf(c).map((e) => e.payload);
+    const a = admissions();
+    const results = await Promise.all(
+      [app, ...others].flatMap((client) => [
+        refusal(a.submit(client, electionId, original!, during)),
+        refusal(a.submit(client, electionId, negated!, during)),
+      ]),
+    );
+    const board = await readBoard(app, electionId);
+    expect(board).toHaveLength(2);
+    const won = decodeBoardEntry(board[1]!, VERSION).payload;
+    // Whichever copy won, every submission of its bytes gets its entry and
+    // every submission of the other's is refused.
+    const winner = equal(won, original!) ? 0 : 1;
+    expect(equal(won, winner === 0 ? original! : negated!)).toBe(true);
+    results.forEach((r, i) => expect(r).toBe(i % 2 === winner ? "boarded" : "rejected:repeat"));
   });
 
   test("a payload that isn't a ballot record is refused as undecodable", async () => {

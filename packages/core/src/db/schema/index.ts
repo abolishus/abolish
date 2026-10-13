@@ -5,7 +5,7 @@ import {
   accountUsers,
   accountVerifications,
 } from "./accounts.ts";
-import { boardEntries, boardSubtrees } from "./board.ts";
+import { boardBallotKeys, boardEntries, boardSubtrees } from "./board.ts";
 import { electionDefinitions, electionRegistrations } from "./definitions.ts";
 import { identityBackups } from "./identity-backups.ts";
 import { moderationActions, moderationReports } from "./moderation.ts";
@@ -16,6 +16,7 @@ export {
   accountSessions,
   accountUsers,
   accountVerifications,
+  boardBallotKeys,
   boardEntries,
   boardSubtrees,
   electionDefinitions,
@@ -39,7 +40,13 @@ export {
  * with a board or identity table (.claude/skills/migrations; T-10, T-13, T-20).
  */
 export const TABLE_CLASSES = {
-  board: ["board_entries", "board_subtrees", "election_definitions", "election_registrations"],
+  board: [
+    "board_ballot_keys",
+    "board_entries",
+    "board_subtrees",
+    "election_definitions",
+    "election_registrations",
+  ],
   account: [
     "account_credentials",
     "account_passkeys",

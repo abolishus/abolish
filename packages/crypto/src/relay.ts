@@ -17,9 +17,9 @@ const U64_MAX = (1n << 64n) - 1n;
 /** The most `data` bytes the L2's portal takes in one deposit (docs/adr/0004-l2-choice.md). */
 export const PORTAL_MAX_DATA = 120_000;
 
-// The deposit's calldata before the record: the selector, four head words
+// The deposit's calldata before the record: the selector, five head words
 // and the record's length word.
-const DEPOSIT_HEAD = 4 + 32 * 5;
+const DEPOSIT_HEAD = 4 + 32 * 6;
 
 /**
  * `MAX_RELAY_RECORD`: the longest record the relay takes, the longest whose
@@ -33,7 +33,7 @@ export const MAX_RELAY_RECORD: number = PARAMETERS.MAX_RELAY_RECORD;
 export const ALIAS_OFFSET = 0x1111000000000000000000000000000000001111n;
 
 export const RELAY_SIGNATURE = "relayBallot(uint64,bytes)";
-export const RELAY_DEPOSIT_SIGNATURE = "submitRelayedBallot(uint64,uint64,uint64,bytes)";
+export const RELAY_DEPOSIT_SIGNATURE = "submitRelayedBallot(uint64,uint64,uint64,uint64,bytes)";
 export const RELAY_EVENT_SIGNATURE = "BallotRelayed(bytes32,uint64,bytes32)";
 
 const selector = (signature: string) => keccak_256(new TextEncoder().encode(signature)).slice(0, 4);
@@ -114,13 +114,19 @@ export interface RelayCall {
   /** The number and timestamp of the L1 block the call ran in: the stamp. */
   readonly l1Block: bigint;
   readonly l1Timestamp: bigint;
+  /**
+   * The deposit's gas limit, the caller's: bound so a verifier can tell a
+   * call that gave too little gas from a deposit suppressed on L2.
+   */
+  readonly gasLimit: bigint;
   /** The record the call carried, as sent. */
   readonly record: Uint8Array;
 }
 
 /**
  * `H(DS("abolish/v1/relay-call", u64(l1_chain_id) ‖ bytes[20](relay) ‖
- * u64(index) ‖ u64(l1_block) ‖ u64(l1_timestamp) ‖ record))`, the word the
+ * u64(index) ‖ u64(l1_block) ‖ u64(l1_timestamp) ‖ u64(gas_limit) ‖
+ * record))`, the word the
  * relay stores for the call. It binds the whole record, not its ballot hash,
  * which leaves out the membership proof and the L1 reference: so the only
  * relayed event that matches it carries the bytes the caller sent (T-71,
@@ -138,6 +144,7 @@ export function relayCallHash(call: RelayCall): Uint8Array {
         u64Bytes("index", call.index),
         u64Bytes("l1Block", call.l1Block),
         u64Bytes("l1Timestamp", call.l1Timestamp),
+        u64Bytes("gasLimit", call.gasLimit),
         call.record,
       ]),
     ),
@@ -146,18 +153,21 @@ export function relayCallHash(call: RelayCall): Uint8Array {
 
 /**
  * The deposit's `data`, `abi.encodeCall(submitRelayedBallot, (index,
- * l1_block, l1_timestamp, record))`: `164 + pad32(len(record))` bytes.
+ * l1_block, l1_timestamp, gas_limit, record))`: `196 + pad32(len(record))`
+ * bytes.
  */
 export function relayDepositData(
   index: bigint,
   l1Block: bigint,
   l1Timestamp: bigint,
+  gasLimit: bigint,
   record: Uint8Array,
 ): Uint8Array {
   for (const [name, v] of [
     ["index", index],
     ["l1Block", l1Block],
     ["l1Timestamp", l1Timestamp],
+    ["gasLimit", gasLimit],
   ] as const)
     u64Bytes(name, v);
   if (!(record instanceof Uint8Array)) throw new TypeError("record must be a Uint8Array");
@@ -168,7 +178,8 @@ export function relayDepositData(
       word(index),
       word(l1Block),
       word(l1Timestamp),
-      word(0x80n),
+      word(gasLimit),
+      word(0xa0n),
       word(BigInt(record.length)),
       record,
     ]),

@@ -519,7 +519,7 @@ The proofs are randomised: regenerating gives other proof bytes for the same sta
 - `signatures`: `relay` and `deposit`, each a function `signature` and its 4-byte `selector`, and `event`, the event's `signature` and `topic0` (all hex).
 - `storage`: the ERC-7201 `namespace`, its `base` slot, `countSlot`, `callsSlot` (`R + 1`) and `callSlots` (call `index`, decimal, and its word's `slot`).
 - `aliases`: each an `l1` address and its `l2` alias.
-- `calls`: each has `id`, `description`, `l1ChainId`, `index`, `l1Block` and `l1Timestamp` (decimal strings), `relay` (20 bytes), the record, `callHash`, `topics` and `data` (the event's), `depositDataLength`, `depositDataSha256` and, for a record of at most 512 bytes, `depositData` (all hex).
+- `calls`: each has `id`, `description`, `l1ChainId`, `index`, `l1Block`, `l1Timestamp` and `gasLimit` (decimal strings), `relay` (20 bytes), the record, `callHash`, `topics` and `data` (the event's), `depositDataLength`, `depositDataSha256` and, for a record of at most 512 bytes, `depositData` (all hex).
 - `framing`: each has `id`, `description`, the record and `result` (`framed`, with its `definitionHash`, or the code: `relay-too-large`, `relay-truncated` or `relay-record-type`).
 - `calldata`: each has `id`, `description`, `calldata` (hex) and `result`: `canonical`, with the decoded `gasLimit` (decimal) and `record` (hex), or `relay-calldata`.
 - `accumulator`: the relay's event accumulator over the first three `calls`, each in its own L1 block: `chainId` (decimal), `address`, `genesis` and `steps` (`n`, the `call` it logs, and the `accumulator` after it).

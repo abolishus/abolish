@@ -60,6 +60,7 @@ interface VectorFile {
     readonly index: string;
     readonly l1Block: string;
     readonly l1Timestamp: string;
+    readonly gasLimit: string;
     readonly callHash: string;
     readonly topics: readonly string[];
     readonly data: string;
@@ -132,7 +133,7 @@ describe("relay vectors (docs/spec/vectors/relay.json)", () => {
     expect(bytesToHex(relayBallotCalldata(0n, new Uint8Array()).subarray(0, 4))).toBe(
       relay.selector,
     );
-    expect(bytesToHex(relayDepositData(0n, 0n, 0n, new Uint8Array()).subarray(0, 4))).toBe(
+    expect(bytesToHex(relayDepositData(0n, 0n, 0n, 0n, new Uint8Array()).subarray(0, 4))).toBe(
       deposit.selector,
     );
     const { topics } = relayEvent(new Uint8Array(32), 0n, new Uint8Array(32));
@@ -169,11 +170,18 @@ describe("relay vectors (docs/spec/vectors/relay.json)", () => {
         index: BigInt(v.index),
         l1Block: BigInt(v.l1Block),
         l1Timestamp: BigInt(v.l1Timestamp),
+        gasLimit: BigInt(v.gasLimit),
         record,
       };
       const callHash = relayCallHash(call);
       expect(bytesToHex(callHash), v.id).toBe(v.callHash);
-      const data = relayDepositData(call.index, call.l1Block, call.l1Timestamp, record);
+      const data = relayDepositData(
+        call.index,
+        call.l1Block,
+        call.l1Timestamp,
+        call.gasLimit,
+        record,
+      );
       expect(data.length, v.id).toBe(v.depositDataLength);
       expect(data.length, v.id).toBeLessThanOrEqual(PORTAL_MAX_DATA);
       expect(bytesToHex(sha256(data)), v.id).toBe(v.depositDataSha256);
@@ -182,6 +190,16 @@ describe("relay vectors (docs/spec/vectors/relay.json)", () => {
       expect(event.topics.map(bytesToHex), v.id).toEqual(v.topics);
       expect(bytesToHex(event.data), v.id).toBe(v.data);
     }
+  });
+
+  test("a call binds the whole record, not only its ballot's header", () => {
+    const typical = file.calls.find((c) => c.id === "typical");
+    const otherProof = file.calls.find((c) => c.id === "other-proof");
+    if (typical?.record === undefined || otherProof?.record === undefined)
+      throw new Error("relay.json: no typical or other-proof call");
+    expect(otherProof.record.slice(0, 70)).toBe(typical.record.slice(0, 70));
+    expect(otherProof.record).not.toBe(typical.record);
+    expect(otherProof.callHash).not.toBe(typical.callHash);
   });
 
   test("framing", () => {
@@ -252,12 +270,13 @@ describe("relay properties", () => {
     index: u64,
     l1Block: u64,
     l1Timestamp: u64,
+    gasLimit: u64,
     record,
   });
 
   test("changing any field of a call changes its hash", () => {
     fc.assert(
-      fc.property(call, fc.nat(), fc.nat({ max: 5 }), (c, at, which) => {
+      fc.property(call, fc.nat(), fc.nat({ max: 6 }), (c, at, which) => {
         const base = bytesToHex(relayCallHash(c));
         const flip = (b: Uint8Array) => {
           const out = b.slice();
@@ -272,6 +291,7 @@ describe("relay properties", () => {
           { ...c, index: bump(c.index) },
           { ...c, l1Block: bump(c.l1Block) },
           { ...c, l1Timestamp: bump(c.l1Timestamp) },
+          { ...c, gasLimit: bump(c.gasLimit) },
           { ...c, record: flip(c.record) },
         ][which];
         if (changed === undefined) return;
@@ -329,7 +349,7 @@ describe("relay properties", () => {
 
   test("MAX_RELAY_RECORD is the longest record whose deposit fits the portal's cap", () => {
     const fits = (n: number) =>
-      relayDepositData(0n, 0n, 0n, new Uint8Array(n)).length <= PORTAL_MAX_DATA;
+      relayDepositData(0n, 0n, 0n, 0n, new Uint8Array(n)).length <= PORTAL_MAX_DATA;
     expect(fits(MAX_RELAY_RECORD)).toBe(true);
     expect(fits(MAX_RELAY_RECORD + 1)).toBe(false);
     const longest = new Uint8Array(MAX_RELAY_RECORD);
@@ -347,13 +367,14 @@ describe("relay properties", () => {
       index: 0n,
       l1Block: 0n,
       l1Timestamp: 0n,
+      gasLimit: 0n,
       record: new Uint8Array(35),
     };
     expect(() => relayCallHash({ ...c, index: 1n << 64n })).toThrow(RangeError);
     expect(() => relayCallHash({ ...c, l1Timestamp: -1n })).toThrow(RangeError);
     expect(() => relayCallHash({ ...c, relay: new Uint8Array(19) })).toThrow(TypeError);
     expect(() => relayBallotCalldata(1n << 64n, c.record)).toThrow(RangeError);
-    expect(() => relayDepositData(0n, 1n << 64n, 0n, c.record)).toThrow(RangeError);
+    expect(() => relayDepositData(0n, 1n << 64n, 0n, 0n, c.record)).toThrow(RangeError);
     expect(() => l2Alias(new Uint8Array(21))).toThrow(TypeError);
     expect(() => relayEvent(new Uint8Array(31), 0n, new Uint8Array(32))).toThrow(TypeError);
   });

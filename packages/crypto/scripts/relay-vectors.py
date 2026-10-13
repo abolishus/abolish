@@ -88,16 +88,16 @@ CALL_TAG = b"abolish/v1/relay-call"
 ACC_TAG = b"abolish/v1/event-accumulator-2"
 MAX_U64 = 2**64 - 1
 PORTAL_MAX_DATA = 120_000
-# The relay's deposit data is 164 bytes of head and length before the record
+# The relay's deposit data is 196 bytes of head and length before the record
 # and the record's zero padding after it (contracts.md, L1 relay, Relaying).
-DEPOSIT_OVERHEAD = 4 + 32 * 5
+DEPOSIT_OVERHEAD = 4 + 32 * 6
 MAX_RELAY_RECORD = (PORTAL_MAX_DATA - DEPOSIT_OVERHEAD) // 32 * 32
-assert MAX_RELAY_RECORD == 119_808
+assert MAX_RELAY_RECORD == 119_776
 BALLOT_TYPE = b"\x00\x02"
 ALIAS_OFFSET = 0x1111000000000000000000000000000000001111
 
 RELAY_SIGNATURE = "relayBallot(uint64,bytes)"
-DEPOSIT_SIGNATURE = "submitRelayedBallot(uint64,uint64,uint64,bytes)"
+DEPOSIT_SIGNATURE = "submitRelayedBallot(uint64,uint64,uint64,uint64,bytes)"
 EVENT_SIGNATURE = "BallotRelayed(bytes32,uint64,bytes32)"
 
 
@@ -152,18 +152,22 @@ def check_calldata(calldata):
     return gas, record
 
 
-def call_hash(chain_id, relay, index, block, timestamp, record):
+def call_hash(chain_id, relay, index, block, timestamp, gas_limit, record):
     assert len(relay) == 20
-    return ds_hash(CALL_TAG, u64(chain_id) + relay + u64(index) + u64(block) + u64(timestamp) + record)
+    return ds_hash(
+        CALL_TAG,
+        u64(chain_id) + relay + u64(index) + u64(block) + u64(timestamp) + u64(gas_limit) + record,
+    )
 
 
-def deposit_data(index, block, timestamp, record):
+def deposit_data(index, block, timestamp, gas_limit, record):
     return (
         selector(DEPOSIT_SIGNATURE)
         + word(index)
         + word(block)
         + word(timestamp)
-        + word(0x80)
+        + word(gas_limit)
+        + word(0xA0)
         + word(len(record))
         + pad32(record)
     )
@@ -273,21 +277,24 @@ def main():
     typical = ballot("call/typical", 3, 400)
     largest_v4 = filled(BALLOT_TYPE + b"\x04" + det("call/v4/definition", 32), "call/v4/body", 81_932)
     largest = filled(BALLOT_TYPE + b"\x05" + det("call/max/definition", 32), "call/max/body", MAX_RELAY_RECORD)
+    other_proof = typical[:200] + bytes([typical[200] ^ 1]) + typical[201:]
     calls_in = [
-        ("shortest", "The shortest record the relay frames: header and definition hash only", l1, relay, 0, 6_000_000, 1_800_000_000, small, "call/small"),
-        ("typical", "A ballot-version-3 record of 400 bytes", l1, relay, 1, 6_000_001, 1_800_000_012, typical, "call/typical"),
-        ("same-record-next-call", "The same record relayed again, one slot later: another index, block and stamp, so another hash", l1, relay, 2, 6_000_002, 1_800_000_024, typical, "call/typical"),
-        ("other-relay", "The typical call's fields, recorded by another relay", l1, other_relay, 1, 6_000_001, 1_800_000_012, typical, "call/typical"),
-        ("other-chain", "The typical call's fields on another L1 (mainnet)", 1, relay, 1, 6_000_001, 1_800_000_012, typical, "call/typical"),
-        ("u64-extremes", "The largest index, block and stamp", MAX_U64, relay, MAX_U64, MAX_U64, MAX_U64, small, "call/small"),
-        ("large-v4", "About the largest ballot-version-4 record (81,932 bytes)", l1, relay, 3, 6_000_100, 1_800_001_200, largest_v4, "call/v4/body"),
-        ("largest", "A record of MAX_RELAY_RECORD bytes, whose deposit data is the most the portal takes but at most 31 bytes", l1, relay, 4, 6_000_101, 1_800_001_212, largest, "call/max/body"),
+        ("shortest", "The shortest record the relay frames: header and definition hash only", l1, relay, 0, 6_000_000, 1_800_000_000, 5_000_000, small, "call/small"),
+        ("typical", "A ballot-version-3 record of 400 bytes", l1, relay, 1, 6_000_001, 1_800_000_012, 5_000_000, typical, "call/typical"),
+        ("same-record-next-call", "The same record relayed again, one slot later: another index, block and stamp, so another hash", l1, relay, 2, 6_000_002, 1_800_000_024, 5_000_000, typical, "call/typical"),
+        ("other-relay", "The typical call's fields, recorded by another relay", l1, other_relay, 1, 6_000_001, 1_800_000_012, 5_000_000, typical, "call/typical"),
+        ("other-chain", "The typical call's fields on another L1 (mainnet)", 1, relay, 1, 6_000_001, 1_800_000_012, 5_000_000, typical, "call/typical"),
+        ("u64-extremes", "The largest index, block, stamp and gas limit", MAX_U64, relay, MAX_U64, MAX_U64, MAX_U64, MAX_U64, small, "call/small"),
+        ("large-v4", "About the largest ballot-version-4 record (81,932 bytes)", l1, relay, 3, 6_000_100, 1_800_001_200, 5_000_000, largest_v4, "call/v4/body"),
+        ("largest", "A record of MAX_RELAY_RECORD bytes, whose deposit data is within 32 bytes of the portal's cap", l1, relay, 4, 6_000_101, 1_800_001_212, 5_000_000, largest, "call/max/body"),
+        ("other-gas", "The typical call with another gas limit", l1, relay, 1, 6_000_001, 1_800_000_012, 5_000_001, typical, "call/typical"),
+        ("other-proof", "The typical call's record with one byte of its membership proof changed: the same header and ballot hash, another call hash", l1, relay, 1, 6_000_001, 1_800_000_012, 5_000_000, other_proof, "call/other-proof"),
     ]
     calls = []
-    for cid, desc, chain, rel, index, block, ts, record, fill in calls_in:
+    for cid, desc, chain, rel, index, block, ts, gas, record, fill in calls_in:
         assert frame(record) is None
-        ch = call_hash(chain, rel, index, block, ts, record)
-        data = deposit_data(index, block, ts, record)
+        ch = call_hash(chain, rel, index, block, ts, gas, record)
+        data = deposit_data(index, block, ts, gas, record)
         assert len(data) <= PORTAL_MAX_DATA
         topics, ev_data = event(record[3:35], index, ch)
         v = {
@@ -298,6 +305,7 @@ def main():
             "index": str(index),
             "l1Block": str(block),
             "l1Timestamp": str(ts),
+            "gasLimit": str(gas),
             **record_fields(fill, record),
             "callHash": ch.hex(),
             "topics": [t.hex() for t in topics],
@@ -346,6 +354,13 @@ def main():
         ("length-past-end", "A length word past the end of the calldata", sel + word(5_000_000) + word(0x40) + word(len(rec) + 32) + pad32(rec)),
         ("head-only", "The selector and two head words", good[:68]),
         ("other-selector", "Another function's selector", selector(DEPOSIT_SIGNATURE) + good[4:]),
+        ("empty-record", "An empty record: canonical calldata, which the framing then refuses", relay_calldata(5_000_000, b"")),
+        ("empty", "No calldata", b""),
+        ("selector-only", "The selector alone", sel),
+        ("short-selector", "Three bytes", sel[:3]),
+        ("gas-dirty-high-byte", "A gas limit word with its top byte set", sel + b"\x01" + good[5:]),
+        ("length-huge", "A length word of 2^256 - 1", sel + word(5_000_000) + word(0x40) + word(2**256 - 1) + pad32(rec)),
+        ("length-2-53", "A length word of 2^53", sel + word(5_000_000) + word(0x40) + word(2**53) + pad32(rec)),
     ]
     calldata = []
     for cid, desc, cd in calldata_in:

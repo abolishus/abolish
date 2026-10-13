@@ -10,7 +10,7 @@
     "check": "vp check",
     "start": "vp node dist/node/main.mjs",
     "test": "vp run test:db",
-    "test:storybook": "vp test run --project storybook",
+    "test:storybook": "vp test run --project 'storybook*'",
     "storybook": "storybook dev -p 6008"
   },
   "dependencies": {

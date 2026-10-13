@@ -20,7 +20,7 @@
     "build": "vp exec tsc -p tsconfig.json",
     "check": "vp check",
     "test": "vp test run --project unit",
-    "test:storybook": "vp test run --project storybook",
+    "test:storybook": "vp test run --project 'storybook*'",
     "storybook": "storybook dev -p 6006",
     "build-storybook": "storybook build"
   },

@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { expect, userEvent, within } from "storybook/test";
+import { expect, userEvent, waitFor, within } from "storybook/test";
 
 import {
   Sidebar,
@@ -53,10 +53,19 @@ type Story = StoryObj<typeof meta>;
 export const Default: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
+    const toggle = canvas.getByRole("button", { name: "Toggle Sidebar" });
+    // Below 768px the sidebar is a sheet the trigger opens.
+    if (window.innerWidth < 768) {
+      await userEvent.click(toggle);
+      const body = within(canvasElement.ownerDocument.body);
+      await waitFor(() => expect(body.getByRole("button", { name: "Polls" })).toBeVisible());
+      await expect(body.getByRole("button", { name: "Polls" })).toHaveAttribute("data-active");
+      return;
+    }
     await expect(canvas.getByRole("button", { name: "Polls" })).toHaveAttribute("data-active");
     const sidebar = canvasElement.querySelector("[data-slot=sidebar]");
     await expect(sidebar).toHaveAttribute("data-state", "expanded");
-    await userEvent.click(canvas.getByRole("button", { name: "Toggle Sidebar" }));
+    await userEvent.click(toggle);
     await expect(sidebar).toHaveAttribute("data-state", "collapsed");
   },
 };

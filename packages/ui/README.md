@@ -16,7 +16,7 @@ Shared UI for `apps/web` and `apps/ballot`: shadcn/ui (preset `b2CQ2Q281`: style
 
 `src/components/ui/` holds the full shadcn/ui set (`shadcn add --all`, preset `b2CQ2Q281`), and it is the base every screen is built from. **Keep all of them, used or not**: don't delete a primitive because nothing imports it yet, and don't hand-roll a component that one of them already covers. Unused primitives cost nothing: apps import them one at a time (`@abolishus/ui/ui/<name>`, hooks from `@abolishus/ui/hooks/<name>`), so a build only bundles what it uses. The root export (`@abolishus/ui`) stays the curated set below, because `apps/ballot` imports it.
 
-Changes from the CLI's output: buttons inside other primitives (dialog and sheet close, carousel arrows, toasts, combobox clear, attachment, message scroller, sidebar trigger) use the 48px `icon` and `default` sizes, since `Button` has no smaller ones; `recharts` takes `reselect` 5.3.0 through a workspace override (its exact 5.1.1 pin fails `trustPolicy`). Any other adaptation carries a comment in the file.
+Changes from the CLI's output: buttons inside other primitives (dialog and sheet close, carousel arrows, toasts, combobox clear, attachment, message scroller, sidebar trigger) use the 48px `icon` and `default` sizes, since `Button` has no smaller ones; `recharts` takes `reselect` 5.3.0 through a workspace override (its exact 5.1.1 pin fails `trustPolicy`). Text fields (`Input`, `Textarea`, `NativeSelect`, `SelectTrigger`, `InputGroup`, the combobox chips) are 48px with base-size text by default; `size="sm"` keeps the CLI's compact field for dense tools. Any other adaptation carries a comment in the file.
 
 ## Rules
 
@@ -30,5 +30,5 @@ Changes from the CLI's output: buttons inside other primitives (dialog and sheet
 ## Test
 
 - `vp run --filter @abolishus/ui test`: node-side checks (stories exist, palette contrast, message formatting with fast-check, the provider).
-- `vp run --filter @abolishus/ui test:storybook`: every story in headless Chromium, its play function, then axe. Needs Playwright's Chromium (`vp exec playwright install chromium`).
+- `vp run --filter @abolishus/ui test:storybook`: every story in headless Chromium, its play function, then axe, at desktop width (`storybook`) and again at 360px (`storybook-phone`); a story fails if the page scrolls sideways at either width. Pick "Small phone" in Storybook's viewport menu to see the phone run. Needs Playwright's Chromium (`vp exec playwright install chromium`).
 - `vp run --filter @abolishus/ui storybook`: the Storybook UI on port 6006.

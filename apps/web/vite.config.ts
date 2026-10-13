@@ -45,6 +45,32 @@ const formatRouteTree: Plugin = {
   },
 };
 
+// Every story in a real browser: its play function, then axe
+// (`test:storybook`). Components only, so without the Start plugin.
+// `viewport` names one of the preview's viewports (none: the default).
+function storybook(name: string, viewport?: string) {
+  return {
+    extends: false,
+    plugins: [tailwindcss(), storybookTest({ configDir: ".storybook" })],
+    define: { "import.meta.env.VITE_STORYBOOK_VIEWPORT": JSON.stringify(viewport ?? "") },
+    test: {
+      name,
+      // The page mockups' play functions type whole sentences through
+      // userEvent and walk several steps, which on CI's runners can pass the
+      // 15-second default.
+      testTimeout: 60_000,
+      browser: {
+        enabled: true,
+        headless: true,
+        // Motion is decorative and every animated element settles in its final
+        // state under reduced motion, so axe judges what a reader ends up seeing.
+        provider: playwright({ contextOptions: { reducedMotion: "reduce" } }),
+        instances: [{ browser: "chromium" as const }],
+      },
+    },
+  };
+}
+
 export default defineConfig({
   plugins: [
     tailwindcss(),
@@ -89,27 +115,10 @@ export default defineConfig({
           fileParallelism: false,
         },
       },
-      {
-        // Every story in a real browser: its play function, then axe
-        // (`test:storybook`). Components only, so without the Start plugin.
-        extends: false,
-        plugins: [tailwindcss(), storybookTest({ configDir: ".storybook" })],
-        test: {
-          name: "storybook",
-          // The page mockups' play functions type whole sentences through
-          // userEvent and walk several steps, which on CI's runners can pass
-          // the 15-second default.
-          testTimeout: 60_000,
-          browser: {
-            enabled: true,
-            headless: true,
-            // Motion is decorative and every animated element settles in its final
-            // state under reduced motion, so axe judges what a reader ends up seeing.
-            provider: playwright({ contextOptions: { reducedMotion: "reduce" } }),
-            instances: [{ browser: "chromium" }],
-          },
-        },
-      },
+      storybook("storybook"),
+      // The same stories at a small phone's width, where the preview fails any
+      // page that scrolls sideways.
+      storybook("storybook-phone", "phone"),
     ],
   },
 });

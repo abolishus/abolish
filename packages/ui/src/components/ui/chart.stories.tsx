@@ -23,7 +23,7 @@ const meta = {
       config={args.config}
       role="figure"
       aria-label="Library levy results by tier"
-      className="w-96"
+      className="w-full max-w-96"
     >
       <BarChart data={results} accessibilityLayer={false}>
         <XAxis dataKey="tier" tickLine={false} axisLine={false} />

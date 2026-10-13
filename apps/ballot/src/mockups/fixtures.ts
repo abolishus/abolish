@@ -108,7 +108,7 @@ export const CLIENT = {
   version: "1.4.0",
   hash: "723b32ae7b2379f360c1f1f2eb64cb4dcbe603f86f764ded7920acf58a7380a3",
   cid: "bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi",
-  origin: "vote.abolish.us",
+  origin: "abolish.ch",
 };
 
 /** Where the website and the client can be reached; any of them will do. */

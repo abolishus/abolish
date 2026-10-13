@@ -10,7 +10,7 @@
     "check": "vp check",
     "test": "vp test run --project unit",
     "test:e2e": "vp test run --project e2e",
-    "test:storybook": "vp test run --project storybook",
+    "test:storybook": "vp test run --project 'storybook*'",
     "storybook": "storybook dev -p 6007",
     "preview": "vp build && vp preview"
   },

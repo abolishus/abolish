@@ -63,7 +63,7 @@ export const RIVERSIDE: EverydayPoll = {
   batchFloor: 50,
   audience: "people with an account",
   addedTrustee: "Riverside Library Friends",
-  definitionHash: "4095dc37150f8a05e5f63c47a6347ccc4f36e7d64002cf4c6156c57fbc9650a9",
+  definitionHash: "b1a71203bc63c46c88c27d024456c4d70c953a796284a33280b376fabc89c490",
   url: "https://abolish.us/polls/riverside-park-improvements",
   questions: [
     {

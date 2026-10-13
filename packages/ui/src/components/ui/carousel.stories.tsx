@@ -14,8 +14,8 @@ const polls = ["Library levy", "Bike lanes on Main", "Park curfew"];
 const meta = {
   component: Carousel,
   render: (args) => (
-    <div className="px-14">
-      <Carousel {...args} aria-label="Open polls" className="w-64">
+    <div className="px-14 max-w-full">
+      <Carousel {...args} aria-label="Open polls" className="w-full max-w-64">
         <CarouselContent>
           {polls.map((poll, index) => (
             <CarouselItem key={poll} aria-label={`${index + 1} of ${polls.length}`}>

@@ -21,7 +21,23 @@ const withProviders: Decorator = (Story, { parameters }) => {
 
 const preview: Preview = {
   decorators: [withProviders],
+  // No page scrolls sideways, at any width the tests run (the phone project
+  // runs at 360px): long hashes wrap or truncate, tables reflow.
+  afterEach: ({ canvasElement }) => {
+    const root = canvasElement.ownerDocument.documentElement;
+    const overflow = root.scrollWidth - root.clientWidth;
+    if (overflow > 1) throw new Error(`The page scrolls sideways by ${overflow}px`);
+  },
+  // The phone test project sets VITE_STORYBOOK_VIEWPORT to "phone".
+  initialGlobals: {
+    viewport: { value: import.meta.env["VITE_STORYBOOK_VIEWPORT"] || undefined, isRotated: false },
+  },
   parameters: {
+    viewport: {
+      options: {
+        phone: { name: "Small phone", styles: { width: "360px", height: "780px" }, type: "mobile" },
+      },
+    },
     // Fail the story's test on any axe violation (WCAG 2.2 AA, AGENTS.md "Testing").
     a11y: {
       test: "error",

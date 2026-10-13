@@ -24,6 +24,27 @@ const fontLicenses: Plugin = {
   },
 };
 
+// Every story in a real browser: its play function, then axe (`test:storybook`).
+// `viewport` names one of the preview's viewports (none: the default).
+function storybook(name: string, viewport?: string) {
+  return {
+    extends: true,
+    plugins: [storybookTest({ configDir: ".storybook" })],
+    define: { "import.meta.env.VITE_STORYBOOK_VIEWPORT": JSON.stringify(viewport ?? "") },
+    test: {
+      name,
+      browser: {
+        enabled: true,
+        headless: true,
+        // Motion is decorative and every animated element settles in its final
+        // state under reduced motion, so axe judges what a reader ends up seeing.
+        provider: playwright({ contextOptions: { reducedMotion: "reduce" } }),
+        instances: [{ browser: "chromium" as const }],
+      },
+    },
+  };
+}
+
 export default defineConfig({
   plugins: [tailwindcss(), fontLicenses],
   // Relative URLs, so the same bytes work at any path: abolishus.eth, a
@@ -58,22 +79,10 @@ export default defineConfig({
           hookTimeout: 120_000,
         },
       },
-      {
-        // Every story in a real browser: its play function, then axe (`test:storybook`).
-        extends: true,
-        plugins: [storybookTest({ configDir: ".storybook" })],
-        test: {
-          name: "storybook",
-          browser: {
-            enabled: true,
-            headless: true,
-            // Motion is decorative and every animated element settles in its final
-            // state under reduced motion, so axe judges what a reader ends up seeing.
-            provider: playwright({ contextOptions: { reducedMotion: "reduce" } }),
-            instances: [{ browser: "chromium" }],
-          },
-        },
-      },
+      storybook("storybook"),
+      // The same stories at a small phone's width, where the preview fails any
+      // page that scrolls sideways.
+      storybook("storybook-phone", "phone"),
     ],
   },
 });

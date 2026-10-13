@@ -11,10 +11,10 @@ import {RegistryFixture} from "./utils/RegistryFixture.sol";
 import {TestBase} from "./utils/Vm.sol";
 
 /// The board's ballot check (docs/spec/contracts.md, Board, Ballots) against
-/// the ballot vectors: ballot.json and ballot-v2.json (records with real
-/// Semaphore proofs, admission results and decode rejections), ballot-v3.json
-/// and ballot-validity.json (committed votes, their shapes and codec
-/// rejections). Every expected value comes from the files. The board runs
+/// the ballot vectors: ballot.json, ballot-v2.json and ballot-v3-records.json
+/// (records with real Semaphore proofs, admission results and decode
+/// rejections), ballot-v3.json and ballot-validity.json (committed votes,
+/// their shapes and codec rejections). Every expected value comes from the files. The board runs
 /// every admission check but the validity proofs (ADR 0028, 3B), so a vector
 /// the verifier rejects only at `option-proof` or `sum-proof` is admitted
 /// here, and every other gets the verifier's own verdict (T-25, T-17).
@@ -22,6 +22,7 @@ contract BallotCheckTest is TestBase {
     string internal constant V1 = "../../docs/spec/vectors/ballot.json";
     string internal constant V2 = "../../docs/spec/vectors/ballot-v2.json";
     string internal constant V3 = "../../docs/spec/vectors/ballot-v3.json";
+    string internal constant V3_RECORDS = "../../docs/spec/vectors/ballot-v3-records.json";
     string internal constant VALIDITY = "../../docs/spec/vectors/ballot-validity.json";
 
     BallotHarness internal lib;
@@ -36,6 +37,10 @@ contract BallotCheckTest is TestBase {
         assertTrue(_eq(_str(vm.readFile(V1), ".format"), "abolish-ballot-vectors/1"), "v1 format");
         assertTrue(_eq(_str(vm.readFile(V2), ".format"), "abolish-ballot-vectors/1"), "v2 format");
         assertTrue(
+            _eq(_str(vm.readFile(V3_RECORDS), ".format"), "abolish-ballot-vectors/1"),
+            "v3 records format"
+        );
+        assertTrue(
             _eq(_str(vm.readFile(V3), ".format"), "abolish-ballot-v3-vectors/1"), "v3 format"
         );
         assertTrue(
@@ -49,7 +54,7 @@ contract BallotCheckTest is TestBase {
         );
     }
 
-    // --- records with membership proofs (versions 1 and 2) -------------------
+    // --- records with membership proofs (versions 1 to 3) --------------------
 
     /// Every ballot of ballot.json: the admitted ones give the file's ballot
     /// hash, `M` and tier; the rest the file's code, except the validity
@@ -62,6 +67,14 @@ contract BallotCheckTest is TestBase {
         assertEq(_ballots(V2, 2), 21, "v2 ballot coverage");
     }
 
+    /// ballot-v3-records.json's ballots under their version-5 definition's
+    /// questions and cells: a range proof's failure (`sum-proof`, naming its
+    /// question) is the verifier's alone, so that ballot is admitted here,
+    /// and a ballot shaped for other questions is `validity-shape` (T-28).
+    function test_BallotVectorsV3() public {
+        assertEq(_ballots(V3_RECORDS, 3), 20, "v3 ballot coverage");
+    }
+
     /// Every decode rejection at its offset. The one record of another type
     /// is a type the spec specifies, so the board reports it as unexpected,
     /// where the file, which knows only 0x0002, says unknown (notation.md,
@@ -72,6 +85,10 @@ contract BallotCheckTest is TestBase {
 
     function test_DecodeVectorsV2() public {
         assertEq(_decodes(V2, 2), 8, "v2 decode coverage");
+    }
+
+    function test_DecodeVectorsV3() public {
+        assertEq(_decodes(V3_RECORDS, 3), 8, "v3 decode coverage");
     }
 
     // --- committed votes (versions 1 and 3) ----------------------------------
@@ -463,7 +480,7 @@ contract BallotCheckTest is TestBase {
                     string.concat("M of ", id)
                 );
                 assertEq(a.version, version, id);
-                if (version == 2 && vm.keyExistsJson(json, string.concat(b, ".tier"))) {
+                if (version >= 2 && vm.keyExistsJson(json, string.concat(b, ".tier"))) {
                     assertEq(
                         a.tier,
                         vm.parseJsonUint(json, string.concat(b, ".tier")),
@@ -511,7 +528,7 @@ contract BallotCheckTest is TestBase {
 
     /// A stub with one election of a record file: its definition's panel,
     /// questions and ballot pin, and its tiers' (version 1) or cells'
-    /// (version 2) roots from the file.
+    /// (versions 2 and 3) roots from the file.
     function _stub(string memory json, string memory e, uint8 version)
         internal
         returns (ParametersStub stub)
@@ -520,7 +537,39 @@ contract BallotCheckTest is TestBase {
         (ElectionRegistry.Parameters memory p, uint8[] memory tiers, uint256[] memory roots) =
             version == 1 ? _electionV1(json, e) : _electionV2(json, e);
         assertEq(p.ballotVersion, version, "the definition's ballot pin");
+        if (version == 3) _assertQuestions(json, e, p.questions);
         stub.set(bytes32(_bytes(json, string.concat(e, ".definitionHash"))), p, tiers, roots);
+    }
+
+    /// The questions decoded from the definition are the ones the file lists
+    /// beside it, so the check is judged against the file's statement.
+    function _assertQuestions(
+        string memory json,
+        string memory e,
+        ElectionRegistry.Question[] memory qs
+    ) internal view {
+        uint256 n;
+        for (; vm.keyExistsJson(json, _at(string.concat(e, ".questions"), n, "")); n++) {
+            string memory s = _at(string.concat(e, ".questions"), n, "");
+            assertTrue(n < qs.length, "the file's question count");
+            assertEq(qs[n].method, 1, "selection");
+            assertEq(
+                qs[n].optionCount,
+                vm.parseJsonUint(json, string.concat(s, ".optionCount")),
+                "option count"
+            );
+            assertEq(
+                qs[n].minSelections,
+                vm.parseJsonUint(json, string.concat(s, ".minSelections")),
+                "minimum"
+            );
+            assertEq(
+                qs[n].maxSelections,
+                vm.parseJsonUint(json, string.concat(s, ".maxSelections")),
+                "maximum"
+            );
+        }
+        assertEq(n, qs.length, "the file's question count");
     }
 
     function _electionV1(string memory json, string memory e)
@@ -558,15 +607,26 @@ contract BallotCheckTest is TestBase {
         }
     }
 
-    /// The panel, one question and the ballot pin of a version-1, 3 or 4
-    /// definition.
+    /// The panel, the questions and the ballot pin of a definition: version
+    /// 5's list, or versions 1, 3 and 4's one question.
     function _fromDefinition(ElectionDefinitionLib.Definition memory d)
         internal
         pure
         returns (ElectionRegistry.Parameters memory p)
     {
-        ElectionRegistry.Question[] memory qs = new ElectionRegistry.Question[](1);
-        qs[0] = ElectionRegistry.Question(1, d.optionCount, d.minSelections, d.maxSelections);
+        ElectionRegistry.Question[] memory qs;
+        if (d.version >= 5) {
+            qs = new ElectionRegistry.Question[](d.questions.length);
+            for (uint256 q; q < qs.length; q++) {
+                ElectionDefinitionLib.Question memory dq = d.questions[q];
+                qs[q] = ElectionRegistry.Question(
+                    dq.method, dq.optionCount, dq.minSelections, dq.maxSelections
+                );
+            }
+        } else {
+            qs = new ElectionRegistry.Question[](1);
+            qs[0] = ElectionRegistry.Question(1, d.optionCount, d.minSelections, d.maxSelections);
+        }
         p = _params(0, d.threshold, d.panelSize, qs);
         for (uint256 i; i < d.pinTypes.length; i++) {
             if (d.pinTypes[i] == 2) p.ballotVersion = d.pinVersions[i];

@@ -1,8 +1,10 @@
-// The contract-event record, record type 0x0008 version 1
+// The contract-event record, record type 0x0008 versions 1 and 2
 // (docs/spec/contracts.md, Contract-event record): one log of one of our L2
 // contracts exactly as the event accumulator hashes it, and the event check
 // that ties it to the contract a definition names and to the event tables of
-// that contract's section. The accumulator's storage proofs are the only
+// that contract's section. The two versions share a layout and differ only in
+// their tables: version 2 adds the board's events and reads the registries'
+// events as the deployable registries emit them. The accumulator's storage proofs are the only
 // evidence archived with it: no transaction, receipt or header, so the
 // archive holds no bytes our contracts didn't define (T-17;
 // docs/adr/0025-contract-event-evidence.md). The event check refuses any log
@@ -31,16 +33,21 @@ import {
   type GroupAddition,
   type GroupRemoval,
 } from "./group-registry.ts";
-import type { ElectionDefinition } from "./election-definition.ts";
-import { decodeElectionDefinition } from "./protocol.ts";
+import { frameBallot, frameDelivery } from "./direct-submit.ts";
+import {
+  type AnyElectionDefinitionRecord,
+  decodeElectionDefinitionRecord,
+  decodeRegistrableElectionDefinition,
+} from "./protocol.ts";
 import { RECORD_TYPES, RecordSchema, recordType } from "./record.ts";
 import { MAX_TRUSTEES, p256Key } from "./trustee.ts";
 
 /**
  * `MAX_EVENT_DATA`: the framing bound on a record's `data`, checked before
- * anything is allocated (T-52). Every event of version 1's tables is far
- * smaller (the largest, a `MembersAdded`, is at most 25,120 bytes); an
- * event that needs more is a new record version.
+ * anything is allocated (T-52). Every event of either version's tables is
+ * far smaller: version 1's largest, a `MembersAdded`, is 25,120 bytes, and
+ * version 2's a framed `BallotSubmitted`, about 175 KB. An event that needs
+ * more is a new record version.
  */
 export const MAX_EVENT_DATA = 1 << 20;
 
@@ -56,19 +63,34 @@ const contractEventV1 = struct([
   ["data", bytesVar(MAX_EVENT_DATA)],
 ] as const);
 
-/** Record type 0x0008, version 1 (docs/spec/contracts.md, Contract-event record). */
-export const CONTRACT_EVENT = recordType(RECORD_TYPES.contractEvent, { 1: contractEventV1 });
+/**
+ * Record type 0x0008, versions 1 and 2 (docs/spec/contracts.md,
+ * Contract-event record): one layout, with each version's own event tables.
+ */
+export const CONTRACT_EVENT = recordType(RECORD_TYPES.contractEvent, {
+  1: contractEventV1,
+  2: contractEventV1,
+});
 
 const SCHEMA = new RecordSchema([CONTRACT_EVENT]);
 
 export type ContractEventRecord = CodecValue<typeof contractEventV1>;
 
-export function encodeContractEvent(record: ContractEventRecord): Uint8Array {
-  return SCHEMA.encode(CONTRACT_EVENT, 1, record);
+/** The record's versions; the profile pins one for every contract's events. */
+export type ContractEventVersion = 1 | 2;
+
+export function encodeContractEvent(
+  record: ContractEventRecord,
+  version: ContractEventVersion,
+): Uint8Array {
+  return SCHEMA.encode(CONTRACT_EVENT, version, record);
 }
 
 /** Strictly decodes a contract-event record under the version the profile pins. */
-export function decodeContractEvent(bytes: Uint8Array, pinned: 1): ContractEventRecord {
+export function decodeContractEvent(
+  bytes: Uint8Array,
+  pinned: ContractEventVersion,
+): ContractEventRecord {
   return SCHEMA.decode(CONTRACT_EVENT, bytes, pinned).value;
 }
 
@@ -128,7 +150,8 @@ export type ContractEvent =
       readonly l1Origin: L1Origin;
       /** The definition's canonical encoding, as the event carries it. */
       readonly definition: Uint8Array;
-      readonly decoded: ElectionDefinition;
+      /** Version 1 only under record version 1; 1 and 3 to 6 under version 2. */
+      readonly decoded: AnyElectionDefinitionRecord;
     }
   | {
       readonly event: "PanelPinned";
@@ -162,6 +185,18 @@ export type ContractEvent =
       readonly groupId: bigint;
       readonly record: Uint8Array;
       readonly removal: GroupRemoval;
+    }
+  | {
+      readonly event:
+        | "BallotSubmitted"
+        | "ShareReceiptSubmitted"
+        | "SharePosted"
+        | "ShareComplaintSubmitted";
+      readonly definitionHash: Uint8Array;
+      /** The record's own `ballot_hash`; a ballot's, recomputed from its bytes. */
+      readonly ballotHash: Uint8Array;
+      /** The record the board accepted, framed as the board frames it. */
+      readonly record: Uint8Array;
     };
 
 export type ContractEventResult =
@@ -177,6 +212,9 @@ interface EventSpec {
 }
 
 const utf8 = new TextEncoder();
+
+const equalBytes = (a: Uint8Array, b: Uint8Array) =>
+  a.length === b.length && a.every((x, i) => x === b[i]);
 
 function bigEndian(b: Uint8Array): bigint {
   let v = 0n;
@@ -259,39 +297,57 @@ const ELECTION_CREATED: EventSpec = {
   },
 };
 
-// An allocation bound only, above the largest version-1 definition (every
+// Version 1's allocation bound, above the largest version-1 definition (every
 // list at its maximum: 717 bytes), so any definition that could decode
-// reaches the decoder, which alone decides.
-const MAX_DEFINITION = 4096;
+// reaches the decoder, which alone decides. Version 2's is `MAX_EVENT_DATA`:
+// its definitions run to about 66 KB.
+const MAX_DEFINITION_V1 = 4096;
 
-const DEFINITION_REGISTERED: EventSpec = {
-  signature: "DefinitionRegistered(bytes32,bytes32,uint64,uint64,bytes32,bytes)",
-  decode(topics, data) {
-    const [, electionId, definitionHash] = topics;
-    if (topics.length !== 3 || electionId === undefined || definitionHash === undefined)
-      return "event-topics";
-    const abi = readAbi(data, 4, [{ at: 3, words: false, max: MAX_DEFINITION }]);
-    const origin = abi && l1Origin(abi.words, 0);
-    const definition = abi?.tails[0];
-    if (origin === undefined || definition === undefined) return "event-data";
-    // Version 1 with its self-pin, as the registry decodes it (rule 2).
-    let decoded: ElectionDefinition;
-    try {
-      decoded = decodeElectionDefinition(definition);
-    } catch (e) {
-      if (e instanceof DecodeError) return "event-data";
-      throw e;
-    }
-    return {
-      event: "DefinitionRegistered",
-      electionId: electionId.slice(),
-      definitionHash: definitionHash.slice(),
-      l1Origin: origin,
-      definition,
-      decoded,
-    };
-  },
-};
+function definitionRegistered(
+  max: number,
+  decodeDefinition: (bytes: Uint8Array) => AnyElectionDefinitionRecord,
+): EventSpec {
+  return {
+    signature: "DefinitionRegistered(bytes32,bytes32,uint64,uint64,bytes32,bytes)",
+    decode(topics, data) {
+      const [, electionId, definitionHash] = topics;
+      if (topics.length !== 3 || electionId === undefined || definitionHash === undefined)
+        return "event-topics";
+      const abi = readAbi(data, 4, [{ at: 3, words: false, max }]);
+      const origin = abi && l1Origin(abi.words, 0);
+      const definition = abi?.tails[0];
+      if (origin === undefined || definition === undefined) return "event-data";
+      let decoded: AnyElectionDefinitionRecord;
+      try {
+        decoded = decodeDefinition(definition);
+      } catch (e) {
+        if (e instanceof DecodeError) return "event-data";
+        throw e;
+      }
+      return {
+        event: "DefinitionRegistered",
+        electionId: electionId.slice(),
+        definitionHash: definitionHash.slice(),
+        l1Origin: origin,
+        definition,
+        decoded,
+      };
+    },
+  };
+}
+
+// Version 1 with its self-pin, as the first registry decoded it.
+const DEFINITION_REGISTERED = definitionRegistered(MAX_DEFINITION_V1, (b) => {
+  const record = decodeElectionDefinitionRecord(b);
+  if (record.version !== 1) throw new DecodeError("unknown-version", 2);
+  return record;
+});
+
+// Versions 1 and 3 to 6, each with its self-pin, as the registry decodes them (rule 2).
+const DEFINITION_REGISTERED_V2 = definitionRegistered(
+  MAX_EVENT_DATA,
+  decodeRegistrableElectionDefinition,
+);
 
 const PANEL_PINNED: EventSpec = {
   signature: "PanelPinned(bytes32,uint8,uint8,bytes)",
@@ -324,43 +380,63 @@ const PANEL_PINNED: EventSpec = {
   },
 };
 
-// `panel_id ‖ stub_hash ‖ ceremony_transcript_hash ‖ u8(count) ‖ (u8 ‖ p256-sig) × count`.
+// `panel_id ‖ stub_hash ‖ ceremony_transcript_hash`, then version 1's
+// `u8(count) ‖ (u8 ‖ p256-sig) × count`, or version 2's `u8(seats) ‖ seat ×
+// seats ‖ u8(count) ‖ approval × count`, each seat `u8 ‖ bytes[32] ‖ x ‖ y`.
 const REGISTRATION_HEADER = 97;
+const REGISTRATION_SEAT = 97;
 const REGISTRATION_APPROVAL = 65;
 
-const CEREMONY_REGISTERED: EventSpec = {
-  signature: "CeremonyRegistered(bytes32,bytes32,bytes32,bytes)",
-  decode(topics, data) {
-    const [, stubHash, panelId, transcriptHash] = topics;
-    if (
-      topics.length !== 4 ||
-      stubHash === undefined ||
-      panelId === undefined ||
-      transcriptHash === undefined
-    )
-      return "event-topics";
-    const max = REGISTRATION_HEADER + 255 * REGISTRATION_APPROVAL;
-    const registration = readAbi(data, 1, [{ at: 0, words: false, max }])?.tails[0];
-    // Version 1's length rule: exactly the header and the approvals its
-    // count byte names, the trustee registry's first layout. The key-set
-    // layout is the record's next version's (docs/spec/contracts.md,
-    // Contract-event record, Known-weak).
-    const count = registration?.[REGISTRATION_HEADER - 1];
-    if (
-      registration === undefined ||
-      count === undefined ||
-      registration.length !== REGISTRATION_HEADER + REGISTRATION_APPROVAL * count
-    )
-      return "event-data";
-    return {
-      event: "CeremonyRegistered",
-      stubHash: stubHash.slice(),
-      panelId: panelId.slice(),
-      transcriptHash: transcriptHash.slice(),
-      registration,
-    };
+function ceremonyRegistered(
+  lengthOk: (registration: Uint8Array) => boolean,
+  max: number,
+): EventSpec {
+  return {
+    signature: "CeremonyRegistered(bytes32,bytes32,bytes32,bytes)",
+    decode(topics, data) {
+      const [, stubHash, panelId, transcriptHash] = topics;
+      if (
+        topics.length !== 4 ||
+        stubHash === undefined ||
+        panelId === undefined ||
+        transcriptHash === undefined
+      )
+        return "event-topics";
+      const registration = readAbi(data, 1, [{ at: 0, words: false, max }])?.tails[0];
+      if (registration === undefined || !lengthOk(registration)) return "event-data";
+      return {
+        event: "CeremonyRegistered",
+        stubHash: stubHash.slice(),
+        panelId: panelId.slice(),
+        transcriptHash: transcriptHash.slice(),
+        registration,
+      };
+    },
+  };
+}
+
+// Version 1's length rule: exactly the header and the approvals its count
+// byte names, the trustee registry's first layout, frozen with version 1.
+const CEREMONY_REGISTERED = ceremonyRegistered(
+  (r) => {
+    const count = r[REGISTRATION_HEADER - 1];
+    return count !== undefined && r.length === REGISTRATION_HEADER + REGISTRATION_APPROVAL * count;
   },
-};
+  REGISTRATION_HEADER + 255 * REGISTRATION_APPROVAL,
+);
+
+// Version 2's: the key-set layout the registry takes (Trustee registry,
+// Registration, check 2), exactly `98 + 97 · seats + 65 · count` bytes.
+const CEREMONY_REGISTERED_V2 = ceremonyRegistered(
+  (r) => {
+    const seats = r[REGISTRATION_HEADER - 1];
+    if (seats === undefined) return false;
+    const countAt = REGISTRATION_HEADER + REGISTRATION_SEAT * seats;
+    const count = r[countAt];
+    return count !== undefined && r.length === countAt + 1 + REGISTRATION_APPROVAL * count;
+  },
+  REGISTRATION_HEADER + 1 + 255 * (REGISTRATION_SEAT + REGISTRATION_APPROVAL),
+);
 
 const REGISTRARS_PINNED: EventSpec = {
   signature: "RegistrarsPinned(uint8,address[])",
@@ -424,42 +500,114 @@ const MEMBERS_REMOVED: EventSpec = {
   },
 };
 
-const TABLES: Readonly<Record<ContractRole, readonly EventSpec[]>> = {
-  "election-registry": [ELECTION_CREATED, DEFINITION_REGISTERED],
-  "trustee-registry": [PANEL_PINNED, CEREMONY_REGISTERED],
-  "group-registry": [REGISTRARS_PINNED, GROUP_CREATED, MEMBERS_ADDED, MEMBERS_REMOVED],
-  // Version 1 has no board events: they come in a later version of the
-  // record with direct submission (P1-18), since a frozen version's tables
-  // never gain one (docs/spec/versioning.md).
-  board: [],
+// The board's events (Board, Events): each carries the record it accepted
+// whole, with its `definition_hash` and `ballot_hash` as the topics. The
+// record must be one the board frames, and the topics exactly what it names
+// (a ballot's hash recomputed from its bytes), so a topic can't disagree
+// with its record (T-31) and no event carries a byte the record doesn't
+// define (T-17).
+function boardEvent(
+  name: "BallotSubmitted" | "ShareReceiptSubmitted" | "SharePosted" | "ShareComplaintSubmitted",
+  frame: (record: Uint8Array) => { definitionHash: Uint8Array; ballotHash: Uint8Array } | undefined,
+): EventSpec {
+  return {
+    signature: `${name}(bytes32,bytes32,bytes)`,
+    decode(topics, data) {
+      const [, definitionHash, ballotHash] = topics;
+      if (topics.length !== 3 || definitionHash === undefined || ballotHash === undefined)
+        return "event-topics";
+      const record = readAbi(data, 1, [{ at: 0, words: false, max: MAX_EVENT_DATA }])?.tails[0];
+      const framed = record && frame(record);
+      if (
+        record === undefined ||
+        framed === undefined ||
+        !equalBytes(framed.definitionHash, definitionHash) ||
+        !equalBytes(framed.ballotHash, ballotHash)
+      )
+        return "event-data";
+      return {
+        event: name,
+        definitionHash: definitionHash.slice(),
+        ballotHash: ballotHash.slice(),
+        record,
+      };
+    },
+  };
+}
+
+const BOARD_EVENTS: readonly EventSpec[] = [
+  boardEvent("BallotSubmitted", frameBallot),
+  boardEvent("ShareReceiptSubmitted", (r) => frameDelivery(RECORD_TYPES.shareReceipt, r)),
+  boardEvent("SharePosted", (r) => frameDelivery(RECORD_TYPES.sharePosting, r)),
+  boardEvent("ShareComplaintSubmitted", (r) => frameDelivery(RECORD_TYPES.shareComplaint, r)),
+];
+
+const GROUP_EVENTS: readonly EventSpec[] = [
+  REGISTRARS_PINNED,
+  GROUP_CREATED,
+  MEMBERS_ADDED,
+  MEMBERS_REMOVED,
+];
+
+// Frozen with each version's vectors (docs/spec/versioning.md): a later
+// change to any contract's events is a new version's table.
+const TABLES: Readonly<
+  Record<ContractEventVersion, Readonly<Record<ContractRole, readonly EventSpec[]>>>
+> = {
+  1: {
+    "election-registry": [ELECTION_CREATED, DEFINITION_REGISTERED],
+    "trustee-registry": [PANEL_PINNED, CEREMONY_REGISTERED],
+    "group-registry": GROUP_EVENTS,
+    // Version 1 has no board events: a frozen version's tables never gain one.
+    board: [],
+  },
+  2: {
+    "election-registry": [ELECTION_CREATED, DEFINITION_REGISTERED_V2],
+    "trustee-registry": [PANEL_PINNED, CEREMONY_REGISTERED_V2],
+    "group-registry": GROUP_EVENTS,
+    board: BOARD_EVENTS,
+  },
 };
+
+const ROLES = ["election-registry", "trustee-registry", "group-registry", "board"] as const;
+const VERSIONS = [1, 2] as const;
 
 const hexOf = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
 
-const BY_TOPIC: ReadonlyMap<ContractRole, ReadonlyMap<string, EventSpec>> = new Map(
-  (Object.keys(TABLES) as ContractRole[]).map((role) => [
-    role,
-    new Map(TABLES[role].map((e) => [hexOf(keccak_256(utf8.encode(e.signature))), e])),
+const BY_TOPIC: ReadonlyMap<
+  ContractEventVersion,
+  ReadonlyMap<ContractRole, ReadonlyMap<string, EventSpec>>
+> = new Map(
+  VERSIONS.map((v) => [
+    v,
+    new Map(
+      ROLES.map((role) => [
+        role,
+        new Map(TABLES[v][role].map((e) => [hexOf(keccak_256(utf8.encode(e.signature))), e])),
+      ]),
+    ),
   ]),
 );
 
 /**
- * Each role's event signatures, in table order, with topic 0 of each (the
- * keccak-256 of the signature). A third party's own tables can be compared
- * with these, and the contracts' ABI is (packages/contracts).
+ * Each version's event signatures by role, in table order (topic 0 of each
+ * is the keccak-256 of its signature). A third party's own tables can be
+ * compared with these, and the contracts' ABI is (packages/contracts).
  */
-export const CONTRACT_EVENT_SIGNATURES: Readonly<Record<ContractRole, readonly string[]>> =
-  Object.freeze(
+export const CONTRACT_EVENT_SIGNATURES: Readonly<
+  Record<ContractEventVersion, Readonly<Record<ContractRole, readonly string[]>>>
+> = Object.freeze({
+  1: signaturesOf(1),
+  2: signaturesOf(2),
+});
+
+function signaturesOf(v: ContractEventVersion): Readonly<Record<ContractRole, readonly string[]>> {
+  return Object.freeze(
     Object.fromEntries(
-      (Object.keys(TABLES) as ContractRole[]).map((r) => [
-        r,
-        Object.freeze(TABLES[r].map((e) => e.signature)),
-      ]),
+      ROLES.map((r) => [r, Object.freeze(TABLES[v][r].map((e) => e.signature))]),
     ) as Record<ContractRole, readonly string[]>,
   );
-
-const equalBytes = (a: Uint8Array, b: Uint8Array) =>
-  a.length === b.length && a.every((x, i) => x === b[i]);
+}
 
 function roleOf(contracts: EventContracts, address: Uint8Array): ContractRole | undefined {
   const roles: readonly [ContractRole, Uint8Array][] = [
@@ -474,24 +622,27 @@ function roleOf(contracts: EventContracts, address: Uint8Array): ContractRole | 
 }
 
 /**
- * The event check of docs/spec/contracts.md (Contract-event record): the
- * record's contract is one of the definition's L2 contracts, its topic 0 is
- * an event of that contract's table, its topics are that event's, each
- * indexed value canonical for its type, and its data is the canonical ABI
- * encoding of the event's other fields, every embedded record decoding as
- * the contract decodes it. Reports the first that fails, in that order. It
- * checks the log's form only: whether the log is the contract's is the
- * accumulator's (`checkEventAccumulatorProof` over `contractEventLog`), and
- * what the fields mean is for the checks that use them (verifier 2.1 to 3.1).
+ * The event check of docs/spec/contracts.md (Contract-event record), under
+ * the version the profile pins: the record's contract is one of the
+ * definition's L2 contracts, its topic 0 is an event of that contract's
+ * table in that version, its topics are that event's, each indexed value
+ * canonical for its type, and its data is the canonical ABI encoding of the
+ * event's other fields, every embedded record decoding (or, for the board's,
+ * framed) as the contract decodes it. Reports the first that fails, in that
+ * order. It checks the log's form only: whether the log is the contract's is
+ * the accumulator's (`checkEventAccumulatorProof` over `contractEventLog`),
+ * and what the fields mean is for the checks that use them (verifier 2.1 to
+ * 3.1, 5).
  */
 export function checkContractEvent(
   record: ContractEventRecord,
   contracts: EventContracts,
+  version: ContractEventVersion,
 ): ContractEventResult {
   const role = roleOf(contracts, record.contract);
   if (role === undefined) return { ok: false, error: "unknown-contract" };
   const [topic0] = record.topics;
-  const spec = topic0 && BY_TOPIC.get(role)?.get(hexOf(topic0));
+  const spec = topic0 && BY_TOPIC.get(version)?.get(role)?.get(hexOf(topic0));
   if (spec === undefined) return { ok: false, error: "unknown-event" };
   const event = spec.decode(record.topics, record.data);
   return typeof event === "string" ? { ok: false, error: event } : { ok: true, role, event };

@@ -60,7 +60,7 @@ const MLKEM_Q = 3329;
 export const AEAD_TAG_LEN = 16;
 
 /** The longest sealed shares: `SHARES` at `MAX_OPTIONS` (a 4-byte count, 64 bytes per option) and the tag. */
-const MAX_SEALED = 4 + 64 * MAX_OPTIONS + AEAD_TAG_LEN;
+export const MAX_SEALED = 4 + 64 * MAX_OPTIONS + AEAD_TAG_LEN;
 
 /**
  * An ML-KEM-768 encapsulation key that passes FIPS 203 §7.2's modulus check:

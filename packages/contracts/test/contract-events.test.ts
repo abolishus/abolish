@@ -4,11 +4,18 @@
 // lists, with the same signature and indexed parameters, so a contract that
 // gains, loses or changes an event fails here before its logs could fail
 // verifier 4.4 (T-17, T-71). The tables come from
-// docs/spec/vectors/contract-event.json, written by an independent generator.
+// docs/spec/vectors/contract-event.json (version 1, the three registries) and
+// contract-event-v2.json (version 2, with the board), written by independent
+// generators.
 
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vite-plus/test";
-import { electionRegistryAbi, groupRegistryAbi, trusteeRegistryAbi } from "../src/generated/abi.ts";
+import {
+  boardAbi,
+  electionRegistryAbi,
+  groupRegistryAbi,
+  trusteeRegistryAbi,
+} from "../src/generated/abi.ts";
 
 interface Vectors {
   readonly events: readonly {
@@ -18,9 +25,10 @@ interface Vectors {
   }[];
 }
 
-const vectors = JSON.parse(
-  readFileSync(new URL("../../../docs/spec/vectors/contract-event.json", import.meta.url), "utf8"),
-) as Vectors;
+const load = (file: string) =>
+  JSON.parse(
+    readFileSync(new URL(`../../../docs/spec/vectors/${file}`, import.meta.url), "utf8"),
+  ) as Vectors;
 
 interface AbiItem {
   readonly type: string;
@@ -33,14 +41,23 @@ interface AbiItem {
   }[];
 }
 
-const roles: readonly [string, readonly AbiItem[]][] = [
+const registries: readonly [string, readonly AbiItem[]][] = [
   ["election-registry", electionRegistryAbi],
   ["trustee-registry", trusteeRegistryAbi],
   ["group-registry", groupRegistryAbi],
 ];
 
+const board: readonly [string, readonly AbiItem[]] = ["board", boardAbi];
+
+// Version 1's tables name no board event; version 2's name the board's four.
+const cases = [
+  ...registries.map(([role, abi]) => ["contract-event.json", role, abi] as const),
+  ...[...registries, board].map(([role, abi]) => ["contract-event-v2.json", role, abi] as const),
+];
+
 describe("contract-event tables", () => {
-  test.each(roles)("%s declares exactly its table's events", (role, abi) => {
+  test.each(cases)("%s: %s declares exactly its table's events", (file, role, abi) => {
+    const vectors = load(file);
     const events = abi.filter((item) => item.type === "event");
     expect(events.every((e) => e.anonymous !== true)).toBe(true);
     const declared = events

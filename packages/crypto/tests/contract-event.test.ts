@@ -10,6 +10,9 @@ import {
   type ContractEvent,
   contractEventLog,
   type ContractEventRecord,
+  type ContractEventVersion,
+  decode,
+  element,
   type ContractRole,
   DecodeError,
   decodeContractEvent,
@@ -22,11 +25,14 @@ import {
 } from "../src/index.ts";
 import { hex, SPEC_VECTORS } from "./spec-vectors.ts";
 
-// docs/spec/vectors/contract-event.json comes from an independent Python
-// implementation of docs/spec/contracts.md, Contract-event record
+// docs/spec/vectors/contract-event.json (version 1) and
+// contract-event-v2.json (version 2) come from independent Python
+// implementations of docs/spec/contracts.md, Contract-event record
 // (scripts/contract-event-vectors.py, with its own Keccak-256, ABI reader,
-// SEC 1 decompression and accumulator), so the bytes, verdicts and
-// accumulators here never come from the code under test (T-17, T-31, T-71).
+// SEC 1 decompression and accumulator, and scripts/contract-event-v2-vectors.py,
+// with its own BN254 point checks and the board's framing), so the bytes,
+// verdicts and accumulators here never come from the code under test (T-17,
+// T-31, T-71).
 
 interface VectorFields {
   readonly contract: string;
@@ -76,18 +82,24 @@ interface Vectors {
   }[];
 }
 
-const vectors = JSON.parse(
-  readFileSync(new URL("contract-event.json", SPEC_VECTORS), "utf8"),
-) as Vectors;
+const load = (file: string) =>
+  JSON.parse(readFileSync(new URL(file, SPEC_VECTORS), "utf8")) as Vectors;
+
+const FILES: Readonly<Record<ContractEventVersion, Vectors>> = {
+  1: load("contract-event.json"),
+  2: load("contract-event-v2.json"),
+};
+const vectors = FILES[1];
 
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
 
-const contracts: EventContracts = {
-  electionRegistry: hex(vectors.contracts["election-registry"]),
-  trusteeRegistry: hex(vectors.contracts["trustee-registry"]),
-  groupRegistry: hex(vectors.contracts["group-registry"]),
-  board: hex(vectors.contracts.board),
-};
+const contractsOf = (v: Vectors): EventContracts => ({
+  electionRegistry: hex(v.contracts["election-registry"]),
+  trusteeRegistry: hex(v.contracts["trustee-registry"]),
+  groupRegistry: hex(v.contracts["group-registry"]),
+  board: hex(v.contracts.board),
+});
+const contracts = contractsOf(vectors);
 
 const recordOf = (f: VectorFields): ContractEventRecord => ({
   contract: hex(f.contract),
@@ -156,6 +168,16 @@ function project(e: ContractEvent): unknown {
       };
     case "MembersRemoved":
       return { event: e.event, groupId: String(e.groupId), record: bytesToHex(e.record) };
+    case "BallotSubmitted":
+    case "ShareReceiptSubmitted":
+    case "SharePosted":
+    case "ShareComplaintSubmitted":
+      return {
+        event: e.event,
+        definitionHash: bytesToHex(e.definitionHash),
+        ballotHash: bytesToHex(e.ballotHash),
+        record: bytesToHex(e.record),
+      };
   }
 }
 
@@ -195,7 +217,10 @@ const tail = (b: Uint8Array) =>
   concat([uintWord(b.length), b, new Uint8Array((32 - (b.length % 32)) % 32)]);
 
 /** The topics and data `abi.encode` gives for `e` (one dynamic field at most, last). */
-function reencode(e: ContractEvent): { topics: Uint8Array[]; data: Uint8Array } {
+function reencode(
+  e: ContractEvent,
+  version: ContractEventVersion,
+): { topics: Uint8Array[]; data: Uint8Array } {
   const dyn = (head: Uint8Array[], body: Uint8Array) =>
     concat([...head, uintWord(32 * (head.length + 1)), body]);
   const origin = (o: { number: bigint; timestamp: bigint; hash: Uint8Array }) => [
@@ -205,7 +230,8 @@ function reencode(e: ContractEvent): { topics: Uint8Array[]; data: Uint8Array } 
   ];
   const sig = (name: string) =>
     sigTopic(
-      CONTRACT_EVENT_SIGNATURES[ROLE_OF[e.event]].find((s) => s.startsWith(`${name}(`)) ?? "",
+      CONTRACT_EVENT_SIGNATURES[version][ROLE_OF[e.event]].find((s) => s.startsWith(`${name}(`)) ??
+        "",
     );
   switch (e.event) {
     case "ElectionCreated":
@@ -248,6 +274,14 @@ function reencode(e: ContractEvent): { topics: Uint8Array[]; data: Uint8Array } 
       };
     case "MembersRemoved":
       return { topics: [sig(e.event), uintWord(e.groupId)], data: dyn([], tail(e.record)) };
+    case "BallotSubmitted":
+    case "ShareReceiptSubmitted":
+    case "SharePosted":
+    case "ShareComplaintSubmitted":
+      return {
+        topics: [sig(e.event), e.definitionHash, e.ballotHash],
+        data: dyn([], tail(e.record)),
+      };
   }
 }
 
@@ -260,13 +294,23 @@ const ROLE_OF: Readonly<Record<ContractEvent["event"], ContractRole>> = {
   GroupCreated: "group-registry",
   MembersAdded: "group-registry",
   MembersRemoved: "group-registry",
+  BallotSubmitted: "board",
+  ShareReceiptSubmitted: "board",
+  SharePosted: "board",
+  ShareComplaintSubmitted: "board",
 };
 
-describe("contract-event vectors (docs/spec/vectors/contract-event.json)", () => {
-  test("the file is the contract-event format for record type 0x0008, version 1", () => {
-    expect(vectors.format).toBe("abolish-contract-event-vectors/1");
+describe.each([
+  [1, "contract-event.json"],
+  [2, "contract-event-v2.json"],
+] as const)("contract-event version %i vectors (docs/spec/vectors/%s)", (version, file) => {
+  const vectors = FILES[version];
+  const contracts = contractsOf(vectors);
+
+  test(`${file} is the contract-event format for record type 0x0008, version ${version}`, () => {
+    expect(vectors.format).toBe(`abolish-contract-event-vectors/${version}`);
     expect(vectors.recordType).toBe("0x0008");
-    expect(vectors.version).toBe(1);
+    expect(vectors.version).toBe(version);
     expect(vectors.maxEventData).toBe(MAX_EVENT_DATA);
     expect(vectors.maxEventTopics).toBe(MAX_EVENT_TOPICS);
   });
@@ -278,7 +322,7 @@ describe("contract-event vectors (docs/spec/vectors/contract-event.json)", () =>
       "group-registry",
       "board",
     ] as const)
-      expect(CONTRACT_EVENT_SIGNATURES[role]).toEqual(
+      expect(CONTRACT_EVENT_SIGNATURES[version][role]).toEqual(
         vectors.events.filter((e) => e.role === role).map((e) => e.signature),
       );
     for (const e of vectors.events)
@@ -289,9 +333,9 @@ describe("contract-event vectors (docs/spec/vectors/contract-event.json)", () =>
     "%s: encodes, decodes and passes the event check as its contract's event",
     (_id, v) => {
       const record = recordOf(v.fields);
-      expect(encodeContractEvent(record)).toEqual(hex(v.encoding));
-      expect(decodeContractEvent(hex(v.encoding), 1)).toEqual(record);
-      const result = checkContractEvent(record, contracts);
+      expect(encodeContractEvent(record, version)).toEqual(hex(v.encoding));
+      expect(decodeContractEvent(hex(v.encoding), version)).toEqual(record);
+      const result = checkContractEvent(record, contracts, version);
       if (!result.ok) throw new Error(`${v.id}: ${result.error}`);
       expect(result.role).toBe(v.role);
       expect(project(result.event)).toEqual(v.event);
@@ -301,9 +345,9 @@ describe("contract-event vectors (docs/spec/vectors/contract-event.json)", () =>
   test.each(vectors.eventFailures.map((r) => [r.id, r] as const))(
     "%s: decodes, and the event check fails with its code",
     (_id, v) => {
-      const record = decodeContractEvent(hex(v.encoding), 1);
+      const record = decodeContractEvent(hex(v.encoding), version);
       expect(record).toEqual(recordOf(v.fields));
-      expect(checkContractEvent(record, contracts)).toEqual({ ok: false, error: v.error });
+      expect(checkContractEvent(record, contracts, version)).toEqual({ ok: false, error: v.error });
     },
   );
 
@@ -312,7 +356,7 @@ describe("contract-event vectors (docs/spec/vectors/contract-event.json)", () =>
     (_id, v) => {
       let error: unknown;
       try {
-        decodeContractEvent(hex(v.encoding), 1);
+        decodeContractEvent(hex(v.encoding), version);
       } catch (e) {
         error = e;
       }
@@ -329,7 +373,7 @@ describe("contract-event vectors (docs/spec/vectors/contract-event.json)", () =>
       const records = s.records.map((id) => {
         const v = byId.get(id);
         if (v === undefined) throw new Error(`no record ${id}`);
-        return decodeContractEvent(hex(v.encoding), 1);
+        return decodeContractEvent(hex(v.encoding), version);
       });
       const chainId = BigInt(vectors.chainId);
       const address = hex(vectors.contracts[role]);
@@ -370,7 +414,7 @@ describe("contract-event record properties", () => {
   test("decode(encode(x)) = x", () => {
     fc.assert(
       fc.property(record, (r) => {
-        expect(decodeContractEvent(encodeContractEvent(r), 1)).toEqual(r);
+        expect(decodeContractEvent(encodeContractEvent(r, 1), 1)).toEqual(r);
       }),
       { numRuns },
     );
@@ -394,7 +438,7 @@ describe("contract-event record properties", () => {
           expect(e).toBeInstanceOf(DecodeError);
           return;
         }
-        expect(encodeContractEvent(decoded)).toEqual(b);
+        expect(encodeContractEvent(decoded, 1)).toEqual(b);
       }),
       { numRuns },
     );
@@ -404,10 +448,10 @@ describe("contract-event record properties", () => {
     const base = recordOf(vectors.records[0]?.fields ?? ({} as VectorFields));
     const topic = new Uint8Array(32);
     expect(() =>
-      encodeContractEvent({ ...base, topics: [topic, topic, topic, topic, topic] }),
+      encodeContractEvent({ ...base, topics: [topic, topic, topic, topic, topic] }, 1),
     ).toThrow(EncodeError);
     expect(() =>
-      encodeContractEvent({ ...base, data: new Uint8Array(MAX_EVENT_DATA + 1) }),
+      encodeContractEvent({ ...base, data: new Uint8Array(MAX_EVENT_DATA + 1) }, 1),
     ).toThrow(EncodeError);
   });
 
@@ -415,57 +459,129 @@ describe("contract-event record properties", () => {
   // re-encoding of its decoded event, so no field carries bytes its event
   // doesn't define and no event has a second record (T-17, T-31). Mutations
   // flip, drop, insert and append bytes, and add or remove topics.
-  test("every passing record's topics and data are those rebuilt from its decoded event", () => {
-    const honest = vectors.records.map((v) => recordOf(v.fields));
-    const mutate = fc.tuple(
-      fc.nat({ max: honest.length - 1 }),
-      fc.constantFrom("flip", "drop", "insert", "append", "add-topic", "drop-topic"),
-      fc.nat(),
-      fc.integer({ min: 0, max: 255 }),
-    );
-    fc.assert(
-      fc.property(mutate, ([which, how, at, value]) => {
-        const r = honest[which];
-        if (r === undefined) throw new Error("no record");
-        const d = r.data;
-        const i = d.length === 0 ? 0 : at % d.length;
-        const data =
-          how === "flip" && d.length > 0
-            ? d.map((x, j) => (j === i ? x ^ (value | 1) : x))
-            : how === "drop" && d.length > 0
-              ? concat([d.subarray(0, i), d.subarray(i + 1)])
-              : how === "insert"
-                ? concat([d.subarray(0, i), new Uint8Array([value]), d.subarray(i)])
-                : how === "append"
-                  ? concat([d, new Uint8Array([value])])
-                  : d;
-        const topics =
-          how === "add-topic"
-            ? [...r.topics, uintWord(value)]
-            : how === "drop-topic"
-              ? r.topics.slice(0, -1)
-              : r.topics;
-        for (const candidate of [r, { ...r, topics, data }]) {
-          const result = checkContractEvent(candidate, contracts);
-          if (!result.ok) continue;
-          const rebuilt = reencode(result.event);
-          // Compared as hex: the largest records are 25 KB.
-          expect(rebuilt.topics.map(bytesToHex)).toEqual(candidate.topics.map(bytesToHex));
-          expect(bytesToHex(rebuilt.data)).toBe(bytesToHex(candidate.data));
-        }
-      }),
-      { numRuns },
-    );
-  }, 120_000);
+  test.each([1, 2] as const)(
+    "version %i: every passing record's topics and data are those rebuilt from its decoded event",
+    (version) => {
+      const contracts = contractsOf(FILES[version]);
+      const honest = FILES[version].records.map((v) => recordOf(v.fields));
+      const mutate = fc.tuple(
+        fc.nat({ max: honest.length - 1 }),
+        fc.constantFrom("flip", "drop", "insert", "append", "add-topic", "drop-topic"),
+        fc.nat(),
+        fc.integer({ min: 0, max: 255 }),
+      );
+      fc.assert(
+        fc.property(mutate, ([which, how, at, value]) => {
+          const r = honest[which];
+          if (r === undefined) throw new Error("no record");
+          const d = r.data;
+          const i = d.length === 0 ? 0 : at % d.length;
+          const data =
+            how === "flip" && d.length > 0
+              ? d.map((x, j) => (j === i ? x ^ (value | 1) : x))
+              : how === "drop" && d.length > 0
+                ? concat([d.subarray(0, i), d.subarray(i + 1)])
+                : how === "insert"
+                  ? concat([d.subarray(0, i), new Uint8Array([value]), d.subarray(i)])
+                  : how === "append"
+                    ? concat([d, new Uint8Array([value])])
+                    : d;
+          const topics =
+            how === "add-topic"
+              ? [...r.topics, uintWord(value)]
+              : how === "drop-topic"
+                ? r.topics.slice(0, -1)
+                : r.topics;
+          for (const candidate of [r, { ...r, topics, data }]) {
+            const result = checkContractEvent(candidate, contracts, version);
+            if (!result.ok) continue;
+            const rebuilt = reencode(result.event, version);
+            // Compared as hex: the largest records are 25 KB.
+            expect(rebuilt.topics.map(bytesToHex)).toEqual(candidate.topics.map(bytesToHex));
+            expect(bytesToHex(rebuilt.data)).toBe(bytesToHex(candidate.data));
+          }
+        }),
+        { numRuns },
+      );
+    },
+    120_000,
+  );
 
   test("a record of another role's address never passes as that role's", () => {
     const created = vectors.records.find((v) => v.id === "election-created");
     if (created === undefined) throw new Error("no election-created record");
     const r = recordOf(created.fields);
     for (const contract of [contracts.trusteeRegistry, contracts.groupRegistry, contracts.board])
-      expect(checkContractEvent({ ...r, contract }, contracts)).toEqual({
+      expect(checkContractEvent({ ...r, contract }, contracts, 1)).toEqual({
         ok: false,
         error: "unknown-event",
       });
   });
 });
+
+describe("contract-event version 2 against version 1", () => {
+  const v2 = contractsOf(FILES[2]);
+
+  // Version 2's tables extend version 1's: every event it keeps is checked
+  // exactly as version 1 checks it, so an election moving to version 2 reads
+  // the registries' unchanged events the same way.
+  test("every version-1 vector of an event version 2 keeps has the same verdict under version 2", () => {
+    const kept = (v: VectorRecord) => {
+      const topic0 = v.fields.topics[0];
+      const changed = ["CeremonyRegistered", "DefinitionRegistered"].map((n) =>
+        bytesToHex(
+          sigTopic(
+            CONTRACT_EVENT_SIGNATURES[1][ROLE_OF[n as ContractEvent["event"]]].find((s) =>
+              s.startsWith(`${n}(`),
+            ) ?? "",
+          ),
+        ),
+      );
+      return topic0 === undefined || !changed.includes(topic0);
+    };
+    const all = [...FILES[1].records, ...FILES[1].eventFailures].filter(kept);
+    expect(all.length).toBeGreaterThan(30);
+    for (const v of all) {
+      const record = { ...recordOf(v.fields), contract: v2Address(v.fields.contract) };
+      const result = checkContractEvent(record, v2, 2);
+      expect(result.ok ? project(result.event) : result).toEqual(
+        v.error === undefined ? v.event : { ok: false, error: v.error },
+      );
+    }
+  });
+
+  // Each version-1 definition that version 1's check reads is one version 2 reads too.
+  test("every DefinitionRegistered record version 1 passes, version 2 passes", () => {
+    for (const v of FILES[1].records.filter(
+      (r) => (r.event as { event?: string }).event === "DefinitionRegistered",
+    )) {
+      const record = { ...recordOf(v.fields), contract: v2.electionRegistry };
+      const result = checkContractEvent(record, v2, 2);
+      if (!result.ok) throw new Error(`${v.id}: ${result.error}`);
+      expect(result.event.event === "DefinitionRegistered" && result.event.decoded.version).toBe(1);
+    }
+  });
+
+  // The board frames elements, never decodes them (T-53): these vectors'
+  // elements aren't ristretto255 points, and their events still pass.
+  test("the framed elements of the not-a-point vectors aren't points", () => {
+    const ids = ["ballot-element-not-a-point", "share-posting-dh-not-a-point"];
+    for (const id of ids) {
+      const v = FILES[2].records.find((r) => r.id === id);
+      if (v === undefined) throw new Error(`no record ${id}`);
+      const result = checkContractEvent(recordOf(v.fields), v2, 2);
+      if (!result.ok || !("record" in result.event)) throw new Error(`${id} doesn't pass`);
+      const record = result.event.record;
+      const at = id.startsWith("ballot") ? 364 + 8 : 3 + 32 + 32 + 1 + 32 + 1088;
+      expect(() => decode(element, record.subarray(at, at + 32))).toThrow(DecodeError);
+    }
+  });
+});
+
+// The version-1 file's addresses, mapped by role to version 2's.
+function v2Address(contract: string): Uint8Array {
+  const role = (Object.keys(FILES[1].contracts) as ContractRole[]).find(
+    (r) => FILES[1].contracts[r] === contract,
+  );
+  return hex(role === undefined ? contract : FILES[2].contracts[role]);
+}

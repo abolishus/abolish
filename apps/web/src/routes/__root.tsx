@@ -1,5 +1,11 @@
 import { formatMessage, I18nProvider } from "@abolishus/ui";
-import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router";
+import {
+  createRootRoute,
+  HeadContent,
+  Outlet,
+  Scripts,
+  useRouterState,
+} from "@tanstack/react-router";
 import { type ReactNode, useEffect } from "react";
 
 import { Failed, NotFound, SiteLayout } from "../components/site-layout.tsx";
@@ -13,6 +19,7 @@ const siteName = catalogs[LOCALE]!.siteName;
 function Document({ children }: { children: ReactNode }) {
   // Error tracking, in the browser only (src/error-reports.ts).
   useEffect(() => reportErrors(window), []);
+  const path = useRouterState({ select: (s) => s.location.pathname });
   return (
     <html lang={LOCALE}>
       <head>
@@ -20,7 +27,7 @@ function Document({ children }: { children: ReactNode }) {
       </head>
       <body>
         <I18nProvider locale={LOCALE}>
-          <SiteLayout>{children}</SiteLayout>
+          <SiteLayout current={path}>{children}</SiteLayout>
         </I18nProvider>
         <Scripts />
       </body>

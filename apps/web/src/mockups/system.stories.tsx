@@ -1,59 +1,18 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { expect, userEvent, within } from "storybook/test";
+import { expect, within } from "storybook/test";
 
-import { ErrorPage, NotFoundPage, UnreachablePage } from "./system-pages.tsx";
+import { UnreachablePage } from "./system-pages.tsx";
 
 const meta = {
   title: "Mockups/Web/System pages",
-  component: NotFoundPage,
+  component: UnreachablePage,
   parameters: { layout: "fullscreen" },
-} satisfies Meta<typeof NotFoundPage>;
+} satisfies Meta<typeof UnreachablePage>;
 
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-export const NotFound: Story = {
-  play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
-    await expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent(
-      "There is no page at this address",
-    );
-    const ways = canvas.getByRole("navigation", { name: "Other places to go" });
-    await expect(within(ways).getByRole("link", { name: /^Verify/ })).toHaveAttribute(
-      "href",
-      "/verify",
-    );
-    await userEvent.tab();
-    await expect(canvas.getByRole("link", { name: "Skip to content" })).toHaveFocus();
-  },
-};
-
-export const SomethingWentWrong: Story = {
-  render: () => <ErrorPage />,
-  play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
-    await expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent(
-      "Something went wrong on our side",
-    );
-    // Says nothing about the error itself: no codes, traces or request IDs.
-    await expect(canvasElement.querySelector("main")?.textContent ?? "").not.toMatch(
-      /\b(5\d\d|stack|exception|request id|trace)\b/i,
-    );
-    await expect(canvas.getByRole("button", { name: "Try again" })).toBeEnabled();
-  },
-};
-
-export const SomethingWentWrongDark: Story = {
-  render: () => <ErrorPage />,
-  parameters: { layout: "fullscreen", theme: "dark" },
-  play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
-    await expect(canvas.getByRole("navigation", { name: "Other places to go" })).toBeVisible();
-  },
-};
-
 export const ServersUnreachable: Story = {
-  render: () => <UnreachablePage />,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent(
@@ -72,7 +31,6 @@ export const ServersUnreachable: Story = {
 };
 
 export const ServersUnreachableDark: Story = {
-  render: () => <UnreachablePage />,
   parameters: { layout: "fullscreen", theme: "dark" },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);

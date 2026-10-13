@@ -83,7 +83,7 @@ export type ElectionDefinitionRecord =
   | { readonly version: 4; readonly value: ElectionDefinitionV4 };
 
 /** A decoded definition of any version this package reads. */
-type AnyElectionDefinitionRecord =
+export type AnyElectionDefinitionRecord =
   | ElectionDefinitionRecord
   | { readonly version: 5; readonly value: ElectionDefinitionV5 }
   | { readonly version: 6; readonly value: ElectionDefinitionV6 };
@@ -129,6 +129,24 @@ export function decodeElectionDefinitionRecord(bytes: Uint8Array): ElectionDefin
   const record = decodeAnyElectionDefinition(bytes);
   // Unreachable: the version byte was read above.
   if (record.version === 5 || record.version === 6) throw new DecodeError("unknown-version", 2);
+  return record;
+}
+
+// The versions a deployed election registry decodes (docs/spec/contracts.md,
+// Election registry, Registration, rule 2), fixed with it.
+const REGISTRABLE_VERSIONS: ReadonlySet<number> = new Set([1, 3, 4, 5, 6]);
+
+/**
+ * `decodeAnyElectionDefinition` restricted to the versions the election
+ * registry decodes, 1 and 3 to 6: any other is `unknown-version`, even once
+ * this package reads it, so the contract-event record's check of
+ * `DefinitionRegistered` never changes with a later definition version.
+ */
+export function decodeRegistrableElectionDefinition(
+  bytes: Uint8Array,
+): AnyElectionDefinitionRecord {
+  const record = decodeAnyElectionDefinition(bytes);
+  if (!REGISTRABLE_VERSIONS.has(record.version)) throw new DecodeError("unknown-version", 2);
   return record;
 }
 

@@ -70,15 +70,34 @@ const enUS = {
   moderationHidden:
     "This poll's question and option text are withheld ({reason}). Its board and result are unaffected, shown by option number.",
   moderationLogLink: "See the moderation log",
-  notFoundTitle: "Not found",
-  notFound: "This server knows no poll or page at this address.",
+  siteTagline: "Ask anything. Check everything.",
+  skipToContent: "Skip to content",
+  navSite: "Site",
+  navHome: "Home",
+  navPollsNote: "Every poll this server lists",
+  navModerationNote: "Every moderation decision, with its reason",
+  navHomeNote: "Start again from the front page",
+  footerClaim: "Non-binding, run by citizens, and every count can be checked.",
+  footerRecord:
+    "Every poll here is on a public board. The verifier recounts it from the chain, without our servers.",
+  footerNav: "The record",
+  otherPlaces: "Other places to go",
+  notFoundCode: "404 · Not found",
+  notFoundTitle: "There is no page at this address",
+  notFound:
+    "The link may be mistyped, or the page may have moved. Nothing on the record is ever removed: board entries, definitions and results are permanent.",
+  notFoundPoll:
+    "If you were looking for a poll, paste its 64-character ID into the form on the front page.",
   unavailableTitle: "Poll unavailable",
   definitionUndecodable:
     "The server sent a definition that doesn't decode under the protocol, so this page won't show it.",
   definitionMismatch:
     "The server sent the definition of another poll for this ID, so this page won't show it.",
-  errorTitle: "Something went wrong",
-  error: "This page couldn't be shown. Try again shortly.",
+  errorCode: "Error",
+  errorTitle: "Something went wrong on our side",
+  error:
+    "This page couldn't be shown. Try again in a moment, or go somewhere else below. This website never handles ballots: if you were voting, your ballot and receipt are safe in the ballot app on your device.",
+  errorRetry: "Try again",
   moderationTitle: "Moderation log",
   moderationLede:
     "Every moderation decision we make, oldest first, with its reason. Moderation only changes how a poll is listed or whether its text is shown, never its board, its definition or its result.",

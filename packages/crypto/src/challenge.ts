@@ -129,6 +129,36 @@ export function coreHash(core: BallotCore): Uint8Array {
   return H(ds("abolish/v1/ballot-core", w.finish()));
 }
 
+/** The core of a ballot of version 2 or 3, which names a cell of the partition rather than a tier. */
+export interface CellBallotCore {
+  readonly definitionHash: Uint8Array;
+  readonly ballotVersion: 2 | 3;
+  readonly cell: number;
+  readonly vss: CommittedVote["vss"];
+  readonly shareHashes: CommittedVote["share_hashes"];
+}
+
+/**
+ * The tracking code of a core of ballot version 2 or 3 (docs/spec/ballot-validity.md,
+ * Core hash): version 1's inputs with the version input 2 or 3 and the cell
+ * in place of the tier, so one code never names cores of two ballot versions
+ * (T-42, T-47, T-31).
+ */
+export function cellCoreHash(core: CellBallotCore): Uint8Array {
+  if (!(core.definitionHash instanceof Uint8Array) || core.definitionHash.length !== 32)
+    throw new RangeError("cellCoreHash: definitionHash must be 32 bytes");
+  if (core.ballotVersion !== 2 && core.ballotVersion !== 3)
+    throw new RangeError("cellCoreHash: ballot version 2 or 3");
+  const w = new Writer();
+  w.bytes(core.definitionHash);
+  u16.write(w, BALLOT_RECORD_TYPE);
+  u8.write(w, core.ballotVersion);
+  u8.write(w, core.cell);
+  VSS.write(w, core.vss);
+  SHARE_HASHES.write(w, core.shareHashes);
+  return H(ds("abolish/v1/ballot-core", w.finish()));
+}
+
 /** The tracking code of a cast ballot record, which the voter's checker finds it by. */
 export function ballotCoreHash(ballot: BallotRecord): Uint8Array {
   return coreHash({

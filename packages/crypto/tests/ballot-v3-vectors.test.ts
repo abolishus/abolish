@@ -29,13 +29,12 @@ import { hex, SPEC_VECTORS } from "./spec-vectors.ts";
 
 // docs/spec/vectors/ballot-v3.json, spoiled-opening-v2.json and
 // tally-questions.json, printed by scripts/ballot-v3-vectors.py (P2-14 part
-// 1b). packages/crypto has no code for ballot version 3, opening version 2 or
-// tally-question-range yet (parts 3 and 4), so these tests read the files
-// with codecs built here from the production field codecs and check them
-// with a second, test-only reading of the spec's checks over the production
-// group and hash: the Python generator and this reading must agree on every
-// byte, hash and verdict (T-31, T-36). Parts 3 and 4 run the same files
-// through the production code.
+// 1b). These tests read the files with codecs built here from the production
+// field codecs and check them with a second, test-only reading of the spec's
+// checks over the production group and hash: the Python generator and this
+// reading must agree on every byte, hash and verdict (T-31, T-36).
+// ballot-v3.test.ts runs the committed votes through the production code
+// (part 3a); the opening and tally-question-range follow in parts 3c and 4.
 
 const MAX_TRUSTEES = 16;
 const MAX_OPTIONS = 64;

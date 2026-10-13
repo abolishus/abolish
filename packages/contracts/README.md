@@ -2,7 +2,7 @@
 
 Abolish's contracts (the L2 contracts and the L1 board anchor), built with Foundry 1.8.3 and solc 0.8.30. Internal and source-only: deployed bytecode is checked against the release build of this source (verifier check 1.2, T-64; Release build, below).
 
-**Status: early (P1-18, P3-2, P4-1).** So far there are the event accumulator, the election registry, the trustee key registry, the group registry with its Tier 0 additions, the board's membership-proof check and the L1 board anchor. The deployable contracts have typed wagmi bindings (Bindings, below). The rest of direct submission follows in later P1-18 changes. Nothing is deployed, and nothing may be until the close rule exists ([`docs/spec/contracts.md`](../../docs/spec/contracts.md), Election registry).
+**Status: early (P1-18, P3-2, P4-1).** So far there are the event accumulator, the election registry, the trustee key registry, the group registry with its Tier 0 additions, the board's membership-proof and ballot checks and the L1 board anchor. The deployable contracts have typed wagmi bindings (Bindings, below). The rest of direct submission follows in later P1-18 changes. Nothing is deployed, and nothing may be until the close rule exists ([`docs/spec/contracts.md`](../../docs/spec/contracts.md), Election registry).
 
 ## Event accumulator
 
@@ -50,6 +50,14 @@ Abolish's contracts (the L2 contracts and the L1 board anchor), built with Found
 - `MembershipProofLib.check(proof, signals)` decodes Semaphore v4's 256-byte Groth16 proof strictly (canonical coordinates, no identity, `A` and `C` on the curve), refuses a signal at or above `r` and a root of 0, and checks Groth16's equation under the pinned depth-32 key, held as constants, through the `ecMul`, `ecAdd` and `ecPairing` precompiles (EIP-196, EIP-197), which also refuse a `B` off the twist or outside its subgroup (T-05, T-31). The pairing gets a fixed 600,000 gas, so a failed call means a broken `B`, never a lack of gas.
 - `scope(definition_hash, tier, root)` and `field(x)` compute `ŝ = F(S)` and Semaphore's `F` on chain, so a contract takes no signal from a submitter (T-12).
 - It is a library for the board contract, which follows in later parts of P1-18 part 4b-3; nothing deployable uses it yet. `test/MembershipProof.t.sol` runs `docs/spec/vectors/membership-proof.json` and `membership.json` through it.
+
+## Ballot check
+
+`src/BallotCheck.sol` implements [`docs/spec/contracts.md`](../../docs/spec/contracts.md), Board, Ballots:
+
+- `BallotCheckLib.check(record, registry, qualified)` checks a direct-submitted ballot record (`0x0002`, versions 1 to 3) against the parameters the election registry recorded for the definition it names (`IElectionParameters`, which `ElectionRegistry` implements), never against anything the submitter supplies (T-25, T-71): the header, `ballot-stray`, the pinned version, strict framing of every field (counts before what they count, enums, `field<bn254>` values, scalars below `ℓ`, and each ristretto255 element's encoding canonical, even and non-zero), then `ballot-tier` (`ballot-cell`), `validity-shape`, `share-hash-unqualified` and the membership proof over `M`, which it recomputes from the record, reverting on the first failure (T-17, T-31, T-52).
+- It runs no ristretto255 arithmetic (ADR 0028, 3B): the validity proofs and whether an element decodes to a point are the verifier's, which sets such a record aside as a rejected entry.
+- `qualified` (the registered key set's seats) is an input until the trustee registry records the set (P1-18 part 4b-3c); nothing deployable uses the library yet (4b-3d). `test/BallotCheck.t.sol` runs `ballot.json`, `ballot-v2.json`, `ballot-v3.json` and `ballot-validity.json` through it, and once against a real election registry.
 
 ## Board anchor
 

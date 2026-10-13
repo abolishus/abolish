@@ -127,6 +127,8 @@ function packageOf(id: string): string | undefined {
   return scope?.startsWith("@") ? `${scope}/${name}` : scope;
 }
 
+// A full production build of the client and its worker: seconds locally,
+// past the 10-second default hook timeout on a busy CI runner.
 beforeAll(async () => {
   outDir = await mkdtemp(join(tmpdir(), "abolish-ballot-"));
   const ids: string[] = [];
@@ -161,7 +163,7 @@ beforeAll(async () => {
       const path = join(entry.parentPath, entry.name);
       files.set(relative(outDir, path).split(sep).join("/"), await readFile(path, "latin1"));
     }
-});
+}, 120_000);
 
 afterAll(async () => {
   if (outDir !== undefined) await rm(outDir, { recursive: true, force: true });

@@ -1,8 +1,12 @@
-import { RECORD_TYPES } from "@abolishus/crypto";
+import { identityKey, RECORD_TYPES } from "@abolishus/crypto";
 import { parseBundle, type Report, verifyBundle } from "@abolishus/verifier";
 import { describe, expect, it } from "vite-plus/test";
 import { planElection, runSimulation, type Scenario } from "../src/index.ts";
-import { SimulatedAnchor } from "../src/simulation/anchor.ts";
+import {
+  receiptKeyWord,
+  SIMULATED_RECEIPT_KEY_LEAD,
+  SimulatedAnchor,
+} from "../src/simulation/anchor.ts";
 import {
   endOf,
   SIMULATED_ANCHOR_DEADLINE,
@@ -46,15 +50,27 @@ const payload = (type: number, body: number) => Uint8Array.of(type >> 8, type & 
 const row = (r: Report, id: string) => r.checks.find((c) => c.id === id);
 const verify = (b: VerifierBundle) => verifyBundle(parseBundle(b.json, b.board));
 
+// The board operator's receipt secret, whose key every simulated definition lists.
+const receiptSecret = crypto.getRandomValues(new Uint8Array(32));
+
 // A board of the ceremony transcript, then entries over three periods, a
 // quiet one, and the seal two periods after the last, every period
-// anchored in the first block after it ends.
-function election(e: SimulatedElection) {
+// anchored in the first block after it ends; the operator's receipt key is
+// registered a day before opening, unless `registerAt` says otherwise.
+function election(
+  e: SimulatedElection,
+  registerAt = SIMULATED_OPENS_AT - SIMULATED_RECEIPT_KEY_LEAD,
+) {
   const l1 = new SimulatedL1();
   const first = segmentAt(SIMULATED_OPENS_AT);
   const seal = first + 5;
-  const board = new SimulatedBoard(e.definition.election_id, SIMULATED_BOARD_ENTRY_VERSION);
+  const board = new SimulatedBoard(
+    e.definition.election_id,
+    SIMULATED_BOARD_ENTRY_VERSION,
+    receiptSecret,
+  );
   const anchor = new SimulatedAnchor(e.definition.election_id, first, seal, l1);
+  anchor.registerReceiptKey(board.receiptKey, registerAt);
   board.board(first, e.transcript);
   for (const [i, s] of [first, first + 1, first + 1, first + 3].entries())
     board.board(s, payload(RECORD_TYPES.shareReceipt, i));
@@ -63,6 +79,7 @@ function election(e: SimulatedElection) {
     const number = l1.firstAfter(moment);
     return { number, timestamp: l1.block(number).timestamp };
   };
+  const block = at(endOf(seal) + SIMULATED_ANCHOR_DEADLINE);
   const inputs: BundleInputs = {
     definition: e.definition,
     panel: e.panel,
@@ -70,13 +87,14 @@ function election(e: SimulatedElection) {
     entries: board.entries,
     anchors: anchor.anchors,
     firstSegment: first,
-    block: at(endOf(seal) + SIMULATED_ANCHOR_DEADLINE),
+    receiptKeys: anchor.receiptKeysAt(block.timestamp),
+    block,
   };
   return { inputs, anchor, at, first, seal };
 }
 
 describe("verifierBundle", { timeout }, () => {
-  const simulated = simulateElection(base, planElection(base));
+  const simulated = simulateElection(base, planElection(base), identityKey(receiptSecret));
 
   it("gives the verifier every anchor from the anchor's L1 state, authenticating the whole board", () => {
     const { inputs, anchor } = election(simulated);
@@ -122,6 +140,39 @@ describe("verifierBundle", { timeout }, () => {
     const r = verify({ json: JSON.stringify(json), board: b.board });
     expect(row(r, "4.1")?.code).toBe("not-reached");
     expect(row(r, "4.2")).toMatchObject({ status: "unverifiable", code: "l1-proof-missing" });
+  });
+
+  // 2.9 reads the operator's key from the anchor's receipt-key record in the
+  // bundle's L1 state, so the run's pass isn't vacuous: a key the record
+  // doesn't hold, or holds from too late, fails the election (T-26, T-71).
+  it("fails 2.9 when the anchor's record doesn't hold the listed key by opening", () => {
+    const { inputs } = election(simulated);
+    expect(row(verify(verifierBundle({ ...inputs, receiptKeys: [] })), "2.9")).toMatchObject({
+      status: "fail",
+      code: "receipt-key-unregistered",
+      at: { key: 0 },
+    });
+    // Registered as voting opens: after `opens_at` in L1 time, so too late.
+    const late = election(simulated, SIMULATED_OPENS_AT);
+    expect(row(verify(verifierBundle(late.inputs)), "2.9")).toMatchObject({
+      status: "fail",
+      code: "receipt-key-unregistered",
+    });
+    // A word the release code can't write: retired before it was registered.
+    const [held] = inputs.receiptKeys;
+    if (held === undefined) throw new Error("no key held");
+    const broken = { key: held.key, word: receiptKeyWord(2n, 1n) };
+    expect(row(verify(verifierBundle({ ...inputs, receiptKeys: [broken] })), "2.9")).toMatchObject({
+      status: "fail",
+      code: "receipt-key-record",
+    });
+  });
+
+  it("leaves 2.9 unverifiable while the verifier's block is before opening", () => {
+    const { inputs, at } = election(simulated);
+    const block = at(SIMULATED_OPENS_AT - 600n);
+    const r = verify(verifierBundle({ ...inputs, block }));
+    expect(row(r, "2.9")).toMatchObject({ status: "unverifiable", code: "receipt-key-unsettled" });
   });
 
   it("leaves 3.1 unverifiable when the board lacks the ceremony transcript", () => {

@@ -1,7 +1,20 @@
-import { BoardError, checkpointHash, RECORD_TYPES, verifyBoard } from "@abolishus/crypto";
+import {
+  BoardError,
+  checkpointHash,
+  identityKey,
+  RECORD_TYPES,
+  receiptKeyJudgement,
+  receiptKeyRecordFromWord,
+  receiptKeysCastCheck,
+  verifyBoard,
+} from "@abolishus/crypto";
 import fc from "fast-check";
 import { describe, expect, it } from "vite-plus/test";
-import { SimulatedAnchor } from "../src/simulation/anchor.ts";
+import {
+  receiptKeyWord,
+  SIMULATED_RECEIPT_KEY_LEAD,
+  SimulatedAnchor,
+} from "../src/simulation/anchor.ts";
 import { endOf, SIMULATED_ANCHOR_DEADLINE, SimulatedBoard } from "../src/simulation/board.ts";
 import { SimulatedL1 } from "../src/simulation/l1.ts";
 
@@ -9,6 +22,8 @@ const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
 
 const VERSION = 4;
 const electionId = new Uint8Array(32).fill(7);
+// A receipt key's secret, from the operator's key service.
+const secret = () => crypto.getRandomValues(new Uint8Array(32));
 
 // A ballot record's header and any body: the board never decodes a payload's fields.
 const payload = (body: readonly number[]) =>
@@ -42,7 +57,7 @@ describe("SimulatedAnchor", { timeout: 120_000 }, () => {
         fc.nat({ max: 3 }),
         (appends, cuts, tail) => {
           const l1 = new SimulatedL1();
-          const board = new SimulatedBoard(electionId, VERSION);
+          const board = new SimulatedBoard(electionId, VERSION, secret());
           let segment = 10;
           const segments = appends.map((a) => (segment += a.step));
           const seal = segment + tail;
@@ -86,7 +101,7 @@ describe("SimulatedAnchor", { timeout: 120_000 }, () => {
 
   it("counts for a reader only the anchors in blocks up to its L1 time", () => {
     const l1 = new SimulatedL1();
-    const board = new SimulatedBoard(electionId, VERSION);
+    const board = new SimulatedBoard(electionId, VERSION, secret());
     const anchor = new SimulatedAnchor(electionId, 10, 12, l1);
     board.board(10, payload([1]));
     board.board(11, payload([2]));
@@ -106,7 +121,7 @@ describe("SimulatedAnchor", { timeout: 120_000 }, () => {
 
   it("repeats the board's state at the seal when nothing was added in it", () => {
     const l1 = new SimulatedL1();
-    const board = new SimulatedBoard(electionId, VERSION);
+    const board = new SimulatedBoard(electionId, VERSION, secret());
     const anchor = new SimulatedAnchor(electionId, 10, 20, l1);
     board.board(10, payload([1]));
     anchor.anchorThrough(board.entries, 20);
@@ -143,7 +158,7 @@ describe("SimulatedAnchor", { timeout: 120_000 }, () => {
     const seal = 13;
     const now = afterSeal(l1, seal);
     const early = new SimulatedAnchor(electionId, 10, seal, l1);
-    const board = new SimulatedBoard(electionId, VERSION);
+    const board = new SimulatedBoard(electionId, VERSION, secret());
     board.board(10, payload([1]));
     early.anchorThrough(board.entries, 10);
     board.board(10, payload([2]));
@@ -154,7 +169,7 @@ describe("SimulatedAnchor", { timeout: 120_000 }, () => {
 
     // Period 11's entry, boarded after the authority passed it over.
     const skipped = new SimulatedAnchor(electionId, 10, seal, l1);
-    const other = new SimulatedBoard(electionId, VERSION);
+    const other = new SimulatedBoard(electionId, VERSION, secret());
     other.board(10, payload([1]));
     skipped.anchorThrough(other.entries, 11);
     other.board(11, payload([2]));
@@ -169,5 +184,88 @@ describe("SimulatedAnchor", { timeout: 120_000 }, () => {
     const open = () =>
       verifyBoard(electionId, other.entries, VERSION, unsealed.anchors, unsealed.clock, now);
     expect(code(open)).toBe("unsealed");
+  });
+});
+
+describe("SimulatedAnchor's receipt-key record", () => {
+  const opensAt = 1_000_000n;
+  const key = identityKey(new Uint8Array(32).fill(3));
+
+  it("writes each word as the contract does, which crypto reads back", () => {
+    fc.assert(
+      fc.property(
+        fc.bigInt({ min: 1n, max: (1n << 64n) - 1n }),
+        fc.bigInt({ min: 0n, max: (1n << 64n) - 1n }),
+        (registeredAt, later) => {
+          const retiredAt =
+            later === 0n ? 0n : registeredAt + (later % ((1n << 64n) - registeredAt));
+          const provenAt = retiredAt > registeredAt ? retiredAt : registeredAt;
+          expect(
+            receiptKeyRecordFromWord(receiptKeyWord(registeredAt, retiredAt), provenAt),
+          ).toEqual({ registeredAt, retiredAt });
+        },
+      ),
+      { numRuns },
+    );
+  });
+
+  it("registers a key in the first L1 block after the time given, a day before opening, so it judges the election", () => {
+    const l1 = new SimulatedL1();
+    const anchor = new SimulatedAnchor(electionId, 0, 400, l1);
+    anchor.registerReceiptKey(key, opensAt - SIMULATED_RECEIPT_KEY_LEAD);
+    const registeredAt = l1.block(l1.firstAfter(opensAt - SIMULATED_RECEIPT_KEY_LEAD)).timestamp;
+    expect(registeredAt).toBeGreaterThan(opensAt - SIMULATED_RECEIPT_KEY_LEAD);
+    // Absent at any block before its own, then held from it on.
+    expect(anchor.receiptKeysAt(registeredAt - 1n)).toEqual([]);
+    expect(anchor.receiptKeyWordAt(key, registeredAt - 1n)).toEqual(new Uint8Array(32));
+    expect(anchor.receiptKeysAt(registeredAt)).toEqual([
+      { key, word: receiptKeyWord(registeredAt, 0n) },
+    ]);
+    const word = anchor.receiptKeyWordAt(key, opensAt);
+    const record = receiptKeyRecordFromWord(word, opensAt);
+    expect(record).toEqual({ registeredAt, retiredAt: 0n });
+    expect(receiptKeyJudgement(record as NonNullable<typeof record>, opensAt, opensAt)).toBe(
+      "judges",
+    );
+    // A client reading it before opening, or after, may cast.
+    expect(
+      receiptKeysCastCheck([anchor.receiptKeyWordAt(key, registeredAt)], opensAt, registeredAt),
+    ).toEqual({
+      castable: true,
+    });
+    expect(receiptKeysCastCheck([word], opensAt, opensAt + 600n)).toEqual({ castable: true });
+  });
+
+  // Controls: a key registered too late, or not at all, doesn't judge the
+  // election, and the client's check refuses it, so the run's pass isn't vacuous.
+  it("leaves a key registered at or after opening, or another key, unjudged", () => {
+    const l1 = new SimulatedL1();
+    const anchor = new SimulatedAnchor(electionId, 0, 400, l1);
+    anchor.registerReceiptKey(key, opensAt);
+    const late = anchor.receiptKeyWordAt(key, opensAt + 600n);
+    const record = receiptKeyRecordFromWord(late, opensAt + 600n);
+    expect(receiptKeyJudgement(record as NonNullable<typeof record>, opensAt, opensAt + 600n)).toBe(
+      "unregistered",
+    );
+    expect(receiptKeysCastCheck([late], opensAt, opensAt + 600n)).toMatchObject({
+      castable: false,
+      key: 0,
+    });
+    const other = identityKey(new Uint8Array(32).fill(4));
+    expect(anchor.receiptKeyWordAt(other, opensAt + 600n)).toEqual(new Uint8Array(32));
+  });
+
+  it("refuses a key registered twice, or its twin, and anything but a p256-key's 33 bytes", () => {
+    const anchor = new SimulatedAnchor(electionId, 0, 400, new SimulatedL1());
+    anchor.registerReceiptKey(key, opensAt);
+    expect(() => anchor.registerReceiptKey(key, opensAt + 12n)).toThrow(/registered twice/);
+    const twin = Uint8Array.from(key);
+    twin[0] = key[0] === 0x02 ? 0x03 : 0x02;
+    expect(() => anchor.registerReceiptKey(twin, opensAt + 12n)).toThrow(/registered twice/);
+    expect(anchor.receiptKeyWordAt(twin, opensAt + 600n)).toEqual(new Uint8Array(32));
+    const bad = Uint8Array.from(key);
+    bad[0] = 0x04;
+    expect(() => anchor.registerReceiptKey(bad, opensAt)).toThrow(RangeError);
+    expect(() => anchor.registerReceiptKey(key.subarray(1), opensAt)).toThrow(RangeError);
   });
 });

@@ -1,7 +1,8 @@
 import {
-  ballotCore,
-  ballotElection,
+  cellBallotCore,
+  cellBallotElection,
   encryptShares,
+  identityKey,
   type IntakeKeys,
   proveValidity,
   shareVote,
@@ -36,7 +37,11 @@ const scenario: Scenario = {
 };
 
 // One election, and one honest ballot for every seat, as a voter's client makes it.
-const election = simulateElection(scenario, planElection(scenario));
+const election = simulateElection(
+  scenario,
+  planElection(scenario),
+  identityKey(crypto.getRandomValues(new Uint8Array(32))),
+);
 const { definitionHash, seats, registered } = election;
 const keys: IntakeKeys[] = seats.map((s) => ({
   seat: s.index,
@@ -50,7 +55,8 @@ const ctx: ValidityContext = {
   threshold: 2,
   panelSize: 3,
   definitionHash,
-  tier: 0,
+  ballotVersion: 2,
+  cell: 0,
   nullifier: 1n,
 };
 const sharing = shareVote(ctx, [1, 0, 1]);
@@ -59,7 +65,7 @@ const encrypted = encryptShares(
   sharing,
   registered.map((r) => r.kemKey),
 );
-const core = ballotCore(ballotElection(election.definition, registered), 0, encrypted);
+const core = cellBallotCore(cellBallotElection(election.definition, registered), 0, encrypted);
 const vote = proveValidity(ctx, sharing, core.shareHashes);
 const every: SeatCiphertext[] = [1, 2, 3].map((seat) => ({
   seat,

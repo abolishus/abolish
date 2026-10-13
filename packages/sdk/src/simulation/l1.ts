@@ -45,6 +45,11 @@ export function finalizedAt(n: bigint): bigint {
   return n * SLOT + SIMULATED_FINALITY;
 }
 
+/** The newest block finalized at `seconds`: the latest finalized block a client knows then. */
+export function latestFinalized(seconds: bigint): bigint {
+  return seconds < SIMULATED_FINALITY ? 0n : (seconds - SIMULATED_FINALITY) / SLOT;
+}
+
 export class SimulatedL1 {
   readonly #hashes = new Map<bigint, Uint8Array>();
 

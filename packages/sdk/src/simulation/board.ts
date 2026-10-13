@@ -117,9 +117,9 @@ const id = (s: SubtreeId) => `${s.level}:${s.index}`;
 export class SimulatedBoard {
   readonly #electionId: Uint8Array;
   readonly #version: BoardEntryVersion;
-  // One receipt key, fresh per run: no definition lists it and no registry
-  // holds it (SIMULATION_STUBS).
-  readonly #receiptSecret = crypto.getRandomValues(new Uint8Array(32));
+  // The operator's one receipt key, from its key service: the definition
+  // lists it and the anchoring authority registered it (T-26).
+  readonly #receiptSecret: Uint8Array;
   // Every perfect subtree's hash, so roots and audit paths come from
   // O(log n) stored hashes rather than every entry (T-52).
   readonly #subtrees = new Map<string, Uint8Array>();
@@ -130,9 +130,11 @@ export class SimulatedBoard {
   /** The receipt key the voter's client pins, as a `p256-key`. */
   readonly receiptKey: Uint8Array;
 
-  constructor(electionId: Uint8Array, version: BoardEntryVersion) {
+  /** An operator signing receipts with `receiptSecret`, a P-256 secret key. */
+  constructor(electionId: Uint8Array, version: BoardEntryVersion, receiptSecret: Uint8Array) {
     this.#electionId = Uint8Array.from(electionId);
     this.#version = version;
+    this.#receiptSecret = Uint8Array.from(receiptSecret);
     this.receiptKey = identityKey(this.#receiptSecret);
   }
 

@@ -1,10 +1,11 @@
 import {
-  ballotElection,
+  cellBallotElection,
   decodeOpening,
   type Element,
-  encodeOpening,
+  encodeOpeningV2,
   encryptShares,
-  openChallenge,
+  identityKey,
+  openChallengeV2,
   shareVote,
 } from "@abolishus/crypto";
 import { describe, expect, it } from "vite-plus/test";
@@ -28,8 +29,12 @@ const scenario: Scenario = {
 };
 
 // One election for every case: the ceremony is the slow part.
-const simulated = simulateElection(scenario, planElection(scenario));
-const election = ballotElection(simulated.definition, simulated.registered);
+const simulated = simulateElection(
+  scenario,
+  planElection(scenario),
+  identityKey(crypto.getRandomValues(new Uint8Array(32))),
+);
+const election = cellBallotElection(simulated.definition, simulated.registered);
 const { definitionHash } = simulated;
 const keys = simulated.registered.map((r) => r.kemKey);
 const { min, max } = selectionRange(scenario);
@@ -44,7 +49,7 @@ const rules = {
 // A challenged attempt's opening, as its voter's checker hands it over.
 function opened(votes: readonly (0 | 1)[] = [0, 1, 0]) {
   const encrypted = encryptShares({ definitionHash }, shareVote(rules, votes), keys);
-  return openChallenge(election, 0, encrypted);
+  return openChallengeV2(election, 0, encrypted);
 }
 
 // A counted ballot's commitments: another attempt's, never opened.
@@ -60,7 +65,7 @@ describe("admitOpening", { timeout: 60_000 }, () => {
   it("admits an honest opening after the counted extent, with its core hash and vote, once", () => {
     const { opening, coreHash } = opened();
     const held = new Set<string>();
-    const payload = encodeOpening(opening);
+    const payload = encodeOpeningV2(opening);
     const first = admitOpening(desk, held, 11, payload);
     expect(first).toMatchObject({ ok: true, votes: [0n, 1n, 0n] });
     if (first.ok) expect(first.coreHash).toEqual(coreHash);
@@ -71,16 +76,16 @@ describe("admitOpening", { timeout: 60_000 }, () => {
   });
 
   it("refuses an opening that doesn't decode or fails the opening checks, before any window", () => {
-    const payload = encodeOpening(opened().opening);
+    const payload = encodeOpeningV2(opened().opening);
     expect(admitOpening(desk, new Set(), 11, payload.subarray(0, -1))).toEqual({
       ok: false,
       code: "decode",
     });
-    const o = decodeOpening(payload, 1);
-    const stray = encodeOpening({ ...o, definition_hash: new Uint8Array(32).fill(7) });
+    const o = decodeOpening(payload, 2);
+    const stray = encodeOpeningV2({ ...o, definition_hash: new Uint8Array(32).fill(7) });
     // Checked before the window: a stray opening boarded early is still stray.
     expect(admitOpening(desk, new Set(), 3, stray)).toEqual({ ok: false, code: "opening-stray" });
-    const tampered = encodeOpening({
+    const tampered = encodeOpeningV2({
       ...o,
       polynomials: o.polynomials.map((p, j) => (j === 1 ? { f: [...p.f].reverse(), g: p.g } : p)),
     });
@@ -91,7 +96,7 @@ describe("admitOpening", { timeout: 60_000 }, () => {
   });
 
   it("refuses an opening at or before s_S and after the openings' window", () => {
-    const payload = encodeOpening(opened().opening);
+    const payload = encodeOpeningV2(opened().opening);
     expect(admitOpening(desk, new Set(), 10, payload)).toEqual({
       ok: false,
       code: "opening-early",
@@ -108,7 +113,7 @@ describe("admitOpening", { timeout: 60_000 }, () => {
 
   it("refuses an opening of a commitment a counted ballot carries, whatever its tracking code", () => {
     const { opening } = opened();
-    const payload = encodeOpening(opening);
+    const payload = encodeOpeningV2(opening);
     // The opened commitments of one option, cast under other share hashes and
     // another option order: the tracking code differs, the commitment doesn't.
     const cast = {

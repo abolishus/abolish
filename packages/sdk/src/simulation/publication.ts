@@ -3,27 +3,28 @@
 // voter's request, it boards an opening only if it decodes strictly and
 // passes the opening checks, falls in the openings' window, opens no
 // commitment of a ballot admitted in the counted extent, and repeats no core
-// already boarded. Every check is @abolishus/crypto's; this file only applies
+// already boarded. Openings are version 2's, of cores of ballots that name
+// their cell (docs/spec/challenge.md, Opening version 2). Every check is
+// @abolishus/crypto's; this file only applies
 // them in Publication's order. A verifier's 6.2 runs the same rules over the
 // board and attributes any break to the operator (T-42, T-47).
 
 import {
   type BallotCore,
-  type BallotElection,
-  type ChallengeOpeningCode,
-  checkChallengeOpening,
+  type CellBallotElection,
+  type ChallengeOpeningV2Code,
+  checkChallengeOpeningV2,
   DecodeError,
   decodeOpening,
   openedCommitments,
-  openingCoreHash,
   opensBallotCommitment,
-  type SpoiledBallotOpening,
+  type SpoiledBallotOpeningV2,
 } from "@abolishus/crypto";
 
 /** Why the operator refuses an opening: a check of challenge.md, or a publication rule. */
 export type OpeningRefusal =
   | "decode"
-  | ChallengeOpeningCode
+  | ChallengeOpeningV2Code
   | "opening-early"
   | "opening-late"
   | "opening-cast"
@@ -32,7 +33,7 @@ export type OpeningRefusal =
 export type OpeningAdmission =
   | {
       readonly ok: true;
-      readonly opening: SpoiledBallotOpening;
+      readonly opening: SpoiledBallotOpeningV2;
       /** The opened core's tracking code. */
       readonly coreHash: Uint8Array;
       /** `v_j` for each option, as the client committed to it. */
@@ -45,7 +46,7 @@ const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "
 /** What the operator holds when openings arrive: the counted extent is fixed by then. */
 export interface OpeningDesk {
   /** The registered definition and key set the openings are checked against. */
-  readonly election: BallotElection;
+  readonly election: CellBallotElection;
   /** Every ballot admitted in the counted extent, superseded ones included. */
   readonly counted: readonly Pick<BallotCore, "definitionHash" | "vss">[];
   /** `s_S`: an opening is boarded only in a later segment. */
@@ -65,14 +66,14 @@ export function admitOpening(
   segment: number,
   payload: Uint8Array,
 ): OpeningAdmission {
-  let opening: SpoiledBallotOpening;
+  let opening: SpoiledBallotOpeningV2;
   try {
-    opening = decodeOpening(payload, 1);
+    opening = decodeOpening(payload, 2);
   } catch (e) {
     if (e instanceof DecodeError) return { ok: false, code: "decode" };
     throw e;
   }
-  const checked = checkChallengeOpening(desk.election, opening);
+  const checked = checkChallengeOpeningV2(desk.election, opening);
   if (!checked.ok) return { ok: false, code: checked.code };
   // Boarding it before the counted extent is fixed could open a vote that
   // still lands and counts, and its timing could say when its voter cast.
@@ -84,7 +85,7 @@ export function admitOpening(
   const opened = openedCommitments(opening);
   if (desk.counted.some((b) => opensBallotCommitment(opened, b)))
     return { ok: false, code: "opening-cast" };
-  const key = hex(openingCoreHash(opening));
+  const key = hex(checked.coreHash);
   if (boarded.has(key)) return { ok: false, code: "opening-repeat" };
   boarded.add(key);
   return { ok: true, opening, coreHash: checked.coreHash, votes: checked.votes };

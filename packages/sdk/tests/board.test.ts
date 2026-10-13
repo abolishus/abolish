@@ -23,6 +23,8 @@ const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
 
 const VERSION = 4;
 const electionId = new Uint8Array(32).fill(7);
+// A receipt key's secret, from the operator's key service.
+const secret = () => crypto.getRandomValues(new Uint8Array(32));
 
 // A payload the envelope carries: a ballot record's header and any body. The
 // board never decodes a payload's fields, so any body serves.
@@ -51,7 +53,7 @@ describe("SimulatedBoard", { timeout: 120_000 }, () => {
           maxLength: 40,
         }),
         (appends) => {
-          const board = new SimulatedBoard(electionId, VERSION);
+          const board = new SimulatedBoard(electionId, VERSION, secret());
           const hashes: Uint8Array[] = [];
           let segment = 10;
           for (const a of appends) {
@@ -89,7 +91,7 @@ describe("SimulatedBoard", { timeout: 120_000 }, () => {
   });
 
   it("gives receipts the client refuses for another payload, key, election or segment", () => {
-    const board = new SimulatedBoard(electionId, VERSION);
+    const board = new SimulatedBoard(electionId, VERSION, secret());
     const p = Uint8Array.from([0, RECORD_TYPES.ballot, 1, 9, 9]);
     board.board(5, Uint8Array.from([0, RECORD_TYPES.ballot, 1]));
     const bytes = encodeReceipt(board.submit(5, p));
@@ -109,10 +111,9 @@ describe("SimulatedBoard", { timeout: 120_000 }, () => {
     expect(code({ ...want, segments: { min: 6, max: 7 } })).toBe("receipt-segment");
   });
 
-  it("uses one fresh receipt key per board", () => {
-    expect(new SimulatedBoard(electionId, VERSION).receiptKey).not.toEqual(
-      new SimulatedBoard(electionId, VERSION).receiptKey,
-    );
+  it("signs with the receipt key its key service gives it", () => {
+    const s = secret();
+    expect(new SimulatedBoard(electionId, VERSION, s).receiptKey).toEqual(identityKey(s));
   });
 
   it("boards a period's openings last, in byte order, whatever order they arrived in", () => {
@@ -131,7 +132,7 @@ describe("SimulatedBoard", { timeout: 120_000 }, () => {
         fc.uniqueArray(opening, { selector: (o) => o.join(), maxLength: 12 }),
         payload,
         (openings, other) => {
-          const board = new SimulatedBoard(electionId, VERSION);
+          const board = new SimulatedBoard(electionId, VERSION, secret());
           board.board(4, other);
           const at = board.boardOpenings(4, openings);
           const checked = checkBoard(electionId, board.entries, VERSION);
@@ -152,7 +153,7 @@ describe("SimulatedBoard", { timeout: 120_000 }, () => {
   });
 
   it("refuses to hold one opening twice in a period", () => {
-    const board = new SimulatedBoard(electionId, VERSION);
+    const board = new SimulatedBoard(electionId, VERSION, secret());
     const o = Uint8Array.from([0, 3, 1, 5]);
     expect(() => board.boardOpenings(4, [o, Uint8Array.from(o)])).toThrow(/twice/);
     expect(board.entries).toHaveLength(0);

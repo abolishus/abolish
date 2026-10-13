@@ -3,39 +3,40 @@
 // tracking code before the choice, the voter's checker records it, the
 // device opens the core and hands the opening over as bytes, and the checker
 // decodes and checks it against the recorded code and the voter's choice.
+// Ballots name their cell (ballot version 2), so openings are version 2's
+// (docs/spec/challenge.md, Opening version 2).
 // Every check is @abolishus/crypto's; this file only orders them as the
 // checker's rules do and compares their results (AGENTS.md, Architecture;
 // T-42, T-44).
 
 import {
-  type BallotElection,
-  type ChallengeOpeningCode,
-  checkChallengeOpening,
+  type CellBallotElection,
+  type ChallengeOpeningV2Code,
+  checkChallengeOpeningV2,
   DecodeError,
   decodeOpening,
   type DecodeErrorCode,
-  type SpoiledBallotOpening,
+  type SpoiledBallotOpeningV2,
 } from "@abolishus/crypto";
-import type { SimulatedTier } from "./scenario.ts";
 
 /**
  * Why a checker reports an opening as evidence that the casting device
  * misbehaved (Client rules, checker rule 3), in the order the checks run:
  * the opening fails to decode, names another election (`opening-stray`) or
- * another tier than the voter's, fails a check of [[challenge]], opens another core than the code recorded before
+ * another cell than the voter's, fails a check of [[challenge]], opens another core than the code recorded before
  * the choice, opens a vote no valid ballot could carry, or opens another vote
  * than the voter chose.
  */
 export type ChallengeVerdictCode =
   | "decode"
-  | "checker-tier"
-  | ChallengeOpeningCode
+  | "checker-cell"
+  | ChallengeOpeningV2Code
   | "checker-code"
   | "opening-vote-outside"
   | "checker-vote";
 
 export type ChallengeVerdict =
-  | { readonly ok: true; readonly opening: SpoiledBallotOpening }
+  | { readonly ok: true; readonly opening: SpoiledBallotOpeningV2 }
   | {
       readonly ok: false;
       readonly code: ChallengeVerdictCode;
@@ -49,27 +50,28 @@ const equalBytes = (a: Uint8Array, b: Uint8Array) =>
 /**
  * The checker's verdict on one challenge: `bytes` is the opening the casting
  * device handed over, `recorded` the tracking code scanned before the choice,
- * all 32 bytes, and `voter` what the voter chose. `election` is the checker's
- * own, from the definition and the key set its ceremony check registered.
+ * all 32 bytes, and `voter` what the voter chose and the cell it votes in.
+ * `election` is the checker's own, from the definition and the key set its
+ * ceremony check registered.
  */
 export function checkChallenge(
-  election: BallotElection,
+  election: CellBallotElection,
   recorded: Uint8Array,
-  voter: { readonly tier: SimulatedTier; readonly votes: readonly (0 | 1)[] },
+  voter: { readonly cell: number; readonly votes: readonly (0 | 1)[] },
   bytes: Uint8Array,
 ): ChallengeVerdict {
-  let opening: SpoiledBallotOpening;
+  let opening: SpoiledBallotOpeningV2;
   try {
-    opening = decodeOpening(bytes, 1);
+    opening = decodeOpening(bytes, 2);
   } catch (e) {
     if (!(e instanceof DecodeError)) throw e;
     return { ok: false, code: "decode", decodeError: e.code };
   }
-  // Rule 3's order: the election, then the voter's tier, then the checks.
+  // Rule 3's order: the election, then the voter's cell, then the checks.
   if (!equalBytes(opening.definition_hash, election.definitionHash))
     return { ok: false, code: "opening-stray" };
-  if (opening.tier !== voter.tier) return { ok: false, code: "checker-tier" };
-  const checked = checkChallengeOpening(election, opening);
+  if (opening.cell !== voter.cell) return { ok: false, code: "checker-cell" };
+  const checked = checkChallengeOpeningV2(election, opening);
   if (!checked.ok) return { ok: false, code: checked.code };
   if (!equalBytes(checked.coreHash, recorded)) return { ok: false, code: "checker-code" };
   if (!checked.withinRules) return { ok: false, code: "opening-vote-outside" };

@@ -1,8 +1,11 @@
 // Runs a simulated election in memory through @abolishus/crypto's own code:
-// a well-formed definition and its signed key ceremony (./election.ts), each
-// voter's sharing and share encryption, the tracking code shown before the
-// cast-or-challenge choice, a challenged attempt's opening and its checker's
-// verdict (./challenge.ts), the cast attempt's validity proof, the share
+// a well-formed definition (version 4, listing the operator's receipt key,
+// which the anchoring authority registers before opening) and its signed key
+// ceremony (./election.ts), each voter's client checking that key's record
+// before casting, each voter's sharing and share encryption, the tracking
+// code shown before the cast-or-challenge choice, a challenged attempt's
+// opening and its checker's verdict (./challenge.ts), the cast attempt's
+// validity proof, the share
 // intake of each trustee up at its cast (proof checks, decryption,
 // share checks, receipt) and the receipt's check under the seat's registered
 // signing key, each ballot's L1 reference on a simulated L1 (./l1.ts), the
@@ -31,11 +34,13 @@ import {
   type AdmittedBallot,
   aggregateCell,
   aggregateHash,
-  type BallotRecord,
-  ballotCore,
-  ballotElection,
+  type BallotRecordV2,
   ballotHash,
+  cellBallotCore,
+  cellBallotElection,
+  cellCoreHash,
   type CellOpening,
+  cellTrackingCode,
   checkBoard,
   checkDelivery,
   checkpointHash,
@@ -46,7 +51,6 @@ import {
   checkSummedShares,
   checkTally,
   type CommittedVote,
-  coreHash,
   decode,
   decodeBallot,
   decodeMembershipProof,
@@ -55,27 +59,29 @@ import {
   deliveryDeadlines,
   deliverySegments,
   deriveTotal,
-  encodeBallot,
+  encodeBallotV2,
   encodeDestructionStatement,
-  encodeOpening,
+  encodeOpeningV2,
   decodeOpening,
-  openingCoreHash,
+  openingV2CoreHash,
   encodeReceipt,
   encodeSharePosting,
   encodeShareReceipt,
   encodeTallyOpening,
   encryptShares,
   GROUP_ORDER,
+  identityKey,
   type IntakeKeys,
   l1RefMin,
   membershipMessage,
   membershipVkEncoding,
   openCell,
-  openChallenge,
+  openChallengeV2,
   openSummedShares,
   openedCommitments,
   opensBallotCommitment,
   proveValidity,
+  receiptKeysCastCheck,
   RECORD_TYPES,
   sealSummedShares,
   type SeatDestruction,
@@ -87,16 +93,15 @@ import {
   shareVote,
   signDestructionStatement,
   signTallyOpening,
-  type SpoiledBallotOpening,
+  type SpoiledBallotOpeningV2,
   sumShares,
   type TallyCode,
   type TallyRules,
-  trackingCode,
   type ValidityContext,
   verifyBoard,
 } from "@abolishus/crypto";
 import { parseBundle, type Verdict, verifyBundle } from "@abolishus/verifier";
-import { SimulatedAnchor } from "./anchor.ts";
+import { SIMULATED_RECEIPT_KEY_LEAD, SimulatedAnchor } from "./anchor.ts";
 import { type VerifierBundle, verifierBundle } from "./bundle.ts";
 import {
   afterAnchored,
@@ -118,7 +123,7 @@ import {
 } from "./intake.ts";
 import { admitOpening } from "./publication.ts";
 import { SIMULATED_BOARD_ENTRY_VERSION, simulateElection } from "./election.ts";
-import { nameBlock, SimulatedL1 } from "./l1.ts";
+import { latestFinalized, nameBlock, SimulatedL1 } from "./l1.ts";
 import {
   deliveredAt,
   downAt,
@@ -138,10 +143,10 @@ import { judgeVerifierReport } from "./verify.ts";
  * result is mistaken for a run of the whole protocol.
  */
 export const SIMULATION_STUBS = Object.freeze([
-  "definition: a well-formed version-1 definition, but its contracts, chain IDs, election counter, clock and tier roots are placeholders and nothing registers it on L2 (P1-18, P3-2)",
+  "definition: a well-formed version-4 definition, each tier one group in one region and so one cell, listing the operator's receipt key; its contracts, chain IDs, election counter, clock and cell roots are placeholders and nothing registers it on L2 (P1-18, P3-2)",
   "ceremony: every seat takes part in the four signed rounds, and the operator boards the transcript as the board's first entry; no release pins the panel, whose identity keys are fresh per run, so the verifier's bundle gives it as a local input (P1-7)",
   "membership: no membership proofs; each voter's nullifier is its index plus one, and each ballot record carries a placeholder proof, the verification key's own alpha, beta and alpha points, which decodes but proves nothing; the run never checks it, and each ballot's M for the re-vote rule is computed from its record here rather than taken from crypto's checkBallot, while the verifier's admission rejects every ballot for it (5.1 to 5.3, membership-proof), so it never verifies their validity proofs (5.4 covers only their shape and qualified share hashes) and its checks over admitted ballots (5.7, and 6.2's opening-cast) judge none (P1-17b, P3-2)",
-  "board: the operator boards each server ballot as it arrives and signs a receipt the voter's client checks at cast, under one receipt key fresh per run that no definition lists or registry holds; the anchoring clock (hourly from the Unix epoch, with a half-hour deadline) is a placeholder, the post-close windows other than the tally, openings' and destruction windows are taken as zero for the counted extent, though the delivery check applies the real delivery deadline (every delivery record is boarded or sent long before it), so the counted extent ends one period after close and the seal is the destruction window's end (P1-13b, P1-18)",
+  "board: the operator boards each server ballot as it arrives and signs a receipt the voter's client checks at cast, under one receipt key fresh per run, which the definition lists and the anchoring authority registers in the anchor's receipt-key record a day before opening, never retiring it; each client checks the key's record before casting from the simulated anchor's memory, not from L1 state, and the verifier's 2.9 reads it from the bundle's simulated L1 state; the anchoring clock (hourly from the Unix epoch, with a half-hour deadline) is a placeholder, the post-close windows other than the tally, openings' and destruction windows are taken as zero for the counted extent, though the delivery check applies the real delivery deadline (every delivery record is boarded or sent long before it), so the counted extent ends one period after close and the seal is the destruction window's end (P1-13b, P1-18)",
   "anchoring: an anchoring authority anchors the checkpoint of every period that added entries, and the seal's, in the first block after the period ends, and every reader judges them with crypto's verifyBoard; but the anchor contract, its clock and the authority's key are simulated, readers during the election take the anchors from memory, and only the verifier's final read proves them from L1 state, a simulated one (the anchor's account alone, with placeholder code, under a header whose other fields are zero and whose hash isn't the simulated chain's block hash), every period's entries are boarded before its end, and the CIDs name segment objects that nothing publishes or pins; readers check the operator's copy, the tally and destruction checks read it before the final board check authenticates it, a node checks the whole board before destroying rather than each first passing opening's inclusion, and the trustees' moments come from the clock rather than from the blocks they saw (P4-1, P4-3)",
   "delivery: ciphertexts reach trustees in memory, and no contract records anything; a direct ballot is boarded by the operator when the servers return, with no operator receipt, never as a contract event; each online seat's node boards its share receipt right after the ballot, and the operator boards it unchecked rather than under the delivery boarding rules; a posting voter's client posts each seat down at that ballot's cast once, right after cast, as a contract-path record the delivery check reads with its cast time as its submission time, though no contract records it and nothing puts it on the board or the archive; a departing seat's receipts for ballots it took before going down are boarded with them, even a direct ballot's after the seat is down; offline and departed seats never come back, so no seat catches up on postings or complains, and nothing is resent (P1-12c, P1-18, P4-2)",
   "trustees: offline seats go down after the ceremony, for the whole voting period, tally and destruction, and departing seats at their scenario time, for the rest of it, and take no part in the tally or destruction, though they hold shares of every ballot cast before; nothing models a departing seat's node or disk afterwards; faulty seats lie only in their summed shares, which their own node's check refuses to seal, so no lie reaches another seat as a summed-share message, no recipient's refusal is shown, and a cell's excluded seats are those that sent nothing (openCell never sees a failing sum); summed-share messages travel in memory, never over a channel, every honest seat combines, and the lowest seat combined signs each cell's opening",
@@ -431,13 +436,28 @@ export async function runSimulation(
     threshold: k,
     panelSize: n,
   };
-  const election = simulateElection(scenario, plan);
+  // The board operator's receipt key, from its key service: the definition
+  // lists it, so it is fixed before the ceremony (T-26).
+  const receiptSecret = crypto.getRandomValues(new Uint8Array(32));
+  const election = simulateElection(scenario, plan, identityKey(receiptSecret));
   const { definitionHash, seats, registered } = election;
+  // Each tier is one cell, numbered in the electorate's order (./election.ts):
+  // a ballot names its cell, which the definition maps back to its tier.
+  const cellOfTier = (tier: SimulatedTier): number => {
+    const c = plan.tiers.indexOf(tier);
+    if (c < 0) throw new Error("simulation: a voter outside the electorate");
+    return c;
+  };
+  const tierOfCell = (cell: number): SimulatedTier => {
+    const tier = plan.tiers[cell];
+    if (tier === undefined) throw new Error("simulation: a ballot naming no cell");
+    return tier;
+  };
   // Ballots go only to the keys the ceremony check registered, by seat (T-37).
   const keys = registered.map((r) => r.kemKey);
   // The checker's election and the casting device's: one definition and the
   // key set its ceremony check registered.
-  const ballots = ballotElection(election.definition, registered);
+  const ballots = cellBallotElection(election.definition, registered);
   // The seats that sum, combine and destroy: a departed seat's shares go down with it.
   const online = onlineSeats(scenario);
   const departed = scenario.trustees.departures.map((d) => d.seat);
@@ -502,6 +522,7 @@ export async function runSimulation(
   const operator = new SimulatedBoard(
     election.definition.election_id,
     SIMULATED_BOARD_ENTRY_VERSION,
+    receiptSecret,
   );
   const firstSegment = segmentAt(opensAt);
   // The ceremony's transcript, which the definition's hash of it names, is
@@ -511,6 +532,10 @@ export async function runSimulation(
   const after = postClose(closesAt);
   const { seal } = after;
   const anchor = new SimulatedAnchor(election.definition.election_id, firstSegment, seal, l1);
+  // The anchoring authority registers the operator's key a day before the
+  // election opens, so it judges the election ([[election-definition]],
+  // Receipt keys; T-26, T-69).
+  anchor.registerReceiptKey(operator.receiptKey, opensAt - SIMULATED_RECEIPT_KEY_LEAD);
   // A reader's board check at `moment`, as the verifier's 4.1 and 4.2 make
   // it: once the first L1 block at or after `moment` is finalized, it reads
   // every anchor and takes that block's time as `now`, so only anchors in
@@ -617,7 +642,8 @@ export async function runSimulation(
       electionId: election.definition.election_id,
       payload,
       boardEntryVersion: SIMULATED_BOARD_ENTRY_VERSION,
-      receiptKeys: [operator.receiptKey],
+      // The keys the definition lists, never one the operator names (T-26).
+      receiptKeys: election.definition.receipt_keys,
       segments: { min: Math.max(firstSegment, segment - 1), max: Math.min(seal, segment + 1) },
     });
     if (!check.ok)
@@ -639,19 +665,34 @@ export async function runSimulation(
   ): Casting => {
     const progress = () =>
       options.onProgress?.({ stage: "cast", done: done + 1, total: casts.length });
+    const cell = cellOfTier(voter.tier);
     const ctx: ValidityContext = {
       ...rules,
       definitionHash,
-      tier: voter.tier,
+      ballotVersion: 2,
+      cell,
       nullifier: BigInt(voter.index + 1),
     };
+    // Before casting, the client reads the record of every key the
+    // definition lists at the latest finalized L1 block it knows, and
+    // refuses to cast for receipts no listed key may give as evidence
+    // ([[election-definition]], Receipt keys; T-26). The record is read
+    // from the simulated anchor's memory (SIMULATION_STUBS).
+    const provenAt = l1.block(latestFinalized(seconds)).timestamp;
+    const castable = receiptKeysCastCheck(
+      election.definition.receipt_keys.map((key) => anchor.receiptKeyWordAt(key, provenAt)),
+      opensAt,
+      provenAt,
+    );
+    if (!castable.castable)
+      throw new Error(`simulation: an honest client refused to cast (${castable.code})`);
     // The client's record of the newest block it named; the L1 reference is
     // made after the cast choice (Client rule 6).
     const l1RefNumber = nameBlock(seconds, named.get(voter.index));
     named.set(voter.index, l1RefNumber);
-    const recordOf = (vote: CommittedVote, l1RefHash: Uint8Array): BallotRecord => ({
+    const recordOf = (vote: CommittedVote, l1RefHash: Uint8Array): BallotRecordV2 => ({
       definition_hash: definitionHash,
-      tier: voter.tier,
+      cell,
       nullifier: ctx.nullifier,
       l1_ref_number: l1RefNumber,
       l1_ref_hash: l1RefHash,
@@ -669,7 +710,7 @@ export async function runSimulation(
           // sent to them again ([[share-encryption]], Intake and receipts).
           const first = toRecast.get(voter.index);
           if (first === undefined) throw new Error("simulation: a recast with no first cast");
-          const payload = encodeBallot(recordOf(first.vote, l1.block(l1RefNumber).hash));
+          const payload = encodeBallotV2(recordOf(first.vote, l1.block(l1RefNumber).hash));
           const { shares, down } = first;
           const k = { shares, down, selects: true, reorged: false, delivered: voter.delivered };
           submit(ballot, seconds, payload, k, []);
@@ -679,12 +720,12 @@ export async function runSimulation(
     const last = kind === "last";
     // A challenged attempt: the checker records the code shown before the
     // choice, then checks the opening the device hands over (T-42).
-    let opening: SpoiledBallotOpening | undefined;
+    let opening: SpoiledBallotOpeningV2 | undefined;
     if (last && voter.challenged) {
       const attempt = encryptShares({ definitionHash }, shareVote(rules, ballot.votes), keys);
-      const recorded = trackingCode(ballots, voter.tier, attempt);
-      const handed = encodeOpening(openChallenge(ballots, voter.tier, attempt).opening);
-      const verdict = checkChallenge(ballots, recorded, voter, handed);
+      const recorded = cellTrackingCode(ballots, cell, attempt);
+      const handed = encodeOpeningV2(openChallengeV2(ballots, cell, attempt).opening);
+      const verdict = checkChallenge(ballots, recorded, { cell, votes: voter.votes }, handed);
       if (!verdict.ok)
         throw new Error(`simulation: an honest challenge failed its check (${verdict.code})`);
       opening = verdict.opening;
@@ -694,14 +735,15 @@ export async function runSimulation(
     // The cast attempt is a fresh sharing: crypto refuses to prove an opened one.
     const sharing = shareVote(rules, ballot.votes);
     const encrypted = encryptShares({ definitionHash }, sharing, keys);
-    const core = ballotCore(ballots, voter.tier, encrypted);
+    const core = cellBallotCore(ballots, cell, encrypted);
     // The code shown before the cast choice, which the checker records.
-    const shown = trackingCode(ballots, voter.tier, encrypted);
+    const shown = cellTrackingCode(ballots, cell, encrypted);
     const vote = proveValidity(ctx, sharing, core.shareHashes);
     // Client rule 3: the core cast, as the ballot carries it, is the one whose code was shown.
-    const cast = coreHash({
+    const cast = cellCoreHash({
       definitionHash: ctx.definitionHash,
-      tier: voter.tier,
+      ballotVersion: 2,
+      cell,
       vss: vote.vss,
       shareHashes: vote.share_hashes,
     });
@@ -740,7 +782,7 @@ export async function runSimulation(
         // A last ballot the plan reorganises names the hash of a block that L1
         // then replaced, which the client saw 2 deep (Client rule 2).
         const lost = last && voter.reorg !== null;
-        const payload = encodeBallot(
+        const payload = encodeBallotV2(
           recordOf(vote, lost ? l1.orphan(l1RefNumber) : l1.block(l1RefNumber).hash),
         );
         if (lost) {
@@ -829,15 +871,16 @@ export async function runSimulation(
     );
 
   // From each boarded ballot record: its L1 reference's admission (5.8) and
-  // M as the verifier recomputes it from the ballot and the definition (5.7).
-  // Ballots are keyed by board index, which receipts interleave. Every
-  // ballot naming a block reorganised away is rejected `l1-ref-unknown` and
-  // never selected, and every other is admitted (T-45).
+  // M as the verifier recomputes it from the ballot and the definition (5.7),
+  // under its cell's tier, by which the re-vote rule ranks it. Ballots are
+  // keyed by board index, which receipts interleave. Every ballot naming a
+  // block reorganised away is rejected `l1-ref-unknown` and never selected,
+  // and every other is admitted (T-45).
   const admitted: AdmittedBallot[] = [];
-  const boarded = new Map<number, BallotRecord>();
+  const boarded = new Map<number, BallotRecordV2>();
   checked.entries.forEach((entry, index) => {
     if (recordTypeOf(entry.payload) !== RECORD_TYPES.ballot) return;
-    const b = decodeBallot(entry.payload, 1);
+    const b = decodeBallot(entry.payload, 2);
     boarded.set(index, b);
     const ref = { l1RefNumber: b.l1_ref_number, l1RefHash: b.l1_ref_hash };
     const verdict = checkL1Reference(ref, finalized, window);
@@ -845,14 +888,20 @@ export async function runSimulation(
     if (verdict !== want)
       throw new Error(`simulation: an honest ballot's L1 reference was ${verdict}, not ${want}`);
     if (verdict !== "admitted") return;
-    const context = { definitionHash, tier: b.tier, nullifier: b.nullifier };
+    const tier = tierOfCell(b.cell);
+    const context = {
+      definitionHash,
+      ballotVersion: 2,
+      cell: b.cell,
+      nullifier: b.nullifier,
+    } as const;
     admitted.push({
-      tier: b.tier,
+      tier,
       nullifier: b.nullifier,
       message: membershipMessage({
         ...ref,
         definitionHash,
-        tier: b.tier,
+        tier,
         ballotHash: ballotHash(context, b.committed_vote),
       }),
       l1RefNumber: b.l1_ref_number,
@@ -879,7 +928,7 @@ export async function runSimulation(
   // ballot's cast receipted it, so a ballot is delivered exactly when its
   // voter posted each seat down then; anything else is a bug, as is any
   // record the check reports (T-25, T-41).
-  const ballotOf = (index: bigint): BallotRecord => {
+  const ballotOf = (index: bigint): BallotRecordV2 => {
     const b = boarded.get(Number(index));
     if (b === undefined) throw new Error("simulation: a selected entry isn't a boarded ballot");
     return b;
@@ -899,7 +948,7 @@ export async function runSimulation(
     },
     selection.selected.map((s): DeliveryBallot => {
       const b = ballotOf(s.index);
-      return { tier: b.tier, nullifier: b.nullifier, vote: b.committed_vote };
+      return { ballotVersion: 2, cell: b.cell, nullifier: b.nullifier, vote: b.committed_vote };
     }),
     // Every delivery record of the counted extent (share receipts, postings
     // and complaints, whichever the operator boarded), so crypto, not this
@@ -956,8 +1005,8 @@ export async function runSimulation(
   };
   for (const b of counted) {
     const { shares } = kept[Number(b.index)] as Kept;
-    const { tier, committed_vote: vote } = ballotOf(b.index);
-    const cell = cellOf(tier as SimulatedTier);
+    const { cell: c, committed_vote: vote } = ballotOf(b.index);
+    const cell = cellOf(tierOfCell(c));
     for (const [seat, share] of shares)
       cell.sums.set(seat, sumShares(tallyRules, [sumOf(cell, seat), share]));
     cell.vss.push(vote.vss);
@@ -976,12 +1025,13 @@ export async function runSimulation(
   let messages = 0;
   const openingSegment = segmentAt(after.tallyFrom);
   const aggregates = plan.tiers.map((tier) => aggregateCell(tallyRules, cellOf(tier).vss));
-  const summedElection = { definition: election.definition, aggregates, registered };
+  const record = { version: 4, value: election.definition } as const;
+  const summedElection = { definition: record, aggregates, registered };
   const honest = online.filter((s) => !faulty.includes(s));
   const opens = plan.tiers.map((tier, c) => {
     const cell = cellOf(tier);
     const aggregate = aggregates[c] as (typeof aggregates)[number];
-    const where = { definition: election.definition, cell: c, aggregate };
+    const where = { definition: record, cell: c, aggregate };
     const outbox: { readonly from: number; readonly to: number; readonly bytes: Uint8Array }[] = [];
     for (const seat of online) {
       const sum = sumOf(cell, seat);
@@ -1195,7 +1245,7 @@ export async function runSimulation(
   // The sealed board carries exactly the published openings, by the codes
   // their checkers recorded, and its entry checks held them in order.
   const spoiled = onBoard(RECORD_TYPES.spoiledBallotOpening).map((e) =>
-    hex(openingCoreHash(decodeOpening(e.payload, 1))),
+    hex(openingV2CoreHash(decodeOpening(e.payload, 2), 2)),
   );
   if (
     spoiled.length !== publications.length ||
@@ -1221,6 +1271,7 @@ export async function runSimulation(
     entries: operator.entries,
     anchors: anchor.anchors,
     firstSegment,
+    receiptKeys: anchor.receiptKeysAt(l1.block(verifierBlock).timestamp),
     block: { number: verifierBlock, timestamp: l1.block(verifierBlock).timestamp },
   });
   options.onBundle?.(bundle);

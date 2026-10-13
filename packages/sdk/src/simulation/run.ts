@@ -273,12 +273,17 @@ export function runSimulation(
     const sharing = shareVote(rules, voter.votes);
     const encrypted = encryptShares({ definitionHash }, sharing, keys);
     const core = ballotCore(ballots, voter.tier, encrypted);
+    // The code shown before the cast choice, which the checker records.
+    const shown = trackingCode(ballots, voter.tier, encrypted);
     const vote = proveValidity(ctx, sharing, core.shareHashes);
-    // The core cast is the one whose code was shown before the choice.
-    if (
-      !same32(coreHash({ ...core, vss: vote.vss, shareHashes: vote.share_hashes }), coreHash(core))
-    )
-      throw new Error("simulation: the cast core isn't the one shown");
+    // Client rule 3: the core cast, as the ballot carries it, is the one whose code was shown.
+    const cast = coreHash({
+      definitionHash: ctx.definitionHash,
+      tier: voter.tier,
+      vss: vote.vss,
+      shareHashes: vote.share_hashes,
+    });
+    if (!same32(cast, shown)) throw new Error("simulation: the cast core isn't the one shown");
     // Checker rule 4: no challenged attempt opens a commitment of the cast ballot.
     if (
       opening !== undefined &&

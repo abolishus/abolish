@@ -67,6 +67,16 @@ describe("checkChallenge", { timeout: 60_000 }, () => {
     });
   });
 
+  it("reports an opening for another election first, before its tier", () => {
+    const a = attempt(voter.votes, 2);
+    const o = decodeOpening(a.bytes, 1);
+    const stray = encodeOpening({ ...o, definition_hash: new Uint8Array(32).fill(7) });
+    expect(checkChallenge(election, a.code, voter, stray)).toEqual({
+      ok: false,
+      code: "opening-stray",
+    });
+  });
+
   it("reports an opening for another tier than the voter's, though the election has it", () => {
     const a = attempt(voter.votes, 2);
     expect(checkChallenge(election, a.code, voter, a.bytes)).toEqual({

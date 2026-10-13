@@ -21,8 +21,8 @@ import type { SimulatedTier } from "./scenario.ts";
 /**
  * Why a checker reports an opening as evidence that the casting device
  * misbehaved (Client rules, checker rule 3), in the order the checks run:
- * the opening fails to decode, names another tier than the voter's, fails a
- * check of [[challenge]], opens another core than the code recorded before
+ * the opening fails to decode, names another election (`opening-stray`) or
+ * another tier than the voter's, fails a check of [[challenge]], opens another core than the code recorded before
  * the choice, opens a vote no valid ballot could carry, or opens another vote
  * than the voter chose.
  */
@@ -65,6 +65,9 @@ export function checkChallenge(
     if (!(e instanceof DecodeError)) throw e;
     return { ok: false, code: "decode", decodeError: e.code };
   }
+  // Rule 3's order: the election, then the voter's tier, then the checks.
+  if (!equalBytes(opening.definition_hash, election.definitionHash))
+    return { ok: false, code: "opening-stray" };
   if (opening.tier !== voter.tier) return { ok: false, code: "checker-tier" };
   const checked = checkChallengeOpening(election, opening);
   if (!checked.ok) return { ok: false, code: checked.code };

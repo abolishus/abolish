@@ -1,5 +1,6 @@
 import { contract, MAX_PAGE_BYTES } from "@abolishus/api-contract";
 import {
+  type BallotAdmissions,
   BoardReadError,
   deleteIdentityBackup,
   hasDefinition,
@@ -18,6 +19,7 @@ import {
   readModerationLog,
   report,
   shortCodeOf,
+  SubmitError,
 } from "@abolishus/core";
 import { implement, ORPCError } from "@orpc/server";
 import type { Sql } from "postgres";
@@ -27,12 +29,17 @@ import type { Sql } from "postgres";
 // no protocol logic lives here (AGENTS.md, Architecture). Every answer is a
 // claim the caller checks with @abolishus/crypto (T-23, T-24, T-34).
 //
-// The context holds the database and nothing else: no handler can see a
-// request's headers, cookies or address, so no procedure can tie what it
-// serves or receives to a person or session (T-10, T-11).
+// The context holds the database, ballot admission and the clock, and
+// nothing of the request: no handler can see a request's headers, cookies or
+// address, so no procedure can tie what it serves or receives to a person or
+// session (T-10, T-11).
 
 export interface Context {
   readonly sql: Sql;
+  /** Absent when this server pins no panel: it then boards no ballot. */
+  readonly admissions?: BallotAdmissions | undefined;
+  /** UNIX time in seconds. */
+  readonly now: () => bigint;
 }
 
 const os = implement(contract).$context<Context>();
@@ -131,14 +138,34 @@ export const router = os.router({
     ),
   },
   ballots: {
-    // Admission (strict decoding, the membership and validity proofs, the
-    // L1 reference and the poll window, verifier 5.x) isn't built yet, so
-    // this server boards no ballot: it fails closed rather than board one it
-    // hasn't checked (T-17, T-52, T-53). A voter can still submit directly to
-    // the contracts once direct submit exists (T-25). P2-3 part 2.
+    // Admission is @abolishus/verifier's (5.1 to 5.4 against the registered
+    // key set), through core, before anything is boarded (T-17, T-52, T-53).
+    // A server that pins no panel can't judge a ballot, so it boards none and
+    // fails closed. Either way a refused voter can submit directly (T-25).
     submit: os.ballots.submit.handler(async ({ input, context, errors }) => {
-      await knownElection(context.sql, input.electionId, errors.ELECTION_NOT_FOUND);
-      throw errors.ELECTION_NOT_OPEN();
+      if (context.admissions === undefined) {
+        await knownElection(context.sql, input.electionId, errors.ELECTION_NOT_FOUND);
+        throw errors.ELECTION_NOT_OPEN();
+      }
+      try {
+        const boarded = await context.admissions.submit(
+          context.sql,
+          fromHex(input.electionId),
+          fromHex(input.ballot),
+          context.now(),
+        );
+        return { entry: toHex(boarded.entry), link: toHex(boarded.link) };
+      } catch (e) {
+        if (!(e instanceof SubmitError)) throw e;
+        switch (e.code) {
+          case "unknown-election":
+            throw errors.ELECTION_NOT_FOUND();
+          case "not-open":
+            throw errors.ELECTION_NOT_OPEN();
+          case "rejected":
+            throw errors.BALLOT_REJECTED({ data: { code: e.admission ?? "decode" } });
+        }
+      }
     }),
   },
   // The public moderation log, a poll's state, and reports

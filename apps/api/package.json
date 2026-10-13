@@ -24,6 +24,7 @@
   },
   "devDependencies": {
     "@abolishus/crypto": "workspace:*",
+    "@abolishus/verifier": "workspace:*",
     "@types/node": "catalog:",
     "fast-check": "catalog:",
     "typescript": "catalog:",

@@ -147,6 +147,8 @@ async function storedBoardVersion(client: Sql, id: Uint8Array): Promise<BoardEnt
 }
 
 export interface AppendedEntry {
+  /** The entry as encoded under the board's version: what a receipt is checked against. */
+  readonly entry: Uint8Array;
   readonly index: bigint;
   readonly entryHash: Uint8Array;
   readonly link: Uint8Array;
@@ -250,7 +252,7 @@ export async function appendEntry(
           hash: t.hash,
         })),
       );
-      return { index, entryHash, link };
+      return { entry: encoded, index, entryHash, link };
     },
     // The previous entry must be read after the lock is taken. Under a
     // snapshot isolation level the snapshot would predate the lock, and

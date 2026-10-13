@@ -6,9 +6,23 @@
 
 import {
   type AnyElectionDefinitionRecord,
+  type BoardEntryVersion,
   decodeElectionDefinitionRecord,
   decodeElectionDefinitionV5,
   type ElectionDefinitionRecord,
+  electionDefinitionHash,
+  electionDefinitionRule,
+  electionDefinitionV3Hash,
+  electionDefinitionV3Rule,
+  electionDefinitionV4Hash,
+  electionDefinitionV4Rule,
+  electionDefinitionV5Hash,
+  electionDefinitionV5Rule,
+  type ElectionDefinitionV5Rule,
+  electionStubHash,
+  electionStubV3Hash,
+  electionStubV4Hash,
+  electionStubV5Hash,
   RECORD_TYPES,
 } from "@abolishus/crypto";
 
@@ -35,3 +49,57 @@ export function decodeDefinition(bytes: Uint8Array): VerifiedDefinition {
     return { version: 5, value: decodeElectionDefinitionV5(bytes) };
   return decodeElectionDefinitionRecord(bytes);
 }
+
+/**
+ * What the checks take from a decoded definition, by its version: its hash,
+ * its stub hash (which the key ceremony binds) and the first well-formedness
+ * rule it breaks. Exhaustive: a version crypto adds doesn't compile until it
+ * is read here (docs/spec/election-definition.md, Layout; T-34, T-37).
+ */
+export function readDefinition(record: VerifiedDefinition): {
+  readonly hash: Uint8Array;
+  readonly stubHash: Uint8Array;
+  readonly rule: ElectionDefinitionV5Rule | undefined;
+  /** Under version 5, `option-count`'s and `selections`' first failing question. */
+  readonly question?: number;
+} {
+  switch (record.version) {
+    case 1:
+      return {
+        hash: electionDefinitionHash(record.value),
+        stubHash: electionStubHash(record.value),
+        rule: electionDefinitionRule(record.value),
+      };
+    case 3:
+      return {
+        hash: electionDefinitionV3Hash(record.value),
+        stubHash: electionStubV3Hash(record.value),
+        rule: electionDefinitionV3Rule(record.value),
+      };
+    case 4:
+      return {
+        hash: electionDefinitionV4Hash(record.value),
+        stubHash: electionStubV4Hash(record.value),
+        rule: electionDefinitionV4Rule(record.value),
+      };
+    case 5: {
+      const failure = electionDefinitionV5Rule(record.value);
+      return {
+        hash: electionDefinitionV5Hash(record.value),
+        stubHash: electionStubV5Hash(record.value),
+        rule: failure?.rule,
+        ...(failure !== undefined && "question" in failure && { question: failure.question }),
+      };
+    }
+    default: {
+      const unread: never = record;
+      throw new Error(`unread definition version ${String(unread)}`);
+    }
+  }
+}
+
+const READABLE: ReadonlySet<number> = new Set<BoardEntryVersion>([1, 3, 4]);
+
+/** Whether this verifier reads a board under the pinned board-entry version. */
+export const isReadable = (v: number | undefined): v is BoardEntryVersion =>
+  v !== undefined && READABLE.has(v);

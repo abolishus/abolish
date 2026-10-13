@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { contract, MAX_BOARD_PAYLOAD } from "@abolishus/api-contract";
-import { ACCOUNT_COOKIE_PREFIX } from "@abolishus/core";
+import { ACCOUNT_COOKIE_PREFIX, type BallotAdmissions } from "@abolishus/core";
 import { OpenAPIHandler } from "@orpc/openapi/node";
 import { onError, ORPCError } from "@orpc/server";
 import type { Sql } from "postgres";
@@ -140,6 +140,10 @@ function refuse(res: ServerResponse, status: number) {
 export interface ApiOptions {
   readonly sql: Sql;
   readonly log: Log;
+  /** Ballot admission; without it the server boards no ballot (`ELECTION_NOT_OPEN`). */
+  readonly admissions?: BallotAdmissions;
+  /** UNIX time in seconds; the system clock by default. Injected so tests can set it. */
+  readonly now?: () => bigint;
   /**
    * Most requests handled at once, from the first byte to the last: past it,
    * a request is refused with 503 before anything is read. Each page of the
@@ -172,6 +176,8 @@ const HEADERS_TIMEOUT_MS = 10_000;
 export function createApiServer({
   sql,
   log,
+  admissions,
+  now = () => BigInt(Math.floor(Date.now() / 1000)),
   maxInFlight = 32,
   idleTimeoutMs = 15_000,
   deadlineMs = 60_000,
@@ -236,7 +242,7 @@ export function createApiServer({
           // A GET takes its input from the query alone (T-31).
           return refuse(res, 400);
         }
-        const { matched } = await handler.handle(req, res, { context: { sql } });
+        const { matched } = await handler.handle(req, res, { context: { sql, admissions, now } });
         if (!matched) refuse(res, 404);
       } catch (e) {
         if (e instanceof BodyError) {

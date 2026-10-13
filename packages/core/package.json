@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@abolishus/crypto": "workspace:*",
+    "@abolishus/verifier": "workspace:*",
     "@better-auth/passkey": "catalog:",
     "better-auth": "catalog:",
     "drizzle-orm": "catalog:",

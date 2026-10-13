@@ -14,6 +14,12 @@ export {
   parseBundle,
   splitEntries,
 } from "./bundle.ts";
+export {
+  type BallotAdmission,
+  type ElectionAdmission,
+  electionAdmission,
+  type ElectionAdmissionCode,
+} from "./admission.ts";
 export { type AdmissionCode, type BallotsReport, type RejectedBallot } from "./ballots.ts";
 export { type OpeningBreak, type OpeningReport } from "./openings.ts";
 export { type CeremonyCode, type CeremonyReport } from "./ceremony.ts";

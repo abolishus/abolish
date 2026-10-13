@@ -1,6 +1,6 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vite-plus/test";
-import { planElection, type Scenario } from "../src/index.ts";
+import { planElection, type PlannedVoter, type Scenario } from "../src/index.ts";
 
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
 
@@ -14,6 +14,7 @@ const base: Scenario = {
   challenges: 0.5,
   revotes: 0.5,
   publications: 0.5,
+  postings: 0.5,
   seed: 7,
 };
 
@@ -37,6 +38,7 @@ const scenario = fc.record({
   challenges: fc.double({ min: 0, max: 1, noNaN: true }),
   revotes: fc.double({ min: 0, max: 1, noNaN: true }),
   publications: fc.double({ min: 0, max: 1, noNaN: true }),
+  postings: fc.double({ min: 0, max: 1, noNaN: true }),
   seed: fc.integer({ min: 0, max: 0xffff_ffff }),
 });
 
@@ -124,6 +126,34 @@ describe("planElection", { timeout: 60_000 }, () => {
         const strip = (r: number) =>
           planElection({ ...s, revotes: r }).voters.map((v) => ({ ...v, earlier: null }));
         expect(strip(other)).toEqual(strip(s.revotes));
+      }),
+      { numRuns },
+    );
+  });
+
+  it("draws postings apart, and counts only the delivered voters: all of them with no offline seat", () => {
+    fc.assert(
+      fc.property(scenario, fc.double({ min: 0, max: 1, noNaN: true }), (s, p) => {
+        const strip = (v: PlannedVoter) => ({
+          ...v,
+          posts: false,
+          delivered: false,
+          earlier: v.earlier === null ? null : { ...v.earlier, posts: false },
+        });
+        const other = planElection({ ...s, postings: p });
+        expect(other.voters.map(strip)).toEqual(planElection(s).voters.map(strip));
+        expect(other.voters.every((v) => v.delivered)).toBe(true);
+        const offline = { ...s, postings: p, trustees: { ...s.trustees, offline: [1] } };
+        const plan = planElection(offline);
+        for (const v of plan.voters) expect(v.delivered).toBe(v.posts);
+        for (const tier of plan.tiers)
+          expect(plan.expected.get(tier)).toEqual(
+            Array.from({ length: s.options }, (_, j) =>
+              plan.voters
+                .filter((v) => v.tier === tier && v.delivered)
+                .reduce((a, v) => a + (v.votes[j] as number), 0),
+            ),
+          );
       }),
       { numRuns },
     );

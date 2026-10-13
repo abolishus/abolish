@@ -84,6 +84,19 @@ export interface Scenario {
    * choice, so 0 (or no field) for none.
    */
   readonly publications: number;
+  /**
+   * The share of ballots, in `[0, 1]`, whose voter, finding an offline
+   * seat's intake unreachable by every route, chooses to post that seat's share publicly
+   * through the contract path (docs/spec/delivery.md, Client rules 4), which
+   * lowers that seat's long-term privacy for the ballot, and with `k` or
+   * more seats offline makes the ballot readable whole to anyone who later
+   * breaks the shares' classical encryption (T-15). A voter who declines
+   * leaves that ballot undelivered, and it counts nothing, nor does an
+   * earlier one in its place: every qualified seat needs a receipt or a
+   * posting. Posting is the voter's
+   * choice, so 0 (or no field) for none.
+   */
+  readonly postings: number;
   /** Seeds the plan only (who votes how and when), never a secret. */
   readonly seed: number;
 }
@@ -146,7 +159,7 @@ function parse(input: unknown): Scenario {
     input,
     "$",
     ["voters", "election", "options", "trustees", "tiers", "seed"],
-    ["outage", "challenges", "revotes", "publications"],
+    ["outage", "challenges", "revotes", "publications", "postings"],
   );
   const voters = integer(o["voters"], "$.voters", 1, MAX_SIMULATED_VOTERS);
   const election = o["election"];
@@ -203,6 +216,7 @@ function parse(input: unknown): Scenario {
       "$",
       `with published openings, voters × ballots × options is at most ${MAX_SIMULATED_OPENING_LOOKUPS}`,
     );
+  const postings = Object.hasOwn(o, "postings") ? fraction(o["postings"], "$.postings") : 0;
   const seed = integer(o["seed"], "$.seed", 0, 0xffff_ffff);
   return {
     voters,
@@ -214,6 +228,7 @@ function parse(input: unknown): Scenario {
     challenges,
     revotes,
     publications,
+    postings,
     seed,
   };
 }

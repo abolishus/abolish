@@ -49,6 +49,7 @@ const scenario: fc.Arbitrary<Scenario> = fc.integer({ min: 2, max: 16 }).chain((
       challenges: fc.double({ min: 0, max: 1, noNaN: true }),
       revotes: fc.double({ min: 0, max: 1, noNaN: true }),
       publications: fc.double({ min: 0, max: 1, noNaN: true }),
+      postings: fc.double({ min: 0, max: 1, noNaN: true }),
       seed: fc.integer({ min: 0, max: 0xffff_ffff }),
     })
     // Published openings only where their own bound holds, at either re-vote share.
@@ -69,6 +70,7 @@ const valid: Scenario = {
   challenges: 0.1,
   revotes: 0.2,
   publications: 0.5,
+  postings: 0.5,
   seed: 1,
 };
 
@@ -88,7 +90,7 @@ describe("parseScenario", () => {
     );
   });
 
-  it("defaults only the optional fields: no outage, challenges, re-votes or publications, no offline or faulty seats, missing tiers at 0", () => {
+  it("defaults only the optional fields: no outage, challenges, re-votes, publications or postings, no offline or faulty seats, missing tiers at 0", () => {
     const r = parseScenario({
       voters: 1,
       election: "approval",
@@ -109,6 +111,7 @@ describe("parseScenario", () => {
         challenges: 0,
         revotes: 0,
         publications: 0,
+        postings: 0,
         seed: 0,
       },
     });
@@ -144,6 +147,9 @@ describe("parseScenario", () => {
       ok: true,
       scenario: { publications: 0 },
     });
+    const { postings: _____, ...noPostings } = valid;
+    const inheritedPostings = Object.assign(Object.create({ postings: 1 }), noPostings);
+    expect(parseScenario(inheritedPostings)).toMatchObject({ ok: true, scenario: { postings: 0 } });
   });
 
   it("refuses missing required fields", () => {
@@ -185,6 +191,10 @@ describe("parseScenario", () => {
     expect(refusal({ ...valid, publications: 1.1 })).toBe("$.publications");
     expect(refusal({ ...valid, publications: "0.5" })).toBe("$.publications");
     expect(refusal({ ...valid, publications: null })).toBe("$.publications");
+    expect(refusal({ ...valid, postings: -0.1 })).toBe("$.postings");
+    expect(refusal({ ...valid, postings: 1.1 })).toBe("$.postings");
+    expect(refusal({ ...valid, postings: "1" })).toBe("$.postings");
+    expect(refusal({ ...valid, postings: null })).toBe("$.postings");
     expect(refusal({ ...valid, outage: { from: 0, to: 1.1 } })).toBe("$.outage.to");
     expect(refusal({ ...valid, outage: { from: 0, to: Number.NaN } })).toBe("$.outage.to");
     expect(refusal([])).toBe("$");

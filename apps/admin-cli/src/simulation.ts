@@ -58,6 +58,10 @@ export function simulationCommandsWith(
             superseded: casts.length - plan.voters.length,
             challenged: plan.voters.filter((v) => v.challenged).length,
             published: plan.voters.filter((v) => v.published).length,
+            // Each ballot its voter posts carries one posting per offline seat.
+            postings: casts.filter((b) => b.posts).length * scenario.trustees.offline.length,
+            // A voter who doesn't post an offline seat leaves its last ballot undelivered.
+            undelivered: plan.voters.filter((v) => !v.delivered).length,
           },
           expected: plan.tiers.map((tier) => ({ tier, counts: plan.expected.get(tier) })),
         });

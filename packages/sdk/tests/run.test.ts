@@ -15,6 +15,7 @@ const base: Scenario = {
   challenges: 0,
   revotes: 0,
   publications: 0,
+  postings: 1,
   seed: 3,
 };
 
@@ -29,12 +30,17 @@ describe("runSimulation", { timeout }, () => {
     expect(r.ballots.challenged).toBe(0);
     expect(r.ballots.published).toBe(0);
     expect(r.ballots.superseded).toBe(0);
-    // Every ballot is boarded, direct ones when the servers return; then an
-    // opening per cell and a destruction statement per online seat.
-    expect(r.board.counted).toBe(9);
+    // Every ballot is boarded, direct ones when the servers return, each
+    // followed by each online seat's share receipt; then an opening per cell
+    // and a destruction statement per online seat.
+    expect(r.board.shareReceipts).toBe(9 * 3);
+    expect(r.board.counted).toBe(9 + 9 * 3);
     expect(r.board.openings).toBe(3);
     expect(r.board.spoiled).toBe(0);
-    expect(r.board.entries).toBe(9 + 3 + 3);
+    expect(r.board.entries).toBe(9 + 9 * 3 + 3 + 3);
+    // Every voter posts the offline seat, so every ballot is delivered.
+    expect(r.ballots.postings).toBe(9);
+    expect(r.ballots.undelivered).toBe(0);
     expect(r.board.head).toMatch(/^[0-9a-f]{64}$/);
     expect(r.board.receiptKey).toMatch(/^0[23][0-9a-f]{64}$/);
     // Each online seat seals its sums for each cell to each other online seat.
@@ -116,7 +122,8 @@ describe("runSimulation", { timeout }, () => {
     // No opening reaches the board, so the online seats destroy at t_D, in s_T.
     expect(r.board.openings).toBe(0);
     expect(r.board.spoiled).toBe(9);
-    expect(r.board.entries).toBe(9 + 9 + 2);
+    expect(r.board.entries).toBe(9 + 9 * 2 + 9 + 2);
+    expect(r.ballots.postings).toBe(9 * 2);
     const ran = runSimulation(base);
     expect(r.destruction.from).toBeGreaterThan(ran.destruction.from + 100);
     expect(r.destruction.seats.map((d) => d.code)).toEqual([
@@ -157,8 +164,8 @@ describe("runSimulation", { timeout }, () => {
     expect(r.ballots.challenged).toBe(9);
     expect(r.ballots.published).toBe(9);
     expect(r.board.spoiled).toBe(9);
-    expect(r.board.counted).toBe(18);
-    expect(r.board.entries).toBe(18 + 3 + 9 + 3);
+    expect(r.board.counted).toBe(18 + 18 * 3);
+    expect(r.board.entries).toBe(18 + 18 * 3 + 3 + 9 + 3);
     for (const c of r.cells) expect(c.counts).toEqual(c.expected);
     // Publishing is the voter's choice: only those who asked.
     const some = runSimulation({ ...base, challenges: 1, publications: 0.5 });
@@ -190,11 +197,62 @@ describe("runSimulation", { timeout }, () => {
     expect(r.ok).toBe(true);
     expect(r.ballots.cast).toBe(18);
     expect(r.ballots.superseded).toBe(9);
-    expect(r.board.counted).toBe(18);
+    expect(r.board.counted).toBe(18 + 18 * 3);
+    // Every ballot is posted, superseded ones included.
+    expect(r.ballots.postings).toBe(18);
     expect(r.ballots.server + r.ballots.direct).toBe(18);
     expect(progress.filter((s) => s === "cast")).toHaveLength(18);
     expect(r.cells.reduce((a, c) => a + c.ballots, 0)).toBe(9);
     for (const c of r.cells) expect(c.counts).toEqual(c.expected);
+  });
+
+  it("counts nothing from a voter who declines to post an offline seat, and opens the rest to the plan", () => {
+    // Every voter declines: every ballot lacks the offline seat, so none counts.
+    const none = runSimulation({ ...base, postings: 0 });
+    expect(none.ok).toBe(true);
+    expect(none.ballots.postings).toBe(0);
+    expect(none.ballots.undelivered).toBe(9);
+    for (const c of none.cells) {
+      expect(c.ballots).toBe(0);
+      expect(c.counts).toEqual([0, 0, 0]);
+    }
+    // Some decline: only those who posted count.
+    const s = { ...base, postings: 0.5 };
+    const declined = planElection(s).voters.filter((v) => !v.delivered).length;
+    expect(declined).toBeGreaterThan(0);
+    expect(declined).toBeLessThan(9);
+    const some = runSimulation(s);
+    expect(some.ok).toBe(true);
+    expect(some.ballots.postings).toBe(9 - declined);
+    expect(some.ballots.undelivered).toBe(declined);
+    expect(some.cells.reduce((a, c) => a + c.ballots, 0)).toBe(9 - declined);
+    for (const c of some.cells) expect(c.counts).toEqual(c.expected);
+  });
+
+  it("counts nothing for a re-voter whose last ballot is undelivered, though its earlier one was posted", () => {
+    const s = { ...base, revotes: 1, postings: 0.5 };
+    const voters = planElection(s).voters;
+    const stranded = voters.filter((v) => v.earlier?.posts === true && !v.posts).length;
+    expect(stranded).toBeGreaterThan(0);
+    const r = runSimulation(s);
+    expect(r.ok).toBe(true);
+    expect(r.ballots.undelivered).toBe(voters.filter((v) => !v.delivered).length);
+    expect(r.cells.reduce((a, c) => a + c.ballots, 0)).toBe(9 - r.ballots.undelivered);
+    for (const c of r.cells) expect(c.counts).toEqual(c.expected);
+  });
+
+  it("needs no posting when every seat is online, whatever the voters would choose", () => {
+    const r = runSimulation({
+      ...base,
+      voters: 4,
+      postings: 0,
+      trustees: { panel: 3, threshold: 2, offline: [], faulty: [] },
+    });
+    expect(r.ok).toBe(true);
+    expect(r.ballots.postings).toBe(0);
+    expect(r.ballots.undelivered).toBe(0);
+    expect(r.board.shareReceipts).toBe(4 * 3);
+    expect(r.cells.reduce((a, c) => a + c.ballots, 0)).toBe(4);
   });
 
   it("opens an empty cell to zero", () => {

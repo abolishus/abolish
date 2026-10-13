@@ -40,6 +40,11 @@ contract BoardTest is TestBase {
     string internal constant RECEIPTS = "../../docs/spec/vectors/share-receipt.json";
     string internal constant V1 = "../../docs/spec/vectors/ballot.json";
     string internal constant V3 = "../../docs/spec/vectors/ballot-v3-records.json";
+    /// Framed values with no zero byte, for the largest record's elements and scalars.
+    uint256 internal constant DENSE_ELEMENT =
+        0x2222222222222222222222222222222222222222222222222222222222222222;
+    uint256 internal constant DENSE_SCALAR =
+        0x0101010101010101010101010101010101010101010101010101010101010101;
 
     /// The ceremonies the stubs record the vectors' key sets under: any
     /// values, since the board only passes them from one registry to the other.
@@ -311,18 +316,22 @@ contract BoardTest is TestBase {
         Vm.Log[] memory logs = _accept(data);
         assertEq(logs.length, 1, "one event");
         _assertEvent(logs[0], BALLOT_SUBMITTED, dh, ballots.ballotHash(record), record);
-        // An upper bound on the transaction: 21,000, its calldata at
-        // EIP-7623's floor price (10 a token, 4 tokens a non-zero byte), the
-        // call and the pairing.
+        // The transaction under EIP-7623: 21,000 plus the larger of its
+        // execution (`used` already counts its calldata at the standard
+        // price, and the pairing is added back) and its calldata at the
+        // floor price (10 a token, 4 tokens a non-zero byte).
         uint256 tokens;
         for (uint256 i; i < data.length; i++) {
             tokens += data[i] == 0 ? 1 : 4;
         }
-        uint256 total = 21_000 + 10 * tokens + used + pairing;
-        // Measured about 2.15 million in the call (framing, the ballot hash
-        // over 48 KB, the event and its accumulator step) and 2.9 million in
-        // all with the calldata and the pairing.
-        assertTrue(used < 2_500_000, "the call");
+        uint256 execution = used + pairing;
+        uint256 total = 21_000 + (execution > 10 * tokens ? execution : 10 * tokens);
+        // Measured about 2.7 million in the call (calldata, framing, the
+        // ballot hash over 48 KB, the event and its accumulator step) and
+        // 2.9 million for the transaction. Every slot the check reads is
+        // warm here, as the test wrote it; a real call pays tens of
+        // thousands more for cold reads.
+        assertTrue(used < 3_000_000, "the call");
         assertTrue(total < 3_500_000, "the transaction");
         assertTrue(total < 1 << 24, "EIP-7825's cap");
     }
@@ -1567,7 +1576,7 @@ contract BoardTest is TestBase {
         return vm.computeCreateAddress(address(this), vm.getNonce(address(this)));
     }
 
-    /// One ballot of ballot.json on a board of its own (two of the file's
+    /// One ballot of a record file (ballot.json, ballot-v3-records.json) on a board of its own (two of the file's
     /// ballots share their bytes under different key sets, and a repeat
     /// checks nothing, Calls), under the key set the file lists for it.
     function _ballotVector(string memory bj, string memory b, string[2] memory names, uint8 version)
@@ -1981,8 +1990,10 @@ contract BoardTest is TestBase {
     }
 
     /// The largest version-3 record for `dh` (see its test): cell 0,
-    /// nullifier 1, an honest ballot's proof, every element the encoding of
-    /// 2 (even and below `p`, so framed) and every scalar 1.
+    /// nullifier 1, an honest ballot's proof, every element 32 bytes of 0x22
+    /// (even and below `p`, so framed) and every scalar 32 bytes of 0x01
+    /// (below `ℓ`): dense bytes, so calldata is priced as an honest
+    /// ballot's, whose bytes are uniformly random, would be.
     function _largestV3(bytes32 dh) internal view returns (bytes memory) {
         ByteWriter.Writer memory w = ByteWriter.create();
         w.put(0x0002, 2);
@@ -1999,7 +2010,7 @@ contract BoardTest is TestBase {
         for (uint256 j; j < 64; j++) {
             w.put(16, 4);
             for (uint256 t; t < 16; t++) {
-                w.put(_le(2), 32);
+                w.put(DENSE_ELEMENT, 32);
             }
         }
         w.put(16, 4);
@@ -2008,13 +2019,13 @@ contract BoardTest is TestBase {
         }
         w.put(64, 4);
         for (uint256 i; i < 64 * 4; i++) {
-            w.put(_le(1), 32);
+            w.put(DENSE_SCALAR, 32);
         }
         w.put(32, 4);
         for (uint256 q; q < 32; q++) {
             w.put(3, 4);
             for (uint256 i; i < 3 * 2; i++) {
-                w.put(_le(1), 32);
+                w.put(DENSE_SCALAR, 32);
             }
         }
         return w.finish();

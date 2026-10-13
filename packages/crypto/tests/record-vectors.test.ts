@@ -257,7 +257,7 @@ describe("display text (docs/spec/display-text.md)", () => {
 
   test.each(valid)("%s decodes, re-encodes, commits and meets its rules", (_id, v, expected) => {
     const value = expected(v) as DisplayText;
-    const decoded = PROTOCOL_SCHEMA.decode(DISPLAY_TEXT, hex(v.encoding), 1).value;
+    const decoded = PROTOCOL_SCHEMA.decode(DISPLAY_TEXT, hex(v.encoding), 1).value as DisplayText;
     expect(decoded).toEqual(value);
     expect(toHex(encodeDisplayText(decoded))).toBe(v.encoding);
     expect(toHex(displayTextCommitment(decoded))).toBe(v.commitment);

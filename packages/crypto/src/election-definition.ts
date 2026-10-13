@@ -1,4 +1,4 @@
-// The election definition, record type 0x0001 versions 1, 3 and 4
+// The election definition, record type 0x0001 versions 1, 3, 4 and 5
 // (docs/spec/election-definition.md): the layouts, the well-formedness
 // rules a decoded definition must also meet, and when a listed receipt key
 // judges the election. Version 2 is never assigned: a
@@ -49,8 +49,8 @@ const tierGroup = struct([
 export const ELECTION_TYPES = Object.freeze({ plurality: 1, approval: 2 } as const);
 export const TALLY_SCHEMES = Object.freeze({ pedersenVss: 1 } as const);
 
-// The fields before and after `electorate`, the same in every version.
-const HEAD = [
+// The fields up to `l1_relay`, the same in every version.
+const ADDRESSES = [
   ["profile", profile],
   ["election_id", hash],
   ["l2_chain_id", u64],
@@ -61,6 +61,11 @@ const HEAD = [
   ["group_registry", address],
   ["l1_anchor", address],
   ["l1_relay", address],
+] as const;
+
+// The fields before `electorate` in versions 1, 3 and 4.
+const HEAD = [
+  ...ADDRESSES,
   ["election_type", enum8([ELECTION_TYPES.plurality, ELECTION_TYPES.approval])],
   ["tally_scheme", enum8([TALLY_SCHEMES.pedersenVss])],
   ["option_count", u16],
@@ -135,16 +140,48 @@ const electionDefinitionV4 = struct([
   ["receipt_keys", list(p256Key, DEFINITION_V4_LIMITS.receiptKeys)],
 ] as const);
 
-/** Record type 0x0001, versions 1, 3 and 4 (docs/spec/election-definition.md). */
+/** The question methods of version 5: 1, selection within the question's limits. */
+export const QUESTION_METHODS = Object.freeze({ selection: 1 } as const);
+
+/**
+ * Version 5's limits (docs/spec/election-definition.md, Layout (version 5)),
+ * written out like version 1's so raising a protocol-wide limit can never
+ * change what version 5 accepts; a test ties them to PARAMETERS.
+ */
+export const DEFINITION_V5_LIMITS = Object.freeze({ maxQuestions: 32, maxOptions: 64 } as const);
+
+const question = struct([
+  ["method", enum8([QUESTION_METHODS.selection])],
+  ["option_count", u16],
+  ["min_selections", u16],
+  ["max_selections", u16],
+] as const);
+
+// Version 4's fields, in order, with `election_type`, `option_count`,
+// `min_selections` and `max_selections` replaced at `election_type`'s
+// position by the list of questions (0026-multi-question-ballots).
+const electionDefinitionV5 = struct([
+  ...ADDRESSES,
+  ["questions", list(question, DEFINITION_V5_LIMITS.maxQuestions)],
+  ["tally_scheme", enum8([TALLY_SCHEMES.pedersenVss])],
+  ["electorate", list(tierElectorate, 3)],
+  ...TAIL,
+  ["receipt_keys", list(p256Key, DEFINITION_V4_LIMITS.receiptKeys)],
+] as const);
+
+/** Record type 0x0001, versions 1, 3, 4 and 5 (docs/spec/election-definition.md). */
 export const ELECTION_DEFINITION = recordType(RECORD_TYPES.electionDefinition, {
   1: electionDefinitionV1,
   3: electionDefinitionV3,
   4: electionDefinitionV4,
+  5: electionDefinitionV5,
 });
 
 export type ElectionDefinition = CodecValue<typeof electionDefinitionV1>;
 export type ElectionDefinitionV3 = CodecValue<typeof electionDefinitionV3>;
 export type ElectionDefinitionV4 = CodecValue<typeof electionDefinitionV4>;
+export type ElectionDefinitionV5 = CodecValue<typeof electionDefinitionV5>;
+export type Question = CodecValue<typeof question>;
 export type TierElectorate = CodecValue<typeof tierElectorate>;
 
 // Version 1's limits, written out rather than read from PARAMETERS: raising a
@@ -220,13 +257,122 @@ export type ElectionDefinitionV4Rule = ElectionDefinitionV3Rule | "receipt-keys"
 export function electionDefinitionV4Rule(
   d: ElectionDefinitionV4,
 ): ElectionDefinitionV4Rule | undefined {
-  const rule = electionDefinitionV3Rule(d);
-  if (rule !== undefined) return rule;
+  return electionDefinitionV3Rule(d) ?? receiptKeysRule(d);
+}
+
+function receiptKeysRule(
+  d: Pick<ElectionDefinitionV4, "receipt_keys">,
+): "receipt-keys" | undefined {
   const keys = d.receipt_keys;
   if (keys.length === 0) return "receipt-keys";
   for (let i = 1; i < keys.length; i++)
     if (compareBytes(keys[i - 1] as Uint8Array, keys[i] as Uint8Array) >= 0) return "receipt-keys";
   return undefined;
+}
+
+/**
+ * The well-formedness rule codes of version 5, in checking order: version
+ * 4's, with `questions` before `option-count`, and `option-count` and
+ * `selections` read per question.
+ */
+export type ElectionDefinitionV5Rule = ElectionDefinitionV4Rule | "questions";
+
+/**
+ * The first rule a version-5 definition breaks: its code and, for
+ * `option-count` and `selections`, the first failing question, which
+ * [[verifier]] 2.1 reports as `at` `{"question": q}`.
+ */
+export type ElectionDefinitionV5Failure =
+  | { readonly rule: "option-count" | "selections"; readonly question: number }
+  | { readonly rule: Exclude<ElectionDefinitionV5Rule, "option-count" | "selections"> };
+
+/**
+ * Version 5's `electionDefinitionRule` (docs/spec/election-definition.md,
+ * Well-formedness): the profile rules, then `questions` (non-empty),
+ * `option-count` (walking the questions, every `m_q ≥ 2` and the running
+ * total within `MAX_OPTIONS`, so the poll's whole option vector fits every
+ * per-option bound) and `selections` (each question's range answerable and
+ * not forbidding every answer), each naming the first failing question, then
+ * version 4's rules from `electorate` on. A question no ballot can answer
+ * would let an election register that no one can vote in (T-28, T-34).
+ */
+export function electionDefinitionV5Rule(
+  d: ElectionDefinitionV5,
+): ElectionDefinitionV5Failure | undefined {
+  const profileFailure = profileRule(d);
+  if (profileFailure !== undefined) return { rule: profileFailure };
+  const questionsFailure = questionsRule(d.questions);
+  if (questionsFailure !== undefined) return questionsFailure;
+  const rule = electorateV3Rule(d) ?? cellsRule(d) ?? tailRule(d) ?? receiptKeysRule(d);
+  return rule === undefined ? undefined : { rule };
+}
+
+function questionsRule(questions: readonly Question[]): ElectionDefinitionV5Failure | undefined {
+  if (questions.length === 0) return { rule: "questions" };
+  // Every question's count before any question's limits: `selections`
+  // compares against `m_q`, so it is read only once every `m_q` is in range.
+  let total = 0;
+  for (const [q, { option_count: m }] of questions.entries()) {
+    total += m;
+    if (m < 2 || total > DEFINITION_V5_LIMITS.maxOptions)
+      return { rule: "option-count", question: q };
+  }
+  for (const [q, x] of questions.entries())
+    if (
+      x.min_selections > x.max_selections ||
+      x.max_selections > x.option_count ||
+      x.max_selections < 1
+    )
+      return { rule: "selections", question: q };
+  return undefined;
+}
+
+/**
+ * The flat index of each question's first option under version 5
+ * (docs/spec/election-definition.md, Questions): `o_q = m_0 + … + m_{q−1}`,
+ * and `total`, the poll's `T`. The ballot, shares, openings and tally work
+ * over the `T` options in this order; results and display text name an
+ * option by (question, option).
+ */
+export function questionOffsets(questions: readonly Pick<Question, "option_count">[]): {
+  readonly offsets: readonly number[];
+  readonly total: number;
+} {
+  const offsets: number[] = [];
+  let total = 0;
+  for (const q of questions) {
+    offsets.push(total);
+    total += q.option_count;
+  }
+  return { offsets, total };
+}
+
+/** The flat index of option `option` of question `question`; throws outside the definition. */
+export function flatOptionIndex(
+  questions: readonly Pick<Question, "option_count">[],
+  question: number,
+  option: number,
+): number {
+  const m = questions[question]?.option_count;
+  if (!Number.isInteger(question) || m === undefined)
+    throw new RangeError("question outside the definition");
+  if (!Number.isInteger(option) || option < 0 || option >= m)
+    throw new RangeError("option outside the question");
+  return (questionOffsets(questions).offsets[question] as number) + option;
+}
+
+/** The (question, option) a flat index names; throws for an index at or past `T`. */
+export function questionOption(
+  questions: readonly Pick<Question, "option_count">[],
+  flat: number,
+): { readonly question: number; readonly option: number } {
+  if (!Number.isInteger(flat) || flat < 0) throw new RangeError("flat index outside the poll");
+  let first = 0;
+  for (const [q, { option_count: m }] of questions.entries()) {
+    if (flat < first + m) return { question: q, option: flat - first };
+    first += m;
+  }
+  throw new RangeError("flat index outside the poll");
 }
 
 function compareBytes(a: Uint8Array, b: Uint8Array): number {
@@ -363,7 +509,11 @@ type Head = Pick<
   "profile" | "election_type" | "option_count" | "min_selections" | "max_selections"
 >;
 
-function headRule(d: Head): ElectionDefinitionRule | undefined {
+// The same in every version: version 5's selection questions use the same
+// record types as plurality and approval.
+function profileRule(
+  d: Pick<ElectionDefinition, "profile">,
+): "protocol-major" | "profile-order" | "profile-types" | "profile-version" | undefined {
   const pinnedTypes = d.profile.pins.map((p) => p.record_type);
   if (d.profile.protocol_major !== 1) return "protocol-major";
   if (!strictlyAscending(pinnedTypes)) return "profile-order";
@@ -373,6 +523,12 @@ function headRule(d: Head): ElectionDefinitionRule | undefined {
   )
     return "profile-types";
   if (d.profile.pins.some((p) => p.version < 1)) return "profile-version";
+  return undefined;
+}
+
+function headRule(d: Head): ElectionDefinitionRule | undefined {
+  const profileFailure = profileRule(d);
+  if (profileFailure !== undefined) return profileFailure;
   if (d.option_count < 2 || d.option_count > DEFINITION_V1_LIMITS.maxOptions) return "option-count";
   if (
     d.min_selections > d.max_selections ||
@@ -406,7 +562,7 @@ function electorateV1Rule(d: ElectionDefinition): ElectionDefinitionRule | undef
   return undefined;
 }
 
-function electorateV3Rule(d: ElectionDefinitionV3): ElectionDefinitionRule | undefined {
+function electorateV3Rule(d: Pick<ElectionDefinitionV3, "electorate">): "electorate" | undefined {
   const tiers = d.electorate.map((t) => t.tier);
   if (tiers.length === 0 || !strictlyAscending(tiers)) return "electorate";
   const seen = new Set<bigint>();
@@ -428,7 +584,7 @@ function electorateV3Rule(d: ElectionDefinitionV3): ElectionDefinitionRule | und
   return undefined;
 }
 
-function cellsRule(d: ElectionDefinitionV3): ElectionDefinitionV3Rule | undefined {
+function cellsRule(d: Pick<ElectionDefinitionV3, "electorate">): "cells" | undefined {
   let total = 0;
   const roots = new Set<bigint>();
   for (const t of d.electorate) {
@@ -466,7 +622,7 @@ type Tail = Pick<
   | "l1_inclusion_bound"
 >;
 
-function tailRule(d: Tail): ElectionDefinitionRule | undefined {
+function tailRule(d: Tail): "panel" | "chain" | "timing" | undefined {
   // At least two trustees must combine shares: a 1-of-n panel lets one party
   // open every voter's sharing alone, which the brief forbids (T-14).
   if (

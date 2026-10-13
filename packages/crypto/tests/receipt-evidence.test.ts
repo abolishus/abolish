@@ -7,6 +7,8 @@ import {
   BOARD_TREE,
   boardEntryHash,
   calldataCarries,
+  checkBoard,
+  checkpointOf,
   disputeEnd,
   encodeBoardEntry,
   inclusionProof,
@@ -83,7 +85,15 @@ interface EvidenceVectors {
       | { kind: "definition"; keys: readonly { key: string; judgement: string }[] };
     readonly firstSegment: number;
     readonly anchors: readonly {
-      checkpoint: { electionId: string; segment: number; size: string; head: string; root: string };
+      checkpoint: {
+        electionId: string;
+        segment: number;
+        size: string;
+        head: string;
+        root: string;
+        objectCid: string;
+        hashesCid: string;
+      };
       anchoredAt: string;
     }[];
     readonly now: string;
@@ -135,6 +145,8 @@ function inputOf(v: VerdictVector): ReceiptJudgeInput {
         size: BigInt(a.checkpoint.size),
         head: hex(a.checkpoint.head),
         root: hex(a.checkpoint.root),
+        object_cid: hex(a.checkpoint.objectCid),
+        hashes_cid: hex(a.checkpoint.hashesCid),
       },
       anchoredAt: BigInt(a.anchoredAt),
     })),
@@ -368,19 +380,11 @@ describe("judgeReceipt", () => {
           const links: Uint8Array[] = [];
           for (const e of hashes) links.push(chainLink(links.at(-1) ?? new Uint8Array(32), e));
           const anchors: Anchor[] = [];
+          const board = checkBoard(electionId, entries, 1);
           for (let s = 0; s <= 3; s++) {
-            const size = segments.filter((x) => x <= s).length;
-            if (size === 0) continue;
-            anchors.push({
-              checkpoint: {
-                election_id: electionId,
-                segment: s,
-                size: BigInt(size),
-                head: links[size - 1] as Uint8Array,
-                root: merkleRoot(BOARD_TREE, hashes.slice(0, size)),
-              },
-              anchoredAt: BigInt((s + 1) * 100 + 5),
-            });
+            const checkpoint = checkpointOf(board, s);
+            if (checkpoint === undefined) continue;
+            anchors.push({ checkpoint, anchoredAt: BigInt((s + 1) * 100 + 5) });
           }
           const i = pick % entries.length;
           const signFor = (leaves: Uint8Array[], chain: Uint8Array) =>

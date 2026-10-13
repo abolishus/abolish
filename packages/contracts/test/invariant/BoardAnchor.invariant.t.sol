@@ -60,10 +60,26 @@ contract AnchorHandler is TestBase {
             uint64 size = uint64((r >> 16) % 4); // 0 sometimes: an empty board
             bytes32 head = keccak256(abi.encode(r, "head"));
             bytes32 root = keccak256(abi.encode(r, "root"));
-            cps = bytes.concat(cps, abi.encodePacked(id, segment, size, head, root));
+            // A misframed CID now and then (dag-cbor's codec): refused (T-17).
+            bool framed = (r >> 40) % 8 != 0;
+            bytes memory cp = abi.encodePacked(
+                id,
+                segment,
+                size,
+                head,
+                root,
+                framed ? bytes4(0x01551220) : bytes4(0x01711220),
+                keccak256(abi.encode(r, "object")),
+                bytes4(0x01701220),
+                keccak256(abi.encode(r, "hashes"))
+            );
+            cps = bytes.concat(cps, cp);
             bytes32 key = _key(id, segment);
             uint256 end = anchor.periodEnd(segment);
-            if (size == 0 || block.timestamp < end || block.timestamp - end > anchor.deadline()) {
+            if (
+                size == 0 || !framed || block.timestamp < end
+                    || block.timestamp - end > anchor.deadline()
+            ) {
                 allowed = false;
             }
             if (shadow[key] != bytes32(0)) allowed = false;
@@ -71,7 +87,7 @@ contract AnchorHandler is TestBase {
                 if (batch[j] == key) allowed = false;
             }
             batch[i] = key;
-            hashes[i] = CheckpointLib.hash(id, segment, size, head, root);
+            hashes[i] = CheckpointLib.hash(cp);
             if (!touched[key]) {
                 touched[key] = true;
                 keys.push(key);

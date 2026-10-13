@@ -413,6 +413,11 @@
       "tag": "abolish/v1/fs/ballot-validity/question-sum",
       "digest": "3fc77cbded2b03adccba0ce63ddff1efbb9b11c7d38699d20b147aa1f3cfedb2",
       "field": "112688175639024653444136469296598507391174418104057137160938993299360042989"
+    },
+    {
+      "tag": "abolish/v1/board-checkpoint-2",
+      "digest": "187f34a7b628f8d8231a2763280383d6b520aa866b81dbd85bd4b1e112abfa2b",
+      "field": "43282270920039322894105174223036961449796223482156867626179516236611890170"
     }
   ],
   "packBytes": [

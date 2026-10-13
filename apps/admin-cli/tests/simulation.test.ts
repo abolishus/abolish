@@ -50,7 +50,9 @@ describe("simulation", { timeout: 60_000 }, () => {
 
   test("plan reads a scenario file and prints the expected counts, ballots, challenges, re-votes, publications and postings, matching run's", async () => {
     const file = join(mkdtempSync(join(tmpdir(), "sim-")), "scenario.json");
-    writeFileSync(file, JSON.stringify({ ...scenario, revotes: 0.5, publications: 1 }));
+    // Seat 4 goes down halfway, so later ballots need one more posting.
+    const trustees = { panel: 4, threshold: 2, offline: [3], departures: [{ seat: 4, at: 0.5 }] };
+    writeFileSync(file, JSON.stringify({ ...scenario, trustees, revotes: 0.5, publications: 1 }));
     const plan = await cli("simulation", "plan", "--file", file);
     expect(plan.code).toBe(0);
     type Ballots = {
@@ -76,7 +78,7 @@ describe("simulation", { timeout: 60_000 }, () => {
     expect(out.ballots.superseded).toBeGreaterThan(0);
     // Every challenger publishes at share 1.
     expect(out.ballots.published).toBe(out.ballots.challenged);
-    // Some voters post the offline seat and the rest leave their ballots undelivered.
+    // Some voters post the down seats and the rest leave their ballots undelivered.
     expect(out.ballots.postings).toBeGreaterThan(0);
     expect(out.ballots.undelivered).toBeGreaterThan(0);
     const { server: _, ...ballots } = report.ballots;

@@ -4,12 +4,16 @@
 // (docs/spec/display-text.md).
 
 import { randomBytes } from "@noble/hashes/utils.js";
-import { DecodeError } from "./codec.ts";
+import { DecodeError, EncodeError } from "./codec.ts";
 import {
   DISPLAY_TEXT,
+  DISPLAY_TEXT_V2_LIMITS,
   type DisplayText,
   type DisplayTextRule,
   displayTextShapeRule,
+  type DisplayTextV2,
+  type DisplayTextV2Rule,
+  displayTextV2ShapeRule,
 } from "./display-text.ts";
 import { BOARD_ENTRY, type BoardEntryVersion, boardPayloadTypes } from "./board.ts";
 import { ds } from "./domain-separation.ts";
@@ -18,8 +22,11 @@ import {
   type ElectionDefinition,
   type ElectionDefinitionV3,
   type ElectionDefinitionV4,
+  type ElectionDefinitionV5,
+  type ElectionDefinitionV5Failure,
   electionDefinitionRule,
   type ElectionDefinitionRule,
+  electionDefinitionV5Rule,
 } from "./election-definition.ts";
 import { H } from "./group.ts";
 import { PARAMETERS } from "./parameters.ts";
@@ -60,11 +67,20 @@ export function encodeElectionDefinitionV4(d: ElectionDefinitionV4): Uint8Array 
   return PROTOCOL_SCHEMA.encode(ELECTION_DEFINITION, 4, d);
 }
 
-/** A decoded definition of any version this package reads. */
+export function encodeElectionDefinitionV5(d: ElectionDefinitionV5): Uint8Array {
+  return PROTOCOL_SCHEMA.encode(ELECTION_DEFINITION, 5, d);
+}
+
+/** A decoded definition of any version the verifier reads (1, 3 and 4). */
 export type ElectionDefinitionRecord =
   | { readonly version: 1; readonly value: ElectionDefinition }
   | { readonly version: 3; readonly value: ElectionDefinitionV3 }
   | { readonly version: 4; readonly value: ElectionDefinitionV4 };
+
+/** A decoded definition of any version this package reads. */
+type AnyElectionDefinitionRecord =
+  | ElectionDefinitionRecord
+  | { readonly version: 5; readonly value: ElectionDefinitionV5 };
 
 /**
  * Strictly decodes an election definition of any version, then checks it
@@ -74,7 +90,7 @@ export type ElectionDefinitionRecord =
  * could be created under a retired layout by labelling it with an older
  * version byte (T-34, T-31).
  */
-export function decodeElectionDefinitionRecord(bytes: Uint8Array): ElectionDefinitionRecord {
+function decodeAnyElectionDefinition(bytes: Uint8Array): AnyElectionDefinitionRecord {
   const record = PROTOCOL_SCHEMA.decode(ELECTION_DEFINITION, bytes, UNPINNED);
   // Exactly one pin for 0x0001, at the record's own version; a second pin,
   // whatever its order, is a mismatch too, so every decoder agrees.
@@ -85,6 +101,39 @@ export function decodeElectionDefinitionRecord(bytes: Uint8Array): ElectionDefin
   if (pins.length !== 1 || pins[0]?.version !== record.version)
     throw new DecodeError("profile-mismatch", 2);
   return record;
+}
+
+/**
+ * `decodeAnyElectionDefinition` for the verifier, which reads definition
+ * versions 1, 3 and 4: a version-5 definition is `unknown-version` at its
+ * version byte, read before any field as it was before version 5 had a
+ * layout, so the verifier leaves it unverifiable (2.3) until it reads
+ * questions (P2-14 part 5; T-36).
+ */
+export function decodeElectionDefinitionRecord(bytes: Uint8Array): ElectionDefinitionRecord {
+  if (
+    bytes instanceof Uint8Array &&
+    bytes.length >= 3 &&
+    bytes[0] === 0 &&
+    bytes[1] === RECORD_TYPES.electionDefinition &&
+    bytes[2] === 5
+  )
+    throw new DecodeError("unknown-version", 2);
+  const record = decodeAnyElectionDefinition(bytes);
+  // Unreachable: the version byte was read above.
+  if (record.version === 5) throw new DecodeError("unknown-version", 2);
+  return record;
+}
+
+/**
+ * `decodeAnyElectionDefinition` for callers that read only version 5
+ * (questions): a definition of any other version is `unknown-version` to
+ * them, after it has decoded under its own layout and pin.
+ */
+export function decodeElectionDefinitionV5(bytes: Uint8Array): ElectionDefinitionV5 {
+  const record = decodeAnyElectionDefinition(bytes);
+  if (record.version !== 5) throw new DecodeError("unknown-version", 2);
+  return record.value;
 }
 
 /**
@@ -112,6 +161,17 @@ export function electionDefinitionV3Hash(d: ElectionDefinitionV3): Uint8Array {
 /** `electionDefinitionHash` for version 4: the same tag over the version-4 encoding. */
 export function electionDefinitionV4Hash(d: ElectionDefinitionV4): Uint8Array {
   return H(ds("abolish/v1/election-definition", encodeElectionDefinitionV4(d)));
+}
+
+/** `electionDefinitionHash` for version 5: the same tag over the version-5 encoding. */
+export function electionDefinitionV5Hash(d: ElectionDefinitionV5): Uint8Array {
+  return H(ds("abolish/v1/election-definition", encodeElectionDefinitionV5(d)));
+}
+
+/** `electionStubHash` for version 5: the questions are in the stub, fixed before the ceremony (T-34). */
+export function electionStubV5Hash(d: ElectionDefinitionV5): Uint8Array {
+  const stub = { ...d, ceremony_transcript_hash: new Uint8Array(32) };
+  return H(ds("abolish/v1/election-stub", encodeElectionDefinitionV5(stub)));
 }
 
 /** `electionStubHash` for version 4: the receipt keys are in the stub, fixed before the ceremony (T-26). */
@@ -178,7 +238,8 @@ export type ProfileCombinationRule = "profile-combination" | "unsupported-versio
 /**
  * 2.3's `profile-combination` (docs/spec/verifier.md, 2.3), for the verifier
  * and for any client that must refuse an election bound to fail it
- * (docs/spec/delivery.md, Versions): ballot versions 1 and 2 need a
+ * (docs/spec/delivery.md, Versions): these definition versions pin
+ * display-text version 1, ballot versions 1 and 2 need a
  * board-entry version that carries share receipts and complaints (3 or 4),
  * definition versions 3 and 4 need ballot version 2 and only they pair with
  * it, ballot version 2 needs a spoiled-ballot opening version that opens its
@@ -205,6 +266,12 @@ export function profileCombinationRule(
   const ballot = pinnedVersion(d, RECORD_TYPES.ballot);
   const opening = pinnedVersion(d, RECORD_TYPES.tallyOpening);
   if (ballot === undefined || opening === undefined) return "profile-combination";
+  // Definition versions 1, 3 and 4 have one question, so display-text
+  // version 1; version 2 carries questions and pairs with definition version
+  // 5 or 6 only. A display-text version this package doesn't know fails
+  // rather than being unsupported: a later one comes with a later definition
+  // version that pins it, so releases never split on it (T-34, T-36, T-41).
+  if (pinnedVersion(d, RECORD_TYPES.displayText) !== 1) return "profile-combination";
   // Regional cells need a ballot that names its cell, and a ballot naming a
   // cell needs a partition of cells: definition versions 3 and 4 pin exactly
   // the ballot versions that name their cell, and every other definition
@@ -243,6 +310,23 @@ export function encodeDisplayText(t: DisplayText): Uint8Array {
 }
 
 /**
+ * Encodes a version-2 display-text record, refusing one longer than
+ * `MAX_DISPLAY_TEXT` (docs/spec/display-text.md, Size): every decoder rejects
+ * it, so a definition committed to it would register a poll no one could be
+ * shown, and so vote in through our client (T-52, T-53). Creation commits
+ * through `displayTextV2Commitment`, which encodes here, so it can't commit
+ * to such a record either.
+ */
+export function encodeDisplayTextV2(t: DisplayTextV2): Uint8Array {
+  const bytes = PROTOCOL_SCHEMA.encode(DISPLAY_TEXT, 2, t);
+  if (bytes.length > DISPLAY_TEXT_V2_LIMITS.maxRecord)
+    throw new EncodeError(
+      `display text is ${bytes.length} bytes, over MAX_DISPLAY_TEXT (${DISPLAY_TEXT_V2_LIMITS.maxRecord})`,
+    );
+  return bytes;
+}
+
+/**
  * Strictly decodes a display-text record against the version `definition`'s
  * profile pins. A definition that pins none, or one this package can't
  * decode, is the caller's error: it should have failed well-formedness or
@@ -251,7 +335,10 @@ export function encodeDisplayText(t: DisplayText): Uint8Array {
 export function decodeDisplayText(bytes: Uint8Array, definition: ElectionDefinition): DisplayText {
   const pinned = pinnedVersion(definition, RECORD_TYPES.displayText);
   if (pinned !== 1) throw new UnsupportedVersionError(RECORD_TYPES.displayText, pinned);
-  return PROTOCOL_SCHEMA.decode(DISPLAY_TEXT, bytes, pinned).value;
+  const record = PROTOCOL_SCHEMA.decode(DISPLAY_TEXT, bytes, pinned);
+  // Unreachable: the pin is 1, so any other version is profile-mismatch.
+  if (record.version !== 1) throw new DecodeError("profile-mismatch", 2);
+  return record.value;
 }
 
 /** `H(DS("abolish/v1/display-text", encode(record)))`, salt included. */
@@ -274,6 +361,52 @@ export function displayTextRule(
   // Not secret, so no constant-time comparison is needed.
   if (!sameBytes(displayTextCommitment(t), definition.display_text_commitment)) return "commitment";
   return displayTextShapeRule(t, definition.option_count);
+}
+
+/**
+ * Strictly decodes a version-2 display-text record for a version-5
+ * definition, which must pin display-text version 2 ([[verifier]] 2.3);
+ * another pin is `UnsupportedVersionError`, as for `decodeDisplayText`. An
+ * input longer than `MAX_DISPLAY_TEXT` is `length-over-max` at offset 0
+ * before its header is read, so a hostile record is rejected on its length
+ * alone (docs/spec/display-text.md, Size; T-52).
+ */
+export function decodeDisplayTextV2(
+  bytes: Uint8Array,
+  definition: ElectionDefinitionV5,
+): DisplayTextV2 {
+  const pinned = pinnedVersion(definition, RECORD_TYPES.displayText);
+  if (pinned !== 2) throw new UnsupportedVersionError(RECORD_TYPES.displayText, pinned);
+  if (!(bytes instanceof Uint8Array)) throw new TypeError("decode: input must be a Uint8Array");
+  if (bytes.length > DISPLAY_TEXT_V2_LIMITS.maxRecord) throw new DecodeError("length-over-max", 0);
+  const record = PROTOCOL_SCHEMA.decode(DISPLAY_TEXT, bytes, pinned);
+  // Unreachable: the pin is 2, so any other version is profile-mismatch.
+  if (record.version !== 2) throw new DecodeError("profile-mismatch", 2);
+  return record.value;
+}
+
+/** `displayTextCommitment` for version 2: the same tag over the version-2 encoding. */
+export function displayTextV2Commitment(t: DisplayTextV2): Uint8Array {
+  return H(ds("abolish/v1/display-text", encodeDisplayTextV2(t)));
+}
+
+/**
+ * `displayTextRule` for version 2: the first rule a record breaks for a
+ * version-5 definition, commitment first, or `undefined` if a client may show
+ * it: exactly the definition's questions, each with exactly its options
+ * (docs/spec/display-text.md, Checks; T-34, T-41).
+ */
+export function displayTextV2Rule(
+  t: DisplayTextV2,
+  definition: ElectionDefinitionV5,
+): DisplayTextV2Rule | undefined {
+  // Not secret, so no constant-time comparison is needed.
+  if (!sameBytes(displayTextV2Commitment(t), definition.display_text_commitment))
+    return "commitment";
+  return displayTextV2ShapeRule(
+    t,
+    definition.questions.map((q) => q.option_count),
+  );
 }
 
 /**
@@ -352,6 +485,94 @@ export function checkElectionToShow(
   if (textRule !== undefined)
     return { ok: false, problem: "display-text-ill-formed", rule: textRule };
   return { ok: true, definition, displayText };
+}
+
+/** Why `checkElectionRecordToShow` refuses: `ShowRefusal`, with version 5's rules. */
+export type ShowRecordRefusal =
+  | Exclude<ShowRefusal, { readonly problem: "definition-ill-formed" | "display-text-ill-formed" }>
+  | ({ readonly problem: "definition-ill-formed" } & (
+      | { readonly rule: ElectionDefinitionRule }
+      | ElectionDefinitionV5Failure
+    ))
+  | {
+      readonly problem: "display-text-ill-formed";
+      readonly rule: DisplayTextRule | DisplayTextV2Rule;
+    };
+
+export type ShowRecordCheck =
+  | {
+      readonly ok: true;
+      readonly version: 1;
+      readonly definition: ElectionDefinition;
+      readonly displayText: DisplayText;
+    }
+  | {
+      readonly ok: true;
+      readonly version: 5;
+      readonly definition: ElectionDefinitionV5;
+      readonly displayText: DisplayTextV2;
+    }
+  | ({ readonly ok: false } & ShowRecordRefusal);
+
+/**
+ * `checkElectionToShow` for definition versions 1 and 5: the same checks in
+ * the same order, under the definition's own version, with version 5's
+ * questions read against display-text version 2 (docs/spec/display-text.md,
+ * Checks): every question, each with exactly its options, commitment first.
+ * A version-5 refusal for `option-count` or `selections` names the first
+ * failing question. Definition versions 3 and 4 are refused as
+ * `definition-undecodable`, as `checkElectionToShow` refuses them, until a
+ * client checks regional cells before showing one (T-34, T-41, G-6).
+ */
+export function checkElectionRecordToShow(
+  electionId: Uint8Array,
+  registeredHash: Uint8Array,
+  definitionBytes: Uint8Array,
+  displayTextBytes: Uint8Array,
+): ShowRecordCheck {
+  if (!(electionId instanceof Uint8Array) || electionId.length !== 32)
+    throw new TypeError("electionId must be 32 bytes");
+  if (!(registeredHash instanceof Uint8Array) || registeredHash.length !== 32)
+    throw new TypeError("registeredHash must be 32 bytes");
+  let record;
+  try {
+    record = decodeAnyElectionDefinition(definitionBytes);
+  } catch (error) {
+    if (error instanceof DecodeError) return { ok: false, problem: "definition-undecodable" };
+    throw error;
+  }
+  if (record.version !== 5) {
+    const checked = checkElectionToShow(
+      electionId,
+      registeredHash,
+      definitionBytes,
+      displayTextBytes,
+    );
+    return checked.ok ? { ...checked, version: 1 } : checked;
+  }
+  const definition = record.value;
+  // Not secret, so no constant-time comparison is needed.
+  if (!sameBytes(definition.election_id, electionId))
+    return { ok: false, problem: "another-election" };
+  if (!sameBytes(electionDefinitionV5Hash(definition), registeredHash))
+    return { ok: false, problem: "unregistered-definition" };
+  const definitionFailure = electionDefinitionV5Rule(definition);
+  if (definitionFailure !== undefined)
+    return { ok: false, problem: "definition-ill-formed", ...definitionFailure };
+  let displayText;
+  try {
+    displayText = decodeDisplayTextV2(displayTextBytes, definition);
+  } catch (error) {
+    // A well-formed definition may pin a display-text version other than 2,
+    // which 2.3 fails; that is refused like bytes that don't decode.
+    if (error instanceof DecodeError || error instanceof UnsupportedVersionError)
+      return { ok: false, problem: "display-text-undecodable" };
+    throw error;
+  }
+  const textRule = displayTextV2Rule(displayText, definition);
+  if (textRule !== undefined)
+    return { ok: false, problem: "display-text-ill-formed", rule: textRule };
+  return { ok: true, version: 5, definition, displayText };
 }
 
 /** A fresh display-text salt, from the platform CSPRNG (docs/spec/display-text.md; T-39). */

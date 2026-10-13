@@ -11,12 +11,8 @@ contract AuthorityStub {}
 
 /// Exposes the checkpoint hash for the vector tests.
 contract CheckpointHarness {
-    function hash(bytes32 electionId, uint32 segment, uint64 size, bytes32 head, bytes32 root)
-        external
-        pure
-        returns (bytes32)
-    {
-        return CheckpointLib.hash(electionId, segment, size, head, root);
+    function hash(bytes memory encoded) external pure returns (bytes32) {
+        return CheckpointLib.hash(encoded);
     }
 }
 
@@ -60,10 +56,10 @@ contract BoardAnchorTest is TestBase {
         for (uint256 i; vm.keyExistsJson(json, _board(i)); i++) {
             for (uint256 j; vm.keyExistsJson(json, _checkpoint(i, j)); j++) {
                 string memory c = _checkpoint(i, j);
-                (bytes32 id, uint32 s, uint64 size, bytes32 head, bytes32 root) =
-                    _parseCheckpoint(json, c);
                 assertEq(
-                    lib.hash(id, s, size, head, root), _bytes32(json, string.concat(c, ".hash")), c
+                    lib.hash(_parseCheckpoint(json, c)),
+                    _bytes32(json, string.concat(c, ".hash")),
+                    c
                 );
                 seen++;
             }
@@ -82,11 +78,11 @@ contract BoardAnchorTest is TestBase {
         uint256 j;
         for (; vm.keyExistsJson(json, _checkpoint(0, j)); j++) {
             string memory c = _checkpoint(0, j);
-            (bytes32 id, uint32 s, uint64 size, bytes32 head, bytes32 root) =
-                _parseCheckpoint(json, c);
+            bytes32 id = _bytes32(json, string.concat(c, ".electionId"));
+            uint32 s = uint32(vm.parseUint(vm.parseJsonString(json, string.concat(c, ".segment"))));
             vm.warp(vm.parseUint(vm.parseJsonString(json, string.concat(c, ".anchoredAt"))));
             vm.prank(authority);
-            anchor.anchor(abi.encodePacked(id, s, size, head, root), "");
+            anchor.anchor(_parseCheckpoint(json, c), "");
             assertEq(anchor.checkpointHashOf(id, s), _bytes32(json, string.concat(c, ".hash")), c);
         }
         assertTrue(j >= 4, "valid board has too few anchors");
@@ -145,7 +141,7 @@ contract BoardAnchorTest is TestBase {
         vm.prank(authority);
         anchor.anchor(_encode(ID, 2, 5, bytes32("head"), bytes32("root")), "");
         Vm.Log[] memory logs = vm.getRecordedLogs();
-        bytes32 h = lib.hash(ID, 2, 5, bytes32("head"), bytes32("root"));
+        bytes32 h = _hash(ID, 2, 5, bytes32("head"), bytes32("root"));
         assertEq(anchor.checkpointHashOf(ID, 2), h, "stored hash");
         assertEq(logs.length, 1, "one log");
         assertEq(logs[0].topics.length, 4, "topics");
@@ -155,7 +151,15 @@ contract BoardAnchorTest is TestBase {
         assertEq(logs[0].topics[3], h, "hash topic");
         assertTrue(
             keccak256(logs[0].data)
-                == keccak256(abi.encode(uint64(5), bytes32("head"), bytes32("root"))),
+                == keccak256(
+                    abi.encode(
+                        uint64(5),
+                        bytes32("head"),
+                        bytes32("root"),
+                        _objectCid(bytes32("head")),
+                        _hashesCid(bytes32("root"))
+                    )
+                ),
             "data"
         );
         _assertAccumulated(logs);
@@ -193,9 +197,9 @@ contract BoardAnchorTest is TestBase {
             ""
         );
         assertEq(vm.getRecordedLogs().length, 3, "logs");
-        assertEq(anchor.checkpointHashOf(ID, 0), lib.hash(ID, 0, 1, "a", "b"), "first");
-        assertEq(anchor.checkpointHashOf(other, 0), lib.hash(other, 0, 9, "c", "d"), "second");
-        assertEq(anchor.checkpointHashOf(ID, 1), lib.hash(ID, 1, 3, "e", "f"), "third");
+        assertEq(anchor.checkpointHashOf(ID, 0), _hash(ID, 0, 1, "a", "b"), "first");
+        assertEq(anchor.checkpointHashOf(other, 0), _hash(other, 0, 9, "c", "d"), "second");
+        assertEq(anchor.checkpointHashOf(ID, 1), _hash(ID, 1, 3, "e", "f"), "third");
     }
 
     /// T-52: no one but the authority can anchor, so no one can front-run an
@@ -223,6 +227,48 @@ contract BoardAnchorTest is TestBase {
             _encode(ID, 0, 0, bytes32(0), bytes32(0)),
             abi.encodeWithSelector(BoardAnchor.EmptyBoard.selector, ID, uint32(0))
         );
+    }
+
+    /// T-17: each CID is framed as the content-addressing spec's CIDs are,
+    /// so only its digest is the authority's choice; a raw or dag-pb root
+    /// is accepted, anything else in any of the four prefix bytes refused.
+    function test_RefusesMalformedCids() public {
+        vm.warp(EPOCH + PERIOD);
+        bytes memory refusal =
+            abi.encodeWithSelector(BoardAnchor.MalformedCid.selector, ID, uint32(0));
+        bytes32 digest = sha256("segment");
+        bytes[6] memory bad = [
+            abi.encodePacked(hex"00551220", digest), // CIDv0's version byte
+            abi.encodePacked(hex"02551220", digest),
+            abi.encodePacked(hex"01711220", digest), // dag-cbor
+            abi.encodePacked(hex"01551320", digest), // sha2-512's code
+            abi.encodePacked(hex"01551221", digest),
+            abi.encodePacked(hex"0155121f", digest)
+        ];
+        bytes memory good = abi.encodePacked(hex"01551220", digest);
+        for (uint256 i; i < bad.length; i++) {
+            _expectRefused(_encodeWith(ID, 0, 1, "h", "r", bad[i], good), refusal);
+            _expectRefused(_encodeWith(ID, 0, 1, "h", "r", good, bad[i]), refusal);
+        }
+        assertEq(anchor.checkpointHashOf(ID, 0), bytes32(0), "stored");
+        vm.prank(authority);
+        anchor.anchor(
+            _encodeWith(ID, 0, 1, "h", "r", good, abi.encodePacked(hex"01701220", digest)), ""
+        );
+        assertTrue(anchor.checkpointHashOf(ID, 0) != bytes32(0), "a framed checkpoint refused");
+    }
+
+    /// Any CID prefix but the two the spec allows is refused.
+    function testFuzz_OnlyFramedCidsAreStored(bytes4 prefix, bool second) public {
+        vm.warp(EPOCH + PERIOD);
+        bytes memory cid = abi.encodePacked(prefix, sha256("segment"));
+        bytes memory good = abi.encodePacked(hex"01551220", sha256("segment"));
+        bytes memory cp = second
+            ? _encodeWith(ID, 0, 1, "h", "r", good, cid)
+            : _encodeWith(ID, 0, 1, "h", "r", cid, good);
+        vm.prank(authority);
+        (bool ok,) = address(anchor).call(abi.encodeCall(BoardAnchor.anchor, (cp, bytes(""))));
+        assertTrue(ok == (prefix == 0x01551220 || prefix == 0x01701220), "acceptance");
     }
 
     /// docs/spec/board.md, Timing: from the period's end to `deadline` after
@@ -323,7 +369,7 @@ contract BoardAnchorTest is TestBase {
 
     function test_RefusesLengthsThatAreNotWholeCheckpoints() public {
         vm.warp(EPOCH + PERIOD);
-        uint256[4] memory lengths = [uint256(1), 107, 109, 215];
+        uint256[4] memory lengths = [uint256(1), 179, 181, 359];
         for (uint256 i; i < 4; i++) {
             _expectRefused(
                 new bytes(lengths[i]),
@@ -341,14 +387,14 @@ contract BoardAnchorTest is TestBase {
         bytes memory cp = _encode(ID, 0, 1, "h", "r");
         bytes memory loc = _locator(1, 32);
         bytes memory good = abi.encodeCall(BoardAnchor.anchor, (cp, loc));
-        // Offsets in the head: 0x40, then 0x40 + 32 + 128 (108 bytes padded).
+        // Offsets in the head: 0x40, then 0x40 + 32 + 192 (180 bytes padded).
         assertEq(_word(good, 4), 0x40, "first offset");
-        assertEq(_word(good, 36), 0x40 + 32 + 128, "second offset");
+        assertEq(_word(good, 36), 0x40 + 32 + 192, "second offset");
         bytes[] memory bad = new bytes[](6);
         bad[0] = bytes.concat(good, bytes32(0)); // a trailing word
         bad[1] = bytes.concat(good, hex"00"); // a trailing byte
         bad[2] = bytes.concat(good); // a copy: `good` must stay canonical
-        bad[2][4 + 64 + 32 + 108] = 0x01; // dirty padding after the checkpoints
+        bad[2][4 + 64 + 32 + 180] = 0x01; // dirty padding after the checkpoints
         bad[3] = bytes.concat(good);
         bad[3][good.length - 1] = 0x01; // dirty padding after the locator (34 bytes)
         // The tails swapped: the second offset points before the first.
@@ -361,17 +407,17 @@ contract BoardAnchorTest is TestBase {
             bytes30(0),
             uint256(cp.length),
             cp,
-            bytes20(0)
+            bytes12(0)
         );
         // A junk word between the head and the first tail.
         bad[5] = abi.encodePacked(
             BoardAnchor.anchor.selector,
             uint256(0x60),
-            uint256(0x60 + 32 + 128),
+            uint256(0x60 + 32 + 192),
             uint256(0),
             uint256(cp.length),
             cp,
-            bytes20(0),
+            bytes12(0),
             uint256(loc.length),
             loc,
             bytes30(0)
@@ -387,29 +433,40 @@ contract BoardAnchorTest is TestBase {
     }
 
     /// The second offset can't point back into the first argument's data:
-    /// here it points at the last word of eight checkpoints (whose last root
-    /// is 34), so the locator's "length" is read from a root and 32 junk bytes
-    /// trail the call at the canonical total length.
+    /// here it points at the last word of eight checkpoints (whose last
+    /// digest is 34), so the locator's "length" is read from a CID and 32
+    /// junk bytes trail the call at the canonical total length.
     function test_RefusesASecondArgumentInsideTheFirst() public {
         vm.warp(EPOCH + PERIOD);
         bytes memory cps;
         for (uint256 i; i < 7; i++) {
             cps = bytes.concat(cps, _encode(bytes32(i), 0, 1, "h", "r"));
         }
-        cps = bytes.concat(cps, _encode(bytes32(uint256(7)), 0, 1, "h", bytes32(uint256(34))));
-        assertEq(cps.length, 864, "a whole number of words");
+        cps = bytes.concat(
+            cps,
+            _encodeWith(
+                bytes32(uint256(7)),
+                0,
+                1,
+                "h",
+                "r",
+                _objectCid("h"),
+                abi.encodePacked(hex"01551220", bytes32(uint256(34)))
+            )
+        );
+        assertEq(cps.length, 1440, "a whole number of words");
         bytes memory loc = _locator(1, 32);
         bytes memory call = abi.encodePacked(
             BoardAnchor.anchor.selector,
             uint256(0x40),
-            uint256(0x40 + 32 + 864 - 32),
+            uint256(0x40 + 32 + 1440 - 32),
             uint256(cps.length),
             cps,
             loc,
             bytes30(0),
             bytes32("junk")
         );
-        assertEq(call.length, 4 + 128 + 864 + 64, "the canonical total length");
+        assertEq(call.length, 4 + 128 + 1440 + 64, "the canonical total length");
         vm.prank(authority);
         (bool ok, bytes memory ret) = address(anchor).call(call);
         _assertRefused(ok, ret, abi.encodeWithSelector(_nonCanonical()));
@@ -575,8 +632,7 @@ contract BoardAnchorTest is TestBase {
     function test_AnchorsCarryNoText() public {
         string memory json = vm.readFile(VECTORS);
         string memory c = _checkpoint(0, 0);
-        (bytes32 id, uint32 s, uint64 size, bytes32 head, bytes32 root) = _parseCheckpoint(json, c);
-        bytes memory cp = _encode(id, s, size, head, root);
+        bytes memory cp = _parseCheckpoint(json, c);
         vm.warp(EPOCH + PERIOD);
         vm.recordLogs();
         vm.prank(authority);
@@ -1030,7 +1086,7 @@ contract BoardAnchorTest is TestBase {
         assertTrue(ok == allowed, "acceptance");
         assertEq(
             anchor.checkpointHashOf(id, segment),
-            ok ? lib.hash(id, segment, size, head, root) : bytes32(0),
+            ok ? _hash(id, segment, size, head, root) : bytes32(0),
             "stored"
         );
     }
@@ -1089,12 +1145,46 @@ contract BoardAnchorTest is TestBase {
         return bytes4(keccak256("NonCanonicalCalldata()"));
     }
 
+    /// A checkpoint with framed CIDs derived from its head and root, so
+    /// checkpoints with different heads or roots name different objects.
+    /// The digests are keccak256, never sha256: a precompile call would take
+    /// the `prank` meant for the anchor call it is an argument of.
     function _encode(bytes32 id, uint32 segment, uint64 size, bytes32 head, bytes32 root)
         internal
         pure
         returns (bytes memory)
     {
-        return abi.encodePacked(id, segment, size, head, root);
+        return _encodeWith(id, segment, size, head, root, _objectCid(head), _hashesCid(root));
+    }
+
+    function _encodeWith(
+        bytes32 id,
+        uint32 segment,
+        uint64 size,
+        bytes32 head,
+        bytes32 root,
+        bytes memory objectCid,
+        bytes memory hashesCid
+    ) internal pure returns (bytes memory) {
+        return abi.encodePacked(id, segment, size, head, root, objectCid, hashesCid);
+    }
+
+    /// A raw-leaf CID (`0x01 ‖ 0x55 ‖ 0x12 ‖ 0x20 ‖ digest`).
+    function _objectCid(bytes32 head) internal pure returns (bytes memory) {
+        return abi.encodePacked(hex"01551220", keccak256(abi.encode("object", head)));
+    }
+
+    /// A dag-pb CID, so both codecs are exercised.
+    function _hashesCid(bytes32 root) internal pure returns (bytes memory) {
+        return abi.encodePacked(hex"01701220", keccak256(abi.encode("hashes", root)));
+    }
+
+    function _hash(bytes32 id, uint32 segment, uint64 size, bytes32 head, bytes32 root)
+        internal
+        view
+        returns (bytes32)
+    {
+        return lib.hash(_encode(id, segment, size, head, root));
     }
 
     function _slot(bytes32 id, uint32 segment) internal pure returns (bytes32) {
@@ -1178,15 +1268,20 @@ contract BoardAnchorTest is TestBase {
         return bytes32(vm.parseBytes(vm.parseJsonString(json, key)));
     }
 
+    /// `encode(checkpoint)` from a board.json checkpoint's fields.
     function _parseCheckpoint(string memory json, string memory c)
         internal
         pure
-        returns (bytes32 id, uint32 s, uint64 size, bytes32 head, bytes32 root)
+        returns (bytes memory)
     {
-        id = _bytes32(json, string.concat(c, ".electionId"));
-        s = uint32(vm.parseUint(vm.parseJsonString(json, string.concat(c, ".segment"))));
-        size = uint64(vm.parseUint(vm.parseJsonString(json, string.concat(c, ".size"))));
-        head = _bytes32(json, string.concat(c, ".head"));
-        root = _bytes32(json, string.concat(c, ".root"));
+        return _encodeWith(
+            _bytes32(json, string.concat(c, ".electionId")),
+            uint32(vm.parseUint(vm.parseJsonString(json, string.concat(c, ".segment")))),
+            uint64(vm.parseUint(vm.parseJsonString(json, string.concat(c, ".size")))),
+            _bytes32(json, string.concat(c, ".head")),
+            _bytes32(json, string.concat(c, ".root")),
+            vm.parseBytes(vm.parseJsonString(json, string.concat(c, ".objectCid"))),
+            vm.parseBytes(vm.parseJsonString(json, string.concat(c, ".hashesCid")))
+        );
     }
 }

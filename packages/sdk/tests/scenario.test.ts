@@ -11,15 +11,28 @@ import {
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
 
 const seatsOf = (panel: number) =>
-  fc
-    .subarray(Array.from({ length: panel }, (_, i) => i + 1))
-    .chain((offline) =>
-      fc
-        .subarray(
-          Array.from({ length: panel }, (_, i) => i + 1).filter((s) => !offline.includes(s)),
-        )
-        .map((faulty) => ({ offline, faulty })),
-    );
+  fc.subarray(Array.from({ length: panel }, (_, i) => i + 1)).chain((offline) =>
+    fc
+      .subarray(Array.from({ length: panel }, (_, i) => i + 1).filter((s) => !offline.includes(s)))
+      .chain((faulty) =>
+        fc
+          .subarray(
+            Array.from({ length: panel }, (_, i) => i + 1).filter(
+              (s) => !offline.includes(s) && !faulty.includes(s),
+            ),
+          )
+          .chain((leaving) =>
+            fc.tuple(
+              ...leaving.map((seat) =>
+                fc
+                  .double({ min: 0, max: 1, noNaN: true, minExcluded: true })
+                  .map((at) => ({ seat, at })),
+              ),
+            ),
+          )
+          .map((departures) => ({ offline, faulty, departures })),
+      ),
+  );
 
 const scenario: fc.Arbitrary<Scenario> = fc.integer({ min: 2, max: 16 }).chain((panel) =>
   fc
@@ -64,7 +77,7 @@ const valid: Scenario = {
   voters: 100,
   election: "plurality",
   options: 3,
-  trustees: { panel: 7, threshold: 4, offline: [2, 5], faulty: [] },
+  trustees: { panel: 7, threshold: 4, offline: [2, 5], faulty: [], departures: [] },
   tiers: { "0": 50, "1": 30, "2": 20 },
   outage: { from: 0.5, to: 1 },
   challenges: 0.1,
@@ -105,7 +118,7 @@ describe("parseScenario", () => {
         voters: 1,
         election: "approval",
         options: 2,
-        trustees: { panel: 2, threshold: 2, offline: [], faulty: [] },
+        trustees: { panel: 2, threshold: 2, offline: [], faulty: [], departures: [] },
         tiers: { "0": 0, "1": 1, "2": 0 },
         outage: null,
         challenges: 0,
@@ -128,9 +141,17 @@ describe("parseScenario", () => {
 
   it("reads only the object's own fields, never inherited ones", () => {
     expect(refusal(Object.create(valid))).toBe("$.voters");
-    const t = Object.create({ offline: [9] });
+    const t = Object.create({ offline: [9], departures: [{ seat: 2, at: 0.5 }] });
     Object.assign(t, { panel: 5, threshold: 3 });
-    expect(parseScenario({ ...valid, trustees: t })).toMatchObject({ ok: true });
+    expect(parseScenario({ ...valid, trustees: t })).toMatchObject({
+      ok: true,
+      scenario: { trustees: { offline: [], departures: [] } },
+    });
+    const d = Object.create({ at: 0.5 });
+    Object.assign(d, { seat: 2 });
+    expect(refusal({ ...valid, trustees: { panel: 5, threshold: 3, departures: [d] } })).toBe(
+      "$.trustees.departures[0].at",
+    );
     expect(refusal({ ...valid, tiers: Object.create({ "0": 1 }) })).toBe("$.tiers");
     const { outage: _, ...noOutage } = valid;
     const inherited = Object.assign(Object.create({ outage: { from: 0, to: 1 } }), noOutage);
@@ -214,6 +235,34 @@ describe("parseScenario", () => {
     // oxlint-disable-next-line no-sparse-arrays -- the hole is the input under test
     expect(t({ offline: [1, , 3] })).toBe("$.trustees.offline[1]");
     expect(t({ faulty: null })).toBe("$.trustees.faulty");
+  });
+
+  it("refuses departures outside the panel, repeated or out of order, at 0 or past the period, or of an offline or faulty seat", () => {
+    const t = (departures: unknown, more: object = {}) =>
+      refusal({ ...valid, trustees: { panel: 5, threshold: 3, departures, ...more } });
+    const d = (seat: unknown, at: unknown) => ({ seat, at });
+    expect(t([d(6, 0.5)])).toBe("$.trustees.departures[0].seat");
+    expect(t([d(0, 0.5)])).toBe("$.trustees.departures[0].seat");
+    expect(t([d(2, 0.5), d(2, 0.7)])).toBe("$.trustees.departures");
+    expect(t([d(3, 0.5), d(2, 0.7)])).toBe("$.trustees.departures");
+    // A seat down from the start is offline, never a departure.
+    expect(t([d(2, 0)])).toBe("$.trustees.departures[0].at");
+    expect(t([d(2, 1.1)])).toBe("$.trustees.departures[0].at");
+    expect(t([d(2, -0.1)])).toBe("$.trustees.departures[0].at");
+    expect(t([d(2, Number.NaN)])).toBe("$.trustees.departures[0].at");
+    expect(t([d(2, "0.5")])).toBe("$.trustees.departures[0].at");
+    expect(t([{ seat: 2 }])).toBe("$.trustees.departures[0].at");
+    expect(t([{ seat: 2, at: 0.5, back: 0.7 }])).toBe("$.trustees.departures[0].back");
+    expect(t([d(2, 0.5)], { offline: [2] })).toBe("$.trustees.departures[0].seat");
+    expect(t([d(1, 0.5), d(2, 0.5)], { faulty: [2] })).toBe("$.trustees.departures[1].seat");
+    expect(t(null)).toBe("$.trustees.departures");
+    expect(t([null])).toBe("$.trustees.departures[0]");
+    // oxlint-disable-next-line no-sparse-arrays -- the hole is the input under test
+    expect(t([d(1, 0.5), , d(3, 0.5)])).toBe("$.trustees.departures[1]");
+    // A departure at the period's end takes every ballot and misses only the tally.
+    expect(
+      parseScenario({ ...valid, trustees: { panel: 5, threshold: 3, departures: [d(4, 1)] } }).ok,
+    ).toBe(true);
   });
 
   it("refuses a scenario whose voters × options × panel, doubled with re-votes, exceeds the work bound", () => {

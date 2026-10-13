@@ -17,6 +17,7 @@ import {
   u32,
   u64,
 } from "./codec.ts";
+import { objectCid } from "./content-addressing.ts";
 import { ds } from "./domain-separation.ts";
 import { H } from "./group.ts";
 import { BOARD_TREE, merkleRoots } from "./merkle.ts";
@@ -182,12 +183,16 @@ export function boardEntryHash(encodedEntry: Uint8Array): Uint8Array {
   return H(ds("abolish/v1/board-entry", copyBytes(encodedEntry, "encodedEntry")));
 }
 
-const checkpointV1 = struct([
+// Version 2 (docs/adr/0029-board-data-availability.md): version 1 had no
+// content addresses and was never anchored, so it is gone, and its tag retired.
+const checkpointV2 = struct([
   ["election_id", bytesFixed(32)],
   ["segment", u32],
   ["size", u64],
   ["head", bytesFixed(32)],
   ["root", bytesFixed(32)],
+  ["object_cid", bytesFixed(36)],
+  ["hashes_cid", bytesFixed(36)],
 ] as const);
 
 /**
@@ -206,21 +211,59 @@ export function chainLink(previous: Uint8Array, entryHash: Uint8Array): Uint8Arr
 }
 
 /** A board checkpoint: the board's state after one segment (docs/spec/board.md). */
-export type Checkpoint = CodecValue<typeof checkpointV1>;
+export type Checkpoint = CodecValue<typeof checkpointV2>;
 
-/** `H(DS("abolish/v1/board-checkpoint", encode(checkpoint)))`, the value P4-1 anchors. */
+/** `H(DS("abolish/v1/board-checkpoint-2", encode(checkpoint)))`, the value P4-1 anchors. */
 export function checkpointHash(checkpoint: Checkpoint): Uint8Array {
-  return H(ds("abolish/v1/board-checkpoint", encode(checkpointV1, checkpoint)));
+  return H(ds("abolish/v1/board-checkpoint-2", encode(checkpointV2, checkpoint)));
 }
 
-/** `encode(checkpoint)`: 108 bytes, `election_id ‖ u32(segment) ‖ u64(size) ‖ head ‖ root`. */
+/**
+ * `encode(checkpoint)`: 180 bytes, `election_id ‖ u32(segment) ‖ u64(size) ‖
+ * head ‖ root ‖ object_cid ‖ hashes_cid`.
+ */
 export function encodeCheckpoint(checkpoint: Checkpoint): Uint8Array {
-  return encode(checkpointV1, checkpoint);
+  return encode(checkpointV2, checkpoint);
 }
 
 /** Strictly decodes `encode(checkpoint)`. Throws `DecodeError` on any other length. */
 export function decodeCheckpoint(bytes: Uint8Array): Checkpoint {
-  return decode(checkpointV1, copyBytes(bytes, "bytes"));
+  return decode(checkpointV2, copyBytes(bytes, "bytes"));
+}
+
+/**
+ * A checkpoint's `object_cid` and `hashes_cid` (docs/spec/board.md, Segments
+ * and checkpoints): the CIDs of the segment object and the entry-hash list of
+ * the segment of entry `size − 1`, the last segment at or before the
+ * checkpoint's that has entries, so a re-anchor with no new entries carries
+ * the CIDs before it. `segments[i]` is entry `i`'s segment field. A board can
+ * then be fetched by CID from L1 alone (T-24, T-49, T-51).
+ */
+function segmentCids(
+  encodings: readonly Uint8Array[],
+  entryHashes: readonly Uint8Array[],
+  segments: readonly number[],
+  size: number,
+): { object_cid: Uint8Array; hashes_cid: Uint8Array } {
+  const last = segments[size - 1];
+  let start = size - 1;
+  while (start > 0 && segments[start - 1] === last) start--;
+  return {
+    object_cid: objectCid(concat(encodings.slice(start, size))),
+    hashes_cid: objectCid(concat(entryHashes.slice(start, size))),
+  };
+}
+
+function concat(parts: readonly Uint8Array[]): Uint8Array {
+  let length = 0;
+  for (const p of parts) length += p.length;
+  const out = new Uint8Array(length);
+  let at = 0;
+  for (const p of parts) {
+    out.set(p, at);
+    at += p.length;
+  }
+  return out;
 }
 
 // The entry layout of every version: the segment is the u32 after the record header
@@ -267,20 +310,29 @@ export function copyCheckpoints(
   // A loop, not a spread: the segment count grows with the election's length.
   let extent = 0;
   for (const size of sizes.values()) extent = Math.max(extent, size);
-  const hashes = encodedEntries.slice(0, extent).map(boardEntryHash);
+  const encodings = encodedEntries.slice(0, extent).map((e) => copyBytes(e, "entry"));
+  const hashes = encodings.map(boardEntryHash);
   const links: Uint8Array[] = [];
   for (const h of hashes) links.push(chainLink(links.at(-1) ?? new Uint8Array(32), h));
   const roots = merkleRoots(BOARD_TREE, hashes, new Set(sizes.values()));
+  const cids = new Map<number, ReturnType<typeof segmentCids>>();
   const out = new Map<number, Checkpoint>();
-  for (const [segment, size] of sizes)
-    if (size > 0)
-      out.set(segment, {
-        election_id: id.slice(),
-        segment,
-        size: BigInt(size),
-        head: (links[size - 1] as Uint8Array).slice(),
-        root: roots.get(size) as Uint8Array,
-      });
+  for (const [segment, size] of sizes) {
+    if (size === 0) continue;
+    // Once per size: the runs of distinct sizes are disjoint, so the copy is
+    // hashed once however many words name the same extent (T-53).
+    let c = cids.get(size);
+    if (c === undefined) cids.set(size, (c = segmentCids(encodings, hashes, fields, size)));
+    out.set(segment, {
+      election_id: id.slice(),
+      segment,
+      size: BigInt(size),
+      head: (links[size - 1] as Uint8Array).slice(),
+      root: roots.get(size) as Uint8Array,
+      object_cid: c.object_cid.slice(),
+      hashes_cid: c.hashes_cid.slice(),
+    });
+  }
   return out;
 }
 
@@ -296,6 +348,7 @@ export type BoardErrorCode =
   | "checkpoint-inconsistent"
   | "checkpoint-missing"
   | "checkpoint-boundary"
+  | "checkpoint-cid"
   | "copy-mismatch"
   | "unanchored"
   | "unsealed";
@@ -323,6 +376,8 @@ export interface CheckedBoard {
   readonly electionId: Uint8Array;
   readonly entries: readonly BoardEntry[];
   readonly entryHashes: readonly Uint8Array[];
+  /** `encodings[i]` is entry `i`'s encoding, the bytes its segment object holds. */
+  readonly encodings: readonly Uint8Array[];
   /** `links[i]` is the chain link after entry `i`. */
   readonly links: readonly Uint8Array[];
 }
@@ -359,6 +414,7 @@ export function checkBoard(
   if (!Array.isArray(encodedEntries)) throw new TypeError("encodedEntries must be an array");
   const entries: BoardEntry[] = [];
   const entryHashes: Uint8Array[] = [];
+  const encodings: Uint8Array[] = [];
   const links: Uint8Array[] = [];
   // Read once, by index, so the entries checked are the entries hashed.
   const count = encodedEntries.length;
@@ -389,9 +445,10 @@ export function checkBoard(
     const hash = boardEntryHash(bytes);
     entries.push(entry);
     entryHashes.push(hash);
+    encodings.push(bytes);
     links.push(chainLink(links.at(-1) ?? new Uint8Array(32), hash));
   }
-  return { electionId: id, entries, entryHashes, links };
+  return { electionId: id, entries, entryHashes, encodings, links };
 }
 
 /**
@@ -459,13 +516,13 @@ function countedAnchors(
   const counted: [number, Checkpoint][] = [];
   for (let j = 0; j < anchors.length; j++) {
     const a = anchors[j] as Anchor;
-    const cp = decode(checkpointV1, encode(checkpointV1, a.checkpoint));
+    const cp = decode(checkpointV2, encode(checkpointV2, a.checkpoint));
     if (isTimely(c, cp.segment, a.anchoredAt) && a.anchoredAt <= now) counted.push([j, cp]);
   }
   const bySegment = new Map<number, Uint8Array>();
   for (const [j, cp] of counted) {
     if (!equalBytes(cp.election_id, id)) throw new BoardError("wrong-election", { checkpoint: j });
-    const encoded = encode(checkpointV1, cp);
+    const encoded = encode(checkpointV2, cp);
     const first = bySegment.get(cp.segment);
     if (first === undefined) bySegment.set(cp.segment, encoded);
     else if (!equalBytes(first, encoded))
@@ -473,7 +530,9 @@ function countedAnchors(
   }
   // From L1 alone, before any copy is read, so no mirror can mask it: a
   // board only grows, so a later segment's checkpoint is never smaller than
-  // an earlier one's, and two of equal size are equal (T-24).
+  // an earlier one's, and two of equal size are equal but for the segment,
+  // their CIDs included, since both name the segment of entry `size − 1`
+  // (T-24).
   for (const [j, cp] of counted) {
     if (cp.size === 0n) throw new BoardError("checkpoint-size", { checkpoint: j });
     for (const [, other] of counted)
@@ -481,7 +540,12 @@ function countedAnchors(
         other.segment < cp.segment &&
         (other.size > cp.size ||
           (other.size === cp.size &&
-            !(equalBytes(other.head, cp.head) && equalBytes(other.root, cp.root))))
+            !(
+              equalBytes(other.head, cp.head) &&
+              equalBytes(other.root, cp.root) &&
+              equalBytes(other.object_cid, cp.object_cid) &&
+              equalBytes(other.hashes_cid, cp.hashes_cid)
+            )))
       )
         throw new BoardError("checkpoint-inconsistent", { checkpoint: j });
   }
@@ -596,12 +660,26 @@ export function verifyBoard(
   // operator's.
   const board = checkBoard(id, prefix, pinned);
   const { entries } = board;
+  const segments = entries.map((e) => e.segment);
+  const cidsBySize = new Map<number, ReturnType<typeof segmentCids>>();
   for (const [j, cp] of counted) {
     const size = Number(cp.size);
     const last = entries[size - 1] as BoardEntry;
     const next = entries[size];
     if (last.segment > cp.segment || (next !== undefined && next.segment <= cp.segment))
       throw new BoardError("checkpoint-boundary", { checkpoint: j });
+    // The prefix is the anchored board, so CIDs that don't name its bytes
+    // are the anchoring authority's, never a mirror's: a fetch by CID from
+    // L1 would find another object, or none (T-24, T-49).
+    // Once per size, so re-anchors don't hash a segment again (T-53).
+    let cids = cidsBySize.get(size);
+    if (cids === undefined)
+      cidsBySize.set(
+        size,
+        (cids = segmentCids(board.encodings, board.entryHashes, segments, size)),
+      );
+    if (!equalBytes(cids.object_cid, cp.object_cid) || !equalBytes(cids.hashes_cid, cp.hashes_cid))
+      throw new BoardError("checkpoint-cid", { checkpoint: j });
   }
   // A segment counts as unanchored only once its window has closed by
   // finalized L1 time, so a running election isn't failed early.
@@ -627,5 +705,11 @@ export function checkpointOf(board: CheckedBoard, segment: number): Checkpoint |
     size: BigInt(size),
     head: (board.links[size - 1] as Uint8Array).slice(),
     root: root as Uint8Array,
+    ...segmentCids(
+      board.encodings,
+      board.entryHashes,
+      board.entries.map((e) => e.segment),
+      size,
+    ),
   };
 }

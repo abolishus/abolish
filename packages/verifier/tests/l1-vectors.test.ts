@@ -88,7 +88,7 @@ const row = (r: Report, id: string) => r.checks.find((c) => c.id === id) as Chec
 
 test("the file is the L1-anchor vector format", () => {
   expect(file.format).toBe("abolish-l1-anchor-vectors/1");
-  expect(file.vectors.length).toBe(12);
+  expect(file.vectors.length).toBe(14);
   expect(new Set(file.vectors.map((v) => v.id)).size).toBe(file.vectors.length);
 });
 
@@ -145,6 +145,7 @@ describe("anchors read from L1 state", () => {
         unanchored: ["pass", "fail"],
         "checkpoint-missing": ["unverifiable", "unverifiable"],
         "checkpoint-inconsistent": ["unverifiable", "fail"],
+        "checkpoint-cid": ["pass", "fail"],
       };
       const want = rows[code];
       if (want === undefined) throw new Error(`no rows for ${code}`);

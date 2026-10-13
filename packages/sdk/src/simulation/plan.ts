@@ -15,9 +15,9 @@ export interface PlannedBallot {
   /** `direct` when our servers are down at `at`: the voter submits without them. */
   readonly path: "server" | "direct";
   /**
-   * Whether the voter, finding an offline seat's intake unreachable for this
-   * ballot, posts that seat's share through the contract path: drawn for
-   * every ballot, and acted on only when a seat is offline.
+   * Whether the voter, finding a seat's intake unreachable for this ballot,
+   * posts that seat's share through the contract path: drawn for every
+   * ballot, and acted on only when a seat is down at `at` (`downAt`).
    */
   readonly posts: boolean;
 }
@@ -33,7 +33,7 @@ export interface PlannedVoter extends PlannedBallot {
   /**
    * Whether every qualified seat gets a receipt or a posting for the
    * voter's last ballot, so it counts (docs/spec/delivery.md, Delivery
-   * check): with no offline seat, or when the voter posts it. An earlier
+   * check): with no seat down when it is cast, or when the voter posts it. An earlier
    * ballot delivered never counts in its place (No fallback).
    */
   readonly delivered: boolean;
@@ -95,6 +95,18 @@ const pathAt = (scenario: Scenario, at: number): PlannedBallot["path"] =>
     ? "direct"
     : "server";
 
+/**
+ * The seats down for a ballot cast at `at`, ascending: the offline seats and
+ * those departed by then. Each takes no share of it, so it is delivered only
+ * if its voter posts them.
+ */
+export function downAt(scenario: Scenario, at: number): number[] {
+  const { offline, departures } = scenario.trustees;
+  return [...offline, ...departures.filter((d) => d.at <= at).map((d) => d.seat)].sort(
+    (a, b) => a - b,
+  );
+}
+
 export function planElection(scenario: Scenario): Plan {
   const next = generator(scenario.seed);
   const nextChallenge = generator(scenario.seed ^ CHALLENGE_STREAM);
@@ -131,7 +143,7 @@ export function planElection(scenario: Scenario): Plan {
     // Two draws for every voter, so whether one re-votes changes no other's.
     const posts = nextPosting() < scenario.postings;
     const earlierPosts = nextPosting() < scenario.postings;
-    const delivered = scenario.trustees.offline.length === 0 || posts;
+    const delivered = downAt(scenario, at).length === 0 || posts;
     if (delivered) {
       const counts = expected.get(tier) as number[];
       votes.forEach((v, j) => {

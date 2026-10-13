@@ -58,12 +58,12 @@ const play: Story["play"] = async ({ canvasElement }) => {
   await expect(canvas.getByText("3 options")).toBeVisible();
   await expect(canvas.getByRole("heading", { name: "Answering" })).toBeVisible();
   await expect(canvas.getByText(/only in the ballot app, never on this website/)).toBeVisible();
-  await expect(
-    canvas.getAllByRole("img", { name: "Fingerprint of definition a4555c67" }),
-  ).toHaveLength(2);
   await openEvidence(canvasElement);
   await expect(canvas.getByText(/what our server says about this poll/)).toBeVisible();
   await expect(canvas.getByRole("figure", { name: "Poll ID" })).toBeVisible();
+  await expect(
+    canvas.getByRole("img", { name: "Fingerprint of definition a4555c67" }),
+  ).toBeVisible();
   await expect(canvas.getByText("4 of 7")).toBeVisible();
   await expect(canvas.getByText("5,000 members")).toBeVisible();
   // A singular plural, and an instant past what Date holds shown as seconds.

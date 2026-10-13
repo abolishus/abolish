@@ -176,11 +176,14 @@ export function PollSummary({ poll, board, moderation, asOf, code }: PollSummary
 
       <details className="group border-t border-border pt-8">
         <summary className="flex min-h-12 cursor-pointer list-none items-center gap-4 underline-offset-4 hover:underline focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none [&::-webkit-details-marker]:hidden">
-          <Fingerprint
-            value={poll.definitionHash}
-            label={t("fingerprintDefinition", { prefix: poll.definitionHash.slice(0, 8) })}
-            size={44}
-          />
+          {/* A seal only: the evidence below names the same fingerprint. */}
+          <span aria-hidden="true" className="contents">
+            <Fingerprint
+              value={poll.definitionHash}
+              label={t("fingerprintDefinition", { prefix: poll.definitionHash.slice(0, 8) })}
+              size={44}
+            />
+          </span>
           <h2 className="m-0 font-heading text-2xl font-semibold">{t("evidenceSummary")}</h2>
           <ChevronDown aria-hidden="true" className="size-5 group-open:rotate-180" />
         </summary>

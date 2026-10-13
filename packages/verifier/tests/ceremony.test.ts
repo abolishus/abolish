@@ -298,3 +298,15 @@ test("the report gives the ceremony after the definition, and the panel last amo
   ]);
   expect(Object.keys(r.inputs).at(-1)).toBe("panel");
 });
+
+test("under definition versions 3 and 4, ballot admission doesn't run yet", () => {
+  // Their ballots (version 2) are admitted against their cell, which this
+  // verifier doesn't do yet (P1-19): unsupported, never failed (T-36).
+  for (const id of ["definition-v3", "definition-v4"]) {
+    const r = format4(byId(id));
+    expect(row(r, "3.2").status).toBe("pass");
+    for (const check of ["5.1", "5.2", "5.3", "5.4"])
+      expect(row(r, check)).toMatchObject({ status: "unverifiable", code: "unsupported-version" });
+    expect(r.ballots).toBeUndefined();
+  }
+});

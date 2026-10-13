@@ -7,6 +7,7 @@ import {
   shareVote,
   type ValidityContext,
 } from "@abolishus/crypto";
+import { Worker } from "node:worker_threads";
 import { afterAll, describe, expect, it } from "vite-plus/test";
 import { planElection, type Scenario } from "../src/index.ts";
 import { simulateElection } from "../src/simulation/election.ts";
@@ -97,6 +98,13 @@ describe("intake in worker threads", { timeout }, () => {
     const closed = intakeInWorkers(keys, 1);
     await closed.close();
     await expect(closed.run(ctx, vote, every)).rejects.toThrow(/closed/);
+  });
+
+  it("serves no worker started without its marker, which exits rather than listening", async () => {
+    const unmarked = new Worker(new URL("../src/simulation/intake-worker.ts", import.meta.url), {
+      workerData: { seats: keys },
+    });
+    expect(await new Promise((resolve) => unmarked.once("exit", resolve))).toBe(0);
   });
 
   it("refuses a worker count that isn't an integer from 1 to the maximum", () => {

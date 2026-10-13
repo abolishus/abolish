@@ -90,13 +90,13 @@ export function intakeInWorkers(seats: readonly IntakeKeys[], count: number): In
     for (const w of waiting.values()) w.reject(failure);
     waiting.clear();
   };
-  const workers = load.map((_, i) => {
+  const start = (i: number) => {
     const worker = new Worker(workerUrl(), { workerData: data });
     worker.on("message", (reply: IntakeReply) => {
       const w = waiting.get(reply.id);
       if (w === undefined) return;
       waiting.delete(reply.id);
-      load[i] = (load[i] ?? 1) - 1;
+      load[i] = (load[i] ?? 0) - 1;
       if ("error" in reply)
         w.reject(new Error(`simulation: intake failed in a worker (${reply.error})`));
       else w.resolve(reply.results);
@@ -106,7 +106,16 @@ export function intakeInWorkers(seats: readonly IntakeKeys[], count: number): In
       if (!closing) fail(new Error(`simulation: an intake worker exited (${code})`));
     });
     return worker;
-  });
+  };
+  // A worker that can't start stops those already started, so none is left holding the process.
+  const workers: Worker[] = [];
+  try {
+    for (let i = 0; i < count; i++) workers.push(start(i));
+  } catch (e) {
+    closing = true;
+    for (const w of workers) void w.terminate();
+    throw e;
+  }
   let next = 0;
   return {
     ahead: 2 * count,

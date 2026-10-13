@@ -38,10 +38,6 @@ contract TrusteeHandler is TestBase {
         }
     }
 
-    function keySetHashOf(bool small) public view returns (bytes32) {
-        return lib.keySetHash(seatsOf[small ? 0 : 1]);
-    }
-
     function stubAt(uint256 seed) public pure returns (bytes32) {
         return keccak256(abi.encode("stub", seed % 4));
     }
@@ -63,9 +59,14 @@ contract TrusteeHandler is TestBase {
         c.stub = stubAt(stubSeed);
         c.transcript =
             transcriptSeed % 4 == 0 ? bytes32(0) : keccak256(abi.encode("t", transcriptSeed % 4));
-        c.keySetHash = keySetHashOf(small);
+        bytes memory seats = _seats(c, small, identityAsSigningKey);
+        // The approvals sign the set the record carries, altered or not, so
+        // only the identity-key check refuses an altered one.
+        c.keySetHash = lib.keySetHash(seats);
         (TrusteeFixture.Approval[] memory a, bool forged) = _approvals(c, seatMask, forgeSeed);
-        bytes memory record = _record(c, small, identityAsSigningKey, a);
+        bytes memory record = TrusteeFixture.encode(
+            c.panel, c.stub, c.transcript, seatCountOf[small ? 0 : 1], seats, a
+        );
         (,, uint8 quorum) = registry.panelOf(c.panel);
         bool allowed = c.transcript != bytes32(0) && a.length >= quorum && !forged
             && !identityAsSigningKey && shadow[c.stub][c.panel] == bytes32(0);
@@ -80,16 +81,15 @@ contract TrusteeHandler is TestBase {
         }
     }
 
-    /// The record, with the panel's key set or, if `identityAsSigningKey`,
+    /// The panel's key set as a record's seats or, if `identityAsSigningKey`,
     /// with seat 1's signing key replaced by its identity key: signed or not,
     /// such a set is refused (contracts.md, Registration, 8).
-    function _record(
-        Call memory c,
-        bool small,
-        bool identityAsSigningKey,
-        TrusteeFixture.Approval[] memory a
-    ) internal view returns (bytes memory) {
-        bytes memory seats = bytes.concat(seatsOf[small ? 0 : 1]);
+    function _seats(Call memory c, bool small, bool identityAsSigningKey)
+        internal
+        view
+        returns (bytes memory seats)
+    {
+        seats = bytes.concat(seatsOf[small ? 0 : 1]);
         if (identityAsSigningKey) {
             (uint256 x, uint256 y) = registry.keyOf(c.panel, 1);
             assembly ("memory-safe") {
@@ -97,10 +97,23 @@ contract TrusteeHandler is TestBase {
                 mstore(add(seats, add(0x20, 65)), y)
             }
         }
-        return
-            TrusteeFixture.encode(
-                c.panel, c.stub, c.transcript, seatCountOf[small ? 0 : 1], seats, a
-            );
+    }
+
+    /// Seat `seat`'s signing key in the panel's key set, as the record
+    /// carries it; zero for a seat outside the set.
+    function expectedSigningKey(bool small, uint256 seat)
+        external
+        view
+        returns (uint256 x, uint256 y)
+    {
+        bytes memory seats = seatsOf[small ? 0 : 1];
+        for (uint256 at; at < seats.length; at += 97) {
+            if (uint8(seats[at]) != seat) continue;
+            assembly ("memory-safe") {
+                x := mload(add(seats, add(0x20, add(at, 33))))
+                y := mload(add(seats, add(0x20, add(at, 65))))
+            }
+        }
     }
 
     function _digest(Call memory c, uint8 seat, bool forge) internal view returns (bytes32) {
@@ -159,7 +172,8 @@ contract TrusteeHandler is TestBase {
 /// 4. The event accumulator counts one event per pinned panel and per
 ///    successful registration.
 /// 5. A recorded stub and panel hold the key set its approvals signed, with
-///    its seats, and nothing else does (ADR 0028, 2B).
+///    its seats and their signing keys, and an unrecorded one holds none
+///    (ADR 0028, 2B).
 contract TrusteeRegistryInvariantTest is TestBase {
     TrusteeRegistry internal registry;
     TrusteeHandler internal handler;
@@ -209,6 +223,13 @@ contract TrusteeRegistryInvariantTest is TestBase {
                 assertEq(keySetHash, handler.shadowKeySet(stub, panel), "key set");
                 uint256 expectedSeats = expected == bytes32(0) ? 0 : (size == 2 ? 0x6 : 0xfe);
                 assertEq(seats, expectedSeats, "seats");
+                for (uint256 seat; seat <= size + 1; seat++) {
+                    (uint256 x, uint256 y) = registry.signingKeyOf(stub, panel, seat);
+                    (uint256 ex, uint256 ey) = expected == bytes32(0)
+                        ? (uint256(0), uint256(0))
+                        : handler.expectedSigningKey(size == 2, seat);
+                    assertTrue(x == ex && y == ey, "signing key");
+                }
             }
         }
     }

@@ -341,8 +341,10 @@ const CEREMONY_REGISTERED: EventSpec = {
       return "event-topics";
     const max = REGISTRATION_HEADER + 255 * REGISTRATION_APPROVAL;
     const registration = readAbi(data, 1, [{ at: 0, words: false, max }])?.tails[0];
-    // The registry's length rule (Registration, check 2): exactly the header
-    // and the approvals its count byte names.
+    // Version 1's length rule: exactly the header and the approvals its
+    // count byte names, the trustee registry's first layout. The key-set
+    // layout is the record's next version's (docs/spec/contracts.md,
+    // Contract-event record, Known-weak).
     const count = registration?.[REGISTRATION_HEADER - 1];
     if (
       registration === undefined ||

@@ -245,9 +245,11 @@ describe("2.3: the profile's versions fit together", () => {
 
   // [board entry, ballot, tally opening, fits]: ballot version 1 needs board
   // entries that carry share receipts and complaints (3 or 4), tally-opening
-  // version 1 needs ones that carry destruction statements (4), and ballot
-  // version 2, which names a cell, needs definition version 3 or 4 (these are
-  // version 1). Ballot version 3 stands for a version with neither need.
+  // version 1 needs ones that carry destruction statements (4), ballot
+  // version 2, which names a cell, needs definition version 3 or 4, and ballot
+  // version 3, which carries questions, definition version 5 (these are
+  // version 1). Ballot version 4 stands for a version this verifier doesn't
+  // know, with neither need: a later release judges it.
   const table: readonly (readonly [number, number, number, boolean])[] = [
     [4, 1, 1, true],
     [3, 1, 1, false],
@@ -256,12 +258,14 @@ describe("2.3: the profile's versions fit together", () => {
     [1, 1, 2, false],
     [4, 2, 1, false],
     [4, 2, 2, false],
-    [4, 3, 1, true],
-    [3, 3, 1, false],
-    [1, 3, 1, false],
-    [1, 3, 2, true],
-    [3, 3, 2, true],
-    [4, 3, 2, true],
+    [4, 3, 1, false],
+    [4, 3, 2, false],
+    [4, 4, 1, true],
+    [3, 4, 1, false],
+    [1, 4, 1, false],
+    [1, 4, 2, true],
+    [3, 4, 2, true],
+    [4, 4, 2, true],
   ];
   for (const [board, ballot, opening, fits] of table)
     test(`board entry ${board}, ballot ${ballot}, tally opening ${opening}: ${fits ? "fits" : "fails"}`, () => {
@@ -475,15 +479,18 @@ describe("definition versions 3 and 4 (regional cells)", () => {
   // [board entry, ballot, spoiled-ballot opening, 2.3]: definition versions 3
   // and 4 need a ballot version that names its cell (2 is the only one known), which needs board entries that carry its
   // delivery records and a spoiled-ballot opening version that opens its
-  // cores. None does yet: version 1 opens version-1 cores only, so it fails,
-  // and version 2 is one a later release may define, so it is unsupported,
-  // never a failure (T-36, T-42).
+  // cores: version 1 opens version-1 cores only, so it fails, and version 2,
+  // which opens them, is one this verifier doesn't read yet, so it is
+  // unsupported, never a failure (T-36, T-42).
   const table: readonly (readonly [number, number, number, string])[] = [
     [4, 1, 1, "profile-combination"],
-    // Ballot version 3 stands for one a later release may define as naming
+    // Ballot version 3 carries questions, which definition version 5 alone has.
+    [4, 3, 1, "profile-combination"],
+    [4, 3, 2, "profile-combination"],
+    // Ballot version 4 stands for one a later release may define as naming
     // its cell: unsupported, never failed, whatever the opening (T-36).
-    [4, 3, 1, "unsupported-version"],
-    [4, 3, 2, "unsupported-version"],
+    [4, 4, 1, "unsupported-version"],
+    [4, 4, 2, "unsupported-version"],
     [4, 2, 1, "profile-combination"],
     [4, 2, 2, "unsupported-version"],
     [3, 2, 255, "unsupported-version"],

@@ -76,8 +76,8 @@ const json = (c: Case, clock = c.clock) =>
 const run = (c: Case, board = hex(c.board), clock = c.clock) =>
   verifyBundle(parseBundle(json(c, clock), board));
 
-const row = (r: Report) => {
-  const { status, code, at } = r.checks.find((x) => x.id === "6.2") as CheckResult;
+const row = (r: Report, id = "6.2") => {
+  const { status, code, at } = r.checks.find((x) => x.id === id) as CheckResult;
   return { status, ...(code !== undefined && { code }), ...(at !== undefined && { at }) };
 };
 const entriesOf = (c: Case) => parseBundle(json(c), hex(c.board)).entries;
@@ -112,11 +112,14 @@ describe("6.2 against the independent implementation", () => {
     test(c.id, { timeout: 60_000 }, () => {
       const r = run(c);
       expect(row(r)).toEqual(c.expected["6.2"]);
+      expect(row(r, "2.3")).toEqual(c.expected["2.3"]);
       expect(r.openings).toEqual(c.openings);
       // An opening never counts, displaces or fails anything: 6.2 is an
-      // admission row, and the copy is a local file (T-53).
+      // admission row, and the copy is a local file (T-53). Only a profile
+      // that fails 2.3 fails the election.
       expect(r.verdict).toBe("unverifiable");
-      expect(r.verdictAgainstInputs).not.toBe("failed");
+      if (c.expected["2.3"]?.["status"] !== "fail")
+        expect(r.verdictAgainstInputs).not.toBe("failed");
     });
 });
 

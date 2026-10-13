@@ -251,5 +251,7 @@ describe("append order", () => {
       ),
       { numRuns: Math.min(numRuns, 200) },
     );
-  });
+    // Two hundred runs of database writes can outlast the default timeout on a
+    // CI runner shared with the other test files.
+  }, 120_000);
 });

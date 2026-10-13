@@ -27,8 +27,9 @@ library ElectionIdLib {
 /// hash of its one definition, so an election's rules can't change after
 /// voting opens or differ between voters (T-34). It admits only a definition
 /// that decodes strictly, is well formed, names this deployment's chains and
-/// contracts, comes from the election's creator before it opens, has an
-/// electorate already public on L2, and whose stub the trustee registry
+/// contracts, comes from the election's creator before it opens, has a δ
+/// within the close rule's bounds (T-35, T-50), has an electorate already
+/// public on L2, and whose stub the trustee registry
 /// recorded with its ceremony transcript (T-17, T-37, T-08, T-13). With each
 /// definition it records the parameters the board's checks read, so the board
 /// never takes them from a caller (ADR 0028, 1C; T-25). There is no admin,
@@ -78,6 +79,13 @@ contract ElectionRegistry is EventAccumulator {
         uint8 authorThreshold;
         /// `n_A`, the author panel's size; 0 with no author panel.
         uint8 authorPanelSize;
+        /// The poll's window and `δ` (`l1_inclusion_bound`), which the close
+        /// rule's checks on the board read (docs/spec/close.md). With the
+        /// fields above they fill one storage slot, so the board reads them
+        /// with the rest for no extra slot.
+        uint64 opensAt;
+        uint64 closesAt;
+        uint32 l1InclusionBound;
         /// In the order the ballot asks them.
         Question[] questions;
     }
@@ -108,6 +116,17 @@ contract ElectionRegistry is EventAccumulator {
     /// point the registry at a contract of its own; on a chain without it
     /// every creation and registration reverts.
     address public constant L1_BLOCK = 0x4200000000000000000000000000000000000015;
+
+    /// The bounds on a definition's `l1_inclusion_bound` (δ), in seconds
+    /// (docs/spec/parameters.md). The floor covers the batcher's normal
+    /// latency, so a ballot cast at close is derivable from L1 by
+    /// `closes_at + δ` unless the batcher is down (T-50, T-53); the ceiling
+    /// keeps short the window in which the sequencer can rebuild unposted
+    /// blocks before close without the close check seeing it (T-35, T-45).
+    /// Constants of the bytecode, never deployment inputs, so verifier 1.2's
+    /// binding fixes them and 2.6 compares δ with the release's pins.
+    uint32 public constant MIN_INCLUSION_BOUND = 600;
+    uint32 public constant MAX_INCLUSION_BOUND = 3600;
 
     /// @notice An election was created: `counter` elections were created
     /// before it, in an L2 block whose L1 origin is the block numbered
@@ -144,6 +163,7 @@ contract ElectionRegistry is EventAccumulator {
     error AlreadyRegistered(bytes32 electionId);
     error OpensBeforeEpoch(uint64 opensAt, uint64 epoch);
     error AlreadyOpen(uint64 opensAt, uint256 timestamp);
+    error InclusionBoundOutOfRange(uint32 bound);
     error RootNotInPast(uint8 tier, uint64 rootL2Block, uint256 blockNumber);
     error CeremonyNotRecorded(bytes32 stubHash, bytes32 transcriptHash);
 
@@ -275,6 +295,12 @@ contract ElectionRegistry is EventAccumulator {
         // starts (verifier 2.1, 2.6).
         if (def.opensAt < epoch) revert OpensBeforeEpoch(def.opensAt, epoch);
         if (block.timestamp >= def.opensAt) revert AlreadyOpen(def.opensAt, block.timestamp);
+        // δ within the close rule's bounds (docs/spec/close.md; T-35, T-50).
+        if (
+            def.l1InclusionBound < MIN_INCLUSION_BOUND || def.l1InclusionBound > MAX_INCLUSION_BOUND
+        ) {
+            revert InclusionBoundOutOfRange(def.l1InclusionBound);
+        }
         _requireElectorateInPast(def);
 
         // The ceremony was run for exactly this definition: the check compares
@@ -334,6 +360,9 @@ contract ElectionRegistry is EventAccumulator {
         // the size within a uint8.
         p.authorThreshold = def.authorThreshold;
         p.authorPanelSize = uint8(def.authorKeys.length);
+        p.opensAt = def.opensAt;
+        p.closesAt = def.closesAt;
+        p.l1InclusionBound = def.l1InclusionBound;
         if (def.version < 5) {
             // One question over all the options, by selection (plurality is
             // the limits (0, 1)).

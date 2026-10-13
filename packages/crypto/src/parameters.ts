@@ -21,6 +21,10 @@ export const PARAMETERS = Object.freeze({
   // Seconds after closes_at + l1_inclusion_bound; the close window of the
   // close statement's version 1 (docs/spec/close.md).
   CLOSE_WINDOW: 172_800,
+  // Seconds; the bounds the election registry's deployment puts on a
+  // definition's l1_inclusion_bound, δ (docs/spec/close.md, contracts.md).
+  MIN_INCLUSION_BOUND: 600,
+  MAX_INCLUSION_BOUND: 3600,
   // Seconds after the seal's anchoring window until the dispute end t_E; a
   // constant of receipt version 1 (docs/spec/receipts.md).
   DISPUTE_WINDOW: 2_592_000,

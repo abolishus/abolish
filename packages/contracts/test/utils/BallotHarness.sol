@@ -77,6 +77,11 @@ contract ParametersStub is IElectionParameters {
         s.panelSize = p.panelSize;
         s.optionCount = p.optionCount;
         s.cellCount = uint16(tiers.length);
+        s.authorThreshold = p.authorThreshold;
+        s.authorPanelSize = p.authorPanelSize;
+        s.opensAt = p.opensAt;
+        s.closesAt = p.closesAt;
+        s.l1InclusionBound = p.l1InclusionBound;
         delete s.questions;
         for (uint256 i; i < p.questions.length; i++) {
             s.questions.push(p.questions[i]);

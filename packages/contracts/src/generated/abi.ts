@@ -594,6 +594,20 @@ export const electionRegistryAbi = [
   {
     type: "function",
     inputs: [],
+    name: "MAX_INCLUSION_BOUND",
+    outputs: [{ name: "", internalType: "uint32", type: "uint32" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    inputs: [],
+    name: "MIN_INCLUSION_BOUND",
+    outputs: [{ name: "", internalType: "uint32", type: "uint32" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    inputs: [],
     name: "board",
     outputs: [{ name: "", internalType: "address", type: "address" }],
     stateMutability: "view",
@@ -725,6 +739,9 @@ export const electionRegistryAbi = [
           { name: "cellCount", internalType: "uint16", type: "uint16" },
           { name: "authorThreshold", internalType: "uint8", type: "uint8" },
           { name: "authorPanelSize", internalType: "uint8", type: "uint8" },
+          { name: "opensAt", internalType: "uint64", type: "uint64" },
+          { name: "closesAt", internalType: "uint64", type: "uint64" },
+          { name: "l1InclusionBound", internalType: "uint32", type: "uint32" },
           {
             name: "questions",
             internalType: "struct ElectionRegistry.Question[]",
@@ -899,6 +916,11 @@ export const electionRegistryAbi = [
       { name: "offset", internalType: "uint256", type: "uint256" },
     ],
     name: "DefinitionMalformed",
+  },
+  {
+    type: "error",
+    inputs: [{ name: "bound", internalType: "uint32", type: "uint32" }],
+    name: "InclusionBoundOutOfRange",
   },
   { type: "error", inputs: [], name: "InvalidDeployment" },
   { type: "error", inputs: [], name: "NonCanonicalCalldata" },

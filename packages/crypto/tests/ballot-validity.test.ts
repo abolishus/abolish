@@ -340,7 +340,9 @@ describe("properties", () => {
       ),
       { numRuns: Math.max(10, numRuns / 50) },
     );
-  });
+    // Up to three ballots' proofs per run, 20 runs under CI's FC_NUM_RUNS:
+    // over 6 s on a shared runner, past the default 5 s timeout.
+  }, 60_000);
 
   test("a ballot fails under any other nullifier, election or tier (T-30, T-32)", () => {
     fc.assert(

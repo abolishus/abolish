@@ -86,7 +86,9 @@ describe("layoutBoard", () => {
     };
   };
 
-  it("gives every entry its own cell, inside its block and the width", () => {
+  // Checks every cell of up to 30 blocks of 400 under FC_NUM_RUNS (1000 in
+  // CI), well past the default 5-second limit.
+  it("gives every entry its own cell, inside its block and the width", { timeout: 60_000 }, () => {
     fc.assert(
       fc.property(
         fc.array(fc.integer({ min: 1, max: 400 }), { minLength: 1, maxLength: 30 }),

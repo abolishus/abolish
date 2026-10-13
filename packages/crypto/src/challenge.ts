@@ -302,7 +302,11 @@ export function openingV2CoreHash(
   });
 }
 
-/** The tracking code of a version-3 opening's core: ballot version 4's core hash, both halves. */
+/**
+ * The tracking code of a version-3 opening's core under ballot version 4:
+ * its core hash, both halves. Ballot version 5's cores, which opening
+ * version 3 opens too, hash under their own version input (P2-17).
+ */
 export function openingV3CoreHash(opening: SpoiledBallotOpeningV3): Uint8Array {
   return coreHashV4({
     definitionHash: opening.definition_hash,

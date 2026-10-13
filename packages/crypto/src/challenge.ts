@@ -12,6 +12,7 @@ import {
   type CommittedVote,
   markOpened,
   type Share,
+  sharingVersion,
   VSS,
 } from "./ballot-validity.ts";
 import {
@@ -199,6 +200,11 @@ function coreOf(
   const made = encryptionOf(encrypted);
   if (made === undefined) throw new TypeError("core: the shares must come from encryptShares");
   const { sharing } = made;
+  // A version-1 core only: a version-3 sharing's votes were checked against
+  // its questions, never this election's one range (opening version 2 opens
+  // version-3 cores; T-42).
+  if (sharingVersion(sharing) !== 1)
+    throw new TypeError("core: the shares must come from a version-1 sharing");
   if (!equalBytes(made.definitionHash, definitionHash))
     throw new RangeError("core: the shares were encrypted for another election");
   if (

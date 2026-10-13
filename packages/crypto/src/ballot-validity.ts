@@ -446,6 +446,11 @@ export function isRegisteredSharing(sharing: VoteSharing): boolean {
   return SHARINGS.has(sharing);
 }
 
+/** Internal: the ballot version whose rules this sharing's votes were checked against, if it is registered. */
+export function sharingVersion(sharing: VoteSharing): 1 | 3 | undefined {
+  return SHARINGS.get(sharing);
+}
+
 // What each sharing has been used for: proved (the voter chose to cast it) or
 // opened (the voter challenged it). One sharing is never both: an opened core
 // is never cast, and a cast core's randomness is never revealed

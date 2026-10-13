@@ -1059,6 +1059,19 @@ export const trusteeRegistryAbi = [
   },
   {
     type: "function",
+    inputs: [
+      { name: "stubHash", internalType: "bytes32", type: "bytes32" },
+      { name: "panelId", internalType: "bytes32", type: "bytes32" },
+    ],
+    name: "keySetOf",
+    outputs: [
+      { name: "keySetHash", internalType: "bytes32", type: "bytes32" },
+      { name: "seats", internalType: "uint256", type: "uint256" },
+    ],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
     inputs: [],
     name: "panelCount",
     outputs: [{ name: "", internalType: "uint256", type: "uint256" }],
@@ -1088,6 +1101,20 @@ export const trusteeRegistryAbi = [
     name: "registerCeremony",
     outputs: [],
     stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    inputs: [
+      { name: "stubHash", internalType: "bytes32", type: "bytes32" },
+      { name: "panelId", internalType: "bytes32", type: "bytes32" },
+      { name: "index", internalType: "uint256", type: "uint256" },
+    ],
+    name: "signingKeyOf",
+    outputs: [
+      { name: "x", internalType: "uint256", type: "uint256" },
+      { name: "y", internalType: "uint256", type: "uint256" },
+    ],
+    stateMutability: "view",
   },
   {
     type: "function",
@@ -1184,6 +1211,11 @@ export const trusteeRegistryAbi = [
   },
   {
     type: "error",
+    inputs: [{ name: "index", internalType: "uint8", type: "uint8" }],
+    name: "DuplicateSigningKey",
+  },
+  {
+    type: "error",
     inputs: [
       { name: "position", internalType: "uint256", type: "uint256" },
       {
@@ -1198,6 +1230,24 @@ export const trusteeRegistryAbi = [
     type: "error",
     inputs: [{ name: "index", internalType: "uint8", type: "uint8" }],
     name: "InvalidSignature",
+  },
+  {
+    type: "error",
+    inputs: [{ name: "index", internalType: "uint8", type: "uint8" }],
+    name: "InvalidSigningKey",
+  },
+  {
+    type: "error",
+    inputs: [{ name: "index", internalType: "uint8", type: "uint8" }],
+    name: "KeySetSeatsOutOfOrder",
+  },
+  {
+    type: "error",
+    inputs: [
+      { name: "seats", internalType: "uint256", type: "uint256" },
+      { name: "threshold", internalType: "uint8", type: "uint8" },
+    ],
+    name: "KeySetTooSmall",
   },
   { type: "error", inputs: [], name: "MalformedRegistration" },
   { type: "error", inputs: [], name: "NoPanels" },

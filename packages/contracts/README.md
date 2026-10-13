@@ -131,7 +131,7 @@ FOUNDRY_PROFILE=ci vp run --filter @abolishus/contracts test   # deeper fuzz and
 
 The tests cover:
 
-- the cross-language vectors in `docs/spec/vectors/event-accumulator-2.json`, `election-definition.json`, `election-registry.json`, `trustee.json`, `group-registry.json`, the checkpoints of `board.json` and the receipt-key records of `election-definition-v4.json`'s judging cases, which independent Python implementations produced;
+- the cross-language vectors in `docs/spec/vectors/event-accumulator-2.json`, `election-definition.json`, `election-registry.json`, `trustee.json`, `key-set.json`, `group-registry.json`, the checkpoints of `board.json` and the receipt-key records of `election-definition-v4.json`'s judging cases, which independent Python implementations produced;
 - fuzz tests that replay the logs the EVM recorded;
 - a test per admission rule of the election registry, per refusal of the trustee registry, of the group registry (its stateful ones included) and of the board anchor (with its window's exact boundaries), and fuzz tests that any one-bit change to an approved definition or a signed group record, or arbitrary bytes, is refused;
 - the group registry's gas for one member with two approvals, two members, a batch of 256 and a removal, each bounded in its own test;

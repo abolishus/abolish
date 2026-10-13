@@ -625,6 +625,57 @@ export interface RegisteredKeys {
   readonly signingKey: Uint8Array;
 }
 
+/**
+ * `kem_key_hash = H(DS("abolish/v1/kem-key", encode(kem_key)))`, the form a
+ * registered KEM key takes in the key set the trustee registry records
+ * (docs/spec/ceremony.md, Key set hash).
+ */
+export function kemKeyHash(key: KemPublicKey): Uint8Array {
+  return H(ds("abolish/v1/kem-key", encode(KEM_PUBLIC_KEY, key)));
+}
+
+/** One seat of the registered key set as its hash binds it. */
+export interface KeySetEntry {
+  readonly index: number;
+  readonly kemKeyHash: Uint8Array;
+  readonly signingKey: Uint8Array;
+}
+
+const KEY_SET = list(
+  struct([
+    ["index", u8],
+    ["kem_key_hash", bytesFixed(32)],
+    ["signing_key", p256Key],
+  ] as const),
+  MAX_TRUSTEES,
+);
+
+/** A qualified seat's entry in the key set: its KEM key hashed. */
+export function keySetEntry(keys: RegisteredKeys): KeySetEntry {
+  return { index: keys.index, kemKeyHash: kemKeyHash(keys.kemKey), signingKey: keys.signingKey };
+}
+
+/**
+ * `key_set_hash = H(DS("abolish/v1/key-set", encode(key_set)))`, which every
+ * seat signs in its ceremony registration and the trustee registry recomputes
+ * (docs/spec/ceremony.md, Key set hash; T-37, T-14). The entries must be in
+ * strictly increasing seat order from 1 to `MAX_TRUSTEES`, and there is at
+ * least one, as the transcript check returns them: any other list is no key
+ * set a seat should sign, so it throws rather than hash.
+ */
+export function keySetHash(entries: readonly KeySetEntry[]): Uint8Array {
+  if (entries.length === 0) throw new RangeError("key set: no seats");
+  let previous = 0;
+  const encoded = entries.map((e) => {
+    const { index, kemKeyHash, signingKey } = e;
+    if (!Number.isSafeInteger(index) || index <= previous || index > MAX_TRUSTEES)
+      throw new RangeError("key set: seats must be strictly increasing, from 1 to MAX_TRUSTEES");
+    previous = index;
+    return { index, kem_key_hash: kemKeyHash, signing_key: signingKey };
+  });
+  return H(ds("abolish/v1/key-set", encode(KEY_SET, encoded)));
+}
+
 export type CeremonyCheck =
   | {
       readonly ok: true;

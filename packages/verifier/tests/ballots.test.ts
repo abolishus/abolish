@@ -264,6 +264,12 @@ describe("when ballot admission can't run", () => {
   });
 });
 
+test("a ballot pin other than 1 leaves 6.2 unsupported: a later release may open its cores (T-36)", () => {
+  const r = format4(byId("ballot-v2"));
+  expect(row(r, "6.2")).toMatchObject({ status: "unverifiable", code: "unsupported-version" });
+  expect(r.openings).toBeUndefined();
+});
+
 test("the report gives the ballots after the ceremony, then the openings", () => {
   const r = format4(byId("mixed"));
   expect(Object.keys(r)).toEqual([

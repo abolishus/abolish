@@ -107,20 +107,17 @@ def floor_of(closes_at, clock):
 def expected(d, e, entries, clock):
     """6.2 and the report's openings, computed here from challenge.md and verifier.md."""
     floor = floor_of(d["closes_at"], clock)
-    counted = []
-    report = []
-    seen = {}
+    envelopes = []
     for at, raw in enumerate(entries):
         env = vc.decode_entry(raw, 4)
-        if isinstance(env, str) or env["electionId"] != d["election_id"]:
-            continue
-        payload, segment = env["payload"], env["segment"]
-        kind = int.from_bytes(payload[:2], "big")
-        if kind == BALLOT_TYPE:
-            # These vectors board only ballots verifier-ballots.json admits.
-            if segment <= floor:
-                counted.append((at, ballot_core(payload)))
-            continue
+        if not isinstance(env, str) and env["electionId"] == d["election_id"]:
+            envelopes.append((at, env["payload"], env["segment"], int.from_bytes(env["payload"][:2], "big")))
+    # Every admitted ballot at or below the floor, wherever it sits in the
+    # copy. These vectors board only ballots verifier-ballots.json admits.
+    counted = [(at, ballot_core(p)) for at, p, seg, kind in envelopes if kind == BALLOT_TYPE and seg <= floor]
+    report = []
+    seen = {}
+    for at, payload, segment, kind in envelopes:
         if kind != OPENING_TYPE:
             continue
         early = [{"code": "opening-early"}] if segment <= floor else []
@@ -335,13 +332,14 @@ def main(constants, out_dir):
 
     mixed = case(
         "mixed",
-        "Close falls in period 2, so s_S is at least 3. A ballot in segment 0 (counted whatever s_S is) and one in segment 4 (counted only if s_S ≥ 4); an honest opening in segment 3 (early); in segment 5 an opening of every check failure, one that doesn't decode, an honest one, one of a vote outside the rules, and two that re-use one ballot's (v_j, r_j) under other share hashes: the segment-0 ballot's (cast) and the segment-4 ballot's (undecided); in segment 6 a byte-identical copy of the honest one and of the stray one (repeats). The honest openings above the floor may still be early or late once s_S is known, so 6.2 is unverifiable.",
+        "Close falls in period 2, so s_S is at least 3. A ballot in segment 0 (counted whatever s_S is) and one in segment 4 (counted only if s_S ≥ 4); an honest opening in segment 3 (early); in segment 5 an opening of every check failure, one that doesn't decode, an honest one, one of a vote outside the rules, and two that re-use one ballot's (v_j, r_j) under other share hashes: the segment-0 ballot's (cast) and the segment-4 ballot's (undecided); in segment 6 a byte-identical copy of the honest one and of the stray one, and in segment 7 a third copy of the honest one (repeats, each of the first). The honest openings above the floor may still be early or late once s_S is known, so 6.2 is unverifiable.",
         [
             (0, ["t", rec0]),
             (3, [enc(early)]),
             (4, [rec2]),
             (5, [enc(honest), enc(cast0), enc(cast2), enc(outside), enc(stray), enc(tier), enc(shape), enc(unqualified), enc(vss_bad), enc(ciphertext), trailing]),
             (6, [enc(honest), enc(stray)]),
+            (7, [enc(honest)]),
         ],
         "unverifiable",
     )
@@ -374,6 +372,12 @@ def main(constants, out_dir):
         "An opening that re-uses the commitment of a ballot in segment 4, above the floor: whether that ballot is counted needs s_S, so no break is reported and 6.2 is unverifiable.",
         [(0, ["t", rec0]), (4, [rec2]), (5, [enc(cast2)])],
         "unverifiable",
+    )
+    case(
+        "cast-at-floor",
+        "An opening that re-uses the commitment of a ballot in segment 3, the floor itself (client rule 1 lets a ballot cast in close's period carry it): counted whatever s_S is, so the opening is cast and 6.2 fails.",
+        [(0, ["t", rec0]), (3, [rec2]), (5, [enc(cast2)])],
+        "fail",
     )
     case("none", "Ballots and no opening: 6.2 passes.", [(0, ["t", rec0]), (4, [rec2])], "pass")
     # A close before the clock's epoch puts the floor below 0, so no segment is early.

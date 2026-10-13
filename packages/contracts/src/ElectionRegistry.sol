@@ -48,17 +48,20 @@ contract ElectionRegistry is EventAccumulator {
         uint64 epoch;
     }
 
-    /// One question's option count and selection limits (docs/spec/contracts.md,
-    /// Parameters).
+    /// One question's method, option count and selection limits
+    /// (docs/spec/contracts.md, Parameters).
     struct Question {
+        /// 1, selection: the only method so far; a later one shapes the
+        /// committed vote differently, so the board needs it.
+        uint8 method;
         uint16 optionCount;
         uint16 minSelections;
         uint16 maxSelections;
     }
 
-    /// What the board's checks read for a registered definition, a function of
-    /// the definition alone (docs/spec/contracts.md, Parameters). All zero and
-    /// empty for a definition hash never registered.
+    /// What the board's checks read for a registered definition apart from
+    /// its cells, a function of the definition alone (docs/spec/contracts.md,
+    /// Parameters). All zero and empty for a definition hash never registered.
     struct Parameters {
         /// The version the definition's profile pins for the ballot (0x0002);
         /// never 0 once registered, since every pin is at least 1.
@@ -69,12 +72,10 @@ contract ElectionRegistry is EventAccumulator {
         uint8 panelSize;
         /// `T`, every question's options together.
         uint16 optionCount;
+        /// How many cells the definition's partition has.
+        uint16 cellCount;
         /// In the order the ballot asks them.
         Question[] questions;
-        /// The partition's cells in order: `cellTiers[c]` is cell `c`'s tier
-        /// and `cellRoots[c]` the root its ballots prove membership against.
-        uint8[] cellTiers;
-        uint256[] cellRoots;
     }
 
     /// A definition field that names something other than this deployment.
@@ -146,6 +147,11 @@ contract ElectionRegistry is EventAccumulator {
     mapping(bytes32 electionId => address) public creatorOf;
     mapping(bytes32 electionId => bytes32) public definitionHashOf;
     mapping(bytes32 definitionHash => Parameters) private _parameters;
+    /// The partition's cells in order: each cell's tier, and the root its
+    /// ballots prove membership against. Kept apart from `_parameters` so the
+    /// board reads one cell, not every cell of a large partition.
+    mapping(bytes32 definitionHash => uint8[]) private _cellTiers;
+    mapping(bytes32 definitionHash => uint256[]) private _cellRoots;
 
     constructor(Deployment memory dep) {
         // The same rule a definition's `chain` check applies, so a deployment
@@ -181,6 +187,22 @@ contract ElectionRegistry is EventAccumulator {
     /// is `definitionHash`, or all zero (`ballotVersion` 0) if none is.
     function parameters(bytes32 definitionHash) external view returns (Parameters memory) {
         return _parameters[definitionHash];
+    }
+
+    /// @notice Every cell's tier, in partition order: where a ballot that
+    /// names its tier finds its cell. Empty if no definition has this hash.
+    function cellTiers(bytes32 definitionHash) external view returns (uint8[] memory) {
+        return _cellTiers[definitionHash];
+    }
+
+    /// @notice Cell `c`'s tier and root. Reverts unless `c` is below the
+    /// definition's `cellCount`.
+    function cell(bytes32 definitionHash, uint256 c)
+        external
+        view
+        returns (uint8 tier, uint256 root)
+    {
+        return (_cellTiers[definitionHash][c], _cellRoots[definitionHash][c]);
     }
 
     /// @notice Creates an election and makes the caller its creator, the only
@@ -272,13 +294,15 @@ contract ElectionRegistry is EventAccumulator {
         p.threshold = def.threshold;
         p.panelSize = def.panelSize;
         p.optionCount = def.optionCount;
-        // Version 1 asks one question, over all its options.
-        p.questions.push(Question(def.optionCount, def.minSelections, def.maxSelections));
+        // Version 1 asks one question, over all its options, by selection
+        // (plurality is the limits (0, 1)).
+        p.questions.push(Question(1, def.optionCount, def.minSelections, def.maxSelections));
         // Version 1's cells are its tiers, one per electorate entry in order
         // (docs/spec/election-definition.md, Tally partition).
+        p.cellCount = uint16(def.electorate.length);
         for (uint256 i; i < def.electorate.length; i++) {
-            p.cellTiers.push(def.electorate[i].tier);
-            p.cellRoots.push(def.electorate[i].root);
+            _cellTiers[h].push(def.electorate[i].tier);
+            _cellRoots[h].push(def.electorate[i].root);
         }
     }
 

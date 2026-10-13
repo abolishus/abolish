@@ -140,10 +140,10 @@ contract ElectionRegistryTest is TestBase {
         bytes memory enc = RegistryFixture.approve(lib, trustees, d);
         vm.prank(CREATOR);
         registry.registerDefinition(enc);
-        _assertParameters(registry.parameters(lib.hash(enc)), d);
+        _assertParameters(lib.hash(enc), d);
     }
 
-    /// Fuzzed limits, panel and ballot pin: whatever is registered is what the
+    /// Fuzzed limits, panel, ballot pin, tiers and roots: whatever is registered is what the
     /// board reads.
     function testFuzz_ParametersAreTheDefinitions(
         uint8 ballotVersion,
@@ -152,7 +152,8 @@ contract ElectionRegistryTest is TestBase {
         uint16 maxSelections,
         uint8 threshold,
         uint8 panelSize,
-        bool twoTiers
+        uint8 tierMask,
+        uint256 rootSeed
     ) public {
         bytes32 id = _create();
         ElectionDefinitionLib.Definition memory d = RegistryFixture.template(registry, id);
@@ -163,15 +164,28 @@ contract ElectionRegistryTest is TestBase {
         d.minSelections = uint16(_bound(minSelections, 0, d.maxSelections));
         d.panelSize = uint8(_bound(panelSize, 2, 16));
         d.threshold = uint8(_bound(threshold, 2, d.panelSize));
-        if (!twoTiers) {
-            ElectionDefinitionLib.TierGroup[] memory e = new ElectionDefinitionLib.TierGroup[](1);
-            e[0] = d.electorate[1];
-            d.electorate = e;
+        // Any non-empty ascending subset of the tiers, each with its own root
+        // below r, so the cells' order and roots are the definition's.
+        uint256 mask = _bound(tierMask, 1, 7);
+        uint256 count = (mask & 1) + (mask >> 1 & 1) + (mask >> 2);
+        ElectionDefinitionLib.TierGroup[] memory e = new ElectionDefinitionLib.TierGroup[](count);
+        uint256 n;
+        for (uint8 t; t < 3; t++) {
+            if (mask >> t & 1 == 0) continue;
+            e[n] = ElectionDefinitionLib.TierGroup({
+                tier: t,
+                groupId: t + 1,
+                root: uint256(keccak256(abi.encode(rootSeed, t))) % ElectionDefinitionLib.BN254_R,
+                rootL2Block: RegistryFixture.ROOT_BLOCK,
+                groupSize: 10
+            });
+            n++;
         }
+        d.electorate = e;
         bytes memory enc = RegistryFixture.approve(lib, trustees, d);
         vm.prank(CREATOR);
         registry.registerDefinition(enc);
-        _assertParameters(registry.parameters(lib.hash(enc)), d);
+        _assertParameters(lib.hash(enc), d);
     }
 
     function test_AnUnregisteredHashHasNoParameters() public {
@@ -650,24 +664,29 @@ contract ElectionRegistryTest is TestBase {
 
     // --- helpers -------------------------------------------------------------
 
-    function _assertParameters(
-        ElectionRegistry.Parameters memory p,
-        ElectionDefinitionLib.Definition memory d
-    ) internal pure {
+    function _assertParameters(bytes32 h, ElectionDefinitionLib.Definition memory d) internal view {
+        ElectionRegistry.Parameters memory p = registry.parameters(h);
         assertEq(p.ballotVersion, d.pinVersions[1], "ballot version");
         assertEq(p.threshold, d.threshold, "threshold");
         assertEq(p.panelSize, d.panelSize, "panel size");
         assertEq(p.optionCount, d.optionCount, "option count");
+        assertEq(p.cellCount, d.electorate.length, "cell count");
         assertEq(p.questions.length, 1, "one question");
+        assertEq(p.questions[0].method, 1, "selection");
         assertEq(p.questions[0].optionCount, d.optionCount, "question options");
         assertEq(p.questions[0].minSelections, d.minSelections, "min selections");
         assertEq(p.questions[0].maxSelections, d.maxSelections, "max selections");
-        assertEq(p.cellTiers.length, d.electorate.length, "cell tiers");
-        assertEq(p.cellRoots.length, d.electorate.length, "cell roots");
+        uint8[] memory tiers = registry.cellTiers(h);
+        assertEq(tiers.length, d.electorate.length, "cell tiers");
         for (uint256 i; i < d.electorate.length; i++) {
-            assertEq(p.cellTiers[i], d.electorate[i].tier, "tier");
-            assertEq(p.cellRoots[i], d.electorate[i].root, "root");
+            assertEq(tiers[i], d.electorate[i].tier, "tiers");
+            (uint8 tier, uint256 root) = registry.cell(h, i);
+            assertEq(tier, d.electorate[i].tier, "tier");
+            assertEq(root, d.electorate[i].root, "root");
         }
+        (bool ok,) = address(registry)
+            .staticcall(abi.encodeCall(ElectionRegistry.cell, (h, d.electorate.length)));
+        assertTrue(!ok, "a cell past the last");
     }
 
     function _assertNoParameters(bytes32 h) internal view {
@@ -676,9 +695,11 @@ contract ElectionRegistryTest is TestBase {
         assertEq(p.threshold, 0, "threshold");
         assertEq(p.panelSize, 0, "panel size");
         assertEq(p.optionCount, 0, "option count");
+        assertEq(p.cellCount, 0, "cell count");
         assertEq(p.questions.length, 0, "questions");
-        assertEq(p.cellTiers.length, 0, "cell tiers");
-        assertEq(p.cellRoots.length, 0, "cell roots");
+        assertEq(registry.cellTiers(h).length, 0, "cell tiers");
+        (bool ok,) = address(registry).staticcall(abi.encodeCall(ElectionRegistry.cell, (h, 0)));
+        assertTrue(!ok, "a cell");
     }
 
     function _bound(uint256 x, uint256 lo, uint256 hi) internal pure returns (uint256) {

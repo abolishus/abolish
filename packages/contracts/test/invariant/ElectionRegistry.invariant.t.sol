@@ -18,7 +18,6 @@ contract RegistryHandler is TestBase {
     bytes32[] public ids;
     mapping(bytes32 => address) public shadowCreator;
     mapping(bytes32 => bytes32) public shadowHash;
-    mapping(bytes32 => uint16) public shadowOptions;
     uint256 public registrations;
     /// Set if a registration succeeded or failed against the rules.
     bool public unexpected;
@@ -57,11 +56,39 @@ contract RegistryHandler is TestBase {
         try registry.registerDefinition(enc) {
             if (!allowed) unexpected = true;
             shadowHash[id] = lib.hash(enc);
-            shadowOptions[id] = d.optionCount;
             registrations++;
+            if (!_recorded(lib.hash(enc), d)) unexpected = true;
         } catch {
             if (allowed) unexpected = true;
+            // A refused definition records nothing, unless it is the one
+            // already registered for this election.
+            if (
+                lib.hash(enc) != shadowHash[id]
+                    && registry.parameters(lib.hash(enc)).ballotVersion != 0
+            ) unexpected = true;
         }
+    }
+
+    /// Whether the registry recorded exactly `d`'s parameters for `h`.
+    function _recorded(bytes32 h, ElectionDefinitionLib.Definition memory d)
+        internal
+        view
+        returns (bool)
+    {
+        ElectionRegistry.Parameters memory p = registry.parameters(h);
+        if (
+            p.ballotVersion != d.pinVersions[1] || p.threshold != d.threshold
+                || p.panelSize != d.panelSize || p.optionCount != d.optionCount
+                || p.cellCount != d.electorate.length || p.questions.length != 1
+                || p.questions[0].method != 1 || p.questions[0].optionCount != d.optionCount
+                || p.questions[0].minSelections != d.minSelections
+                || p.questions[0].maxSelections != d.maxSelections
+        ) return false;
+        for (uint256 i; i < d.electorate.length; i++) {
+            (uint8 tier, uint256 root) = registry.cell(h, i);
+            if (tier != d.electorate[i].tier || root != d.electorate[i].root) return false;
+        }
+        return true;
     }
 
     function _actor(uint8 seed) internal pure returns (address) {
@@ -79,7 +106,8 @@ contract RegistryHandler is TestBase {
 ///    election has no definition yet.
 /// 5. The event accumulator counts one event per creation and per registration.
 /// 6. The board's parameters are recorded for exactly the registered
-///    definitions, from the definition that was registered (ADR 0028, 1C).
+///    definitions, each exactly the registered definition's, and a refused
+///    definition records none (ADR 0028, 1C).
 contract ElectionRegistryInvariantTest is TestBase {
     ElectionRegistry internal registry;
     RegistryHandler internal handler;
@@ -111,9 +139,9 @@ contract ElectionRegistryInvariantTest is TestBase {
             assertTrue(registry.creatorOf(id) == handler.shadowCreator(id), "creator");
             bytes32 h = handler.shadowHash(id);
             assertEq(registry.definitionHashOf(id), h, "definition hash");
-            ElectionRegistry.Parameters memory p = registry.parameters(h);
-            assertEq(p.optionCount, handler.shadowOptions(id), "parameters");
-            assertEq(p.cellRoots.length, h == bytes32(0) ? 0 : 2, "cells");
+            // Set exactly for the registered definitions; what was recorded
+            // is checked against the definition at registration.
+            assertEq(registry.parameters(h).cellCount, h == bytes32(0) ? 0 : 2, "parameters");
         }
     }
 

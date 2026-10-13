@@ -343,6 +343,26 @@ export const electionRegistryAbi = [
   },
   {
     type: "function",
+    inputs: [
+      { name: "definitionHash", internalType: "bytes32", type: "bytes32" },
+      { name: "c", internalType: "uint256", type: "uint256" },
+    ],
+    name: "cell",
+    outputs: [
+      { name: "tier", internalType: "uint8", type: "uint8" },
+      { name: "root", internalType: "uint256", type: "uint256" },
+    ],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    inputs: [{ name: "definitionHash", internalType: "bytes32", type: "bytes32" }],
+    name: "cellTiers",
+    outputs: [{ name: "", internalType: "uint8[]", type: "uint8[]" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
     inputs: [],
     name: "createElection",
     outputs: [{ name: "electionId", internalType: "bytes32", type: "bytes32" }],
@@ -435,18 +455,18 @@ export const electionRegistryAbi = [
           { name: "threshold", internalType: "uint8", type: "uint8" },
           { name: "panelSize", internalType: "uint8", type: "uint8" },
           { name: "optionCount", internalType: "uint16", type: "uint16" },
+          { name: "cellCount", internalType: "uint16", type: "uint16" },
           {
             name: "questions",
             internalType: "struct ElectionRegistry.Question[]",
             type: "tuple[]",
             components: [
+              { name: "method", internalType: "uint8", type: "uint8" },
               { name: "optionCount", internalType: "uint16", type: "uint16" },
               { name: "minSelections", internalType: "uint16", type: "uint16" },
               { name: "maxSelections", internalType: "uint16", type: "uint16" },
             ],
           },
-          { name: "cellTiers", internalType: "uint8[]", type: "uint8[]" },
-          { name: "cellRoots", internalType: "uint256[]", type: "uint256[]" },
         ],
       },
     ],

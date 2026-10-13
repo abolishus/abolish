@@ -293,24 +293,28 @@ const DEFINITION_BALLOT: ReadonlyMap<number, number> = new Map([
 ]);
 // Ballot versions whose delivery records reach the board as share receipts
 // and complaints (docs/spec/delivery.md, Versions).
-const DELIVERED_BALLOT_VERSIONS: ReadonlySet<number> = new Set<number>([1, 2, 3]);
+const DELIVERED_BALLOT_VERSIONS: ReadonlySet<number> = new Set<number>([1, 2, 3, 4]);
 // The spoiled-ballot opening version that opens each ballot version's cores
 // (docs/spec/challenge.md, Versions): opening version 1 opens version 1's,
-// opening version 2 those of versions 2 and 3, which name a cell. A profile
+// opening version 2 those of versions 2 and 3, which name a cell, and
+// opening version 3 those of version 4, both halves. A profile
 // pinning another beside them is refused: a ballot that can't be challenged
 // can't be checked as cast-as-intended (T-42, T-47).
 const CORE_OPENING: ReadonlyMap<number, number> = new Map([
   [1, 1],
   [2, 2],
   [3, 2],
+  [4, 3],
 ]);
 // The spoiled-ballot opening versions this package reads (challenge.ts's
 // SPOILED_BALLOT_OPENING), written out because importing it here would be an
 // import cycle; a test ties the two.
 export const SPOILED_OPENING_VERSIONS: ReadonlySet<number> = new Set<number>([1, 2]);
 // The ballot versions this package reads (ballot.ts's BALLOT), written out
-// for the same reason.
-export const BALLOT_VERSIONS: ReadonlySet<number> = new Set<number>([1, 2, 3]);
+// for the same reason. Version 4 pairs only with definition version 6, which
+// this function doesn't take yet, so under every definition version it does
+// take a profile pinning ballot version 4 fails.
+export const BALLOT_VERSIONS: ReadonlySet<number> = new Set<number>([1, 2, 3, 4]);
 
 /** Why 2.3's profile combination refuses a definition's pins. */
 export type ProfileCombinationRule = "profile-combination" | "unsupported-version";
@@ -322,10 +326,12 @@ export type ProfileCombinationRule = "profile-combination" | "unsupported-versio
  * display-text version 1 and version 5 display-text version 2; definition
  * version 1 pins ballot version 1, versions 3 and 4 ballot version 2 and
  * version 5 ballot version 3, and each of those ballot versions pairs with
- * those definition versions only; ballot versions 1 to 3 need a board-entry
+ * those definition versions only; ballot version 4 pairs with definition
+ * version 6 only, which this function doesn't take, so it fails under every
+ * definition version here; ballot versions 1 to 4 need a board-entry
  * version that carries share receipts and complaints (3 or 4) and the
  * spoiled-ballot opening version that opens their cores (1 for version 1, 2
- * for versions 2 and 3); and tally-opening version 1 needs one that carries
+ * for versions 2 and 3, 3 for version 4); and tally-opening version 1 needs one that carries
  * destruction statements (4, docs/spec/tally.md, Destruction), so an
  * election's creator can't leave delivery, challenge or destruction off the
  * board (T-34, T-42). A board-entry version this package doesn't read is

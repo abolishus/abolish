@@ -222,14 +222,17 @@ def check_validity(e, ctx, vote):
     return "ok"
 
 
-def make_ballot(label, e, ctx, votes, zero_r=(), version=VERSION, over_default_half=False):
+def make_ballot(label, e, ctx, votes, zero_r=(), version=VERSION, over_default_half=False, share_hashes=None, author_share_hashes=None):
     """An honest client's ballot for the flat `votes`; a vote outside the rules is proved as the prover would if it were in them.
 
     `zero_r` lists flat options whose randomness r_j is 0 rather than drawn
     (s_j is still drawn, so both halves are random-looking and C_j is
     g^{v_j}). `version` other than 4 proves over that version input, and
     `over_default_half` over E^D_{j,0} alone as if it were C_j, for the vectors
-    that show neither verifies as version 4."""
+    that show neither verifies as version 4. `share_hashes` and
+    `author_share_hashes`, when given, are the two lists the ballot carries in
+    place of drawn ones (ballot-v4-records-vectors.py's zero hashes for
+    unregistered seats)."""
     assert len(votes) == e["optionTotal"]
     rng = bv.Rng("ballot-v4/" + label)
     k, n, k_a, n_a = e["threshold"], e["panelSize"], e["authorThreshold"], e["authorPanelSize"]
@@ -249,9 +252,9 @@ def make_ballot(label, e, ctx, votes, zero_r=(), version=VERSION, over_default_h
     author_shares = [[{"v": bv.evaluate(p["f"], i), "r": bv.evaluate(p["g"], i)} for p in author] for i in range(1, n_a + 1)]
     vote = {
         "vss": vss,
-        "shareHashes": [rng.bytes32() for _ in range(n)],
+        "shareHashes": [rng.bytes32() for _ in range(n)] if share_hashes is None else list(share_hashes),
         "authorVss": avss,
-        "authorShareHashes": [rng.bytes32() for _ in range(n_a)],
+        "authorShareHashes": [rng.bytes32() for _ in range(n_a)] if author_share_hashes is None else list(author_share_hashes),
     }
     st = statement_hash(ctx, vote, version)
     cs = [row[0] for row in vss] if over_default_half else commitments(vote)

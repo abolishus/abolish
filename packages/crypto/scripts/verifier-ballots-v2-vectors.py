@@ -350,8 +350,8 @@ def build(constants):
     d_b1, t_b1, e_b1 = election_for("v3-ballot-1", [1, 2, 3], profile=pins_for(3, ballot=1, opening=1))
     bundle("ballot-v1", "Definition version 3 pinning ballot version 1, which names a tier, not a cell, beside opening version 1: 2.3 fails profile-combination, and no ballot or opening can be judged against the partition.", d_b1, t_b1, e_b1, [1, 2, 3], [t_b1, (b_a, None)], "not-reached")
 
-    d_b4, t_b4, e_b4 = election_for("v3-ballot-4", [1, 2, 3], profile=pins_for(3, ballot=4))
-    bundle("ballot-v4", "Definition version 3 pinning ballot version 4, which a later release may define to name its cell: 2.3, 5.1 to 5.4, 5.7 and 6.2 are unsupported.", d_b4, t_b4, e_b4, [1, 2, 3], [t_b4, (b_a, None)], "unsupported")
+    d_b5, t_b5, e_b5 = election_for("v3-ballot-5", [1, 2, 3], profile=pins_for(3, ballot=5))
+    bundle("ballot-v5", "Definition version 3 pinning ballot version 5, which a later release may define to name its cell: 2.3, 5.1 to 5.4, 5.7 and 6.2 are unsupported.", d_b5, t_b5, e_b5, [1, 2, 3], [t_b5, (b_a, None)], "unsupported")
 
     return {"panels": panels, "proofs": proofs, "checks": checks, "bundles": bundles, "eid": eid, "cells": cells}
 
@@ -483,7 +483,7 @@ def assemble(constants, proofs_path, out_dir):
     assert by["definition-v4"]["ballots"]["rejected"] == [{"entry": 5, "code": "ballot-stray"}]
     assert by["other-key"]["expected"]["1.3"]["code"] == "membership-key"
     assert by["ballot-v1"]["expected"]["2.3"]["code"] == "profile-combination"
-    assert by["ballot-v4"]["expected"]["2.3"] == UNSUPPORTED
+    assert by["ballot-v5"]["expected"]["2.3"] == UNSUPPORTED
     assert by["quorum"]["expected"]["6.2"] == UNSUPPORTED and by["ballot-v1"]["expected"]["6.2"] == NOT_REACHED
 
     doc = {

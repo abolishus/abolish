@@ -227,6 +227,14 @@ Decryption is steps 1 to 5 above, with `aad` and `t_e` above, the seat's panel's
 
 Before it takes any delivery, a seat of either panel runs what a default seat runs (Intake and receipts: [[verifier]] 2.5 with `panel-kind` and `default-seat`, 3.2 for its own panel, 1.3, 2.4, 2.8), and, with an author panel, checks the author panel's transcript and approvals as P2-16 part 3 specifies; an author seat also checks that the definition names its own identity key at its own index in `author_keys`, so a creator who substituted author keys finds no author node taking part (T-37). A node refuses intake for an election it can't check this way.
 
+**Ballot version 5** ([[ballot-validity]], Ballot record (version 5)), a rolling poll's ballot, keeps version 4's ciphertexts, decryption, receipts, postings and complaints unchanged, and its intake is version 4's with the rolling electorate's admission:
+
+- before it takes any delivery, the node replays each rolling tier's listed groups from the group registry and checks the opening root and member count ([[verifier]] 2.4; [[membership]], Rolling checks), and keeps replaying them through close;
+- step 2 runs `ballot-cell` over the rolling partition and, after `share-hash-unqualified`, `root-step-range` against the steps the node computes itself ([[ballot-validity]], Admission (version 5));
+- step 4 checks the membership proof against `ρ_step`, the root of the named step's tree of the cell's tier that the node computes itself from that replay, under the tier's rolling scope, never the definition's opening root and never a root the delivery names ([[0028-rolling-electorates]], Re-voting, multi-question ballots, intake).
+
+A step the node hasn't seen settle yet can't be judged: the node defers the delivery rather than refusing it, and takes it once its replay reaches a block whose timestamp is after the step's boundary, so an honest ballot made against a settled step is never refused for a node's lag (T-25, T-41). Like version 1's intake, it doesn't check the window, which needs the L1 reference ([[revoting]], Admission, step 5).
+
 ### Share receipt (ballot version 4)
 
 A seat's receipt is an ECDSA P-256 signature by its per-election signing key, registered in its own panel's key set, under `abolish/v1/sig/share-receipt-2`, over

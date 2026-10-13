@@ -247,7 +247,7 @@ Because the scope binds the tier, a proof made for one tier never verifies as an
 **Rolling checks.** Under a rolling electorate a verifier replays each tier's listed groups through the last accepted step (Rolling tier tree), and fails the definition if a tier's `root` or `group_size` differs from the root or member count of its rolling tier tree at `root_l2_block` ([[verifier]] 2.4). A rolling tier with no live member at opening states `Z_32` and a count of 0; it holds no ballot until a step has a member. Then, for each ballot of tier `t`, it:
 
 1. Recomputes `ŝ_t` from the definition (Scope, Rolling scope).
-2. Takes `ρ = ρ_n`, the step root it computed itself for the step `n` the ballot names, once that step is accepted and inside the ballot's window (Root clock and steps); never a root from the ballot, a relay or a submitter.
+2. Takes `ρ = ρ_n`, the step root it computed itself for the step `n` the ballot names, once that step is accepted (`root-step-range`, [[ballot-validity]], Admission (version 5)); never a root from the ballot, a relay or a submitter. The window is checked with the L1 reference, after admission ([[revoting]], Admission, step 5).
 3. Decodes `ν`, recomputes `m̂` and verifies the proof as steps 3 to 5 above do, with public signals `[ρ_n, ν, m̂, ŝ_t]`.
 
 The verifier computes a step's root only for steps some ballot names, from the same replay, so its work stays linear in the groups' events ([[0028-rolling-electorates]], requirement 6).

@@ -462,6 +462,11 @@ def build(constants):
 
     # Membership failures.
     case("membership-step-relabelled", "The newest-step ballot relabelled to step N0 + 1, which also holds its member: the ballot hash binds the step, so M and the proof fail", "rolling", [1, 2], [1, 2], dict(b_dan, step=N0 + 1), "dan", "membership-proof")
+    # Relabelled to a step with the same root: only the ballot hash's binding of the step fails them (T-38).
+    assert step_of(e, 0, N0 + 1)["root"] == step_of(e, 0, N0 + 2)["root"]
+    case("membership-step-relabelled-same-root", "The re-vote relabelled from step N0 + 1 to N0 + 2, whose tree and root are the same: the root passes, but M binds the step through the ballot hash", "rolling", [1, 2], [1, 2], dict(b_ada2, step=N0 + 2), "ada-revote", "membership-proof")
+    assert step_of(e, 1, N0 - 1)["root"] == step_of(e, 1, N0)["root"]
+    case("membership-step-relabelled-same-root-tier-2", "Tier 2's ballot relabelled from step N0 to N0 − 1, whose root is the same", "rolling", [1, 2], [1, 2], dict(b_tess, step=N0 - 1), "tess", "membership-proof")
     b_wrong_root = ballot("wrong-root", e, 0, nullifier("ada", e, 0), N0, [(3, [1]), (4, [2]), (2, [0])], d12, a12)
     prove("wrong-root", "ada", e, b_wrong_root, tree_step=N0 - 1)
     case("membership-other-step-root", "A ballot naming step N0 whose proof is against step N0 − 1's root, with M over this ballot: the verifier takes the root of the step the ballot names", "rolling", [1, 2], [1, 2], b_wrong_root, "wrong-root", "membership-proof")

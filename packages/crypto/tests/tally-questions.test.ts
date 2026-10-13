@@ -15,6 +15,7 @@ import {
   element,
   type ElectionDefinitionV5,
   encodeTallyOpening,
+  GROUP_ORDER,
   identityKey,
   list,
   openCell,
@@ -140,6 +141,27 @@ describe("tally-questions.json (docs/spec/tally.md, Opening checks)", () => {
     }
   });
 
+  test("tally-opening runs for every option before tally-range", () => {
+    // range-before-question-range fails tally-range at option 0; with option
+    // 5's randomness changed it must fail tally-opening at option 5 instead,
+    // in the spec's order, for the trustee's check and the verifier's alike.
+    const c = file.cells.find((x) => x.id === "range-before-question-range");
+    if (c === undefined) throw new Error("no range-before-question-range cell");
+    const ballots = c.ballots.map((b) => decode(VSS, hex(b)) as CommittedVote["vss"]);
+    const opening = c.opening.map((x, j) => ({
+      v: BigInt(x.v),
+      r: j === 5 ? (BigInt(x.r) + 1n) % GROUP_ORDER : BigInt(x.r),
+    }));
+    expect(checkOpening(rules, ballots, opening)).toEqual({
+      ok: false,
+      code: "tally-opening",
+      option: 5,
+    });
+    expect(
+      verifierVerdict(rules, hex(file.election.definitionHash), ballots, opening).failure,
+    ).toEqual({ cell: 0, code: "tally-opening", option: 5 });
+  });
+
   test("without the questions, the cells failing only tally-question-range would pass", () => {
     // The mutation the check guards against: a tally over the flat options
     // alone admits every question count from 0 to |S_c| times its width.
@@ -188,7 +210,7 @@ describe("tallyRules", () => {
     }
   });
 
-  test("a version-6 definition is unsupported: its tally is two panels' (P2-16)", () => {
+  test("a version-6 definition is unsupported until P2-16 tallies ballot version 4", () => {
     const value = decodeElectionDefinitionV6(
       first("election-definition-v6.json", (v) => v.id === "definition-v6-typical"),
     );

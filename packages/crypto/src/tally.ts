@@ -116,9 +116,9 @@ function checkRules(rules: TallyRules): void {
  * The rules a cell of a registered definition is tallied under
  * (docs/spec/tally.md, Context): `m`, `k` and `n`, and under version 5 each
  * question's option count and limits. Versions 1, 3, 4 and 5 only: a
- * version-6 definition's ballots carry two sharings, whose tally is P2-16's,
- * so it is `UnsupportedVersionError` here rather than tallied as one panel's
- * (T-36). A definition that isn't well-formed is refused: its questions could
+ * version-6 definition's ballots are version 4, whose tally (its default
+ * half, and with an author panel the sum of both panels' openings) is
+ * P2-16's, so it is `UnsupportedVersionError` here until then (T-36). A definition that isn't well-formed is refused: its questions could
  * hold limits no ballot proves, which would make `tally-question-range`
  * judge an honest cell (T-28, T-34).
  */

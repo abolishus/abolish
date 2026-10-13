@@ -113,7 +113,7 @@ function signedBytes(m: CodecValue<typeof statementV1>): Uint8Array {
 /**
  * A registered definition a tally runs under: a version-1 definition, or a
  * decoded record of version 1, 3, 4 or 5 (`tallyRules`; a version-6 one is
- * refused until its two panels' tally, P2-16).
+ * refused until P2-16 tallies ballot version 4).
  */
 export type SummedShareDefinition = ElectionDefinition | AnyElectionDefinitionRecord;
 

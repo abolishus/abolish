@@ -11,6 +11,7 @@ const base: Scenario = {
   trustees: { panel: 5, threshold: 3, offline: [], faulty: [] },
   tiers: { "0": 2, "1": 1, "2": 1 },
   outage: { from: 0.5, to: 1 },
+  challenges: 0.5,
   seed: 7,
 };
 
@@ -31,6 +32,7 @@ const scenario = fc.record({
       .map(([from, to]) => ({ from, to })),
     { nil: null },
   ),
+  challenges: fc.double({ min: 0, max: 1, noNaN: true }),
   seed: fc.integer({ min: 0, max: 0xffff_ffff }),
 });
 
@@ -94,11 +96,28 @@ describe("planElection", () => {
     );
   });
 
-  it("spreads voters across tiers by weight and the outage across time", () => {
+  it("draws challenges apart: the share changes no voter's tier, votes, time or path", () => {
+    fc.assert(
+      fc.property(scenario, fc.double({ min: 0, max: 1, noNaN: true }), (s, other) => {
+        const strip = (c: number) =>
+          planElection({ ...s, challenges: c }).voters.map((v) => ({ ...v, challenged: false }));
+        expect(strip(other)).toEqual(strip(s.challenges));
+      }),
+      { numRuns },
+    );
+  });
+
+  it("challenges with no voter at share 0 and with every voter at share 1", () => {
+    expect(planElection({ ...base, challenges: 0 }).voters.some((v) => v.challenged)).toBe(false);
+    expect(planElection({ ...base, challenges: 1 }).voters.every((v) => v.challenged)).toBe(true);
+  });
+
+  it("spreads voters across tiers by weight, the outage across time and challenges by their share", () => {
     const plan = planElection({ ...base, voters: 4000 });
     const share = (tier: number) => plan.voters.filter((v) => v.tier === tier).length / 4000;
     expect(share(0)).toBeCloseTo(0.5, 1);
     expect(share(1)).toBeCloseTo(0.25, 1);
     expect(plan.voters.filter((v) => v.path === "direct").length / 4000).toBeCloseTo(0.5, 1);
+    expect(plan.voters.filter((v) => v.challenged).length / 4000).toBeCloseTo(0.5, 1);
   });
 });

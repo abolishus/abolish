@@ -53,6 +53,7 @@ export function simulationCommandsWith(
           ballots: {
             cast: plan.voters.length,
             direct: plan.voters.filter((v) => v.path === "direct").length,
+            challenged: plan.voters.filter((v) => v.challenged).length,
           },
           expected: plan.tiers.map((tier) => ({ tier, counts: plan.expected.get(tier) })),
         });

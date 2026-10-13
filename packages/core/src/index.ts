@@ -96,3 +96,12 @@ export {
   report,
   reviewReports,
 } from "./reports.ts";
+export {
+  assignShortCodes,
+  MAX_SHORT_CODE_LENGTH,
+  parseShortCode,
+  resolveShortCode,
+  SHORT_CODE_ALPHABET,
+  SHORT_CODE_LENGTH,
+  shortCode,
+} from "./short-codes.ts";

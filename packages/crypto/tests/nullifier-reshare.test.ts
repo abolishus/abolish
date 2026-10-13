@@ -36,6 +36,7 @@ import {
   nullifierReshareApprovalMessage,
   type NullifierReshareCheck,
   nullifierReshareContext,
+  nullifierReshareDealerQuorum,
   nullifierReshareKeyId,
   type NullifierReshareParams,
   nullifierReshareQuorum,
@@ -502,6 +503,10 @@ describe("nullifier-reshare.json", () => {
     const one = all[0] as { index: number; signature: Uint8Array };
     expect(reshareApprovingSeats(scope, hex(a.keyId), [one, one])).toEqual([1]);
     expect(nullifierReshareQuorum(scope)).toBe(3);
+    // The old 2-of-4 panel's consent: 3 qualified dealers, as honest has and two-dealers doesn't.
+    expect(nullifierReshareDealerQuorum(scope)).toBe(3);
+    expect(vectorOf("honest").result.dealers?.length).toBe(3);
+    expect(vectorOf("two-dealers").result.dealers?.length).toBe(2);
     // An old seat's key signs nothing for the new panel.
     expect(() =>
       approveNullifierReshare(

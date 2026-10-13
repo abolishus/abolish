@@ -950,7 +950,9 @@ export function nullifierReshareApprovalMessage(
 /**
  * New seat `index`'s approval of a successor, as its check gave it (its
  * `keyId` and `deadline`), refused once the deadline has passed or if it lies
- * more than `MAX_RESHARE_WINDOW` ahead of `currentL2Block`. The caller MUST have checked
+ * more than `MAX_RESHARE_WINDOW` ahead of `currentL2Block`. `successor` must be
+ * one check's result, its `keyId` and `deadline` together, and the margin
+ * for recording the approval in time is the caller's. The caller MUST have checked
  * the approval rules of docs/spec/nullifier-reshare.md first, rules 4 to 6
  * above all: the predecessor counts and has no counted successor, the run's
  * deadline hasn't passed, and every other successor of this predecessor the
@@ -1002,6 +1004,16 @@ export function reshareApprovingSeats(
       seats.add(a.index);
   }
   return [...seats].sort((x, y) => x - y);
+}
+
+/**
+ * `max(k, n − 1)` over the predecessor's panel: the qualified dealers a
+ * successor needs, the old panel's consent to the succession (approval
+ * rule 1). The transcript check needs only `k`, enough to recombine `sk`.
+ */
+export function nullifierReshareDealerQuorum(scope: NullifierReshareScope): number {
+  const s = scopeOf(scope);
+  return Math.max(s.old.threshold, s.old.keys.length - 1);
 }
 
 /** `q' = max(k', n' − 1)`: the approvals a successor needs, and the qualified new seats an honest seat requires. */

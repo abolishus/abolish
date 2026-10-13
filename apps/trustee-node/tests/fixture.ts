@@ -1,28 +1,20 @@
 // A version-1 stub, a panel and a coordinator that relays every round
-// between seats, dropping what a test tells it to. Built from
-// `@abolishus/crypto` the way the sdk's simulation builds its stub.
+// between seats, dropping what a test tells it to.
 import {
   type AnswersMessage,
   type ChallengesMessage,
-  displayTextCommitment,
-  ELECTION_TYPES,
   type ElectionDefinition,
-  electionId,
   electionStubHash,
   encodeCeremonyTranscript,
   encodeElectionDefinition,
   identityKey,
   type KeysMessage,
-  membershipVkHash,
-  newDisplayTextSalt,
   type Panel,
-  panelId,
-  RECORD_TYPES,
   type RevealsMessage,
-  TALLY_SCHEMES,
 } from "@abolishus/crypto";
 import { expect } from "vite-plus/test";
 import { CeremonySeat, type SeatResult, type SeatStore } from "../src/index.ts";
+import { localStub } from "../src/local.ts";
 import { MemoryStore } from "../src/store.ts";
 
 export const L2_CHAIN_ID = 31338n;
@@ -38,59 +30,11 @@ export function panelOf(n: number, k: number): Panelists {
   return { panel: { threshold: k, keys: secrets.map((s) => identityKey(s)) }, secrets };
 }
 
-const utf8 = (s: string) => new TextEncoder().encode(s);
-
 export function stubFor(
   panel: Panel,
   change: Partial<ElectionDefinition> = {},
 ): ElectionDefinition {
-  const registry = new Uint8Array(20).fill(0xa1);
-  const pins = [];
-  for (let t: number = RECORD_TYPES.electionDefinition; t <= RECORD_TYPES.displayText; t++)
-    pins.push({ record_type: t, version: t === RECORD_TYPES.boardEntry ? 4 : 1 });
-  return {
-    profile: { protocol_major: 1, pins },
-    election_id: electionId(L2_CHAIN_ID, registry, 7n),
-    l2_chain_id: L2_CHAIN_ID,
-    l1_chain_id: 31337n,
-    election_registry: registry,
-    board: new Uint8Array(20).fill(0xa2),
-    trustee_registry: TRUSTEE_REGISTRY,
-    group_registry: new Uint8Array(20).fill(0xa4),
-    l1_anchor: new Uint8Array(20).fill(0xb1),
-    l1_relay: new Uint8Array(20).fill(0xb2),
-    election_type: ELECTION_TYPES.plurality,
-    tally_scheme: TALLY_SCHEMES.pedersenVss,
-    option_count: 2,
-    min_selections: 0,
-    max_selections: 1,
-    electorate: [{ tier: 0, group_id: 1n, root: 1n << 200n, root_l2_block: 1n, group_size: 3n }],
-    membership_vk_hash: membershipVkHash(),
-    panel_id: panelId(panel),
-    threshold: panel.threshold,
-    panel_size: panel.keys.length,
-    ceremony_transcript_hash: new Uint8Array(32),
-    opens_at: 1_000_000n,
-    closes_at: 1_086_400n,
-    l1_inclusion_bound: 3600,
-    sequencing_window: 3600n,
-    max_sequencer_drift: 1800n,
-    display_text_commitment: displayTextCommitment({
-      salt: newDisplayTextSalt(),
-      translations: [
-        {
-          language: utf8("en"),
-          question: utf8("A test poll."),
-          description: utf8(""),
-          options: [
-            { label: utf8("Yes"), description: utf8("") },
-            { label: utf8("No"), description: utf8("") },
-          ],
-        },
-      ],
-    }),
-    ...change,
-  };
+  return localStub(panel, L2_CHAIN_ID, TRUSTEE_REGISTRY, change);
 }
 
 export interface Election {

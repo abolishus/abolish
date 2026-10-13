@@ -2,7 +2,7 @@
 
 The node each trustee runs on infrastructure it controls ([[0006-trustees]], Consequences; `docs/status/P2-13.md`). Internal and source-only; AGPL-3.0-only. It runs only what `docs/spec/` defines, calling `@abolishus/crypto` for every message and check and never reimplementing one.
 
-So far it holds the seat's part in the key ceremony (`docs/spec/ceremony.md`). Intake, the tally and destruction come in later parts, and so does the transport to the coordinator: today the duties are a library a caller drives round by round.
+So far it holds the seat's part in the key ceremony (`docs/spec/ceremony.md`) and the transport that carries it to and from the coordinator. Intake, the tally and destruction come in later parts. Operating a node: [[trustee-node]] (`docs/runbooks/trustee-node.md`).
 
 ## Ceremony duties
 
@@ -20,11 +20,36 @@ Refusals are typed (`SeatRefusal`); a refusal sends and records nothing new. A r
 
 `FileStore` writes each record to a fresh 0600 file, syncs it, hard-links it to its name (which fails if the name exists, across processes too) and syncs every directory from the record's up to the root. `FileStore.open` refuses a root anyone but its owner can reach and removes temporary files a crash left behind.
 
+## Transport
+
+The node only calls out: it polls the coordinator for what it asks of the seat and posts its answers, so nothing listens on the host that holds the seat's keys (`TrusteeNode` over a `Coordinator`; `HttpCoordinator` over HTTPS). The coordinator is trusted for liveness only ([[ceremony]], Parties and keys): everything it returns goes through the seat's checks, and everything the node posts is signed or public.
+
+| Request                                | Body                                                                                                       |
+| -------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `GET  v1/ceremony/seats/{i}/requests`  | 200: `list<{stub: bytes, transcript: bytes}, 16>`                                                          |
+| `POST v1/ceremony/seats/{i}/messages`  | `{stub_hash: bytes32, transcript: bytes}`: a transcript holding only the seat's message, in its round; 204 |
+| `POST v1/ceremony/seats/{i}/approvals` | `{stub_hash, ceremony_transcript_hash, key_set_hash: bytes32, signature: p256-sig}`; 204                   |
+
+Bodies use [[notation]]'s encoding (`bytes` is `bytes<2^20>`), as `application/octet-stream`; they are this transport's envelopes, not protocol records: nothing hashes, signs or archives them whole. Inside them the stub is an election-definition record and the rounds a ceremony transcript record (version 1). A request's `transcript` holds the rounds the coordinator has closed, and asks for the first empty one; all four rounds ask for approval; a non-empty round after an empty one asks for nothing and is refused. The node recomputes `stub_hash` from the stub rather than taking it from the coordinator, and names a run by it and `run_id`.
+
+A lost poll, post or response costs nothing: the next poll asks again and the seat answers with the message it recorded. The node settles each request once (answered, or refused for a reason a later poll can't change) and asks the seat again only for `stub-electorate`, which can change as L2 finalizes, and `no-run`, which can change once it answers an earlier round listed after it. `HttpCoordinator` takes HTTPS only (HTTP only to loopback), follows no redirect, times requests out and stops reading a body past its bound.
+
+## Configuration and commands
+
+`vp run --filter @abolishus/trustee-node start -- <command>`:
+
+- `keygen --out <file>`: a fresh identity key in a new owner-only file (never over an existing one); it prints only the public key, for the panel's registration.
+- `run --config <file>`: one seat's node. The JSON file pins `panel` (`threshold` and the identity keys as hex), its `panelId` (compared with the panel's computed identifier, so a mistyped key fails), `l2ChainId`, `trusteeRegistry`, `seat`, `identityKeyFile` (64 hex digits in a file only its owner can reach, never read through a symbolic link, and refused unless its key is the seat's), `store` (the `FileStore` root), `coordinator` and `pollSeconds`. It logs one JSON event per line, never a secret.
+- `local-ceremony [--seats n] [--threshold k] [--dir path]`: a whole ceremony between `n` local nodes and a local coordinator (`LocalCoordinator`, on loopback HTTP), with a panel and a stub made up for the run and no chain: the electorate check passes.
+
 ## Known-weak
 
-- **No production `ElectorateCheck`.** [[verifier]] 2.4 against finalized L2 state isn't implemented in `packages/verifier` yet, and the check belongs there (AGENTS.md, the verifier's trust base), so the node takes it as a required function. A deployment needs it before any real ceremony; until then the node runs only in tests.
+- **No production `ElectorateCheck`.** [[verifier]] 2.4 against finalized L2 state isn't implemented in `packages/verifier` yet, and the check belongs there (AGENTS.md, the verifier's trust base), so the node takes it as a required function. Until it is (part 3), `run` refuses every stub with `stub-electorate`, so no real ceremony runs.
+- **Identity key from a file only.** The key sits unencrypted in an owner-only file; a hardware token needs `@abolishus/crypto`'s ceremony functions to take a signer instead of a secret key.
+- **The coordinator's side is local only.** `LocalCoordinator` relays one ceremony for `local-ceremony` and the tests; the creator's coordinator, and starting a new run after a failed one, come with the services that run elections. The node doesn't tell the coordinator why it refused a request; the reason is in its own log.
+- **The transport isn't in `docs/spec/`.** The envelopes above are fixed only by this README and the code; a second node implementation (rule 6) needs them specified. Nothing in them is permanent, so changing them later costs a coordinator and node release, not a protocol version.
 - **Definition version 1 only.** Stubs of versions 3 and later are refused (`stub-version`) until the node reads their electorates and, for version 6, the author panel's ceremony.
-- **The store must never be rolled back or shared.** Every duty rests on records written once. Restoring the store from a backup or snapshot, or running one seat from two hosts with their own stores, lets a coordinator get a second round-4 message, a rejoined run or a second approval. The node can't detect either; the deployment must prevent both (part 2 documents it in the node's runbook).
+- **The store must never be rolled back or shared.** Every duty rests on records written once. Restoring the store from a backup or snapshot, or running one seat from two hosts with their own stores, lets a coordinator get a second round-4 message, a rejoined run or a second approval. The node can't detect either; the deployment must prevent both ([[trustee-node]] says how).
 - **Secrets at rest.** `FileStore` keeps the run's KEM secret, signing key and challenge secrets in files readable only by their owner, unencrypted; nothing destroys them yet ([[tally]], Destruction, is a later part). Disk encryption and the destruction duty are the deployment's until then.
 - **A corrupt record throws.** A record that doesn't decode (a damaged disk, a partial restore) makes the request throw rather than return a typed refusal; the node still acts on nothing.
 - **Equivocation evidence.** The node refuses a transcript holding another message of its seat, or another view of a round it signed over, but doesn't yet publish the two messages, which the spec says it SHOULD.
@@ -32,4 +57,4 @@ Refusals are typed (`SeatRefusal`); a refusal sends and records nothing new. A r
 
 ## Testing
 
-`vp run --filter @abolishus/trustee-node test`: whole ceremonies between nodes through a coordinator that withholds messages, restarts between rounds, replays, equivocation, rule 7 at its boundary, one approval per stub, every stub refusal, and the store's write-once rule (fast-check, honouring `FC_NUM_RUNS`; whole-ceremony properties run a tenth of them).
+`vp run --filter @abolishus/trustee-node test`: whole ceremonies between nodes through a coordinator that withholds messages, through `TrusteeNode` with lost polls, posts and responses (fast-check: the ceremony still registers every seat and no seat is ever refused), over HTTP on loopback, restarts between rounds, replays, equivocation, rule 7 at its boundary, one approval per stub, every stub refusal, the configuration and identity key file checks, the HTTP client's bounds, and the store's write-once rule (fast-check, honouring `FC_NUM_RUNS`; whole-ceremony properties run a tenth of them).

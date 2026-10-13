@@ -538,10 +538,10 @@ describe("2.3's profile combination", () => {
     expect(profileCombinationRule(v3(5))).toBe("unsupported-version");
     // Ballot version 2 is the only one that could fit, and only opening
     // version 2 opens its cores, so it is refused beside opening version 1
-    // (docs/spec/challenge.md, Versions; T-42). One this package doesn't
+    // or 3 (docs/spec/challenge.md, Versions; T-42). One this package doesn't
     // know, which a later release may read: unsupported, never a failure
     // that release would disagree with (T-36).
-    for (const spoiled of [1, 2, 255]) {
+    for (const spoiled of [1, 2, 3, 255]) {
       const d = v3(2);
       const pinned = {
         ...d,
@@ -553,7 +553,7 @@ describe("2.3's profile combination", () => {
         },
       };
       expect(profileCombinationRule(pinned)).toBe(
-        spoiled === 1 ? "profile-combination" : spoiled === 2 ? undefined : "unsupported-version",
+        spoiled === 2 ? undefined : spoiled === 255 ? "unsupported-version" : "profile-combination",
       );
     }
     expect(profileCombinationRule(pinning(4, 1, 1))).toBeUndefined();
@@ -752,8 +752,9 @@ describe("2.3's profile combination", () => {
       expect(profileCombinationRule(v5({ [RECORD_TYPES.displayText]: displayText }))).toBe(
         "profile-combination",
       );
-    // Opening version 1 opens version-1 cores only; none pinned can't challenge.
-    for (const spoiled of [1, undefined])
+    // Opening version 1 opens version-1 cores only, and version 3 version-4
+    // cores; none pinned can't challenge.
+    for (const spoiled of [1, 3, undefined])
       expect(profileCombinationRule(v5({ [RECORD_TYPES.spoiledBallotOpening]: spoiled }))).toBe(
         "profile-combination",
       );

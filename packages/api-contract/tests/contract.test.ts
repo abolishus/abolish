@@ -145,6 +145,7 @@ describe("the generated OpenAPI document", () => {
       "GET /board/proofs/inclusion",
       "GET /elections",
       "GET /elections/by-code",
+      "GET /elections/code",
       "GET /elections/definition",
       "GET /moderation/log",
       "GET /moderation/status",

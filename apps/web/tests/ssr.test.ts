@@ -108,6 +108,17 @@ const owners = new Map([
   [FALSE_CODE, ID],
   [SWAPPED_CODE, SWAPPED_ID],
 ]);
+/** A listed poll the stub claims a code for that isn't a prefix of its hash. */
+const MISCODED_ID = FILLER[0]!;
+const MISCODED_CODE = codeOf(MISCODED_ID).startsWith("z")
+  ? `y${codeOf(MISCODED_ID).slice(1)}`
+  : `z${codeOf(MISCODED_ID).slice(1)}`;
+/** Each poll's canonical code as the stub claims it; the other polls have no registration. */
+const codes = new Map([
+  [ID, CODE],
+  [HIDDEN_ID, HIDDEN_CODE],
+  [MISCODED_ID, MISCODED_CODE],
+]);
 
 /** A forgiving spelling of `code`: upper case, with `0` written `O` and `1` written `I`. */
 const forgiving = (code: string) => code.toUpperCase().replaceAll("0", "O").replaceAll("1", "I");
@@ -169,6 +180,17 @@ function stubApi(): Server {
           200,
           electionId === HIDDEN_ID ? { state: "hidden", latest: LATEST } : { state: "visible" },
         );
+      case "/elections/code": {
+        const code = codes.get(electionId);
+        return code === undefined
+          ? json(404, {
+              defined: true,
+              code: "CODE_NOT_FOUND",
+              status: 404,
+              message: "No registration is recorded for this election.",
+            })
+          : json(200, { code });
+      }
     }
     json(404, {});
   });
@@ -268,6 +290,27 @@ describe("poll page", () => {
     expect(html).toContain("One choice");
     expect(html).toContain("4 of 7");
     expect(html).not.toContain('name="robots"');
+    expect(html).toContain(`href="/p/${CODE}"`);
+    expect(html).toContain(`<meta property="og:title" content="Poll ${CODE}"`);
+  });
+
+  test("shows a collided poll's longer code, as the API resolves it", async () => {
+    const html = await (await get(`/polls/${HIDDEN_ID}`)).text();
+    expect(HIDDEN_CODE).toHaveLength(8);
+    expect(html).toContain(`href="/p/${HIDDEN_CODE}"`);
+    expect(html).toContain(`<meta property="og:title" content="Poll ${HIDDEN_CODE}"`);
+  });
+
+  test.each([
+    ["a code that isn't a prefix of the poll's hash (T-34)", MISCODED_ID, MISCODED_CODE],
+    ["no recorded registration", FILLER[1]!, codeOf(FILLER[1]!)],
+  ])("prints no code for %s", async (_, id, code) => {
+    const response = await get(`/polls/${id}`);
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).not.toContain("/p/");
+    expect(html).not.toContain(code);
+    expect(html).toContain('<meta property="og:title" content="A poll on localhost"');
   });
 
   test("forwards nothing of the visitor's to the API (T-10)", async () => {
@@ -278,7 +321,7 @@ describe("poll page", () => {
       "x-forwarded-for": "203.0.113.9",
       "user-agent": "visitor-agent",
     });
-    expect(seen.length).toBe(3);
+    expect(seen.length).toBe(4);
     for (const { headers } of seen) {
       expect(headers.cookie).toBeUndefined();
       expect(headers.authorization).toBeUndefined();

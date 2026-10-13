@@ -2,7 +2,7 @@
 // No result reaches them unless the model's results carry one, and sealed or
 // unreleased results carry none (src/og/model.ts).
 
-import { type PollPreview, shortCode } from "./model.ts";
+import type { PollPreview } from "./model.ts";
 
 const day = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
 const longDay = new Intl.DateTimeFormat("en-GB", {
@@ -24,7 +24,8 @@ export const answersSoFar = (n: number) => `${answers(n)} so far`;
 export const answersCounted = (n: number) => `${answers(n)} counted`;
 
 /** The headline: the question, or the poll's code while the question isn't served. */
-export const headline = (model: PollPreview) => model.question ?? `Poll ${shortCode(model.seal)}`;
+export const headline = (model: PollPreview) =>
+  model.question ?? (model.code === undefined ? `A poll on ${model.host}` : `Poll ${model.code}`);
 
 export function byline(model: PollPreview): string {
   const who = model.askedBy === undefined ? `Asked on ${model.host}` : `Asked by ${model.askedBy}`;

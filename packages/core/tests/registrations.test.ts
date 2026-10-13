@@ -21,6 +21,7 @@ import {
   resolveShortCode,
   SHORT_CODE_LENGTH,
   shortCode,
+  shortCodeOf,
   storeDefinition,
 } from "../src/index.ts";
 import { type TestDb, testDb } from "./db.ts";
@@ -333,6 +334,7 @@ describe("lookupShortCode", () => {
           for (const [i, code] of codes.entries()) {
             const found = await lookupShortCode(tx, code.toUpperCase());
             expect(found).toEqual({ electionId: ids[i], code });
+            expect(await shortCodeOf(tx, ids[i]!)).toBe(code); // entries() index
             // The prefixes next to each code, 7 characters and one either side.
             for (const n of [SHORT_CODE_LENGTH, code.length - 1, code.length + 1]) {
               if (n < SHORT_CODE_LENGTH || n > MAX_SHORT_CODE_LENGTH) continue;
@@ -379,6 +381,8 @@ describe("lookupShortCode", () => {
         electionId: ground,
         code: shortCode(collided, MAX_SHORT_CODE_LENGTH),
       });
+      expect(await shortCodeOf(tx, first.electionId)).toBe(shortCode(h));
+      expect(await shortCodeOf(tx, ground)).toBe(shortCode(collided, MAX_SHORT_CODE_LENGTH));
     });
   });
 
@@ -396,7 +400,35 @@ describe("lookupShortCode", () => {
   });
 
   test("a stored definition with no recorded registration has no code", async () => {
-    const { definitionHash } = await stored();
+    const { electionId, definitionHash } = await stored();
     expect(await lookupShortCode(app, shortCode(definitionHash))).toBeUndefined();
+    expect(await shortCodeOf(app, electionId)).toBeUndefined();
+  });
+});
+
+describe("shortCodeOf", () => {
+  test("an earlier poll keeps its code when a later one is ground to its prefix", async () => {
+    await isolated(async (tx) => {
+      const later = await stored(tx);
+      const h = later.definitionHash;
+      // Registered first, sharing the later poll's first 9 characters (45 bits).
+      const earlier = h.slice();
+      earlier[5] = (h[5] ?? 0) ^ 0x04; // bit 45, the first of the 10th character
+      await recordRegistration(tx, {
+        electionId: b32(),
+        definitionHash: earlier,
+        l2Block: block,
+        logIndex: 0,
+      });
+      await recordRegistration(tx, { ...later, l2Block: block, logIndex: 1 });
+      expect(shortCode(earlier, 9)).toBe(shortCode(h, 9));
+      expect(shortCode(earlier, 10)).not.toBe(shortCode(h, 10));
+      expect(await shortCodeOf(tx, later.electionId)).toBe(shortCode(h, 10));
+    });
+  });
+
+  test("refuses an election ID that isn't 32 bytes", async () => {
+    for (const id of [new Uint8Array(31), new Uint8Array(33), "00".repeat(32)])
+      await expect(shortCodeOf(app, id as Uint8Array)).rejects.toThrow(TypeError);
   });
 });

@@ -103,6 +103,7 @@ export {
   RegistrationError,
   type Registration,
   type RegistrationErrorCode,
+  shortCodeOf,
   type ShortCodeMatch,
 } from "./registrations.ts";
 export {

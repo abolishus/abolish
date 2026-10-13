@@ -17,7 +17,9 @@ export const Route = createFileRoute("/polls/$electionId")({
     const page = await fetchPoll({ data: params.electionId });
     if (page.kind === "not-found") throw notFound();
     const preview =
-      page.kind === "poll" ? await previewMeta(page.poll, siteOrigin(), Date.now()) : undefined;
+      page.kind === "poll"
+        ? await previewMeta(page.poll, page.code, siteOrigin(), Date.now())
+        : undefined;
     return { page, preview };
   },
   head: ({ loaderData }) => {

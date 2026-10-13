@@ -22,6 +22,8 @@ export type PollPage =
       readonly poll: PollView;
       readonly board: BoardHead;
       readonly moderation: ModerationState;
+      /** Its canonical short code, checked against its hash; `undefined` if none is served. */
+      readonly code: string | undefined;
     }
   | { readonly kind: "not-found" }
   | { readonly kind: "unavailable"; readonly problem: DefinitionProblem };
@@ -37,15 +39,36 @@ export async function loadPoll(api: Api, electionId: string): Promise<PollPage> 
       api.elections.getDefinition({ electionId }),
       api.board.getHead({ electionId }),
       api.moderation.getStatus({ electionId }),
+      codeOf(api, electionId),
     ]);
   } catch (error) {
     if (notFound(error)) return { kind: "not-found" };
     throw error;
   }
-  const [{ definition }, board, moderation] = answers;
+  const [{ definition }, board, moderation, claimed] = answers;
   const view = definitionView(electionId, definition);
   if (!view.ok) return { kind: "unavailable", problem: view.problem };
-  return { kind: "poll", poll: view.poll, board, moderation };
+  // A claim, checked as `/p/<code>` checks it: the code must be a prefix of
+  // the hash this page checked, or the page would print another poll's code
+  // (T-34). Which of several polls sharing a prefix owns the shorter one is
+  // the registry's order, which this page doesn't check.
+  const code =
+    claimed !== undefined &&
+    shortCode(fromHex(view.poll.definitionHash), claimed.length) === claimed
+      ? claimed
+      : undefined;
+  return { kind: "poll", poll: view.poll, board, moderation, code };
+}
+
+/** The API's canonical code for `electionId`, or `undefined` while no registration is recorded. */
+async function codeOf(api: Api, electionId: string): Promise<string | undefined> {
+  try {
+    return (await api.elections.getCode({ electionId })).code;
+  } catch (error) {
+    if (error instanceof ORPCError && error.defined && error.code === "CODE_NOT_FOUND")
+      return undefined;
+    throw error;
+  }
 }
 
 export type ShortLink =

@@ -10,6 +10,8 @@ export interface PollSummaryProps {
   poll: PollView;
   board: BoardHead;
   moderation: ModerationState;
+  /** The canonical short code, if one is served. */
+  code: string | undefined;
 }
 
 const TIER_LABEL = { 0: "tier0", 1: "tier1", 2: "tier2" } as const satisfies Record<Tier, string>;
@@ -41,7 +43,7 @@ function Fact({ term, children }: { term: string; children: ReactNode }) {
  * that these are claims, and shows the hashes a reader needs to check them
  * (T-24, T-34).
  */
-export function PollSummary({ poll, board, moderation }: PollSummaryProps) {
+export function PollSummary({ poll, board, moderation, code }: PollSummaryProps) {
   const t = useTranslate(catalogs);
   const latest = moderation.latest;
   return (
@@ -103,6 +105,13 @@ export function PollSummary({ poll, board, moderation }: PollSummaryProps) {
         <Fact term={t("factCloses")}>
           <When instant={poll.closesAt} />
         </Fact>
+        {code === undefined ? null : (
+          <Fact term={t("factShortLink")}>
+            <a className="font-mono underline underline-offset-4" href={`/p/${code}`}>
+              /p/{code}
+            </a>
+          </Fact>
+        )}
       </dl>
 
       <Hash value={poll.definitionHash} label={t("definitionHash")} />

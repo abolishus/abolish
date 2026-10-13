@@ -3,7 +3,7 @@
 // their state: no lead, share, ordering or tier row can be put in one, so no
 // card or description drawn from it can show a result (T-67).
 
-import { shortCode as codeOf } from "@abolishus/core/short-codes";
+import { shortCode } from "@abolishus/core/short-codes";
 import { fromHex } from "../values.ts";
 
 /** The latest released lead of the first question, as a sentence and its share (0–1). */
@@ -52,8 +52,14 @@ export type CivicResults =
   | { readonly state: "closed"; readonly tiers: readonly TierResult[] };
 
 interface PreviewBase {
-  /** The poll's definition hash (64 lowercase hex): its seal and its short code. */
+  /** The poll's definition hash (64 lowercase hex): its seal. */
   readonly seal: string;
+  /**
+   * Its canonical short code, a prefix of `seal` (`@abolishus/core`'s short
+   * codes): 7 characters, or more for a poll whose prefix an earlier poll
+   * took. `undefined` while no registration is recorded, when no code resolves.
+   */
+  readonly code: string | undefined;
   /** This site's host, for the short link ("abolish.us"). */
   readonly host: string;
   /** The first question's text; `undefined` while the API doesn't serve it. */
@@ -101,6 +107,8 @@ const KEYS: Readonly<Record<string, readonly string[]>> = {
  */
 export function checkPreview(model: PollPreview): void {
   if (!/^[0-9a-f]{64}$/.test(model.seal)) throw new RangeError("seal must be 64 lowercase hex");
+  if (model.code !== undefined && shortCode(fromHex(model.seal), model.code.length) !== model.code)
+    throw new RangeError("code must be a short code of the seal");
   if (!Number.isSafeInteger(model.questionCount) || model.questionCount < 1)
     throw new RangeError("questionCount must be a positive integer");
   if (model.answers !== undefined && (!Number.isSafeInteger(model.answers) || model.answers < 0))
@@ -118,12 +126,9 @@ export function checkPreview(model: PollPreview): void {
 }
 
 /**
- * A poll's 7-character short code, from its seal in hex (`@abolishus/core`'s
- * short codes). A later poll whose prefix is taken needs more; the registry
- * decides, so a preview prints the 7-character form only.
+ * "abolish.us/p/3j55dw1": the link as printed, without the scheme. Without a
+ * code, just the host: a 7-character prefix printed anyway could be another
+ * poll's code, and no code resolves before the registration is recorded.
  */
-export const shortCode = (seal: string): string => codeOf(fromHex(seal));
-
-/** "abolish.us/p/3j55dw1": the link as printed, without the scheme. */
-export const shortLink = (model: Pick<PollPreview, "host" | "seal">) =>
-  `${model.host}/p/${shortCode(model.seal)}`;
+export const shortLink = (model: Pick<PollPreview, "host" | "code">) =>
+  model.code === undefined ? model.host : `${model.host}/p/${model.code}`;

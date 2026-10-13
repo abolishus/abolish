@@ -26,7 +26,7 @@ const board = { treeSize: "1234", chainHead: "1f".repeat(32), root: "2e".repeat(
 
 const meta = {
   component: PollSummary,
-  args: { poll, board, moderation: { state: "visible" } },
+  args: { poll, board, moderation: { state: "visible" }, code: "mhanrsz" },
 } satisfies Meta<typeof PollSummary>;
 
 export default meta;
@@ -43,11 +43,25 @@ const play: Story["play"] = async ({ canvasElement }) => {
   await expect(canvas.getByText("18446744073709551615")).toBeVisible();
   await expect(canvas.getByRole("figure", { name: "Chain head" })).toBeVisible();
   await expect(canvas.queryByRole("note")).toBeNull();
+  await expect(canvas.getByRole("link", { name: "/p/mhanrsz" })).toHaveAttribute(
+    "href",
+    "/p/mhanrsz",
+  );
 };
 
 export const Default: Story = { play };
 
 export const Dark: Story = { parameters: { theme: "dark" }, play };
+
+/** No registration recorded yet: no code resolves, so none is printed. */
+export const NoShortCode: Story = {
+  args: { code: undefined },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.queryByText("Short link")).toBeNull();
+    await expect(canvas.queryByRole("link")).toBeNull();
+  },
+};
 
 export const EmptyBoard: Story = {
   args: { board: { treeSize: "0", chainHead: "00".repeat(32), root: "00".repeat(32) } },

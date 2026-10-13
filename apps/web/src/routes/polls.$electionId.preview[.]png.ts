@@ -34,7 +34,7 @@ export const Route = createFileRoute("/polls/$electionId/preview.png")({
         const page = await loadPoll(api(), params.electionId);
         if (page.kind !== "poll") return plain(404);
         const shape = format === "square" ? "square" : "landscape";
-        const model = pollPreview(page.poll, url.host, Date.now());
+        const model = pollPreview(page.poll, page.code, url.host, Date.now());
         const current = await previewVersion(model, shape);
         const etag = `"${current}"`;
         const headers = {

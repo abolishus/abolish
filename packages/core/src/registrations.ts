@@ -13,7 +13,13 @@ import type { Sql } from "postgres";
 import { isBytes } from "./bytes.ts";
 import { readDefinition } from "./definitions.ts";
 import { electionRegistrations } from "./db/schema/index.ts";
-import { parseShortCode, SHORT_CODE_LENGTH, shortCodeRange } from "./short-codes.ts";
+import {
+  MAX_SHORT_CODE_LENGTH,
+  parseShortCode,
+  SHORT_CODE_LENGTH,
+  shortCode,
+  shortCodeRange,
+} from "./short-codes.ts";
 
 /** A `DefinitionRegistered` event: its election, its definition hash and where it is on L2. */
 export interface Registration {
@@ -166,4 +172,52 @@ export async function lookupShortCode(
     if (earlier === undefined || equal(earlier.electionId, owner.electionId)) return undefined;
   }
   return { electionId: owner.electionId, code };
+}
+
+/** Whether a registration recorded before position (`l2Block`, `logIndex`) has `code`'s prefix. */
+async function sharedByEarlier(client: Sql, code: string, l2Block: bigint, logIndex: number) {
+  const { from, to } = shortCodeRange(code);
+  // Materialized, as in `earliestWithPrefix`, so only the prefix's range is read.
+  const [row] = await client<{ one: number }[]>`
+    WITH matches AS MATERIALIZED (
+      SELECT l2_block, log_index FROM election_registrations
+      WHERE definition_hash >= ${from}
+        ${to === undefined ? client`` : client`AND definition_hash < ${to}`}
+    )
+    SELECT 1 AS one FROM matches
+    WHERE (l2_block, log_index) < (${l2Block.toString()}::bigint, ${logIndex}::integer)
+    LIMIT 1`;
+  return row !== undefined;
+}
+
+/**
+ * The canonical short code of the poll registered as `electionId`, the one
+ * `lookupShortCode` resolves to it: the shortest prefix of its definition hash,
+ * at least 7 characters, that no poll recorded before it shares. `undefined`
+ * if no registration is recorded for the election, since a code resolves only
+ * through one. Delisted and hidden polls keep theirs, as they resolve by it.
+ */
+export async function shortCodeOf(
+  client: Sql,
+  electionId: Uint8Array,
+): Promise<string | undefined> {
+  if (!isBytes(electionId) || electionId.length !== 32)
+    throw new TypeError("electionId must be 32 bytes");
+  const db = drizzle({ client });
+  const r = electionRegistrations;
+  const [recorded] = await db
+    .select({ definitionHash: r.definitionHash, l2Block: r.l2Block, logIndex: r.logIndex })
+    .from(r)
+    .where(eq(r.electionId, new Uint8Array(electionId)));
+  if (recorded === undefined) return undefined;
+  const { definitionHash, l2Block, logIndex } = recorded;
+  // Sharing a prefix implies sharing every shorter one, so the first length
+  // no earlier poll shares is the code. Each longer one costs a grinder 32
+  // times the work, so the loop is short whoever registered before.
+  for (let length = SHORT_CODE_LENGTH; length <= MAX_SHORT_CODE_LENGTH; length++) {
+    const code = shortCode(definitionHash, length);
+    if (!(await sharedByEarlier(client, code, l2Block, logIndex))) return code;
+  }
+  // Definition hashes are unique, and 52 characters spell all 256 bits.
+  throw new Error("shortCodeOf: an earlier registration has the same definition hash");
 }

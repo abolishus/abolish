@@ -3,6 +3,7 @@
 // only abolish_app. dist/node/main.mjs serves the built pages, the hashed
 // assets and the account handler.
 
+import { shortCode } from "@abolishus/core/short-codes";
 import { type TestDb, testDb } from "@abolishus/core/test-db";
 import { execFileSync, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
@@ -17,6 +18,7 @@ import { createBuilder } from "vite-plus";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 
 import { definitionView } from "../src/poll.ts";
+import { fromHex } from "../src/values.ts";
 import { pollPreview } from "../src/og/poll.ts";
 import { renderPreview } from "../src/og/render.ts";
 
@@ -193,11 +195,16 @@ describe("link previews from the bundle", () => {
   if (typical?.value === undefined) throw new Error("vector missing");
   const id = typical.value.election_id;
 
+  const view = definitionView(id, typical.encoding);
+  if (!view.ok) throw new Error("vector doesn't decode");
+  const code = shortCode(fromHex(view.poll.definitionHash));
+
   /** Just enough of the API for a poll page and its preview. */
   const api = createHttpServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://stub");
     const body: Record<string, unknown> = {
       "/elections/definition": { definition: typical.encoding },
+      "/elections/code": { code },
       "/board/head": { treeSize: "1", chainHead: "1f".repeat(32), root: "2e".repeat(32) },
       "/moderation/status": { state: "visible" },
     };
@@ -236,10 +243,8 @@ describe("link previews from the bundle", () => {
       expect(preview.headers.get("content-type")).toBe("image/png");
       expect(preview.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
       expect(preview.headers.get("set-cookie")).toBeNull();
-      const view = definitionView(id, typical.encoding);
-      if (!view.ok) throw new Error("vector doesn't decode");
       const expected = await renderPreview(
-        pollPreview(view.poll, "abolish.test", Date.now()),
+        pollPreview(view.poll, code, "abolish.test", Date.now()),
         "landscape",
       );
       expect(new Uint8Array(await preview.arrayBuffer())).toEqual(expected);

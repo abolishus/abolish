@@ -306,6 +306,7 @@ describe("delivery version 2 vectors", () => {
       "delivery-late",
       "share-receipt",
       "posting-hash",
+      "posting-proof",
       "posting-encapsulation",
       "complaint-void",
       "complaint-proof",

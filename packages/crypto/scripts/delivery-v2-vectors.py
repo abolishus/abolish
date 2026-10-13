@@ -303,6 +303,15 @@ def main():
         b["hash"] = b4.ballot_hash(b["ctx"], b["vote"])
         ballots[name] = b
 
+    # Frank's client binds author seat 1's ciphertext as default seat 1's: it hashes into the
+    # ballot, but its proof of knowledge fails for the author seat it is for.
+    def as_default(panel, seat, sb, key, halves, m, ee, w):
+        return sev4.encrypt(e["definitionHash"], DEFAULT if (panel, seat) == (AUTHOR, 1) else panel, seat, key, halves, sb, m, ee, w)
+
+    b = sev4.make_encrypted_ballot("delivery-v2/frank", e, 0, flat({0}, {1}), keys[DEFAULT], keys[AUTHOR], as_default)
+    b["name"], b["hash"] = "frank", b4.ballot_hash(b["ctx"], b["vote"])
+    ballots["frank"] = b
+
     def ballot_json(b):
         return {"id": b["name"], "cell": b["ctx"]["cell"], "nullifier": str(b["ctx"]["nullifier"]), "committedVote": b4.enc_committed_vote(b["vote"]).hex(), "ballotHash": b["hash"].hex()}
 
@@ -511,6 +520,8 @@ def main():
     assert r["ballots"][0]["counted"]
     r = election("late-posting", "Author seat 3's posting one second after the delivery deadline", ["alice"], at(3, *every("alice", {(AUTHOR, 3)})) + by(TD + 1, P("alice", AUTHOR, 3)))
     assert r["ballots"][0]["missing"] == [seat(AUTHOR, 3)] and r["records"] == [{"at": 5, "code": "delivery-late", **seat(AUTHOR, 3)}]
+    r = election("posting-proof", "Frank's author seat 1 ciphertext, bound as default seat 1's, posted through the contract path: its hash matches, its proof of knowledge fails", ["frank"], at(3, *every("frank", {(AUTHOR, 1)})) + by(T0 + 60, P("frank", AUTHOR, 1)))
+    assert r["ballots"][0]["missing"] == [seat(AUTHOR, 1)] and r["records"] == [{"at": 5, "code": "posting-proof", **seat(AUTHOR, 1)}]
     r = election("board-path-posting", "Author seat 3's posting through the board path: a rejected entry, which delivers nothing", ["alice"], at(3, *every("alice", {(AUTHOR, 3)}), P("alice", AUTHOR, 3)))
     assert r["ballots"][0]["missing"] == [seat(AUTHOR, 3)] and r["rejected"] == [{"at": 5, "error": "unexpected-record-type"}]
     r = election(

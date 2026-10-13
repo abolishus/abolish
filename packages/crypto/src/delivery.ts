@@ -1056,7 +1056,10 @@ export function checkDeliveryV2(
 /**
  * Internal: `checkDeliveryV2` with the author panel's key set taken as given,
  * so author seats' delivery can be tested before P2-16 part 3, which then
- * replaces this. The package entry point doesn't export it.
+ * replaces this. The package entry point doesn't export it. An author seat
+ * outside the given key set needs no delivery, as the spec says, so part 3's
+ * replacement must take the author key set from the checked transcript, with
+ * its quorum, never from the caller (T-37, T-25).
  */
 export function checkDeliveryV2With(
   election: DeliveryElectionV2,

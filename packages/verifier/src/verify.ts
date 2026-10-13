@@ -510,7 +510,7 @@ export function verifyBundle(bundle: Bundle): Report {
             : UNSUPPORTED;
         implemented = new Map<string, Outcome>([
           ...implemented,
-          ...["5.1", "5.2", "5.3", "5.4"].map((id) => [id, admission] as const),
+          ...["5.1", "5.2", "5.3", "5.4", "5.7"].map((id) => [id, admission] as const),
         ]);
       }
     }

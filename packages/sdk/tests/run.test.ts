@@ -37,7 +37,13 @@ describe("runSimulation", { timeout }, () => {
     expect(r.board.entries).toBe(9 + 3 + 3);
     expect(r.board.head).toMatch(/^[0-9a-f]{64}$/);
     expect(r.board.receiptKey).toMatch(/^0[23][0-9a-f]{64}$/);
-    expect(r.trustees).toEqual({ online: [1, 3, 4], offline: [2], faulty: [] });
+    // Each online seat seals its sums for each cell to each other online seat.
+    expect(r.trustees).toEqual({
+      online: [1, 3, 4],
+      offline: [2],
+      faulty: [],
+      summedShareMessages: 3 * 2 * 3,
+    });
     expect(r.cells.map((c) => c.tier)).toEqual([0, 1, 2]);
     for (const c of r.cells) {
       expect(c.outcome).toBe("opened");
@@ -71,7 +77,14 @@ describe("runSimulation", { timeout }, () => {
       expect(c.combined).toEqual([2, 3]);
       expect(c.counts).toEqual(c.expected);
     }
-    expect(r.trustees).toEqual({ online: [1, 2, 3], offline: [4], faulty: [1] });
+    // The faulty seat's own check refuses to seal its lie, so only the two
+    // honest seats send, each to the two other online seats.
+    expect(r.trustees).toEqual({
+      online: [1, 2, 3],
+      offline: [4],
+      faulty: [1],
+      summedShareMessages: 2 * 2 * 3,
+    });
     // A faulty seat still states destruction: it lies only in its summed shares.
     expect(r.destruction.seats.map((d) => d.code)).toEqual([
       "destroyed",
@@ -97,6 +110,8 @@ describe("runSimulation", { timeout }, () => {
       expect(c.excluded).toEqual([3]);
       expect(c.counts).toBeUndefined();
     }
+    // Seat 4 alone sends, to seat 3, which is faulty and never combines.
+    expect(r.trustees.summedShareMessages).toBe(3);
     expect(r.total).toBeUndefined();
     // No opening reaches the board, so the online seats destroy at t_D, in s_T.
     expect(r.board.openings).toBe(0);
@@ -110,6 +125,20 @@ describe("runSimulation", { timeout }, () => {
       "destroyed",
       "destroyed",
     ]);
+  });
+
+  it("reports tally-quorum with every online seat excluded when every online seat is faulty", () => {
+    const r = runSimulation({
+      ...base,
+      trustees: { panel: 4, threshold: 2, offline: [4], faulty: [1, 2, 3] },
+    });
+    expect(r.ok).toBe(true);
+    expect(r.trustees.summedShareMessages).toBe(0);
+    expect(r.board.openings).toBe(0);
+    for (const c of r.cells) {
+      expect(c.outcome).toBe("tally-quorum");
+      expect(c.excluded).toEqual([1, 2, 3]);
+    }
   });
 
   it("checks every challenged attempt's opening, then casts a fresh one that still opens to the plan", () => {

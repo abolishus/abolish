@@ -220,7 +220,8 @@ export function intakeCutoff(
     if (typeof v !== "bigint" || v < 0n)
       throw new RangeError("forcedInclusion and margin must be bigints ≥ 0");
   // A cutoff at or before `closes_at + l1_inclusion_bound` would decide before
-  // every counted ballot is in; `deliveryWindowFits` is the full check.
+  // any ballot can be confirmed; only `deliveryWindowFits` shows that every
+  // counted one can be by `c_I`.
   if (forcedInclusion + margin >= DELIVERY_WINDOW)
     throw new RangeError("forcedInclusion + margin must be less than DELIVERY_WINDOW");
   return deliveryDeadlines(closesAt, l1InclusionBound).delivery - forcedInclusion - margin;
@@ -350,7 +351,7 @@ export function owedReceipts(
       index: BigInt(admitted.length),
     });
   }
-  // Keyed by hex, so the union and the sort stay linear in what is owed.
+  // Keyed by hex, so the union is no longer quadratic in what is owed.
   const owed = new Map<string, Uint8Array>();
   for (const b of selectBallots(admitted).selected) {
     const hash = hashOf.get(hex(b.message)) as Uint8Array;

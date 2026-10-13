@@ -450,7 +450,9 @@ def progressive_gindex(parent, field):
 # `state.latest_block_hash`: the latest payload revealed on its chain.
 GLOAS_GINDEX = progressive_gindex(container_gindex(progressive_gindex(1, 10), 0, 2), 0)
 # The light-client spec's EXECUTION_BLOCK_HASH_GINDEX_GLOAS
-# (specs/gloas/light-client/sync-protocol.md) is the same field.
+# (specs/gloas/light-client/sync-protocol.md) is the same field; main() reads
+# it from the pinned file when given it, and checks a branch the consensus
+# specs' own SSZ library built (gloas-body-branch.json).
 assert GLOAS_GINDEX == 2856
 # The bid's own block_hash, field 2: a payload committed to, maybe never revealed.
 GLOAS_BID_BLOCK_HASH_GINDEX = progressive_gindex(container_gindex(progressive_gindex(1, 10), 0, 2), 2)
@@ -606,6 +608,15 @@ def main(out_dir, configs_dir=None):
 
     # With a directory holding the two config files (their sources and sha256s
     # are in the spec), the schedules are checked against them.
+    # And with Gloas's light-client spec beside them, its constant is read from it.
+    if configs_dir is not None:
+        sync = (pathlib.Path(configs_dir) / "sync-protocol.md").read_bytes()
+        assert h(sha256(sync)) == "e0bd1537ff3bdcddafa708ddce35f97de0cac9aac19b08f022ee6c57db1b4f5e"
+        row = next(line for line in sync.decode().splitlines() if line.startswith("| `EXECUTION_BLOCK_HASH_GINDEX_GLOAS`"))
+        assert '"signed_execution_payload_bid", "message", "parent_block_hash"' in row, row
+        assert int(row.split("(= ")[1].split(")")[0].replace(",", "")) == GLOAS_GINDEX, row
+    upstream = json.loads(HERE.with_name("gloas-body-branch.json").read_text())
+    assert upstream["gindex"] == GLOAS_GINDEX and upstream["blockHashGindex"] == GLOAS_BID_BLOCK_HASH_GINDEX
     for chain, file in ((1, "mainnet.yaml"), (11155111, "sepolia.yaml")):
         if configs_dir is not None:
             cfg = config(pathlib.Path(configs_dir) / file)
@@ -732,6 +743,7 @@ def main(out_dir, configs_dir=None):
         state_slot=None,
         cd=None,
         gindex=None,
+        upstream=None,
     ):
         data = cd if cd is not None else bytes(32) * position + C + bytes(32)
         txs = txs_override or [tx(2, bytes(32), nonce=n) for n in range(filler)]
@@ -744,6 +756,12 @@ def main(out_dir, configs_dir=None):
         depth = g.bit_length() - 1
         payload = [label(f"payload sibling {i}") for i in range(depth)]
         body = fold(keccak256(hdr), payload, g - (1 << depth))
+        if upstream is not None:
+            # A body root and branch from eth-ssz-specs, for this very header.
+            assert upstream["leaf"] == h(keccak256(hdr)), f"rerun gloas-body-branch.py with {h(keccak256(hdr))}"
+            payload = [bytes.fromhex(x) for x in upstream["branch"]]
+            body = bytes.fromhex(upstream["bodyRoot"])
+            assert fold(keccak256(hdr), payload, g - (1 << depth)) == body
         o = {
             "salt": salt,
             "txIndex": tx_index,
@@ -836,6 +854,9 @@ def main(out_dir, configs_dir=None):
     gloas_good, gloas_state = o, s
     o, s = build(chain=11155111, slot=GLOAS_SLOT + 5000, summary=False)
     add("ok-sepolia-gloas-block-roots", o, s, "ok", chain=11155111)
+    # The same header in a body the consensus specs' own SSZ library merkleized.
+    o, s = build(chain=11155111, slot=GLOAS_SLOT + 5000, state_slot=GLOAS_SLOT + 90_000, upstream=upstream)
+    add("ok-sepolia-gloas-upstream-body", o, s, "ok", chain=11155111)
     o, s = build(chain=11155111, slot=GLOAS_SLOT, state_slot=GLOAS_SLOT + 90_000)
     add("ok-sepolia-first-gloas-slot", o, s, "ok", chain=11155111)
     # A block from before Gloas keeps its own fork's branch under a Gloas state.
@@ -922,6 +943,10 @@ def main(out_dir, configs_dir=None):
     # The bid's other words at depth 11 (2857 roots its fields 1 to 11) prove nothing.
     o, s = build(chain=11155111, slot=GLOAS_SLOT + 5000, state_slot=GLOAS_SLOT + 90_000, gindex=GLOAS_GINDEX + 1)
     add("payload-other-index-in-gloas", o, s, "opening-payload", chain=11155111)
+    # A progressive tree mirrored (each level's subtree on the right) would put
+    # the field at 2217; EIP-7916 and eth-ssz-specs put it at 2856.
+    o, s = build(chain=11155111, slot=GLOAS_SLOT + 5000, state_slot=GLOAS_SLOT + 90_000, gindex=2217)
+    add("payload-mirrored-layout-2217", o, s, "opening-payload", chain=11155111)
     add("payload-gloas-sibling-flipped", dict(gloas_good, payloadProof=gloas_good["payloadProof"][:10] + [label("flip")]), gloas_state, "opening-payload", chain=11155111)
     # The bid's own block_hash (22857, depth 14) is a payload committed to,
     # maybe never revealed: no opening's branch can reach it.

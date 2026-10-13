@@ -147,7 +147,7 @@ function nestedLists(d: number): Uint8Array {
 describe("receipt-opening.json", () => {
   test("is the expected format, with every vector parsed", () => {
     expect(V.format).toBe("abolish-receipt-opening-vectors/1");
-    expect(V.openings).toHaveLength(92);
+    expect(V.openings).toHaveLength(94);
     expect(V.blocks.map((b) => b.proofs.length)).toEqual([8, 5, 3]);
     expect(V.trieRejections).toHaveLength(8);
     expect(V.calldata).toHaveLength(13);

@@ -99,6 +99,7 @@ function rlpBytes32(it: Rlp | undefined): Uint8Array {
 /** The fields of an L1 block header the verifier uses, and the header's hash. */
 export interface L1Header {
   readonly hash: Uint8Array;
+  readonly parentHash: Uint8Array;
   readonly stateRoot: Uint8Array;
   readonly number: bigint;
   readonly timestamp: bigint;
@@ -117,6 +118,7 @@ export function decodeHeader(bytes: Uint8Array): L1Header {
   if (h.items.some((f) => f.list)) throw new RlpError("a header field is a list");
   return {
     hash: keccak_256(bytes),
+    parentHash: rlpBytes32(h.items[0]),
     stateRoot: rlpBytes32(h.items[3]),
     number: rlpUint(h.items[8], 8),
     timestamp: rlpUint(h.items[11], 8),

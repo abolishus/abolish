@@ -4,16 +4,17 @@
 // versions 1, 3, 4 and 5, 2.3's profile combination, 2.9's receipt keys from L1
 // state, 8.5's not-applicable case,
 // 1.3's failure for a definition naming another membership key and, for
-// format 4, the key-ceremony
+// formats 4 and 5, the key-ceremony
 // transcript check (3.2, and the parts of 2.5 and 3.1 that need no L2 state)
 // ballot admission (5.1 to 5.4, and 5.7 as far as 5.5 allows; ballot
 // version 2 against its cell under definition versions 3 and 4, ballot
-// version 3 against its cell and questions under definition version 5) and the
+// version 3 against its cell and questions under definition version 5; for
+// format 5, 5.8 against its run of L1 headers, before 5.7) and the
 // spoiled-ballot openings (6.2, as far as the floor of s_S decides them;
 // opening version 2 under definition versions 3 to 5) and
 // the tally openings' sorting, attribution and boarding breaches (7.4, as far
 // as they need no counted set; against the cells under definition versions 3
-// to 5) are implemented, and, for formats 3 and 4, 4.4's event check over
+// to 5) are implemented, and, for formats 3 to 5, 4.4's event check over
 // the board's contract-event records, which can fail 4.4 but never pass it;
 // every other check is reported unverifiable, so no run can report an
 // election verified yet. A run on unauthenticated inputs reports
@@ -43,6 +44,7 @@ import {
   type BallotsReport,
   type WindowCode,
 } from "./ballots.ts";
+import type { L1RefCode } from "./references.ts";
 import type { Bundle, InputSource, InputSources } from "./bundle.ts";
 import { type CeremonyCode, ceremonyChecks, type CeremonyReport } from "./ceremony.ts";
 import { CHECKS, type CheckKind } from "./checks.ts";
@@ -74,6 +76,9 @@ export type CheckCode =
   | AdmissionCode
   | WindowCode
   | "repeat"
+  | L1RefCode
+  | "l1-ref-pending"
+  | "l1-blocks-short"
   | OpeningCode
   | TallyCode
   | ReceiptKeyCode
@@ -113,22 +118,22 @@ export interface Report {
   readonly verdict: Verdict;
   readonly verdictAgainstInputs: Verdict;
   readonly inputs: InputSources;
-  /** A format-3 or format-4 bundle's definition hash, once the definition decodes. */
+  /** A format-3, 4 or 5 bundle's definition hash, once the definition decodes. */
   readonly definition?: { readonly hash: string };
-  /** A format-4 bundle's transcript check, once it reached the seats. */
+  /** A format-4 or 5 bundle's transcript check, once it reached the seats. */
   readonly ceremony?: CeremonyReport;
-  /** A format-4 bundle's ballot admission, once it ran (5.1 to 5.4 and 5.7). */
+  /** A format-4 or 5 bundle's ballot admission, once it ran (5.1 to 5.5, 5.7, and 5.8 for format 5). */
   readonly ballots?: BallotsReport;
-  /** A format-4 bundle's spoiled-ballot openings, once 6.2 ran, in copy order. */
+  /** A format-4 or 5 bundle's spoiled-ballot openings, once 6.2 ran, in copy order. */
   readonly openings?: readonly OpeningReport[];
-  /** A format-4 bundle's tally openings, once 7.4 ran, in copy order. */
+  /** A format-4 or 5 bundle's tally openings, once 7.4 ran, in copy order. */
   readonly tallies?: readonly TallyReport[];
   readonly board: {
     readonly entries: number;
     readonly unreadableBytes: number;
     readonly unauthenticated?: number;
   };
-  /** The L1 block a format-2, 3 or 4 bundle was proven at, and the anchors read from its state. */
+  /** The L1 block a format-2 to 5 bundle was proven at, and the anchors read from its state. */
   readonly l1?: {
     readonly blockHash: string;
     readonly blockNumber: string;
@@ -260,7 +265,7 @@ function provedUnderPinnedKey(d: VerifiedDefinition["value"]): boolean {
 }
 
 /**
- * A format-3 or format-4 bundle's definition (docs/spec/verifier.md, Definition): its
+ * A format-3, 4 or 5 bundle's definition (docs/spec/verifier.md, Definition): its
  * decoding and well-formedness, which are part of 2.1, the board-entry
  * version its profile pins, and the board checks' inputs taken from it. Any
  * other format gives them as they are.
@@ -282,11 +287,12 @@ function fromDefinition(bundle: Bundle):
   if (bundle.format === "abolish-verifier-bundle/2") return { inputs: bundle };
   // The board checks need the election and the version: without them they
   // can't run, so 4.1 and 4.2 are not reached, and neither are 4.4's event
-  // check nor the ceremony checks and ballot admission of format 4, which
+  // check nor the ceremony checks and ballot admission of formats 4 and 5, which
   // read the board.
   const boardRows: [string, Outcome][] = [
     ["4.4", NOT_REACHED],
-    ...(bundle.format === "abolish-verifier-bundle/4"
+    ...(bundle.format === "abolish-verifier-bundle/4" ||
+    bundle.format === "abolish-verifier-bundle/5"
       ? ([
           ["2.5", NOT_REACHED],
           ["3.1", NOT_REACHED],
@@ -299,6 +305,9 @@ function fromDefinition(bundle: Bundle):
           ["5.7", NOT_REACHED],
           ["6.2", NOT_REACHED],
           ["7.4", NOT_REACHED],
+          ...(bundle.format === "abolish-verifier-bundle/5"
+            ? ([["5.8", NOT_REACHED]] satisfies [string, Outcome][])
+            : []),
         ] satisfies [string, Outcome][])
       : []),
   ];
@@ -516,7 +525,8 @@ export function verifyBundle(bundle: Bundle): Report {
     // The transcript's bytes are authenticated by the definition's hash of
     // them, not by the board checks, so they run whatever 4.1 and 4.2 found.
     if (
-      bundle.format === "abolish-verifier-bundle/4" &&
+      (bundle.format === "abolish-verifier-bundle/4" ||
+        bundle.format === "abolish-verifier-bundle/5") &&
       definition.definition !== undefined &&
       definition.hash !== undefined &&
       definition.stubHash !== undefined
@@ -539,6 +549,7 @@ export function verifyBundle(bundle: Bundle): Report {
         bundle.entries,
         definition.inputs.boardEntryVersion,
         bundle.clock,
+        bundle.format === "abolish-verifier-bundle/5" ? bundle.l1Blocks : undefined,
       );
       implemented = new Map<string, Outcome>([...implemented, ...admission.rows]);
       ballots = admission.report;

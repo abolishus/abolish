@@ -200,7 +200,13 @@ function stored(key: Uint8Array, word: Uint8Array, timestamp: bigint): L1Evidenc
   ]);
   const state = leaf(anchor, account);
   return {
-    header: { hash: new Uint8Array(32), stateRoot: keccak_256(state), number: 1n, timestamp },
+    header: {
+      hash: new Uint8Array(32),
+      parentHash: new Uint8Array(32),
+      stateRoot: keccak_256(state),
+      number: 1n,
+      timestamp,
+    },
     anchor,
     firstSegment: 0,
     nodes: new NodePool([state, storage]),

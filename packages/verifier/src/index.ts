@@ -1,9 +1,11 @@
 export {
   type Bundle,
   BUNDLE_FORMAT,
+  BUNDLE_FORMAT_BLOCKS,
   BUNDLE_FORMAT_CEREMONY,
   BUNDLE_FORMAT_DEFINITION,
   BUNDLE_FORMAT_L1,
+  type BlocksBundle,
   BundleError,
   type CeremonyBundle,
   type DefinitionBundle,
@@ -27,6 +29,7 @@ export {
   type WindowCode,
 } from "./ballots.ts";
 export { type EventCode } from "./events.ts";
+export { type L1RefCode } from "./references.ts";
 export { type OpeningBreak, type OpeningReport } from "./openings.ts";
 export { type CeremonyCode, type CeremonyReport } from "./ceremony.ts";
 export { CHECKS, type CheckKind, type CheckSpec } from "./checks.ts";

@@ -13,8 +13,11 @@
 // rejected entry and the report lists every one (8.3), so a bad ballot never
 // fails the election (T-52, T-53). Repeats (5.7) are found among the ballots
 // 5.1 to 5.5 admit by @abolishus/crypto's `selectBallots`, keyed by
-// (tier, ν, M) with M recomputed, never by bytes (T-38). L1 references (5.8)
-// and selection (6.1) are decided over the admitted ballots, later.
+// (tier, ν, M) with M recomputed, never by bytes (T-38). Where the bundle
+// gives a run of finalized L1 headers (format 5), each ballot's L1 reference
+// (5.8) is judged against it before repeats, as docs/spec/revoting.md's
+// Selection takes the ballots that passed every admission check; selection
+// (6.1) is decided over the admitted ballots, later.
 
 import {
   type AdmittedBallot,
@@ -45,12 +48,14 @@ import {
   selectBallots,
 } from "@abolishus/crypto";
 import type { VerifiedDefinition } from "./definition.ts";
+import type { L1Header } from "./l1.ts";
 import { countedFloor } from "./openings.ts";
+import { type L1RefCode, referenceJudge } from "./references.ts";
 
 /** One rejected ballot entry: its position in the copy, from 0, and why. */
 export interface RejectedBallot {
   readonly entry: number;
-  readonly code: AdmissionCode | WindowCode | "repeat" | "decode";
+  readonly code: AdmissionCode | WindowCode | L1RefCode | "repeat" | "decode";
   /** `option-proof`'s first failing option (ballot version 3: flat option). */
   readonly option?: number;
   /** Ballot version 3's `sum-proof`: the first failing question. */
@@ -78,6 +83,11 @@ export interface BallotsReport {
   readonly rejected: readonly RejectedBallot[];
   /** Candidate repeats, listed only where 5.5 can't run; otherwise rejected with `repeat`. */
   readonly repeats: readonly RepeatedBallot[];
+  /**
+   * Where 5.8 judged references: ballots naming a block beyond the finalized
+   * head before L1 has finalized one after close, neither admitted nor rejected.
+   */
+  readonly pending?: readonly RepeatedBallot[];
 }
 
 /** An admitted ballot's core and segment, which 6.2's `opening-cast` compares openings with. */
@@ -95,12 +105,20 @@ export type WindowCode = "window-before-open" | "window-after-close" | "window-b
 
 export interface BallotOutcome {
   readonly status: "pass" | "fail" | "unverifiable";
-  readonly code?: AdmissionCode | WindowCode | "repeat" | "unsupported-version" | "not-reached";
+  readonly code?:
+    | AdmissionCode
+    | WindowCode
+    | L1RefCode
+    | "repeat"
+    | "l1-ref-pending"
+    | "l1-blocks-short"
+    | "unsupported-version"
+    | "not-reached";
   readonly at?: { readonly entry: number } | Record<string, never>;
 }
 
 const ROWS = ["5.1", "5.2", "5.3", "5.4"] as const;
-const ALL_ROWS = [...ROWS, "5.5", "5.7"] as const;
+const ALL_ROWS = [...ROWS, "5.5", "5.7", "5.8"] as const;
 
 // The rows each admission code fails (docs/spec/verifier.md, Ballot
 // admission). A membership proof is checked once against [ρ, ν, m̂, ŝ], so
@@ -122,8 +140,16 @@ const WINDOW_CODES: ReadonlySet<string> = new Set<WindowCode>([
   "window-after-close",
   "window-boarded-late",
 ]);
+const L1_REF_CODES: ReadonlySet<string> = new Set<L1RefCode>([
+  "l1-ref-before-open",
+  "l1-ref-after-close",
+  "l1-ref-unknown",
+]);
 
-const all = (o: BallotOutcome) => new Map(ALL_ROWS.map((id) => [id, o]));
+// 5.8 joins the other rows only where the bundle gives L1 blocks: without
+// them it stays not implemented.
+const all = (o: BallotOutcome, blocks: boolean) =>
+  new Map((blocks ? ALL_ROWS : ALL_ROWS.slice(0, -1)).map((id) => [id, o]));
 const NOT_REACHED: BallotOutcome = { status: "unverifiable", code: "not-reached" };
 
 const equal = (a: Uint8Array, b: Uint8Array) =>
@@ -143,7 +169,8 @@ type Path =
  * the key set the transcript check returned once 3.2 passed, or `undefined`,
  * which leaves every ballot unchecked: shares made to an unregistered panel
  * can't be judged (T-37). `clock` is the anchoring clock, which gives the
- * board path's last segment, `s_A = period(closes_at) + 1`.
+ * board path's last segment, `s_A = period(closes_at) + 1`. `blocks`, a
+ * format-5 bundle's run of finalized L1 headers, adds 5.8.
  */
 export function ballotChecks(
   definition: VerifiedDefinition,
@@ -151,13 +178,14 @@ export function ballotChecks(
   entries: readonly Uint8Array[],
   boardEntryVersion: BoardEntryVersion,
   clock: AnchorClock,
+  blocks?: readonly L1Header[],
 ): {
   readonly rows: ReadonlyMap<string, BallotOutcome>;
   readonly report?: BallotsReport;
   readonly admitted?: readonly AdmittedCore[];
 } {
   const judge = judgeFor(definition, registered);
-  if (typeof judge !== "function") return { rows: all(judge) };
+  if (typeof judge !== "function") return { rows: all(judge, blocks !== undefined) };
   const d = definition.value;
   const eventVersion = pinnedVersion(d, RECORD_TYPES.contractEvent);
   // Under a contract-event version this verifier doesn't read, ordinary
@@ -172,6 +200,11 @@ export function ballotChecks(
     board: d.board,
   };
   const lastBoardSegment = countedFloor(d.closes_at, clock);
+  // References are judged only where every copy's window is: a row 5.5
+  // can't decide can't let 5.8 pass either (T-36).
+  const references =
+    blocks !== undefined && windows ? referenceJudge(blocks, d.opens_at, d.closes_at) : undefined;
+  const pending: RepeatedBallot[] = [];
   const passed: { readonly at: number; readonly path: Path; readonly ballot: AdmittedBallot }[] =
     [];
   const cores: AdmittedCore[] = [];
@@ -229,7 +262,21 @@ export function ballotChecks(
       rejected.push({ entry: at, code: late });
       continue;
     }
+    // 6.2's opening-cast compares openings with every ballot 5.1 to 5.5
+    // admit, whatever 5.8 later finds: an opening of a committed vote is a
+    // breach whether or not that ballot's reference counts.
     cores.push({ entry: at, segment: path.segment, core });
+    // 5.8 reads only the reference M binds, so every copy of a ballot gets
+    // the same verdict, and a pending one stays among the ballots 5.7
+    // compares: whatever L1 later decides for it, it decides for its copies.
+    if (typeof references === "function") {
+      const verdict = references(checked);
+      if (verdict === "pending") pending.push({ entry: at });
+      else if (verdict !== "admitted") {
+        rejected.push({ entry: at, code: verdict });
+        continue;
+      }
+    }
     passed.push({
       at,
       path,
@@ -254,6 +301,7 @@ export function ballotChecks(
     for (const b of repeated) rejected.push({ entry: Number(b), code: "repeat" });
     rejected.sort((a, b) => a.entry - b.entry);
   } else repeats = [...repeated].map((b) => ({ entry: Number(b) }));
+  const waiting = pending.filter((p) => !repeated.has(BigInt(p.entry)));
   const rows = new Map<string, BallotOutcome>();
   const firstWith = (has: (r: RejectedBallot) => boolean): BallotOutcome => {
     const first = rejected.find(has);
@@ -285,10 +333,32 @@ export function ballotChecks(
     rows.set("5.5", UNSUPPORTED);
     rows.set("5.7", UNSUPPORTED);
   }
-  const admitted = windows ? passed.filter((p) => !repeated.has(BigInt(p.at))) : passed;
+  if (blocks !== undefined)
+    rows.set(
+      "5.8",
+      !windows
+        ? UNSUPPORTED
+        : references === "l1-blocks-short"
+          ? { status: "unverifiable", code: "l1-blocks-short", at: {} }
+          : // A pending ballot may yet be admitted or rejected, so the row
+            // can neither pass nor fail while one waits (revoting.md,
+            // Pending never lasts).
+            waiting[0] !== undefined
+            ? { status: "unverifiable", code: "l1-ref-pending", at: { entry: waiting[0].entry } }
+            : firstWith((r) => L1_REF_CODES.has(r.code)),
+    );
+  const unsettled = new Set(waiting.map((p) => p.entry));
+  const admitted = windows
+    ? passed.filter((p) => !repeated.has(BigInt(p.at)) && !unsettled.has(p.at))
+    : passed;
   return {
     rows,
-    report: { admitted: admitted.length, rejected, repeats },
+    report: {
+      admitted: admitted.length,
+      rejected,
+      repeats,
+      ...(typeof references === "function" && { pending: waiting }),
+    },
     admitted: cores,
   };
 }

@@ -5,8 +5,8 @@ A second implementation of docs/spec/tally.md, Live results: the release
 schedule, the running sets of a tier's cells over its scheduled snapshots
 (which only grow), the change and the entries between two running sets, the
 release graph and its least positive directed cut, the release choice with
-its lag, and the final tally's graph against the releases, whose cut the
-verifier reports. It is written from the spec with Python's standard library
+its lag, the final tally's graph against the releases, whose cut the
+verifier reports, and a node's completeness check. It is written from the spec with Python's standard library
 only and shares no code with packages/crypto.
 
 The least positive directed cut is computed twice, as the least maximum flow
@@ -299,6 +299,26 @@ def voters(prefix, count, enter, cell=0, revote=None, tie=False):
     return out
 
 
+# The completeness check (tally.md, Live results: What a node does).
+
+
+def completeness(receipted, boarded, earlier):
+    """receipted: the ballots the node receipted in a period before sigma_q,
+    each [ballot, nullifier]; boarded: per nullifier, the distinct admitted
+    ballots in S_q whose node receipts are boarded too; earlier: nullifiers in
+    a running set of the tier at an earlier snapshot. The first missing
+    ballot whose absence could change R_q refuses."""
+    for ballot, nid in receipted:
+        if ballot in boarded.get(nid, []):
+            continue
+        if nid in earlier:
+            continue
+        if len([x for x in boarded.get(nid, []) if x != ballot]) >= 2:
+            continue
+        return {"refuse": ballot}
+    return {"refuse": None}
+
+
 def release_case(name, note, nullifiers, cells, snapshots, b):
     cells_sets = running_sets(nullifiers, snapshots, cells)
     chosen, decisions = choose_releases(cells_sets, snapshots, b)
@@ -486,6 +506,17 @@ def main():
         ),
     ]
 
+    checks = []
+    for name, note, receipted, boarded, earlier in [
+        ("all-present", "Every ballot the node receipted is boarded with its receipt.", [["a/1", "a"], ["b/1", "b"]], {"a": ["a/1"], "b": ["b/1"]}, []),
+        ("withheld", "A receipted ballot is missing and its nullifier has no other ballot: refuse.", [["a/1", "a"], ["b/1", "b"]], {"a": ["a/1"]}, []),
+        ("withheld-first-revote-boarded", "The first ballot is withheld and its re-vote boarded, which would enter the release alone: refuse.", [["v/1", "v"], ["v/2", "v"]], {"v": ["v/2"]}, []),
+        ("withheld-after-entering", "A re-vote is missing, but the nullifier entered at an earlier snapshot with its first ballot, which it keeps: pass.", [["v/2", "v"]], {"v": ["v/1"]}, ["v"]),
+        ("withheld-beside-two", "A ballot is missing, but two other distinct ballots of its nullifier are boarded, so it is held out either way: pass.", [["v/1", "v"]], {"v": ["v/2", "v/3"]}, []),
+        ("withheld-beside-one", "A ballot is missing beside one other ballot of its nullifier, which would enter alone: refuse.", [["v/1", "v"]], {"v": ["v/2"]}, []),
+    ]:
+        checks.append({"id": name, "description": note, "receipted": receipted, "boarded": boarded, "earlier": earlier, "result": completeness(receipted, boarded, earlier)})
+
     doc = {
         "format": "abolish-live-release-vectors/1",
         "title": "Live results: the release schedule, running sets, release graphs and their least positive directed cuts, the release choice and the final tally against the releases",
@@ -496,6 +527,7 @@ def main():
         "running": running,
         "graphs": graphs,
         "releases": releases,
+        "completeness": checks,
     }
     out.mkdir(parents=True, exist_ok=True)
     (out / "live-release.json").write_text(json.dumps(doc, indent=2) + "\n")

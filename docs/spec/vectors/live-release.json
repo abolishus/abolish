@@ -11921,5 +11921,89 @@
         }
       ]
     }
+  ],
+  "completeness": [
+    {
+      "id": "all-present",
+      "description": "Every ballot the node receipted is boarded with its receipt.",
+      "receipted": [
+        ["a/1", "a"],
+        ["b/1", "b"]
+      ],
+      "boarded": {
+        "a": ["a/1"],
+        "b": ["b/1"]
+      },
+      "earlier": [],
+      "result": {
+        "refuse": null
+      }
+    },
+    {
+      "id": "withheld",
+      "description": "A receipted ballot is missing and its nullifier has no other ballot: refuse.",
+      "receipted": [
+        ["a/1", "a"],
+        ["b/1", "b"]
+      ],
+      "boarded": {
+        "a": ["a/1"]
+      },
+      "earlier": [],
+      "result": {
+        "refuse": "b/1"
+      }
+    },
+    {
+      "id": "withheld-first-revote-boarded",
+      "description": "The first ballot is withheld and its re-vote boarded, which would enter the release alone: refuse.",
+      "receipted": [
+        ["v/1", "v"],
+        ["v/2", "v"]
+      ],
+      "boarded": {
+        "v": ["v/2"]
+      },
+      "earlier": [],
+      "result": {
+        "refuse": "v/1"
+      }
+    },
+    {
+      "id": "withheld-after-entering",
+      "description": "A re-vote is missing, but the nullifier entered at an earlier snapshot with its first ballot, which it keeps: pass.",
+      "receipted": [["v/2", "v"]],
+      "boarded": {
+        "v": ["v/1"]
+      },
+      "earlier": ["v"],
+      "result": {
+        "refuse": null
+      }
+    },
+    {
+      "id": "withheld-beside-two",
+      "description": "A ballot is missing, but two other distinct ballots of its nullifier are boarded, so it is held out either way: pass.",
+      "receipted": [["v/1", "v"]],
+      "boarded": {
+        "v": ["v/2", "v/3"]
+      },
+      "earlier": [],
+      "result": {
+        "refuse": null
+      }
+    },
+    {
+      "id": "withheld-beside-one",
+      "description": "A ballot is missing beside one other ballot of its nullifier, which would enter alone: refuse.",
+      "receipted": [["v/1", "v"]],
+      "boarded": {
+        "v": ["v/2"]
+      },
+      "earlier": [],
+      "result": {
+        "refuse": "v/1"
+      }
+    }
   ]
 }

@@ -31,3 +31,28 @@ export const groupRecord = onchainTable(
   }),
   (table) => ({ byGroup: index().on(table.groupId, table.id) }),
 );
+
+/**
+ * Every log the indexed contracts emit, as emitted: the inputs of its
+ * contract's event-accumulator step, so a reader can rebuild each log's
+ * contract-event record (`0x0008`) and check the contract's whole sequence
+ * against a storage proof of its accumulator (docs/spec/contracts.md, Event
+ * accumulator; T-71, T-25). A log's index `n` in its contract's sequence is
+ * its position here in chain order, never a stored number, so a dropped row
+ * shifts every later `n` and fails the check rather than leave a gap.
+ */
+export const contractLog = onchainTable(
+  "contract_log",
+  (t) => ({
+    /** Ponder's event ID: it sorts in chain order. */
+    id: t.text().primaryKey(),
+    contract: t.hex().notNull(),
+    blockNumber: t.bigint().notNull(),
+    blockTimestamp: t.bigint().notNull(),
+    topics: t.hex().array().notNull(),
+    data: t.hex().notNull(),
+    transactionHash: t.hex().notNull(),
+    logIndex: t.integer().notNull(),
+  }),
+  (table) => ({ byContract: index().on(table.contract, table.id) }),
+);

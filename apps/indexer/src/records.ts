@@ -3,7 +3,7 @@
 // history is valid is the replay's to say, under the registrars the reader's
 // release pins (T-71, T-06).
 
-import type { GroupLogRecord } from "@abolishus/crypto";
+import type { ContractEventRecord, GroupLogRecord } from "@abolishus/crypto";
 import type { Sql } from "postgres";
 
 export interface IndexedGroup {
@@ -13,10 +13,9 @@ export interface IndexedGroup {
   readonly records: readonly GroupLogRecord[];
 }
 
-function hexBytes(h: string): Uint8Array {
+function hexBytes(h: string, what: string): Uint8Array {
   // Buffer.from stops at the first bad digit; a corrupted row must fail as one.
-  if (!/^0x(?:[0-9a-f]{2})*$/.test(h))
-    throw new Error("group_record: record isn't 0x-prefixed hex");
+  if (!/^0x(?:[0-9a-f]{2})*$/.test(h)) throw new Error(`${what} isn't 0x-prefixed hex`);
   return Uint8Array.from(Buffer.from(h.slice(2), "hex"));
 }
 
@@ -29,7 +28,8 @@ function hexBytes(h: string): Uint8Array {
  *
  * Replay catches an altered or reordered row, not a missing one: a dropped
  * removal or a dropped tail of additions still replays, to another tree.
- * Only the event accumulator's proof shows a history complete (P3-5 part 3).
+ * Only the event accumulator's proof shows a history complete: check the
+ * registry's `readContractEvents` against it first.
  */
 export async function readIndexedGroups(sql: Sql, schema: string): Promise<IndexedGroup[]> {
   // One snapshot, so a group and a record the indexer commits between the
@@ -47,11 +47,52 @@ export async function readIndexedGroups(sql: Sql, schema: string): Promise<Index
   for (const row of rows) {
     const list = byGroup.get(row.group_id);
     if (list === undefined) throw new Error(`group ${row.group_id}: records but no GroupCreated`);
-    list.push({ kind: row.kind, record: hexBytes(row.record) });
+    list.push({ kind: row.kind, record: hexBytes(row.record, "group_record: record") });
   }
   return groups.map((g) => ({
     groupId: BigInt(g.group_id),
     tier: g.tier,
     records: byGroup.get(g.group_id) ?? [],
   }));
+}
+
+/**
+ * A contract's indexed logs as contract-event records (docs/spec/contracts.md,
+ * Contract-event record), in chain order, `n` counting from 0. `contract` is
+ * the address as 0x and 40 hex digits. The rows are claims: a reader
+ * replays them with @abolishus/crypto's `checkEventAccumulatorProof` (over
+ * `contractEventLog`) against a storage proof of the contract's accumulator
+ * it checked itself, which fails a dropped, added, altered, reordered or
+ * moved log (T-71, T-25), and runs `checkContractEvent` before reading one.
+ * A row that can't be a log at all (a topic that isn't 32 bytes, more than
+ * four topics, non-hex data) throws as corruption.
+ */
+export async function readContractEvents(
+  sql: Sql,
+  schema: string,
+  contract: string,
+): Promise<ContractEventRecord[]> {
+  if (!/^0x[0-9a-fA-F]{40}$/.test(contract))
+    throw new Error("contract must be 0x and 40 hex digits");
+  const address = contract.toLowerCase();
+  const rows = await sql<
+    { block_number: string; block_timestamp: string; topics: string[]; data: string }[]
+  >`
+    select block_number::text, block_timestamp::text, topics, data
+    from ${sql(schema)}.contract_log where contract = ${address}
+    order by id collate "C"`;
+  const contractBytes = hexBytes(address, "contract");
+  return rows.map((row, i) => {
+    const topics = row.topics.map((t) => hexBytes(t, "contract_log: topic"));
+    if (topics.length > 4 || topics.some((t) => t.length !== 32))
+      throw new Error("contract_log: topics aren't up to four 32-byte words");
+    return {
+      contract: contractBytes,
+      n: BigInt(i),
+      l2_block: BigInt(row.block_number),
+      l2_timestamp: BigInt(row.block_timestamp),
+      topics,
+      data: hexBytes(row.data, "contract_log: data"),
+    };
+  });
 }

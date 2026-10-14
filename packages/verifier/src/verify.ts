@@ -57,7 +57,7 @@ import {
 } from "./definition.ts";
 import { eventChecks, type EventCode } from "./events.ts";
 import { countedFloor, openingChecks, type OpeningCode, type OpeningReport } from "./openings.ts";
-import { selectionCheck } from "./selection.ts";
+import { admissionSettled, selectionCheck } from "./selection.ts";
 import { type ReceiptKeyCode, receiptKeyRow } from "./receipt-keys.ts";
 import { tallyChecks, type TallyCode, type TallyReport } from "./tallies.ts";
 import {
@@ -157,9 +157,6 @@ type Outcome = Pick<CheckResult, "status" | "code" | "at">;
 const PASS: Outcome = { status: "pass" };
 const NOT_REACHED: Outcome = { status: "unverifiable", code: "not-reached" };
 const NOT_IMPLEMENTED: Outcome = { status: "unverifiable", code: "not-implemented" };
-// The admission rows a format-5 bundle settles; under format 4, 5.8 never
-// runs, so selection is never reached there.
-const ADMISSION_ROWS = ["5.1", "5.2", "5.3", "5.4", "5.5", "5.7", "5.8"] as const;
 const UNSUPPORTED: Outcome = { status: "unverifiable", code: "unsupported-version", at: {} };
 // 8.5 under a board-entry version that can't carry a destruction statement:
 // reported, never `destruction-missing` for every seat (docs/spec/verifier.md, 8.5).
@@ -312,7 +309,10 @@ function fromDefinition(bundle: Bundle):
           ["6.2", NOT_REACHED],
           ["7.4", NOT_REACHED],
           ...(bundle.format === "abolish-verifier-bundle/5"
-            ? ([["5.8", NOT_REACHED]] satisfies [string, Outcome][])
+            ? ([
+                ["5.8", NOT_REACHED],
+                ["6.1", NOT_REACHED],
+              ] satisfies [string, Outcome][])
             : []),
         ] satisfies [string, Outcome][])
       : []),
@@ -563,10 +563,7 @@ export function verifyBundle(bundle: Bundle): Report {
       // admission doesn't: the anchored extent, the seal and 4.4
       // (docs/spec/verifier.md, Selection).
       const chosen = selectionCheck({
-        admissionSettled: ADMISSION_ROWS.every((id) => {
-          const o = admission.rows.get(id);
-          return o !== undefined && o.status !== "unverifiable";
-        }),
+        admissionSettled: admissionSettled(admission.rows),
         candidates: admission.candidates,
         ordinary: admission.ordinary ?? [],
         // Set only when 4.1 and 4.2 pass.

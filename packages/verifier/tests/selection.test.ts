@@ -11,7 +11,7 @@ import {
   verifyBundle,
 } from "../src/index.ts";
 import type { CountedCandidate } from "../src/ballots.ts";
-import { selectionCheck, type SelectionInputs } from "../src/selection.ts";
+import { admissionSettled, selectionCheck, type SelectionInputs } from "../src/selection.ts";
 import { run, toHex } from "./headers.ts";
 
 // Selection (6.1, docs/spec/verifier.md, Selection): decided only once the
@@ -116,12 +116,43 @@ describe("6.1 is decided only once the counted extent is fixed", () => {
     expect(selectionCheck(inputs({ candidates: later, extent: 4 })).row.status).toBe("pass");
   });
 
+  test("admission is settled only when every row, 5.8 included, passed or failed", () => {
+    const ids = ["5.1", "5.2", "5.3", "5.4", "5.5", "5.7", "5.8"];
+    type Status = "pass" | "fail" | "unverifiable";
+    const settled = new Map<string, { readonly status: Status }>(
+      ids.map((id) => [id, { status: "pass" }]),
+    );
+    expect(admissionSettled(settled)).toBe(true);
+    expect(
+      admissionSettled(
+        new Map<string, { readonly status: Status }>([...settled, ["5.4", { status: "fail" }]]),
+      ),
+    ).toBe(true);
+    for (const id of ids) {
+      expect(
+        admissionSettled(
+          new Map<string, { readonly status: Status }>([
+            ...settled,
+            [id, { status: "unverifiable" }],
+          ]),
+        ),
+      ).toBe(false);
+      // Format 4: 5.8 never runs, and a row nobody reported settles nothing.
+      expect(admissionSettled(new Map([...settled].filter(([k]) => k !== id)))).toBe(false);
+    }
+  });
+
   test("the gates run in the spec's order", () => {
     const late = [candidate(2, 8, ballot(2, 0, 7n, 20n))];
     const all = { candidates: late, ordinary: [1], now: SEAL_ENDS };
     expect(selectionCheck(inputs({ ...all, admissionSettled: false })).row.code).toBe(
       "not-reached",
     );
+    expect(selectionCheck(inputs({ ...all, extent: undefined })).row).toEqual({
+      status: "unverifiable",
+      code: "not-reached",
+      at: {},
+    });
     expect(selectionCheck(inputs(all)).row.code).toBe("not-sealed");
     expect(selectionCheck(inputs({ ...all, now: SEAL_ENDS + 1n })).row).toEqual({
       status: "unverifiable",
@@ -319,6 +350,8 @@ const bundle = (blocks?: readonly string[]) =>
       Uint8Array.from(Buffer.from(admitted.board, "hex")),
     ),
   );
+const settled = (r: Report) =>
+  admissionSettled(new Map(r.checks.map((c) => [c.id, { status: c.status }])));
 const row = (r: Report, id: string) => {
   const { status, code, at } = r.checks.find((x) => x.id === id) as CheckResult;
   return { status, ...(code !== undefined && { code }), ...(at !== undefined && { at }) };
@@ -327,6 +360,7 @@ const row = (r: Report, id: string) => {
 describe("6.1 over the vectors' bundles", () => {
   test("under format 4, 5.8 never runs, so 6.1 is never reached", () => {
     const r = bundle();
+    expect(settled(r)).toBe(false);
     expect(row(r, "6.1")).toEqual({ status: "unverifiable", code: "not-reached", at: {} });
     expect(r.ballots).not.toHaveProperty("selected");
   });
@@ -340,6 +374,7 @@ describe("6.1 over the vectors' bundles", () => {
     const r = bundle(blocks);
     for (const id of ["5.1", "5.2", "5.3", "5.4", "5.5", "5.7", "5.8"])
       expect(row(r, id).status).not.toBe("unverifiable");
+    expect(settled(r)).toBe(true);
     expect([row(r, "4.1").status, row(r, "4.2").status]).not.toEqual(["pass", "pass"]);
     expect(row(r, "6.1")).toEqual({ status: "unverifiable", code: "not-reached", at: {} });
     expect(r.ballots).not.toHaveProperty("ties");
@@ -351,6 +386,34 @@ describe("6.1 over the vectors' bundles", () => {
     );
     const r = bundle(blocks);
     expect(row(r, "5.8").code).toBe("l1-ref-pending");
+    expect(settled(r)).toBe(false);
     expect(row(r, "6.1")).toEqual({ status: "unverifiable", code: "not-reached", at: {} });
+  });
+
+  test("a definition that stops the board checks leaves 6.1 not reached, as it does 5.8", () => {
+    const blocks = run(21_000_000n, [OPENS - L1_REF_MARGIN - 12n, CLOSES + 12n]).map((h) =>
+      toHex(h.encoded),
+    );
+    const r = verifyBundle(
+      parseBundle(
+        JSON.stringify({
+          format: BUNDLE_FORMAT_BLOCKS,
+          definition: admitted.definition.slice(0, -2),
+          clock: file.clock,
+          l1: {
+            firstSegment: closed.firstSegment,
+            header: closed.block.header,
+            nodes: closed.nodes,
+            checkpoints: closed.checkpoints,
+          },
+          panel: file.panels[admitted.panel],
+          l1Blocks: blocks,
+        }),
+        Uint8Array.from(Buffer.from(admitted.board, "hex")),
+      ),
+    );
+    expect(row(r, "2.1").status).toBe("fail");
+    expect(row(r, "5.8")).toEqual({ status: "unverifiable", code: "not-reached" });
+    expect(row(r, "6.1")).toEqual({ status: "unverifiable", code: "not-reached" });
   });
 });

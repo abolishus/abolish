@@ -49,6 +49,20 @@ export interface SelectionInputs {
   readonly floor: bigint;
 }
 
+// The admission rows a format-5 bundle settles; under format 4, 5.8 never
+// runs, so selection is never reached there.
+const ADMISSION_ROWS = ["5.1", "5.2", "5.3", "5.4", "5.5", "5.7", "5.8"] as const;
+
+/** Whether every admission row is present and passed or failed (condition 1). */
+export function admissionSettled(
+  rows: ReadonlyMap<string, { readonly status: "pass" | "fail" | "unverifiable" }>,
+): boolean {
+  return ADMISSION_ROWS.every((id) => {
+    const o = rows.get(id);
+    return o !== undefined && o.status !== "unverifiable";
+  });
+}
+
 const NOT_REACHED: SelectionOutcome = { status: "unverifiable", code: "not-reached", at: {} };
 
 /** 6.1's row and, once it passes, the selection. */

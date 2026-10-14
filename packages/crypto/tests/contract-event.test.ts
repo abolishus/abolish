@@ -25,12 +25,14 @@ import {
 } from "../src/index.ts";
 import { hex, SPEC_VECTORS } from "./spec-vectors.ts";
 
-// docs/spec/vectors/contract-event.json (version 1) and
-// contract-event-v2.json (version 2) come from independent Python
-// implementations of docs/spec/contracts.md, Contract-event record
+// docs/spec/vectors/contract-event.json (version 1), contract-event-v2.json
+// (version 2) and contract-event-v3.json (version 3) come from independent
+// Python implementations of docs/spec/contracts.md, Contract-event record
 // (scripts/contract-event-vectors.py, with its own Keccak-256, ABI reader,
-// SEC 1 decompression and accumulator, and scripts/contract-event-v2-vectors.py,
-// with its own BN254 point checks and the board's framing), so the bytes,
+// SEC 1 decompression and accumulator, scripts/contract-event-v2-vectors.py,
+// with its own BN254 point checks and the board's framing, and
+// scripts/contract-event-v3-vectors.py, with its own close-statement
+// decoding), so the bytes,
 // verdicts and accumulators here never come from the code under test (T-17,
 // T-31, T-71).
 
@@ -88,6 +90,7 @@ const load = (file: string) =>
 const FILES: Readonly<Record<ContractEventVersion, Vectors>> = {
   1: load("contract-event.json"),
   2: load("contract-event-v2.json"),
+  3: load("contract-event-v3.json"),
 };
 const vectors = FILES[1];
 
@@ -176,6 +179,24 @@ function project(e: ContractEvent): unknown {
         event: e.event,
         definitionHash: bytesToHex(e.definitionHash),
         ballotHash: bytesToHex(e.ballotHash),
+        record: bytesToHex(e.record),
+      };
+    case "RelayedBallotSubmitted":
+      return {
+        event: e.event,
+        definitionHash: bytesToHex(e.definitionHash),
+        ballotHash: bytesToHex(e.ballotHash),
+        index: String(e.index),
+        l1Block: String(e.l1Block),
+        stamp: String(e.stamp),
+        gasLimit: String(e.gasLimit),
+        record: bytesToHex(e.record),
+      };
+    case "CloseStatementSubmitted":
+      return {
+        event: e.event,
+        definitionHash: bytesToHex(e.definitionHash),
+        signer: e.signer,
         record: bytesToHex(e.record),
       };
   }
@@ -282,6 +303,19 @@ function reencode(
         topics: [sig(e.event), e.definitionHash, e.ballotHash],
         data: dyn([], tail(e.record)),
       };
+    case "RelayedBallotSubmitted":
+      return {
+        topics: [sig(e.event), e.definitionHash, e.ballotHash],
+        data: dyn(
+          [uintWord(e.index), uintWord(e.l1Block), uintWord(e.stamp), uintWord(e.gasLimit)],
+          tail(e.record),
+        ),
+      };
+    case "CloseStatementSubmitted":
+      return {
+        topics: [sig(e.event), e.definitionHash, uintWord(e.signer)],
+        data: dyn([], tail(e.record)),
+      };
   }
 }
 
@@ -298,11 +332,14 @@ const ROLE_OF: Readonly<Record<ContractEvent["event"], ContractRole>> = {
   ShareReceiptSubmitted: "board",
   SharePosted: "board",
   ShareComplaintSubmitted: "board",
+  RelayedBallotSubmitted: "board",
+  CloseStatementSubmitted: "board",
 };
 
 describe.each([
   [1, "contract-event.json"],
   [2, "contract-event-v2.json"],
+  [3, "contract-event-v3.json"],
 ] as const)("contract-event version %i vectors (docs/spec/vectors/%s)", (version, file) => {
   const vectors = FILES[version];
   const contracts = contractsOf(vectors);
@@ -459,7 +496,7 @@ describe("contract-event record properties", () => {
   // re-encoding of its decoded event, so no field carries bytes its event
   // doesn't define and no event has a second record (T-17, T-31). Mutations
   // flip, drop, insert and append bytes, and add or remove topics.
-  test.each([1, 2] as const)(
+  test.each([1, 2, 3] as const)(
     "version %i: every passing record's topics and data are those rebuilt from its decoded event",
     (version) => {
       const contracts = contractsOf(FILES[version]);
@@ -578,10 +615,49 @@ describe("contract-event version 2 against version 1", () => {
   });
 });
 
-// The version-1 file's addresses, mapped by role to version 2's.
-function v2Address(contract: string): Uint8Array {
-  const role = (Object.keys(FILES[1].contracts) as ContractRole[]).find(
-    (r) => FILES[1].contracts[r] === contract,
+describe("contract-event version 3 against version 2", () => {
+  const v3 = contractsOf(FILES[3]);
+
+  // Version 3 keeps every row of version 2 unchanged, so an election moving
+  // to version 3 reads every event version 2 reads the same way, and adds
+  // only the board's two close-rule events.
+  test("every version-2 vector has the same verdict under version 3", () => {
+    const all = [...FILES[2].records, ...FILES[2].eventFailures];
+    expect(all.length).toBeGreaterThan(60);
+    for (const v of all) {
+      const record = { ...recordOf(v.fields), contract: mapAddress(v.fields.contract, 2, 3) };
+      const result = checkContractEvent(record, v3, 3);
+      expect(result.ok ? project(result.event) : result).toEqual(
+        v.error === undefined ? v.event : { ok: false, error: v.error },
+      );
+    }
+  });
+
+  test("version 2 names neither close-rule event, so it refuses each as unknown-event", () => {
+    const v2 = contractsOf(FILES[2]);
+    const added = FILES[3].records.filter((r) =>
+      ["RelayedBallotSubmitted", "CloseStatementSubmitted"].includes(
+        (r.event as { event?: string }).event ?? "",
+      ),
+    );
+    expect(added.length).toBeGreaterThan(5);
+    for (const v of added) {
+      const record = { ...recordOf(v.fields), contract: v2.board };
+      expect(checkContractEvent(record, v2, 2)).toEqual({ ok: false, error: "unknown-event" });
+    }
+  });
+});
+
+// One file's addresses, mapped by role to another's.
+function mapAddress(
+  contract: string,
+  from: ContractEventVersion,
+  to: ContractEventVersion,
+): Uint8Array {
+  const role = (Object.keys(FILES[from].contracts) as ContractRole[]).find(
+    (r) => FILES[from].contracts[r] === contract,
   );
-  return hex(role === undefined ? contract : FILES[2].contracts[role]);
+  return hex(role === undefined ? contract : FILES[to].contracts[role]);
 }
+
+const v2Address = (contract: string) => mapAddress(contract, 1, 2);

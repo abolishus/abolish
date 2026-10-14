@@ -260,6 +260,27 @@
           "receipted": 2,
           "delivered": true
         }
+      ],
+      "non-member-first": [
+        {
+          "id": "non-member-first/1",
+          "cell": 0,
+          "ref": 1,
+          "admitted": null,
+          "receipted": null,
+          "delivered": false,
+          "boarded": 1,
+          "rejected": 1,
+          "member": false
+        },
+        {
+          "id": "non-member-first/2",
+          "cell": 0,
+          "ref": 2,
+          "admitted": 2,
+          "receipted": 2,
+          "delivered": true
+        }
       ]
     },
     "cells": [
@@ -275,6 +296,7 @@
           },
           {
             "admitted-later": "admitted-later/1",
+            "non-member-first": "non-member-first/2",
             "pending-revote": "pending-revote/1",
             "plain": "plain/1",
             "revoter": "revoter/1",
@@ -284,9 +306,9 @@
           {
             "admitted-later": "admitted-later/1",
             "late-receipts": "late-receipts/1",
+            "non-member-first": "non-member-first/2",
             "pending-revote": "pending-revote/1",
             "plain": "plain/1",
-            "rejected-first": "rejected-first/2",
             "revoter": "revoter/1",
             "tie-after": "tie-after/1",
             "two-cells": "two-cells/1"
@@ -294,9 +316,9 @@
           {
             "admitted-later": "admitted-later/1",
             "late-receipts": "late-receipts/1",
+            "non-member-first": "non-member-first/2",
             "pending-revote": "pending-revote/1",
             "plain": "plain/1",
-            "rejected-first": "rejected-first/2",
             "revoter": "revoter/1",
             "tie-after": "tie-after/1",
             "two-cells": "two-cells/1"
@@ -305,6 +327,7 @@
         "finalBallots": {
           "admitted-later": "admitted-later/1",
           "late-receipts": "late-receipts/1",
+          "non-member-first": "non-member-first/2",
           "pending-first": "pending-first/2",
           "pending-revote": "pending-revote/2",
           "plain": "plain/1",

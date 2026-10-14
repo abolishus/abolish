@@ -98,6 +98,8 @@ One-off items: [[P0-ops]] split shared hot files; [[P0-ops-2]] P0-ops review fol
 
 ## Blocked
 
+- On 2026-10-14 [[P2-15]] part 1a (#268, live results' release rules) was labelled `blocked` after seven rounds of blocking `crypto-review` findings, each fixed on the branch; the next session should re-review the Live results section as a whole against an operator controlling boarding order and timing (see the item's file).
+
 - On 2026-10-12 the owner answered [[0010-tier2-identity-provider]]'s two questions (Owner decision), unblocking [[P3-4]]'s verifier side and real-document registration through trustee attestation.
 - On 2026-10-12 the owner answered [[0006-trustees]]'s small-cell question (regions below the floor fold into a per-tier remainder cell; tiers are never merged or withheld), unblocking [[P1-15]] part 4.
 - On 2026-10-12 the owner decided the open finding that blocked [[P1-12]] part 3b (#101) a second time: the unbounded trustee-node receipt obligation is accepted as a residual until [[P1-12c]] (membership-checked intake, after P1-17b and the ballot record, with P1-18's batched receipts) closes it, which MUST happen before any election registry is deployed ([[0002-everlasting-privacy]], Decision). #101 resumes.

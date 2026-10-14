@@ -59,7 +59,8 @@ def scheduled_snapshots(epoch, period, opens_at, closes_at, live_every):
 # ballot), each with the cell it names, its L1 reference's block number
 # (`ref`), the first scheduled snapshot index at which it is in the snapshot
 # (`boarded`, the same as `admitted` when absent), at which it is rejected
-# (`rejected`, absent if never), at which it is admitted and
+# (`rejected`, absent if never), `member` (false when its membership proof
+# fails; absent means true), at which it is admitted and
 # at which every qualified seat of every panel has a passing receipt for it
 # (`receipted`); None: never by the last snapshot. `delivered` is false for a
 # ballot the delivery check excludes at the final tally (no receipt or
@@ -80,8 +81,9 @@ def status(b, r):
 
 def entering(ballots, r):
     """Conditions 1 and 2 at snapshot r: the one ballot that enters, or None.
-    Pending ballots count towards the nullifier's distinct ballots."""
-    live = [b for b in ballots if status(b, r) in ("admitted", "pending")]
+    Every ballot whose membership proof passes counts towards the nullifier's
+    distinct ballots, pending or later rejected."""
+    live = [b for b in ballots if status(b, r) != "absent" and b.get("member", True)]
     if len(live) != 1 or status(live[0], r) != "admitted":
         return None
     b = live[0]
@@ -434,6 +436,10 @@ def main():
         "rejected-first": [
             dict(ballot("rejected-first", 1, admitted=None, receipted=None), boarded=1, rejected=3),
             ballot("rejected-first", 2, admitted=2, receipted=2),
+        ],
+        "non-member-first": [
+            dict(ballot("non-member-first", 1, admitted=None, receipted=None), boarded=1, rejected=1, member=False),
+            ballot("non-member-first", 2, admitted=2, receipted=2),
         ],
     }
     rs = running_sets(rs_nullifiers, 4, 2)

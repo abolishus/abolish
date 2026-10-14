@@ -58,9 +58,10 @@ def scheduled_snapshots(epoch, period, opens_at, closes_at, live_every):
 # Each nullifier of a tier is given as its distinct ballots (repeats are one
 # ballot), each with the cell it names, its L1 reference's block number
 # (`ref`), and the first scheduled snapshot index at which it is admitted and
-# at which every qualified seat of every panel has a passing receipt or
-# passing posting for it (`delivered`); None: never by the last snapshot.
-# `excluded` marks a ballot the delivery check excludes at the final tally.
+# at which every qualified seat of every panel has a passing receipt for it
+# (`receipted`); None: never by the last snapshot. `delivered` is false for a
+# ballot the delivery check excludes at the final tally (no receipt or
+# passing posting for some seat by the deadline, or a proven complaint).
 
 
 def entering(ballots, r):
@@ -69,7 +70,7 @@ def entering(ballots, r):
     if len(admitted) != 1:
         return None
     b = admitted[0]
-    if b["delivered"] is None or b["delivered"] > r:
+    if b["receipted"] is None or b["receipted"] > r:
         return None
     return b
 
@@ -103,7 +104,7 @@ def final_ballots(nullifiers, cell):
         if len(best) != 1:
             continue
         b = best[0]
-        if b["cell"] != cell or b["delivered"] is None or b.get("excluded"):
+        if b["cell"] != cell or not b["delivered"]:
             continue
         out[nid] = b["id"]
     return out
@@ -285,16 +286,16 @@ def choose_releases(cells_sets, snapshots, b):
 
 
 def voters(prefix, count, enter, cell=0, revote=None, tie=False):
-    """`count` nullifiers whose first ballot is delivered at snapshot `enter`;
+    """`count` nullifiers whose first ballot is receipted at snapshot `enter`;
     with `revote`, a second ballot naming a later L1 block (or the same block,
-    a tie) is admitted and delivered there."""
+    a tie) is admitted and receipted there."""
     out = {}
     for i in range(count):
         nid = f"{prefix}{i:02d}"
-        ballots = [{"id": f"{nid}/1", "cell": cell, "ref": 1, "admitted": enter, "delivered": enter}]
+        ballots = [{"id": f"{nid}/1", "cell": cell, "ref": 1, "admitted": enter, "receipted": enter, "delivered": True}]
         if revote is not None:
             ref = 1 if tie else 2
-            ballots.append({"id": f"{nid}/2", "cell": cell, "ref": ref, "admitted": revote, "delivered": revote})
+            ballots.append({"id": f"{nid}/2", "cell": cell, "ref": ref, "admitted": revote, "receipted": revote, "delivered": True})
         out[nid] = ballots
     return out
 
@@ -373,24 +374,35 @@ def main():
         )
 
     # Running set: one nullifier per rule, over four snapshots of two cells.
-    def ballot(nid, k, cell=0, admitted=1, delivered=1, ref=None):
-        return {"id": f"{nid}/{k}", "cell": cell, "ref": k if ref is None else ref, "admitted": admitted, "delivered": delivered}
+    def ballot(nid, k, cell=0, admitted=1, receipted=1, ref=None, delivered=None):
+        if delivered is None:
+            delivered = receipted is not None
+        return {
+            "id": f"{nid}/{k}",
+            "cell": cell,
+            "ref": k if ref is None else ref,
+            "admitted": admitted,
+            "receipted": receipted,
+            "delivered": delivered,
+        }
 
     rs_nullifiers = {
         "plain": [ballot("plain", 1)],
-        "late-delivery": [ballot("late-delivery", 1, delivered=3)],
-        "never-delivered": [ballot("never-delivered", 1, delivered=None)],
-        "revoter": [ballot("revoter", 1), ballot("revoter", 2, admitted=3, delivered=3)],
-        "pending-revote": [ballot("pending-revote", 1), ballot("pending-revote", 2, admitted=4, delivered=2)],
+        "late-receipts": [ballot("late-receipts", 1, receipted=3)],
+        "never-delivered": [ballot("never-delivered", 1, receipted=None)],
+        "posted-valid": [ballot("posted-valid", 1, receipted=None, delivered=True)],
+        "posted-invalid": [ballot("posted-invalid", 1, receipted=None, delivered=False)],
+        "revoter": [ballot("revoter", 1), ballot("revoter", 2, admitted=3, receipted=3)],
+        "pending-revote": [ballot("pending-revote", 1), ballot("pending-revote", 2, admitted=4, receipted=2)],
         "tie-before": [ballot("tie-before", 1, admitted=2), ballot("tie-before", 2, admitted=2, ref=1)],
         "tie-after": [ballot("tie-after", 1), ballot("tie-after", 2, admitted=2, ref=1)],
         "other-cell": [ballot("other-cell", 1, cell=1)],
-        "two-cells": [ballot("two-cells", 1), ballot("two-cells", 2, cell=1, admitted=2, delivered=2)],
-        "undelivered-first": [
-            ballot("undelivered-first", 1, delivered=None),
-            ballot("undelivered-first", 2, admitted=3, delivered=3),
+        "two-cells": [ballot("two-cells", 1), ballot("two-cells", 2, cell=1, admitted=2, receipted=2)],
+        "unreceipted-first": [
+            ballot("unreceipted-first", 1, receipted=None),
+            ballot("unreceipted-first", 2, admitted=3, receipted=3),
         ],
-        "admitted-later": [ballot("admitted-later", 1, admitted=2, delivered=1)],
+        "admitted-later": [ballot("admitted-later", 1, admitted=2, receipted=1)],
     }
     rs = running_sets(rs_nullifiers, 4, 2)
     running = {

@@ -50,16 +50,18 @@
           "cell": 0,
           "ref": 1,
           "admitted": 1,
-          "delivered": 1
+          "receipted": 1,
+          "delivered": true
         }
       ],
-      "late-delivery": [
+      "late-receipts": [
         {
-          "id": "late-delivery/1",
+          "id": "late-receipts/1",
           "cell": 0,
           "ref": 1,
           "admitted": 1,
-          "delivered": 3
+          "receipted": 3,
+          "delivered": true
         }
       ],
       "never-delivered": [
@@ -68,7 +70,28 @@
           "cell": 0,
           "ref": 1,
           "admitted": 1,
-          "delivered": null
+          "receipted": null,
+          "delivered": false
+        }
+      ],
+      "posted-valid": [
+        {
+          "id": "posted-valid/1",
+          "cell": 0,
+          "ref": 1,
+          "admitted": 1,
+          "receipted": null,
+          "delivered": true
+        }
+      ],
+      "posted-invalid": [
+        {
+          "id": "posted-invalid/1",
+          "cell": 0,
+          "ref": 1,
+          "admitted": 1,
+          "receipted": null,
+          "delivered": false
         }
       ],
       "revoter": [
@@ -77,14 +100,16 @@
           "cell": 0,
           "ref": 1,
           "admitted": 1,
-          "delivered": 1
+          "receipted": 1,
+          "delivered": true
         },
         {
           "id": "revoter/2",
           "cell": 0,
           "ref": 2,
           "admitted": 3,
-          "delivered": 3
+          "receipted": 3,
+          "delivered": true
         }
       ],
       "pending-revote": [
@@ -93,14 +118,16 @@
           "cell": 0,
           "ref": 1,
           "admitted": 1,
-          "delivered": 1
+          "receipted": 1,
+          "delivered": true
         },
         {
           "id": "pending-revote/2",
           "cell": 0,
           "ref": 2,
           "admitted": 4,
-          "delivered": 2
+          "receipted": 2,
+          "delivered": true
         }
       ],
       "tie-before": [
@@ -109,14 +136,16 @@
           "cell": 0,
           "ref": 1,
           "admitted": 2,
-          "delivered": 1
+          "receipted": 1,
+          "delivered": true
         },
         {
           "id": "tie-before/2",
           "cell": 0,
           "ref": 1,
           "admitted": 2,
-          "delivered": 1
+          "receipted": 1,
+          "delivered": true
         }
       ],
       "tie-after": [
@@ -125,14 +154,16 @@
           "cell": 0,
           "ref": 1,
           "admitted": 1,
-          "delivered": 1
+          "receipted": 1,
+          "delivered": true
         },
         {
           "id": "tie-after/2",
           "cell": 0,
           "ref": 1,
           "admitted": 2,
-          "delivered": 1
+          "receipted": 1,
+          "delivered": true
         }
       ],
       "other-cell": [
@@ -141,7 +172,8 @@
           "cell": 1,
           "ref": 1,
           "admitted": 1,
-          "delivered": 1
+          "receipted": 1,
+          "delivered": true
         }
       ],
       "two-cells": [
@@ -150,30 +182,34 @@
           "cell": 0,
           "ref": 1,
           "admitted": 1,
-          "delivered": 1
+          "receipted": 1,
+          "delivered": true
         },
         {
           "id": "two-cells/2",
           "cell": 1,
           "ref": 2,
           "admitted": 2,
-          "delivered": 2
+          "receipted": 2,
+          "delivered": true
         }
       ],
-      "undelivered-first": [
+      "unreceipted-first": [
         {
-          "id": "undelivered-first/1",
+          "id": "unreceipted-first/1",
           "cell": 0,
           "ref": 1,
           "admitted": 1,
-          "delivered": null
+          "receipted": null,
+          "delivered": false
         },
         {
-          "id": "undelivered-first/2",
+          "id": "unreceipted-first/2",
           "cell": 0,
           "ref": 2,
           "admitted": 3,
-          "delivered": 3
+          "receipted": 3,
+          "delivered": true
         }
       ],
       "admitted-later": [
@@ -182,7 +218,8 @@
           "cell": 0,
           "ref": 1,
           "admitted": 2,
-          "delivered": 1
+          "receipted": 1,
+          "delivered": true
         }
       ]
     },
@@ -207,7 +244,7 @@
           },
           {
             "admitted-later": "admitted-later/1",
-            "late-delivery": "late-delivery/1",
+            "late-receipts": "late-receipts/1",
             "pending-revote": "pending-revote/1",
             "plain": "plain/1",
             "revoter": "revoter/1",
@@ -216,7 +253,7 @@
           },
           {
             "admitted-later": "admitted-later/1",
-            "late-delivery": "late-delivery/1",
+            "late-receipts": "late-receipts/1",
             "pending-revote": "pending-revote/1",
             "plain": "plain/1",
             "revoter": "revoter/1",
@@ -226,11 +263,12 @@
         ],
         "finalBallots": {
           "admitted-later": "admitted-later/1",
-          "late-delivery": "late-delivery/1",
+          "late-receipts": "late-receipts/1",
           "pending-revote": "pending-revote/2",
           "plain": "plain/1",
+          "posted-valid": "posted-valid/1",
           "revoter": "revoter/2",
-          "undelivered-first": "undelivered-first/2"
+          "unreceipted-first": "unreceipted-first/2"
         }
       },
       {
@@ -857,7 +895,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-01": [
@@ -866,7 +905,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-02": [
@@ -875,7 +915,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-03": [
@@ -884,7 +925,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-04": [
@@ -893,7 +935,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-05": [
@@ -902,7 +945,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-06": [
@@ -911,7 +955,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-07": [
@@ -920,7 +965,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-08": [
@@ -929,7 +975,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-09": [
@@ -938,7 +985,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-10": [
@@ -947,7 +995,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-11": [
@@ -956,7 +1005,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-12": [
@@ -965,7 +1015,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-13": [
@@ -974,7 +1025,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-14": [
@@ -983,7 +1035,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-15": [
@@ -992,7 +1045,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-16": [
@@ -1001,7 +1055,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-17": [
@@ -1010,7 +1065,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-18": [
@@ -1019,7 +1075,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-19": [
@@ -1028,7 +1085,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-20": [
@@ -1037,7 +1095,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-21": [
@@ -1046,7 +1105,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-22": [
@@ -1055,7 +1115,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-23": [
@@ -1064,7 +1125,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-24": [
@@ -1073,7 +1135,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s2-00": [
@@ -1082,7 +1145,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-01": [
@@ -1091,7 +1155,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-02": [
@@ -1100,7 +1165,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-03": [
@@ -1109,7 +1175,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-04": [
@@ -1118,7 +1185,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-05": [
@@ -1127,7 +1195,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-06": [
@@ -1136,7 +1205,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-07": [
@@ -1145,7 +1215,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-08": [
@@ -1154,7 +1225,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-09": [
@@ -1163,7 +1235,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-10": [
@@ -1172,7 +1245,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-11": [
@@ -1181,7 +1255,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-12": [
@@ -1190,7 +1265,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-13": [
@@ -1199,7 +1275,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-14": [
@@ -1208,7 +1285,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-15": [
@@ -1217,7 +1295,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-16": [
@@ -1226,7 +1305,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-17": [
@@ -1235,7 +1315,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-18": [
@@ -1244,7 +1325,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-19": [
@@ -1253,7 +1335,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-20": [
@@ -1262,7 +1345,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-21": [
@@ -1271,7 +1355,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-22": [
@@ -1280,7 +1365,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-23": [
@@ -1289,7 +1375,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-24": [
@@ -1298,7 +1385,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s3-00": [
@@ -1307,7 +1395,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-01": [
@@ -1316,7 +1405,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-02": [
@@ -1325,7 +1415,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-03": [
@@ -1334,7 +1425,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-04": [
@@ -1343,7 +1435,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-05": [
@@ -1352,7 +1445,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-06": [
@@ -1361,7 +1455,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-07": [
@@ -1370,7 +1465,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-08": [
@@ -1379,7 +1475,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-09": [
@@ -1388,7 +1485,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-10": [
@@ -1397,7 +1495,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-11": [
@@ -1406,7 +1505,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-12": [
@@ -1415,7 +1515,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-13": [
@@ -1424,7 +1525,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-14": [
@@ -1433,7 +1535,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-15": [
@@ -1442,7 +1545,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-16": [
@@ -1451,7 +1555,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-17": [
@@ -1460,7 +1565,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-18": [
@@ -1469,7 +1575,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-19": [
@@ -1478,7 +1585,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-20": [
@@ -1487,7 +1595,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-21": [
@@ -1496,7 +1605,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-22": [
@@ -1505,7 +1615,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-23": [
@@ -1514,7 +1625,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-24": [
@@ -1523,7 +1635,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s4-00": [
@@ -1532,7 +1645,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-01": [
@@ -1541,7 +1655,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-02": [
@@ -1550,7 +1665,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-03": [
@@ -1559,7 +1675,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-04": [
@@ -1568,7 +1685,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-05": [
@@ -1577,7 +1695,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-06": [
@@ -1586,7 +1705,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-07": [
@@ -1595,7 +1715,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-08": [
@@ -1604,7 +1725,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-09": [
@@ -1613,7 +1735,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-10": [
@@ -1622,7 +1745,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-11": [
@@ -1631,7 +1755,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-12": [
@@ -1640,7 +1765,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-13": [
@@ -1649,7 +1775,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-14": [
@@ -1658,7 +1785,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-15": [
@@ -1667,7 +1795,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-16": [
@@ -1676,7 +1805,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-17": [
@@ -1685,7 +1815,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-18": [
@@ -1694,7 +1825,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-19": [
@@ -1703,7 +1835,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-20": [
@@ -1712,7 +1845,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-21": [
@@ -1721,7 +1855,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-22": [
@@ -1730,7 +1865,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-23": [
@@ -1739,7 +1875,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-24": [
@@ -1748,7 +1885,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s5-00": [
@@ -1757,7 +1895,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-01": [
@@ -1766,7 +1905,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-02": [
@@ -1775,7 +1915,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-03": [
@@ -1784,7 +1925,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-04": [
@@ -1793,7 +1935,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-05": [
@@ -1802,7 +1945,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-06": [
@@ -1811,7 +1955,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-07": [
@@ -1820,7 +1965,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-08": [
@@ -1829,7 +1975,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-09": [
@@ -1838,7 +1985,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-10": [
@@ -1847,7 +1995,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-11": [
@@ -1856,7 +2005,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-12": [
@@ -1865,7 +2015,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-13": [
@@ -1874,7 +2025,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-14": [
@@ -1883,7 +2035,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-15": [
@@ -1892,7 +2045,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-16": [
@@ -1901,7 +2055,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-17": [
@@ -1910,7 +2065,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-18": [
@@ -1919,7 +2075,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-19": [
@@ -1928,7 +2085,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-20": [
@@ -1937,7 +2095,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-21": [
@@ -1946,7 +2105,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-22": [
@@ -1955,7 +2115,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-23": [
@@ -1964,7 +2125,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-24": [
@@ -1973,7 +2135,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s6-00": [
@@ -1982,7 +2145,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-01": [
@@ -1991,7 +2155,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-02": [
@@ -2000,7 +2165,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-03": [
@@ -2009,7 +2175,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-04": [
@@ -2018,7 +2185,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-05": [
@@ -2027,7 +2195,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-06": [
@@ -2036,7 +2205,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-07": [
@@ -2045,7 +2215,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-08": [
@@ -2054,7 +2225,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-09": [
@@ -2063,7 +2235,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-10": [
@@ -2072,7 +2245,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-11": [
@@ -2081,7 +2255,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-12": [
@@ -2090,7 +2265,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-13": [
@@ -2099,7 +2275,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-14": [
@@ -2108,7 +2285,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-15": [
@@ -2117,7 +2295,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-16": [
@@ -2126,7 +2305,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-17": [
@@ -2135,7 +2315,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-18": [
@@ -2144,7 +2325,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-19": [
@@ -2153,7 +2335,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-20": [
@@ -2162,7 +2345,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-21": [
@@ -2171,7 +2355,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-22": [
@@ -2180,7 +2365,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-23": [
@@ -2189,7 +2375,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-24": [
@@ -2198,7 +2385,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ]
       },
@@ -2976,7 +3164,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-01": [
@@ -2985,7 +3174,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-02": [
@@ -2994,7 +3184,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-03": [
@@ -3003,7 +3194,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-04": [
@@ -3012,7 +3204,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-05": [
@@ -3021,7 +3214,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-06": [
@@ -3030,7 +3224,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-07": [
@@ -3039,7 +3234,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-08": [
@@ -3048,7 +3244,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-09": [
@@ -3057,7 +3254,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-10": [
@@ -3066,7 +3264,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-11": [
@@ -3075,7 +3274,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-12": [
@@ -3084,7 +3284,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-13": [
@@ -3093,7 +3294,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-14": [
@@ -3102,7 +3304,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-15": [
@@ -3111,7 +3314,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-16": [
@@ -3120,7 +3324,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-17": [
@@ -3129,7 +3334,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-18": [
@@ -3138,7 +3344,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-19": [
@@ -3147,7 +3354,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-20": [
@@ -3156,7 +3364,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-21": [
@@ -3165,7 +3374,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-22": [
@@ -3174,7 +3384,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-23": [
@@ -3183,7 +3394,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-24": [
@@ -3192,7 +3404,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s2-00": [
@@ -3201,7 +3414,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-01": [
@@ -3210,7 +3424,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-02": [
@@ -3219,7 +3434,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-03": [
@@ -3228,7 +3444,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-04": [
@@ -3237,7 +3454,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-05": [
@@ -3246,7 +3464,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-06": [
@@ -3255,7 +3474,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-07": [
@@ -3264,7 +3484,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-08": [
@@ -3273,7 +3494,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-09": [
@@ -3282,7 +3504,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-10": [
@@ -3291,7 +3514,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-11": [
@@ -3300,7 +3524,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-12": [
@@ -3309,7 +3534,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-13": [
@@ -3318,7 +3544,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-14": [
@@ -3327,7 +3554,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-15": [
@@ -3336,7 +3564,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-16": [
@@ -3345,7 +3574,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-17": [
@@ -3354,7 +3584,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-18": [
@@ -3363,7 +3594,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-19": [
@@ -3372,7 +3604,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-20": [
@@ -3381,7 +3614,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-21": [
@@ -3390,7 +3624,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-22": [
@@ -3399,7 +3634,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-23": [
@@ -3408,7 +3644,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-24": [
@@ -3417,7 +3654,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s3-00": [
@@ -3426,7 +3664,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-01": [
@@ -3435,7 +3674,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-02": [
@@ -3444,7 +3684,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-03": [
@@ -3453,7 +3694,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-04": [
@@ -3462,7 +3704,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-05": [
@@ -3471,7 +3714,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-06": [
@@ -3480,7 +3724,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-07": [
@@ -3489,7 +3734,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-08": [
@@ -3498,7 +3744,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-09": [
@@ -3507,7 +3754,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-10": [
@@ -3516,7 +3764,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-11": [
@@ -3525,7 +3774,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-12": [
@@ -3534,7 +3784,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-13": [
@@ -3543,7 +3794,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-14": [
@@ -3552,7 +3804,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-15": [
@@ -3561,7 +3814,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-16": [
@@ -3570,7 +3824,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-17": [
@@ -3579,7 +3834,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-18": [
@@ -3588,7 +3844,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-19": [
@@ -3597,7 +3854,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-20": [
@@ -3606,7 +3864,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-21": [
@@ -3615,7 +3874,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-22": [
@@ -3624,7 +3884,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-23": [
@@ -3633,7 +3894,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-24": [
@@ -3642,7 +3904,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s4-00": [
@@ -3651,7 +3914,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-01": [
@@ -3660,7 +3924,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-02": [
@@ -3669,7 +3934,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-03": [
@@ -3678,7 +3944,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-04": [
@@ -3687,7 +3954,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-05": [
@@ -3696,7 +3964,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-06": [
@@ -3705,7 +3974,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-07": [
@@ -3714,7 +3984,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-08": [
@@ -3723,7 +3994,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-09": [
@@ -3732,7 +4004,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-10": [
@@ -3741,7 +4014,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-11": [
@@ -3750,7 +4024,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-12": [
@@ -3759,7 +4034,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-13": [
@@ -3768,7 +4044,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-14": [
@@ -3777,7 +4054,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-15": [
@@ -3786,7 +4064,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-16": [
@@ -3795,7 +4074,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-17": [
@@ -3804,7 +4084,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-18": [
@@ -3813,7 +4094,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-19": [
@@ -3822,7 +4104,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-20": [
@@ -3831,7 +4114,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-21": [
@@ -3840,7 +4124,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-22": [
@@ -3849,7 +4134,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-23": [
@@ -3858,7 +4144,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-24": [
@@ -3867,7 +4154,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s5-00": [
@@ -3876,7 +4164,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-01": [
@@ -3885,7 +4174,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-02": [
@@ -3894,7 +4184,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-03": [
@@ -3903,7 +4194,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-04": [
@@ -3912,7 +4204,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-05": [
@@ -3921,7 +4214,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-06": [
@@ -3930,7 +4224,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-07": [
@@ -3939,7 +4234,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-08": [
@@ -3948,7 +4244,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-09": [
@@ -3957,7 +4254,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-10": [
@@ -3966,7 +4264,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-11": [
@@ -3975,7 +4274,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-12": [
@@ -3984,7 +4284,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-13": [
@@ -3993,7 +4294,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-14": [
@@ -4002,7 +4304,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-15": [
@@ -4011,7 +4314,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-16": [
@@ -4020,7 +4324,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-17": [
@@ -4029,7 +4334,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-18": [
@@ -4038,7 +4344,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-19": [
@@ -4047,7 +4354,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-20": [
@@ -4056,7 +4364,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-21": [
@@ -4065,7 +4374,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-22": [
@@ -4074,7 +4384,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-23": [
@@ -4083,7 +4394,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-24": [
@@ -4092,7 +4404,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s6-00": [
@@ -4101,7 +4414,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-01": [
@@ -4110,7 +4424,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-02": [
@@ -4119,7 +4434,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-03": [
@@ -4128,7 +4444,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-04": [
@@ -4137,7 +4454,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-05": [
@@ -4146,7 +4464,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-06": [
@@ -4155,7 +4474,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-07": [
@@ -4164,7 +4484,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-08": [
@@ -4173,7 +4494,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-09": [
@@ -4182,7 +4504,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-10": [
@@ -4191,7 +4514,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-11": [
@@ -4200,7 +4524,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-12": [
@@ -4209,7 +4534,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-13": [
@@ -4218,7 +4544,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-14": [
@@ -4227,7 +4554,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-15": [
@@ -4236,7 +4564,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-16": [
@@ -4245,7 +4574,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-17": [
@@ -4254,7 +4584,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-18": [
@@ -4263,7 +4594,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-19": [
@@ -4272,7 +4604,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-20": [
@@ -4281,7 +4614,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-21": [
@@ -4290,7 +4624,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-22": [
@@ -4299,7 +4634,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-23": [
@@ -4308,7 +4644,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-24": [
@@ -4317,7 +4654,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "rv-00": [
@@ -4326,14 +4664,16 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           },
           {
             "id": "rv-00/2",
             "cell": 0,
             "ref": 2,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "rv-01": [
@@ -4342,14 +4682,16 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           },
           {
             "id": "rv-01/2",
             "cell": 0,
             "ref": 2,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "rv-02": [
@@ -4358,14 +4700,16 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           },
           {
             "id": "rv-02/2",
             "cell": 0,
             "ref": 2,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "tie-00": [
@@ -4374,14 +4718,16 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           },
           {
             "id": "tie-00/2",
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ]
       },
@@ -5160,7 +5506,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-01": [
@@ -5169,7 +5516,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-02": [
@@ -5178,7 +5526,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-03": [
@@ -5187,7 +5536,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-04": [
@@ -5196,7 +5546,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-05": [
@@ -5205,7 +5556,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-06": [
@@ -5214,7 +5566,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-07": [
@@ -5223,7 +5576,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-08": [
@@ -5232,7 +5586,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-09": [
@@ -5241,7 +5596,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-10": [
@@ -5250,7 +5606,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-11": [
@@ -5259,7 +5616,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-12": [
@@ -5268,7 +5626,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-13": [
@@ -5277,7 +5636,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-14": [
@@ -5286,7 +5646,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-15": [
@@ -5295,7 +5656,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-16": [
@@ -5304,7 +5666,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-17": [
@@ -5313,7 +5676,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-18": [
@@ -5322,7 +5686,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-19": [
@@ -5331,7 +5696,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-20": [
@@ -5340,7 +5706,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-21": [
@@ -5349,7 +5716,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-22": [
@@ -5358,7 +5726,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-23": [
@@ -5367,7 +5736,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-24": [
@@ -5376,7 +5746,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s2-00": [
@@ -5385,7 +5756,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-01": [
@@ -5394,7 +5766,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-02": [
@@ -5403,7 +5776,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-03": [
@@ -5412,7 +5786,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-04": [
@@ -5421,7 +5796,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-05": [
@@ -5430,7 +5806,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-06": [
@@ -5439,7 +5816,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-07": [
@@ -5448,7 +5826,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-08": [
@@ -5457,7 +5836,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-09": [
@@ -5466,7 +5846,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-10": [
@@ -5475,7 +5856,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-11": [
@@ -5484,7 +5866,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-12": [
@@ -5493,7 +5876,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-13": [
@@ -5502,7 +5886,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-14": [
@@ -5511,7 +5896,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-15": [
@@ -5520,7 +5906,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-16": [
@@ -5529,7 +5916,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-17": [
@@ -5538,7 +5926,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-18": [
@@ -5547,7 +5936,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-19": [
@@ -5556,7 +5946,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-20": [
@@ -5565,7 +5956,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-21": [
@@ -5574,7 +5966,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-22": [
@@ -5583,7 +5976,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-23": [
@@ -5592,7 +5986,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-24": [
@@ -5601,7 +5996,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s3-00": [
@@ -5610,7 +6006,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-01": [
@@ -5619,7 +6016,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-02": [
@@ -5628,7 +6026,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-03": [
@@ -5637,7 +6036,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-04": [
@@ -5646,7 +6046,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-05": [
@@ -5655,7 +6056,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-06": [
@@ -5664,7 +6066,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-07": [
@@ -5673,7 +6076,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-08": [
@@ -5682,7 +6086,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-09": [
@@ -5691,7 +6096,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-10": [
@@ -5700,7 +6106,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-11": [
@@ -5709,7 +6116,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-12": [
@@ -5718,7 +6126,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-13": [
@@ -5727,7 +6136,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-14": [
@@ -5736,7 +6146,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-15": [
@@ -5745,7 +6156,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-16": [
@@ -5754,7 +6166,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-17": [
@@ -5763,7 +6176,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-18": [
@@ -5772,7 +6186,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-19": [
@@ -5781,7 +6196,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-20": [
@@ -5790,7 +6206,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-21": [
@@ -5799,7 +6216,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-22": [
@@ -5808,7 +6226,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-23": [
@@ -5817,7 +6236,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-24": [
@@ -5826,7 +6246,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s4-00": [
@@ -5835,7 +6256,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-01": [
@@ -5844,7 +6266,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-02": [
@@ -5853,7 +6276,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-03": [
@@ -5862,7 +6286,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-04": [
@@ -5871,7 +6296,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-05": [
@@ -5880,7 +6306,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-06": [
@@ -5889,7 +6316,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-07": [
@@ -5898,7 +6326,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-08": [
@@ -5907,7 +6336,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-09": [
@@ -5916,7 +6346,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-10": [
@@ -5925,7 +6356,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-11": [
@@ -5934,7 +6366,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-12": [
@@ -5943,7 +6376,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-13": [
@@ -5952,7 +6386,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-14": [
@@ -5961,7 +6396,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-15": [
@@ -5970,7 +6406,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-16": [
@@ -5979,7 +6416,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-17": [
@@ -5988,7 +6426,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-18": [
@@ -5997,7 +6436,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-19": [
@@ -6006,7 +6446,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-20": [
@@ -6015,7 +6456,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-21": [
@@ -6024,7 +6466,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-22": [
@@ -6033,7 +6476,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-23": [
@@ -6042,7 +6486,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s4-24": [
@@ -6051,7 +6496,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "s5-00": [
@@ -6060,7 +6506,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-01": [
@@ -6069,7 +6516,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-02": [
@@ -6078,7 +6526,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-03": [
@@ -6087,7 +6536,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-04": [
@@ -6096,7 +6546,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-05": [
@@ -6105,7 +6556,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-06": [
@@ -6114,7 +6566,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-07": [
@@ -6123,7 +6576,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-08": [
@@ -6132,7 +6586,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-09": [
@@ -6141,7 +6596,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-10": [
@@ -6150,7 +6606,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-11": [
@@ -6159,7 +6616,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-12": [
@@ -6168,7 +6626,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-13": [
@@ -6177,7 +6636,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-14": [
@@ -6186,7 +6646,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-15": [
@@ -6195,7 +6656,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-16": [
@@ -6204,7 +6666,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-17": [
@@ -6213,7 +6676,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-18": [
@@ -6222,7 +6686,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-19": [
@@ -6231,7 +6696,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-20": [
@@ -6240,7 +6706,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-21": [
@@ -6249,7 +6716,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-22": [
@@ -6258,7 +6726,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-23": [
@@ -6267,7 +6736,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s5-24": [
@@ -6276,7 +6746,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "s6-00": [
@@ -6285,7 +6756,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-01": [
@@ -6294,7 +6766,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-02": [
@@ -6303,7 +6776,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-03": [
@@ -6312,7 +6786,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-04": [
@@ -6321,7 +6796,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-05": [
@@ -6330,7 +6806,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-06": [
@@ -6339,7 +6816,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-07": [
@@ -6348,7 +6826,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-08": [
@@ -6357,7 +6836,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-09": [
@@ -6366,7 +6846,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-10": [
@@ -6375,7 +6856,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-11": [
@@ -6384,7 +6866,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-12": [
@@ -6393,7 +6876,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-13": [
@@ -6402,7 +6886,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-14": [
@@ -6411,7 +6896,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-15": [
@@ -6420,7 +6906,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-16": [
@@ -6429,7 +6916,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-17": [
@@ -6438,7 +6926,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-18": [
@@ -6447,7 +6936,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-19": [
@@ -6456,7 +6946,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-20": [
@@ -6465,7 +6956,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-21": [
@@ -6474,7 +6966,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-22": [
@@ -6483,7 +6976,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-23": [
@@ -6492,7 +6986,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "s6-24": [
@@ -6501,7 +6996,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ],
         "lone-00": [
@@ -6510,14 +7006,16 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           },
           {
             "id": "lone-00/2",
             "cell": 0,
             "ref": 2,
             "admitted": 6,
-            "delivered": 6
+            "receipted": 6,
+            "delivered": true
           }
         ]
       },
@@ -7276,7 +7774,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "big1-01": [
@@ -7285,7 +7784,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "big1-02": [
@@ -7294,7 +7794,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "big1-03": [
@@ -7303,7 +7804,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "big1-04": [
@@ -7312,7 +7814,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "big1-05": [
@@ -7321,7 +7824,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "big1-06": [
@@ -7330,7 +7834,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "big1-07": [
@@ -7339,7 +7844,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "big1-08": [
@@ -7348,7 +7854,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "big1-09": [
@@ -7357,7 +7864,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "big1-10": [
@@ -7366,7 +7874,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "big1-11": [
@@ -7375,7 +7884,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "big1-12": [
@@ -7384,7 +7894,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "big1-13": [
@@ -7393,7 +7904,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "big1-14": [
@@ -7402,7 +7914,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "big1-15": [
@@ -7411,7 +7924,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "big1-16": [
@@ -7420,7 +7934,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "big1-17": [
@@ -7429,7 +7944,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "big1-18": [
@@ -7438,7 +7954,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "big1-19": [
@@ -7447,7 +7964,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "big1-20": [
@@ -7456,7 +7974,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "big1-21": [
@@ -7465,7 +7984,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "big1-22": [
@@ -7474,7 +7994,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "big1-23": [
@@ -7483,7 +8004,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "big1-24": [
@@ -7492,7 +8014,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "big1-25": [
@@ -7501,7 +8024,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "big1-26": [
@@ -7510,7 +8034,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "big1-27": [
@@ -7519,7 +8044,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "big1-28": [
@@ -7528,7 +8054,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "big1-29": [
@@ -7537,7 +8064,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "big2-00": [
@@ -7546,7 +8074,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "big2-01": [
@@ -7555,7 +8084,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "big2-02": [
@@ -7564,7 +8094,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "big2-03": [
@@ -7573,7 +8104,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "big2-04": [
@@ -7582,7 +8114,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "big2-05": [
@@ -7591,7 +8124,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "big2-06": [
@@ -7600,7 +8134,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "big2-07": [
@@ -7609,7 +8144,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "big2-08": [
@@ -7618,7 +8154,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "big2-09": [
@@ -7627,7 +8164,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "big2-10": [
@@ -7636,7 +8174,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "big2-11": [
@@ -7645,7 +8184,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "big2-12": [
@@ -7654,7 +8194,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "big2-13": [
@@ -7663,7 +8204,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "big2-14": [
@@ -7672,7 +8214,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "big2-15": [
@@ -7681,7 +8224,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "big2-16": [
@@ -7690,7 +8234,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "big2-17": [
@@ -7699,7 +8244,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "big2-18": [
@@ -7708,7 +8254,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "big2-19": [
@@ -7717,7 +8264,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "big2-20": [
@@ -7726,7 +8274,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "big2-21": [
@@ -7735,7 +8284,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "big2-22": [
@@ -7744,7 +8294,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "big2-23": [
@@ -7753,7 +8304,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "big2-24": [
@@ -7762,7 +8314,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "big2-25": [
@@ -7771,7 +8324,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "big2-26": [
@@ -7780,7 +8334,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "big2-27": [
@@ -7789,7 +8344,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "big2-28": [
@@ -7798,7 +8354,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "big2-29": [
@@ -7807,7 +8364,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "big3-00": [
@@ -7816,7 +8374,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "big3-01": [
@@ -7825,7 +8384,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "big3-02": [
@@ -7834,7 +8394,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "big3-03": [
@@ -7843,7 +8404,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "big3-04": [
@@ -7852,7 +8414,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "big3-05": [
@@ -7861,7 +8424,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "big3-06": [
@@ -7870,7 +8434,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "big3-07": [
@@ -7879,7 +8444,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "big3-08": [
@@ -7888,7 +8454,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "big3-09": [
@@ -7897,7 +8464,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "big3-10": [
@@ -7906,7 +8474,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "big3-11": [
@@ -7915,7 +8484,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "big3-12": [
@@ -7924,7 +8494,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "big3-13": [
@@ -7933,7 +8504,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "big3-14": [
@@ -7942,7 +8514,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "big3-15": [
@@ -7951,7 +8524,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "big3-16": [
@@ -7960,7 +8534,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "big3-17": [
@@ -7969,7 +8544,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "big3-18": [
@@ -7978,7 +8554,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "big3-19": [
@@ -7987,7 +8564,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "big3-20": [
@@ -7996,7 +8574,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "big3-21": [
@@ -8005,7 +8584,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "big3-22": [
@@ -8014,7 +8594,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "big3-23": [
@@ -8023,7 +8604,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "big3-24": [
@@ -8032,7 +8614,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "big3-25": [
@@ -8041,7 +8624,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "big3-26": [
@@ -8050,7 +8634,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "big3-27": [
@@ -8059,7 +8644,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "big3-28": [
@@ -8068,7 +8654,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "big3-29": [
@@ -8077,7 +8664,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "big4-00": [
@@ -8086,7 +8674,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "big4-01": [
@@ -8095,7 +8684,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "big4-02": [
@@ -8104,7 +8694,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "big4-03": [
@@ -8113,7 +8704,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "big4-04": [
@@ -8122,7 +8714,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "big4-05": [
@@ -8131,7 +8724,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "big4-06": [
@@ -8140,7 +8734,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "big4-07": [
@@ -8149,7 +8744,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "big4-08": [
@@ -8158,7 +8754,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "big4-09": [
@@ -8167,7 +8764,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "big4-10": [
@@ -8176,7 +8774,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "big4-11": [
@@ -8185,7 +8784,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "big4-12": [
@@ -8194,7 +8794,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "big4-13": [
@@ -8203,7 +8804,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "big4-14": [
@@ -8212,7 +8814,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "big4-15": [
@@ -8221,7 +8824,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "big4-16": [
@@ -8230,7 +8834,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "big4-17": [
@@ -8239,7 +8844,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "big4-18": [
@@ -8248,7 +8854,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "big4-19": [
@@ -8257,7 +8864,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "big4-20": [
@@ -8266,7 +8874,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "big4-21": [
@@ -8275,7 +8884,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "big4-22": [
@@ -8284,7 +8894,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "big4-23": [
@@ -8293,7 +8904,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "big4-24": [
@@ -8302,7 +8914,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "big4-25": [
@@ -8311,7 +8924,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "big4-26": [
@@ -8320,7 +8934,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "big4-27": [
@@ -8329,7 +8944,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "big4-28": [
@@ -8338,7 +8954,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "big4-29": [
@@ -8347,7 +8964,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "big5-00": [
@@ -8356,7 +8974,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "big5-01": [
@@ -8365,7 +8984,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "big5-02": [
@@ -8374,7 +8994,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "big5-03": [
@@ -8383,7 +9004,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "big5-04": [
@@ -8392,7 +9014,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "big5-05": [
@@ -8401,7 +9024,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "big5-06": [
@@ -8410,7 +9034,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "big5-07": [
@@ -8419,7 +9044,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "big5-08": [
@@ -8428,7 +9054,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "big5-09": [
@@ -8437,7 +9064,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "big5-10": [
@@ -8446,7 +9074,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "big5-11": [
@@ -8455,7 +9084,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "big5-12": [
@@ -8464,7 +9094,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "big5-13": [
@@ -8473,7 +9104,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "big5-14": [
@@ -8482,7 +9114,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "big5-15": [
@@ -8491,7 +9124,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "big5-16": [
@@ -8500,7 +9134,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "big5-17": [
@@ -8509,7 +9144,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "big5-18": [
@@ -8518,7 +9154,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "big5-19": [
@@ -8527,7 +9164,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "big5-20": [
@@ -8536,7 +9174,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "big5-21": [
@@ -8545,7 +9184,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "big5-22": [
@@ -8554,7 +9194,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "big5-23": [
@@ -8563,7 +9204,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "big5-24": [
@@ -8572,7 +9214,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "big5-25": [
@@ -8581,7 +9224,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "big5-26": [
@@ -8590,7 +9234,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "big5-27": [
@@ -8599,7 +9244,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "big5-28": [
@@ -8608,7 +9254,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "big5-29": [
@@ -8617,7 +9264,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "small-00": [
@@ -8626,7 +9274,8 @@
             "cell": 1,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "small-01": [
@@ -8635,7 +9284,8 @@
             "cell": 1,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "small-02": [
@@ -8644,7 +9294,8 @@
             "cell": 1,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "small-03": [
@@ -8653,7 +9304,8 @@
             "cell": 1,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "small-04": [
@@ -8662,7 +9314,8 @@
             "cell": 1,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "small-05": [
@@ -8671,7 +9324,8 @@
             "cell": 1,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "small-06": [
@@ -8680,7 +9334,8 @@
             "cell": 1,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "small-07": [
@@ -8689,7 +9344,8 @@
             "cell": 1,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "small-08": [
@@ -8698,7 +9354,8 @@
             "cell": 1,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "small-09": [
@@ -8707,7 +9364,8 @@
             "cell": 1,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "small-10": [
@@ -8716,7 +9374,8 @@
             "cell": 1,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "small-11": [
@@ -8725,7 +9384,8 @@
             "cell": 1,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "small-mid-00": [
@@ -8734,7 +9394,8 @@
             "cell": 1,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "small-mid-01": [
@@ -8743,7 +9404,8 @@
             "cell": 1,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "small-mid-02": [
@@ -8752,7 +9414,8 @@
             "cell": 1,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "small-mid-03": [
@@ -8761,7 +9424,8 @@
             "cell": 1,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "small-mid-04": [
@@ -8770,7 +9434,8 @@
             "cell": 1,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "small-mid-05": [
@@ -8779,7 +9444,8 @@
             "cell": 1,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "small-mid-06": [
@@ -8788,7 +9454,8 @@
             "cell": 1,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "small-mid-07": [
@@ -8797,7 +9464,8 @@
             "cell": 1,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "small-mid-08": [
@@ -8806,7 +9474,8 @@
             "cell": 1,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "small-mid-09": [
@@ -8815,7 +9484,8 @@
             "cell": 1,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "small-mid-10": [
@@ -8824,7 +9494,8 @@
             "cell": 1,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "small-mid-11": [
@@ -8833,7 +9504,8 @@
             "cell": 1,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "small-late-00": [
@@ -8842,7 +9514,8 @@
             "cell": 1,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "small-late-01": [
@@ -8851,7 +9524,8 @@
             "cell": 1,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "small-late-02": [
@@ -8860,7 +9534,8 @@
             "cell": 1,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "small-late-03": [
@@ -8869,7 +9544,8 @@
             "cell": 1,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "small-late-04": [
@@ -8878,7 +9554,8 @@
             "cell": 1,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "small-late-05": [
@@ -8887,7 +9564,8 @@
             "cell": 1,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "small-late-06": [
@@ -8896,7 +9574,8 @@
             "cell": 1,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "small-late-07": [
@@ -8905,7 +9584,8 @@
             "cell": 1,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "small-late-08": [
@@ -8914,7 +9594,8 @@
             "cell": 1,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "small-late-09": [
@@ -8923,7 +9604,8 @@
             "cell": 1,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "small-late-10": [
@@ -8932,7 +9614,8 @@
             "cell": 1,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "small-late-11": [
@@ -8941,7 +9624,8 @@
             "cell": 1,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "small-late-12": [
@@ -8950,7 +9634,8 @@
             "cell": 1,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "small-late-13": [
@@ -8959,7 +9644,8 @@
             "cell": 1,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "small-late-14": [
@@ -8968,7 +9654,8 @@
             "cell": 1,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "small-late-15": [
@@ -8977,7 +9664,8 @@
             "cell": 1,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "small-late-16": [
@@ -8986,7 +9674,8 @@
             "cell": 1,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "small-late-17": [
@@ -8995,7 +9684,8 @@
             "cell": 1,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "small-late-18": [
@@ -9004,7 +9694,8 @@
             "cell": 1,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ],
         "small-late-19": [
@@ -9013,7 +9704,8 @@
             "cell": 1,
             "ref": 1,
             "admitted": 5,
-            "delivered": 5
+            "receipted": 5,
+            "delivered": true
           }
         ]
       },
@@ -9927,7 +10619,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "q-01": [
@@ -9936,7 +10629,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "q-02": [
@@ -9945,7 +10639,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "q-03": [
@@ -9954,7 +10649,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "q-04": [
@@ -9963,7 +10659,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "q-05": [
@@ -9972,7 +10669,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "q-06": [
@@ -9981,7 +10679,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "q-07": [
@@ -9990,7 +10689,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "q-08": [
@@ -9999,7 +10699,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "q-09": [
@@ -10008,7 +10709,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "q-10": [
@@ -10017,7 +10719,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "q-11": [
@@ -10026,7 +10729,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "q-12": [
@@ -10035,7 +10739,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "q-13": [
@@ -10044,7 +10749,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "q-14": [
@@ -10053,7 +10759,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "q-15": [
@@ -10062,7 +10769,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "q-16": [
@@ -10071,7 +10779,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "q-17": [
@@ -10080,7 +10789,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "q-18": [
@@ -10089,7 +10799,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "q-19": [
@@ -10098,7 +10809,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "q-20": [
@@ -10107,7 +10819,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "r-00": [
@@ -10116,7 +10829,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "r-01": [
@@ -10125,7 +10839,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "r-02": [
@@ -10134,7 +10849,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s-00": [
@@ -10143,7 +10859,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s-01": [
@@ -10152,7 +10869,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s-02": [
@@ -10161,7 +10879,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "t-00": [
@@ -10170,7 +10889,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "t-01": [
@@ -10179,7 +10899,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "t-02": [
@@ -10188,7 +10909,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "t-03": [
@@ -10197,7 +10919,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "t-04": [
@@ -10206,7 +10929,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "t-05": [
@@ -10215,7 +10939,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "t-06": [
@@ -10224,7 +10949,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "t-07": [
@@ -10233,7 +10959,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "t-08": [
@@ -10242,7 +10969,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "t-09": [
@@ -10251,7 +10979,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "t-10": [
@@ -10260,7 +10989,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "t-11": [
@@ -10269,7 +10999,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "t-12": [
@@ -10278,7 +11009,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "t-13": [
@@ -10287,7 +11019,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "t-14": [
@@ -10296,7 +11029,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "t-15": [
@@ -10305,7 +11039,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "t-16": [
@@ -10314,7 +11049,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "t-17": [
@@ -10323,7 +11059,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "t-18": [
@@ -10332,7 +11069,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "t-19": [
@@ -10341,7 +11079,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "t-20": [
@@ -10350,7 +11089,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "t-21": [
@@ -10359,7 +11099,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "t-22": [
@@ -10368,7 +11109,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "t-23": [
@@ -10377,7 +11119,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "t-24": [
@@ -10386,7 +11129,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "t-25": [
@@ -10395,7 +11139,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "t-26": [
@@ -10404,7 +11149,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "t-27": [
@@ -10413,7 +11159,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "t-28": [
@@ -10422,7 +11169,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "t-29": [
@@ -10431,7 +11179,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "t-30": [
@@ -10440,7 +11189,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "t-31": [
@@ -10449,7 +11199,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "t-32": [
@@ -10458,7 +11209,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "t-33": [
@@ -10467,7 +11219,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "t-34": [
@@ -10476,7 +11229,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "t-35": [
@@ -10485,7 +11239,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "t-36": [
@@ -10494,7 +11249,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "t-37": [
@@ -10503,7 +11259,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "t-38": [
@@ -10512,7 +11269,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ],
         "t-39": [
@@ -10521,7 +11279,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 4,
-            "delivered": 4
+            "receipted": 4,
+            "delivered": true
           }
         ]
       },
@@ -10899,7 +11658,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-01": [
@@ -10908,7 +11668,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-02": [
@@ -10917,7 +11678,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-03": [
@@ -10926,7 +11688,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-04": [
@@ -10935,7 +11698,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-05": [
@@ -10944,7 +11708,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-06": [
@@ -10953,7 +11718,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-07": [
@@ -10962,7 +11728,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-08": [
@@ -10971,7 +11738,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-09": [
@@ -10980,7 +11748,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-10": [
@@ -10989,7 +11758,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-11": [
@@ -10998,7 +11768,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-12": [
@@ -11007,7 +11778,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-13": [
@@ -11016,7 +11788,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-14": [
@@ -11025,7 +11798,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-15": [
@@ -11034,7 +11808,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-16": [
@@ -11043,7 +11818,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-17": [
@@ -11052,7 +11828,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-18": [
@@ -11061,7 +11838,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-19": [
@@ -11070,7 +11848,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-20": [
@@ -11079,7 +11858,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-21": [
@@ -11088,7 +11868,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-22": [
@@ -11097,7 +11878,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-23": [
@@ -11106,7 +11888,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s1-24": [
@@ -11115,7 +11898,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 1,
-            "delivered": 1
+            "receipted": 1,
+            "delivered": true
           }
         ],
         "s2-00": [
@@ -11124,7 +11908,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-01": [
@@ -11133,7 +11918,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-02": [
@@ -11142,7 +11928,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-03": [
@@ -11151,7 +11938,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-04": [
@@ -11160,7 +11948,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-05": [
@@ -11169,7 +11958,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-06": [
@@ -11178,7 +11968,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-07": [
@@ -11187,7 +11978,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-08": [
@@ -11196,7 +11988,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-09": [
@@ -11205,7 +11998,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-10": [
@@ -11214,7 +12008,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-11": [
@@ -11223,7 +12018,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-12": [
@@ -11232,7 +12028,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-13": [
@@ -11241,7 +12038,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-14": [
@@ -11250,7 +12048,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-15": [
@@ -11259,7 +12058,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-16": [
@@ -11268,7 +12068,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-17": [
@@ -11277,7 +12078,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-18": [
@@ -11286,7 +12088,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-19": [
@@ -11295,7 +12098,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-20": [
@@ -11304,7 +12108,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-21": [
@@ -11313,7 +12118,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-22": [
@@ -11322,7 +12128,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-23": [
@@ -11331,7 +12138,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s2-24": [
@@ -11340,7 +12148,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 2,
-            "delivered": 2
+            "receipted": 2,
+            "delivered": true
           }
         ],
         "s3-00": [
@@ -11349,7 +12158,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-01": [
@@ -11358,7 +12168,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-02": [
@@ -11367,7 +12178,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-03": [
@@ -11376,7 +12188,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-04": [
@@ -11385,7 +12198,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-05": [
@@ -11394,7 +12208,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-06": [
@@ -11403,7 +12218,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-07": [
@@ -11412,7 +12228,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-08": [
@@ -11421,7 +12238,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-09": [
@@ -11430,7 +12248,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-10": [
@@ -11439,7 +12258,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-11": [
@@ -11448,7 +12268,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-12": [
@@ -11457,7 +12278,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-13": [
@@ -11466,7 +12288,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-14": [
@@ -11475,7 +12298,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-15": [
@@ -11484,7 +12308,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-16": [
@@ -11493,7 +12318,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-17": [
@@ -11502,7 +12328,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-18": [
@@ -11511,7 +12338,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-19": [
@@ -11520,7 +12348,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-20": [
@@ -11529,7 +12358,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-21": [
@@ -11538,7 +12368,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-22": [
@@ -11547,7 +12378,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-23": [
@@ -11556,7 +12388,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ],
         "s3-24": [
@@ -11565,7 +12398,8 @@
             "cell": 0,
             "ref": 1,
             "admitted": 3,
-            "delivered": 3
+            "receipted": 3,
+            "delivered": true
           }
         ]
       },

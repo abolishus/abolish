@@ -91,7 +91,8 @@ const row = (r: Report, id: string) => {
   return { status, ...(code !== undefined && { code }), ...(at !== undefined && { at }) };
 };
 
-describe("5.8 over the vectors' admitted ballots", () => {
+// Each test verifies a whole board, at about a second a run on CI's shared runner.
+describe("5.8 over the vectors' admitted ballots", { timeout: 30_000 }, () => {
   const admitted = byId("admitted");
 
   test("a window starting after every named block rejects each l1-ref-before-open, by number alone", () => {
@@ -194,7 +195,7 @@ describe("5.8 over the vectors' admitted ballots", () => {
   });
 });
 
-describe("5.8 runs before 5.7", () => {
+describe("5.8 runs before 5.7", { timeout: 30_000 }, () => {
   const mixed = byId("mixed");
 
   test("a copy of a rejected reference is rejected by 5.8, never as a repeat", () => {

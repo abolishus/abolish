@@ -10,7 +10,7 @@
 // never a pass over a set that isn't final (T-33, T-38, T-45, T-53).
 
 import { type AnchorClock, selectBallots } from "@abolishus/crypto";
-import type { CountedCandidate } from "./ballots.ts";
+import { ALL_ROWS, type CountedCandidate } from "./ballots.ts";
 
 /** One ballot entry, by its position in the copy, from 0. */
 export interface SelectedBallot {
@@ -49,15 +49,12 @@ export interface SelectionInputs {
   readonly floor: bigint;
 }
 
-// The admission rows a format-5 bundle settles; under format 4, 5.8 never
-// runs, so selection is never reached there.
-const ADMISSION_ROWS = ["5.1", "5.2", "5.3", "5.4", "5.5", "5.7", "5.8"] as const;
-
 /** Whether every admission row is present and passed or failed (condition 1). */
 export function admissionSettled(
   rows: ReadonlyMap<string, { readonly status: "pass" | "fail" | "unverifiable" }>,
 ): boolean {
-  return ADMISSION_ROWS.every((id) => {
+  // Under format 4, 5.8 never runs, so selection is never reached there.
+  return ALL_ROWS.every((id) => {
     const o = rows.get(id);
     return o !== undefined && o.status !== "unverifiable";
   });

@@ -134,7 +134,8 @@ export interface BallotOutcome {
 }
 
 const ROWS = ["5.1", "5.2", "5.3", "5.4"] as const;
-const ALL_ROWS = [...ROWS, "5.5", "5.7", "5.8"] as const;
+/** Every admission row a format-5 bundle reports, in the spec's order; selection (6.1) needs each settled. */
+export const ALL_ROWS = [...ROWS, "5.5", "5.7", "5.8"] as const;
 
 // The rows each admission code fails (docs/spec/verifier.md, Ballot
 // admission). A membership proof is checked once against [ρ, ν, m̂, ŝ], so

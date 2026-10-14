@@ -221,6 +221,45 @@
           "receipted": 1,
           "delivered": true
         }
+      ],
+      "pending-first": [
+        {
+          "id": "pending-first/1",
+          "cell": 0,
+          "ref": 1,
+          "admitted": 3,
+          "receipted": 1,
+          "delivered": true,
+          "boarded": 1
+        },
+        {
+          "id": "pending-first/2",
+          "cell": 0,
+          "ref": 2,
+          "admitted": 2,
+          "receipted": 2,
+          "delivered": true
+        }
+      ],
+      "rejected-first": [
+        {
+          "id": "rejected-first/1",
+          "cell": 0,
+          "ref": 1,
+          "admitted": null,
+          "receipted": null,
+          "delivered": false,
+          "boarded": 1,
+          "rejected": 3
+        },
+        {
+          "id": "rejected-first/2",
+          "cell": 0,
+          "ref": 2,
+          "admitted": 2,
+          "receipted": 2,
+          "delivered": true
+        }
       ]
     },
     "cells": [
@@ -247,6 +286,7 @@
             "late-receipts": "late-receipts/1",
             "pending-revote": "pending-revote/1",
             "plain": "plain/1",
+            "rejected-first": "rejected-first/2",
             "revoter": "revoter/1",
             "tie-after": "tie-after/1",
             "two-cells": "two-cells/1"
@@ -256,6 +296,7 @@
             "late-receipts": "late-receipts/1",
             "pending-revote": "pending-revote/1",
             "plain": "plain/1",
+            "rejected-first": "rejected-first/2",
             "revoter": "revoter/1",
             "tie-after": "tie-after/1",
             "two-cells": "two-cells/1"
@@ -264,9 +305,11 @@
         "finalBallots": {
           "admitted-later": "admitted-later/1",
           "late-receipts": "late-receipts/1",
+          "pending-first": "pending-first/2",
           "pending-revote": "pending-revote/2",
           "plain": "plain/1",
           "posted-valid": "posted-valid/1",
+          "rejected-first": "rejected-first/2",
           "revoter": "revoter/2",
           "unreceipted-first": "unreceipted-first/2"
         }
@@ -12768,6 +12811,7 @@
         "a": ["a/1"],
         "b": ["b/1"]
       },
+      "pending": {},
       "earlier": [],
       "result": {
         "refuse": null
@@ -12783,6 +12827,7 @@
       "boarded": {
         "a": ["a/1"]
       },
+      "pending": {},
       "earlier": [],
       "result": {
         "refuse": "b/1"
@@ -12798,6 +12843,7 @@
       "boarded": {
         "v": ["v/2"]
       },
+      "pending": {},
       "earlier": [],
       "result": {
         "refuse": "v/1"
@@ -12810,6 +12856,7 @@
       "boarded": {
         "v": ["v/1"]
       },
+      "pending": {},
       "earlier": ["v"],
       "result": {
         "refuse": null
@@ -12822,6 +12869,7 @@
       "boarded": {
         "v": ["v/2", "v/3"]
       },
+      "pending": {},
       "earlier": [],
       "result": {
         "refuse": null
@@ -12834,9 +12882,25 @@
       "boarded": {
         "v": ["v/2"]
       },
+      "pending": {},
       "earlier": [],
       "result": {
         "refuse": "v/1"
+      }
+    },
+    {
+      "id": "withheld-beside-pending",
+      "description": "A ballot is missing beside one admitted and one pending ballot of its nullifier, which is held out either way: pass.",
+      "receipted": [["v/1", "v"]],
+      "boarded": {
+        "v": ["v/2"]
+      },
+      "pending": {
+        "v": ["v/3"]
+      },
+      "earlier": [],
+      "result": {
+        "refuse": null
       }
     }
   ]

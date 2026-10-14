@@ -57,19 +57,34 @@ def scheduled_snapshots(epoch, period, opens_at, closes_at, live_every):
 #
 # Each nullifier of a tier is given as its distinct ballots (repeats are one
 # ballot), each with the cell it names, its L1 reference's block number
-# (`ref`), and the first scheduled snapshot index at which it is admitted and
+# (`ref`), the first scheduled snapshot index at which it is in the snapshot
+# (`boarded`, the same as `admitted` when absent), at which it is rejected
+# (`rejected`, absent if never), at which it is admitted and
 # at which every qualified seat of every panel has a passing receipt for it
 # (`receipted`); None: never by the last snapshot. `delivered` is false for a
 # ballot the delivery check excludes at the final tally (no receipt or
 # passing posting for some seat by the deadline, or a proven complaint).
 
 
+def status(b, r):
+    """A ballot's admission at snapshot r: absent, pending, admitted or rejected."""
+    boarded = b.get("boarded", b["admitted"])
+    if boarded is None or boarded > r:
+        return "absent"
+    if b["admitted"] is not None and b["admitted"] <= r:
+        return "admitted"
+    if b.get("rejected") is not None and b["rejected"] <= r:
+        return "rejected"
+    return "pending"
+
+
 def entering(ballots, r):
-    """Conditions 1 and 2 at snapshot r: the one ballot that enters, or None."""
-    admitted = [b for b in ballots if b["admitted"] is not None and b["admitted"] <= r]
-    if len(admitted) != 1:
+    """Conditions 1 and 2 at snapshot r: the one ballot that enters, or None.
+    Pending ballots count towards the nullifier's distinct ballots."""
+    live = [b for b in ballots if status(b, r) in ("admitted", "pending")]
+    if len(live) != 1 or status(live[0], r) != "admitted":
         return None
-    b = admitted[0]
+    b = live[0]
     if b["receipted"] is None or b["receipted"] > r:
         return None
     return b
@@ -303,10 +318,11 @@ def voters(prefix, count, enter, cell=0, revote=None, tie=False):
 # The completeness check (tally.md, Live results: What a node does).
 
 
-def completeness(receipted, boarded, earlier):
+def completeness(receipted, boarded, earlier, pending=None):
     """receipted: the ballots the node receipted in a period before sigma_q,
     each [ballot, nullifier]; boarded: per nullifier, the distinct admitted
-    ballots in S_q whose node receipts are boarded too; earlier: nullifiers in
+    ballots in S_q whose node receipts are boarded too; pending: per nullifier,
+    the distinct pending ballots in S_q; earlier: nullifiers in
     a running set of the tier at an earlier snapshot. The first missing
     ballot whose absence could change R_q refuses."""
     for ballot, nid in receipted:
@@ -314,7 +330,8 @@ def completeness(receipted, boarded, earlier):
             continue
         if nid in earlier:
             continue
-        if len([x for x in boarded.get(nid, []) if x != ballot]) >= 2:
+        others = [x for x in boarded.get(nid, []) + (pending or {}).get(nid, []) if x != ballot]
+        if len(others) >= 2:
             continue
         return {"refuse": ballot}
     return {"refuse": None}
@@ -403,6 +420,14 @@ def main():
             ballot("unreceipted-first", 2, admitted=3, receipted=3),
         ],
         "admitted-later": [ballot("admitted-later", 1, admitted=2, receipted=1)],
+        "pending-first": [
+            dict(ballot("pending-first", 1, admitted=3), boarded=1),
+            ballot("pending-first", 2, admitted=2, receipted=2),
+        ],
+        "rejected-first": [
+            dict(ballot("rejected-first", 1, admitted=None, receipted=None), boarded=1, rejected=3),
+            ballot("rejected-first", 2, admitted=2, receipted=2),
+        ],
     }
     rs = running_sets(rs_nullifiers, 4, 2)
     running = {
@@ -519,15 +544,27 @@ def main():
     ]
 
     checks = []
-    for name, note, receipted, boarded, earlier in [
+    for name, note, receipted, boarded, earlier, *pending in [
         ("all-present", "Every ballot the node receipted is boarded with its receipt.", [["a/1", "a"], ["b/1", "b"]], {"a": ["a/1"], "b": ["b/1"]}, []),
         ("withheld", "A receipted ballot is missing and its nullifier has no other ballot: refuse.", [["a/1", "a"], ["b/1", "b"]], {"a": ["a/1"]}, []),
         ("withheld-first-revote-boarded", "The first ballot is withheld and its re-vote boarded, which would enter the release alone: refuse.", [["v/1", "v"], ["v/2", "v"]], {"v": ["v/2"]}, []),
         ("withheld-after-entering", "A re-vote is missing, but the nullifier entered at an earlier snapshot with its first ballot, which it keeps: pass.", [["v/2", "v"]], {"v": ["v/1"]}, ["v"]),
         ("withheld-beside-two", "A ballot is missing, but two other distinct ballots of its nullifier are boarded, so it is held out either way: pass.", [["v/1", "v"]], {"v": ["v/2", "v/3"]}, []),
         ("withheld-beside-one", "A ballot is missing beside one other ballot of its nullifier, which would enter alone: refuse.", [["v/1", "v"]], {"v": ["v/2"]}, []),
+        ("withheld-beside-pending", "A ballot is missing beside one admitted and one pending ballot of its nullifier, which is held out either way: pass.", [["v/1", "v"]], {"v": ["v/2"]}, [], {"v": ["v/3"]}),
     ]:
-        checks.append({"id": name, "description": note, "receipted": receipted, "boarded": boarded, "earlier": earlier, "result": completeness(receipted, boarded, earlier)})
+        pend = pending[0] if pending else {}
+        checks.append(
+            {
+                "id": name,
+                "description": note,
+                "receipted": receipted,
+                "boarded": boarded,
+                "pending": pend,
+                "earlier": earlier,
+                "result": completeness(receipted, boarded, earlier, pend),
+            }
+        )
 
     doc = {
         "format": "abolish-live-release-vectors/1",

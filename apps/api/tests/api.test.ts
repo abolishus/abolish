@@ -751,33 +751,53 @@ describe("transport", () => {
     expect(() => createApiServer({ sql: app, log: () => {}, maxInFlight: 0 })).toThrow(RangeError);
   });
 
-  test("an idle client loses its slot: a stalled upload or an unread answer (T-52)", async () => {
-    const capped = createApiServer({ sql: app, log: () => {}, maxInFlight: 1, idleTimeoutMs: 300 });
-    await new Promise<void>((r) => capped.listen(0, "127.0.0.1", r));
-    const port = (capped.address() as AddressInfo).port;
-    const url = `http://127.0.0.1:${port}`;
-    const e = await election(9, 1_000_000);
-    const head = () => fetch(`${url}/board/head?electionId=${e.idHex}`).then((r) => r.status);
-    const stalls = [
-      // Headers and one byte of a body, then nothing.
-      `POST /ballots HTTP/1.1\r\nhost: x\r\ncontent-type: application/json\r\ntransfer-encoding: chunked\r\n\r\n1\r\n{\r\n`,
-      // An 8 MB page the client never reads.
-      `GET /board/entries?electionId=${e.idHex}&start=0&limit=256 HTTP/1.1\r\nhost: x\r\n\r\n`,
-    ];
-    for (const stall of stalls) {
-      const socket = connect(port, "127.0.0.1");
-      socket.on("error", () => {});
-      socket.write(stall);
-      socket.pause();
-      await new Promise((r) => setTimeout(r, 100));
-      expect(await head()).toBe(503);
-      await new Promise((r) => setTimeout(r, 800));
-      expect(await head()).toBe(200);
-      socket.destroy();
-    }
-    capped.closeAllConnections();
-    await new Promise((r) => capped.close(r));
-  });
+  test(
+    "an idle client loses its slot: a stalled upload or an unread answer (T-52)",
+    // Two stalls, each polling up to 10 seconds for its slot (below).
+    { timeout: 30_000 },
+    async () => {
+      const capped = createApiServer({
+        sql: app,
+        log: () => {},
+        maxInFlight: 1,
+        idleTimeoutMs: 300,
+      });
+      await new Promise<void>((r) => capped.listen(0, "127.0.0.1", r));
+      const port = (capped.address() as AddressInfo).port;
+      const url = `http://127.0.0.1:${port}`;
+      const e = await election(9, 1_000_000);
+      const head = () => fetch(`${url}/board/head?electionId=${e.idHex}`).then((r) => r.status);
+      const stalls = [
+        // Headers and one byte of a body, then nothing.
+        `POST /ballots HTTP/1.1\r\nhost: x\r\ncontent-type: application/json\r\ntransfer-encoding: chunked\r\n\r\n1\r\n{\r\n`,
+        // An 8 MB page the client never reads.
+        `GET /board/entries?electionId=${e.idHex}&start=0&limit=256 HTTP/1.1\r\nhost: x\r\n\r\n`,
+      ];
+      for (const stall of stalls) {
+        const socket = connect(port, "127.0.0.1");
+        socket.on("error", () => {});
+        socket.write(stall);
+        socket.pause();
+        await new Promise((r) => setTimeout(r, 100));
+        expect(await head()).toBe(503);
+        // The idle timer starts only once the server stops making progress, and
+        // building the unread 8 MB page alone has taken over a second on CI's
+        // shared runners, so a fixed wait raced it. Poll instead, well inside the
+        // 60-second default deadline: a slot freed before that was freed by the
+        // idle timeout (300 ms here), never by the deadline.
+        const until = Date.now() + 10_000;
+        let status = await head();
+        while (status !== 200 && Date.now() < until) {
+          await new Promise((r) => setTimeout(r, 100));
+          status = await head();
+        }
+        expect(status).toBe(200);
+        socket.destroy();
+      }
+      capped.closeAllConnections();
+      await new Promise((r) => capped.close(r));
+    },
+  );
 
   test("a slow reader loses its slot at the deadline, however it trickles (T-52)", async () => {
     const capped = createApiServer({ sql: app, log: () => {}, maxInFlight: 1, deadlineMs: 500 });

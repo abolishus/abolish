@@ -319,14 +319,15 @@ def voters(prefix, count, enter, cell=0, revote=None, tie=False):
 
 
 def completeness(receipted, boarded, earlier, pending=None):
-    """receipted: the ballots the node receipted in a period before sigma_q,
-    each [ballot, nullifier]; boarded: per nullifier, the distinct admitted
+    """receipted: the ballots the node receipted that the operator owed in S_q
+    (on L2 in time, or with a forwarded board receipt in time), each
+    [ballot, nullifier, owed]; boarded: per nullifier, the distinct admitted
     ballots in S_q whose node receipts are boarded too; pending: per nullifier,
     the distinct pending ballots in S_q; earlier: nullifiers in
     a running set of the tier at an earlier snapshot. The first missing
     ballot whose absence could change R_q refuses."""
-    for ballot, nid in receipted:
-        if ballot in boarded.get(nid, []):
+    for ballot, nid, owed in receipted:
+        if not owed or ballot in boarded.get(nid, []):
             continue
         if nid in earlier:
             continue
@@ -545,13 +546,14 @@ def main():
 
     checks = []
     for name, note, receipted, boarded, earlier, *pending in [
-        ("all-present", "Every ballot the node receipted is boarded with its receipt.", [["a/1", "a"], ["b/1", "b"]], {"a": ["a/1"], "b": ["b/1"]}, []),
-        ("withheld", "A receipted ballot is missing and its nullifier has no other ballot: refuse.", [["a/1", "a"], ["b/1", "b"]], {"a": ["a/1"]}, []),
-        ("withheld-first-revote-boarded", "The first ballot is withheld and its re-vote boarded, which would enter the release alone: refuse.", [["v/1", "v"], ["v/2", "v"]], {"v": ["v/2"]}, []),
-        ("withheld-after-entering", "A re-vote is missing, but the nullifier entered at an earlier snapshot with its first ballot, which it keeps: pass.", [["v/2", "v"]], {"v": ["v/1"]}, ["v"]),
-        ("withheld-beside-two", "A ballot is missing, but two other distinct ballots of its nullifier are boarded, so it is held out either way: pass.", [["v/1", "v"]], {"v": ["v/2", "v/3"]}, []),
-        ("withheld-beside-one", "A ballot is missing beside one other ballot of its nullifier, which would enter alone: refuse.", [["v/1", "v"]], {"v": ["v/2"]}, []),
-        ("withheld-beside-pending", "A ballot is missing beside one admitted and one pending ballot of its nullifier, which is held out either way: pass.", [["v/1", "v"]], {"v": ["v/2"]}, [], {"v": ["v/3"]}),
+        ("all-present", "Every ballot the node receipted is boarded with its receipt.", [["a/1", "a", True], ["b/1", "b", True]], {"a": ["a/1"], "b": ["b/1"]}, []),
+        ("withheld", "A receipted ballot is missing and its nullifier has no other ballot: refuse.", [["a/1", "a", True], ["b/1", "b", True]], {"a": ["a/1"]}, []),
+        ("withheld-first-revote-boarded", "The first ballot is withheld and its re-vote boarded, which would enter the release alone: refuse.", [["v/1", "v", True], ["v/2", "v", True]], {"v": ["v/2"]}, []),
+        ("withheld-after-entering", "A re-vote is missing, but the nullifier entered at an earlier snapshot with its first ballot, which it keeps: pass.", [["v/2", "v", True]], {"v": ["v/1"]}, ["v"]),
+        ("withheld-beside-two", "A ballot is missing, but two other distinct ballots of its nullifier are boarded, so it is held out either way: pass.", [["v/1", "v", True]], {"v": ["v/2", "v/3"]}, []),
+        ("withheld-beside-one", "A ballot is missing beside one other ballot of its nullifier, which would enter alone: refuse.", [["v/1", "v", True]], {"v": ["v/2"]}, []),
+        ("intake-only", "A ballot the node receipted was delivered only to the seats' intake and never given to the board, so it isn't owed: pass.", [["a/1", "a", True], ["b/1", "b", False]], {"a": ["a/1"]}, []),
+        ("withheld-beside-pending", "A ballot is missing beside one admitted and one pending ballot of its nullifier, which is held out either way: pass.", [["v/1", "v", True]], {"v": ["v/2"]}, [], {"v": ["v/3"]}),
     ]:
         pend = pending[0] if pending else {}
         checks.append(

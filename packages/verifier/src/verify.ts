@@ -14,7 +14,8 @@
 // opening version 2 under definition versions 3 to 5) and
 // the tally openings' sorting, attribution and boarding breaches (7.4, as far
 // as they need no counted set; against the cells under definition versions 3
-// to 5) are implemented, and, for formats 3 to 5, 4.4's event check over
+// to 5) and, for format 5, selection (6.1, once the counted extent is fixed)
+// are implemented, and, for formats 3 to 5, 4.4's event check over
 // the board's contract-event records, which can fail 4.4 but never pass it;
 // every other check is reported unverifiable, so no run can report an
 // election verified yet. A run on unauthenticated inputs reports
@@ -55,7 +56,8 @@ import {
   type VerifiedDefinition,
 } from "./definition.ts";
 import { eventChecks, type EventCode } from "./events.ts";
-import { openingChecks, type OpeningCode, type OpeningReport } from "./openings.ts";
+import { countedFloor, openingChecks, type OpeningCode, type OpeningReport } from "./openings.ts";
+import { admissionSettled, selectionCheck } from "./selection.ts";
 import { type ReceiptKeyCode, receiptKeyRow } from "./receipt-keys.ts";
 import { tallyChecks, type TallyCode, type TallyReport } from "./tallies.ts";
 import {
@@ -79,6 +81,7 @@ export type CheckCode =
   | L1RefCode
   | "l1-ref-pending"
   | "l1-blocks-short"
+  | "not-sealed"
   | OpeningCode
   | TallyCode
   | ReceiptKeyCode
@@ -306,7 +309,10 @@ function fromDefinition(bundle: Bundle):
           ["6.2", NOT_REACHED],
           ["7.4", NOT_REACHED],
           ...(bundle.format === "abolish-verifier-bundle/5"
-            ? ([["5.8", NOT_REACHED]] satisfies [string, Outcome][])
+            ? ([
+                ["5.8", NOT_REACHED],
+                ["6.1", NOT_REACHED],
+              ] satisfies [string, Outcome][])
             : []),
         ] satisfies [string, Outcome][])
       : []),
@@ -553,6 +559,24 @@ export function verifyBundle(bundle: Bundle): Report {
       );
       implemented = new Map<string, Outcome>([...implemented, ...admission.rows]);
       ballots = admission.report;
+      // Selection is decided over the counted extent alone, so it needs what
+      // admission doesn't: the anchored extent, the seal and 4.4
+      // (docs/spec/verifier.md, Selection).
+      const chosen = selectionCheck({
+        admissionSettled: admissionSettled(admission.rows),
+        candidates: admission.candidates,
+        ordinary: admission.ordinary ?? [],
+        // Set only when 4.1 and 4.2 pass.
+        extent:
+          board.unauthenticated === undefined ? undefined : board.entries - board.unauthenticated,
+        eventsPass: implemented.get("4.4")?.status === "pass",
+        clock: bundle.clock,
+        now: input === undefined || input instanceof L1Error ? undefined : input.now,
+        floor: countedFloor(definition.definition.value.closes_at, bundle.clock),
+      });
+      implemented = new Map<string, Outcome>([...implemented, ["6.1", chosen.row]]);
+      if (ballots !== undefined && chosen.report !== undefined)
+        ballots = { ...ballots, ...chosen.report };
       // Sorting and attribution need only the definition and the registered
       // signing keys, so 7.4 runs wherever 3.2 passed, under definition
       // versions 3 to 5 against their cells (docs/spec/verifier.md, Tally

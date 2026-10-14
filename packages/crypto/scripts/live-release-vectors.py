@@ -318,23 +318,29 @@ def voters(prefix, count, enter, cell=0, revote=None, tie=False):
 # The completeness check (tally.md, Live results: What a node does).
 
 
-def completeness(receipted, boarded, earlier, pending=None):
-    """receipted: the ballots the node receipted that the operator owed in S_q
-    (on L2 in time, or with a forwarded board receipt in time), each
-    [ballot, nullifier, owed]; boarded: per nullifier, the distinct admitted
-    ballots in S_q whose node receipts are boarded too; pending: per nullifier,
-    the distinct pending ballots in S_q; earlier: nullifiers in
-    a running set of the tier at an earlier snapshot. The first missing
-    ballot whose absence could change R_q refuses."""
+def completeness(receipted, boarded, entered, pending=None):
+    """receipted: the ballots the node receipted, each [ballot, nullifier,
+    owed], owed when the operator owed it in S_q (on L2 in time, or with a
+    forwarded board receipt in time); boarded: per nullifier, the distinct
+    admitted ballots in S_q whose node receipts are boarded too; pending: per
+    nullifier, the distinct pending ballots in S_q; entered: per nullifier in
+    R_q, `since` (it entered after the last release this node signed) and
+    `missingAtEntry` (the node's receipted ballots of it owed at its entry
+    snapshot and missing from it). Entries are checked first, then quiet
+    intervals; the first failing ballot refuses."""
+    for nid in sorted(entered):
+        e = entered[nid]
+        if e["since"] and e["missingAtEntry"]:
+            return {"refuse": e["missingAtEntry"][0], "part": "entries"}
     for ballot, nid, owed in receipted:
         if not owed or ballot in boarded.get(nid, []):
             continue
-        if nid in earlier:
+        if nid in entered:
             continue
         others = [x for x in boarded.get(nid, []) + (pending or {}).get(nid, []) if x != ballot]
         if len(others) >= 2:
             continue
-        return {"refuse": ballot}
+        return {"refuse": ballot, "part": "quiet"}
     return {"refuse": None}
 
 
@@ -545,15 +551,18 @@ def main():
     ]
 
     checks = []
-    for name, note, receipted, boarded, earlier, *pending in [
-        ("all-present", "Every ballot the node receipted is boarded with its receipt.", [["a/1", "a", True], ["b/1", "b", True]], {"a": ["a/1"], "b": ["b/1"]}, []),
-        ("withheld", "A receipted ballot is missing and its nullifier has no other ballot: refuse.", [["a/1", "a", True], ["b/1", "b", True]], {"a": ["a/1"]}, []),
-        ("withheld-first-revote-boarded", "The first ballot is withheld and its re-vote boarded, which would enter the release alone: refuse.", [["v/1", "v", True], ["v/2", "v", True]], {"v": ["v/2"]}, []),
-        ("withheld-after-entering", "A re-vote is missing, but the nullifier entered at an earlier snapshot with its first ballot, which it keeps: pass.", [["v/2", "v", True]], {"v": ["v/1"]}, ["v"]),
-        ("withheld-beside-two", "A ballot is missing, but two other distinct ballots of its nullifier are boarded, so it is held out either way: pass.", [["v/1", "v", True]], {"v": ["v/2", "v/3"]}, []),
-        ("withheld-beside-one", "A ballot is missing beside one other ballot of its nullifier, which would enter alone: refuse.", [["v/1", "v", True]], {"v": ["v/2"]}, []),
-        ("intake-only", "A ballot the node receipted was delivered only to the seats' intake and never given to the board, so it isn't owed: pass.", [["a/1", "a", True], ["b/1", "b", False]], {"a": ["a/1"]}, []),
-        ("withheld-beside-pending", "A ballot is missing beside one admitted and one pending ballot of its nullifier, which is held out either way: pass.", [["v/1", "v", True]], {"v": ["v/2"]}, [], {"v": ["v/3"]}),
+    clean = {"since": False, "missingAtEntry": []}
+    for name, note, receipted, boarded, entered, *pending in [
+        ("all-present", "Every ballot the node receipted is boarded with its receipt.", [["a/1", "a", True], ["b/1", "b", True]], {"a": ["a/1"], "b": ["b/1"]}, {}),
+        ("withheld", "A receipted ballot is missing and its nullifier has no other ballot: refuse.", [["a/1", "a", True], ["b/1", "b", True]], {"a": ["a/1"]}, {}),
+        ("withheld-first-revote-boarded", "The first ballot is withheld and its re-vote boarded, which would enter the release alone: refuse.", [["v/1", "v", True], ["v/2", "v", True]], {"v": ["v/2"]}, {}),
+        ("revote-entered-unreleased", "At an unreleased snapshot the first ballot, owed there, was withheld and the re-vote entered alone; the entries part refuses.", [["v/1", "v", True], ["v/2", "v", True]], {"v": ["v/2"]}, {"v": {"since": True, "missingAtEntry": ["v/1"]}}),
+        ("entry-clean", "A nullifier entered since the last release with nothing owed missing at its entry, and its later re-vote is withheld: pass.", [["v/2", "v", True]], {"v": ["v/1"]}, {"v": {"since": True, "missingAtEntry": []}}),
+        ("withheld-after-entering", "A re-vote is missing, but the nullifier entered at an earlier release with its first ballot, which it keeps: pass.", [["v/2", "v", True]], {"v": ["v/1"]}, {"v": clean}),
+        ("withheld-beside-two", "A ballot is missing, but two other distinct ballots of its nullifier are boarded, so it is held out either way: pass.", [["v/1", "v", True]], {"v": ["v/2", "v/3"]}, {}),
+        ("withheld-beside-one", "A ballot is missing beside one other ballot of its nullifier, which would enter alone: refuse.", [["v/1", "v", True]], {"v": ["v/2"]}, {}),
+        ("intake-only", "A ballot the node receipted was delivered only to the seats' intake and never given to the board, so it isn't owed: pass.", [["a/1", "a", True], ["b/1", "b", False]], {"a": ["a/1"]}, {}),
+        ("withheld-beside-pending", "A ballot is missing beside one admitted and one pending ballot of its nullifier, which is held out either way: pass.", [["v/1", "v", True]], {"v": ["v/2"]}, {}, {"v": ["v/3"]}),
     ]:
         pend = pending[0] if pending else {}
         checks.append(
@@ -563,8 +572,8 @@ def main():
                 "receipted": receipted,
                 "boarded": boarded,
                 "pending": pend,
-                "earlier": earlier,
-                "result": completeness(receipted, boarded, earlier, pend),
+                "entered": entered,
+                "result": completeness(receipted, boarded, entered, pend),
             }
         )
 

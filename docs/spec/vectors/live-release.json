@@ -12812,7 +12812,7 @@
         "b": ["b/1"]
       },
       "pending": {},
-      "earlier": [],
+      "entered": {},
       "result": {
         "refuse": null
       }
@@ -12828,9 +12828,10 @@
         "a": ["a/1"]
       },
       "pending": {},
-      "earlier": [],
+      "entered": {},
       "result": {
-        "refuse": "b/1"
+        "refuse": "b/1",
+        "part": "quiet"
       }
     },
     {
@@ -12844,20 +12845,66 @@
         "v": ["v/2"]
       },
       "pending": {},
-      "earlier": [],
+      "entered": {},
       "result": {
-        "refuse": "v/1"
+        "refuse": "v/1",
+        "part": "quiet"
       }
     },
     {
-      "id": "withheld-after-entering",
-      "description": "A re-vote is missing, but the nullifier entered at an earlier snapshot with its first ballot, which it keeps: pass.",
+      "id": "revote-entered-unreleased",
+      "description": "At an unreleased snapshot the first ballot, owed there, was withheld and the re-vote entered alone; the entries part refuses.",
+      "receipted": [
+        ["v/1", "v", true],
+        ["v/2", "v", true]
+      ],
+      "boarded": {
+        "v": ["v/2"]
+      },
+      "pending": {},
+      "entered": {
+        "v": {
+          "since": true,
+          "missingAtEntry": ["v/1"]
+        }
+      },
+      "result": {
+        "refuse": "v/1",
+        "part": "entries"
+      }
+    },
+    {
+      "id": "entry-clean",
+      "description": "A nullifier entered since the last release with nothing owed missing at its entry, and its later re-vote is withheld: pass.",
       "receipted": [["v/2", "v", true]],
       "boarded": {
         "v": ["v/1"]
       },
       "pending": {},
-      "earlier": ["v"],
+      "entered": {
+        "v": {
+          "since": true,
+          "missingAtEntry": []
+        }
+      },
+      "result": {
+        "refuse": null
+      }
+    },
+    {
+      "id": "withheld-after-entering",
+      "description": "A re-vote is missing, but the nullifier entered at an earlier release with its first ballot, which it keeps: pass.",
+      "receipted": [["v/2", "v", true]],
+      "boarded": {
+        "v": ["v/1"]
+      },
+      "pending": {},
+      "entered": {
+        "v": {
+          "since": false,
+          "missingAtEntry": []
+        }
+      },
       "result": {
         "refuse": null
       }
@@ -12870,7 +12917,7 @@
         "v": ["v/2", "v/3"]
       },
       "pending": {},
-      "earlier": [],
+      "entered": {},
       "result": {
         "refuse": null
       }
@@ -12883,9 +12930,10 @@
         "v": ["v/2"]
       },
       "pending": {},
-      "earlier": [],
+      "entered": {},
       "result": {
-        "refuse": "v/1"
+        "refuse": "v/1",
+        "part": "quiet"
       }
     },
     {
@@ -12899,7 +12947,7 @@
         "a": ["a/1"]
       },
       "pending": {},
-      "earlier": [],
+      "entered": {},
       "result": {
         "refuse": null
       }
@@ -12914,7 +12962,7 @@
       "pending": {
         "v": ["v/3"]
       },
-      "earlier": [],
+      "entered": {},
       "result": {
         "refuse": null
       }

@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import fc from "fast-check";
 import { describe, expect, test } from "vite-plus/test";
 import {
+  BUNDLE_FORMAT_BLOCKS,
   BUNDLE_FORMAT_CEREMONY,
   type CheckResult,
   parseBundle,
@@ -9,6 +10,7 @@ import {
   verifyBundle,
 } from "../src/index.ts";
 import { countedFloor } from "../src/openings.ts";
+import { run as headers, toHex } from "./headers.ts";
 
 // Format-4 bundles: the spoiled-ballot openings, 6.2, checked against the
 // definition and the key set its transcript registered, and judged against
@@ -222,4 +224,27 @@ describe("the floor of s_S", () => {
     expect(r.openings?.[2]?.breaks).toEqual([{ code: "opening-cast", ballot: 1 }]);
     expect(row(r)).toEqual({ status: "unverifiable", code: "not-implemented" });
   });
+});
+
+test("under format 5, a ballot whose L1 reference 5.8 rejects still makes its opening cast", () => {
+  // A run whose window starts above every block the ballots name: 5.8
+  // rejects each, and 6.2 is format 4's, since opening-cast compares with
+  // every ballot 5.1 to 5.5 admit.
+  const c = byId("cast-at-floor");
+  const far = headers(2n ** 62n, [0n, 2n ** 40n]);
+  const r = verifyBundle(
+    parseBundle(
+      JSON.stringify({
+        ...(JSON.parse(json(c)) as object),
+        format: BUNDLE_FORMAT_BLOCKS,
+        l1Blocks: far.map((h) => toHex(h.encoded)),
+      }),
+      hex(c.board),
+    ),
+  );
+  expect(row(r, "5.8")).toMatchObject({ status: "fail", code: "l1-ref-before-open" });
+  expect(r.ballots?.admitted).toBe(0);
+  expect(row(r)).toEqual(row(run(c)));
+  expect(r.openings).toEqual(run(c).openings);
+  expect(row(r)).toEqual({ status: "fail", code: "opening-cast", at: { entry: 3 } });
 });

@@ -262,6 +262,10 @@ export function ballotChecks(
       rejected.push({ entry: at, code: late });
       continue;
     }
+    // 6.2's opening-cast compares openings with every ballot 5.1 to 5.5
+    // admit, whatever 5.8 later finds: an opening of a committed vote is a
+    // breach whether or not that ballot's reference counts.
+    cores.push({ entry: at, segment: path.segment, core });
     // 5.8 reads only the reference M binds, so every copy of a ballot gets
     // the same verdict, and a pending one stays among the ballots 5.7
     // compares: whatever L1 later decides for it, it decides for its copies.
@@ -273,7 +277,6 @@ export function ballotChecks(
         continue;
       }
     }
-    cores.push({ entry: at, segment: path.segment, core });
     passed.push({
       at,
       path,

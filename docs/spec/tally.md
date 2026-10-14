@@ -262,8 +262,8 @@ With `s_T` as above (When), if every cell of the partition has a passing opening
 
 Under definition version 7 with `electorate_mode` 2 the partition is one cell per rolling tier, in `rolling_electorate`'s order ([[verifier]] 2.8), and everything above holds per tier. What changes is what a result says about its electorate, since the tier grew during the poll ([[0028-rolling-electorates]], Anonymity set and reporting; T-16, T-13, T-01):
 
-- **The final result** of each tier carries its counts at opening, at close and at the smallest step used, and its growth, each as [[membership]] (Reported counts) defines it, and states its ballots as counted ballots among those who could answer by the close, never as a share of the opening count ([[verifier]] 8.1).
-- **Each live release** ([[0027-trustee-panels-and-live-results]], Part 2; [[P2-15]]) carries, per rolling tier beside its ballot count, the count at that release, with its step ([[membership]], Reported counts, At a live release). The trustee nodes compute it from the listed groups' events, as every reader does, and the verifier recomputes it rather than reading it from the release; the record that carries it, and the code for a release that states another, are P2-15's.
+- **The final result** of each tier carries its counts at opening, at its last boundary and at the smallest step used, its eligible count and its growth, each as [[membership]] (Reported counts) defines it, and states its ballots as counted ballots among the eligible count, those who could answer during the poll, never as a share of the opening count ([[verifier]] 8.1).
+- **Each live release** ([[0027-trustee-panels-and-live-results]], Part 2; [[P2-15]]) carries, per rolling tier beside its ballot count, the eligible count at that release, with its step ([[membership]], Reported counts, At a live release), which its ballot count never exceeds. The trustee nodes compute it from the listed groups' events, as every reader does, and the verifier recomputes it rather than reading it from the release; the record that carries it, and the code for a release that states another, are P2-15's.
 
 ## Coarser totals
 

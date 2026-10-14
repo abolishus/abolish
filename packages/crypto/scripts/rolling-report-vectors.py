@@ -67,6 +67,18 @@ def accepted(events, groups, n, registered_at, closes_at):
     return registered_at < tau(n) <= closes_at and len(leaves) <= 2**32 and member_count(leaves) > 0
 
 
+def eligible(c, n):
+    """E(n): distinct commitments live at some accepted step m <= n, one step at a time."""
+    ev, groups = c["events"], c["groups"]
+    seen = set()
+    m = last_boundary(c["registered_at"]) + 1  # the first boundary after registration
+    while m <= n:
+        if accepted(ev, groups, m, c["registered_at"], c["closes_at"]):
+            seen |= {x for x in rolling_leaves(ev, groups, lambda e: e["timestamp"] <= tau(m)) if x != 0}
+        m += 1
+    return len(seen)
+
+
 def report(c):
     """membership.md, Reported counts."""
     ev, groups = c["events"], c["groups"]
@@ -74,11 +86,14 @@ def report(c):
     n_c = last_boundary(c["closes_at"])
     if tau(n_c) > c["registered_at"]:
         close = {"step": str(n_c), "members": str(step_count(ev, groups, n_c)), "accepted": accepted(ev, groups, n_c, c["registered_at"], c["closes_at"])}
+        all_eligible = eligible(c, n_c)
     else:
-        close = None
-    # Every step an admitted ballot names is accepted (verifier 5.1).
-    for n in c["ballot_steps"]:
+        close, all_eligible = None, 0
+    # Every step a ballot with a verifying membership proof names is accepted
+    # (verifier 5.1).
+    for n in c["ballot_steps"] + [n for _, steps in c["releases"] for n in steps]:
         assert accepted(ev, groups, n, c["registered_at"], c["closes_at"]), (c["id"], n)
+    assert len(set(c["ballot_steps"])) <= all_eligible
     if c["ballot_steps"]:
         smallest = min(sorted(set(c["ballot_steps"])), key=lambda n: step_count(ev, groups, n))
         smallest = {"step": str(smallest), "members": str(step_count(ev, groups, smallest))}
@@ -98,16 +113,19 @@ def report(c):
             "members": str(count_through(ev, groups, min(period_end(s), c["closes_at"]))),
         }
         for s, r in sorted(growth.items())
+        if r["added"] + r["removed"] > 0
     ]
     releases = []
-    for s in c["release_segments"]:
-        end = min(period_end(s), c["closes_at"])
-        n = (end - ROOT_OFFSET) // ROOT_PERIOD
-        if tau(n) > c["registered_at"]:
-            releases.append({"segment": str(s), "step": str(n), "members": str(step_count(ev, groups, n))})
+    for s, steps in c["releases"]:
+        n = last_boundary(min(period_end(s), c["closes_at"]))
+        terms = ([n] if tau(n) > c["registered_at"] else []) + list(steps)
+        if terms:
+            n_r = max(terms)
+            releases.append({"segment": str(s), "snapshotSteps": [str(m) for m in steps], "step": str(n_r), "count": str(eligible(c, n_r))})
         else:
-            releases.append({"segment": str(s), "step": None, "members": str(opening)})
-    return {"opening": {"members": str(opening)}, "close": close, "smallestStep": smallest, "growth": growth}, releases
+            releases.append({"segment": str(s), "snapshotSteps": [], "step": None, "count": str(opening)})
+    rep = {"opening": {"members": str(opening)}, "eligible": str(all_eligible), "close": close, "smallestStep": smallest, "growth": growth}
+    return rep, releases
 
 
 N0 = rv.N0
@@ -143,7 +161,7 @@ def cases():
                 {"block": 3600, "timestamp": tau(N0 + 12) + 300, "group": b, "add": [mem(12)]},
             ],
             "ballot_steps": [N0 + 7, N0 + 2, N0 + 12, N0 + 1, N0 + 2],
-            "release_segments": [period_of(t - 500) - 1, period_of(t - 500), period_of(tau(N0 + 7)), period_of(tau(N0 + 12)) + 5],
+            "releases": [(period_of(t - 500) - 1, []), (period_of(t - 500), []), (period_of(t + 100), [N0 + 2, N0 + 7]), (period_of(tau(N0 + 7)), [N0 + 1, N0 + 7]), (period_of(tau(N0 + 12)) + 5, [N0 + 12])],
         }
     )
     # 2. No boundary between registration and close: no step, no close count.
@@ -160,7 +178,7 @@ def cases():
                 {"block": 260, "timestamp": t + 300, "group": a, "add": [mem(22)]},
             ],
             "ballot_steps": [],
-            "release_segments": [period_of(t + 590)],
+            "releases": [(period_of(t + 590), [])],
         }
     )
     # 3. Every member removed before the last boundary: the close count is 0
@@ -180,7 +198,34 @@ def cases():
                 {"block": 700, "timestamp": tau(N0 + 2) + 5, "group": b, "remove": [0, 1]},
             ],
             "ballot_steps": [N0 + 1, N0 + 2],
-            "release_segments": [period_of(tau(N0 + 3))],
+            "releases": [(period_of(tau(N0 + 3)), [N0 + 1])],
+        }
+    )
+    # 4. Every inclusive and exclusive edge: registration exactly at a
+    # boundary, events in the opening block and the next, at a boundary, at a
+    # period's last second and the next period's first, and at the close and
+    # one second after it.
+    t4 = tau(N0 + 100)
+    s4 = period_of(tau(N0 + 102))
+    out.append(
+        {
+            "id": "edges",
+            "note": "registered exactly at a boundary, which is never accepted, so a release whose period ends before the next boundary reports the opening count; an event in the opening block (opening) and one in the next block (growth); an event exactly at a boundary (in that step); events at a period's last second and the next period's first (two rows); and events exactly at the close (counted) and one second after (not)",
+            "groups": [a],
+            "root_block": 1000,
+            "registered_at": t4,
+            "closes_at": period_end(s4) + 700,
+            "events": [
+                {"block": 1000, "timestamp": t4 - 1000, "group": a, "add": [mem(40)]},
+                {"block": 1001, "timestamp": t4 - 998, "group": a, "add": [mem(41)]},
+                {"block": 1500, "timestamp": tau(N0 + 101), "group": a, "add": [mem(42)]},
+                {"block": 1900, "timestamp": period_end(s4), "group": a, "add": [mem(43)]},
+                {"block": 1901, "timestamp": period_end(s4) + 1, "group": a, "add": [mem(44)]},
+                {"block": 2200, "timestamp": period_end(s4) + 700, "group": a, "add": [mem(45)]},
+                {"block": 2201, "timestamp": period_end(s4) + 701, "group": a, "add": [mem(46)]},
+            ],
+            "ballot_steps": [N0 + 101],
+            "releases": [(period_of(t4), []), (s4, [])],
         }
     )
     return out

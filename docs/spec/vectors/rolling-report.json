@@ -84,6 +84,7 @@
         "opening": {
           "members": "4"
         },
+        "eligible": "9",
         "close": {
           "step": "2966412",
           "members": "8",
@@ -123,23 +124,33 @@
       "releases": [
         {
           "segment": "10",
+          "snapshotSteps": [],
           "step": null,
-          "members": "4"
+          "count": "4"
         },
         {
           "segment": "11",
+          "snapshotSteps": [],
           "step": "2966404",
-          "members": "5"
+          "count": "6"
+        },
+        {
+          "segment": "11",
+          "snapshotSteps": ["2966402", "2966407"],
+          "step": "2966407",
+          "count": "9"
         },
         {
           "segment": "12",
+          "snapshotSteps": ["2966401", "2966407"],
           "step": "2966410",
-          "members": "8"
+          "count": "9"
         },
         {
           "segment": "18",
+          "snapshotSteps": ["2966412"],
           "step": "2966412",
-          "members": "8"
+          "count": "9"
         }
       ]
     },
@@ -169,6 +180,7 @@
         "opening": {
           "members": "2"
         },
+        "eligible": "0",
         "close": null,
         "smallestStep": null,
         "growth": [
@@ -183,8 +195,9 @@
       "releases": [
         {
           "segment": "11",
+          "snapshotSteps": [],
           "step": null,
-          "members": "2"
+          "count": "2"
         }
       ]
     },
@@ -226,6 +239,7 @@
         "opening": {
           "members": "1"
         },
+        "eligible": "2",
         "close": {
           "step": "2966403",
           "members": "0",
@@ -247,8 +261,111 @@
       "releases": [
         {
           "segment": "11",
+          "snapshotSteps": ["2966401"],
           "step": "2966403",
-          "members": "0"
+          "count": "2"
+        }
+      ]
+    },
+    {
+      "id": "edges",
+      "note": "registered exactly at a boundary, which is never accepted, so a release whose period ends before the next boundary reports the opening count; an event in the opening block (opening) and one in the next block (growth); an event exactly at a boundary (in that step); events at a period's last second and the next period's first (two rows); and events exactly at the close (counted) and one second after (not)",
+      "groups": ["1"],
+      "events": [
+        {
+          "block": "1000",
+          "timestamp": "1779899300",
+          "group": "1",
+          "add": ["1000000000040"]
+        },
+        {
+          "block": "1001",
+          "timestamp": "1779899302",
+          "group": "1",
+          "add": ["1000000000041"]
+        },
+        {
+          "block": "1500",
+          "timestamp": "1779900900",
+          "group": "1",
+          "add": ["1000000000042"]
+        },
+        {
+          "block": "1900",
+          "timestamp": "1779904399",
+          "group": "1",
+          "add": ["1000000000043"]
+        },
+        {
+          "block": "1901",
+          "timestamp": "1779904400",
+          "group": "1",
+          "add": ["1000000000044"]
+        },
+        {
+          "block": "2200",
+          "timestamp": "1779905099",
+          "group": "1",
+          "add": ["1000000000045"]
+        },
+        {
+          "block": "2201",
+          "timestamp": "1779905100",
+          "group": "1",
+          "add": ["1000000000046"]
+        }
+      ],
+      "rootL2Block": "1000",
+      "registeredAt": "1779900300",
+      "closesAt": "1779905099",
+      "ballotSteps": ["2966501"],
+      "report": {
+        "opening": {
+          "members": "1"
+        },
+        "eligible": "5",
+        "close": {
+          "step": "2966507",
+          "members": "5",
+          "accepted": true
+        },
+        "smallestStep": {
+          "step": "2966501",
+          "members": "3"
+        },
+        "growth": [
+          {
+            "period": "27",
+            "added": "1",
+            "removed": "0",
+            "members": "2"
+          },
+          {
+            "period": "28",
+            "added": "2",
+            "removed": "0",
+            "members": "4"
+          },
+          {
+            "period": "29",
+            "added": "2",
+            "removed": "0",
+            "members": "6"
+          }
+        ]
+      },
+      "releases": [
+        {
+          "segment": "27",
+          "snapshotSteps": [],
+          "step": null,
+          "count": "1"
+        },
+        {
+          "segment": "28",
+          "snapshotSteps": [],
+          "step": "2966506",
+          "count": "3"
         }
       ]
     }

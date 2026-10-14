@@ -13,6 +13,7 @@ import { SPEC_VECTORS } from "./spec-vectors.ts";
 
 interface Report {
   readonly opening: { readonly members: string };
+  readonly eligible: string;
   readonly close: {
     readonly step: string;
     readonly members: string;
@@ -29,8 +30,9 @@ interface Report {
 
 interface Release {
   readonly segment: string;
+  readonly snapshotSteps: readonly string[];
   readonly step: string | null;
-  readonly members: string;
+  readonly count: string;
 }
 
 interface Case {
@@ -83,6 +85,17 @@ function accepted(c: Case, n: bigint): boolean {
   );
 }
 
+/** `E(n)`: distinct commitments live at some accepted step `m ≤ n`. */
+function eligible(c: Case, n: bigint): number {
+  const seen = new Set<bigint>();
+  for (let m = boundaryAtOrBefore(BigInt(c.registeredAt)) + 1n; m <= n; m++) {
+    if (!accepted(c, m)) continue;
+    for (const x of rollingLeaves(c.events, c.groups, (e) => BigInt(e.timestamp) <= tau(m)))
+      if (x !== 0n) seen.add(x);
+  }
+  return seen.size;
+}
+
 /** docs/spec/membership.md, Reported counts. */
 function report(c: Case): Report {
   const closesAt = BigInt(c.closesAt);
@@ -99,6 +112,7 @@ function report(c: Case): Report {
     const ts = BigInt(e.timestamp);
     if (!c.groups.includes(e.group) || BigInt(e.block) <= BigInt(c.rootL2Block) || ts > closesAt)
       continue;
+    if ((e.add?.length ?? 0) + (e.remove?.length ?? 0) === 0) continue;
     const s = periodOf(ts);
     const row = rows.get(s) ?? { added: 0, removed: 0 };
     row.added += e.add?.length ?? 0;
@@ -113,6 +127,7 @@ function report(c: Case): Report {
         ),
       ),
     },
+    eligible: String(tau(nc) > registeredAt ? eligible(c, nc) : 0),
     close:
       tau(nc) > registeredAt
         ? { step: String(nc), members: String(stepCount(nc)), accepted: accepted(c, nc) }
@@ -132,11 +147,12 @@ function report(c: Case): Report {
   };
 }
 
-function release(c: Case, segment: string, opening: string): Release {
-  const n = boundaryAtOrBefore(min(periodEnd(BigInt(segment)), BigInt(c.closesAt)));
-  return tau(n) > BigInt(c.registeredAt)
-    ? { segment, step: String(n), members: String(countThrough(c.events, c.groups, tau(n))) }
-    : { segment, step: null, members: opening };
+function release(c: Case, r: Release, opening: string): Release {
+  const n = boundaryAtOrBefore(min(periodEnd(BigInt(r.segment)), BigInt(c.closesAt)));
+  const terms = [...(tau(n) > BigInt(c.registeredAt) ? [n] : []), ...r.snapshotSteps.map(BigInt)];
+  if (terms.length === 0) return { ...r, step: null, count: opening };
+  const newest = terms.reduce((a, b) => (a > b ? a : b));
+  return { ...r, step: String(newest), count: String(eligible(c, newest)) };
 }
 
 describe("rolling reports (docs/spec/membership.md, Reported counts)", () => {
@@ -147,11 +163,15 @@ describe("rolling reports (docs/spec/membership.md, Reported counts)", () => {
   });
 
   test.each(file.cases.map((c) => [c.id, c] as const))("%s", (_id, c) => {
-    // Every step an admitted ballot names is one the poll accepts (5.1).
-    for (const n of c.ballotSteps) expect(accepted(c, BigInt(n))).toBe(true);
+    // Every step a ballot with a verifying proof names is one the poll
+    // accepts (5.1).
+    for (const n of [...c.ballotSteps, ...c.releases.flatMap((r) => r.snapshotSteps)])
+      expect(accepted(c, BigInt(n))).toBe(true);
     const got = report(c);
     expect(got).toEqual(c.report);
-    expect(c.releases.map((r) => release(c, r.segment, got.opening.members))).toEqual(c.releases);
+    expect(c.releases.map((r) => release(c, r, got.opening.members))).toEqual(c.releases);
+    // Ballots never outnumber the eligible count, at the end or at a release.
+    expect(new Set(c.ballotSteps).size).toBeLessThanOrEqual(Number(got.eligible));
   });
 
   test("covers a missing close, an unaccepted close step, a tie, repeats and a release before any step", () => {
@@ -160,6 +180,23 @@ describe("rolling reports (docs/spec/membership.md, Reported counts)", () => {
     expect(reports.some((r) => r.close?.accepted === false && r.close.members === "0")).toBe(true);
     expect(reports.some((r) => r.smallestStep === null)).toBe(true);
     expect(file.cases.flatMap((c) => c.releases).some((r) => r.step === null)).toBe(true);
+    // A tier whose ballots outnumber its close count, never its eligible count.
+    expect(
+      file.cases.some(
+        (c) =>
+          c.report.close !== null && new Set(c.ballotSteps).size > Number(c.report.close.members),
+      ),
+    ).toBe(true);
+    // A snapshot holding a ballot that names a step after its period.
+    expect(
+      file.cases.some((c) =>
+        c.releases.some(
+          (r) =>
+            r.snapshotSteps.length > 0 &&
+            tau(BigInt(r.step!)) > min(periodEnd(BigInt(r.segment)), BigInt(c.closesAt)),
+        ),
+      ),
+    ).toBe(true);
     // A tie on the smallest count reports the lower step.
     const tied = file.cases.find((c) => {
       const counts = c.ballotSteps.map((n) => countThrough(c.events, c.groups, tau(BigInt(n))));

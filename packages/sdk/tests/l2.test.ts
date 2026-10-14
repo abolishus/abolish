@@ -3,9 +3,11 @@ import {
   electionId,
   electionStubV4Hash,
   identityKey,
+  keySetHash,
   type Panel,
   panelId,
   PARAMETERS,
+  signCeremonyRegistration,
 } from "@abolishus/crypto";
 import fc from "fast-check";
 import { describe, expect, it } from "vite-plus/test";
@@ -231,16 +233,66 @@ describe("SimulatedTrusteeRegistry", { timeout }, () => {
 
   // Keyed by stub and panel: another pinned panel's quorum can't block this
   // panel's record (T-25).
-  it("keeps another pinned panel's record apart", () => {
-    const others = Array.from({ length: 4 }, () => crypto.getRandomValues(new Uint8Array(32)));
-    const panel: Panel = { threshold: 2, keys: others.map((s) => identityKey(s)) };
+  it("keeps another pinned panel's record for the same stub apart", () => {
+    const secrets = Array.from({ length: 4 }, () => crypto.getRandomValues(new Uint8Array(32)));
+    const panel: Panel = { threshold: 2, keys: secrets.map((x) => identityKey(x)) };
     const r = new SimulatedTrusteeRegistry(e.deployment.l2ChainId, e.deployment.trusteeRegistry, [
       { panel: e.panel, quorum },
       { panel, quorum: rule7Quorum(panel) },
     ]);
-    // The run's approvals don't verify under the other panel's keys.
-    expect(refusalOf(r, { ...e.registration, panelId: panelId(panel) })).toBe("InvalidSignature");
+    // The other panel's quorum approves another transcript for the run's stub first.
+    const transcript = new Uint8Array(32).fill(4);
+    const setHash = keySetHash(e.registration.seats);
+    const theirs: CeremonyRegistrationRecord = {
+      ...e.registration,
+      panelId: panelId(panel),
+      ceremonyTranscriptHash: transcript,
+      approvals: secrets.map((secret, i) => ({
+        index: i + 1,
+        signature: signCeremonyRegistration(secret, panel, {
+          l2ChainId: e.deployment.l2ChainId,
+          trusteeRegistry: e.deployment.trusteeRegistry,
+          index: i + 1,
+          stubHash,
+          ceremonyTranscriptHash: transcript,
+          keySetHash: setHash,
+        }),
+      })),
+    };
+    expect(refusalOf(r, theirs)).toBe("ok");
     expect(refusalOf(r, e.registration)).toBe("ok");
+    const asked = (t: Uint8Array, p: Panel) =>
+      r.ceremonyRecorded(stubHash, t, panelId(p), p.threshold, p.keys.length);
+    expect(asked(d.ceremony_transcript_hash, e.panel)).toBe(true);
+    expect(asked(transcript, panel)).toBe(true);
+    expect(asked(transcript, e.panel)).toBe(false);
+    expect(asked(d.ceremony_transcript_hash, panel)).toBe(false);
+  });
+
+  it("refuses a key set whose signing key is no P-256 point", () => {
+    const [s1, s2, ...rest] = e.registration.seats;
+    if (s1 === undefined || s2 === undefined) throw new Error("no seats");
+    const bad = { ...s2, signingKey: new Uint8Array(33).fill(0xff) };
+    expect(refusalOf(trustees(), { ...e.registration, seats: [s1, bad, ...rest] })).toBe(
+      "InvalidSigningKey",
+    );
+  });
+
+  it("returns copies, so a caller can't change the recorded key set", () => {
+    const r = trustees();
+    const seats = e.registration.seats.map((x) => ({
+      ...x,
+      signingKey: Uint8Array.from(x.signingKey),
+    }));
+    r.registerCeremony({ ...e.registration, seats });
+    (seats[0] as { signingKey: Uint8Array }).signingKey.fill(0);
+    r.keySetOf(stubHash, d.panel_id)?.seats[0]?.signingKey.fill(0);
+    const held = r.keySetOf(stubHash, d.panel_id)?.seats[0]?.signingKey;
+    expect(
+      held !== undefined && equal(held, e.registration.seats[0]?.signingKey ?? new Uint8Array()),
+    ).toBe(true);
+    expect(r.quorumOf(d.panel_id)).toBe(quorum);
+    expect(r.quorumOf(new Uint8Array(32))).toBeUndefined();
   });
 });
 
@@ -283,6 +335,8 @@ describe("SimulatedElectionRegistry", { timeout }, () => {
       { l1_anchor: new Uint8Array(20).fill(5) },
       { l1_relay: new Uint8Array(20).fill(5) },
       { l1_chain_id: d.l1_chain_id + 2n },
+      { l2_chain_id: d.l2_chain_id + 2n },
+      { election_registry: new Uint8Array(20).fill(5) },
     ];
     for (const f of fields) expect(refusalOf(elections(), { ...d, ...f })).toBe("WrongDeployment");
   });
@@ -294,6 +348,39 @@ describe("SimulatedElectionRegistry", { timeout }, () => {
       before,
     );
     expect(result).toEqual({ ok: false, refusal: "DefinitionIllFormed", rule: "receipt-keys" });
+  });
+
+  it("refuses a definition opening before the anchoring clock's epoch", () => {
+    const t = trustees();
+    t.registerCeremony(e.registration);
+    const r = new SimulatedElectionRegistry({ ...e.deployment, epoch: d.opens_at + 1n }, t);
+    r.createElection(SIMULATED_CREATOR);
+    expect(refusalOf(r)).toBe("OpensBeforeEpoch");
+  });
+
+  it("asks only the deployment's trustee registry, and refuses a deployment that breaks the chain rule", () => {
+    const elsewhere = new SimulatedTrusteeRegistry(
+      e.deployment.l2ChainId,
+      new Uint8Array(20).fill(9),
+      [{ panel: e.panel, quorum }],
+    );
+    expect(() => new SimulatedElectionRegistry(e.deployment, elsewhere)).toThrow(RangeError);
+    const otherChain = new SimulatedTrusteeRegistry(
+      e.deployment.l2ChainId + 1n,
+      e.deployment.trusteeRegistry,
+      [{ panel: e.panel, quorum }],
+    );
+    expect(() => new SimulatedElectionRegistry(e.deployment, otherChain)).toThrow(RangeError);
+    for (const broken of [
+      { board: e.deployment.electionRegistry },
+      { l1Relay: e.deployment.l1Anchor },
+      { groupRegistry: new Uint8Array(20) },
+      { l1ChainId: e.deployment.l2ChainId },
+      { l1ChainId: 0n },
+    ])
+      expect(
+        () => new SimulatedElectionRegistry({ ...e.deployment, ...broken }, trustees()),
+      ).toThrow(RangeError);
   });
 
   it("refuses registration once voting has opened, or over an electorate not yet in the past", () => {

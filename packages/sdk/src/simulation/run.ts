@@ -125,7 +125,6 @@ import {
 import { admitOpening } from "./publication.ts";
 import { SIMULATED_BOARD_ENTRY_VERSION, simulateElection } from "./election.ts";
 import { latestFinalized, nameBlock, SimulatedL1 } from "./l1.ts";
-import { rule7Quorum } from "./l2.ts";
 import {
   deliveredAt,
   downAt,
@@ -145,7 +144,7 @@ import { judgeVerifierReport } from "./verify.ts";
  * result is mistaken for a run of the whole protocol.
  */
 export const SIMULATION_STUBS = Object.freeze([
-  "definition: a well-formed version-4 definition, each tier one group in one region and so one cell, listing the operator's receipt key, created and registered on simulated L2 registries (./l2.ts) at fresh random addresses, with Anvil's chain IDs, the placeholder L1 anchor and relay, a placeholder anchoring clock and placeholder cell roots; the registries hold their records in memory, emit no events and take values rather than calldata, so their byte-level checks (canonical calldata, strict decoding, the record's length, signing keys on the curve) and the L1 origins aren't exercised, the L2 is two-second blocks with no sequencer, and each client compares the definition's hash with the registry's memory rather than reading DefinitionRegistered (P1-18, P1-19, P3-2)",
+  "definition: a well-formed version-4 definition, each tier one group in one region and so one cell, listing the operator's receipt key, created and registered on simulated L2 registries (./l2.ts) at fresh random addresses, with Anvil's chain IDs, the placeholder L1 anchor and relay, a placeholder anchoring clock and placeholder cell roots; the registries hold their records in memory, emit no events and take values rather than calldata, so their byte-level checks (canonical calldata, strict decoding, the record's length) and the L1 origins aren't exercised, the election registry records none of the board's parameters (no direct submission reads them yet), the approvals' quorum and order are checked here rather than by a gated check the verifier's 3.1 shares, the L2 is two-second blocks with no sequencer, and each client compares the definition's hash with the registry's memory rather than reading DefinitionRegistered (P1-18, P1-19, P3-2)",
   "ceremony: every seat takes part in the four signed rounds, every registered seat approves the key set its check returned, the simulated trustee registry records the ceremony under the panel it pins with rule 7's quorum, and the operator boards the transcript as the board's first entry; no release pins the panel, whose identity keys are fresh per run, so the verifier's bundle gives it as a local input and its 3.1 doesn't read the registration (P1-7, P1-19)",
   "membership: no membership proofs; each voter's nullifier is its index plus one, and each ballot record carries a placeholder proof, the verification key's own alpha, beta and alpha points, which decodes but proves nothing; the run never checks it, and each ballot's M for the re-vote rule is computed from its record here rather than taken from crypto's checkBallot, while the verifier's admission rejects every ballot for it (5.1 to 5.3, membership-proof), so it never verifies their validity proofs (5.4 covers only their shape and qualified share hashes) and its checks over admitted ballots (5.7, and 6.2's opening-cast) judge none (P1-17b, P3-2)",
   "board: the operator boards each server ballot as it arrives and signs a receipt the voter's client checks at cast, under one receipt key fresh per run, which the definition lists and the anchoring authority registers in the anchor's receipt-key record a day before opening, never retiring it; each client checks the key's record before casting from the simulated anchor's memory, not from L1 state, and the verifier's 2.9 reads it from the bundle's simulated L1 state; the anchoring clock (hourly from the Unix epoch, with a half-hour deadline) is a placeholder, the post-close windows other than the tally, openings' and destruction windows are taken as zero for the counted extent, though the delivery check applies the real delivery deadline (every delivery record is boarded or sent long before it), so the counted extent ends one period after close and the seal is the destruction window's end (P1-13b, P1-18)",
@@ -1323,7 +1322,9 @@ export async function runSimulation(
       transcriptHash: hex(election.transcriptHash),
       registered: registered.map((r) => r.index),
       approvals: election.registration.approvals.map((a) => a.index),
-      quorum: rule7Quorum(election.panel),
+      // The quorum the trustee registry pins, not rule 7 recomputed, so a
+      // registry pinning another would show here.
+      quorum: election.trusteeRegistry.quorumOf(election.definition.panel_id) ?? 0,
     },
     ballots: {
       cast: casts.length,

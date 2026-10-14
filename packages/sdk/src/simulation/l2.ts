@@ -13,6 +13,7 @@
 // and the verifier doesn't read them yet (SIMULATION_STUBS).
 
 import {
+  EncodeError,
   type ElectionDefinitionV4,
   electionDefinitionV4Hash,
   electionDefinitionV4Rule,
@@ -100,6 +101,7 @@ export type CeremonyRefusal =
   | "AlreadyRecorded"
   | "KeySetTooSmall"
   | "KeySetSeatsOutOfOrder"
+  | "InvalidSigningKey"
   | "DuplicateSigningKey"
   | "SeatsOutOfOrder"
   | "InvalidSignature";
@@ -127,6 +129,11 @@ const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "
 const same = (a: Uint8Array, b: Uint8Array) =>
   a.length === b.length && a.every((x, i) => x === b[i]);
 const isZero = (b: Uint8Array) => b.every((x) => x === 0);
+const copySeat = (s: KeySetEntry): KeySetEntry => ({
+  index: s.index,
+  kemKeyHash: Uint8Array.from(s.kemKeyHash),
+  signingKey: Uint8Array.from(s.signingKey),
+});
 
 /** The quorum every deployment sets for a panel: `max(k, n − 1)` ([[0006-trustees]] rule 7). */
 export function rule7Quorum(panel: Panel): number {
@@ -145,12 +152,17 @@ interface RecordedCeremony {
 }
 
 export class SimulatedTrusteeRegistry {
-  readonly #l2ChainId: bigint;
   readonly #address: Uint8Array;
   readonly #panels = new Map<string, PinnedPanel>();
   // Keyed by stub hash and panel identifier, so another pinned panel's
   // quorum can't block a stub's own panel (Per stub and panel; T-25).
   readonly #recorded = new Map<string, RecordedCeremony>();
+
+  /** The chain and address every approval signs over. */
+  readonly l2ChainId: bigint;
+  get address(): Uint8Array {
+    return Uint8Array.from(this.#address);
+  }
 
   /**
    * A registry at `address` on `l2ChainId` pinning each panel with its
@@ -163,14 +175,14 @@ export class SimulatedTrusteeRegistry {
     panels: readonly { readonly panel: Panel; readonly quorum: number }[],
   ) {
     if (panels.length === 0) throw new RangeError("simulation: a trustee registry pins a panel");
-    this.#l2ChainId = l2ChainId;
+    this.l2ChainId = l2ChainId;
     this.#address = Uint8Array.from(address);
     for (const { panel, quorum } of panels) {
-      const n = panel.keys.length;
-      if (!Number.isSafeInteger(quorum) || quorum < panel.threshold || quorum > n)
-        throw new RangeError("simulation: a panel's quorum must be from k to n");
-      // panelId checks the panel rules (size, threshold, keys, repeats).
+      // In the contract's order: panelId checks the panel rules (size,
+      // threshold, keys, repeats), then the quorum, then a repeated panel.
       const id = hex(panelId(panel));
+      if (!Number.isSafeInteger(quorum) || quorum < panel.threshold || quorum > panel.keys.length)
+        throw new RangeError("simulation: a panel's quorum must be from k to n");
       if (this.#panels.has(id)) throw new RangeError("simulation: a panel pinned twice");
       this.#panels.set(id, {
         panel: { threshold: panel.threshold, keys: panel.keys.map((k) => Uint8Array.from(k)) },
@@ -202,6 +214,14 @@ export class SimulatedTrusteeRegistry {
       if (!Number.isSafeInteger(seat.index) || seat.index <= previous || seat.index > n)
         return refuse("KeySetSeatsOutOfOrder");
       previous = seat.index;
+      // A seat's signing key must be a P-256 point, as `p256-key` decodes
+      // it; encoding the seat alone is that check.
+      try {
+        keySetHash([{ ...seat, index: 1 }]);
+      } catch (e) {
+        if (e instanceof EncodeError) return refuse("InvalidSigningKey");
+        throw e;
+      }
       // One key never signs for two seats, and no identity key signs as a
       // per-election key (T-37). The contract compares points; a p256-key
       // encodes one point, so comparing encodings is the same test.
@@ -218,7 +238,7 @@ export class SimulatedTrusteeRegistry {
         return refuse("SeatsOutOfOrder");
       previous = a.index;
       const statement = {
-        l2ChainId: this.#l2ChainId,
+        l2ChainId: this.l2ChainId,
         trusteeRegistry: this.#address,
         index: a.index,
         stubHash: r.stubHash,
@@ -231,7 +251,7 @@ export class SimulatedTrusteeRegistry {
     this.#recorded.set(key, {
       transcriptHash: Uint8Array.from(r.ceremonyTranscriptHash),
       keySetHash: setHash,
-      seats: r.seats.map((s) => ({ ...s })),
+      seats: r.seats.map(copySeat),
     });
     return { ok: true };
   }
@@ -263,7 +283,12 @@ export class SimulatedTrusteeRegistry {
     const recorded = this.#recorded.get(`${hex(stubHash)}:${hex(id)}`);
     return recorded === undefined
       ? undefined
-      : { keySetHash: Uint8Array.from(recorded.keySetHash), seats: recorded.seats };
+      : { keySetHash: Uint8Array.from(recorded.keySetHash), seats: recorded.seats.map(copySeat) };
+  }
+
+  /** The quorum pinned for `id`, or `undefined` for a panel it doesn't pin. */
+  quorumOf(id: Uint8Array): number | undefined {
+    return this.#panels.get(hex(id))?.quorum;
   }
 }
 
@@ -274,8 +299,43 @@ export class SimulatedElectionRegistry {
   readonly #definitions = new Map<string, Uint8Array>();
   #counter = 0n;
 
+  /**
+   * A registry for `deployment`, asking `trustees`, which must be the
+   * deployment's trustee registry: the contract calls the definition's
+   * `trustee_registry`, so approvals always sign that address (T-37).
+   * Throws, as the contract's deployment reverts, unless the deployment
+   * could appear in a well-formed definition (the `chain` rule).
+   */
   constructor(deployment: SimulatedDeployment, trustees: SimulatedTrusteeRegistry) {
-    this.#deployment = deployment;
+    const l2 = [
+      deployment.electionRegistry,
+      deployment.board,
+      deployment.trusteeRegistry,
+      deployment.groupRegistry,
+    ];
+    const l1 = [deployment.l1Anchor, deployment.l1Relay];
+    if (
+      [...l2, ...l1].some((a) => a.length !== 20 || isZero(a)) ||
+      l2.some((a, i) => l2.slice(i + 1).some((b) => same(a, b))) ||
+      same(deployment.l1Anchor, deployment.l1Relay) ||
+      deployment.l1ChainId === 0n ||
+      deployment.l1ChainId === deployment.l2ChainId
+    )
+      throw new RangeError("simulation: an election registry's deployment breaks the chain rule");
+    if (
+      trustees.l2ChainId !== deployment.l2ChainId ||
+      !same(trustees.address, deployment.trusteeRegistry)
+    )
+      throw new RangeError("simulation: the trustee registry isn't the deployment's");
+    this.#deployment = {
+      ...deployment,
+      electionRegistry: Uint8Array.from(deployment.electionRegistry),
+      board: Uint8Array.from(deployment.board),
+      trusteeRegistry: Uint8Array.from(deployment.trusteeRegistry),
+      groupRegistry: Uint8Array.from(deployment.groupRegistry),
+      l1Anchor: Uint8Array.from(deployment.l1Anchor),
+      l1Relay: Uint8Array.from(deployment.l1Relay),
+    };
     this.#trustees = trustees;
   }
 

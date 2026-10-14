@@ -2,19 +2,22 @@
 """Independent generator for docs/spec/vectors/live-release.json.
 
 A second implementation of docs/spec/tally.md, Live results: the release
-schedule, the running sets of a tier's cells over its scheduled snapshots,
-the change and the entries between two running sets, the release graph and
-its least positive directed cut, and the release choice with its lag. It is
-written from the spec with Python's standard library only and shares no code
-with packages/crypto.
+schedule, the running sets of a tier's cells over its scheduled snapshots
+(which only grow), the change and the entries between two running sets, the
+release graph and its least positive directed cut, the release choice with
+its lag, and the final tally's graph against the releases, whose cut the
+verifier reports. It is written from the spec with Python's standard library
+only and shares no code with packages/crypto.
 
 The least positive directed cut is computed twice, as the least maximum flow
 along an edge (Edmonds-Karp over unit capacities) and by trying every vertex
 set, and the generator stops if they disagree. For graphs of up to five
 vertices it also checks the theorem the spec relies on: the smallest
-non-empty side (the nullifiers weighted positively, or those weighted
-negatively) of any integer combination of the releases, every combination
-with coefficients from -2 to 2 tried, is the least positive directed cut.
+non-empty side (the edges weighted positively, or those weighted negatively)
+of any integer combination of the vertices' totals, every combination with
+coefficients from -2 to 2 tried, is the least positive directed cut. And it
+checks that every chosen set of releases has a cut of at least B, which the
+spec derives from the batch rule because running sets only grow.
 
 Usage: python3 -I -B packages/crypto/scripts/live-release-vectors.py <out-dir>,
 then `vp check --fix` (the committed file is formatted; its values are what
@@ -53,48 +56,56 @@ def scheduled_snapshots(epoch, period, opens_at, closes_at, live_every):
 # Running sets (tally.md, Live results: Running set).
 #
 # Each nullifier of a tier is given as its distinct ballots (repeats are one
-# ballot), each with the cell it names and the first scheduled snapshot index
-# at which it is admitted, at which every qualified seat of every panel has a
-# passing receipt for it, and at which a passing posting names it (None:
-# never by the last snapshot).
+# ballot), each with the cell it names, its L1 reference's block number
+# (`ref`), and the first scheduled snapshot index at which it is admitted and
+# at which every qualified seat of every panel has a passing receipt or
+# passing posting for it (`delivered`); None: never by the last snapshot.
+# `excluded` marks a ballot the delivery check excludes at the final tally.
 
 
-def qualifying(ballots, r):
-    """Conditions 1 to 3 at snapshot r: the one ballot that qualifies, or None."""
+def entering(ballots, r):
+    """Conditions 1 and 2 at snapshot r: the one ballot that enters, or None."""
     admitted = [b for b in ballots if b["admitted"] is not None and b["admitted"] <= r]
     if len(admitted) != 1:
         return None
     b = admitted[0]
-    if b["receipted"] is None or b["receipted"] > r:
-        return None
-    if b["posted"] is not None and b["posted"] <= r:
+    if b["delivered"] is None or b["delivered"] > r:
         return None
     return b
 
 
 def running_sets(nullifiers, snapshots, cells):
     """Per cell, the running sets of snapshots 0..snapshots (index 0 is R_0).
-
-    A nullifier enters with the one ballot that qualifies (conditions 1 to 3),
-    stays with it after a re-vote or tie, and leaves for good once a passing
-    posting for that ballot is boarded (condition 4)."""
+    A nullifier enters once, with one ballot, and stays with it for good."""
     out = [[{}] for _ in range(cells)]
     for r in range(1, snapshots + 1):
         for c in range(cells):
-            out[c].append({})
+            out[c].append(dict(out[c][r - 1]))
         for nid, ballots in nullifiers.items():
-            held = [(c, out[c][r - 1][nid]) for c in range(cells) if nid in out[c][r - 1]]
-            if held:
-                c, bid = held[0]
-                b = next(x for x in ballots if x["id"] == bid)
-                if b["posted"] is None or b["posted"] > r:
-                    out[c][r][nid] = bid
+            if any(nid in out[c][r - 1] for c in range(cells)):
                 continue
-            if any(nid in out[c][i] for c in range(cells) for i in range(1, r)):
-                continue
-            b = qualifying(ballots, r)
+            b = entering(ballots, r)
             if b is not None:
                 out[b["cell"]][r][nid] = b["id"]
+    return out
+
+
+def final_ballots(nullifiers, cell):
+    """The final tally's counted ballots of a cell: per nullifier, the admitted
+    ballot with the highest reference, none on a tie, none if excluded."""
+    out = {}
+    for nid, ballots in nullifiers.items():
+        admitted = [b for b in ballots if b["admitted"] is not None]
+        if not admitted:
+            continue
+        top = max(b["ref"] for b in admitted)
+        best = [b for b in admitted if b["ref"] == top]
+        if len(best) != 1:
+            continue
+        b = best[0]
+        if b["cell"] != cell or b["delivered"] is None or b.get("excluded"):
+            continue
+        out[nid] = b["id"]
     return out
 
 
@@ -110,18 +121,18 @@ def entries(earlier, later):
 
 
 def release_graph(sets):
-    """sets: running sets of the vertices 1..m (vertex 0 is the empty set).
-    Each nullifier is an edge from the vertex before its run to its last."""
+    """sets: the sets of the vertices 1..m (vertex 0 is the empty set), each
+    an object from nullifier to ballot. Each ballot in any of them is an edge
+    from the vertex before its run to its last."""
     seen = {}
     for i, s in enumerate(sets, start=1):
         for n, ballot in s.items():
-            seen.setdefault(n, []).append((i, ballot))
+            seen.setdefault(ballot, []).append(i)
     edges = []
-    for n in sorted(seen):
-        idx = [i for i, _ in seen[n]]
-        assert len({b for _, b in seen[n]}) == 1, "a nullifier's entry never changes ballot"
-        assert idx == list(range(idx[0], idx[-1] + 1)), "a nullifier's run is unbroken"
-        edges.append((idx[0] - 1, idx[-1], n))
+    for ballot in sorted(seen):
+        idx = seen[ballot]
+        assert idx == list(range(idx[0], idx[-1] + 1)), "a ballot's run is unbroken"
+        edges.append((idx[0] - 1, idx[-1], ballot))
     return len(sets) + 1, edges
 
 
@@ -237,23 +248,18 @@ def graph_case(name, note, sets):
 # Release choice (tally.md, Live results: Release choice).
 
 
-def qualifies(cells_sets, chosen, q, r, b, rules):
+def qualifies(cells_sets, chosen, q, r, b):
     """cells_sets: per cell, the running sets of snapshots 0..R."""
     for sets in cells_sets:
         for e in [0] + chosen:
             if change(sets[q], sets[e]) < b:
                 return "batch"
-        if "combination" in rules:
-            nv, edges = release_graph([sets[i] for i in chosen] + [sets[q]])
-            d, _ = directed_cut(nv, edges)
-            if d is not None and d < b:
-                return "combination"
         if entries(sets[q], sets[r]) < b:
             return "lag"
     return None
 
 
-def choose_releases(cells_sets, snapshots, b, rules=("combination",)):
+def choose_releases(cells_sets, snapshots, b):
     chosen = []
     decisions = []
     for r in range(2, snapshots + 1):
@@ -261,7 +267,7 @@ def choose_releases(cells_sets, snapshots, b, rules=("combination",)):
         refused = {}
         pick = None
         for q in range(r - 1, last, -1):
-            why = qualifies(cells_sets, chosen, q, r, b, rules)
+            why = qualifies(cells_sets, chosen, q, r, b)
             if why is None:
                 pick = q
                 break
@@ -269,27 +275,44 @@ def choose_releases(cells_sets, snapshots, b, rules=("combination",)):
         decisions.append({"at": r, "release": pick, "refused": refused})
         if pick is not None:
             chosen.append(pick)
+            # The theorem with grow-only sets: every side of every
+            # combination of the chosen releases holds at least B.
+            for sets in cells_sets:
+                nv, edges = release_graph([sets[i] for i in chosen])
+                d, _ = directed_cut(nv, edges)
+                assert d is None or d >= b
     return chosen, decisions
 
 
-def voters(prefix, count, enter, leave=None, cell=0, revote=None):
-    """`count` nullifiers whose first ballot enters at snapshot `enter`; if
-    `leave` is given, a passing posting for it is boarded there, and if
-    `revote` is, a second ballot is admitted and receipted there."""
+def voters(prefix, count, enter, cell=0, revote=None, tie=False):
+    """`count` nullifiers whose first ballot is delivered at snapshot `enter`;
+    with `revote`, a second ballot naming a later L1 block (or the same block,
+    a tie) is admitted and delivered there."""
     out = {}
     for i in range(count):
         nid = f"{prefix}{i:02d}"
-        ballots = [{"id": f"{nid}/1", "cell": cell, "admitted": enter, "receipted": enter, "posted": leave}]
+        ballots = [{"id": f"{nid}/1", "cell": cell, "ref": 1, "admitted": enter, "delivered": enter}]
         if revote is not None:
-            ballots.append({"id": f"{nid}/2", "cell": cell, "admitted": revote, "receipted": revote, "posted": None})
+            ref = 1 if tie else 2
+            ballots.append({"id": f"{nid}/2", "cell": cell, "ref": ref, "admitted": revote, "delivered": revote})
         out[nid] = ballots
     return out
 
 
-def release_case(name, note, nullifiers, cells, snapshots, b, compare_pairwise=False):
+def release_case(name, note, nullifiers, cells, snapshots, b):
     cells_sets = running_sets(nullifiers, snapshots, cells)
     chosen, decisions = choose_releases(cells_sets, snapshots, b)
-    case = {
+    final = []
+    for c in range(cells):
+        sets = [cells_sets[c][i] for i in chosen] + [final_ballots(nullifiers, c)]
+        nv, edges = release_graph(sets)
+        d, witness = directed_cut(nv, edges)
+        entry = {"cell": c, "finalCut": d, "witness": None}
+        if d is not None:
+            members, side, part = witness
+            entry["witness"] = {"set": members, "side": side, "ballots": part}
+        final.append(entry)
+    return {
         "id": name,
         "description": note,
         "batch": b,
@@ -299,12 +322,9 @@ def release_case(name, note, nullifiers, cells, snapshots, b, compare_pairwise=F
         "runningSets": [[dict(sorted(s.items())) for s in sets[1:]] for sets in cells_sets],
         "decisions": decisions,
         "releases": chosen,
+        "finalBallots": [dict(sorted(final_ballots(nullifiers, c).items())) for c in range(cells)],
+        "final": final,
     }
-    if compare_pairwise:
-        pw, _ = choose_releases(cells_sets, snapshots, b, rules=())
-        assert pw != chosen
-        case["pairwiseOnlyReleases"] = pw
-    return case
 
 
 def main():
@@ -332,30 +352,37 @@ def main():
             }
         )
 
-    # Running set: one nullifier per rule, over four snapshots of cell 0.
-    def ballot(nid, k, cell=0, admitted=1, receipted=1, posted=None):
-        return {"id": f"{nid}/{k}", "cell": cell, "admitted": admitted, "receipted": receipted, "posted": posted}
+    # Running set: one nullifier per rule, over four snapshots of two cells.
+    def ballot(nid, k, cell=0, admitted=1, delivered=1, ref=None):
+        return {"id": f"{nid}/{k}", "cell": cell, "ref": k if ref is None else ref, "admitted": admitted, "delivered": delivered}
 
     rs_nullifiers = {
         "plain": [ballot("plain", 1)],
-        "late-receipts": [ballot("late-receipts", 1, receipted=3)],
-        "never-receipted": [ballot("never-receipted", 1, receipted=None)],
-        "revoter": [ballot("revoter", 1), ballot("revoter", 2, admitted=3, receipted=3)],
-        "pending-revote": [ballot("pending-revote", 1), ballot("pending-revote", 2, admitted=4, receipted=2)],
-        "posted": [ballot("posted", 1, posted=2)],
-        "tie": [ballot("tie", 1, admitted=2), ballot("tie", 2, admitted=2)],
+        "late-delivery": [ballot("late-delivery", 1, delivered=3)],
+        "never-delivered": [ballot("never-delivered", 1, delivered=None)],
+        "revoter": [ballot("revoter", 1), ballot("revoter", 2, admitted=3, delivered=3)],
+        "pending-revote": [ballot("pending-revote", 1), ballot("pending-revote", 2, admitted=4, delivered=2)],
+        "tie-before": [ballot("tie-before", 1, admitted=2), ballot("tie-before", 2, admitted=2, ref=1)],
+        "tie-after": [ballot("tie-after", 1), ballot("tie-after", 2, admitted=2, ref=1)],
         "other-cell": [ballot("other-cell", 1, cell=1)],
-        "two-cells": [ballot("two-cells", 1), ballot("two-cells", 2, cell=1, admitted=2, receipted=2)],
-        "unreceipted-first": [
-            ballot("unreceipted-first", 1, receipted=None),
-            ballot("unreceipted-first", 2, admitted=3, receipted=3),
+        "two-cells": [ballot("two-cells", 1), ballot("two-cells", 2, cell=1, admitted=2, delivered=2)],
+        "undelivered-first": [
+            ballot("undelivered-first", 1, delivered=None),
+            ballot("undelivered-first", 2, admitted=3, delivered=3),
         ],
-        "admitted-later": [ballot("admitted-later", 1, admitted=2, receipted=1)],
+        "admitted-later": [ballot("admitted-later", 1, admitted=2, delivered=1)],
     }
     rs = running_sets(rs_nullifiers, 4, 2)
     running = {
         "nullifiers": rs_nullifiers,
-        "cells": [{"cell": c, "runningSets": [dict(sorted(x.items())) for x in rs[c][1:]]} for c in (0, 1)],
+        "cells": [
+            {
+                "cell": c,
+                "runningSets": [dict(sorted(x.items())) for x in rs[c][1:]],
+                "finalBallots": dict(sorted(final_ballots(rs_nullifiers, c).items())),
+            }
+            for c in (0, 1)
+        ],
     }
 
     # Release graphs.
@@ -364,6 +391,8 @@ def main():
 
     xs = [f"x{i:02d}" for i in range(20)]
     ys = [f"y{i:02d}" for i in range(20)]
+    # Arbitrary runs, as under ADR 0027's rule, where re-voters and postings
+    # leave: why running sets must only grow.
     graphs = [
         graph_case(
             "three-releases-isolate-one",
@@ -399,28 +428,15 @@ def main():
         steady.update(voters(f"s{r}-", 25, r))
     revoting = dict(steady)
     revoting.update(voters("rv-", 3, 1, revote=3))
-    revoting.update(voters("tie-", 1, 1, revote=4))
-    revoting["tie-00"].append({"id": "tie-00/3", "cell": 0, "admitted": 4, "receipted": 4, "posted": None})
+    revoting.update(voters("tie-", 1, 1, revote=4, tie=True))
+    lone = dict(steady)
+    lone.update(voters("lone-", 1, 1, revote=6))
     two_cells = {}
     for r in range(1, 6):
         two_cells.update(voters(f"big{r}-", 30, r, cell=0))
     two_cells.update(voters("small-", 12, 1, cell=1))
     two_cells.update(voters("small-mid-", 12, 3, cell=1))
     two_cells.update(voters("small-late-", 20, 5, cell=1))
-    combo = {}
-    combo.update(voters("x", 20, 1, leave=3))
-    combo.update(voters("z", 1, 1, leave=2))
-    combo.update(voters("y", 20, 2))
-    combo.update(voters("w", 20, 3))
-    combo.update(voters("v", 20, 4))
-    combo.update(voters("u", 20, 5))
-    combo.update(voters("t", 20, 6))
-    departing = {}
-    departing.update(voters("a", 10, 1))
-    departing.update(voters("z", 1, 1, leave=2))
-    departing.update(voters("d", 19, 1, leave=4))
-    for r in range(2, 7):
-        departing.update(voters(f"e{r}-", 25, r))
     quiet_then_busy = {}
     quiet_then_busy.update(voters("q-", 21, 1))
     quiet_then_busy.update(voters("r-", 3, 2))
@@ -430,37 +446,27 @@ def main():
         release_case("steady", "25 new voters per snapshot: every decision releases the snapshot before it.", steady, 1, 6, b),
         release_case(
             "re-votes-stay",
-            "Released voters re-vote at snapshot 3 and one ties at 4: each keeps its first ballot in the running sets, so nothing leaves and the releases go on as without them.",
+            "Released voters re-vote at snapshot 3 and one ties at 4: each keeps its first ballot in the running sets, so the releases go on as without them; the final tally's graph has their four released ballots alone on one side.",
             revoting,
             1,
             6,
             b,
         ),
         release_case(
+            "lone-revoter",
+            "One released voter re-votes after the last release: the final tally less the releases isolates that voter's released ballot, a cut of 1 the verifier flags.",
+            lone,
+            1,
+            6,
+            b,
+        ),
+        release_case(
             "small-cell",
-            "A tier of two cells whose small cell reaches 20 voters at snapshot 3 and has 20 changes after it only at 5: the busy cell waits, and snapshot 4 is the first release.",
+            "A tier of two cells whose small cell reaches 20 voters at snapshot 3 and has 20 entries after it only at 5: the busy cell waits, and snapshot 4 is the first release.",
             two_cells,
             2,
             5,
             b,
-        ),
-        release_case(
-            "combination",
-            "z's ballot is posted while 20 enter: the ADR's pairwise rules would release snapshot 2, whose T2 - T1 has z alone on its leaving side; the combination rule waits for snapshot 3, where 20 more have left.",
-            combo,
-            1,
-            7,
-            b,
-            compare_pairwise=True,
-        ),
-        release_case(
-            "departures",
-            "One released voter's ballot is posted before snapshot 2: no later snapshot is released until 19 more have left, so that the departures since release 1 are 20, at snapshot 4.",
-            departing,
-            1,
-            6,
-            b,
-            compare_pairwise=True,
         ),
         release_case(
             "latest-qualifying",
@@ -482,7 +488,7 @@ def main():
 
     doc = {
         "format": "abolish-live-release-vectors/1",
-        "title": "Live results: the release schedule, running sets, the release graph and its least positive directed cut, and the release choice",
+        "title": "Live results: the release schedule, running sets, release graphs and their least positive directed cuts, the release choice and the final tally against the releases",
         "spec": "docs/spec/tally.md",
         "generator": "packages/crypto/scripts/live-release-vectors.py: an independent Python implementation of docs/spec/tally.md (Live results), computing each directed cut by maximum flow along every edge and by trying every vertex set, and checking the theorem on graphs of up to five vertices by trying every combination with coefficients from -2 to 2",
         "minLiveBatch": str(MIN_LIVE_BATCH),

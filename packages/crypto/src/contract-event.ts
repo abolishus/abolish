@@ -1,10 +1,12 @@
-// The contract-event record, record type 0x0008 versions 1 and 2
+// The contract-event record, record type 0x0008 versions 1 to 3
 // (docs/spec/contracts.md, Contract-event record): one log of one of our L2
 // contracts exactly as the event accumulator hashes it, and the event check
 // that ties it to the contract a definition names and to the event tables of
-// that contract's section. The two versions share a layout and differ only in
+// that contract's section. The versions share a layout and differ only in
 // their tables: version 2 adds the board's events and reads the registries'
-// events as the deployable registries emit them. The accumulator's storage proofs are the only
+// events as the deployable registries emit them, and version 3 adds the
+// board's relayed-ballot and close-statement events (the close rule, T-50,
+// T-35). The accumulator's storage proofs are the only
 // evidence archived with it: no transaction, receipt or header, so the
 // archive holds no bytes our contracts didn't define (T-17;
 // docs/adr/0025-contract-event-evidence.md). The event check refuses any log
@@ -33,6 +35,7 @@ import {
   type GroupAddition,
   type GroupRemoval,
 } from "./group-registry.ts";
+import { decodeCloseStatement } from "./close-statement.ts";
 import { frameBallot, frameDelivery } from "./direct-submit.ts";
 import {
   type AnyElectionDefinitionRecord,
@@ -64,12 +67,13 @@ const contractEventV1 = struct([
 ] as const);
 
 /**
- * Record type 0x0008, versions 1 and 2 (docs/spec/contracts.md,
+ * Record type 0x0008, versions 1 to 3 (docs/spec/contracts.md,
  * Contract-event record): one layout, with each version's own event tables.
  */
 export const CONTRACT_EVENT = recordType(RECORD_TYPES.contractEvent, {
   1: contractEventV1,
   2: contractEventV1,
+  3: contractEventV1,
 });
 
 const SCHEMA = new RecordSchema([CONTRACT_EVENT]);
@@ -77,7 +81,7 @@ const SCHEMA = new RecordSchema([CONTRACT_EVENT]);
 export type ContractEventRecord = CodecValue<typeof contractEventV1>;
 
 /** The record's versions; the profile pins one for every contract's events. */
-export type ContractEventVersion = 1 | 2;
+export type ContractEventVersion = 1 | 2 | 3;
 
 export function encodeContractEvent(
   record: ContractEventRecord,
@@ -196,6 +200,26 @@ export type ContractEvent =
       /** The record's own `ballot_hash`; a ballot's, recomputed from its bytes. */
       readonly ballotHash: Uint8Array;
       /** The record the board accepted, framed as the board frames it. */
+      readonly record: Uint8Array;
+    }
+  | {
+      readonly event: "RelayedBallotSubmitted";
+      readonly definitionHash: Uint8Array;
+      /** The ballot's hash, recomputed from its bytes. */
+      readonly ballotHash: Uint8Array;
+      /** The relay call's index, L1 block, stamp and gas limit, as the deposit named them. */
+      readonly index: bigint;
+      readonly l1Block: bigint;
+      readonly stamp: bigint;
+      readonly gasLimit: bigint;
+      /** The ballot record, framed as the board frames it. */
+      readonly record: Uint8Array;
+    }
+  | {
+      readonly event: "CloseStatementSubmitted";
+      readonly definitionHash: Uint8Array;
+      readonly signer: number;
+      /** The close statement, which decodes strictly as version 1. */
       readonly record: Uint8Array;
     };
 
@@ -535,6 +559,84 @@ function boardEvent(
   };
 }
 
+// A ballot forced through the L1 relay (Board, Relayed ballots): the relay
+// call's four fields, which verifier 4.5 matches against the call hash the
+// relay stored, then the record, framed as an ordinary submission's is.
+const RELAYED_BALLOT_SUBMITTED: EventSpec = {
+  signature: "RelayedBallotSubmitted(bytes32,bytes32,uint64,uint64,uint64,uint64,bytes)",
+  decode(topics, data) {
+    const [, definitionHash, ballotHash] = topics;
+    if (topics.length !== 3 || definitionHash === undefined || ballotHash === undefined)
+      return "event-topics";
+    const abi = readAbi(data, 5, [{ at: 4, words: false, max: MAX_EVENT_DATA }]);
+    if (abi === undefined) return "event-data";
+    const [index, l1Block, stamp, gasLimit] = [0, 1, 2, 3].map((i) =>
+      uintWord(word(abi.words, i), 64),
+    );
+    const record = abi.tails[0];
+    const framed = record && frameBallot(record);
+    if (
+      index === undefined ||
+      l1Block === undefined ||
+      stamp === undefined ||
+      gasLimit === undefined ||
+      record === undefined ||
+      framed === undefined ||
+      !equalBytes(framed.definitionHash, definitionHash) ||
+      !equalBytes(framed.ballotHash, ballotHash)
+    )
+      return "event-data";
+    return {
+      event: "RelayedBallotSubmitted",
+      definitionHash: definitionHash.slice(),
+      ballotHash: ballotHash.slice(),
+      index,
+      l1Block,
+      stamp,
+      gasLimit,
+      record,
+    };
+  },
+};
+
+// A close statement through the contract path (Board, Close statements): the
+// record whole, which decodes strictly as version 1, the version contract-event
+// version 3 fixes, with its `definition_hash` and `signer` as the topics. The
+// signature's verification and the seat are the verifier's (close.md, Close
+// head), as the board judged them when it accepted the record.
+const CLOSE_STATEMENT_LENGTH = 180;
+
+const CLOSE_STATEMENT_SUBMITTED: EventSpec = {
+  signature: "CloseStatementSubmitted(bytes32,uint8,bytes)",
+  decode(topics, data) {
+    const [, definitionHash, signerWord] = topics;
+    const signer = signerWord && uintWord(signerWord, 8);
+    if (topics.length !== 3 || definitionHash === undefined || signer === undefined)
+      return "event-topics";
+    const record = readAbi(data, 1, [{ at: 0, words: false, max: CLOSE_STATEMENT_LENGTH }])
+      ?.tails[0];
+    if (record === undefined) return "event-data";
+    let statement;
+    try {
+      statement = decodeCloseStatement(record, 1);
+    } catch (e) {
+      if (e instanceof DecodeError) return "event-data";
+      throw e;
+    }
+    if (
+      !equalBytes(statement.definition_hash, definitionHash) ||
+      BigInt(statement.signer) !== signer
+    )
+      return "event-data";
+    return {
+      event: "CloseStatementSubmitted",
+      definitionHash: definitionHash.slice(),
+      signer: statement.signer,
+      record,
+    };
+  },
+};
+
 const BOARD_EVENTS: readonly EventSpec[] = [
   boardEvent("BallotSubmitted", frameBallot),
   boardEvent("ShareReceiptSubmitted", (r) => frameDelivery(RECORD_TYPES.shareReceipt, r)),
@@ -567,10 +669,17 @@ const TABLES: Readonly<
     "group-registry": GROUP_EVENTS,
     board: BOARD_EVENTS,
   },
+  // Version 2's rows, with the close rule's two board events added.
+  3: {
+    "election-registry": [ELECTION_CREATED, DEFINITION_REGISTERED_V2],
+    "trustee-registry": [PANEL_PINNED, CEREMONY_REGISTERED_V2],
+    "group-registry": GROUP_EVENTS,
+    board: [...BOARD_EVENTS, RELAYED_BALLOT_SUBMITTED, CLOSE_STATEMENT_SUBMITTED],
+  },
 };
 
 const ROLES = ["election-registry", "trustee-registry", "group-registry", "board"] as const;
-const VERSIONS = [1, 2] as const;
+const VERSIONS = [1, 2, 3] as const;
 
 const hexOf = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
 
@@ -599,6 +708,7 @@ export const CONTRACT_EVENT_SIGNATURES: Readonly<
 > = Object.freeze({
   1: signaturesOf(1),
   2: signaturesOf(2),
+  3: signaturesOf(3),
 });
 
 function signaturesOf(v: ContractEventVersion): Readonly<Record<ContractRole, readonly string[]>> {

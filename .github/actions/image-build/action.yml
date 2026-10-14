@@ -67,11 +67,18 @@ runs:
         case "$SERVICE" in api | web) ;; *) echo "::error::unknown service $SERVICE"; exit 1 ;; esac
         vp run --no-cache --filter "@abolishus/$SERVICE..." build
         mkdir -p "$OUT"
-        docker buildx build --builder abolish --no-cache \
-          --platform linux/amd64 --provenance=false --sbom=false \
-          --metadata-file "$RUNNER_TEMP/metadata.json" \
-          --output "type=oci,dest=$OUT/$SERVICE.tar,rewrite-timestamp=true" \
-          "apps/$SERVICE"
+        # The base image comes anonymously from public.ecr.aws, which rate-limits
+        # (toomanyrequests) the runners' shared addresses. It is pinned by digest,
+        # so a retry builds exactly what the first attempt would have.
+        for attempt in 1 2 3 4; do
+          docker buildx build --builder abolish --no-cache \
+            --platform linux/amd64 --provenance=false --sbom=false \
+            --metadata-file "$RUNNER_TEMP/metadata.json" \
+            --output "type=oci,dest=$OUT/$SERVICE.tar,rewrite-timestamp=true" \
+            "apps/$SERVICE" && break
+          [ "$attempt" = 4 ] && exit 1
+          sleep $((attempt * 30))
+        done
         digest="$(jq -er '."containerimage.digest"' "$RUNNER_TEMP/metadata.json")"
         [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::bad digest $digest"; exit 1; }
         echo "digest=$digest" >>"$GITHUB_OUTPUT"

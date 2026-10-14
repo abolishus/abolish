@@ -7,7 +7,11 @@
 // crypto's `checkCeremonyTranscript` with its context rebuilt from the
 // definition, never from the transcript, and ballots are encrypted only to
 // the keys that check registered, so a run exercises the same binding a
-// voter's client and a trustee node rely on (T-37). Nothing here
+// voter's client and a trustee node rely on (T-37). The election is created
+// on the simulated L2's election registry, which gives its identifier, and
+// once every seat has checked the transcript and signed the key set that
+// check returned, the trustee registry records the ceremony and the election
+// registry the definition (./l2.ts; T-37, T-14, T-34). Nothing here
 // reimplements a check the verifier makes (AGENTS.md, Architecture).
 
 import {
@@ -22,10 +26,11 @@ import {
   type ElectionDefinitionV4,
   electionDefinitionV4Hash,
   electionDefinitionV4Rule,
-  electionId,
   electionStubV4Hash,
   encodeCeremonyTranscript,
   identityKey,
+  keySetEntry,
+  keySetHash,
   keysMessage,
   membershipVkHash,
   newDisplayTextSalt,
@@ -35,8 +40,18 @@ import {
   type RegisteredKeys,
   revealsMessage,
   type SeatSecrets,
+  signCeremonyRegistration,
   TALLY_SCHEMES,
 } from "@abolishus/crypto";
+import {
+  type CeremonyRegistrationRecord,
+  l2BlockAt,
+  rule7Quorum,
+  SIMULATED_REGISTRATION_LEAD,
+  SimulatedElectionRegistry,
+  type SimulatedDeployment,
+  SimulatedTrusteeRegistry,
+} from "./l2.ts";
 import { type Plan, SIMULATED_CLOSES_AT, SIMULATED_OPENS_AT, selectionRange } from "./plan.ts";
 import type { Scenario } from "./scenario.ts";
 
@@ -48,20 +63,40 @@ import type { Scenario } from "./scenario.ts";
 export const SIMULATED_L2_CHAIN_ID = 31338n;
 export const SIMULATED_L1_CHAIN_ID = 31337n;
 
-// Recognisable placeholder values: an address repeats one byte, and a tier's
-// root is 2²⁰⁰ plus its tier, so none can be mistaken for a deployment's or a
-// real tier tree's root (a Poseidon output).
-const PLACEHOLDER_BYTES = Object.freeze({
-  electionRegistry: 0xa1,
-  board: 0xa2,
-  trusteeRegistry: 0xa3,
-  groupRegistry: 0xa4,
-  l1Anchor: 0xb1,
-  l1Relay: 0xb2,
-} as const);
+// Recognisable placeholder values: an L1 address repeats one byte, and a
+// tier's root is 2²⁰⁰ plus its tier, so none can be mistaken for a
+// deployment's or a real tier tree's root (a Poseidon output).
+const PLACEHOLDER_BYTES = Object.freeze({ l1Anchor: 0xb1, l1Relay: 0xb2 } as const);
 const placeholder = (name: keyof typeof PLACEHOLDER_BYTES) =>
   new Uint8Array(20).fill(PLACEHOLDER_BYTES[name]);
 const placeholderRoot = (tier: number) => (1n << 200n) + BigInt(tier);
+
+/**
+ * The account that creates the election and registers its definition. The
+ * registry compares it only with the creation's (./l2.ts).
+ */
+export const SIMULATED_CREATOR = "creator";
+
+/**
+ * A fresh deployment: random L2 addresses, so each run's election registry,
+ * counting from 0, still gives an identifier no other run has, and the
+ * placeholder L1 anchor and relay. The anchoring clock starts at the Unix
+ * epoch (./anchor.ts).
+ */
+export function simulatedDeployment(): SimulatedDeployment {
+  const address = () => crypto.getRandomValues(new Uint8Array(20));
+  return {
+    l2ChainId: SIMULATED_L2_CHAIN_ID,
+    electionRegistry: address(),
+    board: address(),
+    trusteeRegistry: address(),
+    groupRegistry: address(),
+    l1ChainId: SIMULATED_L1_CHAIN_ID,
+    l1Anchor: placeholder("l1Anchor"),
+    l1Relay: placeholder("l1Relay"),
+    epoch: 0n,
+  };
+}
 
 export interface SimulatedElection {
   readonly definition: ElectionDefinitionV4;
@@ -74,6 +109,13 @@ export interface SimulatedElection {
   readonly seats: readonly SeatSecrets[];
   /** The keys `checkCeremonyTranscript` registered, by seat. */
   readonly registered: readonly RegisteredKeys[];
+  readonly deployment: SimulatedDeployment;
+  /** The trustee registry, with the panel pinned and the ceremony recorded. */
+  readonly trusteeRegistry: SimulatedTrusteeRegistry;
+  /** The election registry, with the election created and its definition registered. */
+  readonly electionRegistry: SimulatedElectionRegistry;
+  /** The record the trustee registry recorded: every registered seat's approval. */
+  readonly registration: CeremonyRegistrationRecord;
 }
 
 /** The board-entry version the profile pins: 4, which carries the delivery records and destruction statements ballot version 2 and tally-opening version 1 need ([[verifier]] 2.3). */
@@ -120,11 +162,14 @@ function displayText(scenario: Scenario): DisplayText {
 }
 
 /**
- * Builds the election's stub from the scenario and its plan, listing
+ * Deploys the simulated L2 registries with the panel pinned, creates the
+ * election, builds its stub from the scenario and its plan, listing
  * `receiptKey` (a `p256-key`, the board operator's) as its one receipt key,
  * runs the key ceremony over it with every seat taking part, checks the
- * transcript and returns the definition that binds it. Throws only on a bug:
- * an honest ceremony that doesn't check, or a definition that breaks a rule.
+ * transcript, records the ceremony from every registered seat's approval and
+ * registers the definition that binds it, a day before opening. Throws only
+ * on a bug: an honest ceremony that doesn't check, a definition that breaks
+ * a rule, or a registry refusing either.
  */
 export function simulateElection(
   scenario: Scenario,
@@ -137,26 +182,29 @@ export function simulateElection(
     crypto.getRandomValues(new Uint8Array(32)),
   );
   const panel: Panel = { threshold: k, keys: identitySecrets.map((s) => identityKey(s)) };
-  const electionRegistry = placeholder("electionRegistry");
+  const deployment = simulatedDeployment();
+  // The registry pins the panel at deployment, with rule 7's quorum (T-14).
+  const trusteeRegistry = new SimulatedTrusteeRegistry(
+    deployment.l2ChainId,
+    deployment.trusteeRegistry,
+    [{ panel, quorum: rule7Quorum(panel) }],
+  );
+  const electionRegistry = new SimulatedElectionRegistry(deployment, trusteeRegistry);
   const voters = new Map(plan.tiers.map((t) => [t, 0n]));
   for (const v of plan.voters) voters.set(v.tier, (voters.get(v.tier) ?? 0n) + 1n);
   const stub: ElectionDefinitionV4 = {
     profile: profile(),
-    // A random counter, not a registry's count of elections: two runs never
-    // share an election identifier.
-    election_id: electionId(
-      SIMULATED_L2_CHAIN_ID,
-      electionRegistry,
-      crypto.getRandomValues(new BigUint64Array(1))[0] as bigint,
-    ),
-    l2_chain_id: SIMULATED_L2_CHAIN_ID,
-    l1_chain_id: SIMULATED_L1_CHAIN_ID,
-    election_registry: electionRegistry,
-    board: placeholder("board"),
-    trustee_registry: placeholder("trusteeRegistry"),
-    group_registry: placeholder("groupRegistry"),
-    l1_anchor: placeholder("l1Anchor"),
-    l1_relay: placeholder("l1Relay"),
+    // The registry's, from its counter, at a creation finalized before the
+    // stub is written (docs/spec/contracts.md, Election identifier).
+    election_id: electionRegistry.createElection(SIMULATED_CREATOR),
+    l2_chain_id: deployment.l2ChainId,
+    l1_chain_id: deployment.l1ChainId,
+    election_registry: deployment.electionRegistry,
+    board: deployment.board,
+    trustee_registry: deployment.trusteeRegistry,
+    group_registry: deployment.groupRegistry,
+    l1_anchor: deployment.l1Anchor,
+    l1_relay: deployment.l1Relay,
     election_type: ELECTION_TYPES[scenario.election],
     tally_scheme: TALLY_SCHEMES.pedersenVss,
     option_count: scenario.options,
@@ -227,6 +275,40 @@ export function simulateElection(
   };
   const rule = electionDefinitionV4Rule(definition);
   if (rule !== undefined) throw new Error(`simulation: the definition breaks ${rule}`);
+  // Every seat the check registered signs the key set it returned, over the
+  // registry's chain and address (docs/spec/trustee-identity.md, Ceremony
+  // registration), and anyone submits the record (T-71).
+  const keySet = checked.registered.map(keySetEntry);
+  const setHash = keySetHash(keySet);
+  const registration: CeremonyRegistrationRecord = {
+    panelId: definition.panel_id,
+    stubHash: params.stubHash,
+    ceremonyTranscriptHash: definition.ceremony_transcript_hash,
+    seats: keySet,
+    approvals: checked.registered.map(({ index }) => ({
+      index,
+      signature: signCeremonyRegistration(identitySecrets[index - 1] as Uint8Array, panel, {
+        l2ChainId: definition.l2_chain_id,
+        trusteeRegistry: definition.trustee_registry,
+        index,
+        stubHash: params.stubHash,
+        ceremonyTranscriptHash: definition.ceremony_transcript_hash,
+        keySetHash: setHash,
+      }),
+    })),
+  };
+  const recorded = trusteeRegistry.registerCeremony(registration);
+  if (!recorded.ok)
+    throw new Error(`simulation: the trustee registry refused the ceremony (${recorded.refusal})`);
+  const accepted = electionRegistry.registerDefinition(
+    SIMULATED_CREATOR,
+    definition,
+    l2BlockAt(definition.opens_at - SIMULATED_REGISTRATION_LEAD),
+  );
+  if (!accepted.ok)
+    throw new Error(
+      `simulation: the election registry refused the definition (${accepted.refusal})`,
+    );
   return {
     definition,
     definitionHash: electionDefinitionV4Hash(definition),
@@ -235,5 +317,9 @@ export function simulateElection(
     panel,
     seats,
     registered: checked.registered,
+    deployment,
+    trusteeRegistry,
+    electionRegistry,
+    registration,
   };
 }

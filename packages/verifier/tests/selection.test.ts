@@ -357,7 +357,9 @@ const row = (r: Report, id: string) => {
   return { status, ...(code !== undefined && { code }), ...(at !== undefined && { at }) };
 };
 
-describe("6.1 over the vectors' bundles", () => {
+// Each test verifies a whole bundle (a pairing per membership proof), which
+// has taken over the 5-second default on CI's shared runners.
+describe("6.1 over the vectors' bundles", { timeout: 60_000 }, () => {
   test("under format 4, 5.8 never runs, so 6.1 is never reached", () => {
     const r = bundle();
     expect(settled(r)).toBe(false);

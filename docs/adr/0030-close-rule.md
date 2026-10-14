@@ -137,3 +137,7 @@ Under rule A (`AGENTS.md`): **option E** for ordinary contract-path ballots, the
 - **The unchecked report** lists the counted ballots that have only ordinary copies, rather than those "after `N_c − δ`".
 
 [[revoting]]'s MUST now lists five ways a ballot made after close can count: the three of Known-weak, the relay's seconds after close, and a rebuild past δ when `n − k + 1` seats stay silent and the close is unchecked, which needs fewer seats than `k` whenever `k > (n + 1) / 2` and no false statement.
+
+## Amendment (2026-10-13, P1-18 part 4c-2b-2b-2a)
+
+[[contracts]] (L1 relay) specifies the relay with three changes to Recommendation's wording, which it, not this ADR, states normatively: each call's word binds the whole record and the deposit's gas limit, not the ballot's hash, which leaves out the membership proof and the L1 reference, so a forged deposit of the same ballot with another proof would have matched (T-71, T-31); the relay stores one word per call beside its event accumulator, so 4.5 matches each relayed ballot alone, even after a call whose deposit left no event; and the stamp is the relay's own `block.timestamp`, so the match needs no L1 header, which a verifier still compares where it reads one.

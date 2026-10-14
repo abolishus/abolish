@@ -8,12 +8,13 @@
 // disagreement between the simulation and the verifier, which the run
 // treats as a bug (T-23, T-37, T-54).
 //
-// Four of the passing rows check little here: admission rejects on the
+// Three of the passing rows check little here: admission rejects on the
 // membership proof before it verifies the validity proofs, so 5.4 covers
-// only each ballot's shape and qualified share hashes; 5.5 and 5.7 run over
-// no admitted ballot; and a version-1 definition lists no receipt keys, so 2.9
-// has nothing to read. They are required anyway, so a change that fails
-// them is caught.
+// only each ballot's shape and qualified share hashes, and 5.5 and 5.7 run
+// over no admitted ballot. They are required anyway, so a change that fails
+// them is caught. 2.9 reads the definition's one receipt key from the
+// anchor's receipt-key record in the bundle's L1 state, registered a day
+// before opening (T-26, T-71).
 
 import type { CheckCode, Report } from "@abolishus/verifier";
 

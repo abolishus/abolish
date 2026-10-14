@@ -6,7 +6,9 @@
 // (docs/spec/contracts.md, Board anchor, Verification). The anchor holds what
 // the simulated authority anchored, at the slots of the contract's ERC-7201
 // layout, so the verifier finds exactly those checkpoints, matched against
-// the copy (T-23, T-24). The state is simulated: one account in the state
+// the copy (T-23, T-24), and the authority's receipt-key record, from which
+// the verifier's 2.9 judges the definition's receipt keys (T-26, T-71). The
+// state is simulated: one account in the state
 // trie, placeholder code, and a header whose other fields are zero
 // (SIMULATION_STUBS).
 
@@ -14,8 +16,8 @@ import {
   type Anchor,
   type AnchorClock,
   checkpointHash,
-  type ElectionDefinition,
-  encodeElectionDefinition,
+  type ElectionDefinitionV4,
+  encodeElectionDefinitionV4,
   type Panel,
 } from "@abolishus/crypto";
 import { keccak_256 } from "@noble/hashes/sha3.js";
@@ -46,6 +48,19 @@ export function checkpointSlot(electionId: Uint8Array, segment: number): Uint8Ar
 /** Slot of `lowestSegmentPlusOne[electionId]`: `keccak256(abi.encode(election_id, A + 1))`. */
 export function lowestSegmentSlot(electionId: Uint8Array): Uint8Array {
   return keccak_256(concatBytes(electionId, word(ANCHOR_NAMESPACE + 1n)));
+}
+
+/**
+ * Slot of receipt key `p ‖ x`'s record: `keccak256(abi.encode(x,
+ * keccak256(abi.encode(uint256(p), A + 4))))` (docs/spec/contracts.md, Board
+ * anchor, Receipt keys).
+ */
+export function receiptKeySlot(key: Uint8Array): Uint8Array {
+  if (key.length !== 33) throw new RangeError("simulation: a receipt key is 33 bytes");
+  const inner = keccak_256(
+    concatBytes(word(BigInt(key[0] as number)), word(ANCHOR_NAMESPACE + 4n)),
+  );
+  return keccak_256(concatBytes(key.subarray(1), inner));
 }
 
 // A storage value: the word's RLP without its leading zeros. Zero is never stored.
@@ -93,7 +108,7 @@ export function simulatedHeader(block: BundleBlock, stateRoot: Uint8Array): Uint
 }
 
 export interface BundleInputs {
-  readonly definition: ElectionDefinition;
+  readonly definition: ElectionDefinitionV4;
   readonly panel: Panel;
   readonly clock: AnchorClock;
   /** The board copy: every entry, encoded, in index order. */
@@ -102,6 +117,8 @@ export interface BundleInputs {
   readonly anchors: readonly Anchor[];
   /** The election's first segment `f`, from its creation event. */
   readonly firstSegment: number;
+  /** The anchor's receipt-key record at `block`: each registered key with its word. */
+  readonly receiptKeys: readonly { readonly key: Uint8Array; readonly word: Uint8Array }[];
   readonly block: BundleBlock;
 }
 
@@ -113,12 +130,13 @@ export interface VerifierBundle {
 
 /**
  * The format-4 bundle of an election whose anchor, at `l1_anchor`, holds the
- * given anchors at `block`. The anchor's storage has the lowest anchored
- * segment plus one and each anchored segment's checkpoint hash; anchors in
- * later blocks aren't in that state yet.
+ * given anchors and receipt-key record at `block`. The anchor's storage has
+ * the lowest anchored segment plus one, each anchored segment's checkpoint
+ * hash and each registered key's word; anchors in later blocks aren't in
+ * that state yet.
  */
 export function verifierBundle(inputs: BundleInputs): VerifierBundle {
-  const { definition, panel, clock, entries, anchors, firstSegment, block } = inputs;
+  const { definition, panel, clock, entries, anchors, firstSegment, receiptKeys, block } = inputs;
   const electionId = definition.election_id;
   const held = anchors.filter((a) => a.anchoredAt <= block.timestamp);
   const storage: [Uint8Array, Uint8Array][] = held.map((a) => [
@@ -131,6 +149,7 @@ export function verifierBundle(inputs: BundleInputs): VerifierBundle {
   );
   if (lowest !== undefined)
     storage.push([lowestSegmentSlot(electionId), storageValue(word(BigInt(lowest) + 1n))]);
+  for (const r of receiptKeys) storage.push([receiptKeySlot(r.key), storageValue(r.word)]);
   const storageTrie = buildTrie(storage);
   const account = encodeRlp([
     uintBytes(1n), // nonce: a contract's starts at 1 (EIP-161)
@@ -142,7 +161,7 @@ export function verifierBundle(inputs: BundleInputs): VerifierBundle {
   const decimal = (n: bigint | number) => n.toString();
   const json = JSON.stringify({
     format: BUNDLE_FORMAT_CEREMONY,
-    definition: bytesToHex(encodeElectionDefinition(definition)),
+    definition: bytesToHex(encodeElectionDefinitionV4(definition)),
     clock: {
       epoch: decimal(clock.epoch),
       period: decimal(clock.period),

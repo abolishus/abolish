@@ -1,12 +1,13 @@
 import {
-  ballotElection,
+  cellBallotElection,
+  cellTrackingCode,
   decodeOpening,
-  encodeOpening,
+  encodeOpeningV2,
   encryptShares,
   GROUP_ORDER,
-  openChallenge,
+  identityKey,
+  openChallengeV2,
   shareVote,
-  trackingCode,
 } from "@abolishus/crypto";
 import { describe, expect, it } from "vite-plus/test";
 import { planElection, type Scenario, selectionRange } from "../src/index.ts";
@@ -29,8 +30,13 @@ const scenario: Scenario = {
 };
 
 // One election for every case: the ceremony is the slow part.
-const simulated = simulateElection(scenario, planElection(scenario));
-const election = ballotElection(simulated.definition, simulated.registered);
+const simulated = simulateElection(
+  scenario,
+  planElection(scenario),
+  identityKey(crypto.getRandomValues(new Uint8Array(32))),
+);
+// Tiers 0 and 2 vote, so the partition has two cells: 0 (tier 0) and 1 (tier 2).
+const election = cellBallotElection(simulated.definition, simulated.registered);
 const keys = simulated.registered.map((r) => r.kemKey);
 const { min, max } = selectionRange(scenario);
 const rules = {
@@ -41,18 +47,18 @@ const rules = {
   panelSize: scenario.trustees.panel,
 };
 
-const voter = { tier: 0, votes: [1, 0, 0] } as const;
+const voter = { cell: 0, votes: [1, 0, 0] } as const;
 
-// A casting device's attempt for `votes` and `tier`: the code it shows before
+// A casting device's attempt for `votes` in `cell`: the code it shows before
 // the choice, and the opening it hands over on a challenge.
-function attempt(votes: readonly (0 | 1)[], tier: 0 | 2 = 0, r = rules) {
+function attempt(votes: readonly (0 | 1)[], cell = 0, r = rules) {
   const encrypted = encryptShares(
     { definitionHash: simulated.definitionHash },
     shareVote(r, votes),
     keys,
   );
-  const code = trackingCode(election, tier, encrypted);
-  return { code, bytes: encodeOpening(openChallenge(election, tier, encrypted).opening) };
+  const code = cellTrackingCode(election, cell, encrypted);
+  return { code, bytes: encodeOpeningV2(openChallengeV2(election, cell, encrypted).opening) };
 }
 
 describe("checkChallenge", { timeout: 60_000 }, () => {
@@ -60,7 +66,7 @@ describe("checkChallenge", { timeout: 60_000 }, () => {
     const a = attempt(voter.votes);
     const v = checkChallenge(election, a.code, voter, a.bytes);
     expect(v.ok).toBe(true);
-    if (v.ok) expect(encodeOpening(v.opening)).toEqual(a.bytes);
+    if (v.ok) expect(encodeOpeningV2(v.opening)).toEqual(a.bytes);
   });
 
   it("reports an opening that doesn't decode", () => {
@@ -71,32 +77,42 @@ describe("checkChallenge", { timeout: 60_000 }, () => {
     });
   });
 
-  it("reports an opening for another election first, before its tier", () => {
-    const a = attempt(voter.votes, 2);
-    const o = decodeOpening(a.bytes, 1);
-    const stray = encodeOpening({ ...o, definition_hash: new Uint8Array(32).fill(7) });
+  it("reports an opening for another election first, before its cell", () => {
+    const a = attempt(voter.votes, 1);
+    const o = decodeOpening(a.bytes, 2);
+    const stray = encodeOpeningV2({ ...o, definition_hash: new Uint8Array(32).fill(7) });
     expect(checkChallenge(election, a.code, voter, stray)).toEqual({
       ok: false,
       code: "opening-stray",
     });
   });
 
-  it("reports an opening for another tier than the voter's, though the election has it", () => {
-    const a = attempt(voter.votes, 2);
+  it("reports an opening for another cell than the voter's, though the partition has it", () => {
+    const a = attempt(voter.votes, 1);
     expect(checkChallenge(election, a.code, voter, a.bytes)).toEqual({
       ok: false,
-      code: "checker-tier",
+      code: "checker-cell",
+    });
+  });
+
+  it("reports an opening for a cell the partition doesn't have, with crypto's code", () => {
+    const a = attempt(voter.votes);
+    const o = decodeOpening(a.bytes, 2);
+    const outside = encodeOpeningV2({ ...o, cell: 2 });
+    expect(checkChallenge(election, a.code, { ...voter, cell: 2 }, outside)).toEqual({
+      ok: false,
+      code: "opening-cell",
     });
   });
 
   it("reports an opening that fails crypto's check, with its code", () => {
     const a = attempt(voter.votes);
-    const o = decodeOpening(a.bytes, 1);
+    const o = decodeOpening(a.bytes, 2);
     const [first, ...rest] = o.polynomials;
     if (first === undefined) throw new Error("no options");
     const f = [...first.f];
     f[1] = ((f[1] as bigint) + 1n) % GROUP_ORDER;
-    const tampered = encodeOpening({ ...o, polynomials: [{ f, g: first.g }, ...rest] });
+    const tampered = encodeOpeningV2({ ...o, polynomials: [{ f, g: first.g }, ...rest] });
     expect(checkChallenge(election, a.code, voter, tampered)).toMatchObject({
       ok: false,
       code: "opening-vss",

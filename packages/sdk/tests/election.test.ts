@@ -2,13 +2,14 @@ import {
   ceremonyTranscriptHash,
   checkCeremonyTranscript,
   ELECTION_TYPES,
-  type ElectionDefinition,
-  electionDefinitionHash,
-  electionDefinitionRule,
-  electionStubHash,
+  type ElectionDefinitionV4,
+  electionDefinitionV4Hash,
+  electionDefinitionV4Rule,
+  electionStubV4Hash,
   identityKey,
   panelId,
   pinnedVersion,
+  profileCombinationRule,
   RECORD_TYPES,
 } from "@abolishus/crypto";
 import fc from "fast-check";
@@ -39,13 +40,16 @@ const base: Scenario = {
 const equal = (a: Uint8Array, b: Uint8Array) =>
   a.length === b.length && a.every((x, i) => x === b[i]);
 
+// The board operator's receipt key, which the definition lists.
+const receiptKey = () => identityKey(crypto.getRandomValues(new Uint8Array(32)));
+
 // The ceremony's context, rebuilt from the definition alone, as a trustee
 // node and the verifier rebuild it (verifier 3.2).
-const params = (d: ElectionDefinition, keys: readonly Uint8Array[]) => ({
+const params = (d: ElectionDefinitionV4, keys: readonly Uint8Array[]) => ({
   l2ChainId: d.l2_chain_id,
   trusteeRegistry: d.trustee_registry,
   electionId: d.election_id,
-  stubHash: electionStubHash({ ...d, ceremony_transcript_hash: new Uint8Array(32) }),
+  stubHash: electionStubV4Hash({ ...d, ceremony_transcript_hash: new Uint8Array(32) }),
   panel: { threshold: d.threshold, keys },
 });
 
@@ -84,22 +88,31 @@ describe("simulateElection", { timeout }, () => {
     fc.assert(
       fc.property(scenario, (s: Scenario) => {
         const plan = planElection(s);
-        const e = simulateElection(s, plan);
+        const key = receiptKey();
+        const e = simulateElection(s, plan, key);
         const d = e.definition;
-        expect(electionDefinitionRule(d)).toBeUndefined();
+        expect(electionDefinitionV4Rule(d)).toBeUndefined();
+        expect(profileCombinationRule(d)).toBeUndefined();
         expect(d.election_type).toBe(ELECTION_TYPES[s.election]);
         expect(d.option_count).toBe(s.options);
         expect([d.min_selections, d.max_selections]).toEqual(
           s.election === "plurality" ? [0, 1] : [0, s.options],
         );
         expect([d.threshold, d.panel_size]).toEqual([s.trustees.threshold, s.trustees.panel]);
-        expect(d.electorate.map((g) => g.tier)).toEqual(plan.tiers);
-        for (const g of d.electorate) {
-          const voters = plan.voters.filter((v) => v.tier === g.tier).length;
-          expect(g.group_size).toBe(BigInt(Math.max(1, voters)));
+        // Each tier one group in one region, so one cell, as version 1's tiers were.
+        expect(d.electorate.map((t) => t.tier)).toEqual(plan.tiers);
+        for (const t of d.electorate) {
+          const members = BigInt(Math.max(1, plan.voters.filter((v) => v.tier === t.tier).length));
+          expect(t.groups).toHaveLength(1);
+          expect(t.regions).toEqual([members]);
+          expect(t.cells).toHaveLength(1);
+          expect(t.cells[0]?.members).toBe(members);
         }
-        expect(pinnedVersion(d, RECORD_TYPES.ballot)).toBe(1);
-        expect(equal(e.definitionHash, electionDefinitionHash(d))).toBe(true);
+        expect(d.receipt_keys).toEqual([key]);
+        expect(pinnedVersion(d, RECORD_TYPES.electionDefinition)).toBe(4);
+        expect(pinnedVersion(d, RECORD_TYPES.ballot)).toBe(2);
+        expect(pinnedVersion(d, RECORD_TYPES.spoiledBallotOpening)).toBe(2);
+        expect(equal(e.definitionHash, electionDefinitionV4Hash(d))).toBe(true);
         expect(equal(d.ceremony_transcript_hash, ceremonyTranscriptHash(e.transcript))).toBe(true);
         expect(equal(d.panel_id, panelId({ threshold: d.threshold, keys: panelKeys(e) }))).toBe(
           true,
@@ -118,7 +131,7 @@ describe("simulateElection", { timeout }, () => {
   });
 
   it("registers each seat's own keys, so a ballot is encrypted to the seat that decrypts it", () => {
-    const e = simulateElection(base, planElection(base));
+    const e = simulateElection(base, planElection(base), receiptKey());
     for (const [i, r] of e.registered.entries()) {
       const seat = e.seats[i];
       expect(r.index).toBe(seat?.index);
@@ -130,8 +143,8 @@ describe("simulateElection", { timeout }, () => {
   // The transcript is signed over the stub, so it can't be moved to another
   // election, or used with another panel (T-37).
   it("binds the transcript to its own election and panel", () => {
-    const e = simulateElection(base, planElection(base));
-    const other = simulateElection(base, planElection(base));
+    const e = simulateElection(base, planElection(base), receiptKey());
+    const other = simulateElection(base, planElection(base), receiptKey());
     expect(equal(e.definition.election_id, other.definition.election_id)).toBe(false);
     expect(equal(e.definitionHash, other.definitionHash)).toBe(false);
     const moved = checkCeremonyTranscript(
@@ -147,6 +160,13 @@ describe("simulateElection", { timeout }, () => {
       1,
     );
     expect(restated.ok).toBe(false);
+    // The receipt keys are in the stub, so the ceremony fixes them too (T-26).
+    const rekeyed = checkCeremonyTranscript(
+      params({ ...e.definition, receipt_keys: other.definition.receipt_keys }, panelKeys(e)),
+      e.transcript,
+      1,
+    );
+    expect(rekeyed.ok).toBe(false);
     const swapped = checkCeremonyTranscript(
       params(e.definition, panelKeys(other)),
       e.transcript,

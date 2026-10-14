@@ -11,6 +11,12 @@ import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 import {
   applyGroupRecords,
+  checkContractEvent,
+  checkEventAccumulatorProof,
+  contractEventLog,
+  type ContractEventRecord,
+  decodeContractEvent,
+  encodeContractEvent,
   encodeGroupAddition,
   encodeGroupRemoval,
   type GroupApproval,
@@ -23,14 +29,18 @@ import {
   createPublicClient,
   createWalletClient,
   defineChain,
+  encodeAbiParameters,
   type Hex,
+  hexToBigInt,
   hexToBytes,
   http,
+  keccak256,
   parseSignature,
+  stringToHex,
   toHex,
 } from "viem";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
-import { readIndexedGroups } from "../src/records.ts";
+import { readContractEvents, readIndexedGroups } from "../src/records.ts";
 
 const DATABASE_URL = process.env.TEST_DATABASE_URL;
 if (DATABASE_URL === undefined) throw new Error("TEST_DATABASE_URL is required (AGENTS.md)");
@@ -260,6 +270,77 @@ async function expectIndexMatches(schema: string): Promise<void> {
   }
 }
 
+/**
+ * The accumulator's slots, derived here from docs/spec/contracts.md (ERC-7201
+ * namespace `abolish.event-accumulator`) rather than taken from the contract.
+ */
+const accumulatorSlot =
+  hexToBigInt(
+    keccak256(
+      encodeAbiParameters(
+        [{ type: "uint256" }],
+        [hexToBigInt(keccak256(stringToHex("abolish.event-accumulator"))) - 1n],
+      ),
+    ),
+  ) & ~0xffn;
+
+/**
+ * The registry's accumulator and count after `block`, read from its storage.
+ * A verifier proves these slots under an output root (verifier 4.4); Anvil's
+ * own state stands in for that proof here.
+ */
+async function storedAccumulator(block: bigint) {
+  const word = async (slot: bigint) =>
+    (await publicClient.getStorageAt({
+      address: registry,
+      slot: toHex(slot, { size: 32 }),
+      blockNumber: block,
+    })) ?? "0x";
+  return {
+    block,
+    accumulator: hexToBytes(await word(accumulatorSlot), { size: 32 }),
+    count: hexToBigInt(await word(accumulatorSlot + 1n)),
+  };
+}
+
+const eventContracts = () => ({
+  // Only the group registry is indexed; the other roles are addresses no log
+  // here comes from.
+  electionRegistry: new Uint8Array(20).fill(1),
+  trusteeRegistry: new Uint8Array(20).fill(2),
+  groupRegistry: hexToBytes(registry),
+  board: new Uint8Array(20).fill(3),
+});
+
+/** The accumulator check of the registry's indexed logs against its storage at `block`. */
+async function accumulatorCheck(logs: readonly ContractEventRecord[], block: bigint) {
+  return checkEventAccumulatorProof(
+    BigInt(chainId),
+    hexToBytes(registry),
+    logs.map(contractEventLog),
+    await storedAccumulator(block),
+  );
+}
+
+/**
+ * Every log the registry emitted up to the head is indexed, as a contract-event
+ * record that frames, passes the event check, and replays to the registry's
+ * stored accumulator, from the constructor's `RegistrarsPinned` on (T-71).
+ */
+async function expectLogsComplete(schema: string): Promise<void> {
+  const logs = await readContractEvents(sql, schema, registry);
+  const head = await publicClient.getBlockNumber({ cacheTime: 0 });
+  const stored = await storedAccumulator(head);
+  expect(BigInt(logs.length)).toBe(stored.count);
+  for (const log of logs) {
+    expect(decodeContractEvent(encodeContractEvent(log, 2), 2)).toEqual(log);
+    expect(checkContractEvent(log, eventContracts(), 2).ok).toBe(true);
+  }
+  const first = logs[0] && checkContractEvent(logs[0], eventContracts(), 2);
+  expect(first).toMatchObject({ ok: true, event: { event: "RegistrarsPinned", threshold: 2 } });
+  expect(await accumulatorCheck(logs, head)).toBeNull();
+}
+
 beforeAll(async () => {
   const port = await freePort();
   rpcUrl = `http://127.0.0.1:${port}`;
@@ -338,12 +419,14 @@ describe("apps/indexer on the group registry", () => {
     const indexer = await startIndexer();
     try {
       await expectIndexMatches(indexer.schema);
+      await expectLogsComplete(indexer.schema);
 
       // Live: records after the backfill reach the index too.
       await add(2n, commitments(2));
       await remove(0n, [0n]);
       await caughtUp(indexer.port);
       await expectIndexMatches(indexer.schema);
+      await expectLogsComplete(indexer.schema);
     } finally {
       await stopped(indexer.child);
     }
@@ -356,6 +439,7 @@ describe("apps/indexer on the group registry", () => {
     const indexer = await startIndexer();
     try {
       await expectIndexMatches(indexer.schema);
+      await expectLogsComplete(indexer.schema);
     } finally {
       await stopped(indexer.child);
     }
@@ -379,7 +463,7 @@ describe("apps/indexer on the group registry", () => {
     }
   });
 
-  test("replay catches a reordered row, but not a dropped removal: completeness needs the accumulator", async () => {
+  test("replay catches a reordered row, but not a dropped removal: the accumulator does", async () => {
     const groups = await readIndexedGroups(sql, schemas[1] as string);
     const g = groups.find((x) => x.groupId === 0n);
     if (g === undefined) throw new Error("group 0 isn't indexed");
@@ -404,5 +488,54 @@ describe("apps/indexer on the group registry", () => {
     const shorter = replay(g.records.slice(0, -1));
     expect(shorter.ok).toBe(true);
     if (shorter.ok) expect(shorter.leaves).not.toEqual(expected.get(0n));
+  });
+
+  test("the accumulator check fails a dropped, altered or moved log", async () => {
+    const logs = await readContractEvents(sql, schemas[1] as string, registry);
+    const head = await publicClient.getBlockNumber({ cacheTime: 0 });
+    const renumber = (list: readonly ContractEventRecord[]) =>
+      list.map((log, i) => ({ ...log, n: BigInt(i) }));
+    const last = logs.at(-1);
+    // Logs 1 to 3 create the groups; log 4 is group 0's first addition.
+    const middle = logs[4];
+    if (last === undefined || middle === undefined) throw new Error("too few logs indexed");
+    // The last log is group 0's live removal of member 0, the one replay can't miss.
+    expect(checkContractEvent(last, eventContracts(), 2)).toMatchObject({
+      ok: true,
+      event: { event: "MembersRemoved" },
+    });
+    expect(await accumulatorCheck(logs.slice(0, -1), head)).toBe("accumulator");
+    expect(await accumulatorCheck(renumber(logs.toSpliced(4, 1)), head)).toBe("accumulator");
+    const altered = {
+      ...middle,
+      data: Uint8Array.from(middle.data, (b, i) => (i === 0 ? b ^ 1 : b)),
+    };
+    expect(await accumulatorCheck(logs.with(4, altered), head)).toBe("accumulator");
+    const moved = { ...middle, l2_block: middle.l2_block + 1n };
+    expect(await accumulatorCheck(logs.with(4, moved), head)).not.toBeNull();
+    // Against the storage before the last log's block, the archive's extra
+    // log is past the proven count: it waits for a later proof.
+    expect(await accumulatorCheck(logs, last.l2_block - 1n)).toBeNull();
+  });
+
+  test("a row deleted from the index shifts every later log and fails the accumulator check", async () => {
+    const schema = schemas[1] as string;
+    const head = await publicClient.getBlockNumber({ cacheTime: 0 });
+    // Group 0's first removal, in the middle of the sequence.
+    const [row] = await sql<{ id: string }[]>`
+      select id from ${sql(schema)}.contract_log
+      where topics[1] = ${keccak256(stringToHex("MembersRemoved(uint64,bytes)"))}
+      order by id collate "C" limit 1`;
+    if (row === undefined) throw new Error("no MembersRemoved indexed");
+    // Ponder's live-query trigger expects its running instance; the indexer
+    // has stopped, so only the user triggers are set aside for the delete.
+    await sql.begin(async (tx) => {
+      await tx`alter table ${tx(schema)}.contract_log disable trigger user`;
+      await tx`delete from ${tx(schema)}.contract_log where id = ${row.id}`;
+      await tx`alter table ${tx(schema)}.contract_log enable trigger user`;
+    });
+    const logs = await readContractEvents(sql, schema, registry);
+    expect(logs.map((l) => l.n)).toEqual(logs.map((_, i) => BigInt(i)));
+    expect(await accumulatorCheck(logs, head)).toBe("accumulator");
   });
 });

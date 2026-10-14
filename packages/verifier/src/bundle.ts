@@ -14,7 +14,7 @@ import {
   PanelError,
   panelId,
 } from "@abolishus/crypto";
-import { decodeHeader, type L1Evidence, NodePool, RlpError } from "./l1.ts";
+import { decodeHeader, type L1Evidence, type L1Header, NodePool, RlpError } from "./l1.ts";
 
 /**
  * Where an input came from. A local file authenticates nothing; an
@@ -37,6 +37,7 @@ export interface InputSources {
   readonly firstSegment?: InputSource;
   readonly definition?: InputSource;
   readonly panel?: InputSource;
+  readonly l1Blocks?: InputSource;
 }
 
 interface BundleCommon {
@@ -88,8 +89,20 @@ export interface CeremonyBundle extends Omit<DefinitionBundle, "format"> {
   readonly panel: Panel;
 }
 
+/**
+ * Format 5: as format 4, with a run of consecutive finalized L1 headers that
+ * the L1 references of ballots (5.8) are judged against. Its last header is
+ * the finalized head; nothing yet ties it to `l1.header`, so it is a local
+ * input of its own.
+ */
+export interface BlocksBundle extends Omit<CeremonyBundle, "format"> {
+  readonly format: typeof BUNDLE_FORMAT_BLOCKS;
+  /** In increasing number, each the parent of the next; never empty. */
+  readonly l1Blocks: readonly L1Header[];
+}
+
 /** One election's inputs: the board copy, and what the board checks judge it against. */
-export type Bundle = LocalBundle | L1Bundle | DefinitionBundle | CeremonyBundle;
+export type Bundle = LocalBundle | L1Bundle | DefinitionBundle | CeremonyBundle | BlocksBundle;
 
 /** A bundle that doesn't follow docs/spec/verifier.md, Bundle. */
 export class BundleError extends Error {
@@ -100,6 +113,7 @@ export const BUNDLE_FORMAT = "abolish-verifier-bundle/1";
 export const BUNDLE_FORMAT_L1 = "abolish-verifier-bundle/2";
 export const BUNDLE_FORMAT_DEFINITION = "abolish-verifier-bundle/3";
 export const BUNDLE_FORMAT_CEREMONY = "abolish-verifier-bundle/4";
+export const BUNDLE_FORMAT_BLOCKS = "abolish-verifier-bundle/5";
 
 const U32_MAX = 2n ** 32n - 1n;
 const U64_MAX = 2n ** 64n - 1n;
@@ -182,16 +196,8 @@ function parseL1(value: unknown, withAnchor: false): Omit<L1Evidence, "anchor">;
 function parseL1(value: unknown, withAnchor = true): Omit<L1Evidence, "anchor"> {
   const members = ["firstSegment", "header", "nodes", "checkpoints"];
   const l = object(value, withAnchor ? ["anchor", ...members] : members, "l1");
-  const raw = hexBytes(l["header"], "l1.header");
-  let header: L1Evidence["header"];
-  try {
-    header = decodeHeader(raw);
-  } catch (e) {
-    if (e instanceof RlpError) throw new BundleError(`l1.header: ${e.message}`);
-    throw e;
-  }
   return {
-    header,
+    header: header(l["header"], "l1.header"),
     ...(withAnchor && { anchor: hexBytes(l["anchor"], "l1.anchor", 20) }),
     firstSegment: Number(integer(l["firstSegment"], U32_MAX, "l1.firstSegment")),
     nodes: new NodePool(array(l["nodes"], "l1.nodes").map((n, i) => hexBytes(n, `l1.nodes[${i}]`))),
@@ -224,6 +230,46 @@ function parsePanel(value: unknown): Panel {
   }
   return panel;
 }
+
+function header(value: unknown, what: string): L1Header {
+  const raw = hexBytes(value, what);
+  try {
+    return decodeHeader(raw);
+  } catch (e) {
+    if (e instanceof RlpError) throw new BundleError(`${what}: ${e.message}`);
+    throw e;
+  }
+}
+
+/**
+ * A run of L1 headers: consecutive numbers, each naming the one before as its
+ * parent, with strictly increasing timestamps, as Ethereum's are. A run that
+ * isn't one chain is no L1 at all, and the search for `l1_ref_min` relies on
+ * the timestamps (docs/spec/revoting.md, Admission). Where it holds the block
+ * `l1.header` names, it must hold that header: two L1 views of one bundle
+ * can't disagree.
+ */
+function parseBlocks(value: unknown, anchorHeader: L1Header): readonly L1Header[] {
+  const raw = array(value, "l1Blocks");
+  if (raw.length === 0) throw new BundleError("l1Blocks: expected at least one header");
+  const blocks = raw.map((h, i) => header(h, `l1Blocks[${i}]`));
+  for (const [i, b] of blocks.entries()) {
+    const before = blocks[i - 1];
+    if (
+      before !== undefined &&
+      (b.number !== before.number + 1n ||
+        !equal(b.parentHash, before.hash) ||
+        b.timestamp <= before.timestamp)
+    )
+      throw new BundleError(`l1Blocks[${i}]: not the child of l1Blocks[${i - 1}]`);
+    if (b.number === anchorHeader.number && !equal(b.hash, anchorHeader.hash))
+      throw new BundleError(`l1Blocks[${i}]: another block than l1.header at its number`);
+  }
+  return blocks;
+}
+
+const equal = (a: Uint8Array, b: Uint8Array) =>
+  a.length === b.length && a.every((x, i) => x === b[i]);
 
 // The version-1 entry layout: record header (3), election_id (32), index (8)
 // and segment (4), then the payload's u32 length and the payload.
@@ -305,14 +351,24 @@ export function parseBundle(json: string, board: Uint8Array): Bundle {
     value !== null && typeof value === "object" && !Array.isArray(value)
       ? (value as Record<string, unknown>)["format"]
       : undefined;
-  if (format === BUNDLE_FORMAT_DEFINITION || format === BUNDLE_FORMAT_CEREMONY) {
-    const ceremony = format === BUNDLE_FORMAT_CEREMONY;
+  if (
+    format === BUNDLE_FORMAT_DEFINITION ||
+    format === BUNDLE_FORMAT_CEREMONY ||
+    format === BUNDLE_FORMAT_BLOCKS
+  ) {
+    const blocks = format === BUNDLE_FORMAT_BLOCKS;
+    const ceremony = blocks || format === BUNDLE_FORMAT_CEREMONY;
     const members = ["format", "definition", "clock", "l1"];
-    const b = object(value, ceremony ? [...members, "panel"] : members, "bundle.json");
+    const b = object(
+      value,
+      blocks ? [...members, "panel", "l1Blocks"] : ceremony ? [...members, "panel"] : members,
+      "bundle.json",
+    );
     const definition = hexBytes(b["definition"], "definition");
     const clock = parseClock(b["clock"]);
     const l1 = parseL1(b["l1"], false);
     const panel = ceremony ? parsePanel(b["panel"]) : undefined;
+    const l1Blocks = blocks ? parseBlocks(b["l1Blocks"], l1.header) : undefined;
     const split = splitEntries(board);
     const common = {
       definition,
@@ -332,18 +388,25 @@ export function parseBundle(json: string, board: Uint8Array): Bundle {
       firstSegment: "local-file",
       definition: "local-file",
     } as const;
-    return panel === undefined
-      ? { format: BUNDLE_FORMAT_DEFINITION, ...common, sources }
-      : {
+    if (panel === undefined) return { format: BUNDLE_FORMAT_DEFINITION, ...common, sources };
+    return l1Blocks === undefined
+      ? {
           format: BUNDLE_FORMAT_CEREMONY,
           ...common,
           panel,
           sources: { ...sources, panel: "local-file" },
+        }
+      : {
+          format: BUNDLE_FORMAT_BLOCKS,
+          ...common,
+          panel,
+          l1Blocks,
+          sources: { ...sources, panel: "local-file", l1Blocks: "local-file" },
         };
   }
   if (format !== BUNDLE_FORMAT && format !== BUNDLE_FORMAT_L1)
     throw new BundleError(
-      `bundle.json: format must be ${BUNDLE_FORMAT}, ${BUNDLE_FORMAT_L1}, ${BUNDLE_FORMAT_DEFINITION} or ${BUNDLE_FORMAT_CEREMONY}`,
+      `bundle.json: format must be ${BUNDLE_FORMAT}, ${BUNDLE_FORMAT_L1}, ${BUNDLE_FORMAT_DEFINITION}, ${BUNDLE_FORMAT_CEREMONY} or ${BUNDLE_FORMAT_BLOCKS}`,
     );
   const b = object(
     value,

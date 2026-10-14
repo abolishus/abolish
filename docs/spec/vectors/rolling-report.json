@@ -1,0 +1,256 @@
+{
+  "format": "abolish-rolling-report-vectors/1",
+  "title": "What a rolling tier reports: its counts at opening, at close, at the smallest step used and at live releases, and its growth",
+  "spec": "docs/spec/membership.md",
+  "generator": "Printed by packages/crypto/scripts/rolling-report-vectors.py, written from docs/spec/membership.md (Rolling tier tree, Root clock and steps, Reported counts) and docs/spec/board.md (Timing) with only the Python standard library, independently of packages/crypto, reusing rolling-electorate-vectors.py's chain-order leaves, member count and root clock.",
+  "rootPeriod": "600",
+  "rootOffset": "300",
+  "clock": {
+    "epoch": "1779800000",
+    "period": "3600"
+  },
+  "cases": [
+    {
+      "id": "growth-and-steps",
+      "note": "two listed groups and an unlisted one; events before and after the definition's registration, across three anchoring periods, between the last boundary and the close (counted in growth, not at close) and after the close (in neither); ballots name four steps, in no order and one twice; the two with the smallest count tie, and the lower is reported",
+      "groups": ["1", "2"],
+      "events": [
+        {
+          "block": "90",
+          "timestamp": "1779838300",
+          "group": "1",
+          "add": ["1000000000001", "1000000000002", "1000000000003"]
+        },
+        {
+          "block": "100",
+          "timestamp": "1779839300",
+          "group": "2",
+          "add": ["1000000000004"]
+        },
+        {
+          "block": "101",
+          "timestamp": "1779839302",
+          "group": "7",
+          "add": ["1000000000900", "1000000000901"]
+        },
+        {
+          "block": "102",
+          "timestamp": "1779839304",
+          "group": "1",
+          "remove": ["0"]
+        },
+        {
+          "block": "300",
+          "timestamp": "1779840400",
+          "group": "2",
+          "add": ["1000000000005", "1000000000006"]
+        },
+        {
+          "block": "600",
+          "timestamp": "1779841000",
+          "group": "1",
+          "remove": ["1"]
+        },
+        {
+          "block": "601",
+          "timestamp": "1779841002",
+          "group": "1",
+          "add": ["1000000000007"]
+        },
+        {
+          "block": "2000",
+          "timestamp": "1779843910",
+          "group": "2",
+          "add": ["1000000000008", "1000000000009", "1000000000010"]
+        },
+        {
+          "block": "3500",
+          "timestamp": "1779847600",
+          "group": "1",
+          "add": ["1000000000011"]
+        },
+        {
+          "block": "3600",
+          "timestamp": "1779847800",
+          "group": "2",
+          "add": ["1000000000012"]
+        }
+      ],
+      "rootL2Block": "100",
+      "registeredAt": "1779839800",
+      "closesAt": "1779847750",
+      "ballotSteps": ["2966407", "2966402", "2966412", "2966401", "2966402"],
+      "report": {
+        "opening": {
+          "members": "4"
+        },
+        "close": {
+          "step": "2966412",
+          "members": "8",
+          "accepted": true
+        },
+        "smallestStep": {
+          "step": "2966401",
+          "members": "5"
+        },
+        "growth": [
+          {
+            "period": "10",
+            "added": "0",
+            "removed": "1",
+            "members": "3"
+          },
+          {
+            "period": "11",
+            "added": "3",
+            "removed": "1",
+            "members": "5"
+          },
+          {
+            "period": "12",
+            "added": "3",
+            "removed": "0",
+            "members": "8"
+          },
+          {
+            "period": "13",
+            "added": "1",
+            "removed": "0",
+            "members": "9"
+          }
+        ]
+      },
+      "releases": [
+        {
+          "segment": "10",
+          "step": null,
+          "members": "4"
+        },
+        {
+          "segment": "11",
+          "step": "2966404",
+          "members": "5"
+        },
+        {
+          "segment": "12",
+          "step": "2966410",
+          "members": "8"
+        },
+        {
+          "segment": "18",
+          "step": "2966412",
+          "members": "8"
+        }
+      ]
+    },
+    {
+      "id": "no-boundary",
+      "note": "the poll closes before the first boundary after its registration: no step is accepted, there is no close count and no ballot, and a release reports the opening count",
+      "groups": ["1"],
+      "events": [
+        {
+          "block": "150",
+          "timestamp": "1779840200",
+          "group": "1",
+          "add": ["1000000000020", "1000000000021"]
+        },
+        {
+          "block": "260",
+          "timestamp": "1779840600",
+          "group": "1",
+          "add": ["1000000000022"]
+        }
+      ],
+      "rootL2Block": "200",
+      "registeredAt": "1779840310",
+      "closesAt": "1779840890",
+      "ballotSteps": [],
+      "report": {
+        "opening": {
+          "members": "2"
+        },
+        "close": null,
+        "smallestStep": null,
+        "growth": [
+          {
+            "period": "11",
+            "added": "1",
+            "removed": "0",
+            "members": "3"
+          }
+        ]
+      },
+      "releases": [
+        {
+          "segment": "11",
+          "step": null,
+          "members": "2"
+        }
+      ]
+    },
+    {
+      "id": "emptied-at-close",
+      "note": "every member is removed before the last boundary, so the close count is 0 at a step the poll doesn't accept, never an earlier step's count; a commitment in both groups keeps a leaf in each but counts once, so growth adds leaves and members counts identities",
+      "groups": ["1", "2"],
+      "events": [
+        {
+          "block": "300",
+          "timestamp": "1779839900",
+          "group": "1",
+          "add": ["1000000000030"]
+        },
+        {
+          "block": "400",
+          "timestamp": "1779840350",
+          "group": "2",
+          "add": ["1000000000030", "1000000000031"]
+        },
+        {
+          "block": "500",
+          "timestamp": "1779840905",
+          "group": "1",
+          "remove": ["0"]
+        },
+        {
+          "block": "700",
+          "timestamp": "1779841505",
+          "group": "2",
+          "remove": ["0", "1"]
+        }
+      ],
+      "rootL2Block": "300",
+      "registeredAt": "1779840250",
+      "closesAt": "1779842100",
+      "ballotSteps": ["2966401", "2966402"],
+      "report": {
+        "opening": {
+          "members": "1"
+        },
+        "close": {
+          "step": "2966403",
+          "members": "0",
+          "accepted": false
+        },
+        "smallestStep": {
+          "step": "2966401",
+          "members": "2"
+        },
+        "growth": [
+          {
+            "period": "11",
+            "added": "2",
+            "removed": "3",
+            "members": "0"
+          }
+        ]
+      },
+      "releases": [
+        {
+          "segment": "11",
+          "step": "2966403",
+          "members": "0"
+        }
+      ]
+    }
+  ]
+}

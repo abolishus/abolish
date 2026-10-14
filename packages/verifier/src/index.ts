@@ -30,6 +30,7 @@ export {
 } from "./ballots.ts";
 export { type EventCode } from "./events.ts";
 export { type L1RefCode } from "./references.ts";
+export { type SelectedBallot, type SelectionReport } from "./selection.ts";
 export { type OpeningBreak, type OpeningReport } from "./openings.ts";
 export { type CeremonyCode, type CeremonyReport } from "./ceremony.ts";
 export { CHECKS, type CheckKind, type CheckSpec } from "./checks.ts";

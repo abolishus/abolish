@@ -17,7 +17,7 @@
 // gives a run of finalized L1 headers (format 5), each ballot's L1 reference
 // (5.8) is judged against it before repeats, as docs/spec/revoting.md's
 // Selection takes the ballots that passed every admission check; selection
-// (6.1) is decided over the admitted ballots, later.
+// (6.1) is decided over the admitted ballots by selection.ts.
 
 import {
   type AdmittedBallot,
@@ -88,6 +88,10 @@ export interface BallotsReport {
    * head before L1 has finalized one after close, neither admitted nor rejected.
    */
   readonly pending?: readonly RepeatedBallot[];
+  /** Once selection (6.1) passes: each group's counted ballot (selection.ts). */
+  readonly selected?: readonly RepeatedBallot[];
+  /** Once selection (6.1) passes: the ballots of tied groups, which count nothing. */
+  readonly ties?: readonly RepeatedBallot[];
 }
 
 /** An admitted ballot's core and segment, which 6.2's `opening-cast` compares openings with. */
@@ -95,6 +99,18 @@ export interface AdmittedCore {
   readonly entry: number;
   readonly segment: number;
   readonly core: Pick<BallotCore, "definitionHash" | "vss">;
+}
+
+/**
+ * A ballot every admission check that ran admitted (5.1 to 5.5, 5.7 and, for
+ * format 5, 5.8), with its entry's path and segment, which selection (6.1)
+ * needs to place it in the counted extent.
+ */
+export interface CountedCandidate {
+  readonly entry: number;
+  readonly segment: number;
+  readonly path: Path["kind"];
+  readonly ballot: AdmittedBallot;
 }
 
 /** Every admission code: versions 2 and 3 have `ballot-cell` where version 1 has `ballot-tier`. */
@@ -183,6 +199,10 @@ export function ballotChecks(
   readonly rows: ReadonlyMap<string, BallotOutcome>;
   readonly report?: BallotsReport;
   readonly admitted?: readonly AdmittedCore[];
+  /** Where 5.5 runs: the ballots every admission check that ran admits, in copy order. */
+  readonly candidates?: readonly CountedCandidate[];
+  /** Every entry carrying an ordinary-path ballot, admitted or not, in copy order. */
+  readonly ordinary?: readonly number[];
 } {
   const judge = judgeFor(definition, registered);
   if (typeof judge !== "function") return { rows: all(judge, blocks !== undefined) };
@@ -209,6 +229,7 @@ export function ballotChecks(
     [];
   const cores: AdmittedCore[] = [];
   const rejected: RejectedBallot[] = [];
+  const ordinary: number[] = [];
   for (const [at, encoded] of entries.entries()) {
     let payload: Uint8Array;
     let path: Path;
@@ -235,6 +256,7 @@ export function ballotChecks(
       if (e instanceof DecodeError) continue;
       throw e;
     }
+    if (path.kind === "ordinary") ordinary.push(at);
     let judged;
     try {
       judged = judge(payload);
@@ -360,6 +382,15 @@ export function ballotChecks(
       ...(typeof references === "function" && { pending: waiting }),
     },
     admitted: cores,
+    ...(windows && {
+      candidates: admitted.map((p) => ({
+        entry: p.at,
+        segment: p.path.segment,
+        path: p.path.kind,
+        ballot: p.ballot,
+      })),
+    }),
+    ordinary,
   };
 }
 

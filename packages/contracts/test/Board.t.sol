@@ -93,6 +93,9 @@ contract BoardTest is TestBase {
     uint64 internal constant L1_NUMBER = 7_000_000;
     bytes32 internal constant L1_HASH = keccak256("l1 block");
 
+    /// The L1 relay the board pins: the registry fixture's `l1Relay`.
+    address internal constant RELAY = address(0x4E1A);
+
     ElectionsStub internal elections;
     TrusteesStub internal trustees;
     Board internal board;
@@ -132,7 +135,7 @@ contract BoardTest is TestBase {
         string memory bj = vm.readFile(V1);
         elections = new ElectionsStub();
         trustees = new TrusteesStub();
-        board = new Board(address(elections), address(trustees));
+        board = new Board(address(elections), address(trustees), RELAY);
         ballots = new BallotHarness();
         defs = new DefinitionHarness();
 
@@ -182,6 +185,9 @@ contract BoardTest is TestBase {
             _electionV1(bj, ".elections.plurality");
         hV1 = _b32(bj, ".elections.plurality.definitionHash");
         elections.set(hV1, p, tiers, roots);
+        // Every vector election shares this window: ordinary ballots are
+        // submitted at its opening second, the earliest the board takes.
+        vm.warp(p.opensAt);
         elections.setCeremony(hV1, STUB_V1, PANEL);
         assertTrue(_eq(_str(bj, ".ballots[0].id"), "ok-tier-0"), "the honest ballot");
         assertTrue(_eq(_str(bj, ".ballots[0].election"), "plurality"), "its election");
@@ -289,6 +295,7 @@ contract BoardTest is TestBase {
         bytes32 dh = keccak256("largest version-3 definition");
         ElectionRegistry.Parameters memory p;
         (p.ballotVersion, p.threshold, p.panelSize, p.optionCount) = (3, 16, 16, 64);
+        (p.opensAt, p.closesAt) = (uint64(block.timestamp), uint64(block.timestamp));
         p.questions = new ElectionRegistry.Question[](32);
         for (uint256 q; q < 32; q++) {
             p.questions[q] = ElectionRegistry.Question(1, 2, 0, 2);
@@ -308,11 +315,11 @@ contract BoardTest is TestBase {
         // Each measurement on a fresh board, so none is a repeat's no-op.
         uint256 pairing = _gas(_ballotCall(honestBallot));
         _mockPairing();
-        board = new Board(address(elections), address(trustees));
+        board = new Board(address(elections), address(trustees), RELAY);
         pairing -= _gas(_ballotCall(honestBallot));
-        board = new Board(address(elections), address(trustees));
+        board = new Board(address(elections), address(trustees), RELAY);
         uint256 used = _gas(data);
-        board = new Board(address(elections), address(trustees));
+        board = new Board(address(elections), address(trustees), RELAY);
         Vm.Log[] memory logs = _accept(data);
         assertEq(logs.length, 1, "one event");
         _assertEvent(logs[0], BALLOT_SUBMITTED, dh, ballots.ballotHash(record), record);
@@ -519,7 +526,7 @@ contract BoardTest is TestBase {
             string memory id = _str(sr, string.concat(c, ".id"));
             // A board of its own: `other-panel` is `valid`'s bytes, and a
             // repeat checks nothing (Calls).
-            board = new Board(address(elections), address(trustees));
+            board = new Board(address(elections), address(trustees), RELAY);
             _setPanel(sr, string.concat(".panels.", _str(sr, string.concat(c, ".panel"))));
             bytes memory r = abi.encodePacked(
                 uint16(0x000c),
@@ -564,7 +571,7 @@ contract BoardTest is TestBase {
         uint256[3] memory n; // accepted, refused, skipped
         for (uint256 i; vm.keyExistsJson(dj, _at(".elections", i, "")); i++) {
             string memory e = _at(".elections", i, "");
-            board = new Board(address(elections), address(trustees));
+            board = new Board(address(elections), address(trustees), RELAY);
             trustees.setKeySet(STUB, PANEL, _registered(dj, e));
             for (uint256 j; vm.keyExistsJson(dj, _at(string.concat(e, ".entries"), j, "")); j++) {
                 string memory en = _at(string.concat(e, ".entries"), j, "");
@@ -1120,7 +1127,7 @@ contract BoardTest is TestBase {
         TrusteesStub keys = new TrusteesStub();
         keys.setKeySet(stub, panel, registeredAll);
         keys.setKey(stub, panel, 1, signingKeys[1][0], signingKeys[1][1]);
-        board = new Board(address(registry), address(keys));
+        board = new Board(address(registry), address(keys), RELAY);
         bytes memory r = _receiptFor(dh, 1, signingSecrets[1]);
         Vm.Log[] memory logs = _accept(_receiptsCall(r));
         assertEq(logs.length, 1, "accepted under the registered ceremony");
@@ -1134,7 +1141,7 @@ contract BoardTest is TestBase {
         TrusteesStub elsewhere = new TrusteesStub();
         elsewhere.setKeySet(keccak256("another stub"), panel, registeredAll);
         elsewhere.setKey(keccak256("another stub"), panel, 1, signingKeys[1][0], signingKeys[1][1]);
-        board = new Board(address(registry), address(elsewhere));
+        board = new Board(address(registry), address(elsewhere), RELAY);
         _refuse(
             _receiptsCall(r),
             _refused(0, DeliveryCheckLib.Code.DeliverySeat),
@@ -1174,7 +1181,7 @@ contract BoardTest is TestBase {
         registry.registerDefinition(enc);
         bytes32 dh = defs.hash(enc);
 
-        board = new Board(address(registry), address(treg));
+        board = new Board(address(registry), address(treg), RELAY);
         bytes memory r1 = _receiptFor(dh, 1, signingSecrets[1]);
         Vm.Log[] memory logs = _accept(_receiptsCall(r1));
         assertEq(logs.length, 1, "seat 1's receipt");
@@ -1404,14 +1411,14 @@ contract BoardTest is TestBase {
         uint256 one = _gas(_receiptsCall(r[0]));
         uint256 compl = _gas(_complaintCall(complaint));
         uint256 repeat = _gas(_complaintCall(complaint));
-        board = new Board(address(elections), address(trustees));
+        board = new Board(address(elections), address(trustees), RELAY);
         uint256 three = _gas(_receiptsCall(bytes.concat(r[0], r[1], r[2])));
         // The posting's ballot passes only with the pairing mocked
         // (_mockPairing), so its real cost is the mocked one plus what the
         // mock saves on the honest ballot's check: the four-pair pairing.
         _mockPairing();
         uint256 post = _gas(_postingCall(posting, alice));
-        board = new Board(address(elections), address(trustees));
+        board = new Board(address(elections), address(trustees), RELAY);
         uint256 pairing = ballot - _gas(_ballotCall(honestBallot));
         // Measured about 393,000 (ballot), 343,000 (one receipt), 950,000
         // (three), 342,000 (complaint), 29,000 (a repeat), and for a posting
@@ -1553,7 +1560,11 @@ contract BoardTest is TestBase {
     /// Deploys with `create` itself, since forge may run a test's `new`
     /// through a cheatcode whose revert a `try` doesn't catch.
     function _refuseDeployment(address e, address t) internal {
-        bytes memory code = abi.encodePacked(type(Board).creationCode, abi.encode(e, t));
+        _refuseDeployment(e, t, RELAY);
+    }
+
+    function _refuseDeployment(address e, address t, address r) internal {
+        bytes memory code = abi.encodePacked(type(Board).creationCode, abi.encode(e, t, r));
         address deployed;
         bytes memory reason;
         assembly ("memory-safe") {
@@ -1583,7 +1594,7 @@ contract BoardTest is TestBase {
         internal
     {
         string memory id = _str(bj, string.concat(b, ".id"));
-        board = new Board(address(elections), address(trustees));
+        board = new Board(address(elections), address(trustees), RELAY);
         // Only the ballot's own election is registered, so another's is stray.
         string memory named = _str(bj, string.concat(b, ".election"));
         for (uint256 k; k < 2; k++) {
@@ -1935,6 +1946,8 @@ contract BoardTest is TestBase {
         p.threshold = d.threshold;
         p.panelSize = d.panelSize;
         p.optionCount = d.optionCount;
+        p.opensAt = d.opensAt;
+        p.closesAt = d.closesAt;
         p.questions = new ElectionRegistry.Question[](1);
         p.questions[0] =
             ElectionRegistry.Question(1, d.optionCount, d.minSelections, d.maxSelections);
@@ -1965,6 +1978,8 @@ contract BoardTest is TestBase {
         assertEq(d.version, 5, "definition version 5");
         p.threshold = d.threshold;
         p.panelSize = d.panelSize;
+        p.opensAt = d.opensAt;
+        p.closesAt = d.closesAt;
         p.questions = new ElectionRegistry.Question[](d.questions.length);
         for (uint256 q; q < d.questions.length; q++) {
             ElectionDefinitionLib.Question memory dq = d.questions[q];

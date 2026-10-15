@@ -449,7 +449,7 @@ contract BoardInvariantTest is TestBase {
     function setUp() public {
         ElectionsStub elections = new ElectionsStub();
         TrusteesStub trustees = new TrusteesStub();
-        board = new Board(address(elections), address(trustees));
+        board = new Board(address(elections), address(trustees), address(0x4E1A));
         Honest memory honest;
         string memory bj = vm.readFile(V1);
         honest.ballot = vm.parseBytes(vm.parseJsonString(bj, ".ballots[0].encoding"));
@@ -490,6 +490,9 @@ contract BoardInvariantTest is TestBase {
         p.threshold = d.threshold;
         p.panelSize = d.panelSize;
         p.optionCount = d.optionCount;
+        (p.opensAt, p.closesAt) = (d.opensAt, d.closesAt);
+        // Inside the window, so the honest ballot is accepted.
+        vm.warp(d.opensAt);
         p.questions = new ElectionRegistry.Question[](1);
         p.questions[0] =
             ElectionRegistry.Question(1, d.optionCount, d.minSelections, d.maxSelections);

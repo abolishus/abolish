@@ -51,7 +51,9 @@ library RegistryFixture {
     }
 
     /// A plurality election for Tier 0 and Tier 2 that names `registry`'s
-    /// deployment, with identifier `electionId`.
+    /// deployment, with identifier `electionId`, and pins the profile the
+    /// registry serves for definition version 1: every type at version 1 but
+    /// board-entry version 5 and contract-event version 3.
     function template(ElectionRegistry registry, bytes32 electionId)
         internal
         view
@@ -65,6 +67,8 @@ library RegistryFixture {
             d.pinTypes[i] = uint16(i + 1);
             d.pinVersions[i] = 1;
         }
+        d.pinVersions[6] = 5;
+        d.pinVersions[7] = 3;
         d.electionId = electionId;
         d.l2ChainId = uint64(block.chainid);
         d.l1ChainId = registry.l1ChainId();
@@ -121,8 +125,10 @@ library RegistryFixture {
     /// layout adds: Tier 0 split into two regional cells and Tier 2 one cell
     /// (versions 3 to 6); one receipt key (4 to 6); two questions in place of
     /// the one (5 and 6); and a sealed everyday poll with a 2-of-3 author
-    /// panel (6). The ballot pin is the version each pairs with, 3 standing
-    /// in for version 6's, which isn't specified yet.
+    /// panel (6). The ballot, opening and display-text pins are the versions
+    /// each pairs with, ballot version 3 standing in for version 6's 4, which
+    /// the registry refuses, so a version-6 template is refused there
+    /// (`ProfileNotServed`) unless a test sets its pins.
     function templateV(ElectionRegistry registry, bytes32 electionId, uint8 version)
         internal
         view
@@ -132,6 +138,8 @@ library RegistryFixture {
         d.version = version;
         d.pinVersions[0] = version;
         d.pinVersions[1] = version < 5 ? 2 : 3;
+        d.pinVersions[2] = 2;
+        d.pinVersions[8] = version < 5 ? 1 : 2;
         d.electorate = new ElectionDefinitionLib.TierGroup[](0);
         d.tiers = new ElectionDefinitionLib.TierElectorate[](2);
         d.tiers[0].tier = 0;

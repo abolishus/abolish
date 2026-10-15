@@ -31,7 +31,9 @@ library ElectionIdLib {
 /// within the close rule's bounds (T-35, T-50) and sequencing bounds no
 /// larger than its windows were sized for, has an electorate already public on
 /// L2, and whose stub the trustee registry
-/// recorded with its ceremony transcript (T-17, T-37, T-08, T-13). With each
+/// recorded with its ceremony transcript (T-17, T-37, T-08, T-13), and whose
+/// profile pins the versions this deployment's board and the verifier serve
+/// for it (T-25, T-50, T-53). With each
 /// definition it records the parameters the board's checks read, so the board
 /// never takes them from a caller (ADR 0028, 1C; T-25). There is no admin,
 /// proxy, pause or upgrade path: every rule is fixed at deployment.
@@ -170,6 +172,7 @@ contract ElectionRegistry is EventAccumulator {
     error InvalidDeployment();
     error NonCanonicalCalldata();
     error DefinitionIllFormed(ElectionDefinitionLib.Rule rule);
+    error ProfileNotServed(uint16 recordType, uint8 version);
     error WrongDeployment(DeploymentField field);
     error UnknownElection(bytes32 electionId);
     error NotCreator(bytes32 electionId, address caller);
@@ -337,6 +340,7 @@ contract ElectionRegistry is EventAccumulator {
                 stub, def.ceremonyTranscriptHash, def.panelId, def.threshold, def.panelSize
             );
         if (!recorded) revert CeremonyNotRecorded(stub, def.ceremonyTranscriptHash);
+        _requireServedProfile(def);
 
         bytes32 h = ElectionDefinitionLib.hash(definition);
         definitionHashOf[id] = h;
@@ -428,6 +432,33 @@ contract ElectionRegistry is EventAccumulator {
     function _l1Origin() private view returns (uint64 number, uint64 timestamp, bytes32 hash) {
         IL1Block l1 = IL1Block(L1_BLOCK);
         return (l1.number(), l1.timestamp(), l1.hash());
+    }
+
+    /// The profile pins exactly the versions this deployment serves for the
+    /// definition's version (docs/spec/contracts.md, Election registry,
+    /// Registration, rule 9), checked by record type in ascending order: the
+    /// ballot version the board checks for it (1 for definition version 1, 2
+    /// for 3 and 4, 3 for 5; none for 6, whose ballot version 4 the board
+    /// can't check), the spoiled-ballot opening version that opens that
+    /// ballot's cores, board-entry version 5, the only one that allows the
+    /// close statement, contract-event version 3, the only one that archives
+    /// the board's close-rule events, and the display-text version the
+    /// definition's layout needs. So no registered election leaves a voter's
+    /// direct submission, a seat's statement or a challenge without a path
+    /// the verifier reads (T-25, T-50, T-42, T-53). `profile-types` fixed the
+    /// pins as 0x0001 to 0x0009 in order.
+    function _requireServedProfile(ElectionDefinitionLib.Definition memory def) private pure {
+        uint8 v = def.version;
+        uint8[] memory pins = def.pinVersions;
+        // 0: definition version 6, whose ballot version 4 the board can't check.
+        uint8 ballot = v == 1 ? 1 : v == 3 || v == 4 ? 2 : v == 5 ? 3 : 0;
+        if (ballot == 0 || pins[1] != ballot) revert ProfileNotServed(0x0002, pins[1]);
+        // Opening version 2 opens the cores of ballot versions 2 and 3.
+        if (pins[2] != (ballot == 1 ? 1 : 2)) revert ProfileNotServed(0x0003, pins[2]);
+        if (pins[6] != 5) revert ProfileNotServed(0x0007, pins[6]);
+        if (pins[7] != 3) revert ProfileNotServed(0x0008, pins[7]);
+        // Display-text version 2 carries definition version 5's questions.
+        if (pins[8] != (v == 5 ? 2 : 1)) revert ProfileNotServed(0x0009, pins[8]);
     }
 
     function _requireThisDeployment(ElectionDefinitionLib.Definition memory def) private view {

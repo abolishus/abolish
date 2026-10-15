@@ -46,7 +46,9 @@ library BallotCheckLib {
     }
 
     /// What an admitted ballot gives the board: the election it names, its
-    /// cell and that cell's tier, its nullifier, `ballot_hash` and `M`.
+    /// cell and that cell's tier, its nullifier, `ballot_hash` and `M`, and
+    /// the election's window, which the board's paths each test their own
+    /// way (docs/spec/close.md, Window).
     struct Admitted {
         bytes32 definitionHash;
         uint8 version;
@@ -55,6 +57,8 @@ library BallotCheckLib {
         uint256 nullifier;
         bytes32 ballotHash;
         bytes32 message;
+        uint64 opensAt;
+        uint64 closesAt;
     }
 
     /// Where the committed vote's lists start, and their counts, as framing
@@ -130,6 +134,7 @@ library BallotCheckLib {
     {
         ElectionRegistry.Parameters memory p;
         (p, l) = frame(record, registry, a);
+        (a.opensAt, a.closesAt) = (p.opensAt, p.closesAt);
         uint256 named = _uint(record, TIER_AT, 1);
 
         uint256 root;

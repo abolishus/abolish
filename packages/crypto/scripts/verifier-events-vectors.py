@@ -19,9 +19,10 @@ it, so every failing case is `unverifiable` with the failing record's code.
 The verifier's tests show the `fail` status over l1-anchor.json's anchored
 boards, whose entry 1 is a placeholder of type 0x0008 that doesn't decode.
 
-The records and their verdicts are contract-event.json's and
-contract-event-v2.json's (contract-event-vectors.py and
-contract-event-v2-vectors.py, independent Python implementations): a record
+The records and their verdicts are contract-event.json's,
+contract-event-v2.json's and contract-event-v3.json's (contract-event-vectors.py,
+contract-event-v2-vectors.py and contract-event-v3-vectors.py, independent
+Python implementations): a record
 of `records` passes, one of `eventFailures` fails with its `error`, and one
 of `decodeErrors` doesn't decode, with its `error`, each under its own file's
 version and against its own file's contracts. The only verdict computed here
@@ -88,7 +89,8 @@ def load_events(name, version):
 
 V1 = load_events("contract-event.json", 1)
 V2 = load_events("contract-event-v2.json", 2)
-FILES = {1: V1, 2: V2}
+V3 = load_events("contract-event-v3.json", 3)
+FILES = {1: V1, 2: V2, 3: V3}
 
 
 def pins_of(d):
@@ -121,7 +123,7 @@ def expected(d, entries, anchored=None):
     """4.4 as far as the copy decides it, computed here from verifier.md and contracts.md; `anchored` is the extent 4.1 and 4.2 authenticated, if they pass."""
     status = "unverifiable" if anchored is None else "fail"
     pins = pins_of(d)
-    if pins.get(CONTRACT_EVENT_TYPE) not in (1, 2):
+    if pins.get(CONTRACT_EVENT_TYPE) not in FILES:
         return UNSUPPORTED
     for at, raw in enumerate(entries):
         if anchored is not None and at >= anchored:
@@ -179,16 +181,23 @@ def main(out_dir):
     def rec(f, id_):
         return f["verdicts"][id_][0]
 
+    def honest(f):
+        """An honest record to open a failure case with, and how it reads: version 3's file has only the board's records."""
+        return ("group-created", "an honest group creation") if "group-created" in f["verdicts"] else ("ballot-submitted", "an honest ballot submission")
+
     d1 = definition(dv.TYPICAL, 1, V1)
     d2 = definition(d4.TYPICAL, 2, V2, board_version=4)
     d2_v1 = definition(dv.TYPICAL, 2, V2)
     d3 = definition(rc.TYPICAL, 2, V2, board_version=3)
+    d3_v4 = definition(d4.TYPICAL, 3, V3, board_version=4)
     honest1 = [rec(V1, i) for i in V1["records"]]
     honest2 = [rec(V2, i) for i in V2["records"]]
+    honest3 = [rec(V3, i) for i in V3["records"]]
 
     case("v1-records", "Definition version 1 pinning contract-event version 1: every honest record of contract-event.json, in its order, each passing the event check. 4.4 stays unverifiable (not-implemented): the required entries and the accumulator's replay wait on L2 reads and the archive.", d1, honest1, NOT_IMPLEMENTED)
     case("v2-records", "Definition version 4 pinning board-entry version 4 and contract-event version 2: every honest record of contract-event-v2.json, the board's events included, each passing. 4.4 is not-implemented.", d2, honest2, NOT_IMPLEMENTED)
     case("v3-records", "Definition version 3 pinning board-entry version 3 and contract-event version 2: a ballot, a share receipt and a group creation, each passing. 4.4 is not-implemented.", d3, [rec(V2, "ballot-v2"), rec(V2, "share-receipt"), rec(V2, "group-created")], NOT_IMPLEMENTED)
+    case("events-v3-records", "Definition version 4 pinning board-entry version 4 and contract-event version 3: every honest record of contract-event-v3.json, the board's ballots, relayed ballots and close statements, each passing. 4.4 is not-implemented.", d3_v4, honest3, NOT_IMPLEMENTED)
     case("none", "No contract-event record on the copy: 4.4 is not-implemented, never a pass, since which events must be boarded isn't known yet.", d1, [], NOT_IMPLEMENTED)
 
     case(
@@ -201,24 +210,29 @@ def main(out_dir):
     for f, d, ids in [
         (V1, d1, ["unknown-contract", "unknown-event-board", "unknown-event-no-topics", "event-topics-too-few", "event-topics-tier-over-u8", "event-data-trailing", "event-data-definition-v3", "event-data-registration-count"]),
         (V2, d2, ["unknown-event-ballot-from-registry", "event-topics-ballot-two", "event-data-ballot-element-zero", "event-data-registration-v1-layout", "event-data-receipt-high-s"]),
+        (V3, d3_v4, ["unknown-event-relayed-from-registry", "event-topics-relayed-two", "event-data-relayed-stamp-over-u64", "event-data-relayed-hash-topic", "event-data-close-signer-topic", "event-data-close-signature-high-s"]),
     ]:
         for id_ in ids:
             error = f["verdicts"][id_][1]
             case(
                 f"v{f['version']}-{id_}",
-                f"Contract-event version {f['version']}: an honest group creation, then {f['file']}'s `{id_}` record, the first failure: {error} at entry 1.",
+                f"Contract-event version {f['version']}: {honest(f)[1]}, then {f['file']}'s `{id_}` record, the first failure: {error} at entry 1.",
                 d,
-                [rec(f, "group-created"), rec(f, id_)],
+                [rec(f, honest(f)[0]), rec(f, id_)],
                 outcome("unverifiable", error, {"entry": 1}),
             )
-    for f, d, ids in [(V1, d1, ["version-two", "trailing-bytes", "data-over-max"]), (V2, d2, ["version-one", "version-three", "truncated-data", "topics-over-max"])]:
+    for f, d, ids in [
+        (V1, d1, ["version-two", "trailing-bytes", "data-over-max"]),
+        (V2, d2, ["version-one", "version-three", "truncated-data", "topics-over-max"]),
+        (V3, d3_v4, ["version-one", "version-two", "version-four"]),
+    ]:
         for id_ in ids:
             code = f["verdicts"][f"decode/{id_}"][1][1]
             case(
                 f"v{f['version']}-decode-{id_}",
-                f"Contract-event version {f['version']}: an honest group creation, then {f['file']}'s `{id_}` encoding, which doesn't decode under the pinned version, the first failure: decode ({code}) at entry 1.",
+                f"Contract-event version {f['version']}: {honest(f)[1]}, then {f['file']}'s `{id_}` encoding, which doesn't decode under the pinned version, the first failure: decode ({code}) at entry 1.",
                 d,
-                [rec(f, "group-created"), rec(f, f"decode/{id_}")],
+                [rec(f, honest(f)[0]), rec(f, f"decode/{id_}")],
                 outcome("unverifiable", "decode", {"entry": 1, "decodeError": code}),
             )
 
@@ -266,7 +280,7 @@ def main(out_dir):
         NOT_IMPLEMENTED,
         entry_version=3,
     )
-    for events in (3, 255):
+    for events in (4, 255):
         case(
             f"events-v{events}",
             f"The profile pins contract-event version {events}, unknown here: 4.4 is unverifiable (unsupported-version) whatever the copy holds, failing records included (T-36).",
@@ -281,9 +295,9 @@ def main(out_dir):
         "spec": "docs/spec/verifier.md",
         "generator": (
             "packages/crypto/scripts/verifier-events-vectors.py, from verifier-ceremony-vectors.py and the records of "
-            "contract-event.json and contract-event-v2.json (independent Python implementations)"
+            "contract-event.json, contract-event-v2.json and contract-event-v3.json (independent Python implementations)"
         ),
-        "inputs": {f["file"]: f["sha256"] for f in (V1, V2)},
+        "inputs": {f["file"]: f["sha256"] for f in (V1, V2, V3)},
         "cases": cases,
     }
     path = pathlib.Path(out_dir, "verifier-events.json")

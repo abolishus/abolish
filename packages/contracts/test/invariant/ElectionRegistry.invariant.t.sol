@@ -61,7 +61,8 @@ contract RegistryHandler is TestBase {
         if (version < 5) d.optionCount = 2 + variant / 5 % 4;
         else d.questions[0].optionCount = uint16(2 + variant / 5 % 4);
         bytes memory enc = RegistryFixture.approve(lib, trustees, d);
-        bool allowed = actor == shadowCreator[id] && shadowHash[id] == bytes32(0);
+        // Version 6 has no profile the deployment serves (rule 9).
+        bool allowed = version != 6 && actor == shadowCreator[id] && shadowHash[id] == bytes32(0);
         vm.prank(actor);
         try registry.registerDefinition(enc) {
             if (!allowed) unexpected = true;
@@ -129,11 +130,12 @@ contract RegistryHandler is TestBase {
 /// 2. Every election's creator is the account that created it.
 /// 3. An election's definition hash is set once, by its creator, and never
 ///    changes afterwards (write-once; T-34, T-24).
-/// 4. A registration succeeds exactly when its caller is the creator and the
-///    election has no definition yet.
+/// 4. A registration succeeds exactly when its caller is the creator, the
+///    election has no definition yet, and its definition's version has a
+///    profile the deployment serves (every version but 6).
 /// 5. The event accumulator counts one event per creation and per registration.
 /// 6. The board's parameters are recorded for exactly the registered
-///    definitions of every version, each exactly the registered definition's,
+///    definitions of every registered version, each exactly the registered definition's,
 ///    and a refused definition records none (ADR 0028, 1C).
 /// 7. A registered definition's ceremony is its stub hash and panel, under
 ///    which the trustee registry approved it, and an unregistered or refused

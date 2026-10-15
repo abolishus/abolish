@@ -4,9 +4,12 @@
 // lists, with the same signature and indexed parameters, so a contract that
 // gains, loses or changes an event fails here before its logs could fail
 // verifier 4.4 (T-17, T-71). The tables come from
-// docs/spec/vectors/contract-event.json (version 1, the three registries) and
-// contract-event-v2.json (version 2, with the board), written by independent
-// generators.
+// docs/spec/vectors/contract-event.json (version 1, the three registries),
+// contract-event-v2.json (version 2, with the board's four delivery and ballot
+// events) and contract-event-v3.json (version 3, with the close rule's two),
+// written by independent generators. The board declares version 3's six, so
+// only version 3's table is compared with it: the registry refuses a profile
+// pinning version 1 or 2 (contracts.md, Registration, rule 9).
 
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vite-plus/test";
@@ -49,10 +52,11 @@ const registries: readonly [string, readonly AbiItem[]][] = [
 
 const board: readonly [string, readonly AbiItem[]] = ["board", boardAbi];
 
-// Version 1's tables name no board event; version 2's name the board's four.
+// Version 1's tables name no board event; version 2's name four of its six.
 const cases = [
   ...registries.map(([role, abi]) => ["contract-event.json", role, abi] as const),
-  ...[...registries, board].map(([role, abi]) => ["contract-event-v2.json", role, abi] as const),
+  ...registries.map(([role, abi]) => ["contract-event-v2.json", role, abi] as const),
+  ...[...registries, board].map(([role, abi]) => ["contract-event-v3.json", role, abi] as const),
 ];
 
 describe("contract-event tables", () => {

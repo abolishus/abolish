@@ -11,16 +11,30 @@ library CanonicalCalldata {
     /// transaction carry bytes no record defines (docs/spec/notation.md,
     /// Result-critical fields; T-17).
     function requireOneBytesArgument(bytes calldata b) internal pure {
+        requireWordsThenBytes(0, b);
+    }
+
+    /// The calldata is exactly the standard ABI encoding of `words` static
+    /// one-word arguments followed by one `bytes` argument: the bytes'
+    /// offset `32 · (words + 1)`, zero padding, nothing after it. The
+    /// static words themselves are the decoder's: Solidity reverts on a
+    /// value outside its type, such as a `uint64` word with bit 64 set.
+    function requireWordsThenBytes(uint256 words, bytes calldata b) internal pure {
         uint256 len = b.length;
         uint256 padded = (len + 31) & ~uint256(31);
+        uint256 head = 4 + 32 * (words + 1);
         uint256 offsetWord;
         uint256 lastWord;
         assembly ("memory-safe") {
-            offsetWord := calldataload(4)
+            offsetWord := calldataload(sub(head, 32))
             // The word holding the last data bytes and the padding after them.
-            if mod(len, 32) { lastWord := calldataload(add(68, sub(padded, 32))) }
+            if mod(len, 32) {
+                lastWord := calldataload(add(add(head, 32), sub(padded, 32)))
+            }
         }
-        if (msg.data.length != 68 + padded || offsetWord != 0x20) revert NonCanonicalCalldata();
+        if (msg.data.length != head + 32 + padded || offsetWord != head - 4) {
+            revert NonCanonicalCalldata();
+        }
         if (len % 32 != 0 && lastWord << (8 * (len % 32)) != 0) revert NonCanonicalCalldata();
     }
 

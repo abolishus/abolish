@@ -410,6 +410,76 @@ describe("SimulatedElectionRegistry", { timeout }, () => {
   });
 });
 
+describe("SimulatedElectionRegistry's profile rule", { timeout }, () => {
+  // Another 2-of-4 panel whose secrets the test holds, so a definition with
+  // any profile gets its own stub's ceremony recorded first: the profile is
+  // rule 9, after the ceremony.
+  const secrets = Array.from({ length: 4 }, () => crypto.getRandomValues(new Uint8Array(32)));
+  const panel: Panel = { threshold: 2, keys: secrets.map((x) => identityKey(x)) };
+  const withPins = (pins: ReadonlyMap<number, number>) => {
+    const def = {
+      ...d,
+      panel_id: panelId(panel),
+      threshold: 2,
+      panel_size: 4,
+      profile: {
+        ...d.profile,
+        pins: d.profile.pins.map((p) => ({ ...p, version: pins.get(p.record_type) ?? p.version })),
+      },
+    };
+    const t = new SimulatedTrusteeRegistry(e.deployment.l2ChainId, e.deployment.trusteeRegistry, [
+      { panel, quorum: rule7Quorum(panel) },
+    ]);
+    const stub = electionStubV4Hash(def);
+    const setHash = keySetHash(e.registration.seats);
+    const recorded = t.registerCeremony({
+      ...e.registration,
+      panelId: panelId(panel),
+      stubHash: stub,
+      approvals: secrets.map((secret, i) => ({
+        index: i + 1,
+        signature: signCeremonyRegistration(secret, panel, {
+          l2ChainId: e.deployment.l2ChainId,
+          trusteeRegistry: e.deployment.trusteeRegistry,
+          index: i + 1,
+          stubHash: stub,
+          ceremonyTranscriptHash: def.ceremony_transcript_hash,
+          keySetHash: setHash,
+        }),
+      })),
+    });
+    expect(recorded).toEqual({ ok: true });
+    const r = new SimulatedElectionRegistry(e.deployment, t);
+    r.createElection(SIMULATED_CREATOR);
+    const result = r.registerDefinition(SIMULATED_CREATOR, def, before);
+    return result.ok ? "ok" : result.refusal;
+  };
+
+  it("registers the profile the deployment serves for definition version 4", () => {
+    expect(withPins(new Map())).toBe("ok");
+  });
+
+  // Ballot 0x0002, opening 0x0003, board entry 0x0007, contract event
+  // 0x0008 and display text 0x0009, each at any other version from 1 to 7
+  // ([[contracts]], Election registry, Registration, rule 9).
+  it("refuses every other version of a served pin", () => {
+    const served: readonly (readonly [number, number])[] = [
+      [0x0002, 2],
+      [0x0003, 2],
+      [0x0007, 5],
+      [0x0008, 3],
+      [0x0009, 1],
+    ];
+    for (const [type, version] of served)
+      for (let v = 1; v <= 7; v++)
+        if (v !== version) expect(withPins(new Map([[type, v]]))).toBe("ProfileNotServed");
+  });
+
+  it("leaves the receipt, ceremony-transcript and tally-opening pins to the verifier", () => {
+    for (const type of [0x0004, 0x0005, 0x0006]) expect(withPins(new Map([[type, 2]]))).toBe("ok");
+  });
+});
+
 describe("l2BlockAt", () => {
   it("puts a call in the block whose two seconds hold it", () => {
     fc.assert(

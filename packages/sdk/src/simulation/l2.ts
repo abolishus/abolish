@@ -25,6 +25,8 @@ import {
   PARAMETERS,
   type Panel,
   panelId,
+  pinnedVersion,
+  RECORD_TYPES,
   verifyCeremonyRegistration,
 } from "@abolishus/crypto";
 
@@ -119,7 +121,8 @@ export type DefinitionRefusal =
   | "SequencingWindowTooLarge"
   | "SequencerDriftTooLarge"
   | "RootNotInPast"
-  | "CeremonyNotRecorded";
+  | "CeremonyNotRecorded"
+  | "ProfileNotServed";
 
 export type RegistryResult<R> =
   | { readonly ok: true }
@@ -292,6 +295,24 @@ export class SimulatedTrusteeRegistry {
   }
 }
 
+/**
+ * Rule 9 for a version-4 definition, the only version the simulation
+ * registers: ballot version 2, spoiled-ballot opening version 2, board-entry
+ * version 5, contract-event version 3 and display-text version 1, the
+ * versions the deployment's board and the verifier serve for it
+ * ([[contracts]], Election registry, Registration).
+ */
+const SERVED_V4: ReadonlyMap<number, number> = new Map([
+  [RECORD_TYPES.ballot, 2],
+  [RECORD_TYPES.spoiledBallotOpening, 2],
+  [RECORD_TYPES.boardEntry, 5],
+  [RECORD_TYPES.contractEvent, 3],
+  [RECORD_TYPES.displayText, 1],
+]);
+
+const servedProfile = (d: ElectionDefinitionV4) =>
+  [...SERVED_V4].every(([type, version]) => pinnedVersion(d, type) === version);
+
 export class SimulatedElectionRegistry {
   readonly #deployment: SimulatedDeployment;
   readonly #trustees: SimulatedTrusteeRegistry;
@@ -355,7 +376,7 @@ export class SimulatedElectionRegistry {
   }
 
   /**
-   * `registerDefinition`'s checks 3 to 8 in the contract's order, then the
+   * `registerDefinition`'s checks 3 to 9 in the contract's order, then the
    * write-once record of the definition's hash. Strict decoding (2) is the
    * caller's: the registry takes a decoded definition. Only the creator check
    * reads the caller, and only for its own identifier (T-25, T-71); the
@@ -407,6 +428,7 @@ export class SimulatedElectionRegistry {
       )
     )
       return refuse("CeremonyNotRecorded");
+    if (!servedProfile(d)) return refuse("ProfileNotServed");
     this.#definitions.set(id, electionDefinitionV4Hash(d));
     return { ok: true };
   }

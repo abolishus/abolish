@@ -152,7 +152,7 @@ export async function deployL2(rpc: Rpc, l1: Rpc, inputs: L2Inputs): Promise<L2>
   );
   const deployedBoard = await deploy(
     "Board",
-    concatBytes(address(electionRegistry), address(trusteeRegistry)),
+    concatBytes(address(electionRegistry), address(trusteeRegistry), address(l1Relay)),
   );
   if (!equalBytes(deployedBoard, board))
     throw new Error("the board isn't at the address the election registry names");

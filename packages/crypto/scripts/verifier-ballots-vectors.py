@@ -7,8 +7,13 @@ panel a bundle pins, with the rows 1.3, 2.3, 3.2, 5.1 to 5.5 and 5.7 a
 verifier reports and the report's `ballots`. Each copy of a ballot reaches
 the board by its own path, judged by the close rule's window (5.5,
 docs/spec/close.md, Window) under the file's anchoring clock: a ballot record
-in a board entry (the board path) or the board contract's `BallotSubmitted`
-event in a contract-event record (the ordinary path). Every transcript is made for the stub of the
+in a board entry (the board path), the board contract's `BallotSubmitted`
+event in a contract-event record (the ordinary path), or, under contract-event
+version 3, its `RelayedBallotSubmitted` event (the relayed path), whose stamp
+only 4.5's match with the L1 relay's call proves: a relayed ballot that passes
+5.1 to 5.4 is set aside, leaves 5.5 and 5.7 unverifiable
+(`not-implemented`) at its entry until 4.5 is built, and makes later copies
+candidate repeats, since it may be the copy that stands. Every transcript is made for the stub of the
 definition it is checked against, and every ballot proves membership under
 that definition's hash, so a verifier checks them with nothing but the bundle.
 
@@ -16,8 +21,9 @@ It reuses this folder's independent Python implementations, which share no
 code with packages/crypto or packages/verifier: verifier-ceremony-vectors.py
 (the definitions, transcripts, board entries and the ceremony rows) and
 ballot-vectors.py (Baby Jubjub, tier trees, the ballot record and its
-admission checks in order) and contract-event-v2-vectors.py (the
-contract-event record, version 2, and its event check).
+admission checks in order) and contract-event-v2-vectors.py and
+contract-event-v3-vectors.py (the contract-event record, versions 2 and 3,
+and their event checks).
 
 Membership proofs need a Groth16 prover, so generation has three steps, as
 for ballot.json:
@@ -50,6 +56,7 @@ def _load(name, file):
 
 bal = _load("ballot_vectors", "ballot-vectors.py")
 ce2 = _load("contract_event_v2_vectors", "contract-event-v2-vectors.py")
+ce3 = _load("contract_event_v3_vectors", "contract-event-v3-vectors.py")
 vc = _load("verifier_ceremony_vectors", "verifier-ceremony-vectors.py")
 cv, dv, bv, rev, mem = vc.cv, vc.dv, bal.bv, bal.rev, bal.mem
 
@@ -62,6 +69,10 @@ CONTRACT_EVENT_TYPE = 0x0008
 # s_A = period(closes_at) + 1 = 169 (docs/spec/close.md, Window).
 CLOCK = {"epoch": 1767225600, "period": 3600, "deadline": 7200, "lastSegment": 200}
 BALLOT_SUBMITTED = "BallotSubmitted(bytes32,bytes32,bytes)"
+# The contract-event versions this generator reads, and the relayed path's
+# call fields: any, since the board carries them unjudged.
+READ_EVENTS = (1, 2, 3)
+RELAY_CALL = (7, 6_000_000, 5_000_000)
 MEMBERSHIP_VK_HASH = bytes.fromhex(json.loads((VECTORS / "membership-proof.json").read_text())["verificationKey"]["hash"])
 DEFINITION_TAG = b"abolish/v1/election-definition"
 
@@ -137,32 +148,44 @@ def window(d, path):
 
 
 def via(kind, inner, segment=0, time=None):
-    """A board item carried another way: in an entry of `segment` (kind "board"), or as a contract-event record of the board's `BallotSubmitted` with L2 timestamp `time` ("event"), or of the same log from an address the definition doesn't name ("foreign")."""
+    """A board item carried another way: in an entry of `segment` (kind "board"), or as a contract-event record of the board's `BallotSubmitted` with L2 timestamp `time` ("event"), or of the same log from an address the definition doesn't name ("foreign"), or of its `RelayedBallotSubmitted` with stamp `time` ("relayed", contract-event version 3)."""
     return {"via": kind, "item": inner, "segment": segment, "time": time}
 
 
-def event_record(d, rec, n, time, contract=None):
-    """A version-2 contract-event record of the board's `BallotSubmitted` carrying `rec`, framed as the board frames it (contracts.md, Board, Events)."""
+def event_record(d, rec, n, time, contract=None, version=2, relayed=False):
+    """A contract-event record of `version` (2 or 3) of the board's `BallotSubmitted` carrying `rec`, or under version 3 of its `RelayedBallotSubmitted` with stamp `time` and RELAY_CALL's other fields, framed as the board frames it (contracts.md, Board, Events)."""
     framed = ce2.frame_ballot(rec)
     assert framed is not None
+    if relayed:
+        assert version == 3
+        index, l1_block, gas = RELAY_CALL
+        topics = [ce3.sig_topic(ce3.RELAYED), framed[0], framed[1]]
+        data = ce3.word(index) + ce3.word(l1_block) + ce3.word(time) + ce3.word(gas) + ce3.word(0xA0) + ce3.abi_bytes(rec)
+        return ce3.encode(contract or d["board"], n, 5_000_000 + n, d["opens_at"] + n, topics, data)
     topics = [ce2.sig_topic(BALLOT_SUBMITTED), framed[0], framed[1]]
     data = ce2.word(32) + ce2.abi_bytes(rec)
-    return ce2.encode(contract or d["board"], n, 5_000_000 + n, time, topics, data)
+    encode = ce3.encode if version == 3 else ce2.encode
+    return encode(contract or d["board"], n, 5_000_000 + n, time, topics, data)
 
 
-def ordinary(d, payload):
-    """The ballot a contract-event record carries on the ordinary path, with its L2 timestamp, or None: only a record that decodes under version 2 and passes the event check as the board's `BallotSubmitted` (docs/spec/verifier.md, Ballot admission)."""
+def carried(d, payload, version):
+    """The ballot a contract-event record carries, with its path: ("ordinary", L2 timestamp) for the board's `BallotSubmitted`, ("relayed", None) for its `RelayedBallotSubmitted` under version 3, or None: only a record that decodes under `version` and passes the event check as one of these (docs/spec/verifier.md, Ballot admission)."""
     if int.from_bytes(payload[:2], "big") != CONTRACT_EVENT_TYPE:
         return None
+    m = ce3 if version == 3 else ce2
     try:
-        rec = ce2.decode(payload)
-    except ce2.Reject:
+        rec = m.decode(payload)
+    except m.Reject:
         return None
     contracts = {"election-registry": d["election_registry"], "trustee-registry": d["trustee_registry"], "group-registry": d["group_registry"], "board": d["board"]}
-    ev = ce2.event_check(rec, contracts, {})
-    if not isinstance(ev, dict) or ev["event"] != "BallotSubmitted":
+    ev = m.event_check(rec, contracts, {})
+    if not isinstance(ev, dict):
         return None
-    return bytes.fromhex(ev["record"]), rec["timestamp"]
+    if ev["event"] == "BallotSubmitted":
+        return bytes.fromhex(ev["record"]), "ordinary", rec["timestamp"]
+    if ev["event"] == "RelayedBallotSubmitted":
+        return bytes.fromhex(ev["record"]), "relayed", None
+    return None
 
 
 def build(constants):
@@ -440,25 +463,50 @@ def build(constants):
         [t_w, via("event", (w_early, p_w_early), time=d_w["opens_at"] - 1), via("event", (w_early, p_w_early), time=d_w["closes_at"])],
         "mixed",
     )
-    # A contract-event version this verifier doesn't read: ordinary ballots
-    # can't be found, so the window and repeats can't be decided (T-36).
+    # Contract-event version 3, whose board emits `BallotSubmitted` as
+    # version 2's does, and `RelayedBallotSubmitted` for a forced ballot.
     ce3_pins = [(ty, 3 if ty == CONTRACT_EVENT_TYPE else v) for ty, v in pins]
     d_c3, t_c3, e_c3 = election_for("events-unread", [1, 2, 3], profile={"protocol_major": 1, "pins": ce3_pins})
     u_ok0 = ballot("events-unread", e_c3, 0, nullifier("tier-0", 0, e_c3, 0), [0, 1, 0], zero4)
     p_u_ok0 = prove("events-unread", "tier-0", 0, e_c3, 0, u_ok0)
     bundle(
-        "events-unread",
-        "The profile pins contract-event version 3, which this release doesn't read: the board-path ballot and its copy are judged by 5.1 to 5.4, but 5.5 and 5.7 are unsupported and the copy stays a candidate repeat.",
+        "events-v3",
+        "The profile pins contract-event version 3: a board-path ballot and its board-path copy, judged by 5.1 to 5.5, and the copy a repeat (5.7).",
         d_c3, t_c3, e_c3, [1, 2, 3],
         [t_c3, (u_ok0, p_u_ok0), (u_ok0, p_u_ok0)],
+        "mixed",
+    )
+    bundle(
+        "events-v3-relayed",
+        "Contract-event version 3: the ballot relayed through L1 with a stamp after close, then an ordinary copy inside the window and a board-path copy. The relayed copy passes 5.1 to 5.4 and is set aside, since only 4.5's match with the relay's call proves its stamp: 5.5 and 5.7 are unverifiable (not-implemented) at it, whatever the other copies show, and the board-path copy stays a candidate repeat, since the relayed one may be the copy that stands.",
+        d_c3, t_c3, e_c3, [1, 2, 3],
+        [
+            t_c3,
+            via("relayed", (u_ok0, p_u_ok0), time=d_c3["closes_at"] + 1),
+            via("event", (u_ok0, p_u_ok0), time=d_c3["opens_at"] + 3600),
+            (u_ok0, p_u_ok0),
+        ],
+        "relayed",
+    )
+    # A contract-event version this verifier doesn't read: ordinary ballots
+    # can't be found, so the window and repeats can't be decided (T-36).
+    ce4_pins = [(ty, 4 if ty == CONTRACT_EVENT_TYPE else v) for ty, v in pins]
+    d_c4, t_c4, e_c4 = election_for("events-unread-v4", [1, 2, 3], profile={"protocol_major": 1, "pins": ce4_pins})
+    x_ok0 = ballot("events-unread-v4", e_c4, 0, nullifier("tier-0", 0, e_c4, 0), [0, 1, 0], zero4)
+    p_x_ok0 = prove("events-unread-v4", "tier-0", 0, e_c4, 0, x_ok0)
+    bundle(
+        "events-unread",
+        "The profile pins contract-event version 4, which this release doesn't read: the board-path ballot and its copy are judged by 5.1 to 5.4, but 5.5 and 5.7 are unsupported and the copy stays a candidate repeat.",
+        d_c4, t_c4, e_c4, [1, 2, 3],
+        [t_c4, (x_ok0, p_x_ok0), (x_ok0, p_x_ok0)],
         "candidates",
     )
 
     return {"groups": groups, "panels": panels, "proofs": proofs, "checks": checks, "bundles": bundles, "eid": eid}
 
 
-def rows_for(kind, rejected, repeats=(), windows=True):
-    """5.1 to 5.5 and 5.7 from the rejected entries: each row fails at the first entry whose code is one of its own. Under a contract-event version that isn't read, ordinary ballots can't be found, so 5.5 and 5.7 are unverifiable and a repeat stays a candidate."""
+def rows_for(kind, rejected, repeats=(), windows=True, relayed=()):
+    """5.1 to 5.5 and 5.7 from the rejected entries: each row fails at the first entry whose code is one of its own. Under a contract-event version that isn't read, ordinary ballots can't be found, so 5.5 and 5.7 are unverifiable and a repeat stays a candidate; a relayed ballot that passed 5.1 to 5.4 leaves them unverifiable at the first one."""
     rows_all = ADMISSION_ROWS + ("5.5", "5.7")
     if kind == "not-reached":
         return {r: NOT_REACHED for r in rows_all}
@@ -472,7 +520,9 @@ def rows_for(kind, rejected, repeats=(), windows=True):
 
     for r in ADMISSION_ROWS:
         rows[r] = first([c for c, rs in ROWS_OF.items() if r in rs])
-    if windows:
+    if relayed:
+        rows["5.5"] = rows["5.7"] = outcome("unverifiable", "not-implemented", {"entry": relayed[0]})
+    elif windows:
         rows["5.5"] = first(WINDOW_CODES)
         rows["5.7"] = first(("repeat",))
     else:
@@ -520,9 +570,10 @@ def assemble(constants, proofs_path, out_dir):
                 # The record a board-path ballot of the same bytes would carry,
                 # as the board's event (or the same log from an address the
                 # definition doesn't name, which carries no ballot).
-                assert pins[CONTRACT_EVENT_TYPE] == 2
-                contract = d["board"] if wrap["via"] == "event" else bal.det("verifier foreign contract")[:20]
-                rec = event_record(d, rec, len(payloads), wrap["time"], contract)
+                version = pins[CONTRACT_EVENT_TYPE]
+                assert version in (2, 3)
+                contract = bal.det("verifier foreign contract")[:20] if wrap["via"] == "foreign" else d["board"]
+                rec = event_record(d, rec, len(payloads), wrap["time"], contract, version, wrap["via"] == "relayed")
             payloads.append((kind, rec, b, pid, wrap["segment"]))
         entries = [vc.entry(4, eid, i, seg, rec) for i, (_, rec, _, _, seg) in enumerate(payloads)]
         panel = s["panels"][e["panel"]]
@@ -537,23 +588,23 @@ def assemble(constants, proofs_path, out_dir):
         vk_fails = pins.get(BALLOT_TYPE) == 1 and d["membership_vk_hash"] != MEMBERSHIP_VK_HASH
         # Under a contract-event version this generator doesn't read, ordinary
         # ballots can't be found: 5.5 and 5.7 stay unverifiable.
-        windows = pins.get(CONTRACT_EVENT_TYPE) in (1, 2)
+        windows = pins.get(CONTRACT_EVENT_TYPE) in READ_EVENTS
         rows = {"1.3": outcome("fail", "membership-key", {}) if vk_fails else NOT_IMPLEMENTED, "2.3": combination(d)}
         rows.update({k: v for k, v in ceremony_rows.items() if k == "3.2"})
         ballots = None
-        if expect in ("mixed", "admitted", "repeats", "candidates"):
-            admitted, rejected, repeats, firsts = [], [], [], set()
+        if expect in ("mixed", "admitted", "repeats", "candidates", "relayed"):
+            admitted, rejected, repeats, firsts, relayed = [], [], [], set(), []
             for i, (kind, rec, b, pid, seg) in enumerate(payloads):
                 if kind == "transcript":
                     continue
                 path = {"kind": "board", "segment": seg}
                 if int.from_bytes(rec[:2], "big") == CONTRACT_EVENT_TYPE:
                     # Under contract-event version 1 the board emits no event.
-                    carried = ordinary(d, rec) if pins[CONTRACT_EVENT_TYPE] == 2 else None
-                    if carried is None:
+                    found = carried(d, rec, pins[CONTRACT_EVENT_TYPE]) if pins[CONTRACT_EVENT_TYPE] in (2, 3) else None
+                    if found is None:
                         continue
-                    rec, time = carried
-                    path = {"kind": "ordinary", "segment": seg, "time": time}
+                    rec, kind_of, time = found
+                    path = {"kind": kind_of, "segment": seg, "time": time}
                 if kind == "raw":
                     if rec[-1:] == b"\x00" and rec[2] == 1:
                         rejected.append({"entry": i, "code": "decode", "decodeError": "trailing-bytes"})
@@ -566,6 +617,10 @@ def assemble(constants, proofs_path, out_dir):
                 sig = bal.verifier_signals(e, b)
                 assert (sig is None) == (verdict is None), (bnd["id"], i)
                 code, option = bal.admission(e, bnd["registered"], b, verdict)
+                if code == "ok" and path["kind"] == "relayed":
+                    # Its stamp is the event's word until 4.5 matches the call.
+                    relayed.append(i)
+                    continue
                 late = window(d, path) if code == "ok" and windows else None
                 if late is not None:
                     rejected.append({"entry": i, "code": late})
@@ -582,18 +637,23 @@ def assemble(constants, proofs_path, out_dir):
                     if option is not None:
                         r["option"] = option
                     rejected.append(r)
-            if windows:
+            # A relayed ballot set aside may be the copy that stands, so while
+            # one waits on 4.5 later copies stay candidate repeats.
+            settled = windows and not relayed
+            if settled:
                 # Every copy left passed 5.1 to 5.5, so a repeat is rejected (5.7).
                 rejected = sorted(rejected + [{"entry": r["entry"], "code": "repeat"} for r in repeats], key=lambda r: r["entry"])
                 admitted = [i for i in admitted if {"entry": i} not in repeats]
-            rows.update(rows_for("mixed", rejected, repeats, windows))
-            ballots = {"admitted": len(admitted), "rejected": rejected, "repeats": [] if windows else repeats}
+            rows.update(rows_for("mixed", rejected, repeats, windows, relayed))
+            ballots = {"admitted": len(admitted), "rejected": rejected, "repeats": [] if settled else repeats}
             if expect == "admitted":
                 assert rejected == [] and repeats == [], bnd["id"]
             elif expect == "repeats":
                 assert len(repeats) == 2, bnd["id"]
             elif expect == "candidates":
                 assert not windows and rejected == [] and len(repeats) == 1, bnd["id"]
+            elif expect == "relayed":
+                assert relayed != [] and windows and len(repeats) == 1, bnd["id"]
             else:
                 assert rejected != [], bnd["id"]
         else:

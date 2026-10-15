@@ -17,7 +17,14 @@
 // gives a run of finalized L1 headers (format 5), each ballot's L1 reference
 // (5.8) is judged against it before repeats, as docs/spec/revoting.md's
 // Selection takes the ballots that passed every admission check; selection
-// (6.1) is decided over the admitted ballots by selection.ts.
+// (6.1) is decided over the admitted ballots by selection.ts. Under
+// contract-event version 3 a ballot can also come by the relayed path, as
+// the board's `RelayedBallotSubmitted` event, judged by its relay call's
+// stamp; only 4.5's match with the call the L1 relay recorded makes that
+// stamp the relay's rather than the event's word, and 4.5 isn't built
+// (P1-19), so a relayed ballot that passes 5.1 to 5.4 leaves 5.5, 5.7, 5.8
+// and everything after admission unverifiable, never judged by an unproven
+// stamp (docs/spec/close.md, Window; T-71, T-35).
 
 import {
   type AdmittedBallot,
@@ -129,7 +136,8 @@ export interface BallotOutcome {
     | "l1-ref-pending"
     | "l1-blocks-short"
     | "unsupported-version"
-    | "not-reached";
+    | "not-reached"
+    | "not-implemented";
   readonly at?: { readonly entry: number } | Record<string, never>;
 }
 
@@ -173,13 +181,16 @@ const equal = (a: Uint8Array, b: Uint8Array) =>
   a.length === b.length && a.every((x, i) => x === b[i]);
 
 // The contract-event versions this verifier reads; under version 1 the board
-// emits no event, so every ballot is a board-path one.
-const readsEvents = (v: number | undefined): v is ContractEventVersion => v === 1 || v === 2;
+// emits no event, so every ballot is a board-path one, and only version 3
+// has the relayed path.
+const readsEvents = (v: number | undefined): v is ContractEventVersion =>
+  v === 1 || v === 2 || v === 3;
 
 /** Where one ballot copy came from: its own path decides its window (5.5). */
 type Path =
   | { readonly kind: "board"; readonly segment: number }
-  | { readonly kind: "ordinary"; readonly segment: number; readonly l2Timestamp: bigint };
+  | { readonly kind: "ordinary"; readonly segment: number; readonly l2Timestamp: bigint }
+  | { readonly kind: "relayed"; readonly segment: number };
 
 /**
  * The rows 5.1 to 5.5 and 5.7, and the report's `ballots`. `registered` is
@@ -231,6 +242,8 @@ export function ballotChecks(
   const cores: AdmittedCore[] = [];
   const rejected: RejectedBallot[] = [];
   const ordinary: number[] = [];
+  // Relayed ballots that passed 5.1 to 5.4, whose stamps 4.5 doesn't prove yet.
+  const relayed: number[] = [];
   for (const [at, encoded] of entries.entries()) {
     let payload: Uint8Array;
     let path: Path;
@@ -244,14 +257,19 @@ export function ballotChecks(
         path = { kind: "board", segment: e.segment };
       } else if (type === RECORD_TYPES.contractEvent && windows) {
         // A record that doesn't decode or fails the event check is 4.4's,
-        // and carries no ballot: only the board's own `BallotSubmitted`, as
-        // its contract framed it, is an ordinary ballot (T-71, T-17).
+        // and carries no ballot: only the board's own `BallotSubmitted` and
+        // `RelayedBallotSubmitted`, as its contract framed them, carry an
+        // ordinary or a relayed ballot (T-71, T-17).
         const record = decodeContractEvent(e.payload, eventVersion);
         const checked = checkContractEvent(record, contracts, eventVersion);
-        if (!checked.ok || checked.role !== "board" || checked.event.event !== "BallotSubmitted")
-          continue;
-        payload = checked.event.record;
-        path = { kind: "ordinary", segment: e.segment, l2Timestamp: record.l2_timestamp };
+        if (!checked.ok || checked.role !== "board") continue;
+        if (checked.event.event === "BallotSubmitted") {
+          payload = checked.event.record;
+          path = { kind: "ordinary", segment: e.segment, l2Timestamp: record.l2_timestamp };
+        } else if (checked.event.event === "RelayedBallotSubmitted") {
+          payload = checked.event.record;
+          path = { kind: "relayed", segment: e.segment };
+        } else continue;
       } else continue;
     } catch (e) {
       if (e instanceof DecodeError) continue;
@@ -274,6 +292,12 @@ export function ballotChecks(
         ...(checked.option !== undefined && { option: checked.option }),
         ...(checked.question !== undefined && { question: checked.question }),
       });
+      continue;
+    }
+    // A relayed ballot's window is its matched call's stamp, which 4.5 must
+    // prove first: it is set aside, and leaves the rows after 5.4 open.
+    if (path.kind === "relayed") {
+      relayed.push(at);
       continue;
     }
     // The close rule (5.5) judges each copy by its own entry, after 5.1 to
@@ -316,7 +340,12 @@ export function ballotChecks(
   // doesn't hide a repeat (T-38).
   const repeated = new Set(selectBallots(passed.map((p) => p.ballot)).repeats.map((b) => b.index));
   let repeats: RepeatedBallot[] = [];
-  if (windows) {
+  // A relayed ballot set aside may be the copy that stands, so while one
+  // waits on 4.5 a later copy is only a candidate repeat, as where 5.5
+  // can't run.
+  const firstRelayed = relayed[0];
+  const settled = firstRelayed === undefined;
+  if (windows && settled) {
     // Every copy left has passed 5.1 to 5.5, so the first of each (tier, ν,
     // M) stands and the others are rejected (5.7). 5.8 can't tell them
     // apart: M binds the L1 reference, so it admits or rejects every copy
@@ -371,9 +400,21 @@ export function ballotChecks(
             : firstWith((r) => L1_REF_CODES.has(r.code)),
     );
   const unsettled = new Set(waiting.map((p) => p.entry));
-  const admitted = windows
-    ? passed.filter((p) => !repeated.has(BigInt(p.at)) && !unsettled.has(p.at))
-    : passed;
+  const admitted =
+    windows && settled
+      ? passed.filter((p) => !repeated.has(BigInt(p.at)) && !unsettled.has(p.at))
+      : passed;
+  // A relayed ballot may be inside the window or not, a repeat or the copy
+  // that stands, so no row after 5.4 can pass or fail while one waits on
+  // 4.5, and neither selection (6.1) nor `opening-cast` (6.2) is reached.
+  if (firstRelayed !== undefined) {
+    const open: BallotOutcome = {
+      status: "unverifiable",
+      code: "not-implemented",
+      at: { entry: firstRelayed },
+    };
+    for (const id of ["5.5", "5.7", ...(blocks !== undefined ? ["5.8"] : [])]) rows.set(id, open);
+  }
   return {
     rows,
     report: {
@@ -382,22 +423,23 @@ export function ballotChecks(
       repeats,
       ...(typeof references === "function" && { pending: waiting }),
     },
-    admitted: cores,
-    ...(windows && {
-      candidates: admitted.map((p) => ({
-        entry: p.at,
-        segment: p.path.segment,
-        path: p.path.kind,
-        ballot: p.ballot,
-      })),
-    }),
+    ...(settled && { admitted: cores }),
+    ...(windows &&
+      settled && {
+        candidates: admitted.map((p) => ({
+          entry: p.at,
+          segment: p.path.segment,
+          path: p.path.kind,
+          ballot: p.ballot,
+        })),
+      }),
     ordinary,
   };
 }
 
 /** The close rule's code for an admitted copy, by its own path, or `undefined` inside the window. */
 function windowCode(
-  path: Path,
+  path: Exclude<Path, { readonly kind: "relayed" }>,
   opensAt: bigint,
   closesAt: bigint,
   lastBoardSegment: bigint,

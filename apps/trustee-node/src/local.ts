@@ -47,6 +47,15 @@ import {
 const utf8 = (s: string) => new TextEncoder().encode(s);
 
 /** A version-1 stub for a local panel: a two-option poll on chain ids no network uses. */
+// The versions the profile pins where they aren't 1: the board-entry and
+// contract-event versions the election registry serves (docs/spec/contracts.md,
+// Registration, rule 9), so a local ceremony signs a profile a deployed
+// registry would register.
+const LOCAL_PINS: ReadonlyMap<number, number> = new Map([
+  [RECORD_TYPES.boardEntry, 5],
+  [RECORD_TYPES.contractEvent, 3],
+]);
+
 export function localStub(
   panel: Panel,
   l2ChainId: bigint,
@@ -56,7 +65,7 @@ export function localStub(
   const registry = new Uint8Array(20).fill(0xa1);
   const pins = [];
   for (let t: number = RECORD_TYPES.electionDefinition; t <= RECORD_TYPES.displayText; t++)
-    pins.push({ record_type: t, version: t === RECORD_TYPES.boardEntry ? 4 : 1 });
+    pins.push({ record_type: t, version: LOCAL_PINS.get(t) ?? 1 });
   return {
     profile: { protocol_major: 1, pins },
     election_id: electionId(l2ChainId, registry, 7n),

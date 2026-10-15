@@ -1,4 +1,136 @@
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// BallotRelay
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+export const ballotRelayAbi = [
+  {
+    type: "constructor",
+    inputs: [
+      { name: "portal_", internalType: "address", type: "address" },
+      { name: "board_", internalType: "address", type: "address" },
+    ],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    inputs: [],
+    name: "MAX_RELAY_RECORD",
+    outputs: [{ name: "", internalType: "uint256", type: "uint256" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    inputs: [],
+    name: "board",
+    outputs: [{ name: "", internalType: "address", type: "address" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    inputs: [],
+    name: "callCount",
+    outputs: [{ name: "", internalType: "uint64", type: "uint64" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    inputs: [{ name: "index", internalType: "uint64", type: "uint64" }],
+    name: "callHash",
+    outputs: [{ name: "", internalType: "bytes32", type: "bytes32" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    inputs: [],
+    name: "eventAccumulator",
+    outputs: [
+      { name: "accumulator", internalType: "bytes32", type: "bytes32" },
+      { name: "count", internalType: "uint64", type: "uint64" },
+    ],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    inputs: [],
+    name: "portal",
+    outputs: [{ name: "", internalType: "contract IOptimismPortal", type: "address" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    inputs: [
+      { name: "gasLimit", internalType: "uint64", type: "uint64" },
+      { name: "record", internalType: "bytes", type: "bytes" },
+    ],
+    name: "relayBallot",
+    outputs: [{ name: "index", internalType: "uint64", type: "uint64" }],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "event",
+    anonymous: false,
+    inputs: [
+      {
+        name: "definitionHash",
+        internalType: "bytes32",
+        type: "bytes32",
+        indexed: true,
+      },
+      { name: "index", internalType: "uint64", type: "uint64", indexed: true },
+      {
+        name: "callHash",
+        internalType: "bytes32",
+        type: "bytes32",
+        indexed: false,
+      },
+    ],
+    name: "BallotRelayed",
+  },
+  {
+    type: "error",
+    inputs: [{ name: "blockNumber", internalType: "uint256", type: "uint256" }],
+    name: "BlockNumberTooLarge",
+  },
+  {
+    type: "error",
+    inputs: [{ name: "chainId", internalType: "uint256", type: "uint256" }],
+    name: "ChainIdTooLarge",
+  },
+  {
+    type: "error",
+    inputs: [{ name: "length", internalType: "uint256", type: "uint256" }],
+    name: "DataTooLong",
+  },
+  { type: "error", inputs: [], name: "InvalidDeployment" },
+  { type: "error", inputs: [], name: "NonCanonicalCalldata" },
+  {
+    type: "error",
+    inputs: [{ name: "recordType", internalType: "uint16", type: "uint16" }],
+    name: "RelayRecordType",
+  },
+  {
+    type: "error",
+    inputs: [{ name: "length", internalType: "uint256", type: "uint256" }],
+    name: "RelayTooLarge",
+  },
+  {
+    type: "error",
+    inputs: [{ name: "length", internalType: "uint256", type: "uint256" }],
+    name: "RelayTruncated",
+  },
+  {
+    type: "error",
+    inputs: [{ name: "timestamp", internalType: "uint256", type: "uint256" }],
+    name: "TimestampTooLarge",
+  },
+  {
+    type: "error",
+    inputs: [{ name: "count", internalType: "uint256", type: "uint256" }],
+    name: "TopicCount",
+  },
+] as const;
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Board
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -8,6 +140,7 @@ export const boardAbi = [
     inputs: [
       { name: "elections", internalType: "address", type: "address" },
       { name: "trustees", internalType: "address", type: "address" },
+      { name: "relay_", internalType: "address", type: "address" },
     ],
     stateMutability: "nonpayable",
   },
@@ -30,8 +163,22 @@ export const boardAbi = [
   },
   {
     type: "function",
+    inputs: [],
+    name: "relay",
+    outputs: [{ name: "", internalType: "address", type: "address" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
     inputs: [{ name: "record", internalType: "bytes", type: "bytes" }],
     name: "submitBallot",
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    inputs: [{ name: "record", internalType: "bytes", type: "bytes" }],
+    name: "submitCloseStatement",
     outputs: [],
     stateMutability: "nonpayable",
   },
@@ -61,6 +208,19 @@ export const boardAbi = [
   },
   {
     type: "function",
+    inputs: [
+      { name: "index", internalType: "uint64", type: "uint64" },
+      { name: "l1Block", internalType: "uint64", type: "uint64" },
+      { name: "stamp", internalType: "uint64", type: "uint64" },
+      { name: "gasLimit", internalType: "uint64", type: "uint64" },
+      { name: "record", internalType: "bytes", type: "bytes" },
+    ],
+    name: "submitRelayedBallot",
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
     inputs: [],
     name: "trusteeRegistry",
     outputs: [{ name: "", internalType: "contract IBoardTrustees", type: "address" }],
@@ -85,6 +245,55 @@ export const boardAbi = [
       { name: "record", internalType: "bytes", type: "bytes", indexed: false },
     ],
     name: "BallotSubmitted",
+  },
+  {
+    type: "event",
+    anonymous: false,
+    inputs: [
+      {
+        name: "definitionHash",
+        internalType: "bytes32",
+        type: "bytes32",
+        indexed: true,
+      },
+      { name: "signer", internalType: "uint8", type: "uint8", indexed: true },
+      { name: "record", internalType: "bytes", type: "bytes", indexed: false },
+    ],
+    name: "CloseStatementSubmitted",
+  },
+  {
+    type: "event",
+    anonymous: false,
+    inputs: [
+      {
+        name: "definitionHash",
+        internalType: "bytes32",
+        type: "bytes32",
+        indexed: true,
+      },
+      {
+        name: "ballotHash",
+        internalType: "bytes32",
+        type: "bytes32",
+        indexed: true,
+      },
+      { name: "index", internalType: "uint64", type: "uint64", indexed: false },
+      {
+        name: "l1Block",
+        internalType: "uint64",
+        type: "uint64",
+        indexed: false,
+      },
+      { name: "stamp", internalType: "uint64", type: "uint64", indexed: false },
+      {
+        name: "gasLimit",
+        internalType: "uint64",
+        type: "uint64",
+        indexed: false,
+      },
+      { name: "record", internalType: "bytes", type: "bytes", indexed: false },
+    ],
+    name: "RelayedBallotSubmitted",
   },
   {
     type: "event",
@@ -165,6 +374,15 @@ export const boardAbi = [
   },
   {
     type: "error",
+    inputs: [
+      { name: "timestamp", internalType: "uint256", type: "uint256" },
+      { name: "opensAt", internalType: "uint64", type: "uint64" },
+      { name: "closesAt", internalType: "uint64", type: "uint64" },
+    ],
+    name: "BallotWindow",
+  },
+  {
+    type: "error",
     inputs: [{ name: "blockNumber", internalType: "uint256", type: "uint256" }],
     name: "BlockNumberTooLarge",
   },
@@ -216,6 +434,43 @@ export const boardAbi = [
     type: "error",
     inputs: [{ name: "length", internalType: "uint256", type: "uint256" }],
     name: "ReceiptBatchLength",
+  },
+  {
+    type: "error",
+    inputs: [{ name: "caller", internalType: "address", type: "address" }],
+    name: "RelaySender",
+  },
+  {
+    type: "error",
+    inputs: [
+      { name: "stamp", internalType: "uint64", type: "uint64" },
+      { name: "opensAt", internalType: "uint64", type: "uint64" },
+      { name: "closesAt", internalType: "uint64", type: "uint64" },
+    ],
+    name: "RelayWindow",
+  },
+  {
+    type: "error",
+    inputs: [
+      {
+        name: "code",
+        internalType: "enum ElectionDefinitionLib.DecodeError",
+        type: "uint8",
+      },
+      { name: "offset", internalType: "uint256", type: "uint256" },
+    ],
+    name: "StatementMalformed",
+  },
+  {
+    type: "error",
+    inputs: [
+      {
+        name: "code",
+        internalType: "enum CloseStatementLib.Code",
+        type: "uint8",
+      },
+    ],
+    name: "StatementRefused",
   },
   {
     type: "error",
@@ -954,6 +1209,14 @@ export const electionRegistryAbi = [
       { name: "epoch", internalType: "uint64", type: "uint64" },
     ],
     name: "OpensBeforeEpoch",
+  },
+  {
+    type: "error",
+    inputs: [
+      { name: "recordType", internalType: "uint16", type: "uint16" },
+      { name: "version", internalType: "uint8", type: "uint8" },
+    ],
+    name: "ProfileNotServed",
   },
   {
     type: "error",

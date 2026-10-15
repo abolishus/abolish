@@ -247,6 +247,24 @@ describe("5.8's row where admission doesn't judge references", () => {
     expect(r.ballots?.pending).toBeUndefined();
   });
 
+  // Only 4.5's match with the relay's call proves a relayed ballot's stamp,
+  // so with one set aside nothing after 5.4 is decided: 5.8 joins 5.5 and
+  // 5.7, and selection and the openings' `opening-cast` aren't reached, so an
+  // opening of the relayed ballot's commitment can't make 6.2 pass (T-71).
+  test("a relayed ballot set aside: 5.8 is not implemented at it, and 6.1 and 6.2 aren't reached", () => {
+    const r = verify(byId("events-v3-relayed"), blocks);
+    const open = { status: "unverifiable", code: "not-implemented", at: { entry: 1 } };
+    for (const id of ["5.5", "5.7", "5.8"]) expect(row(r, id)).toEqual(open);
+    for (const id of ["6.1", "6.2"]) expect(row(r, id)?.code).toBe("not-reached");
+    // Its other copies name a block before opening and are rejected, yet 5.8
+    // doesn't fail: no row after 5.4 is decided while a relayed ballot waits.
+    expect(r.ballots?.rejected.map((x) => x.code)).toEqual([
+      "l1-ref-before-open",
+      "l1-ref-before-open",
+    ]);
+    expect(r.ballots?.selected).toBeUndefined();
+  });
+
   test("format 4 leaves 5.8 not implemented and lists no pending ballots", () => {
     const c = byId("admitted");
     const r = verifyBundle(parseBundle(bundleJson(c, undefined), hex(c.board)));

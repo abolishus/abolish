@@ -3,6 +3,7 @@ pragma solidity 0.8.30;
 
 import {BallotCheckLib} from "./BallotCheck.sol";
 import {CanonicalCalldata} from "./CanonicalCalldata.sol";
+import {CloseStatementLib} from "./CloseStatement.sol";
 import {DeliveryCheckLib, IBoardElections, IBoardTrustees} from "./DeliveryCheck.sol";
 import {EventAccumulator} from "./EventAccumulator.sol";
 
@@ -17,8 +18,12 @@ import {EventAccumulator} from "./EventAccumulator.sol";
 /// byte-identical resubmission succeeds and emits nothing, so a client's
 /// retry never reads as a failure and nothing is archived twice; any other
 /// record that passes is accepted, however many there are per seat or
-/// nullifier, so no record ever occupies a slot. There is no admin, proxy,
-/// pause or upgrade path.
+/// nullifier, so no record ever occupies a slot. It takes ordinary ballots
+/// only inside their election's window, and ballots forced through the L1
+/// relay only from the relay's alias, judged by the relay's stamp (ADR 0030;
+/// T-35, T-50). Each seat of the default panel may state the close here, at
+/// most twice per election, the second only with another claim (T-17).
+/// There is no admin, proxy, pause or upgrade path.
 contract Board is EventAccumulator {
     /// @notice A ballot record (0x0002) passed the ballot check.
     event BallotSubmitted(bytes32 indexed definitionHash, bytes32 indexed ballotHash, bytes record);
@@ -33,31 +38,73 @@ contract Board is EventAccumulator {
     event ShareComplaintSubmitted(
         bytes32 indexed definitionHash, bytes32 indexed ballotHash, bytes record
     );
+    /// @notice A ballot forced through the L1 relay passed the ballot check,
+    /// its stamp inside the window. The relay call's index, L1 block, stamp
+    /// and gas limit are the deposit's, carried, never judged: the verifier
+    /// matches them against the call the relay recorded (4.5).
+    event RelayedBallotSubmitted(
+        bytes32 indexed definitionHash,
+        bytes32 indexed ballotHash,
+        uint64 index,
+        uint64 l1Block,
+        uint64 stamp,
+        uint64 gasLimit,
+        bytes record
+    );
+    /// @notice A seat's close statement (0x0015) passed the statement check.
+    event CloseStatementSubmitted(
+        bytes32 indexed definitionHash, uint8 indexed signer, bytes record
+    );
 
     error InvalidDeployment();
     error ReceiptBatchLength(uint256 length);
+    /// `ballot-window`: an ordinary ballot outside `[opens_at, closes_at]` by
+    /// the block's timestamp.
+    error BallotWindow(uint256 timestamp, uint64 opensAt, uint64 closesAt);
+    /// `relay-sender`: the relayed-ballot call came from someone other than
+    /// the relay's alias.
+    error RelaySender(address caller);
+    /// `relay-window`: a relayed ballot's stamp outside `[opens_at, closes_at]`.
+    error RelayWindow(uint64 stamp, uint64 opensAt, uint64 closesAt);
+
+    /// The OP Stack's L1-to-L2 alias offset: a deposit from L1 contract `a`
+    /// runs on L2 from `a + offset mod 2¹⁶⁰`.
+    uint160 internal constant ALIAS_OFFSET = uint160(0x1111000000000000000000000000000000001111);
 
     IBoardElections public immutable electionRegistry;
     IBoardTrustees public immutable trusteeRegistry;
+    /// The L1 relay, whose alias alone may call `submitRelayedBallot`
+    /// (docs/spec/contracts.md, Board, Deployment): verifier 1.2 compares it
+    /// with the definition's `l1_relay`.
+    address public immutable relay;
 
     /// Every accepted record, by `keccak256` of its bytes: a storage key
     /// that nothing outside the contract recomputes, never a protocol hash.
     /// Records begin with their type, so no two types' records share one.
     mapping(bytes32 recordKey => bool) private _accepted;
 
-    constructor(address elections, address trustees) {
+    /// The claims of each seat's accepted close statements, per definition:
+    /// at most two, the second another claim than the first (Close
+    /// statements, `statement-limit`). Zero is an empty slot.
+    mapping(bytes32 definitionHash => mapping(uint8 signer => bytes32[2])) private _claims;
+
+    constructor(address elections, address trustees, address relay_) {
         if (
             elections == address(0) || trustees == address(0) || elections == trustees
-                || elections == address(this) || trustees == address(this)
+                || elections == address(this) || trustees == address(this) || relay_ == address(0)
         ) revert InvalidDeployment();
         electionRegistry = IBoardElections(elections);
         trusteeRegistry = IBoardTrustees(trustees);
+        relay = relay_;
     }
 
     /// @notice Submits a ballot record. Reverts with the ballot check's
     /// error unless it passes (docs/spec/contracts.md, Board, Ballots), with
     /// `share-hash-unqualified` judged against the key set the trustee
-    /// registry recorded for the election's ceremony.
+    /// registry recorded for the election's ceremony, and unless the block's
+    /// timestamp is inside the election's window, the ordinary path's test
+    /// (docs/spec/close.md, Window), so a ballot made after close never
+    /// reaches the board on this path (T-35, T-45).
     function submitBallot(bytes calldata record) external {
         CanonicalCalldata.requireOneBytesArgument(record);
         bytes32 key = keccak256(record);
@@ -65,8 +112,78 @@ contract Board is EventAccumulator {
         if (_accepted[key]) return;
         BallotCheckLib.Admitted memory a =
             BallotCheckLib.check(record, electionRegistry, _qualified(record));
+        if (block.timestamp < a.opensAt || block.timestamp > a.closesAt) {
+            revert BallotWindow(block.timestamp, a.opensAt, a.closesAt);
+        }
         _accepted[key] = true;
         _log3(BallotSubmitted.selector, a.definitionHash, a.ballotHash, abi.encode(record));
+    }
+
+    /// @notice A ballot forced through the L1 relay: the deposit the relay
+    /// made for its call `index`, recorded in L1 block `l1Block` stamped
+    /// `stamp`, with `gasLimit` gas (docs/spec/contracts.md, Board, Relayed
+    /// ballots). Only the relay's alias may call; the record passes the
+    /// ballot check exactly as an ordinary one, and its stamp is inside the
+    /// window. It never consults the board's repeats: every deposit it
+    /// accepts emits, so a sequencer that copies a forced ballot's bytes into
+    /// an ordinary block and withholds it past `L_δ` can't turn the forced
+    /// path's guarantee into the ordinary path's (T-50, T-25).
+    function submitRelayedBallot(
+        uint64 index,
+        uint64 l1Block,
+        uint64 stamp,
+        uint64 gasLimit,
+        bytes calldata record
+    ) external {
+        // Only a deposit the relay made, or one L2 governance forges from its
+        // alias, gets past this, and 4.5 matches no call for a forgery (T-71).
+        unchecked {
+            if (msg.sender != address(uint160(relay) + ALIAS_OFFSET)) {
+                revert RelaySender(msg.sender);
+            }
+        }
+        CanonicalCalldata.requireWordsThenBytes(4, record);
+        BallotCheckLib.Admitted memory a =
+            BallotCheckLib.check(record, electionRegistry, _qualified(record));
+        if (stamp < a.opensAt || stamp > a.closesAt) {
+            revert RelayWindow(stamp, a.opensAt, a.closesAt);
+        }
+        // Remembered, so a later ordinary copy of the same bytes is a no-op;
+        // the relayed one is judged by its own stamp.
+        _accepted[keccak256(record)] = true;
+        _log3(
+            RelayedBallotSubmitted.selector,
+            a.definitionHash,
+            a.ballotHash,
+            abi.encode(index, l1Block, stamp, gasLimit, record)
+        );
+    }
+
+    /// @notice Submits a seat's close statement through the contract path
+    /// (docs/spec/contracts.md, Board, Close statements). A byte-identical
+    /// repeat is a no-op, so a node's retry never reads as a failure. At most
+    /// two statements per seat and election are accepted, the second only
+    /// with another claim, which shows equivocation; so a seat archives at
+    /// most two statements' chosen bytes here, as through the board path
+    /// (T-17). Anyone may call: the signature binds the seat.
+    function submitCloseStatement(bytes calldata record) external {
+        CanonicalCalldata.requireOneBytesArgument(record);
+        bytes32 key = keccak256(record);
+        if (_accepted[key]) return;
+        CloseStatementLib.Accepted memory a =
+            CloseStatementLib.check(record, electionRegistry, trusteeRegistry);
+        bytes32[2] storage claims = _claims[a.definitionHash][a.signer];
+        if (claims[1] != 0 || claims[0] == a.claim) {
+            revert CloseStatementLib.StatementRefused(CloseStatementLib.Code.StatementLimit);
+        }
+        claims[claims[0] == 0 ? 0 : 1] = a.claim;
+        _accepted[key] = true;
+        _log3(
+            CloseStatementSubmitted.selector,
+            a.definitionHash,
+            bytes32(uint256(a.signer)),
+            abi.encode(record)
+        );
     }
 
     /// @notice Submits share receipts: one or more 164-byte records,

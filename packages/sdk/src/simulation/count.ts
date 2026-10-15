@@ -44,6 +44,9 @@ import { SIMULATED_ANCHOR_PERIOD } from "./board.ts";
 export const recordTypeOf = (record: Uint8Array): number =>
   ((record[0] ?? 0) << 8) | (record[1] ?? 0);
 
+const same = (a: Uint8Array, b: Uint8Array) =>
+  a.length === b.length && a.every((x, i) => x === b[i]);
+
 // What the delivery check reads (docs/spec/delivery.md, Delivery check).
 const DELIVERY_RECORD_TYPES: ReadonlySet<number> = new Set([
   RECORD_TYPES.shareReceipt,
@@ -86,7 +89,8 @@ export interface CountedExtent {
   readonly ballots: ReadonlyMap<number, BallotRecordV2>;
   /**
    * Board indices of ballots that don't decode under ballot version 2, name
-   * a cell the partition lacks or fall outside the window by their path,
+   * another definition or a cell the partition lacks, or fall outside the
+   * window by their path,
    * of relayed ballots, whose stamp only L1 shows (4.5), and of
    * contract-event records that don't decode or fail the event check:
    * rejected entries, as the verifier rejects them, never a reason to stop
@@ -188,7 +192,14 @@ export function readCountedExtent(
       return;
     }
     const tier = ctx.tierOfCell(b.cell);
-    if (tier === undefined || inWindow !== "admitted") {
+    // Another election's ballot (`ballot-stray`): the board contract's
+    // sequence is shared by every election on it, so its events can name
+    // any registered definition.
+    if (
+      tier === undefined ||
+      inWindow !== "admitted" ||
+      !same(b.definition_hash, ctx.definitionHash)
+    ) {
       rejected.push(index);
       return;
     }

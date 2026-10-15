@@ -486,4 +486,15 @@ describe("readCountedExtent over the board contract's events", { timeout }, () =
     expect(extent.rejected).toEqual([0, 1]);
     expect(extent.ballots.size).toBe(0);
   });
+
+  it("rejects a ballot naming another definition, and a board-path ballot boarded after s_A", () => {
+    const stray = encodeBallotV2({ ...honest.fields, definition_hash: new Uint8Array(32).fill(9) });
+    const extent = readCountedExtent(ctx, [
+      { segment: 300, payload: stray },
+      { segment: Number(ctx.boardSegment) + 1, payload: honest.record },
+      { segment: Number(ctx.boardSegment), payload: honest.record },
+    ]);
+    expect(extent.rejected).toEqual([0, 1]);
+    expect([...extent.ballots.keys()]).toEqual([2]);
+  });
 });

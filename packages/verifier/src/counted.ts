@@ -40,6 +40,7 @@ import {
   type DecodeErrorCode,
   decodeBoardEntry,
   decodeContractEvent,
+  deriveTotal,
   type DeliveryEntry,
   type DeliveryRecordCode,
   deliveryDeadlines,
@@ -50,8 +51,11 @@ import {
   type RegisteredKeys,
   tallyRules,
 } from "@abolishus/crypto";
+import { bytesToHex } from "@noble/hashes/utils.js";
 import type { BallotTally } from "./ballots.ts";
 import type { VerifiedDefinition } from "./definition.ts";
+import { type CloseCandidate, closeChecks, type CloseReport } from "./close.ts";
+import type { L1Header } from "./l1.ts";
 import { countedFloor } from "./openings.ts";
 import { partitionSize, type TallyBreak } from "./tallies.ts";
 
@@ -77,10 +81,16 @@ export interface CountedInputs {
   readonly clock: AnchorClock;
   /** Whether the pinned board-entry version allows destruction statements (8.5 applies). */
   readonly destruction: boolean;
+  /** Every ballot the admission checks admitted in the anchored extent, in copy order (6.3). */
+  readonly admitted: readonly CloseCandidate[];
+  /** A format-5 bundle's run of finalized L1 headers, where `L_δ` is found (6.3). */
+  readonly blocks: readonly L1Header[] | undefined;
 }
 
 export type CountedCode =
   | CellCode
+  | "close-contested"
+  | "l1-blocks-short"
   | "destruction-early"
   | "destruction-missing"
   | "unsupported-version"
@@ -126,6 +136,8 @@ export interface DeliveryReport {
 /** One cell of the partition, in partition order, once 7.1 passed. */
 export interface CellReport {
   readonly cell: number;
+  /** The tier the cell belongs to (definition version 1: the cell is the tier). */
+  readonly tier: number;
   /** Its counted ballots. */
   readonly counted: number;
   /** For a cell that passes 7.2, its count per option, as decimal strings. */
@@ -133,6 +145,16 @@ export interface CellReport {
   readonly code?: CellCode;
   readonly option?: number;
   readonly question?: number;
+  /** The seats a passing opening of the cell is attributed to, ascending; empty if none is (8.4). */
+  readonly signers: readonly number[];
+}
+
+/** One tier's result, derived from its cells (tally.md, Coarser totals), once 7.1 passed. */
+export interface TierReport {
+  readonly tier: number;
+  readonly counted: number;
+  /** Per option, the sum of its cells' counts, as decimal strings; only where every cell passes 7.2. */
+  readonly counts?: readonly string[];
 }
 
 /** One registered seat's destruction, by its first attributed statement (8.5). */
@@ -157,13 +179,16 @@ export interface DestructionReport {
 }
 
 export interface CountedResult {
-  /** 5.9, 7.1, 7.2, 7.3 and, where the destruction statement applies, 8.5. */
+  /** 5.9, 6.3, 7.1, 7.2, 7.3 and, where the destruction statement applies, 8.5. */
   readonly rows: ReadonlyMap<string, CountedOutcome>;
   readonly delivery?: DeliveryReport;
   readonly cells?: readonly CellReport[];
+  readonly tiers?: readonly TierReport[];
   readonly destruction?: DestructionReport;
   /** 7.4's breaks that need the counted set, by entry (tally.md, Boarding). */
   readonly tallyBreaks?: ReadonlyMap<number, TallyBreak>;
+  /** The close check's statements, seats, head and late ballots, once 6.3 found `L_δ`. */
+  readonly close?: CloseReport;
 }
 
 const TALLY_ROWS = ["7.1", "7.2", "7.3"] as const;
@@ -172,7 +197,7 @@ const TALLY_ROWS = ["7.1", "7.2", "7.3"] as const;
 export function countedRows(outcome: CountedOutcome, destruction: boolean): CountedResult {
   return {
     rows: new Map(
-      ["5.9", ...TALLY_ROWS, ...(destruction ? ["8.5"] : [])].map((id) => [id, outcome]),
+      ["5.9", "6.3", ...TALLY_ROWS, ...(destruction ? ["8.5"] : [])].map((id) => [id, outcome]),
     ),
   };
 }
@@ -360,6 +385,26 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
   // is ignored: 5.9 has no failure of its own.
   const rows = new Map<string, CountedOutcome>([["5.9", { status: "pass" }]]);
 
+  // The close check recomputes the counted sets with the same delivery,
+  // which is by ballot hash (close.md, Close check, step 3).
+  const kept = new Map(
+    delivered.ballots.map((b) => [bytesToHex(b.ballotHash), b.counted] as const),
+  );
+  const closed = closeChecks({
+    definition,
+    definitionHash,
+    registered,
+    clock,
+    eventVersion,
+    eventsPass: inputs.eventsPass,
+    own,
+    blocks: inputs.blocks,
+    ballots: inputs.admitted,
+    delivered: kept,
+  });
+  rows.set("6.3", closed.row);
+  const close = closed.report === undefined ? {} : { close: closed.report };
+
   // The destruction statement's version is the tally opening's (tally.md,
   // Destruction), so neither is read under another tally-opening pin (T-36).
   if (pinnedVersion(d, RECORD_TYPES.tallyOpening) !== 1) {
@@ -370,7 +415,7 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
     };
     for (const id of [...TALLY_ROWS, ...(inputs.destruction ? ["8.5"] : [])])
       rows.set(id, unsupported);
-    return { rows, delivery };
+    return { rows, delivery, ...close };
   }
 
   const size = partitionSize(definition);
@@ -390,16 +435,39 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
     openings.map((o) => o.payload),
     1,
   );
+  const tiers = cellTiers(definition);
   const cellReports: CellReport[] = tally.cells.map((c, cell) => {
     const counted = (cells[cell] as CommittedVss[]).length;
-    if (c.ok) return { cell, counted, counts: c.counts.map((v) => v.toString()) };
+    const tier = tiers[cell] as number;
+    // The seats whose passing opening of the cell is attributed to them; an
+    // unattributed one counts as well, so the list may be empty (8.4).
+    const signers = [
+      ...new Set(c.passing.flatMap((p) => (p.signer === null ? [] : [p.signer]))),
+    ].sort((a, b) => a - b);
+    if (c.ok) return { cell, tier, counted, counts: c.counts.map((v) => v.toString()), signers };
     return {
       cell,
+      tier,
       counted,
       code: c.code,
       ...(c.option !== undefined && { option: c.option }),
       ...(c.question !== undefined && { question: c.question }),
+      signers,
     };
+  });
+  // Each tier's result is derived from its cells' counts, never opened
+  // (tally.md, Coarser totals): only where every cell of the tier passed.
+  const tierReports: TierReport[] = [...new Set(tiers)].map((tier) => {
+    const own = cellReports.filter((c) => c.tier === tier);
+    const counted = own.reduce((n, c) => n + c.counted, 0);
+    const counts = own.map((c) => c.counts);
+    return counts.every((x) => x !== undefined)
+      ? {
+          tier,
+          counted,
+          counts: deriveTotal(counts.map((x) => x.map(BigInt))).map((v) => v.toString()),
+        }
+      : { tier, counted };
   });
   // Every board-path entry past `s_S` is outside its own window, and none
   // carried by a contract event is left, so no late entry changes a counted
@@ -433,7 +501,8 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
         tallyBreaks.set(entry, { code: "tally-opening", option: f.option as number });
     }
 
-  if (!inputs.destruction) return { rows, delivery, cells: cellReports, tallyBreaks };
+  if (!inputs.destruction)
+    return { rows, delivery, ...close, cells: cellReports, tiers: tierReports, tallyBreaks };
   // The destruction segment is `min(s_O + 1, s_T)`, or `s_T` while a cell
   // has no passing opening (tally.md, Destruction checks). `s_T`, the period
   // holding `t_S + TALLY_WINDOW` with `t_S` the end of `s_S` plus the
@@ -496,7 +565,35 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
           }
         : { status: "pass" },
   );
-  return { rows, delivery, cells: cellReports, destruction, tallyBreaks };
+  return {
+    rows,
+    delivery,
+    ...close,
+    cells: cellReports,
+    tiers: tierReports,
+    destruction,
+    tallyBreaks,
+  };
 }
 
 type CommittedVss = BallotTally["vss"];
+
+/**
+ * Each cell's tier, in partition order: under definition version 1 the
+ * cells are the tiers, under versions 3 and 4 every tier's cells in
+ * `electorate` order (election-definition.md, Notes, Tally partition).
+ */
+function cellTiers(definition: VerifiedDefinition): readonly number[] {
+  switch (definition.version) {
+    case 1:
+      return definition.value.electorate.map((g) => g.tier);
+    case 3:
+    case 4:
+    case 5:
+      return definition.value.electorate.flatMap((t) => t.cells.map(() => t.tier));
+    default: {
+      const unread: never = definition;
+      throw new Error(`unread definition version ${String(unread)}`);
+    }
+  }
+}

@@ -7,7 +7,11 @@ import {
   type CommittedVote,
   decode,
   decodeBoardEntry,
+  type BoardEntryVersion,
+  encodeCloseStatement,
+  signCloseStatement,
   decodeContractEvent,
+  checkContractEvent,
   encodeContractEvent,
   PARAMETERS,
   encodeBoardEntry,
@@ -39,6 +43,7 @@ import {
   BUNDLE_FORMAT_CEREMONY,
   BUNDLE_FORMAT_DEFINITION,
   type CheckResult,
+  decodeHeader,
   parseBundle,
   type Report,
   splitEntries,
@@ -47,7 +52,9 @@ import {
 import { type CountedBallot, countedChecks, type CountedInputs } from "../src/counted.ts";
 import { decodeDefinition, readDefinition, type VerifiedDefinition } from "../src/definition.ts";
 import { tallyChecks } from "../src/tallies.ts";
-import { run, toHex } from "./headers.ts";
+import { run, type TestHeader, toHex } from "./headers.ts";
+import type { BallotTally } from "../src/ballots.ts";
+import type { CloseCandidate } from "../src/close.ts";
 
 // The counted set and the tally (docs/spec/verifier.md, Counted set and
 // tally): delivery (5.9), the counted set and the tally checks (7.1 to 7.3),
@@ -104,7 +111,11 @@ const S_K = 289;
 const S_T_FLOOR = 458;
 
 /** One election's fixture: its definition, registered seats and the trustees' signing paths. */
-function election(definition: VerifiedDefinition, seats: readonly number[] = [1, 2, 3, 4]) {
+function election(
+  definition: VerifiedDefinition,
+  seats: readonly number[] = [1, 2, 3, 4],
+  version: BoardEntryVersion = 4,
+) {
   const { hash } = readDefinition(definition);
   const d = definition.value;
   const rules = tallyRules(definition);
@@ -120,7 +131,7 @@ function election(definition: VerifiedDefinition, seats: readonly number[] = [1,
     entries.push(
       encodeBoardEntry(
         { election_id: d.election_id, index: BigInt(entries.length), segment, payload },
-        4,
+        version,
       ),
     );
     return entries.length - 1;
@@ -248,14 +259,55 @@ function election(definition: VerifiedDefinition, seats: readonly number[] = [1,
     registered,
     selected: selected(ballots),
     entries,
-    boardEntryVersion: 4,
+    boardEntryVersion: version,
     extent: entries.length,
     eventsPass: false,
     clock: CLOCK,
     destruction: true,
+    admitted: [],
+    blocks: undefined,
     ...over,
   });
-  return { hash, rules, entries, board, cast, receipt, deliver, opening, destruction, inputs };
+  /** Each ballot as admission admitted it from the board path: what 6.3 compares. */
+  const admitted = (ballots: readonly Cast[]): CloseCandidate[] =>
+    ballots.map((b) => ({
+      entry: b.entry,
+      path: "board",
+      ballot: {
+        tier: "tier" in b.label ? b.label.tier : 0,
+        nullifier: b.nullifier,
+        message: sha256(b.hash),
+        l1RefNumber: 1n,
+        index: BigInt(b.entry),
+      },
+      tally: selected([b])[0]?.tally as BallotTally,
+    }));
+  /** Seat `signer`'s close statement naming `l1` as `L_δ` and claiming L2 block `claim`. */
+  const close = (signer: number, l1: TestHeader, claim: bigint) =>
+    encodeCloseStatement(
+      signCloseStatement(secret(signer), {
+        definition_hash: hash,
+        signer,
+        l1_number: l1.number,
+        l1_hash: l1.hash,
+        l2_number: claim,
+        l2_hash: sha256(text(`l2 ${claim}`)),
+      }),
+    );
+  return {
+    hash,
+    rules,
+    entries,
+    board,
+    cast,
+    receipt,
+    deliver,
+    opening,
+    destruction,
+    inputs,
+    admitted,
+    close,
+  };
 }
 
 const v1 = () => definitionOf(caseOf(tallies, "honest"));
@@ -276,14 +328,21 @@ describe("an honest election", () => {
   test("every row passes, and each cell's counts are the votes cast in it", () => {
     expect(rows(r)).toEqual({
       "5.9": { status: "pass" },
+      // No run of L1 headers is given here: see 6.3's own tests.
+      "6.3": { status: "unverifiable", code: "not-reached", at: {} },
       "7.1": { status: "pass" },
       "7.2": { status: "pass" },
       "7.3": { status: "pass" },
       "8.5": { status: "pass" },
     });
     expect(r.cells).toEqual([
-      { cell: 0, counted: 2, counts: ["1", "1", "0"] },
-      { cell: 1, counted: 1, counts: ["1", "0", "0"] },
+      { cell: 0, tier: 0, counted: 2, counts: ["1", "1", "0"], signers: [1] },
+      { cell: 1, tier: 2, counted: 1, counts: ["1", "0", "0"], signers: [2] },
+    ]);
+    // Each tier's result is its cells' sum: under definition version 1, its one cell.
+    expect(r.tiers).toEqual([
+      { tier: 0, counted: 2, counts: ["1", "1", "0"] },
+      { tier: 2, counted: 1, counts: ["1", "0", "0"] },
     ]);
     expect(r.delivery).toEqual({ excluded: [], records: [], rejected: [] });
     // Both openings pass: 7.4 has nothing to add to them.
@@ -369,14 +428,28 @@ describe("delivery decides the counted set", () => {
     const r = countedChecks(e.inputs([a, b]));
     expect(r.delivery?.excluded).toEqual([{ entry: b.entry, missing: [3], complaints: [] }]);
     expect(r.rows.get("5.9")).toEqual({ status: "pass" });
-    expect(r.cells?.[0]).toEqual({ cell: 0, counted: 1, code: "tally-opening" });
+    expect(r.cells?.[0]).toEqual({
+      cell: 0,
+      tier: 0,
+      counted: 1,
+      code: "tally-opening",
+      signers: [],
+    });
+    // A tier with a failing cell has no derived result.
+    expect(r.tiers?.[0]).toEqual({ tier: 0, counted: 1 });
     expect(r.rows.get("7.2")).toEqual({ status: "fail", code: "tally-opening", at: { cell: 0 } });
     expect(r.tallyBreaks).toEqual(new Map([[wrong, { code: "tally-aggregate" }]]));
     // The opening over the counted set passes.
     e.board(301, e.opening(0, [a], 2));
     const fixed = countedChecks(e.inputs([a, b]));
     expect(fixed.rows.get("7.2")).toEqual({ status: "pass" });
-    expect(fixed.cells?.[0]).toEqual({ cell: 0, counted: 1, counts: ["1", "0", "0"] });
+    expect(fixed.cells?.[0]).toEqual({
+      cell: 0,
+      tier: 0,
+      counted: 1,
+      counts: ["1", "0", "0"],
+      signers: [2],
+    });
   });
 
   test("a seat outside the registered key set needs no receipt", () => {
@@ -388,8 +461,8 @@ describe("delivery decides the counted set", () => {
     const r = countedChecks(e.inputs([a], { destruction: false }));
     expect(r.delivery?.excluded).toEqual([]);
     expect(r.cells).toEqual([
-      { cell: 0, counted: 0, counts: ["0", "0", "0"] },
-      { cell: 1, counted: 1, counts: ["0", "1", "0"] },
+      { cell: 0, tier: 0, counted: 0, counts: ["0", "0", "0"], signers: [1] },
+      { cell: 1, tier: 2, counted: 1, counts: ["0", "1", "0"], signers: [3] },
     ]);
   });
 
@@ -507,7 +580,14 @@ describe("7.2 and 7.4 against the counted set", () => {
       code: "tally-opening",
       at: { cell: 0, option: 1 },
     });
-    expect(r.cells?.[0]).toEqual({ cell: 0, counted: 1, code: "tally-opening", option: 1 });
+    expect(r.cells?.[0]).toEqual({
+      cell: 0,
+      tier: 0,
+      counted: 1,
+      code: "tally-opening",
+      option: 1,
+      signers: [],
+    });
     expect(r.tallyBreaks).toEqual(new Map([[bad, { code: "tally-opening", option: 1 }]]));
     expect(r.rows.get("7.3")).toEqual({ status: "pass" });
   });
@@ -518,8 +598,8 @@ describe("7.2 and 7.4 against the counted set", () => {
     const r = countedChecks(e.inputs([], { destruction: false }));
     expect(r.rows.get("7.2")).toEqual({ status: "fail", code: "tally-missing", at: { cell: 1 } });
     expect(r.cells).toEqual([
-      { cell: 0, counted: 0, counts: ["0", "0", "0"] },
-      { cell: 1, counted: 0, code: "tally-missing" },
+      { cell: 0, tier: 0, counted: 0, counts: ["0", "0", "0"], signers: [1] },
+      { cell: 1, tier: 2, counted: 0, code: "tally-missing", signers: [] },
     ]);
   });
 
@@ -727,6 +807,139 @@ describe("8.5 between the floors of s_T", () => {
   });
 });
 
+describe("6.3, the close check", () => {
+  const CLOSES = v1().value.closes_at;
+  // L_δ is the last block at or before closes_at + δ (an hour): the second.
+  const blocks = run(21_000_000n, [OPENS - 3612n, CLOSES + 3600n, CLOSES + 3612n]);
+  const lDelta = blocks[1] as TestHeader;
+  // Board-entry version 5 carries close statements; s_C = 168 + 1 + 48 = 217.
+  const S_C = 217;
+  const setup = () => {
+    const e = election(v1(), [1, 2, 3, 4], 5);
+    const a = e.cast({ tier: 0 }, [1, 0, 0], 101n);
+    const b = e.cast({ tier: 2 }, [0, 1, 0], 102n);
+    e.deliver([a, b], 200);
+    return { e, a, b };
+  };
+  const check = (
+    e: ReturnType<typeof election>,
+    ballots: Parameters<ReturnType<typeof election>["inputs"]>[0],
+    over: Partial<CountedInputs> = {},
+  ) =>
+    countedChecks(
+      e.inputs(ballots, {
+        destruction: false,
+        admitted: e.admitted(ballots),
+        blocks: blocks.map((h) => decodeHeader(h.encoded)),
+        ...over,
+      }),
+    );
+
+  test("the k-th largest counted claim is the head, and with no late ordinary ballot the check passes", () => {
+    const { e, a, b } = setup();
+    const at = [1, 2, 3].map((seat) => e.board(S_C, e.close(seat, lDelta, 900n)));
+    e.board(200, e.close(4, lDelta, 950n));
+    const r = check(e, [a, b]);
+    expect(r.rows.get("6.3")).toEqual({ status: "pass" });
+    expect(r.close).toMatchObject({
+      head: "900",
+      lDelta: { number: lDelta.number.toString(), hash: toHex(lDelta.hash) },
+      late: [],
+    });
+    expect(r.close?.seats.map((s) => [s.code, s.claim?.number])).toEqual([
+      ["close-counted", "900"],
+      ["close-counted", "900"],
+      ["close-counted", "900"],
+      ["close-counted", "950"],
+    ]);
+    // Two distinct claims are listed: one of them is false.
+    expect(r.close?.claims.map((c) => c.number)).toEqual(["900", "950"]);
+    expect(r.close?.statements.slice(0, 3)).toEqual(
+      at.map((entry, i) => ({ entry, code: "valid", seat: i + 1 })),
+    );
+    expect(r.close).not.toHaveProperty("unchecked");
+  });
+
+  test("fewer than k counted seats leave the close unchecked, and the check passes", () => {
+    const { e, a, b } = setup();
+    e.board(200, e.close(1, lDelta, 900n));
+    e.board(200, e.close(2, lDelta, 900n));
+    // Seat 3 names another L1 block, seat 4 equivocates, and a board-path
+    // statement after s_C is late, the operator's or the seat's.
+    const wrong = e.board(200, e.close(3, blocks[0] as TestHeader, 900n));
+    e.board(200, e.close(4, lDelta, 950n));
+    e.board(200, e.close(4, lDelta, 960n));
+    const late = e.board(S_C + 1, e.close(3, lDelta, 900n));
+    const r = check(e, [a, b]);
+    expect(r.rows.get("6.3")).toEqual({ status: "pass" });
+    expect(r.close?.head).toBeNull();
+    expect(r.close?.unchecked).toEqual([]);
+    expect(r.close?.seats.map((s) => s.code)).toEqual([
+      "close-counted",
+      "close-counted",
+      "close-missing",
+      "close-equivocation",
+    ]);
+    expect(r.close?.statements.filter((s) => s.code !== "valid")).toEqual([
+      { entry: wrong, code: "close-l1", seat: 3 },
+      { entry: late, code: "close-late", seat: null },
+    ]);
+  });
+
+  test("without a finalized block after closes_at + δ, L_δ isn't known", () => {
+    const { e, a, b } = setup();
+    const short = blocks.slice(0, 2).map((h) => decodeHeader(h.encoded));
+    expect(check(e, [a, b], { blocks: short }).rows.get("6.3")).toEqual({
+      status: "unverifiable",
+      code: "l1-blocks-short",
+      at: {},
+    });
+    // The rest of the counted set doesn't wait on it.
+    expect(check(e, [a, b], { blocks: short }).rows.get("7.1")).toEqual({ status: "pass" });
+  });
+
+  test("an ordinary ballot waits on its L2 block, and a contract-path statement on 4.4", () => {
+    const { e, a, b } = setup();
+    const [x, y] = e.admitted([a, b]);
+    const ordinary = { ...(y as CloseCandidate), path: "ordinary" as const };
+    expect(check(e, [a, b], { admitted: [x as CloseCandidate, ordinary] }).rows.get("6.3")).toEqual(
+      { status: "unverifiable", code: "not-implemented", at: { entry: b.entry } },
+    );
+    // verifier-events.json's version-3 records: the board's close statements
+    // among them, alone on the copy.
+    const c = caseOf(events, "events-v3-records");
+    const f = election(definitionOf(c));
+    const dv = definitionOf(c).value;
+    const contracts = {
+      electionRegistry: dv.election_registry,
+      trusteeRegistry: dv.trustee_registry,
+      groupRegistry: dv.group_registry,
+      board: dv.board,
+    };
+    const statements = splitEntries(hex(c.board)).entries.filter((x) => {
+      const p = decodeBoardEntry(x, 4).payload;
+      if (((p[0] as number) << 8) + (p[1] as number) !== 0x0008) return false;
+      const checked = checkContractEvent(decodeContractEvent(p, 3), contracts, 3);
+      return checked.ok && checked.event.event === "CloseStatementSubmitted";
+    });
+    expect(statements.length).toBeGreaterThan(0);
+    const r = countedChecks(
+      f.inputs([], {
+        entries: statements,
+        extent: statements.length,
+        destruction: false,
+        blocks: blocks.map((h) => decodeHeader(h.encoded)),
+      }),
+    );
+    expect(r.rows.get("6.3")).toEqual({
+      status: "unverifiable",
+      code: "not-reached",
+      at: { entry: 0 },
+    });
+    expect(r.rows.get("5.9")).toEqual({ status: "pass" });
+  });
+});
+
 describe("the gates", () => {
   test("a contract-path delivery record waits on 4.4, then on the floor of s_S", () => {
     // verifier-events.json's version-4 definition pinning contract-event
@@ -791,7 +1004,7 @@ describe("the gates", () => {
   test("definition version 5's ballots aren't read by the delivery check yet", () => {
     const e = election(definitionOf(caseOf(tallies, "v5-questions")));
     const r = countedChecks(e.inputs([]));
-    for (const id of ["5.9", "7.1", "7.2", "7.3", "8.5"])
+    for (const id of ["5.9", "6.3", "7.1", "7.2", "7.3", "8.5"])
       expect(r.rows.get(id)).toEqual({ status: "unverifiable", code: "not-implemented", at: {} });
   });
 
@@ -811,7 +1024,7 @@ describe("the gates", () => {
   test("a close plus the inclusion bound before the clock's epoch leaves everything not reached", () => {
     const e = election(v1());
     const r = countedChecks(e.inputs([], { clock: { ...CLOCK, epoch: 1_767_830_400n + 3601n } }));
-    for (const id of ["5.9", "7.1", "7.2", "7.3", "8.5"])
+    for (const id of ["5.9", "6.3", "7.1", "7.2", "7.3", "8.5"])
       expect(r.rows.get(id)).toEqual({ status: "unverifiable", code: "not-reached", at: {} });
     // At the epoch itself, the windows are on the clock.
     const at = countedChecks(e.inputs([], { clock: { ...CLOCK, epoch: 1_767_830_400n + 3600n } }));
@@ -865,7 +1078,7 @@ const row = (r: Report, id: string) => {
   const { status, code, at } = r.checks.find((x) => x.id === id) as CheckResult;
   return { status, ...(code !== undefined && { code }), ...(at !== undefined && { at }) };
 };
-const COUNTED_ROWS = ["5.9", "7.1", "7.2", "7.3", "8.5"];
+const COUNTED_ROWS = ["5.9", "6.3", "7.1", "7.2", "7.3", "8.5"];
 
 describe("the whole run", { timeout: 60_000 }, () => {
   test("formats 4 and 5 leave the counted set not reached while 6.1 hasn't passed", () => {

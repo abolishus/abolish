@@ -93,12 +93,14 @@ describe("a sealed, authenticated board with no ballot", { timeout: 60_000 }, ()
   });
 
   test("delivery has nothing to judge, every empty cell's opening passes, and no seat stated destruction", () => {
-    for (const id of ["5.9", "7.1", "7.2", "7.3", "7.4"])
+    for (const id of ["5.9", "6.3", "7.1", "7.2", "7.3", "7.4"])
       expect(row(r, id)).toEqual({ status: "pass" });
+    // No close statement: the close is unchecked, and passes (close.md, Close check).
+    expect(r.close).toMatchObject({ head: null, unchecked: [], late: [] });
     expect(r.delivery).toEqual({ excluded: [], records: [], rejected: [] });
     expect(r.cells).toEqual([
-      { cell: 0, counted: 0, counts: ["0", "0", "0"] },
-      { cell: 1, counted: 0, counts: ["0", "0", "0"] },
+      { cell: 0, tier: 0, counted: 0, counts: ["0", "0", "0"], signers: [1, 3] },
+      { cell: 1, tier: 2, counted: 0, counts: ["0", "0", "0"], signers: [2] },
     ]);
     expect(row(r, "8.5")).toEqual({
       status: "fail",
@@ -114,6 +116,16 @@ describe("a sealed, authenticated board with no ballot", { timeout: 60_000 }, ()
     // 8.5 is report-only, and the inputs are local files (T-53, T-54).
     expect(r.verdictAgainstInputs).toBe("unverifiable");
     expect(r.verdict).toBe("unverifiable");
+  });
+
+  test("the report's members are in the spec's order (Report)", () => {
+    const spec = readFileSync(new URL("../../../docs/spec/verifier.md", import.meta.url), "utf8");
+    const table = spec.slice(spec.indexOf("### Report"), spec.indexOf("### Command line"));
+    const order = [...table.matchAll(/^\| `([a-zA-Z0-9]+)` +\|/gm)].map((m) => m[1]);
+    const keys = Object.keys(r);
+    expect(keys).toEqual(order.filter((k) => k !== undefined && keys.includes(k)));
+    for (const member of ["delivery", "cells", "tiers", "destruction", "close"])
+      expect(keys).toContain(member);
   });
 
   test("the tally reads the anchored board: without the openings every cell is tally-missing", () => {

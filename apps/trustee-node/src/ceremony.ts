@@ -34,6 +34,7 @@ import {
   decode,
   decodeCeremonyTranscript,
   DecodeError,
+  electionDefinitionHash,
   encode,
   EncodeError,
   encodeCeremonyTranscript,
@@ -65,6 +66,18 @@ import {
   type StubRefusal,
 } from "./stub.ts";
 
+/**
+ * Whether finalized L2 shows that the election with this definition hash can
+ * never be registered: its `opens_at` has passed in finalized L2 time and the
+ * election registry holds no registration of it (the registry refuses one at
+ * or after `opens_at`, docs/spec/contracts.md, Registration, rule 6). It must
+ * resolve `false` whenever it can't decide, so an entry is released only on
+ * proof. The read belongs to `packages/verifier`'s chain access (P2-13 part 3),
+ * as the electorate check's does; until a deployment supplies it, no entry is
+ * ever released.
+ */
+export type NeverRegistered = (definitionHash: Uint8Array, opensAt: bigint) => Promise<boolean>;
+
 export interface SeatConfig extends Pins {
   /** This node's seat in the pinned panel, 1 to n. */
   readonly index: number;
@@ -72,6 +85,8 @@ export interface SeatConfig extends Pins {
   readonly identitySecret: Uint8Array;
   readonly electorate: ElectorateCheck;
   readonly store: SeatStore;
+  /** Releases a served election's capacity once it provably can't be registered; never, if absent. */
+  readonly neverRegistered?: NeverRegistered;
 }
 
 /** Why a seat refuses a request; a refusal sends and records nothing new. */
@@ -130,12 +145,15 @@ const APPROVED = struct([
   ["key_set_hash", HASH],
   ["signature", p256Sig],
 ] as const);
-// What stub check 4 reads of an election the seat serves.
+// What stub check 4 reads of an election the seat serves, and what shows
+// it can no longer be registered: its definition hash and `opens_at`.
 const SERVED = struct([
   ["members", u64],
   ["seats", u8],
   ["closes_at", u64],
   ["l1_inclusion_bound", u32],
+  ["definition_hash", HASH],
+  ["opens_at", u64],
 ] as const);
 const HEX64 = /^[0-9a-f]{64}$/;
 
@@ -357,6 +375,12 @@ export class CeremonySeat {
         seats: demand.seats,
         closes_at: demand.closesAt,
         l1_inclusion_bound: Number(demand.l1InclusionBound),
+        // The definition this approval registers: the stub with this transcript.
+        definition_hash: electionDefinitionHash({
+          ...checked.stub,
+          ceremony_transcript_hash: result.hash,
+        }),
+        opens_at: checked.stub.opens_at,
       }),
     );
     const signature = signCeremonyRegistration(config.identitySecret, config.panel, registration);
@@ -375,14 +399,21 @@ export class CeremonySeat {
     return { ok: true, value: { registration, signature: approved.signature } };
   }
 
-  /** Every election the seat has approved, by stub hash (hex), as stub check 4 reads it. */
+  /**
+   * Every election the seat has approved, by stub hash (hex), as stub check 4
+   * reads it, less those finalized L2 shows can never be registered: an
+   * approved stub nobody registers otherwise holds the seat's capacity for
+   * good, so whoever gets stubs run could take every slot (T-25).
+   */
   async #served(): Promise<Map<string, ForcedPathElection>> {
     const served = new Map<string, ForcedPathElection>();
+    const neverRegistered = this.#config.neverRegistered ?? (() => Promise.resolve(false));
     for (const name of await this.#config.store.list("served")) {
       if (!HEX64.test(name)) throw new Error(`trustee node: a served record named ${name}`);
       const bytes = await this.#durable(`served/${name}`);
       if (bytes === undefined) throw new Error(`trustee node: served/${name} vanished`);
       const r = decode(SERVED, bytes);
+      if (await neverRegistered(r.definition_hash, r.opens_at)) continue;
       served.set(name, {
         members: r.members,
         seats: r.seats,

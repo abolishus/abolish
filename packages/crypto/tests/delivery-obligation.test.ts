@@ -150,9 +150,7 @@ describe("delivery-obligation vectors", () => {
         message: hex(b.message),
         l1RefNumber: BigInt(b.l1RefNumber),
         l1RefHash: hex(b.l1RefHash),
-        ...(b.entry === undefined
-          ? {}
-          : { entry: { path: b.entry.path, value: BigInt(b.entry.value) } }),
+        entry: b.entry === undefined ? null : { path: b.entry.path, value: BigInt(b.entry.value) },
       }));
       const l1 = l1At(BigInt(c.head));
       const receipts = c.receipts.map(hex);
@@ -226,6 +224,7 @@ describe("complaintScope", () => {
       l1RefHash: b.known
         ? (blocks.get(b.ref)?.hash ?? new Uint8Array(32))
         : new Uint8Array(32).fill(0xee),
+      entry: null,
     }));
 
   test("is the receipts owed with every ballot of the view receipted, at most two per tier and nullifier, whatever the order", () => {
@@ -270,14 +269,14 @@ describe("the close rule in the view", () => {
     if (b === undefined) throw new Error("no block");
     return b.hash;
   };
-  const copy = (id: number, ref: number, entry?: ViewBallot["entry"]): ViewBallot => ({
+  const copy = (id: number, ref: number, entry: ViewBallot["entry"] = null): ViewBallot => ({
     ballotHash: Uint8Array.of(id, ...new Uint8Array(31)),
     tier: 0,
     nullifier: 7n,
     message: Uint8Array.of(0xaa, id, ...new Uint8Array(30)),
     l1RefNumber: BigInt(ref),
     l1RefHash: at(ref),
-    ...(entry === undefined ? {} : { entry }),
+    entry,
   });
 
   test("a copy carrying its entry needs the close rule's window", () => {

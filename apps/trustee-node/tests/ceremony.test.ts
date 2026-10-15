@@ -1,6 +1,7 @@
 import {
   checkCeremonyTranscript,
   type ElectionDefinition,
+  electionDefinitionHash,
   electionStubHash,
   encodeElectionDefinition,
   decodeCeremonyTranscript,
@@ -560,6 +561,42 @@ describe("stub check 4: the forced path over the elections a seat serves", () =>
       closes_at: e0.stub.closes_at + 86_400n,
     });
     expect((await seat(first, 0).keys(dayLater.stubBytes, runId)).ok).toBe(true);
+  });
+
+  test("an approved election that can never be registered stops counting, and only on proof", async () => {
+    const stores = [0, 1, 2, 3].map(() => new MemoryStore() as SeatStore);
+    const e0 = election(4, 2, { stores });
+    const first = withStub(e0, members(600n, e0.stub));
+    const run = await runCeremony(first);
+    const approval = value(await seat(first, 0).approve(first.stubBytes, run.transcript));
+    const definitionHash = electionDefinitionHash({
+      ...first.stub,
+      ceremony_transcript_hash: approval.registration.ceremonyTranscriptHash,
+    });
+    const asked: [string, bigint][] = [];
+    const over = (never: boolean) =>
+      new CeremonySeat({
+        panel: e0.panelists.panel,
+        l2ChainId: L2_CHAIN_ID,
+        trusteeRegistry: TRUSTEE_REGISTRY,
+        index: 1,
+        identitySecret: e0.panelists.secrets[0] as Uint8Array,
+        electorate: () => Promise.resolve(true),
+        store: stores[0] as SeatStore,
+        neverRegistered: (hash, opensAt) => {
+          asked.push([Buffer.from(hash).toString("hex"), opensAt]);
+          return Promise.resolve(never);
+        },
+      });
+    const together = withStub(e0, members(600n, e0.stub));
+    const runId = crypto.getRandomValues(new Uint8Array(32));
+    expect(await over(false).keys(together.stubBytes, runId)).toEqual({
+      ok: false,
+      code: "stub-capacity",
+    });
+    // It asks about the definition the approval registers, with its opens_at.
+    expect(asked).toEqual([[Buffer.from(definitionHash).toString("hex"), first.stub.opens_at]]);
+    expect((await over(true).keys(together.stubBytes, runId)).ok).toBe(true);
   });
 
   test("a seat that serves nothing takes the largest election that fits and refuses one member more", async () => {

@@ -11,6 +11,7 @@ import {
   electionDefinitionRule,
   decodeElectionDefinitionRecord,
   electionStubHash,
+  forcedPathDemand,
   type ForcedPathElection,
   forcedPathFits,
   type ForcedPathWindows,
@@ -165,10 +166,19 @@ export async function checkStub(
   if (!(await electorate(decodeElectionDefinitionRecord(bytes).value as ElectionDefinition)))
     return { ok: false, code: "stub-electorate" };
   // 4: the forced path, over the counts 2.4 just checked, with every election
-  // this seat serves (docs/spec/delivery.md, Capacity).
+  // this seat serves whose intervals can overlap this one's; the others never
+  // share a moment with it (docs/spec/delivery.md, Capacity).
   const own = Buffer.from(stubHash).toString("hex");
-  const others = [...served].filter(([hash]) => hash !== own).map(([, demand]) => demand);
-  if (!forcedPathFits([...others, stubDemand(stub)], RELEASE_WINDOWS))
+  const demand = stubDemand(stub);
+  const mine = forcedPathDemand(demand, RELEASE_WINDOWS);
+  const others = [...served]
+    .filter(([hash]) => hash !== own)
+    .map(([, other]) => other)
+    .filter((other) => {
+      const o = forcedPathDemand(other, RELEASE_WINDOWS);
+      return o.complaints.end > mine.receipts.start && o.receipts.start < mine.complaints.end;
+    });
+  if (!forcedPathFits([...others, demand], RELEASE_WINDOWS))
     return { ok: false, code: "stub-capacity" };
   return { ok: true, stub, stubHash };
 }

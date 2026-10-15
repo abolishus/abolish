@@ -1,6 +1,7 @@
 export {
   type Approval,
   CeremonySeat,
+  type NeverRegistered,
   type Rounds12,
   type Rounds123,
   type SeatConfig,

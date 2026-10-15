@@ -418,10 +418,12 @@ export interface ViewBallot {
    * The entry that carries a copy the node holds from the anchored board or
    * the contract's records, judged by the close rule (verifier 5.5,
    * `ballotWindow`): its path, and the L2 block's timestamp, the relay's
-   * stamp or the segment. Absent only for a ballot the node holds from its
+   * stamp or the segment; `null` only for a ballot the node holds from its
    * own intake and can't show absent, which has no entry the node has seen.
+   * Required, so a board or contract copy can't be passed without the entry
+   * the close rule judges.
    */
-  readonly entry?: { readonly path: BallotPath; readonly value: bigint };
+  readonly entry: { readonly path: BallotPath; readonly value: bigint } | null;
 }
 
 /** What the node's view is judged against: the L1 reference's window and the close rule's. */
@@ -484,7 +486,7 @@ export function owedReceipts(
     // whose entry is outside the poll's window never counts or displaces
     // another, so a ballot boarded late can't take the counted one's place in
     // the node's selection while the verifier still counts it (T-35, T-54).
-    if (b.entry !== undefined) {
+    if (b.entry !== null) {
       const { opensAt, boardSegment } = window;
       if (opensAt === undefined || boardSegment === undefined)
         throw new RangeError("owedReceipts: a copy with its entry needs opensAt and boardSegment");

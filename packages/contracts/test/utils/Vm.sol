@@ -15,6 +15,7 @@ interface Vm {
     function assume(bool condition) external pure;
     function chainId(uint256 newChainId) external;
     function clearMockedCalls() external;
+    function cool(address target) external;
     function computeCreateAddress(address deployer, uint256 nonce) external pure returns (address);
     function envOr(string calldata name, bool defaultValue) external view returns (bool value);
     function etch(address target, bytes calldata newRuntimeBytecode) external;

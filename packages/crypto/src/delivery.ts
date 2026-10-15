@@ -586,9 +586,9 @@ export const FORCED_PATH = Object.freeze({
   /** Receipts in one `submitReceipts` call. */
   receiptsPerCall: 256n,
   /** Gas of one receipt call of up to `receiptsPerCall`, intrinsic gas included. */
-  receiptCallGas: 17_000_000n,
+  receiptCallGas: 18_500_000n,
   /** Gas of one `submitComplaint` call, intrinsic gas included. */
-  complaintCallGas: 150_000n,
+  complaintCallGas: 180_000n,
 } as const);
 
 /** The windows the forced path's intervals are read from: `W_C`, `F` and `R`, the values `deliveryWindowFits` checks. */

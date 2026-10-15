@@ -340,7 +340,12 @@ export function ballotChecks(
   // doesn't hide a repeat (T-38).
   const repeated = new Set(selectBallots(passed.map((p) => p.ballot)).repeats.map((b) => b.index));
   let repeats: RepeatedBallot[] = [];
-  if (windows) {
+  // A relayed ballot set aside may be the copy that stands, so while one
+  // waits on 4.5 a later copy is only a candidate repeat, as where 5.5
+  // can't run.
+  const firstRelayed = relayed[0];
+  const settled = firstRelayed === undefined;
+  if (windows && settled) {
     // Every copy left has passed 5.1 to 5.5, so the first of each (tier, ν,
     // M) stands and the others are rejected (5.7). 5.8 can't tell them
     // apart: M binds the L1 reference, so it admits or rejects every copy
@@ -395,13 +400,13 @@ export function ballotChecks(
             : firstWith((r) => L1_REF_CODES.has(r.code)),
     );
   const unsettled = new Set(waiting.map((p) => p.entry));
-  const admitted = windows
-    ? passed.filter((p) => !repeated.has(BigInt(p.at)) && !unsettled.has(p.at))
-    : passed;
+  const admitted =
+    windows && settled
+      ? passed.filter((p) => !repeated.has(BigInt(p.at)) && !unsettled.has(p.at))
+      : passed;
   // A relayed ballot may be inside the window or not, a repeat or the copy
   // that stands, so no row after 5.4 can pass or fail while one waits on
   // 4.5, and neither selection (6.1) nor `opening-cast` (6.2) is reached.
-  const firstRelayed = relayed[0];
   if (firstRelayed !== undefined) {
     const open: BallotOutcome = {
       status: "unverifiable",
@@ -410,7 +415,6 @@ export function ballotChecks(
     };
     for (const id of ["5.5", "5.7", ...(blocks !== undefined ? ["5.8"] : [])]) rows.set(id, open);
   }
-  const settled = firstRelayed === undefined;
   return {
     rows,
     report: {

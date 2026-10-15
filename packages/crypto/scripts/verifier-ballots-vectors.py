@@ -11,8 +11,9 @@ in a board entry (the board path), the board contract's `BallotSubmitted`
 event in a contract-event record (the ordinary path), or, under contract-event
 version 3, its `RelayedBallotSubmitted` event (the relayed path), whose stamp
 only 4.5's match with the L1 relay's call proves: a relayed ballot that passes
-5.1 to 5.4 is set aside, and leaves 5.5 and 5.7 unverifiable
-(`not-implemented`) at its entry until 4.5 is built. Every transcript is made for the stub of the
+5.1 to 5.4 is set aside, leaves 5.5 and 5.7 unverifiable
+(`not-implemented`) at its entry until 4.5 is built, and makes later copies
+candidate repeats, since it may be the copy that stands. Every transcript is made for the stub of the
 definition it is checked against, and every ballot proves membership under
 that definition's hash, so a verifier checks them with nothing but the bundle.
 
@@ -477,7 +478,7 @@ def build(constants):
     )
     bundle(
         "events-v3-relayed",
-        "Contract-event version 3: the ballot relayed through L1 with a stamp after close, then an ordinary copy inside the window and a board-path copy. The relayed copy passes 5.1 to 5.4 and is set aside, since only 4.5's match with the relay's call proves its stamp: 5.5 and 5.7 are unverifiable (not-implemented) at it, whatever the other copies show.",
+        "Contract-event version 3: the ballot relayed through L1 with a stamp after close, then an ordinary copy inside the window and a board-path copy. The relayed copy passes 5.1 to 5.4 and is set aside, since only 4.5's match with the relay's call proves its stamp: 5.5 and 5.7 are unverifiable (not-implemented) at it, whatever the other copies show, and the board-path copy stays a candidate repeat, since the relayed one may be the copy that stands.",
         d_c3, t_c3, e_c3, [1, 2, 3],
         [
             t_c3,
@@ -636,12 +637,15 @@ def assemble(constants, proofs_path, out_dir):
                     if option is not None:
                         r["option"] = option
                     rejected.append(r)
-            if windows:
+            # A relayed ballot set aside may be the copy that stands, so while
+            # one waits on 4.5 later copies stay candidate repeats.
+            settled = windows and not relayed
+            if settled:
                 # Every copy left passed 5.1 to 5.5, so a repeat is rejected (5.7).
                 rejected = sorted(rejected + [{"entry": r["entry"], "code": "repeat"} for r in repeats], key=lambda r: r["entry"])
                 admitted = [i for i in admitted if {"entry": i} not in repeats]
             rows.update(rows_for("mixed", rejected, repeats, windows, relayed))
-            ballots = {"admitted": len(admitted), "rejected": rejected, "repeats": [] if windows else repeats}
+            ballots = {"admitted": len(admitted), "rejected": rejected, "repeats": [] if settled else repeats}
             if expect == "admitted":
                 assert rejected == [] and repeats == [], bnd["id"]
             elif expect == "repeats":
@@ -649,7 +653,7 @@ def assemble(constants, proofs_path, out_dir):
             elif expect == "candidates":
                 assert not windows and rejected == [] and len(repeats) == 1, bnd["id"]
             elif expect == "relayed":
-                assert relayed != [] and windows, bnd["id"]
+                assert relayed != [] and windows and len(repeats) == 1, bnd["id"]
             else:
                 assert rejected != [], bnd["id"]
         else:

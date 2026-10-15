@@ -585,6 +585,22 @@ contract BoardCloseRuleTest is TestBase {
         }
     }
 
+    /// Seat 0 never exists, whatever a key set's bit 0 says (contracts.md,
+    /// Close statements, `statement-seat`): here bit 0 is set and seat 0 has
+    /// seat 1's signing key, so only that rule refuses a statement seat 1's
+    /// key signs as seat 0.
+    function test_SeatZeroNeverStates() public {
+        (, uint256 seats) = trustees.keySetOf(STUB_CLOSE, PANEL);
+        trustees.setKeySet(STUB_CLOSE, PANEL, seats | 1);
+        (uint256 x, uint256 y) = trustees.signingKeyOf(STUB_CLOSE, PANEL, 1);
+        trustees.setKey(STUB_CLOSE, PANEL, 0, x, y);
+        _refuse(
+            _statementCall(_signed(_withByte(statements[0], 35, 0), 1)),
+            _refused(CloseStatementLib.Code.StatementSeat),
+            "seat 0"
+        );
+    }
+
     /// The checks run in the spec's order: decoding before the election, the
     /// election before the seat, the seat before the signature.
     function test_StatementCheckOrder() public {

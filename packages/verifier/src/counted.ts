@@ -234,7 +234,8 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
       inputs.destruction,
     );
   // Ordinary ballots can't be found under a contract-event version this
-  // release doesn't read, so 6.1 never passes there; a caller that gets here
+  // release doesn't read, so 5.5 is unsupported, admission never settles and
+  // 6.1 never passes there, whatever the copy holds; a caller that gets here
   // anyway reports it unsupported, never a counted set (T-36).
   const eventVersion = pinnedVersion(d, RECORD_TYPES.contractEvent);
   if (!readsEvents(eventVersion))
@@ -249,6 +250,7 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
   if (closesAt + bound < clock.epoch)
     return countedRows({ status: "unverifiable", code: "not-reached", at: {} }, inputs.destruction);
   const segments = deliverySegments(clock, closesAt, bound);
+  const deadlines = deliveryDeadlines(closesAt, bound);
   // `s_S` is at least `s_F` and at least `s_K` (tally.md, Tally window;
   // delivery.md, Windows), so every entry at or below this floor is in the
   // counted extent.
@@ -292,6 +294,12 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
           { status: "unverifiable", code: "not-reached", at: { entry: at } },
           inputs.destruction,
         );
+      // Boarded above the floor, it may or may not be in the counted extent,
+      // unless it was sent after the complaint window's end (`t_K ≥ t_D`):
+      // then it is late whatever `s_S` is, as a board-path record above the
+      // floor is, so a record submitted after the windows never holds the
+      // rows open.
+      if (BigInt(segment) > floor && record.l2_timestamp > deadlines.complaint) continue;
       if (BigInt(segment) > floor)
         return countedRows(
           { status: "unverifiable", code: "not-implemented", at: { entry: at } },
@@ -318,7 +326,7 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
       panelSize: d.panel_size,
       registered,
       segments,
-      deadlines: deliveryDeadlines(closesAt, bound),
+      deadlines,
     },
     ballots,
     records,

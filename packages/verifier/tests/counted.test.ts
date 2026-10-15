@@ -7,6 +7,9 @@ import {
   type CommittedVote,
   decode,
   decodeBoardEntry,
+  decodeContractEvent,
+  encodeContractEvent,
+  PARAMETERS,
   encodeBoardEntry,
   encodeDestructionStatement,
   encodeShareReceipt,
@@ -417,6 +420,23 @@ describe("delivery decides the counted set", () => {
     });
   });
 
+  test("s_F, not s_K, is the floor when a period is longer than the complaint window", () => {
+    // Ten-day periods from a second before close: s_D = s_K = 0 and s_F = 1,
+    // so a receipt in segment 1 is in the counted extent and late.
+    const e = election(v1());
+    const a = e.cast({ tier: 0 }, [1, 0, 0], 45n);
+    for (const seat of [1, 2, 3]) e.board(0, e.receipt(a, seat));
+    const last = e.board(1, e.receipt(a, 4));
+    const closes = v1().value.closes_at;
+    const r = countedChecks(
+      e.inputs([a], {
+        destruction: false,
+        clock: { ...CLOCK, epoch: closes - 1n, period: 864_000n },
+      }),
+    );
+    expect(r.delivery?.records).toEqual([{ entry: last, code: "delivery-late" }]);
+  });
+
   test("a receipt signed by another seat is reported and delivers nothing", () => {
     const e = election(v1());
     const a = e.cast({ tier: 0 }, [1, 0, 0], 51n);
@@ -647,6 +667,43 @@ describe("8.5 between the floors of s_T", () => {
     ]);
   });
 
+  test("s_T's floor counts the anchor's deadline, even one longer than a period", () => {
+    // With a two-hour deadline, s_T ≥ 289 + 1 + ⌊(7,200 + 604,800) / 3,600⌋ = 460.
+    const e = election(v1());
+    e.board(500, e.opening(0, [], 1));
+    e.board(500, e.opening(1, [], 1));
+    const early = e.board(459, e.destruction(1));
+    const r = countedChecks(e.inputs([], { clock: { ...CLOCK, deadline: 7200n } }));
+    expect(r.destruction).toMatchObject({ earliest: 460, latest: 501 });
+    expect(r.destruction?.seats[0]).toEqual({
+      seat: 1,
+      code: "destruction-early",
+      entry: early,
+    });
+  });
+
+  test("another election's entries are never read, even inside the anchored extent", () => {
+    const e = election(v1());
+    e.board(300, e.opening(0, [], 1));
+    e.board(300, e.opening(1, [], 1));
+    const other = decodeBoardEntry(e.entries.at(-1) as Uint8Array, 4);
+    e.entries.push(
+      encodeBoardEntry(
+        {
+          ...other,
+          election_id: new Uint8Array(32).fill(9),
+          index: other.index + 1n,
+          segment: 301,
+          payload: e.destruction(2),
+        },
+        4,
+      ),
+    );
+    const r = countedChecks(e.inputs([]));
+    expect(r.destruction?.seats[1]).toEqual({ seat: 2, code: "destruction-missing" });
+    expect(r.destruction?.stray).toEqual([]);
+  });
+
   test("duplicates, unattributed, stray and undecodable statements are listed", () => {
     const e = election(v1());
     e.board(300, e.opening(0, [], 1));
@@ -695,6 +752,36 @@ describe("the gates", () => {
     expect(read2.rows.get("5.9")).toEqual({ status: "pass" });
     const above = countedChecks(e.inputs([], { ...base, entries: at(S_K + 1), eventsPass: true }));
     expect(above.rows.get("5.9")).toEqual({
+      status: "unverifiable",
+      code: "not-implemented",
+      at: firstAt,
+    });
+    // Sent after the complaint window's end, a record above the floor is
+    // late whatever s_S is, so it holds nothing open; one sent at its end may
+    // still be in time.
+    const tK =
+      definition.value.closes_at +
+      BigInt(definition.value.l1_inclusion_bound) +
+      BigInt(PARAMETERS.COMPLAINT_WINDOW);
+    const sentAt = (t: bigint) =>
+      at(S_K + 1).map((x) => {
+        const entry = decodeBoardEntry(x, 4);
+        if (((entry.payload[0] as number) << 8) + (entry.payload[1] as number) !== 0x0008) return x;
+        const record = decodeContractEvent(entry.payload, 2);
+        return encodeBoardEntry(
+          { ...entry, payload: encodeContractEvent({ ...record, l2_timestamp: t }, 2) },
+          4,
+        );
+      });
+    const late = countedChecks(
+      e.inputs([], { ...base, entries: sentAt(tK + 1n), eventsPass: true }),
+    );
+    expect(late.rows.get("5.9")).toEqual({ status: "pass" });
+    expect(late.delivery?.records).toEqual([]);
+    const lastSecond = countedChecks(
+      e.inputs([], { ...base, entries: sentAt(tK), eventsPass: true }),
+    );
+    expect(lastSecond.rows.get("5.9")).toEqual({
       status: "unverifiable",
       code: "not-implemented",
       at: firstAt,

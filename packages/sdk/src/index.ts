@@ -28,3 +28,11 @@ export {
   type SimulationReport,
 } from "./simulation/run.ts";
 export { MAX_INTAKE_WORKERS } from "./simulation/intake.ts";
+export {
+  type PublicRecord,
+  rebuildElection,
+  RebuildError,
+  type RebuildFailure,
+  type RebuiltCell,
+  type RebuiltElection,
+} from "./simulation/rebuild.ts";

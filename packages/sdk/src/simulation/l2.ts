@@ -20,6 +20,7 @@ import {
   type ElectionDefinitionV4Rule,
   electionId,
   electionStubV4Hash,
+  encodeElectionDefinitionV4,
   type KeySetEntry,
   keySetHash,
   PARAMETERS,
@@ -293,6 +294,21 @@ export class SimulatedTrusteeRegistry {
   quorumOf(id: Uint8Array): number | undefined {
     return this.#panels.get(hex(id))?.quorum;
   }
+
+  /**
+   * The panel pinned as `id`, as a copy, or `undefined` for a panel it
+   * doesn't pin: what a reader of the deployment takes the panel from when
+   * no release pins it (SIMULATION_STUBS).
+   */
+  panelOf(id: Uint8Array): Panel | undefined {
+    const pinned = this.#panels.get(hex(id));
+    return pinned === undefined
+      ? undefined
+      : {
+          threshold: pinned.panel.threshold,
+          keys: pinned.panel.keys.map((k) => Uint8Array.from(k)),
+        };
+  }
 }
 
 /**
@@ -318,6 +334,10 @@ export class SimulatedElectionRegistry {
   readonly #trustees: SimulatedTrusteeRegistry;
   readonly #creators = new Map<string, string>();
   readonly #definitions = new Map<string, Uint8Array>();
+  // Each registered definition's canonical encoding, as its registration's
+  // calldata carries it on L2 ([[contracts]], Election registry), so a
+  // reader rebuilding from chain finds the definition there.
+  readonly #encodings = new Map<string, Uint8Array>();
   #counter = 0n;
 
   /**
@@ -430,7 +450,18 @@ export class SimulatedElectionRegistry {
       return refuse("CeremonyNotRecorded");
     if (!servedProfile(d)) return refuse("ProfileNotServed");
     this.#definitions.set(id, electionDefinitionV4Hash(d));
+    this.#encodings.set(id, encodeElectionDefinitionV4(d));
     return { ok: true };
+  }
+
+  /**
+   * The definition registered for `election`, in its canonical encoding, or
+   * `undefined` before registration: the bytes the registration carried,
+   * which a reader decodes strictly and compares with `definitionHashOf`.
+   */
+  definitionOf(election: Uint8Array): Uint8Array | undefined {
+    const e = this.#encodings.get(hex(election));
+    return e === undefined ? undefined : Uint8Array.from(e);
   }
 
   /** The hash registered for `election`, or `undefined` before registration. */

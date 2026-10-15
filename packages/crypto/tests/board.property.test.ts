@@ -31,6 +31,7 @@ import {
   merkleRoots,
   objectCid,
   RECORD_TYPES,
+  splitSegmentObject,
   UNPINNED,
   verifyConsistency,
   verifyBoard,
@@ -770,6 +771,118 @@ describe("checkpoints from a raw copy", () => {
         },
       ),
     );
+  });
+});
+
+// docs/spec/board.md, Segment objects: an object splits into its entries in
+// exactly one way, so whoever fetches one by an anchored CID gets back the
+// encodings the checkpoint was made from (T-24, T-49).
+describe("segment objects", () => {
+  const concat = (parts: readonly Uint8Array[]) =>
+    Uint8Array.from(parts.flatMap((p) => Array.from(p)));
+  const objectArb = fc
+    .array(entryArb, { minLength: 1, maxLength: 8 })
+    .map((es) => es.map((e) => encodeBoardEntry(e, 1)));
+
+  test("splitSegmentObject(concat(entries)) = entries", () => {
+    run(
+      fc.property(objectArb, (encodings) => {
+        expect(splitSegmentObject(concat(encodings))).toEqual(encodings);
+      }),
+    );
+  });
+
+  test("the object a checkpoint's CID names splits into the segment's entries", () => {
+    run(
+      fc.property(fc.array(payloadArb, { minLength: 1, maxLength: 6 }), fc.nat(5), (ps, cut) => {
+        // Entries before `cut` are in segment 0, the rest in segment 1.
+        const encodings = ps.map((payload, i) =>
+          encodeBoardEntry(
+            { election_id: ELECTION, index: BigInt(i), segment: i < cut ? 0 : 1, payload },
+            1,
+          ),
+        );
+        const tail = cut < encodings.length ? encodings.slice(cut) : encodings;
+        const segment = cut < encodings.length ? 1 : 0;
+        const cp = copyCheckpoints(ELECTION, encodings, [segment]).get(segment) as Checkpoint;
+        expect(objectCid(concat(tail))).toEqual(cp.object_cid);
+        expect(splitSegmentObject(concat(tail))).toEqual(tail);
+      }),
+    );
+  });
+
+  test("any accepted object re-joins to itself, and any other is a DecodeError", () => {
+    run(
+      fc.property(objectArb, fc.nat(), fc.integer({ min: 0, max: 255 }), (encodings, at, v) => {
+        const b = concat(encodings);
+        b[at % b.length] = v;
+        let pieces: Uint8Array[];
+        try {
+          pieces = splitSegmentObject(b);
+        } catch (e) {
+          expect(e).toBeInstanceOf(DecodeError);
+          return;
+        }
+        expect(concat(pieces)).toEqual(b);
+      }),
+    );
+  });
+
+  test("rejects an empty object, a truncated entry and a payload length over the maximum", () => {
+    run(
+      fc.property(objectArb, fc.nat(), (encodings, at) => {
+        const b = concat(encodings);
+        // Where each entry ends: a cut there leaves the entries before it.
+        const ends: number[] = [];
+        for (const e of encodings) ends.push((ends.at(-1) ?? 0) + e.length);
+        const cut = 1 + (at % (b.length - 1));
+        const whole = ends.indexOf(cut);
+        if (whole >= 0) expect(splitSegmentObject(b.subarray(0, cut))).toHaveLength(whole + 1);
+        else
+          expect(() => splitSegmentObject(b.subarray(0, cut))).toThrow(
+            expect.objectContaining({ code: "truncated" }),
+          );
+      }),
+    );
+    expect(() => splitSegmentObject(new Uint8Array(0))).toThrow(
+      expect.objectContaining({ code: "truncated", offset: 0 }),
+    );
+    // A length one over the maximum is refused at its own offset, before the
+    // payload it claims is looked for.
+    const over = encodeBoardEntry(
+      {
+        election_id: ELECTION,
+        index: 0n,
+        segment: 0,
+        payload: recordOf(allowedTypes[0] as number, new Uint8Array(0)),
+      },
+      1,
+    );
+    new DataView(over.buffer).setUint32(47, MAX_BOARD_PAYLOAD + 1);
+    expect(() => splitSegmentObject(over)).toThrow(
+      expect.objectContaining({ code: "length-over-max", offset: 47 }),
+    );
+    // At the maximum, a short object is truncated rather than over the limit.
+    new DataView(over.buffer).setUint32(47, MAX_BOARD_PAYLOAD);
+    expect(() => splitSegmentObject(over)).toThrow(
+      expect.objectContaining({ code: "truncated", offset: 51 }),
+    );
+  });
+
+  test("returns copies, so changing the object afterwards changes no entry", () => {
+    const e = encodeBoardEntry(
+      {
+        election_id: ELECTION,
+        index: 0n,
+        segment: 0,
+        payload: recordOf(allowedTypes[0] as number, Uint8Array.of(1)),
+      },
+      1,
+    );
+    const object = Uint8Array.from(e);
+    const [piece] = splitSegmentObject(object);
+    object.fill(0);
+    expect(piece).toEqual(e);
   });
 });
 

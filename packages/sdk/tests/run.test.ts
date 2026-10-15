@@ -93,6 +93,12 @@ describe("runSimulation", { timeout }, () => {
       { seat: 3, code: "destroyed", at: 1 },
       { seat: 4, code: "destroyed", at: 2 },
     ]);
+    // Rebuilt from chain and IPFS once the operator's copy is wiped: one
+    // segment object per period that added entries, holding the whole board.
+    expect(r.rebuild).toEqual({
+      objects: new Set(anchors.map((a) => a.size)).size,
+      entries: r.board.entries,
+    });
     expect(r.stubs).toEqual(SIMULATION_STUBS);
     expect(progress.filter((s) => s === "cast")).toHaveLength(9);
     expect(progress.filter((s) => s === "tally")).toHaveLength(3);

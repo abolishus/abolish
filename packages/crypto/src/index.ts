@@ -160,6 +160,7 @@ export {
   encodeCheckpoint,
   isTimely,
   MAX_BOARD_PAYLOAD,
+  splitSegmentObject,
   type VerifiedBoard,
   verifyBoard,
 } from "./board.ts";

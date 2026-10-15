@@ -834,6 +834,7 @@ export {
   intakeCutoff,
   owedReceipts,
   type ViewBallot,
+  type ViewWindow,
   deliverySegments,
   encodeShareComplaint,
   encodeShareComplaintV2,

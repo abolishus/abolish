@@ -79,20 +79,40 @@ HEAD = 11
 REF_MIN = 2
 CHAIN = {n: (det("block", n), 1_700_000_000 + 12 * n) for n in range(0, HEAD + 1)}
 CLOSES_AT = CHAIN[10][1]
+# The close rule's window (docs/spec/close.md, Window): an ordinary copy's L2
+# timestamp or a relayed copy's stamp within [OPENS_AT, CLOSES_AT], a
+# board-path copy's segment at most S_A.
+OPENS_AT = CHAIN[3][1]
+S_A = 50
+
+
+def in_window(entry):
+    """Verifier 5.5 for the entry that carries a copy; None for a copy held only from intake."""
+    if entry is None:
+        return True
+    path, value = entry
+    if path == "board":
+        return value <= S_A
+    assert path in ("ordinary", "relayed")
+    return OPENS_AT <= value <= CLOSES_AT
 
 
 def obligations(view, receipts, head=HEAD):
     """Owed receipts and the complaint scope, from the spec's reading.
 
     view: ballots, each a dict with hash, tier, nullifier, message, ref,
-    refHash. receipts: the ballot hashes the node receipted. Returns
-    (owed, scope), each a sorted list of ballot hashes, or raises ValueError.
+    refHash and entry ((path, value), or None for a copy held only from
+    intake). receipts: the ballot hashes the node receipted. Returns (owed,
+    scope), each a sorted list of ballot hashes, or raises ValueError.
     """
     for b in view:
         if b["tier"] not in (0, 1, 2):
             raise ValueError("tier")
         if not 0 <= b["nullifier"] < rv.R:
             raise ValueError("nullifier")
+    # 5.5 before 5.8 and selection: a copy outside the window never counts or
+    # displaces another.
+    view = [b for b in view if in_window(b["entry"])]
     verdict = {
         id(b): rv.check_reference(b["ref"], b["refHash"], CHAIN, head, REF_MIN, CLOSES_AT) for b in view
     }
@@ -123,9 +143,10 @@ def obligations(view, receipts, head=HEAD):
     return sorted(owed), sorted(scope)
 
 
-def vb(core, cast, ref, tier=0, nullifier=7, ref_hash=None):
+def vb(core, cast, ref, tier=0, nullifier=7, ref_hash=None, entry=None):
     """A view ballot: `core` names its ballot hash, `cast` its message."""
     return {
+        "entry": entry,
         "hash": det("ballot", core),
         "tier": tier,
         "nullifier": nullifier,
@@ -194,6 +215,47 @@ def obligation_cases():
             "Held from the board, never receipted: nothing owed, the selected ballot in scope",
             [vb(1, 1, 4), vb(2, 2, 6), vb(3, 3, 5, nullifier=8)],
             [],
+        ),
+        (
+            "late-board-newer",
+            "A newer ballot boarded after s_A never displaces the counted one, which stays in scope",
+            [vb(1, 1, 4, entry=("board", 40)), vb(2, 2, 6, entry=("board", S_A + 1))],
+            [],
+        ),
+        (
+            "late-board-tie",
+            "A late board-path ballot naming the counted one's block doesn't make a tie",
+            [vb(1, 1, 4, entry=("board", S_A)), vb(2, 2, 4, entry=("board", S_A + 1))],
+            [1, 2],
+        ),
+        (
+            "late-copy",
+            "A late copy of a timely ballot: the timely copy stands",
+            [vb(1, 1, 4, entry=("board", 40)), vb(1, 1, 4, entry=("board", S_A + 9))],
+            [1],
+        ),
+        (
+            "ordinary-window",
+            "An ordinary copy at close counts; one a second after close, and a relayed one stamped before opening, don't",
+            [
+                vb(1, 1, 4, entry=("ordinary", CLOSES_AT)),
+                vb(2, 2, 6, entry=("ordinary", CLOSES_AT + 1)),
+                vb(3, 3, 5, nullifier=8, entry=("relayed", OPENS_AT - 1)),
+                vb(4, 4, 4, nullifier=8, entry=("relayed", OPENS_AT)),
+            ],
+            [1, 2, 3, 4],
+        ),
+        (
+            "late-only",
+            "Every copy outside the window: nothing owed, nothing in scope, not even as unadmitted",
+            [vb(1, 1, 11, entry=("board", S_A + 1)), vb(2, 2, 4, entry=("ordinary", CLOSES_AT + 1))],
+            [1, 2],
+        ),
+        (
+            "intake-copy-newer",
+            "A newer ballot held only from intake, not shown absent, still displaces (the withheld-data residual)",
+            [vb(1, 1, 4, entry=("board", 40)), vb(2, 2, 6)],
+            [1, 2],
         ),
     ]
 
@@ -391,7 +453,9 @@ def main():
         return b.hex()
 
     def ballot_json(b):
+        entry = {} if b["entry"] is None else {"entry": {"path": b["entry"][0], "value": str(b["entry"][1])}}
         return {
+            **entry,
             "ballotHash": hx(b["hash"]),
             "tier": b["tier"],
             "nullifier": str(b["nullifier"]),
@@ -454,6 +518,8 @@ def main():
         "l1": {
             "l1RefMin": str(REF_MIN),
             "closesAt": str(CLOSES_AT),
+            "opensAt": str(OPENS_AT),
+            "boardSegment": str(S_A),
             "blocks": [{"number": str(n), "hash": hx(h), "timestamp": str(t)} for n, (h, t) in sorted(CHAIN.items())],
         },
         "obligations": owed_cases,

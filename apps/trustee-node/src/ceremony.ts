@@ -14,7 +14,11 @@
 // - at most one approved transcript per `stub_hash`, only one that holds
 //   every message it sent and the rounds it signed over, with at least
 //   `max(k, n − 1)` qualified seats (Approval and re-runs; [[0006-trustees]]
-//   rule 7; T-14, T-54), signed over the key set its own check returned.
+//   rule 7; T-14, T-54), signed over the key set its own check returned;
+// - every election it approves recorded with what the capacity check reads,
+//   before it signs, and approvals one at a time, so each stub check 4 sees
+//   every election approved before it (docs/spec/delivery.md, Capacity;
+//   T-25, T-52, T-54).
 import {
   answersMessage,
   bytesFixed,
@@ -23,6 +27,7 @@ import {
   type CeremonyRegistration,
   type CeremonyTranscript,
   type ChallengesMessage,
+  type ForcedPathElection,
   challengesMessage,
   checkCeremonyTranscript,
   ceremonyKeygen,
@@ -47,9 +52,18 @@ import {
   signCeremonyRegistration,
   struct,
   type AnswersMessage,
+  u32,
+  u64,
+  u8,
 } from "@abolishus/crypto";
 import type { SeatStore } from "./store.ts";
-import { checkStub, type ElectorateCheck, type Pins, type StubRefusal } from "./stub.ts";
+import {
+  checkStub,
+  type ElectorateCheck,
+  type Pins,
+  stubDemand,
+  type StubRefusal,
+} from "./stub.ts";
 
 export interface SeatConfig extends Pins {
   /** This node's seat in the pinned panel, 1 to n. */
@@ -116,6 +130,14 @@ const APPROVED = struct([
   ["key_set_hash", HASH],
   ["signature", p256Sig],
 ] as const);
+// What stub check 4 reads of an election the seat serves.
+const SERVED = struct([
+  ["members", u64],
+  ["seats", u8],
+  ["closes_at", u64],
+  ["l1_inclusion_bound", u32],
+] as const);
+const HEX64 = /^[0-9a-f]{64}$/;
 
 const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
 const equal = (a: Uint8Array, b: Uint8Array) =>
@@ -133,6 +155,9 @@ const FIELD = { 1: "keys", 2: "challenges", 3: "answers", 4: "reveals" } as cons
 
 export class CeremonySeat {
   readonly #config: SeatConfig;
+  // Approvals run one at a time, so no two can each pass stub check 4
+  // against a ledger the other is about to add to.
+  #approving: Promise<unknown> = Promise.resolve();
 
   constructor(config: SeatConfig) {
     const key = config.panel.keys[config.index - 1];
@@ -151,7 +176,7 @@ export class CeremonySeat {
     const config = this.#config;
     if (!(runId instanceof Uint8Array) || runId.length !== 32)
       throw new RangeError("trustee node: runId must be 32 bytes");
-    const checked = await checkStub(stubBytes, config, config.electorate);
+    const checked = await checkStub(stubBytes, config, config.electorate, await this.#served());
     if (!checked.ok) return refuse(checked.code);
     const stubHash = hex(checked.stubHash);
     if ((await this.#durable(`approvals/${stubHash}`)) !== undefined)
@@ -270,8 +295,14 @@ export class CeremonySeat {
    * stub this node approves.
    */
   async approve(stubBytes: Uint8Array, transcript: Uint8Array): Promise<SeatResult<Approval>> {
+    const turn = this.#approving.then(() => this.#approve(stubBytes, transcript));
+    this.#approving = turn.catch(() => undefined);
+    return turn;
+  }
+
+  async #approve(stubBytes: Uint8Array, transcript: Uint8Array): Promise<SeatResult<Approval>> {
     const config = this.#config;
-    const checked = await checkStub(stubBytes, config, config.electorate);
+    const checked = await checkStub(stubBytes, config, config.electorate, await this.#served());
     if (!checked.ok) return refuse(checked.code);
     let t: CeremonyTranscript;
     try {
@@ -316,6 +347,18 @@ export class CeremonySeat {
       // From this node's own check, never from the coordinator (T-37, T-14).
       keySetHash: keySetHash(result.registered.map(keySetEntry)),
     };
+    // Recorded before signing, so every later stub check 4 counts it, even
+    // after a crash between this record and the approval.
+    const demand = stubDemand(checked.stub);
+    await config.store.putOnce(
+      `served/${hex(checked.stubHash)}`,
+      encode(SERVED, {
+        members: demand.members,
+        seats: demand.seats,
+        closes_at: demand.closesAt,
+        l1_inclusion_bound: Number(demand.l1InclusionBound),
+      }),
+    );
     const signature = signCeremonyRegistration(config.identitySecret, config.panel, registration);
     const stored = await config.store.putOnce(
       approvalKey,
@@ -330,6 +373,24 @@ export class CeremonySeat {
     // A repeat request gets the signature first recorded (ECDSA signatures
     // differ per signing; either verifies).
     return { ok: true, value: { registration, signature: approved.signature } };
+  }
+
+  /** Every election the seat has approved, by stub hash (hex), as stub check 4 reads it. */
+  async #served(): Promise<Map<string, ForcedPathElection>> {
+    const served = new Map<string, ForcedPathElection>();
+    for (const name of await this.#config.store.list("served")) {
+      if (!HEX64.test(name)) throw new Error(`trustee node: a served record named ${name}`);
+      const bytes = await this.#durable(`served/${name}`);
+      if (bytes === undefined) throw new Error(`trustee node: served/${name} vanished`);
+      const r = decode(SERVED, bytes);
+      served.set(name, {
+        members: r.members,
+        seats: r.seats,
+        closesAt: r.closes_at,
+        l1InclusionBound: BigInt(r.l1_inclusion_bound),
+      });
+    }
+    return served;
   }
 
   /**

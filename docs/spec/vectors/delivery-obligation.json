@@ -22,6 +22,8 @@
   "l1": {
     "l1RefMin": "2",
     "closesAt": "1700000120",
+    "opensAt": "1700000036",
+    "boardSegment": "50",
     "blocks": [
       {
         "number": "0",
@@ -448,6 +450,250 @@
         "a5fe252c142b05666173ef30b0eea11a932d9f19d8a64844c8a299a51842ce75",
         "cbec5b2bf996eba98fae42a3ba8cf7e3cafbd29711ca6f72bc79b4a4d2e8289f"
       ]
+    },
+    {
+      "id": "late-board-newer",
+      "description": "A newer ballot boarded after s_A never displaces the counted one, which stays in scope",
+      "head": "11",
+      "view": [
+        {
+          "entry": {
+            "path": "board",
+            "value": "40"
+          },
+          "ballotHash": "e98342c88ec180a988e30818994a5be1a75094125350903279d035e987d38b62",
+          "tier": 0,
+          "nullifier": "7",
+          "message": "da4b5cf4842ab884d8f3072ab8b41d979d7eba6b309ebf4911e376c275548702",
+          "l1RefNumber": "4",
+          "l1RefHash": "cb96065a06fe2b464c465726dc365e60466cd65dfc35837dd58e15a988852174"
+        },
+        {
+          "entry": {
+            "path": "board",
+            "value": "51"
+          },
+          "ballotHash": "a5fe252c142b05666173ef30b0eea11a932d9f19d8a64844c8a299a51842ce75",
+          "tier": 0,
+          "nullifier": "7",
+          "message": "0bc4d0eb1f703c32e5789c58157f68c630b15516b0e239a2768abc7ee9c41b00",
+          "l1RefNumber": "6",
+          "l1RefHash": "998736ca5645306941826ba7ac5ce1cf093c54ea82c78b15ce0dfac5f4162027"
+        }
+      ],
+      "receipts": [],
+      "owedReceipts": [],
+      "complaintScope": ["e98342c88ec180a988e30818994a5be1a75094125350903279d035e987d38b62"]
+    },
+    {
+      "id": "late-board-tie",
+      "description": "A late board-path ballot naming the counted one's block doesn't make a tie",
+      "head": "11",
+      "view": [
+        {
+          "entry": {
+            "path": "board",
+            "value": "50"
+          },
+          "ballotHash": "e98342c88ec180a988e30818994a5be1a75094125350903279d035e987d38b62",
+          "tier": 0,
+          "nullifier": "7",
+          "message": "da4b5cf4842ab884d8f3072ab8b41d979d7eba6b309ebf4911e376c275548702",
+          "l1RefNumber": "4",
+          "l1RefHash": "cb96065a06fe2b464c465726dc365e60466cd65dfc35837dd58e15a988852174"
+        },
+        {
+          "entry": {
+            "path": "board",
+            "value": "51"
+          },
+          "ballotHash": "a5fe252c142b05666173ef30b0eea11a932d9f19d8a64844c8a299a51842ce75",
+          "tier": 0,
+          "nullifier": "7",
+          "message": "0bc4d0eb1f703c32e5789c58157f68c630b15516b0e239a2768abc7ee9c41b00",
+          "l1RefNumber": "4",
+          "l1RefHash": "cb96065a06fe2b464c465726dc365e60466cd65dfc35837dd58e15a988852174"
+        }
+      ],
+      "receipts": [
+        "e98342c88ec180a988e30818994a5be1a75094125350903279d035e987d38b62",
+        "a5fe252c142b05666173ef30b0eea11a932d9f19d8a64844c8a299a51842ce75"
+      ],
+      "owedReceipts": ["e98342c88ec180a988e30818994a5be1a75094125350903279d035e987d38b62"],
+      "complaintScope": ["e98342c88ec180a988e30818994a5be1a75094125350903279d035e987d38b62"]
+    },
+    {
+      "id": "late-copy",
+      "description": "A late copy of a timely ballot: the timely copy stands",
+      "head": "11",
+      "view": [
+        {
+          "entry": {
+            "path": "board",
+            "value": "40"
+          },
+          "ballotHash": "e98342c88ec180a988e30818994a5be1a75094125350903279d035e987d38b62",
+          "tier": 0,
+          "nullifier": "7",
+          "message": "da4b5cf4842ab884d8f3072ab8b41d979d7eba6b309ebf4911e376c275548702",
+          "l1RefNumber": "4",
+          "l1RefHash": "cb96065a06fe2b464c465726dc365e60466cd65dfc35837dd58e15a988852174"
+        },
+        {
+          "entry": {
+            "path": "board",
+            "value": "59"
+          },
+          "ballotHash": "e98342c88ec180a988e30818994a5be1a75094125350903279d035e987d38b62",
+          "tier": 0,
+          "nullifier": "7",
+          "message": "da4b5cf4842ab884d8f3072ab8b41d979d7eba6b309ebf4911e376c275548702",
+          "l1RefNumber": "4",
+          "l1RefHash": "cb96065a06fe2b464c465726dc365e60466cd65dfc35837dd58e15a988852174"
+        }
+      ],
+      "receipts": ["e98342c88ec180a988e30818994a5be1a75094125350903279d035e987d38b62"],
+      "owedReceipts": ["e98342c88ec180a988e30818994a5be1a75094125350903279d035e987d38b62"],
+      "complaintScope": ["e98342c88ec180a988e30818994a5be1a75094125350903279d035e987d38b62"]
+    },
+    {
+      "id": "ordinary-window",
+      "description": "An ordinary copy at close counts; one a second after close, and a relayed one stamped before opening, don't",
+      "head": "11",
+      "view": [
+        {
+          "entry": {
+            "path": "ordinary",
+            "value": "1700000120"
+          },
+          "ballotHash": "e98342c88ec180a988e30818994a5be1a75094125350903279d035e987d38b62",
+          "tier": 0,
+          "nullifier": "7",
+          "message": "da4b5cf4842ab884d8f3072ab8b41d979d7eba6b309ebf4911e376c275548702",
+          "l1RefNumber": "4",
+          "l1RefHash": "cb96065a06fe2b464c465726dc365e60466cd65dfc35837dd58e15a988852174"
+        },
+        {
+          "entry": {
+            "path": "ordinary",
+            "value": "1700000121"
+          },
+          "ballotHash": "a5fe252c142b05666173ef30b0eea11a932d9f19d8a64844c8a299a51842ce75",
+          "tier": 0,
+          "nullifier": "7",
+          "message": "0bc4d0eb1f703c32e5789c58157f68c630b15516b0e239a2768abc7ee9c41b00",
+          "l1RefNumber": "6",
+          "l1RefHash": "998736ca5645306941826ba7ac5ce1cf093c54ea82c78b15ce0dfac5f4162027"
+        },
+        {
+          "entry": {
+            "path": "relayed",
+            "value": "1700000035"
+          },
+          "ballotHash": "cbec5b2bf996eba98fae42a3ba8cf7e3cafbd29711ca6f72bc79b4a4d2e8289f",
+          "tier": 0,
+          "nullifier": "8",
+          "message": "843d7b9ac2785b578f9c3dfbb8167dc6013c4f00624220b015f26f5772d3d077",
+          "l1RefNumber": "5",
+          "l1RefHash": "af607dee2296dfdf7cf51545b3fc6d9cc9bdad88e65b1e4146c2d2930aff4af7"
+        },
+        {
+          "entry": {
+            "path": "relayed",
+            "value": "1700000036"
+          },
+          "ballotHash": "aac6dd66aa7e2ae14cc1616ee0ff28804ccaa90ae140a148e49af33e67bf5b03",
+          "tier": 0,
+          "nullifier": "8",
+          "message": "c1b63af1931b104d9859270b9bfaaf11c73659e984b8257c8f001d5e0ba2c2c4",
+          "l1RefNumber": "4",
+          "l1RefHash": "cb96065a06fe2b464c465726dc365e60466cd65dfc35837dd58e15a988852174"
+        }
+      ],
+      "receipts": [
+        "e98342c88ec180a988e30818994a5be1a75094125350903279d035e987d38b62",
+        "a5fe252c142b05666173ef30b0eea11a932d9f19d8a64844c8a299a51842ce75",
+        "cbec5b2bf996eba98fae42a3ba8cf7e3cafbd29711ca6f72bc79b4a4d2e8289f",
+        "aac6dd66aa7e2ae14cc1616ee0ff28804ccaa90ae140a148e49af33e67bf5b03"
+      ],
+      "owedReceipts": [
+        "aac6dd66aa7e2ae14cc1616ee0ff28804ccaa90ae140a148e49af33e67bf5b03",
+        "e98342c88ec180a988e30818994a5be1a75094125350903279d035e987d38b62"
+      ],
+      "complaintScope": [
+        "aac6dd66aa7e2ae14cc1616ee0ff28804ccaa90ae140a148e49af33e67bf5b03",
+        "e98342c88ec180a988e30818994a5be1a75094125350903279d035e987d38b62"
+      ]
+    },
+    {
+      "id": "late-only",
+      "description": "Every copy outside the window: nothing owed, nothing in scope, not even as unadmitted",
+      "head": "11",
+      "view": [
+        {
+          "entry": {
+            "path": "board",
+            "value": "51"
+          },
+          "ballotHash": "e98342c88ec180a988e30818994a5be1a75094125350903279d035e987d38b62",
+          "tier": 0,
+          "nullifier": "7",
+          "message": "da4b5cf4842ab884d8f3072ab8b41d979d7eba6b309ebf4911e376c275548702",
+          "l1RefNumber": "11",
+          "l1RefHash": "c338ee57037eed734a0b470521eba4ff8ee438be9504e1b30804e4e877c2bf07"
+        },
+        {
+          "entry": {
+            "path": "ordinary",
+            "value": "1700000121"
+          },
+          "ballotHash": "a5fe252c142b05666173ef30b0eea11a932d9f19d8a64844c8a299a51842ce75",
+          "tier": 0,
+          "nullifier": "7",
+          "message": "0bc4d0eb1f703c32e5789c58157f68c630b15516b0e239a2768abc7ee9c41b00",
+          "l1RefNumber": "4",
+          "l1RefHash": "cb96065a06fe2b464c465726dc365e60466cd65dfc35837dd58e15a988852174"
+        }
+      ],
+      "receipts": [
+        "e98342c88ec180a988e30818994a5be1a75094125350903279d035e987d38b62",
+        "a5fe252c142b05666173ef30b0eea11a932d9f19d8a64844c8a299a51842ce75"
+      ],
+      "owedReceipts": [],
+      "complaintScope": []
+    },
+    {
+      "id": "intake-copy-newer",
+      "description": "A newer ballot held only from intake, not shown absent, still displaces (the withheld-data residual)",
+      "head": "11",
+      "view": [
+        {
+          "entry": {
+            "path": "board",
+            "value": "40"
+          },
+          "ballotHash": "e98342c88ec180a988e30818994a5be1a75094125350903279d035e987d38b62",
+          "tier": 0,
+          "nullifier": "7",
+          "message": "da4b5cf4842ab884d8f3072ab8b41d979d7eba6b309ebf4911e376c275548702",
+          "l1RefNumber": "4",
+          "l1RefHash": "cb96065a06fe2b464c465726dc365e60466cd65dfc35837dd58e15a988852174"
+        },
+        {
+          "ballotHash": "a5fe252c142b05666173ef30b0eea11a932d9f19d8a64844c8a299a51842ce75",
+          "tier": 0,
+          "nullifier": "7",
+          "message": "0bc4d0eb1f703c32e5789c58157f68c630b15516b0e239a2768abc7ee9c41b00",
+          "l1RefNumber": "6",
+          "l1RefHash": "998736ca5645306941826ba7ac5ce1cf093c54ea82c78b15ce0dfac5f4162027"
+        }
+      ],
+      "receipts": [
+        "e98342c88ec180a988e30818994a5be1a75094125350903279d035e987d38b62",
+        "a5fe252c142b05666173ef30b0eea11a932d9f19d8a64844c8a299a51842ce75"
+      ],
+      "owedReceipts": ["a5fe252c142b05666173ef30b0eea11a932d9f19d8a64844c8a299a51842ce75"],
+      "complaintScope": ["a5fe252c142b05666173ef30b0eea11a932d9f19d8a64844c8a299a51842ce75"]
     },
     {
       "id": "pending",

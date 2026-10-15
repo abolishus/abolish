@@ -42,6 +42,8 @@ interface Vectors {
   readonly l1: {
     readonly l1RefMin: string;
     readonly closesAt: string;
+    readonly opensAt: string;
+    readonly boardSegment: string;
     readonly blocks: readonly { number: string; hash: string; timestamp: string }[];
   };
   readonly obligations: readonly {
@@ -54,6 +56,7 @@ interface Vectors {
       message: string;
       l1RefNumber: string;
       l1RefHash: string;
+      entry?: { path: "ordinary" | "relayed" | "board"; value: string };
     }[];
     readonly receipts: readonly string[];
     readonly owedReceipts?: readonly string[];
@@ -93,7 +96,12 @@ const l1At = (head: bigint): FinalizedL1 => ({
     return b;
   },
 });
-const window = { l1RefMin: BigInt(V.l1.l1RefMin), closesAt: BigInt(V.l1.closesAt) };
+const window = {
+  l1RefMin: BigInt(V.l1.l1RefMin),
+  closesAt: BigInt(V.l1.closesAt),
+  opensAt: BigInt(V.l1.opensAt),
+  boardSegment: BigInt(V.l1.boardSegment),
+};
 
 const windowsOf = (w: Readonly<Record<keyof ForcedPathWindows, string>>): ForcedPathWindows => ({
   contractEventWindow: BigInt(w.contractEventWindow),
@@ -133,7 +141,7 @@ describe("delivery-obligation vectors", () => {
   });
 
   test("owed receipts and complaint scopes are the file's", () => {
-    expect(V.obligations.length).toBeGreaterThanOrEqual(16);
+    expect(V.obligations.length).toBeGreaterThanOrEqual(22);
     for (const c of V.obligations) {
       const view: ViewBallot[] = c.view.map((b) => ({
         ballotHash: hex(b.ballotHash),
@@ -142,6 +150,9 @@ describe("delivery-obligation vectors", () => {
         message: hex(b.message),
         l1RefNumber: BigInt(b.l1RefNumber),
         l1RefHash: hex(b.l1RefHash),
+        ...(b.entry === undefined
+          ? {}
+          : { entry: { path: b.entry.path, value: BigInt(b.entry.value) } }),
       }));
       const l1 = l1At(BigInt(c.head));
       const receipts = c.receipts.map(hex);
@@ -249,6 +260,46 @@ describe("complaintScope", () => {
       }),
       { numRuns },
     );
+  });
+});
+
+describe("the close rule in the view", () => {
+  const closed = l1At(BigInt(V.l1.blocks.length - 1));
+  const at = (n: number) => {
+    const b = blocks.get(BigInt(n));
+    if (b === undefined) throw new Error("no block");
+    return b.hash;
+  };
+  const copy = (id: number, ref: number, entry?: ViewBallot["entry"]): ViewBallot => ({
+    ballotHash: Uint8Array.of(id, ...new Uint8Array(31)),
+    tier: 0,
+    nullifier: 7n,
+    message: Uint8Array.of(0xaa, id, ...new Uint8Array(30)),
+    l1RefNumber: BigInt(ref),
+    l1RefHash: at(ref),
+    ...(entry === undefined ? {} : { entry }),
+  });
+
+  test("a copy carrying its entry needs the close rule's window", () => {
+    const v = [copy(1, 4, { path: "board", value: 1n })];
+    const { l1RefMin, closesAt, opensAt } = window;
+    expect(() => complaintScope(v, closed, { l1RefMin, closesAt })).toThrow(RangeError);
+    expect(() => owedReceipts(v, [], closed, { l1RefMin, closesAt, opensAt })).toThrow(RangeError);
+    // A view of intake copies alone needs only the L1 reference's window.
+    expect(complaintScope([copy(1, 4)], closed, { l1RefMin, closesAt }).map(toHex)).toHaveLength(1);
+  });
+
+  test("a late copy is dropped before selection, at s_A and a second after close", () => {
+    const counted = copy(1, 4, { path: "board", value: window.boardSegment });
+    for (const late of [
+      copy(2, 6, { path: "board", value: window.boardSegment + 1n }),
+      copy(2, 6, { path: "ordinary", value: window.closesAt + 1n }),
+      copy(2, 6, { path: "relayed", value: window.opensAt - 1n }),
+    ])
+      expect(complaintScope([counted, late], closed, window).map((h) => h[0])).toEqual([1]);
+    // The same newer ballot in its window displaces the older one.
+    const timely = copy(2, 6, { path: "ordinary", value: window.closesAt });
+    expect(complaintScope([counted, timely], closed, window).map((h) => h[0])).toEqual([2]);
   });
 });
 
@@ -360,6 +411,17 @@ describe("definitionMembers", () => {
     expect(definitionMembers({ electorate: [{ regions: [1_000n, 20n] }, { regions: [3n] }] })).toBe(
       1_023n,
     );
-    expect(definitionMembers({ electorate: [] })).toBe(0n);
+  });
+
+  test("refuses a rolling or empty electorate, whose members it can't count", () => {
+    const tiers = [{ group_size: 5n }];
+    expect(() => definitionMembers({ electorate: [] })).toThrow(RangeError);
+    expect(() => definitionMembers({ electorate: tiers, electorate_mode: 2 })).toThrow(RangeError);
+    expect(() => definitionMembers({ electorate: tiers, rolling_electorate: [{}] })).toThrow(
+      RangeError,
+    );
+    expect(
+      definitionMembers({ electorate: tiers, electorate_mode: 1, rolling_electorate: [] }),
+    ).toBe(5n);
   });
 });

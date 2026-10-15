@@ -24,6 +24,8 @@ export interface SeatStore {
    * concurrent or not, exactly one writes.
    */
   putOnce(key: string, value: Uint8Array): Promise<PutOnce>;
+  /** The names of the records directly under `prefix`, sorted; none if there are none. */
+  list(prefix: string): Promise<string[]>;
 }
 
 const KEY = /^[a-z0-9-]{1,128}(\/[a-z0-9-]{1,128}){0,7}$/;
@@ -50,6 +52,14 @@ export class MemoryStore implements SeatStore {
     if (held !== undefined) return { created: false, value: Uint8Array.from(held) };
     this.#records.set(key, Uint8Array.from(value));
     return { created: true, value: Uint8Array.from(value) };
+  }
+
+  async list(prefix: string): Promise<string[]> {
+    const under = `${checkedKey(prefix)}/`;
+    return [...this.#records.keys()]
+      .filter((k) => k.startsWith(under) && !k.slice(under.length).includes("/"))
+      .map((k) => k.slice(under.length))
+      .sort();
   }
 }
 
@@ -168,5 +178,20 @@ export class FileStore implements SeatStore {
     const now = await this.get(key);
     if (now === undefined) throw new Error(`store: ${key} vanished after it was written`);
     return { created, value: now };
+  }
+
+  // A crash's temporary files are never records; a name may be linked but
+  // not yet synced, which a reader makes durable before acting on it.
+  async list(prefix: string): Promise<string[]> {
+    try {
+      const entries = await readdir(join(this.#root, checkedKey(prefix)), { withFileTypes: true });
+      return entries
+        .filter((e) => e.isFile() && !e.name.startsWith(".tmp-"))
+        .map((e) => e.name)
+        .sort();
+    } catch (e) {
+      if (isCode(e, "ENOENT")) return [];
+      throw e;
+    }
   }
 }

@@ -31,6 +31,7 @@ import type { RegisteredKeys } from "./ceremony.ts";
 import { PARAMETERS } from "./parameters.ts";
 import { RECORD_TYPES, RecordSchema, recordType } from "./record.ts";
 import { checkL1Reference, type FinalizedL1, selectBallots } from "./revoting.ts";
+import { type BallotPath, ballotWindow } from "./close-statement.ts";
 import {
   checkComplaint,
   checkComplaintV4,
@@ -413,6 +414,24 @@ export interface ViewBallot {
   readonly message: Uint8Array;
   readonly l1RefNumber: bigint;
   readonly l1RefHash: Uint8Array;
+  /**
+   * The entry that carries a copy the node holds from the anchored board or
+   * the contract's records, judged by the close rule (verifier 5.5,
+   * `ballotWindow`): its path, and the L2 block's timestamp, the relay's
+   * stamp or the segment. Absent only for a ballot the node holds from its
+   * own intake and can't show absent, which has no entry the node has seen.
+   */
+  readonly entry?: { readonly path: BallotPath; readonly value: bigint };
+}
+
+/** What the node's view is judged against: the L1 reference's window and the close rule's. */
+export interface ViewWindow {
+  readonly l1RefMin: bigint;
+  readonly closesAt: bigint;
+  /** `opens_at`, for an ordinary or relayed copy's window; needed only when a copy carries its entry. */
+  readonly opensAt?: bigint;
+  /** `s_A = period(closes_at) + 1` (`boardBallotSegment`); needed only when a copy carries its entry. */
+  readonly boardSegment?: bigint;
 }
 
 /**
@@ -439,7 +458,7 @@ export function owedReceipts(
   /** The ballot hash of every receipt the node issued, never reduced by absence. */
   receipts: Iterable<Uint8Array>,
   l1: FinalizedL1,
-  window: { readonly l1RefMin: bigint; readonly closesAt: bigint },
+  window: ViewWindow,
 ): Uint8Array[] {
   const receipted = new Set<string>();
   for (const h of receipts) receipted.add(hex(h));
@@ -461,6 +480,23 @@ export function owedReceipts(
       throw new RangeError("owedReceipts: tier must be 0, 1 or 2");
     if (typeof b.nullifier !== "bigint" || b.nullifier < 0n || b.nullifier >= BN254_R)
       throw new RangeError("owedReceipts: nullifier is not a canonical field<bn254> value");
+    // The close rule (5.5) runs before the L1 check and selection: a copy
+    // whose entry is outside the poll's window never counts or displaces
+    // another, so a ballot boarded late can't take the counted one's place in
+    // the node's selection while the verifier still counts it (T-35, T-54).
+    if (b.entry !== undefined) {
+      const { opensAt, boardSegment } = window;
+      if (opensAt === undefined || boardSegment === undefined)
+        throw new RangeError("owedReceipts: a copy with its entry needs opensAt and boardSegment");
+      if (
+        ballotWindow(b.entry.path, b.entry.value, {
+          opensAt,
+          closesAt: window.closesAt,
+          boardSegment,
+        }) !== "admitted"
+      )
+        continue;
+    }
     const verdict = checkL1Reference(b, l1, window);
     if (verdict === "pending")
       throw new RangeError("owedReceipts: L1 hasn't finalized a block after close");
@@ -522,7 +558,7 @@ export function owedReceipts(
 export function complaintScope(
   view: Iterable<ViewBallot>,
   l1: FinalizedL1,
-  window: { readonly l1RefMin: bigint; readonly closesAt: bigint },
+  window: ViewWindow,
 ): Uint8Array[] {
   const ballots = [...view];
   return owedReceipts(
@@ -660,8 +696,8 @@ export function forcedPathFits(
 export function forcedPathMembersLimit(seats: number, windows: ForcedPathWindows): bigint {
   const fits = (members: bigint) =>
     forcedPathFits([{ members, seats, closesAt: 0n, l1InclusionBound: 0n }], windows);
-  if (!fits(0n)) return -1n;
-  // Doubling, then bisection over [ok, bad).
+  // No members owe nothing, so 0 always fits; then doubling, and bisection
+  // over [ok, bad).
   let ok = 0n;
   let bad = 1n;
   while (fits(bad)) {
@@ -680,18 +716,30 @@ export function forcedPathMembersLimit(seats: number, windows: ForcedPathWindows
  * `M`, a definition's members: the sum over its tiers of `group_size`
  * (version 1) or of the tier's `regions` (versions 3 to 6, whose cells' members
  * sum to the same), the counts [[verifier]] 2.4 recomputes from the group
- * registry. A rolling tier's members over the poll aren't known when it opens,
- * so a definition with one is the caller's to refuse (docs/spec/delivery.md,
- * Capacity).
+ * registry. A rolling tier's members over the poll aren't known when it opens
+ * (docs/spec/delivery.md, Capacity), so it throws for a rolling definition
+ * (`electorate_mode` 2, or any `rolling_electorate`), and for an empty
+ * electorate, which no well-formed definition has and which is a rolling
+ * one's `electorate`: counting it as no members would let a node approve an
+ * election whose obligation it never sized.
  */
 export function definitionMembers(definition: {
   readonly electorate: readonly (
     | { readonly group_size: bigint }
     | { readonly regions: readonly bigint[] }
   )[];
+  readonly electorate_mode?: number;
+  readonly rolling_electorate?: readonly unknown[];
 }): bigint {
+  const { electorate, electorate_mode, rolling_electorate } = definition;
+  if (
+    electorate.length === 0 ||
+    (electorate_mode !== undefined && electorate_mode !== 1) ||
+    (rolling_electorate !== undefined && rolling_electorate.length > 0)
+  )
+    throw new RangeError("definitionMembers: a rolling or empty electorate has no fixed count");
   let members = 0n;
-  for (const tier of definition.electorate)
+  for (const tier of electorate)
     members +=
       "group_size" in tier ? tier.group_size : tier.regions.reduce((sum, n) => sum + n, 0n);
   return members;

@@ -282,8 +282,36 @@ function concat(parts: readonly Uint8Array[]): Uint8Array {
 }
 
 // The entry layout of every version: the segment is the u32 after the record header
-// (3), election_id (32) and index (8).
+// (3), election_id (32) and index (8), and the payload's u32 length follows it.
 const SEGMENT_AT = 3 + 32 + 8;
+const PAYLOAD_AT = SEGMENT_AT + 4 + 4;
+
+/**
+ * Splits a segment object (docs/spec/board.md, Segment objects) into its
+ * encoded entries by their framing alone: each is fixed-width fields, then a
+ * length-prefixed payload, so an object splits in exactly one way. Nothing
+ * is decoded or trusted here, and the result is meant only for
+ * `verifyBoard`, which authenticates every byte against the anchored heads
+ * and roots, then decodes. Throws `DecodeError` on an empty object, a length
+ * over `MAX_BOARD_PAYLOAD` (before anything is read: T-52) or a truncated
+ * last entry, so a fetched object is never partly used (T-24, T-49).
+ */
+export function splitSegmentObject(object: Uint8Array): Uint8Array[] {
+  const bytes = copyBytes(object, "object");
+  // An empty segment has no object, so no checkpoint names one.
+  if (bytes.length === 0) throw new DecodeError("truncated", 0);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.length);
+  const out: Uint8Array[] = [];
+  for (let at = 0; at < bytes.length;) {
+    if (bytes.length - at < PAYLOAD_AT) throw new DecodeError("truncated", at);
+    const n = view.getUint32(at + PAYLOAD_AT - 4);
+    if (n > MAX_BOARD_PAYLOAD) throw new DecodeError("length-over-max", at + PAYLOAD_AT - 4);
+    if (bytes.length - at - PAYLOAD_AT < n) throw new DecodeError("truncated", at + PAYLOAD_AT);
+    out.push(bytes.slice(at, at + PAYLOAD_AT + n));
+    at += PAYLOAD_AT + n;
+  }
+  return out;
+}
 
 /**
  * The checkpoint a board copy gives after each segment in `segments`, from

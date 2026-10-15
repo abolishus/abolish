@@ -104,14 +104,23 @@ export interface Timing {
 }
 
 /**
- * The profile: plurality, every type from 0x0001 to 0x0009 pinned, with
- * board-entry version 4 since tally-opening version 1 needs it
- * ([[verifier]] 2.3).
+ * The versions the profile pins where they aren't 1: board-entry version 5,
+ * which carries the destruction statements tally-opening version 1 needs
+ * ([[verifier]] 2.3) and the close statements, and contract-event version 3,
+ * which archives the board's close-rule events. The election registry
+ * registers no other profile for a version-1 definition ([[contracts]],
+ * Election registry, Registration, rule 9).
  */
+const PINNED: ReadonlyMap<number, number> = new Map([
+  [RECORD_TYPES.boardEntry, 5],
+  [RECORD_TYPES.contractEvent, 3],
+]);
+
+/** The profile: plurality, every type from 0x0001 to 0x0009 pinned, at version 1 but those in `PINNED`. */
 function profile(): ElectionDefinition["profile"] {
   const pins = [];
   for (let t: number = RECORD_TYPES.electionDefinition; t <= RECORD_TYPES.displayText; t++)
-    pins.push({ record_type: t, version: t === RECORD_TYPES.boardEntry ? 4 : 1 });
+    pins.push({ record_type: t, version: PINNED.get(t) ?? 1 });
   return { protocol_major: 1, pins };
 }
 

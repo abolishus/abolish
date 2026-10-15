@@ -118,20 +118,22 @@ export interface SimulatedElection {
   readonly registration: CeremonyRegistrationRecord;
 }
 
-/** The board-entry version the profile pins: 4, which carries the delivery records and destruction statements ballot version 2 and tally-opening version 1 need ([[verifier]] 2.3). */
-export const SIMULATED_BOARD_ENTRY_VERSION = 4;
+/** The board-entry version the profile pins: 5, which carries the delivery records and destruction statements ballot version 2 and tally-opening version 1 need ([[verifier]] 2.3), and the close statements, the only one the election registry admits ([[contracts]], Registration, rule 9). */
+export const SIMULATED_BOARD_ENTRY_VERSION = 5;
 
 /**
  * The versions the profile pins where they aren't 1: the definition's own
  * (4), ballots that name their cell (2) and the openings of their cores (2),
  * the one combination definition version 4 allows (protocol.ts,
- * `profileCombinationRule`; [[verifier]] 2.3).
+ * `profileCombinationRule`; [[verifier]] 2.3), and the board-entry and
+ * contract-event versions the election registry serves (5 and 3).
  */
 const PINNED: ReadonlyMap<number, number> = new Map([
   [RECORD_TYPES.electionDefinition, 4],
   [RECORD_TYPES.ballot, 2],
   [RECORD_TYPES.spoiledBallotOpening, 2],
   [RECORD_TYPES.boardEntry, SIMULATED_BOARD_ENTRY_VERSION],
+  [RECORD_TYPES.contractEvent, 3],
 ]);
 
 /** The profile: every type from 0x0001 to 0x0009 pinned, at version 1 but those in `PINNED`. */

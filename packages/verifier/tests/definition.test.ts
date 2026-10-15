@@ -309,6 +309,11 @@ describe("2.3: the profile's versions fit together", () => {
     [1, 5, 2, true],
     [3, 5, 2, true],
     [4, 5, 2, true],
+    // Version 5 is version 4 with the close statement: it fits wherever 4 does.
+    [5, 1, 1, true],
+    [5, 1, 2, true],
+    [5, 2, 1, false],
+    [5, 5, 2, true],
   ];
   for (const [board, ballot, opening, fits] of table)
     test(`board entry ${board}, ballot ${ballot}, tally opening ${opening}: ${fits ? "fits" : "fails"}`, () => {
@@ -328,9 +333,9 @@ describe("2.3: the profile's versions fit together", () => {
       }
       // The version is one this verifier reads, so the board checks ran.
       expect(row(r, "4.1").code).not.toBe("not-reached");
-      // Only version 4 carries destruction statements (8.5, report-only).
+      // Only versions 4 and 5 carry destruction statements (8.5, report-only).
       expect(row(r, "8.5")).toMatchObject(
-        board === 4
+        board >= 4
           ? { status: "unverifiable", code: "not-implemented" }
           : { status: "unverifiable", code: "not-applicable" },
       );
@@ -338,7 +343,7 @@ describe("2.3: the profile's versions fit together", () => {
     });
 
   test("a version this verifier can't read is unsupported before any combination", () => {
-    for (const board of [2, 5]) {
+    for (const board of [2, 6]) {
       const r = format3(pinning({ [RECORD_TYPES.boardEntry]: board }), closed);
       expect(row(r, "2.3")).toMatchObject({ status: "unverifiable", code: "unsupported-version" });
       notReached(r);

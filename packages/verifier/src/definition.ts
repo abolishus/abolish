@@ -98,7 +98,7 @@ export function readDefinition(record: VerifiedDefinition): {
   }
 }
 
-const READABLE: ReadonlySet<number> = new Set<BoardEntryVersion>([1, 3, 4]);
+const READABLE: ReadonlySet<number> = new Set<BoardEntryVersion>([1, 3, 4, 5]);
 
 /** Whether this verifier reads a board under the pinned board-entry version. */
 export const isReadable = (v: number | undefined): v is BoardEntryVersion =>

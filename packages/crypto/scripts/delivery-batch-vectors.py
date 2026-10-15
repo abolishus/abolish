@@ -616,6 +616,11 @@ def main():
     creject("unordered", "Seat 2's two entries swapped, signed as they stand", complaint_batch_record(definition_hash, 2, [es[1], es[0]], signing_secret(2), sort=False), "non-canonical", 168)
     creject("repeated", "One ballot's complaint twice, signed", complaint_batch_record(definition_hash, 2, [es[0], es[0]], signing_secret(2), sort=False), "non-canonical", 168)
     creject("identity-d", "The first entry's D is the identity", k_two[:72] + bytes(32) + k_two[104:], "non-canonical", 72)
+    # A D that frames as the board frames an element (even, below 2^255 - 19) but isn't a point.
+    not_point = next(v.to_bytes(32, "little") for v in range(2, 1 << 12, 2) if grp.decode(v.to_bytes(32, "little")) is None)
+    np_body = k_two[3:72] + not_point + k_two[104:-64]
+    k_not_point = k_two[:3] + np_body + sr.sign(signing_secret(2), np_body, COMPLAINT_BATCH_TAG)
+    creject("d-not-a-point", "The first entry's D frames but isn't a ristretto255 point, signed: the board accepts it, decoding refuses it", k_not_point, "non-canonical", 72)
     creject("c-ell", "The first entry's c is ℓ", k_two[:104] + L.to_bytes(32, "little") + k_two[136:], "non-canonical", 104)
     creject("z-ell", "The second entry's z is ℓ", k_two[:264] + L.to_bytes(32, "little") + k_two[296:], "non-canonical", 264)
     creject("truncated-entry", "A batch ending inside its second entry's proof", k_two[:40 + 128 + 70], "truncated", 232)
@@ -652,6 +657,14 @@ def main():
     assert r["ballots"][0]["counted"] and r["records"] == [{"at": 2, "pair": 0, "code": "delivery-seat"}], r
     r = election("complaint-batch-stray", "Seat 2's batch for another definition: reported once", ["carol"], carol_posted + by(T0 + 120, K(2, [(bc["hash"], carol_proof)], definition=other_definition)))
     assert r["ballots"][0]["counted"] and r["records"] == [{"at": 3, "code": "delivery-stray"}], r
+    r = election("complaint-batch-d-not-a-point", "Seat 2's batch whose first D isn't a point: a rejected entry, so neither of its complaints counts, and Carol stays counted", ["carol"], carol_posted + by(T0 + 120, k_not_point))
+    assert r["ballots"][0]["counted"] and r["rejected"] == [{"at": 3, "error": "non-canonical"}], r
+    bd = ballots["dave"]
+    dave_unfounded = se.raw_complaint(definition_hash, 2, keys[1], bd["cts"][1], se.nonzero_scalar(complaint_rng))
+    r = election("complaint-batch-unselected-entry", "Seat 2's batch also complains about Dave's ballot, which isn't selected: that entry is set aside, reporting nothing", ["carol"], carol_posted + by(T0 + 120, K(2, [(bc["hash"], carol_proof), (bd["hash"], dave_unfounded)])))
+    assert not r["ballots"][0]["counted"] and r["records"] == [], r
+    r = election("complaint-batch-duplicates", "The same proven complaint in two batches and as a single complaint: Carol is excluded, each listed, and nothing else reported", ["carol"], carol_posted + by(T0 + 120, k_one, K(2, [(bc["hash"], carol_proof), (bd["hash"], dave_unfounded)])) + at(60, carol_complaint))
+    assert not r["ballots"][0]["counted"] and r["records"] == [] and len(r["ballots"][0]["excludedBy"]) == 3, r
     r = election("complaint-batch-contradicts", "Seat 2 receipts Carol's invalid share in a receipt batch, and its complaint batch about the posting is proven: the receipt pair is reported against seat 2", ["carol"], by(T0 + 60, B(1, ["carol"]), batch_record(definition_hash, 2, [(bc["hash"], bc["vote"]["shareHashes"][1])], signing_secret(2)), B(3, ["carol"]), P("carol", 2)) + by(T0 + 120, k_one))
     assert not r["ballots"][0]["counted"] and r["records"] == [{"at": 1, "pair": 0, "code": "receipt-contradicted", "signer": 2}], r
 

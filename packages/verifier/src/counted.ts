@@ -216,8 +216,9 @@ const DELIVERY_TYPES: ReadonlySet<number> = new Set([
   RECORD_TYPES.sharePosting,
   RECORD_TYPES.shareComplaint,
 ]);
-// A share-receipt batch reaches the board only as a contract event: no
-// board-entry version allows it, so 4.1 refuses one boarded directly.
+// Share-receipt and share-complaint batches reach the board only as contract
+// events: no board-entry version allows them, so 4.1 refuses one boarded
+// directly.
 const DELIVERY_EVENTS: ReadonlySet<string> = new Set([
   "ShareReceiptSubmitted",
   "SharePosted",

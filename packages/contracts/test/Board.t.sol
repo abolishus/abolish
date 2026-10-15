@@ -1408,11 +1408,18 @@ contract BoardTest is TestBase {
     }
 
     /// Each complaint-batch decode rejection of delivery-batch.json with its
-    /// code at its offset, but where the file decodes `D` and the board only
-    /// frames it, which agree on every vector here.
+    /// code at its offset, but the `D` that frames and isn't a point, which
+    /// the file's decoding refuses and the board, framing only, accepts.
     function test_ComplaintBatchDecodeRejections() public {
         string memory bj = vm.readFile(BATCHES);
         for (uint256 i; vm.keyExistsJson(bj, _at(".complaintDecode", i, "")); i++) {
+            // A D that frames but isn't a point: the board frames, never
+            // decodes, so it accepts the record the decoder refuses (T-53).
+            if (_eq(_str(bj, _at(".complaintDecode", i, ".id")), "d-not-a-point")) {
+                bytes memory b = _bytes(bj, _at(".complaintDecode", i, ".encoding"));
+                assertEq(_accept(_complaintBatchCall(b)).length, 1, "a framed D is accepted");
+                continue;
+            }
             _refuse(
                 _complaintBatchCall(_bytes(bj, _at(".complaintDecode", i, ".encoding"))),
                 _malformed(

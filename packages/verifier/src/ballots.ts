@@ -47,6 +47,7 @@ import {
   decodeBallot,
   decodeBoardEntry,
   decodeContractEvent,
+  type DeliveryBallot,
   membershipVkHash,
   pinnedVersion,
   questionBallotElection,
@@ -111,13 +112,27 @@ export interface AdmittedCore {
 /**
  * A ballot every admission check that ran admitted (5.1 to 5.5, 5.7 and, for
  * format 5, 5.8), with its entry's path and segment, which selection (6.1)
- * needs to place it in the counted extent.
+ * needs to place it in the counted extent, and what the delivery check (5.9)
+ * and the tally (7.1) read of it once it is selected (counted.ts).
  */
 export interface CountedCandidate {
   readonly entry: number;
   readonly segment: number;
   readonly path: Path["kind"];
   readonly ballot: AdmittedBallot;
+  readonly tally?: BallotTally;
+}
+
+/**
+ * What the tally reads of an admitted ballot: the cell of the partition it
+ * counts in, by its position (docs/spec/tally.md, Context), its VSS
+ * commitments and, for the ballot versions whose delivery this release
+ * checks (1 and 2), what the delivery check recomputes its ballot hash from.
+ */
+export interface BallotTally {
+  readonly cell: number;
+  readonly vss: BallotCore["vss"];
+  readonly delivery?: DeliveryBallot;
 }
 
 /** Every admission code: versions 2 and 3 have `ballot-cell` where version 1 has `ballot-tier`. */
@@ -237,8 +252,12 @@ export function ballotChecks(
   const references =
     blocks !== undefined && windows ? referenceJudge(blocks, d.opens_at, d.closes_at) : undefined;
   const pending: RepeatedBallot[] = [];
-  const passed: { readonly at: number; readonly path: Path; readonly ballot: AdmittedBallot }[] =
-    [];
+  const passed: {
+    readonly at: number;
+    readonly path: Path;
+    readonly ballot: AdmittedBallot;
+    readonly tally: BallotTally;
+  }[] = [];
   const cores: AdmittedCore[] = [];
   const rejected: RejectedBallot[] = [];
   const ordinary: number[] = [];
@@ -334,6 +353,7 @@ export function ballotChecks(
         l1RefNumber: checked.l1RefNumber,
         index: BigInt(at),
       },
+      tally: judged.tally,
     });
   }
   // `message` is M recomputed from the record, so a re-randomised proof
@@ -431,6 +451,7 @@ export function ballotChecks(
           segment: p.path.segment,
           path: p.path.kind,
           ballot: p.ballot,
+          tally: p.tally,
         })),
       }),
     ordinary,
@@ -459,6 +480,8 @@ export type Judge = (payload: Uint8Array) => {
   readonly core: AdmittedCore["core"];
   /** Versions 2 and 3 share `BallotCheckV2`. */
   readonly checked: BallotCheck | BallotCheckV2;
+  /** Read only once the ballot is admitted, whose tier or cell the partition then has. */
+  readonly tally: BallotTally;
 };
 
 export const UNSUPPORTED: BallotOutcome = {
@@ -499,13 +522,23 @@ export function judgeFor(
   )
     return NOT_REACHED;
   if (definition.version === 1) {
-    if (definition.value.electorate.some((g) => g.root === 0n)) return NOT_REACHED;
+    const electorate = definition.value.electorate;
+    if (electorate.some((g) => g.root === 0n)) return NOT_REACHED;
     const election = ballotElection(definition.value, registered);
     return (payload) => {
       const record = decodeBallot(payload, 1);
+      const vss = record.committed_vote.vss;
       return {
-        core: { definitionHash: record.definition_hash, vss: record.committed_vote.vss },
+        core: { definitionHash: record.definition_hash, vss },
         checked: checkBallot(election, record),
+        // Under definition version 1 a cell is its tier's position in
+        // `electorate` (tally.md, Context); `ballot-tier` rejects a tier it
+        // doesn't list, so an admitted ballot's is always found.
+        tally: {
+          cell: electorate.findIndex((g) => g.tier === record.tier),
+          vss,
+          delivery: { tier: record.tier, nullifier: record.nullifier, vote: record.committed_vote },
+        },
       };
     };
   }
@@ -515,18 +548,32 @@ export function judgeFor(
     const election = questionBallotElection(definition.value, registered);
     return (payload) => {
       const record = decodeBallot(payload, 3);
+      const vss = record.committed_vote.vss;
       return {
-        core: { definitionHash: record.definition_hash, vss: record.committed_vote.vss },
+        core: { definitionHash: record.definition_hash, vss },
         checked: checkBallotV3(election, record),
+        // The delivery check reads ballot versions 1 and 2 only (counted.ts).
+        tally: { cell: record.cell, vss },
       };
     };
   }
   const election = cellBallotElection(definition.value, registered);
   return (payload) => {
     const record = decodeBallot(payload, 2);
+    const vss = record.committed_vote.vss;
     return {
-      core: { definitionHash: record.definition_hash, vss: record.committed_vote.vss },
+      core: { definitionHash: record.definition_hash, vss },
       checked: checkBallotV2(election, record),
+      tally: {
+        cell: record.cell,
+        vss,
+        delivery: {
+          ballotVersion: 2,
+          cell: record.cell,
+          nullifier: record.nullifier,
+          vote: record.committed_vote,
+        },
+      },
     };
   };
 }

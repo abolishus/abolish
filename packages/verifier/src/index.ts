@@ -32,6 +32,15 @@ export { type EventCode } from "./events.ts";
 export { type L1RefCode } from "./references.ts";
 export { type SelectedBallot, type SelectionReport } from "./selection.ts";
 export { type OpeningBreak, type OpeningReport } from "./openings.ts";
+export {
+  type CellReport,
+  type CountedAt,
+  type CountedCode,
+  type DeliveryReport,
+  type DestructionReport,
+  type SeatReport,
+} from "./counted.ts";
+export { type TallyBreak, type TallyReport } from "./tallies.ts";
 export { type CeremonyCode, type CeremonyReport } from "./ceremony.ts";
 export { CHECKS, type CheckKind, type CheckSpec } from "./checks.ts";
 export { type CliOutput, EXIT_CODES, runCli } from "./cli.ts";

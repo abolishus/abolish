@@ -16,9 +16,11 @@
 // (`tally-second` when the seat signed another message, `tally-repeat` for a
 // replay of the same one, which is the operator's alone).
 // Whether an opening is over the counted set (`tally-aggregate`) or opens it
-// (`tally-opening`) needs selection (6.1), which needs the close rule (5.5),
-// so an opening that breaks none of the decided rules stays unsettled and 7.4
-// can't pass while one is on the copy.
+// (`tally-opening`) needs the counted set (counted.ts), which needs selection
+// (6.1) and delivery (5.9): until it is known, an opening that breaks none of
+// the decided rules stays unsettled and 7.4 can't pass while one is on the
+// copy. Once it is, the board is sealed and authenticated, so only the
+// anchored extent is read, every opening is settled, and 7.4 passes or fails.
 
 import {
   DecodeError,
@@ -38,6 +40,10 @@ import type { VerifiedDefinition } from "./definition.ts";
 export type TallyBreak =
   | { readonly code: "tally-stray" }
   | { readonly code: "tally-missing" }
+  /** Over another counted set than the verifier's: decided once the counted set is (counted.ts). */
+  | { readonly code: "tally-aggregate" }
+  /** Over the counted set, but not opening `option`'s aggregate commitment. */
+  | { readonly code: "tally-opening"; readonly option: number }
   | { readonly code: "tally-unattributed" }
   /**
    * `of`: the first earlier entry carrying an opening of the same cell
@@ -85,7 +91,7 @@ const equal = (a: Uint8Array, b: Uint8Array) =>
  * non-empty electorate, and under versions 3 to 5 the `cells` rule, which
  * caps the total and gives every tier at least one cell.
  */
-function partitionSize(definition: VerifiedDefinition): number {
+export function partitionSize(definition: VerifiedDefinition): number {
   switch (definition.version) {
     case 1:
       return definition.value.electorate.length;
@@ -100,10 +106,19 @@ function partitionSize(definition: VerifiedDefinition): number {
   }
 }
 
+/** What the counted set decides of the openings (counted.ts), once it is known. */
+export interface CountedOpenings {
+  /** The anchored extent: past it no entry is on the board. */
+  readonly extent: number;
+  /** `tally-aggregate` or `tally-opening`, by entry, for each opening of a cell with `m` entries that breaks one. */
+  readonly breaks: ReadonlyMap<number, TallyBreak>;
+}
+
 /**
  * The row 7.4 and the report's `tallies`. `registered` is the key set the
  * transcript check registered, or `undefined` when 3.2 didn't pass: with no
  * registered key set no opening can be attributed, so nothing is judged.
+ * `counted`, once the counted set is known, settles every opening of a cell.
  */
 export function tallyChecks(
   definition: VerifiedDefinition,
@@ -111,6 +126,7 @@ export function tallyChecks(
   registered: readonly RegisteredKeys[] | undefined,
   entries: readonly Uint8Array[],
   boardEntryVersion: BoardEntryVersion,
+  counted?: CountedOpenings,
 ): { readonly row: TallyOutcome; readonly report?: readonly TallyReport[] } {
   const d = definition.value;
   // A tally-opening version this verifier doesn't read, or none pinned (a
@@ -122,6 +138,9 @@ export function tallyChecks(
   const positions: number[] = [];
   const payloads: Uint8Array[] = [];
   for (const [at, encoded] of entries.entries()) {
+    // Only the sealed board counts once it is known; before that, every
+    // opening on the copy is read, and one past the extent stays unsettled.
+    if (counted !== undefined && at >= counted.extent) break;
     try {
       const e = decodeBoardEntry(encoded, boardEntryVersion);
       // 4.1 reports an entry that doesn't decode or names another election.
@@ -170,6 +189,13 @@ export function tallyChecks(
     }
     const breaks: TallyBreak[] = [];
     if (o.opening.opening.length !== m) breaks.push({ code: "tally-missing" });
+    // Tally.md's Opening checks order: after `tally-missing`, which an
+    // opening of another number of entries breaks instead, and before
+    // `tally-unattributed`.
+    else {
+      const against = counted?.breaks.get(entry);
+      if (against !== undefined) breaks.push(against);
+    }
     if (o.signer === null) breaks.push({ code: "tally-unattributed" });
     else {
       // Any earlier opening of this cell by this seat, whatever its checks
@@ -189,17 +215,20 @@ export function tallyChecks(
     }
     report.push({ entry, cell: o.cell, signer: o.signer, breaks });
   }
-  return { row: rowOf(report), report };
+  return { row: rowOf(report, counted !== undefined), report };
 }
 
 // An opening is settled when it doesn't decode or broke a decided rule; one
 // that broke none may still be over another set or fail to open its cell's
 // aggregate, so it leaves 7.4 unverifiable, which also keeps a settled break
-// from passing the row for the others.
-function rowOf(report: readonly TallyReport[]): TallyOutcome {
-  const settled = (o: TallyReport) => o.code !== undefined || o.breaks.length > 0;
+// from passing the row for the others. Once the counted set is known, one
+// that broke none passes, and the row fails at the first that broke one.
+function rowOf(report: readonly TallyReport[], counted: boolean): TallyOutcome {
+  // With the counted set known, an opening of a cell that breaks nothing
+  // passes every opening check and the boarding rule: settled.
+  const settled = (o: TallyReport) => counted || o.code !== undefined || o.breaks.length > 0;
   if (report.some((o) => !settled(o))) return { status: "unverifiable", code: "not-implemented" };
-  const head = report[0];
+  const head = report.find((o) => o.code !== undefined || o.breaks.length > 0);
   if (head === undefined) return { status: "pass" };
   return {
     status: "fail",

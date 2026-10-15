@@ -458,9 +458,9 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
   // Each tier's result is derived from its cells' counts, never opened
   // (tally.md, Coarser totals): only where every cell of the tier passed.
   const tierReports: TierReport[] = [...new Set(tiers)].map((tier) => {
-    const own = cellReports.filter((c) => c.tier === tier);
-    const counted = own.reduce((n, c) => n + c.counted, 0);
-    const counts = own.map((c) => c.counts);
+    const members = cellReports.filter((c) => c.tier === tier);
+    const counted = members.reduce((n, c) => n + c.counted, 0);
+    const counts = members.map((c) => c.counts);
     return counts.every((x) => x !== undefined)
       ? {
           tier,
@@ -531,14 +531,18 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
   // With `s_T` at its floor a statement is early only if it is early
   // whatever `s_T` is; one the floor finds destroyed is destroyed only at or
   // after the highest the destruction segment can be.
-  const seats: SeatReport[] = lowest.seats.map((s) => {
-    if (s.code === "destruction-missing") return { seat: s.seat, code: s.code };
-    const { at, segment } = statementAt(s.at);
-    if (s.code === "destruction-early") return { seat: s.seat, code: s.code, entry: at };
-    return latest !== undefined && segment >= latest
-      ? { seat: s.seat, code: "destroyed", entry: at }
-      : { seat: s.seat, entry: at };
-  });
+  // Ascending by seat, as the report and the row's first seat are, whatever
+  // order the key set lists them in.
+  const seats: SeatReport[] = [...lowest.seats]
+    .sort((a, b) => a.seat - b.seat)
+    .map((s) => {
+      if (s.code === "destruction-missing") return { seat: s.seat, code: s.code };
+      const { at, segment } = statementAt(s.at);
+      if (s.code === "destruction-early") return { seat: s.seat, code: s.code, entry: at };
+      return latest !== undefined && segment >= latest
+        ? { seat: s.seat, code: "destroyed", entry: at }
+        : { seat: s.seat, entry: at };
+    });
   const destruction: DestructionReport = {
     earliest: lowest.from,
     ...(latest !== undefined && { latest }),

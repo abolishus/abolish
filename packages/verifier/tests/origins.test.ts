@@ -125,6 +125,79 @@ describe("the creation's L1 origin", () => {
   });
 });
 
+describe("the registration against the creation", () => {
+  // Entry 1 is an honest registration; its origin is the data's words 0 to 2,
+  // the creation's words 1 to 3.
+  const registration = decodeBoardEntry(board[1] as Uint8Array, 4);
+  const registered = decodeContractEvent(registration.payload, 2);
+  const setWord = (data: Uint8Array, at: number, value: bigint) => {
+    const out = Uint8Array.from(data);
+    for (let i = 0, x = value; i < 32; i++, x >>= 8n) out[at * 32 + 31 - i] = Number(x & 0xffn);
+    return out;
+  };
+  const entry = (
+    base: ReturnType<typeof decodeBoardEntry>,
+    r: ReturnType<typeof decodeContractEvent>,
+    ours: boolean,
+    originAt: number,
+    origin: { readonly number: bigint; readonly timestamp: bigint },
+    l2Timestamp: bigint,
+  ) => {
+    const data = setWord(setWord(r.data, originAt, origin.number), originAt + 1, origin.timestamp);
+    const topics = r.topics.map((t, i) => (i === 1 && ours ? d.election_id : t));
+    const payload = encodeContractEvent({ ...r, topics, data, l2_timestamp: l2Timestamp }, 2);
+    if (!checkContractEvent(decodeContractEvent(payload, 2), contracts, 2).ok)
+      throw new Error("fixture: a record fails the event check");
+    return encodeBoardEntry({ ...base, election_id: d.election_id, payload }, 4);
+  };
+
+  test("only the election's own creation is compared, never another election's", () => {
+    const copy = [
+      // Another election's creation, with an earlier origin.
+      entry(
+        creation,
+        record,
+        false,
+        1,
+        { number: 18_999_990n, timestamp: ORIGIN - 120n },
+        ORIGIN - 100n,
+      ),
+      entry(creation, record, true, 1, { number: 19_000_000n, timestamp: ORIGIN }, ORIGIN + 10n),
+      // This election's registration, before its creation's origin.
+      entry(
+        registration,
+        registered,
+        true,
+        0,
+        { number: 18_999_995n, timestamp: ORIGIN - 60n },
+        ORIGIN - 50n,
+      ),
+    ];
+    expect(eventChecks(definition, copy, 4, 3)).toEqual({
+      status: "fail",
+      code: "l1-origin-order",
+      at: { entry: 2 },
+    });
+    // At its creation's origin, it is in order.
+    copy[2] = entry(
+      registration,
+      registered,
+      true,
+      0,
+      { number: 19_000_000n, timestamp: ORIGIN },
+      ORIGIN + 20n,
+    );
+    expect(eventChecks(definition, copy, 4, 3)).toEqual({
+      status: "unverifiable",
+      code: "not-implemented",
+    });
+  });
+
+  test("the drift is the release's pin, Base's 30 minutes", () => {
+    expect(PINNED_SEQUENCER_DRIFT).toBe(1800n);
+  });
+});
+
 describe("the three checks, in order", () => {
   const origin = (number: bigint, timestamp: bigint): L1Origin => ({
     number,

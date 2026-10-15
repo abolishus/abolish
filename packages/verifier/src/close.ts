@@ -139,13 +139,6 @@ export function closeChecks(inputs: CloseInputs): {
   const d = inputs.definition.value;
   if (inputs.blocks === undefined)
     return { row: { status: "unverifiable", code: "not-reached", at: {} } };
-  // `closeCheck` places an ordinary ballot by its L2 block, which only 4.4's
-  // replay authenticates, and which this release doesn't read yet.
-  const ordinary = inputs.ballots.find((b) => b.path !== "board");
-  if (ordinary !== undefined)
-    return {
-      row: { status: "unverifiable", code: "not-implemented", at: { entry: ordinary.entry } },
-    };
   const bound = BigInt(d.l1_inclusion_bound);
   const end = d.closes_at + bound;
   // `L_δ` is the last finalized block at or before `closes_at + δ`: the run
@@ -194,6 +187,18 @@ export function closeChecks(inputs: CloseInputs): {
       statementAt.push(at);
     }
   }
+  // `closeCheck` places an ordinary ballot by its L2 block, which only 4.4's
+  // replay authenticates, and which this release doesn't read yet. Its
+  // input is the counted extent's admitted ballots before repeats (close.md,
+  // Close check, step 2); with board-path ballots alone, 5.7's repeats share
+  // their originals' (tier, ν, M) and path, so leaving them out changes no
+  // counted set. A release that judges ordinary ballots must pass them,
+  // since a timely repeat keeps a ballot whose first copy is late.
+  const ordinary = inputs.ballots.find((b) => b.path !== "board");
+  if (ordinary !== undefined)
+    return {
+      row: { status: "unverifiable", code: "not-implemented", at: { entry: ordinary.entry } },
+    };
   const head = closeHead(
     {
       definitionHash: inputs.definitionHash,

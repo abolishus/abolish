@@ -12,6 +12,7 @@ import {
   signCloseStatement,
   decodeContractEvent,
   checkContractEvent,
+  CONTRACT_EVENT_SIGNATURES,
   encodeContractEvent,
   PARAMETERS,
   encodeBoardEntry,
@@ -36,6 +37,7 @@ import {
   aggregateHash,
 } from "@abolishus/crypto";
 import { sha256 } from "@noble/hashes/sha2.js";
+import { keccak_256 } from "@noble/hashes/sha3.js";
 import fc from "fast-check";
 import { describe, expect, test } from "vite-plus/test";
 import {
@@ -677,7 +679,122 @@ describe("7.4 once the counted set is known", () => {
   });
 });
 
+describe("contract-path records, once 4.4 passes", () => {
+  // verifier-events.json's version-4 definition pinning contract-event
+  // version 3, whose board emits receipts and close statements as events.
+  const definition = definitionOf(caseOf(events, "events-v3-records"));
+  const d = definition.value;
+  const bound = BigInt(d.l1_inclusion_bound);
+  const T_D = d.closes_at + bound + BigInt(PARAMETERS.DELIVERY_WINDOW);
+  const T_C = d.closes_at + bound + BigInt(PARAMETERS.CLOSE_WINDOW);
+  const topic0 = (name: string) => {
+    const signature = CONTRACT_EVENT_SIGNATURES[3].board.find((x) => x.startsWith(`${name}(`));
+    if (signature === undefined) throw new Error(`no board event ${name}`);
+    return keccak_256(text(signature));
+  };
+  // `abi.encode(bytes)`, as every board event's data carries its record.
+  const abiBytes = (record: Uint8Array) => {
+    const out = new Uint8Array(64 + Math.ceil(record.length / 32) * 32);
+    out[31] = 0x20;
+    for (let i = 63, n = record.length; n > 0; i--, n = Math.floor(n / 256)) out[i] = n % 256;
+    out.set(record, 64);
+    return out;
+  };
+  const word = (n: number) => Uint8Array.from({ length: 32 }, (_, i) => (i === 31 ? n : 0));
+  /** The board's event `name` carrying `record`, emitted in an L2 block at `t`. */
+  const event = (name: string, topics: readonly Uint8Array[], record: Uint8Array, t: bigint) => {
+    const payload = encodeContractEvent(
+      {
+        contract: d.board,
+        n: 0n,
+        l2_block: 1n,
+        l2_timestamp: t,
+        topics: [topic0(name), ...topics],
+        data: abiBytes(record),
+      },
+      3,
+    );
+    const checked = checkContractEvent(
+      decodeContractEvent(payload, 3),
+      {
+        electionRegistry: d.election_registry,
+        trusteeRegistry: d.trustee_registry,
+        groupRegistry: d.group_registry,
+        board: d.board,
+      },
+      3,
+    );
+    if (!checked.ok || checked.event.event !== name) throw new Error(`fixture: ${name} fails`);
+    return payload;
+  };
+
+  test("a contract-path receipt is in time by its submission time, whatever its segment", () => {
+    const at = (t: bigint) => {
+      const e = election(definition);
+      const a = e.cast({ ballotVersion: 2, cell: 0 }, [1, 0, 0], 111n);
+      for (const seat of [1, 2, 3]) e.board(200, e.receipt(a, seat));
+      const last = e.board(
+        200,
+        event("ShareReceiptSubmitted", [e.hash, a.hash], e.receipt(a, 4), t),
+      );
+      const r = countedChecks(e.inputs([a], { eventsPass: true, destruction: false }));
+      return { r, a, last };
+    };
+    expect(at(T_D).r.delivery).toEqual({ excluded: [], records: [], rejected: [] });
+    const { r, a, last } = at(T_D + 1n);
+    expect(r.delivery).toEqual({
+      excluded: [{ entry: a.entry, missing: [4], complaints: [] }],
+      records: [{ entry: last, code: "delivery-late" }],
+      rejected: [],
+    });
+  });
+
+  test("a contract-path close statement is in time by its submission time, and a late one is its seat's", () => {
+    const blocks = run(21_000_000n, [
+      OPENS - 3612n,
+      d.closes_at + bound,
+      d.closes_at + bound + 12n,
+    ]);
+    const lDelta = blocks[1] as TestHeader;
+    const e = election(definition);
+    const a = e.cast({ ballotVersion: 2, cell: 0 }, [1, 0, 0], 112n);
+    e.deliver([a], 200);
+    const statement = (seat: number, t: bigint) =>
+      e.board(
+        200,
+        event("CloseStatementSubmitted", [e.hash, word(seat)], e.close(seat, lDelta, 700n), t),
+      );
+    for (const seat of [1, 2]) statement(seat, T_C);
+    const late = statement(3, T_C + 1n);
+    const r = countedChecks(
+      e.inputs([a], {
+        eventsPass: true,
+        destruction: false,
+        admitted: e.admitted([a]),
+        blocks: blocks.map((h) => decodeHeader(h.encoded)),
+      }),
+    );
+    expect(r.rows.get("6.3")).toEqual({ status: "pass" });
+    expect(r.close?.statements.at(-1)).toEqual({ entry: late, code: "close-late", seat: 3 });
+    // Two seats counted of a 3-of-4 panel: no head, so the close is unchecked.
+    expect(r.close?.head).toBeNull();
+  });
+});
+
 describe("8.5 between the floors of s_T", () => {
+  test("s_O takes each cell's first passing opening, not a later one", () => {
+    const e = election(v1());
+    e.board(300, e.opening(0, [], 1));
+    e.board(300, e.opening(1, [], 1));
+    // Second passing openings, boarded later, by other seats.
+    e.board(400, e.opening(0, [], 2));
+    e.board(400, e.opening(1, [], 2));
+    const at = e.board(301, e.destruction(1));
+    const r = countedChecks(e.inputs([]));
+    expect(r.destruction).toMatchObject({ earliest: 301, latest: 301 });
+    expect(r.destruction?.seats[0]).toEqual({ seat: 1, code: "destroyed", entry: at });
+  });
+
   // Each cell's first passing opening in segment `opened`: s_O + 1 is the
   // highest the destruction segment can be, and min(s_O + 1, s_T's floor)
   // the lowest.
@@ -901,6 +1018,11 @@ describe("6.3, the close check", () => {
       code: "l1-blocks-short",
       at: {},
     });
+    // A first block at closes_at + δ itself is L_δ.
+    const atEnd = run(21_000_000n, [CLOSES + 3600n, CLOSES + 3612n]).map((h) =>
+      decodeHeader(h.encoded),
+    );
+    expect(check(e, [a, b], { blocks: atEnd }).rows.get("6.3")).toEqual({ status: "pass" });
     // The rest of the counted set doesn't wait on it.
     expect(check(e, [a, b], { blocks: short }).rows.get("7.1")).toEqual({ status: "pass" });
   });
@@ -1006,6 +1128,17 @@ describe("the gates", () => {
       code: "not-implemented",
       at: firstAt,
     });
+  });
+
+  test("under a contract-event version this release doesn't read, nothing is decided (T-36)", () => {
+    const e = election(definitionOf(caseOf(events, "events-v255")));
+    const r = countedChecks(e.inputs([]));
+    for (const id of ["5.9", "6.3", "7.1", "7.2", "7.3", "8.5"])
+      expect(r.rows.get(id)).toEqual({
+        status: "unverifiable",
+        code: "unsupported-version",
+        at: {},
+      });
   });
 
   test("definition version 5's ballots aren't read by the delivery check yet", () => {

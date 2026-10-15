@@ -28,7 +28,9 @@ library CanonicalCalldata {
         assembly ("memory-safe") {
             offsetWord := calldataload(sub(head, 32))
             // The word holding the last data bytes and the padding after them.
-            if mod(len, 32) { lastWord := calldataload(add(add(head, 32), sub(padded, 32))) }
+            if mod(len, 32) {
+                lastWord := calldataload(add(add(head, 32), sub(padded, 32)))
+            }
         }
         if (msg.data.length != head + 32 + padded || offsetWord != head - 4) {
             revert NonCanonicalCalldata();

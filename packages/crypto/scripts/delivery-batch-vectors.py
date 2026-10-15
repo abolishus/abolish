@@ -1,0 +1,484 @@
+#!/usr/bin/env python3
+"""Independent generator for docs/spec/vectors/delivery-batch.json.
+
+A second implementation of docs/spec/delivery.md's share-receipt batch
+(0x0016, version 1): the record, its signed message and its strict decoding,
+and the delivery check reading each pair of a contract-path batch as the
+share receipt it states, beside single receipts, postings and complaints. It
+is written from the spec with Python's integers and hashlib, and shares no
+code with packages/crypto or any @noble library. It reuses
+delivery-vectors.py's records, decoding and windows, and through it
+share-receipt-vectors.py's ballot hash, intake and P-256 ECDSA (checked
+against RFC 6979 Appendix A.2.5 first) and share-encryption-vectors.py's
+ballots, posting check and complaints. The panel and ballots are
+delivery.json's, made from the same labels.
+
+Every secret comes from SHA-256 over a fixed label. The values are test
+data, never keys.
+
+Usage: python3 -I -B packages/crypto/scripts/delivery-batch-vectors.py <out-dir>
+"""
+
+import importlib.util
+import json
+import pathlib
+import sys
+
+HERE = pathlib.Path(__file__)
+
+
+def _load(name, file):
+    spec = importlib.util.spec_from_file_location(name, HERE.with_name(file))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+dv = _load("delivery_vectors", "delivery-vectors.py")
+sr, se, ecdsa, bv, grp = dv.sr, dv.se, dv.ecdsa, dv.bv, dv.grp
+
+L = grp.L
+BATCH = 0x0016
+BATCH_TAG = b"abolish/v1/sig/share-receipt-batch"
+BATCH_MAX = 1024
+POSTING = dv.POSTING
+u8, u32 = bv.u8, bv.u32
+
+# --- The record -------------------------------------------------------------------
+
+
+def batch_statement(definition_hash, seat, pairs):
+    """m = definition_hash ‖ u8(seat) ‖ u32(c) ‖ (ballot_hash ‖ share_hash) × c: 37 + 64·c bytes."""
+    m = definition_hash + u8(seat) + u32(len(pairs)) + b"".join(bh + sh for bh, sh in pairs)
+    assert len(m) == 37 + 64 * len(pairs)
+    return m
+
+
+def batch_record(definition_hash, seat, pairs, d, sort=True):
+    """A batch signed with secret `d`; pairs sorted ascending by ballot hash unless `sort` is False."""
+    if sort:
+        pairs = sorted(pairs)
+    m = batch_statement(definition_hash, seat, pairs)
+    return dv.header(BATCH) + m + sr.sign(d, m, BATCH_TAG)
+
+
+def parse_batch(b):
+    """Strict decoding of a batch under version 1 (docs/spec/delivery.md, Share-receipt batch,
+    Decoding), in field order; returns the fields or (error, offset)."""
+    if len(b) < 2:
+        return "truncated", 0
+    if int.from_bytes(b[:2], "big") != BATCH:
+        return "unexpected-record-type", 0
+    if len(b) < 3:
+        return "truncated", 2
+    if b[2] != 1:
+        return "profile-mismatch", 2
+    if len(b) < 35:
+        return "truncated", 3
+    if len(b) < 36:
+        return "truncated", 35
+    if len(b) < 40:
+        return "truncated", 36
+    c = int.from_bytes(b[36:40], "big")
+    if c > BATCH_MAX:
+        return "length-over-max", 36
+    if c == 0:
+        return "non-canonical", 36
+    pairs = []
+    for j in range(c):
+        o = 40 + 64 * j
+        if len(b) < o + 32:
+            return "truncated", o
+        bh = b[o : o + 32]
+        if pairs and bh <= pairs[-1][0]:
+            return "non-canonical", o
+        if len(b) < o + 64:
+            return "truncated", o + 32
+        pairs.append((bh, b[o + 32 : o + 64]))
+    s = 40 + 64 * c
+    if len(b) < s + 64:
+        return "truncated", s
+    sig = b[s : s + 64]
+    if not dv.sig_canonical(sig):
+        return "non-canonical", s
+    if len(b) > s + 64:
+        return "trailing-bytes", s + 64
+    return {"definitionHash": b[3:35], "seat": b[35], "pairs": pairs, "signature": sig, "statement": b[3:s]}
+
+
+def is_batch(payload):
+    return len(payload) >= 3 and int.from_bytes(payload[:2], "big") == BATCH
+
+
+# --- The delivery check, with batches ------------------------------------------------
+
+
+def check_delivery(definition_hash, registered, seg_d, seg_k, t_d, t_k, ballots, entries):
+    """docs/spec/delivery.md, Delivery check, from the spec's text, with each pair of a
+    contract-path batch read as the receipt it states. Each entry is (path, segment or
+    submission time, payload)."""
+    hashes = [sr.ballot_hash(b["ctx"], bv.enc_committed_vote(b["vote"])) for b in ballots]
+    index = {h: i for i, h in enumerate(hashes)}
+    delivered = [set() for _ in ballots]
+    reports, rejected = [], []
+    receipts, complaints = [], []
+    postings = [dict() for _ in ballots]
+
+    def in_time(path, when, kind):
+        if path == "board":
+            return when <= (seg_k if kind == "complaint" else seg_d)
+        return when <= (t_k if kind == "complaint" else t_d)
+
+    def receipt(at, pair, i, seat, share_hash, signed_ballot, signed_own):
+        """One receipt, single or a batch's pair: `signed_ballot` whether its signature covers the
+        statement rebuilt from ballot i, `signed_own` whether it covers the record's own fields."""
+        extra = {} if pair is None else {"pair": pair}
+        shares = ballots[i]["vote"]["shareHashes"]
+        if not (share_hash == shares[seat - 1] and signed_ballot):
+            reports.append(dict({"at": at}, **extra, code="share-receipt", signer=seat if signed_own else None))
+            return
+        delivered[i].add(seat)
+        receipts.append((at, pair, i, seat))
+
+    for at, (path, when, payload) in enumerate(entries):
+        if is_batch(payload):
+            # No board-entry version allows a batch: through the board path it is a rejected entry.
+            if path != "contract":
+                rejected.append({"at": at, "error": "unexpected-record-type"})
+                continue
+            f = parse_batch(payload)
+            if isinstance(f, tuple):
+                rejected.append({"at": at, "error": f[0]})
+                continue
+            if f["definitionHash"] != definition_hash:
+                reports.append({"at": at, "code": "delivery-stray"})
+                continue
+            seat = f["seat"]
+            key = registered.get(seat)
+            # The one signature, over the batch's own fields: each pair's statement, at once.
+            signed = key is not None and ecdsa.verify(key["signingKey"], bv.ds(BATCH_TAG, f["statement"]), f["signature"])
+            for j, (bh, sh) in enumerate(f["pairs"]):
+                i = index.get(bh)
+                if i is None:
+                    continue
+                if key is None:
+                    reports.append({"at": at, "pair": j, "code": "delivery-seat"})
+                    continue
+                if not in_time(path, when, "receipt"):
+                    reports.append({"at": at, "pair": j, "code": "delivery-late"})
+                    continue
+                # A pair names its ballot by hash, so the statement rebuilt from ballot i is its own.
+                receipt(at, j, i, seat, sh, signed, signed)
+            continue
+        if path != "contract" and len(payload) >= 3 and int.from_bytes(payload[:2], "big") == POSTING:
+            parsed = "unexpected-record-type"
+        else:
+            parsed = dv.parse_record(payload)
+        if isinstance(parsed, str):
+            rejected.append({"at": at, "error": parsed})
+            continue
+        kind, f = parsed
+        if f["definitionHash"] != definition_hash:
+            reports.append({"at": at, "code": "delivery-stray"})
+            continue
+        i = index.get(f["ballotHash"])
+        if i is None:
+            continue
+        seat = f["seat"]
+        key = registered.get(seat)
+        if key is None:
+            reports.append({"at": at, "code": "delivery-seat"})
+            continue
+        if not in_time(path, when, kind):
+            reports.append({"at": at, "code": "delivery-late"})
+            continue
+        b = ballots[i]
+        shares = b["vote"]["shareHashes"]
+        if kind == "receipt":
+            on_ballot = ecdsa.verify(key["signingKey"], bv.ds(dv.RECEIPT_TAG, sr.statement(definition_hash, hashes[i], seat, shares[seat - 1])), f["signature"])
+            own = ecdsa.verify(key["signingKey"], bv.ds(dv.RECEIPT_TAG, sr.statement(definition_hash, f["ballotHash"], seat, f["shareHash"])), f["signature"])
+            receipt(at, None, i, seat, f["shareHash"], on_ballot, own)
+        elif kind == "posting":
+            code, _ = se.check_posting(definition_hash, seat, key["kem"], b["vote"]["vss"], shares, f["ciphertext"], f["m"])
+            if code != "ok":
+                reports.append({"at": at, "code": code})
+                continue
+            delivered[i].add(seat)
+            postings[i][seat] = f
+        else:
+            complaints.append((at, i, f))
+    excluded = [[] for _ in ballots]
+    for at, i, f in complaints:
+        seat = f["seat"]
+        posting = postings[i].get(seat)
+        if posting is None:
+            reports.append({"at": at, "code": "complaint-void"})
+            continue
+        b = ballots[i]
+        key = registered[seat]
+        code = se.check_complaint(definition_hash, seat, key["kem"], b["vote"]["vss"], b["vote"]["shareHashes"], posting["ciphertext"], posting["m"], f["proof"])
+        m = dv.complaint_statement(definition_hash, f["ballotHash"], seat, f["proof"])
+        signer = seat if ecdsa.verify(key["signingKey"], bv.ds(dv.COMPLAINT_TAG, m), f["signature"]) else None
+        if code == "ok":
+            excluded[i].append({"at": at, "seat": seat, "signer": signer})
+        elif code == "complaint-unfounded":
+            reports.append({"at": at, "code": code, "signer": signer})
+        else:
+            reports.append({"at": at, "code": "complaint-proof"})
+    for at, pair, i, seat in receipts:
+        if any(c["seat"] == seat for c in excluded[i]):
+            reports.append(dict({"at": at}, **({} if pair is None else {"pair": pair}), code="receipt-contradicted", signer=seat))
+    reports.sort(key=lambda r: (r["at"], r.get("pair", -1)))
+    out = []
+    for i, h in enumerate(hashes):
+        missing = sorted(s for s in registered if s not in delivered[i])
+        ex = sorted(excluded[i], key=lambda c: c["at"])
+        out.append({"ballotHash": h.hex(), "counted": not missing and not ex, "delivered": not missing, "missing": missing, "excludedBy": ex})
+    return {"ballots": out, "records": reports, "rejected": rejected}
+
+
+# --- Vectors ----------------------------------------------------------------------
+
+
+def main():
+    grp.self_check()
+    ecdsa.self_check()
+    se.aead_self_check()
+    se.mlkem_self_check(100)
+    out = sys.argv[1]
+
+    # delivery.json's panel, definition and ballots, from the same labels.
+    keys = se.trustee_keys("panel-3", 3)
+    base = bv.context("delivery", 3, 0, 1, 2, 3)
+    definition_hash = base["definitionHash"]
+    other_definition = bv.H(b"another election")
+
+    def signing_secret(seat):
+        return ecdsa.secret(f"delivery/panel-3/signing/{seat}".encode())
+
+    def identity_secret(seat):
+        return ecdsa.secret(f"delivery/panel-3/identity/{seat}".encode())
+
+    panel = [
+        {
+            "seat": s,
+            "kemKey": se.enc_kem_key(keys[s - 1]).hex(),
+            "signingSecret": f"{signing_secret(s):064x}",
+            "signingKey": sr.p256_key(signing_secret(s)).hex(),
+            "identityKey": sr.p256_key(identity_secret(s)).hex(),
+        }
+        for s in (1, 2, 3)
+    ]
+
+    def registered(seats=(1, 2, 3)):
+        return {s: {"kem": keys[s - 1], "signingKey": sr.p256_key(signing_secret(s))} for s in seats}
+
+    def bad_share(ctx):
+        def cheat(seat, sb, key, vss, m, e, w):
+            if seat == 2:
+                v = (int.from_bytes(sb[4:36], "little") + 1) % L
+                sb = sb[:4] + bv.scalar(v) + sb[36:]
+            return se.encrypt(ctx["definitionHash"], seat, key, vss, sb, m, e, w)
+
+        return cheat
+
+    ballots = {}
+    for name, votes, dishonest in (("alice", [0, 1, 0], False), ("bob", [1, 0, 0], False), ("carol", [0, 0, 1], True), ("dave", [0, 1, 0], False)):
+        ctx = dict(base, nullifier=int.from_bytes(bv.H(f"delivery/nullifier/{name}".encode()), "big") % bv.R)
+        b = se.make_encrypted_ballot("delivery/" + name, ctx, votes, keys, bad_share(ctx) if dishonest else None)
+        b["name"] = name
+        b["hash"] = sr.ballot_hash(ctx, bv.enc_committed_vote(b["vote"]))
+        ballots[name] = b
+
+    def ballot_json(b):
+        return {"id": b["name"], "tier": b["ctx"]["tier"], "nullifier": str(b["ctx"]["nullifier"]), "committedVote": bv.enc_committed_vote(b["vote"]).hex(), "ballotHash": b["hash"].hex()}
+
+    def receipted(name, seat):
+        """Seat `seat`'s intake of the ballot: its (ballot_hash, share_hash) pair and its single receipt."""
+        b = ballots[name]
+        result, r = sr.intake(b["ctx"], seat, keys[seat - 1], signing_secret(seat), b["vote"], b["cts"][seat - 1])
+        assert result == "ok", (name, seat, result)
+        return (r["ballotHash"], r["shareHash"]), dv.receipt_record(definition_hash, r["ballotHash"], seat, r["shareHash"], r["receipt"])
+
+    def pair(name, seat):
+        return receipted(name, seat)[0]
+
+    def R(name, seat):
+        return receipted(name, seat)[1]
+
+    def B(seat, names, secret=None, definition=None):
+        return batch_record(definition or definition_hash, seat, [pair(n, seat) for n in names], secret or signing_secret(seat))
+
+    def P(name, seat):
+        b = ballots[name]
+        return dv.posting_record(definition_hash, b["hash"], seat, bytes.fromhex(b["encRand"][seat - 1]["m"]), b["cts"][seat - 1])
+
+    complaint_rng = bv.Rng("delivery-batch/complaint")
+    bc = ballots["carol"]
+    carol_proof = se.prove_complaint(definition_hash, 2, keys[1], bc["vote"]["vss"], bc["vote"]["shareHashes"], bc["cts"][1], bytes.fromhex(bc["encRand"][1]["m"]), se.nonzero_scalar(complaint_rng))
+    carol_complaint = dv.complaint_record(definition_hash, bc["hash"], 2, carol_proof, signing_secret(2))[0]
+
+    # --- Records re-made byte for byte ---
+    records = []
+
+    def record(id_, desc, enc, listed=True):
+        """A batch, with its pairs and signed statement listed unless it is too long to repeat."""
+        f = parse_batch(enc)
+        assert isinstance(f, dict), (id_, f)
+        r = {"id": id_, "description": desc, "encoding": enc.hex(), "seat": f["seat"], "count": len(f["pairs"])}
+        if listed:
+            r["pairs"] = [{"ballotHash": bh.hex(), "shareHash": sh.hex()} for bh, sh in f["pairs"]]
+            r["statement"] = f["statement"].hex()
+        records.append(r)
+
+    one = B(1, ["alice"])
+    record("one-pair", "Seat 1's batch of its one receipt for Alice's ballot: 168 bytes", one)
+    three = B(1, ["alice", "bob", "carol"])
+    record("three-pairs", "Seat 1's batch of its receipts for Alice's, Bob's and Carol's ballots, ascending by ballot hash", three)
+    # The most pairs a batch carries: made-up pairs, never receipted, ascending by construction.
+    full_pairs = [(bv.H(f"delivery-batch/full/{j}".encode()), bv.H(f"delivery-batch/full/share/{j}".encode())) for j in range(BATCH_MAX)]
+    full = batch_record(definition_hash, 2, full_pairs, signing_secret(2))
+    assert len(full) == 104 + 64 * BATCH_MAX == 65_640
+    record("max-pairs", "Seat 2's batch of RECEIPT_BATCH_MAX made-up pairs: 65,640 bytes; pair j is H(\"delivery-batch/full/j\") and H(\"delivery-batch/full/share/j\")", full, listed=False)
+
+    # --- Decode rejections ---
+    decode = []
+
+    def reject(id_, desc, enc, error, offset):
+        got = parse_batch(enc)
+        assert got == (error, offset), (id_, got)
+        decode.append({"id": id_, "description": desc, "encoding": enc.hex(), "error": error, "offset": offset})
+
+    sig_at = len(three) - 64
+    reject("truncated-header", "The type alone: a record ending before its version", three[:2], "truncated", 2)
+    reject("another-type", "A share receipt's bytes read as a batch", R("alice", 1), "unexpected-record-type", 0)
+    reject("version-2", "A batch labelled version 2: ballot versions 1 to 3 fix version 1", three[:2] + b"\x02" + three[3:], "profile-mismatch", 2)
+    reject("truncated-definition", "A batch ending inside its definition hash", three[:20], "truncated", 3)
+    reject("truncated-seat", "A batch ending after its definition hash", three[:35], "truncated", 35)
+    reject("truncated-count", "A batch ending inside its count", three[:38], "truncated", 36)
+    empty = dv.header(BATCH) + batch_statement(definition_hash, 1, [])
+    empty += sr.sign(signing_secret(1), empty[3:], BATCH_TAG)
+    reject("empty", "A signed batch of no pairs", empty, "non-canonical", 36)
+    over = three[:36] + u32(BATCH_MAX + 1) + three[40:]
+    reject("over-max", "A count of RECEIPT_BATCH_MAX + 1, refused before any pair is read", over, "length-over-max", 36)
+    ps = sorted([pair("alice", 1), pair("bob", 1), pair("carol", 1)])
+    unordered = batch_record(definition_hash, 1, [ps[1], ps[0], ps[2]], signing_secret(1), sort=False)
+    reject("unordered", "Seat 1's three pairs with the first two swapped, signed as they stand", unordered, "non-canonical", 104)
+    repeated = batch_record(definition_hash, 1, [ps[0], ps[0]], signing_secret(1), sort=False)
+    reject("repeated", "The same pair twice, signed: equal ballot hashes aren't ascending", repeated, "non-canonical", 104)
+    reject("truncated-pair", "A batch whose count says three pairs, ending inside the third's ballot hash", three[: 40 + 64 * 2 + 10], "truncated", 168)
+    reject("truncated-share-hash", "A batch ending inside its second pair's share hash", three[: 40 + 64 + 40], "truncated", 136)
+    reject("truncated-signature", "A batch one byte short", three[:-1], "truncated", sig_at)
+    r_, s_ = int.from_bytes(three[-64:-32], "big"), int.from_bytes(three[-32:], "big")
+    reject("high-s", "The signature with s replaced by n − s", three[:-64] + ecdsa.sig_bytes(r_, ecdsa.N - s_), "non-canonical", sig_at)
+    reject("zero-r", "The signature with r of 0", three[:-64] + ecdsa.sig_bytes(0, s_), "non-canonical", sig_at)
+    reject("trailing", "A batch with a trailing byte", three + b"\x00", "trailing-bytes", len(three))
+
+    # --- Elections ---
+    elections = []
+    SD, SK = 40, 112
+    TD, TK = dv.deadlines(1_700_000_000, 0)
+    T0 = TD - dv.DELIVERY_WINDOW
+
+    def election(id_, desc, names, entries, seats=(1, 2, 3)):
+        sel = [ballots[n] for n in names]
+        result = check_delivery(definition_hash, registered(seats), SD, SK, TD, TK, sel, entries)
+        elections.append(
+            {
+                "id": id_,
+                "description": desc,
+                "registered": list(seats),
+                "segments": {"delivery": str(SD), "complaint": str(SK)},
+                "deadlines": {"delivery": str(TD), "complaint": str(TK)},
+                "ballots": [ballot_json(b) for b in sel],
+                "entries": [{"path": "board", "segment": w, "payload": p.hex()} if path == "board" else {"path": "contract", "submittedAt": str(w), "payload": p.hex()} for path, w, p in entries],
+                "result": result,
+            }
+        )
+        return result
+
+    def at(seg, *payloads):
+        return [("board", seg, p) for p in payloads]
+
+    def by(t, *payloads):
+        return [("contract", t, p) for p in payloads]
+
+    abd = ["alice", "bob", "dave"]
+    honest = ["alice", "bob"]
+    r = election("batches-deliver", "Each seat sends one batch for Alice's and Bob's ballots through the contract path: both are delivered", honest, by(T0 + 60, B(1, honest), B(2, honest), B(3, honest)))
+    assert all(b["counted"] for b in r["ballots"]) and r["records"] == []
+    r = election("batch-at-deadline", "Seat 3's batch is submitted at the delivery deadline itself", honest, by(T0 + 60, B(1, honest), B(2, honest)) + by(TD, B(3, honest)))
+    assert all(b["counted"] for b in r["ballots"])
+    r = election("late-batch", "Seat 3's batch is submitted one second after the delivery deadline: each of its pairs is late", honest, by(T0 + 60, B(1, honest), B(2, honest)) + by(TD + 1, B(3, honest)))
+    assert [b["missing"] for b in r["ballots"]] == [[3], [3]] and [x["code"] for x in r["records"]] == ["delivery-late"] * 2
+    r = election("mixed", "Seat 1 receipts through the board path, seat 2 by batch, seat 3 by a single contract-path receipt for Alice and a batch for Bob", honest, at(3, R("alice", 1), R("bob", 1)) + by(T0 + 60, B(2, honest), R("alice", 3), B(3, ["bob"])))
+    assert all(b["counted"] for b in r["ballots"])
+    r = election("board-path-batch", "Seat 3's batch reaches the board through the board path: a rejected entry, which delivers nothing", honest, by(T0 + 60, B(1, honest), B(2, honest)) + at(3, B(3, honest)))
+    assert [b["missing"] for b in r["ballots"]] == [[3], [3]] and r["rejected"] == [{"at": 2, "error": "unexpected-record-type"}]
+    r = election("stray-batch", "Seat 3's batch names another definition: reported once, and delivers nothing", ["alice"], by(T0 + 60, B(1, ["alice"]), B(2, ["alice"]), B(3, ["alice"], definition=other_definition)))
+    assert r["ballots"][0]["missing"] == [3] and r["records"] == [{"at": 2, "code": "delivery-stray"}]
+    r = election("unqualified-batch", "Seat 3 isn't qualified: its batch is delivery-seat for each pair naming a selected ballot", honest, by(T0 + 60, B(1, honest), B(2, honest), B(3, honest)), seats=(1, 2))
+    assert all(b["counted"] for b in r["ballots"]) and [x["code"] for x in r["records"]] == ["delivery-seat"] * 2
+    r = election("wrong-key", "Seat 3's batch signed with seat 2's key: share-receipt for each pair, attributed to no one", honest, by(T0 + 60, B(1, honest), B(2, honest), B(3, honest, secret=signing_secret(2))))
+    assert [b["missing"] for b in r["ballots"]] == [[3], [3]] and [(x["code"], x["signer"]) for x in r["records"]] == [("share-receipt", None)] * 2
+    r = election("identity-key", "Seat 3's batch signed with its identity key: never its per-election key, so attributed to no one", honest, by(T0 + 60, B(1, honest), B(2, honest), B(3, honest, secret=identity_secret(3))))
+    assert [(x["code"], x["signer"]) for x in r["records"]] == [("share-receipt", None)] * 2
+    ba, bb = ballots["alice"], ballots["bob"]
+    wrong_share = batch_record(definition_hash, 3, [pair("alice", 3), (bb["hash"], bb["vote"]["shareHashes"][0])], signing_secret(3))
+    r = election("wrong-share-hash", "Seat 3's signed batch pairs Bob's ballot with seat 1's share hash: that pair is share-receipt, attributed to seat 3, and Alice's pair delivers", honest, by(T0 + 60, B(1, honest), B(2, honest), wrong_share))
+    assert r["ballots"][0]["counted"] and r["ballots"][1]["missing"] == [3] and [(x["code"], x["signer"]) for x in r["records"]] == [("share-receipt", 3)]
+    unselected = B(3, ["alice", "dave"])
+    r = election("unselected-pair", "Seat 3's batch also carries a pair for Dave's ballot, which isn't selected: set aside, reporting nothing", ["alice"], by(T0 + 60, B(1, ["alice"]), B(2, ["alice"]), unselected))
+    assert r["ballots"][0]["counted"] and r["records"] == []
+    r = election("duplicates", "Seat 3's pair for Alice in two batches and a single receipt: delivered once, nothing reported", ["alice"], by(T0 + 60, B(1, ["alice"]), B(2, ["alice"]), B(3, ["alice"]), B(3, ["alice", "bob"]), R("alice", 3)))
+    assert r["ballots"][0]["counted"] and r["records"] == []
+    bad_batch = B(3, honest)
+    bad_batch = bad_batch[:-1]
+    r = election("malformed-batch", "Seat 3's batch one byte short is a rejected entry", honest, by(T0 + 60, B(1, honest), B(2, honest), bad_batch))
+    assert r["rejected"] == [{"at": 2, "error": "truncated"}]
+    false_pairs = [pair("alice", 2), (bc["hash"], bc["vote"]["shareHashes"][1])]
+    false_batch = batch_record(definition_hash, 2, false_pairs, signing_secret(2))
+    r = election(
+        "contradicted-pair",
+        "Seat 2's batch receipts Carol's invalid share beside Alice's, and its complaint about Carol's posting is proven: Carol is excluded and the pair is reported against seat 2",
+        ["alice", "carol"],
+        by(T0 + 60, B(1, ["alice", "carol"]), false_batch, B(3, ["alice", "carol"]), P("carol", 2)) + at(60, carol_complaint),
+    )
+    assert r["ballots"][0]["counted"] and not r["ballots"][1]["counted"]
+    contradicted = [x for x in r["records"] if x["code"] == "receipt-contradicted"]
+    assert len(contradicted) == 1 and contradicted[0]["signer"] == 2 and contradicted[0]["at"] == 1
+    # Reordering the records changes no verdict (R3).
+    mixed = by(T0 + 60, B(3, abd), R("alice", 2)) + at(5, R("bob", 2), R("dave", 2)) + by(T0 + 90, B(1, abd))
+    first = election("three-ballots", "Batches and single receipts deliver all three ballots", abd, mixed)
+    assert all(b["counted"] for b in first["ballots"])
+    rev = list(reversed(mixed))
+    second = election("three-ballots-reordered", "The same records in reverse order: the same verdicts", abd, rev)
+    assert first["ballots"] == second["ballots"]
+
+    data = {
+        "format": "abolish-delivery-batch-vectors/1",
+        "title": "Share-receipt batches: the record, its decoding and the delivery check reading its pairs",
+        "spec": "docs/spec/delivery.md",
+        "generator": (
+            "Printed by packages/crypto/scripts/delivery-batch-vectors.py, an implementation of "
+            "docs/spec/delivery.md in Python's integers and hashlib, sharing no code with "
+            "packages/crypto or any @noble library. It reuses delivery-vectors.py's records, decoding and "
+            "windows, and through it share-receipt-vectors.py's ballot hash, intake and P-256 ECDSA "
+            "(checked against RFC 6979 Appendix A.2.5 first) and share-encryption-vectors.py's ballots, "
+            "posting check and complaints. Secrets are SHA-256 of fixed labels: test data only."
+        ),
+        "tag": BATCH_TAG.decode(),
+        "maxPairs": BATCH_MAX,
+        "definitionHash": definition_hash.hex(),
+        "panel": panel,
+        "records": records,
+        "decode": decode,
+        "elections": elections,
+    }
+    with open(f"{out}/delivery-batch.json", "w") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+
+
+if __name__ == "__main__":
+    main()

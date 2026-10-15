@@ -1,4 +1,4 @@
-// The contract-event record, record type 0x0008 versions 1 to 3
+// The contract-event record, record type 0x0008 versions 1 to 4
 // (docs/spec/contracts.md, Contract-event record): one log of one of our L2
 // contracts exactly as the event accumulator hashes it, and the event check
 // that ties it to the contract a definition names and to the event tables of
@@ -6,7 +6,8 @@
 // their tables: version 2 adds the board's events and reads the registries'
 // events as the deployable registries emit them, and version 3 adds the
 // board's relayed-ballot and close-statement events (the close rule, T-50,
-// T-35). The accumulator's storage proofs are the only
+// T-35), and version 4 the board's share-receipt batch event (T-25, P1-12d).
+// The accumulator's storage proofs are the only
 // evidence archived with it: no transaction, receipt or header, so the
 // archive holds no bytes our contracts didn't define (T-17;
 // docs/adr/0025-contract-event-evidence.md). The event check refuses any log
@@ -36,6 +37,7 @@ import {
   type GroupRemoval,
 } from "./group-registry.ts";
 import { decodeCloseStatement } from "./close-statement.ts";
+import { decodeShareReceiptBatch, RECEIPT_BATCH_MAX } from "./delivery.ts";
 import { frameBallot, frameDelivery } from "./direct-submit.ts";
 import {
   type AnyElectionDefinitionRecord,
@@ -67,13 +69,14 @@ const contractEventV1 = struct([
 ] as const);
 
 /**
- * Record type 0x0008, versions 1 to 3 (docs/spec/contracts.md,
+ * Record type 0x0008, versions 1 to 4 (docs/spec/contracts.md,
  * Contract-event record): one layout, with each version's own event tables.
  */
 export const CONTRACT_EVENT = recordType(RECORD_TYPES.contractEvent, {
   1: contractEventV1,
   2: contractEventV1,
   3: contractEventV1,
+  4: contractEventV1,
 });
 
 const SCHEMA = new RecordSchema([CONTRACT_EVENT]);
@@ -81,7 +84,7 @@ const SCHEMA = new RecordSchema([CONTRACT_EVENT]);
 export type ContractEventRecord = CodecValue<typeof contractEventV1>;
 
 /** The record's versions; the profile pins one for every contract's events. */
-export type ContractEventVersion = 1 | 2 | 3;
+export type ContractEventVersion = 1 | 2 | 3 | 4;
 
 export function encodeContractEvent(
   record: ContractEventRecord,
@@ -220,6 +223,13 @@ export type ContractEvent =
       readonly definitionHash: Uint8Array;
       readonly signer: number;
       /** The close statement, which decodes strictly as version 1. */
+      readonly record: Uint8Array;
+    }
+  | {
+      readonly event: "ShareReceiptBatchSubmitted";
+      readonly definitionHash: Uint8Array;
+      readonly seat: number;
+      /** The share-receipt batch, which decodes strictly as version 1. */
       readonly record: Uint8Array;
     };
 
@@ -637,6 +647,39 @@ const CLOSE_STATEMENT_SUBMITTED: EventSpec = {
   },
 };
 
+// A share-receipt batch through the contract path (Board, Delivery records):
+// the record whole, which decodes strictly as version 1, the version
+// contract-event version 4 fixes, with its `definition_hash` and `seat` as
+// the topics. Its signature and pairs are the delivery check's.
+const BATCH_LENGTH_MAX = 104 + 64 * RECEIPT_BATCH_MAX;
+
+const SHARE_RECEIPT_BATCH_SUBMITTED: EventSpec = {
+  signature: "ShareReceiptBatchSubmitted(bytes32,uint8,bytes)",
+  decode(topics, data) {
+    const [, definitionHash, seatWord] = topics;
+    const seat = seatWord && uintWord(seatWord, 8);
+    if (topics.length !== 3 || definitionHash === undefined || seat === undefined)
+      return "event-topics";
+    const record = readAbi(data, 1, [{ at: 0, words: false, max: BATCH_LENGTH_MAX }])?.tails[0];
+    if (record === undefined) return "event-data";
+    let batch;
+    try {
+      batch = decodeShareReceiptBatch(record, 1);
+    } catch (e) {
+      if (e instanceof DecodeError) return "event-data";
+      throw e;
+    }
+    if (!equalBytes(batch.definition_hash, definitionHash) || BigInt(batch.seat) !== seat)
+      return "event-data";
+    return {
+      event: "ShareReceiptBatchSubmitted",
+      definitionHash: definitionHash.slice(),
+      seat: batch.seat,
+      record,
+    };
+  },
+};
+
 const BOARD_EVENTS: readonly EventSpec[] = [
   boardEvent("BallotSubmitted", frameBallot),
   boardEvent("ShareReceiptSubmitted", (r) => frameDelivery(RECORD_TYPES.shareReceipt, r)),
@@ -676,10 +719,22 @@ const TABLES: Readonly<
     "group-registry": GROUP_EVENTS,
     board: [...BOARD_EVENTS, RELAYED_BALLOT_SUBMITTED, CLOSE_STATEMENT_SUBMITTED],
   },
+  // Version 3's rows, with the share-receipt batch's event added.
+  4: {
+    "election-registry": [ELECTION_CREATED, DEFINITION_REGISTERED_V2],
+    "trustee-registry": [PANEL_PINNED, CEREMONY_REGISTERED_V2],
+    "group-registry": GROUP_EVENTS,
+    board: [
+      ...BOARD_EVENTS,
+      RELAYED_BALLOT_SUBMITTED,
+      CLOSE_STATEMENT_SUBMITTED,
+      SHARE_RECEIPT_BATCH_SUBMITTED,
+    ],
+  },
 };
 
 const ROLES = ["election-registry", "trustee-registry", "group-registry", "board"] as const;
-const VERSIONS = [1, 2, 3] as const;
+const VERSIONS = [1, 2, 3, 4] as const;
 
 const hexOf = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
 
@@ -709,6 +764,7 @@ export const CONTRACT_EVENT_SIGNATURES: Readonly<
   1: signaturesOf(1),
   2: signaturesOf(2),
   3: signaturesOf(3),
+  4: signaturesOf(4),
 });
 
 function signaturesOf(v: ContractEventVersion): Readonly<Record<ContractRole, readonly string[]>> {

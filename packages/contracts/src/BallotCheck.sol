@@ -82,7 +82,7 @@ library BallotCheckLib {
     /// library is written: every type from 0x0001 to it other than 0x0002 is
     /// `unexpected-record-type`, anything else `unknown-record-type`. A
     /// deployed board can't learn of later types.
-    uint16 internal constant LAST_KNOWN_TYPE = 0x0015;
+    uint16 internal constant LAST_KNOWN_TYPE = 0x0016;
     /// The fixed offsets of docs/spec/ballot-validity.md, Ballot record,
     /// shared by versions 1 to 3.
     uint256 internal constant DEFINITION_AT = 3;

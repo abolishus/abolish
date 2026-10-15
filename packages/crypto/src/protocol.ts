@@ -317,10 +317,11 @@ export const SPOILED_OPENING_VERSIONS: ReadonlySet<number> = new Set<number>([1,
 export const BALLOT_VERSIONS: ReadonlySet<number> = new Set<number>([1, 2, 3, 4]);
 // The contract-event versions this package reads (contract-event.ts's
 // CONTRACT_EVENT), written out for the same reason; a test ties the two.
-// Only version 3's tables name the close rule's board events, so 2.3 fails a
-// profile pinning version 1 or 2 ([[close]], Version; T-35, T-50).
-export const CONTRACT_EVENT_VERSIONS: ReadonlySet<number> = new Set<number>([1, 2, 3]);
-const CLOSE_EVENT_VERSION = 3;
+// Only version 4's tables name every board event, the close rule's and the
+// share-receipt batch's, so 2.3 fails a profile pinning version 1, 2 or 3
+// ([[close]], Version; T-35, T-50, T-25).
+export const CONTRACT_EVENT_VERSIONS: ReadonlySet<number> = new Set<number>([1, 2, 3, 4]);
+const BOARD_EVENT_VERSION = 4;
 
 /** Why 2.3's profile combination refuses a definition's pins. */
 export type ProfileCombinationRule = "profile-combination" | "unsupported-version";
@@ -341,10 +342,11 @@ export type ProfileCombinationRule = "profile-combination" | "unsupported-versio
  * destruction statements (4 or 5, docs/spec/tally.md, Destruction), so an
  * election's creator can't leave delivery, challenge or destruction off the
  * board (T-34, T-42). Every profile also needs a board-entry version that
- * carries close statements (5) and contract-event version 3, which archives
- * the close rule's board events, so a seat can always state the close and
- * the verifier read it ([[close]], Version; T-35, T-50): board-entry version
- * 1, 3 or 4 and contract-event version 1 or 2 fail, and a contract-event
+ * carries close statements (5) and contract-event version 4, which archives
+ * the close rule's board events and the share-receipt batch's, so a seat can
+ * always state the close and force its receipts, and the verifier read both
+ * ([[close]], Version; T-35, T-50, T-25): board-entry version 1, 3 or 4 and
+ * contract-event version 1, 2 or 3 fail, and a contract-event
  * version this package doesn't read is `unsupported-version` when the
  * profile fails on no other ground. A board-entry version this package doesn't read is
  * `unsupported-version`, never a failure: a later version may add itself to
@@ -401,8 +403,8 @@ export function profileCombinationRule(
     allowed.includes(RECORD_TYPES.shareReceipt) && allowed.includes(RECORD_TYPES.shareComplaint);
   const carriesDestruction = allowed.includes(RECORD_TYPES.destructionStatement);
   // Every profile needs the close statement on the board (board-entry
-  // version 5) and the close rule's board events archived (contract-event
-  // version 3), whatever its definition version, or its seats have no way
+  // version 5) and every board event archived (contract-event version 4),
+  // whatever its definition version, or its seats have no way
   // to state the close and 5.5 and 6.3 can't be checked ([[close]],
   // Version; T-35, T-50). A contract-event version this package doesn't
   // read is judged last, below, as a later release's.
@@ -414,7 +416,7 @@ export function profileCombinationRule(
     (!DELIVERED_BALLOT_VERSIONS.has(ballot) || carriesDelivery) &&
     (opening !== 1 || carriesDestruction) &&
     carriesClose &&
-    (!knownEvents || events === CLOSE_EVENT_VERSION);
+    (!knownEvents || events === BOARD_EVENT_VERSION);
   if (!fits) return "profile-combination";
   if (unknownBallot && wanted !== 1) return "unsupported-version";
   if (coreOpening !== undefined && spoiled !== undefined && spoiled !== coreOpening)

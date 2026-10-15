@@ -91,6 +91,7 @@ const FILES: Readonly<Record<ContractEventVersion, Vectors>> = {
   1: load("contract-event.json"),
   2: load("contract-event-v2.json"),
   3: load("contract-event-v3.json"),
+  4: load("contract-event-v4.json"),
 };
 const vectors = FILES[1];
 
@@ -190,6 +191,13 @@ function project(e: ContractEvent): unknown {
         l1Block: String(e.l1Block),
         stamp: String(e.stamp),
         gasLimit: String(e.gasLimit),
+        record: bytesToHex(e.record),
+      };
+    case "ShareReceiptBatchSubmitted":
+      return {
+        event: e.event,
+        definitionHash: bytesToHex(e.definitionHash),
+        seat: e.seat,
         record: bytesToHex(e.record),
       };
     case "CloseStatementSubmitted":
@@ -316,6 +324,11 @@ function reencode(
         topics: [sig(e.event), e.definitionHash, uintWord(e.signer)],
         data: dyn([], tail(e.record)),
       };
+    case "ShareReceiptBatchSubmitted":
+      return {
+        topics: [sig(e.event), e.definitionHash, uintWord(e.seat)],
+        data: dyn([], tail(e.record)),
+      };
   }
 }
 
@@ -334,12 +347,14 @@ const ROLE_OF: Readonly<Record<ContractEvent["event"], ContractRole>> = {
   ShareComplaintSubmitted: "board",
   RelayedBallotSubmitted: "board",
   CloseStatementSubmitted: "board",
+  ShareReceiptBatchSubmitted: "board",
 };
 
 describe.each([
   [1, "contract-event.json"],
   [2, "contract-event-v2.json"],
   [3, "contract-event-v3.json"],
+  [4, "contract-event-v4.json"],
 ] as const)("contract-event version %i vectors (docs/spec/vectors/%s)", (version, file) => {
   const vectors = FILES[version];
   const contracts = contractsOf(vectors);
@@ -496,7 +511,7 @@ describe("contract-event record properties", () => {
   // re-encoding of its decoded event, so no field carries bytes its event
   // doesn't define and no event has a second record (T-17, T-31). Mutations
   // flip, drop, insert and append bytes, and add or remove topics.
-  test.each([1, 2, 3] as const)(
+  test.each([1, 2, 3, 4] as const)(
     "version %i: every passing record's topics and data are those rebuilt from its decoded event",
     (version) => {
       const contracts = contractsOf(FILES[version]);
@@ -644,6 +659,39 @@ describe("contract-event version 3 against version 2", () => {
     for (const v of added) {
       const record = { ...recordOf(v.fields), contract: v2.board };
       expect(checkContractEvent(record, v2, 2)).toEqual({ ok: false, error: "unknown-event" });
+    }
+  });
+});
+
+describe("contract-event version 4 against version 3", () => {
+  const v4 = contractsOf(FILES[4]);
+
+  // Version 4 keeps every row of version 3 unchanged, and adds only the
+  // board's share-receipt batch event.
+  test("every version-3 vector has the same verdict under version 4", () => {
+    const all = [...FILES[3].records, ...FILES[3].eventFailures];
+    expect(all.length).toBeGreaterThan(40);
+    for (const v of all) {
+      const record = { ...recordOf(v.fields), contract: mapAddress(v.fields.contract, 3, 4) };
+      const result = checkContractEvent(record, v4, 4);
+      expect(result.ok ? project(result.event) : result).toEqual(
+        v.error === undefined ? v.event : { ok: false, error: v.error },
+      );
+    }
+  });
+
+  test("version 3 names no batch event, so it refuses each as unknown-event", () => {
+    const v3 = contractsOf(FILES[3]);
+    const added = FILES[4].records.filter(
+      (r) => (r.event as { event?: string }).event === "ShareReceiptBatchSubmitted",
+    );
+    expect(added.map((r) => r.id)).toEqual(
+      (FILES[4] as Vectors & { unknownUnderVersion3: string[] }).unknownUnderVersion3,
+    );
+    expect(added.length).toBe(3);
+    for (const v of added) {
+      const record = { ...recordOf(v.fields), contract: v3.board };
+      expect(checkContractEvent(record, v3, 3)).toEqual({ ok: false, error: "unknown-event" });
     }
   });
 });

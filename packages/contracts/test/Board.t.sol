@@ -98,6 +98,9 @@ contract BoardTest is TestBase {
     address internal constant RELAY = address(0x4E1A);
 
     ElectionsStub internal elections;
+    /// The real registries `_realRegistries` deployed, for `_coldGas`.
+    address internal realElections;
+    address internal realTrustees;
     TrusteesStub internal trustees;
     Board internal board;
     BallotHarness internal ballots;
@@ -1158,6 +1161,35 @@ contract BoardTest is TestBase {
     /// signature `delivery-signature`; and a ballot of the wrong shape reaches
     /// `validity-shape` with `qualified` read from the real registry.
     function test_ReadsARealTrusteeRegistry() public {
+        bytes32 dh = _realRegistries();
+        bytes memory r1 = _receiptFor(dh, 1, signingSecrets[1]);
+        Vm.Log[] memory logs = _accept(_receiptsCall(r1));
+        assertEq(logs.length, 1, "seat 1's receipt");
+        _assertEvent(logs[0], RECEIPT_SUBMITTED, dh, aliceHash, r1);
+        _refuse(
+            _receiptsCall(_receiptFor(dh, 5, signingSecrets[1])),
+            _refused(0, DeliveryCheckLib.Code.DeliverySeat),
+            "seat 5 isn't in the key set"
+        );
+        _refuse(
+            _receiptsCall(_receiptFor(dh, 2, signingSecrets[1])),
+            _refused(0, DeliveryCheckLib.Code.DeliverySignature),
+            "seat 2's receipt signed by seat 1"
+        );
+        // ballot.json's honest ballot (k = 2, n = 3) under this definition
+        // (k = 4, n = 7) frames and fails its shape.
+        _refuse(
+            _ballotCall(_withWord(honestBallot, 3, uint256(dh))),
+            _ballotRefused(BallotCheckLib.Code.ValidityShape),
+            "a ballot of another shape"
+        );
+    }
+
+    /// A real trustee registry (trustee.json's `panel-4-of-7`, seats 1 to 3
+    /// holding delivery.json's signing keys) and a real election registry with
+    /// one definition registered under it, and `board` reading both; returns
+    /// the definition's hash.
+    function _realRegistries() internal returns (bytes32 dh) {
         string memory tj = vm.readFile(TrusteeFixture.VECTORS);
         TrusteeRegistry.PanelInput[] memory panels = new TrusteeRegistry.PanelInput[](1);
         panels[0] = TrusteeFixture.panel(tj, "panel-4-of-7", 4);
@@ -1180,30 +1212,11 @@ contract BoardTest is TestBase {
         _registerCeremony(treg, tj, stub, d.ceremonyTranscriptHash);
         vm.prank(address(0xC4EA));
         registry.registerDefinition(enc);
-        bytes32 dh = defs.hash(enc);
+        dh = defs.hash(enc);
 
         board = new Board(address(registry), address(treg), RELAY);
-        bytes memory r1 = _receiptFor(dh, 1, signingSecrets[1]);
-        Vm.Log[] memory logs = _accept(_receiptsCall(r1));
-        assertEq(logs.length, 1, "seat 1's receipt");
-        _assertEvent(logs[0], RECEIPT_SUBMITTED, dh, aliceHash, r1);
-        _refuse(
-            _receiptsCall(_receiptFor(dh, 5, signingSecrets[1])),
-            _refused(0, DeliveryCheckLib.Code.DeliverySeat),
-            "seat 5 isn't in the key set"
-        );
-        _refuse(
-            _receiptsCall(_receiptFor(dh, 2, signingSecrets[1])),
-            _refused(0, DeliveryCheckLib.Code.DeliverySignature),
-            "seat 2's receipt signed by seat 1"
-        );
-        // ballot.json's honest ballot (k = 2, n = 3) under this definition
-        // (k = 4, n = 7) frames and fails its shape.
-        _refuse(
-            _ballotCall(_withWord(honestBallot, 3, uint256(dh))),
-            _ballotRefused(BallotCheckLib.Code.ValidityShape),
-            "a ballot of another shape"
-        );
+        realElections = address(registry);
+        realTrustees = address(treg);
     }
 
     /// Records a key set for `stub` in `treg`'s one panel, approved by seats
@@ -1439,18 +1452,20 @@ contract BoardTest is TestBase {
     /// and gas, and, where P-256 goes through `P256VERIFY` as on Base, a call
     /// of `receiptsPerCall` receipts and a complaint call each cost at most
     /// their pinned gas, intrinsic gas included, by the standard price or
-    /// EIP-7623's floor, whichever is higher. The capacity check sizes every
+    /// EIP-7623's floor, whichever is higher. Each is measured on its own and
+    /// cold, as a forced deposit runs: every account and slot it reads (the
+    /// board, both registries, the accumulator) is made cold first, since a
+    /// deposit is its own transaction. The capacity check sizes every
     /// election's obligation by these figures, so a board that cost more
     /// would let a trustee node lend its keys to an election it can't serve
     /// through L1 (T-25, T-52, T-54). Under `cancun` P-256 runs in Solidity,
     /// several times the price, and only the framing bounds are checked; the
     /// package's test script sets `EXPECT_P256VERIFY` for the precompile run,
     /// so that run can't skip the gas bounds.
-    function test_ForcedPathCallGas() public {
+    function test_ForcedPathReceiptCallGas() public {
         string memory fj = vm.readFile(OBLIGATION);
         uint256 perCall = vm.parseUint(vm.parseJsonString(fj, ".forcedPath.receiptsPerCall"));
         uint256 receiptGas = vm.parseUint(vm.parseJsonString(fj, ".forcedPath.receiptCallGas"));
-        uint256 complaintGas = vm.parseUint(vm.parseJsonString(fj, ".forcedPath.complaintCallGas"));
         uint256 maxGas = vm.parseUint(vm.parseJsonString(fj, ".portal.maxResourceLimit"));
         uint256 maxData = vm.parseJsonUint(fj, ".portal.maxDepositData");
 
@@ -1465,22 +1480,115 @@ contract BoardTest is TestBase {
             );
         }
         bytes memory receiptsCall = _receiptsCall(batch);
-        bytes memory complaintCall = _complaintCall(complaint);
         assertTrue(receiptsCall.length <= maxData, "a full receipt call's data fits a deposit");
-        assertTrue(receiptGas <= maxGas && complaintGas <= maxGas, "each call fits a deposit");
+        assertTrue(receiptGas <= maxGas, "the receipt call fits a deposit");
+        if (!_expectPrecompile()) return;
+        uint256 stubbed = _withIntrinsic(receiptsCall, _coldGas(receiptsCall));
+        // The same seat's receipts for a real registry's definition.
+        bytes32 dh = _realRegistries();
+        bytes memory real;
+        for (uint256 i; i < perCall; i++) {
+            bytes32 ballot = keccak256(abi.encode("forced path ballot", i));
+            bytes32 share = keccak256(abi.encode("forced path share", i));
+            real = bytes.concat(
+                real,
+                _signed(0x000c, abi.encodePacked(dh, ballot, uint8(1), share), signingSecrets[1])
+            );
+        }
+        bytes memory realCall = _receiptsCall(real);
+        uint256 used = _withIntrinsic(realCall, _coldGas(realCall));
+        assertTrue(used >= stubbed, "the real registries cost at least the stubs");
+        // Measured about 16,185,000 against the stubs and 17,155,000 against
+        // real registries, cold.
+        assertTrue(used <= receiptGas, "a full receipt call");
+        // Near what it bounds, so the check isn't far looser than the board.
+        assertTrue(used > (receiptGas * 9) / 10, "the receipt figure is tight");
+        // The figure is the deposit's gas limit: the board takes another
+        // full call, every receipt new, with exactly that limit, cold.
+        bytes memory next;
+        for (uint256 i; i < perCall; i++) {
+            bytes32 ballot = keccak256(abi.encode("forced path ballot, next call", i));
+            bytes32 share = keccak256(abi.encode("forced path share, next call", i));
+            next = bytes.concat(
+                next,
+                _signed(0x000c, abi.encodePacked(dh, ballot, uint8(1), share), signingSecrets[1])
+            );
+        }
+        _acceptsWithin(_receiptsCall(next), receiptGas);
+    }
 
-        bool precompile = _p256Precompile();
+    /// See `test_ForcedPathReceiptCallGas`: a complaint call, alone and cold,
+    /// before anything in this test has touched the board or the registries.
+    function test_ForcedPathComplaintCallGas() public {
+        string memory fj = vm.readFile(OBLIGATION);
+        uint256 complaintGas = vm.parseUint(vm.parseJsonString(fj, ".forcedPath.complaintCallGas"));
+        uint256 maxGas = vm.parseUint(vm.parseJsonString(fj, ".portal.maxResourceLimit"));
+        assertTrue(complaintGas <= maxGas, "the complaint call fits a deposit");
+        if (!_expectPrecompile()) return;
+        // Against the stubs, then against real registries, which read more
+        // slots; the bound holds for both and the tightness for the larger.
+        bytes memory complaintCall = _complaintCall(complaint);
+        uint256 stubbed = _withIntrinsic(complaintCall, _coldGas(complaintCall));
+        bytes32 dh = _realRegistries();
+        // The same complaint for the real registry's definition, signed again
+        // by its seat: the board checks the signature, never the proof.
+        bytes memory body = _slice(complaint, 3, COMPLAINT_SIG_AT - 3);
+        for (uint256 i; i < 32; i++) {
+            body[i] = dh[i];
+        }
+        complaintCall =
+            _complaintCall(_signed(0x000e, body, signingSecrets[uint8(complaint[SEAT_AT])]));
+        uint256 used = _withIntrinsic(complaintCall, _coldGas(complaintCall));
+        assertTrue(used >= stubbed, "the real registries cost at least the stubs");
+        // Measured about 154,800 against the stubs and 156,800 against real
+        // registries, cold.
+        assertTrue(used <= complaintGas, "a complaint call");
+        assertTrue(used > (complaintGas * 8) / 10, "the complaint figure is tight");
+        // The figure is the deposit's gas limit: the board takes another
+        // complaint, `z` changed in its last bit, with exactly that limit.
+        body[COMPLAINT_Z_AT - 3 + 31] ^= 0x01;
+        _acceptsWithin(
+            _complaintCall(_signed(0x000e, body, signingSecrets[uint8(complaint[SEAT_AT])])),
+            complaintGas
+        );
+    }
+
+    /// The call succeeds, cold, with `gasLimit` as its transaction's limit:
+    /// what is left of it after the intrinsic gas (EIP-2028's price) is what
+    /// the call gets, and EIP-7623's floor fits the limit too.
+    function _acceptsWithin(bytes memory data, uint256 gasLimit) internal {
+        uint256 zeros;
+        for (uint256 i; i < data.length; i++) {
+            if (data[i] == 0) zeros++;
+        }
+        uint256 tokens = zeros + 4 * (data.length - zeros);
+        assertTrue(21_000 + 10 * tokens <= gasLimit, "the floor fits the limit");
+        vm.cool(address(board));
+        vm.cool(realElections);
+        vm.cool(realTrustees);
+        vm.recordLogs();
+        (bool ok,) = address(board).call{gas: gasLimit - 21_000 - 4 * tokens}(data);
+        assertTrue(ok, "accepted within the deposit's gas limit");
+        // Accepted, not a repeat: it emitted.
+        assertTrue(vm.getRecordedLogs().length > 0, "the call emitted");
+    }
+
+    /// Whether P-256 goes through the precompile here, asserted where the
+    /// test script expects it.
+    function _expectPrecompile() internal view returns (bool precompile) {
+        precompile = _p256Precompile();
         if (vm.envOr("EXPECT_P256VERIFY", false)) assertTrue(precompile, "no P256VERIFY");
-        if (!precompile) return;
-        uint256 receipts = _withIntrinsic(receiptsCall, _gas(receiptsCall));
-        uint256 one = _withIntrinsic(complaintCall, _gas(complaintCall));
-        // Measured about 16,170,000 and 136,000.
-        assertTrue(receipts <= receiptGas, "a full receipt call");
-        assertTrue(one <= complaintGas, "a complaint call");
-        // Each figure is near what it bounds, so the check isn't far looser
-        // than the board.
-        assertTrue(receipts > (receiptGas * 9) / 10, "the receipt figure is tight");
-        assertTrue(one > (complaintGas * 8) / 10, "the complaint figure is tight");
+    }
+
+    /// `_gas` with the board and both registries cold, accounts and slots, as
+    /// in a deposit of its own.
+    function _coldGas(bytes memory data) internal returns (uint256) {
+        vm.cool(address(board));
+        vm.cool(address(elections));
+        vm.cool(address(trustees));
+        if (realElections != address(0)) vm.cool(realElections);
+        if (realTrustees != address(0)) vm.cool(realTrustees);
+        return _gas(data);
     }
 
     /// Whether the EVM answers P-256 verification at 0x100, with one of the

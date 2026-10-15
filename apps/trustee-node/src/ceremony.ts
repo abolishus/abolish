@@ -34,7 +34,10 @@ import {
   decode,
   decodeCeremonyTranscript,
   DecodeError,
+  decodeElectionDefinitionRecord,
+  type ElectionDefinition,
   electionDefinitionHash,
+  electionStubHash,
   encode,
   EncodeError,
   encodeCeremonyTranscript,
@@ -320,7 +323,12 @@ export class CeremonySeat {
 
   async #approve(stubBytes: Uint8Array, transcript: Uint8Array): Promise<SeatResult<Approval>> {
     const config = this.#config;
-    const checked = await checkStub(stubBytes, config, config.electorate, await this.#served());
+    // A stub this seat already approved was judged by check 4 then, and its
+    // signature may already be registering it: a retry after a lost response
+    // gets the recorded approval (or `approved-other`) below, never a new
+    // verdict from a ledger that has grown since.
+    const served = (await this.#approvedBefore(stubBytes)) ? new Map() : await this.#served();
+    const checked = await checkStub(stubBytes, config, config.electorate, served);
     if (!checked.ok) return refuse(checked.code);
     let t: CeremonyTranscript;
     try {
@@ -368,7 +376,11 @@ export class CeremonySeat {
     // Recorded before signing, so every later stub check 4 counts it, even
     // after a crash between this record and the approval.
     const demand = stubDemand(checked.stub);
-    await config.store.putOnce(
+    const definitionHash = electionDefinitionHash({
+      ...checked.stub,
+      ceremony_transcript_hash: result.hash,
+    });
+    const recorded = await config.store.putOnce(
       `served/${hex(checked.stubHash)}`,
       encode(SERVED, {
         members: demand.members,
@@ -376,13 +388,15 @@ export class CeremonySeat {
         closes_at: demand.closesAt,
         l1_inclusion_bound: Number(demand.l1InclusionBound),
         // The definition this approval registers: the stub with this transcript.
-        definition_hash: electionDefinitionHash({
-          ...checked.stub,
-          ceremony_transcript_hash: result.hash,
-        }),
+        definition_hash: definitionHash,
         opens_at: checked.stub.opens_at,
       }),
     );
+    // A record a crash left for another transcript of this stub names another
+    // definition, which `neverRegistered` would then judge in this one's
+    // place: this seat keeps to the transcript it recorded first.
+    if (!equal(decode(SERVED, recorded.value).definition_hash, definitionHash))
+      return refuse("approved-other");
     const signature = signCeremonyRegistration(config.identitySecret, config.panel, registration);
     const stored = await config.store.putOnce(
       approvalKey,
@@ -397,6 +411,21 @@ export class CeremonySeat {
     // A repeat request gets the signature first recorded (ECDSA signatures
     // differ per signing; either verifies).
     return { ok: true, value: { registration, signature: approved.signature } };
+  }
+
+  /** Whether the seat holds an approval for the stub these bytes decode to. */
+  async #approvedBefore(stubBytes: Uint8Array): Promise<boolean> {
+    let stub: ElectionDefinition;
+    try {
+      const record = decodeElectionDefinitionRecord(stubBytes);
+      if (record.version !== 1) return false;
+      stub = record.value;
+    } catch (e) {
+      // checkStub refuses it with its own code.
+      if (e instanceof DecodeError) return false;
+      throw e;
+    }
+    return (await this.#durable(`approvals/${hex(electionStubHash(stub))}`)) !== undefined;
   }
 
   /**

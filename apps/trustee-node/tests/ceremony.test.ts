@@ -525,7 +525,7 @@ test("refuses an identity secret that isn't its seat's key", () => {
 });
 
 describe("stub check 4: the forced path over the elections a seat serves", () => {
-  // Four seats with the release's windows fit at most 1,024 members alone
+  // Four seats with the release's windows fit at most 896 members alone
   // (docs/spec/delivery.md, Capacity), so two elections of 600 closing
   // together don't fit, and the same two a day apart do.
   const withStub = (e: Election, change: Partial<ElectionDefinition>): Election => {
@@ -602,13 +602,68 @@ describe("stub check 4: the forced path over the elections a seat serves", () =>
   test("a seat that serves nothing takes the largest election that fits and refuses one member more", async () => {
     const e0 = election(4, 2);
     const runId = crypto.getRandomValues(new Uint8Array(32));
-    const at = withStub(e0, members(1_024n, e0.stub));
-    const over = withStub(e0, members(1_025n, e0.stub));
+    const at = withStub(e0, members(896n, e0.stub));
+    const over = withStub(e0, members(897n, e0.stub));
     expect((await seat(e0, 0).keys(at.stubBytes, runId)).ok).toBe(true);
     expect(await seat(e0, 1).keys(over.stubBytes, runId)).toEqual({
       ok: false,
       code: "stub-capacity",
     });
+  });
+
+  test("a retry of an approved stub gets its recorded approval, whatever the ledger holds since", async () => {
+    const stores = [0, 1, 2, 3].map(() => new MemoryStore() as SeatStore);
+    const e0 = election(4, 2, { stores });
+    const first = withStub(e0, members(600n, e0.stub));
+    const run = await runCeremony(first);
+    const approved = value(await seat(first, 0).approve(first.stubBytes, run.transcript));
+    // An election the ledger now holds beside it, which together wouldn't
+    // fit (as after a release with other windows): the retry isn't re-judged.
+    await (stores[0] as SeatStore).putOnce(
+      `served/${"ab".repeat(32)}`,
+      (await (stores[0] as SeatStore).get(
+        `served/${Buffer.from(first.stubHash).toString("hex")}`,
+      )) as Uint8Array,
+    );
+    const again = value(await seat(first, 0).approve(first.stubBytes, run.transcript));
+    expect(again.signature).toEqual(approved.signature);
+    // A new stub is still judged against the whole ledger.
+    const other = withStub(e0, members(1n, e0.stub));
+    expect(
+      await seat(first, 0).keys(other.stubBytes, crypto.getRandomValues(new Uint8Array(32))),
+    ).toEqual({ ok: false, code: "stub-capacity" });
+  });
+
+  test("after a crash between the served record and the approval, another transcript of the stub is refused", async () => {
+    const inner = new MemoryStore() as SeatStore;
+    // Fails the first approval write only, as a crash right after the
+    // served record would.
+    let crashed = false;
+    const crashing: SeatStore = {
+      get: (key) => inner.get(key),
+      list: (prefix) => inner.list(prefix),
+      putOnce: (key, bytes) => {
+        if (!crashed && key.startsWith("approvals/")) {
+          crashed = true;
+          return Promise.reject(new Error("crash"));
+        }
+        return inner.putOnce(key, bytes);
+      },
+    };
+    const e0 = election(4, 2, { stores: [inner] });
+    const first = withStub(e0, members(600n, e0.stub));
+    const runA = await runCeremony(first);
+    const runB = await runCeremony(first);
+    await expect(
+      seatOver(first, 1, crashing).approve(first.stubBytes, runA.transcript),
+    ).rejects.toThrow("crash");
+    expect(await seatOver(first, 1, inner).approve(first.stubBytes, runB.transcript)).toEqual({
+      ok: false,
+      code: "approved-other",
+    });
+    expect((await seatOver(first, 1, inner).approve(first.stubBytes, runA.transcript)).ok).toBe(
+      true,
+    );
   });
 
   test("of concurrent approvals of two elections that don't fit together, at most one is given", async () => {

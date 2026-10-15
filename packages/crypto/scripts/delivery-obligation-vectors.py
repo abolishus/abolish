@@ -52,8 +52,8 @@ FORCED_PATH = {
     "depositGasTarget": MAX_RESOURCE_LIMIT // ELASTICITY,
     "l1BlockSeconds": 13,
     "receiptsPerCall": 256,
-    "receiptCallGas": 17_000_000,
-    "complaintCallGas": 150_000,
+    "receiptCallGas": 18_500_000,
+    "complaintCallGas": 180_000,
 }
 RECEIPT_LENGTH = 164
 
@@ -349,7 +349,8 @@ def election(members, seats, closes_at=1_800_000_000, bound=600):
 def capacity_cases():
     w1, w21 = windows(1), windows(21)
     l3 = lone_limit(3, w1)
-    half = l3 // 2
+    # Half the limit in whole receipt calls (128 members fill one call of 256).
+    half = (l3 // 2) // 128 * 128
     cases = [
         ("lone-at-limit", "Three seats at the largest electorate R of one hour fits", w1, [election(l3, 3)]),
         ("lone-over-limit", "One member more", w1, [election(l3 + 1, 3)]),
@@ -371,7 +372,7 @@ def capacity_cases():
         ("long-margin", "R of 21 hours at its limit", w21, [election(lone_limit(3, w21), 3)]),
         (
             "same-close-halves",
-            "Two elections closing together, each with half the limit",
+            "Two elections closing together, each with half the limit in whole receipt calls",
             w1,
             [election(half, 3), election(half, 3)],
         ),

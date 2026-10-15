@@ -312,11 +312,11 @@ describe("forcedPathFits", () => {
   });
 
   test("the deployed windows' caps, receipts binding at R of one hour and complaints at 21 hours", () => {
-    expect(forcedPathMembersLimit(3, deployed)).toBe(1280n);
-    expect(forcedPathFits([lone(1280n)], deployed)).toBe(true);
-    expect(forcedPathFits([lone(1281n)], deployed)).toBe(false);
+    expect(forcedPathMembersLimit(3, deployed)).toBe(1152n);
+    expect(forcedPathFits([lone(1152n)], deployed)).toBe(true);
+    expect(forcedPathFits([lone(1153n)], deployed)).toBe(false);
     const long = { ...deployed, margin: 21n * hour };
-    expect(forcedPathMembersLimit(3, long)).toBe(28_307n);
+    expect(forcedPathMembersLimit(3, long)).toBe(23_589n);
   });
 
   test("an empty set fits, and so does an election with no members", () => {

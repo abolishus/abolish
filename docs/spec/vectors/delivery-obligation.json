@@ -16,8 +16,8 @@
     "depositGasTarget": "2000000",
     "l1BlockSeconds": "13",
     "receiptsPerCall": "256",
-    "receiptCallGas": "17000000",
-    "complaintCallGas": "150000"
+    "receiptCallGas": "18500000",
+    "complaintCallGas": "180000"
   },
   "l1": {
     "l1RefMin": "2",
@@ -783,19 +783,19 @@
       },
       "elections": [
         {
-          "members": "1280",
+          "members": "1152",
           "seats": 3,
           "closesAt": "1800000000",
           "l1InclusionBound": "600",
           "receipts": {
             "start": "1800123000",
             "end": "1800126600",
-            "gas": "510000000"
+            "gas": "499500000"
           },
           "complaints": {
             "start": "1800220200",
             "end": "1800385800",
-            "gas": "1152000000"
+            "gas": "1244160000"
           }
         }
       ],
@@ -811,19 +811,19 @@
       },
       "elections": [
         {
-          "members": "1281",
+          "members": "1153",
           "seats": 3,
           "closesAt": "1800000000",
           "l1InclusionBound": "600",
           "receipts": {
             "start": "1800123000",
             "end": "1800126600",
-            "gas": "561000000"
+            "gas": "555000000"
           },
           "complaints": {
             "start": "1800220200",
             "end": "1800385800",
-            "gas": "1152900000"
+            "gas": "1245240000"
           }
         }
       ],
@@ -867,19 +867,19 @@
       },
       "elections": [
         {
-          "members": "4096",
+          "members": "3712",
           "seats": 1,
           "closesAt": "1800000000",
           "l1InclusionBound": "600",
           "receipts": {
             "start": "1800123000",
             "end": "1800126600",
-            "gas": "544000000"
+            "gas": "536500000"
           },
           "complaints": {
             "start": "1800220200",
             "end": "1800385800",
-            "gas": "1228800000"
+            "gas": "1336320000"
           }
         }
       ],
@@ -895,19 +895,19 @@
       },
       "elections": [
         {
-          "members": "257",
+          "members": "129",
           "seats": 16,
           "closesAt": "1800000000",
           "l1InclusionBound": "600",
           "receipts": {
             "start": "1800123000",
             "end": "1800126600",
-            "gas": "816000000"
+            "gas": "592000000"
           },
           "complaints": {
             "start": "1800220200",
             "end": "1800385800",
-            "gas": "1233600000"
+            "gas": "743040000"
           }
         }
       ],
@@ -923,14 +923,14 @@
       },
       "elections": [
         {
-          "members": "768",
+          "members": "640",
           "seats": 5,
           "closesAt": "1800000000",
           "l1InclusionBound": "600",
           "receipts": {
             "start": "1800123000",
             "end": "1800126600",
-            "gas": "510000000"
+            "gas": "462500000"
           },
           "complaints": {
             "start": "1800220200",
@@ -951,14 +951,14 @@
       },
       "elections": [
         {
-          "members": "28308",
+          "members": "23590",
           "seats": 3,
           "closesAt": "1800000000",
           "l1InclusionBound": "600",
           "receipts": {
             "start": "1800051000",
             "end": "1800126600",
-            "gas": "11322000000"
+            "gas": "10267500000"
           },
           "complaints": {
             "start": "1800220200",
@@ -979,19 +979,19 @@
       },
       "elections": [
         {
-          "members": "28307",
+          "members": "23589",
           "seats": 3,
           "closesAt": "1800000000",
           "l1InclusionBound": "600",
           "receipts": {
             "start": "1800051000",
             "end": "1800126600",
-            "gas": "11322000000"
+            "gas": "10267500000"
           },
           "complaints": {
             "start": "1800220200",
             "end": "1800385800",
-            "gas": "25476300000"
+            "gas": "25476120000"
           }
         }
       ],
@@ -999,7 +999,7 @@
     },
     {
       "id": "same-close-halves",
-      "description": "Two elections closing together, each with half the limit",
+      "description": "Two elections closing together, each with half the limit in whole receipt calls",
       "windows": {
         "contractEventWindow": "46800",
         "forcedInclusion": "46800",
@@ -1007,35 +1007,35 @@
       },
       "elections": [
         {
-          "members": "640",
+          "members": "512",
           "seats": 3,
           "closesAt": "1800000000",
           "l1InclusionBound": "600",
           "receipts": {
             "start": "1800123000",
             "end": "1800126600",
-            "gas": "255000000"
+            "gas": "222000000"
           },
           "complaints": {
             "start": "1800220200",
             "end": "1800385800",
-            "gas": "576000000"
+            "gas": "552960000"
           }
         },
         {
-          "members": "640",
+          "members": "512",
           "seats": 3,
           "closesAt": "1800000000",
           "l1InclusionBound": "600",
           "receipts": {
             "start": "1800123000",
             "end": "1800126600",
-            "gas": "255000000"
+            "gas": "222000000"
           },
           "complaints": {
             "start": "1800220200",
             "end": "1800385800",
-            "gas": "576000000"
+            "gas": "552960000"
           }
         }
       ],
@@ -1051,35 +1051,35 @@
       },
       "elections": [
         {
-          "members": "1280",
+          "members": "1152",
           "seats": 3,
           "closesAt": "1800000000",
           "l1InclusionBound": "600",
           "receipts": {
             "start": "1800123000",
             "end": "1800126600",
-            "gas": "510000000"
+            "gas": "499500000"
           },
           "complaints": {
             "start": "1800220200",
             "end": "1800385800",
-            "gas": "1152000000"
+            "gas": "1244160000"
           }
         },
         {
-          "members": "1280",
+          "members": "1152",
           "seats": 3,
           "closesAt": "1800000000",
           "l1InclusionBound": "600",
           "receipts": {
             "start": "1800123000",
             "end": "1800126600",
-            "gas": "510000000"
+            "gas": "499500000"
           },
           "complaints": {
             "start": "1800220200",
             "end": "1800385800",
-            "gas": "1152000000"
+            "gas": "1244160000"
           }
         }
       ],
@@ -1095,35 +1095,35 @@
       },
       "elections": [
         {
-          "members": "1280",
+          "members": "1152",
           "seats": 3,
           "closesAt": "1800000000",
           "l1InclusionBound": "600",
           "receipts": {
             "start": "1800123000",
             "end": "1800126600",
-            "gas": "510000000"
+            "gas": "499500000"
           },
           "complaints": {
             "start": "1800220200",
             "end": "1800385800",
-            "gas": "1152000000"
+            "gas": "1244160000"
           }
         },
         {
-          "members": "1280",
+          "members": "1152",
           "seats": 3,
           "closesAt": "1800003600",
           "l1InclusionBound": "600",
           "receipts": {
             "start": "1800126600",
             "end": "1800130200",
-            "gas": "510000000"
+            "gas": "499500000"
           },
           "complaints": {
             "start": "1800223800",
             "end": "1800389400",
-            "gas": "1152000000"
+            "gas": "1244160000"
           }
         }
       ],
@@ -1139,35 +1139,35 @@
       },
       "elections": [
         {
-          "members": "1280",
+          "members": "1152",
           "seats": 3,
           "closesAt": "1800000000",
           "l1InclusionBound": "600",
           "receipts": {
             "start": "1800123000",
             "end": "1800126600",
-            "gas": "510000000"
+            "gas": "499500000"
           },
           "complaints": {
             "start": "1800220200",
             "end": "1800385800",
-            "gas": "1152000000"
+            "gas": "1244160000"
           }
         },
         {
-          "members": "1280",
+          "members": "1152",
           "seats": 3,
           "closesAt": "1800003599",
           "l1InclusionBound": "600",
           "receipts": {
             "start": "1800126599",
             "end": "1800130199",
-            "gas": "510000000"
+            "gas": "499500000"
           },
           "complaints": {
             "start": "1800223799",
             "end": "1800389399",
-            "gas": "1152000000"
+            "gas": "1244160000"
           }
         }
       ],
@@ -1183,35 +1183,35 @@
       },
       "elections": [
         {
-          "members": "1280",
+          "members": "1152",
           "seats": 3,
           "closesAt": "1800000000",
           "l1InclusionBound": "600",
           "receipts": {
             "start": "1800123000",
             "end": "1800126600",
-            "gas": "510000000"
+            "gas": "499500000"
           },
           "complaints": {
             "start": "1800220200",
             "end": "1800385800",
-            "gas": "1152000000"
+            "gas": "1244160000"
           }
         },
         {
-          "members": "1280",
+          "members": "1152",
           "seats": 3,
           "closesAt": "1800144000",
           "l1InclusionBound": "600",
           "receipts": {
             "start": "1800267000",
             "end": "1800270600",
-            "gas": "510000000"
+            "gas": "499500000"
           },
           "complaints": {
             "start": "1800364200",
             "end": "1800529800",
-            "gas": "1152000000"
+            "gas": "1244160000"
           }
         }
       ],
@@ -1222,17 +1222,17 @@
     {
       "seats": 1,
       "margin": "3600",
-      "members": "4096"
+      "members": "3712"
     },
     {
       "seats": 3,
       "margin": "3600",
-      "members": "1280"
+      "members": "1152"
     },
     {
       "seats": 5,
       "margin": "3600",
-      "members": "768"
+      "members": "640"
     },
     {
       "seats": 7,
@@ -1242,42 +1242,42 @@
     {
       "seats": 16,
       "margin": "3600",
-      "members": "256"
+      "members": "128"
     },
     {
       "seats": 32,
       "margin": "3600",
-      "members": "128"
+      "members": "0"
     },
     {
       "seats": 1,
       "margin": "75600",
-      "members": "84923"
+      "members": "70769"
     },
     {
       "seats": 3,
       "margin": "75600",
-      "members": "28307"
+      "members": "23589"
     },
     {
       "seats": 5,
       "margin": "75600",
-      "members": "16984"
+      "members": "14153"
     },
     {
       "seats": 7,
       "margin": "75600",
-      "members": "12131"
+      "members": "10109"
     },
     {
       "seats": 16,
       "margin": "75600",
-      "members": "5307"
+      "members": "4423"
     },
     {
       "seats": 32,
       "margin": "75600",
-      "members": "2653"
+      "members": "2211"
     }
   ]
 }

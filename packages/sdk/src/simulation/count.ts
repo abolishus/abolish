@@ -1,7 +1,10 @@
 // What a reader of the board derives from its counted extent (docs/spec/
-// verifier.md, 5.7 to 5.9): each ballot record decoded, its L1 reference's
-// admission, the re-vote rule's selection of one ballot per tier and
-// nullifier, and the delivery check that keeps only delivered ones. The
+// verifier.md, 5.5 to 5.9): each ballot record decoded, through the board
+// path or as the board contract's event (a direct submission), its window
+// by its own path, its L1 reference's admission, the re-vote rule's
+// selection of one ballot per tier and nullifier, and the delivery check
+// that keeps only delivered ones, reading contract-path receipts and
+// postings from their events on the board. The
 // trustees read it at t_S (./run.ts), and a rebuild from chain and IPFS reads
 // it again (./rebuild.ts): both call this, so the two can differ only in the
 // bytes they read. Nothing here reimplements a check: each is
@@ -9,11 +12,16 @@
 
 import {
   type AdmittedBallot,
+  ballotWindow,
   type BallotRecordV2,
   type BallotSelection,
   ballotHash,
+  checkContractEvent,
   checkDelivery,
   checkL1Reference,
+  type ContractEventRecord,
+  type ContractEventVersion,
+  decodeContractEvent,
   decodeBallot,
   DecodeError,
   type DeliveryBallot,
@@ -21,6 +29,7 @@ import {
   type DeliveryEntry,
   deliveryDeadlines,
   deliverySegments,
+  type EventContracts,
   type FinalizedL1,
   type L1ReferenceVerdict,
   membershipMessage,
@@ -34,6 +43,9 @@ import { SIMULATED_ANCHOR_PERIOD } from "./board.ts";
 // which records on the board each check reads.
 export const recordTypeOf = (record: Uint8Array): number =>
   ((record[0] ?? 0) << 8) | (record[1] ?? 0);
+
+const same = (a: Uint8Array, b: Uint8Array) =>
+  a.length === b.length && a.every((x, i) => x === b[i]);
 
 // What the delivery check reads (docs/spec/delivery.md, Delivery check).
 const DELIVERY_RECORD_TYPES: ReadonlySet<number> = new Set([
@@ -56,19 +68,37 @@ export interface CountingContext {
   /** L1 as finalized at the reader's head, and the re-vote rule's window over it. */
   readonly finalized: FinalizedL1;
   readonly window: { readonly l1RefMin: bigint; readonly closesAt: bigint };
-  /** Contract-path delivery records, read from chain by their submission time. */
-  readonly postings: readonly DeliveryEntry[];
+  /** The definition's L2 contracts, whose events the board carries as contract-event records. */
+  readonly contracts: EventContracts;
+  /** The contract-event version the profile pins. */
+  readonly eventVersion: ContractEventVersion;
+  readonly opensAt: bigint;
+  /** `s_A = period(closes_at) + 1`: the last segment a board-path ballot may be in. */
+  readonly boardSegment: bigint;
+}
+
+/** A board-contract event on the board, which passed the event check. */
+export interface BoardEvent {
+  /** Its board index. */
+  readonly index: number;
+  readonly record: ContractEventRecord;
 }
 
 export interface CountedExtent {
   /** Each ballot record, by board index. */
   readonly ballots: ReadonlyMap<number, BallotRecordV2>;
   /**
-   * Board indices of ballot-typed payloads that don't decode under ballot
-   * version 2 or name a cell the partition lacks: rejected entries, as the
-   * verifier's admission rejects them, never a reason to stop reading.
+   * Board indices of ballots that don't decode under ballot version 2, name
+   * another definition or a cell the partition lacks, or fall outside the
+   * window by their path,
+   * of relayed ballots, whose stamp only L1 shows (4.5), and of
+   * contract-event records that don't decode or fail the event check:
+   * rejected entries, as the verifier rejects them, never a reason to stop
+   * reading.
    */
   readonly rejected: readonly number[];
+  /** The board contract's events on the board, in board order. */
+  readonly events: readonly BoardEvent[];
   /** Each ballot's L1 reference's verdict (5.8), by board index. */
   readonly verdicts: ReadonlyMap<number, L1ReferenceVerdict>;
   /** The re-vote rule over the admitted ballots (5.7, 6.1). */
@@ -81,9 +111,10 @@ export interface CountedExtent {
 
 /**
  * Reads the counted extent's entries, each with its segment: ballots under
- * ballot version 2, M from each record and the definition, under its cell's
- * tier (5.7), and every delivery record of the extent with the contract-path
- * postings, so crypto, not this file, decides what each says.
+ * ballot version 2, on the board path or in the board contract's events,
+ * M from each record and the definition, under its cell's tier (5.7), and
+ * every delivery record of the extent, on either path, so crypto, not this
+ * file, decides what each says.
  */
 export function readCountedExtent(
   ctx: CountingContext,
@@ -93,18 +124,82 @@ export function readCountedExtent(
   const verdicts = new Map<number, L1ReferenceVerdict>();
   const rejected: number[] = [];
   const admitted: AdmittedBallot[] = [];
+  const events: BoardEvent[] = [];
+  // Contract-path delivery records, each in time by its event's L2 time
+  // (docs/spec/delivery.md, Direct submit).
+  const contractDelivery: DeliveryEntry[] = [];
+  const window = {
+    opensAt: ctx.opensAt,
+    closesAt: ctx.closesAt,
+    boardSegment: ctx.boardSegment,
+  };
   entries.forEach((entry, index) => {
-    if (recordTypeOf(entry.payload) !== RECORD_TYPES.ballot) return;
+    let payload = entry.payload;
+    // Each copy's window by its own path (5.5): a board-path ballot by its
+    // segment, a direct one by its event's L2 block time (T-35, T-50).
+    let inWindow: ReturnType<typeof ballotWindow>;
+    const type = recordTypeOf(payload);
+    if (type === RECORD_TYPES.contractEvent) {
+      // Only the board's own events, as crypto's event check reads them,
+      // carry a ballot or a delivery record (T-71, T-17).
+      let record: ContractEventRecord;
+      try {
+        record = decodeContractEvent(payload, ctx.eventVersion);
+      } catch (e) {
+        if (!(e instanceof DecodeError)) throw e;
+        rejected.push(index);
+        return;
+      }
+      const checked = checkContractEvent(record, ctx.contracts, ctx.eventVersion);
+      if (!checked.ok) {
+        rejected.push(index);
+        return;
+      }
+      if (checked.role !== "board") return;
+      events.push({ index, record });
+      const { event } = checked;
+      switch (event.event) {
+        case "ShareReceiptSubmitted":
+        case "SharePosted":
+        case "ShareComplaintSubmitted":
+          contractDelivery.push({
+            path: "contract",
+            submittedAt: record.l2_timestamp,
+            payload: event.record,
+          });
+          return;
+        case "BallotSubmitted":
+          payload = event.record;
+          inWindow = ballotWindow("ordinary", record.l2_timestamp, window);
+          break;
+        // A relayed ballot's window is its relay call's stamp, which only
+        // L1 shows (4.5): none is read here.
+        case "RelayedBallotSubmitted":
+          rejected.push(index);
+          return;
+        default:
+          return;
+      }
+    } else if (type === RECORD_TYPES.ballot)
+      inWindow = ballotWindow("board", BigInt(entry.segment), window);
+    else return;
     let b: BallotRecordV2;
     try {
-      b = decodeBallot(entry.payload, 2);
+      b = decodeBallot(payload, 2);
     } catch (e) {
       if (!(e instanceof DecodeError)) throw e;
       rejected.push(index);
       return;
     }
     const tier = ctx.tierOfCell(b.cell);
-    if (tier === undefined) {
+    // Another election's ballot (`ballot-stray`): the board contract's
+    // sequence is shared by every election on it, so its events can name
+    // any registered definition.
+    if (
+      tier === undefined ||
+      inWindow !== "admitted" ||
+      !same(b.definition_hash, ctx.definitionHash)
+    ) {
       rejected.push(index);
       return;
     }
@@ -159,10 +254,10 @@ export function readCountedExtent(
       ...entries
         .filter((e) => DELIVERY_RECORD_TYPES.has(recordTypeOf(e.payload)))
         .map((e): DeliveryEntry => ({ path: "board", segment: e.segment, payload: e.payload })),
-      ...ctx.postings,
+      ...contractDelivery,
     ],
     1,
   );
   const counted = selection.selected.filter((_, i) => delivery.ballots[i]?.counted === true);
-  return { ballots, rejected, verdicts, selection, delivery, counted };
+  return { ballots, rejected, events, verdicts, selection, delivery, counted };
 }

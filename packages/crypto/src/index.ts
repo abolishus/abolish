@@ -25,6 +25,7 @@ export {
   type QuestionRules,
   type Share,
   SHARES,
+  shapeOk,
   shareVote,
   shareVoteV3,
   shareVoteV4,
@@ -207,6 +208,7 @@ export {
   type TagPrimitive,
   TAG_REGISTRY,
 } from "./domain-separation.ts";
+export { frameBallot, frameDelivery, type FramedRecord } from "./direct-submit.ts";
 export {
   checkContractEvent,
   CONTRACT_EVENT_SIGNATURES,

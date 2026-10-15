@@ -73,8 +73,8 @@ export interface PostClose {
  * Tally window and Destruction of docs/spec/tally.md, and the openings'
  * window of docs/spec/challenge.md (Publication), from `closes_at`. The
  * windows that make up `W_S` (delivery, complaints, the contract-event
- * window) and `l1_inclusion_bound` are taken as 0, since nothing here
- * delivers through the contract path, so `s_S` is its floor,
+ * window) and `l1_inclusion_bound` are taken as 0, since every
+ * contract-path record is sent and boarded before close, so `s_S` is its floor,
  * `period(closes_at) + 1`; the seal is the destruction window's end, the
  * latest post-close window the run has (SIMULATION_STUBS).
  */
@@ -209,8 +209,8 @@ export class SimulatedBoard {
   }
 
   /**
-   * An entry boarded without a submission through our API (a direct ballot,
-   * a tally opening, a destruction statement): appended with no receipt.
+   * An entry boarded without a submission through our API (a contract
+   * event, a tally opening, a destruction statement): appended with no receipt.
    */
   board(segment: number, payload: Uint8Array): number {
     return Number(this.#append(segment, payload).index);

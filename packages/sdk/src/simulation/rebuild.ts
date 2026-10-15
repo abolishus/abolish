@@ -3,31 +3,35 @@
 // derived from it gone, every result is rebuilt from the public record
 // alone. From chain: the definition the election registry registered, the
 // panel the trustee registry pins and the key set it recorded, every
-// checkpoint the anchor holds, L1's finalized blocks and the contract-path
-// postings; from IPFS: each segment object an anchored checkpoint names by
-// CID. The board is the fetched objects, split by crypto's
+// checkpoint the anchor holds, L1's finalized blocks and the board
+// contract's event accumulator; from IPFS: each segment object an anchored
+// checkpoint names by CID. The board is the fetched objects, split by crypto's
 // `splitSegmentObject` and authenticated by crypto's `verifyBoard` against
 // every anchor, so no byte rests on its source (T-24, T-49, T-51, T-53); the
 // key set is the ceremony transcript's on that board, checked by crypto's
 // `checkCeremonyTranscript` and compared with the registry's record (T-37);
-// the counted set is ./count.ts's, the reading the trustees made at t_S; and
-// the tally and destruction are crypto's checks over the board's openings and
-// statements. Nothing here reimplements a check the verifier makes (AGENTS.md,
-// Architecture). The chain reads are the simulated contracts' memory, and the
-// postings their records held in memory (SIMULATION_STUBS).
+// the board contract's events on the board, direct ballots, receipts and
+// postings, must replay to its accumulator, so none was left off (T-25,
+// T-71); the counted set is ./count.ts's, the reading the trustees made at
+// t_S; and the tally and destruction are crypto's checks over the board's
+// openings and statements. Nothing here reimplements a check the verifier
+// makes (AGENTS.md, Architecture). The chain reads are the simulated
+// contracts' memory (SIMULATION_STUBS).
 
 import {
   type Anchor,
   type AnchorClock,
   type BallotRecordV2,
+  boardBallotSegment,
   cellBallotElection,
   ceremonyTranscriptHash,
   checkCeremonyTranscript,
   checkDestruction,
+  checkEventAccumulatorProof,
+  contractEventLog,
   checkTally,
   type CommittedVote,
   DecodeError,
-  type DeliveryEntry,
   decodeElectionDefinitionRecord,
   decodeOpening,
   deriveTotal,
@@ -48,11 +52,12 @@ import {
 } from "@abolishus/crypto";
 import type { SimulatedIpfs } from "./archive.ts";
 import { anchorClock } from "./anchor.ts";
-import { endOf, postClose, SIMULATED_ANCHOR_DEADLINE } from "./board.ts";
+import type { SimulatedBoardContract } from "./board-contract.ts";
+import { endOf, postClose, SIMULATED_ANCHOR_DEADLINE, SIMULATED_ANCHOR_PERIOD } from "./board.ts";
 import { readCountedExtent, recordTypeOf } from "./count.ts";
-import { SIMULATED_BOARD_ENTRY_VERSION } from "./election.ts";
+import { SIMULATED_BOARD_ENTRY_VERSION, SIMULATED_EVENT_VERSION } from "./election.ts";
 import type { SimulatedL1 } from "./l1.ts";
-import type { SimulatedElectionRegistry, SimulatedTrusteeRegistry } from "./l2.ts";
+import { l2BlockAt, type SimulatedElectionRegistry, type SimulatedTrusteeRegistry } from "./l2.ts";
 
 /**
  * Everything public after the election: what a rebuild may read, and
@@ -66,8 +71,11 @@ export interface PublicRecord {
   /** The board anchor's checkpoints, in L1 order, and its clock. */
   readonly anchor: { readonly anchors: readonly Anchor[]; readonly clock: AnchorClock };
   readonly l1: Pick<SimulatedL1, "block" | "firstAfter" | "finalized">;
-  /** Contract-path share postings, by their submission time. */
-  readonly postings: readonly DeliveryEntry[];
+  /**
+   * The board contract: its accumulator and count at an L2 block, as a
+   * storage proof would show them (SIMULATION_STUBS).
+   */
+  readonly board: Pick<SimulatedBoardContract, "accumulatorAt">;
   readonly ipfs: Pick<SimulatedIpfs, "get">;
 }
 
@@ -81,7 +89,8 @@ export type RebuildFailure =
   | "clock-mismatch"
   | "transcript-mismatch"
   | "ceremony-failed"
-  | "key-set-mismatch";
+  | "key-set-mismatch"
+  | "events-incomplete";
 
 /** A public record from which the election can't be rebuilt. */
 export class RebuildError extends Error {
@@ -270,10 +279,39 @@ export function rebuildElection(record: PublicRecord): RebuiltElection {
       inclusionBound: definition.l1_inclusion_bound,
       finalized,
       window: { l1RefMin: refMin, closesAt: definition.closes_at },
-      postings: record.postings,
+      contracts: {
+        electionRegistry: definition.election_registry,
+        trusteeRegistry: definition.trustee_registry,
+        groupRegistry: definition.group_registry,
+        board: definition.board,
+      },
+      eventVersion: SIMULATED_EVENT_VERSION,
+      opensAt: definition.opens_at,
+      boardSegment: boardBallotSegment(
+        { epoch: 0n, period: SIMULATED_ANCHOR_PERIOD },
+        definition.closes_at,
+      ),
     },
     countedEntries,
   );
+  // The board contract's events in the counted extent, in order of `n`,
+  // replayed against its accumulator at the read's L2 block (verifier 4.4's
+  // accumulator rules): an event left off the board, added, altered or
+  // moved fails, so the operator can't drop a direct submission (T-25,
+  // T-71). Every event is emitted before close, so the counted extent must
+  // hold them all (5.6).
+  const events = [...extent.events]
+    .map((e) => e.record)
+    .sort((a, b) => (a.n < b.n ? -1 : a.n > b.n ? 1 : 0));
+  if (
+    checkEventAccumulatorProof(
+      definition.l2_chain_id,
+      definition.board,
+      events.map(contractEventLog),
+      record.board.accumulatorAt(l2BlockAt(now).number),
+    ) !== null
+  )
+    throw new RebuildError("events-incomplete");
   const vss: CommittedVote["vss"][][] = partition.map(() => []);
   for (const b of extent.counted) {
     // Every selected ballot is one readCountedExtent decoded, in a cell of the partition.

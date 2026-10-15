@@ -54,7 +54,9 @@ FORCED_PATH = {
     # One share-receipt batch of RECEIPT_BATCH_MAX pairs per call.
     "receiptsPerCall": 1024,
     "receiptCallGas": 4_500_000,
-    "complaintCallGas": 180_000,
+    # One share-complaint batch of COMPLAINT_BATCH_MAX entries per call.
+    "complaintsPerCall": 512,
+    "complaintCallGas": 5_000_000,
 }
 # A share-receipt batch's bytes with its header, for `receiptsPerCall` pairs.
 BATCH_LENGTH = 104 + 64 * 1024
@@ -288,12 +290,13 @@ def intervals(e, w):
     c_d = t_d - w["forcedInclusion"]
     owed = 2 * e["members"]
     calls = -(-owed // FORCED_PATH["receiptsPerCall"])
+    complaint_calls = -(-owed // FORCED_PATH["complaintsPerCall"])
     return [
         (c_d - w["margin"], c_d, e["seats"] * calls * FORCED_PATH["receiptCallGas"], "receipts"),
         (
             t_d + w["contractEventWindow"],
             t_k - w["forcedInclusion"],
-            e["seats"] * owed * FORCED_PATH["complaintCallGas"],
+            e["seats"] * complaint_calls * FORCED_PATH["complaintCallGas"],
             "complaints",
         ),
     ]
@@ -320,20 +323,18 @@ def fits(elections, w):
 
 
 def lone_limit(seats, w):
-    """The largest M a lone election fits with, by linear search from a closed-form guess."""
+    """The largest M a lone election fits with: doubling, then bisection over [ok, bad)."""
     one = lambda m: fits([{"members": m, "seats": seats, "closesAt": 0, "l1InclusionBound": 0}], w)
-    per_second = Fraction(FORCED_PATH["depositGasTarget"], FORCED_PATH["l1BlockSeconds"])
-    m = 0
-    # Complaints alone bound M by rate · L_K / (2 · s · gas) (R ≤ L_K, so receipts
-    # never allow more per second than this guess's ceiling).
-    l_k = COMPLAINT_WINDOW - DELIVERY_WINDOW - w["contractEventWindow"] - w["forcedInclusion"]
-    guess = int(per_second * l_k / (2 * seats * FORCED_PATH["complaintCallGas"]))
-    m = guess
-    while m > 0 and not one(m):
-        m -= 1
-    while one(m + 1):
-        m += 1
-    return m
+    ok, bad = 0, 1
+    while one(bad):
+        ok, bad = bad, bad * 2
+    while bad - ok > 1:
+        mid = (ok + bad) // 2
+        if one(mid):
+            ok = mid
+        else:
+            bad = mid
+    return ok
 
 
 def windows(margin_hours, seconds=None):
@@ -405,13 +406,13 @@ def capacity_cases():
         ),
         (
             "receipts-in-complaints",
-            "With R of ten minutes, one election's receipts inside another's complaints, each at its limit: full receipts leave no room for the other's complaints",
+            "With R of ten minutes, one election's receipts inside another's complaints, each at its limit",
             wm,
             [election(lm, 3), election(lm, 3, closes_at=1_800_000_000 + 40 * HOUR)],
         ),
         (
             "complaints-overlap",
-            "With R of one hour, two elections at the limit closing an hour apart: their receipts abut, but their complaints overlap",
+            "With R of one hour, two elections at the limit closing an hour apart: their receipts abut and their complaints overlap, which batched complaints leave room for",
             w1,
             [election(l3, 3), election(l3, 3, closes_at=1_800_000_000 + HOUR)],
         ),
@@ -447,7 +448,7 @@ def capacity_cases():
             }
         )
     assert [c["fits"] for c in out] == [
-        True, False, True, True, False, True, False, True, True, False, True, False, False, False
+        True, False, True, True, False, True, False, True, True, False, True, False, True, True
     ], [c["fits"] for c in out]
     limits = [
         {"seats": s, "margin": str(m * HOUR), "members": str(lone_limit(s, windows(m)))}

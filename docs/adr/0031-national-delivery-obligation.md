@@ -10,7 +10,7 @@
 A trustee node owes, through the contract path, at most two share receipts and two complaints per (`tier`, `ν`) of an election ([[delivery]], What a node owes), and lends its keys only to elections whose obligation it can force through L1 by the deadlines at the portal's sustainable deposit target, 2,000,000 gas per L1 block shared with every depositor ([[delivery]], Capacity). Every record per receipt or complaint costs L1 deposit gas, so the cap grows only linearly with what each record costs:
 
 - one record per receipt (P1-12c): 1,152 members with 3 seats at `R` of one hour;
-- share-receipt batches ([[P1-12d]], about 4,100 gas a receipt) and share-complaint batches (P1-12e, about 3,300 gas a complaint): 20,992 members with 3 seats at `R` of one hour, and about 441,000 at `R` of 21 hours, the most the windows allow.
+- share-receipt batches ([[P1-12d]], about 4,100 gas a receipt) and share-complaint batches ([[P1-12e]], about 8,900 gas a complaint): 20,992 members with 3 seats at `R` of one hour, and 434,688 at `R` of 21 hours, the most the windows allow.
 
 A national referendum has over 150 million eligible members. At 4,100 gas a receipt, two receipts a member and 7 seats, its receipts alone are about 8.6 × 10¹² gas, some 4.3 million L1 blocks of the whole deposit target, about two years. No per-receipt record on L1, or in L2 data forced through L1, carries it. The brief requires civic referendums at national scale ([[PROJECT_BRIEF]]), so the per-receipt forced path can't be the only one.
 
@@ -20,7 +20,7 @@ What is one-way: the delivery check is part of every verifier's judgement of eve
 
 ### A. Per-record batches only
 
-Keep the forced path as P1-12d and P1-12e leave it, and cap civic elections at what it carries. Pros: built; no new availability assumption; every receipt is in L2 data, which every trustee's L2 node reads. Cons: about 440,000 members with 3 seats at best, shared with every other election and depositor, so no national referendum (T-25, T-54).
+Keep the forced path as P1-12d and P1-12e leave it, and cap civic elections at what it carries. Pros: built; no new availability assumption; every receipt is in L2 data, which every trustee's L2 node reads. Cons: about 435,000 members with 3 seats at best, shared with every other election and depositor, so no national referendum (T-25, T-54).
 
 ### B. Receipts in L1 blobs
 
@@ -38,7 +38,7 @@ C, with A kept as the path for small elections and for clients' own receipts. On
 
 ## Consequences
 
-- [[P1-12e]] builds the complaint batches (which also raise A's cap at long `R`); a new item builds C: the obligation-root record and its signed tag, its leaves' layout and content address, the board call and its event in a new contract-event version, the delivery check's inclusion path, the report code for unavailable leaves, and the capacity check reduced to a constant per seat for elections that use it. It must be decided before any election registry is deployed, together with any change to the windows it needs.
+- [[P1-12e]] built the complaint batches (which raise A's cap at long `R`); [[P1-12f]] builds C: the obligation-root record and its signed tag, its leaves' layout and content address, the board call and its event in a new contract-event version, the delivery check's inclusion path, the report code for unavailable leaves, and the capacity check reduced to a constant per seat for elections that use it. It must be decided before any election registry is deployed, together with any change to the windows it needs.
 - The trustee node's intake and decision at `c_I` are unchanged: only how it delivers what it owes changes.
 - Known-weak: until C is built, civic elections are capped at what A carries.
 

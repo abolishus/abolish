@@ -527,7 +527,7 @@ contract BoardCloseRuleTest is TestBase {
             "the top of the low half frames"
         );
         _refuse(
-            _statementCall(_withType(s, 0x0017)),
+            _statementCall(_withType(s, 0x0018)),
             _malformed(ElectionDefinitionLib.DecodeError.UnknownRecordType, 0),
             "an unlisted type"
         );

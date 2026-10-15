@@ -194,6 +194,7 @@ function project(e: ContractEvent): unknown {
         record: bytesToHex(e.record),
       };
     case "ShareReceiptBatchSubmitted":
+    case "ShareComplaintBatchSubmitted":
       return {
         event: e.event,
         definitionHash: bytesToHex(e.definitionHash),
@@ -325,6 +326,7 @@ function reencode(
         data: dyn([], tail(e.record)),
       };
     case "ShareReceiptBatchSubmitted":
+    case "ShareComplaintBatchSubmitted":
       return {
         topics: [sig(e.event), e.definitionHash, uintWord(e.seat)],
         data: dyn([], tail(e.record)),
@@ -348,6 +350,7 @@ const ROLE_OF: Readonly<Record<ContractEvent["event"], ContractRole>> = {
   RelayedBallotSubmitted: "board",
   CloseStatementSubmitted: "board",
   ShareReceiptBatchSubmitted: "board",
+  ShareComplaintBatchSubmitted: "board",
 };
 
 describe.each([
@@ -682,13 +685,15 @@ describe("contract-event version 4 against version 3", () => {
 
   test("version 3 names no batch event, so it refuses each as unknown-event", () => {
     const v3 = contractsOf(FILES[3]);
-    const added = FILES[4].records.filter(
-      (r) => (r.event as { event?: string }).event === "ShareReceiptBatchSubmitted",
+    const added = FILES[4].records.filter((r) =>
+      ["ShareReceiptBatchSubmitted", "ShareComplaintBatchSubmitted"].includes(
+        (r.event as { event?: string }).event ?? "",
+      ),
     );
     expect(added.map((r) => r.id)).toEqual(
       (FILES[4] as Vectors & { unknownUnderVersion3: string[] }).unknownUnderVersion3,
     );
-    expect(added.length).toBe(3);
+    expect(added.length).toBe(6);
     for (const v of added) {
       const record = { ...recordOf(v.fields), contract: v3.board };
       expect(checkContractEvent(record, v3, 3)).toEqual({ ok: false, error: "unknown-event" });

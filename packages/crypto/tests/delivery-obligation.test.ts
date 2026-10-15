@@ -320,7 +320,7 @@ describe("forcedPathFits", () => {
     expect(forcedPathFits([lone(20_992n)], deployed)).toBe(true);
     expect(forcedPathFits([lone(20_993n)], deployed)).toBe(false);
     const long = { ...deployed, margin: 21n * hour };
-    expect(forcedPathMembersLimit(3, long)).toBe(23_589n);
+    expect(forcedPathMembersLimit(3, long)).toBe(434_688n);
   });
 
   test("an empty set fits, and so does an election with no members", () => {

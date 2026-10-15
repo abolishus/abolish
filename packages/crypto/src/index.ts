@@ -208,7 +208,12 @@ export {
   type TagPrimitive,
   TAG_REGISTRY,
 } from "./domain-separation.ts";
-export { frameBallot, frameDelivery, type FramedRecord } from "./direct-submit.ts";
+export {
+  frameBallot,
+  frameComplaintBatch,
+  frameDelivery,
+  type FramedRecord,
+} from "./direct-submit.ts";
 export {
   checkContractEvent,
   CONTRACT_EVENT_SIGNATURES,
@@ -819,8 +824,12 @@ export {
   type DeliveryDeadlines,
   type DeliverySegments,
   DELIVERY_WINDOW,
+  batchShareComplaints,
   batchShareReceipts,
+  COMPLAINT_BATCH_MAX,
+  type ComplaintEntry,
   decodeShareComplaint,
+  decodeShareComplaintBatch,
   decodeSharePosting,
   decodeShareReceipt,
   decodeShareReceiptBatch,
@@ -841,6 +850,7 @@ export {
   type ViewWindow,
   deliverySegments,
   encodeShareComplaint,
+  encodeShareComplaintBatch,
   encodeShareComplaintV2,
   encodeSharePosting,
   encodeSharePostingV2,
@@ -854,9 +864,13 @@ export {
   type ProvenComplaint,
   type ProvenComplaintV2,
   SHARE_COMPLAINT,
+  SHARE_COMPLAINT_BATCH,
   SHARE_POSTING,
   SHARE_RECEIPT,
   SHARE_RECEIPT_BATCH,
+  type ShareComplaintBatchRecord,
+  type ShareComplaintBatchStatement,
+  shareComplaintBatchStatement,
   type ShareComplaintRecord,
   type ShareComplaintRecordV2,
   type ShareComplaintStatement,

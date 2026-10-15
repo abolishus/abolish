@@ -119,6 +119,8 @@ export interface DeliveryReport {
     /** Each proven complaint about it, with the seat its signature attributes it to, or `null`. */
     readonly complaints: readonly {
       readonly entry: number;
+      /** For a share-complaint batch's entry, its index in the batch from 0. */
+      readonly pair?: number;
       readonly seat: number;
       readonly signer: number | null;
     }[];
@@ -221,6 +223,7 @@ const DELIVERY_EVENTS: ReadonlySet<string> = new Set([
   "SharePosted",
   "ShareComplaintSubmitted",
   "ShareReceiptBatchSubmitted",
+  "ShareComplaintBatchSubmitted",
 ]);
 
 const readsEvents = (v: number | undefined): v is ContractEventVersion =>
@@ -373,6 +376,7 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
               missing: b.missing,
               complaints: b.excludedBy.map((c) => ({
                 entry: entryOf(c.at),
+                ...(c.pair !== undefined && { pair: c.pair }),
                 seat: c.seat,
                 signer: c.signer,
               })),

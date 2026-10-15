@@ -38,7 +38,7 @@ import {
 } from "./group-registry.ts";
 import { decodeCloseStatement } from "./close-statement.ts";
 import { decodeShareReceiptBatch, RECEIPT_BATCH_MAX } from "./delivery.ts";
-import { frameBallot, frameDelivery } from "./direct-submit.ts";
+import { frameBallot, frameComplaintBatch, frameDelivery } from "./direct-submit.ts";
 import {
   type AnyElectionDefinitionRecord,
   decodeElectionDefinitionRecord,
@@ -230,6 +230,13 @@ export type ContractEvent =
       readonly definitionHash: Uint8Array;
       readonly seat: number;
       /** The share-receipt batch, which decodes strictly as version 1. */
+      readonly record: Uint8Array;
+    }
+  | {
+      readonly event: "ShareComplaintBatchSubmitted";
+      readonly definitionHash: Uint8Array;
+      readonly seat: number;
+      /** The share-complaint batch, framed as the board frames version 1. */
       readonly record: Uint8Array;
     };
 
@@ -680,6 +687,37 @@ const SHARE_RECEIPT_BATCH_SUBMITTED: EventSpec = {
   },
 };
 
+// A share-complaint batch through the contract path: the record whole,
+// framed as the board frames it, each `D` never decoded, so a batch the
+// board emits always passes (T-53); the delivery check decodes it strictly.
+const COMPLAINT_BATCH_LENGTH_MAX = 104 + 128 * 512;
+
+const SHARE_COMPLAINT_BATCH_SUBMITTED: EventSpec = {
+  signature: "ShareComplaintBatchSubmitted(bytes32,uint8,bytes)",
+  decode(topics, data) {
+    const [, definitionHash, seatWord] = topics;
+    const seat = seatWord && uintWord(seatWord, 8);
+    if (topics.length !== 3 || definitionHash === undefined || seat === undefined)
+      return "event-topics";
+    const record = readAbi(data, 1, [{ at: 0, words: false, max: COMPLAINT_BATCH_LENGTH_MAX }])
+      ?.tails[0];
+    const framed = record && frameComplaintBatch(record);
+    if (
+      record === undefined ||
+      framed === undefined ||
+      !equalBytes(framed.definitionHash, definitionHash) ||
+      BigInt(framed.seat) !== seat
+    )
+      return "event-data";
+    return {
+      event: "ShareComplaintBatchSubmitted",
+      definitionHash: definitionHash.slice(),
+      seat: framed.seat,
+      record,
+    };
+  },
+};
+
 const BOARD_EVENTS: readonly EventSpec[] = [
   boardEvent("BallotSubmitted", frameBallot),
   boardEvent("ShareReceiptSubmitted", (r) => frameDelivery(RECORD_TYPES.shareReceipt, r)),
@@ -719,7 +757,7 @@ const TABLES: Readonly<
     "group-registry": GROUP_EVENTS,
     board: [...BOARD_EVENTS, RELAYED_BALLOT_SUBMITTED, CLOSE_STATEMENT_SUBMITTED],
   },
-  // Version 3's rows, with the share-receipt batch's event added.
+  // Version 3's rows, with the two batches' events added.
   4: {
     "election-registry": [ELECTION_CREATED, DEFINITION_REGISTERED_V2],
     "trustee-registry": [PANEL_PINNED, CEREMONY_REGISTERED_V2],
@@ -729,6 +767,7 @@ const TABLES: Readonly<
       RELAYED_BALLOT_SUBMITTED,
       CLOSE_STATEMENT_SUBMITTED,
       SHARE_RECEIPT_BATCH_SUBMITTED,
+      SHARE_COMPLAINT_BATCH_SUBMITTED,
     ],
   },
 };

@@ -2,7 +2,12 @@ import fc from "fast-check";
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vite-plus/test";
 import {
+  batchShareComplaints,
   batchShareReceipts,
+  COMPLAINT_BATCH_MAX,
+  decodeShareComplaintBatch,
+  encodeShareComplaintBatch,
+  shareComplaintBatchStatement,
   checkDelivery,
   checkDeliveryV2,
   COMMITTED_VOTE,
@@ -92,6 +97,21 @@ interface Vectors {
     readonly error: string;
     readonly offset: number;
   }[];
+  readonly complaintTag: string;
+  readonly maxComplaints: number;
+  readonly complaintRecords: readonly {
+    readonly id: string;
+    readonly encoding: string;
+    readonly seat: number;
+    readonly count: number;
+    readonly statement: string;
+  }[];
+  readonly complaintDecode: readonly {
+    readonly id: string;
+    readonly encoding: string;
+    readonly error: string;
+    readonly offset: number;
+  }[];
   readonly elections: readonly ElectionVector[];
 }
 
@@ -145,7 +165,7 @@ function asJson(r: DeliveryCheck): ElectionVector["result"] {
       counted: b.counted,
       delivered: b.delivered,
       missing: [...b.missing],
-      excludedBy: b.excludedBy.map(({ at, seat, signer }) => ({ at, seat, signer })),
+      excludedBy: b.excludedBy.map((c) => ({ ...c })),
     })),
     records: r.records.map((x) => ({ ...x })),
     rejected: r.rejected.map(({ at, error }) => ({ at, error })),
@@ -192,6 +212,48 @@ describe("share-receipt batch vectors (docs/spec/vectors/delivery-batch.json)", 
       );
       if (made === undefined) throw new Error("no batch");
       expect(bytesHex(encodeShareReceiptBatch(made))).toBe(r.encoding);
+    },
+  );
+
+  test("the complaint batch's tag, maximum and record type", () => {
+    expect(V.complaintTag).toBe("abolish/v1/sig/share-complaint-batch");
+    expect(V.maxComplaints).toBe(COMPLAINT_BATCH_MAX);
+    expect(RECORD_TYPES.shareComplaintBatch).toBe(0x0017);
+  });
+
+  test.each(V.complaintRecords.map((r) => [r.id, r] as const))(
+    "complaint batch %s decodes, re-encodes and is re-made from the seat's secret (RFC 6979)",
+    (_id, r) => {
+      const b = decodeShareComplaintBatch(hex(r.encoding), 1);
+      expect(bytesHex(encodeShareComplaintBatch(b))).toBe(r.encoding);
+      expect(b.seat).toBe(r.seat);
+      expect(b.complaints.length).toBe(r.count);
+      expect(bytesHex(shareComplaintBatchStatement(b))).toBe(r.statement);
+      const [made] = batchShareComplaints(
+        secretOf(r.seat),
+        DEFINITION,
+        r.seat,
+        [...b.complaints].reverse(),
+      );
+      if (made === undefined) throw new Error("no batch");
+      expect(bytesHex(encodeShareComplaintBatch(made))).toBe(r.encoding);
+    },
+  );
+
+  test.each(V.complaintDecode.map((v) => [v.id, v] as const))(
+    "rejects complaint batch %s",
+    (_id, v) => {
+      let err: unknown;
+      try {
+        decodeShareComplaintBatch(hex(v.encoding), 1);
+      } catch (e) {
+        err = e;
+      }
+      expect(err).toBeInstanceOf(DecodeError);
+      expect({ code: (err as DecodeError).code, offset: (err as DecodeError).offset }).toEqual({
+        code: v.error,
+        offset: v.offset,
+      });
     },
   );
 

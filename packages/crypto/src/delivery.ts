@@ -255,12 +255,145 @@ export type ShareReceiptBatchRecord = CodecValue<typeof batchV1>;
  */
 export const SHARE_RECEIPT_BATCH = recordType(RECORD_TYPES.shareReceiptBatch, { 1: batchV1 });
 
+// --- Share-complaint batch (docs/spec/delivery.md, Share-complaint batch) ----------
+
+/** `COMPLAINT_BATCH_MAX`: the most complaints one share-complaint batch carries. */
+export const COMPLAINT_BATCH_MAX = 512;
+
+const COMPLAINT_BATCH_TAG = "abolish/v1/sig/share-complaint-batch";
+
+/** One complaint in a batch: the ballot whose posting it is about, and its proof. */
+export interface ComplaintEntry {
+  readonly ballot_hash: Uint8Array;
+  readonly proof: ComplaintProof;
+}
+
+// `list<complaint_entry, COMPLAINT_BATCH_MAX>` with 1 to COMPLAINT_BATCH_MAX
+// entries, strictly ascending by ballot hash: one complaint per ballot, and
+// one encoding per set (T-31). Each entry's order is checked once its ballot
+// hash is read, before its proof.
+const complaintEntries: Codec<readonly ComplaintEntry[]> = {
+  minLength: 4 + 128,
+  write(w, value) {
+    if (!Array.isArray(value)) throw new EncodeError("complaints: expected an array");
+    const entries = value as readonly ComplaintEntry[];
+    const n = entries.length;
+    if (n < 1 || n > COMPLAINT_BATCH_MAX)
+      throw new EncodeError(`complaints: a batch carries 1 to ${COMPLAINT_BATCH_MAX} entries`);
+    w.uint(4, n);
+    for (let i = 0; i < n; i++) {
+      const e = entries[i] as ComplaintEntry;
+      if (i > 0 && compareBytes(e.ballot_hash, (entries[i - 1] as ComplaintEntry).ballot_hash) <= 0)
+        throw new EncodeError("complaints: entries must be strictly ascending by ballot hash");
+      hash32.write(w, e.ballot_hash);
+      COMPLAINT_PROOF.write(w, e.proof);
+    }
+  },
+  read(r) {
+    const at = r.offset;
+    const count = r.uint(4);
+    if (count > COMPLAINT_BATCH_MAX) throw new DecodeError("length-over-max", at);
+    if (count === 0) throw new DecodeError("non-canonical", at);
+    const out: ComplaintEntry[] = [];
+    for (let i = 0; i < count; i++) {
+      const eAt = r.offset;
+      const ballot_hash = hash32.read(r);
+      const last = out[out.length - 1];
+      if (last !== undefined && compareBytes(ballot_hash, last.ballot_hash) <= 0)
+        throw new DecodeError("non-canonical", eAt);
+      out.push({ ballot_hash, proof: COMPLAINT_PROOF.read(r) });
+    }
+    return out;
+  },
+};
+
+const complaintBatchFields = [
+  ["definition_hash", bytesFixed(32)],
+  ["seat", u8],
+  ["complaints", complaintEntries],
+] as const;
+
+const complaintBatchStatementV1 = struct(complaintBatchFields);
+
+const complaintBatchV1 = struct([...complaintBatchFields, ["signature", p256Sig]] as const);
+
+/** The complaint batch's signed fields: `definition_hash ‖ u8(seat) ‖ u32(c) ‖ (ballot_hash ‖ encode(proof)) × c`. */
+export type ShareComplaintBatchStatement = CodecValue<typeof complaintBatchStatementV1>;
+
+/** A share-complaint batch (`0x0017`, version 1). */
+export type ShareComplaintBatchRecord = CodecValue<typeof complaintBatchV1>;
+
+/**
+ * Record type `0x0017`. Ballot versions 1 to 3 fix it at version 1; versions
+ * 4 and 5 fix none yet; it is never pinned, and travels only through the
+ * contract path.
+ */
+export const SHARE_COMPLAINT_BATCH = recordType(RECORD_TYPES.shareComplaintBatch, {
+  1: complaintBatchV1,
+});
+
 const SCHEMA = new RecordSchema([
   SHARE_RECEIPT,
   SHARE_POSTING,
   SHARE_COMPLAINT,
   SHARE_RECEIPT_BATCH,
+  SHARE_COMPLAINT_BATCH,
 ]);
+
+export function encodeShareComplaintBatch(record: ShareComplaintBatchRecord): Uint8Array {
+  return SCHEMA.encode(SHARE_COMPLAINT_BATCH, 1, record);
+}
+
+/** Strictly decodes a share-complaint batch against version 1, the version ballot versions 1 to 3 fix. */
+export function decodeShareComplaintBatch(bytes: Uint8Array, pinned: 1): ShareComplaintBatchRecord {
+  return SCHEMA.decode(SHARE_COMPLAINT_BATCH, bytes, pinned).value;
+}
+
+/** `m`, the complaint batch's signed statement: its fields without header or signature, `37 + 128·c` bytes. */
+export function shareComplaintBatchStatement(statement: ShareComplaintBatchStatement): Uint8Array {
+  return encode(complaintBatchStatementV1, {
+    definition_hash: statement.definition_hash,
+    seat: statement.seat,
+    complaints: statement.complaints,
+  });
+}
+
+/**
+ * A trustee node's batches of the complaints it owes for one election, one
+ * per ballot hash (one complaint covers every passing posting of a ballot
+ * and seat), sorted by ballot hash, cut into batches of at most
+ * `COMPLAINT_BATCH_MAX` and each signed with the seat's per-election signing
+ * key. Each proof comes from `proveComplaint`; a repeated ballot hash throws.
+ */
+export function batchShareComplaints(
+  signingSecret: Uint8Array,
+  definitionHash: Uint8Array,
+  seat: number,
+  complaints: readonly ComplaintEntry[],
+): ShareComplaintBatchRecord[] {
+  const sorted = complaints
+    .map((e) => ({ ballot_hash: Uint8Array.from(e.ballot_hash), proof: e.proof }))
+    .sort((a, b) => compareBytes(a.ballot_hash, b.ballot_hash));
+  for (let i = 1; i < sorted.length; i++)
+    if (
+      compareBytes(
+        (sorted[i] as ComplaintEntry).ballot_hash,
+        (sorted[i - 1] as ComplaintEntry).ballot_hash,
+      ) === 0
+    )
+      throw new RangeError("batchShareComplaints: a ballot hash is listed twice");
+  const batches: ShareComplaintBatchRecord[] = [];
+  for (let i = 0; i < sorted.length; i += COMPLAINT_BATCH_MAX) {
+    const statement = {
+      definition_hash: Uint8Array.from(definitionHash),
+      seat,
+      complaints: sorted.slice(i, i + COMPLAINT_BATCH_MAX),
+    };
+    const m = shareComplaintBatchStatement(statement);
+    batches.push({ ...statement, signature: signStatement(signingSecret, COMPLAINT_BATCH_TAG, m) });
+  }
+  return batches;
+}
 
 export function encodeShareReceiptBatch(record: ShareReceiptBatchRecord): Uint8Array {
   return SCHEMA.encode(SHARE_RECEIPT_BATCH, 1, record);
@@ -738,8 +871,10 @@ export const FORCED_PATH = Object.freeze({
   receiptsPerCall: 1024n,
   /** Gas of one batch call of up to `receiptsPerCall` receipts, intrinsic gas included. */
   receiptCallGas: 4_500_000n,
-  /** Gas of one `submitComplaint` call, intrinsic gas included. */
-  complaintCallGas: 180_000n,
+  /** Complaints in one `submitComplaintBatch` call: one batch of `COMPLAINT_BATCH_MAX` entries. */
+  complaintsPerCall: 512n,
+  /** Gas of one complaint-batch call of up to `complaintsPerCall`, intrinsic gas included. */
+  complaintCallGas: 5_000_000n,
 } as const);
 
 /** The windows the forced path's intervals are read from: `W_C`, `F` and `R`, the values `deliveryWindowFits` checks. */
@@ -781,8 +916,8 @@ function forcedPathLengths(w: ForcedPathWindows): { receipts: bigint; complaints
  * The forced path's demand of one election (docs/spec/delivery.md, Capacity):
  * every seat's receipts, `s · ⌈2M / RECEIPTS_PER_CALL⌉` receipt calls between
  * the intake cutoff `c_I` and `c_D = t_D − F`, and every seat's complaints,
- * `s · 2M` complaint calls between `t_D + W_C`, when the last posting in time
- * is recorded, and `c_K = t_K − F`.
+ * `s · ⌈2M / COMPLAINTS_PER_CALL⌉` complaint-batch calls between `t_D + W_C`,
+ * when the last posting in time is recorded, and `c_K = t_K − F`.
  */
 export function forcedPathDemand(
   election: ForcedPathElection,
@@ -805,7 +940,10 @@ export function forcedPathDemand(
     complaints: {
       start: delivery + windows.contractEventWindow,
       end: complaint - windows.forcedInclusion,
-      gas: s * owed * FORCED_PATH.complaintCallGas,
+      gas:
+        s *
+        ((owed + FORCED_PATH.complaintsPerCall - 1n) / FORCED_PATH.complaintsPerCall) *
+        FORCED_PATH.complaintCallGas,
     },
   };
 }
@@ -956,6 +1094,8 @@ export interface DeliveryRecordReport {
 /** A proven complaint, by its position, with the seat its signature attributes it to, or `null`. */
 export interface ProvenComplaint {
   readonly at: number;
+  /** For a share-complaint batch's entry, its index in the batch from 0. */
+  readonly pair?: number;
   readonly seat: number;
   readonly signer: number | null;
 }
@@ -1016,12 +1156,23 @@ interface BatchItem extends PanelSeat {
   readonly signature: Uint8Array;
 }
 
+/** A decoded share-complaint batch: one seat's complaints under one signature over `statement`. */
+interface ComplaintBatchItem extends PanelSeat {
+  readonly kind: "complaint-batch";
+  readonly definitionHash: Uint8Array;
+  readonly entries: readonly ComplaintEntry[];
+  readonly statement: Uint8Array;
+  readonly signature: Uint8Array;
+}
+
 /** What differs between the versions: decoding, each panel's keys, and the per-seat checks. */
 interface DeliveryRules {
   /** Strictly decodes a payload of `kind` under the version the ballot version fixes; throws `DecodeError`. */
   decode(kind: DeliveryItem["kind"], payload: Uint8Array): DeliveryItem;
   /** Strictly decodes a contract-path batch under the version the ballot version fixes; throws `DecodeError`. */
   decodeBatch(payload: Uint8Array): BatchItem;
+  /** The same for a contract-path complaint batch. */
+  decodeComplaintBatch(payload: Uint8Array): ComplaintBatchItem;
   /** The tag a complaint's signature is under. */
   readonly complaintTag: SignatureTag;
   /** The seat's registered keys in its own panel's key set. */
@@ -1076,13 +1227,14 @@ const bySeat = (a: PanelSeat, b: PanelSeat) => a.panel - b.panel || a.seat - b.s
 function deliveryKind(
   payload: Uint8Array,
   path: DeliveryEntry["path"],
-): DeliveryItem["kind"] | "batch" {
+): DeliveryItem["kind"] | "batch" | "complaint-batch" {
   if (payload.length < 3) throw new DecodeError("truncated", 0);
   const type = ((payload[0] as number) << 8) | (payload[1] as number);
   if (type === RECORD_TYPES.shareReceipt) return "receipt";
   if (type === RECORD_TYPES.sharePosting && path === "contract") return "posting";
   if (type === RECORD_TYPES.shareComplaint) return "complaint";
   if (type === RECORD_TYPES.shareReceiptBatch && path === "contract") return "batch";
+  if (type === RECORD_TYPES.shareComplaintBatch && path === "contract") return "complaint-batch";
   throw new DecodeError("unexpected-record-type", 0);
 }
 
@@ -1147,10 +1299,18 @@ function deliveryCheck(
   const rejected: { at: number; error: DecodeErrorCode }[] = [];
   // Passing receipts and complaints to check once every posting is known, by ballot.
   const receipts: { at: number; pair?: number; ballot: number; seat: PanelSeat }[] = [];
+  // A batch entry carries its batch's signature verdict; a single complaint is
+  // verified when it is judged.
   const complaints: {
     at: number;
+    pair?: number;
     ballot: number;
-    item: DeliveryItem & { readonly kind: "complaint" };
+    item: PanelSeat & {
+      readonly proof: ComplaintProof;
+      readonly statement: Uint8Array;
+      readonly signature: Uint8Array;
+    };
+    signed?: boolean;
   }[] = [];
   const postings = hashes.map(() => new Map<string, Posting>());
 
@@ -1183,11 +1343,47 @@ function deliveryCheck(
     });
   };
 
+  // A contract-path complaint batch: each entry is read as the complaint it
+  // states, attributed by the batch's one signature (docs/spec/delivery.md,
+  // Share-complaint batch).
+  const complaintBatch = (at: number, submittedAt: bigint, d: ComplaintBatchItem) => {
+    const seat: PanelSeat = { panel: d.panel, seat: d.seat };
+    const key = rules.keys(seat);
+    // T-29: only the seat's registered signing key, never its identity key.
+    const signed =
+      key !== undefined &&
+      verifyStatement(key.signingKey, COMPLAINT_BATCH_TAG, d.statement, d.signature);
+    d.entries.forEach((e, pair) => {
+      const ballot = byHash.get(hex(e.ballot_hash));
+      if (ballot === undefined) return;
+      if (key === undefined) {
+        records.push({ at, pair, code: "delivery-seat", ...seat });
+        return;
+      }
+      if (submittedAt > deadlines.complaint) {
+        records.push({ at, pair, code: "delivery-late", ...seat });
+        return;
+      }
+      complaints.push({
+        at,
+        pair,
+        ballot,
+        item: { ...seat, proof: e.proof, statement: d.statement, signature: d.signature },
+        signed,
+      });
+    });
+  };
+
   entries.forEach((entry, at) => {
-    let d: DeliveryItem | BatchItem;
+    let d: DeliveryItem | BatchItem | ComplaintBatchItem;
     try {
       const kind = deliveryKind(entry.payload, entry.path);
-      d = kind === "batch" ? rules.decodeBatch(entry.payload) : rules.decode(kind, entry.payload);
+      d =
+        kind === "batch"
+          ? rules.decodeBatch(entry.payload)
+          : kind === "complaint-batch"
+            ? rules.decodeComplaintBatch(entry.payload)
+            : rules.decode(kind, entry.payload);
     } catch (e) {
       if (!(e instanceof DecodeError)) throw e;
       rejected.push({ at, error: e.code });
@@ -1198,9 +1394,11 @@ function deliveryCheck(
       records.push({ at, code: "delivery-stray", ...seat });
       return;
     }
-    if (d.kind === "batch") {
+    if (d.kind === "batch" || d.kind === "complaint-batch") {
       // deliveryKind reads a batch only through the contract path.
-      if (entry.path === "contract") batch(at, entry.submittedAt, d);
+      if (entry.path === "contract")
+        if (d.kind === "batch") batch(at, entry.submittedAt, d);
+        else complaintBatch(at, entry.submittedAt, d);
       return;
     }
     const ballot = byHash.get(hex(d.ballotHash));
@@ -1257,28 +1455,26 @@ function deliveryCheck(
   // Complaints, once every posting is known: the passing posting needn't come
   // before the complaint on the board.
   const excluded = hashes.map(() => [] as (ProvenComplaint & { readonly panel: SeatPanel })[]);
-  for (const { at, ballot, item } of complaints) {
+  for (const { at, pair, ballot, item, signed } of complaints) {
     const seat: PanelSeat = { panel: item.panel, seat: item.seat };
+    const p = pair === undefined ? {} : { pair };
     const posting = postings[ballot]?.get(seatKey(seat));
     if (posting === undefined) {
-      records.push({ at, code: "complaint-void", ...seat });
+      records.push({ at, ...p, code: "complaint-void", ...seat });
       continue;
     }
     const key = rules.keys(seat) as RegisteredKeys;
     const result = rules.complaint(ballot, seat, key, posting, item.proof);
     // T-29: attributed only under the seat's registered signing key, never its identity key.
-    const signer = verifyStatement(
-      key.signingKey,
-      rules.complaintTag,
-      item.statement,
-      item.signature,
-    )
-      ? item.seat
-      : null;
-    if (result.ok) excluded[ballot]?.push({ at, ...seat, signer });
+    const signer =
+      (signed ??
+      verifyStatement(key.signingKey, rules.complaintTag, item.statement, item.signature))
+        ? item.seat
+        : null;
+    if (result.ok) excluded[ballot]?.push({ at, ...p, ...seat, signer });
     else if (result.code === "complaint-unfounded")
-      records.push({ at, code: "complaint-unfounded", signer, ...seat });
-    else records.push({ at, code: "complaint-proof", ...seat });
+      records.push({ at, ...p, code: "complaint-unfounded", signer, ...seat });
+    else records.push({ at, ...p, code: "complaint-proof", ...seat });
   }
   // A passing receipt for a seat whose complaint about the same ballot, in the
   // same panel, is proven: the seat signed that shares passed which a public
@@ -1298,7 +1494,7 @@ function deliveryCheck(
     const got = delivered[i] as Set<string>;
     const missing = qualified.filter((s) => !got.has(seatKey(s))).sort(bySeat);
     const excludedBy = (excluded[i] as (ProvenComplaint & { panel: SeatPanel })[]).sort(
-      (a, b) => a.at - b.at,
+      (a, b) => a.at - b.at || (a.pair ?? -1) - (b.pair ?? -1),
     );
     return {
       ballotHash,
@@ -1350,6 +1546,18 @@ export function checkDelivery(
   const ctx = { definitionHash };
   const rules: DeliveryRules = {
     complaintTag: COMPLAINT_TAG,
+    decodeComplaintBatch(payload) {
+      const r = decodeShareComplaintBatch(payload, pinned);
+      return {
+        kind: "complaint-batch",
+        definitionHash: r.definition_hash,
+        panel: SEAT_PANELS.default,
+        seat: r.seat,
+        entries: r.complaints,
+        statement: shareComplaintBatchStatement(r),
+        signature: r.signature,
+      };
+    },
     decodeBatch(payload) {
       const r = decodeShareReceiptBatch(payload, pinned);
       return {
@@ -1434,7 +1642,12 @@ export function checkDelivery(
       counted: b.counted,
       delivered: b.delivered,
       missing: b.missing.map((s) => s.seat),
-      excludedBy: b.excludedBy.map(({ at, seat, signer }) => ({ at, seat, signer })),
+      excludedBy: b.excludedBy.map(({ at, pair, seat, signer }) => ({
+        at,
+        ...(pair === undefined ? {} : { pair }),
+        seat,
+        signer,
+      })),
     })),
     records: r.records.map(({ at, pair, code, signer }) => ({
       at,
@@ -1570,6 +1783,9 @@ export function checkDeliveryV2With(
     // Ballot versions 4 and 5 fix no batch version yet (P2-16 part 5 brings
     // version 2, with the seat's panel), so every batch is a rejected entry.
     decodeBatch() {
+      throw new DecodeError("profile-mismatch", 2);
+    },
+    decodeComplaintBatch() {
       throw new DecodeError("profile-mismatch", 2);
     },
     decode(kind, payload) {

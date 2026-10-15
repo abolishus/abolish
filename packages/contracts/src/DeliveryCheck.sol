@@ -71,6 +71,7 @@ library DeliveryCheckLib {
     uint16 internal constant POSTING_TYPE = 0x000d;
     uint16 internal constant COMPLAINT_TYPE = 0x000e;
     uint16 internal constant BATCH_TYPE = 0x0016;
+    uint16 internal constant COMPLAINT_BATCH_TYPE = 0x0017;
     /// A share receipt with its header; a complaint with its header.
     uint256 internal constant RECEIPT_LENGTH = 164;
     uint256 internal constant COMPLAINT_LENGTH = 228;
@@ -92,6 +93,8 @@ library DeliveryCheckLib {
     uint256 internal constant BATCH_PAIRS_AT = 40;
     /// `RECEIPT_BATCH_MAX`.
     uint256 internal constant BATCH_MAX = 1024;
+    /// `COMPLAINT_BATCH_MAX`, each entry a ballot hash and a 96-byte proof.
+    uint256 internal constant COMPLAINT_BATCH_MAX = 512;
 
     /// `u8(len(tag)) ‖ tag` for `abolish/v1/sig/share-receipt` (0x1c = 28),
     /// `abolish/v1/sig/share-complaint` (0x1e = 30) and
@@ -101,6 +104,8 @@ library DeliveryCheckLib {
     bytes internal constant DS_CIPHERTEXT = "\x1babolish/v1/share-ciphertext";
     /// `abolish/v1/sig/share-receipt-batch` (0x22 = 34).
     bytes internal constant DS_BATCH = "\x22abolish/v1/sig/share-receipt-batch";
+    /// `abolish/v1/sig/share-complaint-batch` (0x24 = 36).
+    bytes internal constant DS_COMPLAINT_BATCH = "\x24abolish/v1/sig/share-complaint-batch";
 
     /// Checks share receipt number `index` of a batch, a 164-byte slice,
     /// and returns the definition and ballot hashes it names.
@@ -161,6 +166,47 @@ library DeliveryCheckLib {
         // `m`: the `37 + 64·c` bytes before the signature, verified once for
         // every pair (docs/spec/delivery.md, Share-receipt batch).
         _verify(r, 0, definitionHash, seat, elections, trustees, DS_BATCH, sigAt);
+    }
+
+    /// Checks a share-complaint batch, the record of `submitComplaintBatch`,
+    /// and returns the definition hash and seat it names: framed strictly,
+    /// its entries strictly ascending by ballot hash, each proof framed as a
+    /// single complaint's, and one signature by the seat's registered key
+    /// over every field before it. The proofs are the verifier's (T-29).
+    function checkComplaintBatch(
+        bytes calldata r,
+        IBoardElections elections,
+        IBoardTrustees trustees
+    ) internal view returns (bytes32 definitionHash, uint8 seat) {
+        definitionHash = _definition(r, 0, COMPLAINT_BATCH_TYPE, elections);
+        seat = uint8(_uint(r, 0, BATCH_SEAT_AT, 1));
+        uint256 count = _uint(r, 0, BATCH_COUNT_AT, 4);
+        // The count is bounded before any entry is read (T-52).
+        if (count > COMPLAINT_BATCH_MAX) {
+            _malformed(0, ElectionDefinitionLib.DecodeError.LengthOverMax, BATCH_COUNT_AT);
+        }
+        if (count == 0) {
+            _malformed(0, ElectionDefinitionLib.DecodeError.NonCanonical, BATCH_COUNT_AT);
+        }
+        uint256 last;
+        for (uint256 j; j < count; j++) {
+            uint256 o = BATCH_PAIRS_AT + 128 * j;
+            uint256 ballotHash = _uint(r, 0, o, 32);
+            if (j > 0 && ballotHash <= last) {
+                _malformed(0, ElectionDefinitionLib.DecodeError.NonCanonical, o);
+            }
+            last = ballotHash;
+            // `complaint_proof`: `D`, never the identity, then `c` and `z`.
+            _element(r, 0, o + 32);
+            _scalar(r, 0, o + 64);
+            _scalar(r, 0, o + 96);
+        }
+        uint256 sigAt = BATCH_PAIRS_AT + 128 * count;
+        _signature(r, 0, sigAt);
+        if (r.length != sigAt + 64) {
+            _malformed(0, ElectionDefinitionLib.DecodeError.TrailingBytes, sigAt + 64);
+        }
+        _verify(r, 0, definitionHash, seat, elections, trustees, DS_COMPLAINT_BATCH, sigAt);
     }
 
     /// Checks a share complaint and returns the hashes it names.

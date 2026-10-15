@@ -4,8 +4,10 @@
 A second implementation of docs/spec/contracts.md (Contract-event record,
 Event tables (version 4)): record type 0x0008 version 4, its strict decoding,
 and the event check under version 4's tables, which are version 3's with one
-board event added: `ShareReceiptBatchSubmitted`, carrying a share-receipt
-batch (0x0016, version 1) whose topics are its `definition_hash` and `seat`.
+board events added: `ShareReceiptBatchSubmitted`, carrying a share-receipt
+batch (0x0016, version 1), and `ShareComplaintBatchSubmitted`, carrying a
+share-complaint batch (0x0017, version 1) framed as the board frames it, each
+with its `definition_hash` and `seat` as the topics.
 
 It reuses only this folder's other independent generators:
 contract-event-v3-vectors.py (version 3, from the same spec) for version 3's
@@ -68,12 +70,22 @@ def decode(b):
 # ----------------------------------------------------------- the event check
 
 BATCH = "ShareReceiptBatchSubmitted(bytes32,uint8,bytes)"
+COMPLAINT_BATCH = "ShareComplaintBatchSubmitted(bytes32,uint8,bytes)"
 
 SIGNATURES = {role: list(sigs) for role, sigs in v3.SIGNATURES.items()}
-SIGNATURES["board"] += [BATCH]
+SIGNATURES["board"] += [BATCH, COMPLAINT_BATCH]
 
 INDEXED = dict(v3.INDEXED)
 INDEXED["ShareReceiptBatchSubmitted"] = ["definitionHash", "seat"]
+INDEXED["ShareComplaintBatchSubmitted"] = ["definitionHash", "seat"]
+
+# Each batch as the event check reads it: a receipt batch decodes strictly;
+# a complaint batch is framed as the board frames it, its D never decoded
+# (contracts.md, What the board frames; T-53).
+PARSE = {
+    "ShareReceiptBatchSubmitted": db.parse_batch,
+    "ShareComplaintBatchSubmitted": lambda b: db.parse_complaint_batch(b, framed=True),
+}
 
 
 def event_check(rec, contracts, definitions):
@@ -88,12 +100,12 @@ def event_check(rec, contracts, definitions):
     name = names[topics[0]].split("(")[0]
     if len(topics) != 1 + len(INDEXED[name]):
         return "event-topics"
-    if name == "ShareReceiptBatchSubmitted":
+    if name in PARSE:
         seat = uint_of(topics[2], 8)
         if seat is None:
             return "event-topics"
         body = abi_tail(data, 1, 0, 1)
-        if body is None or not isinstance(db.parse_batch(body), dict):
+        if body is None or not isinstance(PARSE[name](body), dict):
             return "event-data"
         if body[3:35] != topics[1] or body[35] != seat:
             return "event-data"
@@ -188,7 +200,7 @@ def main(root):
             entry["event"] = result
             records.append((entry, rec))
             # Version 3 names no batch event: under it the same record fails unknown-event.
-            if result["event"] == "ShareReceiptBatchSubmitted":
+            if result["event"] in PARSE:
                 assert v3.event_check(rec, contracts, definitions) == "unknown-event", rid
                 v3_unknown.append(rid)
 
@@ -205,6 +217,45 @@ def main(root):
     for rid, b in honest_batches.items():
         record(f"batch-{rid}", f"ShareReceiptBatchSubmitted carrying delivery-batch.json's {rid}", board,
                batch_topics(b), word(32) + abi_bytes(b))
+
+    complaint_batches = {r["id"]: bytes.fromhex(r["encoding"]) for r in batches["complaintRecords"]}
+
+    def complaint_topics(b):
+        return [T["ShareComplaintBatchSubmitted"], b[3:35], word(b[35])]
+
+    for rid, b in complaint_batches.items():
+        record(f"complaint-batch-{rid}", f"ShareComplaintBatchSubmitted carrying delivery-batch.json's {rid}", board,
+               complaint_topics(b), word(32) + abi_bytes(b))
+    k2 = complaint_batches["two-entries"]
+    # D framed but not a point: the board emits it (it never decodes D), so the
+    # event check must pass it too, or one seat could fail every election (T-53).
+    not_point = None
+    for v in range(2, 1 << 12, 2):
+        cand = v.to_bytes(32, "little")
+        if db.grp.decode(cand) is None:
+            not_point = cand
+            break
+    # Re-signed by seat 2, as delivery-batch.json's panel lists its secret, so
+    # the board, which checks the signature, emits it.
+    body = k2[3:72] + not_point + k2[104:-64]
+    seat2 = next(p for p in batches["panel"] if p["seat"] == 2)
+    framed_only = k2[:3] + body + db.sr.sign(int(seat2["signingSecret"], 16), body, db.COMPLAINT_BATCH_TAG)
+    record("complaint-batch-d-not-a-point", "ShareComplaintBatchSubmitted whose first D frames (even, below 2^255 - 19) but isn't a ristretto255 point: the board emits it, and the event check passes it; the delivery check rejects the record", board,
+           complaint_topics(framed_only), word(32) + abi_bytes(framed_only))
+    kt, kd = complaint_topics(k2), word(32) + abi_bytes(k2)
+    fail("event-topics-complaint-batch-seat-high", "ShareComplaintBatchSubmitted whose seat word has a bit above 8 set", board,
+         [kt[0], kt[1], word(256 + k2[35])], kd)
+    fail("event-data-complaint-batch-seat-topic", "ShareComplaintBatchSubmitted whose seat topic isn't its record's", board,
+         [kt[0], kt[1], word(k2[35] + 1)], kd)
+    fail("event-data-complaint-batch-odd-d", "ShareComplaintBatchSubmitted whose first D is odd, which the board's framing refuses", board,
+         kt, word(32) + abi_bytes(k2[:72] + (1).to_bytes(32, "little") + k2[104:]))
+    for d in batches["complaintDecode"]:
+        b = bytes.fromhex(d["encoding"])
+        topics = [T["ShareComplaintBatchSubmitted"], b[3:35].ljust(32, b"\x00"), word(b[35] if len(b) > 35 else 0)]
+        fail(f"event-data-complaint-batch-{d['id']}", f"ShareComplaintBatchSubmitted carrying delivery-batch.json's {d['id']} "
+             f"({d['description']})", board, topics, word(32) + abi_bytes(b))
+    fail("event-data-receipt-batch-carrying-complaints", "ShareReceiptBatchSubmitted carrying a complaint batch", board,
+         [T["ShareReceiptBatchSubmitted"], k2[3:35], word(k2[35])], kd)
 
     b1 = honest_batches["three-pairs"]
     b_topics, b_data = batch_topics(b1), word(32) + abi_bytes(b1)
@@ -271,7 +322,7 @@ def main(root):
 
     out = {
         "format": "abolish-contract-event-vectors/4",
-        "title": "Contract-event records (0x0008) version 4: the board's share-receipt batch event",
+        "title": "Contract-event records (0x0008) version 4: the board's share-receipt and share-complaint batch events",
         "spec": "docs/spec/contracts.md",
         "generator": (
             "packages/crypto/scripts/contract-event-v4-vectors.py: an independent Python implementation of "

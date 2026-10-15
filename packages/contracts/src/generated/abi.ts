@@ -191,6 +191,13 @@ export const boardAbi = [
   },
   {
     type: "function",
+    inputs: [{ name: "record", internalType: "bytes", type: "bytes" }],
+    name: "submitComplaintBatch",
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
     inputs: [
       { name: "posting", internalType: "bytes", type: "bytes" },
       { name: "ballot", internalType: "bytes", type: "bytes" },
@@ -301,6 +308,21 @@ export const boardAbi = [
       { name: "record", internalType: "bytes", type: "bytes", indexed: false },
     ],
     name: "RelayedBallotSubmitted",
+  },
+  {
+    type: "event",
+    anonymous: false,
+    inputs: [
+      {
+        name: "definitionHash",
+        internalType: "bytes32",
+        type: "bytes32",
+        indexed: true,
+      },
+      { name: "seat", internalType: "uint8", type: "uint8", indexed: true },
+      { name: "record", internalType: "bytes", type: "bytes", indexed: false },
+    ],
+    name: "ShareComplaintBatchSubmitted",
   },
   {
     type: "event",

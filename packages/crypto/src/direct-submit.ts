@@ -204,3 +204,66 @@ export function frameDelivery(type: number, record: Uint8Array): FramedRecord | 
   }
   return { definitionHash: record.slice(3, 35), ballotHash: record.slice(35, 67) };
 }
+
+/** `COMPLAINT_BATCH_MAX` of docs/spec/delivery.md, Share-complaint batch. */
+const COMPLAINT_BATCH_MAX = 512;
+
+const before = (a: Uint8Array, b: Uint8Array) => {
+  for (let i = 0; i < 32; i++) if (a[i] !== b[i]) return (a[i] as number) < (b[i] as number);
+  return false;
+};
+
+// The entries as the board frames them: 1 to COMPLAINT_BATCH_MAX, strictly
+// ascending by ballot hash, each `D` framed, never decoded, and `c` and `z`
+// below ℓ (Delivery records, step 4).
+const framedComplaintEntries: Codec<number> = {
+  minLength: 4 + 128,
+  write() {
+    throw new EncodeError("framing only");
+  },
+  read(r) {
+    const at = r.offset;
+    const count = r.uint(4);
+    if (count > COMPLAINT_BATCH_MAX) throw new DecodeError("length-over-max", at);
+    if (count === 0) throw new DecodeError("non-canonical", at);
+    let last: Uint8Array | undefined;
+    for (let i = 0; i < count; i++) {
+      const eAt = r.offset;
+      const ballotHash = new Uint8Array(r.take(32));
+      if (last !== undefined && !before(last, ballotHash))
+        throw new DecodeError("non-canonical", eAt);
+      last = ballotHash;
+      framedElement.read(r);
+      scalar.read(r);
+      scalar.read(r);
+    }
+    return count;
+  },
+};
+
+const COMPLAINT_BATCH_BODY = struct([
+  ["definition_hash", bytesFixed(32)],
+  ["seat", u8],
+  ["complaints", framedComplaintEntries],
+  ["signature", p256Sig],
+] as const);
+
+/**
+ * Frames a share-complaint batch (`0x0017`) as the board does (Delivery
+ * records, step 4): version 1, its entries ascending with each `D` framed,
+ * never decoded, so a seat's batch the board emits always passes the event
+ * check (T-53). Returns the `definition_hash` and `seat` it names, or
+ * undefined.
+ */
+export function frameComplaintBatch(
+  record: Uint8Array,
+): { readonly definitionHash: Uint8Array; readonly seat: number } | undefined {
+  if (typeOf(record) !== RECORD_TYPES.shareComplaintBatch || record[2] !== 1) return undefined;
+  try {
+    decode(COMPLAINT_BATCH_BODY, record.subarray(3));
+  } catch (e) {
+    if (e instanceof DecodeError) return undefined;
+    throw e;
+  }
+  return { definitionHash: record.slice(3, 35), seat: record[35] as number };
+}

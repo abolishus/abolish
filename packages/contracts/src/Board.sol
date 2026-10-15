@@ -44,6 +44,12 @@ contract Board is EventAccumulator {
     event ShareReceiptBatchSubmitted(
         bytes32 indexed definitionHash, uint8 indexed seat, bytes record
     );
+    /// @notice A share-complaint batch (0x0017) passed the delivery check:
+    /// one seat's complaints under one signature, archived under
+    /// contract-event version 4.
+    event ShareComplaintBatchSubmitted(
+        bytes32 indexed definitionHash, uint8 indexed seat, bytes record
+    );
     /// @notice A ballot forced through the L1 relay passed the ballot check,
     /// its stamp inside the window. The relay call's index, L1 block, stamp
     /// and gas limit are the deposit's, carried, never judged: the verifier
@@ -227,6 +233,26 @@ contract Board is EventAccumulator {
         _accepted[key] = true;
         _log3(
             ShareReceiptBatchSubmitted.selector,
+            definitionHash,
+            bytes32(uint256(seat)),
+            abi.encode(record)
+        );
+    }
+
+    /// @notice Submits a share-complaint batch: up to 512 of one seat's
+    /// complaints under one signature, checked and emitted whole, so a node
+    /// forcing what it owes through L1 pays for one signature, one storage
+    /// key and one event per batch (docs/spec/delivery.md, Capacity; T-25,
+    /// T-54).
+    function submitComplaintBatch(bytes calldata record) external {
+        CanonicalCalldata.requireOneBytesArgument(record);
+        bytes32 key = keccak256(record);
+        if (_accepted[key]) return;
+        (bytes32 definitionHash, uint8 seat) =
+            DeliveryCheckLib.checkComplaintBatch(record, electionRegistry, trusteeRegistry);
+        _accepted[key] = true;
+        _log3(
+            ShareComplaintBatchSubmitted.selector,
             definitionHash,
             bytes32(uint256(seat)),
             abi.encode(record)

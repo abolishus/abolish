@@ -66,6 +66,8 @@ contract BoardTest is TestBase {
         keccak256("ShareComplaintSubmitted(bytes32,bytes32,bytes)");
     bytes32 internal constant BATCH_SUBMITTED =
         keccak256("ShareReceiptBatchSubmitted(bytes32,uint8,bytes)");
+    bytes32 internal constant COMPLAINT_BATCH_SUBMITTED =
+        keccak256("ShareComplaintBatchSubmitted(bytes32,uint8,bytes)");
 
     /// Record layouts (delivery.md, Records): every delivery record's header
     /// and first fields, a receipt's and a complaint's signature, a
@@ -131,6 +133,7 @@ contract BoardTest is TestBase {
     bytes internal complaintDs;
     /// The same for the share-receipt batch, from delivery-batch.json.
     bytes internal batchDs;
+    bytes internal complaintBatchDs;
 
     /// ballot.json's plurality election and its first, admitted, ballot.
     bytes32 internal hV1;
@@ -180,6 +183,7 @@ contract BoardTest is TestBase {
         receiptDs = _ds(_str(dj, ".tags.receipt"));
         complaintDs = _ds(_str(dj, ".tags.complaint"));
         batchDs = _ds(_str(vm.readFile(BATCHES), ".tag"));
+        complaintBatchDs = _ds(_str(vm.readFile(BATCHES), ".complaintTag"));
         receipt = _vectorRecord(dj, "receipt", "share-receipt");
         assertTrue(keccak256(receipt) == keccak256(allReceipted[0]), "the receipt is seat 1's");
         posting = _vectorRecord(dj, "posting", "share-posting");
@@ -1368,6 +1372,103 @@ contract BoardTest is TestBase {
         );
     }
 
+    /// Every complaint batch of delivery-batch.json is accepted and emitted
+    /// whole, with its definition hash and seat as topics and the data
+    /// contract-event-v4.json records for it; the board frames each `D`,
+    /// never decodes it, so the batch whose `D` isn't a point is accepted too
+    /// (T-53). A repeat emits nothing.
+    function test_AcceptsEveryVectorComplaintBatchWithItsEvent() public {
+        string memory bj = vm.readFile(BATCHES);
+        string memory ej = vm.readFile(EVENTS_V4);
+        assertEq(
+            vm.parseJsonUint(bj, ".maxComplaints"), DeliveryCheckLib.COMPLAINT_BATCH_MAX, "maximum"
+        );
+        // contract-event-v4.json lists the ballot, three receipt batches, then
+        // the complaint batches in delivery-batch.json's order, then the one
+        // whose `D` only frames.
+        uint256 i;
+        for (; vm.keyExistsJson(bj, _at(".complaintRecords", i, "")); i++) {
+            bytes memory b = _bytes(bj, _at(".complaintRecords", i, ".encoding"));
+            _acceptComplaintBatch(b, _bytes(ej, _at(".records", 4 + i, ".fields.data")));
+        }
+        string memory last = _at(".records", 4 + i, ".fields.data");
+        bytes memory framedOnly = abi.decode(_bytes(ej, last), (bytes));
+        _acceptComplaintBatch(framedOnly, _bytes(ej, last));
+    }
+
+    function _acceptComplaintBatch(bytes memory b, bytes memory data) internal {
+        Vm.Log[] memory logs = _accept(_complaintBatchCall(b));
+        assertEq(logs.length, 1, "one event");
+        assertEq(logs[0].topics[0], COMPLAINT_BATCH_SUBMITTED, "topic 0");
+        assertEq(logs[0].topics[1], h, "definition topic");
+        assertEq(uint256(logs[0].topics[2]), uint8(b[35]), "seat topic");
+        assertEq(keccak256(logs[0].data), keccak256(abi.encode(b)), "data");
+        assertEq(keccak256(data), keccak256(logs[0].data), "the event file's data");
+        assertEq(_accept(_complaintBatchCall(b)).length, 0, "a repeat emits nothing");
+    }
+
+    /// Each complaint-batch decode rejection of delivery-batch.json with its
+    /// code at its offset, but where the file decodes `D` and the board only
+    /// frames it, which agree on every vector here.
+    function test_ComplaintBatchDecodeRejections() public {
+        string memory bj = vm.readFile(BATCHES);
+        for (uint256 i; vm.keyExistsJson(bj, _at(".complaintDecode", i, "")); i++) {
+            _refuse(
+                _complaintBatchCall(_bytes(bj, _at(".complaintDecode", i, ".encoding"))),
+                _malformed(
+                    0,
+                    _decodeError(_str(bj, _at(".complaintDecode", i, ".error"))),
+                    vm.parseJsonUint(bj, _at(".complaintDecode", i, ".offset"))
+                ),
+                _str(bj, _at(".complaintDecode", i, ".id"))
+            );
+        }
+    }
+
+    /// A complaint batch for no registered definition, for a seat outside the
+    /// key set, or signed by another seat's key or under the single
+    /// complaint's tag is refused, in that order.
+    function test_ComplaintBatchRefusals() public {
+        bytes memory entries = _complaintEntries(3, "refusals");
+        _refuse(
+            _complaintBatchCall(
+                _signedComplaintBatch(
+                    keccak256("no such definition"), 1, entries, signingSecrets[1]
+                )
+            ),
+            _refused(0, DeliveryCheckLib.Code.DeliveryStray),
+            "stray"
+        );
+        _refuse(
+            _complaintBatchCall(_signedComplaintBatch(h, 4, entries, signingSecrets[1])),
+            _refused(0, DeliveryCheckLib.Code.DeliverySeat),
+            "seat 4"
+        );
+        _refuse(
+            _complaintBatchCall(_signedComplaintBatch(h, 1, entries, signingSecrets[2])),
+            _refused(0, DeliveryCheckLib.Code.DeliverySignature),
+            "another seat's key"
+        );
+        bytes memory body = abi.encodePacked(h, uint8(1), uint32(3), entries);
+        (uint256 r, uint256 s) =
+            TrusteeFixture.sign(signingSecrets[1], sha256(bytes.concat(complaintDs, body)));
+        _refuse(
+            _complaintBatchCall(abi.encodePacked(uint16(0x0017), uint8(1), body, r, s)),
+            _refused(0, DeliveryCheckLib.Code.DeliverySignature),
+            "the complaint's tag"
+        );
+        assertEq(
+            _accept(_complaintBatchCall(_signedComplaintBatch(h, 1, entries, signingSecrets[1])))
+            .length,
+            1,
+            "the honest batch"
+        );
+    }
+
+    function testFuzz_ArbitraryComplaintBatchesRefused(bytes calldata r) public {
+        _refuseFuzzed(_complaintBatchCall(r));
+    }
+
     /// No arbitrary record is accepted as a batch, and every refusal is one of
     /// the delivery check's two errors.
     function testFuzz_ArbitraryBatchesRefused(bytes calldata r) public {
@@ -1632,38 +1733,42 @@ contract BoardTest is TestBase {
         );
     }
 
-    /// See `test_ForcedPathReceiptCallGas`: a complaint call, alone and cold,
-    /// before anything in this test has touched the board or the registries.
+    /// See `test_ForcedPathReceiptCallGas`: a full complaint-batch call,
+    /// alone and cold, against the stubs and then real registries.
     function test_ForcedPathComplaintCallGas() public {
         string memory fj = vm.readFile(OBLIGATION);
+        uint256 perCall = vm.parseUint(vm.parseJsonString(fj, ".forcedPath.complaintsPerCall"));
         uint256 complaintGas = vm.parseUint(vm.parseJsonString(fj, ".forcedPath.complaintCallGas"));
         uint256 maxGas = vm.parseUint(vm.parseJsonString(fj, ".portal.maxResourceLimit"));
+        uint256 maxData = vm.parseJsonUint(fj, ".portal.maxDepositData");
+        assertEq(perCall, DeliveryCheckLib.COMPLAINT_BATCH_MAX, "a call is one full batch");
+        bytes memory entries = _complaintEntries(perCall, "forced path");
+        bytes memory batchCall =
+            _complaintBatchCall(_signedComplaintBatch(h, 1, entries, signingSecrets[1]));
+        assertTrue(batchCall.length <= maxData, "a full complaint batch's data fits a deposit");
         assertTrue(complaintGas <= maxGas, "the complaint call fits a deposit");
         if (!_expectPrecompile()) return;
-        // Against the stubs, then against real registries, which read more
-        // slots; the bound holds for both and the tightness for the larger.
-        bytes memory complaintCall = _complaintCall(complaint);
-        uint256 stubbed = _withIntrinsic(complaintCall, _coldGas(complaintCall));
+        uint256 stubbed = _withIntrinsic(batchCall, _coldGas(batchCall));
         bytes32 dh = _realRegistries();
-        // The same complaint for the real registry's definition, signed again
-        // by its seat: the board checks the signature, never the proof.
-        bytes memory body = _slice(complaint, 3, COMPLAINT_SIG_AT - 3);
-        for (uint256 i; i < 32; i++) {
-            body[i] = dh[i];
-        }
-        complaintCall =
-            _complaintCall(_signed(0x000e, body, signingSecrets[uint8(complaint[SEAT_AT])]));
-        uint256 used = _withIntrinsic(complaintCall, _coldGas(complaintCall));
+        bytes memory realCall =
+            _complaintBatchCall(_signedComplaintBatch(dh, 1, entries, signingSecrets[1]));
+        uint256 used = _withIntrinsic(realCall, _coldGas(realCall));
         assertTrue(used >= stubbed, "the real registries cost at least the stubs");
-        // Measured about 154,800 against the stubs and 156,800 against real
-        // registries, cold.
-        assertTrue(used <= complaintGas, "a complaint call");
-        assertTrue(used > (complaintGas * 8) / 10, "the complaint figure is tight");
-        // The figure is the deposit's gas limit: the board takes another
-        // complaint, `z` changed in its last bit, with exactly that limit.
-        body[COMPLAINT_Z_AT - 3 + 31] ^= 0x01;
+        assertTrue(
+            used <= complaintGas, string.concat("a full complaint batch: ", vm.toString(used))
+        );
+        assertTrue(
+            used > (complaintGas * 9) / 10,
+            string.concat(
+                "the complaint figure is tight: ", vm.toString(stubbed), ", ", vm.toString(used)
+            )
+        );
         _acceptsWithin(
-            _complaintCall(_signed(0x000e, body, signingSecrets[uint8(complaint[SEAT_AT])])),
+            _complaintBatchCall(
+                _signedComplaintBatch(
+                    dh, 1, _complaintEntries(perCall, "forced path, next"), signingSecrets[1]
+                )
+            ),
             complaintGas
         );
     }
@@ -1754,6 +1859,53 @@ contract BoardTest is TestBase {
 
     function _batchCall(bytes memory b) internal pure returns (bytes memory) {
         return abi.encodeCall(Board.submitReceiptBatch, (b));
+    }
+
+    function _complaintBatchCall(bytes memory b) internal pure returns (bytes memory) {
+        return abi.encodeCall(Board.submitComplaintBatch, (b));
+    }
+
+    /// `count` complaint entries ascending by ballot hash, each proof framed
+    /// and dense: `D` an even value below `2²⁵⁵ − 19`, `c` and `z` below `ℓ`,
+    /// all little-endian, none checked as points (the board frames only).
+    function _complaintEntries(uint256 count, string memory label)
+        internal
+        pure
+        returns (bytes memory entries)
+    {
+        entries = new bytes(128 * count);
+        for (uint256 i; i < count; i++) {
+            bytes32 ballot = bytes32(
+                (i + 1) << 240 | (uint256(keccak256(abi.encode(label, "ballot", i))) >> 16)
+            );
+            // Little-endian: a word's last byte is the value's top byte and
+            // its first byte the lowest. D's top byte 0x2a and its lowest bit
+            // clear; c's and z's top byte below 0x10.
+            uint256 d = uint256(keccak256(abi.encode(label, "D", i)));
+            d = ((d & ~uint256(0xff)) | 0x2a) & ~(uint256(1) << 248);
+            uint256 c = uint256(keccak256(abi.encode(label, "c", i)));
+            c = (c & ~uint256(0xff)) | 0x05;
+            uint256 z = uint256(keccak256(abi.encode(label, "z", i)));
+            z = (z & ~uint256(0xff)) | 0x07;
+            assembly ("memory-safe") {
+                let at := add(add(entries, 32), mul(i, 128))
+                mstore(at, ballot)
+                mstore(add(at, 32), d)
+                mstore(add(at, 64), c)
+                mstore(add(at, 96), z)
+            }
+        }
+    }
+
+    function _signedComplaintBatch(bytes32 dh, uint8 seat, bytes memory entries, uint256 sk)
+        internal
+        view
+        returns (bytes memory)
+    {
+        bytes memory body = abi.encodePacked(dh, seat, uint32(entries.length / 128), entries);
+        (uint256 r, uint256 s) =
+            TrusteeFixture.sign(sk, sha256(bytes.concat(complaintBatchDs, body)));
+        return abi.encodePacked(uint16(0x0017), uint8(1), body, r, s);
     }
 
     /// `count` pairs ascending by ballot hash, dense as honest hashes are:

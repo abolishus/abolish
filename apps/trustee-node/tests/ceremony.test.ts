@@ -1,5 +1,9 @@
 import {
   checkCeremonyTranscript,
+  type ElectionDefinition,
+  electionDefinitionHash,
+  electionStubHash,
+  encodeElectionDefinition,
   decodeCeremonyTranscript,
   encodeCeremonyTranscript,
   keySetEntry,
@@ -18,6 +22,7 @@ import {
   election,
   L2_CHAIN_ID,
   runCeremony,
+  stubFor,
   TRUSTEE_REGISTRY,
   value,
 } from "./fixture.ts";
@@ -36,6 +41,9 @@ class CrashingStore implements SeatStore {
   putOnce(key: string, value: Uint8Array) {
     if (this.#left-- <= 0) return Promise.reject(new Error("crash"));
     return this.#inner.putOnce(key, value);
+  }
+  list(prefix: string) {
+    return this.#inner.list(prefix);
   }
 }
 
@@ -514,4 +522,130 @@ test("refuses an identity secret that isn't its seat's key", () => {
         store: new MemoryStore(),
       }),
   ).toThrow(RangeError);
+});
+
+describe("stub check 4: the forced path over the elections a seat serves", () => {
+  // Four seats with the release's windows fit at most 1,024 members alone
+  // (docs/spec/delivery.md, Capacity), so two elections of 600 closing
+  // together don't fit, and the same two a day apart do.
+  const withStub = (e: Election, change: Partial<ElectionDefinition>): Election => {
+    const stub = stubFor(e.panelists.panel, {
+      election_id: crypto.getRandomValues(new Uint8Array(32)),
+      ...change,
+    });
+    return {
+      ...e,
+      stub,
+      stubBytes: encodeElectionDefinition(stub),
+      stubHash: electionStubHash(stub),
+    };
+  };
+  const members = (n: bigint, base: ElectionDefinition) => ({
+    electorate: base.electorate.map((g) => ({ ...g, group_size: n })),
+  });
+  const seat = (e: Election, i: number) => e.seats[i] as CeremonySeat;
+
+  test("an approved election counts against the next one, only where they overlap, never against itself", async () => {
+    const e0 = election(4, 2);
+    const first = withStub(e0, members(600n, e0.stub));
+    const run = await runCeremony(first);
+    for (const s of first.seats) value(await s.approve(first.stubBytes, run.transcript));
+    value(await seat(first, 0).approve(first.stubBytes, run.transcript));
+    const together = withStub(e0, members(600n, e0.stub));
+    const runId = crypto.getRandomValues(new Uint8Array(32));
+    for (const s of first.seats)
+      expect(await s.keys(together.stubBytes, runId)).toEqual({ ok: false, code: "stub-capacity" });
+    const dayLater = withStub(e0, {
+      ...members(600n, e0.stub),
+      opens_at: e0.stub.opens_at + 86_400n,
+      closes_at: e0.stub.closes_at + 86_400n,
+    });
+    expect((await seat(first, 0).keys(dayLater.stubBytes, runId)).ok).toBe(true);
+  });
+
+  test("an approved election that can never be registered stops counting, and only on proof", async () => {
+    const stores = [0, 1, 2, 3].map(() => new MemoryStore() as SeatStore);
+    const e0 = election(4, 2, { stores });
+    const first = withStub(e0, members(600n, e0.stub));
+    const run = await runCeremony(first);
+    const approval = value(await seat(first, 0).approve(first.stubBytes, run.transcript));
+    const definitionHash = electionDefinitionHash({
+      ...first.stub,
+      ceremony_transcript_hash: approval.registration.ceremonyTranscriptHash,
+    });
+    const asked: [string, bigint][] = [];
+    const over = (never: boolean) =>
+      new CeremonySeat({
+        panel: e0.panelists.panel,
+        l2ChainId: L2_CHAIN_ID,
+        trusteeRegistry: TRUSTEE_REGISTRY,
+        index: 1,
+        identitySecret: e0.panelists.secrets[0] as Uint8Array,
+        electorate: () => Promise.resolve(true),
+        store: stores[0] as SeatStore,
+        neverRegistered: (hash, opensAt) => {
+          asked.push([Buffer.from(hash).toString("hex"), opensAt]);
+          return Promise.resolve(never);
+        },
+      });
+    const together = withStub(e0, members(600n, e0.stub));
+    const runId = crypto.getRandomValues(new Uint8Array(32));
+    expect(await over(false).keys(together.stubBytes, runId)).toEqual({
+      ok: false,
+      code: "stub-capacity",
+    });
+    // It asks about the definition the approval registers, with its opens_at.
+    expect(asked).toEqual([[Buffer.from(definitionHash).toString("hex"), first.stub.opens_at]]);
+    expect((await over(true).keys(together.stubBytes, runId)).ok).toBe(true);
+  });
+
+  test("a seat that serves nothing takes the largest election that fits and refuses one member more", async () => {
+    const e0 = election(4, 2);
+    const runId = crypto.getRandomValues(new Uint8Array(32));
+    const at = withStub(e0, members(1_024n, e0.stub));
+    const over = withStub(e0, members(1_025n, e0.stub));
+    expect((await seat(e0, 0).keys(at.stubBytes, runId)).ok).toBe(true);
+    expect(await seat(e0, 1).keys(over.stubBytes, runId)).toEqual({
+      ok: false,
+      code: "stub-capacity",
+    });
+  });
+
+  test("of concurrent approvals of two elections that don't fit together, at most one is given", async () => {
+    const e0 = election(4, 2);
+    const a = withStub(e0, members(600n, e0.stub));
+    const b = withStub(e0, members(600n, e0.stub));
+    const runA = await runCeremony(a);
+    const runB = await runCeremony(b);
+    const [x, y] = await Promise.all([
+      seat(e0, 0).approve(a.stubBytes, runA.transcript),
+      seat(e0, 0).approve(b.stubBytes, runB.transcript),
+    ]);
+    expect([x.ok, y.ok].filter(Boolean)).toHaveLength(1);
+    expect([x, y].find((r) => !r.ok)).toEqual({ ok: false, code: "stub-capacity" });
+  });
+
+  test("a restarted seat over the same file store still counts what it approved", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "served-"));
+    try {
+      const e0 = election(4, 2);
+      const first = withStub(e0, members(600n, e0.stub));
+      const store = await FileStore.open(dir);
+      const run = await runCeremony({
+        ...first,
+        seats: [seatOver(first, 1, store), ...first.seats.slice(1)],
+      });
+      value(await seatOver(first, 1, store).approve(first.stubBytes, run.transcript));
+      const restarted = seatOver(first, 1, await FileStore.open(dir));
+      const together = withStub(e0, members(600n, e0.stub));
+      expect(
+        await restarted.keys(together.stubBytes, crypto.getRandomValues(new Uint8Array(32))),
+      ).toEqual({
+        ok: false,
+        code: "stub-capacity",
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });

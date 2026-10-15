@@ -1,4 +1,5 @@
 import {
+  deliveryWindowFits,
   encodeElectionDefinition,
   type ElectionDefinition,
   electionStubHash,
@@ -7,6 +8,7 @@ import {
 } from "@abolishus/crypto";
 import { describe, expect, test } from "vite-plus/test";
 import { CeremonySeat, checkStub, type ElectorateCheck, type Pins } from "../src/index.ts";
+import { RELEASE_WINDOWS } from "../src/stub.ts";
 import { MemoryStore } from "../src/store.ts";
 import { L2_CHAIN_ID, panelOf, stubFor, TRUSTEE_REGISTRY } from "./fixture.ts";
 
@@ -14,7 +16,60 @@ const { panel, secrets } = panelOf(4, 2);
 const pinned: Pins = { panel, l2ChainId: L2_CHAIN_ID, trusteeRegistry: TRUSTEE_REGISTRY };
 const pass = () => Promise.resolve(true);
 const check = (stub: ElectionDefinition, electorate: ElectorateCheck = pass) =>
-  checkStub(encodeElectionDefinition(stub), pinned, electorate);
+  checkStub(encodeElectionDefinition(stub), pinned, electorate, new Map());
+
+describe("stub check 4", () => {
+  // Four seats: at most 1,024 members alone with the release's windows.
+  const sized = (n: bigint, change: Partial<ElectionDefinition> = {}) => {
+    const stub = stubFor(panel, change);
+    return { ...stub, electorate: stub.electorate.map((g) => ({ ...g, group_size: n })) };
+  };
+  const demand = (stub: ElectionDefinition) => ({
+    members: stub.electorate.reduce((m, g) => m + g.group_size, 0n),
+    seats: stub.panel_size,
+    closesAt: stub.closes_at,
+    l1InclusionBound: BigInt(stub.l1_inclusion_bound),
+  });
+
+  test("refuses a stub whose obligation doesn't fit alone", async () => {
+    expect((await check(sized(1_024n))).ok).toBe(true);
+    expect(await check(sized(1_025n))).toEqual({ ok: false, code: "stub-capacity" });
+  });
+
+  test("counts the elections it serves, but not the stub's own entry", async () => {
+    const stub = sized(1n);
+    const served = new Map([["cd".repeat(32), demand(sized(1_024n))]]);
+    expect(await checkStub(encodeElectionDefinition(stub), pinned, pass, served)).toEqual({
+      ok: false,
+      code: "stub-capacity",
+    });
+    const self = sized(1_024n);
+    const own = Buffer.from(electionStubHash(self)).toString("hex");
+    expect(
+      (
+        await checkStub(
+          encodeElectionDefinition(self),
+          pinned,
+          pass,
+          new Map([[own, demand(self)]]),
+        )
+      ).ok,
+    ).toBe(true);
+  });
+
+  test("only after the electorate check, whose counts it reads", async () => {
+    expect(await check(sized(1_025n), () => Promise.resolve(false))).toEqual({
+      ok: false,
+      code: "stub-electorate",
+    });
+  });
+
+  test("the release's windows are ones deliveryWindowFits accepts with hourly 12-hour-deadline anchoring", () => {
+    expect(deliveryWindowFits({ period: 3_600n, deadline: 43_200n, ...RELEASE_WINDOWS })).toBe(
+      true,
+    );
+  });
+});
 
 describe("stub checks", () => {
   test("accepts a stub its pins fix, with the hash recomputed from its bytes", async () => {
@@ -24,7 +79,7 @@ describe("stub checks", () => {
 
   test("refuses bytes that don't decode", async () => {
     const bytes = encodeElectionDefinition(stubFor(panel));
-    expect(await checkStub(bytes.subarray(0, bytes.length - 1), pinned, pass)).toEqual({
+    expect(await checkStub(bytes.subarray(0, bytes.length - 1), pinned, pass, new Map())).toEqual({
       ok: false,
       code: "stub-decode",
     });
@@ -35,8 +90,8 @@ describe("stub checks", () => {
     for (const version of [3, 5, 6, 7, 200]) {
       const other = Uint8Array.from(bytes);
       other[2] = version;
-      expect(await checkStub(other, pinned, pass)).toMatchObject({ ok: false });
-      const result = await checkStub(other, pinned, pass);
+      expect(await checkStub(other, pinned, pass, new Map())).toMatchObject({ ok: false });
+      const result = await checkStub(other, pinned, pass, new Map());
       expect(result.ok ? undefined : result.code).toMatch(/^stub-(version|decode)$/);
     }
   });
@@ -95,6 +150,7 @@ describe("stub checks", () => {
           encodeElectionDefinition({ ...stub, profile: { ...stub.profile, pins } }),
           pinned,
           pass,
+          new Map(),
         );
         // Some versions are known but don't pair with definition version 1;
         // either way the node lends no keys.

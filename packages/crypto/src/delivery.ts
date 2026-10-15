@@ -31,6 +31,7 @@ import type { RegisteredKeys } from "./ceremony.ts";
 import { PARAMETERS } from "./parameters.ts";
 import { RECORD_TYPES, RecordSchema, recordType } from "./record.ts";
 import { checkL1Reference, type FinalizedL1, selectBallots } from "./revoting.ts";
+import { type BallotPath, ballotWindow } from "./close-statement.ts";
 import {
   checkComplaint,
   checkComplaintV4,
@@ -413,6 +414,26 @@ export interface ViewBallot {
   readonly message: Uint8Array;
   readonly l1RefNumber: bigint;
   readonly l1RefHash: Uint8Array;
+  /**
+   * The entry that carries a copy the node holds from the anchored board or
+   * the contract's records, judged by the close rule (verifier 5.5,
+   * `ballotWindow`): its path, and the L2 block's timestamp, the relay's
+   * stamp or the segment; `null` only for a ballot the node holds from its
+   * own intake and can't show absent, which has no entry the node has seen.
+   * Required, so a board or contract copy can't be passed without the entry
+   * the close rule judges.
+   */
+  readonly entry: { readonly path: BallotPath; readonly value: bigint } | null;
+}
+
+/** What the node's view is judged against: the L1 reference's window and the close rule's. */
+export interface ViewWindow {
+  readonly l1RefMin: bigint;
+  readonly closesAt: bigint;
+  /** `opens_at`, for an ordinary or relayed copy's window; needed only when a copy carries its entry. */
+  readonly opensAt?: bigint;
+  /** `s_A = period(closes_at) + 1` (`boardBallotSegment`); needed only when a copy carries its entry. */
+  readonly boardSegment?: bigint;
 }
 
 /**
@@ -439,7 +460,7 @@ export function owedReceipts(
   /** The ballot hash of every receipt the node issued, never reduced by absence. */
   receipts: Iterable<Uint8Array>,
   l1: FinalizedL1,
-  window: { readonly l1RefMin: bigint; readonly closesAt: bigint },
+  window: ViewWindow,
 ): Uint8Array[] {
   const receipted = new Set<string>();
   for (const h of receipts) receipted.add(hex(h));
@@ -461,6 +482,23 @@ export function owedReceipts(
       throw new RangeError("owedReceipts: tier must be 0, 1 or 2");
     if (typeof b.nullifier !== "bigint" || b.nullifier < 0n || b.nullifier >= BN254_R)
       throw new RangeError("owedReceipts: nullifier is not a canonical field<bn254> value");
+    // The close rule (5.5) runs before the L1 check and selection: a copy
+    // whose entry is outside the poll's window never counts or displaces
+    // another, so a ballot boarded late can't take the counted one's place in
+    // the node's selection while the verifier still counts it (T-35, T-54).
+    if (b.entry !== null) {
+      const { opensAt, boardSegment } = window;
+      if (opensAt === undefined || boardSegment === undefined)
+        throw new RangeError("owedReceipts: a copy with its entry needs opensAt and boardSegment");
+      if (
+        ballotWindow(b.entry.path, b.entry.value, {
+          opensAt,
+          closesAt: window.closesAt,
+          boardSegment,
+        }) !== "admitted"
+      )
+        continue;
+    }
     const verdict = checkL1Reference(b, l1, window);
     if (verdict === "pending")
       throw new RangeError("owedReceipts: L1 hasn't finalized a block after close");
@@ -505,6 +543,208 @@ export function owedReceipts(
   // reorganisation; its receipt for the first copy delivers that one (T-25).
   for (const { hash } of unadmitted.values()) owed.set(hex(hash), hash);
   return [...owed.keys()].sort().map((k) => owed.get(k) as Uint8Array);
+}
+
+/**
+ * A trustee node's complaint scope (docs/spec/delivery.md, What a node owes):
+ * the ballot hashes whose failing postings it owes complaints about. It is
+ * `owedReceipts` with every ballot of the view counted as receipted: for each
+ * tier and nullifier, the ballot the selection picks and the newest ballot
+ * whose L1 reference isn't admitted, whoever receipted them. A complaint can
+ * change a counted set only for the ballot the delivery check selects, so the
+ * scope comes from the ballots the node holds and never from postings, which
+ * anyone who has a member's proof can make up: at most two per tier and
+ * nullifier, the bound its receipts have (T-52, T-54). Decided once, at the
+ * intake cutoff, over the view the node then holds. Sorted by ballot hash.
+ */
+export function complaintScope(
+  view: Iterable<ViewBallot>,
+  l1: FinalizedL1,
+  window: ViewWindow,
+): Uint8Array[] {
+  const ballots = [...view];
+  return owedReceipts(
+    ballots,
+    ballots.map((b) => b.ballotHash),
+    l1,
+    window,
+  );
+}
+
+/**
+ * The forced path's figures a release pins (docs/spec/delivery.md,
+ * Capacity): what every seat of every election together can send through
+ * L1 deposits when the sequencer refuses their transactions, and what a
+ * receipt call and a complaint call cost there. The board's tests bind the
+ * two call figures to measured gas, with `P256VERIFY` (T-25, T-52, T-54).
+ */
+export const FORCED_PATH = Object.freeze({
+  /** Deposit gas per L1 block: the portal's target, `maxResourceLimit / elasticityMultiplier`. */
+  depositGasTarget: 2_000_000n,
+  /** Seconds per L1 block: 12-second slots, at most one in 13 missed, as `F` assumes. */
+  l1BlockSeconds: 13n,
+  /** Receipts in one `submitReceipts` call. */
+  receiptsPerCall: 256n,
+  /** Gas of one receipt call of up to `receiptsPerCall`, intrinsic gas included. */
+  receiptCallGas: 17_000_000n,
+  /** Gas of one `submitComplaint` call, intrinsic gas included. */
+  complaintCallGas: 150_000n,
+} as const);
+
+/** The windows the forced path's intervals are read from: `W_C`, `F` and `R`, the values `deliveryWindowFits` checks. */
+export interface ForcedPathWindows {
+  readonly contractEventWindow: bigint;
+  readonly forcedInclusion: bigint;
+  readonly margin: bigint;
+}
+
+/** One election as the capacity check reads it. */
+export interface ForcedPathElection {
+  /** `M`: the definition's members, as [[verifier]] 2.4 recomputes them (`definitionMembers`). */
+  readonly members: bigint;
+  /** `s`: every seat that may force records, the default panel's and an author panel's. */
+  readonly seats: number;
+  readonly closesAt: bigint;
+  readonly l1InclusionBound: bigint;
+}
+
+/** Gas a seat set may have to force through L1 between `start` (inclusive) and `end` (exclusive). */
+export interface ForcedPathInterval {
+  readonly start: bigint;
+  readonly end: bigint;
+  readonly gas: bigint;
+}
+
+function forcedPathLengths(w: ForcedPathWindows): { receipts: bigint; complaints: bigint } {
+  for (const v of [w.contractEventWindow, w.forcedInclusion, w.margin])
+    if (typeof v !== "bigint" || v < 0n) throw new RangeError("every window must be a bigint ≥ 0");
+  const complaints = COMPLAINT_WINDOW - DELIVERY_WINDOW - w.contractEventWindow - w.forcedInclusion;
+  // An empty interval would leave no time to force anything; deliveryWindowFits
+  // makes both at least R, and R at least 1 second.
+  if (w.margin < 1n || complaints < 1n)
+    throw new RangeError("the receipts' and complaints' intervals must be at least 1 second");
+  return { receipts: w.margin, complaints };
+}
+
+/**
+ * The forced path's demand of one election (docs/spec/delivery.md, Capacity):
+ * every seat's receipts, `s · ⌈2M / RECEIPTS_PER_CALL⌉` receipt calls between
+ * the intake cutoff `c_I` and `c_D = t_D − F`, and every seat's complaints,
+ * `s · 2M` complaint calls between `t_D + W_C`, when the last posting in time
+ * is recorded, and `c_K = t_K − F`.
+ */
+export function forcedPathDemand(
+  election: ForcedPathElection,
+  windows: ForcedPathWindows,
+): { readonly receipts: ForcedPathInterval; readonly complaints: ForcedPathInterval } {
+  const { members, seats, closesAt, l1InclusionBound } = election;
+  if (typeof members !== "bigint" || members < 0n)
+    throw new RangeError("members must be a bigint ≥ 0");
+  // At most MAX_TRUSTEES seats in each of the two panels.
+  if (!Number.isInteger(seats) || seats < 1 || seats > 2 * MAX_TRUSTEES)
+    throw new RangeError("seats must be an integer from 1 to 2 · MAX_TRUSTEES");
+  forcedPathLengths(windows);
+  const { delivery, complaint } = deliveryDeadlines(closesAt, l1InclusionBound);
+  const s = BigInt(seats);
+  const owed = 2n * members;
+  const calls = (owed + FORCED_PATH.receiptsPerCall - 1n) / FORCED_PATH.receiptsPerCall;
+  const cD = delivery - windows.forcedInclusion;
+  return {
+    receipts: { start: cD - windows.margin, end: cD, gas: s * calls * FORCED_PATH.receiptCallGas },
+    complaints: {
+      start: delivery + windows.contractEventWindow,
+      end: complaint - windows.forcedInclusion,
+      gas: s * owed * FORCED_PATH.complaintCallGas,
+    },
+  };
+}
+
+/**
+ * Whether a set of elections fits the forced path (docs/spec/delivery.md,
+ * Capacity): each election's receipts and complaints spread evenly over their
+ * intervals, the rates of every interval containing any moment sum to at most
+ * `DEPOSIT_GAS_TARGET / L1_BLOCK_SECONDS` gas per second. The sum only rises at
+ * an interval's start, so the starts are the moments checked. A trustee node
+ * runs it over a stub with every election its seat approved, and refuses the
+ * stub if it doesn't fit, so it never owes more than L1 can carry in time
+ * (T-25, T-52, T-54).
+ */
+export function forcedPathFits(
+  elections: Iterable<ForcedPathElection>,
+  windows: ForcedPathWindows,
+): boolean {
+  const lengths = forcedPathLengths(windows);
+  const demands = [...elections].map((e) => forcedPathDemand(e, windows));
+  const receipts = demands.map((d) => d.receipts);
+  const complaints = demands.map((d) => d.complaints);
+  const at = (xs: ForcedPathInterval[], t: bigint) =>
+    xs.reduce((sum, x) => (x.start <= t && t < x.end ? sum + x.gas : sum), 0n);
+  // (G_R / R + G_K / L_K) · L1_BLOCK_SECONDS ≤ DEPOSIT_GAS_TARGET, in integers.
+  const limit = FORCED_PATH.depositGasTarget * lengths.receipts * lengths.complaints;
+  for (const { start: t } of [...receipts, ...complaints]) {
+    const rate =
+      (at(receipts, t) * lengths.complaints + at(complaints, t) * lengths.receipts) *
+      FORCED_PATH.l1BlockSeconds;
+    if (rate > limit) return false;
+  }
+  return true;
+}
+
+/**
+ * The most members one election with `seats` seats can have and still fit
+ * the forced path alone (`forcedPathFits`), for a node or creator to state
+ * the cap: a lone election's two intervals never overlap.
+ */
+export function forcedPathMembersLimit(seats: number, windows: ForcedPathWindows): bigint {
+  const fits = (members: bigint) =>
+    forcedPathFits([{ members, seats, closesAt: 0n, l1InclusionBound: 0n }], windows);
+  // No members owe nothing, so 0 always fits; then doubling, and bisection
+  // over [ok, bad).
+  let ok = 0n;
+  let bad = 1n;
+  while (fits(bad)) {
+    ok = bad;
+    bad *= 2n;
+  }
+  while (bad - ok > 1n) {
+    const mid = (ok + bad) / 2n;
+    if (fits(mid)) ok = mid;
+    else bad = mid;
+  }
+  return ok;
+}
+
+/**
+ * `M`, a definition's members: the sum over its tiers of `group_size`
+ * (version 1) or of the tier's `regions` (versions 3 to 6, whose cells' members
+ * sum to the same), the counts [[verifier]] 2.4 recomputes from the group
+ * registry. A rolling tier's members over the poll aren't known when it opens
+ * (docs/spec/delivery.md, Capacity), so it throws for a rolling definition
+ * (`electorate_mode` 2, or any `rolling_electorate`), and for an empty
+ * electorate, which no well-formed definition has and which is a rolling
+ * one's `electorate`: counting it as no members would let a node approve an
+ * election whose obligation it never sized.
+ */
+export function definitionMembers(definition: {
+  readonly electorate: readonly (
+    | { readonly group_size: bigint }
+    | { readonly regions: readonly bigint[] }
+  )[];
+  readonly electorate_mode?: number;
+  readonly rolling_electorate?: readonly unknown[];
+}): bigint {
+  const { electorate, electorate_mode, rolling_electorate } = definition;
+  if (
+    electorate.length === 0 ||
+    (electorate_mode !== undefined && electorate_mode !== 1) ||
+    (rolling_electorate !== undefined && rolling_electorate.length > 0)
+  )
+    throw new RangeError("definitionMembers: a rolling or empty electorate has no fixed count");
+  let members = 0n;
+  for (const tier of electorate)
+    members +=
+      "group_size" in tier ? tier.group_size : tier.regions.reduce((sum, n) => sum + n, 0n);
+  return members;
 }
 
 /** What the delivery check runs against, all from data the verifier has already checked. */

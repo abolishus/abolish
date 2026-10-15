@@ -249,6 +249,7 @@ const view = (
   message: Uint8Array.of(0xaa, b.id, ...new Uint8Array(30)),
   l1RefNumber: b.block,
   l1RefHash: b.l1RefHash ?? blockHash(b.block),
+  entry: null,
   receipted: b.receipted ?? true,
 });
 
@@ -455,7 +456,7 @@ describe("owedReceipts", () => {
       head: r.l1RefNumber + 1n,
       block: (n) => ({ hash: n === r.l1RefNumber ? r.l1RefHash : blockHash(n), timestamp: n }),
     };
-    const got = owedReceipts([r], [r.ballotHash], l1, {
+    const got = owedReceipts([{ ...r, entry: null }], [r.ballotHash], l1, {
       l1RefMin: 0n,
       closesAt: r.l1RefNumber,
     });

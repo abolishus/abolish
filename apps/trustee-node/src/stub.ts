@@ -2,13 +2,19 @@
 // before it signs a ceremony registration (docs/spec/ceremony.md, Stub
 // checks). The stub reaches the permanent archive once registered, so a node
 // lends its keys only to one whose fields the pins and the chain fix, never
-// to chosen bytes (T-17, G-12, T-37).
+// to chosen bytes (T-17, G-12, T-37), and only to one whose contract-path
+// obligation it can force through L1 in time (check 4; T-25, T-52, T-54).
 import {
   DecodeError,
+  definitionMembers,
   type ElectionDefinition,
   electionDefinitionRule,
   decodeElectionDefinitionRecord,
   electionStubHash,
+  forcedPathDemand,
+  type ForcedPathElection,
+  forcedPathFits,
+  type ForcedPathWindows,
   membershipVkHash,
   type Panel,
   panelId,
@@ -16,6 +22,30 @@ import {
   profileCombinationRule,
   RECORD_TYPES,
 } from "@abolishus/crypto";
+
+/**
+ * The windows this release sizes the forced path by (docs/spec/delivery.md,
+ * Capacity): `W_C` and `F` of 13 hours (Base's 12-hour forced-inclusion delay
+ * and an hour of missed slots) and `R` of one hour, which `deliveryWindowFits`
+ * accepts with hourly anchoring periods and a 12-hour deadline. A release
+ * that changes `R` changes every node's and client's intake cutoff, so it is
+ * the release's, never a node's own setting.
+ */
+export const RELEASE_WINDOWS: ForcedPathWindows = Object.freeze({
+  contractEventWindow: 46_800n,
+  forcedInclusion: 46_800n,
+  margin: 3_600n,
+});
+
+/** What the capacity check reads from a stub (version 1: one panel, no author seats). */
+export function stubDemand(stub: ElectionDefinition): ForcedPathElection {
+  return {
+    members: definitionMembers(stub),
+    seats: stub.panel_size,
+    closesAt: stub.closes_at,
+    l1InclusionBound: BigInt(stub.l1_inclusion_bound),
+  };
+}
 
 /** What the node's release and deployment pin. */
 export interface Pins {
@@ -45,7 +75,8 @@ export type StubRefusal =
   | "stub-pins"
   | "stub-profile"
   | "stub-membership-key"
-  | "stub-electorate";
+  | "stub-electorate"
+  | "stub-capacity";
 
 export type StubCheck =
   | { readonly ok: true; readonly stub: ElectionDefinition; readonly stubHash: Uint8Array }
@@ -69,14 +100,18 @@ const equal = (a: Uint8Array, b: Uint8Array) =>
   a.length === b.length && a.every((x, i) => x === b[i]);
 
 /**
- * Stub checks 1 to 3. Only definition version 1 is read so far: a version-3
+ * Stub checks 1 to 4. Only definition version 1 is read so far: a version-3
  * or later stub is refused (`stub-version`) until the node reads its
- * electorate, so no ceremony runs for an election the node can't check.
+ * electorate, so no ceremony runs for an election the node can't check, and
+ * no rolling one, whose members over the poll check 4 can't count.
+ * `served` holds the demand of every election the seat has approved, by stub
+ * hash (hex); the stub's own entry, if any, is left out.
  */
 export async function checkStub(
   bytes: Uint8Array,
   pins: Pins,
   electorate: ElectorateCheck,
+  served: ReadonlyMap<string, ForcedPathElection>,
 ): Promise<StubCheck> {
   let record;
   try {
@@ -130,5 +165,20 @@ export async function checkStub(
   const stubHash = electionStubHash(stub);
   if (!(await electorate(decodeElectionDefinitionRecord(bytes).value as ElectionDefinition)))
     return { ok: false, code: "stub-electorate" };
+  // 4: the forced path, over the counts 2.4 just checked, with every election
+  // this seat serves whose intervals can overlap this one's; the others never
+  // share a moment with it (docs/spec/delivery.md, Capacity).
+  const own = Buffer.from(stubHash).toString("hex");
+  const demand = stubDemand(stub);
+  const mine = forcedPathDemand(demand, RELEASE_WINDOWS);
+  const others = [...served]
+    .filter(([hash]) => hash !== own)
+    .map(([, other]) => other)
+    .filter((other) => {
+      const o = forcedPathDemand(other, RELEASE_WINDOWS);
+      return o.complaints.end > mine.receipts.start && o.receipts.start < mine.complaints.end;
+    });
+  if (!forcedPathFits([...others, demand], RELEASE_WINDOWS))
+    return { ok: false, code: "stub-capacity" };
   return { ok: true, stub, stubHash };
 }

@@ -290,4 +290,53 @@ describe("share-receipt batch encoding", () => {
       { numRuns },
     );
   });
+
+  // One encoding per batch (T-31): any sorted set of pairs round-trips, and
+  // any bytes either fail to decode or re-encode to themselves.
+  test("decode(encode(x)) = x, and every decodable input is its own encoding", () => {
+    const hash = fc.uint8Array({ minLength: 32, maxLength: 32 });
+    const [base] = batchShareReceipts(secretOf(1), DEFINITION, 1, [pair(1)]);
+    if (base === undefined) throw new Error("no batch");
+    fc.assert(
+      fc.property(
+        fc.uniqueArray(fc.record({ ballot_hash: hash, share_hash: hash }), {
+          minLength: 1,
+          maxLength: 8,
+          selector: (p) => bytesHex(p.ballot_hash),
+        }),
+        (pairs) => {
+          const receipts = [...pairs].sort((a, b) =>
+            bytesHex(a.ballot_hash).localeCompare(bytesHex(b.ballot_hash)),
+          );
+          const enc = encodeShareReceiptBatch({ ...base, receipts });
+          expect(decodeShareReceiptBatch(enc, 1)).toEqual({ ...base, receipts });
+        },
+      ),
+      { numRuns },
+    );
+    const honest = hex((V.records[1] as Vectors["records"][number]).encoding);
+    fc.assert(
+      fc.property(
+        fc.oneof(
+          fc.uint8Array({ maxLength: 300 }),
+          fc.tuple(fc.nat(), fc.integer({ min: 1, max: 255 })).map(([at, x]) => {
+            const b = Uint8Array.from(honest);
+            b[at % b.length] = ((b[at % b.length] as number) ^ x) & 255;
+            return b;
+          }),
+        ),
+        (bytes) => {
+          let decoded;
+          try {
+            decoded = decodeShareReceiptBatch(bytes, 1);
+          } catch (e) {
+            expect(e).toBeInstanceOf(DecodeError);
+            return;
+          }
+          expect(bytesHex(encodeShareReceiptBatch(decoded))).toBe(bytesHex(bytes));
+        },
+      ),
+      { numRuns },
+    );
+  });
 });

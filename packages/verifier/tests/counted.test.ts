@@ -13,11 +13,13 @@ import {
   decodeContractEvent,
   checkContractEvent,
   CONTRACT_EVENT_SIGNATURES,
+  batchShareReceipts,
   encodeContractEvent,
   PARAMETERS,
   encodeBoardEntry,
   encodeDestructionStatement,
   encodeShareReceipt,
+  encodeShareReceiptBatch,
   encodeTallyOpening,
   identityKey,
   KEM_PUBLIC_KEY,
@@ -217,6 +219,20 @@ function election(
       }),
     );
   };
+  /** Seat `seat`'s share-receipt batch for `ballots`, signed by `signer`'s key (docs/spec/delivery.md, Share-receipt batch). */
+  const batch = (ballots: readonly Cast[], seat: number, signer = seat) => {
+    const [b] = batchShareReceipts(
+      secret(signer),
+      hash,
+      seat,
+      ballots.map((x) => ({
+        ballot_hash: x.hash,
+        share_hash: x.vote.share_hashes[seat - 1] as Uint8Array,
+      })),
+    );
+    if (b === undefined) throw new Error("fixture: no batch");
+    return encodeShareReceiptBatch(b);
+  };
   /** Every registered seat's receipt for each ballot, boarded in `segment`. */
   const deliver = (ballots: readonly Cast[], segment: number) => {
     for (const b of ballots) for (const seat of seats) board(segment, receipt(b, seat));
@@ -303,6 +319,7 @@ function election(
     board,
     cast,
     receipt,
+    batch,
     deliver,
     opening,
     destruction,
@@ -676,6 +693,72 @@ describe("7.4 once the counted set is known", () => {
     const r = opened();
     expect(r.report).toHaveLength(4);
     expect(r.row).toEqual({ status: "unverifiable", code: "not-implemented" });
+  });
+});
+
+describe("contract-path share-receipt batches, once 4.4 passes", () => {
+  // verifier-events.json's version-4 definition pinning contract-event
+  // version 4, whose board emits share-receipt batches as events.
+  const definition = definitionOf(caseOf(events, "events-v4-records"));
+  const d = definition.value;
+  const T_D = d.closes_at + BigInt(d.l1_inclusion_bound) + BigInt(PARAMETERS.DELIVERY_WINDOW);
+  const topic0 = keccak_256(text("ShareReceiptBatchSubmitted(bytes32,uint8,bytes)"));
+  const abiBytes = (record: Uint8Array) => {
+    const out = new Uint8Array(64 + Math.ceil(record.length / 32) * 32);
+    out[31] = 0x20;
+    for (let i = 63, n = record.length; n > 0; i--, n = Math.floor(n / 256)) out[i] = n % 256;
+    out.set(record, 64);
+    return out;
+  };
+  const word = (n: number) => Uint8Array.from({ length: 32 }, (_, i) => (i === 31 ? n : 0));
+  /** The board's batch event carrying `record` of seat `seat`, emitted at `t`. */
+  const event = (hash: Uint8Array, seat: number, record: Uint8Array, t: bigint) => {
+    const payload = encodeContractEvent(
+      {
+        contract: d.board,
+        n: 0n,
+        l2_block: 1n,
+        l2_timestamp: t,
+        topics: [topic0, hash, word(seat)],
+        data: abiBytes(record),
+      },
+      4,
+    );
+    const contracts = {
+      electionRegistry: d.election_registry,
+      trusteeRegistry: d.trustee_registry,
+      groupRegistry: d.group_registry,
+      board: d.board,
+    };
+    const checked = checkContractEvent(decodeContractEvent(payload, 4), contracts, 4);
+    if (!checked.ok || checked.event.event !== "ShareReceiptBatchSubmitted")
+      throw new Error("fixture: the batch event fails");
+    return payload;
+  };
+
+  test("one batch delivers its seat for every ballot it pairs, in time by its submission time", () => {
+    const at = (t: bigint, signer = 4) => {
+      const e = election(definition);
+      const a = e.cast({ ballotVersion: 2, cell: 0 }, [1, 0, 0], 111n);
+      const b = e.cast({ ballotVersion: 2, cell: 0 }, [0, 1, 0], 112n);
+      for (const seat of [1, 2, 3]) for (const x of [a, b]) e.board(200, e.receipt(x, seat));
+      const last = e.board(200, event(e.hash, 4, e.batch([a, b], 4, signer), t));
+      const r = countedChecks(e.inputs([a, b], { eventsPass: true, destruction: false }));
+      return { r, a, b, last };
+    };
+    expect(at(T_D).r.delivery).toEqual({ excluded: [], records: [], rejected: [] });
+    const late = at(T_D + 1n);
+    expect(late.r.delivery.records).toEqual([
+      { entry: late.last, pair: 0, code: "delivery-late" },
+      { entry: late.last, pair: 1, code: "delivery-late" },
+    ]);
+    expect(late.r.delivery.excluded.map((x) => x.missing)).toEqual([[4], [4]]);
+    // Signed by another seat's key: each pair fails share-receipt, attributed to no one.
+    const forged = at(T_D, 3);
+    expect(forged.r.delivery.records).toEqual([
+      { entry: forged.last, pair: 0, code: "share-receipt", signer: null },
+      { entry: forged.last, pair: 1, code: "share-receipt", signer: null },
+    ]);
   });
 });
 

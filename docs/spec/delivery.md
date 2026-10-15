@@ -167,7 +167,7 @@ The release pins the forced path's figures; the board's tests bind the two call 
 | -------------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `DEPOSIT_GAS_TARGET` | 2,000,000 | Deposit gas per L1 block that every seat of every election together may use: the portal's target                                                                  |
 | `L1_BLOCK_SECONDS`   | 13        | Seconds per L1 block: 12-second slots with at most one in 13 missed, the margin `F` assumes ([[parameters]], `MAX_SEQUENCING_WINDOW`)                             |
-| `RECEIPTS_PER_CALL`  | 1,024     | Receipts in one `submitReceiptBatch` call: one batch of `RECEIPT_BATCH_MAX` pairs, 65,640 bytes, 65,768 of calldata, within a deposit's 120,000                   |
+| `RECEIPTS_PER_CALL`  | 1,024     | Receipts in one `submitReceiptBatch` call: one batch of `RECEIPT_BATCH_MAX` pairs, 65,640 bytes, 65,732 of calldata, within a deposit's 120,000                   |
 | `RECEIPT_CALL_GAS`   | 4,500,000 | Gas of one batch call of up to `RECEIPTS_PER_CALL` receipts, its intrinsic gas included, within a deposit's 20,000,000 (measured cold: about 4,172,000 for 1,024) |
 | `COMPLAINT_CALL_GAS` | 180,000   | Gas of one `submitComplaint` call, its intrinsic gas included (measured cold: about 157,000)                                                                      |
 

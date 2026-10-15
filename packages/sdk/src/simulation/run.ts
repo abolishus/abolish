@@ -12,7 +12,10 @@
 // signing key, each ballot's L1 reference on a simulated L1 (./l1.ts), the
 // ballot record on the board (./board.ts) with the operator's receipt and
 // the client's check of it at cast, each such seat's share receipt on the
-// board and a posting voter's postings of the seats down at its cast, the verifier's
+// board and a posting voter's postings of the seats down at its cast, a
+// ballot cast while our servers are down submitted to a simulated board
+// contract (./board-contract.ts) with its seats' receipts, every event of
+// which the operator boards as a contract-event record, the verifier's
 // board check, and from the boarded records: each ballot's admission check,
 // the re-vote rule's selection of each voter's counted ballot, the delivery
 // check that keeps only delivered ones, the summed shares of those, sent
@@ -54,9 +57,11 @@ import {
   type CommittedVote,
   decode,
   decodeMembershipProof,
-  type DeliveryEntry,
+  boardBallotSegment,
+  type ContractEventRecord,
   deriveTotal,
   encodeBallotV2,
+  encodeContractEvent,
   encodeDestructionStatement,
   encodeOpeningV2,
   decodeOpening,
@@ -98,12 +103,14 @@ import {
 import { parseBundle, type Verdict, verifyBundle } from "@abolishus/verifier";
 import { SIMULATED_RECEIPT_KEY_LEAD, SimulatedAnchor } from "./anchor.ts";
 import { SegmentPublisher, SimulatedIpfs } from "./archive.ts";
+import { SimulatedBoardContract } from "./board-contract.ts";
 import { type VerifierBundle, verifierBundle } from "./bundle.ts";
 import {
   afterAnchored,
   endOf,
   postClose,
   SIMULATED_ANCHOR_DEADLINE,
+  SIMULATED_ANCHOR_PERIOD,
   SimulatedBoard,
   segmentAt,
 } from "./board.ts";
@@ -119,8 +126,13 @@ import {
 } from "./intake.ts";
 import { admitOpening } from "./publication.ts";
 import { judgeRebuild, type PublicRecord, rebuildElection } from "./rebuild.ts";
-import { SIMULATED_BOARD_ENTRY_VERSION, simulateElection } from "./election.ts";
+import {
+  SIMULATED_BOARD_ENTRY_VERSION,
+  SIMULATED_EVENT_VERSION,
+  simulateElection,
+} from "./election.ts";
 import { latestFinalized, nameBlock, SimulatedL1 } from "./l1.ts";
+import { l2BlockAt } from "./l2.ts";
 import {
   deliveredAt,
   downAt,
@@ -140,18 +152,18 @@ import { judgeVerifierReport } from "./verify.ts";
  * result is mistaken for a run of the whole protocol.
  */
 export const SIMULATION_STUBS = Object.freeze([
-  "definition: a well-formed version-4 definition, each tier one group in one region and so one cell, listing the operator's receipt key, created and registered on simulated L2 registries (./l2.ts) at fresh random addresses, with Anvil's chain IDs, the placeholder L1 anchor and relay, a placeholder anchoring clock and placeholder cell roots; the registries hold their records in memory, emit no events and take values rather than calldata, so their byte-level checks (canonical calldata, strict decoding, the record's length) and the L1 origins aren't exercised, the election registry records none of the board's parameters (no direct submission reads them yet), the approvals' quorum and order are checked here rather than by a gated check the verifier's 3.1 shares, the L2 is two-second blocks with no sequencer, and each client compares the definition's hash with the registry's memory rather than reading DefinitionRegistered (P1-18, P1-19, P3-2)",
+  "definition: a well-formed version-4 definition, each tier one group in one region and so one cell, listing the operator's receipt key, created and registered on simulated L2 registries (./l2.ts) at fresh random addresses, with Anvil's chain IDs, the placeholder L1 anchor and relay, a placeholder anchoring clock and placeholder cell roots; the registries hold their records in memory, emit no events and take values rather than calldata, so their byte-level checks (canonical calldata, strict decoding, the record's length) and the L1 origins aren't exercised, the election registry records the board's parameters in memory, which only the simulated board contract reads, the approvals' quorum and order are checked here rather than by a gated check the verifier's 3.1 shares, the L2 is two-second blocks with no sequencer, and each client compares the definition's hash with the registry's memory rather than reading DefinitionRegistered (P1-18, P1-19, P3-2)",
   "ceremony: every seat takes part in the four signed rounds, every registered seat approves the key set its check returned, the simulated trustee registry records the ceremony under the panel it pins with rule 7's quorum, and the operator boards the transcript as the board's first entry; no release pins the panel, whose identity keys are fresh per run, so the verifier's bundle gives it as a local input and its 3.1 doesn't read the registration (P1-7, P1-19)",
-  "membership: no membership proofs; each voter's nullifier is its index plus one, and each ballot record carries a placeholder proof, the verification key's own alpha, beta and alpha points, which decodes but proves nothing; the run never checks it, and each ballot's M for the re-vote rule is computed from its record here rather than taken from crypto's checkBallot, while the verifier's admission rejects every ballot for it (5.1 to 5.3, membership-proof), so it never verifies their validity proofs (5.4 covers only their shape and qualified share hashes) and its checks over admitted ballots (5.7, and 6.2's opening-cast) judge none (P1-17b, P3-2)",
+  "membership: no membership proofs; each voter's nullifier is its index plus one, and each ballot record carries a placeholder proof, the verification key's own alpha, beta and alpha points, which decodes but proves nothing; neither the run nor the simulated board contract checks it, and each ballot's M for the re-vote rule is computed from its record here rather than taken from crypto's checkBallot, while the verifier's admission rejects every ballot for it (5.1 to 5.3, membership-proof), so it never verifies their validity proofs (5.4 covers only their shape and qualified share hashes) and its checks over admitted ballots (5.7, and 6.2's opening-cast) judge none (P1-17b, P3-2)",
   "board: the operator boards each server ballot as it arrives and signs a receipt the voter's client checks at cast, under one receipt key fresh per run, which the definition lists and the anchoring authority registers in the anchor's receipt-key record a day before opening, never retiring it; each client checks the key's record before casting from the simulated anchor's memory, not from L1 state, and the verifier's 2.9 reads it from the bundle's simulated L1 state; the anchoring clock (hourly from the Unix epoch, with a half-hour deadline) is a placeholder, the post-close windows other than the tally, openings' and destruction windows are taken as zero for the counted extent, though the delivery check applies the real delivery deadline (every delivery record is boarded or sent long before it), so the counted extent ends one period after close and the seal is the destruction window's end (P1-13b, P1-18)",
   "anchoring: an anchoring authority anchors the checkpoint of every period that added entries, and the seal's, in the first block after the period ends, and every reader judges them with crypto's verifyBoard; but the anchor contract, its clock and the authority's key are simulated, readers during the election take the anchors from memory, and only the verifier's final read proves them from L1 state, a simulated one (the anchor's account alone, with placeholder code, under a header whose other fields are zero and whose hash isn't the simulated chain's block hash), every period's entries are boarded before its end, and the segment objects and entry-hash lists the CIDs name are published to a simulated IPFS store (./archive.ts) that holds whole objects in memory, never a DAG of blocks or a CAR, with no pinning, mirrors or availability attestations; readers during the election check the operator's copy, the tally and destruction checks read it before the final board check authenticates it, a node checks the whole board before destroying rather than each first passing opening's inclusion, and the trustees' moments come from the clock rather than from the blocks they saw (P4-1, P4-3)",
-  "delivery: ciphertexts reach trustees in memory, and no contract records anything; a direct ballot is boarded by the operator when the servers return, with no operator receipt, never as a contract event; each online seat's node boards its share receipt right after the ballot, and the operator boards it unchecked rather than under the delivery boarding rules; a posting voter's client posts each seat down at that ballot's cast once, right after cast, as a contract-path record the delivery check reads with its cast time as its submission time, though no contract records it and nothing puts it on the board or the archive; a departing seat's receipts for ballots it took before going down are boarded with them, even a direct ballot's after the seat is down; offline and departed seats never come back, so no seat catches up on postings or complains, and nothing is resent (P1-12c, P1-18, P4-2)",
+  "delivery: ciphertexts reach trustees in memory; a ballot cast while our servers are down goes to a simulated board contract (./board-contract.ts), and each seat up at its cast sends its share receipt there, the board path being down; every posting goes there too, once, right after its ballot's cast; the contract runs the board's checks in its order but the membership proof's, decodes a ballot or posting strictly where the real one only frames its elements, takes values rather than calldata, costs no gas, has no complaint, relayed-ballot or close-statement call, and is called by the run itself rather than through an RPC, a relay or a fresh privately funded address; its events are boarded by the operator as contract-event records in order of n as soon as our servers are up, during an outage when they return, and the delivery check reads each by its L2 time; a ballot cast through our servers gets each online seat's receipt on the board right after it, boarded unchecked rather than under the delivery boarding rules; offline and departed seats never come back, so no seat catches up on postings or complains, and nothing is resent (P1-12c, P1-18, P4-2)",
   "trustees: offline seats go down after the ceremony, for the whole voting period, tally and destruction, and departing seats at their scenario time, for the rest of it, and take no part in the tally or destruction, though they hold shares of every ballot cast before; nothing models a departing seat's node or disk afterwards; faulty seats lie only in their summed shares, which their own node's check refuses to seal, so no lie reaches another seat as a summed-share message, no recipient's refusal is shown, and a cell's excluded seats are those that sent nothing (openCell never sees a failing sum); summed-share messages travel in memory, never over a channel, every honest seat combines, and the lowest seat combined signs each cell's opening",
   "challenges: the checker records each tracking code and checks the opening in memory, with the election the run built rather than one fetched from chain and IPFS; a voter who publishes asks once, in the first period after the counted extent, and the operator's boarding rules are applied here; the verifier's 6.2 reports every published opening without a break but leaves its row unverifiable until it knows s_S, as 7.4 does the tally openings (P1-19, P1-21 part 2)",
   "re-voting: L1 is simulated, a block every 12 seconds with random hashes, all finalized; a reorganised ballot's block is replaced before it is finalized, which the client sees two epochs after the block and then casts the same committed vote again at once, with no light client or header range modelled; every other reference is admitted, so no ballot is replayed, ties, or names a block before opening or after close (P1-21 part 2)",
   "destruction: every online seat signs its statement at the moment the tally rule sets, and the operator boards each one; nothing destroys the run's key material, which lives until the report is returned",
   "verifier: packages/verifier reads the closed election once, at the first block after the seal's window, from a bundle whose definition, clock and panel are local inputs, so its verdict is never better than unverifiable; the checks it doesn't implement yet, and 1.2's and 2.1's comparisons with pinned deployments, aren't exercised (P1-19)",
-  "rebuild: the sdk holds no database, so the wipe drops the operator's copy of the board and every result derived from it, and the rebuild reads only the public record: the definition, panel and key set from the simulated L2 registries' memory (the definition as its registration's encoding, though no registry records calldata), the anchors and L1 blocks from the simulated anchor and L1, the contract-path postings from the run's memory, since no contract records them, and the board from the simulated IPFS store; it rebuilds once, at the verifier's read after the seal, from one store with no other source to try when an object is missing, and core's Postgres rebuild (P2-1) isn't run (P2-1, P4-3, P4-6)",
+  "rebuild: the sdk holds no database, so the wipe drops the operator's copy of the board and every result derived from it, and the rebuild reads only the public record: the definition, panel and key set from the simulated L2 registries' memory (the definition as its registration's encoding, though no registry records calldata), the anchors and L1 blocks from the simulated anchor and L1, the board contract's accumulator from its memory rather than a storage proof under an output root, replayed over the board's contract-event records, which holds only while one election uses the board, and the board from the simulated IPFS store; it rebuilds once, at the verifier's read after the seal, from one store with no other source to try when an object is missing, and core's Postgres rebuild (P2-1) isn't run (P2-1, P4-3, P4-6)",
 ] as const);
 
 export type CellOutcome = "opened" | TallyCode;
@@ -235,8 +247,17 @@ export interface SimulationReport {
     readonly entries: number;
     /** Entries in the counted extent: the ceremony transcript, then ballots and share receipts. */
     readonly counted: number;
-    /** Share receipts, one from each seat up at its cast per ballot cast. */
+    /**
+     * Share receipts, one from each seat up at its cast per ballot cast:
+     * on the board path for a ballot cast through our servers, through the
+     * board contract for one submitted directly.
+     */
     readonly shareReceipts: number;
+    /**
+     * The board contract's events, each boarded as a contract-event record:
+     * direct ballots, their receipts and every posting.
+     */
+    readonly contractEvents: number;
     /** Tally openings, one per opened cell. */
     readonly openings: number;
     /** Spoiled-ballot openings, one per published challenge. */
@@ -597,29 +618,53 @@ export async function runSimulation(
     readonly down: readonly number[];
   }
   const kept: Kept[] = [];
-  // Ballots submitted directly while our servers are down, which the
-  // operator boards when they return (SIMULATION_STUBS), each with its
-  // share receipts from the seats up at its cast.
-  let pending: (Kept & { readonly payload: Uint8Array; readonly receipts: Uint8Array[] })[] = [];
+  // The board contract on the simulated L2, the direct-submit path: it
+  // reads the election's parameters and key set from the registries, and
+  // each record it accepts is an event under its accumulator (T-25, T-71).
+  const boardContract = new SimulatedBoardContract(
+    election.definition.l2_chain_id,
+    election.definition.board,
+    election.electionRegistry,
+    election.trusteeRegistry,
+  );
+  // The plan's view of each ballot the contract emitted, by event `n`,
+  // until the operator boards the event.
+  const keptByEvent = new Map<number, Kept>();
+  // The operator boards every board-contract event as a contract-event
+  // record, in order of `n`, whenever our servers are up: during an outage
+  // its events wait until the servers return (docs/spec/verifier.md, 5.6;
+  // T-25). Segments never decrease on the board.
+  let boardedEvents = 0;
+  let directBoarded = 0;
+  let lastSegment = firstSegment;
+  const boardEvents = (segment: number) => {
+    lastSegment = Math.max(lastSegment, segment);
+    for (; boardedEvents < boardContract.events.length; boardedEvents++) {
+      const event = boardContract.events[boardedEvents] as ContractEventRecord;
+      const index = operator.board(
+        lastSegment,
+        encodeContractEvent(event, SIMULATED_EVENT_VERSION),
+      );
+      const k = keptByEvent.get(boardedEvents);
+      if (k !== undefined) {
+        kept[index] = k;
+        directBoarded++;
+      }
+    }
+  };
   const returnsAt = segmentAt(secondsAt(scenario.outage?.to ?? 1));
-  // Each seat's node boards its share receipt once the ballot is on
-  // the board (docs/spec/delivery.md, Boarding rule 2): a receipted seat is
+  // Each seat's node boards its share receipt once the ballot is on the
+  // board (docs/spec/delivery.md, Boarding rule 2), or, with the board path
+  // down, sends it through the contract path: a receipted seat is
   // delivered even when the client goes away (Client rules).
   let shareReceipts = 0;
   const boardReceipts = (segment: number, receipts: readonly Uint8Array[]) => {
     for (const r of receipts) operator.board(segment, r);
     shareReceipts += receipts.length;
   };
-  const boardPending = () => {
-    for (const { payload, receipts, ...k } of pending) {
-      kept[operator.board(returnsAt, payload)] = k;
-      boardReceipts(returnsAt, receipts);
-    }
-    pending = [];
-  };
-  // Shares posted through the contract path, which the delivery check reads
-  // by their submission time (SIMULATION_STUBS).
-  const postings: DeliveryEntry[] = [];
+  // Shares posted through the board contract, which the delivery check
+  // reads from their events by their submission time.
+  let postings = 0;
   // Per voter, the newest block it named (Client rule 3's own records).
   const named = new Map<number, bigint>();
   // Per voter whose last ballot named a block reorganised away, what its
@@ -649,12 +694,32 @@ export async function runSimulation(
     receipts: Uint8Array[],
   ) => {
     if (ballot.path === "direct") {
-      pending.push({ payload, receipts, ...k });
+      // With our servers down, the client submits to the board contract
+      // itself, and each seat's node, finding the board path down, sends
+      // its receipt through the contract path (docs/spec/delivery.md,
+      // Direct submit; T-25). An honest record the contract refuses, or
+      // takes as a repeat, is a bug.
+      const block = l2BlockAt(seconds);
+      const n = boardContract.events.length;
+      const sent = boardContract.submitBallot(payload, block);
+      if (!sent.ok || sent.emitted !== 1)
+        throw new Error(
+          `simulation: the board contract refused an honest ballot (${sent.ok ? "repeat" : sent.refusal})`,
+        );
+      keptByEvent.set(n, k);
+      for (const r of receipts) {
+        const got = boardContract.submitReceipts(r, block);
+        if (!got.ok || got.emitted !== 1)
+          throw new Error(
+            `simulation: the board contract refused an honest receipt (${got.ok ? "repeat" : got.refusal})`,
+          );
+      }
+      shareReceipts += receipts.length;
       return;
     }
-    // The servers are back: what was submitted directly is boarded first.
-    boardPending();
+    // The servers are back: the board contract's events are boarded first.
     const segment = segmentAt(seconds);
+    boardEvents(segment);
     const receipt = operator.submit(segment, payload);
     kept[Number(receipt.index)] = k;
     boardReceipts(segment, receipts);
@@ -817,25 +882,6 @@ export async function runSimulation(
           toRecast.set(voter.index, { vote, shares, down });
           reorged++;
         }
-        // Client rule 4 (docs/spec/delivery.md): a down seat's intake fails by
-        // every route, so a voter who chooses to posts that seat's ciphertext
-        // and ML-KEM message through the contract path, which our outage doesn't
-        // touch; any other voter's ballot stays undelivered (T-15, T-25).
-        if (ballot.posts)
-          for (const seat of down) {
-            const at = seat - 1;
-            postings.push({
-              path: "contract",
-              submittedAt: seconds,
-              payload: encodeSharePosting({
-                definition_hash: definitionHash,
-                ballot_hash: ballotHash(ctx, vote),
-                seat,
-                m: (encrypted.randomness[at] as (typeof encrypted.randomness)[number]).m,
-                ciphertext: decode(SHARE_CIPHERTEXT, encrypted.ciphertexts[at] as Uint8Array),
-              }),
-            });
-          }
         const k: Kept = {
           shares,
           selects: last ? !lost : voter.selected === "earlier",
@@ -844,6 +890,34 @@ export async function runSimulation(
           down,
         };
         submit(ballot, seconds, payload, k, receipts);
+        // Client rule 4 (docs/spec/delivery.md): a down seat's intake fails by
+        // every route, so a voter who chooses to posts that seat's ciphertext
+        // and ML-KEM message to the board contract with the ballot record it
+        // cast, which our outage doesn't touch; any other voter's ballot
+        // stays undelivered (T-15, T-25).
+        if (ballot.posts) {
+          const block = l2BlockAt(seconds);
+          for (const seat of down) {
+            const at = seat - 1;
+            const posted = boardContract.submitPosting(
+              encodeSharePosting({
+                definition_hash: definitionHash,
+                ballot_hash: ballotHash(ctx, vote),
+                seat,
+                m: (encrypted.randomness[at] as (typeof encrypted.randomness)[number]).m,
+                ciphertext: decode(SHARE_CIPHERTEXT, encrypted.ciphertexts[at] as Uint8Array),
+              }),
+              payload,
+              block,
+            );
+            if (!posted.ok || posted.emitted !== 1)
+              throw new Error(
+                `simulation: the board contract refused an honest posting (${posted.ok ? "repeat" : posted.refusal})`,
+              );
+            postings++;
+          }
+          if (ballot.path === "server") boardEvents(segmentAt(seconds));
+        }
         progress();
       },
     };
@@ -873,7 +947,11 @@ export async function runSimulation(
   } finally {
     await intake.close();
   }
-  boardPending();
+  // Whatever the contract recorded while the servers were down is boarded
+  // when they return, within the counted extent (5.6).
+  boardEvents(returnsAt);
+  if (boardedEvents !== boardContract.events.length || lastSegment > after.counted)
+    throw new Error("simulation: a board-contract event isn't boarded in the counted extent");
 
   // The counted extent, as the trustees read it at t_S, once the checkpoint
   // for s_S is due: the authority has anchored every period through s_S,
@@ -891,11 +969,12 @@ export async function runSimulation(
         (recordTypeOf(e.payload) === RECORD_TYPES.ceremonyTranscript) !== (i === 0) ||
         (i > 0 &&
           recordTypeOf(e.payload) !== RECORD_TYPES.ballot &&
-          recordTypeOf(e.payload) !== RECORD_TYPES.shareReceipt),
+          recordTypeOf(e.payload) !== RECORD_TYPES.shareReceipt &&
+          recordTypeOf(e.payload) !== RECORD_TYPES.contractEvent),
     )
   )
     throw new Error(
-      "simulation: the counted extent isn't the transcript, then ballots and share receipts",
+      "simulation: the counted extent isn't the transcript, then ballots, share receipts and contract events",
     );
 
   // From each boarded ballot record: its L1 reference's admission (5.8) and
@@ -914,11 +993,22 @@ export async function runSimulation(
     inclusionBound: election.definition.l1_inclusion_bound,
     finalized,
     window,
-    postings,
+    contracts: {
+      electionRegistry: election.definition.election_registry,
+      trusteeRegistry: election.definition.trustee_registry,
+      groupRegistry: election.definition.group_registry,
+      board: election.definition.board,
+    },
+    eventVersion: SIMULATED_EVENT_VERSION,
+    opensAt,
+    boardSegment: boardBallotSegment({ epoch: 0n, period: SIMULATED_ANCHOR_PERIOD }, closesAt),
   };
   const extent = readCountedExtent(countingContext, checked.entries);
   const { ballots: boarded, selection, delivery, counted } = extent;
-  if (extent.rejected.length > 0) throw new Error("simulation: an honest ballot was rejected");
+  if (extent.rejected.length > 0)
+    throw new Error("simulation: an honest ballot or contract event was rejected");
+  if (extent.events.length !== boardContract.events.length)
+    throw new Error("simulation: the counted extent doesn't carry every board-contract event");
   for (const [index, verdict] of extent.verdicts) {
     const want = (kept[index] as Kept).reorged ? "l1-ref-unknown" : "admitted";
     if (verdict !== want)
@@ -1264,7 +1354,7 @@ export async function runSimulation(
   const verifier = verifyBundle(parseBundle(bundle.json, bundle.board));
   const disagreements = judgeVerifierReport(verifier, {
     entries: operator.entries.length,
-    ballots: onBoard(RECORD_TYPES.ballot).length,
+    ballots: onBoard(RECORD_TYPES.ballot).length + directBoarded,
     openings: spoiled.length,
     tallies: tallyEntries.length,
     registered: registered.length,
@@ -1286,7 +1376,7 @@ export async function runSimulation(
     trusteeRegistry: election.trusteeRegistry,
     anchor,
     l1,
-    postings,
+    board: boardContract,
     ipfs,
   };
   options.onPublicRecord?.(publicRecord);
@@ -1328,13 +1418,14 @@ export async function runSimulation(
       recast: casts.filter((c) => c.kind === "recast").length,
       challenged,
       published: publications.length,
-      postings: postings.length,
+      postings,
       undelivered: selection.selected.length - counted.length,
     },
     board: {
       entries: sealed.entries.length,
       counted: checked.entries.length,
       shareReceipts,
+      contractEvents: boardContract.events.length,
       openings: tallyEntries.length,
       spoiled: spoiled.length,
       head: hex(operator.head),

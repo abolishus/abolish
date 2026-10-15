@@ -36,3 +36,8 @@ export {
   type RebuiltCell,
   type RebuiltElection,
 } from "./simulation/rebuild.ts";
+export {
+  type BoardRefusal,
+  type BoardResult,
+  SimulatedBoardContract,
+} from "./simulation/board-contract.ts";

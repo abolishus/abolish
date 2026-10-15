@@ -1,4 +1,5 @@
 import {
+  cellBallotElection,
   electionDefinitionV4Hash,
   electionId,
   electionStubV4Hash,
@@ -101,6 +102,40 @@ describe("the simulated election's registration", { timeout }, () => {
       expect(equal(set?.seats[i]?.signingKey ?? new Uint8Array(), r.signingKey)).toBe(true);
     expect(e.registration.approvals.map((a) => a.index)).toEqual([1, 2, 3, 4]);
     expect(e.registration.approvals.length).toBeGreaterThanOrEqual(quorum);
+  });
+
+  it("records the board's parameters from the registered definition, by its hash, cells in partition order", () => {
+    const p = e.electionRegistry.parametersOf(electionDefinitionV4Hash(d));
+    expect(p).toMatchObject({
+      ballotVersion: 2,
+      threshold: d.threshold,
+      panelSize: d.panel_size,
+      optionCount: d.option_count,
+      opensAt: d.opens_at,
+      closesAt: d.closes_at,
+      l1InclusionBound: d.l1_inclusion_bound,
+      questions: [
+        {
+          method: 1,
+          options: d.option_count,
+          minSelections: d.min_selections,
+          maxSelections: d.max_selections,
+        },
+      ],
+    });
+    const partition = cellBallotElection(d, e.registered).cells;
+    expect(p?.cellCount).toBe(partition.length);
+    expect(p?.cells.map((c) => c.tier)).toEqual(partition.map((c) => c.tier));
+    expect(p?.cells.map((c) => c.root)).toEqual(
+      d.electorate.flatMap((t) => t.cells.map((c) => c.root)),
+    );
+    expect(equal(p?.ceremony.stubHash ?? new Uint8Array(), stubHash)).toBe(true);
+    expect(equal(p?.ceremony.panelId ?? new Uint8Array(), d.panel_id)).toBe(true);
+    // Nothing for a hash never registered, and a copy each read.
+    expect(e.electionRegistry.parametersOf(new Uint8Array(32))).toBeUndefined();
+    if (p !== undefined) p.ceremony.stubHash.fill(0);
+    const again = e.electionRegistry.parametersOf(electionDefinitionV4Hash(d));
+    expect(equal(again?.ceremony.stubHash ?? new Uint8Array(), stubHash)).toBe(true);
   });
 
   it("gives every run its own deployment, so no two share an election identifier", () => {

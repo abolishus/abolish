@@ -121,6 +121,9 @@ export interface SimulatedElection {
 /** The board-entry version the profile pins: 5, which carries the delivery records and destruction statements ballot version 2 and tally-opening version 1 need ([[verifier]] 2.3), and the close statements, the only one the election registry admits ([[contracts]], Registration, rule 9). */
 export const SIMULATED_BOARD_ENTRY_VERSION = 5;
 
+/** The contract-event version the profile pins: 3, the one that archives the board's events beside the close rule's ([[contracts]], Contract-event record). */
+export const SIMULATED_EVENT_VERSION = 3;
+
 /**
  * The versions the profile pins where they aren't 1: the definition's own
  * (4), ballots that name their cell (2) and the openings of their cores (2),
@@ -133,7 +136,7 @@ const PINNED: ReadonlyMap<number, number> = new Map([
   [RECORD_TYPES.ballot, 2],
   [RECORD_TYPES.spoiledBallotOpening, 2],
   [RECORD_TYPES.boardEntry, SIMULATED_BOARD_ENTRY_VERSION],
-  [RECORD_TYPES.contractEvent, 3],
+  [RECORD_TYPES.contractEvent, SIMULATED_EVENT_VERSION],
 ]);
 
 /** The profile: every type from 0x0001 to 0x0009 pinned, at version 1 but those in `PINNED`. */

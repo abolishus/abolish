@@ -8,9 +8,11 @@
 // `verifyCeremonyRegistration` over crypto's `keySetHash` of the record's
 // seats, and the definition with crypto's well-formedness rules and stub
 // hash, so the run exercises the binding a deployed registry enforces (T-37,
-// T-14, T-34, T-24, T-71). The contracts, their chain and their event
-// sequences are simulated: records live in memory, nothing emits an event
-// and the verifier doesn't read them yet (SIMULATION_STUBS).
+// T-14, T-34, T-24, T-71). At registration the election registry also
+// records the board's parameters, which the simulated board contract reads
+// (./board-contract.ts). The contracts and their chain are simulated:
+// records live in memory, the registries emit no event and the verifier
+// doesn't read them yet (SIMULATION_STUBS).
 
 import {
   EncodeError,
@@ -329,8 +331,73 @@ const SERVED_V4: ReadonlyMap<number, number> = new Map([
 const servedProfile = (d: ElectionDefinitionV4) =>
   [...SERVED_V4].every(([type, version]) => pinnedVersion(d, type) === version);
 
+/**
+ * What the registry records for the board, keyed by `definition_hash`
+ * (docs/spec/contracts.md, Election registry, Parameters): the fields a
+ * direct submission's checks read, each from the registered definition, so
+ * the board takes nothing about the election from a submitter (T-25, T-71).
+ * Definition version 4 has one question and no author panel.
+ */
+export interface BoardParameters {
+  readonly ballotVersion: number;
+  readonly threshold: number;
+  readonly panelSize: number;
+  readonly optionCount: number;
+  readonly cellCount: number;
+  readonly opensAt: bigint;
+  readonly closesAt: bigint;
+  readonly l1InclusionBound: number;
+  /** Each question's method, option count and selection limits, in ballot order. */
+  readonly questions: readonly {
+    readonly method: number;
+    readonly options: number;
+    readonly minSelections: number;
+    readonly maxSelections: number;
+  }[];
+  /** Each cell's tier and root, in partition order: tier by tier, each tier's cells in order. */
+  readonly cells: readonly { readonly tier: number; readonly root: bigint }[];
+  /** Where the trustee registry recorded the election's key set. */
+  readonly ceremony: { readonly stubHash: Uint8Array; readonly panelId: Uint8Array };
+}
+
+function boardParameters(d: ElectionDefinitionV4): BoardParameters {
+  return {
+    ballotVersion: pinnedVersion(d, RECORD_TYPES.ballot) ?? 0,
+    threshold: d.threshold,
+    panelSize: d.panel_size,
+    optionCount: d.option_count,
+    cellCount: d.electorate.reduce((n, t) => n + t.cells.length, 0),
+    opensAt: d.opens_at,
+    closesAt: d.closes_at,
+    l1InclusionBound: d.l1_inclusion_bound,
+    questions: [
+      {
+        method: 1,
+        options: d.option_count,
+        minSelections: d.min_selections,
+        maxSelections: d.max_selections,
+      },
+    ],
+    cells: d.electorate.flatMap((t) => t.cells.map((c) => ({ tier: t.tier, root: c.root }))),
+    ceremony: { stubHash: electionStubV4Hash(d), panelId: Uint8Array.from(d.panel_id) },
+  };
+}
+
+const copyParameters = (p: BoardParameters): BoardParameters => ({
+  ...p,
+  questions: p.questions.map((q) => ({ ...q })),
+  cells: p.cells.map((c) => ({ ...c })),
+  ceremony: {
+    stubHash: Uint8Array.from(p.ceremony.stubHash),
+    panelId: Uint8Array.from(p.ceremony.panelId),
+  },
+});
+
 export class SimulatedElectionRegistry {
   readonly #deployment: SimulatedDeployment;
+  // The board's parameters, by definition hash, recorded with the same code
+  // that checks the definition (docs/spec/contracts.md, Parameters).
+  readonly #parameters = new Map<string, BoardParameters>();
   readonly #trustees: SimulatedTrusteeRegistry;
   readonly #creators = new Map<string, string>();
   readonly #definitions = new Map<string, Uint8Array>();
@@ -449,8 +516,10 @@ export class SimulatedElectionRegistry {
     )
       return refuse("CeremonyNotRecorded");
     if (!servedProfile(d)) return refuse("ProfileNotServed");
-    this.#definitions.set(id, electionDefinitionV4Hash(d));
+    const hash = electionDefinitionV4Hash(d);
+    this.#definitions.set(id, hash);
     this.#encodings.set(id, encodeElectionDefinitionV4(d));
+    this.#parameters.set(hex(hash), boardParameters(d));
     return { ok: true };
   }
 
@@ -462,6 +531,15 @@ export class SimulatedElectionRegistry {
   definitionOf(election: Uint8Array): Uint8Array | undefined {
     const e = this.#encodings.get(hex(election));
     return e === undefined ? undefined : Uint8Array.from(e);
+  }
+
+  /**
+   * `parameters`, `cell` and `ceremony` for `definitionHash` together, as a
+   * copy, or `undefined` for a hash never registered (`ballot_version` 0).
+   */
+  parametersOf(definitionHash: Uint8Array): BoardParameters | undefined {
+    const p = this.#parameters.get(hex(definitionHash));
+    return p === undefined ? undefined : copyParameters(p);
   }
 
   /** The hash registered for `election`, or `undefined` before registration. */

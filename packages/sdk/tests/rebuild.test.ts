@@ -380,12 +380,39 @@ describe("rebuildElection", { timeout }, () => {
     ).toEqual(["board entries", "counted extent", "board head", "entries rejected"]);
   });
 
-  it("reads the contract-path postings from chain: without them, ballots posting a down seat aren't delivered", () => {
-    const rebuilt = rebuildElection({ ...record, postings: [] });
-    expect(rebuilt.ballots.undelivered).toBeGreaterThan(0);
-    const differences = judgeRebuild(rebuilt, expectationOf(report));
-    expect(differences.some((d) => d.startsWith("ballots counted"))).toBe(true);
-    expect(differences.some((d) => d.startsWith("cells"))).toBe(true);
+  it("reads direct ballots, receipts and postings from the board contract's events on the board", () => {
+    const events = boardOf(record)
+      .map((e) => decodeBoardEntry(e, SIMULATED_BOARD_ENTRY_VERSION).payload)
+      .filter((p) => typeOf(p) === RECORD_TYPES.contractEvent);
+    expect(events).toHaveLength(report.board.contractEvents);
+    expect(report.ballots.direct).toBeGreaterThan(0);
+    expect(report.ballots.postings).toBeGreaterThan(0);
+  });
+
+  it("refuses a board missing any one of the board contract's events, by its accumulator", () => {
+    const decoded = boardOf(record).map((e) => decodeBoardEntry(e, SIMULATED_BOARD_ENTRY_VERSION));
+    const at = decoded.flatMap((e, i) =>
+      typeOf(e.payload) === RECORD_TYPES.contractEvent ? [i] : [],
+    );
+    expect(at.length).toBeGreaterThan(1);
+    // The first and the last: a dropped event, before or after the rest, is found.
+    for (const drop of [at[0] as number, at.at(-1) as number]) {
+      const board = [
+        ...decoded.slice(0, drop),
+        ...decoded.slice(drop + 1).map((e) => ({ ...e, index: e.index - 1n })),
+      ].map((e) => encodeBoardEntry(e, SIMULATED_BOARD_ENTRY_VERSION));
+      expect(rebuildCode(reanchored(record, board))).toBe("events-incomplete");
+    }
+  });
+
+  it("refuses a board whose contract events disagree with the accumulator's state", () => {
+    const { board } = record;
+    const proven = (block: bigint) => board.accumulatorAt(block);
+    const other: PublicRecord["board"][] = [
+      { accumulatorAt: (b) => ({ ...proven(b), count: proven(b).count + 1n }) },
+      { accumulatorAt: (b) => ({ ...proven(b), accumulator: new Uint8Array(32) }) },
+    ];
+    for (const b of other) expect(rebuildCode({ ...record, board: b })).toBe("events-incomplete");
   });
 });
 

@@ -121,8 +121,8 @@ export interface SimulatedElection {
 /** The board-entry version the profile pins: 5, which carries the delivery records and destruction statements ballot version 2 and tally-opening version 1 need ([[verifier]] 2.3), and the close statements, the only one the election registry admits ([[contracts]], Registration, rule 9) and [[verifier]] 2.3 accepts ([[close]], Version). */
 export const SIMULATED_BOARD_ENTRY_VERSION = 5;
 
-/** The contract-event version the profile pins: 3, the one that archives the board's events beside the close rule's ([[contracts]], Contract-event record), and the only one 2.3 accepts ([[close]], Version). */
-export const SIMULATED_EVENT_VERSION = 3;
+/** The contract-event version the profile pins: 4, the one that archives every board event, the close rule's and the share-receipt batch's ([[contracts]], Contract-event record), and the only one 2.3 accepts ([[close]], Version). */
+export const SIMULATED_EVENT_VERSION = 4;
 
 /**
  * The versions the profile pins where they aren't 1: the definition's own

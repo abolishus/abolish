@@ -42,6 +42,7 @@ import {
   aggregateHash,
   type BallotRecordV2,
   ballotHash,
+  batchShareReceipts,
   cellBallotCore,
   cellBallotElection,
   cellCoreHash,
@@ -69,6 +70,8 @@ import {
   encodeReceipt,
   encodeSharePosting,
   encodeShareReceipt,
+  encodeShareReceiptBatch,
+  decodeShareReceipt,
   encodeTallyOpening,
   encryptShares,
   GROUP_ORDER,
@@ -696,9 +699,9 @@ export async function runSimulation(
     if (ballot.path === "direct") {
       // With our servers down, the client submits to the board contract
       // itself, and each seat's node, finding the board path down, sends
-      // its receipt through the contract path (docs/spec/delivery.md,
-      // Direct submit; T-25). An honest record the contract refuses, or
-      // takes as a repeat, is a bug.
+      // its receipt through the contract path as a share-receipt batch
+      // (docs/spec/delivery.md, Direct submit; T-25). An honest record the
+      // contract refuses, or takes as a repeat, is a bug.
       const block = l2BlockAt(seconds);
       const n = boardContract.events.length;
       const sent = boardContract.submitBallot(payload, block);
@@ -708,7 +711,15 @@ export async function runSimulation(
         );
       keptByEvent.set(n, k);
       for (const r of receipts) {
-        const got = boardContract.submitReceipts(r, block);
+        const { seat, ballot_hash, share_hash } = decodeShareReceipt(r, 1);
+        const [batch] = batchShareReceipts(
+          (seats[seat - 1] as SeatSecrets).signingSecret,
+          definitionHash,
+          seat,
+          [{ ballot_hash, share_hash }],
+        );
+        if (batch === undefined) throw new Error("simulation: no batch for a receipt");
+        const got = boardContract.submitReceiptBatch(encodeShareReceiptBatch(batch), block);
         if (!got.ok || got.emitted !== 1)
           throw new Error(
             `simulation: the board contract refused an honest receipt (${got.ok ? "repeat" : got.refusal})`,

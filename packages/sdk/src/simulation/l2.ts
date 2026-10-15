@@ -316,7 +316,7 @@ export class SimulatedTrusteeRegistry {
 /**
  * Rule 9 for a version-4 definition, the only version the simulation
  * registers: ballot version 2, spoiled-ballot opening version 2, board-entry
- * version 5, contract-event version 3 and display-text version 1, the
+ * version 5, contract-event version 4 and display-text version 1, the
  * versions the deployment's board and the verifier serve for it
  * ([[contracts]], Election registry, Registration).
  */
@@ -324,7 +324,7 @@ const SERVED_V4: ReadonlyMap<number, number> = new Map([
   [RECORD_TYPES.ballot, 2],
   [RECORD_TYPES.spoiledBallotOpening, 2],
   [RECORD_TYPES.boardEntry, 5],
-  [RECORD_TYPES.contractEvent, 3],
+  [RECORD_TYPES.contractEvent, 4],
   [RECORD_TYPES.displayText, 1],
 ]);
 

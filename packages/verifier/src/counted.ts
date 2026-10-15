@@ -126,6 +126,8 @@ export interface DeliveryReport {
   /** Each record the check ignored or attributed, in copy order. */
   readonly records: readonly {
     readonly entry: number;
+    /** For a share-receipt batch's pair, its index in the batch from 0. */
+    readonly pair?: number;
     readonly code: DeliveryRecordCode;
     readonly signer?: number | null;
   }[];
@@ -212,14 +214,17 @@ const DELIVERY_TYPES: ReadonlySet<number> = new Set([
   RECORD_TYPES.sharePosting,
   RECORD_TYPES.shareComplaint,
 ]);
+// A share-receipt batch reaches the board only as a contract event: no
+// board-entry version allows it, so 4.1 refuses one boarded directly.
 const DELIVERY_EVENTS: ReadonlySet<string> = new Set([
   "ShareReceiptSubmitted",
   "SharePosted",
   "ShareComplaintSubmitted",
+  "ShareReceiptBatchSubmitted",
 ]);
 
 const readsEvents = (v: number | undefined): v is ContractEventVersion =>
-  v === 1 || v === 2 || v === 3;
+  v === 1 || v === 2 || v === 3 || v === 4;
 
 const U32_MAX = 0xffffffff;
 
@@ -376,6 +381,7 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
     ),
     records: delivered.records.map((r) => ({
       entry: entryOf(r.at),
+      ...(r.pair !== undefined && { pair: r.pair }),
       code: r.code,
       ...(r.signer !== undefined && { signer: r.signer }),
     })),

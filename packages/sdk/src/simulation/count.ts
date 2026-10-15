@@ -162,6 +162,7 @@ export function readCountedExtent(
         case "ShareReceiptSubmitted":
         case "SharePosted":
         case "ShareComplaintSubmitted":
+        case "ShareReceiptBatchSubmitted":
           contractDelivery.push({
             path: "contract",
             submittedAt: record.l2_timestamp,

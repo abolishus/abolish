@@ -1,0 +1,5 @@
+---
+"@abolishus/verifier": minor
+---
+
+Adds the counted set, the tally and the close check (`docs/spec/verifier.md`, Counted set and tally, Close check). Once selection (6.1) passes, the verifier runs delivery (5.9) over the selected ballots, recomputes each cell's counted set and runs the tally checks (7.1 to 7.3), adds `tally-aggregate` and `tally-opening` to 7.4, reports 8.5's destruction statements, and runs the close check (6.3) against `L_δ` from the bundle's run of L1 headers. 4.4 also checks the L1 origins of the election's `ElectionCreated` and `DefinitionRegistered` (`PINNED_SEQUENCER_DRIFT`). The report gains `delivery`, `cells`, `tiers`, `destruction` and `close`; `CheckCode` gains 7.2's cell codes, `close-contested`, `destruction-early`, `destruction-missing` and the three `l1-origin-*` codes, and `CheckAt` gains `{ cell }` and `{ seat }`, so an exhaustive `switch` over either needs new cases. Under formats 4 and 5, 5.9, 6.3, 7.1 to 7.3 and 8.5 are now `not-reached` rather than `not-implemented` until 6.1 passes, and `TallyBreak` gains two variants.

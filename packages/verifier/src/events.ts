@@ -16,6 +16,14 @@
 // its hash against the election registry, so a crafted definition can make
 // honest records fail against the inputs, never the verdict (T-53).
 //
+// The election's own `ElectionCreated` and `DefinitionRegistered` also carry
+// the L1 origin of the L2 block that emitted them, which the sequencer, or
+// L2 governance rewriting the `L1Block` predeploy, chooses within the drift:
+// each is checked as docs/spec/contracts.md (Election registry, The L1
+// origin) says, against the release's pinned drift and, for format 5, the
+// run of finalized L1 headers, and one that fails fails 4.4 like a record
+// that fails the event check (T-71, T-69, T-34).
+//
 // Nothing here can pass 4.4. Which events the board must carry (the
 // required entries) needs the L2 reads that 2.4, 2.5 and 3.1 wait on too,
 // and whether the records are the contracts' own needs the accumulator
@@ -35,13 +43,26 @@ import {
   decodeContractEvent,
   type BoardEntryVersion,
   type EventContracts,
+  type L1Origin,
   pinnedVersion,
   RECORD_TYPES,
 } from "@abolishus/crypto";
 
 import type { VerifiedDefinition } from "./definition.ts";
+import type { L1Header } from "./l1.ts";
 
-export type EventCode = "decode" | ContractEventError;
+/** Why an event's L1 origin fails (docs/spec/verifier.md, Contract events, step 4). */
+export type OriginCode = "l1-origin-unknown" | "l1-origin-drift" | "l1-origin-order";
+
+export type EventCode = "decode" | ContractEventError | OriginCode;
+
+/**
+ * The `max_sequencer_drift` this release pins for the deployment's L2, in
+ * seconds: Base's (docs/spec/contracts.md, Election registry, The L1 origin;
+ * 0004-l2-choice). Never a definition's own value, which its creator chooses
+ * (T-71). Changing it is a new release.
+ */
+export const PINNED_SEQUENCER_DRIFT = 1800n;
 
 export interface EventOutcome {
   readonly status: "fail" | "unverifiable";
@@ -74,6 +95,7 @@ export function eventChecks(
   entries: readonly Uint8Array[],
   boardEntryVersion: BoardEntryVersion,
   anchored: number | undefined,
+  blocks?: readonly L1Header[],
 ): EventOutcome {
   const d = definition.value;
   const version = pinnedVersion(d, RECORD_TYPES.contractEvent);
@@ -87,6 +109,7 @@ export function eventChecks(
     board: d.board,
   };
   const status = anchored === undefined ? "unverifiable" : "fail";
+  const records: { readonly at: number; readonly payload: Uint8Array }[] = [];
   for (const [at, encoded] of entries.entries()) {
     // The board checks ignore what no anchor covers; so does 4.4.
     if (anchored !== undefined && at >= anchored) break;
@@ -102,14 +125,83 @@ export function eventChecks(
     }
     if ((((payload[0] as number) << 8) | (payload[1] as number)) !== RECORD_TYPES.contractEvent)
       continue;
-    let checked;
+    records.push({ at, payload });
+  }
+  type Checked =
+    | {
+        readonly at: number;
+        readonly record: ReturnType<typeof decodeContractEvent>;
+        readonly result: ReturnType<typeof checkContractEvent>;
+      }
+    | { readonly at: number; readonly error: DecodeErrorCode };
+  const checked = records.map(({ at, payload }): Checked => {
     try {
-      checked = checkContractEvent(decodeContractEvent(payload, version), contracts, version);
+      const record = decodeContractEvent(payload, version);
+      return { at, record, result: checkContractEvent(record, contracts, version) };
     } catch (e) {
       if (!(e instanceof DecodeError)) throw e;
-      return { status, code: "decode", at: { entry: at, decodeError: e.code } };
+      return { at, error: e.code };
     }
-    if (!checked.ok) return { status, code: checked.error, at: { entry: at } };
+  });
+  // The election's creation, whose origin a registration's must not precede
+  // (check 3): the first that passes the event check, wherever it is read.
+  let creation: L1Origin | undefined;
+  for (const c of checked)
+    if ("result" in c && c.result.ok && c.result.event.event === "ElectionCreated")
+      if (equal(c.result.event.electionId, d.election_id)) {
+        creation = c.result.event.l1Origin;
+        break;
+      }
+  for (const c of checked) {
+    if (!("result" in c))
+      return { status, code: "decode", at: { entry: c.at, decodeError: c.error } };
+    if (!c.result.ok) return { status, code: c.result.error, at: { entry: c.at } };
+    const event = c.result.event;
+    if (event.event !== "ElectionCreated" && event.event !== "DefinitionRegistered") continue;
+    if (!equal(event.electionId, d.election_id)) continue;
+    const code = originCode(
+      event.l1Origin,
+      c.record.l2_timestamp,
+      event.event === "DefinitionRegistered" ? creation : undefined,
+      blocks,
+    );
+    if (code !== undefined) return { status, code, at: { entry: c.at } };
   }
   return { status: "unverifiable", code: "not-implemented" };
+}
+
+/**
+ * The first of docs/spec/contracts.md's L1-origin checks an event fails
+ * (Election registry, The L1 origin), or `undefined`. Check 1 is decided
+ * only where the run of finalized headers holds the origin's number; a run
+ * that doesn't reach it decides nothing, and 4.4 never passes anyway.
+ */
+export function originCode(
+  origin: L1Origin,
+  l2Timestamp: bigint,
+  creation: L1Origin | undefined,
+  blocks: readonly L1Header[] | undefined,
+): OriginCode | undefined {
+  // 1. One block of finalized L1: the run's block of that number has that
+  // hash and that timestamp.
+  const first = blocks?.[0];
+  if (blocks !== undefined && first !== undefined && origin.number >= first.number) {
+    const held = blocks[Number(origin.number - first.number)];
+    if (
+      held !== undefined &&
+      (!equal(held.hash, origin.hash) || held.timestamp !== origin.timestamp)
+    )
+      return "l1-origin-unknown";
+  }
+  // 2. The event's L2 block is at or after its origin, by at most the
+  // pinned drift.
+  if (l2Timestamp < origin.timestamp || l2Timestamp > origin.timestamp + PINNED_SEQUENCER_DRIFT)
+    return "l1-origin-drift";
+  // 3. A registration's origin is at or after its election's creation's.
+  if (
+    creation !== undefined &&
+    (origin.number < creation.number || origin.timestamp < creation.timestamp)
+  )
+    return "l1-origin-order";
+  return undefined;
 }

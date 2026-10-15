@@ -15,8 +15,11 @@
 // the tally openings' sorting, attribution and boarding breaches (7.4, as far
 // as they need no counted set; against the cells under definition versions 3
 // to 5) and, for format 5, selection (6.1, once the counted extent is fixed)
-// are implemented, and, for formats 3 to 5, 4.4's event check over
-// the board's contract-event records, which can fail 4.4 but never pass it;
+// and, once it passes, delivery (5.9), the close check (6.3), the tally
+// checks (7.1 to 7.3, and 7.4's counted-set breaks) and 8.5 (counted.ts,
+// close.ts) are implemented, and, for formats 3 to 5, 4.4's event and
+// L1-origin checks over the board's contract-event records, which can fail
+// 4.4 but never pass it;
 // every other check is reported unverifiable, so no run can report an
 // election verified yet. A run on unauthenticated inputs reports
 // what the checks found against them, but its verdict stays unverifiable, so
@@ -56,9 +59,20 @@ import {
   type VerifiedDefinition,
 } from "./definition.ts";
 import { eventChecks, type EventCode } from "./events.ts";
+import {
+  type CellReport,
+  countedChecks,
+  type CountedCode,
+  countedRows,
+  type CountedResult,
+  type DeliveryReport,
+  type DestructionReport,
+  type TierReport,
+} from "./counted.ts";
 import { countedFloor, openingChecks, type OpeningCode, type OpeningReport } from "./openings.ts";
 import { admissionSettled, selectionCheck } from "./selection.ts";
 import { type ReceiptKeyCode, receiptKeyRow } from "./receipt-keys.ts";
+import type { CloseReport } from "./close.ts";
 import { tallyChecks, type TallyCode, type TallyReport } from "./tallies.ts";
 import {
   anchorsFromState,
@@ -84,6 +98,7 @@ export type CheckCode =
   | "not-sealed"
   | OpeningCode
   | TallyCode
+  | CountedCode
   | ReceiptKeyCode
   | EventCode
   | "decode"
@@ -106,6 +121,10 @@ export type CheckAt =
   | { readonly checkpoint: number }
   | { readonly segment: number }
   | { readonly key: number }
+  /** 7.2's first failing cell, with its option or question where the code names one. */
+  | { readonly cell: number; readonly option?: number; readonly question?: number }
+  /** 8.5's first registered seat that isn't `destroyed`, or isn't decided. */
+  | { readonly seat: number }
   | Record<string, never>;
 
 export interface CheckResult {
@@ -131,6 +150,16 @@ export interface Report {
   readonly openings?: readonly OpeningReport[];
   /** A format-4 or 5 bundle's tally openings, once 7.4 ran, in copy order. */
   readonly tallies?: readonly TallyReport[];
+  /** A format-5 bundle's delivery check over the selected ballots, once 5.9 passed. */
+  readonly delivery?: DeliveryReport;
+  /** A format-5 bundle's cells, each with its counted ballots and counts, once 7.1 passed. */
+  readonly cells?: readonly CellReport[];
+  /** A format-5 bundle's per-tier results, derived from the cells, once 7.1 passed. */
+  readonly tiers?: readonly TierReport[];
+  /** A format-5 bundle's destruction report, once 8.5 ran. */
+  readonly destruction?: DestructionReport;
+  /** A format-5 bundle's close check, once 6.3 found `L_δ`. */
+  readonly close?: CloseReport;
   readonly board: {
     readonly entries: number;
     readonly unreadableBytes: number;
@@ -308,6 +337,12 @@ function fromDefinition(bundle: Bundle):
           ["5.7", NOT_REACHED],
           ["6.2", NOT_REACHED],
           ["7.4", NOT_REACHED],
+          ["5.9", NOT_REACHED],
+          ["7.1", NOT_REACHED],
+          ["7.2", NOT_REACHED],
+          ["7.3", NOT_REACHED],
+          ["8.5", NOT_REACHED],
+          ["6.3", NOT_REACHED],
           ...(bundle.format === "abolish-verifier-bundle/5"
             ? ([
                 ["5.8", NOT_REACHED],
@@ -449,6 +484,7 @@ export function verifyBundle(bundle: Bundle): Report {
   let ballots: BallotsReport | undefined;
   let openings: readonly OpeningReport[] | undefined;
   let tallies: readonly TallyReport[] | undefined;
+  let counted: CountedResult | undefined;
   if ("rows" in definition) implemented = definition.rows;
   else {
     input = anchoring(bundle, definition.inputs);
@@ -510,6 +546,8 @@ export function verifyBundle(bundle: Bundle): Report {
                 board.unauthenticated === undefined
                   ? undefined
                   : board.entries - board.unauthenticated,
+                // Format 5's run decides whether an L1 origin is a finalized block.
+                bundle.format === "abolish-verifier-bundle/5" ? bundle.l1Blocks : undefined,
               ),
             ] as const,
           ]),
@@ -577,16 +615,62 @@ export function verifyBundle(bundle: Bundle): Report {
       implemented = new Map<string, Outcome>([...implemented, ["6.1", chosen.row]]);
       if (ballots !== undefined && chosen.report !== undefined)
         ballots = { ...ballots, ...chosen.report };
+      // The counted set is selection's ballots less those delivery (5.9)
+      // excludes, so it, the tally checks and 8.5 wait on 6.1's pass, which
+      // also fixes the sealed, anchored board they read (docs/spec/
+      // verifier.md, Counted set and tally).
+      const destructionApplies = carriesDestruction(definition.inputs.boardEntryVersion);
+      const extent =
+        board.unauthenticated === undefined ? undefined : board.entries - board.unauthenticated;
+      if (
+        chosen.report === undefined ||
+        checked.registered === undefined ||
+        extent === undefined ||
+        admission.candidates === undefined
+      )
+        counted = countedRows(
+          { status: "unverifiable", code: "not-reached", at: {} },
+          destructionApplies,
+        );
+      else {
+        const byEntry = new Map(admission.candidates.map((c) => [c.entry, c]));
+        counted = countedChecks({
+          definition: definition.definition,
+          definitionHash: definition.hash,
+          registered: checked.registered,
+          selected: chosen.report.selected.map(({ entry }) => {
+            const tally = byEntry.get(entry)?.tally;
+            if (tally === undefined)
+              throw new Error("verifyBundle: a selected ballot wasn't admitted");
+            return { entry, tally };
+          }),
+          entries: bundle.entries,
+          boardEntryVersion: definition.inputs.boardEntryVersion,
+          extent,
+          eventsPass: implemented.get("4.4")?.status === "pass",
+          clock: bundle.clock,
+          destruction: destructionApplies,
+          // The close check compares the counted extent's admitted ballots,
+          // and 6.1's pass put every admitted ballot of the anchored extent
+          // there.
+          admitted: admission.candidates.filter((c) => c.entry < extent),
+          blocks: bundle.format === "abolish-verifier-bundle/5" ? bundle.l1Blocks : undefined,
+        });
+      }
+      implemented = new Map<string, Outcome>([...implemented, ...counted.rows]);
       // Sorting and attribution need only the definition and the registered
       // signing keys, so 7.4 runs wherever 3.2 passed, under definition
       // versions 3 to 5 against their cells (docs/spec/verifier.md, Tally
-      // openings).
+      // openings); the counted set, once known, settles the rest.
       const opened = tallyChecks(
         definition.definition,
         definition.hash,
         checked.registered,
         bundle.entries,
         definition.inputs.boardEntryVersion,
+        counted.tallyBreaks === undefined || extent === undefined
+          ? undefined
+          : { extent, breaks: counted.tallyBreaks },
       );
       implemented = new Map<string, Outcome>([...implemented, ["7.4", opened.row]]);
       tallies = opened.report;
@@ -622,6 +706,11 @@ export function verifyBundle(bundle: Bundle): Report {
     ...(ballots !== undefined && { ballots }),
     ...(openings !== undefined && { openings }),
     ...(tallies !== undefined && { tallies }),
+    ...(counted?.delivery !== undefined && { delivery: counted.delivery }),
+    ...(counted?.cells !== undefined && { cells: counted.cells }),
+    ...(counted?.tiers !== undefined && { tiers: counted.tiers }),
+    ...(counted?.destruction !== undefined && { destruction: counted.destruction }),
+    ...(counted?.close !== undefined && { close: counted.close }),
     board,
     ...(bundle.format !== "abolish-verifier-bundle/1" && {
       l1: {

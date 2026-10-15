@@ -37,23 +37,34 @@ export function referenceJudge(
   closesAt: bigint,
 ): "l1-blocks-short" | ((ref: L1Reference) => L1ReferenceVerdict) {
   const first = blocks[0];
-  const last = blocks.at(-1);
-  if (first === undefined || last === undefined) throw new RangeError("referenceJudge: no blocks");
+  if (first === undefined) throw new RangeError("referenceJudge: no blocks");
   const threshold = opensAt > L1_REF_MARGIN ? opensAt - L1_REF_MARGIN : 0n;
   if (first.number !== 0n && first.timestamp >= threshold) return "l1-blocks-short";
-  const l1: FinalizedL1 = {
-    head: last.number,
-    block(n) {
-      // `l1RefMin` and `checkL1Reference` only ask for numbers from the run's
-      // first to its head: the search starts at the first, and a reference
-      // below `l1_ref_min` is decided without a lookup.
-      const b = n >= first.number ? blocks[Number(n - first.number)] : undefined;
-      if (b === undefined) throw new RangeError(`referenceJudge: block ${n} outside the run`);
-      return b;
-    },
-  };
+  // `l1RefMin` and `checkL1Reference` only ask for numbers from the run's
+  // first to its head: the search starts at the first, and a reference below
+  // `l1_ref_min` is decided without a lookup.
+  const l1 = finalizedRun(blocks);
   const min = l1RefMin(l1, first.number, opensAt);
   // The head is before the window: every reference waits for L1.
   if (min === undefined) return () => "pending";
   return (ref) => checkL1Reference(ref, l1, { l1RefMin: min, closesAt });
+}
+
+/**
+ * A parsed run (Bundle) as the finalized L1 chain from its first block to
+ * its head. Only numbers in the run can be asked for: every caller searches
+ * from the run's first block.
+ */
+export function finalizedRun(blocks: readonly L1Header[]): FinalizedL1 {
+  const first = blocks[0];
+  const last = blocks.at(-1);
+  if (first === undefined || last === undefined) throw new RangeError("finalizedRun: no blocks");
+  return {
+    head: last.number,
+    block(n) {
+      const b = n >= first.number ? blocks[Number(n - first.number)] : undefined;
+      if (b === undefined) throw new RangeError(`finalizedRun: block ${n} outside the run`);
+      return b;
+    },
+  };
 }

@@ -894,6 +894,13 @@ describe("6.3, the close check", () => {
       code: "l1-blocks-short",
       at: {},
     });
+    // A run that starts after closes_at + δ can't show L_δ either.
+    const late = blocks.slice(2).map((h) => decodeHeader(h.encoded));
+    expect(check(e, [a, b], { blocks: late }).rows.get("6.3")).toEqual({
+      status: "unverifiable",
+      code: "l1-blocks-short",
+      at: {},
+    });
     // The rest of the counted set doesn't wait on it.
     expect(check(e, [a, b], { blocks: short }).rows.get("7.1")).toEqual({ status: "pass" });
   });

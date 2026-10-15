@@ -15,8 +15,11 @@
 // the tally openings' sorting, attribution and boarding breaches (7.4, as far
 // as they need no counted set; against the cells under definition versions 3
 // to 5) and, for format 5, selection (6.1, once the counted extent is fixed)
-// are implemented, and, for formats 3 to 5, 4.4's event check over
-// the board's contract-event records, which can fail 4.4 but never pass it;
+// and, once it passes, delivery (5.9), the close check (6.3), the tally
+// checks (7.1 to 7.3, and 7.4's counted-set breaks) and 8.5 (counted.ts,
+// close.ts) are implemented, and, for formats 3 to 5, 4.4's event and
+// L1-origin checks over the board's contract-event records, which can fail
+// 4.4 but never pass it;
 // every other check is reported unverifiable, so no run can report an
 // election verified yet. A run on unauthenticated inputs reports
 // what the checks found against them, but its verdict stays unverifiable, so

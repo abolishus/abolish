@@ -121,6 +121,10 @@ def combination(d):
     # verifier doesn't read is a later release's, once nothing else fails.
     closes = board == 5 and events not in (1, 2, None)
     settled = NOT_IMPLEMENTED if events == 3 else outcome("unverifiable", "unsupported-version", {})
+    # A board-entry version this verifier can't read is a later release's,
+    # before any combination (verifier.md, Definition, step 2).
+    if board not in (1, 3, 4, 5):
+        return outcome("unverifiable", "unsupported-version", {})
     if ballot not in (1, 2, 3, 4):
         # A version this verifier doesn't know: a later release judges it.
         return settled if closes else failed

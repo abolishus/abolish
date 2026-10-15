@@ -149,6 +149,10 @@ def combination(defn):
     spoiled = pins.get(SPOILED_OPENING_TYPE)
     failed = outcome("fail", "profile-combination", {})
     unsupported = outcome("unverifiable", "unsupported-version", {})
+    # A board-entry version this verifier can't read is a later release's,
+    # before any combination (verifier.md, Definition, step 2).
+    if board not in ALLOWED:
+        return unsupported
     definition = pins[0x0001]
     # Every profile pins board-entry version 5, the one that allows the close
     # statement, and contract-event version 3, whose tables name the close

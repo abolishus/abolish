@@ -30,9 +30,9 @@
 // segment object to a simulated IPFS store before its checkpoint is anchored
 // (./archive.ts), and once the verifier has read the closed election, the
 // operator's copy is wiped and every result rebuilt from chain and IPFS
-// alone (./rebuild.ts). Nothing here reimplements a check the verifier makes (AGENTS.md, Architecture): it
-// only calls them and compares the result with the plan (T-29, T-54, T-25,
-// T-14).
+// alone (./rebuild.ts). Nothing here reimplements a check the verifier
+// makes (AGENTS.md, Architecture): it only calls them and compares the
+// result with the plan (T-29, T-54, T-25, T-14, T-24, T-49, T-51).
 
 import {
   aggregateCell,
@@ -97,6 +97,7 @@ import {
 } from "@abolishus/crypto";
 import { parseBundle, type Verdict, verifyBundle } from "@abolishus/verifier";
 import { SIMULATED_RECEIPT_KEY_LEAD, SimulatedAnchor } from "./anchor.ts";
+import { SegmentPublisher, SimulatedIpfs } from "./archive.ts";
 import { type VerifierBundle, verifierBundle } from "./bundle.ts";
 import {
   afterAnchored,
@@ -118,7 +119,6 @@ import {
 } from "./intake.ts";
 import { admitOpening } from "./publication.ts";
 import { judgeRebuild, type PublicRecord, rebuildElection } from "./rebuild.ts";
-import { SegmentPublisher, SimulatedIpfs } from "./archive.ts";
 import { SIMULATED_BOARD_ENTRY_VERSION, simulateElection } from "./election.ts";
 import { latestFinalized, nameBlock, SimulatedL1 } from "./l1.ts";
 import {
@@ -909,7 +909,7 @@ export async function runSimulation(
     definitionHash,
     panelSize: n,
     registered,
-    tierOfCell,
+    tierOfCell: (cell) => ballots.cells[cell]?.tier,
     closesAt,
     inclusionBound: election.definition.l1_inclusion_bound,
     finalized,
@@ -918,6 +918,7 @@ export async function runSimulation(
   };
   const extent = readCountedExtent(countingContext, checked.entries);
   const { ballots: boarded, selection, delivery, counted } = extent;
+  if (extent.rejected.length > 0) throw new Error("simulation: an honest ballot was rejected");
   for (const [index, verdict] of extent.verdicts) {
     const want = (kept[index] as Kept).reorged ? "l1-ref-unknown" : "admitted";
     if (verdict !== want)

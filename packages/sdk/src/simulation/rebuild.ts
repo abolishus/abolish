@@ -26,6 +26,7 @@ import {
   checkDestruction,
   checkTally,
   type CommittedVote,
+  DecodeError,
   type DeliveryEntry,
   decodeElectionDefinitionRecord,
   decodeOpening,
@@ -40,10 +41,13 @@ import {
   pinnedVersion,
   RECORD_TYPES,
   type SeatDestruction,
+  isTimely,
+  objectCid,
   splitSegmentObject,
   verifyBoard,
 } from "@abolishus/crypto";
 import type { SimulatedIpfs } from "./archive.ts";
+import { anchorClock } from "./anchor.ts";
 import { endOf, postClose, SIMULATED_ANCHOR_DEADLINE } from "./board.ts";
 import { readCountedExtent, recordTypeOf } from "./count.ts";
 import { SIMULATED_BOARD_ENTRY_VERSION } from "./election.ts";
@@ -74,6 +78,7 @@ export type RebuildFailure =
   | "object-unavailable"
   | "object-malformed"
   | "hashes-unavailable"
+  | "clock-mismatch"
   | "transcript-mismatch"
   | "ceremony-failed"
   | "key-set-mismatch";
@@ -106,7 +111,10 @@ export interface RebuiltElection {
     readonly objects: number;
   };
   readonly ballots: {
+    /** Ballots on the board that decode and name a cell of the partition. */
     readonly cast: number;
+    /** Ballots and published openings rejected as entries: undecodable, or naming no cell. */
+    readonly rejected: number;
     readonly counted: number;
     /** Selected ballots the delivery check kept out. */
     readonly undelivered: number;
@@ -137,7 +145,13 @@ export function rebuildElection(record: PublicRecord): RebuiltElection {
   const registeredHash = record.electionRegistry.definitionHashOf(electionId);
   if (encoded === undefined || registeredHash === undefined)
     throw new RebuildError("definition-unregistered");
-  const decoded = decodeElectionDefinitionRecord(encoded);
+  let decoded: ReturnType<typeof decodeElectionDefinitionRecord>;
+  try {
+    decoded = decodeElectionDefinitionRecord(encoded);
+  } catch (e) {
+    if (e instanceof DecodeError) throw new RebuildError("definition-mismatch");
+    throw e;
+  }
   if (decoded.version !== 4) throw new RebuildError("definition-mismatch");
   const definition = decoded.value;
   const definitionHash = electionDefinitionV4Hash(definition);
@@ -151,29 +165,51 @@ export function rebuildElection(record: PublicRecord): RebuiltElection {
   if (panel === undefined || !same(panelId(panel), definition.panel_id))
     throw new RebuildError("panel-unpinned");
 
-  // The board, from each anchored checkpoint's segment object, in segment
-  // order, as of the verifier's read: a re-anchor names the objects before
-  // it, so only a checkpoint that grew the board adds one.
+  // The windows follow from the definition, and the anchor's clock must be
+  // the one they assume, so the read below is the verifier's moment.
   const after = postClose(definition.closes_at);
+  const { clock } = record.anchor;
+  const want = anchorClock(after.seal);
+  if (
+    clock.epoch !== want.epoch ||
+    clock.period !== want.period ||
+    clock.deadline !== want.deadline ||
+    clock.lastSegment !== want.lastSegment
+  )
+    throw new RebuildError("clock-mismatch");
+  // The board, from each checkpoint the board checks count (timely, for
+  // this election, finalized by the verifier's read), in segment order: a
+  // re-anchor names the objects before it, so only a checkpoint that grew
+  // the board adds one.
   const now = l1.block(l1.firstAfter(endOf(after.seal) + SIMULATED_ANCHOR_DEADLINE)).timestamp;
   const anchored = record.anchor.anchors
-    .filter((a) => a.anchoredAt <= now && same(a.checkpoint.election_id, electionId))
+    .filter(
+      (a) =>
+        a.anchoredAt <= now &&
+        same(a.checkpoint.election_id, electionId) &&
+        isTimely(clock, a.checkpoint.segment, a.anchoredAt),
+    )
     .map((a) => a.checkpoint)
     .sort((a, b) => a.segment - b.segment);
   const entries: Uint8Array[] = [];
   let objects = 0;
   for (const cp of anchored) {
     if (cp.size <= BigInt(entries.length)) continue;
+    // Each fetch is checked by its CID here, whatever the store does (T-49).
     const object = record.ipfs.get(cp.object_cid);
-    if (object === undefined) throw new RebuildError("object-unavailable");
+    if (object === undefined || !same(objectCid(object), cp.object_cid))
+      throw new RebuildError("object-unavailable");
     // The entry-hash list voters' clients read (docs/spec/receipts.md):
     // published beside the object, so it must be fetchable too.
-    if (record.ipfs.get(cp.hashes_cid) === undefined) throw new RebuildError("hashes-unavailable");
+    const hashes = record.ipfs.get(cp.hashes_cid);
+    if (hashes === undefined || !same(objectCid(hashes), cp.hashes_cid))
+      throw new RebuildError("hashes-unavailable");
     let split: Uint8Array[];
     try {
       split = splitSegmentObject(object);
-    } catch {
-      throw new RebuildError("object-malformed");
+    } catch (e) {
+      if (e instanceof DecodeError) throw new RebuildError("object-malformed");
+      throw e;
     }
     entries.push(...split);
     objects++;
@@ -183,10 +219,13 @@ export function rebuildElection(record: PublicRecord): RebuiltElection {
     entries,
     SIMULATED_BOARD_ENTRY_VERSION,
     record.anchor.anchors,
-    record.anchor.clock,
+    clock,
     now,
   );
-  if (unauthenticated > 0) throw new RebuildError("object-malformed");
+  // Only objects the counted checkpoints name were fetched, so every entry
+  // is in the anchored extent unless an object holds more than its
+  // checkpoint says, which verifyBoard's CID check has already refused.
+  if (unauthenticated > 0) throw new Error("simulation: fetched entries past the anchored extent");
 
   // The key set: the transcript on the board, which the definition names,
   // checked from the stub's fields, and the one the trustee registry
@@ -217,12 +256,6 @@ export function rebuildElection(record: PublicRecord): RebuiltElection {
 
   // The counted set, as the trustees read it at t_S (./count.ts).
   const partition = cellBallotElection(definition, registered).cells;
-  const tierOfCell = (cell: number): number => {
-    const tier = partition[cell]?.tier;
-    if (tier === undefined)
-      throw new Error("simulation: a ballot naming no cell of the electorate");
-    return tier;
-  };
   const finalized = l1.finalized(l1.firstAfter(definition.closes_at));
   const refMin = l1RefMin(finalized, 0n, definition.opens_at);
   if (refMin === undefined) throw new Error("simulation: L1 hasn't reached the election's window");
@@ -232,7 +265,7 @@ export function rebuildElection(record: PublicRecord): RebuiltElection {
       definitionHash,
       panelSize: definition.panel_size,
       registered,
-      tierOfCell,
+      tierOfCell: (cell) => partition[cell]?.tier,
       closesAt: definition.closes_at,
       inclusionBound: definition.l1_inclusion_bound,
       finalized,
@@ -243,7 +276,7 @@ export function rebuildElection(record: PublicRecord): RebuiltElection {
   );
   const vss: CommittedVote["vss"][][] = partition.map(() => []);
   for (const b of extent.counted) {
-    // Every selected ballot is one readCountedExtent decoded, in a cell tierOfCell found.
+    // Every selected ballot is one readCountedExtent decoded, in a cell of the partition.
     const { cell, committed_vote: vote } = extent.ballots.get(Number(b.index)) as BallotRecordV2;
     (vss[cell] as CommittedVote["vss"][]).push(vote.vss);
   }
@@ -284,6 +317,18 @@ export function rebuildElection(record: PublicRecord): RebuiltElection {
     { firstPassing, windowSegment: after.windowSegment },
     1,
   );
+  // Published openings that don't decode are rejected entries (verifier
+  // 6.2), never a reason to stop.
+  const spoiled: string[] = [];
+  let rejectedOpenings = 0;
+  for (const e of sealed(RECORD_TYPES.spoiledBallotOpening)) {
+    try {
+      spoiled.push(hex(openingV2CoreHash(decodeOpening(e.payload, 2), 2)));
+    } catch (err) {
+      if (!(err instanceof DecodeError)) throw err;
+      rejectedOpenings++;
+    }
+  }
   const allOpened = cells.every((c) => c.counts !== undefined);
   return {
     definitionHash: hex(definitionHash),
@@ -295,6 +340,7 @@ export function rebuildElection(record: PublicRecord): RebuiltElection {
     },
     ballots: {
       cast: extent.ballots.size,
+      rejected: extent.rejected.length + rejectedOpenings,
       counted: extent.counted.length,
       undelivered: extent.selection.selected.length - extent.counted.length,
     },
@@ -307,9 +353,7 @@ export function rebuildElection(record: PublicRecord): RebuiltElection {
         }
       : {}),
     destruction: { from: destruction.from, seats: destruction.seats },
-    spoiled: sealed(RECORD_TYPES.spoiledBallotOpening).map((e) =>
-      hex(openingV2CoreHash(decodeOpening(e.payload, 2), 2)),
-    ),
+    spoiled,
   };
 }
 
@@ -346,6 +390,7 @@ export function judgeRebuild(rebuilt: RebuiltElection, want: RebuildExpectation)
   check("counted extent", rebuilt.board.counted, want.counted);
   check("board head", rebuilt.board.head, want.head);
   check("ballots cast", rebuilt.ballots.cast, want.cast);
+  check("entries rejected", rebuilt.ballots.rejected, 0);
   check("ballots counted", rebuilt.ballots.counted, want.countedBallots);
   check("ballots undelivered", rebuilt.ballots.undelivered, want.undelivered);
   check(

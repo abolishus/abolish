@@ -15,6 +15,7 @@ import {
   checkDelivery,
   checkL1Reference,
   decodeBallot,
+  DecodeError,
   type DeliveryBallot,
   type DeliveryCheck,
   type DeliveryEntry,
@@ -47,8 +48,8 @@ export interface CountingContext {
   readonly panelSize: number;
   /** The key set the ceremony check registered. */
   readonly registered: readonly RegisteredKeys[];
-  /** The tier of each cell the definition's partition has; throws for any other cell. */
-  readonly tierOfCell: (cell: number) => number;
+  /** The tier of each cell the definition's partition has; `undefined` for any other cell. */
+  readonly tierOfCell: (cell: number) => number | undefined;
   readonly closesAt: bigint;
   /** The definition's `l1_inclusion_bound`. */
   readonly inclusionBound: number;
@@ -62,6 +63,12 @@ export interface CountingContext {
 export interface CountedExtent {
   /** Each ballot record, by board index. */
   readonly ballots: ReadonlyMap<number, BallotRecordV2>;
+  /**
+   * Board indices of ballot-typed payloads that don't decode under ballot
+   * version 2 or name a cell the partition lacks: rejected entries, as the
+   * verifier's admission rejects them, never a reason to stop reading.
+   */
+  readonly rejected: readonly number[];
   /** Each ballot's L1 reference's verdict (5.8), by board index. */
   readonly verdicts: ReadonlyMap<number, L1ReferenceVerdict>;
   /** The re-vote rule over the admitted ballots (5.7, 6.1). */
@@ -84,16 +91,28 @@ export function readCountedExtent(
 ): CountedExtent {
   const ballots = new Map<number, BallotRecordV2>();
   const verdicts = new Map<number, L1ReferenceVerdict>();
+  const rejected: number[] = [];
   const admitted: AdmittedBallot[] = [];
   entries.forEach((entry, index) => {
     if (recordTypeOf(entry.payload) !== RECORD_TYPES.ballot) return;
-    const b = decodeBallot(entry.payload, 2);
+    let b: BallotRecordV2;
+    try {
+      b = decodeBallot(entry.payload, 2);
+    } catch (e) {
+      if (!(e instanceof DecodeError)) throw e;
+      rejected.push(index);
+      return;
+    }
+    const tier = ctx.tierOfCell(b.cell);
+    if (tier === undefined) {
+      rejected.push(index);
+      return;
+    }
     ballots.set(index, b);
     const ref = { l1RefNumber: b.l1_ref_number, l1RefHash: b.l1_ref_hash };
     const verdict = checkL1Reference(ref, ctx.finalized, ctx.window);
     verdicts.set(index, verdict);
     if (verdict !== "admitted") return;
-    const tier = ctx.tierOfCell(b.cell);
     const context = {
       definitionHash: ctx.definitionHash,
       ballotVersion: 2,
@@ -145,5 +164,5 @@ export function readCountedExtent(
     1,
   );
   const counted = selection.selected.filter((_, i) => delivery.ballots[i]?.counted === true);
-  return { ballots, verdicts, selection, delivery, counted };
+  return { ballots, rejected, verdicts, selection, delivery, counted };
 }

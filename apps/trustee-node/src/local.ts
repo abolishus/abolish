@@ -46,7 +46,6 @@ import {
 
 const utf8 = (s: string) => new TextEncoder().encode(s);
 
-/** A version-1 stub for a local panel: a two-option poll on chain ids no network uses. */
 // The versions the profile pins where they aren't 1: the board-entry and
 // contract-event versions the election registry serves (docs/spec/contracts.md,
 // Registration, rule 9), so a local ceremony signs a profile a deployed
@@ -56,6 +55,10 @@ const LOCAL_PINS: ReadonlyMap<number, number> = new Map([
   [RECORD_TYPES.contractEvent, 3],
 ]);
 
+/**
+ * A definition-version-1 stub for a local panel: a two-option poll on chain
+ * ids no network uses, with the profile `LOCAL_PINS` sets.
+ */
 export function localStub(
   panel: Panel,
   l2ChainId: bigint,

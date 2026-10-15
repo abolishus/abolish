@@ -88,7 +88,8 @@ describe("stub checks", () => {
       RECORD_TYPES.contractEvent,
       RECORD_TYPES.displayText,
     ])
-      for (const version of [2, 9]) {
+      // Contract-event version 1 too: the registry registers only version 3.
+      for (const version of type === RECORD_TYPES.contractEvent ? [1, 2, 9] : [2, 9]) {
         const pins = stub.profile.pins.map((p) => (p.record_type === type ? { ...p, version } : p));
         const result = await checkStub(
           encodeElectionDefinition({ ...stub, profile: { ...stub.profile, pins } }),

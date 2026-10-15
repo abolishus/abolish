@@ -1,0 +1,1037 @@
+{
+  "format": "abolish-delivery-obligation-vectors/1",
+  "title": "What a trustee node owes through the contract path, its complaint scope, and the forced path's capacity",
+  "spec": "docs/spec/delivery.md",
+  "generator": "packages/crypto/scripts/delivery-obligation-vectors.py: an independent Python implementation (revoting-vectors.py's selection by sorting and its L1 reference check; the capacity check by a time-ordered sweep with exact fractions)",
+  "windows": {
+    "delivery": "172800",
+    "complaint": "432000"
+  },
+  "portal": {
+    "maxResourceLimit": "20000000",
+    "elasticityMultiplier": 10,
+    "maxDepositData": 120000
+  },
+  "forcedPath": {
+    "depositGasTarget": "2000000",
+    "l1BlockSeconds": "13",
+    "receiptsPerCall": "256",
+    "receiptCallGas": "17000000",
+    "complaintCallGas": "150000"
+  },
+  "l1": {
+    "l1RefMin": "2",
+    "closesAt": "1700000120",
+    "blocks": [
+      {
+        "number": "0",
+        "hash": "a3f7d321a6cfdf2d6ef1d7d4d652040b642925f389f567232182bed0a9053630",
+        "timestamp": "1700000000"
+      },
+      {
+        "number": "1",
+        "hash": "f598c0e34a46fc196548da2ffdd1ba06df206e68e65354811db28cfe49ecf7aa",
+        "timestamp": "1700000012"
+      },
+      {
+        "number": "2",
+        "hash": "c8f17b304d74b970b7062a8617f3702c17482f991e1ee2bfd0c1d2a535e9311d",
+        "timestamp": "1700000024"
+      },
+      {
+        "number": "3",
+        "hash": "db95fc5505e1c83498cf4e6ade33103d35be7e29924942159c3e840c56ebe64a",
+        "timestamp": "1700000036"
+      },
+      {
+        "number": "4",
+        "hash": "cb96065a06fe2b464c465726dc365e60466cd65dfc35837dd58e15a988852174",
+        "timestamp": "1700000048"
+      },
+      {
+        "number": "5",
+        "hash": "af607dee2296dfdf7cf51545b3fc6d9cc9bdad88e65b1e4146c2d2930aff4af7",
+        "timestamp": "1700000060"
+      },
+      {
+        "number": "6",
+        "hash": "998736ca5645306941826ba7ac5ce1cf093c54ea82c78b15ce0dfac5f4162027",
+        "timestamp": "1700000072"
+      },
+      {
+        "number": "7",
+        "hash": "9aad948404a79174dc34b312a944b6e127e242d9396f526c68b09fb2afd4a9ca",
+        "timestamp": "1700000084"
+      },
+      {
+        "number": "8",
+        "hash": "69b8d45ff6b97fc0b06fcdc56c60a4ab4488bb2499a1b078d920958e7b0a0d9a",
+        "timestamp": "1700000096"
+      },
+      {
+        "number": "9",
+        "hash": "9699d3f40f30a6f1bb2e15f9140464cdef3984cda8c925730097651da5612358",
+        "timestamp": "1700000108"
+      },
+      {
+        "number": "10",
+        "hash": "da705e0acf70a40d8c2e42b9fabd13dcd999de326627b968ad793a9e0f625eec",
+        "timestamp": "1700000120"
+      },
+      {
+        "number": "11",
+        "hash": "c338ee57037eed734a0b470521eba4ff8ee438be9504e1b30804e4e877c2bf07",
+        "timestamp": "1700000132"
+      }
+    ]
+  },
+  "obligations": [
+    {
+      "id": "newest",
+      "description": "The newest of two ballots is owed and is the scope",
+      "head": "11",
+      "view": [
+        {
+          "ballotHash": "e98342c88ec180a988e30818994a5be1a75094125350903279d035e987d38b62",
+          "tier": 0,
+          "nullifier": "7",
+          "message": "da4b5cf4842ab884d8f3072ab8b41d979d7eba6b309ebf4911e376c275548702",
+          "l1RefNumber": "4",
+          "l1RefHash": "cb96065a06fe2b464c465726dc365e60466cd65dfc35837dd58e15a988852174"
+        },
+        {
+          "ballotHash": "a5fe252c142b05666173ef30b0eea11a932d9f19d8a64844c8a299a51842ce75",
+          "tier": 0,
+          "nullifier": "7",
+          "message": "0bc4d0eb1f703c32e5789c58157f68c630b15516b0e239a2768abc7ee9c41b00",
+          "l1RefNumber": "6",
+          "l1RefHash": "998736ca5645306941826ba7ac5ce1cf093c54ea82c78b15ce0dfac5f4162027"
+        }
+      ],
+      "receipts": [
+        "e98342c88ec180a988e30818994a5be1a75094125350903279d035e987d38b62",
+        "a5fe252c142b05666173ef30b0eea11a932d9f19d8a64844c8a299a51842ce75"
+      ],
+      "owedReceipts": ["a5fe252c142b05666173ef30b0eea11a932d9f19d8a64844c8a299a51842ce75"],
+      "complaintScope": ["a5fe252c142b05666173ef30b0eea11a932d9f19d8a64844c8a299a51842ce75"]
+    },
+    {
+      "id": "per-group",
+      "description": "One per tier and nullifier",
+      "head": "11",
+      "view": [
+        {
+          "ballotHash": "e98342c88ec180a988e30818994a5be1a75094125350903279d035e987d38b62",
+          "tier": 0,
+          "nullifier": "7",
+          "message": "da4b5cf4842ab884d8f3072ab8b41d979d7eba6b309ebf4911e376c275548702",
+          "l1RefNumber": "4",
+          "l1RefHash": "cb96065a06fe2b464c465726dc365e60466cd65dfc35837dd58e15a988852174"
+        },
+        {
+          "ballotHash": "a5fe252c142b05666173ef30b0eea11a932d9f19d8a64844c8a299a51842ce75",
+          "tier": 0,
+          "nullifier": "8",
+          "message": "0bc4d0eb1f703c32e5789c58157f68c630b15516b0e239a2768abc7ee9c41b00",
+          "l1RefNumber": "5",
+          "l1RefHash": "af607dee2296dfdf7cf51545b3fc6d9cc9bdad88e65b1e4146c2d2930aff4af7"
+        },
+        {
+          "ballotHash": "cbec5b2bf996eba98fae42a3ba8cf7e3cafbd29711ca6f72bc79b4a4d2e8289f",
+          "tier": 2,
+          "nullifier": "7",
+          "message": "843d7b9ac2785b578f9c3dfbb8167dc6013c4f00624220b015f26f5772d3d077",
+          "l1RefNumber": "6",
+          "l1RefHash": "998736ca5645306941826ba7ac5ce1cf093c54ea82c78b15ce0dfac5f4162027"
+        }
+      ],
+      "receipts": [
+        "e98342c88ec180a988e30818994a5be1a75094125350903279d035e987d38b62",
+        "a5fe252c142b05666173ef30b0eea11a932d9f19d8a64844c8a299a51842ce75",
+        "cbec5b2bf996eba98fae42a3ba8cf7e3cafbd29711ca6f72bc79b4a4d2e8289f"
+      ],
+      "owedReceipts": [
+        "a5fe252c142b05666173ef30b0eea11a932d9f19d8a64844c8a299a51842ce75",
+        "cbec5b2bf996eba98fae42a3ba8cf7e3cafbd29711ca6f72bc79b4a4d2e8289f",
+        "e98342c88ec180a988e30818994a5be1a75094125350903279d035e987d38b62"
+      ],
+      "complaintScope": [
+        "a5fe252c142b05666173ef30b0eea11a932d9f19d8a64844c8a299a51842ce75",
+        "cbec5b2bf996eba98fae42a3ba8cf7e3cafbd29711ca6f72bc79b4a4d2e8289f",
+        "e98342c88ec180a988e30818994a5be1a75094125350903279d035e987d38b62"
+      ]
+    },
+    {
+      "id": "tie",
+      "description": "A tie at the newest block selects nothing",
+      "head": "11",
+      "view": [
+        {
+          "ballotHash": "e98342c88ec180a988e30818994a5be1a75094125350903279d035e987d38b62",
+          "tier": 0,
+          "nullifier": "7",
+          "message": "da4b5cf4842ab884d8f3072ab8b41d979d7eba6b309ebf4911e376c275548702",
+          "l1RefNumber": "4",
+          "l1RefHash": "cb96065a06fe2b464c465726dc365e60466cd65dfc35837dd58e15a988852174"
+        },
+        {
+          "ballotHash": "a5fe252c142b05666173ef30b0eea11a932d9f19d8a64844c8a299a51842ce75",
+          "tier": 0,
+          "nullifier": "7",
+          "message": "0bc4d0eb1f703c32e5789c58157f68c630b15516b0e239a2768abc7ee9c41b00",
+          "l1RefNumber": "6",
+          "l1RefHash": "998736ca5645306941826ba7ac5ce1cf093c54ea82c78b15ce0dfac5f4162027"
+        },
+        {
+          "ballotHash": "cbec5b2bf996eba98fae42a3ba8cf7e3cafbd29711ca6f72bc79b4a4d2e8289f",
+          "tier": 0,
+          "nullifier": "7",
+          "message": "843d7b9ac2785b578f9c3dfbb8167dc6013c4f00624220b015f26f5772d3d077",
+          "l1RefNumber": "6",
+          "l1RefHash": "998736ca5645306941826ba7ac5ce1cf093c54ea82c78b15ce0dfac5f4162027"
+        }
+      ],
+      "receipts": [
+        "e98342c88ec180a988e30818994a5be1a75094125350903279d035e987d38b62",
+        "a5fe252c142b05666173ef30b0eea11a932d9f19d8a64844c8a299a51842ce75",
+        "cbec5b2bf996eba98fae42a3ba8cf7e3cafbd29711ca6f72bc79b4a4d2e8289f"
+      ],
+      "owedReceipts": [],
+      "complaintScope": []
+    },
+    {
+      "id": "not-receipted",
+      "description": "A newer ballot this seat didn't receipt supersedes: nothing owed, the newer ballot in scope",
+      "head": "11",
+      "view": [
+        {
+          "ballotHash": "e98342c88ec180a988e30818994a5be1a75094125350903279d035e987d38b62",
+          "tier": 0,
+          "nullifier": "7",
+          "message": "da4b5cf4842ab884d8f3072ab8b41d979d7eba6b309ebf4911e376c275548702",
+          "l1RefNumber": "4",
+          "l1RefHash": "cb96065a06fe2b464c465726dc365e60466cd65dfc35837dd58e15a988852174"
+        },
+        {
+          "ballotHash": "a5fe252c142b05666173ef30b0eea11a932d9f19d8a64844c8a299a51842ce75",
+          "tier": 0,
+          "nullifier": "7",
+          "message": "0bc4d0eb1f703c32e5789c58157f68c630b15516b0e239a2768abc7ee9c41b00",
+          "l1RefNumber": "6",
+          "l1RefHash": "998736ca5645306941826ba7ac5ce1cf093c54ea82c78b15ce0dfac5f4162027"
+        }
+      ],
+      "receipts": ["e98342c88ec180a988e30818994a5be1a75094125350903279d035e987d38b62"],
+      "owedReceipts": [],
+      "complaintScope": ["a5fe252c142b05666173ef30b0eea11a932d9f19d8a64844c8a299a51842ce75"]
+    },
+    {
+      "id": "board-copy",
+      "description": "A copy from the board of a receipted ballot is the same ballot",
+      "head": "11",
+      "view": [
+        {
+          "ballotHash": "e98342c88ec180a988e30818994a5be1a75094125350903279d035e987d38b62",
+          "tier": 0,
+          "nullifier": "7",
+          "message": "da4b5cf4842ab884d8f3072ab8b41d979d7eba6b309ebf4911e376c275548702",
+          "l1RefNumber": "4",
+          "l1RefHash": "cb96065a06fe2b464c465726dc365e60466cd65dfc35837dd58e15a988852174"
+        },
+        {
+          "ballotHash": "e98342c88ec180a988e30818994a5be1a75094125350903279d035e987d38b62",
+          "tier": 0,
+          "nullifier": "7",
+          "message": "da4b5cf4842ab884d8f3072ab8b41d979d7eba6b309ebf4911e376c275548702",
+          "l1RefNumber": "4",
+          "l1RefHash": "cb96065a06fe2b464c465726dc365e60466cd65dfc35837dd58e15a988852174"
+        }
+      ],
+      "receipts": ["e98342c88ec180a988e30818994a5be1a75094125350903279d035e987d38b62"],
+      "owedReceipts": ["e98342c88ec180a988e30818994a5be1a75094125350903279d035e987d38b62"],
+      "complaintScope": ["e98342c88ec180a988e30818994a5be1a75094125350903279d035e987d38b62"]
+    },
+    {
+      "id": "recast",
+      "description": "A receipt for a ballot hash covers its core cast again under another block after a reorganisation",
+      "head": "11",
+      "view": [
+        {
+          "ballotHash": "3f1f1f9a47466bb3490412ec3e9819746d5961d6875949416d46ae6e80e86041",
+          "tier": 0,
+          "nullifier": "7",
+          "message": "da4b5cf4842ab884d8f3072ab8b41d979d7eba6b309ebf4911e376c275548702",
+          "l1RefNumber": "4",
+          "l1RefHash": "5551457168cb67709ff9047a28177aa0694b56b27f9ccc57eeea981f51af607f"
+        },
+        {
+          "ballotHash": "3f1f1f9a47466bb3490412ec3e9819746d5961d6875949416d46ae6e80e86041",
+          "tier": 0,
+          "nullifier": "7",
+          "message": "0bc4d0eb1f703c32e5789c58157f68c630b15516b0e239a2768abc7ee9c41b00",
+          "l1RefNumber": "6",
+          "l1RefHash": "998736ca5645306941826ba7ac5ce1cf093c54ea82c78b15ce0dfac5f4162027"
+        }
+      ],
+      "receipts": ["3f1f1f9a47466bb3490412ec3e9819746d5961d6875949416d46ae6e80e86041"],
+      "owedReceipts": ["3f1f1f9a47466bb3490412ec3e9819746d5961d6875949416d46ae6e80e86041"],
+      "complaintScope": ["3f1f1f9a47466bb3490412ec3e9819746d5961d6875949416d46ae6e80e86041"]
+    },
+    {
+      "id": "recast-shown-absent",
+      "description": "The receipted copy was shown absent; the receipt still covers the copy cast again",
+      "head": "11",
+      "view": [
+        {
+          "ballotHash": "3f1f1f9a47466bb3490412ec3e9819746d5961d6875949416d46ae6e80e86041",
+          "tier": 0,
+          "nullifier": "7",
+          "message": "0bc4d0eb1f703c32e5789c58157f68c630b15516b0e239a2768abc7ee9c41b00",
+          "l1RefNumber": "6",
+          "l1RefHash": "998736ca5645306941826ba7ac5ce1cf093c54ea82c78b15ce0dfac5f4162027"
+        }
+      ],
+      "receipts": ["3f1f1f9a47466bb3490412ec3e9819746d5961d6875949416d46ae6e80e86041"],
+      "owedReceipts": ["3f1f1f9a47466bb3490412ec3e9819746d5961d6875949416d46ae6e80e86041"],
+      "complaintScope": ["3f1f1f9a47466bb3490412ec3e9819746d5961d6875949416d46ae6e80e86041"]
+    },
+    {
+      "id": "recast-withheld",
+      "description": "Only the reorganised copy is held: it is owed, and in scope",
+      "head": "11",
+      "view": [
+        {
+          "ballotHash": "3f1f1f9a47466bb3490412ec3e9819746d5961d6875949416d46ae6e80e86041",
+          "tier": 0,
+          "nullifier": "7",
+          "message": "da4b5cf4842ab884d8f3072ab8b41d979d7eba6b309ebf4911e376c275548702",
+          "l1RefNumber": "4",
+          "l1RefHash": "5551457168cb67709ff9047a28177aa0694b56b27f9ccc57eeea981f51af607f"
+        }
+      ],
+      "receipts": ["3f1f1f9a47466bb3490412ec3e9819746d5961d6875949416d46ae6e80e86041"],
+      "owedReceipts": ["3f1f1f9a47466bb3490412ec3e9819746d5961d6875949416d46ae6e80e86041"],
+      "complaintScope": ["3f1f1f9a47466bb3490412ec3e9819746d5961d6875949416d46ae6e80e86041"]
+    },
+    {
+      "id": "unadmitted",
+      "description": "References before the window, after close and unknown neither count nor supersede",
+      "head": "11",
+      "view": [
+        {
+          "ballotHash": "e98342c88ec180a988e30818994a5be1a75094125350903279d035e987d38b62",
+          "tier": 0,
+          "nullifier": "7",
+          "message": "da4b5cf4842ab884d8f3072ab8b41d979d7eba6b309ebf4911e376c275548702",
+          "l1RefNumber": "4",
+          "l1RefHash": "cb96065a06fe2b464c465726dc365e60466cd65dfc35837dd58e15a988852174"
+        },
+        {
+          "ballotHash": "a5fe252c142b05666173ef30b0eea11a932d9f19d8a64844c8a299a51842ce75",
+          "tier": 0,
+          "nullifier": "7",
+          "message": "0bc4d0eb1f703c32e5789c58157f68c630b15516b0e239a2768abc7ee9c41b00",
+          "l1RefNumber": "8",
+          "l1RefHash": "2ec514574152697d0d36da1690212244985b2ff6f5ac83c452cf5974652f72c5"
+        },
+        {
+          "ballotHash": "cbec5b2bf996eba98fae42a3ba8cf7e3cafbd29711ca6f72bc79b4a4d2e8289f",
+          "tier": 0,
+          "nullifier": "7",
+          "message": "843d7b9ac2785b578f9c3dfbb8167dc6013c4f00624220b015f26f5772d3d077",
+          "l1RefNumber": "1",
+          "l1RefHash": "f598c0e34a46fc196548da2ffdd1ba06df206e68e65354811db28cfe49ecf7aa"
+        },
+        {
+          "ballotHash": "aac6dd66aa7e2ae14cc1616ee0ff28804ccaa90ae140a148e49af33e67bf5b03",
+          "tier": 0,
+          "nullifier": "7",
+          "message": "c1b63af1931b104d9859270b9bfaaf11c73659e984b8257c8f001d5e0ba2c2c4",
+          "l1RefNumber": "11",
+          "l1RefHash": "c338ee57037eed734a0b470521eba4ff8ee438be9504e1b30804e4e877c2bf07"
+        },
+        {
+          "ballotHash": "9f7a1d8e6f0fefa7e1861cf3a6e51be2c4fb525ae5bce88a4f96e0089632f4fc",
+          "tier": 0,
+          "nullifier": "7",
+          "message": "bf0e609e589ee1f14a4b675665313279c587a2febfc1e350c4a5bafecadc851b",
+          "l1RefNumber": "12",
+          "l1RefHash": "4d4ebfc96d348434084e908ae33d32cac460d1cdd5548aab560d58b42c3d2325"
+        }
+      ],
+      "receipts": [
+        "e98342c88ec180a988e30818994a5be1a75094125350903279d035e987d38b62",
+        "a5fe252c142b05666173ef30b0eea11a932d9f19d8a64844c8a299a51842ce75",
+        "cbec5b2bf996eba98fae42a3ba8cf7e3cafbd29711ca6f72bc79b4a4d2e8289f",
+        "aac6dd66aa7e2ae14cc1616ee0ff28804ccaa90ae140a148e49af33e67bf5b03"
+      ],
+      "owedReceipts": [
+        "aac6dd66aa7e2ae14cc1616ee0ff28804ccaa90ae140a148e49af33e67bf5b03",
+        "e98342c88ec180a988e30818994a5be1a75094125350903279d035e987d38b62"
+      ],
+      "complaintScope": [
+        "9f7a1d8e6f0fefa7e1861cf3a6e51be2c4fb525ae5bce88a4f96e0089632f4fc",
+        "e98342c88ec180a988e30818994a5be1a75094125350903279d035e987d38b62"
+      ]
+    },
+    {
+      "id": "unadmitted-tie",
+      "description": "Two unadmitted ballots at one block: the smaller ballot hash is owed",
+      "head": "11",
+      "view": [
+        {
+          "ballotHash": "e98342c88ec180a988e30818994a5be1a75094125350903279d035e987d38b62",
+          "tier": 0,
+          "nullifier": "7",
+          "message": "da4b5cf4842ab884d8f3072ab8b41d979d7eba6b309ebf4911e376c275548702",
+          "l1RefNumber": "11",
+          "l1RefHash": "c338ee57037eed734a0b470521eba4ff8ee438be9504e1b30804e4e877c2bf07"
+        },
+        {
+          "ballotHash": "a5fe252c142b05666173ef30b0eea11a932d9f19d8a64844c8a299a51842ce75",
+          "tier": 0,
+          "nullifier": "7",
+          "message": "0bc4d0eb1f703c32e5789c58157f68c630b15516b0e239a2768abc7ee9c41b00",
+          "l1RefNumber": "11",
+          "l1RefHash": "c338ee57037eed734a0b470521eba4ff8ee438be9504e1b30804e4e877c2bf07"
+        }
+      ],
+      "receipts": [
+        "e98342c88ec180a988e30818994a5be1a75094125350903279d035e987d38b62",
+        "a5fe252c142b05666173ef30b0eea11a932d9f19d8a64844c8a299a51842ce75"
+      ],
+      "owedReceipts": ["a5fe252c142b05666173ef30b0eea11a932d9f19d8a64844c8a299a51842ce75"],
+      "complaintScope": ["a5fe252c142b05666173ef30b0eea11a932d9f19d8a64844c8a299a51842ce75"]
+    },
+    {
+      "id": "empty",
+      "description": "Nothing receipted, nothing held",
+      "head": "11",
+      "view": [],
+      "receipts": [],
+      "owedReceipts": [],
+      "complaintScope": []
+    },
+    {
+      "id": "scope-only",
+      "description": "Held from the board, never receipted: nothing owed, the selected ballot in scope",
+      "head": "11",
+      "view": [
+        {
+          "ballotHash": "e98342c88ec180a988e30818994a5be1a75094125350903279d035e987d38b62",
+          "tier": 0,
+          "nullifier": "7",
+          "message": "da4b5cf4842ab884d8f3072ab8b41d979d7eba6b309ebf4911e376c275548702",
+          "l1RefNumber": "4",
+          "l1RefHash": "cb96065a06fe2b464c465726dc365e60466cd65dfc35837dd58e15a988852174"
+        },
+        {
+          "ballotHash": "a5fe252c142b05666173ef30b0eea11a932d9f19d8a64844c8a299a51842ce75",
+          "tier": 0,
+          "nullifier": "7",
+          "message": "0bc4d0eb1f703c32e5789c58157f68c630b15516b0e239a2768abc7ee9c41b00",
+          "l1RefNumber": "6",
+          "l1RefHash": "998736ca5645306941826ba7ac5ce1cf093c54ea82c78b15ce0dfac5f4162027"
+        },
+        {
+          "ballotHash": "cbec5b2bf996eba98fae42a3ba8cf7e3cafbd29711ca6f72bc79b4a4d2e8289f",
+          "tier": 0,
+          "nullifier": "8",
+          "message": "843d7b9ac2785b578f9c3dfbb8167dc6013c4f00624220b015f26f5772d3d077",
+          "l1RefNumber": "5",
+          "l1RefHash": "af607dee2296dfdf7cf51545b3fc6d9cc9bdad88e65b1e4146c2d2930aff4af7"
+        }
+      ],
+      "receipts": [],
+      "owedReceipts": [],
+      "complaintScope": [
+        "a5fe252c142b05666173ef30b0eea11a932d9f19d8a64844c8a299a51842ce75",
+        "cbec5b2bf996eba98fae42a3ba8cf7e3cafbd29711ca6f72bc79b4a4d2e8289f"
+      ]
+    },
+    {
+      "id": "pending",
+      "description": "L1 has finalized only up to block 9, before close",
+      "head": "9",
+      "view": [
+        {
+          "ballotHash": "e98342c88ec180a988e30818994a5be1a75094125350903279d035e987d38b62",
+          "tier": 0,
+          "nullifier": "7",
+          "message": "da4b5cf4842ab884d8f3072ab8b41d979d7eba6b309ebf4911e376c275548702",
+          "l1RefNumber": "10",
+          "l1RefHash": "da705e0acf70a40d8c2e42b9fabd13dcd999de326627b968ad793a9e0f625eec"
+        }
+      ],
+      "receipts": [],
+      "error": true
+    },
+    {
+      "id": "message",
+      "description": "One message names two ballot hashes",
+      "head": "11",
+      "view": [
+        {
+          "ballotHash": "e98342c88ec180a988e30818994a5be1a75094125350903279d035e987d38b62",
+          "tier": 0,
+          "nullifier": "7",
+          "message": "da4b5cf4842ab884d8f3072ab8b41d979d7eba6b309ebf4911e376c275548702",
+          "l1RefNumber": "4",
+          "l1RefHash": "cb96065a06fe2b464c465726dc365e60466cd65dfc35837dd58e15a988852174"
+        },
+        {
+          "ballotHash": "a5fe252c142b05666173ef30b0eea11a932d9f19d8a64844c8a299a51842ce75",
+          "tier": 0,
+          "nullifier": "7",
+          "message": "da4b5cf4842ab884d8f3072ab8b41d979d7eba6b309ebf4911e376c275548702",
+          "l1RefNumber": "4",
+          "l1RefHash": "cb96065a06fe2b464c465726dc365e60466cd65dfc35837dd58e15a988852174"
+        }
+      ],
+      "receipts": [],
+      "error": true
+    },
+    {
+      "id": "tier",
+      "description": "Tier 3, on a reference before the window",
+      "head": "11",
+      "view": [
+        {
+          "ballotHash": "e98342c88ec180a988e30818994a5be1a75094125350903279d035e987d38b62",
+          "tier": 3,
+          "nullifier": "7",
+          "message": "da4b5cf4842ab884d8f3072ab8b41d979d7eba6b309ebf4911e376c275548702",
+          "l1RefNumber": "1",
+          "l1RefHash": "f598c0e34a46fc196548da2ffdd1ba06df206e68e65354811db28cfe49ecf7aa"
+        }
+      ],
+      "receipts": [],
+      "error": true
+    },
+    {
+      "id": "nullifier",
+      "description": "A nullifier of r, on a reference before the window",
+      "head": "11",
+      "view": [
+        {
+          "ballotHash": "e98342c88ec180a988e30818994a5be1a75094125350903279d035e987d38b62",
+          "tier": 0,
+          "nullifier": "21888242871839275222246405745257275088548364400416034343698204186575808495617",
+          "message": "da4b5cf4842ab884d8f3072ab8b41d979d7eba6b309ebf4911e376c275548702",
+          "l1RefNumber": "1",
+          "l1RefHash": "f598c0e34a46fc196548da2ffdd1ba06df206e68e65354811db28cfe49ecf7aa"
+        }
+      ],
+      "receipts": [],
+      "error": true
+    }
+  ],
+  "capacity": [
+    {
+      "id": "lone-at-limit",
+      "description": "Three seats at the largest electorate R of one hour fits",
+      "windows": {
+        "contractEventWindow": "46800",
+        "forcedInclusion": "46800",
+        "margin": "3600"
+      },
+      "elections": [
+        {
+          "members": "1280",
+          "seats": 3,
+          "closesAt": "1800000000",
+          "l1InclusionBound": "600",
+          "receipts": {
+            "start": "1800123000",
+            "end": "1800126600",
+            "gas": "510000000"
+          },
+          "complaints": {
+            "start": "1800220200",
+            "end": "1800385800",
+            "gas": "1152000000"
+          }
+        }
+      ],
+      "fits": true
+    },
+    {
+      "id": "lone-over-limit",
+      "description": "One member more",
+      "windows": {
+        "contractEventWindow": "46800",
+        "forcedInclusion": "46800",
+        "margin": "3600"
+      },
+      "elections": [
+        {
+          "members": "1281",
+          "seats": 3,
+          "closesAt": "1800000000",
+          "l1InclusionBound": "600",
+          "receipts": {
+            "start": "1800123000",
+            "end": "1800126600",
+            "gas": "561000000"
+          },
+          "complaints": {
+            "start": "1800220200",
+            "end": "1800385800",
+            "gas": "1152900000"
+          }
+        }
+      ],
+      "fits": false
+    },
+    {
+      "id": "empty-electorate",
+      "description": "No members: nothing to force",
+      "windows": {
+        "contractEventWindow": "46800",
+        "forcedInclusion": "46800",
+        "margin": "3600"
+      },
+      "elections": [
+        {
+          "members": "0",
+          "seats": 32,
+          "closesAt": "1800000000",
+          "l1InclusionBound": "600",
+          "receipts": {
+            "start": "1800123000",
+            "end": "1800126600",
+            "gas": "0"
+          },
+          "complaints": {
+            "start": "1800220200",
+            "end": "1800385800",
+            "gas": "0"
+          }
+        }
+      ],
+      "fits": true
+    },
+    {
+      "id": "one-seat",
+      "description": "One seat, its limit",
+      "windows": {
+        "contractEventWindow": "46800",
+        "forcedInclusion": "46800",
+        "margin": "3600"
+      },
+      "elections": [
+        {
+          "members": "4096",
+          "seats": 1,
+          "closesAt": "1800000000",
+          "l1InclusionBound": "600",
+          "receipts": {
+            "start": "1800123000",
+            "end": "1800126600",
+            "gas": "544000000"
+          },
+          "complaints": {
+            "start": "1800220200",
+            "end": "1800385800",
+            "gas": "1228800000"
+          }
+        }
+      ],
+      "fits": true
+    },
+    {
+      "id": "sixteen-seats",
+      "description": "Sixteen seats over the limit",
+      "windows": {
+        "contractEventWindow": "46800",
+        "forcedInclusion": "46800",
+        "margin": "3600"
+      },
+      "elections": [
+        {
+          "members": "257",
+          "seats": 16,
+          "closesAt": "1800000000",
+          "l1InclusionBound": "600",
+          "receipts": {
+            "start": "1800123000",
+            "end": "1800126600",
+            "gas": "816000000"
+          },
+          "complaints": {
+            "start": "1800220200",
+            "end": "1800385800",
+            "gas": "1233600000"
+          }
+        }
+      ],
+      "fits": false
+    },
+    {
+      "id": "author-panel",
+      "description": "A default panel of 3 and an author panel of 2: five seats share the target",
+      "windows": {
+        "contractEventWindow": "46800",
+        "forcedInclusion": "46800",
+        "margin": "3600"
+      },
+      "elections": [
+        {
+          "members": "768",
+          "seats": 5,
+          "closesAt": "1800000000",
+          "l1InclusionBound": "600",
+          "receipts": {
+            "start": "1800123000",
+            "end": "1800126600",
+            "gas": "510000000"
+          },
+          "complaints": {
+            "start": "1800220200",
+            "end": "1800385800",
+            "gas": "1152000000"
+          }
+        }
+      ],
+      "fits": true
+    },
+    {
+      "id": "complaints-bind",
+      "description": "With R of 21 hours the complaints bind first: one member over their limit",
+      "windows": {
+        "contractEventWindow": "46800",
+        "forcedInclusion": "46800",
+        "margin": "75600"
+      },
+      "elections": [
+        {
+          "members": "28308",
+          "seats": 3,
+          "closesAt": "1800000000",
+          "l1InclusionBound": "600",
+          "receipts": {
+            "start": "1800051000",
+            "end": "1800126600",
+            "gas": "11322000000"
+          },
+          "complaints": {
+            "start": "1800220200",
+            "end": "1800385800",
+            "gas": "25477200000"
+          }
+        }
+      ],
+      "fits": false
+    },
+    {
+      "id": "long-margin",
+      "description": "R of 21 hours at its limit",
+      "windows": {
+        "contractEventWindow": "46800",
+        "forcedInclusion": "46800",
+        "margin": "75600"
+      },
+      "elections": [
+        {
+          "members": "28307",
+          "seats": 3,
+          "closesAt": "1800000000",
+          "l1InclusionBound": "600",
+          "receipts": {
+            "start": "1800051000",
+            "end": "1800126600",
+            "gas": "11322000000"
+          },
+          "complaints": {
+            "start": "1800220200",
+            "end": "1800385800",
+            "gas": "25476300000"
+          }
+        }
+      ],
+      "fits": true
+    },
+    {
+      "id": "same-close-halves",
+      "description": "Two elections closing together, each with half the limit",
+      "windows": {
+        "contractEventWindow": "46800",
+        "forcedInclusion": "46800",
+        "margin": "3600"
+      },
+      "elections": [
+        {
+          "members": "640",
+          "seats": 3,
+          "closesAt": "1800000000",
+          "l1InclusionBound": "600",
+          "receipts": {
+            "start": "1800123000",
+            "end": "1800126600",
+            "gas": "255000000"
+          },
+          "complaints": {
+            "start": "1800220200",
+            "end": "1800385800",
+            "gas": "576000000"
+          }
+        },
+        {
+          "members": "640",
+          "seats": 3,
+          "closesAt": "1800000000",
+          "l1InclusionBound": "600",
+          "receipts": {
+            "start": "1800123000",
+            "end": "1800126600",
+            "gas": "255000000"
+          },
+          "complaints": {
+            "start": "1800220200",
+            "end": "1800385800",
+            "gas": "576000000"
+          }
+        }
+      ],
+      "fits": true
+    },
+    {
+      "id": "same-close-over",
+      "description": "Two elections closing together, each at the limit",
+      "windows": {
+        "contractEventWindow": "46800",
+        "forcedInclusion": "46800",
+        "margin": "3600"
+      },
+      "elections": [
+        {
+          "members": "1280",
+          "seats": 3,
+          "closesAt": "1800000000",
+          "l1InclusionBound": "600",
+          "receipts": {
+            "start": "1800123000",
+            "end": "1800126600",
+            "gas": "510000000"
+          },
+          "complaints": {
+            "start": "1800220200",
+            "end": "1800385800",
+            "gas": "1152000000"
+          }
+        },
+        {
+          "members": "1280",
+          "seats": 3,
+          "closesAt": "1800000000",
+          "l1InclusionBound": "600",
+          "receipts": {
+            "start": "1800123000",
+            "end": "1800126600",
+            "gas": "510000000"
+          },
+          "complaints": {
+            "start": "1800220200",
+            "end": "1800385800",
+            "gas": "1152000000"
+          }
+        }
+      ],
+      "fits": false
+    },
+    {
+      "id": "receipts-abut",
+      "description": "Closing R apart: one's receipts end where the other's start",
+      "windows": {
+        "contractEventWindow": "46800",
+        "forcedInclusion": "46800",
+        "margin": "3600"
+      },
+      "elections": [
+        {
+          "members": "1280",
+          "seats": 3,
+          "closesAt": "1800000000",
+          "l1InclusionBound": "600",
+          "receipts": {
+            "start": "1800123000",
+            "end": "1800126600",
+            "gas": "510000000"
+          },
+          "complaints": {
+            "start": "1800220200",
+            "end": "1800385800",
+            "gas": "1152000000"
+          }
+        },
+        {
+          "members": "1280",
+          "seats": 3,
+          "closesAt": "1800003600",
+          "l1InclusionBound": "600",
+          "receipts": {
+            "start": "1800126600",
+            "end": "1800130200",
+            "gas": "510000000"
+          },
+          "complaints": {
+            "start": "1800223800",
+            "end": "1800389400",
+            "gas": "1152000000"
+          }
+        }
+      ],
+      "fits": true
+    },
+    {
+      "id": "receipts-overlap",
+      "description": "Closing R less a second apart: the receipts overlap for one second",
+      "windows": {
+        "contractEventWindow": "46800",
+        "forcedInclusion": "46800",
+        "margin": "3600"
+      },
+      "elections": [
+        {
+          "members": "1280",
+          "seats": 3,
+          "closesAt": "1800000000",
+          "l1InclusionBound": "600",
+          "receipts": {
+            "start": "1800123000",
+            "end": "1800126600",
+            "gas": "510000000"
+          },
+          "complaints": {
+            "start": "1800220200",
+            "end": "1800385800",
+            "gas": "1152000000"
+          }
+        },
+        {
+          "members": "1280",
+          "seats": 3,
+          "closesAt": "1800003599",
+          "l1InclusionBound": "600",
+          "receipts": {
+            "start": "1800126599",
+            "end": "1800130199",
+            "gas": "510000000"
+          },
+          "complaints": {
+            "start": "1800223799",
+            "end": "1800389399",
+            "gas": "1152000000"
+          }
+        }
+      ],
+      "fits": false
+    },
+    {
+      "id": "receipts-in-complaints",
+      "description": "One election's receipts inside another's complaints, each at its limit",
+      "windows": {
+        "contractEventWindow": "46800",
+        "forcedInclusion": "46800",
+        "margin": "3600"
+      },
+      "elections": [
+        {
+          "members": "1280",
+          "seats": 3,
+          "closesAt": "1800000000",
+          "l1InclusionBound": "600",
+          "receipts": {
+            "start": "1800123000",
+            "end": "1800126600",
+            "gas": "510000000"
+          },
+          "complaints": {
+            "start": "1800220200",
+            "end": "1800385800",
+            "gas": "1152000000"
+          }
+        },
+        {
+          "members": "1280",
+          "seats": 3,
+          "closesAt": "1800144000",
+          "l1InclusionBound": "600",
+          "receipts": {
+            "start": "1800267000",
+            "end": "1800270600",
+            "gas": "510000000"
+          },
+          "complaints": {
+            "start": "1800364200",
+            "end": "1800529800",
+            "gas": "1152000000"
+          }
+        }
+      ],
+      "fits": true
+    }
+  ],
+  "limits": [
+    {
+      "seats": 1,
+      "margin": "3600",
+      "members": "4096"
+    },
+    {
+      "seats": 3,
+      "margin": "3600",
+      "members": "1280"
+    },
+    {
+      "seats": 5,
+      "margin": "3600",
+      "members": "768"
+    },
+    {
+      "seats": 7,
+      "margin": "3600",
+      "members": "512"
+    },
+    {
+      "seats": 16,
+      "margin": "3600",
+      "members": "256"
+    },
+    {
+      "seats": 32,
+      "margin": "3600",
+      "members": "128"
+    },
+    {
+      "seats": 1,
+      "margin": "75600",
+      "members": "84923"
+    },
+    {
+      "seats": 3,
+      "margin": "75600",
+      "members": "28307"
+    },
+    {
+      "seats": 5,
+      "margin": "75600",
+      "members": "16984"
+    },
+    {
+      "seats": 7,
+      "margin": "75600",
+      "members": "12131"
+    },
+    {
+      "seats": 16,
+      "margin": "75600",
+      "members": "5307"
+    },
+    {
+      "seats": 32,
+      "margin": "75600",
+      "members": "2653"
+    }
+  ]
+}

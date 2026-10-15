@@ -38,6 +38,7 @@ contract BoardTest is TestBase {
 
     string internal constant DELIVERY = "../../docs/spec/vectors/delivery.json";
     string internal constant RECEIPTS = "../../docs/spec/vectors/share-receipt.json";
+    string internal constant OBLIGATION = "../../docs/spec/vectors/delivery-obligation.json";
     string internal constant V1 = "../../docs/spec/vectors/ballot.json";
     string internal constant V3 = "../../docs/spec/vectors/ballot-v3-records.json";
     /// Framed values with no zero byte, for the largest record's elements and scalars.
@@ -1431,6 +1432,83 @@ contract BoardTest is TestBase {
         assertTrue(pairing > 150_000 && pairing < 250_000, "the pairing");
         assertTrue(post < 280_000, "posting, mocked");
         assertTrue(post + pairing < 480_000, "posting");
+    }
+
+    /// The forced path's call figures (docs/spec/delivery.md, Capacity), from
+    /// delivery-obligation.json: a full receipt call fits one deposit's data
+    /// and gas, and, where P-256 goes through `P256VERIFY` as on Base, a call
+    /// of `receiptsPerCall` receipts and a complaint call each cost at most
+    /// their pinned gas, intrinsic gas included, by the standard price or
+    /// EIP-7623's floor, whichever is higher. The capacity check sizes every
+    /// election's obligation by these figures, so a board that cost more
+    /// would let a trustee node lend its keys to an election it can't serve
+    /// through L1 (T-25, T-52, T-54). Under `cancun` P-256 runs in Solidity,
+    /// several times the price, and only the framing bounds are checked; the
+    /// package's test script sets `EXPECT_P256VERIFY` for the precompile run,
+    /// so that run can't skip the gas bounds.
+    function test_ForcedPathCallGas() public {
+        string memory fj = vm.readFile(OBLIGATION);
+        uint256 perCall = vm.parseUint(vm.parseJsonString(fj, ".forcedPath.receiptsPerCall"));
+        uint256 receiptGas = vm.parseUint(vm.parseJsonString(fj, ".forcedPath.receiptCallGas"));
+        uint256 complaintGas = vm.parseUint(vm.parseJsonString(fj, ".forcedPath.complaintCallGas"));
+        uint256 maxGas = vm.parseUint(vm.parseJsonString(fj, ".portal.maxResourceLimit"));
+        uint256 maxData = vm.parseJsonUint(fj, ".portal.maxDepositData");
+
+        // Distinct receipts of one seat, each for its own ballot and share hash.
+        bytes memory batch;
+        for (uint256 i; i < perCall; i++) {
+            bytes32 ballot = keccak256(abi.encode("forced path ballot", i));
+            bytes32 share = keccak256(abi.encode("forced path share", i));
+            batch = bytes.concat(
+                batch,
+                _signed(0x000c, abi.encodePacked(h, ballot, uint8(1), share), signingSecrets[1])
+            );
+        }
+        bytes memory receiptsCall = _receiptsCall(batch);
+        bytes memory complaintCall = _complaintCall(complaint);
+        assertTrue(receiptsCall.length <= maxData, "a full receipt call's data fits a deposit");
+        assertTrue(receiptGas <= maxGas && complaintGas <= maxGas, "each call fits a deposit");
+
+        bool precompile = _p256Precompile();
+        if (vm.envOr("EXPECT_P256VERIFY", false)) assertTrue(precompile, "no P256VERIFY");
+        if (!precompile) return;
+        uint256 receipts = _withIntrinsic(receiptsCall, _gas(receiptsCall));
+        uint256 one = _withIntrinsic(complaintCall, _gas(complaintCall));
+        // Measured about 16,170,000 and 136,000.
+        assertTrue(receipts <= receiptGas, "a full receipt call");
+        assertTrue(one <= complaintGas, "a complaint call");
+        // Each figure is near what it bounds, so the check isn't far looser
+        // than the board.
+        assertTrue(receipts > (receiptGas * 9) / 10, "the receipt figure is tight");
+        assertTrue(one > (complaintGas * 8) / 10, "the complaint figure is tight");
+    }
+
+    /// Whether the EVM answers P-256 verification at 0x100, with one of the
+    /// vector's honest receipts.
+    function _p256Precompile() internal view returns (bool) {
+        bytes memory r = allReceipted[0];
+        bytes32 digest = sha256(bytes.concat(receiptDs, _slice(r, 3, RECEIPT_SIG_AT - 3)));
+        (bool ok, bytes memory ret) = address(0x100)
+            .staticcall(
+                abi.encodePacked(
+                    digest, _slice(r, RECEIPT_SIG_AT, 64), signingKeys[1][0], signingKeys[1][1]
+                )
+            );
+        return ok && ret.length == 32 && uint256(bytes32(ret)) == 1;
+    }
+
+    /// A transaction's gas for `data` that executed `used`: 21,000, then
+    /// EIP-2028's 4 per zero byte and 16 per other, or EIP-7623's floor of 10
+    /// per token (a zero byte one token, another four) when that is higher.
+    function _withIntrinsic(bytes memory data, uint256 used) internal pure returns (uint256) {
+        uint256 zeros;
+        for (uint256 i; i < data.length; i++) {
+            if (data[i] == 0) zeros++;
+        }
+        uint256 tokens = zeros + 4 * (data.length - zeros);
+        uint256 standard = 21_000 + 4 * tokens + used;
+        uint256 floor = 21_000 + 10 * tokens;
+        return standard > floor ? standard : floor;
     }
 
     // --- helpers: calls and verdicts ----------------------------------------------

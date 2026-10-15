@@ -76,8 +76,8 @@ const bundleOf = (c: Case) =>
   );
 
 const BALLOT = 0x0002;
-// These fixtures' definitions pin board-entry version 4.
-const payloadOf = (entry: Uint8Array) => decodeBoardEntry(entry, 4).payload;
+// These fixtures' definitions pin board-entry version 5, which every profile needs.
+const payloadOf = (entry: Uint8Array) => decodeBoardEntry(entry, 5).payload;
 
 /** Each ballot entry's verdict by `admit`, keyed by its position in the copy. */
 function admissions(c: Case) {

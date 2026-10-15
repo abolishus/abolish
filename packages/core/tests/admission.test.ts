@@ -62,8 +62,8 @@ const panelOf = (name: string): Panel => {
 const definition = decodeElectionDefinition(hex(byId("admitted").definition));
 const electionId = definition.election_id;
 const { opens_at: opensAt, closes_at: closesAt } = definition;
-// The fixtures pin board-entry version 4.
-const VERSION = 4;
+// The fixtures pin board-entry version 5.
+const VERSION = 5;
 const clock = { epoch: opensAt - 7_200n, period: 3_600n };
 
 /** The vector board's entries, decoded: entry 0 is the transcript. */

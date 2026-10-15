@@ -315,6 +315,12 @@ export const SPOILED_OPENING_VERSIONS: ReadonlySet<number> = new Set<number>([1,
 // this function doesn't take yet, so under every definition version it does
 // take a profile pinning ballot version 4 fails.
 export const BALLOT_VERSIONS: ReadonlySet<number> = new Set<number>([1, 2, 3, 4]);
+// The contract-event versions this package reads (contract-event.ts's
+// CONTRACT_EVENT), written out for the same reason; a test ties the two.
+// Only version 3's tables name the close rule's board events, so 2.3 fails a
+// profile pinning version 1 or 2 ([[close]], Version; T-35, T-50).
+export const CONTRACT_EVENT_VERSIONS: ReadonlySet<number> = new Set<number>([1, 2, 3]);
+const CLOSE_EVENT_VERSION = 3;
 
 /** Why 2.3's profile combination refuses a definition's pins. */
 export type ProfileCombinationRule = "profile-combination" | "unsupported-version";
@@ -334,7 +340,13 @@ export type ProfileCombinationRule = "profile-combination" | "unsupported-versio
  * for versions 2 and 3, 3 for version 4); and tally-opening version 1 needs one that carries
  * destruction statements (4 or 5, docs/spec/tally.md, Destruction), so an
  * election's creator can't leave delivery, challenge or destruction off the
- * board (T-34, T-42). A board-entry version this package doesn't read is
+ * board (T-34, T-42). Every profile also needs a board-entry version that
+ * carries close statements (5) and contract-event version 3, which archives
+ * the close rule's board events, so a seat can always state the close and
+ * the verifier read it ([[close]], Version; T-35, T-50): board-entry version
+ * 1, 3 or 4 and contract-event version 1 or 2 fail, and a contract-event
+ * version this package doesn't read is `unsupported-version` when the
+ * profile fails on no other ground. A board-entry version this package doesn't read is
  * `unsupported-version`, never a failure: a later version may add itself to
  * the rule (T-36), but a client that must refuse such an election treats
  * any result but `undefined` as a refusal: it can't cast to a board it
@@ -343,8 +355,8 @@ export type ProfileCombinationRule = "profile-combination" | "unsupported-versio
  * (a later release may define it to name a cell or carry questions), and a
  * spoiled-ballot opening version it doesn't read beside ballot version 2 or
  * 3 (a later release may read it to open their cores); one this package
- * reads that doesn't open their cores fails. A ballot or tally-opening type
- * pinned twice or not at all is `profile-combination` too, and a board-entry
+ * reads that doesn't open their cores fails. A ballot, tally-opening or
+ * contract-event type pinned twice or not at all is `profile-combination` too, and a board-entry
  * type pinned twice or not at all `unsupported-version`, so in those cases a
  * caller that skipped `electionDefinitionRule` still refuses (T-34). It
  * doesn't replace that rule: run it first.
@@ -388,9 +400,21 @@ export function profileCombinationRule(
   const carriesDelivery =
     allowed.includes(RECORD_TYPES.shareReceipt) && allowed.includes(RECORD_TYPES.shareComplaint);
   const carriesDestruction = allowed.includes(RECORD_TYPES.destructionStatement);
+  // Every profile needs the close statement on the board (board-entry
+  // version 5) and the close rule's board events archived (contract-event
+  // version 3), whatever its definition version, or its seats have no way
+  // to state the close and 5.5 and 6.3 can't be checked ([[close]],
+  // Version; T-35, T-50). A contract-event version this package doesn't
+  // read is judged last, below, as a later release's.
+  const carriesClose = allowed.includes(RECORD_TYPES.closeStatement);
+  const events = pinnedVersion(d, RECORD_TYPES.contractEvent);
+  if (events === undefined) return "profile-combination";
+  const knownEvents = CONTRACT_EVENT_VERSIONS.has(events);
   const fits =
     (!DELIVERED_BALLOT_VERSIONS.has(ballot) || carriesDelivery) &&
-    (opening !== 1 || carriesDestruction);
+    (opening !== 1 || carriesDestruction) &&
+    carriesClose &&
+    (!knownEvents || events === CLOSE_EVENT_VERSION);
   if (!fits) return "profile-combination";
   if (unknownBallot && wanted !== 1) return "unsupported-version";
   if (coreOpening !== undefined && spoiled !== undefined && spoiled !== coreOpening)
@@ -403,6 +427,7 @@ export function profileCombinationRule(
   // whose cores it doesn't know the opening of: unverifiable here, since
   // 6.2 can't be checked, never a failure (T-36).
   if (spoiled !== undefined && !SPOILED_OPENING_VERSIONS.has(spoiled)) return "unsupported-version";
+  if (!knownEvents) return "unsupported-version";
   return undefined;
 }
 

@@ -283,37 +283,38 @@ describe("2.3: the profile's versions fit together", () => {
       },
     });
 
-  // [board entry, ballot, tally opening, fits]: ballot version 1 needs board
-  // entries that carry share receipts and complaints (3 or 4), tally-opening
-  // version 1 needs ones that carry destruction statements (4), ballot
-  // version 2, which names a cell, needs definition version 3 or 4, and ballot
-  // version 3, which carries questions, definition version 5, and ballot
-  // version 4, which carries an author half, definition version 6 (these are
-  // version 1). Ballot version 5 stands for a version this verifier doesn't
-  // know, with neither need: a later release judges it.
+  // [board entry, ballot, tally opening, fits], beside contract-event
+  // version 3: ballot version 1 needs board entries that carry share receipts
+  // and complaints (3, 4 or 5), tally-opening version 1 needs ones that carry
+  // destruction statements (4 or 5), every profile needs the close statement
+  // (5; [[close]], Version), ballot version 2, which names a cell, needs
+  // definition version 3 or 4, and ballot version 3, which carries
+  // questions, definition version 5, and ballot version 4, which carries an
+  // author half, definition version 6 (these are version 1). Ballot version 5
+  // stands for a version this verifier doesn't know, with neither need: a
+  // later release judges it.
   const table: readonly (readonly [number, number, number, boolean])[] = [
-    [4, 1, 1, true],
-    [3, 1, 1, false],
-    [1, 1, 1, false],
-    [3, 1, 2, true],
-    [1, 1, 2, false],
-    [4, 2, 1, false],
-    [4, 2, 2, false],
-    [4, 3, 1, false],
-    [4, 3, 2, false],
-    [4, 4, 1, false],
-    [4, 4, 2, false],
-    [4, 5, 1, true],
-    [3, 5, 1, false],
-    [1, 5, 1, false],
-    [1, 5, 2, true],
-    [3, 5, 2, true],
-    [4, 5, 2, true],
-    // Version 5 is version 4 with the close statement: it fits wherever 4 does.
     [5, 1, 1, true],
     [5, 1, 2, true],
-    [5, 2, 1, false],
+    [5, 5, 1, true],
     [5, 5, 2, true],
+    [5, 2, 1, false],
+    [5, 2, 2, false],
+    [5, 3, 1, false],
+    [5, 3, 2, false],
+    [5, 4, 1, false],
+    [5, 4, 2, false],
+    // Board-entry versions 1, 3 and 4 have no close statement, so they fail
+    // whatever else fits, as they did for want of delivery or destruction.
+    [4, 1, 1, false],
+    [4, 1, 2, false],
+    [4, 5, 2, false],
+    [3, 1, 1, false],
+    [3, 1, 2, false],
+    [3, 5, 2, false],
+    [1, 1, 1, false],
+    [1, 1, 2, false],
+    [1, 5, 2, false],
   ];
   for (const [board, ballot, opening, fits] of table)
     test(`board entry ${board}, ballot ${ballot}, tally opening ${opening}: ${fits ? "fits" : "fails"}`, () => {
@@ -322,6 +323,7 @@ describe("2.3: the profile's versions fit together", () => {
           [RECORD_TYPES.boardEntry]: board,
           [RECORD_TYPES.ballot]: ballot,
           [RECORD_TYPES.tallyOpening]: opening,
+          [RECORD_TYPES.contractEvent]: 3,
         }),
         closed,
       );
@@ -341,6 +343,39 @@ describe("2.3: the profile's versions fit together", () => {
       );
       expect(r.verdict).toBe("unverifiable");
     });
+
+  test("every profile pins contract-event version 3, the close rule's events", () => {
+    // Versions 1 and 2 name none of the close rule's board events, so 2.3
+    // fails them; one this verifier doesn't read is a later release's,
+    // unverifiable unless the profile fails on another ground ([[close]],
+    // Version; T-36).
+    const at = (board: number, events: number) =>
+      row(
+        format3(
+          pinning({ [RECORD_TYPES.boardEntry]: board, [RECORD_TYPES.contractEvent]: events }),
+          closed,
+        ),
+        "2.3",
+      );
+    expect(at(5, 3)).toMatchObject({ status: "unverifiable", code: "not-implemented" });
+    for (const events of [1, 2]) {
+      const r = format3(
+        pinning({ [RECORD_TYPES.boardEntry]: 5, [RECORD_TYPES.contractEvent]: events }),
+        closed,
+      );
+      expect(row(r, "2.3")).toEqual(COMBINATION_FAILS);
+      expect(r.verdictAgainstInputs).toBe("failed");
+    }
+    for (const events of [4, 255])
+      expect(at(5, events)).toEqual({
+        id: "2.3",
+        kind: "election",
+        status: "unverifiable",
+        code: "unsupported-version",
+        at: {},
+      });
+    expect(at(4, 4)).toEqual(COMBINATION_FAILS);
+  });
 
   test("a version this verifier can't read is unsupported before any combination", () => {
     for (const board of [2, 6]) {
@@ -549,20 +584,25 @@ describe("definition versions 3 and 4 (regional cells)", () => {
   // implemented yet); an opening version this verifier doesn't know is
   // unsupported, never a failure (T-36, T-42).
   const table: readonly (readonly [number, number, number, string])[] = [
-    [4, 1, 1, "profile-combination"],
+    [5, 1, 1, "profile-combination"],
     // Ballot version 3 carries questions, which definition version 5 alone has.
-    [4, 3, 1, "profile-combination"],
-    [4, 3, 2, "profile-combination"],
+    [5, 3, 1, "profile-combination"],
+    [5, 3, 2, "profile-combination"],
     // Ballot version 4 carries an author half, which definition version 6 alone has.
-    [4, 4, 1, "profile-combination"],
-    [4, 4, 3, "profile-combination"],
+    [5, 4, 1, "profile-combination"],
+    [5, 4, 3, "profile-combination"],
     // Ballot version 5 stands for one a later release may define as naming
     // its cell: unsupported, never failed, whatever the opening (T-36).
-    [4, 5, 1, "unsupported-version"],
-    [4, 5, 2, "unsupported-version"],
-    [4, 2, 1, "profile-combination"],
-    [4, 2, 2, "not-implemented"],
-    [3, 2, 255, "unsupported-version"],
+    [5, 5, 1, "unsupported-version"],
+    [5, 5, 2, "unsupported-version"],
+    [5, 2, 1, "profile-combination"],
+    [5, 2, 2, "not-implemented"],
+    [5, 2, 255, "unsupported-version"],
+    // Board-entry versions without the close statement fail whatever else
+    // fits, a later ballot or opening version included ([[close]], Version).
+    [4, 2, 2, "profile-combination"],
+    [4, 5, 2, "profile-combination"],
+    [3, 2, 255, "profile-combination"],
     [1, 2, 1, "profile-combination"],
     // A board that can't carry delivery fails whatever the opening.
     [1, 2, 2, "profile-combination"],
@@ -581,6 +621,7 @@ describe("definition versions 3 and 4 (regional cells)", () => {
             // Tally-opening version 2 stands for one with no board need, so
             // only the ballot's needs decide.
             [RECORD_TYPES.tallyOpening]: 2,
+            [RECORD_TYPES.contractEvent]: 3,
           }),
           closed,
         );
@@ -651,23 +692,27 @@ describe("definition version 5 (questions)", () => {
   // version-5 profile pins ballot version 3, which carries one range proof
   // per question, spoiled-ballot opening version 2, which opens its cores,
   // display-text version 2, which carries the questions' text, and, for
-  // ballot version 3's delivery and tally-opening version 1's destruction
-  // statements, board-entry version 4. A ballot or opening version this
-  // verifier doesn't know is unsupported, never failed; an unknown
+  // ballot version 3's delivery, tally-opening version 1's destruction
+  // statements and the close statement every profile needs, board-entry
+  // version 5, beside contract-event version 3. A ballot or opening version
+  // this verifier doesn't know is unsupported, never failed; an unknown
   // display-text version fails (docs/spec/verifier.md, 2.3; T-36, T-41, T-42).
   const table: readonly (readonly [number, number, number, number, string])[] = [
-    [4, 3, 2, 2, "not-implemented"],
+    [5, 3, 2, 2, "not-implemented"],
     [3, 3, 2, 2, "profile-combination"],
-    [4, 3, 1, 2, "profile-combination"],
-    [4, 2, 2, 2, "profile-combination"],
-    [4, 1, 1, 2, "profile-combination"],
-    [4, 3, 2, 1, "profile-combination"],
-    [4, 3, 2, 3, "profile-combination"],
+    // Version 4 carries delivery and destruction, not the close statement.
+    [4, 3, 2, 2, "profile-combination"],
+    [5, 3, 1, 2, "profile-combination"],
+    [5, 2, 2, 2, "profile-combination"],
+    [5, 1, 1, 2, "profile-combination"],
+    [5, 3, 2, 1, "profile-combination"],
+    [5, 3, 2, 3, "profile-combination"],
     // Ballot version 4 pairs with definition version 6 alone; version 5
     // stands for one a later release may define to carry questions.
-    [4, 4, 2, 2, "profile-combination"],
-    [4, 5, 2, 2, "unsupported-version"],
-    [4, 3, 255, 2, "unsupported-version"],
+    [5, 4, 2, 2, "profile-combination"],
+    [5, 5, 2, 2, "unsupported-version"],
+    [5, 3, 255, 2, "unsupported-version"],
+    [4, 5, 2, 2, "profile-combination"],
   ];
   for (const [board, ballot, spoiled, text, code] of table)
     test(`board entry ${board}, ballot ${ballot}, opening ${spoiled}, display text ${text}: ${code}`, () => {
@@ -678,6 +723,7 @@ describe("definition version 5 (questions)", () => {
           [RECORD_TYPES.spoiledBallotOpening]: spoiled,
           [RECORD_TYPES.displayText]: text,
           [RECORD_TYPES.tallyOpening]: 1,
+          [RECORD_TYPES.contractEvent]: 3,
         }),
         closed,
       );

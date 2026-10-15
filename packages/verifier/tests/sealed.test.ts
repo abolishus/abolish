@@ -43,7 +43,7 @@ const file = read("verifier-tallies.json") as {
 const honest = file.cases.find((c) => c.id === "honest");
 if (honest === undefined) throw new Error("no honest case");
 const definition = decodeDefinition(hex(honest.definition)).value;
-const VERSION: BoardEntryVersion = 4;
+const VERSION: BoardEntryVersion = 5;
 const OPENS = definition.opens_at;
 const CLOSES = definition.closes_at;
 const clock = {
@@ -85,6 +85,11 @@ const row = (r: Report, id: string) => {
 
 describe("a sealed, authenticated board with no ballot", { timeout: 60_000 }, () => {
   const r = bundle(copy);
+
+  test("the profile pins board-entry version 5 and contract-event version 3, so 2.3 doesn't fail", () => {
+    // 2.3's other parts aren't built, so it stays unverifiable (close.md, Version).
+    expect(row(r, "2.3")).toEqual({ status: "unverifiable", code: "not-implemented" });
+  });
 
   test("4.1, 4.2, 3.2 and every admission row pass, so 6.1 selects nothing", () => {
     for (const id of ["4.1", "4.2", "3.2", "5.1", "5.4", "5.5", "5.7", "5.8", "6.1"])

@@ -95,8 +95,8 @@ def det(label):
 
 
 def pins_for(ballot=3, opening=2):
-    """A version-5 profile: board-entry version 4, display-text version 2, and the given ballot and spoiled-opening pins."""
-    own = {1: 5, BALLOT_TYPE: ballot, SPOILED_OPENING_TYPE: opening, BOARD_ENTRY_TYPE: 4, DISPLAY_TEXT_TYPE: 2}
+    """A version-5 profile: board-entry version 5, contract-event version 3 (close.md, Version), display-text version 2, and the given ballot and spoiled-opening pins."""
+    own = {1: 5, BALLOT_TYPE: ballot, SPOILED_OPENING_TYPE: opening, BOARD_ENTRY_TYPE: vb.BOARD_VERSION, vb.CONTRACT_EVENT_TYPE: 3, DISPLAY_TEXT_TYPE: 2}
     return {"protocol_major": 1, "pins": [(t, own.get(t, 1)) for t in range(1, 10)]}
 
 
@@ -245,7 +245,8 @@ def build(constants):
         }
 
     # Definition version 5 pinning ballot version 3, spoiled-ballot opening
-    # version 2, display-text version 2 and board-entry version 4, so 2.3's
+    # version 2, display-text version 2, board-entry version 5 and
+    # contract-event version 3, so 2.3's
     # combination passes. Seat 4 sends nothing, so the registered key set is
     # seats 1 to 3 and seat 4's share hash must be zero.
     d, t, e = election_for("v5", [1, 2, 3], profile=pins_for())
@@ -452,9 +453,9 @@ def assemble(constants, proofs_path, out_dir):
             # A ballot no membership check reaches carries some valid proof.
             proof = proof_bytes[pid] if pid is not None else next(iter(proof_bytes.values()))
             payloads.append(("ballot", r3.enc_ballot(dict(b, proof=proof)), b))
-        entries = [vc.entry(4, eid, i, 0, rec) for i, (_, rec, _) in enumerate(payloads)]
+        entries = [vc.entry(vb.BOARD_VERSION, eid, i, 0, rec) for i, (_, rec, _) in enumerate(payloads)]
         panel = s["panels"]["panel-4"]
-        ceremony_rows, ceremony = vc.expected(panel, d, entries, panel, 4)
+        ceremony_rows, ceremony = vc.expected(panel, d, entries, panel, vb.BOARD_VERSION)
         if bnd["registered"] is not None:
             assert ceremony_rows["3.2"] == outcome("pass"), bnd["id"]
             assert [x["index"] for x in ceremony["registered"]] == bnd["registered"], bnd["id"]
@@ -489,10 +490,11 @@ def assemble(constants, proofs_path, out_dir):
                 code, where = r3.admission(e, bnd["registered"], b, verdict)
                 assert verdict is not None or code not in ("ok", "option-proof", "sum-proof"), (bnd["id"], i)
                 assert sig is not None or verdict is None, (bnd["id"], i)
-                # Every ballot here is a board-path one in segment 0; the
-                # profiles pin contract-event version 1, under which the board
-                # emits no event (docs/spec/close.md, Window).
-                assert dict(d["profile"]["pins"])[vb.CONTRACT_EVENT_TYPE] == 1
+                # Every ballot here is a board-path one in segment 0, and no
+                # contract-event record carries one (the profiles pin
+                # contract-event version 3, which every profile needs:
+                # docs/spec/close.md, Window and Version).
+                assert dict(d["profile"]["pins"])[vb.CONTRACT_EVENT_TYPE] == 3
                 late = vb.window(d, {"kind": "board", "segment": 0}) if code == "ok" else None
                 if late is not None:
                     rejected.append({"entry": i, "code": late})

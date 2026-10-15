@@ -304,10 +304,10 @@ describe("the close rule's window (5.5) judges each copy by its own path", () =>
     };
     const receipt = events.records.find((x) => x.id === "share-receipt");
     if (receipt === undefined) throw new Error("no share-receipt record");
-    const entry = decodeBoardEntry(entries[2] as Uint8Array, 4);
+    const entry = decodeBoardEntry(entries[2] as Uint8Array, 5);
     const record = hex(receipt.encoding);
     record.set(entry.payload.subarray(3, 23), 3);
-    const swapped = encodeBoardEntry({ ...entry, payload: record }, 4);
+    const swapped = encodeBoardEntry({ ...entry, payload: record }, 5);
     const r = format4(window, join(entries.map((e, i) => (i === 2 ? swapped : e))));
     expect(verdicts(r).has(2)).toBe(false);
     expect(r.ballots?.admitted).toBe(3);
@@ -316,8 +316,8 @@ describe("the close rule's window (5.5) judges each copy by its own path", () =>
   test("s_A takes the floor of a close before the epoch, so segment 1 is late when s_A is 0", () => {
     const admitted = byId("admitted");
     const all = entriesOf(admitted);
-    const entry = decodeBoardEntry(all[1] as Uint8Array, 4);
-    const moved = encodeBoardEntry({ ...entry, segment: 1 }, 4);
+    const entry = decodeBoardEntry(all[1] as Uint8Array, 5);
+    const moved = encodeBoardEntry({ ...entry, segment: 1 }, 5);
     const r = verifyBundle(
       parseBundle(
         JSON.stringify({

@@ -109,7 +109,7 @@ def expected(d, e, entries, clock):
     floor = floor_of(d["closes_at"], clock)
     envelopes = []
     for at, raw in enumerate(entries):
-        env = vc.decode_entry(raw, 4)
+        env = vc.decode_entry(raw, vb.BOARD_VERSION)
         if not isinstance(env, str) and env["electionId"] == d["election_id"]:
             envelopes.append((at, env["payload"], env["segment"], int.from_bytes(env["payload"][:2], "big")))
     # Every admitted ballot at or below the floor, wherever it sits in the
@@ -213,7 +213,7 @@ def main(constants, out_dir):
 
     # The ballots' records, as committed, checked against the ballots rebuilt here.
     committed = next(c for c in json.loads((VECTORS / "verifier-ballots.json").read_text())["cases"] if c["id"] == "admitted")
-    records = [vc.decode_entry(x, 4)["payload"] for x in split(bytes.fromhex(committed["board"]))]
+    records = [vc.decode_entry(x, vb.BOARD_VERSION)["payload"] for x in split(bytes.fromhex(committed["board"]))]
     assert records[0] == t
     (ok0, _), (ok2, _), _ = src["board"][1:]
     for rec, b in zip(records[1:3], (ok0, ok2)):
@@ -301,14 +301,14 @@ def main(constants, out_dir):
             opens = sorted(p for p in payloads if int.from_bytes(p[:2], "big") == OPENING_TYPE)
             assert len(set(opens)) == len(opens)
             for p in others + opens:
-                out.append(vc.entry(4, eid, len(out), seg, p))
+                out.append(vc.entry(vb.BOARD_VERSION, eid, len(out), seg, p))
         return out
 
     cases = []
 
     def case(id_, description, segments, want_status, the_clock=clock, defn=d, transcript=t):
         entries = board([(seg, [transcript if p == "t" else p for p in ps]) for seg, ps in segments])
-        ceremony_rows, _ = vc.expected(panel, defn, entries, panel, 4)
+        ceremony_rows, _ = vc.expected(panel, defn, entries, panel, vb.BOARD_VERSION)
         assert ceremony_rows["3.2"] == outcome("pass"), id_
         # Step 1: opening version 2 is read, but opens other cores than
         # ballot version 1's (a profile 2.3 fails), so nothing is judged.

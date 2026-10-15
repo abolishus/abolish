@@ -56,6 +56,10 @@ TALLY_TYPE = 0x0006
 BALLOT_TYPE = 0x0002
 SPOILED_OPENING_TYPE = 0x0003
 BOARD_ENTRY_TYPE = 0x0007
+CONTRACT_EVENT_TYPE = 0x0008
+# The board-entry version every profile here pins: 5, the one that allows the
+# close statement, beside contract-event version 3 (close.md, Version).
+BOARD_VERSION = 5
 MEMBERSHIP_VK_HASH = bytes.fromhex(json.loads((VECTORS / "membership-proof.json").read_text())["verificationKey"]["hash"])
 
 
@@ -63,7 +67,7 @@ def tally_entries(d, entries):
     """The positions and payloads of the election's tally openings, by the envelope (4.1 reports every other entry)."""
     out = []
     for at, raw in enumerate(entries):
-        env = vc.decode_entry(raw, 4)
+        env = vc.decode_entry(raw, BOARD_VERSION)
         if isinstance(env, str) or env["electionId"] != d["election_id"]:
             continue
         if int.from_bytes(env["payload"][:2], "big") == TALLY_TYPE:
@@ -142,10 +146,10 @@ def main(out_dir):
     eid = dv.TYPICAL["election_id"]
 
     def election_for(label, seats, cheat=None, tally_version=1, base=dv.TYPICAL, opening_version=1):
-        """A definition of `base`'s version pinning board-entry version 4 (and ballot version 2 under versions 3 and 4, which name a cell, and 3 under version 5, which carries questions), its transcript for its own stub, and the seats' per-election signing secrets."""
+        """A definition of `base`'s version pinning board-entry version 5 and contract-event version 3, which every profile needs (close.md, Version), (and ballot version 2 under versions 3 and 4, which name a cell, and 3 under version 5, which carries questions), its transcript for its own stub, and the seats' per-election signing secrets."""
         own = dict(base["profile"]["pins"])[0x0001]
         ballot = {3: 2, 4: 2, 5: 3}.get(own)
-        pin = {BOARD_ENTRY_TYPE: 4, TALLY_TYPE: tally_version, SPOILED_OPENING_TYPE: opening_version, **({BALLOT_TYPE: ballot} if ballot is not None else {})}
+        pin = {BOARD_ENTRY_TYPE: BOARD_VERSION, CONTRACT_EVENT_TYPE: 3, TALLY_TYPE: tally_version, SPOILED_OPENING_TYPE: opening_version, **({BALLOT_TYPE: ballot} if ballot is not None else {})}
         pins = [(ty, pin.get(ty, v)) for ty, v in base["profile"]["pins"]]
         fields = {"profile": {"protocol_major": 1, "pins": pins}, "membership_vk_hash": MEMBERSHIP_VK_HASH}
         ctx = vc.election_of(vc.definition_for(panel, bytes(32), base, **fields))
@@ -203,8 +207,8 @@ def main(out_dir):
     def case(id_, description, payloads, want, defn=d, transcript=t, keys=registered, ceremony="pass", other_election=()):
         entries = []
         for p in [transcript] + payloads:
-            entries.append(vc.entry(4, b"\xee" * 32 if p in other_election else eid, len(entries), 0, p))
-        rows, _ = vc.expected(panel, defn, entries, panel, 4)
+            entries.append(vc.entry(BOARD_VERSION, b"\xee" * 32 if p in other_election else eid, len(entries), 0, p))
+        rows, _ = vc.expected(panel, defn, entries, panel, BOARD_VERSION)
         assert rows["3.2"]["status"] == ceremony, (id_, rows["3.2"])
         if dict(defn["profile"]["pins"]).get(TALLY_TYPE) != 1:
             row, report = outcome("unverifiable", "unsupported-version", {}), None
@@ -338,13 +342,14 @@ def main(out_dir):
     )
 
     # Spoiled-ballot opening version 2, which opens version-2 cores: 2.3's
-    # combination passes beside another pin than the typical profile's, and
+    # combination passes beside another pin than the typical profile's (and
+    # board-entry version 5 and contract-event version 3), and
     # the tally openings are judged as under it.
     do2, to2, so2 = election_for("definition-v3-opening-2", [1, 2, 3], base=rc.TYPICAL, opening_version=2)
     open_o2, _ = opener(do2, so2)
     c = case(
         "v3-opening-2",
-        "A version-3 definition pinning spoiled-ballot opening version 2, whose pairing with ballot version 2 passes 2.3: an opening of cell 3 by seat 1 (undecided) and one of cell 4 by seat 2 (stray). 7.4 is unverifiable.",
+        "A version-3 definition pinning spoiled-ballot opening version 2, whose pairing with ballot version 2 passes 2.3, beside board-entry version 5 and contract-event version 3: an opening of cell 3 by seat 1 (undecided) and one of cell 4 by seat 2 (stray). 7.4 is unverifiable.",
         [open_o2(3, 1), open_o2(4, 2)],
         "unverifiable",
         defn=do2,

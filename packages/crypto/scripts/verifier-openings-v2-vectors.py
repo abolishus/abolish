@@ -103,7 +103,7 @@ def expected(d, e, entries, clock):
     floor = vo.floor_of(d["closes_at"], clock)
     envelopes = []
     for at, raw in enumerate(entries):
-        env = vc.decode_entry(raw, 4)
+        env = vc.decode_entry(raw, vb2.vb.BOARD_VERSION)
         if not isinstance(env, str) and env["electionId"] == d["election_id"]:
             envelopes.append((at, env["payload"], env["segment"], int.from_bytes(env["payload"][:2], "big")))
     # Every admitted ballot at or below the floor, wherever it sits in the
@@ -163,7 +163,7 @@ def election_from(vb, constants, committed_file, version):
     panel = s["panels"]["panel-4"]
     assert d["election_id"] == s["eid"]
     committed = next(c for c in json.loads((VECTORS / committed_file).read_text())["cases"] if c["id"] == "admitted")
-    records = [vc.decode_entry(x, 4)["payload"] for x in vo.split(bytes.fromhex(committed["board"]))]
+    records = [vc.decode_entry(x, vb2.vb.BOARD_VERSION)["payload"] for x in vo.split(bytes.fromhex(committed["board"]))]
     assert records[0] == t
     ballots = [p[0] for p in src["board"][1:]]
     assert len(records) == len(ballots) + 1
@@ -298,7 +298,7 @@ def main(constants, out_dir):
             opens = sorted(p for p in payloads if int.from_bytes(p[:2], "big") == OPENING_TYPE)
             assert len(set(opens)) == len(opens)
             for p in others + opens:
-                out.append(vc.entry(4, eid, len(out), seg, p))
+                out.append(vc.entry(vb2.vb.BOARD_VERSION, eid, len(out), seg, p))
         return out
 
     cases = []
@@ -306,7 +306,7 @@ def main(constants, out_dir):
     def case(id_, description, segments, want_status, src=v5, the_clock=None):
         the_clock = the_clock or dict(clock, epoch=src["d"]["closes_at"] - 2 * PERIOD)
         entries = board(segments, src)
-        ceremony_rows, _ = vc.expected(panel, src["d"], entries, panel, 4)
+        ceremony_rows, _ = vc.expected(panel, src["d"], entries, panel, vb2.vb.BOARD_VERSION)
         assert ceremony_rows["3.2"] == outcome("pass"), id_
         assert vc.combination(src["d"]) == vc.NOT_IMPLEMENTED, id_
         row, report = expected(src["d"], src["election"], entries, the_clock)

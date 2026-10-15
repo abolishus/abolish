@@ -72,6 +72,9 @@ BALLOT_SUBMITTED = "BallotSubmitted(bytes32,bytes32,bytes)"
 # The contract-event versions this generator reads, and the relayed path's
 # call fields: any, since the board carries them unjudged.
 READ_EVENTS = (1, 2, 3)
+# The board-entry version every profile here pins: 5, the one that allows the
+# close statement, and reads every other record as version 4 does.
+BOARD_VERSION = 5
 RELAY_CALL = (7, 6_000_000, 5_000_000)
 MEMBERSHIP_VK_HASH = bytes.fromhex(json.loads((VECTORS / "membership-proof.json").read_text())["verificationKey"]["hash"])
 DEFINITION_TAG = b"abolish/v1/election-definition"
@@ -110,11 +113,23 @@ def combination(d):
     """2.3's profile-combination for a definition version 1, from docs/spec/verifier.md 2.3: it pins ballot version 1 with spoiled-ballot opening version 1, ballot versions 2 to 4 pair only with definition versions 3 to 6, and an unknown ballot version is a later release's to judge."""
     pins = dict(d["profile"]["pins"])
     board, ballot, opening = pins[BOARD_ENTRY_TYPE], pins.get(BALLOT_TYPE), pins.get(0x0006)
+    events = pins.get(CONTRACT_EVENT_TYPE)
+    failed = outcome("fail", "profile-combination", {})
+    # Every profile pins board-entry version 5, which allows the close
+    # statement, and contract-event version 3, whose tables name the close
+    # rule's events (close.md, Version); a contract-event version this
+    # verifier doesn't read is a later release's, once nothing else fails.
+    closes = board == 5 and events not in (1, 2, None)
+    settled = NOT_IMPLEMENTED if events == 3 else outcome("unverifiable", "unsupported-version", {})
+    # A board-entry version this verifier can't read is a later release's,
+    # before any combination (verifier.md, Definition, step 2).
+    if board not in (1, 3, 4, 5):
+        return outcome("unverifiable", "unsupported-version", {})
     if ballot not in (1, 2, 3, 4):
         # A version this verifier doesn't know: a later release judges it.
-        return NOT_IMPLEMENTED
-    fits = ballot == 1 and pins.get(0x0003) == 1 and board in (3, 4) and (opening != 1 or board == 4)
-    return NOT_IMPLEMENTED if fits else outcome("fail", "profile-combination", {})
+        return settled if closes else failed
+    fits = ballot == 1 and pins.get(0x0003) == 1 and board in (3, 4, 5) and (opening != 1 or board in (4, 5)) and closes
+    return settled if fits else failed
 
 
 def negated(proof):
@@ -202,7 +217,9 @@ def build(constants):
         groups[name] = {"tier": tier, "secrets": secrets, "leaves": leaves, "root": root, "path": path}
 
     panels = {"panel-4": cv.make_panel("panel-4", 3, 4), "panel-4-k2": cv.make_panel("panel-4-k2", 2, 4)}
-    pins = [(t, 4 if t == BOARD_ENTRY_TYPE else 1) for t, _ in dv.ALL_PINS]
+    # Board-entry version 5 and contract-event version 3, which every profile
+    # needs (close.md, Version), and version 1 for every other type.
+    pins = [(t, {BOARD_ENTRY_TYPE: BOARD_VERSION, CONTRACT_EVENT_TYPE: 3}.get(t, 1)) for t, _ in dv.ALL_PINS]
     base = dict(
         profile={"protocol_major": 1, "pins": pins},
         electorate=[
@@ -575,9 +592,9 @@ def assemble(constants, proofs_path, out_dir):
                 contract = bal.det("verifier foreign contract")[:20] if wrap["via"] == "foreign" else d["board"]
                 rec = event_record(d, rec, len(payloads), wrap["time"], contract, version, wrap["via"] == "relayed")
             payloads.append((kind, rec, b, pid, wrap["segment"]))
-        entries = [vc.entry(4, eid, i, seg, rec) for i, (_, rec, _, _, seg) in enumerate(payloads)]
+        entries = [vc.entry(pins[BOARD_ENTRY_TYPE], eid, i, seg, rec) for i, (_, rec, _, _, seg) in enumerate(payloads)]
         panel = s["panels"][e["panel"]]
-        ceremony_rows, ceremony = vc.expected(panel, d, entries, panel, 4)
+        ceremony_rows, ceremony = vc.expected(panel, d, entries, panel, pins[BOARD_ENTRY_TYPE])
         assert ceremony_rows["3.2"] == (outcome("pass") if bnd["registered"] is not None else ceremony_rows["3.2"])
         if bnd["registered"] is not None and ceremony is not None:
             assert [x["index"] for x in ceremony["registered"]] == bnd["registered"], bnd["id"]

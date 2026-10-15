@@ -141,8 +141,26 @@ describe("ballot-v3-records.json", () => {
       const d = definitionOf(name);
       expect(toHex(encodeElectionDefinitionV5(d))).toBe(e.definition);
       expect(electionDefinitionV5Rule(d)).toBeUndefined();
-      // Ballot version 3 with opening version 2, which opens its cores.
-      expect(profileCombinationRule(d)).toBeUndefined();
+      // Ballot version 3 with opening version 2, which opens its cores, fits;
+      // the vectors' profiles predate the close rule (board-entry version 4,
+      // contract-event version 1), which 2.3 now refuses, and fit once they
+      // pin board-entry version 5 and contract-event version 3 ([[close]],
+      // Version).
+      expect(profileCombinationRule(d)).toBe("profile-combination");
+      const closing = {
+        ...d,
+        profile: {
+          ...d.profile,
+          pins: d.profile.pins.map((p) =>
+            p.record_type === RECORD_TYPES.boardEntry
+              ? { ...p, version: 5 }
+              : p.record_type === RECORD_TYPES.contractEvent
+                ? { ...p, version: 3 }
+                : p,
+          ),
+        },
+      };
+      expect(profileCombinationRule(closing)).toBeUndefined();
       expect(toHex(electionDefinitionV5Hash(d))).toBe(e.definitionHash);
       const election = electionOf(name, [1, 2]);
       expect(toHex(election.definitionHash)).toBe(e.definitionHash);

@@ -46,8 +46,8 @@ const panel: Panel = {
 };
 const definition = decodeElectionDefinition(unhex(mixed.definition));
 const electionId = definition.election_id;
-// The fixtures pin board-entry version 4.
-const entries = splitEntries(unhex(mixed.board)).entries.map((e) => decodeBoardEntry(e, 4));
+// The fixtures pin board-entry version 5.
+const entries = splitEntries(unhex(mixed.board)).entries.map((e) => decodeBoardEntry(e, 5));
 // The case's one repeat (5.7) is a byte-identical copy of an earlier ballot.
 const repeats = new Set(
   (mixed.ballots?.rejected ?? []).filter((r) => r.code === "repeat").map((r) => r.entry),
@@ -107,13 +107,13 @@ describe("ballots.submit with admission", () => {
         expect(r.status).toBe(201);
         const board = await readBoard(app, electionId);
         const earlier = board.findIndex(
-          (b, i) => i > 0 && hex(decodeBoardEntry(b, 4).payload) === hex(e.payload),
+          (b, i) => i > 0 && hex(decodeBoardEntry(b, 5).payload) === hex(e.payload),
         );
         expect(earlier).toBeGreaterThan(0);
         expect(body["entry"]).toBe(hex(board[earlier]!));
       } else if (code === undefined) {
         expect(r.status).toBe(201);
-        const entry = decodeBoardEntry(unhex(body["entry"] as string), 4);
+        const entry = decodeBoardEntry(unhex(body["entry"] as string), 5);
         expect(entry.payload).toEqual(e.payload);
         expect(entry.index).toBe(BigInt(size));
         expect(entry.segment).toBe(0);
@@ -137,7 +137,7 @@ describe("ballots.submit with admission", () => {
     // ballot with its proof negated (the same tier, ν and M).
     const c = file.cases.find((x) => x.id === "repeats")!;
     const [transcript, , original, negated] = splitEntries(unhex(c.board)).entries.map((e) =>
-      decodeBoardEntry(e, 4),
+      decodeBoardEntry(e, 5),
     );
     const own = await testDb();
     const sql = await own.as("abolish_app");

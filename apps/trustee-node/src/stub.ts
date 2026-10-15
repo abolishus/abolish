@@ -142,8 +142,8 @@ export async function checkStub(
     return { ok: false, code: "stub-pins" };
   // 3, [[verifier]] 2.3: every pinned version is one this release reads, in
   // a combination that fits. The well-formedness rule above makes the pins
-  // exactly types 0x0001 to 0x0009: `profileCombinationRule` judges five of
-  // them, and the rest are judged here. Unlike the verifier, which leaves an election
+  // exactly types 0x0001 to 0x0009: `profileCombinationRule` judges seven of
+  // them (the contract event's included), and the rest are judged here. Unlike the verifier, which leaves an election
   // it can't read unverifiable, a node refuses: it can't check what it
   // can't read.
   if (

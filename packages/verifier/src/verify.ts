@@ -393,8 +393,8 @@ function fromDefinition(bundle: Bundle):
       break;
     case "unsupported-version":
       // The board-entry version is one this verifier reads, so another pin is
-      // one a later release may know (a ballot or spoiled-ballot opening
-      // version it doesn't): unverifiable, never failed, so releases agree
+      // one a later release may know (a ballot, spoiled-ballot opening or
+      // contract-event version it doesn't): unverifiable, never failed, so releases agree
       // (T-36). The board checks still run, as for a failing combination.
       combination = UNSUPPORTED;
       break;

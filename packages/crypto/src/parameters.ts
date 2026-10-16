@@ -45,6 +45,11 @@ export const PARAMETERS = Object.freeze({
   // Constants of the group registry's deployment (docs/spec/vouching.md).
   VOUCH_K: 3,
   VOUCH_SLOTS: 12,
+  // L2 blocks; a vouch's root block is a multiple of the interval and at most
+  // the window before its addition's block, so both are judged from archived
+  // events with no header (docs/spec/vouching.md, The root a vouch names).
+  VOUCH_ROOT_INTERVAL: 1800,
+  VOUCH_ROOT_WINDOW: 302_400,
   // Registered members; the regional-cell floor of election-definition version 3.
   MIN_CELL_ELECTORATE: 1000,
   // Changed nullifiers per cell; the live-results batch floor of

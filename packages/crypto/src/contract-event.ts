@@ -1,4 +1,4 @@
-// The contract-event record, record type 0x0008 versions 1 to 4
+// The contract-event record, record type 0x0008 versions 1 to 5
 // (docs/spec/contracts.md, Contract-event record): one log of one of our L2
 // contracts exactly as the event accumulator hashes it, and the event check
 // that ties it to the contract a definition names and to the event tables of
@@ -6,7 +6,9 @@
 // their tables: version 2 adds the board's events and reads the registries'
 // events as the deployable registries emit them, and version 3 adds the
 // board's relayed-ballot and close-statement events (the close rule, T-50,
-// T-35), and version 4 the board's share-receipt batch event (T-25, P1-12d).
+// T-35), version 4 the board's share-receipt and share-complaint batch events
+// (T-25, P1-12d, P1-12e), and version 5 its obligation-root event (T-25,
+// T-52, P1-12f).
 // The accumulator's storage proofs are the only
 // evidence archived with it: no transaction, receipt or header, so the
 // archive holds no bytes our contracts didn't define (T-17;
@@ -37,7 +39,12 @@ import {
   type GroupRemoval,
 } from "./group-registry.ts";
 import { decodeCloseStatement } from "./close-statement.ts";
-import { COMPLAINT_BATCH_MAX, decodeShareReceiptBatch, RECEIPT_BATCH_MAX } from "./delivery.ts";
+import {
+  COMPLAINT_BATCH_MAX,
+  decodeObligationRoot,
+  decodeShareReceiptBatch,
+  RECEIPT_BATCH_MAX,
+} from "./delivery.ts";
 import { frameBallot, frameComplaintBatch, frameDelivery } from "./direct-submit.ts";
 import {
   type AnyElectionDefinitionRecord,
@@ -69,7 +76,7 @@ const contractEventV1 = struct([
 ] as const);
 
 /**
- * Record type 0x0008, versions 1 to 4 (docs/spec/contracts.md,
+ * Record type 0x0008, versions 1 to 5 (docs/spec/contracts.md,
  * Contract-event record): one layout, with each version's own event tables.
  */
 export const CONTRACT_EVENT = recordType(RECORD_TYPES.contractEvent, {
@@ -77,6 +84,7 @@ export const CONTRACT_EVENT = recordType(RECORD_TYPES.contractEvent, {
   2: contractEventV1,
   3: contractEventV1,
   4: contractEventV1,
+  5: contractEventV1,
 });
 
 const SCHEMA = new RecordSchema([CONTRACT_EVENT]);
@@ -84,7 +92,7 @@ const SCHEMA = new RecordSchema([CONTRACT_EVENT]);
 export type ContractEventRecord = CodecValue<typeof contractEventV1>;
 
 /** The record's versions; the profile pins one for every contract's events. */
-export type ContractEventVersion = 1 | 2 | 3 | 4;
+export type ContractEventVersion = 1 | 2 | 3 | 4 | 5;
 
 export function encodeContractEvent(
   record: ContractEventRecord,
@@ -237,6 +245,13 @@ export type ContractEvent =
       readonly definitionHash: Uint8Array;
       readonly seat: number;
       /** The share-complaint batch, framed as the board frames version 1. */
+      readonly record: Uint8Array;
+    }
+  | {
+      readonly event: "ObligationRootSubmitted";
+      readonly definitionHash: Uint8Array;
+      readonly seat: number;
+      /** The obligation root, which decodes strictly as version 1. */
       readonly record: Uint8Array;
     };
 
@@ -718,6 +733,39 @@ const SHARE_COMPLAINT_BATCH_SUBMITTED: EventSpec = {
   },
 };
 
+// An obligation root through the contract path (Board, Delivery records):
+// the record whole, which decodes strictly as version 1, the version
+// contract-event version 5 fixes, with its `definition_hash` and `seat` as
+// the topics. Its signature, slot, count and leaves are the delivery check's.
+const ROOT_LENGTH = 173;
+
+const OBLIGATION_ROOT_SUBMITTED: EventSpec = {
+  signature: "ObligationRootSubmitted(bytes32,uint8,bytes)",
+  decode(topics, data) {
+    const [, definitionHash, seatWord] = topics;
+    const seat = seatWord && uintWord(seatWord, 8);
+    if (topics.length !== 3 || definitionHash === undefined || seat === undefined)
+      return "event-topics";
+    const record = readAbi(data, 1, [{ at: 0, words: false, max: ROOT_LENGTH }])?.tails[0];
+    if (record === undefined) return "event-data";
+    let root;
+    try {
+      root = decodeObligationRoot(record, 1);
+    } catch (e) {
+      if (e instanceof DecodeError) return "event-data";
+      throw e;
+    }
+    if (!equalBytes(root.definition_hash, definitionHash) || BigInt(root.seat) !== seat)
+      return "event-data";
+    return {
+      event: "ObligationRootSubmitted",
+      definitionHash: definitionHash.slice(),
+      seat: root.seat,
+      record,
+    };
+  },
+};
+
 const BOARD_EVENTS: readonly EventSpec[] = [
   boardEvent("BallotSubmitted", frameBallot),
   boardEvent("ShareReceiptSubmitted", (r) => frameDelivery(RECORD_TYPES.shareReceipt, r)),
@@ -770,10 +818,24 @@ const TABLES: Readonly<
       SHARE_COMPLAINT_BATCH_SUBMITTED,
     ],
   },
+  // Version 4's rows, with the obligation root's event added.
+  5: {
+    "election-registry": [ELECTION_CREATED, DEFINITION_REGISTERED_V2],
+    "trustee-registry": [PANEL_PINNED, CEREMONY_REGISTERED_V2],
+    "group-registry": GROUP_EVENTS,
+    board: [
+      ...BOARD_EVENTS,
+      RELAYED_BALLOT_SUBMITTED,
+      CLOSE_STATEMENT_SUBMITTED,
+      SHARE_RECEIPT_BATCH_SUBMITTED,
+      SHARE_COMPLAINT_BATCH_SUBMITTED,
+      OBLIGATION_ROOT_SUBMITTED,
+    ],
+  },
 };
 
 const ROLES = ["election-registry", "trustee-registry", "group-registry", "board"] as const;
-const VERSIONS = [1, 2, 3, 4] as const;
+const VERSIONS = [1, 2, 3, 4, 5] as const;
 
 const hexOf = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
 
@@ -804,6 +866,7 @@ export const CONTRACT_EVENT_SIGNATURES: Readonly<
   2: signaturesOf(2),
   3: signaturesOf(3),
   4: signaturesOf(4),
+  5: signaturesOf(5),
 });
 
 function signaturesOf(v: ContractEventVersion): Readonly<Record<ContractRole, readonly string[]>> {

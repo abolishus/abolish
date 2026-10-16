@@ -58,6 +58,14 @@ contract BoardChecks {
         return DeliveryCheckLib.checkComplaintBatch(r, e, t);
     }
 
+    function root(bytes calldata r, IBoardElections e, IBoardTrustees t)
+        external
+        view
+        returns (bytes32, uint8, uint8)
+    {
+        return DeliveryCheckLib.checkObligationRoot(r, e, t);
+    }
+
     function ballot(bytes calldata r, IBoardElections e, uint256 qualified)
         external
         view
@@ -73,7 +81,9 @@ contract BoardChecks {
 /// complaint, ballot.json's first, admitted, ballot, and delivery-batch.json's
 /// receipt batches of one and three pairs and complaint batches of one and
 /// two entries, with its complaint batch whose `D` frames but isn't a point,
-/// which the board accepts (it frames, never decodes, T-53).
+/// which the board accepts (it frames, never decodes, T-53), and
+/// delivery-root.json's roots: seat 1's two receipt roots, seat 2's
+/// complaint root and its receipt root of 16,384 leaves.
 struct Honest {
     bytes[3] receipts;
     bytes posting;
@@ -82,6 +92,7 @@ struct Honest {
     bytes ballot;
     bytes[2] receiptBatches;
     bytes[3] complaintBatches;
+    bytes[4] roots;
 }
 
 /// Submits delivery.json's honest records and ballot.json's honest ballot,
@@ -89,7 +100,9 @@ struct Honest {
 /// any of four `m`s, carried by Alice's ballot record with any of four L1
 /// references; one-byte changes of each record (outside a posting's `m`);
 /// and receipt batches with one changed receipt among honest ones; both kinds
-/// of batch record, alone, repeated and with one byte changed. Postings
+/// of batch record, alone, repeated and with one byte changed; and obligation
+/// roots, alone, repeated, competing for one seat's slot and with one byte
+/// changed. Postings
 /// run with the pairing precompile mocked, as in Board.t.sol (no vector
 /// pairs a real membership proof with ciphertexts); ballots run unmocked,
 /// so their membership proof is real. Keeps a shadow of the accumulator
@@ -103,6 +116,9 @@ contract BoardHandler is TestBase {
     IBoardTrustees internal immutable trustees;
     BoardChecks internal immutable checks;
     Honest internal honest;
+
+    /// The root that filled each seat's slot for each kind, by keccak-256.
+    mapping(uint8 seat => mapping(uint8 kind => bytes32)) public rootSlots;
 
     /// Records accepted, by keccak-256 of their bytes, and how many.
     mapping(bytes32 => bool) public accepted;
@@ -222,6 +238,43 @@ contract BoardHandler is TestBase {
         _expectRefused(data, false, type(uint256).max);
     }
 
+    /// An honest root: accepted if its seat's slot for its kind is empty or
+    /// holds it (a repeat, emitting nothing), and refused as `root-repeat`
+    /// if another root filled it, leaving the accumulator as it was.
+    function submitRoot(uint8 which) external {
+        bytes memory record = honest.roots[which % 4];
+        bytes memory data = abi.encodeCall(Board.submitObligationRoot, (record));
+        uint8 seat = uint8(record[35]);
+        uint8 kind = uint8(record[36]);
+        bytes32 filled = rootSlots[seat][kind];
+        if (filled == 0 || filled == keccak256(record)) {
+            _expectAccepted(data, record, record.length, "", false);
+            if (bytes(failure).length == 0) rootSlots[seat][kind] = keccak256(record);
+            return;
+        }
+        bytes memory ret = _expectRefused(data, false, type(uint256).max);
+        if (
+            keccak256(ret)
+                != keccak256(
+                    abi.encodeWithSelector(
+                        DeliveryCheckLib.DeliveryRefused.selector,
+                        uint256(0),
+                        DeliveryCheckLib.Code.RootRepeat
+                    )
+                )
+        ) _fail("a second root of a filled slot isn't root-repeat");
+    }
+
+    /// One byte of an honest root changed: a field under the signature, the
+    /// framing or the signature itself. Refused, whatever its slot holds.
+    function submitChangedRoot(uint8 which, uint256 position, uint8 delta) external {
+        if (delta == 0) delta = 1;
+        bytes memory changed = _changed(honest.roots[which % 4], position, delta);
+        _expectRefused(
+            abi.encodeCall(Board.submitObligationRoot, (changed)), false, type(uint256).max
+        );
+    }
+
     /// Honest receipts with one changed receipt at position `at`: the whole
     /// batch is refused, naming `at`.
     function submitMixedBatch(uint256 seed, uint256 position, uint8 delta) external {
@@ -315,13 +368,17 @@ contract BoardHandler is TestBase {
 
     /// `data` must be refused with one of the board's errors, naming record
     /// `at` of a batch unless `at` is the maximum, and leave the accumulator.
-    function _expectRefused(bytes memory data, bool mocked, uint256 at) internal {
+    function _expectRefused(bytes memory data, bool mocked, uint256 at)
+        internal
+        returns (bytes memory ret)
+    {
         (bytes32 acc, uint64 count) = board.eventAccumulator();
-        (bool ok, bytes memory ret,) = _call(data, mocked);
+        bool ok;
+        (ok, ret,) = _call(data, mocked);
         (bytes32 accAfter, uint64 countAfter) = board.eventAccumulator();
         if (ok) {
             _fail("a changed record was accepted");
-            return;
+            return ret;
         }
         refusedCallCount++;
         if (acc != accAfter || count != countAfter) _fail("a refusal moved the accumulator");
@@ -350,7 +407,10 @@ contract BoardHandler is TestBase {
     {
         if (mocked) vm.mockCall(address(8), "", abi.encode(uint256(1)));
         bool ok;
-        if (topic == Board.ShareReceiptBatchSubmitted.selector) {
+        if (topic == Board.ObligationRootSubmitted.selector) {
+            (ok,) = address(checks)
+                .call(abi.encodeCall(BoardChecks.root, (record, elections, trustees)));
+        } else if (topic == Board.ShareReceiptBatchSubmitted.selector) {
             (ok,) = address(checks)
                 .call(abi.encodeCall(BoardChecks.receiptBatch, (record, elections, trustees)));
         } else if (topic == Board.ShareComplaintBatchSubmitted.selector) {
@@ -497,18 +557,24 @@ contract BoardHandler is TestBase {
 ///    registries the board pins, and no record is emitted twice.
 /// All four hold for the two batch calls too: a receipt or complaint batch
 /// is one record, remembered by its bytes and emitted once as its own event
-/// (`ShareReceiptBatchSubmitted`, `ShareComplaintBatchSubmitted`).
+/// (`ShareReceiptBatchSubmitted`, `ShareComplaintBatchSubmitted`); and the
+/// first three for obligation roots (`ObligationRootSubmitted`).
 /// 3. A record is remembered only if it was emitted: a refused call leaves
 ///    the accumulator unchanged, and submitting it again is refused again,
 ///    never a silent no-op.
 /// 4. Accepting a record never makes another passing record fail: an
 ///    honest record not yet submitted is still accepted after any sequence.
+///    The one exception is the obligation root, which fills its seat's slot
+///    for its kind: after it, exactly the other roots of that seat and kind
+///    are refused, as `root-repeat` (delivery.md, Obligation root), and
+///    every other root is still accepted.
 /// Each is checked by the handler as it goes (its `failure`), and 1 again
 /// here against the board's storage.
 contract BoardInvariantTest is TestBase {
     string internal constant DELIVERY = "../../docs/spec/vectors/delivery.json";
     string internal constant V1 = "../../docs/spec/vectors/ballot.json";
     string internal constant BATCHES = "../../docs/spec/vectors/delivery-batch.json";
+    string internal constant ROOTS = "../../docs/spec/vectors/delivery-root.json";
     bytes32 internal constant STUB = keccak256("delivery stub");
     bytes32 internal constant STUB_V1 = keccak256("ballot stub");
     bytes32 internal constant PANEL = keccak256("panel");
@@ -526,6 +592,7 @@ contract BoardInvariantTest is TestBase {
         _setBallotElection(bj, elections, trustees);
         _setDeliveryElection(vm.readFile(DELIVERY), elections, trustees, honest);
         _setBatches(vm.readFile(BATCHES), honest);
+        _setRoots(vm.readFile(ROOTS), honest);
         handler = new BoardHandler(board, elections, trustees, honest);
     }
 
@@ -649,6 +716,17 @@ contract BoardInvariantTest is TestBase {
             }
         }
         assertTrue(honest.complaintBatches[2].length != 0, "d-not-a-point");
+    }
+
+    /// delivery-root.json's first four roots, made from delivery.json's panel
+    /// and definition: two of seat 1's receipt kind, one of seat 2's
+    /// complaint kind and one of its receipt kind.
+    function _setRoots(string memory rj, Honest memory honest) internal {
+        string[4] memory ids = ["receipt-root", "one-leaf", "complaint-root", "one-block"];
+        for (uint256 i; i < 4; i++) {
+            assertTrue(_is(rj, _at(".records", i, ".id"), ids[i]), ids[i]);
+            honest.roots[i] = vm.parseBytes(vm.parseJsonString(rj, _at(".records", i, ".encoding")));
+        }
     }
 
     /// delivery.json's election in the stubs: the parameters Alice's

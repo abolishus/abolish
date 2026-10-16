@@ -22,7 +22,8 @@ import {EventAccumulator} from "./EventAccumulator.sol";
 /// only inside their election's window, and ballots forced through the L1
 /// relay only from the relay's alias, judged by the relay's stamp (ADR 0030;
 /// T-35, T-50). Each seat of the default panel may state the close here, at
-/// most twice per election, the second only with another claim (T-17).
+/// most twice per election, the second only with another claim, and commit
+/// one obligation root of each kind per election (T-17).
 /// There is no admin, proxy, pause or upgrade path.
 contract Board is EventAccumulator {
     /// @notice A ballot record (0x0002) passed the ballot check.
@@ -50,6 +51,11 @@ contract Board is EventAccumulator {
     event ShareComplaintBatchSubmitted(
         bytes32 indexed definitionHash, uint8 indexed seat, bytes record
     );
+    /// @notice An obligation root (0x001a) passed the delivery check and
+    /// filled its seat's slot for its kind: one seat's receipts or complaints
+    /// committed as one signed Merkle root, archived under contract-event
+    /// version 5.
+    event ObligationRootSubmitted(bytes32 indexed definitionHash, uint8 indexed seat, bytes record);
     /// @notice A ballot forced through the L1 relay passed the ballot check,
     /// its stamp inside the window. The relay call's index, L1 block, stamp
     /// and gas limit are the deposit's, carried, never judged: the verifier
@@ -99,6 +105,12 @@ contract Board is EventAccumulator {
     /// at most two, the second another claim than the first (Close
     /// statements, `statement-limit`). Zero is an empty slot.
     mapping(bytes32 definitionHash => mapping(uint8 signer => bytes32[2])) private _claims;
+
+    /// The kinds of obligation root each seat has filled, per definition: bit
+    /// `kind` (1 for receipts, 2 for complaints) set once a root of that kind
+    /// is accepted (docs/spec/delivery.md, Obligation root, One per seat and
+    /// kind).
+    mapping(bytes32 definitionHash => mapping(uint8 seat => uint8 kinds)) private _roots;
 
     constructor(address elections, address trustees, address relay_) {
         if (
@@ -253,6 +265,35 @@ contract Board is EventAccumulator {
         _accepted[key] = true;
         _log3(
             ShareComplaintBatchSubmitted.selector,
+            definitionHash,
+            bytes32(uint256(seat)),
+            abi.encode(record)
+        );
+    }
+
+    /// @notice Submits an obligation root: all of one seat's receipts, or all
+    /// of its complaints, for one election, committed as one signed Merkle
+    /// root whose leaves are published by content address, so a trustee node
+    /// forcing what it owes through L1 pays for one call per kind whatever
+    /// the electorate (docs/spec/delivery.md, Obligation root, Capacity;
+    /// T-25, T-52, T-54). Only the first root of each seat and kind whose
+    /// signature verifies is accepted: only the seat's signature fills its
+    /// slot, so no one else can take it, and a verifier fetches at most two
+    /// leaf objects per seat (T-17, T-52). A byte-identical repeat is a no-op.
+    function submitObligationRoot(bytes calldata record) external {
+        CanonicalCalldata.requireOneBytesArgument(record);
+        bytes32 key = keccak256(record);
+        if (_accepted[key]) return;
+        (bytes32 definitionHash, uint8 seat, uint8 kind) =
+            DeliveryCheckLib.checkObligationRoot(record, electionRegistry, trusteeRegistry);
+        uint8 filled = _roots[definitionHash][seat];
+        if (filled & kind != 0) {
+            revert DeliveryCheckLib.DeliveryRefused(0, DeliveryCheckLib.Code.RootRepeat);
+        }
+        _roots[definitionHash][seat] = filled | kind;
+        _accepted[key] = true;
+        _log3(
+            ObligationRootSubmitted.selector,
             definitionHash,
             bytes32(uint256(seat)),
             abi.encode(record)

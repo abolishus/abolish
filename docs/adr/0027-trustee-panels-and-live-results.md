@@ -95,7 +95,7 @@ The UI says this plainly (agent):
 ### What an author panel does weaken
 
 - **Network metadata (T-11, T-13).** Author trustees run intake, so each sees every ballot record (membership-checked intake, [[P1-12c]]) with the network address that delivered it. An author's trustee can link addresses to nullifiers and re-votes, though not to votes. The creation flow and the poll's evidence view say who the extra intake parties are.
-- **The posting fallback.** An offline author seat has its shares posted, with classical privacy only ([[0002-everlasting-privacy]], Cons). That weakens only the author half, which is worthless without the default half.
+- **The posting fallback.** An offline author seat has its shares posted, with classical privacy only ([[0002-everlasting-privacy]], Cons). That weakens only the author half, which is worthless without the default half. As built ([[P2-16]] part 3b, [[tally]], Residuals of author panels): that holds only against an adversary that reads no default half; because each panel's partial opening is published on its own, a future adversary that reads one ballot's posted default half and every other ballot's posted author half can recover that ballot's vote, and [[verifier]] 8.2 flags readable ballots per panel.
 - **Liveness**, above (T-54), and selective failure: an author can refuse to take part at the tally of a poll whose running totals it dislikes, and nothing distinguishes that from an outage.
 
 ## Part 2: live results

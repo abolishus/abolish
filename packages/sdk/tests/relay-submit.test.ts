@@ -29,6 +29,7 @@ import {
   portalMinimumGasLimit,
   RELAYED_BALLOT_SUBMITTED_SIGNATURE,
   relayBallot,
+  relayDepositGasFloor,
   type RelayBallotOptions,
 } from "../src/index.ts";
 import {
@@ -44,6 +45,7 @@ import {
 } from "./anvil.ts";
 
 const numRuns = Number(process.env.FC_NUM_RUNS ?? 100);
+const U64 = (1n << 64n) - 1n;
 const BALLOT_RELAYED = keccak_256(new TextEncoder().encode(RELAY_EVENT_SIGNATURE));
 const RELAYED_BALLOT_SUBMITTED = keccak_256(
   new TextEncoder().encode(RELAYED_BALLOT_SUBMITTED_SIGNATURE),
@@ -159,7 +161,7 @@ describe("relayBallot against scripted providers", () => {
   const head = { number: "0x64", timestamp: "0x6553f100", hash: `0x${"99".repeat(32)}` };
   const mined = { number: "0x65", timestamp: "0x6553f10c", hash: blockHash };
   // The board's estimate, and the limit a quarter over it.
-  const gasLimit = 1_250_000n;
+  const gasLimit = 2_500_000n;
   const callHash = relayCallHash({
     l1ChainId: L1,
     relay,
@@ -167,6 +169,15 @@ describe("relayBallot against scripted providers", () => {
     l1Block: 0x65n,
     l1Timestamp: 0x6553f10cn,
     gasLimit,
+    record,
+  });
+  const copyHash = relayCallHash({
+    l1ChainId: L1,
+    relay,
+    index: 1n,
+    l1Block: 2n,
+    l1Timestamp: 3n,
+    gasLimit: 4n,
     record,
   });
   const relayedLog = (changes: Record<string, unknown> = {}) => ({
@@ -181,6 +192,7 @@ describe("relayBallot against scripted providers", () => {
     ...changes,
   });
   const receipt = (logs: unknown[], status = "0x1") => ({
+    from: hex(from),
     transactionHash: txHash,
     status,
     blockHash,
@@ -194,6 +206,8 @@ describe("relayBallot against scripted providers", () => {
         const data = (call as { data: string }).data;
         if (data === hex(selector("board()"))) return hex(concatBytes(new Uint8Array(12), board));
         if (data === hex(selector("callCount()"))) return hex(word(5n));
+        // The word the relay stored for call 1, a relayed copy's below.
+        if (data === hex(concatBytes(selector("callHash(uint64)"), word(1n)))) return hex(copyHash);
         return "0x";
       },
       eth_getBlockByNumber: () => head,
@@ -208,7 +222,7 @@ describe("relayBallot against scripted providers", () => {
       eth_chainId: () => "0x14a34",
       eth_call: () => "0x",
       eth_getLogs: () => [],
-      eth_estimateGas: () => "0xf4240",
+      eth_estimateGas: () => "0x1e8480",
       ...changes,
     });
   const options = (
@@ -346,9 +360,8 @@ describe("relayBallot against scripted providers", () => {
       logIndex: "0x2",
     };
     const a = l1();
-    expect(
-      await relayBallot(options(a.provider, l2({ eth_getLogs: () => [copy] }).provider)),
-    ).toEqual({
+    const b = l2({ eth_getLogs: () => [copy] });
+    expect(await relayBallot(options(a.provider, b.provider))).toEqual({
       status: "already-relayed",
       path: "relayed",
       call: { index: 1n, l1Block: 2n, stamp: 3n, gasLimit: 4n },
@@ -358,6 +371,18 @@ describe("relayBallot against scripted providers", () => {
       logIndex: 2n,
     });
     expect(a.requests.some((r) => r.method === "eth_sendTransaction")).toBe(false);
+    // Found before the board is asked, so a copy is found after close too.
+    expect(b.requests.some((r) => r.method === "eth_call")).toBe(false);
+    // A copy the relay's stored word doesn't match, as one L2 governance
+    // forged from the alias would be (T-71), doesn't stop the client.
+    const forged = {
+      ...copy,
+      data: hex(relayDepositData(1n, 2n, 3n, 5n, record).subarray(4)),
+    };
+    expect(
+      (await relayBallot(options(l1().provider, l2({ eth_getLogs: () => [forged] }).provider)))
+        .status,
+    ).toBe("relayed");
     // A node that answers with an ordinary event under the relayed topic
     // gives nothing the client takes.
     const ordinary = {
@@ -375,8 +400,11 @@ describe("relayBallot against scripted providers", () => {
     ).toBe("relayed");
   });
 
-  it("gives the deposit at least the portal's minimum", async () => {
-    const floor = portalMinimumGasLimit(relayDepositData(0n, 0n, 0n, 0n, record).length);
+  it("never gives the deposit less than its size needs, whatever the node estimates", async () => {
+    const floor = relayDepositGasFloor(relayDepositData(U64, U64, U64, U64, record), record.length);
+    expect(floor).toBeGreaterThan(
+      portalMinimumGasLimit(relayDepositData(0n, 0n, 0n, 0n, record).length),
+    );
     const atFloor = relayCallHash({
       l1ChainId: L1,
       relay,
@@ -390,12 +418,25 @@ describe("relayBallot against scripted providers", () => {
       eth_getTransactionReceipt: () => receipt([relayedLog({ data: hex(atFloor) })]),
     });
     const result = await relayBallot(
-      options(a.provider, l2({ eth_estimateGas: () => "0x1" }).provider),
+      options(a.provider, l2({ eth_estimateGas: () => "0x5208" }).provider),
     );
     expect(result).toMatchObject({ status: "relayed", call: { gasLimit: floor } });
     expect(a.requests.find((r) => r.method === "eth_sendTransaction")?.params[0]).toMatchObject({
       data: hex(relayBallotCalldata(floor, record)),
     });
+  });
+
+  it("checks the account the transaction came from", async () => {
+    await expect(
+      relayBallot(
+        options(
+          l1({
+            eth_getTransactionReceipt: () => ({ ...receipt([relayedLog()]), from: hex(relay) }),
+          }).provider,
+          l2().provider,
+        ),
+      ),
+    ).rejects.toMatchObject({ code: "bad-response" });
   });
 
   it("refuses a call the deposit market prices past one transaction's cap, and caps the margin", async () => {
@@ -406,6 +447,19 @@ describe("relayBallot against scripted providers", () => {
       gasLimit,
     });
     expect(over.requests.some((r) => r.method === "eth_sendTransaction")).toBe(false);
+    // A node that won't search past the cap answers without revert data.
+    const capped = l1({
+      eth_estimateGas: () => {
+        throw Object.assign(new Error("gas required exceeds allowance (16777216)"), {
+          code: -32000,
+        });
+      },
+    });
+    expect(await relayBallot(options(capped.provider, l2().provider))).toEqual({
+      status: "over-cap",
+      gasLimit,
+    });
+    expect(capped.requests.some((r) => r.method === "eth_sendTransaction")).toBe(false);
     const near = l1({ eth_estimateGas: () => "0xf00000" });
     await relayBallot(options(near.provider, l2().provider));
     expect(near.requests.find((r) => r.method === "eth_sendTransaction")?.params[0]).toMatchObject({
@@ -797,6 +851,54 @@ describe("relayBallot against the relay and the board on Anvil", () => {
     });
     expect(await l1.nonce(voter)).toBe(before + 1n);
     expect(await relayCount()).toBe(1n);
+  }, 60_000);
+
+  it("gives a deposit enough gas when the L2 node understates its estimate", async () => {
+    const v = vectors.ballots.find((b) => b.id === "ok-every-seat");
+    if (v === undefined) throw new Error("ballot.json has ok-every-seat");
+    await register("plurality", v.registered);
+    const record = unhex(v.encoding);
+    // A node that answers every estimate with a bare transfer's gas.
+    const understating: Eip1193Provider = {
+      request: (args) =>
+        args.method === "eth_estimateGas" ? Promise.resolve("0x5208") : l2.provider.request(args),
+    };
+    const result = await relayBallot({ ...relayOptions(record), l2Provider: understating });
+    expect(result.status).toBe("relayed");
+    if (result.status !== "relayed") return;
+    const { call } = result;
+    const data = relayDepositData(call.index, call.l1Block, call.stamp, call.gasLimit, record);
+    expect(call.gasLimit).toBe(
+      relayDepositGasFloor(relayDepositData(U64, U64, U64, U64, record), record.length),
+    );
+    expect(call.gasLimit).toBeGreaterThan(relayDepositGasFloor(data, record.length));
+    const deposit = await depositOf(call.index);
+    expect(hex(deposit.data)).toBe(hex(data));
+    // The deposit runs with exactly that limit and the board accepts it.
+    const alias = hex(l2Alias(relay));
+    const tx = await l2.provider.request({
+      method: "eth_sendTransaction",
+      params: [
+        { from: alias, to: hex(board), data: hex(data), gas: `0x${call.gasLimit.toString(16)}` },
+      ],
+    });
+    let receipt: { status: string } | null = null;
+    while (receipt === null)
+      receipt = (await l2.provider.request({
+        method: "eth_getTransactionReceipt",
+        params: [tx],
+      })) as { status: string } | null;
+    expect(receipt.status).toBe("0x1");
+    expect(
+      await findRelayedBallot({
+        provider: l2.provider,
+        chainId: L2_CHAIN,
+        board,
+        record,
+        call,
+        fromBlock,
+      }),
+    ).toMatchObject({ path: "relayed", transactionHash: unhex(String(tx)) });
   }, 60_000);
 
   it("sends nothing once the L1 head is past close", async () => {

@@ -14,17 +14,19 @@
 // One call is one attempt, and every attempt that lands is paid for and
 // archived: the board takes every relayed deposit it accepts, a repeat
 // included (Board, Relayed ballots, No repeats on this path). So it asks
-// first: the relay's framing, locally; the board, on L2, as the deposit will
-// run (from the relay's alias, at the L1 head's stamp), returning its refusal
-// without spending L1 gas; and whether the board already holds a relayed copy
-// of the record. It gives the deposit a gas limit from the board's own
-// estimate, a quarter over it and never below the portal's minimum for the
-// data's length, since too little leaves the call recorded and the deposit
-// reverted on L2, the caller's loss (L1 relay, The gas limit is the
-// caller's). And it refuses a call whose L1 transaction would cost more than
-// one transaction may spend (EIP-7825's 2²⁴): the portal burns L1 gas in
-// proportion to the deposit's gas limit and the deposit market's price, so a
-// state actor filling that market can price a large forced ballot out (T-50).
+// first: the relay's framing, locally; whether the board already holds a
+// relayed copy of the record that the relay's stored word matches; and the
+// board, on L2, as the deposit will run (from the relay's alias, at the L1
+// head's stamp), returning its refusal without spending L1 gas. It gives the
+// deposit a gas limit a quarter over the board's own estimate, never below
+// what the deposit needs by its size alone (`relayDepositGasFloor`, which no
+// node's answer lowers) or the portal's minimum, since too little leaves the
+// call recorded and the deposit reverted on L2, read as the caller's mistake
+// (L1 relay, The gas limit is the caller's). And it refuses a call whose L1
+// transaction would cost more than one transaction may spend (EIP-7825's
+// 2²⁴): the portal burns L1 gas in proportion to the deposit's gas limit and
+// the deposit market's price, so a state actor filling that market can price
+// a large forced ballot out (T-50).
 //
 // What it returns is what the providers' nodes report: as on the ordinary
 // path, a client MUST NOT stand down on `relayed` or `already-relayed` until
@@ -43,6 +45,7 @@ import {
   relayDepositData,
 } from "@abolishus/crypto";
 import { keccak_256 } from "@noble/hashes/sha3.js";
+import { concatBytes } from "@noble/hashes/utils.js";
 import {
   bad,
   type BoardBallotRefusal,
@@ -64,6 +67,7 @@ import {
   type RelayedCallFields,
   revertDataOf,
   U64_MAX,
+  word,
 } from "./direct-submit.ts";
 
 const utf8 = (s: string) => new TextEncoder().encode(s);
@@ -73,6 +77,10 @@ const RELAYED_BALLOT_SUBMITTED = keccak_256(utf8(RELAYED_BALLOT_SUBMITTED_SIGNAT
 const BALLOT_RELAYED = keccak_256(utf8(RELAY_EVENT_SIGNATURE));
 const RELAY_BOARD = selectorOf("board()");
 const RELAY_CALL_COUNT = selectorOf("callCount()");
+const RELAY_CALL_HASH = selectorOf("callHash(uint64)");
+/** How nodes word an estimate that needs more gas than they will search (geth, reth, Anvil). */
+const OVER_ALLOWANCE =
+  /exceeds (the )?allowance|exceeds block gas limit|gas limit too high|out of gas/i;
 
 /**
  * EIP-7825's cap on one transaction's gas, 2²⁴: a relay call whose estimate
@@ -89,6 +97,43 @@ export function portalMinimumGasLimit(dataLength: number): bigint {
   if (!Number.isSafeInteger(dataLength) || dataLength < 0)
     throw new RangeError("dataLength must be a non-negative integer");
   return 21_000n + 40n * BigInt(dataLength);
+}
+
+/**
+ * What the board's relayed-ballot call needs whatever any node says: the
+ * pairing's reserve, `PAIRING_GAS + PAIRING_GAS / 63 + 1,000` with
+ * `PAIRING_GAS` 600,000 (Board, Membership proofs), without which the
+ * membership check reverts.
+ */
+const MEMBERSHIP_RESERVE = 600_000n + 600_000n / 63n + 1_000n;
+/** The ballot check's framing and hashing, at most about 22 gas a record byte (Board, Gas), doubled. */
+const CHECK_GAS_PER_BYTE = 40n;
+/** Cold registry reads, the accepted-bytes word, the accumulator step and the event, generously. */
+const CHECK_GAS_BASE = 150_000n;
+
+/**
+ * The least gas limit the client gives a deposit of `data` carrying a
+ * `recordLength`-byte record, from the data alone: its intrinsic gas at
+ * EIP-7623's floor price (10 a token, a non-zero byte four tokens, which
+ * covers the standard price too), the membership check's reserve, and the
+ * ballot check's cost by the record's size. An L2 node's estimate only ever
+ * raises the limit above this, so a node that understates it can't make the
+ * deposit run out of gas, which the verifier would read as the caller's
+ * mistake (L1 relay, The gas limit is the caller's; T-50).
+ */
+export function relayDepositGasFloor(data: Uint8Array, recordLength: number): bigint {
+  if (!(data instanceof Uint8Array)) throw new TypeError("data must be a Uint8Array");
+  if (!Number.isSafeInteger(recordLength) || recordLength < 0)
+    throw new RangeError("recordLength must be a non-negative integer");
+  let tokens = 0n;
+  for (const b of data) tokens += b === 0 ? 1n : 4n;
+  return (
+    21_000n +
+    10n * tokens +
+    MEMBERSHIP_RESERVE +
+    CHECK_GAS_PER_BYTE * BigInt(recordLength) +
+    CHECK_GAS_BASE
+  );
 }
 
 /**
@@ -190,10 +235,11 @@ export type RelayBallotResult =
       readonly transactionHash?: Uint8Array;
     }
   /**
-   * The call's L1 transaction would need more than `MAX_TRANSACTION_GAS`:
+   * The call's L1 transaction would need more than `MAX_TRANSACTION_GAS`
+   * (`estimate`, or none where the node found no estimate under its cap):
    * the deposit market is priced too high for this ballot now (T-50).
    */
-  | { readonly status: "over-cap"; readonly estimate: bigint; readonly gasLimit: bigint };
+  | { readonly status: "over-cap"; readonly estimate?: bigint; readonly gasLimit: bigint };
 
 export interface RelayBallotOptions {
   /** The voter's L1 wallet. */
@@ -257,14 +303,14 @@ async function onChain(provider: Eip1193Provider, expected: bigint, which: strin
 }
 
 /** The board's relayed events for `record`, from `fromBlock`, by the provider's report. */
-async function relayedCopy(
+async function relayedCopies(
   provider: Eip1193Provider,
   board: Uint8Array,
   record: Uint8Array,
   framed: { readonly definitionHash: Uint8Array; readonly ballotHash: Uint8Array },
   fromBlock: bigint,
   accept: (call: RelayedCallFields) => boolean,
-): Promise<BoardEventLocation | undefined> {
+): Promise<(BoardEventLocation & { readonly path: "relayed" })[]> {
   const logs = await provider.request({
     method: "eth_getLogs",
     params: [
@@ -277,13 +323,16 @@ async function relayedCopy(
     ],
   });
   if (!Array.isArray(logs)) throw bad("logs that aren't a list");
-  return findEvent(
-    logs.map(parseLog),
-    board,
-    record,
-    framed,
-    (carried) => carried.path === "relayed" && accept(carried.call),
-  );
+  return logs.flatMap((log) => {
+    const found = findEvent(
+      [parseLog(log)],
+      board,
+      record,
+      framed,
+      (carried) => carried.path === "relayed" && accept(carried.call),
+    );
+    return found?.path === "relayed" ? [found] : [];
+  });
 }
 
 /**
@@ -346,12 +395,50 @@ export async function relayBallot(options: RelayBallotOptions): Promise<RelayBal
     }),
     "the relay's count",
   );
-  if (count.length !== 32 || readWord(count, 0) >= U64_MAX) throw bad("the relay's count");
+  if (count.length !== 32 || readWord(count, 0) > U64_MAX) throw bad("the relay's count");
   const head = headOf(
     await l1Provider.request({ method: "eth_getBlockByNumber", params: ["latest", false] }),
     "the L1 head",
   );
   if (head.number >= U64_MAX || head.timestamp >= U64_MAX) throw bad("the L1 head");
+
+  // Every relayed copy the board accepted is archived and judged by its own
+  // stamp, so one is enough, even after close; an ordinary copy isn't, since
+  // the sequencer can withhold its batch past L_δ (Relayed ballots, No
+  // repeats on this path). A copy is taken only if the relay's stored word
+  // for its index matches it, so a deposit forged from the alias (T-71),
+  // which 4.5 rejects, never makes the client stand down. A record that
+  // doesn't frame is the board's to refuse below.
+  const framed = frameBallot(record);
+  if (framed !== undefined)
+    for (const copy of await relayedCopies(
+      l2Provider,
+      board,
+      record,
+      framed,
+      fromBlock,
+      () => true,
+    )) {
+      const stored = dataOf(
+        await l1Provider.request({
+          method: "eth_call",
+          params: [
+            {
+              to: hex(relay),
+              data: hex(concatBytes(RELAY_CALL_HASH, word(copy.call.index))),
+            },
+            "latest",
+          ],
+        }),
+        "the relay's call hash",
+      );
+      const { index, l1Block, stamp, gasLimit } = copy.call;
+      const matches = equal(
+        stored,
+        relayCallHash({ l1ChainId, relay, index, l1Block, l1Timestamp: stamp, gasLimit, record }),
+      );
+      if (matches) return { status: "already-relayed", ...copy };
+    }
 
   // The deposit as it would run now: the relay's next index, the next L1
   // block, the head's time as the stamp and a gas limit word of the size a
@@ -371,15 +458,7 @@ export async function relayBallot(options: RelayBallotOptions): Promise<RelayBal
     if (revert === undefined) throw e;
     return { status: "refused", by: "board", refusal: decodeRelayedBallotRevert(revert) };
   }
-  // The board accepted it, so it frames: its hashes are crypto's.
-  const framed = frameBallot(record);
   if (framed === undefined) throw bad("the board's acceptance of a record it can't frame");
-
-  // Every relayed copy the board accepted is archived and judged by its own
-  // stamp, so one is enough; an ordinary copy isn't, since the sequencer can
-  // withhold its batch past L_δ (Relayed ballots, No repeats on this path).
-  const held = await relayedCopy(l2Provider, board, record, framed, fromBlock, () => true);
-  if (held !== undefined) return { status: "already-relayed", ...held };
 
   let estimate: bigint;
   try {
@@ -393,10 +472,17 @@ export async function relayBallot(options: RelayBallotOptions): Promise<RelayBal
     if (revert === undefined) throw e;
     return { status: "refused", by: "board", refusal: decodeRelayedBallotRevert(revert) };
   }
-  // A quarter over the estimate: the membership check reverts unless the
-  // pairing's gas is left (Board, Membership proofs), and the portal's floor.
-  const floor = portalMinimumGasLimit(deposit(0n).length);
-  const gasLimit = estimate + estimate / 4n > floor ? estimate + estimate / 4n : floor;
+  // A quarter over the estimate, never below what the deposit needs by its
+  // size alone (a node can understate an estimate) or the portal's floor.
+  const gasLimit = [
+    estimate + estimate / 4n,
+    // Every word at its widest, so the floor holds for the words the call gets.
+    relayDepositGasFloor(
+      relayDepositData(U64_MAX, U64_MAX, U64_MAX, U64_MAX, record),
+      record.length,
+    ),
+    portalMinimumGasLimit(deposit(0n).length),
+  ].reduce((a, b) => (a > b ? a : b));
   if (gasLimit > U64_MAX) throw bad("a gas estimate");
 
   const data = hex(relayBallotCalldata(gasLimit, record));
@@ -426,6 +512,10 @@ export async function relayBallot(options: RelayBallotOptions): Promise<RelayBal
   } catch (e) {
     if (e instanceof DirectSubmitError) throw e;
     const revert = revertDataOf(e);
+    // Nodes search for an estimate only up to the transaction cap, and fail
+    // without revert data past it.
+    if (revert === undefined && OVER_ALLOWANCE.test(e instanceof Error ? e.message : String(e)))
+      return { status: "over-cap", gasLimit };
     if (revert === undefined) throw e;
     return { status: "refused", by: "relay", refusal: decodeRelayRevert(revert) };
   }
@@ -460,6 +550,7 @@ export async function relayBallot(options: RelayBallotOptions): Promise<RelayBal
   }
   if (typeof receipt !== "object") throw bad("a receipt that isn't an object");
   const fields = receipt as {
+    from?: unknown;
     transactionHash?: unknown;
     status?: unknown;
     logs?: unknown;
@@ -468,6 +559,10 @@ export async function relayBallot(options: RelayBallotOptions): Promise<RelayBal
   };
   if (!equal(fixed(fields.transactionHash, 32, "a receipt's transaction hash"), transactionHash))
     throw bad("another transaction's receipt");
+  // The account is linked to the ballot for good, so one the caller didn't
+  // choose is reported, never passed over (T-11).
+  if (!equal(fixed(fields.from, 20, "a receipt's sender"), from))
+    throw bad("a transaction sent from another account than `from`");
   if (quantityOf(fields.status, "a receipt status") !== 1n) {
     // Mined and reverted: the price rose past the gas given, or the relay
     // refuses now. Nothing was recorded either way.
@@ -586,7 +681,7 @@ export async function findRelayedBallot(
   const framed = frameBallot(record);
   if (framed === undefined) throw new TypeError("record must be a ballot record that frames");
   await onChain(provider, chainId, "L2");
-  return relayedCopy(
+  const [found] = await relayedCopies(
     provider,
     board,
     record,
@@ -598,4 +693,5 @@ export async function findRelayedBallot(
       c.stamp === call.stamp &&
       c.gasLimit === call.gasLimit,
   );
+  return found;
 }

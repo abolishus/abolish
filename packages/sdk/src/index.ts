@@ -68,6 +68,7 @@ export {
   MAX_TRANSACTION_GAS,
   portalMinimumGasLimit,
   relayBallot,
+  relayDepositGasFloor,
   type RelayBallotOptions,
   type RelayBallotResult,
   type RelayedBallotRefusal,

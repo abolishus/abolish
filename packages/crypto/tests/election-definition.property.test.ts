@@ -463,13 +463,13 @@ describe("record types other than the definition", () => {
 });
 
 describe("2.3's profile combination", () => {
-  // Contract-event version 3 unless `events` says otherwise: the close rule's
-  // events, which every profile needs ([[close]], Version).
+  // Contract-event version 5 unless `events` says otherwise: every board
+  // event, which every profile needs ([[close]], Version).
   const pinning = (
     board: number,
     ballot: number,
     opening: number,
-    events = 4,
+    events = 5,
   ): ElectionDefinition => ({
     ...sampleDefinition,
     profile: {
@@ -495,7 +495,8 @@ describe("2.3's profile combination", () => {
   // definition version 3 or 4 and ballot version 3 definition version 5
   // (these are version 1, which pins ballot version 1 with opening version 1),
   // every profile needs board-entry version 5 (the close statement) and
-  // contract-event version 4 (the close rule's and the batch's events), a board-entry version
+  // contract-event version 5 (the close rule's, the batches' and the root's
+  // events), a board-entry version
   // this package doesn't read is unsupported, never a failure, and so is a
   // contract-event version it doesn't read where nothing else fails (T-36).
   const expected = (board: number, ballot: number, opening: number, events: number) => {
@@ -510,22 +511,23 @@ describe("2.3's profile combination", () => {
       carriesClose &&
       events !== 1 &&
       events !== 2 &&
-      events !== 3;
+      events !== 3 &&
+      events !== 4;
     if (!fits) return "profile-combination";
-    return events === 4 ? undefined : "unsupported-version";
+    return events === 5 ? undefined : "unsupported-version";
   };
 
   test("board-entry versions 1 to 6 against ballot, tally-opening and contract-event versions", () => {
     for (let board = 1; board <= 6; board++)
       for (let ballot = 1; ballot <= 3; ballot++)
         for (let opening = 1; opening <= 3; opening++)
-          for (const events of [1, 2, 3, 4, 5, 255])
+          for (const events of [1, 2, 3, 4, 5, 6, 255])
             expect(profileCombinationRule(pinning(board, ballot, opening, events))).toBe(
               expected(board, ballot, opening, events),
             );
   });
 
-  test("the typical profile, all at version 1, fails; with board-entry version 5 and contract-event version 4 it fits", () => {
+  test("the typical profile, all at version 1, fails; with board-entry version 5 and contract-event version 5 it fits", () => {
     expect(electionDefinitionRule(sampleDefinition)).toBeUndefined();
     expect(profileCombinationRule(pinning(1, 1, 1, 1))).toBe("profile-combination");
     expect(profileCombinationRule(pinning(5, 1, 1))).toBeUndefined();
@@ -534,28 +536,25 @@ describe("2.3's profile combination", () => {
   test("every profile needs the close statement and every board event", () => {
     // Board-entry versions 3 and 4 carry delivery and destruction but not the
     // close statement; contract-event versions 1 and 2 name none of the close
-    // rule's board events, and version 3 not the share-receipt batch's
-    // ([[close]], Version; T-35, T-50, T-25).
+    // rule's board events, version 3 not the batches' and version 4 not the
+    // obligation root's ([[close]], Version; T-35, T-50, T-25, T-53).
     for (const board of [1, 3, 4])
       expect(profileCombinationRule(pinning(board, 1, 2))).toBe("profile-combination");
-    for (const events of [1, 2, 3])
+    for (const events of [1, 2, 3, 4])
       expect(profileCombinationRule(pinning(5, 1, 1, events))).toBe("profile-combination");
     // A contract-event version this package doesn't read may be a later
     // release's that names those events: unsupported, never a failure, unless
     // the profile fails on another ground (T-36).
-    expect(profileCombinationRule(pinning(5, 1, 1, 5))).toBe("unsupported-version");
-    expect(profileCombinationRule(pinning(4, 1, 1, 5))).toBe("profile-combination");
-    expect(profileCombinationRule(pinning(5, 2, 1, 5))).toBe("profile-combination");
+    expect(profileCombinationRule(pinning(5, 1, 1, 6))).toBe("unsupported-version");
+    expect(profileCombinationRule(pinning(4, 1, 1, 6))).toBe("profile-combination");
+    expect(profileCombinationRule(pinning(5, 2, 1, 6))).toBe("profile-combination");
   });
 
-  // Version 5 is read by the codec but not yet by the verifier, so 2.3
-  // leaves it unverifiable until P1-12f part 1b-2 makes it the pin.
-  test("the contract-event versions 2.3 knows are the ones its codec reads, but version 5", () => {
+  test("the contract-event versions 2.3 knows are the ones its codec reads", () => {
     const ascending = (a: number, b: number) => a - b;
-    expect([...CONTRACT_EVENT_VERSIONS, 5].sort(ascending)).toEqual(
+    expect([...CONTRACT_EVENT_VERSIONS].sort(ascending)).toEqual(
       Object.keys(CONTRACT_EVENT.versions).map(Number).sort(ascending),
     );
-    expect(profileCombinationRule(pinning(5, 1, 1, 5))).toBe("unsupported-version");
   });
 
   test("a contract-event type pinned twice or not at all is refused, never a fit", () => {
@@ -571,7 +570,7 @@ describe("2.3's profile combination", () => {
       ...fitting,
       profile: {
         ...fitting.profile,
-        pins: [...fitting.profile.pins, { record_type: RECORD_TYPES.contractEvent, version: 4 }],
+        pins: [...fitting.profile.pins, { record_type: RECORD_TYPES.contractEvent, version: 5 }],
       },
     };
     expect(profileCombinationRule(fitting)).toBeUndefined();

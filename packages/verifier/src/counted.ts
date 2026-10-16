@@ -216,19 +216,20 @@ const DELIVERY_TYPES: ReadonlySet<number> = new Set([
   RECORD_TYPES.sharePosting,
   RECORD_TYPES.shareComplaint,
 ]);
-// Share-receipt and share-complaint batches reach the board only as contract
-// events: no board-entry version allows them, so 4.1 refuses one boarded
-// directly.
+// Share-receipt and share-complaint batches and obligation roots reach the
+// board only as contract events: no board-entry version allows them, so 4.1
+// refuses one boarded directly.
 const DELIVERY_EVENTS: ReadonlySet<string> = new Set([
   "ShareReceiptSubmitted",
   "SharePosted",
   "ShareComplaintSubmitted",
   "ShareReceiptBatchSubmitted",
   "ShareComplaintBatchSubmitted",
+  "ObligationRootSubmitted",
 ]);
 
 const readsEvents = (v: number | undefined): v is ContractEventVersion =>
-  v === 1 || v === 2 || v === 3 || v === 4;
+  v === 1 || v === 2 || v === 3 || v === 4 || v === 5;
 
 const U32_MAX = 0xffffffff;
 
@@ -300,6 +301,8 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
   };
   const records: DeliveryEntry[] = [];
   const recordAt: number[] = [];
+  // Obligation roots naming another definition, by entry.
+  const strays: number[] = [];
   for (const { at, segment, payload } of own) {
     const type = typeOf(payload);
     if (DELIVERY_TYPES.has(type)) {
@@ -339,6 +342,22 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
           { status: "unverifiable", code: "not-implemented", at: { entry: at } },
           inputs.destruction,
         );
+      if (checked.event.event === "ObligationRootSubmitted") {
+        // A root for this election may deliver for every ballot by its leaves,
+        // which only the counted-extent attestations make available and
+        // `checkDelivery` doesn't read yet (P1-12f parts 2 and 3; P4-3 part
+        // 2c), so the counted set can't be decided while one is in the
+        // extent: unverifiable, never a guess either way (T-25, T-53). One
+        // naming another definition is stray, its first code, whatever its
+        // leaves (delivery.md, Delivery check).
+        if (equal(checked.event.definitionHash, definitionHash))
+          return countedRows(
+            { status: "unverifiable", code: "not-implemented", at: { entry: at } },
+            inputs.destruction,
+          );
+        strays.push(at);
+        continue;
+      }
       if (!("record" in checked.event)) continue;
       records.push({
         path: "contract",
@@ -384,12 +403,16 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
             },
           ],
     ),
-    records: delivered.records.map((r) => ({
-      entry: entryOf(r.at),
-      ...(r.pair !== undefined && { pair: r.pair }),
-      code: r.code,
-      ...(r.signer !== undefined && { signer: r.signer }),
-    })),
+    // In copy order, the stray roots among the check's records.
+    records: [
+      ...delivered.records.map((r) => ({
+        entry: entryOf(r.at),
+        ...(r.pair !== undefined && { pair: r.pair }),
+        code: r.code,
+        ...(r.signer !== undefined && { signer: r.signer }),
+      })),
+      ...strays.map((entry) => ({ entry, code: "delivery-stray" as const })),
+    ].sort((a, b) => a.entry - b.entry),
     rejected: delivered.rejected.map((r) => ({ entry: entryOf(r.at), decodeError: r.error })),
   };
   // An exclusion is the rule's outcome, never a breach, and a failing record

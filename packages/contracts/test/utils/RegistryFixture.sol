@@ -53,7 +53,7 @@ library RegistryFixture {
     /// A plurality election for Tier 0 and Tier 2 that names `registry`'s
     /// deployment, with identifier `electionId`, and pins the profile the
     /// registry serves for definition version 1: every type at version 1 but
-    /// board-entry version 5 and contract-event version 4.
+    /// board-entry version 5 and contract-event version 5.
     function template(ElectionRegistry registry, bytes32 electionId)
         internal
         view
@@ -68,7 +68,7 @@ library RegistryFixture {
             d.pinVersions[i] = 1;
         }
         d.pinVersions[6] = 5;
-        d.pinVersions[7] = 4;
+        d.pinVersions[7] = 5;
         d.electionId = electionId;
         d.l2ChainId = uint64(block.chainid);
         d.l1ChainId = registry.l1ChainId();

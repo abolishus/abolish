@@ -152,14 +152,14 @@ describe("each opening is judged from its own entry", () => {
   }, 120_000);
 
   test("an opening is a repeat exactly when an earlier kept entry carries its core, whatever that one's checks", () => {
-    // Entries 12 and 15 are one honest opening, 14 and 16 one stray opening.
-    const r = run(mixed, join([0, 16, 14, 15].map((i) => entries[i] as Uint8Array)));
+    // Entries 13 and 16 are one honest opening, 4 and 15 one stray opening.
+    const r = run(mixed, join([0, 15, 4, 16].map((i) => entries[i] as Uint8Array)));
     expect(r.openings?.map((o) => o.breaks)).toEqual([[], [{ code: "opening-repeat", of: 1 }], []]);
   });
 
   test("a cast ballot dropped from the copy no longer makes its opening cast", () => {
-    // Entry 1 is the segment-0 ballot, entry 11 the opening re-using its commitment.
-    const kept = [0, 1, 11].map((i) => entries[i] as Uint8Array);
+    // Entry 1 is the segment-0 ballot, entry 12 the opening re-using its commitment.
+    const kept = [0, 1, 12].map((i) => entries[i] as Uint8Array);
     expect(run(mixed, join(kept)).openings?.[0]?.breaks).toEqual([
       { code: "opening-cast", ballot: 1 },
     ]);
@@ -169,7 +169,7 @@ describe("each opening is judged from its own entry", () => {
   });
 
   test("any change to a passing opening's record makes it fail", () => {
-    const at = 10;
+    const at = 11;
     const opening = entries[at] as Uint8Array;
     expect(whole.get(at)).toMatchObject({ breaks: [] });
     expect(whole.get(at)?.code).toBeUndefined();

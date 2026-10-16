@@ -28,7 +28,7 @@ The seed decides only the plan; every secret comes from the CSPRNG. Every report
 
 ## Direct submit
 
-`directSubmitBallot` sends a cast ballot record straight to the election's board contract on L2 through the voter's own wallet, for when our servers refuse it or can't be reached (`docs/spec/contracts.md`, Board (direct submit); T-25). It takes any EIP-1193 provider, holds no key and uses no third-party code, so `apps/ballot` can call it. One call is one attempt: it checks the wallet is on the definition's `l2_chain_id`, asks the board with `eth_call` first and returns the board's own refusal decoded to the spec's codes (`decodeBoardBallotRevert`: `malformed` with its decode error and offset, `refused` with its admission code, `window`, `gas`), so nothing the board refuses is sent; finds a byte-identical copy the board already holds (a repeat is a silent no-op on chain) rather than resending; and otherwise sends `submitBallot` in its one canonical encoding (`submitBallotCalldata`) with a quarter more gas than the estimate, then reports where the board's `BallotSubmitted` event is. Its answer is only what the provider's node reports, so a client MUST NOT stand down on it (`docs/spec/delivery.md`, Client rules). The paying account is public and linked to the ballot on chain, so funding it can link the voter (T-25, Residual).
+`directSubmitBallot` sends a cast ballot record straight to the election's board contract on L2 through the voter's own wallet, for when our servers refuse it or can't be reached (`docs/spec/contracts.md`, Board (direct submit); T-25). It takes any EIP-1193 provider and holds no key. One call is one attempt: it checks the wallet is on the definition's `l2_chain_id` (and names that chain in the transaction), asks the board with `eth_call` first and returns the board's own refusal decoded to the spec's codes (`decodeBoardBallotRevert`: `malformed` with its decode error and offset, `refused` with its admission code, `window`, `gas`), so nothing the board refuses is sent; finds a byte-identical copy the board already holds, through either path (the relay's deposit included), since a repeat is a silent no-op on chain, rather than resending; and otherwise sends `submitBallot` in its one canonical encoding (`submitBallotCalldata`) with a quarter more gas than the estimate, then reports where the board's event is. The record's hashes are `@abolishus/crypto`'s `frameBallot`'s, never the caller's. Its answers are only what the provider's node reports: a client MUST NOT stand down on an acceptance (`docs/spec/delivery.md`, Client rules), and should confirm a refusal through a node it chose. The paying account is public and linked to the ballot on chain, and the wallet's RPC sees it with the record and the voter's network address, so the account should be fresh and privately funded (T-25, Residual; T-11).
 
 ```ts
 const result = await directSubmitBallot({
@@ -37,7 +37,7 @@ const result = await directSubmitBallot({
   board: definition.board,
   from: account,
   record,
-  ballotHash,
+  fromBlock: registrationBlock,
 });
 if (result.status === "refused") console.log(result.refusal);
 ```

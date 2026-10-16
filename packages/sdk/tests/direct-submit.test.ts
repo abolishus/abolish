@@ -11,7 +11,7 @@ import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { fileURLToPath } from "node:url";
-import { decodeElectionDefinition } from "@abolishus/crypto";
+import { decodeElectionDefinition, l2Alias, relayDepositData } from "@abolishus/crypto";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { bytesToHex, concatBytes, hexToBytes } from "@noble/hashes/utils.js";
 import fc from "fast-check";
@@ -19,6 +19,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 import {
   BALLOT_SUBMITTED_SIGNATURE,
   type BoardBallotRefusal,
+  RELAYED_BALLOT_SUBMITTED_SIGNATURE,
   decodeBoardBallotRevert,
   directSubmitBallot,
   DirectSubmitError,
@@ -39,6 +40,38 @@ function word(v: bigint): Uint8Array {
 }
 
 const BALLOT_SUBMITTED = keccak_256(new TextEncoder().encode(BALLOT_SUBMITTED_SIGNATURE));
+const RELAYED_BALLOT_SUBMITTED = keccak_256(
+  new TextEncoder().encode(RELAYED_BALLOT_SUBMITTED_SIGNATURE),
+);
+
+interface BallotVector {
+  readonly id: string;
+  readonly election: string;
+  readonly registered: readonly number[];
+  readonly encoding: string;
+  readonly ballotHash: string;
+  readonly result: string;
+}
+interface DecodeVector {
+  readonly id: string;
+  readonly encoding: string;
+  readonly error: string;
+  readonly offset?: number;
+}
+const vectors = JSON.parse(
+  readFileSync(new URL("../../../docs/spec/vectors/ballot.json", import.meta.url), "utf8"),
+) as {
+  readonly elections: Record<
+    string,
+    {
+      readonly definition: string;
+      readonly definitionHash: string;
+      readonly tiers: readonly { readonly tier: number; readonly root: string }[];
+    }
+  >;
+  readonly ballots: readonly BallotVector[];
+  readonly decode: readonly DecodeVector[];
+};
 
 describe("submitBallotCalldata", () => {
   it("is the selector, offset 0x20, the length and the zero-padded record, nothing after", () => {
@@ -109,6 +142,8 @@ describe("decodeBoardBallotRevert", () => {
       concatBytes(errorData("BallotRefused(uint8)", 0n), new Uint8Array(1)),
       errorData("BallotRefused(uint8)", 0n).subarray(0, 35),
       errorData("BallotWindow(uint256,uint64,uint64)", 1n, 2n),
+      errorData("BallotWindow(uint256,uint64,uint64)", 1n, 1n << 64n, 2n),
+      errorData("BallotWindow(uint256,uint64,uint64)", 1n, 2n, 1n << 64n),
       concatBytes(selector("InsufficientGas()"), new Uint8Array(32)),
       errorData("Error(string)", 32n, 0n),
       new Uint8Array(),
@@ -161,28 +196,63 @@ function scripted(answers: Record<string, (params: readonly unknown[]) => unknow
 describe("directSubmitBallot against a scripted provider", () => {
   const board = new Uint8Array(20).fill(0xbb);
   const from = new Uint8Array(20).fill(0xaa);
-  const definitionHash = new Uint8Array(32).fill(0xdd);
-  const ballotHash = new Uint8Array(32).fill(0xbe);
-  const record = concatBytes(new Uint8Array([0, 2, 1]), definitionHash, new Uint8Array(40));
+  const [honest] = vectors.ballots;
+  if (honest === undefined) throw new Error("ballot.json has its ballots");
+  const record = unhex(honest.encoding);
+  const definitionHash = unhex(vectors.elections.plurality?.definitionHash ?? "");
+  const ballotHash = unhex(honest.ballotHash);
   const options = (provider: Eip1193Provider): DirectSubmitOptions => ({
     provider,
     chainId: 84532n,
     board,
     from,
     record,
-    ballotHash,
+    fromBlock: 7n,
     sleep: async () => {},
   });
   const txHash = `0x${"77".repeat(32)}`;
-  const log = (topic2: Uint8Array) => ({
+  const location = {
+    transactionHash: unhex(txHash),
+    blockNumber: 16n,
+    blockHash: new Uint8Array(32).fill(0x88),
+    logIndex: 2n,
+  };
+  const ordinaryData = concatBytes(
+    word(32n),
+    word(BigInt(record.length)),
+    record,
+    new Uint8Array(pad32(record.length) - record.length),
+  );
+  const relayedData = concatBytes(
+    word(3n),
+    word(100n),
+    word(1_000n),
+    word(900_000n),
+    word(0xa0n),
+    ordinaryData.subarray(32),
+  );
+  const log = (changes: Record<string, unknown> = {}) => ({
     address: hex(board),
-    topics: [hex(BALLOT_SUBMITTED), hex(definitionHash), hex(topic2)],
-    data: hex(concatBytes(word(32n), word(BigInt(record.length)), record, new Uint8Array(21))),
+    topics: [hex(BALLOT_SUBMITTED), hex(definitionHash), hex(ballotHash)],
+    data: hex(ordinaryData),
     transactionHash: txHash,
     blockNumber: "0x10",
     blockHash: `0x${"88".repeat(32)}`,
     logIndex: "0x2",
+    removed: false,
+    ...changes,
   });
+  const receipt = (logs: unknown[], status = "0x1") => ({ transactionHash: txHash, status, logs });
+  // A board that accepts the record and holds `held`, and mines `mined`.
+  const accepting = (held: unknown[], mined: unknown) =>
+    scripted({
+      eth_chainId: () => "0x14a34",
+      eth_call: () => "0x",
+      eth_getLogs: () => held,
+      eth_estimateGas: () => "0x64",
+      eth_sendTransaction: () => txHash,
+      eth_getTransactionReceipt: () => mined,
+    });
 
   it("refuses another chain before asking the board anything", async () => {
     const { provider, requests } = scripted({ eth_chainId: () => "0x1" });
@@ -192,7 +262,7 @@ describe("directSubmitBallot against a scripted provider", () => {
     expect(requests.map((r) => r.method)).toEqual(["eth_chainId"]);
   });
 
-  it("waits for the receipt, then finds its event", async () => {
+  it("asks without the account, sends on the election's chain, waits, then finds its event", async () => {
     let polls = 0;
     const { provider, requests } = scripted({
       eth_chainId: () => "0x14a34",
@@ -200,69 +270,216 @@ describe("directSubmitBallot against a scripted provider", () => {
       eth_getLogs: () => [],
       eth_estimateGas: () => "0x64",
       eth_sendTransaction: () => txHash,
-      eth_getTransactionReceipt: () =>
-        ++polls < 3 ? null : { status: "0x1", logs: [log(ballotHash)] },
+      eth_getTransactionReceipt: () => (++polls < 3 ? null : receipt([log()])),
     });
     expect(await directSubmitBallot(options(provider))).toEqual({
       status: "submitted",
-      transactionHash: unhex(txHash),
-      blockNumber: 16n,
-      blockHash: new Uint8Array(32).fill(0x88),
-      logIndex: 2n,
+      path: "ordinary",
+      ...location,
     });
-    const sent = requests.find((r) => r.method === "eth_sendTransaction")?.params[0];
-    // The estimate and a quarter more: the pairing needs its gas available.
-    expect(sent).toEqual({
+    const data = hex(submitBallotCalldata(record));
+    expect(requests.find((r) => r.method === "eth_call")?.params).toEqual([
+      { to: hex(board), data },
+      "latest",
+    ]);
+    // Both events, under the record's own hashes, from the caller's block.
+    expect(requests.find((r) => r.method === "eth_getLogs")?.params).toEqual([
+      {
+        address: hex(board),
+        fromBlock: "0x7",
+        toBlock: "latest",
+        topics: [
+          [hex(BALLOT_SUBMITTED), hex(RELAYED_BALLOT_SUBMITTED)],
+          hex(definitionHash),
+          hex(ballotHash),
+        ],
+      },
+    ]);
+    // The estimate and a quarter more: the pairing needs its gas left.
+    expect(requests.find((r) => r.method === "eth_sendTransaction")?.params[0]).toEqual({
       from: hex(from),
       to: hex(board),
-      data: hex(submitBallotCalldata(record)),
+      data,
       gas: "0x7d",
+      chainId: "0x14a34",
     });
+    expect(requests.filter((r) => r.method === "eth_chainId").length).toBe(2);
   });
 
-  it("names a mismatched ballot hash rather than calling the ballot submitted", async () => {
-    const { provider } = scripted({
-      eth_chainId: () => "0x14a34",
-      eth_call: () => "0x",
-      eth_getLogs: () => [log(new Uint8Array(32))],
+  it("finds a copy on either path instead of sending", async () => {
+    for (const [held, path] of [
+      [log(), "ordinary"],
+      [
+        log({
+          topics: [hex(RELAYED_BALLOT_SUBMITTED), hex(definitionHash), hex(ballotHash)],
+          data: hex(relayedData),
+        }),
+        "relayed",
+      ],
+    ] as const) {
+      const { provider, requests } = accepting([held], null);
+      expect(await directSubmitBallot(options(provider)), path).toEqual({
+        status: "already-on-board",
+        path,
+        ...location,
+      });
+      expect(requests.some((r) => r.method === "eth_sendTransaction")).toBe(false);
+    }
+  });
+
+  it("takes no other log for the record's event", async () => {
+    const other = (b: Uint8Array) => {
+      const c = b.slice();
+      c[c.length - 1] = (c[c.length - 1] ?? 0) ^ 1;
+      return c;
+    };
+    const longer = concatBytes(record, new Uint8Array([1]));
+    const notIt = [
+      log({ address: hex(new Uint8Array(20).fill(0xcc)) }),
+      log({
+        topics: [hex(BALLOT_SUBMITTED), hex(definitionHash), hex(ballotHash), hex(ballotHash)],
+      }),
+      log({ topics: [hex(other(BALLOT_SUBMITTED)), hex(definitionHash), hex(ballotHash)] }),
+      log({ topics: [hex(BALLOT_SUBMITTED), hex(other(definitionHash)), hex(ballotHash)] }),
+      log({ data: hex(other(ordinaryData)) }),
+      log({
+        data: hex(
+          concatBytes(
+            word(32n),
+            word(BigInt(longer.length)),
+            longer,
+            new Uint8Array(pad32(longer.length) - longer.length),
+          ),
+        ),
+      }),
+      log({ data: hex(concatBytes(ordinaryData, new Uint8Array(32))) }),
+      log({ data: hex(concatBytes(word(64n), ordinaryData.subarray(32))) }),
+      log({
+        topics: [hex(RELAYED_BALLOT_SUBMITTED), hex(definitionHash), hex(ballotHash)],
+        data: hex(ordinaryData),
+      }),
+      log({
+        topics: [hex(RELAYED_BALLOT_SUBMITTED), hex(definitionHash), hex(ballotHash)],
+        data: hex(concatBytes(word(1n << 64n), relayedData.subarray(32))),
+      }),
+      log({ removed: true }),
+    ];
+    for (const [i, held] of notIt.entries()) {
+      // Neither held before sending nor emitted by the transaction.
+      const { provider, requests } = accepting([held], receipt([held]));
+      await expect(directSubmitBallot(options(provider)), String(i)).rejects.toMatchObject({
+        code: "event-mismatch",
+        message: `transaction ${txHash} succeeded with no event for the record`,
+      });
+      expect(requests.filter((r) => r.method === "eth_sendTransaction").length, String(i)).toBe(1);
+    }
+  });
+
+  it("never calls a ballot submitted under another ballot hash", async () => {
+    const wrong = log({
+      topics: [hex(BALLOT_SUBMITTED), hex(definitionHash), hex(new Uint8Array(32))],
     });
+    const { provider } = accepting([], receipt([wrong]));
     await expect(directSubmitBallot(options(provider))).rejects.toMatchObject({
       code: "event-mismatch",
     });
   });
 
-  it("gives up after its polls without a receipt", async () => {
+  it("takes only its own transaction's receipt and logs", async () => {
+    const { provider } = accepting([], {
+      ...receipt([log()]),
+      transactionHash: `0x${"66".repeat(32)}`,
+    });
+    await expect(directSubmitBallot(options(provider))).rejects.toMatchObject({
+      code: "bad-response",
+    });
+    const foreign = log({ transactionHash: `0x${"66".repeat(32)}` });
+    const second = accepting([], receipt([foreign]));
+    await expect(directSubmitBallot(options(second.provider))).rejects.toMatchObject({
+      code: "event-mismatch",
+    });
+  });
+
+  it("finds the copy another call put first when its own call emitted nothing", async () => {
+    let reads = 0;
     const { provider } = scripted({
       eth_chainId: () => "0x14a34",
       eth_call: () => "0x",
-      eth_getLogs: () => [],
+      eth_getLogs: () => (reads++ === 0 ? [] : [log({ transactionHash: `0x${"55".repeat(32)}` })]),
       eth_estimateGas: () => "0x64",
       eth_sendTransaction: () => txHash,
-      eth_getTransactionReceipt: () => null,
+      eth_getTransactionReceipt: () => receipt([]),
     });
+    expect(await directSubmitBallot(options(provider))).toEqual({
+      status: "already-on-board",
+      path: "ordinary",
+      ...location,
+      transactionHash: new Uint8Array(32).fill(0x55),
+    });
+  });
+
+  it("gives up after its polls without a receipt", async () => {
+    const { provider } = accepting([], null);
     await expect(directSubmitBallot({ ...options(provider), maxPolls: 4 })).rejects.toEqual(
       new DirectSubmitError("receipt-timeout", `transaction ${txHash} wasn't mined after 4 polls`),
     );
   });
 
-  it("reports a reverted transaction by the board's answer afterwards", async () => {
-    let calls = 0;
-    const window = errorData("BallotWindow(uint256,uint64,uint64)", 30n, 10n, 20n);
-    const { provider } = scripted({
+  const windowShut = errorData("BallotWindow(uint256,uint64,uint64)", 30n, 10n, 20n);
+  const reverting = () => {
+    throw Object.assign(new Error("execution reverted"), { code: 3, data: hex(windowShut) });
+  };
+  const shut = { kind: "window", timestamp: 30n, opensAt: 10n, closesAt: 20n };
+
+  it("reports a refusal at the estimate as the board's", async () => {
+    const { provider, requests } = scripted({
       eth_chainId: () => "0x14a34",
-      eth_call: () => {
-        if (calls++ === 0) return "0x";
-        throw Object.assign(new Error("execution reverted"), { code: 3, data: hex(window) });
-      },
+      eth_call: () => "0x",
       eth_getLogs: () => [],
-      eth_estimateGas: () => "0x64",
-      eth_sendTransaction: () => txHash,
-      eth_getTransactionReceipt: () => ({ status: "0x0", logs: [] }),
+      eth_estimateGas: reverting,
     });
     expect(await directSubmitBallot(options(provider))).toEqual({
       status: "refused",
-      refusal: { kind: "window", timestamp: 30n, opensAt: 10n, closesAt: 20n },
+      refusal: shut,
+    });
+    expect(requests.some((r) => r.method === "eth_sendTransaction")).toBe(false);
+  });
+
+  it("reports a reverted transaction by the board's answer afterwards", async () => {
+    // The window shut while the transaction waited.
+    let calls = 0;
+    const later = (afterwards: () => unknown, held: () => unknown[]) =>
+      scripted({
+        eth_chainId: () => "0x14a34",
+        eth_call: () => (calls++ % 2 === 0 ? "0x" : afterwards()),
+        eth_getLogs: held,
+        eth_estimateGas: () => "0x64",
+        eth_sendTransaction: () => txHash,
+        eth_getTransactionReceipt: () => receipt([], "0x0"),
+      });
+    expect(await directSubmitBallot(options(later(reverting, () => []).provider))).toEqual({
+      status: "refused",
+      refusal: shut,
       transactionHash: unhex(txHash),
+    });
+    // Another call put the same bytes on first: the board now holds them.
+    let reads = 0;
+    const raced = later(
+      () => "0x",
+      () => (reads++ === 0 ? [] : [log()]),
+    );
+    expect(await directSubmitBallot(options(raced.provider))).toEqual({
+      status: "already-on-board",
+      path: "ordinary",
+      ...location,
+    });
+    // The board accepts it again: the caller may send again.
+    const again = later(
+      () => "0x",
+      () => [],
+    );
+    await expect(directSubmitBallot(options(again.provider))).rejects.toMatchObject({
+      code: "reverted",
     });
   });
 
@@ -277,16 +494,21 @@ describe("directSubmitBallot against a scripted provider", () => {
     await expect(directSubmitBallot(options(provider))).rejects.toBe(rejected);
   });
 
+  it("calls the board's acceptance of a record it can't frame a bad response", async () => {
+    const { provider } = accepting([], null);
+    await expect(
+      directSubmitBallot({ ...options(provider), record: record.subarray(0, 100) }),
+    ).rejects.toMatchObject({ code: "bad-response" });
+  });
+
   it("refuses answers no node gives", async () => {
-    for (const receipt of [{ status: "0x1" }, { status: "one", logs: [] }, "0x1"]) {
-      const { provider } = scripted({
-        eth_chainId: () => "0x14a34",
-        eth_call: () => "0x",
-        eth_getLogs: () => [],
-        eth_estimateGas: () => "0x64",
-        eth_sendTransaction: () => txHash,
-        eth_getTransactionReceipt: () => receipt,
-      });
+    for (const mined of [
+      { transactionHash: txHash, status: "0x1" },
+      receipt([], "one"),
+      "0x1",
+      receipt([{ ...log(), removed: "no" }]),
+    ]) {
+      const { provider } = accepting([], mined);
       await expect(directSubmitBallot(options(provider))).rejects.toMatchObject({
         code: "bad-response",
       });
@@ -295,35 +517,6 @@ describe("directSubmitBallot against a scripted provider", () => {
 });
 
 // --- the board on Anvil -------------------------------------------------------
-
-interface BallotVector {
-  readonly id: string;
-  readonly election: string;
-  readonly registered: readonly number[];
-  readonly encoding: string;
-  readonly ballotHash: string;
-  readonly result: string;
-}
-interface DecodeVector {
-  readonly id: string;
-  readonly encoding: string;
-  readonly error: string;
-  readonly offset?: number;
-}
-const vectors = JSON.parse(
-  readFileSync(new URL("../../../docs/spec/vectors/ballot.json", import.meta.url), "utf8"),
-) as {
-  readonly elections: Record<
-    string,
-    {
-      readonly definition: string;
-      readonly definitionHash: string;
-      readonly tiers: readonly { readonly tier: number; readonly root: string }[];
-    }
-  >;
-  readonly ballots: readonly BallotVector[];
-  readonly decode: readonly DecodeVector[];
-};
 
 const contractsRoot = fileURLToPath(new URL("../../contracts", import.meta.url));
 const CHAIN_ID = 31_339n;
@@ -443,6 +636,8 @@ let voter: Uint8Array;
 let board: Uint8Array;
 let elections: Uint8Array;
 let trustees: Uint8Array;
+let relay: Uint8Array;
+let fromBlock: bigint;
 const plurality = parametersOf("plurality");
 const approval = parametersOf("approval");
 const PANEL = keccak_256(new TextEncoder().encode("panel"));
@@ -451,12 +646,13 @@ const stubOf = (election: string) => keccak_256(new TextEncoder().encode(`${elec
 async function send(
   to: Uint8Array | undefined,
   data: Uint8Array,
+  from: string = deployer,
 ): Promise<Record<string, unknown>> {
   const tx = await provider.request({
     method: "eth_sendTransaction",
     params: [
       {
-        from: deployer,
+        from,
         ...(to === undefined ? {} : { to: hex(to) }),
         data: hex(data),
         gas: "0x1c9c380",
@@ -516,15 +712,14 @@ const nonce = async () =>
     ),
   );
 
-const submit = (record: Uint8Array, ballotHash: Uint8Array, fromBlock?: bigint) =>
+const submit = (record: Uint8Array) =>
   directSubmitBallot({
     provider,
     chainId: CHAIN_ID,
     board,
     from: voter,
     record,
-    ballotHash,
-    ...(fromBlock === undefined ? {} : { fromBlock }),
+    fromBlock,
     pollInterval: 10,
   });
 
@@ -564,12 +759,14 @@ beforeAll(async () => {
   voter = unhex(accounts[4] as string);
   elections = await deploy("test/utils/BoardFixture.sol:ElectionsStub");
   trustees = await deploy("test/utils/BoardFixture.sol:TrusteesStub");
-  // The relay's address only gates the relayed call, which this doesn't use.
-  const relay = new Uint8Array(20).fill(0x11);
+  // Only the relay's alias may call the relayed path, so a test can act as
+  // its deposit by impersonating that address.
+  relay = new Uint8Array(20).fill(0x11);
   board = await deploy(
     "src/Board.sol:Board",
     concatBytes(...[elections, trustees, relay].map((a) => concatBytes(new Uint8Array(12), a))),
   );
+  fromBlock = BigInt(String(await provider.request({ method: "eth_blockNumber" })));
 }, 120_000);
 
 afterAll(async () => {
@@ -588,7 +785,7 @@ describe("directSubmitBallot against the board on Anvil", () => {
     const at = plurality.opensAt - 60n;
     await mineAt(at);
     const before = await nonce();
-    expect(await submit(unhex(v.encoding), unhex(v.ballotHash))).toEqual({
+    expect(await submit(unhex(v.encoding))).toEqual({
       status: "refused",
       refusal: {
         kind: "window",
@@ -631,7 +828,7 @@ describe("directSubmitBallot against the board on Anvil", () => {
         continue;
       }
       expect(refusal, v.id).toEqual({ kind: "refused", code: v.result });
-      expect(await submit(unhex(v.encoding), unhex(v.ballotHash)), v.id).toEqual({
+      expect(await submit(unhex(v.encoding)), v.id).toEqual({
         status: "refused",
         refusal: { kind: "refused", code: v.result },
       });
@@ -642,7 +839,7 @@ describe("directSubmitBallot against the board on Anvil", () => {
   it("reads the board's decode errors with their offsets", async () => {
     await register("plurality", [1, 2]);
     for (const v of vectors.decode) {
-      const result = await submit(unhex(v.encoding), new Uint8Array(32));
+      const result = await submit(unhex(v.encoding));
       expect(result.status, v.id).toBe("refused");
       if (result.status !== "refused") continue;
       // The board knows every type versioning.md lists, so the file's
@@ -689,12 +886,9 @@ describe("directSubmitBallot against the board on Anvil", () => {
     expect([v.id, reproved.id]).toEqual(["ok-tier-0", "ok-reproved"]);
     await register("plurality", v.registered);
     const record = unhex(v.encoding);
-    const hash = unhex(v.ballotHash);
-    const first = BigInt(String(await provider.request({ method: "eth_blockNumber" })));
-
     const before = await nonce();
 
-    const result = await submit(record, hash, first);
+    const result = await submit(record);
     expect(result.status).toBe("submitted");
     if (result.status !== "submitted") return;
     expect(await nonce()).toBe(before + 1n);
@@ -720,20 +914,33 @@ describe("directSubmitBallot against the board on Anvil", () => {
 
     // The same bytes again: found on the board, nothing sent (Calls, Repeats).
     const { status: _submitted, ...location } = result;
-    expect(await submit(record, hash, first)).toEqual({ status: "already-on-board", ...location });
+    expect(await submit(record)).toEqual({ status: "already-on-board", ...location });
     expect(await nonce()).toBe(before + 1n);
 
-    // A caller whose ballot hash isn't the board's never hears "submitted".
+    // A ballot forced through L1 reaches the board as the relay's deposit,
+    // which emits RelayedBallotSubmitted and makes an ordinary copy a no-op:
+    // found as such, not sent (Relayed ballots).
     const revote = vectors.ballots.find((b) => b.id === "ok-revote");
     if (revote === undefined) throw new Error("ballot.json has ok-revote");
-    await expect(submit(unhex(revote.encoding), new Uint8Array(32), first)).rejects.toMatchObject({
-      code: "event-mismatch",
-    });
+    const alias = hex(l2Alias(relay));
+    await provider.request({ method: "anvil_impersonateAccount", params: [alias] });
+    await provider.request({ method: "anvil_setBalance", params: [alias, "0xde0b6b3a7640000"] });
+    // Mined before the client asks, so the board already holds the bytes.
+    const deposit = await send(
+      board,
+      relayDepositData(0n, 1n, plurality.opensAt, 3_000_000n, unhex(revote.encoding)),
+      alias,
+    );
+    const relayed = await submit(unhex(revote.encoding));
+    expect(relayed).toMatchObject({ status: "already-on-board", path: "relayed" });
+    if (relayed.status !== "already-on-board") return;
+    expect(hex(relayed.transactionHash)).toBe(deposit.transactionHash);
+    expect(await nonce()).toBe(before + 1n);
 
     // After close: a new ballot is outside the window and isn't sent; the
     // one already held is still found (docs/spec/close.md, Window).
     await mineAt(plurality.closesAt + 1n);
-    expect(await submit(unhex(reproved.encoding), unhex(reproved.ballotHash))).toEqual({
+    expect(await submit(unhex(reproved.encoding))).toEqual({
       status: "refused",
       refusal: {
         kind: "window",
@@ -742,7 +949,7 @@ describe("directSubmitBallot against the board on Anvil", () => {
         closesAt: plurality.closesAt,
       },
     });
-    expect(await submit(record, hash, first)).toEqual({ status: "already-on-board", ...location });
-    expect(await nonce()).toBe(before + 2n);
+    expect(await submit(record)).toEqual({ status: "already-on-board", ...location });
+    expect(await nonce()).toBe(before + 1n);
   }, 60_000);
 });

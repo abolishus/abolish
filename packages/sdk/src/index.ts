@@ -43,6 +43,7 @@ export {
 } from "./simulation/board-contract.ts";
 export {
   BALLOT_SUBMITTED_SIGNATURE,
+  RELAYED_BALLOT_SUBMITTED_SIGNATURE,
   type BoardAdmissionCode,
   type BoardBallotRefusal,
   type BoardDecodeCode,

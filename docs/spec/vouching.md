@@ -2,7 +2,7 @@
 
 A Tier 1 member is admitted by vouches from `k` distinct Tier 2 members, each spending one of a lifetime budget of `L` slots, anonymously and checkably from the board ([[0014-tier1-vouching]], option C). Each vouch is a pair of Semaphore proofs under the pinned depth-32 key ([[membership]]): one under a scope per vouchee, so the vouchers are distinct, and one under a scope per slot, so each voucher's budget is bounded. This page fixes the parameters, the binding, both scopes, both messages, the vouch and the Tier 1 addition record, and the checks of one addition on its own. Threats: T-02, T-06, T-22, T-13, T-12, T-31, T-52.
 
-What one addition can't show on its own is P3-3 part 2b's, and is added here before any group registry accepts Tier 1 additions ([[contracts]], Group registry): that each vouch's Tier 2 root is the root of a tier-2 group of the same registry at an anchoring period boundary within the root window `W` of the addition, that no earlier counted vouch in the deployment used its slot nullifiers, that its commitment isn't already an unremoved leaf, the rule for MOCK Tier 2 members, the total order over additions, and batched verification ([[0014-tier1-vouching]], Rules for P3-3 part 2). Until then no vouched addition counts toward Tier 1, and no Tier 1 group can be created: the group registry refuses tier 1 until its addition path exists ([[contracts]], Group registry, Groups), so [[verifier]] 2.4's Safe wording for Tier 1, which 2b replaces, applies to no group.
+What one addition can't show on its own is decided across the deployment (Counting across the deployment, below): that each vouch's Tier 2 root is the root of a tier-2 group of the same registry at a block on the root grid within the root window of the addition, that no earlier counted vouch in the deployment used its slot nullifiers, that its commitment isn't already an unremoved leaf, the rule for MOCK Tier 2 members, the total order over additions, and batched verification ([[0014-tier1-vouching]], Rules for P3-3 part 2). That rule replaces the Safe's signature for Tier 1 in [[verifier]] 2.4. No Tier 1 group can be created yet: the group registry refuses tier 1 until its addition path exists ([[contracts]], Group registry, Groups; P3-3 part 3), so no vouched addition counts toward any tier today.
 
 ## Parameters
 
@@ -52,7 +52,7 @@ m̂_V = F(M_V),  m̂_S = F(M_S)
 Each input after the tag is exactly 117 bytes. The first byte is the proof's role, `0` for the vouchee proof and `1` for the slot proof, so neither message can stand for the other. `tier2_group_id` and `root_block` name the Tier 2 root (The vouch, below).
 
 - **Cross-binding.** Each nullifier depends only on the secret and a public scope, so the voucher computes both before proving either. Because each message names the other proof's nullifier and `C_V`, nobody holding a vouch can pair its slot proof with another vouchee proof, or move either proof to another vouchee, group, registry or chain ([[0014-tier1-vouching]], Cross-binding).
-- **The root is named.** The group and block naming the root are in both messages, so a relay can't rewrite which root a vouch claims, even to another block with the same root: one vouch has one reading, and part 2b's window check judges the block the voucher chose.
+- **The root is named.** The group and block naming the root are in both messages, so a relay can't rewrite which root a vouch claims, even to another block with the same root: one vouch has one reading, and the window check (Counting across the deployment) judges the block the voucher chose.
 - **Pooling stays possible.** Unmodified Semaphore can't show that a vouch's two proofs come from one secret. Colluders can make a vouch from one member's vouchee proof and another's slot proof, each binding the other's nullifier; such a vouch is valid, and the bound of [[0014-tier1-vouching]] counts every secret that contributes either proof (T-02). The vectors include one.
 
 ## The vouch
@@ -70,7 +70,7 @@ A vouch is a fixed 626-byte structure:
 | `vouchee_proof`     | `membership_proof` | 256   | Public signals `[ρ, ν_V, m̂_V, ŝ_V]` ([[membership]], Proof encoding) |
 | `slot_proof`        | `membership_proof` | 256   | Public signals `[ρ, ν_S, m̂_S, ŝ_j]`                                  |
 
-`root` is carried so that a vouch can be checked, and a contract can check it as spam control, without rebuilding Tier 2; a verifier never trusts it, and part 2b requires it to equal the root it rebuilds for `tier2_group_id` at `root_block`. Both proofs prove against one root: a vouch from pooled secrets still names one Tier 2 group and block.
+`root` is carried so that a vouch can be checked, and a contract can check it as spam control, without rebuilding Tier 2; a verifier never trusts it, and requires it to equal the root it rebuilds for `tier2_group_id` at `root_block` (`root-mismatch`, Counting across the deployment). Both proofs prove against one root: a vouch from pooled secrets still names one Tier 2 group and block.
 
 ## Tier 1 addition record
 
@@ -104,16 +104,74 @@ Given the binding's `chain_id` and `registry`, an addition passes if all of the 
 
 The cheap checks come first, so a malformed or duplicated addition is refused before any pairing (T-52).
 
-**A failing addition never fails anything else.** An addition that fails any check, here or in part 2b, doesn't count: it takes no leaf of the tier tree and consumes no slot, and it never fails the group or any definition naming it. That differs from the group registry's signed Tier 0 records, whose failure means a rewritten history (`group-history`, [[contracts]], Group registry, Verification): anyone can submit a Tier 1 addition, so treating a bad one as a fault would let anyone fail every election naming the group (T-25, T-53). How the registry numbers additions it logs but the verifier doesn't count is part 3's, with part 2b. Proofs are malleable: a re-randomised proof is the same vouch, with the same nullifiers, and its nullifiers, never its bytes, are what part 2b's slot accounting counts ([[membership]], Malleability; T-38).
+**A failing addition never fails anything else.** An addition that fails any check, here or in Counting across the deployment, doesn't count: it takes no leaf of the tier tree and consumes no slot, and it never fails the group or any definition naming it. That differs from the group registry's signed Tier 0 records, whose failure means a rewritten history (`group-history`, [[contracts]], Group registry, Verification): anyone can submit a Tier 1 addition, so treating a bad one as a fault would let anyone fail every election naming the group (T-25, T-53). A Tier 1 group's leaves are numbered by its counted additions alone (Counting across the deployment, Counted additions), so an addition the registry logs but the verifier doesn't count takes no index. Proofs are malleable: a re-randomised proof is the same vouch, with the same nullifiers, and its nullifiers, never its bytes, are what the slot accounting counts ([[membership]], Malleability; T-38).
 
-`checkTier1Addition` in `packages/crypto` runs exactly these checks; `vouchScope`, `vouchSlotScope` and `vouchMessage` compute the scopes and messages for the prover (P2-8) and the verifier.
+`checkTier1Addition` in `packages/crypto` runs exactly these checks, the check of one addition alone; `vouchScope`, `vouchSlotScope` and `vouchMessage` compute the scopes and messages for the prover (P2-8) and the verifier.
+
+## Counting across the deployment
+
+Which Tier 1 additions count, and so which leaves every Tier 1 group's tier tree holds, is decided over the whole registry at once, because slots are deployment-wide ([[0014-tier1-vouching]], Order). This is how [[verifier]] 2.4 counts an addition toward Tier 1. Threats: T-06, T-02, T-13, T-22, T-52, T-71.
+
+### Order
+
+Every Tier 1 addition the registry logs, in every Tier 1 group, is taken in one total order: the registry's log order, L2 block number and then position in the block, which is the order of its event sequence ([[contracts]], Group registry, Verification; Event accumulator). "Earlier" below means earlier in this order, and `b_A` is the L2 block of an addition's log, which the event accumulator binds.
+
+- **Reordering cancels no honest vouch.** Only a voucher's own secret makes its slot nullifiers, so whoever orders the chain can only choose which of one voucher's own double-spent vouches counts (T-71).
+- **One replay for every group.** To decide the additions up to an L2 block `b`, a verifier replays every Tier 1 addition of the registry in blocks up to `b`, in every Tier 1 group, junk groups included; no later addition changes an earlier one's verdict. A Tier 1 group's tier tree at a definition's `root_l2_block` therefore needs the registry's whole Tier 1 history up to that block (Known-weak, Replay cost).
+
+### The root a vouch names
+
+A vouch names its Tier 2 root by `tier2_group_id` and `root_block`, and the verifier judges that root itself:
+
+- **The group.** `tier2_group_id` is a group of the same registry (the chain ID and registry of the binding, never anything the vouch carries) whose `GroupCreated` logs tier 2, in a block at or before `root_block`.
+- **The root.** The group's tier tree ([[membership]], Tier tree) over its records in L2 blocks up to and including `root_block`, counted and replayed as [[verifier]] 2.4 counts and replays a Tier 2 group, outside any election. The vouch's `ρ` must equal it. Every record the tree needs carries its L2 block number in the event accumulator, so the root at a block number is a function of the archived events alone, with no header.
+- **The root grid.** `root_block` is a multiple of `VOUCH_ROOT_INTERVAL` ([[parameters]]). A grid of block numbers coarsens what `root_block` says about when the voucher's client synced (T-22), and rules out a root that was current only briefly, such as one taken one block after a single registration (T-13), while needing no block header or anchoring clock to judge ([[0014-tier1-vouching]], Amendment).
+- **The root window.** `root_block ≤ b_A ≤ root_block + VOUCH_ROOT_WINDOW`. A removed Tier 2 member stops vouching once every grid block before their removal is out of the window, and a vouch held back past the window can never count.
+- **A broken Tier 2 history.** If the strict replay of the Tier 2 group through `root_block` fails on a record ([[contracts]], Group registry, Verification), the root it names is undefined and the chain shows a history the registry's rules forbid (T-71). Every definition naming a Tier 1 group of the registry whose `root_l2_block` is at or after `b_A` then fails as `group-history`, naming that record, since every count after the addition depends on whether it counted. On the release's bytecode, on an honest chain, no logged record fails the replay, so no voucher or relay can trigger this.
+
+### MOCK Tier 2 members
+
+Tier 2's nullifier type is fixed per deployment ([[0010-tier2-identity-provider]], Nullifier uniqueness), so either every Tier 2 group of a registry admits MOCK documents or none does. In a registry whose Tier 2 groups admit MOCK, every counted Tier 1 addition may rest on mock vouchers, and [[verifier]] 2.4 accepts that registry's Tier 1 groups for exactly the definitions for which it accepts its Tier 2 groups: those carrying the test flag, on a chain on the pinned allow-list (P3-4 specifies both). Counting itself is the same either way, so one replay serves every definition.
+
+### Checks
+
+Each Tier 1 addition, in order, counts if it passes all of the following. A verifier reports the first failure in this order, each check run over the vouches in record order before the next, with the failing vouch's position where there is one, so conforming verifiers name the same reason. `g` is the record's `group_id`:
+
+1. **`decode`** to **`duplicate-slot`**: checks 1 to 6 of Checks of one addition, with the binding's `chain_id` and `registry` those of the registry that logged it.
+2. **`group`**: `g` is a group of this registry whose `GroupCreated`, earlier in the order, logs tier 1.
+3. **`root-grid`**: each vouch's `root_block` is a multiple of `VOUCH_ROOT_INTERVAL`.
+4. **`root-window`**: each vouch's `root_block ≤ b_A` and `b_A − root_block ≤ VOUCH_ROOT_WINDOW`.
+5. **`tier2-group`**: each vouch's `tier2_group_id` is a group of this registry whose `GroupCreated` logs tier 2, in a block at or before its `root_block`.
+6. **`root-mismatch`**: each vouch's `ρ` equals that group's tier-tree root at its `root_block` (The root a vouch names).
+7. **`slot-spent`**: no vouch's slot nullifier equals a slot nullifier of a vouch of an earlier counted addition, in any Tier 1 group of the registry.
+8. **`member`**: `C_V` isn't the leaf of an earlier counted addition of `g` that hasn't been removed.
+9. **`proof`**: check 7 of Checks of one addition.
+
+The checks that need no pairing and no counting state come first, so most junk is refused cheaply; `root-mismatch` needs the Tier 2 trees, which one pass over the registry's events builds for every grid block at once (T-52). Slot nullifiers are compared as values, never as proof bytes, so a re-randomised copy of a counted vouch fails `slot-spent` ([[membership]], Malleability; T-38).
+
+### Counted additions
+
+A counted addition appends `C_V` as `g`'s next leaf, whose index is the number of earlier counted additions of `g`, and consumes its `k` slot nullifiers, for good: a later removal of the leaf never refunds them ([[0014-tier1-vouching]], Rules for P3-2). An addition that fails consumes nothing and takes no index (Checks of one addition). So a Tier 1 group's tier tree at a block `b` has one leaf per counted addition in blocks up to `b`, in order, and its member count at `b` is the number of those leaves not removed by `b`.
+
+Tier 1 removals, who may make them and whether a removed commitment may be added again, are P3-2's, specified with the group registry's Tier 1 addition path ([[0014-tier1-vouching]], Rules for P3-2); a removal will name a leaf index in this numbering. Until they exist no Tier 1 leaf is removed.
+
+### Batched verification
+
+The `2k` Groth16 verifications of each addition are where the cost lies ([[0014-tier1-vouching]], Cost). A verifier MAY check many proofs together with the small-exponent batch test (Bellare, Garay and Rabin, "Fast batch verification for modular exponentiation and digital signatures", EUROCRYPT 1998), applied to Groth16's verification equation as Zcash's `bellman` batch verifier applies it: with independent random scalars `r_i`, the products over the batch of `e(A_i, B_i)^{r_i}` and of the right-hand sides raised to the same `r_i` are compared, which costs `N + 3` pairings for `N` proofs rather than four per proof, the public-input terms folded into one multi-scalar multiplication. Batching changes cost, never a verdict:
+
+- **Strict decoding first.** Every proof in a batch has passed [[membership]]'s Proof encoding, so each point is on its curve and in its prime-order subgroup; the batch test is sound only in a group of prime order.
+- **Coefficients from the verifier.** Each `r_i` is a uniform scalar of at least 128 bits from a CSPRNG, drawn by the verifier after it holds every proof of the batch, never derived from the proofs, the board or anything a submitter controls; `r_1` may be 1. A batch holding an invalid proof then passes with probability at most `2^−128`.
+- **A failed batch is resolved.** A batch that passes accepts every proof in it; one that fails is split, or its proofs verified one at a time, until each proof's own verdict is known. So the reported first failure is the one individual verification gives.
+- **Any grouping.** A proof's verdict doesn't depend on counting state, so a batch may hold proofs of any additions; a verifier can check every proof of the replay in batches first and then walk the order.
+
+Individual verification ([[membership]], Verification) remains the reference: a verifier that never batches reaches the same verdicts. P3-3 part 2b-2 measures both costs in `packages/crypto` and records them here.
 
 ## Prover rules
 
 These bind the ballot client (P2-6, P2-8), and part 3 builds them:
 
-- **The root.** Prove only against a Tier 2 root the client rebuilt itself from the group's additions ([[membership]], Owned elsewhere), at a block part 2b's window allows.
-- **The slot.** Pick an unused `j` uniformly at random from `[0, L)` rather than counting up, so `j` doesn't reveal how many vouches the voucher has made; keep a slot spent until part 2b's rule releases it; never store `C_V` next to the slot spent ([[0014-tier1-vouching]], Slots).
+- **The root.** Prove only against a Tier 2 root the client rebuilt itself from the group's additions ([[membership]], Owned elsewhere), at the newest block on the root grid that the L2 chain derived from L1 data contains, so the root can't change under the vouch short of an L1 reorganisation ([[0004-l2-choice]], Finality); refuse to vouch once that block is too old for the vouchee to submit within `VOUCH_ROOT_WINDOW`.
+- **The slot.** Pick an unused `j` uniformly at random from `[0, L)` rather than counting up, so `j` doesn't reveal how many vouches the voucher has made; keep a slot spent until its slot nullifier is consumed by a counted addition, or until L2 block `root_block + VOUCH_ROOT_WINDOW` is final, after which the vouch can never count; then check whether it was consumed by fetching every consumed slot nullifier (or the whole board) and matching its own locally, never by asking about its own values (T-10, T-22); never store `C_V` next to the slot spent ([[0014-tier1-vouching]], Slots).
 - **The vouchee.** Refuse to vouch for a forbidden commitment, or for one already in any Tier 1 or Tier 2 group ([[0014-tier1-vouching]], Fresh commitment).
 - **Self-check.** Verify both proofs under the pinned key before the vouch leaves the device ([[membership]], Security notes).
 
@@ -123,7 +181,11 @@ These bind the ballot client (P2-6, P2-8), and part 3 builds them:
 
 ## Known-weak
 
-- **One addition proves nothing about the deployment.** Until part 2b, a vouch's root isn't checked against Tier 2, its slot nullifiers aren't checked against earlier additions, and no addition counts toward Tier 1.
+- **Nothing counts yet.** No Tier 1 group can be created until the group registry's Tier 1 addition path exists (P3-3 part 3), and the counting rule has no code or vectors until P3-3 part 2b-2.
 - **The vouchee's IP address.** Whoever receives an addition sees the sender's network address next to `C_V` (T-11, T-22); [[0014-tier1-vouching]] states it.
-- **Sync time.** Each vouch's public `root_block` shows when the voucher's client last synced Tier 2 to that block; part 2b's rule that it be an anchoring period boundary coarsens this to the period (T-22).
-- **Size.** An addition is 1,919 bytes at `k = 3`, and checking one costs `2k = 6` Groth16 verifications; part 2b batches them.
+- **Sync time.** Each vouch's public `root_block` shows when the voucher's client last synced Tier 2, to within the root grid's `VOUCH_ROOT_INTERVAL` (T-22).
+- **The grid follows L2 block time.** `VOUCH_ROOT_INTERVAL` and `VOUCH_ROOT_WINDOW` are counted in L2 blocks and sized for Base's 2-second blocks ([[parameters]]). If the chain shortens its block time the interval and window shrink in seconds; they are constants of the registry's deployment, so changing them is a new registry.
+- **Held vouches lock slots.** A vouch handed to a vouchee who never submits it holds its slot for up to `VOUCH_ROOT_WINDOW` after its root block is final, a week, before the voucher's client releases it.
+- **Replay cost.** Slots are deployment-wide, so rebuilding any one Tier 1 group means replaying every Tier 1 addition of the registry up to its root block, junk groups included, and checking `2k` proofs for each that reaches `proof`; batching lowers the pairing count, not the replay (T-52, [[0014-tier1-vouching]], Cost).
+- **A rewritten Tier 2 history stops Tier 1.** A Tier 2 record that breaks the strict replay, which only a rewritten chain shows, fails every later Tier 1 count of the registry, not only the vouches naming it (The root a vouch names; T-71).
+- **Size.** An addition is 1,919 bytes at `k = 3`, and checking one costs `2k = 6` Groth16 verifications.

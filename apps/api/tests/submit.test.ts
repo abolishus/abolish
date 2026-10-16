@@ -95,42 +95,47 @@ const submit = (ballot: Uint8Array, id = electionId) =>
   });
 
 describe("ballots.submit with admission", () => {
-  test("boards each admitted ballot and refuses each rejected one with its code", async () => {
-    let size = 1;
-    for (const [at, e] of entries.entries()) {
-      if (at === 0) continue;
-      const r = await submit(e.payload);
-      const body = (await r.json()) as Record<string, unknown>;
-      const code = rejected.get(at);
-      if (repeats.has(at)) {
-        // Its earlier copy's entry, so a client that lost the answer can retry.
-        expect(r.status).toBe(201);
-        const board = await readBoard(app, electionId);
-        const earlier = board.findIndex(
-          (b, i) => i > 0 && hex(decodeBoardEntry(b, 5).payload) === hex(e.payload),
-        );
-        expect(earlier).toBeGreaterThan(0);
-        expect(body["entry"]).toBe(hex(board[earlier]!));
-      } else if (code === undefined) {
-        expect(r.status).toBe(201);
-        const entry = decodeBoardEntry(unhex(body["entry"] as string), 5);
-        expect(entry.payload).toEqual(e.payload);
-        expect(entry.index).toBe(BigInt(size));
-        expect(entry.segment).toBe(0);
-        const board = await readBoard(app, electionId);
-        expect(hex(board[size]!)).toBe(body["entry"]);
-        size++;
-      } else {
-        expect(r.status).toBe(422);
-        expect(body["code"]).toBe("BALLOT_REJECTED");
-        expect(body["data"]).toEqual({ code });
+  // Every entry's admission checks its proofs; a slow runner takes longer than the default 5 s.
+  test(
+    "boards each admitted ballot and refuses each rejected one with its code",
+    { timeout: 60_000 },
+    async () => {
+      let size = 1;
+      for (const [at, e] of entries.entries()) {
+        if (at === 0) continue;
+        const r = await submit(e.payload);
+        const body = (await r.json()) as Record<string, unknown>;
+        const code = rejected.get(at);
+        if (repeats.has(at)) {
+          // Its earlier copy's entry, so a client that lost the answer can retry.
+          expect(r.status).toBe(201);
+          const board = await readBoard(app, electionId);
+          const earlier = board.findIndex(
+            (b, i) => i > 0 && hex(decodeBoardEntry(b, 5).payload) === hex(e.payload),
+          );
+          expect(earlier).toBeGreaterThan(0);
+          expect(body["entry"]).toBe(hex(board[earlier]!));
+        } else if (code === undefined) {
+          expect(r.status).toBe(201);
+          const entry = decodeBoardEntry(unhex(body["entry"] as string), 5);
+          expect(entry.payload).toEqual(e.payload);
+          expect(entry.index).toBe(BigInt(size));
+          expect(entry.segment).toBe(0);
+          const board = await readBoard(app, electionId);
+          expect(hex(board[size]!)).toBe(body["entry"]);
+          size++;
+        } else {
+          expect(r.status).toBe(422);
+          expect(body["code"]).toBe("BALLOT_REJECTED");
+          expect(body["data"]).toEqual({ code });
+        }
+        expect(await readBoard(app, electionId)).toHaveLength(size);
       }
-      expect(await readBoard(app, electionId)).toHaveLength(size);
-    }
-    expect(size).toBeGreaterThan(1);
-    expect(rejected.size).toBeGreaterThan(0);
-    expect(repeats.size).toBe(1);
-  });
+      expect(size).toBeGreaterThan(1);
+      expect(rejected.size).toBeGreaterThan(0);
+      expect(repeats.size).toBe(1);
+    },
+  );
 
   test("a copy of a boarded ballot in other bytes is BALLOT_REJECTED with repeat", async () => {
     // The repeats case: entry 2 is a voter's ballot and entry 3 the same

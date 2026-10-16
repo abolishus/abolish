@@ -18,6 +18,9 @@ export const PARAMETERS = Object.freeze({
   COMPLAINT_WINDOW: 432_000,
   // Seconds after t_D; the destruction window of tally-opening version 1.
   DESTRUCTION_WINDOW: 86_400,
+  // Seconds after t_S; the author panel's deadline of tally-opening version 3
+  // (docs/spec/tally.md, Author panel).
+  AUTHOR_OPENING_WINDOW: 345_600,
   // Seconds after closes_at + l1_inclusion_bound; the close window of the
   // close statement's version 1 (docs/spec/close.md).
   CLOSE_WINDOW: 172_800,

@@ -347,7 +347,9 @@ export type ProfileCombinationRule = "profile-combination" | "unsupported-versio
  * every board event (the close rule's, the batches' and the obligation
  * root's), so a seat can always state the close and force what it owes, and
  * the verifier read all of it ([[close]], Version; T-35, T-50, T-25, T-53):
- * board-entry version 1, 3 or 4 and contract-event version 1 to 4 fail, and a contract-event
+ * board-entry version 1, 3 or 4 and contract-event version 1 to 4 fail, as
+ * does board-entry version 6, which carries running openings and only a
+ * live definition pins (docs/spec/tally.md, Tally-opening version 2); a contract-event
  * version this package doesn't read is `unsupported-version` when the
  * profile fails on no other ground. A board-entry version this package doesn't read is
  * `unsupported-version`, never a failure: a later version may add itself to
@@ -400,6 +402,10 @@ export function profileCombinationRule(
   // read is judged last, below.
   if (ballot === 1 && spoiled !== 1) return "profile-combination";
   const allowed = boardPayloadTypes(board);
+  // Running openings belong to live polls only, definition version 6 or 7
+  // with `results_mode` 2, which this function doesn't take: a sealed
+  // poll's board never carries one (board-entry version 6; T-16, T-31).
+  if (allowed.includes(RECORD_TYPES.runningOpening)) return "profile-combination";
   const carriesDelivery =
     allowed.includes(RECORD_TYPES.shareReceipt) && allowed.includes(RECORD_TYPES.shareComplaint);
   const carriesDestruction = allowed.includes(RECORD_TYPES.destructionStatement);

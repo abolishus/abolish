@@ -1489,5 +1489,154 @@
       ],
       "boarded": [true, true, true, true]
     }
+  ],
+  "boardEntries": [
+    {
+      "id": "v6-running-opening",
+      "description": "A version-6 entry carrying a running opening",
+      "version": 6,
+      "encoding": "00070647b204371757f151fcd1bfcff4048e0c5250d19bb3c5d5c5dc8f935477427a3000000000000000070000000c0000014d0018013c76c07fb4d685c8348a39443cfac76fdd7ed90b73744cd4b41d6ff58eeec83900000000026c4d0dbe2170d96bd695506177677dbcf22e4c34cf0a27169d2481d5c26b43e301000000030200000000000000000000000000000000000000000000000000000000000000d944e8e70fe14ea15855bc5957737cc15e2b4eccd4361570858af0c72a49e4010100000000000000000000000000000000000000000000000000000000000000470e631da354c64c76b59c3fcd02ab7632a1c33fafe2f933c75ee7e8a38b710e0100000000000000000000000000000000000000000000000000000000000000f777df5b31965de6b10268ca476a2277179a24ddf520ab8cee5fa37df9b45d0bdbd48d676eaa2edc4b9a48324ba9b11b3099ffc1f0b021c809fae88e281b19a57e56ab6744fb444a086023b5a8426a18c04d2981eb015840f085564e0e4d5bd9",
+      "error": null
+    },
+    {
+      "id": "v5-running-opening",
+      "description": "A version-5 entry can't carry a running opening: only a live poll's board can",
+      "version": 5,
+      "encoding": "00070547b204371757f151fcd1bfcff4048e0c5250d19bb3c5d5c5dc8f935477427a3000000000000000070000000c0000014d0018013c76c07fb4d685c8348a39443cfac76fdd7ed90b73744cd4b41d6ff58eeec83900000000026c4d0dbe2170d96bd695506177677dbcf22e4c34cf0a27169d2481d5c26b43e301000000030200000000000000000000000000000000000000000000000000000000000000d944e8e70fe14ea15855bc5957737cc15e2b4eccd4361570858af0c72a49e4010100000000000000000000000000000000000000000000000000000000000000470e631da354c64c76b59c3fcd02ab7632a1c33fafe2f933c75ee7e8a38b710e0100000000000000000000000000000000000000000000000000000000000000f777df5b31965de6b10268ca476a2277179a24ddf520ab8cee5fa37df9b45d0bdbd48d676eaa2edc4b9a48324ba9b11b3099ffc1f0b021c809fae88e281b19a57e56ab6744fb444a086023b5a8426a18c04d2981eb015840f085564e0e4d5bd9",
+      "error": "unexpected-record-type"
+    },
+    {
+      "id": "v4-running-opening",
+      "description": "A version-4 entry can't carry a running opening: only a live poll's board can",
+      "version": 4,
+      "encoding": "00070447b204371757f151fcd1bfcff4048e0c5250d19bb3c5d5c5dc8f935477427a3000000000000000070000000c0000014d0018013c76c07fb4d685c8348a39443cfac76fdd7ed90b73744cd4b41d6ff58eeec83900000000026c4d0dbe2170d96bd695506177677dbcf22e4c34cf0a27169d2481d5c26b43e301000000030200000000000000000000000000000000000000000000000000000000000000d944e8e70fe14ea15855bc5957737cc15e2b4eccd4361570858af0c72a49e4010100000000000000000000000000000000000000000000000000000000000000470e631da354c64c76b59c3fcd02ab7632a1c33fafe2f933c75ee7e8a38b710e0100000000000000000000000000000000000000000000000000000000000000f777df5b31965de6b10268ca476a2277179a24ddf520ab8cee5fa37df9b45d0bdbd48d676eaa2edc4b9a48324ba9b11b3099ffc1f0b021c809fae88e281b19a57e56ab6744fb444a086023b5a8426a18c04d2981eb015840f085564e0e4d5bd9",
+      "error": "unexpected-record-type"
+    },
+    {
+      "id": "v3-running-opening",
+      "description": "A version-3 entry can't carry a running opening: only a live poll's board can",
+      "version": 3,
+      "encoding": "00070347b204371757f151fcd1bfcff4048e0c5250d19bb3c5d5c5dc8f935477427a3000000000000000070000000c0000014d0018013c76c07fb4d685c8348a39443cfac76fdd7ed90b73744cd4b41d6ff58eeec83900000000026c4d0dbe2170d96bd695506177677dbcf22e4c34cf0a27169d2481d5c26b43e301000000030200000000000000000000000000000000000000000000000000000000000000d944e8e70fe14ea15855bc5957737cc15e2b4eccd4361570858af0c72a49e4010100000000000000000000000000000000000000000000000000000000000000470e631da354c64c76b59c3fcd02ab7632a1c33fafe2f933c75ee7e8a38b710e0100000000000000000000000000000000000000000000000000000000000000f777df5b31965de6b10268ca476a2277179a24ddf520ab8cee5fa37df9b45d0bdbd48d676eaa2edc4b9a48324ba9b11b3099ffc1f0b021c809fae88e281b19a57e56ab6744fb444a086023b5a8426a18c04d2981eb015840f085564e0e4d5bd9",
+      "error": "unexpected-record-type"
+    },
+    {
+      "id": "v1-running-opening",
+      "description": "A version-1 entry can't carry a running opening: only a live poll's board can",
+      "version": 1,
+      "encoding": "00070147b204371757f151fcd1bfcff4048e0c5250d19bb3c5d5c5dc8f935477427a3000000000000000070000000c0000014d0018013c76c07fb4d685c8348a39443cfac76fdd7ed90b73744cd4b41d6ff58eeec83900000000026c4d0dbe2170d96bd695506177677dbcf22e4c34cf0a27169d2481d5c26b43e301000000030200000000000000000000000000000000000000000000000000000000000000d944e8e70fe14ea15855bc5957737cc15e2b4eccd4361570858af0c72a49e4010100000000000000000000000000000000000000000000000000000000000000470e631da354c64c76b59c3fcd02ab7632a1c33fafe2f933c75ee7e8a38b710e0100000000000000000000000000000000000000000000000000000000000000f777df5b31965de6b10268ca476a2277179a24ddf520ab8cee5fa37df9b45d0bdbd48d676eaa2edc4b9a48324ba9b11b3099ffc1f0b021c809fae88e281b19a57e56ab6744fb444a086023b5a8426a18c04d2981eb015840f085564e0e4d5bd9",
+      "error": "unexpected-record-type"
+    },
+    {
+      "id": "v6-running-opening-v2-header",
+      "description": "A version-6 entry carrying a running-opening header of version 2: the envelope reads only the type, and the record is refused when decoded (profile-mismatch)",
+      "version": 6,
+      "encoding": "00070647b204371757f151fcd1bfcff4048e0c5250d19bb3c5d5c5dc8f935477427a3000000000000000070000000c0000000400180200",
+      "error": null
+    },
+    {
+      "id": "v6-close-statement-type",
+      "description": "A version-6 entry carrying a close statement header, as version 5 allows",
+      "version": 6,
+      "encoding": "00070647b204371757f151fcd1bfcff4048e0c5250d19bb3c5d5c5dc8f935477427a3000000000000000070000000c0000000400150100",
+      "error": null
+    },
+    {
+      "id": "v6-destruction-type",
+      "description": "A version-6 entry carrying a destruction header, as version 4 allows",
+      "version": 6,
+      "encoding": "00070647b204371757f151fcd1bfcff4048e0c5250d19bb3c5d5c5dc8f935477427a3000000000000000070000000c00000004000f0100",
+      "error": null
+    },
+    {
+      "id": "v6-share-receipt-type",
+      "description": "A version-6 entry carrying a share receipt header, as version 3 allows",
+      "version": 6,
+      "encoding": "00070647b204371757f151fcd1bfcff4048e0c5250d19bb3c5d5c5dc8f935477427a3000000000000000070000000c00000004000c0100",
+      "error": null
+    },
+    {
+      "id": "v6-complaint-type",
+      "description": "A version-6 entry carrying a complaint header, as version 3 allows",
+      "version": 6,
+      "encoding": "00070647b204371757f151fcd1bfcff4048e0c5250d19bb3c5d5c5dc8f935477427a3000000000000000070000000c00000004000e0100",
+      "error": null
+    },
+    {
+      "id": "v6-ballot-type",
+      "description": "A version-6 entry carrying a ballot header, as version 1 allows",
+      "version": 6,
+      "encoding": "00070647b204371757f151fcd1bfcff4048e0c5250d19bb3c5d5c5dc8f935477427a3000000000000000070000000c0000000400020100",
+      "error": null
+    },
+    {
+      "id": "v6-tally-opening-type",
+      "description": "A version-6 entry carrying a tally opening header, as version 1 allows: the final tally of a live poll",
+      "version": 6,
+      "encoding": "00070647b204371757f151fcd1bfcff4048e0c5250d19bb3c5d5c5dc8f935477427a3000000000000000070000000c0000000400060100",
+      "error": null
+    },
+    {
+      "id": "v6-event-type",
+      "description": "A version-6 entry carrying a event header, as version 1 allows",
+      "version": 6,
+      "encoding": "00070647b204371757f151fcd1bfcff4048e0c5250d19bb3c5d5c5dc8f935477427a3000000000000000070000000c0000000400080100",
+      "error": null
+    },
+    {
+      "id": "v6-posting-type",
+      "description": "A version-6 entry refuses record type 0x000d: a share posting reaches the board only as a contract event",
+      "version": 6,
+      "encoding": "00070647b204371757f151fcd1bfcff4048e0c5250d19bb3c5d5c5dc8f935477427a3000000000000000070000000c00000004000d0100",
+      "error": "unexpected-record-type"
+    },
+    {
+      "id": "v6-voter-receipt-type",
+      "description": "A version-6 entry refuses record type 0x0004: the voter's receipt stays with its voter",
+      "version": 6,
+      "encoding": "00070647b204371757f151fcd1bfcff4048e0c5250d19bb3c5d5c5dc8f935477427a3000000000000000070000000c0000000400040100",
+      "error": "unexpected-record-type"
+    },
+    {
+      "id": "v6-definition-type",
+      "description": "A version-6 entry refuses record type 0x0001: a definition reaches the board only as its registration's contract event",
+      "version": 6,
+      "encoding": "00070647b204371757f151fcd1bfcff4048e0c5250d19bb3c5d5c5dc8f935477427a3000000000000000070000000c0000000400010100",
+      "error": "unexpected-record-type"
+    },
+    {
+      "id": "v6-summed-share-type",
+      "description": "A version-6 entry refuses record type 0x000b: a summed-share message never leaves the trustees",
+      "version": 6,
+      "encoding": "00070647b204371757f151fcd1bfcff4048e0c5250d19bb3c5d5c5dc8f935477427a3000000000000000070000000c00000004000b0100",
+      "error": "unexpected-record-type"
+    },
+    {
+      "id": "v6-entry-type",
+      "description": "A version-6 entry refuses record type 0x0007: entries never nest",
+      "version": 6,
+      "encoding": "00070647b204371757f151fcd1bfcff4048e0c5250d19bb3c5d5c5dc8f935477427a3000000000000000070000000c0000000400070100",
+      "error": "unexpected-record-type"
+    },
+    {
+      "id": "v6-receipt-batch-type",
+      "description": "A version-6 entry refuses record type 0x0016: a type it doesn't allow",
+      "version": 6,
+      "encoding": "00070647b204371757f151fcd1bfcff4048e0c5250d19bb3c5d5c5dc8f935477427a3000000000000000070000000c0000000400160100",
+      "error": "unexpected-record-type"
+    },
+    {
+      "id": "v6-complaint-batch-type",
+      "description": "A version-6 entry refuses record type 0x0017: a type it doesn't allow",
+      "version": 6,
+      "encoding": "00070647b204371757f151fcd1bfcff4048e0c5250d19bb3c5d5c5dc8f935477427a3000000000000000070000000c0000000400170100",
+      "error": "unexpected-record-type"
+    },
+    {
+      "id": "v6-author-approvals-type",
+      "description": "A version-6 entry refuses record type 0x0019: author approvals are board-entry version 7's, for author panels, which live polls can't have yet",
+      "version": 6,
+      "encoding": "00070647b204371757f151fcd1bfcff4048e0c5250d19bb3c5d5c5dc8f935477427a3000000000000000070000000c0000000400190100",
+      "error": "unexpected-record-type"
+    }
   ]
 }

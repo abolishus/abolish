@@ -403,13 +403,104 @@ describe("properties", { timeout: 120_000 }, () => {
   });
 });
 
+describe("the board and the schedule", { timeout: 120_000 }, () => {
+  test("a seat's opening already on the board blocks its next one, passing or not; an unattributed one blocks no seat", () => {
+    fc.assert(
+      fc.property(arbLive, (input) => {
+        const { el, sched, records } = honestLive(input);
+        const honest = records[0] as RunningOpening;
+        const bumped = honest.opening.map((x, j) => (j === 0 ? { v: x.v + 1n, r: x.r } : x));
+        const failing = signRunningOpening(SECRETS[input.signer - 1] as Uint8Array, {
+          ...honest,
+          opening: bumped,
+        });
+        const offered = [encodeRunningOpening(honest)];
+        expect(boardRunningOpenings(el, sched, [encodeRunningOpening(failing)], offered)).toEqual([
+          false,
+        ]);
+        const unattributed = { ...failing, signer: input.signer === 3 ? 1 : 3 };
+        expect(
+          boardRunningOpenings(el, sched, [encodeRunningOpening(unattributed)], offered),
+        ).toEqual([true]);
+      }),
+      { numRuns: Math.min(numRuns, 20) },
+    );
+  });
+
+  test("a snapshot chosen for one tier is outside the schedule for a cell of another", () => {
+    fc.assert(
+      fc.property(arbLive, (input) => {
+        const { el, sched, records } = honestLive(input);
+        const o = records[0] as RunningOpening;
+        // Cell 1 of tier 1 has the same running sets as cell 0, so only the tier differs.
+        const other = signRunningOpening(SECRETS[input.signer - 1] as Uint8Array, {
+          ...o,
+          cell: 1,
+        });
+        const payload = [encodeRunningOpening(other)];
+        const twoTiers = { ...sched, cellTiers: [0, 1] };
+        expect(readRunningOpenings(el, twoTiers, payload).entries[0]?.kind).toBe(
+          "outside-schedule",
+        );
+        expect(boardRunningOpenings(el, twoTiers, [], payload)).toEqual([false]);
+        const both = { ...twoTiers, chosen: new Map([...sched.chosen, [1, [o.snapshot]]]) };
+        expect(readRunningOpenings(el, both, payload).entries[0]).toMatchObject({
+          kind: "release",
+          cell: 1,
+          passes: true,
+        });
+      }),
+      { numRuns: Math.min(numRuns, 20) },
+    );
+  });
+
+  test("running sets are asked for only for chosen releases, once each", () => {
+    const asked: string[] = [];
+    const counting: ReleaseSchedule = {
+      ...schedule,
+      runningSet: (cell, snapshot) => {
+        asked.push(`${cell}/${snapshot}`);
+        return runningSet(cell, snapshot);
+      },
+    };
+    for (const v of vectors.boards) {
+      asked.length = 0;
+      readRunningOpenings(
+        election,
+        counting,
+        v.payloads.map((b) => hex(b)),
+      );
+      const chosen = new Set(
+        vectors.election.cells.flatMap((c) =>
+          (schedule.chosen.get(c.tier) ?? []).map((q) => `${c.cell}/${q}`),
+        ),
+      );
+      expect(asked.every((k) => chosen.has(k))).toBe(true);
+      expect(new Set(asked).size).toBe(asked.length);
+    }
+  });
+
+  test("a running set of another shape throws rather than failing an opening", () => {
+    const record = hex((vectors.records[0] as Vectors["records"][number]).encoding);
+    const wrong: ReleaseSchedule = {
+      ...schedule,
+      runningSet: (cell, q) => runningSet(cell, q).map((vss) => vss.slice(1)),
+    };
+    expect(() => readRunningOpenings(election, wrong, [record])).toThrow(RangeError);
+  });
+});
+
 describe("arguments", () => {
-  test("a definition hash of another length, no cells or a snapshot outside u32 throws", () => {
+  test("a definition hash of another length, no cells, a tier that isn't an integer or a snapshot outside u32 throws", () => {
     const short = { ...election, definitionHash: new Uint8Array(31) };
     expect(() => readRunningOpenings(short, schedule, [])).toThrow(RangeError);
     expect(() => readRunningOpenings(election, { ...schedule, cellTiers: [] }, [])).toThrow(
       RangeError,
     );
+    for (const t of [-1, 0.5])
+      expect(() => readRunningOpenings(election, { ...schedule, cellTiers: [t] }, [])).toThrow(
+        RangeError,
+      );
     for (const q of [0, 2 ** 32, 1.5])
       expect(() =>
         boardRunningOpenings(election, { ...schedule, chosen: new Map([[0, [q]]]) }, [], []),

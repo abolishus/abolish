@@ -189,6 +189,8 @@ function checkElection(election: LiveElection, schedule: ReleaseSchedule, caller
     throw new RangeError(`${caller}: definitionHash must be 32 bytes`);
   const cells = schedule.cellTiers.length;
   if (cells < 1 || cells > MAX_CELLS) throw new RangeError(`${caller}: from 1 to 256 cells`);
+  if (schedule.cellTiers.some((t) => !Number.isInteger(t) || t < 0))
+    throw new RangeError(`${caller}: a cell's tier must be a non-negative integer`);
   for (const [tier, snapshots] of schedule.chosen)
     if (snapshots.some((q) => !Number.isInteger(q) || q < 1 || q > 0xffff_ffff))
       throw new RangeError(`${caller}: tier ${tier} has a snapshot outside 1 to 2^32 − 1`);
@@ -257,8 +259,9 @@ function decodeOrCode(payload: Uint8Array): RunningOpening | DecodeErrorCode {
  * and otherwise an opening of that release that passes or fails, with the
  * seat its signature attributes it to. Each chosen release's totals in each
  * cell are its first passing opening's counts; under binding every passing
- * one is the same, and telling otherwise is the verifier's (7.5). `at` is a
- * position in `payloads`.
+ * one is the same. These counts are not yet checked by verifier 7.5
+ * (`running-conflict`, `running-range`, `running-question-range`), which is
+ * the verifier's (P2-15 part 3). `at` is a position in `payloads`.
  */
 export function readRunningOpenings(
   election: LiveElection,
@@ -294,8 +297,8 @@ export function readRunningOpenings(
 
 /**
  * The board operator's rule (docs/spec/tally.md, Running opening record,
- * Boarding), over running openings offered in this order to a board whose
- * sealed extent already holds `onBoard`, the running openings boarded so far:
+ * Boarding), over running openings offered in this order to a board that
+ * already holds `onBoard`, every running opening on it so far, from opening on:
  * one is boarded only if it decodes, is an opening of a chosen release in a
  * cell, passes against that release's aggregate, is attributed to a
  * registered seat, and that seat has no running opening of that release and
@@ -303,7 +306,10 @@ export function readRunningOpenings(
  * set the release choice never chose discloses totals the batch rule never
  * bounded (T-16), and a second one per seat, or an unattributed one, would
  * carry chosen bytes the bound on result-critical fields doesn't allow
- * (T-17). Returns, per offered payload, whether it is boarded.
+ * (T-17). `schedule.chosen` must hold only releases already decided from
+ * fixed snapshots (Release choice): a release named early or by hand is
+ * exactly the disclosure this rule exists to stop. Returns, per offered
+ * payload, whether it is boarded.
  */
 export function boardRunningOpenings(
   election: LiveElection,
@@ -314,6 +320,16 @@ export function boardRunningOpenings(
   checkElection(election, schedule, "boardRunningOpenings");
   const verdict = judge(election, schedule);
   const boarded = new Set<string>();
+  // A seat's opening already on the board counts against it whether or not
+  // it would pass today: the rule is no second opening per seat, release and
+  // cell on the board, which bounds a seat's chosen bytes (T-17).
+  for (const [at, payload] of onBoard.entries()) {
+    const o = decodeOrCode(payload);
+    if (typeof o === "string") continue;
+    const e = verdict(at, o);
+    if (e.kind === "release" && e.signer !== null)
+      boarded.add(`${e.cell}/${e.snapshot}/${e.signer}`);
+  }
   const boards = (payload: Uint8Array, at: number) => {
     const o = decodeOrCode(payload);
     if (typeof o === "string") return false;
@@ -324,6 +340,5 @@ export function boardRunningOpenings(
     boarded.add(key);
     return true;
   };
-  onBoard.forEach(boards);
   return offered.map(boards);
 }

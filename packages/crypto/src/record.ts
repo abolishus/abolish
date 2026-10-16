@@ -36,6 +36,7 @@ export const RECORD_TYPES = Object.freeze({
   closeStatement: 0x0015,
   shareReceiptBatch: 0x0016,
   shareComplaintBatch: 0x0017,
+  authorApprovals: 0x0019,
 } as const);
 
 /** `0xff00`–`0xffff`: used only by vector files to exercise framing. */

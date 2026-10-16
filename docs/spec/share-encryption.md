@@ -201,7 +201,7 @@ Ballot version 4 shares each vote in two halves, to the default panel and to an 
 
 ### Keys
 
-Each seat's key is the `kem_key` of the registered key set of its own panel: a default seat's from the default panel's ceremony, an author seat's from the author panel's ([[ceremony]]; P2-16 part 3). A seat's shares are `(f^P_j(i), g^P_j(i))` for its panel `P`, `T` of them.
+Each seat's key is the `kem_key` of the registered key set of its own panel: a default seat's from the default panel's ceremony, an author seat's from the author panel's ([[ceremony]], Author panel). A seat's shares are `(f^P_j(i), g^P_j(i))` for its panel `P`, `T` of them.
 
 ### Ciphertext (ballot version 4)
 
@@ -225,7 +225,7 @@ Decryption is steps 1 to 5 above, with `aad` and `t_e` above, the seat's panel's
 - step 2's `share-hash-unqualified` over both panels ([[ballot-validity]], Admission (version 4));
 - step 3, `share-hash`, comparing `H(ct_i)` with its own panel's list: `share_hashes[i]` for a default seat, `author_share_hashes[i]` for an author seat.
 
-Before it takes any delivery, a seat of either panel runs what a default seat runs (Intake and receipts: [[verifier]] 2.5 with `panel-kind` and `default-seat`, 3.2 for its own panel, 1.3, 2.4, 2.8), and, with an author panel, checks the author panel's transcript and approvals as P2-16 part 3 specifies; an author seat also checks that the definition names its own identity key at its own index in `author_keys`, so a creator who substituted author keys finds no author node taking part (T-37). A node refuses intake for an election it can't check this way.
+Before it takes any delivery, a seat of either panel runs what a default seat runs (Intake and receipts: [[verifier]] 2.5 with `panel-kind` and `default-seat`, 3.2 for its own panel, 1.3, 2.4, 2.8), and, with an author panel, checks the author panel's transcript and approvals from the board ([[ceremony]], Author panel, Who checks it); an author seat also checks that the definition names its own identity key at its own index in `author_keys`, so a creator who substituted author keys finds no author node taking part (T-37). A node refuses intake for an election it can't check this way.
 
 **Ballot version 5** ([[ballot-validity]], Ballot record (version 5)), a rolling poll's ballot, keeps version 4's ciphertexts, decryption, receipts, postings and complaints unchanged, and its intake is version 4's with the rolling electorate's admission:
 

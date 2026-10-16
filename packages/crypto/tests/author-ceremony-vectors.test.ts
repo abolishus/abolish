@@ -88,12 +88,20 @@ interface Vectors {
     readonly stubHash: string;
     readonly code: string;
   }[];
-  readonly records: readonly { readonly id: string; readonly transcript: string; readonly record: string }[];
+  readonly records: readonly {
+    readonly id: string;
+    readonly transcript: string;
+    readonly record: string;
+  }[];
   readonly approvals: readonly {
     readonly id: string;
     readonly transcript: string;
     readonly records: readonly string[];
-    readonly result: { readonly ok: boolean; readonly code?: string; readonly seats?: readonly number[] };
+    readonly result: {
+      readonly ok: boolean;
+      readonly code?: string;
+      readonly seats?: readonly number[];
+    };
   }[];
   readonly boarding: readonly {
     readonly id: string;
@@ -102,7 +110,11 @@ interface Vectors {
     readonly boarded: boolean;
     readonly refusal: string | null;
   }[];
-  readonly decode: readonly { readonly id: string; readonly record: string; readonly error: string }[];
+  readonly decode: readonly {
+    readonly id: string;
+    readonly record: string;
+    readonly error: string;
+  }[];
   readonly boardEntries: readonly {
     readonly id: string;
     readonly version: 5 | 7;
@@ -336,9 +348,9 @@ describe("author approvals", () => {
     // A checked set, but of another transcript.
     const other = checkedKeySetForTests(copy, new Uint8Array(32).fill(7));
     expect(() => checkAuthorApprovals({ ...ctx, registered: other }, [])).toThrow(RangeError);
-    expect(() => authorApprovalsRefusal({ ...ctx, registered: copy }, recordOf("all"), false)).toThrow(
-      RangeError,
-    );
+    expect(() =>
+      authorApprovalsRefusal({ ...ctx, registered: copy }, recordOf("all"), false),
+    ).toThrow(RangeError);
   });
 
   test("records round-trip, and their seats' order never changes what decodes", () => {
@@ -366,21 +378,17 @@ describe("author approvals", () => {
     const ctx = approvalContext("author-honest-3");
     const good = decodeAuthorApprovals(recordOf("all"), 1);
     fc.assert(
-      fc.property(
-        fc.integer({ min: 0, max: 2 }),
-        fc.integer({ min: 1, max: 3 }),
-        (from, to) => {
-          const a = good.approvals[from];
-          if (a === undefined) throw new Error("bad vector");
-          const record = encodeAuthorApprovals({
-            transcript_hash: good.transcript_hash,
-            approvals: [{ index: to, signature: a.signature }],
-          });
-          const r = checkAuthorApprovals(ctx, [record]);
-          expect(r.ok).toBe(false);
-          expect(!r.ok && r.seats).toEqual(a.index === to ? [to] : []);
-        },
-      ),
+      fc.property(fc.integer({ min: 0, max: 2 }), fc.integer({ min: 1, max: 3 }), (from, to) => {
+        const a = good.approvals[from];
+        if (a === undefined) throw new Error("bad vector");
+        const record = encodeAuthorApprovals({
+          transcript_hash: good.transcript_hash,
+          approvals: [{ index: to, signature: a.signature }],
+        });
+        const r = checkAuthorApprovals(ctx, [record]);
+        expect(r.ok).toBe(false);
+        expect(!r.ok && r.seats).toEqual(a.index === to ? [to] : []);
+      }),
       { numRuns: Number(process.env.FC_NUM_RUNS ?? 100) },
     );
   });

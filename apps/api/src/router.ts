@@ -245,8 +245,8 @@ export const router = os.router({
   // Tier 0 registration (docs/spec/registration.md, Answers): core checks
   // steps 2 to 8 in order. Like every route this sees the body alone, never
   // a header, cookie or address, and no answer quotes the request (T-10,
-  // T-11). A server without the service still checks the request's forms
-  // first, then answers unavailable.
+  // T-11). A server without the service publishes no group, so after the
+  // form checks it answers unavailable for every region.
   registrations: {
     tier0: os.registrations.tier0.handler(async ({ input, context, errors }) => {
       try {

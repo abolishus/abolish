@@ -99,7 +99,14 @@ if (tier0Env.some((v) => v !== undefined)) {
     throw new Error(
       "REDIS_URL, API_TIER0_GROUP, TURNSTILE_SECRET_KEY and API_CHALLENGE_HOST go together",
     );
-  redis = new Redis(env.REDIS_URL);
+  // Fail fast while Redis is down or stalled, so a registration answers
+  // unavailable within a second rather than hold one of the server's slots
+  // until its deadline (T-52).
+  redis = new Redis(env.REDIS_URL, {
+    enableOfflineQueue: false,
+    maxRetriesPerRequest: 1,
+    commandTimeout: 1000,
+  });
   // Without a listener an 'error' event would crash the process; its message
   // can quote a command's arguments, a commitment among them (T-11).
   redis.on("error", () => process.stdout.write(`${JSON.stringify({ error: "redis" })}\n`));

@@ -20,6 +20,20 @@ export const REGISTRATION_QUEUE_MAX = 4 * GROUP_REGISTRY_MAX_BATCH;
 export const TURNSTILE_ACTION_TIER0 = "tier0-register";
 /** Seconds the Tier 0 index may lag before the route answers unavailable (step 6). */
 export const TIER0_INDEX_MAX_LAG = 60;
+/**
+ * Seconds an index time may run ahead of this server's clock, for skew
+ * between the batch job's host and ours; beyond it the time is refused, so a
+ * fast clock there can't keep a stale index current here.
+ */
+export const TIER0_INDEX_MAX_SKEW = 5;
+/**
+ * Most registrations handled at once by one server. A request holds its slot
+ * through a Redis round trip and Turnstile's (up to 5 s), and anyone can send
+ * well-formed requests with made-up tokens, so past this the route answers
+ * unavailable rather than take more of the server's slots from ballots and
+ * the board (T-52, T-25).
+ */
+export const TIER0_MAX_CONCURRENT = 8;
 
 const U32_MAX = 2 ** 32 - 1;
 const U64_MAX = (1n << 64n) - 1n;
@@ -33,9 +47,9 @@ export interface Tier0Redis {
  * Every key of Tier 0 registration, under one hash tag so a script can touch
  * them all in one step on Dragonfly or Redis Cluster:
  *
- * - `queue`: a hash from each queued commitment (64 lowercase hex digits) to
- *   the `group_id` it is queued for, so a commitment waits for one group
- *   only, whatever region a later request names (T-16);
+ * - `queue`: a hash from each queued commitment to the `group_id` (canonical
+ *   decimal) it is queued for, so a commitment waits for one group only,
+ *   whatever region a later request names (T-16);
  * - `sizes`: a hash from `group_id` to how many commitments are queued for it;
  * - `live`: a set of the commitments the Tier 0 index holds in any Tier 0
  *   group, signed or self-paid;
@@ -43,10 +57,20 @@ export interface Tier0Redis {
  * - `indexed`: the UNIX time, in seconds, at which the index was last brought
  *   up to the L2 node's latest block.
  *
+ * Every commitment, in `queue`, `live` and `inflight` alike, is written as
+ * `commitmentKey` writes it (64 lowercase hex digits), or a membership test
+ * would miss it. `sizes[g]` is always the number of `queue` entries whose
+ * value is `g`: whatever adds to or removes from `queue` (the route, and the
+ * batch job's selections, drops and returns) changes `sizes` in the same
+ * script, since the queue's bound rests on it (T-52).
+ *
  * The index and the in-flight batches are kept by the batch job; the route
  * only reads them.
  */
 export function tier0Keys(prefix = "abolish") {
+  // A brace in the prefix would change the hash tag, scattering the keys
+  // over slots that one script can't span.
+  if (prefix === "" || /[{}]/.test(prefix)) throw new RangeError("invalid key prefix");
   const at = (name: string) => `${prefix}:{tier0-registration}:${name}`;
   return {
     queue: at("queue"),
@@ -58,6 +82,13 @@ export function tier0Keys(prefix = "abolish") {
 }
 
 export type Tier0Keys = ReturnType<typeof tier0Keys>;
+
+/** A commitment as every Tier 0 key holds it: 64 lowercase hex digits. */
+export function commitmentKey(value: bigint): string {
+  if (typeof value !== "bigint" || value < 0n || value >= BN254_R)
+    throw new RangeError("a commitment is a field<bn254> element");
+  return value.toString(16).padStart(64, "0");
+}
 
 // Steps 5 and 6 in one round trip: the group's queue size and the index's age.
 const PROBE = `
@@ -178,6 +209,7 @@ export class Tier0Registrations {
   readonly #turnstile: Turnstile;
   readonly #now: () => number;
   readonly #keys: Tier0Keys;
+  #active = 0;
 
   constructor(options: Tier0RegistrationOptions) {
     // Until the group registry records a region per group (ADR 0019), the
@@ -208,18 +240,37 @@ export class Tier0Registrations {
     const request = parseTier0Request(input);
     const group = this.#groups.get(request.region);
     if (group === undefined) throw new Tier0RegistrationError("region-unknown");
+    if (this.#active >= TIER0_MAX_CONCURRENT) throw new Tier0RegistrationError("unavailable");
+    this.#active++;
+    try {
+      await this.#queue(request, group);
+    } finally {
+      this.#active--;
+    }
+  }
+
+  async #queue(request: Tier0Request, group: string): Promise<void> {
     const keys = this.#keys;
-    const probe = await this.#redis.eval(PROBE, 2, keys.sizes, keys.indexed, group);
-    const [size, indexed] = probe as [string, string];
+    const probe = await this.#eval(PROBE, 2, keys.sizes, keys.indexed, group);
+    if (!Array.isArray(probe) || probe.length !== 2)
+      throw new Tier0RegistrationError("unavailable");
+    const [size, indexed] = probe as unknown[];
     if (Number(size) >= REGISTRATION_QUEUE_MAX) throw new Tier0RegistrationError("busy");
-    // An index never brought up to date, or not within the last minute, can't
-    // tell a live commitment from a new one (step 6).
-    if (!/^[0-9]{1,15}$/.test(indexed) || this.#now() - Number(indexed) > TIER0_INDEX_MAX_LAG)
+    // An index never brought up to date, not within the last minute, or
+    // dated ahead of our clock can't be trusted to tell a live commitment
+    // from a new one (step 6).
+    const now = this.#now();
+    if (
+      typeof indexed !== "string" ||
+      !/^[0-9]{1,15}$/.test(indexed) ||
+      now - Number(indexed) > TIER0_INDEX_MAX_LAG ||
+      Number(indexed) - now > TIER0_INDEX_MAX_SKEW
+    )
       throw new Tier0RegistrationError("unavailable");
     const verdict = await this.#turnstile.verify(request.turnstile, TURNSTILE_ACTION_TIER0);
     if (verdict === "refused") throw new Tier0RegistrationError("challenge-refused");
     if (verdict === "unavailable") throw new Tier0RegistrationError("challenge-unavailable");
-    const queued = await this.#redis.eval(
+    const queued = await this.#eval(
       ENQUEUE,
       4,
       keys.queue,
@@ -231,5 +282,19 @@ export class Tier0Registrations {
       String(REGISTRATION_QUEUE_MAX),
     );
     if (queued !== 1) throw new Tier0RegistrationError("busy");
+  }
+
+  /**
+   * One script. A Redis failure answers
+   * unavailable: the request's token may be spent, and the client retries
+   * with a new solve. The error itself is dropped, since its message can
+   * quote the script's arguments (T-11).
+   */
+  async #eval(script: string, numkeys: number, ...keysThenArgs: string[]): Promise<unknown> {
+    try {
+      return await this.#redis.eval(script, numkeys, ...keysThenArgs);
+    } catch {
+      throw new Tier0RegistrationError("unavailable");
+    }
   }
 }

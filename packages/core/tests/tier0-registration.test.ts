@@ -4,9 +4,12 @@ import fc from "fast-check";
 import { Redis } from "ioredis";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "vite-plus/test";
 import {
+  commitmentKey,
   parseTier0Request,
   REGISTRATION_QUEUE_MAX,
   TIER0_INDEX_MAX_LAG,
+  TIER0_INDEX_MAX_SKEW,
+  TIER0_MAX_CONCURRENT,
   tier0Keys,
   Tier0RegistrationError,
   Tier0Registrations,
@@ -129,6 +132,25 @@ describe("values", () => {
     expect(value("REGISTRATION_QUEUE_MAX")).toBe(REGISTRATION_QUEUE_MAX.toLocaleString("en-US"));
     expect(value("TURNSTILE_ACTION_TIER0")).toBe(`\`${TURNSTILE_ACTION_TIER0}\``);
     expect(TIER0_INDEX_MAX_LAG).toBe(60);
+  });
+});
+
+describe("keys", () => {
+  test("every key shares one hash tag, and a prefix can't change it", () => {
+    for (const key of Object.values(tier0Keys("abolish:x")))
+      expect(/\{([^}]*)\}/.exec(key)?.[1]).toBe("tier0-registration");
+    for (const bad of ["", "{a}", "a{", "}"]) expect(() => tier0Keys(bad)).toThrow(RangeError);
+  });
+
+  test("commitmentKey writes a commitment as the route reads it", () => {
+    fc.assert(
+      fc.property(commitmentArb, (c) => {
+        expect(commitmentKey(BigInt(`0x${c}`))).toBe(c);
+        expect(parseTier0Request(request(c)).commitment).toBe(c);
+      }),
+      { numRuns },
+    );
+    for (const v of [-1n, BN254_R]) expect(() => commitmentKey(v)).toThrow(RangeError);
   });
 });
 
@@ -286,6 +308,63 @@ describe("Tier0Registrations", () => {
     }
   });
 
+  test("refuses an index time ahead of our clock by more than the skew", async () => {
+    await redis.set(keys().indexed, String(NOW + TIER0_INDEX_MAX_SKEW + 1));
+    expect(await refusal(service().registrations.register(request(hex(5n))))).toBe("unavailable");
+    await redis.set(keys().indexed, String(NOW + TIER0_INDEX_MAX_SKEW));
+    await service().registrations.register(request(hex(5n)));
+    expect(await redis.hget(keys().queue, hex(5n))).toBe("7");
+  });
+
+  test("a Redis failure answers unavailable, without quoting the request", async () => {
+    const commitment = hex(77n);
+    const failing = {
+      eval: () => Promise.reject(new Error(`ERR something about ${commitment}`)),
+    };
+    const registrations = new Tier0Registrations({
+      redis: failing,
+      groups: new Map([[0, GROUP]]),
+      turnstile: stubTurnstile().turnstile,
+      now: () => NOW,
+      prefix,
+    });
+    const e = await registrations.register(request(commitment)).catch((e: unknown) => e);
+    expect(e).toMatchObject({ code: "unavailable" });
+    expect(String(e)).not.toContain(commitment);
+  });
+
+  test("past TIER0_MAX_CONCURRENT registrations at once, answers unavailable before Redis", async () => {
+    await fresh();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const calls: string[] = [];
+    const turnstile: Turnstile = {
+      async verify(token) {
+        calls.push(token ?? "");
+        await gate;
+        return "passed";
+      },
+    };
+    const registrations = new Tier0Registrations({
+      redis,
+      groups: new Map([[0, GROUP]]),
+      turnstile,
+      now: () => NOW,
+      prefix,
+    });
+    const held = Array.from({ length: TIER0_MAX_CONCURRENT }, (_, i) =>
+      registrations.register(request(hex(500n + BigInt(i)))),
+    );
+    while (calls.length < TIER0_MAX_CONCURRENT) await new Promise((r) => setTimeout(r, 5));
+    expect(await refusal(registrations.register(request(hex(600n))))).toBe("unavailable");
+    expect(calls).toHaveLength(TIER0_MAX_CONCURRENT);
+    release();
+    await Promise.all(held);
+    // Slots are given back, whatever the outcome.
+    await registrations.register(request(hex(600n)));
+    expect(await redis.hlen(keys().queue)).toBe(TIER0_MAX_CONCURRENT + 1);
+  });
+
   test("answers alike whether a commitment is new, queued, live or in flight, and queues only a new one", async () => {
     await fc.assert(
       fc.asyncProperty(
@@ -327,9 +406,12 @@ describe("Tier0Registrations", () => {
     await fresh();
     const room = 5;
     await redis.hset(keys().sizes, "7", String(REGISTRATION_QUEUE_MAX - room));
-    const { registrations } = service();
+    // One service per request, as many servers would be: each server's own
+    // concurrency cap mustn't be what keeps the queue in bounds.
     const outcomes = await Promise.allSettled(
-      Array.from({ length: 40 }, (_, i) => registrations.register(request(hex(1000n + BigInt(i))))),
+      Array.from({ length: 40 }, (_, i) =>
+        service().registrations.register(request(hex(1000n + BigInt(i)))),
+      ),
     );
     expect(outcomes.filter((o) => o.status === "fulfilled")).toHaveLength(room);
     for (const o of outcomes)

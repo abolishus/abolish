@@ -98,9 +98,12 @@ export {
   TURNSTILE_SITEVERIFY,
 } from "./turnstile.ts";
 export {
+  commitmentKey,
   parseTier0Request,
   REGISTRATION_QUEUE_MAX,
   TIER0_INDEX_MAX_LAG,
+  TIER0_INDEX_MAX_SKEW,
+  TIER0_MAX_CONCURRENT,
   type Tier0Keys,
   tier0Keys,
   type Tier0MalformedCode,

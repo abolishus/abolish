@@ -52,7 +52,7 @@ const utf8 = (s: string) => new TextEncoder().encode(s);
 // registry would register.
 const LOCAL_PINS: ReadonlyMap<number, number> = new Map([
   [RECORD_TYPES.boardEntry, 5],
-  [RECORD_TYPES.contractEvent, 4],
+  [RECORD_TYPES.contractEvent, 5],
 ]);
 
 /**

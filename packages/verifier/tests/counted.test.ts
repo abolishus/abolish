@@ -768,6 +768,93 @@ describe("contract-path share-receipt batches, once 4.4 passes", () => {
   });
 });
 
+describe("contract-path obligation roots, once 4.4 passes", () => {
+  // verifier-events.json's version-4 definition pinning contract-event
+  // version 5, whose board emits obligation roots as events.
+  const definition = definitionOf(caseOf(events, "events-v5-records"));
+  const d = definition.value;
+  const T_D = d.closes_at + BigInt(d.l1_inclusion_bound) + BigInt(PARAMETERS.DELIVERY_WINDOW);
+  const topic0 = keccak_256(text("ObligationRootSubmitted(bytes32,uint8,bytes)"));
+  const roots = read("delivery-root.json") as {
+    readonly records: readonly { readonly encoding: string }[];
+  };
+  const abiBytes = (record: Uint8Array) => {
+    const out = new Uint8Array(64 + Math.ceil(record.length / 32) * 32);
+    out[31] = 0x20;
+    for (let i = 63, n = record.length; n > 0; i--, n = Math.floor(n / 256)) out[i] = n % 256;
+    out.set(record, 64);
+    return out;
+  };
+  const word = (n: number) => Uint8Array.from({ length: 32 }, (_, i) => (i === 31 ? n : 0));
+  /** delivery-root.json's first root (seat 1's receipts) renamed to `hash`, as the board's event at `t`; the event check never reads its signature. */
+  const event = (hash: Uint8Array, t: bigint) => {
+    const record = hex((roots.records[0] as { readonly encoding: string }).encoding);
+    record.set(hash, 3);
+    const payload = encodeContractEvent(
+      {
+        contract: d.board,
+        n: 0n,
+        l2_block: 1n,
+        l2_timestamp: t,
+        topics: [topic0, hash, word(record[35] as number)],
+        data: abiBytes(record),
+      },
+      5,
+    );
+    const contracts = {
+      electionRegistry: d.election_registry,
+      trusteeRegistry: d.trustee_registry,
+      groupRegistry: d.group_registry,
+      board: d.board,
+    };
+    const checked = checkContractEvent(decodeContractEvent(payload, 5), contracts, 5);
+    if (!checked.ok || checked.event.event !== "ObligationRootSubmitted")
+      throw new Error("fixture: the root event fails");
+    return payload;
+  };
+  const delivered = () => {
+    const e = election(definition);
+    const a = e.cast({ ballotVersion: 2, cell: 0 }, [1, 0, 0], 111n);
+    for (const seat of [1, 2, 3, 4]) e.board(200, e.receipt(a, seat));
+    return { e, a };
+  };
+
+  test("a root for this election leaves 5.9 unverifiable at its entry until its leaves are read", () => {
+    const { e, a } = delivered();
+    const at = e.board(200, event(e.hash, T_D));
+    const r = countedChecks(e.inputs([a], { eventsPass: true, destruction: false }));
+    for (const id of ["5.9", "6.3", "7.1", "7.2", "7.3"])
+      expect(r.rows.get(id)).toEqual({
+        status: "unverifiable",
+        code: "not-implemented",
+        at: { entry: at },
+      });
+  });
+
+  test("a root naming another definition is stray, and the counted set is decided without it", () => {
+    const { e, a } = delivered();
+    const at = e.board(200, event(sha256(text("counted.test another definition")), T_D));
+    const r = countedChecks(e.inputs([a], { eventsPass: true, destruction: false }));
+    expect(r.rows.get("5.9")).toEqual({ status: "pass" });
+    expect(r.delivery).toEqual({
+      excluded: [],
+      records: [{ entry: at, code: "delivery-stray" }],
+      rejected: [],
+    });
+  });
+
+  test("a root waits on 4.4 like every contract-path record", () => {
+    const { e, a } = delivered();
+    const at = e.board(200, event(e.hash, T_D));
+    const r = countedChecks(e.inputs([a], { eventsPass: false, destruction: false }));
+    expect(r.rows.get("5.9")).toEqual({
+      status: "unverifiable",
+      code: "not-reached",
+      at: { entry: at },
+    });
+  });
+});
+
 describe("contract-path records, once 4.4 passes", () => {
   // verifier-events.json's version-4 definition pinning contract-event
   // version 3, whose board emits receipts and close statements as events.

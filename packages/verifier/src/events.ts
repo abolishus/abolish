@@ -79,7 +79,7 @@ const equal = (a: Uint8Array, b: Uint8Array) =>
 // (or none) may name one a later release reads: unverifiable, never failed,
 // so releases agree (2.3; T-36).
 const isReadable = (v: number | undefined): v is ContractEventVersion =>
-  v === 1 || v === 2 || v === 3 || v === 4;
+  v === 1 || v === 2 || v === 3 || v === 4 || v === 5;
 
 /**
  * The row 4.4 as far as the board copy decides it: the first contract-event

@@ -59,6 +59,9 @@ export interface Tier0Redis {
  * - `held`: a hash from `group_id` to the boundaries in a row at which its
  *   short queue was held (absent for 0);
  * - `batches`: a hash from `group_id` to its in-flight addition record (hex);
+ * - `positions`: a hash from `group_id` to the lowest position the batch job
+ *   may still sign, past every record of ours that landed;
+ * - `boundary`: the number of the last period whose boundary ran;
  * - `next`: the index being rebuilt, swapped in for `live` once whole;
  * - `lock`: the batch job's lock, so one runner at a time writes the rest.
  *
@@ -85,6 +88,8 @@ export function tier0Keys(prefix = "abolish") {
     indexed: at("indexed"),
     held: at("held"),
     batches: at("batches"),
+    positions: at("positions"),
+    boundary: at("boundary"),
     next: at("next"),
     lock: at("lock"),
   } as const;

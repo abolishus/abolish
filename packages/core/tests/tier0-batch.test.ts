@@ -26,6 +26,7 @@ import {
   tier0Keys,
   Tier0LockError,
   type Tier0LoggedAddition,
+  type Tier0Redis,
   Tier0Registrations,
 } from "../src/index.ts";
 
@@ -66,6 +67,7 @@ const NOW = 1_800_000_000;
 let redis: Redis;
 let run = 0;
 let prefix: string;
+let clock = NOW;
 beforeAll(() => {
   redis = new Redis(redisUrl);
 });
@@ -74,6 +76,7 @@ afterAll(async () => {
 });
 beforeEach(() => {
   prefix = `test-tier0-batch-${process.pid}-${Date.now()}-${run++}`;
+  clock = NOW;
 });
 afterEach(async () => {
   const left = await allKeys();
@@ -116,6 +119,10 @@ class FakeChain implements Tier0Chain {
   submitFails = false;
   /** Called during the next chain read, once: a stall, say. */
   onRead: (() => Promise<void>) | undefined;
+  /** Answers `group` from a node at another block, while set. */
+  staleGroup: Tier0GroupState | undefined;
+  /** Answers `additionAt` from a node that hasn't seen any addition, while set. */
+  staleAdditions = false;
 
   constructor(groups: readonly bigint[] = [GROUP]) {
     for (const g of groups) {
@@ -141,6 +148,7 @@ class FakeChain implements Tier0Chain {
 
   async group(groupId: bigint): Promise<Tier0GroupState> {
     await this.#read();
+    if (this.staleGroup !== undefined) return this.staleGroup;
     const logs = this.logs.get(groupId) ?? [];
     const size = (ls: readonly Logged[]) =>
       ls.reduce((n, l) => n + BigInt(l.commitments.length), 0n);
@@ -153,6 +161,7 @@ class FakeChain implements Tier0Chain {
 
   async additionAt(groupId: bigint, firstIndex: bigint): Promise<Tier0LoggedAddition | null> {
     await this.#read();
+    if (this.staleAdditions) return null;
     const l = (this.logs.get(groupId) ?? []).find((x) => x.firstIndex === firstIndex);
     return l === undefined ? null : { record: l.record.slice(), final: l.final };
   }
@@ -209,19 +218,37 @@ function batches(
   chain: Tier0Chain,
   over: { signers?: { seat: number; secretKey: Uint8Array }[] } = {},
 ) {
+  const job = newJob(chain, over.signers);
+  // Each run is the next period's boundary.
+  return {
+    refreshIndex: () => job.refreshIndex(),
+    runBoundary: async () => {
+      clock += REGISTRATION_PERIOD;
+      const reports = await job.runBoundary();
+      if (reports === null) throw new Error("boundary already run");
+      return reports;
+    },
+  };
+}
+
+function newJob(
+  chain: Tier0Chain,
+  signers = [
+    { seat: 1, secretKey: SECRETS[0] as Uint8Array },
+    { seat: 3, secretKey: SECRETS[2] as Uint8Array },
+  ],
+  store: Tier0Redis = redis,
+) {
   return new Tier0Batches({
-    redis,
+    redis: store,
     chain,
     groups: new Map([[0, GROUP]]),
     chainId: CHAIN_ID,
     registry: REGISTRY,
     registrars: REGISTRARS,
     threshold: THRESHOLD,
-    signers: over.signers ?? [
-      { seat: 1, secretKey: SECRETS[0] as Uint8Array },
-      { seat: 3, secretKey: SECRETS[2] as Uint8Array },
-    ],
-    now: () => NOW,
+    signers,
+    now: () => clock,
     prefix,
   });
 }
@@ -616,6 +643,102 @@ describe("one batch per position", () => {
   });
 });
 
+describe("nodes at different blocks", () => {
+  test("a final batch seen by additionAt before group() catches up signs nothing at its position", async () => {
+    const chain = new FakeChain();
+    await enqueue(commitments(MIN_REGISTRATION_BATCH, 1n));
+    const job = batches(chain);
+    await job.runBoundary();
+    chain.finalize();
+    await enqueue(commitments(MIN_REGISTRATION_BATCH, 2n));
+    // group() still at the block before the batch: count 0, all final.
+    chain.staleGroup = { tier: 0, finalizedSize: 0n, latestSize: 0n };
+    expect((await job.runBoundary())[0]?.outcome).toBe("waiting");
+    expect(chain.submitted).toHaveLength(1);
+    chain.staleGroup = undefined;
+    expect((await job.runBoundary())[0]?.outcome).toBe("signed");
+    expect(lastRecord(chain).firstIndex).toBe(BigInt(MIN_REGISTRATION_BATCH));
+    chain.finalize();
+    expect((await job.runBoundary())[0]?.outcome).toBe("empty");
+    // Once a record is finished, a count below its end is never signed at,
+    // even when no node shows anything at that position.
+    chain.staleGroup = { tier: 0, finalizedSize: 0n, latestSize: 0n };
+    chain.staleAdditions = true;
+    await enqueue(commitments(MIN_REGISTRATION_BATCH, 3n));
+    expect((await job.runBoundary())[0]?.outcome).toBe("waiting");
+    // A stale node may have a record resent, but never a second record at a position.
+    const byPosition = new Map<bigint, Set<string>>();
+    for (const r of chain.submitted) {
+      const d = decodeGroupAddition(r);
+      if (!d.ok) throw new Error("undecodable");
+      const seen = byPosition.get(d.value.firstIndex) ?? new Set<string>();
+      byPosition.set(d.value.firstIndex, seen.add(Buffer.from(r).toString("hex")));
+    }
+    for (const seen of byPosition.values()) expect(seen.size).toBe(1);
+  });
+
+  test("a lagging count is never signed at where another record is final", async () => {
+    const chain = new FakeChain();
+    chain.land(foreignRecord(GROUP, 0n, commitments(2, 9n)), true);
+    chain.staleGroup = { tier: 0, finalizedSize: 0n, latestSize: 0n };
+    await enqueue(commitments(MIN_REGISTRATION_BATCH));
+    expect((await batches(chain).runBoundary())[0]?.outcome).toBe("waiting");
+    expect(chain.submitted).toEqual([]);
+  });
+
+  test("a landed batch that additionAt can't see yet is never abandoned", async () => {
+    const chain = new FakeChain();
+    await enqueue(commitments(MIN_REGISTRATION_BATCH));
+    const job = batches(chain);
+    await job.runBoundary();
+    chain.finalize();
+    chain.staleAdditions = true;
+    expect((await job.runBoundary())[0]).toEqual({
+      groupId: GROUP,
+      outcome: "waiting",
+      abandoned: false,
+    });
+    expect(await queued()).toEqual([]);
+    expect(chain.submitted).toHaveLength(1);
+  });
+});
+
+describe("boundaries", () => {
+  test("each period's boundary runs once", async () => {
+    const job = newJob(new FakeChain());
+    await enqueue(commitments(3));
+    expect(await job.runBoundary()).not.toBeNull();
+    clock += REGISTRATION_PERIOD - 1;
+    expect(await job.runBoundary()).toBeNull();
+    expect(await redis.hget(keys().held, GROUP.toString())).toBe("1");
+    clock += 1;
+    expect(await job.runBoundary()).not.toBeNull();
+    expect(await redis.hget(keys().held, GROUP.toString())).toBe("2");
+  });
+
+  test("a Redis failure is reported without the script's arguments", async () => {
+    const chain = new FakeChain();
+    const values = commitments(MIN_REGISTRATION_BATCH);
+    await enqueue(values);
+    const failing: Tier0Redis = {
+      eval: (script, numkeys, ...args) =>
+        script.includes("tier0-queue")
+          ? Promise.reject(Object.assign(new Error(`ERR ${args.join(" ")}`), { command: { args } }))
+          : redis.eval(script, numkeys, ...args),
+    };
+    const e = await newJob(chain, undefined, failing)
+      .runBoundary()
+      .then(
+        () => undefined,
+        (x: unknown) => x,
+      );
+    expect(e).toBeInstanceOf(Error);
+    expect(Object.keys(e as object)).toEqual([]);
+    for (const v of values) expect((e as Error).message).not.toContain(commitmentKey(v));
+    expect(chain.submitted).toEqual([]);
+  });
+});
+
 describe("the lock", () => {
   test("a second runner at the same time does nothing", async () => {
     const chain = new FakeChain();
@@ -723,6 +846,8 @@ describe("the queue's state", () => {
             k.indexed,
             k.held,
             k.batches,
+            k.positions,
+            k.boundary,
           ]);
           for (const key of await allKeys()) expect(allowed.has(key)).toBe(true);
         },

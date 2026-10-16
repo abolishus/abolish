@@ -74,6 +74,11 @@ export interface Tier0Chain {
    * node's latest block, unfinalized included (Answers, step 6).
    */
   tier0Commitments(): Promise<Iterable<bigint>>;
+  /**
+   * The group's tier, from its `GroupCreated` event in finalized history
+   * (docs/spec/contracts.md, Groups: registrars sign for a group only once
+   * that event is final); rejects if the event isn't final yet.
+   */
   group(groupId: bigint): Promise<Tier0GroupState>;
   /**
    * The addition whose `first_index` is `firstIndex` in the group, up to the
@@ -185,10 +190,26 @@ return 1
 const READ_BATCH = `return redis.call('HGET', KEYS[1], ARGV[1]) or ''`;
 
 // Step 1, a final batch: its commitments are live now, so they leave the
-// in-flight set with the record.
+// in-flight set with the record, and the group's next position can never
+// again be below the record's end (KEYS[4]), whatever a lagging node says.
 const FINISH = `${FENCE}
 redis.call('HDEL', KEYS[3], ARGV[2])
-if #ARGV > 2 then redis.call('SREM', KEYS[2], unpack(ARGV, 3)) end
+redis.call('HSET', KEYS[4], ARGV[2], ARGV[3])
+if #ARGV > 3 then redis.call('SREM', KEYS[2], unpack(ARGV, 4)) end
+return 1
+`;
+
+// The group's lowest position the job may still sign: past every record of
+// ours that landed, and past a position finalized history gave to another.
+const READ_POSITION = `return redis.call('HGET', KEYS[1], ARGV[1]) or '0'`;
+
+// A boundary runs once: the period number is kept, and a later run in the
+// same period (a retry, a second scheduler) does nothing, so neither `held`
+// nor a batch's time moves off the boundaries (T-13).
+const MARK_BOUNDARY = `${FENCE}
+local last = tonumber(redis.call('GET', KEYS[2]) or '-1')
+if tonumber(ARGV[2]) <= last then return 0 end
+redis.call('SET', KEYS[2], ARGV[2])
 return 1
 `;
 
@@ -196,8 +217,9 @@ return 1
 // for the same group, even past the bound (they were accepted), unless one
 // is queued already; step 2 then drops any that are live.
 const ABANDON = `${FENCE}
+redis.call('HSET', KEYS[6], ARGV[2], ARGV[3])
 local added = 0
-for i = 3, #ARGV do
+for i = 4, #ARGV do
   redis.call('SREM', KEYS[4], ARGV[i])
   if redis.call('HSETNX', KEYS[2], ARGV[i], ARGV[2]) == 1 then added = added + 1 end
 end
@@ -336,12 +358,22 @@ export class Tier0Batches {
   }
 
   /**
-   * One boundary: every published group in ascending `group_id`, each
-   * against the state the groups before it left. Throws `Tier0LockError` if
-   * another runner holds the lock; the boundary is then that runner's.
+   * The boundary that began the current period: every published group in
+   * ascending `group_id`, each against the state the groups before it left.
+   * Resolves null if this period's boundary has already run. Throws
+   * `Tier0LockError` if another runner holds the lock, which may be an index
+   * refresh: the caller retries within the period.
    */
-  async runBoundary(): Promise<Tier0GroupReport[]> {
+  async runBoundary(): Promise<Tier0GroupReport[] | null> {
     return this.#locked(async (token) => {
+      const period = Math.floor(this.#now() / REGISTRATION_PERIOD);
+      const marked = await this.#fenced(
+        MARK_BOUNDARY,
+        [this.#keys.boundary],
+        token,
+        String(period),
+      );
+      if (marked !== 1) return null;
       const reports: Tier0GroupReport[] = [];
       for (const g of this.#groups) reports.push(await this.#group(token, g));
       return reports;
@@ -351,28 +383,30 @@ export class Tier0Batches {
   async #locked<T>(run: (token: string) => Promise<T>): Promise<T> {
     const k = this.#keys;
     const token = crypto.randomUUID();
-    const got = await this.#redis.eval(LOCK, 1, k.lock, token, String(TIER0_BATCH_LOCK_MS));
+    const got = await this.#eval(LOCK, [k.lock], token, String(TIER0_BATCH_LOCK_MS));
     if (got !== 1) throw new Tier0LockError();
     try {
       return await run(token);
     } finally {
-      await this.#redis.eval(UNLOCK, 1, k.lock, token);
+      await this.#eval(UNLOCK, [k.lock], token);
     }
   }
 
-  async #fenced(script: string, keys: string[], token: string, ...args: string[]) {
+  #fenced(script: string, keys: string[], token: string, ...args: string[]) {
+    return this.#eval(script, [this.#keys.lock, ...keys], token, ...args);
+  }
+
+  /**
+   * One script. A Redis error is replaced by one that quotes nothing: the
+   * client's error carries the command's arguments, which can be a record
+   * and commitments not yet sent (T-11, T-13).
+   */
+  async #eval(script: string, keys: string[], ...args: string[]): Promise<unknown> {
     try {
-      return await this.#redis.eval(
-        script,
-        keys.length + 1,
-        this.#keys.lock,
-        ...keys,
-        token,
-        ...args,
-      );
+      return await this.#redis.eval(script, keys.length, ...keys, ...args);
     } catch (e) {
       if (e instanceof Error && e.message.includes("tier0-lock")) throw new Tier0LockError();
-      throw e;
+      throw new Error("Tier 0 batch: a Redis script failed");
     }
   }
 
@@ -415,7 +449,7 @@ export class Tier0Batches {
     if (state.tier !== 0) throw new RangeError(`group ${g} is not a Tier 0 group`);
 
     // Step 1: wait for the last batch.
-    const stored = await this.#redis.eval(READ_BATCH, 1, k.batches, g);
+    const stored = await this.#eval(READ_BATCH, [k.batches], g);
     if (typeof stored === "string" && stored !== "") {
       const record = Uint8Array.from(Buffer.from(stored, "hex"));
       const decoded = decodeGroupAddition(record);
@@ -430,16 +464,36 @@ export class Tier0Batches {
       } catch {
         return report("chain-unavailable");
       }
+      const end = firstIndex + BigInt(commitments.length);
+      // The two reads may come from nodes at different blocks: a record is
+      // abandoned only if another is final at its position and the count
+      // has passed it; anything else unsettled waits. A count that lags
+      // the record's finish is caught before signing (below).
       if (logged !== null && equalBytes(logged.record, record)) {
         if (!logged.final) return report("waiting");
-        await this.#fenced(FINISH, [k.inflight, k.batches], token, g, ...keys);
-      } else if (state.finalizedSize > firstIndex) {
+        await this.#fenced(
+          FINISH,
+          [k.inflight, k.batches, k.positions],
+          token,
+          g,
+          String(end),
+          ...keys,
+        );
+      } else if (logged !== null && logged.final && state.finalizedSize > firstIndex) {
         // Finalized history holds another record at its position: it can
         // never land, and the next batch takes the position.
-        await this.#fenced(ABANDON, [k.queue, k.sizes, k.inflight, k.batches], token, g, ...keys);
+        await this.#fenced(
+          ABANDON,
+          [k.queue, k.sizes, k.inflight, k.batches, k.positions],
+          token,
+          g,
+          String(firstIndex + 1n),
+          ...keys,
+        );
         abandoned = true;
-      } else if (state.latestSize > firstIndex) {
-        // Taken only in unfinalized blocks, which a reorg could undo.
+      } else if (logged !== null || state.latestSize > firstIndex) {
+        // Taken only in unfinalized blocks, which a reorg could undo, or
+        // the reads disagree.
         return report("waiting");
       } else {
         try {
@@ -453,6 +507,17 @@ export class Tier0Batches {
     // An addition we didn't send isn't final yet (a record of ours whose
     // store was lost, say): signing the finalized position now would race it.
     if (state.latestSize !== state.finalizedSize) return report("waiting");
+    // Nor below a position we know is taken, nor where a record already
+    // sits: a lagging node's count must never lead to a second record for a
+    // position (docs/spec/contracts.md, Additions; T-06).
+    const floor = BigInt(String(await this.#eval(READ_POSITION, [k.positions], g)));
+    if (state.finalizedSize < floor) return report("waiting");
+    try {
+      if ((await this.#chain.additionAt(groupId, state.finalizedSize)) !== null)
+        return report("waiting");
+    } catch {
+      return report("chain-unavailable");
+    }
 
     // Step 2: recheck against the index as of the latest block.
     if (!(await this.#refresh(token))) return report("index-unavailable");

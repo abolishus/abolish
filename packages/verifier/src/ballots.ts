@@ -196,8 +196,8 @@ const equal = (a: Uint8Array, b: Uint8Array) =>
   a.length === b.length && a.every((x, i) => x === b[i]);
 
 // The contract-event versions this verifier reads; under version 1 the board
-// emits no event, so every ballot is a board-path one, and only version 3
-// has the relayed path.
+// emits no event, so every ballot is a board-path one, and only versions 3
+// and 4 have the relayed path.
 const readsEvents = (v: number | undefined): v is ContractEventVersion =>
   v === 1 || v === 2 || v === 3 || v === 4;
 

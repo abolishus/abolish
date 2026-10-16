@@ -419,6 +419,9 @@ describe("randomness and parameters", () => {
     ]);
     expect(Object.entries(PARAMETERS)).toEqual(rows);
     expect(Object.isFrozen(PARAMETERS)).toBe(true);
+    // A vouch's root window spans whole intervals of the root grid
+    // (docs/spec/vouching.md, The root a vouch names).
+    expect(PARAMETERS.VOUCH_ROOT_WINDOW % PARAMETERS.VOUCH_ROOT_INTERVAL).toBe(0);
     // Version 1's limits are literals; today they equal the protocol-wide ones.
     expect(DEFINITION_V1_LIMITS).toEqual({
       maxOptions: PARAMETERS.MAX_OPTIONS,

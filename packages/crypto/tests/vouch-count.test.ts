@@ -22,7 +22,7 @@ import { SPEC_VECTORS } from "./spec-vectors.ts";
 // T-22, T-38, T-52, T-71). No expected value comes from the code under test.
 
 interface EventVector {
-  readonly kind: "group-created" | "members-added" | "tier1-addition";
+  readonly kind: "group-created" | "members-added" | "members-removed" | "tier1-addition";
   readonly block: string;
   readonly groupId?: string;
   readonly tier?: number;
@@ -97,7 +97,7 @@ function events(list: readonly EventVector[]): GroupRegistryEvent[] {
     const block = decimal(e.block);
     if (e.kind === "group-created")
       return { kind: e.kind, block, groupId: decimal(e.groupId), tier: e.tier as number };
-    if (e.kind === "members-added")
+    if (e.kind === "members-added" || e.kind === "members-removed")
       return { kind: e.kind, block, groupId: decimal(e.groupId), record: hex(e.record) };
     return { kind: e.kind, block, record: hex(e.record) };
   });
@@ -206,23 +206,32 @@ describe("countTier1Additions", () => {
   const deployment = caseNamed("deployment");
   const all = events(deployment.events);
 
-  test(
-    "no later event changes an earlier addition's verdict: every prefix agrees",
-    { timeout: 300_000 },
-    () => {
-      const full = countCase(deployment);
-      const cuts = [...new Set(all.map((e) => e.block))];
-      // Every third block, and the last, keeps the run short and still cuts
-      // between every kind of addition.
-      for (const cut of cuts.filter((_, i) => i % 3 === 0 || i === cuts.length - 1)) {
-        const prefix = all.filter((e) => e.block <= cut);
-        const got = countTier1Additions(prefix, ctx);
-        expect(got.additions.map((a) => shape(a.at, a.block, a.verdict))).toEqual(
-          full.additions.filter((a) => a.block <= cut).map((a) => shape(a.at, a.block, a.verdict)),
-        );
-      }
-    },
-  );
+  for (const c of vectors.cases)
+    test(
+      `no later event changes an earlier addition's verdict or break: every prefix of ${c.id} agrees`,
+      { timeout: 300_000 },
+      () => {
+        const list = events(c.events);
+        const full = countCase(c);
+        const cuts = [...new Set(list.map((e) => e.block))];
+        // Every third block, and the last, keeps the run short and still cuts
+        // between every kind of addition.
+        for (const cut of cuts.filter((_, i) => i % 3 === 0 || i === cuts.length - 1)) {
+          const got = countTier1Additions(
+            list.filter((e) => e.block <= cut),
+            ctx,
+          );
+          expect(got.additions.map((a) => shape(a.at, a.block, a.verdict))).toEqual(
+            full.additions
+              .filter((a) => a.block <= cut)
+              .map((a) => shape(a.at, a.block, a.verdict)),
+          );
+          expect(got.broken).toEqual(
+            full.broken !== null && full.broken.block <= cut ? full.broken : null,
+          );
+        }
+      },
+    );
 
   test("is judged under the binding's chain and registry", { timeout: 120_000 }, () => {
     // Under another chain ID every recomputed scope and message differs, so

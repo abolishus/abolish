@@ -388,9 +388,15 @@ interface Pending {
   readonly inputs: readonly bigint[];
 }
 
-// A batch this small, once it fails, is checked proof by proof: splitting it
-// further costs more pairings than it saves.
-const SPLIT_FLOOR = 4;
+// The most proofs one batch holds. An invalid proof can cost at most its own
+// batch the gain from batching, never the whole run's (T-52).
+const BATCH_MAX = 64;
+// A batch this small is checked proof by proof: a batch test costs more than
+// it can save.
+const BATCH_MIN = 5;
+// A failed batch this small is checked proof by proof rather than split: past
+// here, splitting costs more pairings than it saves.
+const SPLIT_MIN = 33;
 
 /**
  * `r_i`: uniform in `[1, 2^128)` from the CSPRNG, drawn after every proof of
@@ -446,42 +452,34 @@ function individually(items: readonly Pending[], verdicts: boolean[]): void {
 }
 
 function resolve(items: readonly Pending[], verdicts: boolean[]): void {
-  if (items.length <= SPLIT_FLOOR) individually(items, verdicts);
+  if (items.length < BATCH_MIN) individually(items, verdicts);
   else if (batchPasses(items)) for (const { at } of items) verdicts[at] = true;
-  else split(items, verdicts);
-}
-
-// `items` failed as a batch. A half that passes is accepted; if only one half
-// fails, it holds the invalid proofs and is split in turn. If both fail, the
-// failures are dense (a flood of junk, T-52), and every proof of both is
-// checked alone, so a batch of junk costs about 1.5 times checking it proof
-// by proof rather than the twice that splitting it to the end would.
-function split(items: readonly Pending[], verdicts: boolean[]): void {
-  const half = Math.ceil(items.length / 2);
-  const failed: (readonly Pending[])[] = [];
-  for (const part of [items.slice(0, half), items.slice(half)])
-    if (part.length > SPLIT_FLOOR && batchPasses(part))
-      for (const { at } of part) verdicts[at] = true;
-    else failed.push(part);
-  const [only] = failed;
-  if (failed.length === 1 && only !== undefined && only.length > SPLIT_FLOOR) split(only, verdicts);
-  else for (const part of failed) individually(part, verdicts);
+  // A failed batch holds an invalid proof: split it, each half batched again
+  // with fresh coefficients, until the parts are small enough to check alone.
+  else if (items.length < SPLIT_MIN) individually(items, verdicts);
+  else {
+    const half = Math.ceil(items.length / 2);
+    resolve(items.slice(0, half), verdicts);
+    resolve(items.slice(half), verdicts);
+  }
 }
 
 /**
  * Each proof's verdict under the pinned depth-32 key, exactly as
  * `verifyDecodedMembershipProof` gives it, but checked in batches
- * (docs/spec/vouching.md, Batched verification): a batch that passes accepts
- * every proof in it, and one that fails is split in halves until each proof's
- * own verdict is known, the smallest parts, and both halves of a batch whose
- * halves both fail, proof by proof. A proof whose
+ * (docs/spec/vouching.md, Batched verification): the proofs are taken in
+ * batches of at most 64, in order; a batch that passes accepts every proof in
+ * it, and one that fails is split in halves, each batched again, until the
+ * parts are below 33 proofs, which are checked proof by proof, so each
+ * verdict is the one checking the proof alone gives. A proof whose
  * signals `verifyDecodedMembershipProof` refuses (one at or above `r`, a root
  * of 0) is `false` and never enters a batch. Only proofs decoded by
  * `membershipProof` are accepted: the batch test is sound only for points in
  * their prime-order groups (T-05). The coefficients are drawn here, from the
  * CSPRNG, after every proof is held; no caller supplies them. Batching lowers
- * the cost of honest proofs; a batch of junk fails and falls back to about
- * 1.5 times the pairings of checking it proof by proof (T-52).
+ * the cost of honest proofs; each invalid proof costs at most its own batch
+ * that gain, and a batch of junk costs about 1.35 times checking it proof by
+ * proof (T-52).
  */
 export function verifyDecodedMembershipProofs(checks: readonly MembershipProofCheck[]): boolean[] {
   if (!Array.isArray(checks)) throw new TypeError("checks: expected an array");
@@ -497,6 +495,7 @@ export function verifyDecodedMembershipProofs(checks: readonly MembershipProofCh
     if (!DECODED.has(proof)) throw new TypeError("proof: expected a decoded membership proof");
     if (inputs !== null) pending.push({ at, proof, inputs });
   }
-  resolve(pending, verdicts);
+  for (let i = 0; i < pending.length; i += BATCH_MAX)
+    resolve(pending.slice(i, i + BATCH_MAX), verdicts);
   return verdicts;
 }

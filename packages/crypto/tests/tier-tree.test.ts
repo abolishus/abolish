@@ -13,6 +13,7 @@ import {
   tierTreeRoot,
   tierTreeZeros,
 } from "../src/index.ts";
+import { TierTreeBuilder } from "../src/tier-tree.ts";
 import { SPEC_VECTORS } from "./spec-vectors.ts";
 
 // docs/spec/vectors/tier-tree.json comes from an independent Python
@@ -225,5 +226,51 @@ describe("tier tree", () => {
       expect(() => tierTreeRoot([5n, bad])).toThrow(RangeError);
     expect(() => tierTreePath([5n], 1)).toThrow(RangeError);
     expect(() => tierTreePath([5n], -1)).toThrow(RangeError);
+  });
+});
+
+describe("TierTreeBuilder", () => {
+  const commitment = fc.bigInt({ min: 2n, max: 2n ** 200n });
+
+  test("gives tierTreeRoot's root after any appends and removals, wherever roots are taken", () => {
+    fc.assert(
+      fc.property(
+        fc.array(
+          fc.oneof(
+            commitment.map((c) => ({ op: "append" as const, c })),
+            fc.nat().map((i) => ({ op: "remove" as const, i })),
+            fc.constant({ op: "root" as const }),
+          ),
+          { maxLength: 40 },
+        ),
+        (ops) => {
+          const tree = new TierTreeBuilder();
+          const leaves: bigint[] = [];
+          for (const o of ops) {
+            if (o.op === "append") {
+              tree.append(o.c);
+              leaves.push(o.c);
+            } else if (o.op === "remove" && leaves.length > 0) {
+              tree.remove(o.i % leaves.length);
+              leaves[o.i % leaves.length] = 0n;
+            } else expect(tree.root()).toBe(tierTreeRoot(leaves));
+          }
+          expect(tree.root()).toBe(tierTreeRoot(leaves));
+          expect(tree.size).toBe(leaves.length);
+        },
+      ),
+      { numRuns: Math.min(numRuns, 50) },
+    );
+  });
+
+  test("refuses forbidden commitments and indices that name no leaf", () => {
+    const tree = new TierTreeBuilder();
+    expect(tree.root()).toBe(tierTreeRoot([]));
+    expect(() => tree.append(1n)).toThrow(RangeError);
+    expect(() => tree.remove(0)).toThrow(RangeError);
+    tree.append(5n);
+    expect(() => tree.remove(1)).toThrow(RangeError);
+    tree.remove(0);
+    expect(tree.root()).toBe(tierTreeRoot([0n]));
   });
 });

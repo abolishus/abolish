@@ -9,8 +9,9 @@
 // verdict of each addition is written out by hand from the spec's checks, in
 // the spec's order, and the script refuses to print a case whose proofs
 // snarkjs judges differently from what the case claims, or, for the counting
-// cases, whose verdicts this script's own replay of the counting rule
-// (Counting across the deployment) doesn't reproduce.
+// cases, whose verdicts, break and leaves (also written by hand) this
+// script's own replay of the counting rule (Counting across the deployment)
+// doesn't reproduce.
 //
 // It runs outside the workspace, because packages/crypto depends on @noble/*
 // only. In an empty directory:
@@ -721,9 +722,10 @@ const out = {
 writeFileSync(join(outDir, "vouch.json"), `${JSON.stringify(out, null, 2)}\n`);
 // --- Counting across the deployment (docs/spec/vouching.md). ---
 // Each case is a group registry's whole event sequence: groups created,
-// Tier 2 additions signed by the registrars, and Tier 1 additions. The
-// expected verdicts are written by hand; `replay` below is this script's own
-// reading of the counting rule, and every case must agree with it.
+// Tier 2 additions and removals signed by the registrars, and Tier 1
+// additions. The expected verdicts, break and leaves are written by hand;
+// `replay` below is this script's own reading of the counting rule, and every
+// case must agree with it.
 
 const INTERVAL = 1800n;
 const WINDOW = 302_400n;
@@ -765,6 +767,26 @@ const signed = (digest, seats) =>
       ]);
     }),
   ]);
+const REMOVE_TYPES = {
+  RemoveMembers: [
+    { name: "groupId", type: "uint64" },
+    { name: "tier", type: "uint8" },
+    { name: "size", type: "uint64" },
+    { name: "indices", type: "uint64[]" },
+  ],
+};
+// A `removeMembers` record of a Tier 2 group.
+const removeRecord = (groupId, size, indices) =>
+  Buffer.concat([
+    uint(groupId, 8),
+    uint(size, 8),
+    uint(indices.length, 2),
+    ...indices.map((i) => uint(i, 8)),
+    signed(
+      TypedDataEncoder.hash(DOMAIN, REMOVE_TYPES, { groupId, tier: 2, size, indices }),
+      [1, 3],
+    ),
+  ]);
 // An `addMembers` record of a Tier 2 group (docs/spec/contracts.md, Group registry).
 const addRecord = (groupId, firstIndex, commitments) =>
   Buffer.concat([
@@ -778,30 +800,9 @@ const addRecord = (groupId, firstIndex, commitments) =>
     ),
   ]);
 
-// This script's strict replay of one Tier 2 addition record, for the
-// generator's own check: null if it applies, else the reason.
-function applyAdd(record, groupId, leaves) {
-  const count = record.readUInt16BE(16);
-  const approvalsAt = 18 + 32 * count;
-  if (
-    record.length < approvalsAt + 1 ||
-    record.length !== approvalsAt + 1 + 66 * record[approvalsAt]
-  )
-    return "length";
-  if (count < 1 || count > 256) return "batch";
-  const commitments = Array.from({ length: count }, (_, i) =>
-    big(record.subarray(18 + 32 * i, 50 + 32 * i)),
-  );
-  if (commitments.some((c) => c < 2n || c >= R || c === POSEIDON2_ZERO_ONE))
-    return "forbidden-commitment";
-  if (big(record.subarray(0, 8)) !== groupId) return "group";
-  const firstIndex = big(record.subarray(8, 16));
-  const digest = TypedDataEncoder.hash(DOMAIN, ADD_TYPES, {
-    groupId,
-    tier: 2,
-    firstIndex,
-    commitments,
-  });
+// This script's check of a record's approvals over `digest` (rules 7 and 8):
+// null if they authorise it, else the reason.
+function approvalsFail(record, approvalsAt, digest) {
   const n = record[approvalsAt];
   if (n < THRESHOLD) return "approvals";
   let last = 0;
@@ -817,8 +818,59 @@ function applyAdd(record, groupId, leaves) {
     });
     if (signer !== registrars[seat - 1].address) return "signature";
   }
-  if (firstIndex !== BigInt(leaves.length)) return "position";
-  leaves.push(...commitments);
+  return null;
+}
+const exactLength = (record, header, item) => {
+  if (record.length < header + 1) return false;
+  const approvalsAt = header + item * record.readUInt16BE(header - 2);
+  return (
+    record.length >= approvalsAt + 1 && record.length === approvalsAt + 1 + 66 * record[approvalsAt]
+  );
+};
+
+// This script's strict replay of one Tier 2 record, for the generator's own
+// check: null if it applies (and it is applied to `leaves`), else the reason.
+function applyRecord(kind, record, groupId, leaves) {
+  const count = record.length >= 18 ? record.readUInt16BE(16) : 0;
+  if (kind === "members-added") {
+    if (!exactLength(record, 18, 32)) return "length";
+    if (count < 1 || count > 256) return "batch";
+    const commitments = Array.from({ length: count }, (_, i) =>
+      big(record.subarray(18 + 32 * i, 50 + 32 * i)),
+    );
+    if (commitments.some((c) => c < 2n || c >= R || c === POSEIDON2_ZERO_ONE))
+      return "forbidden-commitment";
+    if (big(record.subarray(0, 8)) !== groupId) return "group";
+    const firstIndex = big(record.subarray(8, 16));
+    const digest = TypedDataEncoder.hash(DOMAIN, ADD_TYPES, {
+      groupId,
+      tier: 2,
+      firstIndex,
+      commitments,
+    });
+    const why = approvalsFail(record, 18 + 32 * count, digest);
+    if (why !== null) return why;
+    if (firstIndex !== BigInt(leaves.length)) return "position";
+    leaves.push(...commitments);
+    return null;
+  }
+  if (!exactLength(record, 18, 8)) return "length";
+  if (count < 1 || count > 256) return "batch";
+  const size = big(record.subarray(8, 16));
+  const indices = Array.from({ length: count }, (_, i) =>
+    big(record.subarray(18 + 8 * i, 26 + 8 * i)),
+  );
+  for (let i = 0; i < count; i++) {
+    if (i > 0 && indices[i] <= indices[i - 1]) return "index-order";
+    if (indices[i] >= size) return "index-range";
+  }
+  if (big(record.subarray(0, 8)) !== groupId) return "group";
+  const digest = TypedDataEncoder.hash(DOMAIN, REMOVE_TYPES, { groupId, tier: 2, size, indices });
+  const why = approvalsFail(record, 18 + 8 * count, digest);
+  if (why !== null) return why;
+  if (size > BigInt(leaves.length)) return "size";
+  if (indices.some((i) => leaves[Number(i)] === 0n)) return "removed";
+  for (const i of indices) leaves[Number(i)] = 0n;
   return null;
 }
 
@@ -835,22 +887,31 @@ async function replay(events) {
       brk({ at, block: e.block, groupId: e.groupId, reason: "duplicate-group" });
     else groups.set(e.groupId, { at, block: e.block, tier: e.tier });
   });
-  // Each Tier 2 group's leaves after each of its records, until one breaks.
+  // Each Tier 2 group's leaves after each of its records, until one breaks. A
+  // members record of a group with no earlier GroupCreated breaks at once.
   const history = new Map();
-  for (const [groupId, g] of groups) {
-    if (g.tier !== 2) continue;
-    const leaves = [];
-    const steps = [];
-    for (const [at, e] of events.entries()) {
-      if (e.kind !== "members-added" || e.groupId !== groupId) continue;
-      const reason = at < g.at ? "created" : applyAdd(e.record, groupId, leaves);
-      if (reason !== null) {
-        brk({ at, block: e.block, groupId, reason });
-        break;
-      }
-      steps.push({ block: e.block, leaves: leaves.slice() });
+  const leavesOf = new Map();
+  const stopped = new Set();
+  for (const [at, e] of events.entries()) {
+    if (e.kind !== "members-added" && e.kind !== "members-removed") continue;
+    const g = groups.get(e.groupId);
+    if (g === undefined || g.at > at) {
+      brk({ at, block: e.block, groupId: e.groupId, reason: "created" });
+      continue;
     }
-    history.set(groupId, steps);
+    if (g.tier !== 2 || stopped.has(e.groupId)) continue;
+    const leaves = leavesOf.get(e.groupId) ?? [];
+    const reason = applyRecord(e.kind, e.record, e.groupId, leaves);
+    if (reason !== null) {
+      brk({ at, block: e.block, groupId: e.groupId, reason });
+      stopped.add(e.groupId);
+      continue;
+    }
+    leavesOf.set(e.groupId, leaves);
+    history.set(e.groupId, [
+      ...(history.get(e.groupId) ?? []),
+      { block: e.block, leaves: leaves.slice() },
+    ]);
   }
   const rootAt = (groupId, block) =>
     tree((history.get(groupId) ?? []).filter((s) => s.block <= block).at(-1)?.leaves ?? []).root;
@@ -970,6 +1031,7 @@ const v08 = await at9({ cv: c2, voucher: 0, j: 8 });
 const v18 = await at9({ cv: c2, voucher: 1, j: 8 });
 const v29 = await at9({ cv: c2, voucher: 2, j: 9 });
 const offGrid = await at9({ cv: c2, voucher: 1, j: 8, rootBlock: GRID + 1n });
+const offGrid0 = await at9({ cv: c2, voucher: 0, j: 8, rootBlock: GRID + 1n });
 const v18late = await at9({ cv: c2, voucher: 1, j: 8, rootBlock: GRID2, t: t2b });
 const tier0Root = await at9({ cv: c2, voucher: 1, j: 8, tier2GroupId: 3n });
 const lateGroup = await at9({ cv: c2, voucher: 0, j: 8, tier2GroupId: 13n });
@@ -992,10 +1054,64 @@ const a25 = [
   await at10({ cv: c3, voucher: 4, j: 5 }),
   await at10({ cv: c3, voucher: 5, j: 3, t: t2b, rootBlock: GRID2 }),
 ];
-if (t8.root === t2.root) throw new Error("group 8's root must differ");
+// Group 14, created and filled in the grid block itself, and group 8 after
+// voucher 1's removal.
+const t14 = tree(vouchers.slice(0, 3).map((v) => v.commitment));
+const t8r = tree([vouchers[0].commitment, 0n]);
+const at14 = [
+  await vouch({
+    groupId: 12n,
+    rootBlock: GRID,
+    cv: c0,
+    voucher: 0,
+    j: 10,
+    tier2GroupId: 14n,
+    t: t14,
+  }),
+  await vouch({
+    groupId: 12n,
+    rootBlock: GRID,
+    cv: c0,
+    voucher: 1,
+    j: 10,
+    tier2GroupId: 14n,
+    t: t14,
+  }),
+  await vouch({
+    groupId: 12n,
+    rootBlock: GRID,
+    cv: c0,
+    voucher: 2,
+    j: 4,
+    tier2GroupId: 14n,
+    t: t14,
+  }),
+];
+const atGrid2 = [
+  await at10({ cv: c2, voucher: 3, j: 3, rootBlock: GRID2, t: t2b }),
+  await at10({ cv: c2, voucher: 4, j: 4, rootBlock: GRID2, t: t2b }),
+  await at10({ cv: c2, voucher: 5, j: 5, rootBlock: GRID2, t: t2b }),
+];
+const afterRemoval = [
+  await vouch({
+    groupId: 12n,
+    rootBlock: GRID2,
+    cv: c3,
+    voucher: 0,
+    j: 11,
+    tier2GroupId: 8n,
+    t: t8r,
+  }),
+  await vouch({ groupId: 12n, rootBlock: GRID2, cv: c3, voucher: 3, j: 6, t: t2b }),
+  await vouch({ groupId: 12n, rootBlock: GRID2, cv: c3, voucher: 4, j: 6, t: t2b }),
+];
+const a15 = await inGroup(15n);
+if (new Set([t2.root, t2b.root, t8.root, t8r.root, t14.root]).size !== 5)
+  throw new Error("the Tier 2 roots must differ");
 
 const created = (groupId, tier, block) => ({ kind: "group-created", block, groupId, tier });
 const added = (groupId, block, record) => ({ kind: "members-added", block, groupId, record });
+const removed = (groupId, block, record) => ({ kind: "members-removed", block, groupId, record });
 const t1 = (block, groupId, cv, vouches, note) => ({
   kind: "tier1-addition",
   block,
@@ -1033,7 +1149,18 @@ const countCases = [
         ),
       ),
       created(10n, 1, 1_200_000n),
+      created(14n, 2, GRID),
+      added(
+        14n,
+        GRID,
+        addRecord(
+          14n,
+          0n,
+          vouchers.slice(0, 3).map((v) => v.commitment),
+        ),
+      ),
       created(13n, 2, GRID + 10n),
+      removed(8n, GRID + 20n, removeRecord(8n, 2n, [1n])),
       added(T2_GROUP, GRID + 50n, addRecord(T2_GROUP, 5n, [fifth])),
       t1(GRID + 100n, TIER1_GROUP, c0, a1, "counted: leaf 0 of group 9"),
       t1(
@@ -1107,6 +1234,29 @@ const countCases = [
         "the second vouch names group 8 with group 7's root",
       ),
       t1(
+        GRID + 265n,
+        TIER1_GROUP,
+        c2,
+        [otherGroupRoot, offGrid0, v29],
+        "the first vouch fails a later check than the second: checks run vouch by vouch within each check",
+      ),
+      t1(
+        GRID + 270n,
+        12n,
+        c0,
+        at14,
+        "counted: leaf 1 of group 12, every vouch naming Tier 2 group 14, created and filled in the root block itself",
+      ),
+      t1(GRID + 280n, 15n, c2, a15, "group 15 is created in this block, after this addition"),
+      created(15n, 1, GRID + 280n),
+      t1(
+        GRID2,
+        10n,
+        c2,
+        atGrid2,
+        "counted: leaf 1 of group 10, its own block its vouches' root block",
+      ),
+      t1(
         GRID2 + 10n,
         TIER1_GROUP,
         c2,
@@ -1142,11 +1292,18 @@ const countCases = [
         "counted: leaf 3, vouched by voucher 5, who joined Tier 2 after the first grid block",
       ),
       t1(
+        GRID2 + 70n,
+        12n,
+        c3,
+        afterRemoval,
+        "counted: leaf 2 of group 12, the first vouch naming group 8 after voucher 1's removal",
+      ),
+      t1(
         GRID + WINDOW,
         10n,
         c1,
         a24,
-        "counted: leaf 1 of group 10, exactly W blocks after its root block",
+        "counted: leaf 2 of group 10, exactly W blocks after its root block",
       ),
       t1(GRID + WINDOW + 1n, 10n, c3, a25, "the first vouch's root block is W + 1 blocks back"),
     ],
@@ -1167,24 +1324,32 @@ const countCases = [
       { error: "tier2-group", vouch: 1 },
       { error: "tier2-group", vouch: 0 },
       { error: "root-mismatch", vouch: 1 },
+      { error: "root-grid", vouch: 1 },
+      { valid: true, index: 1 },
+      { error: "group" },
+      { valid: true, index: 1 },
       { error: "root-mismatch", vouch: 0 },
       { error: "proof", vouch: 2, which: "slot" },
       { valid: true, index: 2 },
       { error: "decode" },
       { error: "duplicate-voucher", vouch: 2 },
       { valid: true, index: 3 },
-      { valid: true, index: 1 },
+      { valid: true, index: 2 },
+      { valid: true, index: 2 },
       { error: "root-window", vouch: 0 },
     ],
+    broken: null,
     leaves: [
-      [TIER1_GROUP, GRID + 99n],
-      [TIER1_GROUP, GRID + 100n],
-      [TIER1_GROUP, GRID + 139n],
-      [TIER1_GROUP, GRID + 140n],
-      [TIER1_GROUP, GRID2 + 60n],
-      [10n, GRID + WINDOW + 1n],
-      [12n, GRID + 210n],
-      [11n, GRID + WINDOW + 1n],
+      [TIER1_GROUP, GRID + 99n, []],
+      [TIER1_GROUP, GRID + 100n, [c0]],
+      [TIER1_GROUP, GRID + 139n, [c0]],
+      [TIER1_GROUP, GRID + 140n, [c0, c1]],
+      [TIER1_GROUP, GRID2 + 60n, [c0, c1, c2, c3]],
+      [10n, GRID + WINDOW + 1n, [c0, c2, c1]],
+      [12n, GRID + 210n, [c2]],
+      [12n, GRID2 + 70n, [c2, c0, c3]],
+      [11n, GRID + WINDOW + 1n, []],
+      [15n, GRID + WINDOW + 1n, []],
     ],
   },
   {
@@ -1205,9 +1370,10 @@ const countCases = [
       t1(GRID + 200n, TIER1_GROUP, c2, a4, "undecided: after b_R"),
     ],
     want: [{ valid: true, index: 0 }],
+    broken: { at: 5, block: GRID + 150n, groupId: T2_GROUP, reason: "position" },
     leaves: [
-      [TIER1_GROUP, GRID + 149n],
-      [TIER1_GROUP, GRID + 150n],
+      [TIER1_GROUP, GRID + 149n, [c0]],
+      [TIER1_GROUP, GRID + 150n, "group-history"],
     ],
   },
   {
@@ -1220,9 +1386,10 @@ const countCases = [
       t1(GRID + 130n, TIER1_GROUP, c1, a5, "undecided"),
     ],
     want: [{ valid: true, index: 0 }],
+    broken: { at: 4, block: GRID + 120n, groupId: T2_GROUP, reason: "duplicate-group" },
     leaves: [
-      [TIER1_GROUP, GRID + 119n],
-      [TIER1_GROUP, GRID + 120n],
+      [TIER1_GROUP, GRID + 119n, [c0]],
+      [TIER1_GROUP, GRID + 120n, "group-history"],
     ],
   },
   {
@@ -1236,9 +1403,27 @@ const countCases = [
       t1(GRID + 100n, TIER1_GROUP, c0, a1, "undecided"),
     ],
     want: [],
+    broken: { at: 1, block: 1_000_000n, groupId: T2_GROUP, reason: "created" },
     leaves: [
-      [TIER1_GROUP, 999_999n],
-      [TIER1_GROUP, 1_000_000n],
+      [TIER1_GROUP, 999_999n, []],
+      [TIER1_GROUP, 1_000_000n, "group-history"],
+    ],
+  },
+  {
+    id: "record-without-group",
+    description:
+      "A members record naming a group never created breaks Tier 1 from its block on, whatever comes after",
+    events: [
+      ...prefix,
+      t1(GRID + 100n, TIER1_GROUP, c0, a1, "counted: before the record"),
+      added(99n, GRID + 150n, addRecord(99n, 0n, [fifth])),
+      t1(GRID + 200n, TIER1_GROUP, c1, a5, "undecided"),
+    ],
+    want: [{ valid: true, index: 0 }],
+    broken: { at: 4, block: GRID + 150n, groupId: 99n, reason: "created" },
+    leaves: [
+      [TIER1_GROUP, GRID + 149n, [c0]],
+      [TIER1_GROUP, GRID + 150n, "group-history"],
     ],
   },
 ];
@@ -1246,7 +1431,7 @@ const countCases = [
 const encodeEvent = (e) => {
   if (e.kind === "group-created")
     return { kind: e.kind, block: String(e.block), groupId: String(e.groupId), tier: e.tier };
-  if (e.kind === "members-added")
+  if (e.kind === "members-added" || e.kind === "members-removed")
     return {
       kind: e.kind,
       block: String(e.block),
@@ -1269,25 +1454,31 @@ for (const c of countCases) {
     throw new Error(
       `${c.id}: expected ${JSON.stringify(want)}, the replay gives ${JSON.stringify(verdicts)}`,
     );
+  const text = (v) => JSON.stringify(v, (_, x) => (typeof x === "bigint" ? String(x) : x));
+  if (text(got.broken) !== text(c.broken))
+    throw new Error(
+      `${c.id}: expected break ${text(c.broken)}, the replay gives ${text(got.broken)}`,
+    );
+  const leaves = c.leaves.map(([groupId, block, expected]) => {
+    const found = got.leavesAt(groupId, block);
+    const want =
+      expected === "group-history" ? { error: expected } : { leaves: expected.map(String) };
+    if (text(found) !== text(want))
+      throw new Error(
+        `${c.id}: group ${String(groupId)} at ${String(block)}: expected ${text(want)}, got ${text(found)}`,
+      );
+    return { groupId: String(groupId), block: String(block), ...want };
+  });
   counting.push({
     id: c.id,
     description: c.description,
     events: c.events.map(encodeEvent),
     additions: got.additions,
     broken:
-      got.broken === null
+      c.broken === null
         ? null
-        : {
-            at: got.broken.at,
-            block: String(got.broken.block),
-            groupId: String(got.broken.groupId),
-            reason: got.broken.reason,
-          },
-    leaves: c.leaves.map(([groupId, block]) => ({
-      groupId: String(groupId),
-      block: String(block),
-      ...got.leavesAt(groupId, block),
-    })),
+        : { ...c.broken, block: String(c.broken.block), groupId: String(c.broken.groupId) },
+    leaves,
   });
 }
 writeFileSync(

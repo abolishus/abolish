@@ -16,7 +16,7 @@ import {
 } from "./group-registry.ts";
 import { type MembershipProofCheck, verifyDecodedMembershipProofs } from "./membership-proof.ts";
 import { PARAMETERS } from "./parameters.ts";
-import { tierTreeRoot } from "./tier-tree.ts";
+import { TierTreeBuilder } from "./tier-tree.ts";
 import {
   precheckTier1Addition,
   proofFailure,
@@ -98,10 +98,9 @@ export type Tier1CountVerdict =
 /**
  * The earliest event, in log order, that breaks a Tier 2 group's strict
  * replay: a members record its group's replay refuses (`applyGroupRecords`'
- * reasons), a members record of a Tier 2 group logged before the group's
- * `GroupCreated` (`created`), or a second `GroupCreated` for a group
- * (`duplicate-group`). An honest registry on the release's bytecode logs
- * none of them.
+ * reasons), a members record of any group with no earlier `GroupCreated`
+ * (`created`), or a second `GroupCreated` for a group (`duplicate-group`).
+ * An honest registry on the release's bytecode logs none of them.
  */
 export interface Tier1Break {
   /** The event's position in the events given. */
@@ -215,10 +214,11 @@ function readEvents(events: readonly GroupRegistryEvent[]): GroupRegistryEvent[]
  * leaf and consumes its slot nullifiers for good; one that fails consumes
  * nothing, takes no index and fails nothing else (T-25, T-53).
  *
- * Every proof is checked before the walk, in batches with coefficients from
- * the CSPRNG (`verifyDecodedMembershipProofs`), only for additions that pass
- * the checks before `slot-spent`, which need no counting state; each proof's
- * verdict is the one checking it alone gives (T-52).
+ * Each Tier 2 group a vouch names is replayed once, with its root taken at
+ * every block named. Every proof is checked before the walk, in batches with
+ * coefficients from the CSPRNG (`verifyDecodedMembershipProofs`), only for
+ * additions that pass the checks before `slot-spent`, which need no counting
+ * state; each proof's verdict is the one checking it alone gives (T-52).
  */
 export function countTier1Additions(
   events: readonly GroupRegistryEvent[],
@@ -247,16 +247,19 @@ export function countTier1Additions(
     else groups.set(e.groupId, { at, block: e.block, tier: e.tier });
   }
 
-  // Each Tier 2 group's records, replayed strictly over the whole sequence given.
+  // Each Tier 2 group's records, replayed strictly over the whole sequence
+  // given. A members record of a group with no earlier GroupCreated, of any
+  // tier, breaks at its own block, so no later event can move a break earlier
+  // (T-71).
   const tier2 = new Map<bigint, Tier2Record[]>();
   for (const [at, e] of list.entries()) {
     if (e.kind !== "members-added" && e.kind !== "members-removed") continue;
     const group = groups.get(e.groupId);
-    if (group?.tier !== 2) continue;
-    if (at < group.at) {
+    if (group === undefined || group.at > at) {
       breakAt({ at, block: e.block, groupId: e.groupId, reason: "created" });
       continue;
     }
+    if (group.tier !== 2) continue;
     const records = tier2.get(e.groupId) ?? [];
     records.push({
       at,
@@ -281,30 +284,8 @@ export function countTier1Additions(
   }
   const stop: bigint | null = (broken as Tier1Break | null)?.block ?? null;
 
-  // A Tier 2 group's root at a block, over records the strict replay accepted.
-  const roots = new Map<string, bigint>();
-  const rootAt = (groupId: bigint, block: bigint): bigint => {
-    const key = `${groupId}:${block}`;
-    const known = roots.get(key);
-    if (known !== undefined) return known;
-    const leaves: bigint[] = [];
-    for (const r of tier2.get(groupId) ?? []) {
-      if (r.block > block) break;
-      // Accepted by applyGroupRecords above, since its block is before b_R.
-      if (r.kind === "add") {
-        const d = decodeGroupAddition(r.record);
-        if (d.ok) leaves.push(...d.value.commitments);
-      } else {
-        const d = decodeGroupRemoval(r.record);
-        if (d.ok) for (const i of d.value.indices) leaves[Number(i)] = 0n;
-      }
-    }
-    const root = tierTreeRoot(leaves);
-    roots.set(key, root);
-    return root;
-  };
-
-  // The checks that need no counting state, for every addition before b_R.
+  // The checks that need no counting state, for every addition before b_R:
+  // first those up to `tier2-group`, collecting the Tier 2 roots they name.
   type Pre =
     | { readonly at: number; readonly block: bigint; readonly verdict: Tier1CountVerdict }
     | {
@@ -314,13 +295,21 @@ export function countTier1Additions(
         readonly value: Tier1Addition;
         readonly proofs: readonly MembershipProofCheck[];
       };
-  const pres: Pre[] = [];
+  const named = new Map<bigint, Set<bigint>>();
+  const opened: Pre[] = [];
   for (const [at, e] of list.entries()) {
     if (e.kind !== "tier1-addition") continue;
     if (stop !== null && e.block >= stop) break;
-    pres.push(stateless(at, e.block, e.record));
+    const p = upToTier2Group(at, e.block, e.record);
+    if (p.verdict === null)
+      for (const v of p.value.vouches) {
+        const blocks = named.get(v.tier2GroupId) ?? new Set<bigint>();
+        blocks.add(v.rootBlock);
+        named.set(v.tier2GroupId, blocks);
+      }
+    opened.push(p);
   }
-  function stateless(at: number, block: bigint, record: Uint8Array): Pre {
+  function upToTier2Group(at: number, block: bigint, record: Uint8Array): Pre {
     const pre = precheckTier1Addition(record, vouchCtx);
     if (!pre.ok) return { at, block, verdict: pre.failure };
     const { groupId, vouches } = pre.value;
@@ -338,11 +327,46 @@ export function countTier1Additions(
       if (t2?.tier !== 2 || t2.block > v.rootBlock)
         return fail({ ok: false, error: "tier2-group", vouch: i });
     }
-    for (const [i, v] of vouches.entries())
-      if (v.root !== rootAt(v.tier2GroupId, v.rootBlock))
-        return fail({ ok: false, error: "root-mismatch", vouch: i });
     return { at, block, verdict: null, value: pre.value, proofs: pre.proofs };
   }
+
+  // Each named Tier 2 group replayed once, its root taken at every block a
+  // vouch names (T-52). Every record applied is in a block before b_R, since
+  // a root block is at most its addition's block, so the strict replay above
+  // accepted it.
+  const roots = new Map<string, bigint>();
+  for (const [groupId, blocks] of named) {
+    const tree = new TierTreeBuilder();
+    const records = tier2.get(groupId) ?? [];
+    let next = 0;
+    for (const block of [...blocks].sort((x, y) => (x < y ? -1 : x > y ? 1 : 0))) {
+      for (; next < records.length; next++) {
+        const r = records[next] as Tier2Record;
+        if (r.block > block) break;
+        if (r.kind === "add") {
+          const d = decodeGroupAddition(r.record);
+          if (d.ok) for (const c of d.value.commitments) tree.append(c);
+        } else {
+          const d = decodeGroupRemoval(r.record);
+          if (d.ok) for (const i of d.value.indices) tree.remove(Number(i));
+        }
+      }
+      roots.set(`${groupId}:${block}`, tree.root());
+    }
+  }
+  const pres = opened.map((p): Pre => {
+    if (p.verdict !== null) return p;
+    const mismatch = p.value.vouches.findIndex(
+      (v) => v.root !== roots.get(`${v.tier2GroupId}:${v.rootBlock}`),
+    );
+    return mismatch < 0
+      ? p
+      : {
+          at: p.at,
+          block: p.block,
+          verdict: { ok: false, error: "root-mismatch", vouch: mismatch },
+        };
+  });
 
   const verdicts = verifyDecodedMembershipProofs(
     pres.flatMap((p) => (p.verdict === null ? p.proofs : [])),

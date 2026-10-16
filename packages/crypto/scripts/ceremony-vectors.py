@@ -89,8 +89,8 @@ def verify(key, tag, m, sig):
     return ecdsa.verify(key, ds(tag, m), sig)
 
 
-def panel_id(k, keys):
-    return H(ds(PANEL_TAG, u8(k) + u8(len(keys)) + b"".join(keys)))
+def panel_id(k, keys, tag=PANEL_TAG):
+    return H(ds(tag, u8(k) + u8(len(keys)) + b"".join(keys)))
 
 
 def make_panel(label, k, n):
@@ -117,7 +117,7 @@ def context(panel, run_id, election=ELECTION):
             + election["trusteeRegistry"]
             + election["electionId"]
             + election["stubHash"]
-            + panel_id(panel["k"], panel["keys"])
+            + panel_id(panel["k"], panel["keys"], panel.get("tag", PANEL_TAG))
             + run_id,
         )
     )
@@ -434,7 +434,7 @@ def check(panel, b, election=ELECTION):
             continue
         if i not in passing:
             reasons.append("possession")
-        elif dhs.count(element(keys[i]["dh"])) > 1 or sks.count(keys[i]["signingKey"]) > 1 or keys[i]["signingKey"] in panel["keys"]:
+        elif dhs.count(element(keys[i]["dh"])) > 1 or sks.count(keys[i]["signingKey"]) > 1 or keys[i]["signingKey"] in panel["keys"] + panel.get("otherKeys", []):
             reasons.append("duplicate-key")
         if i not in ch:
             reasons.append("no-challenges")

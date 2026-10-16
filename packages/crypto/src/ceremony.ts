@@ -43,6 +43,7 @@ import {
   type KemPublicKey,
 } from "./share-encryption.ts";
 import {
+  authorPanelId,
   identityKey,
   type Panel,
   panelId,
@@ -140,6 +141,20 @@ export interface CeremonyParams {
   readonly stubHash: Uint8Array;
   readonly panel: Panel;
   readonly runId: Uint8Array;
+  /**
+   * `"author"` for the author panel's run (docs/spec/ceremony.md, Author
+   * panel): `panel` is the definition's author panel (`1 ≤ k_A`), the
+   * context binds its author panel identifier, and `stubHash` must be
+   * `author_stub_hash`. The default panel's run otherwise.
+   */
+  readonly panelKind?: "default" | "author";
+  /**
+   * In either run of an election with an author panel, the other panel's
+   * identity keys, which `duplicate-key` reads beside the run's own: the
+   * pinned default panel's in the author run, the definition's
+   * `author_keys` in the default run (T-14).
+   */
+  readonly otherPanelKeys?: readonly Uint8Array[];
 }
 
 const CONTEXT = struct([
@@ -155,6 +170,8 @@ interface Run {
   readonly context: Uint8Array;
   readonly threshold: number;
   readonly keys: readonly Uint8Array[];
+  /** Every identity key of both panels, which a signing key must not equal. */
+  readonly identities: readonly Uint8Array[];
 }
 
 // Each field read once, and the panel's identifier computed here, never taken
@@ -163,11 +180,19 @@ function runOf(params: CeremonyParams): Run {
   if (params === null || typeof params !== "object")
     throw new TypeError("ceremony: expected parameters");
   const { l2ChainId, trusteeRegistry, electionId, stubHash, panel, runId } = params;
+  const { panelKind = "default", otherPanelKeys = [] } = params;
   if (panel === null || typeof panel !== "object")
     throw new TypeError("ceremony: expected a panel");
+  if (panelKind !== "default" && panelKind !== "author")
+    throw new TypeError("ceremony: panelKind must be default or author");
+  if (!Array.isArray(otherPanelKeys))
+    throw new TypeError("ceremony: otherPanelKeys must be an array");
   const keys = Array.isArray(panel.keys) ? panel.keys.map((k) => Uint8Array.from(k)) : [];
+  const others = otherPanelKeys.map((k) => Uint8Array.from(k));
   const threshold = panel.threshold;
-  const id = panelId({ threshold, keys });
+  // T-37: each panel's identifier under its own tag, so no message of one
+  // panel's run checks in the other's.
+  const id = (panelKind === "author" ? authorPanelId : panelId)({ threshold, keys });
   const context = H(
     ds(
       "abolish/v1/ceremony-context",
@@ -181,7 +206,7 @@ function runOf(params: CeremonyParams): Run {
       }),
     ),
   );
-  return { context, threshold, keys };
+  return { context, threshold, keys, identities: [...keys, ...others] };
 }
 
 /** `ceremony_context` (docs/spec/ceremony.md, Ceremony context). */
@@ -743,7 +768,7 @@ function seatResults(run: Run, t: Rounds): SeatResult[] {
   const s2 = t.challenges.map((m) => m.index);
 
   const passing = t.keys.filter((m) => possessionOk(run.context, m));
-  const identities = new Set(run.keys.map(hex));
+  const identities = new Set(run.identities.map(hex));
   const count = (values: string[]) => {
     const c = new Map<string, number>();
     for (const v of values) c.set(v, (c.get(v) ?? 0) + 1);

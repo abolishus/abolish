@@ -349,7 +349,8 @@ export type ProfileCombinationRule = "profile-combination" | "unsupported-versio
  * the verifier read all of it ([[close]], Version; T-35, T-50, T-25, T-53):
  * board-entry version 1, 3 or 4 and contract-event version 1 to 4 fail, as
  * does board-entry version 6, which carries running openings and only a
- * live definition pins (docs/spec/tally.md, Tally-opening version 2); a contract-event
+ * live definition pins (docs/spec/tally.md, Tally-opening version 2), and
+ * version 7, which is only for a definition with an author panel; a contract-event
  * version this package doesn't read is `unsupported-version` when the
  * profile fails on no other ground. A board-entry version this package doesn't read is
  * `unsupported-version`, never a failure: a later version may add itself to
@@ -379,6 +380,10 @@ export function profileCombinationRule(
   // until their ballot versions are specified, every version-6 and version-7
   // profile fails 2.3) never falls back to another version's rules.
   if (definition === undefined || ![1, 3, 4, 5].includes(definition)) return "profile-combination";
+  // Board-entry version 7 carries an author panel's approvals, and these
+  // definition versions have no author panel, so it is never theirs
+  // (verifier 2.3; T-17: no approvals record on a board that has no use for it).
+  if (board === 7) return "profile-combination";
   // Definition versions 1, 3 and 4 have one question, so display-text
   // version 1; version 2 carries questions and pairs with definition version
   // 5 (or 6, which this package doesn't decode). A display-text version this

@@ -141,6 +141,7 @@ export {
   BOARD_PAYLOAD_TYPES_V4,
   BOARD_PAYLOAD_TYPES_V5,
   BOARD_PAYLOAD_TYPES_V6,
+  BOARD_PAYLOAD_TYPES_V7,
   boardPayloadTypes,
   type BoardEntryVersion,
   type BoardEntry,
@@ -472,6 +473,18 @@ export {
   type MembershipMessageInput,
   selectBallots,
 } from "./revoting.ts";
+export {
+  AUTHOR_APPROVALS,
+  type AuthorApprovalContext,
+  type AuthorApprovals,
+  type AuthorApprovalsCheck,
+  type AuthorApprovalsCode,
+  type AuthorApprovalsRefusal,
+  authorApprovalsRefusal,
+  checkAuthorApprovals,
+  decodeAuthorApprovals,
+  encodeAuthorApprovals,
+} from "./author-approvals.ts";
 export {
   type AnswersMessage,
   answersMessage,
@@ -950,6 +963,7 @@ export {
 } from "./delivery.ts";
 export { isWellFormedUtf8 } from "./utf8.ts";
 export {
+  authorCeremonyRegistrationMessage,
   authorPanelId,
   authorPanelRule,
   type AuthorPanelRule,
@@ -963,9 +977,11 @@ export {
   p256Key,
   p256Sig,
   panelId,
+  signAuthorCeremonyRegistration,
   signCeremonyRegistration,
   type SignatureTag,
   signStatement,
+  verifyAuthorCeremonyRegistration,
   verifyCeremonyRegistration,
   verifyStatement,
 } from "./trustee.ts";

@@ -434,6 +434,10 @@ contract Tier1AdditionsTest is GroupTestBase {
         _setU16(b, 41 + 48, 12);
         _setWord(b, 41 + 16, 0);
         _expectTier1Refused(b, _vouchErr(GroupRegistry.VouchSlot.selector, 0));
+        // Root 0, which Semaphore proves any secret a member of.
+        b = bytes.concat(record);
+        _setWord(b, 41 + 16, 0);
+        _expectTier1Refused(b, _vouchErr(GroupRegistry.VouchRoot.selector, 0));
         b = bytes.concat(record);
         _setWord(b, 41 + 16, GroupRegistryLib.R);
         _setWord(b, 41 + 50, GroupRegistryLib.R);

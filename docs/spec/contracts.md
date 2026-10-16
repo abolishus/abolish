@@ -519,8 +519,49 @@ Like the other registries, the group registry is shared by every election, so a 
 - **The registrars can't rotate.** A lost or compromised key means a new registry, and every member registers again in its new groups. That is the cost of a set a verifier can check without the Safe's history.
 - **Duplicates are the signing path's to refuse** (Additions): a repeated commitment overstates `group_size` by one.
 - **Tiers 1 and 2 have no addition path yet** (P3-3, P3-4), and no registry may be deployed until they do.
-- **No paymaster yet.** [[0004-l2-choice]] sponsors registration through our own ERC-4337 paymaster (P3-2 part 4c); until then whoever submits an addition pays its gas.
+- **Only our batches are sponsored.** The registration paymaster (below) pays for the signing service's `addMembers` calls only; anyone else who submits an addition pays its gas.
 - **Gas.** In the tests, adding one member with two of three approvals costs about 67,000 gas beyond the transaction's base cost and calldata, each further commitment in the same batch about 1,500, and a batch of 256 about 430,000: two `ecrecover` calls, the keccak hashes of the digest, the storage write and the accumulator step. Removing one member costs about 85,000, mostly its first write to the removed-index bitmap.
+
+## Registration paymaster
+
+Threats: T-13 (linking an identity to who sponsored it), T-52 (spending our gas), T-62 (contract admin abuse), T-69 (a seized service), T-71 (trusting who sent a transaction), T-17 (chosen bytes).
+
+[[0004-l2-choice]] has registration paid by our own [ERC-4337](https://eips.ethereum.org/EIPS/eip-4337) paymaster, never a hosted one, and [[0024-tier0-registration]] has it sponsor only the group registry's `addMembers` from the signing service ([[registration]], The batch). This contract is that paymaster, for EntryPoint v0.8 (whose address the deployment record names). It pays for the service's batches and nothing else: no voter is ever a sponsored sender, so the paymaster, its bundler and the chain see the service's account next to each batch, whose commitments the registry's event publishes anyway, and never a voter's account or address (T-13). It is no part of what a verifier checks: it holds nothing a verifier reads and emits no log (the EntryPoint logs each operation), so it doesn't inherit the event accumulator.
+
+### Deployment
+
+The paymaster pins, as immutables:
+
+- `entryPoint`, which holds its deposit and is the only caller of its validation;
+- `registry`, the group registry whose `addMembers` it sponsors;
+- `service`, the signing service's account (an ERC-4337 account whose owner key the service holds, deployed by an unsponsored transaction before use);
+- `admin`, the `TimelockController` behind our Safe (contracts skill, Rules), never a single key;
+- `maxCost`, the most one operation may cost the deposit, in wei.
+
+Deployment reverts if the EntryPoint, the registry or the admin has no code, or only an EIP-7702 delegation (`0xef0100 ‖ address`, a single key's account; code doesn't prove a timelock, so the deployment record names it), if `service` is zero, or if `maxCost` is zero (T-62). Nothing can be changed later: a new service account or cap is a new paymaster, funded by withdrawing from the old one. Its sponsorship rules being fixed is what lets the admin be trusted with funds alone.
+
+### Sponsorship
+
+`validatePaymasterUserOp(userOp, userOpHash, maxCost)` reverts unless its caller is the EntryPoint (`NotEntryPoint`), then checks, in this order, reverting with `NotSponsored(rule)` on the first failure:
+
+1. **`Sender`**: `userOp.sender` is `service`. No one else is sponsored, even for a well-signed record, since every operation costs the deposit whether or not its call succeeds (T-52, T-71).
+2. **`InitCode`**: `initCode` is empty, so the deposit never pays for deploying an account.
+3. **`PaymasterData`**: `paymasterAndData` is exactly 52 bytes, the paymaster's address and its two gas limits (EntryPoint v0.8's `PAYMASTER_DATA_OFFSET`), with no data after them.
+4. **`CallData`**: `callData` is exactly the standard ABI encoding of `execute(address,uint256,bytes)` (selector `0xb61d27f6`, the call of ERC-4337's reference `BaseAccount`) with the target word `registry` (its upper 96 bits zero), the value word 0, the offset word `0x60`, a length that fits, nothing after the data's zero padding, and data that is itself exactly the standard ABI encoding of `addMembers(bytes)`: its selector, the offset word `0x20`, the record's length word and the record padded to a word, so that the data's length is `68` plus the record's length rounded up to 32. With the offsets and lengths fixed, the call checked is the one the account makes, and the data carries nothing after the record, which the registry would refuse (canonical calldata) at the deposit's cost. The record after the selector is the registry's to judge (Group registry, Additions): the paymaster can't run the registry's checks, whose state ERC-7562 forbids it to read (T-17).
+5. **`Cost`**: `maxCost` is at most the paymaster's `maxCost`.
+
+It then returns an empty context and a validation data of 0 (no signature failure, no time range). With no context, the EntryPoint never calls `postOp`, which always reverts. Every check reads the operation and immutables only, never storage, so the paymaster meets ERC-7562's rules for an unstaked paymaster; a stake only lifts bundlers' throughput limits.
+
+### Funds
+
+Anyone may add to the deposit with `deposit()`, which forwards to the EntryPoint's `depositTo`. Only the admin may call `withdrawTo(to, amount)`, `addStake(unstakeDelaySec)`, `unlockStake()` and `withdrawStake(to)`, which forward to the EntryPoint (T-62). The paymaster holds no ether itself and has no `receive`.
+
+### Known-weak
+
+- **A seized service drains the deposit** (T-69, T-52): whoever holds the service's account key can act as their own bundler, naming themselves the `handleOps` beneficiary, and set gas limits and fees so each operation's charge approaches `maxCost`; the EntryPoint pays that charge (and its penalty on unused gas) from the deposit to them, whether the record is valid or refused. So the deposit is at the service key's disposal, `maxCost` per operation. Keep it to a few days' batches and top it up; the batch job's spending is visible on chain. A per-period limit would need the paymaster to write storage, which ERC-7562 allows only to a staked paymaster.
+- **The account's `execute` is assumed.** The paymaster reads `execute`'s calldata as ERC-4337's reference account decodes it; a service account whose `execute` means something else would be sponsored for whatever it does. The deployment record names the account and its code, which MUST NOT be upgradeable (the reference `SimpleAccount` is UUPS-upgradeable, and an EIP-7702 account can be re-delegated); otherwise the owner key can change what `execute` does later. Either way the loss is bounded as above.
+- **Front-running costs the deposit.** `addMembers` is permissionless, so anyone who sees a sponsored operation before it lands can submit its record directly; the sponsored operation then reverts at the registry (`position`) and is still charged. The griefer pays about as much gas and the members land anyway, so nothing is amplified; submitting through our own or a private bundler avoids it.
+- **The bundler sees the service's operations**, with their network metadata. They carry only what the batch's event shows, so a bundler learns nothing about registrants; running our own bundler, or submitting through a public one, is a deployment choice ([[0004-l2-choice]], Paymaster).
 
 ## Board (direct submit)
 

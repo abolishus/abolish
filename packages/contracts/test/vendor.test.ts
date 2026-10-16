@@ -31,19 +31,31 @@ function actual(dir: URL): string {
 
 describe("vendored code", () => {
   test("vendor/ holds only the recorded directories", () => {
-    expect(readdirSync(new URL("vendor/", ROOT)).sort()).toEqual(["openzeppelin-contracts"]);
+    expect(readdirSync(new URL("vendor/", ROOT)).sort()).toEqual([
+      "account-abstraction",
+      "openzeppelin-contracts",
+    ]);
   });
 
-  test("openzeppelin-contracts matches its recorded sums and tree hash", () => {
-    const { lines, tree } = recorded("openzeppelin-contracts");
-    expect(actual(new URL("vendor/openzeppelin-contracts/", ROOT))).toBe(lines);
-    expect(sha256(lines)).toBe(tree);
-  });
+  test.each(["account-abstraction", "openzeppelin-contracts"])(
+    "%s matches its recorded sums and tree hash",
+    (name) => {
+      const { lines, tree } = recorded(name);
+      expect(actual(new URL(`vendor/${name}/`, ROOT))).toBe(lines);
+      expect(sha256(lines)).toBe(tree);
+    },
+  );
 
-  test("foundry.toml maps only the vendored directory", () => {
+  test("foundry.toml maps only the vendored directories", () => {
     const toml = readFileSync(new URL("foundry.toml", ROOT), "utf8");
-    expect(toml.match(/^remappings\b.*$/gm)).toEqual([
-      'remappings = ["@openzeppelin/contracts/=vendor/openzeppelin-contracts/contracts/"]',
+    expect(toml.match(/^remappings\b/gm)).toHaveLength(1);
+    expect(toml.match(/^remappings = \[[^\]]*\]$/gm)).toEqual([
+      [
+        "remappings = [",
+        '  "@account-abstraction/contracts/=vendor/account-abstraction/contracts/",',
+        '  "@openzeppelin/contracts/=vendor/openzeppelin-contracts/contracts/",',
+        "]",
+      ].join("\n"),
     ]);
     expect(toml).toMatch(/^libs = \[\]$/m);
   });

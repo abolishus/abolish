@@ -341,6 +341,7 @@ export {
   REMOVE_MEMBERS_TYPE,
   type RemoveMembersMessage,
   removeMembersStructHash,
+  signGroupApproval,
 } from "./group-registry.ts";
 // Not exported: `newIdentitySecretWith` and `sealIdentityBackupWith`, the test
 // seams that take their randomness, so production code can't reuse a nonce.

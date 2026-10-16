@@ -3,8 +3,9 @@
 // each tier tree from the registry's events (docs/spec/verifier.md 2.4), and
 // for the signing service. The contract applies the same rules to the same
 // bytes, and both are checked against docs/spec/vectors/group-registry.json.
-// Keccak-256 is @noble/hashes'; secp256k1 public-key recovery is
-// @noble/curves'. This module only fixes the encodings and the checks.
+// Keccak-256 is @noble/hashes'; secp256k1 signing and public-key recovery
+// are @noble/curves'. This module only fixes the encodings, the checks and
+// how a registrar's signature is put in a record.
 
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
@@ -512,6 +513,41 @@ export function checkGroupApprovals(
       return { ok: false, error: "signature", seat };
   }
   return { ok: true };
+}
+
+/**
+ * Registrar `seat`'s approval of `digest`, for the signing service
+ * (docs/spec/registration.md, The batch, step 6): ECDSA over the digest
+ * itself (no prehash), RFC 6979, low-s, with `v` = 27 + the recovery id, as
+ * `ecrecover` reads it. RFC 6979 makes it deterministic, so signing the same
+ * batch again gives the same record (one batch per position, T-06). The
+ * approval is recovered before it is returned, so only one the registry
+ * accepts from this key ever leaves; the key is never kept or returned.
+ */
+export function signGroupApproval(
+  digest: Uint8Array,
+  seat: number,
+  secretKey: Uint8Array,
+): GroupApproval {
+  const d = bytesArg(digest, 32, "digest");
+  if (!Number.isSafeInteger(seat) || seat < 1 || seat > GROUP_REGISTRY_MAX_REGISTRARS)
+    throw new RangeError(`seat: expected an integer from 1 to ${GROUP_REGISTRY_MAX_REGISTRARS}`);
+  const key = bytesArg(secretKey, 32, "secretKey");
+  try {
+    const sig = secp256k1.Signature.fromBytes(
+      secp256k1.sign(d, key, { prehash: false, lowS: true, format: "recovered" }),
+      "recovered",
+    );
+    // Recovery ids 2 and 3 (x(R) ≥ N, probability about 2⁻¹²⁸) have no `v`.
+    if (sig.recovery !== 0 && sig.recovery !== 1) throw new RangeError("unexpressible recovery id");
+    const approval: GroupApproval = { seat, r: sig.r, s: sig.s, v: 27 + sig.recovery };
+    const signer = recoverAddress(d, approval);
+    const own = addressOf(secp256k1.Point.fromBytes(secp256k1.getPublicKey(key, false)));
+    if (signer === null || !equalBytes(signer, own)) throw new RangeError("signature check");
+    return approval;
+  } finally {
+    key.fill(0);
+  }
 }
 
 /** What `applyGroupRecords` checks one group's records against: the release's pins. */

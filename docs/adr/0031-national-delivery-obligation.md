@@ -1,8 +1,8 @@
 # ADR 0031: National-scale delivery obligation
 
-- Status: Accepted (agent) — owner may veto (2026-10-15, rule A): option C
+- Status: accepted (owner, 2026-10-16): option C, first accepted by the agent on 2026-10-15 under rule A
 - Date: 2026-10-15
-- Deciders: agent, owner may veto (rule A)
+- Deciders: agent; accepted by the owner
 - Threats addressed: T-25, T-52, T-54, T-17, T-24, T-53 (see [[THREAT_MODEL]])
 
 ## Context
@@ -41,7 +41,8 @@ C, with A kept as the path for small elections and for clients' own receipts. On
 - [[P1-12e]] built the complaint batches (which raise A's cap at long `R`); [[P1-12f]] builds C: the obligation-root record and its signed tag, its leaves' layout and content address, the board call and its event in a new contract-event version, the delivery check's inclusion path, the report code for unavailable leaves, and the capacity check reduced to a constant per seat for elections that use it. It must be decided before any election registry is deployed, together with any change to the windows it needs.
 - The trustee node's intake and decision at `c_I` are unchanged: only how it delivers what it owes changes.
 - Known-weak: until C is built, civic elections are capped at what A carries.
+- **At launch every trustee is synthetic** (owner, 2026-10-16): the default panel is the transitional one, every seat ours ([[0027-trustee-panels-and-live-results]], Part 3). Then every root and its leaves are ours too, so a root whose leaves are withheld is the operator withholding them, and C's attribution names our seats; and [[0029-board-data-availability]]'s attestations come from the same seats, so under the transitional panel the leaves' availability is the operator's word, as the board's is. C adds nothing a voter can check against us until independent trustees hold seats, which every civic poll requires before it opens ([[0027-trustee-panels-and-live-results]]); national electorates are civic, so C must be built before the first civic poll, not before launch. Everyday polls at launch use A, whose records are in L2 data every reader holds. The capacity check still runs on our seats, so even synthetic trustees refuse an election whose obligation the forced path can't carry.
 
 ## Decision
 
-Under rule A (`AGENTS.md`): option C, `Accepted (agent) — owner may veto`, listed under Decisions to review in [[STATUS]]. Nothing is built yet.
+Option C. Accepted by the agent under rule A on 2026-10-15 and by the owner on 2026-10-16, with the note that at launch every trustee is synthetic (Consequences). Nothing is built yet; [[P1-12f]] builds it, before the first civic poll.

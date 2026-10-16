@@ -4,17 +4,23 @@ import { describe, expect, test } from "vite-plus/test";
 import {
   aggregateCell,
   aggregateHash,
+  BOARD_PAYLOAD_TYPES_V5,
+  BOARD_PAYLOAD_TYPES_V6,
+  type BoardEntryVersion,
   boardRunningOpenings,
   type CommittedVote,
   decode,
+  decodeBoardEntry,
   DecodeError,
   decodeRunningOpening,
   element,
+  encodeBoardEntry,
   encodeRunningOpening,
   identityKey,
   list,
   openCell,
   readRunningOpenings,
+  RECORD_TYPES,
   type ReleaseSchedule,
   type RunningOpening,
   type RunningOpeningsRead,
@@ -88,6 +94,12 @@ interface Vectors {
     readonly id: string;
     readonly offered: readonly string[];
     readonly boarded: readonly boolean[];
+  }[];
+  readonly boardEntries: readonly {
+    readonly id: string;
+    readonly version: BoardEntryVersion;
+    readonly encoding: string;
+    readonly error: string | null;
   }[];
 }
 
@@ -199,6 +211,26 @@ describe("running-opening.json", () => {
     // What is already on the board counts as boarded: offered again, each is refused.
     const boarded = offered.filter((_, i) => v.boarded[i]);
     expect(boardRunningOpenings(election, schedule, boarded, boarded).every((b) => !b)).toBe(true);
+  });
+
+  // Board-entry version 6 carries the running opening; no earlier version
+  // does, so a sealed poll's board can't (docs/spec/board.md, Allowed payloads).
+  test.each(vectors.boardEntries)("board entry $id", (v) => {
+    const b = hex(v.encoding);
+    if (v.error === null) {
+      expect(encodeBoardEntry(decodeBoardEntry(b, v.version), v.version)).toEqual(b);
+    } else {
+      expect(() => decodeBoardEntry(b, v.version)).toThrow(
+        expect.objectContaining({ code: v.error }) as Error,
+      );
+    }
+  });
+
+  test("version 6's allowed types are version 5's and the running opening", () => {
+    expect([...BOARD_PAYLOAD_TYPES_V6].sort((a, b) => a - b)).toEqual(
+      [...BOARD_PAYLOAD_TYPES_V5, RECORD_TYPES.runningOpening].sort((a, b) => a - b),
+    );
+    expect(Object.isFrozen(BOARD_PAYLOAD_TYPES_V6)).toBe(true);
   });
 });
 

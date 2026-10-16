@@ -6,7 +6,8 @@ record: the running opening (record type 0x0018, version 1), its signed
 message and signature, its strict decoder, attribution by the registered
 signing keys, which running openings on a board are a chosen release's and
 which are outside the schedule, when one passes against its release's
-aggregate, and the board operator's boarding rule. It is written from the
+aggregate, the board operator's boarding rule, and the board-entry versions
+that carry it (version 6 only, docs/spec/board.md). It is written from the
 spec with Python's integers and hashlib. Running sets and their openings come
 from tally-vectors.py (ballots from ballot-validity-vectors.py over
 group-vectors.py's self-checked ristretto255), and signatures from
@@ -24,6 +25,7 @@ bytes. The values are test data, never keys.
 Usage: python3 -I -B packages/crypto/scripts/running-opening-vectors.py <out-dir>
 """
 
+import hashlib
 import importlib.util
 import json
 import pathlib
@@ -52,7 +54,7 @@ TAG = b"abolish/v1/sig/running-opening"
 TALLY_OPENING_TAG = b"abolish/v1/sig/tally-opening"
 AGGREGATE_TAG = b"abolish/v1/tally-aggregate"
 
-u8, u32 = bv.u8, bv.u32
+u8, u16, u32 = bv.u8, bv.u16, bv.u32
 
 
 def scalar(x):
@@ -548,6 +550,54 @@ def main():
     )
     boarding_vector("releases-and-cells", "Every chosen release of every cell, each by one seat", full, [True] * 4)
 
+    # Board-entry version 6 (docs/spec/board.md, Allowed payloads): version
+    # 5's types and the running opening, for live polls only.
+    allowed = {1: {0x0002, 0x0003, 0x0005, 0x0006, 0x0008}}
+    allowed[3] = allowed[1] | {0x000C, 0x000E}
+    allowed[4] = allowed[3] | {0x000F}
+    allowed[5] = allowed[4] | {0x0015}
+    allowed[6] = allowed[5] | {RECORD_TYPE}
+    election_id = hashlib.sha256(b"running-opening/election-id").digest()
+    board_entries = []
+
+    def entry(id_, desc, version, payload, error):
+        enc = u16(0x0007) + u8(version) + election_id + (7).to_bytes(8, "big") + u32(12) + u32(len(payload)) + payload
+        got = None if int.from_bytes(payload[:2], "big") in allowed[version] else "unexpected-record-type"
+        assert got == error, id_
+        board_entries.append({"id": id_, "description": desc, "version": version, "encoding": enc.hex(), "error": error})
+
+    entry("v6-running-opening", "A version-6 entry carrying a running opening", 6, honest_b, None)
+    for v in (5, 4, 3, 1):
+        entry(f"v{v}-running-opening", f"A version-{v} entry can't carry a running opening: only a live poll's board can", v, honest_b, "unexpected-record-type")
+    entry(
+        "v6-running-opening-v2-header",
+        "A version-6 entry carrying a running-opening header of version 2: the envelope reads only the type, and the record is refused when decoded (profile-mismatch)",
+        6,
+        bytes.fromhex("00180200"),
+        None,
+    )
+    for t, name, note in [
+        (0x0015, "close-statement", "as version 5 allows"),
+        (0x000F, "destruction", "as version 4 allows"),
+        (0x000C, "share-receipt", "as version 3 allows"),
+        (0x000E, "complaint", "as version 3 allows"),
+        (0x0002, "ballot", "as version 1 allows"),
+        (0x0006, "tally-opening", "as version 1 allows: the final tally of a live poll"),
+        (0x0008, "event", "as version 1 allows"),
+    ]:
+        entry(f"v6-{name}-type", f"A version-6 entry carrying a {name.replace('-', ' ')} header, {note}", 6, u16(t) + b"\x01\x00", None)
+    for t, name, note in [
+        (0x000D, "posting", "a share posting reaches the board only as a contract event"),
+        (0x0004, "voter-receipt", "the voter's receipt stays with its voter"),
+        (0x0001, "definition", "a definition reaches the board only as its registration's contract event"),
+        (0x000B, "summed-share", "a summed-share message never leaves the trustees"),
+        (0x0007, "entry", "entries never nest"),
+        (0x0016, "receipt-batch", "a type it doesn't allow"),
+        (0x0017, "complaint-batch", "a type it doesn't allow"),
+        (0x0019, "author-approvals", "author approvals are board-entry version 7's, for author panels, which live polls can't have yet"),
+    ]:
+        entry(f"v6-{name}-type", f"A version-6 entry refuses record type 0x{t:04x}: {note}", 6, u16(t) + b"\x01\x00", "unexpected-record-type")
+
     data = {
         "format": "abolish-running-opening-vectors/1",
         "title": "Running openings: the record, its signature, which openings are a release's, and the boarding rule",
@@ -584,6 +634,7 @@ def main():
         "attributions": attributions,
         "boards": boards,
         "boardings": boardings,
+        "boardEntries": board_entries,
     }
     with open(f"{out}/running-opening.json", "w") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)

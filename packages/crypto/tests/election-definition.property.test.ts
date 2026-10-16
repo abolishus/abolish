@@ -500,6 +500,10 @@ describe("2.3's profile combination", () => {
   // this package doesn't read is unsupported, never a failure, and so is a
   // contract-event version it doesn't read where nothing else fails (T-36).
   const expected = (board: number, ballot: number, opening: number, events: number) => {
+    // Board-entry version 6 carries running openings, so only a live
+    // definition (version 6 or 7) may pin it, never these (tally.md,
+    // Tally-opening version 2).
+    if (board === 6) return "profile-combination";
     if (![1, 3, 4, 5].includes(board)) return "unsupported-version";
     if (ballot !== 1) return "profile-combination";
     const carriesDelivery = board === 3 || board === 4 || board === 5;
@@ -517,8 +521,8 @@ describe("2.3's profile combination", () => {
     return events === 5 ? undefined : "unsupported-version";
   };
 
-  test("board-entry versions 1 to 6 against ballot, tally-opening and contract-event versions", () => {
-    for (let board = 1; board <= 6; board++)
+  test("board-entry versions 1 to 7 against ballot, tally-opening and contract-event versions", () => {
+    for (let board = 1; board <= 7; board++)
       for (let ballot = 1; ballot <= 3; ballot++)
         for (let opening = 1; opening <= 3; opening++)
           for (const events of [1, 2, 3, 4, 5, 6, 255])
@@ -783,7 +787,7 @@ describe("2.3's profile combination", () => {
     };
     expect(profileCombinationRule(unpinned)).toBe("profile-combination");
     // A board-entry version this package doesn't read stays unsupported (2.3, step 2).
-    expect(profileCombinationRule(withDisplayText(pinning(6, 1, 1), 2))).toBe(
+    expect(profileCombinationRule(withDisplayText(pinning(8, 1, 1), 2))).toBe(
       "unsupported-version",
     );
   });

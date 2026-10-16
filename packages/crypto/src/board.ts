@@ -77,11 +77,25 @@ export const BOARD_PAYLOAD_TYPES_V5: readonly number[] = Object.freeze([
   RECORD_TYPES.closeStatement,
 ]);
 
+/**
+ * Record types a version-6 entry may carry: version 5's, and a live poll's
+ * running openings (docs/spec/tally.md, Running opening record). Only a
+ * profile pinning tally-opening version 2, a live poll's, pins version 6, so
+ * a sealed poll's board can't carry a running opening at all (verifier 2.3;
+ * T-16, T-31). Version 5's set is frozen by its vectors, so allowing them is
+ * a new version.
+ */
+export const BOARD_PAYLOAD_TYPES_V6: readonly number[] = Object.freeze([
+  ...BOARD_PAYLOAD_TYPES_V5,
+  RECORD_TYPES.runningOpening,
+]);
+
 const PAYLOAD_TYPES_BY_VERSION = {
   1: BOARD_PAYLOAD_TYPES,
   3: BOARD_PAYLOAD_TYPES_V3,
   4: BOARD_PAYLOAD_TYPES_V4,
   5: BOARD_PAYLOAD_TYPES_V5,
+  6: BOARD_PAYLOAD_TYPES_V6,
 } as const;
 
 /**
@@ -151,8 +165,9 @@ const entryV1 = entryFields(BOARD_PAYLOAD_TYPES);
 const entryV3 = entryFields(BOARD_PAYLOAD_TYPES_V3);
 const entryV4 = entryFields(BOARD_PAYLOAD_TYPES_V4);
 const entryV5 = entryFields(BOARD_PAYLOAD_TYPES_V5);
+const entryV6 = entryFields(BOARD_PAYLOAD_TYPES_V6);
 
-/** Board entry, version 1, 3, 4 or 5 (docs/spec/board.md). */
+/** Board entry, version 1, 3, 4, 5 or 6 (docs/spec/board.md). */
 export type BoardEntry = CodecValue<typeof entryV1>;
 
 /** Record type `0x0007`: the envelope that places a record on the board. */
@@ -161,6 +176,7 @@ export const BOARD_ENTRY = recordType(RECORD_TYPES.boardEntry, {
   3: entryV3,
   4: entryV4,
   5: entryV5,
+  6: entryV6,
 });
 
 /** A board-entry version this release reads and writes. */

@@ -188,7 +188,7 @@ const arbBoard = fc
       minLength: 1,
       maxLength: 24,
     }),
-    fc.constantFrom<BoardEntryVersion>(1, 3, 4, 5),
+    fc.constantFrom<BoardEntryVersion>(1, 3, 4, 5, 6),
   )
   .map(([rows, version]) => {
     // Segment steps of 0 to 2, capped at the clock's last segment, so

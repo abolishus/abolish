@@ -112,7 +112,11 @@ export function signRunningOpening(
   };
 }
 
-/** A live poll's releases, as the release choice fixed them (docs/spec/tally.md, Release choice). */
+/**
+ * A live poll's releases, as the release choice fixed them (docs/spec/tally.md,
+ * Release choice). `liveReleases` builds it from the fixed snapshots' running
+ * sets, which should be its only source.
+ */
 export interface ReleaseSchedule {
   /** Each cell's tier, by its position in the registered partition. */
   readonly cellTiers: readonly number[];

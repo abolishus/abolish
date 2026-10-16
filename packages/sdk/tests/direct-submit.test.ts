@@ -7,13 +7,9 @@
 // T-17, T-35). Anvil's unlocked development accounts sign: no key is held
 // here (AGENTS.md).
 
-import { type ChildProcess, execFileSync, spawn } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { createServer } from "node:net";
-import { fileURLToPath } from "node:url";
-import { decodeElectionDefinition, l2Alias, relayDepositData } from "@abolishus/crypto";
+import { l2Alias, relayDepositData } from "@abolishus/crypto";
 import { keccak_256 } from "@noble/hashes/sha3.js";
-import { bytesToHex, concatBytes, hexToBytes } from "@noble/hashes/utils.js";
+import { concatBytes } from "@noble/hashes/utils.js";
 import fc from "fast-check";
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 import {
@@ -28,50 +24,25 @@ import {
   revertDataOf,
   submitBallotCalldata,
 } from "../src/index.ts";
+import {
+  type Anvil,
+  boardRegistries,
+  hex,
+  pad32,
+  parametersOf,
+  selector,
+  startAnvil,
+  unhex,
+  vectors,
+  word,
+} from "./anvil.ts";
 
 const numRuns = Number(process.env.FC_NUM_RUNS ?? 100);
-const hex = (b: Uint8Array) => `0x${bytesToHex(b)}`;
-const unhex = (s: string) => hexToBytes(s.startsWith("0x") ? s.slice(2) : s);
-const selector = (signature: string) => keccak_256(new TextEncoder().encode(signature)).slice(0, 4);
-const pad32 = (n: number) => Math.ceil(n / 32) * 32;
-
-function word(v: bigint): Uint8Array {
-  return hexToBytes(v.toString(16).padStart(64, "0"));
-}
 
 const BALLOT_SUBMITTED = keccak_256(new TextEncoder().encode(BALLOT_SUBMITTED_SIGNATURE));
 const RELAYED_BALLOT_SUBMITTED = keccak_256(
   new TextEncoder().encode(RELAYED_BALLOT_SUBMITTED_SIGNATURE),
 );
-
-interface BallotVector {
-  readonly id: string;
-  readonly election: string;
-  readonly registered: readonly number[];
-  readonly encoding: string;
-  readonly ballotHash: string;
-  readonly result: string;
-}
-interface DecodeVector {
-  readonly id: string;
-  readonly encoding: string;
-  readonly error: string;
-  readonly offset?: number;
-}
-const vectors = JSON.parse(
-  readFileSync(new URL("../../../docs/spec/vectors/ballot.json", import.meta.url), "utf8"),
-) as {
-  readonly elections: Record<
-    string,
-    {
-      readonly definition: string;
-      readonly definitionHash: string;
-      readonly tiers: readonly { readonly tier: number; readonly root: string }[];
-    }
-  >;
-  readonly ballots: readonly BallotVector[];
-  readonly decode: readonly DecodeVector[];
-};
 
 describe("submitBallotCalldata", () => {
   it("is the selector, offset 0x20, the length and the zero-padded record, nothing after", () => {
@@ -321,6 +292,9 @@ describe("directSubmitBallot against a scripted provider", () => {
       expect(await directSubmitBallot(options(provider)), path).toEqual({
         status: "already-on-board",
         path,
+        ...(path === "relayed"
+          ? { call: { index: 3n, l1Block: 100n, stamp: 1_000n, gasLimit: 900_000n } }
+          : {}),
         ...location,
       });
       expect(requests.some((r) => r.method === "eth_sendTransaction")).toBe(false);
@@ -518,199 +492,21 @@ describe("directSubmitBallot against a scripted provider", () => {
 
 // --- the board on Anvil -------------------------------------------------------
 
-const contractsRoot = fileURLToPath(new URL("../../contracts", import.meta.url));
 const CHAIN_ID = 31_339n;
 
-async function freePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const server = createServer();
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address();
-      server.close(() =>
-        typeof address === "object" && address !== null
-          ? resolve(address.port)
-          : reject(new Error("no port")),
-      );
-    });
-  });
-}
-
-/** An EIP-1193 provider over Anvil's JSON-RPC: an error keeps its `code` and `data`, as wallets pass them on. */
-function httpProvider(url: string): Eip1193Provider {
-  let id = 0;
-  return {
-    async request({ method, params = [] }) {
-      const response = await fetch(url, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ jsonrpc: "2.0", id: ++id, method, params }),
-      });
-      const body = (await response.json()) as {
-        result?: unknown;
-        error?: { code: number; message: string; data?: unknown };
-      };
-      if (body.error !== undefined)
-        throw Object.assign(new Error(body.error.message), {
-          code: body.error.code,
-          data: body.error.data,
-        });
-      return body.result;
-    },
-  };
-}
-
-function bytecode(contract: string): Uint8Array {
-  return unhex(
-    execFileSync("forge", ["inspect", "--root", contractsRoot, contract, "bytecode"], {
-      encoding: "utf8",
-    }).trim(),
-  );
-}
-
-/** A definition's parameters as `ElectionRegistry.Parameters`, and its cells, from ballot.json. */
-function parametersOf(name: string) {
-  const e = vectors.elections[name];
-  if (e === undefined) throw new Error(`no election ${name}`);
-  const d = decodeElectionDefinition(unhex(e.definition));
-  return {
-    hash: unhex(e.definitionHash),
-    opensAt: d.opens_at,
-    closesAt: d.closes_at,
-    // ParametersStub.set(bytes32, Parameters, uint8[], uint256[]), with the
-    // ballot version 1 the profile pins and one selection question.
-    encode(registered: boolean): Uint8Array {
-      const tiers = registered ? e.tiers : [];
-      const fields = registered
-        ? [
-            1n,
-            d.threshold,
-            d.panel_size,
-            d.option_count,
-            tiers.length,
-            0,
-            0,
-            d.opens_at,
-            d.closes_at,
-            0,
-          ]
-        : [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-      const questions = registered
-        ? [
-            word(1n),
-            word(1n),
-            word(BigInt(d.option_count)),
-            word(BigInt(d.min_selections)),
-            word(BigInt(d.max_selections)),
-          ]
-        : [word(0n)];
-      const p = concatBytes(...fields.map((f) => word(BigInt(f))), word(11n * 32n), ...questions);
-      const tierList = concatBytes(
-        word(BigInt(tiers.length)),
-        ...tiers.map((t) => word(BigInt(t.tier))),
-      );
-      const rootList = concatBytes(
-        word(BigInt(tiers.length)),
-        ...tiers.map((t) => word(BigInt(t.root))),
-      );
-      return concatBytes(
-        selector(
-          "set(bytes32,(uint8,uint8,uint8,uint16,uint16,uint8,uint8,uint64,uint64,uint32,(uint8,uint16,uint16,uint16)[]),uint8[],uint256[])",
-        ),
-        unhex(e.definitionHash),
-        word(128n),
-        word(BigInt(128 + p.length)),
-        word(BigInt(128 + p.length + tierList.length)),
-        p,
-        tierList,
-        rootList,
-      );
-    },
-  };
-}
-
-let anvil: ChildProcess | undefined;
+let chain: Anvil;
 let provider: Eip1193Provider;
-let deployer: string;
 let voter: Uint8Array;
 let board: Uint8Array;
-let elections: Uint8Array;
-let trustees: Uint8Array;
 let relay: Uint8Array;
 let fromBlock: bigint;
+let register: (election: string, registered: readonly number[]) => Promise<void>;
 const plurality = parametersOf("plurality");
-const approval = parametersOf("approval");
-const PANEL = keccak_256(new TextEncoder().encode("panel"));
-const stubOf = (election: string) => keccak_256(new TextEncoder().encode(`${election} stub`));
 
-async function send(
-  to: Uint8Array | undefined,
-  data: Uint8Array,
-  from: string = deployer,
-): Promise<Record<string, unknown>> {
-  const tx = await provider.request({
-    method: "eth_sendTransaction",
-    params: [
-      {
-        from,
-        ...(to === undefined ? {} : { to: hex(to) }),
-        data: hex(data),
-        gas: "0x1c9c380",
-      },
-    ],
-  });
-  let receipt: Record<string, unknown> | null = null;
-  while (receipt === null) {
-    receipt = (await provider.request({
-      method: "eth_getTransactionReceipt",
-      params: [tx],
-    })) as Record<string, unknown> | null;
-    if (receipt === null) await new Promise((r) => setTimeout(r, 10));
-  }
-  if (receipt.status !== "0x1") throw new Error(`transaction ${String(tx)} reverted`);
-  return receipt;
-}
-
-async function deploy(contract: string, args: Uint8Array = new Uint8Array()): Promise<Uint8Array> {
-  const receipt = await send(undefined, concatBytes(bytecode(contract), args));
-  return unhex(String(receipt.contractAddress));
-}
-
-/** Registers only `election` (as Board.t.sol does), with the vector's key set. */
-async function register(election: string, registered: readonly number[]): Promise<void> {
-  for (const [name, p] of [
-    ["plurality", plurality],
-    ["approval", approval],
-  ] as const) {
-    await send(elections, p.encode(name === election));
-    await send(
-      elections,
-      concatBytes(selector("setCeremony(bytes32,bytes32,bytes32)"), p.hash, stubOf(name), PANEL),
-    );
-  }
-  const seats = registered.reduce((m, s) => m | (1n << BigInt(s)), 0n);
-  await send(
-    trustees,
-    concatBytes(
-      selector("setKeySet(bytes32,bytes32,uint256)"),
-      stubOf(election),
-      PANEL,
-      word(seats),
-    ),
-  );
-}
-
-/** Mines the next block at `timestamp`, so `eth_call` at `latest` sees it. */
-async function mineAt(timestamp: bigint): Promise<void> {
-  await provider.request({ method: "evm_mine", params: [Number(timestamp)] });
-}
-
-const nonce = async () =>
-  BigInt(
-    String(
-      await provider.request({ method: "eth_getTransactionCount", params: [hex(voter), "latest"] }),
-    ),
-  );
+const send = (to: Uint8Array | undefined, data: Uint8Array, from?: string) =>
+  chain.send(to, data, from);
+const mineAt = (timestamp: bigint) => chain.mineAt(timestamp);
+const nonce = () => chain.nonce(voter);
 
 const submit = (record: Uint8Array) =>
   directSubmitBallot({
@@ -724,45 +520,18 @@ const submit = (record: Uint8Array) =>
   });
 
 beforeAll(async () => {
-  const port = await freePort();
-  const url = `http://127.0.0.1:${port}`;
   // Genesis a day before the vector elections open, so the window can be
   // reached from both sides.
-  anvil = spawn(
-    "anvil",
-    [
-      "--host",
-      "127.0.0.1",
-      "--port",
-      String(port),
-      "--chain-id",
-      String(CHAIN_ID),
-      "--timestamp",
-      String(plurality.opensAt - 86_400n),
-      "--silent",
-    ],
-    { stdio: ["ignore", "ignore", "inherit"] },
-  );
-  provider = httpProvider(url);
-  const end = Date.now() + 20_000;
-  let accounts: string[] | undefined;
-  while (accounts === undefined) {
-    if (anvil.exitCode !== null) throw new Error("anvil exited (is the toolchain installed?)");
-    try {
-      accounts = (await provider.request({ method: "eth_accounts" })) as string[];
-    } catch (e) {
-      if (Date.now() > end) throw e;
-      await new Promise((r) => setTimeout(r, 100));
-    }
-  }
-  [deployer] = accounts as [string];
-  voter = unhex(accounts[4] as string);
-  elections = await deploy("test/utils/BoardFixture.sol:ElectionsStub");
-  trustees = await deploy("test/utils/BoardFixture.sol:TrusteesStub");
+  chain = await startAnvil(CHAIN_ID, plurality.opensAt - 86_400n);
+  ({ provider } = chain);
+  voter = unhex(chain.accounts[4] as string);
+  const elections = await chain.deploy("test/utils/BoardFixture.sol:ElectionsStub");
+  const trustees = await chain.deploy("test/utils/BoardFixture.sol:TrusteesStub");
+  register = boardRegistries(chain, elections, trustees, ["plurality", "approval"]);
   // Only the relay's alias may call the relayed path, so a test can act as
   // its deposit by impersonating that address.
   relay = new Uint8Array(20).fill(0x11);
-  board = await deploy(
+  board = await chain.deploy(
     "src/Board.sol:Board",
     concatBytes(...[elections, trustees, relay].map((a) => concatBytes(new Uint8Array(12), a))),
   );
@@ -770,11 +539,7 @@ beforeAll(async () => {
 }, 120_000);
 
 afterAll(async () => {
-  if (anvil === undefined || anvil.exitCode !== null) return;
-  await new Promise<void>((resolve) => {
-    anvil?.once("exit", () => resolve());
-    anvil?.kill("SIGTERM");
-  });
+  await chain?.stop();
 });
 
 describe("directSubmitBallot against the board on Anvil", () => {
@@ -932,7 +697,11 @@ describe("directSubmitBallot against the board on Anvil", () => {
       alias,
     );
     const relayed = await submit(unhex(revote.encoding));
-    expect(relayed).toMatchObject({ status: "already-on-board", path: "relayed" });
+    expect(relayed).toMatchObject({
+      status: "already-on-board",
+      path: "relayed",
+      call: { index: 0n, l1Block: 1n, stamp: plurality.opensAt, gasLimit: 3_000_000n },
+    });
     if (relayed.status !== "already-on-board") return;
     expect(hex(relayed.transactionHash)).toBe(deposit.transactionHash);
     expect(await nonce()).toBe(before + 1n);

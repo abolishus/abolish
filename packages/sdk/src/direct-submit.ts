@@ -43,6 +43,9 @@ export const BALLOT_SUBMITTED_SIGNATURE = "BallotSubmitted(bytes32,bytes32,bytes
 export const RELAYED_BALLOT_SUBMITTED_SIGNATURE =
   "RelayedBallotSubmitted(bytes32,bytes32,uint64,uint64,uint64,uint64,bytes)";
 
+// The helpers this file exports below are shared with relay-submit.ts and
+// aren't part of the package's API (index.ts doesn't export them).
+
 const utf8 = (s: string) => new TextEncoder().encode(s);
 const selectorOf = (signature: string) => keccak_256(utf8(signature)).slice(0, 4);
 
@@ -50,16 +53,16 @@ const SUBMIT_BALLOT = selectorOf(SUBMIT_BALLOT_SIGNATURE);
 const BALLOT_SUBMITTED = keccak_256(utf8(BALLOT_SUBMITTED_SIGNATURE));
 const RELAYED_BALLOT_SUBMITTED = keccak_256(utf8(RELAYED_BALLOT_SUBMITTED_SIGNATURE));
 
-const U64_MAX = (1n << 64n) - 1n;
-const pad32 = (n: number) => Math.ceil(n / 32) * 32;
+export const U64_MAX = (1n << 64n) - 1n;
+export const pad32 = (n: number) => Math.ceil(n / 32) * 32;
 
-function word(v: bigint): Uint8Array {
+export function word(v: bigint): Uint8Array {
   const out = new Uint8Array(32);
   for (let i = 31; i >= 0 && v > 0n; i--, v >>= 8n) out[i] = Number(v & 0xffn);
   return out;
 }
 
-function readWord(b: Uint8Array, at: number): bigint {
+export function readWord(b: Uint8Array, at: number): bigint {
   let v = 0n;
   for (let i = at; i < at + 32; i++) v = (v << 8n) | BigInt(b[i] ?? 0);
   return v;
@@ -75,7 +78,7 @@ function encodeBytes(b: Uint8Array): Uint8Array {
 }
 
 /** `abi.decode(data, (bytes))` with every word as `abi.encode` writes it, else `undefined`. */
-function decodeBytesAt(data: Uint8Array, head: number): Uint8Array | undefined {
+export function decodeBytesAt(data: Uint8Array, head: number): Uint8Array | undefined {
   if (data.length < head + 32 || readWord(data, head) !== BigInt(32 * (head / 32 + 1)))
     return undefined;
   const at = head + 32;
@@ -205,15 +208,31 @@ export function decodeBoardBallotRevert(data: Uint8Array): BoardBallotRefusal {
   return unknown;
 }
 
+/**
+ * The relay call a relayed event names (Board, Relayed ballots): carried by
+ * the board, never judged; the verifier matches it against the word the
+ * relay stored (L1 relay, Verification).
+ */
+export interface RelayedCallFields {
+  readonly index: bigint;
+  readonly l1Block: bigint;
+  readonly stamp: bigint;
+  readonly gasLimit: bigint;
+}
+
 /** Where the board's event for the record is, as the provider's node reports it. */
-export interface BoardEventLocation {
-  /** `ordinary` for `BallotSubmitted`, `relayed` for a deposit's `RelayedBallotSubmitted`. */
-  readonly path: "ordinary" | "relayed";
+export type BoardEventLocation = {
   readonly transactionHash: Uint8Array;
   readonly blockNumber: bigint;
   readonly blockHash: Uint8Array;
   readonly logIndex: bigint;
-}
+} & (
+  | /** `BallotSubmitted`. */ { readonly path: "ordinary" }
+  | /** A deposit's `RelayedBallotSubmitted`, with the call it names. */ {
+      readonly path: "relayed";
+      readonly call: RelayedCallFields;
+    }
+);
 
 export type DirectSubmitResult =
   /** This call's transaction emitted the record's event. */
@@ -229,8 +248,10 @@ export type DirectSubmitResult =
     };
 
 export type DirectSubmitErrorCode =
-  /** The provider's chain isn't the election's L2 (`l2_chain_id`). */
+  /** A provider's chain isn't the election's (`l2_chain_id`, or `l1_chain_id` for the relay). */
   | "wrong-chain"
+  /** The relay deposits to another board than the election's (`relayBallot`). */
+  | "wrong-relay"
   /**
    * The provider answered with something no Ethereum node returns, or
    * something the board can't have done (accepting a record it can't frame).
@@ -286,35 +307,35 @@ export interface DirectSubmitOptions {
   readonly sleep?: (ms: number) => Promise<void>;
 }
 
-const hex = (b: Uint8Array) => `0x${bytesToHex(b)}`;
-const quantity = (v: bigint) => `0x${v.toString(16)}`;
+export const hex = (b: Uint8Array) => `0x${bytesToHex(b)}`;
+export const quantity = (v: bigint) => `0x${v.toString(16)}`;
 
-function bytesArg(name: string, b: unknown, length?: number): Uint8Array {
+export function bytesArg(name: string, b: unknown, length?: number): Uint8Array {
   if (!(b instanceof Uint8Array)) throw new TypeError(`${name} must be a Uint8Array`);
   if (length !== undefined && b.length !== length)
     throw new TypeError(`${name} must be ${length} bytes`);
   return b;
 }
 
-function equal(a: Uint8Array, b: Uint8Array): boolean {
+export function equal(a: Uint8Array, b: Uint8Array): boolean {
   return a.length === b.length && a.every((v, i) => v === b[i]);
 }
 
-function bad(what: string, cause?: unknown): DirectSubmitError {
+export function bad(what: string, cause?: unknown): DirectSubmitError {
   return new DirectSubmitError("bad-response", `the provider returned ${what}`, { cause });
 }
 
-function dataOf(value: unknown, what: string): Uint8Array {
+export function dataOf(value: unknown, what: string): Uint8Array {
   if (typeof value !== "string" || !/^0x([0-9a-fA-F]{2})*$/.test(value)) throw bad(what);
   return hexToBytes(value.slice(2));
 }
 
-function quantityOf(value: unknown, what: string): bigint {
+export function quantityOf(value: unknown, what: string): bigint {
   if (typeof value !== "string" || !/^0x[0-9a-fA-F]+$/.test(value)) throw bad(what);
   return BigInt(value);
 }
 
-function fixed(value: unknown, length: number, what: string): Uint8Array {
+export function fixed(value: unknown, length: number, what: string): Uint8Array {
   const b = dataOf(value, what);
   if (b.length !== length) throw bad(what);
   return b;
@@ -338,7 +359,7 @@ export function revertDataOf(error: unknown): Uint8Array | undefined {
   return visit(error);
 }
 
-interface RpcLog {
+export interface RpcLog {
   readonly address: Uint8Array;
   readonly topics: readonly Uint8Array[];
   readonly data: Uint8Array;
@@ -349,7 +370,7 @@ interface RpcLog {
   readonly logIndex: bigint;
 }
 
-function parseLog(value: unknown): RpcLog {
+export function parseLog(value: unknown): RpcLog {
   if (typeof value !== "object" || value === null) throw bad("a log that isn't an object");
   const log = value as Record<string, unknown>;
   if (!Array.isArray(log.topics)) throw bad("a log without topics");
@@ -371,16 +392,27 @@ function parseLog(value: unknown): RpcLog {
 function eventRecord(
   topic0: Uint8Array,
   data: Uint8Array,
-): ["ordinary" | "relayed", Uint8Array] | undefined {
+):
+  | { readonly path: "ordinary"; readonly record: Uint8Array }
+  | { readonly path: "relayed"; readonly record: Uint8Array; readonly call: RelayedCallFields }
+  | undefined {
   if (equal(topic0, BALLOT_SUBMITTED)) {
     const record = decodeBytesAt(data, 0);
-    return record === undefined ? undefined : ["ordinary", record];
+    return record === undefined ? undefined : { path: "ordinary", record };
   }
   if (equal(topic0, RELAYED_BALLOT_SUBMITTED)) {
     // abi.encode(index, l1Block, stamp, gasLimit, record): four uint64 words.
-    for (let at = 0; at < 128; at += 32) if (readWord(data, at) > U64_MAX) return undefined;
+    const [index, l1Block, stamp, gasLimit] = [0, 32, 64, 96].map((at) => readWord(data, at)) as [
+      bigint,
+      bigint,
+      bigint,
+      bigint,
+    ];
+    if ([index, l1Block, stamp, gasLimit].some((v) => v > U64_MAX)) return undefined;
     const record = decodeBytesAt(data, 128);
-    return record === undefined ? undefined : ["relayed", record];
+    return record === undefined
+      ? undefined
+      : { path: "relayed", record, call: { index, l1Block, stamp, gasLimit } };
   }
   return undefined;
 }
@@ -390,13 +422,16 @@ function eventRecord(
  * reorganisation, `BallotSubmitted` or `RelayedBallotSubmitted` under the
  * record's definition hash, carrying the record whole. One carrying the
  * record under another ballot hash means the board or the provider disagrees
- * with crypto's hash of it, never an honest answer.
+ * with crypto's hash of it, never an honest answer. `accept`, if given,
+ * narrows which of the record's events count (the relay's search takes only
+ * relayed ones).
  */
-function findEvent(
+export function findEvent(
   logs: readonly RpcLog[],
   board: Uint8Array,
   record: Uint8Array,
   framed: { readonly definitionHash: Uint8Array; readonly ballotHash: Uint8Array },
+  accept?: (carried: NonNullable<ReturnType<typeof eventRecord>>) => boolean,
 ): BoardEventLocation | undefined {
   for (const log of logs) {
     const [topic0, topic1, topic2] = log.topics;
@@ -404,14 +439,18 @@ function findEvent(
     if (topic0 === undefined || topic1 === undefined || topic2 === undefined) continue;
     if (!equal(topic1, framed.definitionHash)) continue;
     const carried = eventRecord(topic0, log.data);
-    if (carried === undefined || !equal(carried[1], record)) continue;
+    if (carried === undefined || !equal(carried.record, record)) continue;
+    if (accept !== undefined && !accept(carried)) continue;
     if (!equal(topic2, framed.ballotHash))
       throw new DirectSubmitError(
         "event-mismatch",
         `the board's event names ballot hash ${hex(topic2)}, not ${hex(framed.ballotHash)}`,
       );
     const { transactionHash, blockNumber, blockHash, logIndex } = log;
-    return { path: carried[0], transactionHash, blockNumber, blockHash, logIndex };
+    const at = { transactionHash, blockNumber, blockHash, logIndex };
+    return carried.path === "ordinary"
+      ? { path: "ordinary", ...at }
+      : { path: "relayed", call: carried.call, ...at };
   }
   return undefined;
 }

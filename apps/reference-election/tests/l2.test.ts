@@ -60,57 +60,63 @@ const timing = {
   inclusionBound: 600,
 };
 
-test("the ceremony registration record has the trustee registry's layout, every seat signing", () => {
-  const trustees = newTrustees();
-  const absent = 2;
-  const c = runCeremony(timing, l2, trustees, displayText(), { counter: 0n, absent });
-  const record = ceremonyRegistration(l2, trustees, c);
-  const d = c.definition;
-  const stubHash = electionStubHash(d);
-  const present = PANEL.size - absent;
+// A whole key ceremony (ML-KEM challenges among every seat) has taken over
+// the 5-second default on CI's runners.
+test(
+  "the ceremony registration record has the trustee registry's layout, every seat signing",
+  { timeout: 60_000 },
+  () => {
+    const trustees = newTrustees();
+    const absent = 2;
+    const c = runCeremony(timing, l2, trustees, displayText(), { counter: 0n, absent });
+    const record = ceremonyRegistration(l2, trustees, c);
+    const d = c.definition;
+    const stubHash = electionStubHash(d);
+    const present = PANEL.size - absent;
 
-  expect(record.slice(0, 32)).toEqual(d.panel_id);
-  expect(record.slice(32, 64)).toEqual(stubHash);
-  expect(record.slice(64, 96)).toEqual(d.ceremony_transcript_hash);
-  expect(record[96]).toBe(present);
-  const approvalsAt = 97 + 97 * present + 1;
-  expect(record[approvalsAt - 1]).toBe(present);
-  expect(record.length).toBe(approvalsAt + 65 * present);
+    expect(record.slice(0, 32)).toEqual(d.panel_id);
+    expect(record.slice(32, 64)).toEqual(stubHash);
+    expect(record.slice(64, 96)).toEqual(d.ceremony_transcript_hash);
+    expect(record[96]).toBe(present);
+    const approvalsAt = 97 + 97 * present + 1;
+    expect(record[approvalsAt - 1]).toBe(present);
+    expect(record.length).toBe(approvalsAt + 65 * present);
 
-  // Each seat: its index, its KEM key's hash and its signing key's point.
-  const entries = Array.from({ length: present }, (_, i) => {
-    const at = 97 + 97 * i;
-    const x = BigInt(`0x${hex(record.slice(at + 33, at + 65))}`);
-    const y = BigInt(`0x${hex(record.slice(at + 65, at + 97))}`);
-    return {
-      index: record[at] as number,
-      kemKeyHash: record.slice(at + 1, at + 33),
-      signingKey: p256.Point.fromAffine({ x, y }).toBytes(true),
-    };
-  });
-  expect(entries.map((e) => e.index)).toEqual([1, 2, 3, 4, 5]);
-  const setHash = keySetHash(entries);
-  for (let i = 0; i < present; i++) {
-    const at = approvalsAt + 65 * i;
-    const index = record[at] as number;
-    expect(index).toBe(i + 1);
-    const reg = {
-      l2ChainId: d.l2_chain_id,
-      trusteeRegistry: l2.trusteeRegistry,
-      index,
-      stubHash,
-      ceremonyTranscriptHash: d.ceremony_transcript_hash,
-      keySetHash: setHash,
-    };
-    const sig = record.slice(at + 1, at + 65);
-    expect(verifyCeremonyRegistration(trustees.panel, reg, sig)).toBe(true);
-    // Bound to the registry: the same signature under another one fails.
-    expect(
-      verifyCeremonyRegistration(
-        trustees.panel,
-        { ...reg, trusteeRegistry: l2.groupRegistry },
-        sig,
-      ),
-    ).toBe(false);
-  }
-});
+    // Each seat: its index, its KEM key's hash and its signing key's point.
+    const entries = Array.from({ length: present }, (_, i) => {
+      const at = 97 + 97 * i;
+      const x = BigInt(`0x${hex(record.slice(at + 33, at + 65))}`);
+      const y = BigInt(`0x${hex(record.slice(at + 65, at + 97))}`);
+      return {
+        index: record[at] as number,
+        kemKeyHash: record.slice(at + 1, at + 33),
+        signingKey: p256.Point.fromAffine({ x, y }).toBytes(true),
+      };
+    });
+    expect(entries.map((e) => e.index)).toEqual([1, 2, 3, 4, 5]);
+    const setHash = keySetHash(entries);
+    for (let i = 0; i < present; i++) {
+      const at = approvalsAt + 65 * i;
+      const index = record[at] as number;
+      expect(index).toBe(i + 1);
+      const reg = {
+        l2ChainId: d.l2_chain_id,
+        trusteeRegistry: l2.trusteeRegistry,
+        index,
+        stubHash,
+        ceremonyTranscriptHash: d.ceremony_transcript_hash,
+        keySetHash: setHash,
+      };
+      const sig = record.slice(at + 1, at + 65);
+      expect(verifyCeremonyRegistration(trustees.panel, reg, sig)).toBe(true);
+      // Bound to the registry: the same signature under another one fails.
+      expect(
+        verifyCeremonyRegistration(
+          trustees.panel,
+          { ...reg, trusteeRegistry: l2.groupRegistry },
+          sig,
+        ),
+      ).toBe(false);
+    }
+  },
+);

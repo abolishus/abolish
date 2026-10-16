@@ -366,10 +366,12 @@ export {
   MEMBERSHIP_PROOF_LENGTH,
   MEMBERSHIP_ZKEY_SHA256,
   type MembershipProof,
+  type MembershipProofCheck,
   membershipProof,
   type MembershipSignals,
   membershipVkEncoding,
   membershipVkHash,
+  verifyDecodedMembershipProofs,
   verifyMembershipProof,
 } from "./membership-proof.ts";
 export { poseidon2 } from "./poseidon.ts";
@@ -935,6 +937,19 @@ export {
   vouchScope,
   vouchSlotScope,
 } from "./vouch.ts";
+export {
+  countTier1Additions,
+  type GroupRegistryEvent,
+  type Tier1Break,
+  type Tier1Count,
+  type Tier1CountContext,
+  type Tier1CountError,
+  type Tier1CountVerdict,
+  tier1Leaves,
+  type Tier1LeavesResult,
+  VOUCH_ROOT_INTERVAL,
+  VOUCH_ROOT_WINDOW,
+} from "./vouch-count.ts";
 export {
   type Block,
   CHUNK_SIZE,

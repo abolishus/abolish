@@ -3,9 +3,12 @@
 // depth-32 verification key and its hash, the strict proof codec, and
 // Groth16's published verification equation (Groth, EUROCRYPT 2016) over
 // @noble/curves' BN254 pairing. Composition of a published protocol: no
-// curve, pairing or proof-system arithmetic is implemented here.
+// curve, pairing or proof-system arithmetic is implemented here. Many proofs
+// can be checked at once with the small-exponent batch test (Bellare, Garay
+// and Rabin, EUROCRYPT 1998) as Zcash's `bellman` applies it to Groth16.
 
 import { bn254 } from "@noble/curves/bn254.js";
+import { randomBytes } from "@noble/hashes/utils.js";
 import { BN254_R, type Codec, DecodeError, decode, EncodeError, encode } from "./codec.ts";
 import { ds } from "./domain-separation.ts";
 import { H } from "./group.ts";
@@ -371,4 +374,129 @@ function pairingCheck(decoded: MembershipProof, inputs: readonly bigint[]): bool
   // points; noble refuses a zero pairing term, and e(0, gamma) is 1 anyway.
   if (!l.is0()) terms.push({ g1: l, g2: vk.gamma });
   return Fp12.eql(bn254.pairingBatch(terms), Fp12.ONE);
+}
+
+/** One proof of a batch: decoded by `membershipProof`, with its public signals. */
+export interface MembershipProofCheck {
+  readonly proof: MembershipProof;
+  readonly signals: MembershipSignals;
+}
+
+interface Pending {
+  readonly at: number;
+  readonly proof: MembershipProof;
+  readonly inputs: readonly bigint[];
+}
+
+// A batch this small, once it fails, is checked proof by proof: splitting it
+// further costs more pairings than it saves.
+const SPLIT_FLOOR = 4;
+
+/**
+ * `r_i`: uniform in `[1, 2^128)` from the CSPRNG, drawn after every proof of
+ * the batch is fixed, so no submitter can choose proofs that cancel under it
+ * (docs/spec/vouching.md, Batched verification; T-52).
+ */
+function coefficient(): bigint {
+  for (;;) {
+    let v = 0n;
+    for (const x of randomBytes(16)) v = (v << 8n) | BigInt(x);
+    if (v !== 0n) return v;
+  }
+}
+
+/**
+ * Whether every proof of `items` passes, by one product of `N + 3` pairings:
+ * `∏ e(−r_i·A_i, B_i) · e(Σr_i·alpha, beta) · e(Σr_i·L_i, gamma) ·
+ * e(Σr_i·C_i, delta) = 1`, each `L_i`'s inputs folded into one combination
+ * of the five IC points. Sound only because every point passed the strict
+ * decoder, so each lies in its prime-order group: a batch holding an invalid
+ * proof then passes with probability at most `2^−128`.
+ */
+function batchPasses(items: readonly Pending[]): boolean {
+  const vk = verificationKey();
+  const terms: { g1: G1; g2: G2 }[] = [];
+  let sum = 0n;
+  const ic = vk.ic.map(() => 0n);
+  let c = bn254.G1.Point.ZERO;
+  for (const { proof, inputs } of items) {
+    const r = coefficient();
+    // −r·A is never the identity: A isn't, and 0 < r < the group's order.
+    terms.push({ g1: proof.a.multiplyUnsafe(r).negate(), g2: proof.b });
+    sum += r;
+    ic[0] = (ic[0] as bigint) + r;
+    for (const [j, v] of inputs.entries()) ic[j + 1] = (ic[j + 1] as bigint) + r * v;
+    c = c.add(proof.c.multiplyUnsafe(r));
+  }
+  let l = bn254.G1.Point.ZERO;
+  for (const [j, v] of ic.entries()) {
+    const k = v % BN254_R;
+    if (k !== 0n) l = l.add((vk.ic[j] as G1).multiplyUnsafe(k));
+  }
+  // Σr_i is below N·2^128, far below the order, so never 0 mod it.
+  terms.push({ g1: vk.alpha.multiplyUnsafe(sum % BN254_R), g2: vk.beta });
+  // noble refuses a zero pairing term, and e(0, Q) is 1 anyway.
+  if (!l.is0()) terms.push({ g1: l, g2: vk.gamma });
+  if (!c.is0()) terms.push({ g1: c, g2: vk.delta });
+  return Fp12.eql(bn254.pairingBatch(terms), Fp12.ONE);
+}
+
+function individually(items: readonly Pending[], verdicts: boolean[]): void {
+  for (const { at, proof, inputs } of items) verdicts[at] = pairingCheck(proof, inputs);
+}
+
+function resolve(items: readonly Pending[], verdicts: boolean[]): void {
+  if (items.length <= SPLIT_FLOOR) individually(items, verdicts);
+  else if (batchPasses(items)) for (const { at } of items) verdicts[at] = true;
+  else split(items, verdicts);
+}
+
+// `items` failed as a batch. A half that passes is accepted; if only one half
+// fails, it holds the invalid proofs and is split in turn. If both fail, the
+// failures are dense (a flood of junk, T-52), and every proof of both is
+// checked alone, so a batch of junk costs about 1.5 times checking it proof
+// by proof rather than the twice that splitting it to the end would.
+function split(items: readonly Pending[], verdicts: boolean[]): void {
+  const half = Math.ceil(items.length / 2);
+  const failed: (readonly Pending[])[] = [];
+  for (const part of [items.slice(0, half), items.slice(half)])
+    if (part.length > SPLIT_FLOOR && batchPasses(part))
+      for (const { at } of part) verdicts[at] = true;
+    else failed.push(part);
+  const [only] = failed;
+  if (failed.length === 1 && only !== undefined && only.length > SPLIT_FLOOR) split(only, verdicts);
+  else for (const part of failed) individually(part, verdicts);
+}
+
+/**
+ * Each proof's verdict under the pinned depth-32 key, exactly as
+ * `verifyDecodedMembershipProof` gives it, but checked in batches
+ * (docs/spec/vouching.md, Batched verification): a batch that passes accepts
+ * every proof in it, and one that fails is split in halves until each proof's
+ * own verdict is known, the smallest parts, and both halves of a batch whose
+ * halves both fail, proof by proof. A proof whose
+ * signals `verifyDecodedMembershipProof` refuses (one at or above `r`, a root
+ * of 0) is `false` and never enters a batch. Only proofs decoded by
+ * `membershipProof` are accepted: the batch test is sound only for points in
+ * their prime-order groups (T-05). The coefficients are drawn here, from the
+ * CSPRNG, after every proof is held; no caller supplies them. Batching lowers
+ * the cost of honest proofs; a batch of junk fails and falls back to about
+ * 1.5 times the pairings of checking it proof by proof (T-52).
+ */
+export function verifyDecodedMembershipProofs(checks: readonly MembershipProofCheck[]): boolean[] {
+  if (!Array.isArray(checks)) throw new TypeError("checks: expected an array");
+  const list = checks.slice();
+  const verdicts = list.map(() => false);
+  const pending: Pending[] = [];
+  for (const [at, check] of list.entries()) {
+    if (check === null || typeof check !== "object")
+      throw new TypeError(`checks[${at}]: expected an object`);
+    // Read once, so a getter can't show the batch one proof and the split another.
+    const { proof, signals } = check;
+    const inputs = signalInputs(signals);
+    if (!DECODED.has(proof)) throw new TypeError("proof: expected a decoded membership proof");
+    if (inputs !== null) pending.push({ at, proof, inputs });
+  }
+  resolve(pending, verdicts);
+  return verdicts;
 }

@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { expect, userEvent, within } from "storybook/test";
+import { expect, userEvent, waitFor, within } from "storybook/test";
 
 import {
   Select,
@@ -53,6 +53,12 @@ export const Default: Story = {
     const body = within(canvasElement.ownerDocument.body);
     await userEvent.click(await body.findByRole("option", { name: "Residents" }));
     await expect(trigger).toHaveTextContent("Residents");
+    // Base UI keeps the popup mounted and marks it `hidden` only once its exit
+    // transition ends; until then its focus guards and unnamed listbox are
+    // still in the accessibility tree, where the axe check that runs after the
+    // story finds them. On a loaded CI runner the transition can outlast
+    // waitFor's default second.
+    await waitFor(() => expect(body.queryByRole("listbox")).toBeNull(), { timeout: 5_000 });
   },
 };
 

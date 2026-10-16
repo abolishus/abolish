@@ -191,11 +191,25 @@ export const boardAbi = [
   },
   {
     type: "function",
+    inputs: [{ name: "record", internalType: "bytes", type: "bytes" }],
+    name: "submitComplaintBatch",
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
     inputs: [
       { name: "posting", internalType: "bytes", type: "bytes" },
       { name: "ballot", internalType: "bytes", type: "bytes" },
     ],
     name: "submitPosting",
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    inputs: [{ name: "record", internalType: "bytes", type: "bytes" }],
+    name: "submitReceiptBatch",
     outputs: [],
     stateMutability: "nonpayable",
   },
@@ -305,6 +319,21 @@ export const boardAbi = [
         type: "bytes32",
         indexed: true,
       },
+      { name: "seat", internalType: "uint8", type: "uint8", indexed: true },
+      { name: "record", internalType: "bytes", type: "bytes", indexed: false },
+    ],
+    name: "ShareComplaintBatchSubmitted",
+  },
+  {
+    type: "event",
+    anonymous: false,
+    inputs: [
+      {
+        name: "definitionHash",
+        internalType: "bytes32",
+        type: "bytes32",
+        indexed: true,
+      },
       {
         name: "ballotHash",
         internalType: "bytes32",
@@ -334,6 +363,21 @@ export const boardAbi = [
       { name: "record", internalType: "bytes", type: "bytes", indexed: false },
     ],
     name: "SharePosted",
+  },
+  {
+    type: "event",
+    anonymous: false,
+    inputs: [
+      {
+        name: "definitionHash",
+        internalType: "bytes32",
+        type: "bytes32",
+        indexed: true,
+      },
+      { name: "seat", internalType: "uint8", type: "uint8", indexed: true },
+      { name: "record", internalType: "bytes", type: "bytes", indexed: false },
+    ],
+    name: "ShareReceiptBatchSubmitted",
   },
   {
     type: "event",

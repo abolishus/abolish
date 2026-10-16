@@ -27,6 +27,7 @@ import {
   decodeBallot,
   decodeSharePosting,
   decodeShareReceipt,
+  decodeShareReceiptBatch,
   eventAccumulatorGenesis,
   eventAccumulatorStep,
   type FramedRecord,
@@ -36,6 +37,7 @@ import {
   RECORD_TYPES,
   shapeOk,
   shareCiphertextHash,
+  shareReceiptBatchStatement,
   shareReceiptStatement,
   verifyStatement,
 } from "@abolishus/crypto";
@@ -92,10 +94,10 @@ const same = (a: Uint8Array, b: Uint8Array) =>
   a.length === b.length && a.every((x, i) => x === b[i]);
 const typeOf = (b: Uint8Array) => ((b[0] ?? 0) << 8) | (b[1] ?? 0);
 
-// Topic 0 of each board event, from contract-event version 3's table, the
-// version the profile pins (docs/spec/contracts.md, Event tables (version 3)).
+// Topic 0 of each board event, from contract-event version 4's table, the
+// version the profile pins (docs/spec/contracts.md, Event tables (version 4)).
 const topic0 = (name: string): Uint8Array => {
-  const signature = CONTRACT_EVENT_SIGNATURES[3].board.find((s) => s.startsWith(`${name}(`));
+  const signature = CONTRACT_EVENT_SIGNATURES[4].board.find((s) => s.startsWith(`${name}(`));
   if (signature === undefined) throw new Error(`simulation: the board has no event ${name}`);
   return keccak_256(utf8(signature));
 };
@@ -103,6 +105,7 @@ const TOPIC0 = {
   ballot: topic0("BallotSubmitted"),
   receipt: topic0("ShareReceiptSubmitted"),
   posting: topic0("SharePosted"),
+  batch: topic0("ShareReceiptBatchSubmitted"),
 } as const;
 
 // `abi.encode(bytes)`: the offset word, the length word, the bytes padded
@@ -336,6 +339,45 @@ export class SimulatedBoardContract {
     for (const { record, framed } of fresh)
       this.#emit(at, [TOPIC0.receipt, framed.definitionHash, framed.ballotHash], record);
     return { ok: true, emitted: fresh.length };
+  }
+
+  /**
+   * `submitReceiptBatch(record)`: one share-receipt batch, strictly decoded
+   * (its pairs ascending), for a registered election and a seat of its key
+   * set, signed once by that seat's registered signing key, emitted whole
+   * with its definition hash and seat as topics (Calls). A repeat is a no-op.
+   */
+  submitReceiptBatch(record: Uint8Array, at: L2Block): BoardResult {
+    if (this.#isRepeat(record)) return { ok: true, emitted: 0 };
+    if (record.length < 35 || typeOf(record) !== RECORD_TYPES.shareReceiptBatch)
+      return { ok: false, refusal: "decode" };
+    const params = this.#registry.parametersOf(record.subarray(3, 35));
+    if (params === undefined || params.ballotVersion === 0)
+      return { ok: false, refusal: "delivery-stray" };
+    if (params.ballotVersion > 3) return { ok: false, refusal: "unknown-version" };
+    if (record[2] !== 1) return { ok: false, refusal: "profile-mismatch" };
+    let batch;
+    try {
+      batch = decodeShareReceiptBatch(record, 1);
+    } catch (e) {
+      if (e instanceof DecodeError) return { ok: false, refusal: "decode" };
+      throw e;
+    }
+    const seat = this.#qualified(params).find((s) => s.index === batch.seat);
+    if (seat === undefined) return { ok: false, refusal: "delivery-seat" };
+    if (
+      !verifyStatement(
+        seat.signingKey,
+        "abolish/v1/sig/share-receipt-batch",
+        shareReceiptBatchStatement(batch),
+        batch.signature,
+      )
+    )
+      return { ok: false, refusal: "delivery-signature" };
+    const seatWord = new Uint8Array(32);
+    seatWord[31] = batch.seat;
+    this.#emit(at, [TOPIC0.batch, batch.definition_hash, seatWord], record);
+    return { ok: true, emitted: 1 };
   }
 
   /**

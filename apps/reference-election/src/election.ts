@@ -106,14 +106,15 @@ export interface Timing {
 /**
  * The versions the profile pins where they aren't 1: board-entry version 5,
  * which carries the destruction statements tally-opening version 1 needs
- * ([[verifier]] 2.3) and the close statements, and contract-event version 3,
- * which archives the board's close-rule events. The election registry
+ * ([[verifier]] 2.3) and the close statements, and contract-event version 4,
+ * which archives every board event, the close rule's and the share-receipt
+ * batch's. The election registry
  * registers no other profile for a version-1 definition ([[contracts]],
  * Election registry, Registration, rule 9).
  */
 const PINNED: ReadonlyMap<number, number> = new Map([
   [RECORD_TYPES.boardEntry, 5],
-  [RECORD_TYPES.contractEvent, 3],
+  [RECORD_TYPES.contractEvent, 4],
 ]);
 
 /** The profile: plurality, every type from 0x0001 to 0x0009 pinned, at version 1 but those in `PINNED`. */

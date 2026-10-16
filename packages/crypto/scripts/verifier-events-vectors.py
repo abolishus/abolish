@@ -20,8 +20,9 @@ The verifier's tests show the `fail` status over l1-anchor.json's anchored
 boards, whose entry 1 is a placeholder of type 0x0008 that doesn't decode.
 
 The records and their verdicts are contract-event.json's,
-contract-event-v2.json's and contract-event-v3.json's (contract-event-vectors.py,
-contract-event-v2-vectors.py and contract-event-v3-vectors.py, independent
+contract-event-v2.json's, contract-event-v3.json's and contract-event-v4.json's
+(contract-event-vectors.py, contract-event-v2-vectors.py,
+contract-event-v3-vectors.py and contract-event-v4-vectors.py, independent
 Python implementations): a record
 of `records` passes, one of `eventFailures` fails with its `error`, and one
 of `decodeErrors` doesn't decode, with its `error`, each under its own file's
@@ -90,7 +91,8 @@ def load_events(name, version):
 V1 = load_events("contract-event.json", 1)
 V2 = load_events("contract-event-v2.json", 2)
 V3 = load_events("contract-event-v3.json", 3)
-FILES = {1: V1, 2: V2, 3: V3}
+V4 = load_events("contract-event-v4.json", 4)
+FILES = {1: V1, 2: V2, 3: V3, 4: V4}
 
 
 def pins_of(d):
@@ -190,14 +192,17 @@ def main(out_dir):
     d2_v1 = definition(dv.TYPICAL, 2, V2)
     d3 = definition(rc.TYPICAL, 2, V2, board_version=3)
     d3_v4 = definition(d4.TYPICAL, 3, V3, board_version=4)
+    d4_v4 = definition(d4.TYPICAL, 4, V4, board_version=4)
     honest1 = [rec(V1, i) for i in V1["records"]]
     honest2 = [rec(V2, i) for i in V2["records"]]
     honest3 = [rec(V3, i) for i in V3["records"]]
+    honest4 = [rec(V4, i) for i in V4["records"]]
 
     case("v1-records", "Definition version 1 pinning contract-event version 1: every honest record of contract-event.json, in its order, each passing the event check. 4.4 stays unverifiable (not-implemented): the required entries and the accumulator's replay wait on L2 reads and the archive.", d1, honest1, NOT_IMPLEMENTED)
     case("v2-records", "Definition version 4 pinning board-entry version 4 and contract-event version 2: every honest record of contract-event-v2.json, the board's events included, each passing. 4.4 is not-implemented.", d2, honest2, NOT_IMPLEMENTED)
     case("v3-records", "Definition version 3 pinning board-entry version 3 and contract-event version 2: a ballot, a share receipt and a group creation, each passing. 4.4 is not-implemented.", d3, [rec(V2, "ballot-v2"), rec(V2, "share-receipt"), rec(V2, "group-created")], NOT_IMPLEMENTED)
     case("events-v3-records", "Definition version 4 pinning board-entry version 4 and contract-event version 3: every honest record of contract-event-v3.json, the board's ballots, relayed ballots and close statements, each passing. 4.4 is not-implemented.", d3_v4, honest3, NOT_IMPLEMENTED)
+    case("events-v4-records", "Definition version 4 pinning board-entry version 4 and contract-event version 4: every honest record of contract-event-v4.json, a ballot and the board's share-receipt batches, each passing. 4.4 is not-implemented.", d4_v4, honest4, NOT_IMPLEMENTED)
     case("none", "No contract-event record on the copy: 4.4 is not-implemented, never a pass, since which events must be boarded isn't known yet.", d1, [], NOT_IMPLEMENTED)
 
     case(
@@ -211,6 +216,7 @@ def main(out_dir):
         (V1, d1, ["unknown-contract", "unknown-event-board", "unknown-event-no-topics", "event-topics-too-few", "event-topics-tier-over-u8", "event-data-trailing", "event-data-definition-v3", "event-data-registration-count"]),
         (V2, d2, ["unknown-event-ballot-from-registry", "event-topics-ballot-two", "event-data-ballot-element-zero", "event-data-registration-v1-layout", "event-data-receipt-high-s"]),
         (V3, d3_v4, ["unknown-event-relayed-from-registry", "event-topics-relayed-two", "event-data-relayed-stamp-over-u64", "event-data-relayed-hash-topic", "event-data-close-signer-topic", "event-data-close-signature-high-s"]),
+        (V4, d4_v4, ["unknown-event-batch-from-registry", "event-topics-batch-seat-high", "event-data-batch-seat-topic", "event-data-batch-unordered", "event-data-batch-high-s"]),
     ]:
         for id_ in ids:
             error = f["verdicts"][id_][1]
@@ -225,6 +231,7 @@ def main(out_dir):
         (V1, d1, ["version-two", "trailing-bytes", "data-over-max"]),
         (V2, d2, ["version-one", "version-three", "truncated-data", "topics-over-max"]),
         (V3, d3_v4, ["version-one", "version-two", "version-four"]),
+        (V4, d4_v4, ["version-three", "version-five"]),
     ]:
         for id_ in ids:
             code = f["verdicts"][f"decode/{id_}"][1][1]
@@ -280,7 +287,7 @@ def main(out_dir):
         NOT_IMPLEMENTED,
         entry_version=3,
     )
-    for events in (4, 255):
+    for events in (5, 255):
         case(
             f"events-v{events}",
             f"The profile pins contract-event version {events}, unknown here: 4.4 is unverifiable (unsupported-version) whatever the copy holds, failing records included (T-36).",

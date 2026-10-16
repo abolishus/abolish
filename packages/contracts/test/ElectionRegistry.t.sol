@@ -246,10 +246,10 @@ contract ElectionRegistryTest is TestBase {
     /// decodes, by pin (type 0x0001 to 0x0009), written from the spec: 0
     /// where any version is admitted. Version 6 has none.
     function _served(uint8 version) internal pure returns (uint8[9] memory v) {
-        if (version == 1) return [1, 1, 1, 0, 0, 0, 5, 3, 1];
-        if (version == 3) return [3, 2, 2, 0, 0, 0, 5, 3, 1];
-        if (version == 4) return [4, 2, 2, 0, 0, 0, 5, 3, 1];
-        return [5, 3, 2, 0, 0, 0, 5, 3, 2];
+        if (version == 1) return [1, 1, 1, 0, 0, 0, 5, 4, 1];
+        if (version == 3) return [3, 2, 2, 0, 0, 0, 5, 4, 1];
+        if (version == 4) return [4, 2, 2, 0, 0, 0, 5, 4, 1];
+        return [5, 3, 2, 0, 0, 0, 5, 4, 2];
     }
 
     function _templateOf(bytes32 id, uint8 version)
@@ -287,7 +287,7 @@ contract ElectionRegistryTest is TestBase {
 
     /// Each served pin set to any other version from 1 to 7 is refused with
     /// its record type and the version pinned, and nothing is recorded:
-    /// contract-event versions 1 and 2, which can't read the board's events;
+    /// contract-event versions 1 to 3, which can't read all the board's events;
     /// board-entry versions without the close statement; ballot versions the
     /// board can't check, or that don't name the definition's cells; opening
     /// versions that don't open the ballot's cores; and display-text versions

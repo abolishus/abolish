@@ -51,11 +51,15 @@ MAX_DEPOSIT_DATA = 120_000
 FORCED_PATH = {
     "depositGasTarget": MAX_RESOURCE_LIMIT // ELASTICITY,
     "l1BlockSeconds": 13,
-    "receiptsPerCall": 256,
-    "receiptCallGas": 18_500_000,
-    "complaintCallGas": 180_000,
+    # One share-receipt batch of RECEIPT_BATCH_MAX pairs per call.
+    "receiptsPerCall": 1024,
+    "receiptCallGas": 4_500_000,
+    # One share-complaint batch of COMPLAINT_BATCH_MAX entries per call.
+    "complaintsPerCall": 512,
+    "complaintCallGas": 5_000_000,
 }
-RECEIPT_LENGTH = 164
+# A share-receipt batch's bytes with its header, for `receiptsPerCall` pairs.
+BATCH_LENGTH = 104 + 64 * 1024
 
 # Hourly periods, a 12-hour anchoring deadline, F and W_C of 13 hours.
 DEPLOYED = {
@@ -286,12 +290,13 @@ def intervals(e, w):
     c_d = t_d - w["forcedInclusion"]
     owed = 2 * e["members"]
     calls = -(-owed // FORCED_PATH["receiptsPerCall"])
+    complaint_calls = -(-owed // FORCED_PATH["complaintsPerCall"])
     return [
         (c_d - w["margin"], c_d, e["seats"] * calls * FORCED_PATH["receiptCallGas"], "receipts"),
         (
             t_d + w["contractEventWindow"],
             t_k - w["forcedInclusion"],
-            e["seats"] * owed * FORCED_PATH["complaintCallGas"],
+            e["seats"] * complaint_calls * FORCED_PATH["complaintCallGas"],
             "complaints",
         ),
     ]
@@ -318,27 +323,25 @@ def fits(elections, w):
 
 
 def lone_limit(seats, w):
-    """The largest M a lone election fits with, by linear search from a closed-form guess."""
+    """The largest M a lone election fits with: doubling, then bisection over [ok, bad)."""
     one = lambda m: fits([{"members": m, "seats": seats, "closesAt": 0, "l1InclusionBound": 0}], w)
-    per_second = Fraction(FORCED_PATH["depositGasTarget"], FORCED_PATH["l1BlockSeconds"])
-    m = 0
-    # Complaints alone bound M by rate · L_K / (2 · s · gas) (R ≤ L_K, so receipts
-    # never allow more per second than this guess's ceiling).
-    l_k = COMPLAINT_WINDOW - DELIVERY_WINDOW - w["contractEventWindow"] - w["forcedInclusion"]
-    guess = int(per_second * l_k / (2 * seats * FORCED_PATH["complaintCallGas"]))
-    m = guess
-    while m > 0 and not one(m):
-        m -= 1
-    while one(m + 1):
-        m += 1
-    return m
+    ok, bad = 0, 1
+    while one(bad):
+        ok, bad = bad, bad * 2
+    while bad - ok > 1:
+        mid = (ok + bad) // 2
+        if one(mid):
+            ok = mid
+        else:
+            bad = mid
+    return ok
 
 
-def windows(margin_hours):
+def windows(margin_hours, seconds=None):
     return {
         "contractEventWindow": DEPLOYED["contractEventWindow"],
         "forcedInclusion": DEPLOYED["forcedInclusion"],
-        "margin": margin_hours * HOUR,
+        "margin": margin_hours * HOUR if seconds is None else seconds,
     }
 
 
@@ -349,8 +352,15 @@ def election(members, seats, closes_at=1_800_000_000, bound=600):
 def capacity_cases():
     w1, w21 = windows(1), windows(21)
     l3 = lone_limit(3, w1)
-    # Half the limit in whole receipt calls (128 members fill one call of 256).
-    half = (l3 // 2) // 128 * 128
+    # With batched receipts both intervals carry similar rates at R of one
+    # hour, so two elections' complaints overlap wherever their receipts
+    # might: the cases about where receipts meet take R of ten minutes, where
+    # receipts dominate and the complaints' share is small.
+    wm = windows(0, seconds=600)
+    lm = lone_limit(3, wm)
+    # Half that limit in whole receipt calls (512 members fill one batch of 1024).
+    half = (lm // 2) // 512 * 512
+    assert half > 0
     cases = [
         ("lone-at-limit", "Three seats at the largest electorate R of one hour fits", w1, [election(l3, 3)]),
         ("lone-over-limit", "One member more", w1, [election(l3 + 1, 3)]),
@@ -365,40 +375,46 @@ def capacity_cases():
         ),
         (
             "complaints-bind",
-            "With R of 21 hours the complaints bind first: one member over their limit",
+            "With R of 21 hours the complaints bind: one member over their limit",
             w21,
             [election(lone_limit(3, w21) + 1, 3)],
         ),
         ("long-margin", "R of 21 hours at its limit", w21, [election(lone_limit(3, w21), 3)]),
         (
             "same-close-halves",
-            "Two elections closing together, each with half the limit in whole receipt calls",
-            w1,
+            "With R of ten minutes, two elections closing together, each with half the limit in whole receipt calls",
+            wm,
             [election(half, 3), election(half, 3)],
         ),
         (
             "same-close-over",
-            "Two elections closing together, each at the limit",
-            w1,
-            [election(l3, 3), election(l3, 3)],
+            "With R of ten minutes, two elections closing together, each at the limit",
+            wm,
+            [election(lm, 3), election(lm, 3)],
         ),
         (
             "receipts-abut",
-            "Closing R apart: one's receipts end where the other's start",
-            w1,
-            [election(l3, 3), election(l3, 3, closes_at=1_800_000_000 + HOUR)],
+            "With R of ten minutes, closing R apart: one's receipts end where the other's start",
+            wm,
+            [election(lm, 3), election(lm, 3, closes_at=1_800_000_000 + 600)],
         ),
         (
             "receipts-overlap",
-            "Closing R less a second apart: the receipts overlap for one second",
-            w1,
-            [election(l3, 3), election(l3, 3, closes_at=1_800_000_000 + HOUR - 1)],
+            "With R of ten minutes, closing R less a second apart: the receipts overlap for one second",
+            wm,
+            [election(lm, 3), election(lm, 3, closes_at=1_800_000_000 + 599)],
         ),
         (
             "receipts-in-complaints",
-            "One election's receipts inside another's complaints, each at its limit",
+            "With R of ten minutes, one election's receipts inside another's complaints, each at its limit",
+            wm,
+            [election(lm, 3), election(lm, 3, closes_at=1_800_000_000 + 40 * HOUR)],
+        ),
+        (
+            "complaints-overlap",
+            "With R of one hour, two elections at the limit closing an hour apart: their receipts abut and their complaints overlap, which batched complaints leave room for",
             w1,
-            [election(l3, 3), election(l3, 3, closes_at=1_800_000_000 + 40 * HOUR)],
+            [election(l3, 3), election(l3, 3, closes_at=1_800_000_000 + HOUR)],
         ),
     ]
     out = []
@@ -432,7 +448,7 @@ def capacity_cases():
             }
         )
     assert [c["fits"] for c in out] == [
-        True, False, True, True, False, True, False, True, True, False, True, False, True
+        True, False, True, True, False, True, False, True, True, False, True, False, True, True
     ], [c["fits"] for c in out]
     limits = [
         {"seats": s, "margin": str(m * HOUR), "members": str(lone_limit(s, windows(m)))}
@@ -444,10 +460,10 @@ def capacity_cases():
 
 def main():
     out = pathlib.Path(sys.argv[1])
-    # The portal's data cap and per-deposit gas hold for a full receipt call:
-    # its calldata is the selector, the offset, the length and the receipts
+    # The portal's data cap and per-deposit gas hold for a full batch call:
+    # its calldata is the selector, the offset, the length and the batch
     # padded to a word.
-    calldata = 4 + 32 + 32 + -(-FORCED_PATH["receiptsPerCall"] * RECEIPT_LENGTH // 32) * 32
+    calldata = 4 + 32 + 32 + -(-BATCH_LENGTH // 32) * 32
     assert calldata <= MAX_DEPOSIT_DATA and FORCED_PATH["receiptCallGas"] <= MAX_RESOURCE_LIMIT
 
     def hx(b):

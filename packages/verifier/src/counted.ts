@@ -119,6 +119,8 @@ export interface DeliveryReport {
     /** Each proven complaint about it, with the seat its signature attributes it to, or `null`. */
     readonly complaints: readonly {
       readonly entry: number;
+      /** For a share-complaint batch's entry, its index in the batch from 0. */
+      readonly pair?: number;
       readonly seat: number;
       readonly signer: number | null;
     }[];
@@ -126,6 +128,8 @@ export interface DeliveryReport {
   /** Each record the check ignored or attributed, in copy order. */
   readonly records: readonly {
     readonly entry: number;
+    /** For a share-receipt batch's pair, its index in the batch from 0. */
+    readonly pair?: number;
     readonly code: DeliveryRecordCode;
     readonly signer?: number | null;
   }[];
@@ -212,14 +216,19 @@ const DELIVERY_TYPES: ReadonlySet<number> = new Set([
   RECORD_TYPES.sharePosting,
   RECORD_TYPES.shareComplaint,
 ]);
+// Share-receipt and share-complaint batches reach the board only as contract
+// events: no board-entry version allows them, so 4.1 refuses one boarded
+// directly.
 const DELIVERY_EVENTS: ReadonlySet<string> = new Set([
   "ShareReceiptSubmitted",
   "SharePosted",
   "ShareComplaintSubmitted",
+  "ShareReceiptBatchSubmitted",
+  "ShareComplaintBatchSubmitted",
 ]);
 
 const readsEvents = (v: number | undefined): v is ContractEventVersion =>
-  v === 1 || v === 2 || v === 3;
+  v === 1 || v === 2 || v === 3 || v === 4;
 
 const U32_MAX = 0xffffffff;
 
@@ -368,6 +377,7 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
               missing: b.missing,
               complaints: b.excludedBy.map((c) => ({
                 entry: entryOf(c.at),
+                ...(c.pair !== undefined && { pair: c.pair }),
                 seat: c.seat,
                 signer: c.signer,
               })),
@@ -376,6 +386,7 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
     ),
     records: delivered.records.map((r) => ({
       entry: entryOf(r.at),
+      ...(r.pair !== undefined && { pair: r.pair }),
       code: r.code,
       ...(r.signer !== undefined && { signer: r.signer }),
     })),

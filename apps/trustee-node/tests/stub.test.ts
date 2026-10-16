@@ -19,7 +19,7 @@ const check = (stub: ElectionDefinition, electorate: ElectorateCheck = pass) =>
   checkStub(encodeElectionDefinition(stub), pinned, electorate, new Map());
 
 describe("stub check 4", () => {
-  // Four seats: at most 896 members alone with the release's windows.
+  // Four seats: at most 15,360 members alone with the release's windows.
   const sized = (n: bigint, change: Partial<ElectionDefinition> = {}) => {
     const stub = stubFor(panel, change);
     return { ...stub, electorate: stub.electorate.map((g) => ({ ...g, group_size: n })) };
@@ -32,18 +32,18 @@ describe("stub check 4", () => {
   });
 
   test("refuses a stub whose obligation doesn't fit alone", async () => {
-    expect((await check(sized(896n))).ok).toBe(true);
-    expect(await check(sized(897n))).toEqual({ ok: false, code: "stub-capacity" });
+    expect((await check(sized(15_360n))).ok).toBe(true);
+    expect(await check(sized(15_361n))).toEqual({ ok: false, code: "stub-capacity" });
   });
 
   test("counts the elections it serves, but not the stub's own entry", async () => {
     const stub = sized(1n);
-    const served = new Map([["cd".repeat(32), demand(sized(896n))]]);
+    const served = new Map([["cd".repeat(32), demand(sized(15_360n))]]);
     expect(await checkStub(encodeElectionDefinition(stub), pinned, pass, served)).toEqual({
       ok: false,
       code: "stub-capacity",
     });
-    const self = sized(896n);
+    const self = sized(15_360n);
     const own = Buffer.from(electionStubHash(self)).toString("hex");
     expect(
       (
@@ -58,7 +58,7 @@ describe("stub check 4", () => {
   });
 
   test("only after the electorate check, whose counts it reads", async () => {
-    expect(await check(sized(897n), () => Promise.resolve(false))).toEqual({
+    expect(await check(sized(15_361n), () => Promise.resolve(false))).toEqual({
       ok: false,
       code: "stub-electorate",
     });

@@ -2,12 +2,14 @@ import fc from "fast-check";
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vite-plus/test";
 import {
+  COMPLAINT_BATCH_MAX,
   COMPLAINT_WINDOW,
   complaintScope,
   definitionMembers,
   DELIVERY_WINDOW,
   type FinalizedL1,
   FORCED_PATH,
+  RECEIPT_BATCH_MAX,
   forcedPathDemand,
   type ForcedPathElection,
   forcedPathFits,
@@ -133,11 +135,19 @@ describe("delivery-obligation vectors", () => {
     expect(FORCED_PATH.depositGasTarget).toBe(
       BigInt(V.portal.maxResourceLimit) / BigInt(V.portal.elasticityMultiplier),
     );
-    // A full receipt call fits one deposit: 164-byte receipts padded to a
-    // word, after the selector, offset and length, and its gas.
-    const calldata = 4n + 64n + ((FORCED_PATH.receiptsPerCall * 164n + 31n) / 32n) * 32n;
+    // A full receipt call fits one deposit: one share-receipt batch of
+    // `receiptsPerCall` pairs, `104 + 64·c` bytes padded to a word, after the
+    // selector, offset and length, and its gas.
+    expect(FORCED_PATH.receiptsPerCall).toBe(BigInt(RECEIPT_BATCH_MAX));
+    const calldata = 4n + 64n + ((104n + FORCED_PATH.receiptsPerCall * 64n + 31n) / 32n) * 32n;
     expect(calldata).toBeLessThanOrEqual(BigInt(V.portal.maxDepositData));
     expect(FORCED_PATH.receiptCallGas).toBeLessThanOrEqual(BigInt(V.portal.maxResourceLimit));
+    // So does a full complaint call: one share-complaint batch of
+    // `complaintsPerCall` entries, `104 + 128·c` bytes.
+    expect(FORCED_PATH.complaintsPerCall).toBe(BigInt(COMPLAINT_BATCH_MAX));
+    const complaints = 4n + 64n + ((104n + FORCED_PATH.complaintsPerCall * 128n + 31n) / 32n) * 32n;
+    expect(complaints).toBeLessThanOrEqual(BigInt(V.portal.maxDepositData));
+    expect(FORCED_PATH.complaintCallGas).toBeLessThanOrEqual(BigInt(V.portal.maxResourceLimit));
   });
 
   test("owed receipts and complaint scopes are the file's", () => {
@@ -312,11 +322,12 @@ describe("forcedPathFits", () => {
   });
 
   test("the deployed windows' caps, receipts binding at R of one hour and complaints at 21 hours", () => {
-    expect(forcedPathMembersLimit(3, deployed)).toBe(1152n);
-    expect(forcedPathFits([lone(1152n)], deployed)).toBe(true);
-    expect(forcedPathFits([lone(1153n)], deployed)).toBe(false);
+    // With receipts batched (P1-12d): 1,152 members before, at a receipt each.
+    expect(forcedPathMembersLimit(3, deployed)).toBe(20_992n);
+    expect(forcedPathFits([lone(20_992n)], deployed)).toBe(true);
+    expect(forcedPathFits([lone(20_993n)], deployed)).toBe(false);
     const long = { ...deployed, margin: 21n * hour };
-    expect(forcedPathMembersLimit(3, long)).toBe(23_589n);
+    expect(forcedPathMembersLimit(3, long)).toBe(434_688n);
   });
 
   test("an empty set fits, and so does an election with no members", () => {

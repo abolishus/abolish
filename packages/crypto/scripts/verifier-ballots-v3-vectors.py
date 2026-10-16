@@ -95,8 +95,8 @@ def det(label):
 
 
 def pins_for(ballot=3, opening=2):
-    """A version-5 profile: board-entry version 5, contract-event version 3 (close.md, Version), display-text version 2, and the given ballot and spoiled-opening pins."""
-    own = {1: 5, BALLOT_TYPE: ballot, SPOILED_OPENING_TYPE: opening, BOARD_ENTRY_TYPE: vb.BOARD_VERSION, vb.CONTRACT_EVENT_TYPE: 3, DISPLAY_TEXT_TYPE: 2}
+    """A version-5 profile: board-entry version 5, contract-event version 4 (close.md, Version), display-text version 2, and the given ballot and spoiled-opening pins."""
+    own = {1: 5, BALLOT_TYPE: ballot, SPOILED_OPENING_TYPE: opening, BOARD_ENTRY_TYPE: vb.BOARD_VERSION, vb.CONTRACT_EVENT_TYPE: 4, DISPLAY_TEXT_TYPE: 2}
     return {"protocol_major": 1, "pins": [(t, own.get(t, 1)) for t in range(1, 10)]}
 
 
@@ -246,7 +246,7 @@ def build(constants):
 
     # Definition version 5 pinning ballot version 3, spoiled-ballot opening
     # version 2, display-text version 2, board-entry version 5 and
-    # contract-event version 3, so 2.3's
+    # contract-event version 4, so 2.3's
     # combination passes. Seat 4 sends nothing, so the registered key set is
     # seats 1 to 3 and seat 4's share hash must be zero.
     d, t, e = election_for("v5", [1, 2, 3], profile=pins_for())
@@ -492,9 +492,9 @@ def assemble(constants, proofs_path, out_dir):
                 assert sig is not None or verdict is None, (bnd["id"], i)
                 # Every ballot here is a board-path one in segment 0, and no
                 # contract-event record carries one (the profiles pin
-                # contract-event version 3, which every profile needs:
+                # contract-event version 4, which every profile needs:
                 # docs/spec/close.md, Window and Version).
-                assert dict(d["profile"]["pins"])[vb.CONTRACT_EVENT_TYPE] == 3
+                assert dict(d["profile"]["pins"])[vb.CONTRACT_EVENT_TYPE] == 4
                 late = vb.window(d, {"kind": "board", "segment": 0}) if code == "ok" else None
                 if late is not None:
                     rejected.append({"entry": i, "code": late})

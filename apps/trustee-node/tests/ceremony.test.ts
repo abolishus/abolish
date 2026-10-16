@@ -525,8 +525,8 @@ test("refuses an identity secret that isn't its seat's key", () => {
 });
 
 describe("stub check 4: the forced path over the elections a seat serves", () => {
-  // Four seats with the release's windows fit at most 896 members alone
-  // (docs/spec/delivery.md, Capacity), so two elections of 600 closing
+  // Four seats with the release's windows fit at most 15,360 members alone
+  // (docs/spec/delivery.md, Capacity), so two elections of 8,000 closing
   // together don't fit, and the same two a day apart do.
   const withStub = (e: Election, change: Partial<ElectionDefinition>): Election => {
     const stub = stubFor(e.panelists.panel, {
@@ -547,16 +547,16 @@ describe("stub check 4: the forced path over the elections a seat serves", () =>
 
   test("an approved election counts against the next one, only where they overlap, never against itself", async () => {
     const e0 = election(4, 2);
-    const first = withStub(e0, members(600n, e0.stub));
+    const first = withStub(e0, members(8_000n, e0.stub));
     const run = await runCeremony(first);
     for (const s of first.seats) value(await s.approve(first.stubBytes, run.transcript));
     value(await seat(first, 0).approve(first.stubBytes, run.transcript));
-    const together = withStub(e0, members(600n, e0.stub));
+    const together = withStub(e0, members(8_000n, e0.stub));
     const runId = crypto.getRandomValues(new Uint8Array(32));
     for (const s of first.seats)
       expect(await s.keys(together.stubBytes, runId)).toEqual({ ok: false, code: "stub-capacity" });
     const dayLater = withStub(e0, {
-      ...members(600n, e0.stub),
+      ...members(8_000n, e0.stub),
       opens_at: e0.stub.opens_at + 86_400n,
       closes_at: e0.stub.closes_at + 86_400n,
     });
@@ -566,7 +566,7 @@ describe("stub check 4: the forced path over the elections a seat serves", () =>
   test("an approved election that can never be registered stops counting, and only on proof", async () => {
     const stores = [0, 1, 2, 3].map(() => new MemoryStore() as SeatStore);
     const e0 = election(4, 2, { stores });
-    const first = withStub(e0, members(600n, e0.stub));
+    const first = withStub(e0, members(8_000n, e0.stub));
     const run = await runCeremony(first);
     const approval = value(await seat(first, 0).approve(first.stubBytes, run.transcript));
     const definitionHash = electionDefinitionHash({
@@ -588,7 +588,7 @@ describe("stub check 4: the forced path over the elections a seat serves", () =>
           return Promise.resolve(never);
         },
       });
-    const together = withStub(e0, members(600n, e0.stub));
+    const together = withStub(e0, members(8_000n, e0.stub));
     const runId = crypto.getRandomValues(new Uint8Array(32));
     expect(await over(false).keys(together.stubBytes, runId)).toEqual({
       ok: false,
@@ -602,8 +602,8 @@ describe("stub check 4: the forced path over the elections a seat serves", () =>
   test("a seat that serves nothing takes the largest election that fits and refuses one member more", async () => {
     const e0 = election(4, 2);
     const runId = crypto.getRandomValues(new Uint8Array(32));
-    const at = withStub(e0, members(896n, e0.stub));
-    const over = withStub(e0, members(897n, e0.stub));
+    const at = withStub(e0, members(15_360n, e0.stub));
+    const over = withStub(e0, members(15_361n, e0.stub));
     expect((await seat(e0, 0).keys(at.stubBytes, runId)).ok).toBe(true);
     expect(await seat(e0, 1).keys(over.stubBytes, runId)).toEqual({
       ok: false,
@@ -614,7 +614,7 @@ describe("stub check 4: the forced path over the elections a seat serves", () =>
   test("a retry of an approved stub gets its recorded approval, whatever the ledger holds since", async () => {
     const stores = [0, 1, 2, 3].map(() => new MemoryStore() as SeatStore);
     const e0 = election(4, 2, { stores });
-    const first = withStub(e0, members(600n, e0.stub));
+    const first = withStub(e0, members(8_000n, e0.stub));
     const run = await runCeremony(first);
     const approved = value(await seat(first, 0).approve(first.stubBytes, run.transcript));
     // An election the ledger now holds beside it, which together wouldn't
@@ -651,7 +651,7 @@ describe("stub check 4: the forced path over the elections a seat serves", () =>
       },
     };
     const e0 = election(4, 2, { stores: [inner] });
-    const first = withStub(e0, members(600n, e0.stub));
+    const first = withStub(e0, members(8_000n, e0.stub));
     const runA = await runCeremony(first);
     const runB = await runCeremony(first);
     await expect(
@@ -668,8 +668,8 @@ describe("stub check 4: the forced path over the elections a seat serves", () =>
 
   test("of concurrent approvals of two elections that don't fit together, at most one is given", async () => {
     const e0 = election(4, 2);
-    const a = withStub(e0, members(600n, e0.stub));
-    const b = withStub(e0, members(600n, e0.stub));
+    const a = withStub(e0, members(8_000n, e0.stub));
+    const b = withStub(e0, members(8_000n, e0.stub));
     const runA = await runCeremony(a);
     const runB = await runCeremony(b);
     const [x, y] = await Promise.all([
@@ -684,7 +684,7 @@ describe("stub check 4: the forced path over the elections a seat serves", () =>
     const dir = await mkdtemp(join(tmpdir(), "served-"));
     try {
       const e0 = election(4, 2);
-      const first = withStub(e0, members(600n, e0.stub));
+      const first = withStub(e0, members(8_000n, e0.stub));
       const store = await FileStore.open(dir);
       const run = await runCeremony({
         ...first,
@@ -692,7 +692,7 @@ describe("stub check 4: the forced path over the elections a seat serves", () =>
       });
       value(await seatOver(first, 1, store).approve(first.stubBytes, run.transcript));
       const restarted = seatOver(first, 1, await FileStore.open(dir));
-      const together = withStub(e0, members(600n, e0.stub));
+      const together = withStub(e0, members(8_000n, e0.stub));
       expect(
         await restarted.keys(together.stubBytes, crypto.getRandomValues(new Uint8Array(32))),
       ).toEqual({

@@ -502,7 +502,7 @@ describe("SimulatedElectionRegistry's profile rule", { timeout }, () => {
       [0x0002, 2],
       [0x0003, 2],
       [0x0007, 5],
-      [0x0008, 3],
+      [0x0008, 4],
       [0x0009, 1],
     ];
     for (const [type, version] of served)

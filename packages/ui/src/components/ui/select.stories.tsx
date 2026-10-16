@@ -56,8 +56,11 @@ export const Default: Story = {
     // The popup unmounts after its exit transition, with its focus guards and
     // unnamed listbox still in the page until then; the axe check that runs
     // after the story must see it gone. On a loaded CI runner the transition
-    // can outlast waitFor's default second.
-    await waitFor(() => expect(body.queryByRole("listbox")).toBeNull(), { timeout: 5_000 });
+    // can outlast waitFor's default second. `hidden` counts the listbox even
+    // once it is hidden for its exit.
+    await waitFor(() => expect(body.queryByRole("listbox", { hidden: true })).toBeNull(), {
+      timeout: 5_000,
+    });
   },
 };
 

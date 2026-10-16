@@ -372,6 +372,7 @@ describe("obligation roots' tree, leaf object and record hash (delivery-root.jso
     expect(verifyObligationInclusion({ ...record, kind: 2 }, 0, leaf, proof)).toBe(false);
     expect(verifyObligationInclusion(record, 3, leaf, proof)).toBe(false);
     expect(verifyObligationInclusion(record, -1, leaf, proof)).toBe(false);
+    expect(verifyObligationInclusion({ ...record, count: 1.5 }, 0, leaf, proof)).toBe(false);
     // An object that isn't whole leaves of its kind has no tree.
     expect(() => obligationInclusionProof(1, object.subarray(1), 0)).toThrow(RangeError);
   });

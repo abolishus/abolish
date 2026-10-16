@@ -642,7 +642,8 @@ export function obligationInclusionProof(
  * tags, the size and root both from the one record (docs/spec/delivery.md,
  * Obligation tree). It doesn't check the record's signature: a client checks a
  * leaf against the root the contract recorded, whose signature the board
- * verified. Evidence only: a leaf counts only once its root is available.
+ * verified. The client compares the leaf with its own receipt pair first.
+ * Evidence only: a leaf counts only once its root is available.
  */
 export function verifyObligationInclusion(
   root: ObligationRootRecord,
@@ -651,6 +652,7 @@ export function verifyObligationInclusion(
   proof: readonly Uint8Array[],
 ): boolean {
   if (!Number.isSafeInteger(index) || index < 0) return false;
+  if (!Number.isSafeInteger(root.count) || root.count < 1) return false;
   if (!(leaf instanceof Uint8Array) || leaf.length !== ROOT_LEAF_LENGTH[root.kind]) return false;
   return verifyInclusion(
     OBLIGATION_TREE,

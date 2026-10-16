@@ -42,9 +42,36 @@ const result = await directSubmitBallot({
 if (result.status === "refused") console.log(result.refusal);
 ```
 
+### Forced through L1
+
+`relayBallot` forces the same record through the L1 relay with the voter's own L1 wallet, for when the sequencer censors the direct submission (`docs/spec/contracts.md`, L1 relay; T-50). The relay records the call with its L1 block and timestamp, the stamp the close rule judges, and deposits the record to the board through the L2's portal, which the L2 must include within its sequencing window. One call is one attempt, and each that lands is paid for and archived, since the board takes every relayed deposit, a repeat included. So it first frames the record as the relay does, locally; checks both providers' chains and that the relay deposits to the election's board; asks the board on L2 as the deposit will run (from the relay's alias, with the L1 head's time as the stamp) and returns its refusal (`decodeRelayedBallotRevert`) without spending L1 gas; finds a relayed copy the board already holds rather than paying for another (an ordinary copy doesn't count, since the sequencer can withhold its batch); gives the deposit the board's own gas estimate and a quarter, never below the portal's minimum for the data (`portalMinimumGasLimit`); asks the relay (`decodeRelayRevert`); and returns `over-cap` rather than sending a call whose L1 transaction the deposit market's price puts past EIP-7825's 2²⁴ gas (`MAX_TRANSACTION_GAS`). After sending it checks the relay's `BallotRelayed` event against the call hash it recomputes from the call's block, and returns the call: index, L1 block, stamp, gas limit and call hash. `findRelayedBallot` then looks on L2 for the board's `RelayedBallotSubmitted` naming exactly that call, which arrives minutes to hours later. As on the ordinary path, these are the providers' reports, never grounds to stand down, and the paying L1 account is linked to the ballot for good (T-25, Residual; T-11).
+
+```ts
+const relayed = await relayBallot({
+  l1Provider: window.ethereum,
+  l1ChainId: definition.l1_chain_id,
+  relay: definition.l1_relay,
+  l2Provider,
+  l2ChainId: definition.l2_chain_id,
+  board: definition.board,
+  from: account,
+  record,
+  fromBlock: registrationBlock,
+});
+if (relayed.status === "relayed")
+  await findRelayedBallot({
+    provider: l2Provider,
+    chainId: definition.l2_chain_id,
+    board: definition.board,
+    record,
+    call: relayed.call,
+    fromBlock: registrationBlock,
+  });
+```
+
 ## Test
 
-The direct-submit tests run the board contract on Anvil, built by `forge` from `packages/contracts`, so they need the toolchain (`.github/scripts/install-toolchain.sh`) on `PATH`.
+The direct-submit and relay tests run the board and the relay contracts on Anvil, built by `forge` from `packages/contracts`, so they need the toolchain (`.github/scripts/install-toolchain.sh`) on `PATH`.
 
 ```sh
 vp run --filter @abolishus/sdk test

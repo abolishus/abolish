@@ -58,4 +58,19 @@ export {
   revertDataOf,
   SUBMIT_BALLOT_SIGNATURE,
   submitBallotCalldata,
+  type RelayedCallFields,
 } from "./direct-submit.ts";
+export {
+  decodeRelayedBallotRevert,
+  decodeRelayRevert,
+  findRelayedBallot,
+  type FindRelayedBallotOptions,
+  MAX_TRANSACTION_GAS,
+  portalMinimumGasLimit,
+  relayBallot,
+  type RelayBallotOptions,
+  type RelayBallotResult,
+  type RelayedBallotRefusal,
+  type RelayedCall,
+  type RelayRefusal,
+} from "./relay-submit.ts";

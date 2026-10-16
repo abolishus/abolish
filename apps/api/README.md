@@ -21,6 +21,7 @@ Every answer is a claim the caller checks with `@abolishus/crypto`: a definition
 | `backups.put`               | Stores or replaces an identity backup envelope under a locator; the table keeps a hash of the locator (ADR 0017, T-20).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `backups.fetch`             | The envelope stored under a locator. A POST, so the locator never sits in a URL.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `backups.delete`            | Deletes the envelope stored under a locator.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `registrations.tier0`       | Tier 0 registration ([`docs/spec/registration.md`](../../docs/spec/registration.md)): checks the request in the spec's order (forms, a canonical and allowed commitment, a published group for the region, room in its queue, a current Tier 0 index, then Turnstile for `tier0-register` on the challenge host) and queues the commitment through `Tier0Registrations` in core. Every accepted request answers 200 `{}`, whatever the commitment's state. Without the Tier 0 configuration it answers `REGISTRATION_UNAVAILABLE` after the form checks.                                                                                                                                |
 
 Board procedures answer only for elections whose definition the server holds.
 
@@ -38,7 +39,7 @@ One line per request: method, the contract route it matched (from a fixed list, 
 
 ## Running
 
-`vp run --filter @abolishus/api start` (plain Node, no TypeScript transform: `erasableSyntaxOnly` in `tsconfig.json` and a test that starts `src/main.ts` keep it that way) with `DATABASE_URL` (a user granted `abolish_app`, never the owner), and optionally `API_HOST` (default `127.0.0.1`) and `API_PORT` (default `8787`).
+`vp run --filter @abolishus/api start` (plain Node, no TypeScript transform: `erasableSyntaxOnly` in `tsconfig.json` and a test that starts `src/main.ts` keep it that way) with `DATABASE_URL` (a user granted `abolish_app`, never the owner), and optionally `API_HOST` (default `127.0.0.1`) and `API_PORT` (default `8787`). Tier 0 registration takes all four of `REDIS_URL` (the queue's Redis or Dragonfly), `API_TIER0_GROUP` (region 0's published `group_id`), `TURNSTILE_SECRET_KEY` and `API_CHALLENGE_HOST` (the challenge origin's host), or none; the server refuses to start with only some.
 
 `src/migrate.ts` applies pending migrations to `DATABASE_SCHEMA` (default `abolish`) and exits. It connects with `DATABASE_URL` as a user granted `abolish_migrator` and switches to that role, so the tables belong to the group role rather than the login.
 
@@ -48,7 +49,7 @@ One line per request: method, the contract route it matched (from a fixed list, 
 
 ## Tests
 
-`vp run --filter @abolishus/api test` needs `TEST_DATABASE_URL`, as `@abolishus/core`'s tests do, and runs uncached. The tests start the server on a free port and check every answer with `@abolishus/crypto`.
+`vp run --filter @abolishus/api test` needs `TEST_DATABASE_URL` and `REDIS_URL`, as `@abolishus/core`'s tests do, and runs uncached. The tests start the server on a free port and check every answer with `@abolishus/crypto`.
 
 ## Decisions
 

@@ -19,6 +19,7 @@
     "@abolishus/core": "workspace:*",
     "@orpc/openapi": "catalog:",
     "@orpc/server": "catalog:",
+    "ioredis": "catalog:",
     "postgres": "catalog:",
     "zod": "catalog:"
   },

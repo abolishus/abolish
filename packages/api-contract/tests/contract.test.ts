@@ -132,6 +132,37 @@ describe("identity backups (ADR 0017; T-10, T-20)", () => {
   });
 });
 
+describe("Tier 0 registration (docs/spec/registration.md, Request)", () => {
+  const input = contract.registrations.tier0["~orpc"].inputSchema;
+  const valid = { commitment: "0a".repeat(32), region: "0", turnstile: "tok.en-1_" };
+  const issues = async (value: unknown) => (await input?.["~standard"].validate(value))?.issues;
+
+  test("a POST, so nothing of the request sits in a URL", () => {
+    expect(contract.registrations.tier0["~orpc"].route.method).toBe("POST");
+  });
+
+  test("takes exactly a 32-byte commitment, a canonical u32 region and a token", async () => {
+    expect(await issues(valid)).toBeUndefined();
+    expect(await issues({ ...valid, region: "4294967295" })).toBeUndefined();
+    expect(await issues({ ...valid, turnstile: "~".repeat(2048) })).toBeUndefined();
+    for (const bad of [
+      { ...valid, commitment: "0a".repeat(31) },
+      { ...valid, commitment: "0A".repeat(32) },
+      { ...valid, commitment: `0x${"0a".repeat(31)}` },
+      { ...valid, region: "" },
+      { ...valid, region: "01" },
+      { ...valid, region: "-1" },
+      { ...valid, region: "4294967296" },
+      { ...valid, region: 0 },
+      { ...valid, turnstile: "" },
+      { ...valid, turnstile: "a b" },
+      { ...valid, turnstile: "a".repeat(2049) },
+      { commitment: valid.commitment, region: valid.region },
+    ])
+      expect(await issues(bad)).toBeDefined();
+  });
+});
+
 describe("the generated OpenAPI document", () => {
   test("is deterministic", async () => {
     expect(await renderOpenApi()).toBe(await renderOpenApi());
@@ -154,6 +185,7 @@ describe("the generated OpenAPI document", () => {
       "POST /backups/fetch",
       "POST /ballots",
       "POST /moderation/reports",
+      "POST /registrations/tier0",
     ]);
   });
 });

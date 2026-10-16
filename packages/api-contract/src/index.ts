@@ -19,5 +19,7 @@ export {
   MAX_PAGE_BYTES,
   MAX_PROOF_PATH,
   PageSize,
+  RegionCode,
+  TurnstileResponse,
   U64,
 } from "./wire.ts";

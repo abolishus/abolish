@@ -104,3 +104,21 @@ export const IdentityBackupLocator = hexFixed(32);
 
 /** A version-1 envelope, opaque here: the server decodes it strictly with `@abolishus/crypto`. */
 export const IdentityBackupEnvelope = hexFixed(IDENTITY_BACKUP_ENVELOPE);
+
+/**
+ * A region code (docs/spec/registration.md, Groups): a `u32` as a canonical
+ * decimal string, no sign and no leading zero.
+ */
+export const RegionCode = z.string().check(
+  z.maxLength(10, { abort: true }),
+  z.regex(/^(?:0|[1-9][0-9]{0,9})$/, "expected a canonical decimal region code"),
+  z.refine((s) => /^[0-9]+$/.test(s) && Number(s) <= 2 ** 32 - 1, "exceeds 2^32 - 1"),
+);
+
+/** A Turnstile token from the challenge page: 1 to 2,048 characters from 0x21 to 0x7e. */
+export const TurnstileResponse = z
+  .string()
+  .check(
+    z.maxLength(2048, { abort: true }),
+    z.regex(/^[\x21-\x7e]+$/, "expected 1 to 2048 printable ASCII characters"),
+  );

@@ -3,8 +3,11 @@
 // can make passkeys by the thousand, so each action that writes a row for an
 // anonymous caller first costs a solved challenge (T-01, T-52).
 //
-// Never on the ballot path: the ballot client ships no third-party code, and
-// ballot submission must work without our domain (T-25, ADR 0017).
+// Never in the ballot client, which ships no third-party code, and never on
+// ballot submission, which must work without our domain (T-25, ADR 0017).
+// Tier 0 registration's widget runs on a challenge page of its own origin,
+// and only its token reaches the ballot client and our route
+// (docs/spec/registration.md, Challenge page; ADR 0024).
 
 /** The request header that carries a Turnstile token. */
 export const TURNSTILE_HEADER = "x-turnstile-token";
@@ -19,7 +22,7 @@ export const MAX_TURNSTILE_TOKEN = 2048;
  * What a token was issued for: the widget's `action`, which Cloudflare signs
  * into the token, so a token solved for one action can't be spent on another.
  */
-export type TurnstileAction = "passkey-register" | "passkey-authenticate";
+export type TurnstileAction = "passkey-register" | "passkey-authenticate" | "tier0-register";
 
 /**
  * `passed`: Cloudflare vouched for the token, for this site and action.
@@ -35,7 +38,10 @@ export interface Turnstile {
 export interface TurnstileOptions {
   /** The widget's secret key. */
   readonly secretKey: string;
-  /** The host the widget runs on (apps/web's): a token solved on another site is refused. */
+  /**
+   * The host the widget runs on (apps/web's, or the challenge origin's for
+   * Tier 0 registration): a token solved on another site is refused.
+   */
   readonly hostname: string;
   /** How long to wait for Cloudflare before answering `unavailable`. */
   readonly timeoutMs?: number;

@@ -28,6 +28,7 @@
   "devDependencies": {
     "@types/node": "catalog:",
     "fast-check": "catalog:",
+    "ioredis": "catalog:",
     "typescript": "catalog:",
     "vite-plus": "catalog:"
   },

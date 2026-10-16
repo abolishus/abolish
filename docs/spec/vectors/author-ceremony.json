@@ -792,6 +792,27 @@
       "record": "lone",
       "boarded": false,
       "refusal": null
+    },
+    {
+      "id": "repeated",
+      "transcript": "author-honest-3",
+      "record": "repeated",
+      "boarded": false,
+      "refusal": "seats"
+    },
+    {
+      "id": "seat-0",
+      "transcript": "author-honest-3",
+      "record": "seat-0",
+      "boarded": false,
+      "refusal": "seats"
+    },
+    {
+      "id": "short",
+      "transcript": "author-short",
+      "record": "short",
+      "boarded": false,
+      "refusal": "ceremony-participation"
     }
   ],
   "decode": [

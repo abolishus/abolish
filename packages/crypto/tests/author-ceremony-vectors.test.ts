@@ -23,6 +23,7 @@ import {
   keySetEntry,
   keySetHash,
   type Panel,
+  PanelError,
   panelId,
   RECORD_TYPES,
   type RegisteredKeys,
@@ -249,11 +250,11 @@ describe("author-ceremony.json", () => {
     },
   );
 
-  test("duplicate-key reads the other panel's keys only when given them", () => {
+  test("duplicate-key reads the other panel's keys only from the keys it is given", () => {
     // Without the default panel's keys, the borrowed signing key goes unseen.
     const t = transcriptOf("author-duplicate-default");
-    const { otherPanelKeys: _, ...alone } = params(t.panel, "author");
-    const r = checkCeremonyTranscript(alone, hex(t.transcript), 1);
+    const others = { ...params(t.panel, "author"), otherPanelKeys: panelOf("author-1").keys };
+    const r = checkCeremonyTranscript(others, hex(t.transcript), 1);
     expect(r.ok && r.seats.every((s) => s.reasons.length === 0)).toBe(true);
   });
 
@@ -351,6 +352,28 @@ describe("author approvals", () => {
     expect(() =>
       authorApprovalsRefusal({ ...ctx, registered: copy }, recordOf("all"), false),
     ).toThrow(RangeError);
+  });
+
+  test("refuses an author panel outside its rules, so the quorum is never 0", () => {
+    const ctx = approvalContext("author-honest-3");
+    expect(() => checkAuthorApprovals({ ...ctx, panel: { ...AUTHOR, threshold: 0 } }, [])).toThrow(
+      PanelError,
+    );
+  });
+
+  test("the author run needs the default panel's keys, each a canonical p256-key", () => {
+    const t = transcriptOf("author-honest-3");
+    const p = params(t.panel, "author");
+    expect(() =>
+      checkCeremonyTranscript({ ...p, otherPanelKeys: [] }, hex(t.transcript), 1),
+    ).toThrow(RangeError);
+    expect(() =>
+      checkCeremonyTranscript(
+        { ...p, otherPanelKeys: [new Uint8Array(33).fill(9)] },
+        hex(t.transcript),
+        1,
+      ),
+    ).toThrow();
   });
 
   test("records round-trip, and their seats' order never changes what decodes", () => {

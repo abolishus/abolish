@@ -187,8 +187,14 @@ function runOf(params: CeremonyParams): Run {
     throw new TypeError("ceremony: panelKind must be default or author");
   if (!Array.isArray(otherPanelKeys))
     throw new TypeError("ceremony: otherPanelKeys must be an array");
+  // An author panel always sits beside a pinned default panel, whose keys
+  // its duplicate-key rule must read (T-14).
+  if (panelKind === "author" && otherPanelKeys.length === 0)
+    throw new RangeError("ceremony: the author run needs the default panel's keys");
   const keys = Array.isArray(panel.keys) ? panel.keys.map((k) => Uint8Array.from(k)) : [];
-  const others = otherPanelKeys.map((k) => Uint8Array.from(k));
+  // Through the codec, so a value that isn't a canonical p256-key throws
+  // rather than compare as junk.
+  const others = otherPanelKeys.map((k) => decode(p256Key, encode(p256Key, k)));
   const threshold = panel.threshold;
   // T-37: each panel's identifier under its own tag, so no message of one
   // panel's run checks in the other's.

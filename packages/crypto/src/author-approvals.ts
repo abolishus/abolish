@@ -18,7 +18,7 @@ import {
 import { checkedTranscriptHash, keySetEntry, keySetHash, type RegisteredKeys } from "./ceremony.ts";
 import { PARAMETERS } from "./parameters.ts";
 import { RECORD_TYPES, RecordSchema, recordType } from "./record.ts";
-import { type Panel, p256Sig, verifyAuthorCeremonyRegistration } from "./trustee.ts";
+import { authorPanelId, type Panel, p256Sig, verifyAuthorCeremonyRegistration } from "./trustee.ts";
 
 const { MAX_TRUSTEES } = PARAMETERS;
 
@@ -109,6 +109,9 @@ function prepare(input: AuthorApprovalContext): Prepared {
       "author approvals: the key set must come from checkCeremonyTranscript on the author transcript",
     );
   const panelCopy = { threshold: panel.threshold, keys: panel.keys.map((k) => Uint8Array.from(k)) };
+  // The author panel's rules 1 to 3 (PanelError otherwise), so a threshold
+  // of 0 can't make the quorum 0 and approve with no approvals at all.
+  authorPanelId(panelCopy);
   const n = panelCopy.keys.length;
   return {
     ctx: {
@@ -194,6 +197,7 @@ export function checkAuthorApprovals(
 
 /** Why the operator refuses to board an approvals record (Author panel, Boarding). */
 export type AuthorApprovalsRefusal =
+  | "ceremony-participation"
   | DecodeErrorCode
   | "transcript"
   | "seats"
@@ -202,7 +206,8 @@ export type AuthorApprovalsRefusal =
   | "boarded";
 
 /**
- * The operator's boarding rule: a record is boarded only if it decodes,
+ * The operator's boarding rule: a record is boarded only for a transcript
+ * with at least `q_A` qualified seats (`ceremony-participation`), and only if it decodes,
  * names the definition's `author_transcript_hash`, its seats are strictly
  * increasing within 1 to `n_A`, every approval in it counts, they number at
  * least `q_A`, and no approvals record is on the board yet (`boarded`). A
@@ -215,6 +220,9 @@ export function authorApprovalsRefusal(
   boarded: boolean,
 ): AuthorApprovalsRefusal | undefined {
   const p = prepare(context);
+  // No record approves a transcript with too few qualified seats, so none is
+  // boarded for one, whoever signed it (a disqualified seat still can).
+  if (p.ctx.registered.length < p.quorum) return "ceremony-participation";
   const record = decoded(bytes);
   if (record instanceof DecodeError) return record.code;
   if (!equalBytes(record.transcript_hash, p.ctx.authorTranscriptHash)) return "transcript";

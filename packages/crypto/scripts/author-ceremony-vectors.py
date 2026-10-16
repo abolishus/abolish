@@ -171,6 +171,8 @@ def check_approvals(panel, transcript, records):
 
 def boarding(panel, transcript, b, boarded):
     """The operator's boarding rule (Author panel, Boarding): None, or why it refuses."""
+    if len(transcript["registered"]) < max(panel["k"], len(panel["keys"]) - 1):
+        return "ceremony-participation"
     try:
         rec = decode_record(b)
     except DecodeFail as e:
@@ -379,6 +381,9 @@ def main(out):
         ("other-signer", T, "other-signer", False, "signature"),
         ("other-transcript", T, "other-transcript", False, "transcript"),
         ("lone", "author-lone", "lone", False, None),
+        ("repeated", T, "repeated", False, "seats"),
+        ("seat-0", T, "seat-0", False, "seats"),
+        ("short", "author-short", "short", False, "ceremony-participation"),
     ]:
         t = checked[tid]
         got = boarding(t["panel"], t, bytes.fromhex(records[name]["record"]), boarded)

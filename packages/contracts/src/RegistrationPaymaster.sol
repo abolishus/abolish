@@ -13,9 +13,9 @@ import {GroupRegistry} from "./GroupRegistry.sol";
 /// UserOperation: the signing service's account calling the group registry's
 /// `addMembers`, at no more than a fixed cost (docs/adr/0024-tier0-registration.md,
 /// docs/spec/registration.md). It sponsors no voter, so no voter's account
-/// or address ever meets a commitment here (T-13), and whoever seizes the
-/// service can spend the deposit only on capped calls to `addMembers` (T-69,
-/// T-52). Everything it checks is in the UserOperation and its immutables, so
+/// or address ever meets a commitment here (T-13), and no one else can
+/// spend the deposit; whoever seizes the service's key can drain it, at most
+/// `maxCost` per operation (T-69, T-52). Everything it checks is in the UserOperation and its immutables, so
 /// it reads no storage while validating (ERC-7562) and needs no stake.
 /// Its admin, a timelock behind our Safe, can only move funds in and out of
 /// the EntryPoint; what it sponsors is fixed at deployment (T-62). It holds

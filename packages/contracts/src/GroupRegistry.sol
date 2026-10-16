@@ -3,7 +3,8 @@ pragma solidity 0.8.30;
 
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {CanonicalCalldata} from "./CanonicalCalldata.sol";
-import {EventAccumulator} from "./EventAccumulator.sol";
+import {EventAccumulator, EventAccumulatorLib} from "./EventAccumulator.sol";
+import {MembershipProofLib} from "./MembershipProof.sol";
 
 /// @title The group registry's EIP-712 messages and constants
 /// (docs/spec/contracts.md, Group registry, Signed messages).
@@ -86,24 +87,116 @@ library GroupRegistryLib {
     }
 }
 
+/// @title A Tier 1 vouch's parameters, scopes and messages (docs/spec/vouching.md).
+/// @notice The registry computes every scope and message a vouch's proofs are
+/// checked under from the chain, its own address, the Tier 1 group, the
+/// vouchee's commitment and the vouch's own fields, never from the
+/// submitter (contracts.md, Group registry, Tier 1 additions, rule 7). Each
+/// hash is SHA-256 over `DS(tag, m) = u8(len(tag)) ‖ tag ‖ m`
+/// (docs/spec/domain-separation.md), and `F` is Semaphore's field mapping.
+library VouchLib {
+    /// `VOUCH_K`: the vouches an addition carries.
+    uint256 internal constant K = 3;
+    /// `VOUCH_SLOTS`: the slots of each Tier 2 secret, `0` to `L − 1`.
+    uint256 internal constant SLOTS = 12;
+    /// `VOUCH_ROOT_INTERVAL`: a vouch's `root_block` is a multiple of it.
+    uint256 internal constant ROOT_INTERVAL = 1800;
+    /// `VOUCH_ROOT_WINDOW` (`W`): an addition lands at most this many blocks
+    /// after its vouches' `root_block`.
+    uint256 internal constant ROOT_WINDOW = 302_400;
+    /// `u64(group_id) ‖ field(C_V) ‖ u8(k)`.
+    uint256 internal constant HEADER = 41;
+    /// One vouch: `u64 ‖ u64 ‖ field ‖ u16 ‖ field ‖ field ‖ proof ‖ proof`.
+    uint256 internal constant VOUCH_LENGTH = 626;
+    /// The whole record at `k = 3`: 1,919 bytes.
+    uint256 internal constant RECORD_LENGTH = HEADER + VOUCH_LENGTH * K;
+
+    /// `u8(len(tag)) ‖ tag` for `abolish/v1/vouch` (0x10 = 16).
+    bytes internal constant DS_VOUCH = "\x10abolish/v1/vouch";
+    /// `u8(len(tag)) ‖ tag` for `abolish/v1/vouch-slot` (0x15 = 21).
+    bytes internal constant DS_SLOT = "\x15abolish/v1/vouch-slot";
+    /// `u8(len(tag)) ‖ tag` for `abolish/v1/vouch-message` (0x18 = 24).
+    bytes internal constant DS_MESSAGE = "\x18abolish/v1/vouch-message";
+
+    /// `binding ‖ encode(C_V)`, with the binding
+    /// `u64(chain_id) ‖ bytes[20](registry) ‖ u64(group_id)`: the 68 bytes
+    /// the vouchee scope hashes and both messages carry.
+    function vouchee(uint64 chainId, address registry, uint64 groupId, uint256 commitment)
+        internal
+        pure
+        returns (bytes memory)
+    {
+        return abi.encodePacked(chainId, registry, groupId, commitment);
+    }
+
+    /// `S_V = H(DS("abolish/v1/vouch", binding ‖ encode(C_V)))`.
+    function voucheeScopeBytes(bytes memory voucheeBytes) internal pure returns (bytes32) {
+        return sha256(abi.encodePacked(DS_VOUCH, voucheeBytes));
+    }
+
+    /// `S_j = H(DS("abolish/v1/vouch-slot", u64(chain_id) ‖ bytes[20](registry) ‖ u16(j)))`.
+    function slotScopeBytes(uint64 chainId, address registry, uint16 slot)
+        internal
+        pure
+        returns (bytes32)
+    {
+        return sha256(abi.encodePacked(DS_SLOT, chainId, registry, slot));
+    }
+
+    /// `M = H(DS("abolish/v1/vouch-message", u8(role) ‖ binding ‖ encode(C_V) ‖
+    /// u64(tier2_group_id) ‖ u64(root_block) ‖ encode(other_nullifier)))`,
+    /// role 0 for the vouchee proof (naming `ν_S`) and 1 for the slot proof
+    /// (naming `ν_V`).
+    function messageBytes(
+        uint8 role,
+        bytes memory voucheeBytes,
+        uint64 tier2GroupId,
+        uint64 rootBlock,
+        uint256 otherNullifier
+    ) internal pure returns (bytes32) {
+        return sha256(
+            abi.encodePacked(
+                DS_MESSAGE, role, voucheeBytes, tier2GroupId, rootBlock, otherNullifier
+            )
+        );
+    }
+}
+
 /// @title The group registry (docs/spec/contracts.md, Group registry).
 /// @notice Holds the deployment's Semaphore groups: fixes each group's tier
 /// when it creates the group, and logs every addition and removal with the
 /// registrars' signatures, so a verifier rebuilds each tier tree from the
 /// chain alone (verifier 2.4). It keeps no Merkle tree. Anyone may submit a
-/// record: it counts only through at least `threshold` distinct registrars'
-/// signatures, never through who sent it (T-71, T-62, T-06). Each addition
+/// record: a Tier 0 record counts only through at least `threshold` distinct
+/// registrars' signatures, never through who sent it (T-71, T-62, T-06), and
 /// lands at the position it was signed for, at most once, so no relay can
-/// replay, reorder or inflate a group (T-06, T-13). It takes no election
+/// replay, reorder or inflate a group (T-06, T-13). A Tier 1 addition is
+/// authorised by `VOUCH_K` anonymous vouches of Tier 2 members, which the
+/// registry checks only as spam control: the verifier decides what counts
+/// (docs/spec/vouching.md; T-52). It takes no election
 /// identifier, definition or nullifier, so nothing here links a member to a
 /// poll (T-12). There is no admin, proxy, pause or upgrade path, and the
 /// registrars can't change after deployment.
 contract GroupRegistry is EventAccumulator {
     /// A group's record: `exists` tells group 0's tier 0 from no group.
+    /// `memberCount` counts Tier 0 additions only; `createdBlock` is the L2
+    /// block of the group's `createGroup`, which a vouch's Tier 2 group is
+    /// checked against.
     struct Group {
         uint64 memberCount;
         uint8 tier;
         bool exists;
+        uint64 createdBlock;
+    }
+
+    /// A vouch's fields before its proofs (docs/spec/vouching.md, The vouch).
+    struct Vouch {
+        uint64 tier2GroupId;
+        uint64 rootBlock;
+        uint256 root;
+        uint16 slot;
+        uint256 voucheeNullifier;
+        uint256 slotNullifier;
     }
 
     /// Why a deployment's registrars were refused, in the order the checks run.
@@ -128,6 +221,13 @@ contract GroupRegistry is EventAccumulator {
     /// removal record, signatures included.
     event MembersRemoved(uint64 indexed groupId, bytes record);
 
+    /// @notice A Tier 1 addition passed the registry's checks. `record` is
+    /// the whole addition, vouches included; no topic names the group, which
+    /// a verifier reads from the record, so the two can't disagree. Whether
+    /// it counts is the verifier's (docs/spec/vouching.md, Counting across
+    /// the deployment).
+    event Tier1MemberAdded(bytes record);
+
     error InvalidRegistrars(RegistrarError reason);
     error UnsupportedTier(uint8 tier);
     error TooManyGroups();
@@ -145,6 +245,16 @@ contract GroupRegistry is EventAccumulator {
     error TooFewApprovals(uint256 approvals, uint8 threshold);
     error InvalidSeat(uint8 seat);
     error InvalidSignature(uint8 seat);
+    error VouchSlot(uint256 vouch);
+    error VouchRoot(uint256 vouch);
+    error VouchNullifier(uint256 vouch);
+    error RootGrid(uint256 vouch);
+    error RootWindow(uint256 vouch);
+    error Tier2Group(uint256 vouch);
+    error DuplicateVoucher(uint256 vouch);
+    error DuplicateSlot(uint256 vouch);
+    /// `slotProof` false for the vouchee proof, true for the slot proof.
+    error VouchProof(uint256 vouch, bool slotProof);
 
     /// `u64(group_id) ‖ u64(first_index) ‖ u16(count)`.
     uint256 private constant ADD_HEADER = 18;
@@ -202,7 +312,7 @@ contract GroupRegistry is EventAccumulator {
     }
 
     /// @notice A group's tier, whether it exists, and how many commitments
-    /// were added to it (removals don't lower the count).
+    /// were added to it by `addMembers` (removals don't lower the count).
     function groupOf(uint64 groupId)
         external
         view
@@ -210,6 +320,11 @@ contract GroupRegistry is EventAccumulator {
     {
         Group memory g = _groups[groupId];
         return (g.tier, g.exists, g.memberCount);
+    }
+
+    /// @notice The L2 block that created a group (0 for no group).
+    function groupCreatedBlock(uint64 groupId) external view returns (uint64) {
+        return _groups[groupId].createdBlock;
     }
 
     /// @notice Whether member `index` of `groupId` was removed.
@@ -226,18 +341,21 @@ contract GroupRegistry is EventAccumulator {
     }
 
     /// @notice Creates the next group with `tier`, fixed for good. Anyone may:
-    /// a group has no members until the registrars add some. Only Tier 0 is
-    /// accepted until the Tier 1 and Tier 2 addition paths exist.
+    /// a group has no members until the registrars add some, or, for Tier 1,
+    /// until vouched-for people are added. Tier 2 is refused until its
+    /// addition path exists (P3-4).
     function createGroup(uint8 tier) external returns (uint64 groupId) {
         // The selector and one word: no bytes the call doesn't define (T-17).
         if (msg.data.length != 36) revert CanonicalCalldata.NonCanonicalCalldata();
-        if (tier != 0) revert UnsupportedTier(tier);
+        if (tier > 1) revert UnsupportedTier(tier);
         uint256 next = groupCount;
         // group_id stays in the u64 range: after group 2⁶⁴ − 1, creation reverts.
         if (next > type(uint64).max) revert TooManyGroups();
         groupId = uint64(next);
         groupCount = next + 1;
-        _groups[groupId] = Group({memberCount: 0, tier: tier, exists: true});
+        // The accumulator's step below reverts on a block number past u64.
+        _groups[groupId] =
+            Group({memberCount: 0, tier: tier, exists: true, createdBlock: uint64(block.number)});
         _log3(GroupCreated.selector, bytes32(uint256(groupId)), bytes32(uint256(tier)), "");
     }
 
@@ -342,8 +460,141 @@ contract GroupRegistry is EventAccumulator {
         _log2(MembersRemoved.selector, bytes32(uint256(groupId)), abi.encode(record));
     }
 
-    /// The group was created here, with tier 0, the only tier with an
-    /// addition path in this version.
+    /// @notice Adds one vouched-for commitment to a Tier 1 group. The record
+    /// is `u64(group_id) ‖ field(C_V) ‖ u8(k) ‖ vouch × k`
+    /// (docs/spec/vouching.md, Tier 1 addition record), checked in the order
+    /// of docs/spec/contracts.md (Group registry, Tier 1 additions). Its
+    /// authorisation is the vouches alone; the sender is never read (T-71).
+    /// Every check depends only on the record, this block and the group
+    /// table, so no other addition, logged or pending, can make it revert,
+    /// and the verifier's `root-mismatch`, `slot-spent` and `member` are left
+    /// to the verifier (T-25, T-53). Nothing is stored for the addition.
+    function addTier1Member(bytes calldata record) external {
+        CanonicalCalldata.requireOneBytesArgument(record);
+        // Before any other field is read, so a padded or short record costs
+        // nothing to refuse (T-52).
+        if (record.length != VouchLib.RECORD_LENGTH || uint8(record[40]) != VouchLib.K) {
+            revert MalformedRecord();
+        }
+        uint64 groupId = uint64(bytes8(record[0:8]));
+        Group memory group = _groups[groupId];
+        if (!group.exists) revert UnknownGroup(groupId);
+        if (group.tier != 1) revert WrongTier(groupId, group.tier);
+        uint256 commitment = uint256(bytes32(record[8:40]));
+        if (GroupRegistryLib.forbidden(commitment)) revert ForbiddenCommitment(0);
+        for (uint256 i; i < VouchLib.K; i++) {
+            _checkVouchFields(record, i);
+        }
+        // Pairwise-distinct vouchers and slots; the position is the first
+        // vouch that repeats an earlier one's nullifier.
+        for (uint256 i = 1; i < VouchLib.K; i++) {
+            for (uint256 j; j < i; j++) {
+                if (_word(record, i, 50) == _word(record, j, 50)) revert DuplicateVoucher(i);
+            }
+        }
+        for (uint256 i = 1; i < VouchLib.K; i++) {
+            for (uint256 j; j < i; j++) {
+                if (_word(record, i, 82) == _word(record, j, 82)) revert DuplicateSlot(i);
+            }
+        }
+        // The binding's chain is the current one, never truncated.
+        uint64 chainId = EventAccumulatorLib.chainId64(block.chainid);
+        bytes memory voucheeBytes = VouchLib.vouchee(chainId, address(this), groupId, commitment);
+        uint256 voucheeScope = MembershipProofLib.field(VouchLib.voucheeScopeBytes(voucheeBytes));
+        for (uint256 i; i < VouchLib.K; i++) {
+            _checkVouchProofs(record, i, chainId, voucheeBytes, voucheeScope);
+        }
+        _log1(Tier1MemberAdded.selector, abi.encode(record));
+    }
+
+    /// Rule 5 for vouch `i`: its slot, root and nullifiers in range, its
+    /// root block on the grid with this block inside its window, and its
+    /// Tier 2 group created here by the root block.
+    function _checkVouchFields(bytes calldata record, uint256 i) private view {
+        uint256 at = VouchLib.HEADER + VouchLib.VOUCH_LENGTH * i;
+        if (uint16(bytes2(record[at + 48:at + 50])) >= VouchLib.SLOTS) revert VouchSlot(i);
+        uint256 root = uint256(bytes32(record[at + 16:at + 48]));
+        // Semaphore proves membership of root 0 for any secret.
+        if (root == 0 || root >= GroupRegistryLib.R) revert VouchRoot(i);
+        if (
+            uint256(bytes32(record[at + 50:at + 82])) >= GroupRegistryLib.R
+                || uint256(bytes32(record[at + 82:at + 114])) >= GroupRegistryLib.R
+        ) revert VouchNullifier(i);
+        uint64 rootBlock = uint64(bytes8(record[at + 8:at + 16]));
+        if (rootBlock % VouchLib.ROOT_INTERVAL != 0) revert RootGrid(i);
+        // A vouch held past its window can't be logged (T-22, T-52).
+        if (block.number < rootBlock || block.number > uint256(rootBlock) + VouchLib.ROOT_WINDOW) {
+            revert RootWindow(i);
+        }
+        Group memory tier2 = _groups[uint64(bytes8(record[at:at + 8]))];
+        if (!tier2.exists || tier2.tier != 2 || tier2.createdBlock > rootBlock) {
+            revert Tier2Group(i);
+        }
+    }
+
+    /// Rule 7 for vouch `i`: its vouchee proof, then its slot proof, under
+    /// signals whose scopes and messages are computed here (T-31, T-32).
+    /// Internal rather than private only so a test harness can check
+    /// vectors whose root blocks are off the grid.
+    function _checkVouchProofs(
+        bytes calldata record,
+        uint256 i,
+        uint64 chainId,
+        bytes memory voucheeBytes,
+        uint256 voucheeScope
+    ) internal view {
+        uint256 at = VouchLib.HEADER + VouchLib.VOUCH_LENGTH * i;
+        Vouch memory v = _vouch(record, at);
+        // `[ρ, ν_V, m̂_V, ŝ_V]`, the message naming the slot nullifier.
+        MembershipProofLib.Signals memory s = MembershipProofLib.Signals({
+            root: v.root,
+            nullifier: v.voucheeNullifier,
+            message: _message(v, 0, voucheeBytes, v.slotNullifier),
+            scope: voucheeScope
+        });
+        if (!MembershipProofLib.verify(record[at + 114:at + 370], s)) revert VouchProof(i, false);
+        // `[ρ, ν_S, m̂_S, ŝ_j]`, the message naming the vouchee nullifier.
+        s.nullifier = v.slotNullifier;
+        s.message = _message(v, 1, voucheeBytes, v.voucheeNullifier);
+        s.scope = MembershipProofLib.field(VouchLib.slotScopeBytes(chainId, address(this), v.slot));
+        if (!MembershipProofLib.verify(record[at + 370:at + 626], s)) revert VouchProof(i, true);
+    }
+
+    /// The fixed fields of the vouch at `at`, before its two proofs.
+    function _vouch(bytes calldata record, uint256 at) private pure returns (Vouch memory) {
+        return Vouch({
+            tier2GroupId: uint64(bytes8(record[at:at + 8])),
+            rootBlock: uint64(bytes8(record[at + 8:at + 16])),
+            root: uint256(bytes32(record[at + 16:at + 48])),
+            slot: uint16(bytes2(record[at + 48:at + 50])),
+            voucheeNullifier: uint256(bytes32(record[at + 50:at + 82])),
+            slotNullifier: uint256(bytes32(record[at + 82:at + 114]))
+        });
+    }
+
+    /// `F(M)` for the proof of `role` in vouch `v`, naming `other`.
+    function _message(Vouch memory v, uint8 role, bytes memory voucheeBytes, uint256 other)
+        private
+        pure
+        returns (uint256)
+    {
+        return MembershipProofLib.field(
+            VouchLib.messageBytes(role, voucheeBytes, v.tier2GroupId, v.rootBlock, other)
+        );
+    }
+
+    /// The 32-byte word at `offset` within vouch `i`.
+    function _word(bytes calldata record, uint256 i, uint256 offset)
+        private
+        pure
+        returns (bytes32)
+    {
+        uint256 at = VouchLib.HEADER + VouchLib.VOUCH_LENGTH * i + offset;
+        return bytes32(record[at:at + 32]);
+    }
+
+    /// The group was created here, with tier 0, the only tier the
+    /// registrars' records add to or remove from.
     function _requireTierZeroGroup(uint64 groupId, Group memory group) private pure {
         if (!group.exists) revert UnknownGroup(groupId);
         if (group.tier != 0) revert WrongTier(groupId, group.tier);

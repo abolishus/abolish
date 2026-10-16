@@ -3613,6 +3613,7 @@
                 "size": 25,
                 "entered": 25,
                 "counts": ["16", "9"],
+                "conflict": false,
                 "signers": [1]
               },
               {
@@ -3620,6 +3621,7 @@
                 "size": 50,
                 "entered": 25,
                 "counts": ["32", "18"],
+                "conflict": false,
                 "signers": [1]
               },
               {
@@ -3627,6 +3629,7 @@
                 "size": 75,
                 "entered": 25,
                 "counts": ["48", "27"],
+                "conflict": false,
                 "signers": [1]
               },
               {
@@ -3634,6 +3637,7 @@
                 "size": 100,
                 "entered": 25,
                 "counts": ["64", "36"],
+                "conflict": false,
                 "signers": [1]
               },
               {
@@ -3641,6 +3645,7 @@
                 "size": 125,
                 "entered": 25,
                 "counts": ["80", "45"],
+                "conflict": false,
                 "signers": [1]
               }
             ],
@@ -3690,6 +3695,7 @@
             "kind": "release",
             "passes": true,
             "counts": ["16", "9"],
+            "randomness": "summed",
             "breaks": [],
             "blamed": null
           },
@@ -3701,6 +3707,7 @@
             "kind": "release",
             "passes": true,
             "counts": ["32", "18"],
+            "randomness": "summed",
             "breaks": [],
             "blamed": null
           },
@@ -3712,6 +3719,7 @@
             "kind": "release",
             "passes": true,
             "counts": ["48", "27"],
+            "randomness": "summed",
             "breaks": [],
             "blamed": null
           },
@@ -3723,6 +3731,7 @@
             "kind": "release",
             "passes": true,
             "counts": ["64", "36"],
+            "randomness": "summed",
             "breaks": [],
             "blamed": null
           },
@@ -3734,6 +3743,7 @@
             "kind": "release",
             "passes": true,
             "counts": ["80", "45"],
+            "randomness": "summed",
             "breaks": [],
             "blamed": null
           }
@@ -6680,6 +6690,7 @@
                 "size": 25,
                 "entered": 25,
                 "counts": ["16", "9"],
+                "conflict": false,
                 "signers": [1]
               },
               {
@@ -6687,6 +6698,7 @@
                 "size": 50,
                 "entered": 25,
                 "counts": null,
+                "conflict": false,
                 "signers": []
               },
               {
@@ -6694,6 +6706,7 @@
                 "size": 75,
                 "entered": 25,
                 "counts": ["48", "27"],
+                "conflict": false,
                 "signers": [1]
               },
               {
@@ -6701,6 +6714,7 @@
                 "size": 100,
                 "entered": 25,
                 "counts": ["64", "36"],
+                "conflict": false,
                 "signers": [1]
               },
               {
@@ -6708,6 +6722,7 @@
                 "size": 125,
                 "entered": 25,
                 "counts": ["80", "45"],
+                "conflict": false,
                 "signers": [1]
               }
             ],
@@ -6757,6 +6772,7 @@
             "kind": "release",
             "passes": true,
             "counts": ["16", "9"],
+            "randomness": "summed",
             "breaks": [],
             "blamed": null
           },
@@ -6768,6 +6784,7 @@
             "kind": "release",
             "passes": true,
             "counts": ["48", "27"],
+            "randomness": "summed",
             "breaks": [],
             "blamed": null
           },
@@ -6779,6 +6796,7 @@
             "kind": "release",
             "passes": true,
             "counts": ["64", "36"],
+            "randomness": "summed",
             "breaks": [],
             "blamed": null
           },
@@ -6790,6 +6808,7 @@
             "kind": "release",
             "passes": true,
             "counts": ["80", "45"],
+            "randomness": "summed",
             "breaks": [],
             "blamed": null
           }
@@ -9862,6 +9881,7 @@
                 "size": 29,
                 "entered": 29,
                 "counts": ["20", "9"],
+                "conflict": false,
                 "signers": [1]
               },
               {
@@ -9869,6 +9889,7 @@
                 "size": 54,
                 "entered": 25,
                 "counts": ["36", "18"],
+                "conflict": false,
                 "signers": [1]
               },
               {
@@ -9876,6 +9897,7 @@
                 "size": 79,
                 "entered": 25,
                 "counts": ["52", "27"],
+                "conflict": false,
                 "signers": [1]
               },
               {
@@ -9883,6 +9905,7 @@
                 "size": 104,
                 "entered": 25,
                 "counts": ["68", "36"],
+                "conflict": false,
                 "signers": [1]
               },
               {
@@ -9890,6 +9913,7 @@
                 "size": 129,
                 "entered": 25,
                 "counts": ["84", "45"],
+                "conflict": false,
                 "signers": [1]
               }
             ],
@@ -9913,6 +9937,7 @@
             "kind": "release",
             "passes": true,
             "counts": ["20", "9"],
+            "randomness": "summed",
             "breaks": [],
             "blamed": null
           },
@@ -9924,6 +9949,7 @@
             "kind": "release",
             "passes": true,
             "counts": ["36", "18"],
+            "randomness": "summed",
             "breaks": [],
             "blamed": null
           },
@@ -9935,6 +9961,7 @@
             "kind": "release",
             "passes": true,
             "counts": ["52", "27"],
+            "randomness": "summed",
             "breaks": [],
             "blamed": null
           },
@@ -9946,6 +9973,7 @@
             "kind": "release",
             "passes": true,
             "counts": ["68", "36"],
+            "randomness": "summed",
             "breaks": [],
             "blamed": null
           },
@@ -9957,6 +9985,7 @@
             "kind": "release",
             "passes": true,
             "counts": ["84", "45"],
+            "randomness": "summed",
             "breaks": [],
             "blamed": null
           }
@@ -11304,6 +11333,7 @@
                 "size": 25,
                 "entered": 25,
                 "counts": ["16", "9"],
+                "conflict": false,
                 "signers": [1]
               },
               {
@@ -11311,6 +11341,7 @@
                 "size": 50,
                 "entered": 25,
                 "counts": ["32", "18"],
+                "conflict": false,
                 "signers": [1]
               }
             ],
@@ -11350,6 +11381,7 @@
             "kind": "release",
             "passes": true,
             "counts": ["16", "9"],
+            "randomness": "summed",
             "breaks": [],
             "blamed": null
           },
@@ -11361,6 +11393,7 @@
             "kind": "release",
             "passes": true,
             "counts": ["32", "18"],
+            "randomness": "summed",
             "breaks": [],
             "blamed": null
           }
@@ -12874,6 +12907,7 @@
                 "size": 25,
                 "entered": 25,
                 "counts": ["16", "9"],
+                "conflict": false,
                 "signers": [1]
               },
               {
@@ -12881,6 +12915,7 @@
                 "size": 50,
                 "entered": 25,
                 "counts": ["41", "9"],
+                "conflict": false,
                 "signers": [1]
               }
             ],
@@ -12930,6 +12965,7 @@
             "kind": "release",
             "passes": true,
             "counts": ["16", "9"],
+            "randomness": "summed",
             "breaks": [],
             "blamed": null
           },
@@ -12941,6 +12977,7 @@
             "kind": "release",
             "passes": true,
             "counts": ["41", "9"],
+            "randomness": "summed",
             "breaks": [],
             "blamed": null
           }
@@ -16011,6 +16048,7 @@
                 "size": 25,
                 "entered": 25,
                 "counts": ["16", "9"],
+                "conflict": false,
                 "signers": [1, 2]
               },
               {
@@ -16018,6 +16056,7 @@
                 "size": 50,
                 "entered": 25,
                 "counts": ["32", "18"],
+                "conflict": false,
                 "signers": [1, 2]
               },
               {
@@ -16025,6 +16064,7 @@
                 "size": 75,
                 "entered": 25,
                 "counts": ["48", "27"],
+                "conflict": false,
                 "signers": [1, 2]
               },
               {
@@ -16032,6 +16072,7 @@
                 "size": 100,
                 "entered": 25,
                 "counts": ["64", "36"],
+                "conflict": false,
                 "signers": [1, 2]
               },
               {
@@ -16039,6 +16080,7 @@
                 "size": 125,
                 "entered": 25,
                 "counts": ["80", "45"],
+                "conflict": false,
                 "signers": [1, 2]
               }
             ],
@@ -16088,6 +16130,7 @@
             "kind": "release",
             "passes": true,
             "counts": ["16", "9"],
+            "randomness": "summed",
             "breaks": [],
             "blamed": null
           },
@@ -16099,6 +16142,7 @@
             "kind": "release",
             "passes": true,
             "counts": ["16", "9"],
+            "randomness": "summed",
             "breaks": [],
             "blamed": null
           },
@@ -16110,6 +16154,7 @@
             "kind": "release",
             "passes": true,
             "counts": ["32", "18"],
+            "randomness": "summed",
             "breaks": [],
             "blamed": null
           },
@@ -16121,6 +16166,7 @@
             "kind": "release",
             "passes": true,
             "counts": ["32", "18"],
+            "randomness": "summed",
             "breaks": [],
             "blamed": null
           },
@@ -16132,6 +16178,7 @@
             "kind": "release",
             "passes": true,
             "counts": ["48", "27"],
+            "randomness": "summed",
             "breaks": [],
             "blamed": null
           },
@@ -16143,6 +16190,7 @@
             "kind": "release",
             "passes": true,
             "counts": ["48", "27"],
+            "randomness": "summed",
             "breaks": [],
             "blamed": null
           },
@@ -16154,6 +16202,7 @@
             "kind": "release",
             "passes": true,
             "counts": ["64", "36"],
+            "randomness": "summed",
             "breaks": [],
             "blamed": null
           },
@@ -16165,6 +16214,7 @@
             "kind": "release",
             "passes": true,
             "counts": ["64", "36"],
+            "randomness": "summed",
             "breaks": [],
             "blamed": null
           },
@@ -16176,6 +16226,7 @@
             "kind": "release",
             "passes": true,
             "counts": ["80", "45"],
+            "randomness": "summed",
             "breaks": [],
             "blamed": null
           },
@@ -16187,6 +16238,7 @@
             "kind": "release",
             "passes": true,
             "counts": ["80", "45"],
+            "randomness": "summed",
             "breaks": [],
             "blamed": null
           },
@@ -16321,6 +16373,7 @@
             "kind": "release",
             "passes": true,
             "counts": ["48", "27"],
+            "randomness": "summed",
             "breaks": [
               {
                 "code": "running-unattributed"
@@ -16336,6 +16389,7 @@
             "kind": "release",
             "passes": true,
             "counts": ["48", "27"],
+            "randomness": "summed",
             "breaks": [
               {
                 "code": "running-repeat",
@@ -16352,6 +16406,7 @@
             "kind": "release",
             "passes": true,
             "counts": ["48", "27"],
+            "randomness": "summed",
             "breaks": [
               {
                 "code": "running-second",
@@ -16370,6 +16425,2662 @@
             "code": "running-stray",
             "at": {
               "entry": 2000
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "conflict",
+      "description": "Seats 1 and 2 each publish a passing opening of every release, the same (V, R) under different signatures, which is no conflict; at release 2 an unattributed opening with other counts also opens the aggregate, which only a known log_g h allows, and 7.5 fails running-conflict.",
+      "batch": 20,
+      "options": 2,
+      "questions": [
+        {
+          "options": 2,
+          "min": 1,
+          "max": 1
+        }
+      ],
+      "cellTiers": [0],
+      "snapshots": [
+        {
+          "segment": 10,
+          "head": 110
+        },
+        {
+          "segment": 11,
+          "head": 111
+        },
+        {
+          "segment": 12,
+          "head": 112
+        }
+      ],
+      "finalHead": 10000,
+      "nullifiers": {
+        "s1-00": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s1-00/1",
+              "message": "s1-00/1",
+              "cell": 0,
+              "segment": 10,
+              "ref": 110,
+              "receipted": 10,
+              "votes": [0, 1]
+            }
+          ]
+        },
+        "s1-01": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s1-01/1",
+              "message": "s1-01/1",
+              "cell": 0,
+              "segment": 10,
+              "ref": 110,
+              "receipted": 10,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s1-02": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s1-02/1",
+              "message": "s1-02/1",
+              "cell": 0,
+              "segment": 10,
+              "ref": 110,
+              "receipted": 10,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s1-03": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s1-03/1",
+              "message": "s1-03/1",
+              "cell": 0,
+              "segment": 10,
+              "ref": 110,
+              "receipted": 10,
+              "votes": [0, 1]
+            }
+          ]
+        },
+        "s1-04": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s1-04/1",
+              "message": "s1-04/1",
+              "cell": 0,
+              "segment": 10,
+              "ref": 110,
+              "receipted": 10,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s1-05": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s1-05/1",
+              "message": "s1-05/1",
+              "cell": 0,
+              "segment": 10,
+              "ref": 110,
+              "receipted": 10,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s1-06": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s1-06/1",
+              "message": "s1-06/1",
+              "cell": 0,
+              "segment": 10,
+              "ref": 110,
+              "receipted": 10,
+              "votes": [0, 1]
+            }
+          ]
+        },
+        "s1-07": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s1-07/1",
+              "message": "s1-07/1",
+              "cell": 0,
+              "segment": 10,
+              "ref": 110,
+              "receipted": 10,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s1-08": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s1-08/1",
+              "message": "s1-08/1",
+              "cell": 0,
+              "segment": 10,
+              "ref": 110,
+              "receipted": 10,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s1-09": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s1-09/1",
+              "message": "s1-09/1",
+              "cell": 0,
+              "segment": 10,
+              "ref": 110,
+              "receipted": 10,
+              "votes": [0, 1]
+            }
+          ]
+        },
+        "s1-10": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s1-10/1",
+              "message": "s1-10/1",
+              "cell": 0,
+              "segment": 10,
+              "ref": 110,
+              "receipted": 10,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s1-11": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s1-11/1",
+              "message": "s1-11/1",
+              "cell": 0,
+              "segment": 10,
+              "ref": 110,
+              "receipted": 10,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s1-12": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s1-12/1",
+              "message": "s1-12/1",
+              "cell": 0,
+              "segment": 10,
+              "ref": 110,
+              "receipted": 10,
+              "votes": [0, 1]
+            }
+          ]
+        },
+        "s1-13": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s1-13/1",
+              "message": "s1-13/1",
+              "cell": 0,
+              "segment": 10,
+              "ref": 110,
+              "receipted": 10,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s1-14": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s1-14/1",
+              "message": "s1-14/1",
+              "cell": 0,
+              "segment": 10,
+              "ref": 110,
+              "receipted": 10,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s1-15": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s1-15/1",
+              "message": "s1-15/1",
+              "cell": 0,
+              "segment": 10,
+              "ref": 110,
+              "receipted": 10,
+              "votes": [0, 1]
+            }
+          ]
+        },
+        "s1-16": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s1-16/1",
+              "message": "s1-16/1",
+              "cell": 0,
+              "segment": 10,
+              "ref": 110,
+              "receipted": 10,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s1-17": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s1-17/1",
+              "message": "s1-17/1",
+              "cell": 0,
+              "segment": 10,
+              "ref": 110,
+              "receipted": 10,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s1-18": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s1-18/1",
+              "message": "s1-18/1",
+              "cell": 0,
+              "segment": 10,
+              "ref": 110,
+              "receipted": 10,
+              "votes": [0, 1]
+            }
+          ]
+        },
+        "s1-19": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s1-19/1",
+              "message": "s1-19/1",
+              "cell": 0,
+              "segment": 10,
+              "ref": 110,
+              "receipted": 10,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s1-20": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s1-20/1",
+              "message": "s1-20/1",
+              "cell": 0,
+              "segment": 10,
+              "ref": 110,
+              "receipted": 10,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s1-21": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s1-21/1",
+              "message": "s1-21/1",
+              "cell": 0,
+              "segment": 10,
+              "ref": 110,
+              "receipted": 10,
+              "votes": [0, 1]
+            }
+          ]
+        },
+        "s1-22": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s1-22/1",
+              "message": "s1-22/1",
+              "cell": 0,
+              "segment": 10,
+              "ref": 110,
+              "receipted": 10,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s1-23": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s1-23/1",
+              "message": "s1-23/1",
+              "cell": 0,
+              "segment": 10,
+              "ref": 110,
+              "receipted": 10,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s1-24": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s1-24/1",
+              "message": "s1-24/1",
+              "cell": 0,
+              "segment": 10,
+              "ref": 110,
+              "receipted": 10,
+              "votes": [0, 1]
+            }
+          ]
+        },
+        "s2-00": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s2-00/1",
+              "message": "s2-00/1",
+              "cell": 0,
+              "segment": 11,
+              "ref": 111,
+              "receipted": 11,
+              "votes": [0, 1]
+            }
+          ]
+        },
+        "s2-01": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s2-01/1",
+              "message": "s2-01/1",
+              "cell": 0,
+              "segment": 11,
+              "ref": 111,
+              "receipted": 11,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s2-02": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s2-02/1",
+              "message": "s2-02/1",
+              "cell": 0,
+              "segment": 11,
+              "ref": 111,
+              "receipted": 11,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s2-03": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s2-03/1",
+              "message": "s2-03/1",
+              "cell": 0,
+              "segment": 11,
+              "ref": 111,
+              "receipted": 11,
+              "votes": [0, 1]
+            }
+          ]
+        },
+        "s2-04": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s2-04/1",
+              "message": "s2-04/1",
+              "cell": 0,
+              "segment": 11,
+              "ref": 111,
+              "receipted": 11,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s2-05": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s2-05/1",
+              "message": "s2-05/1",
+              "cell": 0,
+              "segment": 11,
+              "ref": 111,
+              "receipted": 11,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s2-06": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s2-06/1",
+              "message": "s2-06/1",
+              "cell": 0,
+              "segment": 11,
+              "ref": 111,
+              "receipted": 11,
+              "votes": [0, 1]
+            }
+          ]
+        },
+        "s2-07": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s2-07/1",
+              "message": "s2-07/1",
+              "cell": 0,
+              "segment": 11,
+              "ref": 111,
+              "receipted": 11,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s2-08": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s2-08/1",
+              "message": "s2-08/1",
+              "cell": 0,
+              "segment": 11,
+              "ref": 111,
+              "receipted": 11,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s2-09": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s2-09/1",
+              "message": "s2-09/1",
+              "cell": 0,
+              "segment": 11,
+              "ref": 111,
+              "receipted": 11,
+              "votes": [0, 1]
+            }
+          ]
+        },
+        "s2-10": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s2-10/1",
+              "message": "s2-10/1",
+              "cell": 0,
+              "segment": 11,
+              "ref": 111,
+              "receipted": 11,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s2-11": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s2-11/1",
+              "message": "s2-11/1",
+              "cell": 0,
+              "segment": 11,
+              "ref": 111,
+              "receipted": 11,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s2-12": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s2-12/1",
+              "message": "s2-12/1",
+              "cell": 0,
+              "segment": 11,
+              "ref": 111,
+              "receipted": 11,
+              "votes": [0, 1]
+            }
+          ]
+        },
+        "s2-13": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s2-13/1",
+              "message": "s2-13/1",
+              "cell": 0,
+              "segment": 11,
+              "ref": 111,
+              "receipted": 11,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s2-14": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s2-14/1",
+              "message": "s2-14/1",
+              "cell": 0,
+              "segment": 11,
+              "ref": 111,
+              "receipted": 11,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s2-15": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s2-15/1",
+              "message": "s2-15/1",
+              "cell": 0,
+              "segment": 11,
+              "ref": 111,
+              "receipted": 11,
+              "votes": [0, 1]
+            }
+          ]
+        },
+        "s2-16": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s2-16/1",
+              "message": "s2-16/1",
+              "cell": 0,
+              "segment": 11,
+              "ref": 111,
+              "receipted": 11,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s2-17": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s2-17/1",
+              "message": "s2-17/1",
+              "cell": 0,
+              "segment": 11,
+              "ref": 111,
+              "receipted": 11,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s2-18": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s2-18/1",
+              "message": "s2-18/1",
+              "cell": 0,
+              "segment": 11,
+              "ref": 111,
+              "receipted": 11,
+              "votes": [0, 1]
+            }
+          ]
+        },
+        "s2-19": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s2-19/1",
+              "message": "s2-19/1",
+              "cell": 0,
+              "segment": 11,
+              "ref": 111,
+              "receipted": 11,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s2-20": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s2-20/1",
+              "message": "s2-20/1",
+              "cell": 0,
+              "segment": 11,
+              "ref": 111,
+              "receipted": 11,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s2-21": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s2-21/1",
+              "message": "s2-21/1",
+              "cell": 0,
+              "segment": 11,
+              "ref": 111,
+              "receipted": 11,
+              "votes": [0, 1]
+            }
+          ]
+        },
+        "s2-22": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s2-22/1",
+              "message": "s2-22/1",
+              "cell": 0,
+              "segment": 11,
+              "ref": 111,
+              "receipted": 11,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s2-23": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s2-23/1",
+              "message": "s2-23/1",
+              "cell": 0,
+              "segment": 11,
+              "ref": 111,
+              "receipted": 11,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s2-24": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s2-24/1",
+              "message": "s2-24/1",
+              "cell": 0,
+              "segment": 11,
+              "ref": 111,
+              "receipted": 11,
+              "votes": [0, 1]
+            }
+          ]
+        },
+        "s3-00": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s3-00/1",
+              "message": "s3-00/1",
+              "cell": 0,
+              "segment": 12,
+              "ref": 112,
+              "receipted": 12,
+              "votes": [0, 1]
+            }
+          ]
+        },
+        "s3-01": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s3-01/1",
+              "message": "s3-01/1",
+              "cell": 0,
+              "segment": 12,
+              "ref": 112,
+              "receipted": 12,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s3-02": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s3-02/1",
+              "message": "s3-02/1",
+              "cell": 0,
+              "segment": 12,
+              "ref": 112,
+              "receipted": 12,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s3-03": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s3-03/1",
+              "message": "s3-03/1",
+              "cell": 0,
+              "segment": 12,
+              "ref": 112,
+              "receipted": 12,
+              "votes": [0, 1]
+            }
+          ]
+        },
+        "s3-04": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s3-04/1",
+              "message": "s3-04/1",
+              "cell": 0,
+              "segment": 12,
+              "ref": 112,
+              "receipted": 12,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s3-05": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s3-05/1",
+              "message": "s3-05/1",
+              "cell": 0,
+              "segment": 12,
+              "ref": 112,
+              "receipted": 12,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s3-06": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s3-06/1",
+              "message": "s3-06/1",
+              "cell": 0,
+              "segment": 12,
+              "ref": 112,
+              "receipted": 12,
+              "votes": [0, 1]
+            }
+          ]
+        },
+        "s3-07": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s3-07/1",
+              "message": "s3-07/1",
+              "cell": 0,
+              "segment": 12,
+              "ref": 112,
+              "receipted": 12,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s3-08": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s3-08/1",
+              "message": "s3-08/1",
+              "cell": 0,
+              "segment": 12,
+              "ref": 112,
+              "receipted": 12,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s3-09": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s3-09/1",
+              "message": "s3-09/1",
+              "cell": 0,
+              "segment": 12,
+              "ref": 112,
+              "receipted": 12,
+              "votes": [0, 1]
+            }
+          ]
+        },
+        "s3-10": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s3-10/1",
+              "message": "s3-10/1",
+              "cell": 0,
+              "segment": 12,
+              "ref": 112,
+              "receipted": 12,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s3-11": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s3-11/1",
+              "message": "s3-11/1",
+              "cell": 0,
+              "segment": 12,
+              "ref": 112,
+              "receipted": 12,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s3-12": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s3-12/1",
+              "message": "s3-12/1",
+              "cell": 0,
+              "segment": 12,
+              "ref": 112,
+              "receipted": 12,
+              "votes": [0, 1]
+            }
+          ]
+        },
+        "s3-13": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s3-13/1",
+              "message": "s3-13/1",
+              "cell": 0,
+              "segment": 12,
+              "ref": 112,
+              "receipted": 12,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s3-14": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s3-14/1",
+              "message": "s3-14/1",
+              "cell": 0,
+              "segment": 12,
+              "ref": 112,
+              "receipted": 12,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s3-15": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s3-15/1",
+              "message": "s3-15/1",
+              "cell": 0,
+              "segment": 12,
+              "ref": 112,
+              "receipted": 12,
+              "votes": [0, 1]
+            }
+          ]
+        },
+        "s3-16": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s3-16/1",
+              "message": "s3-16/1",
+              "cell": 0,
+              "segment": 12,
+              "ref": 112,
+              "receipted": 12,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s3-17": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s3-17/1",
+              "message": "s3-17/1",
+              "cell": 0,
+              "segment": 12,
+              "ref": 112,
+              "receipted": 12,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s3-18": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s3-18/1",
+              "message": "s3-18/1",
+              "cell": 0,
+              "segment": 12,
+              "ref": 112,
+              "receipted": 12,
+              "votes": [0, 1]
+            }
+          ]
+        },
+        "s3-19": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s3-19/1",
+              "message": "s3-19/1",
+              "cell": 0,
+              "segment": 12,
+              "ref": 112,
+              "receipted": 12,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s3-20": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s3-20/1",
+              "message": "s3-20/1",
+              "cell": 0,
+              "segment": 12,
+              "ref": 112,
+              "receipted": 12,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s3-21": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s3-21/1",
+              "message": "s3-21/1",
+              "cell": 0,
+              "segment": 12,
+              "ref": 112,
+              "receipted": 12,
+              "votes": [0, 1]
+            }
+          ]
+        },
+        "s3-22": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s3-22/1",
+              "message": "s3-22/1",
+              "cell": 0,
+              "segment": 12,
+              "ref": 112,
+              "receipted": 12,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s3-23": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s3-23/1",
+              "message": "s3-23/1",
+              "cell": 0,
+              "segment": 12,
+              "ref": 112,
+              "receipted": 12,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s3-24": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s3-24/1",
+              "message": "s3-24/1",
+              "cell": 0,
+              "segment": 12,
+              "ref": 112,
+              "receipted": 12,
+              "votes": [0, 1]
+            }
+          ]
+        },
+        "s4-00": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s4-00/1",
+              "message": "s4-00/1",
+              "cell": 0,
+              "segment": 13,
+              "ref": 113,
+              "receipted": 13,
+              "votes": [0, 1]
+            }
+          ]
+        },
+        "s4-01": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s4-01/1",
+              "message": "s4-01/1",
+              "cell": 0,
+              "segment": 13,
+              "ref": 113,
+              "receipted": 13,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s4-02": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s4-02/1",
+              "message": "s4-02/1",
+              "cell": 0,
+              "segment": 13,
+              "ref": 113,
+              "receipted": 13,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s4-03": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s4-03/1",
+              "message": "s4-03/1",
+              "cell": 0,
+              "segment": 13,
+              "ref": 113,
+              "receipted": 13,
+              "votes": [0, 1]
+            }
+          ]
+        },
+        "s4-04": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s4-04/1",
+              "message": "s4-04/1",
+              "cell": 0,
+              "segment": 13,
+              "ref": 113,
+              "receipted": 13,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s4-05": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s4-05/1",
+              "message": "s4-05/1",
+              "cell": 0,
+              "segment": 13,
+              "ref": 113,
+              "receipted": 13,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s4-06": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s4-06/1",
+              "message": "s4-06/1",
+              "cell": 0,
+              "segment": 13,
+              "ref": 113,
+              "receipted": 13,
+              "votes": [0, 1]
+            }
+          ]
+        },
+        "s4-07": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s4-07/1",
+              "message": "s4-07/1",
+              "cell": 0,
+              "segment": 13,
+              "ref": 113,
+              "receipted": 13,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s4-08": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s4-08/1",
+              "message": "s4-08/1",
+              "cell": 0,
+              "segment": 13,
+              "ref": 113,
+              "receipted": 13,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s4-09": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s4-09/1",
+              "message": "s4-09/1",
+              "cell": 0,
+              "segment": 13,
+              "ref": 113,
+              "receipted": 13,
+              "votes": [0, 1]
+            }
+          ]
+        },
+        "s4-10": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s4-10/1",
+              "message": "s4-10/1",
+              "cell": 0,
+              "segment": 13,
+              "ref": 113,
+              "receipted": 13,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s4-11": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s4-11/1",
+              "message": "s4-11/1",
+              "cell": 0,
+              "segment": 13,
+              "ref": 113,
+              "receipted": 13,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s4-12": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s4-12/1",
+              "message": "s4-12/1",
+              "cell": 0,
+              "segment": 13,
+              "ref": 113,
+              "receipted": 13,
+              "votes": [0, 1]
+            }
+          ]
+        },
+        "s4-13": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s4-13/1",
+              "message": "s4-13/1",
+              "cell": 0,
+              "segment": 13,
+              "ref": 113,
+              "receipted": 13,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s4-14": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s4-14/1",
+              "message": "s4-14/1",
+              "cell": 0,
+              "segment": 13,
+              "ref": 113,
+              "receipted": 13,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s4-15": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s4-15/1",
+              "message": "s4-15/1",
+              "cell": 0,
+              "segment": 13,
+              "ref": 113,
+              "receipted": 13,
+              "votes": [0, 1]
+            }
+          ]
+        },
+        "s4-16": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s4-16/1",
+              "message": "s4-16/1",
+              "cell": 0,
+              "segment": 13,
+              "ref": 113,
+              "receipted": 13,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s4-17": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s4-17/1",
+              "message": "s4-17/1",
+              "cell": 0,
+              "segment": 13,
+              "ref": 113,
+              "receipted": 13,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s4-18": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s4-18/1",
+              "message": "s4-18/1",
+              "cell": 0,
+              "segment": 13,
+              "ref": 113,
+              "receipted": 13,
+              "votes": [0, 1]
+            }
+          ]
+        },
+        "s4-19": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s4-19/1",
+              "message": "s4-19/1",
+              "cell": 0,
+              "segment": 13,
+              "ref": 113,
+              "receipted": 13,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s4-20": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s4-20/1",
+              "message": "s4-20/1",
+              "cell": 0,
+              "segment": 13,
+              "ref": 113,
+              "receipted": 13,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s4-21": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s4-21/1",
+              "message": "s4-21/1",
+              "cell": 0,
+              "segment": 13,
+              "ref": 113,
+              "receipted": 13,
+              "votes": [0, 1]
+            }
+          ]
+        },
+        "s4-22": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s4-22/1",
+              "message": "s4-22/1",
+              "cell": 0,
+              "segment": 13,
+              "ref": 113,
+              "receipted": 13,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s4-23": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s4-23/1",
+              "message": "s4-23/1",
+              "cell": 0,
+              "segment": 13,
+              "ref": 113,
+              "receipted": 13,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s4-24": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s4-24/1",
+              "message": "s4-24/1",
+              "cell": 0,
+              "segment": 13,
+              "ref": 113,
+              "receipted": 13,
+              "votes": [0, 1]
+            }
+          ]
+        },
+        "s5-00": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s5-00/1",
+              "message": "s5-00/1",
+              "cell": 0,
+              "segment": 14,
+              "ref": 114,
+              "receipted": 14,
+              "votes": [0, 1]
+            }
+          ]
+        },
+        "s5-01": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s5-01/1",
+              "message": "s5-01/1",
+              "cell": 0,
+              "segment": 14,
+              "ref": 114,
+              "receipted": 14,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s5-02": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s5-02/1",
+              "message": "s5-02/1",
+              "cell": 0,
+              "segment": 14,
+              "ref": 114,
+              "receipted": 14,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s5-03": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s5-03/1",
+              "message": "s5-03/1",
+              "cell": 0,
+              "segment": 14,
+              "ref": 114,
+              "receipted": 14,
+              "votes": [0, 1]
+            }
+          ]
+        },
+        "s5-04": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s5-04/1",
+              "message": "s5-04/1",
+              "cell": 0,
+              "segment": 14,
+              "ref": 114,
+              "receipted": 14,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s5-05": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s5-05/1",
+              "message": "s5-05/1",
+              "cell": 0,
+              "segment": 14,
+              "ref": 114,
+              "receipted": 14,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s5-06": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s5-06/1",
+              "message": "s5-06/1",
+              "cell": 0,
+              "segment": 14,
+              "ref": 114,
+              "receipted": 14,
+              "votes": [0, 1]
+            }
+          ]
+        },
+        "s5-07": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s5-07/1",
+              "message": "s5-07/1",
+              "cell": 0,
+              "segment": 14,
+              "ref": 114,
+              "receipted": 14,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s5-08": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s5-08/1",
+              "message": "s5-08/1",
+              "cell": 0,
+              "segment": 14,
+              "ref": 114,
+              "receipted": 14,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s5-09": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s5-09/1",
+              "message": "s5-09/1",
+              "cell": 0,
+              "segment": 14,
+              "ref": 114,
+              "receipted": 14,
+              "votes": [0, 1]
+            }
+          ]
+        },
+        "s5-10": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s5-10/1",
+              "message": "s5-10/1",
+              "cell": 0,
+              "segment": 14,
+              "ref": 114,
+              "receipted": 14,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s5-11": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s5-11/1",
+              "message": "s5-11/1",
+              "cell": 0,
+              "segment": 14,
+              "ref": 114,
+              "receipted": 14,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s5-12": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s5-12/1",
+              "message": "s5-12/1",
+              "cell": 0,
+              "segment": 14,
+              "ref": 114,
+              "receipted": 14,
+              "votes": [0, 1]
+            }
+          ]
+        },
+        "s5-13": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s5-13/1",
+              "message": "s5-13/1",
+              "cell": 0,
+              "segment": 14,
+              "ref": 114,
+              "receipted": 14,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s5-14": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s5-14/1",
+              "message": "s5-14/1",
+              "cell": 0,
+              "segment": 14,
+              "ref": 114,
+              "receipted": 14,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s5-15": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s5-15/1",
+              "message": "s5-15/1",
+              "cell": 0,
+              "segment": 14,
+              "ref": 114,
+              "receipted": 14,
+              "votes": [0, 1]
+            }
+          ]
+        },
+        "s5-16": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s5-16/1",
+              "message": "s5-16/1",
+              "cell": 0,
+              "segment": 14,
+              "ref": 114,
+              "receipted": 14,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s5-17": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s5-17/1",
+              "message": "s5-17/1",
+              "cell": 0,
+              "segment": 14,
+              "ref": 114,
+              "receipted": 14,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s5-18": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s5-18/1",
+              "message": "s5-18/1",
+              "cell": 0,
+              "segment": 14,
+              "ref": 114,
+              "receipted": 14,
+              "votes": [0, 1]
+            }
+          ]
+        },
+        "s5-19": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s5-19/1",
+              "message": "s5-19/1",
+              "cell": 0,
+              "segment": 14,
+              "ref": 114,
+              "receipted": 14,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s5-20": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s5-20/1",
+              "message": "s5-20/1",
+              "cell": 0,
+              "segment": 14,
+              "ref": 114,
+              "receipted": 14,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s5-21": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s5-21/1",
+              "message": "s5-21/1",
+              "cell": 0,
+              "segment": 14,
+              "ref": 114,
+              "receipted": 14,
+              "votes": [0, 1]
+            }
+          ]
+        },
+        "s5-22": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s5-22/1",
+              "message": "s5-22/1",
+              "cell": 0,
+              "segment": 14,
+              "ref": 114,
+              "receipted": 14,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s5-23": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s5-23/1",
+              "message": "s5-23/1",
+              "cell": 0,
+              "segment": 14,
+              "ref": 114,
+              "receipted": 14,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s5-24": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s5-24/1",
+              "message": "s5-24/1",
+              "cell": 0,
+              "segment": 14,
+              "ref": 114,
+              "receipted": 14,
+              "votes": [0, 1]
+            }
+          ]
+        },
+        "s6-00": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s6-00/1",
+              "message": "s6-00/1",
+              "cell": 0,
+              "segment": 15,
+              "ref": 115,
+              "receipted": 15,
+              "votes": [0, 1]
+            }
+          ]
+        },
+        "s6-01": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s6-01/1",
+              "message": "s6-01/1",
+              "cell": 0,
+              "segment": 15,
+              "ref": 115,
+              "receipted": 15,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s6-02": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s6-02/1",
+              "message": "s6-02/1",
+              "cell": 0,
+              "segment": 15,
+              "ref": 115,
+              "receipted": 15,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s6-03": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s6-03/1",
+              "message": "s6-03/1",
+              "cell": 0,
+              "segment": 15,
+              "ref": 115,
+              "receipted": 15,
+              "votes": [0, 1]
+            }
+          ]
+        },
+        "s6-04": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s6-04/1",
+              "message": "s6-04/1",
+              "cell": 0,
+              "segment": 15,
+              "ref": 115,
+              "receipted": 15,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s6-05": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s6-05/1",
+              "message": "s6-05/1",
+              "cell": 0,
+              "segment": 15,
+              "ref": 115,
+              "receipted": 15,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s6-06": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s6-06/1",
+              "message": "s6-06/1",
+              "cell": 0,
+              "segment": 15,
+              "ref": 115,
+              "receipted": 15,
+              "votes": [0, 1]
+            }
+          ]
+        },
+        "s6-07": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s6-07/1",
+              "message": "s6-07/1",
+              "cell": 0,
+              "segment": 15,
+              "ref": 115,
+              "receipted": 15,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s6-08": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s6-08/1",
+              "message": "s6-08/1",
+              "cell": 0,
+              "segment": 15,
+              "ref": 115,
+              "receipted": 15,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s6-09": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s6-09/1",
+              "message": "s6-09/1",
+              "cell": 0,
+              "segment": 15,
+              "ref": 115,
+              "receipted": 15,
+              "votes": [0, 1]
+            }
+          ]
+        },
+        "s6-10": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s6-10/1",
+              "message": "s6-10/1",
+              "cell": 0,
+              "segment": 15,
+              "ref": 115,
+              "receipted": 15,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s6-11": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s6-11/1",
+              "message": "s6-11/1",
+              "cell": 0,
+              "segment": 15,
+              "ref": 115,
+              "receipted": 15,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s6-12": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s6-12/1",
+              "message": "s6-12/1",
+              "cell": 0,
+              "segment": 15,
+              "ref": 115,
+              "receipted": 15,
+              "votes": [0, 1]
+            }
+          ]
+        },
+        "s6-13": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s6-13/1",
+              "message": "s6-13/1",
+              "cell": 0,
+              "segment": 15,
+              "ref": 115,
+              "receipted": 15,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s6-14": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s6-14/1",
+              "message": "s6-14/1",
+              "cell": 0,
+              "segment": 15,
+              "ref": 115,
+              "receipted": 15,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s6-15": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s6-15/1",
+              "message": "s6-15/1",
+              "cell": 0,
+              "segment": 15,
+              "ref": 115,
+              "receipted": 15,
+              "votes": [0, 1]
+            }
+          ]
+        },
+        "s6-16": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s6-16/1",
+              "message": "s6-16/1",
+              "cell": 0,
+              "segment": 15,
+              "ref": 115,
+              "receipted": 15,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s6-17": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s6-17/1",
+              "message": "s6-17/1",
+              "cell": 0,
+              "segment": 15,
+              "ref": 115,
+              "receipted": 15,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s6-18": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s6-18/1",
+              "message": "s6-18/1",
+              "cell": 0,
+              "segment": 15,
+              "ref": 115,
+              "receipted": 15,
+              "votes": [0, 1]
+            }
+          ]
+        },
+        "s6-19": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s6-19/1",
+              "message": "s6-19/1",
+              "cell": 0,
+              "segment": 15,
+              "ref": 115,
+              "receipted": 15,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s6-20": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s6-20/1",
+              "message": "s6-20/1",
+              "cell": 0,
+              "segment": 15,
+              "ref": 115,
+              "receipted": 15,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s6-21": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s6-21/1",
+              "message": "s6-21/1",
+              "cell": 0,
+              "segment": 15,
+              "ref": 115,
+              "receipted": 15,
+              "votes": [0, 1]
+            }
+          ]
+        },
+        "s6-22": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s6-22/1",
+              "message": "s6-22/1",
+              "cell": 0,
+              "segment": 15,
+              "ref": 115,
+              "receipted": 15,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s6-23": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s6-23/1",
+              "message": "s6-23/1",
+              "cell": 0,
+              "segment": 15,
+              "ref": 115,
+              "receipted": 15,
+              "votes": [1, 0]
+            }
+          ]
+        },
+        "s6-24": {
+          "tier": 0,
+          "ballots": [
+            {
+              "id": "s6-24/1",
+              "message": "s6-24/1",
+              "cell": 0,
+              "segment": 15,
+              "ref": 115,
+              "receipted": 15,
+              "votes": [0, 1]
+            }
+          ]
+        }
+      },
+      "openings": [
+        {
+          "entry": 1000,
+          "cell": 0,
+          "snapshot": 1,
+          "signer": 1,
+          "message": "0/1/1"
+        },
+        {
+          "entry": 1001,
+          "cell": 0,
+          "snapshot": 1,
+          "signer": 2,
+          "message": "0/1/2"
+        },
+        {
+          "entry": 1002,
+          "cell": 0,
+          "snapshot": 2,
+          "signer": 1,
+          "message": "0/2/1"
+        },
+        {
+          "entry": 1003,
+          "cell": 0,
+          "snapshot": 2,
+          "signer": 2,
+          "message": "0/2/2"
+        },
+        {
+          "entry": 3000,
+          "cell": 0,
+          "snapshot": 2,
+          "signer": null,
+          "counts": [31, 19],
+          "randomness": "forged",
+          "bindingBroken": true,
+          "message": "forged"
+        }
+      ],
+      "result": {
+        "runningSets": [
+          [
+            {
+              "s1-00": "s1-00/1",
+              "s1-01": "s1-01/1",
+              "s1-02": "s1-02/1",
+              "s1-03": "s1-03/1",
+              "s1-04": "s1-04/1",
+              "s1-05": "s1-05/1",
+              "s1-06": "s1-06/1",
+              "s1-07": "s1-07/1",
+              "s1-08": "s1-08/1",
+              "s1-09": "s1-09/1",
+              "s1-10": "s1-10/1",
+              "s1-11": "s1-11/1",
+              "s1-12": "s1-12/1",
+              "s1-13": "s1-13/1",
+              "s1-14": "s1-14/1",
+              "s1-15": "s1-15/1",
+              "s1-16": "s1-16/1",
+              "s1-17": "s1-17/1",
+              "s1-18": "s1-18/1",
+              "s1-19": "s1-19/1",
+              "s1-20": "s1-20/1",
+              "s1-21": "s1-21/1",
+              "s1-22": "s1-22/1",
+              "s1-23": "s1-23/1",
+              "s1-24": "s1-24/1"
+            },
+            {
+              "s1-00": "s1-00/1",
+              "s1-01": "s1-01/1",
+              "s1-02": "s1-02/1",
+              "s1-03": "s1-03/1",
+              "s1-04": "s1-04/1",
+              "s1-05": "s1-05/1",
+              "s1-06": "s1-06/1",
+              "s1-07": "s1-07/1",
+              "s1-08": "s1-08/1",
+              "s1-09": "s1-09/1",
+              "s1-10": "s1-10/1",
+              "s1-11": "s1-11/1",
+              "s1-12": "s1-12/1",
+              "s1-13": "s1-13/1",
+              "s1-14": "s1-14/1",
+              "s1-15": "s1-15/1",
+              "s1-16": "s1-16/1",
+              "s1-17": "s1-17/1",
+              "s1-18": "s1-18/1",
+              "s1-19": "s1-19/1",
+              "s1-20": "s1-20/1",
+              "s1-21": "s1-21/1",
+              "s1-22": "s1-22/1",
+              "s1-23": "s1-23/1",
+              "s1-24": "s1-24/1",
+              "s2-00": "s2-00/1",
+              "s2-01": "s2-01/1",
+              "s2-02": "s2-02/1",
+              "s2-03": "s2-03/1",
+              "s2-04": "s2-04/1",
+              "s2-05": "s2-05/1",
+              "s2-06": "s2-06/1",
+              "s2-07": "s2-07/1",
+              "s2-08": "s2-08/1",
+              "s2-09": "s2-09/1",
+              "s2-10": "s2-10/1",
+              "s2-11": "s2-11/1",
+              "s2-12": "s2-12/1",
+              "s2-13": "s2-13/1",
+              "s2-14": "s2-14/1",
+              "s2-15": "s2-15/1",
+              "s2-16": "s2-16/1",
+              "s2-17": "s2-17/1",
+              "s2-18": "s2-18/1",
+              "s2-19": "s2-19/1",
+              "s2-20": "s2-20/1",
+              "s2-21": "s2-21/1",
+              "s2-22": "s2-22/1",
+              "s2-23": "s2-23/1",
+              "s2-24": "s2-24/1"
+            },
+            {
+              "s1-00": "s1-00/1",
+              "s1-01": "s1-01/1",
+              "s1-02": "s1-02/1",
+              "s1-03": "s1-03/1",
+              "s1-04": "s1-04/1",
+              "s1-05": "s1-05/1",
+              "s1-06": "s1-06/1",
+              "s1-07": "s1-07/1",
+              "s1-08": "s1-08/1",
+              "s1-09": "s1-09/1",
+              "s1-10": "s1-10/1",
+              "s1-11": "s1-11/1",
+              "s1-12": "s1-12/1",
+              "s1-13": "s1-13/1",
+              "s1-14": "s1-14/1",
+              "s1-15": "s1-15/1",
+              "s1-16": "s1-16/1",
+              "s1-17": "s1-17/1",
+              "s1-18": "s1-18/1",
+              "s1-19": "s1-19/1",
+              "s1-20": "s1-20/1",
+              "s1-21": "s1-21/1",
+              "s1-22": "s1-22/1",
+              "s1-23": "s1-23/1",
+              "s1-24": "s1-24/1",
+              "s2-00": "s2-00/1",
+              "s2-01": "s2-01/1",
+              "s2-02": "s2-02/1",
+              "s2-03": "s2-03/1",
+              "s2-04": "s2-04/1",
+              "s2-05": "s2-05/1",
+              "s2-06": "s2-06/1",
+              "s2-07": "s2-07/1",
+              "s2-08": "s2-08/1",
+              "s2-09": "s2-09/1",
+              "s2-10": "s2-10/1",
+              "s2-11": "s2-11/1",
+              "s2-12": "s2-12/1",
+              "s2-13": "s2-13/1",
+              "s2-14": "s2-14/1",
+              "s2-15": "s2-15/1",
+              "s2-16": "s2-16/1",
+              "s2-17": "s2-17/1",
+              "s2-18": "s2-18/1",
+              "s2-19": "s2-19/1",
+              "s2-20": "s2-20/1",
+              "s2-21": "s2-21/1",
+              "s2-22": "s2-22/1",
+              "s2-23": "s2-23/1",
+              "s2-24": "s2-24/1",
+              "s3-00": "s3-00/1",
+              "s3-01": "s3-01/1",
+              "s3-02": "s3-02/1",
+              "s3-03": "s3-03/1",
+              "s3-04": "s3-04/1",
+              "s3-05": "s3-05/1",
+              "s3-06": "s3-06/1",
+              "s3-07": "s3-07/1",
+              "s3-08": "s3-08/1",
+              "s3-09": "s3-09/1",
+              "s3-10": "s3-10/1",
+              "s3-11": "s3-11/1",
+              "s3-12": "s3-12/1",
+              "s3-13": "s3-13/1",
+              "s3-14": "s3-14/1",
+              "s3-15": "s3-15/1",
+              "s3-16": "s3-16/1",
+              "s3-17": "s3-17/1",
+              "s3-18": "s3-18/1",
+              "s3-19": "s3-19/1",
+              "s3-20": "s3-20/1",
+              "s3-21": "s3-21/1",
+              "s3-22": "s3-22/1",
+              "s3-23": "s3-23/1",
+              "s3-24": "s3-24/1"
+            }
+          ]
+        ],
+        "finalBallots": [
+          {
+            "s1-00": "s1-00/1",
+            "s1-01": "s1-01/1",
+            "s1-02": "s1-02/1",
+            "s1-03": "s1-03/1",
+            "s1-04": "s1-04/1",
+            "s1-05": "s1-05/1",
+            "s1-06": "s1-06/1",
+            "s1-07": "s1-07/1",
+            "s1-08": "s1-08/1",
+            "s1-09": "s1-09/1",
+            "s1-10": "s1-10/1",
+            "s1-11": "s1-11/1",
+            "s1-12": "s1-12/1",
+            "s1-13": "s1-13/1",
+            "s1-14": "s1-14/1",
+            "s1-15": "s1-15/1",
+            "s1-16": "s1-16/1",
+            "s1-17": "s1-17/1",
+            "s1-18": "s1-18/1",
+            "s1-19": "s1-19/1",
+            "s1-20": "s1-20/1",
+            "s1-21": "s1-21/1",
+            "s1-22": "s1-22/1",
+            "s1-23": "s1-23/1",
+            "s1-24": "s1-24/1",
+            "s2-00": "s2-00/1",
+            "s2-01": "s2-01/1",
+            "s2-02": "s2-02/1",
+            "s2-03": "s2-03/1",
+            "s2-04": "s2-04/1",
+            "s2-05": "s2-05/1",
+            "s2-06": "s2-06/1",
+            "s2-07": "s2-07/1",
+            "s2-08": "s2-08/1",
+            "s2-09": "s2-09/1",
+            "s2-10": "s2-10/1",
+            "s2-11": "s2-11/1",
+            "s2-12": "s2-12/1",
+            "s2-13": "s2-13/1",
+            "s2-14": "s2-14/1",
+            "s2-15": "s2-15/1",
+            "s2-16": "s2-16/1",
+            "s2-17": "s2-17/1",
+            "s2-18": "s2-18/1",
+            "s2-19": "s2-19/1",
+            "s2-20": "s2-20/1",
+            "s2-21": "s2-21/1",
+            "s2-22": "s2-22/1",
+            "s2-23": "s2-23/1",
+            "s2-24": "s2-24/1",
+            "s3-00": "s3-00/1",
+            "s3-01": "s3-01/1",
+            "s3-02": "s3-02/1",
+            "s3-03": "s3-03/1",
+            "s3-04": "s3-04/1",
+            "s3-05": "s3-05/1",
+            "s3-06": "s3-06/1",
+            "s3-07": "s3-07/1",
+            "s3-08": "s3-08/1",
+            "s3-09": "s3-09/1",
+            "s3-10": "s3-10/1",
+            "s3-11": "s3-11/1",
+            "s3-12": "s3-12/1",
+            "s3-13": "s3-13/1",
+            "s3-14": "s3-14/1",
+            "s3-15": "s3-15/1",
+            "s3-16": "s3-16/1",
+            "s3-17": "s3-17/1",
+            "s3-18": "s3-18/1",
+            "s3-19": "s3-19/1",
+            "s3-20": "s3-20/1",
+            "s3-21": "s3-21/1",
+            "s3-22": "s3-22/1",
+            "s3-23": "s3-23/1",
+            "s3-24": "s3-24/1",
+            "s4-00": "s4-00/1",
+            "s4-01": "s4-01/1",
+            "s4-02": "s4-02/1",
+            "s4-03": "s4-03/1",
+            "s4-04": "s4-04/1",
+            "s4-05": "s4-05/1",
+            "s4-06": "s4-06/1",
+            "s4-07": "s4-07/1",
+            "s4-08": "s4-08/1",
+            "s4-09": "s4-09/1",
+            "s4-10": "s4-10/1",
+            "s4-11": "s4-11/1",
+            "s4-12": "s4-12/1",
+            "s4-13": "s4-13/1",
+            "s4-14": "s4-14/1",
+            "s4-15": "s4-15/1",
+            "s4-16": "s4-16/1",
+            "s4-17": "s4-17/1",
+            "s4-18": "s4-18/1",
+            "s4-19": "s4-19/1",
+            "s4-20": "s4-20/1",
+            "s4-21": "s4-21/1",
+            "s4-22": "s4-22/1",
+            "s4-23": "s4-23/1",
+            "s4-24": "s4-24/1",
+            "s5-00": "s5-00/1",
+            "s5-01": "s5-01/1",
+            "s5-02": "s5-02/1",
+            "s5-03": "s5-03/1",
+            "s5-04": "s5-04/1",
+            "s5-05": "s5-05/1",
+            "s5-06": "s5-06/1",
+            "s5-07": "s5-07/1",
+            "s5-08": "s5-08/1",
+            "s5-09": "s5-09/1",
+            "s5-10": "s5-10/1",
+            "s5-11": "s5-11/1",
+            "s5-12": "s5-12/1",
+            "s5-13": "s5-13/1",
+            "s5-14": "s5-14/1",
+            "s5-15": "s5-15/1",
+            "s5-16": "s5-16/1",
+            "s5-17": "s5-17/1",
+            "s5-18": "s5-18/1",
+            "s5-19": "s5-19/1",
+            "s5-20": "s5-20/1",
+            "s5-21": "s5-21/1",
+            "s5-22": "s5-22/1",
+            "s5-23": "s5-23/1",
+            "s5-24": "s5-24/1",
+            "s6-00": "s6-00/1",
+            "s6-01": "s6-01/1",
+            "s6-02": "s6-02/1",
+            "s6-03": "s6-03/1",
+            "s6-04": "s6-04/1",
+            "s6-05": "s6-05/1",
+            "s6-06": "s6-06/1",
+            "s6-07": "s6-07/1",
+            "s6-08": "s6-08/1",
+            "s6-09": "s6-09/1",
+            "s6-10": "s6-10/1",
+            "s6-11": "s6-11/1",
+            "s6-12": "s6-12/1",
+            "s6-13": "s6-13/1",
+            "s6-14": "s6-14/1",
+            "s6-15": "s6-15/1",
+            "s6-16": "s6-16/1",
+            "s6-17": "s6-17/1",
+            "s6-18": "s6-18/1",
+            "s6-19": "s6-19/1",
+            "s6-20": "s6-20/1",
+            "s6-21": "s6-21/1",
+            "s6-22": "s6-22/1",
+            "s6-23": "s6-23/1",
+            "s6-24": "s6-24/1"
+          }
+        ],
+        "tiers": [
+          {
+            "tier": 0,
+            "decisions": [
+              {
+                "at": 2,
+                "release": 1,
+                "refused": {}
+              },
+              {
+                "at": 3,
+                "release": 2,
+                "refused": {}
+              }
+            ],
+            "releases": [
+              {
+                "snapshot": 1,
+                "counts": ["16", "9"]
+              },
+              {
+                "snapshot": 2,
+                "counts": ["32", "18"]
+              }
+            ]
+          }
+        ],
+        "cells": [
+          {
+            "cell": 0,
+            "tier": 0,
+            "releases": [
+              {
+                "snapshot": 1,
+                "size": 25,
+                "entered": 25,
+                "counts": ["16", "9"],
+                "conflict": false,
+                "signers": [1, 2]
+              },
+              {
+                "snapshot": 2,
+                "size": 50,
+                "entered": 25,
+                "counts": ["32", "18"],
+                "conflict": true,
+                "signers": [1, 2]
+              }
+            ],
+            "finalBatch": {
+              "cut": 25,
+              "flagged": false,
+              "side": {
+                "kind": "entered",
+                "release": 1,
+                "ballots": [
+                  "s1-00/1",
+                  "s1-01/1",
+                  "s1-02/1",
+                  "s1-03/1",
+                  "s1-04/1",
+                  "s1-05/1",
+                  "s1-06/1",
+                  "s1-07/1",
+                  "s1-08/1",
+                  "s1-09/1",
+                  "s1-10/1",
+                  "s1-11/1",
+                  "s1-12/1",
+                  "s1-13/1",
+                  "s1-14/1",
+                  "s1-15/1",
+                  "s1-16/1",
+                  "s1-17/1",
+                  "s1-18/1",
+                  "s1-19/1",
+                  "s1-20/1",
+                  "s1-21/1",
+                  "s1-22/1",
+                  "s1-23/1",
+                  "s1-24/1"
+                ]
+              }
+            }
+          }
+        ],
+        "openings": [
+          {
+            "entry": 1000,
+            "cell": 0,
+            "snapshot": 1,
+            "signer": 1,
+            "kind": "release",
+            "passes": true,
+            "counts": ["16", "9"],
+            "randomness": "summed",
+            "breaks": [],
+            "blamed": null
+          },
+          {
+            "entry": 1001,
+            "cell": 0,
+            "snapshot": 1,
+            "signer": 2,
+            "kind": "release",
+            "passes": true,
+            "counts": ["16", "9"],
+            "randomness": "summed",
+            "breaks": [],
+            "blamed": null
+          },
+          {
+            "entry": 1002,
+            "cell": 0,
+            "snapshot": 2,
+            "signer": 1,
+            "kind": "release",
+            "passes": true,
+            "counts": ["32", "18"],
+            "randomness": "summed",
+            "breaks": [],
+            "blamed": null
+          },
+          {
+            "entry": 1003,
+            "cell": 0,
+            "snapshot": 2,
+            "signer": 2,
+            "kind": "release",
+            "passes": true,
+            "counts": ["32", "18"],
+            "randomness": "summed",
+            "breaks": [],
+            "blamed": null
+          },
+          {
+            "entry": 3000,
+            "cell": 0,
+            "snapshot": 2,
+            "signer": null,
+            "kind": "release",
+            "passes": true,
+            "counts": ["31", "19"],
+            "randomness": "forged",
+            "breaks": [
+              {
+                "code": "running-unattributed"
+              }
+            ],
+            "blamed": null
+          }
+        ],
+        "rows": {
+          "7.5": {
+            "status": "fail",
+            "code": "running-conflict",
+            "at": {
+              "cell": 0,
+              "snapshot": 2
+            }
+          },
+          "7.6": {
+            "status": "fail",
+            "code": "running-unattributed",
+            "at": {
+              "entry": 3000
             }
           }
         }
@@ -18891,6 +21602,7 @@
                 "size": 26,
                 "entered": 26,
                 "counts": ["18", "9"],
+                "conflict": false,
                 "signers": [1]
               },
               {
@@ -18898,6 +21610,7 @@
                 "size": 51,
                 "entered": 25,
                 "counts": ["34", "18"],
+                "conflict": false,
                 "signers": [1]
               }
             ],
@@ -18947,6 +21660,7 @@
             "kind": "release",
             "passes": true,
             "counts": ["18", "9"],
+            "randomness": "summed",
             "breaks": [],
             "blamed": null
           },
@@ -18958,6 +21672,7 @@
             "kind": "release",
             "passes": true,
             "counts": ["34", "18"],
+            "randomness": "summed",
             "breaks": [],
             "blamed": null
           }
@@ -24079,6 +26794,7 @@
                 "size": 120,
                 "entered": 120,
                 "counts": ["80", "40"],
+                "conflict": false,
                 "signers": [1]
               }
             ],
@@ -24132,6 +26848,7 @@
                 "size": 24,
                 "entered": 24,
                 "counts": null,
+                "conflict": false,
                 "signers": []
               }
             ],
@@ -24175,6 +26892,7 @@
                 "size": 25,
                 "entered": 25,
                 "counts": ["16", "9"],
+                "conflict": false,
                 "signers": [1]
               },
               {
@@ -24182,6 +26900,7 @@
                 "size": 50,
                 "entered": 25,
                 "counts": ["32", "18"],
+                "conflict": false,
                 "signers": [1]
               }
             ],
@@ -24231,6 +26950,7 @@
             "kind": "release",
             "passes": true,
             "counts": ["80", "40"],
+            "randomness": "summed",
             "breaks": [],
             "blamed": null
           },
@@ -24242,6 +26962,7 @@
             "kind": "release",
             "passes": true,
             "counts": ["16", "9"],
+            "randomness": "summed",
             "breaks": [],
             "blamed": null
           },
@@ -24253,6 +26974,7 @@
             "kind": "release",
             "passes": true,
             "counts": ["32", "18"],
+            "randomness": "summed",
             "breaks": [],
             "blamed": null
           }

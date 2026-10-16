@@ -260,7 +260,9 @@ def judge_openings(case, sets, chosen):
                 elif aggregate_set is None or aggregate_set != target:
                     breaks.append({"code": "running-aggregate"})
                 else:
-                    bad = [j for j in range(m) if counts[j] != want[j]]
+                    # `bindingBroken`: (V, R) that open the aggregate with
+                    # other counts, which only a known log_g h allows.
+                    bad = [] if o.get("bindingBroken") else [j for j in range(m) if counts[j] != want[j]]
                     if o.get("badR") is not None:
                         bad.append(o["badR"])
                     if bad:
@@ -268,6 +270,7 @@ def judge_openings(case, sets, chosen):
                 row["passes"] = not breaks
                 if row["passes"]:
                     row["counts"] = [str(v) for v in counts]
+                    row["randomness"] = o.get("randomness", "summed")
         if o.get("signer") is None:
             breaks.append({"code": "running-unattributed"})
         elif row["kind"] == "release":
@@ -299,6 +302,9 @@ def releases_per_cell(case, sets, chosen, judged):
                     "size": len(sets[c][q]),
                     "entered": entries(sets[c][prev], sets[c][q]),
                     "counts": passing[0]["counts"] if passing else None,
+                    # Openings differ by their (V, R) lists, never by signer
+                    # or signature.
+                    "conflict": len({(tuple(r["counts"]), r["randomness"]) for r in passing}) > 1,
                     "signers": sorted({r["signer"] for r in passing if r["signer"] is not None}),
                 }
             )
@@ -313,6 +319,8 @@ def row_75(case, per_cell):
         for rel in cell["releases"]:
             if rel["counts"] is None:
                 continue
+            if rel["conflict"]:
+                return {"status": "fail", "code": "running-conflict", "at": {"cell": cell["cell"], "snapshot": rel["snapshot"]}}
             counts = [int(v) for v in rel["counts"]]
             size = rel["size"]
             for j, v in enumerate(counts):
@@ -770,6 +778,18 @@ def main():
             breaches,
             snaps(6),
             ops + extra,
+        )
+    )
+
+    conflict = dict(steady)
+    cases.append(
+        base_case(
+            "conflict",
+            "Seats 1 and 2 each publish a passing opening of every release, the same (V, R) under different signatures, which is no conflict; at release 2 an unattributed opening with other counts also opens the aggregate, which only a known log_g h allows, and 7.5 fails running-conflict.",
+            conflict,
+            snaps(3),
+            openings_for([1, 2], signers=(1, 2))
+            + [{"entry": 3000, "cell": 0, "snapshot": 2, "signer": None, "counts": [31, 19], "randomness": "forged", "bindingBroken": True, "message": "forged"}],
         )
     )
 

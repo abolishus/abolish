@@ -754,6 +754,22 @@ export {
   type TallyOpeningStatement,
 } from "./tally-opening.ts";
 export {
+  boardRunningOpenings,
+  decodeRunningOpening,
+  encodeRunningOpening,
+  readRunningOpenings,
+  type ReleaseSchedule,
+  type ReleaseTotals,
+  RUNNING_OPENING,
+  type RunningOpening,
+  type RunningOpeningEntry,
+  type RunningOpeningFailure,
+  type RunningOpeningsRead,
+  runningOpeningStatement,
+  type RunningOpeningStatement,
+  signRunningOpening,
+} from "./running-opening.ts";
+export {
   checkComplaint,
   checkComplaintV4,
   checkPosting,

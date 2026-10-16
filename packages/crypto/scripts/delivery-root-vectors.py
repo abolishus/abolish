@@ -163,8 +163,10 @@ def parse_root(b):
     order; returns the fields or (error, offset)."""
     if len(b) < 2:
         return "truncated", 0
-    if int.from_bytes(b[:2], "big") != ROOT:
-        return "unexpected-record-type", 0
+    t = int.from_bytes(b[:2], "big")
+    if t != ROOT:
+        # Every other type versioning.md lists, 0x0001 to this one, is unexpected; any other unknown.
+        return ("unexpected-record-type" if 0 < t <= ROOT else "unknown-record-type"), 0
     if len(b) < 3:
         return "truncated", 2
     if b[2] != 1:
@@ -676,6 +678,20 @@ def main():
     reject("high-s", "The signature with s replaced by n − s", receipt_root[:-64] + ecdsa.sig_bytes(r_, ecdsa.N - s_), "non-canonical", 109)
     reject("zero-r", "The signature with r of 0", receipt_root[:-64] + ecdsa.sig_bytes(0, s_), "non-canonical", 109)
     reject("trailing", "A root with a trailing byte", receipt_root + b"\x00", "trailing-bytes", 173)
+    reject("unknown-type", "A root's bytes under type 0x001b, which versioning.md doesn't list", b"\x00\x1b" + receipt_root[2:], "unknown-record-type", 0)
+    reject("type-0", "A root's bytes under type 0", b"\x00\x00" + receipt_root[2:], "unknown-record-type", 0)
+    # Two faults in one record: the first in field order wins, every field
+    # present before the CID's framing is judged, and the framing before the
+    # signature's range and the record's end.
+    kind3 = resign(body[:33] + b"\x03" + body[34:])
+    reject("kind-3-count-truncated", "A root of kind 3 ending inside its count: the kind is judged first", kind3[:39], "invalid-enum", 36)
+    count0 = resign(body[:34] + u32(0) + body[38:])
+    reject("count-0-root-truncated", "A root of no leaves ending inside its root: the count is judged first", count0[:60], "non-canonical", 37)
+    dag_small = resign(body[:70] + b"\x01\x70" + body[72:])
+    reject("cid-dag-pb-small-signature-truncated", "The dag-pb CID of a three-leaf root, the record one byte short: every field is present before the CID's framing is judged", dag_small[:-1], "truncated", 109)
+    r2, s2 = int.from_bytes(dag_small[-64:-32], "big"), int.from_bytes(dag_small[-32:], "big")
+    reject("cid-dag-pb-small-high-s", "The dag-pb CID of a three-leaf root with s replaced by n − s: the CID is judged before the signature", dag_small[:-64] + ecdsa.sig_bytes(r2, ecdsa.N - s2), "non-canonical", 73)
+    reject("high-s-trailing", "The signature with s replaced by n − s and a trailing byte: the signature is judged before the end", receipt_root[:-64] + ecdsa.sig_bytes(r_, ecdsa.N - s_) + b"\x00", "non-canonical", 109)
 
     # --- Elections ---
     elections = []

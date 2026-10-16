@@ -315,11 +315,14 @@ export const SPOILED_OPENING_VERSIONS: ReadonlySet<number> = new Set<number>([1,
 // this function doesn't take yet, so under every definition version it does
 // take a profile pinning ballot version 4 fails.
 export const BALLOT_VERSIONS: ReadonlySet<number> = new Set<number>([1, 2, 3, 4]);
-// The contract-event versions this package reads (contract-event.ts's
-// CONTRACT_EVENT), written out for the same reason; a test ties the two.
-// Only version 4's tables name every board event, the close rule's and the
-// share-receipt batch's, so 2.3 fails a profile pinning version 1, 2 or 3
-// ([[close]], Version; T-35, T-50, T-25).
+// The contract-event versions 2.3 judges: those this package's codec reads
+// (contract-event.ts's CONTRACT_EVENT, written out for the same reason) and
+// the verifier reads, which a test ties. Version 4's tables name every board
+// event but the obligation root's, the close rule's and the batches', so 2.3
+// fails a profile pinning version 1, 2 or 3 ([[close]], Version; T-35, T-50,
+// T-25). Version 5 adds the root's; the codec reads it, but the verifier
+// doesn't yet, so a profile pinning it stays unverifiable, never failed,
+// until P1-12f part 1b-2 makes it the pin (T-36).
 export const CONTRACT_EVENT_VERSIONS: ReadonlySet<number> = new Set<number>([1, 2, 3, 4]);
 const BOARD_EVENT_VERSION = 4;
 

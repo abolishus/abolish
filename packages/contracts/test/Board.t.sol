@@ -41,6 +41,8 @@ contract BoardTest is TestBase {
     string internal constant OBLIGATION = "../../docs/spec/vectors/delivery-obligation.json";
     string internal constant BATCHES = "../../docs/spec/vectors/delivery-batch.json";
     string internal constant EVENTS_V4 = "../../docs/spec/vectors/contract-event-v4.json";
+    string internal constant ROOTS = "../../docs/spec/vectors/delivery-root.json";
+    string internal constant EVENTS_V5 = "../../docs/spec/vectors/contract-event-v5.json";
     string internal constant V1 = "../../docs/spec/vectors/ballot.json";
     string internal constant V3 = "../../docs/spec/vectors/ballot-v3-records.json";
     /// Framed values with no zero byte, for the largest record's elements and scalars.
@@ -68,6 +70,8 @@ contract BoardTest is TestBase {
         keccak256("ShareReceiptBatchSubmitted(bytes32,uint8,bytes)");
     bytes32 internal constant COMPLAINT_BATCH_SUBMITTED =
         keccak256("ShareComplaintBatchSubmitted(bytes32,uint8,bytes)");
+    bytes32 internal constant ROOT_SUBMITTED =
+        keccak256("ObligationRootSubmitted(bytes32,uint8,bytes)");
 
     /// Record layouts (delivery.md, Records): every delivery record's header
     /// and first fields, a receipt's and a complaint's signature, a
@@ -87,6 +91,14 @@ contract BoardTest is TestBase {
     uint256 internal constant SEALED_AT = CT_DH_AT + 96;
     uint256 internal constant POK_C_AT = CT_DH_AT + 32;
     uint256 internal constant COMPLAINT_Z_AT = 132;
+    /// An obligation root's CID and signature (delivery.md, Obligation root),
+    /// and the CID's first four bytes for a raw block and a dag-pb root
+    /// (content-addressing.md: CIDv1, the codec, sha2-256, 32 bytes).
+    uint256 internal constant ROOT_ROOT_AT = 41;
+    uint256 internal constant ROOT_CID_AT = 73;
+    uint256 internal constant ROOT_SIG_AT = 109;
+    bytes4 internal constant RAW_PREFIX = 0x01551220;
+    bytes4 internal constant DAG_PB_PREFIX = 0x01701220;
 
     /// ristretto255's base field prime `2²⁵⁵ − 19` and group order `ℓ`
     /// (RFC 9496), and P-256's group order `n` (SEC 2), as the spec states them.
@@ -134,6 +146,8 @@ contract BoardTest is TestBase {
     /// The same for the share-receipt batch, from delivery-batch.json.
     bytes internal batchDs;
     bytes internal complaintBatchDs;
+    /// The same for the obligation root, from delivery-root.json.
+    bytes internal rootDs;
 
     /// ballot.json's plurality election and its first, admitted, ballot.
     bytes32 internal hV1;
@@ -184,6 +198,7 @@ contract BoardTest is TestBase {
         complaintDs = _ds(_str(dj, ".tags.complaint"));
         batchDs = _ds(_str(vm.readFile(BATCHES), ".tag"));
         complaintBatchDs = _ds(_str(vm.readFile(BATCHES), ".complaintTag"));
+        rootDs = _ds(_str(vm.readFile(ROOTS), ".tag"));
         receipt = _vectorRecord(dj, "receipt", "share-receipt");
         assertTrue(keccak256(receipt) == keccak256(allReceipted[0]), "the receipt is seat 1's");
         posting = _vectorRecord(dj, "posting", "share-posting");
@@ -1060,6 +1075,7 @@ contract BoardTest is TestBase {
         _assertCanonicalOnly(_ballotCall(honestBallot));
         _assertCanonicalOnly(_receiptsCall(receipt));
         _assertCanonicalOnly(_complaintCall(complaint));
+        _assertCanonicalOnly(_rootCall(_bytes(vm.readFile(ROOTS), ".records[0].encoding")));
 
         bytes memory good = _postingCall(posting, alice);
         uint256 paddedA = (posting.length + 31) / 32 * 32;
@@ -1093,17 +1109,25 @@ contract BoardTest is TestBase {
         assertEq(
             Board.ShareComplaintSubmitted.selector, COMPLAINT_SUBMITTED, "ShareComplaintSubmitted"
         );
+        assertEq(Board.ShareReceiptBatchSubmitted.selector, BATCH_SUBMITTED, "receipt batch");
+        assertEq(
+            Board.ShareComplaintBatchSubmitted.selector,
+            COMPLAINT_BATCH_SUBMITTED,
+            "complaint batch"
+        );
+        assertEq(Board.ObligationRootSubmitted.selector, ROOT_SUBMITTED, "ObligationRootSubmitted");
     }
 
     /// A byte-identical record is accepted again as a no-op by any call:
     /// it succeeds, emits nothing and leaves the accumulator as it was.
     function test_ByteIdenticalRepeatsAreNoOps() public {
         _mockPairing();
-        bytes[4] memory calls = [
+        bytes[5] memory calls = [
             _ballotCall(honestBallot),
             _receiptsCall(receipt),
             _postingCall(posting, alice),
-            _complaintCall(complaint)
+            _complaintCall(complaint),
+            _rootCall(_bytes(vm.readFile(ROOTS), ".records[0].encoding"))
         ];
         for (uint256 i; i < calls.length; i++) {
             assertEq(_accept(calls[i]).length, 1, "first");
@@ -1598,11 +1622,12 @@ contract BoardTest is TestBase {
     /// data is exactly its record ABI-encoded (checked by `_assertEvent`).
     function test_NoPersonalDataInCalldataOrEvents() public {
         _mockPairing();
-        bytes[4] memory calls = [
+        bytes[5] memory calls = [
             _ballotCall(honestBallot),
             _receiptsCall(receipt),
             _postingCall(posting, alice),
-            _complaintCall(complaint)
+            _complaintCall(complaint),
+            _rootCall(_bytes(vm.readFile(ROOTS), ".records[0].encoding"))
         ];
         for (uint256 i; i < calls.length; i++) {
             assertTrue(!_looksLikeText(calls[i]), "calldata");
@@ -1663,6 +1688,266 @@ contract BoardTest is TestBase {
         _refuseFuzzed(_ballotCall(bytes.concat(_slice(honestBallot, 0, 36), text)));
         _refuseFuzzed(_ballotCall(text));
         _refuseFuzzed(_postingCall(text, alice));
+    }
+
+    // --- obligation roots ------------------------------------------------------
+
+    /// delivery-root.json is made from delivery.json's panel and definition,
+    /// so the stubs set from delivery.json hold its seats' keys.
+    function test_RootVectorsShareDeliveryJsonsElection() public view {
+        string memory rj = vm.readFile(ROOTS);
+        assertTrue(_eq(_str(rj, ".format"), "abolish-delivery-root-vectors/1"), "root format");
+        assertEq(_b32(rj, ".definitionHash"), h, "the definition");
+        for (uint256 i; i < 3; i++) {
+            assertEq(
+                keccak256(_bytes(rj, _at(".panel", i, ".signingKey"))),
+                keccak256(_bytes(vm.readFile(DELIVERY), _at(".panel", i, ".signingKey"))),
+                "the panel"
+            );
+        }
+        assertTrue(_eq(_str(rj, ".tag"), "abolish/v1/sig/obligation-root"), "the tag");
+    }
+
+    /// Every root of delivery-root.json is accepted on its own and emitted
+    /// whole, its topics its definition hash and seat, exactly as
+    /// contract-event-v5.json's records carry it (contracts.md, Board,
+    /// Events); a repeat emits nothing.
+    function test_AcceptsEveryVectorRootWithItsEvent() public {
+        string memory rj = vm.readFile(ROOTS);
+        string memory ej = vm.readFile(EVENTS_V5);
+        uint256 fresh = vm.snapshotState();
+        uint256 i;
+        for (; vm.keyExistsJson(rj, _at(".records", i, "")); i++) {
+            bytes memory b = _bytes(rj, _at(".records", i, ".encoding"));
+            Vm.Log[] memory logs = _accept(_rootCall(b));
+            assertEq(logs.length, 1, "one event");
+            assertEq(logs[0].topics.length, 3, "three topics");
+            assertEq(logs[0].topics[0], ROOT_SUBMITTED, "topic 0");
+            assertEq(logs[0].topics[1], h, "definition topic");
+            assertEq(uint256(logs[0].topics[2]), uint8(b[35]), "seat topic");
+            assertEq(keccak256(logs[0].data), keccak256(abi.encode(b)), "data");
+            // contract-event-v5.json lists a ballot and a batch, then the roots
+            // in delivery-root.json's order.
+            string memory key = _at(".records", i + 2, ".fields");
+            assertEq(
+                keccak256(_bytes(ej, string.concat(key, ".data"))),
+                keccak256(logs[0].data),
+                "the event file's data"
+            );
+            assertEq(_b32(ej, string.concat(key, ".topics[2]")), logs[0].topics[2], "seat word");
+            assertEq(_accept(_rootCall(b)).length, 0, "a repeat emits nothing");
+            vm.revertToState(fresh);
+        }
+        assertEq(i, 5, "five roots");
+    }
+
+    /// Only the first root of each seat and kind whose signature verifies
+    /// is accepted: another root of the same seat and kind is refused
+    /// (`root-repeat`), while the seat's other kind and every other seat keep
+    /// their own slots, and a byte-identical repeat is still the no-op
+    /// (docs/spec/delivery.md, Obligation root, One per seat and kind; T-17,
+    /// T-52).
+    function test_OneRootPerSeatAndKind() public {
+        string memory rj = vm.readFile(ROOTS);
+        bytes memory receiptRoot = _rootVector(rj, 0, "receipt-root", 1, 1);
+        bytes memory oneLeaf = _rootVector(rj, 1, "one-leaf", 1, 1);
+        bytes memory complaintRoot = _rootVector(rj, 2, "complaint-root", 2, 2);
+        bytes memory oneBlock = _rootVector(rj, 3, "one-block", 2, 1);
+        bytes memory twoBlocks = _rootVector(rj, 4, "two-blocks", 2, 1);
+        bytes memory repeat = _refused(0, DeliveryCheckLib.Code.RootRepeat);
+
+        // A root whose signature fails fills no slot.
+        bytes memory forged =
+            _withByte(oneLeaf, ROOT_SIG_AT + 63, uint8(oneLeaf[ROOT_SIG_AT + 63]) ^ 1);
+        _refuse(_rootCall(forged), _refused(0, DeliveryCheckLib.Code.DeliverySignature), "forged");
+        assertEq(_accept(_rootCall(receiptRoot)).length, 1, "seat 1's receipt root");
+        _refuse(_rootCall(oneLeaf), repeat, "seat 1's second receipt root");
+        _refuse(
+            _rootCall(forged), _refused(0, DeliveryCheckLib.Code.DeliverySignature), "forged, after"
+        );
+        assertEq(_accept(_rootCall(receiptRoot)).length, 0, "the first root's repeat is a no-op");
+        assertEq(_accept(_rootCall(complaintRoot)).length, 1, "seat 2's complaint root");
+        assertEq(_accept(_rootCall(oneBlock)).length, 1, "seat 2's receipt root, its own slot");
+        _refuse(_rootCall(twoBlocks), repeat, "seat 2's second receipt root");
+        // Seat 1's complaint slot is still empty: a complaint root over
+        // Carol's ballot fills it.
+        assertEq(
+            _accept(_rootCall(_signedRoot(h, 1, 2, 1, keccak256("leaves"), signingSecrets[1])))
+            .length,
+            1,
+            "seat 1's complaint root"
+        );
+        _refuse(
+            _rootCall(_signedRoot(h, 1, 2, 2, keccak256("leaves"), signingSecrets[1])),
+            repeat,
+            "seat 1's second complaint root"
+        );
+        // Seat 3's slots are its own.
+        assertEq(
+            _accept(_rootCall(_signedRoot(h, 3, 1, 3, keccak256("seat 3"), signingSecrets[3])))
+            .length,
+            1,
+            "seat 3's receipt root"
+        );
+    }
+
+    /// Each decode rejection of delivery-root.json is refused with its code
+    /// at its offset (contracts.md, Board, Delivery records, step 4), the
+    /// record named as position 0.
+    function test_RootDecodeRejections() public {
+        string memory rj = vm.readFile(ROOTS);
+        uint256 i;
+        for (; vm.keyExistsJson(rj, _at(".decode", i, "")); i++) {
+            _refuse(
+                _rootCall(_bytes(rj, _at(".decode", i, ".encoding"))),
+                _malformed(
+                    0,
+                    _decodeError(_str(rj, _at(".decode", i, ".error"))),
+                    vm.parseJsonUint(rj, _at(".decode", i, ".offset"))
+                ),
+                _str(rj, _at(".decode", i, ".id"))
+            );
+        }
+        assertEq(i, 27, "twenty-seven rejections");
+    }
+
+    /// A root for no registered definition, for a seat outside the key set,
+    /// or signed by another seat's key or under a batch's tag is refused, in
+    /// that order, and fills no slot; a ballot version the board can't read
+    /// fixes no root version (contracts.md, Board, Delivery records, steps 2
+    /// to 6).
+    function test_RootRefusals() public {
+        bytes32 leaves = keccak256("refusals");
+        _refuse(
+            _rootCall(
+                _signedRoot(keccak256("no such definition"), 1, 1, 3, leaves, signingSecrets[1])
+            ),
+            _refused(0, DeliveryCheckLib.Code.DeliveryStray),
+            "stray"
+        );
+        _refuse(
+            _rootCall(_signedRoot(h, 4, 1, 3, leaves, signingSecrets[1])),
+            _refused(0, DeliveryCheckLib.Code.DeliverySeat),
+            "seat 4"
+        );
+        _refuse(
+            _rootCall(_signedRoot(h, 0, 1, 3, leaves, signingSecrets[1])),
+            _refused(0, DeliveryCheckLib.Code.DeliverySeat),
+            "seat 0"
+        );
+        _refuse(
+            _rootCall(_signedRoot(h, 1, 1, 3, leaves, signingSecrets[2])),
+            _refused(0, DeliveryCheckLib.Code.DeliverySignature),
+            "another seat's key"
+        );
+        // A receipt batch's tag over the root's bytes never verifies as a root.
+        bytes memory body = _rootBody(h, 1, 1, 3, leaves, RAW_PREFIX);
+        (uint256 r, uint256 s) =
+            TrusteeFixture.sign(signingSecrets[1], sha256(bytes.concat(batchDs, body)));
+        _refuse(
+            _rootCall(abi.encodePacked(uint16(0x001a), uint8(1), body, r, s)),
+            _refused(0, DeliveryCheckLib.Code.DeliverySignature),
+            "a batch's tag"
+        );
+        // A root's bytes through the batch call, and a batch's through the root call.
+        bytes memory honest = _signedRoot(h, 1, 1, 3, leaves, signingSecrets[1]);
+        _refuse(
+            _batchCall(honest),
+            _malformed(0, ElectionDefinitionLib.DecodeError.UnexpectedRecordType, 0),
+            "a root as a batch"
+        );
+        _refuse(
+            _rootCall(_signedBatch(h, 1, _batchPairs(3, "refusals"), signingSecrets[1])),
+            _malformed(0, ElectionDefinitionLib.DecodeError.UnexpectedRecordType, 0),
+            "a batch as a root"
+        );
+        assertEq(_accept(_rootCall(honest)).length, 1, "the honest root, its slot still empty");
+        // A ballot version above 3 fixes no root version the board reads.
+        ElectionRegistry.Parameters memory p = elections.parameters(h);
+        p.ballotVersion = 4;
+        elections.set(h, p, new uint8[](0), new uint256[](0));
+        _refuse(
+            _rootCall(_signedRoot(h, 2, 1, 3, leaves, signingSecrets[2])),
+            _malformed(0, ElectionDefinitionLib.DecodeError.UnknownVersion, 2),
+            "ballot version 4"
+        );
+        // Canonical calldata only.
+        _refuse(
+            bytes.concat(_rootCall(_signedRoot(h, 3, 1, 3, leaves, signingSecrets[3])), hex"00"),
+            abi.encodeWithSelector(CanonicalCalldata.NonCanonicalCalldata.selector),
+            "non-canonical calldata"
+        );
+    }
+
+    /// The CID's framing follows from the signed kind and count: a raw
+    /// block's CID exactly up to 1 MiB of leaves (16,384 receipts, 8,192
+    /// complaints), a dag-pb root's above, each signed (delivery.md,
+    /// Decoding).
+    function test_RootCidFramingAtTheBlockBoundary() public {
+        uint32[4] memory counts = [uint32(16_384), 16_385, 8192, 8193];
+        uint8[4] memory kinds = [1, 1, 2, 2];
+        for (uint256 i; i < 4; i++) {
+            bool raw = i % 2 == 0;
+            uint256 snap = vm.snapshotState();
+            bytes memory wrong = _signedRootCid(
+                h, 1, kinds[i], counts[i], raw ? DAG_PB_PREFIX : RAW_PREFIX, signingSecrets[1]
+            );
+            _refuse(
+                _rootCall(wrong),
+                _malformed(0, ElectionDefinitionLib.DecodeError.NonCanonical, ROOT_CID_AT),
+                "the other codec"
+            );
+            bytes memory right = _signedRootCid(
+                h, 1, kinds[i], counts[i], raw ? RAW_PREFIX : DAG_PB_PREFIX, signingSecrets[1]
+            );
+            assertEq(_accept(_rootCall(right)).length, 1, "the codec its size gives");
+            vm.revertToState(snap);
+        }
+        // The largest count: 2³² − 1 complaint leaves, a dag-pb root.
+        assertEq(
+            _accept(
+                _rootCall(
+                    _signedRootCid(h, 1, 2, type(uint32).max, DAG_PB_PREFIX, signingSecrets[1])
+                )
+            )
+            .length,
+            1,
+            "the largest count"
+        );
+    }
+
+    /// No arbitrary record is accepted as a root, and every refusal is one of
+    /// the delivery check's errors.
+    function testFuzz_ArbitraryRootsRefused(bytes calldata r) public {
+        _refuseFuzzed(_rootCall(r));
+    }
+
+    /// No one-byte change to an honest root is accepted: it changes a field
+    /// under the signature or the signature itself, or breaks the framing.
+    function testFuzz_RootByteChangesRefused(uint256 at, uint8 delta) public {
+        vm.assume(delta != 0);
+        bytes memory b = _signedRoot(h, 1, 1, 3, keccak256("fuzz"), signingSecrets[1]);
+        at %= b.length;
+        b[at] = bytes1(uint8(b[at]) ^ delta);
+        _refuseFuzzed(_rootCall(b));
+    }
+
+    /// Any fields a seat signs are accepted, once per seat and kind: the
+    /// board judges the framing and the signature, never the root, the count
+    /// or the leaves (contracts.md, Board, Known-weak).
+    function testFuzz_AnySignedRootIsAcceptedOnce(uint8 kind, uint32 count, bytes32 root) public {
+        kind = kind % 2 + 1;
+        if (count == 0) count = 1;
+        assertEq(
+            _accept(_rootCall(_signedRoot(h, 2, kind, count, root, signingSecrets[2]))).length,
+            1,
+            "accepted"
+        );
+        _refuse(
+            _rootCall(_signedRoot(h, 2, kind, 1, ~root, signingSecrets[2])),
+            _refused(0, DeliveryCheckLib.Code.RootRepeat),
+            "the slot is filled"
+        );
     }
 
     // --- gas -------------------------------------------------------------------
@@ -1792,6 +2077,41 @@ contract BoardTest is TestBase {
         );
     }
 
+    /// See `test_ForcedPathReceiptCallGas`: one obligation-root call, alone
+    /// and cold, against the stubs and then real registries, costs at most
+    /// `ROOT_CALL_GAS` (delivery-root.json, `rootCallGas`) with its intrinsic
+    /// gas, and more than 80% of it, so an election that commits roots is
+    /// sized by what the board costs (delivery.md, Capacity; T-25, T-52). The
+    /// first root of a seat is measured, which writes its slot's word from
+    /// zero; the figure is then the gas limit of the seat's other root.
+    function test_ForcedPathRootCallGas() public {
+        string memory fj = vm.readFile(OBLIGATION);
+        uint256 rootGas = vm.parseUint(vm.parseJsonString(vm.readFile(ROOTS), ".rootCallGas"));
+        uint256 maxGas = vm.parseUint(vm.parseJsonString(fj, ".portal.maxResourceLimit"));
+        uint256 maxData = vm.parseJsonUint(fj, ".portal.maxDepositData");
+        // No zero byte in the count, the root or the CID's digest: the
+        // calldata's dearest form.
+        bytes32 dense = bytes32(type(uint256).max / 255);
+        uint32 count = 0x01010101;
+        bytes memory rootCall = _rootCall(_signedRoot(h, 1, 1, count, dense, signingSecrets[1]));
+        assertTrue(rootCall.length <= maxData, "a root call's data fits a deposit");
+        assertTrue(rootGas <= maxGas, "the root call fits a deposit");
+        if (!_expectPrecompile()) return;
+        uint256 stubbed = _withIntrinsic(rootCall, _coldGas(rootCall));
+        bytes32 dh = _realRegistries();
+        bytes memory realCall = _rootCall(_signedRoot(dh, 1, 1, count, dense, signingSecrets[1]));
+        uint256 used = _withIntrinsic(realCall, _coldGas(realCall));
+        assertTrue(used >= stubbed, "the real registries cost at least the stubs");
+        assertTrue(used <= rootGas, string.concat("a root call: ", vm.toString(used)));
+        assertTrue(
+            used > (rootGas * 8) / 10,
+            string.concat(
+                "the root figure is tight: ", vm.toString(stubbed), ", ", vm.toString(used)
+            )
+        );
+        _acceptsWithin(_rootCall(_signedRoot(dh, 1, 2, count, dense, signingSecrets[1])), rootGas);
+    }
+
     /// The call succeeds, cold, with `gasLimit` as its transaction's limit:
     /// what is left of it after the intrinsic gas (EIP-2028's price) is what
     /// the call gets, and EIP-7623's floor fits the limit too.
@@ -1878,6 +2198,64 @@ contract BoardTest is TestBase {
 
     function _batchCall(bytes memory b) internal pure returns (bytes memory) {
         return abi.encodeCall(Board.submitReceiptBatch, (b));
+    }
+
+    function _rootCall(bytes memory r) internal pure returns (bytes memory) {
+        return abi.encodeCall(Board.submitObligationRoot, (r));
+    }
+
+    /// `m` of a root (delivery.md, Obligation root): its CID's digest made up
+    /// from `root`, since the board never reads the leaves.
+    function _rootBody(
+        bytes32 dh,
+        uint8 seat,
+        uint8 kind,
+        uint32 count,
+        bytes32 root,
+        bytes4 prefix
+    ) internal pure returns (bytes memory) {
+        return abi.encodePacked(dh, seat, kind, count, root, prefix, keccak256(abi.encode(root)));
+    }
+
+    /// A root of `count` leaves of `kind`, its CID framed as its size gives,
+    /// signed with `sk`.
+    function _signedRoot(bytes32 dh, uint8 seat, uint8 kind, uint32 count, bytes32 root, uint256 sk)
+        internal
+        view
+        returns (bytes memory)
+    {
+        bytes4 prefix =
+            (kind == 1 ? 64 : 128) * uint256(count) <= 1_048_576 ? RAW_PREFIX : DAG_PB_PREFIX;
+        return _signRoot(_rootBody(dh, seat, kind, count, root, prefix), sk);
+    }
+
+    /// A root whose CID begins with `prefix`, whatever its size gives.
+    function _signedRootCid(
+        bytes32 dh,
+        uint8 seat,
+        uint8 kind,
+        uint32 count,
+        bytes4 prefix,
+        uint256 sk
+    ) internal view returns (bytes memory) {
+        return _signRoot(_rootBody(dh, seat, kind, count, keccak256("root"), prefix), sk);
+    }
+
+    function _signRoot(bytes memory body, uint256 sk) internal view returns (bytes memory) {
+        (uint256 r, uint256 s) = TrusteeFixture.sign(sk, sha256(bytes.concat(rootDs, body)));
+        return abi.encodePacked(uint16(0x001a), uint8(1), body, r, s);
+    }
+
+    /// delivery-root.json's root `i`, checked to be the one the test names.
+    function _rootVector(string memory rj, uint256 i, string memory id, uint8 seat, uint8 kind)
+        internal
+        pure
+        returns (bytes memory b)
+    {
+        assertTrue(_eq(_str(rj, _at(".records", i, ".id")), id), id);
+        b = _bytes(rj, _at(".records", i, ".encoding"));
+        assertEq(uint8(b[35]), seat, string.concat(id, ": seat"));
+        assertEq(uint8(b[36]), kind, string.concat(id, ": kind"));
     }
 
     function _complaintBatchCall(bytes memory b) internal pure returns (bytes memory) {
@@ -2642,7 +3020,11 @@ contract BoardTest is TestBase {
         if (c == keccak256("unexpected-record-type")) {
             return ElectionDefinitionLib.DecodeError.UnexpectedRecordType;
         }
+        if (c == keccak256("unknown-record-type")) {
+            return ElectionDefinitionLib.DecodeError.UnknownRecordType;
+        }
         if (c == keccak256("non-canonical")) return ElectionDefinitionLib.DecodeError.NonCanonical;
+        if (c == keccak256("invalid-enum")) return ElectionDefinitionLib.DecodeError.InvalidEnum;
         if (c == keccak256("profile-mismatch")) {
             return ElectionDefinitionLib.DecodeError.ProfileMismatch;
         }

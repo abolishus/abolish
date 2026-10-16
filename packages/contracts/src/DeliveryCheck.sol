@@ -33,8 +33,9 @@ interface IBoardTrustees {
 
 /// @title The board's checks on delivery records (docs/spec/contracts.md,
 /// Board, Delivery records; docs/spec/delivery.md, Direct submit).
-/// @notice A share receipt (0x000c), share-receipt batch (0x0016) or
-/// complaint (0x000e) is accepted only if
+/// @notice A share receipt (0x000c), share-receipt batch (0x0016),
+/// complaint (0x000e), complaint batch (0x0017) or obligation root (0x001a)
+/// is accepted only if
 /// it decodes strictly, names a registered definition and is signed by the
 /// registered per-election key of a seat of that election's key set; a share
 /// posting (0x000d) only if it decodes strictly and its ciphertext is the one
@@ -61,7 +62,10 @@ library DeliveryCheckLib {
         /// ballot hash differs.
         PostingBallot,
         /// The ciphertext's hash isn't the ballot's share hash for the seat.
-        PostingHash
+        PostingHash,
+        /// The seat's slot for the root's kind is already filled by another
+        /// root whose signature verified (the board's, never the library's).
+        RootRepeat
     }
 
     error DeliveryMalformed(uint256 record, ElectionDefinitionLib.DecodeError code, uint256 offset);
@@ -72,6 +76,7 @@ library DeliveryCheckLib {
     uint16 internal constant COMPLAINT_TYPE = 0x000e;
     uint16 internal constant BATCH_TYPE = 0x0016;
     uint16 internal constant COMPLAINT_BATCH_TYPE = 0x0017;
+    uint16 internal constant ROOT_TYPE = 0x001a;
     /// A share receipt with its header; a complaint with its header.
     uint256 internal constant RECEIPT_LENGTH = 164;
     uint256 internal constant COMPLAINT_LENGTH = 228;
@@ -96,6 +101,25 @@ library DeliveryCheckLib {
     /// `COMPLAINT_BATCH_MAX`, each entry a ballot hash and a 96-byte proof.
     uint256 internal constant COMPLAINT_BATCH_MAX = 512;
 
+    /// An obligation root's fields (docs/spec/delivery.md, Obligation root):
+    /// the seat, the kind, the leaves' `u32` count, the root, the leaf
+    /// object's CID and the signature, 173 bytes in all.
+    uint256 internal constant ROOT_KIND_AT = 36;
+    uint256 internal constant ROOT_COUNT_AT = 37;
+    uint256 internal constant ROOT_ROOT_AT = 41;
+    uint256 internal constant ROOT_CID_AT = 73;
+    uint256 internal constant ROOT_SIG_AT = 109;
+    uint256 internal constant ROOT_LENGTH = 173;
+    /// A receipt root's kind and a complaint root's, and their leaves' sizes.
+    uint8 internal constant RECEIPT_ROOT = 1;
+    uint8 internal constant COMPLAINT_ROOT = 2;
+    /// The largest leaf object one raw block holds (docs/spec/content-addressing.md,
+    /// Small objects), and the first four bytes of a raw block's CID and of a
+    /// dag-pb root's: CIDv1, the codec, sha2-256, 32 bytes.
+    uint256 internal constant RAW_BLOCK_MAX = 1_048_576;
+    uint32 internal constant RAW_CID_PREFIX = 0x01551220;
+    uint32 internal constant DAG_PB_CID_PREFIX = 0x01701220;
+
     /// `u8(len(tag)) ‖ tag` for `abolish/v1/sig/share-receipt` (0x1c = 28),
     /// `abolish/v1/sig/share-complaint` (0x1e = 30) and
     /// `abolish/v1/share-ciphertext` (0x1b = 27).
@@ -106,6 +130,8 @@ library DeliveryCheckLib {
     bytes internal constant DS_BATCH = "\x22abolish/v1/sig/share-receipt-batch";
     /// `abolish/v1/sig/share-complaint-batch` (0x24 = 36).
     bytes internal constant DS_COMPLAINT_BATCH = "\x24abolish/v1/sig/share-complaint-batch";
+    /// `abolish/v1/sig/obligation-root` (0x1e = 30).
+    bytes internal constant DS_ROOT = "\x1eabolish/v1/sig/obligation-root";
 
     /// Checks share receipt number `index` of a batch, a 164-byte slice,
     /// and returns the definition and ballot hashes it names.
@@ -207,6 +233,58 @@ library DeliveryCheckLib {
             _malformed(0, ElectionDefinitionLib.DecodeError.TrailingBytes, sigAt + 64);
         }
         _verify(r, 0, definitionHash, seat, elections, trustees, DS_COMPLAINT_BATCH, sigAt);
+    }
+
+    /// Checks an obligation root, the record of `submitObligationRoot`, and
+    /// returns the definition hash, seat and kind it names: decoded strictly,
+    /// its CID's framing the one its signed kind and count give, so a root
+    /// whose CID can never be canonical takes no seat's slot, and signed by
+    /// the seat's registered key over every field before the signature. The
+    /// leaves are on neither chain, so nothing here reads them; the root, the
+    /// count against the obligation's bound and the leaves' availability are
+    /// the delivery check's (docs/spec/delivery.md, Obligation root; T-52).
+    function checkObligationRoot(
+        bytes calldata r,
+        IBoardElections elections,
+        IBoardTrustees trustees
+    ) internal view returns (bytes32 definitionHash, uint8 seat, uint8 kind) {
+        definitionHash = _definition(r, 0, ROOT_TYPE, elections);
+        seat = uint8(_uint(r, 0, BATCH_SEAT_AT, 1));
+        kind = uint8(_uint(r, 0, ROOT_KIND_AT, 1));
+        if (kind != RECEIPT_ROOT && kind != COMPLAINT_ROOT) {
+            _malformed(0, ElectionDefinitionLib.DecodeError.InvalidEnum, ROOT_KIND_AT);
+        }
+        uint256 count = _uint(r, 0, ROOT_COUNT_AT, 4);
+        if (count == 0) {
+            _malformed(0, ElectionDefinitionLib.DecodeError.NonCanonical, ROOT_COUNT_AT);
+        }
+        // Every field is present before any is judged, as the decoder reads them.
+        if (r.length < ROOT_CID_AT) {
+            _malformed(0, ElectionDefinitionLib.DecodeError.Truncated, ROOT_ROOT_AT);
+        }
+        if (r.length < ROOT_SIG_AT) {
+            _malformed(0, ElectionDefinitionLib.DecodeError.Truncated, ROOT_CID_AT);
+        }
+        if (r.length < ROOT_LENGTH) {
+            _malformed(0, ElectionDefinitionLib.DecodeError.Truncated, ROOT_SIG_AT);
+        }
+        // `objectCid` of `64·c` or `128·c` bytes is one raw block up to 1 MiB
+        // and a dag-pb root above, so the CID's first four bytes are fixed
+        // by fields the signature covers; the digest is the leaves'.
+        uint256 objectLength = (kind == RECEIPT_ROOT ? 64 : 128) * count;
+        if (
+            _uint(r, 0, ROOT_CID_AT, 4)
+                != (objectLength <= RAW_BLOCK_MAX ? RAW_CID_PREFIX : DAG_PB_CID_PREFIX)
+        ) {
+            _malformed(0, ElectionDefinitionLib.DecodeError.NonCanonical, ROOT_CID_AT);
+        }
+        _signature(r, 0, ROOT_SIG_AT);
+        if (r.length != ROOT_LENGTH) {
+            _malformed(0, ElectionDefinitionLib.DecodeError.TrailingBytes, ROOT_LENGTH);
+        }
+        // `m`: the 106 bytes before the signature (docs/spec/delivery.md,
+        // Obligation root).
+        _verify(r, 0, definitionHash, seat, elections, trustees, DS_ROOT, ROOT_SIG_AT);
     }
 
     /// Checks a share complaint and returns the hashes it names.

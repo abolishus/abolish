@@ -1,6 +1,7 @@
 // Share delivery on the board (docs/spec/delivery.md): share receipts
-// (0x000c), postings (0x000d), complaints (0x000e) and share-receipt batches
-// (0x0016) as records, the
+// (0x000c), postings (0x000d), complaints (0x000e), share-receipt and
+// share-complaint batches (0x0016, 0x0017) and obligation roots (0x001a) as
+// records, the
 // delivery deadline and complaint window, and the delivery check that decides
 // which selected ballots stay in the counted set. A ballot counts only if every
 // qualified seat has a receipt or a passing contract-path posting in time, and
@@ -29,6 +30,7 @@ import {
   enum8,
   struct,
   u8,
+  u32,
 } from "./codec.ts";
 import type { RegisteredKeys } from "./ceremony.ts";
 import { PARAMETERS } from "./parameters.ts";
@@ -332,13 +334,120 @@ export const SHARE_COMPLAINT_BATCH = recordType(RECORD_TYPES.shareComplaintBatch
   1: complaintBatchV1,
 });
 
+// --- Obligation root (docs/spec/delivery.md, Obligation root) ----------------------
+
+/** An obligation root's `kind`: 1 commits receipts, 2 complaints. */
+export const OBLIGATION_ROOT_KINDS = { receipts: 1, complaints: 2 } as const;
+
+export type ObligationRootKind = (typeof OBLIGATION_ROOT_KINDS)[keyof typeof OBLIGATION_ROOT_KINDS];
+
+/** One leaf's bytes per kind: a receipt pair, or a complaint entry. */
+const ROOT_LEAF_LENGTH: Readonly<Record<ObligationRootKind, number>> = { 1: 64, 2: 128 };
+
+// The largest object one raw block holds (content-addressing.md, Small
+// objects); above it the object is a dag-pb tree.
+const RAW_BLOCK_MAX = 1_048_576;
+
+/**
+ * The first four bytes `leaves_cid` must have for a root of `kind` over
+ * `count` leaves: CIDv1, raw (`0x55`) when the leaf object is one block and
+ * dag-pb (`0x70`) above, then sha2-256 of 32 bytes. Its signed kind and count
+ * fix them, so a root whose CID can never be canonical takes no slot.
+ */
+function leavesCidPrefix(kind: ObligationRootKind, count: number): readonly number[] {
+  return [0x01, ROOT_LEAF_LENGTH[kind] * count <= RAW_BLOCK_MAX ? 0x55 : 0x70, 0x12, 0x20];
+}
+
+/** An obligation root's signed fields: `m`, 106 bytes. */
+export interface ObligationRootStatement {
+  readonly definition_hash: Uint8Array;
+  readonly seat: number;
+  readonly kind: ObligationRootKind;
+  /** `c`, the number of leaves, at least 1. */
+  readonly count: number;
+  readonly root: Uint8Array;
+  /** The binary CID of the leaf object (docs/spec/content-addressing.md). */
+  readonly leaves_cid: Uint8Array;
+}
+
+/** An obligation root (`0x001a`, version 1). */
+export interface ObligationRootRecord extends ObligationRootStatement {
+  readonly signature: Uint8Array;
+}
+
+const rootKind = enum8<ObligationRootKind>([
+  OBLIGATION_ROOT_KINDS.receipts,
+  OBLIGATION_ROOT_KINDS.complaints,
+]);
+const cid36 = bytesFixed(36);
+
+/** An obligation root's length: its header, 106 signed bytes and the signature. */
+export const OBLIGATION_ROOT_LENGTH = 173;
+
+// Read in field order, every field present before the CID's framing is
+// judged and that before the signature's, so each rejection has one code at
+// one offset (delivery-root.json, decode). The leaves are never read here.
+const obligationRootV1: Codec<ObligationRootRecord> = {
+  minLength: 170,
+  write(w, value) {
+    const { count, kind } = value;
+    if (!Number.isInteger(count) || count < 1 || count > 0xffffffff)
+      throw new EncodeError("obligation root: count is 1 to 2³² − 1");
+    hash32.write(w, value.definition_hash);
+    u8.write(w, value.seat);
+    rootKind.write(w, kind);
+    u32.write(w, count);
+    hash32.write(w, value.root);
+    cid36.write(w, value.leaves_cid);
+    if (!leavesCidPrefix(kind, count).every((b, i) => value.leaves_cid[i] === b))
+      throw new EncodeError("obligation root: leaves_cid isn't the CID its kind and count frame");
+    p256Sig.write(w, value.signature);
+  },
+  read(r) {
+    const definition_hash = hash32.read(r);
+    const seat = u8.read(r);
+    const kind = rootKind.read(r);
+    const countAt = r.offset;
+    const count = u32.read(r);
+    if (count === 0) throw new DecodeError("non-canonical", countAt);
+    const root = hash32.read(r);
+    const cidAt = r.offset;
+    const leaves_cid = cid36.read(r);
+    if (r.remaining < 64) throw new DecodeError("truncated", r.offset);
+    if (!leavesCidPrefix(kind, count).every((b, i) => leaves_cid[i] === b))
+      throw new DecodeError("non-canonical", cidAt);
+    return { definition_hash, seat, kind, count, root, leaves_cid, signature: p256Sig.read(r) };
+  },
+};
+
+/**
+ * Record type `0x001a`. Ballot versions 1 to 3 fix it at version 1; versions
+ * 4 and 5 fix none yet; it is never pinned, and travels only through the
+ * contract path.
+ */
+export const OBLIGATION_ROOT = recordType(RECORD_TYPES.obligationRoot, { 1: obligationRootV1 });
+
 const SCHEMA = new RecordSchema([
   SHARE_RECEIPT,
   SHARE_POSTING,
   SHARE_COMPLAINT,
   SHARE_RECEIPT_BATCH,
   SHARE_COMPLAINT_BATCH,
+  OBLIGATION_ROOT,
 ]);
+
+export function encodeObligationRoot(record: ObligationRootRecord): Uint8Array {
+  return SCHEMA.encode(OBLIGATION_ROOT, 1, record);
+}
+
+/**
+ * Strictly decodes an obligation root against version 1, the version ballot
+ * versions 1 to 3 fix: its kind, a non-zero count and the CID framing they
+ * give, and a canonical low-`s` signature. Its leaves are never read.
+ */
+export function decodeObligationRoot(bytes: Uint8Array, pinned: 1): ObligationRootRecord {
+  return SCHEMA.decode(OBLIGATION_ROOT, bytes, pinned).value;
+}
 
 export function encodeShareComplaintBatch(record: ShareComplaintBatchRecord): Uint8Array {
   return SCHEMA.encode(SHARE_COMPLAINT_BATCH, 1, record);

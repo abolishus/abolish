@@ -320,7 +320,8 @@ export const BALLOT_VERSIONS: ReadonlySet<number> = new Set<number>([1, 2, 3, 4]
 // Only version 5's tables name every board event, the close rule's, the
 // batches' and the obligation root's, so 2.3 fails a profile pinning version
 // 1, 2, 3 or 4 ([[close]], Version; [[contracts]], Contract-event record;
-// T-35, T-50, T-25, T-53).
+// T-35, T-50, T-25, T-53). The codec reads version 6 too, which 2.3 leaves
+// unverifiable until P3-3 part 3b-2 makes it the version every profile pins.
 export const CONTRACT_EVENT_VERSIONS: ReadonlySet<number> = new Set<number>([1, 2, 3, 4, 5]);
 const BOARD_EVENT_VERSION = 5;
 

@@ -486,6 +486,46 @@ contract Tier1AdditionsTest is GroupTestBase {
         );
     }
 
+    /// The event the registry emits is contract-event version 6's record of
+    /// it, topics and data byte for byte (docs/spec/vectors/contract-event-v6.json,
+    /// from an independent generator), so it passes 4.4's event check.
+    function test_EventIsTheVersion6Record() public {
+        bytes memory record = _countedAddition();
+        vm.recordLogs();
+        registry.addTier1Member(record);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        string memory v6 = vm.readFile("../../docs/spec/vectors/contract-event-v6.json");
+        string memory id = ".records[?(@.id == 'tier1-deployment-0')].fields";
+        string[] memory topics = vm.parseJsonStringArray(v6, string.concat(id, ".topics"));
+        assertEq(topics.length, 1, "one topic");
+        assertEq(
+            logs[0].topics[0], bytes32(vm.parseBytes(string.concat("0x", topics[0]))), "topic 0"
+        );
+        bytes memory data =
+            vm.parseBytes(string.concat("0x", vm.parseJsonString(v6, string.concat(id, ".data"))));
+        assertTrue(keccak256(logs[0].data) == keccak256(data), "data");
+    }
+
+    /// A proof whose `B` is on the twist but outside the order-r subgroup
+    /// (membership-proof.json's b-outside-subgroup) fails its pairing, so the
+    /// registry never logs a record version 6's event check refuses (T-53).
+    function test_RefusesAProofOutsideTheSubgroup() public {
+        bytes memory record = _countedAddition();
+        string memory mp = vm.readFile("../../docs/spec/vectors/membership-proof.json");
+        bytes memory outside = vm.parseBytes(
+            string.concat(
+                "0x", vm.parseJsonString(mp, ".decode[?(@.name == 'b-outside-subgroup')].proof")
+            )
+        );
+        uint256 at = 41 + 626 + 370;
+        for (uint256 i; i < 256; i++) {
+            record[at + i] = outside[i];
+        }
+        _expectTier1Refused(
+            record, abi.encodeWithSelector(GroupRegistry.VouchProof.selector, 1, true)
+        );
+    }
+
     /// Any single changed bit of a counted addition is refused: every field
     /// is either checked or bound into a proof's signals (T-31, T-32).
     function testFuzz_RefusesAnyBitFlipOfAnAddition(uint256 bit) public {

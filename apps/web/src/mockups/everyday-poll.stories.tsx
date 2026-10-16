@@ -87,11 +87,14 @@ export const Dark: Story = {
     await expect(
       within(sheet).getByRole("link", { name: "Open the civic record" }),
     ).toHaveAttribute("href", "/polls/riverside/record");
-    // The sheet fades in over 200 ms.
-    await waitFor(() =>
-      expect(
-        within(sheet).getByRole("img", { name: /^Fingerprint of poll b1a7 1203$/ }),
-      ).toBeVisible(),
+    // The sheet fades in over 200 ms, which on a loaded CI runner can
+    // outlast waitFor's default second, as its exit does below.
+    await waitFor(
+      () =>
+        expect(
+          within(sheet).getByRole("img", { name: /^Fingerprint of poll b1a7 1203$/ }),
+        ).toBeVisible(),
+      { timeout: 5_000 },
     );
     await userEvent.keyboard("{Escape}");
     // The sheet unmounts after its exit transition, which on a loaded CI

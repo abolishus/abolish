@@ -748,14 +748,14 @@ describe("contract-path share-receipt batches, once 4.4 passes", () => {
     };
     expect(at(T_D).r.delivery).toEqual({ excluded: [], records: [], rejected: [] });
     const late = at(T_D + 1n);
-    expect(late.r.delivery.records).toEqual([
+    expect(late.r.delivery?.records).toEqual([
       { entry: late.last, pair: 0, code: "delivery-late" },
       { entry: late.last, pair: 1, code: "delivery-late" },
     ]);
-    expect(late.r.delivery.excluded.map((x) => x.missing)).toEqual([[4], [4]]);
+    expect(late.r.delivery?.excluded.map((x) => x.missing)).toEqual([[4], [4]]);
     // Signed by another seat's key: each pair fails share-receipt, attributed to no one.
     const forged = at(T_D, 3);
-    expect(forged.r.delivery.records).toEqual([
+    expect(forged.r.delivery?.records).toEqual([
       { entry: forged.last, pair: 0, code: "share-receipt", signer: null },
       { entry: forged.last, pair: 1, code: "share-receipt", signer: null },
     ]);

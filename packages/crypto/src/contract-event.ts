@@ -37,7 +37,7 @@ import {
   type GroupRemoval,
 } from "./group-registry.ts";
 import { decodeCloseStatement } from "./close-statement.ts";
-import { decodeShareReceiptBatch, RECEIPT_BATCH_MAX } from "./delivery.ts";
+import { COMPLAINT_BATCH_MAX, decodeShareReceiptBatch, RECEIPT_BATCH_MAX } from "./delivery.ts";
 import { frameBallot, frameComplaintBatch, frameDelivery } from "./direct-submit.ts";
 import {
   type AnyElectionDefinitionRecord,
@@ -690,7 +690,7 @@ const SHARE_RECEIPT_BATCH_SUBMITTED: EventSpec = {
 // A share-complaint batch through the contract path: the record whole,
 // framed as the board frames it, each `D` never decoded, so a batch the
 // board emits always passes (T-53); the delivery check decodes it strictly.
-const COMPLAINT_BATCH_LENGTH_MAX = 104 + 128 * 512;
+const COMPLAINT_BATCH_LENGTH_MAX = 104 + 128 * COMPLAINT_BATCH_MAX;
 
 const SHARE_COMPLAINT_BATCH_SUBMITTED: EventSpec = {
   signature: "ShareComplaintBatchSubmitted(bytes32,uint8,bytes)",

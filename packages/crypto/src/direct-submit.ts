@@ -29,6 +29,7 @@ import { TIERS } from "./election-definition.ts";
 import { H, scalar } from "./group.ts";
 import { membershipProof } from "./membership-proof.ts";
 import { PARAMETERS } from "./parameters.ts";
+import { COMPLAINT_BATCH_MAX } from "./delivery.ts";
 import { RECORD_TYPES } from "./record.ts";
 import { MLKEM_CT_LEN, MAX_SEALED } from "./share-encryption.ts";
 import { MAX_TRUSTEES, p256Sig } from "./trustee.ts";
@@ -204,9 +205,6 @@ export function frameDelivery(type: number, record: Uint8Array): FramedRecord | 
   }
   return { definitionHash: record.slice(3, 35), ballotHash: record.slice(35, 67) };
 }
-
-/** `COMPLAINT_BATCH_MAX` of docs/spec/delivery.md, Share-complaint batch. */
-const COMPLAINT_BATCH_MAX = 512;
 
 const before = (a: Uint8Array, b: Uint8Array) => {
   for (let i = 0; i < 32; i++) if (a[i] !== b[i]) return (a[i] as number) < (b[i] as number);

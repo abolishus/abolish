@@ -1,12 +1,17 @@
-// Independent generator for docs/spec/vectors/vouch.json (docs/spec/vouching.md).
+// Independent generator for docs/spec/vectors/vouch.json and vouch-count.json
+// (docs/spec/vouching.md).
 // It shares no code with packages/crypto: proofs come from Semaphore v4.14.3's
 // own `generateProof` and circuit artifacts, every proof's verdict from
 // snarkjs 0.7.5's `groth16.verify`, the field mapping from Semaphore's own
 // `hash` (keccak256 from ethers, shifted right by 8), the tier tree from
-// poseidon-lite's `poseidon2` and SHA-256 from node:crypto. The expected
+// poseidon-lite's `poseidon2`, SHA-256 from node:crypto, and the Tier 2
+// records' EIP-712 digests, signatures and recovery from ethers. The expected
 // verdict of each addition is written out by hand from the spec's checks, in
 // the spec's order, and the script refuses to print a case whose proofs
-// snarkjs judges differently from what the case claims.
+// snarkjs judges differently from what the case claims, or, for the counting
+// cases, whose verdicts, break and leaves (also written by hand) this
+// script's own replay of the counting rule (Counting across the deployment)
+// doesn't reproduce.
 //
 // It runs outside the workspace, because packages/crypto depends on @noble/*
 // only. In an empty directory:
@@ -14,6 +19,8 @@
 //   vp add @semaphore-protocol/core@4.14.3 snarkjs@0.7.5 poseidon-lite@0.3.0 ffjavascript@0.3.1 ethers@6.13.4
 //   curl -O https://snark-artifacts.pse.dev/semaphore/4.13.0/semaphore-32.{wasm,zkey}
 //   vp node vouch-vectors.mjs <artifacts-dir> <verification-keys.json> <out-dir>
+//
+// with packages/crypto/test-vectors/semaphore/verification-keys.json.
 //
 // Groth16 proving is randomised, so a rerun gives other proof bytes for the
 // same statements; the committed file is the record.
@@ -23,7 +30,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { argv, exit } from "node:process";
 import { Identity, generateProof } from "@semaphore-protocol/core";
-import { keccak256, toBeHex } from "ethers";
+import { TypedDataEncoder, Wallet, keccak256, recoverAddress, toBeHex } from "ethers";
 import { buildBn128 } from "ffjavascript";
 import { poseidon2 } from "poseidon-lite";
 import { groth16 } from "snarkjs";
@@ -122,36 +129,37 @@ function tree(leaves) {
 }
 
 const vouchers = Array.from(
-  { length: 5 },
+  { length: 6 },
   (_, i) => new Identity(`abolish vouch vector voucher ${i}`),
 );
-const tier2Leaves = vouchers.map((v) => v.commitment);
+const tier2Leaves = vouchers.slice(0, 5).map((v) => v.commitment);
 const t2 = tree(tier2Leaves);
 const T2_GROUP = 7n;
 const ROOT_BLOCK = 1_234_567n;
 const TIER1_GROUP = 9n;
 const vouchees = Array.from(
-  { length: 3 },
+  { length: 4 },
   (_, i) => new Identity(`abolish vouch vector vouchee ${i}`).commitment,
 );
 
-// One Semaphore proof of `voucher`'s membership at t2's root.
-async function prove(voucherIndex, scopeBytes, messageBytes) {
+// One Semaphore proof of `voucher`'s membership at `t`'s root. Every Tier 2
+// tree here holds vouchers in order from 0, so a voucher's index is its leaf's.
+async function prove(voucherIndex, scopeBytes, messageBytes, t = t2) {
   const identity = vouchers[voucherIndex];
   const out = await generateProof(
     identity,
     {
-      root: t2.root,
+      root: t.root,
       leaf: identity.commitment,
       index: voucherIndex,
-      siblings: t2.path(voucherIndex),
+      siblings: t.path(voucherIndex),
     },
     big(messageBytes),
     big(scopeBytes),
     DEPTH,
     art,
   );
-  if (BigInt(out.merkleTreeRoot) !== t2.root) throw new Error("root");
+  if (BigInt(out.merkleTreeRoot) !== t.root) throw new Error("root");
   // Semaphore reports the scope and message as given; it proves over their `hash`.
   if (BigInt(out.scope) !== big(scopeBytes) || BigInt(out.message) !== big(messageBytes))
     throw new Error("scope or message");
@@ -189,20 +197,22 @@ async function vouch({
   slotVoucher = voucher,
   j,
   rootBlock = ROOT_BLOCK,
+  tier2GroupId = T2_GROUP,
+  t = t2,
 }) {
   const sV = vouchScope(ctx, groupId, cv);
   const sJ = slotScope(ctx, j);
   const nV = nullifierOf(voucher, sV);
   const nS = nullifierOf(slotVoucher, sJ);
-  const mV = message(ctx, 0, groupId, cv, T2_GROUP, rootBlock, nS);
-  const mS = message(ctx, 1, groupId, cv, T2_GROUP, rootBlock, nV);
-  const pV = await prove(voucher, sV, mV);
-  const pS = await prove(slotVoucher, sJ, mS);
+  const mV = message(ctx, 0, groupId, cv, tier2GroupId, rootBlock, nS);
+  const mS = message(ctx, 1, groupId, cv, tier2GroupId, rootBlock, nV);
+  const pV = await prove(voucher, sV, mV, t);
+  const pS = await prove(slotVoucher, sJ, mS, t);
   if (pV.nullifier !== nV || pS.nullifier !== nS) throw new Error("nullifier");
   return {
-    tier2GroupId: T2_GROUP,
+    tier2GroupId,
     rootBlock,
-    root: t2.root,
+    root: t.root,
     slot: j,
     voucheeNullifier: nV,
     slotNullifier: nS,
@@ -710,6 +720,788 @@ const out = {
   decode,
 };
 writeFileSync(join(outDir, "vouch.json"), `${JSON.stringify(out, null, 2)}\n`);
+// --- Counting across the deployment (docs/spec/vouching.md). ---
+// Each case is a group registry's whole event sequence: groups created,
+// Tier 2 additions and removals signed by the registrars, and Tier 1
+// additions. The expected verdicts, break and leaves are written by hand;
+// `replay` below is this script's own reading of the counting rule, and every
+// case must agree with it.
+
+const INTERVAL = 1800n;
+const WINDOW = 302_400n;
+const GRID = INTERVAL * 700n; // a block on the root grid
+const GRID2 = GRID + INTERVAL; // the next one
+
+// Three fixed test registrars, in ascending address order; threshold 2.
+const registrars = [1, 2, 3]
+  .map(
+    (i) =>
+      new Wallet(`0x${sha256(Buffer.from(`abolish vouch-count registrar ${i}`)).toString("hex")}`),
+  )
+  .sort((a, b) => (a.address.toLowerCase() < b.address.toLowerCase() ? -1 : 1));
+const THRESHOLD = 2;
+const DOMAIN = {
+  name: "Abolish group registry",
+  version: "1",
+  chainId: CHAIN_ID,
+  verifyingContract: `0x${REGISTRY.toString("hex")}`,
+};
+const ADD_TYPES = {
+  AddMembers: [
+    { name: "groupId", type: "uint64" },
+    { name: "tier", type: "uint8" },
+    { name: "firstIndex", type: "uint64" },
+    { name: "commitments", type: "uint256[]" },
+  ],
+};
+const signed = (digest, seats) =>
+  Buffer.concat([
+    Buffer.from([seats.length]),
+    ...seats.map((seat) => {
+      const sig = registrars[seat - 1].signingKey.sign(digest);
+      return Buffer.concat([
+        Buffer.from([seat]),
+        Buffer.from(sig.r.slice(2), "hex"),
+        Buffer.from(sig.s.slice(2), "hex"),
+        Buffer.from([sig.v]),
+      ]);
+    }),
+  ]);
+const REMOVE_TYPES = {
+  RemoveMembers: [
+    { name: "groupId", type: "uint64" },
+    { name: "tier", type: "uint8" },
+    { name: "size", type: "uint64" },
+    { name: "indices", type: "uint64[]" },
+  ],
+};
+// A `removeMembers` record of a Tier 2 group.
+const removeRecord = (groupId, size, indices) =>
+  Buffer.concat([
+    uint(groupId, 8),
+    uint(size, 8),
+    uint(indices.length, 2),
+    ...indices.map((i) => uint(i, 8)),
+    signed(
+      TypedDataEncoder.hash(DOMAIN, REMOVE_TYPES, { groupId, tier: 2, size, indices }),
+      [1, 3],
+    ),
+  ]);
+// An `addMembers` record of a Tier 2 group (docs/spec/contracts.md, Group registry).
+const addRecord = (groupId, firstIndex, commitments) =>
+  Buffer.concat([
+    uint(groupId, 8),
+    uint(firstIndex, 8),
+    uint(commitments.length, 2),
+    ...commitments.map(word),
+    signed(
+      TypedDataEncoder.hash(DOMAIN, ADD_TYPES, { groupId, tier: 2, firstIndex, commitments }),
+      [1, 2],
+    ),
+  ]);
+
+// This script's check of a record's approvals over `digest` (rules 7 and 8):
+// null if they authorise it, else the reason.
+function approvalsFail(record, approvalsAt, digest) {
+  const n = record[approvalsAt];
+  if (n < THRESHOLD) return "approvals";
+  let last = 0;
+  for (let i = 0; i < n; i++) {
+    const a = record.subarray(approvalsAt + 1 + 66 * i);
+    const seat = a[0];
+    if (seat <= last || seat > registrars.length) return "seat";
+    last = seat;
+    const signer = recoverAddress(digest, {
+      r: `0x${a.subarray(1, 33).toString("hex")}`,
+      s: `0x${a.subarray(33, 65).toString("hex")}`,
+      v: a[65],
+    });
+    if (signer !== registrars[seat - 1].address) return "signature";
+  }
+  return null;
+}
+const exactLength = (record, header, item) => {
+  if (record.length < header + 1) return false;
+  const approvalsAt = header + item * record.readUInt16BE(header - 2);
+  return (
+    record.length >= approvalsAt + 1 && record.length === approvalsAt + 1 + 66 * record[approvalsAt]
+  );
+};
+
+// This script's strict replay of one Tier 2 record, for the generator's own
+// check: null if it applies (and it is applied to `leaves`), else the reason.
+function applyRecord(kind, record, groupId, leaves) {
+  const count = record.length >= 18 ? record.readUInt16BE(16) : 0;
+  if (kind === "members-added") {
+    if (!exactLength(record, 18, 32)) return "length";
+    if (count < 1 || count > 256) return "batch";
+    const commitments = Array.from({ length: count }, (_, i) =>
+      big(record.subarray(18 + 32 * i, 50 + 32 * i)),
+    );
+    if (commitments.some((c) => c < 2n || c >= R || c === POSEIDON2_ZERO_ONE))
+      return "forbidden-commitment";
+    if (big(record.subarray(0, 8)) !== groupId) return "group";
+    const firstIndex = big(record.subarray(8, 16));
+    const digest = TypedDataEncoder.hash(DOMAIN, ADD_TYPES, {
+      groupId,
+      tier: 2,
+      firstIndex,
+      commitments,
+    });
+    const why = approvalsFail(record, 18 + 32 * count, digest);
+    if (why !== null) return why;
+    if (firstIndex !== BigInt(leaves.length)) return "position";
+    leaves.push(...commitments);
+    return null;
+  }
+  if (!exactLength(record, 18, 8)) return "length";
+  if (count < 1 || count > 256) return "batch";
+  const size = big(record.subarray(8, 16));
+  const indices = Array.from({ length: count }, (_, i) =>
+    big(record.subarray(18 + 8 * i, 26 + 8 * i)),
+  );
+  for (let i = 0; i < count; i++) {
+    if (i > 0 && indices[i] <= indices[i - 1]) return "index-order";
+    if (indices[i] >= size) return "index-range";
+  }
+  if (big(record.subarray(0, 8)) !== groupId) return "group";
+  const digest = TypedDataEncoder.hash(DOMAIN, REMOVE_TYPES, { groupId, tier: 2, size, indices });
+  const why = approvalsFail(record, 18 + 8 * count, digest);
+  if (why !== null) return why;
+  if (size > BigInt(leaves.length)) return "size";
+  if (indices.some((i) => leaves[Number(i)] === 0n)) return "removed";
+  for (const i of indices) leaves[Number(i)] = 0n;
+  return null;
+}
+
+// This script's reading of the counting rule over a case's events.
+async function replay(events) {
+  const groups = new Map();
+  let broken = null;
+  const brk = (b) => {
+    if (broken === null || b.at < broken.at) broken = b;
+  };
+  events.forEach((e, at) => {
+    if (e.kind !== "group-created") return;
+    if (groups.has(e.groupId))
+      brk({ at, block: e.block, groupId: e.groupId, reason: "duplicate-group" });
+    else groups.set(e.groupId, { at, block: e.block, tier: e.tier });
+  });
+  // Each Tier 2 group's leaves after each of its records, until one breaks. A
+  // members record of a group with no earlier GroupCreated breaks at once.
+  const history = new Map();
+  const leavesOf = new Map();
+  const stopped = new Set();
+  for (const [at, e] of events.entries()) {
+    if (e.kind !== "members-added" && e.kind !== "members-removed") continue;
+    const g = groups.get(e.groupId);
+    if (g === undefined || g.at > at) {
+      brk({ at, block: e.block, groupId: e.groupId, reason: "created" });
+      continue;
+    }
+    if (g.tier !== 2 || stopped.has(e.groupId)) continue;
+    const leaves = leavesOf.get(e.groupId) ?? [];
+    const reason = applyRecord(e.kind, e.record, e.groupId, leaves);
+    if (reason !== null) {
+      brk({ at, block: e.block, groupId: e.groupId, reason });
+      stopped.add(e.groupId);
+      continue;
+    }
+    leavesOf.set(e.groupId, leaves);
+    history.set(e.groupId, [
+      ...(history.get(e.groupId) ?? []),
+      { block: e.block, leaves: leaves.slice() },
+    ]);
+  }
+  const rootAt = (groupId, block) =>
+    tree((history.get(groupId) ?? []).filter((s) => s.block <= block).at(-1)?.leaves ?? []).root;
+
+  const spent = new Set();
+  const members = new Map();
+  const additions = [];
+  for (const [at, e] of events.entries()) {
+    if (e.kind !== "tier1-addition") continue;
+    if (broken !== null && e.block >= broken.block) break;
+    const verdict = await judge(at, e);
+    additions.push({ at, block: String(e.block), ...verdict });
+  }
+  async function judge(at, e) {
+    if (e.raw !== undefined) return { valid: false, error: "decode" };
+    const { groupId, cv, vouches } = e;
+    // Checks 1 to 7 of one addition; the proofs' verdict is kept for last.
+    const one = await expected(CTX, groupId, cv, vouches);
+    if (one.error !== undefined && one.error !== "proof") return { valid: false, ...one };
+    const fail = (error, vouch) => ({
+      valid: false,
+      error,
+      ...(vouch === undefined ? {} : { vouch }),
+    });
+    const g = groups.get(groupId);
+    if (g?.tier !== 1 || g.at > at) return fail("group");
+    for (const [i, v] of vouches.entries())
+      if (v.rootBlock % INTERVAL !== 0n) return fail("root-grid", i);
+    for (const [i, v] of vouches.entries())
+      if (v.rootBlock > e.block || e.block - v.rootBlock > WINDOW) return fail("root-window", i);
+    for (const [i, v] of vouches.entries()) {
+      const t = groups.get(v.tier2GroupId);
+      if (t?.tier !== 2 || t.block > v.rootBlock) return fail("tier2-group", i);
+    }
+    for (const [i, v] of vouches.entries())
+      if (v.root !== rootAt(v.tier2GroupId, v.rootBlock)) return fail("root-mismatch", i);
+    const reused = vouches.findIndex((v) => spent.has(v.slotNullifier));
+    if (reused >= 0) return fail("slot-spent", reused);
+    const own = members.get(groupId) ?? { cvs: [], blocks: [] };
+    if (own.cvs.includes(cv)) return fail("member");
+    if (one.error === "proof") return { valid: false, ...one };
+    for (const v of vouches) spent.add(v.slotNullifier);
+    own.cvs.push(cv);
+    own.blocks.push(e.block);
+    members.set(groupId, own);
+    return { valid: true, index: own.cvs.length - 1 };
+  }
+  const leavesAt = (groupId, block) => {
+    if (broken !== null && broken.block <= block) return { error: "group-history" };
+    const own = members.get(groupId) ?? { cvs: [], blocks: [] };
+    return { leaves: own.cvs.filter((_, i) => own.blocks[i] <= block).map(String) };
+  };
+  return { additions, broken, members, leavesAt };
+}
+
+const c3 = vouchees[3];
+const t2b = tree(vouchers.map((v) => v.commitment)); // group 7 after voucher 5 joins
+const t8 = tree(vouchers.slice(0, 2).map((v) => v.commitment)); // group 8
+const at9 = (o) => vouch({ groupId: TIER1_GROUP, rootBlock: GRID, ...o });
+const tamperSlot = (v) => {
+  const a = v.slotProof.pi_a;
+  return { ...v, slotProof: { ...v.slotProof, pi_a: [a[0], String(P - BigInt(a[1])), "1"] } };
+};
+
+// Group 9's first counted addition, and its re-randomised copy.
+const a1 = [
+  await at9({ cv: c0, voucher: 0, j: 5 }),
+  await at9({ cv: c0, voucher: 1, j: 0 }),
+  await at9({ cv: c0, voucher: 2, j: 11 }),
+];
+const a1r = a1.map((v, i) => ({
+  ...v,
+  voucheeProof: rerandomise(v.voucheeProof, 0x9a1n + BigInt(i)),
+  slotProof: rerandomise(v.slotProof, 0x9b1n + BigInt(i)),
+}));
+const a3 = [
+  await at9({ cv: c0, voucher: 3, j: 1 }),
+  await at9({ cv: c0, voucher: 4, j: 2 }),
+  await at9({ cv: c0, voucher: 0, j: 3 }),
+];
+const a4 = [
+  await at9({ cv: c2, voucher: 3, j: 6 }),
+  await at9({ cv: c2, voucher: 0, j: 5 }),
+  await at9({ cv: c2, voucher: 1, j: 1 }),
+];
+const a5 = [
+  await at9({ cv: c1, voucher: 3, slotVoucher: 4, j: 2 }),
+  await at9({ cv: c1, voucher: 0, j: 3 }),
+  await at9({ cv: c1, voucher: 1, j: 3 }),
+];
+const at10 = (o) => vouch({ groupId: 10n, rootBlock: GRID, ...o });
+const a6 = [
+  await at10({ cv: c0, voucher: 2, j: 7 }),
+  await at10({ cv: c0, voucher: 3, j: 4 }),
+  await at10({ cv: c0, voucher: 4, j: 9 }),
+];
+const a7 = [
+  await at10({ cv: c2, voucher: 1, j: 0 }),
+  await at10({ cv: c2, voucher: 2, j: 8 }),
+  await at10({ cv: c2, voucher: 3, j: 5 }),
+];
+const inGroup = async (groupId) => [
+  await vouch({ groupId, rootBlock: GRID, cv: c2, voucher: 0, j: 6 }),
+  await vouch({ groupId, rootBlock: GRID, cv: c2, voucher: 1, j: 6 }),
+  await vouch({ groupId, rootBlock: GRID, cv: c2, voucher: 2, j: 6 }),
+];
+const a8 = await inGroup(3n);
+const a9 = await inGroup(11n);
+const at12 = (o) => vouch({ groupId: 12n, rootBlock: GRID, ...o });
+const a10 = [
+  await at12({ cv: c2, voucher: 2, j: 10 }),
+  await at12({ cv: c2, voucher: 3, j: 7 }),
+  await at12({ cv: c2, voucher: 4, j: 10 }),
+];
+// Vouches for c2 in group 9 that each break one check.
+const v08 = await at9({ cv: c2, voucher: 0, j: 8 });
+const v18 = await at9({ cv: c2, voucher: 1, j: 8 });
+const v29 = await at9({ cv: c2, voucher: 2, j: 9 });
+const offGrid = await at9({ cv: c2, voucher: 1, j: 8, rootBlock: GRID + 1n });
+const offGrid0 = await at9({ cv: c2, voucher: 0, j: 8, rootBlock: GRID + 1n });
+const v18late = await at9({ cv: c2, voucher: 1, j: 8, rootBlock: GRID2, t: t2b });
+const tier0Root = await at9({ cv: c2, voucher: 1, j: 8, tier2GroupId: 3n });
+const lateGroup = await at9({ cv: c2, voucher: 0, j: 8, tier2GroupId: 13n });
+const otherGroupRoot = await at9({ cv: c2, voucher: 1, j: 8, tier2GroupId: 8n });
+const staleRoot = await at9({ cv: c2, voucher: 0, j: 8, rootBlock: GRID2 });
+const v08late = await at9({ cv: c2, voucher: 0, j: 8, rootBlock: GRID2, t: t2b });
+const v29late = await at9({ cv: c2, voucher: 2, j: 9, rootBlock: GRID2, t: t2b });
+const a23 = [
+  await at9({ cv: c3, voucher: 5, j: 0, rootBlock: GRID2, t: t2b }),
+  await at9({ cv: c3, voucher: 3, j: 8, rootBlock: GRID2, t: t2b }),
+  await at9({ cv: c3, voucher: 4, j: 11, rootBlock: GRID2, t: t2b }),
+];
+const a24 = [
+  await at10({ cv: c1, voucher: 0, j: 9 }),
+  await at10({ cv: c1, voucher: 1, j: 9 }),
+  await at10({ cv: c1, voucher: 2, j: 2 }),
+];
+const a25 = [
+  await at10({ cv: c3, voucher: 3, j: 9 }),
+  await at10({ cv: c3, voucher: 4, j: 5 }),
+  await at10({ cv: c3, voucher: 5, j: 3, t: t2b, rootBlock: GRID2 }),
+];
+// Group 14, created and filled in the grid block itself, and group 8 after
+// voucher 1's removal.
+const t14 = tree(vouchers.slice(0, 3).map((v) => v.commitment));
+const t8r = tree([vouchers[0].commitment, 0n]);
+const at14 = [
+  await vouch({
+    groupId: 12n,
+    rootBlock: GRID,
+    cv: c0,
+    voucher: 0,
+    j: 10,
+    tier2GroupId: 14n,
+    t: t14,
+  }),
+  await vouch({
+    groupId: 12n,
+    rootBlock: GRID,
+    cv: c0,
+    voucher: 1,
+    j: 10,
+    tier2GroupId: 14n,
+    t: t14,
+  }),
+  await vouch({
+    groupId: 12n,
+    rootBlock: GRID,
+    cv: c0,
+    voucher: 2,
+    j: 4,
+    tier2GroupId: 14n,
+    t: t14,
+  }),
+];
+const atGrid2 = [
+  await at10({ cv: c2, voucher: 3, j: 3, rootBlock: GRID2, t: t2b }),
+  await at10({ cv: c2, voucher: 4, j: 4, rootBlock: GRID2, t: t2b }),
+  await at10({ cv: c2, voucher: 5, j: 5, rootBlock: GRID2, t: t2b }),
+];
+const afterRemoval = [
+  await vouch({
+    groupId: 12n,
+    rootBlock: GRID2,
+    cv: c3,
+    voucher: 0,
+    j: 11,
+    tier2GroupId: 8n,
+    t: t8r,
+  }),
+  await vouch({ groupId: 12n, rootBlock: GRID2, cv: c3, voucher: 3, j: 6, t: t2b }),
+  await vouch({ groupId: 12n, rootBlock: GRID2, cv: c3, voucher: 4, j: 6, t: t2b }),
+];
+const a15 = await inGroup(15n);
+if (new Set([t2.root, t2b.root, t8.root, t8r.root, t14.root]).size !== 5)
+  throw new Error("the Tier 2 roots must differ");
+
+const created = (groupId, tier, block) => ({ kind: "group-created", block, groupId, tier });
+const added = (groupId, block, record) => ({ kind: "members-added", block, groupId, record });
+const removed = (groupId, block, record) => ({ kind: "members-removed", block, groupId, record });
+const t1 = (block, groupId, cv, vouches, note) => ({
+  kind: "tier1-addition",
+  block,
+  groupId,
+  cv,
+  vouches,
+  note,
+});
+const prefix = [
+  created(T2_GROUP, 2, 1_000_000n),
+  created(TIER1_GROUP, 1, 1_000_000n),
+  added(T2_GROUP, 1_100_000n, addRecord(T2_GROUP, 0n, tier2Leaves)),
+];
+const fifth = vouchers[5].commitment;
+const truncated = encodeAddition(TIER1_GROUP, c2, a4).subarray(0, 1918);
+
+const countCases = [
+  {
+    id: "deployment",
+    description:
+      "Two Tier 2 groups and three Tier 1 groups: counted additions, every counting check refusing one, failures consuming nothing, and the window's edge",
+    events: [
+      ...prefix,
+      created(3n, 0, 1_100_000n),
+      // A Tier 0 group's records are no part of Tier 1 counting, however malformed.
+      added(3n, 1_100_000n, Buffer.from("dead", "hex")),
+      created(8n, 2, 1_100_000n),
+      added(
+        8n,
+        1_100_001n,
+        addRecord(
+          8n,
+          0n,
+          vouchers.slice(0, 2).map((v) => v.commitment),
+        ),
+      ),
+      created(10n, 1, 1_200_000n),
+      created(14n, 2, GRID),
+      added(
+        14n,
+        GRID,
+        addRecord(
+          14n,
+          0n,
+          vouchers.slice(0, 3).map((v) => v.commitment),
+        ),
+      ),
+      created(13n, 2, GRID + 10n),
+      removed(8n, GRID + 20n, removeRecord(8n, 2n, [1n])),
+      added(T2_GROUP, GRID + 50n, addRecord(T2_GROUP, 5n, [fifth])),
+      t1(GRID + 100n, TIER1_GROUP, c0, a1, "counted: leaf 0 of group 9"),
+      t1(
+        GRID + 110n,
+        TIER1_GROUP,
+        c0,
+        a1r,
+        "the first addition re-randomised: its slots are spent",
+      ),
+      t1(GRID + 120n, TIER1_GROUP, c0, a3, "a fresh vouch set for a counted commitment"),
+      t1(GRID + 130n, TIER1_GROUP, c2, a4, "the second vouch reuses voucher 0's slot 5"),
+      t1(
+        GRID + 140n,
+        TIER1_GROUP,
+        c1,
+        a5,
+        "counted: leaf 1, a pooled vouch among its three, on slots the member addition left unspent",
+      ),
+      t1(
+        GRID + 150n,
+        10n,
+        c0,
+        a6,
+        "counted: leaf 0 of group 10, a commitment group 9 already holds",
+      ),
+      t1(
+        GRID + 160n,
+        10n,
+        c2,
+        a7,
+        "slots are deployment-wide: voucher 1's slot 0 was spent in group 9",
+      ),
+      t1(GRID + 170n, 3n, c2, a8, "group 3 is a Tier 0 group"),
+      t1(GRID + 180n, 11n, c2, a9, "group 11 was never created"),
+      t1(GRID + 190n, 12n, c2, a10, "group 12 is created only after this addition"),
+      created(12n, 1, GRID + 200n),
+      t1(GRID + 210n, 12n, c2, a10, "the same record once group 12 exists: counted, leaf 0"),
+      t1(
+        GRID + 220n,
+        TIER1_GROUP,
+        c2,
+        [v08, offGrid, v29],
+        "the second vouch's root block is off the grid",
+      ),
+      t1(
+        GRID + 230n,
+        TIER1_GROUP,
+        c2,
+        [v08, v18late, v29],
+        "the second vouch names a root block after the addition's own",
+      ),
+      t1(
+        GRID + 240n,
+        TIER1_GROUP,
+        c2,
+        [v08, tier0Root, v29],
+        "the second vouch names Tier 0 group 3",
+      ),
+      t1(
+        GRID + 250n,
+        TIER1_GROUP,
+        c2,
+        [lateGroup, v18, v29],
+        "the first vouch names Tier 2 group 13, created after its root block",
+      ),
+      t1(
+        GRID + 260n,
+        TIER1_GROUP,
+        c2,
+        [v08, otherGroupRoot, v29],
+        "the second vouch names group 8 with group 7's root",
+      ),
+      t1(
+        GRID + 265n,
+        TIER1_GROUP,
+        c2,
+        [otherGroupRoot, offGrid0, v29],
+        "the first vouch fails a later check than the second: checks run vouch by vouch within each check",
+      ),
+      t1(
+        GRID + 270n,
+        12n,
+        c0,
+        at14,
+        "counted: leaf 1 of group 12, every vouch naming Tier 2 group 14, created and filled in the root block itself",
+      ),
+      t1(GRID + 280n, 15n, c2, a15, "group 15 is created in this block, after this addition"),
+      created(15n, 1, GRID + 280n),
+      t1(
+        GRID2,
+        10n,
+        c2,
+        atGrid2,
+        "counted: leaf 1 of group 10, its own block its vouches' root block",
+      ),
+      t1(
+        GRID2 + 10n,
+        TIER1_GROUP,
+        c2,
+        [staleRoot, v18late, v29late],
+        "the first vouch names group 7 at the next grid block with the root before voucher 5 joined",
+      ),
+      t1(
+        GRID2 + 20n,
+        TIER1_GROUP,
+        c2,
+        [v08late, v18late, tamperSlot(v29late)],
+        "the third vouch's slot proof is broken",
+      ),
+      t1(
+        GRID2 + 30n,
+        TIER1_GROUP,
+        c2,
+        [v08late, v18late, v29late],
+        "counted: leaf 2, on slots every refused addition before left unspent",
+      ),
+      {
+        kind: "tier1-addition",
+        block: GRID2 + 40n,
+        raw: truncated,
+        note: "a record one byte short",
+      },
+      t1(GRID2 + 50n, TIER1_GROUP, c1, [a5[1], a5[2], a5[1]], "one vouch twice"),
+      t1(
+        GRID2 + 60n,
+        TIER1_GROUP,
+        c3,
+        a23,
+        "counted: leaf 3, vouched by voucher 5, who joined Tier 2 after the first grid block",
+      ),
+      t1(
+        GRID2 + 70n,
+        12n,
+        c3,
+        afterRemoval,
+        "counted: leaf 2 of group 12, the first vouch naming group 8 after voucher 1's removal",
+      ),
+      t1(
+        GRID + WINDOW,
+        10n,
+        c1,
+        a24,
+        "counted: leaf 2 of group 10, exactly W blocks after its root block",
+      ),
+      t1(GRID + WINDOW + 1n, 10n, c3, a25, "the first vouch's root block is W + 1 blocks back"),
+    ],
+    want: [
+      { valid: true, index: 0 },
+      { error: "slot-spent", vouch: 0 },
+      { error: "member" },
+      { error: "slot-spent", vouch: 1 },
+      { valid: true, index: 1 },
+      { valid: true, index: 0 },
+      { error: "slot-spent", vouch: 0 },
+      { error: "group" },
+      { error: "group" },
+      { error: "group" },
+      { valid: true, index: 0 },
+      { error: "root-grid", vouch: 1 },
+      { error: "root-window", vouch: 1 },
+      { error: "tier2-group", vouch: 1 },
+      { error: "tier2-group", vouch: 0 },
+      { error: "root-mismatch", vouch: 1 },
+      { error: "root-grid", vouch: 1 },
+      { valid: true, index: 1 },
+      { error: "group" },
+      { valid: true, index: 1 },
+      { error: "root-mismatch", vouch: 0 },
+      { error: "proof", vouch: 2, which: "slot" },
+      { valid: true, index: 2 },
+      { error: "decode" },
+      { error: "duplicate-voucher", vouch: 2 },
+      { valid: true, index: 3 },
+      { valid: true, index: 2 },
+      { valid: true, index: 2 },
+      { error: "root-window", vouch: 0 },
+    ],
+    broken: null,
+    leaves: [
+      [TIER1_GROUP, GRID + 99n, []],
+      [TIER1_GROUP, GRID + 100n, [c0]],
+      [TIER1_GROUP, GRID + 139n, [c0]],
+      [TIER1_GROUP, GRID + 140n, [c0, c1]],
+      [TIER1_GROUP, GRID2 + 60n, [c0, c1, c2, c3]],
+      [10n, GRID + WINDOW + 1n, [c0, c2, c1]],
+      [12n, GRID + 210n, [c2]],
+      [12n, GRID2 + 70n, [c2, c0, c3]],
+      [11n, GRID + WINDOW + 1n, []],
+      [15n, GRID + WINDOW + 1n, []],
+    ],
+  },
+  {
+    id: "broken-tier2",
+    description:
+      "A Tier 2 record whose signed position disagrees with the replay's count breaks Tier 1 from its block on, even for an addition logged before it in that block",
+    events: [
+      ...prefix,
+      t1(GRID + 100n, TIER1_GROUP, c0, a1, "counted: before b_R"),
+      t1(
+        GRID + 150n,
+        TIER1_GROUP,
+        c1,
+        a5,
+        "undecided: in b_R's block, though logged before the breaking record",
+      ),
+      added(T2_GROUP, GRID + 150n, addRecord(T2_GROUP, 9n, [fifth])),
+      t1(GRID + 200n, TIER1_GROUP, c2, a4, "undecided: after b_R"),
+    ],
+    want: [{ valid: true, index: 0 }],
+    broken: { at: 5, block: GRID + 150n, groupId: T2_GROUP, reason: "position" },
+    leaves: [
+      [TIER1_GROUP, GRID + 149n, [c0]],
+      [TIER1_GROUP, GRID + 150n, "group-history"],
+    ],
+  },
+  {
+    id: "duplicate-group",
+    description: "A second GroupCreated for a group breaks Tier 1 from its block on",
+    events: [
+      ...prefix,
+      t1(GRID + 100n, TIER1_GROUP, c0, a1, "counted: before the repeat"),
+      created(T2_GROUP, 0, GRID + 120n),
+      t1(GRID + 130n, TIER1_GROUP, c1, a5, "undecided"),
+    ],
+    want: [{ valid: true, index: 0 }],
+    broken: { at: 4, block: GRID + 120n, groupId: T2_GROUP, reason: "duplicate-group" },
+    leaves: [
+      [TIER1_GROUP, GRID + 119n, [c0]],
+      [TIER1_GROUP, GRID + 120n, "group-history"],
+    ],
+  },
+  {
+    id: "created-after-records",
+    description:
+      "A Tier 2 group's record logged before its GroupCreated breaks Tier 1 from its block on",
+    events: [
+      created(TIER1_GROUP, 1, 1_000_000n),
+      added(T2_GROUP, 1_000_000n, addRecord(T2_GROUP, 0n, tier2Leaves)),
+      created(T2_GROUP, 2, 1_000_001n),
+      t1(GRID + 100n, TIER1_GROUP, c0, a1, "undecided"),
+    ],
+    want: [],
+    broken: { at: 1, block: 1_000_000n, groupId: T2_GROUP, reason: "created" },
+    leaves: [
+      [TIER1_GROUP, 999_999n, []],
+      [TIER1_GROUP, 1_000_000n, "group-history"],
+    ],
+  },
+  {
+    id: "record-without-group",
+    description:
+      "A members record naming a group never created breaks Tier 1 from its block on, whatever comes after",
+    events: [
+      ...prefix,
+      t1(GRID + 100n, TIER1_GROUP, c0, a1, "counted: before the record"),
+      added(99n, GRID + 150n, addRecord(99n, 0n, [fifth])),
+      t1(GRID + 200n, TIER1_GROUP, c1, a5, "undecided"),
+    ],
+    want: [{ valid: true, index: 0 }],
+    broken: { at: 4, block: GRID + 150n, groupId: 99n, reason: "created" },
+    leaves: [
+      [TIER1_GROUP, GRID + 149n, [c0]],
+      [TIER1_GROUP, GRID + 150n, "group-history"],
+    ],
+  },
+];
+
+const encodeEvent = (e) => {
+  if (e.kind === "group-created")
+    return { kind: e.kind, block: String(e.block), groupId: String(e.groupId), tier: e.tier };
+  if (e.kind === "members-added" || e.kind === "members-removed")
+    return {
+      kind: e.kind,
+      block: String(e.block),
+      groupId: String(e.groupId),
+      record: e.record.toString("hex"),
+    };
+  return {
+    kind: e.kind,
+    block: String(e.block),
+    record: (e.raw ?? encodeAddition(e.groupId, e.cv, e.vouches)).toString("hex"),
+    note: e.note,
+  };
+};
+const counting = [];
+for (const c of countCases) {
+  const got = await replay(c.events);
+  const verdicts = got.additions.map(({ at: _at, block: _block, ...v }) => v);
+  const want = c.want.map((w) => (w.valid ? w : { valid: false, ...w }));
+  if (JSON.stringify(verdicts) !== JSON.stringify(want))
+    throw new Error(
+      `${c.id}: expected ${JSON.stringify(want)}, the replay gives ${JSON.stringify(verdicts)}`,
+    );
+  const text = (v) => JSON.stringify(v, (_, x) => (typeof x === "bigint" ? String(x) : x));
+  if (text(got.broken) !== text(c.broken))
+    throw new Error(
+      `${c.id}: expected break ${text(c.broken)}, the replay gives ${text(got.broken)}`,
+    );
+  const leaves = c.leaves.map(([groupId, block, expected]) => {
+    const found = got.leavesAt(groupId, block);
+    const want =
+      expected === "group-history" ? { error: expected } : { leaves: expected.map(String) };
+    if (text(found) !== text(want))
+      throw new Error(
+        `${c.id}: group ${String(groupId)} at ${String(block)}: expected ${text(want)}, got ${text(found)}`,
+      );
+    return { groupId: String(groupId), block: String(block), ...want };
+  });
+  counting.push({
+    id: c.id,
+    description: c.description,
+    events: c.events.map(encodeEvent),
+    additions: got.additions,
+    broken:
+      c.broken === null
+        ? null
+        : { ...c.broken, block: String(c.broken.block), groupId: String(c.broken.groupId) },
+    leaves,
+  });
+}
+writeFileSync(
+  join(outDir, "vouch-count.json"),
+  `${JSON.stringify(
+    {
+      format: "abolish-vouch-count-vectors/1",
+      spec: "docs/spec/vouching.md",
+      generator: "packages/crypto/scripts/vouch-vectors.mjs",
+      parameters: { k: K, slots: L, rootInterval: String(INTERVAL), rootWindow: String(WINDOW) },
+      context: {
+        chainId: String(CHAIN_ID),
+        registry: REGISTRY.toString("hex"),
+        registrars: registrars.map((w) => w.address.slice(2).toLowerCase()),
+        threshold: THRESHOLD,
+      },
+      cases: counting,
+    },
+    null,
+    2,
+  )}\n`,
+);
+console.log(`${counting.length} counting cases`);
 await curve.terminate();
 console.log(`${additions.length} additions, ${decode.length} decode cases`);
 // Semaphore's prover leaves worker threads behind.

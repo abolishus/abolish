@@ -134,3 +134,57 @@ export function replayTierGroup(events: readonly TierGroupEvent[]): TierGroupRep
   }
   return { leaves, groupSize: leaves.reduce((n, leaf) => (leaf === 0n ? n : n + 1), 0) };
 }
+
+/**
+ * Internal: a tier tree kept across updates, so a group's roots at many blocks
+ * cost one pass over its records rather than one rebuild per block (T-52).
+ * Leaves are appended in order or set to 0 (a removal); `root()` rehashes only
+ * the nodes above leaves changed since the last call. It gives `tierTreeRoot`
+ * of the same leaves.
+ */
+export class TierTreeBuilder {
+  readonly #levels: bigint[][] = Array.from({ length: MEMBERSHIP_DEPTH + 1 }, () => []);
+  #dirty = new Set<number>();
+
+  /** The number of leaves, removed ones included. */
+  get size(): number {
+    return (this.#levels[0] as bigint[]).length;
+  }
+
+  /** Appends a member's commitment as the next leaf. */
+  append(leaf: bigint): void {
+    if (typeof leaf !== "bigint" || isForbiddenCommitment(leaf))
+      throw new RangeError("append: expected a commitment that isn't forbidden");
+    if (this.size >= TIER_TREE_MAX_LEAVES)
+      throw new RangeError("append: a group with more than 2^32 additions has no tier tree");
+    this.#dirty.add(this.size);
+    (this.#levels[0] as bigint[]).push(leaf);
+  }
+
+  /** Sets leaf `index`, already added, to 0. */
+  remove(index: number): void {
+    if (!Number.isSafeInteger(index) || index < 0 || index >= this.size)
+      throw new RangeError("remove: index must name a leaf");
+    (this.#levels[0] as bigint[])[index] = 0n;
+    this.#dirty.add(index);
+  }
+
+  root(): bigint {
+    const z = tierTreeZeros();
+    let changed = this.#dirty;
+    for (let h = 0; h < MEMBERSHIP_DEPTH; h++) {
+      const below = this.#levels[h] as bigint[];
+      const up = this.#levels[h + 1] as bigint[];
+      const empty = z[h] as bigint;
+      const parents = new Set<number>();
+      // Arithmetic, not `>> 1`: bitwise operators wrap above 2^31.
+      for (const i of changed) parents.add(Math.floor(i / 2));
+      // Ascending, so a new parent is always the next one along its level.
+      for (const j of [...parents].sort((a, b) => a - b))
+        up[j] = poseidon2(below[2 * j] as bigint, below[2 * j + 1] ?? empty);
+      changed = parents;
+    }
+    this.#dirty = new Set();
+    return this.#levels[MEMBERSHIP_DEPTH]?.[0] ?? (z[MEMBERSHIP_DEPTH] as bigint);
+  }
+}

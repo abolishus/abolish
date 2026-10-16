@@ -1,7 +1,7 @@
 // Tier 1 vouches (docs/spec/vouching.md, ADR 0014): the binding, the two
 // scopes and messages, the vouch and Tier 1 addition record, and the checks of
-// one addition on its own. Which Tier 2 roots count, slot consumption across
-// the deployment and the root window are P3-3 part 2b's.
+// one addition on its own. Which additions count across the deployment is
+// vouch-count.ts'.
 
 import { DecodeError, EncodeError, Reader, encode, fieldBn254, u16, u64, u8 } from "./codec.ts";
 import { ds } from "./domain-separation.ts";
@@ -13,6 +13,7 @@ import {
   MEMBERSHIP_PROOF_LENGTH,
   encodeMembershipProof,
   type MembershipProof,
+  type MembershipProofCheck,
   membershipProof,
   verifyDecodedMembershipProof,
 } from "./membership-proof.ts";
@@ -283,6 +284,90 @@ function firstRepeat(
   return -1;
 }
 
+type Tier1AdditionFailure = Exclude<Tier1AdditionResult, { ok: true }>;
+
+/**
+ * Internal: checks 1 to 6 of one addition (docs/spec/vouching.md, Checks of
+ * one addition), and, if they pass, the `2k` proof checks check 7 runs, in
+ * its order: each vouch's vouchee proof, then its slot proof, with every
+ * scope and message recomputed here from the binding, `C_V` and the vouch's
+ * own fields, never taken from the record (T-06, T-32).
+ */
+export function precheckTier1Addition(
+  record: Uint8Array,
+  ctx: VouchContext,
+):
+  | { readonly ok: false; readonly failure: Tier1AdditionFailure }
+  | {
+      readonly ok: true;
+      readonly value: Tier1Addition;
+      readonly proofs: readonly MembershipProofCheck[];
+    } {
+  const c = context(ctx);
+  const decoded = decodeAddition(record);
+  const fail = (failure: Tier1AdditionFailure) => ({ ok: false, failure }) as const;
+  if (!decoded.ok) return fail({ ok: false, error: "decode", decode: decoded });
+  const { groupId, commitment, vouches } = decoded.value;
+  if (isForbiddenCommitment(commitment)) return fail({ ok: false, error: "forbidden-commitment" });
+  for (const [i, v] of vouches.entries())
+    if (v.slot >= VOUCH_SLOTS) return fail({ ok: false, error: "slot", vouch: i });
+  for (const [i, v] of vouches.entries())
+    if (v.root === 0n) return fail({ ok: false, error: "root", vouch: i });
+  const voucher = firstRepeat(vouches, "voucheeNullifier");
+  if (voucher >= 0) return fail({ ok: false, error: "duplicate-voucher", vouch: voucher });
+  const slot = firstRepeat(vouches, "slotNullifier");
+  if (slot >= 0) return fail({ ok: false, error: "duplicate-slot", vouch: slot });
+  const voucheeScope = semaphoreField(vouchScope(c, groupId, commitment));
+  const proofs: MembershipProofCheck[] = [];
+  for (const [i, v] of vouches.entries()) {
+    const message = (role: VouchRole, other: bigint) =>
+      semaphoreField(
+        vouchMessage(c, role, groupId, commitment, v.tier2GroupId, v.rootBlock, other),
+      );
+    const [voucheeProof, slotProof] = decoded.proofs[i] as DecodedProofs[number];
+    proofs.push(
+      {
+        proof: voucheeProof,
+        signals: {
+          root: v.root,
+          nullifier: v.voucheeNullifier,
+          message: message(0, v.slotNullifier),
+          scope: voucheeScope,
+        },
+      },
+      {
+        proof: slotProof,
+        signals: {
+          root: v.root,
+          nullifier: v.slotNullifier,
+          message: message(1, v.voucheeNullifier),
+          scope: semaphoreField(vouchSlotScope(c, v.slot)),
+        },
+      },
+    );
+  }
+  return { ok: true, value: decoded.value, proofs };
+}
+
+// The `proof` failure of the proof at `at` in `precheckTier1Addition`'s order.
+function proofFailureAt(at: number): Tier1AdditionFailure {
+  return {
+    ok: false,
+    error: "proof",
+    vouch: Math.floor(at / 2),
+    which: at % 2 ? "slot" : "vouchee",
+  };
+}
+
+/**
+ * Internal: the `proof` failure for the first `false` among an addition's
+ * `2k` proof verdicts, in `precheckTier1Addition`'s order, or `null`.
+ */
+export function proofFailure(verdicts: readonly boolean[]): Tier1AdditionFailure | null {
+  const at = verdicts.indexOf(false);
+  return at < 0 ? null : proofFailureAt(at);
+}
+
 /**
  * The checks of one Tier 1 addition on its own (docs/spec/vouching.md, Checks
  * of one addition), in the spec's order, reporting the first failure and the
@@ -293,44 +378,14 @@ function firstRepeat(
  * the pinned key with every scope and message recomputed here, never taken
  * from the record (T-06, T-32). The cheap checks come before any pairing
  * (T-52). Passing says nothing about the deployment: whether each root is a
- * Tier 2 root within the window, and whether its slots are unspent, are part
- * 2b's.
+ * Tier 2 root within the window, and whether its slots are unspent, are
+ * `countTier1Additions`'.
  */
 export function checkTier1Addition(record: Uint8Array, ctx: VouchContext): Tier1AdditionResult {
-  const c = context(ctx);
-  const decoded = decodeAddition(record);
-  if (!decoded.ok) return { ok: false, error: "decode", decode: decoded };
-  const { groupId, commitment, vouches } = decoded.value;
-  if (isForbiddenCommitment(commitment)) return { ok: false, error: "forbidden-commitment" };
-  for (const [i, v] of vouches.entries())
-    if (v.slot >= VOUCH_SLOTS) return { ok: false, error: "slot", vouch: i };
-  for (const [i, v] of vouches.entries())
-    if (v.root === 0n) return { ok: false, error: "root", vouch: i };
-  const voucher = firstRepeat(vouches, "voucheeNullifier");
-  if (voucher >= 0) return { ok: false, error: "duplicate-voucher", vouch: voucher };
-  const slot = firstRepeat(vouches, "slotNullifier");
-  if (slot >= 0) return { ok: false, error: "duplicate-slot", vouch: slot };
-  const voucheeScope = semaphoreField(vouchScope(c, groupId, commitment));
-  for (const [i, v] of vouches.entries()) {
-    const message = (role: VouchRole, other: bigint) =>
-      semaphoreField(
-        vouchMessage(c, role, groupId, commitment, v.tier2GroupId, v.rootBlock, other),
-      );
-    const [voucheeProof, slotProof] = decoded.proofs[i] as DecodedProofs[number];
-    const voucheeOk = verifyDecodedMembershipProof(voucheeProof, {
-      root: v.root,
-      nullifier: v.voucheeNullifier,
-      message: message(0, v.slotNullifier),
-      scope: voucheeScope,
-    });
-    if (!voucheeOk) return { ok: false, error: "proof", vouch: i, which: "vouchee" };
-    const slotOk = verifyDecodedMembershipProof(slotProof, {
-      root: v.root,
-      nullifier: v.slotNullifier,
-      message: message(1, v.voucheeNullifier),
-      scope: semaphoreField(vouchSlotScope(c, v.slot)),
-    });
-    if (!slotOk) return { ok: false, error: "proof", vouch: i, which: "slot" };
-  }
-  return { ok: true, value: decoded.value };
+  const pre = precheckTier1Addition(record, ctx);
+  if (!pre.ok) return pre.failure;
+  // One at a time, stopping at the first failure: the reference order.
+  for (const [at, { proof, signals }] of pre.proofs.entries())
+    if (!verifyDecodedMembershipProof(proof, signals)) return proofFailureAt(at);
+  return { ok: true, value: pre.value };
 }

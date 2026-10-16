@@ -216,25 +216,32 @@ describe("registrations.tier0", () => {
 });
 
 describe("src/main.ts", () => {
-  test("refuses to start with only part of the Tier 0 configuration", async () => {
-    const child = spawn(
-      process.execPath,
-      [fileURLToPath(new URL("../src/main.ts", import.meta.url))],
-      {
-        env: {
-          PATH: process.env["PATH"] ?? "",
-          DATABASE_URL: process.env["TEST_DATABASE_URL"] ?? "",
-          API_PORT: "1",
-          REDIS_URL: redisUrl,
-          API_TIER0_GROUP: "0",
+  // A fresh Node process loads the whole server, crypto included, before it
+  // reads its configuration, which takes longer than the default 5 s on a
+  // loaded runner (seen on #300).
+  test(
+    "refuses to start with only part of the Tier 0 configuration",
+    { timeout: 60_000 },
+    async () => {
+      const child = spawn(
+        process.execPath,
+        [fileURLToPath(new URL("../src/main.ts", import.meta.url))],
+        {
+          env: {
+            PATH: process.env["PATH"] ?? "",
+            DATABASE_URL: process.env["TEST_DATABASE_URL"] ?? "",
+            API_PORT: "1",
+            REDIS_URL: redisUrl,
+            API_TIER0_GROUP: "0",
+          },
+          stdio: ["ignore", "pipe", "pipe"],
         },
-        stdio: ["ignore", "pipe", "pipe"],
-      },
-    );
-    let stderr = "";
-    child.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
-    const [code] = (await once(child, "exit")) as [number | null];
-    expect(code).not.toBe(0);
-    expect(stderr).toContain("go together");
-  });
+      );
+      let stderr = "";
+      child.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
+      const [code] = (await once(child, "exit")) as [number | null];
+      expect(code).not.toBe(0);
+      expect(stderr).toContain("go together");
+    },
+  );
 });

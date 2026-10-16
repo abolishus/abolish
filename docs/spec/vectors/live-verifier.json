@@ -418,6 +418,70 @@
           }
         ]
       },
+      "broken-copy-first": {
+        "tier": 0,
+        "ballots": [
+          {
+            "id": "broken-copy-first/1-broken",
+            "message": "broken-copy-first/1",
+            "cell": 0,
+            "segment": 10,
+            "ref": 100,
+            "receipted": 10,
+            "votes": [1, 0],
+            "member": false
+          },
+          {
+            "id": "broken-copy-first/1",
+            "message": "broken-copy-first/1",
+            "cell": 0,
+            "segment": 11,
+            "ref": 100,
+            "receipted": 10,
+            "votes": [1, 0]
+          }
+        ]
+      },
+      "early-copy-first": {
+        "tier": 0,
+        "ballots": [
+          {
+            "id": "early-copy-first/1-early",
+            "message": "early-copy-first/1",
+            "cell": 0,
+            "segment": 10,
+            "ref": 100,
+            "receipted": 10,
+            "votes": [1, 0],
+            "invalid": "window-before-open"
+          },
+          {
+            "id": "early-copy-first/1",
+            "message": "early-copy-first/1",
+            "cell": 0,
+            "segment": 11,
+            "ref": 100,
+            "receipted": 10,
+            "votes": [1, 0]
+          }
+        ]
+      },
+      "batch-receipts-only": {
+        "tier": 0,
+        "ballots": [
+          {
+            "id": "batch-receipts-only/1",
+            "message": "batch-receipts-only/1",
+            "cell": 0,
+            "segment": 10,
+            "ref": 100,
+            "receipted": null,
+            "votes": [1, 0],
+            "batchReceipted": 10,
+            "delivered": false
+          }
+        ]
+      },
       "late-receipts": {
         "tier": 0,
         "ballots": [
@@ -495,6 +559,17 @@
       }
     },
     "statuses": {
+      "batch-receipts-only": {
+        "batch-receipts-only/1": ["admitted", "admitted", "admitted"]
+      },
+      "broken-copy-first": {
+        "broken-copy-first/1-broken": ["non-member", "non-member", "non-member"],
+        "broken-copy-first/1": ["absent", "admitted", "admitted"]
+      },
+      "early-copy-first": {
+        "early-copy-first/1-early": ["rejected", "rejected", "rejected"],
+        "early-copy-first/1": ["absent", "admitted", "admitted"]
+      },
       "future-first": {
         "future-first/1": ["pending", "pending", "pending"],
         "future-first/2": ["absent", "admitted", "admitted"]
@@ -555,6 +630,8 @@
           "revote-after-entry": "revote-after-entry/1"
         },
         {
+          "broken-copy-first": "broken-copy-first/1",
+          "early-copy-first": "early-copy-first/1",
           "junk-step-settles": "junk-step-settles/2",
           "non-member-first": "non-member-first/2",
           "plain": "plain/1",
@@ -563,6 +640,8 @@
           "revote-after-entry": "revote-after-entry/1"
         },
         {
+          "broken-copy-first": "broken-copy-first/1",
+          "early-copy-first": "early-copy-first/1",
           "junk-step-settles": "junk-step-settles/2",
           "late-receipts": "late-receipts/1",
           "non-member-first": "non-member-first/2",
@@ -576,6 +655,8 @@
     ],
     "finalBallots": [
       {
+        "broken-copy-first": "broken-copy-first/1",
+        "early-copy-first": "early-copy-first/1",
         "future-first": "future-first/2",
         "invalid-first": "invalid-first/2",
         "junk-step": "junk-step/2",

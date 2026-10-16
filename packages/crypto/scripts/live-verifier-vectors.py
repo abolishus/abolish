@@ -91,18 +91,23 @@ def counts_toward(st):
 
 def entering(ballots, segment, head):
     """The ballot a nullifier enters with at a snapshot, or None. Copies with
-    the same message are one ballot (repeats); the first copy in the snapshot
-    stands for it."""
-    first = {}
+    the same message are one ballot (repeats): it counts if any copy counts
+    and is admitted if any copy is, since a failed copy is never an earlier
+    ballot (R4); its first admitted copy, else its first counting one, stands
+    for it. A receipt batch's pair (`batchReceipted`) never counts: ballot
+    versions 4 and 5 fix no batch version."""
+    by_message = {}
     for b in sorted(ballots, key=lambda x: x["segment"]):
         st = status(b, segment, head)
-        if counts_toward(st) and b["message"] not in first:
-            first[b["message"]] = (b, st)
-    if len(first) != 1:
+        if counts_toward(st):
+            by_message.setdefault(b["message"], []).append((b, st))
+    if len(by_message) != 1:
         return None
-    (b, st), = first.values()
-    if st != "admitted":
+    (copies,) = by_message.values()
+    admitted = [b for b, st in copies if st == "admitted"]
+    if not admitted:
         return None
+    b = admitted[0]
     if b.get("receipted") is None or b["receipted"] > segment:
         return None
     return b
@@ -615,6 +620,24 @@ def main():
         "repeat": {
             "tier": 0,
             "ballots": [ballot("repeat"), dict(ballot("repeat", segment=11), id="repeat/1-copy")],
+        },
+        "broken-copy-first": {
+            "tier": 0,
+            "ballots": [
+                dict(ballot("broken-copy-first", member=False), id="broken-copy-first/1-broken"),
+                dict(ballot("broken-copy-first", segment=11), receipted=10),
+            ],
+        },
+        "early-copy-first": {
+            "tier": 0,
+            "ballots": [
+                dict(ballot("early-copy-first", invalid="window-before-open"), id="early-copy-first/1-early"),
+                dict(ballot("early-copy-first", segment=11), receipted=10),
+            ],
+        },
+        "batch-receipts-only": {
+            "tier": 0,
+            "ballots": [ballot("batch-receipts-only", receipted=-1, batchReceipted=10, delivered=False)],
         },
         "late-receipts": {"tier": 0, "ballots": [ballot("late-receipts", receipted=12)]},
         "never-receipted": {"tier": 0, "ballots": [ballot("never-receipted", receipted=-1, delivered=False)]},

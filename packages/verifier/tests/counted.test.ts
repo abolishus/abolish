@@ -382,7 +382,9 @@ describe("an honest election", () => {
     });
   });
 
-  test("the delivery records' order changes nothing (R3)", () => {
+  // Each run rebuilds the counted set over a whole board; these property
+  // tests have taken over the 5-second default on CI's runners.
+  test("the delivery records' order changes nothing (R3)", { timeout: 60_000 }, () => {
     const receipts = e.entries.slice(0, 12);
     fc.assert(
       fc.property(
@@ -556,31 +558,35 @@ describe("the counted set over any delivery", () => {
     [1, 2, 3, 4].map((seat) => ({ ballot, seat, payload: e.receipt(b, seat) })),
   );
 
-  test("a ballot counts in its cell exactly when every registered seat's receipt is kept, whatever else is (delivery.md, Delivery check)", () => {
-    fc.assert(
-      fc.property(fc.subarray(receipts), (kept) => {
-        const f = election(v1());
-        for (const r of kept) f.board(200, r.payload);
-        const r = countedChecks(f.inputs(cast, { destruction: false }));
-        const delivered = cast.map((_, i) => kept.filter((k) => k.ballot === i).length === 4);
-        expect(r.rows.get("5.9")).toEqual({ status: "pass" });
-        expect(r.delivery?.excluded.map((x) => x.entry)).toEqual(
-          cast.filter((_, i) => !delivered[i]).map((b) => b.entry),
-        );
-        for (const x of r.delivery?.excluded ?? []) {
-          const i = cast.findIndex((b) => b.entry === x.entry);
-          expect(x.missing).toEqual(
-            [1, 2, 3, 4].filter((s) => !kept.some((k) => k.ballot === i && k.seat === s)),
+  test(
+    "a ballot counts in its cell exactly when every registered seat's receipt is kept, whatever else is (delivery.md, Delivery check)",
+    { timeout: 60_000 },
+    () => {
+      fc.assert(
+        fc.property(fc.subarray(receipts), (kept) => {
+          const f = election(v1());
+          for (const r of kept) f.board(200, r.payload);
+          const r = countedChecks(f.inputs(cast, { destruction: false }));
+          const delivered = cast.map((_, i) => kept.filter((k) => k.ballot === i).length === 4);
+          expect(r.rows.get("5.9")).toEqual({ status: "pass" });
+          expect(r.delivery?.excluded.map((x) => x.entry)).toEqual(
+            cast.filter((_, i) => !delivered[i]).map((b) => b.entry),
           );
-        }
-        expect(r.cells?.map((c) => c.counted)).toEqual([
-          (delivered[0] ? 1 : 0) + (delivered[1] ? 1 : 0),
-          delivered[2] ? 1 : 0,
-        ]);
-      }),
-      { numRuns: Math.min(numRuns, 50) },
-    );
-  });
+          for (const x of r.delivery?.excluded ?? []) {
+            const i = cast.findIndex((b) => b.entry === x.entry);
+            expect(x.missing).toEqual(
+              [1, 2, 3, 4].filter((s) => !kept.some((k) => k.ballot === i && k.seat === s)),
+            );
+          }
+          expect(r.cells?.map((c) => c.counted)).toEqual([
+            (delivered[0] ? 1 : 0) + (delivered[1] ? 1 : 0),
+            delivered[2] ? 1 : 0,
+          ]);
+        }),
+        { numRuns: Math.min(numRuns, 50) },
+      );
+    },
+  );
 });
 
 describe("7.2 and 7.4 against the counted set", () => {

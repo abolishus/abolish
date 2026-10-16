@@ -70,7 +70,43 @@ export function printable(text: string): string {
   );
 }
 
-function summary(report: Report): string {
+/**
+ * The summary's results: each tier on its own line, and its cells under it
+ * where it has more than one. No line sums two tiers, so Tier 0's figures
+ * never join a Sybil-resistant tier's (T-01), and the header says the
+ * figures aren't verified unless `verdict` is, so a crafted bundle's counts
+ * never read as the election's result (T-53).
+ */
+function resultLines(report: Report): string[] {
+  if (report.tiers === undefined) return [];
+  const lines = [
+    report.verdict === "verified"
+      ? "results per tier, never summed across tiers:"
+      : `results per tier, not verified (verdict: ${report.verdict}):`,
+  ];
+  for (const t of report.tiers) {
+    const label = t.tier === 0 ? "tier 0 (not Sybil-resistant)" : `tier ${t.tier}`;
+    lines.push(
+      `  ${label}: ${t.counted} counted; ` +
+        (t.counts === undefined
+          ? "no counts (an opening of its cells didn't pass 7.2)"
+          : `counts ${t.counts.join(", ")}`),
+    );
+    const cells = (report.cells ?? []).filter((c) => c.tier === t.tier);
+    if (cells.length < 2) continue;
+    for (const c of cells)
+      lines.push(
+        `    cell ${c.cell}: ${c.counted} counted; ` +
+          (c.counts === undefined
+            ? `no counts (${c.code ?? ""})`
+            : `counts ${c.counts.join(", ")}`),
+      );
+  }
+  return lines;
+}
+
+/** The summary written to stderr (docs/spec/verifier.md, Command line). */
+export function summary(report: Report): string {
   const unauthenticated = Object.entries(report.inputs)
     .filter(([, source]) => !authenticated(source))
     .map(([name]) => name);
@@ -87,6 +123,7 @@ function summary(report: Report): string {
       lines.push(
         `  ${c.id} fail ${c.code ?? ""}${c.at === undefined ? "" : ` ${JSON.stringify(c.at)}`}`,
       );
+  lines.push(...resultLines(report));
   return lines.join("\n") + "\n";
 }
 

@@ -4,8 +4,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import fc from "fast-check";
 import { afterAll, describe, expect, test } from "vite-plus/test";
-import { exitCode, printable } from "../src/cli.ts";
-import { EXIT_CODES, readBundle, type Report, runCli, verifyBundle } from "../src/index.ts";
+import { exitCode, printable, summary } from "../src/cli.ts";
+import {
+  type CellReport,
+  EXIT_CODES,
+  readBundle,
+  type Report,
+  runCli,
+  type TierReport,
+  verifyBundle,
+} from "../src/index.ts";
 
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
 
@@ -198,6 +206,92 @@ describe("a rejected bundle", () => {
     expect(r.code).toBe(EXIT_CODES.bundleRejected);
     expect(r.stderr).toBe(
       "bundle rejected: bundle.json: unknown member a\\u{1b}[2J\\u{9b}31m\\u{202e}b\\u{5c}u{1b}\\u{d}\\u{a}\\u{0}\n",
+    );
+  });
+});
+
+describe("the summary's results", () => {
+  // No vector's bundle reaches a counted tally (counted.test.ts builds those
+  // in process), so the tiers and cells are set on a real report here.
+  const base = verifyBundle(readBundle(vectorDir(okId)));
+  const results = (report: Report) => {
+    const lines = summary(report).split("\n");
+    const at = lines.findIndex((l) => l.startsWith("results per tier"));
+    return at === -1 ? [] : lines.slice(at, -1);
+  };
+  const cells: CellReport[] = [
+    { cell: 0, tier: 0, counted: 2, counts: ["1", "1", "0"], signers: [1] },
+    { cell: 1, tier: 1, counted: 3, counts: ["2", "1", "0"], signers: [1, 2] },
+    { cell: 2, tier: 1, counted: 1, counts: ["0", "0", "1"], signers: [2] },
+    { cell: 3, tier: 2, counted: 4, code: "tally-missing", signers: [] },
+  ];
+  const tiers: TierReport[] = [
+    { tier: 0, counted: 2, counts: ["1", "1", "0"] },
+    { tier: 1, counted: 4, counts: ["2", "1", "1"] },
+    { tier: 2, counted: 4 },
+  ];
+
+  test("are absent until the report has tiers", () => {
+    expect(base.tiers).toBeUndefined();
+    expect(results(base)).toEqual([]);
+  });
+
+  test("give each tier its own line, never a sum across tiers, and Tier 0 its label", () => {
+    expect(results({ ...base, verdict: "verified", cells, tiers })).toEqual([
+      "results per tier, never summed across tiers:",
+      "  tier 0 (not Sybil-resistant): 2 counted; counts 1, 1, 0",
+      "  tier 1: 4 counted; counts 2, 1, 1",
+      "    cell 1: 3 counted; counts 2, 1, 0",
+      "    cell 2: 1 counted; counts 0, 0, 1",
+      "  tier 2: 4 counted; no counts (an opening of its cells didn't pass 7.2)",
+    ]);
+  });
+
+  test("say they aren't verified unless the verdict is (T-53)", () => {
+    for (const verdict of ["failed", "unverifiable"] as const)
+      expect(results({ ...base, verdict, cells, tiers })[0]).toBe(
+        `results per tier, not verified (verdict: ${verdict}):`,
+      );
+  });
+
+  test("show a cell without counts by its code", () => {
+    const split: CellReport[] = [
+      { cell: 0, tier: 2, counted: 1, counts: ["1", "0"], signers: [1] },
+      { cell: 1, tier: 2, counted: 2, code: "tally-opening", option: 1, signers: [] },
+    ];
+    expect(
+      results({ ...base, verdict: "verified", cells: split, tiers: [{ tier: 2, counted: 3 }] }),
+    ).toEqual([
+      "results per tier, never summed across tiers:",
+      "  tier 2: 3 counted; no counts (an opening of its cells didn't pass 7.2)",
+      "    cell 0: 1 counted; counts 1, 0",
+      "    cell 1: 2 counted; no counts (tally-opening)",
+    ]);
+  });
+
+  test("print every tier's own figures once, in order, and nothing else at tier level", () => {
+    const counts = fc.array(fc.nat({ max: 10_000 }), { minLength: 1, maxLength: 4 });
+    fc.assert(
+      fc.property(
+        fc.uniqueArray(fc.nat({ max: 5 }), { minLength: 1, maxLength: 3 }),
+        fc.array(counts, { minLength: 3, maxLength: 3 }),
+        (ids, figures) => {
+          const ts: TierReport[] = ids.map((tier, i) => ({
+            tier,
+            counted: (figures[i] as number[]).reduce((a, b) => a + b, 0),
+            counts: (figures[i] as number[]).map(String),
+          }));
+          const lines = results({ ...base, verdict: "verified", cells: [], tiers: ts });
+          expect(lines.slice(1)).toEqual(
+            ts.map(
+              (t) =>
+                `  ${t.tier === 0 ? "tier 0 (not Sybil-resistant)" : `tier ${t.tier}`}: ` +
+                `${t.counted} counted; counts ${(t.counts as string[]).join(", ")}`,
+            ),
+          );
+        },
+      ),
+      { numRuns },
     );
   });
 });

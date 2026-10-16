@@ -23,6 +23,7 @@ import {
   bytesFixed,
   type Codec,
   type CodecValue,
+  decode,
   DecodeError,
   type DecodeErrorCode,
   encode,
@@ -33,6 +34,10 @@ import {
   u32,
 } from "./codec.ts";
 import type { RegisteredKeys } from "./ceremony.ts";
+import { objectCid } from "./content-addressing.ts";
+import { ds } from "./domain-separation.ts";
+import { H } from "./group.ts";
+import { inclusionProof, merkleRoot, type TreeHash, verifyInclusion } from "./merkle.ts";
 import { PARAMETERS } from "./parameters.ts";
 import { RECORD_TYPES, RecordSchema, recordType } from "./record.ts";
 import { checkL1Reference, type FinalizedL1, selectBallots } from "./revoting.ts";
@@ -447,6 +452,214 @@ export function encodeObligationRoot(record: ObligationRootRecord): Uint8Array {
  */
 export function decodeObligationRoot(bytes: Uint8Array, pinned: 1): ObligationRootRecord {
   return SCHEMA.decode(OBLIGATION_ROOT, bytes, pinned).value;
+}
+
+const ROOT_TAG = "abolish/v1/sig/obligation-root";
+
+const obligationRootStatementV1 = struct([
+  ["definition_hash", hash32],
+  ["seat", u8],
+  ["kind", rootKind],
+  ["count", u32],
+  ["root", hash32],
+  ["leaves_cid", cid36],
+] as const);
+
+/** `m`, the root's signed statement: its fields without header or signature, 106 bytes. */
+export function obligationRootStatement(statement: ObligationRootStatement): Uint8Array {
+  const { kind, count, leaves_cid } = statement;
+  if (!Number.isInteger(count) || count < 1 || count > 0xffffffff)
+    throw new EncodeError("obligation root: count is 1 to 2³² − 1");
+  if (
+    !(leaves_cid instanceof Uint8Array) ||
+    !leavesCidPrefix(kind, count).every((b, i) => leaves_cid[i] === b)
+  )
+    throw new EncodeError("obligation root: leaves_cid isn't the CID its kind and count frame");
+  return encode(obligationRootStatementV1, {
+    definition_hash: statement.definition_hash,
+    seat: statement.seat,
+    kind,
+    count,
+    root: statement.root,
+    leaves_cid,
+  });
+}
+
+/**
+ * The obligation tree's hashes (docs/spec/delivery.md, Obligation tree): RFC
+ * 9162 under `abolish/v1/obligation/leaf` and `/node`, tags of its own, so no
+ * node of an obligation tree is a node of a board tree and no inclusion proof
+ * of one verifies in the other (T-30).
+ */
+export const OBLIGATION_TREE: TreeHash = Object.freeze({
+  leaf: (data: Uint8Array) => H(ds("abolish/v1/obligation/leaf", data)),
+  node: (left: Uint8Array, right: Uint8Array) => {
+    const both = new Uint8Array(left.length + right.length);
+    both.set(left);
+    both.set(right, left.length);
+    return H(ds("abolish/v1/obligation/node", both));
+  },
+});
+
+/**
+ * `H(DS("abolish/v1/obligation-root", record))` over the whole encoded
+ * record, header and signature included: how a counted-extent attestation
+ * names a root whose leaf object its seat holds and has checked
+ * (docs/spec/delivery.md, Leaf availability).
+ */
+export function obligationRootHash(encodedRecord: Uint8Array): Uint8Array {
+  return H(ds("abolish/v1/obligation-root", encodedRecord));
+}
+
+/** One leaf's bytes: a receipt pair (64) or a complaint entry (128). */
+function leafBytes(kind: ObligationRootKind, leaf: ReceiptPair | ComplaintEntry): Uint8Array {
+  return kind === OBLIGATION_ROOT_KINDS.receipts
+    ? encode(receiptPair, leaf as ReceiptPair)
+    : encode(complaintEntry, leaf as ComplaintEntry);
+}
+
+const receiptPair = struct([
+  ["ballot_hash", hash32],
+  ["share_hash", hash32],
+] as const);
+
+const complaintEntry = struct([
+  ["ballot_hash", hash32],
+  ["proof", COMPLAINT_PROOF],
+] as const);
+
+/**
+ * The leaves a leaf object holds for a root of `kind` over `count` leaves, or
+ * `undefined` if the object is inconsistent with it (docs/spec/delivery.md,
+ * Leaf availability, Consistency): not `count` leaves of the kind's size, not
+ * strictly ascending by ballot hash, or a complaint leaf whose proof doesn't
+ * decode as a complaint entry's does. The tree isn't compared here.
+ */
+function readLeafObject(
+  kind: ObligationRootKind,
+  count: number,
+  object: Uint8Array,
+): { readonly bytes: Uint8Array[]; readonly leaves: (ReceiptPair | ComplaintEntry)[] } | undefined {
+  const size = ROOT_LEAF_LENGTH[kind];
+  if (object.length !== size * count) return undefined;
+  const bytes: Uint8Array[] = [];
+  const leaves: (ReceiptPair | ComplaintEntry)[] = [];
+  for (let j = 0; j < count; j++) {
+    const b = object.subarray(size * j, size * (j + 1));
+    const last = leaves[leaves.length - 1];
+    if (last !== undefined && compareBytes(b.subarray(0, 32), last.ballot_hash) <= 0)
+      return undefined;
+    try {
+      leaves.push(
+        kind === OBLIGATION_ROOT_KINDS.receipts
+          ? decode(receiptPair, b)
+          : decode(complaintEntry, b),
+      );
+    } catch (e) {
+      if (!(e instanceof DecodeError)) throw e;
+      return undefined;
+    }
+    bytes.push(b);
+  }
+  return { bytes, leaves };
+}
+
+/** An obligation root as a trustee node submits it, with the leaf object it then serves. */
+export interface ObligationRootBuild {
+  readonly record: ObligationRootRecord;
+  /** The leaves concatenated in ballot-hash order: what `leaves_cid` names. */
+  readonly leafObject: Uint8Array;
+}
+
+/**
+ * A trustee node's obligation root over every receipt (kind 1) or complaint
+ * (kind 2) it owes for one election (docs/spec/delivery.md, Obligation root;
+ * Elections that commit roots): the leaves sorted by ballot hash, their leaf
+ * object, its canonical CID, the tree's root, and the seat's signature with its
+ * per-election signing key. A node MUST pass only the receipts it issued at
+ * intake, or complaints whose proofs it made; a repeated ballot hash throws.
+ */
+export function buildObligationRoot(
+  signingSecret: Uint8Array,
+  definitionHash: Uint8Array,
+  seat: number,
+  owed:
+    | { readonly kind: 1; readonly leaves: readonly ReceiptPair[] }
+    | { readonly kind: 2; readonly leaves: readonly ComplaintEntry[] },
+): ObligationRootBuild {
+  const { kind } = owed;
+  const sorted: readonly (ReceiptPair | ComplaintEntry)[] = [...owed.leaves].sort((a, b) =>
+    compareBytes(a.ballot_hash, b.ballot_hash),
+  );
+  if (sorted.length < 1 || sorted.length > 0xffffffff)
+    throw new RangeError("buildObligationRoot: a root has 1 to 2³² − 1 leaves");
+  for (let i = 1; i < sorted.length; i++)
+    if (
+      compareBytes(
+        (sorted[i] as ReceiptPair).ballot_hash,
+        (sorted[i - 1] as ReceiptPair).ballot_hash,
+      ) === 0
+    )
+      throw new RangeError("buildObligationRoot: a ballot hash is listed twice");
+  const leaves = sorted.map((l) => leafBytes(kind, l));
+  const leafObject = new Uint8Array(ROOT_LEAF_LENGTH[kind] * leaves.length);
+  leaves.forEach((l, j) => leafObject.set(l, ROOT_LEAF_LENGTH[kind] * j));
+  const statement: ObligationRootStatement = {
+    definition_hash: Uint8Array.from(definitionHash),
+    seat,
+    kind,
+    count: leaves.length,
+    root: merkleRoot(OBLIGATION_TREE, leaves),
+    leaves_cid: objectCid(leafObject),
+  };
+  const m = obligationRootStatement(statement);
+  return {
+    record: { ...statement, signature: signStatement(signingSecret, ROOT_TAG, m) },
+    leafObject,
+  };
+}
+
+/**
+ * The audit path proving leaf `index` of a leaf object is in its root, for a
+ * client that asks its seat's node for evidence of its receipt
+ * (docs/spec/delivery.md, Client rules). Throws if the object isn't
+ * consistent with `kind` and its length.
+ */
+export function obligationInclusionProof(
+  kind: ObligationRootKind,
+  leafObject: Uint8Array,
+  index: number,
+): Uint8Array[] {
+  const read = readLeafObject(kind, leafObject.length / ROOT_LEAF_LENGTH[kind], leafObject);
+  if (read === undefined || read.bytes.length === 0)
+    throw new RangeError("obligationInclusionProof: not a leaf object of its kind");
+  return inclusionProof(OBLIGATION_TREE, read.bytes, index);
+}
+
+/**
+ * Verifies that `leaf` (64 or 128 bytes, as the root's kind gives) is leaf
+ * `index` of `root`, with RFC 9162's audit path under the obligation tree's
+ * tags, the size and root both from the one record (docs/spec/delivery.md,
+ * Obligation tree). It doesn't check the record's signature: a client checks a
+ * leaf against the root the contract recorded, whose signature the board
+ * verified. Evidence only: a leaf counts only once its root is available.
+ */
+export function verifyObligationInclusion(
+  root: ObligationRootRecord,
+  index: number,
+  leaf: Uint8Array,
+  proof: readonly Uint8Array[],
+): boolean {
+  if (!Number.isSafeInteger(index) || index < 0) return false;
+  if (!(leaf instanceof Uint8Array) || leaf.length !== ROOT_LEAF_LENGTH[root.kind]) return false;
+  return verifyInclusion(
+    OBLIGATION_TREE,
+    BigInt(index),
+    BigInt(root.count),
+    leaf,
+    proof,
+    root.root,
+  );
 }
 
 export function encodeShareComplaintBatch(record: ShareComplaintBatchRecord): Uint8Array {
@@ -968,8 +1181,9 @@ export function complaintScope(
  * The forced path's figures a release pins (docs/spec/delivery.md,
  * Capacity): what every seat of every election together can send through
  * L1 deposits when the sequencer refuses their transactions, and what a
- * receipt call (one share-receipt batch) and a complaint call cost there. The board's tests bind the
- * two call figures to measured gas, with `P256VERIFY` (T-25, T-52, T-54).
+ * receipt call (one share-receipt batch), a complaint call and an obligation
+ * root's call cost there. The board's tests bind the three call figures to
+ * measured gas, with `P256VERIFY` (T-25, T-52, T-54).
  */
 export const FORCED_PATH = Object.freeze({
   /** Deposit gas per L1 block: the portal's target, `maxResourceLimit / elasticityMultiplier`. */
@@ -984,6 +1198,8 @@ export const FORCED_PATH = Object.freeze({
   complaintsPerCall: 512n,
   /** Gas of one complaint-batch call of up to `complaintsPerCall`, intrinsic gas included. */
   complaintCallGas: 5_000_000n,
+  /** Gas of one `submitObligationRoot` call, intrinsic gas included, whatever its count. */
+  rootCallGas: 200_000n,
 } as const);
 
 /** The windows the forced path's intervals are read from: `W_C`, `F` and `R`, the values `deliveryWindowFits` checks. */
@@ -1071,8 +1287,20 @@ export function forcedPathFits(
   elections: Iterable<ForcedPathElection>,
   windows: ForcedPathWindows,
 ): boolean {
+  return demandsFit(
+    [...elections].map((e) => forcedPathDemand(e, windows)),
+    windows,
+  );
+}
+
+function demandsFit(
+  demands: readonly {
+    readonly receipts: ForcedPathInterval;
+    readonly complaints: ForcedPathInterval;
+  }[],
+  windows: ForcedPathWindows,
+): boolean {
   const lengths = forcedPathLengths(windows);
-  const demands = [...elections].map((e) => forcedPathDemand(e, windows));
   const receipts = demands.map((d) => d.receipts);
   const complaints = demands.map((d) => d.complaints);
   const at = (xs: ForcedPathInterval[], t: bigint) =>
@@ -1086,6 +1314,47 @@ export function forcedPathFits(
     if (rate > limit) return false;
   }
   return true;
+}
+
+/**
+ * Internal: one election's forced-path demand once roots can deliver
+ * (docs/spec/delivery.md, Capacity; Elections that commit roots). It commits
+ * roots exactly when, alone, its batches don't fit (`forcedPathFits`), and
+ * then each of its two intervals carries one root call per seat whatever its
+ * members, `s · ROOT_CALL_GAS`; the batch and root figures never mix within
+ * one election. The package entry point doesn't export it: until P1-12f part
+ * 3 reads a root's leaves and P4-3 part 2c brings the attestation that makes
+ * them available, no root can deliver, and nodes keep `forcedPathFits`, which
+ * counts every election with batches and so refuses every election that
+ * would commit roots (T-25, T-52, T-54).
+ */
+export function forcedPathDemandWithRoots(
+  election: ForcedPathElection,
+  windows: ForcedPathWindows,
+): {
+  readonly commitsRoots: boolean;
+  readonly receipts: ForcedPathInterval;
+  readonly complaints: ForcedPathInterval;
+} {
+  const batches = forcedPathDemand(election, windows);
+  if (demandsFit([batches], windows)) return { commitsRoots: false, ...batches };
+  const gas = BigInt(election.seats) * FORCED_PATH.rootCallGas;
+  return {
+    commitsRoots: true,
+    receipts: { ...batches.receipts, gas },
+    complaints: { ...batches.complaints, gas },
+  };
+}
+
+/** Internal: `forcedPathFits` over `forcedPathDemandWithRoots`, for the same parts to enable. */
+export function forcedPathFitsWithRoots(
+  elections: Iterable<ForcedPathElection>,
+  windows: ForcedPathWindows,
+): boolean {
+  return demandsFit(
+    [...elections].map((e) => forcedPathDemandWithRoots(e, windows)),
+    windows,
+  );
 }
 
 /**
@@ -1185,19 +1454,31 @@ export type DeliveryRecordCode =
   | "complaint-void"
   | "complaint-proof"
   | "complaint-unfounded"
-  | "receipt-contradicted";
+  | "receipt-contradicted"
+  | "root-signature"
+  | "root-repeat"
+  | "root-count"
+  | "root-withheld"
+  | "root-inconsistent";
 
 /** A record the check ignored or attributed, by its position in the entries checked. */
 export interface DeliveryRecordReport {
   readonly at: number;
   /** For a share-receipt batch's pair, its index in the batch from 0; a batch is one record. */
   readonly pair?: number;
+  /** For an obligation root's leaf, its index in the leaf list from 0; a root is one record. */
+  readonly leaf?: number;
   readonly code: DeliveryRecordCode;
   /**
    * The seat its signature attributes it to, or `null`, for the attributable
-   * codes (`share-receipt`, `complaint-unfounded`, `receipt-contradicted`).
+   * codes (`share-receipt`, `complaint-unfounded`, `receipt-contradicted`,
+   * `root-signature` and the root codes reported against its seat).
    */
   readonly signer?: number | null;
+  /** For `root-withheld`: the seats that named the root in their counted-extent attestations, ascending. */
+  readonly namedBy?: readonly number[];
+  /** For `root-withheld`: the seats that attested the counted extent without naming it, ascending. */
+  readonly attestedWithout?: readonly number[];
 }
 
 /** A proven complaint, by its position, with the seat its signature attributes it to, or `null`. */
@@ -1205,6 +1486,8 @@ export interface ProvenComplaint {
   readonly at: number;
   /** For a share-complaint batch's entry, its index in the batch from 0. */
   readonly pair?: number;
+  /** For a complaint root's leaf, its index in the leaf list from 0. */
+  readonly leaf?: number;
   readonly seat: number;
   readonly signer: number | null;
 }
@@ -1225,6 +1508,43 @@ export interface DeliveryCheck {
   readonly records: readonly DeliveryRecordReport[];
   /** Payloads that don't decode under the fixed version: rejected entries, never an election failure. */
   readonly rejected: readonly { readonly at: number; readonly error: DecodeErrorCode }[];
+  /**
+   * Obligation roots the check couldn't read from what it was given: an
+   * available root whose leaf object no source served with the bytes its CID
+   * names, or, without `roots`, any root that reaches the bound. When any is
+   * listed the counted set isn't decided from these sources, never failed:
+   * `ballots` and `records` are then empty (docs/spec/delivery.md, Leaf
+   * availability, Fetched; T-53, T-24).
+   */
+  readonly unverifiable: readonly { readonly at: number }[];
+}
+
+/**
+ * What the delivery check reads obligation roots against (docs/spec/delivery.md,
+ * Delivery check; Leaf availability), all from data the verifier has already
+ * checked.
+ */
+export interface DeliveryRoots {
+  /** `2M`, the obligation's bound, from the members [[verifier]] 2.4 recomputes. */
+  readonly bound: bigint;
+  /** `k`, the default panel's threshold: a root is available with `q − k + 1` of the `q` qualified seats naming it. */
+  readonly threshold: number;
+  /**
+   * Each qualified seat's counted-extent attestation that counts (recorded by
+   * `t_A'`, through the contract path), at most one per seat: the record
+   * hashes (`obligationRootHash`) of the roots it names.
+   */
+  readonly attestations: readonly {
+    readonly seat: number;
+    readonly roots: readonly Uint8Array[];
+  }[];
+  /**
+   * What the sources served for a leaf object's CID, each source's bytes
+   * whole, in the order tried: the first whose canonical CID is `cid` is read,
+   * and bytes that don't give it are a failed fetch from that source, never a
+   * verdict on the root.
+   */
+  leafObjects(cid: Uint8Array): readonly Uint8Array[];
 }
 
 /** A seat of either panel: version 1's records and ballots name only default seats. */
@@ -1274,6 +1594,14 @@ interface ComplaintBatchItem extends PanelSeat {
   readonly signature: Uint8Array;
 }
 
+/** A decoded obligation root: one seat's receipts or complaints under one signature over `statement`. */
+interface RootItem extends PanelSeat {
+  readonly kind: "root";
+  readonly definitionHash: Uint8Array;
+  readonly record: ObligationRootRecord;
+  readonly statement: Uint8Array;
+}
+
 /** What differs between the versions: decoding, each panel's keys, and the per-seat checks. */
 interface DeliveryRules {
   /** Strictly decodes a payload of `kind` under the version the ballot version fixes; throws `DecodeError`. */
@@ -1282,6 +1610,8 @@ interface DeliveryRules {
   decodeBatch(payload: Uint8Array): BatchItem;
   /** The same for a contract-path complaint batch. */
   decodeComplaintBatch(payload: Uint8Array): ComplaintBatchItem;
+  /** The same for a contract-path obligation root. */
+  decodeRoot(payload: Uint8Array): RootItem;
   /** The tag a complaint's signature is under. */
   readonly complaintTag: SignatureTag;
   /** The seat's registered keys in its own panel's key set. */
@@ -1317,7 +1647,25 @@ interface SeatCheck {
   readonly ballots: readonly SeatDelivery[];
   readonly records: readonly SeatReport[];
   readonly rejected: readonly { readonly at: number; readonly error: DecodeErrorCode }[];
+  readonly unverifiable: readonly { readonly at: number }[];
 }
+
+/** `DeliveryRoots` once checked against the registered key set. */
+interface RootReader {
+  readonly bound: bigint;
+  /** Who named a root's record hash, who attested without naming it, and whether that makes it available. */
+  availability(recordHash: Uint8Array): {
+    readonly available: boolean;
+    readonly namedBy: readonly number[];
+    readonly attestedWithout: readonly number[];
+  };
+  leafObjects(cid: Uint8Array): readonly Uint8Array[];
+}
+
+/** Where in a record a report or proven complaint is: a batch's pair or a root's leaf. */
+type Part = { readonly pair?: number; readonly leaf?: number };
+
+const partOrder = (p: Part) => p.pair ?? p.leaf ?? -1;
 
 const sameBytes = (a: Uint8Array, b: Uint8Array) =>
   a.length === b.length && a.every((x, i) => x === b[i]);
@@ -1329,14 +1677,14 @@ const seatKey = (s: PanelSeat) => `${s.panel}:${s.seat}`;
 const bySeat = (a: PanelSeat, b: PanelSeat) => a.panel - b.panel || a.seat - b.seat;
 
 // The record type, read before decoding: no board-entry version allows a
-// posting or a batch, so one here through the board path is rejected like the
-// entry that would carry it, and another record type, which the caller
-// shouldn't have passed, is rejected like any undecodable entry, so board
-// content can't stop the check.
+// posting, a batch or an obligation root, so one here through the board path
+// is rejected like the entry that would carry it, and another record type,
+// which the caller shouldn't have passed, is rejected like any undecodable
+// entry, so board content can't stop the check.
 function deliveryKind(
   payload: Uint8Array,
   path: DeliveryEntry["path"],
-): DeliveryItem["kind"] | "batch" | "complaint-batch" {
+): DeliveryItem["kind"] | "batch" | "complaint-batch" | "root" {
   if (payload.length < 3) throw new DecodeError("truncated", 0);
   const type = ((payload[0] as number) << 8) | (payload[1] as number);
   if (type === RECORD_TYPES.shareReceipt) return "receipt";
@@ -1344,6 +1692,7 @@ function deliveryKind(
   if (type === RECORD_TYPES.shareComplaint) return "complaint";
   if (type === RECORD_TYPES.shareReceiptBatch && path === "contract") return "batch";
   if (type === RECORD_TYPES.shareComplaintBatch && path === "contract") return "complaint-batch";
+  if (type === RECORD_TYPES.obligationRoot && path === "contract") return "root";
   throw new DecodeError("unexpected-record-type", 0);
 }
 
@@ -1398,6 +1747,7 @@ function deliveryCheck(
   qualified: readonly PanelSeat[],
   entries: readonly DeliveryEntry[],
   rules: DeliveryRules,
+  roots: RootReader | undefined,
 ): SeatCheck {
   const { definitionHash, segments, deadlines } = election;
   // A ballot hash binds the tier or cell and the nullifier, so selected ballots never share one.
@@ -1406,13 +1756,14 @@ function deliveryCheck(
   const delivered = hashes.map(() => new Set<string>());
   const records: SeatReport[] = [];
   const rejected: { at: number; error: DecodeErrorCode }[] = [];
+  const unverifiable: { at: number }[] = [];
   // Passing receipts and complaints to check once every posting is known, by ballot.
-  const receipts: { at: number; pair?: number; ballot: number; seat: PanelSeat }[] = [];
-  // A batch entry carries its batch's signature verdict; a single complaint is
-  // verified when it is judged.
+  const receipts: { at: number; part: Part; ballot: number; seat: PanelSeat }[] = [];
+  // A batch entry or root leaf carries its record's signature verdict; a
+  // single complaint is verified when it is judged.
   const complaints: {
     at: number;
-    pair?: number;
+    part: Part;
     ballot: number;
     item: PanelSeat & {
       readonly proof: ComplaintProof;
@@ -1448,7 +1799,7 @@ function deliveryCheck(
         return;
       }
       (delivered[ballot] as Set<string>).add(seatKey(seat));
-      receipts.push({ at, pair, ballot, seat });
+      receipts.push({ at, part: { pair }, ballot, seat });
     });
   };
 
@@ -1475,7 +1826,7 @@ function deliveryCheck(
       }
       complaints.push({
         at,
-        pair,
+        part: { pair },
         ballot,
         item: { ...seat, proof: e.proof, statement: d.statement, signature: d.signature },
         signed,
@@ -1483,8 +1834,103 @@ function deliveryCheck(
     });
   };
 
+  // The slots a root fills: the first of each seat and kind, in board order,
+  // whose signature verifies (docs/spec/delivery.md, One per seat and kind).
+  // The contract accepts one per slot, so the operator's order decides none
+  // (T-52, T-17).
+  const filled = new Set<string>();
+
+  // A contract-path obligation root: read once as a record, set aside with
+  // its first code in the spec's order, or read leaf by leaf as a batch's
+  // pairs or entries are (docs/spec/delivery.md, Delivery check).
+  const root = (at: number, submittedAt: bigint, payload: Uint8Array, d: RootItem) => {
+    const seat: PanelSeat = { panel: d.panel, seat: d.seat };
+    const { record } = d;
+    const key = rules.keys(seat);
+    if (key === undefined) {
+      records.push({ at, code: "delivery-seat", ...seat });
+      return;
+    }
+    // T-29: only the seat's registered signing key, never its identity key;
+    // an unsigned root is no one's and fills no slot.
+    if (!verifyStatement(key.signingKey, ROOT_TAG, d.statement, record.signature)) {
+      records.push({ at, code: "root-signature", signer: null, ...seat });
+      return;
+    }
+    const slot = `${seatKey(seat)}:${record.kind}`;
+    if (filled.has(slot)) {
+      records.push({ at, code: "root-repeat", ...seat });
+      return;
+    }
+    filled.add(slot);
+    const receiptRoot = record.kind === OBLIGATION_ROOT_KINDS.receipts;
+    if (submittedAt > (receiptRoot ? deadlines.delivery : deadlines.complaint)) {
+      records.push({ at, code: "delivery-late", ...seat });
+      return;
+    }
+    // Without the bound, the attestations and the leaf objects, a root that
+    // may deliver can't be read: undecided, never a guess either way (T-25, T-53).
+    if (roots === undefined) {
+      unverifiable.push({ at });
+      return;
+    }
+    // T-52, T-17: before anything is fetched, so no seat makes a verifier
+    // read more than it could owe.
+    if (BigInt(record.count) > roots.bound) {
+      records.push({ at, code: "root-count", signer: d.seat, ...seat });
+      return;
+    }
+    const named = roots.availability(obligationRootHash(payload));
+    if (!named.available) {
+      records.push({
+        at,
+        code: "root-withheld",
+        signer: d.seat,
+        namedBy: named.namedBy,
+        attestedWithout: named.attestedWithout,
+        ...seat,
+      });
+      return;
+    }
+    // A source's bytes that don't give the CID are its failed fetch; if none
+    // gives it, the election is unverifiable from these sources, never the
+    // root inconsistent, so no source changes a root's verdict (T-53, T-24).
+    const object = roots
+      .leafObjects(record.leaves_cid)
+      .find((o) => o instanceof Uint8Array && sameBytes(objectCid(o), record.leaves_cid));
+    if (object === undefined) {
+      unverifiable.push({ at });
+      return;
+    }
+    const read = readLeafObject(record.kind, record.count, object);
+    if (read === undefined || !sameBytes(merkleRoot(OBLIGATION_TREE, read.bytes), record.root)) {
+      records.push({ at, code: "root-inconsistent", signer: d.seat, ...seat });
+      return;
+    }
+    // The root's signature has verified, so every leaf is the seat's.
+    read.leaves.forEach((l, leaf) => {
+      const ballot = byHash.get(hex(l.ballot_hash));
+      if (ballot === undefined) return;
+      if ("share_hash" in l) {
+        if (!sameBytes(l.share_hash, rules.shareHash(ballot, seat))) {
+          records.push({ at, leaf, code: "share-receipt", signer: d.seat, ...seat });
+          return;
+        }
+        (delivered[ballot] as Set<string>).add(seatKey(seat));
+        receipts.push({ at, part: { leaf }, ballot, seat });
+      } else
+        complaints.push({
+          at,
+          part: { leaf },
+          ballot,
+          item: { ...seat, proof: l.proof, statement: d.statement, signature: record.signature },
+          signed: true,
+        });
+    });
+  };
+
   entries.forEach((entry, at) => {
-    let d: DeliveryItem | BatchItem | ComplaintBatchItem;
+    let d: DeliveryItem | BatchItem | ComplaintBatchItem | RootItem;
     try {
       const kind = deliveryKind(entry.payload, entry.path);
       d =
@@ -1492,7 +1938,9 @@ function deliveryCheck(
           ? rules.decodeBatch(entry.payload)
           : kind === "complaint-batch"
             ? rules.decodeComplaintBatch(entry.payload)
-            : rules.decode(kind, entry.payload);
+            : kind === "root"
+              ? rules.decodeRoot(entry.payload)
+              : rules.decode(kind, entry.payload);
     } catch (e) {
       if (!(e instanceof DecodeError)) throw e;
       rejected.push({ at, error: e.code });
@@ -1503,11 +1951,12 @@ function deliveryCheck(
       records.push({ at, code: "delivery-stray", ...seat });
       return;
     }
-    if (d.kind === "batch" || d.kind === "complaint-batch") {
-      // deliveryKind reads a batch only through the contract path.
+    if (d.kind === "batch" || d.kind === "complaint-batch" || d.kind === "root") {
+      // deliveryKind reads a batch or a root only through the contract path.
       if (entry.path === "contract")
         if (d.kind === "batch") batch(at, entry.submittedAt, d);
-        else complaintBatch(at, entry.submittedAt, d);
+        else if (d.kind === "complaint-batch") complaintBatch(at, entry.submittedAt, d);
+        else root(at, entry.submittedAt, entry.payload, d);
       return;
     }
     const ballot = byHash.get(hex(d.ballotHash));
@@ -1547,7 +1996,7 @@ function deliveryCheck(
         return;
       }
       (delivered[ballot] as Set<string>).add(seatKey(seat));
-      receipts.push({ at, ballot, seat });
+      receipts.push({ at, part: {}, ballot, seat });
     } else if (d.kind === "posting") {
       const p = rules.posting(ballot, seat, key, d.posting);
       if (!p.ok) {
@@ -1557,16 +2006,15 @@ function deliveryCheck(
       (delivered[ballot] as Set<string>).add(seatKey(seat));
       postings[ballot]?.set(seatKey(seat), d.posting);
     } else {
-      complaints.push({ at, ballot, item: d });
+      complaints.push({ at, part: {}, ballot, item: d });
     }
   });
 
   // Complaints, once every posting is known: the passing posting needn't come
   // before the complaint on the board.
   const excluded = hashes.map(() => [] as (ProvenComplaint & { readonly panel: SeatPanel })[]);
-  for (const { at, pair, ballot, item, signed } of complaints) {
+  for (const { at, part: p, ballot, item, signed } of complaints) {
     const seat: PanelSeat = { panel: item.panel, seat: item.seat };
-    const p = pair === undefined ? {} : { pair };
     const posting = postings[ballot]?.get(seatKey(seat));
     if (posting === undefined) {
       records.push({ at, ...p, code: "complaint-void", ...seat });
@@ -1588,22 +2036,22 @@ function deliveryCheck(
   // A passing receipt for a seat whose complaint about the same ballot, in the
   // same panel, is proven: the seat signed that shares passed which a public
   // proof shows don't (T-29).
-  for (const { at, pair, ballot, seat } of receipts)
+  for (const { at, part, ballot, seat } of receipts)
     if (excluded[ballot]?.some((c) => c.panel === seat.panel && c.seat === seat.seat))
       records.push({
         at,
-        ...(pair === undefined ? {} : { pair }),
+        ...part,
         code: "receipt-contradicted",
         signer: seat.seat,
         ...seat,
       });
 
-  records.sort((a, b) => a.at - b.at || (a.pair ?? -1) - (b.pair ?? -1));
+  records.sort((a, b) => a.at - b.at || partOrder(a) - partOrder(b));
   const ballots = hashes.map((ballotHash, i) => {
     const got = delivered[i] as Set<string>;
     const missing = qualified.filter((s) => !got.has(seatKey(s))).sort(bySeat);
     const excludedBy = (excluded[i] as (ProvenComplaint & { panel: SeatPanel })[]).sort(
-      (a, b) => a.at - b.at || (a.pair ?? -1) - (b.pair ?? -1),
+      (a, b) => a.at - b.at || partOrder(a) - partOrder(b),
     );
     return {
       ballotHash,
@@ -1613,7 +2061,10 @@ function deliveryCheck(
       excludedBy,
     };
   });
-  return { ballots, records, rejected };
+  // T-53: a counted set decided without a root that may deliver would be a
+  // guess, so nothing is decided.
+  if (unverifiable.length > 0) return { ballots: [], records: [], rejected, unverifiable };
+  return { ballots, records, rejected, unverifiable };
 }
 
 /**
@@ -1627,13 +2078,17 @@ function deliveryCheck(
  * A ballot stays in the counted set only if every qualified seat has a
  * receipt or a passing posting in time and no complaint about it is proven.
  * Neither depends on the records' order, duplicates or records for other
- * ballots (R3).
+ * ballots (R3). A contract-path obligation root is read against `roots`, its
+ * leaves delivering or excluding only once available and consistent; without
+ * `roots`, a root that reaches the bound leaves the counted set undecided
+ * (`unverifiable`).
  */
 export function checkDelivery(
   election: DeliveryElection,
   ballots: readonly DeliveryBallot[],
   entries: readonly DeliveryEntry[],
   pinned: 1,
+  roots?: DeliveryRoots,
 ): DeliveryCheck {
   const { definitionHash, panelSize, registered, segments, deadlines } = election;
   if (!(definitionHash instanceof Uint8Array) || definitionHash.length !== 32)
@@ -1643,6 +2098,7 @@ export function checkDelivery(
   const keyOf = keySet(registered, panelSize, "checkDelivery");
   checkWindows(segments, deadlines, "checkDelivery");
   checkEntries(entries, "checkDelivery");
+  const reader = roots === undefined ? undefined : rootReader(roots, registered);
 
   const hashes = ballots.map((b) => {
     if (b.vote.share_hashes.length !== panelSize)
@@ -1655,6 +2111,17 @@ export function checkDelivery(
   const ctx = { definitionHash };
   const rules: DeliveryRules = {
     complaintTag: COMPLAINT_TAG,
+    decodeRoot(payload) {
+      const record = decodeObligationRoot(payload, pinned);
+      return {
+        kind: "root",
+        definitionHash: record.definition_hash,
+        panel: SEAT_PANELS.default,
+        seat: record.seat,
+        record,
+        statement: obligationRootStatement(record),
+      };
+    },
     decodeComplaintBatch(payload) {
       const r = decodeShareComplaintBatch(payload, pinned);
       return {
@@ -1744,27 +2211,73 @@ export function checkDelivery(
       ),
   };
   const qualified = registered.map((k) => ({ panel: SEAT_PANELS.default, seat: k.index }));
-  const r = deliveryCheck(election, hashes, qualified, entries, rules);
+  const r = deliveryCheck(election, hashes, qualified, entries, rules, reader);
   return {
     ballots: r.ballots.map((b) => ({
       ballotHash: b.ballotHash,
       counted: b.counted,
       delivered: b.delivered,
       missing: b.missing.map((s) => s.seat),
-      excludedBy: b.excludedBy.map(({ at, pair, seat, signer }) => ({
+      excludedBy: b.excludedBy.map(({ at, pair, leaf, seat, signer }) => ({
         at,
         ...(pair === undefined ? {} : { pair }),
+        ...(leaf === undefined ? {} : { leaf }),
         seat,
         signer,
       })),
     })),
-    records: r.records.map(({ at, pair, code, signer }) => ({
+    records: r.records.map(({ at, pair, leaf, code, signer, namedBy, attestedWithout }) => ({
       at,
       ...(pair === undefined ? {} : { pair }),
+      ...(leaf === undefined ? {} : { leaf }),
       code,
       ...(signer === undefined ? {} : { signer }),
+      ...(namedBy === undefined ? {} : { namedBy }),
+      ...(attestedWithout === undefined ? {} : { attestedWithout }),
     })),
     rejected: r.rejected,
+    unverifiable: r.unverifiable,
+  };
+}
+
+// The attestations checked once against the registered key set: each from a
+// qualified seat, at most one per seat, each naming 32-byte record hashes. A
+// root is available with `q − k + 1` of the `q` qualified seats naming it
+// (docs/spec/delivery.md, Leaf availability): withholding an honest root then
+// takes `k` seats, and making one available that no honest seat holds takes
+// `q − k + 1` (T-25, T-54).
+function rootReader(roots: DeliveryRoots, registered: readonly RegisteredKeys[]): RootReader {
+  const name = "checkDelivery";
+  const { bound, threshold, attestations } = roots;
+  if (typeof bound !== "bigint" || bound < 0n)
+    throw new RangeError(`${name}: the roots' bound must be a bigint ≥ 0`);
+  const q = registered.length;
+  if (!Number.isSafeInteger(threshold) || threshold < 1 || threshold > q)
+    throw new RangeError(`${name}: the threshold must be from 1 to the qualified seats`);
+  if (typeof roots.leafObjects !== "function")
+    throw new RangeError(`${name}: leafObjects must be a function`);
+  const qualified = new Set(registered.map((k) => k.index));
+  const named = new Map<number, Set<string>>();
+  for (const a of attestations) {
+    if (!qualified.has(a.seat) || named.has(a.seat))
+      throw new RangeError(`${name}: one attestation per qualified seat`);
+    if (!a.roots.every((h) => h instanceof Uint8Array && h.length === 32))
+      throw new RangeError(`${name}: an attestation names roots by 32-byte record hashes`);
+    named.set(a.seat, new Set(a.roots.map(hex)));
+  }
+  const attesting = [...named.keys()].sort((a, b) => a - b);
+  return {
+    bound,
+    availability(recordHash) {
+      const h = hex(recordHash);
+      const namedBy = attesting.filter((s) => named.get(s)?.has(h) === true);
+      return {
+        available: namedBy.length >= q - threshold + 1,
+        namedBy,
+        attestedWithout: attesting.filter((s) => named.get(s)?.has(h) !== true),
+      };
+    },
+    leafObjects: (cid) => roots.leafObjects(Uint8Array.from(cid)),
   };
 }
 
@@ -1897,6 +2410,10 @@ export function checkDeliveryV2With(
     decodeComplaintBatch() {
       throw new DecodeError("profile-mismatch", 2);
     },
+    // Nor any obligation-root version: every root is a rejected entry.
+    decodeRoot() {
+      throw new DecodeError("profile-mismatch", 2);
+    },
     decode(kind, payload) {
       if (kind === "receipt") {
         const r = decodeShareReceipt(payload, 2);
@@ -1959,7 +2476,13 @@ export function checkDeliveryV2With(
     ...registered.default.map((k) => ({ panel: SEAT_PANELS.default, seat: k.index })),
     ...registered.author.map((k) => ({ panel: SEAT_PANELS.author, seat: k.index })),
   ];
-  return deliveryCheck(election, hashes, qualified, entries, rules);
+  // Every root is rejected above, so none is ever unverifiable here.
+  const {
+    ballots: checked,
+    records,
+    rejected,
+  } = deliveryCheck(election, hashes, qualified, entries, rules, undefined);
+  return { ballots: checked, records, rejected };
 }
 
 /** Builds a share receipt record from an intake result, for the client and the node to board. */

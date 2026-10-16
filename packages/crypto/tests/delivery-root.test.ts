@@ -16,8 +16,8 @@ import { hex, SPEC_VECTORS } from "./spec-vectors.ts";
 // docs/spec/vectors/delivery-root.json comes from an independent Python
 // implementation of the obligation root (scripts/delivery-root-vectors.py),
 // so the expected fields and rejections never come from the code under test.
-// This part reads the record only: the tree, the leaf object and the delivery
-// check over roots are P1-12f part 2's.
+// This file reads the record only: the tree, the leaf object, the delivery
+// check over roots and the forced path are delivery-root-check.test.ts's.
 
 interface Vectors {
   readonly format: string;

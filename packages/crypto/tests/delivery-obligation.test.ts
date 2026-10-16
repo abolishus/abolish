@@ -129,8 +129,9 @@ describe("delivery-obligation vectors", () => {
     expect(V.format).toBe("abolish-delivery-obligation-vectors/1");
     expect(BigInt(V.windows.delivery)).toBe(DELIVERY_WINDOW);
     expect(BigInt(V.windows.complaint)).toBe(COMPLAINT_WINDOW);
+    // The root call's figure is delivery-root.json's (delivery-root-check.test.ts).
     for (const [k, v] of Object.entries(FORCED_PATH))
-      expect(BigInt(V.forcedPath[k as keyof typeof FORCED_PATH])).toBe(v);
+      if (k !== "rootCallGas") expect(BigInt(V.forcedPath[k as keyof typeof FORCED_PATH])).toBe(v);
     // The target is the portal's metered limit over its elasticity.
     expect(FORCED_PATH.depositGasTarget).toBe(
       BigInt(V.portal.maxResourceLimit) / BigInt(V.portal.elasticityMultiplier),

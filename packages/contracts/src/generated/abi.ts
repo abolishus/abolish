@@ -1596,6 +1596,172 @@ export const groupRegistryAbi = [
 ] as const;
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// RegistrationPaymaster
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+export const registrationPaymasterAbi = [
+  {
+    type: "constructor",
+    inputs: [
+      {
+        name: "entryPoint_",
+        internalType: "contract IStakeManager",
+        type: "address",
+      },
+      { name: "registry_", internalType: "address", type: "address" },
+      { name: "service_", internalType: "address", type: "address" },
+      { name: "admin_", internalType: "address", type: "address" },
+      { name: "maxCost_", internalType: "uint256", type: "uint256" },
+    ],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    inputs: [{ name: "unstakeDelaySec", internalType: "uint32", type: "uint32" }],
+    name: "addStake",
+    outputs: [],
+    stateMutability: "payable",
+  },
+  {
+    type: "function",
+    inputs: [],
+    name: "admin",
+    outputs: [{ name: "", internalType: "address", type: "address" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    inputs: [],
+    name: "deposit",
+    outputs: [],
+    stateMutability: "payable",
+  },
+  {
+    type: "function",
+    inputs: [],
+    name: "entryPoint",
+    outputs: [{ name: "", internalType: "contract IStakeManager", type: "address" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    inputs: [],
+    name: "getDeposit",
+    outputs: [{ name: "", internalType: "uint256", type: "uint256" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    inputs: [],
+    name: "maxCost",
+    outputs: [{ name: "", internalType: "uint256", type: "uint256" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    inputs: [
+      { name: "", internalType: "enum IPaymaster.PostOpMode", type: "uint8" },
+      { name: "", internalType: "bytes", type: "bytes" },
+      { name: "", internalType: "uint256", type: "uint256" },
+      { name: "", internalType: "uint256", type: "uint256" },
+    ],
+    name: "postOp",
+    outputs: [],
+    stateMutability: "pure",
+  },
+  {
+    type: "function",
+    inputs: [],
+    name: "registry",
+    outputs: [{ name: "", internalType: "address", type: "address" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    inputs: [],
+    name: "service",
+    outputs: [{ name: "", internalType: "address", type: "address" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    inputs: [],
+    name: "unlockStake",
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    inputs: [
+      {
+        name: "userOp",
+        internalType: "struct PackedUserOperation",
+        type: "tuple",
+        components: [
+          { name: "sender", internalType: "address", type: "address" },
+          { name: "nonce", internalType: "uint256", type: "uint256" },
+          { name: "initCode", internalType: "bytes", type: "bytes" },
+          { name: "callData", internalType: "bytes", type: "bytes" },
+          {
+            name: "accountGasLimits",
+            internalType: "bytes32",
+            type: "bytes32",
+          },
+          {
+            name: "preVerificationGas",
+            internalType: "uint256",
+            type: "uint256",
+          },
+          { name: "gasFees", internalType: "bytes32", type: "bytes32" },
+          { name: "paymasterAndData", internalType: "bytes", type: "bytes" },
+          { name: "signature", internalType: "bytes", type: "bytes" },
+        ],
+      },
+      { name: "", internalType: "bytes32", type: "bytes32" },
+      { name: "maxCost_", internalType: "uint256", type: "uint256" },
+    ],
+    name: "validatePaymasterUserOp",
+    outputs: [
+      { name: "context", internalType: "bytes", type: "bytes" },
+      { name: "validationData", internalType: "uint256", type: "uint256" },
+    ],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    inputs: [{ name: "to", internalType: "address payable", type: "address" }],
+    name: "withdrawStake",
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    inputs: [
+      { name: "to", internalType: "address payable", type: "address" },
+      { name: "amount", internalType: "uint256", type: "uint256" },
+    ],
+    name: "withdrawTo",
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  { type: "error", inputs: [], name: "InvalidDeployment" },
+  { type: "error", inputs: [], name: "NotAdmin" },
+  { type: "error", inputs: [], name: "NotEntryPoint" },
+  {
+    type: "error",
+    inputs: [
+      {
+        name: "refusal",
+        internalType: "enum RegistrationPaymaster.Refusal",
+        type: "uint8",
+      },
+    ],
+    name: "NotSponsored",
+  },
+  { type: "error", inputs: [], name: "PostOpNotUsed" },
+] as const;
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // TrusteeRegistry
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 

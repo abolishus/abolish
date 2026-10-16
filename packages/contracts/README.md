@@ -2,7 +2,7 @@
 
 Abolish's contracts (the L2 contracts and the L1 board anchor), built with Foundry 1.8.3 and solc 0.8.30. Internal and source-only: deployed bytecode is checked against the release build of this source (verifier check 1.2, T-64; Release build, below).
 
-**Status: early (P1-18, P3-2, P4-1).** So far there are the event accumulator, the election registry, the trustee key registry, the group registry with its Tier 0 additions, the board (direct submission of ballots, share receipts, postings and complaints, with its membership-proof, ballot and delivery checks, the close rule's window, relayed ballots and close statements), the L1 board anchor and the L1 relay. The deployable contracts have typed wagmi bindings (Bindings, below), and contract-event version 3 archives every event the board emits. Nothing is deployed: the registry's and the board's remaining pre-deployment requirements are in [`docs/spec/contracts.md`](../../docs/spec/contracts.md) (Known-weak sections).
+**Status: early (P1-18, P3-2, P4-1).** So far there are the event accumulator, the election registry, the trustee key registry, the group registry with its Tier 0 additions, the board (direct submission of ballots, share receipts, postings and complaints, with its membership-proof, ballot and delivery checks, the close rule's window, relayed ballots and close statements), the L1 board anchor, the L1 relay and the registration paymaster. The deployable contracts have typed wagmi bindings (Bindings, below), and contract-event version 3 archives every event the board emits. Nothing is deployed: the registry's and the board's remaining pre-deployment requirements are in [`docs/spec/contracts.md`](../../docs/spec/contracts.md) (Known-weak sections).
 
 ## Event accumulator
 
@@ -91,9 +91,18 @@ Abolish's contracts (the L2 contracts and the L1 board anchor), built with Found
 - The close rule ([`docs/spec/close.md`](../../docs/spec/close.md)): `submitBallot` refuses a ballot outside `[opens_at, closes_at]` by its block's timestamp (`BallotWindow`); `submitRelayedBallot(uint64, uint64, uint64, uint64, bytes)` accepts only the relay's L2 alias (`RelaySender`), checks the ballot as an ordinary one and its stamp against the window (`RelayWindow`), and emits `RelayedBallotSubmitted` for every deposit it accepts, a byte-identical record included; `submitCloseStatement(bytes)` (`src/CloseStatement.sol`) takes a version-1 statement signed by a seat of the default panel's registered key set, at most two per seat and election, the second only with another claim (T-35, T-50, T-71, T-17).
 - `test/Board.t.sol` runs the ballot and delivery vectors through it against stubs set from the files, and once against a real election registry. `test/BoardCloseRule.t.sol` replays `contract-event-v3.json`'s board sequence through the board at the file's address and chain, log for log and accumulator for accumulator, and runs `close-statement.json`'s statements, decode rejections and window verdicts and `relay.json`'s aliases; `test/invariant/BoardCloseRule.invariant.t.sol` holds the close rule's paths and the statement limit over random interleavings.
 
+## Registration paymaster
+
+`src/RegistrationPaymaster.sol` implements [`docs/spec/contracts.md`](../../docs/spec/contracts.md), Registration paymaster: our own ERC-4337 paymaster for EntryPoint v0.8, which pays for the signing service's Tier 0 batches ([`docs/adr/0024-tier0-registration.md`](../../docs/adr/0024-tier0-registration.md), [`docs/spec/registration.md`](../../docs/spec/registration.md)) and nothing else.
+
+- It pins the EntryPoint, the group registry, the signing service's account, its admin (the timelock behind our Safe) and `maxCost` as immutables; deployment refuses an EntryPoint, registry or admin without code (or with only an EIP-7702 delegation), no service and a zero cap (T-62).
+- `validatePaymasterUserOp` sponsors an operation only if, in this order: its sender is the service's account, it deploys no account, `paymasterAndData` is the 52-byte prefix with no data after it, its call is exactly the standard ABI encoding of `execute(registry, 0, inner)` with `inner` starting with `addMembers`'s selector, and its `maxCost` is at most the cap. It returns no context (so `postOp` is never called, and reverts) and no time range, and reads no storage, so bundlers accept it unstaked (ERC-7562). Refusals name the rule (`NotSponsored(Refusal)`).
+- Anyone may `deposit()`; only the admin may `withdrawTo`, `addStake`, `unlockStake` and `withdrawStake`. Nothing else can change: a new service account or cap is a new paymaster. It emits no log and holds nothing a verifier reads, so it doesn't inherit the event accumulator.
+- `test/RegistrationPaymaster.t.sol` runs it against a stand-in EntryPoint and account (`test/utils/MockEntryPoint.sol`) and a real group registry: a sponsored operation lands a signed batch from the vectors' registrars; every rule refuses its case (by fuzzing too: any sender but the service, any cost over the cap, any byte of the call changed outside the record); a changed record is sponsored and refused by the registry, costing the deposit at most the cap; and only the admin moves funds.
+
 ## Bindings
 
-`src/generated/abi.ts` holds the typed ABIs (`as const`) of the six deployable contracts, `BallotRelay`, `Board`, `BoardAnchor`, `ElectionRegistry`, `GroupRegistry` and `TrusteeRegistry`, made by the wagmi CLI's Foundry plugin from the build's `out/` (`wagmi.config.ts`). It is generated and never hand-edited:
+`src/generated/abi.ts` holds the typed ABIs (`as const`) of the seven deployable contracts, `BallotRelay`, `Board`, `BoardAnchor`, `ElectionRegistry`, `GroupRegistry`, `RegistrationPaymaster` and `TrusteeRegistry`, made by the wagmi CLI's Foundry plugin from the build's `out/` (`wagmi.config.ts`). It is generated and never hand-edited:
 
 - the package build compiles, then runs `wagmi generate` and formats the file with `vp fmt`, so `repro-build` fails if a commit's bindings don't match its contracts (it rejects a build that changes a tracked file);
 - `test/bindings.test.ts` checks that the file binds exactly the concrete contracts in `src/`, each with the ABI in its compiled artifact.
@@ -123,7 +132,7 @@ The release build, whose bytecode and immutable ranges verifier 1.2 pins and fro
 
 `vendor/openzeppelin-contracts/` holds six unmodified files of [OpenZeppelin Contracts](https://github.com/OpenZeppelin/openzeppelin-contracts) (MIT, its `LICENSE` beside them) at tag `v5.6.1`, commit `5fd1781b1454fd1ef8e722282f86f9293cacf256`: `P256.sol` and the four files it imports, and `ECDSA.sol`, which imports nothing. They are byte-identical to the same paths in that commit and in the npm package `@openzeppelin/contracts@5.6.1`. `foundry.toml` maps `@openzeppelin/contracts/` to them and nothing else. The `P256` library has been in OpenZeppelin's audited releases since 5.1, and `ECDSA` for much longer.
 
-`test/vendor.test.ts` checks that the directory holds exactly these files with these sha256 sums (the `sha256sum` lines below), and that the tree hash, the sha256 of those lines, is the one recorded here:
+`test/vendor.test.ts` checks that each directory holds exactly its files with these sha256 sums (the `sha256sum` lines below), and that the tree hash, the sha256 of those lines, is the one recorded here:
 
 <!-- vendored:openzeppelin-contracts -->
 
@@ -138,6 +147,19 @@ bdfdbe133991c0c78042957ff5cd97167926fcaf6d15664f3835a076cb066457  contracts/util
 ```
 
 Tree hash: `4629cf8a19588eecd38051c0dbd0966ca3187c1651d3187136e411eedff90771`.
+
+`vendor/account-abstraction/` holds three unmodified interface files of [eth-infinitism's account-abstraction](https://github.com/eth-infinitism/account-abstraction), ERC-4337's reference implementation, at tag `v0.8.0`, commit `4cbc06072cdc19fd60f285c5997f4f7f57a588de` (EntryPoint v0.8): `IPaymaster.sol`, the `PackedUserOperation.sol` it imports, and `IStakeManager.sol`, which imports nothing. They are byte-identical to the same paths in that commit and under `interfaces/` in the npm package `@account-abstraction/contracts@0.8.0`. Each file declares `SPDX-License-Identifier: MIT`, as the npm package does; the repository's `LICENSE`, beside them, is GPL-3.0, which this AGPL-3.0-only package can include either way. `foundry.toml` maps `@account-abstraction/contracts/` to them. They are declarations only: no code of theirs runs in the paymaster.
+
+<!-- vendored:account-abstraction -->
+
+```text
+3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986  LICENSE
+afa15dcc078da38975c9c34320f4312ec5fe4cd02d3e88f40dcf0cdaab6a7856  contracts/interfaces/IPaymaster.sol
+b5b638a2d9f046c7f77b83a1bb2a1f5804527cac17ca9726febdbe3607c86a2a  contracts/interfaces/IStakeManager.sol
+e1c1f25c071c981fa03901e86a85e7ac4300cdc5c54165a1b96962427d9a1930  contracts/interfaces/PackedUserOperation.sol
+```
+
+Tree hash: `4cac5efd3330ca2ebcea0a3c37375cfca8763d29ecf0185125facc0d3591a1d5`.
 
 The check proves the files haven't changed since they were vendored, not that they match upstream: re-deriving them from the tag in CI needs a `ci:` change (rule B), recorded as known-weak in [`docs/status/P1-18.md`](../../docs/status/P1-18.md).
 

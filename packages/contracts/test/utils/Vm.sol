@@ -17,6 +17,7 @@ interface Vm {
     function clearMockedCalls() external;
     function cool(address target) external;
     function computeCreateAddress(address deployer, uint256 nonce) external pure returns (address);
+    function deal(address account, uint256 newBalance) external;
     function envOr(string calldata name, bool defaultValue) external view returns (bool value);
     function etch(address target, bytes calldata newRuntimeBytecode) external;
     function expectRevert(bytes calldata revertData) external;

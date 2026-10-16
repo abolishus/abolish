@@ -8,7 +8,10 @@ test = "test"
 out = "out"
 libs = []
 # Vendored dependencies (README, Vendored code), mapped explicitly.
-remappings = ["@openzeppelin/contracts/=vendor/openzeppelin-contracts/contracts/"]
+remappings = [
+  "@account-abstraction/contracts/=vendor/account-abstraction/contracts/",
+  "@openzeppelin/contracts/=vendor/openzeppelin-contracts/contracts/",
+]
 solc_version = "0.8.30"
 evm_version = "cancun"
 via_ir = false

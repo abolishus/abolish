@@ -26,7 +26,25 @@ if (parsed.ok) console.log((await runSimulation(parsed.scenario, { workers: 3 })
 
 The seed decides only the plan; every secret comes from the CSPRNG. Every report lists in `stubs` what this part models only in outline (placeholder contracts, chains and tier roots, an unpinned panel, a simulated L1 on which every ballot is admitted and every voter's last ballot selected, anchors held in memory during the election and proven from a simulated L1 state only for the verifier's final read, and no membership proofs yet). `challenges` is the share of voters who challenge one attempt before casting a fresh one (0 when absent); the seed draws them apart from the rest of the plan, so changing the share changes no voter's tier, votes or time. `revotes` is the share of voters who cast an earlier ballot, at a time drawn before their last, then re-vote (0 when absent): each ballot names the newest L1 block 2 deep at its time, or, if that isn't newer than the voter's last, the next block once it settles, and only the last ballot counts. A positive share counts two ballots per voter against the work bound. `publications` is the share of challengers who ask, once the counted extent has ended, for their challenged attempt's opening to be published (0 when absent; `docs/spec/challenge.md`, Publication): the operator boards each only if it passes the opening checks, falls in the openings' window, opens no counted ballot's commitment and repeats no core, sorted at the end of its period. Since each opening is compared with every counted ballot, a scenario that can publish keeps `voters × ballots × options` within `MAX_SIMULATED_OPENING_LOOKUPS`. Offline seats take part in the ceremony and are down from the opening on, so a ballot counts only if its voter posts each offline seat's share publicly, which lowers that share's long-term privacy (with `threshold` or more seats down at its cast, offline or departed, a posting voter's ballot is readable whole to anyone who later breaks the shares' classical encryption): `postings` is the share of voters who choose to (0 when absent; `docs/spec/delivery.md`, Client rules), and every other voter's ballot is undelivered and counts nothing, as the plan expects. With no offline seat nobody posts. `trustees.departures` lists seats that go down partway, each `{ seat, at }` with `at` a share of the voting period in `(0, 1]`, ascending by seat and neither offline nor faulty: a departing seat takes every ballot cast before `at`, its receipts boarded with them, and none from then on, so a ballot cast later counts only if its voter posts it as well; it takes no part in the tally or destruction, so a departure at `1` takes every ballot and only shrinks the tally's seats. A run costs about 0.3 s to 0.8 s per ballot at 7 seats in one thread, most of it each seat's intake. `runSimulation` returns a promise; its `workers` option (0 to `MAX_INTAKE_WORKERS`, default 0) runs that intake in as many worker threads, each holding every seat's intake keys for the run, while the calling thread makes each voter's ballot and boards, checks and counts in cast order, so the report doesn't depend on it: on 4 cores, 3 workers about halve a run's time. The packed worker is `dist/intake-worker.mjs`, loaded by its path beside `dist/index.mjs`, so `workers` needs the sdk loaded from its own `dist`, never bundled into another file.
 
+## Direct submit
+
+`directSubmitBallot` sends a cast ballot record straight to the election's board contract on L2 through the voter's own wallet, for when our servers refuse it or can't be reached (`docs/spec/contracts.md`, Board (direct submit); T-25). It takes any EIP-1193 provider, holds no key and uses no third-party code, so `apps/ballot` can call it. One call is one attempt: it checks the wallet is on the definition's `l2_chain_id`, asks the board with `eth_call` first and returns the board's own refusal decoded to the spec's codes (`decodeBoardBallotRevert`: `malformed` with its decode error and offset, `refused` with its admission code, `window`, `gas`), so nothing the board refuses is sent; finds a byte-identical copy the board already holds (a repeat is a silent no-op on chain) rather than resending; and otherwise sends `submitBallot` in its one canonical encoding (`submitBallotCalldata`) with a quarter more gas than the estimate, then reports where the board's `BallotSubmitted` event is. Its answer is only what the provider's node reports, so a client MUST NOT stand down on it (`docs/spec/delivery.md`, Client rules). The paying account is public and linked to the ballot on chain, so funding it can link the voter (T-25, Residual).
+
+```ts
+const result = await directSubmitBallot({
+  provider: window.ethereum,
+  chainId: definition.l2_chain_id,
+  board: definition.board,
+  from: account,
+  record,
+  ballotHash,
+});
+if (result.status === "refused") console.log(result.refusal);
+```
+
 ## Test
+
+The direct-submit tests run the board contract on Anvil, built by `forge` from `packages/contracts`, so they need the toolchain (`.github/scripts/install-toolchain.sh`) on `PATH`.
 
 ```sh
 vp run --filter @abolishus/sdk test

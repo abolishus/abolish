@@ -41,3 +41,20 @@ export {
   type BoardResult,
   SimulatedBoardContract,
 } from "./simulation/board-contract.ts";
+export {
+  BALLOT_SUBMITTED_SIGNATURE,
+  type BoardAdmissionCode,
+  type BoardBallotRefusal,
+  type BoardDecodeCode,
+  type BoardEventLocation,
+  decodeBoardBallotRevert,
+  directSubmitBallot,
+  DirectSubmitError,
+  type DirectSubmitErrorCode,
+  type DirectSubmitOptions,
+  type DirectSubmitResult,
+  type Eip1193Provider,
+  revertDataOf,
+  SUBMIT_BALLOT_SIGNATURE,
+  submitBallotCalldata,
+} from "./direct-submit.ts";

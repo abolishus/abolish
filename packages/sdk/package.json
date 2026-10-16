@@ -33,6 +33,7 @@
     "@noble/hashes": "catalog:"
   },
   "devDependencies": {
+    "@abolishus/contracts": "workspace:*",
     "@types/node": "catalog:",
     "fast-check": "catalog:",
     "typescript": "catalog:",

@@ -232,7 +232,7 @@ describe("report", () => {
 
   test("gives each check the kind the spec's Principles give it", () => {
     const of = (kind: string) => report.checks.filter((c) => c.kind === kind).map((c) => c.id);
-    expect(of("report-only")).toEqual(["1.1", "2.7", "7.4", "8.5"]);
+    expect(of("report-only")).toEqual(["1.1", "2.7", "7.4", "7.6", "8.5"]);
     expect(of("admission")).toEqual(["5.1", "5.2", "5.3", "5.4", "5.5", "5.7", "5.8", "6.2"]);
   });
 

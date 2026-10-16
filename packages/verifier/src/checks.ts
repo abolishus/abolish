@@ -39,6 +39,10 @@ export const CHECKS: readonly CheckSpec[] = Object.freeze([
   ...election("6.3"),
   ...election("7.1", "7.2", "7.3"),
   ...reportOnly("7.4"),
+  // 7.5 fails only on evidence that binding is broken; 7.6 reports the
+  // running openings' breaches (docs/spec/verifier.md, Releases).
+  ...election("7.5"),
+  ...reportOnly("7.6"),
   ...election("8.1", "8.2", "8.3", "8.4"),
   ...reportOnly("8.5"),
 ]);

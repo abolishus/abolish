@@ -1897,9 +1897,16 @@ function deliveryCheck(
     // A source's bytes that don't give the CID are its failed fetch; if none
     // gives it, the election is unverifiable from these sources, never the
     // root inconsistent, so no source changes a root's verdict (T-53, T-24).
+    // No CID names empty bytes, which objectCid refuses, so an empty answer
+    // is a failed fetch too, never an exception that stops the check. Bytes
+    // of another length are still hashed: a CID the seat signed over an
+    // object that isn't `count` leaves is its root-inconsistent.
     const object = roots
       .leafObjects(record.leaves_cid)
-      .find((o) => o instanceof Uint8Array && sameBytes(objectCid(o), record.leaves_cid));
+      .find(
+        (o) =>
+          o instanceof Uint8Array && o.length > 0 && sameBytes(objectCid(o), record.leaves_cid),
+      );
     if (object === undefined) {
       unverifiable.push({ at });
       return;

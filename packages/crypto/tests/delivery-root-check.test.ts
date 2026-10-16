@@ -428,6 +428,30 @@ describe("the delivery check reading obligation roots (delivery-root.json, elect
     expect(asJson(r)).toEqual(good.result);
   });
 
+  test("whatever bytes a source serves, a wrong answer is a failed fetch and a later good one is read", () => {
+    const v = election("wrong-bytes");
+    const good = election("roots-deliver");
+    const roots = rootsOf(v);
+    const served = (junk: Uint8Array[]) => (cid: Uint8Array) => [
+      ...junk,
+      ...rootsOf(good).leafObjects(cid),
+    ];
+    expect(
+      asJson(run(v, entriesOf(v), { ...roots, leafObjects: served([new Uint8Array(0)]) })),
+    ).toEqual(good.result);
+    fc.assert(
+      fc.property(fc.array(fc.uint8Array({ maxLength: 300 }), { maxLength: 3 }), (junk) => {
+        expect(asJson(run(v, entriesOf(v), { ...roots, leafObjects: served(junk) }))).toEqual(
+          good.result,
+        );
+        // With no good source after them, unverifiable, never an exception.
+        const r = run(v, entriesOf(v), { ...roots, leafObjects: () => junk });
+        expect(r.unverifiable.length).toBeGreaterThan(0);
+      }),
+      { numRuns: slowRuns },
+    );
+  });
+
   test("the bound is read before availability, and a root at the bound is read", () => {
     const v = election("roots-deliver");
     const count = Math.max(...v.entries.map((e) => decodeObligationRoot(hex(e.payload), 1).count));

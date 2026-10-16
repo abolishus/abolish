@@ -27,19 +27,19 @@ Versions 1 and 3 to 7 have the same layout and differ only in the record types t
 
 The payload is a complete record whose `record_type` is one the entry's version allows:
 
-| `record_type` | Name | Versions | Why it is on the board |
-| --- | --- | --- | --- |
-| `0x0002` | ballot | 1, 3–7 | A ballot cast through our API ([[ballot-validity]], Ballot record); cast ballots only, never a challenged one |
-| `0x0003` | spoiled-ballot opening | 1, 3–7 | A published Benaloh opening, after close ([[challenge]]); ordered canonically, below |
-| `0x0005` | ceremony transcript | 1, 3–7 | The key ceremony's public transcript (P1-14) |
-| `0x0006` | tally opening | 1, 3–7 | One cell's opening of the tally (P1-15, [[tally]]) |
-| `0x0008` | contract event | 1, 3–7 | One of our contracts' L2 events, including direct-submitted ballots and the definition's registration (P1-18) |
-| `0x000c` | share receipt | 3–7 | A trustee's receipt for one seat's share of a ballot ([[delivery]]) |
-| `0x000e` | share complaint | 3–7 | A trustee's proof that a posted share is invalid ([[delivery]]) |
-| `0x000f` | destruction statement | 4–7 | A trustee's signed statement that it destroyed its per-election key material after the tally ([[tally]], Destruction) |
-| `0x0015` | close statement | 5–7 | A trustee seat's signed statement of the L2 head derivable from L1 at close ([[close]], Close statement); versions 5 to 7 fix its version, 1 |
-| `0x0018` | running opening | 6 | One cell's opening of one release of a live poll's running totals ([[tally]], Running opening record); tally-opening version 2 fixes its version, 1 |
-| `0x0019` | author approvals | 7 | An author panel's approvals of its ceremony transcript, which no contract records ([[ceremony]], Author panel) |
+| `record_type` | Name                   | Versions | Why it is on the board                                                                                                                              |
+| ------------- | ---------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `0x0002`      | ballot                 | 1, 3–7   | A ballot cast through our API ([[ballot-validity]], Ballot record); cast ballots only, never a challenged one                                       |
+| `0x0003`      | spoiled-ballot opening | 1, 3–7   | A published Benaloh opening, after close ([[challenge]]); ordered canonically, below                                                                |
+| `0x0005`      | ceremony transcript    | 1, 3–7   | The key ceremony's public transcript (P1-14)                                                                                                        |
+| `0x0006`      | tally opening          | 1, 3–7   | One cell's opening of the tally (P1-15, [[tally]])                                                                                                  |
+| `0x0008`      | contract event         | 1, 3–7   | One of our contracts' L2 events, including direct-submitted ballots and the definition's registration (P1-18)                                       |
+| `0x000c`      | share receipt          | 3–7      | A trustee's receipt for one seat's share of a ballot ([[delivery]])                                                                                 |
+| `0x000e`      | share complaint        | 3–7      | A trustee's proof that a posted share is invalid ([[delivery]])                                                                                     |
+| `0x000f`      | destruction statement  | 4–7      | A trustee's signed statement that it destroyed its per-election key material after the tally ([[tally]], Destruction)                               |
+| `0x0015`      | close statement        | 5–7      | A trustee seat's signed statement of the L2 head derivable from L1 at close ([[close]], Close statement); versions 5 to 7 fix its version, 1        |
+| `0x0018`      | running opening        | 6        | One cell's opening of one release of a live poll's running totals ([[tally]], Running opening record); tally-opening version 2 fixes its version, 1 |
+| `0x0019`      | author approvals       | 7        | An author panel's approvals of its ceremony transcript, which no contract records ([[ceremony]], Author panel)                                      |
 
 Any other record type, including one the entry's version doesn't allow, is rejected when the envelope is decoded, with `unexpected-record-type`, including the types [[notation]] would call unknown (`0x0000`, unassigned numbers and the test range): here the envelope fixes the allowed set, so anything outside it is unexpected. The reasons: an election definition reaches the board only as the contract event that registered it, and so does a share posting (`0x000d`), whose data must be on L2 for every trustee to read ([[delivery]], Direct submit); a voter's receipt (`0x0004`) stays with its voter, a summed-share message never leaves the trustees ([[tally]], Summed-share message), a board entry never nests, and display text is never on the board, the chain or the archive ([[display-text]], T-17). A payload shorter than a record header (3 bytes) is rejected with `truncated`. Both errors are reported at the offset of the payload's first byte.
 

@@ -36,6 +36,7 @@ export const RECORD_TYPES = Object.freeze({
   closeStatement: 0x0015,
   shareReceiptBatch: 0x0016,
   shareComplaintBatch: 0x0017,
+  runningOpening: 0x0018,
   authorApprovals: 0x0019,
 } as const);
 

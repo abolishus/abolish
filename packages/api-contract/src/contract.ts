@@ -14,6 +14,8 @@ import {
   MAX_PAGE_BYTES,
   MAX_PROOF_PATH,
   PageSize,
+  RegionCode,
+  TurnstileResponse,
   U64,
 } from "./wire.ts";
 
@@ -343,6 +345,50 @@ const deleteBackup = oc
   .input(Locator)
   .output(z.strictObject({}));
 
+// Tier 0 registration (docs/spec/registration.md; ADR 0024, option B). The
+// ballot client sends its identity commitment, the region it asks for and a
+// Turnstile token from the challenge page, all in the body, so no procedure
+// reads a header (T-10). Every accepted request gets the same empty answer,
+// whether the commitment is newly queued, already queued, in flight or
+// already a member, so the route never says whether a commitment waits
+// (T-13); the client learns the outcome from the chain alone (T-11).
+
+const registerTier0 = oc
+  .route({
+    method: "POST",
+    path: "/registrations/tier0",
+    summary: "Ask for a Tier 0 registration",
+    description:
+      "Queues `commitment` (an identity commitment, a field<bn254> as 32 bytes of big-endian hex) for the published Tier 0 group of `region`, paid for by one Turnstile solve on the challenge page for the action `tier0-register`. Checked in order: the forms; a commitment below r and not forbidden (0, 1, Poseidon2(0, 1)); a region with a published group; room in the group's queue; a current Tier 0 index; then the token, so a malformed or unserviceable request never spends it. The answer is the same empty object whether the commitment is newly queued, already queued, in a batch or already a member. The service signs queued commitments into one batch per group at each 10-minute boundary, sorted by value; the client reads the group's records on the L2 to learn whether, and where, its commitment was added, and may send the request again (with a new solve) if it isn't added after about 80 minutes plus L2 finality.",
+    tags: ["registrations"],
+  })
+  .errors({
+    REGISTRATION_MALFORMED: {
+      status: 422,
+      message: "The commitment isn't a canonical field element, or is a forbidden value.",
+      data: z.strictObject({ code: ErrorCode }),
+    },
+    REGION_UNKNOWN: { status: 422, message: "The region has no published Tier 0 group." },
+    REGISTRATION_BUSY: {
+      status: 503,
+      message: "The group's queue is full; try again after the next batch.",
+    },
+    REGISTRATION_UNAVAILABLE: {
+      status: 503,
+      message: "Registration is unavailable here for now.",
+    },
+    CHALLENGE_REFUSED: {
+      status: 403,
+      message: "The Turnstile token was refused: spent, expired, or for another site or action.",
+    },
+    CHALLENGE_UNAVAILABLE: {
+      status: 503,
+      message: "The Turnstile token couldn't be checked; try again with a new one.",
+    },
+  })
+  .input(z.strictObject({ commitment: Hash32, region: RegionCode, turnstile: TurnstileResponse }))
+  .output(z.strictObject({}));
+
 /** The public API contract. `apps/api` implements it; clients call it. */
 export const contract = {
   elections: { list: listElections, getDefinition, resolveCode, getCode },
@@ -350,6 +396,7 @@ export const contract = {
   ballots: { submit: submitBallot },
   moderation: { getLog: getModerationLog, getStatus: getModerationStatus, report: reportPoll },
   backups: { put: putBackup, fetch: fetchBackup, delete: deleteBackup },
+  registrations: { tier0: registerTier0 },
 };
 
 export type Contract = typeof contract;

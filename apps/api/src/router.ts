@@ -20,6 +20,9 @@ import {
   report,
   shortCodeOf,
   SubmitError,
+  parseTier0Request,
+  Tier0RegistrationError,
+  type Tier0Registrations,
 } from "@abolishus/core";
 import { implement, ORPCError } from "@orpc/server";
 import type { Sql } from "postgres";
@@ -29,7 +32,8 @@ import type { Sql } from "postgres";
 // no protocol logic lives here (AGENTS.md, Architecture). Every answer is a
 // claim the caller checks with @abolishus/crypto (T-23, T-24, T-34).
 //
-// The context holds the database, ballot admission and the clock, and
+// The context holds the database, ballot admission, Tier 0 registration and
+// the clock, and
 // nothing of the request: no handler can see a request's headers, cookies or
 // address, so no procedure can tie what it serves or receives to a person or
 // session (T-10, T-11).
@@ -40,6 +44,8 @@ export interface Context {
   readonly admissions?: BallotAdmissions | undefined;
   /** UNIX time in seconds. */
   readonly now: () => bigint;
+  /** Absent when this server isn't configured for Tier 0 registration: it then queues nothing. */
+  readonly tier0?: Tier0Registrations | undefined;
 }
 
 const os = implement(contract).$context<Context>();
@@ -234,6 +240,39 @@ export const router = os.router({
       if (!(await deleteIdentityBackup(context.sql, fromHex(input.locator))))
         throw errors.BACKUP_NOT_FOUND();
       return {};
+    }),
+  },
+  // Tier 0 registration (docs/spec/registration.md, Answers): core checks
+  // steps 2 to 8 in order. Like every route this sees the body alone, never
+  // a header, cookie or address, and no answer quotes the request (T-10,
+  // T-11). A server without the service publishes no group, so after the
+  // form checks it answers unavailable for every region.
+  registrations: {
+    tier0: os.registrations.tier0.handler(async ({ input, context, errors }) => {
+      try {
+        if (context.tier0 === undefined) {
+          parseTier0Request(input);
+          throw new Tier0RegistrationError("unavailable");
+        }
+        await context.tier0.register(input);
+        return {};
+      } catch (e) {
+        if (!(e instanceof Tier0RegistrationError)) throw e;
+        switch (e.code) {
+          case "malformed":
+            throw errors.REGISTRATION_MALFORMED({ data: { code: e.malformed ?? "malformed" } });
+          case "region-unknown":
+            throw errors.REGION_UNKNOWN();
+          case "busy":
+            throw errors.REGISTRATION_BUSY();
+          case "unavailable":
+            throw errors.REGISTRATION_UNAVAILABLE();
+          case "challenge-refused":
+            throw errors.CHALLENGE_REFUSED();
+          case "challenge-unavailable":
+            throw errors.CHALLENGE_UNAVAILABLE();
+        }
+      }
     }),
   },
 });

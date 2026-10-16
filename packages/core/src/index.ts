@@ -98,6 +98,25 @@ export {
   TURNSTILE_SITEVERIFY,
 } from "./turnstile.ts";
 export {
+  commitmentKey,
+  parseTier0Request,
+  REGISTRATION_QUEUE_MAX,
+  TIER0_INDEX_MAX_LAG,
+  TIER0_INDEX_MAX_SKEW,
+  TIER0_MAX_CONCURRENT,
+  type Tier0Keys,
+  tier0Keys,
+  type Tier0MalformedCode,
+  type Tier0Redis,
+  Tier0RegistrationError,
+  type Tier0RegistrationErrorCode,
+  type Tier0RegistrationOptions,
+  Tier0Registrations,
+  type Tier0Request,
+  type Tier0RequestInput,
+  TURNSTILE_ACTION_TIER0,
+} from "./tier0-registration.ts";
+export {
   MAX_REPORT_QUEUE,
   type PendingReport,
   type ReportQueueCursor,

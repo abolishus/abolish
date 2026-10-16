@@ -86,7 +86,7 @@ const row = (r: Report, id: string) => {
 describe("a sealed, authenticated board with no ballot", { timeout: 60_000 }, () => {
   const r = bundle(copy);
 
-  test("the profile pins board-entry version 5 and contract-event version 3, so 2.3 doesn't fail", () => {
+  test("the profile pins board-entry version 5 and contract-event version 4, so 2.3 doesn't fail", () => {
     // 2.3's other parts aren't built, so it stays unverifiable (close.md, Version).
     expect(row(r, "2.3")).toEqual({ status: "unverifiable", code: "not-implemented" });
   });

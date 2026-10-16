@@ -1476,6 +1476,18 @@ contract BoardTest is TestBase {
         _refuseFuzzed(_complaintBatchCall(r));
     }
 
+    /// No one-byte change to an honest complaint batch is accepted: it
+    /// changes an entry or the seat under the signature, or breaks the
+    /// framing.
+    function testFuzz_ComplaintBatchByteChangesRefused(uint256 at, uint8 delta) public {
+        vm.assume(delta != 0);
+        bytes memory b =
+            _signedComplaintBatch(h, 1, _complaintEntries(2, "fuzz"), signingSecrets[1]);
+        at %= b.length;
+        b[at] = bytes1(uint8(b[at]) ^ delta);
+        _refuseFuzzed(_complaintBatchCall(b));
+    }
+
     /// No arbitrary record is accepted as a batch, and every refusal is one of
     /// the delivery check's two errors.
     function testFuzz_ArbitraryBatchesRefused(bytes calldata r) public {

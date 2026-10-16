@@ -42,6 +42,22 @@ contract BoardChecks {
         return DeliveryCheckLib.checkPosting(r, b, e, t, qualified);
     }
 
+    function receiptBatch(bytes calldata r, IBoardElections e, IBoardTrustees t)
+        external
+        view
+        returns (bytes32, uint8)
+    {
+        return DeliveryCheckLib.checkReceiptBatch(r, e, t);
+    }
+
+    function complaintBatch(bytes calldata r, IBoardElections e, IBoardTrustees t)
+        external
+        view
+        returns (bytes32, uint8)
+    {
+        return DeliveryCheckLib.checkComplaintBatch(r, e, t);
+    }
+
     function ballot(bytes calldata r, IBoardElections e, uint256 qualified)
         external
         view
@@ -54,20 +70,26 @@ contract BoardChecks {
 
 /// The honest records the handler submits: delivery.json's three receipts
 /// of all-receipted, its posting (with Alice's ballot record) and its
-/// complaint, and ballot.json's first, admitted, ballot.
+/// complaint, ballot.json's first, admitted, ballot, and delivery-batch.json's
+/// receipt batches of one and three pairs and complaint batches of one and
+/// two entries, with its complaint batch whose `D` frames but isn't a point,
+/// which the board accepts (it frames, never decodes, T-53).
 struct Honest {
     bytes[3] receipts;
     bytes posting;
     bytes alice;
     bytes complaint;
     bytes ballot;
+    bytes[2] receiptBatches;
+    bytes[3] complaintBatches;
 }
 
 /// Submits delivery.json's honest records and ballot.json's honest ballot,
 /// alone, repeated and in receipt batches with repeats inside; postings with
 /// any of four `m`s, carried by Alice's ballot record with any of four L1
 /// references; one-byte changes of each record (outside a posting's `m`);
-/// and receipt batches with one changed receipt among honest ones. Postings
+/// and receipt batches with one changed receipt among honest ones; both kinds
+/// of batch record, alone, repeated and with one byte changed. Postings
 /// run with the pairing precompile mocked, as in Board.t.sol (no vector
 /// pairs a real membership proof with ciphertexts); ballots run unmocked,
 /// so their membership proof is real. Keeps a shadow of the accumulator
@@ -179,6 +201,25 @@ contract BoardHandler is TestBase {
             data = abi.encodeCall(Board.submitBallot, (_changed(honest.ballot, position, delta)));
         }
         _expectRefused(data, kind == 2, type(uint256).max);
+    }
+
+    /// A receipt batch (`kind` even) or complaint batch (odd), whole: one
+    /// signature, one storage key and one event per batch.
+    function submitBatch(uint8 kind, uint8 which) external {
+        (bytes memory data, bytes memory record) = _batchCall(kind, which);
+        _expectAccepted(data, record, record.length, "", false);
+    }
+
+    /// One byte of an honest batch changed: its seat, a pair or entry under
+    /// the signature, the framing or the signature itself. Refused.
+    function submitChangedBatch(uint8 kind, uint8 which, uint256 position, uint8 delta) external {
+        if (delta == 0) delta = 1;
+        (, bytes memory record) = _batchCall(kind, which);
+        bytes memory changed = _changed(record, position, delta);
+        bytes memory data = kind % 2 == 0
+            ? abi.encodeCall(Board.submitReceiptBatch, (changed))
+            : abi.encodeCall(Board.submitComplaintBatch, (changed));
+        _expectRefused(data, false, type(uint256).max);
     }
 
     /// Honest receipts with one changed receipt at position `at`: the whole
@@ -309,7 +350,13 @@ contract BoardHandler is TestBase {
     {
         if (mocked) vm.mockCall(address(8), "", abi.encode(uint256(1)));
         bool ok;
-        if (topic == Board.ShareReceiptSubmitted.selector) {
+        if (topic == Board.ShareReceiptBatchSubmitted.selector) {
+            (ok,) = address(checks)
+                .call(abi.encodeCall(BoardChecks.receiptBatch, (record, elections, trustees)));
+        } else if (topic == Board.ShareComplaintBatchSubmitted.selector) {
+            (ok,) = address(checks)
+                .call(abi.encodeCall(BoardChecks.complaintBatch, (record, elections, trustees)));
+        } else if (topic == Board.ShareReceiptSubmitted.selector) {
             (ok,) = address(checks)
                 .call(abi.encodeCall(BoardChecks.receipt, (record, elections, trustees)));
         } else if (topic == Board.ShareComplaintSubmitted.selector) {
@@ -355,7 +402,11 @@ contract BoardHandler is TestBase {
         view
         returns (bytes memory data, bytes memory record, bool mocked)
     {
-        which %= 9;
+        which %= 14;
+        if (which >= 9) {
+            (data, record) = _batchCall(which - 9, (which - 9) / 2);
+            return (data, record, false);
+        }
         if (which < 3) {
             record = honest.receipts[which];
             data = abi.encodeCall(Board.submitReceipts, (record));
@@ -369,6 +420,21 @@ contract BoardHandler is TestBase {
             record = _posting(which - 5);
             data = abi.encodeCall(Board.submitPosting, (record, honest.alice));
             mocked = true;
+        }
+    }
+
+    /// Honest batch `which` of the receipt (`kind` even) or complaint kind.
+    function _batchCall(uint8 kind, uint8 which)
+        internal
+        view
+        returns (bytes memory data, bytes memory record)
+    {
+        if (kind % 2 == 0) {
+            record = honest.receiptBatches[which % 2];
+            data = abi.encodeCall(Board.submitReceiptBatch, (record));
+        } else {
+            record = honest.complaintBatches[which % 3];
+            data = abi.encodeCall(Board.submitComplaintBatch, (record));
         }
     }
 
@@ -429,6 +495,9 @@ contract BoardHandler is TestBase {
 ///    leaves the accumulator as it was.
 /// 2. Every emitted record passes its stateless check against the
 ///    registries the board pins, and no record is emitted twice.
+/// All four hold for the two batch calls too: a receipt or complaint batch
+/// is one record, remembered by its bytes and emitted once as its own event
+/// (`ShareReceiptBatchSubmitted`, `ShareComplaintBatchSubmitted`).
 /// 3. A record is remembered only if it was emitted: a refused call leaves
 ///    the accumulator unchanged, and submitting it again is refused again,
 ///    never a silent no-op.
@@ -439,6 +508,7 @@ contract BoardHandler is TestBase {
 contract BoardInvariantTest is TestBase {
     string internal constant DELIVERY = "../../docs/spec/vectors/delivery.json";
     string internal constant V1 = "../../docs/spec/vectors/ballot.json";
+    string internal constant BATCHES = "../../docs/spec/vectors/delivery-batch.json";
     bytes32 internal constant STUB = keccak256("delivery stub");
     bytes32 internal constant STUB_V1 = keccak256("ballot stub");
     bytes32 internal constant PANEL = keccak256("panel");
@@ -455,6 +525,7 @@ contract BoardInvariantTest is TestBase {
         honest.ballot = vm.parseBytes(vm.parseJsonString(bj, ".ballots[0].encoding"));
         _setBallotElection(bj, elections, trustees);
         _setDeliveryElection(vm.readFile(DELIVERY), elections, trustees, honest);
+        _setBatches(vm.readFile(BATCHES), honest);
         handler = new BoardHandler(board, elections, trustees, honest);
     }
 
@@ -558,6 +629,26 @@ contract BoardInvariantTest is TestBase {
             ),
             vote
         );
+    }
+
+    /// delivery-batch.json's batches, made from delivery.json's panel and
+    /// definition, so the stubs set from delivery.json check them.
+    function _setBatches(string memory bj, Honest memory honest) internal {
+        assertTrue(_is(bj, ".records[0].id", "one-pair"), "one-pair");
+        assertTrue(_is(bj, ".records[1].id", "three-pairs"), "three-pairs");
+        for (uint256 i; i < 2; i++) {
+            honest.receiptBatches[i] =
+                vm.parseBytes(vm.parseJsonString(bj, _at(".records", i, ".encoding")));
+            honest.complaintBatches[i] =
+                vm.parseBytes(vm.parseJsonString(bj, _at(".complaintRecords", i, ".encoding")));
+        }
+        for (uint256 i; vm.keyExistsJson(bj, _at(".complaintDecode", i, "")); i++) {
+            if (_is(bj, _at(".complaintDecode", i, ".id"), "d-not-a-point")) {
+                honest.complaintBatches[2] =
+                    vm.parseBytes(vm.parseJsonString(bj, _at(".complaintDecode", i, ".encoding")));
+            }
+        }
+        assertTrue(honest.complaintBatches[2].length != 0, "d-not-a-point");
     }
 
     /// delivery.json's election in the stubs: the parameters Alice's

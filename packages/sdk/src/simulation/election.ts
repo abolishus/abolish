@@ -129,7 +129,7 @@ export const SIMULATED_EVENT_VERSION = 4;
  * (4), ballots that name their cell (2) and the openings of their cores (2),
  * the one combination definition version 4 allows (protocol.ts,
  * `profileCombinationRule`; [[verifier]] 2.3), and the board-entry and
- * contract-event versions the election registry serves (5 and 3).
+ * contract-event versions the election registry serves (5 and 4).
  */
 const PINNED: ReadonlyMap<number, number> = new Map([
   [RECORD_TYPES.electionDefinition, 4],

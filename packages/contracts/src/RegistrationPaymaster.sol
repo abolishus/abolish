@@ -146,12 +146,14 @@ contract RegistrationPaymaster is IPaymaster {
     }
 
     /// Whether `c` is exactly the standard ABI encoding of
-    /// `execute(registry, 0, inner)` with `inner` starting with
-    /// `addMembers`'s selector. The offset and length are fixed so that the
-    /// selector read here is the one the account calls; the record itself
-    /// is the registry's to check (T-17, T-71).
+    /// `execute(registry, 0, inner)` with `inner` exactly the standard ABI
+    /// encoding of `addMembers(record)`, up to the record's own padding. The
+    /// offsets and lengths are fixed so that the call checked here is the one
+    /// the account makes, and `inner` can't carry bytes after the record,
+    /// which the registry would refuse at the deposit's cost; the record
+    /// itself is the registry's to check (T-17, T-71).
     function _isAddMembersCall(bytes calldata c) private view returns (bool) {
-        if (c.length < INNER + 4 || bytes4(c[0:4]) != EXECUTE) return false;
+        if (c.length < INNER + 68 || bytes4(c[0:4]) != EXECUTE) return false;
         if (uint256(bytes32(c[4:36])) != uint256(uint160(registry))) return false;
         if (uint256(bytes32(c[36:68])) != 0 || uint256(bytes32(c[68:100])) != 0x60) return false;
         uint256 len = uint256(bytes32(c[100:132]));
@@ -161,7 +163,14 @@ contract RegistrationPaymaster is IPaymaster {
         if (len % 32 != 0 && uint256(bytes32(c[INNER + padded - 32:])) << (8 * (len % 32)) != 0) {
             return false;
         }
-        return len >= 4 && bytes4(c[INNER:INNER + 4]) == GroupRegistry.addMembers.selector;
+        // `inner` is the selector, the offset 0x20, the record's length and
+        // the record, padded to a word.
+        if (len < 68 || bytes4(c[INNER:INNER + 4]) != GroupRegistry.addMembers.selector) {
+            return false;
+        }
+        if (uint256(bytes32(c[INNER + 4:INNER + 36])) != 0x20) return false;
+        uint256 recordLength = uint256(bytes32(c[INNER + 36:INNER + 68]));
+        return recordLength <= len - 68 && len == 68 + ((recordLength + 31) & ~uint256(31));
     }
 
     function _isContract(address a) private view returns (bool) {

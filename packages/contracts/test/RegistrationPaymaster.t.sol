@@ -158,7 +158,7 @@ contract RegistrationPaymasterTest is GroupTestBase {
     function test_RefusesEveryOtherCall() public {
         bytes memory inner = _addMembersCall();
         bytes memory good = _execute(inner);
-        bytes[] memory bad = new bytes[](12);
+        bytes[] memory bad = new bytes[](16);
         // Another account function, another target, a value.
         bad[0] = _replaceWord(good, 0, bytes32(bytes4(0x47e1da2a)), 4);
         bad[1] = _replaceWord(good, 4, bytes32(uint256(uint160(address(paymaster)))), 32);
@@ -177,6 +177,13 @@ contract RegistrationPaymasterTest is GroupTestBase {
         bad[9] = _execute(abi.encodeWithSelector(GroupRegistry.createGroup.selector, uint256(0)));
         bad[10] = _execute(hex"");
         bad[11] = hex"";
+        // `addMembers` not exactly encoded: bytes after the record (in the
+        // same padded length, or a word more), another offset, another length.
+        uint256 recordLength = uint256(_wordAt(inner, 36));
+        bad[12] = _execute(bytes.concat(inner, new bytes(10)));
+        bad[13] = _execute(bytes.concat(inner, bytes32(0)));
+        bad[14] = _execute(_replaceWord(inner, 4, bytes32(uint256(0x40)), 32));
+        bad[15] = _execute(_replaceWord(inner, 36, bytes32(recordLength - 32), 32));
         for (uint256 i; i < bad.length; i++) {
             _expectRefused(_op(bad[i]), MAX_COST, RegistrationPaymaster.Refusal.CallData);
         }
@@ -312,6 +319,12 @@ contract RegistrationPaymasterTest is GroupTestBase {
         op.sender = address(service);
         op.callData = callData;
         op.paymasterAndData = abi.encodePacked(address(paymaster), uint128(1e5), uint128(0));
+    }
+
+    function _wordAt(bytes memory b, uint256 at) internal pure returns (bytes32 w) {
+        assembly ("memory-safe") {
+            w := mload(add(add(b, 32), at))
+        }
     }
 
     function _replaceWord(bytes memory b, uint256 at, bytes32 word, uint256 len)

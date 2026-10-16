@@ -2,6 +2,7 @@ import fc from "fast-check";
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vite-plus/test";
 import {
+  COMPLAINT_BATCH_MAX,
   COMPLAINT_WINDOW,
   complaintScope,
   definitionMembers,
@@ -141,6 +142,12 @@ describe("delivery-obligation vectors", () => {
     const calldata = 4n + 64n + ((104n + FORCED_PATH.receiptsPerCall * 64n + 31n) / 32n) * 32n;
     expect(calldata).toBeLessThanOrEqual(BigInt(V.portal.maxDepositData));
     expect(FORCED_PATH.receiptCallGas).toBeLessThanOrEqual(BigInt(V.portal.maxResourceLimit));
+    // So does a full complaint call: one share-complaint batch of
+    // `complaintsPerCall` entries, `104 + 128·c` bytes.
+    expect(FORCED_PATH.complaintsPerCall).toBe(BigInt(COMPLAINT_BATCH_MAX));
+    const complaints = 4n + 64n + ((104n + FORCED_PATH.complaintsPerCall * 128n + 31n) / 32n) * 32n;
+    expect(complaints).toBeLessThanOrEqual(BigInt(V.portal.maxDepositData));
+    expect(FORCED_PATH.complaintCallGas).toBeLessThanOrEqual(BigInt(V.portal.maxResourceLimit));
   });
 
   test("owed receipts and complaint scopes are the file's", () => {

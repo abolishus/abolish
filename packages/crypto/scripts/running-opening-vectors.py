@@ -509,8 +509,8 @@ def main():
         expect_releases=[True, True, True, True],
     )
     board_vector(
-        "tally-opening-beside",
-        "Beside the releases, a tally opening (record type 0x0006) and a running opening labelled version 2: both are rejected entries here",
+        "other-type-and-version-beside",
+        "Beside the releases, a running opening's bytes relabelled record type 0x0006 and another labelled version 2: both are rejected entries here",
         full + [b"\x00\x06\x01" + fields(honest) + honest["signature"], encode(honest, version=2)],
         expect_entries={4: {"kind": "rejected", "error": "unknown-record-type"}, 5: {"kind": "rejected", "error": "profile-mismatch"}},
     )
@@ -564,7 +564,11 @@ def main():
             "definitionHash": definition_hash.hex(),
             "rules": {"optionCount": m, "threshold": k, "panelSize": n},
             "registered": [{"index": i, "signingKey": keys[i].hex()} for i in sorted(registered)],
+            # An input, not the release choice's output: these few ballots can't
+            # meet MIN_LIVE_BATCH, and release 4 would need a decision at a
+            # fifth snapshot. live-release.json covers the choice.
             "chosen": [{"tier": t, "snapshots": qs} for t, qs in sorted(chosen.items())],
+            "chosenIsInput": True,
             "cells": [
                 {
                     "cell": c,

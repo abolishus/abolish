@@ -543,6 +543,49 @@ describe("rules and arguments", () => {
     expect(decideRelease([cell], [1], 3, b)).toMatchObject({ release: 2 });
   });
 
+  test("running sets that shrink, change a ballot, share a nullifier or ballot, or use objects are refused", () => {
+    const b = PARAMETERS.MIN_LIVE_BATCH;
+    const voters = (tag: string) =>
+      Array.from({ length: b }, (_, i) => [`${tag}${i}`, `${tag}${i}`] as const);
+    const of = (...tags: string[]) => new Map(tags.flatMap(voters));
+    const z = new Map([["z", "z"]]);
+    // Sets in which z leaves: rule 1 and the lag pass at every decision, yet
+    // releases 1 to 4 would have a directed cut of 1, z alone (T-16).
+    const shrinking = [
+      new Map<string, string>(),
+      new Map([...of("x"), ...z]),
+      new Map([...of("x", "w"), ...z]),
+      of("x", "w", "y"),
+      of("y", "w", "v"),
+      of("y", "w", "v", "u"),
+    ];
+    expect(() => chooseReleases([shrinking], b)).toThrow(RangeError);
+    expect(() =>
+      liveReleases({ cellTiers: [0], runningSets: [shrinking], batch: b, vss: () => [] as never }),
+    ).toThrow(RangeError);
+    const grown = [new Map<string, string>(), of("x"), of("x", "y"), of("x", "y", "w")];
+    expect(chooseReleases([grown], b).releases).toEqual([1, 2]);
+    const swapped = grown.map((m, i) => (i === 3 ? new Map([...m, ["x0", "other"]]) : m));
+    expect(() => chooseReleases([swapped], b)).toThrow(RangeError);
+    const twice = grown.map((m, i) => (i === 3 ? new Map([...m, ["extra", "x0"]]) : m));
+    expect(() => chooseReleases([twice], b)).toThrow(RangeError);
+    const otherCell = [
+      new Map<string, string>(),
+      new Map(),
+      new Map(),
+      new Map([["x0", "x0-again"]]),
+    ];
+    expect(() => chooseReleases([grown, otherCell], b)).toThrow(RangeError);
+    const key = Uint8Array.of(1);
+    const objects = [new Map<Uint8Array, string>(), new Map([[key, "a"]])];
+    expect(() => chooseReleases([[...objects, objects[1] as Map<Uint8Array, string>]], b)).toThrow(
+      TypeError,
+    );
+    expect(() =>
+      nextRunningSets([new Map<Uint8Array, string>()], new Map([[key, [voter("a")]]])),
+    ).toThrow(TypeError);
+  });
+
   test("a batch below MIN_LIVE_BATCH, a broken run or malformed arguments throw", () => {
     const empty = [new Map<string, string>(), new Map<string, string>(), new Map<string, string>()];
     expect(() => chooseReleases([empty], PARAMETERS.MIN_LIVE_BATCH - 1)).toThrow(RangeError);

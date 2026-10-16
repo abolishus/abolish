@@ -55,13 +55,15 @@ export type SnapshotAdmission = "admitted" | "pending" | "rejected";
 /**
  * One of a nullifier's distinct ballots in snapshot `S_r` whose membership
  * proof passes (verifier 5.1 to 5.3), as Running set, condition 1 reads it.
- * `ballot` identifies it; use a value compared by `===`, such as its hash in
- * hex, since repeats are one ballot and a running set's change compares
- * ballots.
+ * `ballot` identifies it; use a primitive compared by `===`, such as its hash
+ * in hex, since repeats are one ballot and a running set's change compares
+ * ballots. Give one per distinct ballot, never one per board entry, with its
+ * verdict before repeats are removed: a copy verifier 5.7 rejects as a
+ * repeat is the same ballot, and the same ballot given two verdicts throws.
  */
 export interface SnapshotBallot<B> {
   readonly ballot: B;
-  /** The cell it names. */
+  /** The cell it names, by its position in the registered partition. */
   readonly cell: number;
   /**
    * `admitted` if it is admitted with `h_r` as the L1 head; `pending` if its
@@ -112,7 +114,11 @@ function checkCell(cell: number, cells: number, caller: string): void {
 /**
  * The running sets of a tier's cells at snapshot `r`, from those at `r − 1`
  * and `S_r`'s ballots per nullifier (only nullifiers with at least one ballot
- * whose membership proof passes need be given). A nullifier in a running set
+ * whose membership proof passes need be given). `previous` is indexed by
+ * cell position in the registered partition, the position each ballot names;
+ * since nullifiers are scoped per tier, one call can serve every tier.
+ * Nullifiers and ballots must be primitives (hex strings, say): they are
+ * compared by `===`. A nullifier in a running set
  * of any of the tier's cells stays with the ballot it entered with, whatever
  * follows: a re-vote, a tie or a posting never removes it, so running sets
  * only grow (Running set, Staying; T-16, T-45). Any other enters the cell its
@@ -127,7 +133,11 @@ export function nextRunningSets<N, B>(
   const next = previous.map((s) => new Map(s));
   const held = (n: N) => previous.some((s) => s.has(n));
   for (const [n, ballots] of snapshot) {
-    for (const b of ballots) checkCell(b.cell, cells, "nextRunningSets");
+    checkPrimitive(n, "nextRunningSets");
+    for (const b of ballots) {
+      checkCell(b.cell, cells, "nextRunningSets");
+      checkPrimitive(b.ballot, "nextRunningSets");
+    }
     if (held(n)) continue;
     const b = enteringBallot(ballots);
     if (b !== null) (next[b.cell] as Map<N, B>).set(n, b.ballot);
@@ -136,8 +146,8 @@ export function nextRunningSets<N, B>(
 }
 
 /**
- * Per cell, the running sets `R_0, R_1, …, R_m` of a tier over its first `m`
- * scheduled snapshots, `snapshots[r − 1]` being `S_r`'s ballots per
+ * Per cell of the registered partition (`cells` of them), the running sets
+ * `R_0, R_1, …, R_m` over the first `m` scheduled snapshots, `snapshots[r − 1]` being `S_r`'s ballots per
  * nullifier; `R_0` is the empty set, which stands for a release at opening.
  */
 export function runningSets<N, B>(
@@ -346,7 +356,42 @@ function checkTier<N, B>(cells: readonly (readonly RunningSet<N, B>[])[], caller
     throw new RangeError(`${caller}: every cell needs R_0 to R_m, the same m`);
   if (cells.some((c) => (c[0] as RunningSet<N, B>).size !== 0))
     throw new RangeError(`${caller}: R_0 is the empty set`);
+  // The batch bound on every combination of releases holds only for sets
+  // that grow, each nullifier with one ballot in one cell (Change and the
+  // release graph, Releases), so sets that don't are refused rather than
+  // trusted (T-16).
+  for (const sets of cells)
+    for (let i = 1; i < length; i++) {
+      const earlier = sets[i - 1] as RunningSet<N, B>;
+      const later = sets[i] as RunningSet<N, B>;
+      for (const [n, b] of earlier)
+        if (!later.has(n) || later.get(n) !== b)
+          throw new RangeError(
+            `${caller}: running sets only grow, each nullifier keeping its ballot`,
+          );
+    }
+  const nullifiers = new Set<N>();
+  const ballots = new Set<B>();
+  for (const sets of cells)
+    for (const [n, b] of sets[length - 1] as RunningSet<N, B>) {
+      checkPrimitive(n, caller);
+      checkPrimitive(b, caller);
+      if (nullifiers.has(n) || ballots.has(b))
+        throw new RangeError(`${caller}: a nullifier or ballot is in two cells or twice in a set`);
+      nullifiers.add(n);
+      ballots.add(b);
+    }
   return length - 1;
+}
+
+// Nullifiers and ballots are compared by `===` and as Map keys, so an object
+// (a fresh Uint8Array, say) would never match itself: a voter already in a
+// running set would enter again as new (T-16).
+function checkPrimitive(x: unknown, caller: string): void {
+  if ((typeof x === "object" && x !== null) || typeof x === "function")
+    throw new TypeError(
+      `${caller}: nullifiers and ballots must be primitives, such as hex strings`,
+    );
 }
 
 function refusal<N, B>(

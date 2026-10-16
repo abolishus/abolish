@@ -43,6 +43,7 @@ import {
   COMPLAINT_BATCH_MAX,
   decodeObligationRoot,
   decodeShareReceiptBatch,
+  OBLIGATION_ROOT_LENGTH,
   RECEIPT_BATCH_MAX,
 } from "./delivery.ts";
 import { frameBallot, frameComplaintBatch, frameDelivery } from "./direct-submit.ts";
@@ -737,7 +738,6 @@ const SHARE_COMPLAINT_BATCH_SUBMITTED: EventSpec = {
 // the record whole, which decodes strictly as version 1, the version
 // contract-event version 5 fixes, with its `definition_hash` and `seat` as
 // the topics. Its signature, slot, count and leaves are the delivery check's.
-const ROOT_LENGTH = 173;
 
 const OBLIGATION_ROOT_SUBMITTED: EventSpec = {
   signature: "ObligationRootSubmitted(bytes32,uint8,bytes)",
@@ -746,7 +746,8 @@ const OBLIGATION_ROOT_SUBMITTED: EventSpec = {
     const seat = seatWord && uintWord(seatWord, 8);
     if (topics.length !== 3 || definitionHash === undefined || seat === undefined)
       return "event-topics";
-    const record = readAbi(data, 1, [{ at: 0, words: false, max: ROOT_LENGTH }])?.tails[0];
+    const record = readAbi(data, 1, [{ at: 0, words: false, max: OBLIGATION_ROOT_LENGTH }])
+      ?.tails[0];
     if (record === undefined) return "event-data";
     let root;
     try {

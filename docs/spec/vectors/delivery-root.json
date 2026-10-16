@@ -917,6 +917,55 @@
       "encoding": "001a014459913af27b23a4f7fe95bedfca78f3a2e1695d8a42b4bdc4555885ac4be8b10101000000035848a5831b92ca36c573481a2cfb0a751e6e3f6eff552230c9ab96a33d57b451015512208aad40374105aef1ebe32c615d65ce30c990694e0999d459f2fdfd53af620186148f7ec68c6bea8f273038f9d6e3996817af793265389cedf3b9c202bc74ed9536fc1e431b79dd6fc29aa33325c28bbb8bd31b398528086ed19803b97a2451e100",
       "error": "trailing-bytes",
       "offset": 173
+    },
+    {
+      "id": "unknown-type",
+      "description": "A root's bytes under type 0x001b, which versioning.md doesn't list",
+      "encoding": "001b014459913af27b23a4f7fe95bedfca78f3a2e1695d8a42b4bdc4555885ac4be8b10101000000035848a5831b92ca36c573481a2cfb0a751e6e3f6eff552230c9ab96a33d57b451015512208aad40374105aef1ebe32c615d65ce30c990694e0999d459f2fdfd53af620186148f7ec68c6bea8f273038f9d6e3996817af793265389cedf3b9c202bc74ed9536fc1e431b79dd6fc29aa33325c28bbb8bd31b398528086ed19803b97a2451e1",
+      "error": "unknown-record-type",
+      "offset": 0
+    },
+    {
+      "id": "type-0",
+      "description": "A root's bytes under type 0",
+      "encoding": "0000014459913af27b23a4f7fe95bedfca78f3a2e1695d8a42b4bdc4555885ac4be8b10101000000035848a5831b92ca36c573481a2cfb0a751e6e3f6eff552230c9ab96a33d57b451015512208aad40374105aef1ebe32c615d65ce30c990694e0999d459f2fdfd53af620186148f7ec68c6bea8f273038f9d6e3996817af793265389cedf3b9c202bc74ed9536fc1e431b79dd6fc29aa33325c28bbb8bd31b398528086ed19803b97a2451e1",
+      "error": "unknown-record-type",
+      "offset": 0
+    },
+    {
+      "id": "kind-3-count-truncated",
+      "description": "A root of kind 3 ending inside its count: the kind is judged first",
+      "encoding": "001a014459913af27b23a4f7fe95bedfca78f3a2e1695d8a42b4bdc4555885ac4be8b101030000",
+      "error": "invalid-enum",
+      "offset": 36
+    },
+    {
+      "id": "count-0-root-truncated",
+      "description": "A root of no leaves ending inside its root: the count is judged first",
+      "encoding": "001a014459913af27b23a4f7fe95bedfca78f3a2e1695d8a42b4bdc4555885ac4be8b10101000000005848a5831b92ca36c573481a2cfb0a751e6e3f",
+      "error": "non-canonical",
+      "offset": 37
+    },
+    {
+      "id": "cid-dag-pb-small-signature-truncated",
+      "description": "The dag-pb CID of a three-leaf root, the record one byte short: every field is present before the CID's framing is judged",
+      "encoding": "001a014459913af27b23a4f7fe95bedfca78f3a2e1695d8a42b4bdc4555885ac4be8b10101000000035848a5831b92ca36c573481a2cfb0a751e6e3f6eff552230c9ab96a33d57b451017012208aad40374105aef1ebe32c615d65ce30c990694e0999d459f2fdfd53af62018637e2dda85a2ce4891c9180731f8ee69c1250b5c6c263e5c6ac8d664208ee4ea71afd4f46128fd24d3a6fcd7413b936d121fec5f4be04996b6fc2062b994ccd",
+      "error": "truncated",
+      "offset": 109
+    },
+    {
+      "id": "cid-dag-pb-small-high-s",
+      "description": "The dag-pb CID of a three-leaf root with s replaced by n − s: the CID is judged before the signature",
+      "encoding": "001a014459913af27b23a4f7fe95bedfca78f3a2e1695d8a42b4bdc4555885ac4be8b10101000000035848a5831b92ca36c573481a2cfb0a751e6e3f6eff552230c9ab96a33d57b451017012208aad40374105aef1ebe32c615d65ce30c990694e0999d459f2fdfd53af62018637e2dda85a2ce4891c9180731f8ee69c1250b5c6c263e5c6ac8d664208ee4ea7e502b0b8ed702db3c590328bec46c92e9ae834b8e913051983f7c4976316584b",
+      "error": "non-canonical",
+      "offset": 73
+    },
+    {
+      "id": "high-s-trailing",
+      "description": "The signature with s replaced by n − s and a trailing byte: the signature is judged before the end",
+      "encoding": "001a014459913af27b23a4f7fe95bedfca78f3a2e1695d8a42b4bdc4555885ac4be8b10101000000035848a5831b92ca36c573481a2cfb0a751e6e3f6eff552230c9ab96a33d57b451015512208aad40374105aef1ebe32c615d65ce30c990694e0999d459f2fdfd53af620186148f7ec68c6bea8f273038f9d6e3996817af793265389cedf3b9c202bc74ed95c903e1bbe48622913d655cccda3d74443113df7421ef96162221c709823ed37000",
+      "error": "non-canonical",
+      "offset": 109
     }
   ],
   "elections": [

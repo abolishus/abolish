@@ -833,6 +833,7 @@ export {
   decodeObligationRoot,
   encodeObligationRoot,
   OBLIGATION_ROOT,
+  OBLIGATION_ROOT_LENGTH,
   OBLIGATION_ROOT_KINDS,
   type ObligationRootKind,
   type ObligationRootRecord,

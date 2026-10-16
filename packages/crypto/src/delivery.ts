@@ -381,6 +381,9 @@ const rootKind = enum8<ObligationRootKind>([
 ]);
 const cid36 = bytesFixed(36);
 
+/** An obligation root's length: its header, 106 signed bytes and the signature. */
+export const OBLIGATION_ROOT_LENGTH = 173;
+
 // Read in field order, every field present before the CID's framing is
 // judged and that before the signature's, so each rejection has one code at
 // one offset (delivery-root.json, decode). The leaves are never read here.

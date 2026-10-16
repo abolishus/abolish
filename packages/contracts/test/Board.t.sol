@@ -1808,7 +1808,7 @@ contract BoardTest is TestBase {
                 _str(rj, _at(".decode", i, ".id"))
             );
         }
-        assertEq(i, 20, "twenty rejections");
+        assertEq(i, 27, "twenty-seven rejections");
     }
 
     /// A root for no registered definition, for a seat outside the key set,
@@ -3019,6 +3019,9 @@ contract BoardTest is TestBase {
         }
         if (c == keccak256("unexpected-record-type")) {
             return ElectionDefinitionLib.DecodeError.UnexpectedRecordType;
+        }
+        if (c == keccak256("unknown-record-type")) {
+            return ElectionDefinitionLib.DecodeError.UnknownRecordType;
         }
         if (c == keccak256("non-canonical")) return ElectionDefinitionLib.DecodeError.NonCanonical;
         if (c == keccak256("invalid-enum")) return ElectionDefinitionLib.DecodeError.InvalidEnum;

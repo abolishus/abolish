@@ -517,9 +517,14 @@ export function checkAvailability(
   const filled = new Set<string>();
   const attested = new Map<string, readonly Uint8Array[]>();
   const complained = new Map<string, Uint8Array>();
+  let previous = 0n;
   events.forEach(({ payload, submittedAt }, at) => {
-    if (typeof submittedAt !== "bigint" || submittedAt < 0n)
-      throw new RangeError("checkAvailability: submission times are bigints ≥ 0");
+    // Events in the contract's order come from blocks in order, so their
+    // timestamps never decrease; a list that does isn't one the accumulator
+    // could have replayed.
+    if (typeof submittedAt !== "bigint" || submittedAt < previous)
+      throw new RangeError("checkAvailability: submission times are bigints that never decrease");
+    previous = submittedAt;
     let d: Decoded;
     try {
       d = decodeEvent(payload);

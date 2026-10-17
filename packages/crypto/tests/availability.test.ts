@@ -332,6 +332,12 @@ describe("the availability check", () => {
     expect(() =>
       checkAvailability(base, [{ payload: new Uint8Array(), submittedAt: -1n }]),
     ).toThrow(RangeError);
+    expect(() =>
+      checkAvailability(base, [
+        { payload: new Uint8Array(), submittedAt: 2n },
+        { payload: new Uint8Array(), submittedAt: 1n },
+      ]),
+    ).toThrow(RangeError);
   });
 
   test("the default panel's counted-extent attestations are what delivery reads, with their roots", () => {

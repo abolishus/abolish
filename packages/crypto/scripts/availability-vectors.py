@@ -207,6 +207,8 @@ def check(election, events):
     panels = {p["panel"]: p for p in election["panels"]}
     records, rejected = [], []
     filled, attested, complained = set(), {}, {}
+    # The contract's event order is block order, so submission times never decrease.
+    assert all(a[1] <= b[1] for a, b in zip(events, events[1:]))
     for at, (payload, submitted) in enumerate(events):
         kind = "complaint" if payload[:2] == u16(COMPLAINT) else "attestation"
         try:
@@ -460,7 +462,9 @@ def main():
 
     def case(id_, desc, events, expect, election=None):
         el = election or base
-        evs = [(encode(k, f) if not isinstance(f, bytes) else f, t) for k, f, t in events]
+        # In submission-time order, as the contract's events are; records of
+        # one time keep the order the case lists them in.
+        evs = sorted(((encode(k, f) if not isinstance(f, bytes) else f, t) for k, f, t in events), key=lambda e: e[1])
         got = check(el, evs)
         for key, want in expect.items():
             assert got[key] == want, (id_, key, got[key], want)
@@ -553,8 +557,8 @@ def main():
     )
     case(
         "repeats",
-        "Seat 1's late ballot-extent attestation fills its slot, so its timely one after it is a repeat; a byte-identical copy of seat 2's and seat 3's second complaint are repeats too. Only seats 2 and 4 attest the ballot extent: unavailable at point 1",
-        [(A, attestation(1, 1, 1), t_a + 5), (A, attestation(1, 1, 1), t_a), (A, attestation(1, 2, 1), t_a), (A, attestation(1, 2, 1), t_a)]
+        "Seat 1's first ballot-extent attestation names another checkpoint and fills its slot, so its right one after it is a repeat; a byte-identical copy of seat 2's and seat 3's second complaint are repeats too. Only seats 2 and 4 attest the ballot extent: unavailable at point 1",
+        [(A, attestation(1, 1, 1, checkpoint=other_checkpoint), t_a), (A, attestation(1, 1, 1), t_a), (A, attestation(1, 2, 1), t_a), (A, attestation(1, 2, 1), t_a)]
         + [(C, complaint(1, 3, 1), t_a), (C, complaint(1, 3, 1, cid=cid_pb), t_a), (A, attestation(1, 4, 1), t_a)]
         + honest[4:],
         {"verdict": "unavailable", "failures": [{"point": 1, "panel": 1}]},
@@ -584,15 +588,15 @@ def main():
     )
     case(
         "rejected",
-        "A version-2 copy of seat 1's attestation, a 3-byte payload and a destruction statement's header are rejected entries; the records after them count",
+        "A version-2 copy of seat 1's attestation, a 3-byte payload and a destruction statement's header are rejected entries; the honest records beside them count",
         [(A, at(encode(A, attestation(1, 1, 1)), 2, 2), t_a), (A, bytes.fromhex("001b01"), t_a), (A, bytes.fromhex("000f01"), t_a)] + honest,
         {"verdict": "available"},
     )
     case("empty", "No records at all: every seat silent, unavailable at both points", [], {"verdict": "unavailable", "failures": [{"point": 1, "panel": 1}, {"point": 2, "panel": 1}]})
     case(
         "order",
-        "The all-attest records in reverse order give the same verdict",
-        list(reversed(honest)),
+        "The all-attest records in reverse order within each block give the same verdict",
+        list(reversed(honest[:4])) + list(reversed(honest[4:])),
         {"verdict": "available"},
     )
 

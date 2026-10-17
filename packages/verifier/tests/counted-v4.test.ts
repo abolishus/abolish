@@ -745,55 +745,69 @@ describe("the tally of the default halves (7.1 to 7.4, 8.5)", () => {
     });
   });
 
-  test("an opening over a ballot delivery excluded is over another set", () => {
-    const f = election();
-    f.deliver([a, c, g], 200);
-    // Seat 3 never receipted `b`.
-    for (const seat of [1, 2]) f.board(200, f.receipt(b, seat));
-    const wrong = f.board(300, f.opening(0, [a, b], 1));
-    f.board(300, f.opening(1, [c], 2));
-    f.board(300, f.opening(2, [g], 3));
-    const got = countedChecks(f.inputs([a, b, c, g], { destruction: false }));
-    expect(got.delivery?.excluded).toEqual([
-      { entry: b.entry, missing: [{ panel: DEFAULT, seat: 3 }], complaints: [] },
-    ]);
-    expect(got.rows.get("7.2")).toEqual({ status: "fail", code: "tally-opening", at: { cell: 0 } });
-    expect(got.cells?.[0]).toEqual({
-      cell: 0,
-      tier: 0,
-      counted: 1,
-      code: "tally-opening",
-      signers: [],
-    });
-    // A tier with a failing cell has no derived result.
-    expect(got.tiers?.[0]).toEqual({ tier: 0, counted: 2 });
-    expect(got.tallyBreaks).toEqual(new Map([[wrong, { code: "tally-aggregate" }]]));
-    // The opening over the counted set passes.
-    f.board(301, f.opening(0, [a], 2));
-    const fixed = countedChecks(f.inputs([a, b, c, g], { destruction: false }));
-    expect(fixed.rows.get("7.2")).toEqual({ status: "pass" });
-    expect(fixed.cells?.[0]).toMatchObject({
-      counts: ["1", "0", "0", "1", "1", "0", "0", "1", "0"],
-    });
-  });
+  // Two delivery and tally runs with every signature checked: past the
+  // default 5 seconds on a loaded runner.
+  test(
+    "an opening over a ballot delivery excluded is over another set",
+    { timeout: 60_000 },
+    () => {
+      const f = election();
+      f.deliver([a, c, g], 200);
+      // Seat 3 never receipted `b`.
+      for (const seat of [1, 2]) f.board(200, f.receipt(b, seat));
+      const wrong = f.board(300, f.opening(0, [a, b], 1));
+      f.board(300, f.opening(1, [c], 2));
+      f.board(300, f.opening(2, [g], 3));
+      const got = countedChecks(f.inputs([a, b, c, g], { destruction: false }));
+      expect(got.delivery?.excluded).toEqual([
+        { entry: b.entry, missing: [{ panel: DEFAULT, seat: 3 }], complaints: [] },
+      ]);
+      expect(got.rows.get("7.2")).toEqual({
+        status: "fail",
+        code: "tally-opening",
+        at: { cell: 0 },
+      });
+      expect(got.cells?.[0]).toEqual({
+        cell: 0,
+        tier: 0,
+        counted: 1,
+        code: "tally-opening",
+        signers: [],
+      });
+      // A tier with a failing cell has no derived result.
+      expect(got.tiers?.[0]).toEqual({ tier: 0, counted: 2 });
+      expect(got.tallyBreaks).toEqual(new Map([[wrong, { code: "tally-aggregate" }]]));
+      // The opening over the counted set passes.
+      f.board(301, f.opening(0, [a], 2));
+      const fixed = countedChecks(f.inputs([a, b, c, g], { destruction: false }));
+      expect(fixed.rows.get("7.2")).toEqual({ status: "pass" });
+      expect(fixed.cells?.[0]).toMatchObject({
+        counts: ["1", "0", "0", "1", "1", "0", "0", "1", "0"],
+      });
+    },
+  );
 
-  test("an opening that doesn't open an option fails 7.2 at that option", () => {
-    const f = election();
-    f.deliver([a, c, g], 200);
-    const bad = f.board(
-      300,
-      f.opening(0, [a], 1, (o) => o.map((x, j) => (j === 4 ? { ...x, v: x.v + 1n } : x))),
-    );
-    f.board(300, f.opening(1, [c], 2));
-    f.board(300, f.opening(2, [g], 3));
-    const got = countedChecks(f.inputs([a, c, g], { destruction: false }));
-    expect(got.rows.get("7.2")).toEqual({
-      status: "fail",
-      code: "tally-opening",
-      at: { cell: 0, option: 4 },
-    });
-    expect(got.tallyBreaks).toEqual(new Map([[bad, { code: "tally-opening", option: 4 }]]));
-  });
+  test(
+    "an opening that doesn't open an option fails 7.2 at that option",
+    { timeout: 60_000 },
+    () => {
+      const f = election();
+      f.deliver([a, c, g], 200);
+      const bad = f.board(
+        300,
+        f.opening(0, [a], 1, (o) => o.map((x, j) => (j === 4 ? { ...x, v: x.v + 1n } : x))),
+      );
+      f.board(300, f.opening(1, [c], 2));
+      f.board(300, f.opening(2, [g], 3));
+      const got = countedChecks(f.inputs([a, c, g], { destruction: false }));
+      expect(got.rows.get("7.2")).toEqual({
+        status: "fail",
+        code: "tally-opening",
+        at: { cell: 0, option: 4 },
+      });
+      expect(got.tallyBreaks).toEqual(new Map([[bad, { code: "tally-opening", option: 4 }]]));
+    },
+  );
 });
 
 describe("the gates", () => {

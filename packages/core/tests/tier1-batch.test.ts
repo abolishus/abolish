@@ -233,6 +233,10 @@ class FakeChain implements Tier1Chain {
   readonly refuse = new Set<string>();
   readonly reverts = new Set<string>();
   down = false;
+  /** Blocks every read but `nonce` lags the true latest by: a backend behind another. */
+  lag = 0n;
+  /** Called on a broadcast the fake refuses, before it answers. */
+  onRefuse: ((tx: Uint8Array) => void) | undefined;
   /** Applied to `records`' answer, once set. */
   tamper: ((records: ContractEventRecord[]) => ContractEventRecord[]) | undefined;
   /** Called after `records` reads, once: a reorganisation mid-read, say. */
@@ -263,8 +267,9 @@ class FakeChain implements Tier1Chain {
 
   async heads(): Promise<Tier1Heads> {
     await this.#check();
+    const latest = this.latest - this.lag;
     return {
-      latest: { number: this.latest, hash: this.hash(this.latest) },
+      latest: { number: latest, hash: this.hash(latest) },
       safe: this.safe,
       finalized: this.finalized,
     };
@@ -287,18 +292,19 @@ class FakeChain implements Tier1Chain {
     return out;
   }
 
+  /** Read at the true latest block, whatever `lag` the other reads have. */
   async nonce() {
     await this.#check();
     const taken = new Set(this.foreign);
     for (const [h, block] of this.mined)
       if (block <= this.latest) taken.add((this.txs.get(h) as Tx).nonce);
-    return BigInt(taken.size);
+    return { count: BigInt(taken.size), at: { number: this.latest, hash: this.hash(this.latest) } };
   }
 
   async included(hash: Uint8Array) {
     await this.#check();
     const block = this.mined.get(hex(hash));
-    return block !== undefined && block <= this.latest ? block : null;
+    return block !== undefined && block <= this.latest - this.lag ? block : null;
   }
 
   async simulate(record: Uint8Array) {
@@ -322,7 +328,9 @@ class FakeChain implements Tier1Chain {
   async broadcast(tx: Uint8Array) {
     await this.#check();
     this.broadcasts.push(tx);
-    return this.refuse.has(hex(tx)) ? ("refused" as const) : ("sent" as const);
+    if (!this.refuse.has(hex(tx))) return "sent" as const;
+    this.onRefuse?.(tx);
+    return "refused" as const;
   }
 
   /** Mines the transaction into `block`, logging its record there. */
@@ -430,6 +438,7 @@ const report = (
   returned: 0,
   rebroadcast: 0,
   replaced: 0,
+  refused: 0,
   dropped: 0,
   reverted: 0,
   sent: 0,
@@ -604,6 +613,10 @@ describe("Tier1Batches: a boundary", { timeout: 120_000 }, () => {
         expect(got.sent + got.dropped).toBe(new Set(records.map(hex)).size);
         expect(sent.length).toBeLessThanOrEqual(TIER1_RELAY_MAX_BATCH);
         expect(allCount(HISTORY, B, sent)).toBe(true);
+        // And nothing that would count after them is dropped.
+        for (const r of records)
+          if (!sent.some((x) => hex(x) === hex(r)))
+            expect(allCount(HISTORY, B, [...sent, r])).toBe(false);
         for (let i = 1; i < sent.length; i++)
           expect(commitment(sent[i - 1] as Uint8Array) <= commitment(sent[i] as Uint8Array)).toBe(
             true,
@@ -752,15 +765,47 @@ describe("Tier1Batches: what was sent", { timeout: 120_000 }, () => {
     expect(got.dropped).toBe(1);
   });
 
-  test("a refused send sends it and every later nonce back, and their nonces are signed again over them", async () => {
+  test("a refused send whose nonce is still free stays in flight and is replaced at the next boundary", async () => {
     const { chain, j, txs } = await sent();
     chain.refuse.add(hex(txs[0] as Uint8Array));
-    const got = await boundary(j);
-    expect(got).toEqual(report("judged", { returned: 2, sent: 2 }));
+    expect(await boundary(j)).toEqual(report("pending", { refused: 1, rebroadcast: 1 }));
+    expect(await queued()).toEqual([]);
+    expect(chain.signs).toHaveLength(2);
+    expect(await boundary(j)).toEqual(report("pending", { replaced: 2 }));
     expect(chain.signs.slice(2).map((s) => [s.nonce, hex(s.replacing as Uint8Array)])).toEqual([
       [0n, hex(txs[0] as Uint8Array)],
       [1n, hex(txs[1] as Uint8Array)],
     ]);
+  });
+
+  test("a send refused because it landed meanwhile is kept, and nothing is given back or sent", async () => {
+    const { chain, j, txs } = await sent();
+    const first = txs[0] as Uint8Array;
+    chain.refuse.add(hex(first));
+    chain.onRefuse = (tx) => {
+      chain.mine(tx, B + 1n);
+      chain.advance(B + 1n, B - 200n);
+    };
+    expect(await boundary(j)).toEqual(report("pending", { rebroadcast: 1 }));
+    expect(await queued()).toEqual([]);
+    expect(await inFlight()).toHaveLength(2);
+    expect(chain.signs).toHaveLength(2);
+  });
+
+  test("a record given back for a taken nonce isn't judged against a history older than that nonce", async () => {
+    const { chain, j, txs } = await sent();
+    // Both land in B + 1, but every read except the nonce's comes from a
+    // backend a block behind, which doesn't show them.
+    for (const tx of txs) chain.mine(tx, B + 1n);
+    chain.advance(B + 1n, B - 200n);
+    chain.lag = 1n;
+    expect(await boundary(j)).toEqual(report("index-unavailable", { returned: 2 }));
+    expect(chain.signs).toHaveLength(2);
+    expect(await queued()).toHaveLength(2);
+    // Once the replay reaches the nonce's block, it sees both counted.
+    chain.lag = 0n;
+    expect(await boundary(j)).toEqual(report("judged", { dropped: 2 }));
+    expect(chain.signs).toHaveLength(2);
   });
 
   test("a send that can never land is deleted once its window's last block is final", async () => {

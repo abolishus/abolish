@@ -91,8 +91,11 @@ export interface Tier1Chain {
    * order of `n` (docs/spec/contracts.md, Contract-event record).
    */
   records(after: bigint | null, through: bigint): Promise<readonly ContractEventRecord[]>;
-  /** The relay account's transaction count at the latest block: every lower nonce is taken. */
-  nonce(): Promise<bigint>;
+  /**
+   * The relay account's transaction count at the node's latest block, and
+   * that block: every lower nonce is taken in the history ending there.
+   */
+  nonce(): Promise<{ readonly count: bigint; readonly at: Tier1Head }>;
   /** The block whose transactions include `hash` in the node's latest history, or null. */
   included(hash: Uint8Array): Promise<bigint | null>;
   /** Simulates `addTier1Member(record)` from the relay's account at the latest block: false if it reverts. */
@@ -153,6 +156,8 @@ export interface Tier1BoundaryReport {
   readonly rebroadcast: number;
   /** Step 1: pending transactions replaced at their nonce with higher fees. */
   readonly replaced: number;
+  /** Step 1: pending transactions the node refused to take again, kept to be replaced. */
+  readonly refused: number;
   /** Step 4: records that don't count, or can't be sent in time, dropped. */
   readonly dropped: number;
   /** Step 5: chosen records whose simulation reverted, dropped. */
@@ -443,19 +448,19 @@ export class Tier1Batches {
   }
 
   // Step 2, and the index between boundaries. True once the state is at the
-  // node's latest block and the index says so.
-  async #refresh(token: string): Promise<boolean> {
+  // node's latest block and the index says so. At a boundary, `floor` is the
+  // block step 1 read the account's nonce at: the replay must reach it, so a
+  // record given back because its nonce was taken is judged against a
+  // history that holds whatever took it (T-52).
+  async #refresh(token: string, floor?: Tier1Head): Promise<boolean> {
     // The time the read starts: the index is at least this current.
     const at = Math.floor(this.#now());
     let heads: Tier1Heads;
     try {
-      heads = await this.#extend();
+      heads = await this.#extend(floor);
     } catch {
-      // Unreachable, or inconsistent: either way nothing read is kept, and a
-      // state an extension may have part applied is replaced by a full
-      // replay next time.
-      this.#state = null;
-      this.#tip = null;
+      // Unreachable, or inconsistent: nothing read is kept, and the state
+      // stays at its block unless an extension failed partway (#extend).
       return false;
     }
     await this.#fenced(
@@ -467,11 +472,16 @@ export class Tier1Batches {
     return true;
   }
 
-  async #extend(): Promise<Tier1Heads> {
+  async #extend(floor?: Tier1Head): Promise<Tier1Heads> {
     const chain = this.#chain;
     const heads = await chain.heads();
     const { latest } = heads;
     if (heads.finalized > heads.safe || heads.safe > latest.number) throw new Inconsistent();
+    if (floor !== undefined) {
+      if (latest.number < floor.number) throw new Inconsistent();
+      const hash = await chain.blockHash(floor.number);
+      if (hash === null || !equalBytes(hash, floor.hash)) throw new Inconsistent();
+    }
     // A reorganisation of a block the state was extended past changes that
     // block's hash, since each block's hash covers its parent's: the state
     // is rebuilt from nothing. A node that doesn't have the block (behind
@@ -517,7 +527,14 @@ export class Tier1Batches {
       )
         throw new Inconsistent();
     const state = this.#state ?? this.#fresh();
-    state.extend(read.events, latest.number);
+    try {
+      state.extend(read.events, latest.number);
+    } catch (e) {
+      // Part applied: only a full replay matches a history again.
+      this.#state = null;
+      this.#tip = null;
+      throw e;
+    }
     this.#state = state;
     this.#tip = { number: latest.number, hash: latest.hash.slice() };
     this.#next = start + BigInt(records.length);
@@ -532,6 +549,7 @@ export class Tier1Batches {
       returned: 0,
       rebroadcast: 0,
       replaced: 0,
+      refused: 0,
       dropped: 0,
       reverted: 0,
       sent: 0,
@@ -544,45 +562,42 @@ export class Tier1Batches {
     const chain = this.#chain;
 
     // Step 1: what was sent before, in nonce order. The inclusions are read
-    // before the nonce, and the index after both: a transaction included
-    // between the reads looks like a consumed nonce, its record goes back to
-    // the queue, and the replay then sees it counted and drops the record
-    // (T-52).
+    // before the nonce, and the replay of step 2 reaches the nonce's block: a
+    // transaction included between the reads looks like a taken nonce, its
+    // record goes back to the queue, and the replay sees it counted and
+    // drops the record (T-52).
     const inFlight = pairs(await this.#eval(READ_ALL, [k.inflight]))
       .map(([key, value]) => ({ key, f: readInFlight(value) }))
       .sort((a, b) => cmp(a.f.nonce, b.f.nonce));
+    const includedIn = async (f: InFlight) => {
+      for (const h of f.hashes) {
+        const block = await chain.included(fromHex(h));
+        if (block !== null) return block;
+      }
+      return null;
+    };
     let heads: Tier1Heads;
-    let consumed: bigint;
+    let taken: { readonly count: bigint; readonly at: Tier1Head };
     const included = new Map<string, bigint | null>();
     try {
       heads = await chain.heads();
-      for (const { key, f } of inFlight) {
-        let block: bigint | null = null;
-        for (const h of f.hashes) {
-          block = await chain.included(fromHex(h));
-          if (block !== null) break;
-        }
-        included.set(key, block);
-      }
-      consumed = await chain.nonce();
+      for (const { key, f } of inFlight) included.set(key, await includedIn(f));
+      taken = await chain.nonce();
     } catch {
       return report("chain-unavailable");
     }
     let pending = 0;
     // The next nonce to sign at: past the nonces the chain has taken and
     // every transaction still ours to land.
-    let nextNonce = consumed;
+    let nextNonce = taken.count;
     const keep = (nonce: bigint) => {
       if (nonce + 1n > nextNonce) nextNonce = nonce + 1n;
     };
-    // A nonce whose transaction was refused, and so every later one, which
-    // can't land without it: their records go back to the queue, and their
-    // nonces are signed again, each outbidding the transaction it replaces.
-    let gap = false;
+    // Nonces of records that can never land, whose last transactions a node
+    // may still hold: a new send there outbids them.
     const freed = new Map<bigint, Uint8Array>();
     const giveBack = async (key: string, f: InFlight) => {
       await this.#fenced(INFLIGHT_RETURN, [k.inflight, k.queue], token, key, f.record);
-      if (f.nonce >= consumed) freed.set(f.nonce, fromHex(f.txs.at(-1) as string));
       counts.returned++;
     };
     for (const { key, f } of inFlight) {
@@ -597,21 +612,22 @@ export class Tier1Batches {
       // Its window's last block is final without it: it can never land.
       if (heads.finalized >= windowEnd(f.record)) {
         await this.#fenced(INFLIGHT_DELETE, [k.inflight], token, key);
+        if (f.nonce >= taken.count) freed.set(f.nonce, fromHex(f.txs.at(-1) as string));
         counts.expired++;
         continue;
       }
-      // Its nonce went to another transaction of the account, or an earlier
-      // one's did: judged again with the queue, never sent again without that.
-      if (f.nonce < consumed || gap) {
+      // Its nonce went to another transaction of the account, so none of its
+      // own can land: judged again with the queue, never sent again without that.
+      if (f.nonce < taken.count) {
         await giveBack(key, f);
         continue;
       }
+      const last = fromHex(f.txs.at(-1) as string);
       try {
         if (f.pending >= 1) {
           // Pending at a second boundary: replaced at its nonce with a
           // higher fee, kept before it is sent. A refused replacement leaves
           // the transaction it replaces, still a way to land.
-          const last = fromHex(f.txs.at(-1) as string);
           const signed = await chain.sign(fromHex(f.record), f.nonce, last);
           const next: InFlight = {
             ...f,
@@ -622,12 +638,32 @@ export class Tier1Batches {
           await this.#fenced(INFLIGHT_SET, [k.inflight], token, key, writeInFlight(next));
           if ((await chain.broadcast(signed.tx)) === "refused") await chain.broadcast(last);
           counts.replaced++;
-        } else {
-          if ((await chain.broadcast(fromHex(f.txs.at(-1) as string))) === "refused") {
-            gap = true;
+        } else if ((await chain.broadcast(last)) === "refused") {
+          // Refused because it landed meanwhile, or its nonce was taken, or
+          // for a reason of the node's own (funds, fees). Only a taken nonce
+          // gives the record back: one that may still land stays in flight,
+          // to be replaced at the next boundary, since judging it again could
+          // send it twice (T-52).
+          if ((await includedIn(f)) !== null) {
+            keep(f.nonce);
+            continue;
+          }
+          const now = await chain.nonce();
+          if (now.count > f.nonce) {
+            if (now.at.number > taken.at.number) taken = { count: taken.count, at: now.at };
+            keep(now.count - 1n);
             await giveBack(key, f);
             continue;
           }
+          await this.#fenced(
+            INFLIGHT_SET,
+            [k.inflight],
+            token,
+            key,
+            writeInFlight({ ...f, pending: f.pending + 1 }),
+          );
+          counts.refused++;
+        } else {
           const next: InFlight = { ...f, pending: f.pending + 1 };
           await this.#fenced(INFLIGHT_SET, [k.inflight], token, key, writeInFlight(next));
           counts.rebroadcast++;
@@ -644,7 +680,7 @@ export class Tier1Batches {
     if (pending > 0) return report("pending");
 
     // Step 2: the index and the counting state at the latest block.
-    if (!(await this.#refresh(token))) return report("index-unavailable");
+    if (!(await this.#refresh(token, taken.at))) return report("index-unavailable");
     const state = this.#state as Tier1CountingState;
     if (state.broken !== null) return report("broken");
 

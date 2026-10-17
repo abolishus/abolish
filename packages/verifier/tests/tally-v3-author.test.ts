@@ -4,13 +4,20 @@ import fc from "fast-check";
 import { describe, expect, test } from "vite-plus/test";
 import { ballotChecks } from "../src/ballots.ts";
 import { ceremonyChecks } from "../src/ceremony.ts";
-import { countedChecks, type CountedInputs, questionMethod } from "../src/counted.ts";
+import {
+  countedChecks,
+  type CountedInputs,
+  type CountedOutcome,
+  questionMethod,
+} from "../src/counted.ts";
+import { type TallyOutcome, tallyChecks } from "../src/tallies.ts";
 import { authorRunOf, decodeDefinition, readDefinition } from "../src/definition.ts";
 import { decodeHeader, splitEntries } from "../src/index.ts";
 import { run } from "./headers.ts";
 
-// The tally (7.1 to 7.3) beside an author panel, under tally-opening version
-// 3: one counted set per cell, from delivery over both panels' seats, which
+// The tally (7.1 to 7.4) and destruction (8.5) beside an author panel, under
+// tally-opening version 3: one counted set per cell, from delivery over both
+// panels' seats, which
 // both panels sum over; each panel's partial openings checked against its
 // own half's aggregate and attributed only by its own panel's registered key
 // set, the author panel's checked first; each cell's count the sum of the
@@ -19,12 +26,20 @@ import { run } from "./headers.ts";
 // unbounded `s_A` agree (docs/spec/verifier.md, Counted set and tally, steps
 // 4 and 5; docs/spec/tally.md, Author panel, Opening checks (version 3);
 // T-29, T-37, T-54). The close check (6.3) runs over the same delivery, with
-// the default panel's seats alone. Fixtures:
+// the default panel's seats alone. 7.4 sorts each partial opening by its
+// panel byte and attributes it by that panel's key set alone, a second or a
+// repeat by the same seat of the same panel, with `tally-early` for a default
+// partial opening boarded before every cell had a passing author one; 8.5
+// judges each seat of both panels by its first version-2 destruction
+// statement against the latest first passing opening over cells and both
+// panels (Tally openings; Counted set and tally, steps 6 and 7; tally.md,
+// Boarding (version 3), Windows and destruction (version 2); T-14). Fixtures:
 // docs/spec/vectors/verifier-tally-v3-author.json (packages/crypto/scripts/
 // verifier-tally-v3-author-vectors.py, an independent implementation of both
 // runs, the approvals, the ballots and their shares, the receipts, the
-// delivery check, each panel's honest combination and the opening checks over
-// both panels); selection (6.1) needs L1 evidence these copies don't carry,
+// delivery check, each panel's honest combination, the opening checks and the
+// boarding rule over both panels, and the per-panel destruction report);
+// selection (6.1) needs L1 evidence these copies don't carry,
 // so the admitted ballots stand in for the selected ones, as each has its own
 // nullifier.
 
@@ -39,6 +54,8 @@ interface Case {
   readonly counted: readonly number[];
   readonly cells: readonly Record<string, unknown>[];
   readonly tiers: readonly Record<string, unknown>[];
+  readonly tallies: readonly Record<string, unknown>[];
+  readonly destruction: Record<string, unknown>;
 }
 
 const file = JSON.parse(
@@ -107,11 +124,30 @@ function election(c: Case) {
     blocks: undefined,
     ...over,
   });
-  return { ceremony, candidates, definition, entries, inputs };
+  /** 7.4 over the copy, with what the counted set settles (verify.ts's call). */
+  const tallies = (r: ReturnType<typeof countedChecks>, over: Partial<CountedInputs> = {}) => {
+    const i = inputs(over);
+    return tallyChecks(
+      definition,
+      hash,
+      ceremony.registered,
+      i.authorRegistered,
+      i.entries,
+      7,
+      r.tallyBreaks === undefined
+        ? undefined
+        : {
+            extent: i.extent,
+            breaks: r.tallyBreaks,
+            ...(r.tallyEarly !== undefined && { early: r.tallyEarly }),
+          },
+    );
+  };
+  return { ceremony, candidates, definition, entries, inputs, tallies };
 }
 
 // A not-reached row carries an empty `at`, which the vectors leave out.
-const rows = (r: ReturnType<typeof countedChecks>) =>
+const rows = (r: { readonly rows: ReadonlyMap<string, CountedOutcome | TallyOutcome> }) =>
   Object.fromEntries(
     [...r.rows].map(([id, { status, code, at }]) => [
       id,
@@ -129,15 +165,20 @@ const countedOf = (r: ReturnType<typeof countedChecks>, selected: readonly numbe
   return selected.filter((entry) => !excluded.has(entry));
 };
 
-describe("7.1 to 7.3 beside an author panel against the independent implementation", () => {
+describe("7.1 to 7.4 and 8.5 beside an author panel against the independent implementation", () => {
   for (const c of file.cases)
     test(c.id, () => {
-      const { ceremony, candidates, definition, inputs } = election(c);
+      const { ceremony, candidates, definition, inputs, tallies } = election(c);
       expect(ceremony.registered?.map((k) => k.index)).toEqual([1, 2, 3]);
       expect(ceremony.authorRegistered?.map((k) => k.index)).toEqual([1, 2]);
       expect(candidates.map((x) => x.entry)).toEqual([3, 4, 5]);
       const r = countedChecks(inputs());
-      expect(rows(r)).toEqual(c.expected);
+      const opened = tallies(r);
+      expect(
+        rows({
+          rows: new Map<string, CountedOutcome | TallyOutcome>([...r.rows, ["7.4", opened.row]]),
+        }),
+      ).toEqual(c.expected);
       expect(countedOf(r, [3, 4, 5])).toEqual(c.counted);
       // The vectors give the flat counts; each question's slice of them is
       // cut here by the definition's option counts (8.1).
@@ -162,8 +203,8 @@ describe("7.1 to 7.3 beside an author panel against the independent implementati
         x.counts === undefined ? x : { ...x, byQuestion: sliceBy(sizes, x.counts) };
       expect(r.cells).toEqual(c.cells.map(perQuestion));
       expect(r.tiers).toEqual(c.tiers.map(perQuestion));
-      // 7.4's breaks beside an author panel are P2-16 part 4d-3d-2's.
-      expect(r.tallyBreaks).toBeUndefined();
+      expect(opened.report).toEqual(c.tallies);
+      expect(r.destruction).toEqual(c.destruction);
     });
 });
 
@@ -267,4 +308,130 @@ describe("6.3 beside an author panel", () => {
     expect(r.close?.seats.map((s) => s.seat)).toEqual([1, 2, 3]);
     expect(r.rows.get("7.2")).toEqual({ status: "pass" });
   });
+});
+
+describe("7.4 beside an author panel", () => {
+  test("without the author panel's key set nothing is judged", () => {
+    const { definition, entries, ceremony } = election(byId("boarding"));
+    const { hash } = readDefinition(definition);
+    expect(tallyChecks(definition, hash, ceremony.registered, undefined, entries, 7)).toEqual({
+      row: { status: "unverifiable", code: "not-reached" },
+    });
+  });
+
+  test("until the counted set is known an honest partial opening is unsettled and nothing is early", () => {
+    const c = byId("boarding");
+    const { definition, entries, ceremony } = election(c);
+    const { hash } = readDefinition(definition);
+    const r = tallyChecks(
+      definition,
+      hash,
+      ceremony.registered,
+      ceremony.authorRegistered,
+      entries,
+      7,
+    );
+    expect(r.row).toEqual({ status: "unverifiable", code: "not-implemented" });
+    // The breaks decided without it stay; those against an aggregate and
+    // tally-early wait for it.
+    const without = new Set(["tally-aggregate", "tally-opening", "tally-early"]);
+    expect(r.report).toEqual(
+      c.tallies.map((o) => ({
+        ...o,
+        breaks: (o["breaks"] as readonly { readonly code: string }[]).filter(
+          (b) => !without.has(b.code),
+        ),
+      })),
+    );
+  });
+
+  test("tally-early exactly for the default partial openings boarded before every cell's first passing author one", () => {
+    // Over subsets of the boarding case's openings: which default partial
+    // openings are early depends only on where the remaining passing author
+    // ones are, and none is early once every cell has one before it.
+    const c = byId("boarding");
+    const { entries, inputs, tallies } = election(c);
+    const openings = openingsOf(entries);
+    const passingAuthor = new Set(
+      c.tallies
+        .filter((o) => o["panel"] === 2 && (o["breaks"] as readonly unknown[]).length === 0)
+        .map((o) => o["entry"] as number),
+    );
+    // The repeat passes its opening checks too: only its boarding is a breach.
+    const repeat = c.tallies.find((o) =>
+      (o["breaks"] as readonly { readonly code: string }[]).some((b) => b.code === "tally-repeat"),
+    );
+    if (repeat !== undefined) passingAuthor.add(repeat["entry"] as number);
+    fc.assert(
+      fc.property(
+        fc.array(fc.boolean(), { minLength: openings.length, maxLength: openings.length }),
+        (keep) => {
+          const dropped = new Set(openings.filter((_, k) => keep[k] !== true).map((o) => o.at));
+          const kept = entries.filter((_, at) => !dropped.has(at));
+          // Positions in the kept copy, by original entry.
+          const position = new Map<number, number>();
+          entries.forEach((_, at) => {
+            if (!dropped.has(at)) position.set(at, position.size);
+          });
+          const r = countedChecks(inputs({ entries: kept, extent: kept.length }));
+          const opened = tallies(r, { entries: kept, extent: kept.length });
+          const firstAuthor = [0, 1, 2].map((cell) => {
+            const at = openings.find(
+              (o) =>
+                o.cell === cell && o.panel === 2 && passingAuthor.has(o.at) && !dropped.has(o.at),
+            )?.at;
+            return at === undefined ? Number.POSITIVE_INFINITY : (position.get(at) as number);
+          });
+          const all = Math.max(...firstAuthor);
+          for (const o of opened.report ?? []) {
+            const early = o.breaks.some((b) => b.code === "tally-early");
+            expect(early).toBe(o.panel === 1 && o.cell !== undefined && o.entry < all);
+          }
+        },
+      ),
+      { numRuns },
+    );
+  }, 120_000);
+});
+
+describe("8.5 beside an author panel", () => {
+  test("over any subset of the destroyed case's statements, a seat is destroyed exactly when its statement is kept", () => {
+    const c = byId("destroyed");
+    const { entries, inputs } = election(c);
+    const statements = entries.flatMap((encoded, at) => {
+      const { payload } = decodeBoardEntry(encoded, 7);
+      return ((payload[0] as number) << 8) + (payload[1] as number) ===
+        RECORD_TYPES.destructionStatement
+        ? [{ at, panel: payload[35] as number, seat: payload[36] as number }]
+        : [];
+    });
+    expect(statements).toHaveLength(5);
+    fc.assert(
+      fc.property(fc.array(fc.boolean(), { minLength: 5, maxLength: 5 }), (keep) => {
+        const dropped = new Set(statements.filter((_, k) => keep[k] !== true).map((s) => s.at));
+        const kept = entries.filter((_, at) => !dropped.has(at));
+        const r = countedChecks(inputs({ entries: kept, extent: kept.length }));
+        // The default panel's seats, then the author panel's, each ascending.
+        const seats = [...statements].sort((a, b) => a.panel - b.panel || a.seat - b.seat);
+        expect(r.destruction?.seats.map((s) => [s.panel, s.seat, s.code])).toEqual(
+          seats.map((s) => [
+            s.panel,
+            s.seat,
+            dropped.has(s.at) ? "destruction-missing" : "destroyed",
+          ]),
+        );
+        const missing = seats.find((s) => dropped.has(s.at));
+        expect(r.rows.get("8.5")).toEqual(
+          missing === undefined
+            ? { status: "pass" }
+            : {
+                status: "fail",
+                code: "destruction-missing",
+                at: { panel: missing.panel, seat: missing.seat },
+              },
+        );
+      }),
+      { numRuns },
+    );
+  }, 120_000);
 });

@@ -466,8 +466,8 @@ def opening_row(d, admitted):
 
 
 def tally_row(d, registered):
-    """7.4 (docs/spec/verifier.md, Tally openings, steps 1 and 4): unsupported under a tally-opening version other than 1; not reached unless 3.2 registered a key set (never beside an author panel); otherwise it runs over the copy's openings, and these boards carry none, so it passes (packages/verifier's counted-v4.test.ts judges openings under version 6)."""
-    if dict(d["profile"]["pins"])[TALLY_OPENING_TYPE] != 1:
+    """7.4 (docs/spec/verifier.md, Tally openings, steps 1 and 4): unsupported under a tally-opening version other than 1, or beside an author panel other than 3; not reached unless 3.2 registered a key set; otherwise it runs over the copy's openings, and these boards carry none, so it passes (packages/verifier's counted-v4.test.ts judges openings under version 6, tally-v3-author.test.ts beside an author panel)."""
+    if dict(d["profile"]["pins"])[TALLY_OPENING_TYPE] != (3 if d["author_keys"] else 1):
         return UNSUPPORTED
     return NOT_REACHED if registered is None else outcome("pass")
 

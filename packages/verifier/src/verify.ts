@@ -747,17 +747,23 @@ export function verifyBundle(bundle: Bundle): Report {
       implemented = new Map<string, Outcome>([...implemented, ...counted.rows]);
       // Sorting and attribution need only the definition and the registered
       // signing keys, so 7.4 runs wherever 3.2 passed, under definition
-      // versions 3 to 5 against their cells (docs/spec/verifier.md, Tally
-      // openings); the counted set, once known, settles the rest.
+      // versions 3 to 6 against their cells, beside an author panel per panel
+      // with its own key set (docs/spec/verifier.md, Tally openings); the
+      // counted set, once known, settles the rest, `tally-early` included.
       const opened = tallyChecks(
         definition.definition,
         definition.hash,
         checked.registered,
+        checked.authorRegistered,
         bundle.entries,
         definition.inputs.boardEntryVersion,
         counted.tallyBreaks === undefined || extent === undefined
           ? undefined
-          : { extent, breaks: counted.tallyBreaks },
+          : {
+              extent,
+              breaks: counted.tallyBreaks,
+              ...(counted.tallyEarly !== undefined && { early: counted.tallyEarly }),
+            },
       );
       implemented = new Map<string, Outcome>([...implemented, ["7.4", opened.row]]);
       tallies = opened.report;

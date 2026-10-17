@@ -2,8 +2,9 @@
 """Independent generator for docs/spec/vectors/verifier-tally-v3-author.json.
 
 Elections for the verifier's tally beside an author panel (docs/spec/
-verifier.md, Counted set and tally, steps 4 and 5; 7.1 to 7.3; tally.md,
-Author panel, Opening checks (version 3)): verifier-ballots-v4-author.json's
+verifier.md, Counted set and tally, steps 4 to 7; Tally openings; 7.1 to
+7.4 and 8.5; tally.md, Author panel, Opening checks, Boarding (version 3) and
+Windows and destruction (version 2)): verifier-ballots-v4-author.json's
 "author-mixed" election under a profile that pins tally-opening version 3,
 with a 2-of-3 author panel whose seat 3 sent nothing beside the 3-of-4
 default panel whose seat 4 sent nothing, its board carrying both runs'
@@ -15,10 +16,17 @@ delivery over both panels gives, and attributed only by its own panel's
 registered key set (T-29, T-37, T-54). A missing default partial opening is
 `tally-author-late` while some cell's author opening is late (past `s_A`), and
 the default panel's `tally-missing` otherwise; the bundle knows only a floor
-of `s_A`, so where the two readings differ the cell isn't decided. Each case
-is a definition, a clock, a board copy and the default panel a bundle pins,
-with the rows 5.9, 6.3, 7.1 to 7.3 and 8.5 a verifier reports, the counted
-ballots' entries and the report's `cells` and `tiers`.
+of `s_A`, so where the two readings differ the cell isn't decided. Every
+partial opening is sorted by its panel byte and attributed only by that
+panel's key set, a second or a repeat is by the same seat of the same panel,
+and a default partial opening boarded before every cell had a passing author
+one is `tally-early` (7.4). Every seat of both panels is judged by its first
+version-2 destruction statement attributed to it, against a destruction
+segment from the latest first passing opening over cells and both panels
+(8.5). Each case is a definition, a clock, a board copy and the default panel
+a bundle pins, with the rows 5.9, 6.3, 7.1 to 7.4 and 8.5 a verifier reports,
+the counted ballots' entries and the report's `cells`, `tiers`, `tallies` and
+`destruction`.
 
 It reuses this folder's independent Python implementations, which share no
 code with packages/crypto or packages/verifier:
@@ -80,6 +88,10 @@ DEADLINE = 7200
 U32_MAX = 2**32 - 1
 # tally.md, Author panel, Partial openings: a constant of tally-opening version 3.
 AUTHOR_OPENING_WINDOW = 345_600
+# parameters.md: a constant of tally-opening version 1, which version 3 keeps
+# (tally.md, Windows and destruction (version 2)).
+TALLY_WINDOW = 604_800
+DESTRUCTION_TYPE = pt.DESTRUCTION
 outcome, NOT_REACHED = vc.outcome, vc.NOT_REACHED
 RECEIPT_TYPE = int.from_bytes(dv2.header(dv2.RECEIPT)[:2], "big")
 # verifier-ballots-v4-author-vectors.py's admitted ballots, by label, with the
@@ -209,7 +221,10 @@ def assemble(constants, proofs_path, out_dir):
     # the deadline, so with s_S at its floor s_A is at least this.
     s_a = floor + 1 + (DEADLINE + AUTHOR_OPENING_WINDOW) // PERIOD
     timely, late, after = floor + 1, s_a + 20, s_a + 21
-    clock["lastSegment"] = after + 1
+    # s_T's floor (Windows and destruction (version 2)): the sealed board
+    # reaches past it, so a statement there is anchored.
+    s_t = floor + 1 + (DEADLINE + TALLY_WINDOW) // PERIOD
+    clock["lastSegment"] = max(after, s_t) + 1
     assert seg_d < floor
 
     def board(segments):
@@ -218,6 +233,92 @@ def assemble(constants, proofs_path, out_dir):
             for p in payloads:
                 out.append(vc.entry(BOARD_VERSION, eid, len(out), seg, p))
         return out
+
+    def tally_report(low, openings, opening_at):
+        """7.4 under tally-opening version 3, with the counted set known (verifier.md, Tally openings; tally.md, Boarding (version 3)): each opening's breaks in the boarding rule's order, and the row at the first opening with a code or a break."""
+        failing = {f["at"]: f for c in low["cells"] for p in (DEFAULT, AUTHOR) for f in c["default" if p == DEFAULT else "author"]["failing"]}
+        early = {x["at"] for x in low["early"]}
+        first, out = {}, []
+        for k, (_, b) in enumerate(openings):
+            entry = opening_at[k]
+            try:
+                o = pt.decode_opening(b)
+            except pt.Reject as err:
+                out.append({"entry": entry, "code": "decode", "decodeError": err.code, "breaks": []})
+                continue
+            signer = pt.attribution(keys, o)
+            if not (o["definitionHash"] == defh and o["cell"] < len(e["cells"]) and o["panel"] in (DEFAULT, AUTHOR)):
+                breaks = [{"code": "tally-stray"}] + ([{"code": "tally-unattributed"}] if signer is None else [])
+                out.append({"entry": entry, "panel": o["panel"], "signer": signer, "breaks": breaks})
+                continue
+            breaks = []
+            if len(o["opening"]) != m:
+                breaks.append({"code": "tally-missing"})
+            elif k in failing:
+                f = failing[k]
+                breaks.append({"code": f["code"], **({"option": f["option"]} if "option" in f else {})})
+            if signer is None:
+                breaks.append({"code": "tally-unattributed"})
+            else:
+                key, signed = (o["cell"], o["panel"], signer), pt.opening_message(o)
+                if key in first:
+                    of, earlier = first[key]
+                    breaks.append({"code": "tally-repeat" if earlier == signed else "tally-second", "of": of})
+                else:
+                    first[key] = (entry, signed)
+            if k in early:
+                breaks.append({"code": "tally-early"})
+            out.append({"entry": entry, "cell": o["cell"], "panel": o["panel"], "signer": signer, "breaks": breaks})
+        head = next((o for o in out if "code" in o or o["breaks"]), None)
+        if head is None:
+            return out, outcome("pass")
+        at = {"entry": head["entry"], **({"decodeError": head["decodeError"]} if "decodeError" in head else {})}
+        return out, outcome("fail", head.get("code") or head["breaks"][0]["code"], at)
+
+    def destruction_report(low, payloads, segment_of):
+        """8.5 under destruction-statement version 2 (verifier.md, Counted set and tally, step 7; tally.md, Windows and destruction (version 2)), with s_T at its floor: a seat is destroyed only at or after s_O + 1, early only below the floor's destruction segment, and undecided between."""
+        at = [i for i, p in enumerate(payloads) if int.from_bytes(p[:2], "big") == DESTRUCTION_TYPE]
+        first_passing = [{p: (c[p]["passing"][0]["segment"] if c[p]["passing"] else None) for p in ("default", "author")} for c in low["cells"]]
+        got = pt.check_destruction(defh, keys, [(segment_of[i], payloads[i]) for i in at], first_passing, s_t)
+        segs = [x for c in first_passing for x in c.values()]
+        latest = None if None in segs else max(segs) + 1
+        seats = []
+        for x in got["seats"]:
+            r = {"panel": x["panel"], "seat": x["seat"]}
+            if x["code"] == "destruction-missing":
+                r["code"] = x["code"]
+            elif x["code"] == "destruction-early":
+                r.update(code=x["code"], entry=at[x["at"]])
+            else:
+                if latest is not None and segment_of[at[x["at"]]] >= latest:
+                    r["code"] = "destroyed"
+                r["entry"] = at[x["at"]]
+            seats.append(r)
+        report = {
+            "earliest": got["from"],
+            **({"latest": latest} if latest is not None else {}),
+            "seats": seats,
+            "duplicates": [{"entry": at[x["at"]], "panel": x["panel"], "seat": x["seat"]} for x in got["duplicates"]],
+            "unattributed": [{"entry": at[x["at"]]} for x in got["unattributed"]],
+            "stray": [{"entry": at[x["at"]], "panel": x["panel"], "signer": x["signer"]} for x in got["stray"]],
+            "rejected": [{"entry": at[x["at"]], "decodeError": x["error"]} for x in got["rejected"]],
+        }
+        where = lambda x: {"panel": x["panel"], "seat": x["seat"]}
+        undecided = next((x for x in seats if "code" not in x), None)
+        missed = next((x for x in seats if x.get("code") not in (None, "destroyed")), None)
+        if undecided is not None:
+            row = outcome("unverifiable", "not-implemented", where(undecided))
+        elif missed is not None:
+            row = outcome("fail", missed["code"], where(missed))
+        else:
+            row = outcome("pass")
+        return report, row
+
+    def statement(p, signer, signed_by=None, definition=None, version=2):
+        """A destruction statement by seat (p, signer), signed with `signed_by`'s secret (the seat's own by default); version 1 has no panel."""
+        dh = defh if definition is None else definition
+        msg = pt.destruction_message(dh, p, signer) if version == 2 else pt.header(DESTRUCTION_TYPE, 1) + dh + pt.u8(signer)
+        return msg + pt.sign(pt.DESTRUCTION_TAG, secrets[signed_by or (p, signer)], msg)
 
     tiers = [c["tier"] for c in e["cells"]]
     cases = []
@@ -230,7 +331,7 @@ def assemble(constants, proofs_path, out_dir):
         segment_of = [seg for seg, ps in segments for _ in ps]
         seats = vba.approving(d, author, run["hash"], run["keySetHash"], [p for p in payloads if int.from_bytes(p[:2], "big") == vba.ac.APPROVALS_TYPE])
         assert seats == [1, 2], id_
-        at_ballot, delivery, openings = [], [], []
+        at_ballot, delivery, openings, opening_at = [], [], [], []
         for i, p in enumerate(payloads):
             if p in recs:
                 at_ballot.append(i)
@@ -238,6 +339,7 @@ def assemble(constants, proofs_path, out_dir):
                 delivery.append(("board", segment_of[i], p))
             elif int.from_bytes(p[:2], "big") == TALLY_OPENING_TYPE:
                 openings.append((segment_of[i], p))
+                opening_at.append(i)
         assert len(at_ballot) == len(ballots), id_
         delivered = dv2.check_delivery(defh, registered, seg_d, seg_k, t_d_, t_k_, ballots, delivery)
         cells = [[] for _ in e["cells"]]
@@ -268,6 +370,8 @@ def assemble(constants, proofs_path, out_dir):
             row = outcome("fail", f["code"], {"cell": f["cell"], **{k: f[k] for k in ("panel", "option", "question") if k in f}})
         else:
             row = outcome("unverifiable", "not-implemented", {"cell": low["failure"]["cell"]})
+        tallies, tally_row = tally_report(low, openings, opening_at)
+        destruction, destruction_row = destruction_report(low, payloads, segment_of)
         # Coarser totals: a tier's counts are its cells' sums, only where every
         # cell of the tier passed.
         tier_report = []
@@ -284,19 +388,21 @@ def assemble(constants, proofs_path, out_dir):
                 "definition": vc.encode(d).hex(),
                 "clock": {k: str(v) for k, v in clock.items()},
                 "board": b"".join(entries).hex(),
-                # 6.3 needs the run of L1 headers these copies don't carry;
-                # destruction per panel (8.5) is P2-16 part 4d-3d-2's.
+                # 6.3 needs the run of L1 headers these copies don't carry.
                 "expected": {
                     "5.9": outcome("pass"),
                     "6.3": NOT_REACHED,
                     "7.1": outcome("pass"),
                     "7.2": row,
                     "7.3": outcome("pass"),
-                    "8.5": NOT_REACHED,
+                    "7.4": tally_row,
+                    "8.5": destruction_row,
                 },
                 "counted": [at_ballot[i] for i, v in enumerate(delivered["ballots"]) if v["counted"]],
                 "cells": report,
                 "tiers": tier_report,
+                "tallies": tallies,
+                "destruction": destruction,
             }
         )
         return cases[-1]
@@ -387,10 +493,77 @@ def assemble(constants, proofs_path, out_dir):
         [head, (3, every(b0) + every(b1, skip=[(AUTHOR, 2)]) + every(b2))] + segments(authors(), defaults())[2:],
     )
     assert excluded["counted"] == [3, 5] and excluded["cells"][1]["counted"] == 0
+    for c in cases:
+        assert c["expected"]["8.5"] == outcome("fail", "destruction-missing", {"panel": DEFAULT, "seat": 1}), c["id"]
+
+    boarding = case(
+        "boarding",
+        "Default seat 2's partial opening of cell 0 is boarded before any author one (tally-early, the operator's, and it still counts); author seat 1's partial opening of cell 1 is boarded twice, byte for byte (tally-repeat, the operator's alone), and its second of cell 2 is over an empty set (tally-aggregate, and tally-second: evidence against the seat); author seat 2's partial opening of cell 0 is no second of default seat 2's, whose index it shares, since each is attributed by its own panel's key set. Every cell passes; 7.4 fails at the first break, tally-early.",
+        segments(
+            [(timely, opening(0, DEFAULT, [b0], 2))],
+            authors(),
+            [
+                (timely, opening(1, AUTHOR, [b1], 1)),
+                (timely, opening(2, AUTHOR, [], 1)),
+                (timely, opening(0, AUTHOR, [b0], 2)),
+            ],
+            defaults(skip=(0,)),
+        ),
+    )
+    assert boarding["expected"]["7.2"] == outcome("pass")
+    first_opening = boarding["tallies"][0]["entry"]
+    assert boarding["expected"]["7.4"] == outcome("fail", "tally-early", {"entry": first_opening})
+    assert [[b["code"] for b in o["breaks"]] for o in boarding["tallies"]] == [["tally-early"], [], [], [], ["tally-repeat"], ["tally-aggregate", "tally-second"], [], [], []]
+
+    # Every cell's first passing partial openings are by timely + 1 for both
+    # panels, so the destruction segment is timely + 2 (s_O + 1).
+    s_o1 = timely + 2
+    honest_openings = (authors(), defaults())
+    seats = [(p, i) for p in (DEFAULT, AUTHOR) for i in sorted(registered[p])]
+    destroyed = case(
+        "destroyed",
+        f"As counted without the strays, and every registered seat of both panels states destruction (version 2) in segment {s_o1}, once every cell has both panels' partial openings: each is destroyed, and 8.5 passes.",
+        segments(*honest_openings, [(s_o1, statement(p, i)) for p, i in seats]),
+    )
+    assert destroyed["expected"]["7.4"] == outcome("pass") and destroyed["expected"]["8.5"] == outcome("pass")
+    assert destroyed["destruction"]["earliest"] == destroyed["destruction"]["latest"] == s_o1
+    mixed = case(
+        "destruction-mixed",
+        f"Default seat 1 states destruction in segment {s_o1} (destroyed) and default seat 2 in segment {timely}, before the last cell's default partial opening (destruction-early, the seat's); author seat 1 twice (the second a duplicate); a statement for author seat 2 signed with default seat 2's key and one for default seat 2 signed with author seat 2's (each unattributed: a statement is attributed only by the key set of the panel it names); default seat 3's for another definition (stray, attributed to it) and a version-1 statement (rejected). Default seat 3 and author seat 2 are destruction-missing; 8.5 fails at the first seat that isn't destroyed, default seat 2.",
+        segments(
+            *honest_openings,
+            [
+                (s_o1, statement(DEFAULT, 1)),
+                (timely, statement(DEFAULT, 2)),
+                (s_o1, statement(AUTHOR, 1)),
+                (s_o1 + 1, statement(AUTHOR, 1)),
+                (s_o1, statement(AUTHOR, 2, signed_by=(DEFAULT, 2))),
+                (s_o1, statement(DEFAULT, 2, signed_by=(AUTHOR, 2))),
+                (s_o1, statement(DEFAULT, 3, definition=bytes(32))),
+                (s_o1, statement(AUTHOR, 2, version=1)),
+            ],
+        ),
+    )
+    assert mixed["expected"]["8.5"] == outcome("fail", "destruction-early", {"panel": DEFAULT, "seat": 2})
+    got = mixed["destruction"]
+    assert [x.get("code") for x in got["seats"]] == ["destroyed", "destruction-early", "destruction-missing", "destroyed", "destruction-missing"], got
+    assert (len(got["duplicates"]), len(got["unattributed"]), len(got["stray"]), len(got["rejected"])) == (1, 2, 1, 1), got
+    assert got["stray"][0]["signer"] == 3 and got["rejected"][0]["decodeError"] == "profile-mismatch", got
+    undecided_d = case(
+        "destruction-undecided",
+        f"As author-missing (cell 1 never has an author partial opening, so the destruction segment is s_T, known only from below, at least {s_t}): default seat 1's statement in segment {s_o1} is early whatever s_T is, and every other seat's in segment {s_t} is undecided, since s_T may lie above it; 8.5 is unverifiable at the first undecided seat, default seat 2.",
+        segments(
+            authors(skip=(1,)),
+            defaults(),
+            [(s_o1 if (p, i) == (DEFAULT, 1) else s_t, statement(p, i)) for p, i in seats],
+        ),
+    )
+    assert undecided_d["expected"]["8.5"] == outcome("unverifiable", "not-implemented", {"panel": DEFAULT, "seat": 2})
+    assert undecided_d["destruction"]["earliest"] == s_t and "latest" not in undecided_d["destruction"]
 
     doc = {
         "format": "abolish-verifier-tally-vectors/1",
-        "title": "The verifier's tally beside an author panel (definition version 6, ballot version 4, tally-opening version 3): definitions, clocks, boards carrying both panels' transcripts, the author approvals, ballots, share receipts and partial openings, and the pinned default panel, with the rows 5.9, 6.3, 7.1 to 7.3 and 8.5, the counted ballots' entries and the report's cells and tiers",
+        "title": "The verifier's tally beside an author panel (definition version 6, ballot version 4, tally-opening version 3, destruction statement version 2): definitions, clocks, boards carrying both panels' transcripts, the author approvals, ballots, share receipts, partial openings and destruction statements, and the pinned default panel, with the rows 5.9, 6.3, 7.1 to 7.4 and 8.5, the counted ballots' entries and the report's cells, tiers, tallies and destruction",
         "spec": "docs/spec/verifier.md",
         "generator": (
             "packages/crypto/scripts/verifier-tally-v3-author-vectors.py, from verifier-ballots-v4-author-vectors.py, "

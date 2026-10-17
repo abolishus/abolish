@@ -237,7 +237,11 @@ test("delivery, the counted set and 7.4 decide nothing beside an author panel wi
   expect(counted.rows.size).toBeGreaterThan(0);
   for (const o of counted.rows.values())
     expect(o).toMatchObject({ status: "unverifiable", code: "not-reached" });
+  // This profile pins tally-opening version 1, which 7.4 doesn't read beside
+  // an author panel, whatever key set it has; under version 3 a missing
+  // author key set leaves it not reached (tally-v3-author.test.ts).
   expect(
-    tallyChecks(definition, new Uint8Array(32), ceremony.registered, bundle.entries, 7).row,
-  ).toMatchObject({ status: "unverifiable", code: "not-reached" });
+    tallyChecks(definition, new Uint8Array(32), ceremony.registered, undefined, bundle.entries, 7)
+      .row,
+  ).toMatchObject({ status: "unverifiable", code: "unsupported-version" });
 });

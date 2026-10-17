@@ -36,6 +36,7 @@ import {
   checkDelivery,
   checkDeliveryV2,
   checkDestruction,
+  checkPanelDestruction,
   checkPartialTally,
   checkTally,
   type ContractEventVersion,
@@ -49,7 +50,9 @@ import {
   type DeliveryDeadlines,
   type DeliveryEntry,
   type DeliveryRecordCode,
+  type DestructionReport as DestructionCheck,
   type OpeningReport,
+  type PanelDestructionReport,
   panelTallyRules,
   type PartialCellCode,
   type PartialTallyCheck,
@@ -125,7 +128,7 @@ export type CountedAt =
       readonly option?: number;
       readonly question?: number;
     }
-  | { readonly seat: number }
+  | { readonly panel?: SeatPanel; readonly seat: number }
   | Record<string, never>;
 
 export interface CountedOutcome {
@@ -245,6 +248,8 @@ export interface QuestionReport {
 
 /** One registered seat's destruction, by its first attributed statement (8.5). */
 export interface SeatReport {
+  /** Under destruction-statement version 2, the seat's panel (1 default, 2 author). */
+  readonly panel?: SeatPanel;
   readonly seat: number;
   /** Absent while `s_T` decides it (the statement lies between `earliest` and `latest`). */
   readonly code?: "destroyed" | "destruction-early" | "destruction-missing";
@@ -258,9 +263,18 @@ export interface DestructionReport {
   /** The highest it can be, `s_O + 1`; absent while some cell has no passing opening. */
   readonly latest?: number;
   readonly seats: readonly SeatReport[];
-  readonly duplicates: readonly { readonly entry: number; readonly seat: number }[];
+  /** Under version 2 each duplicate and stray statement also gives the panel it names. */
+  readonly duplicates: readonly {
+    readonly entry: number;
+    readonly panel?: SeatPanel;
+    readonly seat: number;
+  }[];
   readonly unattributed: readonly { readonly entry: number }[];
-  readonly stray: readonly { readonly entry: number; readonly signer: number | null }[];
+  readonly stray: readonly {
+    readonly entry: number;
+    readonly panel?: SeatPanel;
+    readonly signer: number | null;
+  }[];
   readonly rejected: readonly { readonly entry: number; readonly decodeError: DecodeErrorCode }[];
 }
 
@@ -275,6 +289,12 @@ export interface CountedResult {
   readonly destruction?: DestructionReport;
   /** 7.4's breaks that need the counted set, by entry (tally.md, Boarding). */
   readonly tallyBreaks?: ReadonlyMap<number, TallyBreak>;
+  /**
+   * Under tally-opening version 3, the entries of the default partial
+   * openings boarded before every cell had a passing author one (7.4's
+   * `tally-early`, tally.md, Boarding (version 3)).
+   */
+  readonly tallyEarly?: ReadonlySet<number>;
   /** The close check's statements, seats, head and late ballots, once 6.3 found `L_δ`. */
   readonly close?: CloseReport;
 }
@@ -510,18 +530,41 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
     const rules = panelTallyRules(definition as Extract<VerifiedDefinition, { version: 6 }>, 1);
     const tally = panelTally(inputs, delivered.ballots, openings, floor, rules);
     for (const [id, outcome] of tally.rows) rows.set(id, outcome);
-    // Destruction per panel (version 2) is P2-16 part 4d-3d-2's: until then
-    // no seat of either panel is judged (T-14, T-37).
-    if (inputs.destruction)
-      rows.set("8.5", { status: "unverifiable", code: "not-reached", at: {} });
-    return {
+    const result = {
       rows,
       delivery,
       ...close,
       cells: tally.cells,
       tiers: tierResults(definition, rules, tally.cells),
       ...questionReports(rules),
+      tallyBreaks: tally.breaks,
+      tallyEarly: tally.early,
     };
+    if (!inputs.destruction) return result;
+    // Destruction statement version 2, which tally-opening version 3 fixes:
+    // every registered seat of both panels, each statement attributed only
+    // by the key set of the panel it names, and the destruction segment from
+    // the latest first passing opening over cells and both panels, since a
+    // seat of one panel waits for the other's (tally.md, Windows and
+    // destruction (version 2); T-14, T-37, T-54).
+    const statements = own.filter((e) => typeOf(e.payload) === RECORD_TYPES.destructionStatement);
+    // The guard at the top returned without the author key set, so an empty
+    // one never stands in for it here (T-37).
+    const authorSet = inputs.authorRegistered;
+    if (authorSet === undefined) throw new Error("countedChecks: no author key set past its guard");
+    const lowest = checkPanelDestruction(
+      { definitionHash, registered: { default: registered, author: authorSet } },
+      statements.map(({ segment, payload }) => ({ segment, payload })),
+      { firstPassing: tally.firstPassing, windowSegment: windowFloor(inputs, floor) },
+      2,
+    );
+    const destroyed = destructionOf(
+      lowest,
+      statements,
+      tally.firstPassing.flatMap((c) => [c.default, c.author]),
+    );
+    rows.set("8.5", destroyed.row);
+    return { ...result, destruction: destroyed.report };
   }
 
   const size = partitionSize(definition);
@@ -601,13 +644,6 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
       ...questions,
       tallyBreaks,
     };
-  // The destruction segment is `min(s_O + 1, s_T)`, or `s_T` while a cell
-  // has no passing opening (tally.md, Destruction checks). `s_T`, the period
-  // holding `t_S + TALLY_WINDOW` with `t_S` the end of `s_S` plus the
-  // deadline, isn't known, but it grows with `s_S`, so the floor above
-  // bounds it from below.
-  const windowFloor =
-    floor + 1n + (clock.deadline + BigInt(PARAMETERS.TALLY_WINDOW)) / clock.period;
   const firstPassing = tally.cells.map((c) => {
     const p = c.passing[0];
     return p === undefined ? null : (openings[p.at] as (typeof openings)[number]).segment;
@@ -616,57 +652,11 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
   const lowest = checkDestruction(
     { definitionHash, registered },
     statements.map(({ segment, payload }) => ({ segment, payload })),
-    {
-      firstPassing,
-      windowSegment: windowFloor > BigInt(U32_MAX) ? U32_MAX : Number(windowFloor),
-    },
+    { firstPassing, windowSegment: windowFloor(inputs, floor) },
     1,
   );
-  const latest = firstPassing.every((s) => s !== null)
-    ? Math.max(...(firstPassing as number[])) + 1
-    : undefined;
-  const statementAt = (i: number) => statements[i] as (typeof statements)[number];
-  // With `s_T` at its floor a statement is early only if it is early
-  // whatever `s_T` is; one the floor finds destroyed is destroyed only at or
-  // after the highest the destruction segment can be.
-  // Ascending by seat, as the report and the row's first seat are, whatever
-  // order the key set lists them in.
-  const seats: SeatReport[] = [...lowest.seats]
-    .sort((a, b) => a.seat - b.seat)
-    .map((s) => {
-      if (s.code === "destruction-missing") return { seat: s.seat, code: s.code };
-      const { at, segment } = statementAt(s.at);
-      if (s.code === "destruction-early") return { seat: s.seat, code: s.code, entry: at };
-      return latest !== undefined && segment >= latest
-        ? { seat: s.seat, code: "destroyed", entry: at }
-        : { seat: s.seat, entry: at };
-    });
-  const destruction: DestructionReport = {
-    earliest: lowest.from,
-    ...(latest !== undefined && { latest }),
-    seats,
-    duplicates: lowest.duplicates.map((x) => ({ entry: statementAt(x.at).at, seat: x.seat })),
-    unattributed: lowest.unattributed.map((x) => ({ entry: statementAt(x.at).at })),
-    stray: lowest.stray.map((x) => ({ entry: statementAt(x.at).at, signer: x.signer })),
-    rejected: lowest.rejected.map((x) => ({
-      entry: statementAt(x.at).at,
-      decodeError: x.error,
-    })),
-  };
-  const open = seats.find((s) => s.code === undefined);
-  const missed = seats.find((s) => s.code !== undefined && s.code !== "destroyed");
-  rows.set(
-    "8.5",
-    open !== undefined
-      ? { status: "unverifiable", code: "not-implemented", at: { seat: open.seat } }
-      : missed !== undefined
-        ? {
-            status: "fail",
-            code: missed.code as "destruction-early" | "destruction-missing",
-            at: { seat: missed.seat },
-          }
-        : { status: "pass" },
-  );
+  const destroyed = destructionOf(lowest, statements, firstPassing);
+  rows.set("8.5", destroyed.row);
   return {
     rows,
     delivery,
@@ -674,9 +664,96 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
     cells: cellReports,
     tiers: tierReports,
     ...questions,
-    destruction,
+    destruction: destroyed.report,
     tallyBreaks,
   };
+}
+
+/**
+ * `s_T`'s floor. The destruction segment is `min(s_O + 1, s_T)`, or `s_T`
+ * while a cell has no passing opening (tally.md, Destruction checks; under
+ * tally-opening version 3, for either panel, Windows and destruction (version
+ * 2)). `s_T`, the period holding `t_S + TALLY_WINDOW` with `t_S` the end of
+ * `s_S` plus the deadline, isn't known, but it grows with `s_S`, so the
+ * counted extent's floor bounds it from below.
+ */
+function windowFloor(inputs: CountedInputs, floor: bigint): number {
+  const { clock } = inputs;
+  const s = floor + 1n + (clock.deadline + BigInt(PARAMETERS.TALLY_WINDOW)) / clock.period;
+  return s > BigInt(U32_MAX) ? U32_MAX : Number(s);
+}
+
+/**
+ * 8.5's row and the report's `destruction` from crypto's report with `s_T`
+ * at its floor (version 1's, or version 2's with each seat's panel), and the
+ * segments of each cell's first passing openings (null where there is none).
+ */
+function destructionOf(
+  lowest: DestructionCheck | PanelDestructionReport,
+  statements: readonly { readonly at: number; readonly segment: number }[],
+  firstPassing: readonly (number | null)[],
+): { readonly row: CountedOutcome; readonly report: DestructionReport } {
+  const latest = firstPassing.every((s) => s !== null)
+    ? Math.max(...(firstPassing as number[])) + 1
+    : undefined;
+  const statementAt = (i: number) => statements[i] as (typeof statements)[number];
+  const panelOf = (x: object) =>
+    "panel" in x ? { panel: (x as { readonly panel: SeatPanel }).panel } : {};
+  // With `s_T` at its floor a statement is early only if it is early
+  // whatever `s_T` is; one the floor finds destroyed is destroyed only at or
+  // after the highest the destruction segment can be.
+  // Ascending by seat, as the report and the row's first seat are, whatever
+  // order the key set lists them in; under version 2 the default panel's
+  // seats, then the author panel's.
+  const order = (s: object) => ("panel" in s ? (s as { readonly panel: SeatPanel }).panel : 1);
+  const seats: SeatReport[] = [...lowest.seats]
+    .sort((a, b) => order(a) - order(b) || a.seat - b.seat)
+    .map((s) => {
+      const seat = { ...panelOf(s), seat: s.seat };
+      if (s.code === "destruction-missing") return { ...seat, code: s.code };
+      const { at, segment } = statementAt(s.at as number);
+      if (s.code === "destruction-early") return { ...seat, code: s.code, entry: at };
+      return latest !== undefined && segment >= latest
+        ? { ...seat, code: "destroyed", entry: at }
+        : { ...seat, entry: at };
+    });
+  const report: DestructionReport = {
+    earliest: lowest.from,
+    ...(latest !== undefined && { latest }),
+    seats,
+    duplicates: lowest.duplicates.map((x) => ({
+      entry: statementAt(x.at).at,
+      ...panelOf(x),
+      seat: x.seat,
+    })),
+    unattributed: lowest.unattributed.map((x) => ({ entry: statementAt(x.at).at })),
+    stray: lowest.stray.map((x) => ({
+      entry: statementAt(x.at).at,
+      ...panelOf(x),
+      signer: x.signer,
+    })),
+    rejected: lowest.rejected.map((x) => ({
+      entry: statementAt(x.at).at,
+      decodeError: x.error,
+    })),
+  };
+  const where = (s: SeatReport) => ({
+    ...(s.panel !== undefined && { panel: s.panel }),
+    seat: s.seat,
+  });
+  const open = seats.find((s) => s.code === undefined);
+  const missed = seats.find((s) => s.code !== undefined && s.code !== "destroyed");
+  const row: CountedOutcome =
+    open !== undefined
+      ? { status: "unverifiable", code: "not-implemented", at: where(open) }
+      : missed !== undefined
+        ? {
+            status: "fail",
+            code: missed.code as "destruction-early" | "destruction-missing",
+            at: where(missed),
+          }
+        : { status: "pass" };
+  return { row, report };
 }
 
 /** What delivery runs against beside the definition and the records. */
@@ -914,11 +991,24 @@ function panelTally(
   inputs: CountedInputs,
   /** Delivery's verdict on each selected ballot, in the same order. */
   ballots: readonly { readonly counted: boolean }[],
-  openings: readonly { readonly segment: number; readonly payload: Uint8Array }[],
+  openings: readonly {
+    readonly at: number;
+    readonly segment: number;
+    readonly payload: Uint8Array;
+  }[],
   floor: bigint,
   /** The default panel's rules, whose questions a cell's counts are read by. */
   rules: TallyRules,
-): { readonly rows: ReadonlyMap<string, CountedOutcome>; readonly cells: readonly CellReport[] } {
+): {
+  readonly rows: ReadonlyMap<string, CountedOutcome>;
+  readonly cells: readonly CellReport[];
+  readonly breaks: ReadonlyMap<number, TallyBreak>;
+  readonly early: ReadonlySet<number>;
+  readonly firstPassing: readonly {
+    readonly default: number | null;
+    readonly author: number | null;
+  }[];
+} {
   const definition = inputs.definition as Extract<VerifiedDefinition, { version: 6 }>;
   const { definitionHash, registered, clock } = inputs;
   const halves: BallotHalves[][] = Array.from({ length: partitionSize(definition) }, () => []);
@@ -980,6 +1070,17 @@ function panelTally(
       : decided?.code === failure.code
         ? { status: "fail", code: failure.code, at: failureAt(failure) }
         : { status: "unverifiable", code: "not-implemented", at: { cell: failure.cell } };
+  // 7.4's breaks against each panel's aggregate, and `tally-early`, by entry:
+  // neither turns on `s_A`, so the floor's reading gives them.
+  const entryOf = (i: number) => (openings[i] as (typeof openings)[number]).at;
+  const breaks = new Map<number, TallyBreak>();
+  for (const c of atFloor.cells)
+    for (const f of [...c.default.failing, ...c.author.failing])
+      if (f.code === "tally-aggregate") breaks.set(entryOf(f.at), { code: "tally-aggregate" });
+      else if (f.code === "tally-opening")
+        breaks.set(entryOf(f.at), { code: "tally-opening", option: f.option as number });
+  const first = (p: { readonly passing: readonly { readonly segment: number }[] }) =>
+    p.passing[0]?.segment ?? null;
   // 7.1 and 7.3 pass for the reasons they do without an author panel: no late
   // entry changes a counted set, and an opening that doesn't decode under
   // version 3 is a rejected entry that opens no cell.
@@ -990,6 +1091,12 @@ function panelTally(
       ["7.3", { status: "pass" }],
     ]),
     cells,
+    breaks,
+    early: new Set(atFloor.early.map((o) => entryOf(o.at))),
+    firstPassing: atFloor.cells.map((c) => ({
+      default: first(c.default),
+      author: first(c.author),
+    })),
   };
 }
 

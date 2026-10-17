@@ -663,7 +663,7 @@ describe("7.4 once the counted set is known", () => {
   const breaks = counted.tallyBreaks ?? new Map();
   const { registered } = e.inputs([]);
   const opened = (c?: { readonly extent: number; readonly breaks: typeof breaks }) =>
-    tallyChecks(v1(), e.hash, registered, e.entries, 4, c);
+    tallyChecks(v1(), e.hash, registered, undefined, e.entries, 4, c);
 
   test("an opening's counted-set break comes before tally-unattributed, and the row is settled", () => {
     expect(breaks).toEqual(new Map([[other, { code: "tally-aggregate" }]]));
@@ -688,7 +688,7 @@ describe("7.4 once the counted set is known", () => {
     clean.board(300, clean.opening(0, [], 1));
     clean.board(300, clean.opening(1, [], 2));
     expect(
-      tallyChecks(v1(), clean.hash, clean.inputs([]).registered, clean.entries, 4, {
+      tallyChecks(v1(), clean.hash, clean.inputs([]).registered, undefined, clean.entries, 4, {
         extent: clean.entries.length,
         breaks: new Map(),
       }).row,

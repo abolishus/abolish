@@ -935,10 +935,12 @@ describe("definition version 6 (poll class, results mode and author panel)", () 
       hex(v6For(closed.anchor, {}, { ...pinnedKey, ...authorPanel })),
     );
     expect(judgeFor(withAuthor, [])).toEqual({ status: "unverifiable", code: "not-reached" });
-    expect(tallyChecks(withAuthor, new Uint8Array(32), [], [], 5)).toEqual({
-      row: { status: "unverifiable", code: "not-reached" },
+    // Beside an author panel 7.4 reads tally-opening version 3 only; this
+    // profile pins version 1, which opens one sharing (T-36, T-37).
+    expect(tallyChecks(withAuthor, new Uint8Array(32), [], [], [], 5)).toEqual({
+      row: { status: "unverifiable", code: "unsupported-version", at: {} },
     });
-    expect(tallyChecks(record, new Uint8Array(32), [], [], 5)).toEqual({
+    expect(tallyChecks(record, new Uint8Array(32), [], undefined, [], 5)).toEqual({
       row: { status: "pass" },
       report: [],
     });

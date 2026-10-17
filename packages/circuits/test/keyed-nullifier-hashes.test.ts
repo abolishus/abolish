@@ -69,6 +69,9 @@ const LIB = fileURLToPath(new URL("lib/keyed_nullifier", ROOT));
 const BJJ = fileURLToPath(new URL("vendor/oprf-nr/babyjubjub", ROOT));
 const read = (f: string) => readFileSync(new URL(f, ROOT), "utf8");
 
+/** `l`, the order of Baby Jubjub's prime-order subgroup ([[keyed-nullifier]]). */
+const SUBGROUP_ORDER =
+  "2736030358979909402780800718157159386076813972158567259200215660948447373041";
 const pt = (p: Point) => `BabyJubJubPoint::new(${p.x}, ${p.y})`;
 const xy = (p: Point) => `(${p.x}, ${p.y})`;
 /** Asserts a Noir point expression equals a vector point (the type has no `Eq`). */
@@ -119,6 +122,7 @@ fn rational_map_exceptional_${i}() {
 }`),
   );
   for (const h of vectors.hashes) {
+    if (h.map0.u !== h.u0 || h.map1.u !== h.u1) throw new Error(`${h.name}: maps of other u`);
     out.push(`#[test]
 fn hashes_${fn(h.name)}() {
     let u = sponge([H1_TAG, ${h.sigma}, ${h.x}]);
@@ -149,6 +153,19 @@ fn h2_refuses_u_plus_a_point_of_order_two() {
     assert(t.is_on_curve() & t.double().is_identity());
     let _ = h2(${h.sigma}, ${h.x}, ${pt(h.u)}.add(t));
 }`);
+  // l · map(7) is a point of order exactly 8, so these cover every torsion
+  // order finding A names.
+  for (const [order, doublings] of [
+    [8, ""],
+    [4, ".double()"],
+  ] as const) {
+    out.push(`#[test(should_fail_with = "U is not in the prime-order subgroup")]
+fn h2_refuses_u_plus_a_point_of_order_${order}() {
+    let t8 = map(7).scalar_mul(${SUBGROUP_ORDER});
+    assert(t8.double().double().is_not_identity() & t8.multiply_by_cofactor().is_identity());
+    let _ = h2(${h.sigma}, ${h.x}, ${pt(h.u)}.add(t8${doublings}));
+}`);
+  }
   out.push(`#[test(should_fail_with = "U is not in the prime-order subgroup")]
 fn h2_refuses_a_point_of_order_two() {
     let _ = h2(${h.sigma}, ${h.x}, BabyJubJubPoint::new(0, -1));
@@ -159,6 +176,8 @@ fn h2_refuses_a_point_of_order_two() {
 /** Git's object id of a directory as a tree (`git rev-parse <commit>:<path>`). */
 function gitTree(dir: URL): string {
   const entries = readdirSync(dir, { withFileTypes: true }).map((e) => {
+    // A symlink would be hashed as its target's content; the trees have none.
+    if (!e.isDirectory() && !e.isFile()) throw new Error(`not a file: ${e.name}`);
     const isDir = e.isDirectory();
     const id = isDir
       ? gitTree(new URL(`${e.name}/`, dir))
@@ -217,7 +236,14 @@ describe("vendored gadgets", () => {
     const copied = [upstream.slice(20, 49), upstream.slice(196, 223)].map((l) => l.join("\n"));
     expect(copied[0]).toMatch(/^fn is_zero[\s\S]*fn inverse_or_zero\(x: Field\)[\s\S]*\n}$/);
     expect(copied[1]).toMatch(/^fn rational_map_mont_to_twisted_edwards[\s\S]*\n}$/);
-    expect(ours).toContain(`\n\n${copied[0]}\n\n${copied[1]}\n`);
+    // The whole file: a comment header, the copied text, and the one wrapper,
+    // so nothing can comment the copy out and define a map of its own.
+    const [header, rest, ...more] = ours.split(`\n\n${copied[0]}\n\n${copied[1]}\n`);
+    expect(more).toEqual([]);
+    expect(header?.split("\n").every((l) => l.startsWith("//"))).toBe(true);
+    expect(rest).toBe(
+      "\n// Ours: the copied function stays private, as upstream has it.\npub fn mont_to_edwards(s: Field, t: Field) -> (Field, Field) {\n    rational_map_mont_to_twisted_edwards(s, t)\n}\n",
+    );
   });
 });
 
@@ -230,6 +256,8 @@ describe("keyed-nullifier-hashes.json through the Noir library", () => {
 
   test("the library's tags are circuit.json's", () => {
     // T-30: a tag enters a circuit only as the constant tag_field(tag).
+    expect(vectors.tags.h1.tag).toBe("abolish/v1/keyed-nullifier/h1");
+    expect(vectors.tags.h2.tag).toBe("abolish/v1/keyed-nullifier/h2");
     for (const k of ["h1", "h2"] as const) {
       const { tag, field } = vectors.tags[k];
       expect(BigInt(circuitTags.find((t) => t.tag === tag)?.field ?? -1)).toBe(BigInt(field));
@@ -253,7 +281,7 @@ describe("keyed-nullifier-hashes.json through the Noir library", () => {
         vectors.map.cases.length +
         vectors.map.exceptional.length +
         vectors.hashes.length +
-        3,
+        5,
     );
     expect(out).toContain(`${expected} tests passed`);
   }, 600_000);

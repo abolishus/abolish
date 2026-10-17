@@ -57,7 +57,7 @@ with `l2_chain_id` and `group_registry` (`bytes[20]`) from the release's pins, `
 
 ## H1
 
-`H1(x) = H1(σ, x)` maps a document's `x ∈ F_r` to a point of `𝔾`, following RFC 9380's `hash_to_curve` (§3): two field elements, each mapped to the curve, summed, then the cofactor cleared.
+`H1(x) = H1(σ, x)` maps a document's `x ∈ F_p` to a point of `𝔾`, following RFC 9380's `hash_to_curve` (§3): two field elements, each mapped to the curve, summed, then the cofactor cleared.
 
 ```
 u_0, u_1 = Sponge(tag_field("abolish/v1/keyed-nullifier/h1"), σ, x)[0..1]

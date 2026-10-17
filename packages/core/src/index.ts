@@ -234,10 +234,12 @@ export {
   MAX_ANCHOR_CHECK_SEGMENTS,
 } from "./poll-anchor-check.ts";
 export {
+  GroupRecordsError,
   type GroupRecordSource,
   type PollRootDeployment,
   type PollRootReport,
   type ProvenGroupRecords,
+  provenGroupRecords,
   type RootFailure,
   ROOTS_PER_RUN,
   rootPolls,

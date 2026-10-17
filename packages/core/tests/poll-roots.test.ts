@@ -1,9 +1,11 @@
 import {
   type ContractEventRecord,
+  contractEventLog,
   encodeGroupAddition,
   groupAdditionDigest,
   groupRegistryDomainSeparator,
   type GroupRegistryPins,
+  replayEventAccumulator,
   signGroupApproval,
   tierTreeRoot,
 } from "@abolishus/crypto";
@@ -18,7 +20,9 @@ import {
   newAccountId,
   type PollDraft,
   type PollRootDeployment,
+  GroupRecordsError,
   type ProvenGroupRecords,
+  provenGroupRecords,
   rootPolls,
   SETUP_SECONDS,
   submitPollDraft,
@@ -360,5 +364,55 @@ describe("account_polls' electorate", () => {
       db.admin`
         UPDATE account_polls SET state = 'failed', failure = 'electorate-empty' WHERE id = ${id}`,
     ).resolves.toBeDefined();
+  });
+});
+
+describe("provenGroupRecords", () => {
+  const records = registryOf().records;
+  const provenAt = (count: number, block: bigint) => ({
+    ...replayEventAccumulator(
+      chainId,
+      registry,
+      records.slice(0, count).map((r) => contractEventLog(r)),
+    ),
+    block,
+  });
+  const code = (f: () => unknown) => {
+    try {
+      f();
+    } catch (e) {
+      if (e instanceof GroupRecordsError) return e.code;
+      throw e;
+    }
+    return "ok";
+  };
+
+  test("gives the records the accumulator counts, at its block", () => {
+    expect(provenGroupRecords(chainId, registry, records, provenAt(4, 20n))).toEqual({
+      block: 20n,
+      records,
+    });
+    // The addition is in block 20: proven after block 10, it is left for later.
+    expect(provenGroupRecords(chainId, registry, records, provenAt(3, 10n))).toEqual({
+      block: 10n,
+      records: records.slice(0, 3),
+    });
+  });
+
+  test("refuses an index that drops, alters or moves a record", () => {
+    const proven = provenAt(4, 20n);
+    expect(code(() => provenGroupRecords(chainId, registry, records.slice(0, 3), proven))).not.toBe(
+      "ok",
+    );
+    const altered = records.with(3, {
+      ...(records[3] as ContractEventRecord),
+      data: new Uint8Array(32),
+    });
+    expect(code(() => provenGroupRecords(chainId, registry, altered, proven))).toBe("accumulator");
+    const swapped = [records[1], records[0], ...records.slice(2)] as ContractEventRecord[];
+    expect(code(() => provenGroupRecords(chainId, registry, swapped, proven))).not.toBe("ok");
+    expect(code(() => provenGroupRecords(chainId, new Uint8Array(20), records, proven))).toBe(
+      "accumulator",
+    );
   });
 });

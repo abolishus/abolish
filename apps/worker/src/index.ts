@@ -73,6 +73,8 @@ export {
   type OutputRootSource,
   ProvenRegistryAccumulator,
 } from "./output-roots.ts";
+export { POLL_ROOT_ENV, type PollRootConfig, pollRootFromEnv } from "./poll-root-env.ts";
+export { PollRoots, type PollRootsOptions } from "./poll-roots.ts";
 export {
   type RegistryAccumulator,
   RegistrySync,
@@ -95,6 +97,7 @@ export {
 export { TIER0_ENV, type Tier0Config, tier0FromEnv } from "./tier0-env.ts";
 export {
   POLL_CREATE_EVERY_MS,
+  POLL_ROOT_EVERY_MS,
   PRUNE_EVERY_MS,
   REGISTRY_SYNC_EVERY_MS,
   type RunningWorker,

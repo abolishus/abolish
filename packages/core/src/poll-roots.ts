@@ -20,8 +20,12 @@
 // already in the past, so nobody can commit to additions not yet made.
 
 import {
+  checkEventAccumulatorProof,
   type ContractEventRecord,
+  contractEventLog,
+  type EventAccumulatorProofError,
   type GroupRegistryPins,
+  type ProvenEventAccumulator,
   statedTierElectorate,
   type TierElectorate,
   TierMembershipError,
@@ -43,6 +47,40 @@ export interface ProvenGroupRecords {
 /** Where the roots step reads the registry (the worker's index and accumulator proof). */
 export interface GroupRecordSource {
   read(): Promise<ProvenGroupRecords>;
+}
+
+/** The indexed records aren't the registry's sequence the proven accumulator vouches for. */
+export class GroupRecordsError extends Error {
+  override readonly name = "GroupRecordsError";
+  readonly code: EventAccumulatorProofError;
+  constructor(code: EventAccumulatorProofError) {
+    super(`group records refused: ${code}`);
+    this.code = code;
+  }
+}
+
+/**
+ * The group registry's records up to `proven.block`, from `records` (all its
+ * indexed records in order of `n`, as the index holds them): checked against
+ * the registry's accumulator and count after that block, as the caller
+ * proved them, so an index that drops, adds, alters, reorders or moves a
+ * record is refused (`GroupRecordsError`) rather than counted (T-71). Records
+ * past the count are left for a later block.
+ */
+export function provenGroupRecords(
+  chainId: bigint,
+  registry: Uint8Array,
+  records: readonly ContractEventRecord[],
+  proven: ProvenEventAccumulator,
+): ProvenGroupRecords {
+  const refused = checkEventAccumulatorProof(
+    chainId,
+    registry,
+    records.map(contractEventLog),
+    proven,
+  );
+  if (refused !== null) throw new GroupRecordsError(refused);
+  return { block: proven.block, records: records.slice(0, Number(proven.count)) };
 }
 
 /** What the roots step judges the registry under: the deployment's published groups and pins. */

@@ -11,6 +11,8 @@ import * as z from "zod";
 import { registrySyncFromEnv, REGISTRY_SYNC_ENV } from "./registry-env.ts";
 import { DisputeGameRoots, ProvenRegistryAccumulator } from "./output-roots.ts";
 import { RegistrySync } from "./registry-sync.ts";
+import { POLL_ROOT_ENV, pollRootFromEnv } from "./poll-root-env.ts";
+import { PollRoots } from "./poll-roots.ts";
 import { connectTier0Bundler } from "./tier0-bundler.ts";
 import { ViemL1Source } from "./l1-source.ts";
 import { checkCreationAnchorsDeployment, ViemCreationAnchors } from "./creation-anchors.ts";
@@ -230,10 +232,18 @@ if (tier0Config !== undefined) {
 // once the L1 and L2 nodes are on the configured chains. viem's errors quote
 // the nodes' URLs, and postgres' can quote the index's, so none is reported.
 let registry: WorkerOptions["registry"];
+let pollRoots: WorkerOptions["pollRoots"];
 let index: postgres.Sql | undefined;
 const registryConfig = registrySyncFromEnv(
   Object.fromEntries(REGISTRY_SYNC_ENV.map((name) => [name, process.env[name]])),
 );
+// The roots step (P2-22 part 3b-2) reads with the registry sync's index,
+// nodes and group registry, so it runs only beside it.
+const pollRootConfig = pollRootFromEnv(
+  Object.fromEntries(POLL_ROOT_ENV.map((name) => [name, process.env[name]])),
+);
+if (pollRootConfig !== undefined && registryConfig === undefined)
+  throw new Error("the roots step runs only beside the registry sync");
 if (registryConfig !== undefined) {
   const c = registryConfig;
   let accumulator;
@@ -272,6 +282,26 @@ if (registryConfig !== undefined) {
       },
     }),
   };
+  if (pollRootConfig !== undefined)
+    pollRoots = {
+      roots: new PollRoots({
+        sql,
+        index,
+        indexSchema: c.indexSchema,
+        accumulator,
+        chainId: c.chainId,
+        deployment: {
+          groups: pollRootConfig.groups,
+          pins: {
+            version: c.eventVersion,
+            chainId: c.chainId,
+            registry: bytes(c.groupRegistry),
+            registrars: pollRootConfig.registrars.map(bytes),
+            threshold: pollRootConfig.threshold,
+          },
+        },
+      }),
+    };
 }
 
 // The creation step (ADR 0032, P2-22 parts 3a and 3b-1), only when
@@ -318,6 +348,7 @@ const worker = await startWorker({
   ...(tier0 !== undefined && { tier0 }),
   ...(ballots !== undefined && { ballots }),
   ...(registry !== undefined && { registry }),
+  ...(pollRoots !== undefined && { pollRoots }),
   ...(pollCreation !== undefined && { pollCreation }),
 });
 

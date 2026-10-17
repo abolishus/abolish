@@ -86,6 +86,14 @@ export const QUEUES = {
    */
   pollCreate: { name: "{poll-create}", side: "account", data: z.strictObject({}) },
   /**
+   * The roots step of each created, checked poll's setup (core's rootPolls;
+   * ADR 0032, rule 9): its electorate at the newest output root's block.
+   * Runs on a schedule, only beside the registry sync and never with the
+   * creation key, and takes no data: no poll, author or draft is ever queued
+   * (T-10).
+   */
+  pollRoot: { name: "{poll-root}", side: "account", data: z.strictObject({}) },
+  /**
    * Ballots the API received, to admit and board (core's
    * BallotAdmissions.submitAll; docs/spec/ballot-validity.md, Batched
    * admission; T-17, T-52). Queued by the API's `ballots.submit` through

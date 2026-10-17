@@ -11,8 +11,10 @@ import type {
   RegistrySyncErrorCode,
   RegistrySyncReason,
   CreationFailure,
+  RootFailure,
   Tier0GroupOutcome,
 } from "@abolishus/core";
+import type { EventAccumulatorProofError, TierMembershipErrorCode } from "@abolishus/crypto";
 import type { OutputRootErrorCode } from "@abolishus/verifier";
 import type { QueueSpec } from "./queues.ts";
 
@@ -131,6 +133,36 @@ export interface PollCreationLine {
   readonly ceilingReached: boolean;
 }
 
+/**
+ * What a roots-step run did, in counts only (T-10, T-67), written only when
+ * a poll moved; or why it refused the registry's history, every value
+ * public: the index's records against the accumulator (`incomplete`), the
+ * L2 node's answers under the output root (`output-root`), or a published
+ * group's history the deployment's registry can't have logged (`groups`,
+ * with the replay's code).
+ */
+export type PollRootLine =
+  | {
+      readonly queue: "{poll-root}";
+      readonly rooted: number;
+      readonly failed: Partial<Record<RootFailure, number>>;
+    }
+  | {
+      readonly queue: "{poll-root}";
+      readonly finding: "incomplete";
+      readonly reason: EventAccumulatorProofError;
+    }
+  | {
+      readonly queue: "{poll-root}";
+      readonly finding: "output-root";
+      readonly reason: OutputRootErrorCode | "l2-block";
+    }
+  | {
+      readonly queue: "{poll-root}";
+      readonly finding: "groups";
+      readonly reason: TierMembershipErrorCode;
+    };
+
 /** A failure outside any job: the worker lost Redis, say. */
 export interface WorkerErrorLine {
   readonly queue: QueueSpec["name"];
@@ -144,6 +176,7 @@ export type ErrorKind =
   | "stale-job"
   | "tier0-chain-unavailable"
   | "registry-sync-refused"
+  | "poll-root-refused"
   | "internal";
 
 export type LogLine =
@@ -154,5 +187,6 @@ export type LogLine =
   | BallotL1Line
   | RegistrySyncLine
   | PollCreationLine
+  | PollRootLine
   | WorkerErrorLine;
 export type Log = (line: LogLine) => void;

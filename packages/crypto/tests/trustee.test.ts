@@ -420,7 +420,8 @@ describe("panel identifier properties", () => {
       new URL("parameters.md", SPEC_VECTORS.href.replace("vectors/", "")),
       "utf8",
     );
-    expect(params).toContain(`| \`MAX_TRUSTEES\`          | ${MAX_TRUSTEES}        |`);
+    // Whatever the table's column widths, which another row's name can change.
+    expect(params).toMatch(new RegExp(`^\\| \`MAX_TRUSTEES\` +\\| ${MAX_TRUSTEES} +\\|`, "m"));
   });
 });
 

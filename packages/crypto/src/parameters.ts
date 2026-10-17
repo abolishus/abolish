@@ -24,6 +24,12 @@ export const PARAMETERS = Object.freeze({
   // Seconds after closes_at + l1_inclusion_bound; the close window of the
   // close statement's version 1 (docs/spec/close.md).
   CLOSE_WINDOW: 172_800,
+  // Seconds; the fetch allowances of the availability attestation's version 1
+  // (docs/spec/availability.md, Windows): A, the least the delivery window
+  // leaves between the ballot extent's last anchoring deadline and c_I, and
+  // A', after t_S, for the counted extent.
+  BALLOT_FETCH_ALLOWANCE: 43_200,
+  COUNTED_FETCH_ALLOWANCE: 43_200,
   // Seconds; the bounds the election registry's deployment puts on a
   // definition's l1_inclusion_bound, δ (docs/spec/close.md, contracts.md).
   MIN_INCLUSION_BOUND: 600,

@@ -35,8 +35,9 @@ import { hex, SPEC_VECTORS } from "./spec-vectors.ts";
 // over both panels (scripts/delivery-v2-vectors.py, with its own P-256
 // ECDSA, ML-KEM, AEAD and ristretto255), so the expected bytes and verdicts
 // never come from the code under test. Elections with an author panel run
-// through the internal `checkDeliveryV2With`, since the exported check
-// refuses an author key set until P2-16 part 4d-3 takes its approved key set.
+// through the internal `checkDeliveryV2With`, since the exported check takes
+// only an author key set its own run's approvals approved, and these vectors
+// carry no author run (author-key-set.test.ts runs it against one that does).
 
 type RecordKind = "share-receipt" | "share-posting" | "share-complaint";
 
@@ -329,7 +330,7 @@ describe("exported check", () => {
     expect(asJson(r)).toEqual(v.result);
   });
 
-  test("refuses an author panel or author keys until they have a checked source", () => {
+  test("refuses an author panel or author keys without the definition that approved them", () => {
     const v = electionById("all-receipted");
     expect(() => checkDeliveryV2(electionOf(v), ballotsOf(v), entriesOf(v))).toThrow(RangeError);
     const plain = electionById("no-author-panel");

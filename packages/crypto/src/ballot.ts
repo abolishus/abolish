@@ -490,9 +490,16 @@ function panelElection(
   return election;
 }
 
-// Without an author panel only the empty set; with one, the set
-// `checkAuthorApprovals` approved for this definition's author run.
-function approvedFor(definition: ElectionDefinitionV6, keys: readonly RegisteredKeys[]): boolean {
+/**
+ * Internal: without an author panel only the empty set; with one, the set
+ * `checkAuthorApprovals` approved for this definition's author run, under
+ * its chain, trustee registry, author panel identifier, author stub hash and
+ * `author_transcript_hash`. The package entry point doesn't export it.
+ */
+export function approvedFor(
+  definition: ElectionDefinitionV6,
+  keys: readonly RegisteredKeys[],
+): boolean {
   if (definition.author_keys.length === 0) return Array.isArray(keys) && keys.length === 0;
   return wasApproved(keys, {
     l2ChainId: definition.l2_chain_id,

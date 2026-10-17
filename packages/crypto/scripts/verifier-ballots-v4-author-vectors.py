@@ -420,9 +420,11 @@ def assemble(constants, proofs_path, out_dir):
             ballots = {"admitted": len(admitted), "rejected": rejected, "repeats": []}
         else:
             rows.update({r: NOT_REACHED for r in vb4.ADMISSION_ROWS + ("5.5", "5.7")})
-        # 6.2 and 7.4 judge nothing against the author panel's key set yet
-        # (P2-16 part 4d-3), so both stay not reached beside one.
-        rows["6.2"] = NOT_REACHED
+        # 6.2 is reached exactly where admission is, and these copies carry
+        # no opening (verifier-openings-v3-author-vectors.py judges some);
+        # 7.4 judges nothing against the author panel's key set yet (P2-16
+        # part 4d-3c on), so it stays not reached beside one.
+        rows["6.2"] = outcome("pass") if part == "pass" else NOT_REACHED
         rows["7.4"] = NOT_REACHED
         case = {
             "id": bnd["id"],

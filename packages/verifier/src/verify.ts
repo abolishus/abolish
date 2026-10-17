@@ -761,6 +761,7 @@ export function verifyBundle(bundle: Bundle): Report {
       const spoiled = openingChecks(
         definition.definition,
         checked.registered,
+        checked.authorRegistered,
         admission.admitted,
         bundle.entries,
         definition.inputs.boardEntryVersion,

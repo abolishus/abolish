@@ -484,6 +484,9 @@ function panelElection(
   });
   MADE.set(election, { definitionHash, version: 4 });
   KEYS.set(election, copyKeys(registered));
+  // Only the approved set, never seats given unchecked: what the opening
+  // paths rebuild author seats' ciphertexts under (T-37).
+  if ("keys" in author) AUTHOR_KEYS.set(election, copyKeys(author.keys));
   return election;
 }
 
@@ -593,6 +596,9 @@ function madeHashOf(election: object, version: 1 | 2 | 3 | 4): Uint8Array {
 // The registered key set of each context, copied when it was made, for
 // checks that rebuild ciphertexts (docs/spec/challenge.md, Checks).
 const KEYS = new WeakMap<object, readonly RegisteredKeys[]>();
+// The author panel's approved key set a version-4 context was made with, set
+// only by `panelBallotElection` (empty without an author panel).
+const AUTHOR_KEYS = new WeakMap<object, readonly RegisteredKeys[]>();
 
 const copyKeys = (registered: readonly RegisteredKeys[]): readonly RegisteredKeys[] =>
   Object.freeze(
@@ -641,17 +647,22 @@ export function cellContextOf(election: CellBallotElection | QuestionBallotElect
 
 /**
  * Internal: what `panelBallotElection` (or `panelBallotElectionWith`) made
- * this context from, its definition hash and the default panel's registered
- * key set, for opening version 3's rebuild of default seats' ciphertexts
- * (docs/spec/challenge.md, Opening version 3).
+ * this context from, its definition hash, the default panel's registered key
+ * set and, from `panelBallotElection` only, the author panel's approved one,
+ * for opening version 3's rebuild of each seat's ciphertext
+ * (docs/spec/challenge.md, Opening version 3). `authorKeys` is undefined
+ * for a context `panelBallotElectionWith` made, whose author seats no
+ * approvals check vouched for (T-37).
  */
 export function panelContextOf(election: PanelBallotElection): {
   readonly definitionHash: Uint8Array;
   readonly keys: readonly RegisteredKeys[];
+  readonly authorKeys: readonly RegisteredKeys[] | undefined;
 } {
   return {
     definitionHash: madeHashOf(election, 4),
     keys: KEYS.get(election) as readonly RegisteredKeys[],
+    authorKeys: AUTHOR_KEYS.get(election),
   };
 }
 

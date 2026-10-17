@@ -4,16 +4,25 @@ import {
   checkAuthorApprovals,
   checkBallotV4,
   checkCeremonyTranscript,
+  checkChallengeOpeningV3,
   decodeBallot,
   decodeBoardEntry,
   decodeElectionDefinitionV6,
   type ElectionDefinitionV6,
   electionAuthorStubV6Hash,
   electionStubV6Hash,
+  encryptSharesV4,
+  type KemPublicKey,
+  openChallengeV3,
+  panelBallotCore,
   panelBallotElection,
+  panelTrackingCode,
   RECORD_TYPES,
   type RegisteredKeys,
+  shareVoteV4,
 } from "../src/index.ts";
+import { panelBallotElectionWith } from "../src/ballot.ts";
+import { checkChallengeOpeningV3With, coreHashV4 } from "../src/challenge.ts";
 
 // `panelBallotElection` beside an author panel (docs/spec/ballot-validity.md,
 // Admission (version 4): the author panel's registered key set is its own
@@ -227,5 +236,81 @@ describe("panelBallotElection takes the author panel's approved key set", () => 
     expect(() => panelBallotElection(plain, e.registered, e.authorRegistered)).toThrow(
       /no author panel/,
     );
+  });
+});
+
+// The cell 0 ballot's votes: one of three, two of four, one of two.
+const VOTES = [0, 1, 0, 1, 0, 0, 1, 0, 1] as const;
+
+// A key for every seat in seat order, as the client encrypts to; a seat
+// outside the registered set gets another seat's, whose share hash the core
+// zeroes anyway.
+const seatKeys = (registered: readonly RegisteredKeys[], n: number): KemPublicKey[] =>
+  Array.from(
+    { length: n },
+    (_, i) => (registered.find((k) => k.index === i + 1) ?? registered[0])?.kemKey as KemPublicKey,
+  );
+
+describe("openings beside an author panel take its approved key set", () => {
+  function approvedPoll() {
+    const e = election("author-mixed");
+    e.approve();
+    const context = panelBallotElection(e.d, e.registered, e.authorRegistered);
+    const encrypt = () =>
+      encryptSharesV4(
+        { definitionHash: context.definitionHash },
+        shareVoteV4(context, VOTES),
+        seatKeys(e.registered, context.panelSize),
+        seatKeys(e.authorRegistered, context.authorPanelSize),
+      );
+    return { e, context, encrypt };
+  }
+
+  test("an honest client's opening passes under the context, both halves, with the code shown before the choice", () => {
+    const { e, context, encrypt } = approvedPoll();
+    const encrypted = encrypt();
+    const shown = panelTrackingCode(context, 0, encrypted);
+    const core = panelBallotCore(context, 0, encrypted);
+    // Author seat 3 isn't registered: its share hash is zero and it reveals nothing.
+    expect(core.authorShareHashes[2]).toEqual(new Uint8Array(32));
+    expect(core.authorShareHashes.slice(0, 2).every((h) => h.some((b) => b !== 0))).toBe(true);
+    const { opening, coreHash } = openChallengeV3(context, 0, encrypted);
+    expect(coreHash).toEqual(shown);
+    expect(coreHashV4(core)).toEqual(shown);
+    expect(opening.author_seats.map((s) => s.seat)).toEqual([1, 2]);
+    expect(opening.author_polynomials).toHaveLength(VOTES.length);
+    const result = checkChallengeOpeningV3(context, opening);
+    if (!result.ok) throw new Error(`expected a passing opening, got ${result.code}`);
+    expect(result.coreHash).toEqual(shown);
+    expect(result.votes).toEqual(VOTES.map(BigInt));
+    expect(result.withinRules).toBe(true);
+    // The same verdict as the internal path given the same seats.
+    expect(checkChallengeOpeningV3With(context, e.authorRegistered, opening)).toEqual(result);
+  });
+
+  test("an author seat's ciphertext is rebuilt under the approved key, so one made to another key fails that seat", () => {
+    const { e, context } = approvedPoll();
+    const [first, second] = e.authorRegistered as [RegisteredKeys, RegisteredKeys];
+    // Author seat 2's shares encrypted to seat 1's key: the opening's share
+    // hash is that ciphertext's, which no approved seat 2 decrypts.
+    const encrypted = encryptSharesV4(
+      { definitionHash: context.definitionHash },
+      shareVoteV4(context, VOTES),
+      seatKeys(e.registered, context.panelSize),
+      [first.kemKey, first.kemKey, second.kemKey],
+    );
+    expect(() => openChallengeV3(context, 0, encrypted)).toThrow(/registered key/);
+  });
+
+  test("a context whose author seats no approvals check vouched for is refused", () => {
+    const { e, encrypt } = approvedPoll();
+    const unchecked = panelBallotElectionWith(e.d, e.registered, [1, 2]);
+    const encrypted = encrypt();
+    expect(() => panelBallotCore(unchecked, 0, encrypted)).toThrow(/approved one/);
+    expect(() => panelTrackingCode(unchecked, 0, encrypted)).toThrow(/approved one/);
+    expect(() => openChallengeV3(unchecked, 0, encrypted)).toThrow(/approved one/);
+    const { context } = approvedPoll();
+    const { opening } = openChallengeV3(context, 0, encrypt());
+    expect(() => checkChallengeOpeningV3(unchecked, opening)).toThrow(/approved one/);
   });
 });

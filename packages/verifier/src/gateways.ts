@@ -143,7 +143,8 @@ export function gatewaySource(gateways: readonly URL[], options: GatewayOptions 
   // whole URL). Copied, so a caller changing its URLs later changes nothing.
   const bases = gateways.map((g) => {
     const url = parseGateway(g.href);
-    return `${url.origin}${url.pathname}`;
+    // An http(s) URL's path is never empty: a bare origin's is `/`.
+    return `${url.origin}${url.pathname.replace(/\/+$/u, "")}`;
   });
   let requests = 0;
   let blocks = 0;

@@ -289,6 +289,20 @@ describe("gatewaySource", () => {
     }
   });
 
+  test("a bare origin, with or without a trailing slash, asks for exactly /ipfs/{cid}?format=raw", async () => {
+    const block = contentDag(Uint8Array.of(3)).blocks[0] as Block;
+    for (const text of [
+      "https://ipfs.example",
+      "https://ipfs.example/",
+      "https://ipfs.example//",
+    ]) {
+      const { fetch, urls } = fakeFetch(() => new Response(block.bytes));
+      const g = gatewaySource([parseGateway(text)], { fetch });
+      expect(await g.source(block.cid, CHUNK), text).toEqual([block.bytes]);
+      expect(urls).toEqual([`https://ipfs.example/ipfs/${cidText(block.cid)}?format=raw`]);
+    }
+  });
+
   test("sends no request for a CID the reader can't use", async () => {
     const { fetch, urls } = fakeFetch(() => new Response(new Uint8Array()));
     const g = gatewaySource([parseGateway("https://a.example")], { fetch });

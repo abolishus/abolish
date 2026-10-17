@@ -37,7 +37,7 @@ import {
   REMOVAL_REASONS,
   RESTORE_REASONS,
 } from "@abolishus/api-contract";
-import { type TestDb, testDb } from "@abolishus/core/test-db";
+import { addModerators, type TestDb, testDb } from "@abolishus/core/test-db";
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { spawn } from "node:child_process";
@@ -80,6 +80,7 @@ const logs: unknown[] = [];
 beforeAll(async () => {
   db = await testDb();
   app = await db.as("abolish_app");
+  await addModerators(app, "mod-1", "mod-2", "mod-other", "mod-secret");
   server = createApiServer({ sql: app, log: (l) => logs.push(l) });
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;

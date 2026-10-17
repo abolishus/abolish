@@ -13,7 +13,7 @@ import {
   RESTORE_REASONS,
   storeDefinition,
 } from "../src/index.ts";
-import { type TestDb, testDb } from "./db.ts";
+import { addModerators, type TestDb, testDb } from "./db.ts";
 
 // Discovery (src/listing.ts; docs/moderation-policy.md, Actions; T-68): the
 // listing holds every stored poll whose moderation state is `visible`, in
@@ -38,6 +38,7 @@ let app: Sql;
 beforeAll(async () => {
   db = await testDb();
   app = await db.as("abolish_app");
+  await addModerators(app, "mod-1", "mod-2");
 });
 afterAll(() => db?.close());
 

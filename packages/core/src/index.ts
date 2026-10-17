@@ -7,6 +7,23 @@ export {
   type SubmitErrorCode,
   type SubmitOutcome,
 } from "./admission.ts";
+export {
+  addModerator,
+  APPEAL_DECISIONS,
+  type AppealDecision,
+  AppealError,
+  type AppealErrorCode,
+  type AppealOutcome,
+  type AppealReview,
+  decideAppeal,
+  fileAppeal,
+  listPollAppeals,
+  MAX_APPEAL_QUEUE,
+  type OpenAppeal,
+  type PollAppeal,
+  readAppealQueue,
+  retireModerator,
+} from "./appeals.ts";
 export { type FinalizedL1Source, type L1ReferenceOptions, L1References } from "./l1-references.ts";
 export {
   ANCHOR_INCLUSION_MARGIN,
@@ -69,6 +86,8 @@ export { loadMigrations, migrate, type Migration } from "./db/migrate.ts";
 export {
   accountCredentials,
   accountPasskeys,
+  accountAppeals,
+  accountModerators,
   accountPolls,
   accountSessions,
   accountUsers,

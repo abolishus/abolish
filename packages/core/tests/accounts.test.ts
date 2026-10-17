@@ -170,7 +170,10 @@ describe("schema", () => {
       WHERE table_schema = ${db.schema} AND grantee = 'abolish_app' AND table_name LIKE 'account_%'
       GROUP BY table_name ORDER BY table_name`;
     expect(privs.map((r) => [r["table_name"], r["p"]])).toEqual([
+      // Plus UPDATE of some columns (appeals.test.ts).
+      ["account_appeals", "INSERT,SELECT"],
       ["account_credentials", "DELETE,SELECT"],
+      ["account_moderators", "INSERT,SELECT"],
       ["account_passkeys", "DELETE,INSERT,SELECT,UPDATE"],
       ["account_polls", "DELETE,INSERT,SELECT,UPDATE"],
       ["account_sessions", "DELETE,INSERT,SELECT,UPDATE"],

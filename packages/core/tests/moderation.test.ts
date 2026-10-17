@@ -23,7 +23,7 @@ import {
   RESTORE_REASONS,
   storeDefinition,
 } from "../src/index.ts";
-import { type TestDb, testDb } from "./db.ts";
+import { addModerators, type TestDb, testDb } from "./db.ts";
 
 // The moderation log (migrations/0002_moderation.sql, src/moderation.ts;
 // docs/moderation-policy.md; T-68): decisions are append-only and public,
@@ -51,6 +51,7 @@ beforeAll(async () => {
   db = await testDb();
   app = await db.as("abolish_app");
   owner = await db.as("abolish_migrator");
+  await addModerators(app, "mod-1", "mod-2", "m");
 });
 afterAll(() => db?.close());
 
@@ -83,9 +84,7 @@ const delist = (reason: (typeof REMOVAL_REASONS)[number] = "spam"): ModerationDe
   reason,
   moderator: "mod-1",
 });
-const restore = (
-  reason: (typeof RESTORE_REASONS)[number] = "appeal-upheld",
-): ModerationDecision => ({
+const restore = (reason: (typeof RESTORE_REASONS)[number] = "error"): ModerationDecision => ({
   action: "restore",
   reason,
   moderator: "mod-2",
@@ -285,7 +284,7 @@ describe("moderate", () => {
     // Alternating back to a ground already cited since the state began is a no-op.
     expect(await refusedWith(moderate(app, id, hide("spam")))).toBe("no-change");
     await moderate(app, id, restore("error"));
-    expect(await refusedWith(moderate(app, id, restore("appeal-upheld")))).toBe("no-change");
+    expect(await refusedWith(moderate(app, id, restore("notice-withdrawn")))).toBe("no-change");
   });
 
   test("refuses malformed decisions", async () => {
@@ -340,7 +339,8 @@ describe("moderate", () => {
       }),
       fc.record({
         action: fc.constant("restore" as const),
-        reason: fc.constantFrom(...RESTORE_REASONS),
+        // `appeal-upheld` is recorded only by an appeal's review (appeals.test.ts).
+        reason: fc.constantFrom("error" as const, "notice-withdrawn" as const),
         moderator: fc.constant("mod-2"),
       }),
     );

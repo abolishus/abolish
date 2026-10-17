@@ -7,11 +7,16 @@
 // leaves its counts published, by option index.
 
 import { decodeElectionDefinition } from "@abolishus/crypto";
-import { asc, desc, eq, gt, sql as q } from "drizzle-orm";
+import { and, asc, desc, eq, gt, sql as q } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import type { Sql } from "postgres";
 import { isBytes } from "./bytes.ts";
-import { electionDefinitions, moderationActions } from "./db/schema/index.ts";
+import {
+  accountModerators,
+  accountPolls,
+  electionDefinitions,
+  moderationActions,
+} from "./db/schema/index.ts";
 
 /** Grounds for delisting or hiding (docs/moderation-policy.md, Reasons). */
 export const REMOVAL_REASONS = [
@@ -68,6 +73,12 @@ export type ModerationErrorCode =
   | "invalid"
   /** No definition is stored for the election, so there is no poll to moderate. */
   | "unknown-election"
+  /** The handle isn't a moderator's: never added, or retired (src/appeals.ts). */
+  | "unknown-moderator"
+  /** The moderator's account created the poll (docs/moderation-policy.md, Moderators). */
+  | "own-poll"
+  /** A restore citing `appeal-upheld` outside an appeal's review (`decideAppeal`). */
+  | "appeal-only"
   /** Hiding a poll that hasn't closed, for a reason outside `OPEN_POLL_HIDE_REASONS`. */
   | "open-poll"
   /**
@@ -88,10 +99,12 @@ export class ModerationError extends Error {
 
 /**
  * A moderator handle: 1 to 32 lowercase letters, digits and inner hyphens.
- * It names a moderator to the operator, not an account to the database (no
- * foreign key leaves the account tables, T-10), and the public log omits it.
+ * `account_moderators` says whose account it is (src/appeals.ts), so the
+ * tooling can refuse a decision on the moderator's own poll; the log stores
+ * the handle, not the account (no foreign key leaves the account tables,
+ * T-10), and the public log omits it.
  */
-const HANDLE = /^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/;
+export const HANDLE = /^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/;
 /**
  * The two-key advisory lock every decision takes (a separate keyspace from
  * the board's lock class and from migrations' one-key locks). One lock for
@@ -100,6 +113,42 @@ const HANDLE = /^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/;
  * never passes a decision that commits later with a smaller one.
  */
 const MODERATION_LOCK = [0x0b0a4e, 0] as const;
+
+type Db = ReturnType<typeof drizzle>;
+/** A transaction holding `lockModeration`. */
+export type ModerationTx = Parameters<Parameters<Db["transaction"]>[0]>[0];
+
+/** Takes the moderation lock for the rest of `tx`. */
+export async function lockModeration(tx: ModerationTx): Promise<void> {
+  await tx.execute(
+    q`SELECT pg_advisory_xact_lock(${MODERATION_LOCK[0]}::int, ${MODERATION_LOCK[1]}::int)`,
+  );
+}
+
+/** The account behind an active moderator's handle, or `undefined`. */
+export async function moderatorAccount(
+  tx: ModerationTx,
+  handle: string,
+): Promise<string | undefined> {
+  const [row] = await tx
+    .select({ userId: accountModerators.userId })
+    .from(accountModerators)
+    .where(eq(accountModerators.handle, handle));
+  return row?.userId ?? undefined;
+}
+
+/** Whether `accountId` created the poll of `electionId` (ADR 0032, rule 15). */
+export async function createdBy(
+  tx: ModerationTx,
+  electionId: Uint8Array,
+  accountId: string,
+): Promise<boolean> {
+  const [row] = await tx
+    .select({ id: accountPolls.id })
+    .from(accountPolls)
+    .where(and(eq(accountPolls.electionId, electionId), eq(accountPolls.userId, accountId)));
+  return row !== undefined;
+}
 
 function checkElectionId(electionId: unknown): asserts electionId is Uint8Array {
   if (!isBytes(electionId) || electionId.length !== 32)
@@ -134,7 +183,10 @@ export interface ModerationStatus {
  * transaction-scoped advisory lock, so each one is judged against the state
  * it changes and sequence numbers commit in order. Each is dated by the
  * database clock. Refused, with nothing written: a malformed decision, an
- * election with no stored definition, hiding a poll that hasn't closed for a
+ * election with no stored definition, a handle that isn't an active
+ * moderator's, a moderator deciding on a poll their account created, a
+ * restore citing `appeal-upheld` (only `decideAppeal` records one, so the
+ * public log's appeals are real ones), hiding a poll that hasn't closed for a
  * reason outside `OPEN_POLL_HIDE_REASONS`, and an action that changes nothing
  * (a log of no-ops would bury the decisions that matter). Only this function
  * enforces those rules: the app role can insert rows directly, bypassing them,
@@ -147,58 +199,12 @@ export async function moderate(
 ): Promise<{ readonly seq: bigint; readonly state: ModerationState }> {
   checkElectionId(electionId);
   if (!wellFormed(decision)) throw new ModerationError("invalid");
+  if (decision.reason === "appeal-upheld") throw new ModerationError("appeal-only");
   const id = new Uint8Array(electionId);
-  const { action, reason, moderator } = decision;
   return drizzle({ client }).transaction(
     async (tx) => {
-      await tx.execute(
-        q`SELECT pg_advisory_xact_lock(${MODERATION_LOCK[0]}::int, ${MODERATION_LOCK[1]}::int)`,
-      );
-      // The decision's time: the database clock, read after the lock.
-      const [clock] = await tx.execute<{ now: Date | string }>(q`SELECT clock_timestamp() AS now`);
-      // SELECT without FROM yields exactly one row.
-      const decidedAt = new Date(clock!.now);
-      const [stored] = await tx
-        .select({ definition: electionDefinitions.definition })
-        .from(electionDefinitions)
-        .where(eq(electionDefinitions.electionId, id));
-      if (stored === undefined) throw new ModerationError("unknown-election");
-      if (action === "hide" && !(OPEN_POLL_HIDE_REASONS as readonly string[]).includes(reason)) {
-        // A stored definition was decoded and checked before it was stored.
-        const def = decodeElectionDefinition(new Uint8Array(stored.definition));
-        // Ballots can still arrive until the inclusion bound after the close
-        // (election-definition.md, closes_at and l1_inclusion_bound).
-        const at = BigInt(Math.floor(decidedAt.getTime() / 1000));
-        if (at < def.closes_at + BigInt(def.l1_inclusion_bound))
-          throw new ModerationError("open-poll");
-      }
-      // The newest decisions, enough to cover the run since the last change
-      // of state: within a run each reason appears once (below), so a run has
-      // at most one row per removal reason.
-      const recent = await tx
-        .select({ action: moderationActions.action, reason: moderationActions.reason })
-        .from(moderationActions)
-        .where(eq(moderationActions.electionId, id))
-        .orderBy(desc(moderationActions.seq))
-        .limit(REMOVAL_REASONS.length + 1);
-      const before = recent[0] === undefined ? "visible" : stateAfter(recent[0].action);
-      const state = STATE_AFTER[action];
-      if (state === before) {
-        // A removal may be re-cited under a ground not yet cited since the
-        // state last changed, so the log can't fill with alternating no-ops.
-        const cited = new Set<string>();
-        for (const r of recent) {
-          if (stateAfter(r.action) !== before) break;
-          cited.add(r.reason);
-        }
-        if (action === "restore" || cited.has(reason)) throw new ModerationError("no-change");
-      }
-      const [row] = await tx
-        .insert(moderationActions)
-        .values({ electionId: id, action, reason, moderator, decidedAt })
-        .returning({ seq: moderationActions.seq });
-      // INSERT … RETURNING yields exactly the one row inserted.
-      return { seq: row!.seq, state };
+      await lockModeration(tx);
+      return recordDecision(tx, id, decision);
     },
     // The newest decisions must be read after the lock is taken (as for the
     // board's appends): a snapshot older than the lock could miss one.
@@ -206,7 +212,69 @@ export async function moderate(
   );
 }
 
-function stateAfter(action: string): ModerationState {
+/**
+ * `moderate`'s checks and write, for a well-formed decision, inside a
+ * read-committed transaction that holds `lockModeration`.
+ */
+export async function recordDecision(
+  tx: ModerationTx,
+  id: Uint8Array,
+  decision: ModerationDecision,
+): Promise<{ readonly seq: bigint; readonly state: ModerationState }> {
+  const { action, reason, moderator } = decision;
+  // The decision's time: the database clock, read after the lock.
+  const [clock] = await tx.execute<{ now: Date | string }>(q`SELECT clock_timestamp() AS now`);
+  // SELECT without FROM yields exactly one row.
+  const decidedAt = new Date(clock!.now);
+  const [stored] = await tx
+    .select({ definition: electionDefinitions.definition })
+    .from(electionDefinitions)
+    .where(eq(electionDefinitions.electionId, id));
+  if (stored === undefined) throw new ModerationError("unknown-election");
+  const account = await moderatorAccount(tx, moderator);
+  if (account === undefined) throw new ModerationError("unknown-moderator");
+  // A stake other than authorship isn't recorded anywhere, so only this
+  // one is refused (docs/moderation-policy.md, Known-weak).
+  if (await createdBy(tx, id, account)) throw new ModerationError("own-poll");
+  if (action === "hide" && !(OPEN_POLL_HIDE_REASONS as readonly string[]).includes(reason)) {
+    // A stored definition was decoded and checked before it was stored.
+    const def = decodeElectionDefinition(new Uint8Array(stored.definition));
+    // Ballots can still arrive until the inclusion bound after the close
+    // (election-definition.md, closes_at and l1_inclusion_bound).
+    const at = BigInt(Math.floor(decidedAt.getTime() / 1000));
+    if (at < def.closes_at + BigInt(def.l1_inclusion_bound)) throw new ModerationError("open-poll");
+  }
+  // The newest decisions, enough to cover the run since the last change
+  // of state: within a run each reason appears once (below), so a run has
+  // at most one row per removal reason.
+  const recent = await tx
+    .select({ action: moderationActions.action, reason: moderationActions.reason })
+    .from(moderationActions)
+    .where(eq(moderationActions.electionId, id))
+    .orderBy(desc(moderationActions.seq))
+    .limit(REMOVAL_REASONS.length + 1);
+  const before = recent[0] === undefined ? "visible" : stateAfter(recent[0].action);
+  const state = STATE_AFTER[action];
+  if (state === before) {
+    // A removal may be re-cited under a ground not yet cited since the
+    // state last changed, so the log can't fill with alternating no-ops.
+    const cited = new Set<string>();
+    for (const r of recent) {
+      if (stateAfter(r.action) !== before) break;
+      cited.add(r.reason);
+    }
+    if (action === "restore" || cited.has(reason)) throw new ModerationError("no-change");
+  }
+  const [row] = await tx
+    .insert(moderationActions)
+    .values({ electionId: id, action, reason, moderator, decidedAt })
+    .returning({ seq: moderationActions.seq });
+  // INSERT … RETURNING yields exactly the one row inserted.
+  return { seq: row!.seq, state };
+}
+
+/** The state a decision's action leads to. */
+export function stateAfter(action: string): ModerationState {
   if (action === "delist" || action === "hide" || action === "restore") return STATE_AFTER[action];
   // The table's check constraint admits only those three.
   throw new Error(`moderation_actions holds an unknown action: ${action}`);

@@ -72,10 +72,14 @@ test("no board or identity column looks like an account or a person", async () =
   expect(cols.filter((c) => ACCOUNT_LIKE.test(c["column_name"]))).toEqual([]);
 });
 
-// The one allowance, by table and column: the creator record of ADR 0032,
-// rule 15, names the election its author created (P2-22 part 3a). It says
-// whose poll an election is, never who answered it.
-const ACCOUNT_ALLOWED = [{ table_name: "account_polls", column_name: "election_id" }];
+// The allowances, by table and column: the creator record of ADR 0032,
+// rule 15, names the election its author created (P2-22 part 3a), and a
+// creator's appeal names that record (P2-10 part 3b). They say whose poll an
+// election is, never who answered it.
+const ACCOUNT_ALLOWED = [
+  { table_name: "account_appeals", column_name: "poll_id" },
+  { table_name: "account_polls", column_name: "election_id" },
+];
 
 test("no account column looks like a ballot, a voting identity or a poll", async () => {
   const cols = await db.admin`
@@ -84,7 +88,8 @@ test("no account column looks like a ballot, a voting identity or a poll", async
   expect(new Set(cols.map((c) => c["table_name"]))).toEqual(new Set(TABLE_CLASSES.account));
   const flagged = cols
     .filter((c) => BALLOT_LIKE.test(c["column_name"]))
-    .map((c) => ({ table_name: c["table_name"], column_name: c["column_name"] }));
+    .map((c) => ({ table_name: c["table_name"], column_name: c["column_name"] }))
+    .sort((a, b) => a.table_name.localeCompare(b.table_name));
   expect(flagged).toEqual(ACCOUNT_ALLOWED);
 });
 

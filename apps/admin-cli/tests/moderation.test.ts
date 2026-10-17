@@ -1,5 +1,5 @@
-import { report, storeDefinition } from "@abolishus/core";
-import { type TestDb, testDb } from "@abolishus/core/test-db";
+import { fileAppeal, newAccountId, report, storeDefinition } from "@abolishus/core";
+import { addModerators, newAccount, type TestDb, testDb } from "@abolishus/core/test-db";
 import { decodeElectionDefinition, encodeElectionDefinition } from "@abolishus/crypto";
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -29,6 +29,7 @@ let app: Sql;
 beforeAll(async () => {
   db = await testDb();
   app = await db.as("abolish_app");
+  await addModerators(app, "m", "mod-1", "mod-7");
 });
 afterAll(() => db?.close());
 
@@ -244,4 +245,101 @@ test("any other failure exits 3 with its kind only, never its message", async ()
   });
   expect(code).toBe(3);
   expect(err).toEqual([{ error: "internal", kind: expect.any(String) }]);
+});
+
+describe("moderators and appeals", () => {
+  /** A stored, closed poll whose creator record names `author`, as hex and its record's ID. */
+  async function poll(author: string) {
+    const id = await election();
+    const pollId = newAccountId();
+    await app`
+      INSERT INTO account_polls (id, user_id, state, draft, created_at, updated_at, submitted_at,
+        creator_address, create_tx_hash, election_id, created_block)
+      VALUES (${pollId}, ${author}, 'open', '{}', now(), now(), now(), ${randomBytes(20)},
+        ${randomBytes(32)}, ${bytes(id)}, 1)`;
+    return { id, pollId };
+  }
+
+  test("adds and retires handles; a moderator's own poll is refused", async () => {
+    const account = await newAccount(app);
+    expect(await cli("moderation", "moderator-add", "ann", account)).toEqual({
+      code: 0,
+      out: [{ handle: "ann" }],
+      err: [],
+    });
+    const added = await cli("moderation", "moderator-add", "ann", await newAccount(app));
+    expect([added.code, added.err]).toEqual([1, [{ error: "handle-taken" }]]);
+    const mine = await poll(account);
+    const own = await cli("moderation", "decide", mine.id, "delist", "spam", "--moderator", "ann");
+    expect([own.code, own.err]).toEqual([1, [{ error: "own-poll" }]]);
+    expect(await cli("moderation", "moderator-retire", "ann")).toEqual({
+      code: 0,
+      out: [{ handle: "ann", retired: true }],
+      err: [],
+    });
+    const other = await election();
+    const retired = await cli(
+      "moderation",
+      "decide",
+      other,
+      "delist",
+      "spam",
+      "--moderator",
+      "ann",
+    );
+    expect([retired.code, retired.err]).toEqual([1, [{ error: "unknown-moderator" }]]);
+  });
+
+  test("lists open appeals without the creator and reviews them", async () => {
+    const author = await newAccount(app);
+    const { id, pollId } = await poll(author);
+    const hidden = await cli("moderation", "decide", id, "hide", "spam", "--moderator", "mod-1");
+    const seq = String(hidden.out[0]!["seq"]);
+    await fileAppeal(app, author, pollId);
+    const appeals = await cli("moderation", "appeals", "--after", String(BigInt(seq) - 1n));
+    expect(appeals.out).toEqual([
+      {
+        decisionSeq: seq,
+        electionId: id,
+        action: "hide",
+        reason: "spam",
+        decidedAt: expect.any(String),
+        filedAt: expect.any(String),
+      },
+    ]);
+    expect(JSON.stringify(appeals)).not.toContain(author);
+    const same = await cli("moderation", "appeal-decide", seq, "upheld", "--moderator", "mod-1");
+    expect([same.code, same.err]).toEqual([1, [{ error: "same-moderator" }]]);
+    const upheld = await cli("moderation", "appeal-decide", seq, "upheld", "--moderator", "mod-7");
+    expect(upheld).toEqual({
+      code: 0,
+      out: [
+        { decisionSeq: seq, outcome: "upheld", state: "visible", restoreSeq: expect.any(String) },
+      ],
+      err: [],
+    });
+    const status = await cli("moderation", "status", id);
+    expect(status.out[0]!["latest"]).toMatchObject({ action: "restore", reason: "appeal-upheld" });
+    const again = await cli("moderation", "appeal-decide", seq, "rejected", "--moderator", "m");
+    expect([again.code, again.err]).toEqual([1, [{ error: "reviewed" }]]);
+  });
+
+  test("malformed appeal and moderator commands are usage errors", async () => {
+    for (const argv of [
+      ["appeal-decide", "1", "upheld"],
+      ["appeal-decide", "1", "maybe", "--moderator", "m"],
+      ["appeal-decide", "0", "upheld", "--moderator", "m"],
+      ["appeal-decide", "01", "upheld", "--moderator", "m"],
+      ["appeal-decide", "9223372036854775808", "upheld", "--moderator", "m"],
+      ["appeals", "--limit", "0"],
+      ["appeals", "--after", "-1"],
+      ["moderator-add", "ann"],
+      ["moderator-retire"],
+    ]) {
+      const r = await cli("moderation", ...argv);
+      expect([argv, r.code, r.err[0]?.["error"]]).toEqual([argv, 2, "usage"]);
+    }
+    const bad = await cli("moderation", "moderator-add", "Ann", "x");
+    expect([bad.code, bad.err]).toEqual([1, [{ error: "invalid" }]]);
+  });
 });

@@ -171,6 +171,15 @@ async function mine(blocks: number) {
   await client.request({ method: "anvil_mine", params: [toHex(blocks)] } as never);
 }
 
+// Polls for the receipt itself rather than through viem's
+// `waitForTransactionReceipt`: that one checks again only when the block
+// number changes, and drops a change that comes while it is still checking
+// the last. Anvil mines each transaction just after answering it and then
+// mines nothing more, so the dropped change is the only one there will be,
+// and the wait would last until viem's 180-second timeout, past the test's.
+const receiptOf = (hash: Hex) =>
+  until("a receipt", 20_000, () => client.getTransactionReceipt({ hash }));
+
 async function deploy(abi: Abi, bytecode: Hex, args: readonly unknown[]) {
   const hash = await wallet.deployContract({
     account: accounts[0] as Address,
@@ -179,7 +188,7 @@ async function deploy(abi: Abi, bytecode: Hex, args: readonly unknown[]) {
     bytecode,
     args,
   } as Parameters<typeof wallet.deployContract>[0]);
-  const receipt = await client.waitForTransactionReceipt({ hash, pollingInterval: 20 });
+  const receipt = await receiptOf(hash);
   if (receipt.contractAddress == null) throw new Error("not deployed");
   return { address: getAddress(receipt.contractAddress), block: receipt.blockNumber };
 }
@@ -200,7 +209,7 @@ async function write(
     args,
     value,
   } as unknown as Parameters<typeof wallet.writeContract>[0]);
-  const receipt = await client.waitForTransactionReceipt({ hash, pollingInterval: 20 });
+  const receipt = await receiptOf(hash);
   if (receipt.status !== "success") throw new Error(`${functionName} reverted`);
 }
 

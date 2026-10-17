@@ -408,6 +408,9 @@ importers:
       '@abolishus/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@abolishus/membership-prover':
+        specifier: workspace:*
+        version: link:../../packages/membership-prover
       '@abolishus/sdk':
         specifier: workspace:*
         version: link:../../packages/sdk
@@ -974,6 +977,9 @@ importers:
       '@abolishus/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@abolishus/membership-prover':
+        specifier: workspace:*
+        version: link:../membership-prover
       '@types/node':
         specifier: 'catalog:'
         version: 24.19.1

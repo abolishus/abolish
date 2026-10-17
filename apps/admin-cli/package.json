@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@abolishus/core": "workspace:*",
+    "@abolishus/membership-prover": "workspace:*",
     "@abolishus/sdk": "workspace:*",
     "postgres": "catalog:",
     "zod": "catalog:"

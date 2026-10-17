@@ -21,6 +21,7 @@ export {
 export {
   type CellOutcome,
   type CellReport,
+  type MembershipProver,
   runSimulation,
   SIMULATION_STUBS,
   type SimulationOptions,

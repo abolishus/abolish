@@ -2,17 +2,22 @@
 // packages/verifier must report for a run's format-4 bundle, given what the
 // simulation stubs. Every check the verifier implements and the simulation
 // exercises must pass, or, for 6.2 and 7.4, whose rows stay unverifiable
-// until the verifier knows `s_S`, report every opening with no break; the
-// ballots' placeholder membership proofs are the one thing it must reject
-// (SIMULATION_STUBS), and nothing may fail the election. Any other row is a
-// disagreement between the simulation and the verifier, which the run
-// treats as a bug (T-23, T-37, T-54).
+// until the verifier knows `s_S`, report every opening with no break, and
+// nothing may fail the election. With a prover, admission (5.1 to 5.5) must
+// admit every ballot, its membership proof and validity proofs verified;
+// without one, the ballots' placeholder membership proofs are the one thing
+// it must reject (SIMULATION_STUBS). Any other row is a disagreement between
+// the simulation and the verifier, which the run treats as a bug (T-23,
+// T-37, T-54).
 //
-// Three of the passing rows check little here: admission rejects on the
-// membership proof before it verifies the validity proofs, so 5.4 covers
-// only each ballot's shape and qualified share hashes, and 5.5 and 5.7 run
-// over no admitted ballot. They are required anyway, so a change that fails
-// them is caught. 2.9 reads the definition's one receipt key from the
+// Without a prover, three of the passing rows check little: admission
+// rejects on the membership proof before it verifies the validity proofs,
+// so 5.4 covers only each ballot's shape and qualified share hashes, and
+// 5.5 and 5.7 run over no admitted ballot. They are required anyway, so a
+// change that fails them is caught. Either way 5.9 onwards stay not reached
+// while the verifier doesn't judge L1 references from a format-4 bundle
+// (5.8), so the selection, delivery and tally rows judge nothing yet
+// (SIMULATION_STUBS). 2.9 reads the definition's one receipt key from the
 // anchor's receipt-key record in the bundle's L1 state, registered a day
 // before opening (T-26, T-71).
 
@@ -29,12 +34,14 @@ export const VERIFIER_PASSES: readonly string[] = Object.freeze([
   "5.7",
 ]);
 
-/** Rows the placeholder membership proofs fail, with every ballot rejected under this code. */
+/** Admission's membership rows: passed with a prover, else failed by the placeholder proofs, every ballot rejected under this code. */
 export const VERIFIER_MEMBERSHIP_ROWS: readonly string[] = Object.freeze(["5.1", "5.2", "5.3"]);
 const MEMBERSHIP_CODE: CheckCode = "membership-proof";
 
 /** What the run boarded, which the verifier's report must account for. */
 export interface VerifierExpectation {
+  /** Whether every ballot carries a real membership proof, so admission must admit them all. */
+  readonly proven: boolean;
   readonly entries: number;
   /** Seats the ceremony registered: every seat takes part. */
   readonly registered: number;
@@ -56,11 +63,13 @@ export function judgeVerifierReport(report: Report, expected: VerifierExpectatio
     if (row.get(id)?.status !== "pass") problems.push(`${id} didn't pass`);
   for (const id of VERIFIER_MEMBERSHIP_ROWS) {
     const c = row.get(id);
-    if (c?.status !== "fail" || c.code !== MEMBERSHIP_CODE)
+    if (expected.proven) {
+      if (c?.status !== "pass") problems.push(`${id} didn't pass`);
+    } else if (c?.status !== "fail" || c.code !== MEMBERSHIP_CODE)
       problems.push(`${id} didn't fail the placeholder membership proofs`);
   }
   for (const c of report.checks)
-    if (c.status === "fail" && !VERIFIER_MEMBERSHIP_ROWS.includes(c.id))
+    if (c.status === "fail" && (expected.proven || !VERIFIER_MEMBERSHIP_ROWS.includes(c.id)))
       problems.push(`${c.id} failed (${c.code ?? "no code"})`);
   if (report.verdictAgainstInputs === "failed") problems.push("the election failed");
   if (report.board.entries !== expected.entries || report.board.unreadableBytes !== 0)
@@ -81,7 +90,15 @@ export function judgeVerifierReport(report: Report, expected: VerifierExpectatio
   if (report.ceremony?.entry !== 0 || report.ceremony.registered.length !== expected.registered)
     problems.push("3.2 didn't register every seat from the board's first entry");
   const ballots = report.ballots;
-  if (
+  if (expected.proven) {
+    if (
+      ballots === undefined ||
+      ballots.admitted !== expected.ballots ||
+      ballots.rejected.length !== 0 ||
+      ballots.repeats.length !== 0
+    )
+      problems.push("admission didn't admit exactly every ballot");
+  } else if (
     ballots === undefined ||
     ballots.admitted !== 0 ||
     ballots.rejected.length !== expected.ballots ||

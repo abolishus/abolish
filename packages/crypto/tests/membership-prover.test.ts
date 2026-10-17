@@ -10,6 +10,7 @@ import {
   decodeMembershipProof,
   finishMembershipProof,
   MEMBERSHIP_PROOF_LENGTH,
+  membershipNullifier,
   membershipProverInput,
   MembershipProverError,
   type MembershipProverErrorCode,
@@ -167,6 +168,15 @@ describe("membership-prover vectors (docs/spec/vectors/membership-prover.json)",
     }
   });
 
+  test("the nullifier alone is Semaphore's, before any message exists", () => {
+    for (const c of vectors.cases) {
+      const { message: _, ...scope } = statementOf(c);
+      expect(membershipNullifier(bytes(member(c.member).secret), scope), c.name).toBe(
+        decimal(c.signals.nullifier),
+      );
+    }
+  });
+
   test("finishes every Semaphore proof: verified, re-randomised into other bytes, verified again", () => {
     for (const c of vectors.cases) {
       const input = inputOf(c);
@@ -195,6 +205,12 @@ describe("refusals before any proving", () => {
       new Uint8Array(33),
     ])
       expect(refusal(() => membershipProverInput(bad, t0.leaves, statement))).toBe("secret");
+  });
+
+  test("no nullifier for a secret that isn't an identity secret's encoding", () => {
+    const { message: _, ...scope } = statement;
+    for (const bad of [new Uint8Array(32), word(BABYJUBJUB_ORDER), secret.subarray(1)])
+      expect(refusal(() => membershipNullifier(bad, scope))).toBe("secret");
   });
 
   test("a voter whose commitment isn't a leaf", () => {
@@ -393,6 +409,10 @@ describe("inputs over random tiers (fast-check)", () => {
             message: semaphoreField(message),
             scope,
           });
+          // The nullifier alone, with no leaves and no message, is the input's.
+          expect(membershipNullifier(voter.secret, { definitionHash, tier, root })).toBe(
+            input.signals.nullifier,
+          );
         },
       ),
       { numRuns: Math.min(numRuns, 50) },

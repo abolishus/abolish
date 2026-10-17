@@ -1,14 +1,17 @@
 // Simulation commands (docs/PROJECT_BRIEF.md: "run a 10,000-voter national
 // referendum simulation with 7 trustees, two offline, mixed identity tiers,
 // our servers down halfway through"). The scenario is JSON, parsed and run by
-// @abolishus/sdk; this file only reads it and prints the result.
+// @abolishus/sdk; this file only reads it, hands the run the ballot client's
+// own membership prover, and prints the result.
 
 import { accessSync, constants, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { proveMembership } from "@abolishus/membership-prover";
 import {
   deliveredAt,
   downAt,
   MAX_INTAKE_WORKERS,
+  type MembershipProver,
   parseScenario,
   planElection,
   runSimulation,
@@ -76,6 +79,24 @@ function bundleDirOf(values: Values): string | undefined {
   return path;
 }
 
+// The vendored proving key and witness calculator, which the prover checks
+// by sha256 before every proof (T-07, T-12); read once, on the first proof.
+const ARTIFACTS = new URL(
+  "../../../packages/membership-prover/artifacts/snark-artifacts/",
+  import.meta.url,
+);
+
+function clientProver(): MembershipProver {
+  let artifacts: { readonly zkey: Uint8Array; readonly wasm: Uint8Array } | undefined;
+  return (witness) => {
+    artifacts ??= {
+      zkey: readFileSync(new URL("semaphore-32.zkey", ARTIFACTS)),
+      wasm: readFileSync(new URL("semaphore-32.wasm", ARTIFACTS)),
+    };
+    return proveMembership(witness, artifacts);
+  };
+}
+
 const scenarioOptions = { scenario: { type: "string" }, file: { type: "string" } } as const;
 
 /** The commands over a given runner: the sdk's, or a test's stand-in for a report that differs from its plan. */
@@ -126,10 +147,12 @@ export function simulationCommandsWith(
       },
     },
     run: {
-      usage: "(--scenario <json> | --file <path>) [--progress] [--workers <n>] [--bundle <dir>]",
+      usage:
+        "(--scenario <json> | --file <path>) [--progress] [--workers <n>] [--bundle <dir>] [--placeholder-proofs]",
       options: {
         ...scenarioOptions,
         progress: { type: "boolean" },
+        "placeholder-proofs": { type: "boolean" },
         workers: { type: "string" },
         bundle: { type: "string" },
       },
@@ -143,6 +166,10 @@ export function simulationCommandsWith(
         let shown = -1;
         const report = await run(scenario, {
           workers,
+          // Each ballot proved as the client proves it, a few seconds each;
+          // --placeholder-proofs skips proving for a quick run whose ballots
+          // the verifier's admission rejects (SIMULATION_STUBS).
+          ...(values["placeholder-proofs"] === true ? {} : { prover: clientProver() }),
           // Written before the verifier judges it, so a disagreement can be inspected.
           ...(bundleDir !== undefined
             ? {

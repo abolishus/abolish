@@ -220,10 +220,7 @@ describe("boards what the verifier admits, and nothing else", { timeout: 60_000 
     expect(() => checkBoard(electionId, board, VERSION)).not.toThrow();
   });
 
-  // Eight full admissions, each verifying its ballot's proofs, run one after
-  // another under the board's lock, which can pass the default timeout on a
-  // shared runner.
-  test("copies submitted at once board one entry", { timeout: 60_000 }, async () => {
+  test("copies submitted at once board one entry", async () => {
     // The key is read under the board's lock: concurrent copies can't both
     // pass the lookup.
     const c = byId("repeats");

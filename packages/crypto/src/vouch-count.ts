@@ -495,6 +495,9 @@ export class Tier1CountingState {
   readonly #tier2 = new Map<bigint, Tier2Group>();
   readonly #counted: Counted = { spent: new Set(), members: new Map(), leaves: new Map() };
   #broken: Tier1Break | null = null;
+  // Set when an extension throws partway: its events are part applied, so
+  // the state no longer matches any replay and refuses everything after.
+  #failed = false;
   #through: bigint | null = null;
   #position = 0;
 
@@ -510,8 +513,16 @@ export class Tier1CountingState {
       this.#vouchCtx.chainId,
       this.#vouchCtx.registry,
     );
-    // Checked by each Tier 2 group's replay when it first takes a record.
-    this.#registrars = Array.isArray(registrars) ? registrars.slice() : registrars;
+    // Checked now, by a replay of no group's records, and copied, so every
+    // Tier 2 group is judged under the same set whatever the caller does later.
+    new GroupRecordReplay({
+      groupId: 0n,
+      domainSeparator: this.#domainSeparator,
+      tier: 2,
+      registrars,
+      threshold,
+    });
+    this.#registrars = registrars.map((r) => new Uint8Array(r));
     this.#threshold = threshold;
   }
 
@@ -526,7 +537,9 @@ export class Tier1CountingState {
 
   /** Each Tier 1 group's counted additions in order: the leaves of its tier tree. */
   groups(): Tier1Count["groups"] {
-    return new Map([...this.#counted.leaves].map(([id, leaves]) => [id, leaves.slice()]));
+    return new Map(
+      [...this.#counted.leaves].map(([id, leaves]) => [id, leaves.map((l) => ({ ...l }))]),
+    );
   }
 
   /**
@@ -539,6 +552,7 @@ export class Tier1CountingState {
    * only advances its block.
    */
   extend(events: readonly GroupRegistryEvent[], through?: bigint): Tier1Extension {
+    this.#usable();
     const list = readEvents(events);
     const firstBlock = list[0]?.block;
     const lastBlock = list.at(-1)?.block;
@@ -551,10 +565,26 @@ export class Tier1CountingState {
         throw new RangeError("through: must be at or after every event's block and the state's");
     } else if (lastBlock !== undefined) end = lastBlock;
     const base = this.#position;
-    this.#position += list.length;
-    this.#through = end;
-    if (this.#broken !== null) return { additions: [], broken: this.#broken };
+    if (this.#broken !== null) {
+      this.#position += list.length;
+      this.#through = end;
+      return { additions: [], broken: this.#broken };
+    }
+    try {
+      const additions = this.#decide(list, base);
+      this.#position += list.length;
+      this.#through = end;
+      this.#prune();
+      return { additions, broken: this.#broken };
+    } catch (e) {
+      this.#failed = true;
+      throw e;
+    }
+  }
 
+  // Applies the events and decides their Tier 1 additions, `base` being the
+  // first one's position.
+  #decide(list: readonly GroupRegistryEvent[], base: number): Tier1Extension["additions"] {
     // Groups, Tier 2 records and breaks in log order; the Tier 1 additions are
     // decided after, once every root they can name is known.
     const pending: { at: number; block: bigint; record: Uint8Array }[] = [];
@@ -563,8 +593,7 @@ export class Tier1CountingState {
       if (e.kind === "tier1-addition") pending.push({ at, block: e.block, record: e.record });
       else if (!this.#apply(at, e)) break;
     }
-    // `#apply` may have set it since the check above, which TypeScript narrowed.
-    const stop = (this.#broken as Tier1Break | null)?.block ?? null;
+    const stop = this.#broken?.block ?? null;
     const pres = pending
       .filter((p) => stop === null || p.block < stop)
       .map((p) => this.#pre(p.at, p.block, p.record));
@@ -599,8 +628,11 @@ export class Tier1CountingState {
         return known;
       });
     walked.walk.commit();
-    this.#prune();
-    return { additions: walked.additions, broken: this.#broken };
+    return walked.additions;
+  }
+
+  #usable(): void {
+    if (this.#failed) throw new Error("the state failed partway through an extension: rebuild it");
   }
 
   /**
@@ -618,6 +650,7 @@ export class Tier1CountingState {
     records: readonly Uint8Array[],
     options: { readonly limit: number; readonly sendMargin: bigint },
   ): Tier1Judgement {
+    this.#usable();
     if (!Array.isArray(records)) throw new TypeError("records: expected an array");
     if (options === null || typeof options !== "object")
       throw new TypeError("options: expected an object");
@@ -718,7 +751,8 @@ export class Tier1CountingState {
   }
 
   // The root a Tier 2 group's tree had over its records in blocks up to grid
-  // block `g`, which is at most the state's block.
+  // block `g`: every record the state holds is in a block up to `g` when
+  // `g ≥ last`, `b + 1` included.
   #rootAt(groupId: bigint, g: bigint): bigint | undefined {
     const t = this.#tier2.get(groupId);
     if (t === undefined) return (emptyRoot ??= new TierTreeBuilder().root());

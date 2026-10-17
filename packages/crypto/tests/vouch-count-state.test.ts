@@ -176,28 +176,110 @@ describe("Tier1CountingState extended block by block gives the vectors' verdicts
       }
     });
 
-  test("and so does any cut into whole blocks", { timeout: 600_000 }, () => {
-    const c = caseNamed("deployment");
-    const list = events(c.events);
-    const cuts = blockCuts(list);
-    fc.assert(
-      fc.property(fc.subarray(cuts), (chosen) => {
-        const got = extendInPieces(list, new Set(chosen));
-        expect(got.additions.map((a) => shape(a.at, a.block, a.verdict))).toEqual(c.additions);
-        expect(got.broken).toBeNull();
-      }),
-      // Each run replays the deployment's real proofs, about 1.5 s: a
-      // hundredth of FC_NUM_RUNS, 10 runs under CI's 1000.
-      { numRuns: Math.max(3, Number(process.env.FC_NUM_RUNS ?? 100) / 100) },
-    );
-  });
+  for (const c of vectors.cases)
+    test(`and so does any cut of ${c.id} into whole blocks`, { timeout: 600_000 }, () => {
+      const list = events(c.events);
+      const cuts = blockCuts(list);
+      fc.assert(
+        fc.property(fc.subarray(cuts), (chosen) => {
+          const got = extendInPieces(list, new Set(chosen));
+          expect(got.additions.map((a) => shape(a.at, a.block, a.verdict))).toEqual(c.additions);
+          expect(brokenShape(got.broken)).toEqual(c.broken);
+        }),
+        // A run of the deployment replays its real proofs, about 1.5 s: a
+        // hundredth of FC_NUM_RUNS, 10 runs under CI's 1000.
+        { numRuns: Math.max(3, Number(process.env.FC_NUM_RUNS ?? 100) / 100) },
+      );
+    });
 
-  test("gives the same count as countTier1Additions", { timeout: 120_000 }, () => {
-    const list = events(caseNamed("deployment").events);
-    const state = new Tier1CountingState(ctx);
-    const got = state.extend(list);
-    expect({ ...got, groups: state.groups() }).toEqual(countTier1Additions(list, ctx));
-  });
+  // Self-paid events and breaks sharing a block with additions, which no
+  // vector logs: each expected count is written by hand from
+  // docs/spec/vouching.md (A broken Tier 2 history) and docs/spec/contracts.md
+  // (Group registry, Self-paid additions), and the state is held to it however
+  // it is cut, as is countTier1Additions (T-71).
+  const junk = new Uint8Array(40);
+  const handBuilt: readonly {
+    readonly id: string;
+    readonly events: readonly GroupRegistryEvent[];
+    readonly additions: readonly Verdict[];
+    readonly broken: ReturnType<typeof brokenShape>;
+  }[] = [
+    {
+      id: "a self-paid addition naming a signed Tier 2 group",
+      events: [
+        { kind: "group-created", block: 10n, groupId: 5n, tier: 2 },
+        { kind: "self-paid-addition", block: 11n, groupId: 5n, index: 0n, record: junk },
+      ],
+      additions: [],
+      broken: { at: 1, block: "11", groupId: "5", reason: "group" },
+    },
+    {
+      id: "a group created again after a self-paid group of its identifier",
+      events: [
+        { kind: "self-paid-group-created", block: 10n, groupId: 6n },
+        { kind: "group-created", block: 12n, groupId: 6n, tier: 1 },
+      ],
+      additions: [],
+      broken: { at: 1, block: "12", groupId: "6", reason: "duplicate-group" },
+    },
+    {
+      id: "a self-paid addition before its group",
+      events: [{ kind: "self-paid-addition", block: 10n, groupId: 9n, index: 0n, record: junk }],
+      additions: [],
+      broken: { at: 0, block: "10", groupId: "9", reason: "created" },
+    },
+    {
+      id: "a self-paid group's additions",
+      events: [
+        { kind: "self-paid-group-created", block: 10n, groupId: 6n },
+        { kind: "self-paid-addition", block: 11n, groupId: 6n, index: 0n, record: junk },
+      ],
+      additions: [],
+      broken: null,
+    },
+    {
+      id: "a break after an addition in its own block",
+      events: [
+        { kind: "group-created", block: 10n, groupId: 1n, tier: 1 },
+        { kind: "tier1-addition", block: 10n, record: junk },
+        { kind: "tier1-addition", block: 11n, record: junk },
+        { kind: "self-paid-addition", block: 11n, groupId: 9n, index: 0n, record: junk },
+        { kind: "tier1-addition", block: 12n, record: junk },
+      ],
+      additions: [{ at: 1, block: "10", valid: false, error: "decode" }],
+      broken: { at: 3, block: "11", groupId: "9", reason: "created" },
+    },
+  ];
+  for (const c of handBuilt)
+    test(c.id, () => {
+      const whole = countTier1Additions(c.events, ctx);
+      expect(whole.additions.map((a) => shape(a.at, a.block, a.verdict))).toEqual(c.additions);
+      expect(brokenShape(whole.broken)).toEqual(c.broken);
+      const cuts = blockCuts(c.events);
+      for (let mask = 0; mask < 2 ** cuts.length; mask++) {
+        const got = extendInPieces(c.events, new Set(cuts.filter((_, i) => (mask >> i) & 1)));
+        expect(got.additions.map((a) => shape(a.at, a.block, a.verdict))).toEqual(c.additions);
+        expect(brokenShape(got.broken)).toEqual(c.broken);
+      }
+    });
+
+  test(
+    "judges under the registrars it was given, whatever the caller does with them later",
+    {
+      timeout: 120_000,
+    },
+    () => {
+      const c = caseNamed("deployment");
+      const registrars = ctx.registrars.map((r) => r.slice());
+      const state = new Tier1CountingState({ ...ctx, registrars });
+      for (const r of registrars) r.fill(0);
+      const got = state.extend(events(c.events));
+      expect(got.additions.map((a) => shape(a.at, a.block, a.verdict))).toEqual(c.additions);
+      expect(
+        () => new Tier1CountingState({ ...ctx, registrars: ctx.registrars.slice(0, 1) }),
+      ).toThrow(RangeError);
+    },
+  );
 });
 
 describe("Tier1CountingState judges candidates at b + 1 as the replay judges them logged there", () => {

@@ -13,12 +13,15 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  checkBallotV3,
+  decodeBallot,
   decodeDisplayText,
   decodeElectionDefinition,
   type ElectionDefinition,
   encodeDisplayText,
   encodeElectionDefinition,
   membershipProverInput,
+  sealingElectionV5,
   verifyMembershipProof,
 } from "@abolishus/crypto";
 import { type Browser, chromium, type Page } from "playwright";
@@ -450,6 +453,74 @@ describe("sealing a version-5 poll", () => {
     expect(consoleErrors).toEqual([]);
     for (const url of requests) expect(new URL(url).origin).toBe(origin);
   });
+});
+
+describe("casting a version-5 poll's seal", () => {
+  test("the worker casts a seal through a prover worker into a record the admission checks pass, and never opens it", async () => {
+    const l1 = { number: "9000000", hash: "ab".repeat(32) };
+    const json = await page.evaluate(
+      ([id, h, d, t, entries, panel, secret, leaves, block]) =>
+        (
+          globalThis as unknown as {
+            ballotHarness: {
+              sealAndCast(
+                id: string,
+                h: string,
+                d: string,
+                t: string,
+                entries: readonly string[],
+                panel: { threshold: number; keys: readonly string[] },
+                votes: readonly (0 | 1)[],
+                secret: string,
+                leaves: readonly string[],
+                l1: { number: string; hash: string },
+              ): Promise<string>;
+            };
+          }
+        ).ballotHarness.sealAndCast(
+          id,
+          h,
+          d,
+          t,
+          entries,
+          panel,
+          [0, 0, 1, 1, 0],
+          secret,
+          leaves,
+          block,
+        ),
+      [
+        hex(poll.definition.election_id),
+        hex(poll.registeredHash),
+        hex(poll.definitionBytes),
+        hex(poll.displayText),
+        [hex(poll.entry)],
+        { threshold: poll.panel.threshold, keys: poll.panel.keys.map(hex) },
+        hex(poll.members[1] as Uint8Array),
+        poll.cellLeaves.map(String),
+        l1,
+      ] as const,
+    );
+    const { check, cast, opened } = JSON.parse(json) as {
+      check: boolean;
+      cast: { ok: boolean; ballot: string; ballotHash: string };
+      opened: unknown;
+    };
+    expect(check).toBe(true);
+    expect(cast.ok, JSON.stringify(cast)).toBe(true);
+    // Judged here, under a context made from the same records, not by the worker.
+    const independent = sealingElectionV5(poll.definition, [poll.panel], [poll.entry]);
+    if (!independent.ok) throw new Error(independent.code);
+    const record = decodeBallot(fromHex(cast.ballot), 3);
+    const verdict = checkBallotV3(independent.election, record);
+    expect(verdict.ok).toBe(true);
+    if (verdict.ok) expect(hex(verdict.ballotHash)).toBe(cast.ballotHash);
+    expect(record.l1_ref_number).toBe(BigInt(l1.number));
+    expect(opened).toEqual({ ok: false, problem: "cast" });
+    expect(violations).toEqual([]);
+    expect(consoleErrors).toEqual([]);
+    for (const url of requests) expect(new URL(url).origin).toBe(origin);
+  }, 120_000);
 });
 
 describe("proving membership", () => {

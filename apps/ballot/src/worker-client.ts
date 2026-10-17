@@ -6,6 +6,8 @@ import type { Panel } from "@abolishus/crypto";
 
 import type { ElectionCheck } from "./election.ts";
 import {
+  type CastRequest,
+  type CastResult,
   type ChallengeResult,
   type MembershipProofResult,
   type ProveMembershipRequest,
@@ -25,6 +27,9 @@ const PROVE_TIMEOUT_MS = PROVER_TIMEOUT_MS + TIMEOUT_MS;
 
 /** A proof request as the page makes it: everything but the envelope. */
 export type MembershipProofRequest = Omit<ProveMembershipRequest, "v" | "id" | "kind">;
+
+/** A cast as the page makes it: everything but the envelope. */
+export type CastBallotRequest = Omit<CastRequest, "v" | "id" | "kind">;
 
 /** Thrown when the worker answers with an error, crashes, or doesn't answer in time. */
 export class WorkerFailure extends Error {
@@ -132,6 +137,22 @@ export class BallotWorker {
       PROVE_TIMEOUT_MS,
     );
     if (response.kind !== "prove-membership") throw new WorkerFailure("the ballot worker failed");
+    return response.result;
+  }
+
+  /**
+   * Casts a seal the worker holds, proved by the prover worker at the other
+   * end of `request.prover` (prover-client.ts). The port is transferred; the
+   * secret is copied, and the worker zeroes its copy. The seal can't be
+   * challenged after this, whatever the answer.
+   */
+  async cast(request: CastBallotRequest): Promise<CastResult> {
+    const response = await this.#request(
+      (id) => ({ v: PROTOCOL_VERSION, id, kind: "cast", ...request }),
+      [request.prover],
+      PROVE_TIMEOUT_MS,
+    );
+    if (response.kind !== "cast") throw new WorkerFailure("the ballot worker failed");
     return response.result;
   }
 

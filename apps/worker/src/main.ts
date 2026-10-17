@@ -1,9 +1,10 @@
-import { BallotAdmissions, Tier0Batches } from "@abolishus/core";
+import { BallotAdmissions, L1References, Tier0Batches } from "@abolishus/core";
 import { Redis } from "ioredis";
 import postgres from "postgres";
 import { BaseError, createPublicClient, http } from "viem";
 import * as z from "zod";
 import { connectTier0Bundler } from "./tier0-bundler.ts";
+import { ViemL1Source } from "./l1-source.ts";
 import { checkTier0Deployment, ViemTier0Chain } from "./tier0-chain.ts";
 import { TIER0_ENV, tier0FromEnv } from "./tier0-env.ts";
 import { startWorker, type WorkerOptions } from "./worker.ts";
@@ -34,6 +35,16 @@ const Env = z.strictObject({
     .string()
     .regex(/^[1-9][0-9]{0,19}$/)
     .optional(),
+  // Optional, both or neither, and only with the three above: an L1 node
+  // and the chain our definitions name as `l1_chain_id`, to refuse ballots
+  // whose L1 reference verifier 5.8 already rejects (T-17, T-52). Without
+  // it, every reference is left to the verifier. The URL can carry a
+  // provider's API key, so it is never logged or quoted in an error.
+  BALLOT_L1_RPC_URL: z.url({ protocol: /^https?$/ }).optional(),
+  BALLOT_L1_CHAIN_ID: z
+    .string()
+    .regex(/^[1-9][0-9]{0,19}$/)
+    .optional(),
 });
 
 const Panels = z
@@ -52,10 +63,16 @@ const env = Env.parse({
   BALLOT_PINNED_PANELS: process.env["BALLOT_PINNED_PANELS"],
   BALLOT_ANCHOR_EPOCH: process.env["BALLOT_ANCHOR_EPOCH"],
   BALLOT_ANCHOR_PERIOD: process.env["BALLOT_ANCHOR_PERIOD"],
+  BALLOT_L1_RPC_URL: process.env["BALLOT_L1_RPC_URL"],
+  BALLOT_L1_CHAIN_ID: process.env["BALLOT_L1_CHAIN_ID"],
 });
 
 let ballots: WorkerOptions["ballots"];
 const ballotEnv = [env.BALLOT_PINNED_PANELS, env.BALLOT_ANCHOR_EPOCH, env.BALLOT_ANCHOR_PERIOD];
+if (env.BALLOT_L1_RPC_URL !== undefined || env.BALLOT_L1_CHAIN_ID !== undefined) {
+  if (ballotEnv.some((v) => v === undefined))
+    throw new Error("the ballot L1 check needs ballot admission configured");
+}
 if (ballotEnv.some((v) => v !== undefined)) {
   if (
     env.BALLOT_PINNED_PANELS === undefined ||
@@ -65,6 +82,25 @@ if (ballotEnv.some((v) => v !== undefined)) {
     throw new Error(
       "BALLOT_PINNED_PANELS, BALLOT_ANCHOR_EPOCH and BALLOT_ANCHOR_PERIOD go together",
     );
+  let l1: L1References | undefined;
+  if ((env.BALLOT_L1_RPC_URL === undefined) !== (env.BALLOT_L1_CHAIN_ID === undefined))
+    throw new Error("BALLOT_L1_RPC_URL and BALLOT_L1_CHAIN_ID go together");
+  if (env.BALLOT_L1_RPC_URL !== undefined && env.BALLOT_L1_CHAIN_ID !== undefined) {
+    // Each read gives up within L1References' own budget; viem's retries
+    // would only spend it.
+    const client = createPublicClient({
+      transport: http(env.BALLOT_L1_RPC_URL, { timeout: 2_000, retryCount: 0 }),
+    });
+    let source;
+    try {
+      source = await ViemL1Source.connect(client, BigInt(env.BALLOT_L1_CHAIN_ID));
+    } catch (e) {
+      // viem's errors quote the URL.
+      if (e instanceof BaseError) throw new Error("the ballot L1 check couldn't reach the node");
+      throw e;
+    }
+    l1 = new L1References({ source });
+  }
   ballots = {
     admissions: new BallotAdmissions({
       panels: Panels.parse(JSON.parse(env.BALLOT_PINNED_PANELS)).map((p) => ({
@@ -72,6 +108,7 @@ if (ballotEnv.some((v) => v !== undefined)) {
         keys: p.keys.map((k) => new Uint8Array(Buffer.from(k, "hex"))),
       })),
       clock: { epoch: BigInt(env.BALLOT_ANCHOR_EPOCH), period: BigInt(env.BALLOT_ANCHOR_PERIOD) },
+      ...(l1 !== undefined && { l1 }),
     }),
   };
 }

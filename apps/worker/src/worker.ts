@@ -106,6 +106,7 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
             admissions: options.ballots.admissions,
             now: () => BigInt(Math.floor(now().getTime() / 1000)),
             batch,
+            log,
             ...(options.ballots.waitMs === undefined ? {} : { waitMs: options.ballots.waitMs }),
           }),
         }),

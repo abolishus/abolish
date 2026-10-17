@@ -2,6 +2,8 @@ import { decodeBoardEntry, decodeElectionDefinition, type Panel } from "@abolish
 import {
   appendEntry,
   BallotAdmissions,
+  type FinalizedL1Source,
+  L1References,
   readBoard,
   storeDefinition,
   type SubmitOutcome,
@@ -103,7 +105,10 @@ afterEach(async () => {
 afterAll(() => connection?.disconnect());
 
 /** A schema of its own holding `id`'s definition and transcript, a worker judging its ballots, and the API's queue. */
-async function setUp(id: string, options: { pins?: boolean; timeoutMs?: number } = {}) {
+async function setUp(
+  id: string,
+  options: { pins?: boolean; timeoutMs?: number; l1?: FinalizedL1Source } = {},
+) {
   const db = await testDb();
   dbs.push(db);
   const app = await db.as("abolish_app");
@@ -113,6 +118,7 @@ async function setUp(id: string, options: { pins?: boolean; timeoutMs?: number }
   const admissions = new CountingAdmissions({
     panels: [panel],
     clock: { epoch: definition.opens_at, period: 3_600n },
+    ...(options.l1 === undefined ? {} : { l1: new L1References({ source: options.l1 }) }),
   });
   const worker = await startWorker({
     connection,
@@ -249,6 +255,40 @@ describe("the worker judges queued ballots as core's submit would", () => {
         ms: expect.any(Number),
       });
     expect(mine).toHaveLength(payloads.length);
+  });
+});
+
+describe("the L1 reference (5.8), with an L1 node", () => {
+  // A chain on which every block the fixtures' ballots name is finalized
+  // and stamped inside the window, but by other hashes.
+  const forged = (down = false): FinalizedL1Source => ({
+    chainId: definition.l1_chain_id,
+    finalizedHead: async () => {
+      if (down) throw new Error("node down");
+      return 21_100_000n;
+    },
+    block: async (n) => ({
+      hash: new Uint8Array(32),
+      timestamp: definition.opens_at + 12n * (n - 21_000_000n),
+    }),
+  });
+
+  test("a ballot naming a finalized block by another hash is refused with 5.8's code", async () => {
+    const { app, ballots } = await setUp("admitted", { l1: forged() });
+    const o = await ballots.submit(electionId, entriesOf("admitted")[1]!.payload);
+    expect(label(o)).toBe("rejected:l1-ref-unknown");
+    expect(await readBoard(app, electionId)).toHaveLength(1);
+  });
+
+  test("an unreachable node boards the ballot unchecked, and says so without naming it", async () => {
+    const { ballots } = await setUp("admitted", { l1: forged(true) });
+    const payload = entriesOf("admitted")[1]!.payload;
+    expect(label(await ballots.submit(electionId, payload))).toBe("boarded");
+    const lines = logs.filter((l) => "finding" in l && l.queue === "{ballot-submit}");
+    expect(lines).toEqual([{ queue: "{ballot-submit}", finding: "l1-unchecked" }]);
+    const text = JSON.stringify(logs);
+    expect(text).not.toContain(hex(electionId));
+    expect(text).not.toContain(hex(payload).slice(0, 64));
   });
 });
 

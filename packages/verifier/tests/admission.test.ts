@@ -1,6 +1,12 @@
 import { readFileSync } from "node:fs";
 import fc from "fast-check";
-import { decodeBoardEntry } from "@abolishus/crypto";
+import {
+  decodeBallot,
+  decodeBoardEntry,
+  decodeElectionDefinition,
+  pinnedVersion,
+  RECORD_TYPES,
+} from "@abolishus/crypto";
 import { describe, expect, test } from "vite-plus/test";
 import {
   BUNDLE_FORMAT_CEREMONY,
@@ -188,6 +194,31 @@ describe("admitAll gives each payload the verdict admit gives, its membership pr
     );
     expect(admission.admitAll([])).toEqual([]);
   }, 120_000);
+});
+
+describe("hands the caller what 5.8 needs", () => {
+  test("the definition's L1 chain and each admitted ballot's L1 block, as its record names them", () => {
+    // 5.8 is the caller's: it judges the block against the finalized L1
+    // chain the definition names, so both must be the record's own fields.
+    const c = byId("admitted");
+    const entries = bundleOf(c).entries;
+    const admission = electionAdmission(hex(c.definition), panelOf(c.panel), entries);
+    if (!admission.ok) throw new Error(admission.code);
+    const d = decodeElectionDefinition(hex(c.definition));
+    expect(admission.l1ChainId).toBe(d.l1_chain_id);
+    const version = pinnedVersion(d, RECORD_TYPES.ballot) as 1 | 2 | 3 | 4;
+    let seen = 0;
+    for (const entry of entries.slice(1)) {
+      const payload = payloadOf(entry);
+      const r = admission.admit(payload);
+      if (!r.ok) throw new Error(r.code);
+      const record = decodeBallot(payload, version as 1);
+      expect(r.l1RefNumber).toBe(record.l1_ref_number);
+      expect(r.l1RefHash).toEqual(new Uint8Array(record.l1_ref_hash));
+      seen++;
+    }
+    expect(seen).toBeGreaterThan(0);
+  });
 });
 
 describe("refuses every ballot of an election the verifier can't admit ballots for", () => {

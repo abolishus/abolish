@@ -25,6 +25,7 @@ export interface VerifierRun {
     readonly board?: {
       readonly byCid?: {
         readonly storeBlocks?: number;
+        readonly storeUnreadableBytes?: number;
         readonly gateways?: { readonly requests: number; readonly blocks: number };
         readonly stopped?: unknown;
       };

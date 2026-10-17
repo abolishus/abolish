@@ -21,13 +21,26 @@ const board = JSON.parse(
 const valid = board.boards.find((b) => b.id === "valid");
 if (valid === undefined) throw new Error("board.json has no valid board");
 
-test("each segment's object is the one its checkpoint's object_cid names", () => {
-  const cids = new Set(
-    segmentObjects(valid.entries.map((e) => hexToBytes(e))).map((o) =>
-      Buffer.from(objectCid(o)).toString("hex"),
-    ),
-  );
-  for (const c of valid.checkpoints) expect(cids.has(c["objectCid"] as string)).toBe(true);
+test("each segment's object and entry-hash list are the ones its checkpoint's CIDs name", () => {
+  const hex = (b: Uint8Array) => Buffer.from(objectCid(b)).toString("hex");
+  const segments = segmentObjects(valid.entries.map((e) => hexToBytes(e)));
+  const bySegment = new Map(segments.map((s) => [s.segment, s]));
+  // A checkpoint names the objects of the last segment at or before its own that has entries.
+  for (const c of valid.checkpoints) {
+    const at = Math.max(...segments.map((s) => s.segment).filter((s) => s <= Number(c["segment"])));
+    const s = bySegment.get(at);
+    expect(s && hex(s.object)).toBe(c["objectCid"]);
+    expect(s && hex(s.hashes)).toBe(c["hashesCid"]);
+  }
+});
+
+test("a segment that decreases is refused", () => {
+  const segmentOf = (e: Uint8Array) => new DataView(e.buffer, e.byteOffset + 43, 4).getUint32(0);
+  const [first, ...rest] = valid.entries.map((e) => hexToBytes(e));
+  const later = rest.find((e) => first !== undefined && segmentOf(e) > segmentOf(first));
+  if (first === undefined || later === undefined)
+    throw new Error("the valid board has one segment");
+  expect(() => segmentObjects([later, first])).toThrow(RangeError);
 });
 
 // Unsigned LEB128, as CAR frames it.
@@ -43,7 +56,7 @@ function varint(b: Uint8Array, at: number): [value: number, next: number] {
 test("the CAR's header names every object's root, and its sections are every block in order", () => {
   fc.assert(
     fc.property(
-      fc.array(fc.uint8Array({ minLength: 1, maxLength: 3000 }), { maxLength: 23 }),
+      fc.array(fc.uint8Array({ minLength: 1, maxLength: 3000 }), { maxLength: 30 }),
       (objects) => {
         const car = blocksCar(objects);
         const dags = objects.map(contentDag);
@@ -55,7 +68,7 @@ test("the CAR's header names every object's root, and its sections are every blo
           0xa2,
           0x65,
           ...ascii("roots"),
-          0x80 + dags.length,
+          ...(dags.length < 24 ? [0x80 + dags.length] : [0x98, dags.length]),
           ...dags.flatMap((d) => [0xd8, 0x2a, 0x58, 37, 0x00, ...d.root]),
           0x67,
           ...ascii("version"),
@@ -78,7 +91,19 @@ test("the CAR's header names every object's root, and its sections are every blo
   );
 });
 
-test("an entry too short for its segment field, and a 24th object, are refused", () => {
+test("an entry too short for its segment field is refused", () => {
   expect(() => segmentObjects([new Uint8Array(46)])).toThrow(RangeError);
-  expect(() => blocksCar(Array.from({ length: 24 }, () => Uint8Array.of(1)))).toThrow(RangeError);
+});
+
+test("the header's roots array has its length in dag-cbor's shortest form", () => {
+  // RFC 8949, 3.1: below 24 in the initial byte, else in the 1 or 2 bytes after 0x98 or 0x99.
+  const at = (n: number) => {
+    const car = blocksCar(Array.from({ length: n }, (_, i) => Uint8Array.of(i & 0xff, i >> 8)));
+    const [, start] = varint(car, 0);
+    return Array.from(car.slice(start + 7, start + 10));
+  };
+  expect(at(23)[0]).toBe(0x97);
+  expect(at(24).slice(0, 2)).toEqual([0x98, 24]);
+  expect(at(255).slice(0, 2)).toEqual([0x98, 255]);
+  expect(at(256)).toEqual([0x99, 1, 0]);
 });

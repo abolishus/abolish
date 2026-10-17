@@ -60,7 +60,7 @@ export const STAGES: readonly Stage[] = Object.freeze([
     id: 8,
     name: "Wipe Postgres and rebuild every result from chain + IPFS",
     coverage: "partial",
-    note: "the board only: each board's segment objects are published as blocks to a community node (apps/node serve), and each bundle is rebuilt from L1 alone, the checkpoints from the anchor's CheckpointAnchored logs and the copy fetched by the CIDs they name, from a blocks.car exported from the node and from the node's gateway; no Postgres is wiped yet, since nothing the fixture runs writes one (P2-1, P2-4), and no result but the board is rebuilt (P1-15)",
+    note: "the board only: each board's segment objects and entry-hash lists are published as blocks to a community node (apps/node serve), and each bundle is rebuilt from L1 alone, the checkpoints from the anchor's CheckpointAnchored logs and the copy fetched by the CIDs they name, from a blocks.car holding the node's blocks and from the node's gateway; no Postgres is wiped yet, since nothing the fixture runs writes one (P2-1, P2-4), and no result but the board is rebuilt (P1-15)",
   },
   {
     id: 9,

@@ -35,7 +35,10 @@ export function checkExpectations(
       problems.push(`the copy by CID stopped short: ${JSON.stringify(byCid.stopped)}`);
     const read =
       source === "blocks.car"
-        ? byCid.storeBlocks !== undefined && byCid.storeBlocks > 0 && byCid.gateways === undefined
+        ? byCid.storeBlocks !== undefined &&
+          byCid.storeBlocks > 0 &&
+          byCid.storeUnreadableBytes === 0 &&
+          byCid.gateways === undefined
         : byCid.storeBlocks === undefined &&
           byCid.gateways !== undefined &&
           byCid.gateways.blocks > 0 &&

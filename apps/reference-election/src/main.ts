@@ -12,10 +12,12 @@
 // vacuous: an election whose ceremony two seats sat out (rule 7 of
 // [[0006-trustees]]), which the trustee registry must refuse to record and the
 // election registry to register, and the honest bundle with its board copy
-// altered, and one whose block store holds none of its board.
+// altered, and one whose block store holds another election's board but
+// none of its own.
 //
 // The board isn't handed to the verifier from the fixture's memory: its
-// segment objects are published as blocks to a community node (apps/node),
+// segment objects and entry-hash lists are published as blocks to a community
+// node (apps/node),
 // and each bundle is rebuilt from L1 alone, the checkpoints from the anchor's
 // logs and the board copy fetched by the CIDs they name, from a block store
 // exported from the node or from the node's gateway (stage 8's board, P4-3).
@@ -244,14 +246,20 @@ async function run(anvil: Rpc, l2Anvil: Rpc, failures: string[]): Promise<void> 
 
   log(`stage 7: segments ${first} and ${seal} (the seal) anchored for each election`);
 
-  // Stage 8, the board: each election's segment objects published as blocks
-  // to a community node, which serves them by CID from here on.
+  // Stage 8, the board: each election's segment objects and entry-hash lists
+  // published as blocks to a community node, which serves them by CID from
+  // here on.
   const mirror = join(OUT, "node", "blocks");
   mkdirSync(mirror, { recursive: true });
   for (const e of elections)
-    writeFileSync(join(mirror, `${e.name}.car`), blocksCar(segmentObjects(e.entries)));
+    writeFileSync(
+      join(mirror, `${e.name}.car`),
+      blocksCar(segmentObjects(e.entries).flatMap((s) => [s.object, s.hashes])),
+    );
   const node = await startNode(mirror);
-  log(`stage 8: each board's segment objects mirrored by apps/node at ${node.url}`);
+  log(
+    `stage 8: each board's segment objects and entry-hash lists mirrored by apps/node at ${node.url}`,
+  );
   try {
     // Stage 9: the verifier, on each bundle alone, with the board rebuilt from
     // L1: the checkpoints from the anchor's logs, the copy by the CIDs they name.
@@ -263,7 +271,8 @@ async function run(anvil: Rpc, l2Anvil: Rpc, failures: string[]): Promise<void> 
       const clock = { epoch, lastSegment: seal };
       const evidenceFor = { firstSegment: first, header: l1.header, nodes: l1.nodes, checkpoints };
       const dir = join(OUT, e.name, "bundle");
-      // The block store a user exports from the node: the file it mirrors.
+      // A block store holding exactly what the node mirrors for this election,
+      // as a user would export it from any node holding the same blocks.
       const blocks = readFileSync(join(mirror, `${e.name}.car`));
       writeBundle(dir, e, clock, evidenceFor, { blocks });
       if (e.name === "honest") {
@@ -291,10 +300,12 @@ async function run(anvil: Rpc, l2Anvil: Rpc, failures: string[]): Promise<void> 
             }),
           ),
         );
-        // A control: a block store that holds none of the board. Withholding
-        // leaves the election unverifiable from that store, never failed (T-53).
+        // A control: a well-formed block store holding another election's
+        // board (rule-7's) and none of this one's. Withholding leaves the
+        // election unverifiable from that store, never failed (T-53).
         const withheld = join(OUT, "honest", "control-withheld-blocks");
-        writeBundle(withheld, e, clock, evidenceFor, { blocks: blocksCar([]) });
+        const others = readFileSync(join(mirror, "rule-7.car"));
+        writeBundle(withheld, e, clock, evidenceFor, { blocks: others });
         failures.push(
           ...verify(withheld, (r) =>
             checkControl("withheld-blocks", r, {

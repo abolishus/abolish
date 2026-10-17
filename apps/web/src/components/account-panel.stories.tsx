@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, userEvent, waitFor, within } from "storybook/test";
 
 import { AccountError, type AccountClient, type PasskeyView } from "../account/client.ts";
-import type { DraftsClient } from "../account/drafts.ts";
+import { type DraftsClient, DraftsError } from "../account/drafts.ts";
 import { AccountPanel } from "./account-panel.tsx";
 
 /** An account handler in memory: the panel's calls, with no network and no passkey prompt. */
@@ -215,5 +215,23 @@ export const NoPasskeySupport: Story = {
     await expect(await canvas.findByRole("alert")).toHaveTextContent(
       "This browser doesn't support passkeys.",
     );
+  },
+};
+
+export const SessionEndedUnderThePolls: Story = {
+  args: {
+    client: fakeClient({ signedIn: true, passkeys: ONE }),
+    drafts: {
+      ...noPolls,
+      list: async () => {
+        throw new DraftsError("signedOut");
+      },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    // The drafts handler found no session: the panel shows the way back in.
+    await expect(
+      await within(canvasElement).findByRole("button", { name: "Sign in with a passkey" }),
+    ).toBeVisible();
   },
 };

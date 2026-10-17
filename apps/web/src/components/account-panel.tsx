@@ -150,6 +150,9 @@ export function AccountPanel({ client, drafts }: AccountPanelProps) {
     }
   };
 
+  // Stable, so the polls list doesn't reload each time the panel renders.
+  const signedOut = useCallback(() => setView({ kind: "signed-out" }), []);
+
   const signedIn = view.kind === "signed-in";
   const added = (p: PasskeyView) => formatUtc(locale, new Date(p.createdAt));
 
@@ -233,11 +236,7 @@ export function AccountPanel({ client, drafts }: AccountPanelProps) {
 
       {view.kind === "signed-in" ? (
         <>
-          <AccountPolls
-            client={drafts}
-            index="01"
-            onSignedOut={() => setView({ kind: "signed-out" })}
-          />
+          <AccountPolls client={drafts} index="01" onSignedOut={signedOut} />
           <Section
             index="02"
             mark={t("passkeysTitle")}

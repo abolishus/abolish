@@ -24,6 +24,7 @@ export interface ElectionSource {
     registeredHash: Uint8Array,
     definition: Uint8Array,
     displayText: Uint8Array,
+    entries: readonly Uint8Array[],
   ): Promise<ElectionCheck>;
 }
 
@@ -106,6 +107,7 @@ async function open(
       loaded.registeredHash,
       loaded.definition,
       loaded.displayText,
+      loaded.entries,
     );
   } catch {
     return { kind: "unavailable", problem: "worker-failed" };

@@ -30,6 +30,8 @@ const harness = {
       fromHex(registeredHash),
       fromHex(definition),
       fromHex(displayText),
+      [],
+      [],
     );
     return JSON.stringify(result, (_, v: unknown) => (typeof v === "bigint" ? v.toString() : v));
   },
@@ -45,6 +47,8 @@ const harness = {
       loaded.registeredHash,
       loaded.definition,
       loaded.displayText,
+      loaded.entries,
+      deployment.panels,
     );
     return JSON.stringify(result, (_, v: unknown) => (typeof v === "bigint" ? v.toString() : v));
   },
@@ -91,6 +95,34 @@ const harness = {
       v instanceof Uint8Array ? Array.from(v, (b) => b.toString(16).padStart(2, "0")).join("") : v,
     );
   },
+  /**
+   * Checks a version-5 poll with its board's entries under `panel`, then
+   * seals `votes` in cell 0 and challenges the seal twice, with every answer.
+   */
+  async sealAndChallenge(
+    electionId: string,
+    registeredHash: string,
+    definition: string,
+    displayText: string,
+    entries: readonly string[],
+    panel: { readonly threshold: number; readonly keys: readonly string[] },
+    votes: readonly (0 | 1)[],
+  ): Promise<string> {
+    const check = await worker.checkElection(
+      fromHex(electionId),
+      fromHex(registeredHash),
+      fromHex(definition),
+      fromHex(displayText),
+      entries.map(fromHex),
+      [{ threshold: panel.threshold, keys: panel.keys.map(fromHex) }],
+    );
+    const sealed = await worker.seal(fromHex(registeredHash), 0, votes);
+    const opened = sealed.ok ? await worker.challenge(sealed.seal) : undefined;
+    const again = sealed.ok ? await worker.challenge(sealed.seal) : undefined;
+    return JSON.stringify({ check: check.ok, sealed, opened, again }, (_, v: unknown) =>
+      v instanceof Uint8Array ? Array.from(v, (b) => b.toString(16).padStart(2, "0")).join("") : v,
+    );
+  },
   /** Stops the worker, then reports how a request fares: at once, or at its timeout. */
   async stopThenCheck(): Promise<string> {
     worker.terminate();
@@ -101,6 +133,8 @@ const harness = {
         new Uint8Array(32),
         new Uint8Array(),
         new Uint8Array(),
+        [],
+        [],
       );
       return "answered";
     } catch (e) {

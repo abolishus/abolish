@@ -1,7 +1,9 @@
 // The page's side of opening an election: it reads the definition hash the
 // election registry holds for the linked election from the L2, then fetches
-// the definition and its display text from the API, and hands all four to the
-// worker, which decides whether the election may be shown (election.ts). The
+// the definition, its display text and the board's first entry (where the
+// operator boards the ceremony transcript) from the API, and hands them all
+// to the worker, which decides whether the election may be shown
+// (election.ts, worker/session.ts). The
 // worker does no I/O (T-43); this module decides nothing about the records,
 // only whether they could be fetched (T-34, T-41).
 //
@@ -38,6 +40,8 @@ export type Loaded =
       readonly registeredHash: Uint8Array;
       readonly definition: Uint8Array;
       readonly displayText: Uint8Array;
+      /** The board's first entry, or none on an empty board: the worker looks for the transcript there. */
+      readonly entries: readonly Uint8Array[];
     }
   | { readonly ok: false; readonly problem: LoadProblem };
 
@@ -57,6 +61,9 @@ const BLOCK = "finalized";
 const JSON_ROOM = 256;
 const MAX_DEFINITION_ANSWER = 2 * PARAMETERS.MAX_BOARD_PAYLOAD + JSON_ROOM;
 const MAX_DISPLAY_TEXT_ANSWER = 2 * PARAMETERS.MAX_DISPLAY_TEXT + JSON_ROOM;
+// One board entry: its payload and the envelope around it (docs/spec/board.md).
+const BOARD_ENTRY_OVERHEAD = 3 + 32 + 8 + 4 + 4;
+const MAX_ENTRIES_ANSWER = 2 * (PARAMETERS.MAX_BOARD_PAYLOAD + BOARD_ENTRY_OVERHEAD) + JSON_ROOM;
 const MAX_RPC_ANSWER = 4096;
 
 // No cookie, no referrer, no cache and no redirect to anywhere else: each
@@ -88,11 +95,14 @@ export async function loadElection(
     const registeredHash = await registeredHashOf(deployment, registry, electionId, fetchFn);
     if (registeredHash.every((b) => b === 0)) return { ok: false, problem: "not-registered" };
     const id = toHex(electionId);
-    const [definition, displayText] = await both(
-      apiRecord(deployment, "definition", id, "definition", MAX_DEFINITION_ANSWER, fetchFn),
-      apiRecord(deployment, "display-text", id, "displayText", MAX_DISPLAY_TEXT_ANSWER, fetchFn),
+    const [[definition, displayText], entries] = await both(
+      both(
+        apiRecord(deployment, "definition", id, "definition", MAX_DEFINITION_ANSWER, fetchFn),
+        apiRecord(deployment, "display-text", id, "displayText", MAX_DISPLAY_TEXT_ANSWER, fetchFn),
+      ),
+      firstEntry(deployment, id, fetchFn),
     );
-    return { ok: true, registeredHash, definition, displayText };
+    return { ok: true, registeredHash, definition, displayText, entries };
   } catch (error) {
     if (error instanceof Stop) return { ok: false, problem: error.problem };
     throw error;
@@ -197,6 +207,32 @@ async function apiRecord(
   const value = answer[field];
   if (typeof value !== "string" || !/^(?:[0-9a-f]{2})*$/.test(value)) throw new Stop("bad-answer");
   return fromHex(value);
+}
+
+/**
+ * The board's first entry (`GET /board/entries` from 0, one entry), or none
+ * on an empty board. The request names the election and a position,
+ * nothing about the voter (T-10).
+ */
+async function firstEntry(
+  deployment: Deployment,
+  electionId: string,
+  fetchFn: Fetch,
+): Promise<Uint8Array[]> {
+  const url = `${deployment.api}/board/entries?electionId=${electionId}&start=0&limit=1`;
+  const response = await fetchFn(url, { ...REQUEST, method: "GET" });
+  if (response.status === 404) throw new Stop("not-found");
+  if (!response.ok) throw new Stop("unreachable");
+  const answer = await readJson(response, MAX_ENTRIES_ANSWER);
+  if (!isRecord(answer) || Object.keys(answer).length !== 1) throw new Stop("bad-answer");
+  const entries = answer["entries"];
+  if (
+    !Array.isArray(entries) ||
+    entries.length > 1 ||
+    !entries.every((e) => typeof e === "string" && /^(?:[0-9a-f]{2})+$/.test(e))
+  )
+    throw new Stop("bad-answer");
+  return entries.map((e: string) => fromHex(e));
 }
 
 /** The body as JSON, read only up to `maxBytes`. */

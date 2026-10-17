@@ -19,6 +19,8 @@ const request = () => ({
   registeredHash: new Uint8Array(32).fill(1),
   definition: new Uint8Array([1, 2, 3]),
   displayText: new Uint8Array([4, 5]),
+  entries: [new Uint8Array([6])],
+  panels: [{ threshold: 2, keys: [new Uint8Array(33), new Uint8Array(33).fill(1)] }],
 });
 
 describe("requests", () => {
@@ -43,7 +45,8 @@ describe("requests", () => {
   });
 
   test.each([
-    ["another version", { v: 2 }],
+    ["another version", { v: PROTOCOL_VERSION + 1 }],
+    ["an earlier version", { v: 1 }],
     ["a negative id", { id: -1 }],
     ["a fractional id", { id: 1.5 }],
     ["an id that isn't a number", { id: "7" }],
@@ -55,19 +58,33 @@ describe("requests", () => {
     ["a registered hash that isn't bytes", { registeredHash: "00".repeat(32) }],
     ["a definition that isn't bytes", { definition: "0102" }],
     ["display text that isn't bytes", { displayText: new Uint16Array(2) }],
+    ["entries that aren't a list", { entries: new Uint8Array(4) }],
+    ["an entry that isn't bytes", { entries: ["06"] }],
+    ["panels that aren't a list", { panels: { threshold: 1, keys: [] } }],
+    ["a panel with a fractional threshold", { panels: [{ threshold: 1.5, keys: [] }] }],
+    ["a panel key that isn't bytes", { panels: [{ threshold: 1, keys: ["00"] }] }],
+    ["a panel with an extra key", { panels: [{ threshold: 1, keys: [], extra: 1 }] }],
+    ["a panel without keys", { panels: [{ threshold: 1 }] }],
     ["an extra key", { extra: true }],
   ])("refuses %s", (_, change) => {
     expect(parseRequest({ ...request(), ...change })).toBeUndefined();
   });
 
-  test.each(["v", "id", "kind", "electionId", "registeredHash", "definition", "displayText"])(
-    "refuses a request without %s",
-    (key) => {
-      const r: Record<string, unknown> = request();
-      delete r[key];
-      expect(parseRequest(r)).toBeUndefined();
-    },
-  );
+  test.each([
+    "v",
+    "id",
+    "kind",
+    "electionId",
+    "registeredHash",
+    "definition",
+    "displayText",
+    "entries",
+    "panels",
+  ])("refuses a request without %s", (key) => {
+    const r: Record<string, unknown> = request();
+    delete r[key];
+    expect(parseRequest(r)).toBeUndefined();
+  });
 
   test("refuses anything that isn't a request object", () => {
     for (const x of [null, undefined, 7, "request", [request()], new Uint8Array(4)])
@@ -133,7 +150,7 @@ describe("membership proof requests", () => {
     ["a short message", { message: new Uint8Array(31) }],
     ["a prover that isn't a port", { prover: {} }],
     ["an extra key", { extra: true }],
-    ["another version", { v: 2 }],
+    ["another version", { v: PROTOCOL_VERSION + 1 }],
   ])("refuses %s", (_, change) => {
     expect(parseRequest({ ...prove(), ...change })).toBeUndefined();
   });
@@ -153,6 +170,62 @@ describe("membership proof requests", () => {
   });
 });
 
+describe("seal and challenge requests", () => {
+  const seal = () => ({
+    v: PROTOCOL_VERSION,
+    id: 11,
+    kind: "seal",
+    definitionHash: new Uint8Array(32).fill(8),
+    cell: 0,
+    votes: [1, 0, 0, 1],
+  });
+  const challenge = () => ({ v: PROTOCOL_VERSION, id: 12, kind: "challenge", seal: 3 });
+
+  test("accepts well-formed requests as they are", () => {
+    expect(parseRequest(seal())).toEqual(seal());
+    expect(parseRequest(challenge())).toEqual(challenge());
+  });
+
+  test("accepts any cell and any votes of 0 and 1: their limits are the seal's", () => {
+    fc.assert(
+      fc.property(fc.integer(), fc.array(fc.constantFrom(0, 1)), (cell, votes) => {
+        const r = { ...seal(), cell, votes };
+        expect(parseRequest(r)).toEqual(r);
+      }),
+      { numRuns },
+    );
+  });
+
+  test.each([
+    ["a short definition hash", { definitionHash: new Uint8Array(31) }],
+    ["a fractional cell", { cell: 0.5 }],
+    ["a cell as a string", { cell: "0" }],
+    ["a vote of 2", { votes: [1, 2] }],
+    ["a vote as a boolean", { votes: [true] }],
+    ["votes that aren't a list", { votes: new Uint8Array(2) }],
+    ["an extra key", { extra: true }],
+  ])("refuses a seal with %s", (_, change) => {
+    expect(parseRequest({ ...seal(), ...change })).toBeUndefined();
+  });
+
+  test.each([
+    ["a negative seal", { seal: -1 }],
+    ["a seal as a string", { seal: "3" }],
+    ["an extra key", { votes: [] }],
+  ])("refuses a challenge with %s", (_, change) => {
+    expect(parseRequest({ ...challenge(), ...change })).toBeUndefined();
+  });
+
+  test("refuses either without one of its keys", () => {
+    for (const make of [seal, challenge])
+      for (const key of Object.keys(make())) {
+        const r: Record<string, unknown> = make();
+        delete r[key];
+        expect(parseRequest(r)).toBeUndefined();
+      }
+  });
+});
+
 describe("responses", () => {
   test("matches a current response to its request", () => {
     expect(responseId({ v: PROTOCOL_VERSION, id: 4, kind: "check-election", result: {} })).toBe(4);
@@ -160,10 +233,12 @@ describe("responses", () => {
     expect(responseId({ v: PROTOCOL_VERSION, id: 5, kind: "prove-membership", result: {} })).toBe(
       5,
     );
+    expect(responseId({ v: PROTOCOL_VERSION, id: 6, kind: "seal", result: {} })).toBe(6);
+    expect(responseId({ v: PROTOCOL_VERSION, id: 7, kind: "challenge", result: {} })).toBe(7);
   });
 
   test("ignores another version's response or kind", () => {
-    expect(responseId({ v: 2, id: 4, kind: "error" })).toBeUndefined();
+    expect(responseId({ v: PROTOCOL_VERSION + 1, id: 4, kind: "error" })).toBeUndefined();
     expect(responseId({ v: PROTOCOL_VERSION, id: 4, kind: "ready" })).toBeUndefined();
     expect(responseId({ v: PROTOCOL_VERSION, kind: "error" })).toBeUndefined();
   });

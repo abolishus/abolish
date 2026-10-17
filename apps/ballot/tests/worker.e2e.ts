@@ -26,6 +26,7 @@ import { build, preview, type PreviewServer } from "vite-plus";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "vite-plus/test";
 
 import { PROVER_ARTIFACT_NAMES, PROVER_CACHE } from "../src/prover-artifacts.ts";
+import * as poll from "./poll.ts";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const vectors = (name: string) =>
@@ -340,6 +341,14 @@ describe("opening an election from staging's origins", () => {
             contentType: "application/json",
             body: JSON.stringify(textStatus === 200 ? { displayText: textHex } : {}),
           });
+        // A version-1 election's board: no transcript is looked for.
+        if (url.pathname === "/board/entries" && wanted)
+          return route.fulfill({
+            status: 200,
+            headers: cors,
+            contentType: "application/json",
+            body: JSON.stringify({ entries: [] }),
+          });
         return route.fulfill({ status: 404, headers: cors, body: "{}" });
       },
     );
@@ -393,6 +402,53 @@ describe("opening an election from staging's origins", () => {
   test("says so when the API withholds the text", async () => {
     await serve({ textStatus: 451 });
     await expect(open()).resolves.toEqual({ ok: false, problem: "withheld" });
+  });
+});
+
+describe("sealing a version-5 poll", () => {
+  test("the worker checks the poll's ceremony, seals under it and opens the seal once", async () => {
+    const json = await page.evaluate(
+      ([id, h, d, t, entries, panel]) =>
+        (
+          globalThis as unknown as {
+            ballotHarness: {
+              sealAndChallenge(
+                id: string,
+                h: string,
+                d: string,
+                t: string,
+                entries: readonly string[],
+                panel: { threshold: number; keys: readonly string[] },
+                votes: readonly (0 | 1)[],
+              ): Promise<string>;
+            };
+          }
+        ).ballotHarness.sealAndChallenge(id, h, d, t, entries, panel, [0, 1, 0, 1, 0]),
+      [
+        hex(poll.definition.election_id),
+        hex(poll.registeredHash),
+        hex(poll.definitionBytes),
+        hex(poll.displayText),
+        [hex(poll.entry)],
+        { threshold: poll.panel.threshold, keys: poll.panel.keys.map(hex) },
+      ] as const,
+    );
+    const { check, sealed, opened, again } = JSON.parse(json) as {
+      check: boolean;
+      sealed: { ok: boolean; trackingCode: string };
+      opened: { ok: boolean; opening: string; trackingCode: string };
+      again: unknown;
+    };
+    expect(check).toBe(true);
+    expect(sealed.ok).toBe(true);
+    expect(opened.ok).toBe(true);
+    expect(opened.trackingCode).toBe(sealed.trackingCode);
+    // The opening's record type and version: spoiled-ballot opening 2.
+    expect(opened.opening.slice(0, 6)).toBe("000302");
+    expect(again).toEqual({ ok: false, problem: "unknown" });
+    expect(violations).toEqual([]);
+    expect(consoleErrors).toEqual([]);
+    for (const url of requests) expect(new URL(url).origin).toBe(origin);
   });
 });
 

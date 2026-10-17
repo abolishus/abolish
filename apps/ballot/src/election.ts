@@ -13,6 +13,7 @@
 
 import {
   checkElectionRecordToShow,
+  type SealingElectionCode,
   DecodeError,
   decodeElectionDefinition,
   decodeElectionDefinitionV5,
@@ -82,7 +83,13 @@ export type ElectionRefusal =
       readonly problem: "unregistered-definition";
       /** Lowercase hex: the hash of the definition that was served. */
       readonly servedHash: string;
-    };
+    }
+  /**
+   * A version-5 poll shown by every other check, whose ballots this device
+   * can't seal: its panel isn't one this build pins, or its ceremony
+   * transcript is missing or fails (`sealingElectionV5`; T-37, T-54).
+   */
+  | { readonly problem: "ceremony-failed"; readonly code: SealingElectionCode };
 
 export type ElectionCheck =
   | { readonly ok: true; readonly election: CheckedElection }

@@ -112,7 +112,9 @@ export function ElectionRefused({
     refusal.problem === "definition-ill-formed" ||
     (refusal.problem === "display-text-ill-formed" && refusal.rule !== "commitment")
       ? refusal.rule
-      : undefined;
+      : refusal.problem === "ceremony-failed"
+        ? refusal.code
+        : undefined;
   return (
     <EverydayFrame>
       <ScreenTitle title={t("refusedTitle")}>
@@ -174,6 +176,12 @@ function failedCheck(refusal: ElectionRefusal): { title: Key; detail: Key } {
       return refusal.rule === "commitment"
         ? { title: "displayTextChanged", detail: "displayTextChangedDetail" }
         : { title: "displayTextIllFormed", detail: "displayTextIllFormedDetail" };
+    case "ceremony-failed":
+      // A panel this build doesn't pin isn't a fault of the ceremony; whose
+      // keys they are is what this device can't tell (T-37).
+      return refusal.code === "panel-unpinned"
+        ? { title: "panelUnpinned", detail: "panelUnpinnedDetail" }
+        : { title: "ceremonyFailed", detail: "ceremonyFailedDetail" };
   }
 }
 

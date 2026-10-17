@@ -2,7 +2,8 @@
 // pinned address on the pinned chain, at the finalized head, and every answer
 // that isn't shaped like one ends in a problem, never in bytes handed on;
 // requests carry no credentials or referrer and name only the election
-// (T-10, T-11, T-34, T-52). Whether the records may be shown is the worker's
+// (T-10, T-11, T-34, T-52). The board's first entry, which carries the
+// ceremony transcript, is fetched beside the records. Whether the records may be shown is the worker's
 // check, tested in election.test.ts and packages/crypto.
 
 import { PARAMETERS } from "@abolishus/crypto";
@@ -24,6 +25,7 @@ const ID_HEX = "5d".repeat(32);
 const HASH = "3f".repeat(32);
 const DEFINITION = "0001abcd";
 const TEXT = "0009ef";
+const ENTRY = "000704aa";
 
 interface Call {
   readonly url: string;
@@ -52,7 +54,7 @@ const rpcResult = (id: number, result: unknown) => JSON.stringify({ jsonrpc: "2.
 
 /** An honest deployment, with any one answer replaced. */
 function honest(
-  override: Partial<Record<"chainId" | "call" | "definition" | "text", Answer>> = {},
+  override: Partial<Record<"chainId" | "call" | "definition" | "text" | "entries", Answer>> = {},
 ) {
   return network((url, method) => {
     if (url === DEPLOYMENT.rpc) {
@@ -66,6 +68,8 @@ function honest(
       );
     if (url === `${DEPLOYMENT.api}/elections/display-text?electionId=${ID_HEX}`)
       return override.text ?? { status: 200, body: JSON.stringify({ displayText: TEXT }) };
+    if (url === `${DEPLOYMENT.api}/board/entries?electionId=${ID_HEX}&start=0&limit=1`)
+      return override.entries ?? { status: 200, body: JSON.stringify({ entries: [ENTRY] }) };
     return { status: 500, body: "" };
   });
 }
@@ -85,6 +89,7 @@ describe("the registry read", () => {
     expect(hex(loaded.registeredHash)).toBe(HASH);
     expect(hex(loaded.definition)).toBe(DEFINITION);
     expect(hex(loaded.displayText)).toBe(TEXT);
+    expect(loaded.entries.map(hex)).toEqual([ENTRY]);
     const call = calls.find((c) => (c.body as { method?: string })?.method === "eth_call");
     // The pinned registry, the election's word after the selector, the finalized head.
     expect(call?.body).toEqual({
@@ -98,7 +103,7 @@ describe("the registry read", () => {
   test("no request carries credentials or a referrer, or follows a redirect", async () => {
     const { calls, fetchFn } = honest();
     await loadElection(DEPLOYMENT, ID, fetchFn);
-    expect(calls).toHaveLength(4);
+    expect(calls).toHaveLength(5);
     for (const { init } of calls) {
       expect(init.credentials).toBe("omit");
       expect(init.referrerPolicy).toBe("no-referrer");
@@ -312,6 +317,80 @@ describe("the API's records", () => {
       }),
       { numRuns },
     );
+  });
+});
+
+describe("the board's first entry", () => {
+  test("an empty board gives no entry, and the records still come back", async () => {
+    const { fetchFn } = honest({ entries: { status: 200, body: JSON.stringify({ entries: [] }) } });
+    const loaded = await loadElection(DEPLOYMENT, ID, fetchFn);
+    if (!loaded.ok) throw new Error(loaded.problem);
+    expect(loaded.entries).toEqual([]);
+    expect(hex(loaded.definition)).toBe(DEFINITION);
+  });
+
+  test("more than the one entry asked for, other spellings or other shapes are refused", async () => {
+    for (const body of [
+      JSON.stringify({ entries: [ENTRY, ENTRY] }),
+      JSON.stringify({ entries: [ENTRY.toUpperCase()] }),
+      JSON.stringify({ entries: [""] }),
+      JSON.stringify({ entries: ["abc"] }),
+      JSON.stringify({ entries: [`0x${ENTRY}`] }),
+      JSON.stringify({ entries: ENTRY }),
+      JSON.stringify({ entries: [ENTRY], extra: 1 }),
+      JSON.stringify({ entry: ENTRY }),
+      "not json",
+    ])
+      expect(
+        await loadElection(DEPLOYMENT, ID, honest({ entries: { status: 200, body } }).fetchFn),
+      ).toEqual({ ok: false, problem: "bad-answer" });
+  });
+
+  test("the largest entry is read, and one much longer refused", async () => {
+    const at = (bytes: number) =>
+      ({ status: 200, body: JSON.stringify({ entries: ["00".repeat(bytes)] }) }) as const;
+    const largest = await loadElection(
+      DEPLOYMENT,
+      ID,
+      honest({ entries: at(PARAMETERS.MAX_BOARD_PAYLOAD + 51) }).fetchFn,
+    );
+    if (!largest.ok) throw new Error(largest.problem);
+    expect(largest.entries[0]).toHaveLength(PARAMETERS.MAX_BOARD_PAYLOAD + 51);
+    expect(
+      await loadElection(
+        DEPLOYMENT,
+        ID,
+        honest({ entries: at(PARAMETERS.MAX_BOARD_PAYLOAD + 300) }).fetchFn,
+      ),
+    ).toEqual({ ok: false, problem: "bad-answer" });
+  });
+
+  test("a board the API doesn't hold is not found, and its errors unreachable", async () => {
+    expect(
+      await loadElection(DEPLOYMENT, ID, honest({ entries: { status: 404, body: "{}" } }).fetchFn),
+    ).toEqual({ ok: false, problem: "not-found" });
+    for (const entries of ["network", { status: 503, body: "" }] as const)
+      expect(await loadElection(DEPLOYMENT, ID, honest({ entries }).fetchFn)).toEqual({
+        ok: false,
+        problem: "unreachable",
+      });
+  });
+
+  test("withheld text outranks the board's failure, whichever answers first", async () => {
+    for (const delay of [0, 5]) {
+      const { fetchFn } = honest({
+        entries: "network",
+        text: { status: 451, body: "{}" },
+      });
+      const slowFirst: Fetch = (url, init) =>
+        url.includes("/display-text")
+          ? new Promise((r) => setTimeout(r, delay)).then(() => fetchFn(url, init))
+          : fetchFn(url, init);
+      expect(await loadElection(DEPLOYMENT, ID, slowFirst)).toEqual({
+        ok: false,
+        problem: "withheld",
+      });
+    }
   });
 });
 

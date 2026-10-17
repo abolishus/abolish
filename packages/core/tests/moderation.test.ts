@@ -1,4 +1,4 @@
-import { decodeElectionDefinition, encodeElectionDefinition } from "@abolishus/crypto";
+import { encodeElectionDefinition } from "@abolishus/crypto";
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { getTableConfig } from "drizzle-orm/pg-core";
@@ -23,7 +23,7 @@ import {
   RESTORE_REASONS,
   storeDefinition,
 } from "../src/index.ts";
-import { addModerators, type TestDb, testDb } from "./db.ts";
+import { addModerators, type TestDb, testDb, typical } from "./db.ts";
 
 // The moderation log (migrations/0002_moderation.sql, src/moderation.ts;
 // docs/moderation-policy.md; T-68): decisions are append-only and public,
@@ -31,18 +31,6 @@ import { addModerators, type TestDb, testDb } from "./db.ts";
 // reach a result: the board and the definition read back byte for byte.
 
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
-
-const typical = decodeElectionDefinition(
-  Buffer.from(
-    JSON.parse(
-      readFileSync(
-        new URL("../../../docs/spec/vectors/election-definition.json", import.meta.url),
-        "utf8",
-      ),
-    ).vectors.find((v: { id: string }) => v.id === "definition-typical").encoding,
-    "hex",
-  ),
-);
 
 let db: TestDb;
 let app: Sql;

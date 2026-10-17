@@ -1,4 +1,4 @@
-import { decodeElectionDefinition, encodeElectionDefinition } from "@abolishus/crypto";
+import { encodeElectionDefinition } from "@abolishus/crypto";
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { getTableConfig } from "drizzle-orm/pg-core";
@@ -18,7 +18,7 @@ import {
   reviewReports,
   storeDefinition,
 } from "../src/index.ts";
-import { type TestDb, testDb } from "./db.ts";
+import { type TestDb, testDb, typical } from "./db.ts";
 
 // Reports (migrations/0003_moderation_reports.sql, src/reports.ts;
 // docs/moderation-policy.md, Reports): a report keeps its poll and ground and
@@ -26,18 +26,6 @@ import { type TestDb, testDb } from "./db.ts";
 // never moderates anything by itself (T-68).
 
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
-
-const typical = decodeElectionDefinition(
-  Buffer.from(
-    JSON.parse(
-      readFileSync(
-        new URL("../../../docs/spec/vectors/election-definition.json", import.meta.url),
-        "utf8",
-      ),
-    ).vectors.find((v: { id: string }) => v.id === "definition-typical").encoding,
-    "hex",
-  ),
-);
 
 let db: TestDb;
 let app: Sql;

@@ -2,7 +2,6 @@ import {
   BOARD_TREE,
   checkBoard,
   checkElectionToShow,
-  decodeElectionDefinition,
   encodeElectionDefinition,
   identityBackupId,
   merkleRoot,
@@ -37,7 +36,7 @@ import {
   REMOVAL_REASONS,
   RESTORE_REASONS,
 } from "@abolishus/api-contract";
-import { addModerators, type TestDb, testDb } from "@abolishus/core/test-db";
+import { addModerators, type TestDb, testDb, typical } from "@abolishus/core/test-db";
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { spawn } from "node:child_process";
@@ -59,17 +58,6 @@ import { createApiServer, MAX_REQUEST_BODY, type RequestLogLine } from "../src/i
 const hex = (b: Uint8Array) => Buffer.from(b).toString("hex");
 const unhex = (s: string) => new Uint8Array(Buffer.from(s, "hex"));
 const b32 = () => new Uint8Array(randomBytes(32));
-
-const typical = decodeElectionDefinition(
-  unhex(
-    JSON.parse(
-      readFileSync(
-        new URL("../../../docs/spec/vectors/election-definition.json", import.meta.url),
-        "utf8",
-      ),
-    ).vectors.find((v: { id: string }) => v.id === "definition-typical").encoding,
-  ),
-);
 
 let db: TestDb;
 let app: Sql;

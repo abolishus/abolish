@@ -66,7 +66,7 @@ async function appendRaw(
   const prevLink = prev === undefined ? new Uint8Array(32) : Uint8Array.from(prev["link"]);
   const entryHash =
     override.entryHash ??
-    boardEntryHash(encodeBoardEntry({ election_id: id, index: idx, segment, payload }, 1));
+    boardEntryHash(encodeBoardEntry({ election_id: id, index: idx, segment, payload }, 5));
   const link = override.link ?? chainLink(prevLink, entryHash);
   await insertRow(id, idx, segment, payload, entryHash, prevLink, link);
   return { idx, entryHash };
@@ -191,7 +191,7 @@ describe("auditBoard", () => {
     await appendEntry(app, id, 0, ballot(0));
     await appendEntry(app, id, 0, ballot(1));
     expect(await auditBoard(app, id)).toBe(2);
-    // appendRaw hashes under version 1: right for a version-1 board, wrong here.
+    // appendRaw hashes under version 5: right for newElection's default board, wrong here.
     const row = await appendRaw(id, ballot(2));
     await storeSubtrees(id, row.idx, row.entryHash);
     expect(await auditFailure(id)).toEqual(["entry-hash-mismatch", 2]);

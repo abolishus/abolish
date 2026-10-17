@@ -2,6 +2,8 @@ import {
   decodeElectionDefinition,
   electionDefinitionHash,
   encodeElectionDefinition,
+  profileCombinationRule,
+  RECORD_TYPES,
 } from "@abolishus/crypto";
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -17,12 +19,13 @@ import {
   readDefinition,
   storeDefinition,
 } from "../src/index.ts";
-import { type TestDb, testDb } from "./db.ts";
+import { type TestDb, testDb, typical } from "./db.ts";
 
 // Election definitions (migrations/0001_election_definitions.sql and
 // src/definitions.ts; T-34): only definitions @abolishus/crypto decodes and
-// accepts as well formed are stored, each election has one for good, and
-// nobody, the owner included, can change or remove it.
+// accepts as well formed, under a profile 2.3 passes, are stored, each
+// election has one for good, and nobody, the owner included, can change or
+// remove it.
 
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
 
@@ -39,10 +42,8 @@ const vectors: Vector[] = JSON.parse(
     "utf8",
   ),
 ).vectors;
-const vector = (id: string) => vectors.find((v) => v.id === id)!;
-const typical = decodeElectionDefinition(Buffer.from(vector("definition-typical").encoding, "hex"));
 
-/** The typical vector's definition under a fresh election ID. */
+/** `typical` (the typical vector under a profile 2.3 passes) under a fresh election ID. */
 const fresh = (electionId = new Uint8Array(randomBytes(32))) =>
   encodeElectionDefinition({ ...typical, election_id: electionId });
 
@@ -145,15 +146,94 @@ describe("storeDefinition", () => {
     expect(await readDefinition(app, id)).toEqual(bytes);
   });
 
-  test("matches the published vector's hash", async () => {
-    const v = vector("definition-typical");
-    const bytes = Buffer.from(v.encoding, "hex");
-    const id = decodeElectionDefinition(bytes).election_id;
-    // The vector's election ID may already be stored by another test run in
-    // this schema; a repeat of the same bytes is a no-op either way.
-    const stored = await storeDefinition(app, new Uint8Array(bytes));
-    expect(Buffer.from(stored.definitionHash).toString("hex")).toBe(v.hash);
-    expect(await readDefinition(app, id)).toEqual(new Uint8Array(bytes));
+  test("refuses the published vectors, whose profiles 2.3 fails, with nothing stored", async () => {
+    // No well-formed version-1 vector pins board-entry version 5 and
+    // contract-event version 7, so none has close statements and the full
+    // event archive on its board (verifier 2.3; T-35, T-50); the maximal
+    // one's pins are versions this release doesn't read.
+    const good = vectors.filter((v) => v.hash !== undefined && v.illFormed === undefined);
+    expect(good.length).toBeGreaterThan(0);
+    for (const v of good) {
+      const decoded = decodeElectionDefinition(new Uint8Array(Buffer.from(v.encoding, "hex")));
+      const id = new Uint8Array(randomBytes(32));
+      const e = await storeDefinition(
+        app,
+        encodeElectionDefinition({ ...decoded, election_id: id }),
+      ).catch((x: unknown) => x);
+      expect((e as DefinitionError).code, v.id).toBe("profile");
+      expect((e as DefinitionError).cause, v.id).toBe(
+        v.id === "definition-maximal" ? "unsupported-version" : "profile-combination",
+      );
+      expect(await readDefinition(app, id), v.id).toBeUndefined();
+    }
+  });
+
+  test("refuses a profile 2.3 fails or can't read, naming the rule", async () => {
+    // Version 1's profile is board-entry 5, contract-event 7, ballot,
+    // spoiled-ballot opening, tally-opening and display-text 1 (verifier 2.3).
+    const cases: [number, number, string][] = [
+      [RECORD_TYPES.boardEntry, 1, "profile-combination"],
+      [RECORD_TYPES.boardEntry, 4, "profile-combination"],
+      [RECORD_TYPES.boardEntry, 6, "profile-combination"],
+      [RECORD_TYPES.boardEntry, 7, "profile-combination"],
+      [RECORD_TYPES.boardEntry, 9, "unsupported-version"],
+      [RECORD_TYPES.contractEvent, 6, "profile-combination"],
+      [RECORD_TYPES.contractEvent, 9, "unsupported-version"],
+      [RECORD_TYPES.ballot, 2, "profile-combination"],
+      [RECORD_TYPES.spoiledBallotOpening, 2, "profile-combination"],
+      [RECORD_TYPES.tallyOpening, 2, "profile-combination"],
+      [RECORD_TYPES.displayText, 2, "profile-combination"],
+    ];
+    const before = await rows();
+    for (const [type, version, rule] of cases) {
+      const pins = typical.profile.pins.map((p) =>
+        p.record_type === type ? { ...p, version } : p,
+      );
+      const bytes = encodeElectionDefinition({
+        ...typical,
+        election_id: new Uint8Array(randomBytes(32)),
+        profile: { ...typical.profile, pins },
+      });
+      const e = await storeDefinition(app, bytes).catch((x: unknown) => x);
+      expect((e as DefinitionError).code, `${type}@${version}`).toBe("profile");
+      expect((e as DefinitionError).cause, `${type}@${version}`).toBe(rule);
+    }
+    expect(await rows()).toBe(before);
+  });
+
+  test("stores a definition exactly when 2.3 passes its profile", async () => {
+    // The definition's own pin is fixed by decoding, so it never reaches 2.3.
+    const types = typical.profile.pins
+      .map((p) => p.record_type)
+      .filter((t) => t !== RECORD_TYPES.electionDefinition);
+    await fc.assert(
+      fc.asyncProperty(
+        fc.constantFrom(...types),
+        fc.integer({ min: 1, max: 0xff }),
+        async (type, version) => {
+          const pins = typical.profile.pins.map((p) =>
+            p.record_type === type ? { ...p, version } : p,
+          );
+          const decoded = {
+            ...typical,
+            election_id: new Uint8Array(randomBytes(32)),
+            profile: { ...typical.profile, pins },
+          };
+          const rule = profileCombinationRule(decoded);
+          const stored = await storeDefinition(app, encodeElectionDefinition(decoded)).then(
+            () => undefined,
+            (e: unknown) => e,
+          );
+          if (rule === undefined) expect(stored).toBeUndefined();
+          else {
+            expect((stored as DefinitionError).code).toBe("profile");
+            expect((stored as DefinitionError).cause).toBe(rule);
+          }
+          expect(await hasDefinition(app, decoded.election_id)).toBe(rule === undefined);
+        },
+      ),
+      { numRuns: Math.min(numRuns, 200) },
+    );
   });
 
   test("storing the same bytes again is a no-op", async () => {

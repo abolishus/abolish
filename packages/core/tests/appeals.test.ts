@@ -1,4 +1,4 @@
-import { decodeElectionDefinition, encodeElectionDefinition } from "@abolishus/crypto";
+import { encodeElectionDefinition } from "@abolishus/crypto";
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { getTableConfig, type PgTable } from "drizzle-orm/pg-core";
@@ -24,7 +24,7 @@ import {
   retireModerator,
   storeDefinition,
 } from "../src/index.ts";
-import { addModerators, newAccount, type TestDb, testDb } from "./db.ts";
+import { addModerators, newAccount, type TestDb, testDb, typical } from "./db.ts";
 
 // Moderators' accounts and creators' appeals (migrations/0014, src/appeals.ts;
 // docs/moderation-policy.md, Appeals and Moderators; T-68, T-10): a creator
@@ -32,18 +32,6 @@ import { addModerators, newAccount, type TestDb, testDb } from "./db.ts";
 // create the poll reviews it, and only an upheld appeal writes the log.
 
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
-
-const typical = decodeElectionDefinition(
-  Buffer.from(
-    JSON.parse(
-      readFileSync(
-        new URL("../../../docs/spec/vectors/election-definition.json", import.meta.url),
-        "utf8",
-      ),
-    ).vectors.find((v: { id: string }) => v.id === "definition-typical").encoding,
-    "hex",
-  ),
-);
 
 let db: TestDb;
 let app: Sql;

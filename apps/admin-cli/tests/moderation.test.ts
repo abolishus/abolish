@@ -1,8 +1,7 @@
 import { fileAppeal, newAccountId, report, storeDefinition } from "@abolishus/core";
-import { addModerators, newAccount, type TestDb, testDb } from "@abolishus/core/test-db";
-import { decodeElectionDefinition, encodeElectionDefinition } from "@abolishus/crypto";
+import { addModerators, newAccount, type TestDb, testDb, typical } from "@abolishus/core/test-db";
+import { encodeElectionDefinition } from "@abolishus/crypto";
 import { randomBytes } from "node:crypto";
-import { readFileSync } from "node:fs";
 import type { Sql } from "postgres";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import { run } from "../src/index.ts";
@@ -11,18 +10,6 @@ import { run } from "../src/index.ts";
 // queue a page at a time (T-52), review only what the moderator saw, record
 // decisions through core's rules (T-68), and print the public log without the
 // moderator.
-
-const typical = decodeElectionDefinition(
-  Buffer.from(
-    JSON.parse(
-      readFileSync(
-        new URL("../../../docs/spec/vectors/election-definition.json", import.meta.url),
-        "utf8",
-      ),
-    ).vectors.find((v: { id: string }) => v.id === "definition-typical").encoding,
-    "hex",
-  ),
-);
 
 let db: TestDb;
 let app: Sql;

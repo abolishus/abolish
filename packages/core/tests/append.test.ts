@@ -175,24 +175,24 @@ describe("appendEntry", () => {
 
   test("encodes each board under the board-entry version its definition pins", async () => {
     const v4 = await newElection(app, 4);
-    const v1 = await newElection(app);
+    const v5 = await newElection(app);
     const payloads = [ballot(1), opening(1)];
-    for (const id of [v4, v1]) for (const p of payloads) await appendEntry(app, id, 0, p);
+    for (const id of [v4, v5]) for (const p of payloads) await appendEntry(app, id, 0, p);
     const board = checkBoard(v4, await readBoard(app, v4), 4);
     const rows = await stored(v4);
     expect(rows.map((r) => Uint8Array.from(r["entry_hash"]))).toEqual(board.entryHashes);
     expect(rows.map((r) => Uint8Array.from(r["link"]))).toEqual(board.links);
     // The version byte is in every entry hashed, so a board read under another
     // version matches nothing stored (T-23, T-34).
-    const asV1 = payloads.map((payload, i) =>
+    const asV5 = payloads.map((payload, i) =>
       boardEntryHash(
-        encodeBoardEntry({ election_id: v4, index: BigInt(i), segment: 0, payload }, 1),
+        encodeBoardEntry({ election_id: v4, index: BigInt(i), segment: 0, payload }, 5),
       ),
     );
-    expect(board.entryHashes.some((h, i) => equalBytes(h, asV1[i]!))).toBe(false);
+    expect(board.entryHashes.some((h, i) => equalBytes(h, asV5[i]!))).toBe(false);
     const entries = await readBoard(app, v4);
-    expect(() => checkBoard(v4, entries, 1)).toThrow(/profile-mismatch/);
-    expect(checkBoard(v1, await readBoard(app, v1), 1).entries).toHaveLength(2);
+    expect(() => checkBoard(v4, entries, 5)).toThrow(/profile-mismatch/);
+    expect(checkBoard(v5, await readBoard(app, v5), 5).entries).toHaveLength(2);
   });
 
   test("refuses to start a board without a stored definition, or under a version it can't write", async () => {

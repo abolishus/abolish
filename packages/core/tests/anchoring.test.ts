@@ -77,12 +77,12 @@ async function failsWith(query: PromiseLike<unknown>): Promise<string> {
 
 /** The verifier's checkpoint of the stored board after segment `s`. */
 async function expected(e: Uint8Array, s: number): Promise<Checkpoint | undefined> {
-  return checkpointOf(checkBoard(e, await readBoard(app, e), 1), s);
+  return checkpointOf(checkBoard(e, await readBoard(app, e), 5), s);
 }
 
 /** A board with entries in each of `segments`, in order, of an election naming `anchor`. */
 async function boardFor(anchor: { address: Uint8Array }, ...segments: number[]) {
-  const e = await newElection(app, 1, anchor.address);
+  const e = await newElection(app, 5, anchor.address);
   for (const [i, s] of segments.entries()) await appendEntry(app, e, s, ballot(i));
   return e;
 }
@@ -377,7 +377,7 @@ describe("takeCheckpoints", () => {
     // After the last taken checkpoint (2), not after `through` (3): period 3
     // added nothing, so it took none, and an entry in it is still anchorable.
     expect(raised.entry).toEqual((await readBoard(app, e))[2]);
-    expect(checkBoard(e, await readBoard(app, e), 1).entries[2]!.segment).toBe(3);
+    expect(checkBoard(e, await readBoard(app, e), 5).entries[2]!.segment).toBe(3);
     expect((await appendEntry(app, e, 3, ballot(10))).index).toBe(3n);
     expect((await takeCheckpoints(app, e, 3)).map((c) => c.segment)).toEqual([3]);
     // Every checkpoint taken stays the verifier's for the final board.
@@ -408,7 +408,7 @@ describe("takeCheckpoints", () => {
             );
             const board = await readBoard(app, e);
             for (const c of await readCheckpoints(app, e))
-              expect(c).toEqual(checkpointOf(checkBoard(e, board, 1), c.segment));
+              expect(c).toEqual(checkpointOf(checkBoard(e, board, 5), c.segment));
           },
         ),
         { numRuns: Math.min(numRuns, 50) },
@@ -609,7 +609,7 @@ describe("anchorBoards", () => {
           ),
           async (steps) => {
             const chain = new ModelAnchor();
-            const e = await newElection(app, 1, chain.address);
+            const e = await newElection(app, 5, chain.address);
             chain.time = 10n * HOUR;
             let entries = 0;
             for (const [pause, appends] of steps) {
@@ -635,7 +635,7 @@ describe("anchorBoards", () => {
             const verified = verifyBoard(
               e,
               board,
-              1,
+              5,
               anchors,
               { ...CLOCK, lastSegment: 0xffffffff },
               chain.time,

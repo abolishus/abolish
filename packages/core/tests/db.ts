@@ -1,5 +1,6 @@
 import {
   decodeElectionDefinition,
+  type ElectionDefinition,
   encodeElectionDefinition,
   RECORD_TYPES,
 } from "@abolishus/crypto";
@@ -52,7 +53,7 @@ export async function testDb(): Promise<TestDb> {
   };
 }
 
-const typical = decodeElectionDefinition(
+const vector = decodeElectionDefinition(
   Buffer.from(
     (
       JSON.parse(
@@ -66,30 +67,54 @@ const typical = decodeElectionDefinition(
   ),
 );
 
+const repin = (
+  d: ElectionDefinition,
+  versions: ReadonlyMap<number, number>,
+): ElectionDefinition => ({
+  ...d,
+  profile: {
+    ...d.profile,
+    pins: d.profile.pins.map((p) => ({ ...p, version: versions.get(p.record_type) ?? p.version })),
+  },
+});
+
 /**
- * A fresh election with the typical vector's definition stored, so it can
- * have a board: entries are encoded under the board-entry version a stored
- * definition pins, `boardVersion` here (the vector's own 1 by default).
+ * The typical vector's definition under the profile 2.3 asks of definition
+ * version 1: board-entry version 5 and contract-event version 7 in place of
+ * the vector's 1s, so `storeDefinition` stores it.
+ */
+export const typical: ElectionDefinition = repin(
+  vector,
+  new Map([
+    [RECORD_TYPES.boardEntry, 5],
+    [RECORD_TYPES.contractEvent, 7],
+  ]),
+);
+
+/**
+ * A fresh election with `typical` stored, so it can have a board: entries
+ * are encoded under the board-entry version a stored definition pins,
+ * `boardVersion` here (typical's own 5 by default). Any other version is a
+ * profile 2.3 fails, which `storeDefinition` refuses, so that definition is
+ * inserted around it, as only the board store's handling of the version is
+ * under test.
  */
 export async function newElection(
   sql: Sql,
-  boardVersion = 1,
+  boardVersion = 5,
   /** Another L1 anchor than the vector's. */
   l1Anchor: Uint8Array = typical.l1_anchor,
 ): Promise<Uint8Array> {
   const electionId = new Uint8Array(randomBytes(32));
-  const pins = typical.profile.pins.map((p) =>
-    p.record_type === RECORD_TYPES.boardEntry ? { ...p, version: boardVersion } : p,
-  );
-  await storeDefinition(
-    sql,
-    encodeElectionDefinition({
-      ...typical,
-      election_id: electionId,
-      l1_anchor: l1Anchor,
-      profile: { ...typical.profile, pins },
-    }),
-  );
+  const definition = encodeElectionDefinition({
+    ...repin(typical, new Map([[RECORD_TYPES.boardEntry, boardVersion]])),
+    election_id: electionId,
+    l1_anchor: l1Anchor,
+  });
+  if (boardVersion === 5) await storeDefinition(sql, definition);
+  else
+    await sql`INSERT INTO election_definitions (election_id, definition)
+      VALUES (${electionId}, ${definition})`;
   return electionId;
 }
 

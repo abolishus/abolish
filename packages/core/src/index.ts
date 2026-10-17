@@ -98,6 +98,7 @@ export {
   boardCheckpoints,
   boardEntries,
   boardSubtrees,
+  ceremonyStubs,
   displayTexts,
   electionDefinitions,
   electionRegistrations,
@@ -188,6 +189,8 @@ export {
   deletePollDraft,
   type DraftOption,
   type DraftQuestion,
+  draftDisplayText,
+  draftQuestions,
   listAccountPolls,
   MAX_CLOSE_SECONDS,
   MAX_DRAFT_TEXT,
@@ -252,6 +255,15 @@ export {
   rootPolls,
   type StoredTierElectorate,
 } from "./poll-roots.ts";
+export {
+  POLL_DEFINITION_PROFILE,
+  type PollStubDeployment,
+  pollStubDeploymentRule,
+  type PollStubReport,
+  type StubFailure,
+  stubPolls,
+  STUBS_PER_RUN,
+} from "./poll-stubs.ts";
 export {
   MAX_REPORT_QUEUE,
   type PendingReport,

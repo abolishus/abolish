@@ -11,7 +11,7 @@ import { electionDefinitions, electionRegistrations } from "./definitions.ts";
 import { displayTexts } from "./display-texts.ts";
 import { identityBackups } from "./identity-backups.ts";
 import { moderationActions, moderationReports } from "./moderation.ts";
-import { accountPolls, pollCreationTxs } from "./polls.ts";
+import { accountPolls, ceremonyStubs, pollCreationTxs } from "./polls.ts";
 
 export {
   accountAppeals,
@@ -26,6 +26,7 @@ export {
   boardCheckpoints,
   boardEntries,
   boardSubtrees,
+  ceremonyStubs,
   displayTexts,
   electionDefinitions,
   electionRegistrations,
@@ -70,6 +71,7 @@ export const TABLE_CLASSES = {
   ],
   identity: ["identity_backups"],
   operational: [
+    "ceremony_stubs",
     "display_texts",
     "moderation_actions",
     "moderation_reports",

@@ -20,12 +20,14 @@
 import {
   definitionQuestionsRule,
   DISPLAY_TEXT_V2_LIMITS,
+  type DisplayTextV2,
   type DisplayTextV2Rule,
   displayTextV2ShapeRule,
   EncodeError,
   encodeDisplayTextV2,
   PARAMETERS,
   QUESTION_METHODS,
+  type Question,
   TIERS,
 } from "@abolishus/crypto";
 import { and, asc, desc, eq, gt, inArray, sql as q } from "drizzle-orm";
@@ -156,30 +158,25 @@ const strings = (d: PollDraft) => [
   ]),
 ];
 
-/**
- * The first rule `draft` breaks, or `undefined`. With `now` (UNIX seconds),
- * also whether it can be submitted then: it must close at least
- * `MIN_OPEN_SECONDS` after the earliest opening, `SETUP_SECONDS` away, and
- * within `MAX_CLOSE_SECONDS`.
- */
-export function pollDraftProblem(draft: PollDraft, now?: bigint): PollDraftProblem | undefined {
-  // A lone surrogate would be encoded as U+FFFD, so the text registered
-  // would differ from the draft the author saw (T-34); U+0000 couldn't be
-  // stored at all.
-  if (strings(draft).some((s) => UNSTORABLE.test(s))) return { rule: "text" };
-  // The codec bounds the list; past it, the rule's own message is clearer.
-  if (draft.questions.length > DISPLAY_TEXT_V2_LIMITS.maxQuestions) return { rule: "questions" };
-  const questions = draft.questions.map((q) => ({
+/** The draft's questions as definition version 5 states them. */
+export function draftQuestions(draft: PollDraft): Question[] {
+  return draft.questions.map((q) => ({
     method: QUESTION_METHODS.selection,
     option_count: q.options.length,
     min_selections: q.minSelections,
     max_selections: q.maxSelections,
   }));
-  const failure = definitionQuestionsRule(questions);
-  if (failure !== undefined) return failure;
+}
+
+/**
+ * The draft as display text version 2 under `salt`: its one translation,
+ * field for field, so what the definition commits to is exactly what the
+ * author wrote (T-34).
+ */
+export function draftDisplayText(draft: PollDraft, salt: Uint8Array): DisplayTextV2 {
   const utf8 = (s: string) => new TextEncoder().encode(s);
-  const text = {
-    salt: new Uint8Array(PARAMETERS.DISPLAY_TEXT_SALT_LEN),
+  return {
+    salt,
     translations: [
       {
         language: utf8(draft.language),
@@ -196,6 +193,25 @@ export function pollDraftProblem(draft: PollDraft, now?: bigint): PollDraftProbl
       },
     ],
   };
+}
+
+/**
+ * The first rule `draft` breaks, or `undefined`. With `now` (UNIX seconds),
+ * also whether it can be submitted then: it must close at least
+ * `MIN_OPEN_SECONDS` after the earliest opening, `SETUP_SECONDS` away, and
+ * within `MAX_CLOSE_SECONDS`.
+ */
+export function pollDraftProblem(draft: PollDraft, now?: bigint): PollDraftProblem | undefined {
+  // A lone surrogate would be encoded as U+FFFD, so the text registered
+  // would differ from the draft the author saw (T-34); U+0000 couldn't be
+  // stored at all.
+  if (strings(draft).some((s) => UNSTORABLE.test(s))) return { rule: "text" };
+  // The codec bounds the list; past it, the rule's own message is clearer.
+  if (draft.questions.length > DISPLAY_TEXT_V2_LIMITS.maxQuestions) return { rule: "questions" };
+  const questions = draftQuestions(draft);
+  const failure = definitionQuestionsRule(questions);
+  if (failure !== undefined) return failure;
+  const text = draftDisplayText(draft, new Uint8Array(PARAMETERS.DISPLAY_TEXT_SALT_LEN));
   try {
     if (encodeDisplayTextV2(text).length > MAX_DRAFT_TEXT) return { rule: "too-long" };
   } catch (e) {

@@ -85,15 +85,31 @@ contract RegistrationEntryPointTest is GroupTestBase {
     }
 
     /// T-62: nothing can later change what `execute` does. The account has
-    /// no upgrade entry, no delegatecall and no receive, and holds nothing.
-    function test_TheAccountCanBeNeitherUpgradedNorFunded() public {
+    /// no upgrade entry and no fallback, and its code has no opcode that
+    /// could run other code in its place, create a contract, end it or touch
+    /// storage, so its validation reads only immutables (ERC-7562).
+    function test_TheAccountCanNeitherChangeNorRunOtherCode() public {
         (bool ok,) = address(account)
             .call(abi.encodeWithSignature("upgradeToAndCall(address,bytes)", address(1), ""));
         assertTrue(!ok, "upgradeToAndCall");
+        (ok,) = address(account).call(hex"deadbeef");
+        assertTrue(!ok, "unknown selector");
         vm.deal(address(this), 1 ether);
         (ok,) = address(account).call{value: 1}("");
         assertTrue(!ok, "plain transfer");
-        assertEq(address(account).balance, 0, "balance");
+        bytes memory code = address(account).code;
+        assertTrue(code.length > 23, "not a delegation or a minimal proxy");
+        for (uint256 i; i < code.length; i++) {
+            uint8 op = uint8(code[i]);
+            // PUSH1 to PUSH32 carry 1 to 32 bytes of data, immutables among them.
+            if (op >= 0x60 && op <= 0x7f) {
+                i += op - 0x5f;
+                continue;
+            }
+            assertTrue(op != 0x54 && op != 0x55 && op != 0x5c && op != 0x5d, "storage opcode");
+            assertTrue(op != 0xf0 && op != 0xf5, "create opcode");
+            assertTrue(op != 0xf2 && op != 0xf4 && op != 0xff, "code-replacing opcode");
+        }
     }
 
     function test_OnlyTheEntryPointRunsTheAccount() public {
@@ -105,6 +121,21 @@ contract RegistrationEntryPointTest is GroupTestBase {
         vm.prank(vm.addr(OWNER_KEY));
         vm.expectRevert(bytes("account: not from EntryPoint"));
         account.execute(address(registry), 0, call);
+        RegistrationAccountCall[] memory calls = new RegistrationAccountCall[](1);
+        calls[0] = RegistrationAccountCall(address(registry), 0, call);
+        bytes memory batch =
+            abi.encodeWithSignature("executeBatch((address,uint256,bytes)[])", calls);
+        address[2] memory callers = [vm.addr(OWNER_KEY), address(0xCA11)];
+        for (uint256 i; i < callers.length; i++) {
+            vm.prank(callers[i]);
+            (bool ok, bytes memory ret) = address(account).call(batch);
+            assertTrue(!ok, "executeBatch ran");
+            assertEq(
+                keccak256(ret),
+                keccak256(abi.encodeWithSignature("Error(string)", "account: not from EntryPoint")),
+                "executeBatch refusal"
+            );
+        }
     }
 
     // --- the operation's hash --------------------------------------------------
@@ -235,7 +266,7 @@ contract RegistrationEntryPointTest is GroupTestBase {
         _expectFailed(op, "AA24 signature error");
     }
 
-    function test_RefusesAMalformedOrHighSSignature() public {
+    function test_RefusesAMalformedHighSOrOtherVSignature() public {
         PackedUserOperation memory op = _signed(_op(_execute(_addMembersCall())));
         bytes memory good = op.signature;
         op.signature = "";
@@ -245,6 +276,12 @@ contract RegistrationEntryPointTest is GroupTestBase {
         (bytes32 r, bytes32 s, uint8 v) = _split(good);
         op.signature = abi.encodePacked(r, bytes32(N - uint256(s)), v == 27 ? uint8(28) : 27);
         _expectFailed(op, "AA24 signature error");
+        // A raw recovery id, or an EIP-155-style `v`, in place of 27 or 28.
+        uint8[2] memory others = [v - 27, v + 8];
+        for (uint256 i; i < others.length; i++) {
+            op.signature = abi.encodePacked(r, s, others[i]);
+            _expectFailed(op, "AA24 signature error");
+        }
     }
 
     function test_RefusesASignatureForAnotherOperation() public {

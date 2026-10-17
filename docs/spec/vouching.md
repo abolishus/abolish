@@ -181,7 +181,7 @@ So batching cuts an honest replay's proof checks to about a sixth of checking th
 
 ## Prover rules
 
-These bind the ballot client (P2-6, P2-8), and part 3 builds them:
+These bind the ballot client (P2-6, P2-8), and part 3 builds them. How the vouchee's addition reaches the registry through our API, or directly, is [[tier1-relay]]'s:
 
 - **The root.** Prove only against a Tier 2 root the client rebuilt itself from the group's additions ([[membership]], Owned elsewhere), at the newest block on the root grid that the L2 chain derived from L1 data contains, so the root can't change under the vouch short of an L1 reorganisation ([[0004-l2-choice]], Finality); refuse to vouch once that block is too old for the vouchee to submit within `VOUCH_ROOT_WINDOW`; check the root again once that block's L1 data is final, and tell the vouchee to ask for a new vouch if it changed, as for rolling steps ([[membership]], Root clock and steps).
 - **The slot.** Pick an unused `j` uniformly at random from `[0, L)` rather than counting up, so `j` doesn't reveal how many vouches the voucher has made; keep a slot spent until its slot nullifier is consumed by a counted addition, or until L2 block `root_block + VOUCH_ROOT_WINDOW` is final, after which the vouch can never count; then check whether it was consumed by fetching every consumed slot nullifier (or the whole board) and matching its own locally, never by asking about its own values (T-10, T-22); never reuse a slot whose slot nullifier appears in any logged addition, counted or not, since a second vouch from it would show the same `ν_S` and `j` beside a second vouchee's `C_V` and link the two vouchees to one voucher (T-22); never store `C_V` next to the slot spent ([[0014-tier1-vouching]], Slots).

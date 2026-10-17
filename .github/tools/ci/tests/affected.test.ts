@@ -284,6 +284,21 @@ describe("gatedPackageViolations", () => {
     ).toHaveLength(2);
   });
 
+  test("the membership prover is gated like the rest", () => {
+    expect(
+      gatedPackageViolations(
+        [pkg("@abolishus/membership-prover", "packages/membership-prover")],
+        none,
+      ),
+    ).toEqual([]);
+    expect(
+      gatedPackageViolations([pkg("@abolishus/membership-prover", "apps/ballot/prover")], none),
+    ).toHaveLength(1);
+    expect(gatedPackageViolations([], (p) => p === "packages/membership-prover")).toEqual([
+      "packages/membership-prover: must be a real directory, not a symlink",
+    ]);
+  });
+
   test("a gated root that is a symlink fails", () => {
     expect(gatedPackageViolations([], (p) => p === "packages/verifier")).toEqual([
       "packages/verifier: must be a real directory, not a symlink",

@@ -1,12 +1,13 @@
 // What the ballot client's build may contain. The client is the only place a
 // plaintext vote exists, so its bundle carries no third-party runtime code
 // beyond React, the shadcn/ui runtime and the @noble/* libraries
-// @abolishus/crypto is built on, no analytics SDK, no inline script and no
-// other origin, and its CSP forbids loading anything else (T-43, T-67, T-41;
+// @abolishus/crypto is built on (and snarkjs's, in the prover worker alone),
+// no analytics SDK, no inline script and no other origin, and its CSP forbids loading anything else (T-43, T-67, T-41;
 // AGENTS.md, Dependencies). The test builds the app itself, so it judges the
 // real output, Web Worker included. The owner-reviewed copy of these rules in
 // .github/tools/ci/src/ballot.ts is the gate (T-59); this one repeats it.
 
+import { createHash } from "node:crypto";
 import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative, sep } from "node:path";
@@ -17,7 +18,7 @@ import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 
 import { BALLOT_CSP, parseCsp } from "./csp.ts";
 
-const CONNECT_ORIGINS = BALLOT_CSP["connect-src"] ?? [];
+const CONNECT_ORIGINS = (BALLOT_CSP["connect-src"] ?? []).filter((s) => s.startsWith("https://"));
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const repo = join(root, "..", "..");
@@ -57,6 +58,28 @@ const WORKSPACE_SOURCES = [
   "packages/ui/src/",
   "packages/crypto/dist/",
 ];
+
+/**
+ * Code only the prover worker may bundle (ADR 0009): snarkjs's and
+ * ffjavascript's prebuilt browser builds, each the one file named here, and
+ * the gated adapter around them. Neither the page nor the ballot worker runs
+ * any of it.
+ */
+const PROVER_PACKAGES = new Map([
+  ["snarkjs", "build/browser.esm.js"],
+  ["ffjavascript", "build/browser.esm.js"],
+]);
+const PROVER_SOURCES = ["packages/membership-prover/src/"];
+
+/** The prover's key and witness calculator, Semaphore 4.13.0's depth-32 ones, by sha256. */
+const PROVER_ARTIFACTS = {
+  zkey: "2e5f7a9f880c337134ee4c7fc4e53573813b4c9c6ae46221c0b56e7992304650",
+  wasm: "528333d1247f585d33c5a40f46053fb7f8b1f5b8b8fa29118abfc47a60921dc5",
+};
+
+/** The two workers' scripts, by the name Vite gives each after its entry file. */
+const BALLOT_WORKER = /^assets\/worker-[\w-]+\.js$/;
+const PROVER_WORKER = /^assets\/prover-[\w-]+\.js$/;
 
 /**
  * APIs that reach the network or load code, banned from every script the page
@@ -117,7 +140,15 @@ const ANALYTICS_MARKERS = [
   /\bsendBeacon\b/,
 ];
 
+/** One build: the page's, or a Web Worker's, with its chunks and every module it resolved. */
+interface Build {
+  readonly worker: boolean;
+  readonly chunks: string[];
+  readonly modules: string[];
+}
+
 let outDir: string;
+let builds: Build[];
 let moduleIds: string[];
 let files: Map<string, string>;
 
@@ -129,16 +160,36 @@ function packageOf(id: string): string | undefined {
   return scope?.startsWith("@") ? `${scope}/${name}` : scope;
 }
 
+/** A module id's path inside its npm package. */
+function fileInPackage(id: string, pkg: string): string {
+  const marker = `node_modules${sep}${pkg.split("/").join(sep)}${sep}`;
+  return id
+    .slice(id.lastIndexOf(marker) + marker.length)
+    .split(sep)
+    .join("/");
+}
+
+const isProver = (b: Build) =>
+  b.worker && b.chunks.length === 1 && PROVER_WORKER.test(b.chunks[0] ?? "");
+
 // A full production build of the client and its worker: seconds locally,
 // past the 10-second default hook timeout on a busy CI runner.
 beforeAll(async () => {
   outDir = await mkdtemp(join(tmpdir(), "abolish-ballot-"));
-  const ids: string[] = [];
-  const collect: Plugin = {
-    name: "collect-module-ids",
-    buildEnd() {
-      ids.push(...this.getModuleIds());
-    },
+  const reports: Build[] = [];
+  const collect = (worker: boolean): Plugin => {
+    const report: Build = { worker, chunks: [], modules: [] };
+    reports.push(report);
+    return {
+      name: "collect-module-ids",
+      buildEnd() {
+        report.modules.push(...this.getModuleIds());
+      },
+      generateBundle(_, bundle) {
+        for (const output of Object.values(bundle))
+          if (output.type === "chunk") report.chunks.push(output.fileName);
+      },
+    };
   };
   // The test runner sets NODE_ENV=test, which would make Vite bundle React's
   // development build; `vp build` runs with production.
@@ -150,15 +201,16 @@ beforeAll(async () => {
       mode: "production",
       logLevel: "silent",
       build: { outDir, emptyOutDir: true },
-      plugins: [collect],
-      // Vite bundles a worker in a build of its own that runs only these.
-      worker: { plugins: () => [collect] },
+      plugins: [collect(false)],
+      // Vite bundles each worker in a build of its own that runs only these.
+      worker: { plugins: () => [collect(true)] },
     });
   } finally {
     if (nodeEnv === undefined) delete process.env["NODE_ENV"];
     else process.env["NODE_ENV"] = nodeEnv;
   }
-  moduleIds = ids;
+  builds = reports;
+  moduleIds = reports.flatMap((b) => b.modules);
   files = new Map();
   for (const entry of await readdir(outDir, { recursive: true, withFileTypes: true }))
     if (entry.isFile()) {
@@ -181,31 +233,63 @@ const html = () => {
 describe("bundle contents", () => {
   test("bundles no npm package's code but React's, the shadcn/ui runtime's and @noble/*", () => {
     const packages = new Set(moduleIds.map(packageOf).filter((p) => p !== undefined));
-    expect([...packages].filter((p) => !RUNTIME_PACKAGES.has(p))).toEqual([]);
+    expect(
+      [...packages].filter((p) => !RUNTIME_PACKAGES.has(p) && !PROVER_PACKAGES.has(p)),
+    ).toEqual([]);
     // The list isn't vacuous: React is really there.
     expect(packages.has("react-dom")).toBe(true);
     // ...and the worker's modules were seen: @noble/curves comes in only there.
     expect(packages.has("@noble/curves")).toBe(true);
   });
 
+  test("bundles snarkjs's and ffjavascript's browser builds, and their adapter, only in the prover worker", () => {
+    const misplaced = builds.flatMap((b) =>
+      b.modules
+        .filter((id) => {
+          const pkg = packageOf(id);
+          const file = pkg === undefined ? undefined : PROVER_PACKAGES.get(pkg);
+          if (pkg !== undefined && file !== undefined)
+            return !isProver(b) || fileInPackage(id, pkg) !== file;
+          const path = relative(repo, id).split(sep).join("/");
+          return !isProver(b) && PROVER_SOURCES.some((allowed) => path.startsWith(allowed));
+        })
+        .map((id) => `${b.chunks.join(", ")}: ${id}`),
+    );
+    expect(misplaced).toEqual([]);
+  });
+
   test("bundles workspace code only from the ballot app, @abolishus/ui and @abolishus/crypto's build", () => {
-    const outside = moduleIds
-      .filter((id) => packageOf(id) === undefined)
-      .map((id) => relative(repo, id).split(sep).join("/"))
-      .filter((id) => !WORKSPACE_SOURCES.some((allowed) => id.startsWith(allowed)));
+    const outside = builds.flatMap((b) =>
+      b.modules
+        .filter((id) => packageOf(id) === undefined)
+        .map((id) => relative(repo, id).split(sep).join("/"))
+        .filter(
+          (id) =>
+            !WORKSPACE_SOURCES.some((allowed) => id.startsWith(allowed)) &&
+            !(isProver(b) && PROVER_SOURCES.some((allowed) => id.startsWith(allowed))),
+        ),
+    );
     expect(outside).toEqual([]);
   });
 
-  test("emits only the page, scripts, styles and self-hosted fonts", () => {
+  test("emits only the page, scripts, styles, self-hosted fonts and the prover's pinned artifacts", () => {
     const unexpected = [...files.keys()].filter(
       (name) =>
         name !== "index.html" &&
         name !== "third-party-licenses.md" &&
         name !== "font-licenses.txt" &&
         !/^assets\/[\w-]+\.(js|css)$/.test(name) &&
-        !/^assets\/(oxanium|jetbrains-mono)-[\w-]+\.woff2?$/.test(name),
+        !/^assets\/(oxanium|jetbrains-mono)-[\w-]+\.woff2?$/.test(name) &&
+        !/^assets\/[\w-]+\.(zkey|wasm)$/.test(name),
     );
     expect(unexpected).toEqual([]);
+    const unpinned = [...files]
+      .filter(([name]) => /\.(zkey|wasm)$/.test(name))
+      .filter(([name, text]) => {
+        const sha256 = createHash("sha256").update(text, "latin1").digest("hex");
+        return sha256 !== PROVER_ARTIFACTS[name.endsWith(".zkey") ? "zkey" : "wasm"];
+      });
+    expect(unpinned.map(([name]) => name)).toEqual([]);
   });
 
   test("ships the licences of the code and fonts it redistributes", () => {
@@ -282,10 +366,15 @@ describe("the Web Worker", () => {
     expect(html()).not.toMatch(/modulepreload/i);
   });
 
-  test("is one script of its own, which the page doesn't load", () => {
-    expect(unloaded().map(([name]) => name)).toEqual([
-      expect.stringMatching(/^assets\/worker-[\w-]+\.js$/),
-    ]);
+  // The ballot worker, and the prover worker once the client has one: the
+  // only two scripts ballot-worker may mint a URL for.
+  test("is one script of its own, beside at most the prover worker, which the page doesn't load", () => {
+    const names = unloaded().map(([name]) => name);
+    expect(names.filter((name) => BALLOT_WORKER.test(name))).toHaveLength(1);
+    expect(names.filter((name) => PROVER_WORKER.test(name)).length).toBeLessThanOrEqual(1);
+    expect(names.filter((name) => !BALLOT_WORKER.test(name) && !PROVER_WORKER.test(name))).toEqual(
+      [],
+    );
   });
 
   test("uses no network, worker or code-loading API", () => {

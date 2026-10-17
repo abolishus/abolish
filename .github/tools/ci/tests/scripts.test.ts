@@ -300,6 +300,8 @@ describe("crypto-scope.sh", () => {
 
   test.each([
     ["a protocol package", ["packages/crypto/src/a.ts"], true],
+    ["the membership prover", ["packages/membership-prover/src/index.ts"], true],
+    ["the membership prover's vendored key", ["packages/membership-prover/artifacts/x.zkey"], true],
     ["docs/spec", ["docs/spec/encoding.md"], true],
     ["root agent files", ["AGENTS.md"], true],
     ["nested agent files", ["apps/web/CLAUDE.md", "x/.mcp.json"], true],
@@ -308,6 +310,7 @@ describe("crypto-scope.sh", () => {
     ["workflows only", [".github/workflows/ci.yml"], false],
     ["other packages and docs", ["packages/core/a.ts", "docs/adr/0001.md", "README.md"], false],
     ["a look-alike prefix", ["packages/cryptography/a.ts", "docs/specs/x.md"], false],
+    ["a look-alike of the prover", ["packages/membership-prover-x/a.ts"], false],
   ])("%s", (_, paths, applies) => {
     expect(change(paths)).toEqual({ status: 0, last: `applies=${applies}` });
   });

@@ -1,7 +1,8 @@
 # Required check: `crypto-review` (the `crypto-review` job below).
-# Adversarial review, at high effort, of changes to the protocol
-# packages (crypto, circuits, contracts, verifier), docs/spec and agent
-# instruction files. .github/ is exempt (CODEOWNERS routes it to the owner).
+# Adversarial review, at high effort, of changes to the protocol packages
+# (crypto, circuits, contracts, verifier, membership-prover), docs/spec and
+# agent instruction files. .github/ is exempt (CODEOWNERS routes it to the
+# owner).
 # Passes as not applicable otherwise, so it can be a required check on every
 # PR. Fails on any blocking finding and fails closed.
 # Model: repository variable REVIEW_MODEL (falls back to the CLI's `opus` alias).

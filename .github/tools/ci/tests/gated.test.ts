@@ -24,7 +24,13 @@ import {
 
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
 const I = `sha512-${"A".repeat(86)}==`;
-const catalog = { "@noble/hashes": "2.4.0", "@noble/curves": "2.4.0", evil: "1.0.0" };
+const catalog = {
+  "@noble/hashes": "2.4.0",
+  "@noble/curves": "2.4.0",
+  evil: "1.0.0",
+  snarkjs: "0.7.5",
+  ffjavascript: "0.3.1",
+};
 
 // Shaped like the real published manifests.
 const packed = (name: string, extra: Record<string, unknown> = {}) => ({
@@ -305,6 +311,115 @@ describe("manifestViolations", () => {
   });
 });
 
+describe("manifestViolations: the membership prover", () => {
+  const PROVER_DEPS = {
+    "@abolishus/crypto": "workspace:*",
+    snarkjs: "catalog:",
+    ffjavascript: "catalog:",
+  };
+  const prover = (dependencies: Record<string, string> = PROVER_DEPS) => ({
+    name: "@abolishus/membership-prover",
+    private: true,
+    type: "module",
+    scripts: { build: "vp exec tsc -p tsconfig.json", test: "vp test run", check: "vp check" },
+    dependencies,
+  });
+
+  test("depends on exactly @abolishus/crypto, snarkjs and ffjavascript", () => {
+    expect(manifestViolations("membership-prover", prover(), catalog)).toEqual([]);
+  });
+
+  test("must depend on each of them", () => {
+    for (const dep of Object.keys(PROVER_DEPS)) {
+      const rest = Object.fromEntries(Object.entries(PROVER_DEPS).filter(([d]) => d !== dep));
+      expect(manifestViolations("membership-prover", prover(rest), catalog)).toEqual([
+        `packages/membership-prover/package.json: must depend on ${dep}`,
+      ]);
+    }
+  });
+
+  test("rejects any other dependency, @noble/* and snarkjs's own dependencies included", () => {
+    for (const dep of [
+      "@noble/curves",
+      "evil",
+      "circom_runtime",
+      "fastfile",
+      "web-worker",
+      "snarkjs-evil",
+      "@abolishus/verifier",
+      "@abolishus/core",
+    ])
+      expect(
+        manifestViolations(
+          "membership-prover",
+          prover({
+            ...PROVER_DEPS,
+            [dep]: dep.startsWith("@abolishus/") ? "workspace:*" : "catalog:",
+          }),
+          catalog,
+        ),
+        dep,
+      ).toHaveLength(1);
+  });
+
+  test("takes snarkjs and ffjavascript only from the catalog, pinned exactly", () => {
+    for (const spec of ["0.7.5", "^0.7.5", "~0.7.5", "npm:evil@1.0.0", "github:iden3/snarkjs"])
+      expect(
+        manifestViolations("membership-prover", prover({ ...PROVER_DEPS, snarkjs: spec }), catalog),
+        spec,
+      ).toHaveLength(1);
+    for (const pinned of ["^0.7.5", "0.7", "npm:evil@1.0.0", undefined])
+      expect(
+        manifestViolations("membership-prover", prover(), { ...catalog, ffjavascript: pinned }),
+        String(pinned),
+      ).toHaveLength(1);
+    expect(
+      manifestViolations(
+        "membership-prover",
+        prover({ ...PROVER_DEPS, "@abolishus/crypto": "workspace:^" }),
+        catalog,
+      ),
+    ).toHaveLength(1);
+  });
+
+  test("no other gated package may depend on it, snarkjs or ffjavascript", () => {
+    for (const dep of ["@abolishus/membership-prover", "snarkjs", "ffjavascript"]) {
+      const spec = dep.startsWith("@abolishus/") ? "workspace:*" : "catalog:";
+      expect(
+        manifestViolations("crypto", crypto({ dependencies: { [dep]: spec } }), catalog),
+        dep,
+      ).toHaveLength(1);
+      expect(
+        manifestViolations(
+          "verifier",
+          packed("verifier", { dependencies: { "@abolishus/crypto": "workspace:*", [dep]: spec } }),
+          catalog,
+        ),
+        dep,
+      ).toHaveLength(1);
+      for (const name of ["circuits", "contracts"] as const)
+        expect(
+          manifestViolations(name, { dependencies: { [dep]: spec } }, catalog),
+          `${name}: ${dep}`,
+        ).toHaveLength(1);
+    }
+  });
+
+  test("keeps every other gated package's rule: no peer, bundled or import fields, no lifecycle scripts", () => {
+    for (const field of ["peerDependencies", "bundledDependencies", "imports"])
+      expect(
+        manifestViolations("membership-prover", { ...prover(), [field]: {} }, catalog),
+      ).toHaveLength(1);
+    expect(
+      manifestViolations(
+        "membership-prover",
+        { ...prover(), scripts: { postinstall: "node x.js" } },
+        catalog,
+      ),
+    ).toHaveLength(1);
+  });
+});
+
 describe("lockfileViolations", () => {
   const manifest = crypto({ dependencies: { "@noble/curves": "catalog:" } });
 
@@ -389,6 +504,64 @@ describe("lockfileViolations", () => {
     expect(lockfileViolations("verifier", verifier, graph("link:../core"), catalog)).toHaveLength(
       1,
     );
+  });
+});
+
+describe("lockfileViolations: the membership prover", () => {
+  const manifest = {
+    dependencies: {
+      "@abolishus/crypto": "workspace:*",
+      snarkjs: "catalog:",
+      ffjavascript: "catalog:",
+    },
+  };
+  const graph = (locked: Record<string, string>): LockfileGraph[] => [
+    {
+      importers: {
+        "packages/membership-prover": {
+          dependencies: Object.fromEntries(
+            Object.entries(locked).map(([dep, version]) => [
+              dep,
+              { specifier: dep.startsWith("@abolishus/") ? "workspace:*" : "catalog:", version },
+            ]),
+          ),
+        },
+      },
+      // snarkjs's own closure, which serves its CLI too: not walked.
+      packages: { "snarkjs@0.7.5": { resolution: {} }, "bfj@7.0.2": { resolution: {} } },
+      snapshots: { "snarkjs@0.7.5": { dependencies: { bfj: "7.0.2" } }, "bfj@7.0.2": {} },
+    },
+  ];
+  const LOCKED = { "@abolishus/crypto": "link:../crypto", snarkjs: "0.7.5", ffjavascript: "0.3.1" };
+
+  test("locks its three direct dependencies, and judges no deeper", () => {
+    expect(lockfileViolations("membership-prover", manifest, graph(LOCKED), catalog)).toEqual([]);
+  });
+
+  test("rejects snarkjs or ffjavascript locked to anything but the catalog's version", () => {
+    for (const version of ["0.7.4", "0.7.5(x@1.0.0)", "evil@1.0.0", "link:../evil", "file:../x"])
+      expect(
+        lockfileViolations(
+          "membership-prover",
+          manifest,
+          graph({ ...LOCKED, snarkjs: version }),
+          catalog,
+        ),
+        version,
+      ).toHaveLength(1);
+  });
+
+  test("rejects a locked dependency the manifest doesn't declare", () => {
+    expect(
+      lockfileViolations(
+        "membership-prover",
+        manifest,
+        graph({ ...LOCKED, "web-worker": "1.2.0" }),
+        catalog,
+      ),
+    ).toEqual([
+      "pnpm-lock.yaml: importers['packages/membership-prover']: web-worker is locked but not declared",
+    ]);
   });
 });
 
@@ -556,6 +729,38 @@ describe("referenceViolation", () => {
       expect(check(s)).toBeTypeOf("string");
   });
 
+  test("only the membership prover may import snarkjs and ffjavascript, and nothing else of npm", () => {
+    const deps = runtimeDependencies({
+      dependencies: {
+        "@abolishus/crypto": "workspace:*",
+        "@abolishus/membership-prover": "workspace:*",
+        snarkjs: "catalog:",
+        ffjavascript: "catalog:",
+        "@noble/hashes": "catalog:",
+      },
+    });
+    const at = (name: "crypto" | "verifier" | "membership-prover", specifier: string) =>
+      referenceViolation(
+        name,
+        `packages/${name}/src/a.ts`,
+        `packages/${name}/src`,
+        { specifier, kind: "ImportDeclaration" },
+        deps,
+      );
+    for (const s of [
+      "snarkjs",
+      "ffjavascript",
+      "ffjavascript/build/browser.esm.js",
+      "@abolishus/crypto",
+    ])
+      expect(at("membership-prover", s), s).toBeUndefined();
+    for (const s of ["@noble/hashes", "@abolishus/membership-prover", "node:fs", "snarkjs/../x"])
+      expect(at("membership-prover", s), s).toBeTypeOf("string");
+    for (const name of ["crypto", "verifier"] as const)
+      for (const s of ["snarkjs", "ffjavascript", "@abolishus/membership-prover"])
+        expect(at(name, s), `${name}: ${s}`).toBeTypeOf("string");
+  });
+
   test("node: built-ins only in the verifier, and only the allowlisted ones", () => {
     expect(check("node:fs", "verifier")).toBeUndefined();
     expect(check("node:fs", "crypto")).toBeTypeOf("string");
@@ -618,12 +823,14 @@ describe("linkViolations", () => {
       entry("120000", "packages/sdk/src/link.ts"),
       entry("120000", "packages/crypto-evil/x"),
       entry("120000", "packages"),
+      entry("120000", "packages/membership-prover/artifacts/semaphore-32.zkey"),
     ].join("\0");
     expect(linkViolations(listing)).toEqual([
       "packages/crypto/src/link.ts: symlinks are not allowed under a gated package",
       "packages/verifier/vendor: submodules are not allowed under a gated package",
       "packages/circuits: symlinks are not allowed under a gated package",
       "packages: symlinks are not allowed under a gated package",
+      "packages/membership-prover/artifacts/semaphore-32.zkey: symlinks are not allowed under a gated package",
     ]);
   });
 });
@@ -761,6 +968,34 @@ describe("provenanceUrls", () => {
     expect(
       provenanceUrls("rfc/rfc9380.txt", "https://www.rfc-editor.org/rfc/rfc9380.txt", "rfc9380"),
     ).toEqual(["https://www.rfc-editor.org/rfc/rfc9380.txt"]);
+  });
+
+  test("fetches Semaphore's proving key and witness calculator from PSE's host, by release", () => {
+    for (const file of ["semaphore-32.zkey", "semaphore-32.wasm"]) {
+      const url = `https://snark-artifacts.pse.dev/semaphore/4.13.0/${file}`;
+      expect(provenanceUrls(`snark-artifacts/${file}`, url, "4.13.0")).toEqual([url]);
+    }
+  });
+
+  test("rejects other hosts, paths, releases and directories for PSE's artifacts", () => {
+    const url = "https://snark-artifacts.pse.dev/semaphore/4.13.0/semaphore-32.zkey";
+    const bad: [string, string, string][] = [
+      ["snark-artifacts/semaphore-32.zkey", url, "4.14.3"],
+      ["snark-artifacts/semaphore-32.zkey", url, ""],
+      ["semaphore/semaphore-32.zkey", url, "4.13.0"],
+      ["rfc/semaphore-32.zkey", url, "4.13.0"],
+      ["snark-artifacts/x", url.replace("https:", "http:"), "4.13.0"],
+      ["snark-artifacts/x", url.replace("pse.dev", "pse.dev.example.com"), "4.13.0"],
+      ["snark-artifacts/x", url.replace("snark-artifacts.", "evil.snark-artifacts."), "4.13.0"],
+      ["snark-artifacts/x", url.replace("/semaphore/", "/other/"), "4.13.0"],
+      ["snark-artifacts/x", url.replace("4.13.0", "latest"), "latest"],
+      ["snark-artifacts/x", url.replace("semaphore-32.zkey", "x.js"), "4.13.0"],
+      ["snark-artifacts/x", url.replace("semaphore-32.zkey", "../x.zkey"), "4.13.0"],
+      ["snark-artifacts/x", `${url}?x`, "4.13.0"],
+      ["snark-artifacts/x", raw("semaphore-protocol/semaphore"), "v4.13.0"],
+    ];
+    for (const [path, source, tag] of bad)
+      expect(provenanceUrls(path, source, tag), `${path} ${source} ${tag}`).toBeTypeOf("string");
   });
 
   test("rejects other repositories, unpinned refs, bad tags and unknown publishers", () => {

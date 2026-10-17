@@ -200,7 +200,8 @@ jobs:
         working-directory: packages/crypto
         run: vp pack --no-config
       # packages/crypto resolves only to @noble/* (lockfile closure included),
-      # the verifier only to gated packages and @noble/*; src imports match
+      # the verifier only to gated packages and @noble/*, the membership
+      # prover only to crypto, snarkjs and ffjavascript; src imports match
       # what's declared; no symlinks or submodules under gated paths; the
       # packed bundles inline no node_modules code. See gated.ts.
       - name: Gated packages stay inside the gate
@@ -214,8 +215,9 @@ jobs:
           path: lockfile-diff.md
           if-no-files-found: ignore
 
-  # apps/ballot bundles no npm code but React's and shadcn/ui's, no analytics SDK and no URL
-  # but inert ones, under the pinned CSP (ballot.ts). Its own job: building it
+  # apps/ballot bundles no npm code but React's and shadcn/ui's (and snarkjs's
+  # in the prover worker), no analytics SDK and no URL but inert ones, under
+  # the pinned CSP (ballot.ts). Its own job: building it
   # runs the PR's Vite config, which must not share a runner with the
   # supply-chain steps (T-59).
   ballot:

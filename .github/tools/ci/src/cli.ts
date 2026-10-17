@@ -7,13 +7,15 @@
 //   actions-pinned          fail if any workflow uses an action not pinned by SHA
 //   lockfile --base <ref>   enforce lockfile policy, write the diff to lockfile-diff.md
 //   pnpm-selftest           prove the pinned pnpm honours our install-script policy
-//   vectors-provenance      re-fetch every vendored test vector from its allowlisted
-//                           publisher, by commit and by tag, and require the bytes to
-//                           match the manifest and the file
+//   vectors-provenance      re-fetch every vendored test vector and prover artifact
+//                           from its allowlisted publisher (by commit and by tag on
+//                           GitHub), and require the bytes to match the manifest and
+//                           the file
 //   gated                   enforce the dependency, import, symlink and bundle policy
 //                           of the crypto-review-gated packages (see gated.ts)
 //   ballot                  build apps/ballot and enforce its bundle and CSP policy:
-//                           no npm runtime code but React's and shadcn/ui's, no analytics SDK, no URL
+//                           no npm runtime code but React's and shadcn/ui's (and
+//                           snarkjs's in the prover worker), no analytics SDK, no URL
 //                           but inert ones, the pinned CSP (see ballot.ts)
 //   toolchain               fail unless install-toolchain.sh, the catalog, the lockfile
 //                           and AGENTS.md pin one Noir and one bb, and bbup's
@@ -646,7 +648,12 @@ function gated(): void {
   );
 }
 
-const VECTORS = "packages/crypto/test-vectors";
+/**
+ * Directories of vendored files, each with a manifest.json: packages/crypto's
+ * test vectors, and the membership prover's proving key and witness
+ * calculator, which the ballot client ships (ADR 0009, Amendment 2026-10-17).
+ */
+const VECTORS = ["packages/crypto/test-vectors", "packages/membership-prover/artifacts"];
 
 /**
  * The harness binds each vendored vector file to its manifest sha256; this
@@ -655,39 +662,45 @@ const VECTORS = "packages/crypto/test-vectors";
  * sha256. No reviewer can fetch the source, so CI does (T-55, T-39).
  */
 async function vectorsProvenance(): Promise<void> {
-  const manifest = join(VECTORS, "manifest.json");
-  if (!existsSync(manifest)) {
-    console.log("no vendored vectors");
-    return;
-  }
-  const { files } = JSON.parse(readFileSync(manifest, "utf8")) as {
-    files?: { path?: unknown; sha256?: unknown; source?: unknown; tag?: unknown }[];
-  };
-  if (!Array.isArray(files)) throw new Error(`${manifest}: files must be an array`);
   const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
   const errors: string[] = [];
-  for (const { path, sha256: expected, source, tag } of files) {
-    const urls = provenanceUrls(String(path), String(source), String(tag));
-    if (typeof urls === "string") {
-      errors.push(`${manifest}: ${urls}`);
-      continue;
-    }
-    const local = sha256(readFileSync(join(VECTORS, String(path))));
-    if (local !== expected) errors.push(`${manifest}: ${String(path)}: file ${local} != manifest`);
-    for (const url of urls) {
-      const response = await fetch(url);
-      const fetched = response.ok
-        ? sha256(new Uint8Array(await response.arrayBuffer()))
-        : undefined;
-      if (fetched !== expected)
-        errors.push(
-          `${manifest}: ${String(path)}: ${url}: ${fetched === undefined ? `HTTP ${response.status}` : fetched} != manifest ${String(expected)}`,
-        );
+  let count = 0;
+  for (const dir of VECTORS) {
+    const manifest = join(dir, "manifest.json");
+    if (!existsSync(manifest)) continue;
+    const { files } = JSON.parse(readFileSync(manifest, "utf8")) as {
+      files?: { path?: unknown; sha256?: unknown; source?: unknown; tag?: unknown }[];
+    };
+    if (!Array.isArray(files)) throw new Error(`${manifest}: files must be an array`);
+    count += files.length;
+    for (const { path, sha256: expected, source, tag } of files) {
+      const urls = provenanceUrls(String(path), String(source), String(tag));
+      if (typeof urls === "string") {
+        errors.push(`${manifest}: ${urls}`);
+        continue;
+      }
+      const local = sha256(readFileSync(join(dir, String(path))));
+      if (local !== expected)
+        errors.push(`${manifest}: ${String(path)}: file ${local} != manifest`);
+      for (const url of urls) {
+        const response = await fetch(url);
+        const fetched = response.ok
+          ? sha256(new Uint8Array(await response.arrayBuffer()))
+          : undefined;
+        if (fetched !== expected)
+          errors.push(
+            `${manifest}: ${String(path)}: ${url}: ${fetched === undefined ? `HTTP ${response.status}` : fetched} != manifest ${String(expected)}`,
+          );
+      }
     }
   }
   for (const e of errors) console.error(e);
   if (errors.length > 0) process.exit(1);
-  console.log(`${files.length} vendored vector file(s) match their publishers by commit and tag`);
+  console.log(
+    count === 0
+      ? "no vendored vectors"
+      : `${count} vendored vector file(s) match their publishers' copies`,
+  );
 }
 
 // Retries network errors and 5xx (raw.githubusercontent.com blips) but not
@@ -758,11 +771,11 @@ function ballot(): void {
   }
   const work = mkdtempSync(join(tmpdir(), "abolish-ballot-"));
   const outDir = join(work, "dist");
-  const idsFile = join(work, "ids.json");
+  const reportFile = join(work, "builds.json");
   try {
     // apps/ballot's Vite config is the PR's code: it runs only in this child,
     // and everything below is judged here, in code it can't reach (T-59).
-    execFileSync(process.execPath, [".github/tools/ci/src/ballot-build.ts", outDir, idsFile], {
+    execFileSync(process.execPath, [".github/tools/ci/src/ballot-build.ts", outDir, reportFile], {
       stdio: "inherit",
       env: { ...process.env, NODE_ENV: "production" },
     });
@@ -781,7 +794,7 @@ function ballot(): void {
         violations.push(`apps/ballot: emits ${name}, which isn't a regular file`);
     }
     violations.push(
-      ...moduleListViolations(JSON.parse(readFileSync(idsFile, "utf8")), resolve(".")),
+      ...moduleListViolations(JSON.parse(readFileSync(reportFile, "utf8")), resolve(".")),
     );
     violations.push(...distViolations(files));
     for (const v of violations) console.error(v);

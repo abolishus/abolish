@@ -6,10 +6,12 @@
 // (T-59; AGENTS.md rule B). apps/ballot's own tests may repeat them.
 //
 // The check builds the client with its own Vite config and judges two
-// things: the module graph the build resolved (which npm packages and
-// workspace files went in), and the emitted bytes (file names, index.html,
-// URLs and SDK markers in every script and stylesheet).
+// things: the module graph each build resolved (which npm packages and
+// workspace files went into the page and into each Web Worker), and the
+// emitted bytes (file names, index.html, URLs and SDK markers in every script
+// and stylesheet).
 
+import { createHash } from "node:crypto";
 import { posix, relative, sep } from "node:path";
 
 /**
@@ -58,8 +60,43 @@ export const WORKSPACE_SOURCES = [
 ] as const;
 
 /**
- * The origins the client may make requests to, and the only ones its code may
- * name (T-34, T-43): the API that serves definitions, display text and the
+ * Code only the prover worker may bundle, besides the above (ADR 0009,
+ * Amendment 2026-10-17, owner-approved): snarkjs's and ffjavascript's
+ * prebuilt browser builds, each the one file named here, and the gated
+ * adapter around them. snarkjs holds the identity secret there, in a realm of
+ * its own, and the ballot worker re-verifies and re-randomises what it
+ * returns; neither the page nor the ballot worker may run any of it (T-55).
+ */
+export const PROVER_PACKAGES: ReadonlyMap<string, string> = new Map([
+  ["snarkjs", "build/browser.esm.js"],
+  ["ffjavascript", "build/browser.esm.js"],
+]);
+export const PROVER_SOURCES = ["packages/membership-prover/src/"] as const;
+
+/**
+ * The client's two Web Workers, by emitted name (Vite names a worker after
+ * its entry file): the ballot worker, which encrypts and proves, and the
+ * prover worker, which runs snarkjs. No other script may be left for the page
+ * to start, and the page loads neither itself.
+ */
+export const BALLOT_WORKER = /^assets\/worker-[\w-]+\.js$/;
+export const PROVER_WORKER = /^assets\/prover-[\w-]+\.js$/;
+
+/**
+ * The proving key and witness calculator the client serves from its own
+ * release for the prover worker, by sha256: Semaphore 4.13.0's depth-32
+ * `semaphore-32.zkey` and `semaphore-32.wasm` (snark-artifacts.pse.dev, which
+ * vectors-provenance re-fetches), so a build can ship no other key or
+ * WebAssembly under these extensions.
+ */
+export const PROVER_ARTIFACTS: Readonly<Record<string, string>> = {
+  zkey: "2e5f7a9f880c337134ee4c7fc4e53573813b4c9c6ae46221c0b56e7992304650",
+  wasm: "528333d1247f585d33c5a40f46053fb7f8b1f5b8b8fa29118abfc47a60921dc5",
+};
+
+/**
+ * The origins besides its own the client may make requests to, and the only
+ * ones its code may name (T-34, T-43):the API that serves definitions, display text and the
  * board, and one L2 JSON-RPC endpoint the election registry is read through
  * (ADR 0004: Base Sepolia while there is no mainnet). Both are
  * untrusted: the client checks every answer against the registry before
@@ -74,22 +111,24 @@ export const CONNECT_ORIGINS: readonly string[] = [
 
 /**
  * The ballot client's Content Security Policy (T-43). Scripts, styles, fonts
- * and images from its own origin only; requests only to CONNECT_ORIGINS, from
- * the main thread (a worker gets no CSP from the page, so WORKER_BANNED keeps
- * its I/O out); Web
- * Workers from its own origin only, where encryption and proving run; Trusted
- * Types, with one named policy, `ballot-worker`, for the worker's script URL
- * (`new Worker(url)` is a script-URL sink; the client creates the policy
- * first, and a second policy of that name throws); no <base> and no form
- * posts.
+ * and images from its own origin only, and WebAssembly compiled
+ * ('wasm-unsafe-eval', which never allows JavaScript eval) for the prover's
+ * curve code and witness calculator; requests only to its own origin, for the
+ * prover's key and witness calculator from its own release, and to
+ * CONNECT_ORIGINS, from the main thread (a worker gets no CSP from the page,
+ * so WORKER_BANNED keeps its I/O out); Web Workers from its own origin only,
+ * where encryption and proving run; Trusted Types, with one named policy,
+ * `ballot-worker`, for the two workers' script URLs (`new Worker(url)` is a
+ * script-URL sink; the client creates the policy first, and a second policy
+ * of that name throws); no <base> and no form posts.
  */
 export const BALLOT_CSP: Readonly<Record<string, readonly string[]>> = {
   "default-src": ["'none'"],
-  "script-src": ["'self'"],
+  "script-src": ["'self'", "'wasm-unsafe-eval'"],
   "style-src": ["'self'"],
   "font-src": ["'self'"],
   "img-src": ["'self'"],
-  "connect-src": CONNECT_ORIGINS,
+  "connect-src": ["'self'", ...CONNECT_ORIGINS],
   "worker-src": ["'self'"],
   "base-uri": ["'none'"],
   "form-action": ["'none'"],
@@ -144,57 +183,109 @@ export const ANALYTICS_MARKERS: readonly RegExp[] = [
   /\bsendBeacon\b/,
 ];
 
-/** What the build may emit, besides index.html: hashed scripts and styles, self-hosted fonts, licences. */
+/**
+ * What the build may emit, besides index.html: hashed scripts and styles,
+ * self-hosted fonts, licences, and the prover's key and witness calculator
+ * (PROVER_ARTIFACTS pins their bytes).
+ */
 const EMITTED = [
   /^index\.html$/,
   /^assets\/[\w-]+\.(js|css)$/,
   /^assets\/(oxanium|jetbrains-mono)-[\w-]+\.woff2?$/,
+  /^assets\/[\w-]+\.(zkey|wasm)$/,
   /^third-party-licenses\.md$/,
   /^font-licenses\.txt$/,
 ];
 
 /**
- * The npm package a resolved module id belongs to: only a file inside the
- * package's own pnpm store entry under the repository's node_modules, with no
- * node_modules nested below it. Anything else, a directory merely named
- * node_modules included, is undefined and judged as workspace code.
+ * The npm package a resolved module id belongs to, and the file within it:
+ * only a file inside the package's own pnpm store entry under the
+ * repository's node_modules, with no node_modules nested below it. Anything
+ * else, a directory merely named node_modules included, is undefined and
+ * judged as workspace code.
  */
-export function packageOf(id: string, repoRoot: string): string | undefined {
+function storeEntryOf(id: string, repoRoot: string): { name: string; file: string } | undefined {
   const path = relative(repoRoot, id).split(sep).join(posix.sep);
   const m = /^node_modules\/\.pnpm\/[^/]+\/node_modules\/((?:@[^/]+\/)?[^/@][^/]*)\/(.+)$/.exec(
     path,
   );
-  if (m === null || m[2]?.split("/").includes("node_modules")) return undefined;
-  return m[1];
+  if (m?.[1] === undefined || m[2] === undefined || m[2].split("/").includes("node_modules"))
+    return undefined;
+  return { name: m[1], file: m[2] };
+}
+
+/** The npm package a resolved module id belongs to (see storeEntryOf). */
+export function packageOf(id: string, repoRoot: string): string | undefined {
+  return storeEntryOf(id, repoRoot)?.name;
 }
 
 /**
- * Problems with the module list the build child reported: it must be a list
- * of strings, include react-dom (or the module check would be vacuous), and
- * pass `moduleViolations`.
+ * One build the child ran: the page's, or one Web Worker's (`worker`), with
+ * the chunks it emitted and every module it resolved.
  */
-export function moduleListViolations(ids: unknown, repoRoot: string): string[] {
-  if (!Array.isArray(ids) || !ids.every((id) => typeof id === "string"))
-    return ["apps/ballot: the build's module list isn't a list of strings"];
+export interface BuildReport {
+  readonly worker: boolean;
+  readonly chunks: readonly string[];
+  readonly modules: readonly string[];
+}
+
+const isStringList = (value: unknown): value is string[] =>
+  Array.isArray(value) && value.every((v) => typeof v === "string");
+
+/** Whether a build is the prover worker's: a worker build whose one chunk has the prover's name. */
+export function isProverBuild(build: BuildReport): boolean {
+  const [chunk, ...rest] = build.chunks;
+  return build.worker && rest.length === 0 && chunk !== undefined && PROVER_WORKER.test(chunk);
+}
+
+/**
+ * Problems with the builds the child reported: a list of them, each with a
+ * worker flag and lists of chunk names and module ids; react-dom among the
+ * modules (or the module check would be vacuous); and every build passing
+ * `moduleViolations`, with the prover's code allowed in the prover worker's
+ * build only.
+ */
+export function moduleListViolations(report: unknown, repoRoot: string): string[] {
+  const builds: BuildReport[] = [];
+  for (const build of Array.isArray(report) ? report : [undefined]) {
+    const b = build as Partial<Record<keyof BuildReport, unknown>> | null | undefined;
+    if (typeof b?.worker !== "boolean" || !isStringList(b.chunks) || !isStringList(b.modules))
+      return ["apps/ballot: the build's report isn't a list of { worker, chunks, modules }"];
+    builds.push({ worker: b.worker, chunks: b.chunks, modules: b.modules });
+  }
   return [
-    ...(ids.some((id) => packageOf(id, repoRoot) === "react-dom")
+    ...(builds.some((b) => b.modules.some((id) => packageOf(id, repoRoot) === "react-dom"))
       ? []
       : ["apps/ballot: the build reported no react-dom, so the module check would be vacuous"]),
-    ...moduleViolations(ids, repoRoot),
+    ...builds.flatMap((b) => moduleViolations(b.modules, repoRoot, isProverBuild(b))),
   ];
 }
 
-/** Modules in the build that come from neither an allowed package nor allowed workspace source. */
-export function moduleViolations(ids: readonly string[], repoRoot: string): string[] {
+/**
+ * Modules in one build that come from neither an allowed package nor allowed
+ * workspace source; `prover` admits the prover worker's code as well.
+ */
+export function moduleViolations(
+  ids: readonly string[],
+  repoRoot: string,
+  prover = false,
+): string[] {
   const violations: string[] = [];
+  const sources = prover ? [...WORKSPACE_SOURCES, ...PROVER_SOURCES] : WORKSPACE_SOURCES;
   for (const id of ids) {
     // Virtual modules (a leading NUL, or anything outside the repository) are
     // code a plugin made up, whatever path they name.
-    const pkg = id.startsWith("\0") ? undefined : packageOf(id, repoRoot);
-    if (pkg !== undefined) {
-      if (!RUNTIME_PACKAGES.has(pkg))
+    const entry = id.startsWith("\0") ? undefined : storeEntryOf(id, repoRoot);
+    if (entry !== undefined) {
+      const proverFile = PROVER_PACKAGES.get(entry.name);
+      if (proverFile !== undefined) {
+        if (!prover || entry.file !== proverFile)
+          violations.push(
+            `apps/ballot: bundles ${entry.name} (${id}); only its ${proverFile}, and only in the prover worker`,
+          );
+      } else if (!RUNTIME_PACKAGES.has(entry.name))
         violations.push(
-          `apps/ballot: bundles ${pkg} (${id}); only ${[...RUNTIME_PACKAGES].join(", ")} may run in the client`,
+          `apps/ballot: bundles ${entry.name} (${id}); only ${[...RUNTIME_PACKAGES].join(", ")} may run in the client`,
         );
       continue;
     }
@@ -203,11 +294,9 @@ export function moduleViolations(ids: readonly string[], repoRoot: string): stri
       id.startsWith("\0") ||
       path.startsWith("..") ||
       path.split("/").includes("node_modules") ||
-      !WORKSPACE_SOURCES.some((allowed) => path.startsWith(allowed))
+      !sources.some((allowed) => path.startsWith(allowed))
     )
-      violations.push(
-        `apps/ballot: bundles ${JSON.stringify(id)}, outside ${WORKSPACE_SOURCES.join(", ")}`,
-      );
+      violations.push(`apps/ballot: bundles ${JSON.stringify(id)}, outside ${sources.join(", ")}`);
   }
   return violations;
 }
@@ -306,12 +395,12 @@ export function htmlViolations(page: string): string[] {
 
 /**
  * APIs that reach the network or load code, banned from every script the page
- * doesn't load itself. Those scripts are Web Workers (or chunks loaded at run
- * time), and a dedicated worker takes its CSP from its own response headers,
- * never from the page's <meta>: on a host that sends none (an IPFS gateway,
- * abolishus.eth), connect-src 'none' and Trusted Types don't apply in the
- * worker, where the plaintext and the randomness are. So its I/O stays on the
- * main thread (T-43). A heuristic over the bytes, like the URL scan: code that
+ * doesn't load itself. Those scripts are the Web Workers, the ballot worker
+ * and the prover worker, and a dedicated worker takes its CSP from its own
+ * response headers, never from the page's <meta>: on a host that sends none
+ * (an IPFS gateway, abolishus.eth), connect-src and Trusted Types don't apply
+ * in the worker, where the plaintext, the randomness and the identity secret
+ * are. So their I/O stays on the main thread (T-43). A heuristic over the bytes, like the URL scan: code that
  * builds the names at run time evades it, and the worker's own e2e is the
  * other check.
  */
@@ -329,8 +418,15 @@ const WORKER_BANNED: readonly RegExp[] = [
 /** WebRTC reaches any host and no CSP directive governs it, in a page or a worker. */
 const BANNED: readonly RegExp[] = [/\bRTC(PeerConnection|DataChannel)\b/];
 
-/** Problems with the emitted files: unexpected names, URLs, SDK markers, string evaluation, network APIs. */
-export function distViolations(files: ReadonlyMap<string, string>): string[] {
+/**
+ * Problems with the emitted files: unexpected names, URLs, SDK markers, string
+ * evaluation, network APIs, workers, and prover artifacts other than the
+ * pinned ones (`artifacts`, by extension; tests pass their own).
+ */
+export function distViolations(
+  files: ReadonlyMap<string, string>,
+  artifacts: Readonly<Record<string, string>> = PROVER_ARTIFACTS,
+): string[] {
   const violations: string[] = [];
   // The scripts index.html loads (a <script src> or a modulepreload <link>).
   const pageScripts = new Set(
@@ -338,11 +434,36 @@ export function distViolations(files: ReadonlyMap<string, string>): string[] {
       ([, name]) => name,
     ),
   );
-  for (const name of files.keys())
+  for (const [name, bytes] of files) {
     if (!EMITTED.some((pattern) => pattern.test(name)))
       violations.push(
-        `apps/ballot: emits ${name}, which isn't a page, script, style, font or licence`,
+        `apps/ballot: emits ${name}, which isn't a page, script, style, font, licence or prover artifact`,
       );
+    const pinned = artifacts[/\.(zkey|wasm)$/.exec(name)?.[1] ?? ""];
+    if (
+      pinned !== undefined &&
+      createHash("sha256").update(bytes, "latin1").digest("hex") !== pinned
+    )
+      violations.push(`apps/ballot: emits ${name}, which isn't the pinned prover artifact`);
+  }
+  // The page loads neither worker, and nothing else is left for it to start.
+  const workers = [...files.keys()].filter(
+    (name) => name.endsWith(".js") && !pageScripts.has(name),
+  );
+  for (const name of pageScripts)
+    if (name !== undefined && (BALLOT_WORKER.test(name) || PROVER_WORKER.test(name)))
+      violations.push(`apps/ballot: index.html loads ${name}, a worker's script`);
+  for (const name of workers)
+    if (!BALLOT_WORKER.test(name) && !PROVER_WORKER.test(name))
+      violations.push(
+        `apps/ballot: emits ${name}, a script index.html doesn't load that is neither the ballot worker nor the prover worker`,
+      );
+  for (const [label, pattern] of [
+    ["ballot worker", BALLOT_WORKER],
+    ["prover worker", PROVER_WORKER],
+  ] as const)
+    if (workers.filter((name) => pattern.test(name)).length > 1)
+      violations.push(`apps/ballot: emits more than one ${label}`);
   const page = files.get("index.html");
   if (page === undefined) violations.push("apps/ballot: the build has no index.html");
   else violations.push(...htmlViolations(page));

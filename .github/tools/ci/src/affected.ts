@@ -126,7 +126,13 @@ export function missingRequiredScripts(packages: readonly WorkspacePackage[]): s
 }
 
 /** The packages crypto-review gates, by name, each at exactly `packages/<name>`. */
-export const GATED_PACKAGES = ["crypto", "circuits", "contracts", "verifier"] as const;
+export const GATED_PACKAGES = [
+  "crypto",
+  "circuits",
+  "contracts",
+  "verifier",
+  "membership-prover",
+] as const;
 
 /**
  * crypto-review selects by path, so a gated package must live at its gated

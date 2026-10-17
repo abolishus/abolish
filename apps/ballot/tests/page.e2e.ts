@@ -183,10 +183,12 @@ describe("the served ballot client", () => {
       .toBe(5);
   });
 
-  test("refuses a request to any origin the policy doesn't name, its own included", async () => {
+  // Its own origin serves the prover's key and witness calculator from the
+  // release; nothing else the policy doesn't name is reachable.
+  test("refuses a request to any origin the policy doesn't name, and allows its own", async () => {
     const outcome = await page.evaluate(async (self) => {
       const results: string[] = [];
-      for (const url of ["https://example.com/", `${self}/index.html`])
+      for (const url of ["https://example.com/", `${self}/index.html`, "./index.html"])
         try {
           await fetch(url);
           results.push("fetched");
@@ -195,8 +197,36 @@ describe("the served ballot client", () => {
         }
       return results;
     }, origin);
-    expect(outcome).toEqual(["refused", "refused"]);
-    await expect.poll(() => violations.filter((v) => v.startsWith("connect-src")).length).toBe(2);
+    expect(outcome).toEqual(["refused", "fetched", "fetched"]);
+    await expect
+      .poll(() => violations.filter((v) => v.startsWith("connect-src")))
+      .toEqual(["connect-src https://example.com/"]);
+    expect(foreignResponses).toEqual([]);
+  });
+
+  test("compiles WebAssembly, and still refuses to evaluate a string as script", async () => {
+    const outcome = await page.evaluate(async () => {
+      const results: string[] = [];
+      try {
+        // The smallest module: the magic number and version 1.
+        await WebAssembly.compile(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0]));
+        results.push("compiled");
+      } catch {
+        results.push("refused");
+      }
+      try {
+        // oxlint-disable-next-line no-eval -- the string evaluation under test
+        (0, eval)("1");
+        results.push("evaluated");
+      } catch {
+        results.push("refused");
+      }
+      return results;
+    });
+    expect(outcome).toEqual(["compiled", "refused"]);
+    // Trusted Types refuses the string before script-src is consulted, and
+    // compiling the module raised no violation at all.
+    await expect.poll(() => violations).toEqual(["require-trusted-types-for trusted-types-sink"]);
   });
 
   test("refuses an image from another origin", async () => {

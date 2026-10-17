@@ -18,7 +18,8 @@ export LC_ALL=C
 base="${1:?usage: crypto-scope.sh <base-sha>}"
 
 scope=(
-  packages/crypto packages/circuits packages/contracts packages/verifier docs/spec
+  packages/crypto packages/circuits packages/contracts packages/verifier packages/membership-prover
+  docs/spec
   ':(glob)**/AGENTS.md' ':(glob)**/CLAUDE.md' ':(glob)**/CLAUDE.local.md' ':(glob)**/.mcp.json'
   ':(glob)**/.claude' ':(glob)**/.claude/**'
   ':(exclude).github'

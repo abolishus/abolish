@@ -10,7 +10,9 @@
 // package's source by relative path, or a symlink that leaves the gate. Each
 // check below closes one of those paths; together they bound what code the
 // gated packages can run to the gated directories plus the audited `@noble/*`
-// libraries.
+// libraries. The one exception is packages/membership-prover, the client's
+// Groth16 prover adapter, which may also depend on snarkjs and ffjavascript
+// (ADR 0009, Amendment 2026-10-17): its rule names them, nothing else may.
 
 import { posix } from "node:path";
 import { parseAllDocuments, type Document } from "yaml";
@@ -41,6 +43,15 @@ const EXACT_VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 export interface GatedRule {
   /** Gated workspace packages it may depend on (by directory name). */
   readonly workspace: readonly GatedName[];
+  /**
+   * The npm packages it may depend on: the `@noble/*` libraries, or exactly
+   * these third-party packages (each from the catalog at an exact version),
+   * all of them and nothing else, with every gated workspace package in
+   * `workspace`. Only the direct dependencies are judged then: the lockfile
+   * closure below them isn't walked, since most of it serves a library's CLI
+   * and never ships, and the ballot client's bundle check judges what does.
+   */
+  readonly npm: "@noble/*" | readonly string[];
   /** Whether `node:` built-ins may be imported (never in browser-facing code). */
   readonly nodeBuiltins: boolean;
   /**
@@ -118,13 +129,32 @@ const SCRIPT_NAME = /^(?:build|check|test|test:[a-z0-9-]+)$/;
 // workspace imports. The verifier is a CLI too, and may use the other gated
 // packages. circuits and contracts get their own rule (wider if they need it)
 // in the PRs that scaffold them (P1-17, P1-18); until then the strictest one
-// applies, so a dependency of the verifier on them can't leave the gate.
+// applies, so a dependency of the verifier on them can't leave the gate. The
+// membership prover is snarkjs behind a thin adapter, run only in the ballot
+// client's prover worker; it isn't published, and no other gated package may
+// depend on it, so the verifier never runs snarkjs (T-36, T-55).
 export const RULES: Readonly<Record<GatedName, GatedRule>> = {
-  crypto: { workspace: [], nodeBuiltins: false, packed: true },
-  circuits: { workspace: [], nodeBuiltins: false, packed: false },
-  contracts: { workspace: [], nodeBuiltins: false, packed: false },
-  verifier: { workspace: ["crypto", "circuits", "contracts"], nodeBuiltins: true, packed: true },
+  crypto: { workspace: [], npm: "@noble/*", nodeBuiltins: false, packed: true },
+  circuits: { workspace: [], npm: "@noble/*", nodeBuiltins: false, packed: false },
+  contracts: { workspace: [], npm: "@noble/*", nodeBuiltins: false, packed: false },
+  verifier: {
+    workspace: ["crypto", "circuits", "contracts"],
+    npm: "@noble/*",
+    nodeBuiltins: true,
+    packed: true,
+  },
+  "membership-prover": {
+    workspace: ["crypto"],
+    npm: ["snarkjs", "ffjavascript"],
+    nodeBuiltins: false,
+    packed: false,
+  },
 };
+
+/** Whether the rule lets a package depend on, and import, npm package `dep`. */
+function allowsNpm(rule: GatedRule, dep: string): boolean {
+  return rule.npm === "@noble/*" ? NOBLE.test(dep) : rule.npm.includes(dep);
+}
 
 const gatedDir = (name: GatedName) => `packages/${name}`;
 
@@ -151,10 +181,12 @@ export function runtimeDependencies(manifest: Record<string, unknown>): Map<stri
 }
 
 /**
- * Manifest rules: only `@noble/*` from the catalog (pinned to an exact
- * version there) and the gated workspace packages the rule allows, as
- * `workspace:*`. Every other spec (`npm:`, `link:`, `file:`, git, a range,
- * a non-gated `workspace:` package) is rejected.
+ * Manifest rules: only the npm packages the rule allows (`@noble/*`, or its
+ * exact list) from the catalog (pinned to an exact version there) and the
+ * gated workspace packages the rule allows, as `workspace:*`. Every other
+ * spec (`npm:`, `link:`, `file:`, git, a range, a non-gated `workspace:`
+ * package) is rejected. A rule with an exact list also requires each of its
+ * dependencies to be declared.
  */
 export function manifestViolations(
   name: GatedName,
@@ -179,9 +211,13 @@ export function manifestViolations(
   for (const dep of first ?? [])
     if (second?.includes(dep))
       out.push(`${file}: ${dep} is listed in more than one dependency field`);
-  for (const [dep, spec] of runtimeDependencies(manifest)) {
+  const declared = runtimeDependencies(manifest);
+  if (rule.npm !== "@noble/*")
+    for (const dep of [...rule.workspace.map((w) => `@abolishus/${w}`), ...rule.npm])
+      if (!declared.has(dep)) out.push(`${file}: must depend on ${dep}`);
+  for (const [dep, spec] of declared) {
     const ws = gatedByPackageName(dep);
-    if (NOBLE.test(dep)) {
+    if (allowsNpm(rule, dep)) {
       if (spec !== "catalog:") {
         out.push(`${file}: ${dep}: spec must be "catalog:", got ${JSON.stringify(spec)}`);
         continue;
@@ -196,7 +232,7 @@ export function manifestViolations(
         out.push(`${file}: ${dep}: spec must be "workspace:*", got ${JSON.stringify(spec)}`);
     } else {
       out.push(
-        `${file}: runtime dependency ${dep} is not allowed (only @noble/*${rule.workspace.map((w) => `, @abolishus/${w}`).join("")})`,
+        `${file}: runtime dependency ${dep} is not allowed (only ${[rule.npm === "@noble/*" ? rule.npm : rule.npm.join(", "), ...rule.workspace.map((w) => `@abolishus/${w}`)].join(", ")})`,
       );
     }
   }
@@ -327,11 +363,12 @@ export function lockfileGraphs(lockfile: string): LockfileGraph[] {
 
 /**
  * Lockfile rules for one gated importer: its runtime dependencies are exactly
- * the manifest's; each `@noble/*` one is locked to the catalog's exact
- * registry version (never an alias, link, file or peer-suffixed snapshot);
- * each gated workspace one is `link:../<name>`; and the whole transitive
- * closure of the `@noble/*` ones, read from `snapshots:`, is `@noble/*` at
- * exact registry versions with no install-time or peer behaviour.
+ * the manifest's; each npm one is locked to the catalog's exact registry
+ * version (never an alias, link, file or peer-suffixed snapshot); each gated
+ * workspace one is `link:../<name>`; and the whole transitive closure of the
+ * `@noble/*` ones, read from `snapshots:`, is `@noble/*` at exact registry
+ * versions with no install-time or peer behaviour. A rule's exact list of
+ * third-party packages is judged here as direct dependencies only.
  */
 export function lockfileViolations(
   name: GatedName,
@@ -363,12 +400,12 @@ export function lockfileViolations(
     }
     const version = entry?.["version"];
     const ws = gatedByPackageName(dep);
-    if (NOBLE.test(dep)) {
+    if (allowsNpm(RULES[name], dep)) {
       if (entry?.["specifier"] !== "catalog:" || version !== catalog[dep])
         out.push(
           `${where}: ${dep} must be locked to the catalog version ${JSON.stringify(catalog[dep])}, got ${JSON.stringify(version)}`,
         );
-      else roots.push(`${dep}@${String(version)}`);
+      else if (NOBLE.test(dep)) roots.push(`${dep}@${String(version)}`);
     } else if (ws !== undefined && version !== `link:../${ws}`) {
       out.push(`${where}: ${dep} must be locked as link:../${ws}, got ${JSON.stringify(version)}`);
     }
@@ -549,7 +586,7 @@ export function referenceViolation(
   if (!declared.has(dep))
     return `${where} ${JSON.stringify(spec)}: ${dep} is not a declared runtime dependency of packages/${name}`;
   const ws = gatedByPackageName(dep);
-  return NOBLE.test(dep) || (ws !== undefined && RULES[name].workspace.includes(ws))
+  return allowsNpm(RULES[name], dep) || (ws !== undefined && RULES[name].workspace.includes(ws))
     ? undefined
     : `${where} ${JSON.stringify(spec)}: ${dep} is not allowed in packages/${name}`;
 }
@@ -715,11 +752,16 @@ export const VECTOR_PUBLISHERS: Readonly<Record<string, readonly string[]>> = {
   // circomlib's Poseidon parameters and known answers, for the tier tree (P1-17b).
   iden3: ["iden3/circomlib", "iden3/circomlibjs"],
   rfc: [],
+  // Semaphore's proving key and witness calculator, from the host Semaphore's
+  // own packages download them from, for the client's prover (P2-21).
+  "snark-artifacts": [],
 };
 
 const RAW =
   /^https:\/\/raw\.githubusercontent\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\/([0-9a-f]{40})\/([A-Za-z0-9_./-]+)$/;
 const RFC = /^https:\/\/www\.rfc-editor\.org\/rfc\/(rfc[0-9]+)\.txt$/;
+const SNARK_ARTIFACT =
+  /^https:\/\/snark-artifacts\.pse\.dev\/semaphore\/([0-9]+\.[0-9]+\.[0-9]+)\/[A-Za-z0-9_-]+\.(?:zkey|wasm)$/;
 const TAG = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 /**
@@ -729,7 +771,9 @@ const TAG = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
  * with a tag of that repository: GitHub serves any commit in a repository's
  * fork network under the parent's name, so the commit alone doesn't show the
  * publisher made it, but a tag resolves only against the repository's own
- * refs. An RFC's text is never revised in place; its tag is the RFC name.
+ * refs. An RFC's text is never revised in place; its tag is the RFC name. A
+ * Semaphore artifact sits under its release's path on PSE's host, which has
+ * no commits; its tag is that release, and the manifest's sha256 is the pin.
  */
 export function provenanceUrls(path: string, source: string, tag: string): string[] | string {
   const publisher = path.split("/")[0] ?? "";
@@ -740,6 +784,11 @@ export function provenanceUrls(path: string, source: string, tag: string): strin
     return publisher === "rfc" && tag === rfc[1]
       ? [source]
       : `${path}: an RFC goes under rfc/ with its name as the tag`;
+  const artifact = SNARK_ARTIFACT.exec(source);
+  if (artifact !== null)
+    return publisher === "snark-artifacts" && tag === artifact[1]
+      ? [source]
+      : `${path}: a Semaphore artifact goes under snark-artifacts/ with its release as the tag`;
   const raw = RAW.exec(source);
   if (raw === null || source.split("/").includes(".."))
     return `${path}: source must be a raw.githubusercontent.com URL pinned to a full commit hash`;

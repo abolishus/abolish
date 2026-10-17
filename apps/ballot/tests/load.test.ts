@@ -513,21 +513,27 @@ describe("the whole board", () => {
       ).toEqual({ ok: false, problem: "bad-answer" });
   });
 
-  test("a board that never ends is refused once it passes the cap, not read forever", async () => {
-    // A full page of one-kilobyte entries, whatever position is asked, under a 1 MiB cap.
-    const { calls, fetchFn } = network(() => ({
-      status: 200,
-      body: JSON.stringify({ entries: Array.from({ length: PAGE }, () => "00".repeat(1024)) }),
-    }));
-    expect(await loadBoard(DEPLOYMENT, ID, fetchFn, 1024 * 1024)).toEqual({
+  test("a board that never ends is refused once it runs out the budget, not read forever", async () => {
+    // Each page costs 64 KiB of the budget and each entry its bytes and 64.
+    const MiB = 1024 * 1024;
+    const kilobytes = Array.from({ length: PAGE }, () => "00".repeat(1024));
+    const full = network(() => ({ status: 200, body: JSON.stringify({ entries: kilobytes }) }));
+    expect(await loadBoard(DEPLOYMENT, ID, full.fetchFn, MiB)).toEqual({
       ok: false,
       problem: "bad-answer",
     });
-    expect(calls).toHaveLength(5);
-    // A board of exactly the cap is read.
-    const exact = served(Array.from({ length: 1024 }, () => "00".repeat(1024)));
-    const loaded = await loadBoard(DEPLOYMENT, ID, exact.fetchFn, 1024 * 1024);
-    expect(loaded.ok && loaded.entries.length).toBe(1024);
+    expect(full.calls).toHaveLength(4);
+    // One tiny entry a page: the pages' cost stops it, after 16 requests for 1 MiB.
+    const tiny = network(() => ({ status: 200, body: JSON.stringify({ entries: [ENTRY] }) }));
+    expect(await loadBoard(DEPLOYMENT, ID, tiny.fetchFn, MiB)).toEqual({
+      ok: false,
+      problem: "bad-answer",
+    });
+    expect(tiny.calls).toHaveLength(16);
+    // A board within the budget is read: three full pages of kilobyte entries.
+    const within = served(Array.from({ length: 3 * PAGE }, () => "00".repeat(1024)));
+    const loaded = await loadBoard(DEPLOYMENT, ID, within.fetchFn, MiB);
+    expect(loaded.ok && loaded.entries.length).toBe(3 * PAGE);
   });
 
   test("the largest entry is read alone in a page", async () => {

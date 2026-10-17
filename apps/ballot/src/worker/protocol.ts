@@ -64,8 +64,11 @@ export interface SealRequest {
  * Finds the voter's cell in the version-5 poll the worker last checked,
  * which `definitionHash` must name, from `entries`, the whole board as the
  * API serves it (`voterCellV5`; T-10, T-13): the identity commitment of
- * `secret`, registered in `tier` and `group`, replayed under the registrars
- * this build pins (`registrars`, `threshold`). The worker keeps the cell's
+ * `secret`, registered in `tier` and `group`, replayed under `registrars`
+ * and `threshold`, which the page takes from its build's deployment, as it
+ * does the panels (the worker trusts the page with them as it does with the
+ * secret; a wrong set only refuses, since the cell's root still binds the
+ * leaves at the cast). The worker keeps the cell's
  * leaves and the commitment for `cast`; the page gets the cell to seal in.
  */
 export interface FindCellRequest {

@@ -75,8 +75,12 @@ const MAX_PAGE_ANSWER = 2 * Math.max(MAX_PAGE_BYTES, MAX_ENTRY) + 3 * PAGE_ENTRI
 // The most of a board the client reads before it gives up: the group
 // registry's records for a large tier run to tens of megabytes (P2-21 part
 // 3, Known-weak), and a server that never ends the board must not exhaust
-// the device (T-52).
+// the device (T-52). Each entry is charged its bytes and a fixed cost, and
+// each page a fixed cost, so a server answering with tiny entries, one per
+// page, runs the budget out within a few thousand requests too.
 const MAX_BOARD_BYTES = 256 * 1024 * 1024;
+const ENTRY_COST = 64;
+const PAGE_COST = 64 * 1024;
 const MAX_RPC_ANSWER = 4096;
 
 // No cookie, no referrer, no cache and no redirect to anywhere else: each
@@ -249,7 +253,8 @@ export type LoadedBoard =
  * requests name the election and positions only, never a group, region or
  * leaf: a board filtered to the voter's group would tell the server their
  * region (T-10, T-13). A page longer than asked for, an entry that isn't
- * lowercase hex, or a board past `maxBytes` of entries is `bad-answer`.
+ * lowercase hex, or a board that runs out the `maxBytes` budget is
+ * `bad-answer`.
  */
 export async function loadBoard(
   deployment: Deployment,
@@ -259,7 +264,7 @@ export async function loadBoard(
 ): Promise<LoadedBoard> {
   const id = toHex(electionId);
   const entries: Uint8Array[] = [];
-  let total = 0;
+  let budget = maxBytes;
   try {
     for (;;) {
       const url = `${deployment.api}/board/entries?electionId=${id}&start=${entries.length}&limit=${PAGE_ENTRIES}`;
@@ -271,9 +276,10 @@ export async function loadBoard(
       if (!response.ok) throw new Stop("unreachable");
       const page = entriesOf(await readJson(response, MAX_PAGE_ANSWER), PAGE_ENTRIES);
       if (page.length === 0) return { ok: true, entries };
+      budget -= PAGE_COST;
       for (const entry of page) {
-        total += entry.length;
-        if (total > maxBytes) throw new Stop("bad-answer");
+        budget -= entry.length + ENTRY_COST;
+        if (budget < 0) throw new Stop("bad-answer");
         entries.push(entry);
       }
     }

@@ -223,6 +223,14 @@ describe("ballots.submit with admission", () => {
     expect(await readBoard(app, electionId)).toHaveLength(before);
   });
 
+  test("an empty ballot is BALLOT_REJECTED with decode, as the verifier judges it", async () => {
+    const r = await submit(new Uint8Array(0));
+    expect(r.status).toBe(422);
+    const body = (await r.json()) as Record<string, unknown>;
+    expect(body["code"]).toBe("BALLOT_REJECTED");
+    expect(body["data"]).toEqual({ code: "decode" });
+  });
+
   test("a ballot without an outcome in time is BALLOTS_UNAVAILABLE, and writes nothing", async () => {
     const ballot = entries.find((_, at) => at > 0 && !rejected.has(at))!.payload;
     const before = (await readBoard(app, electionId)).length;

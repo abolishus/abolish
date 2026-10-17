@@ -218,6 +218,9 @@ describe("the worker judges queued ballots as core's submit would", () => {
     expect(label(await ballots.submit(new Uint8Array(32).fill(7), Uint8Array.of(0, 2, 1)))).toBe(
       "unknown-election",
     );
+    now = definition.opens_at + 60n;
+    // Empty bytes are the verifier's to refuse, as the contract lets them through.
+    expect(label(await ballots.submit(electionId, new Uint8Array(0)))).toBe("rejected:decode");
     expect(await readBoard(app, electionId)).toHaveLength(1);
   });
 

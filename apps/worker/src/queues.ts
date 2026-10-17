@@ -85,7 +85,8 @@ export const QUEUES = {
       ballot: z
         .string()
         .max(2 * MAX_BOARD_PAYLOAD)
-        .regex(/^(?:[0-9a-f]{2})+$/),
+        // As the contract's: an empty ballot is the verifier's to refuse (decode).
+        .regex(/^(?:[0-9a-f]{2})*$/),
     }),
   },
 } as const satisfies Record<string, QueueSpec>;

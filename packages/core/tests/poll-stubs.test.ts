@@ -54,6 +54,9 @@ const key = (b: number) => identityKey(new Uint8Array(32).fill(b));
 const ascending = (keys: Uint8Array[]) =>
   keys.sort((a, b) => Buffer.from(a).compare(Buffer.from(b)));
 
+/** A compressed key with x = 1, below p: 1 − 3 + b is a non-residue mod p, so no point has it. */
+const OFF_CURVE = Uint8Array.of(2, ...new Uint8Array(31), 1);
+
 const DEPLOYMENT: PollStubDeployment = {
   l2ChainId: 84532n,
   l1ChainId: 11155111n,
@@ -312,6 +315,21 @@ describe("stubPolls", () => {
     expect(await stubs()).toEqual([]);
   });
 
+  test("fails `stub-refused` a poll holding a value with no encoding, and stubs the rest", async () => {
+    // A member count past u64: no codec writes it.
+    const bad = await rooted({}, [
+      {
+        ...ELECTORATE[0]!,
+        regions: [(1n << 64n).toString()],
+        cells: [{ root: ELECTORATE[0]!.cells[0]!.root, members: (1n << 64n).toString() }],
+      },
+    ]);
+    const good = await rooted({}, ELECTORATE, 30);
+    expect(await run()).toEqual({ stubbed: 1, failed: { "stub-refused": 1 } });
+    expect((await row(bad.id)).failure).toBe("stub-refused");
+    expect((await row(good.id)).state).toBe("ceremony");
+  });
+
   test("leaves every poll not yet rooted, and takes the oldest STUBS_PER_RUN first", async () => {
     const waiting = await rooted();
     await db.admin`UPDATE account_polls SET state = 'created', electorate = NULL WHERE id = ${waiting.id}`;
@@ -435,9 +453,15 @@ describe("pollStubDeploymentRule", () => {
     expect(refused({ board: address(0xa1) })).toBe("chain");
     expect(refused({ receiptKeys: [] })).toBe("receipt-keys");
     expect(refused({ receiptKeys: [...DEPLOYMENT.receiptKeys].reverse() })).toBe("receipt-keys");
-    expect(refused({ l1InclusionBound: 0 })).toBeUndefined();
+    // Registration rule 6's bounds, at each edge.
+    expect(refused({ l1InclusionBound: 600 })).toBeUndefined();
+    expect(refused({ l1InclusionBound: 599 })).toBe("sequencing");
+    expect(refused({ l1InclusionBound: 3601 })).toBe("sequencing");
+    expect(refused({ sequencingWindow: 3601n })).toBe("sequencing");
+    expect(refused({ maxSequencerDrift: 1801n })).toBe("sequencing");
     expect(refused({ board: new Uint8Array(19).fill(0xa2) })).toBe("encoding");
-    // x ≥ p: no canonical point.
+    // Off the curve, then x ≥ p: no canonical point either way.
+    expect(refused({ receiptKeys: [OFF_CURVE] })).toBe("encoding");
     expect(refused({ receiptKeys: [Uint8Array.of(2, ...new Uint8Array(32).fill(0xff))] })).toBe(
       "encoding",
     );
@@ -485,8 +509,11 @@ describe("ceremony_stubs and account_polls' stub", () => {
     await expect(app`UPDATE account_polls SET stub_hash = NULL WHERE id = ${id}`).rejects.toThrow(
       /check/,
     );
-    // A failed poll keeps the stub it failed with.
+    // A failed poll keeps the stub it failed with, but never without its electorate.
     await app`UPDATE account_polls SET state = 'failed', failure = 'stub-refused' WHERE id = ${id}`;
     expect((await row(id)).stub_hash).not.toBeNull();
+    await expect(app`UPDATE account_polls SET electorate = NULL WHERE id = ${id}`).rejects.toThrow(
+      /account_polls_stub/,
+    );
   });
 });

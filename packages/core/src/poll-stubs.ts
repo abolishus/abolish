@@ -29,6 +29,7 @@ import {
   newDisplayTextSalt,
   type Panel,
   PanelError,
+  PARAMETERS,
   panelId,
   profileCombinationRule,
   QUESTION_METHODS,
@@ -150,9 +151,11 @@ function stubRule(stub: ElectionDefinitionV5): string | undefined {
 /**
  * The rule every stub built under `deployment` would break, or `undefined`:
  * the definition's own rules on a stub of a two-option poll with one
- * member, so a panel, chain or receipt-key setting the registry would refuse
- * is found when the worker starts, before it fails any poll. The caller
- * refuses to start on anything but `undefined`.
+ * member, and registration rule 6's bounds on the inclusion bound and the
+ * sequencing parameters (`sequencing`), so a setting the registry would
+ * refuse is found when the worker starts, before any seat spends a ceremony
+ * on a stub that can't register (T-25). The caller refuses to start on
+ * anything but `undefined`.
  */
 export function pollStubDeploymentRule(deployment: PollStubDeployment): string | undefined {
   let stub: ElectionDefinitionV5;
@@ -187,6 +190,15 @@ export function pollStubDeploymentRule(deployment: PollStubDeployment): string |
   }
   const rule = stubRule(stub);
   if (rule !== undefined) return rule;
+  // Registration rule 6 (docs/spec/contracts.md), which the definition's
+  // own rules leave to the registry and verifier 2.6.
+  if (
+    deployment.l1InclusionBound < PARAMETERS.MIN_INCLUSION_BOUND ||
+    deployment.l1InclusionBound > PARAMETERS.MAX_INCLUSION_BOUND ||
+    deployment.sequencingWindow > BigInt(PARAMETERS.MAX_SEQUENCING_WINDOW) ||
+    deployment.maxSequencerDrift > BigInt(PARAMETERS.MAX_SEQUENCER_DRIFT)
+  )
+    return "sequencing";
   try {
     // A field outside its codec's range (an address of the wrong length, a
     // receipt key that isn't a point) has no encoding at all.
@@ -210,7 +222,10 @@ const tierElectorate = (t: StoredTierElectorate): TierElectorate => ({
 export type StubFailure =
   /** The draft closes too soon after the `opens_at` this run would set. */
   | "closes-too-soon"
-  /** The stub breaks a definition rule: never for a draft submission accepted, so a bug or a setting. */
+  /**
+   * The stub breaks a definition rule or a stored value has no encoding:
+   * never for a draft submission accepted, so a bug or a setting.
+   */
   | "stub-refused";
 
 /** One run's outcome, in counts only (T-10, T-67). */
@@ -229,7 +244,8 @@ export const STUBS_PER_RUN = 20;
  * opening `SETUP_SECONDS` from now (rule 10), with a fresh display-text
  * salt. A poll whose draft would then close within `MIN_OPEN_SECONDS` of
  * opening fails `closes-too-soon`, which registration would refuse as
- * `timing`; a stub that breaks a definition rule fails `stub-refused`.
+ * `timing`; a stub that breaks a definition rule, or holds a value with no
+ * encoding, fails `stub-refused`.
  * Otherwise the stub and its display text are recorded and the poll moves
  * to `ceremony` naming the stub, in one transaction. Safe to rerun after a
  * crash at any point: a poll moves only from `rooted`, holding the
@@ -238,11 +254,10 @@ export const STUBS_PER_RUN = 20;
 export async function stubPolls(
   client: Sql,
   deployment: PollStubDeployment,
-  options: { readonly now: Date; readonly salt?: () => Uint8Array },
+  options: { readonly now: Date },
 ): Promise<PollStubReport> {
   const db = drizzle({ client });
   const report: PollStubReport = { stubbed: 0, failed: {} };
-  const salt = options.salt ?? newDisplayTextSalt;
   const polls = await db
     .select({
       id: accountPolls.id,
@@ -280,21 +295,35 @@ export async function stubPolls(
       await fail(p.id, electionId, "closes-too-soon");
       continue;
     }
-    const text: DisplayTextV2 = draftDisplayText(draft, salt());
-    const displayText = encodeDisplayTextV2(text);
-    const stub = pollStub(deployment, {
-      electionId,
-      questions: draftQuestions(draft),
-      electorate: (p.electorate as StoredTierElectorate[]).map(tierElectorate),
-      opensAt,
-      closesAt: draft.closesAt,
-      displayTextCommitment: displayTextV2Commitment(text),
-    });
-    if (stubRule(stub) !== undefined) {
+    let built: { displayText: Uint8Array; stub: Uint8Array; stubHash: Uint8Array } | undefined;
+    try {
+      const text: DisplayTextV2 = draftDisplayText(draft, newDisplayTextSalt());
+      const stub = pollStub(deployment, {
+        electionId,
+        questions: draftQuestions(draft),
+        electorate: (p.electorate as StoredTierElectorate[]).map(tierElectorate),
+        opensAt,
+        closesAt: draft.closesAt,
+        displayTextCommitment: displayTextV2Commitment(text),
+      });
+      built =
+        stubRule(stub) === undefined
+          ? {
+              displayText: encodeDisplayTextV2(text),
+              stub: encodeElectionDefinitionV5(stub),
+              stubHash: electionStubV5Hash(stub),
+            }
+          : undefined;
+    } catch (e) {
+      // A stored value outside its codec's range has no encoding: this poll
+      // fails, rather than stopping every later one behind it (T-25).
+      if (!(e instanceof EncodeError)) throw e;
+    }
+    if (built === undefined) {
       await fail(p.id, electionId, "stub-refused");
       continue;
     }
-    const stubHash = electionStubV5Hash(stub);
+    const { displayText, stubHash } = built;
     const moved = await db.transaction(async (tx) => {
       const rows = await tx
         .update(accountPolls)
@@ -306,7 +335,7 @@ export async function stubPolls(
       await tx.insert(ceremonyStubs).values({
         stubHash,
         electionId,
-        stub: encodeElectionDefinitionV5(stub),
+        stub: built.stub,
         displayText,
         opensAt,
         createdAt: options.now,

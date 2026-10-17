@@ -14,9 +14,10 @@
 --
 -- T-10: operational. Every value is public once the poll is registered:
 -- the stub, which the definition becomes, and the display text, which is
--- pinned beside it. It names no account and no poll, and nothing references
--- it by key. A stub whose author deletes their account stays, unattributed,
--- like an unused identifier (rule 16).
+-- pinned beside it. It names no account, and no poll but by the election
+-- identifier the poll's own row already holds; nothing references it by
+-- key. A stub whose author deletes their account stays, unattributed, like
+-- an unused identifier (rule 16).
 --
 -- Operational: a wipe loses the ceremonies in setup, never a result.
 CREATE TABLE ceremony_stubs (

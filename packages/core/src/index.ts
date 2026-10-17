@@ -4,6 +4,17 @@ export {
   SubmitError,
   type SubmitErrorCode,
 } from "./admission.ts";
+export {
+  type AnchorChain,
+  anchorBoards,
+  type AnchorFinding,
+  type AnchorFindingCode,
+  type AnchoringClock,
+  type AnchorReport,
+  type AnchorRun,
+  readCheckpoints,
+  takeCheckpoints,
+} from "./anchoring.ts";
 export { auditBoard, BoardAuditError, type BoardAuditCode, listBoards } from "./audit.ts";
 export {
   appendEntry,
@@ -48,6 +59,7 @@ export {
   accountUsers,
   accountVerifications,
   boardBallotKeys,
+  boardCheckpoints,
   boardEntries,
   boardSubtrees,
   electionDefinitions,

@@ -1,10 +1,10 @@
 // A worker for every queue over one Redis (or Dragonfly) connection, and the
 // schedules that queue the board audit, the identity-backup prune and, when
-// configured, the Tier 0 index refresh and boundary. Job
+// configured, the board anchoring and the Tier 0 index refresh and boundary. Job
 // data is parsed against its queue's schema before it is handled, and every
 // outcome is logged by kind (T-10).
 
-import type { Tier0Batches } from "@abolishus/core";
+import type { AnchorChain, Tier0Batches } from "@abolishus/core";
 import { Queue, Worker } from "bullmq";
 import type { Redis } from "ioredis";
 import type { Sql } from "postgres";
@@ -22,6 +22,13 @@ export interface WorkerOptions {
   readonly auditEveryMs: number;
   /** How often expired identity backups are deleted; daily unless a test says otherwise. */
   readonly pruneEveryMs?: number;
+  /**
+   * The L1 anchor to anchor every board through, and how often to run: well
+   * within the anchor's period, so each checkpoint is sent soon after its
+   * period ends and a failed call is retried long before its deadline.
+   * Without it, nothing is anchored.
+   */
+  readonly anchor?: { readonly chain: AnchorChain; readonly everyMs: number };
   /** The clock handlers judge time by; the system clock unless a test moves it. */
   readonly now?: () => Date;
   /** The first segment of every key; tests give each run its own. */
@@ -72,6 +79,7 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
     sql,
     log,
     now: options.now ?? (() => new Date()),
+    ...(options.anchor === undefined ? {} : { anchor: options.anchor.chain }),
     ...(options.tier0 === undefined ? {} : { tier0: options.tier0.batches }),
   };
   const running = (key: QueueKey) =>
@@ -131,6 +139,9 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
       id: "identity-backup-prune",
       every: options.pruneEveryMs ?? PRUNE_EVERY_MS,
     },
+    ...(options.anchor === undefined
+      ? []
+      : ([{ key: "boardAnchor", id: "board-anchor", every: options.anchor.everyMs }] as const)),
     ...(options.tier0 === undefined
       ? []
       : ([

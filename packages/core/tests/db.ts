@@ -71,7 +71,12 @@ const typical = decodeElectionDefinition(
  * have a board: entries are encoded under the board-entry version a stored
  * definition pins, `boardVersion` here (the vector's own 1 by default).
  */
-export async function newElection(sql: Sql, boardVersion = 1): Promise<Uint8Array> {
+export async function newElection(
+  sql: Sql,
+  boardVersion = 1,
+  /** Another L1 anchor than the vector's. */
+  l1Anchor: Uint8Array = typical.l1_anchor,
+): Promise<Uint8Array> {
   const electionId = new Uint8Array(randomBytes(32));
   const pins = typical.profile.pins.map((p) =>
     p.record_type === RECORD_TYPES.boardEntry ? { ...p, version: boardVersion } : p,
@@ -81,6 +86,7 @@ export async function newElection(sql: Sql, boardVersion = 1): Promise<Uint8Arra
     encodeElectionDefinition({
       ...typical,
       election_id: electionId,
+      l1_anchor: l1Anchor,
       profile: { ...typical.profile, pins },
     }),
   );

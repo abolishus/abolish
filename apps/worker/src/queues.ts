@@ -35,6 +35,13 @@ export const QUEUES = {
    */
   boardAudit: { name: "{board-audit}", side: "board", data: z.strictObject({}) },
   /**
+   * Takes every board's checkpoints for the ended anchoring periods and
+   * anchors them on L1 (core's anchorBoards; docs/spec/board.md, Segments
+   * and checkpoints; T-23, T-24, T-49). Runs on a schedule, only when the
+   * worker has an anchor to send through, and takes no data.
+   */
+  boardAnchor: { name: "{board-anchor}", side: "board", data: z.strictObject({}) },
+  /**
    * Deletes expired identity backups (core's pruneIdentityBackups; T-52,
    * T-66). Runs on a schedule and takes no data: the table is on neither
    * side's queues, and nothing about a backup is ever queued (T-10, T-20).

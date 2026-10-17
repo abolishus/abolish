@@ -132,6 +132,15 @@ test("schedules the board audit, and runs it once at start", async () => {
   ]);
 });
 
+test("schedules no anchoring run without an anchor", async () => {
+  const queue = new Queue(QUEUES.boardAnchor.name, { connection, prefix });
+  try {
+    expect(await queue.getJobSchedulers()).toEqual([]);
+  } finally {
+    await queue.close();
+  }
+});
+
 test("schedules the identity-backup prune daily, and runs it once at start", async () => {
   expect(PRUNE_EVERY_MS).toBe(86_400_000);
   const schedulers = await prunes.getJobSchedulers();
@@ -240,6 +249,10 @@ test("a handler's own error message is neither logged nor kept, the events strea
     prefix: own,
     handlers: {
       boardAudit: async () => {
+        throw new Error(`params: ${MARKER}`);
+      },
+      // Not scheduled: this worker has no anchor.
+      boardAnchor: async () => {
         throw new Error(`params: ${MARKER}`);
       },
       identityBackupPrune: async () => {

@@ -2,6 +2,8 @@
 // data against its queue's schema) and calls core: transports stay thin.
 
 import {
+  type AnchorChain,
+  anchorBoards,
   auditBoard,
   BoardAuditError,
   listBoards,
@@ -28,6 +30,8 @@ export interface JobContext {
   readonly log: Log;
   /** The clock expiry is judged by; injected so tests can move it. */
   readonly now: () => Date;
+  /** The L1 anchor the anchoring job sends through; its queue runs only with one. */
+  readonly anchor?: AnchorChain;
   /** The Tier 0 batch job, when the worker is configured for it; its queues run only then. */
   readonly tier0?: Tier0Batches;
 }
@@ -63,6 +67,24 @@ async function boardAudit(ctx: JobContext, _data: JobData<"boardAudit">): Promis
     }
   }
   if (findings > 0) throw new JobError("board-audit-findings");
+}
+
+/**
+ * One anchoring run over every board. Each finding is logged; the job fails
+ * if there was any, since each one is an election at risk of failing on its
+ * anchors (or one this worker can't anchor).
+ */
+async function boardAnchor(ctx: JobContext, _data: JobData<"boardAnchor">): Promise<void> {
+  if (ctx.anchor === undefined) throw new JobError("internal");
+  const { findings } = await anchorBoards(ctx.sql, ctx.anchor);
+  for (const f of findings)
+    ctx.log({
+      queue: "{board-anchor}",
+      finding: f.code,
+      election: hex(f.electionId),
+      ...(f.segment === undefined ? {} : { segment: f.segment }),
+    });
+  if (findings.length > 0) throw new JobError("board-anchor-findings");
 }
 
 /**
@@ -114,4 +136,4 @@ async function tier0Boundary(ctx: JobContext, _data: JobData<"tier0Boundary">): 
 
 export const HANDLERS: {
   readonly [K in QueueKey]: (ctx: JobContext, data: JobData<K>) => Promise<void>;
-} = { boardAudit, identityBackupPrune, tier0Index, tier0Boundary };
+} = { boardAudit, boardAnchor, identityBackupPrune, tier0Index, tier0Boundary };

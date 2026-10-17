@@ -4,8 +4,10 @@
 // @abolishus/crypto's transcript check (part of 3.1, and 3.2). The context is
 // rebuilt from the definition and the pinned panel, never read from the
 // transcript, so one election's ceremony can't pass for another's (T-37).
-// Under definition version 6 with an author panel, 2.5 also fails an author
-// key that is a default seat's (`default-seat`), the default run's
+// Under definition version 6, 2.5 fails a poll on the civic record whose
+// default panel the release pins as transitional (`panel-kind`, T-14), and
+// with an author panel an author key that is a default seat's
+// (`default-seat`); the default run's
 // `duplicate-key` reads the author keys (T-14), and 3.1 and 3.2 hold per
 // panel: the author panel's transcript, found by `author_transcript_hash`,
 // is checked under its own context, quorum and participation, and its
@@ -25,19 +27,23 @@ import {
   type DecodeErrorCode,
   decodeBoardEntry,
   type ElectionDefinition,
+  type ElectionDefinitionV6,
   type Panel,
   panelId,
   pinnedVersion,
+  POLL_CLASSES,
   RECORD_TYPES,
   type RegisteredKeys,
   type SeatReason,
 } from "@abolishus/crypto";
 import { bytesToHex } from "@noble/hashes/utils.js";
+import { PINNED_PANELS, type PinnedPanel, pinnedKind } from "./panels.ts";
 
 /** Codes the ceremony checks report besides a transcript's own (docs/spec/verifier.md, Key ceremony). */
 export type CeremonyCode =
   | Exclude<CeremonyErrorCode, DecodeErrorCode>
   | "panel-unpinned"
+  | "panel-kind"
   | "default-seat"
   | "ceremony-transcript-missing"
   | "ceremony-participation"
@@ -118,7 +124,10 @@ const TRANSCRIPT_CODES: ReadonlySet<string> = new Set<CeremonyErrorCode>([
   "ceremony-signature",
 ]);
 
-/** The fields the ceremony checks read, the same in every definition version. */
+/**
+ * The fields the ceremony checks read, the same in every definition version,
+ * and version 6's `poll_class`, which 2.5's `panel-kind` reads.
+ */
 type CeremonyDefinition = Pick<
   ElectionDefinition,
   | "profile"
@@ -129,7 +138,8 @@ type CeremonyDefinition = Pick<
   | "threshold"
   | "panel_size"
   | "ceremony_transcript_hash"
->;
+> &
+  Partial<Pick<ElectionDefinitionV6, "poll_class">>;
 
 const equal = (a: Uint8Array, b: Uint8Array) =>
   a.length === b.length && a.every((x, i) => x === b[i]);
@@ -262,7 +272,8 @@ const combine = (...parts: readonly CeremonyOutcome[]): CeremonyOutcome =>
  * `ceremony` once the default panel's transcript check reached the seats.
  * `stubHash` is the definition's stub hash under its own version, which the
  * transcript's context binds (T-37). `author` is the definition's author
- * panel, undefined when it has none (definition.ts, `authorRunOf`).
+ * panel, undefined when it has none (definition.ts, `authorRunOf`). `pins`
+ * are the panels the release pins, whose kinds 2.5's `panel-kind` reads.
  */
 export function ceremonyChecks(
   d: CeremonyDefinition,
@@ -271,13 +282,14 @@ export function ceremonyChecks(
   author: AuthorRun | undefined,
   entries: readonly Uint8Array[],
   boardEntryVersion: BoardEntryVersion,
+  pins: readonly PinnedPanel[] = PINNED_PANELS,
 ): {
   readonly rows: ReadonlyMap<string, CeremonyOutcome>;
   readonly report?: CeremonyReport;
   /**
    * The default panel's registered key set, once 3.2 passed for every panel
-   * (and, beside an author panel, its approvals approve and 2.5 found no
-   * shared seat): what ballots are checked against (5.1 to 5.4).
+   * and 2.5 didn't fail (and, beside an author panel, its approvals
+   * approve): what ballots are checked against (5.1 to 5.4).
    */
   readonly registered?: readonly RegisteredKeys[];
 } {
@@ -298,16 +310,26 @@ export function ceremonyChecks(
     return {
       rows: rows({ status: "fail", code: "panel-unpinned", at: {} }, NOT_REACHED, NOT_REACHED),
     };
-  const authorKeys = author?.panel.keys ?? [];
-  // 2.5's `panel-kind` needs the pinned panel's kind, which the bundle
-  // doesn't carry yet, so it can't be decided: 2.5 never passes here, but
-  // fails on `default-seat`, so no trustee holds shares of both halves
+  // 2.5's `panel-kind`: a poll on the civic record (classes 2 and 3) under
+  // a default panel the release pins as transitional fails, so no such poll
+  // runs under a panel we alone hold (T-14). Only a pinned panel has a kind
+  // to read: one the release doesn't pin (none yet, the bundle's panel being
+  // a local input) leaves `panel-kind` undecided, never failed, since a
+  // release that pins it as independent passes it (T-36).
+  const civic =
+    d.poll_class === POLL_CLASSES.organisational || d.poll_class === POLL_CLASSES.civicReferendum;
+  const transitional = civic && pinnedKind(bytesToHex(d.panel_id), pins) === "transitional";
+  // `default-seat`, so no trustee holds shares of both halves
   // (trustee-identity.md, Author panel identifier, rule 4; T-14). The keys
   // are compared as bytes: both are strictly decoded compressed points,
   // whose encoding is unique.
+  const authorKeys = author?.panel.keys ?? [];
   const shared = authorKeys.findIndex((k) => panel.keys.some((q) => equal(k, q)));
-  const r25: CeremonyOutcome =
-    shared === -1
+  // 2.5 never passes here: the pinned panel's comparison with the keys
+  // registered on L2 isn't implemented.
+  const r25: CeremonyOutcome = transitional
+    ? { status: "fail", code: "panel-kind", at: {} }
+    : shared === -1
       ? NOT_IMPLEMENTED
       : { status: "fail", code: "default-seat", at: { seat: shared + 1 } };
   // A transcript version this verifier can't read may be one a later release
@@ -349,7 +371,10 @@ export function ceremonyChecks(
     return {
       rows: rows(r25, combine(own.r31, registration), own.r32),
       ...(own.checked && { report: own.report }),
-      ...(own.checked && own.registered !== undefined && { registered: own.registered }),
+      // No ballot is judged in an election 2.5 fails (`panel-kind`).
+      ...(r25.status !== "fail" &&
+        own.checked &&
+        own.registered !== undefined && { registered: own.registered }),
     };
 
   // The author panel's run: its context binds `author_panel_id` and
@@ -416,8 +441,9 @@ export function ceremonyChecks(
       },
     }),
     // Nothing is checked against one half's key set: both panels' runs must
-    // hold, the author panel's registration (its approvals) too, and no
-    // author seat may share a default seat's key (T-14, T-37, T-54).
+    // hold, the author panel's registration (its approvals) too, and 2.5
+    // mustn't fail, so no author seat shares a default seat's key (T-14,
+    // T-37, T-54).
     ...(r32.status === "pass" &&
       approvals.status === "pass" &&
       r25.status !== "fail" &&

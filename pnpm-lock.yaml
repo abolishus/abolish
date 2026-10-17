@@ -580,6 +580,9 @@ importers:
       '@abolishus/verifier':
         specifier: workspace:*
         version: link:../../packages/verifier
+      '@noble/hashes':
+        specifier: 'catalog:'
+        version: 2.4.0
     devDependencies:
       '@types/node':
         specifier: 'catalog:'

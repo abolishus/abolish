@@ -66,8 +66,7 @@ const meta = {
     poll: POLL,
     questions: RIVERSIDE,
     arrival: <ArrivalCheck definitionHash={HASH} />,
-    onSend: fn(),
-    onChallenge: fn(),
+    onSeal: fn(),
   },
 } satisfies Meta<typeof AnswerQuestions>;
 
@@ -214,8 +213,8 @@ export const EmptiedAfterChange: Story = {
     await expect(canvas.getByText(/Choose 1 more to go on/)).toBeVisible();
     await expect(canvas.queryByText(/You skipped/)).toBeNull();
     await expect(canvas.queryByText("Skipped: counts as no answer")).toBeNull();
-    await userEvent.click(canvas.getByRole("button", { name: "Send my answers" }));
-    await expect(args.onSend).not.toHaveBeenCalled();
+    await userEvent.click(canvas.getByRole("button", { name: "Seal my answers" }));
+    await expect(args.onSeal).not.toHaveBeenCalled();
     await expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent(EVENTS.question);
     await expect(canvas.getByText("This question needs exactly 2")).toBeVisible();
   },
@@ -235,8 +234,8 @@ export const AtLeastOne: Story = {
     await userEvent.click(canvas.getByText("Monthly river clean-up"));
     await userEvent.click(canvas.getByText("A Saturday farmers' market"));
     await userEvent.click(canvas.getByRole("button", { name: "Check your answers" }));
-    await userEvent.click(canvas.getByRole("button", { name: "Send my answers" }));
-    await expect(args.onSend).toHaveBeenCalledWith([[0, 2]]);
+    await userEvent.click(canvas.getByRole("button", { name: "Seal my answers" }));
+    await expect(args.onSeal).toHaveBeenCalledWith([[0, 2]]);
   },
 };
 
@@ -267,11 +266,12 @@ const answerAll: Story["play"] = async ({ canvasElement, args }) => {
   await userEvent.click(canvas.getByRole("button", { name: "Check your answers" }));
   await expect(canvas.getByText("Free concerts in the bandstand")).toBeVisible();
   await expect(canvas.queryByText("Monthly river clean-up")).toBeNull();
-  await expect(args.onSend).not.toHaveBeenCalled();
-  await userEvent.click(canvas.getByRole("button", { name: "Check the encryption first" }));
-  await expect(args.onChallenge).toHaveBeenCalledWith([[1], [0, 3], [3]]);
-  await userEvent.click(canvas.getByRole("button", { name: "Send my answers" }));
-  await expect(args.onSend).toHaveBeenCalledWith([[1], [0, 3], [3]]);
+  await expect(args.onSeal).not.toHaveBeenCalled();
+  // The choice to cast or challenge comes after the seal's tracking code
+  // (sealed.tsx), never here.
+  await expect(canvas.queryByRole("button", { name: "Check the encryption first" })).toBeNull();
+  await userEvent.click(canvas.getByRole("button", { name: "Seal my answers" }));
+  await expect(args.onSeal).toHaveBeenCalledWith([[1], [0, 3], [3]]);
 };
 
 export const CheckYourAnswers: Story = { name: "Check your answers", play: answerAll };

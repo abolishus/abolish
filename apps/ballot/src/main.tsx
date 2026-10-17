@@ -13,7 +13,7 @@ import { parseLink } from "./link.ts";
 import { loadElection } from "./load.ts";
 import type { ElectionSource } from "./open.tsx";
 import { onSharedGatewayPath } from "./origin.ts";
-import { BallotWorker } from "./worker-client.ts";
+import { BallotWorker, WorkerFailure } from "./worker-client.ts";
 // No module imported here may do anything at import time (spawn a worker,
 // read storage): it would run before the path-gateway check below.
 import "./styles.css";
@@ -40,6 +40,30 @@ const source: ElectionSource = {
         entries,
         STAGING.panels,
       );
+    } catch (error) {
+      used.terminate();
+      if (worker === used) worker = undefined;
+      throw error;
+    }
+  },
+  // A seal and its opening come from the worker that checked the poll, which
+  // holds it; a stopped one fails them, and the screens check the poll anew.
+  async seal(definitionHash, cell, votes) {
+    const used = worker;
+    if (used === undefined) throw new WorkerFailure("no ballot worker");
+    try {
+      return await used.seal(definitionHash, cell, votes);
+    } catch (error) {
+      used.terminate();
+      if (worker === used) worker = undefined;
+      throw error;
+    }
+  },
+  async challenge(seal) {
+    const used = worker;
+    if (used === undefined) throw new WorkerFailure("no ballot worker");
+    try {
+      return await used.challenge(seal);
     } catch (error) {
       used.terminate();
       if (worker === used) worker = undefined;

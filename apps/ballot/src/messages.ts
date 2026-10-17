@@ -62,7 +62,7 @@ const enUS = {
   tryAgain: "Try again",
   notSentTitle: "Your answers weren't sent",
   notSent:
-    "This version of the ballot can't seal or send answers yet, so nothing left this device and nothing was counted.",
+    "This version of the ballot can seal answers but can't send them yet, so nothing left this device and nothing was counted.",
   answerAgain: "Answer again",
   // The arrival check (check.tsx).
   realPoll: "This is the real poll, checked",
@@ -173,10 +173,55 @@ const enUS = {
   unfitExplained: "Those questions can't be skipped. To answer one, use Change.",
   change: "Change",
   changeLabel: "Change your answer to question {number}",
-  send: "Send my answers",
+  seal: "Seal my answers",
+  sealExplained:
+    "Sealing encrypts your answers on this device. Nothing is sent: once they are sealed you choose whether to cast them or to check the encryption first.",
+  // A sealed ballot, before the choice (sealed.tsx).
+  sealingTitle: "Sealing your answers",
+  sealing: "This device is encrypting your answers. Nothing is sent.",
+  sealedTitle: "Your answers are sealed",
+  sealed:
+    "This device has encrypted your answers into a sealed ballot. No one can read it, including Abolish. Nothing has been sent.",
+  trackingCodeLabel: "Tracking code of your sealed ballot",
+  trackingCodeQr: "QR code of the tracking code {hash}",
+  trackingCodeFingerprint: "Fingerprint of the tracking code {hash}",
+  scanTitle: "Scan it now with your other device",
+  scan: "If you want to check this device, scan the code with another phone or computer before you choose. It keeps the code, so it can tell later whether this device opened the same ballot it showed you.",
+  chooseTitle: "Two ways to go on",
+  cast: "Cast this ballot",
+  castExplained: "Sends the sealed ballot to the public board, where it counts.",
   challenge: "Check the encryption first",
   challengeExplained:
-    "Checking the encryption first opens a sealed copy of your answers to show it holds exactly what you chose. That copy can never be counted, so you then send a fresh one.",
+    "Opens this sealed ballot so your other device can show it holds exactly what you chose. An opened ballot can never be counted, so you then answer again and seal a fresh one.",
+  challengeOptional:
+    "Optional. Checking now and then, by anyone, is what catches a device that changes votes.",
+  // A challenged ballot, opened (sealed.tsx).
+  openingTitle: "Opening your sealed ballot",
+  opening: "This device is opening the sealed ballot. Nothing is sent.",
+  openedTitle: "Your sealed ballot is opened",
+  opened:
+    "This device has opened the sealed ballot it showed you. It can't be counted now, and nothing was sent.",
+  openedCode: "The tracking code it opened",
+  checkElsewhereTitle: "Check it on your other device",
+  checkElsewhere:
+    "This screen was drawn by the device that sealed the ballot, so it can't vouch for itself. Save the opening and open it on the device that scanned the code: that device compares the two and shows what the ballot holds.",
+  saveOpening: "Save the opening",
+  savedOpeningNote:
+    "The opening shows how you answered this time. Keep it to yourself, and delete it once you have checked it.",
+  answerAgainExplained:
+    "Your answers aren't kept: you answer again, and this device seals them anew.",
+  // When sealing or opening stopped (sealed.tsx).
+  cantSealTitle: "This ballot can't seal answers for this poll yet",
+  cantSealCells:
+    "This poll's members are split by region, and this version of the ballot doesn't know yet which region is yours. Nothing was sealed or sent.",
+  cantSealVersion:
+    "This poll is of an older kind that this version of the ballot doesn't seal. Nothing was sealed or sent.",
+  sealFailedTitle: "This device couldn't seal your answers",
+  sealFailed:
+    "Nothing was sent. Answer again, or open the ballot from abolishus.eth or another address Abolish lists.",
+  openFailedTitle: "This device couldn't open the sealed ballot",
+  openFailed:
+    "The ballot it sealed can't be counted now, and nothing was sent. This copy of the ballot may be faulty: open it from abolishus.eth or another address Abolish lists.",
   // Proving membership (proving.tsx); each refusal names the check that stopped it.
   provingTitle: "Proving you can answer",
   proving:

@@ -9,6 +9,7 @@ import type { CheckedElection, ElectionRefusal } from "../src/election.ts";
 import { Frame, Note, Part, ScreenTitle, type PollClass } from "../src/frame.tsx";
 import { Ballot, BrokenLink, Checking, NotSent, Unavailable } from "../src/open.tsx";
 import { AnswerQuestions, CheckAnswers, QuestionStep } from "../src/questions.tsx";
+import { Opened, Sealed, SealStopped, Working } from "../src/sealed.tsx";
 
 // The client's CSP has `style-src 'self'`, which blocks every inline `style`
 // attribute (T-43); the e2e test renders only the screens without a poll, so
@@ -83,6 +84,7 @@ describe("the frame under the client's CSP", () => {
       definitionHash: POLL.definitionHash,
       version: 1,
       questions: [{ minSelections: 0, maxSelections: 1 }],
+      cells: 0,
       opensAt: 1_790_000_000n,
       closesAt: 1_792_000_000n,
       translations: [
@@ -103,7 +105,17 @@ describe("the frame under the client's CSP", () => {
         },
       ],
     };
-    const ballot = render(createElement(Ballot, { election, languages: ["en-US"] }));
+    const ballot = render(
+      createElement(Ballot, {
+        election,
+        source: {
+          seal: () => new Promise<never>(() => {}),
+          challenge: () => new Promise<never>(() => {}),
+        },
+        languages: ["en-US"],
+        onRestart: () => {},
+      }),
+    );
     // A version-1 definition names no one who asked: the frame names the election.
     expect(ballot).toContain("Election 3f8a 0c51");
     expect(ballot).not.toContain("asked");
@@ -121,6 +133,38 @@ describe("the frame under the client's CSP", () => {
       ),
     ])
       expect(html).not.toMatch(/\sstyle=/i);
+  });
+
+  test("the sealed ballot's screens render no inline style", () => {
+    const code = "9c1e77a04b2d3f60e8a5c1d27b9043fe6a18c5d2e7f04b3a96c8d1e2f3a4b5c6";
+    const none = () => {};
+    for (const html of [
+      render(createElement(Working, { poll: POLL, kind: "sealing" })),
+      render(createElement(Working, { poll: POLL, kind: "opening" })),
+      render(
+        createElement(Sealed, {
+          poll: POLL,
+          electionId: "5d".repeat(32),
+          trackingCode: code,
+          onCast: none,
+          onChallenge: none,
+        }),
+      ),
+      render(
+        createElement(Opened, {
+          poll: POLL,
+          trackingCode: code,
+          opening: new Uint8Array(8),
+          onAgain: none,
+        }),
+      ),
+      ...(["cant-seal-cells", "cant-seal-version", "seal-failed", "open-failed"] as const).map(
+        (problem) => render(createElement(SealStopped, { poll: POLL, problem, onAgain: none })),
+      ),
+    ]) {
+      expect(html).toContain("<h1");
+      expect(html).not.toMatch(/\sstyle=/i);
+    }
   });
 
   test("the class picks the register: civic for organisational votes and referendums", () => {
@@ -199,8 +243,7 @@ describe("the frame under the client's CSP", () => {
             poll: POLL,
             questions: QUESTIONS,
             arrival: createElement(ArrivalCheck, { definitionHash: POLL.definitionHash }),
-            onSend: none,
-            onChallenge: none,
+            onSeal: none,
           }),
         ),
         render(
@@ -224,8 +267,7 @@ describe("the frame under the client's CSP", () => {
             questions: QUESTIONS,
             answers: [[], [0, 2]],
             onChange: none,
-            onSend: none,
-            onChallenge: none,
+            onSeal: none,
           }),
         ),
       ]) {
@@ -240,8 +282,7 @@ describe("the frame under the client's CSP", () => {
       createElement(AnswerQuestions, {
         poll: POLL,
         questions: QUESTIONS,
-        onSend: none,
-        onChallenge: none,
+        onSeal: none,
       }),
     );
     expect(html).toContain("Question 1 of 2");
@@ -254,8 +295,7 @@ describe("the frame under the client's CSP", () => {
         createElement(AnswerQuestions, {
           poll: POLL,
           questions: [],
-          onSend: none,
-          onChallenge: none,
+          onSeal: none,
         }),
       ),
     ).toThrow(RangeError);

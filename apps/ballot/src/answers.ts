@@ -154,3 +154,18 @@ export function firstUnfit(
   const index = questions.findIndex((q, i) => !fits(q, answers[i] ?? []));
   return index === -1 ? undefined : index;
 }
+
+/**
+ * What the worker seals for `answers`: 0 or 1 per option, every question's
+ * options in order, as `sealBallotV3` takes them. Throws unless every answer
+ * fits its question, so a vote the validity proof would refuse is never
+ * sealed (T-28).
+ */
+export function votesOf(questions: readonly BallotQuestion[], answers: Answers): (0 | 1)[] {
+  if (answers.length !== questions.length || firstUnfit(questions, answers) !== undefined)
+    throw new RangeError("every question needs an answer that fits it");
+  return questions.flatMap((q, i) => {
+    const chosen = answers[i] ?? [];
+    return q.options.map((_, option): 0 | 1 => (chosen.includes(option) ? 1 : 0));
+  });
+}

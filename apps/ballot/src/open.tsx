@@ -1,13 +1,15 @@
 import { Button, useI18n, useTranslate } from "@abolishus/ui";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
-import { pickLanguage, questionsOf } from "./answers.ts";
+import { type Answers, pickLanguage, questionsOf, votesOf } from "./answers.ts";
 import { ArrivalCheck, ElectionRefused } from "./check.tsx";
 import type { CheckedElection, ElectionCheck } from "./election.ts";
 import { ACTION, EverydayFrame, Note, ScreenTitle } from "./frame.tsx";
 import type { Loaded, LoadProblem } from "./load.ts";
 import { catalogs, type Messages } from "./messages.ts";
 import { AnswerQuestions } from "./questions.tsx";
+import { Opened, Sealed, SealStopped, type SealProblem, Working } from "./sealed.tsx";
+import type { ChallengeResult, SealResult } from "./worker/protocol.ts";
 
 // Opening the election a ballot link names (P2-8 part 2b-2): the page fetches
 // the registry's hash and the records (load.ts), the worker checks them
@@ -26,6 +28,10 @@ export interface ElectionSource {
     displayText: Uint8Array,
     entries: readonly Uint8Array[],
   ): Promise<ElectionCheck>;
+  /** The worker's seal of `votes` in `cell` of the poll it last checked (`BallotWorker.seal`); rejects if the worker fails. */
+  seal(definitionHash: Uint8Array, cell: number, votes: readonly (0 | 1)[]): Promise<SealResult>;
+  /** The opening of a seal the voter challenged (`BallotWorker.challenge`); rejects if the worker fails. */
+  challenge(seal: number): Promise<ChallengeResult>;
 }
 
 type State =
@@ -40,6 +46,8 @@ type State =
 
 const toHex = (bytes: Uint8Array) =>
   Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+const fromHex = (hex: string) =>
+  Uint8Array.from(hex.match(/../g) ?? [], (byte) => Number.parseInt(byte, 16));
 
 /** Fetches, checks and shows one election; `origin` is the page's own, which `onSharedGatewayPath` passed. */
 export function OpenElection({
@@ -82,7 +90,16 @@ export function OpenElection({
         />
       );
     case "ready":
-      return <Ballot election={state.election} languages={languages} />;
+      return (
+        <Ballot
+          election={state.election}
+          source={source}
+          languages={languages}
+          // A failed seal or opening checks the poll anew, in a fresh worker
+          // if the last one stopped: the worker holds the poll it seals for.
+          onRestart={() => setAttempt(attempt + 1)}
+        />
+      );
   }
 }
 
@@ -184,49 +201,153 @@ export function BrokenLink() {
   );
 }
 
-/** A checked election's questions, in the reader's language where the election has it. */
+/** Where a voter is between answering and sending. */
+type Step =
+  | { readonly kind: "answering" }
+  | { readonly kind: "sealing" }
+  | { readonly kind: "sealed"; readonly seal: number; readonly trackingCode: string }
+  | { readonly kind: "opening" }
+  | { readonly kind: "opened"; readonly trackingCode: string; readonly opening: Uint8Array }
+  | { readonly kind: "cast" }
+  | { readonly kind: "stopped"; readonly problem: SealProblem };
+
+/**
+ * A checked election's questions, in the reader's language where the
+ * election has it, then the seal: its tracking code before the choice, and
+ * a challenged seal's opening ([[challenge]], Client rules 1 and 2). Every
+ * attempt starts from nothing chosen.
+ */
 export function Ballot({
   election,
+  source,
   languages,
+  onRestart,
 }: {
   election: CheckedElection;
+  source: Pick<ElectionSource, "seal" | "challenge">;
   languages: readonly string[];
+  /** Check the poll again from the start. */
+  onRestart: () => void;
 }) {
   const { locale } = useI18n();
   const [round, setRound] = useState(0);
-  const [stopped, setStopped] = useState(false);
+  const [step, setStep] = useState<Step>({ kind: "answering" });
+  // Each request's answer lands only on the step that asked for it: never
+  // after the voter left this election, or on a later attempt.
+  const asked = useRef(0);
+  useEffect(() => () => void asked.current++, []);
   const language = pickLanguage(election.translations, languages);
   const questions = useMemo(() => questionsOf(election, language), [election, language]);
   const poll = {
     definitionHash: election.definitionHash,
     closes: formatTime(locale, election.closesAt),
   };
-  if (stopped)
-    return (
-      <NotSent
-        definitionHash={election.definitionHash}
-        closes={poll.closes}
-        onAgain={() => {
-          setStopped(false);
-          setRound(round + 1);
-        }}
-      />
+
+  function again() {
+    setStep({ kind: "answering" });
+    setRound(round + 1);
+  }
+
+  function ask<T>(request: () => Promise<T>, then: (answer: T) => Step, failed: SealProblem) {
+    const mine = ++asked.current;
+    void (async () => {
+      let next: Step;
+      try {
+        next = then(await request());
+      } catch {
+        next = { kind: "stopped", problem: failed };
+      }
+      if (asked.current === mine) setStep(next);
+    })();
+  }
+
+  function seal(answers: Answers) {
+    // A version-5 poll of one cell: the voter's cell is that one. Choosing
+    // among several needs the voter's identity, which this client doesn't
+    // hold yet (part 3b-2c-2).
+    if (election.version !== 5) return setStep({ kind: "stopped", problem: "cant-seal-version" });
+    if (election.cells !== 1) return setStep({ kind: "stopped", problem: "cant-seal-cells" });
+    const votes = votesOf(questions, answers);
+    setStep({ kind: "sealing" });
+    ask(
+      () => source.seal(fromHex(election.definitionHash), 0, votes),
+      (sealed): Step =>
+        sealed.ok
+          ? { kind: "sealed", seal: sealed.seal, trackingCode: toHex(sealed.trackingCode) }
+          : { kind: "stopped", problem: "seal-failed" },
+      "seal-failed",
     );
-  return (
-    <AnswerQuestions
-      // A fresh start each round: nothing chosen carries over (questions.tsx).
-      key={`${election.definitionHash}/${round}`}
-      poll={poll}
-      questions={questions}
-      arrival={<ArrivalCheck definitionHash={election.definitionHash} />}
-      // Sealing and sending are part 3; until then nothing leaves the page.
-      onSend={() => setStopped(true)}
-      onChallenge={() => setStopped(true)}
-    />
-  );
+  }
+
+  function challenge(seal: number, shown: string) {
+    setStep({ kind: "opening" });
+    ask(
+      () => source.challenge(seal),
+      // The worker opens only the core it sealed; an opening of any other is
+      // a fault this device reports, never one it hands over (T-42).
+      (opened): Step =>
+        opened.ok && toHex(opened.trackingCode) === shown
+          ? { kind: "opened", trackingCode: shown, opening: opened.opening }
+          : { kind: "stopped", problem: "open-failed" },
+      "open-failed",
+    );
+  }
+
+  switch (step.kind) {
+    case "answering":
+      return (
+        <AnswerQuestions
+          // A fresh start each round: nothing chosen carries over (questions.tsx).
+          key={`${election.definitionHash}/${round}`}
+          poll={poll}
+          questions={questions}
+          arrival={<ArrivalCheck definitionHash={election.definitionHash} />}
+          onSeal={seal}
+        />
+      );
+    case "sealing":
+      return <Working poll={poll} kind="sealing" />;
+    case "sealed":
+      return (
+        <Sealed
+          poll={poll}
+          electionId={election.electionId}
+          trackingCode={step.trackingCode}
+          // Sending is part 3c. The page never asks to open this seal again,
+          // so a ballot the voter chose to cast is never challenged (T-45).
+          onCast={() => setStep({ kind: "cast" })}
+          onChallenge={() => challenge(step.seal, step.trackingCode)}
+        />
+      );
+    case "opening":
+      return <Working poll={poll} kind="opening" />;
+    case "opened":
+      return (
+        <Opened
+          poll={poll}
+          trackingCode={step.trackingCode}
+          opening={step.opening}
+          onAgain={again}
+        />
+      );
+    case "cast":
+      return (
+        <NotSent definitionHash={election.definitionHash} closes={poll.closes} onAgain={again} />
+      );
+    case "stopped":
+      return (
+        <SealStopped
+          poll={poll}
+          problem={step.problem}
+          onAgain={
+            step.problem === "seal-failed" || step.problem === "open-failed" ? onRestart : undefined
+          }
+        />
+      );
+  }
 }
 
-/** Until part 3 seals and sends: says plainly that nothing was sent. */
+/** A cast, until part 3c sends it: says plainly that nothing was sent. */
 export function NotSent({
   definitionHash,
   closes,

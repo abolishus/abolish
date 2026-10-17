@@ -65,6 +65,12 @@ export interface CheckedElection {
   readonly version: 1 | 5;
   /** In question order: one for a version-1 election. */
   readonly questions: readonly QuestionRules[];
+  /**
+   * How many cells the definition splits its electorate into, every tier's
+   * together: a ballot names one by its number. 0 for version 1, which has
+   * no cells and which this client never seals.
+   */
+  readonly cells: number;
   /** Seconds since the Unix epoch. */
   readonly opensAt: bigint;
   readonly closesAt: bigint;
@@ -141,6 +147,7 @@ export function checkElection(
         questions: [
           { minSelections: definition.min_selections, maxSelections: definition.max_selections },
         ],
+        cells: 0,
         opensAt: definition.opens_at,
         closesAt: definition.closes_at,
         translations: displayText.translations.map((t) => ({
@@ -169,6 +176,7 @@ export function checkElection(
         minSelections: q.min_selections,
         maxSelections: q.max_selections,
       })),
+      cells: definition.electorate.reduce((n, tier) => n + tier.cells.length, 0),
       opensAt: definition.opens_at,
       closesAt: definition.closes_at,
       translations: displayText.translations.map((t) => ({

@@ -11,6 +11,7 @@ import {
   skippable,
   stillNeeded,
   toggle,
+  votesOf,
 } from "../src/answers.ts";
 import type { CheckedElection } from "../src/election.ts";
 
@@ -181,6 +182,57 @@ describe("blanks and undervotes", () => {
   });
 });
 
+describe("the votes a seal takes", () => {
+  // Questions with answers that fit them: each answer a sorted subset of size within the limits.
+  const answered = fc.array(
+    wellFormed.chain((q) =>
+      fc
+        .shuffledSubarray(
+          q.options.map((_, i) => i),
+          { minLength: q.minSelections, maxLength: q.maxSelections },
+        )
+        .map((chosen) => ({ q, chosen: [...chosen].sort((a, b) => a - b) })),
+    ),
+    { minLength: 1, maxLength: 5 },
+  );
+
+  test("are 1 exactly at each chosen option, every question's options in order", () => {
+    fc.assert(
+      fc.property(answered, (ballot) => {
+        const questions = ballot.map(({ q }) => q);
+        const votes = votesOf(
+          questions,
+          ballot.map(({ chosen }) => chosen),
+        );
+        let at = 0;
+        for (const { q, chosen } of ballot) {
+          const slice = votes.slice(at, at + q.options.length);
+          expect(slice).toEqual(q.options.map((_, i) => (chosen.includes(i) ? 1 : 0)));
+          at += q.options.length;
+        }
+        expect(votes).toHaveLength(at);
+      }),
+      { numRuns },
+    );
+  });
+
+  test("are never made for an answer that doesn't fit, or a missing one", () => {
+    const questions = [question(3, 0, 1), question(4, 2, 2)];
+    expect(votesOf(questions, [[], [0, 3]])).toEqual([0, 0, 0, 1, 0, 0, 1]);
+    expect(() =>
+      votesOf(questions, [
+        [0, 1],
+        [0, 3],
+      ]),
+    ).toThrow(RangeError);
+    expect(() => votesOf(questions, [[], [0]])).toThrow(RangeError);
+    expect(() => votesOf(questions, [[], [3, 0]])).toThrow(RangeError);
+    expect(() => votesOf(questions, [[], [0, 4]])).toThrow(RangeError);
+    expect(() => votesOf(questions, [[]])).toThrow(RangeError);
+    expect(() => votesOf(questions, [[], [0, 3], []])).toThrow(RangeError);
+  });
+});
+
 describe("the questions of a checked election", () => {
   const election: CheckedElection = {
     electionId: "00".repeat(32),
@@ -190,6 +242,7 @@ describe("the questions of a checked election", () => {
       { minSelections: 0, maxSelections: 2 },
       { minSelections: 1, maxSelections: 1 },
     ],
+    cells: 1,
     opensAt: 0n,
     closesAt: 1n,
     translations: [

@@ -234,7 +234,7 @@ export function boardWith(commitments: readonly bigint[]): Uint8Array[] {
           election_id: definition.election_id,
           index: BigInt(i + 1),
           segment: 0,
-          payload: encodeContractEvent(r, 7),
+          payload: encodeContractEvent(r, 8),
         },
         5,
       ),

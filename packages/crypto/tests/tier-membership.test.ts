@@ -181,7 +181,7 @@ const POLL_PINS = (
     [5, 1],
     [6, 1],
     [7, 5],
-    [8, 7],
+    [8, 8],
     [9, 2],
   ] as const
 ).map(([record_type, version]) => ({ record_type, version }));
@@ -204,7 +204,7 @@ const boardEntries = (definition: ElectionDefinitionV5, records: readonly Contra
         election_id: definition.election_id,
         index: BigInt(i),
         segment: 0,
-        payload: encodeContractEvent(r, 7),
+        payload: encodeContractEvent(r, 8),
       },
       5,
     ),
@@ -1070,7 +1070,7 @@ describe("voterCellV5 reads the voter's cell from the whole board", () => {
       election_id: new Uint8Array(32).fill(9),
       index: 0n,
       segment: 0,
-      payload: encodeContractEvent(t.records[1] as ContractEventRecord, 7),
+      payload: encodeContractEvent(t.records[1] as ContractEventRecord, 8),
     },
     5,
   );
@@ -1108,7 +1108,7 @@ describe("voterCellV5 reads the voter's cell from the whole board", () => {
   );
 
   test("refuses a contract-event payload that doesn't decode, which may be the registry's", () => {
-    const payload = encodeContractEvent(t.records[1] as ContractEventRecord, 7);
+    const payload = encodeContractEvent(t.records[1] as ContractEventRecord, 8);
     const broken = encodeBoardEntry(
       {
         election_id: definition.election_id,

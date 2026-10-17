@@ -139,6 +139,12 @@ afterAll(async () => {
   }
 });
 
+// Polled directly: viem's waitForTransactionReceipt looks again only when
+// the block number changes, and skips a change that lands during a look, so
+// Anvil's one block for the transaction can leave it waiting for good.
+const receiptOf = (hash: Hex) =>
+  until("a receipt", 20_000, () => client.getTransactionReceipt({ hash }));
+
 const rpc = (method: string, params: unknown[]) =>
   client.request({ method, params } as never) as Promise<unknown>;
 const mine = (blocks: number) => rpc("anvil_mine", [toHex(blocks)]);
@@ -164,7 +170,7 @@ async function deployAnchor(): Promise<AnchorDeployment> {
     bytecode,
     args: [clock, authority],
   });
-  const receipt = await client.waitForTransactionReceipt({ hash, pollingInterval: 20 });
+  const receipt = await receiptOf(hash);
   if (!receipt.contractAddress) throw new Error("BoardAnchor wasn't deployed");
   return { chainId, anchor: receipt.contractAddress, clock, authority };
 }
@@ -180,7 +186,7 @@ function sender(deployment: AnchorDeployment, sent: Hex[] = []) {
       to: deployment.anchor,
       data,
     });
-    const receipt = await client.waitForTransactionReceipt({ hash, pollingInterval: 20 });
+    const receipt = await receiptOf(hash);
     if (receipt.status !== "success") throw new Error("the anchor call reverted");
   };
 }

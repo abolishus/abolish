@@ -824,6 +824,8 @@ describe("transport", () => {
     await new Promise((r) => capped.close(r));
   });
 
+  // The poll below waits up to 10 s for a cold Node start, which a loaded CI
+  // runner can need, so the test's timeout must outlast it (the default is 5 s).
   test("src/main.ts starts under plain Node, without a TypeScript transform", async () => {
     // Node strips types but rejects TypeScript-only syntax (parameter
     // properties, enums) that the test runner's transform would accept.
@@ -862,7 +864,7 @@ describe("transport", () => {
       child.kill("SIGTERM");
       await exited;
     }
-  });
+  }, 20_000);
 
   test("unknown routes and methods are 404", async () => {
     expect((await fetch(`${base}/nope`)).status).toBe(404);

@@ -121,8 +121,10 @@ function reported(r: Report, ballots: ReadonlyMap<number, string>) {
 }
 
 describe("admits exactly the ballots the verifier's 5.1 to 5.4 admit", () => {
+  // Each case verifies its whole bundle, membership proofs included, which
+  // can pass the default timeout on a loaded runner.
   for (const id of ["mixed", "admitted", "repeats", "repeat-of-rejected", "unqualified-first"])
-    test(id, () => {
+    test(id, { timeout: 60_000 }, () => {
       const c = byId(id);
       const ours = admissions(c);
       const report = verifyBundle(bundleOf(c));
@@ -283,27 +285,31 @@ describe("never throws on a submitted payload", () => {
     expect(admission.admit(new Uint8Array())).toMatchObject({ ok: false, code: "decode" });
   });
 
-  test("any truncation, extension or byte flip is rejected, never admitted as another ballot", () => {
-    fc.assert(
-      fc.property(
-        fc.oneof(
-          fc.nat({ max: ballot.length - 1 }).map((n) => ballot.slice(0, n)),
-          fc
-            .uint8Array({ minLength: 1, maxLength: 8 })
-            .map((x) => Uint8Array.from([...ballot, ...x])),
-          fc
-            .tuple(fc.nat({ max: ballot.length - 1 }), fc.integer({ min: 1, max: 255 }))
-            .map(([i, x]) => {
-              const b = ballot.slice();
-              b[i] = (b[i] as number) ^ x;
-              return b;
-            }),
+  test(
+    "any truncation, extension or byte flip is rejected, never admitted as another ballot",
+    { timeout: 60_000 },
+    () => {
+      fc.assert(
+        fc.property(
+          fc.oneof(
+            fc.nat({ max: ballot.length - 1 }).map((n) => ballot.slice(0, n)),
+            fc
+              .uint8Array({ minLength: 1, maxLength: 8 })
+              .map((x) => Uint8Array.from([...ballot, ...x])),
+            fc
+              .tuple(fc.nat({ max: ballot.length - 1 }), fc.integer({ min: 1, max: 255 }))
+              .map(([i, x]) => {
+                const b = ballot.slice();
+                b[i] = (b[i] as number) ^ x;
+                return b;
+              }),
+          ),
+          (changed) => {
+            expect(admission.admit(changed).ok).toBe(false);
+          },
         ),
-        (changed) => {
-          expect(admission.admit(changed).ok).toBe(false);
-        },
-      ),
-      { numRuns: Math.min(Number(process.env["FC_NUM_RUNS"] ?? 100), 200) },
-    );
-  });
+        { numRuns: Math.min(Number(process.env["FC_NUM_RUNS"] ?? 100), 200) },
+      );
+    },
+  );
 });

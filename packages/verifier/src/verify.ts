@@ -71,6 +71,7 @@ import {
   countedRows,
   type CountedResult,
   type DeliveryReport,
+  type DeliveryReportV2,
   type DestructionReport,
   type TierReport,
 } from "./counted.ts";
@@ -156,7 +157,7 @@ export interface Report {
   /** A format-4 or 5 bundle's tally openings, once 7.4 ran, in copy order. */
   readonly tallies?: readonly TallyReport[];
   /** A format-5 bundle's delivery check over the selected ballots, once 5.9 passed. */
-  readonly delivery?: DeliveryReport;
+  readonly delivery?: DeliveryReport | DeliveryReportV2;
   /** A format-5 bundle's cells, each with its counted ballots and counts, once 7.1 passed. */
   readonly cells?: readonly CellReport[];
   /** A format-5 bundle's per-tier results, derived from the cells, once 7.1 passed. */

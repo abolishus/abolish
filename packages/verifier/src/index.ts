@@ -38,6 +38,7 @@ export {
   type CountedAt,
   type CountedCode,
   type DeliveryReport,
+  type DeliveryReportV2,
   type DestructionReport,
   type SeatReport,
   type TierReport,

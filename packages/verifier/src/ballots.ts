@@ -50,6 +50,7 @@ import {
   decodeBoardEntry,
   decodeContractEvent,
   type DeliveryBallot,
+  type DeliveryBallotV4,
   finishBallotStep,
   membershipVkHash,
   panelBallotElection,
@@ -143,12 +144,14 @@ export interface CountedCandidate {
  * What the tally reads of an admitted ballot: the cell of the partition it
  * counts in, by its position (docs/spec/tally.md, Context), its VSS
  * commitments and, for the ballot versions whose delivery this release
- * checks (1 and 2), what the delivery check recomputes its ballot hash from.
+ * checks, what the delivery check recomputes its ballot hash from: under
+ * versions 1 and 2 `delivery`, under version 4 `deliveryV4`.
  */
 export interface BallotTally {
   readonly cell: number;
   readonly vss: BallotCore["vss"];
   readonly delivery?: DeliveryBallot;
+  readonly deliveryV4?: DeliveryBallotV4;
 }
 
 /** Every admission code: versions 2 to 4 have `ballot-cell` where version 1 has `ballot-tier`. */
@@ -600,9 +603,17 @@ export function steppedJudgeFor(
       return {
         core: { definitionHash: record.definition_hash, vss, authorVss },
         step: stepBallotV4(election, record),
-        // The tally (7.1 to 7.3) and the delivery check (5.9) don't read
-        // ballot version 4 yet (counted.ts).
-        tally: { cell: record.cell, vss },
+        // The delivery check (5.9) recomputes version 4's ballot hash,
+        // over both halves, and reads each seat's share hash from its panel's.
+        tally: {
+          cell: record.cell,
+          vss,
+          deliveryV4: {
+            cell: record.cell,
+            nullifier: record.nullifier,
+            vote: record.committed_vote,
+          },
+        },
       };
     };
   }

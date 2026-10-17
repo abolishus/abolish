@@ -1,4 +1,9 @@
-import { encodeElectionDefinition } from "@abolishus/crypto";
+import {
+  decodeElectionDefinitionV5,
+  encodeElectionDefinition,
+  encodeElectionDefinitionV5,
+  QUESTION_METHODS,
+} from "@abolishus/crypto";
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { getTableConfig } from "drizzle-orm/pg-core";
@@ -7,6 +12,7 @@ import type { Sql } from "postgres";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import {
   DisplayTextError,
+  ModerationError,
   type DisplayTextErrorCode,
   displayTexts,
   moderate,
@@ -298,5 +304,107 @@ describe("serving", () => {
     expect((await served(id))?.served).toBe("text");
     await moderate(app, id, mod("hide", "personal-data"));
     expect(await served(id)).toEqual({ served: "withheld" });
+  });
+});
+
+// Definition version 5 and display-text version 2 (P2-14): the same check,
+// the client's `checkElectionRecordToShow`, reads every question against the
+// definition's, and the served window reads the version-5 close.
+describe("a poll of several questions", () => {
+  interface TextV2Vector {
+    id: string;
+    pinned: number;
+    encoding: string;
+    error?: string;
+    illFormed?: string;
+    definition?: { optionCounts: string[]; displayTextCommitment: string };
+  }
+  // Pinning display-text version 2, as the client's check asks of version 5.
+  const v2 = vectors<TextV2Vector>("display-text-v2").filter((v) => v.pinned === 2);
+  const goodV2 = v2.find((v) => v.id === "display-text-v2-two-questions")!;
+  // verifier-ballots-v3.json's definition, under a profile 2.3 passes.
+  const base = decodeElectionDefinitionV5(
+    hex(
+      (
+        JSON.parse(
+          readFileSync(
+            new URL("../../../docs/spec/vectors/verifier-ballots-v3.json", import.meta.url),
+            "utf8",
+          ),
+        ) as { cases: { id: string; definition: string }[] }
+      ).cases.find((c) => c.id === "admitted")!.definition,
+    ),
+  );
+
+  /** A stored version-5 election whose questions and commitment are `text`'s vector definition's. */
+  async function electionV5(text: TextV2Vector = goodV2, closesAt = base.closes_at) {
+    const id = new Uint8Array(randomBytes(32));
+    const committed = text.definition ?? goodV2.definition!;
+    await storeDefinition(
+      app,
+      encodeElectionDefinitionV5({
+        ...base,
+        election_id: id,
+        opens_at: base.opens_at < closesAt ? base.opens_at : closesAt - 1n,
+        closes_at: closesAt,
+        questions: committed.optionCounts.map((n) => ({
+          method: QUESTION_METHODS.selection,
+          option_count: Number(n),
+          min_selections: 0,
+          max_selections: 1,
+        })),
+        display_text_commitment: hex(committed.displayTextCommitment),
+      }),
+    );
+    return id;
+  }
+
+  test("every good version-2 vector is stored under a definition that commits to it", async () => {
+    const good = v2.filter((v) => v.error === undefined && v.illFormed === undefined);
+    expect(good.length).toBeGreaterThan(1);
+    for (const v of good) {
+      const id = await electionV5(v);
+      await storeDisplayText(app, id, hex(v.encoding));
+      await storeDisplayText(app, id, hex(v.encoding));
+      expect(await stored(id), v.id).toEqual([hex(v.encoding)]);
+    }
+  });
+
+  test("ill-formed and undecodable version-2 vectors are refused with the check that failed", async () => {
+    const bad = v2.filter((v) => v.error !== undefined || v.illFormed !== undefined);
+    expect(bad.some((v) => v.illFormed === "question-count")).toBe(true);
+    for (const v of bad) {
+      const id = await electionV5(v);
+      const [code, cause] = await refusedWith(storeDisplayText(app, id, hex(v.encoding)));
+      expect(code, v.id).toBe("refused");
+      expect(cause, v.id).toEqual(
+        v.illFormed === undefined
+          ? { ok: false, problem: "display-text-undecodable" }
+          : { ok: false, problem: "display-text-ill-formed", rule: v.illFormed },
+      );
+      expect(await stored(id), v.id).toEqual([]);
+    }
+  });
+
+  test("version-1 text is refused for a poll of several questions", async () => {
+    const id = await electionV5();
+    const [code, cause] = await refusedWith(storeDisplayText(app, id, hex(goodText.encoding)));
+    expect(code).toBe("refused");
+    expect(cause).toEqual({ ok: false, problem: "display-text-undecodable" });
+  });
+
+  test("an open poll is hidden only as a threat, and its text served until the inclusion bound", async () => {
+    const mod = (action: "hide" | "delist" | "restore", reason: string) =>
+      ({ action, reason, moderator: "mod-1" }) as Parameters<typeof moderate>[2];
+    const closesAt = nowSeconds() + 10n * 24n * 3600n;
+    const id = await electionV5(goodV2, closesAt);
+    await storeDisplayText(app, id, hex(goodV2.encoding));
+    const refused = await moderate(app, id, mod("hide", "spam")).catch((e: unknown) => e);
+    expect(refused).toBeInstanceOf(ModerationError);
+    expect((refused as ModerationError).code).toBe("open-poll");
+    await moderate(app, id, mod("hide", "threat"));
+    const bound = closesAt + BigInt(base.l1_inclusion_bound);
+    expect((await readServedDisplayText(app, id, bound - 1n))?.served).toBe("text");
+    expect(await readServedDisplayText(app, id, bound)).toEqual({ served: "withheld" });
   });
 });

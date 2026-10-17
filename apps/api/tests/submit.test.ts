@@ -1,4 +1,9 @@
-import { decodeBoardEntry, decodeElectionDefinition, type Panel } from "@abolishus/crypto";
+import {
+  decodeBoardEntry,
+  decodeElectionDefinition,
+  decodeElectionDefinitionV5,
+  type Panel,
+} from "@abolishus/crypto";
 import { appendEntry, BallotAdmissions, readBoard, storeDefinition } from "@abolishus/core";
 import { type TestDb, testDb } from "@abolishus/core/test-db";
 import { splitEntries } from "@abolishus/verifier";
@@ -22,8 +27,10 @@ import { type BallotSubmitter, createApiServer } from "../src/index.ts";
 // T-38, T-52). A ballot without an outcome in time is BALLOTS_UNAVAILABLE,
 // and what the server answers is read from the board, never taken on the
 // worker's word. The request log still holds only the method, route, status
-// and duration (T-10, T-11). Fixtures: docs/spec/vectors/
-// verifier-ballots.json (an independent implementation's verdicts).
+// and duration (T-10, T-11). A poll of several questions (definition version
+// 5, ballot version 3) goes the same way (P2-14). Fixtures:
+// docs/spec/vectors/verifier-ballots.json and verifier-ballots-v3.json (an
+// independent implementation's verdicts).
 
 const redisUrl = process.env["REDIS_URL"];
 if (!redisUrl) throw new Error("REDIS_URL is not set");
@@ -43,6 +50,7 @@ const file = JSON.parse(
     readonly definition: string;
     readonly board: string;
     readonly ballots?: {
+      readonly admitted?: number;
       readonly rejected: readonly { entry: number; code: string }[];
       readonly repeats: readonly { entry: number }[];
     };
@@ -79,7 +87,7 @@ const workers: RunningWorker[] = [];
 const queues: BallotQueue[] = [];
 
 /** A worker judging ballots for `sql`, and the API's queue to it, under a prefix of their own. */
-async function judging(sql: Sql) {
+async function judging(sql: Sql, epoch = definition.opens_at) {
   const prefix = `abolish-test-api-${Buffer.from(randomBytes(6)).toString("hex")}`;
   workers.push(
     await startWorker({
@@ -92,7 +100,7 @@ async function judging(sql: Sql) {
       ballots: {
         admissions: new BallotAdmissions({
           panels: [panel],
-          clock: { epoch: definition.opens_at, period: 3_600n },
+          clock: { epoch, period: 3_600n },
         }),
       },
     }),
@@ -283,4 +291,63 @@ describe("ballots.submit with admission", () => {
     }
     expect(logs.length).toBeGreaterThan(0);
   });
+
+  test(
+    "a poll of several questions: boards each admitted version-3 ballot, refuses the rest with their codes",
+    { timeout: 120_000 },
+    async () => {
+      const v3 = JSON.parse(
+        readFileSync(
+          new URL("../../../docs/spec/vectors/verifier-ballots-v3.json", import.meta.url),
+          "utf8",
+        ),
+      ) as typeof file;
+      const c = v3.cases.find((x) => x.id === "mixed")!;
+      const id = decodeElectionDefinitionV5(unhex(c.definition)).election_id;
+      const opensAt = decodeElectionDefinitionV5(unhex(c.definition)).opens_at;
+      // Definition version 5 pins board-entry version 5.
+      const [transcript, ...ballots] = splitEntries(unhex(c.board)).entries.map((e) =>
+        decodeBoardEntry(e, 5),
+      );
+      const codes = new Map((c.ballots?.rejected ?? []).map((r) => [r.entry, r.code] as const));
+      expect([...codes.values()]).toContain("sum-proof");
+      const own = await testDb();
+      const sql = await own.as("abolish_app");
+      await storeDefinition(sql, unhex(c.definition));
+      await appendEntry(sql, id, transcript!.segment, transcript!.payload);
+      const { server: s, url } = await listen({
+        sql,
+        log: () => {},
+        ballots: await judging(sql, opensAt),
+      });
+      const before = now;
+      now = opensAt + 60n;
+      try {
+        let size = 1;
+        for (const [i, e] of ballots.entries()) {
+          const code = codes.get(i + 1);
+          const r = await fetch(url, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ electionId: hex(id), ballot: hex(e.payload) }),
+          });
+          const body = (await r.json()) as Record<string, unknown>;
+          if (code === undefined || code === "repeat") {
+            // The case's repeat is byte-identical: it is answered with its earlier entry.
+            expect(r.status, `entry ${i + 1}`).toBe(201);
+            if (code === undefined) size++;
+          } else {
+            expect(r.status, `entry ${i + 1}`).toBe(422);
+            expect(body["data"], `entry ${i + 1}`).toEqual({ code });
+          }
+          expect(await readBoard(sql, id)).toHaveLength(size);
+        }
+        expect(size - 1).toBe(c.ballots?.admitted);
+      } finally {
+        now = before;
+        await new Promise((r) => s.close(r));
+        await own.close();
+      }
+    },
+  );
 });

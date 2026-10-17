@@ -13,7 +13,6 @@ import {
   BN254_R,
   chainLink,
   consistencyProofSubtrees,
-  decodeElectionDefinitionRecord,
   DecodeError,
   encodeBoardEntry,
   foldSubtrees,
@@ -27,6 +26,7 @@ import { and, asc, desc, eq, gte, lt, or, sql as q } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import type { Sql } from "postgres";
 import { isBytes } from "./bytes.ts";
+import { decodeStoredDefinition } from "./definitions.ts";
 import {
   boardBallotKeys,
   boardCheckpoints,
@@ -136,7 +136,7 @@ export async function pinnedBoardVersion(
   // around it: bytes this release can't decode pin nothing it can write.
   let version;
   try {
-    const { value } = decodeElectionDefinitionRecord(new Uint8Array(row.definition));
+    const { value } = decodeStoredDefinition(new Uint8Array(row.definition));
     version = pinnedVersion(value, RECORD_TYPES.boardEntry);
   } catch (e) {
     if (e instanceof DecodeError) return "unsupported-version";

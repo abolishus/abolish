@@ -6,12 +6,11 @@
 // registry's events (T-49), so a later poll ground to share a prefix can't
 // take an earlier poll's code (T-53).
 
-import { decodeElectionDefinition, electionDefinitionHash } from "@abolishus/crypto";
 import { count, desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import type { Sql } from "postgres";
 import { isBytes } from "./bytes.ts";
-import { readDefinition } from "./definitions.ts";
+import { decodeStoredDefinition, readDefinition, storedDefinitionHash } from "./definitions.ts";
 import { electionRegistrations } from "./db/schema/index.ts";
 import {
   MAX_SHORT_CODE_LENGTH,
@@ -80,7 +79,7 @@ export async function recordRegistration(client: Sql, registration: Registration
   // A stored definition was decoded and checked when it was stored.
   if (
     definition !== undefined &&
-    !equal(electionDefinitionHash(decodeElectionDefinition(definition)), hash)
+    !equal(storedDefinitionHash(decodeStoredDefinition(definition)), hash)
   )
     throw new RegistrationError("hash-mismatch");
   const db = drizzle({ client });

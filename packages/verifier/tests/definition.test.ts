@@ -323,7 +323,7 @@ describe("2.3: the profile's versions fit together", () => {
           [RECORD_TYPES.boardEntry]: board,
           [RECORD_TYPES.ballot]: ballot,
           [RECORD_TYPES.tallyOpening]: opening,
-          [RECORD_TYPES.contractEvent]: 5,
+          [RECORD_TYPES.contractEvent]: 6,
         }),
         closed,
       );
@@ -344,9 +344,10 @@ describe("2.3: the profile's versions fit together", () => {
       expect(r.verdict).toBe("unverifiable");
     });
 
-  test("every profile pins contract-event version 5, every board event", () => {
+  test("every profile pins contract-event version 6, every board and registry event", () => {
     // Versions 1 and 2 name none of the close rule's board events, version 3
-    // not the batches' and version 4 not the obligation root's, so 2.3 fails
+    // not the batches', version 4 not the obligation root's and version 5 not
+    // the group registry's Tier 1 addition, so 2.3 fails
     // them; one this verifier doesn't read is a later release's,
     // unverifiable unless the profile fails on another ground ([[close]],
     // Version; T-36).
@@ -358,8 +359,8 @@ describe("2.3: the profile's versions fit together", () => {
         ),
         "2.3",
       );
-    expect(at(5, 5)).toMatchObject({ status: "unverifiable", code: "not-implemented" });
-    for (const events of [1, 2, 3, 4]) {
+    expect(at(5, 6)).toMatchObject({ status: "unverifiable", code: "not-implemented" });
+    for (const events of [1, 2, 3, 4, 5]) {
       const r = format3(
         pinning({ [RECORD_TYPES.boardEntry]: 5, [RECORD_TYPES.contractEvent]: events }),
         closed,
@@ -367,7 +368,7 @@ describe("2.3: the profile's versions fit together", () => {
       expect(row(r, "2.3")).toEqual(COMBINATION_FAILS);
       expect(r.verdictAgainstInputs).toBe("failed");
     }
-    for (const events of [6, 255])
+    for (const events of [7, 255])
       expect(at(5, events)).toEqual({
         id: "2.3",
         kind: "election",
@@ -375,7 +376,7 @@ describe("2.3: the profile's versions fit together", () => {
         code: "unsupported-version",
         at: {},
       });
-    expect(at(4, 6)).toEqual(COMBINATION_FAILS);
+    expect(at(4, 7)).toEqual(COMBINATION_FAILS);
   });
 
   test("a version this verifier can't read is unsupported before any combination", () => {
@@ -622,7 +623,7 @@ describe("definition versions 3 and 4 (regional cells)", () => {
             // Tally-opening version 2 stands for one with no board need, so
             // only the ballot's needs decide.
             [RECORD_TYPES.tallyOpening]: 2,
-            [RECORD_TYPES.contractEvent]: 5,
+            [RECORD_TYPES.contractEvent]: 6,
           }),
           closed,
         );
@@ -695,7 +696,7 @@ describe("definition version 5 (questions)", () => {
   // display-text version 2, which carries the questions' text, and, for
   // ballot version 3's delivery, tally-opening version 1's destruction
   // statements and the close statement every profile needs, board-entry
-  // version 5, beside contract-event version 5. A ballot or opening version
+  // version 5, beside contract-event version 6. A ballot or opening version
   // this verifier doesn't know is unsupported, never failed; an unknown
   // display-text version fails (docs/spec/verifier.md, 2.3; T-36, T-41, T-42).
   const table: readonly (readonly [number, number, number, number, string])[] = [
@@ -724,7 +725,7 @@ describe("definition version 5 (questions)", () => {
           [RECORD_TYPES.spoiledBallotOpening]: spoiled,
           [RECORD_TYPES.displayText]: text,
           [RECORD_TYPES.tallyOpening]: 1,
-          [RECORD_TYPES.contractEvent]: 5,
+          [RECORD_TYPES.contractEvent]: 6,
         }),
         closed,
       );

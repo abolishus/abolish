@@ -58,7 +58,7 @@ SPOILED_OPENING_TYPE = 0x0003
 BOARD_ENTRY_TYPE = 0x0007
 CONTRACT_EVENT_TYPE = 0x0008
 # The board-entry version every profile here pins: 5, the one that allows the
-# close statement, beside contract-event version 5 (close.md, Version).
+# close statement, beside contract-event version 6 (close.md, Version).
 BOARD_VERSION = 5
 MEMBERSHIP_VK_HASH = bytes.fromhex(json.loads((VECTORS / "membership-proof.json").read_text())["verificationKey"]["hash"])
 
@@ -146,10 +146,10 @@ def main(out_dir):
     eid = dv.TYPICAL["election_id"]
 
     def election_for(label, seats, cheat=None, tally_version=1, base=dv.TYPICAL, opening_version=1):
-        """A definition of `base`'s version pinning board-entry version 5 and contract-event version 5, which every profile needs (close.md, Version), (and ballot version 2 under versions 3 and 4, which name a cell, and 3 under version 5, which carries questions), its transcript for its own stub, and the seats' per-election signing secrets."""
+        """A definition of `base`'s version pinning board-entry version 5 and contract-event version 6, which every profile needs (close.md, Version), (and ballot version 2 under versions 3 and 4, which name a cell, and 3 under version 5, which carries questions), its transcript for its own stub, and the seats' per-election signing secrets."""
         own = dict(base["profile"]["pins"])[0x0001]
         ballot = {3: 2, 4: 2, 5: 3}.get(own)
-        pin = {BOARD_ENTRY_TYPE: BOARD_VERSION, CONTRACT_EVENT_TYPE: 5, TALLY_TYPE: tally_version, SPOILED_OPENING_TYPE: opening_version, **({BALLOT_TYPE: ballot} if ballot is not None else {})}
+        pin = {BOARD_ENTRY_TYPE: BOARD_VERSION, CONTRACT_EVENT_TYPE: 6, TALLY_TYPE: tally_version, SPOILED_OPENING_TYPE: opening_version, **({BALLOT_TYPE: ballot} if ballot is not None else {})}
         pins = [(ty, pin.get(ty, v)) for ty, v in base["profile"]["pins"]]
         fields = {"profile": {"protocol_major": 1, "pins": pins}, "membership_vk_hash": MEMBERSHIP_VK_HASH}
         ctx = vc.election_of(vc.definition_for(panel, bytes(32), base, **fields))
@@ -343,13 +343,13 @@ def main(out_dir):
 
     # Spoiled-ballot opening version 2, which opens version-2 cores: 2.3's
     # combination passes beside another pin than the typical profile's (and
-    # board-entry version 5 and contract-event version 5), and
+    # board-entry version 5 and contract-event version 6), and
     # the tally openings are judged as under it.
     do2, to2, so2 = election_for("definition-v3-opening-2", [1, 2, 3], base=rc.TYPICAL, opening_version=2)
     open_o2, _ = opener(do2, so2)
     c = case(
         "v3-opening-2",
-        "A version-3 definition pinning spoiled-ballot opening version 2, whose pairing with ballot version 2 passes 2.3, beside board-entry version 5 and contract-event version 5: an opening of cell 3 by seat 1 (undecided) and one of cell 4 by seat 2 (stray). 7.4 is unverifiable.",
+        "A version-3 definition pinning spoiled-ballot opening version 2, whose pairing with ballot version 2 passes 2.3, beside board-entry version 5 and contract-event version 6: an opening of cell 3 by seat 1 (undecided) and one of cell 4 by seat 2 (stray). 7.4 is unverifiable.",
         [open_o2(3, 1), open_o2(4, 2)],
         "unverifiable",
         defn=do2,

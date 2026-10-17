@@ -229,7 +229,7 @@ const DELIVERY_EVENTS: ReadonlySet<string> = new Set([
 ]);
 
 const readsEvents = (v: number | undefined): v is ContractEventVersion =>
-  v === 1 || v === 2 || v === 3 || v === 4 || v === 5;
+  v === 1 || v === 2 || v === 3 || v === 4 || v === 5 || v === 6;
 
 const U32_MAX = 0xffffffff;
 

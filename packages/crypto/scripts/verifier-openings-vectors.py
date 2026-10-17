@@ -306,7 +306,7 @@ def main(constants, out_dir):
 
     cases = []
 
-    def case(id_, description, segments, want_status, the_clock=clock, defn=d, transcript=t):
+    def case(id_, description, segments, want_status, the_clock=clock, defn=d, transcript=t, want_code=None):
         entries = board([(seg, [transcript if p == "t" else p for p in ps]) for seg, ps in segments])
         ceremony_rows, _ = vc.expected(panel, defn, entries, panel, vb.BOARD_VERSION)
         assert ceremony_rows["3.2"] == outcome("pass"), id_
@@ -319,6 +319,7 @@ def main(constants, out_dir):
             assert pinned == 1, id_
             row, report = expected(defn, election, entries, the_clock)
         assert row["status"] == want_status, (id_, row)
+        assert want_code is None or row.get("code") == want_code, (id_, row)
         c = {
             "id": id_,
             "description": description,
@@ -360,9 +361,10 @@ def main(constants, out_dir):
     )
     case(
         "decode-first",
-        "The first settled opening doesn't decode (a trailing byte): 6.2 fails with decode and its decoding code.",
-        [(0, ["t", rec0]), (5, [trailing, enc(stray)])],
+        "The first settled opening doesn't decode (a trailing byte), and a stray one follows in a later segment: 6.2 fails with decode and its decoding code.",
+        [(0, ["t", rec0]), (5, [trailing]), (6, [enc(stray)])],
         "fail",
+        want_code="decode",
     )
     case(
         "honest",

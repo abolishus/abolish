@@ -157,7 +157,9 @@ test("the fixtures were made from the contract-event vectors as committed", () =
     expect(createHash("sha256").update(raw(name)).digest("hex")).toBe(digest);
 });
 
-describe("4.4 against the independent implementation", () => {
+// Generous: a version-6 copy decodes six Groth16 proofs per Tier 1 addition
+// (B's subgroup check included), about 4 s for events-v6-records alone.
+describe("4.4 against the independent implementation", { timeout: 60_000 }, () => {
   for (const c of file.cases)
     test(c.id, () => {
       const r = run(c);

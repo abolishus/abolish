@@ -251,6 +251,15 @@ function adapter(
 type Forward = (params: unknown[]) => Promise<unknown>;
 type Hook = (method: string, params: unknown[], forward: Forward) => Promise<unknown>;
 
+/** Logs as a node that gives no timestamp of their own answers them. */
+function untimed(logs: unknown): unknown {
+  return (logs as Record<string, unknown>[]).map((l) => {
+    const copy = { ...l };
+    delete copy["blockTimestamp"];
+    return copy;
+  });
+}
+
 /** A client of the Anvil node through `hook`, which may change any answer: a node not to trust. */
 function nodeClient(hook: Hook): PublicClient {
   let id = 0;
@@ -322,16 +331,28 @@ describe("the startup check", () => {
   });
 });
 
+/** The registry's records up to the latest block, as core reads them: heads first. */
+async function readTo(reader: ViemTier1Chain, after: bigint | null = null) {
+  const latest = (await reader.heads()).latest.number;
+  return { latest, records: await reader.records(after, latest) };
+}
+
 describe("the registry's records", () => {
   test("are its logs in order, numbered from 0, reaching its accumulator at any log range", async () => {
     const { registry, fromBlock } = await deployWithGroups();
+    const key = await relayKey();
+    // In steps, as core extends its state: the second read starts at `n` 3.
+    const stepped = adapter(registry, fromBlock, key);
+    const first = await readTo(stepped);
+    expect(first.records.map((r) => r.n)).toEqual([0n, 1n, 2n]);
     await createGroup(registry, 1);
     await createGroup(registry, 0);
-    const latest = await client.getBlockNumber({ cacheTime: 0 });
-    const key = await relayKey();
-    const whole = await adapter(registry, fromBlock, key).records(null, latest);
+    const rest = await readTo(stepped, first.latest);
+    expect(rest.records.map((r) => r.n)).toEqual([3n, 4n]);
+    const { latest, records: whole } = await readTo(adapter(registry, fromBlock, key));
+    expect(latest).toBe(rest.latest);
+    expect([...first.records, ...rest.records]).toEqual(whole);
     // The constructor's RegistrarsPinned and four GroupCreated.
-    expect(whole.map((r) => r.n)).toEqual([0n, 1n, 2n, 3n, 4n]);
     expect(whole[0]?.l2_block).toBe(fromBlock);
     for (const r of whole) {
       expect(hex(r.contract)).toBe(registry.slice(2).toLowerCase());
@@ -350,21 +371,19 @@ describe("the registry's records", () => {
       expect(events.pinned).toHaveLength(1);
     }
     for (const logRange of [1n, 2n, 3n])
-      expect(await adapter(registry, fromBlock, key, { logRange }).records(null, latest)).toEqual(
+      expect((await readTo(adapter(registry, fromBlock, key, { logRange }))).records).toEqual(
         whole,
       );
-    // In steps, as core extends its state: the second read starts at `n` 3.
-    const stepped = adapter(registry, fromBlock, key);
-    const split = whole[2]?.l2_block as bigint;
-    const first = await stepped.records(null, split);
-    const rest = await stepped.records(split, latest);
-    expect([...first, ...rest]).toEqual(whole);
     // A read from a block this adapter never ended at reads the
     // accumulator there from the node.
-    expect(await adapter(registry, fromBlock, key).records(split, latest)).toEqual(rest);
+    expect((await readTo(adapter(registry, fromBlock, key), first.latest)).records).toEqual(
+      rest.records,
+    );
     // A range with no logs.
     await mine(1);
-    expect(await stepped.records(latest, latest + 1n)).toEqual([]);
+    expect((await readTo(stepped, rest.latest)).records).toEqual([]);
+    // Only up to the block heads() gave: core checks that block's hash.
+    await expect(stepped.records(null, first.latest)).rejects.toThrow(Tier1ChainError);
   });
 
   test("are refused when the node drops, alters or re-times a log", async () => {
@@ -397,11 +416,20 @@ describe("the registry's records", () => {
               : l,
         );
       },
+      // Logs without their own timestamps, and a block re-timed.
       async (method, params, forward) => {
-        const answer = (await forward(params)) as { timestamp: Hex } | null;
-        if (method !== "eth_getBlockByNumber" || answer === null || params[0] === "latest")
-          return answer;
-        return { ...answer, timestamp: toHex(BigInt(answer.timestamp) + 1n) };
+        const answer = await forward(params);
+        if (method === "eth_getLogs") return untimed(answer);
+        const block = answer as { timestamp: Hex } | null;
+        if (method !== "eth_getBlockByNumber" || block === null || params[0] === "latest")
+          return block;
+        return { ...block, timestamp: toHex(BigInt(block.timestamp) + 1n) };
+      },
+      // A log's own timestamp, where a node gives one, is bound as well.
+      async (method, params, forward) => {
+        const answer = await forward(params);
+        if (method !== "eth_getLogs") return answer;
+        return (answer as object[]).map((l) => ({ ...l, blockTimestamp: "0x1" }));
       },
       async (method, params, forward) => {
         const answer = await forward(params);
@@ -414,11 +442,22 @@ describe("the registry's records", () => {
     ];
     for (const [i, hook] of hooks.entries()) {
       const reader = adapter(registry, fromBlock, key, { client: nodeClient(hook) });
-      const error = await reader.records(null, latest).catch((e: unknown) => e);
+      const error = await readTo(reader).catch((e: unknown) => e);
       expect(error, `hook ${i}`).toBeInstanceOf(Tier1ChainError);
       expect(String(error)).toBe("Tier1ChainError: the Tier 1 relay's L2 node: records");
     }
+    // Logs without their own timestamps read their blocks' instead.
+    const plain = adapter(registry, fromBlock, key, {
+      client: nodeClient(async (method, params, forward) => {
+        const answer = await forward(params);
+        return method === "eth_getLogs" ? untimed(answer) : answer;
+      }),
+    });
+    expect((await readTo(plain)).records).toEqual(
+      (await readTo(adapter(registry, fromBlock, key))).records,
+    );
   });
+
   test("are read against the block core was given, refused for a block the node doesn't have", async () => {
     const { registry, fromBlock } = await deployWithGroups();
     const key = await relayKey();
@@ -436,10 +475,12 @@ describe("the registry's records", () => {
     const heads = await forked.heads();
     expect(bytesToHex(heads.latest.hash)).toBe(other);
     await expect(forked.records(null, heads.latest.number)).rejects.toThrow(Tier1ChainError);
-    // The same read without the fork passes.
+    // A nonce read there is refused too: the count is read by that hash.
+    await expect(forked.nonce()).rejects.toThrow(Tier1ChainError);
+    // The same reads without the fork pass.
     const honest = adapter(registry, fromBlock, key);
-    const h = await honest.heads();
-    expect(await honest.records(null, h.latest.number)).toHaveLength(3);
+    expect((await readTo(honest)).records).toHaveLength(3);
+    expect((await honest.nonce()).count).toBe(0n);
   });
 });
 
@@ -465,28 +506,75 @@ describe("the heads", () => {
       client: createPublicClient({ transport: http(closed, { retryCount: 0 }) }) as PublicClient,
     });
     const record = junkRecord(1n);
+    // A transaction signed while the node was up, broadcast once it isn't.
+    const standIn = getAddress(`0x${randomBytes(20).toString("hex")}`);
+    const signed = await adapter(standIn, 0n, await relayKey()).sign(record, 0n);
     for (const call of [
       () => reader.heads(),
+      () => reader.blockHash(1n),
       () => reader.records(null, 10n),
       () => reader.nonce(),
+      () => reader.included(signed.hash),
       () => reader.simulate(record),
       () => reader.sign(record, 0n),
+      () => reader.broadcast(signed.tx),
     ]) {
       const error = await call().catch((e: unknown) => e);
       expect(error).toBeInstanceOf(Tier1ChainError);
       expect(String(error)).not.toContain("secret-api-key");
       expect(String(error)).not.toContain(hex(record).slice(0, 64));
+      expect(String(error)).not.toContain(hex(signed.tx).slice(0, 64));
+      expect(String(error)).not.toContain(hex(signed.hash));
     }
   });
 });
 
 describe("sending", () => {
-  test("a reverting call simulates false", async () => {
+  test("a reverting call simulates false, and any other error answer rejects", async () => {
     const { registry, fromBlock } = await deployWithGroups();
-    const reader = adapter(registry, fromBlock, await relayKey());
+    const key = await relayKey();
+    const reader = adapter(registry, fromBlock, key);
     // Group 1 is Tier 1, but the vouches name no Tier 2 group here.
     expect(await reader.simulate(junkRecord(1n))).toBe(false);
     expect(await reader.simulate(junkRecord(0n))).toBe(false);
+    // A rate limit, an internal error or a backend without the block isn't
+    // a revert: the record must stay queued.
+    for (const [code, message] of [
+      [-32005, "limit exceeded"],
+      [-32603, "internal error"],
+      [-32000, "header not found"],
+    ] as const) {
+      const flaky = adapter(registry, fromBlock, key, {
+        client: nodeClient(async (method, params, forward) => {
+          if (method === "eth_call") throw Object.assign(new Error(message), { code });
+          return forward(params);
+        }),
+      });
+      await expect(flaky.simulate(junkRecord(1n)), message).rejects.toThrow(Tier1ChainError);
+    }
+  });
+
+  test("a broadcast the node already holds is sent, another error refused, a wrong hash rejected", async () => {
+    const standIn = getAddress(`0x${randomBytes(20).toString("hex")}`);
+    const key = await relayKey();
+    const signed = await adapter(standIn, 0n, key).sign(junkRecord(1n), 0n);
+    const answering = (answer: (forward: Forward, params: unknown[]) => Promise<unknown>) =>
+      adapter(standIn, 0n, key, {
+        client: nodeClient(async (method, params, forward) =>
+          method === "eth_sendRawTransaction" ? answer(forward, params) : forward(params),
+        ),
+      });
+    const failing = (code: number, message: string) =>
+      answering(async () => {
+        throw Object.assign(new Error(message), { code });
+      });
+    expect(await failing(-32000, "already known").broadcast(signed.tx)).toBe("sent");
+    expect(await failing(-32000, "known transaction: 0xab").broadcast(signed.tx)).toBe("sent");
+    expect(await failing(-32000, "nonce too low").broadcast(signed.tx)).toBe("refused");
+    expect(await failing(-32000, "insufficient funds").broadcast(signed.tx)).toBe("refused");
+    await expect(
+      answering(async () => toHex(randomBytes(32))).broadcast(signed.tx),
+    ).rejects.toThrow(Tier1ChainError);
   });
 
   test("signs addTier1Member at the nonce, replaces with both fees raised, and finds what landed", async () => {
@@ -549,20 +637,32 @@ describe("sending", () => {
     await expect(reader.sign(record, 1n, first.tx)).rejects.toThrow(Tier1ChainError);
   });
 
-  test("never signs above the fee cap, a replacement included", async () => {
+  test("never signs above the fee cap, and at it replaces a record's transaction with itself", async () => {
     const standIn = getAddress(`0x${randomBytes(20).toString("hex")}`);
-    await rpc("anvil_setCode", [standIn, "0x00"]);
     const key = await relayKey();
     const record = junkRecord(1n);
     const free = await adapter(standIn, 0n, key).sign(record, 0n);
     const fee = parseTransaction(bytesToHex(free.tx)).maxFeePerGas as bigint;
     const cap = fee / 2n;
     const capped = adapter(standIn, 0n, key, { maxFeePerGas: cap });
-    for (const signed of [await capped.sign(record, 0n), await capped.sign(record, 0n, free.tx)]) {
-      const t = parseTransaction(bytesToHex(signed.tx));
-      expect(t.maxFeePerGas).toBe(cap);
-      expect(t.maxPriorityFeePerGas as bigint).toBeLessThanOrEqual(cap);
+    const first = await capped.sign(record, 0n);
+    const t = parseTransaction(bytesToHex(first.tx));
+    expect(t.maxFeePerGas).toBe(cap);
+    expect(t.maxPriorityFeePerGas as bigint).toBeLessThanOrEqual(cap);
+    // No raise fits under the cap: the same record's transaction stays as
+    // it is, so core keeps one copy.
+    for (const replacing of [first.tx, free.tx]) {
+      const again = await capped.sign(record, 0n, replacing);
+      expect(hex(again.tx)).toBe(hex(replacing));
+      expect(bytesToHex(again.hash)).toBe(keccak256(bytesToHex(replacing)));
     }
+    // Another record's transaction at a freed nonce is outbid up to the cap.
+    const other = await capped.sign(junkRecord(2n), 0n, free.tx);
+    const o = parseTransaction(bytesToHex(other.tx));
+    expect(o.maxFeePerGas).toBe(cap);
+    expect(decodeFunctionData({ abi: groupRegistryAbi, data: o.data as Hex }).args).toEqual([
+      bytesToHex(junkRecord(2n)),
+    ]);
   });
 });
 

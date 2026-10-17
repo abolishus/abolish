@@ -212,11 +212,13 @@ async function tier1Index(ctx: JobContext, _data: JobData<"tier1Index">): Promis
 }
 
 /**
- * Seconds into a relay period within which its boundary may still run: four
- * of `TIER1_BOUNDARY_EVERY_MS`'s ticks. A worker that was down, or whose
- * ticks all lost the lock, skips the period rather than send late, since a
+ * Seconds into a relay period within which its boundary may still start:
+ * four of `TIER1_BOUNDARY_EVERY_MS`'s ticks. A worker that was down, or whose
+ * ticks all lost the lock, skips the period rather than start late, since a
  * batch's time is what dates its requests (docs/spec/tier1-relay.md, The
- * batch; T-13); its records wait for the next boundary.
+ * batch; T-13); its records wait for the next boundary. A boundary that
+ * starts in time can still send later, after a long replay (Known-weak in
+ * docs/status/P3-3.md).
  */
 export const TIER1_BOUNDARY_WITHIN = 120;
 

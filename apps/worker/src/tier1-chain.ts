@@ -40,6 +40,7 @@ import {
   bytesToHex,
   decodeFunctionResult,
   encodeFunctionData,
+  ExecutionRevertedError,
   getAddress,
   type Hex,
   hexToBytes,
@@ -48,7 +49,6 @@ import {
   type PublicClient,
   RpcError,
   RpcRequestError,
-  ExecutionRevertedError,
   TransactionReceiptNotFoundError,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
@@ -64,6 +64,9 @@ export const TIER1_LOG_RANGE = TIER0_LOG_RANGE;
  */
 const KEPT_ENDS = 8;
 
+/** Blocks whose timestamps are read at once, so a full replay isn't one round trip per block. */
+const TIMESTAMP_READS = 16;
+
 export interface Tier1ChainOptions {
   /** One L2 node; its HTTP transport should time out well within core's `TIER1_BATCH_LOCK_MS`. */
   readonly client: PublicClient;
@@ -74,10 +77,11 @@ export interface Tier1ChainOptions {
   /** The relay account's key: it signs every call and pays for it, and nothing else. */
   readonly key: Uint8Array;
   /**
-   * The most wei per gas any call is signed to pay. The node's fee answers
-   * are its own, so this bounds a boundary's spend at
+   * The most wei per L2 gas any call is signed to pay. The node's fee
+   * answers are its own, so this bounds a boundary's L2 execution spend at
    * `TIER1_RELAY_MAX_BATCH · TIER1_RELAY_GAS_LIMIT · maxFeePerGas` whatever
-   * it says (T-52).
+   * it says (T-52). An OP Stack chain's L1 data fee is charged outside it
+   * (Known-weak in docs/status/P3-3.md).
    */
   readonly maxFeePerGas: bigint;
   /** Blocks per log query; `TIER1_LOG_RANGE` unless a provider allows fewer. */
@@ -100,6 +104,7 @@ interface End {
 
 interface RawLog {
   readonly blockNumber: bigint | null;
+  readonly blockTimestamp?: bigint | null;
   readonly logIndex: number | null;
   readonly removed?: boolean;
   readonly topics: readonly Hex[];
@@ -176,19 +181,15 @@ export class ViemTier1Chain implements Tier1Chain {
       const start = after === null ? null : after + 1n;
       if (after !== null && after < this.#from) throw new Error("before the deployment");
       if (through < (start ?? this.#from)) throw new Error("an empty range");
-      const at =
-        this.#latest?.number === through
-          ? this.#latest.hash
-          : head(await this.#client.getBlock({ blockNumber: through }), through).hash;
-      const [begin, end] = await Promise.all([this.#endAt(after), this.#accumulatorAt(at)]);
+      // Core reads to the latest block `heads()` gave it, whose hash it
+      // checks: the read is bound to that hash, and to no other block.
+      if (this.#latest?.number !== through) throw new Error("not the block core checks");
+      const [begin, end] = await Promise.all([
+        this.#endAt(after),
+        this.#accumulatorAt(this.#latest.hash),
+      ]);
       const logs = await this.#logs(start ?? this.#from, through);
-      const times = new Map<bigint, bigint>();
-      for (const log of logs)
-        if (!times.has(log.blockNumber))
-          times.set(
-            log.blockNumber,
-            (await this.#client.getBlock({ blockNumber: log.blockNumber })).timestamp,
-          );
+      const times = await this.#timestamps(logs);
       let acc = begin.accumulator;
       const records = logs.map((log, i): ContractEventRecord => {
         const record = {
@@ -222,10 +223,15 @@ export class ViemTier1Chain implements Tier1Chain {
   nonce(): Promise<{ readonly count: bigint; readonly at: Tier1Head }> {
     return guard("nonce", async () => {
       const at = head(await this.#client.getBlock({ blockTag: "latest" }));
-      const count = await this.#client.getTransactionCount({
-        address: this.#account.address,
-        blockNumber: at.number,
-      });
+      // By the block's hash (EIP-1898), so the count is the one in the
+      // history core's replay is bound to: a count from another fork at that
+      // height could give back a record whose transaction can still land.
+      const count = await this.#client.request({
+        method: "eth_getTransactionCount",
+        params: [this.#account.address, { blockHash: bytesToHex(at.hash), requireCanonical: true }],
+      } as never);
+      if (typeof count !== "string" || !/^0x[0-9a-fA-F]{1,16}$/.test(count))
+        throw new Error("a malformed count");
       return { count: BigInt(count), at };
     });
   }
@@ -256,9 +262,13 @@ export class ViemTier1Chain implements Tier1Chain {
         });
         return true;
       } catch (e) {
-        // The node answered the call with an error: a revert, by any node's
-        // wording. One that couldn't answer rejects.
-        if (answered(e)) return false;
+        // Only a revert, as viem reads one from the node's answer (code 3 or
+        // "execution reverted"), drops the record. Any other error, a rate
+        // limit or a backend without the latest block among them, rejects,
+        // so the record stays queued (docs/spec/tier1-relay.md, The batch,
+        // step 5).
+        if (e instanceof BaseError && e.walk((c) => c instanceof ExecutionRevertedError) !== null)
+          return false;
         throw e;
       }
     });
@@ -269,6 +279,7 @@ export class ViemTier1Chain implements Tier1Chain {
       const fees = await this.#client.estimateFeesPerGas({ chain: null, type: "eip1559" });
       let maxFeePerGas = fees.maxFeePerGas;
       let maxPriorityFeePerGas = fees.maxPriorityFeePerGas;
+      const data = this.#calldata(record);
       if (replacing !== undefined) {
         const old = parseTransaction(bytesToHex(replacing));
         if (
@@ -282,12 +293,18 @@ export class ViemTier1Chain implements Tier1Chain {
         // Nodes take a replacement only with both fees raised, by 10% for
         // geth's pool; an eighth more clears it.
         const raise = (v: bigint) => v + v / 8n + 1n;
-        if (raise(old.maxFeePerGas) > maxFeePerGas) maxFeePerGas = raise(old.maxFeePerGas);
-        if (raise(old.maxPriorityFeePerGas) > maxPriorityFeePerGas)
-          maxPriorityFeePerGas = raise(old.maxPriorityFeePerGas);
+        const floor = {
+          maxFee: raise(old.maxFeePerGas),
+          priority: raise(old.maxPriorityFeePerGas),
+        };
+        if (floor.maxFee > maxFeePerGas) maxFeePerGas = floor.maxFee;
+        if (floor.priority > maxPriorityFeePerGas) maxPriorityFeePerGas = floor.priority;
+        // Past the cap no node would take a replacement of the same record,
+        // so it stays as it is, and core keeps it unchanged. One of another
+        // record (a freed nonce) is outbid as far as the cap allows.
+        if (floor.maxFee > this.#maxFee && old.data === data)
+          return { tx: replacing.slice(), hash: hexToBytes(keccak256(bytesToHex(replacing))) };
       }
-      // At the cap a replacement may not be taken; the transaction it would
-      // replace still stands (core broadcasts it again).
       if (maxFeePerGas > this.#maxFee) maxFeePerGas = this.#maxFee;
       if (maxPriorityFeePerGas > maxFeePerGas) maxPriorityFeePerGas = maxFeePerGas;
       const tx = await this.#account.signTransaction({
@@ -295,7 +312,7 @@ export class ViemTier1Chain implements Tier1Chain {
         chainId: Number(this.#chainId),
         nonce: Number(nonce),
         to: this.#registry,
-        data: this.#calldata(record),
+        data,
         value: 0n,
         gas: TIER1_RELAY_GAS_LIMIT,
         maxFeePerGas,
@@ -359,6 +376,7 @@ export class ViemTier1Chain implements Tier1Chain {
    */
   async #accumulatorAt(hash: Uint8Array): Promise<End> {
     const data = encodeFunctionData({ abi: groupRegistryAbi, functionName: "eventAccumulator" });
+    // viem's `call` takes no block hash, so the request is sent as is.
     const answer = await this.#client.request({
       method: "eth_call",
       params: [
@@ -372,6 +390,32 @@ export class ViemTier1Chain implements Tier1Chain {
       data: answer as Hex,
     });
     return { accumulator: hexToBytes(accumulator), count };
+  }
+
+  /**
+   * Each log's block timestamp: the log's own where the node gives one, else
+   * its block's, a few blocks at a time. The accumulator binds them either way.
+   */
+  async #timestamps(logs: readonly (RawLog & { blockNumber: bigint })[]) {
+    const times = new Map<bigint, bigint>();
+    const missing: bigint[] = [];
+    for (const log of logs) {
+      if (times.has(log.blockNumber)) continue;
+      if (typeof log.blockTimestamp === "bigint") times.set(log.blockNumber, log.blockTimestamp);
+      else if (!missing.includes(log.blockNumber)) missing.push(log.blockNumber);
+    }
+    for (let i = 0; i < missing.length; i += TIMESTAMP_READS) {
+      const blocks = await Promise.all(
+        missing
+          .slice(i, i + TIMESTAMP_READS)
+          .map((blockNumber) => this.#client.getBlock({ blockNumber })),
+      );
+      for (const block of blocks) {
+        if (block.number === null) throw new Error("a pending block");
+        times.set(block.number, block.timestamp);
+      }
+    }
+    return times;
   }
 
   /** Every log of the registry in blocks `from` to `to`, in chain order. */
@@ -426,12 +470,7 @@ function head(
 function answered(e: unknown): boolean {
   return (
     e instanceof BaseError &&
-    e.walk(
-      (c) =>
-        c instanceof RpcRequestError ||
-        c instanceof RpcError ||
-        c instanceof ExecutionRevertedError,
-    ) !== null
+    e.walk((c) => c instanceof RpcRequestError || c instanceof RpcError) !== null
   );
 }
 

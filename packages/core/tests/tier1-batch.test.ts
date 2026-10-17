@@ -231,6 +231,8 @@ class FakeChain implements Tier1Chain {
   readonly simulated: Uint8Array[] = [];
   readonly recordCalls: (bigint | null)[] = [];
   readonly refuse = new Set<string>();
+  /** Signs every replacement as the transaction it replaces, as an adapter at its fee cap. */
+  capped = false;
   readonly reverts = new Set<string>();
   down = false;
   /** Blocks every read but `nonce` lags the true latest by: a backend behind another. */
@@ -316,6 +318,9 @@ class FakeChain implements Tier1Chain {
   async sign(record: Uint8Array, nonce: bigint, replacing?: Uint8Array): Promise<Tier1SignedSend> {
     await this.#check();
     this.signs.push({ record, nonce, replacing });
+    // At its fee cap an adapter can't outbid, and signs what it replaces.
+    if (this.capped && replacing !== undefined)
+      return { tx: replacing.slice(), hash: sha256(replacing) };
     const tx = Uint8Array.from([
       ...new TextEncoder().encode(`tx:${nonce}:${this.signs.length}:`),
       ...record,
@@ -735,6 +740,18 @@ describe("Tier1Batches: what was sent", { timeout: 120_000 }, () => {
     for (const tx of txs) chain.mine(tx, B + 1n);
     chain.advance(B + 2n, B - 200n);
     expect(await boundary(j)).toEqual(report("judged", { dropped: 1 }));
+  });
+
+  test("a replacement at the adapter's fee cap is the transaction already kept, kept once", async () => {
+    const { chain, j, txs } = await sent();
+    chain.capped = true;
+    expect(await boundary(j)).toEqual(report("pending", { rebroadcast: 2 }));
+    for (let i = 0; i < 3; i++)
+      expect(await boundary(j)).toEqual(report("pending", { replaced: 2 }));
+    const kept = await inFlight();
+    expect(kept.map((f) => f.hashes.length)).toEqual([1, 1]);
+    expect(kept.flatMap((f) => f.txs).sort()).toEqual(txs.map(hex).sort());
+    expect(kept.map((f) => f.pending)).toEqual([4, 4]);
   });
 
   test("a landed send is kept until final, then deleted", async () => {

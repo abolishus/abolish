@@ -302,15 +302,6 @@ function anchored(inputs: CountedInputs) {
 export function countedChecks(inputs: CountedInputs): CountedResult {
   const { definition, definitionHash, registered, clock } = inputs;
   const d = definition.value;
-  // This release's delivery check reads ballot versions 1 and 2, whose
-  // delivery records are version 1, and version 4 (definition version 6),
-  // whose records are version 2; definition version 5's ballots are version
-  // 3, which `checkDelivery` doesn't read yet.
-  if (definition.version === 5)
-    return countedRows(
-      { status: "unverifiable", code: "not-implemented", at: {} },
-      inputs.destruction,
-    );
   // Beside an author panel delivery (5.9) reads the author seats' key set,
   // their own run's, approved on the board: without it nothing is decided,
   // never with a key set taken on trust or the default panel's alone (T-37).

@@ -1411,13 +1411,6 @@ describe("the gates", () => {
       });
   });
 
-  test("definition version 5's ballots aren't read by the delivery check yet", () => {
-    const e = election(definitionOf(caseOf(tallies, "v5-questions")));
-    const r = countedChecks(e.inputs([]));
-    for (const id of ["5.9", "6.3", "7.1", "7.2", "7.3", "8.5"])
-      expect(r.rows.get(id)).toEqual({ status: "unverifiable", code: "not-implemented", at: {} });
-  });
-
   test("under another tally-opening pin, delivery runs and the tally and 8.5 are unsupported", () => {
     const e = election(definitionOf(caseOf(tallies, "tally-v2")));
     const r = countedChecks(e.inputs([]));

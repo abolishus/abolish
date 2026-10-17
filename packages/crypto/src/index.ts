@@ -1037,6 +1037,7 @@ export {
   type DeliveryCheckV2,
   type DeliveryElection,
   type DeliveryElectionV2,
+  deliveryBallotHash,
   type DeliveryEntry,
   type DeliveryRecordCode,
   type DeliveryRecordReport,

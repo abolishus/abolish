@@ -10,10 +10,12 @@
 
 import {
   ballotHash,
+  ballotHashV3,
   ballotHashV4,
   type BallotHashContextV3,
   type BallotLabel,
   type CommittedVote,
+  type CommittedVoteV3,
   type CommittedVoteV4,
   labelOf,
 } from "./ballot-validity.ts";
@@ -1443,13 +1445,38 @@ export interface DeliveryElection {
 }
 
 /**
- * A ballot [[revoting]] selected, decoded, with its tier (ballot version 2:
- * its cell) and nullifier; it passed `validity-shape`.
+ * A ballot [[revoting]] selected, decoded, with its tier (ballot versions 2
+ * and 3: its cell) and nullifier; it passed `validity-shape`. Ballot version
+ * 3 keeps version 1's delivery records ([[ballot-validity]], Shares and
+ * delivery (version 3)): only its ballot hash, over the question range
+ * proofs, differs.
  */
-export type DeliveryBallot = BallotLabel & {
-  readonly nullifier: bigint;
-  readonly vote: CommittedVote;
-};
+export type DeliveryBallot =
+  | (BallotLabel & {
+      readonly nullifier: bigint;
+      readonly vote: CommittedVote;
+    })
+  | {
+      readonly ballotVersion: 3;
+      readonly cell: number;
+      readonly nullifier: bigint;
+      readonly vote: CommittedVoteV3;
+    };
+
+/**
+ * The ballot hash a delivery record names for `ballot`, under the ballot's
+ * own version, so a receipt for a version-3 ballot binds its question range
+ * proofs and no other version's hash (T-38, T-41).
+ */
+export function deliveryBallotHash(definitionHash: Uint8Array, ballot: DeliveryBallot): Uint8Array {
+  if (ballot.ballotVersion === 3) {
+    const { cell, nullifier, vote } = ballot;
+    return ballotHashV3({ definitionHash, cell, nullifier }, vote);
+  }
+  const { version, label } = labelOf(ballot);
+  const named: BallotLabel = version === 1 ? { tier: label } : { ballotVersion: 2, cell: label };
+  return ballotHash({ definitionHash, ...named, nullifier: ballot.nullifier }, ballot.vote);
+}
 
 /**
  * A delivery record in the counted extent: through the board path, with the
@@ -2092,7 +2119,7 @@ function deliveryCheck(
 
 /**
  * The delivery check (docs/spec/delivery.md, Delivery check; verifier 5.9)
- * for ballot versions 1 and 2, with delivery records of version 1.
+ * for ballot versions 1 to 3, with delivery records of version 1.
  * `ballots` are the ballots selected for every cell from the counted extent;
  * `entries` every share-receipt, posting and complaint in the counted extent,
  * by either path, in board order, and `at` in every report is a position in
@@ -2126,9 +2153,7 @@ export function checkDelivery(
   const hashes = ballots.map((b) => {
     if (b.vote.share_hashes.length !== panelSize)
       throw new RangeError("checkDelivery: every ballot must have passed validity-shape");
-    const { version, label } = labelOf(b);
-    const named: BallotLabel = version === 1 ? { tier: label } : { ballotVersion: 2, cell: label };
-    return ballotHash({ definitionHash, ...named, nullifier: b.nullifier }, b.vote);
+    return deliveryBallotHash(definitionHash, b);
   });
   const vote = (ballot: number) => (ballots[ballot] as DeliveryBallot).vote;
   const ctx = { definitionHash };

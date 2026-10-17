@@ -17,9 +17,7 @@
 
 import {
   type AdmittedBallot,
-  ballotHash,
   ballotHashV4,
-  type BallotLabel,
   type CloseBallot,
   closeCheck,
   closeDeadline,
@@ -30,6 +28,7 @@ import {
   DecodeError,
   type DecodeErrorCode,
   decodeContractEvent,
+  deliveryBallotHash,
   type AnchorClock,
   lDelta,
   RECORD_TYPES,
@@ -233,11 +232,10 @@ export function closeChecks(inputs: CloseInputs): {
     }
     if (t?.delivery === undefined)
       throw new Error("closeChecks: an admitted ballot without its delivery fields");
-    const { nullifier, vote, ...label } = t.delivery;
     return {
       ...b.ballot,
       cell: t.cell,
-      ballotHash: ballotHash({ definitionHash, nullifier, ...(label as BallotLabel) }, vote),
+      ballotHash: deliveryBallotHash(definitionHash, t.delivery),
       path: "board",
     };
   });

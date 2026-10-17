@@ -41,6 +41,11 @@ import {
   openChallengeV2,
 } from "./challenge.ts";
 import { DecodeError, type DecodeErrorCode } from "./codec.ts";
+import {
+  type ContractEventRecord,
+  type ContractEventVersion,
+  decodeContractEvent,
+} from "./contract-event.ts";
 import type { ElectionDefinitionV5 } from "./election-definition.ts";
 import { equalBytes } from "./nullifier-key.ts";
 import { decodeMembershipProof, membershipVkHash } from "./membership-proof.ts";
@@ -53,7 +58,12 @@ import {
   secretScalar,
 } from "./membership-prover.ts";
 import { poseidon2 } from "./poseidon.ts";
-import { electionStubV5Hash, pinnedVersion, profileCombinationRule } from "./protocol.ts";
+import {
+  electionStubV5Hash,
+  pinnedVersion,
+  type ProfileCombinationRule,
+  profileCombinationRule,
+} from "./protocol.ts";
 import { RECORD_TYPES } from "./record.ts";
 import { membershipMessage } from "./revoting.ts";
 import {
@@ -62,6 +72,11 @@ import {
   kemKeygen,
   type KemPublicKey,
 } from "./share-encryption.ts";
+import {
+  tierMembership,
+  TierMembershipError,
+  type TierMembershipErrorCode,
+} from "./tier-membership.ts";
 import { type Panel, panelId } from "./trustee.ts";
 
 /**
@@ -194,6 +209,103 @@ function payloadOf(
     // An entry that doesn't decode carries no transcript.
     if (e instanceof DecodeError) return undefined;
     throw e;
+  }
+}
+
+/** Who the voter is in a poll's electorate, as their device recorded it at registration. */
+export interface VoterIdentity {
+  /** `identityCommitment` of the voter's secret: the leaf the client looks for. */
+  readonly commitment: bigint;
+  /** The tier the voter registered in. */
+  readonly tier: number;
+  /** The group the voter registered in, which says their region. */
+  readonly group: bigint;
+}
+
+/**
+ * Why the voter has no cell to cast in: the profile's (2.3, which
+ * `sealingElectionV5` already passed for a poll the client holds), a tier the
+ * poll's electorate doesn't list (`tier-absent`), a contract-event record on
+ * the board that doesn't decode under the pinned version (`board-event`, as
+ * one that fails the event check), or `tierMembership`'s refusal. Each is a
+ * reason the client shows, never a retry.
+ */
+export type VoterCellCode = ProfileCombinationRule | "tier-absent" | TierMembershipErrorCode;
+
+export type VoterCell =
+  | {
+      readonly ok: true;
+      /** The cell's position in the ballot's partition, every tier's cells counted: `sealBallotV3`'s `cell`. */
+      readonly cell: number;
+      /** The cell tree's leaves in order, for `castSealV3`; iterable again and again. */
+      readonly leaves: Iterable<bigint>;
+    }
+  | {
+      readonly ok: false;
+      readonly code: VoterCellCode;
+      /** The group the refusal concerns, where `tierMembership` names one. */
+      readonly group?: bigint;
+    };
+
+/**
+ * The voter's cell in a version-5 poll and its leaves, rebuilt on the device
+ * from the whole board (each an encoded entry, as `GET /board/entries`
+ * serves it, in any order; an entry that doesn't decode under the pinned
+ * board-entry version or names another election is skipped, as the
+ * verifier's 4.4 skips it), never a path or a leaf index asked of a server
+ * (T-10, T-13). The board's contract-event records go to `tierMembership`
+ * under the definition's chain, group registry and contract-event version
+ * and the registrars this release pins, never ones a record logs, so a
+ * rewritten group history, a recount that disagrees with the definition and
+ * a repeat that moved the voter out of their region are all refused (T-06,
+ * T-16, T-71). The cell's root is checked by `castSealV3`, over these
+ * leaves.
+ */
+export function voterCellV5(
+  definition: ElectionDefinitionV5,
+  entries: readonly Uint8Array[],
+  identity: VoterIdentity,
+  release: { readonly registrars: readonly Uint8Array[]; readonly threshold: number },
+): VoterCell {
+  const combination = profileCombinationRule(definition);
+  if (combination !== undefined) return { ok: false, code: combination };
+  const at = definition.electorate.findIndex((t) => t.tier === identity.tier);
+  const tier = definition.electorate[at];
+  if (tier === undefined) return { ok: false, code: "tier-absent" };
+  // profileCombinationRule refused a board-entry or contract-event version
+  // this release doesn't read.
+  const boardEntryVersion = pinnedVersion(definition, RECORD_TYPES.boardEntry) as BoardEntryVersion;
+  const version = pinnedVersion(definition, RECORD_TYPES.contractEvent) as ContractEventVersion;
+  const records: ContractEventRecord[] = [];
+  for (const encoded of entries) {
+    const payload = payloadOf(encoded, boardEntryVersion, definition.election_id);
+    if (payload === undefined) continue;
+    if ((((payload[0] as number) << 8) | (payload[1] as number)) !== RECORD_TYPES.contractEvent)
+      continue;
+    try {
+      records.push(decodeContractEvent(payload, version));
+    } catch (e) {
+      // It may be the group registry's: the client can't tell, so it can't
+      // leave it out (fail closed).
+      if (e instanceof DecodeError) return { ok: false, code: "board-event" };
+      throw e;
+    }
+  }
+  try {
+    const found = tierMembership(records, tier, identity.commitment, identity.group, {
+      version,
+      chainId: definition.l2_chain_id,
+      registry: definition.group_registry,
+      registrars: release.registrars,
+      threshold: release.threshold,
+    });
+    const before = definition.electorate.slice(0, at).reduce((n, t) => n + t.cells.length, 0);
+    return { ok: true, cell: before + found.cell, leaves: found.leaves };
+  } catch (e) {
+    if (!(e instanceof TierMembershipError)) throw e;
+    return e.group === undefined
+      ? { ok: false, code: e.code }
+      : { ok: false, code: e.code, group: e.group };
   }
 }
 

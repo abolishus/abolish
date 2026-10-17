@@ -28,6 +28,8 @@ async function answer(request: WorkerRequest): Promise<WorkerResponse> {
   switch (request.kind) {
     case "check-election":
       return { v, id, kind: "check-election", result: session.checkElection(request) };
+    case "find-cell":
+      return { v, id, kind: "find-cell", result: session.findCell(request) };
     case "seal":
       return { v, id, kind: "seal", result: session.seal(request) };
     case "challenge":

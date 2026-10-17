@@ -29,6 +29,15 @@ export interface Deployment {
    * (T-37, T-54).
    */
   readonly panels: readonly Panel[];
+  /**
+   * The group registry's registrars and threshold this build pins, or
+   * `undefined` while none is deployed: a voter's cell is rebuilt from the
+   * board under these, never under a `RegistrarsPinned` the board logs, so
+   * whoever serves the board can't sign additions of its own (T-71).
+   */
+  readonly registrars:
+    | { readonly registrars: readonly Uint8Array[]; readonly threshold: number }
+    | undefined;
 }
 
 /** Staging: Base Sepolia ([[0004-l2-choice]]) and the staging API behind Cloudflare. */
@@ -42,4 +51,7 @@ export const STAGING: Deployment = {
   // No release pins a panel yet: the transitional panel comes with the
   // release that deploys it (P2-16 part 6).
   panels: [],
+  // No group registry is deployed on staging yet (P3-2's registry deploys
+  // with the others), so a staging build finds no voter's cell.
+  registrars: undefined,
 };

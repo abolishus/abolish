@@ -1,7 +1,8 @@
 // A seal cast in the ballot worker (src/worker/session.ts, `cast`): the
 // record is proved by a prover at the other end of a channel, here
 // @abolishus/membership-prover's snarkjs run in Node as the prover worker
-// runs it, and only a record that passes the admission checks comes back
+// runs it, over the leaves of the cell the worker found from the board, and
+// only a record that passes the admission checks comes back
 // (docs/spec/ballot-validity.md, Casting (version 3); T-07, T-12, T-45,
 // T-55). Records are judged by @abolishus/crypto's `checkBallotV3` under a
 // context made here from the same records, not from the worker.
@@ -24,18 +25,23 @@ import {
   type CastRequest,
   type CastResult,
   type CheckElectionRequest,
+  type FindCellRequest,
   PROTOCOL_VERSION,
 } from "../src/worker/protocol.ts";
 import { BallotSession } from "../src/worker/session.ts";
 import {
+  board,
+  boardWith,
   cellLeaves,
   definition,
   definitionBytes,
   displayText,
   entry,
+  GROUP,
   members,
   panel,
   registeredHash,
+  registrars,
 } from "./poll.ts";
 
 const toHex = (b: Uint8Array) => Buffer.from(b).toString("hex");
@@ -108,34 +114,60 @@ const checkRequest: CheckElectionRequest = {
   panels: [panel],
 };
 
-/** A session holding the poll and one seal of `VOTES` in cell 0. */
-function sealed(): { session: BallotSession; seal: number } {
-  const session = new BallotSession();
-  const check = session.checkElection(checkRequest);
-  if (!check.ok) throw new Error(check.problem);
+const findCellRequest = (change: Partial<FindCellRequest> = {}): FindCellRequest => ({
+  v: PROTOCOL_VERSION,
+  id: 5,
+  kind: "find-cell",
+  definitionHash: registeredHash,
+  secret: Uint8Array.from(members[1] as Uint8Array),
+  tier: 0,
+  group: GROUP,
+  entries: board,
+  ...registrars,
+  ...change,
+});
+
+const sealIn = (session: BallotSession, cell: number) => {
   const result = session.seal({
     v: PROTOCOL_VERSION,
     id: 2,
     kind: "seal",
     definitionHash: registeredHash,
-    cell: 0,
+    cell,
     votes: VOTES,
   });
   if (!result.ok) throw new Error(result.problem);
-  return { session, seal: result.seal };
+  return result.seal;
+};
+
+/**
+ * A session holding the poll, the cell of member 1 found from `find` (the
+ * honest board unless given; none if `null`) and one seal of `VOTES` in cell 0.
+ */
+function sealed(find: Partial<FindCellRequest> | null = {}): {
+  session: BallotSession;
+  seal: number;
+} {
+  const session = new BallotSession();
+  const check = session.checkElection(checkRequest);
+  if (!check.ok) throw new Error(check.problem);
+  if (find !== null) {
+    const found = session.findCell(findCellRequest(find));
+    if (!found.ok) throw new Error(found.problem);
+  }
+  return { session, seal: sealIn(session, 0) };
 }
 
 const castRequest = (
   seal: number,
   port: MessagePort,
-  change: Partial<Pick<CastRequest, "secret" | "leaves" | "l1Number" | "l1Hash">> = {},
+  change: Partial<Pick<CastRequest, "secret" | "l1Number" | "l1Hash">> = {},
 ): CastRequest => ({
   v: PROTOCOL_VERSION,
   id: 3,
   kind: "cast",
   seal,
   secret: Uint8Array.from(members[1] as Uint8Array),
-  leaves: cellLeaves,
   ...L1,
   ...change,
   prover: port,
@@ -203,19 +235,21 @@ describe("casting a seal", () => {
   );
 
   test(
-    "a recast under another member's secret is refused before the prover hears anything",
+    "a recast under another member's secret is refused before the prover hears anything, even once that member's cell is found",
     async () => {
       const { session, seal } = sealed();
       const p = snarkjs();
       admitted(await session.cast(castRequest(seal, p.port)));
       p.close();
-      const other = prover(() => undefined);
-      const result = await session.cast(
-        castRequest(seal, other.port, { secret: Uint8Array.from(members[2] as Uint8Array) }),
-      );
-      expect(result).toEqual({ ok: false, problem: "secret" });
-      expect(other.received).toEqual([]);
-      other.close();
+      const other = () => Uint8Array.from(members[2] as Uint8Array);
+      for (const find of [false, true]) {
+        if (find) expect(session.findCell(findCellRequest({ secret: other() })).ok).toBe(true);
+        const q = prover(() => undefined);
+        const result = await session.cast(castRequest(seal, q.port, { secret: other() }));
+        expect(result).toEqual({ ok: false, problem: "secret" });
+        expect(q.received).toEqual([]);
+        q.close();
+      }
     },
     2 * PROOF_TIMEOUT,
   );
@@ -276,10 +310,10 @@ describe("casting a seal", () => {
     }
   });
 
-  // Five seals, each a fresh sharing and encryption over every question:
+  // Several seals, each a fresh sharing and encryption over every question:
   // about 6 s on a loaded CI runner, past the 5 s default.
   test(
-    "a non-member, leaves that miss the cell's root and a malformed secret are refused before any proving",
+    "a secret other than the one found, a malformed one, and a board whose leaves miss the cell's root are refused before any proving",
     async () => {
       // A valid secret, and no member's; a fresh copy each time, as the worker zeroes it.
       const outsider = () => {
@@ -287,18 +321,17 @@ describe("casting a seal", () => {
         s[0] = 1;
         return s;
       };
-      const cases: [Partial<CastRequest>, string][] = [
-        // A secret whose commitment isn't one of the cell's leaves.
-        [{ leaves: [...cellLeaves, identityCommitment(outsider())], secret: outsider() }, "root"],
-        [{ secret: outsider() }, "not-a-member"],
-        // The cell's leaves without the voter's.
-        [{ leaves: cellLeaves.filter((_, i) => i !== 1) }, "not-a-member"],
-        // The voter's among them, out of order: they don't climb to the cell's root.
-        [{ leaves: [...cellLeaves].reverse() }, "root"],
-        [{ secret: new Uint8Array(32) }, "secret"],
+      const cases: [Partial<FindCellRequest>, Partial<CastRequest>, string][] = [
+        [{}, { secret: outsider() }, "secret"],
+        [{}, { secret: new Uint8Array(32) }, "secret"],
+        // The cell's members in another order: the counts agree with the
+        // definition, but the leaves don't climb to the cell's root.
+        [{ entries: boardWith([...cellLeaves].reverse()) }, {}, "root"],
+        // An outsider in the voter's place.
+        [{ entries: boardWith(cellLeaves.with(0, identityCommitment(outsider()))) }, {}, "root"],
       ];
-      for (const [change, problem] of cases) {
-        const { session, seal } = sealed();
+      for (const [find, change, problem] of cases) {
+        const { session, seal } = sealed(find);
         const p = prover(() => undefined);
         await expect(session.cast(castRequest(seal, p.port, change))).resolves.toEqual({
           ok: false,
@@ -310,6 +343,47 @@ describe("casting a seal", () => {
     },
     PROOF_TIMEOUT,
   );
+
+  test("a seal is cast only in the voter's cell, found for the poll the worker holds", async () => {
+    const tries: [string, () => { session: BallotSession; seal: number }][] = [
+      ["no cell found", () => sealed(null)],
+      [
+        "a refused search",
+        () => {
+          const s = sealed();
+          s.session.findCell(findCellRequest({ group: GROUP + 1n }));
+          return s;
+        },
+      ],
+      [
+        "a seal in another cell",
+        () => {
+          const s = sealed();
+          return { session: s.session, seal: sealIn(s.session, 1) };
+        },
+      ],
+      [
+        "a poll checked anew",
+        () => {
+          const s = sealed();
+          s.session.checkElection(checkRequest);
+          return { session: s.session, seal: sealIn(s.session, 0) };
+        },
+      ],
+    ];
+    for (const [what, make] of tries) {
+      const { session, seal } = make();
+      const p = prover(() => undefined);
+      await expect(session.cast(castRequest(seal, p.port)), what).resolves.toEqual({
+        ok: false,
+        problem: "no-cell",
+      });
+      expect(p.received).toEqual([]);
+      p.close();
+      // Refused, but cast: never opened (T-45).
+      expect(challenge(session, seal)).toEqual({ ok: false, problem: "cast" });
+    }
+  });
 
   test(
     "a proof of another cast, an artifact the prover refused, and no answer in time are refusals",

@@ -137,7 +137,13 @@ const harness = {
     panel: { readonly threshold: number; readonly keys: readonly string[] },
     votes: readonly (0 | 1)[],
     secret: string,
-    leaves: readonly string[],
+    find: {
+      readonly tier: number;
+      readonly group: string;
+      readonly board: readonly string[];
+      readonly registrars: readonly string[];
+      readonly threshold: number;
+    },
     l1: { readonly number: string; readonly hash: string },
   ): Promise<string> {
     const check = await worker.checkElection(
@@ -148,7 +154,17 @@ const harness = {
       entries.map(fromHex),
       [{ threshold: panel.threshold, keys: panel.keys.map(fromHex) }],
     );
-    const sealed = await worker.seal(fromHex(registeredHash), 0, votes);
+    const found = await worker.findCell({
+      definitionHash: fromHex(registeredHash),
+      secret: fromHex(secret),
+      tier: find.tier,
+      group: BigInt(find.group),
+      entries: find.board.map(fromHex),
+      registrars: find.registrars.map(fromHex),
+      threshold: find.threshold,
+    });
+    if (!found.ok) return JSON.stringify({ check: check.ok, found });
+    const sealed = await worker.seal(fromHex(registeredHash), found.cell, votes);
     if (!sealed.ok) return JSON.stringify({ check: check.ok, sealed });
     const artifacts = await loadProverArtifacts({
       base: import.meta.url,
@@ -160,7 +176,6 @@ const harness = {
       {
         seal: sealed.seal,
         secret: fromHex(secret),
-        leaves: leaves.map(BigInt),
         l1Number: BigInt(l1.number),
         l1Hash: fromHex(l1.hash),
       },

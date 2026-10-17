@@ -3,7 +3,9 @@
 // that isn't shaped like one ends in a problem, never in bytes handed on;
 // requests carry no credentials or referrer and name only the election
 // (T-10, T-11, T-34, T-52). The board's first entry, which carries the
-// ceremony transcript, is fetched beside the records. Whether the records may be shown is the worker's
+// ceremony transcript, is fetched beside the records; the whole board, for
+// the voter's cell, page by page, naming nothing but the election and a
+// position (T-10, T-13). Whether the records may be shown is the worker's
 // check, tested in election.test.ts and packages/crypto.
 
 import { PARAMETERS } from "@abolishus/crypto";
@@ -14,7 +16,7 @@ import { describe, expect, test } from "vite-plus/test";
 import type { Deployment } from "../src/deployment.ts";
 import { STAGING } from "../src/deployment.ts";
 import { parseLink } from "../src/link.ts";
-import { DEFINITION_HASH_OF, type Fetch, loadElection } from "../src/load.ts";
+import { DEFINITION_HASH_OF, type Fetch, loadBoard, loadElection } from "../src/load.ts";
 
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
 
@@ -450,6 +452,107 @@ describe("the link", () => {
   });
 });
 
+describe("the whole board", () => {
+  const PAGE = 256;
+  const pageUrl = (start: number) =>
+    `${DEPLOYMENT.api}/board/entries?electionId=${ID_HEX}&start=${start}&limit=${PAGE}`;
+  /** A board of `entries`, served in pages of `size` (the API may serve fewer than asked). */
+  const served = (entries: readonly string[], size = PAGE) =>
+    network((url) => {
+      for (let start = 0; start <= entries.length; start++)
+        if (url === pageUrl(start))
+          return {
+            status: 200,
+            body: JSON.stringify({ entries: entries.slice(start, start + size) }),
+          };
+      return { status: 500, body: "" };
+    });
+
+  test("every entry comes back in order, whatever page sizes the API serves, and only positions are asked", async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.array(fc.uint8Array({ minLength: 1, maxLength: 8 }), { maxLength: 600 }),
+        fc.integer({ min: 1, max: PAGE }),
+        async (entries, size) => {
+          const { calls, fetchFn } = served(entries.map(hex), size);
+          const loaded = await loadBoard(DEPLOYMENT, ID, fetchFn);
+          if (!loaded.ok) throw new Error(loaded.problem);
+          expect(loaded.entries.map(hex)).toEqual(entries.map(hex));
+          // Pages until an empty one, each from where the last ended.
+          expect(calls).toHaveLength(Math.ceil(entries.length / size) + 1);
+          for (const { url, init } of calls) {
+            expect(url).toMatch(
+              new RegExp(
+                `^${DEPLOYMENT.api}/board/entries\\?electionId=${ID_HEX}&start=\\d+&limit=${PAGE}$`,
+              ),
+            );
+            expect(init).toMatchObject({
+              credentials: "omit",
+              referrerPolicy: "no-referrer",
+              redirect: "error",
+            });
+          }
+        },
+      ),
+      { numRuns: Math.min(numRuns, 50) },
+    );
+  });
+
+  test("a page longer than asked for, other spellings or shapes are refused", async () => {
+    const tooMany = Array.from({ length: PAGE + 1 }, () => ENTRY);
+    for (const body of [
+      JSON.stringify({ entries: tooMany }),
+      JSON.stringify({ entries: [ENTRY.toUpperCase()] }),
+      JSON.stringify({ entries: [""] }),
+      JSON.stringify({ entries: [`0x${ENTRY}`] }),
+      JSON.stringify({ entries: [ENTRY], extra: 1 }),
+      "not json",
+    ])
+      expect(
+        await loadBoard(DEPLOYMENT, ID, network(() => ({ status: 200, body })).fetchFn),
+      ).toEqual({ ok: false, problem: "bad-answer" });
+  });
+
+  test("a board that never ends is refused once it passes the cap, not read forever", async () => {
+    // A full page of one-kilobyte entries, whatever position is asked, under a 1 MiB cap.
+    const { calls, fetchFn } = network(() => ({
+      status: 200,
+      body: JSON.stringify({ entries: Array.from({ length: PAGE }, () => "00".repeat(1024)) }),
+    }));
+    expect(await loadBoard(DEPLOYMENT, ID, fetchFn, 1024 * 1024)).toEqual({
+      ok: false,
+      problem: "bad-answer",
+    });
+    expect(calls).toHaveLength(5);
+    // A board of exactly the cap is read.
+    const exact = served(Array.from({ length: 1024 }, () => "00".repeat(1024)));
+    const loaded = await loadBoard(DEPLOYMENT, ID, exact.fetchFn, 1024 * 1024);
+    expect(loaded.ok && loaded.entries.length).toBe(1024);
+  });
+
+  test("the largest entry is read alone in a page", async () => {
+    const largest = "00".repeat(PARAMETERS.MAX_BOARD_PAYLOAD + 51);
+    const loaded = await loadBoard(DEPLOYMENT, ID, served([largest, ENTRY], 1).fetchFn);
+    if (!loaded.ok) throw new Error(loaded.problem);
+    expect(loaded.entries.map(hex)).toEqual([largest, ENTRY]);
+  });
+
+  test("a board the API doesn't hold is not found, and its errors unreachable", async () => {
+    const answers: [Answer, string][] = [
+      [{ status: 404, body: "{}" }, "not-found"],
+      [{ status: 503, body: "" }, "unreachable"],
+      ["network", "unreachable"],
+    ];
+    for (const [answer, problem] of answers) {
+      // The failure on the second page, after a good first one.
+      const { fetchFn } = network((url) =>
+        url === pageUrl(0) ? { status: 200, body: JSON.stringify({ entries: [ENTRY] }) } : answer,
+      );
+      expect(await loadBoard(DEPLOYMENT, ID, fetchFn)).toEqual({ ok: false, problem });
+    }
+  });
+});
+
 describe("the deployments", () => {
   test("staging's origins are the ones the CSP lets the client reach, and its registry is a plain address or none", () => {
     expect(STAGING.api).toBe("https://api-staging.abolish.us");
@@ -458,5 +561,12 @@ describe("the deployments", () => {
     // 0x and 40 lowercase hex digits: eth_call's `to` as the RPC expects it, never a checksum spelling.
     if (STAGING.electionRegistry !== undefined)
       expect(STAGING.electionRegistry).toMatch(/^0x[0-9a-f]{40}$/);
+    // Registrars are addresses, at least `threshold` of them.
+    if (STAGING.registrars !== undefined) {
+      expect(STAGING.registrars.registrars.every((r) => r.length === 20)).toBe(true);
+      expect(STAGING.registrars.threshold).toBeLessThanOrEqual(
+        STAGING.registrars.registrars.length,
+      );
+    }
   });
 });

@@ -4,6 +4,10 @@ import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vite-plus/test";
 import {
   type ContractEventRecord,
+  decodeElectionDefinitionV5,
+  type ElectionDefinitionV5,
+  encodeBoardEntry,
+  encodeContractEvent,
   encodeGroupAddition,
   encodeGroupRemoval,
   groupAdditionDigest,
@@ -21,6 +25,7 @@ import {
   type TierMembershipErrorCode,
   tierTreeMemberPath,
   tierTreeRoot,
+  voterCellV5,
 } from "../src/index.ts";
 import { SPEC_VECTORS } from "./spec-vectors.ts";
 
@@ -156,6 +161,55 @@ const pins: GroupRegistryPins = {
 const domain = groupRegistryDomainSeparator(chainId, registry);
 const keys = registryVectors.registrars.secretKeys.map(hex);
 const ROOT_BLOCK = 100n;
+
+// voterCellV5's definition: version 5's typical one under the profile every
+// poll pins today (board-entry 5, contract-event 7), its electorate and
+// group registry replaced by the board's.
+const typicalV5 = decodeElectionDefinitionV5(
+  hex(
+    read<{ vectors: readonly { id: string; encoding: string }[] }>(
+      "election-definition-v5.json",
+    ).vectors.find((v) => v.id === "definition-v5-typical")?.encoding,
+  ),
+);
+const POLL_PINS = (
+  [
+    [1, 5],
+    [2, 3],
+    [3, 2],
+    [4, 1],
+    [5, 1],
+    [6, 1],
+    [7, 5],
+    [8, 7],
+    [9, 2],
+  ] as const
+).map(([record_type, version]) => ({ record_type, version }));
+const pollDefinition = (
+  electorate: readonly TierElectorate[],
+  registryAddress = registry,
+  l2ChainId = chainId,
+): ElectionDefinitionV5 => ({
+  ...typicalV5,
+  l2_chain_id: l2ChainId,
+  group_registry: registryAddress,
+  electorate: [...electorate],
+  profile: { protocol_major: 1, pins: POLL_PINS },
+});
+/** Each record as a board entry of `definition`'s election, under board-entry version 5. */
+const boardEntries = (definition: ElectionDefinitionV5, records: readonly ContractEventRecord[]) =>
+  records.map((r, i) =>
+    encodeBoardEntry(
+      {
+        election_id: definition.election_id,
+        index: BigInt(i),
+        segment: 0,
+        payload: encodeContractEvent(r, 7),
+      },
+      5,
+    ),
+  );
+const release = { registrars: pins.registrars, threshold: pins.threshold };
 
 /** A registry event before it is logged: the board numbers and blocks them. */
 type Event =
@@ -772,6 +826,27 @@ describe("tierMembership in a Tier 1 tier", () => {
     expect(checked).toBeGreaterThanOrEqual(15);
   });
 
+  test("voterCellV5 places a Tier 1 voter after every Tier 0 cell", { timeout: 60_000 }, () => {
+    const groupId = 9n;
+    const leaves = finalLeaves(groupId);
+    const tier0 = tierOf("split").electorate;
+    const definition = pollDefinition(
+      [tier0, oneGroup(groupId, leaves)],
+      tier1Registry,
+      tier1Pins.chainId,
+    );
+    const found = voterCellV5(
+      definition,
+      boardEntries(definition, board),
+      { commitment: leaves[0] as bigint, tier: 1, group: groupId },
+      release,
+    );
+    if (!found.ok) throw new Error(found.code);
+    expect(tier0.cells.length).toBeGreaterThan(1);
+    expect(found.cell).toBe(tier0.cells.length);
+    expect([...found.leaves]).toEqual(leaves);
+  });
+
   test("applies the first-occurrence rule across Tier 1 groups and alarms on a move", () => {
     // Group 9 holds four commitments; groups 10 and 12 repeat three of them each.
     const nine = finalLeaves(9n);
@@ -981,6 +1056,113 @@ describe("tierMembership in a Tier 1 tier", () => {
 // The creator's side (P2-22 part 3b-2): the electorate a definition states,
 // from the registry's sequence. Every expected region count, cell root and
 // member count is regional-cells.json's, from the independent implementation.
+// The client's call: the whole board as the API serves it, encoded entries
+// in any order, with the election's other records among them.
+describe("voterCellV5 reads the voter's cell from the whole board", () => {
+  const t = tierOf("split");
+  const leaf = 1_000_001_000n; // group 22's first member
+  const identity = { commitment: leaf, tier: 0, group: 22n };
+  const definition = pollDefinition([t.electorate, ...typicalV5.electorate.slice(1)]);
+  const expected = tierMembership(t.records, t.electorate, leaf, 22n, pins);
+  const entries = boardEntries(definition, t.records);
+  const otherElection = encodeBoardEntry(
+    {
+      election_id: new Uint8Array(32).fill(9),
+      index: 0n,
+      segment: 0,
+      payload: encodeContractEvent(t.records[1] as ContractEventRecord, 7),
+    },
+    5,
+  );
+  // A payload of another record type (a transcript's header) and bytes that aren't an entry.
+  const otherType = encodeBoardEntry(
+    {
+      election_id: definition.election_id,
+      index: 0n,
+      segment: 0,
+      payload: Uint8Array.of(0x00, 0x05, 1, 2, 3),
+    },
+    5,
+  );
+  const noEntry = Uint8Array.of(0, 7, 0, 5);
+
+  test(
+    "gives tierMembership's cell and leaves, in any order, skipping what isn't the election's",
+    { timeout: 120_000 },
+    () => {
+      fc.assert(
+        fc.property(fc.nat(), (seed) => {
+          const all = [...entries, otherElection, otherType, noEntry];
+          const shuffled = all
+            .map((e, i) => ({ e, k: (i * 2_654_435_761 + seed) % 4_294_967_291 }))
+            .sort((a, b) => a.k - b.k)
+            .map((x) => x.e);
+          const found = voterCellV5(definition, shuffled, identity, release);
+          if (!found.ok) throw new Error(found.code);
+          expect(found.cell).toBe(expected.cell);
+          expect([...found.leaves]).toEqual([...expected.leaves]);
+        }),
+        { numRuns: Math.min(numRuns, 10) },
+      );
+    },
+  );
+
+  test("refuses a contract-event payload that doesn't decode, which may be the registry's", () => {
+    const payload = encodeContractEvent(t.records[1] as ContractEventRecord, 7);
+    const broken = encodeBoardEntry(
+      {
+        election_id: definition.election_id,
+        index: 0n,
+        segment: 0,
+        payload: payload.subarray(0, payload.length - 1),
+      },
+      5,
+    );
+    expect(voterCellV5(definition, [...entries, broken], identity, release)).toEqual({
+      ok: false,
+      code: "board-event",
+    });
+  });
+
+  test("passes tierMembership's refusals on, with the group they concern", () => {
+    expect(voterCellV5(definition, entries, { ...identity, group: 21n }, release)).toEqual({
+      ok: false,
+      code: "not-a-member",
+      group: 21n,
+    });
+    // The release's registrars, never ones the board logs.
+    expect(
+      voterCellV5(definition, entries, identity, {
+        registrars: [...release.registrars].reverse(),
+        threshold: release.threshold,
+      }),
+    ).toMatchObject({ ok: false, code: "registrars" });
+    // Without the tier's records the board can't give the voter a cell.
+    expect(voterCellV5(definition, entries.slice(0, 1), identity, release)).toMatchObject({
+      ok: false,
+      code: "group-created",
+    });
+  });
+
+  test("refuses a tier the electorate doesn't list and a profile 2.3 refuses", () => {
+    expect(voterCellV5(definition, entries, { ...identity, tier: 1 }, release)).toEqual({
+      ok: false,
+      code: "tier-absent",
+    });
+    const v6 = {
+      ...definition,
+      profile: {
+        protocol_major: 1,
+        pins: POLL_PINS.map((p) => (p.record_type === 8 ? { ...p, version: 6 } : p)),
+      },
+    };
+    expect(voterCellV5(v6, entries, identity, release)).toEqual({
+      ok: false,
+      code: "profile-combination",
+    });
+  });
+});
+
 describe("statedTierElectorate", () => {
   const choiceOf = (t: (typeof tiers)[number]): TierChoice => ({
     tier: 0,

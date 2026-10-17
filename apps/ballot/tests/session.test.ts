@@ -4,7 +4,9 @@
 // registered, each opened at most once (T-37, T-42, T-45, T-54). The
 // transcript is a real run of the ceremony's four rounds (tests/poll.ts);
 // the opening is judged by @abolishus/crypto's own challenge check,
-// under a context made here from the same records, not from the worker.
+// under a context made here from the same records, not from the worker. The
+// voter's cell is found from the whole board, for an identity the board's
+// registry records added (T-10, T-13).
 
 import {
   checkChallengeOpeningV2,
@@ -18,11 +20,23 @@ import { describe, expect, test } from "vite-plus/test";
 import {
   type ChallengeRequest,
   type CheckElectionRequest,
+  type FindCellRequest,
   PROTOCOL_VERSION,
   type SealRequest,
 } from "../src/worker/protocol.ts";
 import { BallotSession } from "../src/worker/session.ts";
-import { definition, definitionBytes, displayText, entry, panel, registeredHash } from "./poll.ts";
+import {
+  board,
+  definition,
+  definitionBytes,
+  displayText,
+  entry,
+  GROUP,
+  members,
+  panel,
+  registeredHash,
+  registrars,
+} from "./poll.ts";
 
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
 const toHex = (b: Uint8Array) => Buffer.from(b).toString("hex");
@@ -54,6 +68,19 @@ const challengeRequest = (seal: number): ChallengeRequest => ({
   id: 3,
   kind: "challenge",
   seal,
+});
+
+const findCellRequest = (change: Partial<FindCellRequest> = {}): FindCellRequest => ({
+  v: PROTOCOL_VERSION,
+  id: 4,
+  kind: "find-cell",
+  definitionHash: registeredHash,
+  secret: Uint8Array.from(members[1] as Uint8Array),
+  tier: 0,
+  group: GROUP,
+  entries: board,
+  ...registrars,
+  ...change,
 });
 
 /** A session holding the honest poll. */
@@ -195,5 +222,60 @@ describe("seals", () => {
       ok: false,
       problem: "unknown",
     });
+  });
+});
+
+describe("the voter's cell", () => {
+  test("each member of the board's group is in cell 0, and the worker zeroes the secret", () => {
+    const session = holding();
+    for (const member of members) {
+      const secret = Uint8Array.from(member);
+      expect(session.findCell(findCellRequest({ secret }))).toEqual({ ok: true, cell: 0 });
+      expect(secret.every((b) => b === 0)).toBe(true);
+    }
+  });
+
+  test("a board that doesn't add the voter, or another group, tier or registrars, gives no cell", () => {
+    const session = holding();
+    // A valid identity secret, and no member's.
+    const outsider = new Uint8Array(32);
+    outsider[0] = 1;
+    const cases: [Partial<FindCellRequest>, string][] = [
+      [{ secret: outsider }, "not-a-member"],
+      [{ group: GROUP + 1n }, "not-a-member"],
+      [{ tier: 1 }, "tier-absent"],
+      [{ entries: [entry] }, "group-created"],
+      // Other registrars than the ones who signed the batch.
+      [{ registrars: registrars.registrars.slice(1) }, "group-history"],
+    ];
+    for (const [change, code] of cases)
+      expect(session.findCell(findCellRequest(change))).toMatchObject({
+        ok: false,
+        problem: "cell",
+        code,
+      });
+  });
+
+  test("a secret that isn't an identity secret is refused and zeroed", () => {
+    const secret = new Uint8Array(32).fill(0xff);
+    expect(holding().findCell(findCellRequest({ secret }))).toEqual({
+      ok: false,
+      problem: "secret",
+    });
+    expect(secret.every((b) => b === 0)).toBe(true);
+  });
+
+  test("no cell is found for another poll or none, and the secret is zeroed all the same", () => {
+    for (const [session, definitionHash] of [
+      [new BallotSession(), registeredHash],
+      [holding(), new Uint8Array(32)],
+    ] as const) {
+      const secret = Uint8Array.from(members[0] as Uint8Array);
+      expect(session.findCell(findCellRequest({ definitionHash, secret }))).toEqual({
+        ok: false,
+        problem: "no-election",
+      });
+      expect(secret.every((b) => b === 0)).toBe(true);
+    }
   });
 });

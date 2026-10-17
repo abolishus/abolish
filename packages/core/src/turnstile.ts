@@ -26,6 +26,7 @@ export type TurnstileAction =
   | "passkey-register"
   | "passkey-authenticate"
   | "tier0-register"
+  | "tier1-relay"
   | "poll-create";
 
 /**

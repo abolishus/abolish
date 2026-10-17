@@ -1,4 +1,4 @@
-import { createTurnstile, Tier0Registrations } from "@abolishus/core";
+import { createTurnstile, Tier0Registrations, Tier1Relay } from "@abolishus/core";
 import { BallotQueue } from "@abolishus/worker/ballot-queue";
 import { Redis } from "ioredis";
 import postgres from "postgres";
@@ -29,6 +29,14 @@ const Env = z.strictObject({
     .optional(),
   TURNSTILE_SECRET_KEY: z.string().min(1).optional(),
   API_CHALLENGE_HOST: z.string().min(1).optional(),
+  // The Tier 1 relay (docs/spec/tier1-relay.md): the published Tier 1 group
+  // of region 0, with REDIS_URL, which holds its queue, and the same
+  // Turnstile secret key and challenge host. Without it the route answers
+  // RELAY_UNAVAILABLE.
+  API_TIER1_GROUP: z
+    .string()
+    .regex(/^(0|[1-9][0-9]{0,19})$/)
+    .optional(),
   // The ballot client's origins, comma-separated, whose pages may read the
   // API's answers (CORS); the server checks each is an exact origin.
   API_CORS_ORIGINS: z.string().min(1).optional(),
@@ -42,6 +50,7 @@ const env = Env.parse({
   API_TIER0_GROUP: process.env["API_TIER0_GROUP"],
   TURNSTILE_SECRET_KEY: process.env["TURNSTILE_SECRET_KEY"],
   API_CHALLENGE_HOST: process.env["API_CHALLENGE_HOST"],
+  API_TIER1_GROUP: process.env["API_TIER1_GROUP"],
   API_CORS_ORIGINS: process.env["API_CORS_ORIGINS"],
 });
 
@@ -85,6 +94,25 @@ if (tier0Env.some((v) => v !== undefined)) {
   });
 }
 
+let tier1: Tier1Relay | undefined;
+if (env.API_TIER1_GROUP !== undefined) {
+  if (
+    redis === undefined ||
+    env.TURNSTILE_SECRET_KEY === undefined ||
+    env.API_CHALLENGE_HOST === undefined
+  )
+    throw new Error("API_TIER1_GROUP needs TURNSTILE_SECRET_KEY, API_CHALLENGE_HOST and REDIS_URL");
+  tier1 = new Tier1Relay({
+    redis,
+    groups: new Map([[0, BigInt(env.API_TIER1_GROUP)]]),
+    turnstile: createTurnstile({
+      secretKey: env.TURNSTILE_SECRET_KEY,
+      hostname: env.API_CHALLENGE_HOST,
+    }),
+    now: () => Math.floor(Date.now() / 1000),
+  });
+}
+
 // The key ceremony's coordinator (P2-22 part 4c-2): the default panel's
 // seats poll it here, beside the worker that opens runs and closes rounds.
 // Without its variables the routes answer 503.
@@ -97,6 +125,7 @@ const server = createApiServer({
   sql,
   ...(ballots !== undefined && { ballots }),
   ...(tier0 !== undefined && { tier0 }),
+  ...(tier1 !== undefined && { tier1 }),
   ...(env.API_CORS_ORIGINS !== undefined && { corsOrigins: env.API_CORS_ORIGINS.split(",") }),
   ...(ceremony !== undefined && { ceremony: { deployment: ceremony } }),
   log: (line) => process.stdout.write(`${JSON.stringify(line)}\n`),

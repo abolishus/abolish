@@ -12,6 +12,7 @@
   "scripts": {
     "build": "vp exec tsc -p tsconfig.json",
     "check": "vp check",
+    "creation-key": "vp node src/creation-key-cli.ts",
     "start": "vp node src/main.ts",
     "test": "vp run test:services"
   },

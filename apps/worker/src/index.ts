@@ -26,6 +26,17 @@ export {
   headerRlp,
   ViemCreationAnchors,
 } from "./creation-anchors.ts";
+export {
+  CREATION_KEY_USAGE,
+  type CreationKeyChainState,
+  creationKeyChainState,
+  type CreationKeyCommand,
+  creationKeyReport,
+  parseCreationKeyCommand,
+  type Sweep,
+  sweepCreationKey,
+  type SweepOptions,
+} from "./creation-key.ts";
 export { ViemL1Source } from "./l1-source.ts";
 export {
   checkPollCreationDeployment,

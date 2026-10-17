@@ -223,6 +223,13 @@ export {
   type SignedCreation,
 } from "./poll-creation.ts";
 export {
+  type CreationKeyRecords,
+  creationKeyRecords,
+  KEY_POLLS_LISTED,
+  type KeyPoll,
+  NEEDS_CREATION_KEY,
+} from "./poll-creation-status.ts";
+export {
   ANCHOR_CHECK_DELAY,
   ANCHOR_CHECKS_PER_RUN,
   type AnchorCheckReport,

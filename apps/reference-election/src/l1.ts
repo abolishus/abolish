@@ -123,6 +123,17 @@ export async function mineAt(rpc: Rpc, timestamp: bigint): Promise<void> {
   await rpc.call("evm_mine");
 }
 
+/** Mines a block at `timestamp` and returns its number and hash, for a ballot to name. */
+export async function l1RefAt(
+  rpc: Rpc,
+  timestamp: bigint,
+): Promise<{ readonly number: bigint; readonly hash: Uint8Array }> {
+  await mineAt(rpc, timestamp);
+  const block = await rpc.call<Block>("eth_getBlockByNumber", ["latest", false]);
+  if (BigInt(block.timestamp) !== timestamp) throw new Error("the block isn't the one mined");
+  return { number: BigInt(block.number), hash: unhex(block.hash) };
+}
+
 /** Anchors `checkpoints` in one call from the authority, in a block at `timestamp`. */
 export async function anchorAt(
   rpc: Rpc,

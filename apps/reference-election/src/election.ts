@@ -41,12 +41,16 @@ export const STUBS = Object.freeze({
     "the group registry's two registrars are placeholder addresses: no group is created (stage 3, P3-2)",
   l1Relay: "the L1 relay is a placeholder address: no relay is deployed (P4-2)",
   electorate:
-    "one Tier 0 group with a placeholder root and size: no registration or membership yet (stage 2, P3-2)",
+    "one Tier 0 group whose root is the tier tree of the fixture's voters' commitments, computed by the fixture: no group is created in the group registry and no voter registers (stages 2 and 3, P2-6, P3-2)",
   panel:
     "the panel's identity keys are fresh random keys, given to the verifier as a local file: no release pins a panel yet ([[0006-trustees]], P1-7)",
   anchorAuthority:
     "the anchoring authority is a one-byte contract Anvil lets the fixture send from, not the Safe (P4-1 part 2)",
-  seal: "lastSegment is the segment after the ceremony's: no definition-derived seal yet, since no post-close window is fixed (P1-13, P1-15, P1-18)",
+  seal: "lastSegment is two segments after the ceremony's, the one after the voting window's: no definition-derived seal yet, since no post-close window is fixed (P1-13, P1-15, P1-18)",
+  l1References:
+    "ballots name the newest blocks the fixture mines on the L1 Anvil during the window, not a block seen 2 deep as revoting.md's Client rules have a client name; the verifier doesn't judge references from a format-4 bundle (5.8, P1-19)",
+  casting:
+    "ballots are made by the fixture through @abolishus/crypto and the client's prover in Node, not by apps/ballot, and boarded directly: no API admission, trustee intake or receipts (P2-8, P2-3, P2-13)",
 });
 
 // Distinct, recognisable placeholder values: anyone can recompute them from
@@ -152,6 +156,8 @@ export interface CeremonyOptions {
   readonly counter: bigint;
   /** How many seats, from the last, send nothing at all. */
   readonly absent: number;
+  /** The Tier 0 group's root and size. */
+  readonly electorate: { readonly root: bigint; readonly size: bigint };
 }
 
 /**
@@ -164,7 +170,7 @@ export function runCeremony(
   l2: L2Deployment,
   trustees: Trustees,
   text: DisplayText,
-  { counter, absent }: CeremonyOptions,
+  { counter, absent, electorate }: CeremonyOptions,
 ): Ceremony {
   const { panel } = trustees;
   const stub: ElectionDefinition = {
@@ -183,8 +189,16 @@ export function runCeremony(
     option_count: 3,
     min_selections: 0,
     max_selections: 1,
-    electorate: [{ tier: 0, group_id: 1n, root: 1n, root_l2_block: 1n, group_size: 1n }],
-    // The pinned key, which verifier 1.3 requires; no ballot is cast yet (stage 4).
+    electorate: [
+      {
+        tier: 0,
+        group_id: 1n,
+        root: electorate.root,
+        root_l2_block: 1n,
+        group_size: electorate.size,
+      },
+    ],
+    // The pinned key, which verifier 1.3 requires and every ballot is proved under.
     membership_vk_hash: membershipVkHash(),
     panel_id: panelId(panel),
     threshold: panel.threshold,

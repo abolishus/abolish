@@ -68,7 +68,11 @@ test(
   () => {
     const trustees = newTrustees();
     const absent = 2;
-    const c = runCeremony(timing, l2, trustees, displayText(), { counter: 0n, absent });
+    const c = runCeremony(timing, l2, trustees, displayText(), {
+      counter: 0n,
+      absent,
+      electorate: { root: 1n, size: 1n },
+    });
     const record = ceremonyRegistration(l2, trustees, c);
     const d = c.definition;
     const stubHash = electionStubHash(d);

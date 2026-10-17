@@ -106,3 +106,26 @@ What would change it: accounts becoming costly in a way a solve isn't (then C ke
 ## Decision
 
 Under rule A (`AGENTS.md`): option B, with D as the direct path, status `Accepted (agent) — owner may veto`, listed under Decisions to review in [[STATUS]]. A veto in favour of C, or of A, is taken before part 4d builds the route; nothing is registered meanwhile, since no group registry is deployed until Tier 1 and Tier 2 additions, and D, exist.
+
+## Amendment 1 (2026-10-17, P3-2 part 5a)
+
+[[contracts]] (Group registry, Self-paid additions) specifies option D's call and settles the three questions this ADR left to part 5. Each is `Accepted (agent) — owner may veto`, listed under Decisions to review in [[STATUS]].
+
+**The record.** Options weighed:
+
+- **A. A batch with a signed-style position**, `group_id ‖ first_index ‖ count ‖ commitments`, like `addMembers` without approvals. Rejected: with no signature to bind the position, anyone can land one addition to the group first and kill every pending one, at the price of gas (T-25).
+- **B. A batch with no position.** Cheaper per member for bulk additions, which only a Sybil makes; a registrant adds one commitment.
+- **C. One commitment, no position** (chosen): `group_id ‖ commitment`, exactly 40 bytes. The registry assigns the index and logs it as a topic, and the verifier replays the indices against its own count, so no addition reverts because another landed first.
+
+**Duplicates.** Options weighed:
+
+- **A. A commitment-to-index map refusing a held commitment.** Rejected: refusing signed batches over it would let anyone kill a batch in flight by self-adding one of its commitments (T-25), refusing only self-paid additions would still need every signed commitment written (about 22,000 gas each, 5.6 million for a full batch), and a copier who lands first keeps the place either way.
+- **B. No contract check; the verifier ranks occurrences** (chosen): [[membership]]'s first-occurrence rule walks signed groups by `group_id`, then self-paid groups' additions in chain order, as option D above requires.
+
+**Removals.** Options weighed:
+
+- **A. Registrar-signed removals in self-paid groups.** Rejected: the registrars could remove every self-paid member, undoing the path that exists so joining Tier 0 doesn't rest on them (T-25, T-06).
+- **B. No self-paid removals, and removed signed occurrences keep their precedence**, so a removal keeps its commitment out of the tier. Rejected: the registrars could then shut any self-paid registrant out of the tier by signing a copy of their commitment and removing it, which is exclusion rather than the move a signed copy already allows.
+- **C. No self-paid removals, and removed leaves are 0 before the walk** (chosen): a self-paid group can't be shrunk by anyone, and a commitment removed from a signed group can be self-added again and counts.
+
+What C costs: no Tier 0 removal revokes a commitment in a tier that lists a self-paid group, so a lost or stolen Tier 0 secret stays usable by whoever holds it (T-18, T-69), as at Tier 1 ([[0014-tier1-vouching]], Amendment 2). Revocation at Tier 0 needs a proof by the secret's holder, which neither removal path gives; it waits on T-18's design.

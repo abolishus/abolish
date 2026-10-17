@@ -6,16 +6,19 @@ import {
   electionDefinitionV4Hash,
   electionDefinitionV4Rule,
   electionStubV4Hash,
+  identityCommitment,
   identityKey,
   panelId,
   pinnedVersion,
   profileCombinationRule,
   RECORD_TYPES,
+  tierTreeRoot,
 } from "@abolishus/crypto";
 import fc from "fast-check";
 import { describe, expect, it } from "vite-plus/test";
 import { planElection, runSimulation, type Scenario } from "../src/index.ts";
 import { simulateElection } from "../src/simulation/election.ts";
+import type { SimulatedTier } from "../src/simulation/scenario.ts";
 
 // The ceremony costs n² ML-KEM challenges, so the property runs a twentieth
 // of the usual count (at least 10).
@@ -102,12 +105,26 @@ describe("simulateElection", { timeout }, () => {
         // Each tier one group in one region, so one cell, as version 1's tiers were.
         expect(d.electorate.map((t) => t.tier)).toEqual(plan.tiers);
         for (const t of d.electorate) {
-          const members = BigInt(Math.max(1, plan.voters.filter((v) => v.tier === t.tier).length));
+          const voters = plan.voters.filter((v) => v.tier === t.tier);
+          const members = BigInt(Math.max(1, voters.length));
           expect(t.groups).toHaveLength(1);
           expect(t.regions).toEqual([members]);
           expect(t.cells).toHaveLength(1);
           expect(t.cells[0]?.members).toBe(members);
+          // The cell's root is the tier tree of its voters' commitments, each
+          // from the voter's own secret; a tier no voter is in has one member
+          // no voter holds the secret of.
+          const leaves = e.leaves.get(t.tier as SimulatedTier) ?? [];
+          expect(BigInt(leaves.length)).toBe(members);
+          expect(t.cells[0]?.root).toBe(tierTreeRoot(leaves));
+          if (voters.length > 0)
+            expect(new Set(leaves)).toEqual(
+              new Set(voters.map((v) => identityCommitment(e.identities[v.index] as Uint8Array))),
+            );
         }
+        // A fresh secret per voter.
+        expect(e.identities).toHaveLength(s.voters);
+        expect(new Set(e.identities.map((x) => x.join())).size).toBe(s.voters);
         expect(d.receipt_keys).toEqual([key]);
         expect(pinnedVersion(d, RECORD_TYPES.electionDefinition)).toBe(4);
         expect(pinnedVersion(d, RECORD_TYPES.ballot)).toBe(2);

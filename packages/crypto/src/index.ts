@@ -404,6 +404,7 @@ export {
   checkMembershipZkey,
   finishMembershipProof,
   identityCommitment,
+  membershipNullifier,
   membershipProverInput,
   MembershipProverError,
   type MembershipProverErrorCode,

@@ -11,8 +11,11 @@
 // on the simulated L2's election registry, which gives its identifier, and
 // once every seat has checked the transcript and signed the key set that
 // check returned, the trustee registry records the ceremony and the election
-// registry the definition (./l2.ts; T-37, T-14, T-34). Nothing here
-// reimplements a check the verifier makes (AGENTS.md, Architecture).
+// registry the definition (./l2.ts; T-37, T-14, T-34). Every planned voter
+// has a fresh identity secret, and each tier's cell root is the tier tree of
+// their commitments, so a ballot's membership proof is against the root the
+// definition names (T-10). Nothing here reimplements a check the verifier
+// makes (AGENTS.md, Architecture).
 
 import {
   answersMessage,
@@ -28,12 +31,14 @@ import {
   electionDefinitionV4Rule,
   electionStubV4Hash,
   encodeCeremonyTranscript,
+  identityCommitment,
   identityKey,
   keySetEntry,
   keySetHash,
   keysMessage,
   membershipVkHash,
   newDisplayTextSalt,
+  newIdentitySecret,
   type Panel,
   panelId,
   RECORD_TYPES,
@@ -42,6 +47,7 @@ import {
   type SeatSecrets,
   signCeremonyRegistration,
   TALLY_SCHEMES,
+  tierTreeRoot,
 } from "@abolishus/crypto";
 import {
   type CeremonyRegistrationRecord,
@@ -53,7 +59,7 @@ import {
   SimulatedTrusteeRegistry,
 } from "./l2.ts";
 import { type Plan, SIMULATED_CLOSES_AT, SIMULATED_OPENS_AT, selectionRange } from "./plan.ts";
-import type { Scenario } from "./scenario.ts";
+import type { Scenario, SimulatedTier } from "./scenario.ts";
 
 /**
  * Local chain IDs (Anvil's 31337 for L1, the next for L2), never a public
@@ -69,7 +75,6 @@ export const SIMULATED_L1_CHAIN_ID = 31337n;
 const PLACEHOLDER_BYTES = Object.freeze({ l1Anchor: 0xb1, l1Relay: 0xb2 } as const);
 const placeholder = (name: keyof typeof PLACEHOLDER_BYTES) =>
   new Uint8Array(20).fill(PLACEHOLDER_BYTES[name]);
-const placeholderRoot = (tier: number) => (1n << 200n) + BigInt(tier);
 
 /**
  * The account that creates the election and registers its definition. The
@@ -116,6 +121,10 @@ export interface SimulatedElection {
   readonly electionRegistry: SimulatedElectionRegistry;
   /** The record the trustee registry recorded: every registered seat's approval. */
   readonly registration: CeremonyRegistrationRecord;
+  /** Every planned voter's identity secret, by the voter's plan index; it stays in the voter's client. */
+  readonly identities: readonly Uint8Array[];
+  /** Each tier's leaves, in tier-tree order: its one cell's tree, whose root the definition names. */
+  readonly leaves: ReadonlyMap<SimulatedTier, readonly bigint[]>;
 }
 
 /** The board-entry version the profile pins: 5, which carries the delivery records and destruction statements ballot version 2 and tally-opening version 1 need ([[verifier]] 2.3), and the close statements, the only one the election registry admits ([[contracts]], Registration, rule 9) and [[verifier]] 2.3 accepts ([[close]], Version). */
@@ -195,8 +204,19 @@ export function simulateElection(
     [{ panel, quorum: rule7Quorum(panel) }],
   );
   const electionRegistry = new SimulatedElectionRegistry(deployment, trusteeRegistry);
-  const voters = new Map(plan.tiers.map((t) => [t, 0n]));
-  for (const v of plan.voters) voters.set(v.tier, (voters.get(v.tier) ?? 0n) + 1n);
+  // Each voter's identity secret, its commitment added to its tier's group
+  // in voter order. A tier no voter is planned in still has a member, since
+  // a cell has at least one (docs/spec/election-definition.md): one whose
+  // secret no client holds, so it never votes.
+  const identities: Uint8Array[] = [];
+  const leaves = new Map<SimulatedTier, bigint[]>(plan.tiers.map((t) => [t, []]));
+  for (const v of [...plan.voters].sort((a, b) => a.index - b.index)) {
+    const secret = newIdentitySecret();
+    identities[v.index] = secret;
+    leaves.get(v.tier)?.push(identityCommitment(secret));
+  }
+  for (const group of leaves.values())
+    if (group.length === 0) group.push(identityCommitment(newIdentitySecret()));
   const stub: ElectionDefinitionV4 = {
     profile: profile(),
     // The registry's, from its counter, at a creation finalized before the
@@ -217,17 +237,17 @@ export function simulateElection(
     max_selections: max,
     // One group per tier in one region, so each tier is one cell, as
     // version 1's tiers-only partition was (docs/spec/election-definition.md,
-    // Regional cells), with a placeholder root: membership isn't simulated
-    // yet. Its count is the tier's planned voters (at least 1, as the
-    // definition requires), since every planned voter casts.
+    // Regional cells), whose root is the tier tree of its members'
+    // commitments and whose count is theirs.
     electorate: plan.tiers.map((tier) => {
-      const members = (voters.get(tier) ?? 0n) > 0n ? (voters.get(tier) as bigint) : 1n;
+      const group = leaves.get(tier) ?? [];
+      const members = BigInt(group.length);
       return {
         tier,
         root_l2_block: 1n,
         groups: [{ group_id: BigInt(tier + 1), region: 0 }],
         regions: [members],
-        cells: [{ root: placeholderRoot(tier), members }],
+        cells: [{ root: tierTreeRoot(group), members }],
       };
     }),
     membership_vk_hash: membershipVkHash(),
@@ -326,5 +346,7 @@ export function simulateElection(
     trusteeRegistry,
     electionRegistry,
     registration,
+    identities,
+    leaves,
   };
 }

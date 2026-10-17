@@ -124,6 +124,28 @@ export function identityCommitment(secret: Uint8Array): bigint {
   return commitmentOf(secretScalar(secret));
 }
 
+/**
+ * The nullifier `ν = Poseidon2(ŝ, s)` (docs/spec/membership.md, Statement)
+ * of the voter whose identity secret is `secret`, under the scope of
+ * `statement`'s definition hash, tier and root: what the validity proofs
+ * bind (docs/spec/ballot-validity.md, Casting step 2) before `M`, and so the
+ * prover's input, can exist. It is the `nullifier` signal
+ * `membershipProverInput` gives for the same secret, definition, tier and
+ * root under any message. It reads no leaves, so it says nothing of
+ * membership: only a member's proof can carry it (T-07). Throws
+ * `MembershipProverError` with `secret`, and as `membershipScope` does.
+ */
+export function membershipNullifier(
+  secret: Uint8Array,
+  statement: Omit<MembershipStatement, "message">,
+): bigint {
+  if (statement === null || typeof statement !== "object")
+    throw new TypeError("statement: expected an object");
+  // Read once, as membershipProverInput reads its statement.
+  const { definitionHash, tier, root } = statement;
+  return poseidon2(membershipScope(definitionHash, tier, root), secretScalar(secret));
+}
+
 /** The root a path of 32 siblings climbs to from `leaf` at `index`, as the circuit computes it. */
 function climb(leaf: bigint, index: number, siblings: readonly bigint[]): bigint {
   let node = leaf;

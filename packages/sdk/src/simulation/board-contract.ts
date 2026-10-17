@@ -12,7 +12,9 @@
 // @abolishus/crypto's; this file only orders them as the contract does.
 //
 // What the simulation leaves out (SIMULATION_STUBS): the membership proof
-// (step 9), since ballots carry a placeholder; complaints, the relayed path
+// (step 9), since a run without a prover gives ballots a placeholder, and
+// one with a prover has the client check its proof before submitting;
+// complaints, the relayed path
 // and close statements, which nothing sends; calldata, gas and the
 // contract's decode offsets. And where the contract only frames an element,
 // this board decodes the record strictly to read its cell and shape, so it
@@ -220,8 +222,8 @@ export class SimulatedBoardContract {
 
   // Ballots, steps 1 to 8 (docs/spec/contracts.md, Board, Ballots): the
   // header, the election, the version, the framing, the cell, the shape and
-  // the qualified share hashes. Step 9, the membership proof, isn't checked:
-  // every ballot carries a placeholder (SIMULATION_STUBS).
+  // the qualified share hashes. Step 9, the membership proof, isn't checked
+  // (SIMULATION_STUBS).
   #checkBallot(record: Uint8Array): Admitted | BoardRefusal {
     if (record.length < 3 || typeOf(record) !== RECORD_TYPES.ballot) return "decode";
     if (record.length < 35) return "decode";

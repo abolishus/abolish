@@ -34,6 +34,7 @@
   },
   "devDependencies": {
     "@abolishus/contracts": "workspace:*",
+    "@abolishus/membership-prover": "workspace:*",
     "@types/node": "catalog:",
     "fast-check": "catalog:",
     "typescript": "catalog:",

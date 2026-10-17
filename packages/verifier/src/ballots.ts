@@ -2,8 +2,9 @@
 // every ballot of this election on the board copy, by @abolishus/crypto's
 // `checkBallot` (under definition versions 3 and 4, `checkBallotV2`, against
 // the ballot's cell; under definition version 5, `checkBallotV3`, against its
-// cell and the questions; under definition version 6, `checkBallotV4`, which
-// also judges the author half against the definition's author panel) with
+// cell and the questions; under definition version 6 without an author
+// panel, `checkBallotV4`, against its cell, the questions and both halves'
+// shapes from the definition) with
 // the definition and the key set the transcript
 // check registered, never against anything a ballot or the bundle chooses
 // (T-37, T-04). A ballot reaches the board by the board path, as a ballot

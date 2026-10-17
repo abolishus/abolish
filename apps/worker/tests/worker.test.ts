@@ -308,7 +308,7 @@ test("an audit names every bad board, then fails by kind", async () => {
       VALUES (${id}, 1, 0, ${ballot(1)}, ${b32()}, ${Uint8Array.from(prev!["link"])}, ${b32()})`;
   }
   const lines = await audit({});
-  const findings = lines.filter((l) => "finding" in l);
+  const findings = lines.filter((l) => "finding" in l && l.queue === "{board-audit}");
   expect(findings.map((f) => f.election).sort()).toEqual(bad.map(hex).sort());
   for (const f of findings)
     expect(f).toEqual({

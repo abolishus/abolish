@@ -46,6 +46,12 @@ LANGUAGE plpgsql AS $$
 DECLARE
   last_entry board_entries%ROWTYPE;
 BEGIN
+  -- The board lock appendEntry and takeCheckpoints take (board.ts,
+  -- BOARD_LOCK_CLASS), taken here too, so a writer that skips it is still
+  -- serialised with them: otherwise a checkpoint and an entry behind it,
+  -- each inserted while the other is uncommitted, would both pass their
+  -- checks. Each statement after it reads committed rows afresh.
+  PERFORM pg_advisory_xact_lock(723533, ('x' || encode(substring(NEW.election_id FROM 1 FOR 4), 'hex'))::bit(32)::int);
   IF EXISTS (SELECT 1 FROM board_checkpoints
       WHERE election_id = NEW.election_id AND segment >= NEW.segment) THEN
     RAISE EXCEPTION 'board_checkpoints: segment % is not after every taken checkpoint', NEW.segment
@@ -81,6 +87,12 @@ CREATE TRIGGER board_checkpoints_append_in_order
 CREATE FUNCTION board_entries_check_fence() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
+  -- The board lock appendEntry and takeCheckpoints take (board.ts,
+  -- BOARD_LOCK_CLASS), taken here too, so a writer that skips it is still
+  -- serialised with them: otherwise a checkpoint and an entry behind it,
+  -- each inserted while the other is uncommitted, would both pass their
+  -- checks. Each statement after it reads committed rows afresh.
+  PERFORM pg_advisory_xact_lock(723533, ('x' || encode(substring(NEW.election_id FROM 1 FOR 4), 'hex'))::bit(32)::int);
   IF EXISTS (SELECT 1 FROM board_checkpoints
       WHERE election_id = NEW.election_id AND segment >= NEW.segment) THEN
     RAISE EXCEPTION 'board_entries: segment % already has a checkpoint', NEW.segment

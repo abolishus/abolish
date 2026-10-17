@@ -20,7 +20,7 @@ import { and, asc, desc, eq, gt, lte } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import type { Sql } from "postgres";
 import { listBoards } from "./audit.ts";
-import { lockBoard, pinnedBoardVersion } from "./board.ts";
+import { lockBoard, pinnedBoardVersion, readBoard } from "./board.ts";
 import { isBytes } from "./bytes.ts";
 import { readDefinition } from "./definitions.ts";
 import { boardCheckpoints, boardEntries } from "./db/schema/index.ts";
@@ -47,8 +47,9 @@ const equal = (a: Uint8Array, b: Uint8Array) =>
  * or labels it later when asked to. `through` of -1 takes nothing.
  *
  * The board is read and the checkpoints stored under the board lock, so no
- * append lands between them. The whole board up to `through` is read into
- * memory, as the audit reads it.
+ * append lands between them. When a period to take has entries, the whole
+ * board up to `through` is read into memory, as the audit reads it;
+ * otherwise only the segments are.
  */
 export async function takeCheckpoints(
   client: Sql,
@@ -70,6 +71,19 @@ export async function takeCheckpoints(
         .limit(1);
       const after = last === undefined ? -1n : last.segment;
       if (BigInt(through) <= after) return [];
+      const fresh = await tx
+        .selectDistinct({ segment: boardEntries.segment })
+        .from(boardEntries)
+        .where(
+          and(
+            eq(boardEntries.electionId, id),
+            gt(boardEntries.segment, after),
+            lte(boardEntries.segment, BigInt(through)),
+          ),
+        )
+        .orderBy(asc(boardEntries.segment));
+      if (fresh.length === 0) return [];
+      const segments = fresh.map((r) => Number(r.segment));
       // Segments never decrease along the board, so the entries with a
       // segment up to `through` are a prefix of it.
       const rows = await tx
@@ -81,10 +95,6 @@ export async function takeCheckpoints(
         .from(boardEntries)
         .where(and(eq(boardEntries.electionId, id), lte(boardEntries.segment, BigInt(through))))
         .orderBy(asc(boardEntries.idx));
-      const segments = [
-        ...new Set(rows.filter((r) => r.segment > after).map((r) => Number(r.segment))),
-      ];
-      if (segments.length === 0) return [];
       const version = await pinnedBoardVersion(tx, id);
       if (typeof version === "string") throw new Error(`a stored board has ${version}`);
       const entries = rows.map((r) =>
@@ -179,6 +189,19 @@ export type AnchorFindingCode =
    * anchored without this job. The election fails on it (T-24, T-69).
    */
   | "anchor-conflict"
+  /**
+   * A taken checkpoint isn't the one the stored board gives now: the row was
+   * written around takeCheckpoints, or the board was. Nothing of the
+   * election is sent, so a database write never becomes an anchor (T-23).
+   */
+  | "anchor-mismatch"
+  /**
+   * The L1 node's latest block is further ahead of the worker's clock than
+   * `MAX_L1_CLOCK_LEAD`: periods are taken only as far as the worker's
+   * clock allows, so a node reporting a time ahead can't fence a period
+   * still running and push ballots into later segments (T-25).
+   */
+  | "anchor-clock"
   /** The run failed for this board before it finished (its error isn't kept); the next run retries it. */
   | "anchor-error"
   /** The anchor call failed; the checkpoints are sent again next run while timely. */
@@ -194,10 +217,21 @@ export type AnchorFindingCode =
 
 export interface AnchorFinding {
   readonly code: AnchorFindingCode;
-  readonly electionId: Uint8Array;
-  /** The segment it concerns; absent for `anchor-unserved`, `anchor-error` and `anchor-send-failed`. */
+  /** The election it concerns; absent for `anchor-clock`. */
+  readonly electionId?: Uint8Array;
+  /** The segment it concerns; absent for `anchor-unserved`, `anchor-error`, `anchor-send-failed` and `anchor-clock`. */
   readonly segment?: number;
 }
+
+/** How far, in seconds, the L1 node's latest block may lead the worker's clock before it is distrusted. */
+export const MAX_L1_CLOCK_LEAD = 120n;
+
+/**
+ * How long, in seconds, a call may take to be included. A checkpoint whose
+ * window closes sooner than this goes in a call of its own, so if it lands
+ * too late and reverts, it holds back none of its election's others.
+ */
+export const ANCHOR_INCLUSION_MARGIN = 600n;
 
 export interface AnchorReport {
   readonly electionId: Uint8Array;
@@ -239,19 +273,37 @@ function checkClock(clock: AnchoringClock): void {
  * after it), and reports what it finds. One call per election, so a call
  * that reverts holds back no other election's anchors.
  *
+ * `localNow` is the worker's own clock (UNIX seconds). Periods are taken up
+ * to the one before the period of the earlier of the L1 time and
+ * `localNow + MAX_L1_CLOCK_LEAD`; windows are judged by the L1 time, which
+ * the anchor judges by. Before sending, each checkpoint is recomputed from
+ * the stored board and must be the stored one.
+ *
  * An election is anchored only if its definition names this L1 and anchor:
  * its verifier reads no other (T-52). The seal's checkpoint, owed even when
  * the seal's period added nothing, isn't taken yet: nothing computes the
  * seal from a definition (P4-1, Known-weak).
  */
-export async function anchorBoards(client: Sql, chain: AnchorChain): Promise<AnchorRun> {
+export async function anchorBoards(
+  client: Sql,
+  chain: AnchorChain,
+  localNow: bigint,
+): Promise<AnchorRun> {
   checkClock(chain.clock);
   if (!isBytes(chain.address) || chain.address.length !== 20)
     throw new TypeError("the anchor's address must be 20 bytes");
+  if (typeof localNow !== "bigint" || localNow < 0n)
+    throw new TypeError("localNow must be a bigint ≥ 0");
   const now = await chain.now();
   if (typeof now !== "bigint" || now < 0n) throw new TypeError("now must be a bigint ≥ 0");
   const clock = chain.clock;
-  const through = Math.min(periodAt(clock, now) - 1, MAX_SEGMENT);
+  const findings: AnchorFinding[] = [];
+  const trusted = localNow + MAX_L1_CLOCK_LEAD;
+  if (now > trusted) findings.push({ code: "anchor-clock" });
+  const through = Math.max(
+    -1,
+    Math.min(periodAt(clock, now < trusted ? now : trusted) - 1, MAX_SEGMENT),
+  );
   // Every checkpoint whose window is open, or closed within one deadline,
   // so a missed one is reported for a while rather than once: from the first
   // segment `s` with `end(s) + 2·deadline ≥ now`.
@@ -259,7 +311,6 @@ export async function anchorBoards(client: Sql, chain: AnchorChain): Promise<Anc
   const from =
     lag <= 0n ? 0 : Number(atMostPastLast((lag + clock.period - 1n) / clock.period - 1n));
   const reports: AnchorReport[] = [];
-  const findings: AnchorFinding[] = [];
   for (const id of await listBoards(client)) {
     try {
       const report = await anchorBoard(client, chain, id, now, through, from, findings);
@@ -311,14 +362,40 @@ async function anchorBoard(
       findings.push({ code: "anchor-missed", electionId: id, segment: checkpoint.segment });
     } else due.push(checkpoint);
   }
-  let anchored: number[] = [];
-  if (due.length > 0) {
+  const anchored: number[] = [];
+  if (due.length === 0) return { electionId: id, taken: taken.map((c) => c.segment), anchored };
+  // T-23: the stored rows are sent only if the board still gives them, so
+  // a row written around takeCheckpoints (its root and CIDs aren't checked
+  // by the table) is never anchored in the authority's name.
+  const recomputed = copyCheckpoints(
+    id,
+    await readBoard(client, id),
+    due.map((c) => c.segment),
+  );
+  const wrong = due.filter((c) => {
+    const r = recomputed.get(c.segment);
+    return r === undefined || !equal(encodeCheckpoint(r), encodeCheckpoint(c));
+  });
+  if (wrong.length > 0) {
+    for (const c of wrong)
+      findings.push({ code: "anchor-mismatch", electionId: id, segment: c.segment });
+    return { electionId: id, taken: taken.map((c) => c.segment), anchored };
+  }
+  // Checkpoints near their deadline each in a call of their own, after the
+  // others in one.
+  const late = (c: Checkpoint) =>
+    now + ANCHOR_INCLUSION_MARGIN > endOf(clock, c.segment) + clock.deadline;
+  const calls = [due.filter((c) => !late(c)), ...due.filter(late).map((c) => [c])];
+  let failed = false;
+  for (const call of calls) {
+    if (call.length === 0) continue;
     try {
-      await chain.anchor(due);
-      anchored = due.map((c) => c.segment);
+      await chain.anchor(call);
+      anchored.push(...call.map((c) => c.segment));
     } catch {
-      findings.push({ code: "anchor-send-failed", electionId: id });
-      for (const c of due)
+      if (!failed) findings.push({ code: "anchor-send-failed", electionId: id });
+      failed = true;
+      for (const c of call)
         if (now >= endOf(clock, c.segment) + clock.deadline / 2n)
           findings.push({ code: "anchor-overdue", electionId: id, segment: c.segment });
     }

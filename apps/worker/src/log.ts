@@ -33,13 +33,14 @@ export type AuditFindingLine =
     };
 
 /**
- * What an anchoring run found for one election (core's AnchorFindingCode).
- * The election ID and segment are public: both are on the board and on L1.
+ * What an anchoring run found (core's AnchorFindingCode), for one election
+ * but `anchor-clock`. The election ID and segment are public: both are on
+ * the board and on L1.
  */
 export interface AnchorFindingLine {
   readonly queue: "{board-anchor}";
   readonly finding: AnchorFindingCode;
-  readonly election: string;
+  readonly election?: string;
   readonly segment?: number;
 }
 

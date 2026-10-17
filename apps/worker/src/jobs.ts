@@ -70,21 +70,25 @@ async function boardAudit(ctx: JobContext, _data: JobData<"boardAudit">): Promis
 }
 
 /**
- * One anchoring run over every board. Each finding is logged; the job fails
- * if there was any, since each one is an election at risk of failing on its
- * anchors (or one this worker can't anchor).
+ * One anchoring run over every board, with the worker's clock as the bound
+ * on the L1 node's. Each finding is logged; the job fails if any is an
+ * election at risk of failing on its anchors, or a node to distrust. An
+ * election naming another anchor is logged on every run but fails nothing,
+ * so a job failing means something to act on.
  */
 async function boardAnchor(ctx: JobContext, _data: JobData<"boardAnchor">): Promise<void> {
   if (ctx.anchor === undefined) throw new JobError("internal");
-  const { findings } = await anchorBoards(ctx.sql, ctx.anchor);
+  const localNow = BigInt(Math.floor(ctx.now().getTime() / 1000));
+  const { findings } = await anchorBoards(ctx.sql, ctx.anchor, localNow);
   for (const f of findings)
     ctx.log({
       queue: "{board-anchor}",
       finding: f.code,
-      election: hex(f.electionId),
+      ...(f.electionId === undefined ? {} : { election: hex(f.electionId) }),
       ...(f.segment === undefined ? {} : { segment: f.segment }),
     });
-  if (findings.length > 0) throw new JobError("board-anchor-findings");
+  if (findings.some((f) => f.code !== "anchor-unserved"))
+    throw new JobError("board-anchor-findings");
 }
 
 /**

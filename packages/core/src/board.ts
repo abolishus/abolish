@@ -42,7 +42,7 @@ const MAX_SEGMENT = 2 ** 32 - 1;
  * a separate keyspace from the one-bigint locks migrations take, so a board
  * lock never collides with them.
  */
-const BOARD_LOCK_CLASS = 0x0b0a4d;
+const BOARD_LOCK_CLASS = 0x0b0a4d; // 723533, as migrations/0009 takes it in its triggers
 
 export type AppendErrorCode =
   /** No definition is stored for the election, so its board-entry version is unknown. */

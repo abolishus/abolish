@@ -20,6 +20,9 @@ const hex = (b: Uint8Array) => Buffer.from(b).toString("hex");
 const ballot = (...body: number[]) => Uint8Array.of(0x00, 0x02, 1, ...body);
 const CLOCK = { epoch: 0n, period: 3600n, deadline: 43_200n } as const;
 const prefix = `abolish-test-${hex(randomBytes(6))}`;
+// The worker's clock and the node's, in period 2: periods 0 and 1 have ended.
+const NOW = new Date(Number(2n * CLOCK.period + 60n) * 1000);
+const START = 2n * CLOCK.period + 60n;
 
 /** An anchor holding whatever it is sent, at a fixed L1 time. */
 class HeldAnchor implements AnchorChain {
@@ -27,7 +30,7 @@ class HeldAnchor implements AnchorChain {
   readonly sent: Checkpoint[][] = [];
   readonly chainId: bigint;
   readonly address: Uint8Array;
-  readonly time: bigint;
+  time: bigint;
   constructor(chainId: bigint, address: Uint8Array, time: bigint) {
     this.chainId = chainId;
     this.address = address;
@@ -63,8 +66,7 @@ beforeAll(async () => {
   await appendEntry(app, served, 0, ballot(0));
   await appendEntry(app, served, 1, ballot(1));
   const d = decodeElectionDefinition((await readDefinition(app, served))!);
-  // In period 2: periods 0 and 1 have ended.
-  chain = new HeldAnchor(d.l1_chain_id, d.l1_anchor, 2n * CLOCK.period + 60n);
+  chain = new HeldAnchor(d.l1_chain_id, d.l1_anchor, START);
   connection = new Redis(redisUrl, { maxRetriesPerRequest: null });
   worker = await startWorker({
     connection,
@@ -72,6 +74,7 @@ beforeAll(async () => {
     log: (l) => logs.push(l),
     auditEveryMs: 3_600_000,
     anchor: { chain, everyMs: 300_000 },
+    now: () => NOW,
     prefix,
   });
   anchors = new Queue(QUEUES.boardAnchor.name, { connection, prefix });
@@ -107,19 +110,33 @@ test("schedules the anchoring run, which anchors every ended period at start", a
   expect(chain.sent[0]!.map((c) => c.segment)).toEqual([0, 1]);
 });
 
-test("logs each finding by its public values, and fails the job", async () => {
+test("logs an election naming another anchor, and fails nothing for it", async () => {
   const other = await newElection(app, 1, new Uint8Array(20).fill(9));
   await appendEntry(app, other, 0, ballot(2));
   await anchors.add("boardAnchor", {});
   expect(await outcome()).toEqual([
     { queue: "{board-anchor}", finding: "anchor-unserved", election: hex(other) },
-    {
-      queue: "{board-anchor}",
-      outcome: "failed",
-      error: "board-anchor-findings",
-      ms: expect.any(Number),
-    },
+    { queue: "{board-anchor}", outcome: "completed", ms: expect.any(Number) },
   ]);
   // Nothing more to send for the served election.
   expect(chain.sent).toHaveLength(1);
+});
+
+test("logs a node ahead of the worker's clock, and fails the job", async () => {
+  chain.time = BigInt(Math.floor(NOW.getTime() / 1000)) + 3600n;
+  try {
+    await anchors.add("boardAnchor", {});
+    expect(await outcome()).toEqual([
+      { queue: "{board-anchor}", finding: "anchor-clock" },
+      { queue: "{board-anchor}", finding: "anchor-unserved", election: expect.any(String) },
+      {
+        queue: "{board-anchor}",
+        outcome: "failed",
+        error: "board-anchor-findings",
+        ms: expect.any(Number),
+      },
+    ]);
+  } finally {
+    chain.time = START;
+  }
 });

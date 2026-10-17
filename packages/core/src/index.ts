@@ -5,6 +5,7 @@ export {
   type SubmitErrorCode,
 } from "./admission.ts";
 export {
+  ANCHOR_INCLUSION_MARGIN,
   type AnchorChain,
   anchorBoards,
   type AnchorFinding,
@@ -12,6 +13,7 @@ export {
   type AnchoringClock,
   type AnchorReport,
   type AnchorRun,
+  MAX_L1_CLOCK_LEAD,
   readCheckpoints,
   takeCheckpoints,
 } from "./anchoring.ts";

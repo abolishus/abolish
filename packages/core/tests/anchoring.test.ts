@@ -24,6 +24,7 @@ import {
   readBoard,
   readCheckpoints,
   readDefinition,
+  MAX_L1_CLOCK_LEAD,
   takeCheckpoints,
 } from "../src/index.ts";
 import { newElection, type TestDb, testDb } from "./db.ts";
@@ -102,6 +103,8 @@ class ModelAnchor implements AnchorChain {
   readonly address: Uint8Array;
   readonly clock = CLOCK;
   time = 0n;
+  /** How long after `time` a call is included, and judged. */
+  inclusionDelay = 0n;
   /** Makes the next calls revert. */
   failing = false;
   readonly calls: Checkpoint[][] = [];
@@ -131,7 +134,8 @@ class ModelAnchor implements AnchorChain {
     for (const c of checkpoints) {
       const key = ModelAnchor.key(c.election_id, c.segment);
       if (c.size === 0n || this.#slots.has(key) || keys.has(key)) throw new Error("reverted");
-      if (this.time < endOf(c.segment) || this.time > endOf(c.segment) + CLOCK.deadline)
+      const at = this.time + this.inclusionDelay;
+      if (at < endOf(c.segment) || at > endOf(c.segment) + CLOCK.deadline)
         throw new Error("reverted");
       keys.add(key);
     }
@@ -139,7 +143,7 @@ class ModelAnchor implements AnchorChain {
     for (const c of checkpoints)
       this.#slots.set(ModelAnchor.key(c.election_id, c.segment), {
         checkpoint: c,
-        anchoredAt: this.time,
+        anchoredAt: this.time + this.inclusionDelay,
       });
   }
 
@@ -162,12 +166,15 @@ class ModelAnchor implements AnchorChain {
   }
 }
 
-const reportOf = (run: AnchorRun, e: Uint8Array) =>
-  run.reports.find((r) => Buffer.from(r.electionId).equals(Buffer.from(e)));
+/** A run with the worker's clock at the L1 time, unless a test says otherwise. */
+const run = (chain: ModelAnchor, localNow = chain.time) => anchorBoards(app, chain, localNow);
+
+const reportOf = (result: AnchorRun, e: Uint8Array) =>
+  result.reports.find((r) => Buffer.from(r.electionId).equals(Buffer.from(e)));
 
 const findingsOf = (findings: readonly AnchorFinding[], e: Uint8Array) =>
   findings
-    .filter((f) => Buffer.from(f.electionId).equals(Buffer.from(e)))
+    .filter((f) => f.electionId !== undefined && Buffer.from(f.electionId).equals(Buffer.from(e)))
     .map((f) => (f.segment === undefined ? f.code : `${f.code}@${f.segment}`));
 
 describe("schema", () => {
@@ -284,6 +291,38 @@ describe("the table's checks", () => {
     await insert(3);
   });
 
+  test("a checkpoint and an entry behind it, written concurrently without the lock, never both land", async () => {
+    // Raw writers that skip appendEntry's and takeCheckpoints' lock: the
+    // triggers take it, so the second waits for the first and sees it.
+    const e = await boardIn(0);
+    const c = (await expected(e, 0))!;
+    const [first] = await app`SELECT link FROM board_entries WHERE election_id = ${e}`;
+    const other = await db.as("abolish_app");
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    let inserted!: () => void;
+    const putting = new Promise<void>((r) => (inserted = r));
+    const take = app.begin(async (tx) => {
+      await tx`INSERT INTO board_checkpoints (election_id, segment, size, checkpoint)
+        VALUES (${e}, 0, 1, ${encodeCheckpoint(c)})`;
+      inserted();
+      await held;
+    });
+    await putting;
+    let settled = false;
+    const append = failsWith(
+      other`INSERT INTO board_entries (election_id, idx, segment, payload, entry_hash, prev_link, link)
+        VALUES (${e}, 1, 0, ${ballot(9)}, ${b32()}, ${first!["link"]}, ${b32()})`,
+    ).finally(() => (settled = true));
+    await new Promise((r) => setTimeout(r, 300));
+    expect(settled).toBe(false);
+    release();
+    await take;
+    expect(await append).toBe("23514");
+    expect(await readCheckpoints(app, e)).toEqual([c]);
+    expect(await readBoard(app, e)).toHaveLength(1);
+  });
+
   test("a temporary table can't stand in for the checkpoints", async () => {
     const e = await boardIn(0);
     await takeCheckpoints(app, e, 0);
@@ -384,16 +423,16 @@ describe("anchorBoards", () => {
     const e = await boardFor(chain, 0, 1, 1, 3);
     const f = await boardFor(chain, 1);
     chain.time = endOf(1) + 60n;
-    const run = await anchorBoards(app, chain);
-    expect(reportOf(run, e)).toEqual({ electionId: e, taken: [0, 1], anchored: [0, 1] });
-    expect(reportOf(run, f)).toEqual({ electionId: f, taken: [1], anchored: [1] });
-    expect(findingsOf(run.findings, e)).toEqual([]);
+    const result = await run(chain);
+    expect(reportOf(result, e)).toEqual({ electionId: e, taken: [0, 1], anchored: [0, 1] });
+    expect(reportOf(result, f)).toEqual({ electionId: f, taken: [1], anchored: [1] });
+    expect(findingsOf(result.findings, e)).toEqual([]);
     for (const s of [0, 1])
       expect(await chain.anchored(e, s)).toEqual(checkpointHash((await expected(e, s))!));
     const calls = chain.calls.filter((c) => Buffer.from(c[0]!.election_id).equals(Buffer.from(e)));
     expect(calls.map((c) => c.map((x) => x.segment))).toEqual([[0, 1]]);
     const before = chain.calls.length;
-    expect(reportOf(await anchorBoards(app, chain), e)).toEqual({
+    expect(reportOf(await run(chain), e)).toEqual({
       electionId: e,
       taken: [],
       anchored: [],
@@ -405,7 +444,7 @@ describe("anchorBoards", () => {
     const chain = new ModelAnchor();
     const e = await boardFor(chain, 0);
     chain.time = endOf(0) - 1n;
-    await anchorBoards(app, chain);
+    await run(chain);
     expect(await chain.anchored(e, 0)).toBeUndefined();
     expect(await readCheckpoints(app, e)).toEqual([]);
   });
@@ -418,8 +457,8 @@ describe("anchorBoards", () => {
       new ModelAnchor({ address: own.address, chainId: l1ChainId + 1n }),
     ]) {
       chain.time = endOf(0);
-      const run = await anchorBoards(app, chain);
-      expect(findingsOf(run.findings, e)).toEqual(["anchor-unserved"]);
+      const result = await run(chain);
+      expect(findingsOf(result.findings, e)).toEqual(["anchor-unserved"]);
       expect(chain.calls).toEqual([]);
     }
     expect(await readCheckpoints(app, e)).toEqual([]);
@@ -430,8 +469,8 @@ describe("anchorBoards", () => {
     const e = await boardFor(chain, 0, 1);
     chain.time = endOf(1);
     chain.put({ ...(await expected(e, 0))!, root: b32() });
-    const run = await anchorBoards(app, chain);
-    expect(findingsOf(run.findings, e)).toEqual(["anchor-conflict@0"]);
+    const result = await run(chain);
+    expect(findingsOf(result.findings, e)).toEqual(["anchor-conflict@0"]);
     expect(chain.calls.map((c) => c.map((x) => x.segment))).toEqual([[1]]);
   });
 
@@ -440,28 +479,26 @@ describe("anchorBoards", () => {
     const e = await boardFor(chain, 0);
     chain.failing = true;
     chain.time = endOf(0) + 60n;
-    expect(findingsOf((await anchorBoards(app, chain)).findings, e)).toEqual([
-      "anchor-send-failed",
-    ]);
+    expect(findingsOf((await run(chain)).findings, e)).toEqual(["anchor-send-failed"]);
     chain.time = endOf(0) + CLOCK.deadline / 2n;
-    expect(findingsOf((await anchorBoards(app, chain)).findings, e)).toEqual([
+    expect(findingsOf((await run(chain)).findings, e)).toEqual([
       "anchor-send-failed",
       "anchor-overdue@0",
     ]);
     chain.time = endOf(0) + CLOCK.deadline + 1n;
     chain.failing = false;
-    expect(findingsOf((await anchorBoards(app, chain)).findings, e)).toEqual(["anchor-missed@0"]);
+    expect(findingsOf((await run(chain)).findings, e)).toEqual(["anchor-missed@0"]);
     expect(chain.calls).toEqual([]);
     // Reported for one deadline after it, then no longer read.
     chain.time = endOf(0) + 2n * CLOCK.deadline + 1n;
-    expect(findingsOf((await anchorBoards(app, chain)).findings, e)).toEqual([]);
+    expect(findingsOf((await run(chain)).findings, e)).toEqual([]);
   });
 
   test("the last moment of the window still anchors", async () => {
     const chain = new ModelAnchor();
     const e = await boardFor(chain, 0);
     chain.time = endOf(0) + CLOCK.deadline;
-    await anchorBoards(app, chain);
+    await run(chain);
     expect(await chain.anchored(e, 0)).toBeDefined();
   });
 
@@ -469,10 +506,10 @@ describe("anchorBoards", () => {
     const chain = new ModelAnchor();
     const e = await boardFor(chain, 0);
     chain.time = endOf(0);
-    await anchorBoards(app, chain);
+    await run(chain);
     chain.drop(e, 0);
     chain.time += 60n;
-    expect(reportOf(await anchorBoards(app, chain), e)?.anchored).toEqual([0]);
+    expect(reportOf(await run(chain), e)?.anchored).toEqual([0]);
     expect(await chain.anchored(e, 0)).toEqual(checkpointHash((await expected(e, 0))!));
   });
 
@@ -486,9 +523,62 @@ describe("anchorBoards", () => {
       if (Buffer.from(id).equals(Buffer.from(e))) throw new Error("node down");
       return anchored(id, s);
     };
-    const run = await anchorBoards(app, chain);
-    expect(findingsOf(run.findings, e)).toEqual(["anchor-error"]);
+    const result = await run(chain);
+    expect(findingsOf(result.findings, e)).toEqual(["anchor-error"]);
     expect(await chain.anchored(f, 0)).toBeDefined();
+  });
+
+  test("sends nothing for an election whose stored checkpoint the board doesn't give", async () => {
+    const chain = new ModelAnchor();
+    const e = await boardFor(chain, 0, 1);
+    const c = (await expected(e, 0))!;
+    // Election, segment, size and head pass the table's checks; the root
+    // and CIDs need hashing, so only the run can catch them.
+    await app`INSERT INTO board_checkpoints (election_id, segment, size, checkpoint)
+      VALUES (${e}, 0, 1, ${encodeCheckpoint({ ...c, root: b32() })})`;
+    chain.time = endOf(1);
+    const result = await run(chain);
+    expect(findingsOf(result.findings, e)).toEqual(["anchor-mismatch@0"]);
+    expect(chain.calls).toEqual([]);
+    expect(reportOf(result, e)).toEqual({ electionId: e, taken: [1], anchored: [] });
+  });
+
+  test("takes no period the worker's clock hasn't seen end, whatever the node says", async () => {
+    const chain = new ModelAnchor();
+    const e = await boardFor(chain, 0, 1, 2, 3);
+    chain.time = endOf(3) + 60n;
+    // The node is three hours ahead of the worker's clock, which is in period 1.
+    const result = await run(chain, endOf(0) + 60n);
+    expect(result.findings.filter((f) => f.code === "anchor-clock")).toEqual([
+      { code: "anchor-clock" },
+    ]);
+    expect(reportOf(result, e)?.taken).toEqual([0]);
+    // Within the allowed lead, the node's time decides.
+    chain.time = endOf(1) + MAX_L1_CLOCK_LEAD;
+    const close = await run(chain, endOf(1));
+    expect(close.findings.filter((f) => f.code === "anchor-clock")).toEqual([]);
+    expect(reportOf(close, e)?.taken).toEqual([1]);
+  });
+
+  test("a checkpoint near its deadline goes alone, so its revert holds back no other", async () => {
+    const chain = new ModelAnchor();
+    const e = await boardFor(chain, 0, 11);
+    chain.time = endOf(0) + CLOCK.deadline - 100n;
+    // Included 200 seconds later: past segment 0's window, inside 11's.
+    chain.inclusionDelay = 200n;
+    const result = await run(chain);
+    expect(chain.calls.map((c) => c.map((x) => x.segment))).toEqual([[11]]);
+    expect(findingsOf(result.findings, e)).toEqual(["anchor-send-failed", "anchor-overdue@0"]);
+    expect(reportOf(result, e)?.anchored).toEqual([11]);
+  });
+
+  test("before the epoch, a run takes and sends nothing", async () => {
+    const chain = Object.assign(new ModelAnchor(), { clock: { ...CLOCK, epoch: 10n * HOUR } });
+    const e = await boardFor(chain, 0);
+    chain.time = HOUR;
+    const result = await run(chain);
+    expect(findingsOf(result.findings, e)).toEqual([]);
+    expect(reportOf(result, e)).toEqual({ electionId: e, taken: [], anchored: [] });
   });
 
   test("refuses a chain with a bad clock or address", async () => {
@@ -497,9 +587,10 @@ describe("anchorBoards", () => {
       Object.assign(new ModelAnchor(), { clock: { ...CLOCK, period: 0n } }),
       Object.assign(new ModelAnchor(), { address: new Uint8Array(19) }),
     ])
-      await expect(anchorBoards(app, bad)).rejects.toThrow();
+      await expect(run(bad)).rejects.toThrow();
+    await expect(anchorBoards(app, chain, -1n)).rejects.toThrow(TypeError);
     chain.now = async () => -1n;
-    await expect(anchorBoards(app, chain)).rejects.toThrow(TypeError);
+    await expect(run(chain)).rejects.toThrow(TypeError);
   });
 
   test(
@@ -527,15 +618,15 @@ describe("anchorBoards", () => {
               const s = Number((chain.time - 60n - CLOCK.epoch) / CLOCK.period);
               for (let i = 0; i < appends; i++)
                 await appendEntry(app, e, s, ballot(entries++), { raiseToPrevious: true });
-              await anchorBoards(app, chain);
+              await run(chain);
             }
             // Two closing runs: one past the last entry's period, one more to
             // show nothing is left to send.
             chain.time += CLOCK.period;
-            await anchorBoards(app, chain);
+            await run(chain);
             chain.time += 60n;
             const before = chain.calls.length;
-            await anchorBoards(app, chain);
+            await run(chain);
             expect(chain.calls.length).toBe(before);
             const board = await readBoard(app, e);
             const anchors = chain.anchorsOf(e);

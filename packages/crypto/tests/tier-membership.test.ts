@@ -848,6 +848,24 @@ describe("tierMembership in a Tier 1 tier", () => {
     ).toBe("board-event");
   });
 
+  test("refuses a boarded addition logged before its group's creation", () => {
+    // Event 22 names group 12 before event 23 creates it; vouch-count's `group` check refuses it.
+    expect(groupOf(22)).toBe(12n);
+    expect(counted.has(22)).toBe(false);
+    const leaves = finalLeaves(12n);
+    expect(
+      refusal(() =>
+        tierMembership(
+          [...board, logOf(22)],
+          oneGroup(12n, leaves),
+          leaves[0] as bigint,
+          12n,
+          tier1Pins,
+        ),
+      ),
+    ).toBe("group-history");
+  });
+
   test("refuses a boarded addition with a forbidden commitment", () => {
     const leaves = finalLeaves(9n);
     const record = hex(deployment.events[13]?.record);
@@ -905,6 +923,8 @@ describe("tierMembership in a Tier 1 tier", () => {
     // checked by the client, so only the leaves matter here.
     const template = hex(deployment.events[13]?.record);
     const leaves = tree.leaves.map(decimal);
+    // Events 13 to 22 are all additions, so each stand-in takes an addition's place.
+    expect(leaves.length).toBeLessThanOrEqual(10);
     const records = leaves.map((leaf, i) => {
       const r = new Uint8Array(template);
       r.set(word(1n).subarray(24), 0);

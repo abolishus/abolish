@@ -56,7 +56,8 @@ export type TierMembershipErrorCode =
   /**
    * A listed Tier 0 group's records break its replayed history
    * (`applyGroupRecords`), or a listed Tier 1 group's boarded additions hold
-   * one no count takes: a forbidden commitment, or one already its leaf.
+   * one no count takes: one before the group's creation, a forbidden
+   * commitment, or one already its leaf.
    */
   | "group-history"
   /** A Tier 2 group: the registry has no Tier 2 addition path yet (P3-4). */
@@ -121,22 +122,24 @@ function fieldAt(b: Uint8Array, at: number): bigint {
  * needs the registry's whole Tier 1 and Tier 2 history from the archive, so
  * no vouch is checked here; the board must carry exactly the counted ones
  * (verifier 4.4, Tier 1 boarding), and a board that doesn't fails the
- * definition's root or counts. One a count never takes, a forbidden or
- * repeated commitment, is refused at once. `MembersAdded` and
+ * definition's root or counts. One a count never takes (logged before the
+ * group's `GroupCreated`, at `created` in `events`, or a forbidden or
+ * repeated commitment) is refused at once. `MembersAdded` and
  * `MembersRemoved` naming the group change nothing in it.
  */
 function tier1GroupLeaves(
   events: readonly GroupRegistryEvent[],
+  created: number,
   id: bigint,
   rootBlock: bigint,
 ): bigint[] {
   const leaves: bigint[] = [];
   const seen = new Set<bigint>();
-  for (const e of events) {
+  for (const [at, e] of events.entries()) {
     if (e.block > rootBlock) break; // blocks never decrease along the sequence
     if (e.kind !== "tier1-addition" || u64At(e.record, 0) !== id) continue;
     const commitment = fieldAt(e.record, 8);
-    if (isForbiddenCommitment(commitment) || seen.has(commitment))
+    if (at < created || isForbiddenCommitment(commitment) || seen.has(commitment))
       throw new TierMembershipError("group-history", id);
     seen.add(commitment);
     leaves.push(commitment);
@@ -194,8 +197,8 @@ function registryRecords(
  * `MembersAdded` and `MembersRemoved` records in blocks up to the tier's
  * `root_l2_block`, under the release's registrars, as the verifier's 2.4
  * does; a listed Tier 1 group's leaves are its boarded `Tier1MemberAdded`
- * records in those blocks, with no vouch checked; the regions and cells are recounted under the first-occurrence rule
- * and must equal the definition's; the voter's commitment must be a live
+ * records in those blocks, with no vouch checked; the regions and cells are
+ * recounted under the first-occurrence rule and must equal the definition's; the voter's commitment must be a live
  * leaf of `group` and be counted in `group`'s region. The cell's root isn't
  * recomputed here: `membershipProverInput` checks it over the returned
  * leaves in the same pass that builds the path. Throws
@@ -256,7 +259,8 @@ export function tierMembership(
     if (only === undefined || created.length !== 1 || only.kind !== "group-created")
       throw new TierMembershipError("group-created", id);
     if (only.tier !== tierId) throw new TierMembershipError("group-tier", id);
-    if (only.tier === 1) return tier1GroupLeaves(read.events, id, rootBlock);
+    if (only.tier === 1)
+      return tier1GroupLeaves(read.events, read.events.indexOf(only), id, rootBlock);
     if (only.tier !== 0) throw new TierMembershipError("tier-unsupported", id);
     const log: GroupLogRecord[] = [];
     for (const e of read.events) {

@@ -59,9 +59,9 @@ const equal = (a: Uint8Array, b: Uint8Array) =>
  * strict decoding, the well-formedness rules and 2.3's profile combination.
  * A profile 2.3 fails is refused: no ballot cast under it can be verified,
  * and the client refuses it, so the server never serves it as an election
- * (T-34, T-42). So is one that is only unsupported here (a board-entry,
- * ballot, opening or contract-event version this release doesn't read): the
- * board store and admission can't read its records either (T-36). Storing the same bytes again
+ * (T-34, T-42). So is one 2.3 finds only unsupported here
+ * (`unsupported-version`): the board store and admission can't read its
+ * records either (T-36). Storing the same bytes again
  * is a no-op; different bytes for a stored election are a `conflict`. The
  * caller is responsible for having read the definition from the registry in
  * a finalized L2 block (P3-5 indexes it): the row is permanent, and this

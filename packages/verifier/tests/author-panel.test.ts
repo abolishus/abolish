@@ -6,11 +6,13 @@ import {
   encodeBoardEntry,
   encodeElectionDefinitionV6,
   panelId,
+  POLL_CLASSES,
   RECORD_TYPES,
 } from "@abolishus/crypto";
 import { describe, expect, test } from "vite-plus/test";
 import { type AuthorRun, ceremonyChecks } from "../src/ceremony.ts";
 import { authorRunOf, decodeDefinition } from "../src/definition.ts";
+import { PINNED_PANELS, type PinnedPanel } from "../src/panels.ts";
 import {
   BUNDLE_FORMAT_CEREMONY,
   type CheckResult,
@@ -185,6 +187,126 @@ describe("the default panel beside an author panel", () => {
       7,
     );
     expect(r.rows.get("2.5")).toEqual({ status: "fail", code: "panel-unpinned", at: {} });
+  });
+});
+
+// 2.5's `panel-kind` (docs/spec/verifier.md, Key ceremony, step 1): a poll
+// on the civic record fails under a default panel the release pins as
+// transitional, and is never failed under one it doesn't pin (T-14, T-36).
+type PollClass = (typeof POLL_CLASSES)[keyof typeof POLL_CLASSES];
+describe("panel-kind", () => {
+  const id = Buffer.from(d.panel_id).toString("hex");
+  const pinnedAs = (kind: PinnedPanel["kind"]): PinnedPanel[] => [{ panelId: id, kind }];
+  const civic = [POLL_CLASSES.organisational, POLL_CLASSES.civicReferendum];
+  const classed = (
+    poll_class: PollClass,
+    author: AuthorRun | undefined,
+    pins: PinnedPanel[],
+    copy = entries,
+  ) =>
+    ceremonyChecks(
+      { ...d, poll_class },
+      hex(election.stubHash),
+      defaultPanel,
+      author,
+      copy,
+      7,
+      pins,
+    );
+  const KIND = { status: "fail", code: "panel-kind", at: {} };
+
+  test("fails a poll on the civic record under a panel the release pins as transitional", () => {
+    for (const poll_class of civic) {
+      const r = classed(poll_class, undefined, pinnedAs("transitional"));
+      expect(r.rows.get("2.5"), String(poll_class)).toEqual(KIND);
+      // The transcript is still checked, but no ballot is judged against
+      // the key set of an election 2.5 fails.
+      expect(r.rows.get("3.2"), String(poll_class)).toEqual({ status: "pass" });
+      expect(r.report?.registered, String(poll_class)).toHaveLength(4);
+      expect(r.registered, String(poll_class)).toBeUndefined();
+    }
+  });
+
+  test("passes an everyday poll under a transitional panel, and the civic record under an independent one", () => {
+    for (const [poll_class, kind] of [
+      [POLL_CLASSES.everyday, "transitional"],
+      [POLL_CLASSES.everyday, "independent"],
+      ...civic.map((c) => [c, "independent"] as const),
+    ] as const) {
+      const r = classed(poll_class, undefined, pinnedAs(kind));
+      expect(r.rows.get("2.5"), `${poll_class} ${kind}`).toEqual({
+        status: "unverifiable",
+        code: "not-implemented",
+      });
+      expect(r.registered, `${poll_class} ${kind}`).toHaveLength(4);
+    }
+  });
+
+  test("leaves a panel the release doesn't pin undecided, never failed", () => {
+    const other: PinnedPanel[] = [{ panelId: "00".repeat(32), kind: "transitional" }];
+    for (const pins of [[], other, PINNED_PANELS])
+      for (const poll_class of civic) {
+        const r = classed(poll_class, undefined, [...pins]);
+        expect(r.rows.get("2.5")).toEqual({ status: "unverifiable", code: "not-implemented" });
+        expect(r.registered).toHaveLength(4);
+      }
+  });
+
+  test("a definition without a poll class (versions 1 to 5) is never failed on it", () => {
+    const r = ceremonyChecks(
+      d,
+      hex(election.stubHash),
+      defaultPanel,
+      undefined,
+      entries,
+      7,
+      pinnedAs("transitional"),
+    );
+    expect(r.rows.get("2.5")).toEqual({ status: "unverifiable", code: "not-implemented" });
+  });
+
+  test("is reported before default-seat, and panel-unpinned before it", () => {
+    const [q1] = defaultPanel.keys;
+    if (q1 === undefined) throw new Error("short panel");
+    const transitional = pinnedAs("transitional");
+    expect(
+      classed(POLL_CLASSES.civicReferendum, keysOnly([q1]), transitional).rows.get("2.5"),
+    ).toEqual(KIND);
+    // Beside an author panel whose run and approvals hold, no key set either.
+    const beside = classed(
+      POLL_CLASSES.civicReferendum,
+      honest,
+      transitional,
+      board(defaultTranscript, honestTranscript, recordOf("all")),
+    );
+    expect(beside.rows.get("2.5")).toEqual(KIND);
+    expect(beside.rows.get("3.2")).toEqual({ status: "pass" });
+    expect(beside.registered).toBeUndefined();
+    // Without the pin, the same definition fails on its shared seat.
+    expect(classed(POLL_CLASSES.civicReferendum, keysOnly([q1]), []).rows.get("2.5")).toEqual({
+      status: "fail",
+      code: "default-seat",
+      at: { seat: 1 },
+    });
+    const r = ceremonyChecks(
+      { ...d, poll_class: POLL_CLASSES.civicReferendum, threshold: d.threshold - 1 },
+      hex(election.stubHash),
+      defaultPanel,
+      undefined,
+      entries,
+      7,
+      transitional,
+    );
+    expect(r.rows.get("2.5")).toEqual({ status: "fail", code: "panel-unpinned", at: {} });
+  });
+
+  test("this release's pins name each panel once, by its identifier, with a kind", () => {
+    const ids = PINNED_PANELS.map((p) => p.panelId);
+    expect(new Set(ids).size).toBe(ids.length);
+    for (const p of PINNED_PANELS) {
+      expect(p.panelId).toMatch(/^[0-9a-f]{64}$/);
+      expect(["independent", "transitional"]).toContain(p.kind);
+    }
   });
 });
 
@@ -385,9 +507,10 @@ describe("a version-6 definition beside the default panel", () => {
     [RECORD_TYPES.contractEvent]: 7,
     [RECORD_TYPES.displayText]: 2,
   };
-  const definition = (author: readonly Uint8Array[]) =>
+  const definition = (author: readonly Uint8Array[], poll_class = base.poll_class) =>
     encodeElectionDefinitionV6({
       ...base,
+      poll_class,
       election_id: hex(l1File.electionId),
       l1_anchor: hex(closed.anchor),
       panel_id: panelId(defaultPanel),
@@ -447,6 +570,12 @@ describe("a version-6 definition beside the default panel", () => {
     expect(row(r, "2.3").status).not.toBe("fail");
     expect(row(r, "3.1")).toMatchObject({ code: "ceremony-transcript-missing" });
     for (const id of ["5.1", "5.4", "6.2", "7.4"]) expect(row(r, id).status).toBe("unverifiable");
+  });
+
+  test("a poll on the civic record under a panel this release doesn't pin isn't failed on its kind", () => {
+    const r = format4(definition([], POLL_CLASSES.civicReferendum));
+    expect(row(r, "2.1").status).not.toBe("fail");
+    expect(row(r, "2.5")).toMatchObject({ status: "unverifiable", code: "not-implemented" });
   });
 
   test("the API's admission refuses an author panel at 2.3, and a sealed poll before its transcript", () => {

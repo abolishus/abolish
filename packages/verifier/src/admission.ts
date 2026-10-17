@@ -126,7 +126,8 @@ export function electionAdmission(
     boardEntryVersion,
   );
   if (registered === undefined) {
-    // The first failing row decides: 2.5 (another panel), 3.1 (a transcript
+    // The first failing row decides: 2.5 (another panel, a transitional one
+    // on the civic record, or an author seat a default seat's), 3.1 (a transcript
     // that doesn't decode or fails a transcript-level check), then 3.2
     // (quorum or participation). Otherwise 3.1 says why nothing was checked.
     for (const id of ["2.5", "3.1", "3.2"]) {

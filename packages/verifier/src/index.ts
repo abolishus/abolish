@@ -51,6 +51,7 @@ export {
   type StatementReport,
 } from "./close.ts";
 export { type CeremonyCode, type CeremonyReport } from "./ceremony.ts";
+export { type PanelKind, PINNED_PANELS, type PinnedPanel } from "./panels.ts";
 export { CHECKS, type CheckKind, type CheckSpec } from "./checks.ts";
 export { type CliOutput, EXIT_CODES, runCli } from "./cli.ts";
 export { readBlockStore, type BlockStore } from "./blocks.ts";

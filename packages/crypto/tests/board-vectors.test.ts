@@ -9,6 +9,7 @@ import {
   boardEntryHash,
   BoardError,
   checkpointHash,
+  contentDag,
   copyCheckpoints,
   consistencyProof,
   DecodeError,
@@ -18,6 +19,7 @@ import {
   MAX_BOARD_PAYLOAD,
   merkleRoot,
   merkleRoots,
+  readBoardCopy,
   UNPINNED,
   verifyBoard,
   verifyConsistency,
@@ -228,6 +230,32 @@ const clock: AnchorClock = {
   lastSegment: Number(dec(file.clock.lastSegment)),
 };
 
+function anchorsOf(v: BoardVector): Anchor[] {
+  return v.checkpoints.map((c) => {
+    const cp = {
+      election_id: hex(c.electionId),
+      segment: Number(dec(c.segment)),
+      size: dec(c.size),
+      head: hex(c.head),
+      root: hex(c.root),
+      object_cid: hex(c.objectCid),
+      hashes_cid: hex(c.hashesCid),
+    };
+    return { checkpoint: cp, anchoredAt: dec(c.anchoredAt) };
+  });
+}
+
+/** The verdict on `entries` as the vectors write it. */
+function verdictOf(v: BoardVector, entries: readonly Uint8Array[]): unknown {
+  try {
+    verifyBoard(hex(v.electionId), entries, 1, anchorsOf(v), clock, dec(v.now));
+  } catch (e) {
+    if (!(e instanceof BoardError)) throw e;
+    return { code: e.code, ...e.at };
+  }
+  return "ok";
+}
+
 describe("board checks", () => {
   test("parses every vector", () => {
     expect(file.boards.length).toBe(56);
@@ -275,4 +303,84 @@ test("a valid board's copy gives every anchored checkpoint, read from its raw by
       expect(bytesToHex(checkpointHash(cp))).toBe(c.hash);
     }
   }
+});
+
+// docs/spec/board.md, A copy from L1's CIDs: each vector's board read back by
+// the CIDs its anchors name, from a mirror holding the segment objects of the
+// vector's own entries.
+describe("board checks over a copy read by CID", () => {
+  const key = (b: Uint8Array) => bytesToHex(b);
+  function mirror(entries: readonly Uint8Array[]) {
+    const bySegment = new Map<number, Uint8Array[]>();
+    // An entry too short for a segment field is no segment's: the mirror holds it nowhere.
+    for (const e of entries.filter((e) => e.length >= 47)) {
+      const s = new DataView(e.buffer, e.byteOffset + 43, 4).getUint32(0);
+      bySegment.set(s, [...(bySegment.get(s) ?? []), e]);
+    }
+    const out = new Map<string, Uint8Array>();
+    for (const run of bySegment.values()) {
+      const object = Uint8Array.from(run.flatMap((p) => Array.from(p)));
+      for (const b of contentDag(object).blocks) out.set(key(b.cid), b.bytes);
+    }
+    return async (cid: Uint8Array) => {
+      const b = out.get(key(cid));
+      return b === undefined ? [] : [b];
+    };
+  }
+
+  // Where the verdict differs because no copy by CID reaches the anchored extent: the mirror holds the
+  // vector's altered copy, whose objects no anchored CID names, or the
+  // anchored CIDs don't name a run the checkpoints' sizes bound (an operator
+  // failure the whole board would show; docs/spec/board.md, Residuals).
+  const shortByCid = new Set([
+    "forged-trailing-same-segment",
+    "segment-decreased",
+    "entry-trailing-bytes",
+    "copy-altered-inside-extent",
+    "reordered-copy",
+    "dropped",
+    "checkpoint-mid-segment",
+    "checkpoint-segment-too-early",
+    "checkpoint-contradicted-by-larger",
+    "checkpoint-errors-in-order",
+    "checkpoint-wrong-object-cid",
+    "checkpoint-cid-before-next-boundary",
+    "checkpoint-cid-of-prefix",
+    "checkpoint-cid-non-canonical",
+    "checkpoint-reanchor-fresh-cid",
+    "checkpoint-forked",
+    "late-only-is-unanchored",
+    "early-anchor-ignored",
+    "unanchored-skipped-segment",
+    "running-unanchored",
+  ]);
+
+  for (const v of file.boards)
+    test(v.id, async () => {
+      let got: unknown;
+      let stopped: unknown;
+      try {
+        const copy = await readBoardCopy(
+          hex(v.electionId),
+          anchorsOf(v),
+          clock,
+          dec(v.now),
+          mirror(v.entries.map(hex)),
+          1 << 30,
+        );
+        stopped = copy.stopped;
+        got = verdictOf(v, copy.encodedEntries);
+      } catch (e) {
+        if (!(e instanceof BoardError)) throw e;
+        got = { code: e.code, ...e.at };
+      }
+      // A copy that stops short is unverifiable from these sources, never an
+      // election failure; otherwise its verdict is the vector's.
+      if (!shortByCid.has(v.id)) expect(got).toEqual(v.result);
+      else {
+        expect(stopped).toBeDefined();
+        expect(got).toEqual({ code: "checkpoint-missing", checkpoint: expect.any(Number) });
+        expect(got).not.toEqual(v.result);
+      }
+    });
 });

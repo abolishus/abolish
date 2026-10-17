@@ -30,7 +30,9 @@ import {
   MAX_BOARD_PAYLOAD,
   merkleRoot,
   merkleRoots,
+  contentDag,
   objectCid,
+  readBoardCopy,
   RECORD_TYPES,
   splitSegmentObject,
   UNPINNED,
@@ -884,6 +886,270 @@ describe("segment objects", () => {
     const [piece] = splitSegmentObject(object);
     object.fill(0);
     expect(piece).toEqual(e);
+  });
+});
+
+// docs/spec/board.md, A copy from L1's CIDs: the board read back from the
+// CIDs its counted checkpoints name, from any sources, verifies as the board
+// does, and a source can only leave it short, never fail it (T-24, T-49, T-53).
+describe("a copy read by L1's CIDs", () => {
+  const concat = (parts: readonly Uint8Array[]) =>
+    Uint8Array.from(parts.flatMap((p) => Array.from(p)));
+  const segmentOf = (e: Uint8Array) => new DataView(e.buffer, e.byteOffset + 43, 4).getUint32(0);
+  const key = (b: Uint8Array) => Buffer.from(b).toString("hex");
+
+  /** Every block of every segment object of `entries`, as an honest mirror holds them. */
+  function blocksOf(entries: readonly Uint8Array[]) {
+    const bySegment = new Map<number, Uint8Array[]>();
+    for (const e of entries) {
+      const s = segmentOf(e);
+      bySegment.set(s, [...(bySegment.get(s) ?? []), e]);
+    }
+    const out = new Map<string, Uint8Array>();
+    for (const run of bySegment.values())
+      for (const b of contentDag(concat(run)).blocks) out.set(key(b.cid), b.bytes);
+    return out;
+  }
+
+  /** A source over `blocks` that records what it was asked for. */
+  const sourceOf =
+    (blocks: ReadonlyMap<string, Uint8Array>, asked: string[] = []) =>
+    async (cid: Uint8Array) => {
+      asked.push(key(cid));
+      const b = blocks.get(key(cid));
+      return b === undefined ? [] : [b];
+    };
+
+  // Far more than any generated board's segment objects.
+  const BUDGET = 1 << 30;
+
+  const copyOf = (
+    anchors: readonly Anchor[],
+    last: number,
+    blocks: ReadonlyMap<string, Uint8Array>,
+    asked?: string[],
+    maxBytes = BUDGET,
+  ) =>
+    readBoardCopy(
+      ELECTION,
+      anchors,
+      clockFor(last),
+      closedAt(last),
+      sourceOf(blocks, asked),
+      maxBytes,
+    );
+
+  test("an honest board is read back whole, and verifies", async () => {
+    await fc.assert(
+      fc.asyncProperty(boardArb, async ({ entries, last }) => {
+        const anchors = checkpointsFor(entries, last);
+        const copy = await copyOf(anchors, last, blocksOf(entries));
+        expect(copy.stopped).toBeUndefined();
+        expect(copy.encodedEntries).toEqual(entries);
+        expect(verdict(copy.encodedEntries, anchors, last)).toBe("ok");
+      }),
+      { numRuns },
+    );
+  });
+
+  test("each segment object is read once, however many checkpoints carry its CIDs", async () => {
+    await fc.assert(
+      fc.asyncProperty(boardArb, async ({ entries, last }) => {
+        // checkpointsFor anchors every period, so a gap re-anchors the last
+        // segment's CIDs; each object is asked for block by block, once.
+        const anchors = checkpointsFor(entries, last);
+        const blocks = blocksOf(entries);
+        const asked: string[] = [];
+        await copyOf([...anchors, ...anchors], last, blocks, asked);
+        expect(asked.length).toBe(new Set(asked).size);
+        expect(new Set(asked)).toEqual(new Set(blocks.keys()));
+      }),
+      { numRuns },
+    );
+  });
+
+  test("a withheld or altered block leaves the copy short at that segment: unverifiable, never failed", async () => {
+    await fc.assert(
+      fc.asyncProperty(boardArb, fc.nat(), fc.boolean(), async ({ entries, last }, which, drop) => {
+        const anchors = checkpointsFor(entries, last);
+        const blocks = new Map(blocksOf(entries));
+        const target = [...blocks.keys()][which % blocks.size] as string;
+        if (drop) blocks.delete(target);
+        else {
+          const b = Uint8Array.from(blocks.get(target) as Uint8Array);
+          b[0] = (b[0] as number) ^ 1;
+          blocks.set(target, b);
+        }
+        const copy = await copyOf(anchors, last, blocks);
+        expect(copy.stopped?.reason).toBe("unavailable");
+        // The copy is the runs before the withheld one, whole.
+        expect(entries.slice(0, copy.encodedEntries.length)).toEqual(copy.encodedEntries);
+        expect(verdict(copy.encodedEntries, anchors, last)).toBe("checkpoint-missing");
+      }),
+      { numRuns },
+    );
+  });
+
+  test("a segment left unanchored stops the copy at the next run, which its object can't fill", async () => {
+    await fc.assert(
+      fc.asyncProperty(boardArb, fc.nat(), async ({ entries, last }, which) => {
+        const segments = [...new Set(entries.map(segmentOf))];
+        fc.pre(segments.length >= 2);
+        // Skip every checkpoint of one segment with entries, not the seal's.
+        const skipped = segments[which % (segments.length - 1)] as number;
+        // With the periods after it that carry its size until the next one.
+        const all = checkpointsFor(entries, last);
+        const size = all.find((a) => a.checkpoint.segment === skipped)?.checkpoint.size;
+        const anchors = all.filter((a) => a.checkpoint.size !== size);
+        const copy = await copyOf(anchors, last, blocksOf(entries));
+        expect(copy.stopped?.reason).toBe("not-run");
+        expect(copy.encodedEntries).toEqual(entries.filter((e) => segmentOf(e) < skipped));
+        // The whole board would show the operator's `unanchored`; the copy by
+        // CID is short of it, which is unverifiable (docs/spec/board.md, Residuals).
+        expect(verdict(entries, anchors, last)).toBe("unanchored");
+        expect(verdict(copy.encodedEntries, anchors, last)).toBe("checkpoint-missing");
+      }),
+      { numRuns },
+    );
+  });
+
+  test("in a running election, an anchor landing before an earlier period's stops the copy, never fails it", async () => {
+    await fc.assert(
+      fc.asyncProperty(boardArb, async ({ entries, last }) => {
+        const segments = [...new Set(entries.map(segmentOf))];
+        fc.pre(segments.length >= 2);
+        const [earlier, later] = segments.slice(-2) as [number, number];
+        // The later segment's checkpoint is anchored, the earlier one's not yet:
+        // `now` is inside the earlier segment's window, so the board is fine.
+        const now = end(earlier) + DEADLINE - 1n;
+        fc.pre(end(later) + 60n <= now);
+        const anchors = checkpointsFor(entries, last).filter(
+          (a) => a.checkpoint.segment < earlier || a.checkpoint.segment === later,
+        );
+        const clock = clockFor(last);
+        expect(() => verifyBoard(ELECTION, entries, 1, anchors, clock, now)).not.toThrow();
+        const copy = await readBoardCopy(
+          ELECTION,
+          anchors,
+          clock,
+          now,
+          sourceOf(blocksOf(entries)),
+          BUDGET,
+        );
+        expect(copy.stopped?.reason).toBe("not-run");
+        expect(() => verifyBoard(ELECTION, copy.encodedEntries, 1, anchors, clock, now)).toThrow(
+          expect.objectContaining({ code: "checkpoint-missing" }),
+        );
+      }),
+      { numRuns },
+    );
+  });
+
+  test("a CID of bytes that aren't the run, or of an object over its bound, stops the copy", async () => {
+    const entries = [0, 1].map((i) =>
+      encodeBoardEntry(
+        {
+          election_id: ELECTION,
+          index: BigInt(i),
+          segment: 0,
+          payload: recordOf(allowedTypes[0] as number, Uint8Array.of(i)),
+        },
+        1,
+      ),
+    );
+    const [first] = checkpointsFor(entries, 0) as [Anchor];
+    const withObject = (object: Uint8Array) => {
+      const dag = contentDag(object);
+      const blocks = new Map(dag.blocks.map((b) => [key(b.cid), b.bytes] as const));
+      const anchor = { ...first, checkpoint: { ...first.checkpoint, object_cid: dag.root } };
+      return { anchor, blocks, root: dag.root };
+    };
+    // One of the two entries, a truncated pair, and both entries twice.
+    for (const object of [
+      entries[0] as Uint8Array,
+      concat(entries).subarray(1),
+      concat([...entries, ...entries]),
+    ]) {
+      const { anchor, blocks } = withObject(object);
+      const copy = await copyOf([anchor], 0, blocks);
+      expect(copy).toEqual({ encodedEntries: [], stopped: { checkpoint: 0, reason: "not-run" } });
+    }
+    // Two entries encode in at most 2 × (51 + MAX_BOARD_PAYLOAD) bytes: an
+    // object one byte longer is refused after its root alone.
+    const over = withObject(new Uint8Array(2 * (51 + MAX_BOARD_PAYLOAD) + 1));
+    const asked: string[] = [];
+    const copy = await copyOf([over.anchor], 0, over.blocks, asked);
+    expect(copy.stopped).toEqual({ checkpoint: 0, reason: "inconsistent" });
+    expect(asked).toEqual([key(over.root)]);
+  });
+
+  test("the byte budget covers the whole copy: a run past it stops the copy before anything but its root is asked for", async () => {
+    await fc.assert(
+      fc.asyncProperty(boardArb, fc.nat(), async ({ entries, last }, cut) => {
+        const anchors = checkpointsFor(entries, last);
+        const blocks = blocksOf(entries);
+        // The runs' object lengths are the entries' lengths, segment by segment.
+        const total = entries.reduce((n, e) => n + e.length, 0);
+        expect((await copyOf(anchors, last, blocks, undefined, total)).stopped).toBeUndefined();
+        const budget = 1 + (cut % total);
+        fc.pre(budget < total);
+        const copy = await copyOf(anchors, last, blocks, undefined, budget);
+        expect(copy.stopped?.reason).toBe("over-budget");
+        const held = copy.encodedEntries.reduce((n, e) => n + e.length, 0);
+        expect(held).toBeLessThanOrEqual(budget);
+        expect(entries.slice(0, copy.encodedEntries.length)).toEqual(copy.encodedEntries);
+        expect(verdict(copy.encodedEntries, anchors, last)).toBe("checkpoint-missing");
+      }),
+      { numRuns },
+    );
+  });
+
+  test("a root of repeated chunks under a large anchored size reads no more than the budget", async () => {
+    // The anchoring authority anchors a run of 4,096 entries (a bound of about
+    // 4 GiB) whose object is 64 MiB of zeros: four distinct blocks, any of
+    // which a caching source serves again and again.
+    const zeros = contentDag(new Uint8Array(64 * 1024 * 1024));
+    expect(zeros.blocks.length).toBeLessThan(5);
+    const blocks = new Map(zeros.blocks.map((b) => [key(b.cid), b.bytes] as const));
+    const entry = encodeBoardEntry(
+      {
+        election_id: ELECTION,
+        index: 0n,
+        segment: 0,
+        payload: recordOf(allowedTypes[0] as number, Uint8Array.of(1)),
+      },
+      1,
+    );
+    const [honest] = checkpointsFor([entry], 0) as [Anchor];
+    const anchor = {
+      ...honest,
+      checkpoint: { ...honest.checkpoint, size: 4096n, object_cid: zeros.root },
+    };
+    const asked: string[] = [];
+    const copy = await copyOf([anchor], 0, blocks, asked, 16 * 1024 * 1024);
+    expect(copy).toEqual({ encodedEntries: [], stopped: { checkpoint: 0, reason: "over-budget" } });
+    expect(asked).toEqual([key(zeros.root)]);
+  });
+
+  test("refuses a budget that isn't a positive integer", async () => {
+    for (const maxBytes of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1])
+      await expect(copyOf([], 0, new Map(), undefined, maxBytes)).rejects.toThrow(RangeError);
+  });
+
+  test("a failure from L1 alone is thrown before anything is fetched", async () => {
+    await fc.assert(
+      fc.asyncProperty(boardArb, async ({ entries, last }) => {
+        const anchors = checkpointsFor(entries, last);
+        const [a] = anchors as [Anchor];
+        const other = { ...a, checkpoint: { ...a.checkpoint, election_id: new Uint8Array(32) } };
+        const asked: string[] = [];
+        await expect(copyOf([other, ...anchors], last, blocksOf(entries), asked)).rejects.toThrow(
+          expect.objectContaining({ code: "wrong-election" }),
+        );
+        expect(asked).toEqual([]);
+      }),
+      { numRuns },
+    );
   });
 });
 

@@ -209,9 +209,9 @@ const complaintV1: Codec<AvailabilityComplaint> = {
 };
 
 /**
- * Record type `0x001b`. No profile pins it: the contract-event version whose
- * tables carry the board contract's availability call fixes it, and none does
- * yet. It counts only through the contract path.
+ * Record type `0x001b`. No profile pins it: contract-event version 8, whose
+ * tables carry the board contract's availability events, fixes it at 1. It
+ * counts only through the contract path.
  */
 export const AVAILABILITY_ATTESTATION = recordType(RECORD_TYPES.availabilityAttestation, {
   1: attestationV1,
@@ -240,7 +240,7 @@ export function encodeAvailabilityComplaint(record: AvailabilityComplaint): Uint
   return SCHEMA.encode(AVAILABILITY_COMPLAINT, 1, record);
 }
 
-/** Strictly decodes a availability complaint under version 1. */
+/** Strictly decodes an availability complaint under version 1. */
 export function decodeAvailabilityComplaint(bytes: Uint8Array, pinned: 1): AvailabilityComplaint {
   return SCHEMA.decode(AVAILABILITY_COMPLAINT, bytes, pinned).value;
 }

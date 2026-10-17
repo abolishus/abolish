@@ -3,7 +3,6 @@ import { join } from "node:path";
 import {
   type AsyncBlockSource,
   type Checkpoint,
-  checkpointHash,
   cidText,
   contentDag,
   objectCar,
@@ -15,11 +14,11 @@ import { bytesToHex, concatBytes, hexToBytes } from "@noble/hashes/utils.js";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "vite-plus/test";
 import { cli } from "../src/cli.ts";
 import { gateway } from "../src/gateway.ts";
-import { checkpointFromLog, finalizedHeader } from "../src/l1.ts";
+import { finalizedHeader } from "../src/l1.ts";
 import { mirrorThen, type PinReport, pinElections } from "../src/pin.ts";
 import { type Rpc, RpcError } from "../src/rpc.ts";
 import { openMirror } from "../src/store.ts";
-import { type Anchor, type Chain, hex, padded, startChain, word } from "./anvil.ts";
+import { type Anchor, type Chain, forgedLog, hex, startChain, word } from "./anvil.ts";
 import { blocksDir, close, listen, removeDirs } from "./fixture.ts";
 
 // Fetch and pin (P4-5 part 2) against a real chain: Anvil runs the board
@@ -440,34 +439,6 @@ describe("a node not to trust", () => {
     expect(real.number).toBeTypeOf("bigint");
   });
 });
-
-/** A log carrying `cp` in the contract's layout, with the other fields of `log`. */
-function forgedLog(log: { address: string; topics: string[]; data: string }, cp: Checkpoint) {
-  const data = concatBytes(
-    word(cp.size),
-    cp.head,
-    cp.root,
-    word(0xa0n),
-    word(0x100n),
-    word(36n),
-    padded(cp.object_cid),
-    word(36n),
-    padded(cp.hashes_cid),
-  );
-  const forged = {
-    ...log,
-    topics: [
-      log.topics[0]!,
-      hex(cp.election_id),
-      hex(word(BigInt(cp.segment))),
-      hex(checkpointHash(cp)),
-    ],
-    data: hex(data),
-  };
-  // The forged log is well formed: only the proven word refuses it.
-  expect(checkpointFromLog(forged)).toEqual(cp);
-  return forged;
-}
 
 describe("abolish-node fetch", () => {
   function io() {

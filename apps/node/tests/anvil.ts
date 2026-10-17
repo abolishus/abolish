@@ -5,9 +5,11 @@
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import { createServer } from "node:net";
 import { fileURLToPath } from "node:url";
-import { type Checkpoint, encodeCheckpoint } from "@abolishus/crypto";
+import { type Checkpoint, checkpointHash, encodeCheckpoint } from "@abolishus/crypto";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { bytesToHex, concatBytes, hexToBytes } from "@noble/hashes/utils.js";
+import { expect } from "vite-plus/test";
+import { checkpointFromLog } from "../src/l1.ts";
 import { type Rpc, rpcClient } from "../src/rpc.ts";
 
 export const hex = (b: Uint8Array) => `0x${bytesToHex(b)}`;
@@ -157,4 +159,35 @@ export async function startChain(): Promise<Chain> {
       await exited;
     },
   };
+}
+
+/** A log carrying `cp` in the contract's layout, with the other fields of `log`. */
+export function forgedLog(
+  log: { address: string; topics: string[]; data: string },
+  cp: Checkpoint,
+) {
+  const data = concatBytes(
+    word(cp.size),
+    cp.head,
+    cp.root,
+    word(0xa0n),
+    word(0x100n),
+    word(36n),
+    padded(cp.object_cid),
+    word(36n),
+    padded(cp.hashes_cid),
+  );
+  const forged = {
+    ...log,
+    topics: [
+      log.topics[0]!,
+      hex(cp.election_id),
+      hex(word(BigInt(cp.segment))),
+      hex(checkpointHash(cp)),
+    ],
+    data: hex(data),
+  };
+  // The forged log is well formed: only the proven word refuses it.
+  expect(checkpointFromLog(forged)).toEqual(cp);
+  return forged;
 }

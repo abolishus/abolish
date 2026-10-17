@@ -19,13 +19,14 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from "vite-plu
 import { cli } from "../src/cli.ts";
 import { gateway } from "../src/gateway.ts";
 import { anchorTiming, finalizedBlock } from "../src/l1.ts";
-import { type Rpc, RpcError } from "../src/rpc.ts";
+import { chainId, type Rpc, RpcError } from "../src/rpc.ts";
 import { openMirror } from "../src/store.ts";
 import { type VerifyReport, verifyElections } from "../src/verify.ts";
 import {
   type Anchor,
   type Chain,
   DEADLINE,
+  forgedLog,
   hex,
   padded,
   PERIOD,
@@ -78,9 +79,11 @@ const PANEL = {
 
 let chain: Chain;
 let anchor: Anchor;
+let l1ChainId: bigint;
 beforeAll(async () => {
   chain = await startChain();
   anchor = await chain.deployAnchor();
+  l1ChainId = await chainId(chain.rpc);
 }, 120_000);
 afterAll(async () => {
   await chain?.stop();
@@ -99,6 +102,7 @@ function definition(name: string, changes: Partial<ElectionDefinition> = {}): El
     election_registry: REGISTRY,
     trustee_registry: TRUSTEES,
     l1_anchor: anchor.address,
+    l1_chain_id: l1ChainId,
     ...changes,
   };
 }
@@ -107,6 +111,8 @@ interface Log {
   readonly address: Uint8Array;
   readonly topics: readonly string[];
   readonly data: Uint8Array;
+  readonly blockNumber?: bigint;
+  readonly removed?: true;
 }
 
 // The three events, ABI-encoded here as docs/spec/contracts.md lists them.
@@ -152,15 +158,28 @@ function pinned(panelId: Uint8Array): Log {
 
 const FINALIZED = 100n;
 
-/** An L2 node answering `eth_getLogs` from `logs` as a real one filters them, up to its finalized block. */
-function l2Node(logs: readonly Log[]): Rpc {
+const answered = (l: Log) => ({
+  address: hex(l.address),
+  topics: l.topics,
+  data: hex(l.data),
+  blockNumber: `0x${(l.blockNumber ?? 16n).toString(16)}`,
+  ...(l.removed && { removed: true }),
+});
+
+/**
+ * An L2 node answering `eth_getLogs` from `logs` as a real one filters them,
+ * up to its finalized block, plus `extra` whatever the filter: a node that
+ * lies about which logs match.
+ */
+function l2Node(logs: readonly Log[], extra: readonly Log[] = []): Rpc {
   return {
     call: async (method, params) => {
+      if (method === "eth_chainId") return `0x${typical.l2_chain_id.toString(16)}`;
       if (method === "eth_getBlockByNumber") return { number: `0x${FINALIZED.toString(16)}` };
       if (method !== "eth_getLogs") throw new Error(`unexpected ${method}`);
       const filter = params[0] as { address: string; topics: (string | string[] | null)[] };
-      return logs
-        .filter(
+      return [
+        ...logs.filter(
           (l) =>
             hex(l.address) === filter.address &&
             filter.topics.every(
@@ -168,13 +187,9 @@ function l2Node(logs: readonly Log[]): Rpc {
                 t === null ||
                 (Array.isArray(t) ? t.includes(l.topics[i] ?? "") : t === l.topics[i]),
             ),
-        )
-        .map((l) => ({
-          address: hex(l.address),
-          topics: l.topics,
-          data: hex(l.data),
-          blockNumber: "0x10",
-        }));
+        ),
+        ...extra,
+      ].map(answered);
     },
   };
 }
@@ -192,17 +207,19 @@ function checkpoint(d: ElectionDefinition, segment: number, object: Uint8Array):
   };
 }
 
-async function run(l2: Rpc, dir: string, reports: string) {
+async function run(l2: Rpc, dir: string, reports: string, l1: Rpc = chain.rpc) {
   const { header, rlp } = await finalizedBlock(chain.rpc);
   const lines: VerifyReport[] = [];
   await verifyElections({
-    l1: chain.rpc,
+    l1,
     anchor: anchor.address,
     header,
     headerRlp: rlp,
     timing: await anchorTiming(chain.rpc, anchor.address, header),
     l2,
     registry: REGISTRY,
+    l1ChainId,
+    l2ChainId: typical.l2_chain_id,
     l2Finalized: FINALIZED,
     mirror: await openMirror(dir),
     reports,
@@ -229,16 +246,21 @@ describe("verify", () => {
       Object.fromEntries(objects.map((o, i) => [`${i}.car`, objectCar(o)])),
     );
     const reports = await blocksDir({});
-    const l2 = l2Node([
-      created(d, createdAt),
-      registered(d, createdAt + 60n),
-      pinned(d.panel_id),
-      // Another contract's log under the same topics, which the node drops.
-      {
-        ...registered(definition("honest", { opens_at: 1n }), createdAt),
-        address: address("other"),
-      },
-    ]);
+    const registration = registered(d, createdAt + 60n);
+    const l2 = l2Node(
+      [created(d, createdAt), registration, pinned(d.panel_id)],
+      // Each a second registration, were it not dropped (`l2-repeated`):
+      // another contract's log under the same topics, one reorganised away,
+      // and one past the finalized block.
+      [
+        {
+          ...registered(definition("honest", { opens_at: 1n }), createdAt),
+          address: address("other"),
+        },
+        { ...registration, removed: true },
+        { ...registration, blockNumber: FINALIZED + 1n },
+      ],
+    );
     const { lines, header, rlp } = await run(l2, dir, reports);
 
     const line = byElection(lines, d);
@@ -283,47 +305,69 @@ describe("verify", () => {
   test("reports and skips each election whose inputs it can't gather, and verifies the others", async () => {
     const at = anchor.epoch + PERIOD + 5n;
     const honest = definition("still verified");
-    const cases = {
-      "l2-definition-missing": definition("unregistered"),
-      "l2-creation-missing": definition("uncreated"),
-      "l2-repeated": definition("registered twice"),
-      "definition-anchor": definition("another anchor", { l1_anchor: address("another anchor") }),
-      "definition-registry": definition("another registry", {
-        election_registry: address("another registry"),
-      }),
-      "creation-outside-clock": definition("created before the epoch"),
-      "l2-panel-missing": definition("unpinned panel", { panel_id: keccak_256(text("no panel")) }),
-    };
-    const all = [honest, ...Object.values(cases)];
+    const panelless = definition("unpinned panel", { panel_id: keccak_256(text("no panel")) });
+    const cases: [string, ElectionDefinition, Log[]][] = [
+      ["l2-definition-missing", definition("unregistered"), []],
+      ["l2-creation-missing", definition("uncreated"), []],
+      ["l2-repeated", definition("registered twice"), []],
+      ["definition-anchor", definition("another anchor", { l1_anchor: address("other") }), []],
+      [
+        "definition-registry",
+        definition("another registry", { election_registry: address("x") }),
+        [],
+      ],
+      ["definition-chain", definition("another L1", { l1_chain_id: l1ChainId + 1n }), []],
+      ["definition-chain", definition("another L2", { l2_chain_id: 1n }), []],
+      ["creation-outside-clock", definition("created before the epoch"), []],
+      ["creation-outside-clock", definition("created past the last segment"), []],
+      ["l2-panel-missing", panelless, []],
+      ["unanchored", definition("never anchored"), []],
+      ["l1-checkpoint-unknown at segment 1", definition("a withheld L1 log"), []],
+    ];
+    for (const c of cases) {
+      const [code, d, logs] = c;
+      if (code === "l2-definition-missing") {
+        // Its registration with a byte past the canonical encoding: no event.
+        const r = registered(d, at);
+        logs.push(created(d, at), { ...r, data: concatBytes(r.data, new Uint8Array(1)) });
+      } else if (code === "l2-creation-missing") logs.push(registered(d, at));
+      else if (code === "l2-repeated")
+        logs.push(created(d, at), registered(d, at), registered(d, at + 1n));
+      else if (d === cases[7]![1]) logs.push(created(d, anchor.epoch - 1n), registered(d, at));
+      else if (d === cases[8]![1])
+        logs.push(created(d, anchor.epoch + PERIOD * 2n ** 32n), registered(d, at));
+      else logs.push(created(d, at), registered(d, at));
+    }
+    const anchored = [honest, ...cases.filter(([code]) => code !== "unanchored").map(([, d]) => d)];
     await chain.anchorAll(
       anchor,
-      all.map((d) => checkpoint(d, 1, text("segment 1"))),
+      anchored.map((d) => checkpoint(d, 1, text("segment 1"))),
     );
+    const withheld = cases.at(-1)![1];
+    await chain.anchorAll(anchor, [checkpoint(withheld, 2, text("segment 1"))]);
+    // An L1 node that forges a log for the election never anchored and
+    // withholds the withheld election's log of segment 1.
+    const never = cases.at(-2)![1];
+    const l1: Rpc = {
+      call: async (method, params) => {
+        const result = await chain.rpc.call(method, params);
+        if (method !== "eth_getLogs") return result;
+        const logs = result as { address: string; topics: string[]; data: string }[];
+        const kept = logs.filter(
+          (l) => !(l.topics[1] === hex(withheld.election_id) && BigInt(l.topics[2]!) === 1n),
+        );
+        return [...kept, forgedLog(logs[0]!, checkpoint(never, 1, text("forged")))];
+      },
+    };
     const dir = await blocksDir({ "0.car": objectCar(text("segment 1")) });
-    const reports = await blocksDir({});
-    const unregistered = registered(cases["l2-definition-missing"], at);
-    const logs: Log[] = [
+    const l2 = l2Node([
       created(honest, at),
       registered(honest, at),
       pinned(honest.panel_id),
-      created(cases["l2-definition-missing"], at),
-      // Its registration with a byte past the canonical encoding: no event.
-      { ...unregistered, data: concatBytes(unregistered.data, new Uint8Array(1)) },
-      registered(cases["l2-creation-missing"], at),
-      created(cases["l2-repeated"], at),
-      registered(cases["l2-repeated"], at),
-      registered(cases["l2-repeated"], at + 1n),
-      created(cases["definition-anchor"], at),
-      registered(cases["definition-anchor"], at),
-      created(cases["definition-registry"], at),
-      registered(cases["definition-registry"], at),
-      created(cases["creation-outside-clock"], anchor.epoch - 1n),
-      registered(cases["creation-outside-clock"], at),
-      created(cases["l2-panel-missing"], at),
-      registered(cases["l2-panel-missing"], at),
-    ];
-    const { lines } = await run(l2Node(logs), dir, reports);
-    for (const [code, d] of Object.entries(cases))
+      ...cases.flatMap(([, , logs]) => logs),
+    ]);
+    const { lines } = await run(l2, dir, await blocksDir({}), l1);
+    for (const [code, d] of cases)
       expect(byElection(lines, d), code).toEqual({
         election: bytesToHex(d.election_id),
         error: code,
@@ -342,7 +386,7 @@ describe("verify", () => {
     const { lines } = await run(broken, await blocksDir({}), await blocksDir({}));
     expect(byElection(lines, d)).toEqual({
       election: bytesToHex(d.election_id),
-      error: "rpc: eth_getLogs: refused",
+      error: "l2: eth_getLogs: refused",
     });
   });
 });

@@ -28,6 +28,7 @@ import { mkdir, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   type AnyElectionDefinitionRecord,
+  type Checkpoint,
   CHUNK_SIZE,
   encodeCheckpoint,
   type EventContracts,
@@ -58,6 +59,8 @@ export type SkipCode =
   | "definition-anchor"
   /** The definition names another election registry than the one it was read from. */
   | "definition-registry"
+  /** The definition names other chains than the nodes' (`eth_chainId`). */
+  | "definition-chain"
   /** The creation's L1 origin is before the clock's epoch, or past its last `u32` segment. */
   | "creation-outside-clock"
   /** No logged checkpoint is one the anchor holds: there is no board to verify. */
@@ -83,6 +86,9 @@ export interface VerifyOptions {
   readonly timing: AnchorTiming;
   readonly l2: Rpc;
   readonly registry: Uint8Array;
+  /** Each node's `eth_chainId`: the chains a definition must name. */
+  readonly l1ChainId: bigint;
+  readonly l2ChainId: bigint;
   /** The L2 block logs are read up to: the L2 node's finalized one. */
   readonly l2Finalized: bigint;
   readonly mirror: Mirror;
@@ -131,12 +137,94 @@ const contractsOf = (d: AnyElectionDefinitionRecord["value"]): EventContracts =>
 const hex = (b: Uint8Array) => bytesToHex(b);
 const same = (a: Uint8Array, b: Uint8Array) => hex(a) === hex(b);
 
-// Writes `bytes` to `path` through a temporary file and a rename, so a
+// Writes `text` to `path` through a temporary file and a rename, so a
 // reader (`serve`) never sees half a report.
 async function writeWhole(path: string, text: string): Promise<void> {
   const temporary = `${path}.${randomUUID()}.partial`;
   await writeFile(temporary, text);
   await rename(temporary, path);
+}
+
+/**
+ * Most bytes of proof nodes one election's bundle holds: as hex in one JSON
+ * text they must stay far below the longest string the runtime can make,
+ * whatever the L1 node answers (T-52).
+ */
+export const MAX_BUNDLE_PROOF_BYTES = 64 * 1024 * 1024;
+
+// An RPC error as the node reports it, naming which chain's node failed.
+const tagged = (chain: "l1" | "l2") => (e: unknown) => {
+  throw e instanceof RpcError ? new RpcError(`${chain}: ${e.message}`) : e;
+};
+
+// One election's bundle, as JSON, or why it can't be gathered.
+async function gather(
+  options: VerifyOptions,
+  election: string,
+  checkpoints: readonly Checkpoint[],
+): Promise<{ readonly json: string } | { readonly error: string }> {
+  const { l1, anchor, header, timing, l2, registry } = options;
+  const reg = await registration(
+    l2,
+    registry,
+    hexToBytes(election),
+    options.l2FromBlock,
+    options.l2Finalized,
+  ).catch(tagged("l2"));
+  const d = reg.decoded.value;
+  // The L1 evidence is the node's anchor's on the node's L1, and the
+  // definition was read from the node's registry on its L2: a definition
+  // naming others would be judged against evidence that isn't its own.
+  if (!same(d.l1_anchor, anchor)) return { error: "definition-anchor" };
+  if (!same(d.election_registry, registry)) return { error: "definition-registry" };
+  if (d.l1_chain_id !== options.l1ChainId || d.l2_chain_id !== options.l2ChainId)
+    return { error: "definition-chain" };
+  // `f` is the period containing the creation's L1 origin
+  // (docs/spec/contracts.md, Board anchor, Verification).
+  const origin = reg.created.timestamp;
+  const f = origin < timing.epoch ? -1n : (origin - timing.epoch) / timing.period;
+  if (f < 0n || f > U32_MAX) return { error: "creation-outside-clock" };
+  const panel = await pinnedPanel(
+    l2,
+    contractsOf(d),
+    d.panel_id,
+    options.l2FromBlock,
+    options.l2Finalized,
+  ).catch(tagged("l2"));
+  // Definition versions 4 and later list receipt keys, which 2.9 judges
+  // from the anchor's record in the same L1 state.
+  const keys = "receipt_keys" in d ? d.receipt_keys : [];
+  const proven = await provenCheckpoints(l1, anchor, header, checkpoints, {
+    extraSlots: keys.map(receiptKeySlot),
+    maxProofBytes: MAX_BUNDLE_PROOF_BYTES,
+  }).catch(tagged("l1"));
+  // In segment order, as the reader proves them.
+  const seal = proven.checkpoints.at(-1)?.segment;
+  if (seal === undefined) return { error: "unanchored" };
+  const json = JSON.stringify(
+    {
+      format: BUNDLE_FORMAT_CEREMONY,
+      definition: hex(reg.definition),
+      clock: {
+        epoch: timing.epoch.toString(),
+        period: timing.period.toString(),
+        deadline: timing.deadline.toString(),
+        lastSegment: seal.toString(),
+      },
+      l1: {
+        firstSegment: f.toString(),
+        header: hex(options.headerRlp),
+        nodes: proven.nodes.map(hex),
+        // Every logged checkpoint: the verifier counts only those whose
+        // hash is a word it proves.
+        checkpoints: checkpoints.map((c) => hex(encodeCheckpoint(c))),
+      },
+      panel: { threshold: panel.threshold.toString(), keys: panel.keys.map(hex) },
+    },
+    null,
+    2,
+  );
+  return { json };
 }
 
 /**
@@ -147,92 +235,31 @@ async function writeWhole(path: string, text: string): Promise<void> {
  * only if the logs can't be read (`RpcError`) or the reports can't be written.
  */
 export async function verifyElections(options: VerifyOptions): Promise<VerifyRun> {
-  const { l1, anchor, header, timing, l2, registry, report } = options;
+  const { report } = options;
   if (!Number.isSafeInteger(options.maxBoardBytes) || options.maxBoardBytes < 1)
     throw new RangeError("maxBoardBytes must be a positive integer");
-  const logged = await loggedCheckpoints(l1, anchor, header, options.fromBlock);
+  const logged = await loggedCheckpoints(
+    options.l1,
+    options.anchor,
+    options.header,
+    options.fromBlock,
+  );
   const store = mirrorStore(options.mirror);
   for (const [election, checkpoints] of logged.elections) {
     const skip = (error: string) => report({ election, error });
-    let json;
+    let gathered;
     try {
-      const reg = await registration(
-        l2,
-        registry,
-        hexToBytes(election),
-        options.l2FromBlock,
-        options.l2Finalized,
-      );
-      const d = reg.decoded.value;
-      // The L1 evidence is the node's anchor's, and the definition was read
-      // from the node's registry: a definition naming others would be judged
-      // against evidence that isn't its own.
-      if (!same(d.l1_anchor, anchor)) {
-        skip("definition-anchor");
-        continue;
-      }
-      if (!same(d.election_registry, registry)) {
-        skip("definition-registry");
-        continue;
-      }
-      // `f` is the period containing the creation's L1 origin
-      // (docs/spec/contracts.md, Board anchor, Verification).
-      const origin = reg.created.timestamp;
-      const f = origin < timing.epoch ? -1n : (origin - timing.epoch) / timing.period;
-      if (f < 0n || f > U32_MAX) {
-        skip("creation-outside-clock");
-        continue;
-      }
-      const panel = await pinnedPanel(
-        l2,
-        contractsOf(d),
-        d.panel_id,
-        options.l2FromBlock,
-        options.l2Finalized,
-      );
-      // Definition versions 4 and 5 list receipt keys, which 2.9 judges from
-      // the anchor's record in the same L1 state.
-      const keys = "receipt_keys" in d ? d.receipt_keys : [];
-      const proven = await provenCheckpoints(
-        l1,
-        anchor,
-        header,
-        checkpoints,
-        keys.map(receiptKeySlot),
-      );
-      const seal = Math.max(...proven.checkpoints.map((c) => c.segment));
-      if (!Number.isFinite(seal)) {
-        skip("unanchored");
-        continue;
-      }
-      json = JSON.stringify(
-        {
-          format: BUNDLE_FORMAT_CEREMONY,
-          definition: hex(reg.definition),
-          clock: {
-            epoch: timing.epoch.toString(),
-            period: timing.period.toString(),
-            deadline: timing.deadline.toString(),
-            lastSegment: seal.toString(),
-          },
-          l1: {
-            firstSegment: f.toString(),
-            header: hex(options.headerRlp),
-            nodes: proven.nodes.map(hex),
-            // Every logged checkpoint: the verifier counts only those whose
-            // hash is a word it proves.
-            checkpoints: checkpoints.map((c) => hex(encodeCheckpoint(c))),
-          },
-          panel: { threshold: panel.threshold.toString(), keys: panel.keys.map(hex) },
-        },
-        null,
-        2,
-      );
+      gathered = await gather(options, election, checkpoints);
     } catch (e) {
       if (!(e instanceof L1Error) && !(e instanceof L2Error) && !(e instanceof RpcError)) throw e;
-      skip(e instanceof RpcError ? `rpc: ${e.message}` : e.message);
+      skip(e.message);
       continue;
     }
+    if ("error" in gathered) {
+      skip(gathered.error);
+      continue;
+    }
+    const { json } = gathered;
     let parsed;
     try {
       parsed = parseBundle(json, new Uint8Array());

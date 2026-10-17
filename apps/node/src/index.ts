@@ -12,6 +12,7 @@ export {
   headerRlp,
   loggedCheckpoints,
   parseAddress,
+  PROOF_NODE_OVERHEAD,
   proofNodes,
   type Proven,
   provenCheckpoints,
@@ -35,8 +36,9 @@ export {
   type PinReport,
   pinElections,
 } from "./pin.ts";
-export { parseRpcUrl, type Rpc, rpcClient, RpcError } from "./rpc.ts";
+export { chainId, parseRpcUrl, type Rpc, rpcClient, RpcError } from "./rpc.ts";
 export {
+  MAX_BUNDLE_PROOF_BYTES,
   mirrorStore,
   type SkipCode,
   type VerifyOptions,

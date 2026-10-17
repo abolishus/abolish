@@ -260,24 +260,34 @@ export const PROOF_SLOTS_PER_REQUEST = 256;
 export const MAX_PROOF_BYTES = 256 * 1024 * 1024;
 
 /**
+ * What each node costs against a proof budget beyond its bytes: what holding
+ * one more array takes, so a node can't make the reader hold millions of
+ * tiny nodes within the budget (T-52).
+ */
+export const PROOF_NODE_OVERHEAD = 64;
+
+/**
  * The account and storage proof nodes of `slots` of the anchor at the
  * header's block, `PROOF_SLOTS_PER_REQUEST` slots a request. Nothing here is
  * trusted: the verifier's reader walks them from the header's state root, so
  * a changed or missing node is its `l1-proof-missing`. An answer that can't
- * be read, or proofs past `MAX_PROOF_BYTES`, throw `RpcError`.
+ * be read, an empty node (no trie holds one), or proofs past `maxBytes`,
+ * each node counted with `PROOF_NODE_OVERHEAD`, throw `RpcError`.
  */
 export async function proofNodes(
   rpc: Rpc,
   anchor: Uint8Array,
   header: L1Header,
   slots: readonly Uint8Array[],
+  maxBytes: number = MAX_PROOF_BYTES,
 ): Promise<Uint8Array[]> {
   const nodes: Uint8Array[] = [];
   let held = 0;
   const keep = (n: unknown, what: string) => {
     const node = unhex(n, what);
-    held += node.length;
-    if (held > MAX_PROOF_BYTES) throw new RpcError("eth_getProof: proofs past the size limit");
+    if (node.length === 0) throw new RpcError(`${what}: an empty node`);
+    held += node.length + PROOF_NODE_OVERHEAD;
+    if (held > maxBytes) throw new RpcError("eth_getProof: proofs past the size limit");
     nodes.push(node);
   };
   for (let at = 0; at < slots.length; at += PROOF_SLOTS_PER_REQUEST) {
@@ -315,15 +325,16 @@ export interface Proven {
  * pins wait for a node that doesn't. So does a range of more than
  * `MAX_SEGMENTS_READ` segments (`l1-range-too-long`), checked before any
  * proof is asked for. An answer that can't be read, or proofs past
- * `MAX_PROOF_BYTES`, throw `RpcError`. The proofs of `extraSlots` (a
- * definition's receipt keys) are fetched with the others, unread here.
+ * `maxProofBytes` (`MAX_PROOF_BYTES` by default), throw `RpcError`. The
+ * proofs of `extraSlots` (a definition's receipt keys) are fetched with the
+ * others, unread here.
  */
 export async function provenCheckpoints(
   rpc: Rpc,
   anchor: Uint8Array,
   header: L1Header,
   logged: readonly Checkpoint[],
-  extraSlots: readonly Uint8Array[] = [],
+  options: { readonly extraSlots?: readonly Uint8Array[]; readonly maxProofBytes?: number } = {},
 ): Promise<Proven> {
   const [first] = logged;
   if (first === undefined) return { checkpoints: [], nodes: [] };
@@ -348,7 +359,13 @@ export async function provenCheckpoints(
   if (high - low + 1 > MAX_SEGMENTS_READ) throw new L1Error("l1-range-too-long");
   const slots = [lowestSegmentSlot(electionId)];
   for (let s = low; s <= high; s++) slots.push(checkpointSlot(electionId, s));
-  const nodes = await proofNodes(rpc, anchor, header, [...slots, ...extraSlots]);
+  const nodes = await proofNodes(
+    rpc,
+    anchor,
+    header,
+    [...slots, ...(options.extraSlots ?? [])],
+    options.maxProofBytes,
+  );
   // Pinning judges no timing: a word proven at the header's block is held by
   // the anchor, whenever it was written, and the board checks' windows are
   // the verifier's. A clock of period 1 from time 0 makes every segment up to

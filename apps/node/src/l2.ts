@@ -84,7 +84,8 @@ const WORD = /^0x[0-9a-fA-F]{64}$/u;
  * The logs `address` emitted from `fromBlock` to `toBlock` matching
  * `topics`, as contract-event records. `n` and `l2_timestamp` are 0: the
  * event check reads neither, and nothing here replays the accumulator. A log
- * of another address or of another shape is dropped.
+ * of another address, of another shape, outside the range or marked removed
+ * (reorganised away) is dropped.
  */
 async function contractLogs(
   rpc: Rpc,
@@ -104,9 +105,16 @@ async function contractLogs(
   if (!Array.isArray(logs)) throw new RpcError("eth_getLogs: not a list");
   const records: ContractEventRecord[] = [];
   for (const log of logs) {
-    const l = (log ?? {}) as { address?: unknown; topics?: unknown; data?: unknown };
-    const blockNumber = (log as { blockNumber?: unknown } | null)?.blockNumber;
+    const l = (log ?? {}) as {
+      address?: unknown;
+      topics?: unknown;
+      data?: unknown;
+      blockNumber?: unknown;
+      removed?: unknown;
+    };
+    const blockNumber = l.blockNumber;
     if (
+      l.removed === true ||
       typeof l.address !== "string" ||
       l.address.toLowerCase() !== hex(address) ||
       !Array.isArray(l.topics) ||
@@ -115,7 +123,9 @@ async function contractLogs(
       typeof l.data !== "string" ||
       !/^0x(?:[0-9a-fA-F]{2})*$/u.test(l.data) ||
       typeof blockNumber !== "string" ||
-      !/^0x(?:0|[1-9a-fA-F][0-9a-fA-F]{0,15})$/u.test(blockNumber)
+      !/^0x(?:0|[1-9a-fA-F][0-9a-fA-F]{0,15})$/u.test(blockNumber) ||
+      BigInt(blockNumber) < fromBlock ||
+      BigInt(blockNumber) > toBlock
     )
       continue;
     records.push({

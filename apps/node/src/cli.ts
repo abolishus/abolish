@@ -17,7 +17,7 @@ import { gateway } from "./gateway.ts";
 import { anchorTiming, finalizedBlock, finalizedHeader, parseAddress } from "./l1.ts";
 import { l2Finalized } from "./l2.ts";
 import { DEFAULT_MAX_ELECTION_BYTES, mirrorThen, pinElections } from "./pin.ts";
-import { parseRpcUrl, rpcClient, RpcError } from "./rpc.ts";
+import { chainId, parseRpcUrl, rpcClient, RpcError } from "./rpc.ts";
 import { type Mirror, openMirror } from "./store.ts";
 import { verifyElections } from "./verify.ts";
 
@@ -246,14 +246,16 @@ async function verify(args: readonly string[], io: CliIo): Promise<number> {
     const { header, rlp } = await finalizedBlock(parsed.l1);
     io.out({ l1: { number: header.number.toString(), hash: `0x${bytesToHex(header.hash)}` } });
     const timing = await anchorTiming(parsed.l1, parsed.anchor, header);
-    l1Inputs = { header, headerRlp: rlp, timing };
+    l1Inputs = { header, headerRlp: rlp, timing, l1ChainId: await chainId(parsed.l1) };
   } catch (e) {
     if (!(e instanceof RpcError)) throw e;
     io.err({ error: `l1: ${e.message}` });
     return 1;
   }
   let finalized;
+  let l2ChainId;
   try {
+    l2ChainId = await chainId(parsed.l2);
     finalized = await l2Finalized(parsed.l2);
     io.out({ l2: { number: finalized.toString() } });
   } catch (e) {
@@ -266,6 +268,7 @@ async function verify(args: readonly string[], io: CliIo): Promise<number> {
       ...parsed,
       ...l1Inputs,
       l2Finalized: finalized,
+      l2ChainId,
       mirror,
       reports,
       fromBlock: BigInt(values["from-block"]),

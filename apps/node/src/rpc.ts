@@ -110,3 +110,11 @@ export function rpcClient(url: URL, options: RpcOptions = {}): Rpc {
     },
   };
 }
+
+/** The node's `eth_chainId`, refused unless a canonical quantity of at most 64 bits. */
+export async function chainId(rpc: Rpc): Promise<bigint> {
+  const id = await rpc.call("eth_chainId", []);
+  if (typeof id !== "string" || !/^0x(?:0|[1-9a-fA-F][0-9a-fA-F]{0,15})$/u.test(id))
+    throw new RpcError("eth_chainId: not a chain ID");
+  return BigInt(id);
+}

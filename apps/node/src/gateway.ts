@@ -13,9 +13,11 @@
 // Nothing about a request is written anywhere. Which CIDs a reader fetches
 // can say which election, or which segment, it cares about (T-11).
 
+import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { join } from "node:path";
+import { pipeline } from "node:stream/promises";
 import { cidText } from "@abolishus/crypto";
 import { parseCid } from "./cid.ts";
 import type { Mirror } from "./store.ts";
@@ -111,8 +113,9 @@ async function answer(
   res.end(req.method === "HEAD" ? undefined : block);
 }
 
-// The report at `path`, read whole at each request: the node keeps no cache,
-// and `verify` replaces a report by a rename, so a request reads one run's.
+// The report at `path`, opened at each request: the node keeps no cache, and
+// `verify` replaces a report by a rename, so a request reads one run's. It is
+// streamed, never held whole, so open requests cost what is in flight (T-52).
 async function answerReport(
   path: string,
   req: IncomingMessage,
@@ -120,29 +123,32 @@ async function answerReport(
 ): Promise<void> {
   let file;
   try {
-    file = await open(path, "r");
+    // Non-blocking, so a FIFO put in the directory can't hold a thread.
+    file = await open(path, constants.O_RDONLY | (constants.O_NONBLOCK ?? 0));
   } catch {
     return refuse(res, 404);
   }
-  let body;
+  let streaming = false;
   try {
     const stat = await file.stat();
     if (!stat.isFile() || stat.size > MAX_REPORT_BYTES) return refuse(res, 404);
-    body = await file.readFile();
+    res.writeHead(200, {
+      "content-type": "application/json; charset=utf-8",
+      "content-length": stat.size,
+      // A later run replaces it.
+      "cache-control": "no-cache",
+      // JSON, never a page: nothing in it runs or loads at the node's origin (T-43).
+      "content-security-policy": "default-src 'none'; sandbox",
+      // A report is public and checkable by anyone who reruns the verifier.
+      "access-control-allow-origin": "*",
+    });
+    if (req.method === "HEAD" || stat.size === 0) return void res.end();
+    streaming = true;
+    // The stream closes the file when it ends or fails.
+    await pipeline(file.createReadStream({ end: stat.size - 1 }), res);
   } finally {
-    await file.close();
+    if (!streaming) await file.close();
   }
-  res.writeHead(200, {
-    "content-type": "application/json; charset=utf-8",
-    "content-length": body.length,
-    // A later run replaces it.
-    "cache-control": "no-cache",
-    // JSON, never a page: nothing in it runs or loads at the node's origin (T-43).
-    "content-security-policy": "default-src 'none'; sandbox",
-    // A report is public and checkable by anyone who reruns the verifier.
-    "access-control-allow-origin": "*",
-  });
-  res.end(req.method === "HEAD" ? undefined : body);
 }
 
 // Whether an Accept header lists the raw-block type (case-insensitively, as

@@ -1,6 +1,8 @@
 // The creation step's configuration from the environment
-// ([[0032-poll-creation-operations]], rules 1, 2 and 18; P2-22 part 3a; the
-// poll-creation runbook): all of it or none of it, the daily ceiling aside.
+// ([[0032-poll-creation-operations]], rules 1, 2 and 18; P2-22 parts 3a and
+// 3b-1; the poll-creation runbook): all of it or none of it, the daily
+// ceiling aside. The L1 node and the anchor are part of it, since nothing
+// created may go on unchecked.
 // The creation key is a secret (T-65, T-72), so a malformed one is refused
 // with a message naming the variable and never quoting its value; so is the
 // URL, which can carry a provider's API key.
@@ -14,6 +16,11 @@ export interface PollCreationConfig {
   readonly chainId: bigint;
   /** The election registry our definitions name. */
   readonly registry: Address;
+  /** The L1 node the per-slot check proves the anchor's words from (P2-22 part 3b-1). */
+  readonly l1RpcUrl: string;
+  readonly l1ChainId: bigint;
+  /** The board anchor our definitions name. */
+  readonly anchor: Address;
   /** The creation key's 32 bytes. */
   readonly key: Uint8Array;
   /** Creations sent in any 24 hours (rule 18). */
@@ -25,6 +32,9 @@ export const POLL_CREATE_ENV = [
   "CREATE_CHAIN_ID",
   "CREATE_REGISTRY",
   "CREATE_KEY",
+  "CREATE_L1_RPC_URL",
+  "CREATE_L1_CHAIN_ID",
+  "CREATE_ANCHOR",
 ] as const;
 
 /** Optional beside the others: core's `CREATE_DAILY_CEILING` when unset. */
@@ -34,18 +44,24 @@ type PollCreateEnv = Partial<
   Record<(typeof POLL_CREATE_ENV)[number] | typeof POLL_CREATE_CEILING_ENV, string>
 >;
 
+// viem signs with the chain ID as a JavaScript number.
+const chainId = z
+  .string()
+  .regex(/^[1-9][0-9]{0,15}$/)
+  .transform((v) => BigInt(v))
+  .refine((v) => v <= BigInt(Number.MAX_SAFE_INTEGER));
+const address = z
+  .string()
+  .refine((v) => isAddress(v, { strict: false }))
+  .transform((v) => getAddress(v));
+
 const Public = z.strictObject({
   CREATE_L2_RPC_URL: z.url({ protocol: /^https?$/ }),
-  // viem signs with the chain ID as a JavaScript number.
-  CREATE_CHAIN_ID: z
-    .string()
-    .regex(/^[1-9][0-9]{0,15}$/)
-    .transform((v) => BigInt(v))
-    .refine((v) => v <= BigInt(Number.MAX_SAFE_INTEGER)),
-  CREATE_REGISTRY: z
-    .string()
-    .refine((v) => isAddress(v, { strict: false }))
-    .transform((v) => getAddress(v)),
+  CREATE_CHAIN_ID: chainId,
+  CREATE_REGISTRY: address,
+  CREATE_L1_RPC_URL: z.url({ protocol: /^https?$/ }),
+  CREATE_L1_CHAIN_ID: chainId,
+  CREATE_ANCHOR: address,
   CREATE_DAILY_CEILING: z
     .string()
     .regex(/^(0|[1-9][0-9]{0,5})$/)
@@ -75,6 +91,9 @@ export function pollCreationFromEnv(
     CREATE_L2_RPC_URL: env.CREATE_L2_RPC_URL,
     CREATE_CHAIN_ID: env.CREATE_CHAIN_ID,
     CREATE_REGISTRY: env.CREATE_REGISTRY,
+    CREATE_L1_RPC_URL: env.CREATE_L1_RPC_URL,
+    CREATE_L1_CHAIN_ID: env.CREATE_L1_CHAIN_ID,
+    CREATE_ANCHOR: env.CREATE_ANCHOR,
     CREATE_DAILY_CEILING: has(POLL_CREATE_CEILING_ENV) ? env.CREATE_DAILY_CEILING : undefined,
   });
   if (!parsed.success)
@@ -88,6 +107,9 @@ export function pollCreationFromEnv(
     l2RpcUrl: p.CREATE_L2_RPC_URL,
     chainId: p.CREATE_CHAIN_ID,
     registry: p.CREATE_REGISTRY,
+    l1RpcUrl: p.CREATE_L1_RPC_URL,
+    l1ChainId: p.CREATE_L1_CHAIN_ID,
+    anchor: p.CREATE_ANCHOR,
     key: Uint8Array.from(Buffer.from(key, "hex")),
     dailyCeiling: p.CREATE_DAILY_CEILING ?? defaultCeiling,
   };

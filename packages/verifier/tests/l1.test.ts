@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vite-plus/test";
 import {
   checkpointSlot,
+  checkpointWords,
   decodeHeader,
   decodeRlp,
   L1Error,
@@ -12,6 +13,7 @@ import {
   type Rlp,
   RlpError,
 } from "../src/index.ts";
+import { anchorState, stored } from "./state.ts";
 
 // Strict RLP, headers and trie walks (docs/spec/verifier.md, Anchors from
 // L1). The vectors in l1-vectors.test.ts check them against Anvil's own
@@ -252,6 +254,43 @@ describe("the anchor's slots", () => {
   test("match cast index", () => {
     expect(toHex(lowestSegmentSlot(id))).toBe(LOWEST);
     expect(toHex(checkpointSlot(id, 4))).toBe(SEGMENT_4);
+  });
+});
+
+describe("checkpointWords", () => {
+  const id = new Uint8Array(32).fill(0x11);
+  const other = new Uint8Array(32).fill(0x22);
+  const anchor = new Uint8Array(20).fill(0xa0);
+  const w = (b: number) => new Uint8Array(32).fill(b);
+  const state = (entries: readonly (readonly [Uint8Array, Uint8Array])[]) => {
+    const { header, nodes } = anchorState(anchor, entries, { number: 9n, timestamp: 1000n });
+    return { header: decodeHeader(header), anchor, nodes: new NodePool(nodes) };
+  };
+
+  test("proves each segment's word, zero where nothing was anchored, in the order asked", () => {
+    const l1 = state([
+      [checkpointSlot(id, 3), stored(w(0xaa))],
+      [checkpointSlot(id, 5), stored(w(0xbb))],
+      // Another election's word at a segment asked about is not this one's.
+      [checkpointSlot(other, 4), stored(w(0xcc))],
+    ]);
+    expect(checkpointWords(l1, id, [5, 4, 3, 6]).map(toHex)).toEqual(
+      [w(0xbb), w(0), w(0xaa), w(0)].map(toHex),
+    );
+    expect(checkpointWords(l1, id, [])).toEqual([]);
+  });
+
+  test("never reads a slot the nodes don't prove, and refuses an anchor that isn't there", () => {
+    const l1 = state([[checkpointSlot(other, 4), stored(w(0xcc))]]);
+    expect(() => checkpointWords({ ...l1, nodes: new NodePool([]) }, id, [4])).toThrow(
+      expect.objectContaining({ code: "l1-proof-missing" }),
+    );
+    expect(() =>
+      checkpointWords({ ...l1, anchor: new Uint8Array(20).fill(0xa1) }, id, [4]),
+    ).toThrow(expect.objectContaining({ code: "l1-anchor-absent" }));
+    expect(() => checkpointWords(l1, id.subarray(1), [4])).toThrow(RangeError);
+    for (const s of [-1, 1.5, 2 ** 32])
+      expect(() => checkpointWords(l1, id, [s])).toThrow(RangeError);
   });
 });
 

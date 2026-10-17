@@ -123,6 +123,10 @@ export interface PollCreationLine {
   readonly resent: number;
   readonly sendFailed: number;
   readonly created: number;
+  /** Identifiers the per-slot check proved clear. */
+  readonly checked: number;
+  /** Identifiers abandoned for an anchor ahead of their ceremony (T-69). */
+  readonly abandoned: number;
   readonly failed: Partial<Record<CreationFailure, number>>;
   readonly ceilingReached: boolean;
 }

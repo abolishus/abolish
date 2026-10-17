@@ -223,6 +223,17 @@ export {
   type SignedCreation,
 } from "./poll-creation.ts";
 export {
+  ANCHOR_CHECK_DELAY,
+  ANCHOR_CHECKS_PER_RUN,
+  type AnchorCheckReport,
+  anchorCheckSegments,
+  checkCreationAnchors,
+  type CreationAnchors,
+  type L1Block,
+  MAX_ABANDONED_IDS,
+  MAX_ANCHOR_CHECK_SEGMENTS,
+} from "./poll-anchor-check.ts";
+export {
   MAX_REPORT_QUEUE,
   type PendingReport,
   type ReportQueueCursor,

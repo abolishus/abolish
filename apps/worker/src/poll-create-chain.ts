@@ -176,7 +176,12 @@ export class ViemPollCreationChain implements PollCreationChain {
     const id = electionId(this.#chainId, hexToBytes(this.#registry), event.args.counter);
     if (bytesToHex(id) !== event.args.electionId.toLowerCase())
       throw new Error("the event's identifier isn't the counter's");
-    return { state: "created", electionId: id, block: receipt.blockNumber };
+    return {
+      state: "created",
+      electionId: id,
+      block: receipt.blockNumber,
+      l1OriginTimestamp: event.args.l1OriginTimestamp,
+    };
   }
 }
 

@@ -20,6 +20,7 @@
     "@abolishus/core": "workspace:*",
     "@abolishus/crypto": "workspace:*",
     "@abolishus/indexer": "workspace:*",
+    "@abolishus/verifier": "workspace:*",
     "bullmq": "catalog:",
     "ioredis": "catalog:",
     "postgres": "catalog:",
@@ -27,7 +28,6 @@
     "zod": "catalog:"
   },
   "devDependencies": {
-    "@abolishus/verifier": "workspace:*",
     "@types/node": "catalog:",
     "fast-check": "catalog:",
     "typescript": "catalog:",

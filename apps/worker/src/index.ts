@@ -19,6 +19,13 @@ export {
   type BallotBatchOptions,
   BallotBatches,
 } from "./ballots.ts";
+export {
+  checkCreationAnchorsDeployment,
+  type CreationAnchorsDeployment,
+  type CreationAnchorsOptions,
+  headerRlp,
+  ViemCreationAnchors,
+} from "./creation-anchors.ts";
 export { ViemL1Source } from "./l1-source.ts";
 export {
   checkPollCreationDeployment,

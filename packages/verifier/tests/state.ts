@@ -98,6 +98,41 @@ const word = (n: bigint) => {
 export const stored = (w: Uint8Array) => rlp(w.subarray(w.findIndex((x) => x !== 0)));
 
 /**
+ * An L1 state whose only account is the anchor at `anchor`, its storage
+ * holding `storage` (slot, RLP of the stored word), and the header of a block
+ * numbered `number` at `timestamp` over it: the header's bytes and every
+ * trie node `eth_getProof` could return.
+ */
+export function anchorState(
+  anchor: Uint8Array,
+  storage: readonly (readonly [Uint8Array, Uint8Array])[],
+  block: { readonly number: bigint; readonly timestamp: bigint },
+) {
+  const storageTrie = buildTrie(storage);
+  const account = rlp([uint(1n), uint(0n), storageTrie.root, keccak_256(Uint8Array.of(0xfe))]);
+  const stateTrie = buildTrie([[anchor, account]]);
+  const z = (n: number) => new Uint8Array(n);
+  const header = rlp([
+    z(32),
+    z(32),
+    z(20),
+    stateTrie.root,
+    z(32),
+    z(32),
+    z(256),
+    uint(0n),
+    uint(block.number),
+    uint(0n),
+    uint(0n),
+    uint(block.timestamp),
+    new Uint8Array(),
+    z(32),
+    z(8),
+  ]);
+  return { header, nodes: [...stateTrie.nodes, ...storageTrie.nodes] };
+}
+
+/**
  * The `l1` member of a format-2 to 5 bundle whose anchor at `anchor` holds a
  * checkpoint after every segment of `entries` and after the seal, proven at
  * an L1 block numbered `number` at `timestamp`.

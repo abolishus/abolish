@@ -345,7 +345,7 @@ export function contractStorageRoot(
 }
 
 /** The anchor account's storage root, from the state trie. */
-function storageRoot(l1: L1Evidence): Uint8Array {
+function storageRoot(l1: Pick<L1Evidence, "header" | "anchor" | "nodes">): Uint8Array {
   const root = contractStorageRoot(l1.nodes, l1.header.stateRoot, l1.anchor);
   // Absent, or without code: unverifiable, never every segment unanchored.
   if (root === undefined) throw new L1Error("l1-anchor-absent");
@@ -409,6 +409,30 @@ export function anchorsFromState(
     if (cp !== undefined)
       return { anchor: { checkpoint: cp, anchoredAt }, hash: w, source: "checkpoint" };
     throw new L1Error("l1-checkpoint-unknown", s);
+  });
+}
+
+/**
+ * The checkpoint word of each of `segments` for an election, in the order
+ * given, read from the board anchor's state at the header's block: all zero
+ * where nothing was anchored. A creator's per-slot check reads these before
+ * its election's ceremony (docs/spec/contracts.md, Board anchor,
+ * Verification, Pre-creation anchors), with the same proofs a verifier
+ * takes: no node can show a stored word as empty under a header it gave.
+ * Which header that is, and so which block, rests on whatever the caller
+ * trusts for L1's finalized chain (T-69).
+ */
+export function checkpointWords(
+  l1: Pick<L1Evidence, "header" | "anchor" | "nodes">,
+  electionId: Uint8Array,
+  segments: readonly number[],
+): Uint8Array[] {
+  if (electionId.length !== 32) throw new RangeError("an election identifier is 32 bytes");
+  const root = storageRoot(l1);
+  return segments.map((s) => {
+    if (!Number.isInteger(s) || s < 0 || s > 0xffffffff)
+      throw new RangeError("a segment is a u32");
+    return storageWord(l1.nodes.get(root, keccak_256(checkpointSlot(electionId, s))));
   });
 }
 

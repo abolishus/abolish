@@ -13,6 +13,7 @@ import { DisputeGameRoots, ProvenRegistryAccumulator } from "./output-roots.ts";
 import { RegistrySync } from "./registry-sync.ts";
 import { connectTier0Bundler } from "./tier0-bundler.ts";
 import { ViemL1Source } from "./l1-source.ts";
+import { checkCreationAnchorsDeployment, ViemCreationAnchors } from "./creation-anchors.ts";
 import { checkPollCreationDeployment, ViemPollCreationChain } from "./poll-create-chain.ts";
 import {
   POLL_CREATE_CEILING_ENV,
@@ -273,18 +274,28 @@ if (registryConfig !== undefined) {
   };
 }
 
-// The creation step (ADR 0032, P2-22 part 3a), only when configured, and
-// only once the node is on the configured chain and the registry is one our
-// definitions can name. The URL can carry a provider's API key, which viem's
-// errors quote, so a failure here is reported by step only.
+// The creation step (ADR 0032, P2-22 parts 3a and 3b-1), only when
+// configured, and only once the L2 node is on the configured chain with a
+// registry our definitions can name, and the L1 node on its chain with the
+// anchor whose clock the per-slot check reads by. The URLs can carry a
+// provider's API key, which viem's errors quote, so a failure here is
+// reported by step only.
 let pollCreation: WorkerOptions["pollCreation"];
 if (pollCreationConfig !== undefined) {
   const c = pollCreationConfig;
   const client = createPublicClient({ transport: http(c.l2RpcUrl, { timeout: 30_000 }) });
+  const l1 = createPublicClient({ transport: http(c.l1RpcUrl, { timeout: 30_000 }) });
+  let clock;
   try {
     await checkPollCreationDeployment(client, { chainId: c.chainId, registry: c.registry });
   } catch (e) {
     if (e instanceof BaseError) throw new Error("the creation step couldn't reach the chain");
+    throw e;
+  }
+  try {
+    clock = await checkCreationAnchorsDeployment(l1, { chainId: c.l1ChainId, anchor: c.anchor });
+  } catch (e) {
+    if (e instanceof BaseError) throw new Error("the creation step couldn't reach L1");
     throw e;
   }
   pollCreation = {
@@ -295,6 +306,7 @@ if (pollCreationConfig !== undefined) {
       key: c.key,
     }),
     dailyCeiling: c.dailyCeiling,
+    anchors: new ViemCreationAnchors({ client: l1, anchor: c.anchor, clock }),
   };
 }
 

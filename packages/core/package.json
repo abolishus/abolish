@@ -10,7 +10,8 @@
     "./short-codes": "./src/short-codes.ts",
     "./turnstile": "./src/turnstile.ts",
     "./test-db": "./tests/db.ts",
-    "./test-authenticator": "./tests/authenticator.ts"
+    "./test-authenticator": "./tests/authenticator.ts",
+    "./test-ceremony-seats": "./tests/ceremony-seats.ts"
   },
   "scripts": {
     "build": "vp exec tsc -p tsconfig.json",

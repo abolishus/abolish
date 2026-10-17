@@ -4,9 +4,11 @@ import {
   type BallotAdmissions,
   type CreationAnchors,
   type PollCreationChain,
+  type PollRegistrationChain,
   type PollStubDeployment,
   type Tier0Batches,
 } from "@abolishus/core";
+import { identityKey, type Panel } from "@abolishus/crypto";
 import type { PollRoots, RegistrySync } from "../src/index.ts";
 import { newElection, type TestDb, testDb } from "@abolishus/core/test-db";
 import { Queue } from "bullmq";
@@ -335,14 +337,27 @@ test("schedules no creation run without the creation key", async () => {
 });
 
 /** A creation key that never has anything to send or read. */
-const idleChain: PollCreationChain = {
+const idleChain: PollCreationChain & PollRegistrationChain = {
   creator: new Uint8Array(20).fill(0xc0),
   nonces: async () => ({ finalized: 0n, latest: 0n, pending: 0n }),
   signCreation: async () => {
     throw new Error("nothing is submitted");
   },
+  signCeremony: async () => {
+    throw new Error("nothing is approved");
+  },
+  signDefinition: async () => {
+    throw new Error("nothing is approved");
+  },
   broadcast: async () => {},
   creation: async () => ({ state: "unknown" }),
+  registration: async () => ({ state: "unknown" }),
+};
+
+/** A default panel with no ceremony to register. */
+const idlePanel: Panel = {
+  threshold: 2,
+  keys: [1, 2, 3].map((i) => identityKey(new Uint8Array(32).fill(i))),
 };
 
 /** An L1 anchor the per-slot check never needs: nothing is created. */
@@ -367,7 +382,13 @@ test("a worker holding the creation key runs the creation step and nothing else"
     log: (l) => lines.push(l),
     auditEveryMs: 3_600_000,
     prefix: own,
-    pollCreation: { chain: idleChain, dailyCeiling: 1, anchors: idleAnchors, everyMs: 3_600_000 },
+    pollCreation: {
+      chain: idleChain,
+      dailyCeiling: 1,
+      anchors: idleAnchors,
+      panel: idlePanel,
+      everyMs: 3_600_000,
+    },
   });
   try {
     for (let i = 0; i < 200 && !lines.some((l) => "outcome" in l); i++)
@@ -404,7 +425,7 @@ test("a worker refuses the creation key beside any other job", async () => {
     log: () => {},
     auditEveryMs: 3_600_000,
     prefix: `abolish-test-${hex(randomBytes(6))}`,
-    pollCreation: { chain: idleChain, dailyCeiling: 1, anchors: idleAnchors },
+    pollCreation: { chain: idleChain, dailyCeiling: 1, anchors: idleAnchors, panel: idlePanel },
   };
   const anchor = { chain: {} as AnchorChain, everyMs: 3_600_000 };
   const tier0 = { batches: {} as Tier0Batches };

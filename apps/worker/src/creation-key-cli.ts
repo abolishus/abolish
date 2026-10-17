@@ -47,6 +47,7 @@ async function main(): Promise<void> {
     registry: config.registry,
     l1ChainId: config.l1ChainId,
     anchor: config.anchor,
+    panel: config.panel,
   });
 
   // Both commands read the creation step's ledger.

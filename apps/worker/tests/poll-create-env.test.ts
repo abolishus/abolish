@@ -1,13 +1,15 @@
 import { describe, expect, test } from "vite-plus/test";
 import { POLL_CREATE_ENV, pollCreationFromEnv } from "../src/index.ts";
 
-// The creation step's configuration (ADR 0032, rules 1 and 18; P2-22 part
-// 3a): all of it or none, the ceiling optional, and neither the key nor the
-// URL ever in an error (T-65, T-72).
+// The creation step's configuration (ADR 0032, rules 1 and 18; P2-22 parts
+// 3a and 5b): all of it or none, the default panel included, the ceiling
+// optional, and neither the key nor the URL ever in an error (T-65, T-72).
 
 const KEY = "c7".repeat(32);
 const SECRET_URL = "https://l2.example/v2/provider-api-key";
 const SECRET_L1_URL = "https://l1.example/v2/provider-api-key";
+const SEAT_1 = `02${"11".repeat(32)}`;
+const SEAT_2 = `03${"22".repeat(32)}`;
 
 const full = {
   CREATE_L2_RPC_URL: SECRET_URL,
@@ -17,6 +19,8 @@ const full = {
   CREATE_L1_RPC_URL: SECRET_L1_URL,
   CREATE_L1_CHAIN_ID: "11155111",
   CREATE_ANCHOR: "0x00000000000000000000000000000000000000a1",
+  CREATE_PANEL_THRESHOLD: "2",
+  CREATE_PANEL_KEYS: `${SEAT_1},${SEAT_2}`,
 };
 
 const refusal = (env: Record<string, string>) => {
@@ -43,6 +47,10 @@ describe("the creation step's configuration", () => {
       l1ChainId: 11155111n,
       anchor: "0x00000000000000000000000000000000000000A1",
       key: Uint8Array.from(Buffer.from(KEY, "hex")),
+      panel: {
+        threshold: 2,
+        keys: [SEAT_1, SEAT_2].map((k) => Uint8Array.from(Buffer.from(k, "hex"))),
+      },
       dailyCeiling: 200,
     });
     expect(
@@ -68,6 +76,9 @@ describe("the creation step's configuration", () => {
       [{ ...full, CREATE_L1_CHAIN_ID: "01" }, "CREATE_L1_CHAIN_ID"],
       [{ ...full, CREATE_ANCHOR: "0xzz" }, "CREATE_ANCHOR"],
       [{ ...full, CREATE_DAILY_CEILING: "-1" }, "CREATE_DAILY_CEILING"],
+      [{ ...full, CREATE_PANEL_THRESHOLD: "0" }, "CREATE_PANEL_THRESHOLD"],
+      [{ ...full, CREATE_PANEL_KEYS: `${SEAT_1};${SEAT_2}` }, "CREATE_PANEL_KEYS"],
+      [{ ...full, CREATE_PANEL_KEYS: `04${"11".repeat(32)}` }, "CREATE_PANEL_KEYS"],
       [{ ...full, CREATE_KEY: `${KEY}00` }, "CREATE_KEY"],
       [{ ...full, CREATE_KEY: KEY.replace("c7", "zz") }, "CREATE_KEY"],
     ] as const) {

@@ -250,7 +250,14 @@ describe("the status command", () => {
     expect(BigInt(fresh.creationCost)).toBeGreaterThan(0n);
 
     await submittedPoll();
-    const adapter = new ViemPollCreationChain({ client, chainId: CHAIN_ID, registry, key });
+    const adapter = new ViemPollCreationChain({
+      client,
+      chainId: CHAIN_ID,
+      registry,
+      // The stand-in the registry names: nothing here registers.
+      trusteeRegistry: getAddress(toHex(0xd0002, { size: 20 })),
+      key,
+    });
     await advancePollCreations(app, adapter, { now: NOW });
     // Anvil mines each transaction as it arrives, but after the send returns.
     const [{ hash: sent }] = (await db.admin`

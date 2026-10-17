@@ -1,21 +1,31 @@
-// The creation step's chain adapter (packages/core's `PollCreationChain`;
-// [[0032-poll-creation-operations]], rules 1, 4 and 12; P2-22 part 3a): the
-// creation key signs `createElection()` here, sends it to one L2 node and
-// reads its receipt. Core decides what to sign and when a poll moves on;
-// this file only signs, sends and reads.
+// The creation step's chain adapter (packages/core's `PollCreationChain` and
+// `PollRegistrationChain`; [[0032-poll-creation-operations]], rules 1, 4 and
+// 12; P2-22 parts 3a and 5b): the creation key signs `createElection()`, and
+// later each poll's `registerCeremony(record)` and
+// `registerDefinition(definition)`, here, sends them to one L2 node and reads
+// their receipts. Core decides what to sign and when a poll moves on; this
+// file only signs, sends and reads.
 //
-// A creation counts only from finalized history, and only as the event the
-// release's registry emits for it: the receipt is the key's own call to the
-// configured registry, its block is the node's block at that height, and
-// its one `ElectionCreated` names the key as creator and the identifier the
-// registry's counter gives (docs/spec/contracts.md, Election identifier).
-// Anything else is a node not to read from, never a poll to move (T-25,
-// T-34). The key is used for nothing but signing, and nothing here logs or
-// throws it, the transactions or the node's answers (T-65, T-72).
+// A creation or a registration counts only from finalized history, and only
+// as the event the release's registry emits for it: the receipt is the key's
+// own call to the configured registry, its block is the node's block at that
+// height, and its one `ElectionCreated` names the key as creator and the
+// identifier the registry's counter gives (docs/spec/contracts.md, Election
+// identifier), or its one `DefinitionRegistered` names the definition the
+// registry admitted. Anything else is a node not to read from, never a poll
+// to move (T-25, T-34). The key is used for nothing but signing, and nothing
+// here logs or throws it, the transactions or the node's answers (T-65,
+// T-72).
 
-import { electionRegistryAbi } from "@abolishus/contracts/abi";
-import type { CreationStatus, PollCreationChain, SignedCreation } from "@abolishus/core";
-import { electionId } from "@abolishus/crypto";
+import { electionRegistryAbi, trusteeRegistryAbi } from "@abolishus/contracts/abi";
+import type {
+  CreationStatus,
+  PollCreationChain,
+  PollRegistrationChain,
+  RegistrationStatus,
+  SignedCreation,
+} from "@abolishus/core";
+import { electionId, type Panel, panelId } from "@abolishus/crypto";
 import {
   type Address,
   BaseError,
@@ -28,6 +38,7 @@ import {
   keccak256,
   parseEventLogs,
   type PublicClient,
+  type TransactionReceipt,
   TransactionNotFoundError,
   TransactionReceiptNotFoundError,
 } from "viem";
@@ -46,7 +57,19 @@ export const CREATE_CALLDATA = encodeFunctionData({
  */
 const GAS_HEADROOM = 120n;
 
-/** How many of the latest base fee a creation's fee cap allows, before its tip. */
+/**
+ * `registerDefinition`'s gas limit, as a base and a cost per byte of its
+ * definition. Its gas can't be estimated when it is signed: core signs it
+ * beside the ceremony's registration, before either is sent, and until the
+ * ceremony lands the registry refuses it (`CeremonyNotRecorded`). Its cost
+ * is the definition's decoding, rules and parameters, and the event that
+ * carries it whole, all linear in its length; the Anvil test measures a
+ * definition's use against this. Only gas used is paid.
+ */
+export const DEFINITION_GAS_BASE = 1_500_000n;
+export const DEFINITION_GAS_PER_BYTE = 600n;
+
+/** How many of the latest base fee a transaction's fee cap allows, before its tip. */
 export const BASE_FEE_HEADROOM = 3n;
 
 /** A node's answer to a transaction it already holds, which is a send that took. */
@@ -58,21 +81,25 @@ export interface PollCreationChainOptions {
   /** The node's chain, as `checkPollCreationDeployment` checked it. */
   readonly chainId: bigint;
   readonly registry: Address;
+  /** The election registry's trustee registry, as `checkPollCreationDeployment` read it. */
+  readonly trusteeRegistry: Address;
   /** The creation key's 32 bytes (`CREATE_KEY`). */
   readonly key: Uint8Array;
 }
 
-/** The creation key on the election registry, as the creation step uses it. */
-export class ViemPollCreationChain implements PollCreationChain {
+/** The creation key on the election and trustee registries, as the creation and registration steps use it. */
+export class ViemPollCreationChain implements PollCreationChain, PollRegistrationChain {
   readonly #client: PublicClient;
   readonly #chainId: bigint;
   readonly #registry: Address;
+  readonly #trusteeRegistry: Address;
   readonly #account: PrivateKeyAccount;
 
   constructor(options: PollCreationChainOptions) {
     this.#client = options.client;
     this.#chainId = options.chainId;
     this.#registry = getAddress(options.registry);
+    this.#trusteeRegistry = getAddress(options.trusteeRegistry);
     this.#account = creationAccount(options.key);
   }
 
@@ -94,14 +121,34 @@ export class ViemPollCreationChain implements PollCreationChain {
   }
 
   async signCreation(nonce: bigint): Promise<SignedCreation> {
+    return this.#sign(nonce, this.#registry, CREATE_CALLDATA);
+  }
+
+  async signCeremony(nonce: bigint, record: Uint8Array): Promise<SignedCreation> {
+    const data = encodeFunctionData({
+      abi: trusteeRegistryAbi,
+      functionName: "registerCeremony",
+      args: [bytesToHex(record)],
+    });
+    return this.#sign(nonce, this.#trusteeRegistry, data);
+  }
+
+  async signDefinition(nonce: bigint, definition: Uint8Array): Promise<SignedCreation> {
+    const data = encodeFunctionData({
+      abi: electionRegistryAbi,
+      functionName: "registerDefinition",
+      args: [bytesToHex(definition)],
+    });
+    const gas = DEFINITION_GAS_BASE + DEFINITION_GAS_PER_BYTE * BigInt(definition.length);
+    return this.#sign(nonce, this.#registry, data, gas);
+  }
+
+  /** Signs a call to `to` at `nonce`, with `gas` or the node's estimate and headroom. */
+  async #sign(nonce: bigint, to: Address, data: Hex, gas?: bigint): Promise<SignedCreation> {
     if (nonce < 0n || nonce > BigInt(Number.MAX_SAFE_INTEGER))
       throw new RangeError("the nonce is out of range");
-    const [gas, block, tip] = await Promise.all([
-      this.#client.estimateGas({
-        account: this.#account.address,
-        to: this.#registry,
-        data: CREATE_CALLDATA,
-      }),
+    const [estimate, block, tip] = await Promise.all([
+      gas ?? this.#client.estimateGas({ account: this.#account.address, to, data }),
       this.#client.getBlock({ blockTag: "latest" }),
       this.#client.estimateMaxPriorityFeePerGas(),
     ]);
@@ -110,10 +157,10 @@ export class ViemPollCreationChain implements PollCreationChain {
       type: "eip1559",
       chainId: Number(this.#chainId),
       nonce: Number(nonce),
-      to: this.#registry,
-      data: CREATE_CALLDATA,
-      gas: (gas * GAS_HEADROOM) / 100n,
-      // Nothing replaces a creation stuck under a fee rise, and it would
+      to,
+      data,
+      gas: gas ?? (estimate * GAS_HEADROOM) / 100n,
+      // Nothing replaces a transaction stuck under a fee rise, and it would
       // hold every later nonce of the key, so the cap is several base fees
       // ahead; EIP-1559 charges only the base fee and the tip.
       maxFeePerGas: block.baseFeePerGas * BASE_FEE_HEADROOM + tip,
@@ -132,6 +179,68 @@ export class ViemPollCreationChain implements PollCreationChain {
   }
 
   async creation(hash: Uint8Array): Promise<CreationStatus> {
+    const final = await this.#finalReceipt(hash, this.#registry);
+    if (!("receipt" in final)) return final;
+    const { receipt } = final;
+    if (receipt.status !== "success") return { state: "reverted" };
+    const created = parseEventLogs({
+      abi: electionRegistryAbi,
+      eventName: "ElectionCreated",
+      logs: receipt.logs.filter((l) => getAddress(l.address) === this.#registry),
+      strict: true,
+    });
+    const event = created.length === 1 ? created[0] : undefined;
+    if (event === undefined || getAddress(event.args.creator) !== this.#account.address)
+      throw new Error("the creation has no ElectionCreated of its own");
+    // The identifier is the registry's counter's, so a node can't hand the
+    // poll another election's (T-25).
+    const id = electionId(this.#chainId, hexToBytes(this.#registry), event.args.counter);
+    if (bytesToHex(id) !== event.args.electionId.toLowerCase())
+      throw new Error("the event's identifier isn't the counter's");
+    return {
+      state: "created",
+      electionId: id,
+      block: receipt.blockNumber,
+      l1OriginTimestamp: event.args.l1OriginTimestamp,
+    };
+  }
+
+  async registration(hash: Uint8Array): Promise<RegistrationStatus> {
+    const final = await this.#finalReceipt(hash, this.#registry);
+    if (!("receipt" in final)) return final;
+    const { receipt } = final;
+    if (receipt.status !== "success") return { state: "reverted" };
+    const registered = parseEventLogs({
+      abi: electionRegistryAbi,
+      eventName: "DefinitionRegistered",
+      logs: receipt.logs.filter((l) => getAddress(l.address) === this.#registry),
+      strict: true,
+    });
+    // One successful `registerDefinition` emits exactly one. Core compares
+    // its election and definition hash with the poll's approved definition
+    // (T-34), so a node can only fail the poll here, never move it.
+    if (registered.length !== 1)
+      throw new Error("the registration has no DefinitionRegistered of its own");
+    const { electionId: id, definitionHash } = registered[0]!.args;
+    return {
+      state: "registered",
+      electionId: hexToBytes(id),
+      definitionHash: hexToBytes(definitionHash),
+      block: receipt.blockNumber,
+    };
+  }
+
+  /**
+   * The receipt of the key's transaction `hash` to `to`, once final; or
+   * whether the node knows it at all. Throws on a receipt that isn't the
+   * node's chain's or isn't that call's.
+   */
+  async #finalReceipt(
+    hash: Uint8Array,
+    to: Address,
+  ): Promise<
+    { readonly state: "unknown" | "included" } | { readonly receipt: TransactionReceipt }
+  > {
     const finalized = await this.#client.getBlock({ blockTag: "finalized" });
     let receipt;
     try {
@@ -158,30 +267,10 @@ export class ViemPollCreationChain implements PollCreationChain {
       receipt.transactionHash !== bytesToHex(hash) ||
       getAddress(receipt.from) !== this.#account.address ||
       receipt.to === null ||
-      getAddress(receipt.to) !== this.#registry
+      getAddress(receipt.to) !== to
     )
-      throw new Error("the receipt isn't the creation's");
-    if (receipt.status !== "success") return { state: "reverted" };
-    const created = parseEventLogs({
-      abi: electionRegistryAbi,
-      eventName: "ElectionCreated",
-      logs: receipt.logs.filter((l) => getAddress(l.address) === this.#registry),
-      strict: true,
-    });
-    const event = created.length === 1 ? created[0] : undefined;
-    if (event === undefined || getAddress(event.args.creator) !== this.#account.address)
-      throw new Error("the creation has no ElectionCreated of its own");
-    // The identifier is the registry's counter's, so a node can't hand the
-    // poll another election's (T-25).
-    const id = electionId(this.#chainId, hexToBytes(this.#registry), event.args.counter);
-    if (bytesToHex(id) !== event.args.electionId.toLowerCase())
-      throw new Error("the event's identifier isn't the counter's");
-    return {
-      state: "created",
-      electionId: id,
-      block: receipt.blockNumber,
-      l1OriginTimestamp: event.args.l1OriginTimestamp,
-    };
+      throw new Error("the receipt isn't the transaction's");
+    return { receipt };
   }
 }
 
@@ -202,6 +291,8 @@ export interface PollCreationDeployment {
   /** The L1 and the board anchor the per-slot check reads (`CREATE_L1_CHAIN_ID`, `CREATE_ANCHOR`). */
   readonly l1ChainId: bigint;
   readonly anchor: Address;
+  /** The default panel whose ceremonies the registration step registers (`CREATE_PANEL_*`). */
+  readonly panel: Panel;
 }
 
 /**
@@ -211,12 +302,18 @@ export interface PollCreationDeployment {
  * go to the registry our definitions will name and are read back from it
  * (T-34), and that names the configured L1 and board anchor, so the per-slot
  * check reads the anchor every stub of these identifiers will pin (P2-22
- * part 4b). Throws naming the mismatch, never the URL or a key.
+ * part 4b), and whose trustee registry pins the default panel at its
+ * threshold, so the ceremonies registered there are ones the registry's
+ * definitions can name (T-37, part 5b). Returns that trustee registry, the
+ * one `registerCeremony` goes to. Throws naming the mismatch, never the URL
+ * or a key.
  */
 export async function checkPollCreationDeployment(
   client: PublicClient,
   deployment: PollCreationDeployment,
-): Promise<void> {
+): Promise<{ readonly trusteeRegistry: Address }> {
+  // Throws on a panel that isn't one, before anything is read.
+  const panel = panelId(deployment.panel);
   const chainId = BigInt(await client.getChainId());
   if (chainId !== deployment.chainId) throw new Error("the L2 node is on another chain");
   const blockNumber = (await client.getBlock({ blockTag: "finalized" })).number;
@@ -240,11 +337,37 @@ export async function checkPollCreationDeployment(
   if (first.toLowerCase() !== bytesToHex(want))
     throw new Error("the registry numbers its elections for another chain or address");
   const at = { address: deployment.registry, abi: electionRegistryAbi, blockNumber } as const;
-  const [l1ChainId, anchor] = await Promise.all([
+  const [l1ChainId, anchor, trusteeRegistry] = await Promise.all([
     client.readContract({ ...at, functionName: "l1ChainId" }),
     client.readContract({ ...at, functionName: "l1Anchor" }),
+    client.readContract({ ...at, functionName: "trusteeRegistry" }),
   ]);
   if (l1ChainId !== deployment.l1ChainId) throw new Error("the registry names another L1");
   if (getAddress(anchor) !== getAddress(deployment.anchor))
     throw new Error("the registry names another board anchor");
+  // The identifier binds the threshold, the size and every key in seat
+  // order, so a non-empty entry under it is this panel, as the stub step
+  // checks (T-37). Its quorum must be rule 7's `max(k, n − 1)`, the
+  // approvals core collects: a higher one refuses every registration.
+  let pinned: readonly [number, number, number];
+  try {
+    pinned = await client.readContract({
+      address: trusteeRegistry,
+      abi: trusteeRegistryAbi,
+      functionName: "panelOf",
+      args: [bytesToHex(panel)],
+      blockNumber,
+    });
+  } catch (e) {
+    if (e instanceof ContractFunctionExecutionError)
+      throw new Error("the registry's trustee registry isn't one");
+    throw e;
+  }
+  const [threshold, size, quorum] = pinned;
+  const { keys } = deployment.panel;
+  if (size !== keys.length || threshold !== deployment.panel.threshold)
+    throw new Error("the trustee registry doesn't pin the panel");
+  if (quorum !== Math.max(threshold, keys.length - 1))
+    throw new Error("the trustee registry pins the panel at another quorum than rule 7's");
+  return { trusteeRegistry: getAddress(trusteeRegistry) };
 }

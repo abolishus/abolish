@@ -40,6 +40,8 @@ export {
 export { ViemL1Source } from "./l1-source.ts";
 export {
   checkPollCreationDeployment,
+  DEFINITION_GAS_BASE,
+  DEFINITION_GAS_PER_BYTE,
   type PollCreationChainOptions,
   type PollCreationDeployment,
   ViemPollCreationChain,

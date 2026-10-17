@@ -174,6 +174,7 @@ export type PollRootLine =
 export interface PollStubLine {
   readonly queue: "{poll-stub}";
   readonly stubbed: number;
+  readonly restubbed: number;
   readonly failed: Partial<Record<StubFailure, number>>;
 }
 

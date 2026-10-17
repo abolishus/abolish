@@ -216,12 +216,12 @@ async function sync(
 }
 
 const SOON = later(60);
+const CLOSES = new Date(Number(DRAFT.closesAt) * 1000);
 const run = (now = SOON, client = app) => openPolls(client, CLOCK, { now });
 const quiet = {
   opened: 0,
   waiting: 0,
   early: 0,
-  late: 0,
   otherAnchor: 0,
   unboarded: 0,
   errored: 0,
@@ -373,16 +373,43 @@ describe("a registered poll", () => {
     expect(await readBoard(app, r.electionId)).toEqual([]);
   });
 
-  test("leaves a poll whose stub pins another anchor than the clock's, and one past its close", async () => {
+  test("leaves a poll whose stub pins another anchor than the clock's, until its close", async () => {
     const r = await registered();
-    expect(await openPolls(app, { ...CLOCK, anchor: address(0xb9) }, { now: SOON })).toEqual({
-      ...quiet,
-      otherAnchor: 1,
-    });
-    expect(await run(new Date(Number(DRAFT.closesAt) * 1000))).toEqual({ ...quiet, late: 1 });
-    expect(await readBoard(app, r.electionId)).toEqual([]);
+    const other = { ...CLOCK, anchor: address(0xb9) };
+    const before = new Date(Number(DRAFT.closesAt) * 1000 - 1000);
+    expect(await openPolls(app, other, { now: before })).toEqual({ ...quiet, otherAnchor: 1 });
     expect((await poll(r.id))["state"]).toBe("registered");
-    await clear();
+    expect(await openPolls(app, other, { now: CLOSES })).toEqual({
+      ...quiet,
+      failed: { "open-timeout": 1 },
+    });
+    expect(await poll(r.id)).toEqual({ state: "failed", failure: "open-timeout" });
+    expect(await readBoard(app, r.electionId)).toEqual([]);
+  });
+
+  test("fails `open-timeout` a poll that would open at or past its close, boarding nothing", async () => {
+    const r = await registered();
+    expect(await run(CLOSES)).toEqual({ ...quiet, failed: { "open-timeout": 1 } });
+    expect(await poll(r.id)).toEqual({ state: "failed", failure: "open-timeout" });
+    expect(await readBoard(app, r.electionId)).toEqual([]);
+    // Failed, it is never taken again.
+    expect(await run(CLOSES)).toEqual(quiet);
+  });
+
+  test("fails `open-timeout` a poll still waiting for the registry sync at its close", async () => {
+    const r = await registered(false);
+    const before = new Date(CLOSES.getTime() - 1000);
+    expect(await run(before)).toEqual({ ...quiet, waiting: 1 });
+    expect((await poll(r.id))["state"]).toBe("registered");
+    expect(await run(CLOSES)).toEqual({ ...quiet, failed: { "open-timeout": 1 } });
+    expect(await poll(r.id)).toEqual({ state: "failed", failure: "open-timeout" });
+  });
+
+  test("fails a poll the read-back refuses as `open-mismatch`, even past its close", async () => {
+    const r = await registered();
+    await db.admin`UPDATE account_polls SET stub_hash = ${randomBytes(32)} WHERE id = ${r.id}`;
+    expect(await run(CLOSES)).toEqual({ ...quiet, failed: { "open-mismatch": 1 } });
+    expect(await poll(r.id)).toEqual({ state: "failed", failure: "open-mismatch" });
   });
 
   test("counts a poll whose step throws and opens the rest", async () => {

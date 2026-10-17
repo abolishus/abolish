@@ -4,8 +4,8 @@ import { bytea } from "./bytea.ts";
 
 // Drizzle view of migrations/0012_account_polls.sql, 0013_poll_creation.sql,
 // 0015_poll_anchor_check.sql, 0016_poll_roots.sql, 0017_poll_stubs.sql,
-// 0018_ceremony_runs.sql, 0019_poll_registration.sql and
-// 0020_poll_opening.sql; a test checks the two agree. `account_polls` is in
+// 0018_ceremony_runs.sql, 0019_poll_registration.sql, 0020_poll_opening.sql
+// and 0021_poll_retries.sql; a test checks the two agree. `account_polls` is in
 // the account class: whose poll it is, never who answered it (ADR 0032, rule
 // 15; T-10). `poll_creation_txs` is operational: the creation key's public
 // transactions, creations and registrations, naming no account, poll or

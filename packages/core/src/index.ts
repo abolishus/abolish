@@ -321,6 +321,7 @@ export {
   type PollStubReport,
   type StubFailure,
   stubPolls,
+  STUBS_PER_POLL,
   STUBS_PER_RUN,
 } from "./poll-stubs.ts";
 export {

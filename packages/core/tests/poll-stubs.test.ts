@@ -26,9 +26,11 @@ import {
   pollDraftProblem,
   type PollStubDeployment,
   pollStubDeploymentRule,
+  REGISTRATION_MARGIN_SECONDS,
   SETUP_SECONDS,
   type StoredTierElectorate,
   stubPolls,
+  STUBS_PER_POLL,
   STUBS_PER_RUN,
   submitPollDraft,
 } from "../src/index.ts";
@@ -176,7 +178,7 @@ const utf8 = (s: string) => new TextEncoder().encode(s);
 describe("stubPolls", () => {
   test("records a stub of the draft, the electorate and the pins, and moves the poll to `ceremony`", async () => {
     const { id, electionId } = await rooted();
-    expect(await run()).toEqual({ stubbed: 1, failed: {} });
+    expect(await run()).toEqual({ stubbed: 1, restubbed: 0, failed: {} });
     const [s, ...rest] = await stubs();
     expect(rest).toEqual([]);
     const stub = decodeElectionDefinitionV5(s!["stub"]);
@@ -272,14 +274,14 @@ describe("stubPolls", () => {
       },
     ]);
     // Nothing left: the next run records nothing.
-    expect(await run()).toEqual({ stubbed: 0, failed: {} });
+    expect(await run()).toEqual({ stubbed: 0, restubbed: 0, failed: {} });
     expect(await stubs()).toHaveLength(1);
   });
 
   test("salts every stub's display text afresh", async () => {
     await rooted();
     await rooted();
-    expect(await run()).toEqual({ stubbed: 2, failed: {} });
+    expect(await run()).toEqual({ stubbed: 2, restubbed: 0, failed: {} });
     const [a, b] = await stubs();
     const commitment = (s: typeof a) =>
       Buffer.from(decodeElectionDefinitionV5(s!["stub"]).display_text_commitment);
@@ -295,7 +297,7 @@ describe("stubPolls", () => {
     const edge = OPENS_AT + BigInt(MIN_OPEN_SECONDS);
     const ok = await rooted({ closesAt: edge });
     const late = await rooted({ closesAt: edge - 1n });
-    expect(await run()).toEqual({ stubbed: 1, failed: { "closes-too-soon": 1 } });
+    expect(await run()).toEqual({ stubbed: 1, restubbed: 0, failed: { "closes-too-soon": 1 } });
     expect((await row(ok.id)).state).toBe("ceremony");
     expect(await row(late.id)).toEqual({
       state: "failed",
@@ -310,7 +312,7 @@ describe("stubPolls", () => {
     const { id } = await rooted({}, [
       { ...ELECTORATE[0]!, cells: [{ root: ELECTORATE[0]!.cells[0]!.root, members: "4" }] },
     ]);
-    expect(await run()).toEqual({ stubbed: 0, failed: { "stub-refused": 1 } });
+    expect(await run()).toEqual({ stubbed: 0, restubbed: 0, failed: { "stub-refused": 1 } });
     expect(await row(id)).toEqual({ state: "failed", failure: "stub-refused", stub_hash: null });
     expect(await stubs()).toEqual([]);
   });
@@ -325,7 +327,7 @@ describe("stubPolls", () => {
       },
     ]);
     const good = await rooted({}, ELECTORATE, 30);
-    expect(await run()).toEqual({ stubbed: 1, failed: { "stub-refused": 1 } });
+    expect(await run()).toEqual({ stubbed: 1, restubbed: 0, failed: { "stub-refused": 1 } });
     expect((await row(bad.id)).failure).toBe("stub-refused");
     expect((await row(good.id)).state).toBe("ceremony");
   });
@@ -333,15 +335,15 @@ describe("stubPolls", () => {
   test("leaves every poll not yet rooted, and takes the oldest STUBS_PER_RUN first", async () => {
     const waiting = await rooted();
     await db.admin`UPDATE account_polls SET state = 'created', electorate = NULL WHERE id = ${waiting.id}`;
-    expect(await run()).toEqual({ stubbed: 0, failed: {} });
+    expect(await run()).toEqual({ stubbed: 0, restubbed: 0, failed: {} });
     expect((await row(waiting.id)).state).toBe("created");
     const polls = [];
     for (let i = 0; i <= STUBS_PER_RUN; i++) polls.push(await rooted({}, ELECTORATE, 600 - i));
-    expect(await run()).toEqual({ stubbed: STUBS_PER_RUN, failed: {} });
+    expect(await run()).toEqual({ stubbed: STUBS_PER_RUN, restubbed: 0, failed: {} });
     // The newest waits for the next run.
     expect((await row(polls.at(-1)!.id)).state).toBe("rooted");
     expect((await row(polls[0]!.id)).state).toBe("ceremony");
-    expect(await run()).toEqual({ stubbed: 1, failed: {} });
+    expect(await run()).toEqual({ stubbed: 1, restubbed: 0, failed: {} });
   });
 
   test("records one stub per poll when runs race on separate connections", async () => {
@@ -393,7 +395,7 @@ describe("stubPolls", () => {
         await db.admin`DELETE FROM account_polls`;
         await db.admin`DELETE FROM ceremony_stubs`;
         await rooted(over);
-        expect(await run()).toEqual({ stubbed: 1, failed: {} });
+        expect(await run()).toEqual({ stubbed: 1, restubbed: 0, failed: {} });
         const [s] = await stubs();
         const stub = decodeElectionDefinitionV5(s!["stub"]);
         expect(electionDefinitionV5Rule(stub)).toBeUndefined();
@@ -431,6 +433,172 @@ describe("stubPolls", () => {
       }),
       { numRuns: Math.min(numRuns, 40) },
     );
+  });
+});
+
+describe("rule 10's retry", () => {
+  /** The run's time at which a stub opening at `opensAt` is within REGISTRATION_MARGIN_SECONDS. */
+  const marginOf = (opensAt: bigint) =>
+    new Date(Number(opensAt - BigInt(REGISTRATION_MARGIN_SECONDS)) * 1000);
+  const stubOf = (id: string) => db.admin`
+    SELECT s.stub_hash, s.stub, s.display_text, s.opens_at FROM ceremony_stubs s
+      JOIN account_polls p ON p.stub_hash = s.stub_hash WHERE p.id = ${id}`;
+
+  test("gives a poll a new stub for its identifier once its registration can't be signed, at the margin's edge", async () => {
+    const { id, electionId } = await rooted();
+    await run();
+    const [first] = await stubOf(id);
+    const edge = marginOf(OPENS_AT);
+    // A second before the edge, the registration step may still sign.
+    expect(await run(DEPLOYMENT, new Date(edge.getTime() - 1000))).toEqual({
+      stubbed: 0,
+      restubbed: 0,
+      failed: {},
+    });
+    expect(await stubs()).toHaveLength(1);
+    expect(await run(DEPLOYMENT, edge)).toEqual({ stubbed: 0, restubbed: 1, failed: {} });
+    const [second] = await stubOf(id);
+    expect(Buffer.from(second!["stub_hash"])).not.toEqual(Buffer.from(first!["stub_hash"]));
+    expect(await row(id)).toEqual({
+      state: "ceremony",
+      failure: null,
+      stub_hash: second!["stub_hash"],
+    });
+    // Both kept, for the same identifier: the first may already be in a seat's hands.
+    const recorded = await stubs();
+    expect(recorded).toHaveLength(2);
+    for (const s of recorded) expect(Buffer.from(s["election_id"])).toEqual(electionId);
+    // The new stub is the first with a later opening and a fresh salt, and
+    // passes the same rules.
+    const reopened = BigInt(edge.getTime() / 1000) + BigInt(SETUP_SECONDS);
+    expect(second!["opens_at"]).toBe(reopened.toString());
+    const a = decodeElectionDefinitionV5(first!["stub"]);
+    const b = decodeElectionDefinitionV5(second!["stub"]);
+    expect(electionDefinitionV5Rule(b)).toBeUndefined();
+    expect(profileCombinationRule(b)).toBeUndefined();
+    expect(Buffer.from(second!["stub_hash"])).toEqual(Buffer.from(electionStubV5Hash(b)));
+    expect(b.opens_at).toBe(reopened);
+    expect(Buffer.from(b.display_text_commitment)).not.toEqual(
+      Buffer.from(a.display_text_commitment),
+    );
+    const { opens_at: _a, display_text_commitment: _ac, ...restA } = a;
+    const { opens_at: _b, display_text_commitment: _bc, ...restB } = b;
+    expect(restB).toEqual(restA);
+    const text = decodeDisplayTextV2(second!["display_text"], b);
+    expect(displayTextV2Rule(text, b)).toBeUndefined();
+    expect(text.translations).toEqual(decodeDisplayTextV2(first!["display_text"], a).translations);
+    // The new stub isn't late: the next run at the same time leaves it.
+    expect(await run(DEPLOYMENT, edge)).toEqual({ stubbed: 0, restubbed: 0, failed: {} });
+  });
+
+  test("leaves a poll whose registration is recorded, however late", async () => {
+    const { id } = await rooted();
+    await run();
+    await db.admin`
+      UPDATE account_polls SET ceremony_tx_hash = ${randomBytes(32)},
+        register_tx_hash = ${randomBytes(32)} WHERE id = ${id}`;
+    const [before] = await stubOf(id);
+    expect(await run(DEPLOYMENT, marginOf(OPENS_AT + 3600n))).toEqual({
+      stubbed: 0,
+      restubbed: 0,
+      failed: {},
+    });
+    expect((await row(id)).stub_hash).toEqual(before!["stub_hash"]);
+    expect(await stubs()).toHaveLength(1);
+  });
+
+  test("fails `ceremony-timeout` after STUBS_PER_POLL stubs, keeping the last", async () => {
+    const { id } = await rooted({ closesAt: NOW_S + 30n * 24n * 3600n });
+    await run();
+    let opensAt = OPENS_AT;
+    for (let i = 1; i < STUBS_PER_POLL; i++) {
+      const at = marginOf(opensAt);
+      expect(await run(DEPLOYMENT, at)).toEqual({ stubbed: 0, restubbed: 1, failed: {} });
+      opensAt = BigInt(at.getTime() / 1000) + BigInt(SETUP_SECONDS);
+    }
+    expect(await stubs()).toHaveLength(STUBS_PER_POLL);
+    const [last] = await stubOf(id);
+    expect(await run(DEPLOYMENT, marginOf(opensAt))).toEqual({
+      stubbed: 0,
+      restubbed: 0,
+      failed: { "ceremony-timeout": 1 },
+    });
+    expect(await row(id)).toEqual({
+      state: "failed",
+      failure: "ceremony-timeout",
+      stub_hash: last!["stub_hash"],
+    });
+    expect(await stubs()).toHaveLength(STUBS_PER_POLL);
+    // Failed, it is never taken again.
+    expect(await run(DEPLOYMENT, marginOf(opensAt + 3600n))).toEqual({
+      stubbed: 0,
+      restubbed: 0,
+      failed: {},
+    });
+  });
+
+  test("fails `closes-too-soon` a poll the new stub would leave open under MIN_OPEN_SECONDS, at its edge", async () => {
+    const at = marginOf(OPENS_AT);
+    const reopened = BigInt(at.getTime() / 1000) + BigInt(SETUP_SECONDS);
+    const edge = reopened + BigInt(MIN_OPEN_SECONDS);
+    const ok = await rooted({ closesAt: edge });
+    const late = await rooted({ closesAt: edge - 1n });
+    expect(await run()).toEqual({ stubbed: 2, restubbed: 0, failed: {} });
+    const [kept] = await stubOf(late.id);
+    expect(await run(DEPLOYMENT, at)).toEqual({
+      stubbed: 0,
+      restubbed: 1,
+      failed: { "closes-too-soon": 1 },
+    });
+    expect((await row(ok.id)).state).toBe("ceremony");
+    expect(await row(late.id)).toEqual({
+      state: "failed",
+      failure: "closes-too-soon",
+      stub_hash: kept!["stub_hash"],
+    });
+    expect(await stubs()).toHaveLength(3);
+  });
+
+  test("takes the earliest opening first, STUBS_PER_RUN a run", async () => {
+    for (let i = 0; i < STUBS_PER_RUN; i++) await rooted({}, ELECTORATE, 600 - i);
+    expect(await run()).toEqual({ stubbed: STUBS_PER_RUN, restubbed: 0, failed: {} });
+    const later = new Date(NOW.getTime() + 600_000);
+    const last = await rooted();
+    expect(await run(DEPLOYMENT, later)).toEqual({ stubbed: 1, restubbed: 0, failed: {} });
+    const [before] = await stubOf(last.id);
+    // Every stub is late at the margin of the last one's opening; it opens
+    // last, so it waits for the next run.
+    const at = marginOf(BigInt(later.getTime() / 1000) + BigInt(SETUP_SECONDS));
+    expect(await run(DEPLOYMENT, at)).toEqual({
+      stubbed: 0,
+      restubbed: STUBS_PER_RUN,
+      failed: {},
+    });
+    expect((await stubOf(last.id))[0]!["stub_hash"]).toEqual(before!["stub_hash"]);
+    expect(await run(DEPLOYMENT, at)).toEqual({ stubbed: 0, restubbed: 1, failed: {} });
+    expect(await run(DEPLOYMENT, at)).toEqual({ stubbed: 0, restubbed: 0, failed: {} });
+  });
+
+  test("gives one new stub when runs race on separate connections", async () => {
+    const polls = [await rooted(), await rooted(), await rooted()];
+    await run();
+    const other = await db.as("abolish_app");
+    const at = marginOf(OPENS_AT);
+    const reports = await Promise.all([
+      stubPolls(app, DEPLOYMENT, { now: at }),
+      stubPolls(other, DEPLOYMENT, { now: at }),
+    ]);
+    expect(reports.reduce((n, r) => n + r.restubbed, 0)).toBe(3);
+    const recorded = await stubs();
+    expect(recorded).toHaveLength(6);
+    for (const p of polls) {
+      const mine = recorded.filter((s) => Buffer.from(s["election_id"]).equals(p.electionId));
+      expect(mine).toHaveLength(2);
+      const [current] = await stubOf(p.id);
+      expect(BigInt(current!["opens_at"])).toBe(
+        BigInt(at.getTime() / 1000) + BigInt(SETUP_SECONDS),
+      );
+    }
   });
 });
 

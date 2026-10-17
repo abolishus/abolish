@@ -95,7 +95,8 @@ export const QUEUES = {
   pollRoot: { name: "{poll-root}", side: "account", data: z.strictObject({}) },
   /**
    * The stub step of each rooted poll's setup (core's stubPolls; ADR 0032,
-   * rules 7, 8, 10 and 11): the version-5 stub its ceremony binds. Runs on a
+   * rules 7, 8, 10 and 11): the version-5 stub its ceremony binds, and a new
+   * one under rule 10 when its registration can't land in time. Runs on a
    * schedule, only beside the registry sync, whose deployment every stub
    * pins, and never with the creation key, and takes no data: no poll,
    * author or draft is ever queued (T-10).

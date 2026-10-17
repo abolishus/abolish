@@ -308,12 +308,14 @@ async function pollRoot(ctx: JobContext, _data: JobData<"pollRoot">): Promise<vo
 /**
  * One run of the stub step, logging what moved, by count. A stub is built
  * from what the database holds and the deployment checked at startup, so
- * nothing here reads a chain; a poll whose stub breaks a rule fails alone.
+ * nothing here reads a chain; a poll whose stub breaks a rule fails alone,
+ * and one whose last retry under rule 10 missed its registration fails as
+ * `ceremony-timeout`.
  */
 async function pollStub(ctx: JobContext, _data: JobData<"pollStub">): Promise<void> {
   if (ctx.pollStubs === undefined) throw new JobError("internal");
   const report = await stubPolls(ctx.sql, ctx.pollStubs, { now: ctx.now() });
-  if (report.stubbed > 0 || Object.keys(report.failed).length > 0)
+  if (report.stubbed + report.restubbed > 0 || Object.keys(report.failed).length > 0)
     ctx.log({ queue: "{poll-stub}", ...report });
 }
 
@@ -352,7 +354,7 @@ async function ceremonyCoordinate(
 async function pollOpen(ctx: JobContext, _data: JobData<"pollOpen">): Promise<void> {
   if (ctx.pollClock === undefined) throw new JobError("internal");
   const report = await openPolls(ctx.sql, ctx.pollClock, { now: ctx.now() });
-  const left = report.early + report.late + report.otherAnchor + report.unboarded;
+  const left = report.early + report.otherAnchor + report.unboarded;
   if (report.opened + left + report.errored > 0 || Object.keys(report.failed).length > 0)
     ctx.log({ queue: "{poll-open}", ...report });
   // A poll whose step threw was counted and the rest went on; the job still

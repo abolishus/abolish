@@ -7,8 +7,10 @@ import {
   createPollDraft,
   newAccountId,
   type PollStubDeployment,
+  REGISTRATION_MARGIN_SECONDS,
   type RegistrySyncReport,
   SETUP_SECONDS,
+  stubPolls,
   submitPollDraft,
 } from "@abolishus/core";
 import { type TestDb, testDb } from "@abolishus/core/test-db";
@@ -389,7 +391,7 @@ describe("the stub job", () => {
     // Its queue's keys are under its own hash tag.
     expect(keys.length).toBeGreaterThan(0);
     expect(lines).toEqual([
-      { queue: "{poll-stub}", stubbed: 1, failed: {} },
+      { queue: "{poll-stub}", stubbed: 1, restubbed: 0, failed: {} },
       { queue: "{poll-stub}", outcome: "completed", ms: expect.any(Number) },
     ]);
     const [poll] = await db.admin`SELECT state, stub_hash FROM account_polls WHERE id = ${id}`;
@@ -425,11 +427,37 @@ describe("the stub job", () => {
     });
   });
 
+  test("gives a poll whose registration can no longer land a new stub under rule 10, by count", async () => {
+    const deployment = await pollStubDeployment(client, pins, config);
+    const id = await rooted();
+    // Stubbed so that its registration's margin is reached at NOW.
+    const earlier = new Date(NOW.getTime() - (SETUP_SECONDS - REGISTRATION_MARGIN_SECONDS) * 1000);
+    expect((await stubPolls(app, deployment, { now: earlier })).stubbed).toBe(1);
+    expect((await scheduledRun(deployment)).lines).toEqual([
+      { queue: "{poll-stub}", stubbed: 0, restubbed: 1, failed: {} },
+      { queue: "{poll-stub}", outcome: "completed", ms: expect.any(Number) },
+    ]);
+    const [row] = await db.admin`
+      SELECT p.state, s.opens_at FROM account_polls p
+        JOIN ceremony_stubs s ON s.stub_hash = p.stub_hash WHERE p.id = ${id}`;
+    expect(row).toEqual({
+      state: "ceremony",
+      opens_at: (NOW_S + BigInt(SETUP_SECONDS)).toString(),
+    });
+    // Both kept for its identifier: the first may already be in a seat's hands.
+    const [{ count }] = (await db.admin`
+      SELECT count(*)::int AS count FROM ceremony_stubs s
+        JOIN account_polls p ON p.election_id = s.election_id WHERE p.id = ${id}`) as unknown as [
+      { count: number },
+    ];
+    expect(count).toBe(2);
+  });
+
   test("fails a poll that would close too soon, by count, and an idle run writes only its job line", async () => {
     const deployment = await pollStubDeployment(client, pins, config);
     const id = await rooted(NOW_S + BigInt(SETUP_SECONDS));
     expect((await scheduledRun(deployment)).lines).toEqual([
-      { queue: "{poll-stub}", stubbed: 0, failed: { "closes-too-soon": 1 } },
+      { queue: "{poll-stub}", stubbed: 0, restubbed: 0, failed: { "closes-too-soon": 1 } },
       { queue: "{poll-stub}", outcome: "completed", ms: expect.any(Number) },
     ]);
     const [poll] = await db.admin`SELECT state, failure FROM account_polls WHERE id = ${id}`;

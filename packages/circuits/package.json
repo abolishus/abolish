@@ -6,16 +6,19 @@
   "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
-    "build": "nargo check --workspace",
+    "build": "nargo check --workspace && vp node scripts/artifacts.ts",
     "check": "nargo fmt --check && nargo check --workspace",
     "test": "nargo test --workspace && vp test run"
   },
   "devDependencies": {
+    "@noble/curves": "catalog:",
     "@types/node": "catalog:",
     "typescript": "catalog:",
     "vite-plus": "catalog:"
   },
   "abolish": {
-    "buildOutputs": []
+    "buildOutputs": [
+      "artifacts"
+    ]
   }
 }

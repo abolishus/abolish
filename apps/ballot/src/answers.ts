@@ -32,23 +32,26 @@ export interface BallotQuestion {
 export type Answers = readonly (readonly number[])[];
 
 /**
- * The questions of a checked election in the translation tagged `language`.
+ * The questions of a checked election, in order, in the translation tagged `language`.
  * Only text that passed the worker's check is shown, so the language must be
  * one of the election's own translations (T-41).
  */
 export function questionsOf(election: CheckedElection, language: string): BallotQuestion[] {
   const translation = election.translations.find((t) => t.language === language);
   if (translation === undefined) throw new RangeError(`no translation "${language}"`);
-  return [
-    {
+  // The check passed each translation with exactly the definition's questions.
+  return election.questions.map((rules, q) => {
+    const text = translation.questions[q];
+    if (text === undefined) throw new RangeError(`no text for question ${q}`);
+    return {
       language: translation.language,
-      question: translation.question,
-      description: translation.description,
-      options: translation.options,
-      minSelections: election.minSelections,
-      maxSelections: election.maxSelections,
-    },
-  ];
+      question: text.question,
+      description: text.description,
+      options: text.options,
+      minSelections: rules.minSelections,
+      maxSelections: rules.maxSelections,
+    };
+  });
 }
 
 /**

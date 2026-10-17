@@ -185,44 +185,83 @@ describe("the questions of a checked election", () => {
   const election: CheckedElection = {
     electionId: "00".repeat(32),
     definitionHash: "11".repeat(32),
-    electionType: "approval",
-    minSelections: 0,
-    maxSelections: 2,
+    version: 5,
+    questions: [
+      { minSelections: 0, maxSelections: 2 },
+      { minSelections: 1, maxSelections: 1 },
+    ],
     opensAt: 0n,
     closesAt: 1n,
     translations: [
       {
         language: "en",
-        question: "Which events?",
-        description: "Pick the ones you'd go to.",
-        options: [
-          { label: "Market", description: "" },
-          { label: "Cinema", description: "Outdoors" },
-          { label: "Clean-up", description: "" },
+        title: "Summer",
+        description: "",
+        questions: [
+          {
+            question: "Which events?",
+            description: "Pick the ones you'd go to.",
+            options: [
+              { label: "Market", description: "" },
+              { label: "Cinema", description: "Outdoors" },
+              { label: "Clean-up", description: "" },
+            ],
+          },
+          {
+            question: "Which month?",
+            description: "",
+            options: [
+              { label: "July", description: "" },
+              { label: "August", description: "" },
+            ],
+          },
         ],
       },
       {
         language: "es",
-        question: "¿Qué eventos?",
+        title: "Verano",
         description: "",
-        options: [
-          { label: "Mercado", description: "" },
-          { label: "Cine", description: "Al aire libre" },
-          { label: "Limpieza", description: "" },
+        questions: [
+          {
+            question: "¿Qué eventos?",
+            description: "",
+            options: [
+              { label: "Mercado", description: "" },
+              { label: "Cine", description: "Al aire libre" },
+              { label: "Limpieza", description: "" },
+            ],
+          },
+          {
+            question: "¿Qué mes?",
+            description: "",
+            options: [
+              { label: "Julio", description: "" },
+              { label: "Agosto", description: "" },
+            ],
+          },
         ],
       },
     ],
   };
 
-  test("carry the definition's limits and the chosen translation's text", () => {
+  test("carry each question's limits and the chosen translation's text, in order", () => {
+    const es = election.translations[1]?.questions;
     expect(questionsOf(election, "es")).toEqual([
       {
         language: "es",
         question: "¿Qué eventos?",
         description: "",
-        options: election.translations[1]?.options,
+        options: es?.[0]?.options,
         minSelections: 0,
         maxSelections: 2,
+      },
+      {
+        language: "es",
+        question: "¿Qué mes?",
+        description: "",
+        options: es?.[1]?.options,
+        minSelections: 1,
+        maxSelections: 1,
       },
     ]);
   });

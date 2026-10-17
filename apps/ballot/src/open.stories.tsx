@@ -26,30 +26,41 @@ const option = (label: string, description = "") => ({ label, description });
 const ELECTION: CheckedElection = {
   electionId: ELECTION_ID,
   definitionHash: REGISTERED,
-  electionType: "plurality",
-  minSelections: 0,
-  maxSelections: 1,
+  version: 1,
+  questions: [{ minSelections: 0, maxSelections: 1 }],
   opensAt: 1_790_000_000n,
   closesAt: 1_792_000_000n,
   translations: [
     {
       language: "en",
-      question: QUESTION,
+      title: "",
       description: "",
-      options: [
-        option("Better lighting on the river path"),
-        option("Public toilets open all year"),
-        option("Two hundred new street trees"),
+      questions: [
+        {
+          question: QUESTION,
+          description: "",
+          options: [
+            option("Better lighting on the river path"),
+            option("Public toilets open all year"),
+            option("Two hundred new street trees"),
+          ],
+        },
       ],
     },
     {
       language: "es",
-      question: "¿Qué mejora le importa más?",
+      title: "",
       description: "",
-      options: [
-        option("Mejor iluminación en el camino del río"),
-        option("Baños públicos abiertos todo el año"),
-        option("Doscientos árboles nuevos"),
+      questions: [
+        {
+          question: "¿Qué mejora le importa más?",
+          description: "",
+          options: [
+            option("Mejor iluminación en el camino del río"),
+            option("Baños públicos abiertos todo el año"),
+            option("Doscientos árboles nuevos"),
+          ],
+        },
       ],
     },
   ],
@@ -112,6 +123,49 @@ const opens: Story["play"] = async ({ canvasElement }) => {
 };
 
 export const Opens: Story = { name: "A checked poll opens", play: opens };
+
+const FIRST = "Should the park stay open late?";
+const SECOND = "Should the library open on Sundays?";
+
+/** A version-5 poll of two questions, the second required: what P2-22 creates. */
+const POLL_OF_QUESTIONS: CheckedElection = {
+  ...ELECTION,
+  version: 5,
+  questions: [
+    { minSelections: 0, maxSelections: 1 },
+    { minSelections: 1, maxSelections: 1 },
+  ],
+  translations: [
+    {
+      language: "en",
+      title: "Park and library",
+      description: "",
+      questions: [
+        { question: FIRST, description: "", options: [option("Yes"), option("No")] },
+        { question: SECOND, description: "", options: [option("Yes"), option("No")] },
+      ],
+    },
+  ],
+};
+
+export const OpensQuestions: Story = {
+  name: "A checked poll of two questions opens",
+  args: { source: source([LOADED], { ok: true, election: POLL_OF_QUESTIONS }) },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(await canvas.findByRole("heading", { level: 1, name: FIRST })).toBeVisible();
+    await expect(canvas.getByText("Question 1 of 2")).toBeVisible();
+    await userEvent.click(canvas.getByText("Yes"));
+    await userEvent.click(canvas.getByRole("button", { name: "Next question" }));
+    // Each question in the definition's order, with its own limits: the second can't be skipped.
+    await expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent(SECOND);
+    await expect(canvas.getByText("Question 2 of 2")).toBeVisible();
+    await userEvent.click(canvas.getByText("No"));
+    await userEvent.click(canvas.getByRole("button", { name: "Check your answers" }));
+    await expect(canvas.getByText(FIRST)).toBeVisible();
+    await expect(canvas.getByText(SECOND)).toBeVisible();
+  },
+};
 
 export const OpensDark: Story = {
   name: "A checked poll opens, dark",

@@ -1,17 +1,21 @@
-// What the client shows of a checked election (src/election.ts): the text
-// exactly as the record holds it, the definition's own hash and counting rule,
-// and a refusal passed on as @abolishus/crypto's `checkElectionToShow` gave it.
-// The checks themselves are tested against every vector in packages/crypto
-// (tests/show-election.test.ts); here, one refusal of each kind shows none is
-// lost on the way (T-34, T-41).
+// What the client shows of a checked election (src/election.ts), for
+// definition versions 1 and 5: the text exactly as the record holds it, the
+// definition's own hash and each question's limits, and a refusal passed on as
+// @abolishus/crypto's `checkElectionRecordToShow` gave it. The checks
+// themselves are tested against every vector in packages/crypto
+// (tests/show-election.test.ts, tests/definition-v5.property.test.ts); here,
+// one refusal of each kind shows none is lost on the way (T-34, T-41).
 
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 
 import {
   decodeElectionDefinition,
+  decodeElectionDefinitionV5,
   type ElectionDefinition,
+  type ElectionDefinitionV5,
   encodeElectionDefinition,
+  encodeElectionDefinitionV5,
 } from "@abolishus/crypto";
 import { describe, expect, test } from "vite-plus/test";
 
@@ -101,7 +105,7 @@ describe("the election", () => {
     expect(result.election.definitionHash).toBe(definitionHash(encoding).toString("hex"));
   });
 
-  test("names an approval election as one", () => {
+  test("carries the definition's limits as its one question's", () => {
     const approval = decodeElectionDefinition(
       hex(vector(definitionVectors, "definition-approval").encoding),
     );
@@ -115,7 +119,7 @@ describe("the election", () => {
       check(definition.election_id, encodeElectionDefinition(definition), anyText),
     ).toMatchObject({
       ok: true,
-      election: { electionType: "approval", minSelections: 1, maxSelections: 2 },
+      election: { version: 1, questions: [{ minSelections: 1, maxSelections: 2 }] },
     });
   });
 
@@ -168,19 +172,26 @@ describe("the display text", () => {
       expect(result.election.translations).toEqual(
         v.value.translations.map((t) => ({
           language: text(t.language),
-          question: text(t.question),
-          description: text(t.description),
-          options: t.options.map((o) => ({
-            label: text(o.label),
-            description: text(o.description),
-          })),
+          title: "",
+          description: "",
+          questions: [
+            {
+              question: text(t.question),
+              description: text(t.description),
+              options: t.options.map((o) => ({
+                label: text(o.label),
+                description: text(o.description),
+              })),
+            },
+          ],
         })),
       );
       expect(result.election).toMatchObject({
         electionId: Buffer.from(definition.election_id).toString("hex"),
-        electionType: "plurality",
-        minSelections: definition.min_selections,
-        maxSelections: definition.max_selections,
+        version: 1,
+        questions: [
+          { minSelections: definition.min_selections, maxSelections: definition.max_selections },
+        ],
         opensAt: definition.opens_at,
         closesAt: definition.closes_at,
       });
@@ -217,5 +228,156 @@ describe("the display text", () => {
       expect(
         check(typical.election_id, encodeElectionDefinition(goodDefinition()), hex(v.encoding)),
       ).toEqual({ ok: false, problem: "display-text-ill-formed", rule: "commitment" });
+  });
+});
+
+interface TextV2Vector {
+  id: string;
+  encoding: string;
+  /** The display-text version the vector is decoded under. */
+  pinned: number;
+  error?: string;
+  illFormed?: string;
+  definition?: { optionCounts: string[]; displayTextCommitment: string };
+  value?: {
+    translations: {
+      language: string;
+      title: string;
+      description: string;
+      questions: {
+        question: string;
+        description: string;
+        options: { label: string; description: string }[];
+      }[];
+    }[];
+  };
+}
+
+describe("a version-5 election, a poll of questions", () => {
+  const textVectors = vectors<TextV2Vector>("display-text-v2");
+  const typicalV5 = decodeElectionDefinitionV5(
+    hex(
+      vector(vectors<DefinitionVector>("election-definition-v5"), "definition-v5-typical").encoding,
+    ),
+  );
+
+  /** The typical version-5 definition with one question per count, the last two required, committing to `commitment`. */
+  function definitionV5(counts: readonly string[], commitment: string): ElectionDefinitionV5 {
+    return {
+      ...typicalV5,
+      questions: counts.map((m, q) => ({
+        method: 1,
+        option_count: Number(m),
+        min_selections: q === 0 ? 0 : 1,
+        max_selections: q === 0 ? Number(m) : 1,
+      })),
+      display_text_commitment: hex(commitment),
+    };
+  }
+  const forVector = (v: TextV2Vector) => {
+    if (v.definition === undefined) throw new Error("vector has no definition");
+    return definitionV5(v.definition.optionCounts, v.definition.displayTextCommitment);
+  };
+  const two = vector(textVectors, "display-text-v2-two-questions");
+  const withDefinition = textVectors.filter((v) => v.definition !== undefined);
+
+  test.each(withDefinition.filter((v) => v.illFormed === undefined))(
+    "shows $id: every question's text exactly as the record holds it, with its limits",
+    (v) => {
+      if (v.value === undefined) throw new Error("incomplete vector");
+      const definition = forVector(v);
+      const encoding = encodeElectionDefinitionV5(definition);
+      const result = check(definition.election_id, encoding, hex(v.encoding));
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.election).toEqual({
+        electionId: Buffer.from(definition.election_id).toString("hex"),
+        // The same tag and formula as version 1's, over the version-5 encoding.
+        definitionHash: definitionHash(encoding).toString("hex"),
+        version: 5,
+        questions: definition.questions.map((q) => ({
+          minSelections: q.min_selections,
+          maxSelections: q.max_selections,
+        })),
+        opensAt: definition.opens_at,
+        closesAt: definition.closes_at,
+        translations: v.value.translations.map((t) => ({
+          language: text(t.language),
+          title: text(t.title),
+          description: text(t.description),
+          questions: t.questions.map((q) => ({
+            question: text(q.question),
+            description: text(q.description),
+            options: q.options.map((o) => ({
+              label: text(o.label),
+              description: text(o.description),
+            })),
+          })),
+        })),
+      });
+    },
+  );
+
+  test.each(withDefinition.filter((v) => v.illFormed !== undefined))(
+    "refuses $id, which breaks $illFormed",
+    (v) => {
+      const definition = forVector(v);
+      expect(
+        check(definition.election_id, encodeElectionDefinitionV5(definition), hex(v.encoding)),
+      ).toEqual({ ok: false, problem: "display-text-ill-formed", rule: v.illFormed });
+    },
+  );
+
+  // A definition pinning version 2 decodes under 2: a vector that fails only under another pin is left out.
+  test.each(textVectors.filter((v) => v.error !== undefined && v.pinned === 2))(
+    "refuses $id, which doesn't decode",
+    ({ encoding }) => {
+      const definition = forVector(two);
+      expect(
+        check(definition.election_id, encodeElectionDefinitionV5(definition), hex(encoding)),
+      ).toEqual({ ok: false, problem: "display-text-undecodable" });
+    },
+  );
+
+  test("passes on an ill-formed definition's refusal with the question it names", () => {
+    const definition = forVector(two);
+    const broken: ElectionDefinitionV5 = {
+      ...definition,
+      questions: [
+        definition.questions[0] as ElectionDefinitionV5["questions"][number],
+        { method: 1, option_count: 2, min_selections: 0, max_selections: 3 },
+      ],
+    };
+    expect(
+      check(broken.election_id, encodeElectionDefinitionV5(broken), hex(two.encoding)),
+    ).toEqual({ ok: false, problem: "definition-ill-formed", rule: "selections", question: 1 });
+  });
+
+  test("passes on the refusal of a definition the registry doesn't hold, with the served hash", () => {
+    const served = encodeElectionDefinitionV5(forVector(two));
+    expect(
+      checkElection(typicalV5.election_id, new Uint8Array(32), served, hex(two.encoding)),
+    ).toEqual({
+      ok: false,
+      problem: "unregistered-definition",
+      servedHash: definitionHash(served).toString("hex"),
+    });
+  });
+
+  // The attack the check exists for, with questions: text whose two
+  // questions are swapped, under a definition committing to the original.
+  test("refuses another text, and a version-1 text, under a version-5 definition", () => {
+    const definition = forVector(two);
+    const encoding = encodeElectionDefinitionV5(definition);
+    for (const v of withDefinition.filter((x) => x.illFormed === undefined && x !== two))
+      expect(check(definition.election_id, encoding, hex(v.encoding))).toMatchObject({
+        ok: false,
+        problem: "display-text-ill-formed",
+        rule: "commitment",
+      });
+    expect(check(definition.election_id, encoding, hex(goodText.encoding))).toEqual({
+      ok: false,
+      problem: "display-text-undecodable",
+    });
   });
 });

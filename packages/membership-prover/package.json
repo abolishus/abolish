@@ -1,0 +1,29 @@
+{
+  "name": "@abolishus/membership-prover",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The ballot client's Groth16 membership prover: snarkjs behind a thin adapter, run only in the prover worker. Source-only.",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "vp exec tsc -p tsconfig.json",
+    "check": "vp check",
+    "test": "vp test run"
+  },
+  "dependencies": {
+    "@abolishus/crypto": "workspace:*",
+    "ffjavascript": "catalog:",
+    "snarkjs": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vite-plus": "catalog:"
+  },
+  "abolish": {
+    "buildOutputs": []
+  }
+}

@@ -19,6 +19,7 @@ import { BJJ_G } from "./keyed-nullifier.ts";
 import { MEMBERSHIP_DEPTH, membershipScope, semaphoreField } from "./membership.ts";
 import {
   MEMBERSHIP_PROOF_LENGTH,
+  MEMBERSHIP_WASM_SHA256,
   MEMBERSHIP_ZKEY_SHA256,
   type MembershipSignals,
   rerandomiseMembershipProof,
@@ -41,6 +42,8 @@ export type MembershipProverErrorCode =
   | "not-a-member"
   /** The proving key isn't `semaphore-32.zkey` by its sha256. */
   | "zkey"
+  /** The witness calculator isn't `semaphore-32.wasm` by its sha256. */
+  | "wasm"
   /** The prover's proof doesn't verify under the pinned key for the inputs computed here. */
   | "proof"
   /** The re-randomised proof doesn't verify: a fault here, never sent. */
@@ -195,6 +198,18 @@ export function checkMembershipZkey(zkey: Uint8Array): void {
     throw new TypeError("zkey: expected bytes");
   if (bytesToHex(sha256(new Uint8Array(zkey))) !== MEMBERSHIP_ZKEY_SHA256)
     throw new MembershipProverError("zkey");
+}
+
+/**
+ * Refuses a witness calculator that isn't Semaphore's `semaphore-32.wasm` by
+ * its sha256 (`MEMBERSHIP_WASM_SHA256`), whatever its source; checked on
+ * every use, before the secret reaches it (T-12, T-55).
+ */
+export function checkMembershipWasm(wasm: Uint8Array): void {
+  if (!(wasm instanceof Uint8Array) || !ArrayBuffer.isView(wasm))
+    throw new TypeError("wasm: expected bytes");
+  if (bytesToHex(sha256(new Uint8Array(wasm))) !== MEMBERSHIP_WASM_SHA256)
+    throw new MembershipProverError("wasm");
 }
 
 /** A scalar uniform in `[min, r)`, by rejection over 254-bit draws (kept about 76% of the time). */

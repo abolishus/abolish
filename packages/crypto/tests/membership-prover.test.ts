@@ -5,6 +5,7 @@ import { describe, expect, test } from "vite-plus/test";
 import {
   BABYJUBJUB_ORDER,
   BN254_R,
+  checkMembershipWasm,
   checkMembershipZkey,
   decodeMembershipProof,
   finishMembershipProof,
@@ -236,6 +237,12 @@ describe("refusals before any proving", () => {
     for (const bad of [new Uint8Array(0), new Uint8Array(1024), bytes(first.proof)])
       expect(refusal(() => checkMembershipZkey(bad))).toBe("zkey");
     expect(() => checkMembershipZkey("zkey" as unknown as Uint8Array)).toThrow(TypeError);
+  });
+
+  test("a witness calculator that isn't semaphore-32.wasm by its sha256", () => {
+    for (const bad of [new Uint8Array(0), new Uint8Array(1024), bytes(first.proof)])
+      expect(refusal(() => checkMembershipWasm(bad))).toBe("wasm");
+    expect(() => checkMembershipWasm("wasm" as unknown as Uint8Array)).toThrow(TypeError);
   });
 
   test("the witness always has depth 32, whatever the tier's size", () => {

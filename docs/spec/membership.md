@@ -177,6 +177,8 @@ The pinned key is Semaphore's depth-32 Groth16 verification key: entry 31 of `vk
 
 The proving key that goes with it is `semaphore-32.zkey` as Semaphore 4.14.3's prover downloads it, `https://snark-artifacts.pse.dev/semaphore/4.13.0/semaphore-32.zkey`, sha256 `2e5f7a9f880c337134ee4c7fc4e53573813b4c9c6ae46221c0b56e7992304650`. Its embedded verification key equals the pinned one, and its reference string is well formed (Reference-string check).
 
+Its witness calculator is `semaphore-32.wasm` from the same release, `https://snark-artifacts.pse.dev/semaphore/4.13.0/semaphore-32.wasm`, sha256 `528333d1247f585d33c5a40f46053fb7f8b1f5b8b8fa29118abfc47a60921dc5`. It computes the witness from the identity secret, so a prover MUST NOT run any other: the self-check (Security notes) catches a wrong witness, never a calculator that keeps the secret (T-12, T-55).
+
 ```
 vk                = G1(α) ‖ G2(β) ‖ G2(γ) ‖ G2(δ) ‖ G1(IC_0) ‖ … ‖ G1(IC_4)        768 bytes
 membership_vk_hash = H(DS("abolish/v1/membership-vk", u8(32) ‖ vk ‖ zkey_sha256))

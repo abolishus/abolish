@@ -1,0 +1,27 @@
+{
+  "format": "abolish-test-vectors-manifest/1",
+  "files": [
+    {
+      "path": "snark-artifacts/semaphore-32.zkey",
+      "sha256": "2e5f7a9f880c337134ee4c7fc4e53573813b4c9c6ae46221c0b56e7992304650",
+      "source": "https://snark-artifacts.pse.dev/semaphore/4.13.0/semaphore-32.zkey",
+      "tag": "4.13.0",
+      "origin": "Semaphore v4 (Privacy & Scaling Explorations): the depth-32 Groth16 proving key of its multi-party trusted setup, as @semaphore-protocol/proof 4.14.3 downloads it",
+      "originUrl": "https://github.com/semaphore-protocol/semaphore",
+      "license": "MIT",
+      "retrieved": "2026-10-17",
+      "covers": "The membership prover's proving key (docs/spec/membership.md, Verification key), whose reference string P1-17b part 2 checked"
+    },
+    {
+      "path": "snark-artifacts/semaphore-32.wasm",
+      "sha256": "528333d1247f585d33c5a40f46053fb7f8b1f5b8b8fa29118abfc47a60921dc5",
+      "source": "https://snark-artifacts.pse.dev/semaphore/4.13.0/semaphore-32.wasm",
+      "tag": "4.13.0",
+      "origin": "Semaphore v4 (Privacy & Scaling Explorations): the depth-32 circuit's witness calculator compiled by circom, as @semaphore-protocol/proof 4.14.3 downloads it beside the proving key",
+      "originUrl": "https://github.com/semaphore-protocol/semaphore",
+      "license": "MIT",
+      "retrieved": "2026-10-17",
+      "covers": "The membership prover's witness calculator for Semaphore(32)"
+    }
+  ]
+}

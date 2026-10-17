@@ -342,7 +342,7 @@ export function electionDefinitionV5Rule(
 ): ElectionDefinitionV5Failure | undefined {
   const profileFailure = profileRule(d);
   if (profileFailure !== undefined) return { rule: profileFailure };
-  const questionsFailure = questionsRule(d.questions);
+  const questionsFailure = definitionQuestionsRule(d.questions);
   if (questionsFailure !== undefined) return questionsFailure;
   const rule = electorateV3Rule(d) ?? cellsRule(d) ?? tailRule(d) ?? receiptKeysRule(d);
   return rule === undefined ? undefined : { rule };
@@ -417,7 +417,18 @@ function authorPanelDefinitionRule(
     : "author-panel";
 }
 
-function questionsRule(questions: readonly Question[]): ElectionDefinitionV5Failure | undefined {
+/**
+ * Version 5's `questions`, `option-count` and `selections` rules alone, in
+ * the order `electionDefinitionV5Rule` checks them. Exported so a poll's
+ * author is refused at the form with the rule the registry's checks mirror,
+ * before any definition exists to check (P2-22; T-28, T-72).
+ */
+export function definitionQuestionsRule(
+  questions: readonly Question[],
+):
+  | { readonly rule: "questions" }
+  | { readonly rule: "option-count" | "selections"; readonly question: number }
+  | undefined {
   if (questions.length === 0) return { rule: "questions" };
   // Every question's count before any question's limits: `selections`
   // compares against `m_q`, so it is read only once every `m_q` is in range.

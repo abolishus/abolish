@@ -11,6 +11,7 @@ import {
   decodeElectionDefinitionV5,
   DEFINITION_V1_LIMITS,
   DEFINITION_V5_LIMITS,
+  definitionQuestionsRule,
   DISPLAY_TEXT_V2_LIMITS,
   type DisplayTextV2,
   displayTextV2Rule,
@@ -147,6 +148,8 @@ describe("definition version 5's questions", () => {
       fc.property(questions(small), (qs) => {
         const failure = electionDefinitionV5Rule({ ...typical, questions: qs });
         expect(failure).toEqual(specQuestionsRule(qs));
+        // The rules alone, as a poll's draft is checked before any definition exists.
+        expect(definitionQuestionsRule(qs)).toEqual(specQuestionsRule(qs));
       }),
       opts,
     );

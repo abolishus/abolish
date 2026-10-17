@@ -209,6 +209,7 @@ export {
   type DisplayTextRule,
   type DisplayTextV2,
   type DisplayTextV2Rule,
+  displayTextV2ShapeRule,
 } from "./display-text.ts";
 export {
   ds,
@@ -261,6 +262,7 @@ export {
   DEFINITION_V4_LIMITS,
   DEFINITION_V5_LIMITS,
   DEFINITION_V6_LIMITS,
+  definitionQuestionsRule,
   ELECTION_TYPES,
   type ElectionDefinition,
   type ElectionDefinitionRule,

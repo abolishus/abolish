@@ -22,7 +22,11 @@ export const MAX_TURNSTILE_TOKEN = 2048;
  * What a token was issued for: the widget's `action`, which Cloudflare signs
  * into the token, so a token solved for one action can't be spent on another.
  */
-export type TurnstileAction = "passkey-register" | "passkey-authenticate" | "tier0-register";
+export type TurnstileAction =
+  | "passkey-register"
+  | "passkey-authenticate"
+  | "tier0-register"
+  | "poll-create";
 
 /**
  * `passed`: Cloudflare vouched for the token, for this site and action.

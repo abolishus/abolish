@@ -172,6 +172,7 @@ describe("schema", () => {
     expect(privs.map((r) => [r["table_name"], r["p"]])).toEqual([
       ["account_credentials", "DELETE,SELECT"],
       ["account_passkeys", "DELETE,INSERT,SELECT,UPDATE"],
+      ["account_polls", "DELETE,INSERT,SELECT,UPDATE"],
       ["account_sessions", "DELETE,INSERT,SELECT,UPDATE"],
       ["account_users", "DELETE,INSERT,SELECT,UPDATE"],
       ["account_verifications", "DELETE,INSERT,SELECT,UPDATE"],

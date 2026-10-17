@@ -140,11 +140,12 @@ function languagesRule(
 }
 
 /**
- * Internal: clients call `displayTextV2Rule`, which checks the commitment
- * first (T-34, T-41). The first rule after `commitment` that a decoded
- * version-2 record breaks for a definition whose questions have
- * `optionCounts` options, in order, or `undefined`. Each rule is checked over
- * every translation before the next, as version 1's are.
+ * The first rule after `commitment` that a version-2 record breaks for a
+ * definition whose questions have `optionCounts` options, in order, or
+ * `undefined`. Each rule is checked over every translation before the next,
+ * as version 1's are. A client showing an election calls `displayTextV2Rule`,
+ * which checks the commitment first (T-34, T-41); this alone is for text that
+ * no definition commits to yet, such as a poll's draft (P2-22).
  */
 export function displayTextV2ShapeRule(
   t: DisplayTextV2,

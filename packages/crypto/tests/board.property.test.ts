@@ -1001,6 +1001,37 @@ describe("a copy read by L1's CIDs", () => {
     );
   });
 
+  test("in a running election, an anchor landing before an earlier period's stops the copy, never fails it", async () => {
+    await fc.assert(
+      fc.asyncProperty(boardArb, async ({ entries, last }) => {
+        const segments = [...new Set(entries.map(segmentOf))];
+        fc.pre(segments.length >= 2);
+        const [earlier, later] = segments.slice(-2) as [number, number];
+        // The later segment's checkpoint is anchored, the earlier one's not yet:
+        // `now` is inside the earlier segment's window, so the board is fine.
+        const now = end(earlier) + DEADLINE - 1n;
+        fc.pre(end(later) + 60n <= now);
+        const anchors = checkpointsFor(entries, last).filter(
+          (a) => a.checkpoint.segment < earlier || a.checkpoint.segment === later,
+        );
+        const clock = clockFor(last);
+        expect(() => verifyBoard(ELECTION, entries, 1, anchors, clock, now)).not.toThrow();
+        const copy = await readBoardCopy(
+          ELECTION,
+          anchors,
+          clock,
+          now,
+          sourceOf(blocksOf(entries)),
+        );
+        expect(copy.stopped?.reason).toBe("not-run");
+        expect(() => verifyBoard(ELECTION, copy.encodedEntries, 1, anchors, clock, now)).toThrow(
+          expect.objectContaining({ code: "checkpoint-missing" }),
+        );
+      }),
+      { numRuns },
+    );
+  });
+
   test("a CID of bytes that aren't the run, or of an object over its bound, stops the copy", async () => {
     const entries = [0, 1].map((i) =>
       encodeBoardEntry(

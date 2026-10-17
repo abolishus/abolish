@@ -264,9 +264,14 @@ function* walk(
     const span = maxLinks ** (h - 1);
     return Math.ceil((Math.min(chunks, first + span * maxLinks) - first) / span);
   };
+  // A node's shape depends only on its height, how many chunks it covers and
+  // whether the object's last (possibly short) chunk is among them, so every
+  // level has at most three: checking a root costs the levels' fan-outs, never
+  // the claimed length, which the root alone chooses (T-52).
   const shapes = new Map<string, Node>();
   const shape = (h: number, first: number): Node => {
-    const key = `${h}:${first}`;
+    const covered = Math.min(maxLinks ** h, chunks - first);
+    const key = `${h}:${covered}:${first + covered === chunks}`;
     const known = shapes.get(key);
     if (known !== undefined) return known;
     let node: Node;
@@ -284,8 +289,9 @@ function* walk(
     shapes.set(key, node);
     return node;
   };
-  // Allocated at the first leaf that hashes, so a CID no source serves costs nothing.
-  let object: Uint8Array | undefined;
+  // Each leaf that hashes, kept until the walk ends, so memory follows the
+  // bytes served and checked, never the length a root claims (T-52).
+  const leaves: Uint8Array[] = [];
   function* read(
     c: Uint8Array,
     h: number,
@@ -298,10 +304,8 @@ function* walk(
     const bytes = held ?? (yield* fetchBlock(c, blockLimit));
     if (bytes === undefined) return "unavailable";
     if (h === 0) {
-      const at = first * chunkSize;
       if (bytes.length !== shape(0, first).size) return "inconsistent";
-      object ??= new Uint8Array(length);
-      object.set(bytes, at);
+      leaves.push(bytes);
       return undefined;
     }
     const span = maxLinks ** (h - 1);
@@ -322,8 +326,8 @@ function* walk(
   }
   const failed = yield* read(cid, height, 0, root);
   if (failed !== undefined) return { ok: false, reason: failed };
-  // The walk reached every leaf, so the object was allocated.
-  return { ok: true, bytes: object as Uint8Array };
+  // The walk reached every leaf, in order, so they are the object's `length` bytes.
+  return { ok: true, bytes: concat(leaves) };
 }
 
 type Failure = "unavailable" | "inconsistent";
@@ -353,9 +357,13 @@ function* fetchBlock(
   const digest = c.subarray(4);
   const answers: unknown = yield { cid: Uint8Array.from(c), limit };
   if (!Array.isArray(answers)) throw new TypeError("readObject: blocks must return an array");
-  for (const b of answers as unknown[])
-    if (b instanceof Uint8Array && b.length <= limit && equal(sha256(b), digest))
-      return Uint8Array.from(b);
+  for (const b of answers as unknown[]) {
+    if (!(b instanceof Uint8Array) || b.length > limit) continue;
+    // Copied before hashing, so what is checked is what is kept, whatever
+    // else holds the answer's buffer.
+    const held = Uint8Array.from(b);
+    if (equal(sha256(held), digest)) return held;
+  }
   return undefined;
 }
 

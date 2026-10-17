@@ -583,6 +583,90 @@ describe("reading an object within a bound", () => {
     expect(readObjectWithin(cid, 2 * CHUNK_SIZE, () => [big])).toEqual(unavailable);
   });
 
+  // A canonical dag-pb node over children of these sizes and Tsizes, with any
+  // CIDs, encoded as docs/spec/content-addressing.md writes it, so a root
+  // claiming any length can be built by hand without the data under it.
+  const pbVarint = (n: number): number[] => {
+    const out: number[] = [];
+    for (let v = n; ; v = Math.floor(v / 0x80)) {
+      if (v < 0x80) return [...out, v];
+      out.push((v % 0x80) | 0x80);
+    }
+  };
+  type Shaped = { cid: Uint8Array; size: number; tsize: number; bytes: Uint8Array };
+  const node = (children: readonly Omit<Shaped, "bytes">[]): Shaped => {
+    const size = children.reduce((n, c) => n + c.size, 0);
+    const data = [
+      0x08,
+      2,
+      0x18,
+      ...pbVarint(size),
+      ...children.flatMap((c) => [0x20, ...pbVarint(c.size)]),
+    ];
+    const links = children.flatMap((c) => {
+      const link = [0x0a, 36, ...c.cid, 0x12, 0, 0x18, ...pbVarint(c.tsize)];
+      return [0x12, ...pbVarint(link.length), ...link];
+    });
+    const bytes = Uint8Array.from([...links, 0x0a, ...pbVarint(data.length), ...data]);
+    return {
+      cid: Uint8Array.from([0x01, 0x70, 0x12, 0x20, ...sha256(bytes)]),
+      size,
+      tsize: bytes.length + children.reduce((n, c) => n + c.tsize, 0),
+      bytes,
+    };
+  };
+  // A full subtree of height `h` under `links` per node and `chunk`-byte
+  // leaves. Full subtrees of one height are identical, so each level is built once.
+  const full = (h: number, links: number, chunk: number): Omit<Shaped, "bytes"> => {
+    let level: Omit<Shaped, "bytes"> = { cid: new Uint8Array(36), size: chunk, tsize: chunk };
+    for (let k = 0; k < h; k++) level = node(Array.from({ length: links }, () => level));
+    return level;
+  };
+
+  test("the hand-built node is the canonical one", () => {
+    const bytes = Uint8Array.from({ length: 16 * 64 }, (_, i) => i % 251);
+    const dag = dagOf(bytes);
+    const leaves = dag.blocks.filter((b) => b.cid[1] === 0x55);
+    // 16 distinct leaves: the root is four nodes of four leaves each.
+    const groups = [0, 1, 2, 3].map((g) =>
+      node(leaves.slice(4 * g, 4 * g + 4).map((l) => ({ cid: l.cid, size: 64, tsize: 64 }))),
+    );
+    expect(hex(node(groups).cid)).toBe(hex(dag.root));
+  });
+
+  test("a lone root claiming a huge length is checked and refused at no cost that grows with the claim", () => {
+    // Under the small layout: 4^22 chunks of 64 bytes, 2^50 bytes.
+    const small = node(Array.from({ length: 4 }, () => full(21, 4, 64)));
+    expect(small.size).toBe(2 ** 50);
+    const asked: string[] = [];
+    const start = performance.now();
+    expect(
+      within(
+        small.cid,
+        Number.MAX_SAFE_INTEGER,
+        source([{ cid: small.cid, bytes: small.bytes }], asked),
+      ),
+    ).toEqual(unavailable);
+    // The root, then its first child, which no source holds.
+    expect(asked).toHaveLength(2);
+    // Under the protocol's: seven subtrees of 1,024^3 chunks, 7 · 2^50 bytes.
+    const big = node(Array.from({ length: 7 }, () => full(3, MAX_LINKS, CHUNK_SIZE)));
+    expect(big.size).toBe(7 * 2 ** 50);
+    expect(
+      readObjectWithin(
+        big.cid,
+        Number.MAX_SAFE_INTEGER,
+        source([{ cid: big.cid, bytes: big.bytes }]),
+      ),
+    ).toEqual(unavailable);
+    expect(readObject(big.cid, big.size, source([{ cid: big.cid, bytes: big.bytes }]))).toEqual(
+      unavailable,
+    );
+    // Shapes are memoised per level, so this is milliseconds, never the
+    // claimed tree's billions of nodes.
+    expect(performance.now() - start).toBeLessThan(5_000);
+  });
+
   test("refuses a bound that isn't a positive integer", () => {
     const cid = objectCid(Uint8Array.of(1));
     const none = () => [];

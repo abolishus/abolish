@@ -302,6 +302,26 @@ describe("bundle contents", () => {
 
   test("ships the licences of the code and fonts it redistributes", () => {
     expect(files.get("third-party-licenses.md")).toMatch(/## react-dom - [\d.]+ \(MIT\)/);
+    // The prover worker's build, which build.license doesn't see: snarkjs,
+    // ffjavascript and what their prebuilt bundles inline (ADR 0009, Amendment).
+    for (const [name, licence] of [
+      ["snarkjs", "GPL-3.0"],
+      ["ffjavascript", "GPL-3.0"],
+      ["fastfile", "GPL-3.0"],
+      ["r1csfile", "GPL-3.0"],
+      ["wasmcurves", "GPL-3.0"],
+      ["wasmbuilder", "GPL-3.0"],
+      ["@iden3/binfileutils", "GPL-3.0"],
+      ["@iden3/bigarray", "GPL-3.0"],
+      ["circom_runtime", "Apache-2.0"],
+      ["web-worker", "Apache-2.0"],
+      ["blake2b-wasm", "MIT"],
+      ["js-sha3", "MIT"],
+    ])
+      expect(files.get("third-party-licenses.md")).toMatch(
+        new RegExp(`## ${name} - [\\d.]+ \\(${licence}, in the prover worker\\)`),
+      );
+    expect(files.get("third-party-licenses.md")).toContain("GNU GENERAL PUBLIC LICENSE");
     const fonts = files.get("font-licenses.txt") ?? "";
     for (const name of ["oxanium", "jetbrains-mono"])
       expect(fonts).toContain(`@fontsource-variable/${name}\n`);

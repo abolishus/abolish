@@ -19,6 +19,7 @@ import {
   type DeliveryElection,
   type DeliveryEntry,
   deliveryDeadlines,
+  BALLOT_FETCH_ALLOWANCE,
   deliveryWindowFits,
   intakeCutoff,
   deliverySegments,
@@ -382,7 +383,15 @@ describe("input checks", () => {
     // needs W_C + R + F.
     expect(deliveryWindowFits({ ...deployed, contractEventWindow: 34n * hour })).toBe(true);
     expect(deliveryWindowFits({ ...deployed, contractEventWindow: 34n * hour + 1n })).toBe(false);
-    const delivery = DELIVERY_WINDOW - 15n * hour;
+    // The anchoring term carries the ballot extent's fetch allowance A, 12
+    // hours (docs/spec/availability.md, Windows): with W_C below it, the
+    // anchoring clock now binds at 2 · period + deadline + A + R + F.
+    expect(BALLOT_FETCH_ALLOWANCE).toBe(12n * hour);
+    expect(deliveryWindowFits({ ...deployed, margin: 9n * hour })).toBe(true);
+    expect(deliveryWindowFits({ ...deployed, margin: 9n * hour + 1n })).toBe(false);
+    expect(deliveryWindowFits({ ...deployed, deadline: 20n * hour })).toBe(true);
+    expect(deliveryWindowFits({ ...deployed, deadline: 20n * hour + 1n })).toBe(false);
+    const delivery = DELIVERY_WINDOW - 27n * hour;
     expect(deliveryWindowFits({ ...deployed, forcedInclusion: delivery })).toBe(true);
     expect(deliveryWindowFits({ ...deployed, forcedInclusion: delivery + 1n })).toBe(false);
     // The complaint bound (W_C + F + R within the three days after the delivery

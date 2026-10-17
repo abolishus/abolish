@@ -81,6 +81,13 @@ export const DELIVERY_WINDOW = BigInt(PARAMETERS.DELIVERY_WINDOW);
 /** `COMPLAINT_WINDOW`: seconds after `closes_at + l1_inclusion_bound` by which complaints are sent. */
 export const COMPLAINT_WINDOW = BigInt(PARAMETERS.COMPLAINT_WINDOW);
 
+/**
+ * `A`, `BALLOT_FETCH_ALLOWANCE`: the least seconds the delivery window leaves
+ * trustee seats between the ballot extent's last anchoring deadline and the
+ * intake cutoff, by which they attest it (docs/spec/availability.md, Windows).
+ */
+export const BALLOT_FETCH_ALLOWANCE = BigInt(PARAMETERS.BALLOT_FETCH_ALLOWANCE);
+
 const receiptV1 = struct([
   ["definition_hash", bytesFixed(32)],
   ["ballot_hash", bytesFixed(32)],
@@ -979,11 +986,13 @@ export function intakeCutoff(
 /**
  * The bounds P4-1's anchoring clock and P1-18's contract-event window must
  * keep (docs/spec/delivery.md, Direct submit), in seconds as bigints:
- * `DELIVERY_WINDOW ≥ max(2 · period + deadline, W_C) + R + F`, so every
+ * `DELIVERY_WINDOW ≥ max(2 · period + deadline + A, W_C) + R + F`, so every
  * counted ballot's anchoring or contract recording is confirmable on finalized
  * L1 by the intake cutoff `c_I = t_D − F − R`, where a trustee node decides
  * what it owes, with `R` left to send its receipts through the contract path,
- * even forced through L1; and `COMPLAINT_WINDOW − DELIVERY_WINDOW ≥ W_C
+ * even forced through L1, and the seats have at least `A` after the ballot
+ * extent's last anchoring deadline to fetch it before they attest it at `c_I`
+ * (docs/spec/availability.md, Windows; T-24, T-54); and `COMPLAINT_WINDOW − DELIVERY_WINDOW ≥ W_C
  * + F + R`, so a trustee can read the last posting and still send a complaint.
  * `margin` is `R`, for L1 finality and the node's own reaction.
  */
@@ -998,7 +1007,7 @@ export function deliveryWindowFits(constants: {
   for (const v of [period, deadline, contractEventWindow, forcedInclusion, margin])
     if (typeof v !== "bigint" || v < 0n)
       throw new RangeError("every constant must be a bigint ≥ 0");
-  const anchored = 2n * period + deadline;
+  const anchored = 2n * period + deadline + BALLOT_FETCH_ALLOWANCE;
   const seen = anchored > contractEventWindow ? anchored : contractEventWindow;
   return (
     seen + margin + forcedInclusion <= DELIVERY_WINDOW &&

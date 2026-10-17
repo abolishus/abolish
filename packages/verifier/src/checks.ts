@@ -22,7 +22,7 @@ export const CHECKS: readonly CheckSpec[] = Object.freeze([
   ...reportOnly("2.7"),
   ...election("2.8", "2.9"),
   ...election("3.1", "3.2"),
-  ...election("4.1", "4.2", "4.3", "4.4", "4.5"),
+  ...election("4.1", "4.2", "4.3", "4.4", "4.5", "4.6"),
   ...admission("5.1", "5.2", "5.3", "5.4", "5.5"),
   ...election("5.6"),
   ...admission("5.7", "5.8"),

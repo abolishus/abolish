@@ -1,0 +1,3956 @@
+{
+  "format": "abolish-availability-vectors/1",
+  "title": "Availability attestations and fetch complaints: the records, their windows and the availability check",
+  "spec": "docs/spec/availability.md",
+  "generator": "packages/crypto/scripts/availability-vectors.py: an independent Python implementation of docs/spec/availability.md (Records, Windows, Availability check), with trustee-vectors.py's P-256 ECDSA, which reproduces RFC 6979 Appendix A.2.5 first",
+  "tags": {
+    "attestation": "abolish/v1/sig/availability-attestation",
+    "complaint": "abolish/v1/sig/fetch-complaint"
+  },
+  "recordTypes": {
+    "attestation": "0x001b",
+    "complaint": "0x001c"
+  },
+  "version": 1,
+  "allowances": {
+    "ballot": "43200",
+    "counted": "43200"
+  },
+  "records": [
+    {
+      "id": "attestation-ballot-extent",
+      "description": "Default seat 1 attests the ballot extent: no roots, 138 bytes",
+      "kind": "attestation",
+      "signingSecret": "095c9e0060bdf22268778534114444d29723973455c1b57ce178d4ede12dcdd2",
+      "signingKey": "02b3e1bbbb3decb07fe320a38277e913529c86aa7cf410ceb8f42d243b6fd4ea5e",
+      "fields": {
+        "definitionHash": "239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a86",
+        "panel": 1,
+        "seat": 1,
+        "point": 1,
+        "checkpointHash": "94a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5",
+        "roots": []
+      },
+      "message": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601010194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e500000000",
+      "signature": "4f9d6f4fec2d5c4ea18db89df97a164fdcf63ae9adfe80c5c5ab74fff363601253bc7a5a7d6c351aacdb6def4a55d8ab8b4b5db8ca84f341b1ffcb9f4297abbd",
+      "encoding": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601010194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5000000004f9d6f4fec2d5c4ea18db89df97a164fdcf63ae9adfe80c5c5ab74fff363601253bc7a5a7d6c351aacdb6def4a55d8ab8b4b5db8ca84f341b1ffcb9f4297abbd"
+    },
+    {
+      "id": "attestation-counted-no-roots",
+      "description": "Default seat 2 attests the counted extent, holding no root",
+      "kind": "attestation",
+      "signingSecret": "2f502758d4bdef9b292dcb999935eb171f0c6588a6e7450a7a0ba9f2a9adf80b",
+      "signingKey": "02aa69adc88f7113b6ee34b19509cb67e1221585f6dd8a2525cc1e8821e58054e8",
+      "fields": {
+        "definitionHash": "239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a86",
+        "panel": 1,
+        "seat": 2,
+        "point": 2,
+        "checkpointHash": "93957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf3",
+        "roots": []
+      },
+      "message": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601020293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf300000000",
+      "signature": "9c14c9d450312a00640af862863605c4e59916e97c9920ed9dd21f949a42ea252e0a731dff5db843befb1ac5cd8af41a5bb1202feba9ed1c6c01874ba78472bf",
+      "encoding": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601020293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf3000000009c14c9d450312a00640af862863605c4e59916e97c9920ed9dd21f949a42ea252e0a731dff5db843befb1ac5cd8af41a5bb1202feba9ed1c6c01874ba78472bf"
+    },
+    {
+      "id": "attestation-counted-one-root",
+      "description": "Default seat 3 attests the counted extent naming one root: 170 bytes",
+      "kind": "attestation",
+      "signingSecret": "00ab279365a92d414474750c9f18967e349a2825949184d0d7d4111d3b0079fa",
+      "signingKey": "032ed39ce03836fa6476fa8a88342939d0a8ad12557578feb220908cabae3e7157",
+      "fields": {
+        "definitionHash": "239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a86",
+        "panel": 1,
+        "seat": 3,
+        "point": 2,
+        "checkpointHash": "93957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf3",
+        "roots": ["77e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1"]
+      },
+      "message": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601030293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000000177e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1",
+      "signature": "0abef32caa478ba7b7ebeb5e01b1cee5fe6fe9d98de098bba361420e9349a5c37eda2260c4fa9686298e27e7c7426927d471e06516e7429ccdf51519a870edac",
+      "encoding": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601030293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000000177e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f10abef32caa478ba7b7ebeb5e01b1cee5fe6fe9d98de098bba361420e9349a5c37eda2260c4fa9686298e27e7c7426927d471e06516e7429ccdf51519a870edac"
+    },
+    {
+      "id": "attestation-counted-three-roots",
+      "description": "Default seat 4 attests the counted extent naming three roots, ascending: 234 bytes",
+      "kind": "attestation",
+      "signingSecret": "f9e61a0a4f1ab9fc53e1e0497938e43955c8a043ca50dc9764b4ba5d0dd474c6",
+      "signingKey": "031cd83cd95b2bea410742cbfd6f49cf596393e11ccaffd060a71d92b6c748c257",
+      "fields": {
+        "definitionHash": "239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a86",
+        "panel": 1,
+        "seat": 4,
+        "point": 2,
+        "checkpointHash": "93957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf3",
+        "roots": [
+          "77e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1",
+          "e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa",
+          "eb16e72596d3f6c54053e45fd93cf00e073c677f5884501f1099217f8604ee47"
+        ]
+      },
+      "message": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601040293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000000377e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aaeb16e72596d3f6c54053e45fd93cf00e073c677f5884501f1099217f8604ee47",
+      "signature": "d2f576971aa1c659580be4aee4a02604c15121e13a677e70f620d6bb3b6ba6ea1d4449eeed5ada67475747e157a30268deea2d0547387cdbfacce3d58ea5977b",
+      "encoding": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601040293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000000377e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aaeb16e72596d3f6c54053e45fd93cf00e073c677f5884501f1099217f8604ee47d2f576971aa1c659580be4aee4a02604c15121e13a677e70f620d6bb3b6ba6ea1d4449eeed5ada67475747e157a30268deea2d0547387cdbfacce3d58ea5977b"
+    },
+    {
+      "id": "attestation-author",
+      "description": "Author seat 2 attests the ballot extent: the panel byte is 2",
+      "kind": "attestation",
+      "signingSecret": "317809d18f53bbaa14c924addb9c5534c07e1d2f55cadd4cbb4f1818b3745c39",
+      "signingKey": "038934eb10924e49e412a6bae431d8048d57eca0e49a52c2e0e897e50d724ca576",
+      "fields": {
+        "definitionHash": "239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a86",
+        "panel": 2,
+        "seat": 2,
+        "point": 1,
+        "checkpointHash": "94a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5",
+        "roots": []
+      },
+      "message": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8602020194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e500000000",
+      "signature": "95dd427499fcf901c4849c7eddabceb15ca7299c9417b7c86470f19715349b4263093899807cf1f4d5626a520e05e2bc5d1568f1d20c6d5c03cbf64432776dcc",
+      "encoding": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8602020194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e50000000095dd427499fcf901c4849c7eddabceb15ca7299c9417b7c86470f19715349b4263093899807cf1f4d5626a520e05e2bc5d1568f1d20c6d5c03cbf64432776dcc"
+    },
+    {
+      "id": "complaint-raw",
+      "description": "Default seat 1 complains of the counted extent, naming a raw block's CID",
+      "kind": "complaint",
+      "signingSecret": "095c9e0060bdf22268778534114444d29723973455c1b57ce178d4ede12dcdd2",
+      "signingKey": "02b3e1bbbb3decb07fe320a38277e913529c86aa7cf410ceb8f42d243b6fd4ea5e",
+      "fields": {
+        "definitionHash": "239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a86",
+        "panel": 1,
+        "seat": 1,
+        "point": 2,
+        "checkpointHash": "93957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf3",
+        "cid": "0155122098d694f95255ca588aca77c25a2b2c4444fb85b8870d54f9a6828dfdb7a80500"
+      },
+      "message": "001c01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601010293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30155122098d694f95255ca588aca77c25a2b2c4444fb85b8870d54f9a6828dfdb7a80500",
+      "signature": "d05dfd8c31a1274fe6c0eaf1e563a027c91f053349112421a160047fe3365ad570cb104da70be38ce5011c11cd007d008c6f621ba7abfb6f58b62d5aac5669f2",
+      "encoding": "001c01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601010293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30155122098d694f95255ca588aca77c25a2b2c4444fb85b8870d54f9a6828dfdb7a80500d05dfd8c31a1274fe6c0eaf1e563a027c91f053349112421a160047fe3365ad570cb104da70be38ce5011c11cd007d008c6f621ba7abfb6f58b62d5aac5669f2"
+    },
+    {
+      "id": "complaint-dag-pb",
+      "description": "Author seat 3 complains of the ballot extent, naming a dag-pb root's CID",
+      "kind": "complaint",
+      "signingSecret": "37bd82064c5a0bbb375ba34b3b0365568aab51a49548c9e60520eb3b865bf177",
+      "signingKey": "039c60179e5d447a82ca5b3eeef83afcd9bf08370942ede4baa22eeacbfad77067",
+      "fields": {
+        "definitionHash": "239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a86",
+        "panel": 2,
+        "seat": 3,
+        "point": 1,
+        "checkpointHash": "94a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5",
+        "cid": "01701220a1924e00a6bb65b82cfd55eed8a48f9d835042f7b459cca03b061905643e7da5"
+      },
+      "message": "001c01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8602030194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e501701220a1924e00a6bb65b82cfd55eed8a48f9d835042f7b459cca03b061905643e7da5",
+      "signature": "90cbae66b07cc76d63a065262e773f10871e7fae19652ed8129f293a93eeff013578a3abfa3b3b86ec44457989474c338e5c8a0fed26525cdca83a717bfdac1d",
+      "encoding": "001c01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8602030194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e501701220a1924e00a6bb65b82cfd55eed8a48f9d835042f7b459cca03b061905643e7da590cbae66b07cc76d63a065262e773f10871e7fae19652ed8129f293a93eeff013578a3abfa3b3b86ec44457989474c338e5c8a0fed26525cdca83a717bfdac1d"
+    }
+  ],
+  "decodeErrors": [
+    {
+      "id": "empty",
+      "description": "No bytes",
+      "kind": "attestation",
+      "encoding": "",
+      "error": "truncated",
+      "offset": 0
+    },
+    {
+      "id": "header-only",
+      "description": "A header and nothing else",
+      "kind": "attestation",
+      "encoding": "001b01",
+      "error": "truncated",
+      "offset": 3
+    },
+    {
+      "id": "destruction-type",
+      "description": "Record type 0x000f, which this file doesn't know",
+      "kind": "attestation",
+      "encoding": "000f01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601010194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5000000004f9d6f4fec2d5c4ea18db89df97a164fdcf63ae9adfe80c5c5ab74fff363601253bc7a5a7d6c351aacdb6def4a55d8ab8b4b5db8ca84f341b1ffcb9f4297abbd",
+      "error": "unknown-record-type",
+      "offset": 0
+    },
+    {
+      "id": "complaint-as-attestation",
+      "description": "A complaint where an attestation is read",
+      "kind": "attestation",
+      "encoding": "001c01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601010293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30155122098d694f95255ca588aca77c25a2b2c4444fb85b8870d54f9a6828dfdb7a80500d05dfd8c31a1274fe6c0eaf1e563a027c91f053349112421a160047fe3365ad570cb104da70be38ce5011c11cd007d008c6f621ba7abfb6f58b62d5aac5669f2",
+      "error": "unexpected-record-type",
+      "offset": 0
+    },
+    {
+      "id": "attestation-as-complaint",
+      "description": "An attestation where a complaint is read",
+      "kind": "complaint",
+      "encoding": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601010194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5000000004f9d6f4fec2d5c4ea18db89df97a164fdcf63ae9adfe80c5c5ab74fff363601253bc7a5a7d6c351aacdb6def4a55d8ab8b4b5db8ca84f341b1ffcb9f4297abbd",
+      "error": "unexpected-record-type",
+      "offset": 0
+    },
+    {
+      "id": "version-2",
+      "description": "Version 2, which no contract-event version fixes",
+      "kind": "attestation",
+      "encoding": "001b02239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601010194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5000000004f9d6f4fec2d5c4ea18db89df97a164fdcf63ae9adfe80c5c5ab74fff363601253bc7a5a7d6c351aacdb6def4a55d8ab8b4b5db8ca84f341b1ffcb9f4297abbd",
+      "error": "profile-mismatch",
+      "offset": 2
+    },
+    {
+      "id": "truncated-definition",
+      "description": "The definition hash cut short",
+      "kind": "attestation",
+      "encoding": "001b01239048011512b504142d30c44722bc72a7",
+      "error": "truncated",
+      "offset": 3
+    },
+    {
+      "id": "panel-0",
+      "description": "A panel byte of 0",
+      "kind": "attestation",
+      "encoding": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8600010194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5000000004f9d6f4fec2d5c4ea18db89df97a164fdcf63ae9adfe80c5c5ab74fff363601253bc7a5a7d6c351aacdb6def4a55d8ab8b4b5db8ca84f341b1ffcb9f4297abbd",
+      "error": "invalid-enum",
+      "offset": 35
+    },
+    {
+      "id": "panel-3",
+      "description": "A panel byte of 3",
+      "kind": "complaint",
+      "encoding": "001c01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8603010293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30155122098d694f95255ca588aca77c25a2b2c4444fb85b8870d54f9a6828dfdb7a80500d05dfd8c31a1274fe6c0eaf1e563a027c91f053349112421a160047fe3365ad570cb104da70be38ce5011c11cd007d008c6f621ba7abfb6f58b62d5aac5669f2",
+      "error": "invalid-enum",
+      "offset": 35
+    },
+    {
+      "id": "point-0",
+      "description": "A point of 0",
+      "kind": "attestation",
+      "encoding": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601010094a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5000000004f9d6f4fec2d5c4ea18db89df97a164fdcf63ae9adfe80c5c5ab74fff363601253bc7a5a7d6c351aacdb6def4a55d8ab8b4b5db8ca84f341b1ffcb9f4297abbd",
+      "error": "invalid-enum",
+      "offset": 37
+    },
+    {
+      "id": "point-3",
+      "description": "A point of 3",
+      "kind": "complaint",
+      "encoding": "001c01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601010393957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30155122098d694f95255ca588aca77c25a2b2c4444fb85b8870d54f9a6828dfdb7a80500d05dfd8c31a1274fe6c0eaf1e563a027c91f053349112421a160047fe3365ad570cb104da70be38ce5011c11cd007d008c6f621ba7abfb6f58b62d5aac5669f2",
+      "error": "invalid-enum",
+      "offset": 37
+    },
+    {
+      "id": "truncated-checkpoint",
+      "description": "The checkpoint hash cut short",
+      "kind": "attestation",
+      "encoding": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601010194a4f054b65b9045a22ab001",
+      "error": "truncated",
+      "offset": 38
+    },
+    {
+      "id": "truncated-count",
+      "description": "Two bytes of the root count",
+      "kind": "attestation",
+      "encoding": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601010194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e50000",
+      "error": "truncated",
+      "offset": 70
+    },
+    {
+      "id": "ballot-extent-with-root",
+      "description": "A root named at the ballot extent: non-canonical at the count",
+      "kind": "attestation",
+      "encoding": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601010194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e50000000177e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f14f9d6f4fec2d5c4ea18db89df97a164fdcf63ae9adfe80c5c5ab74fff363601253bc7a5a7d6c351aacdb6def4a55d8ab8b4b5db8ca84f341b1ffcb9f4297abbd",
+      "error": "non-canonical",
+      "offset": 70
+    },
+    {
+      "id": "roots-over-max",
+      "description": "A count of 33 roots",
+      "kind": "attestation",
+      "encoding": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601040293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000002177e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aaeb16e72596d3f6c54053e45fd93cf00e073c677f5884501f1099217f8604ee47d2f576971aa1c659580be4aee4a02604c15121e13a677e70f620d6bb3b6ba6ea1d4449eeed5ada67475747e157a30268deea2d0547387cdbfacce3d58ea5977b",
+      "error": "length-over-max",
+      "offset": 70
+    },
+    {
+      "id": "roots-unordered",
+      "description": "The first two roots swapped: non-canonical at the second",
+      "kind": "attestation",
+      "encoding": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601040293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf300000003e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa77e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1eb16e72596d3f6c54053e45fd93cf00e073c677f5884501f1099217f8604ee47d2f576971aa1c659580be4aee4a02604c15121e13a677e70f620d6bb3b6ba6ea1d4449eeed5ada67475747e157a30268deea2d0547387cdbfacce3d58ea5977b",
+      "error": "non-canonical",
+      "offset": 106
+    },
+    {
+      "id": "roots-repeated",
+      "description": "The first root twice: non-canonical at the second",
+      "kind": "attestation",
+      "encoding": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601040293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000000377e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f177e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1eb16e72596d3f6c54053e45fd93cf00e073c677f5884501f1099217f8604ee47d2f576971aa1c659580be4aee4a02604c15121e13a677e70f620d6bb3b6ba6ea1d4449eeed5ada67475747e157a30268deea2d0547387cdbfacce3d58ea5977b",
+      "error": "non-canonical",
+      "offset": 106
+    },
+    {
+      "id": "truncated-in-roots",
+      "description": "The count promises three roots and two follow",
+      "kind": "attestation",
+      "encoding": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601040293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000000377e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa",
+      "error": "truncated",
+      "offset": 138
+    },
+    {
+      "id": "cid-dag-cbor",
+      "description": "A complaint CID with the dag-cbor codec (0x71)",
+      "kind": "complaint",
+      "encoding": "001c01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601010293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30171122098d694f95255ca588aca77c25a2b2c4444fb85b8870d54f9a6828dfdb7a80500d05dfd8c31a1274fe6c0eaf1e563a027c91f053349112421a160047fe3365ad570cb104da70be38ce5011c11cd007d008c6f621ba7abfb6f58b62d5aac5669f2",
+      "error": "non-canonical",
+      "offset": 70
+    },
+    {
+      "id": "cid-version-0",
+      "description": "A complaint CID whose version byte is 0",
+      "kind": "complaint",
+      "encoding": "001c01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601010293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30055122098d694f95255ca588aca77c25a2b2c4444fb85b8870d54f9a6828dfdb7a80500d05dfd8c31a1274fe6c0eaf1e563a027c91f053349112421a160047fe3365ad570cb104da70be38ce5011c11cd007d008c6f621ba7abfb6f58b62d5aac5669f2",
+      "error": "non-canonical",
+      "offset": 70
+    },
+    {
+      "id": "cid-blake3",
+      "description": "A complaint CID naming blake3 (0x1e) as its hash",
+      "kind": "complaint",
+      "encoding": "001c01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601010293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf301551e2098d694f95255ca588aca77c25a2b2c4444fb85b8870d54f9a6828dfdb7a80500d05dfd8c31a1274fe6c0eaf1e563a027c91f053349112421a160047fe3365ad570cb104da70be38ce5011c11cd007d008c6f621ba7abfb6f58b62d5aac5669f2",
+      "error": "non-canonical",
+      "offset": 70
+    },
+    {
+      "id": "cid-length-31",
+      "description": "A complaint CID whose digest length byte is 31",
+      "kind": "complaint",
+      "encoding": "001c01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601010293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30155121f98d694f95255ca588aca77c25a2b2c4444fb85b8870d54f9a6828dfdb7a80500d05dfd8c31a1274fe6c0eaf1e563a027c91f053349112421a160047fe3365ad570cb104da70be38ce5011c11cd007d008c6f621ba7abfb6f58b62d5aac5669f2",
+      "error": "non-canonical",
+      "offset": 70
+    },
+    {
+      "id": "truncated-cid",
+      "description": "The CID cut short",
+      "kind": "complaint",
+      "encoding": "001c01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601010293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30155122098d694f95255ca588aca77c25a2b2c44",
+      "error": "truncated",
+      "offset": 70
+    },
+    {
+      "id": "truncated-in-signature",
+      "description": "The last byte of the signature missing",
+      "kind": "attestation",
+      "encoding": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601010194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5000000004f9d6f4fec2d5c4ea18db89df97a164fdcf63ae9adfe80c5c5ab74fff363601253bc7a5a7d6c351aacdb6def4a55d8ab8b4b5db8ca84f341b1ffcb9f4297ab",
+      "error": "truncated",
+      "offset": 74
+    },
+    {
+      "id": "signature-high-s",
+      "description": "The signature's s replaced by n − s",
+      "kind": "complaint",
+      "encoding": "001c01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601010293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30155122098d694f95255ca588aca77c25a2b2c4444fb85b8870d54f9a6828dfdb7a80500d05dfd8c31a1274fe6c0eaf1e563a027c91f053349112421a160047fe3365ad58f34efb158f41c741afee3ee32ff82ff30779891ff6ba3159b039d68500cbb5f",
+      "error": "non-canonical",
+      "offset": 106
+    },
+    {
+      "id": "signature-r-zero",
+      "description": "The signature's r is 0",
+      "kind": "attestation",
+      "encoding": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601010194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e500000000000000000000000000000000000000000000000000000000000000000000000053bc7a5a7d6c351aacdb6def4a55d8ab8b4b5db8ca84f341b1ffcb9f4297abbd",
+      "error": "non-canonical",
+      "offset": 74
+    },
+    {
+      "id": "trailing-byte",
+      "description": "One byte after the signature",
+      "kind": "complaint",
+      "encoding": "001c01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601010293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30155122098d694f95255ca588aca77c25a2b2c4444fb85b8870d54f9a6828dfdb7a80500d05dfd8c31a1274fe6c0eaf1e563a027c91f053349112421a160047fe3365ad570cb104da70be38ce5011c11cd007d008c6f621ba7abfb6f58b62d5aac5669f200",
+      "error": "trailing-bytes",
+      "offset": 170
+    }
+  ],
+  "windows": [
+    {
+      "id": "deployed",
+      "description": "F of 13 hours, R of one hour, a 10-minute inclusion bound: c_I 34 hours after closes_at + δ",
+      "closesAt": "1800000000",
+      "l1InclusionBound": "600",
+      "countedDue": "1800604800",
+      "forcedInclusion": "46800",
+      "margin": "3600",
+      "result": {
+        "ballotCutoff": "1800123000",
+        "ballotDeadline": "1800169800",
+        "countedCutoff": "1800648000",
+        "countedDeadline": "1800694800",
+        "summing": "1800698400"
+      }
+    },
+    {
+      "id": "margin-9-hours",
+      "description": "R of 9 hours, the most the deployed windows allow: c_I 26 hours after closes_at + δ",
+      "closesAt": "1800000000",
+      "l1InclusionBound": "3600",
+      "countedDue": "1800500000",
+      "forcedInclusion": "46800",
+      "margin": "32400",
+      "result": {
+        "ballotCutoff": "1800097200",
+        "ballotDeadline": "1800144000",
+        "countedCutoff": "1800543200",
+        "countedDeadline": "1800590000",
+        "summing": "1800622400"
+      }
+    },
+    {
+      "id": "no-forced-inclusion",
+      "description": "F and R of 0: every cutoff is its deadline",
+      "closesAt": "0",
+      "l1InclusionBound": "0",
+      "countedDue": "0",
+      "forcedInclusion": "0",
+      "margin": "0",
+      "result": {
+        "ballotCutoff": "172800",
+        "ballotDeadline": "172800",
+        "countedCutoff": "43200",
+        "countedDeadline": "43200",
+        "summing": "43200"
+      }
+    }
+  ],
+  "checks": [
+    {
+      "id": "all-attest",
+      "description": "Every qualified default seat attests both points in time: available",
+      "election": {
+        "definitionHash": "239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a86",
+        "panels": [
+          {
+            "panel": 1,
+            "threshold": 3,
+            "registered": [
+              {
+                "index": 1,
+                "signingKey": "02b3e1bbbb3decb07fe320a38277e913529c86aa7cf410ceb8f42d243b6fd4ea5e"
+              },
+              {
+                "index": 2,
+                "signingKey": "02aa69adc88f7113b6ee34b19509cb67e1221585f6dd8a2525cc1e8821e58054e8"
+              },
+              {
+                "index": 3,
+                "signingKey": "032ed39ce03836fa6476fa8a88342939d0a8ad12557578feb220908cabae3e7157"
+              },
+              {
+                "index": 4,
+                "signingKey": "031cd83cd95b2bea410742cbfd6f49cf596393e11ccaffd060a71d92b6c748c257"
+              }
+            ]
+          }
+        ],
+        "checkpoints": {
+          "ballot": "94a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5",
+          "counted": "93957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf3"
+        },
+        "deadlines": {
+          "ballot": "1000000",
+          "counted": "2000000"
+        }
+      },
+      "events": [
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601010194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5000000004f9d6f4fec2d5c4ea18db89df97a164fdcf63ae9adfe80c5c5ab74fff363601253bc7a5a7d6c351aacdb6def4a55d8ab8b4b5db8ca84f341b1ffcb9f4297abbd",
+          "submittedAt": "999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601020194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5000000000391e9a800f84d1d43ef225e3b64c3eeb42476b183ca65e108dc18587fb5f41651efe5fa886610dae919a0f3aefec85c92a3c33aa9b4b6fd5e6903d2b09294c5",
+          "submittedAt": "999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601030194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5000000008560cdc165de0f002f7327b6c4306cfe287a1f63a0f8e1fa0a60c1f3e282575072f132cb38bda91f3aa3c9d3d61b1d5fc3ec38c102b50a0d6126f18ffbb6334d",
+          "submittedAt": "999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601040194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e500000000ec0ac8993700e00c60a249ec45595e259be5201ec8ab5274474ad6ea704ef9f30e2ff3ecf09f70452ad2024bf6cdaaba55f31b8706cafe4070ff516c4871c3fa",
+          "submittedAt": "999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601010293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000000277e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aaaa347f526ca583cf97479a963af3c15ebee39a314e611d9c02d84fdc4889f388693332a8d22f1f72cc9b60f89c3723836d6c6b484a7ab4659e4e9b435effea14",
+          "submittedAt": "1999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601020293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000000277e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa8ea57715049b648f0d753cd0604e19f4914a515505bdccea2736437993bbece81d34ce014e606d818007033f2fdfdfb3a602902039a06445faa85c786b127ec5",
+          "submittedAt": "1999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601030293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000000277e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aacc4c156c9cb96e11fa04c919ae18980edcbfe018be21e80780789595f288891f5d72ea4ed85a2e26e48adba5e9ba30e6f3dc0c42d824eeab310cafe639a3fcd4",
+          "submittedAt": "1999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601040293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000000277e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa5f4704f7de4b3161780dcad8669de327e0ed11d583e9a89f9fd438ae39c0c3c3339b76e0396eb1e4c3fbd17d4174f2578b96dcc6fb3958757572bf6adc9a5028",
+          "submittedAt": "1999990"
+        }
+      ],
+      "result": {
+        "verdict": "available",
+        "failures": [],
+        "points": [
+          {
+            "point": 1,
+            "checkpoint": "94a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5",
+            "panels": [
+              {
+                "panel": 1,
+                "holds": true,
+                "attested": [
+                  {
+                    "seat": 1,
+                    "roots": []
+                  },
+                  {
+                    "seat": 2,
+                    "roots": []
+                  },
+                  {
+                    "seat": 3,
+                    "roots": []
+                  },
+                  {
+                    "seat": 4,
+                    "roots": []
+                  }
+                ],
+                "complained": [],
+                "silent": []
+              }
+            ]
+          },
+          {
+            "point": 2,
+            "checkpoint": "93957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf3",
+            "panels": [
+              {
+                "panel": 1,
+                "holds": true,
+                "attested": [
+                  {
+                    "seat": 1,
+                    "roots": [
+                      "77e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1",
+                      "e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa"
+                    ]
+                  },
+                  {
+                    "seat": 2,
+                    "roots": [
+                      "77e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1",
+                      "e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa"
+                    ]
+                  },
+                  {
+                    "seat": 3,
+                    "roots": [
+                      "77e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1",
+                      "e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa"
+                    ]
+                  },
+                  {
+                    "seat": 4,
+                    "roots": [
+                      "77e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1",
+                      "e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa"
+                    ]
+                  }
+                ],
+                "complained": [],
+                "silent": []
+              }
+            ]
+          }
+        ],
+        "records": [
+          {
+            "at": 0,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 1,
+            "point": 1
+          },
+          {
+            "at": 1,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 2,
+            "point": 1
+          },
+          {
+            "at": 2,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 3,
+            "point": 1
+          },
+          {
+            "at": 3,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 4,
+            "point": 1
+          },
+          {
+            "at": 4,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 1,
+            "point": 2
+          },
+          {
+            "at": 5,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 2,
+            "point": 2
+          },
+          {
+            "at": 6,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 3,
+            "point": 2
+          },
+          {
+            "at": 7,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 4,
+            "point": 2
+          }
+        ],
+        "rejected": []
+      }
+    },
+    {
+      "id": "quorum-exactly",
+      "description": "Three of four seats attest each point, the threshold: available, the fourth silent",
+      "election": {
+        "definitionHash": "239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a86",
+        "panels": [
+          {
+            "panel": 1,
+            "threshold": 3,
+            "registered": [
+              {
+                "index": 1,
+                "signingKey": "02b3e1bbbb3decb07fe320a38277e913529c86aa7cf410ceb8f42d243b6fd4ea5e"
+              },
+              {
+                "index": 2,
+                "signingKey": "02aa69adc88f7113b6ee34b19509cb67e1221585f6dd8a2525cc1e8821e58054e8"
+              },
+              {
+                "index": 3,
+                "signingKey": "032ed39ce03836fa6476fa8a88342939d0a8ad12557578feb220908cabae3e7157"
+              },
+              {
+                "index": 4,
+                "signingKey": "031cd83cd95b2bea410742cbfd6f49cf596393e11ccaffd060a71d92b6c748c257"
+              }
+            ]
+          }
+        ],
+        "checkpoints": {
+          "ballot": "94a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5",
+          "counted": "93957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf3"
+        },
+        "deadlines": {
+          "ballot": "1000000",
+          "counted": "2000000"
+        }
+      },
+      "events": [
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601010194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5000000004f9d6f4fec2d5c4ea18db89df97a164fdcf63ae9adfe80c5c5ab74fff363601253bc7a5a7d6c351aacdb6def4a55d8ab8b4b5db8ca84f341b1ffcb9f4297abbd",
+          "submittedAt": "999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601020194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5000000000391e9a800f84d1d43ef225e3b64c3eeb42476b183ca65e108dc18587fb5f41651efe5fa886610dae919a0f3aefec85c92a3c33aa9b4b6fd5e6903d2b09294c5",
+          "submittedAt": "999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601030194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5000000008560cdc165de0f002f7327b6c4306cfe287a1f63a0f8e1fa0a60c1f3e282575072f132cb38bda91f3aa3c9d3d61b1d5fc3ec38c102b50a0d6126f18ffbb6334d",
+          "submittedAt": "999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601010293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000000277e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aaaa347f526ca583cf97479a963af3c15ebee39a314e611d9c02d84fdc4889f388693332a8d22f1f72cc9b60f89c3723836d6c6b484a7ab4659e4e9b435effea14",
+          "submittedAt": "1999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601020293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000000277e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa8ea57715049b648f0d753cd0604e19f4914a515505bdccea2736437993bbece81d34ce014e606d818007033f2fdfdfb3a602902039a06445faa85c786b127ec5",
+          "submittedAt": "1999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601030293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000000277e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aacc4c156c9cb96e11fa04c919ae18980edcbfe018be21e80780789595f288891f5d72ea4ed85a2e26e48adba5e9ba30e6f3dc0c42d824eeab310cafe639a3fcd4",
+          "submittedAt": "1999990"
+        }
+      ],
+      "result": {
+        "verdict": "available",
+        "failures": [],
+        "points": [
+          {
+            "point": 1,
+            "checkpoint": "94a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5",
+            "panels": [
+              {
+                "panel": 1,
+                "holds": true,
+                "attested": [
+                  {
+                    "seat": 1,
+                    "roots": []
+                  },
+                  {
+                    "seat": 2,
+                    "roots": []
+                  },
+                  {
+                    "seat": 3,
+                    "roots": []
+                  }
+                ],
+                "complained": [],
+                "silent": [4]
+              }
+            ]
+          },
+          {
+            "point": 2,
+            "checkpoint": "93957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf3",
+            "panels": [
+              {
+                "panel": 1,
+                "holds": true,
+                "attested": [
+                  {
+                    "seat": 1,
+                    "roots": [
+                      "77e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1",
+                      "e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa"
+                    ]
+                  },
+                  {
+                    "seat": 2,
+                    "roots": [
+                      "77e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1",
+                      "e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa"
+                    ]
+                  },
+                  {
+                    "seat": 3,
+                    "roots": [
+                      "77e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1",
+                      "e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa"
+                    ]
+                  }
+                ],
+                "complained": [],
+                "silent": [4]
+              }
+            ]
+          }
+        ],
+        "records": [
+          {
+            "at": 0,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 1,
+            "point": 1
+          },
+          {
+            "at": 1,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 2,
+            "point": 1
+          },
+          {
+            "at": 2,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 3,
+            "point": 1
+          },
+          {
+            "at": 3,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 1,
+            "point": 2
+          },
+          {
+            "at": 4,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 2,
+            "point": 2
+          },
+          {
+            "at": 5,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 3,
+            "point": 2
+          }
+        ],
+        "rejected": []
+      }
+    },
+    {
+      "id": "quorum-short-ballot",
+      "description": "Two seats attest the ballot extent, one complains and one is silent: unavailable at point 1",
+      "election": {
+        "definitionHash": "239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a86",
+        "panels": [
+          {
+            "panel": 1,
+            "threshold": 3,
+            "registered": [
+              {
+                "index": 1,
+                "signingKey": "02b3e1bbbb3decb07fe320a38277e913529c86aa7cf410ceb8f42d243b6fd4ea5e"
+              },
+              {
+                "index": 2,
+                "signingKey": "02aa69adc88f7113b6ee34b19509cb67e1221585f6dd8a2525cc1e8821e58054e8"
+              },
+              {
+                "index": 3,
+                "signingKey": "032ed39ce03836fa6476fa8a88342939d0a8ad12557578feb220908cabae3e7157"
+              },
+              {
+                "index": 4,
+                "signingKey": "031cd83cd95b2bea410742cbfd6f49cf596393e11ccaffd060a71d92b6c748c257"
+              }
+            ]
+          }
+        ],
+        "checkpoints": {
+          "ballot": "94a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5",
+          "counted": "93957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf3"
+        },
+        "deadlines": {
+          "ballot": "1000000",
+          "counted": "2000000"
+        }
+      },
+      "events": [
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601010194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5000000004f9d6f4fec2d5c4ea18db89df97a164fdcf63ae9adfe80c5c5ab74fff363601253bc7a5a7d6c351aacdb6def4a55d8ab8b4b5db8ca84f341b1ffcb9f4297abbd",
+          "submittedAt": "1000000"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601020194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5000000000391e9a800f84d1d43ef225e3b64c3eeb42476b183ca65e108dc18587fb5f41651efe5fa886610dae919a0f3aefec85c92a3c33aa9b4b6fd5e6903d2b09294c5",
+          "submittedAt": "1000000"
+        },
+        {
+          "payload": "001c01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601030194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e50155122098d694f95255ca588aca77c25a2b2c4444fb85b8870d54f9a6828dfdb7a80500276fb143945e9d3e5b3b55499f89146f1467dd137dfb42f8a582354eabea4d594337358e5eadc10475d854348de331d1dfcaf9a9678d4359983fe12e11f910b5",
+          "submittedAt": "1000000"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601010293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000000277e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aaaa347f526ca583cf97479a963af3c15ebee39a314e611d9c02d84fdc4889f388693332a8d22f1f72cc9b60f89c3723836d6c6b484a7ab4659e4e9b435effea14",
+          "submittedAt": "1999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601020293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000000277e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa8ea57715049b648f0d753cd0604e19f4914a515505bdccea2736437993bbece81d34ce014e606d818007033f2fdfdfb3a602902039a06445faa85c786b127ec5",
+          "submittedAt": "1999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601030293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000000277e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aacc4c156c9cb96e11fa04c919ae18980edcbfe018be21e80780789595f288891f5d72ea4ed85a2e26e48adba5e9ba30e6f3dc0c42d824eeab310cafe639a3fcd4",
+          "submittedAt": "1999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601040293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000000277e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa5f4704f7de4b3161780dcad8669de327e0ed11d583e9a89f9fd438ae39c0c3c3339b76e0396eb1e4c3fbd17d4174f2578b96dcc6fb3958757572bf6adc9a5028",
+          "submittedAt": "1999990"
+        }
+      ],
+      "result": {
+        "verdict": "unavailable",
+        "failures": [
+          {
+            "point": 1,
+            "panel": 1
+          }
+        ],
+        "points": [
+          {
+            "point": 1,
+            "checkpoint": "94a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5",
+            "panels": [
+              {
+                "panel": 1,
+                "holds": false,
+                "attested": [
+                  {
+                    "seat": 1,
+                    "roots": []
+                  },
+                  {
+                    "seat": 2,
+                    "roots": []
+                  }
+                ],
+                "complained": [
+                  {
+                    "seat": 3,
+                    "cid": "0155122098d694f95255ca588aca77c25a2b2c4444fb85b8870d54f9a6828dfdb7a80500"
+                  }
+                ],
+                "silent": [4]
+              }
+            ]
+          },
+          {
+            "point": 2,
+            "checkpoint": "93957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf3",
+            "panels": [
+              {
+                "panel": 1,
+                "holds": true,
+                "attested": [
+                  {
+                    "seat": 1,
+                    "roots": [
+                      "77e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1",
+                      "e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa"
+                    ]
+                  },
+                  {
+                    "seat": 2,
+                    "roots": [
+                      "77e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1",
+                      "e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa"
+                    ]
+                  },
+                  {
+                    "seat": 3,
+                    "roots": [
+                      "77e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1",
+                      "e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa"
+                    ]
+                  },
+                  {
+                    "seat": 4,
+                    "roots": [
+                      "77e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1",
+                      "e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa"
+                    ]
+                  }
+                ],
+                "complained": [],
+                "silent": []
+              }
+            ]
+          }
+        ],
+        "records": [
+          {
+            "at": 0,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 1,
+            "point": 1
+          },
+          {
+            "at": 1,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 2,
+            "point": 1
+          },
+          {
+            "at": 2,
+            "kind": "complaint",
+            "code": "valid",
+            "panel": 1,
+            "seat": 3,
+            "point": 1
+          },
+          {
+            "at": 3,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 1,
+            "point": 2
+          },
+          {
+            "at": 4,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 2,
+            "point": 2
+          },
+          {
+            "at": 5,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 3,
+            "point": 2
+          },
+          {
+            "at": 6,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 4,
+            "point": 2
+          }
+        ],
+        "rejected": []
+      }
+    },
+    {
+      "id": "complain-then-attest",
+      "description": "Seat 3 complains of the ballot extent and then attests it in time: its attestation counts and it isn't listed as complaining",
+      "election": {
+        "definitionHash": "239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a86",
+        "panels": [
+          {
+            "panel": 1,
+            "threshold": 3,
+            "registered": [
+              {
+                "index": 1,
+                "signingKey": "02b3e1bbbb3decb07fe320a38277e913529c86aa7cf410ceb8f42d243b6fd4ea5e"
+              },
+              {
+                "index": 2,
+                "signingKey": "02aa69adc88f7113b6ee34b19509cb67e1221585f6dd8a2525cc1e8821e58054e8"
+              },
+              {
+                "index": 3,
+                "signingKey": "032ed39ce03836fa6476fa8a88342939d0a8ad12557578feb220908cabae3e7157"
+              },
+              {
+                "index": 4,
+                "signingKey": "031cd83cd95b2bea410742cbfd6f49cf596393e11ccaffd060a71d92b6c748c257"
+              }
+            ]
+          }
+        ],
+        "checkpoints": {
+          "ballot": "94a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5",
+          "counted": "93957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf3"
+        },
+        "deadlines": {
+          "ballot": "1000000",
+          "counted": "2000000"
+        }
+      },
+      "events": [
+        {
+          "payload": "001c01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601030194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e50155122098d694f95255ca588aca77c25a2b2c4444fb85b8870d54f9a6828dfdb7a80500276fb143945e9d3e5b3b55499f89146f1467dd137dfb42f8a582354eabea4d594337358e5eadc10475d854348de331d1dfcaf9a9678d4359983fe12e11f910b5",
+          "submittedAt": "999900"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601010194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5000000004f9d6f4fec2d5c4ea18db89df97a164fdcf63ae9adfe80c5c5ab74fff363601253bc7a5a7d6c351aacdb6def4a55d8ab8b4b5db8ca84f341b1ffcb9f4297abbd",
+          "submittedAt": "999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601020194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5000000000391e9a800f84d1d43ef225e3b64c3eeb42476b183ca65e108dc18587fb5f41651efe5fa886610dae919a0f3aefec85c92a3c33aa9b4b6fd5e6903d2b09294c5",
+          "submittedAt": "999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601030194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5000000008560cdc165de0f002f7327b6c4306cfe287a1f63a0f8e1fa0a60c1f3e282575072f132cb38bda91f3aa3c9d3d61b1d5fc3ec38c102b50a0d6126f18ffbb6334d",
+          "submittedAt": "999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601040194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e500000000ec0ac8993700e00c60a249ec45595e259be5201ec8ab5274474ad6ea704ef9f30e2ff3ecf09f70452ad2024bf6cdaaba55f31b8706cafe4070ff516c4871c3fa",
+          "submittedAt": "999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601010293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000000277e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aaaa347f526ca583cf97479a963af3c15ebee39a314e611d9c02d84fdc4889f388693332a8d22f1f72cc9b60f89c3723836d6c6b484a7ab4659e4e9b435effea14",
+          "submittedAt": "1999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601020293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000000277e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa8ea57715049b648f0d753cd0604e19f4914a515505bdccea2736437993bbece81d34ce014e606d818007033f2fdfdfb3a602902039a06445faa85c786b127ec5",
+          "submittedAt": "1999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601030293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000000277e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aacc4c156c9cb96e11fa04c919ae18980edcbfe018be21e80780789595f288891f5d72ea4ed85a2e26e48adba5e9ba30e6f3dc0c42d824eeab310cafe639a3fcd4",
+          "submittedAt": "1999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601040293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000000277e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa5f4704f7de4b3161780dcad8669de327e0ed11d583e9a89f9fd438ae39c0c3c3339b76e0396eb1e4c3fbd17d4174f2578b96dcc6fb3958757572bf6adc9a5028",
+          "submittedAt": "1999990"
+        }
+      ],
+      "result": {
+        "verdict": "available",
+        "failures": [],
+        "points": [
+          {
+            "point": 1,
+            "checkpoint": "94a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5",
+            "panels": [
+              {
+                "panel": 1,
+                "holds": true,
+                "attested": [
+                  {
+                    "seat": 1,
+                    "roots": []
+                  },
+                  {
+                    "seat": 2,
+                    "roots": []
+                  },
+                  {
+                    "seat": 3,
+                    "roots": []
+                  },
+                  {
+                    "seat": 4,
+                    "roots": []
+                  }
+                ],
+                "complained": [],
+                "silent": []
+              }
+            ]
+          },
+          {
+            "point": 2,
+            "checkpoint": "93957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf3",
+            "panels": [
+              {
+                "panel": 1,
+                "holds": true,
+                "attested": [
+                  {
+                    "seat": 1,
+                    "roots": [
+                      "77e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1",
+                      "e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa"
+                    ]
+                  },
+                  {
+                    "seat": 2,
+                    "roots": [
+                      "77e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1",
+                      "e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa"
+                    ]
+                  },
+                  {
+                    "seat": 3,
+                    "roots": [
+                      "77e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1",
+                      "e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa"
+                    ]
+                  },
+                  {
+                    "seat": 4,
+                    "roots": [
+                      "77e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1",
+                      "e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa"
+                    ]
+                  }
+                ],
+                "complained": [],
+                "silent": []
+              }
+            ]
+          }
+        ],
+        "records": [
+          {
+            "at": 0,
+            "kind": "complaint",
+            "code": "valid",
+            "panel": 1,
+            "seat": 3,
+            "point": 1
+          },
+          {
+            "at": 1,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 1,
+            "point": 1
+          },
+          {
+            "at": 2,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 2,
+            "point": 1
+          },
+          {
+            "at": 3,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 3,
+            "point": 1
+          },
+          {
+            "at": 4,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 4,
+            "point": 1
+          },
+          {
+            "at": 5,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 1,
+            "point": 2
+          },
+          {
+            "at": 6,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 2,
+            "point": 2
+          },
+          {
+            "at": 7,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 3,
+            "point": 2
+          },
+          {
+            "at": 8,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 4,
+            "point": 2
+          }
+        ],
+        "rejected": []
+      }
+    },
+    {
+      "id": "late",
+      "description": "Two ballot-extent attestations a second past t_A and one counted-extent attestation a second past t_A': late, unavailable at point 1; point 2 still holds with three",
+      "election": {
+        "definitionHash": "239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a86",
+        "panels": [
+          {
+            "panel": 1,
+            "threshold": 3,
+            "registered": [
+              {
+                "index": 1,
+                "signingKey": "02b3e1bbbb3decb07fe320a38277e913529c86aa7cf410ceb8f42d243b6fd4ea5e"
+              },
+              {
+                "index": 2,
+                "signingKey": "02aa69adc88f7113b6ee34b19509cb67e1221585f6dd8a2525cc1e8821e58054e8"
+              },
+              {
+                "index": 3,
+                "signingKey": "032ed39ce03836fa6476fa8a88342939d0a8ad12557578feb220908cabae3e7157"
+              },
+              {
+                "index": 4,
+                "signingKey": "031cd83cd95b2bea410742cbfd6f49cf596393e11ccaffd060a71d92b6c748c257"
+              }
+            ]
+          }
+        ],
+        "checkpoints": {
+          "ballot": "94a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5",
+          "counted": "93957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf3"
+        },
+        "deadlines": {
+          "ballot": "1000000",
+          "counted": "2000000"
+        }
+      },
+      "events": [
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601010194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5000000004f9d6f4fec2d5c4ea18db89df97a164fdcf63ae9adfe80c5c5ab74fff363601253bc7a5a7d6c351aacdb6def4a55d8ab8b4b5db8ca84f341b1ffcb9f4297abbd",
+          "submittedAt": "1000000"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601020194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5000000000391e9a800f84d1d43ef225e3b64c3eeb42476b183ca65e108dc18587fb5f41651efe5fa886610dae919a0f3aefec85c92a3c33aa9b4b6fd5e6903d2b09294c5",
+          "submittedAt": "1000001"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601030194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5000000008560cdc165de0f002f7327b6c4306cfe287a1f63a0f8e1fa0a60c1f3e282575072f132cb38bda91f3aa3c9d3d61b1d5fc3ec38c102b50a0d6126f18ffbb6334d",
+          "submittedAt": "1000001"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601010293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000000032b6f3c2dc0575a5b2eb3fa7d92c040d0ddc2542134d6c0b77054900e2c85e491acb213709ab5e7a422f73e41508b4efcc7f8fc400ab52bba9ba4889d12fd0fe",
+          "submittedAt": "2000000"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601020293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf3000000009c14c9d450312a00640af862863605c4e59916e97c9920ed9dd21f949a42ea252e0a731dff5db843befb1ac5cd8af41a5bb1202feba9ed1c6c01874ba78472bf",
+          "submittedAt": "2000000"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601030293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf300000000a6650e77b58e2c9598651be4e0399a1078ad3b7a51de887b5160011378fb7c0115b03086c8d73d126be5a25a36cf760fdb948bb6caaca65b48e327e3e0bae959",
+          "submittedAt": "2000000"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601040293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf3000000004a11f1b143f3f48ac748984f8c23144cb97e95867cbf6756bd7c2bcf697e914b1d7bae99b733711391d2b77a0306e91a88dc402c476d7ad81ff52724f2ad8f5d",
+          "submittedAt": "2000001"
+        }
+      ],
+      "result": {
+        "verdict": "unavailable",
+        "failures": [
+          {
+            "point": 1,
+            "panel": 1
+          }
+        ],
+        "points": [
+          {
+            "point": 1,
+            "checkpoint": "94a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5",
+            "panels": [
+              {
+                "panel": 1,
+                "holds": false,
+                "attested": [
+                  {
+                    "seat": 1,
+                    "roots": []
+                  }
+                ],
+                "complained": [],
+                "silent": [2, 3, 4]
+              }
+            ]
+          },
+          {
+            "point": 2,
+            "checkpoint": "93957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf3",
+            "panels": [
+              {
+                "panel": 1,
+                "holds": true,
+                "attested": [
+                  {
+                    "seat": 1,
+                    "roots": []
+                  },
+                  {
+                    "seat": 2,
+                    "roots": []
+                  },
+                  {
+                    "seat": 3,
+                    "roots": []
+                  }
+                ],
+                "complained": [],
+                "silent": [4]
+              }
+            ]
+          }
+        ],
+        "records": [
+          {
+            "at": 0,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 1,
+            "point": 1
+          },
+          {
+            "at": 1,
+            "kind": "attestation",
+            "code": "availability-late",
+            "panel": 1,
+            "seat": 2,
+            "point": 1
+          },
+          {
+            "at": 2,
+            "kind": "attestation",
+            "code": "availability-late",
+            "panel": 1,
+            "seat": 3,
+            "point": 1
+          },
+          {
+            "at": 3,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 1,
+            "point": 2
+          },
+          {
+            "at": 4,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 2,
+            "point": 2
+          },
+          {
+            "at": 5,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 3,
+            "point": 2
+          },
+          {
+            "at": 6,
+            "kind": "attestation",
+            "code": "availability-late",
+            "panel": 1,
+            "seat": 4,
+            "point": 2
+          }
+        ],
+        "rejected": []
+      }
+    },
+    {
+      "id": "wrong-checkpoint",
+      "description": "Seats 1 and 2 attest the counted extent naming another checkpoint, and seat 3 names the ballot extent's: availability-checkpoint, unavailable at point 2",
+      "election": {
+        "definitionHash": "239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a86",
+        "panels": [
+          {
+            "panel": 1,
+            "threshold": 3,
+            "registered": [
+              {
+                "index": 1,
+                "signingKey": "02b3e1bbbb3decb07fe320a38277e913529c86aa7cf410ceb8f42d243b6fd4ea5e"
+              },
+              {
+                "index": 2,
+                "signingKey": "02aa69adc88f7113b6ee34b19509cb67e1221585f6dd8a2525cc1e8821e58054e8"
+              },
+              {
+                "index": 3,
+                "signingKey": "032ed39ce03836fa6476fa8a88342939d0a8ad12557578feb220908cabae3e7157"
+              },
+              {
+                "index": 4,
+                "signingKey": "031cd83cd95b2bea410742cbfd6f49cf596393e11ccaffd060a71d92b6c748c257"
+              }
+            ]
+          }
+        ],
+        "checkpoints": {
+          "ballot": "94a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5",
+          "counted": "93957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf3"
+        },
+        "deadlines": {
+          "ballot": "1000000",
+          "counted": "2000000"
+        }
+      },
+      "events": [
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601010194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5000000004f9d6f4fec2d5c4ea18db89df97a164fdcf63ae9adfe80c5c5ab74fff363601253bc7a5a7d6c351aacdb6def4a55d8ab8b4b5db8ca84f341b1ffcb9f4297abbd",
+          "submittedAt": "999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601020194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5000000000391e9a800f84d1d43ef225e3b64c3eeb42476b183ca65e108dc18587fb5f41651efe5fa886610dae919a0f3aefec85c92a3c33aa9b4b6fd5e6903d2b09294c5",
+          "submittedAt": "999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601030194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5000000008560cdc165de0f002f7327b6c4306cfe287a1f63a0f8e1fa0a60c1f3e282575072f132cb38bda91f3aa3c9d3d61b1d5fc3ec38c102b50a0d6126f18ffbb6334d",
+          "submittedAt": "999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601040194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e500000000ec0ac8993700e00c60a249ec45595e259be5201ec8ab5274474ad6ea704ef9f30e2ff3ecf09f70452ad2024bf6cdaaba55f31b8706cafe4070ff516c4871c3fa",
+          "submittedAt": "999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601010217f51171a69537829b875c60ec4f7b104e5e4966fca0b99edab1ea7d7b4e8bfa0000000095a6133748fdd4bbf899f3215ff7c93897cebb108368d4538a899bdcecce5f4429147b2e765ce528ff31237e9250035ae0ed729d070edd6a3b9debce59748e7c",
+          "submittedAt": "2000000"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601020217f51171a69537829b875c60ec4f7b104e5e4966fca0b99edab1ea7d7b4e8bfa0000000052e574625295e9133e9ba311738995784ea9534374a971945e6112e76387867d0ebf8998fd38275ef31895a83eab6bdd03fa8d1d01a315cf6687c9fe8d924201",
+          "submittedAt": "2000000"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601030294a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e500000000717fc473a26476a19c1a4cb589ab3ce7dc27a7d192039457eca2fb1dc41e95235d7b51a9b8e051a743d0dd354ce74b894fbbdef927c9f01460c678743a46ec9c",
+          "submittedAt": "2000000"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601040293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf3000000004a11f1b143f3f48ac748984f8c23144cb97e95867cbf6756bd7c2bcf697e914b1d7bae99b733711391d2b77a0306e91a88dc402c476d7ad81ff52724f2ad8f5d",
+          "submittedAt": "2000000"
+        }
+      ],
+      "result": {
+        "verdict": "unavailable",
+        "failures": [
+          {
+            "point": 2,
+            "panel": 1
+          }
+        ],
+        "points": [
+          {
+            "point": 1,
+            "checkpoint": "94a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5",
+            "panels": [
+              {
+                "panel": 1,
+                "holds": true,
+                "attested": [
+                  {
+                    "seat": 1,
+                    "roots": []
+                  },
+                  {
+                    "seat": 2,
+                    "roots": []
+                  },
+                  {
+                    "seat": 3,
+                    "roots": []
+                  },
+                  {
+                    "seat": 4,
+                    "roots": []
+                  }
+                ],
+                "complained": [],
+                "silent": []
+              }
+            ]
+          },
+          {
+            "point": 2,
+            "checkpoint": "93957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf3",
+            "panels": [
+              {
+                "panel": 1,
+                "holds": false,
+                "attested": [
+                  {
+                    "seat": 4,
+                    "roots": []
+                  }
+                ],
+                "complained": [],
+                "silent": [1, 2, 3]
+              }
+            ]
+          }
+        ],
+        "records": [
+          {
+            "at": 0,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 1,
+            "point": 1
+          },
+          {
+            "at": 1,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 2,
+            "point": 1
+          },
+          {
+            "at": 2,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 3,
+            "point": 1
+          },
+          {
+            "at": 3,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 4,
+            "point": 1
+          },
+          {
+            "at": 4,
+            "kind": "attestation",
+            "code": "availability-checkpoint",
+            "panel": 1,
+            "seat": 1,
+            "point": 2
+          },
+          {
+            "at": 5,
+            "kind": "attestation",
+            "code": "availability-checkpoint",
+            "panel": 1,
+            "seat": 2,
+            "point": 2
+          },
+          {
+            "at": 6,
+            "kind": "attestation",
+            "code": "availability-checkpoint",
+            "panel": 1,
+            "seat": 3,
+            "point": 2
+          },
+          {
+            "at": 7,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 4,
+            "point": 2
+          }
+        ],
+        "rejected": []
+      }
+    },
+    {
+      "id": "no-checkpoint",
+      "description": "No counted checkpoint is at or before s_A: every ballot-extent attestation is availability-checkpoint",
+      "election": {
+        "definitionHash": "239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a86",
+        "panels": [
+          {
+            "panel": 1,
+            "threshold": 3,
+            "registered": [
+              {
+                "index": 1,
+                "signingKey": "02b3e1bbbb3decb07fe320a38277e913529c86aa7cf410ceb8f42d243b6fd4ea5e"
+              },
+              {
+                "index": 2,
+                "signingKey": "02aa69adc88f7113b6ee34b19509cb67e1221585f6dd8a2525cc1e8821e58054e8"
+              },
+              {
+                "index": 3,
+                "signingKey": "032ed39ce03836fa6476fa8a88342939d0a8ad12557578feb220908cabae3e7157"
+              },
+              {
+                "index": 4,
+                "signingKey": "031cd83cd95b2bea410742cbfd6f49cf596393e11ccaffd060a71d92b6c748c257"
+              }
+            ]
+          }
+        ],
+        "checkpoints": {
+          "ballot": null,
+          "counted": "93957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf3"
+        },
+        "deadlines": {
+          "ballot": "1000000",
+          "counted": "2000000"
+        }
+      },
+      "events": [
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601010194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5000000004f9d6f4fec2d5c4ea18db89df97a164fdcf63ae9adfe80c5c5ab74fff363601253bc7a5a7d6c351aacdb6def4a55d8ab8b4b5db8ca84f341b1ffcb9f4297abbd",
+          "submittedAt": "999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601020194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5000000000391e9a800f84d1d43ef225e3b64c3eeb42476b183ca65e108dc18587fb5f41651efe5fa886610dae919a0f3aefec85c92a3c33aa9b4b6fd5e6903d2b09294c5",
+          "submittedAt": "999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601030194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5000000008560cdc165de0f002f7327b6c4306cfe287a1f63a0f8e1fa0a60c1f3e282575072f132cb38bda91f3aa3c9d3d61b1d5fc3ec38c102b50a0d6126f18ffbb6334d",
+          "submittedAt": "999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601040194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e500000000ec0ac8993700e00c60a249ec45595e259be5201ec8ab5274474ad6ea704ef9f30e2ff3ecf09f70452ad2024bf6cdaaba55f31b8706cafe4070ff516c4871c3fa",
+          "submittedAt": "999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601010293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000000277e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aaaa347f526ca583cf97479a963af3c15ebee39a314e611d9c02d84fdc4889f388693332a8d22f1f72cc9b60f89c3723836d6c6b484a7ab4659e4e9b435effea14",
+          "submittedAt": "1999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601020293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000000277e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa8ea57715049b648f0d753cd0604e19f4914a515505bdccea2736437993bbece81d34ce014e606d818007033f2fdfdfb3a602902039a06445faa85c786b127ec5",
+          "submittedAt": "1999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601030293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000000277e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aacc4c156c9cb96e11fa04c919ae18980edcbfe018be21e80780789595f288891f5d72ea4ed85a2e26e48adba5e9ba30e6f3dc0c42d824eeab310cafe639a3fcd4",
+          "submittedAt": "1999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601040293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000000277e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa5f4704f7de4b3161780dcad8669de327e0ed11d583e9a89f9fd438ae39c0c3c3339b76e0396eb1e4c3fbd17d4174f2578b96dcc6fb3958757572bf6adc9a5028",
+          "submittedAt": "1999990"
+        }
+      ],
+      "result": {
+        "verdict": "unavailable",
+        "failures": [
+          {
+            "point": 1,
+            "panel": 1
+          }
+        ],
+        "points": [
+          {
+            "point": 1,
+            "checkpoint": null,
+            "panels": [
+              {
+                "panel": 1,
+                "holds": false,
+                "attested": [],
+                "complained": [],
+                "silent": [1, 2, 3, 4]
+              }
+            ]
+          },
+          {
+            "point": 2,
+            "checkpoint": "93957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf3",
+            "panels": [
+              {
+                "panel": 1,
+                "holds": true,
+                "attested": [
+                  {
+                    "seat": 1,
+                    "roots": [
+                      "77e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1",
+                      "e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa"
+                    ]
+                  },
+                  {
+                    "seat": 2,
+                    "roots": [
+                      "77e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1",
+                      "e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa"
+                    ]
+                  },
+                  {
+                    "seat": 3,
+                    "roots": [
+                      "77e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1",
+                      "e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa"
+                    ]
+                  },
+                  {
+                    "seat": 4,
+                    "roots": [
+                      "77e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1",
+                      "e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa"
+                    ]
+                  }
+                ],
+                "complained": [],
+                "silent": []
+              }
+            ]
+          }
+        ],
+        "records": [
+          {
+            "at": 0,
+            "kind": "attestation",
+            "code": "availability-checkpoint",
+            "panel": 1,
+            "seat": 1,
+            "point": 1
+          },
+          {
+            "at": 1,
+            "kind": "attestation",
+            "code": "availability-checkpoint",
+            "panel": 1,
+            "seat": 2,
+            "point": 1
+          },
+          {
+            "at": 2,
+            "kind": "attestation",
+            "code": "availability-checkpoint",
+            "panel": 1,
+            "seat": 3,
+            "point": 1
+          },
+          {
+            "at": 3,
+            "kind": "attestation",
+            "code": "availability-checkpoint",
+            "panel": 1,
+            "seat": 4,
+            "point": 1
+          },
+          {
+            "at": 4,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 1,
+            "point": 2
+          },
+          {
+            "at": 5,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 2,
+            "point": 2
+          },
+          {
+            "at": 6,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 3,
+            "point": 2
+          },
+          {
+            "at": 7,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 4,
+            "point": 2
+          }
+        ],
+        "rejected": []
+      }
+    },
+    {
+      "id": "stray-seat-signature",
+      "description": "Beside three honest records per point: seat 1's key over another definition (stray, attributed), seat 5, which isn't qualified (seat), seat 4's fields signed by seat 2's key and seat 4's fields signed under the complaint tag (signature): none counts, and seat 4 is silent",
+      "election": {
+        "definitionHash": "239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a86",
+        "panels": [
+          {
+            "panel": 1,
+            "threshold": 3,
+            "registered": [
+              {
+                "index": 1,
+                "signingKey": "02b3e1bbbb3decb07fe320a38277e913529c86aa7cf410ceb8f42d243b6fd4ea5e"
+              },
+              {
+                "index": 2,
+                "signingKey": "02aa69adc88f7113b6ee34b19509cb67e1221585f6dd8a2525cc1e8821e58054e8"
+              },
+              {
+                "index": 3,
+                "signingKey": "032ed39ce03836fa6476fa8a88342939d0a8ad12557578feb220908cabae3e7157"
+              },
+              {
+                "index": 4,
+                "signingKey": "031cd83cd95b2bea410742cbfd6f49cf596393e11ccaffd060a71d92b6c748c257"
+              }
+            ]
+          }
+        ],
+        "checkpoints": {
+          "ballot": "94a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5",
+          "counted": "93957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf3"
+        },
+        "deadlines": {
+          "ballot": "1000000",
+          "counted": "2000000"
+        }
+      },
+      "events": [
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601010194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5000000004f9d6f4fec2d5c4ea18db89df97a164fdcf63ae9adfe80c5c5ab74fff363601253bc7a5a7d6c351aacdb6def4a55d8ab8b4b5db8ca84f341b1ffcb9f4297abbd",
+          "submittedAt": "999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601020194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5000000000391e9a800f84d1d43ef225e3b64c3eeb42476b183ca65e108dc18587fb5f41651efe5fa886610dae919a0f3aefec85c92a3c33aa9b4b6fd5e6903d2b09294c5",
+          "submittedAt": "999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601030194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5000000008560cdc165de0f002f7327b6c4306cfe287a1f63a0f8e1fa0a60c1f3e282575072f132cb38bda91f3aa3c9d3d61b1d5fc3ec38c102b50a0d6126f18ffbb6334d",
+          "submittedAt": "999990"
+        },
+        {
+          "payload": "001b01bb0afd463395646b9c537769cd86e8ea2684e45be83f74ee7c469eb674ed21c101010194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e500000000d59761502a75d1679763e4c31843a618f45d91287f8ea817de9d9d994aa9632c06515a4c2d6b6794d7b97b5d93162446d9f0f607ff718ecf042f0253c705b0f3",
+          "submittedAt": "1000000"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601050194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5000000005d48b7f0b8763ea4dbb398f079d3d265b58744bb676bf39b62267d31d9b540862196206e4788e6bbe34365750cab748cf1cc4b9baf08924efda29bd1f3df96a8",
+          "submittedAt": "1000000"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601040194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e500000000d09d4cdfc968e4ef1cbd8615b693a4fa71d6714a63020e0c115a49a637e2bbf26a29a1084c77925fdc4ab3fa299869a844a28c7194664ea1065cf2636baa3e31",
+          "submittedAt": "1000000"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601040194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e50000000079776b2719646b6addc0fd230e40b425f143dea6d94e936778dbd8c0087dd8956a56c7f81a01d401023406bf2dcf2bf244ce1ca7705c3c0091ee556442006304",
+          "submittedAt": "1000000"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601010293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000000277e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aaaa347f526ca583cf97479a963af3c15ebee39a314e611d9c02d84fdc4889f388693332a8d22f1f72cc9b60f89c3723836d6c6b484a7ab4659e4e9b435effea14",
+          "submittedAt": "1999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601020293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000000277e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa8ea57715049b648f0d753cd0604e19f4914a515505bdccea2736437993bbece81d34ce014e606d818007033f2fdfdfb3a602902039a06445faa85c786b127ec5",
+          "submittedAt": "1999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601030293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000000277e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aacc4c156c9cb96e11fa04c919ae18980edcbfe018be21e80780789595f288891f5d72ea4ed85a2e26e48adba5e9ba30e6f3dc0c42d824eeab310cafe639a3fcd4",
+          "submittedAt": "1999990"
+        }
+      ],
+      "result": {
+        "verdict": "available",
+        "failures": [],
+        "points": [
+          {
+            "point": 1,
+            "checkpoint": "94a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5",
+            "panels": [
+              {
+                "panel": 1,
+                "holds": true,
+                "attested": [
+                  {
+                    "seat": 1,
+                    "roots": []
+                  },
+                  {
+                    "seat": 2,
+                    "roots": []
+                  },
+                  {
+                    "seat": 3,
+                    "roots": []
+                  }
+                ],
+                "complained": [],
+                "silent": [4]
+              }
+            ]
+          },
+          {
+            "point": 2,
+            "checkpoint": "93957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf3",
+            "panels": [
+              {
+                "panel": 1,
+                "holds": true,
+                "attested": [
+                  {
+                    "seat": 1,
+                    "roots": [
+                      "77e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1",
+                      "e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa"
+                    ]
+                  },
+                  {
+                    "seat": 2,
+                    "roots": [
+                      "77e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1",
+                      "e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa"
+                    ]
+                  },
+                  {
+                    "seat": 3,
+                    "roots": [
+                      "77e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1",
+                      "e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa"
+                    ]
+                  }
+                ],
+                "complained": [],
+                "silent": [4]
+              }
+            ]
+          }
+        ],
+        "records": [
+          {
+            "at": 0,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 1,
+            "point": 1
+          },
+          {
+            "at": 1,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 2,
+            "point": 1
+          },
+          {
+            "at": 2,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 3,
+            "point": 1
+          },
+          {
+            "at": 3,
+            "kind": "attestation",
+            "code": "availability-stray",
+            "signer": 1
+          },
+          {
+            "at": 4,
+            "kind": "attestation",
+            "code": "availability-seat"
+          },
+          {
+            "at": 5,
+            "kind": "attestation",
+            "code": "availability-signature"
+          },
+          {
+            "at": 6,
+            "kind": "attestation",
+            "code": "availability-signature"
+          },
+          {
+            "at": 7,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 1,
+            "point": 2
+          },
+          {
+            "at": 8,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 2,
+            "point": 2
+          },
+          {
+            "at": 9,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 3,
+            "point": 2
+          }
+        ],
+        "rejected": []
+      }
+    },
+    {
+      "id": "stray-unattributed",
+      "description": "Another definition signed by a key this election never registered: stray, attributed to no one",
+      "election": {
+        "definitionHash": "239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a86",
+        "panels": [
+          {
+            "panel": 1,
+            "threshold": 3,
+            "registered": [
+              {
+                "index": 1,
+                "signingKey": "02b3e1bbbb3decb07fe320a38277e913529c86aa7cf410ceb8f42d243b6fd4ea5e"
+              },
+              {
+                "index": 2,
+                "signingKey": "02aa69adc88f7113b6ee34b19509cb67e1221585f6dd8a2525cc1e8821e58054e8"
+              },
+              {
+                "index": 3,
+                "signingKey": "032ed39ce03836fa6476fa8a88342939d0a8ad12557578feb220908cabae3e7157"
+              },
+              {
+                "index": 4,
+                "signingKey": "031cd83cd95b2bea410742cbfd6f49cf596393e11ccaffd060a71d92b6c748c257"
+              }
+            ]
+          }
+        ],
+        "checkpoints": {
+          "ballot": "94a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5",
+          "counted": "93957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf3"
+        },
+        "deadlines": {
+          "ballot": "1000000",
+          "counted": "2000000"
+        }
+      },
+      "events": [
+        {
+          "payload": "001b01bb0afd463395646b9c537769cd86e8ea2684e45be83f74ee7c469eb674ed21c101010194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e50000000041b6eb97fb0cda77ae6d03a2d3f65b0ae4326389a61209e99e4f36eb2d42f032499ac3d8bee8dad47a3598ca2c50555df3b3b2fa3944c2292854188d79a5c95c",
+          "submittedAt": "1000000"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601010194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5000000004f9d6f4fec2d5c4ea18db89df97a164fdcf63ae9adfe80c5c5ab74fff363601253bc7a5a7d6c351aacdb6def4a55d8ab8b4b5db8ca84f341b1ffcb9f4297abbd",
+          "submittedAt": "999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601020194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5000000000391e9a800f84d1d43ef225e3b64c3eeb42476b183ca65e108dc18587fb5f41651efe5fa886610dae919a0f3aefec85c92a3c33aa9b4b6fd5e6903d2b09294c5",
+          "submittedAt": "999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601030194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5000000008560cdc165de0f002f7327b6c4306cfe287a1f63a0f8e1fa0a60c1f3e282575072f132cb38bda91f3aa3c9d3d61b1d5fc3ec38c102b50a0d6126f18ffbb6334d",
+          "submittedAt": "999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601040194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e500000000ec0ac8993700e00c60a249ec45595e259be5201ec8ab5274474ad6ea704ef9f30e2ff3ecf09f70452ad2024bf6cdaaba55f31b8706cafe4070ff516c4871c3fa",
+          "submittedAt": "999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601010293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000000277e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aaaa347f526ca583cf97479a963af3c15ebee39a314e611d9c02d84fdc4889f388693332a8d22f1f72cc9b60f89c3723836d6c6b484a7ab4659e4e9b435effea14",
+          "submittedAt": "1999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601020293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000000277e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa8ea57715049b648f0d753cd0604e19f4914a515505bdccea2736437993bbece81d34ce014e606d818007033f2fdfdfb3a602902039a06445faa85c786b127ec5",
+          "submittedAt": "1999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601030293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000000277e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aacc4c156c9cb96e11fa04c919ae18980edcbfe018be21e80780789595f288891f5d72ea4ed85a2e26e48adba5e9ba30e6f3dc0c42d824eeab310cafe639a3fcd4",
+          "submittedAt": "1999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601040293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000000277e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa5f4704f7de4b3161780dcad8669de327e0ed11d583e9a89f9fd438ae39c0c3c3339b76e0396eb1e4c3fbd17d4174f2578b96dcc6fb3958757572bf6adc9a5028",
+          "submittedAt": "1999990"
+        }
+      ],
+      "result": {
+        "verdict": "available",
+        "failures": [],
+        "points": [
+          {
+            "point": 1,
+            "checkpoint": "94a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5",
+            "panels": [
+              {
+                "panel": 1,
+                "holds": true,
+                "attested": [
+                  {
+                    "seat": 1,
+                    "roots": []
+                  },
+                  {
+                    "seat": 2,
+                    "roots": []
+                  },
+                  {
+                    "seat": 3,
+                    "roots": []
+                  },
+                  {
+                    "seat": 4,
+                    "roots": []
+                  }
+                ],
+                "complained": [],
+                "silent": []
+              }
+            ]
+          },
+          {
+            "point": 2,
+            "checkpoint": "93957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf3",
+            "panels": [
+              {
+                "panel": 1,
+                "holds": true,
+                "attested": [
+                  {
+                    "seat": 1,
+                    "roots": [
+                      "77e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1",
+                      "e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa"
+                    ]
+                  },
+                  {
+                    "seat": 2,
+                    "roots": [
+                      "77e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1",
+                      "e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa"
+                    ]
+                  },
+                  {
+                    "seat": 3,
+                    "roots": [
+                      "77e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1",
+                      "e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa"
+                    ]
+                  },
+                  {
+                    "seat": 4,
+                    "roots": [
+                      "77e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1",
+                      "e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa"
+                    ]
+                  }
+                ],
+                "complained": [],
+                "silent": []
+              }
+            ]
+          }
+        ],
+        "records": [
+          {
+            "at": 0,
+            "kind": "attestation",
+            "code": "availability-stray",
+            "signer": null
+          },
+          {
+            "at": 1,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 1,
+            "point": 1
+          },
+          {
+            "at": 2,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 2,
+            "point": 1
+          },
+          {
+            "at": 3,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 3,
+            "point": 1
+          },
+          {
+            "at": 4,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 4,
+            "point": 1
+          },
+          {
+            "at": 5,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 1,
+            "point": 2
+          },
+          {
+            "at": 6,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 2,
+            "point": 2
+          },
+          {
+            "at": 7,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 3,
+            "point": 2
+          },
+          {
+            "at": 8,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 4,
+            "point": 2
+          }
+        ],
+        "rejected": []
+      }
+    },
+    {
+      "id": "repeats",
+      "description": "Seat 1's late ballot-extent attestation fills its slot, so its timely one after it is a repeat; a byte-identical copy of seat 2's and seat 3's second complaint are repeats too. Only seats 2 and 4 attest the ballot extent: unavailable at point 1",
+      "election": {
+        "definitionHash": "239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a86",
+        "panels": [
+          {
+            "panel": 1,
+            "threshold": 3,
+            "registered": [
+              {
+                "index": 1,
+                "signingKey": "02b3e1bbbb3decb07fe320a38277e913529c86aa7cf410ceb8f42d243b6fd4ea5e"
+              },
+              {
+                "index": 2,
+                "signingKey": "02aa69adc88f7113b6ee34b19509cb67e1221585f6dd8a2525cc1e8821e58054e8"
+              },
+              {
+                "index": 3,
+                "signingKey": "032ed39ce03836fa6476fa8a88342939d0a8ad12557578feb220908cabae3e7157"
+              },
+              {
+                "index": 4,
+                "signingKey": "031cd83cd95b2bea410742cbfd6f49cf596393e11ccaffd060a71d92b6c748c257"
+              }
+            ]
+          }
+        ],
+        "checkpoints": {
+          "ballot": "94a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5",
+          "counted": "93957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf3"
+        },
+        "deadlines": {
+          "ballot": "1000000",
+          "counted": "2000000"
+        }
+      },
+      "events": [
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601010194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5000000004f9d6f4fec2d5c4ea18db89df97a164fdcf63ae9adfe80c5c5ab74fff363601253bc7a5a7d6c351aacdb6def4a55d8ab8b4b5db8ca84f341b1ffcb9f4297abbd",
+          "submittedAt": "1000005"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601010194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5000000004f9d6f4fec2d5c4ea18db89df97a164fdcf63ae9adfe80c5c5ab74fff363601253bc7a5a7d6c351aacdb6def4a55d8ab8b4b5db8ca84f341b1ffcb9f4297abbd",
+          "submittedAt": "1000000"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601020194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5000000000391e9a800f84d1d43ef225e3b64c3eeb42476b183ca65e108dc18587fb5f41651efe5fa886610dae919a0f3aefec85c92a3c33aa9b4b6fd5e6903d2b09294c5",
+          "submittedAt": "1000000"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601020194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5000000000391e9a800f84d1d43ef225e3b64c3eeb42476b183ca65e108dc18587fb5f41651efe5fa886610dae919a0f3aefec85c92a3c33aa9b4b6fd5e6903d2b09294c5",
+          "submittedAt": "1000000"
+        },
+        {
+          "payload": "001c01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601030194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e50155122098d694f95255ca588aca77c25a2b2c4444fb85b8870d54f9a6828dfdb7a80500276fb143945e9d3e5b3b55499f89146f1467dd137dfb42f8a582354eabea4d594337358e5eadc10475d854348de331d1dfcaf9a9678d4359983fe12e11f910b5",
+          "submittedAt": "1000000"
+        },
+        {
+          "payload": "001c01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601030194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e501701220a1924e00a6bb65b82cfd55eed8a48f9d835042f7b459cca03b061905643e7da52c53fadd0488bc87e3dd85891b5efe27d0d23f2e35d76938210227b7f06944993e3e5f11085a29de21f3bd1226b0e47b79c0d6ddd8f39e0bca71360824186219",
+          "submittedAt": "1000000"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601040194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e500000000ec0ac8993700e00c60a249ec45595e259be5201ec8ab5274474ad6ea704ef9f30e2ff3ecf09f70452ad2024bf6cdaaba55f31b8706cafe4070ff516c4871c3fa",
+          "submittedAt": "1000000"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601010293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000000277e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aaaa347f526ca583cf97479a963af3c15ebee39a314e611d9c02d84fdc4889f388693332a8d22f1f72cc9b60f89c3723836d6c6b484a7ab4659e4e9b435effea14",
+          "submittedAt": "1999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601020293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000000277e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa8ea57715049b648f0d753cd0604e19f4914a515505bdccea2736437993bbece81d34ce014e606d818007033f2fdfdfb3a602902039a06445faa85c786b127ec5",
+          "submittedAt": "1999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601030293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000000277e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aacc4c156c9cb96e11fa04c919ae18980edcbfe018be21e80780789595f288891f5d72ea4ed85a2e26e48adba5e9ba30e6f3dc0c42d824eeab310cafe639a3fcd4",
+          "submittedAt": "1999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601040293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000000277e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa5f4704f7de4b3161780dcad8669de327e0ed11d583e9a89f9fd438ae39c0c3c3339b76e0396eb1e4c3fbd17d4174f2578b96dcc6fb3958757572bf6adc9a5028",
+          "submittedAt": "1999990"
+        }
+      ],
+      "result": {
+        "verdict": "unavailable",
+        "failures": [
+          {
+            "point": 1,
+            "panel": 1
+          }
+        ],
+        "points": [
+          {
+            "point": 1,
+            "checkpoint": "94a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5",
+            "panels": [
+              {
+                "panel": 1,
+                "holds": false,
+                "attested": [
+                  {
+                    "seat": 2,
+                    "roots": []
+                  },
+                  {
+                    "seat": 4,
+                    "roots": []
+                  }
+                ],
+                "complained": [
+                  {
+                    "seat": 3,
+                    "cid": "0155122098d694f95255ca588aca77c25a2b2c4444fb85b8870d54f9a6828dfdb7a80500"
+                  }
+                ],
+                "silent": [1]
+              }
+            ]
+          },
+          {
+            "point": 2,
+            "checkpoint": "93957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf3",
+            "panels": [
+              {
+                "panel": 1,
+                "holds": true,
+                "attested": [
+                  {
+                    "seat": 1,
+                    "roots": [
+                      "77e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1",
+                      "e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa"
+                    ]
+                  },
+                  {
+                    "seat": 2,
+                    "roots": [
+                      "77e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1",
+                      "e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa"
+                    ]
+                  },
+                  {
+                    "seat": 3,
+                    "roots": [
+                      "77e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1",
+                      "e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa"
+                    ]
+                  },
+                  {
+                    "seat": 4,
+                    "roots": [
+                      "77e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1",
+                      "e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa"
+                    ]
+                  }
+                ],
+                "complained": [],
+                "silent": []
+              }
+            ]
+          }
+        ],
+        "records": [
+          {
+            "at": 0,
+            "kind": "attestation",
+            "code": "availability-late",
+            "panel": 1,
+            "seat": 1,
+            "point": 1
+          },
+          {
+            "at": 1,
+            "kind": "attestation",
+            "code": "availability-repeat",
+            "panel": 1,
+            "seat": 1,
+            "point": 1
+          },
+          {
+            "at": 2,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 2,
+            "point": 1
+          },
+          {
+            "at": 3,
+            "kind": "attestation",
+            "code": "availability-repeat",
+            "panel": 1,
+            "seat": 2,
+            "point": 1
+          },
+          {
+            "at": 4,
+            "kind": "complaint",
+            "code": "valid",
+            "panel": 1,
+            "seat": 3,
+            "point": 1
+          },
+          {
+            "at": 5,
+            "kind": "complaint",
+            "code": "availability-repeat",
+            "panel": 1,
+            "seat": 3,
+            "point": 1
+          },
+          {
+            "at": 6,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 4,
+            "point": 1
+          },
+          {
+            "at": 7,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 1,
+            "point": 2
+          },
+          {
+            "at": 8,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 2,
+            "point": 2
+          },
+          {
+            "at": 9,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 3,
+            "point": 2
+          },
+          {
+            "at": 10,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 4,
+            "point": 2
+          }
+        ],
+        "rejected": []
+      }
+    },
+    {
+      "id": "author-panel",
+      "description": "With an author panel of three, threshold 2: the default seats and author seats 1 and 2 attest both points, author seat 3 complains of the ballot extent: available",
+      "election": {
+        "definitionHash": "239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a86",
+        "panels": [
+          {
+            "panel": 1,
+            "threshold": 3,
+            "registered": [
+              {
+                "index": 1,
+                "signingKey": "02b3e1bbbb3decb07fe320a38277e913529c86aa7cf410ceb8f42d243b6fd4ea5e"
+              },
+              {
+                "index": 2,
+                "signingKey": "02aa69adc88f7113b6ee34b19509cb67e1221585f6dd8a2525cc1e8821e58054e8"
+              },
+              {
+                "index": 3,
+                "signingKey": "032ed39ce03836fa6476fa8a88342939d0a8ad12557578feb220908cabae3e7157"
+              },
+              {
+                "index": 4,
+                "signingKey": "031cd83cd95b2bea410742cbfd6f49cf596393e11ccaffd060a71d92b6c748c257"
+              }
+            ]
+          },
+          {
+            "panel": 2,
+            "threshold": 2,
+            "registered": [
+              {
+                "index": 1,
+                "signingKey": "030298e67cc2527f344be63158adb8a7f76eab2048a706d6c9912b871fd11045dc"
+              },
+              {
+                "index": 2,
+                "signingKey": "038934eb10924e49e412a6bae431d8048d57eca0e49a52c2e0e897e50d724ca576"
+              },
+              {
+                "index": 3,
+                "signingKey": "039c60179e5d447a82ca5b3eeef83afcd9bf08370942ede4baa22eeacbfad77067"
+              }
+            ]
+          }
+        ],
+        "checkpoints": {
+          "ballot": "94a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5",
+          "counted": "93957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf3"
+        },
+        "deadlines": {
+          "ballot": "1000000",
+          "counted": "2000000"
+        }
+      },
+      "events": [
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601010194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5000000004f9d6f4fec2d5c4ea18db89df97a164fdcf63ae9adfe80c5c5ab74fff363601253bc7a5a7d6c351aacdb6def4a55d8ab8b4b5db8ca84f341b1ffcb9f4297abbd",
+          "submittedAt": "999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601020194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5000000000391e9a800f84d1d43ef225e3b64c3eeb42476b183ca65e108dc18587fb5f41651efe5fa886610dae919a0f3aefec85c92a3c33aa9b4b6fd5e6903d2b09294c5",
+          "submittedAt": "999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601030194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5000000008560cdc165de0f002f7327b6c4306cfe287a1f63a0f8e1fa0a60c1f3e282575072f132cb38bda91f3aa3c9d3d61b1d5fc3ec38c102b50a0d6126f18ffbb6334d",
+          "submittedAt": "999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601040194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e500000000ec0ac8993700e00c60a249ec45595e259be5201ec8ab5274474ad6ea704ef9f30e2ff3ecf09f70452ad2024bf6cdaaba55f31b8706cafe4070ff516c4871c3fa",
+          "submittedAt": "999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601010293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000000277e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aaaa347f526ca583cf97479a963af3c15ebee39a314e611d9c02d84fdc4889f388693332a8d22f1f72cc9b60f89c3723836d6c6b484a7ab4659e4e9b435effea14",
+          "submittedAt": "1999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601020293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000000277e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa8ea57715049b648f0d753cd0604e19f4914a515505bdccea2736437993bbece81d34ce014e606d818007033f2fdfdfb3a602902039a06445faa85c786b127ec5",
+          "submittedAt": "1999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601030293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000000277e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aacc4c156c9cb96e11fa04c919ae18980edcbfe018be21e80780789595f288891f5d72ea4ed85a2e26e48adba5e9ba30e6f3dc0c42d824eeab310cafe639a3fcd4",
+          "submittedAt": "1999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601040293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000000277e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa5f4704f7de4b3161780dcad8669de327e0ed11d583e9a89f9fd438ae39c0c3c3339b76e0396eb1e4c3fbd17d4174f2578b96dcc6fb3958757572bf6adc9a5028",
+          "submittedAt": "1999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8602010194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e500000000e6aa9c684124c2c42d64aa14fbb36869614a2da0a90ae4a183a424606231f2680df0adbb255ab2b3a1ed9f0d86b5f286b6a814c28f3de7da4cad60094b536f5a",
+          "submittedAt": "1000000"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8602020194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e50000000095dd427499fcf901c4849c7eddabceb15ca7299c9417b7c86470f19715349b4263093899807cf1f4d5626a520e05e2bc5d1568f1d20c6d5c03cbf64432776dcc",
+          "submittedAt": "1000000"
+        },
+        {
+          "payload": "001c01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8602030194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e501701220a1924e00a6bb65b82cfd55eed8a48f9d835042f7b459cca03b061905643e7da590cbae66b07cc76d63a065262e773f10871e7fae19652ed8129f293a93eeff013578a3abfa3b3b86ec44457989474c338e5c8a0fed26525cdca83a717bfdac1d",
+          "submittedAt": "1000000"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8602010293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000000003a61e6abc7dfabb79536bd64ead721fdfa2faad8da61153b8fd9a1357b0ec7a48b510f8d35f928eda6b3f4aa4df9156418d677c8c385d553c97406f030def7e",
+          "submittedAt": "2000000"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8602020293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf300000000c8966e2e22587f028eb4fe7f2b73115f9751505af8973e148ef1bb01e4f76de40285caa348573ffe6a00bdfa204a39acb37732187b6d00e527d9cd376564096a",
+          "submittedAt": "2000000"
+        }
+      ],
+      "result": {
+        "verdict": "available",
+        "failures": [],
+        "points": [
+          {
+            "point": 1,
+            "checkpoint": "94a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5",
+            "panels": [
+              {
+                "panel": 1,
+                "holds": true,
+                "attested": [
+                  {
+                    "seat": 1,
+                    "roots": []
+                  },
+                  {
+                    "seat": 2,
+                    "roots": []
+                  },
+                  {
+                    "seat": 3,
+                    "roots": []
+                  },
+                  {
+                    "seat": 4,
+                    "roots": []
+                  }
+                ],
+                "complained": [],
+                "silent": []
+              },
+              {
+                "panel": 2,
+                "holds": true,
+                "attested": [
+                  {
+                    "seat": 1,
+                    "roots": []
+                  },
+                  {
+                    "seat": 2,
+                    "roots": []
+                  }
+                ],
+                "complained": [
+                  {
+                    "seat": 3,
+                    "cid": "01701220a1924e00a6bb65b82cfd55eed8a48f9d835042f7b459cca03b061905643e7da5"
+                  }
+                ],
+                "silent": []
+              }
+            ]
+          },
+          {
+            "point": 2,
+            "checkpoint": "93957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf3",
+            "panels": [
+              {
+                "panel": 1,
+                "holds": true,
+                "attested": [
+                  {
+                    "seat": 1,
+                    "roots": [
+                      "77e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1",
+                      "e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa"
+                    ]
+                  },
+                  {
+                    "seat": 2,
+                    "roots": [
+                      "77e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1",
+                      "e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa"
+                    ]
+                  },
+                  {
+                    "seat": 3,
+                    "roots": [
+                      "77e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1",
+                      "e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa"
+                    ]
+                  },
+                  {
+                    "seat": 4,
+                    "roots": [
+                      "77e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1",
+                      "e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa"
+                    ]
+                  }
+                ],
+                "complained": [],
+                "silent": []
+              },
+              {
+                "panel": 2,
+                "holds": true,
+                "attested": [
+                  {
+                    "seat": 1,
+                    "roots": []
+                  },
+                  {
+                    "seat": 2,
+                    "roots": []
+                  }
+                ],
+                "complained": [],
+                "silent": [3]
+              }
+            ]
+          }
+        ],
+        "records": [
+          {
+            "at": 0,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 1,
+            "point": 1
+          },
+          {
+            "at": 1,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 2,
+            "point": 1
+          },
+          {
+            "at": 2,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 3,
+            "point": 1
+          },
+          {
+            "at": 3,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 4,
+            "point": 1
+          },
+          {
+            "at": 4,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 1,
+            "point": 2
+          },
+          {
+            "at": 5,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 2,
+            "point": 2
+          },
+          {
+            "at": 6,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 3,
+            "point": 2
+          },
+          {
+            "at": 7,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 4,
+            "point": 2
+          },
+          {
+            "at": 8,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 2,
+            "seat": 1,
+            "point": 1
+          },
+          {
+            "at": 9,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 2,
+            "seat": 2,
+            "point": 1
+          },
+          {
+            "at": 10,
+            "kind": "complaint",
+            "code": "valid",
+            "panel": 2,
+            "seat": 3,
+            "point": 1
+          },
+          {
+            "at": 11,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 2,
+            "seat": 1,
+            "point": 2
+          },
+          {
+            "at": 12,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 2,
+            "seat": 2,
+            "point": 2
+          }
+        ],
+        "rejected": []
+      }
+    },
+    {
+      "id": "author-panel-without-key-set",
+      "description": "An author panel the board contract has no key set for: its seats' attestations are availability-seat, and it holds neither point",
+      "election": {
+        "definitionHash": "239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a86",
+        "panels": [
+          {
+            "panel": 1,
+            "threshold": 3,
+            "registered": [
+              {
+                "index": 1,
+                "signingKey": "02b3e1bbbb3decb07fe320a38277e913529c86aa7cf410ceb8f42d243b6fd4ea5e"
+              },
+              {
+                "index": 2,
+                "signingKey": "02aa69adc88f7113b6ee34b19509cb67e1221585f6dd8a2525cc1e8821e58054e8"
+              },
+              {
+                "index": 3,
+                "signingKey": "032ed39ce03836fa6476fa8a88342939d0a8ad12557578feb220908cabae3e7157"
+              },
+              {
+                "index": 4,
+                "signingKey": "031cd83cd95b2bea410742cbfd6f49cf596393e11ccaffd060a71d92b6c748c257"
+              }
+            ]
+          },
+          {
+            "panel": 2,
+            "threshold": 2,
+            "registered": []
+          }
+        ],
+        "checkpoints": {
+          "ballot": "94a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5",
+          "counted": "93957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf3"
+        },
+        "deadlines": {
+          "ballot": "1000000",
+          "counted": "2000000"
+        }
+      },
+      "events": [
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601010194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5000000004f9d6f4fec2d5c4ea18db89df97a164fdcf63ae9adfe80c5c5ab74fff363601253bc7a5a7d6c351aacdb6def4a55d8ab8b4b5db8ca84f341b1ffcb9f4297abbd",
+          "submittedAt": "999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601020194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5000000000391e9a800f84d1d43ef225e3b64c3eeb42476b183ca65e108dc18587fb5f41651efe5fa886610dae919a0f3aefec85c92a3c33aa9b4b6fd5e6903d2b09294c5",
+          "submittedAt": "999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601030194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5000000008560cdc165de0f002f7327b6c4306cfe287a1f63a0f8e1fa0a60c1f3e282575072f132cb38bda91f3aa3c9d3d61b1d5fc3ec38c102b50a0d6126f18ffbb6334d",
+          "submittedAt": "999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601040194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e500000000ec0ac8993700e00c60a249ec45595e259be5201ec8ab5274474ad6ea704ef9f30e2ff3ecf09f70452ad2024bf6cdaaba55f31b8706cafe4070ff516c4871c3fa",
+          "submittedAt": "999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601010293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000000277e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aaaa347f526ca583cf97479a963af3c15ebee39a314e611d9c02d84fdc4889f388693332a8d22f1f72cc9b60f89c3723836d6c6b484a7ab4659e4e9b435effea14",
+          "submittedAt": "1999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601020293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000000277e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa8ea57715049b648f0d753cd0604e19f4914a515505bdccea2736437993bbece81d34ce014e606d818007033f2fdfdfb3a602902039a06445faa85c786b127ec5",
+          "submittedAt": "1999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601030293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000000277e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aacc4c156c9cb96e11fa04c919ae18980edcbfe018be21e80780789595f288891f5d72ea4ed85a2e26e48adba5e9ba30e6f3dc0c42d824eeab310cafe639a3fcd4",
+          "submittedAt": "1999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601040293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000000277e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa5f4704f7de4b3161780dcad8669de327e0ed11d583e9a89f9fd438ae39c0c3c3339b76e0396eb1e4c3fbd17d4174f2578b96dcc6fb3958757572bf6adc9a5028",
+          "submittedAt": "1999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8602010194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e500000000e6aa9c684124c2c42d64aa14fbb36869614a2da0a90ae4a183a424606231f2680df0adbb255ab2b3a1ed9f0d86b5f286b6a814c28f3de7da4cad60094b536f5a",
+          "submittedAt": "1000000"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8602020194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e50000000095dd427499fcf901c4849c7eddabceb15ca7299c9417b7c86470f19715349b4263093899807cf1f4d5626a520e05e2bc5d1568f1d20c6d5c03cbf64432776dcc",
+          "submittedAt": "1000000"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8602030194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e50000000008b53388786b9533422672de777dea37d61b0d012842a565156e18673b55840e2db58dd645bf83068ec2417a64b78526896f405c3b400fdd8620094c19d8b612",
+          "submittedAt": "1000000"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8602010293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000000003a61e6abc7dfabb79536bd64ead721fdfa2faad8da61153b8fd9a1357b0ec7a48b510f8d35f928eda6b3f4aa4df9156418d677c8c385d553c97406f030def7e",
+          "submittedAt": "2000000"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8602020293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf300000000c8966e2e22587f028eb4fe7f2b73115f9751505af8973e148ef1bb01e4f76de40285caa348573ffe6a00bdfa204a39acb37732187b6d00e527d9cd376564096a",
+          "submittedAt": "2000000"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8602030293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf300000000e67af12b024fc98b7c90d3c9673ced49240cf970a240512129f18f52d30fdf9011523ea76187a5704a30d2a42ac92109a10eab5c459be96d36b0d96d169f7daf",
+          "submittedAt": "2000000"
+        }
+      ],
+      "result": {
+        "verdict": "unavailable",
+        "failures": [
+          {
+            "point": 1,
+            "panel": 2
+          },
+          {
+            "point": 2,
+            "panel": 2
+          }
+        ],
+        "points": [
+          {
+            "point": 1,
+            "checkpoint": "94a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5",
+            "panels": [
+              {
+                "panel": 1,
+                "holds": true,
+                "attested": [
+                  {
+                    "seat": 1,
+                    "roots": []
+                  },
+                  {
+                    "seat": 2,
+                    "roots": []
+                  },
+                  {
+                    "seat": 3,
+                    "roots": []
+                  },
+                  {
+                    "seat": 4,
+                    "roots": []
+                  }
+                ],
+                "complained": [],
+                "silent": []
+              },
+              {
+                "panel": 2,
+                "holds": false,
+                "attested": [],
+                "complained": [],
+                "silent": []
+              }
+            ]
+          },
+          {
+            "point": 2,
+            "checkpoint": "93957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf3",
+            "panels": [
+              {
+                "panel": 1,
+                "holds": true,
+                "attested": [
+                  {
+                    "seat": 1,
+                    "roots": [
+                      "77e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1",
+                      "e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa"
+                    ]
+                  },
+                  {
+                    "seat": 2,
+                    "roots": [
+                      "77e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1",
+                      "e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa"
+                    ]
+                  },
+                  {
+                    "seat": 3,
+                    "roots": [
+                      "77e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1",
+                      "e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa"
+                    ]
+                  },
+                  {
+                    "seat": 4,
+                    "roots": [
+                      "77e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1",
+                      "e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa"
+                    ]
+                  }
+                ],
+                "complained": [],
+                "silent": []
+              },
+              {
+                "panel": 2,
+                "holds": false,
+                "attested": [],
+                "complained": [],
+                "silent": []
+              }
+            ]
+          }
+        ],
+        "records": [
+          {
+            "at": 0,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 1,
+            "point": 1
+          },
+          {
+            "at": 1,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 2,
+            "point": 1
+          },
+          {
+            "at": 2,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 3,
+            "point": 1
+          },
+          {
+            "at": 3,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 4,
+            "point": 1
+          },
+          {
+            "at": 4,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 1,
+            "point": 2
+          },
+          {
+            "at": 5,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 2,
+            "point": 2
+          },
+          {
+            "at": 6,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 3,
+            "point": 2
+          },
+          {
+            "at": 7,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 4,
+            "point": 2
+          },
+          {
+            "at": 8,
+            "kind": "attestation",
+            "code": "availability-seat"
+          },
+          {
+            "at": 9,
+            "kind": "attestation",
+            "code": "availability-seat"
+          },
+          {
+            "at": 10,
+            "kind": "attestation",
+            "code": "availability-seat"
+          },
+          {
+            "at": 11,
+            "kind": "attestation",
+            "code": "availability-seat"
+          },
+          {
+            "at": 12,
+            "kind": "attestation",
+            "code": "availability-seat"
+          },
+          {
+            "at": 13,
+            "kind": "attestation",
+            "code": "availability-seat"
+          }
+        ],
+        "rejected": []
+      }
+    },
+    {
+      "id": "author-record-without-author-panel",
+      "description": "A record naming the author panel in a poll without one is availability-seat",
+      "election": {
+        "definitionHash": "239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a86",
+        "panels": [
+          {
+            "panel": 1,
+            "threshold": 3,
+            "registered": [
+              {
+                "index": 1,
+                "signingKey": "02b3e1bbbb3decb07fe320a38277e913529c86aa7cf410ceb8f42d243b6fd4ea5e"
+              },
+              {
+                "index": 2,
+                "signingKey": "02aa69adc88f7113b6ee34b19509cb67e1221585f6dd8a2525cc1e8821e58054e8"
+              },
+              {
+                "index": 3,
+                "signingKey": "032ed39ce03836fa6476fa8a88342939d0a8ad12557578feb220908cabae3e7157"
+              },
+              {
+                "index": 4,
+                "signingKey": "031cd83cd95b2bea410742cbfd6f49cf596393e11ccaffd060a71d92b6c748c257"
+              }
+            ]
+          }
+        ],
+        "checkpoints": {
+          "ballot": "94a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5",
+          "counted": "93957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf3"
+        },
+        "deadlines": {
+          "ballot": "1000000",
+          "counted": "2000000"
+        }
+      },
+      "events": [
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601010194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5000000004f9d6f4fec2d5c4ea18db89df97a164fdcf63ae9adfe80c5c5ab74fff363601253bc7a5a7d6c351aacdb6def4a55d8ab8b4b5db8ca84f341b1ffcb9f4297abbd",
+          "submittedAt": "999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601020194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5000000000391e9a800f84d1d43ef225e3b64c3eeb42476b183ca65e108dc18587fb5f41651efe5fa886610dae919a0f3aefec85c92a3c33aa9b4b6fd5e6903d2b09294c5",
+          "submittedAt": "999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601030194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5000000008560cdc165de0f002f7327b6c4306cfe287a1f63a0f8e1fa0a60c1f3e282575072f132cb38bda91f3aa3c9d3d61b1d5fc3ec38c102b50a0d6126f18ffbb6334d",
+          "submittedAt": "999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601040194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e500000000ec0ac8993700e00c60a249ec45595e259be5201ec8ab5274474ad6ea704ef9f30e2ff3ecf09f70452ad2024bf6cdaaba55f31b8706cafe4070ff516c4871c3fa",
+          "submittedAt": "999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601010293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000000277e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aaaa347f526ca583cf97479a963af3c15ebee39a314e611d9c02d84fdc4889f388693332a8d22f1f72cc9b60f89c3723836d6c6b484a7ab4659e4e9b435effea14",
+          "submittedAt": "1999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601020293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000000277e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa8ea57715049b648f0d753cd0604e19f4914a515505bdccea2736437993bbece81d34ce014e606d818007033f2fdfdfb3a602902039a06445faa85c786b127ec5",
+          "submittedAt": "1999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601030293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000000277e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aacc4c156c9cb96e11fa04c919ae18980edcbfe018be21e80780789595f288891f5d72ea4ed85a2e26e48adba5e9ba30e6f3dc0c42d824eeab310cafe639a3fcd4",
+          "submittedAt": "1999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601040293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000000277e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa5f4704f7de4b3161780dcad8669de327e0ed11d583e9a89f9fd438ae39c0c3c3339b76e0396eb1e4c3fbd17d4174f2578b96dcc6fb3958757572bf6adc9a5028",
+          "submittedAt": "1999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8602010194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e500000000e6aa9c684124c2c42d64aa14fbb36869614a2da0a90ae4a183a424606231f2680df0adbb255ab2b3a1ed9f0d86b5f286b6a814c28f3de7da4cad60094b536f5a",
+          "submittedAt": "1000000"
+        }
+      ],
+      "result": {
+        "verdict": "available",
+        "failures": [],
+        "points": [
+          {
+            "point": 1,
+            "checkpoint": "94a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5",
+            "panels": [
+              {
+                "panel": 1,
+                "holds": true,
+                "attested": [
+                  {
+                    "seat": 1,
+                    "roots": []
+                  },
+                  {
+                    "seat": 2,
+                    "roots": []
+                  },
+                  {
+                    "seat": 3,
+                    "roots": []
+                  },
+                  {
+                    "seat": 4,
+                    "roots": []
+                  }
+                ],
+                "complained": [],
+                "silent": []
+              }
+            ]
+          },
+          {
+            "point": 2,
+            "checkpoint": "93957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf3",
+            "panels": [
+              {
+                "panel": 1,
+                "holds": true,
+                "attested": [
+                  {
+                    "seat": 1,
+                    "roots": [
+                      "77e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1",
+                      "e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa"
+                    ]
+                  },
+                  {
+                    "seat": 2,
+                    "roots": [
+                      "77e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1",
+                      "e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa"
+                    ]
+                  },
+                  {
+                    "seat": 3,
+                    "roots": [
+                      "77e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1",
+                      "e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa"
+                    ]
+                  },
+                  {
+                    "seat": 4,
+                    "roots": [
+                      "77e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1",
+                      "e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa"
+                    ]
+                  }
+                ],
+                "complained": [],
+                "silent": []
+              }
+            ]
+          }
+        ],
+        "records": [
+          {
+            "at": 0,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 1,
+            "point": 1
+          },
+          {
+            "at": 1,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 2,
+            "point": 1
+          },
+          {
+            "at": 2,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 3,
+            "point": 1
+          },
+          {
+            "at": 3,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 4,
+            "point": 1
+          },
+          {
+            "at": 4,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 1,
+            "point": 2
+          },
+          {
+            "at": 5,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 2,
+            "point": 2
+          },
+          {
+            "at": 6,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 3,
+            "point": 2
+          },
+          {
+            "at": 7,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 4,
+            "point": 2
+          },
+          {
+            "at": 8,
+            "kind": "attestation",
+            "code": "availability-seat"
+          }
+        ],
+        "rejected": []
+      }
+    },
+    {
+      "id": "rejected",
+      "description": "A version-2 copy of seat 1's attestation, a 3-byte payload and a destruction statement's header are rejected entries; the records after them count",
+      "election": {
+        "definitionHash": "239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a86",
+        "panels": [
+          {
+            "panel": 1,
+            "threshold": 3,
+            "registered": [
+              {
+                "index": 1,
+                "signingKey": "02b3e1bbbb3decb07fe320a38277e913529c86aa7cf410ceb8f42d243b6fd4ea5e"
+              },
+              {
+                "index": 2,
+                "signingKey": "02aa69adc88f7113b6ee34b19509cb67e1221585f6dd8a2525cc1e8821e58054e8"
+              },
+              {
+                "index": 3,
+                "signingKey": "032ed39ce03836fa6476fa8a88342939d0a8ad12557578feb220908cabae3e7157"
+              },
+              {
+                "index": 4,
+                "signingKey": "031cd83cd95b2bea410742cbfd6f49cf596393e11ccaffd060a71d92b6c748c257"
+              }
+            ]
+          }
+        ],
+        "checkpoints": {
+          "ballot": "94a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5",
+          "counted": "93957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf3"
+        },
+        "deadlines": {
+          "ballot": "1000000",
+          "counted": "2000000"
+        }
+      },
+      "events": [
+        {
+          "payload": "001b02239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601010194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5000000004f9d6f4fec2d5c4ea18db89df97a164fdcf63ae9adfe80c5c5ab74fff363601253bc7a5a7d6c351aacdb6def4a55d8ab8b4b5db8ca84f341b1ffcb9f4297abbd",
+          "submittedAt": "1000000"
+        },
+        {
+          "payload": "001b01",
+          "submittedAt": "1000000"
+        },
+        {
+          "payload": "000f01",
+          "submittedAt": "1000000"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601010194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5000000004f9d6f4fec2d5c4ea18db89df97a164fdcf63ae9adfe80c5c5ab74fff363601253bc7a5a7d6c351aacdb6def4a55d8ab8b4b5db8ca84f341b1ffcb9f4297abbd",
+          "submittedAt": "999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601020194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5000000000391e9a800f84d1d43ef225e3b64c3eeb42476b183ca65e108dc18587fb5f41651efe5fa886610dae919a0f3aefec85c92a3c33aa9b4b6fd5e6903d2b09294c5",
+          "submittedAt": "999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601030194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5000000008560cdc165de0f002f7327b6c4306cfe287a1f63a0f8e1fa0a60c1f3e282575072f132cb38bda91f3aa3c9d3d61b1d5fc3ec38c102b50a0d6126f18ffbb6334d",
+          "submittedAt": "999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601040194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e500000000ec0ac8993700e00c60a249ec45595e259be5201ec8ab5274474ad6ea704ef9f30e2ff3ecf09f70452ad2024bf6cdaaba55f31b8706cafe4070ff516c4871c3fa",
+          "submittedAt": "999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601010293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000000277e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aaaa347f526ca583cf97479a963af3c15ebee39a314e611d9c02d84fdc4889f388693332a8d22f1f72cc9b60f89c3723836d6c6b484a7ab4659e4e9b435effea14",
+          "submittedAt": "1999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601020293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000000277e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa8ea57715049b648f0d753cd0604e19f4914a515505bdccea2736437993bbece81d34ce014e606d818007033f2fdfdfb3a602902039a06445faa85c786b127ec5",
+          "submittedAt": "1999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601030293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000000277e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aacc4c156c9cb96e11fa04c919ae18980edcbfe018be21e80780789595f288891f5d72ea4ed85a2e26e48adba5e9ba30e6f3dc0c42d824eeab310cafe639a3fcd4",
+          "submittedAt": "1999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601040293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000000277e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa5f4704f7de4b3161780dcad8669de327e0ed11d583e9a89f9fd438ae39c0c3c3339b76e0396eb1e4c3fbd17d4174f2578b96dcc6fb3958757572bf6adc9a5028",
+          "submittedAt": "1999990"
+        }
+      ],
+      "result": {
+        "verdict": "available",
+        "failures": [],
+        "points": [
+          {
+            "point": 1,
+            "checkpoint": "94a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5",
+            "panels": [
+              {
+                "panel": 1,
+                "holds": true,
+                "attested": [
+                  {
+                    "seat": 1,
+                    "roots": []
+                  },
+                  {
+                    "seat": 2,
+                    "roots": []
+                  },
+                  {
+                    "seat": 3,
+                    "roots": []
+                  },
+                  {
+                    "seat": 4,
+                    "roots": []
+                  }
+                ],
+                "complained": [],
+                "silent": []
+              }
+            ]
+          },
+          {
+            "point": 2,
+            "checkpoint": "93957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf3",
+            "panels": [
+              {
+                "panel": 1,
+                "holds": true,
+                "attested": [
+                  {
+                    "seat": 1,
+                    "roots": [
+                      "77e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1",
+                      "e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa"
+                    ]
+                  },
+                  {
+                    "seat": 2,
+                    "roots": [
+                      "77e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1",
+                      "e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa"
+                    ]
+                  },
+                  {
+                    "seat": 3,
+                    "roots": [
+                      "77e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1",
+                      "e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa"
+                    ]
+                  },
+                  {
+                    "seat": 4,
+                    "roots": [
+                      "77e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1",
+                      "e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa"
+                    ]
+                  }
+                ],
+                "complained": [],
+                "silent": []
+              }
+            ]
+          }
+        ],
+        "records": [
+          {
+            "at": 3,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 1,
+            "point": 1
+          },
+          {
+            "at": 4,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 2,
+            "point": 1
+          },
+          {
+            "at": 5,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 3,
+            "point": 1
+          },
+          {
+            "at": 6,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 4,
+            "point": 1
+          },
+          {
+            "at": 7,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 1,
+            "point": 2
+          },
+          {
+            "at": 8,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 2,
+            "point": 2
+          },
+          {
+            "at": 9,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 3,
+            "point": 2
+          },
+          {
+            "at": 10,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 4,
+            "point": 2
+          }
+        ],
+        "rejected": [
+          {
+            "at": 0,
+            "error": "profile-mismatch"
+          },
+          {
+            "at": 1,
+            "error": "truncated"
+          },
+          {
+            "at": 2,
+            "error": "unknown-record-type"
+          }
+        ]
+      }
+    },
+    {
+      "id": "empty",
+      "description": "No records at all: every seat silent, unavailable at both points",
+      "election": {
+        "definitionHash": "239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a86",
+        "panels": [
+          {
+            "panel": 1,
+            "threshold": 3,
+            "registered": [
+              {
+                "index": 1,
+                "signingKey": "02b3e1bbbb3decb07fe320a38277e913529c86aa7cf410ceb8f42d243b6fd4ea5e"
+              },
+              {
+                "index": 2,
+                "signingKey": "02aa69adc88f7113b6ee34b19509cb67e1221585f6dd8a2525cc1e8821e58054e8"
+              },
+              {
+                "index": 3,
+                "signingKey": "032ed39ce03836fa6476fa8a88342939d0a8ad12557578feb220908cabae3e7157"
+              },
+              {
+                "index": 4,
+                "signingKey": "031cd83cd95b2bea410742cbfd6f49cf596393e11ccaffd060a71d92b6c748c257"
+              }
+            ]
+          }
+        ],
+        "checkpoints": {
+          "ballot": "94a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5",
+          "counted": "93957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf3"
+        },
+        "deadlines": {
+          "ballot": "1000000",
+          "counted": "2000000"
+        }
+      },
+      "events": [],
+      "result": {
+        "verdict": "unavailable",
+        "failures": [
+          {
+            "point": 1,
+            "panel": 1
+          },
+          {
+            "point": 2,
+            "panel": 1
+          }
+        ],
+        "points": [
+          {
+            "point": 1,
+            "checkpoint": "94a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5",
+            "panels": [
+              {
+                "panel": 1,
+                "holds": false,
+                "attested": [],
+                "complained": [],
+                "silent": [1, 2, 3, 4]
+              }
+            ]
+          },
+          {
+            "point": 2,
+            "checkpoint": "93957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf3",
+            "panels": [
+              {
+                "panel": 1,
+                "holds": false,
+                "attested": [],
+                "complained": [],
+                "silent": [1, 2, 3, 4]
+              }
+            ]
+          }
+        ],
+        "records": [],
+        "rejected": []
+      }
+    },
+    {
+      "id": "order",
+      "description": "The all-attest records in reverse order give the same verdict",
+      "election": {
+        "definitionHash": "239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a86",
+        "panels": [
+          {
+            "panel": 1,
+            "threshold": 3,
+            "registered": [
+              {
+                "index": 1,
+                "signingKey": "02b3e1bbbb3decb07fe320a38277e913529c86aa7cf410ceb8f42d243b6fd4ea5e"
+              },
+              {
+                "index": 2,
+                "signingKey": "02aa69adc88f7113b6ee34b19509cb67e1221585f6dd8a2525cc1e8821e58054e8"
+              },
+              {
+                "index": 3,
+                "signingKey": "032ed39ce03836fa6476fa8a88342939d0a8ad12557578feb220908cabae3e7157"
+              },
+              {
+                "index": 4,
+                "signingKey": "031cd83cd95b2bea410742cbfd6f49cf596393e11ccaffd060a71d92b6c748c257"
+              }
+            ]
+          }
+        ],
+        "checkpoints": {
+          "ballot": "94a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5",
+          "counted": "93957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf3"
+        },
+        "deadlines": {
+          "ballot": "1000000",
+          "counted": "2000000"
+        }
+      },
+      "events": [
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601040293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000000277e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa5f4704f7de4b3161780dcad8669de327e0ed11d583e9a89f9fd438ae39c0c3c3339b76e0396eb1e4c3fbd17d4174f2578b96dcc6fb3958757572bf6adc9a5028",
+          "submittedAt": "1999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601030293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000000277e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aacc4c156c9cb96e11fa04c919ae18980edcbfe018be21e80780789595f288891f5d72ea4ed85a2e26e48adba5e9ba30e6f3dc0c42d824eeab310cafe639a3fcd4",
+          "submittedAt": "1999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601020293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000000277e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa8ea57715049b648f0d753cd0604e19f4914a515505bdccea2736437993bbece81d34ce014e606d818007033f2fdfdfb3a602902039a06445faa85c786b127ec5",
+          "submittedAt": "1999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601010293957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf30000000277e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aaaa347f526ca583cf97479a963af3c15ebee39a314e611d9c02d84fdc4889f388693332a8d22f1f72cc9b60f89c3723836d6c6b484a7ab4659e4e9b435effea14",
+          "submittedAt": "1999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601040194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e500000000ec0ac8993700e00c60a249ec45595e259be5201ec8ab5274474ad6ea704ef9f30e2ff3ecf09f70452ad2024bf6cdaaba55f31b8706cafe4070ff516c4871c3fa",
+          "submittedAt": "999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601030194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5000000008560cdc165de0f002f7327b6c4306cfe287a1f63a0f8e1fa0a60c1f3e282575072f132cb38bda91f3aa3c9d3d61b1d5fc3ec38c102b50a0d6126f18ffbb6334d",
+          "submittedAt": "999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601020194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5000000000391e9a800f84d1d43ef225e3b64c3eeb42476b183ca65e108dc18587fb5f41651efe5fa886610dae919a0f3aefec85c92a3c33aa9b4b6fd5e6903d2b09294c5",
+          "submittedAt": "999990"
+        },
+        {
+          "payload": "001b01239048011512b504142d30c44722bc72a74bddaa2c4dcb331e9326ffaebb9a8601010194a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5000000004f9d6f4fec2d5c4ea18db89df97a164fdcf63ae9adfe80c5c5ab74fff363601253bc7a5a7d6c351aacdb6def4a55d8ab8b4b5db8ca84f341b1ffcb9f4297abbd",
+          "submittedAt": "999990"
+        }
+      ],
+      "result": {
+        "verdict": "available",
+        "failures": [],
+        "points": [
+          {
+            "point": 1,
+            "checkpoint": "94a4f054b65b9045a22ab001b2f24481036a73166392e3e8dfe982c96aa204e5",
+            "panels": [
+              {
+                "panel": 1,
+                "holds": true,
+                "attested": [
+                  {
+                    "seat": 1,
+                    "roots": []
+                  },
+                  {
+                    "seat": 2,
+                    "roots": []
+                  },
+                  {
+                    "seat": 3,
+                    "roots": []
+                  },
+                  {
+                    "seat": 4,
+                    "roots": []
+                  }
+                ],
+                "complained": [],
+                "silent": []
+              }
+            ]
+          },
+          {
+            "point": 2,
+            "checkpoint": "93957610a88cc07fd3f6567d39b4e22a18c83114a18c7a867949d935bb71fcf3",
+            "panels": [
+              {
+                "panel": 1,
+                "holds": true,
+                "attested": [
+                  {
+                    "seat": 1,
+                    "roots": [
+                      "77e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1",
+                      "e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa"
+                    ]
+                  },
+                  {
+                    "seat": 2,
+                    "roots": [
+                      "77e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1",
+                      "e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa"
+                    ]
+                  },
+                  {
+                    "seat": 3,
+                    "roots": [
+                      "77e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1",
+                      "e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa"
+                    ]
+                  },
+                  {
+                    "seat": 4,
+                    "roots": [
+                      "77e1b9de10d9fd68fbafdd32dfbb0b095eda13be5886e28e651f97c73d5ba7f1",
+                      "e3d629d34223838cda5c1e8dbdff555906387eade7b75ce4821036377f2ad2aa"
+                    ]
+                  }
+                ],
+                "complained": [],
+                "silent": []
+              }
+            ]
+          }
+        ],
+        "records": [
+          {
+            "at": 0,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 4,
+            "point": 2
+          },
+          {
+            "at": 1,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 3,
+            "point": 2
+          },
+          {
+            "at": 2,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 2,
+            "point": 2
+          },
+          {
+            "at": 3,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 1,
+            "point": 2
+          },
+          {
+            "at": 4,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 4,
+            "point": 1
+          },
+          {
+            "at": 5,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 3,
+            "point": 1
+          },
+          {
+            "at": 6,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 2,
+            "point": 1
+          },
+          {
+            "at": 7,
+            "kind": "attestation",
+            "code": "valid",
+            "panel": 1,
+            "seat": 1,
+            "point": 1
+          }
+        ],
+        "rejected": []
+      }
+    }
+  ]
+}

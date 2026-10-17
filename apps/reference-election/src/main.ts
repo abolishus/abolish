@@ -12,15 +12,24 @@
 // vacuous: an election whose ceremony two seats sat out (rule 7 of
 // [[0006-trustees]]), which the trustee registry must refuse to record and the
 // election registry to register, and the honest bundle with its board copy
-// altered.
+// altered, and one whose block store holds another election's board but
+// none of its own.
+//
+// The board isn't handed to the verifier from the fixture's memory: its
+// segment objects and entry-hash lists are published as blocks to a community
+// node (apps/node),
+// and each bundle is rebuilt from L1 alone, the checkpoints from the anchor's
+// logs and the board copy fetched by the CIDs they name, from a block store
+// exported from the node or from the node's gateway (stage 8's board, P4-3).
 
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   type Checkpoint,
   copyCheckpoints,
   type ElectionDefinition,
+  encodeCheckpoint,
   encodeDisplayText,
   encodeElectionDefinition,
   type Panel,
@@ -29,7 +38,15 @@ import { bytesToHex } from "@noble/hashes/utils.js";
 import { type Rpc, startAnvil } from "./anvil.ts";
 import { boardEntry, displayText, newTrustees, PANEL, runCeremony, STUBS } from "./election.ts";
 import { checkControl, checkExpectations } from "./expectations.ts";
-import { anchorAt, type DeployedAnchor, deployAnchor, evidence, mineAt } from "./l1.ts";
+import { blocksCar, segmentObjects } from "./blocks.ts";
+import {
+  anchorAt,
+  type DeployedAnchor,
+  deployAnchor,
+  evidence,
+  loggedCheckpoints,
+  mineAt,
+} from "./l1.ts";
 import {
   ceremonyRegistration,
   createElection,
@@ -37,6 +54,7 @@ import {
   registerCeremony,
   registerDefinition,
 } from "./l2.ts";
+import { startNode } from "./node.ts";
 import { anchorSlots } from "./slots.ts";
 import { STAGES } from "./stages.ts";
 import { runVerifier } from "./verify.ts";
@@ -75,12 +93,23 @@ interface Election {
   readonly checkpoints: readonly [Checkpoint, Checkpoint];
 }
 
+/**
+ * The board copy a bundle holds: `board.bin`, a block store (`blocks.car`) to
+ * read it from by CID, or neither, for a run that reads it from gateways.
+ */
+type Copy = { readonly board: Uint8Array } | { readonly blocks: Uint8Array } | "none";
+
 function writeBundle(
   dir: string,
   e: Election,
   clock: { epoch: bigint; lastSegment: number },
-  l1: { firstSegment: number; header: Uint8Array; nodes: readonly Uint8Array[] },
-  board: Uint8Array = Buffer.concat(e.entries),
+  l1: {
+    firstSegment: number;
+    header: Uint8Array;
+    nodes: readonly Uint8Array[];
+    checkpoints: readonly Checkpoint[];
+  },
+  copy: Copy,
 ): void {
   mkdirSync(dir, { recursive: true });
   const bundle = {
@@ -96,17 +125,23 @@ function writeBundle(
       firstSegment: l1.firstSegment.toString(),
       header: hex(l1.header),
       nodes: l1.nodes.map(hex),
-      checkpoints: [],
+      checkpoints: l1.checkpoints.map((c) => hex(encodeCheckpoint(c))),
     },
     panel: { threshold: e.panel.threshold.toString(), keys: e.panel.keys.map(hex) },
   };
   writeFileSync(join(dir, "bundle.json"), `${JSON.stringify(bundle, null, 2)}\n`);
-  writeFileSync(join(dir, "board.bin"), board);
+  if (copy === "none") return;
+  if ("board" in copy) writeFileSync(join(dir, "board.bin"), copy.board);
+  else writeFileSync(join(dir, "blocks.car"), copy.blocks);
 }
 
 /** Verifies `dir`, keeps the report next to it, and returns what fell short. */
-function verify(dir: string, judge: (run: ReturnType<typeof runVerifier>) => string[]): string[] {
-  const run = runVerifier(dir);
+function verify(
+  dir: string,
+  judge: (run: ReturnType<typeof runVerifier>) => string[],
+  options: readonly string[] = [],
+): string[] {
+  const run = runVerifier(dir, options);
   writeFileSync(`${dir}-report.json`, run.stdout);
   return judge(run);
 }
@@ -209,51 +244,95 @@ async function run(anvil: Rpc, l2Anvil: Rpc, failures: string[]): Promise<void> 
   const after = end(seal) + DEADLINE + 1n;
   for (let i = 0n; i < 70n; i++) await mineAt(anvil, after + i * 12n);
 
-  // Stage 9: the verifier, on each bundle alone.
-  for (const e of elections) {
-    const l1 = await evidence(
-      anvil,
-      anchor.address,
-      anchorSlots(e.definition.election_id, first, seal),
-    );
-    if (l1.timestamp < after) throw new Error("the finalized block is before the anchors");
-    const clock = { epoch, lastSegment: seal };
-    const evidenceFor = { firstSegment: first, header: l1.header, nodes: l1.nodes };
-    const dir = join(OUT, e.name, "bundle");
-    writeBundle(dir, e, clock, evidenceFor);
-    if (e.name === "honest") {
-      failures.push(...verify(dir, checkExpectations));
-      // A control: the honest bundle with one byte of its transcript flipped.
-      // The copy no longer matches its anchors, nor the definition's hash.
-      const tampered = Buffer.concat(e.entries);
-      const last = tampered.length - 1;
-      tampered[last] = (tampered[last] as number) ^ 1;
-      const control = join(OUT, "honest", "control-tampered-copy");
-      writeBundle(control, e, clock, evidenceFor, tampered);
-      failures.push(
-        ...verify(control, (r) =>
-          checkControl("tampered-copy", r, {
-            "3.1": { status: "unverifiable", code: "ceremony-transcript-missing" },
-            "3.2": { status: "unverifiable", code: "not-reached" },
-            "4.2": { status: "unverifiable", code: "l1-checkpoint-unknown" },
-          }),
-        ),
-      );
-    } else {
-      // A control: anchored and well formed, but only 5 of 7 seats took part,
-      // under rule 7's 6: the verifier must fail the election on 3.2 alone.
-      failures.push(
-        ...verify(dir, (r) =>
-          checkControl("rule-7", r, {
-            "3.2": { status: "fail", code: "ceremony-participation" },
-            "4.1": { status: "pass" },
-            "4.2": { status: "pass" },
-          }),
-        ),
-      );
-    }
-  }
   log(`stage 7: segments ${first} and ${seal} (the seal) anchored for each election`);
+
+  // Stage 8, the board: each election's segment objects and entry-hash lists
+  // published as blocks to a community node, which serves them by CID from
+  // here on.
+  const mirror = join(OUT, "node", "blocks");
+  mkdirSync(mirror, { recursive: true });
+  for (const e of elections)
+    writeFileSync(
+      join(mirror, `${e.name}.car`),
+      blocksCar(segmentObjects(e.entries).flatMap((s) => [s.object, s.hashes])),
+    );
+  const node = await startNode(mirror);
+  log(
+    `stage 8: each board's segment objects and entry-hash lists mirrored by apps/node at ${node.url}`,
+  );
+  try {
+    // Stage 9: the verifier, on each bundle alone, with the board rebuilt from
+    // L1: the checkpoints from the anchor's logs, the copy by the CIDs they name.
+    for (const e of elections) {
+      const id = e.definition.election_id;
+      const l1 = await evidence(anvil, anchor.address, anchorSlots(id, first, seal));
+      if (l1.timestamp < after) throw new Error("the finalized block is before the anchors");
+      const checkpoints = await loggedCheckpoints(anvil, anchor.address, id);
+      const clock = { epoch, lastSegment: seal };
+      const evidenceFor = { firstSegment: first, header: l1.header, nodes: l1.nodes, checkpoints };
+      const dir = join(OUT, e.name, "bundle");
+      // A block store holding exactly what the node mirrors for this election,
+      // as a user would export it from any node holding the same blocks.
+      const blocks = readFileSync(join(mirror, `${e.name}.car`));
+      writeBundle(dir, e, clock, evidenceFor, { blocks });
+      if (e.name === "honest") {
+        failures.push(...verify(dir, (r) => checkExpectations(r, "blocks.car")));
+        // The same election read from the node's gateway alone, no copy in the bundle.
+        const fromNode = join(OUT, "honest", "bundle-from-node");
+        writeBundle(fromNode, e, clock, evidenceFor, "none");
+        failures.push(
+          ...verify(fromNode, (r) => checkExpectations(r, "gateway"), ["--gateway", node.url]),
+        );
+        // A control: the honest bundle with one byte of its transcript flipped
+        // in board.bin, and no logged checkpoint given. The copy no longer
+        // matches its anchors, nor the definition's hash.
+        const tampered = Buffer.concat(e.entries);
+        const last = tampered.length - 1;
+        tampered[last] = (tampered[last] as number) ^ 1;
+        const control = join(OUT, "honest", "control-tampered-copy");
+        writeBundle(control, e, clock, { ...evidenceFor, checkpoints: [] }, { board: tampered });
+        failures.push(
+          ...verify(control, (r) =>
+            checkControl("tampered-copy", r, {
+              "3.1": { status: "unverifiable", code: "ceremony-transcript-missing" },
+              "3.2": { status: "unverifiable", code: "not-reached" },
+              "4.2": { status: "unverifiable", code: "l1-checkpoint-unknown" },
+            }),
+          ),
+        );
+        // A control: a well-formed block store holding another election's
+        // board (rule-7's) and none of this one's. Withholding leaves the
+        // election unverifiable from that store, never failed (T-53).
+        const withheld = join(OUT, "honest", "control-withheld-blocks");
+        const others = readFileSync(join(mirror, "rule-7.car"));
+        writeBundle(withheld, e, clock, evidenceFor, { blocks: others });
+        failures.push(
+          ...verify(withheld, (r) =>
+            checkControl("withheld-blocks", r, {
+              "3.1": { status: "unverifiable", code: "ceremony-transcript-missing" },
+              "3.2": { status: "unverifiable", code: "not-reached" },
+              "4.1": { status: "unverifiable", code: "checkpoint-missing" },
+              "4.2": { status: "unverifiable", code: "checkpoint-missing" },
+            }),
+          ),
+        );
+      } else {
+        // A control: anchored and well formed, but only 5 of 7 seats took part,
+        // under rule 7's 6: the verifier must fail the election on 3.2 alone.
+        failures.push(
+          ...verify(dir, (r) =>
+            checkControl("rule-7", r, {
+              "3.2": { status: "fail", code: "ceremony-participation" },
+              "4.1": { status: "pass" },
+              "4.2": { status: "pass" },
+            }),
+          ),
+        );
+      }
+    }
+  } finally {
+    await node.stop();
+  }
 }
 
 async function main(): Promise<number> {

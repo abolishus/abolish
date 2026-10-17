@@ -21,11 +21,21 @@ export interface VerifierRun {
     readonly verdict: string;
     readonly verdictAgainstInputs?: string;
     readonly checks: readonly ReportRow[];
+    /** How a copy read by CID came out (docs/spec/verifier.md, Board by CID). */
+    readonly board?: {
+      readonly byCid?: {
+        readonly storeBlocks?: number;
+        readonly storeUnreadableBytes?: number;
+        readonly gateways?: { readonly requests: number; readonly blocks: number };
+        readonly stopped?: unknown;
+      };
+    };
   };
   readonly stdout: string;
 }
 
-export function runVerifier(bundleDir: string): VerifierRun {
+/** Runs the verifier over `bundleDir`, with `options` (such as `--gateway <url>`) before it. */
+export function runVerifier(bundleDir: string, options: readonly string[] = []): VerifierRun {
   const script = [
     `import { runCli } from ${JSON.stringify(VERIFIER.href)};`,
     "process.exitCode = await runCli(process.argv.slice(1), {",
@@ -33,14 +43,19 @@ export function runVerifier(bundleDir: string): VerifierRun {
     "  stderr: (t) => process.stderr.write(t),",
     "});",
   ].join("\n");
-  const run = spawnSync(process.execPath, ["--input-type=module", "-e", script, bundleDir], {
-    encoding: "utf8",
-    // The verifier contacts nothing; an empty environment keeps it from
-    // reading anything of the fixture's but its argument.
-    env: {},
-    cwd: fileURLToPath(new URL(".", VERIFIER)),
-    maxBuffer: 64 * 1024 * 1024,
-  });
+  const run = spawnSync(
+    process.execPath,
+    ["--input-type=module", "-e", script, "--", ...options, "--", bundleDir],
+    {
+      encoding: "utf8",
+      // The verifier contacts nothing but the gateways it is given; an empty
+      // environment keeps it from reading anything of the fixture's but its
+      // arguments.
+      env: {},
+      cwd: fileURLToPath(new URL(".", VERIFIER)),
+      maxBuffer: 64 * 1024 * 1024,
+    },
+  );
   if (run.error !== undefined) throw run.error;
   if (run.stdout === "")
     throw new Error(`the verifier gave no report (exit ${run.status}): ${run.stderr}`);

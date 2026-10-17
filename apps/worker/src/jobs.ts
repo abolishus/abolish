@@ -12,6 +12,8 @@ import {
   Tier0LockError,
 } from "@abolishus/core";
 import type { Sql } from "postgres";
+import type { BallotOutcome } from "./ballot-queue.ts";
+import type { BallotBatches } from "./ballots.ts";
 import type { ErrorKind, Log } from "./log.ts";
 import type { JobData, QueueKey } from "./queues.ts";
 
@@ -34,6 +36,8 @@ export interface JobContext {
   readonly anchor?: AnchorChain;
   /** The Tier 0 batch job, when the worker is configured for it; its queues run only then. */
   readonly tier0?: Tier0Batches;
+  /** Ballot admission, when the worker pins panels; its queue runs only then. */
+  readonly ballots?: BallotBatches;
 }
 
 /** The Tier 0 queues, which run only with `JobContext.tier0`. */
@@ -138,6 +142,23 @@ async function tier0Boundary(ctx: JobContext, _data: JobData<"tier0Boundary">): 
     });
 }
 
+/**
+ * Judges one ballot in the batch it joins, and returns its outcome: a
+ * refusal is an outcome, not a failure, so the API can answer it. A job
+ * fails only when the batch's database work does, and its fixed kind is all
+ * the API learns.
+ */
+async function ballotSubmit(
+  ctx: JobContext,
+  data: JobData<"ballotSubmit">,
+): Promise<BallotOutcome> {
+  if (ctx.ballots === undefined) throw new JobError("internal");
+  return ctx.ballots.submit(data.electionId, data.ballot);
+}
+
+/** What a job returns: nothing, but `{ballot-submit}`'s outcome. */
+export type JobResult<K extends QueueKey> = K extends "ballotSubmit" ? BallotOutcome : void;
+
 export const HANDLERS: {
-  readonly [K in QueueKey]: (ctx: JobContext, data: JobData<K>) => Promise<void>;
-} = { boardAudit, boardAnchor, identityBackupPrune, tier0Index, tier0Boundary };
+  readonly [K in QueueKey]: (ctx: JobContext, data: JobData<K>) => Promise<JobResult<K>>;
+} = { boardAudit, boardAnchor, identityBackupPrune, tier0Index, tier0Boundary, ballotSubmit };

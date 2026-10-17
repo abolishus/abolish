@@ -3,6 +3,7 @@ export {
   type BallotAdmissionOptions,
   SubmitError,
   type SubmitErrorCode,
+  type SubmitOutcome,
 } from "./admission.ts";
 export {
   ANCHOR_INCLUSION_MARGIN,
@@ -29,6 +30,7 @@ export {
   BoardReadError,
   type BoardReadErrorCode,
   readBoard,
+  readBoardedEntry,
   readConsistencyProof,
   readEntries,
   readHead,

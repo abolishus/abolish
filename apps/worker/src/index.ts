@@ -4,7 +4,20 @@ export {
   checkAnchorDeployment,
   ViemAnchorChain,
 } from "./anchor-chain.ts";
-export { HANDLERS, type JobContext, JobError, TIER0_QUEUES } from "./jobs.ts";
+export {
+  BALLOT_OUTCOME,
+  type BallotOutcome,
+  BallotQueue,
+  type BallotQueueOptions,
+  type BallotUnavailable,
+} from "./ballot-queue.ts";
+export {
+  BALLOT_BATCH,
+  BALLOT_BATCH_WAIT_MS,
+  type BallotBatchOptions,
+  BallotBatches,
+} from "./ballots.ts";
+export { HANDLERS, type JobContext, JobError, type JobResult, TIER0_QUEUES } from "./jobs.ts";
 export type {
   AnchorFindingLine,
   AuditFindingLine,

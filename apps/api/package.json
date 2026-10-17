@@ -2,7 +2,7 @@
   "name": "@abolishus/api",
   "version": "0.0.0",
   "private": true,
-  "description": "The public API: serves election definitions and the board over oRPC, and will take ballots. Source-only.",
+  "description": "The public API: serves election definitions and the board over oRPC, and takes ballots for the worker to judge. Source-only.",
   "license": "AGPL-3.0-only",
   "type": "module",
   "exports": {
@@ -17,6 +17,7 @@
   "dependencies": {
     "@abolishus/api-contract": "workspace:*",
     "@abolishus/core": "workspace:*",
+    "@abolishus/worker": "workspace:*",
     "@orpc/openapi": "catalog:",
     "@orpc/server": "catalog:",
     "ioredis": "catalog:",

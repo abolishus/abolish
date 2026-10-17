@@ -1,4 +1,4 @@
-import { Tier0Batches } from "@abolishus/core";
+import { BallotAdmissions, Tier0Batches } from "@abolishus/core";
 import { Redis } from "ioredis";
 import postgres from "postgres";
 import { BaseError, createPublicClient, http } from "viem";
@@ -20,13 +20,61 @@ const Env = z.strictObject({
     .int()
     .min(60_000)
     .default(10 * 60_000),
+  // Ballot admission for the API's queue, all three or none: the trustee
+  // panels the release pins, as JSON (`[{"threshold": k, "keys": ["<hex>",
+  // …]}]`, each key a seat's identity key in seat order), and the anchoring
+  // clock of the anchor contract our definitions name (docs/spec/board.md,
+  // Timing). Without them the worker boards no ballot.
+  BALLOT_PINNED_PANELS: z.string().min(1).optional(),
+  BALLOT_ANCHOR_EPOCH: z
+    .string()
+    .regex(/^(0|[1-9][0-9]{0,19})$/)
+    .optional(),
+  BALLOT_ANCHOR_PERIOD: z
+    .string()
+    .regex(/^[1-9][0-9]{0,19}$/)
+    .optional(),
 });
+
+const Panels = z
+  .array(
+    z.strictObject({
+      threshold: z.number().int().min(1),
+      keys: z.array(z.string().regex(/^(?:[0-9a-f]{2})+$/)).min(1),
+    }),
+  )
+  .min(1);
 
 const env = Env.parse({
   DATABASE_URL: process.env["DATABASE_URL"],
   REDIS_URL: process.env["REDIS_URL"],
   AUDIT_EVERY_MS: process.env["AUDIT_EVERY_MS"],
+  BALLOT_PINNED_PANELS: process.env["BALLOT_PINNED_PANELS"],
+  BALLOT_ANCHOR_EPOCH: process.env["BALLOT_ANCHOR_EPOCH"],
+  BALLOT_ANCHOR_PERIOD: process.env["BALLOT_ANCHOR_PERIOD"],
 });
+
+let ballots: WorkerOptions["ballots"];
+const ballotEnv = [env.BALLOT_PINNED_PANELS, env.BALLOT_ANCHOR_EPOCH, env.BALLOT_ANCHOR_PERIOD];
+if (ballotEnv.some((v) => v !== undefined)) {
+  if (
+    env.BALLOT_PINNED_PANELS === undefined ||
+    env.BALLOT_ANCHOR_EPOCH === undefined ||
+    env.BALLOT_ANCHOR_PERIOD === undefined
+  )
+    throw new Error(
+      "BALLOT_PINNED_PANELS, BALLOT_ANCHOR_EPOCH and BALLOT_ANCHOR_PERIOD go together",
+    );
+  ballots = {
+    admissions: new BallotAdmissions({
+      panels: Panels.parse(JSON.parse(env.BALLOT_PINNED_PANELS)).map((p) => ({
+        threshold: p.threshold,
+        keys: p.keys.map((k) => new Uint8Array(Buffer.from(k, "hex"))),
+      })),
+      clock: { epoch: BigInt(env.BALLOT_ANCHOR_EPOCH), period: BigInt(env.BALLOT_ANCHOR_PERIOD) },
+    }),
+  };
+}
 
 const tier0Config = tier0FromEnv(
   Object.fromEntries(TIER0_ENV.map((name) => [name, process.env[name]])),
@@ -108,6 +156,7 @@ const worker = await startWorker({
   log: (line) => process.stdout.write(`${JSON.stringify(line)}\n`),
   auditEveryMs: env.AUDIT_EVERY_MS,
   ...(tier0 !== undefined && { tier0 }),
+  ...(ballots !== undefined && { ballots }),
 });
 
 for (const signal of ["SIGINT", "SIGTERM"] as const)

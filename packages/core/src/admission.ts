@@ -50,6 +50,11 @@ export class SubmitError extends Error {
   }
 }
 
+/** One ballot's outcome from `BallotAdmissions.submitAll`. */
+export type SubmitOutcome =
+  | { readonly ok: true; readonly boarded: AppendedEntry }
+  | { readonly ok: false; readonly error: SubmitError };
+
 export interface BallotAdmissionOptions {
   /**
    * The trustee panels this release pins (docs/spec/verifier.md, Inputs):
@@ -110,35 +115,75 @@ export class BallotAdmissions {
     ballot: Uint8Array,
     now: bigint,
   ): Promise<AppendedEntry> {
-    if (!isBytes(electionId) || electionId.length !== 32 || !isBytes(ballot))
-      throw new TypeError("electionId must be 32 bytes and ballot bytes");
+    const [outcome] = await this.submitAll(client, electionId, [ballot], now);
+    if (outcome === undefined) throw new Error("submitAll answered no ballot");
+    if (!outcome.ok) throw outcome.error;
+    return outcome.boarded;
+  }
+
+  /**
+   * `submit` for many ballots of one election at once: their membership
+   * proofs are verified together (the verifier's `admitAll`), then the
+   * admitted ones are appended in the order given, so each gets the verdict
+   * and the entry `submit` would give it on its own, called in that order
+   * (T-52). A refusal is that ballot's outcome; a database error throws, and
+   * the ballots before it may be boarded already, so a caller retries the
+   * same bytes, which return their entries.
+   */
+  async submitAll(
+    client: Sql,
+    electionId: Uint8Array,
+    ballots: readonly Uint8Array[],
+    now: bigint,
+  ): Promise<SubmitOutcome[]> {
+    if (!isBytes(electionId) || electionId.length !== 32)
+      throw new TypeError("electionId must be 32 bytes");
+    if (!Array.isArray(ballots) || !ballots.every(isBytes))
+      throw new TypeError("ballots must be an array of bytes");
     if (typeof now !== "bigint" || now < 0n) throw new TypeError("now must be a bigint ≥ 0");
     const id = new Uint8Array(electionId);
-    const admission = await this.#admission(client, id);
-    if (!admission.ok) throw new SubmitError("not-open");
+    const own = ballots.map((b) => new Uint8Array(b));
+    const refuseAll = (error: SubmitError) => own.map(() => ({ ok: false, error }) as const);
+    if (own.length === 0) return [];
+    let admission;
+    try {
+      admission = await this.#admission(client, id);
+    } catch (e) {
+      if (e instanceof SubmitError) return refuseAll(e);
+      throw e;
+    }
+    if (!admission.ok) return refuseAll(new SubmitError("not-open"));
     // By our clock. A ballot cast at close but boarded a moment later is
     // refused here and can still be submitted directly (T-25); the close
     // rule (verifier 5.5) decides what counts, never this check.
     if (now < admission.opensAt || now > admission.closesAt || now < this.#clock.epoch)
-      throw new SubmitError("not-open");
-    const verdict = admission.admit(new Uint8Array(ballot));
-    if (!verdict.ok) throw new SubmitError("rejected", verdict.code);
+      return refuseAll(new SubmitError("not-open"));
     const segment = (now - this.#clock.epoch) / this.#clock.period;
-    if (segment > 0xffffffffn) throw new SubmitError("not-open");
-    // Labelled before the proofs ran, so a later-labelled ballot may have
-    // been boarded meanwhile: this one then takes that segment, never a lower
-    // one (a ballot boarded under a segment whose checkpoint may already be
-    // taken would fail it, checkpoint-boundary).
-    try {
-      return await appendEntry(client, id, Number(segment), ballot, {
-        raiseToPrevious: true,
-        ballot: { tier: verdict.tier, nullifier: verdict.nullifier, message: verdict.message },
-      });
-    } catch (e) {
-      if (e instanceof AppendError && e.code === "repeat")
-        throw new SubmitError("rejected", "repeat");
-      throw e;
+    if (segment > 0xffffffffn) return refuseAll(new SubmitError("not-open"));
+    const verdicts = admission.admitAll(own);
+    const outcomes: SubmitOutcome[] = [];
+    for (const [i, verdict] of verdicts.entries()) {
+      const ballot = own[i] as Uint8Array;
+      if (!verdict.ok) {
+        outcomes.push({ ok: false, error: new SubmitError("rejected", verdict.code) });
+        continue;
+      }
+      // Labelled before the proofs ran, so a later-labelled ballot may have
+      // been boarded meanwhile: this one then takes that segment, never a
+      // lower one (a ballot boarded under a segment whose checkpoint may
+      // already be taken would fail it, checkpoint-boundary).
+      try {
+        const boarded = await appendEntry(client, id, Number(segment), ballot, {
+          raiseToPrevious: true,
+          ballot: { tier: verdict.tier, nullifier: verdict.nullifier, message: verdict.message },
+        });
+        outcomes.push({ ok: true, boarded });
+      } catch (e) {
+        if (!(e instanceof AppendError && e.code === "repeat")) throw e;
+        outcomes.push({ ok: false, error: new SubmitError("rejected", "repeat") });
+      }
     }
+    return outcomes;
   }
 
   async #admission(client: Sql, id: Uint8Array): Promise<Decided> {

@@ -21,16 +21,15 @@ describe("questionMethod", () => {
   });
 
   test("gives different limits over the same options different methods", () => {
-    const limits = fc
+    const limitsOver = (m: number) =>
+      fc
+        .integer({ min: 1, max: m })
+        .chain((max) => fc.tuple(fc.integer({ min: 0, max }), fc.constant(max)));
+    const pairs = fc
       .integer({ min: 2, max: 64 })
-      .chain((m) =>
-        fc
-          .integer({ min: 1, max: m })
-          .chain((max) => fc.tuple(fc.integer({ min: 0, max }), fc.constant(max), fc.constant(m))),
-      );
+      .chain((m) => fc.tuple(fc.constant(m), limitsOver(m), limitsOver(m)));
     fc.assert(
-      fc.property(limits, limits, ([a, b, m], [c, d]) => {
-        if (d > m) return;
+      fc.property(pairs, ([m, [a, b], [c, d]]) => {
         fc.pre(a !== c || b !== d);
         expect(questionMethod(a, b, m)).not.toBe(questionMethod(c, d, m));
       }),

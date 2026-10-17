@@ -111,9 +111,11 @@ function resultLines(report: Report): string[] {
       return [`; counts ${result.counts.join(", ")}`, []];
     return [
       "; counts per question:",
-      result.byQuestion.map(
-        (q, i) => `${indent}question ${i} (${questions[i]?.method ?? ""}): counts ${q.join(", ")}`,
-      ),
+      result.byQuestion.map((q, i) => {
+        const question = questions[i];
+        if (question === undefined) throw new Error("summary: a slice without its question");
+        return `${indent}question ${i} (${question.method}): counts ${q.join(", ")}`;
+      }),
     ];
   };
   for (const t of report.tiers) {

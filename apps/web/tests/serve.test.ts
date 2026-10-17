@@ -3,9 +3,16 @@
 // page's own WebAuthn conversions (src/account/webauthn.ts) with a software
 // authenticator; the assets; and what the front refuses and logs.
 
-import { createAccounts, type TurnstileAction } from "@abolishus/core";
+import {
+  createAccounts,
+  decideAppeal,
+  moderate,
+  newAccountId,
+  type TurnstileAction,
+} from "@abolishus/core";
 import { SoftAuthenticator } from "@abolishus/core/test-authenticator";
-import { type TestDb, testDb } from "@abolishus/core/test-db";
+import { addModerators, newElection, type TestDb, testDb } from "@abolishus/core/test-db";
+import { randomBytes } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import type { Server } from "node:http";
 import { request as rawRequest } from "node:http";
@@ -33,6 +40,8 @@ const SESSION = "__Secure-abolish-account.session_token";
 const SCRIPT = "export const a = 1;\n";
 
 let db: TestDb;
+let sql: Awaited<ReturnType<TestDb["as"]>>;
+let accounts: ReturnType<typeof createAccounts>;
 let clientDir: string;
 let server: Server;
 let base: string;
@@ -78,8 +87,8 @@ function streamed(): Response {
 
 beforeAll(async () => {
   db = await testDb();
-  const sql = await db.as("abolish_app");
-  const accounts = createAccounts({
+  sql = await db.as("abolish_app");
+  accounts = createAccounts({
     sql,
     secret: SECRET,
     origin: ORIGIN,
@@ -414,6 +423,132 @@ describe("poll drafts under /drafts", () => {
     expect((await author.call("GET", "/drafts/read")).status).toBe(404);
     expect(await (await author.call("GET", "/drafts")).json()).toEqual({ polls: [] });
     expect(started).toHaveLength(0);
+  });
+});
+
+describe("a creator's appeals under /drafts", () => {
+  /**
+   * A signed-in creator with a poll set up as the worker leaves it: a stored
+   * definition and the creator record naming its election.
+   */
+  async function setUpPoll() {
+    const creator = new Browser();
+    await register(creator, new SoftAuthenticator(RP_ID), true);
+    const cookie = [...creator.cookies].map(([k, v]) => `${k}=${v}`).join("; ");
+    const account = (await accounts.accountOf(new Headers({ cookie })))!;
+    const electionId = await newElection(sql);
+    const id = newAccountId();
+    await sql`
+      INSERT INTO account_polls (id, user_id, state, draft, created_at, updated_at, submitted_at,
+        creator_address, create_tx_hash, election_id, created_block)
+      VALUES (${id}, ${account}, 'open', '{}', now(), now(), now(), ${randomBytes(20)},
+        ${randomBytes(32)}, ${electionId}, 1)`;
+    return { creator, id, electionId };
+  }
+
+  let handles: string[];
+  beforeAll(async () => {
+    const prefix = newAccountId().slice(0, 8);
+    handles = [`${prefix}-a`, `${prefix}-b`];
+    await addModerators(sql, ...handles);
+  });
+
+  test("a creator sees a removal, appeals it once and sees the outcome, without a moderator", async () => {
+    const { creator, id, electionId } = await setUpPoll();
+    const view = async () => {
+      const res = await creator.call("POST", "/drafts/moderation", { id });
+      expect(res.status).toBe(200);
+      expect(res.headers.get("cache-control")).toBe("no-store");
+      return res.json();
+    };
+    expect(await view()).toEqual({ state: "visible", appealable: false, appeals: [] });
+    expect(await (await creator.call("POST", "/drafts/appeal", { id })).json()).toEqual({
+      code: "NOT_APPEALABLE",
+      status: 409,
+    });
+
+    const { seq } = await moderate(sql, electionId, {
+      action: "delist",
+      reason: "spam",
+      moderator: handles[0]!,
+    });
+    const latest = {
+      seq: `${seq}`,
+      action: "delist",
+      reason: "spam",
+      decidedAt: expect.any(String),
+    };
+    expect(await view()).toEqual({ state: "delisted", latest, appealable: true, appeals: [] });
+
+    const filed = await creator.call("POST", "/drafts/appeal", { id });
+    expect(filed.status).toBe(201);
+    expect(await filed.json()).toEqual({ decisionSeq: `${seq}` });
+    expect((await creator.call("POST", "/drafts/appeal", { id })).status).toBe(409);
+    const pending = await view();
+    expect(pending).toEqual({
+      state: "delisted",
+      latest,
+      appealable: false,
+      appeals: [{ decisionSeq: `${seq}`, filedAt: expect.any(String) }],
+    });
+    expect(JSON.stringify(pending)).not.toContain(handles[0]);
+
+    const { restoreSeq } = await decideAppeal(sql, seq, "upheld", handles[1]!);
+    const decided = await view();
+    expect(decided).toEqual({
+      state: "visible",
+      latest: {
+        seq: `${restoreSeq}`,
+        action: "restore",
+        reason: "appeal-upheld",
+        decidedAt: expect.any(String),
+      },
+      appealable: false,
+      appeals: [
+        {
+          decisionSeq: `${seq}`,
+          filedAt: expect.any(String),
+          outcome: "upheld",
+          reviewedAt: expect.any(String),
+        },
+      ],
+    });
+    expect(JSON.stringify(decided)).not.toMatch(new RegExp(handles.join("|")));
+  });
+
+  test("only the creator sees or appeals a poll, and malformed or cross-site calls are refused", async () => {
+    const { creator, id, electionId } = await setUpPoll();
+    await moderate(sql, electionId, { action: "hide", reason: "threat", moderator: handles[0]! });
+    const other = new Browser();
+    await register(other, new SoftAuthenticator(RP_ID), true);
+    for (const path of ["/drafts/moderation", "/drafts/appeal"]) {
+      expect(await (await other.call("POST", path, { id })).json()).toEqual({
+        code: "NOT_FOUND",
+        status: 404,
+      });
+      expect((await creator.call("POST", path, { id: newAccountId() })).status).toBe(404);
+      expect((await new Browser().call("POST", path, { id })).status).toBe(401);
+      for (const bad of [{}, { id: id.toUpperCase() }, { id, extra: 1 }, { id: 1 }])
+        expect((await creator.call("POST", path, bad)).status).toBe(400);
+      expect((await creator.call("GET", path)).status).toBe(404);
+      const res = await fetch(`${base}${path}`, {
+        method: "POST",
+        headers: {
+          origin: "https://elsewhere.test",
+          cookie: [...creator.cookies].map(([k, v]) => `${k}=${v}`).join("; "),
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ id }),
+      });
+      expect(res.status).toBe(403);
+    }
+    // None of those filed anything.
+    expect(await (await creator.call("POST", "/drafts/moderation", { id })).json()).toMatchObject({
+      state: "hidden",
+      appealable: true,
+      appeals: [],
+    });
+    expect(logged.at(-1)).toMatchObject({ route: "drafts" });
   });
 });
 

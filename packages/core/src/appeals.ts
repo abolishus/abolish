@@ -26,11 +26,13 @@ import {
   type ModerationDecision,
   moderatorAccount,
   type ModerationState,
+  type ModerationStatus,
   type ModerationTx,
   recordDecision,
   REMOVAL_REASONS,
   type RemovalReason,
   stateAfter,
+  statusOf,
 } from "./moderation.ts";
 
 /** What a reviewer decides. */
@@ -222,7 +224,15 @@ export async function listPollAppeals(
   pollId: string,
 ): Promise<PollAppeal[]> {
   if (!isAccountId(accountId) || !isAccountId(pollId)) throw new AppealError("invalid");
-  const rows = await drizzle({ client })
+  return appealsOf(drizzle({ client }), accountId, pollId);
+}
+
+async function appealsOf(
+  db: Pick<ModerationTx, "select">,
+  accountId: string,
+  pollId: string,
+): Promise<PollAppeal[]> {
+  const rows = await db
     .select({
       decisionSeq: accountAppeals.decisionSeq,
       filedAt: accountAppeals.filedAt,
@@ -240,6 +250,52 @@ export async function listPollAppeals(
     outcome: (r.outcome as AppealOutcome | null) ?? undefined,
     reviewedAt: r.reviewedAt ?? undefined,
   }));
+}
+
+/**
+ * A poll's moderation as its creator sees it: the public state and newest
+ * decision, and their appeals, never a moderator. `appealable` says whether
+ * `fileAppeal` would take the newest decision now.
+ */
+export interface PollModeration extends ModerationStatus {
+  readonly appeals: readonly PollAppeal[];
+  readonly appealable: boolean;
+}
+
+/**
+ * `accountId`'s poll `pollId`'s moderation, or `undefined` if it has no
+ * such poll. Read in one snapshot, so the state and the appeals agree. A
+ * poll not yet set up has no election, so nothing has decided about it.
+ */
+export async function readPollModeration(
+  client: Sql,
+  accountId: string,
+  pollId: string,
+): Promise<PollModeration | undefined> {
+  if (!isAccountId(accountId) || !isAccountId(pollId)) throw new AppealError("invalid");
+  return drizzle({ client }).transaction(
+    async (tx) => {
+      const [poll] = await tx
+        .select({ electionId: accountPolls.electionId })
+        .from(accountPolls)
+        .where(and(eq(accountPolls.id, pollId), eq(accountPolls.userId, accountId)));
+      if (poll === undefined) return undefined;
+      const status: ModerationStatus =
+        poll.electionId === null ? { state: "visible" } : await statusOf(tx, poll.electionId);
+      const appeals = await appealsOf(tx, accountId, pollId);
+      const latest = status.latest;
+      return {
+        ...status,
+        appeals,
+        // `fileAppeal`'s rule: the newest decision, a removal, not appealed before.
+        appealable:
+          latest !== undefined &&
+          latest.action !== "restore" &&
+          !appeals.some((a) => a.decisionSeq === latest.seq),
+      };
+    },
+    { isolationLevel: "repeatable read", accessMode: "read only" },
+  );
 }
 
 /** One open appeal as a moderator sees it: the decision, never the creator. */

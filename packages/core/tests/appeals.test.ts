@@ -20,6 +20,7 @@ import {
   newAccountId,
   readAppealQueue,
   readModerationLog,
+  readPollModeration,
   retireModerator,
   storeDefinition,
 } from "../src/index.ts";
@@ -382,6 +383,65 @@ describe("appeals", () => {
     expect(await appealRows(p.id)).toBe(0);
   });
 
+  test("the creator's view: the state, the newest decision and their appeals", async () => {
+    const p = await poll();
+    expect(await readPollModeration(app, p.user, p.id)).toEqual({
+      state: "visible",
+      appeals: [],
+      appealable: false,
+    });
+    const { seq } = await moderate(app, p.electionId, {
+      action: "hide",
+      reason: "personal-data",
+      moderator: "mod-1",
+    });
+    const hidden = {
+      state: "hidden",
+      latest: { seq, action: "hide", reason: "personal-data", decidedAt: expect.any(Date) },
+    };
+    expect(await readPollModeration(app, p.user, p.id)).toEqual({
+      ...hidden,
+      appeals: [],
+      appealable: true,
+    });
+    await fileAppeal(app, p.user, p.id);
+    const filed = await readPollModeration(app, p.user, p.id);
+    expect(filed).toEqual({
+      ...hidden,
+      appeals: await listPollAppeals(app, p.user, p.id),
+      appealable: false,
+    });
+    // No moderator anywhere in it.
+    expect(
+      JSON.stringify(filed, (_, v: unknown) => (typeof v === "bigint" ? `${v}` : v)),
+    ).not.toMatch(/mod-/);
+    const { restoreSeq } = await decideAppeal(app, seq, "upheld", "mod-2");
+    expect(await readPollModeration(app, p.user, p.id)).toMatchObject({
+      state: "visible",
+      latest: { seq: restoreSeq, action: "restore", reason: "appeal-upheld" },
+      appeals: [{ decisionSeq: seq, outcome: "upheld" }],
+      appealable: false,
+    });
+    // Another account's poll, an unknown poll and a draft.
+    expect(await readPollModeration(app, await newAccount(app), p.id)).toBeUndefined();
+    expect(await readPollModeration(app, p.user, newAccountId())).toBeUndefined();
+    const draft = newAccountId();
+    await app`
+      INSERT INTO account_polls (id, user_id, state, draft, created_at, updated_at)
+      VALUES (${draft}, ${p.user}, 'drafted', '{}', now(), now())`;
+    expect(await readPollModeration(app, p.user, draft)).toEqual({
+      state: "visible",
+      appeals: [],
+      appealable: false,
+    });
+    for (const [a, id] of [
+      ["x", p.id],
+      [p.user, "x"],
+      [p.user, p.id.toUpperCase()],
+    ])
+      expect(await code(readPollModeration(app, a!, id!))).toBe("invalid");
+  });
+
   test("concurrent appeals of one decision record one", async () => {
     const p = await poll();
     const { seq } = await moderate(app, p.electionId, {
@@ -509,7 +569,9 @@ describe("appeals", () => {
             if (wasRemoved) record("restore", (await d).seq, "error");
             else expect(await code(d)).toBe("no-change");
           } else if (s.kind === "appeal") {
+            const { appealable } = (await readPollModeration(app, p.user, p.id))!;
             const r = await code(fileAppeal(app, p.user, p.id));
+            expect(appealable).toBe(r === "ok");
             const newest = run.at(-1);
             if (newest === undefined || state === "visible") expect(r).toBe("not-appealable");
             else if (appealed.has(newest.seq)) expect(r).toBe("already-appealed");

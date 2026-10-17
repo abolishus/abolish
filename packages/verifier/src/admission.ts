@@ -12,14 +12,18 @@
 // close rule (5.5), repeats (5.7) and the L2 side of 3.1.
 
 import {
+  type BallotCheck,
+  type BallotCheckV2,
+  type BallotStep,
   DecodeError,
   type DecodeErrorCode,
+  finishBallotSteps,
   pinnedVersion,
   profileCombinationRule,
   RECORD_TYPES,
   type Panel,
 } from "@abolishus/crypto";
-import { type AdmissionCode, judgeFor } from "./ballots.ts";
+import { type AdmissionCode, steppedJudgeFor } from "./ballots.ts";
 import { type CeremonyCode, ceremonyChecks } from "./ceremony.ts";
 import { decodeDefinition, isReadable, readDefinition } from "./definition.ts";
 
@@ -66,6 +70,14 @@ export interface ElectionAdmission {
   readonly closesAt: bigint;
   /** Strictly decodes one ballot payload and runs 5.1 to 5.4 on it; never throws on its bytes. */
   readonly admit: (payload: Uint8Array) => BallotAdmission;
+  /**
+   * Each payload's verdict, exactly as `admit` gives it, with the membership
+   * proofs of the ballots that reach that check verified together
+   * (docs/spec/ballot-validity.md, Batched admission): a ballot whose proof
+   * fails runs no validity proof, and an invalid proof costs at most its own
+   * batch of 64 the gain from batching (T-52). Never throws on the bytes.
+   */
+  readonly admitAll: (payloads: readonly Uint8Array[]) => BallotAdmission[];
 }
 
 /**
@@ -116,37 +128,60 @@ export function electionAdmission(
       why === "ceremony-transcript-missing" || why === "unsupported-version" ? why : "not-reached",
     );
   }
-  const judge = judgeFor(record, registered);
+  const judge = steppedJudgeFor(record, registered);
   if (typeof judge !== "function")
     return refuse(judge.code === "unsupported-version" ? "unsupported-version" : "not-reached");
+  // Up to the membership proof: a payload decided before it, or its step.
+  const step = (payload: Uint8Array): BallotAdmission | BallotStep<BallotCheck | BallotCheckV2> => {
+    // The envelope's record type first: a payload of another type is no
+    // ballot, whatever its bytes after the type would decode to.
+    if (
+      payload.length < 2 ||
+      (((payload[0] as number) << 8) | (payload[1] as number)) !== RECORD_TYPES.ballot
+    )
+      return { ok: false, code: "decode", decodeError: "unexpected-record-type" };
+    try {
+      return judge(payload).step;
+    } catch (e) {
+      if (!(e instanceof DecodeError)) throw e;
+      return { ok: false, code: "decode", decodeError: e.code };
+    }
+  };
+  const verdict = (checked: BallotCheck | BallotCheckV2): BallotAdmission =>
+    checked.ok
+      ? {
+          ok: true,
+          tier: checked.tier,
+          nullifier: checked.nullifier,
+          message: checked.message,
+          l1RefNumber: checked.l1RefNumber,
+        }
+      : { ok: false, code: checked.code };
+  const admitAll = (payloads: readonly Uint8Array[]): BallotAdmission[] => {
+    const results: (BallotAdmission | undefined)[] = [];
+    const waiting: {
+      readonly at: number;
+      readonly step: BallotStep<BallotCheck | BallotCheckV2>;
+    }[] = [];
+    for (const [at, payload] of payloads.entries()) {
+      const s = step(payload);
+      if ("ok" in s) results.push(s);
+      else {
+        results.push(undefined);
+        waiting.push({ at, step: s });
+      }
+    }
+    const finished = finishBallotSteps(waiting.map((w) => w.step));
+    for (const [i, { at }] of waiting.entries())
+      results[at] = verdict(finished[i] as BallotCheck | BallotCheckV2);
+    return results as BallotAdmission[];
+  };
   return {
     ok: true,
     electionId: new Uint8Array(d.election_id),
     opensAt: d.opens_at,
     closesAt: d.closes_at,
-    admit: (payload) => {
-      // The envelope's record type first: a payload of another type is no
-      // ballot, whatever its bytes after the type would decode to.
-      if (
-        payload.length < 2 ||
-        (((payload[0] as number) << 8) | (payload[1] as number)) !== RECORD_TYPES.ballot
-      )
-        return { ok: false, code: "decode", decodeError: "unexpected-record-type" };
-      let checked;
-      try {
-        checked = judge(payload).checked;
-      } catch (e) {
-        if (!(e instanceof DecodeError)) throw e;
-        return { ok: false, code: "decode", decodeError: e.code };
-      }
-      if (!checked.ok) return { ok: false, code: checked.code };
-      return {
-        ok: true,
-        tier: checked.tier,
-        nullifier: checked.nullifier,
-        message: checked.message,
-        l1RefNumber: checked.l1RefNumber,
-      };
-    },
+    admit: (payload) => admitAll([payload])[0] as BallotAdmission,
+    admitAll,
   };
 }

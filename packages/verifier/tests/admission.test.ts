@@ -146,6 +146,50 @@ describe("admits exactly the ballots the verifier's 5.1 to 5.4 admit", () => {
   });
 });
 
+describe("admitAll gives each payload the verdict admit gives, its membership proofs batched", () => {
+  for (const id of ["mixed", "admitted", "repeats", "repeat-of-rejected", "unqualified-first"])
+    test(`${id}: the verifier's 5.1 to 5.4 verdicts`, () => {
+      const c = byId(id);
+      const entries = bundleOf(c).entries;
+      const admission = electionAdmission(hex(c.definition), panelOf(c.panel), entries);
+      if (!admission.ok) throw new Error(admission.code);
+      const ats = [...entries.keys()].filter((at) => {
+        const payload = payloadOf(entries[at] as Uint8Array);
+        return (((payload[0] as number) << 8) | (payload[1] as number)) === BALLOT;
+      });
+      const all = admission.admitAll(ats.map((at) => payloadOf(entries[at] as Uint8Array)));
+      const ours = new Map(
+        ats.map((at, i) => {
+          const r = all[i] as (typeof all)[number];
+          return [at, r.ok ? "admitted" : r.code] as const;
+        }),
+      );
+      expect(ours).toEqual(reported(verifyBundle(bundleOf(c)), ours));
+    });
+
+  test("any multiset of payloads, ballots or not, in any order and past a batch of 64", () => {
+    const c = byId("mixed");
+    const entries = bundleOf(c).entries;
+    const admission = electionAdmission(hex(c.definition), panelOf(c.panel), entries);
+    if (!admission.ok) throw new Error(admission.code);
+    const payloads = [...entries.map((e) => payloadOf(e)), new Uint8Array(), Uint8Array.of(0, 2)];
+    const alone = payloads.map((p) => admission.admit(p));
+    // Each run checks up to 80 Groth16 proofs, so the runs are capped.
+    fc.assert(
+      fc.property(
+        fc.array(fc.nat(payloads.length - 1), { maxLength: 80, size: "max" }),
+        (picks) => {
+          expect(admission.admitAll(picks.map((i) => payloads[i] as Uint8Array))).toEqual(
+            picks.map((i) => alone[i]),
+          );
+        },
+      ),
+      { numRuns: Math.min(Number(process.env["FC_NUM_RUNS"] ?? 100), 3) },
+    );
+    expect(admission.admitAll([])).toEqual([]);
+  }, 120_000);
+});
+
 describe("refuses every ballot of an election the verifier can't admit ballots for", () => {
   const refusal = (c: Case, panel = panelOf(c.panel), entries = bundleOf(c).entries) => {
     const r = electionAdmission(hex(c.definition), panel, entries);

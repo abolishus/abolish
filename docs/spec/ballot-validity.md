@@ -651,6 +651,16 @@ Version 4's (Casting (version 4)), with the step chosen at cast:
 - **Removals don't stop a ballot in an open poll.** A removed member can name an older reference and a step from before its removal, until close ([[membership]], Root clock and steps).
 - **Spam control on rolling direct submission is gas only** ([[0028-rolling-electorates]], Direct submission; T-52).
 
+## Batched admission
+
+An operator admitting many ballots, or a verifier judging a board, MAY verify the membership proofs of many ballots together, by the small-exponent batch test of [[vouching]] (Batched verification): one key, strict decoding first, coefficients of at least 128 bits drawn from a CSPRNG after every proof of the batch is held, and a failed batch resolved until each proof's own verdict is known. It applies to every ballot version here, since each checks its proof under the one pinned key. Batching changes cost, never a verdict:
+
+- **The order stands.** Each ballot's checks before `membership-proof` run first, alone; only a ballot that passes them has its proof in a batch. Its validity proofs run only once its proof passes, so a ballot whose proof fails is `membership-proof` whatever its validity proofs, and costs none of them, as checking it alone would give.
+- **Any grouping.** A ballot's verdict reads no other entry (R4), so a batch may hold ballots of any elections, tiers and cells, in any order, and repeats of one ballot.
+- **Flooding.** Anyone can build ballots that reach `membership-proof` and fail it: an invalid proof costs at most its own batch the gain from batching, and a batch of junk about 1.35 times checking it proof by proof ([[vouching]], Batched verification; T-52).
+
+`finishBallotSteps` in `packages/crypto` batches this way, over the steps `stepBallot` to `stepBallotV4` return (each ballot's checks up to its membership proof), in batches of at most 64 by `verifyDecodedMembershipProofs`; `electionAdmission`'s `admitAll` in `packages/verifier` runs it over many payloads. Checking each ballot alone ([[membership]], Checks) remains the reference: an implementation that never batches reaches the same verdicts.
+
 ## Residuals
 
 - **Trustees can open any ballot.** Any `k` trustees can combine their shares and open a ballot's commitments, publicly and verifiably (T-14, [[0002-everlasting-privacy]]). This page doesn't change that.

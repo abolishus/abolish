@@ -33,6 +33,8 @@ import {
   selectBallots,
   UnsupportedVersionError,
   verifyMembershipProof,
+  finishBallotSteps,
+  stepBallotV2,
 } from "../src/index.ts";
 import { hex, SPEC_VECTORS } from "./spec-vectors.ts";
 
@@ -178,6 +180,18 @@ describe("ballot-v2.json", () => {
       expect(result.nullifier).toBe(record.nullifier);
       expect(result.l1RefNumber).toBe(record.l1_ref_number);
       expect(toHex(result.l1RefHash)).toBe(toHex(record.l1_ref_hash));
+    }
+  });
+
+  test("batched together, each ballot's result is the one checking it alone gives", () => {
+    const pairs = vectors.ballots.map(
+      (b) => [electionOf(b.election, b.registered), decodeBallot(hex(b.encoding), 2)] as const,
+    );
+    const batched = finishBallotSteps(pairs.map(([e, r]) => stepBallotV2(e, r)));
+    for (const [i, b] of vectors.ballots.entries()) {
+      const [election, record] = pairs[i] as (typeof pairs)[number];
+      expect(codeOf(batched[i] as BallotCheckV2)).toBe(b.result);
+      expect(batched[i]).toEqual(checkBallotV2(election, record));
     }
   });
 

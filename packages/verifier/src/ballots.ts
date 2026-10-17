@@ -34,12 +34,10 @@ import {
   type BallotCode,
   type BallotCore,
   ballotElection,
+  type BallotStep,
   type BallotV2Code,
   type BoardEntryVersion,
   cellBallotElection,
-  checkBallot,
-  checkBallotV2,
-  checkBallotV3,
   checkContractEvent,
   type ContractEventVersion,
   DecodeError,
@@ -48,12 +46,16 @@ import {
   decodeBoardEntry,
   decodeContractEvent,
   type DeliveryBallot,
+  finishBallotStep,
   membershipVkHash,
   pinnedVersion,
   questionBallotElection,
   RECORD_TYPES,
   type RegisteredKeys,
   selectBallots,
+  stepBallot,
+  stepBallotV2,
+  stepBallotV3,
 } from "@abolishus/crypto";
 import type { VerifiedDefinition } from "./definition.ts";
 import type { L1Header } from "./l1.ts";
@@ -484,6 +486,13 @@ export type Judge = (payload: Uint8Array) => {
   readonly tally: BallotTally;
 };
 
+/** `Judge` with the checks stopped at the membership proof, for `finishBallotSteps` to batch. */
+export type SteppedJudge = (payload: Uint8Array) => {
+  readonly core: AdmittedCore["core"];
+  readonly step: BallotStep<BallotCheck | BallotCheckV2>;
+  readonly tally: BallotTally;
+};
+
 export const UNSUPPORTED: BallotOutcome = {
   status: "unverifiable",
   code: "unsupported-version",
@@ -504,6 +513,19 @@ export function judgeFor(
   definition: VerifiedDefinition,
   registered: readonly RegisteredKeys[] | undefined,
 ): BallotOutcome | Judge {
+  const stepped = steppedJudgeFor(definition, registered);
+  if (typeof stepped !== "function") return stepped;
+  return (payload) => {
+    const { core, step, tally } = stepped(payload);
+    return { core, checked: finishBallotStep(step), tally };
+  };
+}
+
+/** `judgeFor`, each ballot's checks stopped at its membership proof. */
+export function steppedJudgeFor(
+  definition: VerifiedDefinition,
+  registered: readonly RegisteredKeys[] | undefined,
+): BallotOutcome | SteppedJudge {
   const d = definition.value;
   const pinned = pinnedVersion(d, RECORD_TYPES.ballot);
   const own = definition.version === 1 ? 1 : definition.version === 5 ? 3 : 2;
@@ -530,7 +552,7 @@ export function judgeFor(
       const vss = record.committed_vote.vss;
       return {
         core: { definitionHash: record.definition_hash, vss },
-        checked: checkBallot(election, record),
+        step: stepBallot(election, record),
         // Under definition version 1 a cell is its tier's position in
         // `electorate` (tally.md, Context); `ballot-tier` rejects a tier it
         // doesn't list, so an admitted ballot's is always found.
@@ -551,7 +573,7 @@ export function judgeFor(
       const vss = record.committed_vote.vss;
       return {
         core: { definitionHash: record.definition_hash, vss },
-        checked: checkBallotV3(election, record),
+        step: stepBallotV3(election, record),
         // The delivery check reads ballot versions 1 and 2 only (counted.ts).
         tally: { cell: record.cell, vss },
       };
@@ -563,7 +585,7 @@ export function judgeFor(
     const vss = record.committed_vote.vss;
     return {
       core: { definitionHash: record.definition_hash, vss },
-      checked: checkBallotV2(election, record),
+      step: stepBallotV2(election, record),
       tally: {
         cell: record.cell,
         vss,

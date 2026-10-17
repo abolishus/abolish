@@ -51,6 +51,7 @@ The ballot record (record type `0x0002`, version 1; [`docs/spec/ballot-validity.
 - `ballotElection(definition, registered)` derives the context once: the definition hash, rules, each tier's root and scope, and the qualified seats, from a key set `checkCeremonyTranscript` returned for the transcript the definition names. `checkBallot` and `ballotSignals` take only contexts it made.
 - `ballotSignals(election, ballot)` gives the public signals `[ρ, ν, F(M), ŝ]` a ballot's membership proof is made over; the ballot client proves over exactly these (P2-8).
 - `checkBallot(election, ballot)` is the admission check of verifier 5.1 to 5.4, in order: `ballot-stray`, `ballot-tier`, `validity-shape`, `share-hash-unqualified`, `membership-proof`, `option-proof`, `sum-proof`. An admitted ballot gives its ballot hash and the `(tier, ν, M, l1_ref_number)` that `checkL1Reference` and `selectBallots` take next. The ballot client runs it on its own record before sending it.
+- `stepBallot` to `stepBallotV4` run a ballot's admission checks up to its membership proof, and `finishBallotSteps(steps)` finishes many at once, their membership proofs verified together by `verifyDecodedMembershipProofs` and each ballot's validity proofs run only once its proof passes ([`docs/spec/ballot-validity.md`](../../docs/spec/ballot-validity.md), Batched admission). Every result is the one `checkBallot` (or its version's) gives the ballot alone; only steps these functions made are accepted (T-52).
 
 ## Share encryption
 

@@ -3,12 +3,14 @@ import { accountUsers } from "./accounts.ts";
 import { bytea } from "./bytea.ts";
 
 // Drizzle view of migrations/0012_account_polls.sql, 0013_poll_creation.sql,
-// 0015_poll_anchor_check.sql, 0016_poll_roots.sql and 0017_poll_stubs.sql; a
-// test checks the two agree. `account_polls` is in the account class: whose poll it is, never
+// 0015_poll_anchor_check.sql, 0016_poll_roots.sql, 0017_poll_stubs.sql and
+// 0018_ceremony_runs.sql; a test checks the two agree. `account_polls` is in the account class: whose poll it is, never
 // who answered it (ADR 0032, rule 15; T-10). `poll_creation_txs` is
 // operational: the creation key's public transactions, naming no account,
 // poll or election. `ceremony_stubs` is operational: the coordinator's
-// stubs, public once registered, naming no account or poll.
+// stubs, public once registered, naming no account or poll; so are
+// `ceremony_runs`, `ceremony_messages` and `ceremony_approvals`, what it
+// relays and collects for each stub's run.
 
 const at = (name: string) => timestamp(name, { withTimezone: true });
 
@@ -54,3 +56,46 @@ export const ceremonyStubs = pgTable("ceremony_stubs", {
   opensAt: bigint("opens_at", { mode: "bigint" }).notNull(),
   createdAt: at("created_at").notNull(),
 });
+
+export const ceremonyRuns = pgTable("ceremony_runs", {
+  runId: bytea("run_id").primaryKey(),
+  stubHash: bytea("stub_hash")
+    .notNull()
+    .unique()
+    .references(() => ceremonyStubs.stubHash),
+  round: smallint("round").notNull(),
+  roundOpenedAt: at("round_opened_at").notNull(),
+  transcript: bytea("transcript").notNull(),
+  transcriptHash: bytea("transcript_hash"),
+  keySetHash: bytea("key_set_hash"),
+  qualified: smallint("qualified").array(),
+  outcome: text("outcome"),
+  createdAt: at("created_at").notNull(),
+});
+
+export const ceremonyMessages = pgTable(
+  "ceremony_messages",
+  {
+    runId: bytea("run_id")
+      .notNull()
+      .references(() => ceremonyRuns.runId),
+    round: smallint("round").notNull(),
+    seat: smallint("seat").notNull(),
+    message: bytea("message").notNull(),
+    receivedAt: at("received_at").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.runId, t.round, t.seat] })],
+);
+
+export const ceremonyApprovals = pgTable(
+  "ceremony_approvals",
+  {
+    runId: bytea("run_id")
+      .notNull()
+      .references(() => ceremonyRuns.runId),
+    seat: smallint("seat").notNull(),
+    signature: bytea("signature").notNull(),
+    receivedAt: at("received_at").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.runId, t.seat] })],
+);

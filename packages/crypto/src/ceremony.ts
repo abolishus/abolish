@@ -568,6 +568,42 @@ export function revealsMessage(
   });
 }
 
+const ROUND_FIELDS = ["keys", "challenges", "answers", "reveals"] as const;
+
+/**
+ * Whether a seat's posted message can join the open round of a run, for a
+ * coordinator deciding what it relays (docs/spec/ceremony.md, Parties and
+ * keys). `closed` is the run's transcript so far: its rounds up to the open
+ * one hold messages and the rest are empty. `post` must be a transcript of
+ * the same run holding exactly one message, in the open round. The message
+ * fits when the closed rounds with it as the open round's only message pass
+ * the transcript check's structure (checks 1 to 3: order, shape, and every
+ * signature over the round chain under the seat's pinned identity key), so
+ * a message only its seat could sign takes that seat's place, and none can
+ * make the whole transcript fail once the round closes (T-54). Messages that
+ * fit one at a time fit together: each seat sends one per round, the shape
+ * depends only on the closed rounds, and each signature only on the chain
+ * before its round.
+ */
+export function ceremonyMessageFits(
+  params: Omit<CeremonyParams, "runId">,
+  closed: CeremonyTranscript,
+  post: CeremonyTranscript,
+): boolean {
+  const open = ROUND_FIELDS.findIndex((f) => closed[f].length === 0);
+  if (open === -1 || ROUND_FIELDS.slice(open).some((f) => closed[f].length > 0))
+    throw new RangeError("ceremony: the closed rounds must leave one round open");
+  if (!equalBytes(closed.run_id, post.run_id)) return false;
+  if (ROUND_FIELDS.some((f, r) => post[f].length !== (r === open ? 1 : 0))) return false;
+  const run = runOf({ ...params, runId: closed.run_id });
+  const t: Partial<Record<(typeof ROUND_FIELDS)[number], readonly { index: number }[]>> = {};
+  for (const [r, f] of ROUND_FIELDS.entries()) {
+    if (r > open) break;
+    t[f] = (r === open ? post : closed)[f];
+  }
+  return structureCode(run, t as Partial<Rounds>) === null;
+}
+
 // A node checks the rounds it signs over, as a verifier would, so its
 // signature never commits to a malformed or forged earlier round.
 function checkedPrefix(run: Run, rounds: Partial<Rounds>): Uint8Array[] {

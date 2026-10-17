@@ -8,11 +8,15 @@ import {
   type SeatSecrets,
 } from "../src/ceremony.ts";
 import {
+  type AnswersMessage,
   answersMessage,
   type CeremonyCheck,
   ceremonyContext,
   ceremonyKeygen,
+  ceremonyMessageFits,
   ceremonyTranscriptHash,
+  type CeremonyTranscript,
+  type ChallengesMessage,
   challengesMessage,
   checkCeremonyTranscript,
   DecodeError,
@@ -20,8 +24,10 @@ import {
   encodeCeremonyTranscript,
   identityKey,
   KEM_PUBLIC_KEY,
+  type KeysMessage,
   keysMessage,
   type Panel,
+  type RevealsMessage,
   revealsMessage,
 } from "../src/index.ts";
 import { encode } from "../src/codec.ts";
@@ -391,6 +397,89 @@ describe("a seat's node", () => {
 
   test("refuses a proof nonce outside 1 to ℓ − 1", () => {
     expect(() => keysMessageWith(c.params, seat, 0n)).toThrow(/w/);
+  });
+});
+
+describe("ceremonyMessageFits", () => {
+  const c = ceremony(2, 3, new Uint8Array(32).fill(6));
+  const full = decodeCeremonyTranscript(c.bytes, 1);
+  const FIELDS = ["keys", "challenges", "answers", "reveals"] as const;
+  type Field = (typeof FIELDS)[number];
+  const empty = { keys: [], challenges: [], answers: [], reveals: [] };
+  // The run with rounds before `open` closed as the honest ceremony closed them.
+  const closedBefore = (open: number): CeremonyTranscript => ({
+    ...empty,
+    ...Object.fromEntries(FIELDS.slice(0, open).map((f) => [f, full[f]])),
+    run_id: full.run_id,
+  });
+  const post = <M extends { index: number }>(field: Field, message: M): CeremonyTranscript =>
+    ({ ...empty, run_id: full.run_id, [field]: [message] }) as CeremonyTranscript;
+  const fits = (closed: CeremonyTranscript, p: CeremonyTranscript) =>
+    ceremonyMessageFits(c.electionParams, closed, p);
+
+  test("takes every honest seat's message in its round", () => {
+    for (const [r, f] of FIELDS.entries())
+      for (const m of full[f]) expect(fits(closedBefore(r), post(f, m))).toBe(true);
+  });
+
+  test("refuses a message for another round, run, election or seat", () => {
+    const m = full.challenges[1] as ChallengesMessage;
+    expect(fits(closedBefore(1), post("challenges", m))).toBe(true);
+    // Before its round, or after it.
+    expect(fits(closedBefore(0), post("challenges", m))).toBe(false);
+    expect(fits(closedBefore(2), post("challenges", m))).toBe(false);
+    expect(fits(closedBefore(1), { ...post("challenges", m), run_id: new Uint8Array(32) })).toBe(
+      false,
+    );
+    expect(
+      ceremonyMessageFits(
+        { ...c.electionParams, electionId: new Uint8Array(32).fill(3) },
+        closedBefore(1),
+        post("challenges", m),
+      ),
+    ).toBe(false);
+    // Signed by seat 2, claimed for seat 3, and seat 4, which the panel lacks.
+    expect(fits(closedBefore(1), post("challenges", { ...m, index: 3 }))).toBe(false);
+    expect(fits(closedBefore(1), post("challenges", { ...m, index: 4 }))).toBe(false);
+  });
+
+  test("refuses a message over a round chain that isn't the one closed", () => {
+    // Seat 3's round-2 message signed over all three round-1 messages, offered
+    // over a round 1 the coordinator closed without seat 2's.
+    const closed = { ...closedBefore(1), keys: [full.keys[0], full.keys[2]] } as CeremonyTranscript;
+    expect(fits(closed, post("challenges", full.challenges[2] as ChallengesMessage))).toBe(false);
+    // A seat that sent nothing in round 1 has no place in round 2.
+    const without3 = { ...closedBefore(1), keys: full.keys.slice(0, 2) } as CeremonyTranscript;
+    expect(fits(without3, post("challenges", full.challenges[2] as ChallengesMessage))).toBe(false);
+  });
+
+  test("refuses a message whose shape would fail the closed transcript", () => {
+    const m = full.challenges[0] as ChallengesMessage;
+    // One challenge short: the whole transcript would fail `ceremony-shape`.
+    expect(
+      fits(closedBefore(1), post("challenges", { ...m, challenges: m.challenges.slice(1) })),
+    ).toBe(false);
+    const sig = Uint8Array.from(m.signature);
+    sig[40] = (sig[40] as number) ^ 1;
+    expect(fits(closedBefore(1), post("challenges", { ...m, signature: sig }))).toBe(false);
+  });
+
+  test("refuses a post holding more or less than one message, in one round", () => {
+    const two = { ...post("keys", full.keys[0] as KeysMessage), keys: full.keys.slice(0, 2) };
+    expect(fits(closedBefore(0), two)).toBe(false);
+    expect(fits(closedBefore(0), { ...empty, run_id: full.run_id })).toBe(false);
+    expect(
+      fits(closedBefore(1), {
+        ...post("challenges", full.challenges[0] as ChallengesMessage),
+        keys: full.keys.slice(0, 1),
+      }),
+    ).toBe(false);
+  });
+
+  test("needs closed rounds that leave exactly one round open", () => {
+    const gap = { ...closedBefore(2), keys: [] } as CeremonyTranscript;
+    expect(() => fits(gap, post("answers", full.answers[0] as AnswersMessage))).toThrow(/open/);
+    expect(() => fits(full, post("reveals", full.reveals[0] as RevealsMessage))).toThrow(/open/);
   });
 });
 

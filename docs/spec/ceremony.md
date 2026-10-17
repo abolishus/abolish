@@ -23,6 +23,8 @@ The panel is the one the verifier's release pins ([[trustee-identity]], Panel id
 
 A **coordinator** (in practice the creator's node) relays messages and assembles the transcript. It is trusted for nothing but liveness: it can withhold a message, and nothing else (Security notes).
 
+An honest coordinator relays a seat's message for a round only if, with the rounds it has already closed, that message alone in its round passes the transcript check's structure (checks 1 to 3: order, shape and every signature over the round chain), and only the first such message per seat and round. Seats don't authenticate to the coordinator otherwise, so without the signature check anyone could take a seat's place in a round, and without the shape check one seat's malformed message could make the whole transcript fail check 2. Messages that pass one at a time pass together, since each seat sends one per round and both the shape and each signature depend only on the closed rounds. A coordinator that skips this only stalls the run, as withholding does (T-54).
+
 ## Ceremony context
 
 The creator fixes every field of the definition except `ceremony_transcript_hash` first ([[election-definition]], Stub hash and the ceremony), and picks `run_id`, 32 bytes from the CSPRNG, fresh for every run of the ceremony. Every message and proof of the run binds

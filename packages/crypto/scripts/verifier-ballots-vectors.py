@@ -168,12 +168,12 @@ def window(d, path):
 
 
 def via(kind, inner, segment=0, time=None):
-    """A board item carried another way: in an entry of `segment` (kind "board"), or as a contract-event record of the board's `BallotSubmitted` with L2 timestamp `time` ("event"), or of the same log from an address the definition doesn't name ("foreign"), or of its `RelayedBallotSubmitted` with stamp `time` ("relayed", contract-event versions 3 to 6)."""
+    """A board item carried another way: in an entry of `segment` (kind "board"), or as a contract-event record of the board's `BallotSubmitted` with L2 timestamp `time` ("event"), or of the same log from an address the definition doesn't name ("foreign"), or of its `RelayedBallotSubmitted` with stamp `time` ("relayed", contract-event versions 3 to 6), or a contract-event record that carries no ballot, given whole as {"record": bytes} ("record")."""
     return {"via": kind, "item": inner, "segment": segment, "time": time}
 
 
 def event_record(d, rec, n, time, contract=None, version=2, relayed=False):
-    """A contract-event record of `version` (2 or 3) of the board's `BallotSubmitted` carrying `rec`, or under version 3 of its `RelayedBallotSubmitted` with stamp `time` and RELAY_CALL's other fields, framed as the board frames it (contracts.md, Board, Events)."""
+    """A contract-event record of `version` (2 to 6) of the board's `BallotSubmitted` carrying `rec`, or under version 3 of its `RelayedBallotSubmitted` with stamp `time` and RELAY_CALL's other fields, framed as the board frames it (contracts.md, Board, Events)."""
     framed = ce2.frame_ballot(rec)
     assert framed is not None
     if relayed:
@@ -186,6 +186,31 @@ def event_record(d, rec, n, time, contract=None, version=2, relayed=False):
     data = ce2.word(32) + ce2.abi_bytes(rec)
     encode = {2: ce2, 3: ce3, 4: ce4, 5: ce5, 6: ce6}[version].encode
     return encode(contract or d["board"], n, 5_000_000 + n, time, topics, data)
+
+
+def root_event(d, definition_hash, n, time):
+    """The board's `ObligationRootSubmitted` under contract-event version 6, carrying delivery-root.json's receipt root with `definition_hash` in place of its own: the event check reads the root's fields, never its signature (contracts.md, Board, Events)."""
+    root = bytes.fromhex(next(r for r in json.loads((VECTORS / "delivery-root.json").read_text())["records"] if r["id"] == "receipt-root")["encoding"])
+    root = root[:3] + definition_hash + root[35:]
+    topics = [ce5.sig_topic(ce5.ROOT), definition_hash, ce5.word(root[35])]
+    payload = ce6.encode(d["board"], n, 5_000_000 + n, time, topics, ce5.word(32) + ce5.abi_bytes(root))
+    assert _event_of(d, payload) == "ObligationRootSubmitted"
+    return payload
+
+
+def tier1_event(d, n, time):
+    """The group registry's `Tier1MemberAdded` under contract-event version 6, carrying vouch.json's honest addition (contracts.md, Group registry, Events)."""
+    addition = bytes.fromhex(next(a for a in json.loads((VECTORS / "vouch.json").read_text())["additions"] if a["id"] == "honest")["record"])
+    payload = ce6.encode(d["group_registry"], n, 4_000_000 + n, time, [ce6.sig_topic(ce6.TIER1)], ce6.word(32) + ce6.abi_bytes(addition))
+    assert _event_of(d, payload) == "Tier1MemberAdded"
+    return payload
+
+
+def _event_of(d, payload):
+    """The event a version-6 record passes the event check as, or its code."""
+    contracts = {"election-registry": d["election_registry"], "trustee-registry": d["trustee_registry"], "group-registry": d["group_registry"], "board": d["board"]}
+    ev = ce6.event_check(ce6.decode(payload), contracts, {})
+    return ev["event"] if isinstance(ev, dict) else ev
 
 
 def carried(d, payload, version):
@@ -485,6 +510,31 @@ def build(constants):
         [t_w, via("event", (w_early, p_w_early), time=d_w["opens_at"] - 1), via("event", (w_early, p_w_early), time=d_w["closes_at"])],
         "mixed",
     )
+    # Contract-event version 6, which every profile here pins: beside its
+    # ballots the board carries other events: the board's obligation root,
+    # and a Tier 1 addition of the group registry, which an election boards
+    # for the Tier 1 groups it lists (verifier.md, 4.4). Each passes the
+    # event check, and admission reads none of them.
+    d_e6, t_e6, e_e6 = election_for("events-v6", [1, 2, 3])
+    v6_ok0 = ballot("events-v6-tier-0", e_e6, 0, nullifier("tier-0", 0, e_e6, 0), [0, 1, 0], zero4)
+    p_v6_ok0 = prove("events-v6-tier-0", "tier-0", 0, e_e6, 0, v6_ok0)
+    v6_ok2 = ballot("events-v6-tier-2", e_e6, 2, nullifier("tier-2", 1, e_e6, 2), [0, 0, 1], zero4)
+    p_v6_ok2 = prove("events-v6-tier-2", "tier-2", 1, e_e6, 2, v6_ok2)
+    v6_inside = d_e6["opens_at"] + 3600
+    bundle(
+        "events-v6",
+        "Contract-event version 6, which every profile pins: a board-path ballot; an ordinary one inside the window; the board's ObligationRootSubmitted naming the definition (delivery-root.json's receipt root, its definition hash replaced); the group registry's Tier1MemberAdded carrying vouch.json's honest addition, whose group this definition doesn't list, so it is no required entry and fails nothing (4.4, Tier 1 boarding); and an ordinary copy of the first ballot inside the window, a repeat. Both other records pass the event check and carry no ballot, so admission reads neither.",
+        d_e6, t_e6, e_e6, [1, 2, 3],
+        [
+            t_e6,
+            (v6_ok0, p_v6_ok0),
+            via("event", (v6_ok2, p_v6_ok2), time=v6_inside),
+            via("record", {"record": root_event(d_e6, e_e6["definitionHash"], 3, v6_inside + 1)}),
+            via("record", {"record": tier1_event(d_e6, 4, v6_inside + 2)}),
+            via("event", (v6_ok0, p_v6_ok0), time=v6_inside + 3),
+        ],
+        "mixed",
+    )
     # Contract-event version 3, whose board emits `BallotSubmitted` as
     # version 2's does, and `RelayedBallotSubmitted` for a forced ballot.
     ce3_pins = [(ty, 3 if ty == CONTRACT_EVENT_TYPE else v) for ty, v in pins]
@@ -572,6 +622,8 @@ def assemble(constants, proofs_path, out_dir):
         def make(p):
             if isinstance(p, bytes):
                 return "transcript", p, None, None
+            if isinstance(p, dict):
+                return "record", p["record"], None, None
             if len(p) == 3 and p[0] == "negated":
                 _, b, pid = p
                 return "ballot", bal.enc_ballot(dict(b, proof=negated(proof_bytes[pid]))), b, pid
@@ -588,12 +640,14 @@ def assemble(constants, proofs_path, out_dir):
         for p in bnd["board"]:
             wrap = p if isinstance(p, dict) else {"via": "board", "item": p, "segment": 0, "time": None}
             kind, rec, b, pid = make(wrap["item"])
-            if wrap["via"] != "board":
+            if wrap["via"] == "record":
+                assert pins[CONTRACT_EVENT_TYPE] == 6
+            elif wrap["via"] != "board":
                 # The record a board-path ballot of the same bytes would carry,
                 # as the board's event (or the same log from an address the
                 # definition doesn't name, which carries no ballot).
                 version = pins[CONTRACT_EVENT_TYPE]
-                assert version in (2, 3)
+                assert version in (2, 3, 6)
                 contract = bal.det("verifier foreign contract")[:20] if wrap["via"] == "foreign" else d["board"]
                 rec = event_record(d, rec, len(payloads), wrap["time"], contract, version, wrap["via"] == "relayed")
             payloads.append((kind, rec, b, pid, wrap["segment"]))
@@ -625,6 +679,7 @@ def assemble(constants, proofs_path, out_dir):
                     found = carried(d, rec, pins[CONTRACT_EVENT_TYPE]) if pins[CONTRACT_EVENT_TYPE] in (2, 3, 4, 5, 6) else None
                     if found is None:
                         continue
+                    assert kind != "record", (bnd["id"], i)
                     rec, kind_of, time = found
                     path = {"kind": kind_of, "segment": seg, "time": time}
                 if kind == "raw":

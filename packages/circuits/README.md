@@ -26,15 +26,24 @@ Each circuit gets its own Nargo package next to `lib/`, depending on `abolish` b
 
 ## Vendored dependencies
 
-Copied as plain files, unchanged, from the pinned commits, with their MIT licences beside them. `test/keyed-nullifier-hashes.test.ts` recomputes each tree's git object id (what `git rev-parse <commit>:<path>` prints upstream), so any edit shows up as a failed test and in the reviewed diff (T-55). Refreshing one means copying a new upstream tree and updating its row here and in the test, together with the spec's review of the diff ([[keyed-nullifier-hashes]], TACEO's gadgets).
+Copied as plain files, unchanged, from the pinned commits, with their MIT licences beside them; upstream's READMEs are left out. `test/keyed-nullifier-hashes.test.ts` recomputes the git object id of every vendored entry (what `git rev-parse <commit>:<path>` prints upstream) and fails on any file under `vendor/` that isn't pinned, so any edit shows up as a failed test and in the reviewed diff (T-55). Refreshing one means copying a new upstream tree and updating its rows here and in the test, together with the spec's review of the diff ([[keyed-nullifier-hashes]], TACEO's gadgets).
 
-| Path                              | Upstream                                     | Tag      | Commit                                     | Tree pinned                                                  |
-| --------------------------------- | -------------------------------------------- | -------- | ------------------------------------------ | ------------------------------------------------------------ |
-| `vendor/oprf-nr/babyjubjub`       | `https://github.com/TaceoLabs/oprf-nr`       | `v1.0.0` | `e4984d6ca15771200875745828e8f6c5ced70186` | `babyjubjub/src`: `4c27dd3b30880bd23c95dd88f0c794a8c9482366` |
-| `vendor/noir-poseidon/poseidon2`  | `https://github.com/TaceoLabs/noir-poseidon` | `v0.6.1` | `23cf1f05cbebb78538c8e321ab3da306e3529923` | `poseidon2`: `5c72d2098b1b0daefc7eea327302f46774a5eba6`      |
-| `vendor/noir-poseidon/hash_utils` | `https://github.com/TaceoLabs/noir-poseidon` | `v0.6.1` | `23cf1f05cbebb78538c8e321ab3da306e3529923` | `hash_utils`: `e85d957d3cae9acd652cf09ae676d7dbf9d848b2`     |
+| Upstream                                     | Tag      | Commit                                     |
+| -------------------------------------------- | -------- | ------------------------------------------ |
+| `https://github.com/TaceoLabs/oprf-nr`       | `v1.0.0` | `e4984d6ca15771200875745828e8f6c5ced70186` |
+| `https://github.com/TaceoLabs/noir-poseidon` | `v0.6.1` | `23cf1f05cbebb78538c8e321ab3da306e3529923` |
 
-One file differs from upstream: `vendor/oprf-nr/babyjubjub/Nargo.toml` takes `poseidon2` by path (`../../noir-poseidon/poseidon2`) instead of upstream's `{ tag = "v0.6.1", git = "https://github.com/TaceoLabs/noir-poseidon", directory = "poseidon2" }`, so only its `src` tree is pinned, and the test checks the whole file. `poseidon2` is used only by TACEO's `encode`, which our circuits don't call; it is vendored because the library doesn't compile without it. `lib/keyed_nullifier/src/rational_map.nr` copies the private rational map and its helpers from `hash_to_curve.nr`, and the test checks the copy against the vendored lines. All three libraries are workspace members, so `nargo test` runs their own tests too, TACEO's `encode` known answers among them.
+| Path                                         | Upstream path           | Git object id                              |
+| -------------------------------------------- | ----------------------- | ------------------------------------------ |
+| `vendor/oprf-nr/LICENSE`                     | `LICENSE`               | `b82e0563feef75ccfd57f081fd2efb5f80b391d7` |
+| `vendor/oprf-nr/babyjubjub/src`              | `babyjubjub/src`        | `4c27dd3b30880bd23c95dd88f0c794a8c9482366` |
+| `vendor/noir-poseidon/LICENSE`               | `LICENSE`               | `3fe6670c1099f6fb152d1cde560c3495ee3f9555` |
+| `vendor/noir-poseidon/poseidon2/Nargo.toml`  | `poseidon2/Nargo.toml`  | `7bf975d0e027da52afd3887ca1ddecef5092e8f4` |
+| `vendor/noir-poseidon/poseidon2/src`         | `poseidon2/src`         | `f3a287154fe93da15680fca1398ad583fe782450` |
+| `vendor/noir-poseidon/hash_utils/Nargo.toml` | `hash_utils/Nargo.toml` | `3e8398fa4ffff7a9e20c717791ca7607610dc58c` |
+| `vendor/noir-poseidon/hash_utils/src`        | `hash_utils/src`        | `d8bc189c687d2d01419758e43a49576b2bae66ff` |
+
+One file differs from upstream: `vendor/oprf-nr/babyjubjub/Nargo.toml` takes `poseidon2` by path (`../../noir-poseidon/poseidon2`) instead of upstream's `{ tag = "v0.6.1", git = "https://github.com/TaceoLabs/noir-poseidon", directory = "poseidon2" }`, and the test checks the whole file. `poseidon2` is used only by TACEO's `encode`, which our circuits don't call; it is vendored because the library doesn't compile without it. `lib/keyed_nullifier/src/rational_map.nr` copies the private rational map and its helpers from `hash_to_curve.nr`, and the test checks the copy against the vendored lines. All three libraries are workspace members, so `nargo test` runs their own tests too, TACEO's `encode` known answers among them.
 
 ## Test
 

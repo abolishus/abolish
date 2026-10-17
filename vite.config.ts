@@ -2,14 +2,8 @@ import { defineConfig } from "vite-plus";
 
 export default defineConfig({
   fmt: {
-    // Kept verbatim: the owner's brief, the FSF license text and vendored
-    // third-party sources, whose git trees packages/circuits' tests pin.
-    ignorePatterns: [
-      "docs/PROJECT_BRIEF.md",
-      "pnpm-lock.yaml",
-      "LICENSE",
-      "packages/circuits/vendor/**",
-    ],
+    // Kept verbatim: the owner's brief and the FSF license text.
+    ignorePatterns: ["docs/PROJECT_BRIEF.md", "pnpm-lock.yaml", "LICENSE"],
   },
   lint: {
     jsPlugins: [{ name: "vite-plus", specifier: "vite-plus/oxlint-plugin" }],

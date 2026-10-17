@@ -234,6 +234,16 @@ export {
   MAX_ANCHOR_CHECK_SEGMENTS,
 } from "./poll-anchor-check.ts";
 export {
+  type GroupRecordSource,
+  type PollRootDeployment,
+  type PollRootReport,
+  type ProvenGroupRecords,
+  type RootFailure,
+  ROOTS_PER_RUN,
+  rootPolls,
+  type StoredTierElectorate,
+} from "./poll-roots.ts";
+export {
   MAX_REPORT_QUEUE,
   type PendingReport,
   type ReportQueueCursor,

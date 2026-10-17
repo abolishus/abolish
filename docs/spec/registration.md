@@ -51,7 +51,7 @@ A host on a domain in the Public Suffix List's private section (a hosting provid
 **The page.** It is static, built reproducibly from this repository with the ballot client (P2-8), and:
 
 - loads Turnstile's script from `https://challenges.cloudflare.com` and renders one widget for the deployment's site key with `action` the fragment's `action`, which MUST be `tier0-register` or `tier1-relay` ([[tier1-relay]], Request; the page renders nothing for any other), and nothing else from any other origin. Its policy is sent as headers, since `frame-ancestors` can't be set by a `<meta>` tag: `default-src 'none'`, `script-src 'self' https://challenges.cloudflare.com`, `frame-src https://challenges.cloudflare.com`, `style-src 'self'`, `base-uri 'none'`, `form-action 'none'`, and `frame-ancestors` listing exactly the ballot client's entry points from the signed release; `Referrer-Policy: no-referrer`; no `Set-Cookie`;
-- reads nothing from the voter, makes no request of its own, and reads only its own URL's fragment;
+- reads nothing from the voter, makes no request of its own, and reads only its own URL's fragment, parsed strictly: exactly the keys `origin` and `action`, each once, in that order, with no other key, or it renders nothing;
 - works over Tor as far as it is ours to: nothing on the page or the route refuses or degrades a Tor exit ([[0024-tier0-registration]], option B, Cons; T-11). Whether Turnstile lets a Tor user solve is Cloudflare's, and it often doesn't; such a voter's only other path is part 5's direct one (T-25).
 
 **The handoff.** The ballot client shows the page in a frame and receives the token by `postMessage`:

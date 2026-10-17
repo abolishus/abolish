@@ -119,6 +119,24 @@ describe("the served ballot client", () => {
     expect(consoleErrors).toEqual([]);
   });
 
+  test("opens the election a new fragment names, and with no registry pinned asks no one", async () => {
+    // Same document: the fragment changes, which only hashchange reports.
+    await page.evaluate(() => {
+      location.hash = `#election=${"5d".repeat(32)}`;
+    });
+    await page
+      .getByRole("heading", { level: 1, name: "This copy of the ballot can't check polls yet" })
+      .waitFor();
+    await page.evaluate(() => {
+      location.hash = "#election=5d";
+    });
+    await page.getByRole("heading", { level: 1, name: "This link doesn't open a poll" }).waitFor();
+    // Staging pins no election registry yet, so nothing was fetched from anyone.
+    expect(foreignRequests).toEqual([]);
+    expect(violations).toEqual([]);
+    expect(consoleErrors).toEqual([]);
+  });
+
   test("refuses to turn a string into script or markup (Trusted Types)", async () => {
     const outcomes = await page.evaluate(() => {
       const attempts: Record<string, () => void> = {

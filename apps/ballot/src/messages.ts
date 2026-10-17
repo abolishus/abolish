@@ -30,6 +30,40 @@ const enUS = {
     "No ballot was shown and nothing you chose was sent. You haven't lost your chance to vote.",
   otherAddressTitle: "Open the ballot from another address",
   otherAddress: "Open the ballot from abolishus.eth or another address Abolish lists instead.",
+  // Opening a poll from its link (open.tsx).
+  checkingTitle: "Checking this poll",
+  checking:
+    "Before showing you anything, this device is checking the poll against the public election registry.",
+  brokenLinkTitle: "This link doesn't open a poll",
+  brokenLink:
+    "Part of the link may be missing. Ask whoever sent it for the link again, or open the ballot from the poll's page.",
+  noRegistryTitle: "This copy of the ballot can't check polls yet",
+  noRegistry:
+    "It names no election registry to check polls against, so it won't show any. Nothing was sent.",
+  wrongChainTitle: "The election registry couldn't be read",
+  wrongChain:
+    "The network this device read from isn't the one this ballot checks polls on, so it stopped before showing anything.",
+  notRegisteredTitle: "This poll isn't registered",
+  notRegistered:
+    "The public election registry has no poll with this link's number, or it was registered only moments ago. Check the link, or try again later.",
+  notFoundTitle: "This poll's questions aren't available",
+  notFound:
+    "The poll is registered, but the server didn't have its questions. Try again later, or open the ballot from another address.",
+  withheldTitle: "This poll's wording is withheld",
+  withheld:
+    "Its questions are withheld under Abolish's moderation policy, so this device can't show them. Nothing was sent.",
+  unreachableTitle: "This device couldn't reach the servers",
+  unreachable: "Check your connection and try again. Nothing was sent.",
+  badAnswerTitle: "A server sent something that isn't a poll",
+  badAnswer:
+    "This device stopped before showing anything. Try again later, or open the ballot from another address.",
+  workerFailedTitle: "This device couldn't check the poll",
+  workerFailed: "The check stopped before it finished. Try again. Nothing was sent.",
+  tryAgain: "Try again",
+  notSentTitle: "Your answers weren't sent",
+  notSent:
+    "This version of the ballot can't seal or send answers yet, so nothing left this device and nothing was counted.",
+  answerAgain: "Answer again",
   // The arrival check (check.tsx).
   realPoll: "This is the real poll, checked",
   realPollExplained:

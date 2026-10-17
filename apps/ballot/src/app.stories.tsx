@@ -1,9 +1,9 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, within } from "storybook/test";
 
-import { App, SharedOrigin } from "./app.tsx";
+import { Home, SharedOrigin } from "./app.tsx";
 
-const meta = { component: App, parameters: { layout: "fullscreen" } } satisfies Meta<typeof App>;
+const meta = { component: Home, parameters: { layout: "fullscreen" } } satisfies Meta<typeof Home>;
 
 export default meta;
 type Story = StoryObj<typeof meta>;

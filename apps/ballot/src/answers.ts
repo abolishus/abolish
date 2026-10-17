@@ -45,6 +45,30 @@ export function questionsOf(election: CheckedElection, language: string): Ballot
 }
 
 /**
+ * Which of an election's translations to show, for a reader whose browser
+ * prefers `preferred` (`navigator.languages`, most preferred first): the first
+ * preference a translation's tag matches exactly, else the first whose
+ * primary language matches, else the election's first translation. Only an
+ * election's own tags are returned, so `questionsOf` always finds one.
+ */
+export function pickLanguage(
+  translations: readonly { readonly language: string }[],
+  preferred: readonly string[],
+): string {
+  const tags = translations.map((t) => t.language);
+  const wanted = preferred.map((p) => p.toLowerCase());
+  const primary = (tag: string) => tag.split("-")[0];
+  const choice =
+    wanted.map((w) => tags.find((tag) => tag === w)).find((tag) => tag !== undefined) ??
+    wanted
+      .map((w) => tags.find((tag) => primary(tag) === primary(w)))
+      .find((tag) => tag !== undefined) ??
+    tags[0];
+  if (choice === undefined) throw new RangeError("an election has at least one translation");
+  return choice;
+}
+
+/**
  * The instruction a question's limits give. The owner's four methods are
  * limits, not labels (pick one `(0, 1)`, pick any `(0, m)`, pick up to N
  * `(0, N)`, pick exactly N `(N, N)`); any other range the rules allow is

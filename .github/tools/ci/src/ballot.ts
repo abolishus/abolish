@@ -99,14 +99,16 @@ export const BALLOT_CSP: Readonly<Record<string, readonly string[]>> = {
 
 /**
  * URLs that may appear in scripts and stylesheets as inert strings, never
- * fetched: XML namespace names React DOM sets, React's error-decoder link,
- * and Tailwind's licence comment.
+ * fetched: XML namespace names React DOM sets, React's and Base UI's
+ * error-decoder links (each only formatted into a thrown error's message) and
+ * Tailwind's licence comment.
  */
 export const INERT_URLS: ReadonlySet<string> = new Set([
   "http://www.w3.org/1998/Math/MathML",
   "http://www.w3.org/1999/xlink",
   "http://www.w3.org/2000/svg",
   "http://www.w3.org/XML/1998/namespace",
+  "https://base-ui.com/production-error",
   "https://react.dev/errors/",
   "https://tailwindcss.com",
 ]);

@@ -293,6 +293,19 @@ describe("distViolations", () => {
       expect(distViolations(dist({ [worker]: code })).length, code).toBeGreaterThan(0);
   });
 
+  test("lets the scripts name Base UI's error-decoder link, and nothing else on its host", () => {
+    const page = "assets/index-BuPP35rj.js";
+    expect(
+      distViolations(dist({ [page]: 'f("https://base-ui.com/production-error","Base UI")' })),
+    ).toEqual([]);
+    for (const url of [
+      "https://base-ui.com/",
+      "https://base-ui.com/production-error/x",
+      "https://base-ui.com.example.com/production-error",
+    ])
+      expect(distViolations(dist({ [page]: `fetch("${url}")` })).length, url).toBeGreaterThan(0);
+  });
+
   test("lets the scripts name the allowed origins, but no lookalike of them", () => {
     const page = "assets/index-BuPP35rj.js";
     for (const url of [

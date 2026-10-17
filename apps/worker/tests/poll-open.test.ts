@@ -30,7 +30,7 @@ import { type LogLine, type RegistrySync, startWorker } from "../src/index.ts";
 const redisUrl = process.env["REDIS_URL"];
 const NOW = new Date("2026-10-17T12:00:00Z");
 const NOW_S = BigInt(NOW.getTime() / 1000);
-const CLOCK = { epoch: 1_700_000_000n, period: 3600n };
+
 const hex = (b: Uint8Array) => Buffer.from(b).toString("hex");
 
 const address = (b: number) => new Uint8Array(20).fill(b);
@@ -42,6 +42,8 @@ const secret = (i: number) => {
 };
 const SECRETS = [1, 2, 3].map(secret);
 const PANEL: Panel = { threshold: 2, keys: SECRETS.map(identityKey) };
+// The hourly clock of the anchor every stub pins.
+const CLOCK = { anchor: address(0xb1), epoch: 1_700_000_000n, period: 3600n };
 const ascending = (keys: Uint8Array[]) =>
   keys.sort((a, b) => Buffer.from(a).compare(Buffer.from(b)));
 
@@ -209,7 +211,17 @@ describe.skipIf(redisUrl === undefined)("the opening job", () => {
     // Its queue's keys are under its own hash tag.
     expect(run.keys.length).toBeGreaterThan(0);
     expect(run.lines).toEqual([
-      { queue: "{poll-open}", opened: 1, waiting: 0, early: 0, unboarded: 0, failed: {} },
+      {
+        queue: "{poll-open}",
+        opened: 1,
+        waiting: 0,
+        early: 0,
+        late: 0,
+        otherAnchor: 0,
+        unboarded: 0,
+        errored: 0,
+        failed: {},
+      },
       { queue: "{poll-open}", outcome: "completed", ms: expect.any(Number) },
     ]);
     const [row] = await db.admin`SELECT state FROM account_polls WHERE id = ${r.id}`;

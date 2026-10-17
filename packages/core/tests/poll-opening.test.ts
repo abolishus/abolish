@@ -52,12 +52,12 @@ import { type TestDb, testDb } from "./db.ts";
 const NOW = new Date("2026-10-17T12:00:00Z");
 const NOW_S = BigInt(NOW.getTime() / 1000);
 const later = (seconds: number) => new Date(NOW.getTime() + seconds * 1000);
-// An hourly clock; the creations' L1 origin is a day before NOW.
-const CLOCK: BoardClock = { epoch: 1_700_000_000n, period: 3600n };
+const address = (b: number) => new Uint8Array(20).fill(b);
+// The hourly clock of the anchor every stub pins; the creations' L1 origin
+// is a day before NOW.
+const CLOCK: BoardClock = { anchor: address(0xb1), epoch: 1_700_000_000n, period: 3600n };
 const ORIGIN = NOW_S - 86_400n;
 const segmentAt = (t: bigint) => Number((t - CLOCK.epoch) / CLOCK.period);
-
-const address = (b: number) => new Uint8Array(20).fill(b);
 const secret = (i: number) => {
   const d = new Uint8Array(32);
   d[0] = 0x42;
@@ -133,8 +133,8 @@ let blockNumber = 1000n;
 interface Registered {
   readonly id: string;
   readonly electionId: Uint8Array;
-  /** What the read-back compares, as the database holds it. */
-  readonly poll: RegisteredPoll;
+  /** What the read-back compares, as the database holds it once synced. */
+  readonly poll: RegisteredPoll & { readonly definition: Uint8Array };
 }
 
 /**
@@ -217,7 +217,16 @@ async function sync(
 
 const SOON = later(60);
 const run = (now = SOON, client = app) => openPolls(client, CLOCK, { now });
-const quiet = { opened: 0, waiting: 0, early: 0, unboarded: 0, failed: {} };
+const quiet = {
+  opened: 0,
+  waiting: 0,
+  early: 0,
+  late: 0,
+  otherAnchor: 0,
+  unboarded: 0,
+  errored: 0,
+  failed: {},
+};
 const poll = async (id: string) => {
   const [r] = await db.admin`SELECT state, failure FROM account_polls WHERE id = ${id}`;
   return r!;
@@ -312,7 +321,7 @@ describe("a registered poll", () => {
     await clear();
   });
 
-  test("fails as open-mismatch when the stored stub no longer matches the draft, writing nothing", async () => {
+  test("fails as open-mismatch when its draft no longer matches what was registered, writing nothing", async () => {
     const r = await registered();
     // The author's draft as stored differs from what was registered.
     await db.admin`
@@ -329,6 +338,61 @@ describe("a registered poll", () => {
     // Its new identifier has no registration: it waits, and nothing is written for the old one.
     expect(await run()).toEqual({ ...quiet, waiting: 1 });
     expect(await readBoard(app, r.electionId)).toEqual([]);
+    await clear();
+  });
+
+  test("judges a registration the sync recorded without its definition by its hash: the draft's waits, another fails", async () => {
+    const r = await registered(false);
+    await recordRegistration(app, {
+      electionId: r.electionId,
+      definitionHash: r.poll.registeredHash,
+      l2Block: ++blockNumber,
+      logIndex: 0,
+    });
+    expect(await run()).toEqual({ ...quiet, waiting: 1 });
+    // The poll left was touched, so polls behind it go first next time.
+    const [row] = await db.admin`SELECT updated_at FROM account_polls WHERE id = ${r.id}`;
+    expect(row!["updated_at"]).toEqual(SOON);
+    await clear();
+
+    const other = await registered(false);
+    await recordRegistration(app, {
+      electionId: other.electionId,
+      definitionHash: new Uint8Array(32).fill(9),
+      l2Block: ++blockNumber,
+      logIndex: 0,
+    });
+    expect(await run()).toEqual({ ...quiet, failed: { "open-mismatch": 1 } });
+    expect(await poll(other.id)).toMatchObject({ state: "failed", failure: "open-mismatch" });
+  });
+
+  test("fails a poll whose stub or approved run is missing, since nothing can be compared", async () => {
+    const r = await registered();
+    await db.admin`UPDATE account_polls SET stub_hash = ${randomBytes(32)} WHERE id = ${r.id}`;
+    expect(await run()).toEqual({ ...quiet, failed: { "open-mismatch": 1 } });
+    expect(await readBoard(app, r.electionId)).toEqual([]);
+  });
+
+  test("leaves a poll whose stub pins another anchor than the clock's, and one past its close", async () => {
+    const r = await registered();
+    expect(await openPolls(app, { ...CLOCK, anchor: address(0xb9) }, { now: SOON })).toEqual({
+      ...quiet,
+      otherAnchor: 1,
+    });
+    expect(await run(new Date(Number(DRAFT.closesAt) * 1000))).toEqual({ ...quiet, late: 1 });
+    expect(await readBoard(app, r.electionId)).toEqual([]);
+    expect((await poll(r.id))["state"]).toBe("registered");
+    await clear();
+  });
+
+  test("counts a poll whose step throws and opens the rest", async () => {
+    const bad = await registered();
+    await db.admin`
+      UPDATE account_polls SET draft = jsonb_set(draft, '{closesAt}', '"soon"') WHERE id = ${bad.id}`;
+    const good = await registered();
+    expect(await run()).toEqual({ ...quiet, opened: 1, errored: 1 });
+    expect((await poll(good.id))["state"]).toBe("open");
+    expect((await poll(bad.id))["state"]).toBe("registered");
     await clear();
   });
 
@@ -350,7 +414,7 @@ describe("the read-back", () => {
     c[c.length - 1]! ^= 1;
     return c;
   };
-  /** The registered definition with `change` applied, as a registry holding it would store it. */
+  /** The registry holding the registered definition with `change` applied, stored and hashed. */
   const holding = (change: (d: ReturnType<typeof decodeElectionDefinitionV5>) => object) => {
     const d = decodeElectionDefinitionV5(base.poll.definition);
     const definition = encodeElectionDefinitionV5({ ...d, ...change(d) } as typeof d);
@@ -361,23 +425,39 @@ describe("the read-back", () => {
     };
   };
 
-  test("accepts the registered definition", () => {
+  test("accepts the registered definition, stored or by its hash alone", () => {
     expect(pollReadBack(base.poll)).toBeUndefined();
+    expect(pollReadBack({ ...base.poll, definition: undefined })).toBeUndefined();
   });
 
-  test("refuses another registered hash, stub, transcript or display text", () => {
+  test("refuses a registry holding anything else, stored or by its hash alone", () => {
+    for (const held of [
+      holding(() => ({ board: address(0xee) })),
+      holding((d) => ({ closes_at: d.closes_at + 60n })),
+      holding((d) => ({ receipt_keys: d.receipt_keys.slice(0, 1) })),
+      holding(() => ({ ceremony_transcript_hash: new Uint8Array(32).fill(7) })),
+      holding((d) => ({ questions: d.questions.slice(0, 1) })),
+    ]) {
+      expect(pollReadBack(held)).toBe("registered-hash");
+      expect(pollReadBack({ ...held, definition: undefined })).toBe("registered-hash");
+    }
     expect(pollReadBack({ ...base.poll, registeredHash: bump(base.poll.registeredHash) })).toBe(
       "registered-hash",
     );
-    expect(pollReadBack({ ...base.poll, definition: base.poll.definition.slice(0, -1) })).toBe(
-      "definition-version",
-    );
-    expect(pollReadBack({ ...base.poll, stubHash: bump(base.poll.stubHash) })).toBe("stub");
+    // Another transcript than the approved one: the definition binds that one.
     expect(pollReadBack({ ...base.poll, transcript: bump(base.poll.transcript) })).toBe(
-      "transcript",
+      "registered-hash",
     );
-    // A registered stub with other pins: not the one the seats approved.
-    expect(pollReadBack(holding(() => ({ board: address(0xee) })))).toBe("stub");
+    // Stored bytes other than the registered ones (the sync checks the hash,
+    // but the read-back doesn't rest on it).
+    expect(pollReadBack({ ...base.poll, definition: base.poll.definition.slice(0, -1) })).toBe(
+      "definition",
+    );
+  });
+
+  test("refuses a recorded stub or display text that isn't the poll's", () => {
+    expect(pollReadBack({ ...base.poll, stubHash: bump(base.poll.stubHash) })).toBe("stub");
+    expect(pollReadBack({ ...base.poll, stub: base.poll.stub.slice(0, -1) })).toBe("stub");
     expect(pollReadBack({ ...base.poll, displayText: bump(base.poll.displayText) })).toBe(
       "display-text",
     );
@@ -400,37 +480,28 @@ describe("the read-back", () => {
       { ...DRAFT, questions: [DRAFT.questions[0]!] },
     ];
     for (const draft of changed) expect(pollReadBack({ ...base.poll, draft })).toBe("display-text");
-    // Fields only the definition states.
+    // Fields only the definition states: the seats' stub no longer follows.
     expect(pollReadBack({ ...base.poll, draft: { ...DRAFT, closesAt: DRAFT.closesAt + 1n } })).toBe(
-      "definition",
+      "stub",
     );
     expect(
       pollReadBack({
         ...base.poll,
         draft: { ...DRAFT, questions: [{ ...q0, maxSelections: 2 }, DRAFT.questions[1]!] },
       }),
-    ).toBe("definition");
-    expect(pollReadBack({ ...base.poll, opensAt: base.poll.opensAt + 1n })).toBe("definition");
-    expect(pollReadBack({ ...base.poll, electionId: bump(base.poll.electionId) })).toBe(
-      "definition",
-    );
+    ).toBe("stub");
+    expect(pollReadBack({ ...base.poll, opensAt: base.poll.opensAt + 1n })).toBe("stub");
+    expect(pollReadBack({ ...base.poll, electionId: bump(base.poll.electionId) })).toBe("stub");
     expect(
-      pollReadBack({
-        ...base.poll,
-        electorate: [{ ...ELECTORATE[0]!, rootL2Block: "501" }],
-      }),
-    ).toBe("definition");
+      pollReadBack({ ...base.poll, electorate: [{ ...ELECTORATE[0]!, rootL2Block: "501" }] }),
+    ).toBe("stub");
   });
 
-  test("the recorded text is the draft's under its salt, and a registered definition with any other field is not the approved stub", () => {
+  test("the recorded text is the draft's under the salt it carries, opening the commitment", () => {
     const registered = decodeElectionDefinitionV5(base.poll.definition);
     const text = decodeDisplayTextV2(base.poll.displayText, registered);
     expect(displayTextV2Commitment(text)).toEqual(registered.display_text_commitment);
     expect(encodeDisplayTextV2(draftDisplayText(DRAFT, text.salt))).toEqual(base.poll.displayText);
-    expect(pollReadBack(holding((d) => ({ closes_at: d.closes_at + 60n })))).toBe("stub");
-    expect(pollReadBack(holding((d) => ({ receipt_keys: d.receipt_keys.slice(0, 1) })))).toBe(
-      "stub",
-    );
   });
 
   test("any single changed byte of the registered definition is refused", () => {

@@ -347,13 +347,17 @@ async function ceremonyCoordinate(
  * poll whose registered definition isn't its draft's fails as
  * `open-mismatch`, which the line counts: that is the alert of ADR 0032
  * rule 13. Waiting for the registry sync is the normal case and logs
- * nothing.
+ * nothing; anything else left is counted.
  */
 async function pollOpen(ctx: JobContext, _data: JobData<"pollOpen">): Promise<void> {
   if (ctx.pollClock === undefined) throw new JobError("internal");
   const report = await openPolls(ctx.sql, ctx.pollClock, { now: ctx.now() });
-  if (report.opened + report.early + report.unboarded > 0 || Object.keys(report.failed).length > 0)
+  const left = report.early + report.late + report.otherAnchor + report.unboarded;
+  if (report.opened + left + report.errored > 0 || Object.keys(report.failed).length > 0)
     ctx.log({ queue: "{poll-open}", ...report });
+  // A poll whose step threw was counted and the rest went on; the job still
+  // fails, so the error is seen.
+  if (report.errored > 0) throw new JobError("poll-open-errors");
 }
 
 /**

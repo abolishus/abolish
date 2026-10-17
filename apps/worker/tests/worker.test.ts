@@ -434,7 +434,10 @@ test("a worker refuses the creation key beside any other job", async () => {
   const ballots = { admissions: {} as BallotAdmissions };
   const registry = { sync: {} as RegistrySync };
   const pollRoots = { roots: {} as PollRoots };
-  const pollStubs = { deployment: {} as PollStubDeployment, clock: { epoch: 0n, period: 3600n } };
+  const pollStubs = {
+    deployment: {} as PollStubDeployment,
+    clock: { anchor: new Uint8Array(20), epoch: 0n, period: 3600n },
+  };
   for (const extra of [
     { anchor },
     { tier0 },
@@ -467,7 +470,10 @@ test("a worker refuses the stub step without the registry sync", async () => {
       log: () => {},
       auditEveryMs: 3_600_000,
       prefix: `abolish-test-${hex(randomBytes(6))}`,
-      pollStubs: { deployment: {} as PollStubDeployment, clock: { epoch: 0n, period: 3600n } },
+      pollStubs: {
+        deployment: {} as PollStubDeployment,
+        clock: { anchor: new Uint8Array(20), epoch: 0n, period: 3600n },
+      },
     }),
   ).rejects.toThrow("only beside the registry sync");
 });

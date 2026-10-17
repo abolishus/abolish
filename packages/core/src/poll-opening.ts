@@ -54,17 +54,19 @@ import { tierElectorate } from "./poll-stubs.ts";
 
 /** Why the read-back refuses a registered definition. */
 export type ReadBackMismatch =
-  /** The stored definition doesn't decode as a version-5 definition. */
-  | "definition-version"
-  /** The registry's event carries another hash than the stored definition's. */
-  | "registered-hash"
-  /** The definition isn't a completion of the poll's approved stub. */
-  | "stub"
-  /** The approved transcript isn't the one the definition binds. */
-  | "transcript"
   /** The recorded display text isn't the draft's, under its own salt. */
   | "display-text"
-  /** A field differs from the draft, the electorate, `opens_at` or the stub's pins. */
+  /**
+   * The draft, electorate or `opens_at` no longer make the stub the seats
+   * approved, so nothing registered under it can be the draft's.
+   */
+  | "stub"
+  /**
+   * The registry's event carries another hash than the definition rebuilt
+   * from the draft and the approved run.
+   */
+  | "registered-hash"
+  /** The stored definition isn't, byte for byte, the one rebuilt. */
   | "definition";
 
 /** What the read-back compares: one registered poll's records. */
@@ -82,53 +84,50 @@ export interface RegisteredPoll {
   readonly transcript: Uint8Array;
   /** The definition hash the registry's `DefinitionRegistered` event carries. */
   readonly registeredHash: Uint8Array;
-  /** The definition the registry sync stored for the election. */
-  readonly definition: Uint8Array;
+  /**
+   * The definition the registry sync stored for the election, or
+   * `undefined` when it recorded the registration without storing it
+   * (`storeDefinition` refused the bytes): the event's hash is then all
+   * there is to compare.
+   */
+  readonly definition: Uint8Array | undefined;
 }
 
 const equal = (a: Uint8Array, b: Uint8Array) =>
   a.length === b.length && a.every((x, i) => x === b[i]);
 
 /**
- * Rule 13's comparison: `undefined` when the registered definition is
- * exactly the definition `poll`'s draft, electorate and approved stub make,
- * completed with the approved transcript's hash, and the recorded display
- * text is the draft's under the salt it carries; otherwise the first
- * mismatch. The definition is compared as bytes after rebuilding it, so no
- * field, present or added by a later version, is left out (T-34).
+ * Rule 13's comparison: `undefined` when the registry holds exactly the
+ * definition `poll`'s draft, electorate and approved stub make, completed
+ * with the approved transcript's hash, and the recorded display text is the
+ * draft's under the salt it carries; otherwise the first mismatch. The
+ * definition is rebuilt and compared by its registered hash and, once
+ * stored, as bytes, so no field, present or added by a later version, is
+ * left out (T-34).
  */
 export function pollReadBack(poll: RegisteredPoll): ReadBackMismatch | undefined {
   try {
     return readBack(poll);
   } catch (e) {
-    // Bytes with no decoding, or a stored value with no encoding: whatever
-    // the registry holds, it isn't the draft's.
+    // A recorded stub with no decoding, or a stored value with no encoding:
+    // nothing registered can be the draft's.
     if (
       e instanceof DecodeError ||
       e instanceof EncodeError ||
       e instanceof UnsupportedVersionError
     )
-      return "definition";
+      return "stub";
     throw e;
   }
 }
 
 function readBack(poll: RegisteredPoll): ReadBackMismatch | undefined {
-  let registered: ElectionDefinitionV5;
-  try {
-    registered = decodeElectionDefinitionV5(poll.definition);
-  } catch (e) {
-    if (e instanceof DecodeError || e instanceof UnsupportedVersionError)
-      return "definition-version";
-    throw e;
-  }
-  if (!equal(electionDefinitionV5Hash(registered), poll.registeredHash)) return "registered-hash";
-  if (!equal(electionStubV5Hash(registered), poll.stubHash)) return "stub";
-  const transcriptHash = ceremonyTranscriptHash(poll.transcript);
-  if (!equal(registered.ceremony_transcript_hash, transcriptHash)) return "transcript";
+  // The deployment's pins, the panel and the receipt keys, as the seats
+  // approved them.
+  const stub = decodeElectionDefinitionV5(poll.stub);
   let text;
   try {
-    const { salt } = decodeDisplayTextV2(poll.displayText, registered);
+    const { salt } = decodeDisplayTextV2(poll.displayText, stub);
     text = draftDisplayText(poll.draft, salt);
     if (!equal(encodeDisplayTextV2(text), poll.displayText)) return "display-text";
   } catch (e) {
@@ -136,23 +135,29 @@ function readBack(poll: RegisteredPoll): ReadBackMismatch | undefined {
     throw e;
   }
   const expected: ElectionDefinitionV5 = {
-    // The deployment's pins, the panel and the receipt keys, as the seats
-    // approved them.
-    ...decodeElectionDefinitionV5(poll.stub),
+    ...stub,
     election_id: poll.electionId,
     questions: draftQuestions(poll.draft),
     electorate: poll.electorate.map(tierElectorate),
     opens_at: poll.opensAt,
     closes_at: poll.draft.closesAt,
     display_text_commitment: displayTextV2Commitment(text),
-    ceremony_transcript_hash: transcriptHash,
+    ceremony_transcript_hash: ceremonyTranscriptHash(poll.transcript),
   };
-  if (!equal(encodeElectionDefinitionV5(expected), poll.definition)) return "definition";
+  if (!equal(electionStubV5Hash(expected), poll.stubHash)) return "stub";
+  if (!equal(electionDefinitionV5Hash(expected), poll.registeredHash)) return "registered-hash";
+  if (
+    poll.definition !== undefined &&
+    !equal(encodeElectionDefinitionV5(expected), poll.definition)
+  )
+    return "definition";
   return undefined;
 }
 
 /** The anchoring clock of the anchor every stub pins (docs/spec/board.md, Timing), in seconds. */
 export interface BoardClock {
+  /** The anchor's address on L1, 20 bytes: a poll whose stub pins another is left. */
+  readonly anchor: Uint8Array;
   readonly epoch: bigint;
   readonly period: bigint;
 }
@@ -166,12 +171,18 @@ export type OpenFailure =
 export interface PollOpenReport {
   /** Polls moved to `open`, their transcript boarded and display text stored. */
   opened: number;
-  /** Registered polls whose registration the registry sync hasn't stored yet. */
+  /** Registered polls whose registration the registry sync hasn't recorded or stored yet. */
   waiting: number;
   /** Polls left because the clock is before their first segment `f`. */
   early: number;
+  /** Polls left because they close before they could open (part 5d fails them). */
+  late: number;
+  /** Polls left because their stub pins another anchor than the clock's. */
+  otherAnchor: number;
   /** Polls left because their board already starts with another entry. */
   unboarded: number;
+  /** Polls whose step threw; the rest of the run goes on, and the caller fails the job. */
+  errored: number;
   /** Polls moved to `failed`, by reason. */
   failed: Partial<Record<OpenFailure, number>>;
 }
@@ -181,24 +192,41 @@ export const OPENS_PER_RUN = 20;
 
 const MAX_SEGMENT = 0xffffffffn;
 
+type Outcome = "opened" | "waiting" | "early" | "late" | "otherAnchor" | "unboarded" | "failed";
+
 /**
- * One run of the opening step: every registered poll, oldest first, whose
- * registration and definition the registry sync has stored, is read back
- * against its draft (`pollReadBack`); a mismatch fails it as
- * `open-mismatch`. Otherwise its display text is stored, its transcript is
- * boarded as entry 0 in the clock's current segment (never below `f`), and
- * it moves to `open`. Safe to rerun after a crash at any point: the text
- * and the first entry are written once and found again, and a poll moves
- * only from `registered`, holding the identifier it was read with.
+ * One run of the opening step: up to `OPENS_PER_RUN` registered polls,
+ * least recently touched first. A poll whose registration the registry sync
+ * has recorded is read back against its draft (`pollReadBack`), by the
+ * event's hash alone until its definition is stored; a mismatch fails it as
+ * `open-mismatch`. Once stored and matching, its transcript is boarded as
+ * entry 0 in the clock's current segment (never below `f`), its display text
+ * is stored, and it moves to `open`. A poll left (waiting, early, late,
+ * another anchor, unboarded) has its time touched, so polls that can't move
+ * never hold the run's slots from the rest; one whose step throws is
+ * counted in `errored` and the run goes on. Safe to rerun after a crash at
+ * any point: the first entry and the text are written once and found again,
+ * and a poll moves only from `registered`, holding the identifier it was
+ * read with.
  */
 export async function openPolls(
   client: Sql,
   clock: BoardClock,
   options: { readonly now: Date },
 ): Promise<PollOpenReport> {
-  if (clock.period < 1n || clock.epoch < 0n) throw new RangeError("the clock is malformed");
+  if (clock.period < 1n || clock.epoch < 0n || clock.anchor.length !== 20)
+    throw new RangeError("the clock is malformed");
   const db = drizzle({ client });
-  const report: PollOpenReport = { opened: 0, waiting: 0, early: 0, unboarded: 0, failed: {} };
+  const report: PollOpenReport = {
+    opened: 0,
+    waiting: 0,
+    early: 0,
+    late: 0,
+    otherAnchor: 0,
+    unboarded: 0,
+    errored: 0,
+    failed: {},
+  };
   const polls = await db
     .select({
       id: accountPolls.id,
@@ -220,30 +248,35 @@ export async function openPolls(
       eq(accountPolls.state, "registered"),
       eq(accountPolls.electionId, electionId),
     );
-  const fail = async (id: string, electionId: Uint8Array) => {
-    const moved = await db
-      .update(accountPolls)
-      .set({ state: "failed", failure: "open-mismatch", updatedAt: options.now })
-      .where(unopened(id, electionId))
-      .returning({ id: accountPolls.id });
-    if (moved.length > 0)
-      report.failed["open-mismatch"] = (report.failed["open-mismatch"] ?? 0) + 1;
-  };
-  for (const p of polls) {
+  const move = async (
+    id: string,
+    electionId: Uint8Array,
+    set: { state?: "open" | "failed"; failure?: OpenFailure },
+  ) =>
+    (
+      await db
+        .update(accountPolls)
+        .set({ ...set, updatedAt: options.now })
+        .where(unopened(id, electionId))
+        .returning({ id: accountPolls.id })
+    ).length > 0;
+
+  const open = async (p: (typeof polls)[number]): Promise<Outcome | undefined> => {
     // The table requires all three, and the origin with the identifier, from
     // `registered` on.
     const electionId = Uint8Array.from(p.electionId as Uint8Array);
     const stubHash = Uint8Array.from(p.stubHash as Uint8Array);
     const origin = p.origin as bigint;
+    const fail = async () =>
+      (await move(p.id, electionId, { state: "failed", failure: "open-mismatch" }))
+        ? "failed"
+        : undefined;
     const [registration] = await db
       .select({ definitionHash: electionRegistrations.definitionHash })
       .from(electionRegistrations)
       .where(eq(electionRegistrations.electionId, electionId));
+    if (registration === undefined) return "waiting";
     const definition = await readDefinition(client, electionId);
-    if (registration === undefined || definition === undefined) {
-      report.waiting++;
-      continue;
-    }
     const [stub] = await db
       .select({
         stub: ceremonyStubs.stub,
@@ -253,50 +286,42 @@ export async function openPolls(
       .from(ceremonyStubs)
       .where(eq(ceremonyStubs.stubHash, stubHash));
     const approved = await approvedCeremony(client, stubHash);
+    // A registered poll's stub and approved run are recorded before its
+    // registration is signed; without them nothing can be compared.
+    if (stub === undefined || approved === undefined) return fail();
     const stored = p.draft as { closesAt: string } & Omit<PollDraft, "closesAt">;
-    const mismatch =
-      stub === undefined || approved === undefined
-        ? "stub"
-        : pollReadBack({
-            electionId,
-            draft: { ...stored, closesAt: BigInt(stored.closesAt) },
-            electorate: p.electorate as StoredTierElectorate[],
-            stubHash,
-            stub: Uint8Array.from(stub.stub),
-            displayText: Uint8Array.from(stub.displayText),
-            opensAt: stub.opensAt,
-            transcript: approved.transcript,
-            registeredHash: Uint8Array.from(registration.definitionHash),
-            definition,
-          });
-    if (mismatch !== undefined || stub === undefined || approved === undefined) {
-      await fail(p.id, electionId);
-      continue;
-    }
+    const draft: PollDraft = { ...stored, closesAt: BigInt(stored.closesAt) };
+    const mismatch = pollReadBack({
+      electionId,
+      draft,
+      electorate: p.electorate as StoredTierElectorate[],
+      stubHash,
+      stub: Uint8Array.from(stub.stub),
+      displayText: Uint8Array.from(stub.displayText),
+      opensAt: stub.opensAt,
+      transcript: approved.transcript,
+      registeredHash: Uint8Array.from(registration.definitionHash),
+      definition,
+    });
+    if (mismatch !== undefined) return fail();
+    // Registered as the draft's, but not stored yet: the registry sync stores
+    // it on a later run.
+    if (definition === undefined) return "waiting";
+    // The transcript is labelled by the clock of the anchor the definition
+    // pins; another anchor's periods would mislabel it (docs/spec/board.md,
+    // Timing).
+    if (!equal(decodeElectionDefinitionV5(definition).l1_anchor, clock.anchor))
+      return "otherAnchor";
+    if (now >= draft.closesAt) return "late";
     // Anchors count from segment 0 up, so an origin before the epoch is `f` = 0.
     const first = origin < clock.epoch ? 0n : (origin - clock.epoch) / clock.period;
     const segment = now < clock.epoch ? -1n : (now - clock.epoch) / clock.period;
     // A clock behind the creation's L1 origin would label the transcript
     // below `f`; time fixes it.
-    if (segment < first) {
-      report.early++;
-      continue;
-    }
+    if (segment < first) return "early";
     if (segment > MAX_SEGMENT) throw new RangeError("the clock is past the last segment");
-    try {
-      await storeDisplayText(client, electionId, Uint8Array.from(stub.displayText));
-    } catch (e) {
-      if (!(e instanceof DisplayTextError)) throw e;
-      // The client's own check refuses the text against the registered
-      // definition: nobody could be shown the poll.
-      if (e.code === "refused") {
-        await fail(p.id, electionId);
-        continue;
-      }
-      // `conflict`: the text was stored and since taken down. Serving it is
-      // moderation's; the definition commits to this one record either way.
-      if (e.code !== "conflict") throw e;
-    }
+    // Boarded before the text is stored, so a poll left unboarded serves
+    // nothing.
     try {
       await appendEntry(client, electionId, Number(segment), approved.transcript, {
         first: true,
@@ -304,15 +329,40 @@ export async function openPolls(
       });
     } catch (e) {
       if (!(e instanceof AppendError && e.code === "not-first")) throw e;
-      report.unboarded++;
+      return "unboarded";
+    }
+    try {
+      await storeDisplayText(client, electionId, Uint8Array.from(stub.displayText));
+    } catch (e) {
+      if (!(e instanceof DisplayTextError)) throw e;
+      // The client's own check refuses the text against the registered
+      // definition: nobody could be shown the poll.
+      if (e.code === "refused") return fail();
+      // `conflict`: the text was stored and since taken down. Serving it is
+      // moderation's; the definition commits to this one record either way.
+      if (e.code !== "conflict") throw e;
+    }
+    return (await move(p.id, electionId, { state: "open" })) ? "opened" : undefined;
+  };
+
+  for (const p of polls) {
+    let outcome;
+    try {
+      outcome = await open(p);
+    } catch {
+      // One poll's malformed row or unexpected refusal never holds up the
+      // rest; the count fails the job, so it is still seen.
+      report.errored++;
       continue;
     }
-    const moved = await db
-      .update(accountPolls)
-      .set({ state: "open", updatedAt: options.now })
-      .where(unopened(p.id, electionId))
-      .returning({ id: accountPolls.id });
-    report.opened += moved.length;
+    if (outcome === undefined) continue;
+    if (outcome === "failed") {
+      report.failed["open-mismatch"] = (report.failed["open-mismatch"] ?? 0) + 1;
+      continue;
+    }
+    report[outcome]++;
+    // Touched, so the next run takes the polls behind it first.
+    if (outcome !== "opened") await move(p.id, Uint8Array.from(p.electionId as Uint8Array), {});
   }
   return report;
 }

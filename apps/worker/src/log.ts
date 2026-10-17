@@ -208,6 +208,7 @@ export type ErrorKind =
   | "tier0-chain-unavailable"
   | "registry-sync-refused"
   | "poll-root-refused"
+  | "poll-open-errors"
   | "internal";
 
 export type LogLine =

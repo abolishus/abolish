@@ -299,7 +299,7 @@ if (registryConfig !== undefined) {
         createPublicClient({ transport: http(c.l1RpcUrl, { timeout: 30_000 }) }),
         { chainId: c.l1ChainId, anchor: `0x${Buffer.from(deployment.l1Anchor).toString("hex")}` },
       );
-      pollStubs = { deployment, clock };
+      pollStubs = { deployment, clock: { anchor: deployment.l1Anchor, ...clock } };
     } catch (e) {
       if (e instanceof BaseError) throw new Error("the opening step couldn't reach the L1 node");
       throw e;

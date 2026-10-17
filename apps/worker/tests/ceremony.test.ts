@@ -137,7 +137,7 @@ async function scheduledRun(now: Date) {
       everyMs: 3_600_000,
       coordinateEveryMs: 3_600_000,
       openEveryMs: 3_600_000,
-      clock: { epoch: 0n, period: 3600n },
+      clock: { anchor: new Uint8Array(20), epoch: 0n, period: 3600n },
     },
   });
   const queue = "{ceremony-coordinate}";

@@ -441,9 +441,10 @@ contract ElectionRegistry is EventAccumulator {
     /// for 3 and 4, 3 for 5; none for 6, whose ballot version 4 the board
     /// can't check), the spoiled-ballot opening version that opens that
     /// ballot's cores, board-entry version 5, the only one that allows the
-    /// close statement, contract-event version 6, the only one that archives
+    /// close statement, contract-event version 7, the only one that archives
     /// every event of the board (the close rule's, the batches' and the
-    /// obligation root's) and of the group registry (its Tier 1 additions),
+    /// obligation root's) and of the group registry (its Tier 1 additions
+    /// and its self-paid groups and additions),
     /// and the display-text version the
     /// definition's layout needs. So no registered election leaves a voter's
     /// direct submission, a seat's statement or a challenge without a path
@@ -458,7 +459,7 @@ contract ElectionRegistry is EventAccumulator {
         // Opening version 2 opens the cores of ballot versions 2 and 3.
         if (pins[2] != (ballot == 1 ? 1 : 2)) revert ProfileNotServed(0x0003, pins[2]);
         if (pins[6] != 5) revert ProfileNotServed(0x0007, pins[6]);
-        if (pins[7] != 6) revert ProfileNotServed(0x0008, pins[7]);
+        if (pins[7] != 7) revert ProfileNotServed(0x0008, pins[7]);
         // Display-text version 2 carries definition version 5's questions.
         if (pins[8] != (v == 5 ? 2 : 1)) revert ProfileNotServed(0x0009, pins[8]);
     }

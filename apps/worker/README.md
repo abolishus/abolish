@@ -79,7 +79,7 @@ The registry sync (`{registry-sync}`, P3-5 parts 3a and 3b) runs only when every
 | `REGISTRY_SYNC_L1_CHAIN_ID`       | The L1's chain ID.                                                                                                                    |
 | `REGISTRY_SYNC_PORTAL`            | The L2's `OptimismPortal` on L1: the factory its `disputeGameFactory()` names and its `respectedGameType()` decide which roots count. |
 | `REGISTRY_SYNC_ELECTION_REGISTRY` | The election registry's address; `REGISTRY_SYNC_TRUSTEE_REGISTRY`, `_GROUP_REGISTRY` and `_BOARD` the other three, distinct.          |
-| `REGISTRY_SYNC_EVENT_VERSION`     | The contract-event version the deployment's profiles pin (verifier 2.3), 1 to 6.                                                      |
+| `REGISTRY_SYNC_EVENT_VERSION`     | The contract-event version the deployment's profiles pin (verifier 2.3), 1 to 7.                                                      |
 
 No URL is quoted in an error, and a startup that can't reach the nodes says only that.
 

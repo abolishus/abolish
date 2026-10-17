@@ -246,10 +246,10 @@ contract ElectionRegistryTest is TestBase {
     /// decodes, by pin (type 0x0001 to 0x0009), written from the spec: 0
     /// where any version is admitted. Version 6 has none.
     function _served(uint8 version) internal pure returns (uint8[9] memory v) {
-        if (version == 1) return [1, 1, 1, 0, 0, 0, 5, 6, 1];
-        if (version == 3) return [3, 2, 2, 0, 0, 0, 5, 6, 1];
-        if (version == 4) return [4, 2, 2, 0, 0, 0, 5, 6, 1];
-        return [5, 3, 2, 0, 0, 0, 5, 6, 2];
+        if (version == 1) return [1, 1, 1, 0, 0, 0, 5, 7, 1];
+        if (version == 3) return [3, 2, 2, 0, 0, 0, 5, 7, 1];
+        if (version == 4) return [4, 2, 2, 0, 0, 0, 5, 7, 1];
+        return [5, 3, 2, 0, 0, 0, 5, 7, 2];
     }
 
     function _templateOf(bytes32 id, uint8 version)
@@ -285,10 +285,11 @@ contract ElectionRegistryTest is TestBase {
         }
     }
 
-    /// Each served pin set to any other version from 1 to 7 is refused with
+    /// Each served pin set to any other version from 1 to 8 is refused with
     /// its record type and the version pinned, and nothing is recorded:
-    /// contract-event versions 1 to 5, which can't read every event of the
-    /// board and the group registry (version 5 names no Tier 1 addition);
+    /// contract-event versions 1 to 6, which can't read every event of the
+    /// board and the group registry (version 5 names no Tier 1 addition,
+    /// version 6 no self-paid group or addition);
     /// board-entry versions without the close statement; ballot versions the
     /// board can't check, or that don't name the definition's cells; opening
     /// versions that don't open the ballot's cores; and display-text versions
@@ -299,7 +300,7 @@ contract ElectionRegistryTest is TestBase {
             uint8[9] memory served = _served(versions[i]);
             for (uint256 t = 1; t < 9; t++) {
                 if (served[t] == 0) continue;
-                for (uint8 v = 1; v <= 7; v++) {
+                for (uint8 v = 1; v <= 8; v++) {
                     if (v == served[t]) continue;
                     bytes32 id = _create();
                     ElectionDefinitionLib.Definition memory d = _templateOf(id, versions[i]);

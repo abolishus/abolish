@@ -146,7 +146,7 @@ describe("ballot-v3-records.json", () => {
       // Ballot version 3 with opening version 2, which opens its cores, fits;
       // the vectors' profiles predate the close rule (board-entry version 4,
       // contract-event version 1), which 2.3 now refuses, and fit once they
-      // pin board-entry version 5 and contract-event version 6 ([[close]],
+      // pin board-entry version 5 and contract-event version 7 ([[close]],
       // Version).
       expect(profileCombinationRule(d)).toBe("profile-combination");
       const closing = {
@@ -157,7 +157,7 @@ describe("ballot-v3-records.json", () => {
             p.record_type === RECORD_TYPES.boardEntry
               ? { ...p, version: 5 }
               : p.record_type === RECORD_TYPES.contractEvent
-                ? { ...p, version: 6 }
+                ? { ...p, version: 7 }
                 : p,
           ),
         },

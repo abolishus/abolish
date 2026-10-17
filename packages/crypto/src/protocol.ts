@@ -318,15 +318,15 @@ export const SPOILED_OPENING_VERSIONS: ReadonlySet<number> = new Set<number>([1,
 export const BALLOT_VERSIONS: ReadonlySet<number> = new Set<number>([1, 2, 3, 4]);
 // The contract-event versions this package reads (contract-event.ts's
 // CONTRACT_EVENT), written out for the same reason; a test ties the two.
-// Only version 6's tables name every board event (the close rule's, the
-// batches' and the obligation root's) and the group registry's Tier 1
-// addition, which lands in the sequence every election shares, so 2.3 fails
-// a profile pinning version 1 to 5 ([[close]], Version; [[contracts]],
-// Contract-event record; T-35, T-50, T-25, T-53). The codec reads versions 7
-// and 8 too, which 2.3 leaves unverifiable until P3-2 part 5b-2 and P4-3
-// part 2c-3 make each in turn the version every profile pins.
-export const CONTRACT_EVENT_VERSIONS: ReadonlySet<number> = new Set<number>([1, 2, 3, 4, 5, 6]);
-const EVENT_VERSION = 6;
+// Only version 7's tables name every board event (the close rule's, the
+// batches' and the obligation root's) and every group-registry event (the
+// Tier 1 addition and the self-paid group and addition), which land in the
+// sequence every election shares, so 2.3 fails a profile pinning version 1
+// to 6 ([[close]], Version; [[contracts]], Contract-event record; T-35,
+// T-50, T-25, T-53). The codec reads version 8 too, which 2.3 leaves
+// unverifiable until P4-3 part 2c-3 makes it the version every profile pins.
+export const CONTRACT_EVENT_VERSIONS: ReadonlySet<number> = new Set<number>([1, 2, 3, 4, 5, 6, 7]);
+const EVENT_VERSION = 7;
 
 /** Why 2.3's profile combination refuses a definition's pins. */
 export type ProfileCombinationRule = "profile-combination" | "unsupported-version";
@@ -348,12 +348,12 @@ export type ProfileCombinationRule = "profile-combination" | "unsupported-versio
  * destruction statements (4 or 5, docs/spec/tally.md, Destruction), so an
  * election's creator can't leave delivery, challenge or destruction off the
  * board (T-34, T-42). Every profile also needs a board-entry version that
- * carries close statements (5) and contract-event version 6, which archives
+ * carries close statements (5) and contract-event version 7, which archives
  * every board event (the close rule's, the batches' and the obligation
- * root's) and the group registry's Tier 1 additions, so a seat can always
- * state the close and force what it owes, and the verifier read all of it
- * ([[close]], Version; T-35, T-50, T-25, T-53): board-entry version 1, 3 or
- * 4 and contract-event version 1 to 5 fail, as
+ * root's) and the group registry's Tier 1 and self-paid additions, so a seat
+ * can always state the close and force what it owes, and the verifier read
+ * all of it ([[close]], Version; T-35, T-50, T-25, T-53): board-entry
+ * version 1, 3 or 4 and contract-event version 1 to 6 fail, as
  * does board-entry version 6, which carries running openings and only a
  * live definition pins (docs/spec/tally.md, Tally-opening version 2), and
  * version 7, which is only for a definition with an author panel; a contract-event
@@ -446,7 +446,7 @@ export function profileCombinationRule(
     allowed.includes(RECORD_TYPES.shareReceipt) && allowed.includes(RECORD_TYPES.shareComplaint);
   const carriesDestruction = allowed.includes(RECORD_TYPES.destructionStatement);
   // Every profile needs the close statement on the board (board-entry
-  // version 5) and every event archived (contract-event version 6),
+  // version 5) and every event archived (contract-event version 7),
   // whatever its definition version, or its seats have no way
   // to state the close and 5.5 and 6.3 can't be checked ([[close]],
   // Version; T-35, T-50). A contract-event version this package doesn't

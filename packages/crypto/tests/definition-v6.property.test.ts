@@ -365,7 +365,7 @@ describe("2.3's profile combination under version 6", () => {
     [RECORD_TYPES.spoiledBallotOpening]: 3,
     [RECORD_TYPES.tallyOpening]: 1,
     [RECORD_TYPES.boardEntry]: 5,
-    [RECORD_TYPES.contractEvent]: 6,
+    [RECORD_TYPES.contractEvent]: 7,
     [RECORD_TYPES.displayText]: 2,
   };
   const v6 = (
@@ -447,8 +447,8 @@ describe("2.3's profile combination under version 6", () => {
       { [RECORD_TYPES.displayText]: 1 },
       { [RECORD_TYPES.displayText]: 3 },
       { [RECORD_TYPES.displayText]: undefined },
-      // Contract-event versions 1 to 5 miss board or registry events.
-      ...[1, 2, 3, 4, 5].map((events) => ({ [RECORD_TYPES.contractEvent]: events })),
+      // Contract-event versions 1 to 6 miss board or registry events.
+      ...[1, 2, 3, 4, 5, 6].map((events) => ({ [RECORD_TYPES.contractEvent]: events })),
       // A failure is reported beside a version this package doesn't read.
       { [RECORD_TYPES.boardEntry]: 1, [RECORD_TYPES.spoiledBallotOpening]: 255 },
       { [RECORD_TYPES.ballot]: 3, [RECORD_TYPES.contractEvent]: 255 },

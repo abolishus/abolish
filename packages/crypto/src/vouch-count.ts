@@ -73,7 +73,7 @@ export type GroupRegistryEvent =
       readonly record: Uint8Array;
     }
   | {
-      /** A Tier 1 addition record, as the registry's `Tier1MemberAdded` logs it (contract-event version 6). */
+      /** A Tier 1 addition record, as the registry's `Tier1MemberAdded` logs it (contract-event versions 6 and 7). */
       readonly kind: "tier1-addition";
       readonly block: bigint;
       readonly record: Uint8Array;

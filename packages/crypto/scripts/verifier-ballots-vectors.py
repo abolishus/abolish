@@ -22,7 +22,7 @@ code with packages/crypto or packages/verifier: verifier-ceremony-vectors.py
 (the definitions, transcripts, board entries and the ceremony rows) and
 ballot-vectors.py (Baby Jubjub, tier trees, the ballot record and its
 admission checks in order) and contract-event-v2-vectors.py to
-contract-event-v6-vectors.py (the contract-event record, versions 2 to 6,
+contract-event-v7-vectors.py (the contract-event record, versions 2 to 7,
 and their event checks).
 
 Membership proofs need a Groth16 prover, so generation has three steps, as
@@ -60,6 +60,7 @@ ce3 = _load("contract_event_v3_vectors", "contract-event-v3-vectors.py")
 ce4 = _load("contract_event_v4_vectors", "contract-event-v4-vectors.py")
 ce5 = _load("contract_event_v5_vectors", "contract-event-v5-vectors.py")
 ce6 = _load("contract_event_v6_vectors", "contract-event-v6-vectors.py")
+ce7 = _load("contract_event_v7_vectors", "contract-event-v7-vectors.py")
 vc = _load("verifier_ceremony_vectors", "verifier-ceremony-vectors.py")
 cv, dv, bv, rev, mem = vc.cv, vc.dv, bal.bv, bal.rev, bal.mem
 
@@ -74,7 +75,7 @@ CLOCK = {"epoch": 1767225600, "period": 3600, "deadline": 7200, "lastSegment": 2
 BALLOT_SUBMITTED = "BallotSubmitted(bytes32,bytes32,bytes)"
 # The contract-event versions this generator reads, and the relayed path's
 # call fields: any, since the board carries them unjudged.
-READ_EVENTS = (1, 2, 3, 4, 5, 6)
+READ_EVENTS = (1, 2, 3, 4, 5, 6, 7)
 # The board-entry version every profile here pins: 5, the one that allows the
 # close statement, and reads every other record as version 4 does.
 BOARD_VERSION = 5
@@ -119,13 +120,14 @@ def combination(d):
     events = pins.get(CONTRACT_EVENT_TYPE)
     failed = outcome("fail", "profile-combination", {})
     # Every profile pins board-entry version 5, which allows the close
-    # statement, and contract-event version 6, whose tables name every board
+    # statement, and contract-event version 7, whose tables name every board
     # event, the close rule's, the batches' and the obligation root's, and
-    # the group registry's Tier 1 addition (close.md, Version; contracts.md,
-    # Event tables (version 6)); a contract-event version this verifier
-    # doesn't read is a later release's, once nothing else fails.
-    closes = board == 5 and events not in (1, 2, 3, 4, 5, None)
-    settled = NOT_IMPLEMENTED if events == 6 else outcome("unverifiable", "unsupported-version", {})
+    # the group registry's Tier 1 and self-paid additions (close.md,
+    # Version; contracts.md, Event tables (version 7)); a contract-event
+    # version this verifier doesn't read is a later release's, once nothing
+    # else fails.
+    closes = board == 5 and events not in (1, 2, 3, 4, 5, 6, None)
+    settled = NOT_IMPLEMENTED if events == 7 else outcome("unverifiable", "unsupported-version", {})
     # A board-entry version this verifier can't read is a later release's,
     # before any combination (verifier.md, Definition, step 2).
     if board not in (1, 3, 4, 5):
@@ -168,48 +170,57 @@ def window(d, path):
 
 
 def via(kind, inner, segment=0, time=None):
-    """A board item carried another way: in an entry of `segment` (kind "board"), or as a contract-event record of the board's `BallotSubmitted` with L2 timestamp `time` ("event"), or of the same log from an address the definition doesn't name ("foreign"), or of its `RelayedBallotSubmitted` with stamp `time` ("relayed", contract-event versions 3 to 6), or a contract-event record that carries no ballot, given whole as {"record": bytes} ("record")."""
+    """A board item carried another way: in an entry of `segment` (kind "board"), or as a contract-event record of the board's `BallotSubmitted` with L2 timestamp `time` ("event"), or of the same log from an address the definition doesn't name ("foreign"), or of its `RelayedBallotSubmitted` with stamp `time` ("relayed", contract-event versions 3 to 7), or a contract-event record that carries no ballot, given whole as {"record": bytes} ("record")."""
     return {"via": kind, "item": inner, "segment": segment, "time": time}
 
 
 def event_record(d, rec, n, time, contract=None, version=2, relayed=False):
-    """A contract-event record of `version` (2 to 6) of the board's `BallotSubmitted` carrying `rec`, or under version 3 of its `RelayedBallotSubmitted` with stamp `time` and RELAY_CALL's other fields, framed as the board frames it (contracts.md, Board, Events)."""
+    """A contract-event record of `version` (2 to 7) of the board's `BallotSubmitted` carrying `rec`, or under version 3 of its `RelayedBallotSubmitted` with stamp `time` and RELAY_CALL's other fields, framed as the board frames it (contracts.md, Board, Events)."""
     framed = ce2.frame_ballot(rec)
     assert framed is not None
     if relayed:
-        assert version in (3, 4, 5, 6)
+        assert version in (3, 4, 5, 6, 7)
         index, l1_block, gas = RELAY_CALL
         topics = [ce3.sig_topic(ce3.RELAYED), framed[0], framed[1]]
         data = ce3.word(index) + ce3.word(l1_block) + ce3.word(time) + ce3.word(gas) + ce3.word(0xA0) + ce3.abi_bytes(rec)
-        return {3: ce3, 4: ce4, 5: ce5, 6: ce6}[version].encode(contract or d["board"], n, 5_000_000 + n, d["opens_at"] + n, topics, data)
+        return {3: ce3, 4: ce4, 5: ce5, 6: ce6, 7: ce7}[version].encode(contract or d["board"], n, 5_000_000 + n, d["opens_at"] + n, topics, data)
     topics = [ce2.sig_topic(BALLOT_SUBMITTED), framed[0], framed[1]]
     data = ce2.word(32) + ce2.abi_bytes(rec)
-    encode = {2: ce2, 3: ce3, 4: ce4, 5: ce5, 6: ce6}[version].encode
+    encode = {2: ce2, 3: ce3, 4: ce4, 5: ce5, 6: ce6, 7: ce7}[version].encode
     return encode(contract or d["board"], n, 5_000_000 + n, time, topics, data)
 
 
 def root_event(d, definition_hash, n, time):
-    """The board's `ObligationRootSubmitted` under contract-event version 6, carrying delivery-root.json's receipt root with `definition_hash` in place of its own: the event check reads the root's fields, never its signature (contracts.md, Board, Events)."""
+    """The board's `ObligationRootSubmitted` under contract-event version 7, carrying delivery-root.json's receipt root with `definition_hash` in place of its own: the event check reads the root's fields, never its signature (contracts.md, Board, Events)."""
     root = bytes.fromhex(next(r for r in json.loads((VECTORS / "delivery-root.json").read_text())["records"] if r["id"] == "receipt-root")["encoding"])
     root = root[:3] + definition_hash + root[35:]
     topics = [ce5.sig_topic(ce5.ROOT), definition_hash, ce5.word(root[35])]
-    payload = ce6.encode(d["board"], n, 5_000_000 + n, time, topics, ce5.word(32) + ce5.abi_bytes(root))
+    payload = ce7.encode(d["board"], n, 5_000_000 + n, time, topics, ce5.word(32) + ce5.abi_bytes(root))
     assert _event_of(d, payload) == "ObligationRootSubmitted"
     return payload
 
 
 def tier1_event(d, n, time):
-    """The group registry's `Tier1MemberAdded` under contract-event version 6, carrying vouch.json's honest addition (contracts.md, Group registry, Events)."""
+    """The group registry's `Tier1MemberAdded` under contract-event version 7, carrying vouch.json's honest addition (contracts.md, Group registry, Events)."""
     addition = bytes.fromhex(next(a for a in json.loads((VECTORS / "vouch.json").read_text())["additions"] if a["id"] == "honest")["record"])
-    payload = ce6.encode(d["group_registry"], n, 4_000_000 + n, time, [ce6.sig_topic(ce6.TIER1)], ce6.word(32) + ce6.abi_bytes(addition))
+    payload = ce7.encode(d["group_registry"], n, 4_000_000 + n, time, [ce6.sig_topic(ce6.TIER1)], ce6.word(32) + ce6.abi_bytes(addition))
     assert _event_of(d, payload) == "Tier1MemberAdded"
     return payload
 
 
+def self_paid_events(d, group, n, time):
+    """The group registry's `SelfPaidGroupCreated` for `group` and its first `SelfPaidMemberAdded` under contract-event version 7, with contract-event-v7-vectors.py's commitment for this file (contracts.md, Group registry, Self-paid additions)."""
+    created = ce7.encode(d["group_registry"], n, 4_000_000 + n, time, [ce7.sig_topic(ce7.CREATED), ce7.word(group)], b"")
+    body = ce7.self_paid(group, ce7.commitment("verifier-ballots/self-paid"))
+    added = ce7.encode(d["group_registry"], n + 1, 4_000_001 + n, time + 1, [ce7.sig_topic(ce7.ADDED), ce7.word(group), ce7.word(0)], ce7.word(32) + ce7.abi_bytes(body))
+    assert _event_of(d, created) == "SelfPaidGroupCreated" and _event_of(d, added) == "SelfPaidMemberAdded"
+    return created, added
+
+
 def _event_of(d, payload):
-    """The event a version-6 record passes the event check as, or its code."""
+    """The event a version-7 record passes the event check as, or its code."""
     contracts = {"election-registry": d["election_registry"], "trustee-registry": d["trustee_registry"], "group-registry": d["group_registry"], "board": d["board"]}
-    ev = ce6.event_check(ce6.decode(payload), contracts, {})
+    ev = ce7.event_check(ce7.decode(payload), contracts, {})
     return ev["event"] if isinstance(ev, dict) else ev
 
 
@@ -217,7 +228,7 @@ def carried(d, payload, version):
     """The ballot a contract-event record carries, with its path: ("ordinary", L2 timestamp) for the board's `BallotSubmitted`, ("relayed", None) for its `RelayedBallotSubmitted` under version 3, or None: only a record that decodes under `version` and passes the event check as one of these (docs/spec/verifier.md, Ballot admission)."""
     if int.from_bytes(payload[:2], "big") != CONTRACT_EVENT_TYPE:
         return None
-    m = {2: ce2, 3: ce3, 4: ce4, 5: ce5, 6: ce6}[version]
+    m = {2: ce2, 3: ce3, 4: ce4, 5: ce5, 6: ce6, 7: ce7}[version]
     try:
         rec = m.decode(payload)
     except m.Reject:
@@ -247,9 +258,9 @@ def build(constants):
         groups[name] = {"tier": tier, "secrets": secrets, "leaves": leaves, "root": root, "path": path}
 
     panels = {"panel-4": cv.make_panel("panel-4", 3, 4), "panel-4-k2": cv.make_panel("panel-4-k2", 2, 4)}
-    # Board-entry version 5 and contract-event version 6, which every profile
+    # Board-entry version 5 and contract-event version 7, which every profile
     # needs (close.md, Version), and version 1 for every other type.
-    pins = [(t, {BOARD_ENTRY_TYPE: BOARD_VERSION, CONTRACT_EVENT_TYPE: 6}.get(t, 1)) for t, _ in dv.ALL_PINS]
+    pins = [(t, {BOARD_ENTRY_TYPE: BOARD_VERSION, CONTRACT_EVENT_TYPE: 7}.get(t, 1)) for t, _ in dv.ALL_PINS]
     base = dict(
         profile={"protocol_major": 1, "pins": pins},
         electorate=[
@@ -510,28 +521,32 @@ def build(constants):
         [t_w, via("event", (w_early, p_w_early), time=d_w["opens_at"] - 1), via("event", (w_early, p_w_early), time=d_w["closes_at"])],
         "mixed",
     )
-    # Contract-event version 6, which every profile here pins: beside its
+    # Contract-event version 7, which every profile here pins: beside its
     # ballots the board carries other events: the board's obligation root,
-    # and a Tier 1 addition of the group registry, which an election boards
-    # for the Tier 1 groups it lists (verifier.md, 4.4). Each passes the
-    # event check, and admission reads none of them.
-    d_e6, t_e6, e_e6 = election_for("events-v6", [1, 2, 3])
-    v6_ok0 = ballot("events-v6-tier-0", e_e6, 0, nullifier("tier-0", 0, e_e6, 0), [0, 1, 0], zero4)
-    p_v6_ok0 = prove("events-v6-tier-0", "tier-0", 0, e_e6, 0, v6_ok0)
-    v6_ok2 = ballot("events-v6-tier-2", e_e6, 2, nullifier("tier-2", 1, e_e6, 2), [0, 0, 1], zero4)
-    p_v6_ok2 = prove("events-v6-tier-2", "tier-2", 1, e_e6, 2, v6_ok2)
-    v6_inside = d_e6["opens_at"] + 3600
+    # a Tier 1 addition of the group registry, which an election boards for
+    # the Tier 1 groups it lists, and a self-paid group's creation and first
+    # addition, which it boards for the self-paid groups it lists (verifier.md,
+    # 4.4). Each passes the event check, and admission reads none of them.
+    d_e7, t_e7, e_e7 = election_for("events-v7", [1, 2, 3])
+    v7_ok0 = ballot("events-v7-tier-0", e_e7, 0, nullifier("tier-0", 0, e_e7, 0), [0, 1, 0], zero4)
+    p_v7_ok0 = prove("events-v7-tier-0", "tier-0", 0, e_e7, 0, v7_ok0)
+    v7_ok2 = ballot("events-v7-tier-2", e_e7, 2, nullifier("tier-2", 1, e_e7, 2), [0, 0, 1], zero4)
+    p_v7_ok2 = prove("events-v7-tier-2", "tier-2", 1, e_e7, 2, v7_ok2)
+    v7_inside = d_e7["opens_at"] + 3600
+    v7_created, v7_added = self_paid_events(d_e7, 9, 5, v7_inside + 3)
     bundle(
-        "events-v6",
-        "Contract-event version 6, which every profile pins: a board-path ballot; an ordinary one inside the window; the board's ObligationRootSubmitted naming the definition (delivery-root.json's receipt root, its definition hash replaced); the group registry's Tier1MemberAdded carrying vouch.json's honest addition, whose group this definition doesn't list, so it is no required entry and fails nothing (4.4, Tier 1 boarding); and an ordinary copy of the first ballot inside the window, a repeat. Both other records pass the event check and carry no ballot, so admission reads neither.",
-        d_e6, t_e6, e_e6, [1, 2, 3],
+        "events-v7",
+        "Contract-event version 7, which every profile pins: a board-path ballot; an ordinary one inside the window; the board's ObligationRootSubmitted naming the definition (delivery-root.json's receipt root, its definition hash replaced); the group registry's Tier1MemberAdded carrying vouch.json's honest addition, whose group this definition doesn't list, so it is no required entry and fails nothing (4.4, Tier 1 boarding); the registry's SelfPaidGroupCreated and SelfPaidMemberAdded for group 9, which this definition doesn't list either; and an ordinary copy of the first ballot inside the window, a repeat. The other records pass the event check and carry no ballot, so admission reads none of them.",
+        d_e7, t_e7, e_e7, [1, 2, 3],
         [
-            t_e6,
-            (v6_ok0, p_v6_ok0),
-            via("event", (v6_ok2, p_v6_ok2), time=v6_inside),
-            via("record", {"record": root_event(d_e6, e_e6["definitionHash"], 3, v6_inside + 1)}),
-            via("record", {"record": tier1_event(d_e6, 4, v6_inside + 2)}),
-            via("event", (v6_ok0, p_v6_ok0), time=v6_inside + 3),
+            t_e7,
+            (v7_ok0, p_v7_ok0),
+            via("event", (v7_ok2, p_v7_ok2), time=v7_inside),
+            via("record", {"record": root_event(d_e7, e_e7["definitionHash"], 3, v7_inside + 1)}),
+            via("record", {"record": tier1_event(d_e7, 4, v7_inside + 2)}),
+            via("record", {"record": v7_created}),
+            via("record", {"record": v7_added}),
+            via("event", (v7_ok0, p_v7_ok0), time=v7_inside + 5),
         ],
         "mixed",
     )
@@ -543,7 +558,7 @@ def build(constants):
     p_u_ok0 = prove("events-unread", "tier-0", 0, e_c3, 0, u_ok0)
     bundle(
         "events-v3",
-        "The profile pins contract-event version 3, which 2.3 fails since the share-receipt batch (P1-12d), as it fails version 4 since the obligation root (P1-12f) and version 5 since the Tier 1 addition (P3-3), but whose records the release still reads: a board-path ballot and its board-path copy, judged by 5.1 to 5.5, and the copy a repeat (5.7).",
+        "The profile pins contract-event version 3, which 2.3 fails since the share-receipt batch (P1-12d), as it fails version 4 since the obligation root (P1-12f), version 5 since the Tier 1 addition (P3-3) and version 6 since the self-paid addition (P3-2), but whose records the release still reads: a board-path ballot and its board-path copy, judged by 5.1 to 5.5, and the copy a repeat (5.7).",
         d_c3, t_c3, e_c3, [1, 2, 3],
         [t_c3, (u_ok0, p_u_ok0), (u_ok0, p_u_ok0)],
         "mixed",
@@ -562,13 +577,13 @@ def build(constants):
     )
     # A contract-event version this verifier doesn't read: ordinary ballots
     # can't be found, so the window and repeats can't be decided (T-36).
-    ce7_pins = [(ty, 7 if ty == CONTRACT_EVENT_TYPE else v) for ty, v in pins]
-    d_c4, t_c4, e_c4 = election_for("events-unread-v7", [1, 2, 3], profile={"protocol_major": 1, "pins": ce7_pins})
-    x_ok0 = ballot("events-unread-v7", e_c4, 0, nullifier("tier-0", 0, e_c4, 0), [0, 1, 0], zero4)
-    p_x_ok0 = prove("events-unread-v7", "tier-0", 0, e_c4, 0, x_ok0)
+    ce8_pins = [(ty, 8 if ty == CONTRACT_EVENT_TYPE else v) for ty, v in pins]
+    d_c4, t_c4, e_c4 = election_for("events-unread-v8", [1, 2, 3], profile={"protocol_major": 1, "pins": ce8_pins})
+    x_ok0 = ballot("events-unread-v8", e_c4, 0, nullifier("tier-0", 0, e_c4, 0), [0, 1, 0], zero4)
+    p_x_ok0 = prove("events-unread-v8", "tier-0", 0, e_c4, 0, x_ok0)
     bundle(
         "events-unread",
-        "The profile pins contract-event version 7, which this release doesn't read: the board-path ballot and its copy are judged by 5.1 to 5.4, but 5.5 and 5.7 are unsupported and the copy stays a candidate repeat.",
+        "The profile pins contract-event version 8, which this release doesn't read: the board-path ballot and its copy are judged by 5.1 to 5.4, but 5.5 and 5.7 are unsupported and the copy stays a candidate repeat.",
         d_c4, t_c4, e_c4, [1, 2, 3],
         [t_c4, (x_ok0, p_x_ok0), (x_ok0, p_x_ok0)],
         "candidates",
@@ -641,13 +656,13 @@ def assemble(constants, proofs_path, out_dir):
             wrap = p if isinstance(p, dict) else {"via": "board", "item": p, "segment": 0, "time": None}
             kind, rec, b, pid = make(wrap["item"])
             if wrap["via"] == "record":
-                assert pins[CONTRACT_EVENT_TYPE] == 6
+                assert pins[CONTRACT_EVENT_TYPE] == 7
             elif wrap["via"] != "board":
                 # The record a board-path ballot of the same bytes would carry,
                 # as the board's event (or the same log from an address the
                 # definition doesn't name, which carries no ballot).
                 version = pins[CONTRACT_EVENT_TYPE]
-                assert version in (2, 3, 6)
+                assert version in (2, 3, 7)
                 contract = bal.det("verifier foreign contract")[:20] if wrap["via"] == "foreign" else d["board"]
                 rec = event_record(d, rec, len(payloads), wrap["time"], contract, version, wrap["via"] == "relayed")
             payloads.append((kind, rec, b, pid, wrap["segment"]))
@@ -676,7 +691,7 @@ def assemble(constants, proofs_path, out_dir):
                 path = {"kind": "board", "segment": seg}
                 if int.from_bytes(rec[:2], "big") == CONTRACT_EVENT_TYPE:
                     # Under contract-event version 1 the board emits no event.
-                    found = carried(d, rec, pins[CONTRACT_EVENT_TYPE]) if pins[CONTRACT_EVENT_TYPE] in (2, 3, 4, 5, 6) else None
+                    found = carried(d, rec, pins[CONTRACT_EVENT_TYPE]) if pins[CONTRACT_EVENT_TYPE] in (2, 3, 4, 5, 6, 7) else None
                     if found is None:
                         continue
                     assert kind != "record", (bnd["id"], i)

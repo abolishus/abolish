@@ -240,8 +240,7 @@ if (registryConfig !== undefined) {
     const roots = await DisputeGameRoots.connect(
       createPublicClient({ transport: http(c.l1RpcUrl, { timeout: 30_000 }) }),
       c.l1ChainId,
-      c.gameFactory,
-      c.gameType,
+      c.portal,
     );
     accumulator = await ProvenRegistryAccumulator.connect(
       createPublicClient({ transport: http(c.l2RpcUrl, { timeout: 30_000 }) }),

@@ -105,8 +105,8 @@ const after = (
  * isn't recorded yet, storing its definition first. `logs` are all the
  * registry's indexed logs in chain order, `n` counting from 0; logs above
  * the proven block are left for a later run. `proven` is the registry's
- * accumulator and count at the L2's finalized block, as the caller's node
- * reports them. Throws `RegistrySyncError` before recording anything if the
+ * accumulator and count after an L2 block, as the caller proved them; one
+ * before the latest recorded registration's block records nothing. Throws `RegistrySyncError` before recording anything if the
  * logs aren't the registry's sequence, a log's index doesn't rise within its
  * block, or the registrations already recorded aren't the registry's first
  * ones, and stops at the first log the event check refuses, so a
@@ -175,6 +175,13 @@ export async function syncRegistrations(
   // the latest at its position: otherwise the index, the deployment or the
   // table changed under us, and skipping would drop a registration silently.
   const latest = await latestRegistration(client);
+  // A proof at a block before the latest recorded registration's (a newer
+  // game claiming an older block, say) can't reach what is recorded, so it
+  // vouches for nothing new: nothing to record, and nothing to refuse.
+  if (latest !== undefined && proven.block < latest.l2Block) {
+    if (failure !== undefined) throw failure;
+    return { recorded: 0, unstored: [] };
+  }
   let skip = 0;
   if (latest !== undefined) {
     skip = registrations.findIndex((r) => after(r.record, r.logIndex, latest));

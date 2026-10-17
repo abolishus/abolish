@@ -98,18 +98,17 @@ beforeAll(async () => {
   // past blocks' storage too, which would leave b1's proofs b2's.
   await rpc("anvil_setCode", [REGISTRY, "0x602035600035550000"]);
   const [from] = (await rpc("eth_accounts", [])) as unknown as Hex[];
+  // Each write's block, from its receipt: viem caches getBlockNumber.
   const write = async (key: Hex, value: Hex) => {
     const hash = await rpc("eth_sendTransaction", [
       { from, to: REGISTRY, data: concat([key, value]) },
     ]);
-    await l2.waitForTransactionReceipt({ hash: hash as unknown as Hex });
+    return (await l2.waitForTransactionReceipt({ hash: hash as unknown as Hex })).blockNumber;
   };
   await write(slot(ACCUMULATOR_SLOT), ACC_1);
-  await write(slot(ACCUMULATOR_SLOT + 1n), slot(3n));
-  b1 = await l2.getBlockNumber();
+  b1 = await write(slot(ACCUMULATOR_SLOT + 1n), slot(3n));
   await write(slot(ACCUMULATOR_SLOT), ACC_2);
-  await write(slot(ACCUMULATOR_SLOT + 1n), slot(4n));
-  b2 = await l2.getBlockNumber();
+  b2 = await write(slot(ACCUMULATOR_SLOT + 1n), slot(4n));
 }, 60_000);
 
 afterAll(async () => {
@@ -210,6 +209,25 @@ describe("the L2 node's proven adapter", () => {
     await expect(node.proven(REGISTRY)).rejects.toThrow(GameBlockError);
   });
 
+  test("refuses a node answer that isn't hex as malformed, not as an internal failure", async () => {
+    const garbled = createPublicClient({
+      transport: custom({
+        async request({ method, params }: { method: string; params?: unknown[] }) {
+          const answer = (await rpc(method, params ?? [])) as unknown;
+          if (method !== "eth_getProof") return answer;
+          const proof = answer as { accountProof: string[] };
+          return { ...proof, accountProof: ["0xzz", ...proof.accountProof.slice(1)] };
+        },
+      }),
+    }) as PublicClient;
+    const node = await ProvenRegistryAccumulator.connect(
+      garbled,
+      CHAIN,
+      source(async () => ({ outputRoot: await rootOf(b1), l2Block: b1 })),
+    );
+    await expect(node.proven(REGISTRY)).rejects.toMatchObject({ code: "l2-proof-malformed" });
+  });
+
   test("refuses an address without code", async () => {
     const node = await ProvenRegistryAccumulator.connect(
       l2,
@@ -232,9 +250,12 @@ describe("the L2 node's proven adapter", () => {
   });
 });
 
-// The L1 side: a scripted node holding a factory's games at its finalized head.
+// The L1 side: a scripted node holding a portal and its factory's games at
+// its finalized head.
 
 const abi = parseAbi([
+  "function disputeGameFactory() view returns (address)",
+  "function respectedGameType() view returns (uint32)",
   "function gameCount() view returns (uint256)",
   "function gameAtIndex(uint256 index) view returns (uint32 gameType, uint64 timestamp, address proxy)",
   "function rootClaim() view returns (bytes32)",
@@ -242,6 +263,7 @@ const abi = parseAbi([
   "function status() view returns (uint8)",
 ]);
 
+const PORTAL: Address = "0x000000000000000000000000000000000000b047";
 const FACTORY: Address = "0x00000000000000000000000000000000000fac70";
 const FINALIZED = 9_000n;
 const PINNED = 621;
@@ -255,7 +277,7 @@ interface Game {
 
 const proxyOf = (i: number): Address => toHex(0x9a3e0000n + BigInt(i), { size: 20 });
 
-function l1Of(games: readonly Game[], options: { chainId?: bigint } = {}) {
+function l1Of(games: readonly Game[], options: { chainId?: bigint; respected?: number } = {}) {
   const calls: { fn: string; block: unknown }[] = [];
   const client = createPublicClient({
     transport: custom({
@@ -278,6 +300,10 @@ function l1Of(games: readonly Game[], options: { chainId?: bigint } = {}) {
           const { functionName, args } = decodeFunctionData({ abi, data });
           calls.push({ fn: functionName, block });
           const result = (): unknown => {
+            if (to.toLowerCase() === PORTAL) {
+              if (functionName === "disputeGameFactory") return FACTORY;
+              if (functionName === "respectedGameType") return options.respected ?? PINNED;
+            }
             if (to.toLowerCase() === FACTORY) {
               if (functionName === "gameCount") return BigInt(games.length);
               if (functionName === "gameAtIndex") {
@@ -309,7 +335,7 @@ const game = (type: number, n: number, status = 0): Game => ({
 });
 
 describe("the L1 node's dispute games", () => {
-  test("names the newest game of the pinned type not shown false, read at the finalized head", async () => {
+  test("names the newest game of the portal's type not shown false, read at the finalized head", async () => {
     const { client, calls } = l1Of([
       game(PINNED, 1, 2),
       game(PINNED, 2, 0),
@@ -318,7 +344,7 @@ describe("the L1 node's dispute games", () => {
       game(PINNED, 4, 1),
       game(0, 5),
     ]);
-    const roots = await DisputeGameRoots.connect(client, L1_CHAIN, FACTORY, PINNED);
+    const roots = await DisputeGameRoots.connect(client, L1_CHAIN, PORTAL);
     expect(await roots.latest()).toEqual({
       outputRoot: hexToBytes(game(PINNED, 2).root),
       l2Block: 200n,
@@ -327,9 +353,25 @@ describe("the L1 node's dispute games", () => {
     for (const c of calls) expect(c.block).toBe(toHex(FINALIZED));
   });
 
+  test("follows the type the portal respects, never another", async () => {
+    const games = [game(PINNED, 1), game(1, 2), game(PINNED, 3)];
+    const respected = await DisputeGameRoots.connect(
+      l1Of(games, { respected: 1 }).client,
+      L1_CHAIN,
+      PORTAL,
+    );
+    expect((await respected.latest()).l2Block).toBe(200n);
+    const none = await DisputeGameRoots.connect(
+      l1Of(games, { respected: 0 }).client,
+      L1_CHAIN,
+      PORTAL,
+    );
+    await expect(none.latest()).rejects.toThrow("no output root");
+  });
+
   test("a resolved game in its claim's favour counts as one in progress does", async () => {
     const { client } = l1Of([game(PINNED, 1, 0), game(PINNED, 2, 2)]);
-    const roots = await DisputeGameRoots.connect(client, L1_CHAIN, FACTORY, PINNED);
+    const roots = await DisputeGameRoots.connect(client, L1_CHAIN, PORTAL);
     expect((await roots.latest()).l2Block).toBe(200n);
   });
 
@@ -339,24 +381,24 @@ describe("the L1 node's dispute games", () => {
       ...Array.from({ length: Number(MAX_GAMES_SCANNED) }, (_, i) => game(7, i + 2)),
     ];
     const { client, calls } = l1Of(games);
-    const roots = await DisputeGameRoots.connect(client, L1_CHAIN, FACTORY, PINNED);
+    const roots = await DisputeGameRoots.connect(client, L1_CHAIN, PORTAL);
     await expect(roots.latest()).rejects.toThrow("no output root");
     expect(calls.filter((c) => c.fn === "gameAtIndex")).toHaveLength(Number(MAX_GAMES_SCANNED));
     // One more game read back finds it.
     const { client: wider } = l1Of(games.slice(0, -1));
-    const found = await DisputeGameRoots.connect(wider, L1_CHAIN, FACTORY, PINNED);
+    const found = await DisputeGameRoots.connect(wider, L1_CHAIN, PORTAL);
     expect((await found.latest()).l2Block).toBe(100n);
   });
 
   test("an empty factory names no root", async () => {
     const { client } = l1Of([]);
-    const roots = await DisputeGameRoots.connect(client, L1_CHAIN, FACTORY, PINNED);
+    const roots = await DisputeGameRoots.connect(client, L1_CHAIN, PORTAL);
     await expect(roots.latest()).rejects.toThrow("no output root");
   });
 
   test("refuses a node on another chain", async () => {
     const { client } = l1Of([], { chainId: 1n });
-    await expect(DisputeGameRoots.connect(client, L1_CHAIN, FACTORY, PINNED)).rejects.toThrow(
+    await expect(DisputeGameRoots.connect(client, L1_CHAIN, PORTAL)).rejects.toThrow(
       "another chain",
     );
   });

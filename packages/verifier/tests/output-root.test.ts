@@ -368,14 +368,16 @@ describe("storageAtOutputRoot binds everything to the root", () => {
     expect(codeOf(read(e))).toBe("l2-proof-malformed");
   });
 
-  test("refuses inputs of the wrong length before reading anything", () => {
+  test("refuses inputs of the wrong length before reading anything, the node's as a root mismatch", () => {
     const e = honest();
     expect(() =>
       accumulatorAtOutputRoot({ ...e, outputRoot: new Uint8Array(31) }, REGISTRY),
     ).toThrow(RangeError);
-    expect(() =>
-      accumulatorAtOutputRoot({ ...e, messagePasserStorageRoot: new Uint8Array(33) }, REGISTRY),
-    ).toThrow(RangeError);
+    expect(
+      codeOf(() =>
+        accumulatorAtOutputRoot({ ...e, messagePasserStorageRoot: new Uint8Array(33) }, REGISTRY),
+      ),
+    ).toBe("output-root");
     expect(() => accumulatorAtOutputRoot(e, new Uint8Array(32))).toThrow(RangeError);
     expect(() => storageAtOutputRoot(e, REGISTRY, [new Uint8Array(31)])).toThrow(RangeError);
   });

@@ -18,6 +18,7 @@ import {
   NodePool,
   RlpError,
   storageWord,
+  word,
 } from "./l1.ts";
 
 /**
@@ -115,6 +116,10 @@ export function storageAtOutputRoot(
       throw new RangeError("a slot must be 32 bytes");
   if (!(evidence.outputRoot instanceof Uint8Array) || evidence.outputRoot.length !== 32)
     throw new RangeError("outputRoot must be 32 bytes");
+  // The node serves this one: a root of another length is no preimage of
+  // the root, and refused as one rather than as the caller's error.
+  const mp = evidence.messagePasserStorageRoot;
+  if (!(mp instanceof Uint8Array) || mp.length !== 32) throw new OutputRootError("output-root");
   let block: L1Header;
   try {
     block = decodeHeader(evidence.header);
@@ -122,7 +127,7 @@ export function storageAtOutputRoot(
     if (e instanceof RlpError) throw new OutputRootError("l2-header");
     throw e;
   }
-  const claimed = outputRootV0(block.stateRoot, evidence.messagePasserStorageRoot, block.hash);
+  const claimed = outputRootV0(block.stateRoot, mp, block.hash);
   if (!equal(claimed, evidence.outputRoot)) throw new OutputRootError("output-root");
   try {
     const nodes = new NodePool(evidence.nodes);
@@ -137,12 +142,6 @@ export function storageAtOutputRoot(
     throw e;
   }
 }
-
-const slotWord = (n: bigint) => {
-  const b = new Uint8Array(32);
-  for (let i = 31, x = n; x > 0n; i--, x >>= 8n) b[i] = Number(x & 0xffn);
-  return b;
-};
 
 /** A proven accumulator, with the block's hash and timestamp from its header. */
 export interface OutputRootAccumulator extends ProvenEventAccumulator {
@@ -161,8 +160,8 @@ export function accumulatorAtOutputRoot(
   address: Uint8Array,
 ): OutputRootAccumulator {
   const { block, words } = storageAtOutputRoot(evidence, address, [
-    slotWord(ACCUMULATOR_SLOT),
-    slotWord(ACCUMULATOR_SLOT + 1n),
+    word(ACCUMULATOR_SLOT),
+    word(ACCUMULATOR_SLOT + 1n),
   ]);
   const [accumulator, countWord] = words as [Uint8Array, Uint8Array];
   if (countWord.subarray(0, 24).some((x) => x !== 0)) throw new OutputRootError("l2-count");

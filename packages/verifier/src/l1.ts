@@ -269,7 +269,8 @@ export interface StateAnchor {
 /** The ERC-7201 namespace `abolish.board-anchor` (docs/spec/contracts.md, Board anchor). */
 export const ANCHOR_NAMESPACE = 0x16eba4501d0a9dddbfa03518d843c364be664629e6d99efb7169d8f090095b00n;
 
-const word = (n: bigint) => {
+/** `n` as a 32-byte big-endian word, as a storage slot is named. */
+export const word = (n: bigint) => {
   const b = new Uint8Array(32);
   for (let i = 31; i >= 0 && n > 0n; i--, n >>= 8n) b[i] = Number(n & 0xffn);
   return b;

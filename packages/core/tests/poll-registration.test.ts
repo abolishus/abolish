@@ -16,11 +16,13 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from "vite-pl
 import {
   advancePollCreations,
   advancePollRegistrations,
+  type ApprovedCeremony,
   approvedCeremony,
   type CreationStatus,
   createPollDraft,
   newAccountId,
   openCeremonyRuns,
+  pollRegistration,
   type PollCreationChain,
   type PollDraft,
   type PollRegistrationChain,
@@ -424,7 +426,7 @@ describe("an approved poll", () => {
     const other = await db.as("abolish_app");
     const chain = new FakeChain();
     const reports = await Promise.all([run(chain), run(chain, SOON, PANEL, other)]);
-    expect(reports.map((r) => r.sent).sort()).toEqual([0, 1]);
+    expect(reports.map((r) => r.sent).sort((a, b) => a - b)).toEqual([0, 1]);
     expect(chain.signed.size).toBe(2);
     expect((await ledger()).length).toBe(2);
   });
@@ -464,6 +466,69 @@ describe("a poll left for later", () => {
     } finally {
       await db.admin`UPDATE account_polls SET creator_address = ${address(0xc0)} WHERE id = ${pollId}`;
     }
+  });
+});
+
+describe("pollRegistration", () => {
+  test("refuses every approved run crypto's checks refuse, and only those", async () => {
+    const approved = (await approvedCeremony(app, stubHash))!;
+    const [row] = await db.admin`
+      SELECT s.stub, p.election_id FROM ceremony_stubs s JOIN account_polls p USING (stub_hash)
+      WHERE s.stub_hash = ${stubHash}`;
+    const stub = Uint8Array.from(row!["stub"]);
+    const electionId = Uint8Array.from(row!["election_id"]);
+    const flip = (b: Uint8Array) => b.map((x, i) => (i === 0 ? x ^ 1 : x));
+    interface Over {
+      stub?: Uint8Array;
+      stubHash?: Uint8Array;
+      electionId?: Uint8Array;
+      panel?: Panel;
+      approved?: ApprovedCeremony;
+    }
+    const build = (o: Over = {}) =>
+      pollRegistration(
+        o.stub ?? stub,
+        o.stubHash ?? stubHash,
+        o.electionId ?? electionId,
+        o.panel ?? PANEL,
+        o.approved ?? approved,
+      );
+    expect(typeof build()).toBe("object");
+    const [one, two, three] = approved.approvals;
+    const cases: [string, Over][] = [
+      ["a stub that doesn't decode", { stub: stub.subarray(0, stub.length - 1) }],
+      ["another stub hash", { stubHash: flip(stubHash) }],
+      ["another election", { electionId: flip(electionId) }],
+      [
+        "another transcript hash",
+        { approved: { ...approved, transcriptHash: flip(approved.transcriptHash) } },
+      ],
+      [
+        "a transcript that doesn't check",
+        { approved: { ...approved, transcript: flip(approved.transcript) } },
+      ],
+      ["another key set", { approved: { ...approved, keySetHash: flip(approved.keySetHash) } }],
+      ["below the quorum", { approved: { ...approved, approvals: [one!] } }],
+      ["out of order", { approved: { ...approved, approvals: [two!, one!, three!] } }],
+      ["a seat twice", { approved: { ...approved, approvals: [one!, one!, two!] } }],
+      [
+        "a seat outside the panel",
+        { approved: { ...approved, approvals: [one!, two!, { ...three!, seat: 4 }] } },
+      ],
+      [
+        "another seat's signature",
+        { approved: { ...approved, approvals: [one!, { ...two!, signature: three!.signature }] } },
+      ],
+      [
+        "a signature off its form",
+        {
+          approved: { ...approved, approvals: [one!, { ...two!, signature: new Uint8Array(64) }] },
+        },
+      ],
+    ];
+    for (const [name, over] of cases) expect(build(over), name).toBe("refused");
+    const other: Panel = { threshold: 2, keys: [4, 5, 6].map((i) => identityKey(secret(i))) };
+    expect(build({ panel: other })).toBe("other-panel");
   });
 });
 
@@ -520,6 +585,26 @@ describe("a failed registration", () => {
     expect((await run(chain, new Date(sent + REGISTRATION_DEADLINE_MS + 1))).failed).toEqual({
       "registration-timeout": 1,
     });
+  });
+
+  test("never times out while the registry could still admit it, nor once it is included", async () => {
+    const chain = new FakeChain();
+    chain.refuse = 2;
+    await run(chain);
+    chain.refuse = Number.POSITIVE_INFINITY;
+    // Past a short deadline but before `opens_at` and its margin: kept.
+    const opened = Number(OPENS_AT - NOW_S) + REGISTRATION_MARGIN_SECONDS;
+    const at = (seconds: number) =>
+      advancePollRegistrations(app, chain, PANEL, { now: later(seconds), deadlineMs: 1 });
+    expect((await at(opened - 1)).failed).toEqual({});
+    // Included and never finalized: kept, however late.
+    chain.refuse = 0;
+    await at(opened - 1);
+    chain.mine();
+    expect((await at(opened + 24 * 3600)).failed).toEqual({});
+    expect((await poll())["state"]).toBe("ceremony");
+    chain.finalize();
+    expect((await at(opened + 24 * 3600)).registered).toBe(1);
   });
 
   test("fails `registration-mismatch` when the event names another definition", async () => {

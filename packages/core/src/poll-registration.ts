@@ -26,6 +26,7 @@
 
 import {
   checkCeremonyTranscript,
+  DecodeError,
   decodeElectionDefinitionV5,
   type ElectionDefinitionV5,
   electionDefinitionV5Hash,
@@ -33,6 +34,7 @@ import {
   electionStubV5Hash,
   encodeCeremonyRegistration,
   encodeElectionDefinitionV5,
+  EncodeError,
   keySetEntry,
   keySetHash,
   type Panel,
@@ -91,8 +93,9 @@ export interface PollRegistrationChain extends Pick<
 export const REGISTRATION_MARGIN_SECONDS = 5 * 60;
 
 /**
- * How long a registration may take, from its recording to finality, before
- * its poll fails with `registration-timeout`, as for a creation (rule 14).
+ * How long a registration the node doesn't know may take, from its
+ * recording, before its poll fails with `registration-timeout`, as for a
+ * creation (rule 14); never before the poll's `opens_at` has passed.
  */
 export const REGISTRATION_DEADLINE_MS = 2 * 60 * 60_000;
 
@@ -103,14 +106,18 @@ export const REGISTRATIONS_PER_RUN = 20;
 export type RegistrationFailure =
   /**
    * The approved ceremony or the definition it completes fails crypto's
-   * checks: no seat should have approved it, so nothing is sent.
+   * checks (no seat should have approved it), or its transaction is past
+   * what an L2 node takes: nothing is sent.
    */
   | "registration-refused"
   /** `registerDefinition` reverted in finalized history. */
   | "registration-reverted"
   /** Another transaction of the key took its nonce in finalized history. */
   | "registration-replaced"
-  /** Not registered within `REGISTRATION_DEADLINE_MS` of its recording. */
+  /**
+   * Unknown to the node `REGISTRATION_DEADLINE_MS` after its recording and
+   * after `opens_at`, once the registry can no longer admit it.
+   */
   | "registration-timeout"
   /** The finalized event names another election or another definition. */
   | "registration-mismatch";
@@ -156,32 +163,50 @@ export interface PollRegistration {
   readonly record: Uint8Array;
 }
 
+/** The largest transaction the creation key's ledger holds (`poll_creation_txs`). */
+const MAX_LEDGER_TX = 131_072;
+
 /**
- * The definition and ceremony record of `stub`'s approved run, or
- * `"other-panel"` when the stub doesn't name `panel`, or `"refused"` when
- * the run doesn't pass crypto's checks: its transcript under the panel, the
+ * The definition and ceremony record of `stub`'s approved run for the poll
+ * of `electionId`, or `"other-panel"` when the stub doesn't name `panel`, or
+ * `"refused"` when the run doesn't pass crypto's checks: the stub's hash and
+ * election, its transcript under the panel, rule 7's qualified seats, the
  * key set's hash, a quorum of approvals each verifying under its seat's
  * pinned key, and the completed definition's own rules and stub hash.
  */
 export function pollRegistration(
   stub: Uint8Array,
   stubHash: Uint8Array,
+  electionId: Uint8Array,
   panel: Panel,
   approved: ApprovedCeremony,
 ): PollRegistration | "other-panel" | "refused" {
-  let decoded: ElectionDefinitionV5;
   try {
-    decoded = decodeElectionDefinitionV5(stub);
-  } catch {
-    return "refused";
+    return checkedRegistration(stub, stubHash, electionId, panel, approved);
+  } catch (e) {
+    // A value with no encoding (a key or signature off its form): no
+    // registry would take it, and one poll's bytes must not stop the rest.
+    if (e instanceof EncodeError || e instanceof DecodeError) return "refused";
+    throw e;
   }
+}
+
+function checkedRegistration(
+  stub: Uint8Array,
+  stubHash: Uint8Array,
+  electionId: Uint8Array,
+  panel: Panel,
+  approved: ApprovedCeremony,
+): PollRegistration | "other-panel" | "refused" {
+  const decoded = decodeElectionDefinitionV5(stub);
   if (
     !equal(decoded.panel_id, panelId(panel)) ||
     decoded.threshold !== panel.threshold ||
     decoded.panel_size !== panel.keys.length
   )
     return "other-panel";
-  if (!equal(electionStubV5Hash(decoded), stubHash)) return "refused";
+  if (!equal(electionStubV5Hash(decoded), stubHash) || !equal(decoded.election_id, electionId))
+    return "refused";
   const election = {
     l2ChainId: decoded.l2_chain_id,
     trusteeRegistry: decoded.trustee_registry,
@@ -241,12 +266,27 @@ export function pollRegistration(
   };
 }
 
+/** The hash of `stub` completed with `transcriptHash`, or `undefined` if the stub doesn't decode. */
+function approvedDefinitionHash(
+  stub: Uint8Array,
+  transcriptHash: Uint8Array,
+): Uint8Array | undefined {
+  try {
+    const decoded = decodeElectionDefinitionV5(stub);
+    return electionDefinitionV5Hash({ ...decoded, ceremony_transcript_hash: transcriptHash });
+  } catch (e) {
+    if (e instanceof DecodeError) return undefined;
+    throw e;
+  }
+}
+
 /**
  * One run of the registration step for `chain`'s key, under the default
  * panel `panel`: sends again every recorded transaction of the key not yet
  * included, moves each poll whose registration finalized (to `registered`,
  * or `failed` if it reverted, its nonce went to another transaction or its
- * event isn't the poll's), fails those past the deadline, then signs,
+ * event isn't the poll's), fails those the node lost past the deadline and
+ * the poll's opening, then signs,
  * records and sends the two registrations of each poll in `ceremony` whose
  * stub has an approved run, oldest first, while its `opens_at` is more than
  * `REGISTRATION_MARGIN_SECONDS` away. Each step is safe to rerun after a
@@ -309,6 +349,8 @@ export async function advancePollRegistrations(
   for (const tx of await unincluded(client, creator, nonces.latest))
     if (await send(tx)) report.resent++;
 
+  const seconds = BigInt(Math.floor(now.getTime() / 1000));
+
   // 2. Each poll in `ceremony` with a recorded registration: whether it
   // finalized, and as what.
   const recorded = await db
@@ -319,9 +361,12 @@ export async function advancePollRegistrations(
       hash: pollCreationTxs.txHash,
       nonce: pollCreationTxs.nonce,
       sentAt: pollCreationTxs.sentAt,
+      stub: ceremonyStubs.stub,
+      opensAt: ceremonyStubs.opensAt,
     })
     .from(accountPolls)
     .leftJoin(pollCreationTxs, eq(pollCreationTxs.txHash, accountPolls.registerTxHash))
+    .leftJoin(ceremonyStubs, eq(ceremonyStubs.stubHash, accountPolls.stubHash))
     .where(
       and(
         eq(accountPolls.state, "ceremony"),
@@ -340,28 +385,32 @@ export async function advancePollRegistrations(
       await fail(r.id, stubHash, "registration-timeout");
       continue;
     }
-    const late = now.getTime() - r.sentAt.getTime() > deadline;
+    // Late only once the registry can no longer admit it: past the
+    // deadline and past `opens_at` (with the margin for the worker's clock
+    // against L2 time), after which a landing reverts with `AlreadyOpen`.
+    // Before then it may still land, and a poll failed under it would be
+    // registered on chain behind our back.
+    const late =
+      now.getTime() - r.sentAt.getTime() > deadline &&
+      (r.opensAt === null || seconds >= r.opensAt + BigInt(REGISTRATION_MARGIN_SECONDS));
     if (r.nonce >= nonces.latest) {
       if (late) await fail(r.id, stubHash, "registration-timeout");
       continue;
     }
     const status = await chain.registration(r.hash);
     if (status.state === "registered") {
-      // What the registry admitted must be what this step built: the
-      // approved run's definition for this poll's election (T-34).
+      // What the registry admitted must be the approved run's definition
+      // for this poll's election (T-34): the stub with its transcript's
+      // hash, whatever panel the step is configured with now.
       const approved = await approvedCeremony(client, stubHash);
-      const [stub] = await db
-        .select({ stub: ceremonyStubs.stub })
-        .from(ceremonyStubs)
-        .where(eq(ceremonyStubs.stubHash, stubHash));
-      const built =
-        approved === undefined || stub === undefined
+      const expected =
+        approved === undefined || r.stub === null
           ? undefined
-          : pollRegistration(stub.stub, stubHash, panel, approved);
+          : approvedDefinitionHash(r.stub, approved.transcriptHash);
       if (
-        typeof built !== "object" ||
+        expected === undefined ||
         !equal(status.electionId, electionId) ||
-        !equal(status.definitionHash, built.definitionHash)
+        !equal(status.definitionHash, expected)
       ) {
         await fail(r.id, stubHash, "registration-mismatch");
         continue;
@@ -384,7 +433,8 @@ export async function advancePollRegistrations(
     // finalized history: another transaction of the key took it.
     else if (status.state === "unknown" && r.nonce < nonces.finalized)
       await fail(r.id, stubHash, "registration-replaced");
-    else if (late) await fail(r.id, stubHash, "registration-timeout");
+    // Included is left to finalize, however long that takes.
+    else if (status.state === "unknown" && late) await fail(r.id, stubHash, "registration-timeout");
   }
 
   // 3. New registrations, for each poll whose stub has an approved run,
@@ -392,6 +442,7 @@ export async function advancePollRegistrations(
   const waiting = await db
     .select({
       id: accountPolls.id,
+      electionId: accountPolls.electionId,
       stubHash: ceremonyStubs.stubHash,
       stub: ceremonyStubs.stub,
       opensAt: ceremonyStubs.opensAt,
@@ -406,7 +457,6 @@ export async function advancePollRegistrations(
       ),
     )
     .orderBy(asc(ceremonyStubs.createdAt), asc(accountPolls.id));
-  const seconds = BigInt(Math.floor(now.getTime() / 1000));
   let signedThisRun = 0;
   for (const w of waiting) {
     if (signedThisRun >= REGISTRATIONS_PER_RUN) break;
@@ -419,7 +469,8 @@ export async function advancePollRegistrations(
       report.late++;
       continue;
     }
-    const built = pollRegistration(w.stub, w.stubHash, panel, approved);
+    // The table holds the identifier on every poll in `ceremony`.
+    const built = pollRegistration(w.stub, w.stubHash, w.electionId as Uint8Array, panel, approved);
     if (built === "other-panel") {
       report.mismatched++;
       continue;
@@ -453,6 +504,10 @@ export async function advancePollRegistrations(
       for (const t of [ceremony, definition])
         if (t.hash.length !== 32 || t.tx.length === 0)
           throw new Error("the chain signed a malformed registration");
+      // Past what the ledger and an L2 node's pool take: nothing recorded,
+      // so the poll fails rather than stopping every run behind it.
+      if (ceremony.tx.length > MAX_LEDGER_TX || definition.tx.length > MAX_LEDGER_TX)
+        return "too-large" as const;
       await tx.insert(pollCreationTxs).values([
         {
           creatorAddress: creator,
@@ -482,6 +537,10 @@ export async function advancePollRegistrations(
       return [ceremony, definition] as const;
     });
     if (signed === undefined) continue;
+    if (signed === "too-large") {
+      await fail(w.id, w.stubHash, "registration-refused");
+      continue;
+    }
     signedThisRun++;
     // Committed: only now are they sent (rule 12), the ceremony's first.
     const [ceremony, definition] = signed;

@@ -5,6 +5,7 @@
 import { once } from "node:events";
 import { parseArgs } from "node:util";
 import { gatewaySource, MAX_GATEWAYS, parseGateway } from "@abolishus/verifier";
+import { bytesToHex } from "@noble/hashes/utils.js";
 import { gateway } from "./gateway.ts";
 import { finalizedHeader, parseAddress } from "./l1.ts";
 import { DEFAULT_MAX_ELECTION_BYTES, mirrorThen, pinElections } from "./pin.ts";
@@ -25,8 +26,9 @@ export const USAGE = [
 
 /**
  * Exit codes: 0 stopped (`serve`) or done (`fetch`, whatever it couldn't
- * fetch, which it reports); 1 L1 couldn't be read; 2 bad usage, a directory
- * that can't be read or an address it can't listen on.
+ * fetch, which it reports); 1 L1's block or logs couldn't be read; 2 bad
+ * usage, a directory that can't be read or written or an address it can't
+ * listen on.
  */
 export async function cli(argv: readonly string[], io: CliIo): Promise<number> {
   const [command, ...rest] = argv;
@@ -153,7 +155,7 @@ async function fetchAndPin(args: readonly string[], io: CliIo): Promise<number> 
     io.out({
       l1: {
         number: header.number.toString(),
-        hash: `0x${Buffer.from(header.hash).toString("hex")}`,
+        hash: `0x${bytesToHex(header.hash)}`,
       },
     });
     const run = await pinElections(header, {
@@ -167,9 +169,15 @@ async function fetchAndPin(args: readonly string[], io: CliIo): Promise<number> 
     });
     io.out({ refusedLogs: run.refusedLogs, gateways: parsed.gateways.stats() });
   } catch (e) {
-    if (!(e instanceof RpcError)) throw e;
-    io.err({ error: `l1: ${e.message}` });
-    return 1;
+    if (e instanceof RpcError) {
+      io.err({ error: `l1: ${e.message}` });
+      return 1;
+    }
+    // The directory can't be written (EACCES, ENOSPC), as `serve` reports it.
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code === undefined) throw e;
+    io.err({ error: `blocks: ${code}` });
+    return 2;
   }
   return 0;
 }

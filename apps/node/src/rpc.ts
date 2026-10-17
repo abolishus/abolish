@@ -84,11 +84,17 @@ export function rpcClient(url: URL, options: RpcOptions = {}): Rpc {
         await res.body?.cancel();
         throw new RpcError(`${method}: status ${res.status}`);
       }
+      let answer: string;
+      try {
+        answer = await text(res);
+      } catch (e) {
+        // Cut off mid-answer (a timeout, a reset), or past the size limit.
+        throw new RpcError(`${method}: ${e instanceof RpcError ? e.message : (e as Error).name}`);
+      }
       let body: unknown;
       try {
-        body = JSON.parse(await text(res));
-      } catch (e) {
-        if (e instanceof RpcError) throw new RpcError(`${method}: ${e.message}`);
+        body = JSON.parse(answer);
+      } catch {
         throw new RpcError(`${method}: an answer that isn't JSON`);
       }
       if (typeof body !== "object" || body === null || (body as { id?: unknown }).id !== n)

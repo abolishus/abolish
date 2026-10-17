@@ -32,8 +32,10 @@ function unhex(value: unknown, what: string): Uint8Array {
   return hexToBytes(value.slice(2));
 }
 
+// At most 32 bytes: no header field is wider, and a longer one would cost
+// time quadratic in its length to encode (T-52).
 function quantity(value: unknown, what: string): bigint {
-  if (typeof value !== "string" || !/^0x(?:0|[1-9a-fA-F][0-9a-fA-F]*)$/u.test(value))
+  if (typeof value !== "string" || !/^0x(?:0|[1-9a-fA-F][0-9a-fA-F]{0,63})$/u.test(value))
     throw new RpcError(`${what}: not a quantity`);
   return BigInt(value);
 }
@@ -241,6 +243,13 @@ export async function loggedCheckpoints(
 export const PROOF_SLOTS_PER_REQUEST = 256;
 
 /**
+ * Most bytes of proof nodes held for one election: a few thousand slots'
+ * proofs are a few MiB, so this leaves room for years of hourly segments
+ * while a node can't make the pinner hold its answers without bound (T-52).
+ */
+export const MAX_PROOF_BYTES = 256 * 1024 * 1024;
+
+/**
  * The election's checkpoints the anchor holds at the header's block, of
  * those `logged` names: the verifier's reader proves the lowest-segment word
  * and the word of every segment from the lowest anchored one to the highest
@@ -250,7 +259,8 @@ export const PROOF_SLOTS_PER_REQUEST = 256;
  * (`l1-checkpoint-unknown`): the node withheld its log, so this election's
  * pins wait for a node that doesn't. So does a range of more than
  * `MAX_SEGMENTS_READ` segments (`l1-range-too-long`), checked before any
- * proof is asked for.
+ * proof is asked for. An answer that can't be read, or proofs past
+ * `MAX_PROOF_BYTES`, throw `RpcError`.
  */
 export async function provenCheckpoints(
   rpc: Rpc,
@@ -282,6 +292,13 @@ export async function provenCheckpoints(
   const slots = [lowestSegmentSlot(electionId)];
   for (let s = low; s <= high; s++) slots.push(checkpointSlot(electionId, s));
   const nodes: Uint8Array[] = [];
+  let held = 0;
+  const keep = (n: unknown, what: string) => {
+    const node = unhex(n, what);
+    held += node.length;
+    if (held > MAX_PROOF_BYTES) throw new RpcError("eth_getProof: proofs past the size limit");
+    nodes.push(node);
+  };
   for (let at = 0; at < slots.length; at += PROOF_SLOTS_PER_REQUEST) {
     const proof = (await rpc.call("eth_getProof", [
       hex(anchor),
@@ -290,11 +307,11 @@ export async function provenCheckpoints(
     ])) as { accountProof?: unknown; storageProof?: unknown } | null;
     if (!Array.isArray(proof?.accountProof) || !Array.isArray(proof?.storageProof))
       throw new RpcError("eth_getProof: not a proof");
-    for (const n of proof.accountProof) nodes.push(unhex(n, "accountProof"));
+    for (const n of proof.accountProof) keep(n, "accountProof");
     for (const p of proof.storageProof) {
       const list = (p as { proof?: unknown } | null)?.proof;
       if (!Array.isArray(list)) throw new RpcError("eth_getProof: not a proof");
-      for (const n of list) nodes.push(unhex(n, "storageProof"));
+      for (const n of list) keep(n, "storageProof");
     }
   }
   // Pinning judges no timing: a word proven at the header's block is held by

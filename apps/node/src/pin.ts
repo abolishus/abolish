@@ -8,22 +8,23 @@
 // judges the board: that is the verifier's (part 3), which authenticates every
 // byte against the anchored heads and roots.
 
+import { randomUUID } from "node:crypto";
 import { readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   type AsyncBlockSource,
   type Checkpoint,
+  checkpointHash,
   cidText,
   MAX_BOARD_PAYLOAD,
   objectCar,
   objectCid,
   readObjectWithinAsync,
 } from "@abolishus/crypto";
-import { L1Error } from "@abolishus/verifier";
-import type { L1Header } from "@abolishus/verifier";
+import { L1Error, type L1Header } from "@abolishus/verifier";
 import { bytesToHex } from "@noble/hashes/utils.js";
 import { loggedCheckpoints, provenCheckpoints } from "./l1.ts";
-import type { Rpc } from "./rpc.ts";
+import { type Rpc, RpcError } from "./rpc.ts";
 import type { Mirror } from "./store.ts";
 
 // An entry is its 51 fixed bytes and a payload of at most `MAX_BOARD_PAYLOAD`
@@ -77,9 +78,8 @@ export interface PinOptions {
   readonly report: (r: PinReport) => void;
 }
 
-/** What one run read from L1: its block, and the logs it refused. */
+/** What one run read from L1: how many logs it refused. */
 export interface PinRun {
-  readonly header: L1Header;
   readonly refusedLogs: number;
 }
 
@@ -107,7 +107,8 @@ async function write(dir: string, cid: Uint8Array, object: Uint8Array): Promise<
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
   }
-  const temporary = `${path}.partial`;
+  // A name of its own, so two runs sharing the directory never write one file.
+  const temporary = `${path}.${randomUUID()}.partial`;
   await writeFile(temporary, car);
   await rename(temporary, path);
   return "pinned";
@@ -117,10 +118,10 @@ async function write(dir: string, cid: Uint8Array, object: Uint8Array): Promise<
  * One run: the finalized L1 block, every `CheckpointAnchored` log up to it,
  * and, election by election, the checkpoints the anchor holds and the
  * objects they name. Each election and each object is reported as it is
- * done. An election whose checkpoints can't be proven (its L1 error) is
- * reported and skipped; an object that can't be read is reported and the
- * next one tried. Throws only if L1 can't be read at all (`RpcError`) or
- * the directory can't be written.
+ * done. An election whose checkpoints can't be proven (its L1 error, or an
+ * answer that can't be read) is reported and skipped; an object that can't
+ * be read is reported and the next one tried. Throws only if the logs can't
+ * be read (`RpcError`) or the directory can't be written.
  */
 export async function pinElections(header: L1Header, options: PinOptions): Promise<PinRun> {
   const { rpc, anchor, blocks, dir, maxElectionBytes, report } = options;
@@ -132,11 +133,15 @@ export async function pinElections(header: L1Header, options: PinOptions): Promi
     try {
       proven = await provenCheckpoints(rpc, anchor, header, checkpoints);
     } catch (e) {
-      if (!(e instanceof L1Error)) throw e;
+      // One election's proofs failing (a proof missing, a rate limit, a
+      // timeout) leaves the others to try.
+      if (!(e instanceof L1Error) && !(e instanceof RpcError)) throw e;
       report({ election, error: e.message });
       continue;
     }
-    report({ election, checkpoints: proven.length, unproven: checkpoints.length - proven.length });
+    // Distinct checkpoints, so a node repeating a log inflates nothing.
+    const distinct = new Set(checkpoints.map((c) => bytesToHex(checkpointHash(c)))).size;
+    report({ election, checkpoints: proven.length, unproven: distinct - proven.length });
     // A checkpoint of size `n_i` covers the entries after the next smaller
     // size, so its objects are bounded by that run's count; checkpoints of
     // one size name one run.
@@ -180,5 +185,5 @@ export async function pinElections(header: L1Header, options: PinOptions): Promi
       }
     }
   }
-  return { header, refusedLogs: logged.refused };
+  return { refusedLogs: logged.refused };
 }

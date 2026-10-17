@@ -373,7 +373,8 @@ describe("a node not to trust", () => {
       const result = await forward(method, params);
       if (method !== "eth_getLogs") return result;
       const [log] = result as { address: string; topics: string[]; data: string }[];
-      return [...(result as unknown[]), forgedLog(log!, forged)];
+      // The real log repeated counts once.
+      return [...(result as unknown[]), log, forgedLog(log!, forged)];
     });
     const gateways = gatewaySource([
       await serving([
@@ -431,6 +432,30 @@ describe("a node not to trust", () => {
         [objects[2]!, list].map((o) => `${cidText(objectCid(o))}.car`).sort(),
       );
     }
+  });
+
+  test("an election whose proofs can't be read is reported, and the next one still pinned", async () => {
+    const anchor = await deployAnchor();
+    const [e, f] = [id(12), id(13)];
+    const list = new Uint8Array(32).fill(6);
+    await anchorAll(anchor, [
+      checkpoint(e, 0, 1n, text("e"), list),
+      checkpoint(f, 0, 1n, text("f"), list),
+    ]);
+    const gateways = gatewaySource([await serving([text("e"), text("f"), list])]);
+    let proofs = 0;
+    const through = hooked(async (method, params, forward) => {
+      // The first election's proof request is refused, as a rate limit would.
+      if (method === "eth_getProof" && proofs++ === 0) throw new RpcError("eth_getProof: limited");
+      return forward(method, params);
+    });
+    const dir = await blocksDir({});
+    const run = await pin(anchor, dir, gateways.source, { through });
+    expect(run.reports.filter((r) => !("outcome" in r))).toEqual([
+      { election: ids(e), error: "eth_getProof: limited" },
+      { election: ids(f), checkpoints: 1, unproven: 0 },
+    ]);
+    expect((await readdir(dir)).length).toBe(2);
   });
 
   test("a log in another layout, or from another address, is refused", async () => {
@@ -523,6 +548,12 @@ describe("a node not to trust", () => {
     });
     await expect(finalizedHeader(through)).rejects.toThrow(RpcError);
     await expect(finalizedHeader(through)).rejects.toThrow("doesn't hash to its hash");
+    // A quantity wider than any header field is refused before it is encoded.
+    const wide = hooked(async (method, params, forward) => {
+      const block = (await forward(method, params)) as Record<string, string>;
+      return { ...block, difficulty: `0x1${"0".repeat(64)}` };
+    });
+    await expect(finalizedHeader(wide)).rejects.toThrow("difficulty: not a quantity");
     // A block of one field, with its hash recomputed.
     const short = hooked(async (method, params, forward) => {
       const { parentHash } = (await forward(method, params)) as Record<string, string>;

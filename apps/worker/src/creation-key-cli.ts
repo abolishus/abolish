@@ -42,7 +42,12 @@ async function main(): Promise<void> {
     throw new Error("the creation key's commands need the creation step's variables");
   const client = createPublicClient({ transport: http(config.l2RpcUrl, { timeout: 30_000 }) });
   // The key is used only against the registry it creates on, on its chain.
-  await checkPollCreationDeployment(client, { chainId: config.chainId, registry: config.registry });
+  await checkPollCreationDeployment(client, {
+    chainId: config.chainId,
+    registry: config.registry,
+    l1ChainId: config.l1ChainId,
+    anchor: config.anchor,
+  });
 
   // Both commands read the creation step's ledger.
   const url = z.url({ protocol: /^postgres(?:ql)?$/ }).safeParse(process.env["DATABASE_URL"]);

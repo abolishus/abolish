@@ -10,6 +10,7 @@ import type {
   BallotAdmissions,
   CreationAnchors,
   PollCreationChain,
+  PollStubDeployment,
   Tier0Batches,
 } from "@abolishus/core";
 import { Queue, Worker } from "bullmq";
@@ -82,9 +83,19 @@ export interface WorkerOptions {
     readonly everyMs?: number;
   };
   /**
+   * The stub step (P2-22 part 4b), only beside the registry sync, whose
+   * deployment its stubs pin, as `pollStubDeployment` checked it; without
+   * it, no rooted poll gets a stub.
+   */
+  readonly pollStubs?: {
+    readonly deployment: PollStubDeployment;
+    /** How often it runs; `POLL_STUB_EVERY_MS` unless a test says otherwise. */
+    readonly everyMs?: number;
+  };
+  /**
    * The creation step, with the creation key ([[0032-poll-creation-operations]],
    * rule 2): a worker given it runs the `{poll-create}` queue and nothing
-   * else, no audit, prune, anchoring, Tier 0, ballot, registry or roots work beside the key,
+   * else, no audit, prune, anchoring, Tier 0, ballot, registry, roots or stub work beside the key,
    * and refuses to start with any of those configured. Without it, nothing
    * creates polls.
    */
@@ -135,6 +146,12 @@ export const POLL_CREATE_EVERY_MS = 30_000;
  */
 export const POLL_ROOT_EVERY_MS = 60_000;
 
+/**
+ * A stub opens `SETUP_SECONDS` after its run, and setup is tens of minutes,
+ * so once a minute adds little.
+ */
+export const POLL_STUB_EVERY_MS = 60_000;
+
 export interface RunningWorker {
   close(): Promise<void>;
 }
@@ -149,13 +166,16 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
   const creating = options.pollCreation !== undefined;
   if (options.pollRoots !== undefined && options.registry === undefined)
     throw new Error("the roots step runs only beside the registry sync");
+  if (options.pollStubs !== undefined && options.registry === undefined)
+    throw new Error("the stub step runs only beside the registry sync");
   if (
     creating &&
     (options.anchor !== undefined ||
       options.tier0 !== undefined ||
       options.ballots !== undefined ||
       options.registry !== undefined ||
-      options.pollRoots !== undefined)
+      options.pollRoots !== undefined ||
+      options.pollStubs !== undefined)
   )
     throw new Error("a worker holding the creation key runs nothing else");
   const prefix = options.prefix ?? KEY_PREFIX;
@@ -170,6 +190,7 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
     ...(options.tier0 === undefined ? {} : { tier0: options.tier0.batches }),
     ...(options.registry === undefined ? {} : { registry: options.registry.sync }),
     ...(options.pollRoots === undefined ? {} : { pollRoots: options.pollRoots.roots }),
+    ...(options.pollStubs === undefined ? {} : { pollStubs: options.pollStubs.deployment }),
     ...(options.pollCreation === undefined
       ? {}
       : {
@@ -203,7 +224,10 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
             ? options.registry !== undefined
             : key === "pollRoot"
               ? options.pollRoots !== undefined
-              : options.tier0 !== undefined || !(TIER0_QUEUES as readonly QueueKey[]).includes(key);
+              : key === "pollStub"
+                ? options.pollStubs !== undefined
+                : options.tier0 !== undefined ||
+                  !(TIER0_QUEUES as readonly QueueKey[]).includes(key);
   const workers = (Object.keys(QUEUES) as QueueKey[]).filter(running).map((key) => {
     const spec = QUEUES[key];
     const worker = new Worker(
@@ -347,6 +371,15 @@ function everyOtherSchedule(options: WorkerOptions) {
             key: "pollRoot",
             id: "poll-root",
             every: options.pollRoots.everyMs ?? POLL_ROOT_EVERY_MS,
+          },
+        ] as const)),
+    ...(options.pollStubs === undefined
+      ? []
+      : ([
+          {
+            key: "pollStub",
+            id: "poll-stub",
+            every: options.pollStubs.everyMs ?? POLL_STUB_EVERY_MS,
           },
         ] as const)),
   ] as const satisfies readonly { key: QueueKey; id: string; every: number }[];

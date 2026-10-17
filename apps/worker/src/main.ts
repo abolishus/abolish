@@ -13,6 +13,8 @@ import { DisputeGameRoots, ProvenRegistryAccumulator } from "./output-roots.ts";
 import { RegistrySync } from "./registry-sync.ts";
 import { POLL_ROOT_ENV, pollRootFromEnv } from "./poll-root-env.ts";
 import { PollRoots } from "./poll-roots.ts";
+import { pollStubDeployment } from "./poll-stub-chain.ts";
+import { POLL_STUB_ENV, pollStubFromEnv } from "./poll-stub-env.ts";
 import { connectTier0Bundler } from "./tier0-bundler.ts";
 import { ViemL1Source } from "./l1-source.ts";
 import { checkCreationAnchorsDeployment, ViemCreationAnchors } from "./creation-anchors.ts";
@@ -103,6 +105,8 @@ if (
     env.BALLOT_ANCHOR_PERIOD,
     ...TIER0_ENV.map((name) => process.env[name]),
     ...REGISTRY_SYNC_ENV.map((name) => process.env[name]),
+    ...POLL_ROOT_ENV.map((name) => process.env[name]),
+    ...POLL_STUB_ENV.map((name) => process.env[name]),
   ].some((v) => v !== undefined && v !== "")
 )
   throw new Error("a worker holding the creation key runs nothing else");
@@ -244,23 +248,50 @@ const pollRootConfig = pollRootFromEnv(
 );
 if (pollRootConfig !== undefined && registryConfig === undefined)
   throw new Error("the roots step runs only beside the registry sync");
+// The stub step (P2-22 part 4b) pins the registry sync's deployment, so it
+// runs only beside it too.
+const pollStubConfig = pollStubFromEnv(
+  Object.fromEntries(POLL_STUB_ENV.map((name) => [name, process.env[name]])),
+);
+if (pollStubConfig !== undefined && registryConfig === undefined)
+  throw new Error("the stub step runs only beside the registry sync");
+let pollStubs: WorkerOptions["pollStubs"];
 if (registryConfig !== undefined) {
   const c = registryConfig;
   let accumulator;
+  const l2 = createPublicClient({ transport: http(c.l2RpcUrl, { timeout: 30_000 }) });
   try {
     const roots = await DisputeGameRoots.connect(
       createPublicClient({ transport: http(c.l1RpcUrl, { timeout: 30_000 }) }),
       c.l1ChainId,
       c.portal,
     );
-    accumulator = await ProvenRegistryAccumulator.connect(
-      createPublicClient({ transport: http(c.l2RpcUrl, { timeout: 30_000 }) }),
-      c.chainId,
-      roots,
-    );
+    accumulator = await ProvenRegistryAccumulator.connect(l2, c.chainId, roots);
   } catch (e) {
     if (e instanceof BaseError) throw new Error("the registry sync couldn't reach its nodes");
     throw e;
+  }
+  if (pollStubConfig !== undefined) {
+    try {
+      pollStubs = {
+        deployment: await pollStubDeployment(
+          l2,
+          {
+            chainId: c.chainId,
+            l1ChainId: c.l1ChainId,
+            electionRegistry: c.electionRegistry,
+            board: c.board,
+            trusteeRegistry: c.trusteeRegistry,
+            groupRegistry: c.groupRegistry,
+            eventVersion: c.eventVersion,
+          },
+          pollStubConfig,
+        ),
+      };
+    } catch (e) {
+      if (e instanceof BaseError) throw new Error("the stub step couldn't reach the L2 node");
+      throw e;
+    }
   }
   const bytes = (a: string) => Uint8Array.from(Buffer.from(a.slice(2), "hex"));
   index = postgres(c.indexUrl, { onnotice: () => {}, max: 1 });
@@ -317,7 +348,12 @@ if (pollCreationConfig !== undefined) {
   const l1 = createPublicClient({ transport: http(c.l1RpcUrl, { timeout: 30_000 }) });
   let clock;
   try {
-    await checkPollCreationDeployment(client, { chainId: c.chainId, registry: c.registry });
+    await checkPollCreationDeployment(client, {
+      chainId: c.chainId,
+      registry: c.registry,
+      l1ChainId: c.l1ChainId,
+      anchor: c.anchor,
+    });
   } catch (e) {
     if (e instanceof BaseError) throw new Error("the creation step couldn't reach the chain");
     throw e;
@@ -349,6 +385,7 @@ const worker = await startWorker({
   ...(ballots !== undefined && { ballots }),
   ...(registry !== undefined && { registry }),
   ...(pollRoots !== undefined && { pollRoots }),
+  ...(pollStubs !== undefined && { pollStubs }),
   ...(pollCreation !== undefined && { pollCreation }),
 });
 

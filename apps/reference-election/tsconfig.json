@@ -4,5 +4,5 @@
     "types": ["node"],
     "erasableSyntaxOnly": true
   },
-  "include": ["src", "tests"]
+  "include": ["src", "tests", "../../packages/membership-prover/src/snarkjs.d.ts"]
 }

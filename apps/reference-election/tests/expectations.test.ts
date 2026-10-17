@@ -1,5 +1,11 @@
 import { expect, test } from "vite-plus/test";
-import { checkControl, checkExpectations, REQUIRED_PASSES } from "../src/expectations.ts";
+import {
+  checkBallots,
+  checkControl,
+  checkExpectations,
+  type ExpectedBallots,
+  REQUIRED_PASSES,
+} from "../src/expectations.ts";
 import type { ReportRow } from "../src/verify.ts";
 import { STAGES } from "../src/stages.ts";
 
@@ -9,9 +15,15 @@ const rows = (status: Record<string, ReportRow["status"]>): ReportRow[] =>
     status: status[id] ?? "pass",
     ...(status[id] !== undefined && status[id] !== "pass" && { code: "x" }),
   }));
+const none = { admitted: 0, rejected: [] };
 const fromStore = { byCid: { storeBlocks: 1, storeUnreadableBytes: 0 } };
 const honest = {
-  report: { verdict: "unverifiable", checks: rows({ "2.1": "unverifiable" }), board: fromStore },
+  report: {
+    verdict: "unverifiable",
+    checks: rows({ "2.1": "unverifiable" }),
+    board: fromStore,
+    ballots: { admitted: 0, rejected: [] },
+  },
   exitCode: 21,
 };
 const fromGateway = {
@@ -20,28 +32,29 @@ const fromGateway = {
 };
 
 test("the honest shape passes, from a block store and from a gateway", () => {
-  expect(checkExpectations(honest, "blocks.car")).toEqual([]);
-  expect(checkExpectations(fromGateway, "gateway")).toEqual([]);
+  expect(checkExpectations(honest, "blocks.car", none)).toEqual([]);
+  expect(checkExpectations(fromGateway, "gateway", none)).toEqual([]);
 });
 
 test("the copy must be read by CID, whole, from the source the run gave", () => {
   const withBoard = (board: object) => ({ ...honest, report: { ...honest.report, board } });
   // board.bin: no byCid in the report.
-  expect(checkExpectations(withBoard({}), "blocks.car")).toEqual([
+  expect(checkExpectations(withBoard({}), "blocks.car", none)).toEqual([
     "the board copy must be read by CID",
   ]);
-  expect(checkExpectations(honest, "gateway")).toHaveLength(1);
-  expect(checkExpectations(fromGateway, "blocks.car")).toHaveLength(1);
+  expect(checkExpectations(honest, "gateway", none)).toHaveLength(1);
+  expect(checkExpectations(fromGateway, "blocks.car", none)).toHaveLength(1);
   // A gateway that failed some requests, or served nothing.
   for (const gateways of [
     { requests: 3, blocks: 2 },
     { requests: 0, blocks: 0 },
   ])
-    expect(checkExpectations(withBoard({ byCid: { gateways } }), "gateway")).toHaveLength(1);
+    expect(checkExpectations(withBoard({ byCid: { gateways } }), "gateway", none)).toHaveLength(1);
   expect(
     checkExpectations(
       withBoard({ byCid: { storeBlocks: 0, storeUnreadableBytes: 0 } }),
       "blocks.car",
+      none,
     ),
   ).toHaveLength(1);
   expect(
@@ -50,6 +63,7 @@ test("the copy must be read by CID, whole, from the source the run gave", () => 
         byCid: { ...fromStore.byCid, stopped: { checkpoint: 0, reason: "unavailable" } },
       }),
       "blocks.car",
+      none,
     ),
   ).toEqual(['the copy by CID stopped short: {"checkpoint":0,"reason":"unavailable"}']);
 });
@@ -66,10 +80,11 @@ test("every required row must pass", () => {
           },
         },
         "blocks.car",
+        none,
       ),
     ).toEqual([`check ${id} must pass, got unverifiable x`]);
   expect(
-    checkExpectations({ ...honest, report: { ...honest.report, checks: [] } }, "blocks.car"),
+    checkExpectations({ ...honest, report: { ...honest.report, checks: [] } }, "blocks.car", none),
   ).toHaveLength(REQUIRED_PASSES.length);
 });
 
@@ -81,6 +96,7 @@ test("any failed row, a failed verdict or a verified one stops the run", () => {
         report: { ...honest.report, checks: rows({ "2.1": "fail" }) },
       },
       "blocks.car",
+      none,
     ),
   ).toContain("check 2.1 failed: x");
   expect(
@@ -90,17 +106,63 @@ test("any failed row, a failed verdict or a verified one stops the run", () => {
         report: { ...honest.report, verdictAgainstInputs: "failed" },
       },
       "blocks.car",
+      none,
     ),
   ).toContain("the checks failed the election against its inputs");
   expect(
     checkExpectations(
       { exitCode: 0, report: { ...honest.report, verdict: "verified" } },
       "blocks.car",
+      none,
     ),
   ).toEqual(["the verdict must be unverifiable from local inputs, got verified"]);
-  expect(checkExpectations({ ...honest, exitCode: 0 }, "blocks.car")).toEqual([
+  expect(checkExpectations({ ...honest, exitCode: 0 }, "blocks.car", none)).toEqual([
     "the verifier exited 0, not 21 for unverifiable",
   ]);
+});
+
+test("the ballots admitted and rejected must be exactly those expected", () => {
+  const four = { admitted: 4, rejected: [] };
+  const withBallots = (ballots: ExpectedBallots) => ({
+    ...honest,
+    report: { ...honest.report, ballots },
+  });
+  expect(checkExpectations(withBallots(four), "blocks.car", four)).toEqual([]);
+  // Admission rows pass vacuously on an empty board, so an empty one isn't the run's.
+  expect(checkExpectations(honest, "blocks.car", four)).toEqual([
+    "honest: 0 ballots admitted, not 4",
+  ]);
+  expect(
+    checkExpectations(
+      {
+        ...honest,
+        report: {
+          verdict: honest.report.verdict,
+          checks: honest.report.checks,
+          board: honest.report.board,
+        },
+      },
+      "blocks.car",
+      four,
+    ),
+  ).toEqual(["honest: the report has no ballots"]);
+  const rejected = { admitted: 1, rejected: [{ entry: 2, code: "membership-proof" }] };
+  expect(checkBallots("c", { report: withBallots(rejected).report }, rejected)).toEqual([]);
+  expect(
+    checkBallots(
+      "c",
+      {
+        report: withBallots({ admitted: 1, rejected: [{ entry: 2, code: "validity-shape" }] })
+          .report,
+      },
+      rejected,
+    ),
+  ).toEqual([
+    'c: rejected [{"entry":2,"code":"validity-shape"}], not [{"entry":2,"code":"membership-proof"}]',
+  ]);
+  expect(
+    checkBallots("c", { report: withBallots({ admitted: 2, rejected: [] }).report }, rejected),
+  ).toHaveLength(2);
 });
 
 test("a control must show each row it pins, with its code", () => {

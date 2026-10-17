@@ -5,10 +5,50 @@
 import type { ReportRow, VerifierRun } from "./verify.ts";
 
 /**
- * Rows that must pass on the honest run: 3.2 (the ceremony, stage 1) and 4.1
- * and 4.2 (the board against its anchors, stage 7).
+ * Rows that must pass on the honest run: 3.2 (the ceremony, stage 1), 4.1
+ * and 4.2 (the board against its anchors, stage 7), and ballot admission:
+ * 5.1 to 5.4, the close rule's window (5.5) and repeats (5.7) (stage 4).
  */
-export const REQUIRED_PASSES: readonly string[] = Object.freeze(["3.2", "4.1", "4.2"]);
+export const REQUIRED_PASSES: readonly string[] = Object.freeze([
+  "3.2",
+  "4.1",
+  "4.2",
+  "5.1",
+  "5.2",
+  "5.3",
+  "5.4",
+  "5.5",
+  "5.7",
+]);
+
+/** What the report's `ballots` must hold: how many entries admitted, and each rejected one. */
+export interface ExpectedBallots {
+  readonly admitted: number;
+  readonly rejected: readonly { readonly entry: number; readonly code: string }[];
+}
+
+/**
+ * Why the report's ballots differ from `expected`; empty if they don't. The
+ * admission rows pass vacuously on a board without ballots, so a run that
+ * boards ballots pins how many the verifier admitted, and which it rejected.
+ */
+export function checkBallots(
+  name: string,
+  run: Pick<VerifierRun, "report">,
+  expected: ExpectedBallots,
+): string[] {
+  const ballots = run.report.ballots;
+  if (ballots === undefined) return [`${name}: the report has no ballots`];
+  const rejected = ballots.rejected.map((r) => ({ entry: r.entry, code: r.code }));
+  const problems: string[] = [];
+  if (ballots.admitted !== expected.admitted)
+    problems.push(`${name}: ${ballots.admitted} ballots admitted, not ${expected.admitted}`);
+  if (JSON.stringify(rejected) !== JSON.stringify(expected.rejected))
+    problems.push(
+      `${name}: rejected ${JSON.stringify(rejected)}, not ${JSON.stringify(expected.rejected)}`,
+    );
+  return problems;
+}
 
 // The verifier's exit codes (packages/verifier, EXIT_CODES).
 const EXIT = { verified: 0, failed: 20, unverifiable: 21 } as const;
@@ -25,9 +65,10 @@ export type CopySource = "blocks.car" | "gateway";
 export function checkExpectations(
   run: Pick<VerifierRun, "report" | "exitCode">,
   source: CopySource,
+  ballots: ExpectedBallots,
 ): string[] {
   const { report } = run;
-  const problems: string[] = [];
+  const problems: string[] = checkBallots("honest", run, ballots);
   const byCid = report.board?.byCid;
   if (byCid === undefined) problems.push("the board copy must be read by CID");
   else {

@@ -29,14 +29,14 @@ export const STAGES: readonly Stage[] = Object.freeze([
   {
     id: 3,
     name: "Group membership",
-    coverage: "not-yet",
-    note: "P3-2 (group registry on L2), P1-17b (membership proofs)",
+    coverage: "partial",
+    note: "the definition's one Tier 0 group is four voters' identity commitments, its root their tier tree, and every ballot proves membership in it with a real Semaphore proof under the pinned depth-32 key, made by the ballot client's prover (@abolishus/membership-prover) from a path rebuilt from every leaf; the root is computed by the fixture, not created in the group registry on L2 (P3-2), and the verifier doesn't read the registry yet (2.4, P1-19)",
   },
   {
     id: 4,
     name: "Casting, Benaloh challenge/spoil, re-voting",
-    coverage: "not-yet",
-    note: "P1-12 (the ballot record), P1-13 (challenge/spoil), P1-13b",
+    coverage: "partial",
+    note: "three voters cast version-1 ballots in Casting's order through @abolishus/crypto, one re-voting under a later L1 block, each boarded on the board path in the voting window's segment; the verifier must admit all four (5.1 to 5.5, 5.7), and a control election's ballot carrying another ballot's proof must be rejected at 5.1 to 5.3 alone; one challenged attempt is opened and checked on a second context against the code shown, but not published, since an opening boarded before the counted extent breaks challenge.md's Publication rules (P1-18's window); no ballot goes through the API or a trustee's intake, so there are no receipts (P2-3, P2-13, P1-13b), the L1 references aren't judged (5.8 needs format 5's headers, P1-19) and selection (6.1) isn't reached",
   },
   {
     id: 5,
@@ -54,7 +54,7 @@ export const STAGES: readonly Stage[] = Object.freeze([
     id: 7,
     name: "L1 anchoring",
     coverage: "partial",
-    note: "the BoardAnchor contract on Anvil anchors the ceremony's segment and the seal from a stub authority, and the verifier reads both back from eth_getProof; the anchoring job and the Safe are P4-1 part 2",
+    note: "the BoardAnchor contract on Anvil anchors the ceremony's segment, the voting window's and the seal from a stub authority, and the verifier reads them back from eth_getProof; the anchoring job and the Safe are P4-1 part 2",
   },
   {
     id: 8,

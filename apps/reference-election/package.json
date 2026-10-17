@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@abolishus/crypto": "workspace:*",
+    "@abolishus/membership-prover": "workspace:*",
     "@noble/curves": "catalog:",
     "@noble/hashes": "catalog:"
   },

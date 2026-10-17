@@ -21,6 +21,11 @@ export interface VerifierRun {
     readonly verdict: string;
     readonly verdictAgainstInputs?: string;
     readonly checks: readonly ReportRow[];
+    /** Ballot admission's outcome, once 5.1 to 5.4 ran (docs/spec/verifier.md, Report). */
+    readonly ballots?: {
+      readonly admitted: number;
+      readonly rejected: readonly { readonly entry: number; readonly code: string }[];
+    };
     /** How a copy read by CID came out (docs/spec/verifier.md, Board by CID). */
     readonly board?: {
       readonly byCid?: {

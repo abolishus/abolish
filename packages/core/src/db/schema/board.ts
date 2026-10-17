@@ -49,3 +49,17 @@ export const boardBallotKeys = pgTable(
     unique().on(t.electionId, t.idx),
   ],
 );
+
+// Drizzle view of migrations/0009_board_checkpoints.sql: each checkpoint the
+// anchoring job took, append-only like the board; taking one fences its
+// segment (T-24).
+export const boardCheckpoints = pgTable(
+  "board_checkpoints",
+  {
+    electionId: bytea("election_id").notNull(),
+    segment: bigint("segment", { mode: "bigint" }).notNull(),
+    size: bigint("size", { mode: "bigint" }).notNull(),
+    checkpoint: bytea("checkpoint").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.electionId, t.segment] })],
+);

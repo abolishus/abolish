@@ -3,7 +3,7 @@
 // an error message (messages can quote data). Findings are their own lines
 // and carry only public board values.
 
-import type { BoardAuditCode, Tier0GroupOutcome } from "@abolishus/core";
+import type { AnchorFindingCode, BoardAuditCode, Tier0GroupOutcome } from "@abolishus/core";
 import type { QueueSpec } from "./queues.ts";
 
 export interface JobLogLine {
@@ -33,6 +33,18 @@ export type AuditFindingLine =
     };
 
 /**
+ * What an anchoring run found (core's AnchorFindingCode), for one election
+ * but `anchor-clock`. The election ID and segment are public: both are on
+ * the board and on L1.
+ */
+export interface AnchorFindingLine {
+  readonly queue: "{board-anchor}";
+  readonly finding: AnchorFindingCode;
+  readonly election?: string;
+  readonly segment?: number;
+}
+
+/**
  * What a Tier 0 boundary did to one published group. The group ID is public
  * (the deployment record lists it), and the line names a step, never a
  * commitment or a record (T-10, T-13).
@@ -53,9 +65,15 @@ export interface WorkerErrorLine {
 
 export type ErrorKind =
   | "board-audit-findings"
+  | "board-anchor-findings"
   | "invalid-job-data"
   | "tier0-chain-unavailable"
   | "internal";
 
-export type LogLine = JobLogLine | AuditFindingLine | Tier0BoundaryLine | WorkerErrorLine;
+export type LogLine =
+  | JobLogLine
+  | AuditFindingLine
+  | AnchorFindingLine
+  | Tier0BoundaryLine
+  | WorkerErrorLine;
 export type Log = (line: LogLine) => void;

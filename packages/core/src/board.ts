@@ -29,6 +29,7 @@ import type { Sql } from "postgres";
 import { isBytes } from "./bytes.ts";
 import {
   boardBallotKeys,
+  boardCheckpoints,
   boardEntries,
   boardSubtrees,
   electionDefinitions,
@@ -41,7 +42,7 @@ const MAX_SEGMENT = 2 ** 32 - 1;
  * a separate keyspace from the one-bigint locks migrations take, so a board
  * lock never collides with them.
  */
-const BOARD_LOCK_CLASS = 0x0b0a4d;
+const BOARD_LOCK_CLASS = 0x0b0a4d; // 723533, as migrations/0009 takes it in its triggers
 
 export type AppendErrorCode =
   /** No definition is stored for the election, so its board-entry version is unknown. */
@@ -52,6 +53,11 @@ export type AppendErrorCode =
   | "invalid-entry"
   /** The segment is below the previous entry's. */
   | "segment-decreased"
+  /**
+   * The segment's checkpoint, or a later one's, is already taken: an entry
+   * there would make it invalid for the board once anchored (T-24).
+   */
+  | "segment-checkpointed"
   /** Within a segment, openings come last, in strictly increasing byte order (T-42, T-47). */
   | "opening-order"
   /**
@@ -117,7 +123,7 @@ const isBoardEntryVersion = (v: number | undefined): v is BoardEntryVersion =>
  * and fails 2.3's `profile-mismatch` (docs/spec/board.md; T-23, T-34). A
  * definition is write-once, so the answer never changes for a board.
  */
-async function pinnedBoardVersion(
+export async function pinnedBoardVersion(
   db: Pick<ReturnType<typeof drizzle>, "select">,
   id: Uint8Array,
 ): Promise<BoardEntryVersion | BoardVersionCode> {
@@ -137,6 +143,21 @@ async function pinnedBoardVersion(
     throw e;
   }
   return isBoardEntryVersion(version) ? version : "unsupported-version";
+}
+
+/**
+ * Takes the transaction-scoped advisory lock that serialises writes to one
+ * board: appends, and the checkpoints that fence them. Its second key is the
+ * election ID's first 4 bytes, from a hash output, so two elections rarely
+ * share one; sharing only serialises their writes.
+ */
+export async function lockBoard(
+  tx: Pick<ReturnType<typeof drizzle>, "execute">,
+  id: Uint8Array,
+): Promise<void> {
+  await tx.execute(
+    q`SELECT pg_advisory_xact_lock(${BOARD_LOCK_CLASS}::int, ('x' || encode(substring(${id}::bytea FROM 1 FOR 4), 'hex'))::bit(32)::int)`,
+  );
 }
 
 /** `pinnedBoardVersion`, for readers outside an append's transaction. */
@@ -222,6 +243,8 @@ export async function appendEntry(
      * than `segment`, rather than refuse it: for a caller that labels by its
      * clock before slow work, so two appends racing across a period boundary
      * both land (the later-labelled one first), never `segment-decreased`.
+     * Likewise, label it with the segment after the last checkpoint taken
+     * when `segment` is at or below it, never `segment-checkpointed`.
      */
     readonly raiseToPrevious?: boolean;
     /**
@@ -262,12 +285,7 @@ export async function appendEntry(
   }
   return drizzle({ client }).transaction(
     async (tx) => {
-      // The lock's second key is the election ID's first 4 bytes, from a hash
-      // output, so two elections rarely share one; sharing only serialises
-      // their appends.
-      await tx.execute(
-        q`SELECT pg_advisory_xact_lock(${BOARD_LOCK_CLASS}::int, ('x' || encode(substring(${id}::bytea FROM 1 FOR 4), 'hex'))::bit(32)::int)`,
-      );
+      await lockBoard(tx, id);
       const version = await pinnedBoardVersion(tx, id);
       if (typeof version === "string") throw new AppendError(version);
       if (key !== undefined) {
@@ -311,6 +329,19 @@ export async function appendEntry(
             link: new Uint8Array(seen.link),
           };
         }
+      }
+      // Read under the lock, so no checkpoint is taken between this and the
+      // insert.
+      const [fence] = await tx
+        .select({ segment: boardCheckpoints.segment })
+        .from(boardCheckpoints)
+        .where(eq(boardCheckpoints.electionId, id))
+        .orderBy(desc(boardCheckpoints.segment))
+        .limit(1);
+      if (fence !== undefined && segment <= Number(fence.segment)) {
+        if (options.raiseToPrevious !== true || Number(fence.segment) === MAX_SEGMENT)
+          throw new AppendError("segment-checkpointed");
+        segment = Number(fence.segment) + 1;
       }
       const [prev] = await tx
         .select()

@@ -5,7 +5,7 @@ import {
   accountUsers,
   accountVerifications,
 } from "./accounts.ts";
-import { boardBallotKeys, boardEntries, boardSubtrees } from "./board.ts";
+import { boardBallotKeys, boardCheckpoints, boardEntries, boardSubtrees } from "./board.ts";
 import { electionDefinitions, electionRegistrations } from "./definitions.ts";
 import { identityBackups } from "./identity-backups.ts";
 import { moderationActions, moderationReports } from "./moderation.ts";
@@ -17,6 +17,7 @@ export {
   accountUsers,
   accountVerifications,
   boardBallotKeys,
+  boardCheckpoints,
   boardEntries,
   boardSubtrees,
   electionDefinitions,
@@ -42,6 +43,7 @@ export {
 export const TABLE_CLASSES = {
   board: [
     "board_ballot_keys",
+    "board_checkpoints",
     "board_entries",
     "board_subtrees",
     "election_definitions",

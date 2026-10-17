@@ -1,5 +1,6 @@
 export { HANDLERS, type JobContext, JobError, TIER0_QUEUES } from "./jobs.ts";
 export type {
+  AnchorFindingLine,
   AuditFindingLine,
   ErrorKind,
   JobLogLine,

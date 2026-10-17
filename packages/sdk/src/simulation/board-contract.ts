@@ -26,7 +26,6 @@ import {
   type ContractEventRecord,
   CONTRACT_EVENT_SIGNATURES,
   DecodeError,
-  decodeBallot,
   decodeSharePosting,
   decodeShareReceipt,
   decodeShareReceiptBatch,
@@ -38,6 +37,7 @@ import {
   type ProvenEventAccumulator,
   RECORD_TYPES,
   shapeOk,
+  shapeOkV3,
   shareCiphertextHash,
   shareReceiptBatchStatement,
   shareReceiptStatement,
@@ -50,6 +50,7 @@ import type {
   SimulatedElectionRegistry,
   SimulatedTrusteeRegistry,
 } from "./l2.ts";
+import { decodeSimulatedBallot, type SimulatedBallotRecord } from "./versions.ts";
 
 /** The board's refusals, by the contract's codes, in its checking order per call. */
 export type BoardRefusal =
@@ -230,35 +231,42 @@ export class SimulatedBoardContract {
     const params = this.#registry.parametersOf(record.subarray(3, 35));
     if (params === undefined || params.ballotVersion === 0) return "ballot-stray";
     if (record[2] !== params.ballotVersion) return "profile-mismatch";
-    // The simulation pins ballot version 2 only, the one definition version
-    // 4 allows; the contract also reads 1 and 3.
-    if (params.ballotVersion !== 2) return "unknown-version";
+    // The simulation pins ballot versions 2 and 3, the ones definition
+    // versions 4 and 5 allow; the contract also reads 1.
+    const version = params.ballotVersion;
+    if (version !== 2 && version !== 3) return "unknown-version";
     const framed = frameBallot(record);
     if (framed === undefined) return "decode";
-    let ballot;
+    let ballot: SimulatedBallotRecord;
     try {
-      ballot = decodeBallot(record, 2);
+      ballot = decodeSimulatedBallot(record, version);
     } catch (e) {
       if (e instanceof DecodeError) return "decode";
       throw e;
     }
     if (ballot.cell >= params.cellCount) return "ballot-cell";
-    const question = params.questions[0];
-    if (params.questions.length !== 1 || question === undefined) return "validity-shape";
-    const shaped = shapeOk(
-      {
-        optionCount: params.optionCount,
-        minSelections: question.minSelections,
-        maxSelections: question.maxSelections,
-        threshold: params.threshold,
-        panelSize: params.panelSize,
-        definitionHash: framed.definitionHash,
-        ballotVersion: 2,
-        cell: ballot.cell,
-        nullifier: ballot.nullifier,
-      },
-      ballot.committed_vote,
-    );
+    const rules = {
+      threshold: params.threshold,
+      panelSize: params.panelSize,
+      definitionHash: framed.definitionHash,
+      cell: ballot.cell,
+      nullifier: ballot.nullifier,
+    };
+    const questions = params.questions.map((q) => ({
+      optionCount: q.options,
+      minSelections: q.minSelections,
+      maxSelections: q.maxSelections,
+    }));
+    // Version 3's shape has a range proof per question; version 2 asks one.
+    const question = questions[0];
+    const shaped =
+      version === 3
+        ? "sum_proofs" in ballot.committed_vote &&
+          shapeOkV3({ ...rules, questions }, ballot.committed_vote)
+        : questions.length === 1 &&
+          question !== undefined &&
+          "sum_proof" in ballot.committed_vote &&
+          shapeOk({ ...rules, ...question, ballotVersion: 2 }, ballot.committed_vote);
     if (!shaped) return "validity-shape";
     const qualified = new Set(this.#qualified(params).map((s) => s.index));
     const hashes = ballot.committed_vote.share_hashes;

@@ -99,6 +99,35 @@ describe("runSimulation with the ballot client's prover", { timeout }, () => {
     ]);
   });
 
+  it("proves every version-3 ballot of several questions, and the verifier admits each", async () => {
+    const r = await runSimulation(
+      {
+        ...base,
+        election: "questions",
+        options: 6,
+        questions: [
+          { options: 2, min: 1, max: 1 },
+          { options: 4, min: 0, max: 2 },
+        ],
+        reorgs: 0,
+      },
+      { prover },
+    );
+    expect(r.ok).toBe(true);
+    expect(r.verifier.passed).toEqual(
+      expect.arrayContaining(["5.1", "5.2", "5.3", "5.4", "5.5", "5.7"]),
+    );
+    expect(r.verifier.failed).toEqual([]);
+    expect(r.verifier.admittedBallots).toBe(r.ballots.cast);
+    for (const c of r.cells) {
+      expect(c.counts).toEqual(c.expected);
+      expect(c.questions?.map((q) => q.counts)).toEqual([
+        c.expected.slice(0, 2),
+        c.expected.slice(2),
+      ]);
+    }
+  });
+
   it("boards no ballot whose proof doesn't verify against the client's own signals", async () => {
     const one: Scenario = {
       ...base,

@@ -12,6 +12,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { planElection, type Scenario, selectionRange } from "../src/index.ts";
 import { simulateElection } from "../src/simulation/election.ts";
 import { admitOpening, type OpeningDesk } from "../src/simulation/publication.ts";
+import { oneQuestion } from "./one-question.ts";
 
 const scenario: Scenario = {
   voters: 4,
@@ -34,7 +35,7 @@ const simulated = simulateElection(
   planElection(scenario),
   identityKey(crypto.getRandomValues(new Uint8Array(32))),
 );
-const election = cellBallotElection(simulated.definition, simulated.registered);
+const election = cellBallotElection(oneQuestion(simulated.definition), simulated.registered);
 const { definitionHash } = simulated;
 const keys = simulated.registered.map((r) => r.kemKey);
 const { min, max } = selectionRange(scenario);

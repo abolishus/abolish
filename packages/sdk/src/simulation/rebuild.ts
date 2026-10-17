@@ -21,9 +21,7 @@
 import {
   type Anchor,
   type AnchorClock,
-  type BallotRecordV2,
   boardBallotSegment,
-  cellBallotElection,
   ceremonyTranscriptHash,
   checkCeremonyTranscript,
   checkDestruction,
@@ -33,10 +31,9 @@ import {
   type CommittedVote,
   DecodeError,
   decodeElectionDefinitionRecord,
+  decodeElectionDefinitionV5,
   decodeOpening,
   deriveTotal,
-  electionDefinitionV4Hash,
-  electionStubV4Hash,
   keySetEntry,
   keySetHash,
   l1RefMin,
@@ -48,6 +45,7 @@ import {
   isTimely,
   objectCid,
   splitSegmentObject,
+  tallyRules,
   verifyBoard,
 } from "@abolishus/crypto";
 import type { SimulatedIpfs } from "./archive.ts";
@@ -58,6 +56,13 @@ import { readCountedExtent, recordTypeOf } from "./count.ts";
 import { SIMULATED_BOARD_ENTRY_VERSION, SIMULATED_EVENT_VERSION } from "./election.ts";
 import type { SimulatedL1 } from "./l1.ts";
 import { l2BlockAt, type SimulatedElectionRegistry, type SimulatedTrusteeRegistry } from "./l2.ts";
+import {
+  definitionHashOf,
+  definitionRecord,
+  type SimulatedDefinition,
+  simulatedBallots,
+  stubHashOf,
+} from "./versions.ts";
 
 /**
  * Everything public after the election: what a rebuild may read, and
@@ -154,16 +159,21 @@ export function rebuildElection(record: PublicRecord): RebuiltElection {
   const registeredHash = record.electionRegistry.definitionHashOf(electionId);
   if (encoded === undefined || registeredHash === undefined)
     throw new RebuildError("definition-unregistered");
-  let decoded: ReturnType<typeof decodeElectionDefinitionRecord>;
+  // Version 5 has its own decoder beside the one for versions 1, 3 and 4,
+  // picked by the version byte, which each checks against the profile again.
+  let definition: SimulatedDefinition;
   try {
-    decoded = decodeElectionDefinitionRecord(encoded);
+    if (encoded[2] === 5) definition = decodeElectionDefinitionV5(encoded);
+    else {
+      const decoded = decodeElectionDefinitionRecord(encoded);
+      if (decoded.version !== 4) throw new RebuildError("definition-mismatch");
+      definition = decoded.value;
+    }
   } catch (e) {
     if (e instanceof DecodeError) throw new RebuildError("definition-mismatch");
     throw e;
   }
-  if (decoded.version !== 4) throw new RebuildError("definition-mismatch");
-  const definition = decoded.value;
-  const definitionHash = electionDefinitionV4Hash(definition);
+  const definitionHash = definitionHashOf(definition);
   if (
     !same(definitionHash, registeredHash) ||
     !same(definition.election_id, electionId) ||
@@ -245,7 +255,7 @@ export function rebuildElection(record: PublicRecord): RebuiltElection {
     !same(ceremonyTranscriptHash(transcript), definition.ceremony_transcript_hash)
   )
     throw new RebuildError("transcript-mismatch");
-  const stubHash = electionStubV4Hash(definition);
+  const stubHash = stubHashOf(definition);
   const ceremony = checkCeremonyTranscript(
     {
       l2ChainId: definition.l2_chain_id,
@@ -264,7 +274,8 @@ export function rebuildElection(record: PublicRecord): RebuiltElection {
     throw new RebuildError("key-set-mismatch");
 
   // The counted set, as the trustees read it at t_S (./count.ts).
-  const partition = cellBallotElection(definition, registered).cells;
+  const ballots = simulatedBallots(definition, registered);
+  const partition = ballots.election.cells;
   const finalized = l1.finalized(l1.firstAfter(definition.closes_at));
   const refMin = l1RefMin(finalized, 0n, definition.opens_at);
   if (refMin === undefined) throw new Error("simulation: L1 hasn't reached the election's window");
@@ -272,6 +283,7 @@ export function rebuildElection(record: PublicRecord): RebuiltElection {
   const extent = readCountedExtent(
     {
       definitionHash,
+      ballotVersion: ballots.version,
       panelSize: definition.panel_size,
       registered,
       tierOfCell: (cell) => partition[cell]?.tier,
@@ -315,7 +327,9 @@ export function rebuildElection(record: PublicRecord): RebuiltElection {
   const vss: CommittedVote["vss"][][] = partition.map(() => []);
   for (const b of extent.counted) {
     // Every selected ballot is one readCountedExtent decoded, in a cell of the partition.
-    const { cell, committed_vote: vote } = extent.ballots.get(Number(b.index)) as BallotRecordV2;
+    const counted = extent.ballots.get(Number(b.index));
+    if (counted === undefined) throw new Error("simulation: a counted ballot isn't a boarded one");
+    const { cell, committed_vote: vote } = counted;
     (vss[cell] as CommittedVote["vss"][]).push(vote.vss);
   }
 
@@ -325,14 +339,9 @@ export function rebuildElection(record: PublicRecord): RebuiltElection {
     board.entries
       .filter((e) => e.segment <= after.seal && recordTypeOf(e.payload) === type)
       .map((e) => ({ segment: e.segment, payload: e.payload }));
-  const tallyRules = {
-    optionCount: definition.option_count,
-    threshold: definition.threshold,
-    panelSize: definition.panel_size,
-  };
   const openings = sealed(RECORD_TYPES.tallyOpening);
   const tally = checkTally(
-    { definitionHash, rules: tallyRules, registered },
+    { definitionHash, rules: tallyRules(definitionRecord(definition)), registered },
     vss,
     openings.map((e) => e.payload),
     1,
@@ -361,7 +370,7 @@ export function rebuildElection(record: PublicRecord): RebuiltElection {
   let rejectedOpenings = 0;
   for (const e of sealed(RECORD_TYPES.spoiledBallotOpening)) {
     try {
-      spoiled.push(hex(openingV2CoreHash(decodeOpening(e.payload, 2), 2)));
+      spoiled.push(hex(openingV2CoreHash(decodeOpening(e.payload, 2), ballots.version)));
     } catch (err) {
       if (!(err instanceof DecodeError)) throw err;
       rejectedOpenings++;

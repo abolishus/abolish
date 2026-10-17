@@ -40,11 +40,30 @@ export const MAX_SIMULATED_OPENING_LOOKUPS = 10_000_000;
 export const SIMULATED_TIERS = TIERS;
 export type SimulatedTier = (typeof SIMULATED_TIERS)[number];
 
+/**
+ * One question of a `questions` scenario: its option count and how many of
+ * them a voter picks, from `min` to `max` (pick one is 0 to 1 or 1 to 1, pick
+ * any 0 to `options`, pick exactly N is N to N).
+ */
+export interface SimulatedQuestion {
+  readonly options: number;
+  readonly min: number;
+  readonly max: number;
+}
+
 export interface Scenario {
   readonly voters: number;
-  /** Plurality is one option or none per ballot; approval any subset. */
-  readonly election: "plurality" | "approval";
+  /**
+   * Plurality is one option or none per ballot; approval any subset; both
+   * one question under definition version 4. `questions` is several
+   * questions on one ballot under definition version 5, with ballot version
+   * 3 ([[0026-multi-question-ballots]]).
+   */
+  readonly election: "plurality" | "approval" | "questions";
+  /** The poll's options: under `questions`, the total over its questions, in flat order. */
   readonly options: number;
+  /** Under `questions`, each question in ballot order; otherwise absent. */
+  readonly questions?: readonly SimulatedQuestion[];
   readonly trustees: {
     /** `n`. */
     readonly panel: number;
@@ -191,18 +210,49 @@ function departing(v: unknown, path: string, panel: number): Scenario["trustees"
   return out;
 }
 
+function questionList(v: unknown, path: string): SimulatedQuestion[] {
+  if (!Array.isArray(v) || v.length < 1 || v.length > PARAMETERS.MAX_QUESTIONS)
+    throw new Refusal(path, `expected an array of 1 to ${PARAMETERS.MAX_QUESTIONS} questions`);
+  // Array.from visits holes too, so a sparse array is refused rather than skipped.
+  const out = Array.from(v, (q: unknown, i) => {
+    const at = `${path}[${i}]`;
+    const o = object(q, at, ["options", "min", "max"]);
+    // Version 5's rule `option-count`: every question has at least 2 options.
+    const options = integer(o["options"], `${at}.options`, 2, PARAMETERS.MAX_OPTIONS);
+    const min = integer(o["min"], `${at}.min`, 0, options);
+    // Version 5's rule `selections`: 1 ≤ max, min ≤ max ≤ options.
+    const max = integer(o["max"], `${at}.max`, Math.max(min, 1), options);
+    return { options, min, max };
+  });
+  if (out.reduce((n, q) => n + q.options, 0) > PARAMETERS.MAX_OPTIONS)
+    throw new Refusal(path, `at most ${PARAMETERS.MAX_OPTIONS} options over the questions`);
+  return out;
+}
+
 function parse(input: unknown): Scenario {
+  const election = (input as Json | null)?.["election"];
   const o = object(
     input,
     "$",
-    ["voters", "election", "options", "trustees", "tiers", "seed"],
+    [
+      "voters",
+      "election",
+      ...(election === "questions" ? ["questions"] : ["options"]),
+      "trustees",
+      "tiers",
+      "seed",
+    ],
     ["outage", "challenges", "revotes", "publications", "postings", "reorgs"],
   );
   const voters = integer(o["voters"], "$.voters", 1, MAX_SIMULATED_VOTERS);
-  const election = o["election"];
-  if (election !== "plurality" && election !== "approval")
-    throw new Refusal("$.election", 'expected "plurality" or "approval"');
-  const options = integer(o["options"], "$.options", 2, PARAMETERS.MAX_OPTIONS);
+  if (election !== "plurality" && election !== "approval" && election !== "questions")
+    throw new Refusal("$.election", 'expected "plurality", "approval" or "questions"');
+  const questions =
+    election === "questions" ? questionList(o["questions"], "$.questions") : undefined;
+  const options =
+    questions === undefined
+      ? integer(o["options"], "$.options", 2, PARAMETERS.MAX_OPTIONS)
+      : questions.reduce((n, q) => n + q.options, 0);
 
   const t = object(
     o["trustees"],
@@ -275,6 +325,7 @@ function parse(input: unknown): Scenario {
     voters,
     election,
     options,
+    ...(questions === undefined ? {} : { questions }),
     trustees: { panel, threshold, offline, faulty, departures },
     tiers,
     outage,

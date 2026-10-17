@@ -3,14 +3,13 @@
 // tracking code before the choice, the voter's checker records it, the
 // device opens the core and hands the opening over as bytes, and the checker
 // decodes and checks it against the recorded code and the voter's choice.
-// Ballots name their cell (ballot version 2), so openings are version 2's
+// Ballots name their cell (ballot versions 2 and 3), so openings are version 2's
 // (docs/spec/challenge.md, Opening version 2).
 // Every check is @abolishus/crypto's; this file only orders them as the
 // checker's rules do and compares their results (AGENTS.md, Architecture;
 // T-42, T-44).
 
 import {
-  type CellBallotElection,
   type ChallengeOpeningV2Code,
   checkChallengeOpeningV2,
   DecodeError,
@@ -18,6 +17,7 @@ import {
   type DecodeErrorCode,
   type SpoiledBallotOpeningV2,
 } from "@abolishus/crypto";
+import type { SimulatedBallotElection } from "./versions.ts";
 
 /**
  * Why a checker reports an opening as evidence that the casting device
@@ -55,7 +55,7 @@ const equalBytes = (a: Uint8Array, b: Uint8Array) =>
  * ceremony check registered.
  */
 export function checkChallenge(
-  election: CellBallotElection,
+  election: SimulatedBallotElection,
   recorded: Uint8Array,
   voter: { readonly cell: number; readonly votes: readonly (0 | 1)[] },
   bytes: Uint8Array,

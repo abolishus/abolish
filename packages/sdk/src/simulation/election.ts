@@ -1,6 +1,7 @@
 // The simulated election's definition and its key ceremony: a well-formed
-// version-4 election definition built from the scenario, listing the board
-// operator's receipt key (docs/spec/election-definition.md, Layout (version
+// election definition built from the scenario, version 4 for one question
+// or version 5 for several (docs/spec/election-definition.md, Layout
+// (version 5)), listing the board operator's receipt key (Layout (version
 // 4), Receipt keys), and the four signed
 // rounds of docs/spec/ceremony.md run by every seat through
 // @abolishus/crypto's production entry points. The transcript is checked by
@@ -25,11 +26,11 @@ import {
   checkCeremonyTranscript,
   type DisplayText,
   displayTextCommitment,
+  type DisplayTextV2,
+  displayTextV2Commitment,
   ELECTION_TYPES,
   type ElectionDefinitionV4,
-  electionDefinitionV4Hash,
-  electionDefinitionV4Rule,
-  electionStubV4Hash,
+  type ElectionDefinitionV5,
   encodeCeremonyTranscript,
   identityCommitment,
   identityKey,
@@ -41,6 +42,7 @@ import {
   newIdentitySecret,
   type Panel,
   panelId,
+  QUESTION_METHODS,
   RECORD_TYPES,
   type RegisteredKeys,
   revealsMessage,
@@ -60,6 +62,12 @@ import {
 } from "./l2.ts";
 import { type Plan, SIMULATED_CLOSES_AT, SIMULATED_OPENS_AT, selectionRange } from "./plan.ts";
 import type { Scenario, SimulatedTier } from "./scenario.ts";
+import {
+  definitionHashOf,
+  definitionRuleOf,
+  type SimulatedDefinition,
+  stubHashOf,
+} from "./versions.ts";
 
 /**
  * Local chain IDs (Anvil's 31337 for L1, the next for L2), never a public
@@ -104,7 +112,8 @@ export function simulatedDeployment(): SimulatedDeployment {
 }
 
 export interface SimulatedElection {
-  readonly definition: ElectionDefinitionV4;
+  /** Version 4 for a one-question scenario, version 5 for `questions`. */
+  readonly definition: SimulatedDefinition;
   readonly definitionHash: Uint8Array;
   readonly transcript: Uint8Array;
   readonly transcriptHash: Uint8Array;
@@ -148,11 +157,24 @@ const PINNED: ReadonlyMap<number, number> = new Map([
   [RECORD_TYPES.contractEvent, SIMULATED_EVENT_VERSION],
 ]);
 
-/** The profile: every type from 0x0001 to 0x0009 pinned, at version 1 but those in `PINNED`. */
-function profile(): ElectionDefinitionV4["profile"] {
+/**
+ * Version 5's: its own, ballot version 3 with the same openings, and
+ * display-text version 2, which carries its questions, the one combination
+ * definition version 5 allows and the registry serves for it ([[contracts]],
+ * Registration, rule 9).
+ */
+const PINNED_V5: ReadonlyMap<number, number> = new Map([
+  ...PINNED,
+  [RECORD_TYPES.electionDefinition, 5],
+  [RECORD_TYPES.ballot, 3],
+  [RECORD_TYPES.displayText, 2],
+]);
+
+/** The profile: every type from 0x0001 to 0x0009 pinned, at version 1 but those in `pinned`. */
+function profile(pinned: ReadonlyMap<number, number>): ElectionDefinitionV4["profile"] {
   const pins = [];
   for (let t: number = RECORD_TYPES.electionDefinition; t <= RECORD_TYPES.displayText; t++)
-    pins.push({ record_type: t, version: PINNED.get(t) ?? 1 });
+    pins.push({ record_type: t, version: pinned.get(t) ?? 1 });
   return { protocol_major: 1, pins };
 }
 
@@ -166,9 +188,30 @@ function displayText(scenario: Scenario): DisplayText {
         language: utf8("en"),
         question: utf8("Simulated election: it counts for nothing."),
         description: utf8(""),
-        options: Array.from({ length: scenario.options }, (_, i) => ({
-          label: utf8(`Option ${i + 1}`),
+        options: optionText(scenario.options),
+      },
+    ],
+  };
+}
+
+const optionText = (count: number) =>
+  Array.from({ length: count }, (_, i) => ({
+    label: utf8(`Option ${i + 1}`),
+    description: utf8(""),
+  }));
+
+function questionsText(questions: NonNullable<Scenario["questions"]>): DisplayTextV2 {
+  return {
+    salt: newDisplayTextSalt(),
+    translations: [
+      {
+        language: utf8("en"),
+        title: utf8("Simulated election: it counts for nothing."),
+        description: utf8(""),
+        questions: questions.map((q, i) => ({
+          question: utf8(`Question ${i + 1}`),
           description: utf8(""),
+          options: optionText(q.options),
         })),
       },
     ],
@@ -191,7 +234,6 @@ export function simulateElection(
   receiptKey: Uint8Array,
 ): SimulatedElection {
   const { panel: n, threshold: k } = scenario.trustees;
-  const { min, max } = selectionRange(scenario);
   const identitySecrets = Array.from({ length: n }, () =>
     crypto.getRandomValues(new Uint8Array(32)),
   );
@@ -217,8 +259,7 @@ export function simulateElection(
   }
   for (const group of leaves.values())
     if (group.length === 0) group.push(identityCommitment(newIdentitySecret()));
-  const stub: ElectionDefinitionV4 = {
-    profile: profile(),
+  const common = {
     // The registry's, from its counter, at a creation finalized before the
     // stub is written (docs/spec/contracts.md, Election identifier).
     election_id: electionRegistry.createElection(SIMULATED_CREATOR),
@@ -230,11 +271,7 @@ export function simulateElection(
     group_registry: deployment.groupRegistry,
     l1_anchor: deployment.l1Anchor,
     l1_relay: deployment.l1Relay,
-    election_type: ELECTION_TYPES[scenario.election],
     tally_scheme: TALLY_SCHEMES.pedersenVss,
-    option_count: scenario.options,
-    min_selections: min,
-    max_selections: max,
     // One group per tier in one region, so each tier is one cell, as
     // version 1's tiers-only partition was (docs/spec/election-definition.md,
     // Regional cells), whose root is the tier tree of its members'
@@ -261,15 +298,44 @@ export function simulateElection(
     l1_inclusion_bound: 3600,
     sequencing_window: 3600n,
     max_sequencer_drift: 1800n,
-    display_text_commitment: displayTextCommitment(displayText(scenario)),
     // In the stub, so the key is fixed before the ceremony (T-26).
     receipt_keys: [Uint8Array.from(receiptKey)],
   };
+  const { questions, election } = scenario;
+  let stub: SimulatedDefinition;
+  if (questions !== undefined) {
+    const v5: ElectionDefinitionV5 = {
+      ...common,
+      profile: profile(PINNED_V5),
+      questions: questions.map((q) => ({
+        method: QUESTION_METHODS.selection,
+        option_count: q.options,
+        min_selections: q.min,
+        max_selections: q.max,
+      })),
+      display_text_commitment: displayTextV2Commitment(questionsText(questions)),
+    };
+    stub = v5;
+  } else {
+    if (election === "questions")
+      throw new TypeError("simulation: a questions scenario lists them");
+    const { min, max } = selectionRange(scenario);
+    const v4: ElectionDefinitionV4 = {
+      ...common,
+      profile: profile(PINNED),
+      election_type: ELECTION_TYPES[election],
+      option_count: scenario.options,
+      min_selections: min,
+      max_selections: max,
+      display_text_commitment: displayTextCommitment(displayText(scenario)),
+    };
+    stub = v4;
+  }
   const params = {
     l2ChainId: stub.l2_chain_id,
     trusteeRegistry: stub.trustee_registry,
     electionId: stub.election_id,
-    stubHash: electionStubV4Hash(stub),
+    stubHash: stubHashOf(stub),
     panel,
   };
   const run = { ...params, runId: crypto.getRandomValues(new Uint8Array(32)) };
@@ -294,11 +360,11 @@ export function simulateElection(
   if (!checked.ok) throw new Error(`simulation: the ceremony failed its check (${checked.code})`);
   if (checked.registered.length !== n)
     throw new Error("simulation: an honest seat wasn't registered by the ceremony");
-  const definition: ElectionDefinitionV4 = {
+  const definition: SimulatedDefinition = {
     ...stub,
     ceremony_transcript_hash: ceremonyTranscriptHash(transcript),
   };
-  const rule = electionDefinitionV4Rule(definition);
+  const rule = definitionRuleOf(definition);
   if (rule !== undefined) throw new Error(`simulation: the definition breaks ${rule}`);
   // Every seat the check registered signs the key set it returned, over the
   // registry's chain and address (docs/spec/trustee-identity.md, Ceremony
@@ -336,7 +402,7 @@ export function simulateElection(
     );
   return {
     definition,
-    definitionHash: electionDefinitionV4Hash(definition),
+    definitionHash: definitionHashOf(definition),
     transcript,
     transcriptHash: checked.hash,
     panel,

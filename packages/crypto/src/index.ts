@@ -26,6 +26,7 @@ export {
   type Share,
   SHARES,
   shapeOk,
+  shapeOkV3,
   shareVote,
   shareVoteV3,
   shareVoteV4,

@@ -18,6 +18,7 @@ import {
   MAX_INTAKE_WORKERS,
   type SeatCiphertext,
 } from "../src/simulation/intake.ts";
+import { oneQuestion } from "./one-question.ts";
 
 const timeout = 60_000;
 
@@ -65,7 +66,11 @@ const encrypted = encryptShares(
   sharing,
   registered.map((r) => r.kemKey),
 );
-const core = cellBallotCore(cellBallotElection(election.definition, registered), 0, encrypted);
+const core = cellBallotCore(
+  cellBallotElection(oneQuestion(election.definition), registered),
+  0,
+  encrypted,
+);
 const vote = proveValidity(ctx, sharing, core.shareHashes);
 const every: SeatCiphertext[] = [1, 2, 3].map((seat) => ({
   seat,

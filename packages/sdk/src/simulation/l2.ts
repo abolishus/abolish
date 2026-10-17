@@ -16,13 +16,7 @@
 
 import {
   EncodeError,
-  type ElectionDefinitionV4,
-  electionDefinitionV4Hash,
-  electionDefinitionV4Rule,
-  type ElectionDefinitionV4Rule,
   electionId,
-  electionStubV4Hash,
-  encodeElectionDefinitionV4,
   type KeySetEntry,
   keySetHash,
   PARAMETERS,
@@ -32,6 +26,13 @@ import {
   RECORD_TYPES,
   verifyCeremonyRegistration,
 } from "@abolishus/crypto";
+import {
+  definitionHashOf,
+  definitionRuleOf,
+  encodeDefinition,
+  type SimulatedDefinition,
+  stubHashOf,
+} from "./versions.ts";
 
 /** Seconds between simulated L2 blocks, Base's 2. */
 export const SIMULATED_L2_BLOCK_TIME = 2n;
@@ -129,7 +130,7 @@ export type DefinitionRefusal =
 
 export type RegistryResult<R> =
   | { readonly ok: true }
-  | { readonly ok: false; readonly refusal: R; readonly rule?: ElectionDefinitionV4Rule };
+  | { readonly ok: false; readonly refusal: R; readonly rule?: string };
 
 const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
 const same = (a: Uint8Array, b: Uint8Array) =>
@@ -314,11 +315,10 @@ export class SimulatedTrusteeRegistry {
 }
 
 /**
- * Rule 9 for a version-4 definition, the only version the simulation
- * registers: ballot version 2, spoiled-ballot opening version 2, board-entry
- * version 5, contract-event version 7 and display-text version 1, the
- * versions the deployment's board and the verifier serve for it
- * ([[contracts]], Election registry, Registration).
+ * Rule 9 for a version-4 definition: ballot version 2, spoiled-ballot
+ * opening version 2, board-entry version 5, contract-event version 7 and
+ * display-text version 1, the versions the deployment's board and the
+ * verifier serve for it ([[contracts]], Election registry, Registration).
  */
 const SERVED_V4: ReadonlyMap<number, number> = new Map([
   [RECORD_TYPES.ballot, 2],
@@ -328,15 +328,24 @@ const SERVED_V4: ReadonlyMap<number, number> = new Map([
   [RECORD_TYPES.displayText, 1],
 ]);
 
-const servedProfile = (d: ElectionDefinitionV4) =>
-  [...SERVED_V4].every(([type, version]) => pinnedVersion(d, type) === version);
+/** Rule 9 for a version-5 definition: ballot version 3, whose cores the same openings open, and display-text version 2. */
+const SERVED_V5: ReadonlyMap<number, number> = new Map([
+  ...SERVED_V4,
+  [RECORD_TYPES.ballot, 3],
+  [RECORD_TYPES.displayText, 2],
+]);
+
+const servedProfile = (d: SimulatedDefinition) =>
+  [...("questions" in d ? SERVED_V5 : SERVED_V4)].every(
+    ([type, version]) => pinnedVersion(d, type) === version,
+  );
 
 /**
  * What the registry records for the board, keyed by `definition_hash`
  * (docs/spec/contracts.md, Election registry, Parameters): the fields a
  * direct submission's checks read, each from the registered definition, so
  * the board takes nothing about the election from a submitter (T-25, T-71).
- * Definition version 4 has one question and no author panel.
+ * Definition versions 4 and 5 have no author panel.
  */
 export interface BoardParameters {
   readonly ballotVersion: number;
@@ -360,26 +369,36 @@ export interface BoardParameters {
   readonly ceremony: { readonly stubHash: Uint8Array; readonly panelId: Uint8Array };
 }
 
-function boardParameters(d: ElectionDefinitionV4): BoardParameters {
+function boardParameters(d: SimulatedDefinition): BoardParameters {
+  // Version 4's one question is method 1, selection, under its limits.
+  const questions =
+    "questions" in d
+      ? d.questions.map((q) => ({
+          method: q.method,
+          options: q.option_count,
+          minSelections: q.min_selections,
+          maxSelections: q.max_selections,
+        }))
+      : [
+          {
+            method: 1,
+            options: d.option_count,
+            minSelections: d.min_selections,
+            maxSelections: d.max_selections,
+          },
+        ];
   return {
     ballotVersion: pinnedVersion(d, RECORD_TYPES.ballot) ?? 0,
     threshold: d.threshold,
     panelSize: d.panel_size,
-    optionCount: d.option_count,
+    optionCount: questions.reduce((n, q) => n + q.options, 0),
     cellCount: d.electorate.reduce((n, t) => n + t.cells.length, 0),
     opensAt: d.opens_at,
     closesAt: d.closes_at,
     l1InclusionBound: d.l1_inclusion_bound,
-    questions: [
-      {
-        method: 1,
-        options: d.option_count,
-        minSelections: d.min_selections,
-        maxSelections: d.max_selections,
-      },
-    ],
+    questions,
     cells: d.electorate.flatMap((t) => t.cells.map((c) => ({ tier: t.tier, root: c.root }))),
-    ceremony: { stubHash: electionStubV4Hash(d), panelId: Uint8Array.from(d.panel_id) },
+    ceremony: { stubHash: stubHashOf(d), panelId: Uint8Array.from(d.panel_id) },
   };
 }
 
@@ -471,11 +490,11 @@ export class SimulatedElectionRegistry {
    */
   registerDefinition(
     caller: string,
-    d: ElectionDefinitionV4,
+    d: SimulatedDefinition,
     block: L2Block,
   ): RegistryResult<DefinitionRefusal> {
     const refuse = (refusal: DefinitionRefusal) => ({ ok: false as const, refusal });
-    const rule = electionDefinitionV4Rule(d);
+    const rule = definitionRuleOf(d);
     if (rule !== undefined) return { ok: false, refusal: "DefinitionIllFormed", rule };
     const dep = this.#deployment;
     if (
@@ -507,7 +526,7 @@ export class SimulatedElectionRegistry {
     if (d.electorate.some((t) => t.root_l2_block >= block.number)) return refuse("RootNotInPast");
     if (
       !this.#trustees.ceremonyRecorded(
-        electionStubV4Hash(d),
+        stubHashOf(d),
         d.ceremony_transcript_hash,
         d.panel_id,
         d.threshold,
@@ -516,9 +535,9 @@ export class SimulatedElectionRegistry {
     )
       return refuse("CeremonyNotRecorded");
     if (!servedProfile(d)) return refuse("ProfileNotServed");
-    const hash = electionDefinitionV4Hash(d);
+    const hash = definitionHashOf(d);
     this.#definitions.set(id, hash);
-    this.#encodings.set(id, encodeElectionDefinitionV4(d));
+    this.#encodings.set(id, encodeDefinition(d));
     this.#parameters.set(hex(hash), boardParameters(d));
     return { ok: true };
   }

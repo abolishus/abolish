@@ -19,6 +19,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { planElection, runSimulation, type Scenario } from "../src/index.ts";
 import { simulateElection } from "../src/simulation/election.ts";
 import type { SimulatedTier } from "../src/simulation/scenario.ts";
+import { oneQuestion } from "./one-question.ts";
 
 // The ceremony costs n² ML-KEM challenges, so the property runs a twentieth
 // of the usual count (at least 10).
@@ -93,10 +94,10 @@ describe("simulateElection", { timeout }, () => {
         const plan = planElection(s);
         const key = receiptKey();
         const e = simulateElection(s, plan, key);
-        const d = e.definition;
+        const d = oneQuestion(e.definition);
         expect(electionDefinitionV4Rule(d)).toBeUndefined();
         expect(profileCombinationRule(d)).toBeUndefined();
-        expect(d.election_type).toBe(ELECTION_TYPES[s.election]);
+        expect(d.election_type).toBe(ELECTION_TYPES[s.election as "plurality" | "approval"]);
         expect(d.option_count).toBe(s.options);
         expect([d.min_selections, d.max_selections]).toEqual(
           s.election === "plurality" ? [0, 1] : [0, s.options],
@@ -165,27 +166,36 @@ describe("simulateElection", { timeout }, () => {
     expect(equal(e.definition.election_id, other.definition.election_id)).toBe(false);
     expect(equal(e.definitionHash, other.definitionHash)).toBe(false);
     const moved = checkCeremonyTranscript(
-      params({ ...e.definition, election_id: other.definition.election_id }, panelKeys(e)),
+      params(
+        { ...oneQuestion(e.definition), election_id: other.definition.election_id },
+        panelKeys(e),
+      ),
       e.transcript,
       1,
     );
     expect(moved.ok).toBe(false);
     // The same election, with any other stub field: the stub hash differs.
     const restated = checkCeremonyTranscript(
-      params({ ...e.definition, option_count: e.definition.option_count + 1 }, panelKeys(e)),
+      params(
+        { ...oneQuestion(e.definition), option_count: oneQuestion(e.definition).option_count + 1 },
+        panelKeys(e),
+      ),
       e.transcript,
       1,
     );
     expect(restated.ok).toBe(false);
     // The receipt keys are in the stub, so the ceremony fixes them too (T-26).
     const rekeyed = checkCeremonyTranscript(
-      params({ ...e.definition, receipt_keys: other.definition.receipt_keys }, panelKeys(e)),
+      params(
+        { ...oneQuestion(e.definition), receipt_keys: other.definition.receipt_keys },
+        panelKeys(e),
+      ),
       e.transcript,
       1,
     );
     expect(rekeyed.ok).toBe(false);
     const swapped = checkCeremonyTranscript(
-      params(e.definition, panelKeys(other)),
+      params(oneQuestion(e.definition), panelKeys(other)),
       e.transcript,
       1,
     );

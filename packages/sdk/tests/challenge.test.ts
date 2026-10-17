@@ -13,6 +13,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { planElection, type Scenario, selectionRange } from "../src/index.ts";
 import { checkChallenge } from "../src/simulation/challenge.ts";
 import { simulateElection } from "../src/simulation/election.ts";
+import { oneQuestion } from "./one-question.ts";
 
 const scenario: Scenario = {
   voters: 4,
@@ -36,7 +37,7 @@ const simulated = simulateElection(
   identityKey(crypto.getRandomValues(new Uint8Array(32))),
 );
 // Tiers 0 and 2 vote, so the partition has two cells: 0 (tier 0) and 1 (tier 2).
-const election = cellBallotElection(simulated.definition, simulated.registered);
+const election = cellBallotElection(oneQuestion(simulated.definition), simulated.registered);
 const keys = simulated.registered.map((r) => r.kemKey);
 const { min, max } = selectionRange(scenario);
 const rules = {

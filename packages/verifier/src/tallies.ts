@@ -193,11 +193,15 @@ export function tallyChecks(
     }
   }
   const cells = partitionSize(definition);
+  // The guard above returned without the author key set, so an empty one
+  // never stands in for it (T-37).
+  const authorSet = author ? authorRegistered : [];
+  if (authorSet === undefined) throw new Error("tallyChecks: no author key set past its guard");
   // Each sorted opening as one shape: its cell, the panel it names under
   // version 3, its signer, its entries and the message its signature is over.
   const sorted = author
     ? sortPartialOpenings(
-        { definitionHash, registered: { default: registered, author: authorRegistered ?? [] } },
+        { definitionHash, registered: { default: registered, author: authorSet } },
         cells,
         found,
       ).map((o) =>

@@ -548,11 +548,12 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
     // seat of one panel waits for the other's (tally.md, Windows and
     // destruction (version 2); T-14, T-37, T-54).
     const statements = own.filter((e) => typeOf(e.payload) === RECORD_TYPES.destructionStatement);
+    // The guard at the top returned without the author key set, so an empty
+    // one never stands in for it here (T-37).
+    const authorSet = inputs.authorRegistered;
+    if (authorSet === undefined) throw new Error("countedChecks: no author key set past its guard");
     const lowest = checkPanelDestruction(
-      {
-        definitionHash,
-        registered: { default: registered, author: inputs.authorRegistered ?? [] },
-      },
+      { definitionHash, registered: { default: registered, author: authorSet } },
       statements.map(({ segment, payload }) => ({ segment, payload })),
       { firstPassing: tally.firstPassing, windowSegment: windowFloor(inputs, floor) },
       2,

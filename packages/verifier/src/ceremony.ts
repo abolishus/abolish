@@ -275,8 +275,9 @@ export function ceremonyChecks(
   readonly rows: ReadonlyMap<string, CeremonyOutcome>;
   readonly report?: CeremonyReport;
   /**
-   * The default panel's registered key set, once 3.2 passed for every
-   * panel: what ballots are checked against (5.1 to 5.4).
+   * The default panel's registered key set, once 3.2 passed for every panel
+   * (and, beside an author panel, its approvals approve and 2.5 found no
+   * shared seat): what ballots are checked against (5.1 to 5.4).
    */
   readonly registered?: readonly RegisteredKeys[];
 } {
@@ -415,8 +416,11 @@ export function ceremonyChecks(
       },
     }),
     // Nothing is checked against one half's key set: both panels' runs must
-    // hold (T-14, T-54).
+    // hold, the author panel's registration (its approvals) too, and no
+    // author seat may share a default seat's key (T-14, T-37, T-54).
     ...(r32.status === "pass" &&
+      approvals.status === "pass" &&
+      r25.status !== "fail" &&
       own.checked &&
       own.registered !== undefined && { registered: own.registered }),
   };

@@ -10,6 +10,7 @@ import {
 } from "@abolishus/crypto";
 import { describe, expect, test } from "vite-plus/test";
 import { type AuthorRun, ceremonyChecks } from "../src/ceremony.ts";
+import { authorRunOf, decodeDefinition } from "../src/definition.ts";
 import {
   BUNDLE_FORMAT_CEREMONY,
   type CheckResult,
@@ -305,7 +306,32 @@ describe("the author panel's run", () => {
     ]);
   });
 
-  test("the default panel's failure is reported before the author panel's", () => {
+  test("the author run is checked under author_stub_hash, never the default stub", () => {
+    const r = check(
+      { ...honest, stubHash: hex(election.stubHash) },
+      board(defaultTranscript, honestTranscript, recordOf("all")),
+    );
+    expect(r.rows.get("3.1")).toMatchObject({ status: "fail", at: { entry: 1, panel: "author" } });
+    expect(r.registered).toBeUndefined();
+  });
+
+  test("no key set is returned while the approvals don't approve or an author seat is a default seat", () => {
+    expect(
+      check(honest, board(defaultTranscript, honestTranscript, recordOf("seat-1"))).registered,
+    ).toBeUndefined();
+    expect(check(honest, board(defaultTranscript, honestTranscript)).registered).toBeUndefined();
+  });
+
+  test("an author panel's failure beats the default panel's missing transcript on 3.1", () => {
+    const r = check(honest, board(honestTranscript, recordOf("seat-1")));
+    expect(r.rows.get("3.1")).toEqual({
+      status: "fail",
+      code: "author-approvals",
+      at: { panel: "author" },
+    });
+  });
+
+  test("the default panel's missing transcript is reported before the author panel's unreached rows", () => {
     const r = check(honest, board(honestTranscript));
     expect(r.rows.get("3.1")).toEqual({
       status: "unverifiable",
@@ -432,5 +458,43 @@ describe("a version-6 definition beside the default panel", () => {
       ok: false,
       code: "ceremony-transcript-missing",
     });
+  });
+});
+
+describe("authorRunOf", () => {
+  const v6 = read("election-definition-v6.json") as {
+    readonly vectors: readonly {
+      readonly id: string;
+      readonly encoding: string;
+      readonly authorStubHash?: string;
+    }[];
+  };
+
+  test("binds the definition's author panel, transcript hash and the spec's author stub hash", () => {
+    let seen = 0;
+    for (const v of v6.vectors) {
+      if (v.authorStubHash === undefined) continue;
+      let record;
+      try {
+        record = decodeDefinition(hex(v.encoding));
+      } catch {
+        continue;
+      }
+      if (record.version !== 6) continue;
+      const run = authorRunOf(record);
+      if (record.value.author_keys.length === 0) {
+        expect(run, v.id).toBeUndefined();
+        continue;
+      }
+      seen++;
+      if (run === undefined) throw new Error(`${v.id}: no author run`);
+      expect(Buffer.from(run.stubHash).toString("hex"), v.id).toBe(v.authorStubHash);
+      expect(run.transcriptHash, v.id).toEqual(record.value.author_transcript_hash);
+      expect(run.panel, v.id).toEqual({
+        threshold: record.value.author_threshold,
+        keys: record.value.author_keys,
+      });
+    }
+    expect(seen).toBeGreaterThan(0);
   });
 });

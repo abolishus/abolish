@@ -473,7 +473,7 @@ describe("the first-occurrence ranking (docs/spec/membership.md, Cell tree)", ()
               return x;
             }),
           );
-          expect(firstOccurrence(groups)).toEqual(expected);
+          expect(firstOccurrence(groups, [])).toEqual(expected);
         },
       ),
       { numRuns },
@@ -513,6 +513,18 @@ describe("the first-occurrence ranking (docs/spec/membership.md, Cell tree)", ()
       ),
       { numRuns },
     );
+  });
+
+  test("requires the chain positions, so no caller ranks self-paid groups by group_id by omission", () => {
+    expect(() =>
+      (firstOccurrence as (g: readonly (readonly bigint[])[]) => bigint[][])([[5n]]),
+    ).toThrow(TypeError);
+    expect(() =>
+      (deriveTierCells as (t: unknown, l: unknown) => unknown)(
+        { groups: [{ group_id: 1n, region: 0 }], regions: [0n] },
+        new Map([[1n, [5n]]]),
+      ),
+    ).toThrow(TypeError);
   });
 
   test("refuses chain positions that don't match the leaves or repeat", () => {
@@ -590,6 +602,33 @@ describe("Tier 1 counting beside self-paid groups (docs/spec/vouching.md, A brok
     expect(
       at([{ kind: "self-paid-addition", block: 4n, groupId: 9n, index: 0n, record: spRecord(9n) }]),
     ).toEqual({ at: 0, block: 4n, groupId: 9n, reason: "created" });
+  });
+
+  test("a signed record naming a self-paid group, or a self-paid addition naming a Tier 0 or Tier 1 group, breaks nothing", () => {
+    const signed = (groupId: bigint) => {
+      const digest = groupAdditionDigest(domain, {
+        groupId,
+        tier: 0,
+        firstIndex: 0n,
+        commitments: [1000n],
+      });
+      return encodeGroupAddition({
+        groupId,
+        firstIndex: 0n,
+        commitments: [1000n],
+        approvals: approve(digest),
+      });
+    };
+    expect(
+      at([
+        { kind: "self-paid-group-created", block: 1n, groupId: 0n },
+        { kind: "group-created", block: 1n, groupId: 1n, tier: 0 },
+        { kind: "group-created", block: 1n, groupId: 2n, tier: 1 },
+        { kind: "members-added", block: 2n, groupId: 0n, record: signed(0n), firstIndex: 0n },
+        { kind: "self-paid-addition", block: 3n, groupId: 1n, index: 0n, record: spRecord(1n) },
+        { kind: "self-paid-addition", block: 3n, groupId: 2n, index: 0n, record: spRecord(2n) },
+      ]),
+    ).toBeNull();
   });
 
   test("a self-paid addition naming a Tier 2 group breaks its replay at group", () => {
@@ -693,6 +732,23 @@ describe("the ballot client's and the creator's replays over self-paid groups", 
 
     test("a self-paid record naming a signed group", () => {
       expect(code([...base, selfPaid(10n, 2n, 1_000_000_003n)])).toBe("group-history");
+    });
+
+    test("a signed record before its group's creation", () => {
+      const [spCreated, created, add, ...rest] = base;
+      expect(code([spCreated as Event, add as Event, created as Event, ...rest])).toBe(
+        "group-history",
+      );
+    });
+
+    test("statedTierElectorate refuses the same histories", () => {
+      const choice = { tier: 0, root_l2_block: ROOT_BLOCK, groups: electorate.groups };
+      const stated = (events: readonly Event[]) =>
+        refusal(() => statedTierElectorate(logs(events), choice, pins));
+      expect(stated([...base.slice(0, 4), selfPaid(5n, 2n, 1_000_000_000n)])).toBe("group-history");
+      expect(stated([...base, added(5n, 2n, [1_000_000_003n])])).toBe("group-history");
+      expect(stated([...base, selfPaid(10n, 2n, 1_000_000_003n)])).toBe("group-history");
+      expect(stated([...base, { kind: "self-paid-created", groupId: 10n }])).toBe("group-created");
     });
 
     test("a record before its group's creation", () => {

@@ -120,9 +120,12 @@ describe("regional-cells vectors (docs/spec/vectors/regional-cells.json)", () =>
     "tier %s: leaves, region counts, cells and paths",
     (_id, v) => {
       const { tier, leavesOf } = tierOf(v);
-      const derived = deriveTierCells(tier, leavesOf);
+      const derived = deriveTierCells(tier, leavesOf, new Map());
       if (v.leaves !== undefined) {
-        const deduped = firstOccurrence(tier.groups.map((g) => leavesOf.get(g.group_id) ?? []));
+        const deduped = firstOccurrence(
+          tier.groups.map((g) => leavesOf.get(g.group_id) ?? []),
+          [],
+        );
         expect(deduped).toEqual(v.leaves.map((row) => row.map(decimal)));
       }
       expect(derived.regions).toEqual(v.regions.map(decimal));
@@ -150,7 +153,7 @@ describe("regional-cells vectors (docs/spec/vectors/regional-cells.json)", () =>
   test("a definition stating exactly the derived electorate matches, and each wrong field is found", () => {
     for (const v of vectors.tiers) {
       const { tier, leavesOf } = tierOf(v);
-      const derived = deriveTierCells(tier, leavesOf);
+      const derived = deriveTierCells(tier, leavesOf, new Map());
       const stated: TierElectorate = {
         tier: 0,
         root_l2_block: 1n,
@@ -245,7 +248,7 @@ describe("first occurrence and cell trees (docs/spec/membership.md, Cell tree)",
   test("each nonzero commitment survives exactly once, at its first position", () => {
     fc.assert(
       fc.property(groups, (gs) => {
-        const out = firstOccurrence(gs);
+        const out = firstOccurrence(gs, []);
         const flatIn = gs.flat();
         const flatOut = out.flat();
         expect(flatOut).toHaveLength(flatIn.length);
@@ -271,7 +274,11 @@ describe("first occurrence and cell trees (docs/spec/membership.md, Cell tree)",
           })),
           regions: Array.from({ length: used.size }, () => 0n),
         };
-        const derived = deriveTierCells(tier, new Map(gs.map((g, i) => [BigInt(10 + i), g])));
+        const derived = deriveTierCells(
+          tier,
+          new Map(gs.map((g, i) => [BigInt(10 + i), g])),
+          new Map(),
+        );
         const distinct = new Set(gs.flat().filter((x) => x !== 0n)).size;
         expect(derived.regions.reduce((a, b) => a + b, 0n)).toBe(BigInt(distinct));
         const seen = new Set<bigint>();
@@ -303,13 +310,14 @@ describe("first occurrence and cell trees (docs/spec/membership.md, Cell tree)",
           regions,
         },
         leaves,
+        new Map(),
       ),
     ).toThrow(RangeError);
     expect(() =>
-      deriveTierCells({ groups: [{ group_id: 1n, region: 1 }], regions }, leaves),
+      deriveTierCells({ groups: [{ group_id: 1n, region: 1 }], regions }, leaves, new Map()),
     ).toThrow(RangeError);
     expect(() =>
-      deriveTierCells({ groups: [{ group_id: 3n, region: 0 }], regions }, leaves),
+      deriveTierCells({ groups: [{ group_id: 3n, region: 0 }], regions }, leaves, new Map()),
     ).toThrow(RangeError);
   });
 });

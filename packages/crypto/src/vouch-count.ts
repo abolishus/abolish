@@ -445,8 +445,9 @@ export function countTier1Additions(
     }
     if (group.tier !== 2) continue;
     // A self-paid addition naming a signed group fails that group's replay at
-    // `group` (2.4); the event check has already decoded it strictly, so no
-    // decoding code comes first.
+    // `group` (2.4). Events read by `groupRegistryEvents` have passed the event
+    // check, which decodes the record strictly, so no decoding code comes
+    // first; hand-built events are the caller's to have decoded.
     if (e.kind === "self-paid-addition") {
       breakAt({ at, block: e.block, groupId: e.groupId, reason: "group" });
       continue;

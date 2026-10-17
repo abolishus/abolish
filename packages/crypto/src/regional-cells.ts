@@ -64,8 +64,14 @@ export function foldRegions(members: readonly bigint[]): number[][] {
  */
 export function firstOccurrence(
   groups: readonly (readonly bigint[])[],
-  chainOrder: readonly (readonly bigint[] | undefined)[] = [],
+  chainOrder: readonly (readonly bigint[] | undefined)[],
 ): bigint[][] {
+  // Required, not defaulted: a caller leaving out self-paid groups' positions
+  // would rank them by `group_id`, which lets a copy in a lower group move a
+  // registrant (T-16). Every group of a tier with no self-paid group passes
+  // `undefined`, or an empty list for none.
+  if (!Array.isArray(chainOrder))
+    throw new TypeError("firstOccurrence: chainOrder: expected an array");
   const seen = new Set<bigint>();
   const out = groups.map((leaves) => leaves.slice());
   const keep = (row: bigint[], i: number) => {
@@ -144,8 +150,10 @@ export interface DerivedTier {
 export function deriveTierCells(
   tier: Pick<TierElectorate, "groups" | "regions">,
   leavesOf: ReadonlyMap<bigint, readonly bigint[]>,
-  chainOrderOf: ReadonlyMap<bigint, readonly bigint[]> = new Map(),
+  chainOrderOf: ReadonlyMap<bigint, readonly bigint[]>,
 ): DerivedTier {
+  if (!(chainOrderOf instanceof Map))
+    throw new TypeError("deriveTierCells: chainOrderOf: expected a Map");
   const groupIds = tier.groups.map((g) => g.group_id);
   for (let i = 1; i < groupIds.length; i++)
     if ((groupIds[i - 1] as bigint) >= (groupIds[i] as bigint))

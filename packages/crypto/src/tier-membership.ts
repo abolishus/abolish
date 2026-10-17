@@ -52,15 +52,20 @@ export type TierMembershipErrorCode =
   | "board-event"
   /** A boarded `RegistrarsPinned` names other registrars or another threshold than the release pins. */
   | "registrars"
-  /** A listed group has no `GroupCreated` on the board by the tier's `root_l2_block`, or more than one. */
+  /**
+   * A listed group has no creation (`GroupCreated` or `SelfPaidGroupCreated`)
+   * on the board by the tier's `root_l2_block`, or more than one of either kind.
+   */
   | "group-created"
   /** A listed group was created for another tier. */
   | "group-tier"
   /**
    * A listed Tier 0 group's records break its replayed history
-   * (`applyGroupRecords`), or a listed Tier 1 group's boarded additions hold
-   * one no count takes: one before the group's creation, a forbidden
-   * commitment, or one already its leaf.
+   * (`applyGroupRecords` for a signed group, `applySelfPaidRecords` for a
+   * self-paid one), name it before its creation or are of the other kind's
+   * records, or a listed Tier 1 group's boarded additions hold one no count
+   * takes: one before the group's creation, a forbidden commitment, or one
+   * already its leaf.
    */
   | "group-history"
   /** A Tier 2 group: the registry has no Tier 2 addition path yet (P3-4). */
@@ -76,8 +81,9 @@ export type TierMembershipErrorCode =
   /** The voter's commitment isn't a live leaf of the group it registered in by `root_l2_block`. */
   | "not-a-member"
   /**
-   * The voter's commitment is counted in an earlier group of another region,
-   * so the first-occurrence rule moved it out of the region it registered in
+   * The voter's commitment is counted in a group of another region (a signed
+   * group, or a self-paid copy added earlier), so the first-occurrence rule
+   * moved it out of the region it registered in
    * (docs/spec/membership.md, Cell tree). An alarm, never a vote in that cell.
    */
   | "moved";
@@ -262,38 +268,41 @@ function listedGroupLeaves(
       throw new TierMembershipError("registrars");
 
   const domainSeparator = groupRegistryDomainSeparator(chainId, pinned.registry);
-  // Events up to the tier's block, at their positions in the registry's log order.
+  // Events up to the tier's block, at their positions in the registry's log
+  // order, and each listed group's creations and records, bucketed in one
+  // pass: a paid flood of self-paid events is read once, not once per group (T-52).
   const upTo: GroupRegistryEvent[] = [];
+  const listed = new Map(
+    groups.map(({ group_id: id }) => [
+      id,
+      {
+        created: [] as { at: number; tier: number; selfPaid: boolean }[],
+        naming: [] as { at: number; e: GroupRegistryEvent }[],
+      },
+    ]),
+  );
   for (const e of read.events) {
     if (e.block > rootBlock) break; // blocks never decrease along the sequence
-    upTo.push(e);
+    const at = upTo.push(e) - 1;
+    if (e.kind === "tier1-addition") continue; // a Tier 1 group's leaves are read by tier1GroupLeaves
+    const bucket = listed.get(e.groupId);
+    if (bucket === undefined) continue;
+    if (e.kind === "group-created" || e.kind === "self-paid-group-created")
+      bucket.created.push({
+        at,
+        tier: e.kind === "group-created" ? e.tier : 0,
+        selfPaid: e.kind !== "group-created",
+      });
+    else bucket.naming.push({ at, e });
   }
   return groups.map(({ group_id: id }): ListedGroup => {
-    const created = upTo.flatMap((e, at) =>
-      (e.kind === "group-created" || e.kind === "self-paid-group-created") && e.groupId === id
-        ? [
-            {
-              at,
-              tier: e.kind === "group-created" ? e.tier : 0,
-              selfPaid: e.kind !== "group-created",
-            },
-          ]
-        : [],
-    );
+    const { created, naming } = listed.get(id) as NonNullable<ReturnType<typeof listed.get>>;
     const only = created[0];
     if (only === undefined || created.length !== 1)
       throw new TierMembershipError("group-created", id);
     if (only.tier !== tierId) throw new TierMembershipError("group-tier", id);
     if (only.tier === 1) return { leaves: tier1GroupLeaves(upTo, only.at, id, rootBlock) };
     if (only.tier !== 0) throw new TierMembershipError("tier-unsupported", id);
-    const naming = upTo.flatMap((e, at) =>
-      (e.kind === "members-added" ||
-        e.kind === "members-removed" ||
-        e.kind === "self-paid-addition") &&
-      e.groupId === id
-        ? [{ at, e }]
-        : [],
-    );
     if (naming.some((r) => r.at < only.at)) throw new TierMembershipError("group-history", id);
     if (only.selfPaid) {
       const log: SelfPaidLogRecord[] = [];

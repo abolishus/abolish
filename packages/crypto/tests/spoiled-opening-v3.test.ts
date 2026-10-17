@@ -45,9 +45,10 @@ import { hex, SPEC_VECTORS } from "./spec-vectors.ts";
 // (scripts/spoiled-opening-v3-vectors.py), with ML-KEM-768 and
 // ChaCha20-Poly1305 written from FIPS 203 and RFC 8439, so the expected
 // encodings, core hashes, verdicts and opened commitments never come from the
-// code under test. The exported paths don't take an author panel's approved
-// key set until P2-16 part 4d-3, so polls with one run through the internal
-// `…With` paths, which take it as given; the exported paths refuse them.
+// code under test. These vectors carry no author run, so polls with an author
+// panel run through the internal `…With` paths, which take its key set as
+// given; the exported paths take only the approved set `panelBallotElection`
+// was made with and refuse these (author-key-set.test.ts runs them with one).
 
 interface Vectors {
   readonly format: string;
@@ -427,13 +428,13 @@ describe("opening version 3", () => {
     expect(result.ok).toBe(true);
   });
 
-  test("the exported paths refuse a poll with an author panel until its key set has a checked source", () => {
+  test("the exported paths refuse a context beside an author panel with no approved key set", () => {
     const encrypted = encryptFor(author, [0, 1, 0, 1, 0], authorMeta);
     const record = decodeOpening(honest, 3);
-    expect(() => checkChallengeOpeningV3(author.election, record)).toThrow(/own ceremony/);
-    expect(() => openChallengeV3(author.election, 0, encrypted)).toThrow(/own ceremony/);
-    expect(() => panelBallotCore(author.election, 0, encrypted)).toThrow(/own ceremony/);
-    expect(() => panelTrackingCode(author.election, 0, encrypted)).toThrow(/own ceremony/);
+    expect(() => checkChallengeOpeningV3(author.election, record)).toThrow(/approved one/);
+    expect(() => openChallengeV3(author.election, 0, encrypted)).toThrow(/approved one/);
+    expect(() => panelBallotCore(author.election, 0, encrypted)).toThrow(/approved one/);
+    expect(() => panelTrackingCode(author.election, 0, encrypted)).toThrow(/approved one/);
     // And panelBallotElection makes one only from an approved author key set
     // (author-key-set.test.ts).
     const d = decodeElectionDefinitionV6(hex(authorMeta.definition));

@@ -249,7 +249,7 @@ describe("when 6.2 runs (step 1)", () => {
         RECORD_TYPES.spoiledBallotOpening,
         255,
       );
-      expect(openingChecks(d, undefined, undefined, [], 4, clock)).toEqual({
+      expect(openingChecks(d, undefined, undefined, undefined, [], 4, clock)).toEqual({
         row: { status: "unverifiable", code: "unsupported-version", at: {} },
       });
     }
@@ -270,7 +270,7 @@ describe("when 6.2 runs (step 1)", () => {
         RECORD_TYPES.spoiledBallotOpening,
         version,
       );
-      expect(openingChecks(d, undefined, undefined, [], 4, clock)).toEqual({
+      expect(openingChecks(d, undefined, undefined, undefined, [], 4, clock)).toEqual({
         row: { status: "unverifiable", code: "not-reached" },
       });
     }

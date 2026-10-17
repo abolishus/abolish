@@ -159,6 +159,7 @@ const OPENING_VERSIONS: ReadonlySet<number | undefined> = new Set([1, 2, 3]);
 function judgeFor(
   definition: VerifiedDefinition,
   registered: readonly RegisteredKeys[] | undefined,
+  authorRegistered: readonly RegisteredKeys[] | undefined,
   admitted: readonly AdmittedCore[] | undefined,
 ): OpeningOutcome | Judge {
   const d = definition.value;
@@ -187,12 +188,18 @@ function judgeFor(
   )
     return NOT_REACHED;
   if (definition.version === 6) {
-    // Opening version 3 rebuilds the author seats' ciphertexts under their
-    // key set, which isn't passed here until P2-16 part 4d-3: nothing is
-    // judged beside an author panel until then, since an unchecked
-    // ciphertext must never let an opening pass (T-37).
-    if (definition.value.author_keys.length !== 0) return NOT_REACHED;
-    const election = panelBallotElection(definition.value, registered);
+    // Opening version 3 rebuilds the author seats' ciphertexts under the
+    // author panel's own run's key set, approved on the board, as admission
+    // judges its share hashes: never under keys no transcript check gave, or
+    // the default panel's, since an unchecked ciphertext must never let an
+    // opening pass (T-37, T-17).
+    const author = definition.value.author_keys.length !== 0;
+    if (author && authorRegistered === undefined) return NOT_REACHED;
+    const election = panelBallotElection(
+      definition.value,
+      registered,
+      author ? authorRegistered : [],
+    );
     return (payload) => {
       const o = decodeOpening(payload, 3);
       const checked = checkChallengeOpeningV3(election, o);
@@ -232,19 +239,21 @@ function judgeFor(
 
 /**
  * The row 6.2 and the report's `openings`. `registered` is the key set the
- * transcript check registered and `admitted` the ballots admission admitted,
- * or `undefined` when admission didn't run, which leaves every opening
- * unchecked.
+ * transcript check registered, `authorRegistered` the author panel's, beside
+ * one, once its approvals approve it (3.1, 3.2), and `admitted` the ballots
+ * admission admitted, or `undefined` when admission didn't run, which leaves
+ * every opening unchecked.
  */
 export function openingChecks(
   definition: VerifiedDefinition,
   registered: readonly RegisteredKeys[] | undefined,
+  authorRegistered: readonly RegisteredKeys[] | undefined,
   admitted: readonly AdmittedCore[] | undefined,
   entries: readonly Uint8Array[],
   boardEntryVersion: BoardEntryVersion,
   clock: AnchorClock,
 ): { readonly row: OpeningOutcome; readonly report?: readonly OpeningReport[] } {
-  const judge = judgeFor(definition, registered, admitted);
+  const judge = judgeFor(definition, registered, authorRegistered, admitted);
   if (typeof judge !== "function" || admitted === undefined)
     return { row: typeof judge === "function" ? NOT_REACHED : judge };
   const d = definition.value;

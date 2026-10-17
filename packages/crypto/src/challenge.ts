@@ -910,15 +910,22 @@ export function checkChallengeOpeningV2(
   };
 }
 
-// The exported version-4 opening paths don't take the author panel's
-// approved key set (`checkAuthorApprovals`) until P2-16 part 4d-3 judges
-// openings beside an author panel, so they refuse a poll with one rather
-// than take its keys on trust (T-37), as `checkDeliveryV2` does.
-function refuseAuthorPanel(election: PanelBallotElection, name: string): void {
-  if (election.authorPanelSize !== 0)
+// The author keys the exported version-4 opening paths take: the approved
+// set `panelBallotElection` made the context with (`checkAuthorApprovals`),
+// never one the caller names. A context `panelBallotElectionWith` made beside
+// an author panel has no approved set and is refused rather than have an
+// author seat's ciphertext rebuilt under keys taken on trust (T-37, T-17).
+function approvedAuthorKeys(
+  election: PanelBallotElection,
+  name: string,
+): readonly RegisteredKeys[] {
+  if (election.authorPanelSize === 0) return [];
+  const { authorKeys } = panelContextOf(election);
+  if (authorKeys === undefined)
     throw new RangeError(
-      `${name}: an author panel's key set comes from its own ceremony (P2-16 part 4d-3)`,
+      `${name}: an author panel's key set must be the approved one panelBallotElection takes`,
     );
+  return authorKeys;
 }
 
 // The author keys the internal paths take, in seat order: exactly the author
@@ -1006,22 +1013,23 @@ function panelCoreOf(
  * share hash of every seat outside its panel's registered key set zero
  * (docs/spec/challenge.md, Opening version 3). It is what the client shows
  * the tracking code of and, on cast, proves over; `openChallengeV3` opens
- * exactly this core. A poll with an author panel is refused until that
- * panel's approved key set is taken here (P2-16 part 4d-3; T-37).
+ * exactly this core. Beside an author panel, its seats are the approved key
+ * set `panelBallotElection` took, and a context without one is refused
+ * (T-37).
  */
 export function panelBallotCore(
   election: PanelBallotElection,
   cell: number,
   encrypted: EncryptedSharesV4,
 ): CellBallotCoreV4 {
-  refuseAuthorPanel(election, "panelBallotCore");
-  return panelCoreOf(election, [], cell, encrypted, "panelBallotCore").core;
+  const authorKeys = approvedAuthorKeys(election, "panelBallotCore");
+  return panelCoreOf(election, authorKeys, cell, encrypted, "panelBallotCore").core;
 }
 
 /**
  * Internal: `panelBallotCore` with the author panel's registered key set
- * taken as given, so author halves can be tested before P2-16 part 4d-3, which
- * then replaces this. The package entry point doesn't export it.
+ * taken as given, so author halves can be tested against vectors that carry
+ * no author run. The package entry point doesn't export it.
  */
 export function panelBallotCoreWith(
   election: PanelBallotElection,
@@ -1089,22 +1097,23 @@ function openV3(
  * check needs the whole vote (docs/spec/challenge.md, Opening version 3).
  * The same rules hold: it reveals only a sharing this package made and
  * hasn't proved, and marks it opened, and seats outside their panel's
- * registered key set reveal nothing (T-42, T-45). A poll with an author
- * panel is refused until that panel's key set has a checked source (T-37).
+ * registered key set reveal nothing (T-42, T-45). Beside an author panel,
+ * its seats are the approved key set `panelBallotElection` took, and a
+ * context without one is refused (T-37).
  */
 export function openChallengeV3(
   election: PanelBallotElection,
   cell: number,
   encrypted: EncryptedSharesV4,
 ): { readonly opening: SpoiledBallotOpeningV3; readonly coreHash: Uint8Array } {
-  refuseAuthorPanel(election, "openChallengeV3");
-  return openV3(election, [], cell, encrypted, "openChallengeV3");
+  const authorKeys = approvedAuthorKeys(election, "openChallengeV3");
+  return openV3(election, authorKeys, cell, encrypted, "openChallengeV3");
 }
 
 /**
  * Internal: `openChallengeV3` with the author panel's registered key set
- * taken as given (P2-16 part 4d-3 replaces it). The package entry point doesn't
- * export it.
+ * taken as given, for vectors that carry no author run. The package entry
+ * point doesn't export it.
  */
 export function openChallengeV3With(
   election: PanelBallotElection,
@@ -1147,23 +1156,23 @@ export type ChallengeOpeningV3Check =
  * its own panel, never from a board entry. A passing opening gives its
  * tracking code, its votes and their randomness, whatever the votes are;
  * `withinRules` false is `opening-vote-outside`. It takes a record
- * `decodeOpening(…, 3)` returned. A poll with an author panel is refused
- * until that panel's approved key set is taken here (P2-16 part 4d-3; T-37).
+ * `decodeOpening(…, 3)` returned. Beside an author panel, its seats are the
+ * approved key set `panelBallotElection` took, from the author transcript
+ * and the approvals on the board, and a context without one is refused: an
+ * author seat left out would have its ciphertext go unchecked (T-37, T-17).
  */
 export function checkChallengeOpeningV3(
   election: PanelBallotElection,
   opening: SpoiledBallotOpeningV3,
 ): ChallengeOpeningV3Check {
-  refuseAuthorPanel(election, "checkChallengeOpeningV3");
-  return checkV3(election, [], opening, "checkChallengeOpeningV3");
+  const authorKeys = approvedAuthorKeys(election, "checkChallengeOpeningV3");
+  return checkV3(election, authorKeys, opening, "checkChallengeOpeningV3");
 }
 
 /**
  * Internal: `checkChallengeOpeningV3` with the author panel's registered key
- * set taken as given, so author halves can be tested before P2-16 part 4d-3,
- * which must take it from the checked transcript, never the caller: an
- * author seat left out would have its ciphertext go unchecked (T-37). The
- * package entry point doesn't export it.
+ * set taken as given, so author halves can be tested against vectors that
+ * carry no author run. The package entry point doesn't export it.
  */
 export function checkChallengeOpeningV3With(
   election: PanelBallotElection,

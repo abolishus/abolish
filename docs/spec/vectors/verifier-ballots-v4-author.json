@@ -84,8 +84,7 @@
           }
         },
         "6.2": {
-          "status": "unverifiable",
-          "code": "not-reached"
+          "status": "pass"
         },
         "7.4": {
           "status": "unverifiable",
@@ -298,8 +297,7 @@
           "status": "pass"
         },
         "6.2": {
-          "status": "unverifiable",
-          "code": "not-reached"
+          "status": "pass"
         },
         "7.4": {
           "status": "unverifiable",

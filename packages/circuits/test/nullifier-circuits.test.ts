@@ -46,7 +46,7 @@ interface Vectors {
 }
 interface Abi {
   readonly parameters: readonly { readonly name: string; readonly visibility: string }[];
-  readonly return_type: { readonly visibility: string } | null;
+  readonly return_type: { readonly abi_type: unknown; readonly visibility: string } | null;
 }
 
 const ROOT = new URL("../", import.meta.url);
@@ -71,6 +71,11 @@ const PUBLIC = {
   nullifier_output: ["sigma", "q", "b_x", "b_y", "z_x", "z_y"],
 } as const;
 type Circuit = keyof typeof PUBLIC;
+/** Each circuit's public output: B as (B.x, B.y), and N. */
+const RETURN: Record<Circuit, unknown> = {
+  nullifier_query: { kind: "tuple", fields: [{ kind: "field" }, { kind: "field" }] },
+  nullifier_output: { kind: "field" },
+};
 
 function vectorTests(circuit: Circuit): string {
   const out: string[] = [];
@@ -159,6 +164,7 @@ describe("compiled circuits", () => {
         PUBLIC[circuit].length,
       );
       expect(abi.return_type?.visibility).toBe("public");
+      expect(abi.return_type?.abi_type).toEqual(RETURN[circuit]);
     },
     600_000,
   );

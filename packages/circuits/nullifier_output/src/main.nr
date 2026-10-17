@@ -146,6 +146,9 @@ mod tests {
         let _ = run(X, R, Witness { b: w.b, z: id, u: id });
     }
 
+    // The one test that can't break a single constraint: an off-curve U also
+    // misses Z and h2's own on-curve assertion. It shows the first on-curve
+    // check fires before any add, which an off-curve point could under-constrain.
     #[test(should_fail_with = "Point must be on curve")]
     fn refuses_u_off_the_curve() {
         let w = honest(X, R);

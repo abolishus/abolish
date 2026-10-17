@@ -237,6 +237,25 @@ describe("records what the accumulator vouches for", () => {
     expect(await recordedSince(first)).toHaveLength(2);
   });
 
+  test("a proof older than the latest recorded registration is refused, never skipped", async () => {
+    const d = deployment();
+    const defs = [definition(), definition()];
+    const logs = logsOf(d, [registered(defs[0]!, 1n), registered(defs[1]!, 2n)]);
+    const first = logs[0]!.record.l2_block;
+    expect(await syncRegistrations(app, d, logs, provenAll(d, logs))).toEqual({
+      recorded: 2,
+      unstored: [],
+    });
+    // It can't vouch for the second registration, so the table could be
+    // anyone's past it: a row far above any proven block must not stall the
+    // sync silently.
+    expect(await refusal(syncRegistrations(app, d, logs, provenAt(d, logs, 1, first)))).toEqual([
+      "recorded",
+      "other-registrations",
+    ]);
+    expect(await recordedSince(first)).toHaveLength(2);
+  });
+
   test("a definition storeDefinition refuses is still registered, its codes kept", async () => {
     const d = deployment();
     const ill = definition({ opens_at: typical.closes_at });

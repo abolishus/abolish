@@ -269,7 +269,8 @@ export interface StateAnchor {
 /** The ERC-7201 namespace `abolish.board-anchor` (docs/spec/contracts.md, Board anchor). */
 export const ANCHOR_NAMESPACE = 0x16eba4501d0a9dddbfa03518d843c364be664629e6d99efb7169d8f090095b00n;
 
-const word = (n: bigint) => {
+/** `n` as a 32-byte big-endian word, as a storage slot is named. */
+export const word = (n: bigint) => {
   const b = new Uint8Array(32);
   for (let i = 31; i >= 0 && n > 0n; i--, n >>= 8n) b[i] = Number(n & 0xffn);
   return b;
@@ -300,7 +301,7 @@ export function receiptKeySlot(key: Uint8Array): Uint8Array {
 }
 
 /** The 32-byte word at `slot`, from a storage trie value: RLP of the word with its leading zeros removed. */
-function storageWord(value: Uint8Array | undefined): Uint8Array {
+export function storageWord(value: Uint8Array | undefined): Uint8Array {
   if (value === undefined) return new Uint8Array(32);
   let it: Rlp;
   try {
@@ -317,25 +318,38 @@ function storageWord(value: Uint8Array | undefined): Uint8Array {
   return w;
 }
 
-/** The anchor account's storage root, from the state trie. */
-function storageRoot(l1: L1Evidence): Uint8Array {
-  const account = l1.nodes.get(l1.header.stateRoot, keccak_256(l1.anchor));
-  if (account === undefined) throw new L1Error("l1-anchor-absent");
+/**
+ * The storage root of the account at `address` in the state trie under
+ * `stateRoot`, or undefined if the nodes prove there is no account there or
+ * it has no code. An account without code (an EOA, say) can't be one of our
+ * contracts, so a wrong address reads as absent, never as empty storage.
+ */
+export function contractStorageRoot(
+  nodes: NodePool,
+  stateRoot: Uint8Array,
+  address: Uint8Array,
+): Uint8Array | undefined {
+  const account = nodes.get(stateRoot, keccak_256(address));
+  if (account === undefined) return undefined;
   try {
     const a = decodeRlp(account);
     if (!a.list || a.items.length !== 4) throw new RlpError("an account is 4 fields");
     rlpUint(a.items[0], 8);
     rlpUint(a.items[1], 32);
-    // An account without code (an EOA, say) can't be the anchor: read it as
-    // absent, so a wrong address is unverifiable, never every segment
-    // unanchored.
     const root = rlpBytes32(a.items[2]);
-    if (equal(rlpBytes32(a.items[3]), NO_CODE)) throw new L1Error("l1-anchor-absent");
-    return root;
+    return equal(rlpBytes32(a.items[3]), NO_CODE) ? undefined : root;
   } catch (e) {
     if (e instanceof RlpError) throw new L1Error("l1-proof-malformed");
     throw e;
   }
+}
+
+/** The anchor account's storage root, from the state trie. */
+function storageRoot(l1: L1Evidence): Uint8Array {
+  const root = contractStorageRoot(l1.nodes, l1.header.stateRoot, l1.anchor);
+  // Absent, or without code: unverifiable, never every segment unanchored.
+  if (root === undefined) throw new L1Error("l1-anchor-absent");
+  return root;
 }
 
 /**

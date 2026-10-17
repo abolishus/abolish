@@ -57,10 +57,19 @@ export {
 } from "./queues.ts";
 export { REGISTRY_SYNC_ENV, type RegistrySyncConfig, registrySyncFromEnv } from "./registry-env.ts";
 export {
-  ACCUMULATOR_SLOT,
+  type ClaimedOutputRoot,
+  DisputeGameRoots,
+  encodeHeader,
+  GameBlockError,
+  MAX_GAMES_SCANNED,
+  MESSAGE_PASSER,
+  type OutputRootSource,
+  ProvenRegistryAccumulator,
+} from "./output-roots.ts";
+export {
+  type RegistryAccumulator,
   RegistrySync,
   type RegistrySyncOptions,
-  ViemRegistryAccumulator,
 } from "./registry-sync.ts";
 export {
   type BundlerRequest,

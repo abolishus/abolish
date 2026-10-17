@@ -16,10 +16,12 @@ import {
   type Tier0Batches,
   Tier0LockError,
 } from "@abolishus/core";
+import { OutputRootError } from "@abolishus/verifier";
 import type { Sql } from "postgres";
 import type { BallotOutcome } from "./ballot-queue.ts";
 import type { BallotBatches } from "./ballots.ts";
 import type { ErrorKind, Log } from "./log.ts";
+import { GameBlockError } from "./output-roots.ts";
 import type { JobData, QueueKey } from "./queues.ts";
 import type { RegistrySync } from "./registry-sync.ts";
 
@@ -153,9 +155,10 @@ async function tier0Boundary(ctx: JobContext, _data: JobData<"tier0Boundary">): 
 }
 
 /**
- * Records the registry's finalized registrations. A refusal (an index the
- * accumulator doesn't vouch for, a log the event check refuses, a row the
- * database refuses) is logged as a finding and fails the job, and nothing
+ * Records the registry's proven registrations. A refusal (an L2 node whose
+ * answers don't prove under the output root, an index the accumulator
+ * doesn't vouch for, a log the event check refuses, a row the database
+ * refuses) is logged as a finding and fails the job, and nothing
  * after the refused log is recorded until it is resolved; an unreachable
  * node or index fails it as `internal`. A registration recorded without its
  * definition is logged and fails nothing: the registry accepted it, and a
@@ -174,6 +177,8 @@ async function registrySync(ctx: JobContext, _data: JobData<"registrySync">): Pr
       ctx.log({ queue, finding: "registration", reason: e.code });
     else if (e instanceof DefinitionError && e.code === "conflict")
       ctx.log({ queue, finding: "definition", reason: "conflict" });
+    else if (e instanceof OutputRootError || e instanceof GameBlockError)
+      ctx.log({ queue, finding: "output-root", reason: e.code });
     else throw e;
     throw new JobError("registry-sync-refused");
   }

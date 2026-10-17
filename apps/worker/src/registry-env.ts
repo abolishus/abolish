@@ -1,8 +1,8 @@
-// The registry sync's configuration from the environment (P3-5 part 3a): all
-// of it or none of it, as the Tier 0 job's. Addresses, the chain and the
-// schema are public; the index's database URL carries a password and the L2
-// node's URL may carry a provider's API key, so a malformed one is named,
-// never quoted.
+// The registry sync's configuration from the environment (P3-5 parts 3a and
+// 3b): all of it or none of it, as the Tier 0 job's. Addresses, the chains
+// and the schema are public; the index's database URL carries
+// a password and either node's URL may carry a provider's API key, so a
+// malformed one is named, never quoted.
 
 import type { ContractEventVersion } from "@abolishus/crypto";
 import { type Address, getAddress, isAddress } from "viem";
@@ -12,9 +12,14 @@ export interface RegistrySyncConfig {
   /** The indexer's database and the schema it runs under (its `DATABASE_SCHEMA`). */
   readonly indexUrl: string;
   readonly indexSchema: string;
-  /** The L2 node whose finalized head and storage the sync trusts. */
+  /** The L2 node, whose answers are proven under output roots. */
   readonly l2RpcUrl: string;
   readonly chainId: bigint;
+  /** The L1 node whose finalized head the sync trusts, and the L1's chain. */
+  readonly l1RpcUrl: string;
+  readonly l1ChainId: bigint;
+  /** The L2's OptimismPortal on L1, which names the dispute game factory and the respected game type. */
+  readonly portal: Address;
   readonly electionRegistry: Address;
   readonly trusteeRegistry: Address;
   readonly groupRegistry: Address;
@@ -28,6 +33,9 @@ export const REGISTRY_SYNC_ENV = [
   "REGISTRY_SYNC_INDEX_SCHEMA",
   "REGISTRY_SYNC_L2_RPC_URL",
   "REGISTRY_SYNC_CHAIN_ID",
+  "REGISTRY_SYNC_L1_RPC_URL",
+  "REGISTRY_SYNC_L1_CHAIN_ID",
+  "REGISTRY_SYNC_PORTAL",
   "REGISTRY_SYNC_ELECTION_REGISTRY",
   "REGISTRY_SYNC_TRUSTEE_REGISTRY",
   "REGISTRY_SYNC_GROUP_REGISTRY",
@@ -53,6 +61,13 @@ const Env = z.strictObject({
     .regex(/^[1-9][0-9]{0,19}$/)
     .transform((v) => BigInt(v))
     .refine((v) => v < 1n << 64n),
+  REGISTRY_SYNC_L1_RPC_URL: z.url({ protocol: /^https?$/ }),
+  REGISTRY_SYNC_L1_CHAIN_ID: z
+    .string()
+    .regex(/^[1-9][0-9]{0,19}$/)
+    .transform((v) => BigInt(v))
+    .refine((v) => v < 1n << 64n),
+  REGISTRY_SYNC_PORTAL: AddressValue,
   REGISTRY_SYNC_ELECTION_REGISTRY: AddressValue,
   REGISTRY_SYNC_TRUSTEE_REGISTRY: AddressValue,
   REGISTRY_SYNC_GROUP_REGISTRY: AddressValue,
@@ -89,6 +104,9 @@ export function registrySyncFromEnv(env: RegistrySyncEnv): RegistrySyncConfig | 
     indexSchema: p.REGISTRY_SYNC_INDEX_SCHEMA,
     l2RpcUrl: p.REGISTRY_SYNC_L2_RPC_URL,
     chainId: p.REGISTRY_SYNC_CHAIN_ID,
+    l1RpcUrl: p.REGISTRY_SYNC_L1_RPC_URL,
+    l1ChainId: p.REGISTRY_SYNC_L1_CHAIN_ID,
+    portal: p.REGISTRY_SYNC_PORTAL,
     electionRegistry: p.REGISTRY_SYNC_ELECTION_REGISTRY,
     trusteeRegistry: p.REGISTRY_SYNC_TRUSTEE_REGISTRY,
     groupRegistry: p.REGISTRY_SYNC_GROUP_REGISTRY,

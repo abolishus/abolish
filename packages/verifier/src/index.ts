@@ -81,6 +81,17 @@ export {
   RlpError,
   type StateAnchor,
 } from "./l1.ts";
+export {
+  ACCUMULATOR_SLOT,
+  accumulatorAtOutputRoot,
+  type OutputRootAccumulator,
+  OutputRootError,
+  type OutputRootErrorCode,
+  type OutputRootEvidence,
+  outputRootV0,
+  type StorageAtOutputRoot,
+  storageAtOutputRoot,
+} from "./output-root.ts";
 export { type ReceiptKeyCode, type ReceiptKeyRow, receiptKeyRow } from "./receipt-keys.ts";
 export {
   type CheckAt,

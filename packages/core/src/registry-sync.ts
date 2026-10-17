@@ -105,8 +105,9 @@ const after = (
  * isn't recorded yet, storing its definition first. `logs` are all the
  * registry's indexed logs in chain order, `n` counting from 0; logs above
  * the proven block are left for a later run. `proven` is the registry's
- * accumulator and count at the L2's finalized block, as the caller's node
- * reports them. Throws `RegistrySyncError` before recording anything if the
+ * accumulator and count after an L2 block, as the caller proved them; one
+ * before the latest recorded registration's block can't vouch for it, and is
+ * refused as `recorded` like any table the proof doesn't match. Throws `RegistrySyncError` before recording anything if the
  * logs aren't the registry's sequence, a log's index doesn't rise within its
  * block, or the registrations already recorded aren't the registry's first
  * ones, and stops at the first log the event check refuses, so a

@@ -5,7 +5,7 @@ A Tier 2 member's nullifier `N` is keyed by the trustees: the 2HashDH OPRF `N = 
 What this page doesn't yet specify is P3-4 part 2b's later steps, and nothing registers at Tier 2 through the panel until they are:
 
 - **2b-2:** the key's sharing transcript, which dealers qualify (and so the share commitments below), `key_id` and the registration keys, are specified in [[nullifier-key]] (part 2b-2a), and resharing to a new panel or epoch in [[nullifier-reshare]] (part 2b-2b), whose successor key the answer check takes in the same shape.
-- **2b-3:** `H1` and `H2`, with the diff of TACEO's gadgets against the audited code, are specified in [[keyed-nullifier-hashes]] (part 2b-3a); the query and output records and the statements of their circuits (and so `query_hash`) are part 2b-3b's.
+- **2b-3:** `H1` and `H2`, with the diff of TACEO's gadgets against the audited code, are specified in [[keyed-nullifier-hashes]] (part 2b-3a); the query and output records, `query_hash` and the statements of their circuits in [[nullifier-query]] (part 2b-3b-2a), and the circuits themselves are part 2b-3b-2b's.
 - **2b-4:** the attestation's group position and quorum, the delivery of `N` to every seat, and [[verifier]] 2.4's count of attested additions.
 
 ## Sources
@@ -110,7 +110,7 @@ and its secret share is the pair `(sk_i, s_i) = (Σ_d f_d(i), Σ_d f'_d(i)) mod 
 
 ## Evaluation
 
-A query names the key by `key_id` (32 bytes, [[nullifier-key]], Transcript), is named itself by `query_hash` (32 bytes, part 2b-3) and carries the blinded point `B = r · H1(x)`, a `bjj-point` that isn't the identity. A seat answers only after checking the query proof (part 2b-3), and never for a `B` it can't decode. Seat `i` answers with
+A query names the key by `key_id` (32 bytes, [[nullifier-key]], Transcript), is named itself by `query_hash` (32 bytes, [[nullifier-query]]) and carries the blinded point `B = r · H1(x)`, a `bjj-point` that isn't the identity. A seat answers only after the query check ([[nullifier-query]], Query check), its proof included, and never for a `B` it can't decode. Seat `i` answers with
 
 ```
 Z_i = sk_i · B
@@ -142,14 +142,14 @@ and accepts if the recomputed `c` equals the proof's. Every point is a `bjj-poin
 
 ## Answer record
 
-A seat's answer is a record, never on the board, never in the archive and never pinned by a profile: the Tier 2 key fixes its version (version 1 of the key transcript, [[nullifier-key]], uses version 1). It travels to the client encrypted to a fresh client key (part 2b-3), and the client forwards the `k` it combined to every attester (part 2b-4).
+A seat's answer is a record, never on the board, never in the archive and never pinned by a profile: the Tier 2 key fixes its version (version 1 of the key transcript, [[nullifier-key]], uses version 1). It travels to the client encrypted to a fresh client key (part 2b-4), and the client forwards the `k` it combined to every attester (part 2b-4).
 
 Record type `0x0010`, version 1:
 
 | Field        | Type         | Meaning                                                                 |
 | ------------ | ------------ | ----------------------------------------------------------------------- |
 | `key_id`     | `bytes[32]`  | The key the seat answered under ([[nullifier-key]])                     |
-| `query_hash` | `bytes[32]`  | The query it answered (part 2b-3)                                       |
+| `query_hash` | `bytes[32]`  | The query it answered ([[nullifier-query]])                             |
 | `seat`       | `u8`         | The answering seat `i`, `1 ≤ i ≤ n`                                     |
 | `b`          | `bjj-point`  | `B`, the query's blinded point. Never the identity                      |
 | `z`          | `bjj-point`  | `Z_i = sk_i · B`. Never the identity                                    |
@@ -192,7 +192,7 @@ Z   = Σ_{i ∈ S} λ_i · Z_i
 
 By the proofs, `Z_i = sk_i · B` for every `i ∈ S`, so `Z = sk · B` whichever `k` seats answered: one query has one `Z`, and an attester that recombines the `k` forwarded answers gets the same `Z` as the client ([[0022-tier2-keyed-nullifier]], Attestation). Two answers from one seat, or fewer than `k` seats, are refused, never combined. `Z` is the identity only if `sk · B` is, which for `B ≠ (0, 1)` in `𝔾` means `sk = 0`; a combiner refuses it.
 
-The client then unblinds with its own `r` (part 2b-3):
+The client then unblinds with its own `r` ([[nullifier-query]], The output):
 
 ```
 U = r⁻¹ · Z  = sk · H1(x)
@@ -202,9 +202,9 @@ with `r⁻¹` the inverse modulo `l`, and derives `N = H2(x, U)` ([[keyed-nullif
 
 ## Security notes
 
-- **The query proof is what stops a static Diffie–Hellman oracle.** Each answer is `sk_i` times a point the client sent. A seat that answered any well-formed `B` would let a client chain queries (`B`, then `sk_i · B` as its next `B`, and so on) and run Cheon's attack (EUROCRYPT 2006). The small factors of `l − 1` are `2⁴ · 3 · 5 · 11² · 17 · 967` (about 2²⁸·⁸ in all, by trial division below 2·10⁶) and of `l + 1` are `2 · 19 · 31 · 67 · 641`, so that attack would cut about 14 bits from `sk_i` with about 2²⁹ chained queries. The query proof (part 2b-3) shows the client knows `r` with `B = r · H1(x)`, and `sk_i · B = (r · sk_i) · H1(x)` can't be proven as a next query without knowing `r · sk_i`. So a seat MUST check the query proof before it answers (part 2b-3 makes `packages/crypto`'s evaluation take only a query whose proof has been checked; until then its `evaluate` answers any well-formed `B`, and nothing calls it outside tests), and the panel's published query counts (part 2b-4) bound what a client with many valid proofs gets.
+- **The query proof is what stops a static Diffie–Hellman oracle.** Each answer is `sk_i` times a point the client sent. A seat that answered any well-formed `B` would let a client chain queries (`B`, then `sk_i · B` as its next `B`, and so on) and run Cheon's attack (EUROCRYPT 2006). The small factors of `l − 1` are `2⁴ · 3 · 5 · 11² · 17 · 967` (about 2²⁸·⁸ in all, by trial division below 2·10⁶) and of `l + 1` are `2 · 19 · 31 · 67 · 641`, so that attack would cut about 14 bits from `sk_i` with about 2²⁹ chained queries. The query proof ([[nullifier-query]], Query circuit) shows the client knows `r` with `B = r · H1(x)`, and `sk_i · B = (r · sk_i) · H1(x)` can't be proven as a next query without knowing `r · sk_i`. So a seat MUST check the query proof before it answers (part 2b-3b-2b makes `packages/crypto`'s evaluation take only a query whose proof has been checked; until then its `evaluate` answers any well-formed `B`, and nothing calls it outside tests), and the panel's published query counts (part 2b-4) bound what a client with many valid proofs gets.
 - **Threshold one-more Diffie–Hellman.** Fewer than `k` seats can't evaluate, and `q` queries give no more than `q` evaluations, under the threshold one-more Diffie–Hellman assumption in the random-oracle model (TOPPSS; [[0022-tier2-keyed-nullifier]], Pros).
-- **A discrete-log break gives the shares.** Any recorded `(B, Z_i)` gives `sk_i` to an adversary who solves discrete logs in `𝔾`, and `k` of them give `sk` (A-11, T-15). That is [[0022-tier2-keyed-nullifier]]'s second limit; encrypting queries and answers in transit (part 2b-3, to the registration KEM keys of [[nullifier-key]]) narrows it to clients and seats.
+- **A discrete-log break gives the shares.** Any recorded `(B, Z_i)` gives `sk_i` to an adversary who solves discrete logs in `𝔾`, and `k` of them give `sk` (A-11, T-15). That is [[0022-tier2-keyed-nullifier]]'s second limit; encrypting queries and answers in transit (part 2b-4, to the registration KEM keys of [[nullifier-key]]) narrows it to clients and seats.
 - **Not constant time everywhere.** `@noble/curves`' scalar multiplication is constant time, and `packages/crypto` uses it for every secret (`sk_i`, `s_i`, `w_1`, `w_2`, `r⁻¹`): `s_i` with the public `C_i` gives `sk_i · G`, which the commitment's hiding must keep. `sk_i`, `s_i`, `w_1` and `w_2` are `bigint`s, which JavaScript can't zeroise, and the response arithmetic is plain `bigint` arithmetic. A seat's node runs on hardware it controls; the mainnet audit covers it (T-14).
 
 ## Test vectors

@@ -382,7 +382,7 @@ function possessionOk(context: Uint8Array, m: RegistrationKeysMessage): boolean 
 export interface RegistrationSecrets {
   readonly index: number;
   readonly identitySecret: Uint8Array;
-  /** The registration KEM key: dealt shares now, clients' queries later (part 2b-3). */
+  /** The registration KEM key: dealt shares now, clients' queries later (part 2b-4). */
   readonly kem: KemKeyPair;
   /** The registration P-256 signing key, 32 bytes big-endian: it signs answers. */
   readonly signingSecret: Uint8Array;

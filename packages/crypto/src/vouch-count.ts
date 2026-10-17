@@ -73,6 +73,20 @@ export type GroupRegistryEvent =
       readonly record: Uint8Array;
     }
   | {
+      /** A self-paid Tier 0 group, as `SelfPaidGroupCreated` logs it (contract-event version 7). */
+      readonly kind: "self-paid-group-created";
+      readonly block: bigint;
+      readonly groupId: bigint;
+    }
+  | {
+      /** A self-paid addition, as `SelfPaidMemberAdded` logs it, with its `index` topic. */
+      readonly kind: "self-paid-addition";
+      readonly block: bigint;
+      readonly groupId: bigint;
+      readonly index: bigint;
+      readonly record: Uint8Array;
+    }
+  | {
       /** A Tier 1 addition record, as the registry's `Tier1MemberAdded` logs it (contract-event versions 6 and 7). */
       readonly kind: "tier1-addition";
       readonly block: bigint;
@@ -107,8 +121,9 @@ export type GroupRegistryEventsResult =
  * takes it: each contract-event record, under the pinned contract-event
  * version, through the event check against the group registry
  * (docs/spec/contracts.md, Event check), then `GroupCreated`, `MembersAdded`
- * (with its `firstIndex` topic), `MembersRemoved` and `Tier1MemberAdded` as
- * events at the record's L2 block, and `RegistrarsPinned` returned apart,
+ * (with its `firstIndex` topic), `MembersRemoved`, `Tier1MemberAdded`,
+ * `SelfPaidGroupCreated` and `SelfPaidMemberAdded` (with its `index` topic)
+ * as events at the record's L2 block, and `RegistrarsPinned` returned apart,
  * for the caller to compare with its pins. The first record that fails the
  * check is reported, as 4.4 reports it: the release's registry logs none, so
  * one is a rewritten chain or other bytecode, never a submitter's (T-53,
@@ -171,6 +186,16 @@ export function groupRegistryEvents(
       events.push({ kind: "members-removed", block, groupId: event.groupId, record: event.record });
     else if (event.event === "Tier1MemberAdded")
       events.push({ kind: "tier1-addition", block, record: event.record });
+    else if (event.event === "SelfPaidGroupCreated")
+      events.push({ kind: "self-paid-group-created", block, groupId: event.groupId });
+    else if (event.event === "SelfPaidMemberAdded")
+      events.push({
+        kind: "self-paid-addition",
+        block,
+        groupId: event.groupId,
+        index: event.index,
+        record: event.record,
+      });
     else if (event.event === "RegistrarsPinned")
       pinned.push({ at, threshold: event.threshold, registrars: event.registrars });
     else throw new Error(`records[${at}]: unread group-registry event ${event.event}`);
@@ -315,6 +340,18 @@ function readEvents(events: readonly GroupRegistryEvent[]): GroupRegistryEvent[]
     }
     if (kind === "tier1-addition")
       return { kind, block, record: bytesArg(e.record, `events[${at}].record`) };
+    if (kind === "self-paid-group-created")
+      return { kind, block, groupId: u64Arg(e.groupId, `events[${at}].groupId`) };
+    if (kind === "self-paid-addition") {
+      const { groupId, index, record } = e;
+      return {
+        kind,
+        block,
+        groupId: u64Arg(groupId, `events[${at}].groupId`),
+        index: u64Arg(index, `events[${at}].index`),
+        record: bytesArg(record, `events[${at}].record`),
+      };
+    }
     throw new TypeError(`events[${at}]: unknown kind`);
   });
 }
@@ -374,11 +411,19 @@ export function countTier1Additions(
   const breakAt = (b: Tier1Break) => {
     if (broken === null || b.at < broken.at) broken = b;
   };
+  // A self-paid group is a Tier 0 group of its own kind: it takes no Tier 1
+  // addition and no vouch names it, but its creation numbers a group, so a
+  // second creation of an identifier breaks the count whichever kinds they are.
   for (const [at, e] of list.entries()) {
-    if (e.kind !== "group-created") continue;
+    if (e.kind !== "group-created" && e.kind !== "self-paid-group-created") continue;
     if (groups.has(e.groupId))
       breakAt({ at, block: e.block, groupId: e.groupId, reason: "duplicate-group" });
-    else groups.set(e.groupId, { at, block: e.block, tier: e.tier });
+    else
+      groups.set(e.groupId, {
+        at,
+        block: e.block,
+        tier: e.kind === "group-created" ? e.tier : 0,
+      });
   }
 
   // Each Tier 2 group's records, replayed strictly over the whole sequence
@@ -387,13 +432,26 @@ export function countTier1Additions(
   // (T-71).
   const tier2 = new Map<bigint, Tier2Record[]>();
   for (const [at, e] of list.entries()) {
-    if (e.kind !== "members-added" && e.kind !== "members-removed") continue;
+    if (
+      e.kind !== "members-added" &&
+      e.kind !== "members-removed" &&
+      e.kind !== "self-paid-addition"
+    )
+      continue;
     const group = groups.get(e.groupId);
     if (group === undefined || group.at > at) {
       breakAt({ at, block: e.block, groupId: e.groupId, reason: "created" });
       continue;
     }
     if (group.tier !== 2) continue;
+    // A self-paid addition naming a signed group fails that group's replay at
+    // `group` (2.4). Events read by `groupRegistryEvents` have passed the event
+    // check, which decodes the record strictly, so no decoding code comes
+    // first; hand-built events are the caller's to have decoded.
+    if (e.kind === "self-paid-addition") {
+      breakAt({ at, block: e.block, groupId: e.groupId, reason: "group" });
+      continue;
+    }
     const records = tier2.get(e.groupId) ?? [];
     records.push(
       e.kind === "members-added"

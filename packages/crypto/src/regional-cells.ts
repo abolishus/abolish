@@ -47,23 +47,59 @@ export function foldRegions(members: readonly bigint[]): number[][] {
 }
 
 /**
- * The first-occurrence rule (docs/spec/membership.md, Cell tree): walking a
- * tier's groups in the order given (ascending `group_id`), each group's leaves
- * in index order, a nonzero leaf equal to an earlier nonzero leaf becomes 0.
- * So one commitment counts once per tier, in the first group holding it: one
- * secret has one cell and one nullifier per tier (G-2), and a repeat can't
- * inflate a region past the floor (T-16).
+ * The first-occurrence rule (docs/spec/membership.md, Cell tree): a nonzero
+ * leaf equal to an earlier nonzero leaf in the walk becomes 0. So one
+ * commitment counts once per tier: one secret has one cell and one nullifier
+ * per tier (G-2), and a repeat can't inflate a region past the floor (T-16).
+ *
+ * The walk takes first every signed group in the order given (ascending
+ * `group_id`), each group's leaves in index order, then every leaf of the
+ * self-paid groups in chain order, whatever their `group_id`. `chainOrder[i]`
+ * is given only for a self-paid group, as each of its leaves' position in
+ * the registry's log order (its `SelfPaidMemberAdded`'s position in the
+ * sequence); positions are distinct across the tier. So a self-paid copy
+ * never displaces a signed occurrence, and among self-paid ones the earliest
+ * addition counts ([[0024-tier0-registration]], Amendment 1; T-16, T-06).
+ * Each leaf keeps its place: only which occurrence counts is decided.
  */
-export function firstOccurrence(groups: readonly (readonly bigint[])[]): bigint[][] {
+export function firstOccurrence(
+  groups: readonly (readonly bigint[])[],
+  chainOrder: readonly (readonly bigint[] | undefined)[],
+): bigint[][] {
+  // Required, not defaulted: a caller leaving out self-paid groups' positions
+  // would rank them by `group_id`, which lets a copy in a lower group move a
+  // registrant (T-16). Every group of a tier with no self-paid group passes
+  // `undefined`, or an empty list for none.
+  if (!Array.isArray(chainOrder))
+    throw new TypeError("firstOccurrence: chainOrder: expected an array");
   const seen = new Set<bigint>();
-  return groups.map((leaves) =>
-    leaves.map((leaf) => {
-      if (leaf === 0n) return 0n;
-      if (seen.has(leaf)) return 0n;
-      seen.add(leaf);
-      return leaf;
-    }),
-  );
+  const out = groups.map((leaves) => leaves.slice());
+  const keep = (row: bigint[], i: number) => {
+    const leaf = row[i] as bigint;
+    if (leaf === 0n) return;
+    if (seen.has(leaf)) row[i] = 0n;
+    else seen.add(leaf);
+  };
+  const selfPaid: { group: number; leaf: number; position: bigint }[] = [];
+  const positions = new Set<bigint>();
+  for (const [g, row] of out.entries()) {
+    const order = chainOrder[g];
+    if (order === undefined) {
+      for (let i = 0; i < row.length; i++) keep(row, i);
+      continue;
+    }
+    if (!Array.isArray(order) || order.length !== row.length)
+      throw new RangeError(`firstOccurrence: chainOrder[${g}] must give one position per leaf`);
+    for (const [i, position] of order.entries()) {
+      if (typeof position !== "bigint" || positions.has(position))
+        throw new RangeError("firstOccurrence: chain positions must be distinct bigints");
+      positions.add(position);
+      selfPaid.push({ group: g, leaf: i, position });
+    }
+  }
+  selfPaid.sort((a, b) => (a.position < b.position ? -1 : 1));
+  for (const { group, leaf } of selfPaid) keep(out[group] as bigint[], leaf);
+  return out;
 }
 
 /**
@@ -104,8 +140,9 @@ export interface DerivedTier {
  * A tier's region counts and cells, recomputed from its groups' tier-tree
  * leaves at the tier's `root_l2_block` (`leavesOf`: each group's leaves as
  * the lenient or strict replay gives them, 0 for a removed or forbidden
- * addition). Only the tier's `groups` and the number of its `regions` are
- * read: the stated counts and cells are what this recomputes, never inputs.
+ * addition), with each self-paid group's leaves' chain positions in
+ * `chainOrderOf` (`firstOccurrence`; absent for a signed group). Only the
+ * tier's `groups` and the number of its `regions` are read: the stated counts and cells are what this recomputes, never inputs.
  * The caller has checked the definition's `electorate` rule. A member's
  * path is `tierTreePath(cell.leaves, index)`, with `index` its leaf's
  * position in `cell.leaves` (P2-8).
@@ -113,7 +150,10 @@ export interface DerivedTier {
 export function deriveTierCells(
   tier: Pick<TierElectorate, "groups" | "regions">,
   leavesOf: ReadonlyMap<bigint, readonly bigint[]>,
+  chainOrderOf: ReadonlyMap<bigint, readonly bigint[]>,
 ): DerivedTier {
+  if (!(chainOrderOf instanceof Map))
+    throw new TypeError("deriveTierCells: chainOrderOf: expected a Map");
   const groupIds = tier.groups.map((g) => g.group_id);
   for (let i = 1; i < groupIds.length; i++)
     if ((groupIds[i - 1] as bigint) >= (groupIds[i] as bigint))
@@ -125,7 +165,10 @@ export function deriveTierCells(
     if (leaves === undefined) throw new RangeError(`deriveTierCells: no leaves for group ${id}`);
     return leaves;
   });
-  const leaves = firstOccurrence(raw);
+  const leaves = firstOccurrence(
+    raw,
+    groupIds.map((id) => chainOrderOf.get(id)),
+  );
   const regions = regionCounts(tier, leaves);
   const cells = foldRegions(regions).map((cellRegions): DerivedCell => {
     const inCell = new Set(cellRegions);

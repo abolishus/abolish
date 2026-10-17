@@ -677,3 +677,88 @@ export function applyGroupRecords(
     groupSize: leaves.reduce((n, leaf) => (leaf === 0n ? n : n + 1), 0),
   };
 }
+
+/** The length of an `addSelfPaidMember` record: `u64(group_id) ‖ field<bn254>(commitment)`. */
+export const SELF_PAID_RECORD_LENGTH = 40;
+
+/** A decoded `addSelfPaidMember` record (docs/spec/contracts.md, Group registry, Self-paid additions). */
+export interface SelfPaidAddition {
+  readonly groupId: bigint;
+  readonly commitment: bigint;
+}
+
+/**
+ * Decodes an `addSelfPaidMember` record, applying its stateless checks in the
+ * registry's order: exactly 40 bytes (`length`), then a commitment that isn't
+ * forbidden (`forbidden-commitment`). The group's kind and the index are the
+ * caller's (`applySelfPaidRecords`).
+ */
+export function decodeSelfPaidAddition(bytes: Uint8Array): GroupRecordResult<SelfPaidAddition> {
+  const b = copyRecord(bytes);
+  if (b.length !== SELF_PAID_RECORD_LENGTH) return { ok: false, error: "length" };
+  const r = new Reader(b);
+  const groupId = u64Of(r);
+  const commitment = bigEndian(r.take(32));
+  r.end();
+  if (isForbiddenCommitment(commitment)) return { ok: false, error: "forbidden-commitment" };
+  return { ok: true, value: { groupId, commitment } };
+}
+
+/** The `addSelfPaidMember` record of `addition`; throws `EncodeError` for anything the decoder refuses. */
+export function encodeSelfPaidAddition(addition: SelfPaidAddition): Uint8Array {
+  const { groupId, commitment } = addition;
+  if (typeof commitment !== "bigint" || isForbiddenCommitment(commitment))
+    throw new EncodeError("commitment: a forbidden commitment");
+  const w = new Writer();
+  w.bytes(word(checkU64(groupId, "groupId")).subarray(24));
+  w.bytes(word(commitment));
+  return w.finish();
+}
+
+/** One logged `SelfPaidMemberAdded` of a group, in log order, with its `index` topic. */
+export interface SelfPaidLogRecord {
+  readonly index: bigint;
+  readonly record: Uint8Array;
+}
+
+/**
+ * The verifier's replay of one self-paid group (docs/spec/contracts.md, Group
+ * registry, Verification, Self-paid groups): its own member count `c` from 0,
+ * and for each record, in this order of report, a strict decoding (`length`,
+ * `forbidden-commitment`), its own `group_id` equal to the group's (`group`),
+ * then its `index` topic equal to `c`, with `c < 2^32` (`position`). Leaf `c`
+ * is then the commitment. There are no approvals and no removals, so the
+ * replay catches only a history the registry couldn't have logged (a skipped
+ * or repeated index, a forbidden commitment, a record of another group); a
+ * rewritten chain that renumbers consistently is the accumulator's to catch
+ * (T-71). The caller has already refused, as `group`, any signed record
+ * naming the group.
+ */
+export function applySelfPaidRecords(
+  records: readonly SelfPaidLogRecord[],
+  ctx: { readonly groupId: bigint },
+): GroupReplayResult {
+  if (ctx === null || typeof ctx !== "object") throw new TypeError("ctx: expected an object");
+  const group = uintArg(ctx.groupId, MAX_U64, "groupId");
+  if (!Array.isArray(records)) throw new TypeError("records: expected an array");
+  const leaves: bigint[] = [];
+  const fail = (at: number, reason: GroupHistoryReason): GroupReplayResult => ({
+    ok: false,
+    error: "group-history",
+    at,
+    reason,
+  });
+  for (const [at, entry] of records.slice().entries()) {
+    if (entry === null || typeof entry !== "object")
+      throw new TypeError(`records[${at}]: expected an object`);
+    const { index, record } = entry;
+    const d = decodeSelfPaidAddition(record);
+    if (!d.ok) return fail(at, d.error);
+    if (d.value.groupId !== group) return fail(at, "group");
+    const count = BigInt(leaves.length);
+    if (typeof index !== "bigint" || index !== count || count >= MAX_LEAVES)
+      return fail(at, "position");
+    leaves.push(d.value.commitment);
+  }
+  return { ok: true, count: BigInt(leaves.length), leaves, groupSize: leaves.length };
+}

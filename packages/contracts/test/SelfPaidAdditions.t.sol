@@ -236,6 +236,57 @@ contract SelfPaidAdditionsTest is GroupTestBase {
         registry.addSelfPaidMember{value: FEE}(_record(SELF_PAID, 2));
     }
 
+    /// docs/spec/vectors/self-paid.json's records, from the independent Python
+    /// generator `packages/crypto` is also checked against: each valid record's
+    /// commitment is added to a self-paid group, and each rejected one is
+    /// refused at its error. The records are put in the existing self-paid
+    /// group, since the group is checked before the commitment (rule 4 before
+    /// rule 6), and a wrong length is refused whatever the group.
+    function test_SelfPaidVectorRecords() public {
+        string memory sp = vm.readFile("../../docs/spec/vectors/self-paid.json");
+        assertEq(
+            keccak256(bytes(vm.parseJsonString(sp, ".format"))),
+            keccak256("abolish-self-paid-vectors/1"),
+            "format"
+        );
+        uint256 i;
+        for (; vm.keyExistsJson(sp, string.concat(".records.valid[", vm.toString(i), "]")); i++) {
+            string memory at = string.concat(".records.valid[", vm.toString(i), "]");
+            bytes memory record = _hexBytes(vm.parseJsonString(sp, string.concat(at, ".record")));
+            assertEq(record.length, 40, "length");
+            uint256 commitment = vm.parseJsonUint(sp, string.concat(at, ".commitment"));
+            assertEq(
+                keccak256(record),
+                keccak256(
+                    _record(uint64(vm.parseJsonUint(sp, string.concat(at, ".groupId"))), commitment)
+                ),
+                "layout"
+            );
+            (,, uint64 before) = registry.groupOf(SELF_PAID);
+            registry.addSelfPaidMember{value: FEE}(_inSelfPaidGroup(record));
+            (,, uint64 count) = registry.groupOf(SELF_PAID);
+            assertEq(count, before + 1, "added");
+        }
+        assertTrue(i >= 3, "valid record coverage");
+        for (
+            i = 0;
+            vm.keyExistsJson(sp, string.concat(".records.rejected[", vm.toString(i), "]"));
+            i++
+        ) {
+            string memory at = string.concat(".records.rejected[", vm.toString(i), "]");
+            bytes memory record = _hexBytes(vm.parseJsonString(sp, string.concat(at, ".record")));
+            bytes32 err = keccak256(bytes(vm.parseJsonString(sp, string.concat(at, ".error"))));
+            bytes memory expected = err == keccak256("length")
+                ? abi.encodeWithSelector(GroupRegistry.MalformedRecord.selector)
+                : abi.encodeWithSelector(GroupRegistry.ForbiddenCommitment.selector, 0);
+            assertTrue(
+                err == keccak256("length") || err == keccak256("forbidden-commitment"), "error"
+            );
+            _expectSelfPaidRefused(_inSelfPaidGroup(record), FEE, expected);
+        }
+        assertTrue(i >= 10, "rejected record coverage");
+    }
+
     /// Each refusal is the first failing check in the spec's order: length,
     /// fee, group, position, commitment.
     function test_ChecksRunInOrder() public {
@@ -538,6 +589,20 @@ contract SelfPaidAdditionsTest is GroupTestBase {
 
     function _record(uint64 groupId, uint256 commitment) internal pure returns (bytes memory) {
         return abi.encodePacked(groupId, commitment);
+    }
+
+    /// The vector file's hex, where `vm.parseBytes` refuses the empty string.
+    function _hexBytes(string memory h) internal pure returns (bytes memory) {
+        return bytes(h).length == 0 ? new bytes(0) : vm.parseBytes(h);
+    }
+
+    /// `record` with its first eight bytes, where it has them, naming `SELF_PAID`.
+    function _inSelfPaidGroup(bytes memory record) internal pure returns (bytes memory b) {
+        b = bytes.concat(record);
+        bytes8 id = bytes8(SELF_PAID);
+        for (uint256 j; j < 8 && j < b.length; j++) {
+            b[j] = id[j];
+        }
     }
 
     function _signedAddition(uint64 groupId, uint64 first, uint256[] memory c)

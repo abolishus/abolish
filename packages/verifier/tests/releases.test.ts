@@ -526,7 +526,10 @@ describe("running-opening.json through runningOpeningFacts", () => {
     );
     const result = liveReleases({
       running,
-      rules: election.rules,
+      rules: {
+        ...election.rules,
+        questions: [{ optionCount: 3, minSelections: 0, maxSelections: 3 }],
+      },
       batch: 20,
       openings: facts,
       counted: sets.map(() => new Set<string>()),
@@ -624,13 +627,53 @@ function oneCell(
   };
 }
 
+describe("snapshot heads at a period's end", () => {
+  // epoch 0, period 100: snapshots at segments 1, 2 and 3, ending at 200, 300 and 400.
+  const clock = { epoch: 0n, period: 100n };
+  const run = (from: number, to: number) =>
+    Array.from({ length: (to - from) / 50 + 1 }, (_, i) => ({
+      number: BigInt(i),
+      timestamp: BigInt(from + 50 * i),
+      hash: NO_HASH,
+    }));
+  const heads = (blocks: readonly LiveBlock[]) => snapshotHeads(clock, 100n, 400n, 1, blocks);
+
+  test("a block exactly at the end is after the snapshot, and fixes its head", () => {
+    const got = heads(run(150, 400));
+    expect(got.ok && got.snapshots.map((s) => [s.segment, Number(s.head.timestamp)])).toEqual([
+      [1, 150],
+      [2, 250],
+      [3, 350],
+    ]);
+  });
+
+  test("a run ending exactly at an end fixes that snapshot, and not the next", () => {
+    expect(heads(run(150, 300))).toEqual({
+      ok: false,
+      code: "l1-blocks-short",
+      at: { snapshot: 3 },
+    });
+  });
+
+  test("a run starting exactly at an end doesn't fix that snapshot", () => {
+    expect(heads(run(200, 400))).toEqual({
+      ok: false,
+      code: "l1-blocks-short",
+      at: { snapshot: 1 },
+    });
+  });
+});
+
 describe("the final tally's least side", () => {
   test("is the least positive directed cut of the release graph with the final tally", () => {
     fc.assert(
       fc.property(releasesAndFinal, ({ ballots, releases, final }) => {
         const r = liveReleases({
           running: oneCell(releases, ballots.length),
-          rules: { optionCount: 1 },
+          rules: {
+            optionCount: 1,
+            questions: [{ optionCount: 1, minSelections: 0, maxSelections: 1 }],
+          },
           batch: 20,
           openings: [],
           counted: [final],
@@ -657,7 +700,10 @@ describe("the final tally's least side", () => {
     expect(
       liveReleases({
         running,
-        rules: { optionCount: 1 },
+        rules: {
+          optionCount: 1,
+          questions: [{ optionCount: 1, minSelections: 0, maxSelections: 1 }],
+        },
         batch: 20,
         openings: [],
         counted: [new Set<string>()],
@@ -767,6 +813,33 @@ describe("running sets", () => {
     expect([...r.choices.keys()]).toEqual([0, 1]);
   });
 
+  test("a ballot stands by its first admitted copy, for its cell and its receipts", () => {
+    const r = liveRunning({
+      cellTiers: [0],
+      snapshots,
+      copies: [
+        // A counting copy that fails ahead of the admitted ones, never receipted.
+        copy(0, "a", "a/1", { rejected: true, receiptedAt: null }),
+        copy(1, "a", "a/1", { receiptedAt: 10 }),
+        copy(2, "a", "a/1", { receiptedAt: 12 }),
+      ],
+      batch: 20,
+    });
+    expect((r.sets[0] as RunningSet<string, string>[]).map((s) => s.size)).toEqual([0, 1, 1, 1]);
+    expect(r.firstEntry.get("a/1")).toBe(0);
+  });
+
+  test("refuse two copies at one entry", () => {
+    expect(() =>
+      liveRunning({
+        cellTiers: [0],
+        snapshots,
+        copies: [copy(0, "a", "a"), copy(0, "b", "b")],
+        batch: 20,
+      }),
+    ).toThrow(RangeError);
+  });
+
   test("refuse a copy naming no cell of the partition", () => {
     expect(() =>
       liveRunning({
@@ -836,6 +909,45 @@ describe("running openings", () => {
       [[{ code: "running-aggregate" }, { code: "running-second", of: 1 }], 1],
     ]);
     expect(r.rows["7.6"]).toEqual({ status: "fail", code: "running-repeat", at: { entry: 2 } });
+  });
+
+  test("a seat may open a release in every cell, and must be given in copy order", () => {
+    const two: LiveRunning<string, string> = {
+      ...running,
+      cellTiers: [0, 0],
+      sets: [
+        running.sets[0] as RunningSet<string, string>[],
+        [new Map(), new Map(), new Map([["m", "c"]]), new Map([["m", "c"]])],
+      ],
+      firstEntry: new Map([
+        ["b", 0],
+        ["c", 1],
+      ]),
+    };
+    const r = liveReleases({
+      running: two,
+      rules: {
+        optionCount: 1,
+        questions: [{ optionCount: 1, minSelections: 0, maxSelections: 1 }],
+      },
+      batch: 20,
+      openings: [opening(1), opening(2, { cell: 1 })],
+      counted: [new Set(["b"]), new Set(["c"])],
+    });
+    expect(r.openings.map((o) => ("breaks" in o ? o.breaks : null))).toEqual([[], []]);
+    expect(r.rows["7.6"]).toEqual({ status: "pass" });
+    expect(() => judge([opening(2), opening(1)])).toThrow(RangeError);
+    expect(() => judge([opening(1), opening(1)])).toThrow(RangeError);
+  });
+
+  test("7.6 reports an opening that doesn't decode", () => {
+    const r = judge([opening(1), { entry: 2, decodeError: "truncated" }]);
+    expect(r.rows["7.6"]).toEqual({
+      status: "fail",
+      code: "decode",
+      at: { entry: 2, decodeError: "truncated" },
+    });
+    expect(r.openings[1]).toEqual({ entry: 2, code: "decode", decodeError: "truncated" });
   });
 
   test("a stray opening is never checked against a set, and an unattributed one never blames", () => {

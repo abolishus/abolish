@@ -124,7 +124,15 @@ export interface LiveCopy<N extends LiveKey, B extends LiveKey> {
   readonly stepFinalAt: bigint | null;
   /** Whether its membership check (5.1 to 5.3) passes once that step is final. */
   readonly member: boolean;
-  /** Whether it fails an admission check that doesn't read L1 (5.4, 5.5, 5.7). */
+  /**
+   * Whether it fails any admission check but membership, a reference above
+   * the head and an unknown reference: 5.4, 5.5, 5.7, 5.8's other codes
+   * (`l1-ref-before-open`, `l1-ref-after-close`) and a rolling step's
+   * (`root-step-stale`, `root-step-future`). Each of those is fixed whatever
+   * the head, so one left out here would let a ballot enter a running set no
+   * honest node's holds, and every honest seat's opening of that release
+   * would read as over another aggregate (T-29, T-16).
+   */
   readonly rejected: boolean;
   /** The L1 block number its reference names (5.8). */
   readonly reference: bigint;
@@ -210,6 +218,9 @@ export function liveRunning<N extends LiveKey, B extends LiveKey>(input: {
       throw new RangeError("liveRunning: snapshots ascend, their heads never fall");
   }
   const copies = [...input.copies].sort((a, b) => a.entry - b.entry);
+  for (const [i, c] of copies.entries())
+    if (i > 0 && (copies[i - 1] as LiveCopy<N, B>).entry === c.entry)
+      throw new RangeError(`liveRunning: two copies at entry ${c.entry}`);
   const firstEntry = new Map<B, number>();
   for (const c of copies) {
     if (!Number.isInteger(c.cell) || c.cell < 0 || c.cell >= cellTiers.length)
@@ -479,12 +490,13 @@ export interface LiveReleases {
  * is reported against, each release's totals per cell and tier, 7.5's and
  * 7.6's rows, and per cell the final tally's least side against its tier's
  * releases. `counted` is each cell's counted set (7.1), the ballots the
- * final tally counts; `rules` the definition's option total and, where it
- * has them, its questions' limits.
+ * final tally counts; `rules` the definition's option total and its
+ * questions' limits, which every live definition (version 6 or 7) has, the
+ * same rules `runningOpeningFacts` judged the openings with.
  */
 export function liveReleases<N extends LiveKey, B extends LiveKey>(input: {
   readonly running: LiveRunning<N, B>;
-  readonly rules: { readonly optionCount: number; readonly questions?: readonly QuestionRules[] };
+  readonly rules: { readonly optionCount: number; readonly questions: readonly QuestionRules[] };
   readonly batch: number;
   readonly openings: readonly RunningOpeningFacts[];
   readonly counted: readonly ReadonlySet<B>[];
@@ -502,6 +514,12 @@ export function liveReleases<N extends LiveKey, B extends LiveKey>(input: {
     string,
     { opening: string; counts: readonly bigint[]; signer: number | null }[]
   >();
+  // Copy order decides which earlier opening a repeat or second points to
+  // and which passing opening gives a release's counts, so it is enforced,
+  // never assumed (T-29).
+  for (const [i, o] of input.openings.entries())
+    if (i > 0 && (input.openings[i - 1] as RunningOpeningFacts).entry >= o.entry)
+      throw new RangeError("liveReleases: openings must be given in copy order, one per entry");
   const openings = input.openings.map((o): RunningOpeningReport => {
     if ("decodeError" in o) return { entry: o.entry, code: "decode", decodeError: o.decodeError };
     const breaks: RunningBreak[] = [];
@@ -657,7 +675,7 @@ export function liveReleases<N extends LiveKey, B extends LiveKey>(input: {
 function row75(
   cells: readonly CellReleasesReport[],
   passing: ReadonlyMap<string, readonly { opening: string; counts: readonly bigint[] }[]>,
-  rules: { readonly optionCount: number; readonly questions?: readonly QuestionRules[] },
+  rules: { readonly optionCount: number; readonly questions: readonly QuestionRules[] },
 ): ReleaseRow {
   for (const cell of cells)
     for (const release of cell.releases) {
@@ -673,7 +691,7 @@ function row75(
       const option = first.counts.findIndex((v) => v > size);
       if (option !== -1) return { status: "fail", code: "running-range", at: { ...at, option } };
       let start = 0;
-      for (const [question, q] of (rules.questions ?? []).entries()) {
+      for (const [question, q] of rules.questions.entries()) {
         const total = first.counts.slice(start, start + q.optionCount).reduce((s, v) => s + v, 0n);
         if (total < BigInt(q.minSelections) * size || total > BigInt(q.maxSelections) * size)
           return { status: "fail", code: "running-question-range", at: { ...at, question } };

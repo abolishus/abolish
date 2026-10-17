@@ -80,7 +80,21 @@ export type GroupRegistryEvent =
     };
 
 export type GroupRegistryEventsResult =
-  | { readonly ok: true; readonly events: readonly GroupRegistryEvent[] }
+  | {
+      readonly ok: true;
+      readonly events: readonly GroupRegistryEvent[];
+      /**
+       * Each `RegistrarsPinned`, by position: the caller requires it to name
+       * exactly the registrars and threshold its release pins, the ones
+       * counting is judged under (docs/spec/contracts.md, Group registry,
+       * Verification).
+       */
+      readonly pinned: readonly {
+        readonly at: number;
+        readonly threshold: number;
+        readonly registrars: readonly Uint8Array[];
+      }[];
+    }
   | {
       readonly ok: false;
       /** The first record that fails, by its position in the records given. */
@@ -94,13 +108,15 @@ export type GroupRegistryEventsResult =
  * version, through the event check against the group registry
  * (docs/spec/contracts.md, Event check), then `GroupCreated`, `MembersAdded`
  * (with its `firstIndex` topic), `MembersRemoved` and `Tier1MemberAdded` as
- * events at the record's L2 block, and `RegistrarsPinned`, which counts
- * nothing, left out. The first record that fails the check is reported, as
- * 4.4 reports it: the release's registry logs none, so one is a rewritten
- * chain or other bytecode, never a submitter's (T-53, T-71). `records` is the
- * registry's own sequence in order of `n`, every record its, as the event
- * accumulator's replay authenticates it (P4-3); whether it is the
- * registry's whole sequence is that replay's, not this function's.
+ * events at the record's L2 block, and `RegistrarsPinned` returned apart,
+ * for the caller to compare with its pins. The first record that fails the
+ * check is reported, as 4.4 reports it: the release's registry logs none, so
+ * one is a rewritten chain or other bytecode, never a submitter's (T-53,
+ * T-71). `records` is the registry's own sequence in order of `n`, with L2
+ * blocks never decreasing,
+ * as the event accumulator's replay authenticates it (P4-3), so a record out
+ * of that order throws, as the caller's mistake; whether it is the registry's
+ * whole sequence is that replay's, not this function's.
  */
 export function groupRegistryEvents(
   records: readonly ContractEventRecord[],
@@ -110,7 +126,8 @@ export function groupRegistryEvents(
   if (!Array.isArray(records)) throw new TypeError("records: expected an array");
   const registry = bytesArg(groupRegistry, "groupRegistry");
   if (registry.length !== 20) throw new RangeError("groupRegistry: expected 20 bytes");
-  // Only the group registry's role can match: no other address is 0 bytes long.
+  // Only the group registry's address is given; the other roles match nothing
+  // a decoded record carries, since its contract is 20 bytes.
   const none = new Uint8Array(0);
   const contracts = {
     electionRegistry: none,
@@ -119,7 +136,9 @@ export function groupRegistryEvents(
     board: none,
   };
   const events: GroupRegistryEvent[] = [];
+  const pinned: { at: number; threshold: number; registrars: readonly Uint8Array[] }[] = [];
   let lastN = -1n;
+  let lastBlock = 0n;
   for (const [at, record] of records.slice().entries()) {
     if (record === null || typeof record !== "object")
       throw new TypeError(`records[${at}]: expected an object`);
@@ -128,8 +147,14 @@ export function groupRegistryEvents(
     if (typeof record.n !== "bigint" || record.n <= lastN)
       throw new RangeError(`records[${at}]: n must increase`);
     lastN = record.n;
+    if (typeof record.l2_block !== "bigint" || record.l2_block < lastBlock)
+      throw new RangeError(`records[${at}]: l2_block must not decrease`);
+    lastBlock = record.l2_block;
     const checked = checkContractEvent(record, contracts, version);
     if (!checked.ok) return { ok: false, at, error: checked.error };
+    // A hand-built record whose contract matches no 20-byte address could
+    // match an empty role: only the group registry's events are read.
+    if (checked.role !== "group-registry") return { ok: false, at, error: "unknown-contract" };
     const block = record.l2_block;
     const { event } = checked;
     if (event.event === "GroupCreated")
@@ -146,8 +171,11 @@ export function groupRegistryEvents(
       events.push({ kind: "members-removed", block, groupId: event.groupId, record: event.record });
     else if (event.event === "Tier1MemberAdded")
       events.push({ kind: "tier1-addition", block, record: event.record });
+    else if (event.event === "RegistrarsPinned")
+      pinned.push({ at, threshold: event.threshold, registrars: event.registrars });
+    else throw new Error(`records[${at}]: unread group-registry event ${event.event}`);
   }
-  return { ok: true, events };
+  return { ok: true, events, pinned };
 }
 
 /** What a replay is judged under: the release's pins for the registry. */
@@ -322,7 +350,7 @@ function readEvents(events: readonly GroupRegistryEvent[]): GroupRegistryEvent[]
  * Batched verification, Proofs last): only those of additions a walk of the
  * order would count, in batches with coefficients from the CSPRNG
  * (`verifyDecodedMembershipProofs`), each proof at most once, with the walk
- * redone when one fails. So copies of counted additions, which anyone can
+ * redone once when one fails. So copies of counted additions, which anyone can
  * log, cost no pairing, and each proof's verdict is the one checking it alone
  * gives (T-52).
  */
@@ -486,29 +514,33 @@ export function countTier1Additions(
 
   // Proofs last (docs/spec/vouching.md, Batched verification): walk the order
   // taking each addition that passes checks 1 to 8 as counted, then batch the
-  // proofs of those whose proofs aren't checked yet. If every one passes, the
-  // walk stands. Otherwise those that fail are known not to count, and the
-  // walk is redone with that known: an addition that fails consumes nothing,
-  // so a later one may now pass `slot-spent` or `member` and need its own
-  // proofs. A proof's verdict doesn't depend on the walk, so each proof is
-  // checked at most once, and pairings go only to additions some walk would
-  // count, never to copies of counted ones (T-52). On an honest chain no
-  // logged proof fails, so one walk and one batch decide everything.
+  // proofs of the additions it counted. If every one passes, the walk stands.
+  // Otherwise the walk is redone once, now checking each addition's proofs
+  // when it reaches them (those already checked from the batch's verdicts): an
+  // addition that fails consumes nothing, so a later one may now pass
+  // `slot-spent` or `member` and need its own proofs. So there are at most two
+  // walks, whatever a rewritten history logs, each proof is checked at most
+  // once, and pairings go only to additions that reach `proof` in some walk,
+  // never to copies of counted ones (T-52). On an honest chain no logged proof
+  // fails, so one walk and one batch decide everything.
   const proofs = new Map<number, readonly boolean[]>();
-  for (;;) {
-    const walk = walkOrder(pres, proofs);
-    if (walk.unchecked.length === 0) return { ...walk.count, broken };
-    const verdicts = verifyDecodedMembershipProofs(walk.unchecked.flatMap((u) => u.proofs));
-    let next = 0;
-    let failed = false;
-    for (const u of walk.unchecked) {
-      const own = verdicts.slice(next, next + u.proofs.length);
-      next += u.proofs.length;
-      proofs.set(u.pre, own);
-      if (own.includes(false)) failed = true;
-    }
-    if (!failed) return { ...walk.count, broken };
+  const first = walkOrder(pres, (i) => proofs.get(i));
+  const verdicts = verifyDecodedMembershipProofs(first.unchecked.flatMap((u) => u.proofs));
+  let next = 0;
+  for (const u of first.unchecked) {
+    proofs.set(u.pre, verdicts.slice(next, next + u.proofs.length));
+    next += u.proofs.length;
   }
+  if (!verdicts.includes(false)) return { ...first.count, broken };
+  const second = walkOrder(pres, (i, own) => {
+    let known = proofs.get(i);
+    if (known === undefined) {
+      known = verifyDecodedMembershipProofs(own);
+      proofs.set(i, known);
+    }
+    return known;
+  });
+  return { ...second.count, broken };
 }
 
 // An addition after the checks that need no counting state: its verdict, or
@@ -524,14 +556,18 @@ type Pre =
     };
 
 /**
- * One walk of the order: slots and leaves, with each addition's proof
- * verdicts taken from `proofs` (by its position in `pres`) where they are
- * known and taken as passing where not. `unchecked` lists the additions the
- * walk counted on unchecked proofs; when it is empty, the walk is the count.
+ * One walk of the order: slots and leaves, with an addition's proof verdicts
+ * asked of `verdictsOf` (by its position in `pres`) only once it passes
+ * checks 1 to 8, and taken as passing where it gives none. `unchecked` lists
+ * the additions the walk counted on proofs it had no verdicts for; when it is
+ * empty, the walk is the count.
  */
 function walkOrder(
   pres: readonly Pre[],
-  proofs: ReadonlyMap<number, readonly boolean[]>,
+  verdictsOf: (
+    pre: number,
+    proofs: readonly MembershipProofCheck[],
+  ) => readonly boolean[] | undefined,
 ): {
   readonly count: Omit<Tier1Count, "broken">;
   readonly unchecked: readonly {
@@ -564,7 +600,7 @@ function walkOrder(
       decide({ ok: false, error: "member" });
       continue;
     }
-    const own = proofs.get(i);
+    const own = verdictsOf(i, p.proofs);
     const failure = own === undefined ? null : proofFailure(own);
     if (failure !== null) {
       decide(failure);

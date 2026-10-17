@@ -1,4 +1,5 @@
 import { keccak_256 } from "@noble/hashes/sha3.js";
+import fc from "fast-check";
 import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, test, vi } from "vite-plus/test";
 import type { ContractEventRecord, GroupRegistryEvent } from "../src/index.ts";
@@ -13,6 +14,11 @@ import { SPEC_VECTORS } from "./spec-vectors.ts";
 // the code under test (T-52, T-38, T-71).
 
 const checked: number[] = [];
+// When set, the proofs' verdicts come from it instead of the pairing check,
+// and every check object given is recorded, so a property can choose which
+// proofs fail and see that none is checked twice.
+let fake: ((nullifier: bigint) => boolean) | null = null;
+const given: object[] = [];
 
 vi.mock("../src/membership-proof.ts", async (importOriginal) => {
   const real = await importOriginal<typeof import("../src/membership-proof.ts")>();
@@ -22,7 +28,10 @@ vi.mock("../src/membership-proof.ts", async (importOriginal) => {
       checks: Parameters<typeof real.verifyDecodedMembershipProofs>[0],
     ) => {
       checked.push(checks.length);
-      return real.verifyDecodedMembershipProofs(checks);
+      if (fake === null) return real.verifyDecodedMembershipProofs(checks);
+      const verdict = fake;
+      given.push(...checks);
+      return checks.map((c) => verdict(c.signals.nullifier));
     },
   };
 });
@@ -116,6 +125,8 @@ function exchangedProofs(record: Uint8Array): Uint8Array {
 
 beforeEach(() => {
   checked.length = 0;
+  given.length = 0;
+  fake = null;
 });
 
 describe("countTier1Additions checks proofs last", () => {
@@ -160,6 +171,70 @@ describe("countTier1Additions checks proofs last", () => {
     // The first walk counts the copy and leaves the original slot-spent.
     expect(checked).toEqual([2 * VOUCH_K, 2 * VOUCH_K]);
   });
+
+  test(
+    "gives the reference order's verdicts whichever proofs fail, checking each proof at most once",
+    { timeout: 600_000 },
+    () => {
+      // Copies of the deployment's first counted addition, at its block, with
+      // commitments and slot nullifiers drawn from small pools so that slots and
+      // commitments overlap; a slot proof fails when its nullifier is in `bad`.
+      // Every check before `slot-spent` passes, so the reference is the walk
+      // with each proof checked as the addition reaches it.
+      const original = tier1(13);
+      const prefix = all.slice(0, 13);
+      const field = (v: bigint) => hex(v.toString(16).padStart(64, "0"));
+      const vouchAt = (j: number) => 41 + VOUCH_LENGTH * j;
+      const variant = (commitment: bigint, slots: readonly bigint[]) => {
+        const r = original.record.slice();
+        r.set(field(commitment), 8);
+        for (const [j, n] of slots.entries()) r.set(field(n), vouchAt(j) + 82);
+        return { ...original, record: r };
+      };
+      const addition = fc.record({
+        commitment: fc.integer({ min: 0, max: 2 }).map((c) => 1000n + BigInt(c)),
+        slots: fc.uniqueArray(fc.integer({ min: 1, max: 6 }).map(BigInt), {
+          minLength: VOUCH_K,
+          maxLength: VOUCH_K,
+        }),
+      });
+      fc.assert(
+        fc.property(
+          fc.array(addition, { minLength: 1, maxLength: 8 }),
+          fc.uniqueArray(fc.integer({ min: 1, max: 6 }).map(BigInt), { maxLength: 6 }),
+          (list, badList) => {
+            const bad = new Set(badList);
+            checked.length = 0;
+            given.length = 0;
+            fake = (n) => !bad.has(n);
+            const got = countTier1Additions(
+              [...prefix, ...list.map((a) => variant(a.commitment, a.slots))],
+              ctx,
+            );
+            fake = null;
+            const spent = new Set<bigint>();
+            const members = new Set<bigint>();
+            const expected = list.map((a) => {
+              const reused = a.slots.findIndex((n) => spent.has(n));
+              if (reused >= 0) return { ok: false, error: "slot-spent", vouch: reused };
+              if (members.has(a.commitment)) return { ok: false, error: "member" };
+              const failing = a.slots.findIndex((n) => bad.has(n));
+              if (failing >= 0) return { ok: false, error: "proof", vouch: failing, which: "slot" };
+              for (const n of a.slots) spent.add(n);
+              members.add(a.commitment);
+              return { ok: true, index: members.size - 1 };
+            });
+            expect(got.additions.map((a) => a.verdict)).toMatchObject(expected);
+            expect(new Set(given).size).toBe(given.length);
+            expect(checked.length).toBeLessThanOrEqual(1 + list.length);
+          },
+        ),
+        // Each run decodes up to eight additions' 18 points, about 0.2 s, so a
+        // tenth of FC_NUM_RUNS: 100 runs under CI's 1000.
+        { numRuns: Math.max(20, Number(process.env.FC_NUM_RUNS ?? 100) / 10) },
+      );
+    },
+  );
 
   test("an honest replay takes one batch", () => {
     const got = countTier1Additions(all.slice(0, 14), ctx);
@@ -246,7 +321,9 @@ describe("groupRegistryEvents", () => {
   test("reads the registry's logs as the events counting takes", { timeout: 120_000 }, () => {
     const read = groupRegistryEvents(logs, ctx.registry, 6);
     if (!read.ok) throw new Error(`refused at ${read.at}: ${read.error}`);
-    // RegistrarsPinned counts nothing; each addition carries its topic.
+    // RegistrarsPinned is returned apart, for the caller to compare with its
+    // pins; each addition carries its topic.
+    expect(read.pinned).toEqual([{ at: 0, threshold: ctx.threshold, registrars: ctx.registrars }]);
     expect(read.events).toEqual(
       loggable.map((e) =>
         e.kind === "members-added" ? { ...e, firstIndex: u64At(e.record, 8) } : e,
@@ -274,10 +351,12 @@ describe("groupRegistryEvents", () => {
   test("an event the registry never logs fails the event check", () => {
     for (const u of unloggable) {
       const e = all[u] as GroupRegistryEvent & { record: Uint8Array };
-      const log = logOf(e.kind === "members-added" ? { ...e, firstIndex: 0n } : e, logs.length);
-      expect(groupRegistryEvents([...logs, log], ctx.registry, 6)).toEqual({
+      // Logged in its place: after the RegistrarsPinned and the events before it.
+      const at = newAt(u) + 1;
+      const log = logOf(e.kind === "members-added" ? { ...e, firstIndex: 0n } : e, at);
+      expect(groupRegistryEvents([...logs.slice(0, at), log], ctx.registry, 6)).toEqual({
         ok: false,
-        at: logs.length,
+        at,
         error: "event-data",
       });
     }
@@ -295,6 +374,34 @@ describe("groupRegistryEvents", () => {
     expect(got.broken).toEqual({ at, block: e.block, groupId: e.groupId, reason: "position" });
     // Without the topic the same record replays: only the topic broke it.
     expect(countTier1Additions(loggable.slice(0, at + 1), ctx).broken).toBeNull();
+  });
+
+  test("a replay failure at an earlier record comes before a topic, and a topic before its own record's", () => {
+    // Events 2 and 12 are group 7's two additions; event 2's last approval is
+    // tampered, so its replay fails at event 2.
+    const adds = [2, 12];
+    for (const i of adds) expect(all[i]?.kind).toBe("members-added");
+    const first = all[2] as GroupRegistryEvent & { kind: "members-added" };
+    const tampered = first.record.slice();
+    tampered.set([(tampered.at(-10) as number) ^ 1], tampered.length - 10);
+    const base = all.slice(0, 14).map((e, i) => (i === 2 ? { ...first, record: tampered } : e));
+    const replayed = countTier1Additions(base, ctx).broken;
+    expect(replayed).toMatchObject({ at: 2, groupId: 7n });
+    expect(replayed?.reason).not.toBe("position");
+    const withTopic = (i: number, delta: bigint) =>
+      base.map((e, j) => {
+        if (j !== i || e.kind !== "members-added") return e;
+        return { ...e, firstIndex: u64At(e.record, 8) + delta };
+      });
+    // A moved topic at the later addition: the earlier replay failure stands.
+    expect(countTier1Additions(withTopic(12, 1n), ctx).broken).toEqual(replayed);
+    // A moved topic on the failing record itself: the topic is checked first.
+    expect(countTier1Additions(withTopic(2, 1n), ctx).broken).toEqual({
+      ...replayed,
+      reason: "position",
+    });
+    // A matching topic changes nothing.
+    expect(countTier1Additions(withTopic(2, 0n), ctx).broken).toEqual(replayed);
   });
 
   test("reports the first record that fails the event check, by position", () => {
@@ -336,6 +443,10 @@ describe("groupRegistryEvents", () => {
       groupRegistryEvents([logs[0], logs[0]] as ContractEventRecord[], ctx.registry, 6),
     ).toThrow(RangeError);
     expect(() => groupRegistryEvents(logs, new Uint8Array(0), 6)).toThrow(RangeError);
-    expect(groupRegistryEvents([], ctx.registry, 6)).toEqual({ ok: true, events: [] });
+    expect(groupRegistryEvents([], ctx.registry, 6)).toEqual({ ok: true, events: [], pinned: [] });
+    const later = { ...(logs[1] as ContractEventRecord), n: 5n, l2_block: 0n };
+    expect(() =>
+      groupRegistryEvents([logs[1] as ContractEventRecord, later], ctx.registry, 6),
+    ).toThrow(RangeError);
   });
 });

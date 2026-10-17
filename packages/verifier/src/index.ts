@@ -8,6 +8,7 @@ export {
   type BlocksBundle,
   BundleError,
   type CeremonyBundle,
+  type CidRead,
   type DefinitionBundle,
   type InputSource,
   type InputSources,
@@ -51,7 +52,8 @@ export {
 export { type CeremonyCode, type CeremonyReport } from "./ceremony.ts";
 export { CHECKS, type CheckKind, type CheckSpec } from "./checks.ts";
 export { type CliOutput, EXIT_CODES, runCli } from "./cli.ts";
-export { readBundle } from "./files.ts";
+export { readBlockStore, type BlockStore } from "./blocks.ts";
+export { DEFAULT_MAX_BOARD_BYTES, loadBundle, readBundle } from "./files.ts";
 export {
   anchorsFromState,
   checkpointSlot,
@@ -78,6 +80,7 @@ export {
   type CheckStatus,
   type Report,
   REPORT_FORMAT,
+  readBoardByCid,
   type Verdict,
   verifyBundle,
 } from "./verify.ts";

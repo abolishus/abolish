@@ -28,7 +28,7 @@ export interface VerifierRun {
 export function runVerifier(bundleDir: string): VerifierRun {
   const script = [
     `import { runCli } from ${JSON.stringify(VERIFIER.href)};`,
-    "process.exitCode = runCli(process.argv.slice(1), {",
+    "process.exitCode = await runCli(process.argv.slice(1), {",
     "  stdout: (t) => process.stdout.write(t),",
     "  stderr: (t) => process.stderr.write(t),",
     "});",

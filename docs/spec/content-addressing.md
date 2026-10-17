@@ -49,4 +49,4 @@ An object whose length no signed record fixes but only bounds, a board segment o
 ## Still to come
 
 - Archive manifests and their Arweave layout: P4-3.
-- Fetching by CID over the network (P4-6 and the verifier): a fetcher MUST stop reading an answer past 1 MiB, before allocating more (Reading by CID), and check the object it reads against the L1-anchored roots (T-49, T-24). Segment objects are read within their checkpoints' bound (Reading within a bound; [[board]], A copy from L1's CIDs); the verifier's sources over the network are [[P4-3]]'s next part.
+- Fetching by CID over the network (P4-6 and the verifier): a fetcher MUST stop reading an answer past 1 MiB, before allocating more (Reading by CID), and check the object it reads against the L1-anchored roots (T-49, T-24). Segment objects are read within their checkpoints' bound (Reading within a bound; [[board]], A copy from L1's CIDs); the verifier reads them from a local block store ([[verifier]], Board by CID), and its sources over the network are [[P4-3]]'s next part.

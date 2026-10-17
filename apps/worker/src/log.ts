@@ -13,6 +13,7 @@ import type {
   CreationFailure,
   Tier0GroupOutcome,
 } from "@abolishus/core";
+import type { OutputRootErrorCode } from "@abolishus/verifier";
 import type { QueueSpec } from "./queues.ts";
 
 export interface JobLogLine {
@@ -78,7 +79,8 @@ export interface BallotL1Line {
 
 /**
  * What a registry sync found: the index or a log refused (`incomplete`,
- * `event-check`), a registration or definition the database refused, or a
+ * `event-check`), the L2 node's answers refused under the output root
+ * (`output-root`), a registration or definition the database refused, or a
  * registration recorded without its definition. Every value is public chain
  * data (T-10).
  */
@@ -97,6 +99,11 @@ export type RegistrySyncLine =
       readonly queue: "{registry-sync}";
       readonly finding: "definition";
       readonly reason: "conflict";
+    }
+  | {
+      readonly queue: "{registry-sync}";
+      readonly finding: "output-root";
+      readonly reason: OutputRootErrorCode | "l2-block";
     }
   | {
       readonly queue: "{registry-sync}";

@@ -9,7 +9,8 @@ import postgres from "postgres";
 import { BaseError, createPublicClient, http } from "viem";
 import * as z from "zod";
 import { registrySyncFromEnv, REGISTRY_SYNC_ENV } from "./registry-env.ts";
-import { RegistrySync, ViemRegistryAccumulator } from "./registry-sync.ts";
+import { DisputeGameRoots, ProvenRegistryAccumulator } from "./output-roots.ts";
+import { RegistrySync } from "./registry-sync.ts";
 import { connectTier0Bundler } from "./tier0-bundler.ts";
 import { ViemL1Source } from "./l1-source.ts";
 import { checkPollCreationDeployment, ViemPollCreationChain } from "./poll-create-chain.ts";
@@ -223,10 +224,10 @@ if (tier0Config !== undefined) {
   };
 }
 
-// The registry sync (P3-5 part 3a), only when configured: it reads the
-// indexer's database as a role that can only read it, and starts only once
-// the L2 node is on the configured chain. viem's errors quote the node's
-// URL, and postgres' can quote the index's, so neither is reported.
+// The registry sync (P3-5 parts 3a and 3b), only when configured: it reads
+// the indexer's database as a role that can only read it, and starts only
+// once the L1 and L2 nodes are on the configured chains. viem's errors quote
+// the nodes' URLs, and postgres' can quote the index's, so none is reported.
 let registry: WorkerOptions["registry"];
 let index: postgres.Sql | undefined;
 const registryConfig = registrySyncFromEnv(
@@ -236,12 +237,19 @@ if (registryConfig !== undefined) {
   const c = registryConfig;
   let accumulator;
   try {
-    accumulator = await ViemRegistryAccumulator.connect(
+    const roots = await DisputeGameRoots.connect(
+      createPublicClient({ transport: http(c.l1RpcUrl, { timeout: 30_000 }) }),
+      c.l1ChainId,
+      c.gameFactory,
+      c.gameType,
+    );
+    accumulator = await ProvenRegistryAccumulator.connect(
       createPublicClient({ transport: http(c.l2RpcUrl, { timeout: 30_000 }) }),
       c.chainId,
+      roots,
     );
   } catch (e) {
-    if (e instanceof BaseError) throw new Error("the registry sync couldn't reach the L2 node");
+    if (e instanceof BaseError) throw new Error("the registry sync couldn't reach its nodes");
     throw e;
   }
   const bytes = (a: string) => Uint8Array.from(Buffer.from(a.slice(2), "hex"));

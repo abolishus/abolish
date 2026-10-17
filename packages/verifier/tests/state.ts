@@ -52,7 +52,7 @@ function hexPrefix(path: readonly number[], leaf: boolean): Uint8Array {
 const nibbles = (b: Uint8Array) => [...b].flatMap((x) => [x >> 4, x & 0x0f]);
 
 /** The secure trie of `entries`: its root and every node 32 bytes or longer. */
-function buildTrie(entries: readonly (readonly [Uint8Array, Uint8Array])[]) {
+export function buildTrie(entries: readonly (readonly [Uint8Array, Uint8Array])[]) {
   const nodes: Uint8Array[] = [];
   const reference = (node: Uint8Array): Item => {
     if (node.length < 32) return { encoded: node };
@@ -95,7 +95,7 @@ const word = (n: bigint) => {
   for (let i = 31, x = n; x > 0n; i--, x >>= 8n) b[i] = Number(x & 0xffn);
   return b;
 };
-const stored = (w: Uint8Array) => rlp(w.subarray(w.findIndex((x) => x !== 0)));
+export const stored = (w: Uint8Array) => rlp(w.subarray(w.findIndex((x) => x !== 0)));
 
 /**
  * The `l1` member of a format-2 to 5 bundle whose anchor at `anchor` holds a

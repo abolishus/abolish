@@ -12,30 +12,22 @@ import { Redis } from "ioredis";
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import type { Sql } from "postgres";
+import { ACCUMULATOR_SLOT, OutputRootError } from "@abolishus/verifier";
 import {
   bytesToHex,
-  createPublicClient,
-  custom,
   encodeAbiParameters,
   type Hex,
   hexToBigInt,
   keccak256,
   stringToHex,
-  toHex,
 } from "viem";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
-import {
-  ACCUMULATOR_SLOT,
-  type LogLine,
-  RegistrySync,
-  startWorker,
-  ViemRegistryAccumulator,
-} from "../src/index.ts";
+import { type LogLine, type RegistryAccumulator, RegistrySync, startWorker } from "../src/index.ts";
 
-// The registry sync (src/registry-sync.ts; P3-5 part 3a): the L2 node's
-// adapter reads the registry's accumulator at its finalized head from the
-// spec's slots, and the sync records from an index only what that
-// accumulator vouches for, through core (T-71, T-34's RPC residual).
+// The registry sync (src/registry-sync.ts; P3-5 parts 3a and 3b): it records
+// from an index only what the proven accumulator vouches for, through core,
+// and a node whose answers don't prove under the output root fails the job
+// as a finding (T-71, T-34).
 
 const CHAIN = 84_532n;
 const redisUrl = process.env["REDIS_URL"];
@@ -101,51 +93,23 @@ const recordOf = (registry: Hex, log: Log, n: number): ContractEventRecord => ({
 });
 
 /**
- * An L2 node whose finalized head is `finalized` and whose registry storage
- * holds the accumulator over the logs at or below it. `calls` records each
- * request.
+ * The registry's accumulator over its logs at or below the block `at()`
+ * returns, as the output-root adapter proves it (tests/output-roots.test.ts
+ * tests the proof).
  */
-function nodeOf(
-  registry: Hex,
-  logs: () => readonly Log[],
-  options: { chainId?: bigint; finalized: () => bigint; count?: Hex },
-) {
-  const calls: { method: string; params: unknown }[] = [];
-  const client = createPublicClient({
-    transport: custom({
-      async request({ method, params }: { method: string; params?: unknown }) {
-        calls.push({ method, params });
-        if (method === "eth_chainId") return toHex(options.chainId ?? CHAIN);
-        if (method === "eth_getBlockByNumber") {
-          const n = options.finalized();
-          return {
-            number: toHex(n),
-            hash: toHex(n, { size: 32 }),
-            parentHash: toHex(n - 1n, { size: 32 }),
-            timestamp: toHex(1_800_000_000n + n),
-            transactions: [],
-            logsBloom: null,
-            nonce: null,
-          };
-        }
-        if (method === "eth_getStorageAt") {
-          const [address, slot, block] = params as [Hex, Hex, Hex];
-          if (address.toLowerCase() !== registry) return toHex(0n, { size: 32 });
-          const upTo = logs().filter((l) => l.block <= hexToBigInt(block));
-          const state = replayEventAccumulator(
-            CHAIN,
-            Buffer.from(registry.slice(2), "hex"),
-            upTo.map((l, i) => contractEventLog(recordOf(registry, l, i))),
-          );
-          if (hexToBigInt(slot) === ACCUMULATOR_SLOT) return bytesToHex(state.accumulator);
-          if (hexToBigInt(slot) === ACCUMULATOR_SLOT + 1n)
-            return options.count ?? toHex(state.count, { size: 32 });
-        }
-        throw new Error(`unexpected ${method}`);
-      },
-    }),
-  });
-  return { client, calls };
+function accumulatorOf(registry: Hex, logs: () => readonly Log[], at: () => bigint) {
+  return {
+    async proven() {
+      const block = at();
+      const upTo = logs().filter((l) => l.block <= block);
+      const state = replayEventAccumulator(
+        CHAIN,
+        Buffer.from(registry.slice(2), "hex"),
+        upTo.map((l, i) => contractEventLog(recordOf(registry, l, i))),
+      );
+      return { block, ...state };
+    },
+  };
 }
 
 test("the accumulator's slot is the spec's ERC-7201 derivation", () => {
@@ -159,37 +123,6 @@ test("the accumulator's slot is the spec's ERC-7201 derivation", () => {
       ),
     ) & ~0xffn;
   expect(ACCUMULATOR_SLOT).toBe(derived);
-});
-
-describe("the L2 node's adapter", () => {
-  const registry = addr();
-  const logs: Log[] = [{ block: 5n, logIndex: 0, ...registration(5n) }];
-
-  test("reads both slots at the finalized head, by number", async () => {
-    const { client, calls } = nodeOf(registry, () => logs, { finalized: () => 7n });
-    const node = await ViemRegistryAccumulator.connect(client, CHAIN);
-    const proven = await node.finalized(registry);
-    expect(proven.block).toBe(7n);
-    expect(proven.count).toBe(1n);
-    expect(calls.filter((c) => c.method === "eth_getStorageAt").map((c) => c.params)).toEqual([
-      [registry, toHex(ACCUMULATOR_SLOT, { size: 32 }), toHex(7n)],
-      [registry, toHex(ACCUMULATOR_SLOT + 1n, { size: 32 }), toHex(7n)],
-    ]);
-  });
-
-  test("refuses a node on another chain", async () => {
-    const { client } = nodeOf(registry, () => logs, { chainId: 1n, finalized: () => 7n });
-    await expect(ViemRegistryAccumulator.connect(client, CHAIN)).rejects.toThrow("another chain");
-  });
-
-  test("refuses a count that isn't a u64", async () => {
-    const { client } = nodeOf(registry, () => logs, {
-      finalized: () => 7n,
-      count: toHex(1n << 64n, { size: 32 }),
-    });
-    const node = await ViemRegistryAccumulator.connect(client, CHAIN);
-    await expect(node.finalized(registry)).rejects.toThrow("isn't a u64");
-  });
 });
 
 let db: TestDb;
@@ -232,7 +165,7 @@ async function indexed(n: number) {
   return { registry, logs };
 }
 
-function syncOf(registry: Hex, node: ViemRegistryAccumulator) {
+function syncOf(registry: Hex, node: RegistryAccumulator) {
   return new RegistrySync({
     sql: app,
     index: db.admin,
@@ -258,14 +191,50 @@ const positions = async (from: bigint) =>
       WHERE l2_block >= ${from.toString()} ORDER BY l2_block, log_index`
   ).map((r) => [hex(r.election_id), BigInt(r.l2_block), r.log_index]);
 
+/** Runs the scheduled job once through a worker, and returns its log lines and Redis keys. */
+async function scheduledRun(sync: RegistrySync) {
+  const lines: LogLine[] = [];
+  const prefix = `abolish-test-${hex(randomBytes(6))}`;
+  const connection = new Redis(redisUrl!, { maxRetriesPerRequest: null });
+  const worker = await startWorker({
+    connection,
+    sql: app,
+    log: (l) => lines.push(l),
+    auditEveryMs: 3_600_000,
+    prefix,
+    registry: { sync, everyMs: 3_600_000 },
+  });
+  let keys: string[];
+  try {
+    for (
+      let i = 0;
+      i < 200 && !lines.some((l) => l.queue === "{registry-sync}" && "outcome" in l);
+      i++
+    )
+      await new Promise((r) => setTimeout(r, 25));
+    keys = await connection.keys(`${prefix}:{registry-sync}:*`);
+  } finally {
+    await worker.close();
+    for (const key of await connection.keys(`${prefix}:*`)) await connection.del(key);
+    connection.disconnect();
+  }
+  return { lines, keys };
+}
+
 describe("the sync", () => {
-  test("records the index's registrations up to the finalized head, with their positions", async () => {
+  test("records the index's registrations up to the proven block, with their positions", async () => {
     const { registry, logs } = await indexed(4);
-    let finalized = logs[1]!.block;
-    const { client } = nodeOf(registry, () => logs, { finalized: () => finalized });
-    const sync = syncOf(registry, await ViemRegistryAccumulator.connect(client, CHAIN));
+    let proven = logs[1]!.block;
+    const sync = syncOf(
+      registry,
+      accumulatorOf(
+        registry,
+        () => logs,
+        () => proven,
+      ),
+    );
     expect(await sync.run()).toEqual({ recorded: 2, unstored: [] });
-    finalized = logs[3]!.block;
+    proven = logs[3]!.block;
     expect(await sync.run()).toEqual({ recorded: 2, unstored: [] });
     expect(await positions(logs[0]!.block)).toEqual(
       logs.map((l) => [hex(l.electionId), l.block, l.logIndex]),
@@ -273,41 +242,41 @@ describe("the sync", () => {
     for (const l of logs) expect(await readDefinition(app, l.electionId)).toEqual(l.definition);
   });
 
-  test("an index missing a log the node's accumulator counts records nothing, and the job says so", async () => {
+  test("an index missing a log the proven accumulator counts records nothing, and the job says so", async () => {
     const { registry, logs } = await indexed(2);
     await db.admin`
       DELETE FROM ${db.admin(index)}.contract_log WHERE id = ${`${registry}-000000`}`;
-    const { client } = nodeOf(registry, () => logs, { finalized: () => logs[1]!.block });
-    const sync = syncOf(registry, await ViemRegistryAccumulator.connect(client, CHAIN));
-    const lines: LogLine[] = [];
-    const prefix = `abolish-test-${hex(randomBytes(6))}`;
-    const connection = new Redis(redisUrl!, { maxRetriesPerRequest: null });
-    const worker = await startWorker({
-      connection,
-      sql: app,
-      log: (l) => lines.push(l),
-      auditEveryMs: 3_600_000,
-      prefix,
-      registry: { sync, everyMs: 3_600_000 },
-    });
-    let keys: string[];
-    try {
-      for (
-        let i = 0;
-        i < 200 && !lines.some((l) => l.queue === "{registry-sync}" && "outcome" in l);
-        i++
-      )
-        await new Promise((r) => setTimeout(r, 25));
-      keys = await connection.keys(`${prefix}:{registry-sync}:*`);
-    } finally {
-      await worker.close();
-      for (const key of await connection.keys(`${prefix}:*`)) await connection.del(key);
-      connection.disconnect();
-    }
+    const sync = syncOf(
+      registry,
+      accumulatorOf(
+        registry,
+        () => logs,
+        () => logs[1]!.block,
+      ),
+    );
+    const { lines, keys } = await scheduledRun(sync);
     // Its queue's keys are under its own hash tag.
     expect(keys.length).toBeGreaterThan(0);
     expect(lines.filter((l) => l.queue === "{registry-sync}")).toEqual([
       { queue: "{registry-sync}", finding: "incomplete", reason: "accumulator" },
+      {
+        queue: "{registry-sync}",
+        outcome: "failed",
+        error: "registry-sync-refused",
+        ms: expect.any(Number),
+      },
+    ]);
+    expect(await positions(logs[0]!.block)).toEqual([]);
+  });
+
+  test("an L2 node whose answers don't prove under the output root fails the job as a finding", async () => {
+    const { registry, logs } = await indexed(1);
+    const sync = syncOf(registry, {
+      proven: () => Promise.reject(new OutputRootError("output-root")),
+    });
+    const { lines } = await scheduledRun(sync);
+    expect(lines.filter((l) => l.queue === "{registry-sync}")).toEqual([
+      { queue: "{registry-sync}", finding: "output-root", reason: "output-root" },
       {
         queue: "{registry-sync}",
         outcome: "failed",

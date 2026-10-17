@@ -303,6 +303,7 @@ export {
   deriveTierCells,
   firstOccurrence,
   foldRegions,
+  regionCounts,
   type TierElectorateMismatch,
   tierElectorateMismatch,
 } from "./regional-cells.ts";
@@ -392,6 +393,7 @@ export {
 export {
   checkMembershipZkey,
   finishMembershipProof,
+  identityCommitment,
   membershipProverInput,
   MembershipProverError,
   type MembershipProverErrorCode,
@@ -401,10 +403,19 @@ export {
 } from "./membership-prover.ts";
 export { poseidon2 } from "./poseidon.ts";
 export {
+  type GroupRegistryPins,
+  type TierMembership,
+  tierMembership,
+  TierMembershipError,
+  type TierMembershipErrorCode,
+} from "./tier-membership.ts";
+export {
   replayTierGroup,
   TIER_TREE_MAX_LEAVES,
   type TierGroupEvent,
   type TierGroupReplay,
+  type TierTreeMemberPath,
+  tierTreeMemberPath,
   tierTreePath,
   tierTreeRoot,
   tierTreeZeros,

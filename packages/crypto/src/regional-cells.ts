@@ -66,6 +66,23 @@ export function firstOccurrence(groups: readonly (readonly bigint[])[]): bigint[
   );
 }
 
+/**
+ * Each region's member count over its groups' leaves after first occurrence
+ * (`counted`, in the tier's group order): the nonzero leaves of the groups in
+ * it. The one count both the verifier (`deriveTierCells`) and the ballot
+ * client (`tierMembership`) compare with a definition's `regions`.
+ */
+export function regionCounts(
+  tier: Pick<TierElectorate, "groups" | "regions">,
+  counted: readonly (readonly bigint[])[],
+): bigint[] {
+  const regions = tier.regions.map(() => 0n);
+  for (const [i, g] of tier.groups.entries())
+    for (const leaf of counted[i] ?? [])
+      if (leaf !== 0n) regions[g.region] = (regions[g.region] as bigint) + 1n;
+  return regions;
+}
+
 export interface DerivedCell {
   /** The cell's regions, by index in the tier's `regions`. */
   readonly regions: readonly number[];
@@ -109,10 +126,7 @@ export function deriveTierCells(
     return leaves;
   });
   const leaves = firstOccurrence(raw);
-  const counted = (xs: readonly bigint[]) => BigInt(xs.reduce((n, x) => (x === 0n ? n : n + 1), 0));
-  const regions = tier.regions.map(() => 0n);
-  for (const [i, g] of tier.groups.entries())
-    regions[g.region] = (regions[g.region] as bigint) + counted(leaves[i] as bigint[]);
+  const regions = regionCounts(tier, leaves);
   const cells = foldRegions(regions).map((cellRegions): DerivedCell => {
     const inCell = new Set(cellRegions);
     const at = tier.groups.flatMap((g, i) => (inCell.has(g.region) ? [i] : []));

@@ -9,6 +9,7 @@ import {
   poseidon2,
   replayTierGroup,
   type TierGroupEvent,
+  tierTreeMemberPath,
   tierTreePath,
   tierTreeRoot,
   tierTreeZeros,
@@ -272,5 +273,83 @@ describe("TierTreeBuilder", () => {
     expect(() => tree.remove(1)).toThrow(RangeError);
     tree.remove(0);
     expect(tree.root()).toBe(tierTreeRoot([0n]));
+  });
+});
+
+describe("tierTreeMemberPath", () => {
+  /** An iterable that can be read once only, as a stream of leaves is. */
+  const once = (leaves: readonly bigint[]): Iterable<bigint> => {
+    let read = false;
+    return {
+      *[Symbol.iterator]() {
+        if (read) throw new Error("read twice");
+        read = true;
+        yield* leaves;
+      },
+    };
+  };
+
+  test("gives the independent implementation's siblings and root, from a stream", () => {
+    let checked = 0;
+    for (const t of vectors.trees) {
+      const leaves = t.leaves.map(decimal);
+      for (const p of t.paths) {
+        const leaf = leaves[p.index] as bigint;
+        // The stream finds a commitment's first leaf; other paths are tierTreePath's.
+        if (leaf === 0n || leaves.indexOf(leaf) !== p.index) continue;
+        expect(tierTreeMemberPath(once(leaves), leaf), `${t.id}[${p.index}]`).toEqual({
+          index: p.index,
+          siblings: p.siblings.map(decimal),
+          root: decimal(t.root),
+        });
+        checked++;
+      }
+    }
+    expect(checked).toBeGreaterThanOrEqual(10);
+  });
+
+  test(
+    "equals tierTreePath and tierTreeRoot for any leaves and member, at every size around a power of two",
+    { timeout: 120_000 },
+    () => {
+      const sizes = [1, 2, 3, 4, 5, 7, 8, 9, 15, 16, 17, 31, 32, 33, 64, 65];
+      fc.assert(
+        fc.property(
+          fc.constantFrom(...sizes),
+          fc.array(fc.oneof(member, fc.constant(0n)), { minLength: 65, maxLength: 65 }),
+          fc.nat(),
+          (size, pool, pick) => {
+            const leaves = pool.slice(0, size);
+            const i = pick % size;
+            const target = leaves[i] === 0n ? 2n : (leaves[i] as bigint);
+            leaves[i] = target;
+            const first = leaves.indexOf(target);
+            expect(tierTreeMemberPath(once(leaves), target)).toEqual({
+              index: first,
+              siblings: tierTreePath(leaves, first),
+              root: tierTreeRoot(leaves),
+            });
+          },
+        ),
+        { numRuns: Math.min(numRuns, 100) },
+      );
+    },
+  );
+
+  test("finds the first of repeated leaves, and nothing for a commitment that isn't a leaf", () => {
+    const leaves = [5n, 7n, 0n, 7n, 9n];
+    expect(tierTreeMemberPath(leaves, 7n)?.index).toBe(1);
+    expect(tierTreeMemberPath(leaves, 11n)).toBeUndefined();
+    expect(tierTreeMemberPath([], 7n)).toBeUndefined();
+  });
+
+  test("rejects leaves tierTreeRoot rejects, and members that can't be leaves", () => {
+    for (const bad of [1n, POSEIDON2_ZERO_ONE, BN254_R, -1n])
+      expect(() => tierTreeMemberPath([5n, bad], 5n), String(bad)).toThrow(RangeError);
+    expect(() => tierTreeMemberPath([5n, 1 as never], 5n)).toThrow(RangeError);
+    for (const bad of [0n, 1n, POSEIDON2_ZERO_ONE, BN254_R])
+      expect(() => tierTreeMemberPath([5n], bad), String(bad)).toThrow(RangeError);
+    expect(() => tierTreeMemberPath(5n as never, 5n)).toThrow(TypeError);
+    expect(() => tierTreeMemberPath(null as never, 5n)).toThrow(TypeError);
   });
 });

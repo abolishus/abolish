@@ -34,7 +34,7 @@ import {
   u32,
 } from "./codec.ts";
 import type { RegisteredKeys } from "./ceremony.ts";
-import { objectCid } from "./content-addressing.ts";
+import { objectCid, readObject } from "./content-addressing.ts";
 import { ds } from "./domain-separation.ts";
 import { H } from "./group.ts";
 import { inclusionProof, merkleRoot, type TreeHash, verifyInclusion } from "./merkle.ts";
@@ -1512,9 +1512,9 @@ export interface DeliveryCheck {
   readonly rejected: readonly { readonly at: number; readonly error: DecodeErrorCode }[];
   /**
    * Obligation roots the check couldn't read from what it was given: an
-   * available root whose leaf object no source served with the bytes its CID
-   * names, or, without `roots`, any root that reaches the bound. When any is
-   * listed the counted set isn't decided from these sources, never failed:
+   * available root some block of whose leaf object no source served, or,
+   * without `roots`, any root that reaches the bound. When any is listed
+   * the counted set isn't decided from these sources, never failed:
    * `ballots` and `records` are then empty (docs/spec/delivery.md, Leaf
    * availability, Fetched; T-53, T-24).
    */
@@ -1541,12 +1541,13 @@ export interface DeliveryRoots {
     readonly roots: readonly Uint8Array[];
   }[];
   /**
-   * What the sources served for a leaf object's CID, each source's bytes
-   * whole, in the order tried: the first whose canonical CID is `cid` is read,
-   * and bytes that don't give it are a failed fetch from that source, never a
-   * verdict on the root.
+   * What the sources served for one block of a leaf object, by the block's
+   * CID, each source's answer in the order tried, with the most bytes the
+   * block can have, where a fetcher stops reading: the first answer within
+   * it that hashes to the CID is read, and any other is a failed fetch from
+   * that source, never a verdict on the root (`readObject`).
    */
-  leafObjects(cid: Uint8Array): readonly Uint8Array[];
+  leafBlocks(cid: Uint8Array, limit: number): readonly Uint8Array[];
 }
 
 /** A seat of either panel: version 1's records and ballots name only default seats. */
@@ -1661,7 +1662,7 @@ interface RootReader {
     readonly namedBy: readonly number[];
     readonly attestedWithout: readonly number[];
   };
-  leafObjects(cid: Uint8Array): readonly Uint8Array[];
+  leafBlocks(cid: Uint8Array, limit: number): readonly Uint8Array[];
 }
 
 /** Where in a record a report or proven complaint is: a batch's pair or a root's leaf. */
@@ -1894,24 +1895,22 @@ function deliveryCheck(
       });
       return;
     }
-    // A source's bytes that don't give the CID are its failed fetch; if none
-    // gives it, the election is unverifiable from these sources, never the
-    // root inconsistent, so no source changes a root's verdict (T-53, T-24).
-    // No CID names empty bytes, which objectCid refuses, so an empty answer
-    // is a failed fetch too, never an exception that stops the check. Bytes
-    // of another length are still hashed: a CID the seat signed over an
-    // object that isn't `count` leaves is its root-inconsistent.
-    const object = roots
-      .leafObjects(record.leaves_cid)
-      .find(
-        (o) =>
-          o instanceof Uint8Array && o.length > 0 && sameBytes(objectCid(o), record.leaves_cid),
-      );
-    if (object === undefined) {
+    // Block by block, only along the canonical DAG of `count` leaves, so no
+    // seat makes a verifier read more than its root's object. A block no
+    // source serves leaves the election unverifiable from these sources,
+    // never the root inconsistent, so no source changes a root's verdict
+    // (T-53, T-24); blocks that hash but don't form that object (another
+    // length, chunking or layout) are the seat's, as the CID it signed.
+    const fetched = readObject(
+      record.leaves_cid,
+      ROOT_LEAF_LENGTH[record.kind] * record.count,
+      (cid, limit) => roots.leafBlocks(cid, limit),
+    );
+    if (!fetched.ok && fetched.reason === "unavailable") {
       unverifiable.push({ at });
       return;
     }
-    const read = readLeafObject(record.kind, record.count, object);
+    const read = fetched.ok ? readLeafObject(record.kind, record.count, fetched.bytes) : undefined;
     if (read === undefined || !sameBytes(merkleRoot(OBLIGATION_TREE, read.bytes), record.root)) {
       records.push({ at, code: "root-inconsistent", signer: d.seat, ...seat });
       return;
@@ -2263,8 +2262,8 @@ function rootReader(roots: DeliveryRoots, registered: readonly RegisteredKeys[])
   const q = registered.length;
   if (!Number.isSafeInteger(threshold) || threshold < 1 || threshold > q)
     throw new RangeError(`${name}: the threshold must be from 1 to the qualified seats`);
-  if (typeof roots.leafObjects !== "function")
-    throw new RangeError(`${name}: leafObjects must be a function`);
+  if (typeof roots.leafBlocks !== "function")
+    throw new RangeError(`${name}: leafBlocks must be a function`);
   const qualified = new Set(registered.map((k) => k.index));
   const named = new Map<number, Set<string>>();
   for (const a of attestations) {
@@ -2286,7 +2285,7 @@ function rootReader(roots: DeliveryRoots, registered: readonly RegisteredKeys[])
         attestedWithout: attesting.filter((s) => named.get(s)?.has(h) !== true),
       };
     },
-    leafObjects: (cid) => roots.leafObjects(Uint8Array.from(cid)),
+    leafBlocks: (cid, limit) => roots.leafBlocks(Uint8Array.from(cid), limit),
   };
 }
 

@@ -1024,6 +1024,8 @@ export {
   MAX_LINKS,
   objectCar,
   objectCid,
+  type ObjectRead,
+  readObject,
 } from "./content-addressing.ts";
 export {
   ALIAS_OFFSET,

@@ -28,6 +28,7 @@ import {
   POSEIDON2_ZERO_ONE,
   REMOVE_MEMBERS_TYPE,
   removeMembersStructHash,
+  signGroupApproval,
 } from "../src/index.ts";
 import { hex, SPEC_VECTORS } from "./spec-vectors.ts";
 
@@ -308,10 +309,11 @@ describe("group-registry vectors", () => {
       ).toEqual({ ok: true });
       for (const a of v.approvals) {
         expect(a.signer).toBe(vectors.registrars.addresses[a.seat - 1]);
-        // The vectors' signatures are reproduced byte for byte by RFC 6979.
-        expect(sign(hex(vectors.registrars.secretKeys[a.seat - 1] ?? ""), digest, a.seat)).toEqual(
-          approvalOf(a),
-        );
+        // The vectors' signatures are reproduced byte for byte by RFC 6979,
+        // by the test's own signer and by the signing service's.
+        const key = hex(vectors.registrars.secretKeys[a.seat - 1] ?? "");
+        expect(sign(key, digest, a.seat)).toEqual(approvalOf(a));
+        expect(signGroupApproval(digest, a.seat, key)).toEqual(approvalOf(a));
       }
     });
   });
@@ -346,9 +348,9 @@ describe("group-registry vectors", () => {
       ).toEqual({ ok: true });
       for (const a of v.approvals) {
         expect(a.signer).toBe(vectors.registrars.addresses[a.seat - 1]);
-        expect(sign(hex(vectors.registrars.secretKeys[a.seat - 1] ?? ""), digest, a.seat)).toEqual(
-          approvalOf(a),
-        );
+        const key = hex(vectors.registrars.secretKeys[a.seat - 1] ?? "");
+        expect(sign(key, digest, a.seat)).toEqual(approvalOf(a));
+        expect(signGroupApproval(digest, a.seat, key)).toEqual(approvalOf(a));
       }
     });
   });
@@ -358,6 +360,46 @@ describe("group-registry vectors", () => {
     expect(result).toEqual(
       v.seat === undefined ? { error: v.error } : { error: v.error, seat: v.seat },
     );
+  });
+});
+
+describe("signGroupApproval", () => {
+  const SECRETS = vectors.registrars.secretKeys.map(hex);
+  const digest = hex(vectors.additions[0]?.digest ?? "");
+
+  test("gives an approval the pinned set accepts, at any seat the signer holds", () => {
+    fc.assert(
+      fc.property(fc.uint8Array({ minLength: 32, maxLength: 32 }), (d) => {
+        const approvals = SECRETS.map((key, i) => signGroupApproval(d, i + 1, key));
+        expect(checkGroupApprovals(d, approvals, REGISTRARS, THRESHOLD)).toEqual({ ok: true });
+        for (const a of approvals) {
+          // Low-s and an expressible v, as the registry requires.
+          expect(a.s <= (secp256k1.Point.Fn.ORDER - 1n) / 2n).toBe(true);
+          expect([27, 28]).toContain(a.v);
+        }
+      }),
+      { numRuns },
+    );
+  }, 120_000);
+
+  test("leaves the caller's key unchanged", () => {
+    const key = SECRETS[0] as Uint8Array;
+    const before = key.slice();
+    signGroupApproval(digest, 1, key);
+    expect(key).toEqual(before);
+  });
+
+  test("refuses a seat outside 1 to 16, a digest or key of the wrong length, and an invalid key", () => {
+    const key = SECRETS[0] as Uint8Array;
+    for (const seat of [0, -1, 17, 1.5, Number.NaN])
+      expect(() => signGroupApproval(digest, seat, key)).toThrow(RangeError);
+    expect(() => signGroupApproval(digest.subarray(1), 1, key)).toThrow(TypeError);
+    expect(() => signGroupApproval(digest, 1, key.subarray(1))).toThrow(TypeError);
+    expect(() => signGroupApproval(digest, 1, new Uint8Array(32))).toThrow();
+    const order = new Uint8Array(32);
+    let n = secp256k1.Point.Fn.ORDER;
+    for (let i = 31; i >= 0; i--, n >>= 8n) order[i] = Number(n & 0xffn);
+    expect(() => signGroupApproval(digest, 1, order)).toThrow();
   });
 });
 

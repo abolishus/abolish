@@ -2,7 +2,7 @@
 // Answers and Queue; ADR 0024, option B). A request is checked in the
 // spec's order, cheapest first, so a malformed or unserviceable one never
 // spends the voter's Turnstile token; then one Redis script queues its
-// commitment for its region's group. The batch job (P3-2 part 4d-2) signs
+// commitment for its region's group. The batch job (tier0-batch.ts) signs
 // what is queued.
 //
 // T-10, T-11, T-13: nothing here sees a header, cookie or address, and the
@@ -55,7 +55,15 @@ export interface Tier0Redis {
  *   group, signed or self-paid;
  * - `inflight`: a set of the commitments in any group's in-flight batch;
  * - `indexed`: the UNIX time, in seconds, at which the index was last brought
- *   up to the L2 node's latest block.
+ *   up to the L2 node's latest block;
+ * - `held`: a hash from `group_id` to the boundaries in a row at which its
+ *   short queue was held (absent for 0);
+ * - `batches`: a hash from `group_id` to its in-flight addition record (hex);
+ * - `positions`: a hash from `group_id` to the lowest position the batch job
+ *   may still sign, past every record of ours that landed;
+ * - `boundary`: the number of the last period whose boundary ran;
+ * - `next`: the index being rebuilt, swapped in for `live` once whole;
+ * - `lock`: the batch job's lock, so one runner at a time writes the rest.
  *
  * Every commitment, in `queue`, `live` and `inflight` alike, is written as
  * `commitmentKey` writes it (64 lowercase hex digits), or a membership test
@@ -64,8 +72,8 @@ export interface Tier0Redis {
  * batch job's selections, drops and returns) changes `sizes` in the same
  * script, since the queue's bound rests on it (T-52).
  *
- * The index and the in-flight batches are kept by the batch job; the route
- * only reads them.
+ * The index, the in-flight batches and `held` are kept by the batch job
+ * (tier0-batch.ts); the route only reads `live`, `inflight` and `indexed`.
  */
 export function tier0Keys(prefix = "abolish") {
   // A brace in the prefix would change the hash tag, scattering the keys
@@ -78,6 +86,12 @@ export function tier0Keys(prefix = "abolish") {
     live: at("live"),
     inflight: at("inflight"),
     indexed: at("indexed"),
+    held: at("held"),
+    batches: at("batches"),
+    positions: at("positions"),
+    boundary: at("boundary"),
+    next: at("next"),
+    lock: at("lock"),
   } as const;
 }
 

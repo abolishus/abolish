@@ -98,6 +98,22 @@ export {
   TURNSTILE_SITEVERIFY,
 } from "./turnstile.ts";
 export {
+  MAX_REGISTRATION_HOLD,
+  MIN_REGISTRATION_BATCH,
+  REGISTRATION_PERIOD,
+  selectUniformly,
+  TIER0_BATCH_LOCK_MS,
+  type Tier0BatchOptions,
+  Tier0Batches,
+  type Tier0Chain,
+  type Tier0GroupOutcome,
+  type Tier0GroupReport,
+  type Tier0GroupState,
+  Tier0LockError,
+  type Tier0LoggedAddition,
+  type Tier0Signer,
+} from "./tier0-batch.ts";
+export {
   commitmentKey,
   parseTier0Request,
   REGISTRATION_QUEUE_MAX,

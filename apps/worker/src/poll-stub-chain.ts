@@ -21,7 +21,7 @@ import {
   type PollStubDeployment,
   pollStubDeploymentRule,
 } from "@abolishus/core";
-import { type ContractEventVersion, panelId, RECORD_TYPES } from "@abolishus/crypto";
+import { type ContractEventVersion, electionId, panelId, RECORD_TYPES } from "@abolishus/crypto";
 import {
   type Address,
   bytesToHex,
@@ -84,21 +84,36 @@ export async function pollStubDeployment(
         blockNumber,
       }),
     );
-  const [board, trusteeRegistry, groupRegistry, l1Anchor, l1Relay, l1ChainId] = await Promise.all([
-    registry("board"),
-    registry("trusteeRegistry"),
-    registry("groupRegistry"),
-    registry("l1Anchor"),
-    registry("l1Relay"),
-    read("an election registry", () =>
-      client.readContract({
-        address: pins.electionRegistry,
-        abi: electionRegistryAbi,
-        functionName: "l1ChainId",
-        blockNumber,
-      }),
-    ),
-  ]);
+  const [first, board, trusteeRegistry, groupRegistry, l1Anchor, l1Relay, l1ChainId] =
+    await Promise.all([
+      read("an election registry", () =>
+        client.readContract({
+          address: pins.electionRegistry,
+          abi: electionRegistryAbi,
+          functionName: "electionIdAt",
+          args: [0n],
+          blockNumber,
+        }),
+      ),
+      registry("board"),
+      registry("trusteeRegistry"),
+      registry("groupRegistry"),
+      registry("l1Anchor"),
+      registry("l1Relay"),
+      read("an election registry", () =>
+        client.readContract({
+          address: pins.electionRegistry,
+          abi: electionRegistryAbi,
+          functionName: "l1ChainId",
+          blockNumber,
+        }),
+      ),
+    ]);
+  // Numbered as the release's registry numbers them, as the creation step
+  // checks too, so the stubs' registry is one with the release's rules.
+  const want = electionId(pins.chainId, hexToBytes(getAddress(pins.electionRegistry)), 0n);
+  if (first.toLowerCase() !== bytesToHex(want))
+    throw new Error("the registry numbers its elections for another chain or address");
   for (const [name, held, named] of [
     ["board", board, pins.board],
     ["trustee registry", trusteeRegistry, pins.trusteeRegistry],
@@ -126,7 +141,8 @@ export async function pollStubDeployment(
   const rule = pollStubDeploymentRule(deployment);
   if (rule !== undefined) throw new Error(`the stub's deployment breaks its rule: ${rule}`);
   // The identifier binds the threshold, the size and every key in seat
-  // order, so a panel pinned under it is this panel (T-37).
+  // order, so a non-empty entry under it is this panel (T-37); the
+  // threshold and size are compared as well, at no cost.
   const [threshold, size] = await read("a trustee registry", () =>
     client.readContract({
       address: pins.trusteeRegistry,

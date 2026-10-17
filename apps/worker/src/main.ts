@@ -105,6 +105,8 @@ if (
     env.BALLOT_ANCHOR_PERIOD,
     ...TIER0_ENV.map((name) => process.env[name]),
     ...REGISTRY_SYNC_ENV.map((name) => process.env[name]),
+    ...POLL_ROOT_ENV.map((name) => process.env[name]),
+    ...POLL_STUB_ENV.map((name) => process.env[name]),
   ].some((v) => v !== undefined && v !== "")
 )
   throw new Error("a worker holding the creation key runs nothing else");

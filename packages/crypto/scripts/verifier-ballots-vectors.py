@@ -511,10 +511,10 @@ def build(constants):
         "mixed",
     )
     # Contract-event version 6, which every profile here pins: beside its
-    # ballots the board carries other events of the election's checks, the
-    # board's obligation root and, for an election naming a Tier 1 group, the
-    # group registry's counted Tier 1 additions (verifier.md, 4.4). Each
-    # passes the event check, and admission reads none of them.
+    # ballots the board carries other events: the board's obligation root,
+    # and a Tier 1 addition of the group registry, which an election boards
+    # for the Tier 1 groups it lists (verifier.md, 4.4). Each passes the
+    # event check, and admission reads none of them.
     d_e6, t_e6, e_e6 = election_for("events-v6", [1, 2, 3])
     v6_ok0 = ballot("events-v6-tier-0", e_e6, 0, nullifier("tier-0", 0, e_e6, 0), [0, 1, 0], zero4)
     p_v6_ok0 = prove("events-v6-tier-0", "tier-0", 0, e_e6, 0, v6_ok0)
@@ -523,7 +523,7 @@ def build(constants):
     v6_inside = d_e6["opens_at"] + 3600
     bundle(
         "events-v6",
-        "Contract-event version 6, which every profile pins: a board-path ballot; an ordinary one inside the window; the board's ObligationRootSubmitted naming the definition (delivery-root.json's receipt root, its definition hash replaced); the group registry's Tier1MemberAdded carrying vouch.json's honest addition, as an election naming a Tier 1 group boards each of the group's counted additions (4.4); and an ordinary copy of the first ballot inside the window, a repeat. Both other records pass the event check and carry no ballot, so admission reads neither.",
+        "Contract-event version 6, which every profile pins: a board-path ballot; an ordinary one inside the window; the board's ObligationRootSubmitted naming the definition (delivery-root.json's receipt root, its definition hash replaced); the group registry's Tier1MemberAdded carrying vouch.json's honest addition, whose group this definition doesn't list, so it is no required entry and fails nothing (4.4, Tier 1 boarding); and an ordinary copy of the first ballot inside the window, a repeat. Both other records pass the event check and carry no ballot, so admission reads neither.",
         d_e6, t_e6, e_e6, [1, 2, 3],
         [
             t_e6,

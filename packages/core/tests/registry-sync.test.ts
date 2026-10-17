@@ -11,11 +11,12 @@ import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import fc from "fast-check";
 import type { Sql } from "postgres";
-import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, test } from "vite-plus/test";
 import {
   type IndexedLog,
   latestRegistration,
   readDefinition,
+  recordRegistration,
   RegistrationError,
   type RegistryDeployment,
   RegistrySyncError,
@@ -159,13 +160,21 @@ async function refusal(p: Promise<unknown>): Promise<[string, string]> {
   throw new Error("sync succeeded");
 }
 
+// A database of its own for each test (and each property run): a deployment
+// has one registry, and the sync refuses a table holding another's.
 let db: TestDb;
 let app: Sql;
-beforeAll(async () => {
-  db = await testDb();
+let open: TestDb | undefined;
+async function reset() {
+  await open?.close();
+  open = db = await testDb();
   app = await db.as("abolish_app");
+}
+beforeEach(reset);
+afterEach(async () => {
+  await open?.close();
+  open = undefined;
 });
-afterAll(() => db?.close());
 
 /** The registrations recorded after `block`, in chain order. */
 const recordedSince = async (block: bigint) =>
@@ -249,6 +258,7 @@ describe("records what the accumulator vouches for", () => {
         fc.array(fc.boolean(), { minLength: 1, maxLength: 8 }),
         fc.array(fc.nat(), { minLength: 1, maxLength: 4 }),
         async (kinds, cuts) => {
+          await reset();
           const d = deployment();
           const emitted = kinds.map((reg, i) =>
             reg ? registered(definition(), BigInt(i)) : created(b(32), BigInt(i)),
@@ -271,9 +281,10 @@ describe("records what the accumulator vouches for", () => {
           expect((await recordedSince(start)).map((r) => r.position)).toEqual(expected);
         },
       ),
-      { numRuns: Math.min(numRuns, 50) },
+      // Each run migrates a database of its own.
+      { numRuns: Math.min(numRuns, 25) },
     );
-  });
+  }, 120_000);
 });
 
 describe("refuses an index the accumulator doesn't vouch for, recording nothing", () => {
@@ -335,6 +346,82 @@ describe("refuses an index the accumulator doesn't vouch for, recording nothing"
   });
 });
 
+describe("refuses an index or a table it can't line up", () => {
+  test("two registrations in one block with their log indices swapped", async () => {
+    const d = deployment();
+    const start = nextBlock;
+    const logs = logsOf(d, [registered(definition(), 1n), registered(definition(), 1n)]);
+    // One block, the two logs' indices in the order the index claims.
+    const block = logs[0]!.record.l2_block;
+    const swapped = logs.map((l, i) => ({
+      record: { ...l.record, l2_block: block },
+      logIndex: i === 0 ? 7 : 4,
+    }));
+    expect(await refusal(syncRegistrations(app, d, swapped, provenAll(d, swapped)))).toEqual([
+      "incomplete",
+      "log-index",
+    ]);
+    expect(await recordedSince(start)).toEqual([]);
+    const ordered = swapped.map((l, i) => ({ ...l, logIndex: i === 0 ? 4 : 7 }));
+    expect(await syncRegistrations(app, d, ordered, provenAll(d, ordered))).toEqual({
+      recorded: 2,
+      unstored: [],
+    });
+    expect((await recordedSince(start)).map((r) => r.position)).toEqual([
+      `${block}/4`,
+      `${block}/7`,
+    ]);
+  });
+
+  test("another registry's logs over a table holding this one's registrations", async () => {
+    const d = deployment();
+    const first = logsOf(d, [registered(definition(), 1n)]);
+    await syncRegistrations(app, d, first, provenAll(d, first));
+    const other = deployment();
+    const start = nextBlock;
+    const logs = logsOf(other, [registered(definition(), 1n), registered(definition(), 2n)]);
+    expect(await refusal(syncRegistrations(app, other, logs, provenAll(other, logs)))).toEqual([
+      "recorded",
+      "other-registrations",
+    ]);
+    expect(await recordedSince(start)).toEqual([]);
+  });
+
+  test("an index whose latest recorded registration moved in its block", async () => {
+    const d = deployment();
+    const logs = logsOf(d, [
+      registered(definition(), 1n),
+      registered(definition(), 2n),
+      registered(definition(), 3n),
+    ]);
+    await syncRegistrations(app, d, logs.slice(0, 2), provenAll(d, logs.slice(0, 2)));
+    const start = logs[2]!.record.l2_block;
+    // The latest recorded registration at another index in its block.
+    const moved = logs.map((l, i) => (i === 1 ? { ...l, logIndex: l.logIndex + 1 } : l));
+    expect(await refusal(syncRegistrations(app, d, moved, provenAll(d, moved)))).toEqual([
+      "recorded",
+      "other-registrations",
+    ]);
+    expect(await recordedSince(start)).toEqual([]);
+  });
+  test("a table holding a registration the registry's logs don't", async () => {
+    await recordRegistration(app, {
+      electionId: b(32),
+      definitionHash: b(32),
+      l2Block: 1n,
+      logIndex: 0,
+    });
+    const d = deployment();
+    const start = nextBlock;
+    const logs = logsOf(d, [registered(definition(), 1n)]);
+    expect(await refusal(syncRegistrations(app, d, logs, provenAll(d, logs)))).toEqual([
+      "recorded",
+      "other-registrations",
+    ]);
+    expect(await recordedSince(start)).toEqual([]);
+  });
+});
+
 describe("stops at a log the event check refuses", () => {
   const cases: [string, (good: Emitted) => Emitted, string][] = [
     ["an unknown event", (e) => ({ ...e, topics: [b(32), ...e.topics.slice(1)] }), "unknown-event"],
@@ -371,7 +458,7 @@ describe("stops at a log the event check refuses", () => {
     }));
     expect(await refusal(syncRegistrations(app, d, logs, provenAll(d, logs)))).toEqual([
       "event-check",
-      "unknown-event",
+      "other-contract",
     ]);
     expect(await recordedSince(start)).toEqual([]);
   });
@@ -379,12 +466,15 @@ describe("stops at a log the event check refuses", () => {
   test("a registration filing its definition under another election", async () => {
     const d = deployment();
     const start = nextBlock;
-    const logs = logsOf(d, [registered(definition(), 1n, b(32))]);
+    const def = definition();
+    const logs = logsOf(d, [registered(def, 1n, b(32))]);
     expect(await refusal(syncRegistrations(app, d, logs, provenAll(d, logs)))).toEqual([
       "event-check",
       "other-election",
     ]);
     expect(await recordedSince(start)).toEqual([]);
+    // Refused before anything is written.
+    expect(await readDefinition(app, decodeElectionDefinition(def).election_id)).toBeUndefined();
   });
 
   test("a registration the table refuses stops the run with its error", async () => {

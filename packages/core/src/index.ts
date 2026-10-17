@@ -197,6 +197,7 @@ export {
   reviewReports,
 } from "./reports.ts";
 export {
+  countRegistrations,
   latestRegistration,
   lookupShortCode,
   recordRegistration,

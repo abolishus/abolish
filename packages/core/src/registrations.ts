@@ -7,7 +7,7 @@
 // take an earlier poll's code (T-53).
 
 import { decodeElectionDefinition, electionDefinitionHash } from "@abolishus/crypto";
-import { desc, eq } from "drizzle-orm";
+import { count, desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import type { Sql } from "postgres";
 import { isBytes } from "./bytes.ts";
@@ -114,6 +114,12 @@ export async function recordRegistration(client: Sql, registration: Registration
   // A concurrent recorder can still get in first: the table's constraints and
   // append trigger then refuse this insert with the database's own error.
   await db.insert(r).values({ electionId: id, definitionHash: hash, l2Block, logIndex });
+}
+
+/** How many registrations are recorded. */
+export async function countRegistrations(client: Sql): Promise<number> {
+  const [row] = await drizzle({ client }).select({ n: count() }).from(electionRegistrations);
+  return row?.n ?? 0;
 }
 
 /** The position of the latest recorded registration, or `undefined` when none is. */

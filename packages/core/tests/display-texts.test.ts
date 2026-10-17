@@ -281,7 +281,24 @@ describe("serving", () => {
     }
   });
 
-  test("the newest ground decides: a threat hide re-cited as personal data is withheld", async () => {
+  test("a personal-data or illegal hide re-cited as a threat stays withheld", async () => {
+    for (const reason of ["illegal", "personal-data"]) {
+      const { id } = await withText(10);
+      await moderate(app, id, mod("hide", reason));
+      await moderate(app, id, mod("hide", "threat"));
+      expect(await served(id), reason).toEqual({ served: "withheld" });
+    }
+  });
+
+  test("only the grounds since the last change of state count", async () => {
+    const { id } = await withText(10);
+    await moderate(app, id, mod("hide", "personal-data"));
+    await moderate(app, id, mod("restore", "error"));
+    await moderate(app, id, mod("hide", "threat"));
+    expect((await served(id))?.served).toBe("text");
+  });
+
+  test("a threat hide re-cited as personal data is withheld from then on", async () => {
     const { id } = await withText(10);
     await moderate(app, id, mod("hide", "threat"));
     expect((await served(id))?.served).toBe("text");

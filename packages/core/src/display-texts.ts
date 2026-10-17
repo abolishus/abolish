@@ -7,8 +7,8 @@
 //
 // What is served follows the moderation policy (docs/moderation-policy.md,
 // Open polls; T-68): a hidden poll's text is withheld, except a poll hidden
-// as a `threat` while ballots can still land, whose text the ballot client
-// keeps showing under a notice. The text stays in this table until the
+// only as a `threat` while ballots can still land, whose text the ballot
+// client keeps showing under a notice. The text stays in this table until the
 // unpinning job deletes it (P4-3).
 
 import {
@@ -17,13 +17,13 @@ import {
   electionDefinitionHash,
   type ShowRefusal,
 } from "@abolishus/crypto";
-import { eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import type { Sql } from "postgres";
 import { isBytes } from "./bytes.ts";
-import { displayTexts } from "./db/schema/index.ts";
+import { displayTexts, moderationActions } from "./db/schema/index.ts";
 import { readDefinition } from "./definitions.ts";
-import { moderationStatus } from "./moderation.ts";
+import { REMOVAL_REASONS } from "./moderation.ts";
 
 export type DisplayTextErrorCode =
   /** No definition is stored for the election, so nothing to check the text against. */
@@ -101,9 +101,13 @@ export async function storeDisplayText(
 /**
  * The text the API serves for `electionId` at `now` (UNIX seconds), or
  * `undefined` if no definition is stored for it. A hidden poll's text is
- * withheld unless its newest decision cites `threat` and ballots can still
- * land: until `closes_at` plus `l1_inclusion_bound`, the window in which
- * `moderate` refuses any other hide (docs/moderation-policy.md, Open polls).
+ * withheld unless ballots can still land (until `closes_at` plus
+ * `l1_inclusion_bound`, the window in which `moderate` refuses any other
+ * hide) and every ground cited since it was hidden is `threat`: a re-citation
+ * adds a ground rather than replacing one, so text hidden as `personal-data`
+ * or `illegal` stays withheld however it is re-cited, and a `threat` hide
+ * re-cited under either is withheld from then on (docs/moderation-policy.md,
+ * Open polls and Reasons).
  */
 export async function readServedDisplayText(
   client: Sql,
@@ -114,13 +118,23 @@ export async function readServedDisplayText(
   const id = new Uint8Array(electionId);
   const definition = await readDefinition(client, id);
   if (definition === undefined) return undefined;
-  const { state, latest } = await moderationStatus(client, id);
-  if (state === "hidden") {
+  const db = drizzle({ client });
+  // Within a run of one state each ground is cited once (`moderate`), so a
+  // run of hides holds at most one row per removal reason.
+  const recent = await db
+    .select({ action: moderationActions.action, reason: moderationActions.reason })
+    .from(moderationActions)
+    .where(eq(moderationActions.electionId, id))
+    .orderBy(desc(moderationActions.seq))
+    .limit(REMOVAL_REASONS.length + 1);
+  const end = recent.findIndex((r) => r.action !== "hide");
+  const hiddenRun = end === -1 ? recent : recent.slice(0, end);
+  if (hiddenRun.length > 0) {
     const def = decodeElectionDefinition(definition);
     const open = now < def.closes_at + BigInt(def.l1_inclusion_bound);
-    if (!(open && latest?.reason === "threat")) return { served: "withheld" };
+    if (!(open && hiddenRun.every((r) => r.reason === "threat"))) return { served: "withheld" };
   }
-  const [row] = await drizzle({ client })
+  const [row] = await db
     .select({ displayText: displayTexts.displayText })
     .from(displayTexts)
     .where(eq(displayTexts.electionId, id));

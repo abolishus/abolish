@@ -314,8 +314,12 @@ export function createApiServer({
       try {
         if (carriesAccountCredential(req)) return refuse(res, 400);
         if (route === "unmatched") return refuse(res, 404);
-        if (req.method === "OPTIONS")
+        if (req.method === "OPTIONS") {
+          // A preflight carries no input, so no body either (T-31).
+          if (req.headers["content-length"] !== undefined || req.headers["transfer-encoding"])
+            return refuse(res, 400);
           return preflight(req, res, route.slice("OPTIONS ".length), allowed);
+        }
         if (req.method === "POST") {
           // A POST takes its input from the body alone, so nothing that keys on
           // the URL (a cache, a rate limiter) sees a different request (T-31).

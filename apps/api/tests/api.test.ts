@@ -315,6 +315,18 @@ describe("CORS for the ballot client", () => {
         (await preflight(path, client, method, headers)).status,
       ]).toEqual([path, method, headers, 403]);
     expect((await preflight("/nope", client, "GET")).status).toBe(404);
+    expect((await preflight("/ballots", client, "POST", "content-type, CONTENT-TYPE")).status).toBe(
+      204,
+    );
+  });
+
+  test("a preflight with a body is refused", async () => {
+    const r = await fetch(`${corsBase}/ballots`, {
+      method: "OPTIONS",
+      headers: { origin: client, "access-control-request-method": "POST" },
+      body: "{}",
+    });
+    expect(r.status).toBe(400);
   });
 
   test("a preflight is logged under its route from the fixed list", async () => {

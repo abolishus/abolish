@@ -36,6 +36,7 @@ import {
   type BallotCheckV2,
   type BallotCode,
   type BallotCore,
+  type CellBallotCoreV4,
   ballotElection,
   type BallotStep,
   type BallotV2Code,
@@ -118,7 +119,10 @@ export interface BallotsReport {
 export interface AdmittedCore {
   readonly entry: number;
   readonly segment: number;
-  readonly core: Pick<BallotCore, "definitionHash" | "vss">;
+  /** Under ballot version 4, both halves: an opening opens either (T-14, T-47). */
+  readonly core:
+    | Pick<BallotCore, "definitionHash" | "vss">
+    | Pick<CellBallotCoreV4, "definitionHash" | "vss" | "authorVss">;
 }
 
 /**
@@ -592,14 +596,12 @@ export function steppedJudgeFor(
     const election = panelBallotElection(definition.value, registered);
     return (payload) => {
       const record = decodeBallot(payload, 4);
-      const vss = record.committed_vote.vss;
+      const { vss, author_vss: authorVss } = record.committed_vote;
       return {
-        core: { definitionHash: record.definition_hash, vss },
+        core: { definitionHash: record.definition_hash, vss, authorVss },
         step: stepBallotV4(election, record),
         // The tally (7.1 to 7.3) and the delivery check (5.9) don't read
-        // ballot version 4 yet (counted.ts); 6.2 under opening version 3
-        // isn't reached (openings.ts), so `core` stands only for the default
-        // half until P2-16 part 4b-2 compares openings with both halves.
+        // ballot version 4 yet (counted.ts).
         tally: { cell: record.cell, vss },
       };
     };

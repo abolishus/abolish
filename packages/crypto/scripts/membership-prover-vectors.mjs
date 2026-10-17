@@ -140,8 +140,10 @@ async function prove(name, note, member, treeId, index) {
     member,
     tree: treeId,
     message: message.toString("hex"),
-    // What Semaphore's generateProof hands snarkjs's fullProve for this path:
-    // a full 32-sibling path, so `merkleProofLength` is 32.
+    // The circuit inputs generateProof builds from this path (its
+    // `fullProve` call, packages/proof/src/generate-proof.ts), whose proof
+    // Semaphore's verifyProof accepted: a full 32-sibling path, so
+    // `merkleProofLength` is 32.
     input: {
       secret: String(identity.secretScalar),
       merkleProofLength: String(siblings.length),

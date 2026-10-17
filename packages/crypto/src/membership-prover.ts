@@ -12,7 +12,7 @@
 
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex, randomBytes } from "@noble/hashes/utils.js";
-import { BN254_R } from "./codec.ts";
+import { BN254_R, EncodeError } from "./codec.ts";
 import { isIdentitySecret } from "./identity-backup.ts";
 import { BJJ_G } from "./keyed-nullifier.ts";
 import { MEMBERSHIP_DEPTH, membershipScope, semaphoreField } from "./membership.ts";
@@ -90,9 +90,13 @@ export interface MembershipProverInput {
 const BUILT = new WeakSet<MembershipProverInput>();
 
 function secretScalar(secret: Uint8Array): bigint {
-  if (!isIdentitySecret(secret)) throw new MembershipProverError("secret");
+  // Copied first, so the bytes checked are the bytes read.
+  const copy =
+    secret instanceof Uint8Array && ArrayBuffer.isView(secret) ? new Uint8Array(secret) : null;
+  if (copy === null || !isIdentitySecret(copy)) throw new MembershipProverError("secret");
   let s = 0n;
-  for (const b of new Uint8Array(secret)) s = (s << 8n) | BigInt(b);
+  for (const b of copy) s = (s << 8n) | BigInt(b);
+  copy.fill(0);
   return s;
 }
 
@@ -209,7 +213,14 @@ export function finishMembershipProofWith(
     throw new MembershipProverError("proof");
   const t = scalar(draw, 1n);
   const u = scalar(draw, 0n);
-  const out = rerandomiseMembershipProof(bytes, t, u);
+  let out: Uint8Array;
+  try {
+    out = rerandomiseMembershipProof(bytes, t, u);
+  } catch (e) {
+    // B' or C' the identity, with probability about 2^-254.
+    if (e instanceof EncodeError) throw new MembershipProverError("rerandomised");
+    throw e;
+  }
   if (!verifyMembershipProof(out, input.signals)) throw new MembershipProverError("rerandomised");
   return out;
 }

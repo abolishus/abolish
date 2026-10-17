@@ -1,3 +1,4 @@
+import { bn254 } from "@noble/curves/bn254.js";
 import fc from "fast-check";
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vite-plus/test";
@@ -13,6 +14,7 @@ import {
   type MembershipProverErrorCode,
   membershipScope,
   type MembershipStatement,
+  membershipVkEncoding,
   poseidon2,
   semaphoreField,
   tierTreePath,
@@ -298,16 +300,30 @@ describe("finishing a proof", () => {
     expect(Buffer.from(out).equals(Buffer.from(proof))).toBe(true);
   });
 
-  test("re-randomises as (t⁻¹·A, t·B + t·u·δ₂, C + u·A): valid for any scalars, and A' depends only on t", () => {
-    const a = decodeMembershipProof(proof).a;
+  test("re-randomises as (t⁻¹·A, t·B + t·u·δ₂, C + u·A), valid for any scalars", () => {
+    const { a, b, c } = decodeMembershipProof(proof);
+    // δ₂ from the pinned key's encoding: alpha (64 bytes), beta and gamma
+    // (128 each), then delta, each coordinate imaginary part first.
+    const vk = membershipVkEncoding();
+    const at = (i: number) => BigInt(`0x${Buffer.from(vk.subarray(i, i + 32)).toString("hex")}`);
+    const delta = bn254.G2.Point.fromAffine({
+      x: bn254.fields.Fp2.create({ c0: at(352), c1: at(320) }),
+      y: bn254.fields.Fp2.create({ c0: at(416), c1: at(384) }),
+    });
     fc.assert(
       fc.property(
         fc.bigInt({ min: 1n, max: BN254_R - 1n }),
-        fc.bigInt({ min: 0n, max: BN254_R - 1n }),
+        fc.bigInt({ min: 1n, max: BN254_R - 1n }),
         (t, u) => {
           const out = rerandomiseMembershipProof(proof, t, u);
           expect(verifyMembershipProof(out, input.signals)).toBe(true);
-          expect(decodeMembershipProof(out).a.multiply(t).equals(a)).toBe(true);
+          const next = decodeMembershipProof(out);
+          // Each component exactly as specified, so dropping the u terms (which
+          // would keep the prover's C) fails here.
+          expect(next.a.multiply(t).equals(a)).toBe(true);
+          expect(next.b.equals(b.add(delta.multiply(u)).multiply(t))).toBe(true);
+          expect(next.c.equals(c.add(a.multiply(u)))).toBe(true);
+          expect(next.c.equals(c)).toBe(false);
         },
       ),
       { numRuns: Math.min(numRuns, 10) },

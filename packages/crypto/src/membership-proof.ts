@@ -519,7 +519,10 @@ export function rerandomiseMembershipProof(proof: Uint8Array, t: bigint, u: bigi
   // u is 0 with probability 2^-254; noble's constant-time multiply refuses 0.
   const shifted = u === 0n ? b : b.add(verificationKey().delta.multiply(u));
   return encodeMembershipProof({
-    a: a.multiply(Fr.inv(t)),
+    // Fermat's inverse, with the public exponent r − 2: noble's `inv` is a
+    // variable-time Euclid whose timing could reveal t, and with it how to
+    // undo A's re-randomisation.
+    a: a.multiply(Fr.pow(t, BN254_R - 2n)),
     b: shifted.multiply(t),
     c: u === 0n ? c : c.add(a.multiply(u)),
   });

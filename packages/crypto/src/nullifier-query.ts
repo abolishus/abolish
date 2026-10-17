@@ -25,10 +25,10 @@ import { H } from "./group.ts";
 import { isForbiddenCommitment } from "./group-registry.ts";
 import {
   type AnswerCode,
-  bjjLagrangeAtZero,
   bjjPoint,
   type BjjPoint,
   checkNullifierAnswer,
+  combineAnswers,
   decodeNullifierAnswer,
   encodeNullifierAnswer,
   type NullifierAnswer,
@@ -351,12 +351,15 @@ export function checkNullifierOutput(
     // check's own codes remain.
     if (!result.ok) return { ok: false, code: result.code as OutputCode, index };
   }
-  const seats = answers.map((a) => a.seat);
-  let z: BjjPoint | null = null;
-  for (const a of answers) {
-    const term = a.z.multiplyUnsafe(bjjLagrangeAtZero(a.seat, seats));
-    z = z === null ? term : z.add(term);
+  // The answers are checked, k of them, from distinct qualified seats of this
+  // key and query, so the identity is the only combination combineAnswers
+  // refuses.
+  let z: BjjPoint;
+  try {
+    z = combineAnswers(key, answers);
+  } catch (e) {
+    if (e instanceof RangeError) return { ok: false, code: "output-combination" };
+    throw e;
   }
-  if (z === null || z.is0()) return { ok: false, code: "output-combination" };
   return { ok: true, output, z };
 }

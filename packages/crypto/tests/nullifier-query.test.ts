@@ -4,6 +4,7 @@ import { describe, expect, test } from "vite-plus/test";
 import {
   BJJ_G,
   BJJ_ORDER,
+  BN254_R,
   type BjjPoint,
   bjjPoint,
   checkNullifierOutput,
@@ -241,9 +242,9 @@ describe("query record", () => {
       l2_chain_id: fc.bigInt({ min: 0n, max: 2n ** 64n - 1n }),
       group_registry: fc.uint8Array({ minLength: 20, maxLength: 20 }),
       group_id: fc.bigInt({ min: 0n, max: 2n ** 64n - 1n }),
-      commitment: fc.bigInt({ min: 0n, max: SIGMA }),
+      commitment: fc.bigInt({ min: 0n, max: BN254_R - 1n }),
       query_id: fc.uint8Array({ minLength: 32, maxLength: 32 }),
-      comm_in: fc.bigInt({ min: 0n, max: SIGMA }),
+      comm_in: fc.bigInt({ min: 0n, max: BN254_R - 1n }),
       b: fc.bigInt({ min: 1n, max: BJJ_ORDER - 1n }).map((k) => BJJ_G.multiply(k)),
       proof: fc.uint8Array({ maxLength: 64 }),
     });

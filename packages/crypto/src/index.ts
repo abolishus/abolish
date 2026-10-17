@@ -1156,8 +1156,13 @@ export {
   type Tier1CountContext,
   type Tier1CountError,
   type Tier1CountVerdict,
+  Tier1CountingState,
+  type Tier1Extension,
+  type Tier1Judged,
+  type Tier1Judgement,
   tier1Leaves,
   type Tier1LeavesResult,
+  type Tier1SendMarginFailure,
   VOUCH_ROOT_INTERVAL,
   VOUCH_ROOT_WINDOW,
 } from "./vouch-count.ts";

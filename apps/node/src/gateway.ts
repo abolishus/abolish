@@ -1,0 +1,107 @@
+// The node's mirror over HTTP: the raw-block requests of the IPFS trustless
+// gateway API (`GET /ipfs/{cid}` with `?format=raw` or
+// `Accept: application/vnd.ipld.raw`), which any IPFS client and the
+// verifier's network sources can read (P4-3). A reader hashes every block
+// against the CID it asked for, so it trusts the node for availability only
+// (T-49, T-51).
+//
+// No path below a CID, no CAR responses and no deserialized responses: the
+// node serves blocks, never pages, so nothing it holds runs in a browser at
+// its origin (T-43).
+//
+// Nothing about a request is written anywhere. Which CIDs a reader fetches
+// can say which election, or which segment, it cares about (T-11).
+
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { cidText } from "@abolishus/crypto";
+import { parseCid } from "./cid.ts";
+import type { Mirror } from "./store.ts";
+
+const RAW = "application/vnd.ipld.raw";
+// Longest request target answered: `/ipfs/` and a CID, then a short query.
+const MAX_TARGET = 128;
+
+export interface GatewayLimits {
+  /** Most connections open at once; past it, new ones are closed on accept (T-52). Default 1,024. */
+  readonly maxConnections?: number;
+  /** A request whose headers take longer is refused (T-52). Default 10 s. */
+  readonly headersTimeoutMs?: number;
+  /** A request still open after this long is refused (T-52). Default 30 s. */
+  readonly requestTimeoutMs?: number;
+}
+
+/** An HTTP server answering raw-block requests from `mirror`. Not yet listening. */
+export function gateway(mirror: Mirror, limits: GatewayLimits = {}): Server {
+  const server = createServer(
+    {
+      headersTimeout: limits.headersTimeoutMs ?? 10_000,
+      requestTimeout: limits.requestTimeoutMs ?? 30_000,
+      connectionsCheckingInterval: 1_000,
+      maxHeaderSize: 8_192,
+      // Node's default: an idle keep-alive connection is closed after 5 s.
+      keepAliveTimeout: 5_000,
+    },
+    (req, res) => {
+      res.setHeader("x-content-type-options", "nosniff");
+      answer(mirror, req, res).catch(() => {
+        if (!res.headersSent) refuse(res, 500);
+        else res.destroy();
+      });
+    },
+  );
+  // T-52: past this, Node closes each new socket on accept instead of serving it.
+  server.maxConnections = limits.maxConnections ?? 1_024;
+  return server;
+}
+
+async function answer(mirror: Mirror, req: IncomingMessage, res: ServerResponse): Promise<void> {
+  // A request with a body is refused and its connection closed, so Node
+  // doesn't read the body to reuse the connection.
+  const body =
+    (req.headers["content-length"] !== undefined && req.headers["content-length"] !== "0") ||
+    req.headers["transfer-encoding"] !== undefined;
+  if (req.method !== "GET" && req.method !== "HEAD")
+    return refuse(res, 405, { allow: "GET, HEAD", ...(body ? { connection: "close" } : {}) });
+  if (body) return refuse(res, 400, { connection: "close" });
+  const target = req.url ?? "";
+  if (target.length > MAX_TARGET || !target.startsWith("/ipfs/")) return refuse(res, 404);
+  const query = target.indexOf("?");
+  const path = target.slice("/ipfs/".length, query === -1 ? undefined : query);
+  const cid = parseCid(path);
+  if (cid === undefined) return refuse(res, 400);
+  const format = new URLSearchParams(query === -1 ? "" : target.slice(query + 1)).getAll("format");
+  const raw = format.length > 0 ? format.every((f) => f === "raw") : accepts(req.headers.accept);
+  if (!raw) return refuse(res, 406, { vary: "accept" });
+  const block = await mirror.block(cid);
+  if (block === undefined) return refuse(res, 404);
+  const name = cidText(cid);
+  res.writeHead(200, {
+    "content-type": RAW,
+    "content-length": block.length,
+    // A CID names its bytes for good; the same URL without `format` is a 406
+    // to another Accept.
+    "cache-control": "public, max-age=29030400, immutable",
+    vary: "accept",
+    etag: `"${name}.raw"`,
+    "content-disposition": `attachment; filename="${name}.bin"`,
+    // Blocks are public and checked by whoever reads them, from any origin.
+    "access-control-allow-origin": "*",
+  });
+  res.end(req.method === "HEAD" ? undefined : block);
+}
+
+// Whether an Accept header lists the raw-block type (case-insensitively, as
+// media types are) with a weight above zero.
+function accepts(accept: string | undefined): boolean {
+  return (accept ?? "").split(",").some((entry) => {
+    const [type, ...params] = entry.split(";").map((p) => p.trim().toLowerCase());
+    if (type !== RAW) return false;
+    const q = params.find((p) => p.startsWith("q="));
+    return q === undefined || Number(q.slice(2)) > 0;
+  });
+}
+
+function refuse(res: ServerResponse, status: number, headers: Record<string, string> = {}): void {
+  res.writeHead(status, { ...headers, "cache-control": "no-store", "content-length": 0 });
+  res.end();
+}

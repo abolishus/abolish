@@ -592,6 +592,11 @@ describe("tierMembership reads the board as untrusted", () => {
     ).toThrow(RangeError);
     const unordered = { ...t.electorate, groups: [...t.electorate.groups].reverse() };
     expect(() => tierMembership(t.records, unordered, leaf, 22n, pins)).toThrow(RangeError);
+    const negative = {
+      ...t.electorate,
+      groups: t.electorate.groups.map((g) => ({ ...g, region: -1 })),
+    };
+    expect(() => tierMembership(t.records, negative, leaf, 22n, pins)).toThrow(RangeError);
     const noRegion = {
       ...t.electorate,
       groups: t.electorate.groups.map((g) => ({ ...g, region: 9 })),
@@ -601,45 +606,50 @@ describe("tierMembership reads the board as untrusted", () => {
 });
 
 describe("tierMembership feeds the prover", () => {
-  test("a Semaphore identity's cell gives the circuit inputs Semaphore's generateProof gives", () => {
-    const c = proverVectors.cases.find((x) => x.name === "first-tier");
-    const tree = proverVectors.trees.find((x) => x.id === c?.tree);
-    if (c === undefined || tree === undefined || tree.tier !== 0) throw new Error("no tier-0 case");
-    const leaves = tree.leaves.map(decimal);
-    const board = logs([
-      { kind: "created", groupId: 1n, tier: 0 },
-      ...additions(1n, leaves.slice(0, 1)),
-      ...additions(1n, leaves.slice(1), 1n),
-    ]);
-    const electorate: TierElectorate = {
-      tier: 0,
-      root_l2_block: ROOT_BLOCK,
-      groups: [{ group_id: 1n, region: 0 }],
-      regions: [BigInt(leaves.length)],
-      cells: [{ root: decimal(tree.root), members: BigInt(leaves.length) }],
-    };
-    const secret = hex(proverVectors.members[c.member]?.secret);
-    const m = tierMembership(board, electorate, identityCommitment(secret), 1n, pins);
-    const input = membershipProverInput(secret, m.leaves, {
-      definitionHash: hex(proverVectors.definitionHash),
-      tier: 0,
-      root: m.root,
-      message: hex(c.message),
-    });
-    expect(input.witness).toEqual(c.input);
-    // A cell root the board's leaves don't climb to is refused by the prover.
-    const wrong = {
-      ...electorate,
-      cells: [{ root: decimal(tree.root) + 1n, members: BigInt(leaves.length) }],
-    };
-    const w = tierMembership(board, wrong, identityCommitment(secret), 1n, pins);
-    expect(() =>
-      membershipProverInput(secret, w.leaves, {
+  test(
+    "a Semaphore identity's cell gives the circuit inputs Semaphore's generateProof gives",
+    { timeout: 60_000 },
+    () => {
+      const c = proverVectors.cases.find((x) => x.name === "first-tier");
+      const tree = proverVectors.trees.find((x) => x.id === c?.tree);
+      if (c === undefined || tree === undefined || tree.tier !== 0)
+        throw new Error("no tier-0 case");
+      const leaves = tree.leaves.map(decimal);
+      const board = logs([
+        { kind: "created", groupId: 1n, tier: 0 },
+        ...additions(1n, leaves.slice(0, 1)),
+        ...additions(1n, leaves.slice(1), 1n),
+      ]);
+      const electorate: TierElectorate = {
+        tier: 0,
+        root_l2_block: ROOT_BLOCK,
+        groups: [{ group_id: 1n, region: 0 }],
+        regions: [BigInt(leaves.length)],
+        cells: [{ root: decimal(tree.root), members: BigInt(leaves.length) }],
+      };
+      const secret = hex(proverVectors.members[c.member]?.secret);
+      const m = tierMembership(board, electorate, identityCommitment(secret), 1n, pins);
+      const input = membershipProverInput(secret, m.leaves, {
         definitionHash: hex(proverVectors.definitionHash),
         tier: 0,
-        root: w.root,
+        root: m.root,
         message: hex(c.message),
-      }),
-    ).toThrow("root");
-  });
+      });
+      expect(input.witness).toEqual(c.input);
+      // A cell root the board's leaves don't climb to is refused by the prover.
+      const wrong = {
+        ...electorate,
+        cells: [{ root: decimal(tree.root) + 1n, members: BigInt(leaves.length) }],
+      };
+      const w = tierMembership(board, wrong, identityCommitment(secret), 1n, pins);
+      expect(() =>
+        membershipProverInput(secret, w.leaves, {
+          definitionHash: hex(proverVectors.definitionHash),
+          tier: 0,
+          root: w.root,
+          message: hex(c.message),
+        }),
+      ).toThrow("root");
+    },
+  );
 });

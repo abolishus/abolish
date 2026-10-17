@@ -303,6 +303,7 @@ export {
   deriveTierCells,
   firstOccurrence,
   foldRegions,
+  regionCounts,
   type TierElectorateMismatch,
   tierElectorateMismatch,
 } from "./regional-cells.ts";

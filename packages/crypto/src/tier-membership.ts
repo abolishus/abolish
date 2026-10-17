@@ -23,7 +23,7 @@ import {
   groupRegistryDomainSeparator,
   isForbiddenCommitment,
 } from "./group-registry.ts";
-import { firstOccurrence, foldRegions } from "./regional-cells.ts";
+import { firstOccurrence, foldRegions, regionCounts } from "./regional-cells.ts";
 import { groupRegistryEvents } from "./vouch-count.ts";
 
 /** What the board's group-registry events are read and replayed under. */
@@ -181,11 +181,18 @@ export function tierMembership(
   for (let i = 1; i < groups.length; i++)
     if ((groups[i - 1]?.group_id as bigint) >= (groups[i]?.group_id as bigint))
       throw new RangeError("tier.groups: expected strictly ascending group_id");
-  if (groups.some((g) => !Number.isSafeInteger(g.region) || g.region >= regions.length))
+  if (
+    groups.some(
+      (g) => !Number.isSafeInteger(g.region) || g.region < 0 || g.region >= regions.length,
+    )
+  )
     throw new RangeError("tier.groups: a group names a region the tier doesn't have");
 
   const read = groupRegistryEvents(registryRecords(records, pinned), pinned.registry, version);
   if (!read.ok) throw new TierMembershipError("board-event");
+  // The board need not carry `RegistrarsPinned` (verifier 4.4 doesn't require
+  // it): every record is replayed under the release's registrars whatever it
+  // says, so one is only compared, never relied on.
   for (const p of read.pinned)
     if (
       p.threshold !== threshold ||
@@ -232,10 +239,7 @@ export function tierMembership(
     throw new TierMembershipError("not-a-member", group);
 
   const counted = firstOccurrence(raw);
-  const members = regions.map(() => 0n);
-  for (const [i, g] of groups.entries())
-    for (const leaf of counted[i] as bigint[])
-      if (leaf !== 0n) members[g.region] = (members[g.region] as bigint) + 1n;
+  const members = regionCounts({ groups, regions }, counted);
   if (members.some((n, r) => n !== regions[r])) throw new TierMembershipError("electorate");
   const fold = foldRegions(members);
   if (

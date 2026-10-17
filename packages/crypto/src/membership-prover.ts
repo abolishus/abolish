@@ -14,6 +14,7 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex, randomBytes } from "@noble/hashes/utils.js";
 import { BN254_R, EncodeError } from "./codec.ts";
 import { isIdentitySecret } from "./identity-backup.ts";
+import { isForbiddenCommitment } from "./group-registry.ts";
 import { BJJ_G } from "./keyed-nullifier.ts";
 import { MEMBERSHIP_DEPTH, membershipScope, semaphoreField } from "./membership.ts";
 import {
@@ -153,6 +154,9 @@ export function membershipProverInput(
   const messageField = semaphoreField(message);
   const s = secretScalar(secret);
   const commitment = commitmentOf(s);
+  // A forbidden commitment is never a leaf (part 2's contract), and the path
+  // builder refuses to look for one.
+  if (isForbiddenCommitment(commitment)) throw new MembershipProverError("not-a-member");
   const found = tierTreeMemberPath(leaves, commitment);
   if (found === undefined) throw new MembershipProverError("not-a-member");
   const { index, siblings } = found;

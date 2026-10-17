@@ -97,6 +97,14 @@ function clientProver(): MembershipProver {
   };
 }
 
+// Each question's slice of a tier's flat counts, in ballot order, as the
+// run's report gives it (crypto's questionResults over the definition); the
+// tests hold the two to agreeing. No figure across questions (ADR 0026).
+function questionSlices(scenario: Scenario, counts: readonly number[]): number[][] {
+  let at = 0;
+  return (scenario.questions ?? []).map((q) => counts.slice(at, (at += q.options)));
+}
+
 const scenarioOptions = { scenario: { type: "string" }, file: { type: "string" } } as const;
 
 /** The commands over a given runner: the sdk's, or a test's stand-in for a report that differs from its plan. */
@@ -142,7 +150,12 @@ export function simulationCommandsWith(
                 : !v.delivered,
             ).length,
           },
-          expected: plan.tiers.map((tier) => ({ tier, counts: plan.expected.get(tier) })),
+          expected: plan.tiers.map((tier) => {
+            const counts = plan.expected.get(tier) as readonly number[];
+            return scenario.questions === undefined
+              ? { tier, counts }
+              : { tier, counts, questions: questionSlices(scenario, counts) };
+          }),
         });
       },
     },

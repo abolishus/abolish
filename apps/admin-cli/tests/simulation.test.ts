@@ -224,6 +224,51 @@ describe("simulation", { timeout: 60_000 }, () => {
     expect(ballots).toEqual(plan.ballots);
   });
 
+  test("plan and run print each question's expected and opened counts, and nothing across questions", async () => {
+    // Pick one, pick any and pick exactly two.
+    const questions = [
+      { options: 3, min: 1, max: 1 },
+      { options: 3, min: 0, max: 3 },
+      { options: 4, min: 2, max: 2 },
+    ];
+    const { options: _, ...one } = scenario;
+    const json = JSON.stringify({ ...one, election: "questions", questions, revotes: 0.5 });
+    type Question = { expected: number[]; counts?: number[] };
+    const plan = await cli("simulation", "plan", "--scenario", json);
+    expect(plan.code).toBe(0);
+    const expected = (
+      plan.out[0] as { expected: { tier: number; counts: number[]; questions: number[][] }[] }
+    ).expected;
+    for (const e of expected) {
+      expect(e.questions.map((q) => q.length)).toEqual([3, 3, 4]);
+      expect(e.questions.flat()).toEqual(e.counts);
+    }
+    const ran = await cli("simulation", "run", "--scenario", json, PLACEHOLDER);
+    expect(ran.code).toBe(0);
+    const report = ran.out[0] as {
+      ok: boolean;
+      cells: { tier: number; outcome: string; counts: number[]; questions: Question[] }[];
+    };
+    expect(report.ok).toBe(true);
+    expect(report.cells.map((c) => c.outcome)).toEqual(["opened", "opened"]);
+    // The run's slices, by crypto's reading of the definition, are the plan's.
+    expect(
+      report.cells.map((c) => ({
+        tier: c.tier,
+        counts: c.counts,
+        questions: c.questions.map((q) => q.expected),
+      })),
+    ).toEqual(expected);
+    for (const c of report.cells) {
+      for (const q of c.questions) expect(Object.keys(q).sort()).toEqual(["counts", "expected"]);
+      expect(c.questions.map((q) => q.counts)).toEqual(c.questions.map((q) => q.expected));
+    }
+    // A one-question plan has no per-question slices.
+    const single = (await cli("simulation", "plan", "--scenario", JSON.stringify(scenario)))
+      .out[0] as { expected: Record<string, unknown>[] };
+    for (const e of single.expected) expect(e).not.toHaveProperty("questions");
+  });
+
   test("refuses a malformed scenario as a usage error naming the field", async () => {
     const r = await cli(
       "simulation",

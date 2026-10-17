@@ -402,9 +402,12 @@ describe("appeals", () => {
     );
     expect(reviews.filter((r) => r === "ok")).toHaveLength(1);
     expect(reviews.filter((r) => r === "reviewed")).toHaveLength(3);
+    // The one review that won decides both the stored outcome and the log.
+    const won = reviews.indexOf("ok") % 2 ? "upheld" : "rejected";
+    expect((await listPollAppeals(app, p.user, p.id))[0]!.outcome).toBe(won);
     const restores =
       await app`SELECT count(*)::int AS n FROM moderation_actions WHERE election_id = ${p.electionId} AND reason = 'appeal-upheld'`;
-    expect(restores[0]!["n"]).toBeLessThanOrEqual(1);
+    expect(restores[0]!["n"]).toBe(won === "upheld" ? 1 : 0);
   });
 
   test("deleting the creator's account deletes their appeals", async () => {
@@ -453,8 +456,9 @@ describe("appeals", () => {
 
   test("the outcome follows the model: upheld only while the decision stands", async () => {
     // Random interleavings of removals, restores, appeals and reviews on one
-    // poll: an appeal is accepted only against a standing removal, and a
-    // review upholds only while its decision is still the newest.
+    // poll: an appeal is accepted only against the newest decision, if it is
+    // a removal, and a review upholds or rejects only while the state hasn't
+    // changed since that decision.
     type Step =
       | { kind: "remove"; action: "delist" | "hide" }
       | { kind: "restore" }
@@ -472,41 +476,42 @@ describe("appeals", () => {
         decision: fc.constantFrom("upheld" as const, "rejected" as const),
       }),
     );
+    const grounds = ["spam", "threat", "personal-data", "harassment", "impersonation"] as const;
+    const after = { delist: "delisted", hide: "hidden", restore: "visible" } as const;
     await fc.assert(
       fc.asyncProperty(fc.array(step, { maxLength: 8 }), async (steps) => {
         const p = await poll();
-        let newest: { seq: bigint; removal: boolean } | undefined;
+        let state = "visible" as "visible" | "delisted" | "hidden";
+        // The decisions since the state last changed, oldest first.
+        let run: { seq: bigint; reason: string }[] = [];
+        const record = (action: keyof typeof after, seq: bigint, reason: string) => {
+          if (after[action] !== state) run = [];
+          state = after[action];
+          run.push({ seq, reason });
+        };
         const open: bigint[] = [];
         const appealed = new Set<bigint>();
-        let reason = 0;
-        const grounds = ["spam", "threat", "personal-data", "harassment", "impersonation"] as const;
+        let next = 0;
         for (const s of steps) {
           if (s.kind === "remove") {
-            const r = await code(
-              moderate(app, p.electionId, {
-                action: s.action,
-                // A fresh ground each time, so a removal is always recorded.
-                reason: grounds[reason++ % grounds.length]!,
-                moderator: "mod-1",
-              }).then((d) => {
-                newest = { seq: d.seq, removal: true };
-              }),
-            );
-            if (r !== "ok") expect(r).toBe("no-change");
+            const reason = grounds[next++ % grounds.length]!;
+            const recorded = after[s.action] !== state || !run.some((r) => r.reason === reason);
+            const d = moderate(app, p.electionId, { action: s.action, reason, moderator: "mod-1" });
+            if (recorded) record(s.action, (await d).seq, reason);
+            else expect(await code(d)).toBe("no-change");
           } else if (s.kind === "restore") {
-            const r = await code(
-              moderate(app, p.electionId, {
-                action: "restore",
-                reason: "error",
-                moderator: "mod-1",
-              }).then((d) => {
-                newest = { seq: d.seq, removal: false };
-              }),
-            );
-            expect(r).toBe(newest?.removal === true || r === "ok" ? "ok" : "no-change");
+            const wasRemoved = state !== "visible";
+            const d = moderate(app, p.electionId, {
+              action: "restore",
+              reason: "error",
+              moderator: "mod-1",
+            });
+            if (wasRemoved) record("restore", (await d).seq, "error");
+            else expect(await code(d)).toBe("no-change");
           } else if (s.kind === "appeal") {
             const r = await code(fileAppeal(app, p.user, p.id));
-            if (newest === undefined || !newest.removal) expect(r).toBe("not-appealable");
+            const newest = run.at(-1);
+            if (newest === undefined || state === "visible") expect(r).toBe("not-appealable");
             else if (appealed.has(newest.seq)) expect(r).toBe("already-appealed");
             else {
               expect(r).toBe("ok");
@@ -515,18 +520,62 @@ describe("appeals", () => {
             }
           } else if (open.length > 0) {
             const seq = open.shift()!;
+            const stands = run.some((r) => r.seq === seq);
             const review = await decideAppeal(app, seq, s.decision, "mod-2");
-            const stands = newest?.seq === seq;
             expect(review.outcome).toBe(stands ? s.decision : "superseded");
             if (review.restoreSeq !== undefined)
-              newest = { seq: review.restoreSeq, removal: false };
+              record("restore", review.restoreSeq, "appeal-upheld");
+            expect(review.state).toBe(state);
           }
-          const state = (await moderationStatus(app, p.electionId)).state;
-          expect(state === "visible").toBe(newest === undefined || !newest.removal);
+          expect((await moderationStatus(app, p.electionId)).state).toBe(state);
         }
       }),
       { numRuns: Math.min(numRuns, 30) },
     );
+  });
+
+  test("a re-cited removal keeps the appeal standing, and its moderator can't review it", async () => {
+    const p = await poll();
+    const { seq } = await moderate(app, p.electionId, {
+      action: "delist",
+      reason: "spam",
+      moderator: "mod-1",
+    });
+    await fileAppeal(app, p.user, p.id);
+    const recite = await moderate(app, p.electionId, {
+      action: "delist",
+      reason: "harassment",
+      moderator: "mod-2",
+    });
+    // mod-2 keeps the delisting in place too.
+    expect(await code(decideAppeal(app, seq, "rejected", "mod-2"))).toBe("same-moderator");
+    // The re-cite's own appeal can't go to mod-1, who made the first delisting.
+    expect(await fileAppeal(app, p.user, p.id)).toBe(recite.seq);
+    expect(await code(decideAppeal(app, recite.seq, "rejected", "mod-1"))).toBe("same-moderator");
+    expect(await decideAppeal(app, seq, "upheld", "mod-3")).toMatchObject({
+      outcome: "upheld",
+      state: "visible",
+    });
+    // The state changed since the re-cite, so its appeal is superseded.
+    expect((await decideAppeal(app, recite.seq, "rejected", "mod-3")).outcome).toBe("superseded");
+  });
+
+  test("an appeal whose sequence number names another poll's decision is never served", async () => {
+    const mine = await poll();
+    const theirs = await poll();
+    const { seq } = await moderate(app, theirs.electionId, {
+      action: "hide",
+      reason: "threat",
+      moderator: "mod-1",
+    });
+    // As if the log were restored on its own and reused the number.
+    await app`INSERT INTO account_appeals (decision_seq, poll_id, filed_at)
+      VALUES (${String(seq)}, ${mine.id}, now())`;
+    expect((await readAppealQueue(app, MAX_APPEAL_QUEUE)).map((a) => a.decisionSeq)).not.toContain(
+      seq,
+    );
+    expect(await code(decideAppeal(app, seq, "upheld", "mod-2"))).toBe("not-found");
+    expect((await moderationStatus(app, theirs.electionId)).state).toBe("hidden");
   });
 });
 

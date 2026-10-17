@@ -28,6 +28,7 @@ import {
   type ModerationState,
   type ModerationTx,
   recordDecision,
+  REMOVAL_REASONS,
   type RemovalReason,
   stateAfter,
 } from "./moderation.ts";
@@ -129,12 +130,37 @@ export async function addModerator(client: Sql, handle: string, accountId: strin
 /** Retires `handle`: it decides nothing more and is never given again. */
 export async function retireModerator(client: Sql, handle: string): Promise<void> {
   if (!handleOk(handle)) throw new AppealError("invalid");
-  const retired = await drizzle({ client })
-    .update(accountModerators)
-    .set({ userId: null })
-    .where(and(eq(accountModerators.handle, handle), q`${accountModerators.userId} IS NOT NULL`))
-    .returning({ handle: accountModerators.handle });
-  if (retired.length === 0) throw new AppealError("unknown-moderator");
+  // Under the lock, so no decision by the handle that read it as active
+  // commits after the retirement.
+  await transaction(client, async (tx) => {
+    const retired = await tx
+      .update(accountModerators)
+      .set({ userId: null })
+      .where(and(eq(accountModerators.handle, handle), q`${accountModerators.userId} IS NOT NULL`))
+      .returning({ handle: accountModerators.handle });
+    if (retired.length === 0) throw new AppealError("unknown-moderator");
+  });
+}
+
+/**
+ * The decisions about `electionId` since its state last changed, newest
+ * first: within such a run each removal reason appears once (`moderate`), so
+ * it has at most one row per removal reason.
+ */
+async function currentRun(tx: ModerationTx, electionId: Uint8Array) {
+  const recent = await tx
+    .select({
+      seq: moderationActions.seq,
+      action: moderationActions.action,
+      moderator: moderationActions.moderator,
+    })
+    .from(moderationActions)
+    .where(eq(moderationActions.electionId, electionId))
+    .orderBy(desc(moderationActions.seq))
+    .limit(REMOVAL_REASONS.length + 1);
+  const state = recent[0] === undefined ? undefined : stateAfter(recent[0].action);
+  const end = recent.findIndex((r) => stateAfter(r.action) !== state);
+  return end === -1 ? recent : recent.slice(0, end);
 }
 
 /** The newest decision about `electionId`, if any. */
@@ -254,6 +280,10 @@ export async function readAppealQueue(
     })
     .from(accountAppeals)
     .innerJoin(moderationActions, eq(moderationActions.seq, accountAppeals.decisionSeq))
+    // The decision must be about the appeal's own poll: the log and the
+    // account tables are kept apart, and a log restored on its own could
+    // reuse a sequence number.
+    .innerJoin(accountPolls, sameElection)
     .where(and(isNull(accountAppeals.outcome), gt(accountAppeals.decisionSeq, after)))
     .orderBy(asc(accountAppeals.decisionSeq))
     .limit(limit);
@@ -268,6 +298,11 @@ export async function readAppealQueue(
   }));
 }
 
+const sameElection = and(
+  eq(accountPolls.id, accountAppeals.pollId),
+  eq(accountPolls.electionId, moderationActions.electionId),
+);
+
 export interface AppealReview {
   readonly outcome: AppealOutcome;
   /** The poll's state after the review. */
@@ -280,12 +315,14 @@ export interface AppealReview {
  * Records `moderator`'s decision on the appeal against decision
  * `decisionSeq`. Upheld, it records a `restore` citing `appeal-upheld`
  * (with every check `moderate` makes); rejected, it changes nothing in the
- * log. If a later decision changed the poll since the appeal was filed, the
- * appeal is closed as `superseded` whatever the reviewer chose, since the
- * decision it contests no longer stands; the creator can appeal the newer
- * one. Refused, with nothing written: an unknown appeal (`not-found`), one
- * already reviewed (`reviewed`), a handle that isn't an active moderator's,
- * the moderator who made the decision (`same-moderator`) and a moderator
+ * log. If a later decision changed the poll's state since the appeal was
+ * filed, the appeal is closed as `superseded` whatever the reviewer chose,
+ * since the decision it contests no longer stands; the creator can appeal
+ * the newer one. A removal re-cited under another ground leaves the state, so
+ * the appeal still stands. Refused, with nothing written: an unknown appeal
+ * (`not-found`), one already reviewed (`reviewed`), a handle that isn't an
+ * active moderator's, a moderator who made the appealed decision or any
+ * decision since the state last changed (`same-moderator`), and a moderator
  * whose account created the poll (`own-poll`).
  */
 export async function decideAppeal(
@@ -311,19 +348,25 @@ export async function decideAppeal(
       })
       .from(accountAppeals)
       .innerJoin(moderationActions, eq(moderationActions.seq, accountAppeals.decisionSeq))
+      .innerJoin(accountPolls, sameElection)
       .where(eq(accountAppeals.decisionSeq, decisionSeq))
       .for("update", { of: accountAppeals });
     if (appeal === undefined) throw new AppealError("not-found");
     if (appeal.outcome !== null) throw new AppealError("reviewed");
     const account = await moderatorAccount(tx, moderator);
     if (account === undefined) throw new AppealError("unknown-moderator");
-    if (appeal.decidedBy === moderator) throw new AppealError("same-moderator");
     const electionId = new Uint8Array(appeal.electionId);
+    const run = await currentRun(tx, electionId);
+    const stands = run.some((r) => r.seq === decisionSeq);
+    // Whoever keeps the removal in place, by deciding it or re-citing it
+    // under another ground, doesn't judge the appeal against it.
+    if (appeal.decidedBy === moderator || (stands && run.some((r) => r.moderator === moderator)))
+      throw new AppealError("same-moderator");
     if (await createdBy(tx, electionId, account)) throw new AppealError("own-poll");
     // An appeal is filed against a decision, so its poll has one.
-    const newest = (await newestDecision(tx, electionId))!;
+    const newest = run[0]!;
     let review: AppealReview;
-    if (newest.seq !== decisionSeq) {
+    if (!stands) {
       review = { outcome: "superseded", state: stateAfter(newest.action) };
     } else if (decision === "upheld") {
       const restore: ModerationDecision = { action: "restore", reason: "appeal-upheld", moderator };

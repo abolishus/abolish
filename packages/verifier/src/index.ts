@@ -40,6 +40,8 @@ export {
   type DeliveryReport,
   type DeliveryReportV2,
   type DestructionReport,
+  type QuestionReport,
+  questionMethod,
   type SeatReport,
   type TierReport,
 } from "./counted.ts";

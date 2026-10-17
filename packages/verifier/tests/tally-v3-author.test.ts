@@ -132,19 +132,38 @@ const countedOf = (r: ReturnType<typeof countedChecks>, selected: readonly numbe
 describe("7.1 to 7.3 beside an author panel against the independent implementation", () => {
   for (const c of file.cases)
     test(c.id, () => {
-      const { ceremony, candidates, inputs } = election(c);
+      const { ceremony, candidates, definition, inputs } = election(c);
       expect(ceremony.registered?.map((k) => k.index)).toEqual([1, 2, 3]);
       expect(ceremony.authorRegistered?.map((k) => k.index)).toEqual([1, 2]);
       expect(candidates.map((x) => x.entry)).toEqual([3, 4, 5]);
       const r = countedChecks(inputs());
       expect(rows(r)).toEqual(c.expected);
       expect(countedOf(r, [3, 4, 5])).toEqual(c.counted);
-      expect(r.cells).toEqual(c.cells);
-      expect(r.tiers).toEqual(c.tiers);
+      // The vectors give the flat counts; each question's slice of them is
+      // cut here by the definition's option counts (8.1).
+      const sizes = (
+        definition.value as { readonly questions: readonly { option_count: number }[] }
+      ).questions.map((q) => q.option_count);
+      const perQuestion = <T extends { readonly counts?: readonly string[] }>(x: T) =>
+        x.counts === undefined ? x : { ...x, byQuestion: sliceBy(sizes, x.counts) };
+      expect(r.cells).toEqual(c.cells.map(perQuestion));
+      expect(r.tiers).toEqual(c.tiers.map(perQuestion));
       // 7.4's breaks beside an author panel are P2-16 part 4d-3d-2's.
       expect(r.tallyBreaks).toBeUndefined();
     });
 });
+
+/** `counts` cut into consecutive runs of `sizes`' lengths. */
+function sliceBy(sizes: readonly number[], counts: readonly string[]): string[][] {
+  const out: string[][] = [];
+  let at = 0;
+  for (const n of sizes) {
+    out.push(counts.slice(at, at + n));
+    at += n;
+  }
+  expect(at).toBe(counts.length);
+  return out;
+}
 
 /** The copy's tally openings by position, with the cell, panel and signer each names. */
 function openingsOf(entries: readonly Uint8Array[]) {

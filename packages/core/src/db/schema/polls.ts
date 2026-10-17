@@ -3,11 +3,12 @@ import { accountUsers } from "./accounts.ts";
 import { bytea } from "./bytea.ts";
 
 // Drizzle view of migrations/0012_account_polls.sql, 0013_poll_creation.sql,
-// 0015_poll_anchor_check.sql and 0016_poll_roots.sql; a test checks the two
-// agree. `account_polls` is in the account class: whose poll it is, never
+// 0015_poll_anchor_check.sql, 0016_poll_roots.sql and 0017_poll_stubs.sql; a
+// test checks the two agree. `account_polls` is in the account class: whose poll it is, never
 // who answered it (ADR 0032, rule 15; T-10). `poll_creation_txs` is
 // operational: the creation key's public transactions, naming no account,
-// poll or election.
+// poll or election. `ceremony_stubs` is operational: the coordinator's
+// stubs, public once registered, naming no account or poll.
 
 const at = (name: string) => timestamp(name, { withTimezone: true });
 
@@ -30,6 +31,7 @@ export const accountPolls = pgTable("account_polls", {
   anchorsCheckedBlock: bigint("anchors_checked_block", { mode: "bigint" }),
   abandonedIds: smallint("abandoned_ids").notNull().default(0),
   electorate: jsonb("electorate"),
+  stubHash: bytea("stub_hash"),
 });
 
 export const pollCreationTxs = pgTable(
@@ -43,3 +45,12 @@ export const pollCreationTxs = pgTable(
   },
   (t) => [primaryKey({ columns: [t.creatorAddress, t.nonce] })],
 );
+
+export const ceremonyStubs = pgTable("ceremony_stubs", {
+  stubHash: bytea("stub_hash").primaryKey(),
+  electionId: bytea("election_id").notNull(),
+  stub: bytea("stub").notNull(),
+  displayText: bytea("display_text").notNull(),
+  opensAt: bigint("opens_at", { mode: "bigint" }).notNull(),
+  createdAt: at("created_at").notNull(),
+});

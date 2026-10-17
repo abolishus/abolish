@@ -127,9 +127,12 @@ describe("sealBallotV3", () => {
         expect(decoded.seats.map((s) => s.seat)).toEqual(unqualified ? all.slice(1) : all);
         expect(toHex(decoded.share_hashes[0] as Uint8Array) === "00".repeat(32)).toBe(unqualified);
       }),
-      { numRuns: Math.min(numRuns, 20) },
+      // Each run makes three ML-KEM encryptions, an opening and its check
+      // (about 0.13 s), so it runs a twentieth of FC_NUM_RUNS, as
+      // ballot-v3.test.ts's honest-ballot property does.
+      { numRuns: Math.max(10, numRuns / 20) },
     );
-  });
+  }, 120_000);
 
   test("two seals of the same votes show different codes", () => {
     const a = sealBallotV3(election, 0, [...VOTES]);
@@ -223,6 +226,47 @@ describe("castSealV3", () => {
       "root",
     );
     expect(() => challengeSealV3(failed)).toThrow(/never opened/);
+  });
+
+  test("a refused first cast doesn't bind the seal: the right identity casts it next", () => {
+    const sealed = sealBallotV3(election, 0, [...VOTES]);
+    // A member of the other cell first (a wrong identity picked), then this cell's.
+    expect(refusal(() => castSealV3(sealed, members[5] as Uint8Array, cell0, L1))).toBe(
+      "not-a-member",
+    );
+    const { witness } = castSealV3(sealed, members[0] as Uint8Array, cell0, L1);
+    expect(witness.merkleProofIndex).toBe("0");
+    // And the cast seal is never cast again by the identity refused first.
+    expect(() => castSealV3(sealed, members[5] as Uint8Array, cell0, L1)).toThrow(
+      /another identity/,
+    );
+  });
+
+  test("refuses a malformed L1 reference before proving, leaving the seal open to a challenge", () => {
+    const sealed = sealBallotV3(election, 0, [...VOTES]);
+    const secret = members[0] as Uint8Array;
+    for (const l1 of [
+      { number: -1n, hash: new Uint8Array(32) },
+      { number: 1n << 64n, hash: new Uint8Array(32) },
+      { number: 1, hash: new Uint8Array(32) },
+      { number: 1n, hash: new Uint8Array(31) },
+      { number: 1n, hash: new Uint8Array(33) },
+    ])
+      expect(() => castSealV3(sealed, secret, cell0, l1 as typeof L1)).toThrow(RangeError);
+    expect(() => castSealV3(sealed, new Uint8Array(32), cell0, L1)).toThrow(MembershipProverError);
+    expect(challengeSealV3(sealed).trackingCode).toEqual(sealed.trackingCode);
+    // Opened once only.
+    expect(() => challengeSealV3(sealed)).toThrow(/already opened/);
+  });
+
+  test("a cast whose proof was refused casts again with the same committed vote", () => {
+    const sealed = sealBallotV3(election, 0, [...VOTES]);
+    const secret = members[1] as Uint8Array;
+    const first = castSealV3(sealed, secret, cell0, L1);
+    expect(refusal(() => finishSealV3(first, new Uint8Array(MEMBERSHIP_PROOF_LENGTH)))).toBe(
+      "proof",
+    );
+    expect(castSealV3(sealed, secret, cell0, L1).witness).toEqual(first.witness);
   });
 });
 

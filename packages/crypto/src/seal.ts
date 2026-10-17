@@ -97,14 +97,22 @@ interface Seal {
   readonly tier: number;
   readonly root: bigint;
   readonly scope: bigint;
-  readonly encrypted: EncryptedShares;
-  readonly sharing: VoteSharing;
+  /**
+   * The sharing and the shares' encryption, with every polynomial and
+   * encapsulation: dropped once a cast's validity proofs and witness are made,
+   * since a recast needs only the committed vote and a cast's randomness is
+   * erased (docs/spec/challenge.md, Client rules; T-18, T-45).
+   */
+  secrets?: { readonly sharing: VoteSharing; readonly encrypted: EncryptedShares };
   /** The core whose tracking code was shown; its share hashes are the ones proved over. */
   readonly core: CellBallotCore;
   readonly trackingCode: Uint8Array;
-  readonly qualified: readonly number[];
-  /** Set by the first cast: the challenge is then refused (the sharing is proved). */
+  /** Each qualified seat's share ciphertext, which is public once delivered. */
+  readonly ciphertexts: readonly { readonly seat: number; readonly ciphertext: Uint8Array }[];
   challenged: boolean;
+  /** Set when validity is first proved: the voter chose to cast, so the seal is never opened. */
+  proved: boolean;
+  /** Set once a cast's witness is made: the seal is then never opened. */
   cast?: { readonly nullifier: bigint; readonly vote: CommittedVoteV3 };
 }
 
@@ -150,6 +158,7 @@ export function sealBallotV3(
   const encrypted = encryptShares({ definitionHash }, sharing, seatKeys);
   const core = cellBallotCore(election, cell, encrypted);
   const trackingCode = cellCoreHash(core);
+  const qualified = [...byIndex.keys()].sort((a, b) => a - b);
   const sealed: SealedBallotV3 = Object.freeze({
     cell,
     trackingCode: Uint8Array.from(trackingCode),
@@ -161,12 +170,19 @@ export function sealBallotV3(
     tier: target.tier,
     root: target.root,
     scope: target.scope,
-    encrypted,
-    sharing,
+    secrets: { sharing, encrypted },
     core,
     trackingCode,
-    qualified: Object.freeze([...byIndex.keys()].sort((a, b) => a - b)),
+    ciphertexts: Object.freeze(
+      qualified.map((seat) =>
+        Object.freeze({
+          seat,
+          ciphertext: Uint8Array.from(encrypted.ciphertexts[seat - 1] as Uint8Array),
+        }),
+      ),
+    ),
     challenged: false,
+    proved: false,
   });
   return sealed;
 }
@@ -188,10 +204,14 @@ export function challengeSealV3(sealed: SealedBallotV3): {
   readonly trackingCode: Uint8Array;
 } {
   const seal = sealOf(sealed);
-  if (seal.cast !== undefined)
+  if (seal.proved || seal.secrets === undefined)
     throw new TypeError("challengeSealV3: this seal was cast; it is never opened");
-  const { opening, coreHash } = openChallengeV2(seal.election, seal.cell, seal.encrypted);
+  if (seal.challenged) throw new TypeError("challengeSealV3: this seal was already opened");
+  // Spent before the opening is made: a throw below still leaves it uncastable.
   seal.challenged = true;
+  const { opening, coreHash } = openChallengeV2(seal.election, seal.cell, seal.secrets.encrypted);
+  if (!equalBytes(coreHash, seal.trackingCode))
+    throw new TypeError("challengeSealV3: the opened core isn't the one shown");
   return { opening: encodeOpeningV2(opening), trackingCode: coreHash };
 }
 
@@ -204,10 +224,15 @@ export function challengeSealV3(sealed: SealedBallotV3): {
  * leaves that don't climb to the cell's root. Only the witness leaves for
  * the prover; finish with `finishSealV3`.
  *
- * Casting the same seal again (a retry after a failed proof, or a recast under
- * a new L1 block, revoting Client rule 4) keeps its first validity proofs, so
- * every record of one seal carries one committed vote; a different secret is
- * refused. Throws `MembershipProverError`.
+ * The seal is marked cast, and its sharing and encapsulation randomness
+ * dropped, only once the witness is made, so a refused secret or bad leaves
+ * leave it as it was. Casting it again (a proof that failed before any
+ * record existed, or a recast under a newer L1 block, revoting Client rule 4)
+ * keeps its first validity proofs, so every record of one seal carries one
+ * committed vote; a different secret is refused. A retry of a record already
+ * sent resends that record's bytes (Casting: a retry sends the identical
+ * record), never a new cast. Throws `MembershipProverError`, or `RangeError`
+ * for an L1 reference that isn't a u64 and 32 bytes.
  */
 export function castSealV3(
   sealed: SealedBallotV3,
@@ -219,9 +244,17 @@ export function castSealV3(
   if (seal.challenged)
     throw new TypeError("castSealV3: this seal was challenged; it is never cast");
   const { number: l1RefNumber, hash: l1RefHash } = l1;
+  if (typeof l1RefNumber !== "bigint" || l1RefNumber < 0n || l1RefNumber >> 64n !== 0n)
+    throw new RangeError("castSealV3: the L1 block number isn't a u64");
+  if (!(l1RefHash instanceof Uint8Array) || l1RefHash.length !== 32)
+    throw new RangeError("castSealV3: the L1 block hash isn't 32 bytes");
   const nullifier = poseidon2(seal.scope, secretScalar(secret));
   if (seal.cast !== undefined && seal.cast.nullifier !== nullifier)
     throw new TypeError("castSealV3: this seal was cast with another identity");
+  const { secrets } = seal;
+  // A first cast proves validity again if an earlier attempt was refused
+  // before its witness (fresh nonces over the same core; nothing left the device).
+  if (seal.cast === undefined) seal.proved = true;
   const vote =
     seal.cast?.vote ??
     proveValidityV3(
@@ -233,11 +266,11 @@ export function castSealV3(
         cell: seal.cell,
         nullifier,
       },
-      seal.sharing,
+      // Dropped only when `cast` is set, so a seal not yet cast still holds it.
+      (secrets as NonNullable<typeof secrets>).sharing,
       // The core's hashes: an unqualified seat's is zero, never its ciphertext's.
       seal.core.shareHashes,
     );
-  seal.cast = { nullifier, vote };
   const ballotHash = ballotHashV3(
     { definitionHash: seal.definitionHash, cell: seal.cell, nullifier },
     vote,
@@ -257,6 +290,13 @@ export function castSealV3(
   });
   // The same scope and secret, so the same nullifier: a mismatch is a fault here.
   if (input.signals.nullifier !== nullifier) throw new MembershipProverError("secret");
+  if (seal.cast === undefined) {
+    seal.cast = { nullifier, vote };
+    // Erased as far as the platform allows: the ML-KEM messages' bytes are
+    // zeroed, and the polynomials and scalars (immutable bigints) dropped.
+    for (const { m } of secrets?.encrypted.randomness ?? []) m.fill(0);
+    delete seal.secrets;
+  }
   const casting: BallotCastingV3 = Object.freeze({ witness: input.witness });
   CASTINGS.set(casting, {
     seal,
@@ -308,11 +348,8 @@ export function finishSealV3(casting: BallotCastingV3, proof: Uint8Array): CastB
     ballotHash: checked.ballotHash,
     nullifier: record.nullifier,
     ciphertexts: Object.freeze(
-      seal.qualified.map((seat) =>
-        Object.freeze({
-          seat,
-          ciphertext: Uint8Array.from(seal.encrypted.ciphertexts[seat - 1] as Uint8Array),
-        }),
+      seal.ciphertexts.map(({ seat, ciphertext }) =>
+        Object.freeze({ seat, ciphertext: Uint8Array.from(ciphertext) }),
       ),
     ),
   });

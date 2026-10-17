@@ -10,6 +10,7 @@ import type {
   RegistrationErrorCode,
   RegistrySyncErrorCode,
   RegistrySyncReason,
+  CreationFailure,
   Tier0GroupOutcome,
 } from "@abolishus/core";
 import type { QueueSpec } from "./queues.ts";
@@ -104,6 +105,21 @@ export type RegistrySyncLine =
       readonly reason: Exclude<DefinitionErrorCode, "conflict">;
     };
 
+/**
+ * What a creation-step run did, in counts only: no poll, author, nonce or
+ * identifier (T-10, T-67). Written only when something moved or a send
+ * failed, so an idle tick writes only its job line.
+ */
+export interface PollCreationLine {
+  readonly queue: "{poll-create}";
+  readonly sent: number;
+  readonly resent: number;
+  readonly sendFailed: number;
+  readonly created: number;
+  readonly failed: Partial<Record<CreationFailure, number>>;
+  readonly ceilingReached: boolean;
+}
+
 /** A failure outside any job: the worker lost Redis, say. */
 export interface WorkerErrorLine {
   readonly queue: QueueSpec["name"];
@@ -126,5 +142,6 @@ export type LogLine =
   | Tier0BoundaryLine
   | BallotL1Line
   | RegistrySyncLine
+  | PollCreationLine
   | WorkerErrorLine;
 export type Log = (line: LogLine) => void;

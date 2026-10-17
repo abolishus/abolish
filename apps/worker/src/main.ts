@@ -1,4 +1,9 @@
-import { BallotAdmissions, L1References, Tier0Batches } from "@abolishus/core";
+import {
+  BallotAdmissions,
+  CREATE_DAILY_CEILING,
+  L1References,
+  Tier0Batches,
+} from "@abolishus/core";
 import { Redis } from "ioredis";
 import postgres from "postgres";
 import { BaseError, createPublicClient, http } from "viem";
@@ -7,6 +12,12 @@ import { registrySyncFromEnv, REGISTRY_SYNC_ENV } from "./registry-env.ts";
 import { RegistrySync, ViemRegistryAccumulator } from "./registry-sync.ts";
 import { connectTier0Bundler } from "./tier0-bundler.ts";
 import { ViemL1Source } from "./l1-source.ts";
+import { checkPollCreationDeployment, ViemPollCreationChain } from "./poll-create-chain.ts";
+import {
+  POLL_CREATE_CEILING_ENV,
+  POLL_CREATE_ENV,
+  pollCreationFromEnv,
+} from "./poll-create-env.ts";
 import { checkTier0Deployment, ViemTier0Chain } from "./tier0-chain.ts";
 import { TIER0_ENV, tier0FromEnv } from "./tier0-env.ts";
 import { startWorker, type WorkerOptions } from "./worker.ts";
@@ -68,6 +79,29 @@ const env = Env.parse({
   BALLOT_L1_RPC_URL: process.env["BALLOT_L1_RPC_URL"],
   BALLOT_L1_CHAIN_ID: process.env["BALLOT_L1_CHAIN_ID"],
 });
+
+const pollCreationConfig = pollCreationFromEnv(
+  Object.fromEntries(
+    [...POLL_CREATE_ENV, POLL_CREATE_CEILING_ENV].map((name) => [name, process.env[name]]),
+  ),
+  CREATE_DAILY_CEILING,
+);
+// T-65: read once; nothing later in the process, or anything it spawns,
+// finds the key in its environment.
+delete process.env["CREATE_KEY"];
+// The creation key runs alone (ADR 0032, rule 2): refused before any other
+// job's chain is touched, as startWorker refuses it too.
+if (
+  pollCreationConfig !== undefined &&
+  [
+    env.BALLOT_PINNED_PANELS,
+    env.BALLOT_ANCHOR_EPOCH,
+    env.BALLOT_ANCHOR_PERIOD,
+    ...TIER0_ENV.map((name) => process.env[name]),
+    ...REGISTRY_SYNC_ENV.map((name) => process.env[name]),
+  ].some((v) => v !== undefined && v !== "")
+)
+  throw new Error("a worker holding the creation key runs nothing else");
 
 let ballots: WorkerOptions["ballots"];
 const ballotEnv = [env.BALLOT_PINNED_PANELS, env.BALLOT_ANCHOR_EPOCH, env.BALLOT_ANCHOR_PERIOD];
@@ -232,6 +266,31 @@ if (registryConfig !== undefined) {
   };
 }
 
+// The creation step (ADR 0032, P2-22 part 3a), only when configured, and
+// only once the node is on the configured chain and the registry is one our
+// definitions can name. The URL can carry a provider's API key, which viem's
+// errors quote, so a failure here is reported by step only.
+let pollCreation: WorkerOptions["pollCreation"];
+if (pollCreationConfig !== undefined) {
+  const c = pollCreationConfig;
+  const client = createPublicClient({ transport: http(c.l2RpcUrl, { timeout: 30_000 }) });
+  try {
+    await checkPollCreationDeployment(client, { chainId: c.chainId, registry: c.registry });
+  } catch (e) {
+    if (e instanceof BaseError) throw new Error("the creation step couldn't reach the chain");
+    throw e;
+  }
+  pollCreation = {
+    chain: new ViemPollCreationChain({
+      client,
+      chainId: c.chainId,
+      registry: c.registry,
+      key: c.key,
+    }),
+    dailyCeiling: c.dailyCeiling,
+  };
+}
+
 const worker = await startWorker({
   connection,
   sql,
@@ -240,6 +299,7 @@ const worker = await startWorker({
   ...(tier0 !== undefined && { tier0 }),
   ...(ballots !== undefined && { ballots }),
   ...(registry !== undefined && { registry }),
+  ...(pollCreation !== undefined && { pollCreation }),
 });
 
 for (const signal of ["SIGINT", "SIGTERM"] as const)

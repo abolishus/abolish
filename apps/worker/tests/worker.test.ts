@@ -1,4 +1,11 @@
-import { appendEntry } from "@abolishus/core";
+import {
+  type AnchorChain,
+  appendEntry,
+  type BallotAdmissions,
+  type PollCreationChain,
+  type Tier0Batches,
+} from "@abolishus/core";
+import type { RegistrySync } from "../src/index.ts";
 import { newElection, type TestDb, testDb } from "@abolishus/core/test-db";
 import { Queue } from "bullmq";
 import { Redis } from "ioredis";
@@ -220,11 +227,15 @@ test("every key the worker uses is under its queue's hash tag", async () => {
   await prunes.add("identityBackupPrune", {});
   await outcome("{identity-backup-prune}");
   const keys = await connection.keys(`${prefix}:*`);
-  // This worker has no Tier 0 job, pins no panel and has no registry sync, so
-  // those queues have no keys here (tests/tier0.test.ts, tests/ballots.test.ts
-  // and tests/registry-sync.test.ts cover them).
+  // This worker has no Tier 0 job, pins no panel, has no registry sync and
+  // holds no creation key, so those queues have no keys here
+  // (tests/tier0.test.ts, tests/ballots.test.ts and
+  // tests/registry-sync.test.ts cover the first three; the creation
+  // worker's test below checks its keys).
   const tags = Object.entries(QUEUES)
-    .filter(([key]) => ![...TIER0_QUEUES, "ballotSubmit", "registrySync"].includes(key))
+    .filter(
+      ([key]) => ![...TIER0_QUEUES, "ballotSubmit", "registrySync", "pollCreate"].includes(key),
+    )
     .map(([, q]) => `${prefix}:${q.name}:`);
   for (const tag of tags)
     expect(
@@ -264,6 +275,8 @@ test("a handler's own error message is neither logged nor kept, the events strea
       tier0Boundary: async () => {},
       // Not scheduled: this worker has no registry sync.
       registrySync: async () => {},
+      // Not scheduled: this worker holds no creation key.
+      pollCreate: async () => {},
       // Not run: this worker pins no panel.
       ballotSubmit: async () => {
         throw new Error(`params: ${MARKER}`);
@@ -292,6 +305,84 @@ test("a handler's own error message is neither logged nor kept, the events strea
       await queue.close();
     }
   }
+});
+
+test("schedules no creation run without the creation key", async () => {
+  const queue = new Queue(QUEUES.pollCreate.name, { connection, prefix });
+  try {
+    expect(await queue.getJobSchedulers()).toEqual([]);
+  } finally {
+    await queue.close();
+  }
+});
+
+/** A creation key that never has anything to send or read. */
+const idleChain: PollCreationChain = {
+  creator: new Uint8Array(20).fill(0xc0),
+  nonces: async () => ({ finalized: 0n, latest: 0n, pending: 0n }),
+  signCreation: async () => {
+    throw new Error("nothing is submitted");
+  },
+  broadcast: async () => {},
+  creation: async () => ({ state: "unknown" }),
+};
+
+test("a worker holding the creation key runs the creation step and nothing else", async () => {
+  // ADR 0032, rule 2: no audit, prune, anchoring, Tier 0 or ballot work
+  // beside the key.
+  const own = `abolish-test-${hex(randomBytes(6))}`;
+  const lines: LogLine[] = [];
+  const creator = await startWorker({
+    connection,
+    sql: app,
+    log: (l) => lines.push(l),
+    auditEveryMs: 3_600_000,
+    prefix: own,
+    pollCreation: { chain: idleChain, dailyCeiling: 1, everyMs: 3_600_000 },
+  });
+  try {
+    for (let i = 0; i < 200 && !lines.some((l) => "outcome" in l); i++)
+      await new Promise((r) => setTimeout(r, 25));
+    // An idle run writes only its job line.
+    expect(lines).toEqual([
+      { queue: "{poll-create}", outcome: "completed", ms: expect.any(Number) },
+    ]);
+    // Read before the queues below are opened to list schedules.
+    const keys = await connection.keys(`${own}:*`);
+    expect(keys.length).toBeGreaterThan(0);
+    expect(keys.filter((k) => !k.startsWith(`${own}:{poll-create}:`))).toEqual([]);
+    const scheduled: string[] = [];
+    for (const { name } of Object.values(QUEUES)) {
+      const queue = new Queue(name, { connection, prefix: own });
+      for (const s of await queue.getJobSchedulers()) scheduled.push(`${name} ${s.key} ${s.every}`);
+      await queue.close();
+    }
+    expect(scheduled).toEqual(["{poll-create} poll-create 3600000"]);
+  } finally {
+    await creator.close();
+    for (const { name } of Object.values(QUEUES)) {
+      const queue = new Queue(name, { connection, prefix: own });
+      await queue.obliterate({ force: true });
+      await queue.close();
+    }
+  }
+});
+
+test("a worker refuses the creation key beside any other job", async () => {
+  const base = {
+    connection,
+    sql: app,
+    log: () => {},
+    auditEveryMs: 3_600_000,
+    prefix: `abolish-test-${hex(randomBytes(6))}`,
+    pollCreation: { chain: idleChain, dailyCeiling: 1 },
+  };
+  const anchor = { chain: {} as AnchorChain, everyMs: 3_600_000 };
+  const tier0 = { batches: {} as Tier0Batches };
+  const ballots = { admissions: {} as BallotAdmissions };
+  const registry = { sync: {} as RegistrySync };
+  for (const extra of [{ anchor }, { tier0 }, { ballots }, { registry }])
+    await expect(startWorker({ ...base, ...extra })).rejects.toThrow("runs nothing else");
 });
 
 test("msgpackr's native accelerator isn't installed, so no prebuilt binary loads", async () => {

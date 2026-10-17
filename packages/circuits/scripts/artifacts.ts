@@ -1,7 +1,7 @@
 // Writes each circuit's committed artifacts into a directory (`artifacts/` by
 // default): `<circuit>.json`, the ACIR and ABI as nargo compiles them, and
 // `<circuit>.vk`, its UltraHonk verification key from bb under the vendored
-// reference string (README, Artifacts). test/artifacts.test.ts runs this into a
+// reference string (README, Artifacts). test/proofs.test.ts runs this into a
 // scratch directory and fails if anything differs from what is committed.
 // Run from the package root: `vp node scripts/artifacts.ts [dir]`.
 
@@ -24,13 +24,25 @@ export function writeArtifacts(out: string): void {
   const scratch = mkdtempSync(join(tmpdir(), "abolish-circuit-artifacts-"));
   try {
     for (const circuit of CIRCUITS) {
-      execFileSync("nargo", ["compile", "--package", circuit], { cwd: root, stdio: "pipe" });
-      // nargo has no output option; its file is removed so the build leaves
-      // only artifacts/ behind (repro-build hashes every untracked file, and
-      // this one holds absolute paths).
-      const target = join(root, "target", `${circuit}.json`);
-      const compiled = JSON.parse(readFileSync(target, "utf8")) as Record<string, unknown>;
-      rmSync(target);
+      // nargo has no output option, so each circuit compiles as a scratch copy
+      // with its path dependencies made absolute: the package's own target/
+      // stays untouched for the tests that compile into it concurrently, and
+      // the build leaves only artifacts/ behind for repro-build to hash. The
+      // program is the same as the workspace's (test/proofs.test.ts).
+      const pkg = join(scratch, `${circuit}-pkg`);
+      mkdirSync(join(pkg, "src"), { recursive: true });
+      writeFileSync(
+        join(pkg, "Nargo.toml"),
+        readFileSync(join(root, circuit, "Nargo.toml"), "utf8").replace(
+          /path = "\.\.\/([^"]+)"/g,
+          (_, p: string) => `path = ${JSON.stringify(join(root, p))}`,
+        ),
+      );
+      copyFileSync(join(root, circuit, "src", "main.nr"), join(pkg, "src", "main.nr"));
+      execFileSync("nargo", ["compile", "--program-dir", pkg], { stdio: "pipe" });
+      const compiled = JSON.parse(
+        readFileSync(join(pkg, "target", `${circuit}.json`), "utf8"),
+      ) as Record<string, unknown>;
       // debug_symbols and file_map carry the sources' absolute paths; proving
       // needs only the bytecode and the ABI.
       const { noir_version, hash, abi, bytecode } = compiled;

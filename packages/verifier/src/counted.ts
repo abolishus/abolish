@@ -1,6 +1,7 @@
 // The counted set and the tally (docs/spec/verifier.md, Counted set and
 // tally): once selection (6.1) has passed, delivery (5.9) over the selected
-// ballots by @abolishus/crypto's `checkDelivery`, each cell's counted set
+// ballots by @abolishus/crypto's `checkDelivery` (`checkDeliveryV2` under
+// ballot version 4, over both panels' seats), each cell's counted set
 // from the ballots it keeps, the tally checks (7.1 to 7.3) by `checkTally`,
 // the two breaks of 7.4 that need the counted set, and 8.5's destruction
 // report by `checkDestruction`. The verifier gathers the records and maps the
@@ -33,6 +34,7 @@ import {
   type CellCode,
   checkContractEvent,
   checkDelivery,
+  checkDeliveryV2,
   checkDestruction,
   checkTally,
   type ContractEventVersion,
@@ -41,14 +43,19 @@ import {
   decodeBoardEntry,
   decodeContractEvent,
   deriveTotal,
+  type DeliveryCheck,
+  type DeliveryCheckV2,
+  type DeliveryDeadlines,
   type DeliveryEntry,
   type DeliveryRecordCode,
   deliveryDeadlines,
+  type DeliverySegments,
   deliverySegments,
   PARAMETERS,
   pinnedVersion,
   RECORD_TYPES,
   type RegisteredKeys,
+  type SeatPanel,
   tallyRules,
 } from "@abolishus/crypto";
 import { bytesToHex } from "@noble/hashes/utils.js";
@@ -137,6 +144,35 @@ export interface DeliveryReport {
   readonly rejected: readonly { readonly entry: number; readonly decodeError: DecodeErrorCode }[];
 }
 
+/**
+ * The report's `delivery` under ballot version 4, whose delivery records are
+ * version 2: version 1's, with each seat named by its panel (1 default, 2
+ * author) as well as its index.
+ */
+export interface DeliveryReportV2 {
+  readonly excluded: readonly {
+    readonly entry: number;
+    /** Qualified seats of either panel with no receipt or passing posting in time: default seats first, each panel ascending. */
+    readonly missing: readonly { readonly panel: SeatPanel; readonly seat: number }[];
+    readonly complaints: readonly {
+      readonly entry: number;
+      readonly panel: SeatPanel;
+      readonly seat: number;
+      readonly signer: number | null;
+    }[];
+  }[];
+  /** Each record the check ignored or attributed, in copy order, with the panel and seat it names. */
+  readonly records: readonly {
+    readonly entry: number;
+    readonly code: DeliveryRecordCode;
+    readonly panel: SeatPanel;
+    readonly seat: number;
+    readonly signer?: number | null;
+  }[];
+  /** Each record that doesn't decode under version 2 (every batch and root among them): a rejected entry (8.3). */
+  readonly rejected: readonly { readonly entry: number; readonly decodeError: DecodeErrorCode }[];
+}
+
 /** One cell of the partition, in partition order, once 7.1 passed. */
 export interface CellReport {
   readonly cell: number;
@@ -185,7 +221,7 @@ export interface DestructionReport {
 export interface CountedResult {
   /** 5.9, 6.3, 7.1, 7.2, 7.3 and, where the destruction statement applies, 8.5. */
   readonly rows: ReadonlyMap<string, CountedOutcome>;
-  readonly delivery?: DeliveryReport;
+  readonly delivery?: DeliveryReport | DeliveryReportV2;
   readonly cells?: readonly CellReport[];
   readonly tiers?: readonly TierReport[];
   readonly destruction?: DestructionReport;
@@ -261,14 +297,19 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
   const { definition, definitionHash, registered, clock } = inputs;
   const d = definition.value;
   // This release's delivery check reads ballot versions 1 and 2, whose
-  // delivery records are version 1; definition version 5's ballots are
-  // version 3, which `checkDelivery` doesn't read yet, and version 6's are
-  // version 4, whose delivery records are version 2 (P2-16 part 4).
-  if (definition.version === 5 || definition.version === 6)
+  // delivery records are version 1, and version 4 (definition version 6),
+  // whose records are version 2; definition version 5's ballots are version
+  // 3, which `checkDelivery` doesn't read yet.
+  if (definition.version === 5)
     return countedRows(
       { status: "unverifiable", code: "not-implemented", at: {} },
       inputs.destruction,
     );
+  // 3.2 registers no key set beside an author panel, so admission judges no
+  // ballot there and 6.1 never passes; a caller that gets here anyway decides
+  // nothing, since the author seats' key set would be taken on trust (T-37).
+  if (definition.version === 6 && definition.value.author_keys.length !== 0)
+    return countedRows({ status: "unverifiable", code: "not-reached", at: {} }, inputs.destruction);
   // Ordinary ballots can't be found under a contract-event version this
   // release doesn't read, so 5.5 is unsupported, admission never settles and
   // 6.1 never passes there, whatever the copy holds; a caller that gets here
@@ -343,7 +384,9 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
           { status: "unverifiable", code: "not-implemented", at: { entry: at } },
           inputs.destruction,
         );
-      if (checked.event.event === "ObligationRootSubmitted") {
+      // Ballot version 4 fixes no obligation-root version, so there a root
+      // is a rejected entry the delivery check lists, whatever it names.
+      if (checked.event.event === "ObligationRootSubmitted" && definition.version !== 6) {
         // A root for this election may deliver for every ballot by its leaves,
         // which only the counted-extent attestations make available and
         // `checkDelivery` doesn't read yet (P1-12f parts 2 and 3; P4-3 part
@@ -369,53 +412,12 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
     }
   }
 
-  const ballots = inputs.selected.map((b) => {
-    if (b.tally.delivery === undefined)
-      throw new Error("countedChecks: a selected ballot without its delivery fields");
-    return b.tally.delivery;
-  });
-  const delivered = checkDelivery(
-    {
-      definitionHash,
-      panelSize: d.panel_size,
-      registered,
-      segments,
-      deadlines,
-    },
-    ballots,
-    records,
-    1,
-  );
-  const entryOf = (i: number) => recordAt[i] as number;
-  const delivery: DeliveryReport = {
-    excluded: delivered.ballots.flatMap((b, i) =>
-      b.counted
-        ? []
-        : [
-            {
-              entry: (inputs.selected[i] as CountedBallot).entry,
-              missing: b.missing,
-              complaints: b.excludedBy.map((c) => ({
-                entry: entryOf(c.at),
-                ...(c.pair !== undefined && { pair: c.pair }),
-                seat: c.seat,
-                signer: c.signer,
-              })),
-            },
-          ],
-    ),
-    // In copy order, the stray roots among the check's records.
-    records: [
-      ...delivered.records.map((r) => ({
-        entry: entryOf(r.at),
-        ...(r.pair !== undefined && { pair: r.pair }),
-        code: r.code,
-        ...(r.signer !== undefined && { signer: r.signer }),
-      })),
-      ...strays.map((entry) => ({ entry, code: "delivery-stray" as const })),
-    ].sort((a, b) => a.entry - b.entry),
-    rejected: delivered.rejected.map((r) => ({ entry: entryOf(r.at), decodeError: r.error })),
-  };
+  const against: DeliveryWindow = { definitionHash, registered, segments, deadlines };
+  const delivered =
+    definition.version === 6
+      ? deliveryV2(inputs, against, records, recordAt)
+      : deliveryV1(inputs, against, records, recordAt, strays);
+  const { delivery } = delivered;
   // An exclusion is the rule's outcome, never a breach, and a failing record
   // is ignored: 5.9 has no failure of its own.
   const rows = new Map<string, CountedOutcome>([["5.9", { status: "pass" }]]);
@@ -439,6 +441,14 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
   });
   rows.set("6.3", closed.row);
   const close = closed.report === undefined ? {} : { close: closed.report };
+
+  // Version 6's tally (7.1 to 7.3, 8.5) reads its counted set's default
+  // halves under tally-opening version 1, which P2-16 part 4c brings.
+  if (definition.version === 6) {
+    const later: CountedOutcome = { status: "unverifiable", code: "not-implemented", at: {} };
+    for (const id of [...TALLY_ROWS, ...(inputs.destruction ? ["8.5"] : [])]) rows.set(id, later);
+    return { rows, delivery, ...close };
+  }
 
   // The destruction statement's version is the tally opening's (tally.md,
   // Destruction), so neither is read under another tally-opening pin (T-36).
@@ -612,6 +622,135 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
     tiers: tierReports,
     destruction,
     tallyBreaks,
+  };
+}
+
+/** What delivery runs against beside the definition and the records. */
+interface DeliveryWindow {
+  readonly definitionHash: Uint8Array;
+  readonly registered: readonly RegisteredKeys[];
+  readonly segments: DeliverySegments;
+  readonly deadlines: DeliveryDeadlines;
+}
+
+/** The selected ballots' delivery fields, of the version the definition's ballots have. */
+function deliveryFields<K extends "delivery" | "deliveryV4">(
+  selected: readonly CountedBallot[],
+  key: K,
+): NonNullable<BallotTally[K]>[] {
+  return selected.map((b) => {
+    const fields = b.tally[key];
+    if (fields === undefined)
+      throw new Error("countedChecks: a selected ballot without its delivery fields");
+    return fields as NonNullable<BallotTally[K]>;
+  });
+}
+
+/** 5.9 under ballot versions 1 and 2: delivery records version 1, over the default panel. */
+function deliveryV1(
+  inputs: CountedInputs,
+  window: DeliveryWindow,
+  records: readonly DeliveryEntry[],
+  recordAt: readonly number[],
+  strays: readonly number[],
+): { readonly ballots: DeliveryCheck["ballots"]; readonly delivery: DeliveryReport } {
+  const delivered = checkDelivery(
+    { ...window, panelSize: inputs.definition.value.panel_size },
+    deliveryFields(inputs.selected, "delivery"),
+    records,
+    1,
+  );
+  const entryOf = (i: number) => recordAt[i] as number;
+  return {
+    ballots: delivered.ballots,
+    delivery: {
+      excluded: delivered.ballots.flatMap((b, i) =>
+        b.counted
+          ? []
+          : [
+              {
+                entry: (inputs.selected[i] as CountedBallot).entry,
+                missing: b.missing,
+                complaints: b.excludedBy.map((c) => ({
+                  entry: entryOf(c.at),
+                  ...(c.pair !== undefined && { pair: c.pair }),
+                  seat: c.seat,
+                  signer: c.signer,
+                })),
+              },
+            ],
+      ),
+      // In copy order, the stray roots among the check's records.
+      records: [
+        ...delivered.records.map((r) => ({
+          entry: entryOf(r.at),
+          ...(r.pair !== undefined && { pair: r.pair }),
+          code: r.code,
+          ...(r.signer !== undefined && { signer: r.signer }),
+        })),
+        ...strays.map((entry) => ({ entry, code: "delivery-stray" as const })),
+      ].sort((a, b) => a.entry - b.entry),
+      rejected: delivered.rejected.map((r) => ({ entry: entryOf(r.at), decodeError: r.error })),
+    },
+  };
+}
+
+/**
+ * 5.9 under ballot version 4: delivery records version 2, over every
+ * qualified seat of both panels, each record against its own panel's share
+ * hashes and key set (docs/spec/delivery.md, Delivery check (version 2);
+ * T-37). Without an author panel its key set is empty, so a record naming
+ * an author seat is `delivery-seat` and delivers nothing.
+ */
+function deliveryV2(
+  inputs: CountedInputs,
+  window: DeliveryWindow,
+  records: readonly DeliveryEntry[],
+  recordAt: readonly number[],
+): { readonly ballots: DeliveryCheckV2["ballots"]; readonly delivery: DeliveryReportV2 } {
+  const delivered = checkDeliveryV2(
+    {
+      definitionHash: window.definitionHash,
+      panelSize: inputs.definition.value.panel_size,
+      authorPanelSize: 0,
+      registered: { default: window.registered, author: [] },
+      segments: window.segments,
+      deadlines: window.deadlines,
+    },
+    deliveryFields(inputs.selected, "deliveryV4"),
+    records,
+  );
+  const entryOf = (i: number) => recordAt[i] as number;
+  return {
+    ballots: delivered.ballots,
+    delivery: {
+      excluded: delivered.ballots.flatMap((b, i) =>
+        b.counted
+          ? []
+          : [
+              {
+                entry: (inputs.selected[i] as CountedBallot).entry,
+                missing: b.missing.map(({ panel, seat }) => ({ panel, seat })),
+                // Ballot version 4 fixes no batch version, so no complaint
+                // here is a batch's entry.
+                complaints: b.excludedBy.map((c) => ({
+                  entry: entryOf(c.at),
+                  panel: c.panel,
+                  seat: c.seat,
+                  signer: c.signer,
+                })),
+              },
+            ],
+      ),
+      records: delivered.records.map((r) => ({
+        entry: entryOf(r.at),
+        code: r.code,
+        panel: r.panel,
+        seat: r.seat,
+        ...(r.signer !== undefined && { signer: r.signer }),
+      })),
+      rejected: delivered.rejected.map((r) => ({ entry: entryOf(r.at), decodeError: r.error })),
+    },
   };
 }
 

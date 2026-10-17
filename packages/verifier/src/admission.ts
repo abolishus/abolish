@@ -171,6 +171,9 @@ export function electionAdmission(
         waiting.push({ at, step: s });
       }
     }
+    // Finishing reads only what each step decoded and the election's own
+    // context, so no payload's bytes can make it throw and lose the others'
+    // verdicts: every decoding error was caught above, per payload.
     const finished = finishBallotSteps(waiting.map((w) => w.step));
     for (const [i, { at }] of waiting.entries())
       results[at] = verdict(finished[i] as BallotCheck | BallotCheckV2);

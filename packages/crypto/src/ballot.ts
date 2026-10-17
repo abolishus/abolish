@@ -1115,7 +1115,10 @@ function runStep<R>(step: Step<R>): R {
  * A ballot's admission checks run up to its membership proof, by
  * `stepBallot` to `stepBallotV4`. Only `finishBallotStep` and
  * `finishBallotSteps` read it, and only steps this module made are accepted,
- * so no caller can finish one with a verdict it chose (T-05).
+ * so no caller can finish one with a verdict it chose (T-05). The step holds
+ * the decoded record, whose validity proofs are read when it is finished:
+ * the record must not change in between, or the result would cover the
+ * hash and signals of one vote and the validity proofs of another.
  */
 export interface BallotStep<R> {
   /** Type-only: what finishing the step gives. Never set. */
@@ -1154,15 +1157,19 @@ export function finishBallotStep<R>(step: BallotStep<R>): R {
  */
 export function finishBallotSteps<R>(steps: readonly BallotStep<R>[]): R[] {
   if (!Array.isArray(steps)) throw new TypeError("steps: expected an array");
-  const list = steps.map((handle) => stepFrom<R>(handle));
   const waiting: { readonly at: number; readonly finish: (verified: boolean) => R }[] = [];
   const checks: MembershipProofCheck[] = [];
-  const results: (R | undefined)[] = list.map((step, at) => {
-    if ("done" in step) return step.done;
-    waiting.push({ at, finish: step.finish });
-    checks.push(step.check);
-    return undefined;
-  });
+  const results: (R | undefined)[] = [];
+  // By `entries`, so a hole is refused by `stepFrom` rather than skipped.
+  for (const [at, handle] of steps.entries()) {
+    const step = stepFrom<R>(handle);
+    if ("done" in step) results.push(step.done);
+    else {
+      results.push(undefined);
+      waiting.push({ at, finish: step.finish });
+      checks.push(step.check);
+    }
+  }
   const verdicts = verifyDecodedMembershipProofs(checks);
   for (const [i, { at, finish }] of waiting.entries()) results[at] = finish(verdicts[i] === true);
   return results as R[];

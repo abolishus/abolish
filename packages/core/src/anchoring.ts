@@ -12,7 +12,6 @@ import {
   checkpointHash,
   copyCheckpoints,
   decodeCheckpoint,
-  decodeElectionDefinition,
   encodeBoardEntry,
   encodeCheckpoint,
 } from "@abolishus/crypto";
@@ -22,7 +21,7 @@ import type { Sql } from "postgres";
 import { listBoards } from "./audit.ts";
 import { lockBoard, pinnedBoardVersion, readBoard } from "./board.ts";
 import { isBytes } from "./bytes.ts";
-import { readDefinition } from "./definitions.ts";
+import { decodeStoredDefinition, readDefinition } from "./definitions.ts";
 import { boardCheckpoints, boardEntries } from "./db/schema/index.ts";
 
 const MAX_SEGMENT = 2 ** 32 - 1;
@@ -343,7 +342,7 @@ async function anchorBoard(
   const definition = await readDefinition(client, id);
   // A board is started only once its definition is stored (appendEntry).
   if (definition === undefined) throw new Error("a stored board has no definition");
-  const d = decodeElectionDefinition(definition);
+  const d = decodeStoredDefinition(definition).value;
   if (d.l1_chain_id !== chain.chainId || !equal(d.l1_anchor, chain.address)) {
     findings.push({ code: "anchor-unserved", electionId: id });
     return undefined;

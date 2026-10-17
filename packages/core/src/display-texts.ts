@@ -11,18 +11,13 @@
 // client keeps showing under a notice. The text stays in this table until the
 // unpinning job deletes it (P4-3).
 
-import {
-  checkElectionToShow,
-  decodeElectionDefinition,
-  electionDefinitionHash,
-  type ShowRefusal,
-} from "@abolishus/crypto";
+import { checkElectionRecordToShow, type ShowRecordRefusal } from "@abolishus/crypto";
 import { desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import type { Sql } from "postgres";
 import { isBytes } from "./bytes.ts";
 import { displayTexts, moderationActions } from "./db/schema/index.ts";
-import { readDefinition } from "./definitions.ts";
+import { decodeStoredDefinition, readDefinition, storedDefinitionHash } from "./definitions.ts";
 import { REMOVAL_REASONS } from "./moderation.ts";
 
 export type DisplayTextErrorCode =
@@ -36,7 +31,7 @@ export type DisplayTextErrorCode =
 export class DisplayTextError extends Error {
   override readonly name = "DisplayTextError";
   readonly code: DisplayTextErrorCode;
-  constructor(code: DisplayTextErrorCode, options?: { cause?: ShowRefusal }) {
+  constructor(code: DisplayTextErrorCode, options?: { cause?: ShowRecordRefusal }) {
     super(`display text refused: ${code}`, options);
     this.code = code;
   }
@@ -59,8 +54,9 @@ function checkElectionId(electionId: unknown): asserts electionId is Uint8Array 
 }
 
 /**
- * Stores `displayText` for `electionId`, after `checkElectionToShow` passes it
- * against the stored definition. Storing the same bytes again is a no-op;
+ * Stores `displayText` for `electionId`, after `checkElectionRecordToShow`
+ * passes it against the stored definition (display-text version 2 against a
+ * version-5 definition's questions). Storing the same bytes again is a no-op;
  * other bytes for an election that has text are a `conflict` (the
  * commitment binds one record, so they can't pass the check unless the hash
  * collides).
@@ -78,8 +74,8 @@ export async function storeDisplayText(
   if (definition === undefined) throw new DisplayTextError("unknown-election");
   // A stored definition decoded and was well formed when it was stored, so
   // its hash is the one the registry holds if it was taken from the registry.
-  const registered = electionDefinitionHash(decodeElectionDefinition(definition));
-  const checked = checkElectionToShow(id, registered, definition, bytes);
+  const registered = storedDefinitionHash(decodeStoredDefinition(definition));
+  const checked = checkElectionRecordToShow(id, registered, definition, bytes);
   if (!checked.ok) throw new DisplayTextError("refused", { cause: checked });
   const db = drizzle({ client });
   const inserted = await db
@@ -130,7 +126,7 @@ export async function readServedDisplayText(
   const end = recent.findIndex((r) => r.action !== "hide");
   const hiddenRun = end === -1 ? recent : recent.slice(0, end);
   if (hiddenRun.length > 0) {
-    const def = decodeElectionDefinition(definition);
+    const def = decodeStoredDefinition(definition).value;
     const open = now < def.closes_at + BigInt(def.l1_inclusion_bound);
     if (!(open && hiddenRun.every((r) => r.reason === "threat"))) return { served: "withheld" };
   }

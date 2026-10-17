@@ -1,9 +1,13 @@
 import {
   decodeElectionDefinition,
+  decodeElectionDefinitionV5,
   electionDefinitionHash,
+  electionDefinitionV5Hash,
   encodeElectionDefinition,
+  encodeElectionDefinitionV5,
 } from "@abolishus/crypto";
 import { randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { getTableConfig } from "drizzle-orm/pg-core";
 import fc from "fast-check";
 import type { Sql } from "postgres";
@@ -195,6 +199,37 @@ describe("recordRegistration", () => {
         ),
       ),
     );
+  });
+
+  test("a stored version-5 definition is checked against its own version's hash", async () => {
+    // verifier-ballots-v3.json's definition of several questions (P2-14).
+    const v5 = decodeElectionDefinitionV5(
+      Uint8Array.from(
+        Buffer.from(
+          (
+            JSON.parse(
+              readFileSync(
+                new URL("../../../docs/spec/vectors/verifier-ballots-v3.json", import.meta.url),
+                "utf8",
+              ),
+            ) as { cases: { id: string; definition: string }[] }
+          ).cases.find((c) => c.id === "admitted")!.definition,
+          "hex",
+        ),
+      ),
+    );
+    const definition = { ...v5, election_id: b32() };
+    const { electionId, definitionHash } = await storeDefinition(
+      app,
+      encodeElectionDefinitionV5(definition),
+    );
+    expect(definitionHash).toEqual(electionDefinitionV5Hash(definition));
+    const r = { electionId, definitionHash, ...next() };
+    expect(await refusedWith(recordRegistration(app, { ...r, definitionHash: b32() }))).toBe(
+      "hash-mismatch",
+    );
+    await recordRegistration(app, r);
+    expect(await shortCodeOf(app, electionId)).toBe(shortCode(definitionHash));
   });
 
   test("records an event whose definition isn't stored, so it still owns its codes", async () => {

@@ -1,7 +1,10 @@
 import {
   decodeElectionDefinition,
+  decodeElectionDefinitionV5,
   electionDefinitionHash,
+  electionDefinitionV5Hash,
   encodeElectionDefinition,
+  encodeElectionDefinitionV5,
   profileCombinationRule,
   RECORD_TYPES,
 } from "@abolishus/crypto";
@@ -42,6 +45,28 @@ const vectors: Vector[] = JSON.parse(
     "utf8",
   ),
 ).vectors;
+
+const readVectors = (name: string): Vector[] =>
+  JSON.parse(readFileSync(new URL(`../../../docs/spec/vectors/${name}`, import.meta.url), "utf8"))
+    .vectors;
+const unhex = (s: string) => new Uint8Array(Buffer.from(s, "hex"));
+
+// A version-5 definition of three questions under the profile 2.3 asks of
+// version 5 (verifier-ballots-v3.json's, from an independent implementation).
+const typicalV5 = decodeElectionDefinitionV5(
+  unhex(
+    (
+      JSON.parse(
+        readFileSync(
+          new URL("../../../docs/spec/vectors/verifier-ballots-v3.json", import.meta.url),
+          "utf8",
+        ),
+      ) as { cases: { id: string; definition: string }[] }
+    ).cases.find((c) => c.id === "admitted")!.definition,
+  ),
+);
+const freshV5 = (electionId = new Uint8Array(randomBytes(32))) =>
+  encodeElectionDefinitionV5({ ...typicalV5, election_id: electionId });
 
 /** `typical` (the typical vector under a profile 2.3 passes) under a fresh election ID. */
 const fresh = (electionId = new Uint8Array(randomBytes(32))) =>
@@ -309,6 +334,104 @@ describe("storeDefinition", () => {
       ),
       { numRuns: Math.min(numRuns, 200) },
     );
+  });
+});
+
+describe("storeDefinition under definition version 5 (several questions, P2-14)", () => {
+  test("stores one under its own election ID, with version 5's hash", async () => {
+    expect(typicalV5.questions.length).toBeGreaterThan(1);
+    const id = new Uint8Array(randomBytes(32));
+    const bytes = freshV5(id);
+    const stored = await storeDefinition(app, bytes);
+    expect(stored.electionId).toEqual(id);
+    expect(stored.definitionHash).toEqual(
+      electionDefinitionV5Hash(decodeElectionDefinitionV5(bytes)),
+    );
+    expect(await readDefinition(app, id)).toEqual(bytes);
+    expect((await storeDefinition(app, bytes)).definitionHash).toEqual(stored.definitionHash);
+    const other = encodeElectionDefinitionV5({ ...typicalV5, election_id: id, opens_at: 1n });
+    expect(await refusedWith(storeDefinition(app, other))).toBe("conflict");
+  });
+
+  test("refuses every version-5 vector that fails decoding, with nothing stored", async () => {
+    const bad = readVectors("election-definition-v5.json").filter((v) => v.error !== undefined);
+    expect(bad.length).toBeGreaterThan(0);
+    const before = await rows();
+    for (const v of bad) {
+      const e = await storeDefinition(app, unhex(v.encoding)).catch((x: unknown) => x);
+      expect((e as DefinitionError).code, v.id).toBe("decode");
+      expect(((e as DefinitionError).cause as { code: string }).code, v.id).toBe(v.error);
+    }
+    expect(await rows()).toBe(before);
+  });
+
+  test("refuses every version-5 vector that is ill formed, naming the rule", async () => {
+    const bad = readVectors("election-definition-v5.json").filter((v) => v.illFormed !== undefined);
+    expect(bad.length).toBeGreaterThan(0);
+    for (const v of bad) {
+      const id = new Uint8Array(randomBytes(32));
+      const decoded = decodeElectionDefinitionV5(unhex(v.encoding));
+      const bytes = encodeElectionDefinitionV5({ ...decoded, election_id: id });
+      const e = await storeDefinition(app, bytes).catch((x: unknown) => x);
+      expect((e as DefinitionError).code, v.id).toBe("ill-formed");
+      expect((e as DefinitionError).cause, v.id).toBe(v.illFormed);
+      expect(await readDefinition(app, id), v.id).toBeUndefined();
+    }
+  });
+
+  test("stores one exactly when 2.3 passes its profile", async () => {
+    const types = typicalV5.profile.pins
+      .map((p) => p.record_type)
+      .filter((t) => t !== RECORD_TYPES.electionDefinition);
+    await fc.assert(
+      fc.asyncProperty(
+        fc.constantFrom(...types),
+        fc.integer({ min: 1, max: 0xff }),
+        async (type, version) => {
+          const pins = typicalV5.profile.pins.map((p) =>
+            p.record_type === type ? { ...p, version } : p,
+          );
+          const decoded = {
+            ...typicalV5,
+            election_id: new Uint8Array(randomBytes(32)),
+            profile: { ...typicalV5.profile, pins },
+          };
+          const rule = profileCombinationRule(decoded);
+          const stored = await storeDefinition(app, encodeElectionDefinitionV5(decoded)).then(
+            () => undefined,
+            (e: unknown) => e,
+          );
+          if (rule === undefined) expect(stored).toBeUndefined();
+          else {
+            expect((stored as DefinitionError).code).toBe("profile");
+            expect((stored as DefinitionError).cause).toBe(rule);
+          }
+          expect(await hasDefinition(app, decoded.election_id)).toBe(rule === undefined);
+        },
+      ),
+      { numRuns: Math.min(numRuns, 200) },
+    );
+  });
+
+  test("refuses versions 3, 4 and 6 as unknown, which no client shows yet", async () => {
+    const before = await rows();
+    for (const name of [
+      "election-definition-v3.json",
+      "election-definition-v4.json",
+      "election-definition-v6.json",
+    ]) {
+      const good = readVectors(name).filter((v) => v.hash !== undefined);
+      expect(good.length, name).toBeGreaterThan(0);
+      for (const v of good) {
+        const e = await storeDefinition(app, unhex(v.encoding)).catch((x: unknown) => x);
+        expect((e as DefinitionError).code, v.id).toBe("decode");
+        expect((e as DefinitionError).cause, v.id).toMatchObject({
+          code: "unknown-version",
+          offset: 2,
+        });
+      }
+    }
+    expect(await rows()).toBe(before);
   });
 });
 

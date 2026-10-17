@@ -6,11 +6,11 @@
 // chain + IPFS whatever is decided here (G-9), and hiding a poll's text
 // leaves its counts published, by option index.
 
-import { decodeElectionDefinition } from "@abolishus/crypto";
 import { and, asc, desc, eq, gt, sql as q } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import type { Sql } from "postgres";
 import { isBytes } from "./bytes.ts";
+import { decodeStoredDefinition } from "./definitions.ts";
 import {
   accountModerators,
   accountPolls,
@@ -238,7 +238,7 @@ export async function recordDecision(
   if (await createdBy(tx, id, account)) throw new ModerationError("own-poll");
   if (action === "hide" && !(OPEN_POLL_HIDE_REASONS as readonly string[]).includes(reason)) {
     // A stored definition was decoded and checked before it was stored.
-    const def = decodeElectionDefinition(new Uint8Array(stored.definition));
+    const def = decodeStoredDefinition(new Uint8Array(stored.definition)).value;
     // Ballots can still arrive until the inclusion bound after the close
     // (election-definition.md, closes_at and l1_inclusion_bound).
     const at = BigInt(Math.floor(decidedAt.getTime() / 1000));

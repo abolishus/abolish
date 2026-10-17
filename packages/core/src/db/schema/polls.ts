@@ -66,6 +66,7 @@ export const ceremonyRuns = pgTable("ceremony_runs", {
   round: smallint("round").notNull(),
   roundOpenedAt: at("round_opened_at").notNull(),
   transcript: bytea("transcript").notNull(),
+  eligible: smallint("eligible").array().notNull(),
   transcriptHash: bytea("transcript_hash"),
   keySetHash: bytea("key_set_hash"),
   qualified: smallint("qualified").array(),

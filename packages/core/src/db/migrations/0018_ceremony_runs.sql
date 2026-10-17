@@ -26,6 +26,10 @@ CREATE TABLE ceremony_runs (
     octet_length(transcript) BETWEEN 3 AND 1048576
     AND substring(transcript FROM 1 FOR 3) = '\x000501'
   ),
+  -- The seats the open round (or the approvals) asks: every seat in round
+  -- 1, round 1's senders in rounds 2 and 3, round 2's in round 4 (the
+  -- transcript check's order rule), the qualified seats after.
+  eligible smallint[] NOT NULL CHECK (cardinality(eligible) BETWEEN 1 AND 16),
   -- Once round 4 closed with a transcript that checks: its hash, the
   -- registered key set's hash and its qualified seats, in order.
   transcript_hash bytea CHECK (octet_length(transcript_hash) = 32),
@@ -44,6 +48,7 @@ CREATE TABLE ceremony_runs (
     AND (round = 5) <= (transcript_hash IS NOT NULL)
     AND (round = 6) = (outcome IS NOT NULL)
     AND ((outcome IN ('approved', 'too-few-approvals')) IS NOT TRUE OR transcript_hash IS NOT NULL)
+    AND ((outcome IN ('too-few-messages', 'transcript-refused')) IS NOT TRUE OR transcript_hash IS NULL)
   )
 );
 

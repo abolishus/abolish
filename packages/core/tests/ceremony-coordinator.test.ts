@@ -263,7 +263,7 @@ const seats = () => [new Seat(1), new Seat(2), new Seat(3)];
 
 const runRow = async (stubHash: Uint8Array) => {
   const [r] = await db.admin`
-    SELECT run_id, round, outcome, qualified, transcript FROM ceremony_runs WHERE stub_hash = ${stubHash}`;
+    SELECT run_id, round, outcome, qualified, eligible, transcript FROM ceremony_runs WHERE stub_hash = ${stubHash}`;
   return r!;
 };
 
@@ -334,28 +334,69 @@ describe("a whole ceremony", () => {
     expect(poll!["state"]).toBe("ceremony");
   }, 120_000);
 
-  test("closes rounds at their deadline without a withheld seat, and approves with rule 7's n − 1", async () => {
+  test("closes round 1 at its deadline without a withheld seat, then asks only the seats left, and approves with rule 7's n − 1", async () => {
     const stubHash = await stubbed();
     await openCeremonyRuns(app, DEPLOYMENT, { now: NOW });
-    const [one, two] = seats();
-    let at = 0;
-    for (let round = 1; round <= 4; round++) {
+    const [one, two, three] = seats();
+    expect(await one!.act()).toEqual(["accepted"]);
+    expect(await two!.act()).toEqual(["accepted"]);
+    // Not yet due: round 1 stays open for seat 3.
+    expect(await close(ROUND_SECONDS - 1)).toEqual({ closed: 0, ended: {} });
+    expect(await close(ROUND_SECONDS)).toEqual({ closed: 1, ended: {} });
+    expect(await runRow(stubHash)).toMatchObject({ round: 2, eligible: [1, 2] });
+    // Seat 3 sent nothing in round 1, so no later round asks it, and each
+    // closes as soon as seats 1 and 2 have sent.
+    for (let round = 2; round <= 4; round++) {
+      expect(await three!.act()).toEqual([]);
       expect(await one!.act()).toEqual(["accepted"]);
       expect(await two!.act()).toEqual(["accepted"]);
-      // Not yet due: the round stays open for seat 3.
-      expect(await close(at + ROUND_SECONDS - 1)).toEqual({ closed: 0, ended: {} });
-      at += ROUND_SECONDS;
-      expect(await close(at)).toEqual({ closed: 1, ended: {} });
+      expect((await runRow(stubHash))["round"]).toBe(round + 1);
     }
     expect(await runRow(stubHash)).toMatchObject({ round: 5, qualified: [1, 2] });
-    // Seat 3 didn't qualify, so it isn't asked to approve; both qualified
-    // seats' approvals end the run at once.
-    expect(await new Seat(3).act()).toEqual([]);
+    expect(await three!.act()).toEqual([]);
     expect(await one!.act()).toEqual(["accepted"]);
     expect(await two!.act()).toEqual(["accepted"]);
     expect((await runRow(stubHash))["outcome"]).toBe("approved");
     await expectApproved(stubHash, [1, 2]);
   }, 120_000);
+
+  test("refuses a round-2 message from a seat that sent nothing in round 1", async () => {
+    const stubHash = await stubbed();
+    await openCeremonyRuns(app, DEPLOYMENT, { now: NOW });
+    const [one, two, three] = seats();
+    await one!.act();
+    await two!.act();
+    await close(ROUND_SECONDS);
+    const [r] = await coordinatorRequests(app, DEPLOYMENT, 1);
+    const stub = decodeElectionDefinitionV5(r!.stub);
+    const t = decodeCeremonyTranscript(r!.transcript, 1);
+    const params: CeremonyParams = {
+      l2ChainId: stub.l2_chain_id,
+      trusteeRegistry: stub.trustee_registry,
+      electionId: stub.election_id,
+      stubHash,
+      panel: PANEL,
+      runId: t.run_id,
+    };
+    // Seat 3's challenges over round 1 as closed, signed by seat 3 itself:
+    // it has no round-1 message, so the order rule leaves it out.
+    const late = ceremonyKeygen(3, SECRETS[2]!);
+    const withLate = [...t.keys, keysMessage(params, late)];
+    const m = challengesMessage(params, late, withLate).message;
+    const body = encodeCeremonyTranscript({ run_id: t.run_id, ...EMPTY, challenges: [m] });
+    expect(
+      await postCeremonyMessage(app, DEPLOYMENT, 3, { stubHash, transcript: body }, { now: NOW }),
+    ).toBe("refused");
+    expect(await three!.act()).toEqual([]);
+  }, 60_000);
+
+  test("asks nothing for a run whose poll has left `ceremony`", async () => {
+    await stubbed();
+    await openCeremonyRuns(app, DEPLOYMENT, { now: NOW });
+    expect(await coordinatorRequests(app, DEPLOYMENT, 1)).toHaveLength(1);
+    await db.admin`UPDATE account_polls SET state = 'failed', failure = 'stub-refused'`;
+    expect(await coordinatorRequests(app, DEPLOYMENT, 1)).toEqual([]);
+  });
 
   test("ends a run whose round closes below rule 7's quorum", async () => {
     const stubHash = await stubbed();
@@ -435,6 +476,15 @@ describe("openCeremonyRuns", () => {
       opened: 0,
       mismatched: 0,
       expired: 1,
+    });
+    // A stub recorded beside another election identifier than its own.
+    await db.admin`DELETE FROM account_polls`;
+    const hash = await stubbed();
+    await db.admin`UPDATE ceremony_stubs SET election_id = ${randomBytes(32)} WHERE stub_hash = ${hash}`;
+    expect(await openCeremonyRuns(app, DEPLOYMENT, { now: NOW })).toEqual({
+      opened: 0,
+      mismatched: 1,
+      expired: 0,
     });
   });
 
@@ -546,10 +596,12 @@ describe("posts", () => {
         { now: NOW },
       );
     expect(await approve(1, 1, new Uint8Array(32), new Uint8Array(32))).toBe("not-open");
+    // Round 1 closes at its deadline without seat 3; the rest as soon as
+    // seats 1 and 2 have sent.
     for (let round = 1; round <= 4; round++) {
       await one!.act();
       await two!.act();
-      await close(ROUND_SECONDS * round);
+      if (round === 1) await close(ROUND_SECONDS);
     }
     const { transcript } = await runRow(stubHash);
     const check = checkCeremonyTranscript(
@@ -615,11 +667,17 @@ describe("the coordinator's tables", () => {
     expect(await set("outcome = 'approved', round = 6")).toMatch(/check/);
     expect(await set("transcript_hash = '\\x00'")).toMatch(/check/);
     expect(await set("transcript = '\\x000502'")).toMatch(/check/);
+    // An early end never carries a checked transcript.
+    expect(
+      await set(
+        "outcome = 'too-few-messages', round = 6, transcript_hash = decode(repeat('00', 32), 'hex'), key_set_hash = decode(repeat('00', 32), 'hex'), qualified = '{1,2}'",
+      ),
+    ).toMatch(/check/);
     expect(await set("outcome = 'too-few-messages', round = 6")).toBe("ok");
     expect((await runRow(stubHash))["outcome"]).toBe("too-few-messages");
     await expect(
-      app`INSERT INTO ceremony_runs (run_id, stub_hash, round, round_opened_at, transcript, created_at)
-        VALUES (${randomBytes(32)}, ${stubHash}, 1, now(), ${encodeCeremonyTranscript({ run_id: new Uint8Array(32), ...EMPTY })}, now())`,
+      app`INSERT INTO ceremony_runs (run_id, stub_hash, round, round_opened_at, transcript, eligible, created_at)
+        VALUES (${randomBytes(32)}, ${stubHash}, 1, now(), ${encodeCeremonyTranscript({ run_id: new Uint8Array(32), ...EMPTY })}, '{1,2,3}', now())`,
     ).rejects.toThrow(/unique|duplicate/);
   });
 });

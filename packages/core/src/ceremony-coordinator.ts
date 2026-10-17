@@ -100,9 +100,11 @@ export interface OpenRunsReport {
 
 /**
  * Opens a run, with a fresh `run_id` from the CSPRNG, for every poll in
- * `ceremony` whose current stub has none. A stub whose panel identifier, L2
- * chain or trustee registry isn't the deployment's is left unopened: no seat
- * of this panel could approve it. Safe to rerun: one run per stub.
+ * `ceremony` whose current stub has none, asking every seat for round 1. A
+ * stub whose panel identifier, L2 chain or trustee registry isn't the
+ * deployment's, or whose election identifier isn't the one recorded beside
+ * it, is left unopened: no seat of this panel could approve it. Safe to
+ * rerun: one run per stub.
  */
 export async function openCeremonyRuns(
   client: Sql,
@@ -115,6 +117,7 @@ export async function openCeremonyRuns(
     .select({
       stubHash: ceremonyStubs.stubHash,
       stub: ceremonyStubs.stub,
+      electionId: ceremonyStubs.electionId,
       opensAt: ceremonyStubs.opensAt,
     })
     .from(accountPolls)
@@ -125,8 +128,18 @@ export async function openCeremonyRuns(
   const id = panelId(deployment.panel);
   const now = BigInt(Math.floor(options.now.getTime() / 1000));
   for (const s of stubs) {
-    const stub = decodeElectionDefinitionV5(s.stub);
+    let stub;
+    try {
+      stub = decodeElectionDefinitionV5(s.stub);
+    } catch (e) {
+      // The table holds only version-5 records the stub step built; one that
+      // doesn't decode is left, rather than stopping every run behind it.
+      if (!(e instanceof DecodeError)) throw e;
+      report.mismatched++;
+      continue;
+    }
     if (
+      !equal(stub.election_id, s.electionId) ||
       !equal(stub.panel_id, id) ||
       stub.l2_chain_id !== deployment.l2ChainId ||
       !equal(stub.trustee_registry, deployment.trusteeRegistry)
@@ -146,6 +159,7 @@ export async function openCeremonyRuns(
         stubHash: s.stubHash,
         round: 1,
         roundOpenedAt: options.now,
+        eligible: deployment.panel.keys.map((_, i) => i + 1),
         transcript: encodeCeremonyTranscript({ run_id: runId, ...EMPTY }),
         createdAt: options.now,
       })
@@ -160,9 +174,11 @@ const validSeat = (deployment: CoordinatorDeployment, seat: number) =>
   Number.isSafeInteger(seat) && seat >= 1 && seat <= deployment.panel.keys.length;
 
 /**
- * What the coordinator asks of `seat` now, oldest run first: the open round
- * of every run it has sent nothing in yet, and, once a run's transcript
- * checks, its approval if the seat qualified and hasn't approved.
+ * What the coordinator asks of `seat` now, oldest run first, for polls still
+ * in `ceremony`: the open round of every run where the seat can still send
+ * (every seat in round 1, round 1's senders in rounds 2 and 3, round 2's in
+ * round 4) and hasn't, and, once a run's transcript checks, its approval if
+ * the seat qualified and hasn't approved.
  */
 export async function coordinatorRequests(
   client: Sql,
@@ -176,12 +192,14 @@ export async function coordinatorRequests(
     .from(ceremonyRuns)
     .innerJoin(ceremonyStubs, eq(ceremonyStubs.stubHash, ceremonyRuns.stubHash))
     .where(
-      sql`(${ceremonyRuns.round} <= 4 AND NOT EXISTS (
+      sql`EXISTS (SELECT 1 FROM ${accountPolls} WHERE ${accountPolls.stubHash} = ${ceremonyRuns.stubHash}
+          AND ${accountPolls.state} = 'ceremony')
+        AND ${seat} = ANY(${ceremonyRuns.eligible}) AND ((${ceremonyRuns.round} <= 4 AND NOT EXISTS (
           SELECT 1 FROM ${ceremonyMessages} WHERE ${ceremonyMessages.runId} = ${ceremonyRuns.runId}
             AND ${ceremonyMessages.round} = ${ceremonyRuns.round} AND ${ceremonyMessages.seat} = ${seat}))
-        OR (${ceremonyRuns.round} = 5 AND ${seat} = ANY(${ceremonyRuns.qualified}) AND NOT EXISTS (
+        OR (${ceremonyRuns.round} = 5 AND NOT EXISTS (
           SELECT 1 FROM ${ceremonyApprovals} WHERE ${ceremonyApprovals.runId} = ${ceremonyRuns.runId}
-            AND ${ceremonyApprovals.seat} = ${seat}))`,
+            AND ${ceremonyApprovals.seat} = ${seat})))`,
     )
     .orderBy(asc(ceremonyRuns.createdAt), asc(ceremonyRuns.runId))
     .limit(MAX_COORDINATOR_REQUESTS);
@@ -197,31 +215,39 @@ interface LockedRun {
   readonly electionId: Uint8Array;
   readonly round: number;
   readonly transcript: Uint8Array;
+  readonly eligible: number[];
   readonly transcriptHash: Uint8Array | null;
   readonly keySetHash: Uint8Array | null;
   readonly qualified: number[] | null;
 }
 
-// The run's row, locked until the transaction ends, so a post and a close
-// never interleave: a message is judged against the rounds as they stay.
-async function lockRun(tx: Tx, where: SQL | undefined): Promise<LockedRun | undefined> {
-  const [run] = await tx
+// The run's row, locked until the transaction ends when `lock` is set, so
+// a post and a close never interleave.
+async function readRun(
+  tx: Db | Tx,
+  where: SQL | undefined,
+  lock: boolean,
+): Promise<LockedRun | undefined> {
+  const query = tx
     .select({
       runId: ceremonyRuns.runId,
       stubHash: ceremonyRuns.stubHash,
       electionId: ceremonyStubs.electionId,
       round: ceremonyRuns.round,
       transcript: ceremonyRuns.transcript,
+      eligible: ceremonyRuns.eligible,
       transcriptHash: ceremonyRuns.transcriptHash,
       keySetHash: ceremonyRuns.keySetHash,
       qualified: ceremonyRuns.qualified,
     })
     .from(ceremonyRuns)
     .innerJoin(ceremonyStubs, eq(ceremonyStubs.stubHash, ceremonyRuns.stubHash))
-    .where(where)
-    .for("update", { of: ceremonyRuns });
+    .where(where);
+  const [run] = await (lock ? query.for("update", { of: ceremonyRuns }) : query);
   return run;
 }
+
+const lockRun = (tx: Tx, where: SQL | undefined) => readRun(tx, where, true);
 
 const params = (d: CoordinatorDeployment, run: LockedRun) => ({
   l2ChainId: d.l2ChainId,
@@ -235,7 +261,14 @@ const params = (d: CoordinatorDeployment, run: LockedRun) => ({
  * Seat `seat`'s message for the open round of the run of `stubHash`: a
  * version-1 transcript of the run holding only that message. Kept if it is
  * the seat's first for the round and fits (`ceremonyMessageFits`); the
- * round closes at once when every seat has sent.
+ * round closes at once when every seat that can send in it has.
+ *
+ * The fit check, which verifies every closed message's signature, runs
+ * before the run's lock, against the run as read; under the lock the post
+ * is kept only if the run is still in that round, whose closed rounds are
+ * then the ones it was checked against (rounds only move forward). So a
+ * flood of refused posts never holds the lock honest posts and the
+ * worker's close wait on (T-54).
  */
 export async function postCeremonyMessage(
   client: Sql,
@@ -253,13 +286,19 @@ export async function postCeremonyMessage(
     throw e;
   }
   const db = drizzle({ client });
+  const read = await readRun(db, eq(ceremonyRuns.stubHash, post.stubHash), false);
+  if (read === undefined || read.round > 4) return "not-open";
+  const field = FIELDS[read.round - 1] as (typeof FIELDS)[number];
+  if (message[field][0]?.index !== seat || !read.eligible.includes(seat)) return "refused";
+  const closed = decodeCeremonyTranscript(read.transcript, 1);
+  if (!ceremonyMessageFits(params(deployment, read), closed, message)) return "refused";
   return db.transaction(async (tx) => {
-    const run = await lockRun(tx, eq(ceremonyRuns.stubHash, post.stubHash));
-    if (run === undefined || run.round > 4) return "not-open";
-    const field = FIELDS[run.round - 1] as (typeof FIELDS)[number];
-    if (message[field][0]?.index !== seat) return "refused";
-    const closed = decodeCeremonyTranscript(run.transcript, 1);
-    if (!ceremonyMessageFits(params(deployment, run), closed, message)) return "refused";
+    const run = await lockRun(
+      tx,
+      and(eq(ceremonyRuns.runId, read.runId), eq(ceremonyRuns.round, read.round)),
+    );
+    // The round closed meanwhile: the message was for rounds that moved on.
+    if (run === undefined) return "not-open";
     const kept = await tx
       .insert(ceremonyMessages)
       .values({
@@ -276,7 +315,7 @@ export async function postCeremonyMessage(
       .select({ count: sql<number>`count(*)::int` })
       .from(ceremonyMessages)
       .where(and(eq(ceremonyMessages.runId, run.runId), eq(ceremonyMessages.round, run.round)));
-    if (count === deployment.panel.keys.length) await closeRound(tx, deployment, run, options.now);
+    if (count === run.eligible.length) await closeRound(tx, deployment, run, options.now);
     return "accepted";
   });
 }
@@ -371,8 +410,20 @@ async function closeRound(
     tx.update(ceremonyRuns).set(values).where(eq(ceremonyRuns.runId, run.runId));
   if (messages.length < quorum(deployment.panel))
     return void (await set({ transcript, round: 6, outcome: "too-few-messages" }));
-  if (run.round < 4)
-    return void (await set({ transcript, round: run.round + 1, roundOpenedAt: now }));
+  // Round 1's senders answer in rounds 2 and 3; only round 2's reveal (the
+  // transcript check's order rule).
+  if (run.round < 4) {
+    // Round 1's senders can send in rounds 2 and 3, and only round 2's in
+    // round 4 (the transcript check's order rule): no one else is asked, and
+    // the next round closes once they have all sent.
+    const next = decodeCeremonyTranscript(transcript, 1)[run.round < 3 ? "keys" : "challenges"];
+    return void (await set({
+      transcript,
+      round: run.round + 1,
+      roundOpenedAt: now,
+      eligible: next.map((m) => m.index),
+    }));
+  }
   const check = checkCeremonyTranscript(params(deployment, run), transcript, 1);
   if (!check.ok || check.registered.length < quorum(deployment.panel))
     return void (await set({ transcript, round: 6, outcome: "transcript-refused" }));
@@ -383,6 +434,7 @@ async function closeRound(
     transcriptHash: check.hash,
     keySetHash: keySetHash(check.registered.map(keySetEntry)),
     qualified: check.registered.map((k) => k.index),
+    eligible: check.registered.map((k) => k.index),
   });
 }
 

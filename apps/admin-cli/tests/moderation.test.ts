@@ -255,9 +255,9 @@ describe("moderators and appeals", () => {
     await app`
       INSERT INTO account_polls (id, user_id, state, draft, created_at, updated_at, submitted_at,
         creator_address, create_tx_hash, election_id, created_block, l1_origin_timestamp,
-        anchors_checked_block, electorate)
+        anchors_checked_block, electorate, stub_hash)
       VALUES (${pollId}, ${author}, 'open', '{}', now(), now(), now(), ${randomBytes(20)},
-        ${randomBytes(32)}, ${bytes(id)}, 1, 1, 1, '[]')`;
+        ${randomBytes(32)}, ${bytes(id)}, 1, 1, 1, '[]', ${randomBytes(32)})`;
     return { id, pollId };
   }
 

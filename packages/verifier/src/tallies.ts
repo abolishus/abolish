@@ -138,9 +138,9 @@ export function tallyChecks(
   if (registered === undefined) return { row: { status: "unverifiable", code: "not-reached" } };
   // Under definition version 6 tally-opening version 1 opens ballot version
   // 4's default half, which without an author panel is the whole sharing
-  // (tally.md, Context). Beside an author panel 3.2 registers no key set, so
-  // this is a guard: its halves are tallied per panel (P2-16 part 4d), and
-  // nothing is judged against the default panel's rules alone (T-37).
+  // (tally.md, Context). Beside an author panel its halves are tallied per
+  // panel (P2-16 part 4d-3), so nothing is judged here against the default
+  // panel's rules alone (T-37).
   if (definition.version === 6 && definition.value.author_keys.length !== 0)
     return { row: { status: "unverifiable", code: "not-reached" } };
   const positions: number[] = [];

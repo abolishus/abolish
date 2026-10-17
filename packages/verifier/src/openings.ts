@@ -188,9 +188,8 @@ function judgeFor(
     return NOT_REACHED;
   if (definition.version === 6) {
     // Admission judges no ballot beside an author panel, so this is a guard:
-    // an author half's seats have no registered key set until that panel's
-    // own ceremony is read (P2-16 part 4d), and an unchecked ciphertext must
-    // never let an opening pass (T-37).
+    // an author half's seats' key set isn't passed here until P2-16 part
+    // 4d-3, and an unchecked ciphertext must never let an opening pass (T-37).
     if (definition.value.author_keys.length !== 0) return NOT_REACHED;
     const election = panelBallotElection(definition.value, registered);
     return (payload) => {

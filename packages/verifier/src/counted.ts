@@ -305,8 +305,8 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
       { status: "unverifiable", code: "not-implemented", at: {} },
       inputs.destruction,
     );
-  // 3.2 registers no key set beside an author panel, so admission judges no
-  // ballot there and 6.1 never passes; a caller that gets here anyway decides
+  // Admission judges no ballot beside an author panel yet (P2-16 part 4d-3),
+  // so 6.1 never passes there; a caller that gets here anyway decides
   // nothing, since the author seats' key set would be taken on trust (T-37).
   if (definition.version === 6 && definition.value.author_keys.length !== 0)
     return countedRows({ status: "unverifiable", code: "not-reached", at: {} }, inputs.destruction);

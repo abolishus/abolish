@@ -411,9 +411,10 @@ def build(constants):
         "ballots",
     )
 
-    # An author panel: 3.2 is unverifiable beside it and no key set is
-    # registered, since the author panel's own ceremony isn't read yet, so no
-    # ballot is judged (T-37).
+    # An author panel: 3.2 holds per panel, and this board carries no
+    # transcript that hashes to `author_transcript_hash`, so the author run
+    # isn't reached, 3.2 is unverifiable and no key set is registered; no
+    # ballot is judged (Key ceremony; ceremony.md, Author panel; T-37).
     d_ap, t_ap, e_ap = election_for(
         "v6-author-panel",
         [1, 2, 3],
@@ -424,8 +425,8 @@ def build(constants):
     )
     bundle(
         "author-panel",
-        "A poll with an author panel of 2 of 3: 2.3 fails profile-combination, 3.2 is unverifiable beside the author panel and registers no key set, so 5.1 to 5.5 and 5.7 are not reached.",
-        d_ap, t_ap, e_ap, None, [t_ap, (b_a, None)], "not-reached", NOT_IMPLEMENTED,
+        "A poll with an author panel of 2 of 3 whose transcript isn't on the board: 2.3 fails profile-combination, 3.2 is unverifiable (not-reached: the author panel's run, which 3.2 holds for too, isn't reached) and registers no key set, so 5.1 to 5.5 and 5.7 are not reached.",
+        d_ap, t_ap, e_ap, None, [t_ap, (b_a, None)], "not-reached", NOT_REACHED,
     )
 
     def two_bad(i, answers, *_):
@@ -528,8 +529,9 @@ def assemble(constants, proofs_path, out_dir):
         panel = s["panels"]["panel-4"]
         ceremony_rows, ceremony = vc.expected(panel, d, entries, panel, vb.BOARD_VERSION)
         if bnd["ceremonyRow"] is not None:
-            # The default run passes; beside an author panel 3.2 can't, and
-            # registers nothing (Key ceremony, 3.2 note).
+            # The default run passes; beside an author panel 3.2 holds for
+            # its run too, which these boards never carry, so it registers
+            # nothing (Key ceremony, 3.2 note).
             assert ceremony_rows["3.2"] == outcome("pass"), bnd["id"]
             ceremony_rows = dict(ceremony_rows, **{"3.2": bnd["ceremonyRow"]})
         elif bnd["registered"] is not None:
@@ -626,6 +628,7 @@ def assemble(constants, proofs_path, out_dir):
     assert by["opening-2"]["ballots"]["rejected"] == [{"entry": 3, "code": "membership-proof"}]
     assert by["live"]["expected"]["2.3"] == COMBINATION_FAILS and by["live"]["ballots"]["admitted"] == 2
     assert by["author-panel"]["expected"]["2.3"] == COMBINATION_FAILS and by["author-panel"]["expected"]["5.1"] == NOT_REACHED
+    assert by["author-panel"]["expected"]["3.2"] == NOT_REACHED
     assert by["other-key"]["expected"]["1.3"]["code"] == "membership-key"
     assert by["ballot-v1"]["expected"]["2.3"] == COMBINATION_FAILS
     assert by["ballot-v3"]["expected"]["2.3"] == COMBINATION_FAILS

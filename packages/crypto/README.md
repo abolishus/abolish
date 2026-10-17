@@ -141,6 +141,13 @@ The ballot client's side of a proof (`docs/spec/membership.md`, Security notes; 
 - `checkMembershipZkey(zkey)`, `checkMembershipWasm(wasm)`: refuse (`zkey`, `wasm`) a proving key that isn't `semaphore-32.zkey`, and a witness calculator that isn't `semaphore-32.wasm`, by sha256 (`MEMBERSHIP_ZKEY_SHA256`, `MEMBERSHIP_WASM_SHA256`). `packages/membership-prover` checks both before every proof.
 - `finishMembershipProof(input, proof)`: the prover's proof verified under the pinned key against `input`'s signals (only inputs `membershipProverInput` built are accepted), re-randomised as `(t⁻¹·A, t·B + t·u·δ₂, C + u·A)` with CSPRNG scalars and verified again; refuses with `proof` or `rerandomised`. Only its output leaves the device. Run it in a realm the prover's code can't reach.
 
+Sealing a version-3 ballot, the only way the ballot client reaches the plaintext votes and the encryption randomness (`docs/spec/ballot-validity.md`, Casting (version 3); `docs/spec/challenge.md`, Client rules; T-42, T-45, T-47, T-55):
+
+- `sealBallotV3(election, cell, votes)`: the sharing, each registered seat's shares encrypted to its registered key and the core's tracking code (`SealedBallotV3`), shown before the voter chooses. A seat outside the registered key set has no ciphertext and a zero share hash.
+- `challengeSealV3(sealed)`: the encoded opening (`0x0003` version 2) of exactly that core; the seal is then never cast.
+- `castSealV3(sealed, secret, leaves, l1)`: `ν` under the cell's scope, the validity proofs (kept for every later cast of the seal, so a retry or a recast under a newer L1 block carries the same committed vote), the ballot hash, `M` and the prover's witness (`BallotCastingV3`), with `membershipProverInput`'s refusals before any proving. The seal is bound to the identity, and its sharing and encapsulation randomness dropped, only once the witness is made; from then on it is never opened, and never cast with another identity.
+- `finishSealV3(casting, proof)`: the proof finished by `finishMembershipProof`, the record assembled, its core checked against the code shown and the record run through `checkBallotV3`; returns the encoding, the ballot hash, `ν` and each qualified seat's ciphertext for its intake (`CastBallotV3`), or throws (`BallotSealError` with the admission code). Nothing here sends anything.
+
 The proving key's reference string was checked well formed, once and publicly, by `scripts/membership-crs-check.ts` (`docs/spec/membership.md`, Reference-string check; T-07, T-12). Its tests run on a toy key; set `MEMBERSHIP_CRS_DIR` to a directory with `semaphore-32.zkey`, `ppot_0080_14.ptau` and `semaphore-32.r1cs` to rerun it on the real one.
 
 ## Circuit-facing values

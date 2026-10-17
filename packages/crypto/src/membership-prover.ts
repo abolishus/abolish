@@ -93,7 +93,12 @@ export interface MembershipProverInput {
 // no caller can check a proof against signals the prover returned.
 const BUILT = new WeakSet<MembershipProverInput>();
 
-function secretScalar(secret: Uint8Array): bigint {
+/**
+ * Internal: the scalar `s` of an identity secret's encoding, or
+ * `MembershipProverError` with `secret`. The package entry point doesn't
+ * export it; `castSealV3` derives the nullifier with it.
+ */
+export function secretScalar(secret: Uint8Array): bigint {
   // Copied first, so the bytes checked are the bytes read.
   const copy =
     secret instanceof Uint8Array && ArrayBuffer.isView(secret) ? new Uint8Array(secret) : null;

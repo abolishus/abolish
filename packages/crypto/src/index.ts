@@ -1144,10 +1144,12 @@ export {
 } from "./trustee.ts";
 export {
   checkTier1Addition,
+  checkTier1AdditionForm,
   decodeTier1Addition,
   encodeTier1Addition,
   type Tier1Addition,
   type Tier1AdditionDecodeResult,
+  type Tier1AdditionFormResult,
   type Tier1AdditionResult,
   type Vouch,
   type VouchContext,

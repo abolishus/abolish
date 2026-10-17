@@ -163,6 +163,34 @@ describe("Tier 0 registration (docs/spec/registration.md, Request)", () => {
   });
 });
 
+describe("the Tier 1 relay (docs/spec/tier1-relay.md, Request)", () => {
+  const input = contract.registrations.tier1["~orpc"].inputSchema;
+  const valid = { record: "0a".repeat(1919), turnstile: "tok.en-1_" };
+  const issues = async (value: unknown) => (await input?.["~standard"].validate(value))?.issues;
+
+  test("a POST, so nothing of the request sits in a URL", () => {
+    expect(contract.registrations.tier1["~orpc"].route.method).toBe("POST");
+  });
+
+  test("takes exactly a record of 3,838 lowercase hex digits and a token", async () => {
+    expect(await issues(valid)).toBeUndefined();
+    expect(await issues({ ...valid, turnstile: "~".repeat(2048) })).toBeUndefined();
+    for (const bad of [
+      { ...valid, record: "0a".repeat(1918) },
+      { ...valid, record: "0a".repeat(1920) },
+      { ...valid, record: `${"0a".repeat(1918)}0` },
+      { ...valid, record: "0A".repeat(1919) },
+      { ...valid, record: `0x${"0a".repeat(1918)}` },
+      { ...valid, turnstile: "" },
+      { ...valid, turnstile: "a b" },
+      { ...valid, turnstile: "a".repeat(2049) },
+      { ...valid, region: "0" },
+      { record: valid.record },
+    ])
+      expect(await issues(bad)).toBeDefined();
+  });
+});
+
 describe("the generated OpenAPI document", () => {
   test("is deterministic", async () => {
     expect(await renderOpenApi()).toBe(await renderOpenApi());
@@ -187,6 +215,7 @@ describe("the generated OpenAPI document", () => {
       "POST /ballots",
       "POST /moderation/reports",
       "POST /registrations/tier0",
+      "POST /registrations/tier1",
     ]);
   });
 });

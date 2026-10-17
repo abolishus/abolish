@@ -285,6 +285,46 @@ function firstRepeat(
 }
 
 type Tier1AdditionFailure = Exclude<Tier1AdditionResult, { ok: true }>;
+type Tier1AdditionFormFailure = Exclude<Tier1AdditionFailure, { error: "proof" }>;
+
+/** Checks 1 to 6 of one addition: `checkTier1Addition`'s failures but `proof`. */
+export type Tier1AdditionFormResult =
+  | { readonly ok: true; readonly value: Tier1Addition }
+  | Tier1AdditionFormFailure;
+
+// Checks 1 to 6 of one addition, which need the record alone.
+function formChecks(
+  record: Uint8Array,
+):
+  | { readonly ok: false; readonly failure: Tier1AdditionFormFailure }
+  | { readonly ok: true; readonly value: Tier1Addition; readonly proofs: DecodedProofs } {
+  const decoded = decodeAddition(record);
+  const fail = (failure: Tier1AdditionFormFailure) => ({ ok: false, failure }) as const;
+  if (!decoded.ok) return fail({ ok: false, error: "decode", decode: decoded });
+  const { commitment, vouches } = decoded.value;
+  if (isForbiddenCommitment(commitment)) return fail({ ok: false, error: "forbidden-commitment" });
+  for (const [i, v] of vouches.entries())
+    if (v.slot >= VOUCH_SLOTS) return fail({ ok: false, error: "slot", vouch: i });
+  for (const [i, v] of vouches.entries())
+    if (v.root === 0n) return fail({ ok: false, error: "root", vouch: i });
+  const voucher = firstRepeat(vouches, "voucheeNullifier");
+  if (voucher >= 0) return fail({ ok: false, error: "duplicate-voucher", vouch: voucher });
+  const slot = firstRepeat(vouches, "slotNullifier");
+  if (slot >= 0) return fail({ ok: false, error: "duplicate-slot", vouch: slot });
+  return decoded;
+}
+
+/**
+ * Checks 1 to 6 of one Tier 1 addition (docs/spec/vouching.md, Checks of one
+ * addition), in the spec's order, with the failing vouch's position: every
+ * check but the proofs, so no pairing is spent (T-52). Passing says nothing
+ * about the proofs: what the relay's route runs on a record before queueing
+ * it (docs/spec/tier1-relay.md, Answers, step 3).
+ */
+export function checkTier1AdditionForm(record: Uint8Array): Tier1AdditionFormResult {
+  const checked = formChecks(record);
+  return checked.ok ? { ok: true, value: checked.value } : checked.failure;
+}
 
 /**
  * Internal: checks 1 to 6 of one addition (docs/spec/vouching.md, Checks of
@@ -304,19 +344,9 @@ export function precheckTier1Addition(
       readonly proofs: readonly MembershipProofCheck[];
     } {
   const c = context(ctx);
-  const decoded = decodeAddition(record);
-  const fail = (failure: Tier1AdditionFailure) => ({ ok: false, failure }) as const;
-  if (!decoded.ok) return fail({ ok: false, error: "decode", decode: decoded });
+  const decoded = formChecks(record);
+  if (!decoded.ok) return { ok: false, failure: decoded.failure };
   const { groupId, commitment, vouches } = decoded.value;
-  if (isForbiddenCommitment(commitment)) return fail({ ok: false, error: "forbidden-commitment" });
-  for (const [i, v] of vouches.entries())
-    if (v.slot >= VOUCH_SLOTS) return fail({ ok: false, error: "slot", vouch: i });
-  for (const [i, v] of vouches.entries())
-    if (v.root === 0n) return fail({ ok: false, error: "root", vouch: i });
-  const voucher = firstRepeat(vouches, "voucheeNullifier");
-  if (voucher >= 0) return fail({ ok: false, error: "duplicate-voucher", vouch: voucher });
-  const slot = firstRepeat(vouches, "slotNullifier");
-  if (slot >= 0) return fail({ ok: false, error: "duplicate-slot", vouch: slot });
   const voucheeScope = semaphoreField(vouchScope(c, groupId, commitment));
   const proofs: MembershipProofCheck[] = [];
   for (const [i, v] of vouches.entries()) {

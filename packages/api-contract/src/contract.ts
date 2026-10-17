@@ -4,6 +4,7 @@ import * as z from "zod/mini";
 import {
   Hash32,
   hexBytes,
+  hexFixed,
   IDENTITY_BACKUP_ENVELOPE,
   IDENTITY_BACKUP_RETENTION_MONTHS,
   IdentityBackupEnvelope,
@@ -419,6 +420,58 @@ const registerTier0 = oc
   .input(z.strictObject({ commitment: Hash32, region: RegionCode, turnstile: TurnstileResponse }))
   .output(z.strictObject({}));
 
+// The Tier 1 relay (docs/spec/tier1-relay.md). The ballot client sends a
+// vouchee's Tier 1 addition record and a Turnstile token from the challenge
+// page, both in the body (T-10). The route checks the record alone, never
+// whether it counts, and every accepted request gets the same empty answer,
+// whether the record is newly queued, already queued, or can never count,
+// so the route says nothing about any commitment or slot (T-13, T-22); the
+// client learns the outcome from the chain alone (T-11).
+
+/** A Tier 1 addition record's length in bytes: `41 + 626 · VOUCH_K` (docs/spec/vouching.md). */
+const TIER1_ADDITION_RECORD = 1919;
+
+const relayTier1 = oc
+  .route({
+    method: "POST",
+    path: "/registrations/tier1",
+    summary: "Ask the relay to send a Tier 1 addition",
+    description:
+      "Queues `record` (a Tier 1 addition record, docs/spec/vouching.md, exactly 1,919 bytes of lowercase hex) for the relay, paid for by one Turnstile solve on the challenge page for the action `tier1-relay`. Checked in order: the forms; the record's checks that need it alone (decoding, a forbidden commitment, each slot below L, each root nonzero, distinct vouchers and slots) and every vouch's `root_block` on the root grid, answered as `RELAY_MALFORMED` with the check's code and the failing vouch's position; a published Tier 1 group; a current relay index; every vouch's root at or below the L2 safe head with at least 1,800 blocks of its window left past the relay's latest block; the token; then room in the queue, so a malformed or unserviceable record never spends the token and a full queue is answered only after the solve. No proof is checked here. The answer is the same empty object whether the record is newly queued, already queued, or will never count. At each 10-minute boundary the relay sends the queued records that count under its own replay of the registry; the client reads the registry's events to learn whether its commitment was added, and may send the record again (with a new solve) if nothing is logged after about two periods plus L2 finality, or submit it to the registry directly.",
+    tags: ["registrations"],
+  })
+  .errors({
+    RELAY_MALFORMED: {
+      status: 422,
+      message: "The record fails a check it can be judged on alone.",
+      data: z.strictObject({
+        code: ErrorCode,
+        vouch: z.optional(z.number().check(z.int(), z.minimum(0))),
+      }),
+    },
+    GROUP_UNKNOWN: { status: 422, message: "The record's group isn't a published Tier 1 group." },
+    RELAY_UNAVAILABLE: { status: 503, message: "The relay is unavailable here for now." },
+    VOUCH_WINDOW: {
+      status: 422,
+      message:
+        "A vouch's root is past the L2 safe head, or too little of its window is left for the relay.",
+    },
+    CHALLENGE_REFUSED: {
+      status: 403,
+      message: "The Turnstile token was refused: spent, expired, or for another site or action.",
+    },
+    CHALLENGE_UNAVAILABLE: {
+      status: 503,
+      message: "The Turnstile token couldn't be checked; try again with a new one.",
+    },
+    RELAY_BUSY: {
+      status: 503,
+      message: "The relay's queue is full; try again with a new solve after the next boundary.",
+    },
+  })
+  .input(z.strictObject({ record: hexFixed(TIER1_ADDITION_RECORD), turnstile: TurnstileResponse }))
+  .output(z.strictObject({}));
+
 /** The public API contract. `apps/api` implements it; clients call it. */
 export const contract = {
   elections: { list: listElections, getDefinition, getDisplayText, resolveCode, getCode },
@@ -426,7 +479,7 @@ export const contract = {
   ballots: { submit: submitBallot },
   moderation: { getLog: getModerationLog, getStatus: getModerationStatus, report: reportPoll },
   backups: { put: putBackup, fetch: fetchBackup, delete: deleteBackup },
-  registrations: { tier0: registerTier0 },
+  registrations: { tier0: registerTier0, tier1: relayTier1 },
 };
 
 export type Contract = typeof contract;

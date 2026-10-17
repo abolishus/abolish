@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vite-plus/test";
 import {
   checkTier1Addition,
+  checkTier1AdditionForm,
   decodeTier1Addition,
   encodeTier1Addition,
   semaphoreField,
@@ -151,6 +152,55 @@ describe("vouch vectors", () => {
       error: "decode",
       decode: want,
     });
+  });
+});
+
+describe("checkTier1AdditionForm", () => {
+  // Checks 1 to 6 alone: the vectors' verdicts, with every `proof` failure
+  // passing, since no proof is checked.
+  test.each(vectors.additions)("addition $id", (a) => {
+    const result = checkTier1AdditionForm(hex(a.record));
+    if (a.valid || a.error === "proof") {
+      const decoded = decodeTier1Addition(hex(a.record));
+      expect(decoded.ok).toBe(true);
+      if (decoded.ok) expect(result).toEqual({ ok: true, value: decoded.value });
+      return;
+    }
+    expect(result).toEqual({
+      ok: false,
+      error: a.error,
+      ...(a.vouch === undefined ? {} : { vouch: a.vouch }),
+    });
+  });
+
+  test.each(vectors.decode)("refuses $name as decode", (d) => {
+    expect(checkTier1AdditionForm(hex(d.record))).toEqual({
+      ok: false,
+      error: "decode",
+      decode: decodeTier1Addition(hex(d.record)),
+    });
+  });
+
+  test("agrees with checkTier1Addition on everything but the proofs", () => {
+    // Arbitrary byte changes to the honest record: whatever the full check
+    // answers before its proofs, the form check answers too.
+    fc.assert(
+      fc.property(
+        fc.array(fc.tuple(fc.nat(HONEST.length - 1), fc.integer({ min: 0, max: 255 })), {
+          minLength: 1,
+          maxLength: 4,
+        }),
+        (changes) => {
+          const record = new Uint8Array(HONEST);
+          for (const [at, value] of changes) record[at] = value;
+          const form = checkTier1AdditionForm(record);
+          const full = checkTier1Addition(record, CTX);
+          if (!full.ok && full.error === "proof") expect(form.ok).toBe(true);
+          else expect(form).toEqual(full);
+        },
+      ),
+      { numRuns: Math.min(runs, 50) },
+    );
   });
 });
 

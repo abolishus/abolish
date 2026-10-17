@@ -21,8 +21,11 @@ import {
   report,
   shortCodeOf,
   parseTier0Request,
+  parseTier1Request,
   Tier0RegistrationError,
   type Tier0Registrations,
+  type Tier1Relay,
+  Tier1RelayError,
 } from "@abolishus/core";
 import { implement, ORPCError } from "@orpc/server";
 import type { BallotQueue } from "@abolishus/worker/ballot-queue";
@@ -34,7 +37,7 @@ import type { Sql } from "postgres";
 // claim the caller checks with @abolishus/crypto (T-23, T-24, T-34).
 //
 // The context holds the database, the worker's ballot queue, Tier 0
-// registration and the clock, and nothing of the request: no handler can see a request's
+// registration, the Tier 1 relay and the clock, and nothing of the request: no handler can see a request's
 // headers, cookies or address, so no procedure can tie what it serves or
 // receives to a person or session (T-10, T-11).
 
@@ -49,6 +52,8 @@ export interface Context {
   readonly now: () => bigint;
   /** Absent when this server isn't configured for Tier 0 registration: it then queues nothing. */
   readonly tier0?: Tier0Registrations | undefined;
+  /** Absent when this server isn't configured for the Tier 1 relay: it then queues nothing. */
+  readonly tier1?: Tier1Relay | undefined;
 }
 
 const os = implement(contract).$context<Context>();
@@ -286,6 +291,46 @@ export const router = os.router({
             throw errors.CHALLENGE_REFUSED();
           case "challenge-unavailable":
             throw errors.CHALLENGE_UNAVAILABLE();
+        }
+      }
+    }),
+    // The Tier 1 relay (docs/spec/tier1-relay.md, Answers): core checks
+    // steps 2 to 8 in order, and no answer depends on the commitment's
+    // state (T-13, T-22). A server without the relay publishes no group, so
+    // after the record's own checks it answers unavailable.
+    tier1: os.registrations.tier1.handler(async ({ input, context, errors }) => {
+      try {
+        if (context.tier1 === undefined) {
+          parseTier1Request(input);
+          throw new Tier1RelayError("unavailable");
+        }
+        await context.tier1.relay(input);
+        return {};
+      } catch (e) {
+        if (!(e instanceof Tier1RelayError)) throw e;
+        switch (e.code) {
+          case "form":
+            // The contract's schema refuses these first; core checks again.
+            throw new ORPCError("BAD_REQUEST");
+          case "malformed":
+            throw errors.RELAY_MALFORMED({
+              data: {
+                code: e.malformed ?? "malformed",
+                ...(e.vouch !== undefined && { vouch: e.vouch }),
+              },
+            });
+          case "group-unknown":
+            throw errors.GROUP_UNKNOWN();
+          case "unavailable":
+            throw errors.RELAY_UNAVAILABLE();
+          case "vouch-window":
+            throw errors.VOUCH_WINDOW();
+          case "challenge-refused":
+            throw errors.CHALLENGE_REFUSED();
+          case "challenge-unavailable":
+            throw errors.CHALLENGE_UNAVAILABLE();
+          case "busy":
+            throw errors.RELAY_BUSY();
         }
       }
     }),

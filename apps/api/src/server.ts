@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { contract, MAX_BOARD_PAYLOAD } from "@abolishus/api-contract";
-import { ACCOUNT_COOKIE_PREFIX, type Tier0Registrations } from "@abolishus/core";
+import { ACCOUNT_COOKIE_PREFIX, type Tier0Registrations, type Tier1Relay } from "@abolishus/core";
 import { OpenAPIHandler } from "@orpc/openapi/node";
 import { onError, ORPCError } from "@orpc/server";
 import type { Sql } from "postgres";
@@ -190,6 +190,8 @@ export interface ApiOptions {
   readonly now?: () => bigint;
   /** Tier 0 registration; without it the route answers `REGISTRATION_UNAVAILABLE`. */
   readonly tier0?: Tier0Registrations;
+  /** The Tier 1 relay; without it the route answers `RELAY_UNAVAILABLE`. */
+  readonly tier1?: Tier1Relay;
   /**
    * Most requests handled at once, from the first byte to the last: past it,
    * a request is refused with 503 before anything is read. Each page of the
@@ -239,6 +241,7 @@ export function createApiServer({
   ballots,
   now = () => BigInt(Math.floor(Date.now() / 1000)),
   tier0,
+  tier1,
   maxInFlight = 32,
   idleTimeoutMs = 15_000,
   deadlineMs = 60_000,
@@ -329,7 +332,7 @@ export function createApiServer({
           return refuse(res, 400);
         }
         const { matched } = await handler.handle(req, res, {
-          context: { sql, ballots, now, tier0 },
+          context: { sql, ballots, now, tier0, tier1 },
         });
         if (!matched) refuse(res, 404);
       } catch (e) {

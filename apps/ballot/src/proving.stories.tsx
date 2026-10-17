@@ -104,13 +104,13 @@ export const Unavailable = refused(
   "The files for making proofs couldn't be fetched",
   true,
 );
-export const Zkey = refused("zkey", "The proving key isn't the published one", true);
-export const Wasm = refused("wasm", "The proof's calculator isn't the published one", true);
-export const Prover = refused("prover", "The part that makes proofs didn't answer properly", true);
+export const Zkey = refused("zkey", "The proving key isn't the published one", false);
+export const Wasm = refused("wasm", "The proof's calculator isn't the published one", false);
+export const Prover = refused("prover", "The part that makes proofs didn't answer properly", false);
 export const WorkerFailed = refused(
   "worker-failed",
   "This device stopped while making the proof",
-  true,
+  false,
 );
 export const Wrong = refused("proof", "The proof didn't pass this device's check", false);
 export const Fault = refused(

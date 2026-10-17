@@ -79,20 +79,25 @@ const REFUSALS: Record<
   // What a server or the release served: another try fetches it again.
   root: { title: "proofRootTitle", detail: "proofRoot", retry: true },
   unavailable: { title: "proofUnavailableTitle", detail: "proofUnavailable", retry: true },
-  zkey: { title: "proofZkeyTitle", detail: "proofZkey", retry: true },
-  wasm: { title: "proofWasmTitle", detail: "proofWasm", retry: true },
-  prover: { title: "proofProverTitle", detail: "proofProver", retry: true },
-  "worker-failed": { title: "proofStoppedTitle", detail: "proofStopped", retry: true },
-  // This copy's prover made a wrong proof, or its own code faulted: the same
-  // code fails the same way, so another address, not another try (T-55).
+  // Once the prover holds the witness, every failure is one it may have chosen:
+  // a hijacked snarkjs could fail, crash or stall on a bit of the secret, and
+  // each retry would offer it another bit, readable from when the ballot is
+  // finally sent. So no retry once proving began, only another address
+  // (ADR 0009: a refusal shown to the voter, not a retry loop; T-55).
+  // `zkey` and `wasm` included: the page's check refuses them before the prover
+  // starts, but the prover may also answer with either after the witness.
+  zkey: { title: "proofZkeyTitle", detail: "proofZkey", retry: false },
+  wasm: { title: "proofWasmTitle", detail: "proofWasm", retry: false },
+  prover: { title: "proofProverTitle", detail: "proofProver", retry: false },
+  "worker-failed": { title: "proofStoppedTitle", detail: "proofStopped", retry: false },
   proof: { title: "proofWrongTitle", detail: "proofWrong", retry: false },
   rerandomised: { title: "proofFaultTitle", detail: "proofFault", retry: false },
 };
 
 /**
  * No proof was made: the check that stopped it in words, its name as the
- * code gives it for whoever the voter reports it to, and a retry only where
- * another fetch or another prover could help. Nothing was sent either way.
+ * code gives it for whoever the voter reports it to, and a retry only for a
+ * refusal made before the prover saw the witness. Nothing was sent either way.
  */
 export function ProvingRefused({
   problem,

@@ -195,14 +195,16 @@ const enUS = {
     "This copy of the ballot didn't serve them. Check your connection and try again, or open the ballot from another address.",
   proofZkeyTitle: "The proving key isn't the published one",
   proofZkey:
-    "The key this device was served for making proofs isn't the one this version of the ballot pins, so it wasn't used. Try again, or open the ballot from another address.",
+    "The key this device was served for making proofs isn't the one this version of the ballot pins, so it wasn't used. Open the ballot from abolishus.eth or another address Abolish lists.",
   proofWasmTitle: "The proof's calculator isn't the published one",
   proofWasm:
-    "The file this device was served for working out the proof isn't the one this version of the ballot pins, so it wasn't used. Try again, or open the ballot from another address.",
+    "The file this device was served for working out the proof isn't the one this version of the ballot pins, so it wasn't used. Open the ballot from abolishus.eth or another address Abolish lists.",
   proofProverTitle: "The part that makes proofs didn't answer properly",
-  proofProver: "It stopped, answered out of turn or took too long. Try again.",
+  proofProver:
+    "It stopped, answered out of turn or took too long. This copy of the ballot may be faulty: open it from abolishus.eth or another address Abolish lists.",
   proofStoppedTitle: "This device stopped while making the proof",
-  proofStopped: "The proof didn't finish. Try again.",
+  proofStopped:
+    "The proof didn't finish. Open the ballot from abolishus.eth or another address Abolish lists.",
   proofWrongTitle: "The proof didn't pass this device's check",
   proofWrong:
     "This device checks every proof before it is sent, and this one was wrong. This copy of the ballot may be faulty: open it from abolishus.eth or another address Abolish lists.",

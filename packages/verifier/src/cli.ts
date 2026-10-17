@@ -43,7 +43,8 @@ report). Prints the JSON report on stdout and a summary on stderr.
 --gateway reads the board copy's blocks by CID from an IPFS trustless
 gateway (http: or https:), after blocks.car if the bundle holds one; give it
 up to ${MAX_GATEWAYS} times, asked in order. Every block is checked against its CID,
-but each gateway sees which blocks, and so which election, you read.
+but each gateway sees which blocks, and so which election, you read (and,
+over http:, so does the network); prefer https:.
 
 Exit codes: 0 verified, 20 failed, 21 unverifiable, 22 bundle rejected,
 64 usage (and --help). Any other code is an error of the verifier, not a

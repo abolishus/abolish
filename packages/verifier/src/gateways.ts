@@ -87,8 +87,10 @@ const same = (a: Uint8Array, b: Uint8Array) =>
 // The body, if it is at most `limit` bytes. The stream is read chunk by
 // chunk and cancelled once the count passes `limit`, before more is held,
 // whatever Content-Length or Content-Encoding say (a compressed body is
-// counted as it decompresses), so no answer costs more than `limit` bytes
-// of memory (docs/spec/content-addressing.md, Reading by CID; T-52).
+// counted as it decompresses), so an answer costs a small multiple of
+// `limit` bytes of memory at most: the chunks held, one stream chunk past
+// them, and the joined copy (docs/spec/content-addressing.md, Reading by
+// CID; T-52).
 async function bodyWithin(res: Response, limit: number): Promise<Uint8Array | undefined> {
   const declared = res.headers.get("content-length");
   if (declared !== null && /^[0-9]+$/u.test(declared) && Number(declared) > limit) {
@@ -136,8 +138,13 @@ export function gatewaySource(gateways: readonly URL[], options: GatewayOptions 
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1)
     throw new RangeError("timeoutMs must be a positive integer");
   const fetch = options.fetch ?? globalThis.fetch;
-  // Copied, so a caller changing its URLs later changes nothing here.
-  const bases = gateways.map((g) => `${g.origin}${g.pathname.replace(/\/+$/u, "")}`);
+  // Checked here too, so a caller that skips `parseGateway` can't name a URL
+  // whose origin and path aren't a gateway's (a `blob:` URL's path is a
+  // whole URL). Copied, so a caller changing its URLs later changes nothing.
+  const bases = gateways.map((g) => {
+    const url = parseGateway(g.href);
+    return `${url.origin}${url.pathname}`;
+  });
   let requests = 0;
   let blocks = 0;
   const ask = async (

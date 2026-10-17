@@ -117,6 +117,13 @@ describe("gatewaySource", () => {
     expect(() => gatewaySource(Array.from({ length: MAX_GATEWAYS + 1 }, () => g))).toThrow(
       RangeError,
     );
+    // A URL that skipped parseGateway is checked all the same.
+    for (const bad of [
+      "blob:https://evil.example/x",
+      "ftp://ipfs.example",
+      "https://ipfs.example/?q",
+    ])
+      expect(() => gatewaySource([new URL(bad)]), bad).toThrow(RangeError);
     for (const timeoutMs of [0, -1, 1.5, Number.NaN])
       expect(() => gatewaySource([g], { timeoutMs })).toThrow(RangeError);
   });

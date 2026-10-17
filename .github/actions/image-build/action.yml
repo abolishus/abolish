@@ -6,7 +6,7 @@ description: >
   timezone and umask; deploy.yml pushes only if both digests match (T-61).
 inputs:
   service:
-    description: The image's service, api or web (apps/<service>, package @abolishus/<service>).
+    description: The image's service, api, web or ballot (apps/<service>, package @abolishus/<service>).
     required: true
   variant:
     description: a or b.
@@ -64,7 +64,7 @@ runs:
         umask "$UMASK"
         SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
         export SOURCE_DATE_EPOCH
-        case "$SERVICE" in api | web) ;; *) echo "::error::unknown service $SERVICE"; exit 1 ;; esac
+        case "$SERVICE" in api | web | ballot) ;; *) echo "::error::unknown service $SERVICE"; exit 1 ;; esac
         vp run --no-cache --filter "@abolishus/$SERVICE..." build
         mkdir -p "$OUT"
         # The base image comes anonymously from public.ecr.aws, which rate-limits

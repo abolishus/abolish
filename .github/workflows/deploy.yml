@@ -1,11 +1,11 @@
-# Builds, signs and deploys the API and web images to staging on every push to main
+# Builds, signs and deploys the API, web and ballot images to staging on every push to main
 # (P2-11; docs/runbooks/railway.md). Threats: T-61 (release compromise), T-65
 # (deployer credential leak), T-56 (compromised action or runner), T-23.
 #
 #   image-<service>-a/b  one fresh checkout each, different path, locale,
 #              timezone and umask; build the bundle and the image (.github/
 #              actions/image-build); output the image manifest digest. No
-#              secrets. One pair per service (api, web).
+#              secrets. One pair per service (api, web, ballot).
 #   checks     ci, repro-build and reference-election passed on this commit.
 #   publish    per service: both digests match; the archive is that image;
 #              push it to GHCR by digest, sign it (cosign keyless) and attest SLSA build
@@ -112,6 +112,44 @@ jobs:
           service: web
           variant: b
 
+  image-ballot-a:
+    name: image ballot (a)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/actions
+      - id: build
+        uses: ./.github/actions/image-build
+        with:
+          service: ballot
+          variant: a
+
+  image-ballot-b:
+    name: image ballot (b)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/actions
+      - id: build
+        uses: ./.github/actions/image-build
+        with:
+          service: ballot
+          variant: b
+
   checks:
     name: checks
     runs-on: ubuntu-24.04
@@ -158,7 +196,8 @@ jobs:
 
   publish:
     name: publish ${{ matrix.service }}
-    needs: [image-api-a, image-api-b, image-web-a, image-web-b, checks]
+    needs:
+      [image-api-a, image-api-b, image-web-a, image-web-b, image-ballot-a, image-ballot-b, checks]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -167,13 +206,13 @@ jobs:
       attestations: write
     strategy:
       matrix:
-        service: [api, web]
+        service: [api, web, ballot]
     env:
       SERVICE: ${{ matrix.service }}
       IMAGE: ghcr.io/${{ github.repository_owner }}/abolish-${{ matrix.service }}
       # Job outputs, never artifacts, carry the digests (see below).
-      DIGEST: ${{ matrix.service == 'api' && needs.image-api-a.outputs.digest || needs.image-web-a.outputs.digest }}
-      DIGEST_B: ${{ matrix.service == 'api' && needs.image-api-b.outputs.digest || needs.image-web-b.outputs.digest }}
+      DIGEST: ${{ matrix.service == 'api' && needs.image-api-a.outputs.digest || matrix.service == 'web' && needs.image-web-a.outputs.digest || needs.image-ballot-a.outputs.digest }}
+      DIGEST_B: ${{ matrix.service == 'api' && needs.image-api-b.outputs.digest || matrix.service == 'web' && needs.image-web-b.outputs.digest || needs.image-ballot-b.outputs.digest }}
     steps:
       - name: Both builds produced one image
         env:
@@ -254,7 +293,7 @@ jobs:
 
   staging:
     name: staging
-    needs: [image-api-a, image-web-a, publish, current]
+    needs: [image-api-a, image-web-a, image-ballot-a, publish, current]
     if: needs.current.outputs.is_head == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -268,6 +307,7 @@ jobs:
       # publish checked each against its second build and pushed exactly it.
       API_IMAGE: ghcr.io/${{ github.repository_owner }}/abolish-api@${{ needs.image-api-a.outputs.digest }}
       WEB_IMAGE: ghcr.io/${{ github.repository_owner }}/abolish-web@${{ needs.image-web-a.outputs.digest }}
+      BALLOT_IMAGE: ghcr.io/${{ github.repository_owner }}/abolish-ballot@${{ needs.image-ballot-a.outputs.digest }}
     steps:
       # A re-run of an older run would point staging back at an older digest
       # with nobody meaning to roll back. Only main's head deploys; a rollback
@@ -300,7 +340,7 @@ jobs:
           IDENTITY: ${{ github.server_url }}/${{ github.repository }}/.github/workflows/deploy.yml@refs/heads/main
           REPO: ${{ github.repository }}
         run: |
-          for image in "$API_IMAGE" "$WEB_IMAGE"; do
+          for image in "$API_IMAGE" "$WEB_IMAGE" "$BALLOT_IMAGE"; do
             cosign verify "$image" \
               --certificate-identity "$IDENTITY" \
               --certificate-oidc-issuer https://token.actions.githubusercontent.com >/dev/null
@@ -315,13 +355,14 @@ jobs:
         run: |
           [ -n "$DATABASE_URL" ] || { echo "::error::MIGRATE_DATABASE_URL is not set in the staging environment"; exit 1; }
           docker run --rm -e DATABASE_URL "$API_IMAGE" node migrate.mjs
-      # The API first: the web app's pages call it, and both run against the
-      # migrations just applied.
-      - name: Deploy the API and the web app to Railway
+      # The API first: the web app's pages and the ballot client call it, and
+      # the API and web app run against the migrations just applied.
+      - name: Deploy the API, the web app and the ballot client to Railway
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
           API_SERVICE_ID: ${{ vars.RAILWAY_API_SERVICE_ID }}
           WEB_SERVICE_ID: ${{ vars.RAILWAY_WEB_SERVICE_ID }}
+          BALLOT_SERVICE_ID: ${{ vars.RAILWAY_BALLOT_SERVICE_ID }}
           # Railway's GraphQL API (backboard.railway.com/graphql/v2).
           Q_ENV: "query { projectToken { environmentId } }"
           Q_SOURCE: >-
@@ -330,8 +371,8 @@ jobs:
           Q_DEPLOY: "mutation($s: String!, $e: String!) { serviceInstanceDeployV2(serviceId: $s, environmentId: $e) }"
           Q_STATUS: "query($d: String!) { deployment(id: $d) { status } }"
         run: |
-          if [ -z "$RAILWAY_TOKEN" ] || [ -z "$API_SERVICE_ID" ] || [ -z "$WEB_SERVICE_ID" ]; then
-            echo "::error::RAILWAY_TOKEN, RAILWAY_API_SERVICE_ID and RAILWAY_WEB_SERVICE_ID must be set in the staging environment"
+          if [ -z "$RAILWAY_TOKEN" ] || [ -z "$API_SERVICE_ID" ] || [ -z "$WEB_SERVICE_ID" ] || [ -z "$BALLOT_SERVICE_ID" ]; then
+            echo "::error::RAILWAY_TOKEN, RAILWAY_API_SERVICE_ID, RAILWAY_WEB_SERVICE_ID and RAILWAY_BALLOT_SERVICE_ID must be set in the staging environment"
             exit 1
           fi
           gql() {
@@ -365,3 +406,4 @@ jobs:
           }
           deploy "$API_SERVICE_ID" "$API_IMAGE"
           deploy "$WEB_SERVICE_ID" "$WEB_IMAGE"
+          deploy "$BALLOT_SERVICE_ID" "$BALLOT_IMAGE"

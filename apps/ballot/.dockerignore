@@ -1,0 +1,4 @@
+# Only the client and its server go into the image (Dockerfile).
+*
+!dist/
+!server/

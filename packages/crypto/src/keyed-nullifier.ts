@@ -326,7 +326,7 @@ export interface NullifierKey {
 
 /** The query an answer is for, as its client made it or an attester received it. */
 export interface NullifierQuery {
-  /** `query_hash`, 32 bytes (part 2b-3). */
+  /** `query_hash`, 32 bytes (docs/spec/nullifier-query.md). */
   readonly queryHash: Uint8Array;
   /** `B = r · H1(x)`, never the identity. */
   readonly b: BjjPoint;

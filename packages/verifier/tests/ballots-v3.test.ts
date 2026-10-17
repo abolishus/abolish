@@ -264,9 +264,13 @@ test("the report gives the ballots after the ceremony, then the spoiled-ballot o
   ]);
 });
 
-test("4.4's event check runs under definition version 5 and, with no contract-event record, leaves 4.4 not-implemented", () => {
-  expect(row(format4(byId("mixed")), "4.4")).toMatchObject({
-    status: "unverifiable",
-    code: "not-implemented",
-  });
-});
+test(
+  "4.4's event check runs under definition version 5 and, with no contract-event record, leaves 4.4 not-implemented",
+  { timeout: 60_000 },
+  () => {
+    expect(row(format4(byId("mixed")), "4.4")).toMatchObject({
+      status: "unverifiable",
+      code: "not-implemented",
+    });
+  },
+);

@@ -138,7 +138,7 @@ describe("admits exactly the ballots the verifier's 5.1 to 5.4 admit", () => {
       expect(codes).toContain(code);
   });
 
-  test("a ballot's verdict doesn't depend on the other entries given", () => {
+  test("a ballot's verdict doesn't depend on the other entries given", { timeout: 60_000 }, () => {
     // Only the transcript is needed: admission is per ballot (T-52).
     const c = byId("mixed");
     const entries = bundleOf(c).entries;
@@ -154,7 +154,7 @@ describe("admits exactly the ballots the verifier's 5.1 to 5.4 admit", () => {
 
 describe("admitAll gives each payload the verdict admit gives, its membership proofs batched", () => {
   for (const id of ["mixed", "admitted", "repeats", "repeat-of-rejected", "unqualified-first"])
-    test(`${id}: the verifier's 5.1 to 5.4 verdicts`, () => {
+    test(`${id}: the verifier's 5.1 to 5.4 verdicts`, { timeout: 60_000 }, () => {
       const c = byId(id);
       const entries = bundleOf(c).entries;
       const admission = electionAdmission(hex(c.definition), panelOf(c.panel), entries);

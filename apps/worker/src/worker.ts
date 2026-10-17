@@ -20,6 +20,7 @@ import { BALLOT_BATCH, BallotBatches } from "./ballots.ts";
 import { HANDLERS, JobError, TIER0_QUEUES } from "./jobs.ts";
 import type { Log } from "./log.ts";
 import { JOB_OPTIONS, KEY_PREFIX, QUEUES, type QueueKey } from "./queues.ts";
+import type { PollRoots } from "./poll-roots.ts";
 import type { RegistrySync } from "./registry-sync.ts";
 
 export interface WorkerOptions {
@@ -72,9 +73,18 @@ export interface WorkerOptions {
     readonly everyMs?: number;
   };
   /**
+   * The roots step (P2-22 part 3b-2), only beside the registry sync, whose
+   * index and nodes it reads; without it, no created poll is rooted.
+   */
+  readonly pollRoots?: {
+    readonly roots: PollRoots;
+    /** How often it runs; `POLL_ROOT_EVERY_MS` unless a test says otherwise. */
+    readonly everyMs?: number;
+  };
+  /**
    * The creation step, with the creation key ([[0032-poll-creation-operations]],
    * rule 2): a worker given it runs the `{poll-create}` queue and nothing
-   * else, no audit, prune, anchoring, Tier 0, ballot or registry work beside the key,
+   * else, no audit, prune, anchoring, Tier 0, ballot, registry or roots work beside the key,
    * and refuses to start with any of those configured. Without it, nothing
    * creates polls.
    */
@@ -119,6 +129,12 @@ export const REGISTRY_SYNC_EVERY_MS = 60_000;
  */
 export const POLL_CREATE_EVERY_MS = 30_000;
 
+/**
+ * Each run waits for a new output root only through the accumulator it
+ * reads, and setup is tens of minutes, so once a minute adds little.
+ */
+export const POLL_ROOT_EVERY_MS = 60_000;
+
 export interface RunningWorker {
   close(): Promise<void>;
 }
@@ -131,12 +147,15 @@ const elapsed = (job: { processedOn?: number | undefined; finishedOn?: number | 
 export async function startWorker(options: WorkerOptions): Promise<RunningWorker> {
   const { connection, sql, log } = options;
   const creating = options.pollCreation !== undefined;
+  if (options.pollRoots !== undefined && options.registry === undefined)
+    throw new Error("the roots step runs only beside the registry sync");
   if (
     creating &&
     (options.anchor !== undefined ||
       options.tier0 !== undefined ||
       options.ballots !== undefined ||
-      options.registry !== undefined)
+      options.registry !== undefined ||
+      options.pollRoots !== undefined)
   )
     throw new Error("a worker holding the creation key runs nothing else");
   const prefix = options.prefix ?? KEY_PREFIX;
@@ -150,6 +169,7 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
     ...(options.anchor === undefined ? {} : { anchor: options.anchor.chain }),
     ...(options.tier0 === undefined ? {} : { tier0: options.tier0.batches }),
     ...(options.registry === undefined ? {} : { registry: options.registry.sync }),
+    ...(options.pollRoots === undefined ? {} : { pollRoots: options.pollRoots.roots }),
     ...(options.pollCreation === undefined
       ? {}
       : {
@@ -181,7 +201,9 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
           ? options.ballots !== undefined
           : key === "registrySync"
             ? options.registry !== undefined
-            : options.tier0 !== undefined || !(TIER0_QUEUES as readonly QueueKey[]).includes(key);
+            : key === "pollRoot"
+              ? options.pollRoots !== undefined
+              : options.tier0 !== undefined || !(TIER0_QUEUES as readonly QueueKey[]).includes(key);
   const workers = (Object.keys(QUEUES) as QueueKey[]).filter(running).map((key) => {
     const spec = QUEUES[key];
     const worker = new Worker(
@@ -316,6 +338,15 @@ function everyOtherSchedule(options: WorkerOptions) {
             key: "registrySync",
             id: "registry-sync",
             every: options.registry.everyMs ?? REGISTRY_SYNC_EVERY_MS,
+          },
+        ] as const)),
+    ...(options.pollRoots === undefined
+      ? []
+      : ([
+          {
+            key: "pollRoot",
+            id: "poll-root",
+            every: options.pollRoots.everyMs ?? POLL_ROOT_EVERY_MS,
           },
         ] as const)),
   ] as const satisfies readonly { key: QueueKey; id: string; every: number }[];

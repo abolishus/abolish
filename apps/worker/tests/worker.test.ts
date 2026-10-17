@@ -6,7 +6,7 @@ import {
   type PollCreationChain,
   type Tier0Batches,
 } from "@abolishus/core";
-import type { RegistrySync } from "../src/index.ts";
+import type { PollRoots, RegistrySync } from "../src/index.ts";
 import { newElection, type TestDb, testDb } from "@abolishus/core/test-db";
 import { Queue } from "bullmq";
 import { Redis } from "ioredis";
@@ -228,14 +228,15 @@ test("every key the worker uses is under its queue's hash tag", async () => {
   await prunes.add("identityBackupPrune", {});
   await outcome("{identity-backup-prune}");
   const keys = await connection.keys(`${prefix}:*`);
-  // This worker has no Tier 0 job, pins no panel, has no registry sync and
-  // holds no creation key, so those queues have no keys here
-  // (tests/tier0.test.ts, tests/ballots.test.ts and
-  // tests/registry-sync.test.ts cover the first three; the creation
+  // This worker has no Tier 0 job, pins no panel, has no registry sync or
+  // roots step and holds no creation key, so those queues have no keys here
+  // (tests/tier0.test.ts, tests/ballots.test.ts, tests/registry-sync.test.ts
+  // and tests/poll-roots.test.ts cover the first four; the creation
   // worker's test below checks its keys).
   const tags = Object.entries(QUEUES)
     .filter(
-      ([key]) => ![...TIER0_QUEUES, "ballotSubmit", "registrySync", "pollCreate"].includes(key),
+      ([key]) =>
+        ![...TIER0_QUEUES, "ballotSubmit", "registrySync", "pollCreate", "pollRoot"].includes(key),
     )
     .map(([, q]) => `${prefix}:${q.name}:`);
   for (const tag of tags)
@@ -278,6 +279,8 @@ test("a handler's own error message is neither logged nor kept, the events strea
       registrySync: async () => {},
       // Not scheduled: this worker holds no creation key.
       pollCreate: async () => {},
+      // Not scheduled: this worker has no roots step.
+      pollRoot: async () => {},
       // Not run: this worker pins no panel.
       ballotSubmit: async () => {
         throw new Error(`params: ${MARKER}`);
@@ -393,8 +396,22 @@ test("a worker refuses the creation key beside any other job", async () => {
   const tier0 = { batches: {} as Tier0Batches };
   const ballots = { admissions: {} as BallotAdmissions };
   const registry = { sync: {} as RegistrySync };
-  for (const extra of [{ anchor }, { tier0 }, { ballots }, { registry }])
+  const pollRoots = { roots: {} as PollRoots };
+  for (const extra of [{ anchor }, { tier0 }, { ballots }, { registry }, { registry, pollRoots }])
     await expect(startWorker({ ...base, ...extra })).rejects.toThrow("runs nothing else");
+});
+
+test("a worker refuses the roots step without the registry sync", async () => {
+  await expect(
+    startWorker({
+      connection,
+      sql: app,
+      log: () => {},
+      auditEveryMs: 3_600_000,
+      prefix: `abolish-test-${hex(randomBytes(6))}`,
+      pollRoots: { roots: {} as PollRoots },
+    }),
+  ).rejects.toThrow("only beside the registry sync");
 });
 
 test("msgpackr's native accelerator isn't installed, so no prebuilt binary loads", async () => {

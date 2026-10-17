@@ -11,6 +11,7 @@ import {
   auditBoard,
   BoardAuditError,
   DefinitionError,
+  GroupRecordsError,
   listBoards,
   type PollCreationChain,
   pruneIdentityBackups,
@@ -19,6 +20,7 @@ import {
   type Tier0Batches,
   Tier0LockError,
 } from "@abolishus/core";
+import { TierMembershipError } from "@abolishus/crypto";
 import { OutputRootError } from "@abolishus/verifier";
 import type { Sql } from "postgres";
 import type { BallotOutcome } from "./ballot-queue.ts";
@@ -26,6 +28,7 @@ import type { BallotBatches } from "./ballots.ts";
 import type { ErrorKind, Log } from "./log.ts";
 import { GameBlockError } from "./output-roots.ts";
 import type { JobData, QueueKey } from "./queues.ts";
+import type { PollRoots } from "./poll-roots.ts";
 import type { RegistrySync } from "./registry-sync.ts";
 
 /** A job's failure, by kind: the only thing about it that is logged. */
@@ -51,6 +54,8 @@ export interface JobContext {
   readonly ballots?: BallotBatches;
   /** The registry sync, when the worker is configured for it; its queue runs only then. */
   readonly registry?: RegistrySync;
+  /** The roots step, beside the registry sync; its queue runs only then. */
+  readonly pollRoots?: PollRoots;
   /**
    * The creation key, its daily ceiling and the L1 anchor its identifiers
    * are checked against, in a creation worker; its queue runs only then.
@@ -232,6 +237,32 @@ async function pollCreate(ctx: JobContext, _data: JobData<"pollCreate">): Promis
 }
 
 /**
+ * One run of the roots step, logging what moved, by count. A history it
+ * refuses (an index the accumulator doesn't vouch for, an L2 node whose
+ * answers don't prove under the output root, a published group the
+ * deployment's registry can't have logged) is logged as a finding and fails
+ * the job, failing no poll; an unreachable node or index fails it as
+ * `internal`.
+ */
+async function pollRoot(ctx: JobContext, _data: JobData<"pollRoot">): Promise<void> {
+  if (ctx.pollRoots === undefined) throw new JobError("internal");
+  const queue = "{poll-root}";
+  let report;
+  try {
+    report = await ctx.pollRoots.run(ctx.now());
+  } catch (e) {
+    if (e instanceof GroupRecordsError) ctx.log({ queue, finding: "incomplete", reason: e.code });
+    else if (e instanceof OutputRootError || e instanceof GameBlockError)
+      ctx.log({ queue, finding: "output-root", reason: e.code });
+    else if (e instanceof TierMembershipError)
+      ctx.log({ queue, finding: "groups", reason: e.code });
+    else throw e;
+    throw new JobError("poll-root-refused");
+  }
+  if (report.rooted > 0 || Object.keys(report.failed).length > 0) ctx.log({ queue, ...report });
+}
+
+/**
  * Judges one ballot in the batch it joins, and returns its outcome: a
  * refusal is an outcome, not a failure, so the API can answer it. A job
  * fails only when the batch's database work does, and its fixed kind is all
@@ -258,5 +289,6 @@ export const HANDLERS: {
   tier0Boundary,
   registrySync,
   pollCreate,
+  pollRoot,
   ballotSubmit,
 };

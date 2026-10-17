@@ -423,7 +423,7 @@ describe("the table", () => {
       app`UPDATE account_polls SET l1_origin_timestamp = NULL WHERE id = ${id}`,
     ).rejects.toThrow(/check/);
     await app`UPDATE account_polls SET anchors_checked_block = 5 WHERE id = ${id}`;
-    await app`UPDATE account_polls SET state = 'rooted' WHERE id = ${id}`;
+    await app`UPDATE account_polls SET state = 'rooted', electorate = '[]' WHERE id = ${id}`;
     await expect(
       app`UPDATE account_polls SET state = 'submitted', creator_address = NULL,
         create_tx_hash = NULL, election_id = NULL, created_block = NULL,

@@ -406,6 +406,8 @@ export {
 export { poseidon2 } from "./poseidon.ts";
 export {
   type GroupRegistryPins,
+  statedTierElectorate,
+  type TierChoice,
   type TierMembership,
   tierMembership,
   TierMembershipError,

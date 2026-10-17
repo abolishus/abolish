@@ -614,68 +614,106 @@ export function applyGroupRecords(
   records: readonly GroupLogRecord[],
   ctx: GroupReplayContext,
 ): GroupReplayResult {
-  if (ctx === null || typeof ctx !== "object") throw new TypeError("ctx: expected an object");
-  // Each field read once, so a getter can't show one record one set and the next another.
-  const { groupId, domainSeparator, tier, registrars, threshold } = ctx;
-  const group = uintArg(groupId, MAX_U64, "groupId");
-  const domain = bytesArg(domainSeparator, 32, "domainSeparator");
-  const set = checkedRegistrars(registrars, threshold);
-  tierArg(tier);
+  const replay = new GroupRecordReplay(ctx);
   if (!Array.isArray(records)) throw new TypeError("records: expected an array");
-  const leaves: bigint[] = [];
-  // Forbidden commitments are refused, so no added leaf is 0 and 0 marks a removal.
-  const fail = (at: number, reason: GroupHistoryReason): GroupReplayResult => ({
-    ok: false,
-    error: "group-history",
-    at,
-    reason,
-  });
   for (const [at, entry] of records.slice().entries()) {
-    const { kind, record } = entry;
-    if (kind === "add") {
-      const d = decodeGroupAddition(record);
-      if (!d.ok) return fail(at, d.error);
-      const a = d.value;
-      if (a.groupId !== group) return fail(at, "group");
-      const digest = groupAdditionDigest(domain, {
-        groupId: a.groupId,
-        tier,
-        firstIndex: a.firstIndex,
-        commitments: a.commitments,
-      });
-      const c = checkGroupApprovals(digest, a.approvals, set, threshold);
-      if (!c.ok) return fail(at, c.error);
-      // The signed position against our own count: a replayed, reordered or
-      // omitted-before batch breaks the sequence the registrars signed.
-      const count = BigInt(leaves.length);
-      if (a.firstIndex !== count || count + BigInt(a.commitments.length) > MAX_LEAVES)
-        return fail(at, "position");
-      leaves.push(...a.commitments);
-    } else if (kind === "remove") {
-      const d = decodeGroupRemoval(record);
-      if (!d.ok) return fail(at, d.error);
-      const rm = d.value;
-      if (rm.groupId !== group) return fail(at, "group");
-      const digest = groupRemovalDigest(domain, {
-        groupId: rm.groupId,
-        tier,
-        size: rm.size,
-        indices: rm.indices,
-      });
-      const c = checkGroupApprovals(digest, rm.approvals, set, threshold);
-      if (!c.ok) return fail(at, c.error);
-      // Indices are below `size` (decoded), so below the count once size is.
-      if (rm.size > BigInt(leaves.length)) return fail(at, "size");
-      if (rm.indices.some((i) => leaves[Number(i)] === 0n)) return fail(at, "removed");
-      for (const i of rm.indices) leaves[Number(i)] = 0n;
-    } else throw new TypeError(`records[${at}]: kind must be "add" or "remove"`);
+    const applied = replay.apply(entry, `records[${at}]`);
+    if (!applied.ok) return { ok: false, error: "group-history", at, reason: applied.reason };
   }
+  const { leaves } = replay;
   return {
     ok: true,
     count: BigInt(leaves.length),
     leaves,
     groupSize: leaves.reduce((n, leaf) => (leaf === 0n ? n : n + 1), 0),
   };
+}
+
+/** What one record did to its group, or why it breaks the group's history. */
+export type GroupRecordApplied =
+  | { readonly ok: true; readonly kind: "add"; readonly commitments: readonly bigint[] }
+  | { readonly ok: true; readonly kind: "remove"; readonly indices: readonly bigint[] }
+  | { readonly ok: false; readonly reason: GroupHistoryReason };
+
+/**
+ * Internal: `applyGroupRecords` one record at a time, for a replay that is
+ * extended as the registry logs records (the Tier 1 relay's counting state,
+ * docs/spec/tier1-relay.md). The checks are `applyGroupRecords`' own, which is
+ * this loop. After a record fails, the history is broken and the caller stops:
+ * nothing it applies afterwards is a replay of the registry's rules.
+ */
+export class GroupRecordReplay {
+  readonly #group: bigint;
+  readonly #domain: Uint8Array;
+  readonly #tier: number;
+  readonly #set: ReturnType<typeof checkedRegistrars>;
+  readonly #threshold: number;
+  // Forbidden commitments are refused, so no added leaf is 0 and 0 marks a removal.
+  readonly #leaves: bigint[] = [];
+
+  constructor(ctx: GroupReplayContext) {
+    if (ctx === null || typeof ctx !== "object") throw new TypeError("ctx: expected an object");
+    // Each field read once, so a getter can't show one record one set and the next another.
+    const { groupId, domainSeparator, tier, registrars, threshold } = ctx;
+    this.#group = uintArg(groupId, MAX_U64, "groupId");
+    this.#domain = bytesArg(domainSeparator, 32, "domainSeparator");
+    this.#set = checkedRegistrars(registrars, threshold);
+    this.#threshold = threshold;
+    tierArg(tier);
+    this.#tier = tier;
+  }
+
+  /** The tier tree's leaves so far, `0n` where a member was removed. */
+  get leaves(): readonly bigint[] {
+    return this.#leaves.slice();
+  }
+
+  apply(entry: GroupLogRecord, what = "record"): GroupRecordApplied {
+    const { kind, record } = entry;
+    const fail = (reason: GroupHistoryReason): GroupRecordApplied => ({ ok: false, reason });
+    const leaves = this.#leaves;
+    if (kind === "add") {
+      const d = decodeGroupAddition(record);
+      if (!d.ok) return fail(d.error);
+      const a = d.value;
+      if (a.groupId !== this.#group) return fail("group");
+      const digest = groupAdditionDigest(this.#domain, {
+        groupId: a.groupId,
+        tier: this.#tier,
+        firstIndex: a.firstIndex,
+        commitments: a.commitments,
+      });
+      const c = checkGroupApprovals(digest, a.approvals, this.#set, this.#threshold);
+      if (!c.ok) return fail(c.error);
+      // The signed position against our own count: a replayed, reordered or
+      // omitted-before batch breaks the sequence the registrars signed.
+      const count = BigInt(leaves.length);
+      if (a.firstIndex !== count || count + BigInt(a.commitments.length) > MAX_LEAVES)
+        return fail("position");
+      leaves.push(...a.commitments);
+      return { ok: true, kind, commitments: a.commitments };
+    }
+    if (kind === "remove") {
+      const d = decodeGroupRemoval(record);
+      if (!d.ok) return fail(d.error);
+      const rm = d.value;
+      if (rm.groupId !== this.#group) return fail("group");
+      const digest = groupRemovalDigest(this.#domain, {
+        groupId: rm.groupId,
+        tier: this.#tier,
+        size: rm.size,
+        indices: rm.indices,
+      });
+      const c = checkGroupApprovals(digest, rm.approvals, this.#set, this.#threshold);
+      if (!c.ok) return fail(c.error);
+      // Indices are below `size` (decoded), so below the count once size is.
+      if (rm.size > BigInt(leaves.length)) return fail("size");
+      if (rm.indices.some((i) => leaves[Number(i)] === 0n)) return fail("removed");
+      for (const i of rm.indices) leaves[Number(i)] = 0n;
+      return { ok: true, kind, indices: rm.indices };
+    }
+    throw new TypeError(`${what}: kind must be "add" or "remove"`);
+  }
 }
 
 /** The length of an `addSelfPaidMember` record: `u64(group_id) ‖ field<bn254>(commitment)`. */

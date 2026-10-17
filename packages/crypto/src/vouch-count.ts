@@ -14,11 +14,9 @@ import {
   checkContractEvent,
 } from "./contract-event.ts";
 import {
-  applyGroupRecords,
   decodeGroupAddition,
-  decodeGroupRemoval,
   type GroupHistoryReason,
-  type GroupLogRecord,
+  GroupRecordReplay,
   groupRegistryDomainSeparator,
 } from "./group-registry.ts";
 import { type MembershipProofCheck, verifyDecodedMembershipProofs } from "./membership-proof.ts";
@@ -274,18 +272,6 @@ export interface Tier1Count {
   >;
 }
 
-interface Group {
-  readonly at: number;
-  readonly block: bigint;
-  readonly tier: number;
-}
-
-interface Tier2Record extends GroupLogRecord {
-  readonly at: number;
-  readonly block: bigint;
-  readonly firstIndex?: bigint;
-}
-
 function u64Arg(v: unknown, what: string): bigint {
   if (typeof v !== "bigint" || v < 0n || v > MAX_U64)
     throw new RangeError(`${what}: expected a bigint from 0 to 2^64 - 1`);
@@ -363,7 +349,7 @@ function readEvents(events: readonly GroupRegistryEvent[]): GroupRegistryEvent[]
  * changes an earlier addition's verdict, so one replay serves every
  * definition reaching no further.
  *
- * Each Tier 2 group is first replayed strictly, as verifier 2.4 replays it
+ * Each Tier 2 group is replayed strictly, as verifier 2.4 replays it
  * (`applyGroupRecords` under the pinned registrars), and the earliest event
  * that breaks any Tier 2 history, at block `b_R`, stops the count there:
  * additions in blocks before `b_R` are decided, since no root they name can
@@ -382,226 +368,95 @@ function readEvents(events: readonly GroupRegistryEvent[]): GroupRegistryEvent[]
  * leaf and consumes its slot nullifiers for good; one that fails consumes
  * nothing, takes no index and fails nothing else (T-25, T-53).
  *
- * Each Tier 2 group a vouch names is replayed once, with its root taken at
- * every block named. The proofs are checked last (docs/spec/vouching.md,
- * Batched verification, Proofs last): only those of additions a walk of the
- * order would count, in batches with coefficients from the CSPRNG
+ * Each Tier 2 group's tree is built once, its root kept at every root-grid
+ * block. The proofs are checked last (docs/spec/vouching.md, Batched
+ * verification, Proofs last): only those of additions a walk of the order
+ * would count, in batches with coefficients from the CSPRNG
  * (`verifyDecodedMembershipProofs`), each proof at most once, with the walk
  * redone once when one fails. So copies of counted additions, which anyone can
  * log, cost no pairing, and each proof's verdict is the one checking it alone
- * gives (T-52).
+ * gives (T-52). This is one extension of a fresh `Tier1CountingState`, so the
+ * relay's state and a verifier's replay are the same code.
  */
 export function countTier1Additions(
   events: readonly GroupRegistryEvent[],
   ctx: Tier1CountContext,
 ): Tier1Count {
-  if (ctx === null || typeof ctx !== "object") throw new TypeError("ctx: expected an object");
-  // Each field read once, so a getter can't show one check one value and the next another.
-  const { chainId, registry, registrars, threshold } = ctx;
-  const vouchCtx: VouchContext = {
-    chainId: u64Arg(chainId, "chainId"),
-    registry: bytesArg(registry, "registry"),
-  };
-  const domainSeparator = groupRegistryDomainSeparator(vouchCtx.chainId, vouchCtx.registry);
-  const list = readEvents(events);
-
-  // Groups, by their first GroupCreated, and the earliest break among them.
-  const groups = new Map<bigint, Group>();
-  let broken: Tier1Break | null = null;
-  const breakAt = (b: Tier1Break) => {
-    if (broken === null || b.at < broken.at) broken = b;
-  };
-  // A self-paid group is a Tier 0 group of its own kind: it takes no Tier 1
-  // addition and no vouch names it, but its creation numbers a group, so a
-  // second creation of an identifier breaks the count whichever kinds they are.
-  for (const [at, e] of list.entries()) {
-    if (e.kind !== "group-created" && e.kind !== "self-paid-group-created") continue;
-    if (groups.has(e.groupId))
-      breakAt({ at, block: e.block, groupId: e.groupId, reason: "duplicate-group" });
-    else
-      groups.set(e.groupId, {
-        at,
-        block: e.block,
-        tier: e.kind === "group-created" ? e.tier : 0,
-      });
-  }
-
-  // Each Tier 2 group's records, replayed strictly over the whole sequence
-  // given. A members record of a group with no earlier GroupCreated, of any
-  // tier, breaks at its own block, so no later event can move a break earlier
-  // (T-71).
-  const tier2 = new Map<bigint, Tier2Record[]>();
-  for (const [at, e] of list.entries()) {
-    if (
-      e.kind !== "members-added" &&
-      e.kind !== "members-removed" &&
-      e.kind !== "self-paid-addition"
-    )
-      continue;
-    const group = groups.get(e.groupId);
-    if (group === undefined || group.at > at) {
-      breakAt({ at, block: e.block, groupId: e.groupId, reason: "created" });
-      continue;
-    }
-    if (group.tier !== 2) continue;
-    // A self-paid addition naming a signed group fails that group's replay at
-    // `group` (2.4). Events read by `groupRegistryEvents` have passed the event
-    // check, which decodes the record strictly, so no decoding code comes
-    // first; hand-built events are the caller's to have decoded.
-    if (e.kind === "self-paid-addition") {
-      breakAt({ at, block: e.block, groupId: e.groupId, reason: "group" });
-      continue;
-    }
-    const records = tier2.get(e.groupId) ?? [];
-    records.push(
-      e.kind === "members-added"
-        ? {
-            at,
-            block: e.block,
-            kind: "add",
-            record: e.record,
-            ...(e.firstIndex === undefined ? {} : { firstIndex: e.firstIndex }),
-          }
-        : { at, block: e.block, kind: "remove", record: e.record },
-    );
-    tier2.set(e.groupId, records);
-  }
-  for (const [groupId, records] of tier2) {
-    const replay = applyGroupRecords(records, {
-      groupId,
-      domainSeparator,
-      tier: 2,
-      registrars,
-      threshold,
-    });
-    // The event's `firstIndex` topic is the one an accumulator and an indexer
-    // read; an addition whose own `first_index` differs fails its group
-    // (docs/spec/contracts.md, Group registry, Verification, which checks the
-    // topics before replaying), so only a replay failure at an earlier record
-    // comes first.
-    const end = replay.ok ? records.length : replay.at + 1;
-    const mismatch = records.slice(0, end).findIndex((r) => {
-      if (r.firstIndex === undefined) return false;
-      const d = decodeGroupAddition(r.record);
-      return d.ok && d.value.firstIndex !== r.firstIndex;
-    });
-    if (mismatch >= 0) {
-      const record = records[mismatch] as Tier2Record;
-      breakAt({ at: record.at, block: record.block, groupId, reason: "position" });
-    } else if (!replay.ok) {
-      const record = records[replay.at] as Tier2Record;
-      breakAt({ at: record.at, block: record.block, groupId, reason: replay.reason });
-    }
-  }
-  const stop: bigint | null = (broken as Tier1Break | null)?.block ?? null;
-
-  // The checks that need no counting state, for every addition before b_R:
-  // first those up to `tier2-group`, collecting the Tier 2 roots they name.
-  const named = new Map<bigint, Set<bigint>>();
-  const opened: Pre[] = [];
-  for (const [at, e] of list.entries()) {
-    if (e.kind !== "tier1-addition") continue;
-    if (stop !== null && e.block >= stop) break;
-    const p = upToTier2Group(at, e.block, e.record);
-    if (p.verdict === null)
-      for (const v of p.value.vouches) {
-        const blocks = named.get(v.tier2GroupId) ?? new Set<bigint>();
-        blocks.add(v.rootBlock);
-        named.set(v.tier2GroupId, blocks);
-      }
-    opened.push(p);
-  }
-  function upToTier2Group(at: number, block: bigint, record: Uint8Array): Pre {
-    const pre = precheckTier1Addition(record, vouchCtx);
-    if (!pre.ok) return { at, block, verdict: pre.failure };
-    const { groupId, vouches } = pre.value;
-    const fail = (verdict: Tier1CountVerdict): Pre => ({ at, block, verdict });
-    const group = groups.get(groupId);
-    if (group?.tier !== 1 || group.at > at) return fail({ ok: false, error: "group" });
-    for (const [i, v] of vouches.entries())
-      if (v.rootBlock % VOUCH_ROOT_INTERVAL !== 0n)
-        return fail({ ok: false, error: "root-grid", vouch: i });
-    for (const [i, v] of vouches.entries())
-      if (v.rootBlock > block || block - v.rootBlock > VOUCH_ROOT_WINDOW)
-        return fail({ ok: false, error: "root-window", vouch: i });
-    for (const [i, v] of vouches.entries()) {
-      const t2 = groups.get(v.tier2GroupId);
-      if (t2?.tier !== 2 || t2.block > v.rootBlock)
-        return fail({ ok: false, error: "tier2-group", vouch: i });
-    }
-    return { at, block, verdict: null, value: pre.value, proofs: pre.proofs };
-  }
-
-  // Each named Tier 2 group replayed once, its root taken at every block a
-  // vouch names (T-52). Every record applied is in a block before b_R, since
-  // a root block is at most its addition's block, so the strict replay above
-  // accepted it.
-  const roots = new Map<string, bigint>();
-  for (const [groupId, blocks] of named) {
-    const tree = new TierTreeBuilder();
-    const records = tier2.get(groupId) ?? [];
-    let next = 0;
-    for (const block of [...blocks].sort((x, y) => (x < y ? -1 : x > y ? 1 : 0))) {
-      for (; next < records.length; next++) {
-        const r = records[next] as Tier2Record;
-        if (r.block > block) break;
-        if (r.kind === "add") {
-          const d = decodeGroupAddition(r.record);
-          if (d.ok) for (const c of d.value.commitments) tree.append(c);
-        } else {
-          const d = decodeGroupRemoval(r.record);
-          if (d.ok) for (const i of d.value.indices) tree.remove(Number(i));
-        }
-      }
-      roots.set(`${groupId}:${block}`, tree.root());
-    }
-  }
-  const pres = opened.map((p): Pre => {
-    if (p.verdict !== null) return p;
-    const mismatch = p.value.vouches.findIndex(
-      (v) => v.root !== roots.get(`${v.tier2GroupId}:${v.rootBlock}`),
-    );
-    return mismatch < 0
-      ? p
-      : {
-          at: p.at,
-          block: p.block,
-          verdict: { ok: false, error: "root-mismatch", vouch: mismatch },
-        };
-  });
-
-  // Proofs last (docs/spec/vouching.md, Batched verification): walk the order
-  // taking each addition that passes checks 1 to 8 as counted, then batch the
-  // proofs of the additions it counted. If every one passes, the walk stands.
-  // Otherwise the walk is redone once, now checking each addition's proofs
-  // when it reaches them (those already checked from the batch's verdicts): an
-  // addition that fails consumes nothing, so a later one may now pass
-  // `slot-spent` or `member` and need its own proofs. So there are at most two
-  // walks, whatever a rewritten history logs, each proof is checked at most
-  // once, and pairings go only to additions that reach `proof` in some walk,
-  // never to copies of counted ones (T-52). On an honest chain no logged proof
-  // fails, so one walk and one batch decide everything.
-  const proofs = new Map<number, readonly boolean[]>();
-  const first = walkOrder(pres, (i) => proofs.get(i));
-  const verdicts = verifyDecodedMembershipProofs(first.unchecked.flatMap((u) => u.proofs));
-  let next = 0;
-  for (const u of first.unchecked) {
-    proofs.set(u.pre, verdicts.slice(next, next + u.proofs.length));
-    next += u.proofs.length;
-  }
-  if (!verdicts.includes(false)) return { ...first.count, broken };
-  const second = walkOrder(pres, (i, own) => {
-    let known = proofs.get(i);
-    if (known === undefined) {
-      known = verifyDecodedMembershipProofs(own);
-      proofs.set(i, known);
-    }
-    return known;
-  });
-  return { ...second.count, broken };
+  const state = new Tier1CountingState(ctx);
+  const { additions, broken } = state.extend(events);
+  return { additions, broken, groups: state.groups() };
 }
 
-// An addition after the checks that need no counting state: its verdict, or
+/** What one extension of a counting state decided. */
+export interface Tier1Extension {
+  /** The verdicts of the extension's Tier 1 additions in blocks before any break, in log order. */
+  readonly additions: Tier1Count["additions"];
+  /** The state's break, from this extension or an earlier one. */
+  readonly broken: Tier1Break | null;
+}
+
+/** Why the relay drops a record that would count: too little of a vouch's window is left to send it. */
+export interface Tier1SendMarginFailure {
+  readonly ok: false;
+  readonly error: "send-margin";
+  readonly vouch: number;
+}
+
+/** One candidate's outcome at a boundary (docs/spec/tier1-relay.md, The batch, step 4). */
+export type Tier1Judged =
+  | {
+      readonly status: "chosen";
+      readonly value: Tier1Addition;
+      /** The leaf index it would take, after the counted additions and the candidates chosen before it. */
+      readonly index: number;
+    }
+  | {
+      readonly status: "dropped";
+      readonly verdict: Exclude<Tier1CountVerdict, { ok: true }> | Tier1SendMarginFailure;
+    }
+  /** Not judged: the walk had chosen its limit first. */
+  | { readonly status: "unreached" };
+
+export type Tier1Judgement =
+  | {
+      readonly ok: true;
+      /** `b + 1`: the block every candidate was judged as if logged in. */
+      readonly block: bigint;
+      readonly candidates: readonly Tier1Judged[];
+    }
+  | { readonly ok: false; readonly error: "group-history"; readonly broken: Tier1Break };
+
+interface Group {
+  readonly at: number;
+  readonly block: bigint;
+  readonly tier: number;
+}
+
+// A Tier 2 group's strict replay and its tier tree, with the roots the tree
+// had before later records changed it (T-52).
+interface Tier2Group {
+  readonly replay: GroupRecordReplay;
+  readonly tree: TierTreeBuilder;
+  /** The block of the last record applied; 0 before any. */
+  last: bigint;
+  /**
+   * `root` is the tree over the records in blocks before the next record's,
+   * from block `from` on. Kept only where a root-grid block falls in that span,
+   * since a vouch names no other block, and only back to the oldest grid block
+   * a later addition can still name.
+   */
+  roots: { readonly from: bigint; readonly root: bigint }[];
+}
+
+// The counted additions: every slot nullifier they spent, and each Tier 1
+// group's members and leaves in order.
+interface Counted {
+  readonly spent: Set<bigint>;
+  readonly members: Map<bigint, Set<bigint>>;
+  readonly leaves: Map<bigint, { commitment: bigint; block: bigint }[]>;
+}
+
+// An addition after the checks that need no slots or members: its verdict, or
 // (`verdict: null`) its decoded value and proofs, still to be walked.
 type Pre =
   | { readonly at: number; readonly block: bigint; readonly verdict: Tier1CountVerdict }
@@ -613,29 +468,406 @@ type Pre =
       readonly proofs: readonly MembershipProofCheck[];
     };
 
+let emptyRoot: bigint | undefined;
+
 /**
- * One walk of the order: slots and leaves, with an addition's proof verdicts
- * asked of `verdictsOf` (by its position in `pres`) only once it passes
- * checks 1 to 8, and taken as passing where it gives none. `unchecked` lists
- * the additions the walk counted on proofs it had no verdicts for; when it is
- * empty, the walk is the count.
+ * The relay's counting state (docs/spec/tier1-relay.md, The counting state):
+ * the replay of [[vouching]]'s counting rule up to a block, extended by the
+ * registry's later events as they are logged, against which candidate
+ * records are judged without a full replay each (T-52). It holds every
+ * group's creation and tier, each Tier 2 group's strict replay and tier tree
+ * with its roots at the grid blocks still inside the window, the slot
+ * nullifiers spent, each Tier 1 group's counted members, and the break, if
+ * any. Extending it by a sequence in pieces gives exactly the verdicts and
+ * the break that `countTier1Additions` gives over the whole sequence, which
+ * is one extension of a fresh state.
+ *
+ * Positions (`at`, a break's `at`) count every event the state was extended
+ * by. The state can't be rolled back: when a reorganisation removes a block
+ * it was extended past, the caller builds a new one.
+ */
+export class Tier1CountingState {
+  readonly #vouchCtx: VouchContext;
+  readonly #domainSeparator: Uint8Array;
+  readonly #registrars: readonly Uint8Array[];
+  readonly #threshold: number;
+  readonly #groups = new Map<bigint, Group>();
+  readonly #tier2 = new Map<bigint, Tier2Group>();
+  readonly #counted: Counted = { spent: new Set(), members: new Map(), leaves: new Map() };
+  #broken: Tier1Break | null = null;
+  #through: bigint | null = null;
+  #position = 0;
+
+  constructor(ctx: Tier1CountContext) {
+    if (ctx === null || typeof ctx !== "object") throw new TypeError("ctx: expected an object");
+    // Each field read once, so a getter can't show one check one value and the next another.
+    const { chainId, registry, registrars, threshold } = ctx;
+    this.#vouchCtx = {
+      chainId: u64Arg(chainId, "chainId"),
+      registry: bytesArg(registry, "registry"),
+    };
+    this.#domainSeparator = groupRegistryDomainSeparator(
+      this.#vouchCtx.chainId,
+      this.#vouchCtx.registry,
+    );
+    // Checked by each Tier 2 group's replay when it first takes a record.
+    this.#registrars = Array.isArray(registrars) ? registrars.slice() : registrars;
+    this.#threshold = threshold;
+  }
+
+  /** `b`: the block the state has every event of, or null before any extension that names one. */
+  get block(): bigint | null {
+    return this.#through;
+  }
+
+  get broken(): Tier1Break | null {
+    return this.#broken;
+  }
+
+  /** Each Tier 1 group's counted additions in order: the leaves of its tier tree. */
+  groups(): Tier1Count["groups"] {
+    return new Map([...this.#counted.leaves].map(([id, leaves]) => [id, leaves.slice()]));
+  }
+
+  /**
+   * Extends the state by the registry's events after its block, in log order,
+   * through block `through` (by default the last event's): the caller asserts
+   * that these are all of the registry's events in blocks up to it, so the
+   * next extension starts in a later block. Returns the verdicts of the
+   * additions it decided. Once a Tier 2 history is broken, nothing more is
+   * decided (docs/spec/vouching.md, A broken Tier 2 history), and the state
+   * only advances its block.
+   */
+  extend(events: readonly GroupRegistryEvent[], through?: bigint): Tier1Extension {
+    const list = readEvents(events);
+    const firstBlock = list[0]?.block;
+    const lastBlock = list.at(-1)?.block;
+    if (this.#through !== null && firstBlock !== undefined && firstBlock <= this.#through)
+      throw new RangeError("events: blocks must be after the state's block");
+    let end = this.#through;
+    if (through !== undefined) {
+      end = u64Arg(through, "through");
+      if ((lastBlock !== undefined && end < lastBlock) || (this.#through ?? 0n) > end)
+        throw new RangeError("through: must be at or after every event's block and the state's");
+    } else if (lastBlock !== undefined) end = lastBlock;
+    const base = this.#position;
+    this.#position += list.length;
+    this.#through = end;
+    if (this.#broken !== null) return { additions: [], broken: this.#broken };
+
+    // Groups, Tier 2 records and breaks in log order; the Tier 1 additions are
+    // decided after, once every root they can name is known.
+    const pending: { at: number; block: bigint; record: Uint8Array }[] = [];
+    for (const [i, e] of list.entries()) {
+      const at = base + i;
+      if (e.kind === "tier1-addition") pending.push({ at, block: e.block, record: e.record });
+      else if (!this.#apply(at, e)) break;
+    }
+    // `#apply` may have set it since the check above, which TypeScript narrowed.
+    const stop = (this.#broken as Tier1Break | null)?.block ?? null;
+    const pres = pending
+      .filter((p) => stop === null || p.block < stop)
+      .map((p) => this.#pre(p.at, p.block, p.record));
+
+    // Proofs last (docs/spec/vouching.md, Batched verification): walk the order
+    // taking each addition that passes checks 1 to 8 as counted, then batch the
+    // proofs of the additions it counted. If every one passes, the walk stands.
+    // Otherwise the walk is redone once, now checking each addition's proofs
+    // when it reaches them (those already checked from the batch's verdicts):
+    // an addition that fails consumes nothing, so a later one may now pass
+    // `slot-spent` or `member` and need its own proofs. So there are at most
+    // two walks, whatever a rewritten history logs, each proof is checked at
+    // most once, and pairings go only to additions that reach `proof` in some
+    // walk, never to copies of counted ones (T-52). On an honest chain no
+    // logged proof fails, so one walk and one batch decide everything.
+    const proofs = new Map<number, readonly boolean[]>();
+    let walked = walkOrder(pres, this.#counted, (i) => proofs.get(i));
+    const batch = walked.unchecked.flatMap((u) => u.proofs);
+    const verdicts = batch.length === 0 ? [] : verifyDecodedMembershipProofs(batch);
+    let next = 0;
+    for (const u of walked.unchecked) {
+      proofs.set(u.pre, verdicts.slice(next, next + u.proofs.length));
+      next += u.proofs.length;
+    }
+    if (verdicts.includes(false))
+      walked = walkOrder(pres, this.#counted, (i, own) => {
+        let known = proofs.get(i);
+        if (known === undefined) {
+          known = verifyDecodedMembershipProofs(own);
+          proofs.set(i, known);
+        }
+        return known;
+      });
+    walked.walk.commit();
+    this.#prune();
+    return { additions: walked.additions, broken: this.#broken };
+  }
+
+  /**
+   * Judges candidate records, in the order given (the relay's shuffle), as if
+   * logged in block `b + 1` after the state's events and the candidates chosen
+   * before them, with every check of the counting rule, proofs last and each
+   * candidate's own (docs/spec/tier1-relay.md, The batch, step 4). A candidate
+   * that would count is chosen only if every vouch's window still has
+   * `sendMargin` blocks past `b` (`b + sendMargin ≤ root_block + W`), checked
+   * before its slots and proofs; any other is dropped and consumes nothing.
+   * Once `limit` are chosen, the rest are unreached. The state is unchanged:
+   * what lands is read from the chain at the next extension.
+   */
+  judge(
+    records: readonly Uint8Array[],
+    options: { readonly limit: number; readonly sendMargin: bigint },
+  ): Tier1Judgement {
+    if (!Array.isArray(records)) throw new TypeError("records: expected an array");
+    if (options === null || typeof options !== "object")
+      throw new TypeError("options: expected an object");
+    const { limit, sendMargin } = options;
+    if (!Number.isSafeInteger(limit) || limit < 0)
+      throw new RangeError("limit: expected a non-negative integer");
+    const margin = u64Arg(sendMargin, "sendMargin");
+    const b = this.#through;
+    if (b === null) throw new RangeError("judge: the state has no block yet");
+    if (this.#broken !== null) return { ok: false, error: "group-history", broken: this.#broken };
+    const block = b + 1n;
+    const walk = new Walk(this.#counted);
+    const prove = (_: number, own: readonly MembershipProofCheck[]) =>
+      verifyDecodedMembershipProofs(own);
+    let chosen = 0;
+    const candidates = records.slice().map((r, i): Tier1Judged => {
+      const record = bytesArg(r, `records[${i}]`);
+      if (chosen >= limit) return { status: "unreached" };
+      // Every group the state knows was created before any candidate.
+      const p = this.#pre(this.#position, block, record);
+      if (p.verdict !== null) return { status: "dropped", verdict: drop(p.verdict) };
+      const late = p.value.vouches.findIndex((v) => b + margin > v.rootBlock + VOUCH_ROOT_WINDOW);
+      if (late >= 0)
+        return { status: "dropped", verdict: { ok: false, error: "send-margin", vouch: late } };
+      const { verdict } = walk.consider(i, p, prove);
+      if (!verdict.ok) return { status: "dropped", verdict };
+      chosen++;
+      return { status: "chosen", value: verdict.value, index: verdict.index };
+    });
+    return { ok: true, block, candidates };
+  }
+
+  // Applies one event that isn't a Tier 1 addition; false once it breaks the
+  // count. A members record of a group with no earlier creation, of any tier,
+  // breaks at its own block, so no later event can move a break earlier (T-71).
+  #apply(at: number, e: Exclude<GroupRegistryEvent, { kind: "tier1-addition" }>): boolean {
+    const breakAt = (reason: Tier1Break["reason"]) => {
+      this.#broken = { at, block: e.block, groupId: e.groupId, reason };
+      return false;
+    };
+    // A self-paid group is a Tier 0 group of its own kind: it takes no Tier 1
+    // addition and no vouch names it, but its creation numbers a group, so a
+    // second creation of an identifier breaks the count whichever kinds they are.
+    if (e.kind === "group-created" || e.kind === "self-paid-group-created") {
+      if (this.#groups.has(e.groupId)) return breakAt("duplicate-group");
+      this.#groups.set(e.groupId, {
+        at,
+        block: e.block,
+        tier: e.kind === "group-created" ? e.tier : 0,
+      });
+      return true;
+    }
+    const group = this.#groups.get(e.groupId);
+    if (group === undefined) return breakAt("created");
+    if (group.tier !== 2) return true;
+    // A self-paid addition naming a signed group fails that group's replay at
+    // `group` (2.4). Events read by `groupRegistryEvents` have passed the event
+    // check, which decodes the record strictly, so no decoding code comes
+    // first; hand-built events are the caller's to have decoded.
+    if (e.kind === "self-paid-addition") return breakAt("group");
+    // The event's `firstIndex` topic is the one an accumulator and an indexer
+    // read; an addition whose own `first_index` differs fails its group
+    // (docs/spec/contracts.md, Group registry, Verification, which checks the
+    // topics before replaying the record).
+    if (e.kind === "members-added" && e.firstIndex !== undefined) {
+      const d = decodeGroupAddition(e.record);
+      if (d.ok && d.value.firstIndex !== e.firstIndex) return breakAt("position");
+    }
+    let t = this.#tier2.get(e.groupId);
+    if (t === undefined) {
+      t = {
+        replay: new GroupRecordReplay({
+          groupId: e.groupId,
+          domainSeparator: this.#domainSeparator,
+          tier: 2,
+          registrars: this.#registrars,
+          threshold: this.#threshold,
+        }),
+        tree: new TierTreeBuilder(),
+        last: 0n,
+        roots: [],
+      };
+      this.#tier2.set(e.groupId, t);
+    }
+    // The tree as it stands holds from `last` until this record's block: keep
+    // its root if a grid block falls in between.
+    const grid = ((t.last + VOUCH_ROOT_INTERVAL - 1n) / VOUCH_ROOT_INTERVAL) * VOUCH_ROOT_INTERVAL;
+    if (grid < e.block) t.roots.push({ from: t.last, root: t.tree.root() });
+    const applied = t.replay.apply({
+      kind: e.kind === "members-added" ? "add" : "remove",
+      record: e.record,
+    });
+    if (!applied.ok) return breakAt(applied.reason);
+    if (applied.kind === "add") for (const c of applied.commitments) t.tree.append(c);
+    else for (const i of applied.indices) t.tree.remove(Number(i));
+    t.last = e.block;
+    return true;
+  }
+
+  // The root a Tier 2 group's tree had over its records in blocks up to grid
+  // block `g`, which is at most the state's block.
+  #rootAt(groupId: bigint, g: bigint): bigint | undefined {
+    const t = this.#tier2.get(groupId);
+    if (t === undefined) return (emptyRoot ??= new TierTreeBuilder().root());
+    if (g >= t.last) return t.tree.root();
+    let lo = 0;
+    let hi = t.roots.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if ((t.roots[mid] as Tier2Group["roots"][number]).from <= g) lo = mid + 1;
+      else hi = mid;
+    }
+    return t.roots[lo - 1]?.root;
+  }
+
+  // Drops the roots no later addition or candidate can name: every one is in
+  // a block after the state's, so names no grid block before `b + 1 - W`.
+  #prune(): void {
+    if (this.#through === null || this.#through + 1n <= VOUCH_ROOT_WINDOW) return;
+    const oldest = this.#through + 1n - VOUCH_ROOT_WINDOW;
+    for (const t of this.#tier2.values()) {
+      const keep = t.roots.findLastIndex((r) => r.from <= oldest);
+      if (keep > 0) t.roots = t.roots.slice(keep);
+    }
+  }
+
+  // The checks that need no slots or members, up to `root-mismatch`, of an
+  // addition at position `at` in block `block`.
+  #pre(at: number, block: bigint, record: Uint8Array): Pre {
+    const pre = precheckTier1Addition(record, this.#vouchCtx);
+    if (!pre.ok) return { at, block, verdict: pre.failure };
+    const { groupId, vouches } = pre.value;
+    const fail = (verdict: Tier1CountVerdict): Pre => ({ at, block, verdict });
+    const group = this.#groups.get(groupId);
+    if (group?.tier !== 1 || group.at > at) return fail({ ok: false, error: "group" });
+    for (const [i, v] of vouches.entries())
+      if (v.rootBlock % VOUCH_ROOT_INTERVAL !== 0n)
+        return fail({ ok: false, error: "root-grid", vouch: i });
+    for (const [i, v] of vouches.entries())
+      if (v.rootBlock > block || block - v.rootBlock > VOUCH_ROOT_WINDOW)
+        return fail({ ok: false, error: "root-window", vouch: i });
+    for (const [i, v] of vouches.entries()) {
+      const t2 = this.#groups.get(v.tier2GroupId);
+      if (t2?.tier !== 2 || t2.block > v.rootBlock)
+        return fail({ ok: false, error: "tier2-group", vouch: i });
+    }
+    for (const [i, v] of vouches.entries())
+      if (v.root !== this.#rootAt(v.tier2GroupId, v.rootBlock))
+        return fail({ ok: false, error: "root-mismatch", vouch: i });
+    return { at, block, verdict: null, value: pre.value, proofs: pre.proofs };
+  }
+}
+
+const drop = (v: Tier1CountVerdict): Exclude<Tier1CountVerdict, { ok: true }> => {
+  if (v.ok) throw new Error("unreachable: a verdict before the walk counts nothing");
+  return v;
+};
+
+/**
+ * Slots and leaves taken by a walk over `base`, the counted additions, which
+ * it reads but changes only on `commit`.
+ */
+class Walk {
+  readonly #base: Counted;
+  readonly #spent = new Set<bigint>();
+  readonly #members = new Map<bigint, Set<bigint>>();
+  readonly #leaves = new Map<bigint, { commitment: bigint; block: bigint }[]>();
+
+  constructor(base: Counted) {
+    this.#base = base;
+  }
+
+  /**
+   * `slot-spent`, `member`, then the proofs, whose verdicts are asked of
+   * `verdictsOf` only once the others pass and taken as passing where it
+   * gives none (`unchecked`). A counted addition takes its slots and its
+   * group's next leaf.
+   */
+  consider(
+    i: number,
+    p: Extract<Pre, { verdict: null }>,
+    verdictsOf: (
+      pre: number,
+      proofs: readonly MembershipProofCheck[],
+    ) => readonly boolean[] | undefined,
+  ): { readonly verdict: Tier1CountVerdict; readonly unchecked: boolean } {
+    const { groupId, commitment, vouches } = p.value;
+    const reused = vouches.findIndex(
+      (v) => this.#base.spent.has(v.slotNullifier) || this.#spent.has(v.slotNullifier),
+    );
+    if (reused >= 0)
+      return { verdict: { ok: false, error: "slot-spent", vouch: reused }, unchecked: false };
+    // The registry has no Tier 1 removals ([[contracts]], Group registry, Tier
+    // 1 additions), so every counted leaf is unremoved.
+    const members = this.#members.get(groupId) ?? new Set<bigint>();
+    if (this.#base.members.get(groupId)?.has(commitment) === true || members.has(commitment))
+      return { verdict: { ok: false, error: "member" }, unchecked: false };
+    const own = verdictsOf(i, p.proofs);
+    const failure = own === undefined ? null : proofFailure(own);
+    if (failure !== null) return { verdict: failure, unchecked: false };
+    for (const v of vouches) this.#spent.add(v.slotNullifier);
+    members.add(commitment);
+    this.#members.set(groupId, members);
+    const leaves = this.#leaves.get(groupId) ?? [];
+    const index = (this.#base.leaves.get(groupId)?.length ?? 0) + leaves.length;
+    leaves.push({ commitment, block: p.block });
+    this.#leaves.set(groupId, leaves);
+    return { verdict: { ok: true, value: p.value, index }, unchecked: own === undefined };
+  }
+
+  /** Makes the walk's slots and leaves the base's. */
+  commit(): void {
+    const base = this.#base;
+    for (const n of this.#spent) base.spent.add(n);
+    for (const [id, members] of this.#members) {
+      const into = base.members.get(id) ?? new Set<bigint>();
+      for (const c of members) into.add(c);
+      base.members.set(id, into);
+    }
+    for (const [id, leaves] of this.#leaves) {
+      const into = base.leaves.get(id) ?? [];
+      into.push(...leaves);
+      base.leaves.set(id, into);
+    }
+  }
+}
+
+/**
+ * One walk of the order over the counted additions in `base`, with an
+ * addition's proof verdicts asked of `verdictsOf` (by its position in `pres`)
+ * only once it passes checks 1 to 8. `unchecked` lists the additions the walk
+ * counted on proofs it had no verdicts for; when it is empty, the walk is the
+ * count.
  */
 function walkOrder(
   pres: readonly Pre[],
+  base: Counted,
   verdictsOf: (
     pre: number,
     proofs: readonly MembershipProofCheck[],
   ) => readonly boolean[] | undefined,
 ): {
-  readonly count: Omit<Tier1Count, "broken">;
+  readonly additions: Tier1Count["additions"];
+  readonly walk: Walk;
   readonly unchecked: readonly {
     readonly pre: number;
     readonly proofs: readonly MembershipProofCheck[];
   }[];
 } {
-  const spent = new Set<bigint>();
-  const leaves = new Map<bigint, { commitment: bigint; block: bigint }[]>();
-  const members = new Map<bigint, Set<bigint>>();
+  const walk = new Walk(base);
   const additions: Tier1Count["additions"][number][] = [];
   const unchecked: { pre: number; proofs: readonly MembershipProofCheck[] }[] = [];
   for (const [i, p] of pres.entries()) {
@@ -643,37 +875,11 @@ function walkOrder(
       additions.push(p);
       continue;
     }
-    const { groupId, commitment, vouches } = p.value;
-    const decide = (verdict: Tier1CountVerdict) =>
-      additions.push({ at: p.at, block: p.block, verdict });
-    const reused = vouches.findIndex((v) => spent.has(v.slotNullifier));
-    if (reused >= 0) {
-      decide({ ok: false, error: "slot-spent", vouch: reused });
-      continue;
-    }
-    // The registry has no Tier 1 removals ([[contracts]], Group registry, Tier
-    // 1 additions), so every counted leaf is unremoved.
-    const groupMembers = members.get(groupId) ?? new Set<bigint>();
-    if (groupMembers.has(commitment)) {
-      decide({ ok: false, error: "member" });
-      continue;
-    }
-    const own = verdictsOf(i, p.proofs);
-    const failure = own === undefined ? null : proofFailure(own);
-    if (failure !== null) {
-      decide(failure);
-      continue;
-    }
-    if (own === undefined) unchecked.push({ pre: i, proofs: p.proofs });
-    for (const v of vouches) spent.add(v.slotNullifier);
-    groupMembers.add(commitment);
-    members.set(groupId, groupMembers);
-    const groupLeaves = leaves.get(groupId) ?? [];
-    decide({ ok: true, value: p.value, index: groupLeaves.length });
-    groupLeaves.push({ commitment, block: p.block });
-    leaves.set(groupId, groupLeaves);
+    const { verdict, unchecked: u } = walk.consider(i, p, verdictsOf);
+    if (u) unchecked.push({ pre: i, proofs: p.proofs });
+    additions.push({ at: p.at, block: p.block, verdict });
   }
-  return { count: { additions, groups: leaves }, unchecked };
+  return { additions, walk, unchecked };
 }
 
 export type Tier1LeavesResult =

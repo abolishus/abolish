@@ -197,6 +197,8 @@ export {
   reviewReports,
 } from "./reports.ts";
 export {
+  countRegistrations,
+  latestRegistration,
   lookupShortCode,
   recordRegistration,
   RegistrationError,
@@ -215,3 +217,12 @@ export {
   shortCode,
   shortCodeRange,
 } from "./short-codes.ts";
+export {
+  type IndexedLog,
+  type RegistryDeployment,
+  RegistrySyncError,
+  type RegistrySyncErrorCode,
+  type RegistrySyncReason,
+  type RegistrySyncReport,
+  syncRegistrations,
+} from "./registry-sync.ts";

@@ -69,6 +69,14 @@ export const QUEUES = {
    */
   tier0Boundary: { name: "{tier0-boundary}", side: "operational", data: z.strictObject({}) },
   /**
+   * Records the election registry's finalized registrations from the index,
+   * checked against the registry's event accumulator, and stores their
+   * definitions (core's syncRegistrations; T-71, T-49, T-53). Runs on a
+   * schedule, only when the worker is configured for it, and takes no data:
+   * everything it reads is public chain data.
+   */
+  registrySync: { name: "{registry-sync}", side: "operational", data: z.strictObject({}) },
+  /**
    * Ballots the API received, to admit and board (core's
    * BallotAdmissions.submitAll; docs/spec/ballot-validity.md, Batched
    * admission; T-17, T-52). Queued by the API's `ballots.submit` through

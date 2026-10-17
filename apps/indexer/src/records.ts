@@ -57,6 +57,12 @@ export async function readIndexedGroups(sql: Sql, schema: string): Promise<Index
   }));
 }
 
+/** A contract's log as the index holds it: its contract-event record and its index in its block. */
+export interface IndexedLog {
+  readonly record: ContractEventRecord;
+  readonly logIndex: number;
+}
+
 /**
  * A contract's indexed logs as contract-event records (docs/spec/contracts.md,
  * Contract-event record), in chain order, `n` counting from 0. `contract` is
@@ -73,13 +79,32 @@ export async function readContractEvents(
   schema: string,
   contract: string,
 ): Promise<ContractEventRecord[]> {
+  return (await readIndexedLogs(sql, schema, contract)).map((l) => l.record);
+}
+
+/**
+ * `readContractEvents` with each log's index in its block, which the
+ * accumulator doesn't bind: a reader keeps it only as a position (the
+ * registrations' order, P2-18), never as evidence.
+ */
+export async function readIndexedLogs(
+  sql: Sql,
+  schema: string,
+  contract: string,
+): Promise<IndexedLog[]> {
   if (!/^0x[0-9a-fA-F]{40}$/.test(contract))
     throw new Error("contract must be 0x and 40 hex digits");
   const address = contract.toLowerCase();
   const rows = await sql<
-    { block_number: string; block_timestamp: string; topics: string[]; data: string }[]
+    {
+      block_number: string;
+      block_timestamp: string;
+      topics: string[];
+      data: string;
+      log_index: number;
+    }[]
   >`
-    select block_number::text, block_timestamp::text, topics, data
+    select block_number::text, block_timestamp::text, topics, data, log_index
     from ${sql(schema)}.contract_log where contract = ${address}
     order by id collate "C"`;
   const contractBytes = hexBytes(address, "contract");
@@ -88,12 +113,15 @@ export async function readContractEvents(
     if (topics.length > 4 || topics.some((t) => t.length !== 32))
       throw new Error("contract_log: topics aren't up to four 32-byte words");
     return {
-      contract: contractBytes,
-      n: BigInt(i),
-      l2_block: BigInt(row.block_number),
-      l2_timestamp: BigInt(row.block_timestamp),
-      topics,
-      data: hexBytes(row.data, "contract_log: data"),
+      record: {
+        contract: contractBytes,
+        n: BigInt(i),
+        l2_block: BigInt(row.block_number),
+        l2_timestamp: BigInt(row.block_timestamp),
+        topics,
+        data: hexBytes(row.data, "contract_log: data"),
+      },
+      logIndex: row.log_index,
     };
   });
 }

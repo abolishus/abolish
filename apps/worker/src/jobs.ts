@@ -6,8 +6,11 @@ import {
   anchorBoards,
   auditBoard,
   BoardAuditError,
+  DefinitionError,
   listBoards,
   pruneIdentityBackups,
+  RegistrationError,
+  RegistrySyncError,
   type Tier0Batches,
   Tier0LockError,
 } from "@abolishus/core";
@@ -16,6 +19,7 @@ import type { BallotOutcome } from "./ballot-queue.ts";
 import type { BallotBatches } from "./ballots.ts";
 import type { ErrorKind, Log } from "./log.ts";
 import type { JobData, QueueKey } from "./queues.ts";
+import type { RegistrySync } from "./registry-sync.ts";
 
 /** A job's failure, by kind: the only thing about it that is logged. */
 export class JobError extends Error {
@@ -38,6 +42,8 @@ export interface JobContext {
   readonly tier0?: Tier0Batches;
   /** Ballot admission, when the worker pins panels; its queue runs only then. */
   readonly ballots?: BallotBatches;
+  /** The registry sync, when the worker is configured for it; its queue runs only then. */
+  readonly registry?: RegistrySync;
 }
 
 /** The Tier 0 queues, which run only with `JobContext.tier0`. */
@@ -143,6 +149,35 @@ async function tier0Boundary(ctx: JobContext, _data: JobData<"tier0Boundary">): 
 }
 
 /**
+ * Records the registry's finalized registrations. A refusal (an index the
+ * accumulator doesn't vouch for, a log the event check refuses, a row the
+ * database refuses) is logged as a finding and fails the job, and nothing
+ * after the refused log is recorded until it is resolved; an unreachable
+ * node or index fails it as `internal`. A registration recorded without its
+ * definition is logged and fails nothing: the registry accepted it, and a
+ * definition we can't store yet is a later version's or the verifier's to
+ * refuse.
+ */
+async function registrySync(ctx: JobContext, _data: JobData<"registrySync">): Promise<void> {
+  if (ctx.registry === undefined) throw new JobError("internal");
+  const queue = "{registry-sync}";
+  let report;
+  try {
+    report = await ctx.registry.run();
+  } catch (e) {
+    if (e instanceof RegistrySyncError) ctx.log({ queue, finding: e.code, reason: e.reason });
+    else if (e instanceof RegistrationError)
+      ctx.log({ queue, finding: "registration", reason: e.code });
+    else if (e instanceof DefinitionError && e.code === "conflict")
+      ctx.log({ queue, finding: "definition", reason: "conflict" });
+    else throw e;
+    throw new JobError("registry-sync-refused");
+  }
+  for (const u of report.unstored)
+    ctx.log({ queue, finding: "definition-unstored", election: hex(u.electionId), reason: u.code });
+}
+
+/**
  * Judges one ballot in the batch it joins, and returns its outcome: a
  * refusal is an outcome, not a failure, so the API can answer it. A job
  * fails only when the batch's database work does, and its fixed kind is all
@@ -161,4 +196,12 @@ export type JobResult<K extends QueueKey> = K extends "ballotSubmit" ? BallotOut
 
 export const HANDLERS: {
   readonly [K in QueueKey]: (ctx: JobContext, data: JobData<K>) => Promise<JobResult<K>>;
-} = { boardAudit, boardAnchor, identityBackupPrune, tier0Index, tier0Boundary, ballotSubmit };
+} = {
+  boardAudit,
+  boardAnchor,
+  identityBackupPrune,
+  tier0Index,
+  tier0Boundary,
+  registrySync,
+  ballotSubmit,
+};

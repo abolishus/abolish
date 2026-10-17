@@ -755,6 +755,9 @@ importers:
       '@abolishus/crypto':
         specifier: workspace:*
         version: link:../../packages/crypto
+      '@abolishus/indexer':
+        specifier: workspace:*
+        version: link:../indexer
       bullmq:
         specifier: 'catalog:'
         version: 6.3.11(ioredis@5.11.1)(pg@8.23.1)

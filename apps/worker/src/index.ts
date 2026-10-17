@@ -29,6 +29,7 @@ export type {
   JobLogLine,
   Log,
   LogLine,
+  RegistrySyncLine,
   Tier0BoundaryLine,
   WorkerErrorLine,
 } from "./log.ts";
@@ -41,6 +42,13 @@ export {
   type QueueSpec,
   type Side,
 } from "./queues.ts";
+export { REGISTRY_SYNC_ENV, type RegistrySyncConfig, registrySyncFromEnv } from "./registry-env.ts";
+export {
+  ACCUMULATOR_SLOT,
+  RegistrySync,
+  type RegistrySyncOptions,
+  ViemRegistryAccumulator,
+} from "./registry-sync.ts";
 export {
   type BundlerRequest,
   connectTier0Bundler,
@@ -58,6 +66,7 @@ export {
 export { TIER0_ENV, type Tier0Config, tier0FromEnv } from "./tier0-env.ts";
 export {
   PRUNE_EVERY_MS,
+  REGISTRY_SYNC_EVERY_MS,
   type RunningWorker,
   startWorker,
   TIER0_BOUNDARY_EVERY_MS,

@@ -8,7 +8,9 @@ import {
   type AccountFailure,
   type PasskeyView,
 } from "../account/client.ts";
+import type { DraftsClient } from "../account/drafts.ts";
 import { catalogs, type Messages } from "../messages.ts";
+import { AccountPolls } from "./account-polls.tsx";
 import { formatUtc } from "./format.ts";
 import { PageHeader, Section } from "./page-parts.tsx";
 
@@ -91,6 +93,8 @@ function Separation() {
 
 export interface AccountPanelProps {
   readonly client: AccountClient;
+  /** The signed-in account's polls. */
+  readonly drafts: DraftsClient;
 }
 
 /**
@@ -99,7 +103,7 @@ export interface AccountPanelProps {
  * here can name a ballot (T-10). Votes are cast only in the ballot client,
  * with a voting identity kept on the device under its own passkey (ADR 0017).
  */
-export function AccountPanel({ client }: AccountPanelProps) {
+export function AccountPanel({ client, drafts }: AccountPanelProps) {
   const t = useTranslate(catalogs);
   const { locale } = useI18n();
   const [view, setView] = useState<View>({ kind: "loading" });
@@ -229,8 +233,13 @@ export function AccountPanel({ client }: AccountPanelProps) {
 
       {view.kind === "signed-in" ? (
         <>
-          <Section
+          <AccountPolls
+            client={drafts}
             index="01"
+            onSignedOut={() => setView({ kind: "signed-out" })}
+          />
+          <Section
+            index="02"
             mark={t("passkeysTitle")}
             title={t("passkeysHeading")}
             id="passkeys-title"
@@ -294,7 +303,7 @@ export function AccountPanel({ client }: AccountPanelProps) {
           </Section>
 
           <Section
-            index="02"
+            index="03"
             mark={t("accountDeleteMark")}
             title={t("accountDeleteTitle")}
             id="delete-title"

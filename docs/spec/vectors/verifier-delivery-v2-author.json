@@ -67,19 +67,19 @@
         },
         "7.1": {
           "status": "unverifiable",
-          "code": "not-reached"
+          "code": "unsupported-version"
         },
         "7.2": {
           "status": "unverifiable",
-          "code": "not-reached"
+          "code": "unsupported-version"
         },
         "7.3": {
           "status": "unverifiable",
-          "code": "not-reached"
+          "code": "unsupported-version"
         },
         "8.5": {
           "status": "unverifiable",
-          "code": "not-reached"
+          "code": "unsupported-version"
         }
       }
     },
@@ -138,19 +138,19 @@
         },
         "7.1": {
           "status": "unverifiable",
-          "code": "not-reached"
+          "code": "unsupported-version"
         },
         "7.2": {
           "status": "unverifiable",
-          "code": "not-reached"
+          "code": "unsupported-version"
         },
         "7.3": {
           "status": "unverifiable",
-          "code": "not-reached"
+          "code": "unsupported-version"
         },
         "8.5": {
           "status": "unverifiable",
-          "code": "not-reached"
+          "code": "unsupported-version"
         }
       }
     },
@@ -224,19 +224,19 @@
         },
         "7.1": {
           "status": "unverifiable",
-          "code": "not-reached"
+          "code": "unsupported-version"
         },
         "7.2": {
           "status": "unverifiable",
-          "code": "not-reached"
+          "code": "unsupported-version"
         },
         "7.3": {
           "status": "unverifiable",
-          "code": "not-reached"
+          "code": "unsupported-version"
         },
         "8.5": {
           "status": "unverifiable",
-          "code": "not-reached"
+          "code": "unsupported-version"
         }
       }
     },
@@ -278,19 +278,19 @@
         },
         "7.1": {
           "status": "unverifiable",
-          "code": "not-reached"
+          "code": "unsupported-version"
         },
         "7.2": {
           "status": "unverifiable",
-          "code": "not-reached"
+          "code": "unsupported-version"
         },
         "7.3": {
           "status": "unverifiable",
-          "code": "not-reached"
+          "code": "unsupported-version"
         },
         "8.5": {
           "status": "unverifiable",
-          "code": "not-reached"
+          "code": "unsupported-version"
         }
       }
     },

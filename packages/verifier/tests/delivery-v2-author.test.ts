@@ -15,9 +15,11 @@ import { splitEntries } from "../src/index.ts";
 // those its own run registered and its approvals approved on the board, never
 // a key set taken on trust or the default panel's alone (docs/spec/
 // verifier.md, Key ceremony, step 5, and Counted set and tally, step 3;
-// docs/spec/delivery.md, Delivery check (version 2); T-37, T-17, T-25). The
-// close check and the per-panel tally beside an author panel are P2-16 part
-// 4d-3d's, so 6.3, 7.1 to 7.3 and 8.5 stay not reached. Fixtures:
+// docs/spec/delivery.md, Delivery check (version 2); T-37, T-17, T-25). These
+// copies carry no L1 headers, so 6.3 isn't reached, and their profile pins
+// tally-opening version 1, which can't open an author panel's two halves, so
+// 7.1 to 7.3 and 8.5 are unsupported (tally-v3-author.test.ts has the tally
+// under version 3). Fixtures:
 // docs/spec/vectors/verifier-delivery-v2-author.json (packages/crypto/
 // scripts/verifier-delivery-v2-author-vectors.py, an independent
 // implementation of both runs, the approvals, the receipts and the delivery
@@ -146,7 +148,7 @@ describe("5.9 beside an author panel against the independent implementation", ()
       expect(candidates.map((x) => x.entry)).toEqual([3, 4, 5]);
       expect(r.delivery).toEqual(c.delivery);
       expect(countedOf(r, [3, 4, 5])).toEqual(c.counted);
-      // Nothing past delivery is decided here yet.
+      // Nothing past delivery is decided under tally-opening version 1.
       expect(r.cells).toBeUndefined();
       expect(r.close).toBeUndefined();
     });

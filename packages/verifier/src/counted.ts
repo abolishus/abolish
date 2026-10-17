@@ -30,12 +30,13 @@
 
 import {
   type AnchorClock,
+  type BallotHalves,
   type BoardEntryVersion,
-  type CellCode,
   checkContractEvent,
   checkDelivery,
   checkDeliveryV2,
   checkDestruction,
+  checkPartialTally,
   checkTally,
   type ContractEventVersion,
   DecodeError,
@@ -48,6 +49,10 @@ import {
   type DeliveryDeadlines,
   type DeliveryEntry,
   type DeliveryRecordCode,
+  type OpeningReport,
+  panelTallyRules,
+  type PartialCellCode,
+  type PartialTallyCheck,
   deliveryDeadlines,
   type DeliverySegments,
   deliverySegments,
@@ -101,7 +106,7 @@ export interface CountedInputs {
 }
 
 export type CountedCode =
-  | CellCode
+  | PartialCellCode
   | "close-contested"
   | "l1-blocks-short"
   | "destruction-early"
@@ -112,7 +117,12 @@ export type CountedCode =
 
 export type CountedAt =
   | { readonly entry: number }
-  | { readonly cell: number; readonly option?: number; readonly question?: number }
+  | {
+      readonly cell: number;
+      readonly panel?: SeatPanel;
+      readonly option?: number;
+      readonly question?: number;
+    }
   | { readonly seat: number }
   | Record<string, never>;
 
@@ -188,11 +198,24 @@ export interface CellReport {
   readonly counted: number;
   /** For a cell that passes 7.2, its count per option, as decimal strings. */
   readonly counts?: readonly string[];
-  readonly code?: CellCode;
+  /**
+   * For a cell that fails 7.2, its code; beside an author panel, neither this
+   * nor `counts` while `s_A` decides between `tally-author-late` and the
+   * default panel's `tally-missing`.
+   */
+  readonly code?: PartialCellCode;
+  /** Beside an author panel, the panel a failure names, where it names one. */
+  readonly panel?: SeatPanel;
   readonly option?: number;
   readonly question?: number;
-  /** The seats a passing opening of the cell is attributed to, ascending; empty if none is (8.4). */
+  /**
+   * The seats a passing opening of the cell is attributed to, ascending;
+   * empty if none is (8.4). Beside an author panel, the default panel's
+   * seats, by their passing partial openings.
+   */
   readonly signers: readonly number[];
+  /** Beside an author panel, the author panel's seats its passing partial openings are attributed to, ascending. */
+  readonly authorSigners?: readonly number[];
 }
 
 /** One tier's result, derived from its cells (tally.md, Coarser totals), once 7.1 passed. */
@@ -425,18 +448,11 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
   // An exclusion is the rule's outcome, never a breach, and a failing record
   // is ignored: 5.9 has no failure of its own.
   const rows = new Map<string, CountedOutcome>([["5.9", { status: "pass" }]]);
-  // The close check and the per-panel tally beside an author panel are P2-16
-  // part 4d-3d's: until then neither is decided over the default panel's
-  // seats alone (T-37, T-54).
-  if (author) {
-    const unreached: CountedOutcome = { status: "unverifiable", code: "not-reached", at: {} };
-    for (const id of ["6.3", ...TALLY_ROWS, ...(inputs.destruction ? ["8.5"] : [])])
-      rows.set(id, unreached);
-    return { rows, delivery };
-  }
 
   // The close check recomputes the counted sets with the same delivery,
-  // which is by ballot hash (close.md, Close check, step 3).
+  // which is by ballot hash (close.md, Close check, step 3). Only the default
+  // panel's seats make close statements, so beside an author panel it runs
+  // as without one, over the counted set delivery over both panels gave.
   const kept = new Map(
     delivered.ballots.map((b) => [bytesToHex(b.ballotHash), b.counted] as const),
   );
@@ -457,7 +473,9 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
 
   // The destruction statement's version is the tally opening's (tally.md,
   // Destruction), so neither is read under another tally-opening pin (T-36).
-  if (pinnedVersion(d, RECORD_TYPES.tallyOpening) !== 1) {
+  // Beside an author panel the pin is version 3, whose partial openings are
+  // per panel; a version-1 opening opens one sharing, never two halves.
+  if (pinnedVersion(d, RECORD_TYPES.tallyOpening) !== (author ? 3 : 1)) {
     const unsupported: CountedOutcome = {
       status: "unverifiable",
       code: "unsupported-version",
@@ -466,6 +484,23 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
     for (const id of [...TALLY_ROWS, ...(inputs.destruction ? ["8.5"] : [])])
       rows.set(id, unsupported);
     return { rows, delivery, ...close };
+  }
+
+  const openings = own.filter((e) => typeOf(e.payload) === RECORD_TYPES.tallyOpening);
+  if (author) {
+    const tally = panelTally(inputs, delivered.ballots, openings, floor);
+    for (const [id, outcome] of tally.rows) rows.set(id, outcome);
+    // Destruction per panel (version 2) is P2-16 part 4d-3d-2's: until then
+    // no seat of either panel is judged (T-14, T-37).
+    if (inputs.destruction)
+      rows.set("8.5", { status: "unverifiable", code: "not-reached", at: {} });
+    return {
+      rows,
+      delivery,
+      ...close,
+      cells: tally.cells,
+      tiers: tierResults(definition, tally.cells),
+    };
   }
 
   const size = partitionSize(definition);
@@ -478,7 +513,6 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
       throw new Error("countedChecks: a selected ballot outside the partition");
     into.push(vss);
   });
-  const openings = own.filter((e) => typeOf(e.payload) === RECORD_TYPES.tallyOpening);
   const tally = checkTally(
     { definitionHash, rules: tallyRules(definition), registered },
     cells,
@@ -489,11 +523,7 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
   const cellReports: CellReport[] = tally.cells.map((c, cell) => {
     const counted = (cells[cell] as CommittedVss[]).length;
     const tier = tiers[cell] as number;
-    // The seats whose passing opening of the cell is attributed to them; an
-    // unattributed one counts as well, so the list may be empty (8.4).
-    const signers = [
-      ...new Set(c.passing.flatMap((p) => (p.signer === null ? [] : [p.signer]))),
-    ].sort((a, b) => a - b);
+    const signers = signersOf(c.passing);
     if (c.ok) return { cell, tier, counted, counts: c.counts.map((v) => v.toString()), signers };
     return {
       cell,
@@ -505,20 +535,7 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
       signers,
     };
   });
-  // Each tier's result is derived from its cells' counts, never opened
-  // (tally.md, Coarser totals): only where every cell of the tier passed.
-  const tierReports: TierReport[] = [...new Set(tiers)].map((tier) => {
-    const members = cellReports.filter((c) => c.tier === tier);
-    const counted = members.reduce((n, c) => n + c.counted, 0);
-    const counts = members.map((c) => c.counts);
-    return counts.every((x) => x !== undefined)
-      ? {
-          tier,
-          counted,
-          counts: deriveTotal(counts.map((x) => x.map(BigInt))).map((v) => v.toString()),
-        }
-      : { tier, counted };
-  });
+  const tierReports = tierResults(definition, cellReports);
   // Every board-path entry past `s_S` is outside its own window, and none
   // carried by a contract event is left, so no late entry changes a counted
   // set: `tally-late` can't fail (tally.md, Tally window).
@@ -767,6 +784,136 @@ function deliveryV2(
 }
 
 type CommittedVss = BallotTally["vss"];
+
+/** The seats the openings in `passing` are attributed to, ascending; an unattributed one counts as well (8.4). */
+const signersOf = (passing: readonly OpeningReport[]) =>
+  [...new Set(passing.flatMap((p) => (p.signer === null ? [] : [p.signer])))].sort((a, b) => a - b);
+
+/**
+ * Each tier's result, derived from its cells' counts, never opened (tally.md,
+ * Coarser totals): only where every cell of the tier passed.
+ */
+function tierResults(
+  definition: VerifiedDefinition,
+  cells: readonly CellReport[],
+): readonly TierReport[] {
+  return [...new Set(cellTiers(definition))].map((tier) => {
+    const members = cells.filter((c) => c.tier === tier);
+    const counted = members.reduce((n, c) => n + c.counted, 0);
+    const counts = members.map((c) => c.counts);
+    return counts.every((x) => x !== undefined)
+      ? {
+          tier,
+          counted,
+          counts: deriveTotal(counts.map((x) => x.map(BigInt))).map((v) => v.toString()),
+        }
+      : { tier, counted };
+  });
+}
+
+const failureAt = (f: NonNullable<PartialTallyCheck["failure"]>) => ({
+  cell: f.cell,
+  ...(f.panel !== undefined && { panel: f.panel }),
+  ...(f.option !== undefined && { option: f.option }),
+  ...(f.question !== undefined && { question: f.question }),
+});
+
+/**
+ * 7.1 to 7.3 beside an author panel, under tally-opening version 3
+ * (docs/spec/tally.md, Author panel, Opening checks (version 3)): one counted
+ * set per cell, which both panels sum over, each panel's partial openings
+ * checked against its own half's aggregate and attributed only by its own
+ * registered key set, and each cell's count the sum of the two (T-29, T-37,
+ * T-54). Whose failure a missing default partial opening is turns on `s_A`,
+ * the period holding `t_S + AUTHOR_OPENING_WINDOW`, which grows with `s_S`
+ * as `s_T` does: an author partial opening at or below its floor is in time
+ * whatever `s_S` is, and one boarded nowhere is late whatever it is. Where
+ * the two readings give a cell different codes, the cell isn't decided, and
+ * nor is 7.2 if it is the first failing one: a later release that knows
+ * `s_S` reports `tally-author-late` or the default panel's `tally-missing`,
+ * never another status, and never names the default panel for the author's
+ * delay meanwhile.
+ */
+function panelTally(
+  inputs: CountedInputs,
+  /** Delivery's verdict on each selected ballot, in the same order. */
+  ballots: readonly { readonly counted: boolean }[],
+  openings: readonly { readonly segment: number; readonly payload: Uint8Array }[],
+  floor: bigint,
+): { readonly rows: ReadonlyMap<string, CountedOutcome>; readonly cells: readonly CellReport[] } {
+  const definition = inputs.definition as Extract<VerifiedDefinition, { version: 6 }>;
+  const { definitionHash, registered, clock } = inputs;
+  const halves: BallotHalves[][] = Array.from({ length: partitionSize(definition) }, () => []);
+  ballots.forEach((b, i) => {
+    if (!b.counted) return;
+    const { cell, deliveryV4 } = (inputs.selected[i] as CountedBallot).tally;
+    const into = halves[cell];
+    if (into === undefined || deliveryV4 === undefined)
+      throw new Error(
+        "countedChecks: a selected ballot outside the partition or without both halves",
+      );
+    into.push(deliveryV4.vote);
+  });
+  const election = {
+    definitionHash,
+    defaultRules: panelTallyRules(definition, 1),
+    authorRules: panelTallyRules(definition, 2),
+    registered: { default: registered, author: inputs.authorRegistered ?? [] },
+  };
+  const entries = openings.map(({ segment, payload }) => ({ segment, payload }));
+  const sA =
+    floor + 1n + (clock.deadline + BigInt(PARAMETERS.AUTHOR_OPENING_WINDOW)) / clock.period;
+  // `s_A` at its floor, and unbounded: every other code is the same under both.
+  const atFloor = checkPartialTally(
+    election,
+    halves,
+    entries,
+    sA > BigInt(U32_MAX) ? U32_MAX : Number(sA),
+  );
+  const unbounded = checkPartialTally(election, halves, entries, U32_MAX);
+  const tiers = cellTiers(definition);
+  const cells = atFloor.cells.map((c, cell): CellReport => {
+    const base = {
+      cell,
+      tier: tiers[cell] as number,
+      counted: (halves[cell] as BallotHalves[]).length,
+    };
+    const signers = {
+      signers: signersOf(c.default.passing),
+      authorSigners: signersOf(c.author.passing),
+    };
+    if (c.ok) return { ...base, counts: c.counts.map((v) => v.toString()), ...signers };
+    const other = unbounded.cells[cell] as (typeof unbounded.cells)[number];
+    if (other.ok || other.code !== c.code) return { ...base, ...signers };
+    return {
+      ...base,
+      code: c.code,
+      ...(c.panel !== undefined && { panel: c.panel }),
+      ...(c.option !== undefined && { option: c.option }),
+      ...(c.question !== undefined && { question: c.question }),
+      ...signers,
+    };
+  });
+  const failure = atFloor.failure;
+  const decided = unbounded.failure;
+  const row: CountedOutcome =
+    failure === undefined
+      ? { status: "pass" }
+      : decided?.code === failure.code
+        ? { status: "fail", code: failure.code, at: failureAt(failure) }
+        : { status: "unverifiable", code: "not-implemented", at: { cell: failure.cell } };
+  // 7.1 and 7.3 pass for the reasons they do without an author panel: no late
+  // entry changes a counted set, and an opening that doesn't decode under
+  // version 3 is a rejected entry that opens no cell.
+  return {
+    rows: new Map<string, CountedOutcome>([
+      ["7.1", { status: "pass" }],
+      ["7.2", row],
+      ["7.3", { status: "pass" }],
+    ]),
+    cells,
+  };
+}
 
 /**
  * Each cell's tier, in partition order: under definition version 1 the

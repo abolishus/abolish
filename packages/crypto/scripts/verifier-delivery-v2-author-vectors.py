@@ -14,7 +14,9 @@ only by the author panel's own run, approved on the board, never by the
 ballot, a receipt or the default panel (T-37, T-17, T-25). Each case is a
 definition, a clock, a board copy and the default panel a bundle pins, with
 the rows 5.9, 6.3, 7.1 to 7.3 and 8.5 a verifier reports and the report's
-`delivery`.
+`delivery`; its profile pins tally-opening version 1, which can't open an
+author panel's halves, so the tally rows are unsupported here, and
+verifier-tally-v3-author-vectors.py judges the tally under version 3.
 
 It reuses this folder's independent Python implementations, which share no
 code with packages/crypto or packages/verifier:
@@ -64,6 +66,7 @@ BOARD_VERSION = vba.BOARD_VERSION
 PERIOD = 3600
 outcome, NOT_REACHED = vc.outcome, vc.NOT_REACHED
 RECEIPT_TYPE = int.from_bytes(dv2.header(dv2.RECEIPT)[:2], "big")
+TALLY_OPENING_TYPE = 0x0006
 
 
 def main(constants, out_dir):
@@ -171,9 +174,17 @@ def main(constants, out_dir):
                     at_record.append(i)
             assert len(at_ballot) == len(ballots), id_
             result = dv2.check_delivery(defh, registered, seg_d, seg_k, t_d_, t_k_, ballots, delivery)
-            # 5.9 has no failure of its own; the close check and the tally
-            # beside an author panel are P2-16 part 4d-3d's.
+            # 5.9 has no failure of its own. The close check needs the run of
+            # L1 headers these copies don't carry, and this profile pins
+            # tally-opening version 1, whose openings open one sharing, never
+            # an author panel's two halves, so the tally and the destruction
+            # statement it fixes are unsupported (verifier.md, Counted set
+            # and tally, step 5; verifier-tally-v3-author-vectors.py has the
+            # tally under version 3).
+            assert dict(d["profile"]["pins"])[TALLY_OPENING_TYPE] == 1
             rows["5.9"] = outcome("pass")
+            for r in ("7.1", "7.2", "7.3", "8.5"):
+                rows[r] = outcome("unverifiable", "unsupported-version")
             c["delivery"] = {
                 "excluded": [
                     {

@@ -16,6 +16,7 @@ import {
   SETUP_SECONDS,
   type SignedCreation,
   submitPollDraft,
+  updatePollDraft,
 } from "../src/index.ts";
 import { type TestDb, testDb } from "./db.ts";
 
@@ -419,6 +420,57 @@ describe("advancePollCreations", () => {
     });
     expect(await row(id!)).toMatchObject({ state: "failed", failure: "closes-too-soon" });
     expect(chain.signed).toEqual([]);
+  });
+
+  test("a closes-too-soon verdict never lands on the poll's next submission", async () => {
+    // Between this run reading the waiting poll and failing it, another run
+    // fails it, and its author retries, moves the close later and submits it
+    // again (part 5d-2). No chain call sits between the two, so the race runs
+    // just before the run's write reaches the database.
+    const chain = new FakeChain();
+    const closesAt = NOW_S + BigInt(SETUP_SECONDS + MIN_OPEN_SECONDS);
+    const [id] = await submitted(1, closesAt);
+    const [{ author }] = (await db.admin`
+      SELECT user_id AS author FROM account_polls WHERE id = ${id!}`) as unknown as [
+      { author: string },
+    ];
+    const later = new Date(NOW.getTime() + HOUR);
+    let race: (() => Promise<void>) | undefined = async () => {
+      await db.admin`UPDATE account_polls SET state = 'failed', failure = 'creation-timeout'
+        WHERE id = ${id!}`;
+      await retryFailedPoll(app2, author, id!, later);
+      await updatePollDraft(app2, author, id!, draft(NOW_S + 7n * 24n * 3600n), later);
+      await submitPollDraft(app2, author, id!, {
+        turnstile: { verify: async () => "passed" },
+        token: "t",
+        now: later,
+      });
+    };
+    const before = async () => {
+      await race?.();
+      race = undefined;
+    };
+    // Drizzle sends each statement through `unsafe`; the run's failure write
+    // is the one carrying its reason.
+    const client = new Proxy(app, {
+      get(target, key, receiver) {
+        if (key !== "unsafe") return Reflect.get(target, key, receiver);
+        return (query: string, params?: unknown[]) => {
+          if (!params?.includes("closes-too-soon")) return target.unsafe(query, params as never);
+          // A write with `returning` is read through `values`.
+          return {
+            values: () => before().then(() => target.unsafe(query, params as never).values()),
+          };
+        };
+      },
+    });
+    // Checked by mutation: keyed by the state alone, the verdict fails the
+    // new submission.
+    const report = await run(chain, new Date(NOW.getTime() + 1000), client);
+    expect(report).toMatchObject({ sent: 0 });
+    expect(report.failed).toEqual({});
+    expect(race).toBeUndefined();
+    expect(await row(id!)).toMatchObject({ state: "submitted", failure: null, hash: null });
   });
 
   test("refuses a creator that isn't an address", async () => {

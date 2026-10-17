@@ -1,7 +1,7 @@
 import { jsonb, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 import { accountUsers } from "./accounts.ts";
 
-// Drizzle view of migrations/0010_account_polls.sql; a test checks the two
+// Drizzle view of migrations/0012_account_polls.sql; a test checks the two
 // agree. In the account class: whose poll it is, never who answered it
 // (ADR 0032, rule 15; T-10).
 

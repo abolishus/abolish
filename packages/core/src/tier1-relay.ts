@@ -3,7 +3,7 @@
 // first, so a malformed or unserviceable record never spends the vouchee's
 // Turnstile token; then one Redis script queues the record. The relay job
 // judges what is queued at each boundary against its counting state and
-// sends what counts (P3-3 part 3c-2b-2).
+// sends what counts (tier1-batch.ts).
 //
 // T-10, T-11, T-13: nothing here sees a header, cookie or address, and the
 // queue keeps each record's bytes under their hash and nothing else: no
@@ -65,17 +65,29 @@ export interface Tier1Redis {
  *   lowercase hex, so two records for one commitment are two entries (T-25);
  * - `index`: the relay's index as `tier1IndexValue` writes it, the UNIX time
  *   it was last brought up to the L2 node's latest block with that block
- *   and the safe head, set in one write so the three always agree.
+ *   and the safe head, set in one write so the three always agree;
+ * - `inflight`: a hash from each sent record's `recordKey` to the record,
+ *   its nonce and the transactions signed for it, until it is final or can
+ *   never land (docs/spec/tier1-relay.md, Queue);
+ * - `boundary`: the number of the last period whose boundary ran;
+ * - `lock`: the job's lock, which every write of the job checks.
  *
- * The relay job keeps `index` and takes records out of `queue`; the route
- * only reads `index` and adds to `queue`.
+ * The relay job (`Tier1Batches`) keeps `index`, `inflight`, `boundary` and
+ * `lock` and takes records out of `queue`; the route only reads `index` and
+ * adds to `queue`.
  */
 export function tier1Keys(prefix = "abolish") {
   // A brace in the prefix would change the hash tag, scattering the keys
   // over slots that one script can't span.
   if (prefix === "" || /[{}]/.test(prefix)) throw new RangeError("invalid key prefix");
   const at = (name: string) => `${prefix}:{tier1-relay}:${name}`;
-  return { queue: at("queue"), index: at("index") } as const;
+  return {
+    queue: at("queue"),
+    index: at("index"),
+    inflight: at("inflight"),
+    boundary: at("boundary"),
+    lock: at("lock"),
+  } as const;
 }
 
 export type Tier1Keys = ReturnType<typeof tier1Keys>;

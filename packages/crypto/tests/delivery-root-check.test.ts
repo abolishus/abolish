@@ -3,11 +3,14 @@ import fc from "fast-check";
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vite-plus/test";
 import {
+  type Block,
   buildObligationRoot,
   checkDelivery,
   COMMITTED_VOTE,
+  CHUNK_SIZE,
   COMPLAINT_PROOF,
   type ComplaintEntry,
+  contentDag,
   decode,
   decodeObligationRoot,
   type DeliveryBallot,
@@ -30,9 +33,11 @@ import {
   objectCid,
   type ObligationRootKind,
   type ReceiptPair,
+  signStatement,
   verifyInclusion,
   verifyObligationInclusion,
 } from "../src/index.ts";
+import { dagWith } from "../src/content-addressing.ts";
 import { forcedPathDemandWithRoots, forcedPathFitsWithRoots } from "../src/delivery.ts";
 import { hex, SPEC_VECTORS } from "./spec-vectors.ts";
 
@@ -226,12 +231,36 @@ const entriesOf = (v: ElectionVector): DeliveryEntry[] =>
       : { path: "contract", submittedAt: BigInt(e.submittedAt), payload: hex(e.payload) },
   );
 
+// A source holding an object under a CID answers that CID with the root
+// block `contentDag` makes of it, and its other blocks by their own CIDs, so
+// one holding the wrong bytes answers with a block that doesn't hash to the
+// CID; one holding no bytes holds nothing.
+interface Held {
+  readonly cid: Uint8Array;
+  readonly object: Uint8Array;
+}
+const dags = new Map<string, readonly Block[]>();
+const blocksOf = (held: readonly Held[]) => (cid: Uint8Array) =>
+  held.flatMap(({ cid: named, object }) => {
+    if (object.length === 0) return [];
+    const key = bytesHex(sha256(object));
+    const dag = dags.get(key) ?? contentDag(object).blocks;
+    dags.set(key, dag);
+    const [root, ...rest] = dag as [Block, ...Block[]];
+    return [
+      ...(bytesHex(named) === bytesHex(cid) ? [root.bytes] : []),
+      ...rest.filter((b) => bytesHex(b.cid) === bytesHex(cid)).map((b) => b.bytes),
+    ];
+  });
+
+const heldOf = (v: ElectionVector): Held[] =>
+  v.leafObjects.map((o) => ({ cid: hex(o.cid), object: hex(o.object) }));
+
 const rootsOf = (v: ElectionVector): DeliveryRoots => ({
   bound: BigInt(v.bound),
   threshold: v.threshold,
   attestations: v.attestations.map((a) => ({ seat: a.seat, roots: a.roots.map(hex) })),
-  leafObjects: (cid) =>
-    v.leafObjects.filter((o) => o.cid === bytesHex(cid)).map((o) => hex(o.object)),
+  leafBlocks: blocksOf(heldOf(v)),
 });
 
 function asJson(r: DeliveryCheck): ElectionVector["result"] {
@@ -423,29 +452,32 @@ describe("the delivery check reading obligation roots (delivery-root.json, elect
     const roots = rootsOf(v);
     const r = run(v, entriesOf(v), {
       ...roots,
-      leafObjects: (cid) => [...roots.leafObjects(cid), ...rootsOf(good).leafObjects(cid)],
+      leafBlocks: (cid, limit) => [
+        ...roots.leafBlocks(cid, limit),
+        ...rootsOf(good).leafBlocks(cid, limit),
+      ],
     });
     expect(asJson(r)).toEqual(good.result);
   });
 
-  test("whatever bytes a source serves, a wrong answer is a failed fetch and a later good one is read", () => {
+  test("whatever bytes a source serves for a block, a wrong answer is a failed fetch and a later good one is read", () => {
     const v = election("wrong-bytes");
     const good = election("roots-deliver");
     const roots = rootsOf(v);
-    const served = (junk: Uint8Array[]) => (cid: Uint8Array) => [
+    const served = (junk: Uint8Array[]) => (cid: Uint8Array, limit: number) => [
       ...junk,
-      ...rootsOf(good).leafObjects(cid),
+      ...rootsOf(good).leafBlocks(cid, limit),
     ];
     expect(
-      asJson(run(v, entriesOf(v), { ...roots, leafObjects: served([new Uint8Array(0)]) })),
+      asJson(run(v, entriesOf(v), { ...roots, leafBlocks: served([new Uint8Array(0)]) })),
     ).toEqual(good.result);
     fc.assert(
       fc.property(fc.array(fc.uint8Array({ maxLength: 300 }), { maxLength: 3 }), (junk) => {
-        expect(asJson(run(v, entriesOf(v), { ...roots, leafObjects: served(junk) }))).toEqual(
+        expect(asJson(run(v, entriesOf(v), { ...roots, leafBlocks: served(junk) }))).toEqual(
           good.result,
         );
         // With no good source after them, unverifiable, never an exception.
-        const r = run(v, entriesOf(v), { ...roots, leafObjects: () => junk });
+        const r = run(v, entriesOf(v), { ...roots, leafBlocks: () => junk });
         expect(r.unverifiable.length).toBeGreaterThan(0);
       }),
       { numRuns: slowRuns },
@@ -459,6 +491,94 @@ describe("the delivery check reading obligation roots (delivery-root.json, elect
     const r = run(v, entriesOf(v), { ...rootsOf(v), bound: BigInt(count - 1), attestations: [] });
     expect(r.records.some((x) => x.code === "root-count")).toBe(true);
     expect(r.records.some((x) => x.code === "root-withheld")).toBe(false);
+  });
+
+  // One seat's receipt root over its leaves and 16,384 made-up ones that name
+  // no ballot of the election, so its leaf object takes a dag-pb DAG; signed
+  // over the canonical CID or over another chunking's.
+  describe("a root whose leaf object takes more than one block", () => {
+    const v = election("roots-deliver");
+    const at = v.entries.findIndex((e) => decodeObligationRoot(hex(e.payload), 1).kind === 1);
+    const original = decodeObligationRoot(hex((v.entries[at] as { payload: string }).payload), 1);
+    const own = leavesOf(
+      1,
+      (heldOf(v).find((h) => bytesHex(h.cid) === bytesHex(original.leaves_cid)) as Held).object,
+    ) as ReceiptPair[];
+    const padding = Array.from({ length: 16_384 }, (_, j) => ({
+      ballot_hash: H(utf8(`delivery-root/padding/${j}`)),
+      share_hash: H(utf8(`delivery-root/padding/share/${j}`)),
+    }));
+    const built = buildObligationRoot(secretOf(original.seat), DEFINITION, original.seat, {
+      kind: 1,
+      leaves: [...own, ...padding],
+    });
+    const signed = (leavesCid: Uint8Array) => {
+      const statement = { ...built.record, leaves_cid: leavesCid };
+      const m = obligationRootStatement(statement);
+      return encodeObligationRoot({
+        ...statement,
+        signature: signStatement(secretOf(original.seat), "abolish/v1/sig/obligation-root", m),
+      });
+    };
+    // The election with this root in the original's place, named by every attester.
+    const withRoot = (record: Uint8Array, blocks: readonly Block[]) => {
+      const entries = entriesOf(v);
+      entries[at] = { ...(entries[at] as DeliveryEntry), payload: record };
+      const hash = bytesHex(obligationRootHash(record));
+      const roots = rootsOf(v);
+      return run(v, entries, {
+        ...roots,
+        bound: BigInt(built.record.count),
+        attestations: roots.attestations.map((a) => ({
+          seat: a.seat,
+          roots: [...a.roots, hex(hash)],
+        })),
+        leafBlocks: (cid, limit) => [
+          ...roots.leafBlocks(cid, limit),
+          ...blocks.filter((b) => bytesHex(b.cid) === bytesHex(cid)).map((b) => b.bytes),
+        ],
+      });
+    };
+
+    test("its canonical DAG is read block by block and delivers as the original did", () => {
+      expect(built.leafObject.length).toBeGreaterThan(CHUNK_SIZE);
+      const dag = contentDag(built.leafObject);
+      expect(bytesHex(dag.root)).toBe(bytesHex(built.record.leaves_cid));
+      expect(dag.root[1]).toBe(0x70);
+      const r = withRoot(signed(dag.root), dag.blocks);
+      expect(asJson(r)).toEqual(v.result);
+    });
+
+    test("any block of it no source serves leaves the election unverifiable", () => {
+      const dag = contentDag(built.leafObject);
+      for (const missing of dag.blocks) {
+        const r = withRoot(
+          signed(dag.root),
+          dag.blocks.filter((b) => b !== missing),
+        );
+        expect(r.unverifiable).toEqual([{ at }]);
+        expect(r.ballots).toEqual([]);
+      }
+    });
+
+    test("signed over another chunking of the same leaves, it is the seat's root-inconsistent", () => {
+      const other = dagWith(built.leafObject, CHUNK_SIZE / 2, 1_024);
+      const r = withRoot(signed(other.root), other.blocks);
+      expect(r.unverifiable).toEqual([]);
+      expect(r.records).toContainEqual({
+        at,
+        code: "root-inconsistent",
+        signer: original.seat,
+      });
+      // It delivers nothing: the seat is missing for every ballot it alone receipted.
+      const without = run(
+        v,
+        entriesOf(v).filter((_, i) => i !== at),
+      );
+      expect(r.ballots.map((b) => [...b.missing])).toEqual(
+        without.ballots.map((b) => [...b.missing]),
+      );
+    });
   });
 
   test("refuses inputs that would make availability fail open", () => {
@@ -512,26 +632,20 @@ describe("the delivery check reading obligation roots (delivery-root.json, elect
     () => {
       const v = election("roots-deliver");
       const roots = rootsOf(v);
-      const objects = v.leafObjects.map((o) => hex(o.object));
+      const held = heldOf(v);
       fc.assert(
         fc.property(
-          fc.nat({ max: objects.length - 1 }),
+          fc.nat({ max: held.length - 1 }),
           fc.nat({ max: 255 }),
           fc.integer({ min: 1, max: 255 }),
           (which, at, flip) => {
-            const changed = objects.map((o, i) => {
-              if (i !== which) return o;
-              const b = o.slice();
+            const changed = held.map((h, i) => {
+              if (i !== which) return h;
+              const b = h.object.slice();
               b[at % b.length] = ((b[at % b.length] as number) ^ flip) & 0xff;
-              return b;
+              return { cid: h.cid, object: b };
             });
-            const r = run(v, entriesOf(v), {
-              ...roots,
-              leafObjects: (cid) => {
-                const i = v.leafObjects.findIndex((o) => o.cid === bytesHex(cid));
-                return i < 0 ? [] : [changed[i] as Uint8Array];
-              },
-            });
+            const r = run(v, entriesOf(v), { ...roots, leafBlocks: blocksOf(changed) });
             expect(r.unverifiable.length).toBe(1);
             expect(r.ballots).toEqual([]);
           },

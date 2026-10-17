@@ -2,8 +2,16 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import fc from "fast-check";
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vite-plus/test";
-import { dagWith, encodeCar } from "../src/content-addressing.ts";
-import { CHUNK_SIZE, cidText, contentDag, MAX_LINKS, objectCar, objectCid } from "../src/index.ts";
+import { type Block, dagWith, encodeCar, readWith } from "../src/content-addressing.ts";
+import {
+  CHUNK_SIZE,
+  cidText,
+  contentDag,
+  MAX_LINKS,
+  objectCar,
+  objectCid,
+  readObject,
+} from "../src/index.ts";
 import { SPEC_VECTORS } from "./spec-vectors.ts";
 
 // docs/spec/vectors/content-addressing.json records each object's CID and CAR
@@ -128,5 +136,294 @@ describe("content addressing", () => {
     expect(() => contentDag(new Uint8Array(0))).toThrow(RangeError);
     expect(() => dagWith(Uint8Array.of(1), 0, 4)).toThrow(RangeError);
     expect(() => dagWith(Uint8Array.of(1), 4, 1)).toThrow(RangeError);
+  });
+});
+
+// The blocks of a CARv1 (header, then each block as varint length, CID,
+// bytes), so the reader can be fed what Kubo exported rather than this
+// package's own DAG.
+function carBlocks(car: Uint8Array): Block[] {
+  const varint = (at: number) => {
+    let value = 0;
+    for (let scale = 1; ; scale *= 0x80, at++) {
+      const x = car[at] as number;
+      value += (x & 0x7f) * scale;
+      if (x < 0x80) return { value, next: at + 1 };
+    }
+  };
+  const header = varint(0);
+  const out: Block[] = [];
+  for (let at = header.next + header.value; at < car.length;) {
+    const len = varint(at);
+    out.push({
+      cid: car.slice(len.next, len.next + 36),
+      bytes: car.slice(len.next + 36, len.next + len.value),
+    });
+    at = len.next + len.value;
+  }
+  return out;
+}
+
+// A source holding these blocks, recording each request.
+function source(blocks: readonly Block[], requests: string[] = []) {
+  return (cid: Uint8Array) => {
+    requests.push(hex(cid));
+    return blocks.filter((b) => hex(b.cid) === hex(cid)).map((b) => b.bytes);
+  };
+}
+
+const unavailable = { ok: false, reason: "unavailable" };
+const inconsistent = { ok: false, reason: "inconsistent" };
+
+describe("reading an object by its CID (content-addressing.json)", () => {
+  for (const v of vectors.vectors) {
+    test(`${v.id}: read back under its own profile, and canonical only if it is the protocol's`, () => {
+      const profile = vectors.profiles[v.profile] as { chunkSize: number; maxLinks: number };
+      const bytes = object(v.label, v.length);
+      const blocks =
+        v.car === undefined
+          ? dagWith(bytes, profile.chunkSize, profile.maxLinks).blocks
+          : carBlocks(Buffer.from(v.car, "hex"));
+      const cid = Buffer.from(v.cidHex, "hex");
+      const own = readWith(
+        cid,
+        v.length,
+        source(blocks),
+        profile.chunkSize,
+        profile.maxLinks,
+        Math.max(profile.chunkSize, 4096),
+      );
+      expect(own.ok && hex(own.bytes)).toBe(hex(bytes));
+      // Under the protocol's limits only the canonical DAG reads: a layout
+      // profile's tree of the same bytes is another DAG, whoever built it.
+      const read = readObject(cid, v.length, source(blocks));
+      if (hex(objectCid(bytes)) === v.cidHex) expect(read.ok && hex(read.bytes)).toBe(hex(bytes));
+      else expect(read).toEqual(inconsistent);
+    });
+  }
+});
+
+describe("reading an object by its CID", () => {
+  const profile = { chunkSize: 64, maxLinks: 4 };
+  const read = (
+    cid: Uint8Array,
+    length: number,
+    blocks: (cid: Uint8Array, limit: number) => readonly Uint8Array[],
+  ) => readWith(cid, length, blocks, profile.chunkSize, profile.maxLinks, 4096);
+  const dagOf = (bytes: Uint8Array) => dagWith(bytes, profile.chunkSize, profile.maxLinks);
+  const objects = fc.uint8Array({ minLength: 1, maxLength: 3000 });
+
+  test("reads back any object from its blocks, in any order", () => {
+    fc.assert(
+      fc.property(objects, fc.boolean(), (bytes, reversed) => {
+        const dag = dagOf(bytes);
+        const blocks = reversed ? [...dag.blocks].reverse() : dag.blocks;
+        const r = read(dag.root, bytes.length, source(blocks));
+        expect(r.ok && hex(r.bytes)).toBe(hex(bytes));
+      }),
+      { numRuns },
+    );
+  });
+
+  test("a block no source serves is unavailable, never inconsistent", () => {
+    fc.assert(
+      fc.property(objects, fc.nat(), (bytes, which) => {
+        const dag = dagOf(bytes);
+        const missing = hex((dag.blocks[which % dag.blocks.length] as Block).cid);
+        const blocks = dag.blocks.filter((b) => hex(b.cid) !== missing);
+        expect(read(dag.root, bytes.length, source(blocks))).toEqual(unavailable);
+      }),
+      { numRuns },
+    );
+  });
+
+  test("any answer that doesn't hash is a failed fetch: a later good one is read, and with none it is unavailable", () => {
+    fc.assert(
+      fc.property(
+        objects,
+        fc.array(fc.uint8Array({ maxLength: 200 }), { maxLength: 3 }),
+        (bytes, junk) => {
+          const dag = dagOf(bytes);
+          const good = source(dag.blocks);
+          const r = read(dag.root, bytes.length, (cid) => [...junk, ...good(cid)]);
+          expect(r.ok && hex(r.bytes)).toBe(hex(bytes));
+          expect(read(dag.root, bytes.length, () => junk)).toEqual(unavailable);
+          // A flipped byte in a served block is that block's failed fetch.
+          const flipped = dag.blocks.map((b) => {
+            const c = Uint8Array.from(b.bytes);
+            c[0] = (c[0] as number) ^ 1;
+            return { cid: b.cid, bytes: c };
+          });
+          expect(read(dag.root, bytes.length, source(flipped))).toEqual(unavailable);
+        },
+      ),
+      { numRuns },
+    );
+  });
+
+  test("another length is inconsistent", () => {
+    fc.assert(
+      fc.property(objects, fc.integer({ min: 1, max: 4000 }), (bytes, length) => {
+        fc.pre(length !== bytes.length);
+        const dag = dagOf(bytes);
+        const r = read(dag.root, length, source(dag.blocks));
+        // A wrong length can also need a block the source doesn't hold (a
+        // longer object has more chunks); never does it read.
+        expect(r.ok).toBe(false);
+        if (Math.ceil(length / 64) === Math.ceil(bytes.length / 64))
+          expect(r).toEqual(inconsistent);
+      }),
+      { numRuns },
+    );
+  });
+
+  test("the same bytes under other limits read only where the DAG is the same", () => {
+    fc.assert(
+      fc.property(
+        objects,
+        fc.integer({ min: 1, max: 128 }),
+        fc.integer({ min: 2, max: 8 }),
+        (bytes, chunkSize, maxLinks) => {
+          const other = dagWith(bytes, chunkSize, maxLinks);
+          const r = read(other.root, bytes.length, source(other.blocks));
+          if (hex(other.root) === hex(dagOf(bytes).root))
+            expect(r.ok && hex(r.bytes)).toBe(hex(bytes));
+          else expect(r).toEqual(inconsistent);
+        },
+      ),
+      { numRuns },
+    );
+  });
+
+  test("a root node changed in any way and hashed again never reads, and with an extra byte is inconsistent", () => {
+    fc.assert(
+      fc.property(
+        fc.uint8Array({ minLength: 65, maxLength: 3000 }),
+        fc.nat(),
+        fc.integer({ min: 1, max: 255 }),
+        fc.boolean(),
+        (bytes, at, flip, append) => {
+          const dag = dagOf(bytes);
+          const node = (dag.blocks[0] as Block).bytes;
+          let changed: Uint8Array;
+          if (append) changed = Uint8Array.from([...node, flip]);
+          else {
+            changed = Uint8Array.from(node);
+            changed[at % node.length] = (changed[at % node.length] as number) ^ flip;
+          }
+          const cid = Uint8Array.from([...dag.root.subarray(0, 4), ...sha256(changed)]);
+          const r = read(cid, bytes.length, source([...dag.blocks, { cid, bytes: changed }]));
+          // A flip inside a link's CID names a block no source holds instead.
+          expect(r.ok).toBe(false);
+          if (append) expect(r).toEqual(inconsistent);
+        },
+      ),
+      { numRuns },
+    );
+  });
+
+  test("a CID of another form is inconsistent before anything is fetched", () => {
+    const bytes = object("small", 100);
+    const cid = objectCid(bytes);
+    const requests: string[] = [];
+    const blocks = source(contentDag(bytes).blocks, requests);
+    for (const other of [
+      // dag-pb, another hash function, another digest length, CIDv0's 0x12 0x20, too long.
+      [0x01, 0x70, 0x12, 0x20],
+      [0x01, 0x55, 0x13, 0x20],
+      [0x01, 0x55, 0x12, 0x1f],
+      [0x12, 0x20],
+    ]) {
+      const c = Uint8Array.from([...other, ...cid.subarray(4)]);
+      expect(readObject(c, 100, blocks), hex(c)).toEqual(inconsistent);
+    }
+    expect(readObject(Uint8Array.from([...cid, 0]), 100, blocks)).toEqual(inconsistent);
+    expect(requests).toEqual([]);
+    expect(readObject(cid, 100, blocks)).toEqual({ ok: true, bytes });
+  });
+
+  test("no CID makes it request more blocks than the canonical DAG of its length has", () => {
+    fc.assert(
+      fc.property(
+        objects,
+        fc.integer({ min: 1, max: 16 }),
+        fc.integer({ min: 2, max: 4 }),
+        (bytes, chunkSize, maxLinks) => {
+          // A deeper, finer DAG of the bytes, against the canonical DAG of an
+          // object of that length whose chunks all differ, so none is shared.
+          const other = dagWith(bytes, chunkSize, maxLinks);
+          const requests: string[] = [];
+          read(other.root, bytes.length, source(other.blocks, requests));
+          const canonical = dagOf(Uint8Array.from({ length: bytes.length }, (_, i) => i % 251));
+          expect(requests.length).toBeLessThanOrEqual(canonical.blocks.length);
+        },
+      ),
+      { numRuns },
+    );
+  });
+
+  // A two-level DAG of 16 leaves under the small layout, with its root node.
+  const deep = () => {
+    const bytes = Uint8Array.from({ length: 16 * 64 }, (_, i) => i % 251);
+    const dag = dagOf(bytes);
+    return { bytes, dag, node: (dag.blocks[0] as Block).bytes };
+  };
+  const rehashed = (node: Uint8Array) => Uint8Array.from([0x01, 0x70, 0x12, 0x20, ...sha256(node)]);
+
+  test("a node is checked when it arrives, before any child is asked for", () => {
+    const { bytes, node } = deep();
+    // The last byte is the root's last blocksizes entry: another value
+    // there, with the root hashed again and no child served, is the root's.
+    const changed = Uint8Array.from(node);
+    changed[changed.length - 1] = (changed[changed.length - 1] as number) ^ 1;
+    const cid = rehashed(changed);
+    const requests: string[] = [];
+    expect(read(cid, bytes.length, source([{ cid, bytes: changed }], requests))).toEqual(
+      inconsistent,
+    );
+    expect(requests).toEqual([hex(cid)]);
+  });
+
+  test("a link whose CID has the codec of another place is inconsistent, and never asked for", () => {
+    const { bytes, dag, node } = deep();
+    // The root's children are dag-pb nodes; its first link's codec byte
+    // follows the PBLink's tag and length, the Hash's tag and length, and
+    // the CID's version byte.
+    const at = 2 + 2 + 1;
+    expect(node[at]).toBe(0x70);
+    const changed = Uint8Array.from(node);
+    changed[at] = 0x55;
+    const cid = rehashed(changed);
+    const requests: string[] = [];
+    const r = read(cid, bytes.length, source([...dag.blocks, { cid, bytes: changed }], requests));
+    expect(r).toEqual(inconsistent);
+    expect(requests).toEqual([hex(cid)]);
+  });
+
+  test("an answer over the limit is a failed fetch, and every request carries the limit", () => {
+    const { bytes, dag } = deep();
+    const limits = new Set<number>();
+    const r = read(dag.root, bytes.length, (cid, limit) => {
+      limits.add(limit);
+      return [new Uint8Array(limit + 1), ...source(dag.blocks)(cid)];
+    });
+    expect(r.ok && hex(r.bytes)).toBe(hex(bytes));
+    expect([...limits]).toEqual([4096]);
+    const protocol = new Set<number>();
+    readObject(objectCid(bytes), bytes.length, (_cid, limit) => {
+      protocol.add(limit);
+      return [];
+    });
+    expect([...protocol]).toEqual([CHUNK_SIZE]);
+  });
+
+  test("refuses a length or limits outside the layout", () => {
+    const cid = objectCid(Uint8Array.of(1));
+    const none = () => [];
+    expect(() => readObject(cid, 0, none)).toThrow(RangeError);
+    expect(() => readObject(cid, 1.5, none)).toThrow(RangeError);
+    expect(() => readWith(cid, 1, none, 0, 4, 4)).toThrow(RangeError);
+    expect(() => readWith(cid, 1, none, 4, 1, 4)).toThrow(RangeError);
+    expect(() => readWith(cid, 1, none, 4, 4, 3)).toThrow(RangeError);
   });
 });

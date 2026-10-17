@@ -66,6 +66,193 @@ export function cidText(cid: Uint8Array): string {
   return `b${base32(cid)}`;
 }
 
+/** What `readObject` found: the object's bytes, or why it has none. */
+export type ObjectRead =
+  | { readonly ok: true; readonly bytes: Uint8Array }
+  | { readonly ok: false; readonly reason: "unavailable" | "inconsistent" };
+
+/**
+ * Reads the object of exactly `length` bytes that `cid` names, block by
+ * block (docs/spec/content-addressing.md, Reading by CID). `blocks(c, limit)`
+ * gives what each source served for block `c`, in the order tried, and
+ * `limit` is `CHUNK_SIZE`, which no block of the layout exceeds, where a
+ * fetcher stops reading; the first answer within it that hashes to `c` is
+ * read, so a wrong answer is only a failed fetch from its source, and
+ * sources may each serve some blocks.
+ *
+ * - `unavailable`: no source served some block of it. Never a verdict on the
+ *   object: the sources may not hold it, or no one may.
+ * - `inconsistent`: blocks that hash to their CIDs don't form `contentDag` of
+ *   `length` bytes (another length, chunking or layout, a CID of another
+ *   form, a node that isn't canonical). A function of `cid` and `length`
+ *   alone, so every source that serves the blocks gives the same answer.
+ *
+ * Only the canonical DAG's shape for `length` is walked, and each node is
+ * checked when it arrives, before its children are asked for, so no CID
+ * makes a reader fetch more blocks, or keep more bytes, than that object has
+ * (T-49, T-52, T-53, T-24).
+ */
+export function readObject(
+  cid: Uint8Array,
+  length: number,
+  blocks: (cid: Uint8Array, limit: number) => readonly Uint8Array[],
+): ObjectRead {
+  return readWith(cid, length, blocks, CHUNK_SIZE, MAX_LINKS, CHUNK_SIZE);
+}
+
+/** Internal: `readObject` under `dagWith`'s limits, for the deeper layouts' tests. */
+export function readWith(
+  cid: Uint8Array,
+  length: number,
+  blocks: (cid: Uint8Array, limit: number) => readonly Uint8Array[],
+  chunkSize: number,
+  maxLinks: number,
+  blockLimit: number,
+): ObjectRead {
+  if (!(cid instanceof Uint8Array)) throw new TypeError("readObject: cid must be bytes");
+  if (!Number.isSafeInteger(length) || length < 1)
+    throw new RangeError("readObject: length must be a positive integer");
+  if (typeof blocks !== "function") throw new TypeError("readObject: blocks must be a function");
+  if (!Number.isSafeInteger(chunkSize) || chunkSize < 1)
+    throw new RangeError("readObject: chunkSize must be a positive integer");
+  if (!Number.isSafeInteger(maxLinks) || maxLinks < 2)
+    throw new RangeError("readObject: maxLinks must be at least 2");
+  if (!Number.isSafeInteger(blockLimit) || blockLimit < chunkSize)
+    throw new RangeError("readObject: blockLimit must be an integer of at least chunkSize");
+  const chunks = Math.ceil(length / chunkSize);
+  let height = 0;
+  for (let span = 1; span < chunks; span *= maxLinks) height++;
+  // Each node covers `maxLinks ** h` chunks from `first`, the last one
+  // fewer, as the balanced layout builds them bottom up; a node above the
+  // leaves is dag-pb even with one child. Its size and Tsize, and so every
+  // byte of it but its links' CIDs, follow from `length` alone.
+  const childCount = (h: number, first: number) => {
+    const span = maxLinks ** (h - 1);
+    return Math.ceil((Math.min(chunks, first + span * maxLinks) - first) / span);
+  };
+  const shapes = new Map<string, Node>();
+  const shape = (h: number, first: number): Node => {
+    const key = `${h}:${first}`;
+    const known = shapes.get(key);
+    if (known !== undefined) return known;
+    let node: Node;
+    if (h === 0) {
+      const size = Math.min(chunkSize, length - first * chunkSize);
+      node = walked(PLACEHOLDER, size, size);
+    } else {
+      const span = maxLinks ** (h - 1);
+      const children = Array.from({ length: childCount(h, first) }, (_, i) =>
+        shape(h - 1, first + i * span),
+      );
+      const built = parent(children);
+      node = walked(PLACEHOLDER, built.size, built.tsize);
+    }
+    shapes.set(key, node);
+    return node;
+  };
+  // Allocated at the first leaf that hashes, so a CID no source serves costs nothing.
+  let object: Uint8Array | undefined;
+  const read = (c: Uint8Array, h: number, first: number): Failure | undefined => {
+    if (!hasPrefix(c, h === 0 ? RAW : DAG_PB)) return "inconsistent";
+    // Any answer within the limit is hashed, so a CID over a block of
+    // another length is the object's, never a failed fetch.
+    const bytes = fetchBlock(c, blockLimit, blocks);
+    if (bytes === undefined) return "unavailable";
+    if (h === 0) {
+      const at = first * chunkSize;
+      if (bytes.length !== shape(0, first).size) return "inconsistent";
+      object ??= new Uint8Array(length);
+      object.set(bytes, at);
+      return undefined;
+    }
+    const span = maxLinks ** (h - 1);
+    const links = linkCids(bytes, childCount(h, first));
+    if (links === undefined) return "inconsistent";
+    // The canonical node for these CIDs at this place must be exactly the
+    // block that hashed (no other Tsize, name, field or order), before any
+    // child is asked for.
+    const rebuilt = parent(
+      links.map((link, i) => ({ ...shape(h - 1, first + i * span), cid: link })),
+    );
+    if (!equal(rebuilt.bytes, bytes)) return "inconsistent";
+    for (const [i, link] of links.entries()) {
+      const failed = read(link, h - 1, first + i * span);
+      if (failed !== undefined) return failed;
+    }
+    return undefined;
+  };
+  const failed = read(cid, height, 0);
+  if (failed !== undefined) return { ok: false, reason: failed };
+  // The walk reached every leaf, so the object was allocated.
+  return { ok: true, bytes: object as Uint8Array };
+}
+
+type Failure = "unavailable" | "inconsistent";
+
+// A node's place in the canonical DAG, with what its parent's encoding reads
+// of it (its size and Tsize) and no bytes kept.
+const PLACEHOLDER = new Uint8Array(36);
+
+const walked = (cid: Uint8Array, size: number, tsize: number): Node => ({
+  cid,
+  bytes: new Uint8Array(0),
+  size,
+  tsize,
+  children: [],
+});
+
+function hasPrefix(c: Uint8Array, codec: number): boolean {
+  return c.length === 36 && c[0] === 0x01 && c[1] === codec && c[2] === SHA2_256 && c[3] === 0x20;
+}
+
+// The first answer within `limit` that hashes to the CID; any other is its
+// source's failed fetch, and one over the limit isn't hashed.
+function fetchBlock(
+  c: Uint8Array,
+  limit: number,
+  blocks: (cid: Uint8Array, limit: number) => readonly Uint8Array[],
+): Uint8Array | undefined {
+  const digest = c.subarray(4);
+  for (const b of blocks(Uint8Array.from(c), limit))
+    if (b instanceof Uint8Array && b.length <= limit && equal(sha256(b), digest))
+      return Uint8Array.from(b);
+  return undefined;
+}
+
+// The CIDs of a dag-pb node's first `n` links, where canonical form puts
+// them (each Links field first, its Hash first), or undefined if they aren't
+// there; the rebuilt node is compared with the whole block afterwards.
+function linkCids(node: Uint8Array, n: number): Uint8Array[] | undefined {
+  const out: Uint8Array[] = [];
+  let at = 0;
+  for (let i = 0; i < n; i++) {
+    if (node[at] !== 0x12) return undefined;
+    const len = readVarint(node, at + 1);
+    if (len === undefined) return undefined;
+    const start = len.next;
+    if (start + len.value > node.length || node[start] !== 0x0a || node[start + 1] !== 36)
+      return undefined;
+    out.push(node.slice(start + 2, start + 38));
+    at = start + len.value;
+  }
+  return out;
+}
+
+function readVarint(b: Uint8Array, at: number): { value: number; next: number } | undefined {
+  let value = 0;
+  for (let i = 0, scale = 1; i < 8; i++, scale *= 0x80) {
+    const x = b[at + i];
+    if (x === undefined) return undefined;
+    value += (x & 0x7f) * scale;
+    if (x < 0x80) return { value, next: at + i + 1 };
+  }
+  return undefined;
+}
+
+function equal(a: Uint8Array, b: Uint8Array): boolean {
+  return a.length === b.length && a.every((x, i) => x === b[i]);
+}
+
 /**
  * Internal: `contentDag` with other chunk and fan-out limits, so the balanced
  * layout's deeper trees can be checked against other implementations with

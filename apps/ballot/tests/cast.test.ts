@@ -276,34 +276,40 @@ describe("casting a seal", () => {
     }
   });
 
-  test("a non-member, leaves that miss the cell's root and a malformed secret are refused before any proving", async () => {
-    // A valid secret, and no member's; a fresh copy each time, as the worker zeroes it.
-    const outsider = () => {
-      const s = new Uint8Array(32);
-      s[0] = 1;
-      return s;
-    };
-    const cases: [Partial<CastRequest>, string][] = [
-      // A secret whose commitment isn't one of the cell's leaves.
-      [{ leaves: [...cellLeaves, identityCommitment(outsider())], secret: outsider() }, "root"],
-      [{ secret: outsider() }, "not-a-member"],
-      // The cell's leaves without the voter's.
-      [{ leaves: cellLeaves.filter((_, i) => i !== 1) }, "not-a-member"],
-      // The voter's among them, out of order: they don't climb to the cell's root.
-      [{ leaves: [...cellLeaves].reverse() }, "root"],
-      [{ secret: new Uint8Array(32) }, "secret"],
-    ];
-    for (const [change, problem] of cases) {
-      const { session, seal } = sealed();
-      const p = prover(() => undefined);
-      await expect(session.cast(castRequest(seal, p.port, change))).resolves.toEqual({
-        ok: false,
-        problem,
-      });
-      expect(p.received).toEqual([]);
-      p.close();
-    }
-  });
+  // Five seals, each a fresh sharing and encryption over every question:
+  // about 6 s on a loaded CI runner, past the 5 s default.
+  test(
+    "a non-member, leaves that miss the cell's root and a malformed secret are refused before any proving",
+    async () => {
+      // A valid secret, and no member's; a fresh copy each time, as the worker zeroes it.
+      const outsider = () => {
+        const s = new Uint8Array(32);
+        s[0] = 1;
+        return s;
+      };
+      const cases: [Partial<CastRequest>, string][] = [
+        // A secret whose commitment isn't one of the cell's leaves.
+        [{ leaves: [...cellLeaves, identityCommitment(outsider())], secret: outsider() }, "root"],
+        [{ secret: outsider() }, "not-a-member"],
+        // The cell's leaves without the voter's.
+        [{ leaves: cellLeaves.filter((_, i) => i !== 1) }, "not-a-member"],
+        // The voter's among them, out of order: they don't climb to the cell's root.
+        [{ leaves: [...cellLeaves].reverse() }, "root"],
+        [{ secret: new Uint8Array(32) }, "secret"],
+      ];
+      for (const [change, problem] of cases) {
+        const { session, seal } = sealed();
+        const p = prover(() => undefined);
+        await expect(session.cast(castRequest(seal, p.port, change))).resolves.toEqual({
+          ok: false,
+          problem,
+        });
+        expect(p.received).toEqual([]);
+        p.close();
+      }
+    },
+    PROOF_TIMEOUT,
+  );
 
   test(
     "a proof of another cast, an artifact the prover refused, and no answer in time are refusals",

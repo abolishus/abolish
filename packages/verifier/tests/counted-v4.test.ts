@@ -711,6 +711,11 @@ describe("the tally of the default halves (7.1 to 7.4, 8.5)", () => {
         tier: 0,
         counted: 2,
         counts: ["1", "0", "0", "1", "2", "0", "0", "1", "1"],
+        byQuestion: [
+          ["1", "0", "0"],
+          ["1", "2", "0", "0"],
+          ["1", "1"],
+        ],
         signers: [1],
       },
       {
@@ -718,6 +723,11 @@ describe("the tally of the default halves (7.1 to 7.4, 8.5)", () => {
         tier: 0,
         counted: 1,
         counts: ["0", "1", "0", "0", "0", "0", "1", "1", "0"],
+        byQuestion: [
+          ["0", "1", "0"],
+          ["0", "0", "0", "1"],
+          ["1", "0"],
+        ],
         signers: [2],
       },
       {
@@ -725,13 +735,42 @@ describe("the tally of the default halves (7.1 to 7.4, 8.5)", () => {
         tier: 2,
         counted: 1,
         counts: ["0", "0", "1", "1", "0", "1", "0", "0", "1"],
+        byQuestion: [
+          ["0", "0", "1"],
+          ["1", "0", "1", "0"],
+          ["0", "1"],
+        ],
         signers: [3],
       },
     ]);
     // Tier 0's result is its two cells' sum, derived, never opened.
     expect(r.tiers).toEqual([
-      { tier: 0, counted: 3, counts: ["1", "1", "0", "1", "2", "0", "1", "2", "1"] },
-      { tier: 2, counted: 1, counts: ["0", "0", "1", "1", "0", "1", "0", "0", "1"] },
+      {
+        tier: 0,
+        counted: 3,
+        counts: ["1", "1", "0", "1", "2", "0", "1", "2", "1"],
+        byQuestion: [
+          ["1", "1", "0"],
+          ["1", "2", "0", "1"],
+          ["2", "1"],
+        ],
+      },
+      {
+        tier: 2,
+        counted: 1,
+        counts: ["0", "0", "1", "1", "0", "1", "0", "0", "1"],
+        byQuestion: [
+          ["0", "0", "1"],
+          ["1", "0", "1", "0"],
+          ["0", "1"],
+        ],
+      },
+    ]);
+    // Each question's limits and the method they give, from the definition alone.
+    expect(r.questions).toEqual([
+      { question: 0, options: 3, minSelections: 0, maxSelections: 1, method: "pick one" },
+      { question: 1, options: 4, minSelections: 0, maxSelections: 2, method: "pick up to 2" },
+      { question: 2, options: 2, minSelections: 1, maxSelections: 1, method: "pick exactly 1" },
     ]);
     expect(r.tallyBreaks).toEqual(new Map());
     expect(r.destruction).toEqual({

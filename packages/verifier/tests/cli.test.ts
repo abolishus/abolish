@@ -9,6 +9,7 @@ import {
   type CellReport,
   EXIT_CODES,
   readBundle,
+  type QuestionReport,
   type Report,
   runCli,
   type TierReport,
@@ -266,6 +267,63 @@ describe("the summary's results", () => {
       "  tier 2: 3 counted; no counts (an opening of its cells didn't pass 7.2)",
       "    cell 0: 1 counted; counts 1, 0",
       "    cell 1: 2 counted; no counts (tally-opening)",
+    ]);
+  });
+
+  test("give each question its own line with its method, under definition versions 5 and 6", () => {
+    const questions: QuestionReport[] = [
+      { question: 0, options: 2, minSelections: 0, maxSelections: 1, method: "pick one" },
+      { question: 1, options: 3, minSelections: 2, maxSelections: 2, method: "pick exactly 2" },
+    ];
+    const qCells: CellReport[] = [
+      {
+        cell: 0,
+        tier: 1,
+        counted: 3,
+        counts: ["2", "1", "3", "2", "1"],
+        byQuestion: [
+          ["2", "1"],
+          ["3", "2", "1"],
+        ],
+        signers: [1],
+      },
+      { cell: 1, tier: 1, counted: 1, code: "tally-question-range", question: 1, signers: [] },
+      {
+        cell: 2,
+        tier: 0,
+        counted: 1,
+        counts: ["1", "0", "1", "1", "0"],
+        byQuestion: [
+          ["1", "0"],
+          ["1", "1", "0"],
+        ],
+        signers: [2],
+      },
+    ];
+    const qTiers: TierReport[] = [
+      {
+        tier: 0,
+        counted: 1,
+        counts: ["1", "0", "1", "1", "0"],
+        byQuestion: [
+          ["1", "0"],
+          ["1", "1", "0"],
+        ],
+      },
+      { tier: 1, counted: 4 },
+    ];
+    expect(
+      results({ ...base, verdict: "verified", cells: qCells, tiers: qTiers, questions }),
+    ).toEqual([
+      "results per tier, never summed across tiers:",
+      "  tier 0 (not Sybil-resistant): 1 counted; counts per question:",
+      "    question 0 (pick one): counts 1, 0",
+      "    question 1 (pick exactly 2): counts 1, 1, 0",
+      "  tier 1: 4 counted; no counts (an opening of its cells didn't pass 7.2)",
+      "    cell 0: 3 counted; counts per question:",
+      "      question 0 (pick one): counts 2, 1",
+      "      question 1 (pick exactly 2): counts 3, 2, 1",
+      "    cell 1: 1 counted; no counts (tally-question-range)",
     ]);
   });
 

@@ -73,6 +73,7 @@ import {
   type DeliveryReport,
   type DeliveryReportV2,
   type DestructionReport,
+  type QuestionReport,
   type TierReport,
 } from "./counted.ts";
 import { countedFloor, openingChecks, type OpeningCode, type OpeningReport } from "./openings.ts";
@@ -165,6 +166,8 @@ export interface Report {
   readonly cells?: readonly CellReport[];
   /** A format-5 bundle's per-tier results, derived from the cells, once 7.1 passed. */
   readonly tiers?: readonly TierReport[];
+  /** Under definition versions 5 and 6, beside `cells`, each question's limits and method (8.1). */
+  readonly questions?: readonly QuestionReport[];
   /** A format-5 bundle's destruction report, once 8.5 ran. */
   readonly destruction?: DestructionReport;
   /** A format-5 bundle's close check, once 6.3 found `L_δ`. */
@@ -794,6 +797,7 @@ export function verifyBundle(bundle: Bundle): Report {
     ...(counted?.delivery !== undefined && { delivery: counted.delivery }),
     ...(counted?.cells !== undefined && { cells: counted.cells }),
     ...(counted?.tiers !== undefined && { tiers: counted.tiers }),
+    ...(counted?.questions !== undefined && { questions: counted.questions }),
     ...(counted?.destruction !== undefined && { destruction: counted.destruction }),
     ...(counted?.close !== undefined && { close: counted.close }),
     board: bundle.byCid === undefined ? board : { ...board, byCid: bundle.byCid },

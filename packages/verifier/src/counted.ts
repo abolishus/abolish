@@ -58,9 +58,11 @@ import {
   deliverySegments,
   PARAMETERS,
   pinnedVersion,
+  questionResults,
   RECORD_TYPES,
   type RegisteredKeys,
   type SeatPanel,
+  type TallyRules,
   tallyRules,
 } from "@abolishus/crypto";
 import { bytesToHex } from "@noble/hashes/utils.js";
@@ -198,6 +200,8 @@ export interface CellReport {
   readonly counted: number;
   /** For a cell that passes 7.2, its count per option, as decimal strings. */
   readonly counts?: readonly string[];
+  /** Under definition versions 5 and 6, beside `counts`, each question's slice of them, in question order. */
+  readonly byQuestion?: readonly (readonly string[])[];
   /**
    * For a cell that fails 7.2, its code; beside an author panel, neither this
    * nor `counts` while `s_A` decides between `tally-author-late` and the
@@ -224,6 +228,19 @@ export interface TierReport {
   readonly counted: number;
   /** Per option, the sum of its cells' counts, as decimal strings; only where every cell passes 7.2. */
   readonly counts?: readonly string[];
+  /** Under definition versions 5 and 6, beside `counts`, each question's slice of them, in question order. */
+  readonly byQuestion?: readonly (readonly string[])[];
+}
+
+/** One question of a definition version 5 or 6, as its results are read (8.1). */
+export interface QuestionReport {
+  readonly question: number;
+  /** `m_q`, its option count. */
+  readonly options: number;
+  readonly minSelections: number;
+  readonly maxSelections: number;
+  /** The method its limits give, rendered from them; never a label the definition carries. */
+  readonly method: string;
 }
 
 /** One registered seat's destruction, by its first attributed statement (8.5). */
@@ -253,6 +270,8 @@ export interface CountedResult {
   readonly delivery?: DeliveryReport | DeliveryReportV2;
   readonly cells?: readonly CellReport[];
   readonly tiers?: readonly TierReport[];
+  /** Under definition versions 5 and 6, beside `cells`, each question's limits and method. */
+  readonly questions?: readonly QuestionReport[];
   readonly destruction?: DestructionReport;
   /** 7.4's breaks that need the counted set, by entry (tally.md, Boarding). */
   readonly tallyBreaks?: ReadonlyMap<number, TallyBreak>;
@@ -488,7 +507,8 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
 
   const openings = own.filter((e) => typeOf(e.payload) === RECORD_TYPES.tallyOpening);
   if (author) {
-    const tally = panelTally(inputs, delivered.ballots, openings, floor);
+    const rules = panelTallyRules(definition as Extract<VerifiedDefinition, { version: 6 }>, 1);
+    const tally = panelTally(inputs, delivered.ballots, openings, floor, rules);
     for (const [id, outcome] of tally.rows) rows.set(id, outcome);
     // Destruction per panel (version 2) is P2-16 part 4d-3d-2's: until then
     // no seat of either panel is judged (T-14, T-37).
@@ -499,7 +519,8 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
       delivery,
       ...close,
       cells: tally.cells,
-      tiers: tierResults(definition, tally.cells),
+      tiers: tierResults(definition, rules, tally.cells),
+      ...questionReports(rules),
     };
   }
 
@@ -513,8 +534,9 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
       throw new Error("countedChecks: a selected ballot outside the partition");
     into.push(vss);
   });
+  const rules = tallyRules(definition);
   const tally = checkTally(
-    { definitionHash, rules: tallyRules(definition), registered },
+    { definitionHash, rules, registered },
     cells,
     openings.map((o) => o.payload),
     1,
@@ -524,7 +546,7 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
     const counted = (cells[cell] as CommittedVss[]).length;
     const tier = tiers[cell] as number;
     const signers = signersOf(c.passing);
-    if (c.ok) return { cell, tier, counted, counts: c.counts.map((v) => v.toString()), signers };
+    if (c.ok) return { cell, tier, counted, ...countsOf(rules, c.counts), signers };
     return {
       cell,
       tier,
@@ -535,7 +557,8 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
       signers,
     };
   });
-  const tierReports = tierResults(definition, cellReports);
+  const tierReports = tierResults(definition, rules, cellReports);
+  const questions = questionReports(rules);
   // Every board-path entry past `s_S` is outside its own window, and none
   // carried by a contract event is left, so no late entry changes a counted
   // set: `tally-late` can't fail (tally.md, Tally window).
@@ -569,7 +592,15 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
     }
 
   if (!inputs.destruction)
-    return { rows, delivery, ...close, cells: cellReports, tiers: tierReports, tallyBreaks };
+    return {
+      rows,
+      delivery,
+      ...close,
+      cells: cellReports,
+      tiers: tierReports,
+      ...questions,
+      tallyBreaks,
+    };
   // The destruction segment is `min(s_O + 1, s_T)`, or `s_T` while a cell
   // has no passing opening (tally.md, Destruction checks). `s_T`, the period
   // holding `t_S + TALLY_WINDOW` with `t_S` the end of `s_S` plus the
@@ -642,6 +673,7 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
     ...close,
     cells: cellReports,
     tiers: tierReports,
+    ...questions,
     destruction,
     tallyBreaks,
   };
@@ -795,6 +827,7 @@ const signersOf = (passing: readonly OpeningReport[]) =>
  */
 function tierResults(
   definition: VerifiedDefinition,
+  rules: TallyRules,
   cells: readonly CellReport[],
 ): readonly TierReport[] {
   return [...new Set(cellTiers(definition))].map((tier) => {
@@ -802,13 +835,56 @@ function tierResults(
     const counted = members.reduce((n, c) => n + c.counted, 0);
     const counts = members.map((c) => c.counts);
     return counts.every((x) => x !== undefined)
-      ? {
-          tier,
-          counted,
-          counts: deriveTotal(counts.map((x) => x.map(BigInt))).map((v) => v.toString()),
-        }
+      ? { tier, counted, ...countsOf(rules, deriveTotal(counts.map((x) => x.map(BigInt)))) }
       : { tier, counted };
   });
+}
+
+/**
+ * A passing cell's or tier's counts, and under definition versions 5 and 6
+ * each question's slice of them by crypto's `questionResults`: each question
+ * on its own, never a figure joining two, since none is opened (8.1;
+ * ADR 0026, No cross-tabulation; T-29, T-16).
+ */
+function countsOf(
+  rules: TallyRules,
+  counts: readonly bigint[],
+): { readonly counts: readonly string[]; readonly byQuestion?: readonly (readonly string[])[] } {
+  const text = (xs: readonly bigint[]) => xs.map((v) => v.toString());
+  return rules.questions === undefined
+    ? { counts: text(counts) }
+    : { counts: text(counts), byQuestion: questionResults(rules, counts).map(text) };
+}
+
+/** Under definition versions 5 and 6, each question's limits and its method (8.1). */
+function questionReports(rules: TallyRules): { readonly questions?: readonly QuestionReport[] } {
+  if (rules.questions === undefined) return {};
+  return {
+    questions: rules.questions.map((q, question) => ({
+      question,
+      options: q.optionCount,
+      minSelections: q.minSelections,
+      maxSelections: q.maxSelections,
+      method: questionMethod(q.minSelections, q.maxSelections, q.optionCount),
+    })),
+  };
+}
+
+/**
+ * The method a question's limits give (election-definition.md, Questions,
+ * Methods are limits): the owner's four are pick one `(0, 1)`, pick any
+ * `(0, m)`, pick up to N `(0, N)` and pick exactly N `(N, N)`; any other
+ * range the rules allow is said as at least N or N to M. Rendered from the
+ * limits the validity proof enforces, so it can't disagree with what was
+ * counted (T-34, T-41).
+ */
+export function questionMethod(min: number, max: number, options: number): string {
+  if (min === 0) {
+    if (max === 1) return "pick one";
+    return max === options ? "pick any" : `pick up to ${max}`;
+  }
+  if (min === max) return `pick exactly ${min}`;
+  return max === options ? `pick at least ${min}` : `pick ${min} to ${max}`;
 }
 
 const failureAt = (f: NonNullable<PartialTallyCheck["failure"]>) => ({
@@ -840,6 +916,8 @@ function panelTally(
   ballots: readonly { readonly counted: boolean }[],
   openings: readonly { readonly segment: number; readonly payload: Uint8Array }[],
   floor: bigint,
+  /** The default panel's rules, whose questions a cell's counts are read by. */
+  rules: TallyRules,
 ): { readonly rows: ReadonlyMap<string, CountedOutcome>; readonly cells: readonly CellReport[] } {
   const definition = inputs.definition as Extract<VerifiedDefinition, { version: 6 }>;
   const { definitionHash, registered, clock } = inputs;
@@ -856,7 +934,7 @@ function panelTally(
   });
   const election = {
     definitionHash,
-    defaultRules: panelTallyRules(definition, 1),
+    defaultRules: rules,
     authorRules: panelTallyRules(definition, 2),
     registered: { default: registered, author: inputs.authorRegistered ?? [] },
   };
@@ -882,7 +960,7 @@ function panelTally(
       signers: signersOf(c.default.passing),
       authorSigners: signersOf(c.author.passing),
     };
-    if (c.ok) return { ...base, counts: c.counts.map((v) => v.toString()), ...signers };
+    if (c.ok) return { ...base, ...countsOf(rules, c.counts), ...signers };
     const other = unbounded.cells[cell] as (typeof unbounded.cells)[number];
     if (other.ok || other.code !== c.code) return { ...base, ...signers };
     return {

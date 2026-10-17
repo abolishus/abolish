@@ -67,6 +67,26 @@ interface RegistryVectors {
   };
 }
 
+interface CountVectors {
+  readonly context: { readonly chainId: string; readonly registry: string };
+  readonly cases: readonly {
+    readonly id: string;
+    readonly events: readonly {
+      readonly kind: string;
+      readonly block: string;
+      readonly groupId?: string;
+      readonly tier?: number;
+      readonly record?: string;
+    }[];
+    readonly additions: readonly { readonly at: number; readonly valid: boolean }[];
+    readonly leaves: readonly {
+      readonly groupId: string;
+      readonly block: string;
+      readonly leaves: readonly string[];
+    }[];
+  }[];
+}
+
 interface ProverVectors {
   readonly definitionHash: string;
   readonly members: readonly { readonly secret: string }[];
@@ -90,6 +110,7 @@ const read = <T>(name: string) =>
 const cellsVectors = read<CellsVectors>("regional-cells.json");
 const registryVectors = read<RegistryVectors>("group-registry.json");
 const proverVectors = read<ProverVectors>("membership-prover.json");
+const countVectors = read<CountVectors>("vouch-count.json");
 // Topic 0 of each group-registry event, from the independent generator of
 // contract-event-v6.json, so the logs built below are the registry's.
 const eventVectors = read<{
@@ -486,20 +507,16 @@ describe("tierMembership reads the board as untrusted", () => {
     ).toBe("group-tier");
   });
 
-  test("refuses Tier 1 and Tier 2 tiers until their leaves are read (part 3b)", () => {
-    for (const tier of [1, 2] as const) {
-      const board = logs([{ kind: "created", groupId: 7n, tier }]);
-      const electorate: TierElectorate = {
-        tier,
-        root_l2_block: ROOT_BLOCK,
-        groups: [{ group_id: 7n, region: 0 }],
-        regions: [1n],
-        cells: [{ root: 5n, members: 1n }],
-      };
-      expect(refusal(() => tierMembership(board, electorate, 5n, 7n, pins))).toBe(
-        "tier-unsupported",
-      );
-    }
+  test("refuses Tier 2 tiers, which have no addition path yet (P3-4)", () => {
+    const board = logs([{ kind: "created", groupId: 7n, tier: 2 }]);
+    const electorate: TierElectorate = {
+      tier: 2,
+      root_l2_block: ROOT_BLOCK,
+      groups: [{ group_id: 7n, region: 0 }],
+      regions: [1n],
+      cells: [{ root: 5n, members: 1n }],
+    };
+    expect(refusal(() => tierMembership(board, electorate, 5n, 7n, pins))).toBe("tier-unsupported");
   });
 
   test("refuses a history the registry's rules forbid", () => {
@@ -652,4 +669,296 @@ describe("tierMembership feeds the prover", () => {
       ).toThrow("root");
     },
   );
+});
+
+// A Tier 1 tier's leaves are the group's boarded additions, which the board
+// carries exactly as counted (docs/spec/verifier.md, Contract events, Tier 1
+// boarding). vouch-count.json's deployment, from the independent generator of
+// vouch-count's vectors, says which of its additions count and each group's
+// leaves at each block; the board below carries only the counted ones, as an
+// honest operator's would (T-06, T-53).
+describe("tierMembership in a Tier 1 tier", () => {
+  const deployment = countVectors.cases.find((c) => c.id === "deployment");
+  if (deployment === undefined) throw new Error("no deployment case");
+  const tier1Registry = hex(countVectors.context.registry);
+  const tier1Pins: GroupRegistryPins = {
+    ...pins,
+    chainId: decimal(countVectors.context.chainId),
+    registry: tier1Registry,
+  };
+  const TIER1 = new Set([9n, 10n, 12n]);
+  const counted = new Set(deployment.additions.filter((a) => a.valid).map((a) => a.at));
+
+  /** The registry's log of vouch-count's event `at` (`n` = `at` + 1), or of a stand-in record there. */
+  function logOf(at: number, record?: Uint8Array): ContractEventRecord {
+    const e = deployment?.events[at];
+    if (e === undefined) throw new Error(`no event ${at}`);
+    const block = decimal(e.block);
+    const base = {
+      contract: tier1Registry,
+      n: BigInt(at + 1),
+      l2_block: block,
+      l2_timestamp: 1_760_000_000n + block * 2n,
+    };
+    if (e.kind === "group-created")
+      return {
+        ...base,
+        topics: [
+          topic0("GroupCreated(uint64,uint8)"),
+          word(decimal(e.groupId)),
+          word(BigInt(e.tier as number)),
+        ],
+        data: new Uint8Array(0),
+      };
+    if (e.kind !== "tier1-addition") throw new Error(`event ${at} is ${e.kind}`);
+    return {
+      ...base,
+      topics: [topic0("Tier1MemberAdded(bytes)")],
+      data: abiBytes(record ?? hex(e.record)),
+    };
+  }
+  const groupOf = (at: number) =>
+    new DataView(hex(deployment.events[at]?.record).buffer).getBigUint64(0, false);
+
+  // The Tier 1 groups' creations and their counted additions, nothing else.
+  const board = deployment.events.flatMap((e, at) =>
+    (e.kind === "group-created" && TIER1.has(decimal(e.groupId))) ||
+    (e.kind === "tier1-addition" && counted.has(at))
+      ? [logOf(at)]
+      : [],
+  );
+  const finalLeaves = (groupId: bigint) => {
+    const last = deployment.leaves.filter((l) => decimal(l.groupId) === groupId).at(-1);
+    if (last === undefined) throw new Error(`no leaves for group ${groupId}`);
+    return last.leaves.map(decimal);
+  };
+  const ROOT = 1_562_401n;
+  const oneGroup = (groupId: bigint, leaves: readonly bigint[], root = ROOT): TierElectorate => ({
+    tier: 1,
+    root_l2_block: root,
+    groups: [{ group_id: groupId, region: 0 }],
+    regions: [BigInt(leaves.length)],
+    cells: [{ root: 5n, members: BigInt(leaves.length) }],
+  });
+
+  test("boards the vectors' counted additions of three Tier 1 groups", () => {
+    expect(board.length).toBe(3 + 10);
+    expect(new Set(board.filter((r) => r.topics.length === 1).map((r) => r.n))).toEqual(
+      new Set([...counted].map((at) => BigInt(at + 1))),
+    );
+  });
+
+  test("gives each group's leaves at every block the vectors list", () => {
+    let checked = 0;
+    for (const l of deployment.leaves) {
+      const groupId = decimal(l.groupId);
+      const leaves = l.leaves.map(decimal);
+      if (!TIER1.has(groupId) || leaves.length === 0) continue;
+      const electorate = oneGroup(groupId, leaves, decimal(l.block));
+      for (const leaf of leaves) {
+        const m = tierMembership(board, electorate, leaf, groupId, tier1Pins);
+        expect(m.cell).toBe(0);
+        expect(m.root).toBe(5n);
+        expect([...m.leaves], `group ${groupId} at ${l.block}`).toEqual(leaves);
+        checked++;
+      }
+    }
+    expect(checked).toBeGreaterThanOrEqual(15);
+  });
+
+  test("applies the first-occurrence rule across Tier 1 groups and alarms on a move", () => {
+    // Group 9 holds four commitments; groups 10 and 12 repeat three of them each.
+    const nine = finalLeaves(9n);
+    const ten = finalLeaves(10n);
+    const twelve = finalLeaves(12n);
+    expect(ten.every((c) => nine.includes(c))).toBe(true);
+    expect(twelve.every((c) => nine.includes(c))).toBe(true);
+    const electorate: TierElectorate = {
+      tier: 1,
+      root_l2_block: ROOT,
+      groups: [
+        { group_id: 9n, region: 0 },
+        { group_id: 10n, region: 1 },
+        { group_id: 12n, region: 0 },
+      ],
+      regions: [4n, 0n],
+      cells: [{ root: 5n, members: 4n }],
+    };
+    // One cell (both regions fold, below the floor): group 9's leaves, then
+    // groups 10's and 12's repeats, each zeroed at its index.
+    const cell = [...nine, ...Array<bigint>(6).fill(0n)];
+    const repeated = ten[0] as bigint;
+    const m = tierMembership(board, electorate, repeated, 9n, tier1Pins);
+    expect([...m.leaves]).toEqual(cell);
+    // Registered in group 12, same region as group 9: counted there, no alarm.
+    expect([
+      ...tierMembership(board, electorate, twelve[0] as bigint, 12n, tier1Pins).leaves,
+    ]).toEqual(cell);
+    // Registered in group 10, counted in group 9 of another region: an alarm.
+    const e = (() => {
+      try {
+        tierMembership(board, electorate, repeated, 10n, tier1Pins);
+      } catch (err) {
+        return err;
+      }
+    })();
+    expect(e).toBeInstanceOf(TierMembershipError);
+    expect((e as TierMembershipError).code).toBe("moved");
+    expect((e as TierMembershipError).group).toBe(9n);
+  });
+
+  test("a board carrying more or fewer than the counted additions is refused", () => {
+    const leaves = finalLeaves(9n);
+    const electorate = oneGroup(9n, leaves);
+    const voter = leaves[0] as bigint;
+    expect([...tierMembership(board, electorate, voter, 9n, tier1Pins).leaves]).toEqual(leaves);
+    // Uncounted additions of the group: copies of a counted commitment...
+    for (const at of [14, 15]) {
+      expect(counted.has(at)).toBe(false);
+      expect(
+        refusal(() => tierMembership([...board, logOf(at)], electorate, voter, 9n, tier1Pins)),
+        `event ${at}`,
+      ).toBe("group-history");
+    }
+    // ...and a fresh commitment (event 36, its vouch's proof broken, given a
+    // commitment no addition has): a leaf the definition doesn't count.
+    expect(counted.has(36)).toBe(false);
+    expect(groupOf(36)).toBe(9n);
+    const fresh = hex(deployment.events[36]?.record);
+    fresh.set(word(12_345n), 8);
+    expect(
+      refusal(() => tierMembership([...board, logOf(36, fresh)], electorate, voter, 9n, tier1Pins)),
+    ).toBe("electorate");
+    // A counted addition left off.
+    const last = board.findLast((r) => r.topics.length === 1 && groupOf(Number(r.n) - 1) === 9n);
+    expect(
+      refusal(() =>
+        tierMembership(
+          board.filter((r) => r !== last),
+          electorate,
+          voter,
+          9n,
+          tier1Pins,
+        ),
+      ),
+    ).toBe("electorate");
+    // A boarded addition that doesn't decode fails the event check.
+    expect(
+      refusal(() => tierMembership([...board, logOf(38)], electorate, voter, 9n, tier1Pins)),
+    ).toBe("board-event");
+  });
+
+  test("refuses a boarded addition logged before its group's creation", () => {
+    // Event 22 names group 12 before event 23 creates it; vouch-count's `group` check refuses it.
+    expect(groupOf(22)).toBe(12n);
+    expect(counted.has(22)).toBe(false);
+    const leaves = finalLeaves(12n);
+    expect(
+      refusal(() =>
+        tierMembership(
+          [...board, logOf(22)],
+          oneGroup(12n, leaves),
+          leaves[0] as bigint,
+          12n,
+          tier1Pins,
+        ),
+      ),
+    ).toBe("group-history");
+  });
+
+  test("refuses a boarded addition with a forbidden commitment", () => {
+    const leaves = finalLeaves(9n);
+    const record = hex(deployment.events[13]?.record);
+    record.set(word(1n), 8);
+    expect(
+      refusal(() =>
+        tierMembership(
+          [...board, logOf(14, record)],
+          oneGroup(9n, leaves),
+          leaves[0] as bigint,
+          9n,
+          tier1Pins,
+        ),
+      ),
+    ).toBe("group-history");
+  });
+
+  test("ignores what changes nothing in a Tier 1 group", () => {
+    const leaves = finalLeaves(9n);
+    const electorate = oneGroup(9n, leaves, 1_261_860n);
+    const voter = leaves[0] as bigint;
+    const expected = [...tierMembership(board, electorate, voter, 9n, tier1Pins).leaves];
+    expect(expected).toEqual(leaves);
+    // Other groups' additions, counted or not, and the group's own after root_l2_block.
+    const others = deployment.events.flatMap((e, at) =>
+      e.kind === "tier1-addition" && at !== 38 && at !== 43 && groupOf(at) !== 9n
+        ? [logOf(at)]
+        : [],
+    );
+    // An addition of group 9 with a fresh commitment, logged after root_l2_block.
+    const fresh = hex(deployment.events[36]?.record);
+    fresh.set(word(12_345n), 8);
+    const later = logOf(43, fresh);
+    // A MembersAdded and a MembersRemoved naming the group, which the registry
+    // refuses, logged where vouch-count's other groups' records sit.
+    const members = logs([added(9n, 0n, [5n]), removed(9n, 1n, [0n])]).map((r, i) => ({
+      ...r,
+      contract: tier1Registry,
+      n: BigInt([3, 5][i] as number),
+      l2_block: 1_100_000n,
+      l2_timestamp: 1_760_000_000n + 2_200_000n,
+    }));
+    expect([
+      ...tierMembership([...board, ...others, later, ...members], electorate, voter, 9n, tier1Pins)
+        .leaves,
+    ]).toEqual(expected);
+  });
+
+  test("feeds the prover the path Semaphore's generateProof takes", { timeout: 60_000 }, () => {
+    const c = proverVectors.cases.find((x) => x.name === "first-tier");
+    const tree = proverVectors.trees.find((x) => x.id === c?.tree);
+    if (c === undefined || tree === undefined) throw new Error("no first-tier case");
+    // The vectors' tree boarded as Tier 1 additions: vouch-count's first
+    // counted record with its group and commitment replaced. No vouch is
+    // checked by the client, so only the leaves matter here.
+    const template = hex(deployment.events[13]?.record);
+    const leaves = tree.leaves.map(decimal);
+    // Events 13 to 22 are all additions, so each stand-in takes an addition's place.
+    expect(leaves.length).toBeLessThanOrEqual(10);
+    const records = leaves.map((leaf, i) => {
+      const r = new Uint8Array(template);
+      r.set(word(1n).subarray(24), 0);
+      r.set(word(leaf), 8);
+      return logOf(13 + i, r);
+    });
+    const created = {
+      ...logOf(1),
+      topics: [topic0("GroupCreated(uint64,uint8)"), word(1n), word(1n)],
+    };
+    const electorate: TierElectorate = {
+      tier: 1,
+      root_l2_block: ROOT,
+      groups: [{ group_id: 1n, region: 0 }],
+      regions: [BigInt(leaves.length)],
+      cells: [{ root: decimal(tree.root), members: BigInt(leaves.length) }],
+    };
+    const secret = hex(proverVectors.members[c.member]?.secret);
+    const m = tierMembership(
+      [created, ...records],
+      electorate,
+      identityCommitment(secret),
+      1n,
+      tier1Pins,
+    );
+    const input = membershipProverInput(secret, m.leaves, {
+      definitionHash: hex(proverVectors.definitionHash),
+      tier: 1,
+      root: m.root,
+      message: hex(c.message),
+    });
+    // The path is the tier's, whatever the tier; the scope is Tier 1's.
+    expect(input.witness.merkleProofIndex).toBe(c.input["merkleProofIndex"]);
+    expect(input.witness.merkleProofSiblings).toEqual(c.input["merkleProofSiblings"]);
+    expect(input.witness.scope).not.toBe(c.input["scope"]);
+  });
 });
